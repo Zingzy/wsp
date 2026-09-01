@@ -19,6 +19,7 @@ export function stubBackend(): StubBackend {
 
   const backend: StubBackend = {
     machines,
+    capabilities: { liveCloneForks: true, ramPreservingPause: true, resize: false, previewUrls: true, signedUrls: true },
     execImpl: () => ({ exitCode: 0, stdout: "", stderr: "" }),
     async create(spec: MachineSpec): Promise<Machine> {
       const m: StubMachine = {
