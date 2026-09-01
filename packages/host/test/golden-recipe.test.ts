@@ -35,6 +35,7 @@ describe("host golden recipe", () => {
     expect(deployed).toEqual([builder.id]);
     expect(builder.execLog).toEqual([GOLDEN_SETUP]);
     expect(builder.spec).toMatchObject({ kind: "desktop", onIdle: "kill", envs: { ANTHROPIC_API_KEY: ANTHROPIC } });
+    expect(builder.spec.idleTimeoutMs).toBeGreaterThan(0);
 
     const { version } = await rt.golden.seal(view.id);
     expect(version.smoke).toEqual({ cmd: GOLDEN_SMOKE, exitCode: 0 });

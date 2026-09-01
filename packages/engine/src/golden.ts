@@ -18,6 +18,12 @@ export type StageListener = (stage: GoldenStage, detail?: string) => void;
 /** Solari's built-in templates are kind-specific (TemplateKindMismatch otherwise). */
 const DEFAULT_TEMPLATE: Record<MachineKind, string> = { sandbox: "base", desktop: "default" };
 
+/** How long a builder may sit with no API activity before it is killed. Whether
+ * a live noVNC stream counts as activity is unmeasured, so this covers a person
+ * reading docs on the builder screen; a forgotten builder costs under $1 at
+ * Starter rates over this window. */
+export const BUILDER_IDLE_MS = 6 * 60 * 60_000;
+
 export interface MachineSize {
   cpu?: number;
   memMb?: number;
@@ -92,7 +98,13 @@ export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Build
   stage("creating", `${kind} from ${baseTemplate}`);
   // A builder that idle-pauses resumes not first-life, so its seal would 502 and
   // consume it anyway; killing on idle loses the same work but fails loud and free.
-  const machine = await opts.backend.create({ kind, template: baseTemplate, onIdle: "kill", ...sizeSpec(opts) });
+  const machine = await opts.backend.create({
+    kind,
+    template: baseTemplate,
+    onIdle: "kill",
+    idleTimeoutMs: BUILDER_IDLE_MS,
+    ...sizeSpec(opts),
+  });
   try {
     if (opts.deployDaemon) {
       stage("deploying-daemon");
