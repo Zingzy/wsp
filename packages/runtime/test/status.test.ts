@@ -8,6 +8,14 @@ import { memoryStore } from "../src/store.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { WsClient } from "./ws-client.js";
 
+async function until(cond: () => boolean, ms = 2000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!cond()) {
+    if (Date.now() > deadline) throw new Error("condition not met in time");
+    await new Promise(r => setTimeout(r, 5));
+  }
+}
+
 function testRuntime(status?: { costIntervalMs?: number; pollIntervalMs?: number }): {
   rt: Runtime;
   backend: StubBackend;
@@ -122,8 +130,7 @@ describe("status.watch cost events", () => {
     rt.events.on("workspace.cost", e => costs.push(e as EventUnion & { type: "workspace.cost" }));
 
     const stop = rt.status.watch();
-    await new Promise(r => setTimeout(r, 50));
-    expect(costs.length).toBeGreaterThanOrEqual(2);
+    await until(() => costs.length >= 2);
     const running = costs.at(-1)!;
     EventUnion.parse(running); // the wire schema accepts what the bus emits
     expect(running.workspaceId).toBe(ws.id);
@@ -134,9 +141,8 @@ describe("status.watch cost events", () => {
 
     await rt.workspaces.nap(ws.id);
     costs.length = 0;
-    await new Promise(r => setTimeout(r, 50));
+    await until(() => costs.length >= 2);
     stop();
-    expect(costs.length).toBeGreaterThanOrEqual(2);
     expect(costs.at(-1)!.rateUsdPerHour).toBe(0);
     // napping accrues nothing: consecutive events carry the same total
     expect(costs.at(-1)!.accruedUsd).toBeCloseTo(costs[0]!.accruedUsd, 10);
