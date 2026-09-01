@@ -9,6 +9,7 @@ import { parseArgs } from "node:util";
 import { createClaudeAdapter } from "@wsp/adapter-claude";
 import {
   SolariBackend,
+  applyDotfiles,
   createRuntime,
   jsonFileStore,
   machineExecStream,
@@ -351,6 +352,9 @@ usage:
   wspx new <name> [--cpu N]    fork a workspace from the golden image
   wspx ls                      list workspaces and account machines
   wspx send <id> "<prompt>"    run a claude turn in a workspace (auto-resumes)
+  wspx dotfiles <id> <source> [--preset name ...]
+                               apply a dotfiles repo (https URL or GitHub user)
+                               to a running workspace; presets: zsh, neovim, tmux
   wspx nap <id>                pause a workspace
   wspx wake <id>               resume a workspace (resurrects if it vanished)
   wspx upgrade <id> [--cpu N]  vault files, replace with a fresh golden fork
@@ -365,6 +369,7 @@ async function main(): Promise<void> {
     options: {
       cpu: { type: "string" },
       mem: { type: "string" },
+      preset: { type: "string", multiple: true },
       help: { type: "boolean", short: "h" },
     },
     allowPositionals: true,
@@ -411,6 +416,19 @@ async function main(): Promise<void> {
       const [id, prompt] = rest;
       if (!id || !prompt) throw new Error('usage: wspx send <id> "<prompt>"');
       await cmdSend(rt, id, prompt);
+      return;
+    }
+    case "dotfiles": {
+      const [id, source] = rest;
+      if (!id || !source) throw new Error("usage: wspx dotfiles <workspace-id> <source> [--preset name ...]");
+      const ws = await rt.workspaces.get(id);
+      if (ws.phase !== "running") {
+        throw new Error(`workspace ${id} is ${ws.phase}: wake it first (wspx wake ${id})`);
+      }
+      const machine = await rt.backend.get(ws.machineId);
+      const result = await applyDotfiles(machine, source, values.preset ? { presets: values.preset } : {});
+      console.log(`manager: ${result.manager}`);
+      for (const s of result.steps) console.log(`${s.name} ${s.exitCode}`);
       return;
     }
     case "nap": {
