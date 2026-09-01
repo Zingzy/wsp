@@ -1,5 +1,6 @@
 import { backoffMs, classify, shouldRetry, type WspError } from "./errors.js";
-import type { ExecResult, Machine, MachineBackend, MachineKind, MachineSpec, MachineState } from "./machine.js";
+import type { ExecResult, Machine, MachineBackend, MachineKind, MachineSpec, MachineState, PreviewReach } from "./machine.js";
+import { previewTokenExpiry } from "./preview.js";
 
 type Fetch = typeof globalThis.fetch;
 
@@ -154,6 +155,13 @@ class SolariMachine implements Machine {
       if ((e as WspError).kind === "missing") return "gone";
       throw e;
     }
+  }
+
+  async previewUrl(port: number): Promise<PreviewReach> {
+    const res = await this.backend.request<{ url: string; token: string }>(
+      "GET", this.path(`/ports/${port}`),
+    );
+    return { url: res.url, token: res.token, expiresAt: previewTokenExpiry(res.token) };
   }
 
   async downloadUrl(path: string): Promise<string> {

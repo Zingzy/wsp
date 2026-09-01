@@ -13,6 +13,14 @@ export interface MachineSpec {
 
 export interface ExecResult { exitCode: number; stdout: string; stderr: string }
 
+/** A minted public route to one guest port: URL with the pt_token embedded,
+ * the same token standalone, and its expiry in epoch ms (60-min TTL). */
+export interface PreviewReach {
+  url: string;
+  token: string;
+  expiresAt: number;
+}
+
 export interface Machine {
   readonly id: string;
   readonly kind: MachineKind;
@@ -25,6 +33,8 @@ export interface Machine {
   state(): Promise<MachineState>;
   downloadUrl(path: string): Promise<string>;
   uploadUrl(path: string): Promise<string>;
+  /** Optional: only backends whose capabilities include previewUrls have it. */
+  previewUrl?(port: number): Promise<PreviewReach>;
 }
 
 export interface MachineBackend {
