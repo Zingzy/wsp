@@ -2,7 +2,7 @@
 // Browser-side client for the runtime WS (see packages/runtime/src/serve.ts).
 // Auth: open the socket, send one `auth` frame with the token (host injects it
 // via window.__WSP__), then ops flow. The token never rides in the URL.
-import type { Capabilities, EventUnion, SessionView, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import type { Capabilities, EventUnion, SessionEvent, SessionView, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 
 export type ProtocolEvent = EventUnion;
 type Pending = { resolve: (v: Record<string, unknown>) => void; reject: (e: Error) => void };
@@ -105,6 +105,8 @@ export interface Api {
   startSession(opts: StartSessionOptions): Promise<SessionView>;
   /** All sessions the runtime knows, or one workspace's. */
   listSessions(id?: string): Promise<SessionView[]>;
+  /** The workspace's persisted session events, oldest first: what a chat replays on mount. */
+  sessionHistory(id: string): Promise<SessionEvent[]>;
   subscribe(fn: (e: ProtocolEvent) => void): () => void;
 }
 
@@ -146,6 +148,7 @@ export function makeApi(c: ProtocolClient): Api {
       (await c.request<{ workspace: WorkspaceView }>("workspaces.upgrade", { workspaceId: id, ...size })).workspace,
     capabilities: async () => (await c.request<{ capabilities: Capabilities }>("capabilities.get")).capabilities,
     startSession: async opts => (await c.request<{ session: SessionView }>("sessions.start", { ...opts })).session,
+    sessionHistory: async id => (await c.request<{ events: SessionEvent[] }>("sessions.history", { workspaceId: id })).events,
     listSessions: async id =>
       (await c.request<{ sessions: SessionView[] }>("sessions.list", id !== undefined ? { workspaceId: id } : {})).sessions,
     subscribe: fn => c.subscribe(fn),

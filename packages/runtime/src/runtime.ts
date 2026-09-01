@@ -14,7 +14,7 @@ import {
   type MachineBackend,
   type MachineSpec,
 } from "@wsp/engine";
-import type { EventUnion, SessionView, WorkspaceView } from "@wsp/protocol";
+import type { EventUnion, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
 import { createStatusTracker, type StatusApi, type StatusWatchOptions } from "./status.js";
 import type { Store } from "./store.js";
 
@@ -151,6 +151,8 @@ export interface Runtime {
       opts: { prompt: string; harness?: string; resume?: string; cwd?: string },
     ): Promise<SessionHandle>;
     list(workspaceId?: string): SessionView[];
+    /** The workspace's persisted session events, oldest first; a chat replays these on mount. */
+    history(workspaceId: string): Promise<SessionEvent[]>;
   };
   readonly golden: {
     build(opts: GoldenBuildRequest): Promise<{ manifest: GoldenManifest; version: GoldenVersion }>;
@@ -163,6 +165,14 @@ export interface Runtime {
 
 const WORKSPACES = "workspaces";
 const GOLDENS = "goldens";
+const TRANSCRIPTS = "transcripts";
+/** Events kept per workspace; the oldest fall off so one chatty workspace cannot grow the store forever. */
+const TRANSCRIPT_CAP = 5000;
+
+interface TranscriptRecord {
+  workspaceId: string;
+  events: SessionEvent[];
+}
 
 /** Stand-in for a machine that vanished while we were away; resume() failing with
  * kind "missing" is exactly what triggers Workspace's resurrect path. */
@@ -213,6 +223,25 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
   const live = new Map<string, LiveWorkspace>();
   const sessions = new Map<string, { view: SessionView; handle: SessionHandle }>();
+  const transcripts = new Map<string, SessionEvent[]>();
+
+  // Deltas are only appended in memory; the store sees the transcript at turn
+  // boundaries, so a crash mid-turn loses that turn's partial output and
+  // nothing else.
+  const record = (event: SessionEvent): void => {
+    let events = transcripts.get(event.workspaceId);
+    if (!events) {
+      events = [];
+      transcripts.set(event.workspaceId, events);
+    }
+    events.push(event);
+    if (events.length > TRANSCRIPT_CAP) events.splice(0, events.length - TRANSCRIPT_CAP);
+    if (event.type !== "session.delta") {
+      const snapshot: TranscriptRecord = { workspaceId: event.workspaceId, events: [...events] };
+      void store.put(TRANSCRIPTS, event.workspaceId, snapshot);
+    }
+    bus.emit(event);
+  };
 
   const view = (r: WorkspaceRecord): WorkspaceView => ({
     id: r.id,
@@ -269,6 +298,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           throw e;
         });
         attach(record, machine);
+      }
+      for (const raw of await store.list(TRANSCRIPTS)) {
+        const t = raw as TranscriptRecord;
+        transcripts.set(t.workspaceId, t.events);
       }
     })();
     return hydrated;
@@ -357,7 +390,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if ((e as { kind?: string }).kind !== "missing") throw e;
       });
       live.delete(id);
+      transcripts.delete(id);
       await store.delete(WORKSPACES, id);
+      await store.delete(TRANSCRIPTS, id);
       bus.emit({ type: "workspace.deleted", workspaceId: id });
     },
 
@@ -386,10 +421,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             sessionView.claudeSessionId = sessionId;
             entry.record.claudeSessionId = sessionId;
             void persist(entry.record);
-            bus.emit({
+            record({
               type: "session.start",
               workspaceId,
               sessionId,
+              prompt: o.prompt,
               ...(event.model !== undefined ? { model: event.model } : {}),
               ...(event.cwd !== undefined ? { cwd: event.cwd } : {}),
               ...(event.tools !== undefined ? { tools: event.tools } : {}),
@@ -397,7 +433,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             return;
           }
           case "turn.delta":
-            bus.emit({
+            record({
               type: "session.delta",
               workspaceId,
               sessionId,
@@ -410,10 +446,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             return;
           case "turn.done":
             sessionView.status = event.result.status;
-            bus.emit({ type: "session.done", workspaceId, sessionId, result: event.result });
+            record({ type: "session.done", workspaceId, sessionId, result: event.result });
             return;
           case "session.end":
-            bus.emit({
+            record({
               type: "session.end",
               workspaceId,
               sessionId,
@@ -457,6 +493,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     list(workspaceId) {
       const all = [...sessions.values()].map(s => ({ ...s.view }));
       return workspaceId === undefined ? all : all.filter(s => s.workspaceId === workspaceId);
+    },
+
+    async history(workspaceId) {
+      await entryOf(workspaceId);
+      return [...(transcripts.get(workspaceId) ?? [])];
     },
   };
 

@@ -100,6 +100,8 @@ const sessionScope = { workspaceId: z.string(), sessionId: z.string() };
 export const SessionStartEvent = z.object({
   type: z.literal("session.start"),
   ...sessionScope,
+  /** The user's turn; set by the runtime (the adapter never sees it) so a replayed transcript shows it. */
+  prompt: z.string().optional(),
   model: z.string().optional(),
   cwd: z.string().optional(),
   tools: z.array(z.string()).optional(),
@@ -127,6 +129,10 @@ export const SessionEndEvent = z.object({
   exitCode: z.number().nullable(),
   sawResult: z.boolean(),
 });
+
+/** The events sessions.history replays: what a chat transcript folds. */
+export const SessionEvent = z.discriminatedUnion("type", [SessionStartEvent, SessionDeltaEvent, SessionDoneEvent, SessionEndEvent]);
+export type SessionEvent = z.infer<typeof SessionEvent>;
 
 // --- workspace / port / inbox events ----------------------------------------
 
@@ -297,6 +303,8 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     cwd: z.string().optional(),
   }),
   z.object({ id: reqId, op: z.literal("sessions.list"), workspaceId: z.string().optional() }),
+  /** Replies with the workspace's persisted SessionEvent[] (oldest first, capped by the runtime). */
+  z.object({ id: reqId, op: z.literal("sessions.history"), workspaceId: z.string() }),
   z.object({ id: reqId, op: z.literal("golden.get"), name: z.string() }),
   /** Replies with the backend's Capabilities; the UI gates features on these. */
   z.object({ id: reqId, op: z.literal("capabilities.get") }),

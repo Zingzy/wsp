@@ -162,6 +162,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "sessions.list":
               send({ id: msg.id, ok: true, sessions: rt.sessions.list(msg.workspaceId) });
               return;
+            case "sessions.history":
+              send({ id: msg.id, ok: true, events: await rt.sessions.history(msg.workspaceId) });
+              return;
             case "golden.get":
               send({ id: msg.id, ok: true, manifest: await rt.golden.get(msg.name) });
               return;

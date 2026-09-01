@@ -6,6 +6,7 @@ import {
   EventUnion,
   RuntimeRequest,
   RuntimeResponse,
+  SessionEvent,
   SessionView,
   WorkspaceView,
 } from "../src/index.js";
@@ -78,6 +79,11 @@ describe("protocol event union", () => {
     ];
     for (const s of samples) expect(EventUnion.parse(s)).toEqual(s);
     expect(() => EventUnion.parse({ type: "workspace.exploded" })).toThrow();
+    // session.start may carry the prompt so a replayed transcript shows the user's turn
+    const started = { type: "session.start", workspaceId: "ws_1", sessionId: "s1", prompt: "fix the flaky test" };
+    expect(EventUnion.parse(started)).toEqual(started);
+    expect(SessionEvent.parse(started)).toEqual(started);
+    expect(() => SessionEvent.parse({ type: "workspace.napped", workspaceId: "ws_1" })).toThrow();
     // session.end with a null exit code (kill path) is valid
     expect(
       EventUnion.parse({ type: "session.end", workspaceId: "w", sessionId: "s", exitCode: null, sawResult: false }),
@@ -136,6 +142,7 @@ describe("runtime wire types", () => {
       { id: 12, op: "sessions.list" },
       { id: 13, op: "golden.get", name: "default" },
       { id: 14, op: "capabilities.get" },
+      { id: 15, op: "sessions.history", workspaceId: "ws_1" },
     ];
     for (const r of reqs) expect(RuntimeRequest.parse(r)).toEqual(r);
     expect(() => RuntimeRequest.parse({ id: 1, op: "workspaces.create" })).toThrow(); // golden+name required

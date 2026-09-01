@@ -13,6 +13,7 @@ export type {
   MachineState,
   ReachState,
   ReachStatus,
+  SessionEvent,
   SessionStatus,
   SessionView,
   WorkspacePhase,

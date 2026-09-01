@@ -116,6 +116,58 @@ describe("runtime", () => {
   });
 });
 
+describe("runtime session history", () => {
+  const scripted = (text: string): HarnessAdapterFactory => () => ({
+    start: ({ onEvent }) => {
+      const sessionId = "22222222-2222-4222-8222-222222222222";
+      const result: TurnResult = { status: "completed", text };
+      const finished = (async () => {
+        const feed: AdapterEvent[] = [
+          { type: "session.start", sessionId, model: "claude-sonnet-4-5" },
+          { type: "turn.delta", sessionId, kind: "text", text },
+          { type: "turn.done", sessionId, result },
+          { type: "session.end", sessionId, exitCode: 0, sawResult: true },
+        ];
+        for (const e of feed) onEvent(e);
+        return result;
+      })();
+      return { localId: sessionId, claudeSessionId: sessionId, finished };
+    },
+  });
+
+  it("replays a workspace's session events with the prompt on session.start, surviving a restart", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: { claude: scripted("hello") } });
+    const a = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const b = await rt.workspaces.create({ golden: "snap_g", name: "b" });
+    await (await rt.sessions.start(a.id, { prompt: "say hello" })).finished;
+
+    const history = await rt.sessions.history(a.id);
+    expect(history.map(e => e.type)).toEqual(["session.start", "session.delta", "session.done", "session.end"]);
+    expect(history[0]).toMatchObject({ type: "session.start", workspaceId: a.id, prompt: "say hello" });
+    expect(await rt.sessions.history(b.id)).toEqual([]);
+
+    // a fresh runtime over the same store still has it; deleting the workspace drops it
+    const rt2 = createRuntime({ backend, store, adapters: {} });
+    expect(await rt2.sessions.history(a.id)).toEqual(history);
+    await rt2.workspaces.delete(a.id);
+    await expect(rt2.sessions.history(a.id)).rejects.toThrow("no such workspace");
+    expect(await store.list("transcripts")).toEqual([]);
+  });
+
+  it("caps the persisted transcript so a chatty workspace cannot grow the store without bound", async () => {
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: scripted("x") } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    for (let i = 0; i < 1300; i++) await (await rt.sessions.start(ws.id, { prompt: `t${i}` })).finished;
+    const history = await rt.sessions.history(ws.id);
+    expect(history.length).toBeLessThanOrEqual(5000);
+    expect(history[history.length - 1]).toMatchObject({ type: "session.end" });
+    expect(history.some(e => e.type === "session.start" && e.prompt === "t1299")).toBe(true);
+    expect(history.some(e => e.type === "session.start" && e.prompt === "t0")).toBe(false);
+  });
+});
+
 describe("runtime upgrade vault", () => {
   it("vaults user files (skipping golden-provided dirs) onto the fresh fork", async () => {
     const backend = stubBackend();

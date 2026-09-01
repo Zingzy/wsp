@@ -104,3 +104,19 @@ describe("serveRuntime capabilities", () => {
     c.close();
   });
 });
+
+describe("serveRuntime session history", () => {
+  it("sessions.history returns the persisted session events for one workspace", async () => {
+    const runtime = rt();
+    srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const id = (created["workspace"] as { id: string }).id;
+    const res = await c.request("sessions.history", { workspaceId: id });
+    expect(res.ok).toBe(true);
+    expect(res["events"]).toEqual([]);
+    const missing = await c.request("sessions.history", { workspaceId: "ws_nope" });
+    expect(missing.ok).toBe(false);
+    c.close();
+  });
+});

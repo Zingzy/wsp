@@ -29,6 +29,7 @@ function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
     upgrade: async id => workspaces.find(w => w.id === id)!,
     capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true }),
     startSession: async o => row(o.workspaceId),
+    sessionHistory: async () => [],
     listSessions: async id => (id === undefined ? sessions : sessions.filter(s => s.workspaceId === id)),
     subscribe: fn => {
       listeners.add(fn);

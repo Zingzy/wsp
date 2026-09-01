@@ -31,6 +31,7 @@ function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
     upgrade: async id => workspaces.find(w => w.id === id)!,
     capabilities: async () => CAPS,
     startSession: async o => ({ id: "s_new", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
+    sessionHistory: async () => [],
     listSessions: async id => {
       listCalls.push(id);
       return id === undefined ? sessions : sessions.filter(s => s.workspaceId === id);
