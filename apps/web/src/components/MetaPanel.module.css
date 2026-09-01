@@ -1,0 +1,5 @@
+.meta { padding: 14px; display: flex; flex-direction: column; gap: 10px; font-family: var(--mono); font-size: 12px; }
+.row { display: flex; justify-content: space-between; }
+.k { color: var(--deep); }
+.v { color: var(--fg); }
+.dim { color: var(--deep); margin-top: 12px; }
