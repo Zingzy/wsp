@@ -58,11 +58,13 @@ function fixture(opts: { golden?: GoldenManifest; workspaces?: WorkspaceView[] }
     prepareGolden: vi.fn(async () => builder),
     sealGolden: vi.fn(async () => ({ manifest, version })),
   } satisfies Api;
-  const stage = (s: GoldenStage, detail?: string) =>
+  // `listener` is the last subscriber, the wizard's; the store subscribes first on bind.
+  const push = (e: ProtocolEvent) =>
     act(() => {
-      listener?.({ type: "golden.stage", name: "default", stage: s, ...(detail !== undefined ? { detail } : {}) });
+      listener?.(e);
     });
-  return { api, stage };
+  const stage = (s: GoldenStage, detail?: string) => push({ type: "golden.stage", name: "default", stage: s, ...(detail !== undefined ? { detail } : {}) });
+  return { api, stage, push };
 }
 
 beforeEach(() => {
@@ -132,6 +134,18 @@ describe("wizard steps follow the wire", () => {
     expect(save.disabled).toBe(true);
     f.stage("ready");
     expect(save.disabled).toBe(false);
+  });
+
+  it("ignores golden.stage frames for a golden this wizard did not prepare", async () => {
+    const f = await mount();
+    f.api.prepareGolden.mockImplementationOnce(() => new Promise<GoldenBuilderView>(() => {}));
+    await waitFor(() => screen.getByRole("button", { name: "Prepare my machine" }));
+    fireEvent.click(screen.getByRole("button", { name: "Prepare my machine" }));
+    f.stage("creating");
+    f.push({ type: "golden.stage", name: "nightly", stage: "failed", detail: "someone else's build" });
+    f.push({ type: "golden.stage", name: "nightly", stage: "ready" });
+    expect(screen.getByTestId("step").textContent).toBe("preparing");
+    expect(screen.getByTestId("stage-creating").getAttribute("data-state")).toBe("current");
   });
 
   it("a failed stage shows start over with the detail, and start over returns to welcome", async () => {

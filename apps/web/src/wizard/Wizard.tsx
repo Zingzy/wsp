@@ -37,6 +37,8 @@ const STAGE_WORD: Record<GoldenStage, string> = {
 };
 
 const FIRST_WORKSPACE = "first";
+/** The golden this wizard builds; stage frames for any other name belong to someone else's build. */
+const GOLDEN_NAME = "default";
 
 export function Wizard({ keys, onDone }: { keys?: KeyFlags; onDone: () => void }) {
   const api = useStore(s => s.api);
@@ -47,7 +49,9 @@ export function Wizard({ keys, onDone }: { keys?: KeyFlags; onDone: () => void }
   useEffect(() => {
     if (!api) return;
     return api.subscribe(e => {
-      if (e.type === "golden.stage") dispatch({ type: "stage", stage: e.stage, ...(e.detail !== undefined ? { detail: e.detail } : {}) });
+      if (e.type === "golden.stage" && e.name === GOLDEN_NAME) {
+        dispatch({ type: "stage", stage: e.stage, ...(e.detail !== undefined ? { detail: e.detail } : {}) });
+      }
     });
   }, [api]);
 
@@ -56,7 +60,7 @@ export function Wizard({ keys, onDone }: { keys?: KeyFlags; onDone: () => void }
   const prepare = (): void => {
     if (!api) return;
     dispatch({ type: "prepare" });
-    api.prepareGolden("default").then(builder => dispatch({ type: "prepared", builder })).catch(fail);
+    api.prepareGolden(GOLDEN_NAME).then(builder => dispatch({ type: "prepared", builder })).catch(fail);
   };
 
   const seal = (): void => {
@@ -193,7 +197,7 @@ function Hero({
             </li>
           ))}
         </ul>
-        <p className={styles.note}>Take your time, but a long idle break can pause the machine and lose this setup.</p>
+        <p className={styles.note}>Take your time, but a machine left idle too long is shut down and this setup is lost.</p>
         <div className={styles.actions}>
           <button type="button" className={`${styles.key} ${styles.keySpend}`} disabled={!ready} onClick={onSeal}>
             Save as my golden image
