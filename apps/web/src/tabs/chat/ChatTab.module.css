@@ -1,0 +1,84 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Chat lens, styled after the approved mock's terminal transcript vocabulary:
+   dense mono lines on --term, green = running only, orange = spend only. */
+
+.root { height: 100%; display: flex; flex-direction: column; }
+
+.scroll {
+  flex: 1; min-height: 0; overflow-y: auto; background: var(--term);
+  padding: 18px 20px 26px;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.62;
+  color: var(--muted); white-space: pre-wrap; word-break: break-word;
+}
+
+.empty {
+  height: 100%; display: grid; place-content: center;
+  font-family: var(--sans); color: var(--deep);
+}
+
+.user { margin-top: 14px; color: var(--fg); }
+.user:first-child { margin-top: 0; }
+.prompt { color: var(--deep); }
+
+.assistant { margin-top: 10px; }
+.tdot {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--fg); margin-right: 6px; vertical-align: baseline;
+}
+
+.blockHead {
+  display: block; width: 100%; text-align: left; margin-top: 10px; padding: 0;
+  background: transparent; border: none; cursor: pointer;
+  font: inherit; color: var(--muted);
+  transition: color 0.16s;
+}
+.blockHead:hover { color: var(--fg); }
+.toolName { color: var(--fg); font-weight: 600; }
+.dim { color: var(--deep); }
+.blockBody { padding-left: 16px; }
+.blockBody pre {
+  margin: 2px 0 0; font: inherit; white-space: pre-wrap; word-break: break-word;
+}
+.thinkingHead { color: var(--deep); }
+.thinkingBody { padding-left: 16px; color: var(--deep); }
+
+.done { margin-top: 10px; font-size: 11px; color: var(--deep); }
+.cost { color: var(--acc); }
+.errText { color: var(--fg); margin-top: 2px; font-size: 12.5px; }
+
+.working { margin-top: 12px; color: var(--deep); font-size: 11px; }
+.okDot {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--ok); margin-right: 6px;
+}
+
+.composer { border-top: 1px solid var(--soft); background: var(--panel); padding: 10px 12px 8px; }
+.input {
+  display: block; width: 100%; resize: none; overflow-y: auto;
+  background: var(--term); color: var(--fg);
+  border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.5; outline: none;
+  transition: border-color 0.16s;
+}
+.input:focus { border-color: rgba(255, 255, 255, 0.22); }
+.input:disabled { opacity: 0.55; }
+.hint { margin-top: 6px; min-height: 14px; font-family: var(--mono); font-size: 10.5px; color: var(--deep); }
+
+.approval {
+  display: inline-block; border: 1px solid var(--line); border-radius: 8px;
+  padding: 10px 12px; margin: 10px 0 0; line-height: 1.55;
+}
+.approvalTitle { color: var(--fg); }
+.approvalDetail { color: var(--deep); margin-top: 2px; }
+.approvalKeys { display: flex; gap: 8px; margin-top: 9px; }
+.key {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 5px 10px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--card); box-shadow: inset 0 0.7px 0 rgba(255, 255, 255, 0.16);
+  font-family: var(--mono); font-size: 11px; color: var(--muted); cursor: pointer;
+  transition: background 0.16s, color 0.16s;
+}
+.key:hover { background: color-mix(in srgb, var(--card), white 4%); color: var(--fg); }
+.key:active { background: color-mix(in srgb, var(--card), white 7%); }
+.confirm { border-color: rgba(251, 146, 60, 0.55); color: var(--acc); }
+.confirm:hover { background: rgba(251, 146, 60, 0.08); color: var(--acc); }
