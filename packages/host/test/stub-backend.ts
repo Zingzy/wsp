@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 import type { ExecResult, Machine, MachineBackend, MachineSpec, MachineState } from "@wsp/engine";
 
 export interface StubMachine extends Machine {

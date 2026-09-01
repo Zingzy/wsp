@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it, vi } from "vitest";
 import { Workspace } from "../src/lifecycle.js";
 import type { Machine, PreviewReach } from "../src/machine.js";

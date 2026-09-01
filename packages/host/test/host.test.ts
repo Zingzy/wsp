@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { GoldenManifest } from "@wsp/engine";

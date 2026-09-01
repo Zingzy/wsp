@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 import type { Machine, PreviewReach } from "./machine.js";
 
 /** Measured Solari TTL: the pt_token exp claim is 60 minutes from mint. */

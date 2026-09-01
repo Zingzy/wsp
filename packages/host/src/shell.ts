@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 // The localhost status shell: one static page that renders /api/workspaces
 // client-side every 5s. The full tabs UI is Plan 3; this page only has to be
 // an honest live view, so it stays dependency-free and inline.

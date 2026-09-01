@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 // wsp: local app entry. Embeds the runtime in-process and serves the status
 // shell on loopback. There is no control plane; the Solari key is read here
 // and used only for direct calls from this process to the machine API.
@@ -9,6 +10,7 @@ import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import { createClaudeAdapter } from "@wsp/adapter-claude";
 import { SolariBackend, createRuntime, jsonFileStore, machineExecStream, type Runtime } from "@wsp/runtime";
+import { doctor } from "./doctor.js";
 import { startHost } from "./server.js";
 
 const VERSION = (
@@ -156,6 +158,11 @@ export async function cli(argv: string[], io: CliIO = console): Promise<number> 
   switch (cmd) {
     case undefined:
       return serve(io, opts);
+    case "doctor": {
+      const keys = await loadKeys(io);
+      const rt = makeRuntime(keys, opts.statePath);
+      return doctor(rt, io, keys.anthropic !== undefined ? { envs: claudeEnvs(keys.anthropic) } : {});
+    }
     default:
       io.error(`unknown command: ${cmd}\n\n${HELP}`);
       return 1;

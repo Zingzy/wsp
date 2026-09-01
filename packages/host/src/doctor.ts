@@ -1,0 +1,413 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// wsp doctor: proves the whole reach path against one live machine and prints
+// a timing table. fork -> deploy daemon -> previewUrl -> heartbeat client ->
+// inbox round trip -> kill, with a zero-machines check at the end.
+
+import { execFile } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { promisify } from "node:util";
+import { DAEMON_PORT, type Machine } from "@wsp/engine";
+import type { Runtime } from "@wsp/runtime";
+import WebSocket from "ws";
+import type { CliIO } from "./cli.js";
+
+const execFileAsync = promisify(execFile);
+
+// --- daemon bundle --------------------------------------------------------
+
+// Runs inside /root/wsp-daemon. Loopback binds are unreachable through the
+// preview edge (it dials eth0), so 0.0.0.0 is the whole point of this file.
+const START_MJS = `import { startDaemon } from "./dist/index.js";
+const d = await startDaemon({ host: "0.0.0.0" });
+console.log(\`wsp-daemon listening on 0.0.0.0:\${d.port}\`);
+`;
+
+function resolveDaemonDir(): string {
+  const require = createRequire(import.meta.url);
+  return dirname(require.resolve("@wsp/daemon/package.json"));
+}
+
+/** Lay out an installable copy of the daemon: its dist build, a start script,
+ * and a package.json whose dependency pins mirror the daemon's (node-pty has
+ * no linux prebuilds, so the guest's npm install compiles it, ~5s). */
+export async function stageDaemonBundle(stageDir: string, daemonDir = resolveDaemonDir()): Promise<void> {
+  const daemonPkg = JSON.parse(readFileSync(join(daemonDir, "package.json"), "utf8")) as {
+    dependencies: Record<string, string>;
+  };
+  mkdirSync(stageDir, { recursive: true });
+  cpSync(join(daemonDir, "dist"), join(stageDir, "dist"), { recursive: true });
+  writeFileSync(join(stageDir, "start.mjs"), START_MJS);
+  writeFileSync(
+    join(stageDir, "package.json"),
+    JSON.stringify(
+      { name: "wsp-daemon-bundle", private: true, type: "module", dependencies: daemonPkg.dependencies },
+      null,
+      2,
+    ),
+  );
+}
+
+/** The in-guest install+start sequence. The setsid line ends in a bare `&`
+ * with the sleep on the same statement: `&` already terminates a command, so
+ * joining it with `;` would be a bash syntax error (a live run died on it). */
+export function deployScript(token: string): string {
+  return [
+    "set -e",
+    "mkdir -p /root/wsp-daemon /root/inbox",
+    "tar -xzf /root/wsp-daemon.tgz -C /root/wsp-daemon",
+    "cd /root/wsp-daemon",
+    "npm install --omit=dev --no-audit --no-fund > /tmp/wsp-npm.log 2>&1 || { tail -3 /tmp/wsp-npm.log; echo NPM_FAIL; false; }",
+    "umask 077",
+    `printf '%s' '${token}' > /root/.wsp-daemon-token`,
+    "setsid nohup node /root/wsp-daemon/start.mjs > /root/daemon.log 2>&1 < /dev/null & sleep 1.5",
+    "ss -ltn | grep -q 7070 && echo DAEMON_UP || { cat /root/daemon.log; echo DAEMON_DOWN; }",
+  ].join("\n");
+}
+
+/** Upload and start the daemon on a machine; returns the minted auth token. */
+export async function deployDaemon(
+  machine: Machine,
+  opts: { token?: string; daemonDir?: string } = {},
+): Promise<{ token: string }> {
+  const token = opts.token ?? randomBytes(24).toString("hex");
+  const stage = mkdtempSync(join(tmpdir(), "wsp-daemon-bundle-"));
+  const tgz = `${stage}.tgz`;
+  try {
+    await stageDaemonBundle(stage, opts.daemonDir);
+    await execFileAsync("tar", ["-czf", tgz, "-C", stage, "."]);
+    const putUrl = await machine.uploadUrl("/root/wsp-daemon.tgz");
+    const put = await fetch(putUrl, { method: "PUT", body: readFileSync(tgz) });
+    if (!put.ok) throw new Error(`bundle upload failed: HTTP ${put.status}`);
+
+    const res = await machine.exec(deployScript(token), { timeoutMs: 120_000 });
+    if (res.exitCode !== 0 || !res.stdout.includes("DAEMON_UP")) {
+      throw new Error(`daemon deploy failed: ${res.stdout.slice(-300)} ${res.stderr.slice(-200)}`);
+    }
+    return { token };
+  } finally {
+    rmSync(stage, { recursive: true, force: true });
+    rmSync(tgz, { force: true });
+  }
+}
+
+// --- preview-socket client ------------------------------------------------
+
+export interface DaemonSocket {
+  op(op: string, extra?: Record<string, unknown>): Promise<Record<string, unknown>>;
+  close(): void;
+  readonly closed: Promise<number>;
+  /** Completed heartbeat round trips. */
+  readonly beats: number;
+  readonly open: boolean;
+}
+
+export interface ConnectOptions {
+  /** Preview URL (pt_token in the query) or a plain local daemon URL. */
+  url: string;
+  /** The daemon's own token; the second gate behind the edge's pt_token. */
+  token: string;
+  /** App-level beat cadence; the edge's idle sweep kills quiet sockets ~30s
+   * out and browsers cannot send protocol pings. Default 10s (measured). */
+  heartbeatMs?: number;
+  onEvent?: (event: Record<string, unknown>) => void;
+  connectTimeoutMs?: number;
+}
+
+/** Connect through the preview edge and prove auth with one op round trip
+ * before resolving; then keep the socket warm with app-level heartbeats. */
+export function connectDaemonSocket(opts: ConnectOptions): Promise<DaemonSocket> {
+  const u = new URL(opts.url);
+  u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
+  u.searchParams.set("token", opts.token);
+
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(u.toString());
+    const pending = new Map<number, { resolve: (m: Record<string, unknown>) => void; reject: (e: Error) => void }>();
+    let nextId = 1;
+    let beats = 0;
+    let settled = false;
+    let heartbeat: NodeJS.Timeout | undefined;
+    let resolveClosed: (code: number) => void = () => {};
+    const closed = new Promise<number>(r => (resolveClosed = r));
+
+    const connectTimer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        ws.terminate();
+        reject(new Error(`daemon connect timed out after ${opts.connectTimeoutMs ?? 15_000}ms`));
+      }
+    }, opts.connectTimeoutMs ?? 15_000);
+
+    const op = (name: string, extra: Record<string, unknown> = {}): Promise<Record<string, unknown>> => {
+      const id = nextId++;
+      return new Promise((res, rej) => {
+        pending.set(id, { resolve: res, reject: rej });
+        ws.send(JSON.stringify({ id, op: name, ...extra }));
+      });
+    };
+
+    const socket: DaemonSocket = {
+      op,
+      close: () => {
+        if (heartbeat) clearInterval(heartbeat);
+        ws.close(1000);
+      },
+      closed,
+      get beats() {
+        return beats;
+      },
+      get open() {
+        return ws.readyState === ws.OPEN;
+      },
+    };
+
+    ws.on("message", raw => {
+      const m = JSON.parse(String(raw)) as Record<string, unknown>;
+      const id = m["id"];
+      if (typeof id === "number" && pending.has(id)) {
+        pending.get(id)!.resolve(m);
+        pending.delete(id);
+      } else if (typeof m["type"] === "string") {
+        opts.onEvent?.(m);
+      }
+    });
+
+    ws.on("open", () => {
+      // The daemon accepts the upgrade before checking the token, so only a
+      // successful op proves we are in (a bad token closes 4401 instead).
+      op("manifest.get").then(
+        () => {
+          clearTimeout(connectTimer);
+          settled = true;
+          heartbeat = setInterval(() => {
+            op("manifest.get").then(
+              () => {
+                beats++;
+              },
+              () => {},
+            );
+          }, opts.heartbeatMs ?? 10_000);
+          resolve(socket);
+        },
+        e => {
+          clearTimeout(connectTimer);
+          if (!settled) {
+            settled = true;
+            reject(e instanceof Error ? e : new Error(String(e)));
+          }
+        },
+      );
+    });
+    ws.on("close", (code, reason) => {
+      if (heartbeat) clearInterval(heartbeat);
+      const err = new Error(`daemon connection closed ${code} ${String(reason)}`);
+      for (const p of pending.values()) p.reject(err);
+      pending.clear();
+      resolveClosed(code);
+      if (!settled) {
+        settled = true;
+        clearTimeout(connectTimer);
+        reject(err);
+      }
+    });
+    ws.on("error", e => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(connectTimer);
+        reject(e instanceof Error ? e : new Error(String(e)));
+      }
+    });
+  });
+}
+
+// --- the doctor loop ------------------------------------------------------
+
+function fmtMs(ms: number): string {
+  return ms < 10_000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+}
+
+class Timings {
+  rows: { step: string; ms: number; note: string }[] = [];
+  async time<T>(step: string, fn: () => Promise<T>, note?: (v: T) => string): Promise<T> {
+    const start = Date.now();
+    const v = await fn();
+    this.rows.push({ step, ms: Date.now() - start, note: note ? note(v) : "" });
+    return v;
+  }
+  add(step: string, ms: number, note = ""): void {
+    this.rows.push({ step, ms, note });
+  }
+  print(log: (line: string) => void): void {
+    const w1 = Math.max(...this.rows.map(r => r.step.length), 4) + 2;
+    log("");
+    log("step".padEnd(w1) + "time".padEnd(10) + "note");
+    log("-".repeat(w1 + 10 + 44));
+    for (const r of this.rows) log(r.step.padEnd(w1) + fmtMs(r.ms).padEnd(10) + r.note);
+    log("-".repeat(w1 + 10 + 44));
+    log("TOTAL".padEnd(w1) + fmtMs(this.rows.reduce((a, r) => a + r.ms, 0)));
+  }
+}
+
+const RESERVED = { key: "poc", value: "ttl-test" }; // sleeping experiment: never touch
+const GOLDEN_SETUP = "curl -fsSL https://claude.ai/install.sh | bash";
+
+export interface DoctorOptions {
+  /** Envs baked into golden builds and forks (claude credentials). */
+  envs?: Record<string, string>;
+  daemonDir?: string;
+}
+
+export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): Promise<number> {
+  const timings = new Timings();
+  let failed: string | undefined;
+  let workspaceId: string | undefined;
+  let socket: DaemonSocket | undefined;
+  const eventListeners: ((e: Record<string, unknown>) => void)[] = [];
+
+  const buildGolden = async (): Promise<string> => {
+    if (!opts.envs) {
+      throw new Error("no golden image and no ANTHROPIC_API_KEY to build one; add the key or run wspx golden build");
+    }
+    const { version } = await rt.golden.build({
+      setup: GOLDEN_SETUP,
+      smoke: "claude --version",
+      cpu: 2,
+      memMb: 4096,
+      envs: opts.envs,
+      labels: { wsp: "1", "wsp-doctor": "1", createdAt: new Date().toISOString() },
+    });
+    return version.snapshotId;
+  };
+
+  try {
+    io.log("doctor: proving the reach loop against one live machine");
+
+    let golden = "";
+    const manifest = await rt.golden.get();
+    const head = manifest?.versions.find(v => v.version === manifest.head);
+    if (head) {
+      golden = head.snapshotId;
+      timings.add("golden image", 0, `reused v${head.version} (${golden})`);
+    } else {
+      golden = await timings.time("golden image", buildGolden, id => `built fresh (${id})`);
+    }
+
+    const view = await timings.time(
+      "fork workspace",
+      async () => {
+        const spec = {
+          golden,
+          name: `doctor-${Date.now().toString(36)}`,
+          ...(opts.envs !== undefined ? { envs: opts.envs } : {}),
+          labels: { wsp: "1", "wsp-doctor": "1", createdAt: new Date().toISOString() },
+        };
+        try {
+          return await rt.workspaces.create(spec);
+        } catch (e) {
+          if ((e as { kind?: string }).kind !== "missing") throw e;
+          io.log("golden snapshot is gone; rebuilding");
+          const rebuilt = await buildGolden();
+          return rt.workspaces.create({ ...spec, golden: rebuilt });
+        }
+      },
+      w => `machine ${w.machineId.slice(0, 24)}…`,
+    );
+    workspaceId = view.id;
+    const machine = await rt.backend.get(view.machineId);
+
+    const { token } = await timings.time(
+      "deploy daemon",
+      () => deployDaemon(machine, opts.daemonDir !== undefined ? { daemonDir: opts.daemonDir } : {}),
+      () => "tar upload + in-guest npm install (node-pty compile) + start on 0.0.0.0:7070",
+    );
+
+    if (!machine.previewUrl) {
+      throw new Error("this backend mints no preview URLs (capabilities.previewUrls=false); doctor needs one");
+    }
+    const reach = await timings.time(
+      "mint previewUrl",
+      () => machine.previewUrl!(DAEMON_PORT),
+      r => `expires in ${Math.round((r.expiresAt - Date.now()) / 60_000)}min, host ${new URL(r.url).host}`,
+    );
+
+    socket = await timings.time(
+      "ws connect + first op",
+      () =>
+        connectDaemonSocket({
+          url: reach.url,
+          token,
+          onEvent: e => {
+            for (const l of eventListeners) l(e);
+          },
+        }),
+      () => "TLS + upgrade + authed manifest.get through the preview edge",
+    );
+
+    const beatTarget = 3;
+    await timings.time(
+      `heartbeats (${beatTarget} x 10s)`,
+      async () => {
+        const s = socket!;
+        const start = Date.now();
+        while (s.beats < beatTarget) {
+          if (!s.open) throw new Error("socket died between heartbeats (idle sweep won)");
+          if (Date.now() - start > 60_000) throw new Error("heartbeats stalled");
+          await new Promise(r => setTimeout(r, 250));
+        }
+      },
+      () => "socket alive past the ~30s idle sweep",
+    );
+
+    await timings.time(
+      "inbox round trip",
+      async () => {
+        const s = socket!;
+        const got = new Promise<void>((resolve, reject) => {
+          const t = setTimeout(() => reject(new Error("no inbox.file event in 20s")), 20_000);
+          eventListeners.push(e => {
+            if (e["type"] === "inbox.file") {
+              clearTimeout(t);
+              resolve();
+            }
+          });
+        });
+        await s.op("inbox.watch");
+        await rt.workspaces.exec(workspaceId!, "echo doctor > /root/inbox/doctor-ping.txt");
+        await got;
+      },
+      () => "REST touch -> inbox.file over the preview socket (~2s watcher quiet window)",
+    );
+
+    socket.close();
+    await timings.time(
+      "kill + verify zero",
+      async () => {
+        await rt.workspaces.delete(workspaceId!);
+        workspaceId = undefined;
+        const leftover = (await rt.backend.list()).filter(
+          m => m.labels[RESERVED.key] !== RESERVED.value && m.state !== "gone",
+        );
+        if (leftover.length > 0) throw new Error(`machines still up: ${leftover.map(m => m.id).join(", ")}`);
+      },
+      () => "workspace deleted, no machines left on the account",
+    );
+  } catch (e) {
+    failed = e instanceof Error ? e.message : String(e);
+    socket?.close();
+    if (workspaceId !== undefined) {
+      await rt.workspaces.delete(workspaceId).catch(() => {});
+    }
+  }
+
+  timings.print(io.log);
+  if (failed !== undefined) {
+    io.error(`\nDOCTOR FAIL: ${failed}`);
+    return 1;
+  }
+  io.log("\nDOCTOR PASS: fork, daemon, previewUrl, heartbeats, inbox, teardown all live.");
+  return 0;
+}
