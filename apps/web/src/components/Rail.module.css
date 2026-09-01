@@ -1,0 +1,10 @@
+.rail { padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+.head { font-family: var(--mono); font-weight: 600; color: var(--fg); padding: 8px 6px 14px; letter-spacing: -0.02em; }
+.empty { color: var(--deep); font-family: var(--mono); font-size: 12px; padding: 6px; }
+.card { display: flex; align-items: center; gap: 8px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px; cursor: pointer; text-align: left; color: var(--fg); font: inherit; }
+.card[data-selected="true"] { border-color: var(--acc); }
+.dot { width: 8px; height: 8px; border-radius: 99px; background: var(--deep); flex: none; }
+.dot[data-phase="running"] { background: var(--ok); }
+.dot[data-phase="napping"] { background: transparent; border: 1px solid var(--deep); }
+.name { flex: 1; font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.phase { color: var(--deep); font-family: var(--mono); font-size: 11px; }
