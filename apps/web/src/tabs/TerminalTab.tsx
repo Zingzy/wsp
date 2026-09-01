@@ -9,6 +9,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import type { DaemonLinkStatus } from "@wsp/protocol";
 import "@xterm/xterm/css/xterm.css";
+import { composeKey, composeMode, RAW_STATE, type ComposeStep } from "../terminal/compose.js";
 import { getTerminals, onTerminals, type WorkspaceTerminals } from "../terminal/link.js";
 import styles from "./TerminalTab.module.css";
 
@@ -116,8 +117,23 @@ function TerminalView({ terms, ptyId }: { terms: WorkspaceTerminals; ptyId: stri
       terms.resize(ptyId, dims.cols, dims.rows);
     };
     applyFit();
-    const unbind = terms.bind(ptyId, { data: d => term.write(d), reset: () => term.reset() });
-    const input = term.onData(d => terms.write(ptyId, d));
+    // Compose state lives here, not in React: a keystroke must not re-render.
+    let compose = RAW_STATE;
+    const apply = (step: ComposeStep): void => {
+      compose = step.state;
+      if (step.toScreen) term.write(step.toScreen);
+      if (step.toPty) terms.write(ptyId, step.toPty);
+    };
+    const unbind = terms.bind(ptyId, {
+      data: d => term.write(d),
+      reset: () => {
+        // The screen is wiped and the mode is unknown until re-attach reports it.
+        compose = RAW_STATE;
+        term.reset();
+      },
+      mode: report => apply(composeMode(compose, report)),
+    });
+    const input = term.onData(d => apply(composeKey(compose, d)));
     const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(applyFit) : null;
     ro?.observe(el);
     term.focus();
