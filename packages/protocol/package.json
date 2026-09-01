@@ -1,13 +1,12 @@
 {
-  "name": "@wsp/engine",
+  "name": "@wsp/protocol",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts",
     "test": "vitest run"
   },
-  "devDependencies": {
-    "ws": "^8.21.3",
-    "@types/ws": "^8.18.1"
+  "dependencies": {
+    "zod": "^3.25.76"
   }
 }
