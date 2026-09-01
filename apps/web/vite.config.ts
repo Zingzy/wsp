@@ -8,6 +8,9 @@ const pkg = (path: string) => fileURLToPath(new URL(`../../packages/${path}`, im
 
 export default defineConfig({
   plugins: [react()],
+  // noVNC's H.264 decoder module uses top-level await, which vite's default
+  // es2020 target rejects at bundle time.
+  build: { target: "es2022" },
   test: {
     environment: "jsdom",
     globals: true,
