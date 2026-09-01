@@ -2,15 +2,11 @@
 // Terminal tab against the real daemon: startDaemon in-process, the reach
 // client as the wire, jsdom for the component. WebGL cannot exist under
 // jsdom, so that addon is mocked; real rendering is the browser pass's job.
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { startDaemon, type DaemonHandle } from "@wsp/daemon";
-import { connectDaemon, type DaemonReach } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TerminalTab } from "../src/tabs/TerminalTab.js";
-import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../src/terminal/link.js";
+import { WorkspaceTerminals, type TerminalWire } from "../src/terminal/link.js";
+import { boot, teardown, WS_ID } from "./terminal-harness.js";
 
 vi.mock("@xterm/addon-webgl", () => ({
   WebglAddon: class {
@@ -22,47 +18,9 @@ vi.mock("@xterm/addon-webgl", () => ({
   },
 }));
 
-const TOKEN = "t21-token";
-const WS_ID = "ws_term_test";
-
-let daemon: DaemonHandle | undefined;
-let reach: DaemonReach | undefined;
-let inboxDir: string | undefined;
-
-async function boot(): Promise<{ wt: WorkspaceTerminals; daemon: DaemonHandle }> {
-  inboxDir = mkdtempSync(join(tmpdir(), "wsp-term-"));
-  daemon = await startDaemon({
-    port: 0,
-    token: TOKEN,
-    inboxDir,
-    inboxQuietMs: 100,
-    inboxPollMs: 50,
-    portsSource: async () => [],
-    portsIntervalMs: 1000,
-  });
-  const wire: TerminalWire = { request: (op, params = {}) => reach!.request(op, params) };
-  const wt = new WorkspaceTerminals(wire);
-  reach = connectDaemon({
-    previewUrl: `ws://127.0.0.1:${daemon.port}`,
-    token: TOKEN,
-    heartbeatMs: 60_000,
-    onEvent: e => wt.feedEvent(e),
-    onStatus: s => wt.feedStatus(s),
-  });
-  await reach.ready;
-  provideTerminals(WS_ID, wt);
-  return { wt, daemon };
-}
-
 afterEach(async () => {
   cleanup();
-  provideTerminals(WS_ID, null);
-  reach?.close();
-  reach = undefined;
-  await daemon?.close();
-  daemon = undefined;
-  if (inboxDir) rmSync(inboxDir, { recursive: true, force: true });
-  inboxDir = undefined;
+  await teardown();
 });
 
 describe("WorkspaceTerminals", () => {
@@ -104,6 +62,17 @@ describe("WorkspaceTerminals", () => {
     await wt.close(tab.ptyId);
     expect(daemon.ptys.list()).toHaveLength(0);
     expect(wt.tabs()).toHaveLength(0);
+  }, 15_000);
+
+  it("marks the tab exited when the pty's process ends", async () => {
+    const { wt } = await boot();
+    const tab = await wt.open({ shell: "/bin/sh" });
+    const seen: string[] = [];
+    const un = wt.bind(tab.ptyId, { data: d => seen.push(d), reset: () => {} });
+    wt.write(tab.ptyId, "exit\r");
+    await waitFor(() => expect(wt.tabs()[0]).toMatchObject({ exited: true }), { timeout: 10_000 });
+    expect(seen.join("")).toContain("[process exited]");
+    un();
   }, 15_000);
 
   it("a reconnect re-attaches every pty and resets bound sinks", async () => {
