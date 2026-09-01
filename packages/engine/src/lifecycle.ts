@@ -1,5 +1,6 @@
-import type { Machine, MachineSpec } from "./machine.js";
+import type { Machine, MachineSpec, PreviewReach } from "./machine.js";
 import type { WspError } from "./errors.js";
+import { DAEMON_PORT, refreshPreviewToken } from "./preview.js";
 
 export interface WorkspaceHooks {
   goldenSnapshot: string;
@@ -20,6 +21,9 @@ export class Workspace {
   // machine that was ever resumed cross-host, and same-host vs cross-host is
   // invisible from outside. So any resume disqualifies direct snapshots.
   private firstLife = true;
+  // Keyed by machine id: pause+wake keeps a reach valid (measured), but a
+  // resurrect/upgrade replaces the machine and voids it.
+  private preview?: { machineId: string; reach: PreviewReach };
 
   constructor(
     machine: Machine,
@@ -45,6 +49,15 @@ export class Workspace {
 
   get goldenSnapshot(): string {
     return this.hooks.goldenSnapshot;
+  }
+
+  /** Reach for the in-guest daemon: mints the :7070 preview URL, reusing the
+   * cached one while it is fresh (under ~50 min old). */
+  async daemonReach(): Promise<PreviewReach> {
+    const cached = this.preview?.machineId === this.machine.id ? this.preview.reach : undefined;
+    const reach = await refreshPreviewToken(this.machine, DAEMON_PORT, cached);
+    this.preview = { machineId: this.machine.id, reach };
+    return reach;
   }
 
   async nap(): Promise<void> {

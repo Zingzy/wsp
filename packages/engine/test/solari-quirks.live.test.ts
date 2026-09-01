@@ -6,6 +6,8 @@
 //   2. desktop control-WS 1006     -> FIXED upstream 2026-09-01; canary now
 //      guards the fix (REST /exec stays as the conservative default in wsp)
 //   3. docker can't run containers -> no Docker-based features
+//   4. previewUrl survives pause+wake -> daemonReach's cross-nap reuse
+//      (docs claim the url dies with the machine; measured otherwise)
 // A canary failing loudly is the signal to go adjust a workaround on purpose,
 // not a regression in wsp.
 
@@ -159,7 +161,69 @@ describe.runIf(LIVE)("solari platform-bug canaries", () => {
       await m.kill().catch(() => {});
     }
   });
+
+  // Docs say preview URLs die with the machine; measured (ticket-6 spike,
+  // 2026-09-01): they only go dark WHILE paused, and the same url+token routes
+  // again ~1s after wake. Workspace.daemonReach depends on that by keeping the
+  // minted reach across nap+wake; if this canary fails, wake must remint.
+  it("canary 4: previewUrl survives pause+wake (same url routes after resume)", { timeout: 240_000 }, async () => {
+    const m = await backend.create({ kind: "sandbox", cpu: 1, memMb: 2048, labels: TEST_LABEL });
+    try {
+      const listen = await m.exec(
+        "command -v python3 >/dev/null || echo NO_PYTHON3; " +
+          "setsid nohup python3 -m http.server 7070 --bind 0.0.0.0 >/tmp/http.log 2>&1 < /dev/null & " +
+          "sleep 1; ss -ltn | grep -q 7070 && echo LISTENING || echo NOT_LISTENING",
+      );
+      expect(listen.stdout, "in-guest listener on 0.0.0.0:7070 failed to start").toContain("LISTENING");
+
+      if (!m.previewUrl) throw new Error("SolariMachine lost previewUrl support");
+      const reach = await m.previewUrl(7070);
+      // exp claim is epoch ms 60 min out; a failed parse would also land at
+      // +60min, so the window mainly guards seconds-vs-ms confusion.
+      expect(reach.expiresAt).toBeGreaterThan(Date.now() + 50 * 60_000);
+      expect(reach.expiresAt).toBeLessThan(Date.now() + 70 * 60_000);
+      expect((await routes(reach.url)).ok, "freshly minted previewUrl does not route").toBe(true);
+
+      await m.pause();
+      while ((await m.state()) !== "paused") await sleep(1000);
+      await m.resume();
+      while ((await m.state()) !== "running") await sleep(1000);
+
+      const after = await routes(reach.url);
+      if (after.ok) {
+        SHOUT(
+          "CANARY 4: previewUrl survived pause+wake (same url+token routed " +
+            `post-resume, status ${after.status}). daemonReach may keep reusing across naps.`,
+        );
+      } else {
+        SHOUT(
+          `CANARY 4 REGRESSED: previewUrl no longer routes after pause+wake (${after.detail}). ` +
+            "Platform behavior changed; Workspace.daemonReach must remint on wake.",
+        );
+      }
+      expect(after.ok, "previewUrl stopped surviving pause+wake").toBe(true);
+    } finally {
+      await m.kill().catch(() => {});
+    }
+  });
 });
+
+/** GET the preview URL until the in-guest listener answers; the edge 502s
+ * while the guest dial is not ready (first dial ~1s, post-wake ~1s). */
+async function routes(url: string): Promise<{ ok: boolean; status?: number; detail: string }> {
+  let detail = "no attempt";
+  for (let attempt = 1; attempt <= 6; attempt++) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+      if (res.ok) return { ok: true, status: res.status, detail: `HTTP ${res.status}` };
+      detail = `HTTP ${res.status}`;
+    } catch (e) {
+      detail = e instanceof Error ? e.message : String(e);
+    }
+    await sleep(2000);
+  }
+  return { ok: false, detail: `${detail} after 6 attempts` };
+}
 
 type ControlOutcome =
   | { kind: "success"; exitCode: number; detail: string }
