@@ -13,9 +13,13 @@ const TABS: TabKind[] = ["chat", "terminal", "browser", "screen"];
 export function TabStrip() {
   const workspaceId = useSelectedId();
   const sessions = useSession(workspaceId);
-  // Default: chat when a managed session exists, else terminal (approved decision).
-  const [active, setActive] = useState<TabKind>(sessions.length > 0 ? "chat" : "terminal");
+  // Default: chat when a managed session exists, else terminal (approved
+  // decision). Derived, not initial state, so it follows a session that starts
+  // after mount; an explicit pick per workspace overrides it.
+  const [picked, setPicked] = useState<Record<string, TabKind>>({});
   if (!workspaceId) return <div className={styles.none}>select a workspace</div>;
+  const active: TabKind = picked[workspaceId] ?? (sessions.length > 0 ? "chat" : "terminal");
+  const setActive = (t: TabKind) => setPicked(p => ({ ...p, [workspaceId]: t }));
   return (
     <>
       <div className={styles.strip} role="tablist">
