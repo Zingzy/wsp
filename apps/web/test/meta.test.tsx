@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Capabilities, EventUnion, WorkspaceSize, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import type { Capabilities, EventUnion, SnapshotLineage, SnapshotRollbackResult, WorkspaceSize, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 import { MetaPanel } from "../src/components/MetaPanel.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -37,20 +37,27 @@ const CAPS: Capabilities = { liveCloneForks: true, ramPreservingPause: true, res
 
 // Live emitter: MetaPanel's cost series listens through api.subscribe, exactly
 // like the store does, so tests push events through the same channel.
-export function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS) {
+const EMPTY_LINEAGE: SnapshotLineage = { name: "default", head: null, versions: [] };
+
+export function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS, lineage: SnapshotLineage = EMPTY_LINEAGE) {
   const listeners = new Set<(e: EventUnion) => void>();
+  let current = lineage;
   const api: Api & {
     emit(e: EventUnion): void;
     nap: ReturnType<typeof vi.fn>;
     upgrade: ReturnType<typeof vi.fn<(id: string, size: WorkspaceSize) => Promise<WorkspaceView>>>;
+    rollbackSnapshot: ReturnType<typeof vi.fn<(version: number, name?: string) => Promise<SnapshotRollbackResult>>>;
   } = {
     upgrade: vi.fn(async (id: string, _size: WorkspaceSize) => view(id, "?", "running")),
     capabilities: vi.fn(async () => capabilities),
     daemonReach: vi.fn(async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 })),
     startSession: vi.fn(async (o: { workspaceId: string }) => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" as const })),
     sessionHistory: vi.fn(async () => []),
-    listSnapshots: vi.fn(async () => ({ name: "default", head: null, versions: [] })),
-    rollbackSnapshot: vi.fn(async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" as const })),
+    listSnapshots: vi.fn(async () => current),
+    rollbackSnapshot: vi.fn(async (version: number) => {
+      current = { ...current, head: version };
+      return { lineage: current, existingWorkspaces: "untouched" as const };
+    }),
     listWorkspaces: vi.fn(async () => workspaces),
     getWorkspace: vi.fn(async id => workspaces.find(w => w.id === id)!),
     createWorkspace: vi.fn(async () => workspaces[0]!),
@@ -157,11 +164,81 @@ describe("spend sparkline", () => {
 });
 
 describe("snapshot lineage", () => {
-  it("renders live disk and the golden base from view fields", async () => {
+  const gv = (n: number) => ({
+    version: n,
+    snapshotId: `snap_golden-v${n}`,
+    baseTemplate: "base",
+    setupSha: `sha${n}`,
+    createdAt: `2026-08-${10 + n}T00:00:00.000Z`,
+    smoke: { cmd: "true", exitCode: 0 },
+  });
+  const twoVersions: SnapshotLineage = { name: "default", head: 12, versions: [gv(11), gv(12)] };
+  const onV12 = (): WorkspaceView => ({ ...view("ws_a", "api"), golden: "snap_golden-v12" });
+
+  async function renderLineage(w: WorkspaceView, lineage: SnapshotLineage) {
+    const api = fakeApi([w], CAPS, lineage);
+    useStore.getState().bind(api);
+    render(<MetaPanel />);
+    await waitFor(() => expect(useStore.getState().ready).toBe(true));
+    return api;
+  }
+
+  it("renders live disk and the golden base from view fields while no golden was ever sealed", async () => {
     await bindAndRender([view("ws_a", "api")]);
     expect(screen.getByText("live disk")).toBeDefined();
     expect(screen.getByText("forked 2026-08-30")).toBeDefined();
-    expect(fact("golden")).toBe("snap_golden01golden");
+    await waitFor(() => expect(fact("golden")).toBe("snap_golden01golden"));
+  });
+
+  it("the live node is green only while the workspace runs", async () => {
+    await bindAndRender([view("ws_a", "api", "napping")]);
+    expect(document.querySelector('[data-cur="true"]')).toBeNull();
+    expect(screen.getByText("live disk")).toBeDefined();
+  });
+
+  it("lists golden versions newest first, marks head and this fork, offers activate only off head", async () => {
+    await renderLineage(onV12(), twoVersions);
+    await waitFor(() => expect(fact("v12")).toBe("v12headthis fork"));
+    expect(fact("v11")).toBe("v11");
+    expect(screen.getByText("built 2026-08-22")).toBeDefined();
+    const rows = [...document.querySelectorAll("[data-k^='v1']")].map(el => el.getAttribute("data-k"));
+    expect(rows).toEqual(["v12", "v11"]);
+    expect(screen.getByRole("button", { name: "activate v11" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "activate v12" })).toBeNull();
+  });
+
+  it("activate arms an orange confirm; confirming rolls head back and says existing workspaces keep their image", async () => {
+    const api = await renderLineage(onV12(), twoVersions);
+    await screen.findByRole("button", { name: "activate v11" });
+    fireEvent.click(screen.getByRole("button", { name: "activate v11" }));
+    const confirm = screen.getByRole("button", { name: "confirm rollback to v11" });
+    expect(confirm.className).toContain("keyConfirm");
+    expect(api.rollbackSnapshot).not.toHaveBeenCalled();
+
+    fireEvent.click(confirm);
+    await waitFor(() => expect(api.rollbackSnapshot).toHaveBeenCalledWith(11));
+    await waitFor(() => expect(fact("v11")).toBe("v11head"));
+    expect(fact("v12")).toBe("v12this fork");
+    expect(screen.getByText("new forks use v11 · existing workspaces keep their image")).toBeDefined();
+    expect(screen.getByRole("button", { name: "activate v12" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: /confirm rollback/ })).toBeNull();
+  });
+
+  it("cancel closes the confirm without touching the api", async () => {
+    const api = await renderLineage(onV12(), twoVersions);
+    fireEvent.click(await screen.findByRole("button", { name: "activate v11" }));
+    fireEvent.click(screen.getByRole("button", { name: "cancel" }));
+    expect(screen.queryByRole("button", { name: /confirm rollback/ })).toBeNull();
+    expect(api.rollbackSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("a refused rollback shows the runtime's message and leaves head where it was", async () => {
+    const api = await renderLineage(onV12(), twoVersions);
+    api.rollbackSnapshot.mockRejectedValueOnce(new Error("rollback target v11 not in manifest"));
+    fireEvent.click(await screen.findByRole("button", { name: "activate v11" }));
+    fireEvent.click(screen.getByRole("button", { name: "confirm rollback to v11" }));
+    await waitFor(() => expect(screen.getByText("rollback target v11 not in manifest")).toBeDefined());
+    expect(fact("v12")).toBe("v12headthis fork");
   });
 });
 

@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Meta panel (Plan 3 Task 7): machine facts, live spend sparkline, snapshot
-// lineage, pause/wake, upgrade. Lineage is read-only: no snapshot
-// list/rollback ops exist on the wire, so it renders from the view's
-// golden + createdAt fields.
-import { useState } from "react";
-import type { WorkspaceSize, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+// Meta panel: machine facts, live spend sparkline, snapshot lineage with
+// golden rollback, pause/wake, upgrade.
+import { useEffect, useState } from "react";
+import type { SnapshotLineage, WorkspaceSize, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 import { useCapabilities, useCost, useSelectedId, useStatus, useStore, useWorkspace } from "../protocol/store.js";
 import { upgradeOptions, useCostSeries, useUpgrade, type CostPoint, type Upgrade } from "../protocol/meta.js";
 import styles from "./MetaPanel.module.css";
@@ -128,13 +126,51 @@ function Usage({ w, status, series }: { w: WorkspaceView; status: WorkspaceStatu
 }
 
 function Lineage({ w }: { w: WorkspaceView }) {
+  const api = useStore(s => s.api);
+  const [lineage, setLineage] = useState<SnapshotLineage | null>(null);
+  /** Version whose rollback awaits the orange confirm. */
+  const [armed, setArmed] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!api) return;
+    let current = true;
+    api.listSnapshots().then(
+      l => {
+        if (current) setLineage(l);
+      },
+      () => {},
+    );
+    return () => {
+      current = false;
+    };
+  }, [api]);
+
+  const rollback = async (version: number): Promise<void> => {
+    if (!api) return;
+    setBusy(true);
+    try {
+      const result = await api.rollbackSnapshot(version);
+      setLineage(result.lineage);
+      setNote(`new forks use v${version} · existing workspaces keep their image`);
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+      setArmed(null);
+    }
+  };
+
+  // Newest first, like the mock's lineage reads top-down from the latest golden.
+  const versions = lineage ? [...lineage.versions].sort((a, b) => b.version - a.version) : [];
   return (
     <section className={styles.sectLast}>
       <div className={styles.sectHead}>
         <span className={styles.label}>snapshots</span>
       </div>
       <div className={styles.snaps}>
-        <div className={styles.snap} data-cur="true">
+        <div className={styles.snap} data-cur={w.phase === "running"}>
           <span className={styles.node} />
           <span>
             <span className={styles.l1}>live disk</span>
@@ -142,18 +178,69 @@ function Lineage({ w }: { w: WorkspaceView }) {
           </span>
           <span className={styles.when}>now</span>
         </div>
-        <div className={styles.snap}>
-          <span className={styles.node} />
-          <span>
-            <span className={styles.l1} data-k="golden">
-              {w.golden}
-              <em>golden</em>
+        {versions.length === 0 ? (
+          <div className={styles.snap}>
+            <span className={styles.node} />
+            <span>
+              <span className={styles.l1} data-k="golden">
+                {w.golden}
+                <em>golden</em>
+              </span>
+              <span className={styles.l2}>base image</span>
             </span>
-            <span className={styles.l2}>base image</span>
-          </span>
-          <span className={styles.when} />
-        </div>
+            <span className={styles.when} />
+          </div>
+        ) : (
+          versions.map(v => {
+            const head = v.version === lineage?.head;
+            return (
+              <div key={v.version} className={styles.snap} data-head={head}>
+                <span className={styles.node} />
+                <span>
+                  <span className={styles.l1} data-k={`v${v.version}`}>
+                    v{v.version}
+                    {head && <em>head</em>}
+                    {v.snapshotId === w.golden && <em>this fork</em>}
+                  </span>
+                  <span className={styles.l2}>built {v.createdAt.slice(0, 10)}</span>
+                </span>
+                <span className={styles.when}>
+                  {!head && armed !== v.version && (
+                    <button
+                      className={styles.keyMini}
+                      aria-label={`activate v${v.version}`}
+                      title="new forks use this version; existing workspaces keep theirs"
+                      disabled={busy}
+                      onClick={() => setArmed(v.version)}
+                    >
+                      activate
+                    </button>
+                  )}
+                </span>
+                {armed === v.version && (
+                  <div className={styles.rollRow}>
+                    <div className={styles.uRow}>
+                      head<b>v{lineage?.head} → v{v.version}</b>
+                    </div>
+                    <div className={styles.uRow}>
+                      running workspaces<b>unchanged</b>
+                    </div>
+                    <div className={styles.btns}>
+                      <button className={`${styles.keyMini} ${styles.keyConfirm}`} disabled={busy} onClick={() => void rollback(v.version)}>
+                        confirm rollback to v{v.version}
+                      </button>
+                      <button className={styles.keyMini} onClick={() => setArmed(null)}>
+                        cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
       </div>
+      <div className={styles.status}>{busy ? "rolling back…" : note}</div>
     </section>
   );
 }
