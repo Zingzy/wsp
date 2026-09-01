@@ -4,7 +4,7 @@
 // liveness is an app-level ping op; every (re)connect re-subscribes and
 // rescans the inbox because events pushed during a gap are gone for good.
 
-import { DaemonEvent } from "@wsp/protocol";
+import { DaemonEvent, type DaemonLinkStatus } from "@wsp/protocol";
 import WebSocket from "ws";
 
 export interface ReachOptions {
@@ -14,12 +14,10 @@ export interface ReachOptions {
   token: string;
   onEvent: (e: DaemonEvent) => void;
   /** Fires on every transition; reauth-needed and dead are terminal. */
-  onStatus?: (s: ReachStatus) => void;
+  onStatus?: (s: DaemonLinkStatus) => void;
   heartbeatMs?: number;
   backoffMs?: (attempt: number) => number;
 }
-
-export type ReachStatus = "connecting" | "live" | "reauth-needed" | "dead";
 
 export interface ReachStats {
   pingsSent: number;
@@ -31,7 +29,7 @@ export interface DaemonReach {
   /** Resolves after the first successful connect + subscribe + rescan; rejects on 4401. */
   readonly ready: Promise<void>;
   request(op: string, params?: Record<string, unknown>): Promise<Record<string, unknown>>;
-  status(): ReachStatus;
+  status(): DaemonLinkStatus;
   stats(): ReachStats;
   close(): void;
 }
@@ -69,8 +67,8 @@ export function connectDaemon(opts: ReachOptions): DaemonReach {
   const pending = new Map<number, Pending>();
   const stats: ReachStats = { pingsSent: 0, pongsReceived: 0, reconnects: 0 };
 
-  let status!: ReachStatus;
-  function setStatus(s: ReachStatus): void {
+  let status!: DaemonLinkStatus;
+  function setStatus(s: DaemonLinkStatus): void {
     if (s === status) return;
     status = s;
     opts.onStatus?.(s);

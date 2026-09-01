@@ -3,10 +3,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startDaemon, type DaemonHandle, type ListeningPort } from "@wsp/daemon";
-import type { DaemonEvent } from "@wsp/protocol";
+import type { DaemonEvent, DaemonLinkStatus } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
-import { connectDaemon, daemonWsUrl, type DaemonReach, type ReachStatus } from "../src/reach.js";
+import { connectDaemon, daemonWsUrl, type DaemonReach } from "../src/reach.js";
 import { startTcpProxy, type TcpProxy } from "./tcp-proxy.js";
 
 const TOKEN = "reach-token";
@@ -124,7 +124,7 @@ describe("connectDaemon", () => {
 
   it("reports connecting then live on first connect", async () => {
     daemon = await startTestDaemon();
-    const statuses: ReachStatus[] = [];
+    const statuses: DaemonLinkStatus[] = [];
     reach = connectDaemon({
       previewUrl: `ws://127.0.0.1:${daemon.port}`,
       token: TOKEN,
@@ -139,7 +139,7 @@ describe("connectDaemon", () => {
   it("cycles connecting → live across a cut socket, without duplicate emissions", async () => {
     daemon = await startTestDaemon();
     proxy = await startTcpProxy(daemon.port);
-    const statuses: ReachStatus[] = [];
+    const statuses: DaemonLinkStatus[] = [];
     reach = connectDaemon({
       previewUrl: `ws://127.0.0.1:${proxy.port}`,
       token: TOKEN,
@@ -156,7 +156,7 @@ describe("connectDaemon", () => {
 
   it("rejects ready and reports reauth-needed on a bad token", async () => {
     daemon = await startTestDaemon();
-    const statuses: ReachStatus[] = [];
+    const statuses: DaemonLinkStatus[] = [];
     reach = connectDaemon({
       previewUrl: `ws://127.0.0.1:${daemon.port}`,
       token: "wrong-token",
@@ -170,7 +170,7 @@ describe("connectDaemon", () => {
   it("surfaces a post-establishment 4401 as reauth-needed and stops retrying", async () => {
     daemon = await startTestDaemon();
     proxy = await startTcpProxy(daemon.port);
-    const statuses: ReachStatus[] = [];
+    const statuses: DaemonLinkStatus[] = [];
     reach = connectDaemon({
       previewUrl: `ws://127.0.0.1:${proxy.port}`,
       token: TOKEN,
@@ -205,7 +205,7 @@ describe("connectDaemon", () => {
 
   it("reports dead once the client closes", async () => {
     daemon = await startTestDaemon();
-    const statuses: ReachStatus[] = [];
+    const statuses: DaemonLinkStatus[] = [];
     reach = connectDaemon({
       previewUrl: `ws://127.0.0.1:${daemon.port}`,
       token: TOKEN,
