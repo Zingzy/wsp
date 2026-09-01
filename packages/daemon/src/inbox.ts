@@ -29,6 +29,7 @@ export class InboxWatcher extends EventEmitter {
   private timer: NodeJS.Timeout | null = null;
   private pending = new Map<string, Pending>();
   private seen = new Set<string>();
+  private sweeping = false;
 
   constructor(opts: InboxOptions) {
     super();
@@ -96,6 +97,16 @@ export class InboxWatcher extends EventEmitter {
   }
 
   private async sweep(): Promise<void> {
+    if (this.sweeping) return;
+    this.sweeping = true;
+    try {
+      await this.settle();
+    } finally {
+      this.sweeping = false;
+    }
+  }
+
+  private async settle(): Promise<void> {
     await this.trackUnseen();
     const now = Date.now();
     for (const [path, p] of this.pending) {
