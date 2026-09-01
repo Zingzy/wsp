@@ -32,6 +32,34 @@ export interface DaemonHandle {
   close(): Promise<void>;
 }
 
+/** CLI flags for the bin: --host matters for LOCAL runs (bind 127.0.0.1 so
+ * macOS/Windows firewalls stay quiet); in-guest keeps the 0.0.0.0 default
+ * because the previewUrl edge dials eth0. */
+export function parseDaemonArgs(argv: string[]): Pick<DaemonOptions, "host" | "port" | "tokenPath"> {
+  const out: { host?: string; port?: number; tokenPath?: string } = {};
+  for (let i = 0; i < argv.length; i++) {
+    const flag = argv[i]!;
+    const value = argv[i + 1];
+    if (flag === "--host") {
+      if (!value) throw new Error("--host needs a value (e.g. --host 127.0.0.1)");
+      out.host = value;
+      i++;
+    } else if (flag === "--port") {
+      const port = Number(value);
+      if (!value || !Number.isInteger(port)) throw new Error("--port needs an integer value");
+      out.port = port;
+      i++;
+    } else if (flag === "--token-path") {
+      if (!value) throw new Error("--token-path needs a file path");
+      out.tokenPath = value;
+      i++;
+    } else {
+      throw new Error(`unknown flag ${flag} (known: --host, --port, --token-path)`);
+    }
+  }
+  return out;
+}
+
 interface Request {
   id?: string | number;
   op?: string;
