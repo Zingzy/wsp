@@ -118,7 +118,7 @@ describe("connectDaemonLink", () => {
       backoffMs: () => 30,
     });
     await until(() => link!.status() === "live");
-    await new Promise(r => setTimeout(r, 250));
+    await until(() => link!.stats().pongsReceived >= 2);
     expect(link.stats().pongsReceived).toBeGreaterThanOrEqual(2);
 
     proxy.cutAll();
