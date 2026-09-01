@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { watch, type FSWatcher } from "node:fs";
+import { readdirSync, watch, type FSWatcher } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -28,6 +28,8 @@ export class InboxWatcher extends EventEmitter {
   private watcher: FSWatcher | null = null;
   private timer: NodeJS.Timeout | null = null;
   private pending = new Map<string, Pending>();
+  private seen = new Set<string>();
+  private sweeping = false;
 
   constructor(opts: InboxOptions) {
     super();
@@ -38,6 +40,8 @@ export class InboxWatcher extends EventEmitter {
 
   start(): void {
     if (this.watcher) return;
+    // Files present at start are rescan's to report; seeded before fs.watch so every later drop is unseen.
+    for (const name of readdirSync(this.dir)) this.seen.add(join(this.dir, name));
     this.watcher = watch(this.dir, (_event, filename) => {
       if (filename) this.track(join(this.dir, String(filename)));
     });
@@ -51,6 +55,7 @@ export class InboxWatcher extends EventEmitter {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.pending.clear();
+    this.seen.clear();
   }
 
   /** List the settled files currently in the inbox, for clients recovering missed events. */
@@ -74,10 +79,35 @@ export class InboxWatcher extends EventEmitter {
   }
 
   private track(path: string): void {
+    this.seen.add(path);
     if (!this.pending.has(path)) this.pending.set(path, { size: -1, stableSince: Date.now() });
   }
 
+  /** fs.watch can drop events (FSEvents startup window, inotify overflow), so the sweep is the guarantee. */
+  private async trackUnseen(): Promise<void> {
+    let names: string[];
+    try {
+      names = await readdir(this.dir);
+    } catch {
+      return;
+    }
+    const present = new Set(names.map(name => join(this.dir, name)));
+    for (const path of this.seen) if (!present.has(path)) this.seen.delete(path);
+    for (const path of present) if (!this.seen.has(path)) this.track(path);
+  }
+
   private async sweep(): Promise<void> {
+    if (this.sweeping) return;
+    this.sweeping = true;
+    try {
+      await this.settle();
+    } finally {
+      this.sweeping = false;
+    }
+  }
+
+  private async settle(): Promise<void> {
+    await this.trackUnseen();
     const now = Date.now();
     for (const [path, p] of this.pending) {
       let size: number;
