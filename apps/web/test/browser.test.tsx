@@ -173,6 +173,31 @@ describe("browser tabs inside the pane", () => {
     expect(screen.getByText("pid 7")).toBeDefined();
   });
 
+  it("port events that arrive while the tab is parked still update the directory", () => {
+    const { emit, view } = setup();
+    emit(open(WS, 5173));
+    fireEvent.click(screen.getByRole("button", { name: "open :5173" }));
+    view.unmount();
+    emit(close(WS, 5173));
+    emit(open(WS, 5000, 9));
+    render(<BrowserTab workspaceId={WS} />);
+    expect(screen.getByText(":5173 stopped listening")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "port directory" }));
+    expect(screen.queryByText(":5173")).toBeNull();
+    expect(screen.getByText("pid 9")).toBeDefined();
+  });
+
+  it("a deleted workspace forgets its tabs and directory", () => {
+    const { emit, view } = setup();
+    emit(open(WS, 5173));
+    fireEvent.click(screen.getByRole("button", { name: "open :5173" }));
+    view.unmount();
+    emit({ type: "workspace.deleted", workspaceId: WS });
+    render(<BrowserTab workspaceId={WS} />);
+    expect(screen.getByText("no open ports")).toBeDefined();
+    expect(screen.getAllByRole("tab")).toHaveLength(1);
+  });
+
   it("each workspace has its own tabs and directory", () => {
     const { emit, view } = setup();
     emit(open(WS, 5173));

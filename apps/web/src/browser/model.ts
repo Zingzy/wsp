@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Per-workspace browser state that outlives the BrowserTab component: the
 // port directory and the pane's own tabs. The wire carries no port snapshot,
-// so the directory is what this client has seen since it first subscribed,
+// so the directory is what this client has seen since the api was bound,
 // not the guest's full listening set.
 import type { ProtocolEvent } from "../protocol/client.js";
+import { useStore } from "../protocol/store.js";
 
 export interface PortEntry {
   readonly port: number;
@@ -114,3 +115,17 @@ export function getBrowser(workspaceId: string): WorkspaceBrowser {
 export function resetBrowsers(): void {
   registry.clear();
 }
+
+function route(e: ProtocolEvent): void {
+  if (e.type === "port.open" || e.type === "port.close") getBrowser(e.workspaceId).feedEvent(e);
+  else if (e.type === "workspace.deleted") registry.delete(e.workspaceId);
+}
+
+// Fed from the store's api rather than the mounted tab: a port that closes
+// while the user is on another lens must not still read as listening.
+let unbind: (() => void) | null = null;
+useStore.subscribe((s, prev) => {
+  if (s.api === prev.api) return;
+  unbind?.();
+  unbind = s.api ? s.api.subscribe(route) : null;
+});

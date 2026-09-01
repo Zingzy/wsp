@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Browser tab: the new-tab page is the workspace's live port directory, fed by
 // the daemon's port watcher through the runtime event stream. Opening a port
-// shows a local placeholder because the wire exposes no per-port URL yet; the
-// tabs and the directory live in ../browser/model.js so tab-away keeps them.
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
-import type { ProtocolEvent } from "../protocol/client.js";
-import { useProtocolEvents } from "../protocol/store.js";
+// shows a local placeholder because the wire exposes no per-port URL yet. The
+// tabs and the directory live in ../browser/model.js, which also consumes the
+// port events, so tab-away keeps both current.
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { getBrowser, type BrowserTabView, type PortEntry, type WorkspaceBrowser } from "../browser/model.js";
 import styles from "./BrowserTab.module.css";
 
@@ -13,14 +12,6 @@ const localUrl = (port: number) => `http://localhost:${port}`;
 
 export function BrowserTab({ workspaceId }: { workspaceId: string }) {
   const browser = getBrowser(workspaceId);
-  const onEvent = useCallback(
-    (e: ProtocolEvent) => {
-      if ((e.type === "port.open" || e.type === "port.close") && e.workspaceId === workspaceId) browser.feedEvent(e);
-    },
-    [browser, workspaceId],
-  );
-  useProtocolEvents(onEvent);
-
   const ports = useSyncExternalStore(fn => browser.onChange(fn), () => browser.ports());
   const tabs = useSyncExternalStore(fn => browser.onChange(fn), () => browser.tabs());
   const activeId = useSyncExternalStore(fn => browser.onChange(fn), () => browser.activeId());
