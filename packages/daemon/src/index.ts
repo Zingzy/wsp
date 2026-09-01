@@ -18,5 +18,15 @@ export {
   type PortOpenEvent,
   type PortCloseEvent,
 } from "./ports.js";
+export {
+  ModeWatcher,
+  linuxModeProbe,
+  parseSttyModes,
+  parseStatTpgid,
+  type ModeProbe,
+  type ModeProbeResult,
+  type ModeListener,
+  type PtyModeEvent,
+} from "./mode.js";
 export { ProcessManifest, type ManifestEntry, type ManifestOptions } from "./manifest.js";
 export { InboxWatcher, type InboxOptions, type InboxFileEvent } from "./inbox.js";

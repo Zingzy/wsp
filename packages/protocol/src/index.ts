@@ -322,6 +322,17 @@ export const DaemonEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("port.open"), port: z.number(), pid: z.number().optional() }),
   z.object({ type: z.literal("port.close"), port: z.number() }),
   z.object({ type: z.literal("inbox.file"), path: z.string(), bytes: z.number() }),
+  /** Broadcast on pty.attach (current state) and afterwards only on change.
+   * mode mirrors the slave termios ICANON bit ("line" when set), echo mirrors
+   * ECHO; foreground is the comm of the foreground process group leader, ""
+   * when unreadable. There is no request op: clients only listen. */
+  z.object({
+    type: z.literal("pty.mode"),
+    ptyId: z.string(),
+    mode: z.enum(["line", "raw"]),
+    echo: z.boolean(),
+    foreground: z.string(),
+  }),
 ]);
 export type DaemonEvent = z.infer<typeof DaemonEvent>;
 
