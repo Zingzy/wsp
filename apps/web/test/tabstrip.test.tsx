@@ -79,6 +79,20 @@ describe("tab strip default tab", () => {
     expect(activeTab()).toBe("browser");
   });
 
+  it("forgets a pick when its workspace is deleted, so a reused id starts on the default again", async () => {
+    const { api, emit } = fakeApi([view("ws_a")], []);
+    act(() => useStore.getState().bind(api));
+    await flush();
+    render(<TabStrip />);
+    fireEvent.click(screen.getByRole("tab", { name: "browser" }));
+    expect(activeTab()).toBe("browser");
+
+    emit({ type: "workspace.deleted", workspaceId: "ws_a" });
+    emit({ type: "workspace.created", workspace: view("ws_a") });
+    act(() => useStore.getState().select("ws_a"));
+    expect(activeTab()).toBe("terminal");
+  });
+
   it("each workspace gets its own default: chat where a session exists, terminal elsewhere", async () => {
     const { api } = fakeApi([view("ws_a"), view("ws_b")], [row("ws_b")]);
     act(() => useStore.getState().bind(api));

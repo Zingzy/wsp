@@ -2,8 +2,8 @@
 // The flat strip from the approved mock: chat, one tab per terminal pty,
 // browser, screen. Pty tabs are a view over the workspace's WorkspaceTerminals
 // (../terminal/link.js), which owns their order, titles and the active one.
-import { useState, useSyncExternalStore } from "react";
-import { useSelectedId, useSession } from "../protocol/store.js";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { useSelectedId, useSession, useWorkspaces } from "../protocol/store.js";
 import { getTerminals, onTerminals, type WorkspaceTerminals } from "../terminal/link.js";
 import { ChatTab } from "../tabs/ChatTab.js";
 import { TerminalLinkState, TerminalTab } from "../tabs/TerminalTab.js";
@@ -21,6 +21,13 @@ export function TabStrip() {
   // decision). Derived, not initial state, so it follows a session that starts
   // after mount; an explicit pick per workspace overrides it.
   const [picked, setPicked] = useState<Record<string, TabKind>>({});
+  const workspaces = useWorkspaces();
+  useEffect(() => {
+    setPicked(p => {
+      const kept = Object.fromEntries(Object.entries(p).filter(([id]) => workspaces.some(w => w.id === id)));
+      return Object.keys(kept).length === Object.keys(p).length ? p : kept;
+    });
+  }, [workspaces]);
   if (!workspaceId) return <div className={styles.none}>select a workspace</div>;
   const active: TabKind = picked[workspaceId] ?? (sessions.length > 0 ? "chat" : "terminal");
   const setActive = (t: TabKind) => setPicked(p => ({ ...p, [workspaceId]: t }));

@@ -230,6 +230,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const live = new Map<string, LiveWorkspace>();
   const sessions = new Map<string, { view: SessionView; handle: SessionHandle }>();
   const transcripts = new Map<string, SessionEvent[]>();
+  // done and end arrive back to back; puts are chained per workspace so the
+  // later snapshot always lands last, whatever order the store finishes in.
+  const transcriptFlushes = new Map<string, Promise<void>>();
   // Keyed by machine id: a resurrect or upgrade brings a fresh guest and file.
   const daemonTokens = new Map<string, { token: string | undefined; readAt: number }>();
   const daemonTokenOf = async (machine: Machine): Promise<string | undefined> => {
@@ -254,7 +257,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (events.length > TRANSCRIPT_CAP) events.splice(0, events.length - TRANSCRIPT_CAP);
     if (event.type !== "session.delta") {
       const snapshot: TranscriptRecord = { workspaceId: event.workspaceId, events: [...events] };
-      void store.put(TRANSCRIPTS, event.workspaceId, snapshot);
+      const queued = (transcriptFlushes.get(event.workspaceId) ?? Promise.resolve())
+        .then(() => store.put(TRANSCRIPTS, event.workspaceId, snapshot))
+        .catch(() => {});
+      transcriptFlushes.set(event.workspaceId, queued);
     }
     bus.emit(event);
   };

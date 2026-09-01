@@ -44,17 +44,6 @@ export function useCostSeries(id: string | null): CostPoint[] {
   return id ? (series[id] ?? []) : [];
 }
 
-/** The wire has workspaces.upgrade but makeApi does not expose it yet;
- * client.ts is outside ticket 25's ownership, so this duck-types until the
- * one-line client addition lands. */
-export interface UpgradeCapableApi extends Api {
-  upgrade(id: string, size: WorkspaceSize): Promise<WorkspaceView>;
-}
-
-function hasUpgrade(api: Api): api is UpgradeCapableApi {
-  return typeof (api as Partial<UpgradeCapableApi>).upgrade === "function";
-}
-
 export type UpgradePhase =
   | { kind: "idle" }
   | { kind: "resizing"; size: WorkspaceSize }
@@ -80,8 +69,8 @@ export function useUpgrade(id: string): Upgrade {
 
   const run = useCallback(
     (size: WorkspaceSize) => {
-      if (!api || !hasUpgrade(api)) {
-        setPhase({ kind: "failed", message: "upgrade is not wired into the web client yet" });
+      if (!api) {
+        setPhase({ kind: "failed", message: "not connected to the runtime" });
         return;
       }
       setPhase({ kind: "resizing", size });
@@ -98,10 +87,9 @@ export function useUpgrade(id: string): Upgrade {
 }
 
 /** Doubling ladder above the current size. The 16 vCPU cap is a placeholder
- * guess, not a provider fact: no size catalog exists on the wire and
- * capabilities.resize is not exposed to the client (SolariBackend ships
- * resize: false, so today's backend rejects every upgrade anyway). Pricing is
- * linear per vCPU + per GB, so scaling both by k scales the rate by k. */
+ * guess, not a provider fact: no size catalog exists on the wire, only the
+ * capabilities.resize flag the panel gates on. Pricing is linear per vCPU +
+ * per GB, so scaling both by k scales the rate by k. */
 export function upgradeOptions(current: WorkspaceSize): WorkspaceSize[] {
   const out: WorkspaceSize[] = [];
   for (let k = 2; current.cpu * k <= 16; k *= 2) out.push({ cpu: current.cpu * k, memMb: current.memMb * k });

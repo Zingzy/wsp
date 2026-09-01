@@ -156,6 +156,28 @@ describe("runtime session history", () => {
     expect(await store.list("transcripts")).toEqual([]);
   });
 
+  it("persists turn boundaries in order even when an earlier put finishes last", async () => {
+    const inner = memoryStore();
+    let puts = 0;
+    const store = {
+      ...inner,
+      put: async (collection: string, id: string, value: unknown) => {
+        // the first transcript write is slow, the ones behind it are instant
+        const delay = collection === "transcripts" && puts++ === 0 ? 40 : 0;
+        await new Promise(r => setTimeout(r, delay));
+        await inner.put(collection, id, value);
+      },
+    };
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: scripted("x") } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
+    // The chain drains on its own clock; poll for it instead of guessing a sleep.
+    const read = async () => ((await inner.get("transcripts", ws.id)) as { events: { type: string }[] } | undefined)?.events ?? [];
+    const deadline = Date.now() + 2000;
+    while ((await read()).length < 4 && Date.now() < deadline) await new Promise(r => setTimeout(r, 10));
+    expect((await read()).map(e => e.type)).toEqual(["session.start", "session.delta", "session.done", "session.end"]);
+  });
+
   it("caps the persisted transcript so a chatty workspace cannot grow the store without bound", async () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: scripted("x") } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
