@@ -33,7 +33,9 @@ options:
                      when the current directory has a .env)
 
 keys are read from the environment, then ./.env, then ~/.wsp/.env (WSP_HOME
-overrides ~/.wsp). Missing keys are prompted for and can be saved to that file.
+overrides ~/.wsp). The prompt runs only when no Solari key is found; it asks
+for the optional Anthropic key at the same time and can save both to that file.
+With a Solari key present, a missing Anthropic key is only noted at start.
 `;
 
 export interface CliIO {
