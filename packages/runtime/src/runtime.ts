@@ -111,9 +111,17 @@ export interface RuntimeOptions {
   backend: MachineBackend;
   store: Store;
   adapters: Record<string, HarnessAdapterFactory>;
-  /** Guest paths carried across an upgrade (vault export/import). */
+  /**
+   * Explicit guest paths carried across an upgrade. Default: everything under
+   * /root except golden-provided dirs (VAULT_SKIP), enumerated at export time.
+   */
   vaultPaths?: string[];
 }
+
+/** Dirs the golden image already provides on every fresh fork; re-vaulting
+ * them is dead weight, and extracting them with --recursive-unlink would
+ * delete the fork's own copies first (the claude install lives in .local). */
+const VAULT_SKIP = new Set([".local", ".cache", ".npm"]);
 
 export interface GoldenBuildRequest extends Omit<BuildGoldenOptions, "backend" | "manifest"> {
   /** Store key; several goldens can coexist. */
@@ -184,8 +192,20 @@ function deadMachine(id: string): Machine {
 
 export function createRuntime(opts: RuntimeOptions): Runtime {
   const { backend, store, adapters } = opts;
-  const vaultPaths = opts.vaultPaths ?? ["/root"];
   const bus = eventBus();
+
+  const vaultPathsOf = async (m: Machine): Promise<string[]> => {
+    if (opts.vaultPaths) return opts.vaultPaths;
+    // Breadcrumb doubles as the guarantee that the export list is never empty.
+    await m.exec("date -u +%FT%TZ >> /root/.wsp-upgraded");
+    const ls = await m.exec("ls -A /root");
+    if (ls.exitCode !== 0) throw new Error(`vault enumeration failed: ${ls.stderr.slice(-200)}`);
+    return ls.stdout
+      .split("\n")
+      .map(s => s.trim())
+      .filter(s => s.length > 0 && !VAULT_SKIP.has(s))
+      .map(s => `/root/${s}`);
+  };
   const live = new Map<string, LiveWorkspace>();
   const sessions = new Map<string, { view: SessionView; handle: SessionHandle }>();
 
@@ -225,7 +245,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           entry.machine = m;
           return m;
         },
-        vaultExport: m => exportPaths(m, vaultPaths),
+        vaultExport: async m => exportPaths(m, await vaultPathsOf(m)),
         vaultImport: (m, payload) => importInto(m, payload, "/"),
       },
       { phase: record.phase, firstLife: record.firstLife },

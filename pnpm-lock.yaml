@@ -21,7 +21,18 @@ importers:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@22.20.1)
 
-  apps/wspx: {}
+  apps/wspx:
+    dependencies:
+      '@wsp/adapter-claude':
+        specifier: workspace:*
+        version: link:../../packages/adapter-claude
+      '@wsp/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
 
   packages/adapter-claude:
     devDependencies:
@@ -45,7 +56,14 @@ importers:
         specifier: ^8.18.1
         version: 8.18.1
 
-  packages/engine: {}
+  packages/engine:
+    devDependencies:
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
+      ws:
+        specifier: ^8.21.3
+        version: 8.21.3
 
   packages/protocol:
     dependencies:

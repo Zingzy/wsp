@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
 import type { EventUnion } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
@@ -113,5 +113,42 @@ describe("runtime", () => {
     await rt.workspaces.delete(ws.id);
     expect(backend.machines[0]!.killed).toBe(true);
     expect(await rt.workspaces.list()).toEqual([]);
+  });
+});
+
+describe("runtime upgrade vault", () => {
+  it("vaults user files (skipping golden-provided dirs) onto the fresh fork", async () => {
+    const backend = stubBackend();
+    const tarCmds: string[] = [];
+    const untarCmds: string[] = [];
+    backend.execImpl = (m, cmd) => {
+      if (cmd.includes("ls -A /root")) {
+        return { exitCode: 0, stdout: "notes.md\n.local\n.claude-cfg\n.npm\n.wsp-upgraded\n", stderr: "" };
+      }
+      if (cmd.includes("tar czf")) tarCmds.push(`${m.id}:${cmd}`);
+      if (cmd.includes("tar xzf")) untarCmds.push(`${m.id}:${cmd}`);
+      return { exitCode: 0, stdout: "", stderr: "" };
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: { method?: string }) =>
+        init?.method === "PUT" ? new Response(null, { status: 200 }) : new Response(Buffer.from("tarbytes")),
+      ),
+    );
+    try {
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+      const upgraded = await rt.workspaces.upgrade(ws.id, { cpu: 4 });
+      expect(upgraded.machineId).toBe("m2");
+      expect(backend.machines[1]!.spec.cpu).toBe(4);
+      const tar = tarCmds.find(c => c.startsWith("m1:"));
+      expect(tar).toContain("'root/notes.md'");
+      expect(tar).toContain("'root/.claude-cfg'");
+      expect(tar).not.toContain(".local");
+      expect(tar).not.toContain(".npm");
+      expect(untarCmds.some(c => c.startsWith("m2:"))).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
