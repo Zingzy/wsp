@@ -178,6 +178,7 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("manifest.restartScript") }),
   z.object({ id: reqId, op: z.literal("inbox.watch") }),
   z.object({ id: reqId, op: z.literal("inbox.rescan") }),
+  z.object({ id: reqId, op: z.literal("ping") }),
 ]);
 export type DaemonRequest = z.infer<typeof DaemonRequest>;
 

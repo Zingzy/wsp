@@ -1,0 +1,142 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { startDaemon, type DaemonHandle, type ListeningPort } from "@wsp/daemon";
+import type { DaemonEvent } from "@wsp/protocol";
+import { afterEach, describe, expect, it } from "vitest";
+import { connectDaemon, daemonWsUrl, type DaemonReach } from "../src/reach.js";
+import { startTcpProxy, type TcpProxy } from "./tcp-proxy.js";
+
+const TOKEN = "reach-token";
+
+async function until(cond: () => boolean, ms = 5000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!cond()) {
+    if (Date.now() > deadline) throw new Error("condition not met in time");
+    await new Promise(r => setTimeout(r, 25));
+  }
+}
+
+let daemon: DaemonHandle | undefined;
+let proxy: TcpProxy | undefined;
+let reach: DaemonReach | undefined;
+let inboxDir: string | undefined;
+let snapshot: ListeningPort[] = [];
+
+// Both watchers must be faked: darwin has no /proc/net/tcp and no /root/inbox.
+async function startTestDaemon(): Promise<DaemonHandle> {
+  inboxDir = mkdtempSync(join(tmpdir(), "wsp-reach-inbox-"));
+  snapshot = [];
+  return startDaemon({
+    port: 0,
+    token: TOKEN,
+    inboxDir,
+    inboxQuietMs: 100,
+    inboxPollMs: 25,
+    portsSource: async () => snapshot,
+    portsIntervalMs: 25,
+  });
+}
+
+afterEach(async () => {
+  reach?.close();
+  reach = undefined;
+  await proxy?.close();
+  proxy = undefined;
+  await daemon?.close();
+  daemon = undefined;
+  if (inboxDir) rmSync(inboxDir, { recursive: true, force: true });
+  inboxDir = undefined;
+});
+
+describe("daemonWsUrl", () => {
+  it("turns a previewUrl into a wss url carrying both tokens", () => {
+    const url = daemonWsUrl("https://abc123-7070.preview.getsolari.com/?pt_token=edge", "ours");
+    expect(url).toBe("wss://abc123-7070.preview.getsolari.com/?pt_token=edge&token=ours");
+  });
+
+  it("keeps ws urls as-is apart from the token", () => {
+    expect(daemonWsUrl("ws://127.0.0.1:7070", "t")).toBe("ws://127.0.0.1:7070/?token=t");
+  });
+});
+
+describe("connectDaemon", () => {
+  it("heartbeats at the configured interval and gets acks back", async () => {
+    daemon = await startTestDaemon();
+    reach = connectDaemon({
+      previewUrl: `ws://127.0.0.1:${daemon.port}`,
+      token: TOKEN,
+      onEvent: () => {},
+      heartbeatMs: 100,
+    });
+    await reach.ready;
+    await until(() => reach!.stats().pongsReceived >= 3);
+    expect(reach.stats().pingsSent).toBeGreaterThanOrEqual(3);
+  });
+
+  it("survives a cut socket: reconnects, re-subscribes, and rescans the inbox", async () => {
+    daemon = await startTestDaemon();
+    const f1 = join(inboxDir!, "before.bin");
+    writeFileSync(f1, "1".repeat(11));
+    proxy = await startTcpProxy(daemon.port);
+
+    const events: DaemonEvent[] = [];
+    const seen = (path: string) => events.filter(e => e.type === "inbox.file" && e.path === path).length;
+    reach = connectDaemon({
+      previewUrl: `ws://127.0.0.1:${proxy.port}`,
+      token: TOKEN,
+      onEvent: e => events.push(e),
+      heartbeatMs: 100,
+      backoffMs: () => 300, // long enough for a file to settle inside the gap
+    });
+    await reach.ready;
+
+    // initial rescan announced the pre-existing file
+    await until(() => seen(f1) >= 1);
+
+    // the sweep: connection dies, and a file lands AND settles while nobody is
+    // subscribed, so its push event goes to no one
+    proxy.cutAll();
+    const f2 = join(inboxDir!, "during-gap.bin");
+    writeFileSync(f2, "2".repeat(22));
+
+    // only a post-reconnect rescan can re-announce the long-settled f1
+    await until(() => seen(f1) >= 2);
+    // and the file lost in the gap was recovered
+    await until(() => seen(f2) >= 1);
+    expect(reach.stats().reconnects).toBeGreaterThanOrEqual(1);
+
+    // ports.watch was re-subscribed on the new connection
+    snapshot = [{ port: 9999, pid: 42, inode: 7, uid: 0 }];
+    await until(() => events.some(e => e.type === "port.open" && e.port === 9999));
+
+    // inbox.watch was re-subscribed too: a post-reconnect file still arrives
+    const f3 = join(inboxDir!, "after.bin");
+    writeFileSync(f3, "3".repeat(33));
+    await until(() => events.some(e => e.type === "inbox.file" && e.path === f3));
+
+    // heartbeats keep flowing on the new socket
+    const pongs = reach.stats().pongsReceived;
+    await until(() => reach!.stats().pongsReceived > pongs);
+  });
+
+  it("keeps retrying while the daemon is unreachable and connects once it is back", async () => {
+    daemon = await startTestDaemon();
+    const dead = await startTcpProxy(daemon.port);
+    const port = dead.port;
+    await dead.close(); // nothing listens on `port` now
+
+    reach = connectDaemon({
+      previewUrl: `ws://127.0.0.1:${port}`,
+      token: TOKEN,
+      onEvent: () => {},
+      heartbeatMs: 100,
+      backoffMs: () => 25,
+    });
+    await new Promise(r => setTimeout(r, 150)); // let a few dials fail
+    proxy = await startTcpProxy(daemon.port, port); // daemon reachable again on the same port
+    await reach.ready;
+    await until(() => reach!.stats().pongsReceived >= 1);
+  });
+});

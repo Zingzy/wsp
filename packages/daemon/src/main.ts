@@ -232,6 +232,12 @@ async function handle(ws: WebSocket, state: ConnState, ctx: Ctx, msg: Request): 
       reply(ws, msg.id, { count: files.length });
       return;
     }
+    case "ping": {
+      // App-level heartbeat: the previewUrl edge sweeps idle connections and
+      // browser clients cannot send protocol pings.
+      reply(ws, msg.id, {});
+      return;
+    }
     default:
       fail(ws, msg.id, `unknown op: ${String(msg.op)}`);
   }
