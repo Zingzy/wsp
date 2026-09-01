@@ -77,6 +77,14 @@ describe("makeApi wrappers", () => {
     expect(lastSent()).toMatchObject({ op: "sessions.list", workspaceId: "ws_1" });
   });
 
+  it("daemonReach sends workspaces.daemonReach and unwraps the reach view", async () => {
+    const { api, lastSent } = await connect();
+    const reach = { url: "https://m1-7070.preview.example/?pt_token=e", expiresAt: 1, daemonToken: "d" };
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, reach });
+    expect(await api.daemonReach("ws_1")).toEqual(reach);
+    expect(lastSent()).toMatchObject({ op: "workspaces.daemonReach", workspaceId: "ws_1" });
+  });
+
   it("a rejected op surfaces the runtime's error message", async () => {
     const { api } = await connect();
     ScriptedSocket.reply = f => ({ id: f["id"], ok: false, error: "workspace is napping" });

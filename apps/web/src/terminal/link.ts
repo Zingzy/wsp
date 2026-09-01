@@ -249,8 +249,8 @@ export class WorkspaceTerminals {
 }
 
 // --- registry: workspaceId → WorkspaceTerminals ---------------------------------
-// The app's wiring (or a test) provides a connection per workspace; the tab
-// only ever looks one up. Production wiring lands with the runtime pty plumbing.
+// wiring.ts (or a test) provides a connection per workspace; the tab and the
+// strip only ever look one up.
 
 const registry = new Map<string, WorkspaceTerminals>();
 const registryFns = new Set<() => void>();

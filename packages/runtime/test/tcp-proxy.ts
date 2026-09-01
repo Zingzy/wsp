@@ -5,17 +5,25 @@ export interface TcpProxy {
   port: number;
   /** Destroy every live connection without stopping the listener, like an idle sweep. */
   cutAll(): void;
+  /** Keep every socket open but forward nothing: a half-dead link only heartbeats can detect. */
+  stall(): void;
+  resume(): void;
   close(): Promise<void>;
 }
 
 export async function startTcpProxy(targetPort: number, listenPort = 0): Promise<TcpProxy> {
   const pairs = new Set<{ a: Socket; b: Socket }>();
+  let stalled = false;
   const server = createServer(a => {
     const b = connect(targetPort, "127.0.0.1");
     const pair = { a, b };
     pairs.add(pair);
-    a.pipe(b);
-    b.pipe(a);
+    a.on("data", chunk => {
+      if (!stalled) b.write(chunk);
+    });
+    b.on("data", chunk => {
+      if (!stalled) a.write(chunk);
+    });
     const drop = () => {
       pairs.delete(pair);
       a.destroy();
@@ -34,6 +42,12 @@ export async function startTcpProxy(targetPort: number, listenPort = 0): Promise
   const port = typeof addr === "object" && addr !== null ? addr.port : 0;
   return {
     port,
+    stall() {
+      stalled = true;
+    },
+    resume() {
+      stalled = false;
+    },
     cutAll() {
       for (const { a, b } of pairs) {
         a.destroy();

@@ -14,7 +14,7 @@ import {
   type MachineBackend,
   type MachineSpec,
 } from "@wsp/engine";
-import type { EventUnion, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
+import type { DaemonReachView, EventUnion, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
 import { createStatusTracker, type StatusApi, type StatusWatchOptions } from "./status.js";
 import type { Store } from "./store.js";
 
@@ -144,6 +144,8 @@ export interface Runtime {
     delete(id: string): Promise<void>;
     /** One-shot command on the workspace's machine (plumbing for clients; sessions are the main road). */
     exec(id: string, cmd: string, opts?: { timeoutMs?: number }): Promise<ExecResult>;
+    /** How a browser dials this workspace's daemon; throws on backends without preview URLs. */
+    daemonReach(id: string): Promise<DaemonReachView>;
   };
   readonly sessions: {
     start(
@@ -166,6 +168,10 @@ export interface Runtime {
 const WORKSPACES = "workspaces";
 const GOLDENS = "goldens";
 const TRANSCRIPTS = "transcripts";
+/** Mirrors @wsp/daemon's DEFAULT_TOKEN_PATH; the runtime cannot import the daemon package (it only runs inside guests). */
+const DAEMON_TOKEN_PATH = "/root/.wsp-daemon-token";
+/** A guest with no token file is asked again after this long (a daemon may be deployed later). */
+const DAEMON_TOKEN_MISS_TTL_MS = 60_000;
 /** Events kept per workspace; the oldest fall off so one chatty workspace cannot grow the store forever. */
 const TRANSCRIPT_CAP = 5000;
 
@@ -224,6 +230,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const live = new Map<string, LiveWorkspace>();
   const sessions = new Map<string, { view: SessionView; handle: SessionHandle }>();
   const transcripts = new Map<string, SessionEvent[]>();
+  // Keyed by machine id: a resurrect or upgrade brings a fresh guest and file.
+  const daemonTokens = new Map<string, { token: string | undefined; readAt: number }>();
+  const daemonTokenOf = async (machine: Machine): Promise<string | undefined> => {
+    const cached = daemonTokens.get(machine.id);
+    if (cached && (cached.token !== undefined || Date.now() - cached.readAt < DAEMON_TOKEN_MISS_TTL_MS)) return cached.token;
+    const res = await machine.exec(`cat ${DAEMON_TOKEN_PATH}`);
+    const token = res.exitCode === 0 && res.stdout.trim() !== "" ? res.stdout.trim() : undefined;
+    daemonTokens.set(machine.id, { token, readAt: Date.now() });
+    return token;
+  };
 
   // Deltas are only appended in memory; the store sees the transcript at turn
   // boundaries, so a crash mid-turn loses that turn's partial output and
@@ -399,6 +415,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async exec(id, cmd, o) {
       const entry = await entryOf(id);
       return entry.machine.exec(cmd, o);
+    },
+
+    async daemonReach(id) {
+      const entry = await entryOf(id);
+      const reach = await entry.ws.daemonReach();
+      const daemonToken = await daemonTokenOf(entry.machine);
+      return { url: reach.url, expiresAt: reach.expiresAt, ...(daemonToken !== undefined ? { daemonToken } : {}) };
     },
   };
 

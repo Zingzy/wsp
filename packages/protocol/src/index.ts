@@ -39,6 +39,16 @@ export const ReachStatus = z.object({
 });
 export type ReachStatus = z.infer<typeof ReachStatus>;
 
+/** What a browser needs to dial a workspace's daemon: the minted preview route
+ * (edge token embedded, hourly expiry) and the daemon's own query token as read
+ * off the guest. No daemonToken means no daemon token file on that machine. */
+export const DaemonReachView = z.object({
+  url: z.string(),
+  expiresAt: z.number(),
+  daemonToken: z.string().optional(),
+});
+export type DaemonReachView = z.infer<typeof DaemonReachView>;
+
 export const WorkspaceSize = z.object({ cpu: z.number(), memMb: z.number() });
 export type WorkspaceSize = z.infer<typeof WorkspaceSize>;
 
@@ -293,6 +303,8 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     memMb: z.number().optional(),
   }),
   z.object({ id: reqId, op: z.literal("workspaces.delete"), workspaceId: z.string() }),
+  /** Replies with a DaemonReachView; the runtime remints the edge token when it nears expiry. */
+  z.object({ id: reqId, op: z.literal("workspaces.daemonReach"), workspaceId: z.string() }),
   z.object({
     id: reqId,
     op: z.literal("sessions.start"),

@@ -35,6 +35,7 @@ function fakeApi(workspaces: WorkspaceView[]): Api & { nap: ReturnType<typeof vi
     upgrade: vi.fn(async (id: string) => view(id, "?", "running")),
     capabilities: vi.fn(async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true })),
     startSession: vi.fn(async (o: { workspaceId: string }) => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" as const })),
+    daemonReach: vi.fn(async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 })),
     sessionHistory: vi.fn(async () => []),
     listSessions: vi.fn(async () => []),
     subscribe: vi.fn(() => () => {}),

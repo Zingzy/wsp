@@ -168,6 +168,58 @@ describe("runtime session history", () => {
   });
 });
 
+describe("runtime daemon reach", () => {
+  const TOKEN_CMD = "cat /root/.wsp-daemon-token";
+
+  it("hands back the preview route plus the daemon token read once off the guest", async () => {
+    const backend = stubBackend();
+    let minted = 0;
+    backend.execImpl = (_m, cmd) =>
+      cmd === TOKEN_CMD ? { exitCode: 0, stdout: "guest-token\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" };
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    backend.machines[0]!.previewUrl = async port => {
+      minted++;
+      return { url: `https://m1-${port}.preview.example/?pt_token=edge`, token: "edge", expiresAt: Date.now() + 3_600_000 };
+    };
+
+    const reach = await rt.workspaces.daemonReach(ws.id);
+    expect(reach).toEqual({ url: "https://m1-7070.preview.example/?pt_token=edge", expiresAt: expect.any(Number), daemonToken: "guest-token" });
+    await rt.workspaces.daemonReach(ws.id);
+    expect(minted).toBe(1);
+    expect(backend.machines[0]!.execLog.filter(c => c === TOKEN_CMD)).toHaveLength(1);
+  });
+
+  it("omits the daemon token when the guest has none and refuses backends without preview urls", async () => {
+    const backend = stubBackend();
+    backend.execImpl = (_m, cmd) => (cmd === TOKEN_CMD ? { exitCode: 1, stdout: "", stderr: "No such file" } : { exitCode: 0, stdout: "", stderr: "" });
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await expect(rt.workspaces.daemonReach(ws.id)).rejects.toThrow("without preview URLs");
+
+    backend.machines[0]!.previewUrl = async () => ({ url: "https://m1-7070.preview.example/?pt_token=e", token: "e", expiresAt: Date.now() + 3_600_000 });
+    const reach = await rt.workspaces.daemonReach(ws.id);
+    expect(reach.daemonToken).toBeUndefined();
+    expect("daemonToken" in reach).toBe(false);
+  });
+
+  it("re-reads the token after a resurrect replaces the machine", async () => {
+    const backend = stubBackend();
+    backend.execImpl = (m, cmd) => (cmd === TOKEN_CMD ? { exitCode: 0, stdout: `tok-${m.id}`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const mint = async (port: number) => ({ url: `https://x-${port}.preview.example/?pt_token=e`, token: "e", expiresAt: Date.now() + 3_600_000 });
+    backend.machines[0]!.previewUrl = mint;
+    expect((await rt.workspaces.daemonReach(ws.id)).daemonToken).toBe("tok-m1");
+
+    await rt.workspaces.nap(ws.id);
+    backend.machines[0]!.killed = true;
+    await rt.workspaces.wake(ws.id);
+    backend.machines[1]!.previewUrl = mint;
+    expect((await rt.workspaces.daemonReach(ws.id)).daemonToken).toBe("tok-m2");
+  });
+});
+
 describe("runtime upgrade vault", () => {
   it("vaults user files (skipping golden-provided dirs) onto the fresh fork", async () => {
     const backend = stubBackend();

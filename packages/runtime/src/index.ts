@@ -9,6 +9,7 @@ export * from "./reach.js";
 export { SolariBackend, type SolariBackendOptions, type GoldenManifest, type Machine } from "@wsp/engine";
 // The protocol types the runtime API surface speaks.
 export type {
+  DaemonReachView,
   EventUnion,
   MachineState,
   ReachState,

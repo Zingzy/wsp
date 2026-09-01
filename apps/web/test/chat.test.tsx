@@ -43,6 +43,7 @@ function fixtureApi(workspaces: WorkspaceView[], history: Record<string, Session
   const listeners = new Set<(e: ProtocolEvent) => void>();
   const started: Array<{ workspaceId: string; prompt: string; resume?: string }> = [];
   const api: Api = {
+    daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
     sessionHistory: async id => history[id] ?? [],
     listWorkspaces: async () => workspaces,
     getWorkspace: async id => workspaces.find(w => w.id === id)!,
