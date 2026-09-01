@@ -5,16 +5,20 @@ import {
   buildGolden,
   exportPaths,
   importInto,
+  prepareBuilder,
   reap,
+  sealGolden,
+  type Builder,
   type BuildGoldenOptions,
   type ExecResult,
   type GoldenManifest,
   type GoldenVersion,
   type Machine,
   type MachineBackend,
+  type MachineKind,
   type MachineSpec,
 } from "@wsp/engine";
-import type { EventUnion, SessionView, WorkspaceView } from "@wsp/protocol";
+import type { DaemonReachView, EventUnion, GoldenBuilderView, GoldenStage, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
 import { createStatusTracker, type StatusApi, type StatusWatchOptions } from "./status.js";
 import type { Store } from "./store.js";
 
@@ -108,10 +112,26 @@ export interface SessionHandle {
   interrupt(): Promise<void>;
 }
 
+/** What every golden built by this runtime gets; the host wires it (the daemon
+ * bundle and the harness install script live there, not in the runtime). */
+export interface GoldenRecipe {
+  setup: string;
+  /** Must exit 0 on a fork of the snapshot before a version is sealed. */
+  smoke: string;
+  baseTemplate?: string;
+  cpu?: number;
+  memMb?: number;
+  envs?: Record<string, string>;
+  labels?: Record<string, string>;
+  deployDaemon?: (machine: Machine) => Promise<void>;
+}
+
 export interface RuntimeOptions {
   backend: MachineBackend;
   store: Store;
   adapters: Record<string, HarnessAdapterFactory>;
+  /** Required for golden.prepare / golden.seal; the scripted golden.build carries its own. */
+  goldenRecipe?: GoldenRecipe;
   /**
    * Explicit guest paths carried across an upgrade. Default: everything under
    * /root except golden-provided dirs (VAULT_SKIP), enumerated at export time.
@@ -144,6 +164,8 @@ export interface Runtime {
     delete(id: string): Promise<void>;
     /** One-shot command on the workspace's machine (plumbing for clients; sessions are the main road). */
     exec(id: string, cmd: string, opts?: { timeoutMs?: number }): Promise<ExecResult>;
+    /** How a browser dials this workspace's daemon; throws on backends without preview URLs. */
+    daemonReach(id: string): Promise<DaemonReachView>;
   };
   readonly sessions: {
     start(
@@ -151,10 +173,17 @@ export interface Runtime {
       opts: { prompt: string; harness?: string; resume?: string; cwd?: string },
     ): Promise<SessionHandle>;
     list(workspaceId?: string): SessionView[];
+    /** The workspace's persisted session events, oldest first; a chat replays these on mount. */
+    history(workspaceId: string): Promise<SessionEvent[]>;
   };
   readonly golden: {
     build(opts: GoldenBuildRequest): Promise<{ manifest: GoldenManifest; version: GoldenVersion }>;
     get(name?: string): Promise<GoldenManifest | undefined>;
+    /** Boots a first-life builder from the recipe; a person sets it up on its live screen, then seals it. */
+    prepare(opts?: { name?: string; kind?: MachineKind }): Promise<GoldenBuilderView>;
+    /** Snapshot, smoke-fork, append a version. The builder is consumed whether this succeeds, fails, or is refused. */
+    seal(builderId: string): Promise<{ manifest: GoldenManifest; version: GoldenVersion }>;
+    builders(): Promise<GoldenBuilderView[]>;
   };
   /** Enriched status (machine state, daemon reach, size, rate) + cost ticker. */
   readonly status: StatusApi;
@@ -163,6 +192,39 @@ export interface Runtime {
 
 const WORKSPACES = "workspaces";
 const GOLDENS = "goldens";
+const TRANSCRIPTS = "transcripts";
+/** Mirrors @wsp/daemon's DEFAULT_TOKEN_PATH; the runtime cannot import the daemon package (it only runs inside guests). */
+const DAEMON_TOKEN_PATH = "/root/.wsp-daemon-token";
+/** A guest with no token file is asked again after this long (a daemon may be deployed later). */
+const DAEMON_TOKEN_MISS_TTL_MS = 60_000;
+/** Events kept per workspace; the oldest fall off so one chatty workspace cannot grow the store forever. */
+const TRANSCRIPT_CAP = 5000;
+
+interface TranscriptRecord {
+  workspaceId: string;
+  events: SessionEvent[];
+}
+
+/** Builders live apart from workspaces: never in the rail, and a record left
+ * by a crashed wizard is exactly what reap() sweeps. */
+const BUILDERS = "builders";
+
+interface BuilderRecord {
+  id: string;
+  name: string;
+  kind: MachineKind;
+  baseTemplate: string;
+  setupSha: string;
+  createdAt: string;
+  streamUrl?: string;
+}
+
+interface LiveBuilder {
+  record: BuilderRecord;
+  builder: Builder;
+  /** Hydrated from the store by a later process, so its first life cannot be vouched for. */
+  stale: boolean;
+}
 
 /** Stand-in for a machine that vanished while we were away; resume() failing with
  * kind "missing" is exactly what triggers Workspace's resurrect path. */
@@ -212,7 +274,43 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       .map(s => `/root/${s}`);
   };
   const live = new Map<string, LiveWorkspace>();
+  const builders = new Map<string, LiveBuilder>();
   const sessions = new Map<string, { view: SessionView; handle: SessionHandle }>();
+  const transcripts = new Map<string, SessionEvent[]>();
+  // done and end arrive back to back; puts are chained per workspace so the
+  // later snapshot always lands last, whatever order the store finishes in.
+  const transcriptFlushes = new Map<string, Promise<void>>();
+  // Keyed by machine id: a resurrect or upgrade brings a fresh guest and file.
+  const daemonTokens = new Map<string, { token: string | undefined; readAt: number }>();
+  const daemonTokenOf = async (machine: Machine): Promise<string | undefined> => {
+    const cached = daemonTokens.get(machine.id);
+    if (cached && (cached.token !== undefined || Date.now() - cached.readAt < DAEMON_TOKEN_MISS_TTL_MS)) return cached.token;
+    const res = await machine.exec(`cat ${DAEMON_TOKEN_PATH}`);
+    const token = res.exitCode === 0 && res.stdout.trim() !== "" ? res.stdout.trim() : undefined;
+    daemonTokens.set(machine.id, { token, readAt: Date.now() });
+    return token;
+  };
+
+  // Deltas are only appended in memory; the store sees the transcript at turn
+  // boundaries, so a crash mid-turn loses that turn's partial output and
+  // nothing else.
+  const record = (event: SessionEvent): void => {
+    let events = transcripts.get(event.workspaceId);
+    if (!events) {
+      events = [];
+      transcripts.set(event.workspaceId, events);
+    }
+    events.push(event);
+    if (events.length > TRANSCRIPT_CAP) events.splice(0, events.length - TRANSCRIPT_CAP);
+    if (event.type !== "session.delta") {
+      const snapshot: TranscriptRecord = { workspaceId: event.workspaceId, events: [...events] };
+      const queued = (transcriptFlushes.get(event.workspaceId) ?? Promise.resolve())
+        .then(() => store.put(TRANSCRIPTS, event.workspaceId, snapshot))
+        .catch(() => {});
+      transcriptFlushes.set(event.workspaceId, queued);
+    }
+    bus.emit(event);
+  };
 
   const view = (r: WorkspaceRecord): WorkspaceView => ({
     id: r.id,
@@ -269,6 +367,26 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           throw e;
         });
         attach(record, machine);
+      }
+      for (const raw of await store.list(TRANSCRIPTS)) {
+        const t = raw as TranscriptRecord;
+        transcripts.set(t.workspaceId, t.events);
+      }
+      for (const raw of await store.list(BUILDERS)) {
+        const record = raw as BuilderRecord;
+        const machine = await backend.get(record.id).catch((e: unknown) => {
+          if ((e as { kind?: string }).kind === "missing") return undefined;
+          throw e;
+        });
+        if (!machine) {
+          await store.delete(BUILDERS, record.id);
+          continue;
+        }
+        builders.set(record.id, {
+          record,
+          builder: { machine, kind: record.kind, baseTemplate: record.baseTemplate, setupSha: record.setupSha, createdAt: record.createdAt, firstLife: false },
+          stale: true,
+        });
       }
     })();
     return hydrated;
@@ -357,13 +475,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if ((e as { kind?: string }).kind !== "missing") throw e;
       });
       live.delete(id);
+      transcripts.delete(id);
       await store.delete(WORKSPACES, id);
+      await store.delete(TRANSCRIPTS, id);
       bus.emit({ type: "workspace.deleted", workspaceId: id });
     },
 
     async exec(id, cmd, o) {
       const entry = await entryOf(id);
       return entry.machine.exec(cmd, o);
+    },
+
+    async daemonReach(id) {
+      const entry = await entryOf(id);
+      const reach = await entry.ws.daemonReach();
+      const daemonToken = await daemonTokenOf(entry.machine);
+      return { url: reach.url, expiresAt: reach.expiresAt, ...(daemonToken !== undefined ? { daemonToken } : {}) };
     },
   };
 
@@ -386,10 +513,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             sessionView.claudeSessionId = sessionId;
             entry.record.claudeSessionId = sessionId;
             void persist(entry.record);
-            bus.emit({
+            record({
               type: "session.start",
               workspaceId,
               sessionId,
+              prompt: o.prompt,
               ...(event.model !== undefined ? { model: event.model } : {}),
               ...(event.cwd !== undefined ? { cwd: event.cwd } : {}),
               ...(event.tools !== undefined ? { tools: event.tools } : {}),
@@ -397,7 +525,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             return;
           }
           case "turn.delta":
-            bus.emit({
+            record({
               type: "session.delta",
               workspaceId,
               sessionId,
@@ -410,10 +538,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             return;
           case "turn.done":
             sessionView.status = event.result.status;
-            bus.emit({ type: "session.done", workspaceId, sessionId, result: event.result });
+            record({ type: "session.done", workspaceId, sessionId, result: event.result });
             return;
           case "session.end":
-            bus.emit({
+            record({
               type: "session.end",
               workspaceId,
               sessionId,
@@ -458,6 +586,32 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const all = [...sessions.values()].map(s => ({ ...s.view }));
       return workspaceId === undefined ? all : all.filter(s => s.workspaceId === workspaceId);
     },
+
+    async history(workspaceId) {
+      await entryOf(workspaceId);
+      return [...(transcripts.get(workspaceId) ?? [])];
+    },
+  };
+
+  const builderView = (r: BuilderRecord): GoldenBuilderView => ({
+    id: r.id,
+    name: r.name,
+    kind: r.kind,
+    createdAt: r.createdAt,
+    ...(r.streamUrl !== undefined ? { screen: { streamUrl: r.streamUrl } } : {}),
+  });
+
+  const forgetBuilder = async (id: string): Promise<void> => {
+    builders.delete(id);
+    await store.delete(BUILDERS, id);
+  };
+
+  const stageOf = (name: string) => (stage: GoldenStage, detail?: string) =>
+    bus.emit({ type: "golden.stage", name, stage, ...(detail !== undefined ? { detail } : {}) });
+
+  const recipeOrThrow = (): GoldenRecipe => {
+    if (!opts.goldenRecipe) throw new Error("this runtime has no golden recipe; the host wires one (setup + smoke) before the wizard can run");
+    return opts.goldenRecipe;
   };
 
   const golden: Runtime["golden"] = {
@@ -471,6 +625,65 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
     async get(name) {
       return (await store.get(GOLDENS, name ?? "default")) as GoldenManifest | undefined;
+    },
+
+    async prepare(o) {
+      await ready();
+      const recipe = recipeOrThrow();
+      const name = o?.name ?? "default";
+      const { deployDaemon, smoke, ...size } = recipe;
+      void smoke;
+      const builder = await prepareBuilder({
+        backend,
+        ...size,
+        ...(o?.kind !== undefined ? { kind: o.kind } : {}),
+        ...(deployDaemon !== undefined ? { deployDaemon } : {}),
+        labels: { ...recipe.labels, wsp: "1", "wsp-builder": "1", createdAt: new Date().toISOString() },
+        onStage: stageOf(name),
+      });
+      const record: BuilderRecord = {
+        id: builder.machine.id,
+        name,
+        kind: builder.kind,
+        baseTemplate: builder.baseTemplate,
+        setupSha: builder.setupSha,
+        createdAt: builder.createdAt,
+        ...(builder.machine.streamUrl !== undefined ? { streamUrl: builder.machine.streamUrl } : {}),
+      };
+      builders.set(record.id, { record, builder, stale: false });
+      await store.put(BUILDERS, record.id, record);
+      return builderView(record);
+    },
+
+    async seal(builderId) {
+      await ready();
+      const entry = builders.get(builderId);
+      if (!entry) throw new Error(`no such builder: ${builderId}`);
+      const recipe = recipeOrThrow();
+      const prior = (await store.get(GOLDENS, entry.record.name)) as GoldenManifest | undefined;
+      try {
+        const result = await sealGolden(entry.builder, {
+          backend,
+          smoke: recipe.smoke,
+          ...(recipe.cpu !== undefined ? { cpu: recipe.cpu } : {}),
+          ...(recipe.memMb !== undefined ? { memMb: recipe.memMb } : {}),
+          ...(recipe.envs !== undefined ? { envs: recipe.envs } : {}),
+          labels: { ...recipe.labels, wsp: "1", "wsp-smoke": "1", createdAt: new Date().toISOString() },
+          ...(prior !== undefined ? { manifest: prior } : {}),
+          onStage: stageOf(entry.record.name),
+        });
+        await store.put(GOLDENS, entry.record.name, result.manifest);
+        return result;
+      } finally {
+        // A refused builder can never seal; under a two-machine cap it must not outlive the refusal.
+        await entry.builder.machine.kill().catch(() => {});
+        await forgetBuilder(builderId);
+      }
+    },
+
+    async builders() {
+      await ready();
+      return [...builders.values()].map(b => builderView(b.record));
     },
   };
 
@@ -494,11 +707,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     status,
     reap: async olderThanMs => {
       await ready();
-      return reap({
+      const reaped: string[] = [];
+      for (const b of [...builders.values()].filter(b => b.stale)) {
+        await b.builder.machine.kill().catch((e: unknown) => {
+          if ((e as { kind?: string }).kind !== "missing") throw e;
+        });
+        await forgetBuilder(b.record.id);
+        reaped.push(b.record.id);
+      }
+      const swept = await reap({
         backend,
-        knownIds: [...live.values()].map(e => e.record.machineId),
+        knownIds: [...live.values()].map(e => e.record.machineId).concat([...builders.keys()]),
         ...(olderThanMs !== undefined ? { olderThanMs } : {}),
       });
+      return reaped.concat(swept.filter(id => !reaped.includes(id)));
     },
   };
 }

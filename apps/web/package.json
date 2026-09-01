@@ -4,8 +4,8 @@
   "type": "module",
   "license": "AGPL-3.0-only",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
+    "dev": "pnpm --filter @wsp/protocol build && vite",
+    "build": "pnpm --filter @wsp/protocol build && tsc -b && vite build",
     "test": "vitest run"
   },
   "dependencies": {

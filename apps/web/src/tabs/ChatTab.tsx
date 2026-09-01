@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Chat lens over a workspace's session event stream (Plan 3 Task 4).
-// Rendering folds session.* protocol events through transcript.ts; composing
-// is fully local, and Enter starts exactly one turn, resumed through the
-// workspace's claudeSessionId. Transcript is live-only: the wire has no
-// history/replay op, so events seen while unmounted are gone.
+// Chat view over a workspace's session event stream. Rendering folds
+// session.* protocol events through transcript.ts; composing is fully local,
+// and Enter starts exactly one turn, resumed through the workspace's
+// claudeSessionId. On mount the transcript replays from sessions.history;
+// live events are ignored until that reply lands, because the socket is
+// FIFO: anything pushed before the reply is already in it, anything after is
+// not.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useProtocolEvents, useStore, useWorkspace } from "../protocol/store.js";
-import type { Api, ProtocolEvent } from "../protocol/client.js";
+import type { ProtocolEvent } from "../protocol/client.js";
+import type { SessionEvent } from "@wsp/protocol";
 import {
   applySessionEvent,
   appendLocalError,
@@ -18,16 +21,6 @@ import {
 } from "./chat/transcript.js";
 import styles from "./chat/ChatTab.module.css";
 
-// The runtime wire has sessions.start, but the client Api does not wrap it
-// yet. Detect the method structurally; until it exists the composer stays
-// disabled with the reason shown.
-interface StartsSessions {
-  startSession(opts: { workspaceId: string; prompt: string; resume?: string }): Promise<unknown>;
-}
-function canStartSessions(api: Api | null): api is Api & StartsSessions {
-  return api !== null && typeof (api as Partial<StartsSessions>).startSession === "function";
-}
-
 const INPUT_MAX_PX = 140;
 
 export function ChatTab({ workspaceId }: { workspaceId: string }) {
@@ -37,6 +30,8 @@ export function ChatTab({ workspaceId }: { workspaceId: string }) {
   const [sending, setSending] = useState(false);
   const [draft, setDraft] = useState("");
   const [viewedWs, setViewedWs] = useState(workspaceId);
+  const [hydratedFor, setHydratedFor] = useState<string | null>(null);
+  const hydratedRef = useRef<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -46,7 +41,31 @@ export function ChatTab({ workspaceId }: { workspaceId: string }) {
     setSending(false);
   }
 
+  useEffect(() => {
+    if (!api) return;
+    let current = true;
+    api.sessionHistory(workspaceId).then(
+      events => {
+        if (!current) return;
+        setTranscript(replayTranscript(events, workspaceId));
+        hydratedRef.current = workspaceId;
+        setHydratedFor(workspaceId);
+      },
+      (err: unknown) => {
+        if (!current) return;
+        setTranscript(t => appendLocalError(t, `history unavailable: ${err instanceof Error ? err.message : String(err)}`));
+        hydratedRef.current = workspaceId;
+        setHydratedFor(workspaceId);
+      },
+    );
+    return () => {
+      current = false;
+      hydratedRef.current = null;
+    };
+  }, [api, workspaceId]);
+
   const onEvent = useCallback((e: ProtocolEvent) => {
+    if (hydratedRef.current !== workspaceId) return;
     setTranscript(t => applySessionEvent(t, e, workspaceId));
     if (isSessionEvent(e) && e.workspaceId === workspaceId) setSending(false);
   }, [workspaceId]);
@@ -63,19 +82,24 @@ export function ChatTab({ workspaceId }: { workspaceId: string }) {
 
   useEffect(() => { resize(inputRef.current, draft); }, [draft]);
 
-  const sender = canStartSessions(api) ? api : null;
   const busy = sending || transcript.running;
-  const disabledReason = !sender ? "runtime client cannot start sessions yet" : busy ? "turn in flight" : null;
+  const disabledReason = !api
+    ? "not connected to the runtime"
+    : hydratedFor !== workspaceId
+      ? "loading transcript"
+      : busy
+        ? "turn in flight"
+        : null;
 
   async function send() {
     const prompt = draft.trim();
-    if (!prompt || !sender || busy) return;
+    if (!prompt || !api || busy) return;
     setDraft("");
     setSending(true);
     setTranscript(t => appendUserTurn(t, prompt));
     const resume = workspace?.claudeSessionId;
     try {
-      await sender.startSession({ workspaceId, prompt, ...(resume ? { resume } : {}) });
+      await api.startSession({ workspaceId, prompt, ...(resume ? { resume } : {}) });
     } catch (err) {
       setSending(false);
       setDraft(d => (d === "" ? prompt : d));
@@ -119,6 +143,16 @@ export function ChatTab({ workspaceId }: { workspaceId: string }) {
       </div>
     </div>
   );
+}
+
+/** Persisted events carry the prompt on session.start; the live path echoes the user turn itself. */
+function replayTranscript(events: SessionEvent[], workspaceId: string): Transcript {
+  let t = emptyTranscript;
+  for (const e of events) {
+    if (e.type === "session.start" && e.prompt !== undefined) t = appendUserTurn(t, e.prompt);
+    t = applySessionEvent(t, e, workspaceId);
+  }
+  return t;
 }
 
 function resize(el: HTMLTextAreaElement | null, value: string): void {

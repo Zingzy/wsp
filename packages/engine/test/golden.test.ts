@@ -1,12 +1,16 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { buildGolden, forkGolden, rollback } from "../src/golden.js";
+import { buildGolden, forkGolden, prepareBuilder, rollback, sealGolden, type GoldenStage } from "../src/golden.js";
+import { NotFirstLifeError } from "../src/lifecycle.js";
 import type { ExecResult, Machine, MachineBackend, MachineSpec } from "../src/machine.js";
 
 function recordingBackend(execResults: Record<string, ExecResult> = {}) {
   const created: MachineSpec[] = [];
   const snapshots: string[] = [];
   const killed: string[] = [];
+  const deletedSnapshots: string[] = [];
+  /** Every create/kill/snapshot in order, so sequencing under the machine cap is provable. */
+  const timeline: string[] = [];
   let nextId = 0;
   const backend: MachineBackend = {
     capabilities: { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true },
@@ -14,12 +18,13 @@ function recordingBackend(execResults: Record<string, ExecResult> = {}) {
     async create(spec) {
       created.push(spec);
       const id = `m${++nextId}`;
+      timeline.push(`create ${id}`);
       const machine: Machine = {
-        id, kind: spec.kind, streamUrl: undefined,
+        id, kind: spec.kind, streamUrl: spec.kind === "desktop" ? `wss://fake/stream/${id}` : undefined,
         exec: async (cmd) => execResults[cmd] ?? { exitCode: 0, stdout: "", stderr: "" },
-        snapshot: async (name) => { snapshots.push(name); return `snap_${name}`; },
+        snapshot: async (name) => { snapshots.push(name); timeline.push(`snapshot ${id}`); return `snap_${name}`; },
         pause: async () => {}, resume: async () => {},
-        kill: async () => { killed.push(id); },
+        kill: async () => { killed.push(id); timeline.push(`kill ${id}`); },
         state: async () => "running" as const,
         downloadUrl: async () => "https://x", uploadUrl: async () => "https://x",
       };
@@ -27,37 +32,48 @@ function recordingBackend(execResults: Record<string, ExecResult> = {}) {
     },
     async get() { throw new Error("unused"); },
     async list() { return []; },
-    async deleteSnapshot() {},
+    async deleteSnapshot(id) { deletedSnapshots.push(id); },
   };
-  return { backend, created, snapshots, killed };
+  return { backend, created, snapshots, killed, deletedSnapshots, timeline };
+}
+
+function stageRecorder() {
+  const stages: string[] = [];
+  const onStage = (stage: GoldenStage, detail?: string) => {
+    stages.push(detail === undefined ? stage : `${stage}:${detail}`);
+  };
+  return { stages, onStage };
 }
 
 describe("golden pipeline", () => {
-  it("refuses to snapshot when the smoke test fails", async () => {
-    const { backend, snapshots, killed } = recordingBackend({
+  it("seals no version when the smoke fork fails, and leaves no machine or snapshot behind", async () => {
+    const { backend, killed, deletedSnapshots } = recordingBackend({
       "boom --version": { exitCode: 127, stdout: "", stderr: "not found" },
     });
     await expect(
       buildGolden({ backend, setup: "true", smoke: "boom --version" }),
     ).rejects.toThrow(/smoke/);
-    expect(snapshots).toEqual([]); // Vorflux gate: no image from a machine that failed smoke
-    expect(killed).toEqual(["m1"]); // builder never leaks
+    expect(deletedSnapshots).toEqual(["snap_golden-v1"]); // the image that failed smoke does not survive
+    expect(killed).toEqual(["m1", "m2"]); // builder and smoke fork both gone
   });
 
-  it("writes a complete manifest entry and kills the builder", async () => {
-    const { backend, killed } = recordingBackend();
+  it("writes a complete manifest entry, sandbox kind by default, and kills builder and fork", async () => {
+    const { backend, created, killed } = recordingBackend();
     const { manifest, version } = await buildGolden({
       backend, baseTemplate: "base", setup: "echo setup", smoke: "true",
     });
     expect(version.version).toBe(1);
     expect(version.snapshotId).toBe("snap_golden-v1");
     expect(version.baseTemplate).toBe("base");
+    expect(version.kind).toBe("sandbox");
     expect(version.setupSha).toBe(createHash("sha256").update("echo setup").digest("hex"));
     expect(version.smoke).toEqual({ cmd: "true", exitCode: 0 });
     expect(Date.parse(version.createdAt)).not.toBeNaN();
     expect(manifest.head).toBe(1);
     expect(manifest.versions).toEqual([version]);
-    expect(killed).toEqual(["m1"]);
+    expect(created.map(c => c.kind)).toEqual(["sandbox", "sandbox"]);
+    expect(created[1]!.fromSnapshot).toBe("snap_golden-v1");
+    expect(killed).toEqual(["m1", "m2"]);
   });
 
   it("appends versions and rollback only moves head", async () => {
@@ -72,17 +88,93 @@ describe("golden pipeline", () => {
     expect(two.manifest.head).toBe(2); // input untouched
   });
 
-  it("fork passes envs/fromSnapshot and never mutates the manifest", async () => {
+  it("fork passes envs/fromSnapshot, restores the sealed kind, and never mutates the manifest", async () => {
     const { backend, created } = recordingBackend();
-    const { manifest } = await buildGolden({ backend, setup: "s", smoke: "true" });
+    const { manifest } = await buildGolden({ backend, kind: "desktop", setup: "s", smoke: "true" });
     const before = JSON.stringify(manifest);
     const m = await forkGolden(backend, manifest, { envs: { FOO: "bar" }, labels: { wsp: "1" } });
-    expect(m.id).toBe("m2");
-    const forkSpec = created[1]!;
+    expect(m.id).toBe("m3");
+    expect(m.kind).toBe("desktop");
+    const forkSpec = created[2]!;
     expect(forkSpec.fromSnapshot).toBe("snap_golden-v1");
     expect(forkSpec.envs).toEqual({ FOO: "bar" });
     expect(forkSpec.labels).toEqual({ wsp: "1" });
     expect(forkSpec.template).toBeUndefined();
     expect(JSON.stringify(manifest)).toBe(before);
+  });
+});
+
+describe("interactive golden: prepare then seal", () => {
+  it("prepare boots a desktop from the desktop template, runs daemon then harness, and reports stages", async () => {
+    const { backend, created, timeline } = recordingBackend();
+    const { stages, onStage } = stageRecorder();
+    const daemonOn: string[] = [];
+    const builder = await prepareBuilder({
+      backend,
+      setup: "install harness",
+      deployDaemon: async m => { daemonOn.push(m.id); },
+      onStage,
+    });
+    expect(created[0]).toMatchObject({ kind: "desktop", template: "default" });
+    expect(builder.kind).toBe("desktop");
+    expect(builder.firstLife).toBe(true);
+    expect(builder.machine.streamUrl).toBe("wss://fake/stream/m1");
+    expect(daemonOn).toEqual(["m1"]);
+    expect(stages).toEqual(["creating:desktop from default", "deploying-daemon", "installing-harness", "ready"]);
+    expect(timeline).toEqual(["create m1"]); // alive and waiting for the person
+  });
+
+  it("prepare with a sandbox kind picks the sandbox template", async () => {
+    const { backend, created } = recordingBackend();
+    await prepareBuilder({ backend, kind: "sandbox", setup: "true" });
+    expect(created[0]).toMatchObject({ kind: "sandbox", template: "base" });
+  });
+
+  it("prepare kills the machine and reports failed when the harness install fails", async () => {
+    const { backend, killed } = recordingBackend({ "bad install": { exitCode: 1, stdout: "", stderr: "nope" } });
+    const { stages, onStage } = stageRecorder();
+    await expect(prepareBuilder({ backend, setup: "bad install", onStage })).rejects.toThrow(/setup failed/);
+    expect(killed).toEqual(["m1"]);
+    expect(stages.at(-1)).toMatch(/^failed:golden setup failed/);
+  });
+
+  it("seal snapshots, kills the builder before the smoke fork boots, and records the kind", async () => {
+    const { backend, created, timeline } = recordingBackend();
+    const { stages, onStage } = stageRecorder();
+    const builder = await prepareBuilder({ backend, setup: "echo setup", onStage });
+    const { manifest, version } = await sealGolden(builder, { backend, smoke: "claude --version", onStage });
+    expect(timeline).toEqual(["create m1", "snapshot m1", "kill m1", "create m2", "kill m2"]);
+    expect(created[1]).toMatchObject({ kind: "desktop", fromSnapshot: "snap_golden-v1" });
+    expect(version).toMatchObject({ version: 1, kind: "desktop", baseTemplate: "default", snapshotId: "snap_golden-v1" });
+    expect(version.setupSha).toBe(builder.setupSha);
+    expect(manifest.head).toBe(1);
+    expect(stages).toEqual([
+      "creating:desktop from default", "installing-harness", "ready",
+      "snapshotting:golden-v1", "smoke-forking:claude --version", "sealed:v1",
+    ]);
+  });
+
+  it("seal refuses a builder that is not first-life with a typed error and touches nothing", async () => {
+    const { backend, timeline, snapshots } = recordingBackend();
+    const builder = await prepareBuilder({ backend, setup: "true" });
+    const err = await sealGolden({ ...builder, firstLife: false }, { backend, smoke: "true" }).catch(e => e as unknown);
+    expect(err).toBeInstanceOf(NotFirstLifeError);
+    expect((err as NotFirstLifeError).kind).toBe("notFirstLife");
+    expect((err as NotFirstLifeError).machineId).toBe("m1");
+    expect(snapshots).toEqual([]);
+    expect(timeline).toEqual(["create m1"]);
+  });
+
+  it("a failed seal kills every machine, drops the snapshot, and leaves the prior manifest untouched", async () => {
+    const { backend, killed, deletedSnapshots } = recordingBackend({ smoke: { exitCode: 2, stdout: "", stderr: "broken" } });
+    const { stages, onStage } = stageRecorder();
+    const one = await buildGolden({ backend, setup: "a", smoke: "true" });
+    const before = JSON.stringify(one.manifest);
+    const builder = await prepareBuilder({ backend, setup: "b" });
+    await expect(sealGolden(builder, { backend, smoke: "smoke", manifest: one.manifest, onStage })).rejects.toThrow(/smoke failed/);
+    expect(JSON.stringify(one.manifest)).toBe(before);
+    expect(killed).toEqual(["m1", "m2", "m3", "m4"]);
+    expect(deletedSnapshots).toEqual(["snap_golden-v2"]);
+    expect(stages.at(-1)).toMatch(/^failed:golden smoke failed/);
   });
 });

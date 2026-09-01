@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect } from "react";
 import { create } from "zustand";
-import type { SessionView, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import type { Capabilities, SessionView, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 import type { Api, ProtocolEvent } from "./client.js";
 
 export interface CostTick {
@@ -14,6 +14,8 @@ export interface CostTick {
 
 interface State {
   api: Api | null;
+  /** Backend feature flags; null until the first reply. Gate upgrade/resize on these. */
+  capabilities: Capabilities | null;
   workspaces: WorkspaceView[];
   statuses: Record<string, WorkspaceStatus>;
   costs: Record<string, CostTick>;
@@ -31,6 +33,16 @@ interface State {
   createWorkspace(name: string): Promise<void>;
   clearToast(): void;
   applyEvent(e: ProtocolEvent): void;
+  /** Rows come from the runtime (only it knows harness and final status); events say when to ask. */
+  reloadSessions(workspaceId: string): Promise<void>;
+}
+
+const NO_SESSIONS: SessionView[] = [];
+
+function groupSessions(rows: SessionView[]): Record<string, SessionView[]> {
+  const out: Record<string, SessionView[]> = {};
+  for (const r of rows) (out[r.workspaceId] ??= []).push(r);
+  return out;
 }
 
 export const useStore = create<State>((set, get) => {
@@ -45,6 +57,7 @@ export const useStore = create<State>((set, get) => {
 
   return {
     api: null,
+    capabilities: null,
     workspaces: [],
     statuses: {},
     costs: {},
@@ -58,6 +71,10 @@ export const useStore = create<State>((set, get) => {
       api.subscribe(e => get().applyEvent(e));
       void get().refresh();
       void api
+        .capabilities()
+        .then(capabilities => set({ capabilities }))
+        .catch(() => {});
+      void api
         .watchStatuses()
         .then(statuses => set({ statuses: Object.fromEntries(statuses.map(s => [s.id, s])) }))
         .catch((e: unknown) => set({ toast: `live status unavailable: ${e instanceof Error ? e.message : String(e)}` }));
@@ -66,8 +83,18 @@ export const useStore = create<State>((set, get) => {
     async refresh() {
       const api = get().api;
       if (!api) return;
-      const workspaces = await api.listWorkspaces();
-      set(s => ({ workspaces, ready: true, selectedId: s.selectedId ?? workspaces[0]?.id ?? null }));
+      const [workspaces, rows] = await Promise.all([api.listWorkspaces(), api.listSessions().catch(() => NO_SESSIONS)]);
+      set(s => ({ workspaces, sessions: groupSessions(rows), ready: true, selectedId: s.selectedId ?? workspaces[0]?.id ?? null }));
+    },
+    async reloadSessions(workspaceId) {
+      const api = get().api;
+      if (!api) return;
+      try {
+        const rows = await api.listSessions(workspaceId);
+        set(s => ({ sessions: { ...s.sessions, [workspaceId]: rows } }));
+      } catch {
+        // the next session event asks again
+      }
     },
     async toggle(id) {
       const api = get().api;
@@ -99,7 +126,8 @@ export const useStore = create<State>((set, get) => {
             const { [e.workspaceId]: _s, ...statuses } = s.statuses;
             const { [e.workspaceId]: _c, ...costs } = s.costs;
             const { [e.workspaceId]: _p, ...spending } = s.spending;
-            return { workspaces: s.workspaces.filter(x => x.id !== e.workspaceId), statuses, costs, spending };
+            const { [e.workspaceId]: _r, ...sessions } = s.sessions;
+            return { workspaces: s.workspaces.filter(x => x.id !== e.workspaceId), statuses, costs, spending, sessions };
           });
           return;
         case "workspace.created":
@@ -124,11 +152,30 @@ export const useStore = create<State>((set, get) => {
             costs: { ...s.costs, [e.workspaceId]: { rateUsdPerHour: e.rateUsdPerHour, accruedUsd: e.accruedUsd, at: e.at } },
           }));
           return;
-        case "session.start":
-          set(s => ({ spending: { ...s.spending, [e.workspaceId]: (s.spending[e.workspaceId] ?? 0) + 1 } }));
+        case "session.start": {
+          // The next send resumes this id; the runtime persists it, the view learns it here.
+          const remember = <T extends WorkspaceView>(w: T): T => (w.id === e.workspaceId ? { ...w, claudeSessionId: e.sessionId } : w);
+          set(s => ({
+            spending: { ...s.spending, [e.workspaceId]: (s.spending[e.workspaceId] ?? 0) + 1 },
+            workspaces: s.workspaces.map(remember),
+            statuses: s.statuses[e.workspaceId] ? { ...s.statuses, [e.workspaceId]: remember(s.statuses[e.workspaceId]!) } : s.statuses,
+          }));
+          void get().reloadSessions(e.workspaceId);
+          return;
+        }
+        case "session.done":
+          set(s => ({
+            sessions: {
+              ...s.sessions,
+              [e.workspaceId]: (s.sessions[e.workspaceId] ?? NO_SESSIONS).map(r =>
+                r.claudeSessionId === e.sessionId || r.id === e.sessionId ? { ...r, status: e.result.status } : r,
+              ),
+            },
+          }));
           return;
         case "session.end":
           set(s => ({ spending: { ...s.spending, [e.workspaceId]: Math.max(0, (s.spending[e.workspaceId] ?? 0) - 1) } }));
+          void get().reloadSessions(e.workspaceId);
           return;
         default:
           return;
@@ -152,9 +199,10 @@ export function useSpending(id: string | null): boolean {
   return useStore(s => (id ? (s.spending[id] ?? 0) > 0 : false));
 }
 export function useSession(workspaceId: string | null): SessionView[] {
-  return useStore(s => (workspaceId ? s.sessions[workspaceId] ?? [] : []));
+  return useStore(s => (workspaceId ? s.sessions[workspaceId] ?? NO_SESSIONS : NO_SESSIONS));
 }
 export function useReady(): boolean { return useStore(s => s.ready); }
+export function useCapabilities(): Capabilities | null { return useStore(s => s.capabilities); }
 
 /** Subscribe a component to raw protocol events (terminal/chat/browser tabs use this). */
 export function useProtocolEvents(fn: (e: ProtocolEvent) => void): void {

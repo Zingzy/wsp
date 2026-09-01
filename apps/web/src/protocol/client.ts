@@ -2,7 +2,7 @@
 // Browser-side client for the runtime WS (see packages/runtime/src/serve.ts).
 // Auth: open the socket, send one `auth` frame with the token (host injects it
 // via window.__WSP__), then ops flow. The token never rides in the URL.
-import type { EventUnion, SessionView, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import type { Capabilities, DaemonReachView, EventUnion, SessionEvent, SessionView, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 
 export type ProtocolEvent = EventUnion;
 type Pending = { resolve: (v: Record<string, unknown>) => void; reject: (e: Error) => void };
@@ -98,8 +98,31 @@ export interface Api {
   watchStatuses(): Promise<WorkspaceStatus[]>;
   nap(id: string): Promise<WorkspaceView>;
   wake(id: string): Promise<WorkspaceView>;
-  listSessions(id: string): Promise<SessionView[]>;
+  /** Replaces the machine with a fresh golden fork at the new size; gate on capabilities().resize. */
+  upgrade(id: string, size: WorkspaceSizeSpec): Promise<WorkspaceView>;
+  capabilities(): Promise<Capabilities>;
+  /** How to dial the workspace's daemon right now; ask again per dial, the edge token expires hourly. */
+  daemonReach(id: string): Promise<DaemonReachView>;
+  /** One turn on the workspace; events arrive on the subscription, this resolves with the row. */
+  startSession(opts: StartSessionOptions): Promise<SessionView>;
+  /** All sessions the runtime knows, or one workspace's. */
+  listSessions(id?: string): Promise<SessionView[]>;
+  /** The workspace's persisted session events, oldest first: what a chat replays on mount. */
+  sessionHistory(id: string): Promise<SessionEvent[]>;
   subscribe(fn: (e: ProtocolEvent) => void): () => void;
+}
+
+export interface WorkspaceSizeSpec {
+  cpu?: number;
+  memMb?: number;
+}
+
+export interface StartSessionOptions {
+  workspaceId: string;
+  prompt: string;
+  harness?: string;
+  resume?: string;
+  cwd?: string;
 }
 
 interface GoldenManifestWire {
@@ -123,7 +146,14 @@ export function makeApi(c: ProtocolClient): Api {
     watchStatuses: async () => (await c.request<{ statuses: WorkspaceStatus[] }>("status.subscribe")).statuses,
     nap: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.nap", { workspaceId: id })).workspace,
     wake: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.wake", { workspaceId: id })).workspace,
-    listSessions: async id => (await c.request<{ sessions: SessionView[] }>("sessions.list", { workspaceId: id })).sessions,
+    upgrade: async (id, size) =>
+      (await c.request<{ workspace: WorkspaceView }>("workspaces.upgrade", { workspaceId: id, ...size })).workspace,
+    capabilities: async () => (await c.request<{ capabilities: Capabilities }>("capabilities.get")).capabilities,
+    daemonReach: async id => (await c.request<{ reach: DaemonReachView }>("workspaces.daemonReach", { workspaceId: id })).reach,
+    startSession: async opts => (await c.request<{ session: SessionView }>("sessions.start", { ...opts })).session,
+    sessionHistory: async id => (await c.request<{ events: SessionEvent[] }>("sessions.history", { workspaceId: id })).events,
+    listSessions: async id =>
+      (await c.request<{ sessions: SessionView[] }>("sessions.list", id !== undefined ? { workspaceId: id } : {})).sessions,
     subscribe: fn => c.subscribe(fn),
   };
 }

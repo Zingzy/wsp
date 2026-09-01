@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
   DaemonEvent,
+  DaemonReachView,
   DaemonRequest,
   DaemonResponse,
   EventUnion,
+  GoldenManifest,
+  GoldenStageEvent,
+  RuntimeErrorResponse,
   RuntimeRequest,
   RuntimeResponse,
+  SessionEvent,
   SessionView,
   WorkspaceView,
 } from "../src/index.js";
@@ -78,6 +83,11 @@ describe("protocol event union", () => {
     ];
     for (const s of samples) expect(EventUnion.parse(s)).toEqual(s);
     expect(() => EventUnion.parse({ type: "workspace.exploded" })).toThrow();
+    // session.start may carry the prompt so a replayed transcript shows the user's turn
+    const started = { type: "session.start", workspaceId: "ws_1", sessionId: "s1", prompt: "fix the flaky test" };
+    expect(EventUnion.parse(started)).toEqual(started);
+    expect(SessionEvent.parse(started)).toEqual(started);
+    expect(() => SessionEvent.parse({ type: "workspace.napped", workspaceId: "ws_1" })).toThrow();
     // session.end with a null exit code (kill path) is valid
     expect(
       EventUnion.parse({ type: "session.end", workspaceId: "w", sessionId: "s", exitCode: null, sawResult: false }),
@@ -135,10 +145,46 @@ describe("runtime wire types", () => {
       { id: 11, op: "sessions.start", workspaceId: "ws_1", prompt: "do the thing" },
       { id: 12, op: "sessions.list" },
       { id: 13, op: "golden.get", name: "default" },
+      { id: 14, op: "capabilities.get" },
+      { id: 15, op: "sessions.history", workspaceId: "ws_1" },
+      { id: 16, op: "workspaces.daemonReach", workspaceId: "ws_1" },
+      { id: 17, op: "golden.prepare", name: "default" },
+      { id: 18, op: "golden.prepare", name: "default", kind: "desktop" },
+      { id: 19, op: "golden.seal", builderId: "m1" },
     ];
     for (const r of reqs) expect(RuntimeRequest.parse(r)).toEqual(r);
     expect(() => RuntimeRequest.parse({ id: 1, op: "workspaces.create" })).toThrow(); // golden+name required
+    expect(() => RuntimeRequest.parse({ id: 1, op: "golden.prepare", name: "d", kind: "browser" })).toThrow();
+    expect(() => RuntimeRequest.parse({ id: 1, op: "golden.seal" })).toThrow(); // builderId required
     expect(RuntimeResponse.parse({ id: 4, ok: true, workspace: { id: "w" } })).toBeTruthy();
     expect(RuntimeResponse.parse({ id: 4, ok: false, error: "nope" })).toBeTruthy();
+  });
+
+  it("DaemonReachView carries the preview route, its expiry, and the daemon token when the guest has one", () => {
+    const full = { url: "https://m-7070.preview.example/?pt_token=edge", expiresAt: 1_700_000_000_000, daemonToken: "d" };
+    expect(DaemonReachView.parse(full)).toEqual(full);
+    const bare = { url: "https://m-7070.preview.example/?pt_token=edge", expiresAt: 1 };
+    expect(DaemonReachView.parse(bare)).toEqual(bare);
+    expect(() => DaemonReachView.parse({ url: "x" })).toThrow();
+  });
+});
+
+describe("golden wire schemas", () => {
+  it("golden.stage rides the event union with a closed stage enum and an optional detail", () => {
+    const e = { type: "golden.stage", name: "default", stage: "smoke-forking", detail: "claude --version" };
+    expect(EventUnion.parse(e)).toEqual(e);
+    expect(GoldenStageEvent.parse({ type: "golden.stage", name: "default", stage: "sealed" })).toBeTruthy();
+    expect(() => GoldenStageEvent.parse({ type: "golden.stage", name: "default", stage: "vibing" })).toThrow();
+  });
+
+  it("a manifest sealed before kind was recorded still parses; new ones carry the kind", () => {
+    const old = { version: 1, snapshotId: "snap_a", baseTemplate: "base", setupSha: "x", createdAt: "2026-09-01T00:00:00Z", smoke: { cmd: "true", exitCode: 0 } };
+    const parsed = GoldenManifest.parse({ head: 2, versions: [old, { ...old, version: 2, kind: "desktop" }] });
+    expect(parsed.versions[0]!.kind).toBeUndefined();
+    expect(parsed.versions[1]!.kind).toBe("desktop");
+  });
+
+  it("error replies may carry a typed kind", () => {
+    expect(RuntimeErrorResponse.parse({ id: 1, ok: false, error: "refused", kind: "notFirstLife" }).kind).toBe("notFirstLife");
   });
 });

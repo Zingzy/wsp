@@ -6,6 +6,8 @@
 // tab holds a WebGL renderer (the atlas budget).
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { TabStrip } from "../src/components/TabStrip.js";
+import { useStore } from "../src/protocol/store.js";
 import { TerminalTab } from "../src/tabs/TerminalTab.js";
 import { boot, teardown, WS_ID } from "./terminal-harness.js";
 
@@ -80,8 +82,9 @@ describe("parked terminals", () => {
     const { wt, daemon } = await boot();
     // cat holds the pty open without shell startup cost, 20 times over.
     for (let i = 0; i < 20; i++) await wt.open({ shell: "/bin/cat" });
-    const view = render(<TerminalTab workspaceId={WS_ID} />);
-    expect(await screen.findAllByRole("tab")).toHaveLength(20);
+    useStore.setState({ selectedId: WS_ID, ready: true });
+    const view = render(<TabStrip />);
+    expect((await screen.findAllByRole("tab")).filter(t => t.hasAttribute("data-pty"))).toHaveLength(20);
 
     // Visit every tab: each mount swaps the previous xterm out.
     for (const t of wt.tabs()) {

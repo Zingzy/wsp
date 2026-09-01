@@ -2,7 +2,7 @@
 // Terminal tab against the real daemon: startDaemon in-process, the reach
 // client as the wire, jsdom for the component. WebGL cannot exist under
 // jsdom, so that addon is mocked; real rendering is the browser pass's job.
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TerminalTab } from "../src/tabs/TerminalTab.js";
 import { WorkspaceTerminals, type TerminalWire } from "../src/terminal/link.js";
@@ -179,63 +179,4 @@ describe("TerminalTab", () => {
     render(<TerminalTab workspaceId="ws_unlinked" />);
     screen.getByText(/no terminal link/);
   });
-
-  it("auto-opens one pty, parks on unmount without killing it, reuses it on remount", async () => {
-    const { wt, daemon } = await boot();
-    const view = render(<TerminalTab workspaceId={WS_ID} />);
-    await waitFor(() => expect(daemon.ptys.list()).toHaveLength(1), { timeout: 10_000 });
-    await screen.findByRole("tab");
-    await waitFor(() => expect(wt.sinkCount()).toBe(1));
-    expect(document.querySelector(".xterm")).not.toBeNull();
-
-    view.unmount(); // tab-away
-    expect(wt.sinkCount()).toBe(0);
-    expect(document.querySelector(".xterm")).toBeNull();
-    expect(daemon.ptys.list()).toHaveLength(1); // detach, not kill
-    expect(daemon.ptys.list()[0]!.exited).toBe(false);
-
-    render(<TerminalTab workspaceId={WS_ID} />); // tab back
-    await waitFor(() => expect(wt.sinkCount()).toBe(1));
-    expect(daemon.ptys.list()).toHaveLength(1); // reused, not re-created
-  }, 15_000);
-
-  it("the + button opens a second terminal with its own pty id", async () => {
-    const { wt, daemon } = await boot();
-    render(<TerminalTab workspaceId={WS_ID} />);
-    await waitFor(() => expect(daemon.ptys.list()).toHaveLength(1), { timeout: 10_000 });
-    fireEvent.click(screen.getByLabelText("new terminal"));
-    await waitFor(() => expect(daemon.ptys.list()).toHaveLength(2), { timeout: 10_000 });
-    expect(await screen.findAllByRole("tab")).toHaveLength(2);
-    const ids = daemon.ptys.list().map(p => p.id);
-    expect(new Set(ids).size).toBe(2);
-    expect(wt.tabs().map(t => t.ptyId)).toEqual(ids);
-  }, 15_000);
-
-  it("closing the last terminal stays closed instead of respawning", async () => {
-    const { daemon } = await boot();
-    render(<TerminalTab workspaceId={WS_ID} />);
-    await waitFor(() => expect(daemon.ptys.list()).toHaveLength(1), { timeout: 10_000 });
-    fireEvent.click(screen.getByLabelText(/^close /));
-    await waitFor(() => expect(daemon.ptys.list()).toHaveLength(0), { timeout: 10_000 });
-    await new Promise(r => setTimeout(r, 250)); // the auto-open effect must not refire
-    expect(daemon.ptys.list()).toHaveLength(0);
-    screen.getByText("no terminals");
-  }, 15_000);
-
-  it("renders the connection state: live dot, reconnecting text, reauth banner", async () => {
-    const { wt } = await boot();
-    render(<TerminalTab workspaceId={WS_ID} />);
-    await screen.findByTitle("connected");
-
-    act(() => wt.feedStatus("connecting"));
-    screen.getByText("reconnecting");
-    expect(screen.queryByTitle("connected")).toBeNull();
-
-    act(() => wt.feedStatus("reauth-needed"));
-    screen.getByText("auth expired");
-    screen.getByText(/rejected this workspace/);
-
-    act(() => wt.feedStatus("live"));
-    await screen.findByTitle("connected");
-  }, 15_000);
 });

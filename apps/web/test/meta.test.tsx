@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { EventUnion, WorkspaceSize, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import type { Capabilities, EventUnion, WorkspaceSize, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 import { MetaPanel } from "../src/components/MetaPanel.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -33,17 +33,22 @@ const costEvent = (workspaceId: string, rate: number, awakeMs: number, at: strin
   at,
 });
 
+const CAPS: Capabilities = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true };
+
 // Live emitter: MetaPanel's cost series listens through api.subscribe, exactly
-// like the store does, so tests push events through the same channel. upgrade
-// is what makeApi will expose once client.ts wires the existing wire op.
-export function fakeApi(workspaces: WorkspaceView[]) {
+// like the store does, so tests push events through the same channel.
+export function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS) {
   const listeners = new Set<(e: EventUnion) => void>();
   const api: Api & {
     emit(e: EventUnion): void;
     nap: ReturnType<typeof vi.fn>;
     upgrade: ReturnType<typeof vi.fn<(id: string, size: WorkspaceSize) => Promise<WorkspaceView>>>;
   } = {
-    upgrade: vi.fn(async (id: string) => view(id, "?", "running")),
+    upgrade: vi.fn(async (id: string, _size: WorkspaceSize) => view(id, "?", "running")),
+    capabilities: vi.fn(async () => capabilities),
+    daemonReach: vi.fn(async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 })),
+    startSession: vi.fn(async (o: { workspaceId: string }) => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" as const })),
+    sessionHistory: vi.fn(async () => []),
     listWorkspaces: vi.fn(async () => workspaces),
     getWorkspace: vi.fn(async id => workspaces.find(w => w.id === id)!),
     createWorkspace: vi.fn(async () => workspaces[0]!),
@@ -179,6 +184,7 @@ describe("pause/wake", () => {
 
 async function openPicker(api: Awaited<ReturnType<typeof bindAndRender>>) {
   await waitFor(() => expect(fact("machine")).toBe("2 vCPU · 4 GB"));
+  await waitFor(() => expect((screen.getByRole("button", { name: "upgrade api" }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole("button", { name: "upgrade api" }));
   return api;
 }
@@ -228,13 +234,17 @@ describe("upgrade", () => {
     expect(fact("machine")).toBe("2 vCPU · 4 GB");
   });
 
-  it("fails soft while the client api lacks the upgrade method", async () => {
-    // today's makeApi: the wire op exists but the wrapper does not expose it
-    const api = await bindAndRender([view("ws_a", "api")]);
-    Object.assign(api, { upgrade: undefined });
+  it("stays disabled and says so when the backend cannot resize", async () => {
+    const api = fakeApi([view("ws_a", "api")], { ...CAPS, resize: false });
+    useStore.getState().bind(api);
+    render(<MetaPanel />);
     await waitFor(() => expect(fact("machine")).toBe("2 vCPU · 4 GB"));
-    fireEvent.click(screen.getByRole("button", { name: "upgrade api" }));
-    fireEvent.click(screen.getByRole("button", { name: "confirm resize" }));
-    await waitFor(() => expect(screen.getByText(/not wired into the web client/)).toBeDefined());
+    await waitFor(() => expect(useStore.getState().capabilities?.resize).toBe(false));
+    const button = screen.getByRole("button", { name: "upgrade api" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.textContent).toBe("no resize");
+    fireEvent.click(button);
+    expect(screen.queryByRole("button", { name: "confirm resize" })).toBeNull();
+    expect(api.upgrade).not.toHaveBeenCalled();
   });
 });

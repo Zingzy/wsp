@@ -39,6 +39,16 @@ export const ReachStatus = z.object({
 });
 export type ReachStatus = z.infer<typeof ReachStatus>;
 
+/** What a browser needs to dial a workspace's daemon: the minted preview route
+ * (edge token embedded, hourly expiry) and the daemon's own query token as read
+ * off the guest. No daemonToken means no daemon token file on that machine. */
+export const DaemonReachView = z.object({
+  url: z.string(),
+  expiresAt: z.number(),
+  daemonToken: z.string().optional(),
+});
+export type DaemonReachView = z.infer<typeof DaemonReachView>;
+
 export const WorkspaceSize = z.object({ cpu: z.number(), memMb: z.number() });
 export type WorkspaceSize = z.infer<typeof WorkspaceSize>;
 
@@ -100,6 +110,8 @@ const sessionScope = { workspaceId: z.string(), sessionId: z.string() };
 export const SessionStartEvent = z.object({
   type: z.literal("session.start"),
   ...sessionScope,
+  /** The user's turn; set by the runtime (the adapter never sees it) so a replayed transcript shows it. */
+  prompt: z.string().optional(),
   model: z.string().optional(),
   cwd: z.string().optional(),
   tools: z.array(z.string()).optional(),
@@ -127,6 +139,10 @@ export const SessionEndEvent = z.object({
   exitCode: z.number().nullable(),
   sawResult: z.boolean(),
 });
+
+/** The events sessions.history replays: what a chat transcript folds. */
+export const SessionEvent = z.discriminatedUnion("type", [SessionStartEvent, SessionDeltaEvent, SessionDoneEvent, SessionEndEvent]);
+export type SessionEvent = z.infer<typeof SessionEvent>;
 
 // --- workspace / port / inbox events ----------------------------------------
 
@@ -176,6 +192,62 @@ export const InboxFileEvent = z.object({
   bytes: z.number(),
 });
 
+// --- golden image (manifest, interactive builder, wizard stages) --------------
+
+export const MachineKind = z.enum(["sandbox", "desktop"]);
+export type MachineKind = z.infer<typeof MachineKind>;
+
+/** One sealed image. `kind` is the machine kind the snapshot was taken from and
+ * therefore restores as; entries sealed before kind was recorded were all
+ * sandboxes, so readers treat a missing kind as sandbox. */
+export const GoldenVersion = z.object({
+  version: z.number(),
+  snapshotId: z.string(),
+  baseTemplate: z.string(),
+  kind: MachineKind.optional(),
+  setupSha: z.string(),
+  createdAt: z.string(),
+  smoke: z.object({ cmd: z.string(), exitCode: z.number() }),
+});
+export type GoldenVersion = z.infer<typeof GoldenVersion>;
+
+export const GoldenManifest = z.object({ head: z.number(), versions: z.array(GoldenVersion) });
+export type GoldenManifest = z.infer<typeof GoldenManifest>;
+
+/** The live machine a person sets up before sealing it as a golden. It is not
+ * a workspace and never appears in the rail; `screen` is present when the
+ * machine streams a display (desktop kind). */
+export const GoldenBuilderView = z.object({
+  id: z.string(),
+  name: z.string(),
+  kind: MachineKind,
+  createdAt: z.string(),
+  screen: z.object({ streamUrl: z.string() }).optional(),
+});
+export type GoldenBuilderView = z.infer<typeof GoldenBuilderView>;
+
+export const GoldenStage = z.enum([
+  "creating",
+  "deploying-daemon",
+  "installing-harness",
+  "ready",
+  "snapshotting",
+  "smoke-forking",
+  "sealed",
+  "failed",
+]);
+export type GoldenStage = z.infer<typeof GoldenStage>;
+
+/** Progress of a golden prepare or seal, keyed by golden name; `detail` is
+ * free text for a progress line (the failure message on `failed`). */
+export const GoldenStageEvent = z.object({
+  type: z.literal("golden.stage"),
+  name: z.string(),
+  stage: GoldenStage,
+  detail: z.string().optional(),
+});
+export type GoldenStageEvent = z.infer<typeof GoldenStageEvent>;
+
 export const EventUnion = z.discriminatedUnion("type", [
   WorkspaceCreatedEvent,
   WorkspaceNappedEvent,
@@ -191,6 +263,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   PortOpenEvent,
   PortCloseEvent,
   InboxFileEvent,
+  GoldenStageEvent,
 ]);
 export type EventUnion = z.infer<typeof EventUnion>;
 
@@ -298,6 +371,8 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     memMb: z.number().optional(),
   }),
   z.object({ id: reqId, op: z.literal("workspaces.delete"), workspaceId: z.string() }),
+  /** Replies with a DaemonReachView; the runtime remints the edge token when it nears expiry. */
+  z.object({ id: reqId, op: z.literal("workspaces.daemonReach"), workspaceId: z.string() }),
   z.object({
     id: reqId,
     op: z.literal("sessions.start"),
@@ -308,11 +383,28 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     cwd: z.string().optional(),
   }),
   z.object({ id: reqId, op: z.literal("sessions.list"), workspaceId: z.string().optional() }),
+  /** Replies with the workspace's persisted SessionEvent[] (oldest first, capped by the runtime). */
+  z.object({ id: reqId, op: z.literal("sessions.history"), workspaceId: z.string() }),
   z.object({ id: reqId, op: z.literal("golden.get"), name: z.string() }),
+  /** Replies with the backend's Capabilities; the UI gates features on these. */
+  z.object({ id: reqId, op: z.literal("capabilities.get") }),
+  /** Boots a fresh builder for golden `name`; replies with a GoldenBuilderView.
+   * Progress rides golden.stage events on the events channel. */
+  z.object({ id: reqId, op: z.literal("golden.prepare"), name: z.string(), kind: MachineKind.optional() }),
+  /** Snapshots the builder, smoke-tests a fork, appends a manifest version;
+   * replies with { manifest, version }. The builder is consumed either way. */
+  z.object({ id: reqId, op: z.literal("golden.seal"), builderId: z.string() }),
 ]);
 export type RuntimeRequest = z.infer<typeof RuntimeRequest>;
 
 export const RuntimeOkResponse = z.object({ id: reqId.nullable(), ok: z.literal(true) }).passthrough();
-export const RuntimeErrorResponse = z.object({ id: reqId.nullable(), ok: z.literal(false), error: z.string() });
+/** `kind` carries a typed failure when the runtime has one (engine WspError
+ * kinds such as "concurrency", or "notFirstLife" from a refused seal). */
+export const RuntimeErrorResponse = z.object({
+  id: reqId.nullable(),
+  ok: z.literal(false),
+  error: z.string(),
+  kind: z.string().optional(),
+});
 export const RuntimeResponse = z.union([RuntimeOkResponse, RuntimeErrorResponse]);
 export type RuntimeResponse = z.infer<typeof RuntimeResponse>;

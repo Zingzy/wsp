@@ -149,6 +149,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               await rt.workspaces.delete(msg.workspaceId);
               send({ id: msg.id, ok: true });
               return;
+            case "workspaces.daemonReach":
+              send({ id: msg.id, ok: true, reach: await rt.workspaces.daemonReach(msg.workspaceId) });
+              return;
             case "sessions.start": {
               const handle = await rt.sessions.start(msg.workspaceId, {
                 prompt: msg.prompt,
@@ -162,12 +165,34 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "sessions.list":
               send({ id: msg.id, ok: true, sessions: rt.sessions.list(msg.workspaceId) });
               return;
+            case "sessions.history":
+              send({ id: msg.id, ok: true, events: await rt.sessions.history(msg.workspaceId) });
+              return;
             case "golden.get":
               send({ id: msg.id, ok: true, manifest: await rt.golden.get(msg.name) });
               return;
+            case "capabilities.get":
+              send({ id: msg.id, ok: true, capabilities: rt.backend.capabilities });
+              return;
+            case "golden.prepare":
+              send({
+                id: msg.id,
+                ok: true,
+                builder: await rt.golden.prepare({ name: msg.name, ...(msg.kind !== undefined ? { kind: msg.kind } : {}) }),
+              });
+              return;
+            case "golden.seal":
+              send({ id: msg.id, ok: true, ...(await rt.golden.seal(msg.builderId)) });
+              return;
           }
         } catch (e) {
-          send({ id: msg.id, ok: false, error: e instanceof Error ? e.message : String(e) });
+          const kind = (e as { kind?: unknown }).kind;
+          send({
+            id: msg.id,
+            ok: false,
+            error: e instanceof Error ? e.message : String(e),
+            ...(typeof kind === "string" ? { kind } : {}),
+          });
         }
       })();
     });

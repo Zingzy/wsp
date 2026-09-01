@@ -5,6 +5,7 @@ import { useReady, useStore } from "./protocol/store.js";
 import { Rail } from "./components/Rail.js";
 import { TabStrip } from "./components/TabStrip.js";
 import { MetaPanel } from "./components/MetaPanel.js";
+import { wireTerminals } from "./terminal/wiring.js";
 import styles from "./App.module.css";
 
 export function App({ wsUrl, token }: { wsUrl: string; token: string }) {
@@ -16,6 +17,7 @@ export function App({ wsUrl, token }: { wsUrl: string; token: string }) {
     void client.connect().then(() => { if (live) bind(makeApi(client)); });
     return () => { live = false; client.close(); };
   }, [wsUrl, token, bind]);
+  useEffect(() => wireTerminals(useStore), []);
   return (
     <div className={styles.app}>
       <aside className={styles.rail}><Rail /></aside>
