@@ -6,6 +6,18 @@
 
 import { z } from "zod";
 
+// --- backend capabilities ----------------------------------------------------
+
+/** Honest per-backend feature flags; the UI degrades based on these, never on probing. */
+export const Capabilities = z.object({
+  liveCloneForks: z.boolean(),
+  ramPreservingPause: z.boolean(),
+  resize: z.boolean(),
+  previewUrls: z.boolean(),
+  signedUrls: z.boolean(),
+});
+export type Capabilities = z.infer<typeof Capabilities>;
+
 // --- views -----------------------------------------------------------------
 
 export const WorkspacePhase = z.enum(["running", "napping"]);
@@ -135,7 +147,7 @@ export const EventUnion = z.discriminatedUnion("type", [
 ]);
 export type EventUnion = z.infer<typeof EventUnion>;
 
-// --- daemon wire protocol (ws://127.0.0.1:7070/?token=..., 4401 on bad token) --
+// --- daemon wire protocol (ws://0.0.0.0:7070/?token=..., 4401 on bad token) ---
 
 const reqId = z.union([z.string(), z.number()]);
 
@@ -165,6 +177,8 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   }),
   z.object({ id: reqId, op: z.literal("manifest.restartScript") }),
   z.object({ id: reqId, op: z.literal("inbox.watch") }),
+  z.object({ id: reqId, op: z.literal("inbox.rescan") }),
+  z.object({ id: reqId, op: z.literal("ping") }),
 ]);
 export type DaemonRequest = z.infer<typeof DaemonRequest>;
 

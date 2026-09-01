@@ -1,3 +1,5 @@
+import type { Capabilities } from "@wsp/protocol";
+
 export type MachineKind = "sandbox" | "desktop";
 export type MachineState = "starting" | "running" | "paused" | "gone";
 
@@ -28,6 +30,7 @@ export interface Machine {
 }
 
 export interface MachineBackend {
+  readonly capabilities: Capabilities;
   create(spec: MachineSpec): Promise<Machine>;
   get(id: string): Promise<Machine>;
   list(labels?: Record<string, string>): Promise<{ id: string; state: MachineState; labels: Record<string, string> }[]>;

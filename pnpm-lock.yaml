@@ -57,6 +57,10 @@ importers:
         version: 8.18.1
 
   packages/engine:
+    dependencies:
+      '@wsp/protocol':
+        specifier: workspace:*
+        version: link:../protocol
     devDependencies:
       '@types/ws':
         specifier: ^8.18.1
@@ -92,6 +96,9 @@ importers:
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1
+      '@wsp/daemon':
+        specifier: workspace:*
+        version: link:../daemon
 
 packages:
 

@@ -9,6 +9,7 @@ const YOUNG = new Date(NOW - 2 * 60_000).toISOString();
 function stubBackend(rows: { id: string; state: MachineState; labels: Record<string, string> }[]) {
   const killed: string[] = [];
   const backend: MachineBackend = {
+    capabilities: { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true },
     async create() { throw new Error("unused"); },
     async get(id) {
       return {

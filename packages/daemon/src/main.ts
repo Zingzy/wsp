@@ -7,7 +7,8 @@ import { PortWatcher, procNetTcpSource, type PortSnapshotSource } from "./ports.
 import { PtyManager } from "./pty-manager.js";
 
 export const DEFAULT_PORT = 7070;
-export const DEFAULT_HOST = "127.0.0.1";
+// 0.0.0.0, not loopback: the previewUrl edge dials the guest's eth0 (loopback answers 502).
+export const DEFAULT_HOST = "0.0.0.0";
 export const DEFAULT_TOKEN_PATH = "/root/.wsp-daemon-token";
 export const DEFAULT_INBOX_DIR = "/root/inbox";
 export const DEFAULT_MANIFEST_PATH = "/root/.wsp/manifest.json";
@@ -77,6 +78,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
 
   wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     const url = new URL(req.url ?? "/", "ws://localhost");
+    // With the server on 0.0.0.0 this check is the only gate; nothing below may run before it.
     if (url.searchParams.get("token") !== token) {
       ws.close(4401, "unauthorized");
       return;
@@ -221,6 +223,18 @@ async function handle(ws: WebSocket, state: ConnState, ctx: Ctx, msg: Request): 
     }
     case "inbox.watch": {
       subscribe(state, ws, ctx.getInboxWatcher(), ["inbox.file"]);
+      reply(ws, msg.id, {});
+      return;
+    }
+    case "inbox.rescan": {
+      const files = await ctx.getInboxWatcher().rescan();
+      for (const e of files) push(ws, { ...e });
+      reply(ws, msg.id, { count: files.length });
+      return;
+    }
+    case "ping": {
+      // App-level heartbeat: the previewUrl edge sweeps idle connections and
+      // browser clients cannot send protocol pings.
       reply(ws, msg.id, {});
       return;
     }

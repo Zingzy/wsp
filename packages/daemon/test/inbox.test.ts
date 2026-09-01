@@ -32,4 +32,27 @@ describe("InboxWatcher", () => {
     expect(events).toHaveLength(1); // settled file does not re-fire
     w.stop();
   });
+
+  it("rescan lists settled files but skips ones still uploading", async () => {
+    const d2 = mkdtempSync(join(tmpdir(), "wsp-inbox-rescan-"));
+    const settled = join(d2, "old.png");
+    const part = join(d2, "new.part");
+    writeFileSync(settled, "o".repeat(10));
+    const w = new InboxWatcher({ dir: d2, quietMs: 200, pollMs: 40 });
+    w.start();
+
+    // Keep new.part growing until the watcher has it pending and old.png has settled out.
+    writeFileSync(part, "n");
+    const deadline = Date.now() + 3000;
+    let paths: string[] = [];
+    do {
+      appendFileSync(part, "n");
+      await new Promise(r => setTimeout(r, 50));
+      paths = (await w.rescan()).map(f => f.path);
+    } while ((paths.includes(part) || !paths.includes(settled)) && Date.now() < deadline);
+
+    expect(paths).toEqual([settled]);
+    w.stop();
+    rmSync(d2, { recursive: true, force: true });
+  });
 });

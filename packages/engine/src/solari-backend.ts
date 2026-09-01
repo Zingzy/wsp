@@ -1,3 +1,4 @@
+import type { Capabilities } from "@wsp/protocol";
 import { backoffMs, classify, shouldRetry, type WspError } from "./errors.js";
 import type { ExecResult, Machine, MachineBackend, MachineKind, MachineSpec, MachineState } from "./machine.js";
 
@@ -30,6 +31,14 @@ function fail(e: WspError): never {
 }
 
 export class SolariBackend implements MachineBackend {
+  readonly capabilities: Capabilities = {
+    liveCloneForks: true,
+    ramPreservingPause: true,
+    resize: false, // Starter plan clamps every sandbox to 2 vCPU
+    previewUrls: true,
+    signedUrls: true,
+  };
+
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly fetch: Fetch;
