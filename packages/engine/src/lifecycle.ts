@@ -14,6 +14,24 @@ export interface WorkspaceHooks {
 
 export type WorkspacePhase = "running" | "napping";
 
+/** Thrown when a snapshot is asked of a machine that has been resumed. Typed so
+ * callers (the wizard) can tell "start over" from an ordinary failure. */
+export class NotFirstLifeError extends Error {
+  readonly kind = "notFirstLife" as const;
+  constructor(
+    readonly machineId: string,
+    action: string,
+  ) {
+    super(`${action} refused: machine ${machineId} is not first-life (it was resumed); snapshots only come from fresh machines`);
+    this.name = "NotFirstLifeError";
+  }
+}
+
+/** The snapshot-fresh rule as one check: every snapshot in the engine goes through it. */
+export function assertFirstLife(machineId: string, firstLife: boolean, action: string): void {
+  if (!firstLife) throw new NotFirstLifeError(machineId, action);
+}
+
 export class Workspace {
   private machine: Machine;
   private phase: WorkspacePhase = "running";
@@ -81,11 +99,7 @@ export class Workspace {
   }
 
   async checkpoint(name: string): Promise<string> {
-    if (!this.firstLife) {
-      throw new Error(
-        `checkpoint(${name}) refused: machine ${this.machine.id} is not first-life (was resumed); build images via the golden pipeline instead`,
-      );
-    }
+    assertFirstLife(this.machine.id, this.firstLife, `checkpoint(${name})`);
     return this.machine.snapshot(name);
   }
 

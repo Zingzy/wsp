@@ -4,6 +4,9 @@ import {
   DaemonRequest,
   DaemonResponse,
   EventUnion,
+  GoldenManifest,
+  GoldenStageEvent,
+  RuntimeErrorResponse,
   RuntimeRequest,
   RuntimeResponse,
   SessionView,
@@ -135,10 +138,35 @@ describe("runtime wire types", () => {
       { id: 11, op: "sessions.start", workspaceId: "ws_1", prompt: "do the thing" },
       { id: 12, op: "sessions.list" },
       { id: 13, op: "golden.get", name: "default" },
+      { id: 14, op: "golden.prepare", name: "default" },
+      { id: 15, op: "golden.prepare", name: "default", kind: "desktop" },
+      { id: 16, op: "golden.seal", builderId: "m1" },
     ];
     for (const r of reqs) expect(RuntimeRequest.parse(r)).toEqual(r);
     expect(() => RuntimeRequest.parse({ id: 1, op: "workspaces.create" })).toThrow(); // golden+name required
+    expect(() => RuntimeRequest.parse({ id: 1, op: "golden.prepare", name: "d", kind: "browser" })).toThrow();
+    expect(() => RuntimeRequest.parse({ id: 1, op: "golden.seal" })).toThrow(); // builderId required
     expect(RuntimeResponse.parse({ id: 4, ok: true, workspace: { id: "w" } })).toBeTruthy();
     expect(RuntimeResponse.parse({ id: 4, ok: false, error: "nope" })).toBeTruthy();
+  });
+});
+
+describe("golden wire schemas", () => {
+  it("golden.stage rides the event union with a closed stage enum and an optional detail", () => {
+    const e = { type: "golden.stage", name: "default", stage: "smoke-forking", detail: "claude --version" };
+    expect(EventUnion.parse(e)).toEqual(e);
+    expect(GoldenStageEvent.parse({ type: "golden.stage", name: "default", stage: "sealed" })).toBeTruthy();
+    expect(() => GoldenStageEvent.parse({ type: "golden.stage", name: "default", stage: "vibing" })).toThrow();
+  });
+
+  it("a manifest sealed before kind was recorded still parses; new ones carry the kind", () => {
+    const old = { version: 1, snapshotId: "snap_a", baseTemplate: "base", setupSha: "x", createdAt: "2026-09-01T00:00:00Z", smoke: { cmd: "true", exitCode: 0 } };
+    const parsed = GoldenManifest.parse({ head: 2, versions: [old, { ...old, version: 2, kind: "desktop" }] });
+    expect(parsed.versions[0]!.kind).toBeUndefined();
+    expect(parsed.versions[1]!.kind).toBe("desktop");
+  });
+
+  it("error replies may carry a typed kind", () => {
+    expect(RuntimeErrorResponse.parse({ id: 1, ok: false, error: "refused", kind: "notFirstLife" }).kind).toBe("notFirstLife");
   });
 });

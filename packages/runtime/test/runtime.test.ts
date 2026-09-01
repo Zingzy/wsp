@@ -116,6 +116,54 @@ describe("runtime", () => {
   });
 });
 
+describe("runtime golden builders", () => {
+  const recipe = { setup: "install", smoke: "true" };
+
+  it("reap kills a builder left behind by a crashed wizard, whatever its age, and keeps this process's own", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
+    const stale = await crashed.golden.prepare({ name: "default" });
+
+    const rt = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
+    const own = await rt.golden.prepare({ name: "default" });
+    expect((await rt.golden.builders()).map(b => b.id).sort()).toEqual([stale.id, own.id].sort());
+
+    const reaped = await rt.reap();
+    expect(reaped).toEqual([stale.id]);
+    expect(backend.machines.find(m => m.id === stale.id)!.killed).toBe(true);
+    expect(backend.machines.find(m => m.id === own.id)!.killed).toBe(false);
+    expect((await rt.golden.builders()).map(b => b.id)).toEqual([own.id]);
+    expect(await store.list("builders")).toHaveLength(1);
+    expect(await rt.workspaces.list()).toEqual([]);
+  });
+
+  it("a builder whose machine already vanished is forgotten on hydrate", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
+    const b = await crashed.golden.prepare();
+    await backend.machines[0]!.kill();
+    const rt = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
+    expect(await rt.golden.builders()).toEqual([]);
+    expect(await store.get("builders", b.id)).toBeUndefined();
+  });
+
+  it("a failed seal forgets the builder and writes no manifest", async () => {
+    const backend = stubBackend();
+    backend.execImpl = (_m, cmd) => (cmd === "true" ? { exitCode: 1, stdout: "", stderr: "broken" } : { exitCode: 0, stdout: "", stderr: "" });
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
+    const stages: string[] = [];
+    rt.events.on("golden.stage", e => { if (e.type === "golden.stage") stages.push(e.stage); });
+    const b = await rt.golden.prepare();
+    await expect(rt.golden.seal(b.id)).rejects.toThrow(/smoke failed/);
+    expect(stages.at(-1)).toBe("failed");
+    expect(backend.machines.every(m => m.killed)).toBe(true);
+    expect(await rt.golden.builders()).toEqual([]);
+    expect(await rt.golden.get()).toBeUndefined();
+  });
+});
+
 describe("runtime upgrade vault", () => {
   it("vaults user files (skipping golden-provided dirs) onto the fresh fork", async () => {
     const backend = stubBackend();
