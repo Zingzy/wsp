@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Zustand store fed by one ProtocolClient + typed React hooks. The six component
-// tickets code against these hooks; they are the stable contract.
+// Zustand store fed by one ProtocolClient + typed React hooks: the stable
+// contract components code against.
 import { useEffect } from "react";
 import { create } from "zustand";
 import type { SessionView, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";

@@ -18,9 +18,9 @@ import {
 } from "./chat/transcript.js";
 import styles from "./chat/ChatTab.module.css";
 
-// The runtime wire has sessions.start, but the Api in protocol/client.ts
-// (ticket #19's file) does not wrap it yet. Detect the method structurally;
-// until it lands the composer stays disabled with the reason shown.
+// The runtime wire has sessions.start, but the client Api does not wrap it
+// yet. Detect the method structurally; until it exists the composer stays
+// disabled with the reason shown.
 interface StartsSessions {
   startSession(opts: { workspaceId: string; prompt: string; resume?: string }): Promise<unknown>;
 }
