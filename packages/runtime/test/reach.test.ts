@@ -8,16 +8,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 import { connectDaemon, daemonWsUrl, type DaemonReach } from "../src/reach.js";
 import { startTcpProxy, type TcpProxy } from "./tcp-proxy.js";
+import { until } from "./until.js";
 
 const TOKEN = "reach-token";
-
-async function until(cond: () => boolean, ms = 5000): Promise<void> {
-  const deadline = Date.now() + ms;
-  while (!cond()) {
-    if (Date.now() > deadline) throw new Error("condition not met in time");
-    await new Promise(r => setTimeout(r, 25));
-  }
-}
 
 let daemon: DaemonHandle | undefined;
 let proxy: TcpProxy | undefined;
@@ -106,7 +99,8 @@ describe("connectDaemon", () => {
     await until(() => seen(f1) >= 2);
     // and the file lost in the gap was recovered
     await until(() => seen(f2) >= 1);
-    expect(reach.stats().reconnects).toBeGreaterThanOrEqual(1);
+    // the rescan pushes its files before it replies, and the ritual counts the reconnect after the reply
+    await until(() => reach!.stats().reconnects >= 1);
 
     // ports.watch was re-subscribed on the new connection
     snapshot = [{ port: 9999, pid: 42, inode: 7, uid: 0 }];
