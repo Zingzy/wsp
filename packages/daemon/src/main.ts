@@ -3,6 +3,7 @@ import type { IncomingMessage } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 import { InboxWatcher } from "./inbox.js";
 import { ProcessManifest, type ManifestOptions } from "./manifest.js";
+import { linuxModeProbe, ModeWatcher, type ModeProbe } from "./mode.js";
 import { PortWatcher, procNetTcpSource, type PortSnapshotSource } from "./ports.js";
 import { PtyManager } from "./pty-manager.js";
 
@@ -24,6 +25,8 @@ export interface DaemonOptions {
   inboxQuietMs?: number;
   inboxPollMs?: number;
   manifest?: ManifestOptions;
+  modeProbe?: ModeProbe;
+  modeIntervalMs?: number;
 }
 
 export interface DaemonHandle {
@@ -101,7 +104,13 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
     return inboxWatcher;
   };
 
-  const ctx: Ctx = { ptys, manifest, getPortWatcher, getInboxWatcher };
+  // Inert until a pty.attach; the Linux-only default probe fails silently on
+  // darwin, so attach tests without a fake probe still pass.
+  const modes = new ModeWatcher(opts.modeProbe ?? linuxModeProbe(), {
+    ...(opts.modeIntervalMs !== undefined ? { intervalMs: opts.modeIntervalMs } : {}),
+  });
+
+  const ctx: Ctx = { ptys, manifest, modes, getPortWatcher, getInboxWatcher };
   const wss = new WebSocketServer({ host: opts.host ?? DEFAULT_HOST, port: opts.port ?? DEFAULT_PORT });
 
   wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
@@ -144,6 +153,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
     close: async () => {
       portWatcher?.stop();
       inboxWatcher?.stop();
+      modes.stop();
       for (const ws of wss.clients) ws.terminate();
       await new Promise<void>((resolve, reject) => wss.close(err => (err ? reject(err) : resolve())));
       ptys.destroyAll();
@@ -154,6 +164,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
 interface Ctx {
   ptys: PtyManager;
   manifest: ProcessManifest;
+  modes: ModeWatcher;
   getPortWatcher(): PortWatcher;
   getInboxWatcher(): InboxWatcher;
 }
@@ -202,7 +213,8 @@ async function handle(ws: WebSocket, state: ConnState, ctx: Ctx, msg: Request): 
       const s = requirePty(ctx.ptys, msg);
       const unData = s.attach(data => push(ws, { type: "pty.data", ptyId: s.id, data }));
       const unExit = s.onExit(e => push(ws, { type: "pty.exit", ptyId: s.id, exitCode: e.exitCode, signal: e.signal }));
-      state.detaches.push(unData, unExit);
+      const unMode = ctx.modes.attach(s.id, s.pid, e => push(ws, { ...e }));
+      state.detaches.push(unData, unExit, unMode);
       reply(ws, msg.id, { ptyId: s.id });
       return;
     }

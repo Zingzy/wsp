@@ -126,4 +126,27 @@ describe("daemon WS server", () => {
     expect(bad.ok).toBe(false);
     c2.close();
   });
+
+  it("pushes pty.mode on attach and again when the probed state changes", async () => {
+    let state = { icanon: true, echo: true, foreground: "bash" };
+    const d = await startDaemon({ port: 0, token: TOKEN, modeProbe: async () => state, modeIntervalMs: 50 });
+    try {
+      const c = await Client.connect(d.port, TOKEN);
+      const created = await c.request("pty.create", { shell: "bash" });
+      const ptyId = created["ptyId"] as string;
+      await c.request("pty.attach", { ptyId });
+      await new Promise(r => setTimeout(r, 100));
+      const modes = () => c.events.filter(e => e.type === "pty.mode");
+      expect(modes()[0]).toMatchObject({ ptyId, mode: "line", echo: true, foreground: "bash" });
+
+      state = { icanon: false, echo: false, foreground: "vim" };
+      await new Promise(r => setTimeout(r, 150));
+      const last = modes()[modes().length - 1];
+      expect(last).toMatchObject({ ptyId, mode: "raw", echo: false, foreground: "vim" });
+      expect(modes().length).toBe(2);
+      c.close();
+    } finally {
+      await d.close();
+    }
+  });
 });
