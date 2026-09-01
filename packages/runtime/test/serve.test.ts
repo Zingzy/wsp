@@ -203,3 +203,47 @@ describe("serveRuntime golden wizard ops", () => {
     c.close();
   });
 });
+
+describe("serveRuntime snapshot lineage", () => {
+  const version = (n: number) => ({
+    version: n,
+    snapshotId: `snap_golden-v${n}`,
+    baseTemplate: "base",
+    setupSha: `sha${n}`,
+    createdAt: `2026-08-${10 + n}T00:00:00.000Z`,
+    smoke: { cmd: "true", exitCode: 0 },
+  });
+
+  it("snapshots.list is the manifest with head; rollback moves head, says existing workspaces are untouched, persists", async () => {
+    const store = memoryStore();
+    await store.put("goldens", "default", { head: 2, versions: [version(1), version(2)] });
+    srv = await serveRuntime(createRuntime({ backend: stubBackend(), store, adapters: {} }), { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+
+    const listed = await c.request("snapshots.list");
+    expect(listed.ok).toBe(true);
+    expect(listed["lineage"]).toEqual({ name: "default", head: 2, versions: [version(1), version(2)] });
+
+    const rolled = await c.request("snapshots.rollback", { version: 1 });
+    expect(rolled.ok).toBe(true);
+    expect(rolled["lineage"]).toEqual({ name: "default", head: 1, versions: [version(1), version(2)] });
+    expect(rolled["existingWorkspaces"]).toBe("untouched");
+    expect((await c.request("golden.get", { name: "default" }))["manifest"]).toEqual({ head: 1, versions: [version(1), version(2)] });
+
+    const empty = await c.request("snapshots.list", { name: "other" });
+    expect(empty["lineage"]).toEqual({ name: "other", head: null, versions: [] });
+    c.close();
+  });
+
+  it("snapshots.rollback to a version outside the manifest is a typed refusal that changes nothing", async () => {
+    const store = memoryStore();
+    await store.put("goldens", "default", { head: 1, versions: [version(1)] });
+    srv = await serveRuntime(createRuntime({ backend: stubBackend(), store, adapters: {} }), { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    const refused = await c.request("snapshots.rollback", { version: 9 });
+    expect(refused).toMatchObject({ ok: false, kind: "missing" });
+    expect(String(refused["error"])).toContain("v9");
+    expect((await c.request("snapshots.list"))["lineage"]).toMatchObject({ head: 1 });
+    c.close();
+  });
+});

@@ -31,6 +31,8 @@ function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
     startSession: async o => row(o.workspaceId),
     daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
     sessionHistory: async () => [],
+    listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
+    rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
     listSessions: async id => (id === undefined ? sessions : sessions.filter(s => s.workspaceId === id)),
     subscribe: fn => {
       listeners.add(fn);
