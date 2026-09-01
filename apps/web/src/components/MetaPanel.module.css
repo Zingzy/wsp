@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: AGPL-3.0-only */
-/* Values from the approved mock's .meta/.sect/.kv/.spark/.snap blocks;
- * --acc appears only for spend (the sparkline). */
+/* Values from the approved mock's .meta/.sect/.kv/.spark/.snap/.key blocks;
+ * --acc appears only for spend (the sparkline) and confirm-resize. */
 .meta { display: flex; flex-direction: column; min-height: 100%; font-size: 13px; }
 .empty { color: var(--deep); font-family: var(--mono); font-size: 12px; padding: 14px; }
 .scroll { flex: 1; min-height: 0; }
@@ -44,3 +44,42 @@
 .l1 em { font-style: normal; color: var(--deep); margin-left: 8px; }
 .l2 { font-size: 10.5px; color: var(--deep); line-height: 1.4; display: block; }
 .when { display: flex; align-items: center; justify-content: flex-end; font-size: 10.5px; color: var(--deep); }
+
+.actions { border-top: 1px solid var(--soft); padding: 13px 16px 15px; }
+.btns { display: flex; gap: 8px; }
+.btns > .key { flex: 1; }
+.key {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 7px 11px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--card); box-shadow: inset 0 0.7px 0 rgba(255, 255, 255, 0.16);
+  font-size: 11.5px; font-family: inherit; color: var(--muted); cursor: pointer;
+  transition: background 0.16s, color 0.16s, border-color 0.16s;
+}
+.key:hover { background: color-mix(in srgb, var(--card), white 4%); color: var(--fg); }
+.key:active { background: color-mix(in srgb, var(--card), white 7%); }
+.key[disabled] { opacity: 0.45; cursor: default; }
+.key[disabled]:hover { background: var(--card); color: var(--muted); }
+.keyPrimary { background: var(--fg); color: #0b0b0d; border-color: transparent; box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.22); }
+.keyPrimary:hover { background: #e6e6e8; color: #0b0b0d; }
+.keyMini {
+  padding: 4px 9px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--card); box-shadow: inset 0 0.7px 0 rgba(255, 255, 255, 0.16);
+  font-size: 10.5px; font-family: inherit; color: var(--muted); cursor: pointer;
+  transition: background 0.16s, color 0.16s, border-color 0.16s;
+}
+.keyMini:hover { background: color-mix(in srgb, var(--card), white 4%); color: var(--fg); }
+.keyMini[data-picked="true"] { border-color: var(--muted); color: var(--fg); }
+.keyConfirm { border-color: color-mix(in srgb, var(--acc) 55%, transparent); color: var(--acc); }
+.keyConfirm:hover { background: color-mix(in srgb, var(--acc) 8%, transparent); color: var(--acc); }
+
+.upgradeRow { margin-top: 11px; border: 1px solid var(--soft); border-radius: 8px; padding: 11px 12px; }
+.tiers { display: flex; gap: 6px; margin-bottom: 10px; }
+.uRow { display: flex; font-size: 11px; color: var(--deep); margin-bottom: 5px; }
+.uRow b { font-weight: 400; color: var(--fg); margin-left: auto; }
+.upgradeRow .btns { margin-top: 10px; }
+
+.status { min-height: 17px; margin-top: 6px; font-size: 10.5px; color: var(--deep); }
+.statusErr {
+  background: none; border: none; padding: 0; margin: 0; text-align: left;
+  font: inherit; color: var(--deep); cursor: pointer;
+}

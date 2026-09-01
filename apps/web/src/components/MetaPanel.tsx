@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Meta panel (Plan 3 Task 7): machine facts, live spend sparkline, snapshot
-// lineage. Lineage is read-only: no snapshot list/rollback ops exist on the
-// wire, so it renders from the view's golden + createdAt fields.
+// lineage, pause/wake, upgrade. Lineage is read-only: no snapshot
+// list/rollback ops exist on the wire, so it renders from the view's
+// golden + createdAt fields.
+import { useState } from "react";
 import type { WorkspaceSize, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
-import { useCost, useSelectedId, useStatus, useWorkspace } from "../protocol/store.js";
-import { useCostSeries, type CostPoint } from "../protocol/meta.js";
+import { useCost, useSelectedId, useStatus, useStore, useWorkspace } from "../protocol/store.js";
+import { upgradeOptions, useCostSeries, useUpgrade, type CostPoint, type Upgrade } from "../protocol/meta.js";
 import styles from "./MetaPanel.module.css";
 
 const money = (n: number, d = 4): string => `$${n.toFixed(d)}`;
@@ -46,7 +48,15 @@ function Spark({ rates }: { rates: number[] }) {
   );
 }
 
-function Facts({ w, status, awakeMs }: { w: WorkspaceView; status: WorkspaceStatus | null; awakeMs: number | null }) {
+interface FactsProps {
+  w: WorkspaceView;
+  status: WorkspaceStatus | null;
+  awakeMs: number | null;
+  /** Optimistically painted while an upgrade is in flight. */
+  pendingSize: WorkspaceSize | null;
+}
+
+function Facts({ w, status, awakeMs, pendingSize }: FactsProps) {
   const expected = expectedMachineState(w.phase);
   const diverged = status && status.machineState !== expected ? status.machineState : null;
   return (
@@ -63,7 +73,18 @@ function Facts({ w, status, awakeMs }: { w: WorkspaceView; status: WorkspaceStat
           <span className={styles.stDot} data-phase={w.phase} />
         </dd>
         <dt>machine</dt>
-        <dd data-k="machine">{status ? sizeLabel(status.size) : "—"}</dd>
+        <dd data-k="machine">
+          {pendingSize ? (
+            <>
+              {sizeLabel(pendingSize)}
+              <span className={styles.dim}> · resizing</span>
+            </>
+          ) : status ? (
+            sizeLabel(status.size)
+          ) : (
+            "—"
+          )}
+        </dd>
         <dt>reach</dt>
         <dd data-k="reach">{status ? status.reach.state.replace("-", " ") : "—"}</dd>
         <dt>awake</dt>
@@ -134,16 +155,105 @@ function Lineage({ w }: { w: WorkspaceView }) {
   );
 }
 
+function Actions({ w, status, upgrade }: { w: WorkspaceView; status: WorkspaceStatus | null; upgrade: Upgrade }) {
+  const toggle = useStore(s => s.toggle);
+  const [open, setOpen] = useState(false);
+  const [picked, setPicked] = useState<WorkspaceSize | null>(null);
+  const running = w.phase === "running";
+  const options = status ? upgradeOptions(status.size) : [];
+  const choice = picked ?? options[0] ?? null;
+  const rate = status?.rateUsdPerHour ?? null;
+
+  const close = (): void => {
+    setOpen(false);
+    setPicked(null);
+  };
+  const confirm = (): void => {
+    if (!choice) return;
+    close();
+    upgrade.run(choice);
+  };
+
+  return (
+    <div className={styles.actions}>
+      <div className={styles.btns}>
+        <button
+          className={styles.key}
+          aria-label={`${running ? "pause" : "wake"} ${w.name}`}
+          title={running ? "suspend the vm, keep the disk" : "boot the vm from its disk"}
+          onClick={() => void toggle(w.id)}
+        >
+          {running ? "pause" : "wake"}
+        </button>
+        <button
+          className={`${styles.key} ${styles.keyPrimary}`}
+          disabled={!status || options.length === 0 || upgrade.phase.kind === "resizing"}
+          aria-label={`upgrade ${w.name}`}
+          title="resize to a larger machine"
+          onClick={() => (open ? close() : setOpen(true))}
+        >
+          {status && options.length === 0 ? "largest size" : "upgrade"}
+        </button>
+      </div>
+      {open && status && choice && (
+        <div className={styles.upgradeRow}>
+          {options.length > 1 && (
+            <div className={styles.tiers}>
+              {options.map(o => (
+                <button
+                  key={o.cpu}
+                  className={styles.keyMini}
+                  data-picked={o.cpu === choice.cpu}
+                  onClick={() => setPicked(o)}
+                >
+                  {sizeLabel(o)}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className={styles.uRow}>
+            current<b>{sizeLabel(status.size)}{rate !== null ? ` · ${money(rate, 3)}/hr` : ""}</b>
+          </div>
+          <div className={styles.uRow}>
+            new<b>{sizeLabel(choice)}{rate !== null ? ` · ~${money((rate * choice.cpu) / status.size.cpu, 3)}/hr` : ""}</b>
+          </div>
+          <div className={styles.btns}>
+            <button className={`${styles.keyMini} ${styles.keyConfirm}`} onClick={confirm}>
+              confirm resize
+            </button>
+            <button className={styles.keyMini} onClick={close}>
+              cancel
+            </button>
+          </div>
+        </div>
+      )}
+      <div className={styles.status} role="status">
+        {upgrade.phase.kind === "resizing" && "resizing…"}
+        {upgrade.phase.kind === "settling" && "resized"}
+        {upgrade.phase.kind === "failed" && (
+          <button className={styles.statusErr} onClick={upgrade.dismiss}>
+            {upgrade.phase.message}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Panel({ w, series }: { w: WorkspaceView; series: CostPoint[] }) {
   const status = useStatus(w.id);
+  const upgrade = useUpgrade(w.id);
   const last = series[series.length - 1];
+  const pendingSize =
+    upgrade.phase.kind === "resizing" || upgrade.phase.kind === "settling" ? upgrade.phase.size : null;
   return (
     <div className={styles.meta}>
       <div className={styles.scroll}>
-        <Facts w={w} status={status} awakeMs={last ? last.awakeMs : null} />
+        <Facts w={w} status={status} awakeMs={last ? last.awakeMs : null} pendingSize={pendingSize} />
         <Usage w={w} status={status} series={series} />
         <Lineage w={w} />
       </div>
+      <Actions w={w} status={status} upgrade={upgrade} />
     </div>
   );
 }

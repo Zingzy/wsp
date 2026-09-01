@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { EventUnion, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import type { EventUnion, WorkspaceSize, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 import { MetaPanel } from "../src/components/MetaPanel.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -34,10 +34,16 @@ const costEvent = (workspaceId: string, rate: number, awakeMs: number, at: strin
 });
 
 // Live emitter: MetaPanel's cost series listens through api.subscribe, exactly
-// like the store does, so tests push events through the same channel.
+// like the store does, so tests push events through the same channel. upgrade
+// is what makeApi will expose once client.ts wires the existing wire op.
 export function fakeApi(workspaces: WorkspaceView[]) {
   const listeners = new Set<(e: EventUnion) => void>();
-  const api: Api & { emit(e: EventUnion): void; nap: ReturnType<typeof vi.fn> } = {
+  const api: Api & {
+    emit(e: EventUnion): void;
+    nap: ReturnType<typeof vi.fn>;
+    upgrade: ReturnType<typeof vi.fn<(id: string, size: WorkspaceSize) => Promise<WorkspaceView>>>;
+  } = {
+    upgrade: vi.fn(async (id: string) => view(id, "?", "running")),
     listWorkspaces: vi.fn(async () => workspaces),
     getWorkspace: vi.fn(async id => workspaces.find(w => w.id === id)!),
     createWorkspace: vi.fn(async () => workspaces[0]!),
@@ -148,5 +154,86 @@ describe("snapshot lineage", () => {
     expect(screen.getByText("live disk")).toBeDefined();
     expect(screen.getByText("forked 2026-08-30")).toBeDefined();
     expect(fact("golden")).toBe("snap_golden01golden");
+  });
+});
+
+describe("pause/wake", () => {
+  it("paints the phase immediately and calls the api", async () => {
+    const api = await bindAndRender([view("ws_a", "api")]);
+    fireEvent.click(screen.getByRole("button", { name: "pause api" }));
+    expect(useStore.getState().workspaces[0]!.phase).toBe("napping");
+    expect(screen.getByRole("button", { name: "wake api" })).toBeDefined();
+    await waitFor(() => expect(api.nap).toHaveBeenCalledWith("ws_a"));
+  });
+
+  it("reverts on failure", async () => {
+    const api = await bindAndRender([view("ws_a", "api")]);
+    api.nap.mockRejectedValueOnce(new Error("backend said no"));
+    fireEvent.click(screen.getByRole("button", { name: "pause api" }));
+    expect(useStore.getState().workspaces[0]!.phase).toBe("napping");
+    await waitFor(() => expect(useStore.getState().workspaces[0]!.phase).toBe("running"));
+    expect(screen.getByRole("button", { name: "pause api" })).toBeDefined();
+  });
+});
+
+async function openPicker(api: Awaited<ReturnType<typeof bindAndRender>>) {
+  await waitFor(() => expect(fact("machine")).toBe("2 vCPU · 4 GB"));
+  fireEvent.click(screen.getByRole("button", { name: "upgrade api" }));
+  return api;
+}
+
+describe("upgrade", () => {
+  it("offers doubling tiers with the estimated rate", async () => {
+    await openPicker(await bindAndRender([view("ws_a", "api")]));
+    expect(screen.getByRole("button", { name: "8 vCPU · 16 GB" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "16 vCPU · 32 GB" })).toBeDefined();
+    expect(screen.getByText("~$0.220/hr", { exact: false })).toBeDefined();
+  });
+
+  it("paints the new size while the op runs, then settles on the status event", async () => {
+    const api = await bindAndRender([view("ws_a", "api")]);
+    let resolveUpgrade!: (w: WorkspaceView) => void;
+    api.upgrade.mockImplementationOnce(() => new Promise(res => (resolveUpgrade = res)));
+    await openPicker(api);
+    fireEvent.click(screen.getByRole("button", { name: "confirm resize" }));
+
+    // painted before the api call settles
+    expect(fact("machine")).toBe("4 vCPU · 8 GB · resizing");
+    expect(screen.getByRole("status").textContent).toBe("resizing…");
+    expect(api.upgrade).toHaveBeenCalledWith("ws_a", { cpu: 4, memMb: 8192 });
+
+    act(() => resolveUpgrade(view("ws_a", "api")));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("resized"));
+
+    const w = view("ws_a", "api");
+    act(() => api.emit({ type: "workspace.status", status: { ...status(w), size: { cpu: 4, memMb: 8192 } } }));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(""));
+    expect(fact("machine")).toBe("4 vCPU · 8 GB");
+  });
+
+  it("picks a larger tier when chosen", async () => {
+    const api = await openPicker(await bindAndRender([view("ws_a", "api")]));
+    fireEvent.click(screen.getByRole("button", { name: "8 vCPU · 16 GB" }));
+    fireEvent.click(screen.getByRole("button", { name: "confirm resize" }));
+    await waitFor(() => expect(api.upgrade).toHaveBeenCalledWith("ws_a", { cpu: 8, memMb: 16384 }));
+  });
+
+  it("un-paints and shows the message on failure", async () => {
+    const api = await bindAndRender([view("ws_a", "api")]);
+    api.upgrade.mockRejectedValueOnce(new Error("quota exceeded"));
+    await openPicker(api);
+    fireEvent.click(screen.getByRole("button", { name: "confirm resize" }));
+    await waitFor(() => expect(screen.getByText("quota exceeded")).toBeDefined());
+    expect(fact("machine")).toBe("2 vCPU · 4 GB");
+  });
+
+  it("fails soft while the client api lacks the upgrade method", async () => {
+    // today's makeApi: the wire op exists but the wrapper does not expose it
+    const api = await bindAndRender([view("ws_a", "api")]);
+    Object.assign(api, { upgrade: undefined });
+    await waitFor(() => expect(fact("machine")).toBe("2 vCPU · 4 GB"));
+    fireEvent.click(screen.getByRole("button", { name: "upgrade api" }));
+    fireEvent.click(screen.getByRole("button", { name: "confirm resize" }));
+    await waitFor(() => expect(screen.getByText(/not wired into the web client/)).toBeDefined());
   });
 });
