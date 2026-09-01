@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { makeApi, ProtocolClient } from "./protocol/client.js";
 import { useReady, useStore } from "./protocol/store.js";
 import { Rail } from "./components/Rail.js";
 import { TabStrip } from "./components/TabStrip.js";
 import { MetaPanel } from "./components/MetaPanel.js";
 import { wireTerminals } from "./terminal/wiring.js";
+import { Wizard, type KeyFlags } from "./wizard/Wizard.js";
 import styles from "./App.module.css";
 
-export function App({ wsUrl, token }: { wsUrl: string; token: string }) {
+export function App({ wsUrl, token, keys }: { wsUrl: string; token: string; keys?: KeyFlags }) {
   const bind = useStore(s => s.bind);
-  const ready = useReady();
   useEffect(() => {
     const client = new ProtocolClient({ url: wsUrl, token });
     let live = true;
@@ -18,10 +18,32 @@ export function App({ wsUrl, token }: { wsUrl: string; token: string }) {
     return () => { live = false; client.close(); };
   }, [wsUrl, token, bind]);
   useEffect(() => wireTerminals(useStore), []);
+  return <Shell {...(keys !== undefined ? { keys } : {})} />;
+}
+
+type Golden = "unknown" | "none" | "present";
+
+/** The window below the connection: the first-run wizard until a golden
+ * image exists, the three-column app from then on. */
+export function Shell({ keys }: { keys?: KeyFlags }) {
+  const api = useStore(s => s.api);
+  const ready = useReady();
+  const [golden, setGolden] = useState<Golden>("unknown");
+  useEffect(() => {
+    if (!api) return;
+    let live = true;
+    // A failed lookup falls through to the app; the rail's own create reports the error.
+    void api
+      .getGolden()
+      .then(m => { if (live) setGolden(m ? "present" : "none"); })
+      .catch(() => { if (live) setGolden("present"); });
+    return () => { live = false; };
+  }, [api]);
+  if (golden === "none") return <Wizard {...(keys !== undefined ? { keys } : {})} onDone={() => setGolden("present")} />;
   return (
     <div className={styles.app}>
       <aside className={styles.rail}><Rail /></aside>
-      <main className={styles.main}>{ready ? <TabStrip /> : <div className={styles.boot}>connecting to runtime…</div>}</main>
+      <main className={styles.main}>{ready && golden === "present" ? <TabStrip /> : <div className={styles.boot}>connecting to runtime…</div>}</main>
       <aside className={styles.meta}><MetaPanel /></aside>
     </div>
   );
