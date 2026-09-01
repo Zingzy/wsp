@@ -47,6 +47,34 @@ importers:
 
   packages/engine: {}
 
+  packages/protocol:
+    dependencies:
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
+
+  packages/runtime:
+    dependencies:
+      '@wsp/adapter-claude':
+        specifier: workspace:*
+        version: link:../adapter-claude
+      '@wsp/engine':
+        specifier: workspace:*
+        version: link:../engine
+      '@wsp/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      ws:
+        specifier: ^8.21.3
+        version: 8.21.3
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
+
 packages:
 
   '@esbuild/aix-ppc64@0.21.5':
@@ -910,6 +938,9 @@ packages:
       utf-8-validate:
         optional: true
 
+  zod@3.25.76:
+    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
+
 snapshots:
 
   '@esbuild/aix-ppc64@0.21.5':
@@ -1576,3 +1607,5 @@ snapshots:
       stackback: 0.0.2
 
   ws@8.21.3: {}
+
+  zod@3.25.76: {}

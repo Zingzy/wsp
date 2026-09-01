@@ -21,12 +21,26 @@ export class Workspace {
   // invisible from outside. So any resume disqualifies direct snapshots.
   private firstLife = true;
 
-  constructor(machine: Machine, private readonly hooks: WorkspaceHooks) {
+  constructor(
+    machine: Machine,
+    private readonly hooks: WorkspaceHooks,
+    initial?: { phase?: WorkspacePhase; firstLife?: boolean },
+  ) {
     this.machine = machine;
+    this.phase = initial?.phase ?? "running";
+    this.firstLife = initial?.firstLife ?? true;
   }
 
   get machineId(): string {
     return this.machine.id;
+  }
+
+  get currentPhase(): WorkspacePhase {
+    return this.phase;
+  }
+
+  get isFirstLife(): boolean {
+    return this.firstLife;
   }
 
   get goldenSnapshot(): string {

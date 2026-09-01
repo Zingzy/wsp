@@ -1,0 +1,19 @@
+{
+  "name": "@wsp/runtime",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@wsp/adapter-claude": "workspace:*",
+    "@wsp/engine": "workspace:*",
+    "@wsp/protocol": "workspace:*",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "@types/ws": "^8.18.1"
+  }
+}
