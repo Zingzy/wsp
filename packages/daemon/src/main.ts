@@ -1,18 +1,28 @@
 import { readFileSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
-import { pathToFileURL } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
+import { InboxWatcher } from "./inbox.js";
+import { ProcessManifest, type ManifestOptions } from "./manifest.js";
+import { PortWatcher, procNetTcpSource, type PortSnapshotSource } from "./ports.js";
 import { PtyManager } from "./pty-manager.js";
 
 export const DEFAULT_PORT = 7070;
 export const DEFAULT_HOST = "127.0.0.1";
 export const DEFAULT_TOKEN_PATH = "/root/.wsp-daemon-token";
+export const DEFAULT_INBOX_DIR = "/root/inbox";
+export const DEFAULT_MANIFEST_PATH = "/root/.wsp/manifest.json";
 
 export interface DaemonOptions {
   host?: string;
   port?: number;
   token?: string;
   tokenPath?: string;
+  portsSource?: PortSnapshotSource;
+  portsIntervalMs?: number;
+  inboxDir?: string;
+  inboxQuietMs?: number;
+  inboxPollMs?: number;
+  manifest?: ManifestOptions;
 }
 
 export interface DaemonHandle {
@@ -36,6 +46,33 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
   if (!token) throw new Error("daemon refuses to start without an auth token");
 
   const ptys = new PtyManager();
+  const manifest = new ProcessManifest(opts.manifest ?? { path: DEFAULT_MANIFEST_PATH });
+  // Watchers are created on first watch op so darwin tests never touch /proc.
+  let portWatcher: PortWatcher | null = null;
+  let inboxWatcher: InboxWatcher | null = null;
+
+  const getPortWatcher = () => {
+    if (!portWatcher) {
+      portWatcher = new PortWatcher(opts.portsSource ?? procNetTcpSource(), {
+        intervalMs: opts.portsIntervalMs ?? 1000,
+      });
+      portWatcher.start();
+    }
+    return portWatcher;
+  };
+  const getInboxWatcher = () => {
+    if (!inboxWatcher) {
+      inboxWatcher = new InboxWatcher({
+        dir: opts.inboxDir ?? DEFAULT_INBOX_DIR,
+        ...(opts.inboxQuietMs !== undefined ? { quietMs: opts.inboxQuietMs } : {}),
+        ...(opts.inboxPollMs !== undefined ? { pollMs: opts.inboxPollMs } : {}),
+      });
+      inboxWatcher.start();
+    }
+    return inboxWatcher;
+  };
+
+  const ctx: Ctx = { ptys, manifest, getPortWatcher, getInboxWatcher };
   const wss = new WebSocketServer({ host: opts.host ?? DEFAULT_HOST, port: opts.port ?? DEFAULT_PORT });
 
   wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
@@ -58,11 +95,9 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
         ws.send(JSON.stringify({ id: null, ok: false, error: "invalid json" }));
         return;
       }
-      try {
-        handle(ws, state, ptys, msg);
-      } catch (e) {
+      handle(ws, state, ctx, msg).catch((e: unknown) => {
         ws.send(JSON.stringify({ id: msg.id ?? null, ok: false, error: e instanceof Error ? e.message : String(e) }));
-      }
+      });
     });
   });
 
@@ -77,11 +112,20 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
     port: boundPort,
     ptys,
     close: async () => {
+      portWatcher?.stop();
+      inboxWatcher?.stop();
       for (const ws of wss.clients) ws.terminate();
       await new Promise<void>((resolve, reject) => wss.close(err => (err ? reject(err) : resolve())));
       ptys.destroyAll();
     },
   };
+}
+
+interface Ctx {
+  ptys: PtyManager;
+  manifest: ProcessManifest;
+  getPortWatcher(): PortWatcher;
+  getInboxWatcher(): InboxWatcher;
 }
 
 function reply(ws: WebSocket, id: Request["id"], payload: Record<string, unknown>): void {
@@ -103,10 +147,18 @@ function requirePty(ptys: PtyManager, msg: Request) {
   return s;
 }
 
-function handle(ws: WebSocket, state: ConnState, ptys: PtyManager, msg: Request): void {
+function subscribe(state: ConnState, ws: WebSocket, emitter: NodeJS.EventEmitter, events: string[]): void {
+  for (const name of events) {
+    const forward = (e: Record<string, unknown>) => push(ws, e);
+    emitter.on(name, forward);
+    state.detaches.push(() => emitter.off(name, forward));
+  }
+}
+
+async function handle(ws: WebSocket, state: ConnState, ctx: Ctx, msg: Request): Promise<void> {
   switch (msg.op) {
     case "pty.create": {
-      const s = ptys.create({
+      const s = ctx.ptys.create({
         cols: msg["cols"] as number | undefined,
         rows: msg["rows"] as number | undefined,
         shell: msg["shell"] as string | undefined,
@@ -117,7 +169,7 @@ function handle(ws: WebSocket, state: ConnState, ptys: PtyManager, msg: Request)
       return;
     }
     case "pty.attach": {
-      const s = requirePty(ptys, msg);
+      const s = requirePty(ctx.ptys, msg);
       const unData = s.attach(data => push(ws, { type: "pty.data", ptyId: s.id, data }));
       const unExit = s.onExit(e => push(ws, { type: "pty.exit", ptyId: s.id, exitCode: e.exitCode, signal: e.signal }));
       state.detaches.push(unData, unExit);
@@ -125,25 +177,51 @@ function handle(ws: WebSocket, state: ConnState, ptys: PtyManager, msg: Request)
       return;
     }
     case "pty.write": {
-      const s = requirePty(ptys, msg);
-      s.write(String(msg["data"] ?? ""));
+      requirePty(ctx.ptys, msg).write(String(msg["data"] ?? ""));
       reply(ws, msg.id, {});
       return;
     }
     case "pty.resize": {
-      const s = requirePty(ptys, msg);
-      s.resize(Number(msg["cols"]), Number(msg["rows"]));
+      requirePty(ctx.ptys, msg).resize(Number(msg["cols"]), Number(msg["rows"]));
       reply(ws, msg.id, {});
       return;
     }
     case "pty.kill": {
-      const s = requirePty(ptys, msg);
-      ptys.destroy(s.id);
+      ctx.ptys.destroy(requirePty(ctx.ptys, msg).id);
       reply(ws, msg.id, {});
       return;
     }
     case "pty.list": {
-      reply(ws, msg.id, { ptys: ptys.list() });
+      reply(ws, msg.id, { ptys: ctx.ptys.list() });
+      return;
+    }
+    case "ports.watch": {
+      const w = ctx.getPortWatcher();
+      subscribe(state, ws, w, ["port.open", "port.close"]);
+      await w.poll();
+      reply(ws, msg.id, { ports: w.current() });
+      return;
+    }
+    case "manifest.get": {
+      reply(ws, msg.id, { entries: ctx.manifest.entries() });
+      return;
+    }
+    case "manifest.record": {
+      const entry = ctx.manifest.record({
+        cmd: String(msg["cmd"] ?? ""),
+        cwd: String(msg["cwd"] ?? "/root"),
+        ...(msg["port"] !== undefined ? { port: Number(msg["port"]) } : {}),
+      });
+      reply(ws, msg.id, { entry });
+      return;
+    }
+    case "manifest.restartScript": {
+      reply(ws, msg.id, { script: ctx.manifest.toRestartScript() });
+      return;
+    }
+    case "inbox.watch": {
+      subscribe(state, ws, ctx.getInboxWatcher(), ["inbox.file"]);
+      reply(ws, msg.id, {});
       return;
     }
     default:
@@ -151,12 +229,3 @@ function handle(ws: WebSocket, state: ConnState, ptys: PtyManager, msg: Request)
   }
 }
 
-const isMain = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
-if (isMain) {
-  startDaemon()
-    .then(d => console.log(`wsp-daemon listening on ${DEFAULT_HOST}:${d.port}`))
-    .catch(e => {
-      console.error("wsp-daemon failed to start:", e instanceof Error ? e.message : e);
-      process.exit(1);
-    });
-}
