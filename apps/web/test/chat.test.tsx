@@ -39,22 +39,25 @@ const FIXTURE: EventUnion[] = [
   { type: "session.end", ...scope, exitCode: 0, sawResult: true },
 ];
 
-type Sender = Api & { startSession(opts: { workspaceId: string; prompt: string; resume?: string }): Promise<unknown> };
-
 function fixtureApi(workspaces: WorkspaceView[]) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
   const started: Array<{ workspaceId: string; prompt: string; resume?: string }> = [];
-  const api: Sender = {
+  const api: Api = {
     listWorkspaces: async () => workspaces,
     getWorkspace: async id => workspaces.find(w => w.id === id)!,
     createWorkspace: async () => workspaces[0]!,
     nap: async id => workspaces.find(w => w.id === id)!,
     wake: async id => workspaces.find(w => w.id === id)!,
+    upgrade: async id => workspaces.find(w => w.id === id)!,
+    capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true }),
     listSessions: async () => [],
     watchStatuses: async () => [],
     createFromGoldenHead: async () => workspaces[0]!,
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
-    startSession: async opts => { started.push(opts); return {}; },
+    startSession: async opts => {
+      started.push(opts);
+      return { id: "s1", workspaceId: opts.workspaceId, harness: "claude", status: "running" };
+    },
   };
   const emit = (e: EventUnion) => act(() => { for (const fn of [...listeners]) fn(e); });
   return { api, started, emit };

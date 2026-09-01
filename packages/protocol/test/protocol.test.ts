@@ -135,6 +135,7 @@ describe("runtime wire types", () => {
       { id: 11, op: "sessions.start", workspaceId: "ws_1", prompt: "do the thing" },
       { id: 12, op: "sessions.list" },
       { id: 13, op: "golden.get", name: "default" },
+      { id: 14, op: "capabilities.get" },
     ];
     for (const r of reqs) expect(RuntimeRequest.parse(r)).toEqual(r);
     expect(() => RuntimeRequest.parse({ id: 1, op: "workspaces.create" })).toThrow(); // golden+name required

@@ -32,6 +32,9 @@ function fakeApi(workspaces: WorkspaceView[]): Api & { nap: ReturnType<typeof vi
     watchStatuses: vi.fn(async () => workspaces.map(status)),
     nap: vi.fn(async (id: string) => view(id, "?", "napping")),
     wake: vi.fn(async (id: string) => view(id, "?", "running")),
+    upgrade: vi.fn(async (id: string) => view(id, "?", "running")),
+    capabilities: vi.fn(async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true })),
+    startSession: vi.fn(async (o: { workspaceId: string }) => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" as const })),
     listSessions: vi.fn(async () => []),
     subscribe: vi.fn(() => () => {}),
   };
@@ -40,6 +43,7 @@ function fakeApi(workspaces: WorkspaceView[]): Api & { nap: ReturnType<typeof vi
 beforeEach(() => {
   useStore.setState({
     api: null,
+    capabilities: null,
     workspaces: [],
     statuses: {},
     costs: {},

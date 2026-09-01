@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect } from "react";
 import { create } from "zustand";
-import type { SessionView, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import type { Capabilities, SessionView, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 import type { Api, ProtocolEvent } from "./client.js";
 
 export interface CostTick {
@@ -14,6 +14,8 @@ export interface CostTick {
 
 interface State {
   api: Api | null;
+  /** Backend feature flags; null until the first reply. Gate upgrade/resize on these. */
+  capabilities: Capabilities | null;
   workspaces: WorkspaceView[];
   statuses: Record<string, WorkspaceStatus>;
   costs: Record<string, CostTick>;
@@ -45,6 +47,7 @@ export const useStore = create<State>((set, get) => {
 
   return {
     api: null,
+    capabilities: null,
     workspaces: [],
     statuses: {},
     costs: {},
@@ -57,6 +60,10 @@ export const useStore = create<State>((set, get) => {
       set({ api });
       api.subscribe(e => get().applyEvent(e));
       void get().refresh();
+      void api
+        .capabilities()
+        .then(capabilities => set({ capabilities }))
+        .catch(() => {});
       void api
         .watchStatuses()
         .then(statuses => set({ statuses: Object.fromEntries(statuses.map(s => [s.id, s])) }))
@@ -155,6 +162,7 @@ export function useSession(workspaceId: string | null): SessionView[] {
   return useStore(s => (workspaceId ? s.sessions[workspaceId] ?? [] : []));
 }
 export function useReady(): boolean { return useStore(s => s.ready); }
+export function useCapabilities(): Capabilities | null { return useStore(s => s.capabilities); }
 
 /** Subscribe a component to raw protocol events (terminal/chat/browser tabs use this). */
 export function useProtocolEvents(fn: (e: ProtocolEvent) => void): void {

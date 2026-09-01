@@ -6,7 +6,7 @@
 // history/replay op, so events seen while unmounted are gone.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useProtocolEvents, useStore, useWorkspace } from "../protocol/store.js";
-import type { Api, ProtocolEvent } from "../protocol/client.js";
+import type { ProtocolEvent } from "../protocol/client.js";
 import {
   applySessionEvent,
   appendLocalError,
@@ -17,16 +17,6 @@ import {
   type TranscriptItem,
 } from "./chat/transcript.js";
 import styles from "./chat/ChatTab.module.css";
-
-// The runtime wire has sessions.start, but the client Api does not wrap it
-// yet. Detect the method structurally; until it exists the composer stays
-// disabled with the reason shown.
-interface StartsSessions {
-  startSession(opts: { workspaceId: string; prompt: string; resume?: string }): Promise<unknown>;
-}
-function canStartSessions(api: Api | null): api is Api & StartsSessions {
-  return api !== null && typeof (api as Partial<StartsSessions>).startSession === "function";
-}
 
 const INPUT_MAX_PX = 140;
 
@@ -63,19 +53,18 @@ export function ChatTab({ workspaceId }: { workspaceId: string }) {
 
   useEffect(() => { resize(inputRef.current, draft); }, [draft]);
 
-  const sender = canStartSessions(api) ? api : null;
   const busy = sending || transcript.running;
-  const disabledReason = !sender ? "runtime client cannot start sessions yet" : busy ? "turn in flight" : null;
+  const disabledReason = !api ? "not connected to the runtime" : busy ? "turn in flight" : null;
 
   async function send() {
     const prompt = draft.trim();
-    if (!prompt || !sender || busy) return;
+    if (!prompt || !api || busy) return;
     setDraft("");
     setSending(true);
     setTranscript(t => appendUserTurn(t, prompt));
     const resume = workspace?.claudeSessionId;
     try {
-      await sender.startSession({ workspaceId, prompt, ...(resume ? { resume } : {}) });
+      await api.startSession({ workspaceId, prompt, ...(resume ? { resume } : {}) });
     } catch (err) {
       setSending(false);
       setDraft(d => (d === "" ? prompt : d));

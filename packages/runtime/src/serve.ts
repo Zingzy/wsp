@@ -165,6 +165,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "golden.get":
               send({ id: msg.id, ok: true, manifest: await rt.golden.get(msg.name) });
               return;
+            case "capabilities.get":
+              send({ id: msg.id, ok: true, capabilities: rt.backend.capabilities });
+              return;
           }
         } catch (e) {
           send({ id: msg.id, ok: false, error: e instanceof Error ? e.message : String(e) });

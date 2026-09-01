@@ -92,3 +92,15 @@ describe("serveRuntime events", () => {
     quiet.close();
   });
 });
+
+describe("serveRuntime capabilities", () => {
+  it("capabilities.get returns the backend's flags so the UI degrades on facts, not probes", async () => {
+    const backend = stubBackend();
+    srv = await serveRuntime(createRuntime({ backend, store: memoryStore(), adapters: {} }), { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    const res = await c.request("capabilities.get");
+    expect(res.ok).toBe(true);
+    expect(res["capabilities"]).toEqual(backend.capabilities);
+    c.close();
+  });
+});

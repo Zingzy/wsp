@@ -298,6 +298,8 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
   }),
   z.object({ id: reqId, op: z.literal("sessions.list"), workspaceId: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("golden.get"), name: z.string() }),
+  /** Replies with the backend's Capabilities; the UI gates features on these. */
+  z.object({ id: reqId, op: z.literal("capabilities.get") }),
 ]);
 export type RuntimeRequest = z.infer<typeof RuntimeRequest>;
 
