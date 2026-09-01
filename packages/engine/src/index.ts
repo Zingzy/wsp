@@ -4,5 +4,7 @@ export * from "./preview.js";
 export * from "./solari-backend.js";
 export * from "./lifecycle.js";
 export * from "./golden.js";
+export * from "./dotfiles.js";
+export * from "./dotfiles-presets.js";
 export * from "./vault.js";
 export * from "./orphans.js";

@@ -33,6 +33,10 @@ export async function boot(): Promise<Harness> {
     inboxPollMs: 50,
     portsSource: async () => [],
     portsIntervalMs: 1000,
+    // The real probe is Linux-only and its failure fallback reports line mode,
+    // which would hold keystrokes locally. A fixed raw report keeps these
+    // tests on the passthrough path; compose has its own suite.
+    modeProbe: async () => ({ icanon: false, echo: true, foreground: "sh" }),
   });
   const wireLog: Harness["wireLog"] = [];
   const wire: TerminalWire = {
