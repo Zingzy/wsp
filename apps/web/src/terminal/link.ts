@@ -5,6 +5,7 @@
 // parking a tab drops its xterm instance (the heavy part) and a remount
 // replays from the mirror instead of re-attaching.
 import type { DaemonEvent, DaemonLinkStatus } from "@wsp/protocol";
+import type { PtyModeReport } from "./compose.js";
 
 /** Mirrors the daemon's per-pty scrollback cap (pty-manager.ts), in UTF-16 units. */
 const MIRROR_CAP = 256 * 1024;
@@ -18,6 +19,8 @@ export interface TerminalSink {
   data(chunk: string): void;
   /** The mirror was invalidated (reconnect replay incoming): clear the screen. */
   reset(): void;
+  /** The pty's termios mode as last reported by the daemon; on bind and on change. */
+  mode?(report: PtyModeReport): void;
 }
 
 export interface PtyTabView {
@@ -38,6 +41,8 @@ interface PtyState {
   chunks: string[];
   length: number;
   sinks: Set<TerminalSink>;
+  /** Null until the daemon reports; the tab treats that as raw. */
+  mode: PtyModeReport | null;
 }
 
 export class WorkspaceTerminals {
@@ -84,6 +89,13 @@ export class WorkspaceTerminals {
       this.#mirror(p, note);
       for (const s of p.sinks) s.data(note);
       this.#notifyTabs();
+      return;
+    }
+    if (e.type === "pty.mode") {
+      const p = this.#ptys.get(e.ptyId);
+      if (!p) return;
+      p.mode = { mode: e.mode, echo: e.echo };
+      for (const s of p.sinks) s.mode?.(p.mode);
     }
   }
 
@@ -133,6 +145,7 @@ export class WorkspaceTerminals {
       chunks: [],
       length: 0,
       sinks: new Set(),
+      mode: null,
     };
     this.#ptys.set(ptyId, p);
     this.#order.push(ptyId);
@@ -182,6 +195,7 @@ export class WorkspaceTerminals {
     const p = this.#ptys.get(ptyId);
     if (!p) return () => {};
     if (p.length > 0) sink.data(p.chunks.join(""));
+    if (p.mode) sink.mode?.(p.mode);
     p.sinks.add(sink);
     return () => p.sinks.delete(sink);
   }
@@ -220,6 +234,7 @@ export class WorkspaceTerminals {
     for (const p of this.#ptys.values()) {
       p.chunks = [];
       p.length = 0;
+      p.mode = null;
       for (const s of p.sinks) s.reset();
       try {
         await this.#wire.request("pty.attach", { ptyId: p.ptyId });
