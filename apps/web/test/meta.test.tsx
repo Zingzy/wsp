@@ -57,6 +57,9 @@ export function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities 
     nap: vi.fn(async (id: string) => view(id, "?", "napping")),
     wake: vi.fn(async (id: string) => view(id, "?", "running")),
     listSessions: vi.fn(async () => []),
+    getGolden: async () => undefined,
+    prepareGolden: async () => { throw new Error("no wizard in this fixture"); },
+    sealGolden: async () => { throw new Error("no wizard in this fixture"); },
     subscribe: fn => {
       listeners.add(fn);
       return () => listeners.delete(fn);

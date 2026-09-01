@@ -39,6 +39,9 @@ function fakeApi(workspaces: WorkspaceView[]): Api & { nap: ReturnType<typeof vi
     sessionHistory: vi.fn(async () => []),
     listSessions: vi.fn(async () => []),
     subscribe: vi.fn(() => () => {}),
+    getGolden: async () => undefined,
+    prepareGolden: async () => { throw new Error("no wizard in this fixture"); },
+    sealGolden: async () => { throw new Error("no wizard in this fixture"); },
   };
 }
 

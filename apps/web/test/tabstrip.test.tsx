@@ -32,6 +32,9 @@ function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
     daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
     sessionHistory: async () => [],
     listSessions: async id => (id === undefined ? sessions : sessions.filter(s => s.workspaceId === id)),
+    getGolden: async () => undefined,
+    prepareGolden: async () => { throw new Error("no wizard in this fixture"); },
+    sealGolden: async () => { throw new Error("no wizard in this fixture"); },
     subscribe: fn => {
       listeners.add(fn);
       return () => listeners.delete(fn);

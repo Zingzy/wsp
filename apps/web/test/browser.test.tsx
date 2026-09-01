@@ -38,6 +38,9 @@ function fakeApi(workspaces: WorkspaceView[]) {
     sessionHistory: async () => [],
     listSessions: async () => [],
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
+    getGolden: async () => undefined,
+    prepareGolden: async () => { throw new Error("no wizard in this fixture"); },
+    sealGolden: async () => { throw new Error("no wizard in this fixture"); },
   };
   const emit = (e: EventUnion) => act(() => { for (const fn of [...listeners]) fn(e); });
   return { api, emit };

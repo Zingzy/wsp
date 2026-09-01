@@ -22,6 +22,9 @@ function fakeApi(workspaces: WorkspaceView[]): Api {
     sessionHistory: async () => [],
     listSessions: async () => [],
     subscribe: () => () => {},
+    getGolden: async () => undefined,
+    prepareGolden: async () => { throw new Error("no wizard in this fixture"); },
+    sealGolden: async () => { throw new Error("no wizard in this fixture"); },
   };
 }
 
