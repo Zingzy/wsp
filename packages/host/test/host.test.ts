@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { GoldenManifest } from "@wsp/engine";
 import { createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
-import { afterEach, describe, expect, it } from "vitest";
-import { cli } from "../src/cli.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cli, serve, type CliIO } from "../src/cli.js";
 import { startHost, type HostHandle } from "../src/server.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 
@@ -27,6 +29,29 @@ const GOLDEN: GoldenManifest = {
   ],
 };
 
+// Stands in for apps/web/dist: the dev boot line the host replaces, one
+// module script with a src, one asset.
+const DEV_BOOT = `<script>window.__WSP__ = window.__WSP__ || { wsPort: 4410, token: "" };</script>`;
+const PAGE = `<!doctype html>
+<html><head><script type="module" crossorigin src="/assets/app.js"></script></head>
+<body><div id="root"></div>
+${DEV_BOOT}
+</body></html>
+`;
+
+function fakeWebDir(page: string | null = PAGE): string {
+  const dir = mkdtempSync(join(tmpdir(), "wsp-web-"));
+  mkdirSync(join(dir, "assets"));
+  writeFileSync(join(dir, "assets", "app.js"), "console.log('app')\n");
+  if (page !== null) writeFileSync(join(dir, "index.html"), page);
+  return dir;
+}
+
+const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
+function quietIO(lines: string[] = []): CliIO {
+  return { log: l => lines.push(l), error: l => lines.push(l), ask: noPrompt, askSecret: noPrompt };
+}
+
 function testRuntime(seedGolden = true): { rt: Runtime; backend: StubBackend; store: Store } {
   const backend = stubBackend();
   const store = memoryStore();
@@ -40,16 +65,14 @@ async function getJson(url: string): Promise<{ status: number; body: any }> {
   return { status: res.status, body: await res.json() };
 }
 
+function inlineScripts(html: string): string[] {
+  return [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]!);
+}
+
 describe("wsp cli", () => {
   it("--version prints the package version", async () => {
     const lines: string[] = [];
-    const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
-    const code = await cli(["--version"], {
-      log: l => lines.push(l),
-      error: l => lines.push(l),
-      ask: noPrompt,
-      askSecret: noPrompt,
-    });
+    const code = await cli(["--version"], quietIO(lines));
     expect(code).toBe(0);
     expect(lines).toEqual([`wsp ${pkg.version}`]);
   });
@@ -59,29 +82,99 @@ describe("wsp cli", () => {
   });
 });
 
-describe("host status shell", () => {
+describe("host serves the app", () => {
   let handle: HostHandle | undefined;
   let probeTarget: Server | undefined;
+  const dirs: string[] = [];
+  const webDir = (page?: string | null): string => {
+    const d = fakeWebDir(page);
+    dirs.push(d);
+    return d;
+  };
   afterEach(async () => {
     await handle?.close();
     handle = undefined;
     await new Promise<void>(r => (probeTarget ? probeTarget.close(() => r()) : r()));
     probeTarget = undefined;
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+    vi.unstubAllEnvs();
   });
 
-  it("serves the shell HTML and the workspace list JSON", async () => {
+  it("the page's one inline script is the boot object: runtime port, token, and key flags", async () => {
     const { rt } = testRuntime();
-    await rt.workspaces.create({ golden: "snap_gold", name: "alpha" });
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0 });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: true } });
     expect(handle.wsPort).toBeGreaterThan(0);
 
     const page = await fetch(`http://127.0.0.1:${handle.port}/`);
     expect(page.status).toBe(200);
     expect(page.headers.get("content-type")).toContain("text/html");
     const html = await page.text();
-    expect(html).toContain("wsp");
-    expect(html).toContain("new workspace");
+    expect(html).toContain('<script type="module" crossorigin src="/assets/app.js">');
+    expect(inlineScripts(html)).toEqual([
+      `window.__WSP__ = {"wsPort":${handle.wsPort},"token":"${handle.authToken}","keys":{"anthropic":true}};`,
+    ]);
+    expect(html).not.toContain("window.__WSP__ ||");
+  });
 
+  it("says anthropic false when the host loaded no anthropic key", async () => {
+    const { rt } = testRuntime();
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false } });
+    const html = await (await fetch(`http://127.0.0.1:${handle.port}/`)).text();
+    expect(html).toContain('"keys":{"anthropic":false}');
+  });
+
+  it("through the cli, the page carries the flag and never the key value", async () => {
+    const SOLARI = "slr_live_fake_solari_key";
+    const ANTHROPIC = "sk-ant-x-fake-anthropic-key";
+    const home = mkdtempSync(join(tmpdir(), "wsp-home-"));
+    dirs.push(home);
+    vi.stubEnv("SOLARI_API_KEY", SOLARI);
+    vi.stubEnv("ANTHROPIC_API_KEY", ANTHROPIC);
+    vi.stubEnv("WSP_HOME", home);
+
+    handle = await serve(quietIO(), { port: 0, wsPort: 0, statePath: join(home, "state.json"), webDir: webDir() });
+    const html = await (await fetch(`http://127.0.0.1:${handle.port}/`)).text();
+    expect(html).toContain('"keys":{"anthropic":true}');
+    expect(html).not.toContain(ANTHROPIC);
+    expect(html).not.toContain(SOLARI);
+    expect(html).not.toMatch(/sk-ant|slr_live/);
+    const assets = await (await fetch(`http://127.0.0.1:${handle.port}/assets/app.js`)).text();
+    expect(assets).not.toMatch(/sk-ant|slr_live/);
+  });
+
+  it("serves the bundle's assets and refuses paths outside the web dir", async () => {
+    const { rt } = testRuntime();
+    const dir = webDir();
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: dir, keys: { anthropic: false } });
+    const base = `http://127.0.0.1:${handle.port}`;
+
+    const js = await fetch(`${base}/assets/app.js`);
+    expect(js.status).toBe(200);
+    expect(js.headers.get("content-type")).toBe("text/javascript");
+    expect(await js.text()).toBe("console.log('app')\n");
+
+    writeFileSync(join(dir, "..", "wsp-outside-marker.txt"), "outside");
+    dirs.push(join(dir, "..", "wsp-outside-marker.txt"));
+    expect((await fetch(`${base}/..%2fwsp-outside-marker.txt`)).status).toBe(404);
+    expect((await fetch(`${base}/assets/..%2f..%2fwsp-outside-marker.txt`)).status).toBe(404);
+    expect((await fetch(`${base}/assets/missing.js`)).status).toBe(404);
+    expect((await fetch(`${base}/assets/`)).status).toBe(404);
+  });
+
+  it("refuses to start without a built page or without the boot line to replace", async () => {
+    const { rt } = testRuntime();
+    await expect(startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(null), keys: { anthropic: false } })).rejects.toThrow(
+      /web app not built/,
+    );
+    await expect(
+      startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir("<!doctype html><html><body></body></html>"), keys: { anthropic: false } }),
+    ).rejects.toThrow(/__WSP__/);
+  });
+
+  it("lists workspaces as JSON", async () => {
+    const { rt } = testRuntime();
+    await rt.workspaces.create({ golden: "snap_gold", name: "alpha" });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false } });
     const { status, body } = await getJson(`http://127.0.0.1:${handle.port}/api/workspaces`);
     expect(status).toBe(200);
     expect(body.workspaces).toHaveLength(1);
@@ -95,7 +188,7 @@ describe("host status shell", () => {
 
   it("creates a workspace from the golden head via POST", async () => {
     const { rt, backend } = testRuntime();
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0 });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false } });
     const res = await fetch(`http://127.0.0.1:${handle.port}/api/workspaces`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -112,7 +205,7 @@ describe("host status shell", () => {
 
   it("refuses workspace creation without a golden image", async () => {
     const { rt } = testRuntime(false);
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0 });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false } });
     const res = await fetch(`http://127.0.0.1:${handle.port}/api/workspaces`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -147,7 +240,7 @@ describe("host status shell", () => {
       };
     };
 
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0 });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false } });
     const first = await getJson(`http://127.0.0.1:${handle.port}/api/workspaces`);
     expect(first.body.workspaces[0].reach).toMatchObject({ state: "reachable" });
     expect(first.body.workspaces[0].reach.url).toContain("pt_token=");

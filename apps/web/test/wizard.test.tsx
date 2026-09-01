@@ -138,6 +138,17 @@ describe("wizard steps follow the wire", () => {
     expect(save.disabled).toBe(false);
   });
 
+  it("the hero step says an idle builder is killed after six hours, in one line", async () => {
+    const f = await mount();
+    await waitFor(() => screen.getByRole("button", { name: "Prepare my machine" }));
+    fireEvent.click(screen.getByRole("button", { name: "Prepare my machine" }));
+    await waitFor(() => expect(screen.getByTestId("step").textContent).toBe("hero"));
+    const note = screen.getByText(/six hours/);
+    expect(note.textContent).toBe("Take your time, but a machine idle for six hours is killed and this setup is lost.");
+    expect(note.textContent).not.toMatch(/pause|shut down/);
+    expect(f.api.prepareGolden).toHaveBeenCalledTimes(1);
+  });
+
   it("ignores golden.stage frames for a golden this wizard did not prepare", async () => {
     const f = await mount();
     f.api.prepareGolden.mockImplementationOnce(() => new Promise<GoldenBuilderView>(() => {}));

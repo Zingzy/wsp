@@ -141,6 +141,9 @@ importers:
       '@wsp/runtime':
         specifier: workspace:*
         version: link:../runtime
+      '@wsp/web':
+        specifier: workspace:*
+        version: link:../../apps/web
       ws:
         specifier: ^8.21.3
         version: 8.21.3

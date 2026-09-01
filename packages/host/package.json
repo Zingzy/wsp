@@ -15,6 +15,7 @@
     "@wsp/daemon": "workspace:*",
     "@wsp/engine": "workspace:*",
     "@wsp/runtime": "workspace:*",
+    "@wsp/web": "workspace:*",
     "ws": "^8.21.3"
   },
   "devDependencies": {

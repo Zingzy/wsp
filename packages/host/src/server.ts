@@ -1,22 +1,31 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { randomBytes } from "node:crypto";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { serveRuntime, type Runtime } from "@wsp/runtime";
-import { SHELL_HTML } from "./shell.js";
 
 // The enriched status now lives in @wsp/runtime (every client reads one
 // implementation); re-exported so host consumers keep their imports.
 export type { ReachState, ReachStatus, WorkspaceStatus } from "@wsp/runtime";
 
+/** Which keys the host loaded. Flags only: the page never sees a value. */
+export interface KeyFlags {
+  anthropic: boolean;
+}
+
 export interface HostOptions {
   runtime: Runtime;
-  /** HTTP port for the status shell (0 picks a free one). Default 4400. */
+  /** The built web app: index.html plus its assets. */
+  webDir: string;
+  keys: KeyFlags;
+  /** HTTP port for the app (0 picks a free one). Default 4400. */
   port?: number;
   /** Port for serveRuntime's WS (0 picks a free one). Default 4410. */
   wsPort?: number;
   /** Auth token for the runtime WS; generated when omitted. */
   authToken?: string;
-  /** Envs baked into workspaces created from the shell. */
+  /** Envs baked into workspaces created from the JSON route. */
   workspaceEnvs?: Record<string, string>;
   probeTimeoutMs?: number;
 }
@@ -28,10 +37,43 @@ export interface HostHandle {
   close(): Promise<void>;
 }
 
+// The dev default apps/web/index.html ships; the host swaps it for the real
+// boot object so the page carries exactly one inline script.
+const BOOT_SCRIPT = /<script>window\.__WSP__ = [^<]*<\/script>/;
+
+const CONTENT_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript",
+  ".css": "text/css",
+  ".map": "application/json",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".ico": "image/x-icon",
+  ".woff2": "font/woff2",
+  ".wasm": "application/wasm",
+};
+
+function loadPage(webDir: string, boot: { wsPort: number; token: string; keys: KeyFlags }): string {
+  const path = join(webDir, "index.html");
+  if (!existsSync(path)) throw new Error(`web app not built: ${path} is missing (pnpm --filter @wsp/web build)`);
+  const html = readFileSync(path, "utf8");
+  if (!BOOT_SCRIPT.test(html)) throw new Error(`${path} has no window.__WSP__ boot line to replace`);
+  return html.replace(BOOT_SCRIPT, `<script>window.__WSP__ = ${JSON.stringify(boot)};</script>`);
+}
+
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
   res.writeHead(status, { "content-type": "application/json", "content-length": Buffer.byteLength(payload) });
   res.end(payload);
+}
+
+function sendAsset(res: ServerResponse, webDir: string, path: string): boolean {
+  const file = resolvePath(webDir, `.${decodeURIComponent(path)}`);
+  if (!file.startsWith(webDir + sep) || !existsSync(file) || !statSync(file).isFile()) return false;
+  const body = readFileSync(file);
+  res.writeHead(200, { "content-type": CONTENT_TYPES[extname(file)] ?? "application/octet-stream", "content-length": body.length });
+  res.end(body);
+  return true;
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
@@ -49,16 +91,23 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const rt = opts.runtime;
   const authToken = opts.authToken ?? randomBytes(24).toString("base64url");
   const probeTimeoutMs = opts.probeTimeoutMs ?? 2500;
+  const webDir = resolvePath(opts.webDir);
 
   const rtServer = await serveRuntime(rt, { port: opts.wsPort ?? 4410, authToken });
-  const shell = SHELL_HTML.replace("__WS_ENDPOINT__", `ws://127.0.0.1:${rtServer.port}`);
+  let page: string;
+  try {
+    page = loadPage(webDir, { wsPort: rtServer.port, token: authToken, keys: opts.keys });
+  } catch (e) {
+    await rtServer.close();
+    throw e;
+  }
 
   const server = createServer((req, res) => {
     void (async () => {
       const path = new URL(req.url ?? "/", "http://localhost").pathname;
       if (req.method === "GET" && path === "/") {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-        res.end(shell);
+        res.end(page);
         return;
       }
       if (req.method === "GET" && path === "/api/workspaces") {
@@ -87,6 +136,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
         sendJson(res, 200, { workspace });
         return;
       }
+      if (req.method === "GET" && sendAsset(res, webDir, path)) return;
       sendJson(res, 404, { error: `no route: ${req.method} ${path}` });
     })().catch((e: unknown) => {
       if (!res.headersSent) sendJson(res, 500, { error: e instanceof Error ? e.message : String(e) });
@@ -96,7 +146,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    // The shell is a local status page; never expose it beyond loopback.
+    // The app carries the runtime token; never expose it beyond loopback.
     server.listen(opts.port ?? 4400, "127.0.0.1", resolve);
   });
   const addr = server.address();

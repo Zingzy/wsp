@@ -19,7 +19,7 @@ claude sessions.
 ```sh
 pnpm install && pnpm -r build
 printf 'SOLARI_API_KEY=%s\n' "$YOUR_KEY" > .env
-npx wsp             # status shell on http://127.0.0.1:4400
+npx wsp             # the app on http://127.0.0.1:4400
 npx wsp doctor      # prove the reach path against one live machine
 ```
 
@@ -85,7 +85,7 @@ first backend.
 
 The runtime runs inside the `wsp` process on your machine, so your provider
 key travels only in direct requests from that process to the provider's API.
-The status shell and the WebSocket API bind 127.0.0.1 only.
+The app and the WebSocket API bind 127.0.0.1 only.
 
 ## Packages
 
@@ -96,7 +96,7 @@ The status shell and the WebSocket API bind 127.0.0.1 only.
 | `@wsp/adapter-claude` | drives claude headless inside a workspace |
 | `@wsp/protocol` | zod schemas for every wire message |
 | `@wsp/runtime` | embeddable runtime: workspaces, sessions, events over WS |
-| `@wsp/host` | the `wsp` bin: embedded runtime, status shell, doctor |
+| `@wsp/host` | the `wsp` bin: embedded runtime, serves the app, doctor |
 | `wspx` | dev CLI over the same runtime |
 
 ## License

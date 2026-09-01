@@ -197,7 +197,7 @@ function Hero({
             </li>
           ))}
         </ul>
-        <p className={styles.note}>Take your time, but a machine left idle too long is shut down and this setup is lost.</p>
+        <p className={styles.note}>Take your time, but a machine idle for six hours is killed and this setup is lost.</p>
         <div className={styles.actions}>
           <button type="button" className={`${styles.key} ${styles.keySpend}`} disabled={!ready} onClick={onSeal}>
             Save as my golden image
