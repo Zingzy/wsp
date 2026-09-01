@@ -12,6 +12,11 @@
   --deep: #82828c;
   --line: rgba(255, 255, 255, 0.1);
   --soft: rgba(255, 255, 255, 0.055);
+  /* Overlay tokens (review #21): hover fills and the keycap top highlight the
+     mock carries as literals; components use these, never raw rgba. */
+  --hover: rgba(255, 255, 255, 0.05);
+  --hover-strong: rgba(255, 255, 255, 0.08);
+  --bevel: inset 0 0.7px 0 rgba(255, 255, 255, 0.1);
   --acc: #fb923c;   /* orange: spend / confirm ONLY */
   --ok: #34d399;    /* green: running ONLY */
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Menlo, Consolas, monospace;

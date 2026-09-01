@@ -4,7 +4,7 @@
 // liveness is an app-level ping op; every (re)connect re-subscribes and
 // rescans the inbox because events pushed during a gap are gone for good.
 
-import { DaemonEvent } from "@wsp/protocol";
+import { DaemonEvent, type DaemonLinkStatus } from "@wsp/protocol";
 import WebSocket from "ws";
 
 export interface ReachOptions {
@@ -13,6 +13,8 @@ export interface ReachOptions {
   /** The daemon's own token, appended as the `token` query param. */
   token: string;
   onEvent: (e: DaemonEvent) => void;
+  /** Fires on every transition; reauth-needed and dead are terminal. */
+  onStatus?: (s: DaemonLinkStatus) => void;
   heartbeatMs?: number;
   backoffMs?: (attempt: number) => number;
 }
@@ -27,6 +29,7 @@ export interface DaemonReach {
   /** Resolves after the first successful connect + subscribe + rescan; rejects on 4401. */
   readonly ready: Promise<void>;
   request(op: string, params?: Record<string, unknown>): Promise<Record<string, unknown>>;
+  status(): DaemonLinkStatus;
   stats(): ReachStats;
   close(): void;
 }
@@ -63,6 +66,13 @@ export function connectDaemon(opts: ReachOptions): DaemonReach {
   let retryTimer: NodeJS.Timeout | null = null;
   const pending = new Map<number, Pending>();
   const stats: ReachStats = { pingsSent: 0, pongsReceived: 0, reconnects: 0 };
+
+  let status!: DaemonLinkStatus;
+  function setStatus(s: DaemonLinkStatus): void {
+    if (s === status) return;
+    status = s;
+    opts.onStatus?.(s);
+  }
 
   let readyResolve!: () => void;
   let readyReject!: (e: Error) => void;
@@ -133,6 +143,7 @@ export function connectDaemon(opts: ReachOptions): DaemonReach {
 
   function scheduleReconnect(): void {
     if (closed) return;
+    setStatus("connecting");
     attempt++;
     retryTimer = setTimeout(dial, backoff(attempt));
   }
@@ -150,11 +161,13 @@ export function connectDaemon(opts: ReachOptions): DaemonReach {
     connections++;
     stats.reconnects = connections - 1;
     startHeartbeat(sock);
+    setStatus("live");
     readyResolve();
   }
 
   function dial(): void {
     if (closed) return;
+    setStatus("connecting");
     const sock = new WebSocket(url);
     ws = sock;
     sock.addEventListener("open", () => void ritual(sock));
@@ -166,7 +179,8 @@ export function connectDaemon(opts: ReachOptions): DaemonReach {
       flushPending("connection lost");
       if (closed) return;
       if (ev.code === 4401) {
-        readyReject(new Error("daemon rejected token (4401)")); // retrying cannot fix a bad token
+        setStatus("reauth-needed"); // retrying cannot fix a bad token; a new one must be provisioned
+        readyReject(new Error("daemon rejected token (4401)")); // no-op once ready resolved
         return;
       }
       scheduleReconnect();
@@ -178,6 +192,7 @@ export function connectDaemon(opts: ReachOptions): DaemonReach {
   return {
     ready,
     request: send,
+    status: () => status,
     stats: () => ({ ...stats }),
     close() {
       closed = true;
@@ -185,6 +200,7 @@ export function connectDaemon(opts: ReachOptions): DaemonReach {
       stopHeartbeat();
       flushPending("client closed");
       ws?.close(1000);
+      setStatus("dead");
       readyReject(new Error("client closed")); // no-op once ready resolved
     },
   };
