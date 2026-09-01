@@ -90,7 +90,9 @@ export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Build
   const baseTemplate = opts.baseTemplate ?? DEFAULT_TEMPLATE[kind];
 
   stage("creating", `${kind} from ${baseTemplate}`);
-  const machine = await opts.backend.create({ kind, template: baseTemplate, ...sizeSpec(opts) });
+  // A builder that idle-pauses resumes not first-life, so its seal would 502 and
+  // consume it anyway; killing on idle loses the same work but fails loud and free.
+  const machine = await opts.backend.create({ kind, template: baseTemplate, onIdle: "kill", ...sizeSpec(opts) });
   try {
     if (opts.deployDaemon) {
       stage("deploying-daemon");

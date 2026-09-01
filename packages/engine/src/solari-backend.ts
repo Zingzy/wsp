@@ -93,6 +93,7 @@ export class SolariBackend implements MachineBackend {
         ...(spec.memMb ? { memMb: spec.memMb } : {}),
         ...(spec.envs ? { envs: spec.envs } : {}),
         ...(spec.labels ? { metadata: spec.labels } : {}),
+        ...(spec.onIdle ? { lifecycle: { onTimeout: spec.onIdle } } : {}),
       },
     );
     return new SolariMachine(this, res.sandboxId, res.kind ?? spec.kind, res.streamUrl);

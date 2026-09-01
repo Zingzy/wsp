@@ -11,6 +11,9 @@ export interface MachineSpec {
   memMb?: number;
   envs?: Record<string, string>;
   labels?: Record<string, string>;
+  /** What the provider does when the machine sits idle past its window; the
+   * provider default (Solari: pause) applies when absent. */
+  onIdle?: "pause" | "kill";
 }
 
 export interface ExecResult { exitCode: number; stdout: string; stderr: string }

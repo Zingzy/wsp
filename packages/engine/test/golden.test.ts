@@ -115,7 +115,8 @@ describe("interactive golden: prepare then seal", () => {
       deployDaemon: async m => { daemonOn.push(m.id); },
       onStage,
     });
-    expect(created[0]).toMatchObject({ kind: "desktop", template: "default" });
+    // An idle-paused builder resumes not first-life and the seal would 502; kill fails loud instead.
+    expect(created[0]).toMatchObject({ kind: "desktop", template: "default", onIdle: "kill" });
     expect(builder.kind).toBe("desktop");
     expect(builder.firstLife).toBe(true);
     expect(builder.machine.streamUrl).toBe("wss://fake/stream/m1");
@@ -128,6 +129,15 @@ describe("interactive golden: prepare then seal", () => {
     const { backend, created } = recordingBackend();
     await prepareBuilder({ backend, kind: "sandbox", setup: "true" });
     expect(created[0]).toMatchObject({ kind: "sandbox", template: "base" });
+  });
+
+  it("only the builder idles to kill; the smoke fork keeps the provider default", async () => {
+    const { backend, created } = recordingBackend();
+    const builder = await prepareBuilder({ backend, kind: "sandbox", setup: "true" });
+    await sealGolden(builder, { backend, smoke: "true" });
+    expect(created[0]!.onIdle).toBe("kill");
+    expect(created[1]).toMatchObject({ fromSnapshot: "snap_golden-v1" });
+    expect(created[1]!.onIdle).toBeUndefined();
   });
 
   it("prepare kills the machine and reports failed when the harness install fails", async () => {
