@@ -23,6 +23,19 @@ export function liveEnv(): LiveEnv {
   return out as unknown as LiveEnv;
 }
 
+// Env for any machine that runs Claude Code. Config dir on purpose: carried
+// by snapshots, never HOME. bash -c callers rely on PATH carrying .local/bin.
+export function claudeEnvs(env: LiveEnv): Record<string, string> {
+  return {
+    ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY,
+    CLAUDE_CONFIG_DIR: "/root/.claude-cfg",
+    IS_SANDBOX: "1",
+    PATH: "/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+  };
+}
+
+export const CLAUDE_INSTALL = "curl -fsSL https://claude.ai/install.sh | bash";
+
 export const RESERVED_LABEL = { key: "poc", value: "ttl-test" }; // sleeping experiment: never touch
 
 export function isReserved(labels: Record<string, string>): boolean {
