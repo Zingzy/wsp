@@ -7,7 +7,7 @@ export {
   type ReachStatus,
   type WorkspaceStatus,
 } from "./server.js";
-export { cli, makeRuntime, HELP, type CliIO } from "./cli.js";
+export { cli, loadKeys, makeRuntime, terminalIO, wspHome, HELP, type CliIO, type KeySources } from "./cli.js";
 export {
   doctor,
   deployDaemon,

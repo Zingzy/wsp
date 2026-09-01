@@ -43,7 +43,13 @@ async function getJson(url: string): Promise<{ status: number; body: any }> {
 describe("wsp cli", () => {
   it("--version prints the package version", async () => {
     const lines: string[] = [];
-    const code = await cli(["--version"], { log: l => lines.push(l), error: l => lines.push(l) });
+    const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
+    const code = await cli(["--version"], {
+      log: l => lines.push(l),
+      error: l => lines.push(l),
+      ask: noPrompt,
+      askSecret: noPrompt,
+    });
     expect(code).toBe(0);
     expect(lines).toEqual([`wsp ${pkg.version}`]);
   });
