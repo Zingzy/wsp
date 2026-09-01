@@ -113,6 +113,12 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               detaches.push(rt.events.on("*", e => send(e as unknown as Record<string, unknown>)));
               send({ id: msg.id, ok: true });
               return;
+            case "status.subscribe":
+              // Watch before the snapshot so no change falls between them;
+              // socket close releases the watcher via detaches.
+              detaches.push(rt.status.watch());
+              send({ id: msg.id, ok: true, statuses: await rt.status.list() });
+              return;
             case "workspaces.create": {
               const { id, op, ...rest } = msg;
               void op;

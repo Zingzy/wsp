@@ -1,5 +1,6 @@
 export * from "./runtime.js";
 export * from "./serve.js";
+export * from "./status.js";
 export * from "./store.js";
 export * from "./machine-exec.js";
 export * from "./reach.js";
@@ -7,4 +8,15 @@ export * from "./reach.js";
 // engine directly; the runtime is the only layer that drives it.
 export { SolariBackend, type SolariBackendOptions, type GoldenManifest, type Machine } from "@wsp/engine";
 // The protocol types the runtime API surface speaks.
-export type { EventUnion, SessionView, WorkspaceView, WorkspacePhase, SessionStatus } from "@wsp/protocol";
+export type {
+  EventUnion,
+  MachineState,
+  ReachState,
+  ReachStatus,
+  SessionStatus,
+  SessionView,
+  WorkspacePhase,
+  WorkspaceSize,
+  WorkspaceStatus,
+  WorkspaceView,
+} from "@wsp/protocol";

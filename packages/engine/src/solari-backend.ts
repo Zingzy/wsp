@@ -40,6 +40,15 @@ export class SolariBackend implements MachineBackend {
     signedUrls: true,
   };
 
+  // Solari's published Starter pricing: per vCPU-hour + per GB-hour
+  // (2 vCPU / 4 GB comes to ~$0.11/hr). The Starter clamp doubles as the
+  // assumed shape for specs that never named a size.
+  readonly pricing = {
+    rateUsdPerHour: (size: { cpu: number; memMb: number }): number =>
+      size.cpu * 0.035 + (size.memMb / 1024) * 0.01,
+    defaultSize: { cpu: 2, memMb: 4096 },
+  };
+
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly fetch: Fetch;

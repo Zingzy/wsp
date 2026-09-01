@@ -23,6 +23,25 @@ export type Capabilities = z.infer<typeof Capabilities>;
 export const WorkspacePhase = z.enum(["running", "napping"]);
 export type WorkspacePhase = z.infer<typeof WorkspacePhase>;
 
+/** Backend vocabulary: a napping workspace's machine reads "paused" here.
+ * Phase is the product word, machine state the provider word; clients render
+ * phase and use machineState only for divergence (starting, gone). */
+export const MachineState = z.enum(["starting", "running", "paused", "gone"]);
+export type MachineState = z.infer<typeof MachineState>;
+
+export const ReachState = z.enum(["reachable", "no-daemon", "unreachable", "napping", "unsupported", "gone"]);
+export type ReachState = z.infer<typeof ReachState>;
+
+export const ReachStatus = z.object({
+  state: ReachState,
+  url: z.string().optional(),
+  expiresAt: z.number().optional(),
+});
+export type ReachStatus = z.infer<typeof ReachStatus>;
+
+export const WorkspaceSize = z.object({ cpu: z.number(), memMb: z.number() });
+export type WorkspaceSize = z.infer<typeof WorkspaceSize>;
+
 export const WorkspaceView = z.object({
   id: z.string(),
   name: z.string(),
@@ -35,6 +54,16 @@ export const WorkspaceView = z.object({
   claudeSessionId: z.string().optional(),
 });
 export type WorkspaceView = z.infer<typeof WorkspaceView>;
+
+/** WorkspaceView enriched with what the rail and meta panel render live. */
+export const WorkspaceStatus = WorkspaceView.extend({
+  machineState: MachineState,
+  reach: ReachStatus,
+  size: WorkspaceSize,
+  /** Awake burn rate for this size; 0 never appears here (napping costs ride the cost event). */
+  rateUsdPerHour: z.number(),
+});
+export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
 
 export const SessionStatus = z.enum(["running", "completed", "interrupted", "failed"]);
 export type SessionStatus = z.infer<typeof SessionStatus>;
@@ -117,6 +146,22 @@ export const WorkspaceUpgradedEvent = z.object({
 });
 export const WorkspaceDeletedEvent = z.object({ type: z.literal("workspace.deleted"), workspaceId: z.string() });
 
+export const WorkspaceStatusEvent = z.object({ type: z.literal("workspace.status"), status: WorkspaceStatus });
+
+/** Awake-time cost tick. Computed locally from size and elapsed running time
+ * (provider billing API integration is a later plan); zero rate while napping. */
+export const WorkspaceCostEvent = z.object({
+  type: z.literal("workspace.cost"),
+  workspaceId: z.string(),
+  phase: WorkspacePhase,
+  /** Current burn: the size's awake rate while running, 0 while napping. */
+  rateUsdPerHour: z.number(),
+  /** Total awake milliseconds behind accruedUsd since this runtime began tracking. */
+  awakeMs: z.number(),
+  accruedUsd: z.number(),
+  at: z.string(),
+});
+
 export const PortOpenEvent = z.object({
   type: z.literal("port.open"),
   workspaceId: z.string(),
@@ -137,6 +182,8 @@ export const EventUnion = z.discriminatedUnion("type", [
   WorkspaceWokenEvent,
   WorkspaceUpgradedEvent,
   WorkspaceDeletedEvent,
+  WorkspaceStatusEvent,
+  WorkspaceCostEvent,
   SessionStartEvent,
   SessionDeltaEvent,
   SessionDoneEvent,
@@ -210,6 +257,10 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("auth"), token: z.string() }),
   z.object({ id: reqId, op: z.literal("ticket.issue"), purpose: TicketPurpose }),
   z.object({ id: reqId, op: z.literal("events.subscribe") }),
+  /** Replies with a WorkspaceStatus[] snapshot and keeps the runtime's status
+   * poller + cost ticker running while this socket lives; the events ride the
+   * events.subscribe channel. */
+  z.object({ id: reqId, op: z.literal("status.subscribe") }),
   z.object({
     id: reqId,
     op: z.literal("workspaces.create"),
