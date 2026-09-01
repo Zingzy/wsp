@@ -11,6 +11,7 @@ import { ChatTab } from "../src/tabs/ChatTab.js";
 import { ApprovalPrompt } from "../src/tabs/chat/ApprovalPrompt.js";
 
 const WS = "ws_chat0001";
+const CLAUDE_SID = "e16ed170-8257-4668-879e-fe836341633c";
 const scope = { workspaceId: WS, sessionId: "sess_0001" };
 
 const workspace: WorkspaceView = {
@@ -20,7 +21,7 @@ const workspace: WorkspaceView = {
   phase: "running",
   golden: "snap_g",
   createdAt: "2026-09-01T00:00:00Z",
-  claudeSessionId: "e16ed170-8257-4668-879e-fe836341633c",
+  claudeSessionId: CLAUDE_SID,
 };
 
 const FIXTURE: EventUnion[] = [
@@ -38,9 +39,12 @@ const FIXTURE: EventUnion[] = [
   { type: "session.end", ...scope, exitCode: 0, sawResult: true },
 ];
 
+type Sender = Api & { startSession(opts: { workspaceId: string; prompt: string; resume?: string }): Promise<unknown> };
+
 function fixtureApi(workspaces: WorkspaceView[]) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
-  const api: Api = {
+  const started: Array<{ workspaceId: string; prompt: string; resume?: string }> = [];
+  const api: Sender = {
     listWorkspaces: async () => workspaces,
     getWorkspace: async id => workspaces.find(w => w.id === id)!,
     createWorkspace: async () => workspaces[0]!,
@@ -48,9 +52,10 @@ function fixtureApi(workspaces: WorkspaceView[]) {
     wake: async id => workspaces.find(w => w.id === id)!,
     listSessions: async () => [],
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
+    startSession: async opts => { started.push(opts); return {}; },
   };
   const emit = (e: EventUnion) => act(() => { for (const fn of [...listeners]) fn(e); });
-  return { api, emit };
+  return { api, started, emit };
 }
 
 async function setup(api: Api) {
@@ -104,6 +109,43 @@ describe("chat tab rendering", () => {
     expect(screen.getByText("failed")).toBeDefined();
     expect(screen.getByText("session exited without a result (exit code 137)")).toBeDefined();
     expect(screen.queryByText("working")).toBeNull();
+  });
+});
+
+describe("chat tab composer", () => {
+  it("enter sends exactly one turn with resume, disables while in flight, re-enables on done", async () => {
+    const { api, started, emit } = fixtureApi([workspace]);
+    await setup(api);
+    const input = screen.getByRole("textbox", { name: "prompt" }) as HTMLTextAreaElement;
+
+    fireEvent.change(input, { target: { value: "fix the flaky test" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(started.length).toBe(1));
+    expect(started[0]).toEqual({ workspaceId: WS, prompt: "fix the flaky test", resume: CLAUDE_SID });
+
+    // Local echo of the user turn; composer disabled with the reason shown.
+    expect(screen.getByText("fix the flaky test")).toBeDefined();
+    expect(input.disabled).toBe(true);
+    expect(screen.getByText("turn in flight")).toBeDefined();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(started.length).toBe(1);
+
+    emit({ type: "session.start", ...scope });
+    expect(input.disabled).toBe(true);
+    emit({ type: "session.done", ...scope, result: { status: "completed", durationMs: 900, costUsd: 0.001 } });
+    emit({ type: "session.end", ...scope, exitCode: 0, sawResult: true });
+    expect(input.disabled).toBe(false);
+    expect(started.length).toBe(1);
+  });
+
+  it("ignores empty and whitespace-only drafts", async () => {
+    const { api, started } = fixtureApi([workspace]);
+    await setup(api);
+    const input = screen.getByRole("textbox", { name: "prompt" });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(started.length).toBe(0);
   });
 });
 
