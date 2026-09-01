@@ -17,6 +17,10 @@
   --hover: rgba(255, 255, 255, 0.05);
   --hover-strong: rgba(255, 255, 255, 0.08);
   --bevel: inset 0 0.7px 0 rgba(255, 255, 255, 0.1);
+  /* Inverted primary key (review #25): the mock's fg-on-dark keycap literals. */
+  --key-primary-ink: #0b0b0d;
+  --key-primary-hover: #e6e6e8;
+  --bevel-down: inset 0 -1px 0 rgba(0, 0, 0, 0.22);
   --acc: #fb923c;   /* orange: spend / confirm ONLY */
   --ok: #34d399;    /* green: running ONLY */
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Menlo, Consolas, monospace;

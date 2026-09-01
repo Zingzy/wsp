@@ -97,9 +97,11 @@ export function useUpgrade(id: string): Upgrade {
   return { phase, run, dismiss };
 }
 
-/** Doubling ladder above the current size, capped at 16 vCPU. No size catalog
- * or per-size pricing op exists on the wire; pricing is linear per vCPU + per
- * GB, so scaling both by k scales the rate by k. */
+/** Doubling ladder above the current size. The 16 vCPU cap is a placeholder
+ * guess, not a provider fact: no size catalog exists on the wire and
+ * capabilities.resize is not exposed to the client (SolariBackend ships
+ * resize: false, so today's backend rejects every upgrade anyway). Pricing is
+ * linear per vCPU + per GB, so scaling both by k scales the rate by k. */
 export function upgradeOptions(current: WorkspaceSize): WorkspaceSize[] {
   const out: WorkspaceSize[] = [];
   for (let k = 2; current.cpu * k <= 16; k *= 2) out.push({ cpu: current.cpu * k, memMb: current.memMb * k });

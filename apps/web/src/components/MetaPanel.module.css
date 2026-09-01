@@ -51,7 +51,7 @@
 .key {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   padding: 7px 11px; border: 1px solid var(--line); border-radius: 6px;
-  background: var(--card); box-shadow: inset 0 0.7px 0 rgba(255, 255, 255, 0.16);
+  background: var(--card); box-shadow: var(--bevel);
   font-size: 11.5px; font-family: inherit; color: var(--muted); cursor: pointer;
   transition: background 0.16s, color 0.16s, border-color 0.16s;
 }
@@ -59,11 +59,11 @@
 .key:active { background: color-mix(in srgb, var(--card), white 7%); }
 .key[disabled] { opacity: 0.45; cursor: default; }
 .key[disabled]:hover { background: var(--card); color: var(--muted); }
-.keyPrimary { background: var(--fg); color: #0b0b0d; border-color: transparent; box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.22); }
-.keyPrimary:hover { background: #e6e6e8; color: #0b0b0d; }
+.keyPrimary { background: var(--fg); color: var(--key-primary-ink); border-color: transparent; box-shadow: var(--bevel-down); }
+.keyPrimary:hover { background: var(--key-primary-hover); color: var(--key-primary-ink); }
 .keyMini {
   padding: 4px 9px; border: 1px solid var(--line); border-radius: 6px;
-  background: var(--card); box-shadow: inset 0 0.7px 0 rgba(255, 255, 255, 0.16);
+  background: var(--card); box-shadow: var(--bevel);
   font-size: 10.5px; font-family: inherit; color: var(--muted); cursor: pointer;
   transition: background 0.16s, color 0.16s, border-color 0.16s;
 }

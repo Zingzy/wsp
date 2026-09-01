@@ -98,7 +98,10 @@ function Usage({ w, status, series }: { w: WorkspaceView; status: WorkspaceStatu
   const cost = useCost(w.id);
   const running = w.phase === "running";
   const rates = series.map(p => p.rateUsdPerHour);
-  const since = series[0]?.at.slice(11, 16);
+  const start = series[0];
+  const since = start
+    ? new Date(start.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })
+    : null;
   const rateNow = running ? `${money(cost?.rateUsdPerHour ?? status?.rateUsdPerHour ?? 0, 3)}/hr` : "$0/hr";
   return (
     <section className={styles.sect}>

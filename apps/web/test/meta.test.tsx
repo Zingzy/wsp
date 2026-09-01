@@ -125,7 +125,8 @@ describe("spend sparkline", () => {
     act(() => api.emit(costEvent("ws_a", 0.22, 120_000, "2026-09-01T00:02:00Z")));
     await waitFor(() => expect(document.querySelector("[data-spark]")).not.toBeNull());
     expect(screen.getByText("peak $0.22")).toBeDefined();
-    expect(screen.getByText("since 00:01")).toBeDefined();
+    // rendered in the viewer's timezone, so assert shape rather than a fixed clock
+    expect(screen.getByText(/^since \d{2}:\d{2}$/)).toBeDefined();
   });
 
   it("keeps each workspace's series separate", async () => {
