@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Meta panel: machine facts, live spend sparkline, snapshot lineage with
 // golden rollback, pause/wake, upgrade.
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { SnapshotLineage, WorkspaceSize, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
-import { useCapabilities, useCost, useSelectedId, useStatus, useStore, useWorkspace } from "../protocol/store.js";
+import { useCapabilities, useCost, useProtocolEvents, useSelectedId, useStatus, useStore, useWorkspace } from "../protocol/store.js";
 import { upgradeOptions, useCostSeries, useUpgrade, type CostPoint, type Upgrade } from "../protocol/meta.js";
 import styles from "./MetaPanel.module.css";
 
@@ -133,8 +133,8 @@ function Lineage({ w }: { w: WorkspaceView }) {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!api) return;
+  const load = useCallback(() => {
+    if (!api) return () => {};
     let current = true;
     api.listSnapshots().then(
       l => {
@@ -146,6 +146,17 @@ function Lineage({ w }: { w: WorkspaceView }) {
       current = false;
     };
   }, [api]);
+  useEffect(load, [load]);
+  // The manifest changes on the bus only when a golden seals (a rollback from
+  // another client emits nothing), so that is the one stage worth a refetch.
+  useProtocolEvents(
+    useCallback(
+      e => {
+        if (e.type === "golden.stage" && e.stage === "sealed") load();
+      },
+      [load],
+    ),
+  );
 
   const rollback = async (version: number): Promise<void> => {
     if (!api) return;

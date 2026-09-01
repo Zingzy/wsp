@@ -47,13 +47,14 @@ export function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities 
     nap: ReturnType<typeof vi.fn>;
     upgrade: ReturnType<typeof vi.fn<(id: string, size: WorkspaceSize) => Promise<WorkspaceView>>>;
     rollbackSnapshot: ReturnType<typeof vi.fn<(version: number, name?: string) => Promise<SnapshotRollbackResult>>>;
+    listSnapshots: ReturnType<typeof vi.fn<() => Promise<SnapshotLineage>>>;
   } = {
     upgrade: vi.fn(async (id: string, _size: WorkspaceSize) => view(id, "?", "running")),
     capabilities: vi.fn(async () => capabilities),
     daemonReach: vi.fn(async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 })),
     startSession: vi.fn(async (o: { workspaceId: string }) => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" as const })),
     sessionHistory: vi.fn(async () => []),
-    listSnapshots: vi.fn(async () => current),
+    listSnapshots: vi.fn<() => Promise<SnapshotLineage>>(async () => current),
     rollbackSnapshot: vi.fn(async (version: number) => {
       current = { ...current, head: version };
       return { lineage: current, existingWorkspaces: "untouched" as const };
@@ -222,6 +223,20 @@ describe("snapshot lineage", () => {
     expect(screen.getByText("new forks use v11 · existing workspaces keep their image")).toBeDefined();
     expect(screen.getByRole("button", { name: "activate v12" })).toBeDefined();
     expect(screen.queryByRole("button", { name: /confirm rollback/ })).toBeNull();
+  });
+
+  it("refetches the lineage when a golden seals, so a version sealed elsewhere shows up without a reload", async () => {
+    const api = await renderLineage(onV12(), twoVersions);
+    await screen.findByRole("button", { name: "activate v11" });
+    expect(api.listSnapshots).toHaveBeenCalledTimes(1);
+
+    api.listSnapshots.mockResolvedValueOnce({ name: "default", head: 13, versions: [gv(11), gv(12), gv(13)] });
+    act(() => api.emit({ type: "golden.stage", name: "default", stage: "snapshotting" }));
+    expect(api.listSnapshots).toHaveBeenCalledTimes(1); // only a sealed stage changes the manifest
+    act(() => api.emit({ type: "golden.stage", name: "default", stage: "sealed" }));
+    await waitFor(() => expect(fact("v13")).toBe("v13head"));
+    expect(fact("v12")).toBe("v12this fork");
+    expect(api.listSnapshots).toHaveBeenCalledTimes(2);
   });
 
   it("cancel closes the confirm without touching the api", async () => {
