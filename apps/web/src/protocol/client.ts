@@ -2,7 +2,7 @@
 // Browser-side client for the runtime WS (see packages/runtime/src/serve.ts).
 // Auth: open the socket, send one `auth` frame with the token (host injects it
 // via window.__WSP__), then ops flow. The token never rides in the URL.
-import type { Capabilities, DaemonReachView, EventUnion, SessionEvent, SessionView, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import type { Capabilities, DaemonReachView, EventUnion, SessionEvent, SessionView, WorkspaceStatus, WorkspaceView, SnapshotLineage, SnapshotRollbackResult } from "@wsp/protocol";
 
 export type ProtocolEvent = EventUnion;
 type Pending = { resolve: (v: Record<string, unknown>) => void; reject: (e: Error) => void };
@@ -110,6 +110,10 @@ export interface Api {
   /** The workspace's persisted session events, oldest first: what a chat replays on mount. */
   sessionHistory(id: string): Promise<SessionEvent[]>;
   subscribe(fn: (e: ProtocolEvent) => void): () => void;
+  /** Every sealed version of a golden and the head new forks use. */
+  listSnapshots(name?: string): Promise<SnapshotLineage>;
+  /** Moves head to a version in the manifest; workspaces already forked keep their image. */
+  rollbackSnapshot(version: number, name?: string): Promise<SnapshotRollbackResult>;
 }
 
 export interface WorkspaceSizeSpec {
@@ -155,5 +159,14 @@ export function makeApi(c: ProtocolClient): Api {
     listSessions: async id =>
       (await c.request<{ sessions: SessionView[] }>("sessions.list", id !== undefined ? { workspaceId: id } : {})).sessions,
     subscribe: fn => c.subscribe(fn),
+    listSnapshots: async name =>
+      (await c.request<{ lineage: SnapshotLineage }>("snapshots.list", name !== undefined ? { name } : {})).lineage,
+    rollbackSnapshot: async (version, name) => {
+      const { lineage, existingWorkspaces } = await c.request<SnapshotRollbackResult>("snapshots.rollback", {
+        version,
+        ...(name !== undefined ? { name } : {}),
+      });
+      return { lineage, existingWorkspaces };
+    },
   };
 }

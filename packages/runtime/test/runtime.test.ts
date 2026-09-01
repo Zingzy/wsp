@@ -326,3 +326,35 @@ describe("runtime upgrade vault", () => {
     }
   });
 });
+
+describe("runtime golden rollback", () => {
+  const version = (n: number) => ({
+    version: n,
+    snapshotId: `snap_golden-v${n}`,
+    baseTemplate: "base",
+    setupSha: `sha${n}`,
+    createdAt: `2026-08-${10 + n}T00:00:00.000Z`,
+    smoke: { cmd: "true", exitCode: 0 },
+  });
+
+  it("moves head to an earlier version, persists it, and leaves existing workspaces on their image", async () => {
+    const store = memoryStore();
+    await store.put("goldens", "default", { head: 2, versions: [version(1), version(2)] });
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_golden-v2", name: "a" });
+
+    const rolled = await rt.golden.rollback(1);
+    expect(rolled).toEqual({ head: 1, versions: [version(1), version(2)] });
+    expect(await rt.golden.get()).toEqual(rolled);
+    expect((await rt.workspaces.get(ws.id)).golden).toBe("snap_golden-v2");
+  });
+
+  it("refuses a version that is not in the manifest, and a golden that does not exist, as kind missing", async () => {
+    const store = memoryStore();
+    await store.put("goldens", "default", { head: 1, versions: [version(1)] });
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: {} });
+    await expect(rt.golden.rollback(7)).rejects.toMatchObject({ kind: "missing", message: expect.stringContaining("v7") });
+    await expect(rt.golden.rollback(1, "nope")).rejects.toMatchObject({ kind: "missing" });
+    expect(await rt.golden.get()).toEqual({ head: 1, versions: [version(1)] }); // untouched
+  });
+});

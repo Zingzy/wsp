@@ -184,6 +184,23 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "golden.seal":
               send({ id: msg.id, ok: true, ...(await rt.golden.seal(msg.builderId)) });
               return;
+            case "snapshots.list": {
+              const name = msg.name ?? "default";
+              const manifest = await rt.golden.get(name);
+              send({ id: msg.id, ok: true, lineage: { name, head: manifest?.head ?? null, versions: manifest?.versions ?? [] } });
+              return;
+            }
+            case "snapshots.rollback": {
+              const name = msg.name ?? "default";
+              const manifest = await rt.golden.rollback(msg.version, name);
+              send({
+                id: msg.id,
+                ok: true,
+                lineage: { name, head: manifest.head, versions: manifest.versions },
+                existingWorkspaces: "untouched",
+              });
+              return;
+            }
           }
         } catch (e) {
           const kind = (e as { kind?: unknown }).kind;
