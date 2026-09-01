@@ -2,5 +2,17 @@
   "name": "@wsp/daemon",
   "type": "module",
   "main": "dist/index.js",
-  "scripts": { "build": "tsup src/index.ts --format esm --dts", "test": "vitest run" }
+  "scripts": {
+    "build": "tsup src/index.ts src/main.ts --format esm --dts",
+    "postinstall": "node scripts/fix-node-pty-perms.mjs",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "node-pty": "^1.1.0",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.0",
+    "@types/ws": "^8.18.1"
+  }
 }
