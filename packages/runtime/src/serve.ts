@@ -174,9 +174,25 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "capabilities.get":
               send({ id: msg.id, ok: true, capabilities: rt.backend.capabilities });
               return;
+            case "golden.prepare":
+              send({
+                id: msg.id,
+                ok: true,
+                builder: await rt.golden.prepare({ name: msg.name, ...(msg.kind !== undefined ? { kind: msg.kind } : {}) }),
+              });
+              return;
+            case "golden.seal":
+              send({ id: msg.id, ok: true, ...(await rt.golden.seal(msg.builderId)) });
+              return;
           }
         } catch (e) {
-          send({ id: msg.id, ok: false, error: e instanceof Error ? e.message : String(e) });
+          const kind = (e as { kind?: unknown }).kind;
+          send({
+            id: msg.id,
+            ok: false,
+            error: e instanceof Error ? e.message : String(e),
+            ...(typeof kind === "string" ? { kind } : {}),
+          });
         }
       })();
     });

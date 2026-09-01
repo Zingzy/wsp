@@ -1,91 +1,194 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Golden images in two halves so the scripted pipeline and the first-run
+// wizard share one road: prepareBuilder boots a fresh machine and installs the
+// harness (nothing personal on it yet); sealGolden snapshots it, proves the
+// snapshot boots by smoke-testing a fork, and appends a manifest version.
+// Between the halves a person may sit on the builder's live screen for as
+// long as they like, as long as nobody pauses it (snapshot-fresh rule).
+
 import { createHash } from "node:crypto";
+import type { GoldenManifest, GoldenStage, GoldenVersion } from "@wsp/protocol";
+import { assertFirstLife } from "./lifecycle.js";
 import type { Machine, MachineBackend, MachineKind } from "./machine.js";
 
-export interface GoldenVersion {
-  version: number;
-  snapshotId: string;
-  baseTemplate: string;
-  setupSha: string;
-  createdAt: string;
-  smoke: { cmd: string; exitCode: number };
+export type { GoldenManifest, GoldenStage, GoldenVersion };
+
+export type StageListener = (stage: GoldenStage, detail?: string) => void;
+
+/** Solari's built-in templates are kind-specific (TemplateKindMismatch otherwise). */
+const DEFAULT_TEMPLATE: Record<MachineKind, string> = { sandbox: "base", desktop: "default" };
+
+export interface MachineSize {
+  cpu?: number;
+  memMb?: number;
+  envs?: Record<string, string>;
+  labels?: Record<string, string>;
 }
 
-export interface GoldenManifest {
-  head: number;
-  versions: GoldenVersion[];
+export interface PrepareBuilderOptions extends MachineSize {
+  backend: MachineBackend;
+  /** Default desktop: the builder's own noVNC stream is what the wizard shows. */
+  kind?: MachineKind;
+  baseTemplate?: string;
+  /** Host-owned step (the daemon bundle lives outside the engine); skipped when absent. */
+  deployDaemon?: (machine: Machine) => Promise<void>;
+  /** Harness install; its sha is recorded in the manifest. */
+  setup: string;
+  setupTimeoutMs?: number;
+  onStage?: StageListener;
 }
 
-export interface BuildGoldenOptions {
+/** A first-life machine with the harness installed, waiting to be sealed. */
+export interface Builder {
+  readonly machine: Machine;
+  readonly kind: MachineKind;
+  readonly baseTemplate: string;
+  readonly setupSha: string;
+  readonly createdAt: string;
+  /** False once the machine has ever been resumed; sealGolden refuses it then. */
+  readonly firstLife: boolean;
+}
+
+export interface SealGoldenOptions extends MachineSize {
+  backend: MachineBackend;
+  /** Runs on a fork of the fresh snapshot; a non-zero exit means no version is sealed. */
+  smoke: string;
+  smokeTimeoutMs?: number;
+  manifest?: GoldenManifest;
+  onStage?: StageListener;
+}
+
+export interface BuildGoldenOptions extends MachineSize {
   backend: MachineBackend;
   setup: string;
   smoke: string;
+  /** The scripted pipeline keeps its historical default; the wizard passes desktop. */
+  kind?: MachineKind;
   baseTemplate?: string;
-  cpu?: number;
-  memMb?: number;
-  envs?: Record<string, string>;
-  labels?: Record<string, string>;
   manifest?: GoldenManifest;
-  keepBuilder?: boolean;
   setupTimeoutMs?: number;
   smokeTimeoutMs?: number;
+  onStage?: StageListener;
 }
 
-export interface ForkOverrides {
+export interface ForkOverrides extends MachineSize {
   kind?: MachineKind;
-  cpu?: number;
-  memMb?: number;
-  envs?: Record<string, string>;
-  labels?: Record<string, string>;
 }
 
-// Every build runs on a machine created here and snapshotted before any
-// pause/resume, so images always obey the snapshot-fresh rule.
-export async function buildGolden(
-  opts: BuildGoldenOptions,
-): Promise<{ manifest: GoldenManifest; version: GoldenVersion; builder?: Machine }> {
-  const baseTemplate = opts.baseTemplate ?? "base";
+function sizeSpec(o: MachineSize) {
+  return {
+    ...(o.cpu ? { cpu: o.cpu } : {}),
+    ...(o.memMb ? { memMb: o.memMb } : {}),
+    ...(o.envs ? { envs: o.envs } : {}),
+    ...(o.labels ? { labels: o.labels } : {}),
+  };
+}
+
+export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Builder> {
+  const stage = opts.onStage ?? (() => {});
+  const kind = opts.kind ?? "desktop";
+  const baseTemplate = opts.baseTemplate ?? DEFAULT_TEMPLATE[kind];
+
+  stage("creating", `${kind} from ${baseTemplate}`);
+  const machine = await opts.backend.create({ kind, template: baseTemplate, ...sizeSpec(opts) });
+  try {
+    if (opts.deployDaemon) {
+      stage("deploying-daemon");
+      await opts.deployDaemon(machine);
+    }
+    stage("installing-harness");
+    const res = await machine.exec(opts.setup, { timeoutMs: opts.setupTimeoutMs ?? 300_000 });
+    if (res.exitCode !== 0) {
+      throw new Error(`golden setup failed (exit ${res.exitCode}): ${res.stderr.slice(-500)}`);
+    }
+    stage("ready");
+    return {
+      machine,
+      kind,
+      baseTemplate,
+      setupSha: createHash("sha256").update(opts.setup).digest("hex"),
+      createdAt: new Date().toISOString(),
+      firstLife: true,
+    };
+  } catch (e) {
+    await machine.kill().catch(() => {});
+    stage("failed", e instanceof Error ? e.message : String(e));
+    throw e;
+  }
+}
+
+// Sequenced for a two-machine cap: the builder dies before the smoke fork
+// boots, so the seal itself never holds more than one machine.
+export async function sealGolden(
+  builder: Builder,
+  opts: SealGoldenOptions,
+): Promise<{ manifest: GoldenManifest; version: GoldenVersion }> {
+  const stage = opts.onStage ?? (() => {});
+  assertFirstLife(builder.machine.id, builder.firstLife, "seal");
+
   const prior = opts.manifest?.versions ?? [];
   const versionNum = (prior[prior.length - 1]?.version ?? 0) + 1;
-
-  const builder = await opts.backend.create({
-    kind: "sandbox",
-    template: baseTemplate,
-    ...(opts.cpu ? { cpu: opts.cpu } : {}),
-    ...(opts.memMb ? { memMb: opts.memMb } : {}),
-    ...(opts.envs ? { envs: opts.envs } : {}),
-    ...(opts.labels ? { labels: opts.labels } : {}),
-  });
-
+  let snapshotId: string | undefined;
+  let builderAlive = true;
+  let fork: Machine | undefined;
   try {
-    const setupRes = await builder.exec(opts.setup, { timeoutMs: opts.setupTimeoutMs ?? 300_000 });
-    if (setupRes.exitCode !== 0) {
-      throw new Error(`golden setup failed (exit ${setupRes.exitCode}): ${setupRes.stderr.slice(-500)}`);
-    }
-    const smokeRes = await builder.exec(opts.smoke, { timeoutMs: opts.smokeTimeoutMs ?? 120_000 });
+    stage("snapshotting", `golden-v${versionNum}`);
+    snapshotId = await builder.machine.snapshot(`golden-v${versionNum}`);
+    await builder.machine.kill();
+    builderAlive = false;
+
+    stage("smoke-forking", opts.smoke);
+    fork = await opts.backend.create({ kind: builder.kind, fromSnapshot: snapshotId, ...sizeSpec(opts) });
+    const smokeRes = await fork.exec(opts.smoke, { timeoutMs: opts.smokeTimeoutMs ?? 120_000 });
     if (smokeRes.exitCode !== 0) {
       throw new Error(
         `golden smoke failed (exit ${smokeRes.exitCode}) for ${JSON.stringify(opts.smoke)}: ${smokeRes.stderr.slice(-500)}`,
       );
     }
+    await fork.kill();
 
-    const snapshotId = await builder.snapshot(`golden-v${versionNum}`);
     const version: GoldenVersion = {
       version: versionNum,
       snapshotId,
-      baseTemplate,
-      setupSha: createHash("sha256").update(opts.setup).digest("hex"),
+      baseTemplate: builder.baseTemplate,
+      kind: builder.kind,
+      setupSha: builder.setupSha,
       createdAt: new Date().toISOString(),
       smoke: { cmd: opts.smoke, exitCode: smokeRes.exitCode },
     };
-    const manifest: GoldenManifest = { head: versionNum, versions: [...prior, version] };
-
-    if (opts.keepBuilder) return { manifest, version, builder };
-    await builder.kill();
-    return { manifest, version };
+    stage("sealed", `v${versionNum}`);
+    return { manifest: { head: versionNum, versions: [...prior, version] }, version };
   } catch (e) {
-    if (!opts.keepBuilder) await builder.kill().catch(() => {});
+    if (builderAlive) await builder.machine.kill().catch(() => {});
+    await fork?.kill().catch(() => {});
+    if (snapshotId !== undefined) await opts.backend.deleteSnapshot(snapshotId).catch(() => {});
+    stage("failed", e instanceof Error ? e.message : String(e));
     throw e;
   }
+}
+
+/** The scripted pipeline: prepare then seal, no one in between. */
+export async function buildGolden(
+  opts: BuildGoldenOptions,
+): Promise<{ manifest: GoldenManifest; version: GoldenVersion }> {
+  const { backend, setup, smoke, kind, baseTemplate, manifest, setupTimeoutMs, smokeTimeoutMs, onStage, ...size } = opts;
+  const builder = await prepareBuilder({
+    backend,
+    kind: kind ?? "sandbox",
+    setup,
+    ...size,
+    ...(baseTemplate !== undefined ? { baseTemplate } : {}),
+    ...(setupTimeoutMs !== undefined ? { setupTimeoutMs } : {}),
+    ...(onStage !== undefined ? { onStage } : {}),
+  });
+  return sealGolden(builder, {
+    backend,
+    smoke,
+    ...size,
+    ...(manifest !== undefined ? { manifest } : {}),
+    ...(smokeTimeoutMs !== undefined ? { smokeTimeoutMs } : {}),
+    ...(onStage !== undefined ? { onStage } : {}),
+  });
 }
 
 export async function forkGolden(
@@ -96,12 +199,9 @@ export async function forkGolden(
   const head = manifest.versions.find(v => v.version === manifest.head);
   if (!head) throw new Error(`manifest head ${manifest.head} has no version entry`);
   return backend.create({
-    kind: overrides.kind ?? "sandbox",
+    kind: overrides.kind ?? head.kind ?? "sandbox",
     fromSnapshot: head.snapshotId,
-    ...(overrides.cpu ? { cpu: overrides.cpu } : {}),
-    ...(overrides.memMb ? { memMb: overrides.memMb } : {}),
-    ...(overrides.envs ? { envs: overrides.envs } : {}),
-    ...(overrides.labels ? { labels: overrides.labels } : {}),
+    ...sizeSpec(overrides),
   });
 }
 

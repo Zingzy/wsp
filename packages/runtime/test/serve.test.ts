@@ -137,3 +137,69 @@ describe("serveRuntime daemon reach", () => {
     c.close();
   });
 });
+
+describe("serveRuntime golden wizard ops", () => {
+  const recipe = { setup: "curl install", smoke: "claude --version", envs: { ANTHROPIC_API_KEY: "k" } };
+
+  it("golden.prepare replies with the builder and its screen, golden.seal writes v1 of desktop kind, and no machine survives", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const runtime = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    await c.request("events.subscribe");
+
+    const prepared = await c.request("golden.prepare", { name: "default" });
+    expect(prepared.ok).toBe(true);
+    expect(prepared["builder"]).toMatchObject({ id: "m1", name: "default", kind: "desktop", screen: { streamUrl: "wss://stub/stream/m1" } });
+    expect(backend.machines[0]!.spec).toMatchObject({ kind: "desktop", template: "default", envs: { ANTHROPIC_API_KEY: "k" } });
+    expect(backend.machines[0]!.spec.labels).toMatchObject({ wsp: "1", "wsp-builder": "1" });
+    expect(backend.machines[0]!.execLog).toEqual(["curl install"]);
+    // the builder is not a workspace
+    expect((await c.request("workspaces.list"))["workspaces"]).toEqual([]);
+    expect(await store.list("builders")).toHaveLength(1);
+
+    const sealed = await c.request("golden.seal", { builderId: "m1" });
+    expect(sealed.ok).toBe(true);
+    expect(sealed["version"]).toMatchObject({ version: 1, kind: "desktop", snapshotId: "snap_golden-v1", smoke: { cmd: "claude --version", exitCode: 0 } });
+    expect((sealed["manifest"] as { head: number }).head).toBe(1);
+    expect(backend.machines.map(m => [m.id, m.kind, m.killed])).toEqual([["m1", "desktop", true], ["m2", "desktop", true]]);
+    expect(backend.machines[1]!.spec.fromSnapshot).toBe("snap_golden-v1");
+    expect(backend.machines[1]!.execLog).toEqual(["claude --version"]);
+    expect(await store.list("builders")).toEqual([]);
+    expect((await c.request("golden.get", { name: "default" }))["manifest"]).toEqual(sealed["manifest"]);
+
+    await new Promise(r => setTimeout(r, 20));
+    const stages = c.events.filter(e => e.type === "golden.stage").map(e => e["stage"]);
+    expect(stages).toEqual(["creating", "installing-harness", "ready", "snapshotting", "smoke-forking", "sealed"]);
+    expect(c.events.filter(e => e.type === "golden.stage").every(e => e["name"] === "default")).toBe(true);
+    c.close();
+  });
+
+  it("golden.seal on a builder hydrated by a later process is refused as notFirstLife and the builder dies", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const first = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
+    const builder = await first.golden.prepare();
+    const second = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
+    srv = await serveRuntime(second, { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    expect((await c.request("golden.prepare", { name: "default" })).ok).toBe(true); // a fresh one is fine
+    const refused = await c.request("golden.seal", { builderId: builder.id });
+    expect(refused).toMatchObject({ ok: false, kind: "notFirstLife" });
+    expect(refused["error"]).toMatch(/first-life/);
+    expect(backend.machines[0]!.killed).toBe(true);
+    expect(backend.machines.filter(m => !m.killed)).toHaveLength(1);
+    expect(await second.golden.get()).toBeUndefined();
+    c.close();
+  });
+
+  it("golden.prepare fails plainly when the runtime has no recipe", async () => {
+    srv = await serveRuntime(rt(), { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    const res = await c.request("golden.prepare", { name: "default" });
+    expect(res.ok).toBe(false);
+    expect(res["error"]).toMatch(/no golden recipe/);
+    c.close();
+  });
+});
