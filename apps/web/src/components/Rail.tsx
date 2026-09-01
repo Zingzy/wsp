@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Workspace rail (Plan 3 Task 2): 3-row cards per the approved mock, fed by
-// the enriched status subscription + cost ticker. Ticket additions: the
-// new-workspace affordance, and the awake ring turning amber during live
-// sessions (coordinator ruling on ticket 19).
+// Workspace rail: 3-row cards per the approved mock, fed by the enriched
+// status subscription + cost ticker. Beyond the mock: the new-workspace
+// affordance, and the awake ring turns amber only during live sessions.
 import { useState } from "react";
 import type { WorkspaceView } from "@wsp/protocol";
 import { useCost, useSelectedId, useSpending, useStatus, useStore, useWorkspaces } from "../protocol/store.js";

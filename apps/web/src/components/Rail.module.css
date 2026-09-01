@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: AGPL-3.0-only */
-/* Values from the approved mock's .rail block; spend-pulse + add button are
- * ticket additions using the existing tokens (--acc appears only for spend). */
+/* Values from the approved mock's .rail block; spend-pulse and add button
+ * extend it using existing tokens (--acc appears only for spend). */
 .rail { display: flex; flex-direction: column; min-height: 0; height: 100%; background: var(--panel); }
 .head { display: flex; align-items: baseline; gap: 8px; padding: 13px 14px 9px; }
 .label { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--deep); }
@@ -32,8 +32,8 @@
 .dot { width: 7px; height: 7px; border-radius: 50%; position: relative; justify-self: start; }
 .dot[data-phase="running"] { background: var(--ok); box-shadow: 0 0 7px 1px color-mix(in srgb, var(--ok) 40%, transparent); }
 .dot[data-phase="napping"] { border: 1.5px solid var(--deep); }
-/* mock's awake ping ring, always on while running; it turns amber only while
- * a live agent session burns money (coordinator ruling on ticket 19) */
+/* mock's awake ping ring, always on while running; amber only while a live
+ * agent session burns money */
 .dot[data-phase="running"]::after {
   content: ""; position: absolute; inset: 0; border-radius: 50%;
   border: 1px solid var(--ok); animation: ping 2.6s ease-out infinite;

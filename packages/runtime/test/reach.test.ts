@@ -3,8 +3,9 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startDaemon, type DaemonHandle, type ListeningPort } from "@wsp/daemon";
-import type { DaemonEvent } from "@wsp/protocol";
+import type { DaemonEvent, DaemonLinkStatus } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
+import { WebSocketServer } from "ws";
 import { connectDaemon, daemonWsUrl, type DaemonReach } from "../src/reach.js";
 import { startTcpProxy, type TcpProxy } from "./tcp-proxy.js";
 
@@ -119,6 +120,102 @@ describe("connectDaemon", () => {
     // heartbeats keep flowing on the new socket
     const pongs = reach.stats().pongsReceived;
     await until(() => reach!.stats().pongsReceived > pongs);
+  });
+
+  it("reports connecting then live on first connect", async () => {
+    daemon = await startTestDaemon();
+    const statuses: DaemonLinkStatus[] = [];
+    reach = connectDaemon({
+      previewUrl: `ws://127.0.0.1:${daemon.port}`,
+      token: TOKEN,
+      onEvent: () => {},
+      onStatus: s => statuses.push(s),
+    });
+    await reach.ready;
+    expect(statuses).toEqual(["connecting", "live"]);
+    expect(reach.status()).toBe("live");
+  });
+
+  it("cycles connecting → live across a cut socket, without duplicate emissions", async () => {
+    daemon = await startTestDaemon();
+    proxy = await startTcpProxy(daemon.port);
+    const statuses: DaemonLinkStatus[] = [];
+    reach = connectDaemon({
+      previewUrl: `ws://127.0.0.1:${proxy.port}`,
+      token: TOKEN,
+      onEvent: () => {},
+      heartbeatMs: 100,
+      backoffMs: () => 25,
+      onStatus: s => statuses.push(s),
+    });
+    await reach.ready;
+    proxy.cutAll();
+    await until(() => statuses.filter(s => s === "live").length >= 2);
+    expect(statuses).toEqual(["connecting", "live", "connecting", "live"]);
+  });
+
+  it("rejects ready and reports reauth-needed on a bad token", async () => {
+    daemon = await startTestDaemon();
+    const statuses: DaemonLinkStatus[] = [];
+    reach = connectDaemon({
+      previewUrl: `ws://127.0.0.1:${daemon.port}`,
+      token: "wrong-token",
+      onEvent: () => {},
+      onStatus: s => statuses.push(s),
+    });
+    await expect(reach.ready).rejects.toThrow("4401");
+    expect(statuses).toEqual(["connecting", "reauth-needed"]);
+  });
+
+  it("surfaces a post-establishment 4401 as reauth-needed and stops retrying", async () => {
+    daemon = await startTestDaemon();
+    proxy = await startTcpProxy(daemon.port);
+    const statuses: DaemonLinkStatus[] = [];
+    reach = connectDaemon({
+      previewUrl: `ws://127.0.0.1:${proxy.port}`,
+      token: TOKEN,
+      onEvent: () => {},
+      heartbeatMs: 100,
+      backoffMs: () => 25,
+      onStatus: s => statuses.push(s),
+    });
+    await reach.ready;
+
+    // The token stops being honored mid-session: every redial now gets a 4401.
+    const port = proxy.port;
+    await proxy.close();
+    proxy = undefined;
+    const rejecting = new WebSocketServer({ host: "127.0.0.1", port });
+    let dials = 0;
+    rejecting.on("connection", ws => {
+      dials++;
+      ws.close(4401, "unauthorized");
+    });
+    try {
+      await until(() => statuses.includes("reauth-needed"));
+      expect(statuses).toEqual(["connecting", "live", "connecting", "reauth-needed"]);
+      const seen = dials;
+      await new Promise(r => setTimeout(r, 200)); // several backoff periods
+      expect(dials).toBe(seen); // reauth is terminal: retrying cannot fix a bad token
+      expect(reach.status()).toBe("reauth-needed");
+    } finally {
+      await new Promise<void>(resolve => rejecting.close(() => resolve()));
+    }
+  });
+
+  it("reports dead once the client closes", async () => {
+    daemon = await startTestDaemon();
+    const statuses: DaemonLinkStatus[] = [];
+    reach = connectDaemon({
+      previewUrl: `ws://127.0.0.1:${daemon.port}`,
+      token: TOKEN,
+      onEvent: () => {},
+      onStatus: s => statuses.push(s),
+    });
+    await reach.ready;
+    reach.close();
+    reach = undefined;
+    expect(statuses).toEqual(["connecting", "live", "dead"]);
   });
 
   it("keeps retrying while the daemon is unreachable and connects once it is back", async () => {

@@ -196,6 +196,10 @@ export type EventUnion = z.infer<typeof EventUnion>;
 
 // --- daemon wire protocol (ws://0.0.0.0:7070/?token=..., 4401 on bad token) ---
 
+/** Client-side health of a daemon link; reauth-needed and dead are terminal. */
+export const DaemonLinkStatus = z.enum(["connecting", "live", "reauth-needed", "dead"]);
+export type DaemonLinkStatus = z.infer<typeof DaemonLinkStatus>;
+
 const reqId = z.union([z.string(), z.number()]);
 
 export const DaemonRequest = z.discriminatedUnion("op", [

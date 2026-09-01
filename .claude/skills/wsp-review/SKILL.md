@@ -47,6 +47,8 @@ Review wsp changes against the laws this project has already paid for. Generic c
 
 ## Process laws
 
+- No process language in source comments: no ticket numbers, plan names, or merge-history narration. A comment states a constraint for the next reader; process lives in the tracker.
+
 - Conventional commit subject <72 chars + a why-paragraph; NO co-author trailers.
 - One ticket = one branch = one session; branch names ticket/<n>-<slug>; worktrees under ~/wsp/.claude/worktrees/ (never /tmp).
 - Builders never merge to main; the coordinator merges. Ticket branches may be pushed to origin for PR review; main pushes are coordinator-only.
