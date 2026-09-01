@@ -75,6 +75,74 @@ describe("WorkspaceTerminals", () => {
     un();
   }, 15_000);
 
+  it("a pty that cannot re-attach is marked lost while the rest still re-attach", async () => {
+    const attaches: string[] = [];
+    let nextPty = 1;
+    let reattaching = false;
+    const wire: TerminalWire = {
+      request: async (op, params = {}) => {
+        if (op === "pty.create") return { ok: true, ptyId: `p${nextPty++}` };
+        if (op === "pty.attach") {
+          if (reattaching && params["ptyId"] === "p1") throw new Error("no such pty: p1");
+          attaches.push(String(params["ptyId"]));
+        }
+        return { ok: true };
+      },
+    };
+    const wt = new WorkspaceTerminals(wire);
+    wt.feedStatus("live");
+    await wt.open();
+    await wt.open();
+    attaches.length = 0;
+    reattaching = true;
+
+    wt.feedStatus("connecting");
+    wt.feedStatus("live");
+    await waitFor(() => expect(attaches).toEqual(["p2"])); // p1 failed, p2 still re-attached
+    expect(wt.tabs().find(t => t.ptyId === "p1")).toMatchObject({ exited: true });
+    expect(wt.tabs().find(t => t.ptyId === "p2")).toMatchObject({ exited: false });
+  });
+
+  it("a connection dying mid-reattach does not mark ptys lost", async () => {
+    let nextPty = 1;
+    const attaches: string[] = [];
+    let pendingReject: ((e: Error) => void) | null = null;
+    let deferNext = false;
+    const wire: TerminalWire = {
+      request: (op, params = {}) => {
+        if (op === "pty.create") return Promise.resolve({ ok: true, ptyId: `p${nextPty++}` });
+        if (op === "pty.attach") {
+          attaches.push(String(params["ptyId"]));
+          if (deferNext) {
+            deferNext = false;
+            return new Promise((_, reject) => {
+              pendingReject = reject;
+            });
+          }
+        }
+        return Promise.resolve({ ok: true });
+      },
+    };
+    const wt = new WorkspaceTerminals(wire);
+    wt.feedStatus("live");
+    await wt.open();
+    await wt.open();
+    attaches.length = 0;
+
+    deferNext = true; // p1's re-attach hangs until the socket death rejects it
+    wt.feedStatus("connecting");
+    wt.feedStatus("live");
+    await waitFor(() => expect(pendingReject).not.toBeNull());
+    wt.feedStatus("connecting"); // the connection died again mid-ritual
+    pendingReject!(new Error("connection lost"));
+    await new Promise(r => setTimeout(r, 25));
+    expect(attaches).toEqual(["p1"]); // the ritual stopped, p2 was not attempted
+    expect(wt.tabs().every(t => !t.exited)).toBe(true); // nobody wrongly marked lost
+
+    wt.feedStatus("live"); // recovery: the next live transition re-runs the full ritual
+    await waitFor(() => expect(attaches).toEqual(["p1", "p1", "p2"]));
+  });
+
   it("a reconnect re-attaches every pty and resets bound sinks", async () => {
     const ops: string[] = [];
     let nextPty = 1;
@@ -141,6 +209,17 @@ describe("TerminalTab", () => {
     const ids = daemon.ptys.list().map(p => p.id);
     expect(new Set(ids).size).toBe(2);
     expect(wt.tabs().map(t => t.ptyId)).toEqual(ids);
+  }, 15_000);
+
+  it("closing the last terminal stays closed instead of respawning", async () => {
+    const { daemon } = await boot();
+    render(<TerminalTab workspaceId={WS_ID} />);
+    await waitFor(() => expect(daemon.ptys.list()).toHaveLength(1), { timeout: 10_000 });
+    fireEvent.click(screen.getByLabelText(/^close /));
+    await waitFor(() => expect(daemon.ptys.list()).toHaveLength(0), { timeout: 10_000 });
+    await new Promise(r => setTimeout(r, 250)); // the auto-open effect must not refire
+    expect(daemon.ptys.list()).toHaveLength(0);
+    screen.getByText("no terminals");
   }, 15_000);
 
   it("renders the connection state: live dot, reconnecting text, reauth banner", async () => {

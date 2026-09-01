@@ -4,12 +4,10 @@
 // daemon has no pty.detach op, so each pty is attached at most once per wire;
 // parking a tab drops its xterm instance (the heavy part) and a remount
 // replays from the mirror instead of re-attaching.
-import type { DaemonEvent } from "@wsp/protocol";
+import type { DaemonEvent, DaemonLinkStatus } from "@wsp/protocol";
 
 /** Mirrors the daemon's per-pty scrollback cap (pty-manager.ts), in UTF-16 units. */
 const MIRROR_CAP = 256 * 1024;
-
-export type LinkStatus = "connecting" | "live" | "reauth-needed" | "dead";
 
 /** The one thing a transport must provide. Tests back it with the reach client. */
 export interface TerminalWire {
@@ -47,12 +45,13 @@ export class WorkspaceTerminals {
   #ptys = new Map<string, PtyState>();
   #order: string[] = [];
   #activeId: string | null = null;
-  #status: LinkStatus = "connecting";
+  #status: DaemonLinkStatus = "connecting";
   #wasLive = false;
   #statusFns = new Set<() => void>();
   #tabsFns = new Set<() => void>();
   #tabsView: PtyTabView[] = [];
   #opening: Promise<PtyTabView> | null = null;
+  #everOpened = false;
 
   constructor(wire: TerminalWire) {
     this.#wire = wire;
@@ -60,7 +59,7 @@ export class WorkspaceTerminals {
 
   // --- fed by the transport owner -------------------------------------------
 
-  feedStatus(s: LinkStatus): void {
+  feedStatus(s: DaemonLinkStatus): void {
     const relive = s === "live" && this.#wasLive;
     if (s === "live") this.#wasLive = true;
     this.#status = s;
@@ -90,7 +89,7 @@ export class WorkspaceTerminals {
 
   // --- read side for the tab UI ----------------------------------------------
 
-  status(): LinkStatus {
+  status(): DaemonLinkStatus {
     return this.#status;
   }
 
@@ -125,6 +124,7 @@ export class WorkspaceTerminals {
     if (opts.shell !== undefined) params["shell"] = opts.shell;
     if (opts.cwd !== undefined) params["cwd"] = opts.cwd;
     const created = await this.#wire.request("pty.create", params);
+    this.#everOpened = true;
     const ptyId = String(created["ptyId"]);
     const p: PtyState = {
       ptyId,
@@ -140,6 +140,11 @@ export class WorkspaceTerminals {
     await this.#wire.request("pty.attach", { ptyId });
     this.#notifyTabs();
     return { ptyId: p.ptyId, title: p.title, exited: p.exited };
+  }
+
+  /** True once any pty was ever created; the tab auto-opens only before this. */
+  everOpened(): boolean {
+    return this.#everOpened;
   }
 
   /** The tab's auto-open on first mount; concurrent mounts share one create. */
@@ -219,7 +224,17 @@ export class WorkspaceTerminals {
       try {
         await this.#wire.request("pty.attach", { ptyId: p.ptyId });
       } catch {
-        return; // connection died again; the next live transition retries
+        // The wire dropping again rejects everything: stop, the next live
+        // transition re-runs the full ritual. A per-pty refusal on a live wire
+        // means that pty is gone (daemon restarted); the rest must still attach.
+        if (this.#status !== "live") return;
+        if (!p.exited) {
+          p.exited = true;
+          const note = "\r\n[terminal lost: could not re-attach]\r\n";
+          this.#mirror(p, note);
+          for (const s of p.sinks) s.data(note);
+          this.#notifyTabs();
+        }
       }
     }
   }

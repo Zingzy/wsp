@@ -3,21 +3,31 @@
 // ../terminal/link.js. Pty tabs live in that model, so tab-away parks the
 // terminal (xterm disposed, pty alive) and a remount replays from the mirror.
 import { useEffect, useRef, useSyncExternalStore } from "react";
-import { Terminal } from "@xterm/xterm";
+import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
+import type { DaemonLinkStatus } from "@wsp/protocol";
 import "@xterm/xterm/css/xterm.css";
-import { getTerminals, onTerminals, type LinkStatus, type WorkspaceTerminals } from "../terminal/link.js";
+import { getTerminals, onTerminals, type WorkspaceTerminals } from "../terminal/link.js";
 import styles from "./TerminalTab.module.css";
 
 // The well is darker than the app chrome (content-well inversion, approved
-// mock); xterm cannot read CSS vars, so these mirror tokens.css.
-const THEME = {
-  background: "#060607", // --term
-  foreground: "#a1a1aa", // --muted
-  cursor: "#f4f4f5", // --fg
-  selectionBackground: "rgba(244, 244, 245, 0.18)",
-};
+// mock). xterm cannot read CSS vars, so the theme resolves tokens.css at
+// mount; an unresolved token (jsdom) leaves that key on xterm's default.
+function themeFromTokens(el: HTMLElement): ITheme {
+  const cs = getComputedStyle(el);
+  const v = (name: string) => cs.getPropertyValue(name).trim();
+  const background = v("--term");
+  const foreground = v("--muted");
+  const cursor = v("--fg");
+  const selectionBackground = v("--line");
+  return {
+    ...(background ? { background } : {}),
+    ...(foreground ? { foreground } : {}),
+    ...(cursor ? { cursor } : {}),
+    ...(selectionBackground ? { selectionBackground } : {}),
+  };
+}
 
 export function TerminalTab({ workspaceId }: { workspaceId: string }) {
   const terms = useSyncExternalStore(onTerminals, () => getTerminals(workspaceId));
@@ -31,7 +41,9 @@ function TerminalPane({ terms }: { terms: WorkspaceTerminals }) {
   const activeId = useSyncExternalStore(fn => terms.onTabs(fn), () => terms.activeId());
 
   useEffect(() => {
-    if (status === "live" && tabs.length === 0) terms.ensureOpen().catch(() => {});
+    // Auto-open only before the first pty ever: closing the last terminal
+    // must not respawn one.
+    if (status === "live" && tabs.length === 0 && !terms.everOpened()) terms.ensureOpen().catch(() => {});
   }, [terms, status, tabs.length]);
 
   return (
@@ -83,14 +95,16 @@ function TerminalPane({ terms }: { terms: WorkspaceTerminals }) {
         {activeId ? (
           <TerminalView key={activeId} terms={terms} ptyId={activeId} />
         ) : (
-          <div className={styles.empty}>{status === "live" ? "opening terminal" : "waiting for connection"}</div>
+          <div className={styles.empty}>
+            {status !== "live" ? "waiting for connection" : terms.everOpened() ? "no terminals" : "opening terminal"}
+          </div>
         )}
       </div>
     </div>
   );
 }
 
-function StatusIndicator({ status }: { status: LinkStatus }) {
+function StatusIndicator({ status }: { status: DaemonLinkStatus }) {
   if (status === "live") return <span className={styles.dot} title="connected" />;
   if (status === "connecting") return <span className={styles.state}>reconnecting</span>;
   if (status === "reauth-needed") return <span className={styles.state}>auth expired</span>;
@@ -109,7 +123,7 @@ function TerminalView({ terms, ptyId }: { terms: WorkspaceTerminals; ptyId: stri
       lineHeight: 1.2,
       cursorBlink: true,
       scrollback: 5000,
-      theme: THEME,
+      theme: themeFromTokens(el),
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
