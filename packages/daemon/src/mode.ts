@@ -106,13 +106,19 @@ export class ModeWatcher {
     };
   }
 
+  /** Drops a pty whose process is gone; attached sockets would otherwise keep
+   * probing a dead pid until they close. Later detach calls are no-ops. */
+  remove(ptyId: string): void {
+    const entry = this.entries.get(ptyId);
+    if (!entry) return;
+    if (entry.timer) clearInterval(entry.timer);
+    entry.timer = null;
+    entry.listeners.clear();
+    this.entries.delete(ptyId);
+  }
+
   stop(): void {
-    for (const entry of this.entries.values()) {
-      if (entry.timer) clearInterval(entry.timer);
-      entry.timer = null;
-      entry.listeners.clear();
-    }
-    this.entries.clear();
+    for (const id of [...this.entries.keys()]) this.remove(id);
   }
 
   private async poll(ptyId: string, entry: Entry, newcomer?: ModeListener): Promise<void> {

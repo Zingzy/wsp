@@ -212,8 +212,12 @@ async function handle(ws: WebSocket, state: ConnState, ctx: Ctx, msg: Request): 
     case "pty.attach": {
       const s = requirePty(ctx.ptys, msg);
       const unData = s.attach(data => push(ws, { type: "pty.data", ptyId: s.id, data }));
-      const unExit = s.onExit(e => push(ws, { type: "pty.exit", ptyId: s.id, exitCode: e.exitCode, signal: e.signal }));
-      const unMode = ctx.modes.attach(s.id, s.pid, e => push(ws, { ...e }));
+      const unExit = s.onExit(e => {
+        ctx.modes.remove(s.id);
+        push(ws, { type: "pty.exit", ptyId: s.id, exitCode: e.exitCode, signal: e.signal });
+      });
+      // onExit fires synchronously for an already-dead pty; never start polling one.
+      const unMode = s.exited ? () => {} : ctx.modes.attach(s.id, s.pid, e => push(ws, { ...e }));
       state.detaches.push(unData, unExit, unMode);
       reply(ws, msg.id, { ptyId: s.id });
       return;
@@ -229,7 +233,9 @@ async function handle(ws: WebSocket, state: ConnState, ctx: Ctx, msg: Request): 
       return;
     }
     case "pty.kill": {
-      ctx.ptys.destroy(requirePty(ctx.ptys, msg).id);
+      const id = requirePty(ctx.ptys, msg).id;
+      ctx.modes.remove(id);
+      ctx.ptys.destroy(id);
       reply(ws, msg.id, {});
       return;
     }

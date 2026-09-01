@@ -1,5 +1,5 @@
 import { networkInterfaces } from "node:os";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import { startDaemon, type DaemonHandle } from "../src/main.js";
 
@@ -144,6 +144,37 @@ describe("daemon WS server", () => {
       const last = modes()[modes().length - 1];
       expect(last).toMatchObject({ ptyId, mode: "raw", echo: false, foreground: "vim" });
       expect(modes().length).toBe(2);
+      c.close();
+    } finally {
+      await d.close();
+    }
+  });
+
+  it("stops probing once the pty exits, even with the client still attached", async () => {
+    const probe = vi.fn(async () => ({ icanon: true, echo: true, foreground: "bash" }));
+    const d = await startDaemon({ port: 0, token: TOKEN, modeProbe: probe, modeIntervalMs: 50 });
+    try {
+      const c = await Client.connect(d.port, TOKEN);
+      const created = await c.request("pty.create", { shell: "bash" });
+      const ptyId = created["ptyId"] as string;
+      await c.request("pty.attach", { ptyId });
+      await c.request("pty.write", { ptyId, data: "exit\n" });
+      const deadline = Date.now() + 3000;
+      while (!c.events.some(e => e.type === "pty.exit") && Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 20));
+      }
+      expect(c.events.some(e => e.type === "pty.exit")).toBe(true);
+      const atExit = probe.mock.calls.length;
+      await new Promise(r => setTimeout(r, 300));
+      expect(probe.mock.calls.length).toBe(atExit);
+
+      // a late attach to the dead pty must not restart the loop either
+      const c2 = await Client.connect(d.port, TOKEN);
+      await c2.request("pty.attach", { ptyId });
+      await new Promise(r => setTimeout(r, 300));
+      expect(probe.mock.calls.length).toBe(atExit);
+      expect(c2.events.some(e => e.type === "pty.exit")).toBe(true);
+      c2.close();
       c.close();
     } finally {
       await d.close();

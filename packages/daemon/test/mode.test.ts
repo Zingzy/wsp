@@ -66,6 +66,21 @@ describe("ModeWatcher", () => {
     w.stop();
   });
 
+  it("stops probing a removed pty even while clients stay attached", async () => {
+    const probe = vi.fn(async () => LINE);
+    const w = new ModeWatcher(probe, { intervalMs: 200 });
+    const un = w.attach("p1", 42, () => {});
+    await vi.advanceTimersByTimeAsync(400);
+    expect(probe.mock.calls.length).toBeGreaterThan(0);
+
+    w.remove("p1");
+    const atRemove = probe.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(probe.mock.calls.length).toBe(atRemove);
+    un(); // late socket close after the pty died must not throw
+    w.stop();
+  });
+
   it("keeps the last known mode and blanks foreground on probe failure, silently", async () => {
     let fail = false;
     const probe: ModeProbe = async () => {
