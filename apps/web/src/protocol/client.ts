@@ -11,6 +11,8 @@ import type {
   GoldenVersion,
   SessionEvent,
   SessionView,
+  SnapshotLineage,
+  SnapshotRollbackResult,
   WorkspaceStatus,
   WorkspaceView,
 } from "@wsp/protocol";
@@ -127,6 +129,10 @@ export interface Api {
   prepareGolden(name?: string): Promise<GoldenBuilderView>;
   /** Snapshots the builder, smoke-tests a fork, seals a version. The builder is consumed on every outcome. */
   sealGolden(builderId: string): Promise<{ manifest: GoldenManifest; version: GoldenVersion }>;
+  /** Every sealed version of a golden and the head new forks use. */
+  listSnapshots(name?: string): Promise<SnapshotLineage>;
+  /** Moves head to a version in the manifest; workspaces already forked keep their image. */
+  rollbackSnapshot(version: number, name?: string): Promise<SnapshotRollbackResult>;
 }
 
 export interface WorkspaceSizeSpec {
@@ -172,6 +178,15 @@ export function makeApi(c: ProtocolClient): Api {
     sealGolden: async builderId => {
       const { manifest, version } = await c.request<{ manifest: GoldenManifest; version: GoldenVersion }>("golden.seal", { builderId });
       return { manifest, version };
+    },
+    listSnapshots: async name =>
+      (await c.request<{ lineage: SnapshotLineage }>("snapshots.list", name !== undefined ? { name } : {})).lineage,
+    rollbackSnapshot: async (version, name) => {
+      const { lineage, existingWorkspaces } = await c.request<SnapshotRollbackResult>("snapshots.rollback", {
+        version,
+        ...(name !== undefined ? { name } : {}),
+      });
+      return { lineage, existingWorkspaces };
     },
   };
 }

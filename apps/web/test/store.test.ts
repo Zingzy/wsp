@@ -33,6 +33,8 @@ function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
     startSession: async o => ({ id: "s_new", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
     daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
     sessionHistory: async () => [],
+    listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
+    rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
     listSessions: async id => {
       listCalls.push(id);
       return id === undefined ? sessions : sessions.filter(s => s.workspaceId === id);

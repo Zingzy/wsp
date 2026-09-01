@@ -17,6 +17,7 @@ import {
   type MachineBackend,
   type MachineKind,
   type MachineSpec,
+  rollback as rollbackGolden,
 } from "@wsp/engine";
 import type { DaemonReachView, EventUnion, GoldenBuilderView, GoldenStage, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
 import { createStatusTracker, type StatusApi, type StatusWatchOptions } from "./status.js";
@@ -184,6 +185,8 @@ export interface Runtime {
     /** Snapshot, smoke-fork, append a version. The builder is consumed whether this succeeds, fails, or is refused. */
     seal(builderId: string): Promise<{ manifest: GoldenManifest; version: GoldenVersion }>;
     builders(): Promise<GoldenBuilderView[]>;
+    /** Moves the golden's head; new forks follow it, workspaces already forked keep their image. */
+    rollback(version: number, name?: string): Promise<GoldenManifest>;
   };
   /** Enriched status (machine state, daemon reach, size, rate) + cost ticker. */
   readonly status: StatusApi;
@@ -684,6 +687,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async builders() {
       await ready();
       return [...builders.values()].map(b => builderView(b.record));
+    },
+
+    async rollback(version, name) {
+      const key = name ?? "default";
+      const missing = (message: string) => Object.assign(new Error(message), { kind: "missing" });
+      const prior = (await store.get(GOLDENS, key)) as GoldenManifest | undefined;
+      if (!prior) throw missing(`no golden named "${key}"`);
+      let next: GoldenManifest;
+      try {
+        next = rollbackGolden(prior, version);
+      } catch (e) {
+        throw missing(e instanceof Error ? e.message : String(e));
+      }
+      await store.put(GOLDENS, key, next);
+      return next;
     },
   };
 

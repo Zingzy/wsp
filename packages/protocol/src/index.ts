@@ -394,6 +394,11 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
   /** Snapshots the builder, smoke-tests a fork, appends a manifest version;
    * replies with { manifest, version }. The builder is consumed either way. */
   z.object({ id: reqId, op: z.literal("golden.seal"), builderId: z.string() }),
+  /** Replies with { lineage: SnapshotLineage } for golden `name` (default "default"). */
+  z.object({ id: reqId, op: z.literal("snapshots.list"), name: z.string().optional() }),
+  /** Moves the golden's head to a version already in its manifest; replies with a
+   * SnapshotRollbackResult. A version outside the manifest fails with kind "missing". */
+  z.object({ id: reqId, op: z.literal("snapshots.rollback"), version: z.number(), name: z.string().optional() }),
 ]);
 export type RuntimeRequest = z.infer<typeof RuntimeRequest>;
 
@@ -408,3 +413,23 @@ export const RuntimeErrorResponse = z.object({
 });
 export const RuntimeResponse = z.union([RuntimeOkResponse, RuntimeErrorResponse]);
 export type RuntimeResponse = z.infer<typeof RuntimeResponse>;
+
+// --- snapshot lineage (golden manifest as the rollback UI reads it) -----------
+
+/** Every sealed version of one golden and the head new forks use. head is null
+ * while the golden has never been sealed. The manifest is the truth here, never
+ * a backend snapshot listing (list() is best-effort). */
+export const SnapshotLineage = z.object({
+  name: z.string(),
+  head: z.number().nullable(),
+  versions: z.array(GoldenVersion),
+});
+export type SnapshotLineage = z.infer<typeof SnapshotLineage>;
+
+/** Rollback only moves head. Workspaces already forked keep their machines and
+ * image; the field says so on the wire so no client reads it as a fleet change. */
+export const SnapshotRollbackResult = z.object({
+  lineage: SnapshotLineage,
+  existingWorkspaces: z.literal("untouched"),
+});
+export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;

@@ -85,6 +85,20 @@ describe("makeApi wrappers", () => {
     expect(lastSent()).toMatchObject({ op: "workspaces.daemonReach", workspaceId: "ws_1" });
   });
 
+  it("listSnapshots and rollbackSnapshot send the snapshots ops and unwrap their replies", async () => {
+    const { api, lastSent } = await connect();
+    const lineage = { name: "default", head: 2, versions: [] };
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, lineage });
+    expect(await api.listSnapshots()).toEqual(lineage);
+    expect(lastSent()).toEqual({ id: expect.any(Number), op: "snapshots.list" });
+    await api.listSnapshots("other");
+    expect(lastSent()).toMatchObject({ op: "snapshots.list", name: "other" });
+
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, lineage: { ...lineage, head: 1 }, existingWorkspaces: "untouched" });
+    expect(await api.rollbackSnapshot(1)).toEqual({ lineage: { ...lineage, head: 1 }, existingWorkspaces: "untouched" });
+    expect(lastSent()).toEqual({ id: expect.any(Number), op: "snapshots.rollback", version: 1 });
+  });
+
   it("a rejected op surfaces the runtime's error message", async () => {
     const { api } = await connect();
     ScriptedSocket.reply = f => ({ id: f["id"], ok: false, error: "workspace is napping" });

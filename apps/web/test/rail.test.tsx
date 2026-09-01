@@ -37,6 +37,8 @@ function fakeApi(workspaces: WorkspaceView[]): Api & { nap: ReturnType<typeof vi
     startSession: vi.fn(async (o: { workspaceId: string }) => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" as const })),
     daemonReach: vi.fn(async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 })),
     sessionHistory: vi.fn(async () => []),
+    listSnapshots: vi.fn(async () => ({ name: "default", head: null, versions: [] })),
+    rollbackSnapshot: vi.fn(async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" as const })),
     listSessions: vi.fn(async () => []),
     subscribe: vi.fn(() => () => {}),
     getGolden: async () => undefined,
