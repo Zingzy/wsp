@@ -253,7 +253,9 @@ class Timings {
 }
 
 const RESERVED = { key: "poc", value: "ttl-test" }; // sleeping experiment: never touch
-const GOLDEN_SETUP = "curl -fsSL https://claude.ai/install.sh | bash";
+/** Harness install and its proof; the scripted doctor build and the wizard recipe share them. */
+export const GOLDEN_SETUP = "curl -fsSL https://claude.ai/install.sh | bash";
+export const GOLDEN_SMOKE = "claude --version";
 
 export interface DoctorOptions {
   /** Envs baked into golden builds and forks (claude credentials). */
@@ -274,7 +276,7 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
     }
     const { version } = await rt.golden.build({
       setup: GOLDEN_SETUP,
-      smoke: "claude --version",
+      smoke: GOLDEN_SMOKE,
       cpu: 2,
       memMb: 4096,
       envs: opts.envs,

@@ -8,8 +8,16 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { createClaudeAdapter } from "@wsp/adapter-claude";
-import { SolariBackend, createRuntime, jsonFileStore, machineExecStream, type Runtime } from "@wsp/runtime";
-import { doctor } from "./doctor.js";
+import {
+  SolariBackend,
+  createRuntime,
+  jsonFileStore,
+  machineExecStream,
+  type GoldenRecipe,
+  type Machine,
+  type Runtime,
+} from "@wsp/runtime";
+import { GOLDEN_SETUP, GOLDEN_SMOKE, deployDaemon, doctor } from "./doctor.js";
 import { startHost } from "./server.js";
 import { TerminalInput } from "./terminal-input.js";
 
@@ -45,7 +53,7 @@ export interface CliIO {
   askSecret(question: string): Promise<string>;
 }
 
-interface Keys {
+export interface Keys {
   solari: string;
   anthropic?: string;
 }
@@ -139,12 +147,34 @@ export async function loadKeys(
   return { solari, ...(anthropic !== undefined ? { anthropic } : {}) };
 }
 
-function claudeEnvs(anthropicKey: string): Record<string, string> {
+/** Without a key the guest still needs the config dir and PATH; a subscription
+ * user signs in with /login on the machine, so wsp never sees that credential. */
+function claudeEnvs(anthropicKey?: string): Record<string, string> {
   return {
-    ANTHROPIC_API_KEY: anthropicKey,
+    ...(anthropicKey !== undefined ? { ANTHROPIC_API_KEY: anthropicKey } : {}),
     CLAUDE_CONFIG_DIR: CONFIG_DIR,
     IS_SANDBOX: "1",
     PATH: "/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+  };
+}
+
+/** What every golden the wizard seals is made of: the harness install and its
+ * smoke from the doctor, the daemon bundle deploy, and the loaded keys as envs. */
+export function goldenRecipe(
+  keys: Pick<Keys, "anthropic">,
+  hooks: { deployDaemon?: (machine: Machine) => Promise<void> } = {},
+): GoldenRecipe {
+  return {
+    setup: GOLDEN_SETUP,
+    smoke: GOLDEN_SMOKE,
+    cpu: 2,
+    memMb: 4096,
+    envs: claudeEnvs(keys.anthropic),
+    deployDaemon:
+      hooks.deployDaemon ??
+      (async machine => {
+        await deployDaemon(machine);
+      }),
   };
 }
 
@@ -165,6 +195,7 @@ export function makeRuntime(keys: Keys, statePath: string): Runtime {
           configDir: CONFIG_DIR,
         }),
     },
+    goldenRecipe: goldenRecipe(keys),
   });
 }
 

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { buildGolden, forkGolden, prepareBuilder, rollback, sealGolden, type GoldenStage } from "../src/golden.js";
+import { BUILDER_IDLE_MS, buildGolden, forkGolden, prepareBuilder, rollback, sealGolden, type GoldenStage } from "../src/golden.js";
 import { NotFirstLifeError } from "../src/lifecycle.js";
 import type { ExecResult, Machine, MachineBackend, MachineSpec } from "../src/machine.js";
 
@@ -115,7 +115,8 @@ describe("interactive golden: prepare then seal", () => {
       deployDaemon: async m => { daemonOn.push(m.id); },
       onStage,
     });
-    expect(created[0]).toMatchObject({ kind: "desktop", template: "default" });
+    // An idle-paused builder resumes not first-life and the seal would 502; kill fails loud instead.
+    expect(created[0]).toMatchObject({ kind: "desktop", template: "default", onIdle: "kill" });
     expect(builder.kind).toBe("desktop");
     expect(builder.firstLife).toBe(true);
     expect(builder.machine.streamUrl).toBe("wss://fake/stream/m1");
@@ -128,6 +129,17 @@ describe("interactive golden: prepare then seal", () => {
     const { backend, created } = recordingBackend();
     await prepareBuilder({ backend, kind: "sandbox", setup: "true" });
     expect(created[0]).toMatchObject({ kind: "sandbox", template: "base" });
+  });
+
+  it("only the builder idles to kill, after a window long enough for a person; the smoke fork keeps the provider default", async () => {
+    const { backend, created } = recordingBackend();
+    const builder = await prepareBuilder({ backend, kind: "sandbox", setup: "true" });
+    await sealGolden(builder, { backend, smoke: "true" });
+    expect(created[0]).toMatchObject({ onIdle: "kill", idleTimeoutMs: BUILDER_IDLE_MS });
+    expect(BUILDER_IDLE_MS).toBeGreaterThanOrEqual(4 * 60 * 60_000);
+    expect(created[1]).toMatchObject({ fromSnapshot: "snap_golden-v1" });
+    expect(created[1]!.onIdle).toBeUndefined();
+    expect(created[1]!.idleTimeoutMs).toBeUndefined();
   });
 
   it("prepare kills the machine and reports failed when the harness install fails", async () => {

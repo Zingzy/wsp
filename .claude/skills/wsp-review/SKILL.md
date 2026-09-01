@@ -30,6 +30,7 @@ Review wsp changes against the laws this project has already paid for. Generic c
 - No bearers in URLs on OUR protocol (first-frame auth or 5-min single-purpose tickets). previewUrl's pt_token is theirs, not a precedent for us.
 - Nothing may collect, store, or proxy Anthropic credentials outside the user's machine/VM (the carve-out we build under). Model traffic never transits our code.
 - Never print or commit key material; .env stays gitignored; fake keys in tests look fake (sk-ant-x).
+- curl|sh is banned in anything that installs user-chosen software (dotfiles presets pin release binaries by sha256; there is a test). The one exemption is the harness vendor's own installer, GOLDEN_SETUP (claude.ai/install.sh over TLS): it is the supported install path, runs only on a first-life builder, and its invocation is recorded in the manifest as setupSha (which pins which installer ran, not its content; the smoke gate is what proves the result). Do not relitigate it in reviews; do not widen it.
 
 ## Test discipline
 
