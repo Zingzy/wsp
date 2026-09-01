@@ -15,6 +15,7 @@ import {
   type MachineSpec,
 } from "@wsp/engine";
 import type { EventUnion, SessionView, WorkspaceView } from "@wsp/protocol";
+import { createStatusTracker, type StatusApi, type StatusWatchOptions } from "./status.js";
 import type { Store } from "./store.js";
 
 // --- adapter port -------------------------------------------------------------
@@ -116,6 +117,8 @@ export interface RuntimeOptions {
    * /root except golden-provided dirs (VAULT_SKIP), enumerated at export time.
    */
   vaultPaths?: string[];
+  /** Defaults for the status poller / cost ticker (tests shrink the intervals). */
+  status?: StatusWatchOptions;
 }
 
 /** Dirs the golden image already provides on every fresh fork; re-vaulting
@@ -153,6 +156,8 @@ export interface Runtime {
     build(opts: GoldenBuildRequest): Promise<{ manifest: GoldenManifest; version: GoldenVersion }>;
     get(name?: string): Promise<GoldenManifest | undefined>;
   };
+  /** Enriched status (machine state, daemon reach, size, rate) + cost ticker. */
+  readonly status: StatusApi;
   reap(olderThanMs?: number): Promise<string[]>;
 }
 
@@ -469,12 +474,24 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
   };
 
+  const status = createStatusTracker({
+    backend,
+    records: async () => {
+      await ready();
+      return [...live.values()].map(e => ({ ...view(e.record), spec: e.record.spec }));
+    },
+    emit: e => bus.emit(e),
+    on: (type, l) => bus.on(type, l),
+    ...(opts.status !== undefined ? { defaults: opts.status } : {}),
+  });
+
   return {
     events: bus,
     backend,
     workspaces,
     sessions: sessionsApi,
     golden,
+    status,
     reap: async olderThanMs => {
       await ready();
       return reap({

@@ -11,6 +11,8 @@ function fakeApi(workspaces: WorkspaceView[]): Api {
     listWorkspaces: async () => workspaces,
     getWorkspace: async id => workspaces.find(w => w.id === id)!,
     createWorkspace: async () => workspaces[0]!,
+    createFromGoldenHead: async () => workspaces[0]!,
+    watchStatuses: async () => [],
     nap: async id => workspaces.find(w => w.id === id)!,
     wake: async id => workspaces.find(w => w.id === id)!,
     listSessions: async () => [],
@@ -28,6 +30,7 @@ describe("shell scaffold", () => {
     render(<Rail />);
     await waitFor(() => expect(screen.getByText("api")).toBeDefined());
     expect(screen.getByText("web")).toBeDefined();
-    expect(screen.getAllByRole("button").length).toBe(2);
+    // one selectable card per workspace (nap/wake and new-workspace are extra buttons)
+    expect(screen.getAllByRole("button", { name: /^(api|web)/ }).length).toBe(2);
   });
 });

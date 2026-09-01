@@ -39,8 +39,16 @@ export interface Machine {
   previewUrl?(port: number): Promise<PreviewReach>;
 }
 
+/** What a size costs on this provider, and the shape a spec gets when it
+ * names none. Local arithmetic until provider billing APIs are integrated. */
+export interface BackendPricing {
+  rateUsdPerHour(size: { cpu: number; memMb: number }): number;
+  defaultSize: { cpu: number; memMb: number };
+}
+
 export interface MachineBackend {
   readonly capabilities: Capabilities;
+  readonly pricing: BackendPricing;
   create(spec: MachineSpec): Promise<Machine>;
   get(id: string): Promise<Machine>;
   list(labels?: Record<string, string>): Promise<{ id: string; state: MachineState; labels: Record<string, string> }[]>;

@@ -40,6 +40,18 @@ The edge drops sockets that stay quiet for about 30 seconds, so clients send
 an app-level heartbeat every 10. A paused workspace's URL goes dark and the
 same URL routes again about a second after wake.
 
+Running `wsp-daemon` on your own machine (tests, local hacking) will make
+macOS and Windows ask about incoming connections, because 0.0.0.0 accepts
+from the network. For local runs bind loopback and supply a token inline,
+since the in-guest token file lives under /root:
+
+```
+WSP_DAEMON_TOKEN=dev wsp-daemon --host 127.0.0.1
+```
+
+(`--token-path <file>` works too.) Only in-guest deployments need the
+0.0.0.0 default, since the preview edge dials eth0.
+
 `wsp doctor` walks the whole loop against one live machine and prints what
 it measured. One run, client in India, machine in us-west:
 

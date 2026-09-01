@@ -2,7 +2,7 @@
 // Browser-side client for the runtime WS (see packages/runtime/src/serve.ts).
 // Auth: open the socket, send one `auth` frame with the token (host injects it
 // via window.__WSP__), then ops flow. The token never rides in the URL.
-import type { EventUnion, SessionView, WorkspaceView } from "@wsp/protocol";
+import type { EventUnion, SessionView, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 
 export type ProtocolEvent = EventUnion;
 type Pending = { resolve: (v: Record<string, unknown>) => void; reject: (e: Error) => void };
@@ -92,17 +92,35 @@ export interface Api {
   listWorkspaces(): Promise<WorkspaceView[]>;
   getWorkspace(id: string): Promise<WorkspaceView>;
   createWorkspace(golden: string, name?: string): Promise<WorkspaceView>;
+  /** Resolves the default golden manifest's head so the UI never handles snapshot ids. */
+  createFromGoldenHead(name: string): Promise<WorkspaceView>;
+  /** Snapshot of enriched statuses; keeps the runtime's poller + cost ticker running for this socket. */
+  watchStatuses(): Promise<WorkspaceStatus[]>;
   nap(id: string): Promise<WorkspaceView>;
   wake(id: string): Promise<WorkspaceView>;
   listSessions(id: string): Promise<SessionView[]>;
   subscribe(fn: (e: ProtocolEvent) => void): () => void;
 }
 
+interface GoldenManifestWire {
+  head: number;
+  versions: { version: number; snapshotId: string }[];
+}
+
 export function makeApi(c: ProtocolClient): Api {
+  const create = async (golden: string, name?: string) =>
+    (await c.request<{ workspace: WorkspaceView }>("workspaces.create", { golden, ...(name ? { name } : {}) })).workspace;
   return {
     listWorkspaces: async () => (await c.request<{ workspaces: WorkspaceView[] }>("workspaces.list")).workspaces,
     getWorkspace: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.get", { workspaceId: id })).workspace,
-    createWorkspace: async (golden, name) => (await c.request<{ workspace: WorkspaceView }>("workspaces.create", { golden, ...(name ? { name } : {}) })).workspace,
+    createWorkspace: create,
+    createFromGoldenHead: async name => {
+      const { manifest } = await c.request<{ manifest?: GoldenManifestWire }>("golden.get", { name: "default" });
+      const head = manifest?.versions.find(v => v.version === manifest.head);
+      if (!head) throw new Error("no golden image yet; build one first (wspx golden build)");
+      return create(head.snapshotId, name);
+    },
+    watchStatuses: async () => (await c.request<{ statuses: WorkspaceStatus[] }>("status.subscribe")).statuses,
     nap: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.nap", { workspaceId: id })).workspace,
     wake: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.wake", { workspaceId: id })).workspace,
     listSessions: async id => (await c.request<{ sessions: SessionView[] }>("sessions.list", { workspaceId: id })).sessions,
