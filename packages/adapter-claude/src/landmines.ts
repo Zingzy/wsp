@@ -1,0 +1,116 @@
+// Encoded Claude Code deployment quirks. Sources: pingdotgg/t3code (MIT, see
+// NOTICE; logic only) and measured behavior in solari-poc/RESULTS.md.
+
+import { randomUUID } from "node:crypto";
+
+// Inherited CLAUDE_CODE_*/CLAUDECODE mark the child as nested inside another
+// Claude Code run; FORCE_CODE_TERMINAL flips terminal detection (t3code unsets
+// it for headless probes).
+export const ENV_STRIP_PATTERNS: readonly RegExp[] = [
+  /^CLAUDE_CODE_/,
+  /^CLAUDECODE$/,
+  /^FORCE_CODE_TERMINAL$/,
+];
+
+// From t3code's probe options: headless runs must not probe for IDEs, or the
+// CLI spawns discovery process trees on every invocation.
+const HEADLESS_OVERRIDES = {
+  CLAUDE_CODE_AUTO_CONNECT_IDE: "0",
+  CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL: "1",
+} as const;
+
+export interface ClaudeEnvOptions {
+  base?: Readonly<Record<string, string | undefined>>;
+  /** Absolute path for CLAUDE_CONFIG_DIR ("/root/.claude-cfg" in guests). */
+  configDir: string;
+  apiKey?: string;
+}
+
+export function stripLandmineEnv(
+  base: Readonly<Record<string, string | undefined>>,
+): Record<string, string> {
+  const clean: Record<string, string> = {};
+  for (const [key, value] of Object.entries(base)) {
+    if (value === undefined) continue;
+    if (ENV_STRIP_PATTERNS.some((pattern) => pattern.test(key))) continue;
+    clean[key] = value;
+  }
+  return clean;
+}
+
+/**
+ * Config isolation goes through CLAUDE_CONFIG_DIR, never through HOME:
+ * overriding HOME relocates the macOS keychain lookup and the CLI reports
+ * "Not logged in" (t3code ClaudeHome.ts). IS_SANDBOX=1 is what lets
+ * --dangerously-skip-permissions run as root in guests (solari-poc P1).
+ */
+export function buildEnv(options: ClaudeEnvOptions): Record<string, string> {
+  const configDir = options.configDir.trim();
+  if (!configDir.startsWith("/")) {
+    throw new Error(`configDir must be an absolute path, got "${options.configDir}"`);
+  }
+  return {
+    ...stripLandmineEnv(options.base ?? {}),
+    ...HEADLESS_OVERRIDES,
+    CLAUDE_CONFIG_DIR: configDir,
+    IS_SANDBOX: "1",
+    ...(options.apiKey === undefined ? {} : { ANTHROPIC_API_KEY: options.apiKey }),
+  };
+}
+
+/**
+ * The caller generates the session UUID and passes it via --session-id, so the
+ * session is addressable (registry, transcript path, --resume) before the CLI
+ * prints anything (t3code startSession).
+ */
+export function newSessionId(): string {
+  return randomUUID();
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export interface BuildCommandOptions {
+  prompt: string;
+  /** Fresh session: the self-generated UUID passed as --session-id. */
+  sessionId?: string;
+  /** Existing session: passed as --resume instead. */
+  resume?: string;
+  cwd?: string;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", String.raw`'\''`)}'`;
+}
+
+/**
+ * Print-mode stream-json refuses to run without --verbose, and `claude -p`
+ * hangs unless stdin is closed (solari-poc probes, RESULTS.md P1).
+ */
+export function buildCommand(options: BuildCommandOptions): string {
+  const { prompt, sessionId, resume, cwd } = options;
+  if ((sessionId === undefined) === (resume === undefined)) {
+    throw new Error("buildCommand needs exactly one of sessionId or resume");
+  }
+  const id = sessionId ?? resume ?? "";
+  if (!UUID_RE.test(id)) {
+    throw new Error(`session identifier must be a UUID, got "${id}"`);
+  }
+  const idFlag = sessionId === undefined ? `--resume ${id}` : `--session-id ${id}`;
+  const claude = [
+    `claude -p ${shellQuote(prompt)}`,
+    "--output-format stream-json",
+    "--verbose",
+    "--dangerously-skip-permissions",
+    idFlag,
+    "</dev/null",
+  ].join(" ");
+  return cwd === undefined ? claude : `cd ${shellQuote(cwd)} && ${claude}`;
+}
+
+/**
+ * Interrupt policy from t3code interruptTurn: a graceful interrupt can be
+ * acknowledged while background tasks keep the CLI alive, so interrupt is a
+ * hard boundary: teardown (close stdin/SIGTERM), then SIGKILL after this
+ * grace window.
+ */
+export const INTERRUPT_GRACE_MS = 5_000;

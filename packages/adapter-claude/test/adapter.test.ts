@@ -1,0 +1,261 @@
+import { readFileSync } from "node:fs";
+
+import { describe, expect, it } from "vitest";
+
+import type { AdapterEvent, ExecStream, ExecStreamFactory } from "../src/adapter.js";
+import { createClaudeAdapter } from "../src/adapter.js";
+
+const FIXTURE_SESSION_ID = "e16ed170-8257-4668-879e-fe836341633c";
+
+function fixtureLines(): string[] {
+  const raw = readFileSync(new URL("./fixtures/stream-session.jsonl", import.meta.url), "utf8");
+  return raw.split("\n").filter((line) => line.trim().length > 0);
+}
+
+interface ScriptedExec {
+  factory: ExecStreamFactory;
+  calls: { command: string; env: Record<string, string> }[];
+  order: string[];
+}
+
+/** Replays scripted stdout lines; in hang mode the stream only ends on kill(). */
+function scriptedExec(lines: string[], opts: { exitCode?: number; hang?: boolean } = {}): ScriptedExec {
+  const calls: ScriptedExec["calls"] = [];
+  const order: string[] = [];
+  const factory: ExecStreamFactory = (command, { env }) => {
+    calls.push({ command, env });
+    let resolveExit: (code: number | null) => void = () => {};
+    const exited = new Promise<number | null>((resolve) => {
+      resolveExit = resolve;
+    });
+    const stream: ExecStream = {
+      lines: (async function* () {
+        yield* lines;
+        if (opts.hang) await exited;
+        else resolveExit(opts.exitCode ?? 0);
+      })(),
+      teardown: () => {
+        order.push("teardown");
+        if (!opts.hang) resolveExit(opts.exitCode ?? 0);
+      },
+      kill: () => {
+        order.push("kill");
+        resolveExit(null);
+      },
+      exited,
+    };
+    return stream;
+  };
+  return { factory, calls, order };
+}
+
+function collect(): { events: AdapterEvent[]; onEvent: (e: AdapterEvent) => void } {
+  const events: AdapterEvent[] = [];
+  return { events, onEvent: (e) => events.push(e) };
+}
+
+describe("ClaudeAdapter over the recorded fixture", () => {
+  it("normalizes the stream into session.start / turn.delta / turn.done / session.end", async () => {
+    const exec = scriptedExec(fixtureLines());
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { events, onEvent } = collect();
+
+    const session = adapter.start({ prompt: "write a hello world server", onEvent });
+    const result = await session.finished;
+
+    expect(events.map((e) => e.type)).toEqual([
+      "session.start",
+      "turn.delta",
+      "turn.delta",
+      "turn.delta",
+      "turn.delta",
+      "turn.delta",
+      "turn.done",
+      "session.end",
+    ]);
+
+    const start = events[0];
+    if (start?.type !== "session.start") throw new Error("expected session.start");
+    expect(start.sessionId).toBe(FIXTURE_SESSION_ID);
+    expect(start.model).toBe("claude-sonnet-4-5");
+    expect(start.cwd).toBe("/root");
+    expect(start.tools).toContain("Bash");
+
+    const deltas = events.filter((e) => e.type === "turn.delta");
+    expect(deltas.map((d) => d.kind)).toEqual([
+      "text",
+      "tool_use",
+      "tool_result",
+      "thinking",
+      "text",
+    ]);
+    const toolUse = deltas[1];
+    expect(toolUse?.toolName).toBe("Bash");
+    expect(toolUse?.toolUseId).toBe("toolu_01WspFixBash1");
+    expect(toolUse?.text).toContain("curl -s http://localhost:3000");
+    const toolResult = deltas[2];
+    expect(toolResult?.text).toBe("Hello, World!");
+    expect(toolResult?.isError).toBe(false);
+    expect(deltas[3]?.text).toContain("server is live");
+
+    expect(result.status).toBe("completed");
+    expect(result.durationMs).toBe(10458);
+    expect(result.costUsd).toBe(0.0187);
+    expect(result.text).toBe("Server is live at :3000 and answered: Hello, World!");
+
+    const end = events.at(-1);
+    if (end?.type !== "session.end") throw new Error("expected session.end");
+    expect(end.exitCode).toBe(0);
+    expect(end.sawResult).toBe(true);
+    expect(session.claudeSessionId).toBe(FIXTURE_SESSION_ID);
+  });
+
+  it("spawns with the landmine-safe command and env", async () => {
+    const exec = scriptedExec(fixtureLines());
+    const adapter = createClaudeAdapter({
+      exec: exec.factory,
+      configDir: "/root/.claude-cfg",
+      baseEnv: { CLAUDECODE: "1", CLAUDE_CODE_ENTRYPOINT: "cli", PATH: "/usr/bin", HOME: "/Users/z" },
+    });
+    const { onEvent } = collect();
+
+    const session = adapter.start({ prompt: "say ok", onEvent });
+    await session.finished;
+
+    const call = exec.calls[0];
+    if (!call) throw new Error("exec never called");
+    expect(call.command).toContain("--output-format stream-json");
+    expect(call.command).toContain("--verbose");
+    expect(call.command).toContain("--dangerously-skip-permissions");
+    expect(call.command).toContain(`--session-id ${session.localId}`);
+    expect(call.command.endsWith("</dev/null")).toBe(true);
+    expect(call.env.CLAUDECODE).toBeUndefined();
+    expect(call.env.CLAUDE_CODE_ENTRYPOINT).toBeUndefined();
+    expect(call.env.CLAUDE_CONFIG_DIR).toBe("/root/.claude-cfg");
+    expect(call.env.HOME).toBe("/Users/z");
+  });
+
+  it("self-generates the session UUID and registers the session before any output", () => {
+    const exec = scriptedExec(fixtureLines());
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { onEvent } = collect();
+
+    const session = adapter.start({ prompt: "say ok", onEvent });
+
+    expect(session.localId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(adapter.sessions.get(session.localId)).toBe(session);
+  });
+
+  it("resumes with the prior session id as the registry key", async () => {
+    const exec = scriptedExec(fixtureLines());
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { onEvent } = collect();
+
+    const session = adapter.start({ prompt: "next turn", resume: FIXTURE_SESSION_ID, onEvent });
+    await session.finished;
+
+    expect(session.localId).toBe(FIXTURE_SESSION_ID);
+    expect(exec.calls[0]?.command).toContain(`--resume ${FIXTURE_SESSION_ID}`);
+  });
+});
+
+describe("interrupt policy (teardown, then SIGKILL)", () => {
+  it("escalates to kill when teardown does not end the process, and reports the turn interrupted", async () => {
+    const init = `{"type":"system","subtype":"init","session_id":"${FIXTURE_SESSION_ID}"}`;
+    const exec = scriptedExec([init], { hang: true });
+    const adapter = createClaudeAdapter({
+      exec: exec.factory,
+      configDir: "/root/.claude-cfg",
+      interruptGraceMs: 15,
+    });
+    const { events, onEvent } = collect();
+
+    const session = adapter.start({ prompt: "loop forever", onEvent });
+    await session.interrupt();
+    const result = await session.finished;
+
+    expect(exec.order).toEqual(["teardown", "kill"]);
+    expect(result.status).toBe("interrupted");
+    const end = events.at(-1);
+    if (end?.type !== "session.end") throw new Error("expected session.end");
+    expect(end.sawResult).toBe(false);
+    expect(end.exitCode).toBeNull();
+  });
+
+  it("does not kill when teardown ends the process within the grace window", async () => {
+    const exec = scriptedExec(fixtureLines());
+    const adapter = createClaudeAdapter({
+      exec: exec.factory,
+      configDir: "/root/.claude-cfg",
+      interruptGraceMs: 5_000,
+    });
+    const { onEvent } = collect();
+
+    const session = adapter.start({ prompt: "say ok", onEvent });
+    await session.finished;
+    await session.interrupt();
+
+    expect(exec.order).toEqual(["teardown"]);
+  });
+});
+
+describe("result classification", () => {
+  function resultRun(resultLine: string): Promise<{ events: AdapterEvent[]; result: import("../src/adapter.js").TurnResult }> {
+    const init = `{"type":"system","subtype":"init","session_id":"${FIXTURE_SESSION_ID}"}`;
+    const exec = scriptedExec([init, resultLine]);
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { events, onEvent } = collect();
+    const session = adapter.start({ prompt: "x", onEvent });
+    return session.finished.then((result) => ({ events, result }));
+  }
+
+  it("maps aborted_streaming to interrupted", async () => {
+    const { result } = await resultRun(
+      `{"type":"result","subtype":"error_during_execution","is_error":true,"terminal_reason":"aborted_streaming","errors":["[ede_diagnostic] stream abort trace"],"duration_ms":812,"session_id":"${FIXTURE_SESSION_ID}"}`,
+    );
+    expect(result.status).toBe("interrupted");
+    expect(result.error).toBeUndefined();
+  });
+
+  it("maps other execution errors to failed and hides [ede_diagnostic] noise", async () => {
+    const { result } = await resultRun(
+      `{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["[ede_diagnostic] internal","MCP server exploded"],"duration_ms":900,"session_id":"${FIXTURE_SESSION_ID}"}`,
+    );
+    expect(result.status).toBe("failed");
+    expect(result.error).toBe("MCP server exploded");
+  });
+
+  it("fails the turn when the process dies without a result event", async () => {
+    const init = `{"type":"system","subtype":"init","session_id":"${FIXTURE_SESSION_ID}"}`;
+    const exec = scriptedExec([init], { exitCode: 1 });
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { events, onEvent } = collect();
+
+    const session = adapter.start({ prompt: "x", onEvent });
+    const result = await session.finished;
+
+    expect(result.status).toBe("failed");
+    expect(result.error).toMatch(/exited with code 1/);
+    const end = events.at(-1);
+    if (end?.type !== "session.end") throw new Error("expected session.end");
+    expect(end.sawResult).toBe(false);
+  });
+
+  it("skips lines that are not stream-json events", async () => {
+    const lines = [
+      "not json at all",
+      "42",
+      '{"type":123}',
+      `{"type":"result","subtype":"success","is_error":false,"result":"ok","duration_ms":5,"session_id":"${FIXTURE_SESSION_ID}"}`,
+    ];
+    const exec = scriptedExec(lines);
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { events, onEvent } = collect();
+
+    const session = adapter.start({ prompt: "x", onEvent });
+    const result = await session.finished;
+
+    expect(result.status).toBe("completed");
+    expect(events.map((e) => e.type)).toEqual(["turn.done", "session.end"]);
+  });
+});

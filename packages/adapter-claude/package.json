@@ -2,5 +2,11 @@
   "name": "@wsp/adapter-claude",
   "type": "module",
   "main": "dist/index.js",
-  "scripts": { "build": "tsup src/index.ts --format esm --dts", "test": "vitest run" }
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1"
+  }
 }
