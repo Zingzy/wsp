@@ -4,7 +4,7 @@
 // stream-session.jsonl (hello-world server run). No live daemon.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { EventUnion, WorkspaceView } from "@wsp/protocol";
+import type { EventUnion, SessionEvent, WorkspaceView } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { ChatTab } from "../src/tabs/ChatTab.js";
@@ -39,22 +39,27 @@ const FIXTURE: EventUnion[] = [
   { type: "session.end", ...scope, exitCode: 0, sawResult: true },
 ];
 
-type Sender = Api & { startSession(opts: { workspaceId: string; prompt: string; resume?: string }): Promise<unknown> };
-
-function fixtureApi(workspaces: WorkspaceView[]) {
+function fixtureApi(workspaces: WorkspaceView[], history: Record<string, SessionEvent[]> = {}) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
   const started: Array<{ workspaceId: string; prompt: string; resume?: string }> = [];
-  const api: Sender = {
+  const api: Api = {
+    daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
+    sessionHistory: async id => history[id] ?? [],
     listWorkspaces: async () => workspaces,
     getWorkspace: async id => workspaces.find(w => w.id === id)!,
     createWorkspace: async () => workspaces[0]!,
     nap: async id => workspaces.find(w => w.id === id)!,
     wake: async id => workspaces.find(w => w.id === id)!,
+    upgrade: async id => workspaces.find(w => w.id === id)!,
+    capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true }),
     listSessions: async () => [],
     watchStatuses: async () => [],
     createFromGoldenHead: async () => workspaces[0]!,
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
-    startSession: async opts => { started.push(opts); return {}; },
+    startSession: async opts => {
+      started.push(opts);
+      return { id: "s1", workspaceId: opts.workspaceId, harness: "claude", status: "running" };
+    },
   };
   const emit = (e: EventUnion) => act(() => { for (const fn of [...listeners]) fn(e); });
   return { api, started, emit };
@@ -63,7 +68,9 @@ function fixtureApi(workspaces: WorkspaceView[]) {
 async function setup(api: Api) {
   useStore.getState().bind(api);
   await waitFor(() => expect(useStore.getState().workspaces.length).toBeGreaterThan(0));
-  return render(<ChatTab workspaceId={WS} />);
+  const view = render(<ChatTab workspaceId={WS} />);
+  await waitFor(() => expect(screen.queryByText("loading transcript")).toBeNull());
+  return view;
 }
 
 describe("chat tab rendering", () => {
@@ -111,6 +118,48 @@ describe("chat tab rendering", () => {
     expect(screen.getByText("failed")).toBeDefined();
     expect(screen.getByText("session exited without a result (exit code 137)")).toBeDefined();
     expect(screen.queryByText("working")).toBeNull();
+  });
+});
+
+describe("chat tab hydration", () => {
+  const other: WorkspaceView = { ...workspace, id: "ws_chat0002", name: "web", claudeSessionId: undefined };
+  const replay = (ws: string, prompt: string, text: string): SessionEvent[] => {
+    const sc = { workspaceId: ws, sessionId: `sess_${ws}` };
+    return [
+      { type: "session.start", ...sc, model: "claude-sonnet-4-5", prompt },
+      { type: "session.delta", ...sc, kind: "text", text },
+      { type: "session.done", ...sc, result: { status: "completed", durationMs: 900, costUsd: 0.001 } },
+      { type: "session.end", ...sc, exitCode: 0, sawResult: true },
+    ];
+  };
+
+  it("replays the persisted transcript on mount, user turn included, and again on workspace switch", async () => {
+    const { api } = fixtureApi([workspace, other], {
+      [WS]: replay(WS, "add a health route", "Added GET /health."),
+      [other.id]: replay(other.id, "bump react", "React is on 19.1."),
+    });
+    const view = await setup(api);
+    await screen.findByText("Added GET /health.");
+    expect(screen.getByText("add a health route")).toBeDefined();
+    expect(screen.queryByText("No session yet. Send a prompt to start one.")).toBeNull();
+    expect(screen.queryByText("working")).toBeNull();
+
+    view.rerender(<ChatTab workspaceId={other.id} />);
+    await screen.findByText("React is on 19.1.");
+    expect(screen.getByText("bump react")).toBeDefined();
+    expect(screen.queryByText("Added GET /health.")).toBeNull();
+  });
+
+  it("live events keep landing after hydration and the composer follows the replayed state", async () => {
+    const { api, emit } = fixtureApi([workspace], { [WS]: replay(WS, "first", "one.") });
+    await setup(api);
+    await screen.findByText("one.");
+    const input = screen.getByRole("textbox", { name: "prompt" }) as HTMLTextAreaElement;
+    expect(input.disabled).toBe(false);
+    emit({ type: "session.start", ...scope });
+    emit({ type: "session.delta", ...scope, kind: "text", text: "two." });
+    expect(screen.getByText("two.")).toBeDefined();
+    expect(input.disabled).toBe(true);
   });
 });
 

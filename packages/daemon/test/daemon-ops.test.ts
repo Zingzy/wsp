@@ -110,9 +110,14 @@ describe("daemon ops: ports, manifest, inbox", () => {
 
     const file = join(inboxDir, "upload.bin");
     writeFileSync(file, "z".repeat(64));
-    await new Promise(r => setTimeout(r, 500));
-
-    expect(c.events).toContainEqual({ type: "inbox.file", path: file, bytes: 64 });
+    // FSEvents delivers the change with unbounded latency, so the assertion is
+    // "settles eventually", never "settles within a fixed sleep".
+    const settled = { type: "inbox.file", path: file, bytes: 64 };
+    const deadline = Date.now() + 5000;
+    while (!c.events.some(e => e.type === "inbox.file" && e.path === file) && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 25));
+    }
+    expect(c.events).toContainEqual(settled);
     c.close();
   });
 

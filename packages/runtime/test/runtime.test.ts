@@ -116,6 +116,132 @@ describe("runtime", () => {
   });
 });
 
+describe("runtime session history", () => {
+  const scripted = (text: string): HarnessAdapterFactory => () => ({
+    start: ({ onEvent }) => {
+      const sessionId = "22222222-2222-4222-8222-222222222222";
+      const result: TurnResult = { status: "completed", text };
+      const finished = (async () => {
+        const feed: AdapterEvent[] = [
+          { type: "session.start", sessionId, model: "claude-sonnet-4-5" },
+          { type: "turn.delta", sessionId, kind: "text", text },
+          { type: "turn.done", sessionId, result },
+          { type: "session.end", sessionId, exitCode: 0, sawResult: true },
+        ];
+        for (const e of feed) onEvent(e);
+        return result;
+      })();
+      return { localId: sessionId, claudeSessionId: sessionId, finished };
+    },
+  });
+
+  it("replays a workspace's session events with the prompt on session.start, surviving a restart", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: { claude: scripted("hello") } });
+    const a = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const b = await rt.workspaces.create({ golden: "snap_g", name: "b" });
+    await (await rt.sessions.start(a.id, { prompt: "say hello" })).finished;
+
+    const history = await rt.sessions.history(a.id);
+    expect(history.map(e => e.type)).toEqual(["session.start", "session.delta", "session.done", "session.end"]);
+    expect(history[0]).toMatchObject({ type: "session.start", workspaceId: a.id, prompt: "say hello" });
+    expect(await rt.sessions.history(b.id)).toEqual([]);
+
+    // a fresh runtime over the same store still has it; deleting the workspace drops it
+    const rt2 = createRuntime({ backend, store, adapters: {} });
+    expect(await rt2.sessions.history(a.id)).toEqual(history);
+    await rt2.workspaces.delete(a.id);
+    await expect(rt2.sessions.history(a.id)).rejects.toThrow("no such workspace");
+    expect(await store.list("transcripts")).toEqual([]);
+  });
+
+  it("persists turn boundaries in order even when an earlier put finishes last", async () => {
+    const inner = memoryStore();
+    let puts = 0;
+    const store = {
+      ...inner,
+      put: async (collection: string, id: string, value: unknown) => {
+        // the first transcript write is slow, the ones behind it are instant
+        const delay = collection === "transcripts" && puts++ === 0 ? 40 : 0;
+        await new Promise(r => setTimeout(r, delay));
+        await inner.put(collection, id, value);
+      },
+    };
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: scripted("x") } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
+    // The chain drains on its own clock; poll for it instead of guessing a sleep.
+    const read = async () => ((await inner.get("transcripts", ws.id)) as { events: { type: string }[] } | undefined)?.events ?? [];
+    const deadline = Date.now() + 2000;
+    while ((await read()).length < 4 && Date.now() < deadline) await new Promise(r => setTimeout(r, 10));
+    expect((await read()).map(e => e.type)).toEqual(["session.start", "session.delta", "session.done", "session.end"]);
+  });
+
+  it("caps the persisted transcript so a chatty workspace cannot grow the store without bound", async () => {
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: scripted("x") } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    for (let i = 0; i < 1300; i++) await (await rt.sessions.start(ws.id, { prompt: `t${i}` })).finished;
+    const history = await rt.sessions.history(ws.id);
+    expect(history.length).toBeLessThanOrEqual(5000);
+    expect(history[history.length - 1]).toMatchObject({ type: "session.end" });
+    expect(history.some(e => e.type === "session.start" && e.prompt === "t1299")).toBe(true);
+    expect(history.some(e => e.type === "session.start" && e.prompt === "t0")).toBe(false);
+  });
+});
+
+describe("runtime daemon reach", () => {
+  const TOKEN_CMD = "cat /root/.wsp-daemon-token";
+
+  it("hands back the preview route plus the daemon token read once off the guest", async () => {
+    const backend = stubBackend();
+    let minted = 0;
+    backend.execImpl = (_m, cmd) =>
+      cmd === TOKEN_CMD ? { exitCode: 0, stdout: "guest-token\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" };
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    backend.machines[0]!.previewUrl = async port => {
+      minted++;
+      return { url: `https://m1-${port}.preview.example/?pt_token=edge`, token: "edge", expiresAt: Date.now() + 3_600_000 };
+    };
+
+    const reach = await rt.workspaces.daemonReach(ws.id);
+    expect(reach).toEqual({ url: "https://m1-7070.preview.example/?pt_token=edge", expiresAt: expect.any(Number), daemonToken: "guest-token" });
+    await rt.workspaces.daemonReach(ws.id);
+    expect(minted).toBe(1);
+    expect(backend.machines[0]!.execLog.filter(c => c === TOKEN_CMD)).toHaveLength(1);
+  });
+
+  it("omits the daemon token when the guest has none and refuses backends without preview urls", async () => {
+    const backend = stubBackend();
+    backend.execImpl = (_m, cmd) => (cmd === TOKEN_CMD ? { exitCode: 1, stdout: "", stderr: "No such file" } : { exitCode: 0, stdout: "", stderr: "" });
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await expect(rt.workspaces.daemonReach(ws.id)).rejects.toThrow("without preview URLs");
+
+    backend.machines[0]!.previewUrl = async () => ({ url: "https://m1-7070.preview.example/?pt_token=e", token: "e", expiresAt: Date.now() + 3_600_000 });
+    const reach = await rt.workspaces.daemonReach(ws.id);
+    expect(reach.daemonToken).toBeUndefined();
+    expect("daemonToken" in reach).toBe(false);
+  });
+
+  it("re-reads the token after a resurrect replaces the machine", async () => {
+    const backend = stubBackend();
+    backend.execImpl = (m, cmd) => (cmd === TOKEN_CMD ? { exitCode: 0, stdout: `tok-${m.id}`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const mint = async (port: number) => ({ url: `https://x-${port}.preview.example/?pt_token=e`, token: "e", expiresAt: Date.now() + 3_600_000 });
+    backend.machines[0]!.previewUrl = mint;
+    expect((await rt.workspaces.daemonReach(ws.id)).daemonToken).toBe("tok-m1");
+
+    await rt.workspaces.nap(ws.id);
+    backend.machines[0]!.killed = true;
+    await rt.workspaces.wake(ws.id);
+    backend.machines[1]!.previewUrl = mint;
+    expect((await rt.workspaces.daemonReach(ws.id)).daemonToken).toBe("tok-m2");
+  });
+});
+
 describe("runtime upgrade vault", () => {
   it("vaults user files (skipping golden-provided dirs) onto the fresh fork", async () => {
     const backend = stubBackend();

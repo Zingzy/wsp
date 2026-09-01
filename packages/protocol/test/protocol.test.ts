@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   DaemonEvent,
+  DaemonReachView,
   DaemonRequest,
   DaemonResponse,
   EventUnion,
   RuntimeRequest,
   RuntimeResponse,
+  SessionEvent,
   SessionView,
   WorkspaceView,
 } from "../src/index.js";
@@ -78,6 +80,11 @@ describe("protocol event union", () => {
     ];
     for (const s of samples) expect(EventUnion.parse(s)).toEqual(s);
     expect(() => EventUnion.parse({ type: "workspace.exploded" })).toThrow();
+    // session.start may carry the prompt so a replayed transcript shows the user's turn
+    const started = { type: "session.start", workspaceId: "ws_1", sessionId: "s1", prompt: "fix the flaky test" };
+    expect(EventUnion.parse(started)).toEqual(started);
+    expect(SessionEvent.parse(started)).toEqual(started);
+    expect(() => SessionEvent.parse({ type: "workspace.napped", workspaceId: "ws_1" })).toThrow();
     // session.end with a null exit code (kill path) is valid
     expect(
       EventUnion.parse({ type: "session.end", workspaceId: "w", sessionId: "s", exitCode: null, sawResult: false }),
@@ -135,10 +142,21 @@ describe("runtime wire types", () => {
       { id: 11, op: "sessions.start", workspaceId: "ws_1", prompt: "do the thing" },
       { id: 12, op: "sessions.list" },
       { id: 13, op: "golden.get", name: "default" },
+      { id: 14, op: "capabilities.get" },
+      { id: 15, op: "sessions.history", workspaceId: "ws_1" },
+      { id: 16, op: "workspaces.daemonReach", workspaceId: "ws_1" },
     ];
     for (const r of reqs) expect(RuntimeRequest.parse(r)).toEqual(r);
     expect(() => RuntimeRequest.parse({ id: 1, op: "workspaces.create" })).toThrow(); // golden+name required
     expect(RuntimeResponse.parse({ id: 4, ok: true, workspace: { id: "w" } })).toBeTruthy();
     expect(RuntimeResponse.parse({ id: 4, ok: false, error: "nope" })).toBeTruthy();
+  });
+
+  it("DaemonReachView carries the preview route, its expiry, and the daemon token when the guest has one", () => {
+    const full = { url: "https://m-7070.preview.example/?pt_token=edge", expiresAt: 1_700_000_000_000, daemonToken: "d" };
+    expect(DaemonReachView.parse(full)).toEqual(full);
+    const bare = { url: "https://m-7070.preview.example/?pt_token=edge", expiresAt: 1 };
+    expect(DaemonReachView.parse(bare)).toEqual(bare);
+    expect(() => DaemonReachView.parse({ url: "x" })).toThrow();
   });
 });

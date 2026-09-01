@@ -39,6 +39,16 @@ export const ReachStatus = z.object({
 });
 export type ReachStatus = z.infer<typeof ReachStatus>;
 
+/** What a browser needs to dial a workspace's daemon: the minted preview route
+ * (edge token embedded, hourly expiry) and the daemon's own query token as read
+ * off the guest. No daemonToken means no daemon token file on that machine. */
+export const DaemonReachView = z.object({
+  url: z.string(),
+  expiresAt: z.number(),
+  daemonToken: z.string().optional(),
+});
+export type DaemonReachView = z.infer<typeof DaemonReachView>;
+
 export const WorkspaceSize = z.object({ cpu: z.number(), memMb: z.number() });
 export type WorkspaceSize = z.infer<typeof WorkspaceSize>;
 
@@ -100,6 +110,8 @@ const sessionScope = { workspaceId: z.string(), sessionId: z.string() };
 export const SessionStartEvent = z.object({
   type: z.literal("session.start"),
   ...sessionScope,
+  /** The user's turn; set by the runtime (the adapter never sees it) so a replayed transcript shows it. */
+  prompt: z.string().optional(),
   model: z.string().optional(),
   cwd: z.string().optional(),
   tools: z.array(z.string()).optional(),
@@ -127,6 +139,10 @@ export const SessionEndEvent = z.object({
   exitCode: z.number().nullable(),
   sawResult: z.boolean(),
 });
+
+/** The events sessions.history replays: what a chat transcript folds. */
+export const SessionEvent = z.discriminatedUnion("type", [SessionStartEvent, SessionDeltaEvent, SessionDoneEvent, SessionEndEvent]);
+export type SessionEvent = z.infer<typeof SessionEvent>;
 
 // --- workspace / port / inbox events ----------------------------------------
 
@@ -287,6 +303,8 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     memMb: z.number().optional(),
   }),
   z.object({ id: reqId, op: z.literal("workspaces.delete"), workspaceId: z.string() }),
+  /** Replies with a DaemonReachView; the runtime remints the edge token when it nears expiry. */
+  z.object({ id: reqId, op: z.literal("workspaces.daemonReach"), workspaceId: z.string() }),
   z.object({
     id: reqId,
     op: z.literal("sessions.start"),
@@ -297,7 +315,11 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     cwd: z.string().optional(),
   }),
   z.object({ id: reqId, op: z.literal("sessions.list"), workspaceId: z.string().optional() }),
+  /** Replies with the workspace's persisted SessionEvent[] (oldest first, capped by the runtime). */
+  z.object({ id: reqId, op: z.literal("sessions.history"), workspaceId: z.string() }),
   z.object({ id: reqId, op: z.literal("golden.get"), name: z.string() }),
+  /** Replies with the backend's Capabilities; the UI gates features on these. */
+  z.object({ id: reqId, op: z.literal("capabilities.get") }),
 ]);
 export type RuntimeRequest = z.infer<typeof RuntimeRequest>;
 

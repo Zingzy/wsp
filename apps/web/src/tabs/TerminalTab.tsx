@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Terminal tab: xterm bound to daemon ptys through the per-workspace link in
-// ../terminal/link.js. Pty tabs live in that model, so tab-away parks the
-// terminal (xterm disposed, pty alive) and a remount replays from the mirror.
+// Terminal pane: xterm bound to the active daemon pty through the
+// per-workspace link in ../terminal/link.js. Pty tabs live in that model and
+// render in the TabStrip, so tab-away parks the terminal (xterm disposed, pty
+// alive) and a remount replays from the mirror.
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -48,44 +49,6 @@ function TerminalPane({ terms }: { terms: WorkspaceTerminals }) {
 
   return (
     <div className={styles.pane}>
-      <div className={styles.bar} role="tablist" aria-label="terminals">
-        {tabs.map(t => (
-          <button
-            key={t.ptyId}
-            role="tab"
-            aria-selected={t.ptyId === activeId}
-            data-active={t.ptyId === activeId}
-            className={styles.ptab}
-            onClick={() => terms.setActive(t.ptyId)}
-          >
-            <span>{t.title}</span>
-            {t.exited && <span className={styles.exited}>exited</span>}
-            <span
-              role="button"
-              aria-label={`close ${t.title}`}
-              className={styles.close}
-              onClick={e => {
-                e.stopPropagation();
-                void terms.close(t.ptyId);
-              }}
-            >
-              ×
-            </span>
-          </button>
-        ))}
-        <button
-          className={styles.add}
-          aria-label="new terminal"
-          onClick={() => {
-            void terms.open().catch(() => {});
-          }}
-        >
-          +
-        </button>
-        <span className={styles.right}>
-          <StatusIndicator status={status} />
-        </span>
-      </div>
       {status === "reauth-needed" && (
         <div className={styles.banner}>
           the daemon rejected this workspace&apos;s token. terminals reconnect once the workspace re-authenticates.
@@ -102,6 +65,12 @@ function TerminalPane({ terms }: { terms: WorkspaceTerminals }) {
       </div>
     </div>
   );
+}
+
+/** The daemon link's health, rendered by the TabStrip at its right edge. */
+export function TerminalLinkState({ terms }: { terms: WorkspaceTerminals }) {
+  const status = useSyncExternalStore(fn => terms.onStatus(fn), () => terms.status());
+  return <StatusIndicator status={status} />;
 }
 
 function StatusIndicator({ status }: { status: DaemonLinkStatus }) {

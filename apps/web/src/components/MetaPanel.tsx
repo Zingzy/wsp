@@ -5,7 +5,7 @@
 // golden + createdAt fields.
 import { useState } from "react";
 import type { WorkspaceSize, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
-import { useCost, useSelectedId, useStatus, useStore, useWorkspace } from "../protocol/store.js";
+import { useCapabilities, useCost, useSelectedId, useStatus, useStore, useWorkspace } from "../protocol/store.js";
 import { upgradeOptions, useCostSeries, useUpgrade, type CostPoint, type Upgrade } from "../protocol/meta.js";
 import styles from "./MetaPanel.module.css";
 
@@ -160,10 +160,13 @@ function Lineage({ w }: { w: WorkspaceView }) {
 
 function Actions({ w, status, upgrade }: { w: WorkspaceView; status: WorkspaceStatus | null; upgrade: Upgrade }) {
   const toggle = useStore(s => s.toggle);
+  const capabilities = useCapabilities();
   const [open, setOpen] = useState(false);
   const [picked, setPicked] = useState<WorkspaceSize | null>(null);
   const running = w.phase === "running";
-  const options = status ? upgradeOptions(status.size) : [];
+  // Backend fact, not a probe: a provider that cannot resize gets no picker at all.
+  const canResize = capabilities?.resize === true;
+  const options = status && canResize ? upgradeOptions(status.size) : [];
   const choice = picked ?? options[0] ?? null;
   const rate = status?.rateUsdPerHour ?? null;
 
@@ -192,10 +195,10 @@ function Actions({ w, status, upgrade }: { w: WorkspaceView; status: WorkspaceSt
           className={`${styles.key} ${styles.keyPrimary}`}
           disabled={!status || options.length === 0 || upgrade.phase.kind === "resizing"}
           aria-label={`upgrade ${w.name}`}
-          title="resize to a larger machine"
+          title={canResize ? "resize to a larger machine" : "this provider cannot resize machines"}
           onClick={() => (open ? close() : setOpen(true))}
         >
-          {status && options.length === 0 ? "largest size" : "upgrade"}
+          {capabilities && !canResize ? "no resize" : status && options.length === 0 ? "largest size" : "upgrade"}
         </button>
       </div>
       {open && status && choice && (
