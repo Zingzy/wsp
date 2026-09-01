@@ -10,6 +10,17 @@ function fakeFetch(routes: Record<string, { status: number; body: unknown }>) {
 }
 
 describe("SolariBackend", () => {
+  it("declares the measured Solari capability truth", () => {
+    const b = new SolariBackend({ apiKey: "k", fetch: fakeFetch({}) });
+    expect(b.capabilities).toEqual({
+      liveCloneForks: true,
+      ramPreservingPause: true,
+      resize: false,
+      previewUrls: true,
+      signedUrls: true,
+    });
+  });
+
   it("creates a sandbox and URL-encodes ids on follow-up calls", async () => {
     const id = "pool:vm_1:org.SIG"; // ids contain : and . — must be encoded
     const f = fakeFetch({

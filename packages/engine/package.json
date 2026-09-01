@@ -6,6 +6,9 @@
     "build": "tsup src/index.ts --format esm --dts",
     "test": "vitest run"
   },
+  "dependencies": {
+    "@wsp/protocol": "workspace:*"
+  },
   "devDependencies": {
     "ws": "^8.21.3",
     "@types/ws": "^8.18.1"

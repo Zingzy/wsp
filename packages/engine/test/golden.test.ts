@@ -9,6 +9,7 @@ function recordingBackend(execResults: Record<string, ExecResult> = {}) {
   const killed: string[] = [];
   let nextId = 0;
   const backend: MachineBackend = {
+    capabilities: { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true },
     async create(spec) {
       created.push(spec);
       const id = `m${++nextId}`;

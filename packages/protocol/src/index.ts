@@ -6,6 +6,18 @@
 
 import { z } from "zod";
 
+// --- backend capabilities ----------------------------------------------------
+
+/** Honest per-backend feature flags; the UI degrades based on these, never on probing. */
+export const Capabilities = z.object({
+  liveCloneForks: z.boolean(),
+  ramPreservingPause: z.boolean(),
+  resize: z.boolean(),
+  previewUrls: z.boolean(),
+  signedUrls: z.boolean(),
+});
+export type Capabilities = z.infer<typeof Capabilities>;
+
 // --- views -----------------------------------------------------------------
 
 export const WorkspacePhase = z.enum(["running", "napping"]);
