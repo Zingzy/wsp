@@ -1,12 +1,15 @@
 {
   "name": "@wsp/wspx",
   "type": "module",
-  "scripts": { "build": "tsup src/main.ts --format esm" },
+  "scripts": {
+    "build": "tsup src/main.ts --format esm"
+  },
   "dependencies": {
     "@wsp/adapter-claude": "workspace:*",
     "@wsp/runtime": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.20.1"
-  }
+  },
+  "license": "AGPL-3.0-only"
 }

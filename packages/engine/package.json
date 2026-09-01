@@ -9,5 +9,6 @@
   "devDependencies": {
     "ws": "^8.21.3",
     "@types/ws": "^8.18.1"
-  }
+  },
+  "license": "AGPL-3.0-only"
 }

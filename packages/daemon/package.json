@@ -2,7 +2,9 @@
   "name": "@wsp/daemon",
   "type": "module",
   "main": "dist/index.js",
-  "bin": { "wsp-daemon": "./dist/bin.js" },
+  "bin": {
+    "wsp-daemon": "./dist/bin.js"
+  },
   "scripts": {
     "build": "tsup src/index.ts src/bin.ts --format esm --dts",
     "postinstall": "node scripts/fix-node-pty-perms.mjs",
@@ -15,5 +17,6 @@
   "devDependencies": {
     "@types/node": "^26.4.0",
     "@types/ws": "^8.18.1"
-  }
+  },
+  "license": "AGPL-3.0-only"
 }
