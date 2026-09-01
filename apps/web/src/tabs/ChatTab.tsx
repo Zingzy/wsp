@@ -52,10 +52,16 @@ export function ChatTab({ workspaceId }: { workspaceId: string }) {
   }, [workspaceId]);
   useProtocolEvents(onEvent);
 
+  // The reducer returns the same object for events that change nothing, so
+  // keying on the transcript itself also catches deltas that only grow the
+  // tail item. A reader who scrolled up is not yanked back down.
+  const nearBottomRef = useRef(true);
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [transcript.items.length]);
+    if (el && nearBottomRef.current) el.scrollTop = el.scrollHeight;
+  }, [transcript]);
+
+  useEffect(() => { resize(inputRef.current, draft); }, [draft]);
 
   const sender = canStartSessions(api) ? api : null;
   const busy = sending || transcript.running;
@@ -65,7 +71,6 @@ export function ChatTab({ workspaceId }: { workspaceId: string }) {
     const prompt = draft.trim();
     if (!prompt || !sender || busy) return;
     setDraft("");
-    resize(inputRef.current, "");
     setSending(true);
     setTranscript(t => appendUserTurn(t, prompt));
     const resume = workspace?.claudeSessionId;
@@ -73,13 +78,21 @@ export function ChatTab({ workspaceId }: { workspaceId: string }) {
       await sender.startSession({ workspaceId, prompt, ...(resume ? { resume } : {}) });
     } catch (err) {
       setSending(false);
+      setDraft(d => (d === "" ? prompt : d));
       setTranscript(t => appendLocalError(t, err instanceof Error ? err.message : String(err)));
     }
   }
 
   return (
     <div className={styles.root}>
-      <div className={styles.scroll} ref={scrollRef}>
+      <div
+        className={styles.scroll}
+        ref={scrollRef}
+        onScroll={e => {
+          const el = e.currentTarget;
+          nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+        }}
+      >
         {transcript.items.length === 0 && !transcript.running
           ? <div className={styles.empty}>No session yet. Send a prompt to start one.</div>
           : transcript.items.map((item, i) => <Item key={i} item={item} />)}
@@ -94,7 +107,7 @@ export function ChatTab({ workspaceId }: { workspaceId: string }) {
           placeholder="send a prompt"
           aria-label="prompt"
           disabled={disabledReason !== null}
-          onChange={e => { setDraft(e.target.value); resize(e.target, e.target.value); }}
+          onChange={e => setDraft(e.target.value)}
           onKeyDown={e => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();

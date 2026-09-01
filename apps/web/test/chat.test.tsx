@@ -138,6 +138,20 @@ describe("chat tab composer", () => {
     expect(started.length).toBe(1);
   });
 
+  it("restores the draft and re-enables when startSession rejects", async () => {
+    const { api } = fixtureApi([workspace]);
+    api.startSession = async () => { throw new Error("workspace is napping"); };
+    await setup(api);
+    const input = screen.getByRole("textbox", { name: "prompt" }) as HTMLTextAreaElement;
+
+    fireEvent.change(input, { target: { value: "fix the flaky test" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(screen.getByText("workspace is napping")).toBeDefined());
+    expect(screen.getByText("failed")).toBeDefined();
+    expect(input.value).toBe("fix the flaky test");
+    expect(input.disabled).toBe(false);
+  });
+
   it("ignores empty and whitespace-only drafts", async () => {
     const { api, started } = fixtureApi([workspace]);
     await setup(api);
