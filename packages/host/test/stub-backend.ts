@@ -21,7 +21,6 @@ export function stubBackend(): StubBackend {
     capabilities: { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true },
     pricing: { rateUsdPerHour: (s: { cpu: number; memMb: number }) => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 } },
     machines,
-    capabilities: { liveCloneForks: true, ramPreservingPause: true, resize: false, previewUrls: true, signedUrls: true },
     execImpl: () => ({ exitCode: 0, stdout: "", stderr: "" }),
     async create(spec: MachineSpec): Promise<Machine> {
       const m: StubMachine = {
