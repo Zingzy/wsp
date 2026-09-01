@@ -6,15 +6,8 @@ import { createRuntime, type Runtime } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
+import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
-
-async function until(cond: () => boolean, ms = 2000): Promise<void> {
-  const deadline = Date.now() + ms;
-  while (!cond()) {
-    if (Date.now() > deadline) throw new Error("condition not met in time");
-    await new Promise(r => setTimeout(r, 5));
-  }
-}
 
 function testRuntime(status?: { costIntervalMs?: number; pollIntervalMs?: number }): {
   rt: Runtime;
@@ -160,13 +153,12 @@ describe("status.watch cost events", () => {
     rt.events.on("workspace.status", e => seen.push((e as { status: WorkspaceStatus }).status));
 
     const stop = rt.status.watch();
-    await new Promise(r => setTimeout(r, 60));
-    const baseline = seen.length; // first poll baselines every workspace once
-    expect(baseline).toBe(1);
+    await until(() => seen.length >= 1); // first poll baselines every workspace once
+    expect(seen.length).toBe(1);
     await rt.workspaces.nap(ws.id);
-    await new Promise(r => setTimeout(r, 60));
+    await until(() => seen.length >= 2);
     stop();
-    expect(seen.length).toBe(baseline + 1);
+    expect(seen.length).toBe(2);
     expect(seen.at(-1)).toMatchObject({ id: ws.id, phase: "napping", machineState: "paused" });
   });
 });
@@ -183,8 +175,7 @@ describe("serveRuntime status.subscribe", () => {
     const statuses = res["statuses"] as WorkspaceStatus[];
     expect(statuses).toHaveLength(1);
     expect(statuses[0]).toMatchObject({ name: "alpha", machineState: "running" });
-    await new Promise(r => setTimeout(r, 50));
-    expect(c.events.some(e => e.type === "workspace.cost")).toBe(true);
+    await until(() => c.events.some(e => e.type === "workspace.cost"));
     c.close();
   });
 });
