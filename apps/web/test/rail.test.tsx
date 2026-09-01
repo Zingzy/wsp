@@ -41,6 +41,9 @@ function fakeApi(workspaces: WorkspaceView[]): Api & { nap: ReturnType<typeof vi
     rollbackSnapshot: vi.fn(async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" as const })),
     listSessions: vi.fn(async () => []),
     subscribe: vi.fn(() => () => {}),
+    getGolden: async () => undefined,
+    prepareGolden: async () => { throw new Error("no wizard in this fixture"); },
+    sealGolden: async () => { throw new Error("no wizard in this fixture"); },
   };
 }
 

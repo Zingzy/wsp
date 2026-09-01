@@ -39,6 +39,9 @@ function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
       listCalls.push(id);
       return id === undefined ? sessions : sessions.filter(s => s.workspaceId === id);
     },
+    getGolden: async () => undefined,
+    prepareGolden: async () => { throw new Error("no wizard in this fixture"); },
+    sealGolden: async () => { throw new Error("no wizard in this fixture"); },
     subscribe: fn => {
       listeners.add(fn);
       return () => listeners.delete(fn);

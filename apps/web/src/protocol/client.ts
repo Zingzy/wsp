@@ -2,7 +2,20 @@
 // Browser-side client for the runtime WS (see packages/runtime/src/serve.ts).
 // Auth: open the socket, send one `auth` frame with the token (host injects it
 // via window.__WSP__), then ops flow. The token never rides in the URL.
-import type { Capabilities, DaemonReachView, EventUnion, SessionEvent, SessionView, WorkspaceStatus, WorkspaceView, SnapshotLineage, SnapshotRollbackResult } from "@wsp/protocol";
+import type {
+  Capabilities,
+  DaemonReachView,
+  EventUnion,
+  GoldenBuilderView,
+  GoldenManifest,
+  GoldenVersion,
+  SessionEvent,
+  SessionView,
+  SnapshotLineage,
+  SnapshotRollbackResult,
+  WorkspaceStatus,
+  WorkspaceView,
+} from "@wsp/protocol";
 
 export type ProtocolEvent = EventUnion;
 type Pending = { resolve: (v: Record<string, unknown>) => void; reject: (e: Error) => void };
@@ -110,6 +123,12 @@ export interface Api {
   /** The workspace's persisted session events, oldest first: what a chat replays on mount. */
   sessionHistory(id: string): Promise<SessionEvent[]>;
   subscribe(fn: (e: ProtocolEvent) => void): () => void;
+  /** The named golden manifest, undefined on a fresh install: that absence is what opens the first-run wizard. */
+  getGolden(name?: string): Promise<GoldenManifest | undefined>;
+  /** Boots the wizard's builder; progress arrives as golden.stage events on the subscription. */
+  prepareGolden(name?: string): Promise<GoldenBuilderView>;
+  /** Snapshots the builder, smoke-tests a fork, seals a version. The builder is consumed on every outcome. */
+  sealGolden(builderId: string): Promise<{ manifest: GoldenManifest; version: GoldenVersion }>;
   /** Every sealed version of a golden and the head new forks use. */
   listSnapshots(name?: string): Promise<SnapshotLineage>;
   /** Moves head to a version in the manifest; workspaces already forked keep their image. */
@@ -129,11 +148,6 @@ export interface StartSessionOptions {
   cwd?: string;
 }
 
-interface GoldenManifestWire {
-  head: number;
-  versions: { version: number; snapshotId: string }[];
-}
-
 export function makeApi(c: ProtocolClient): Api {
   const create = async (golden: string, name?: string) =>
     (await c.request<{ workspace: WorkspaceView }>("workspaces.create", { golden, ...(name ? { name } : {}) })).workspace;
@@ -142,7 +156,7 @@ export function makeApi(c: ProtocolClient): Api {
     getWorkspace: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.get", { workspaceId: id })).workspace,
     createWorkspace: create,
     createFromGoldenHead: async name => {
-      const { manifest } = await c.request<{ manifest?: GoldenManifestWire }>("golden.get", { name: "default" });
+      const { manifest } = await c.request<{ manifest?: GoldenManifest }>("golden.get", { name: "default" });
       const head = manifest?.versions.find(v => v.version === manifest.head);
       if (!head) throw new Error("no golden image yet; build one first (wspx golden build)");
       return create(head.snapshotId, name);
@@ -159,6 +173,12 @@ export function makeApi(c: ProtocolClient): Api {
     listSessions: async id =>
       (await c.request<{ sessions: SessionView[] }>("sessions.list", id !== undefined ? { workspaceId: id } : {})).sessions,
     subscribe: fn => c.subscribe(fn),
+    getGolden: async (name = "default") => (await c.request<{ manifest?: GoldenManifest }>("golden.get", { name })).manifest,
+    prepareGolden: async (name = "default") => (await c.request<{ builder: GoldenBuilderView }>("golden.prepare", { name })).builder,
+    sealGolden: async builderId => {
+      const { manifest, version } = await c.request<{ manifest: GoldenManifest; version: GoldenVersion }>("golden.seal", { builderId });
+      return { manifest, version };
+    },
     listSnapshots: async name =>
       (await c.request<{ lineage: SnapshotLineage }>("snapshots.list", name !== undefined ? { name } : {})).lineage,
     rollbackSnapshot: async (version, name) => {

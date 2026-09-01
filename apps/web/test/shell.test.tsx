@@ -24,6 +24,9 @@ function fakeApi(workspaces: WorkspaceView[]): Api {
     rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
     listSessions: async () => [],
     subscribe: () => () => {},
+    getGolden: async () => undefined,
+    prepareGolden: async () => { throw new Error("no wizard in this fixture"); },
+    sealGolden: async () => { throw new Error("no wizard in this fixture"); },
   };
 }
 

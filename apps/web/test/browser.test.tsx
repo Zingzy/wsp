@@ -40,6 +40,9 @@ function fakeApi(workspaces: WorkspaceView[]) {
     rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
     listSessions: async () => [],
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
+    getGolden: async () => undefined,
+    prepareGolden: async () => { throw new Error("no wizard in this fixture"); },
+    sealGolden: async () => { throw new Error("no wizard in this fixture"); },
   };
   const emit = (e: EventUnion) => act(() => { for (const fn of [...listeners]) fn(e); });
   return { api, emit };

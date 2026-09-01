@@ -34,6 +34,9 @@ function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
     listSessions: async id => (id === undefined ? sessions : sessions.filter(s => s.workspaceId === id)),
+    getGolden: async () => undefined,
+    prepareGolden: async () => { throw new Error("no wizard in this fixture"); },
+    sealGolden: async () => { throw new Error("no wizard in this fixture"); },
     subscribe: fn => {
       listeners.add(fn);
       return () => listeners.delete(fn);

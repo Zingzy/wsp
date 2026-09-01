@@ -58,6 +58,9 @@ function fixtureApi(workspaces: WorkspaceView[], history: Record<string, Session
     watchStatuses: async () => [],
     createFromGoldenHead: async () => workspaces[0]!,
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
+    getGolden: async () => undefined,
+    prepareGolden: async () => { throw new Error("no wizard in this fixture"); },
+    sealGolden: async () => { throw new Error("no wizard in this fixture"); },
     startSession: async opts => {
       started.push(opts);
       return { id: "s1", workspaceId: opts.workspaceId, harness: "claude", status: "running" };
