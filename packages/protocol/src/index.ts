@@ -147,7 +147,7 @@ export const EventUnion = z.discriminatedUnion("type", [
 ]);
 export type EventUnion = z.infer<typeof EventUnion>;
 
-// --- daemon wire protocol (ws://127.0.0.1:7070/?token=..., 4401 on bad token) --
+// --- daemon wire protocol (ws://0.0.0.0:7070/?token=..., 4401 on bad token) ---
 
 const reqId = z.union([z.string(), z.number()]);
 
@@ -177,6 +177,7 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   }),
   z.object({ id: reqId, op: z.literal("manifest.restartScript") }),
   z.object({ id: reqId, op: z.literal("inbox.watch") }),
+  z.object({ id: reqId, op: z.literal("inbox.rescan") }),
 ]);
 export type DaemonRequest = z.infer<typeof DaemonRequest>;
 

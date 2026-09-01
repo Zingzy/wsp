@@ -115,4 +115,24 @@ describe("daemon ops: ports, manifest, inbox", () => {
     expect(c.events).toContainEqual({ type: "inbox.file", path: file, bytes: 64 });
     c.close();
   });
+
+  it("inbox.rescan replays every existing file as an inbox.file event", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-ops-rescan-"));
+    writeFileSync(join(dir, "a.png"), "a".repeat(10));
+    writeFileSync(join(dir, "b.bin"), "b".repeat(20));
+    const d = await startDaemon({ port: 0, token: TOKEN, inboxDir: dir });
+    try {
+      const c = await connect(d.port);
+      const res = await c.request("inbox.rescan");
+      expect(res.ok).toBe(true);
+      expect(res["count"]).toBe(2);
+      // WS ordering: both events land before the reply does
+      expect(c.events).toContainEqual({ type: "inbox.file", path: join(dir, "a.png"), bytes: 10 });
+      expect(c.events).toContainEqual({ type: "inbox.file", path: join(dir, "b.bin"), bytes: 20 });
+      c.close();
+    } finally {
+      await d.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

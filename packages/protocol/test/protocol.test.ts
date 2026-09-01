@@ -99,6 +99,7 @@ describe("daemon wire types (one home for the ops from @wsp/daemon)", () => {
       { id: 9, op: "manifest.record", cmd: "pnpm dev", cwd: "/root/app", port: 3000 },
       { id: 10, op: "manifest.restartScript" },
       { id: 11, op: "inbox.watch" },
+      { id: 12, op: "inbox.rescan" },
     ];
     for (const r of reqs) expect(DaemonRequest.parse(r)).toEqual(r);
     expect(() => DaemonRequest.parse({ id: 1, op: "pty.explode" })).toThrow();

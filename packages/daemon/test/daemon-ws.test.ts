@@ -1,6 +1,16 @@
+import { networkInterfaces } from "node:os";
 import { afterAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { startDaemon, type DaemonHandle } from "../src/main.js";
+
+function lanIPv4(): string | null {
+  for (const infos of Object.values(networkInterfaces())) {
+    for (const i of infos ?? []) {
+      if (i.family === "IPv4" && !i.internal) return i.address;
+    }
+  }
+  return null;
+}
 
 const TOKEN = "test-token-123";
 
@@ -64,6 +74,26 @@ describe("daemon WS server", () => {
     const ws = new WebSocket(`ws://127.0.0.1:${daemon.port}/?token=wrong`);
     const code = await new Promise<number>(resolve => ws.once("close", c => resolve(c)));
     expect(code).toBe(4401);
+  });
+
+  it("closes a tokenless connection 4401 before processing any op", async () => {
+    const before = daemon.ptys.list().length;
+    const ws = new WebSocket(`ws://127.0.0.1:${daemon.port}/`);
+    ws.on("open", () => ws.send(JSON.stringify({ id: 1, op: "pty.create", shell: "bash" })));
+    const code = await new Promise<number>(resolve => ws.once("close", c => resolve(c)));
+    expect(code).toBe(4401);
+    await new Promise(r => setTimeout(r, 100));
+    expect(daemon.ptys.list().length).toBe(before);
+  });
+
+  it("accepts connections on non-loopback interfaces (previewUrl edge dials eth0)", async () => {
+    const addr = lanIPv4() ?? "127.0.0.1";
+    const ws = new WebSocket(`ws://${addr}:${daemon.port}/?token=${TOKEN}`);
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", resolve);
+      ws.once("error", reject);
+    });
+    ws.close();
   });
 
   it("serves ptys that survive a client disconnect, replaying to the next client", async () => {

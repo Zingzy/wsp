@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { watch, type FSWatcher } from "node:fs";
-import { stat } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 export interface InboxFileEvent {
@@ -51,6 +51,26 @@ export class InboxWatcher extends EventEmitter {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.pending.clear();
+  }
+
+  /** List the settled files currently in the inbox, for clients recovering missed events. */
+  async rescan(): Promise<InboxFileEvent[]> {
+    const names = await readdir(this.dir);
+    const out: InboxFileEvent[] = [];
+    for (const name of names) {
+      const path = join(this.dir, name);
+      if (this.pending.has(path)) continue; // mid-upload: the settle sweep will announce it
+      let size: number;
+      try {
+        const s = await stat(path);
+        if (!s.isFile()) continue;
+        size = s.size;
+      } catch {
+        continue; // vanished between readdir and stat
+      }
+      out.push({ type: "inbox.file", path, bytes: size });
+    }
+    return out;
   }
 
   private track(path: string): void {
