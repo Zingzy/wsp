@@ -1,0 +1,22 @@
+{
+  "name": "@wsp/host",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "wsp": "./dist/bin.js"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts src/bin.ts --format esm --dts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@wsp/adapter-claude": "workspace:*",
+    "@wsp/engine": "workspace:*",
+    "@wsp/runtime": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1"
+  },
+  "license": "AGPL-3.0-only"
+}
