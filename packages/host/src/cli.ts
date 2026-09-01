@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// wsp: local app entry. Embeds the runtime in-process and serves the status
-// shell on loopback. There is no control plane; the Solari key is read here
+// wsp: local app entry. Embeds the runtime in-process and serves the web app
+// on loopback. There is no control plane; the Solari key is read here
 // and used only for direct calls from this process to the machine API.
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -18,7 +19,7 @@ import {
   type Runtime,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, deployDaemon, doctor } from "./doctor.js";
-import { startHost } from "./server.js";
+import { startHost, type HostHandle } from "./server.js";
 import { TerminalInput } from "./terminal-input.js";
 
 const VERSION = (
@@ -30,12 +31,12 @@ const CONFIG_DIR = "/root/.claude-cfg";
 export const HELP = `wsp - local workspaces for coding agents
 
 usage:
-  wsp                start the runtime and the status shell on localhost
+  wsp                start the runtime and serve the app on localhost
   wsp doctor         run the reach loop end to end against one live machine
   wsp --version      print the version
 
 options:
-  --port N           shell port (default 4400)
+  --port N           app port (default 4400)
   --ws-port N        runtime websocket port (default 4410)
   --state PATH       state file (default ~/.wsp/state.json, or ./.wsp/state.json
                      when the current directory has a .env)
@@ -178,6 +179,11 @@ export function goldenRecipe(
   };
 }
 
+/** The built web app, next to the @wsp/web package the host depends on. */
+function defaultWebDir(): string {
+  return join(dirname(createRequire(import.meta.url).resolve("@wsp/web/package.json")), "dist");
+}
+
 function defaultStatePath(): string {
   // A .env in cwd marks a dev checkout; share its .wsp state with wspx.
   if (existsSync(join(process.cwd(), ".env"))) return join(process.cwd(), ".wsp", "state.json");
@@ -199,30 +205,32 @@ export function makeRuntime(keys: Keys, statePath: string): Runtime {
   });
 }
 
-async function serve(
+export async function serve(
   io: CliIO,
-  opts: { port: number; wsPort: number; statePath: string },
-): Promise<number> {
+  opts: { port: number; wsPort: number; statePath: string; webDir?: string },
+): Promise<HostHandle> {
   const keys = await loadKeys(io);
   const rt = makeRuntime(keys, opts.statePath);
   const handle = await startHost({
     runtime: rt,
     port: opts.port,
     wsPort: opts.wsPort,
+    webDir: opts.webDir ?? defaultWebDir(),
+    keys: { anthropic: keys.anthropic !== undefined },
     ...(keys.anthropic !== undefined ? { workspaceEnvs: claudeEnvs(keys.anthropic) } : {}),
   });
-  // The future UI reads the token from disk; the WS never sees it in a URL.
+  // Other local tools read the token from disk; the WS never sees it in a URL.
   const tokenPath = join(dirname(opts.statePath), "host-token");
   mkdirSync(dirname(tokenPath), { recursive: true });
   writeFileSync(tokenPath, handle.authToken, { mode: 0o600 });
 
-  io.log(`shell       http://127.0.0.1:${handle.port}`);
+  io.log(`app         http://127.0.0.1:${handle.port}`);
   io.log(`runtime ws  ws://127.0.0.1:${handle.wsPort} (token: ${tokenPath})`);
   io.log(`state       ${opts.statePath}`);
   if (keys.anthropic === undefined) {
     io.log("note: no ANTHROPIC_API_KEY found; new workspaces fork without claude credentials");
   }
-  return 0;
+  return handle;
 }
 
 export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<number> {
@@ -260,7 +268,8 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
   const [cmd] = positionals;
   switch (cmd) {
     case undefined:
-      return serve(io, opts);
+      await serve(io, opts);
+      return 0;
     case "doctor": {
       const keys = await loadKeys(io);
       const rt = makeRuntime(keys, opts.statePath);
