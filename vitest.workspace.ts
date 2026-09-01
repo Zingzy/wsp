@@ -1,0 +1,27 @@
+// Vitest 2.x workspace: each entry runs under its own config/environment.
+// Node packages + wspx use the root node config; apps/web carries its own
+// vite config (react plugin + jsdom) so React component tests get a DOM.
+import { fileURLToPath } from "node:url";
+
+const pkg = (name: string) => fileURLToPath(new URL(`./packages/${name}/src/index.ts`, import.meta.url));
+const alias = {
+  "@wsp/engine": pkg("engine"),
+  "@wsp/adapter-claude": pkg("adapter-claude"),
+  "@wsp/daemon": pkg("daemon"),
+  "@wsp/protocol": pkg("protocol"),
+  "@wsp/runtime": pkg("runtime"),
+};
+
+export default [
+  {
+    resolve: { alias },
+    test: {
+      name: "node",
+      include: ["packages/*/test/**/*.test.ts", "apps/wspx/**/*.test.ts"],
+      environment: "node",
+      // Live tests create real machines under a 2-machine cap: no parallelism live.
+      fileParallelism: process.env.WSP_LIVE !== "1",
+    },
+  },
+  "./apps/web/vite.config.ts",
+];
