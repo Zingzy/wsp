@@ -4,3 +4,5 @@ dist/
 docs/plans/
 artifacts/
 .wsp/
+
+.claude/worktrees/
