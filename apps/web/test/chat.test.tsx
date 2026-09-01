@@ -51,6 +51,8 @@ function fixtureApi(workspaces: WorkspaceView[]) {
     nap: async id => workspaces.find(w => w.id === id)!,
     wake: async id => workspaces.find(w => w.id === id)!,
     listSessions: async () => [],
+    watchStatuses: async () => [],
+    createFromGoldenHead: async () => workspaces[0]!,
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
     startSession: async opts => { started.push(opts); return {}; },
   };
