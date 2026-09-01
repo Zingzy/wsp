@@ -44,6 +44,9 @@
 .l1 em { font-style: normal; color: var(--deep); margin-left: 8px; }
 .l2 { font-size: 10.5px; color: var(--deep); line-height: 1.4; display: block; }
 .when { display: flex; align-items: center; justify-content: flex-end; font-size: 10.5px; color: var(--deep); }
+.snap[data-head="true"] .node { background: var(--fg); }
+.rollRow { grid-column: 2 / -1; margin: 4px 0 6px; border: 1px solid var(--soft); border-radius: 8px; padding: 11px 12px; }
+.rollRow .btns { margin-top: 10px; }
 
 .actions { border-top: 1px solid var(--soft); padding: 13px 16px 15px; }
 .btns { display: flex; gap: 8px; }

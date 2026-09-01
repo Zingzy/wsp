@@ -45,6 +45,8 @@ function fixtureApi(workspaces: WorkspaceView[], history: Record<string, Session
   const api: Api = {
     daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
     sessionHistory: async id => history[id] ?? [],
+    listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
+    rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
     listWorkspaces: async () => workspaces,
     getWorkspace: async id => workspaces.find(w => w.id === id)!,
     createWorkspace: async () => workspaces[0]!,

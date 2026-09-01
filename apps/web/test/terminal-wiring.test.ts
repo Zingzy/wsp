@@ -47,6 +47,8 @@ function fakeApi(workspaces: WorkspaceView[], daemonPort: () => number) {
     startSession: async o => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
     listSessions: async () => [],
     sessionHistory: async () => [],
+    listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
+    rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
     daemonReach: async () => {
       reaches++;
       return { url: `ws://127.0.0.1:${daemonPort()}`, expiresAt: Date.now() + 3_600_000, daemonToken: TOKEN };

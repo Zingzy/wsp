@@ -11,6 +11,8 @@ import {
   RuntimeRequest,
   RuntimeResponse,
   SessionEvent,
+  SnapshotLineage,
+  SnapshotRollbackResult,
   SessionView,
   WorkspaceView,
 } from "../src/index.js";
@@ -158,6 +160,28 @@ describe("runtime wire types", () => {
     expect(() => RuntimeRequest.parse({ id: 1, op: "golden.seal" })).toThrow(); // builderId required
     expect(RuntimeResponse.parse({ id: 4, ok: true, workspace: { id: "w" } })).toBeTruthy();
     expect(RuntimeResponse.parse({ id: 4, ok: false, error: "nope" })).toBeTruthy();
+  });
+
+  it("snapshots.list / snapshots.rollback parse, and SnapshotLineage is the manifest plus its name", () => {
+    const list = { id: 20, op: "snapshots.list" };
+    const named = { id: 21, op: "snapshots.list", name: "default" };
+    const roll = { id: 22, op: "snapshots.rollback", version: 11 };
+    for (const r of [list, named, roll]) expect(RuntimeRequest.parse(r)).toEqual(r);
+    expect(() => RuntimeRequest.parse({ id: 23, op: "snapshots.rollback" })).toThrow(); // version required
+    const version = {
+      version: 11,
+      snapshotId: "snap_golden-v11",
+      baseTemplate: "base",
+      setupSha: "abc",
+      createdAt: "2026-08-14T00:00:00.000Z",
+      smoke: { cmd: "claude --version", exitCode: 0 },
+    };
+    const lineage = { name: "default", head: 11, versions: [version] };
+    expect(SnapshotLineage.parse(lineage)).toEqual(lineage);
+    expect(SnapshotLineage.parse({ name: "default", head: null, versions: [] })).toEqual({ name: "default", head: null, versions: [] });
+    const rolled = { lineage, existingWorkspaces: "untouched" };
+    expect(SnapshotRollbackResult.parse(rolled)).toEqual(rolled);
+    expect(() => SnapshotRollbackResult.parse({ lineage, existingWorkspaces: "upgraded" })).toThrow();
   });
 
   it("DaemonReachView carries the preview route, its expiry, and the daemon token when the guest has one", () => {
