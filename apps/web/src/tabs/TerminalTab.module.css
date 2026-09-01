@@ -1,0 +1,57 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+.pane { height: 100%; display: flex; flex-direction: column; background: var(--term); }
+
+.bar {
+  display: flex; align-items: center; gap: 2px; padding: 5px 8px;
+  border-bottom: 1px solid var(--soft); background: var(--panel);
+  overflow-x: auto; scrollbar-width: none;
+}
+.bar::-webkit-scrollbar { display: none; }
+
+.ptab {
+  display: flex; align-items: center; gap: 7px; height: 26px; padding: 0 6px 0 10px;
+  border: 1px solid transparent; border-radius: 6px; background: transparent;
+  color: var(--deep); font-family: var(--mono); font-size: 11.5px; white-space: nowrap;
+  cursor: pointer; transition: color 0.16s, background 0.16s, border-color 0.16s;
+}
+.ptab:hover { color: var(--muted); background: rgba(255, 255, 255, 0.035); }
+.ptab[data-active="true"] {
+  background: var(--card); border-color: var(--line); color: var(--fg);
+  box-shadow: inset 0 0.7px 0 rgba(255, 255, 255, 0.1);
+}
+.exited { color: var(--deep); font-size: 10.5px; }
+
+.close {
+  display: grid; place-items: center; width: 15px; height: 15px; border-radius: 4px;
+  color: var(--deep); font-size: 12px; line-height: 1;
+  transition: color 0.16s, background 0.16s;
+}
+.close:hover { color: var(--fg); background: rgba(255, 255, 255, 0.08); }
+
+.add {
+  display: grid; place-items: center; width: 26px; height: 26px; flex: none;
+  border: none; border-radius: 6px; background: transparent;
+  color: var(--deep); font-size: 14px; cursor: pointer;
+  transition: color 0.16s, background 0.16s;
+}
+.add:hover { color: var(--fg); background: rgba(255, 255, 255, 0.05); }
+
+.right {
+  margin-left: auto; display: flex; align-items: center; padding: 0 6px 0 12px; flex: none;
+}
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.state { font-family: var(--mono); font-size: 10.5px; color: var(--deep); }
+
+.banner {
+  border: 1px solid var(--line); border-radius: 8px; margin: 10px 12px 0;
+  padding: 9px 12px; font-family: var(--mono); font-size: 11.5px;
+  color: var(--muted); line-height: 1.55;
+}
+
+.well { flex: 1; min-height: 0; padding: 10px 4px 10px 12px; }
+.term { height: 100%; width: 100%; }
+
+.none, .empty {
+  height: 100%; display: flex; align-items: center; justify-content: center;
+  color: var(--deep); font-family: var(--mono); font-size: 12px;
+}

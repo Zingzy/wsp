@@ -1,0 +1,193 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Terminal tab against the real daemon: startDaemon in-process, the reach
+// client as the wire, jsdom for the component. WebGL cannot exist under
+// jsdom, so that addon is mocked; real rendering is the browser pass's job.
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { startDaemon, type DaemonHandle } from "@wsp/daemon";
+import { connectDaemon, type DaemonReach } from "@wsp/runtime";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { TerminalTab } from "../src/tabs/TerminalTab.js";
+import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../src/terminal/link.js";
+
+vi.mock("@xterm/addon-webgl", () => ({
+  WebglAddon: class {
+    activate(): void {}
+    dispose(): void {}
+    onContextLoss(): { dispose(): void } {
+      return { dispose() {} };
+    }
+  },
+}));
+
+const TOKEN = "t21-token";
+const WS_ID = "ws_term_test";
+
+let daemon: DaemonHandle | undefined;
+let reach: DaemonReach | undefined;
+let inboxDir: string | undefined;
+
+async function boot(): Promise<{ wt: WorkspaceTerminals; daemon: DaemonHandle }> {
+  inboxDir = mkdtempSync(join(tmpdir(), "wsp-term-"));
+  daemon = await startDaemon({
+    port: 0,
+    token: TOKEN,
+    inboxDir,
+    inboxQuietMs: 100,
+    inboxPollMs: 50,
+    portsSource: async () => [],
+    portsIntervalMs: 1000,
+  });
+  const wire: TerminalWire = { request: (op, params = {}) => reach!.request(op, params) };
+  const wt = new WorkspaceTerminals(wire);
+  reach = connectDaemon({
+    previewUrl: `ws://127.0.0.1:${daemon.port}`,
+    token: TOKEN,
+    heartbeatMs: 60_000,
+    onEvent: e => wt.feedEvent(e),
+    onStatus: s => wt.feedStatus(s),
+  });
+  await reach.ready;
+  provideTerminals(WS_ID, wt);
+  return { wt, daemon };
+}
+
+afterEach(async () => {
+  cleanup();
+  provideTerminals(WS_ID, null);
+  reach?.close();
+  reach = undefined;
+  await daemon?.close();
+  daemon = undefined;
+  if (inboxDir) rmSync(inboxDir, { recursive: true, force: true });
+  inboxDir = undefined;
+});
+
+describe("WorkspaceTerminals", () => {
+  it("replays scrollback into a sink bound after the output happened", async () => {
+    const { wt } = await boot();
+    const tab = await wt.open({ shell: "/bin/sh" });
+    wt.write(tab.ptyId, "echo replay-mark-$((40 + 2))\r");
+
+    const live: string[] = [];
+    const un1 = wt.bind(tab.ptyId, { data: d => live.push(d), reset: () => {} });
+    await waitFor(() => expect(live.join("")).toContain("replay-mark-42"), { timeout: 10_000 });
+    un1();
+
+    // A sink bound later gets the same bytes back from the mirror, synchronously.
+    const replayed: string[] = [];
+    const un2 = wt.bind(tab.ptyId, { data: d => replayed.push(d), reset: () => {} });
+    expect(replayed.join("")).toContain("replay-mark-42");
+    un2();
+  }, 15_000);
+
+  it("resize propagates to the daemon pty", async () => {
+    const { wt, daemon } = await boot();
+    const tab = await wt.open({ shell: "/bin/sh" });
+    wt.resize(tab.ptyId, 100, 40);
+    await waitFor(() => {
+      const p = daemon.ptys.list().find(x => x.id === tab.ptyId);
+      expect(p).toMatchObject({ cols: 100, rows: 40 });
+    });
+  }, 15_000);
+
+  it("unbinding keeps the pty alive; close kills it", async () => {
+    const { wt, daemon } = await boot();
+    const tab = await wt.open({ shell: "/bin/sh" });
+    const un = wt.bind(tab.ptyId, { data: () => {}, reset: () => {} });
+    un();
+    expect(daemon.ptys.list()).toHaveLength(1);
+    expect(daemon.ptys.list()[0]!.exited).toBe(false);
+
+    await wt.close(tab.ptyId);
+    expect(daemon.ptys.list()).toHaveLength(0);
+    expect(wt.tabs()).toHaveLength(0);
+  }, 15_000);
+
+  it("a reconnect re-attaches every pty and resets bound sinks", async () => {
+    const ops: string[] = [];
+    let nextPty = 1;
+    const wire: TerminalWire = {
+      request: async op => {
+        ops.push(op);
+        return op === "pty.create" ? { ok: true, ptyId: `p${nextPty++}` } : { ok: true };
+      },
+    };
+    const wt = new WorkspaceTerminals(wire);
+    wt.feedStatus("live");
+    const a = await wt.open();
+    await wt.open();
+    wt.feedEvent({ type: "pty.data", ptyId: a.ptyId, data: "pre-cut output" });
+
+    let resets = 0;
+    const un = wt.bind(a.ptyId, { data: () => {}, reset: () => resets++ });
+    ops.length = 0;
+    wt.feedStatus("connecting");
+    wt.feedStatus("live");
+    await waitFor(() => expect(ops.filter(o => o === "pty.attach")).toHaveLength(2));
+    expect(resets).toBe(1);
+
+    // The mirror was invalidated: replay now comes from the daemon, not from us.
+    const late: string[] = [];
+    wt.bind(a.ptyId, { data: d => late.push(d), reset: () => {} })();
+    expect(late).toEqual([]);
+    un();
+  });
+});
+
+describe("TerminalTab", () => {
+  it("renders a placeholder when no terminal link exists for the workspace", () => {
+    render(<TerminalTab workspaceId="ws_unlinked" />);
+    screen.getByText(/no terminal link/);
+  });
+
+  it("auto-opens one pty, parks on unmount without killing it, reuses it on remount", async () => {
+    const { wt, daemon } = await boot();
+    const view = render(<TerminalTab workspaceId={WS_ID} />);
+    await waitFor(() => expect(daemon.ptys.list()).toHaveLength(1), { timeout: 10_000 });
+    await screen.findByRole("tab");
+    await waitFor(() => expect(wt.sinkCount()).toBe(1));
+    expect(document.querySelector(".xterm")).not.toBeNull();
+
+    view.unmount(); // tab-away
+    expect(wt.sinkCount()).toBe(0);
+    expect(document.querySelector(".xterm")).toBeNull();
+    expect(daemon.ptys.list()).toHaveLength(1); // detach, not kill
+    expect(daemon.ptys.list()[0]!.exited).toBe(false);
+
+    render(<TerminalTab workspaceId={WS_ID} />); // tab back
+    await waitFor(() => expect(wt.sinkCount()).toBe(1));
+    expect(daemon.ptys.list()).toHaveLength(1); // reused, not re-created
+  }, 15_000);
+
+  it("the + button opens a second terminal with its own pty id", async () => {
+    const { wt, daemon } = await boot();
+    render(<TerminalTab workspaceId={WS_ID} />);
+    await waitFor(() => expect(daemon.ptys.list()).toHaveLength(1), { timeout: 10_000 });
+    fireEvent.click(screen.getByLabelText("new terminal"));
+    await waitFor(() => expect(daemon.ptys.list()).toHaveLength(2), { timeout: 10_000 });
+    expect(await screen.findAllByRole("tab")).toHaveLength(2);
+    const ids = daemon.ptys.list().map(p => p.id);
+    expect(new Set(ids).size).toBe(2);
+    expect(wt.tabs().map(t => t.ptyId)).toEqual(ids);
+  }, 15_000);
+
+  it("renders the connection state: live dot, reconnecting text, reauth banner", async () => {
+    const { wt } = await boot();
+    render(<TerminalTab workspaceId={WS_ID} />);
+    await screen.findByTitle("connected");
+
+    act(() => wt.feedStatus("connecting"));
+    screen.getByText("reconnecting");
+    expect(screen.queryByTitle("connected")).toBeNull();
+
+    act(() => wt.feedStatus("reauth-needed"));
+    screen.getByText("auth expired");
+    screen.getByText(/rejected this workspace/);
+
+    act(() => wt.feedStatus("live"));
+    await screen.findByTitle("connected");
+  }, 15_000);
+});
