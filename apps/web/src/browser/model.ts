@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Per-workspace browser state that outlives the BrowserTab component: the
-// port directory and the pane's own tabs. The wire carries no port snapshot,
-// so the directory is what this client has seen since the api was bound,
-// not the guest's full listening set.
+// port directory and the pane's own tabs. Ports arrive over the workspace's
+// own daemon link (terminal/wiring.ts): the ports.watch reply seeds the
+// directory and the daemon's port.open/port.close pushes keep it current.
+// The runtime stream's port events are still accepted, but nothing emits
+// them today.
 import type { ProtocolEvent } from "../protocol/client.js";
 import { useStore } from "../protocol/store.js";
 
@@ -45,6 +47,38 @@ export class WorkspaceBrowser {
       this.#portsView = this.#portsView.filter(p => p.port !== e.port);
       this.#notify();
     }
+  }
+
+  /**
+   * Adopts the daemon's full listening set from a ports.watch reply: ports it
+   * names are added, ports it omits are dropped, survivors keep their
+   * first-seen. Anything that is not an array of {port} rows is ignored so a
+   * bad reply cannot empty a directory the pushes built.
+   */
+  syncPorts(reply: unknown): void {
+    if (!Array.isArray(reply)) return;
+    const rows: { port: number; pid: number | null }[] = [];
+    for (const row of reply) {
+      if (typeof row !== "object" || row === null) return;
+      const { port, pid } = row as { port?: unknown; pid?: unknown };
+      if (typeof port !== "number") return;
+      rows.push({ port, pid: typeof pid === "number" ? pid : null });
+    }
+    const next = new Map<number, PortEntry>();
+    let changed = false;
+    for (const { port, pid } of rows) {
+      const known = this.#ports.get(port);
+      if (known) {
+        next.set(port, known);
+        continue;
+      }
+      next.set(port, { port, pid, firstSeen: this.#now() });
+      changed = true;
+    }
+    if (!changed && next.size === this.#ports.size) return;
+    this.#ports = next;
+    this.#portsView = [...next.values()].sort((a, b) => a.port - b.port);
+    this.#notify();
   }
 
   onChange(fn: () => void): () => void {
