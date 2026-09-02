@@ -16,3 +16,17 @@ export {
   indicatesNeutral,
   type DeriveRowsInput,
 } from "./timeline-rows.js";
+export {
+  derivePendingApprovals,
+  derivePendingUserInputs,
+  type PromptEvent,
+  type ApprovalRequestedEvent,
+  type ApprovalResolvedEvent,
+  type UserInputRequestedEvent,
+  type UserInputResolvedEvent,
+  type PromptRespondFailedEvent,
+} from "./prompts.js";
+export { applyPortsSnapshot, applyPortEvent, toPreviewableServers, type KnownPort, type PortsSnapshot, type PreviewableServersInput } from "./ports.js";
+export { deriveSidebarProjects, deriveThread, workspaceIndicator, threadIndicator, type SidebarInput } from "./workspaces.js";
+export { toTerminalAttachEvent, isPtyEvent } from "./terminal.js";
+export { CLAUDE_CODE_CATALOG, catalogFor } from "./catalog.js";
