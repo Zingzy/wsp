@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
 import {
   DAEMON_PORT,
@@ -419,7 +419,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   // boundaries, so a crash mid-turn loses that turn's partial output and
   // nothing else. A session's end is written at once, anything before it waits
   // for the debounce.
-  const record = (event: SessionEvent): void => {
+  const record = (unstamped: SessionEvent): void => {
+    const event: SessionEvent = { ...unstamped, at: Date.now() };
     let events = transcripts.get(event.workspaceId);
     if (!events) {
       events = [];
@@ -784,7 +785,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
       // Created before adapter.start so events that fire synchronously during
       // start() still land on the view.
-      const sessionView: SessionView = { id: "", workspaceId, harness, status: "running" };
+      const sessionView: SessionView = {
+        id: "",
+        workspaceId,
+        harness,
+        status: "running",
+        prompt: o.prompt,
+        startedAt: Date.now(),
+      };
+      const turnId = randomUUID();
 
       const forward = (event: AdapterEvent): void => {
         const sessionId = event.sessionId;
@@ -797,10 +806,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               type: "session.start",
               workspaceId,
               sessionId,
+              turnId,
               prompt: o.prompt,
               ...(event.model !== undefined ? { model: event.model } : {}),
               ...(event.cwd !== undefined ? { cwd: event.cwd } : {}),
               ...(event.tools !== undefined ? { tools: event.tools } : {}),
+              ...(event.harness !== undefined ? { harness: event.harness } : {}),
             });
             return;
           }
@@ -809,6 +820,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               type: "session.delta",
               workspaceId,
               sessionId,
+              turnId,
               kind: event.kind,
               text: event.text,
               ...(event.toolName !== undefined ? { toolName: event.toolName } : {}),
@@ -818,13 +830,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             return;
           case "turn.done":
             sessionView.status = event.result.status;
-            record({ type: "session.done", workspaceId, sessionId, result: event.result });
+            record({ type: "session.done", workspaceId, sessionId, turnId, result: event.result });
             return;
           case "session.end":
+            sessionView.endedAt = Date.now();
             record({
               type: "session.end",
               workspaceId,
               sessionId,
+              turnId,
               exitCode: event.exitCode,
               sawResult: event.sawResult,
             });
@@ -855,9 +869,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       started.finished
         .then(result => {
           sessionView.status = result.status;
+          sessionView.endedAt ??= Date.now();
         })
         .catch(() => {
           sessionView.status = "failed";
+          sessionView.endedAt ??= Date.now();
         });
       return handle;
     },
