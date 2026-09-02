@@ -1,0 +1,25 @@
+appId: wsp.desktop
+productName: wsp
+electronVersion: 43.5.1
+directories:
+  app: build/app
+  output: dist
+asar: false
+npmRebuild: false
+files:
+  - main/**
+  - web/**
+  - package.json
+extraResources:
+  - from: build/app/node_modules/@wsp/daemon
+    to: node_modules/@wsp/daemon
+mac:
+  target:
+    - target: dir
+      arch: [arm64, x64]
+  identity: null
+  category: public.app-category.developer-tools
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
