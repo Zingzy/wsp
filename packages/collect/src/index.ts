@@ -2,6 +2,7 @@
 export * from "./manifest.js";
 export * from "./host.js";
 export { collect, DETECTORS } from "./collect.js";
+export { nodeHost } from "./live-host.js";
 export type { Detector } from "./detect/common.js";
 export { detectIdentity } from "./detect/identity.js";
 export { detectShell } from "./detect/shell.js";
