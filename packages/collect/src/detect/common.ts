@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { type Host, expand } from "../host.js";
-import type { Default, ManifestEntry, Rung } from "../manifest.js";
+import type { Default, Linux, ManifestEntry, Rung } from "../manifest.js";
 
 export type Detector = (host: Host) => Promise<ManifestEntry[]>;
 
@@ -14,6 +14,7 @@ export interface RowSpec {
   reason?: string;
   group?: string;
   required?: boolean;
+  linux?: Linux;
   /** Emit the row even when none of the candidate paths exist. */
   always?: boolean;
 }
@@ -63,6 +64,7 @@ export function entry(spec: EntrySpec): ManifestEntry {
     default: spec.default ?? "bring",
     ...(spec.reason !== undefined ? { reason: spec.reason } : {}),
     ...(spec.required !== undefined ? { required: spec.required } : {}),
+    ...(spec.linux !== undefined ? { linux: spec.linux } : {}),
   };
 }
 

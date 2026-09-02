@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { LOGIN_CHOICES, Manifest, ManifestEntry, RUNGS, parseManifest } from "../src/index.js";
+import { LINUX, LOGIN_CHOICES, Manifest, ManifestEntry, RUNGS, parseManifest } from "../src/index.js";
 
 const entry = {
   rung: "identity",
@@ -34,6 +34,12 @@ describe("manifest schema", () => {
     expect(ManifestEntry.parse(answered)).toEqual(answered);
   });
 
+  it("a tools row may say whether it runs on Linux", () => {
+    const formula = { rung: "tools", id: "tools/brew/mas", label: "mas", group: "Homebrew", paths: [], bytes: 0, default: "skip", reason: "no Linux bottle", linux: "no" };
+    expect(ManifestEntry.parse(formula)).toEqual(formula);
+    expect(LINUX).toEqual(["yes", "no", "unknown"]);
+  });
+
   it.each([
     ["an unknown rung", { ...entry, rung: "fonts" }],
     ["an empty id", { ...entry, id: "" }],
@@ -44,6 +50,8 @@ describe("manifest schema", () => {
     ["a choice outside copy, machine, skip", { ...entry, choice: "later" }],
     ["a choice on a row that is not a login", { ...entry, choice: "copy" }],
     ["a required row that defaults to skip", { ...entry, required: true, default: "skip" }],
+    ["a linux marker outside yes, no, unknown", { ...entry, rung: "tools", id: "tools/brew/x", linux: "maybe" }],
+    ["a linux marker on a row that is not a tool", { ...entry, linux: "yes" }],
   ])("rejects %s", (_name, bad) => {
     expect(ManifestEntry.safeParse(bad).success).toBe(false);
   });

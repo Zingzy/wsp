@@ -8,8 +8,10 @@ export { detectShell } from "./detect/shell.js";
 export { detectEditors, parseExtensionList } from "./detect/editors.js";
 export { detectToolchains } from "./detect/toolchains.js";
 export {
-  detectTools, parseBrewfile, parseCargoInstalls, parseGoVersionM, parseNpmGlobals, parsePipxList, parseUvToolList,
+  detectTools, parseBrewfile, parseBunGlobals, parseCargoInstalls, parseGoVersionM, parseNpmGlobals, parsePipxList, parsePnpmGlobals, parseUvToolList,
   type BrewLine, type GoModule, type Pkg,
 } from "./detect/tools.js";
+export { classifyFormulae, linuxSupport, renderSnapshot, type BottleSnapshot } from "./brew-bottles.js";
+export { LINUX_BOTTLES } from "./data/linux-bottles.js";
 export { AGENTS, detectAgents } from "./detect/agents.js";
 export { detectLogins } from "./detect/logins.js";

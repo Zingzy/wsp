@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { linuxSupport } from "../brew-bottles.js";
 import type { Host } from "../host.js";
 import type { ManifestEntry } from "../manifest.js";
 import { exists, found, entry, item, present } from "./common.js";
@@ -80,6 +81,32 @@ function parseNameVersionLines(text: string): Pkg[] {
 export const parseUvToolList = parseNameVersionLines;
 export const parseCargoInstalls = parseNameVersionLines;
 
+/** `pnpm ls -g --json`: one object per global dir, each with a dependencies map. */
+export function parsePnpmGlobals(text: string): Pkg[] {
+  const data = tryJson(text);
+  if (!Array.isArray(data)) return [];
+  const out: Pkg[] = [];
+  for (const dir of data) {
+    if (!isRecord(dir) || !isRecord(dir["dependencies"])) continue;
+    for (const [name, info] of Object.entries(dir["dependencies"])) {
+      const version = isRecord(info) && typeof info["version"] === "string" ? info["version"] : undefined;
+      out.push(version === undefined ? { name } : { name, version });
+    }
+  }
+  return out;
+}
+
+/** `bun pm ls -g`: a header naming the global dir, then tree lines of `name@version`. */
+export function parseBunGlobals(text: string): Pkg[] {
+  const out: Pkg[] = [];
+  for (const line of text.split("\n")) {
+    const m = /^[│├└─\s]+(@?[^@\s]+)@(\S+)$/.exec(line);
+    if (m?.[1] === undefined || m[2] === undefined) continue;
+    out.push({ name: m[1], version: m[2] });
+  }
+  return out;
+}
+
 export interface GoModule {
   path: string;
   version: string;
@@ -110,10 +137,19 @@ interface GlobalManager {
 
 const GLOBALS: readonly GlobalManager[] = [
   { id: "npm", bin: "npm", group: "npm globals", args: ["ls", "-g", "--depth=0", "--json"], parse: parseNpmGlobals, sep: "@" },
+  { id: "pnpm", bin: "pnpm", group: "pnpm globals", args: ["ls", "-g", "--depth=0", "--json"], parse: parsePnpmGlobals, sep: "@" },
+  { id: "bun", bin: "bun", group: "bun globals", args: ["pm", "ls", "-g"], parse: parseBunGlobals, sep: "@" },
   { id: "pipx", bin: "pipx", group: "pipx", args: ["list", "--json"], parse: parsePipxList, sep: " " },
   { id: "uv", bin: "uv", group: "uv tools", args: ["tool", "list"], parse: parseUvToolList, sep: " " },
   { id: "cargo", bin: "cargo", group: "cargo installs", args: ["install", "--list"], parse: parseCargoInstalls, sep: " " },
 ];
+
+// A formula the laptop already runs on Linux needs no snapshot to vouch for it.
+function formulaRow(host: Host, name: string): ManifestEntry {
+  const linux = host.platform === "linux" ? "yes" : linuxSupport(name);
+  const base = { rung: "tools" as const, id: `tools/brew/${name}`, label: name, group: "Homebrew", linux };
+  return linux === "no" ? item({ ...base, default: "skip", reason: "no Linux bottle" }) : item(base);
+}
 
 async function brewRows(host: Host): Promise<ManifestEntry[]> {
   if (!(await host.exec.which("brew"))) return [];
@@ -121,13 +157,13 @@ async function brewRows(host: Host): Promise<ManifestEntry[]> {
   return parseBrewfile(dump ?? "").map(l => {
     switch (l.kind) {
       case "tap":
-        return item({ rung: "tools", id: `tools/brew-tap/${l.name}`, label: l.name, group: "Homebrew taps" });
+        return item({ rung: "tools", id: `tools/brew-tap/${l.name}`, label: l.name, group: "Homebrew taps", linux: "yes" });
       case "brew":
-        return item({ rung: "tools", id: `tools/brew/${l.name}`, label: l.name, group: "Homebrew" });
+        return formulaRow(host, l.name);
       case "cask":
-        return item({ rung: "tools", id: `tools/brew-cask/${l.name}`, label: l.name, group: "Homebrew casks", default: "skip", reason: "macOS app, no Linux build" });
+        return item({ rung: "tools", id: `tools/brew-cask/${l.name}`, label: l.name, group: "Homebrew casks", default: "skip", reason: "macOS app, no Linux build", linux: "no" });
       case "mas":
-        return item({ rung: "tools", id: `tools/mas/${l.name}`, label: l.name, group: "Mac App Store", default: "skip", reason: "Mac App Store, macOS only" });
+        return item({ rung: "tools", id: `tools/mas/${l.name}`, label: l.name, group: "Mac App Store", default: "skip", reason: "Mac App Store, macOS only", linux: "no" });
       default: {
         const _exhaustive: never = l.kind;
         return _exhaustive;
@@ -143,8 +179,8 @@ async function goRows(host: Host): Promise<ManifestEntry[]> {
   for (const name of await host.fs.list(bin)) {
     const mod = parseGoVersionM((await host.exec.run("go", ["version", "-m", `${bin}/${name}`])) ?? "");
     rows.push(mod === undefined
-      ? item({ rung: "tools", id: `tools/go/${name}`, label: `${name} (no module info)`, group: "Go binaries", default: "skip" })
-      : item({ rung: "tools", id: `tools/go/${name}`, label: `${name} (${mod.path}@${mod.version})`, group: "Go binaries" }));
+      ? item({ rung: "tools", id: `tools/go/${name}`, label: `${name} (no module info)`, group: "Go binaries", default: "skip", linux: "yes" })
+      : item({ rung: "tools", id: `tools/go/${name}`, label: `${name} (${mod.path}@${mod.version})`, group: "Go binaries", linux: "yes" }));
   }
   return rows;
 }
@@ -153,14 +189,15 @@ export async function detectTools(host: Host): Promise<ManifestEntry[]> {
   const rows: (ManifestEntry | undefined)[] = [...(await brewRows(host))];
 
   if ((await exists(host, "~/.config/home-manager")) || (await exists(host, "~/.config/nixpkgs/home.nix"))) {
-    rows.push(entry({ rung: "tools", id: "tools/nix-home-manager", label: "Nix home-manager config", ...(await found(host, ["~/.config/home-manager", "~/.config/nixpkgs/home.nix"])) }));
+    rows.push(entry({ rung: "tools", id: "tools/nix-home-manager", label: "Nix home-manager config", linux: "yes", ...(await found(host, ["~/.config/home-manager", "~/.config/nixpkgs/home.nix"])) }));
   }
 
+  // Language package managers run on Linux and fetch each package's own Linux build.
   for (const g of GLOBALS) {
     if (!(await host.exec.which(g.bin))) continue;
     const out = await host.exec.run(g.bin, g.args);
     for (const p of g.parse(out ?? "")) {
-      rows.push(item({ rung: "tools", id: `tools/${g.id}/${p.name}`, label: versioned(p, g.sep), group: g.group }));
+      rows.push(item({ rung: "tools", id: `tools/${g.id}/${p.name}`, label: versioned(p, g.sep), group: g.group, linux: "yes" }));
     }
   }
   rows.push(...(await goRows(host)));

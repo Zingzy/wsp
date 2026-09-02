@@ -17,6 +17,11 @@ export type LoginChoice = z.infer<typeof LoginChoice>;
 export const Default = z.enum(["bring", "skip"]);
 export type Default = z.infer<typeof Default>;
 
+/** Whether a tools row can be installed on the Linux machine; unknown when nothing on the laptop can tell. */
+export const LINUX = ["yes", "no", "unknown"] as const;
+export const Linux = z.enum(LINUX);
+export type Linux = z.infer<typeof Linux>;
+
 const Fields = z.object({
   rung: Rung,
   /** `<rung>/<name>`; the last segment looks up install and sign-in commands. */
@@ -36,6 +41,8 @@ const Fields = z.object({
   bring: z.boolean().optional(),
   /** The person's answer on a logins row; absent on a fresh collection. */
   choice: LoginChoice.optional(),
+  /** Only on a tools row; the TUI greys out a "no". */
+  linux: Linux.optional(),
 });
 
 export const ManifestEntry = Fields.superRefine((e, ctx) => {
@@ -44,6 +51,9 @@ export const ManifestEntry = Fields.superRefine((e, ctx) => {
   }
   if (e.choice !== undefined && e.rung !== "logins") {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["choice"], message: "only a logins row carries a choice" });
+  }
+  if (e.linux !== undefined && e.rung !== "tools") {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["linux"], message: "only a tools row carries a linux marker" });
   }
   if (e.required === true && e.default === "skip") {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["required"], message: "a required row cannot default to skip" });
