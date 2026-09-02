@@ -22,7 +22,7 @@ import {
 } from "@wsp/runtime";
 import { CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, claudeEnvs, deployDaemon, doctor } from "./doctor.js";
 import { runInit, type InitIO } from "./init.js";
-import type { Manifest } from "./init-recipe.js";
+import type { ChecklistItem, Manifest } from "./init-recipe.js";
 import { startHost, type HostHandle } from "./server.js";
 import { TerminalInput } from "./terminal-input.js";
 
@@ -240,7 +240,7 @@ async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: 
       keys,
       statePath: opts.statePath,
       runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `node ${(await deployDaemon(machine)).node}` }),
-      host: (rt, builder) => hostFor(rt, keys, { ...opts, builder }, io),
+      host: (rt, builder, checklist) => hostFor(rt, keys, { ...opts, builder, checklist }, io),
     },
     terminalInitIO(),
   );
@@ -259,7 +259,7 @@ export async function serve(
 async function hostFor(
   rt: Runtime,
   keys: Keys,
-  opts: { port: number; wsPort: number; statePath: string; webDir?: string; builder?: GoldenBuilderView },
+  opts: { port: number; wsPort: number; statePath: string; webDir?: string; builder?: GoldenBuilderView; checklist?: ChecklistItem[] },
   io: CliIO,
 ): Promise<HostHandle> {
   const handle = await startHost({
@@ -269,6 +269,7 @@ async function hostFor(
     webDir: opts.webDir ?? defaultWebDir(),
     keys: { anthropic: keys.anthropic !== undefined },
     ...(opts.builder !== undefined ? { builder: opts.builder } : {}),
+    ...(opts.checklist !== undefined ? { checklist: opts.checklist } : {}),
     ...(keys.anthropic !== undefined ? { workspaceEnvs: claudeEnvs(keys.anthropic) } : {}),
     log: line => io.log(line),
   });

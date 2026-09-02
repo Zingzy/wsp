@@ -10,15 +10,20 @@ import type { GoldenBuilderView, GoldenRecipe, GoldenStage, Runtime } from "@wsp
 import { S_BAR, S_STEP_ERROR, S_STEP_SUBMIT, cancel, confirm, intro, isCancel, log, note, outro } from "@clack/prompts";
 import type { Keys } from "./cli.js";
 import {
+  LOGIN_CHOICES,
   RUNGS,
   RUNG_TITLE,
+  agentName,
+  checklistFor,
   goldenRecipeFor,
+  initialChoice,
   initialTicks,
   installFor,
   isTickable,
   loadManifest,
   recipePath,
   saveRecipe,
+  type ChecklistItem,
   type Manifest,
   type ManifestEntry,
   type Rung,
@@ -47,8 +52,9 @@ export interface InitOptions {
   statePath: string;
   /** Builds the runtime around the recipe the ticks produced. */
   runtime(recipe: GoldenRecipe): Runtime;
-  /** Starts the app server over that runtime once the builder is ready; the page lands on that builder. */
-  host(rt: Runtime, builder: GoldenBuilderView): Promise<HostHandle>;
+  /** Starts the app server over that runtime once the builder is ready; the page lands on that
+   * builder with the sign-ins the person chose to do there. */
+  host(rt: Runtime, builder: GoldenBuilderView, checklist: ChecklistItem[]): Promise<HostHandle>;
   /** How long to wait when the account is at its machine cap, and how often. */
   retry?: { waitMs: number; attempts: number };
 }
@@ -69,6 +75,13 @@ export function fmtBytes(n: number): string {
 }
 
 // --- stage stream ----------------------------------------------------------
+
+export interface StageWords {
+  stage: GoldenStage;
+  start: string;
+  end: string;
+  fail: string;
+}
 
 export interface StageStep {
   stage: GoldenStage;
@@ -93,16 +106,25 @@ export interface StageFrame {
 
 /** The prepare stages in order, with the words the terminal shows while each
  * runs and once it is over. The stage names are the protocol's; the harness
- * stage runs whatever setup the ticks produced, so its words name no agent. */
-const PREPARE_STEPS: readonly { stage: GoldenStage; start: string; end: string; fail: string }[] = [
-  { stage: "creating", start: "Booting a fresh machine", end: "Machine booted", fail: "Boot failed" },
-  { stage: "deploying-daemon", start: "Starting the workspace daemon", end: "Workspace daemon running", fail: "Workspace daemon failed to start" },
-  { stage: "installing-harness", start: "Running the setup", end: "Setup finished", fail: "Setup failed" },
-  { stage: "ready", start: "Waiting for the machine", end: "Machine ready", fail: "Machine never became ready" },
+ * stage installs whatever agents were ticked, and names none of them. */
+export const PREPARE_STEPS: readonly StageWords[] = [
+  { stage: "creating", start: "Creating the machine", end: "Machine created", fail: "Creating the machine failed" },
+  { stage: "deploying-daemon", start: "Installing the base (Node, the daemon)", end: "Base installed", fail: "Installing the base failed" },
+  { stage: "installing-harness", start: "Installing agents", end: "Agents installed", fail: "Installing agents failed" },
+  { stage: "ready", start: "Waiting for the machine", end: "Ready", fail: "The machine never became ready" },
 ];
 
-export function reduceStages(frames: readonly StageFrame[]): StageView {
-  const steps: StageStep[] = PREPARE_STEPS.map(s => ({ ...s, state: "pending", tail: [] }));
+/** The seal, driven from the browser; the terminal only reports it. */
+export const SEAL_STEPS: readonly StageWords[] = [
+  { stage: "snapshotting", start: "Taking the snapshot", end: "Snapshot taken", fail: "Snapshot failed" },
+  { stage: "smoke-forking", start: "Booting a fork to prove it", end: "Fork booted and checked", fail: "The fork failed its check" },
+  { stage: "sealed", start: "Sealing", end: "Sealed", fail: "Seal failed" },
+];
+
+const LAST_STAGE = new Set<string>(["ready", "sealed"]);
+
+export function reduceStages(frames: readonly StageFrame[], words: readonly StageWords[] = PREPARE_STEPS): StageView {
+  const steps: StageStep[] = words.map(s => ({ ...s, state: "pending", tail: [] }));
   let failure: string | undefined;
   let at = -1;
   for (const f of frames) {
@@ -116,7 +138,7 @@ export function reduceStages(frames: readonly StageFrame[]): StageView {
     if (i < 0) continue;
     for (let j = 0; j < i; j++) if (steps[j]!.state !== "done") steps[j]!.state = "done";
     at = i;
-    steps[i]!.state = f.stage === "ready" ? "done" : "current";
+    steps[i]!.state = LAST_STAGE.has(f.stage) ? "done" : "current";
     if (f.detail !== undefined) steps[i]!.tail.push(f.detail);
   }
   return failure !== undefined ? { steps, failure } : { steps };
@@ -127,7 +149,7 @@ export function reduceStages(frames: readonly StageFrame[]): StageView {
  * details kept under a failed step. Animation only on a terminal. */
 class StageStream {
   private frames: StageFrame[] = [];
-  private view = reduceStages([]);
+  private view: StageView;
   private printed = 0;
   private timer: NodeJS.Timeout | undefined;
   private tick = 0;
@@ -136,7 +158,18 @@ class StageStream {
   constructor(
     private readonly output: Writable,
     private readonly animate: boolean,
-  ) {}
+    private readonly words: readonly StageWords[] = PREPARE_STEPS,
+  ) {
+    this.view = reduceStages([], words);
+  }
+
+  get failed(): boolean {
+    return this.view.failure !== undefined;
+  }
+
+  get finished(): boolean {
+    return this.view.failure !== undefined || this.view.steps.every(s => s.state === "done");
+  }
 
   start(): void {
     if (this.animate) {
@@ -151,7 +184,7 @@ class StageStream {
   push(frame: StageFrame): void {
     const prev = this.view;
     this.frames.push(frame);
-    this.view = reduceStages(this.frames);
+    this.view = reduceStages(this.frames, this.words);
     if (this.animate) this.draw();
     else this.announce(prev);
   }
@@ -222,7 +255,26 @@ class StageStream {
 
 }
 
+/** One animated line while something short runs; off a terminal nothing is drawn. */
+function spin(output: Writable, label: string, animate: boolean): () => void {
+  if (!animate) return () => {};
+  let tick = 0;
+  const frames = ["◒", "◐", "◓", "◑"];
+  const draw = (): void => {
+    output.write(`\r${styleText("cyan", frames[tick++ % frames.length]!)}  ${label}`);
+  };
+  draw();
+  const timer = setInterval(draw, 80);
+  return () => {
+    clearInterval(timer);
+    output.write("\r\x1b[2K");
+  };
+}
+
 // --- screens ---------------------------------------------------------------
+
+/** Anthropic forbids a host to collect or pass along this credential, which is why its login is signed in on the machine unless the person opts in. */
+const CLAUDE_LOGIN_WHY = "Anthropic's terms forbid a host to collect or pass along this credential, so the default is to sign in on the machine.";
 
 function selectItem(e: ManifestEntry): SelectItem {
   const where = e.paths.length > 0 ? e.paths.join(", ") : "reinstalled on the machine";
@@ -230,7 +282,7 @@ function selectItem(e: ManifestEntry): SelectItem {
   const install = installFor(e);
   const detail =
     e.rung === "logins"
-      ? [where, "ticked: copied into the golden from this machine. unticked: sign in on the machine"]
+      ? [where, agentName(e) === "claude" ? CLAUDE_LOGIN_WHY : "copy puts this login in the golden; sign in on the machine does it in the browser, next"]
       : e.rung === "agents"
         ? [where, install !== undefined ? "installed on the machine, config brought along" : "config brought along; no installer for it yet, install it on the machine"]
         : [where, [size, e.default === "bring" ? "brought by default" : "left out by default"].filter((s): s is string => s !== undefined).join(", ")];
@@ -243,46 +295,66 @@ function selectItem(e: ManifestEntry): SelectItem {
     detail,
     ...(lock !== undefined ? { lock } : {}),
     ...(lock === "off" && e.reason !== undefined ? { lockReason: e.reason } : {}),
+    ...(e.rung === "logins" ? { choices: LOGIN_CHOICES } : {}),
   };
 }
 
 function rungIntro(rung: Rung): string | undefined {
-  return rung === "logins" ? "Each tick copies that login into the golden from this machine. Leave one unticked to sign in on the machine yourself, in the browser, next." : undefined;
+  return rung === "logins" ? "Per login: copy it from this computer into the golden, sign in on the machine yourself in the browser next, or skip it." : undefined;
 }
 
 function detectionNote(manifest: Manifest, source: string): string[] {
   if (manifest.entries.length === 0) {
-    return ["Found nothing to bring from this machine.", "Pass --manifest <path> to list what should come along."];
+    return ["Found nothing to bring from this computer.", "Pass --manifest <path> to list what should come along.", "", "Nothing has left this computer."];
   }
   const lines: string[] = [];
   for (const rung of RUNGS) {
     const entries = manifest.entries.filter(e => e.rung === rung);
     if (entries.length === 0) continue;
     const bytes = entries.reduce((n, e) => n + e.bytes, 0);
-    lines.push(`${RUNG_TITLE[rung].padEnd(12)} ${String(entries.length).padStart(3)}${bytes > 0 ? `  ${fmtBytes(bytes)}` : ""}`);
+    const canCome = entries.filter(isTickable).length;
+    const parts = [canCome < entries.length ? `${canCome} can come` : "", bytes > 0 ? fmtBytes(bytes) : ""].filter(p => p !== "");
+    lines.push(`${RUNG_TITLE[rung].padEnd(12)} ${String(entries.length).padStart(3)}${parts.length > 0 ? `  ${parts.join(", ")}` : ""}`);
   }
-  lines.push("", `${manifest.entries.length} things ${source}`);
+  lines.push("", `${manifest.entries.length} things ${source}. Nothing has left this computer.`);
   return lines;
 }
 
-function summaryNote(manifest: Manifest, ticks: ReadonlySet<string>): string[] {
+function summaryNote(manifest: Manifest, ticks: ReadonlySet<string>, choices: ReadonlyMap<string, string>): string[] {
   const lines: string[] = [];
+  let upload = 0;
   for (const rung of RUNGS) {
     const entries = manifest.entries.filter(e => e.rung === rung);
     if (entries.length === 0) continue;
     const on = entries.filter(e => ticks.has(e.id));
     const bytes = on.reduce((n, e) => n + e.bytes, 0);
+    upload += bytes;
     lines.push(`${RUNG_TITLE[rung]}  ${on.length} of ${entries.length}${bytes > 0 ? `, ${fmtBytes(bytes)}` : ""}`);
     if (on.length > 0) lines.push(...on.map(e => `  ${e.label}`));
   }
+  const onMachine = manifest.entries.filter(e => e.rung === "logins" && choices.get(e.id) === "machine");
+  if (onMachine.length > 0) lines.push(`Sign in on the machine: ${onMachine.map(e => e.label).join(", ")}`);
   const installs = manifest.entries.filter(e => ticks.has(e.id) && installFor(e) !== undefined);
-  lines.push("", installs.length > 0 ? `The machine installs: ${installs.map(e => e.label).join(", ")}.` : "The machine installs nothing; it boots bare.");
+  lines.push("", `Upload: ${fmtBytes(upload)}. Nothing has left this computer yet.`);
+  lines.push(installs.length > 0 ? `The machine installs: ${installs.map(e => e.label).join(", ")}.` : "The machine installs nothing; it boots bare.");
   lines.push("Ticked files are recorded in the recipe; copying them onto the machine lands with golden import.");
   return lines;
 }
 
-async function tickRungs(manifest: Manifest, io: InitIO): Promise<Set<string> | "cancel"> {
-  const answers = new Map<Rung, Set<string>>();
+interface Answers {
+  ticks: Set<string>;
+  choices: Map<string, string>;
+}
+
+function defaultAnswers(manifest: Manifest): Answers {
+  return {
+    ticks: new Set(manifest.entries.filter(e => (e.rung === "logins" ? initialChoice(e) === "copy" : initialTicks(e))).map(e => e.id)),
+    choices: new Map(manifest.entries.filter(e => e.rung === "logins").map(e => [e.id, initialChoice(e)])),
+  };
+}
+
+async function tickRungs(manifest: Manifest, io: InitIO): Promise<Answers | "cancel"> {
+  const answers = new Map<Rung, Answers>();
   const rungsWithItems = RUNGS.filter(r => manifest.entries.some(e => e.rung === r));
   let i = 0;
   while (i < RUNGS.length) {
@@ -295,12 +367,20 @@ async function tickRungs(manifest: Manifest, io: InitIO): Promise<Set<string> | 
       continue;
     }
     const prior = answers.get(rung);
-    const initial = prior ?? new Set(entries.filter(initialTicks).map(e => e.id));
+    const fresh = defaultAnswers({ entries });
     const hint = rungIntro(rung);
     if (hint !== undefined && prior === undefined) log.message(dim(hint), { output: io.output, symbol: dim(S_BAR) });
-    const result = await rungSelect({ title: RUNG_TITLE[rung], counter, items: entries.map(selectItem), initial, input: io.input, output: io.output });
+    const result = await rungSelect({
+      title: RUNG_TITLE[rung],
+      counter,
+      items: entries.map(selectItem),
+      initial: prior?.ticks ?? fresh.ticks,
+      initialChoices: prior?.choices ?? fresh.choices,
+      input: io.input,
+      output: io.output,
+    });
     if (result.kind === "cancel") return "cancel";
-    answers.set(rung, result.ticks);
+    answers.set(rung, { ticks: result.ticks, choices: result.choices });
     if (result.kind === "back") {
       const idx = rungsWithItems.indexOf(rung);
       i = idx > 0 ? RUNGS.indexOf(rungsWithItems[idx - 1]!) : i;
@@ -308,8 +388,11 @@ async function tickRungs(manifest: Manifest, io: InitIO): Promise<Set<string> | 
     }
     i += 1;
   }
-  const all = new Set<string>();
-  for (const s of answers.values()) for (const id of s) all.add(id);
+  const all: Answers = { ticks: new Set(), choices: new Map() };
+  for (const a of answers.values()) {
+    for (const id of a.ticks) all.ticks.add(id);
+    for (const [id, c] of a.choices) all.choices.set(id, c);
+  }
   return all;
 }
 
@@ -325,44 +408,43 @@ function overSsh(env: Record<string, string | undefined>): boolean {
 
 export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult> {
   const out = { output: io.output };
+  // Off a terminal there is nobody to ask: it runs as if --yes were given.
   const interactive = io.isTTY && !opts.yes;
   intro("wsp init", out);
 
-  if (!io.isTTY && !opts.yes) {
-    log.error("stdin is not a terminal. Rerun with --yes to take the defaults, and --manifest <path> to say what comes along.", out);
-    outro("Nothing was changed.", out);
-    return { code: 1 };
-  }
-
   let manifest: Manifest;
   let source: string;
+  const stopSpin = spin(io.output, "Reading this computer", io.isTTY);
   try {
     if (opts.manifestPath !== undefined) {
       manifest = loadManifest(opts.manifestPath);
       source = `listed in ${opts.manifestPath}`;
     } else {
       manifest = await opts.collect();
-      source = "found on this machine";
+      source = "found on this computer";
     }
   } catch (e) {
+    stopSpin();
     log.error(e instanceof Error ? e.message : String(e), out);
     return { code: 1 };
   }
-  note(detectionNote(manifest, source).join("\n"), "What this machine has", out);
+  stopSpin();
+  note(detectionNote(manifest, source).join("\n"), "Found on this computer", out);
 
-  let ticks: Set<string>;
+  let answers: Answers;
   if (interactive) {
     const picked = await tickRungs(manifest, io);
     if (picked === "cancel") {
       cancel("Nothing was changed.", out);
       return { code: 1 };
     }
-    ticks = picked;
+    answers = picked;
   } else {
-    ticks = new Set(manifest.entries.filter(initialTicks).map(e => e.id));
+    answers = defaultAnswers(manifest);
   }
+  const { ticks, choices } = answers;
 
-  note(summaryNote(manifest, ticks).join("\n"), "Summary", out);
+  note(summaryNote(manifest, ticks, choices).join("\n"), "Summary", out);
   if (interactive) {
     const go = await confirm({ message: "Boot a machine on your Solari account and build this? It bills while it runs.", initialValue: false, input: io.input, output: io.output });
     if (isCancel(go) || !go) {
@@ -370,11 +452,11 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       return { code: 1 };
     }
   } else {
-    log.step("Boot a machine on your Solari account and build this: taken as yes (--yes).", out);
+    log.step(`Boot a machine on your Solari account and build this: taken as yes (${opts.yes ? "--yes" : "no terminal"}).`, out);
   }
 
   const path = recipePath(opts.statePath);
-  saveRecipe(path, manifest, ticks);
+  saveRecipe(path, manifest, ticks, choices);
   log.info(`Recipe saved to ${path}. Rerun with wsp init --manifest ${path} --yes to build it again.`, out);
 
   const bring = manifest.entries.filter(e => ticks.has(e.id));
@@ -407,11 +489,42 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   stream.stop();
   off();
 
-  const handle = await opts.host(rt, builder);
+  const checklist = checklistFor(manifest, choices);
+  const handle = await opts.host(rt, builder, checklist);
   const url = `http://127.0.0.1:${handle.port}/`;
   await handoff(url, handle, io, interactive, out);
-  outro(`Finish on the machine's terminal in the browser: sign in to what you left unticked, then save it as your golden image.\n${dim(S_BAR)}  Recipe: ${path}`, out);
+  outro(
+    [
+      "Finish on the machine's terminal in the browser: sign in where the checklist says, then save it as your golden image.",
+      `${dim(S_BAR)}  Recipe: ${path}`,
+      `${dim(S_BAR)}  This terminal keeps reporting until the save is done.`,
+    ].join("\n"),
+    out,
+  );
+  reportSeal(rt, io, path);
   return { code: 0, handle };
+}
+
+/** After the hand-off the browser drives the seal; the terminal shows it as it happens. */
+function reportSeal(rt: Runtime, io: InitIO, recipe: string): void {
+  let stream: StageStream | undefined;
+  const off = rt.events.on("golden.stage", e => {
+    if (e.type !== "golden.stage" || e.name !== GOLDEN_NAME) return;
+    if (!stream) {
+      stream = new StageStream(io.output, io.isTTY, SEAL_STEPS);
+      stream.start();
+    }
+    stream.push({ type: "golden.stage", name: e.name, stage: e.stage, ...(e.detail !== undefined ? { detail: e.detail } : {}) });
+    if (!stream.finished) return;
+    stream.stop();
+    off();
+    const out = { output: io.output };
+    if (stream.failed) {
+      log.error(`Seal failed and the builder is gone. Run wsp init again; the recipe at ${recipe} is kept.`, out);
+    } else {
+      log.success(`Golden v1 sealed. The app is forking your first workspace; wsp keeps serving it here.`, out);
+    }
+  });
 }
 
 async function handoff(url: string, handle: HostHandle, io: InitIO, interactive: boolean, out: { output: Writable }): Promise<void> {

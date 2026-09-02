@@ -6,8 +6,12 @@ import { App } from "./App.js";
 import "./tokens.css";
 
 // keys: presence flags only; the host never hands a value to the browser.
-// builder: the machine wsp init prepared, when this page was opened by it.
-const cfg = (window as unknown as { __WSP__: { wsPort: number; token: string; keys?: { anthropic: boolean }; builder?: GoldenBuilderView } }).__WSP__;
+// builder and checklist: the machine wsp init prepared and the sign-ins chosen for it, when this page was opened by it.
+const cfg = (
+  window as unknown as {
+    __WSP__: { wsPort: number; token: string; keys?: { anthropic: boolean }; builder?: GoldenBuilderView; checklist?: { label: string; command: string }[] };
+  }
+).__WSP__;
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <App
@@ -15,6 +19,7 @@ createRoot(document.getElementById("root")!).render(
       token={cfg.token}
       {...(cfg.keys !== undefined ? { keys: cfg.keys } : {})}
       {...(cfg.builder !== undefined ? { builder: cfg.builder } : {})}
+      {...(cfg.checklist !== undefined ? { checklist: cfg.checklist } : {})}
     />
   </StrictMode>,
 );

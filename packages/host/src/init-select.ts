@@ -21,6 +21,8 @@ export interface SelectItem {
   /** on: always ticked, cannot be unticked. off: never ticked, with the reason shown. */
   lock?: "on" | "off";
   lockReason?: string;
+  /** A row that cycles through answers on space instead of ticking; the first one is the tick. */
+  choices?: readonly { value: string; label: string }[];
 }
 
 export type Entry =
@@ -34,12 +36,19 @@ export interface RungSelectOptions {
   counter: string;
   items: SelectItem[];
   initial: ReadonlySet<string>;
+  /** Current answer per row that has choices. */
+  initialChoices?: ReadonlyMap<string, string>;
   input?: Readable;
   output?: Writable;
   maxVisible?: number;
 }
 
-export type RungSelectResult = { kind: "next"; ticks: Set<string> } | { kind: "back"; ticks: Set<string> } | { kind: "cancel" };
+export interface RungAnswer {
+  ticks: Set<string>;
+  /** Answer per row that has choices. */
+  choices: Map<string, string>;
+}
+export type RungSelectResult = ({ kind: "next" } & RungAnswer) | ({ kind: "back" } & RungAnswer) | { kind: "cancel" };
 
 const DETAIL_LINES = 2;
 const dim = (s: string): string => styleText("dim", s);
@@ -52,7 +61,7 @@ export function matches(item: SelectItem, query: string): boolean {
 export function buildEntries(items: readonly SelectItem[], query: string, folded: ReadonlySet<string>): Entry[] {
   const shown = items.filter(i => matches(i, query));
   const out: Entry[] = [];
-  if (query.trim() === "" && shown.length > 0) out.push({ type: "all" });
+  if (query.trim() === "" && shown.some(tickable)) out.push({ type: "all" });
   let i = 0;
   while (i < shown.length) {
     const item = shown[i]!;
@@ -71,7 +80,7 @@ export function buildEntries(items: readonly SelectItem[], query: string, folded
   return out;
 }
 
-const tickable = (i: SelectItem): boolean => i.lock === undefined;
+const tickable = (i: SelectItem): boolean => i.lock === undefined && i.choices === undefined;
 
 function flipAll(ticks: Set<string>, items: readonly SelectItem[]): void {
   const free = items.filter(tickable);
@@ -110,6 +119,7 @@ class RungPrompt extends Prompt<Set<string>> {
   cursor = 0;
   back = false;
   readonly folded = new Set<string>();
+  readonly choices = new Map<string, string>();
   private lastQuery = "";
 
   constructor(private readonly o: RungSelectOptions) {
@@ -118,6 +128,13 @@ class RungPrompt extends Prompt<Set<string>> {
     for (const i of o.items) {
       if (i.lock === "on") ticks.add(i.id);
       if (i.lock === "off") ticks.delete(i.id);
+      if (i.choices !== undefined) {
+        const first = i.choices[0]?.value;
+        const chosen = o.initialChoices?.get(i.id) ?? first;
+        if (chosen !== undefined) this.choices.set(i.id, chosen);
+        if (chosen === first) ticks.add(i.id);
+        else ticks.delete(i.id);
+      }
     }
     this.value = ticks;
     this.on("cursor", action => this.onCursor(action));
@@ -156,7 +173,8 @@ class RungPrompt extends Prompt<Set<string>> {
         this.cursor = Math.min(Math.max(0, entries.length - 1), this.cursor + 1);
         return;
       case "space":
-        if (at) toggleEntry(this.ticks(), at, this.o.items);
+        if (at?.type === "item" && at.item.choices !== undefined) this.cycle(at.item);
+        else if (at) toggleEntry(this.ticks(), at, this.o.items);
         return;
       case "left": {
         const group = at?.type === "group" ? at.group : at?.type === "item" ? at.item.group : undefined;
@@ -171,6 +189,17 @@ class RungPrompt extends Prompt<Set<string>> {
       default:
         return;
     }
+  }
+
+  /** Next answer for a choice row; the first answer is what the tick means. */
+  private cycle(item: SelectItem): void {
+    const choices = item.choices ?? [];
+    if (item.lock !== undefined || choices.length === 0) return;
+    const at = choices.findIndex(c => c.value === this.choices.get(item.id));
+    const next = choices[(at + 1) % choices.length]!;
+    this.choices.set(item.id, next.value);
+    if (next.value === choices[0]!.value) this.ticks().add(item.id);
+    else this.ticks().delete(item.id);
   }
 
   private row(entry: Entry, current: boolean): string {
@@ -192,6 +221,11 @@ class RungPrompt extends Prompt<Set<string>> {
       case "item": {
         const i = entry.item;
         const indent = i.group !== undefined ? "  " : "";
+        if (i.choices !== undefined) {
+          const chosen = i.choices.find(c => c.value === this.choices.get(i.id))?.label ?? "";
+          const text = `${i.label}  ${chosen}${i.lock === "off" && i.lockReason !== undefined ? `  ${i.lockReason}` : ""}`;
+          return `${mark} ${indent}${current && i.lock === undefined ? text : dim(text)}`;
+        }
         if (i.lock === "on") return `${mark} ${indent}${dim(`${S_CHECKBOX_SELECTED} ${i.label}  always`)}`;
         if (i.lock === "off") return `${mark} ${indent}${dim(`${S_CHECKBOX_INACTIVE} ${i.label}  ${i.lockReason ?? "not brought"}`)}`;
         const label = current ? i.label : dim(i.label);
@@ -220,13 +254,27 @@ class RungPrompt extends Prompt<Set<string>> {
   private frame(): string {
     const title = `${styleText("bold", this.o.title)}  ${dim(this.o.counter)}`;
     const ticks = this.ticks();
+    const withChoices = this.o.items.filter(i => i.choices !== undefined);
     const free = this.o.items.filter(tickable);
     const on = free.filter(i => ticks.has(i.id)).length + this.o.items.filter(i => i.lock === "on").length;
     const of = free.length + this.o.items.filter(i => i.lock === "on").length;
+    const countLine =
+      withChoices.length > 0
+        ? (withChoices[0]!.choices ?? [])
+            .map(c => `${withChoices.filter(i => this.choices.get(i.id) === c.value).length} ${c.label}`)
+            .join(", ")
+        : `${fmtCount(on, of)} ticked`;
 
     if (this.state === "submit" || (this.state === "cancel" && this.back)) {
-      const picked = this.o.items.filter(i => ticks.has(i.id)).map(i => i.label);
-      const line = this.back ? "back" : picked.length === 0 ? "nothing ticked" : `${fmtCount(on, of)}: ${picked.join(", ")}`;
+      const picked = this.o.items.filter(i => ticks.has(i.id) && i.choices === undefined).map(i => i.label);
+      const chosen = withChoices.map(i => `${i.label}: ${i.choices?.find(c => c.value === this.choices.get(i.id))?.label ?? ""}`);
+      const line = this.back
+        ? "back"
+        : withChoices.length > 0
+          ? chosen.join(", ")
+          : picked.length === 0
+            ? "nothing ticked"
+            : `${fmtCount(on, of)}: ${picked.join(", ")}`;
       return `${styleText("green", S_STEP_SUBMIT)}  ${title}\n${dim(S_BAR)}  ${dim(line)}`;
     }
     if (this.state === "cancel") {
@@ -256,8 +304,8 @@ class RungPrompt extends Prompt<Set<string>> {
     lines.push(dim(S_BAR));
     for (const d of this.detail(at)) lines.push(`${dim(S_BAR)}  ${dim(d)}`);
     lines.push(dim(S_BAR));
-    lines.push(`${dim(S_BAR)}  ${dim(`${fmtCount(on, of)} ticked`)}`);
-    lines.push(`${dim(S_BAR_END)}  ${dim("space tick   ← → fold   esc back   enter next")}`);
+    lines.push(`${dim(S_BAR)}  ${dim(countLine)}`);
+    lines.push(`${dim(S_BAR_END)}  ${dim(withChoices.length > 0 ? "space next answer   esc back   enter next" : "space tick   ← → fold   esc back   enter next")}`);
     return lines.join("\n");
   }
 }
@@ -265,9 +313,9 @@ class RungPrompt extends Prompt<Set<string>> {
 export async function rungSelect(o: RungSelectOptions): Promise<RungSelectResult> {
   const prompt = new RungPrompt(o);
   const result = await prompt.prompt();
-  const ticks = prompt.value ?? new Set<string>();
-  if (isCancel(result)) return prompt.back ? { kind: "back", ticks } : { kind: "cancel" };
-  return { kind: "next", ticks };
+  const answer: RungAnswer = { ticks: prompt.value ?? new Set<string>(), choices: prompt.choices };
+  if (isCancel(result)) return prompt.back ? { kind: "back", ...answer } : { kind: "cancel" };
+  return { kind: "next", ...answer };
 }
 
 /** One keypress, by name ("c", "return"); ctrl-c and escape resolve as "cancel". */

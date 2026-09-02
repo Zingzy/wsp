@@ -6,13 +6,16 @@ import { afterEach, describe, expect, it } from "vitest";
 import { GOLDEN_SETUP, GOLDEN_SMOKE } from "../src/doctor.js";
 import {
   RUNGS,
+  checklistFor,
   goldenRecipeFor,
+  initialChoice,
   initialTicks,
   isTickable,
   loadManifest,
   parseManifest,
   recipePath,
   saveRecipe,
+  signInCommand,
   type ManifestEntry,
 } from "../src/init-recipe.js";
 import { FIXTURE, byId } from "./init-fixture.js";
@@ -40,6 +43,29 @@ describe("manifest ticks", () => {
   });
 });
 
+describe("login choices", () => {
+  it("copy when the default is bring, sign in on the machine when it is skip or cannot be copied, and a saved choice wins", () => {
+    expect(initialChoice(byId("logins/gh"))).toBe("copy");
+    expect(initialChoice(byId("logins/claude"))).toBe("machine");
+    expect(initialChoice({ ...byId("logins/gh"), default: "skip", reason: "expires in hours" })).toBe("machine");
+    expect(initialChoice({ ...byId("logins/gh"), choice: "skip" })).toBe("skip");
+    expect(initialChoice({ ...byId("logins/gh"), bring: false })).toBe("machine");
+    expect(initialChoice({ ...byId("logins/claude"), choice: "copy" })).toBe("copy");
+  });
+
+  it("knows the sign-in command of the common logins and says nothing for the rest", () => {
+    expect(signInCommand(byId("logins/gh"))).toBe("gh auth login");
+    expect(signInCommand(byId("logins/claude"))).toBe("claude, then /login");
+    expect(signInCommand({ ...byId("logins/gh"), id: "logins/kube" })).toBeUndefined();
+  });
+
+  it("the checklist is exactly the logins chosen as sign in on the machine", () => {
+    const choices = new Map([["logins/gh", "machine"], ["logins/claude", "skip"]] as const);
+    expect(checklistFor(FIXTURE, choices)).toEqual([{ label: "GitHub CLI login", command: "gh auth login" }]);
+    expect(checklistFor(FIXTURE, new Map([["logins/claude", "machine"]]))).toEqual([{ label: "Claude Code login", command: "claude, then /login" }]);
+  });
+});
+
 describe("parseManifest", () => {
   it("accepts the collector shape and a saved recipe with bring flags", () => {
     expect(parseManifest(JSON.parse(JSON.stringify(FIXTURE)))).toEqual(FIXTURE);
@@ -50,6 +76,7 @@ describe("parseManifest", () => {
   it("names the field that is wrong", () => {
     expect(() => parseManifest({ entries: [{ rung: "kitchen", id: "x", label: "x", paths: [], bytes: 0, default: "bring" }] })).toThrow(/entries\[0\]\.rung/);
     expect(() => parseManifest({ entries: [{ rung: "shell", id: "x", label: "x", paths: [], bytes: "big", default: "bring" }] })).toThrow(/entries\[0\]\.bytes/);
+    expect(() => parseManifest({ entries: [{ ...byId("logins/gh"), choice: "maybe" }] })).toThrow(/entries\[0\]\.choice/);
     expect(() => parseManifest({ items: [] })).toThrow(/entries/);
     expect(() => parseManifest("nope")).toThrow(/object/);
   });
@@ -103,14 +130,21 @@ describe("recipe file", () => {
     const path = recipePath(statePath);
     expect(path).toBe(join(dir, "sub", "golden-recipe.json"));
 
-    saveRecipe(path, FIXTURE, new Set(["identity/git-user", "shell/zshrc", "agents/claude"]));
+    const choices = new Map([["logins/gh", "machine"], ["logins/claude", "copy"]] as const);
+    saveRecipe(path, FIXTURE, new Set(["identity/git-user", "shell/zshrc", "agents/claude", "logins/claude"]), choices);
     const text = readFileSync(path, "utf8");
     expect(text.endsWith("\n")).toBe(true);
     const back = loadManifest(path);
     expect(back.entries).toHaveLength(FIXTURE.entries.length);
-    expect(back.entries.map(e => [e.id, e.bring])).toEqual(FIXTURE.entries.map(e => [e.id, ["identity/git-user", "shell/zshrc", "agents/claude"].includes(e.id)]));
-    // A re-run of the saved file preselects exactly what was ticked.
-    expect(back.entries.filter(initialTicks).map(e => e.id)).toEqual(["identity/git-user", "shell/zshrc", "agents/claude"]);
+    expect(back.entries.map(e => [e.id, e.bring])).toEqual(
+      FIXTURE.entries.map(e => [e.id, ["identity/git-user", "shell/zshrc", "agents/claude", "logins/claude"].includes(e.id)]),
+    );
+    expect(back.entries.find(e => e.id === "logins/gh")?.choice).toBe("machine");
+    expect(back.entries.find(e => e.id === "logins/claude")?.choice).toBe("copy");
+    expect(back.entries.find(e => e.id === "shell/zshrc")).not.toHaveProperty("choice");
+    // A re-run of the saved file preselects exactly what was ticked and chosen.
+    expect(back.entries.filter(initialTicks).map(e => e.id)).toEqual(["identity/git-user", "shell/zshrc", "agents/claude", "logins/claude"]);
+    expect(back.entries.filter(e => e.rung === "logins").map(initialChoice)).toEqual(["machine", "copy"]);
   });
 
   it("loadManifest reports the path on a bad file", () => {

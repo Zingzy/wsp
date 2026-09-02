@@ -114,7 +114,7 @@ describe("rungSelect", () => {
     const p = rungSelect({ title: "Shell", counter: "2/7", items: ITEMS, initial: new Set(["zshrc"]), input, output });
     await press(input, KEY.down, KEY.down, KEY.down, KEY.space, KEY.esc);
     const result = await p;
-    expect(result).toEqual({ kind: "back", ticks: new Set(["git", "gh", "zshrc"]) });
+    expect(result).toEqual({ kind: "back", ticks: new Set(["git", "gh", "zshrc"]), choices: new Map() });
   });
 
   it("ctrl-c cancels", async () => {
@@ -122,6 +122,43 @@ describe("rungSelect", () => {
     const p = rungSelect({ title: "Shell", counter: "2/7", items: ITEMS, initial: new Set(), input, output });
     await press(input, KEY.ctrlC);
     expect(await p).toEqual({ kind: "cancel" });
+  });
+
+  it("a row with choices cycles them on space, has no all row, and reports the choice; copy counts as a tick", async () => {
+    const CHOICES = [
+      { value: "copy", label: "copy from this computer" },
+      { value: "machine", label: "sign in on the machine" },
+      { value: "skip", label: "skip" },
+    ];
+    const items: SelectItem[] = [
+      { id: "gh", label: "GitHub CLI login", detail: ["~/.config/gh/hosts.yml"], choices: CHOICES },
+      { id: "claude", label: "Claude Code login", detail: ["Keychain"], choices: CHOICES },
+    ];
+    const { input, output, text, clear } = streams();
+    const p = rungSelect({
+      title: "Sign-ins",
+      counter: "7/7",
+      items,
+      initial: new Set(["gh"]),
+      initialChoices: new Map([["gh", "copy"], ["claude", "machine"]]),
+      input,
+      output,
+    });
+    await settle();
+    expect(text()).not.toContain("all ");
+    expect(text()).toContain("copy from this computer");
+    expect(text()).toContain("sign in on the machine");
+    clear();
+    await press(input, KEY.space);
+    expect(text()).toContain("GitHub CLI login  sign in on the machine");
+    await press(input, KEY.space);
+    await press(input, KEY.space);
+    await press(input, KEY.down, KEY.space, KEY.enter);
+    const result = await p;
+    expect(result.kind).toBe("next");
+    if (result.kind !== "next") return;
+    expect(result.choices).toEqual(new Map([["gh", "copy"], ["claude", "skip"]]));
+    expect([...result.ticks]).toEqual(["gh"]);
   });
 
   it("left folds the group under the cursor and right unfolds it", async () => {

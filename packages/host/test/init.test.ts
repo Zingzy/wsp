@@ -31,6 +31,8 @@ interface Fake {
   copied: string[];
   backends: StubBackend[];
   recipes: GoldenRecipe[];
+  runtimes: Runtime[];
+  checklists: { label: string; command: string }[][];
   hosts: number;
 }
 
@@ -45,6 +47,8 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
   const copied: string[] = [];
   const backends: StubBackend[] = [];
   const recipes: GoldenRecipe[] = [];
+  const runtimes: Runtime[] = [];
+  const checklists: { label: string; command: string }[][] = [];
   const counters = { hosts: 0 };
   const io: InitIO = {
     input,
@@ -72,11 +76,14 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
       recipes.push(recipe);
       const backend = stubBackend();
       backends.push(backend);
-      return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+      runtimes.push(rt);
+      return rt;
     },
-    host: async (rt: Runtime, builder) => {
+    host: async (rt: Runtime, builder, checklist) => {
       counters.hosts += 1;
       expect(builder.id).toBe(backends.at(-1)?.machines[0]?.id);
+      checklists.push(checklist);
       void rt;
       const handle: HostHandle = { port: 4400, wsPort: 4410, authToken: "tok", close: async () => {} };
       return handle;
@@ -110,6 +117,8 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
     copied,
     backends,
     recipes,
+    runtimes,
+    checklists,
     get hosts() {
       return counters.hosts;
     },
@@ -129,8 +138,10 @@ describe("wsp init, interactive", () => {
     await f.until("Identity");
     const first = f.text();
     // Screen one is the detection result, before any question.
-    expect(first).toContain("15 things found on this machine");
-    expect(first.indexOf("What this machine has")).toBeLessThan(first.indexOf("1/7"));
+    expect(first).toContain("Found on this computer");
+    expect(first).toContain("Tools          4  3 can come");
+    expect(first).toContain("Nothing has left this computer.");
+    expect(first.indexOf("Found on this computer")).toBeLessThan(first.indexOf("1/7"));
     expect(first).toContain("1/7");
     expect(first).not.toMatch(/claude|codex/i);
     await f.press(KEY.enter);
@@ -147,14 +158,19 @@ describe("wsp init, interactive", () => {
     expect(f.text()).toContain("Claude Code");
     await f.press(KEY.enter);
     await f.until("Sign-ins");
-    expect(f.text()).toContain("sign in on the machine");
-    await f.press(KEY.enter);
+    expect(f.text()).toContain("GitHub CLI login  copy from this computer");
+    expect(f.text()).toContain("Claude Code login  sign in on the machine");
+    // gh: copy -> sign in on the machine.
+    await f.press(KEY.space, KEY.enter);
 
     await f.until("Boot a machine");
     const summary = f.text().slice(f.text().lastIndexOf("Summary"));
     expect(summary).toContain("Identity");
     expect(summary).toContain("~/.ssh/config");
     expect(summary).not.toContain("id_ed25519");
+    expect(summary).toContain("Upload");
+    expect(summary).toContain("Nothing has left this computer yet.");
+    expect(summary).toContain("Sign in on the machine: GitHub CLI login, Claude Code login");
     expect(f.backends).toHaveLength(0);
     await f.press("y");
 
@@ -165,7 +181,7 @@ describe("wsp init, interactive", () => {
     expect(result.handle?.port).toBe(4400);
 
     const out = f.text();
-    const order = ["Machine booted", "Workspace daemon running", "Setup finished", "Machine ready"].map(s => out.indexOf(s));
+    const order = ["Machine created", "Base installed", "Agents installed", "Ready"].map(s => out.indexOf(s));
     expect(order.every(i => i >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(out).toContain("node v22.12.0");
@@ -184,9 +200,22 @@ describe("wsp init, interactive", () => {
     const bring = saved.entries.filter(e => e.bring).map(e => e.id);
     expect(bring).toEqual([
       "identity/git-user", "identity/ssh-config", "shell/zshrc", "shell/starship", "editors/nvim", "toolchains/mise",
-      "tools/brew/gh", "tools/brew/jq", "tools/npm/pnpm", "agents/claude", "logins/gh",
+      "tools/brew/gh", "tools/brew/jq", "tools/npm/pnpm", "agents/claude",
     ]);
+    expect(saved.entries.filter(e => e.rung === "logins").map(e => e.choice)).toEqual(["machine", "machine"]);
     expect(out).toContain("golden-recipe.json");
+    expect(f.checklists[0]).toEqual([
+      { label: "GitHub CLI login", command: "gh auth login" },
+      { label: "Claude Code login", command: "claude, then /login" },
+    ]);
+
+    // The terminal keeps reporting after the hand-off: the seal stages arrive as the browser drives them.
+    const rt = f.runtimes[0]!;
+    await rt.golden.seal(f.backends[0]!.machines[0]!.id);
+    await f.until("Sealed");
+    const after = f.text().slice(out.length);
+    expect(after.indexOf("Snapshot taken")).toBeLessThan(after.indexOf("Fork booted and checked"));
+    expect(after).toContain("Golden v1 sealed");
   });
 
   it("escape on a later rung replays the earlier answer; c copies the address at the hand-off", async () => {
@@ -235,6 +264,24 @@ describe("wsp init, interactive", () => {
     expect(f.hosts).toBe(0);
   });
 
+  it("a prepare that fails after the hand-off never happened is reported once, and a failed seal after it is reported too", async () => {
+    const f = fake({ yes: true });
+    f.opts.runtime = recipe => {
+      const backend = stubBackend();
+      f.backends.push(backend);
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
+      f.runtimes.push(rt);
+      return rt;
+    };
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(0);
+    const rt = f.runtimes[0]!;
+    f.backends[0]!.execImpl = () => ({ exitCode: 3, stdout: "", stderr: "claude: not found" });
+    await rt.golden.seal(f.backends[0]!.machines[0]!.id).catch(() => {});
+    await f.until("Seal failed");
+    expect(f.text()).toContain("Run wsp init again");
+  });
+
   it("nothing found on this machine still shows the screens' empty state and reaches the confirm", async () => {
     const f = fake({ collect: async () => ({ entries: [] }) });
     const run = runInit(f.opts, f.io);
@@ -247,13 +294,14 @@ describe("wsp init, interactive", () => {
 });
 
 describe("wsp init, flags and no terminal", () => {
-  it("without a terminal and without --yes it refuses before touching anything", async () => {
+  it("without a terminal it behaves as --yes: defaults taken, nothing asked, the address printed", async () => {
     const f = fake({ tty: false });
     const result = await runInit(f.opts, f.io);
-    expect(result.code).toBe(1);
-    expect(f.text()).toContain("--yes");
-    expect(f.backends).toHaveLength(0);
-    expect(f.hosts).toBe(0);
+    expect(result.code).toBe(0);
+    expect(f.text()).toContain("taken as yes");
+    expect(f.text()).toMatch(URL_RE);
+    expect(f.backends[0]!.machines).toHaveLength(1);
+    expect(f.opened).toEqual([]);
   });
 
   it("--yes with --manifest takes the file's ticks, asks nothing, prints the address and never opens a browser", async () => {
@@ -267,7 +315,7 @@ describe("wsp init, flags and no terminal", () => {
     expect(result.code).toBe(0);
     const out = f.text();
     expect(out).toMatch(URL_RE);
-    expect(out).toContain("Machine ready");
+    expect(out).toContain("Ready");
     expect(f.opened).toEqual([]);
     expect(f.copied).toEqual([]);
     // No agent ticked: the setup installs nothing and names nothing.
@@ -320,7 +368,7 @@ describe("wsp init, flags and no terminal", () => {
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(1);
     expect(f.hosts).toBe(0);
-    expect(f.text()).toMatch(/Setup failed/);
+    expect(f.text()).toMatch(/Installing agents failed/);
     expect(f.text()).toContain("no route");
   });
 });
@@ -336,7 +384,7 @@ describe("stage stream", () => {
       ["installing-harness", "current"],
       ["ready", "pending"],
     ]);
-    expect(view.steps[0]).toMatchObject({ start: "Booting a fresh machine", end: "Machine booted", tail: ["sandbox from default"] });
+    expect(view.steps[0]).toMatchObject({ start: "Creating the machine", end: "Machine created", tail: ["sandbox from default"] });
     expect(view.steps[1]!.tail).toEqual(["node v22"]);
     expect(view.failure).toBeUndefined();
   });

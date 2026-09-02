@@ -95,10 +95,15 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-async function mount(opts: Parameters<typeof fixture>[0] = {}, keys?: { anthropic: boolean }, handed?: GoldenBuilderView) {
+async function mount(
+  opts: Parameters<typeof fixture>[0] = {},
+  keys?: { anthropic: boolean },
+  handed?: GoldenBuilderView,
+  checklist?: { label: string; command: string }[],
+) {
   const f = fixture(opts);
   useStore.getState().bind(f.api);
-  render(<Shell keys={keys} builder={handed} />);
+  render(<Shell keys={keys} builder={handed} checklist={checklist} />);
   await waitFor(() => expect(f.api.getGolden).toHaveBeenCalled());
   return f;
 }
@@ -154,6 +159,19 @@ describe("wizard steps follow the wire", () => {
       rmSync(inboxDir, { recursive: true, force: true });
     }
   }, 20_000);
+
+  it("the checklist lists only the sign-ins chosen for the machine, each with its command", async () => {
+    await mount({}, undefined, builder, [{ label: "GitHub CLI login", command: "gh auth login" }]);
+    await waitFor(() => expect(screen.getByTestId("step").textContent).toBe("hero"));
+    const rows = screen.getAllByRole("checkbox").map(c => c.parentElement?.textContent);
+    expect(rows).toEqual(["GitHub CLI login: gh auth login"]);
+  });
+
+  it("with no checklist handed over the hero keeps the generic one", async () => {
+    await mount({}, undefined, builder);
+    await waitFor(() => expect(screen.getByTestId("step").textContent).toBe("hero"));
+    expect(screen.getAllByRole("checkbox").length).toBeGreaterThan(1);
+  });
 
   it("the hero step says an idle builder is killed after six hours, in one line", async () => {
     await mount({}, undefined, builder);

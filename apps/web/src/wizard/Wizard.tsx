@@ -21,6 +21,12 @@ export interface KeyFlags {
   anthropic: boolean;
 }
 
+/** One sign-in the person chose to do on the machine, with the command that starts it. */
+export interface ChecklistItem {
+  label: string;
+  command: string;
+}
+
 const STEP_WORD: Record<Step, string> = {
   none: "terminal",
   hero: "set up",
@@ -45,7 +51,17 @@ const FIRST_WORKSPACE = "first";
 /** The golden wsp init builds; stage frames for any other name belong to someone else's build. */
 const GOLDEN_NAME = "default";
 
-export function Wizard({ keys, builder, onDone }: { keys?: KeyFlags; builder?: GoldenBuilderView; onDone: () => void }) {
+export function Wizard({
+  keys,
+  builder,
+  checklist,
+  onDone,
+}: {
+  keys?: KeyFlags;
+  builder?: GoldenBuilderView;
+  checklist?: ChecklistItem[];
+  onDone: () => void;
+}) {
   const api = useStore(s => s.api);
   const select = useStore(s => s.select);
   const [state, dispatch] = useReducer(reduce, builder, initial);
@@ -98,7 +114,7 @@ export function Wizard({ keys, builder, onDone }: { keys?: KeyFlags; builder?: G
         </span>
       </header>
       {state.step === "none" && <NoBuilder />}
-      {state.step === "hero" && state.builder && <Hero builder={state.builder} keys={keys} onSeal={seal} />}
+      {state.step === "hero" && state.builder && <Hero builder={state.builder} keys={keys} checklist={checklist} onSeal={seal} />}
       {state.step === "sealing" && <Stages title="Saving your golden image" list={SEAL_STAGES} seen={state.seen} detail={state.detail} />}
       {state.step === "done" && <Landing />}
       {state.step === "failed" && <Failed detail={state.detail ?? ""} />}
@@ -169,12 +185,13 @@ function useBuilderTerminals(api: Api | null, builderId: string, wanted: boolean
   }, [api, builderId, wanted]);
 }
 
-function Hero({ builder, keys, onSeal }: { builder: GoldenBuilderView; keys?: KeyFlags; onSeal: () => void }) {
+function Hero({ builder, keys, checklist, onSeal }: { builder: GoldenBuilderView; keys?: KeyFlags; checklist?: ChecklistItem[]; onSeal: () => void }) {
   const api = useStore(s => s.api);
   const streamUrl = builder.screen?.streamUrl;
   useBuilderTerminals(api, builder.id, streamUrl === undefined);
-  const [ticked, setTicked] = useState<boolean[]>(() => CHECKLIST.map(() => false));
-  const items = keys?.anthropic ? CHECKLIST.slice(1) : CHECKLIST;
+  // wsp init hands over exactly the sign-ins chosen for the machine; without it, the generic list.
+  const items = checklist !== undefined ? checklist.map(c => `${c.label}: ${c.command}`) : keys?.anthropic ? CHECKLIST.slice(1) : CHECKLIST;
+  const [ticked, setTicked] = useState<boolean[]>(() => items.map(() => false));
   return (
     <section className={styles.hero}>
       <div className={styles.screen}>
