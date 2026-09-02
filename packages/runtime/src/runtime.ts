@@ -283,6 +283,8 @@ export interface Runtime {
   /** Enriched status (machine state, daemon reach, size, rate) + cost ticker. */
   readonly status: StatusApi;
   reap(olderThanMs?: number): Promise<string[]>;
+  /** Writes every transcript still waiting on its debounce; the store is complete once this resolves. */
+  close(): Promise<void>;
 }
 
 const WORKSPACES = "workspaces";
@@ -294,6 +296,9 @@ const DAEMON_TOKEN_PATH = "/root/.wsp-daemon-token";
 const DAEMON_TOKEN_MISS_TTL_MS = 60_000;
 /** Events kept per workspace; the oldest fall off so one chatty workspace cannot grow the store forever. */
 const TRANSCRIPT_CAP = 5000;
+/** A turn boundary waits this long for more before the transcript is written; measured at one put per
+ * event, 5000 events cost 4 s of memory-store clones and 6.6 s of file rewrites after the last turn. */
+const TRANSCRIPT_FLUSH_MS = 250;
 
 interface TranscriptRecord {
   workspaceId: string;
@@ -376,9 +381,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const builders = new Map<string, LiveBuilder>();
   const sessions = new Map<string, { view: SessionView; handle: SessionHandle }>();
   const transcripts = new Map<string, SessionEvent[]>();
-  // done and end arrive back to back; puts are chained per workspace so the
-  // later snapshot always lands last, whatever order the store finishes in.
+  // Puts are chained per workspace so the later snapshot always lands last,
+  // whatever order the store finishes in.
   const transcriptFlushes = new Map<string, Promise<void>>();
+  const transcriptTimers = new Map<string, NodeJS.Timeout>();
   // Keyed by machine id: a resurrect or upgrade brings a fresh guest and file.
   const daemonTokens = new Map<string, { token: string | undefined; readAt: number }>();
   const daemonTokenOf = async (machine: Machine): Promise<string | undefined> => {
@@ -390,9 +396,29 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return token;
   };
 
+  const cancelFlush = (workspaceId: string): void => {
+    clearTimeout(transcriptTimers.get(workspaceId));
+    transcriptTimers.delete(workspaceId);
+  };
+
+  // The copy is taken here, not per event: a store may serialise after it
+  // returns, and the live array keeps moving under it.
+  const flushTranscript = (workspaceId: string): Promise<void> => {
+    cancelFlush(workspaceId);
+    const events = transcripts.get(workspaceId);
+    if (!events) return transcriptFlushes.get(workspaceId) ?? Promise.resolve();
+    const snapshot: TranscriptRecord = { workspaceId, events: [...events] };
+    const queued = (transcriptFlushes.get(workspaceId) ?? Promise.resolve())
+      .then(() => store.put(TRANSCRIPTS, workspaceId, snapshot))
+      .catch(() => {});
+    transcriptFlushes.set(workspaceId, queued);
+    return queued;
+  };
+
   // Deltas are only appended in memory; the store sees the transcript at turn
   // boundaries, so a crash mid-turn loses that turn's partial output and
-  // nothing else.
+  // nothing else. A session's end is written at once, anything before it waits
+  // for the debounce.
   const record = (event: SessionEvent): void => {
     let events = transcripts.get(event.workspaceId);
     if (!events) {
@@ -401,12 +427,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
     events.push(event);
     if (events.length > TRANSCRIPT_CAP) events.splice(0, events.length - TRANSCRIPT_CAP);
-    if (event.type !== "session.delta") {
-      const snapshot: TranscriptRecord = { workspaceId: event.workspaceId, events: [...events] };
-      const queued = (transcriptFlushes.get(event.workspaceId) ?? Promise.resolve())
-        .then(() => store.put(TRANSCRIPTS, event.workspaceId, snapshot))
-        .catch(() => {});
-      transcriptFlushes.set(event.workspaceId, queued);
+    if (event.type === "session.end") void flushTranscript(event.workspaceId);
+    else if (event.type !== "session.delta" && !transcriptTimers.has(event.workspaceId)) {
+      transcriptTimers.set(event.workspaceId, setTimeout(() => void flushTranscript(event.workspaceId), TRANSCRIPT_FLUSH_MS));
     }
     bus.emit(event);
   };
@@ -711,6 +734,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       });
       live.delete(id);
       transcripts.delete(id);
+      cancelFlush(id);
+      await transcriptFlushes.get(id);
+      transcriptFlushes.delete(id);
       await store.delete(WORKSPACES, id);
       await store.delete(TRANSCRIPTS, id);
       await store.deleteBlob(VAULTS, id);
@@ -995,6 +1021,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(olderThanMs !== undefined ? { olderThanMs } : {}),
       });
       return reaped.concat(swept.filter(id => !reaped.includes(id)));
+    },
+    close: async () => {
+      for (const id of [...transcriptTimers.keys()]) void flushTranscript(id);
+      await Promise.all(transcriptFlushes.values());
     },
   };
 }

@@ -156,30 +156,116 @@ describe("runtime session history", () => {
     expect(await store.list("transcripts")).toEqual([]);
   });
 
-  it("persists turn boundaries in order even when an earlier put finishes last", async () => {
+  /** An adapter the test drives by hand, so turn boundaries can arrive without a session.end behind them. */
+  const manual = () => {
+    const sessionId = "33333333-3333-4333-8333-333333333333";
+    let onEvent: ((e: AdapterEvent) => void) | undefined;
+    let finish!: (r: TurnResult) => void;
+    const finished = new Promise<TurnResult>(r => (finish = r));
+    const adapter: HarnessAdapterFactory = () => ({
+      start: o => {
+        onEvent = o.onEvent;
+        return { localId: sessionId, claudeSessionId: sessionId, finished };
+      },
+    });
+    return {
+      adapter,
+      start: () => onEvent!({ type: "session.start", sessionId, model: "claude-sonnet-4-5" }),
+      done: (text: string) => onEvent!({ type: "turn.done", sessionId, result: { status: "completed", text } }),
+      end: () => {
+        onEvent!({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+        finish({ status: "completed", text: "" });
+      },
+    };
+  };
+
+  /** memoryStore that counts transcript puts and can hold the first one open until the test lets go. */
+  const countingStore = () => {
     const inner = memoryStore();
     let puts = 0;
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>(r => (release = r));
+    let holdFirst = false;
     const store = {
       ...inner,
       put: async (collection: string, id: string, value: unknown) => {
-        // the first transcript write is slow, the ones behind it are instant
-        const delay = collection === "transcripts" && puts++ === 0 ? 40 : 0;
-        await new Promise(r => setTimeout(r, delay));
+        if (collection === "transcripts" && puts++ === 0 && holdFirst) await gate;
         await inner.put(collection, id, value);
       },
     };
+    const stored = async (id: string) => ((await inner.get("transcripts", id)) as { events: { type: string; prompt?: string }[] } | undefined)?.events ?? [];
+    return { store, stored, puts: () => puts, holdFirstPut: () => (holdFirst = true), releaseFirstPut: () => release!() };
+  };
+  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+  const until = async (cond: () => Promise<boolean>, ms: number) => {
+    const deadline = Date.now() + ms;
+    while (!(await cond()) && Date.now() < deadline) await sleep(5);
+    return cond();
+  };
+
+  it("coalesces a burst of turn boundaries into one put after the debounce instead of one per event", async () => {
+    const { store, stored, puts } = countingStore();
+    const m = manual();
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: m.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await rt.sessions.start(ws.id, { prompt: "go" });
+    m.start();
+    for (let i = 0; i < 20; i++) m.done(`t${i}`);
+    await sleep(50);
+    expect(puts()).toBe(0);
+    await sleep(400);
+    expect(puts()).toBe(1);
+    expect((await stored(ws.id)).length).toBe(21);
+    m.end();
+    await rt.close();
+  });
+
+  it("session.end lands in the store at once, without waiting out the debounce", async () => {
+    const { store, stored, puts } = countingStore();
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: scripted("x") } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
-    // The chain drains on its own clock; poll for it instead of guessing a sleep.
-    const read = async () => ((await inner.get("transcripts", ws.id)) as { events: { type: string }[] } | undefined)?.events ?? [];
-    const deadline = Date.now() + 2000;
-    while ((await read()).length < 4 && Date.now() < deadline) await new Promise(r => setTimeout(r, 10));
-    expect((await read()).map(e => e.type)).toEqual(["session.start", "session.delta", "session.done", "session.end"]);
+    expect(await until(async () => (await stored(ws.id)).length === 4, 100)).toBe(true);
+    expect((await stored(ws.id)).map(e => e.type)).toEqual(["session.start", "session.delta", "session.done", "session.end"]);
+    expect(puts()).toBe(1);
+  });
+
+  it("close() writes what is still waiting on the debounce and leaves no timer behind", async () => {
+    const { store, stored, puts } = countingStore();
+    const m = manual();
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: m.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await rt.sessions.start(ws.id, { prompt: "go" });
+    m.start();
+    m.done("t0");
+    await rt.close();
+    expect(puts()).toBe(1);
+    expect((await stored(ws.id)).map(e => e.type)).toEqual(["session.start", "session.done"]);
+    await sleep(400);
+    expect(puts()).toBe(1);
+  });
+
+  it("persists flushes in order even when an earlier put finishes last", async () => {
+    const { store, stored, puts, holdFirstPut, releaseFirstPut } = countingStore();
+    holdFirstPut();
+    const m = manual();
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: m.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await rt.sessions.start(ws.id, { prompt: "go" });
+    m.start();
+    m.done("t0");
+    // the debounce fires and the first put stalls in the store; the end flush queues behind it
+    expect(await until(async () => puts() === 1, 1000)).toBe(true);
+    m.end();
+    await sleep(20);
+    expect(await stored(ws.id)).toEqual([]);
+    releaseFirstPut();
+    await rt.close();
+    expect((await stored(ws.id)).map(e => e.type)).toEqual(["session.start", "session.done", "session.end"]);
   });
 
   it("caps the persisted transcript so a chatty workspace cannot grow the store without bound", { timeout: 20_000 }, async () => {
-    const store = memoryStore();
+    const { store, stored } = countingStore();
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: scripted("x") } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     for (let i = 0; i < 1300; i++) await (await rt.sessions.start(ws.id, { prompt: `t${i}` })).finished;
@@ -188,10 +274,11 @@ describe("runtime session history", () => {
     expect(history[history.length - 1]).toMatchObject({ type: "session.end" });
     expect(history.some(e => e.type === "session.start" && e.prompt === "t1299")).toBe(true);
     expect(history.some(e => e.type === "session.start" && e.prompt === "t0")).toBe(false);
-    // Thousands of queued snapshot puts drain after the turns finish; left running
-    // they starve the timers of whatever test comes next, so wait them out here.
-    const stored = async () => ((await store.get("transcripts", ws.id)) as { events: { type: string; prompt?: string }[] } | undefined)?.events ?? [];
-    while (!(await stored()).some(e => e.type === "session.start" && e.prompt === "t1299")) await new Promise(r => setTimeout(r, 10));
+    // close() waits the put chain out, so nothing drains into the next test's clock.
+    await rt.close();
+    const persisted = await stored(ws.id);
+    expect(persisted.length).toBeLessThanOrEqual(5000);
+    expect(persisted.some(e => e.type === "session.start" && e.prompt === "t1299")).toBe(true);
   });
 });
 
