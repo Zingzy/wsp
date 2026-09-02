@@ -95,6 +95,11 @@ export const SessionView = z.object({
   harness: z.string(),
   status: SessionStatus,
   claudeSessionId: z.string().optional(),
+  /** The user's turn that started this session. */
+  prompt: z.string().optional(),
+  /** Ms epoch, runtime clock; endedAt is unset while the session runs. */
+  startedAt: z.number().optional(),
+  endedAt: z.number().optional(),
 });
 export type SessionView = z.infer<typeof SessionView>;
 
@@ -116,7 +121,23 @@ export const TurnResult = z.object({
 });
 export type TurnResult = z.infer<typeof TurnResult>;
 
-const sessionScope = { workspaceId: z.string(), sessionId: z.string() };
+const sessionScope = {
+  workspaceId: z.string(),
+  sessionId: z.string(),
+  /** Ms epoch from the runtime clock when it recorded the event; the adapter has no clock of its own. */
+  at: z.number().optional(),
+  /** Minted by the runtime per sessions.start. The Claude session id repeats across --resume, so it
+   * cannot split a transcript into turns; this can. */
+  turnId: z.string().optional(),
+};
+
+/** What the CLI announces about itself in system/init, beyond model and tools. */
+export const SessionHarness = z.object({
+  slashCommands: z.array(z.string()).optional(),
+  permissionMode: z.string().optional(),
+  agents: z.array(z.string()).optional(),
+});
+export type SessionHarness = z.infer<typeof SessionHarness>;
 
 export const SessionStartEvent = z.object({
   type: z.literal("session.start"),
@@ -126,6 +147,7 @@ export const SessionStartEvent = z.object({
   model: z.string().optional(),
   cwd: z.string().optional(),
   tools: z.array(z.string()).optional(),
+  harness: SessionHarness.optional(),
 });
 
 export const SessionDeltaEvent = z.object({
@@ -194,6 +216,8 @@ export const PortOpenEvent = z.object({
   workspaceId: z.string(),
   port: z.number(),
   pid: z.number().optional(),
+  /** The listener's /proc/<pid>/comm; absent when the pid or its comm is unreadable. */
+  process: z.string().optional(),
 });
 export const PortCloseEvent = z.object({ type: z.literal("port.close"), workspaceId: z.string(), port: z.number() });
 export const InboxFileEvent = z.object({
@@ -332,7 +356,7 @@ export const DaemonEvent = z.discriminatedUnion("type", [
     exitCode: z.number(),
     signal: z.number().optional(),
   }),
-  z.object({ type: z.literal("port.open"), port: z.number(), pid: z.number().optional() }),
+  z.object({ type: z.literal("port.open"), port: z.number(), pid: z.number().optional(), process: z.string().optional() }),
   z.object({ type: z.literal("port.close"), port: z.number() }),
   z.object({ type: z.literal("inbox.file"), path: z.string(), bytes: z.number() }),
   /** Broadcast on pty.attach (current state) and afterwards only on change.

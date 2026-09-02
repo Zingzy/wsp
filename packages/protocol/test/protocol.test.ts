@@ -121,6 +121,60 @@ describe("protocol event union", () => {
   });
 });
 
+describe("session wire fields the face reads", () => {
+  it("every session event may carry at (ms epoch) and turnId; both survive a JSON round trip", () => {
+    const scope = { workspaceId: "ws_1", sessionId: "s1", at: 1756687889412, turnId: "turn_0001" };
+    const events = [
+      { type: "session.start", ...scope, prompt: "hello" },
+      { type: "session.delta", ...scope, kind: "text", text: "hi" },
+      { type: "session.done", ...scope, result: { status: "completed" } },
+      { type: "session.end", ...scope, exitCode: 0, sawResult: true },
+    ];
+    for (const e of events) {
+      expect(SessionEvent.parse(e)).toEqual(e);
+      expect(EventUnion.parse(JSON.parse(JSON.stringify(e)))).toEqual(e);
+    }
+    expect(() => SessionEvent.parse({ ...events[0], at: "2026-09-01T00:00:00Z" })).toThrow();
+    expect(() => SessionEvent.parse({ ...events[0], turnId: 7 })).toThrow();
+  });
+
+  it("session.start carries the harness catalog from system/init", () => {
+    const started = {
+      type: "session.start",
+      workspaceId: "ws_1",
+      sessionId: "s1",
+      harness: { slashCommands: ["compact", "review"], permissionMode: "bypassPermissions", agents: ["general-purpose"] },
+    };
+    expect(SessionEvent.parse(started)).toEqual(started);
+    const partial = { ...started, harness: { permissionMode: "default" } };
+    expect(SessionEvent.parse(partial)).toEqual(partial);
+    expect(() => SessionEvent.parse({ ...started, harness: { slashCommands: "compact" } })).toThrow();
+  });
+
+  it("SessionView carries prompt, startedAt and endedAt so the sidebar can title and sort threads", () => {
+    const running = {
+      id: "0b6a9c1e-0000-4000-8000-000000000000",
+      workspaceId: "ws_1",
+      harness: "claude",
+      status: "running",
+      prompt: "fix the flaky test",
+      startedAt: 1756687889412,
+    };
+    expect(SessionView.parse(running)).toEqual(running);
+    const ended = { ...running, status: "completed", endedAt: 1756687899870 };
+    expect(SessionView.parse(ended)).toEqual(ended);
+    expect(() => SessionView.parse({ ...running, startedAt: "soon" })).toThrow();
+  });
+
+  it("port.open names the listening process on both the daemon and runtime wires", () => {
+    const daemonSide = { type: "port.open", port: 8080, pid: 123, process: "node" };
+    expect(DaemonEvent.parse(daemonSide)).toEqual(daemonSide);
+    const runtimeSide = { ...daemonSide, workspaceId: "ws_1" };
+    expect(EventUnion.parse(runtimeSide)).toEqual(runtimeSide);
+    expect(() => DaemonEvent.parse({ ...daemonSide, process: 1 })).toThrow();
+  });
+});
+
 describe("daemon wire types (one home for the ops from @wsp/daemon)", () => {
   it("parses requests, responses, and push events", () => {
     const reqs = [
