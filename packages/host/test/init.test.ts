@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
+import { RUNGS } from "@wsp/collect";
 import { createRuntime, memoryStore, type GoldenRecipe, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { GOLDEN_SETUP } from "../src/doctor.js";
@@ -280,6 +281,28 @@ describe("wsp init, interactive", () => {
     await rt.golden.seal(f.backends[0]!.machines[0]!.id).catch(() => {});
     await f.until("Seal failed");
     expect(f.text()).toContain("Run wsp init again");
+  });
+
+  it("the detect spinner counts each rung as the collector finishes it, before the found note", async () => {
+    const f = fake({
+      collect: async onRung => {
+        for (const rung of RUNGS) onRung(rung, FIXTURE.entries.filter(e => e.rung === rung).length);
+        return FIXTURE;
+      },
+    });
+    const run = runInit(f.opts, f.io);
+    await f.until("1/7");
+    const t = f.text();
+    expect(t).toContain("Reading this computer  Identity 3");
+    expect(t).toContain("Reading this computer  Identity 3, Shell 2, Editors 1, Toolchains 1, Tools 4, Agents 2, Sign-ins 2");
+    expect(t.indexOf("Sign-ins 2")).toBeLessThan(t.indexOf("Found on this computer"));
+    for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
+      await f.until(rung);
+      await f.press(KEY.enter);
+    }
+    await f.until("Boot a machine");
+    await f.press("n");
+    expect((await run).code).toBe(1);
   });
 
   it("nothing found on this machine still shows the screens' empty state and reaches the confirm", async () => {

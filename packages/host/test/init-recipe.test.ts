@@ -1,32 +1,26 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { type ManifestEntry, parseManifest } from "@wsp/collect";
 import { afterEach, describe, expect, it } from "vitest";
 import { GOLDEN_SETUP, GOLDEN_SMOKE } from "../src/doctor.js";
 import {
-  RUNGS,
   checklistFor,
   goldenRecipeFor,
   initialChoice,
   initialTicks,
   isTickable,
   loadManifest,
-  parseManifest,
   recipePath,
   saveRecipe,
   signInCommand,
-  type ManifestEntry,
 } from "../src/init-recipe.js";
 import { FIXTURE, byId } from "./init-fixture.js";
 
 const ANTHROPIC = "sk-ant-x-fake-anthropic-key";
 
 describe("manifest ticks", () => {
-  it("lists the seven rungs in ladder order", () => {
-    expect(RUNGS).toEqual(["identity", "shell", "editors", "toolchains", "tools", "agents", "logins"]);
-  });
-
   it("a skip with a reason cannot be ticked; a bare skip can", () => {
     expect(isTickable(byId("identity/ssh-key"))).toBe(false);
     expect(isTickable(byId("agents/codex"))).toBe(true);
@@ -73,10 +67,12 @@ describe("parseManifest", () => {
     expect(parseManifest(saved).entries[0]).toMatchObject({ id: "shell/zshrc", bring: false });
   });
 
-  it("names the field that is wrong", () => {
-    expect(() => parseManifest({ entries: [{ rung: "kitchen", id: "x", label: "x", paths: [], bytes: 0, default: "bring" }] })).toThrow(/entries\[0\]\.rung/);
-    expect(() => parseManifest({ entries: [{ rung: "shell", id: "x", label: "x", paths: [], bytes: "big", default: "bring" }] })).toThrow(/entries\[0\]\.bytes/);
-    expect(() => parseManifest({ entries: [{ ...byId("logins/gh"), choice: "maybe" }] })).toThrow(/entries\[0\]\.choice/);
+  it("names the row and field that is wrong, in the collector's words", () => {
+    expect(() => parseManifest({ entries: [{ rung: "kitchen", id: "kitchen/x", label: "x", paths: [], bytes: 0, default: "bring" }] })).toThrow(/invalid manifest: entries\.0\.rung/);
+    expect(() => parseManifest({ entries: [{ rung: "shell", id: "shell/x", label: "x", paths: [], bytes: "big", default: "bring" }] })).toThrow(/entries\.0\.bytes/);
+    expect(() => parseManifest({ entries: [{ ...byId("logins/gh"), choice: "maybe" }] })).toThrow(/entries\.0\.choice/);
+    expect(() => parseManifest({ entries: [{ ...byId("shell/zshrc"), id: "zshrc" }] })).toThrow(/entries\.0\.id: id must start with shell\//);
+    expect(() => parseManifest({ entries: [byId("shell/zshrc"), byId("shell/zshrc")] })).toThrow(/entries\.1\.id: duplicate id shell\/zshrc/);
     expect(() => parseManifest({ items: [] })).toThrow(/entries/);
     expect(() => parseManifest("nope")).toThrow(/object/);
   });
@@ -147,8 +143,11 @@ describe("recipe file", () => {
     expect(back.entries.filter(e => e.rung === "logins").map(initialChoice)).toEqual(["machine", "copy"]);
   });
 
-  it("loadManifest reports the path on a bad file", () => {
+  it("loadManifest reports the path on a bad file, ahead of the collector's reason", () => {
     dir = mkdtempSync(join(tmpdir(), "wsp-recipe-"));
     expect(() => loadManifest(join(dir, "missing.json"))).toThrow(/missing\.json/);
+    const path = join(dir, "recipe.json");
+    writeFileSync(path, JSON.stringify({ entries: [{ ...byId("shell/zshrc"), choice: "copy" }] }));
+    expect(() => loadManifest(path)).toThrow(/recipe\.json: invalid manifest: entries\.0\.choice: only a logins row carries a choice/);
   });
 });
