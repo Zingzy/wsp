@@ -51,10 +51,8 @@ export async function stageDaemonBundle(stageDir: string, daemonDir = resolveDae
   );
 }
 
-/** Node for guests whose template ships none (the desktop template does; the
- * sandbox template carries its own). Pinned release tarball, checksum-verified
- * against nodejs.org's SHASUMS256.txt, unpacked into /usr/local; no package
- * manager, no version manager, no piped installer. */
+/** Desktop templates ship no node; the sandbox template carries its own.
+ * The pins are nodejs.org's SHASUMS256.txt entries for this release. */
 export const GUEST_NODE = {
   version: "22.23.2",
   sha256: {
@@ -75,7 +73,7 @@ function nodeBootstrap(): string {
     "  esac",
     `  curl -fsSL -o "/tmp/$pkg" "https://nodejs.org/dist/v${v}/$pkg"`,
     '  echo "$sha  /tmp/$pkg" | sha256sum -c - >/dev/null',
-    `  tar -xzf "/tmp/$pkg" -C /usr/local --strip-components=1 --exclude='*/CHANGELOG.md' --exclude='*/LICENSE' --exclude='*/README.md'`,
+    '  tar -xzf "/tmp/$pkg" -C /usr/local --strip-components=1',
     '  rm -f "/tmp/$pkg"',
     "  export npm_config_nodedir=/usr/local",
     "fi",
@@ -103,10 +101,9 @@ export function deployScript(token: string): string {
   ].join("\n");
 }
 
-/** macOS tar records com.apple.provenance as pax xattr headers that GNU tar in
- * the guest warns about once per file, burying real errors. Measured on bsdtar
- * 3.5.3: --no-xattrs is what strips them; COPYFILE_DISABLE stops the ._ files
- * and --no-mac-metadata is bsdtar-only, so GNU tar never sees it. */
+/** macOS tar writes com.apple.provenance as pax xattr headers; GNU tar in the
+ * guest warns once per file and buries real errors. Measured on bsdtar 3.5.3:
+ * --no-xattrs strips them, --no-mac-metadata alone does not and is bsdtar-only. */
 export function tarPackCommand(
   stage: string,
   tgz: string,
@@ -126,7 +123,7 @@ export async function packBundle(stage: string, tgz: string): Promise<void> {
 }
 
 /** Upload and start the daemon on a machine; returns the minted auth token and
- * the Node the guest ended up running the daemon on. */
+ * the Node version the daemon runs on. */
 export async function deployDaemon(
   machine: Machine,
   opts: { token?: string; daemonDir?: string } = {},

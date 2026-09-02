@@ -21,8 +21,6 @@ describe.runIf(LIVE)("daemon deploy on a desktop builder (live)", () => {
     }
   });
 
-  // The harness install is the engine canary's job (golden.live.test.ts); this
-  // one proves the host-owned stage on the template that ships no node.
   it("prepare passes deploying-daemon on the default desktop template, bootstrapping node", { timeout: 600_000 }, async () => {
     const t0 = Date.now();
     const stages: { stage: GoldenStage; at: number; detail?: string }[] = [];
@@ -34,7 +32,7 @@ describe.runIf(LIVE)("daemon deploy on a desktop builder (live)", () => {
       backend,
       ...recipe,
       labels: LABEL,
-      setup: "true",
+      setup: "true", // the harness install has its own canary in engine
       deployDaemon: async m => {
         deployed = await deployDaemon(m);
       },
