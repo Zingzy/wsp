@@ -125,6 +125,14 @@ describe("makeApi golden wrappers", () => {
     expect(lastSent()).toMatchObject({ op: "golden.prepare", name: "default" });
   });
 
+  it("builderReach sends golden.builderReach and unwraps the reach view", async () => {
+    const { api, lastSent } = await connect();
+    const reach = { url: "https://m1-7070.preview.example/?pt_token=e", expiresAt: 1, daemonToken: "d" };
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, reach });
+    expect(await api.builderReach("m1")).toEqual(reach);
+    expect(lastSent()).toMatchObject({ op: "golden.builderReach", builderId: "m1" });
+  });
+
   it("sealGolden sends golden.seal with the builder id and returns manifest plus version", async () => {
     const { api, lastSent } = await connect();
     const version = { version: 1, snapshotId: "snap_1", baseTemplate: "default", kind: "desktop", setupSha: "x", createdAt: "t", smoke: { cmd: "true", exitCode: 0 } };

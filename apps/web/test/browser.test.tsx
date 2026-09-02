@@ -34,6 +34,7 @@ function fakeApi(workspaces: WorkspaceView[]) {
     upgrade: async id => workspaces.find(w => w.id === id)!,
     capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true }),
     daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
+    builderReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
     startSession: async o => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
     sessionHistory: async () => [],
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
