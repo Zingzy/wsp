@@ -6,3 +6,4 @@ artifacts/
 .wsp/
 
 .claude/worktrees/
+.DS_Store

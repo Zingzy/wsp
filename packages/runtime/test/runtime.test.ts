@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { gunzipSync } from "node:zlib";
 import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
 import type { EventUnion } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
@@ -156,30 +157,177 @@ describe("runtime session history", () => {
     expect(await store.list("transcripts")).toEqual([]);
   });
 
-  it("persists turn boundaries in order even when an earlier put finishes last", async () => {
+  /** An adapter the test drives by hand, so turn boundaries can arrive without a session.end behind them. */
+  const manual = () => {
+    const sessionId = "33333333-3333-4333-8333-333333333333";
+    let onEvent: ((e: AdapterEvent) => void) | undefined;
+    let finish!: (r: TurnResult) => void;
+    const finished = new Promise<TurnResult>(r => (finish = r));
+    const adapter: HarnessAdapterFactory = () => ({
+      start: o => {
+        onEvent = o.onEvent;
+        return { localId: sessionId, claudeSessionId: sessionId, finished };
+      },
+    });
+    return {
+      adapter,
+      start: () => onEvent!({ type: "session.start", sessionId, model: "claude-sonnet-4-5" }),
+      done: (text: string) => onEvent!({ type: "turn.done", sessionId, result: { status: "completed", text } }),
+      end: () => {
+        onEvent!({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+        finish({ status: "completed", text: "" });
+      },
+    };
+  };
+
+  it("stamps at and one turnId per start on every session event, and forwards the adapter's harness", async () => {
+    const sessionId = "44444444-4444-4444-8444-444444444444";
+    const harness = { slashCommands: ["compact"], permissionMode: "bypassPermissions", agents: ["general-purpose"] };
+    const scripted: HarnessAdapterFactory = () => ({
+      start: o => {
+        const result: TurnResult = { status: "completed", text: "ok" };
+        const finished = Promise.resolve().then(() => {
+          o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5", harness });
+          o.onEvent({ type: "turn.delta", sessionId, kind: "text", text: "ok" });
+          o.onEvent({ type: "turn.done", sessionId, result });
+          o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+          return result;
+        });
+        return { localId: sessionId, claudeSessionId: sessionId, finished };
+      },
+    });
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: scripted } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const before = Date.now();
+    await (await rt.sessions.start(ws.id, { prompt: "first" })).finished;
+    await (await rt.sessions.start(ws.id, { prompt: "second", resume: sessionId })).finished;
+    const after = Date.now();
+
+    const history = await rt.sessions.history(ws.id);
+    expect(history).toHaveLength(8);
+    for (const e of history) {
+      expect(e.at).toBeGreaterThanOrEqual(before);
+      expect(e.at).toBeLessThanOrEqual(after);
+      expect(e.turnId).toMatch(/^[0-9a-f-]{36}$/);
+    }
+    const turnIds = new Set(history.map(e => e.turnId));
+    expect(turnIds.size).toBe(2);
+    expect(new Set(history.slice(0, 4).map(e => e.turnId)).size).toBe(1);
+    expect(new Set(history.slice(4).map(e => e.turnId)).size).toBe(1);
+    expect(history[0]).toMatchObject({ type: "session.start", harness });
+    await rt.close();
+  });
+
+  it("SessionView carries the prompt, when it started and when it ended", async () => {
+    const m = manual();
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: m.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const before = Date.now();
+    const handle = await rt.sessions.start(ws.id, { prompt: "go" });
+    m.start();
+    const running = handle.view();
+    expect(running.prompt).toBe("go");
+    expect(running.startedAt).toBeGreaterThanOrEqual(before);
+    expect(running.startedAt).toBeLessThanOrEqual(Date.now());
+    expect(running.endedAt).toBeUndefined();
+
+    m.done("done");
+    m.end();
+    await handle.finished;
+    const ended = rt.sessions.list(ws.id)[0]!;
+    expect(ended.endedAt).toBeGreaterThanOrEqual(ended.startedAt!);
+    expect(ended.endedAt).toBeLessThanOrEqual(Date.now());
+    expect(ended.prompt).toBe("go");
+    await rt.close();
+  });
+
+  /** memoryStore that counts transcript puts and can hold the first one open until the test lets go. */
+  const countingStore = () => {
     const inner = memoryStore();
     let puts = 0;
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>(r => (release = r));
+    let holdFirst = false;
     const store = {
       ...inner,
       put: async (collection: string, id: string, value: unknown) => {
-        // the first transcript write is slow, the ones behind it are instant
-        const delay = collection === "transcripts" && puts++ === 0 ? 40 : 0;
-        await new Promise(r => setTimeout(r, delay));
+        if (collection === "transcripts" && puts++ === 0 && holdFirst) await gate;
         await inner.put(collection, id, value);
       },
     };
+    const stored = async (id: string) => ((await inner.get("transcripts", id)) as { events: { type: string; prompt?: string }[] } | undefined)?.events ?? [];
+    return { store, stored, puts: () => puts, holdFirstPut: () => (holdFirst = true), releaseFirstPut: () => release!() };
+  };
+  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+  const until = async (cond: () => Promise<boolean>, ms: number) => {
+    const deadline = Date.now() + ms;
+    while (!(await cond()) && Date.now() < deadline) await sleep(5);
+    return cond();
+  };
+
+  it("coalesces a burst of turn boundaries into one put after the debounce instead of one per event", async () => {
+    const { store, stored, puts } = countingStore();
+    const m = manual();
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: m.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await rt.sessions.start(ws.id, { prompt: "go" });
+    m.start();
+    for (let i = 0; i < 20; i++) m.done(`t${i}`);
+    await sleep(50);
+    expect(puts()).toBe(0);
+    await sleep(400);
+    expect(puts()).toBe(1);
+    expect((await stored(ws.id)).length).toBe(21);
+    m.end();
+    await rt.close();
+  });
+
+  it("session.end lands in the store at once, without waiting out the debounce", async () => {
+    const { store, stored, puts } = countingStore();
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: scripted("x") } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
-    // The chain drains on its own clock; poll for it instead of guessing a sleep.
-    const read = async () => ((await inner.get("transcripts", ws.id)) as { events: { type: string }[] } | undefined)?.events ?? [];
-    const deadline = Date.now() + 2000;
-    while ((await read()).length < 4 && Date.now() < deadline) await new Promise(r => setTimeout(r, 10));
-    expect((await read()).map(e => e.type)).toEqual(["session.start", "session.delta", "session.done", "session.end"]);
+    expect(await until(async () => (await stored(ws.id)).length === 4, 100)).toBe(true);
+    expect((await stored(ws.id)).map(e => e.type)).toEqual(["session.start", "session.delta", "session.done", "session.end"]);
+    expect(puts()).toBe(1);
+  });
+
+  it("close() writes what is still waiting on the debounce and leaves no timer behind", async () => {
+    const { store, stored, puts } = countingStore();
+    const m = manual();
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: m.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await rt.sessions.start(ws.id, { prompt: "go" });
+    m.start();
+    m.done("t0");
+    await rt.close();
+    expect(puts()).toBe(1);
+    expect((await stored(ws.id)).map(e => e.type)).toEqual(["session.start", "session.done"]);
+    await sleep(400);
+    expect(puts()).toBe(1);
+  });
+
+  it("persists flushes in order even when an earlier put finishes last", async () => {
+    const { store, stored, puts, holdFirstPut, releaseFirstPut } = countingStore();
+    holdFirstPut();
+    const m = manual();
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: m.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await rt.sessions.start(ws.id, { prompt: "go" });
+    m.start();
+    m.done("t0");
+    // the debounce fires and the first put stalls in the store; the end flush queues behind it
+    expect(await until(async () => puts() === 1, 1000)).toBe(true);
+    m.end();
+    await sleep(20);
+    expect(await stored(ws.id)).toEqual([]);
+    releaseFirstPut();
+    await rt.close();
+    expect((await stored(ws.id)).map(e => e.type)).toEqual(["session.start", "session.done", "session.end"]);
   });
 
   it("caps the persisted transcript so a chatty workspace cannot grow the store without bound", { timeout: 20_000 }, async () => {
-    const store = memoryStore();
+    const { store, stored } = countingStore();
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: scripted("x") } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     for (let i = 0; i < 1300; i++) await (await rt.sessions.start(ws.id, { prompt: `t${i}` })).finished;
@@ -188,10 +336,11 @@ describe("runtime session history", () => {
     expect(history[history.length - 1]).toMatchObject({ type: "session.end" });
     expect(history.some(e => e.type === "session.start" && e.prompt === "t1299")).toBe(true);
     expect(history.some(e => e.type === "session.start" && e.prompt === "t0")).toBe(false);
-    // Thousands of queued snapshot puts drain after the turns finish; left running
-    // they starve the timers of whatever test comes next, so wait them out here.
-    const stored = async () => ((await store.get("transcripts", ws.id)) as { events: { type: string; prompt?: string }[] } | undefined)?.events ?? [];
-    while (!(await stored()).some(e => e.type === "session.start" && e.prompt === "t1299")) await new Promise(r => setTimeout(r, 10));
+    // close() waits the put chain out, so nothing drains into the next test's clock.
+    await rt.close();
+    const persisted = await stored(ws.id);
+    expect(persisted.length).toBeLessThanOrEqual(5000);
+    expect(persisted.some(e => e.type === "session.start" && e.prompt === "t1299")).toBe(true);
   });
 });
 
@@ -676,6 +825,247 @@ describe("runtime verified wake", () => {
     } finally {
       warn.mockRestore();
       vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("runtime workspace size", () => {
+  /** A provider that clamps memory: whatever is asked, the machine it builds has 2048 MB. */
+  function clampingBackend() {
+    const backend = stubBackend();
+    const create = backend.create.bind(backend);
+    backend.create = async spec => {
+      const m = (await create(spec)) as (typeof backend.machines)[number];
+      m.shape = { ...m.shape, memMb: 2048 };
+      return m;
+    };
+    return backend;
+  }
+
+  it("create asks for an explicit size: the pricing default when the caller names none", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await rt.workspaces.create({ golden: "snap_g", name: "b", memMb: 2048 });
+    expect(backend.machines[0]!.spec).toMatchObject({ cpu: 2, memMb: 4096 });
+    expect(backend.machines[1]!.spec).toMatchObject({ cpu: 2, memMb: 2048 });
+  });
+
+  it("the size shown and billed is what the provider built, not what was asked, and it survives a restart", async () => {
+    const backend = clampingBackend();
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: {}, status: { costIntervalMs: 15, pollIntervalMs: 60_000 } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    expect(backend.machines[0]!.spec.memMb).toBe(4096);
+    const built = { cpu: 2, memMb: 2048 };
+    const [status] = await rt.status.list();
+    expect(status).toMatchObject({ size: built, rateUsdPerHour: backend.pricing.rateUsdPerHour(built) });
+
+    const costs: number[] = [];
+    rt.events.on("workspace.cost", e => { if (e.type === "workspace.cost") costs.push(e.rateUsdPerHour); });
+    const stop = rt.status.watch();
+    while (costs.length === 0) await new Promise(r => setTimeout(r, 5));
+    stop();
+    expect(costs[0]).toBeCloseTo(backend.pricing.rateUsdPerHour(built), 10);
+
+    const rt2 = createRuntime({ backend, store, adapters: {} });
+    expect((await rt2.status.list())[0]).toMatchObject({ id: ws.id, size: built });
+  });
+
+  it("a resurrected fork asks for the recorded size and records what came back; an upgrade records its new size", async () => {
+    const backend = clampingBackend();
+    backend.execImpl = (_m, cmd) => (cmd.includes("ls -A /root") ? { exitCode: 0, stdout: "notes.md\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: { method?: string }) =>
+      init?.method === "PUT" ? new Response(null, { status: 200 }) : new Response(Buffer.from("tarbytes")),
+    ));
+    try {
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+      const events: EventUnion[] = [];
+      rt.events.on("workspace.status", e => events.push(e));
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      await rt.workspaces.nap(ws.id);
+      backend.machines[0]!.killed = true;
+      await rt.workspaces.wake(ws.id);
+      expect(backend.machines[1]!.spec).toMatchObject({ cpu: 2, memMb: 2048 });
+      const pushed = events.at(-1) as { status: { size: { cpu: number; memMb: number } } };
+      expect(pushed.status.size).toEqual({ cpu: 2, memMb: 2048 });
+
+      backend.machines[1]!.previewUrl = undefined;
+      await rt.workspaces.upgrade(ws.id, { cpu: 4 });
+      expect(backend.machines[2]!.spec).toMatchObject({ cpu: 4, memMb: 2048 });
+      expect((await rt.status.list())[0]!.size).toEqual({ cpu: 4, memMb: 2048 });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("a fork inherits the size its golden was sealed at unless the caller overrides it", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const version = { version: 1, snapshotId: "snap_golden-v1", baseTemplate: "base", setupSha: "s", createdAt: "2026-09-01T00:00:00.000Z", smoke: { cmd: "true", exitCode: 0 }, size: { cpu: 2, memMb: 8192 } };
+    await store.put("goldens", "big", { head: 1, versions: [version] });
+    const rt = createRuntime({ backend, store, adapters: {} });
+    await rt.workspaces.create({ golden: "snap_golden-v1", name: "a" });
+    await rt.workspaces.create({ golden: "snap_golden-v1", name: "b", memMb: 2048 });
+    await rt.workspaces.create({ golden: "snap_elsewhere", name: "c" });
+    expect(backend.machines[0]!.spec).toMatchObject({ cpu: 2, memMb: 8192 });
+    expect(backend.machines[1]!.spec).toMatchObject({ cpu: 2, memMb: 2048 });
+    expect(backend.machines[2]!.spec).toMatchObject({ cpu: 2, memMb: 4096 });
+    expect((await rt.status.list()).map(s => s.size.memMb).sort()).toEqual([2048, 4096, 8192]);
+  });
+
+  it("seal records the builder's size on the version, as the provider reported it", async () => {
+    const backend = clampingBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: { setup: "install", smoke: "true", cpu: 2, memMb: 4096 } });
+    const b = await rt.golden.prepare();
+    expect(backend.machines[0]!.spec).toMatchObject({ cpu: 2, memMb: 4096 });
+    const { version } = await rt.golden.seal(b.id);
+    expect(version.size).toEqual({ cpu: 2, memMb: 2048 });
+    expect(backend.machines[1]!.spec).toMatchObject({ cpu: 2, memMb: 4096 });
+  });
+
+  it("a stored workspace with no recorded size is sized from the provider's view on hydrate", async () => {
+    const backend = clampingBackend();
+    const store = memoryStore();
+    const rt1 = createRuntime({ backend, store, adapters: {} });
+    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
+    const raw = (await store.get("workspaces", ws.id)) as Record<string, unknown>;
+    delete raw["size"];
+    await store.put("workspaces", ws.id, raw);
+
+    const rt2 = createRuntime({ backend, store, adapters: {} });
+    expect((await rt2.status.list())[0]!.size).toEqual({ cpu: 2, memMb: 2048 });
+  });
+});
+
+describe("runtime workspace screen", () => {
+  /** A provider whose forks boot as desktop machines: every machine it builds streams a display. */
+  function desktopBackend() {
+    const backend = stubBackend();
+    const create = backend.create.bind(backend);
+    backend.create = spec => create({ ...spec, kind: "desktop" });
+    return backend;
+  }
+
+  it("a desktop machine's stream rides the view and the status; a sandbox carries no screen", async () => {
+    const desktop = desktopBackend();
+    const rt = createRuntime({ backend: desktop, store: memoryStore(), adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    expect(ws.screen).toEqual({ streamUrl: "wss://stub/stream/m1" });
+    expect((await rt.workspaces.get(ws.id)).screen).toEqual({ streamUrl: "wss://stub/stream/m1" });
+    expect((await rt.status.list())[0]!.screen).toEqual({ streamUrl: "wss://stub/stream/m1" });
+
+    const headless = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
+    const sandbox = await headless.workspaces.create({ golden: "snap_g", name: "b" });
+    expect(sandbox).not.toHaveProperty("screen");
+    expect((await headless.status.list())[0]).not.toHaveProperty("screen");
+  });
+
+  it("the stream survives a restart and a wake on the same machine; a resurrect refreshes it from the new machine", async () => {
+    const backend = desktopBackend();
+    const store = memoryStore();
+    const rt1 = createRuntime({ backend, store, adapters: {} });
+    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
+    await rt1.workspaces.nap(ws.id);
+
+    const rt2 = createRuntime({ backend, store, adapters: {} });
+    expect((await rt2.workspaces.get(ws.id)).screen).toEqual({ streamUrl: "wss://stub/stream/m1" });
+    const woken = await rt2.workspaces.wake(ws.id);
+    expect(woken.machineId).toBe("m1");
+    expect(woken.screen).toEqual({ streamUrl: "wss://stub/stream/m1" });
+
+    const pushed: EventUnion[] = [];
+    rt2.events.on("workspace.status", e => pushed.push(e));
+    await rt2.workspaces.nap(ws.id);
+    backend.machines[0]!.killed = true;
+    const resurrected = await rt2.workspaces.wake(ws.id);
+    expect(resurrected.machineId).toBe("m2");
+    expect(resurrected.screen).toEqual({ streamUrl: "wss://stub/stream/m2" });
+    const last = pushed.at(-1) as { status: { screen?: { streamUrl: string } } };
+    expect(last.status.screen).toEqual({ streamUrl: "wss://stub/stream/m2" });
+    expect((await store.get("workspaces", ws.id) as { screen?: unknown }).screen).toEqual({ streamUrl: "wss://stub/stream/m2" });
+  });
+});
+
+describe("runtime fork kind", () => {
+  const version = (kind?: "sandbox" | "desktop") => ({
+    version: 1,
+    snapshotId: "snap_golden-v1",
+    baseTemplate: "base",
+    ...(kind !== undefined ? { kind } : {}),
+    setupSha: "sha1",
+    createdAt: "2026-08-11T00:00:00.000Z",
+    smoke: { cmd: "true", exitCode: 0 },
+  });
+
+  it("forks a desktop golden as kind desktop on create, resurrect and upgrade, carrying the stream on the view", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    await store.put("goldens", "default", { head: 1, versions: [version("desktop")] });
+    const rt = createRuntime({ backend, store, adapters: {} });
+
+    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "a" });
+    expect(backend.machines[0]!.spec.kind).toBe("desktop");
+    expect(ws.screen).toEqual({ streamUrl: "wss://stub/stream/m1" });
+
+    await rt.workspaces.nap(ws.id);
+    backend.machines[0]!.killed = true;
+    const woken = await rt.workspaces.wake(ws.id);
+    expect(backend.machines[1]!.spec.kind).toBe("desktop");
+    expect(woken.screen).toEqual({ streamUrl: "wss://stub/stream/m2" });
+
+    const upgraded = await rt.workspaces.upgrade(ws.id, { cpu: 4 });
+    expect(backend.machines[2]!.spec.kind).toBe("desktop");
+    expect(upgraded.screen).toEqual({ streamUrl: "wss://stub/stream/m3" });
+  });
+
+  it("a manifest sealed before versions recorded a kind still forks sandbox", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    await store.put("goldens", "default", { head: 1, versions: [version()] });
+    const rt = createRuntime({ backend, store, adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "a" });
+    expect(backend.machines[0]!.spec.kind).toBe("sandbox");
+    expect(ws.screen).toBeUndefined();
+  });
+});
+
+describe("nap vault against the stub backend", () => {
+  it("stores a real tar from the stub download URL without warning", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const rt = createRuntime({ backend, store, adapters: {} });
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+      await rt.workspaces.nap(ws.id);
+      expect(warn).not.toHaveBeenCalled();
+      const vault = await store.getBlob("vaults", ws.id);
+      expect(vault).toBeDefined();
+      expect(gunzipSync(vault!).equals(Buffer.alloc(1024))).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("warns once and keeps the previous vault when the download URL cannot be fetched", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const rt = createRuntime({ backend, store, adapters: {} });
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+      await rt.workspaces.nap(ws.id);
+      const first = await store.getBlob("vaults", ws.id);
+      await rt.workspaces.wake(ws.id);
+
+      backend.machines[0]!.downloadUrl = async () => "http://127.0.0.1:1/nothing-listens-here";
+      await rt.workspaces.nap(ws.id);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]![0]).toBe(`nap vault for ${ws.id} not stored, previous kept: fetch failed`);
+      expect(await store.getBlob("vaults", ws.id)).toEqual(first);
+    } finally {
+      warn.mockRestore();
     }
   });
 });

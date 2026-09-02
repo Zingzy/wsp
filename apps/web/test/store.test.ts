@@ -3,7 +3,7 @@
 // session.* events decide when to refetch and what to patch in between.
 import { beforeEach, describe, expect, it } from "vitest";
 import type { SessionView, WorkspaceView } from "@wsp/protocol";
-import type { Api, ProtocolEvent } from "../src/protocol/client.js";
+import { DisconnectedError, type Api, type ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 
 const view = (id: string): WorkspaceView => ({
@@ -20,12 +20,19 @@ const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, pre
 function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
   const listCalls: (string | undefined)[] = [];
+  const pulls = { workspaces: 0, statuses: 0 };
   const api: Api = {
-    listWorkspaces: async () => workspaces,
+    listWorkspaces: async () => {
+      pulls.workspaces++;
+      return workspaces;
+    },
     getWorkspace: async id => workspaces.find(w => w.id === id)!,
     createWorkspace: async () => workspaces[0]!,
     createFromGoldenHead: async () => workspaces[0]!,
-    watchStatuses: async () => [],
+    watchStatuses: async () => {
+      pulls.statuses++;
+      return workspaces.map(w => ({ ...w, machineState: "running" as const, reach: { state: "reachable" as const }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0 }));
+    },
     nap: async id => workspaces.find(w => w.id === id)!,
     wake: async id => workspaces.find(w => w.id === id)!,
     upgrade: async id => workspaces.find(w => w.id === id)!,
@@ -52,13 +59,13 @@ function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
   const emit = (e: ProtocolEvent) => {
     for (const fn of [...listeners]) fn(e);
   };
-  return { api, emit, listCalls };
+  return { api, emit, listCalls, pulls };
 }
 
 const flush = () => new Promise(r => setTimeout(r, 0));
 
 beforeEach(() => {
-  useStore.setState({ api: null, capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, sessions: {}, ready: false });
+  useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, sessions: {}, ready: false });
 });
 
 describe("store sessions", () => {
@@ -117,5 +124,50 @@ describe("store sessions", () => {
     await flush();
     emit({ type: "workspace.deleted", workspaceId: "ws_a" });
     expect(useStore.getState().sessions).toEqual({});
+  });
+});
+
+describe("store connection", () => {
+  it("starts connecting and mirrors what the client reports", () => {
+    expect(useStore.getState().conn).toBe("connecting");
+    useStore.getState().setConn("reconnecting");
+    expect(useStore.getState().conn).toBe("reconnecting");
+  });
+
+  it("live with an api bound pulls the workspace list and the status snapshot again", async () => {
+    const workspaces = [view("ws_a")];
+    const { api, pulls } = fakeApi(workspaces, []);
+    useStore.getState().bind(api);
+    await flush();
+    expect(pulls).toEqual({ workspaces: 1, statuses: 1 });
+
+    workspaces.push(view("ws_b"));
+    useStore.getState().setConn("reconnecting");
+    useStore.getState().setConn("live");
+    await flush();
+    expect(pulls).toEqual({ workspaces: 2, statuses: 2 });
+    expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_a", "ws_b"]);
+    expect(Object.keys(useStore.getState().statuses)).toEqual(["ws_a", "ws_b"]);
+    expect(useStore.getState().selectedId).toBe("ws_a");
+  });
+
+  it("live before anything is bound pulls nothing", () => {
+    useStore.getState().setConn("live");
+    expect(useStore.getState().conn).toBe("live");
+    expect(useStore.getState().api).toBeNull();
+  });
+
+  it("an optimistic toggle cut off by the drop reverts without a toast; the banner already says it", async () => {
+    const { api } = fakeApi([view("ws_a")], []);
+    api.nap = async () => {
+      throw new DisconnectedError("lost");
+    };
+    useStore.getState().bind(api);
+    await flush();
+    const toggling = useStore.getState().toggle("ws_a");
+    expect(useStore.getState().workspaces[0]!.phase).toBe("napping");
+    await toggling;
+    expect(useStore.getState().workspaces[0]!.phase).toBe("running");
+    expect(useStore.getState().toast).toBeNull();
   });
 });

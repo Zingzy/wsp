@@ -12,8 +12,10 @@ export default defineConfig({
   // old tabs keep going through Vite's own pipeline.
   plugins: [react(), tailwindcss()],
   // noVNC's H.264 decoder module uses top-level await, which vite's default
-  // es2020 target rejects at bundle time.
+  // es2020 target rejects. build.target covers only the production bundle;
+  // the dev dependency prescan has its own esbuild target and needs the same.
   build: { target: "es2022" },
+  optimizeDeps: { esbuildOptions: { target: "es2022" } },
   test: {
     environment: "jsdom",
     globals: true,

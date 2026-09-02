@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { gzipSync } from "node:zlib";
 import type { ExecResult, Machine, MachineBackend, MachineSpec, MachineState } from "@wsp/engine";
 
 export interface StubMachine extends Machine {
@@ -13,9 +16,28 @@ export interface StubBackend extends MachineBackend {
   execImpl: (m: StubMachine, cmd: string) => Promise<ExecResult> | ExecResult;
 }
 
+// Two zero blocks is a complete empty tar, so downloads are real archives.
+const EMPTY_TGZ = gzipSync(Buffer.alloc(1024));
+
+/** One loopback server per backend: GET serves the empty tar, PUT accepts anything. */
+function vaultServer(): () => Promise<string> {
+  let origin: Promise<string> | undefined;
+  return () =>
+    (origin ??= new Promise(resolve => {
+      const server = createServer((req, res) => {
+        res.setHeader("connection", "close");
+        if (req.method === "PUT") req.resume().on("end", () => res.writeHead(200).end());
+        else res.writeHead(200, { "content-type": "application/gzip" }).end(EMPTY_TGZ);
+      });
+      server.unref();
+      server.listen(0, "127.0.0.1", () => resolve(`http://127.0.0.1:${(server.address() as AddressInfo).port}`));
+    }));
+}
+
 export function stubBackend(): StubBackend {
   let seq = 0;
   const machines: StubMachine[] = [];
+  const vaultOrigin = vaultServer();
 
   const backend: StubBackend = {
     capabilities: { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true },
@@ -52,11 +74,11 @@ export function stubBackend(): StubBackend {
         async state(): Promise<MachineState> {
           return m.killed ? "gone" : m.paused ? "paused" : "running";
         },
-        async downloadUrl(): Promise<string> {
-          return "https://stub/download";
+        async downloadUrl(path: string): Promise<string> {
+          return `${await vaultOrigin()}/download${path}`;
         },
-        async uploadUrl(): Promise<string> {
-          return "https://stub/upload";
+        async uploadUrl(path: string): Promise<string> {
+          return `${await vaultOrigin()}/upload${path}`;
         },
       };
       machines.push(m);

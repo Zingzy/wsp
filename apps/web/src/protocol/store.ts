@@ -4,7 +4,7 @@
 import { useEffect } from "react";
 import { create } from "zustand";
 import type { Capabilities, SessionView, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
-import type { Api, ProtocolEvent } from "./client.js";
+import { DisconnectedError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
 
 export interface CostTick {
   rateUsdPerHour: number;
@@ -14,6 +14,8 @@ export interface CostTick {
 
 interface State {
   api: Api | null;
+  /** The runtime socket as the client reports it; the shell's banner reads this. */
+  conn: ConnStatus;
   /** Backend feature flags; null until the first reply. Gate upgrade/resize on these. */
   capabilities: Capabilities | null;
   workspaces: WorkspaceView[];
@@ -26,6 +28,8 @@ interface State {
   sessions: Record<string, SessionView[]>;
   ready: boolean;
   bind(api: Api): void;
+  /** Mirrors the client's status; live with an api bound pulls list and statuses again so a reconnect converges. */
+  setConn(conn: ConnStatus): void;
   select(id: string | null): void;
   refresh(): Promise<void>;
   /** Optimistic nap/wake: paint now, reconcile on the event, revert + toast on failure. */
@@ -55,8 +59,18 @@ export const useStore = create<State>((set, get) => {
     }));
   };
 
+  // What bind fetches and a reconnect fetches again: the list plus the status snapshot that also arms status.subscribe.
+  const pull = (api: Api): void => {
+    void get().refresh().catch(() => {});
+    void api
+      .watchStatuses()
+      .then(statuses => set({ statuses: Object.fromEntries(statuses.map(s => [s.id, s])) }))
+      .catch((e: unknown) => set({ toast: `live status unavailable: ${e instanceof Error ? e.message : String(e)}` }));
+  };
+
   return {
     api: null,
+    conn: "connecting",
     capabilities: null,
     workspaces: [],
     statuses: {},
@@ -69,15 +83,16 @@ export const useStore = create<State>((set, get) => {
     bind(api) {
       set({ api });
       api.subscribe(e => get().applyEvent(e));
-      void get().refresh();
       void api
         .capabilities()
         .then(capabilities => set({ capabilities }))
         .catch(() => {});
-      void api
-        .watchStatuses()
-        .then(statuses => set({ statuses: Object.fromEntries(statuses.map(s => [s.id, s])) }))
-        .catch((e: unknown) => set({ toast: `live status unavailable: ${e instanceof Error ? e.message : String(e)}` }));
+      pull(api);
+    },
+    setConn(conn) {
+      set({ conn });
+      const api = get().api;
+      if (conn === "live" && api) pull(api);
     },
     select(id) { set({ selectedId: id }); },
     async refresh() {
@@ -106,7 +121,7 @@ export const useStore = create<State>((set, get) => {
         await (to === "napping" ? api.nap(id) : api.wake(id));
       } catch (e) {
         setPhase(id, w.phase);
-        set({ toast: `${w.name}: ${e instanceof Error ? e.message : String(e)}` });
+        if (!(e instanceof DisconnectedError)) set({ toast: `${w.name}: ${e instanceof Error ? e.message : String(e)}` });
       }
     },
     async createWorkspace(name) {

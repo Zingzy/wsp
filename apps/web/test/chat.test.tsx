@@ -12,7 +12,11 @@ import { ApprovalPrompt } from "../src/tabs/chat/ApprovalPrompt.js";
 
 const WS = "ws_chat0001";
 const CLAUDE_SID = "e16ed170-8257-4668-879e-fe836341633c";
-const scope = { workspaceId: WS, sessionId: "sess_0001" };
+const scope = { workspaceId: WS, sessionId: "sess_0001", turnId: "turn_0001" };
+/** Wall clock of the fixture run; each event is stamped in wire order. */
+const T0 = Date.parse("2026-09-01T01:31:29.412Z");
+const at = (ms: number) => ({ at: T0 + ms });
+const HARNESS = { slashCommands: ["compact", "context", "cost", "init", "review"], permissionMode: "bypassPermissions", agents: ["general-purpose"] };
 
 const workspace: WorkspaceView = {
   id: WS,
@@ -25,18 +29,18 @@ const workspace: WorkspaceView = {
 };
 
 const FIXTURE: EventUnion[] = [
-  { type: "session.start", ...scope, model: "claude-sonnet-4-5", cwd: "/root", tools: ["Bash", "Read"] },
-  { type: "session.delta", ...scope, kind: "text", text: "Creating the server file, " },
-  { type: "session.delta", ...scope, kind: "text", text: "then starting it." },
+  { type: "session.start", ...scope, ...at(0), model: "claude-sonnet-4-5", cwd: "/root", tools: ["Bash", "Read"], harness: HARNESS },
+  { type: "session.delta", ...scope, ...at(1_200), kind: "text", text: "Creating the server file, " },
+  { type: "session.delta", ...scope, ...at(1_450), kind: "text", text: "then starting it." },
   {
-    type: "session.delta", ...scope, kind: "tool_use", toolName: "Bash", toolUseId: "toolu_01WspFixBash1",
+    type: "session.delta", ...scope, ...at(4_495), kind: "tool_use", toolName: "Bash", toolUseId: "toolu_01WspFixBash1",
     text: "node /root/server.js >/dev/null 2>&1 & sleep 0.3 && curl -s http://localhost:3000",
   },
-  { type: "session.delta", ...scope, kind: "tool_result", toolUseId: "toolu_01WspFixBash1", text: "Hello, World!", isError: false },
-  { type: "session.delta", ...scope, kind: "thinking", text: "curl returned the greeting, so the server is live." },
-  { type: "session.delta", ...scope, kind: "text", text: "Server is live at :3000." },
-  { type: "session.done", ...scope, result: { status: "completed", durationMs: 10458, costUsd: 0.0187, text: "Server is live at :3000." } },
-  { type: "session.end", ...scope, exitCode: 0, sawResult: true },
+  { type: "session.delta", ...scope, ...at(5_708), kind: "tool_result", toolUseId: "toolu_01WspFixBash1", text: "Hello, World!", isError: false },
+  { type: "session.delta", ...scope, ...at(7_900), kind: "thinking", text: "curl returned the greeting, so the server is live." },
+  { type: "session.delta", ...scope, ...at(9_300), kind: "text", text: "Server is live at :3000." },
+  { type: "session.done", ...scope, ...at(10_458), result: { status: "completed", durationMs: 10458, costUsd: 0.0187, text: "Server is live at :3000." } },
+  { type: "session.end", ...scope, ...at(10_600), exitCode: 0, sawResult: true },
 ];
 
 function fixtureApi(workspaces: WorkspaceView[], history: Record<string, SessionEvent[]> = {}) {
@@ -65,7 +69,7 @@ function fixtureApi(workspaces: WorkspaceView[], history: Record<string, Session
     sealGolden: async () => { throw new Error("no wizard in this fixture"); },
     startSession: async opts => {
       started.push(opts);
-      return { id: "s1", workspaceId: opts.workspaceId, harness: "claude", status: "running" };
+      return { id: "s1", workspaceId: opts.workspaceId, harness: "claude", status: "running", prompt: opts.prompt, startedAt: T0 };
     },
   };
   const emit = (e: EventUnion) => act(() => { for (const fn of [...listeners]) fn(e); });

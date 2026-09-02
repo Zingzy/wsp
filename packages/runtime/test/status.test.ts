@@ -50,7 +50,7 @@ describe("status.list", () => {
       phase: "running",
       machineState: "running",
       reach: { state: "unsupported" }, // stub machines mint no preview URLs
-      size: backend.pricing.defaultSize, // the backend's assumed shape when the spec is silent
+      size: backend.pricing.defaultSize, // asked for explicitly when the caller names none; the stub builds what it is asked
       rateUsdPerHour: backend.pricing.rateUsdPerHour(backend.pricing.defaultSize),
     });
     expect(statuses[0]!.rateUsdPerHour).toBeCloseTo(0.11, 5);

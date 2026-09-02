@@ -214,6 +214,9 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) => server.close(err => (err ? reject(err) : resolve())));
       await rtServer.close();
+      // Last: with the servers gone nothing can record another event, so the
+      // flush this waits on is the final word in the store.
+      await rt.close();
     },
   };
 }

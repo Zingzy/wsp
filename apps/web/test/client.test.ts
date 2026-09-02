@@ -1,31 +1,48 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // makeApi against a scripted socket: every wrapper sends the op serveRuntime
-// dispatches and unwraps the field its reply carries.
-import { describe, expect, it } from "vitest";
-import { makeApi, ProtocolClient } from "../src/protocol/client.js";
+// dispatches and unwraps the field its reply carries. The same socket plays a
+// runtime that dies and comes back for the reconnect tests.
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DisconnectedError, makeApi, ProtocolClient, type ConnStatus, type ProtocolClientOptions } from "../src/protocol/client.js";
 
 type Frame = Record<string, unknown>;
 
 class ScriptedSocket {
   static instances: ScriptedSocket[] = [];
   static reply: (frame: Frame) => Frame | undefined = () => undefined;
+  static authOk = true;
+  /** false plays a runtime that is down: every new socket closes before it opens. */
+  static serverUp = true;
   sent: Frame[] = [];
   onopen: (() => void) | null = null;
   onmessage: ((e: { data: string }) => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((e: { code: number }) => void) | null = null;
   onerror: (() => void) | null = null;
   constructor(readonly url: string) {
     ScriptedSocket.instances.push(this);
-    queueMicrotask(() => this.onopen?.());
+    queueMicrotask(() => (ScriptedSocket.serverUp ? this.onopen?.() : this.drop(1006)));
   }
   send(data: string): void {
     const frame = JSON.parse(data) as Frame;
     this.sent.push(frame);
-    const reply = frame["op"] === "auth" ? { id: frame["id"], ok: true } : ScriptedSocket.reply(frame);
+    if (frame["op"] === "auth") {
+      const reply = ScriptedSocket.authOk ? { id: frame["id"], ok: true } : { id: frame["id"], ok: false, error: "unauthorized" };
+      queueMicrotask(() => this.onmessage?.({ data: JSON.stringify(reply) }));
+      if (!ScriptedSocket.authOk) queueMicrotask(() => this.drop(4401));
+      return;
+    }
+    const reply = ScriptedSocket.reply(frame);
     if (reply) queueMicrotask(() => this.onmessage?.({ data: JSON.stringify(reply) }));
   }
+  /** The server side going away, as a wsp restart looks from the tab. */
+  drop(code: number): void {
+    this.onclose?.({ code });
+  }
   close(): void {
-    this.onclose?.();
+    this.drop(1000);
+  }
+  frames(op: string): Frame[] {
+    return this.sent.filter(f => f["op"] === op);
   }
 }
 
@@ -149,5 +166,140 @@ describe("makeApi golden wrappers", () => {
     expect(lastSent()).toMatchObject({ op: "golden.seal", builderId: "m1" });
     expect(got.version).toEqual(version);
     expect(got.manifest.head).toBe(1);
+  });
+});
+
+describe("ProtocolClient reconnect", () => {
+  const until = async (cond: () => boolean, ms = 2000): Promise<void> => {
+    const deadline = Date.now() + ms;
+    while (!cond()) {
+      if (Date.now() > deadline) throw new Error("condition not met in time");
+      await new Promise(r => setTimeout(r, 5));
+    }
+  };
+  function newClient(extra: Partial<ProtocolClientOptions> = {}) {
+    ScriptedSocket.instances.length = 0;
+    const statuses: ConnStatus[] = [];
+    const client = new ProtocolClient({
+      url: "ws://test",
+      token: "tok",
+      WebSocketCtor: ScriptedSocket as unknown as typeof WebSocket,
+      onStatus: s => statuses.push(s),
+      ...extra,
+    });
+    return { client, statuses, socket: (n: number) => ScriptedSocket.instances[n]! };
+  }
+  beforeEach(() => {
+    ScriptedSocket.authOk = true;
+    ScriptedSocket.serverUp = true;
+    ScriptedSocket.reply = () => undefined;
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("a dropped socket comes back: redial, same token, events.subscribe re-armed, events flow again", async () => {
+    const { client, statuses, socket } = newClient({ backoffMs: () => 0 });
+    await client.connect();
+    const seen: unknown[] = [];
+    client.subscribe(e => seen.push(e));
+    expect(socket(0).frames("events.subscribe")).toHaveLength(1);
+
+    socket(0).drop(1006);
+    expect(client.status).toBe("reconnecting");
+    await until(() => client.status === "live");
+
+    expect(ScriptedSocket.instances).toHaveLength(2);
+    expect(socket(1).sent[0]).toEqual({ id: 0, op: "auth", token: "tok" });
+    expect(socket(1).frames("events.subscribe")).toHaveLength(1);
+    expect(statuses).toEqual(["live", "reconnecting", "live"]);
+
+    socket(1).onmessage?.({ data: JSON.stringify({ type: "workspace.napped", workspaceId: "ws_1" }) });
+    expect(seen).toEqual([{ type: "workspace.napped", workspaceId: "ws_1" }]);
+    client.close();
+  });
+
+  it("requests in flight at the drop reject with DisconnectedError; so do requests made while reconnecting", async () => {
+    const { client, socket } = newClient({ backoffMs: () => 10_000 });
+    await client.connect();
+    const inFlight = client.request("workspaces.list");
+    socket(0).drop(1006);
+    await expect(inFlight).rejects.toBeInstanceOf(DisconnectedError);
+    await expect(inFlight).rejects.toMatchObject({ reason: "lost" });
+    const whileDown = client.request("workspaces.list");
+    await expect(whileDown).rejects.toBeInstanceOf(DisconnectedError);
+    await expect(whileDown).rejects.toMatchObject({ reason: "lost" });
+    client.close();
+  });
+
+  it("redials on the default schedule, 250 ms doubling to a 5 s cap, and starts over after a live", async () => {
+    vi.useFakeTimers();
+    const { client } = newClient();
+    await client.connect();
+    ScriptedSocket.serverUp = false;
+    client.subscribe(() => {});
+    ScriptedSocket.instances[0]!.drop(1006);
+
+    let dials = 1;
+    for (const wait of [250, 500, 1000, 2000, 4000, 5000, 5000]) {
+      await vi.advanceTimersByTimeAsync(wait - 1);
+      expect(ScriptedSocket.instances).toHaveLength(dials);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(ScriptedSocket.instances).toHaveLength(dials + 1);
+      dials++;
+    }
+    expect(client.status).toBe("reconnecting");
+
+    ScriptedSocket.serverUp = true;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(client.status).toBe("live");
+
+    ScriptedSocket.instances[ScriptedSocket.instances.length - 1]!.drop(1006);
+    const before = ScriptedSocket.instances.length;
+    await vi.advanceTimersByTimeAsync(249);
+    expect(ScriptedSocket.instances).toHaveLength(before);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(ScriptedSocket.instances).toHaveLength(before + 1);
+    client.close();
+  });
+
+  it("a rejected token is terminal: closed, no redial, requests say unauthorized", async () => {
+    vi.useFakeTimers();
+    ScriptedSocket.authOk = false;
+    const { client, statuses } = newClient();
+    await expect(client.connect()).rejects.toMatchObject({ reason: "unauthorized" });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(ScriptedSocket.instances).toHaveLength(1);
+    expect(client.status).toBe("closed");
+    expect(statuses).toEqual(["closed"]);
+    await expect(client.request("workspaces.list")).rejects.toMatchObject({ reason: "unauthorized" });
+  });
+
+  it("close() ends the redial loop and settles as closed", async () => {
+    vi.useFakeTimers();
+    const { client, statuses } = newClient();
+    await client.connect();
+    ScriptedSocket.instances[0]!.drop(1006);
+    client.close();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(ScriptedSocket.instances).toHaveLength(1);
+    expect(statuses).toEqual(["live", "reconnecting", "closed"]);
+    await expect(client.request("workspaces.list")).rejects.toMatchObject({ reason: "closed" });
+  });
+
+  it("before the first live it keeps dialling as connecting, never reconnecting", async () => {
+    vi.useFakeTimers();
+    ScriptedSocket.serverUp = false;
+    const { client, statuses } = newClient();
+    const opened = client.connect();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(ScriptedSocket.instances.length).toBeGreaterThan(2);
+    expect(client.status).toBe("connecting");
+    expect(statuses).toEqual([]);
+    ScriptedSocket.serverUp = true;
+    await vi.advanceTimersByTimeAsync(5_000);
+    await opened;
+    expect(statuses).toEqual(["live"]);
+    client.close();
   });
 });
