@@ -1,2 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 export * from "./manifest.js";
+export * from "./host.js";
+export { collect, DETECTORS } from "./collect.js";
+export type { Detector } from "./detect/common.js";
+export { detectIdentity } from "./detect/identity.js";
+export { detectShell } from "./detect/shell.js";
+export { detectEditors, parseExtensionList } from "./detect/editors.js";
+export { detectToolchains } from "./detect/toolchains.js";
+export {
+  detectTools, parseBrewfile, parseCargoInstalls, parseGoVersionM, parseNpmGlobals, parsePipxList, parseUvToolList,
+  type BrewLine, type GoModule, type Pkg,
+} from "./detect/tools.js";
+export { AGENTS, detectAgents } from "./detect/agents.js";
+export { detectLogins } from "./detect/logins.js";
