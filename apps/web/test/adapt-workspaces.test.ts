@@ -47,14 +47,22 @@ describe("deriveSidebarProjects", () => {
     const projects = deriveSidebarProjects({
       workspaces: [LIVE_WORKSPACE_2, LIVE_WORKSPACE_1],
       statuses: statusesFrom(LIVE_RUN_1),
-      sessions: { [LIVE_WS]: [{ id: "s1", workspaceId: LIVE_WS, harness: "claude", status: "completed", claudeSessionId: "59094224" }] },
+      sessions: {
+        [LIVE_WS]: [
+          { id: "s1", workspaceId: LIVE_WS, harness: "claude", status: "completed", claudeSessionId: "59094224", prompt: "hello", startedAt: Date.parse("2026-09-02T17:19:35.668Z"), endedAt: Date.parse("2026-09-02T17:19:37.768Z") },
+          { id: "s0", workspaceId: LIVE_WS, harness: "claude", status: "running", claudeSessionId: "59094224" },
+        ],
+      },
     });
     expect(projects.map(p => [p.displayName, p.indicator.label, p.remoteEnvironmentLabels, p.threads.length])).toEqual([
-      ["first", "Running", ["machine-1"], 1],
+      ["first", "Running", ["machine-1"], 2],
       ["yolo", "Running", ["machine-2"], 0],
     ]);
     expect(projects[0]).toMatchObject({ projectKey: LIVE_WS, environmentPresence: "remote-only", groupedProjectCount: 1, allRemoteMembersAreDesktopLocal: false, machineState: "running", reach: "reachable" });
-    expect(projects[0]?.threads[0]).toEqual({ id: "s1", workspaceId: LIVE_WS, title: "59094224", status: "completed", indicator: { label: "Completed", tone: "neutral", pulse: false } });
+    expect(projects[0]?.threads).toEqual([
+      { id: "s1", workspaceId: LIVE_WS, title: "hello", status: "completed", startedAt: "2026-09-02T17:19:35.668Z", endedAt: "2026-09-02T17:19:37.768Z", indicator: { label: "Completed", tone: "neutral", pulse: false } },
+      { id: "s0", workspaceId: LIVE_WS, title: "59094224", status: "running", startedAt: null, endedAt: null, indicator: { label: "Working", tone: "running", pulse: true } },
+    ]);
   });
 
   it("the restart log: a napping status wins over the stale view phase", () => {

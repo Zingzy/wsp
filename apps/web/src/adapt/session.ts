@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Session events into chat view models. Ported from t3code session-logic.ts
 // (deriveWorkLogEntries, deriveTimelineEntries; commit 57a66608) against
-// @wsp/protocol's SessionEvent. One wsp session run is one turn; a resumed
-// Claude session id repeats across turns, so the turn id is the session id
-// plus the ordinal of its session.start. Wire order is the timeline order:
-// session events carry no timestamp, so createdAt is whatever the caller's
-// clock says (receipt time) and "" when it says nothing.
-import type { SessionEvent, TurnResult } from "@wsp/protocol";
+// @wsp/protocol's SessionEvent. One wsp session run is one turn, keyed by the
+// runtime's turnId; events from before the runtime stamped one fall back to
+// the session id plus the ordinal of its session.start, since a resumed Claude
+// session id repeats across turns. Wire order is the timeline order. createdAt
+// is the wire's `at` (ms epoch) as ISO, else the caller's receipt clock, else
+// "" for unstamped history.
+import type { SessionEvent, SessionHarness, TurnResult } from "@wsp/protocol";
 import type {
   ChatMessage,
   ProviderRequestKind,
@@ -25,10 +26,12 @@ export interface SessionModel {
   readonly latestTurn: TurnSummary | null;
   readonly running: boolean;
   readonly model: string | null;
+  /** What the CLI announced about itself on the last session.start that carried it. */
+  readonly harness: SessionHarness | null;
 }
 
 export interface DeriveSessionOptions {
-  /** Receipt clock for an event; undefined leaves createdAt empty. */
+  /** Receipt clock for an event without a wire `at`; undefined leaves createdAt empty. */
   readonly at?: (event: SessionEvent, index: number) => string | undefined;
 }
 
@@ -57,6 +60,7 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
   const startsBySession = new Map<string, number>();
   let turn: TurnBuild | null = null;
   let model: string | null = null;
+  let harness: SessionHarness | null = null;
 
   const push = (entry: TimelineEntry): number => {
     timeline.push(entry);
@@ -115,8 +119,33 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
     turns[turns.length - 1] = t.summary;
   };
 
+  const openTurn = (event: SessionEvent, turnId: string, count: number, at: string): TurnBuild => {
+    const start = event.type === "session.start" ? event : null;
+    const summary: TurnSummary = {
+      turnId,
+      sessionId: event.sessionId,
+      state: "running",
+      prompt: start?.prompt ?? null,
+      model: start?.model ?? null,
+      durationMs: null,
+      costUsd: null,
+      error: null,
+      startedAt: at || null,
+      completedAt: null,
+    };
+    turns.push(summary);
+    return { summary, startCount: count, ordinal: 0, openMessage: null, sawText: false, tools: new Map(), openAnonymousTool: null };
+  };
+  /** A delta, done or end whose turn never started here (history capped mid-turn) still needs a turn to hang on. */
+  const turnFor = (event: SessionEvent, at: string): TurnBuild => {
+    if (turn !== null && (event.turnId === undefined || event.turnId === turn.summary.turnId)) return turn;
+    if (turn !== null && turn.summary.state === "running") finishTurn(turn, { status: "failed", error: "session restarted before it finished" }, at);
+    turn = openTurn(event, event.turnId ?? `${event.sessionId}#0`, 0, at);
+    return turn;
+  };
+
   for (const [index, event] of events.entries()) {
-    const at = options.at?.(event, index) ?? "";
+    const at = event.at !== undefined ? new Date(event.at).toISOString() : options.at?.(event, index) ?? "";
     switch (event.type) {
       case "session.start": {
         if (turn && turn.summary.state === "running") {
@@ -125,46 +154,26 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
         const count = (startsBySession.get(event.sessionId) ?? 0) + 1;
         startsBySession.set(event.sessionId, count);
         model = event.model ?? model;
-        const summary: TurnSummary = {
-          turnId: `${event.sessionId}#${count}`,
-          sessionId: event.sessionId,
-          state: "running",
-          prompt: event.prompt ?? null,
-          model: event.model ?? null,
-          durationMs: null,
-          costUsd: null,
-          error: null,
-          startedAt: at || null,
-          completedAt: null,
-        };
-        turns.push(summary);
-        turn = { summary, startCount: count, ordinal: 0, openMessage: null, sawText: false, tools: new Map(), openAnonymousTool: null };
+        harness = event.harness ?? harness;
+        turn = openTurn(event, event.turnId ?? `${event.sessionId}#${count}`, count, at);
         if (event.prompt !== undefined) addMessage(turn, "user", event.prompt, at, false);
         continue;
       }
       case "session.delta": {
-        // A delta before any start (history capped mid-turn) still needs a turn to hang on.
-        if (!turn) {
-          const summary: TurnSummary = {
-            turnId: `${event.sessionId}#0`, sessionId: event.sessionId, state: "running", prompt: null, model: null,
-            durationMs: null, costUsd: null, error: null, startedAt: at || null, completedAt: null,
-          };
-          turns.push(summary);
-          turn = { summary, startCount: 0, ordinal: 0, openMessage: null, sawText: false, tools: new Map(), openAnonymousTool: null };
-        }
-        applyDelta(turn, event, at);
+        applyDelta(turnFor(event, at), event, at);
         continue;
       }
       case "session.done": {
-        if (turn) finishTurn(turn, event.result, at);
+        finishTurn(turnFor(event, at), event.result, at);
         continue;
       }
       case "session.end": {
-        if (turn && turn.summary.state === "running") {
+        const t = turnFor(event, at);
+        if (t.summary.state === "running") {
           const error = event.sawResult
             ? "session exited without a result"
             : `session exited without a result (exit code ${event.exitCode ?? "unknown"})`;
-          finishTurn(turn, { status: "failed", error }, at);
+          finishTurn(t, { status: "failed", error }, at);
         }
         continue;
       }
@@ -224,17 +233,18 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
         const key = e.toolUseId ?? (t.openAnonymousTool !== null ? `anon:${t.openAnonymousTool}` : undefined);
         const call = key !== undefined ? t.tools.get(key) : undefined;
         const entry = call ? work(call.entryIndex) : undefined;
+        const orphanOutput = summarizeOutput(e.text);
         if (!call || !entry) {
           addWork(t, {
             createdAt: at, label: e.toolName ?? "tool", toolTitle: e.toolName ?? "tool", tone: "tool",
             ...(e.toolUseId !== undefined ? { toolCallId: e.toolUseId } : {}),
             toolLifecycleStatus: e.isError ? "failed" : "completed", sourceActivityKind: "tool.completed",
-            ...(e.text.length > 0 ? { detail: summarizeOutput(e.text) } : {}),
+            ...(orphanOutput !== undefined ? { detail: orphanOutput } : {}),
           }, at);
           return;
         }
         const failed = e.isError === true || entry.toolLifecycleStatus === "failed";
-        const output = e.text.length > 0 ? summarizeOutput(e.text) : undefined;
+        const output = summarizeOutput(e.text);
         replace(call.entryIndex, workEntry({
           ...entry,
           toolLifecycleStatus: failed ? "failed" : "completed",
@@ -258,7 +268,7 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
     if (entry.kind === "message") messages.push(entry.message);
     else if (entry.kind === "work") workEntries.push(entry.entry);
   }
-  return { turns, messages, workEntries, timeline, latestTurn: turns[turns.length - 1] ?? null, running, model };
+  return { turns, messages, workEntries, timeline, latestTurn: turns[turns.length - 1] ?? null, running, model, harness };
 }
 
 function messageEntry(m: ChatMessage): TimelineEntry {
@@ -342,7 +352,6 @@ function toolKind(toolName: string): { itemType?: ToolLifecycleItemType; request
   if (WEB_TOOLS.has(toolName)) return { itemType: "web_search" };
   if (toolName === "Task") return { itemType: "collab_agent_tool_call" };
   if (toolName.startsWith("mcp__")) return { itemType: "mcp_tool_call" };
-  if (CODE_SEARCH_TOOLS.has(toolName)) return {};
   return {};
 }
 
@@ -350,10 +359,10 @@ export function isCodeSearchTool(toolName: string | undefined): boolean {
   return toolName !== undefined && CODE_SEARCH_TOOLS.has(toolName);
 }
 
-/** First non-empty line, cut to 84 characters like t3code's inline preview; a blank-only result yields the line count. */
-export function summarizeOutput(text: string): string {
+/** First non-empty line, cut to 84 characters like t3code's inline preview; fence-only output has nothing to show. */
+export function summarizeOutput(text: string): string | undefined {
   const lines = text.split(/\r?\n/).map(line => line.replace(/\s+/g, " ").trim()).filter(line => line.length > 0);
   const first = lines.find(line => line !== "```");
-  if (first === undefined) return lines.length > 1 ? `${lines.length} lines` : text.trim();
+  if (first === undefined) return lines.length > 1 ? `${lines.length} lines` : undefined;
   return first.length <= 84 ? first : `${first.slice(0, 83).trimEnd()}…`;
 }

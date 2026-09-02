@@ -29,4 +29,4 @@ export {
 export { applyPortsSnapshot, applyPortEvent, toPreviewableServers, type KnownPort, type PortsSnapshot, type PreviewableServersInput } from "./ports.js";
 export { deriveSidebarProjects, deriveThread, workspaceIndicator, threadIndicator, type SidebarInput } from "./workspaces.js";
 export { toTerminalAttachEvent, isPtyEvent } from "./terminal.js";
-export { CLAUDE_CODE_CATALOG, catalogFor } from "./catalog.js";
+export { CLAUDE_CODE_CATALOG, catalogFor, catalogFromHarness, permissionMode } from "./catalog.js";

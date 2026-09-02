@@ -65,8 +65,10 @@ export function deriveThread(session: SessionView): SidebarThreadSnapshot {
   return {
     id: session.id,
     workspaceId: session.workspaceId,
-    title: session.claudeSessionId ?? session.id,
+    title: session.prompt ?? session.claudeSessionId ?? session.id,
     status: session.status,
+    startedAt: session.startedAt !== undefined ? new Date(session.startedAt).toISOString() : null,
+    endedAt: session.endedAt !== undefined ? new Date(session.endedAt).toISOString() : null,
     indicator: threadIndicator(session),
   };
 }

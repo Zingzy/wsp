@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { SessionEvent } from "@wsp/protocol";
 import { deriveMessagesTimelineRows, deriveSession, formatDuration } from "../src/adapt/index.js";
 import type { WorkLogEntry } from "../src/adapt/index.js";
-import { CHAT_STREAM } from "./fixtures/chat-stream.js";
+import { CHAT_STREAM, CHAT_TURN } from "./fixtures/chat-stream.js";
 import { LIVE_RUN_1, LIVE_SID, sessionEventsOf } from "./fixtures/live-run-1.js";
 
 const scope = { workspaceId: "ws_t", sessionId: "sess_t" };
@@ -32,7 +32,7 @@ describe("deriveSession: the chat fixture", () => {
       ["assistant", "Server is live at :3000."],
     ]);
     expect(model.messages.every(m => !m.streaming)).toBe(true);
-    expect(model.messages.every(m => m.turnId === "sess_0001#1")).toBe(true);
+    expect(model.messages.every(m => m.turnId === CHAT_TURN)).toBe(true);
   });
 
   it("turns the tool call and its result into one completed command row, thinking into a thinking row", () => {
@@ -53,10 +53,11 @@ describe("deriveSession: the chat fixture", () => {
 
   it("summarises the turn from session.done and clears running on session.end", () => {
     expect(model.turns).toEqual([
-      expect.objectContaining({ turnId: "sess_0001#1", state: "completed", durationMs: 10458, costUsd: 0.0187, model: "claude-sonnet-4-5", prompt: null }),
+      expect.objectContaining({ turnId: CHAT_TURN, state: "completed", durationMs: 10458, costUsd: 0.0187, model: "claude-sonnet-4-5", prompt: null }),
     ]);
     expect(model.running).toBe(false);
-    expect(model.latestTurn?.turnId).toBe("sess_0001#1");
+    expect(model.latestTurn?.turnId).toBe(CHAT_TURN);
+    expect(model.turns[0]).toMatchObject({ startedAt: "2026-09-01T01:31:29.412Z", completedAt: "2026-09-01T01:31:39.870Z" });
   });
 
   it("keeps wire order in the timeline: text, tool, thinking, text", () => {
@@ -75,7 +76,7 @@ describe("deriveSession: streaming states", () => {
     expect(m.workEntries[0]).toMatchObject({ toolLifecycleStatus: "inProgress", sourceActivityKind: "tool.started", requestKind: "file-read", detail: "/a.ts" });
   });
 
-  it("keeps the assistant message streaming only while it is the newest thing in a running turn", () => {
+  it("the newest assistant message in a running turn is streaming", () => {
     const m = deriveSession([start, { type: "session.delta", ...scope, kind: "text", text: "Look" }]);
     expect(m.messages.at(-1)?.streaming).toBe(true);
   });
@@ -124,12 +125,37 @@ describe("deriveSession: streaming states", () => {
     else expect(errors).toEqual([expect.objectContaining({ label: errorLabel, sourceActivityKind: "runtime.error", turnId: "sess_t#1" })]);
   });
 
-  it("stamps createdAt from the caller's clock and leaves it empty when there is none", () => {
-    const stamped = deriveSession(CHAT_STREAM, { at: (_e, i) => `2026-09-01T00:00:0${i}Z` });
-    expect(stamped.messages[0]?.createdAt).toBe("2026-09-01T00:00:01Z");
-    expect(stamped.messages[0]?.updatedAt).toBe("2026-09-01T00:00:02Z");
-    expect(stamped.turns[0]).toMatchObject({ startedAt: "2026-09-01T00:00:00Z", completedAt: "2026-09-01T00:00:07Z" });
-    expect(deriveSession(CHAT_STREAM).messages[0]?.createdAt).toBe("");
+  it("createdAt: the wire's at wins, then the caller's clock, then empty", () => {
+    const wire = deriveSession(CHAT_STREAM, { at: () => "1999-01-01T00:00:00Z" });
+    expect(wire.messages[0]?.createdAt).toBe("2026-09-01T01:31:30.612Z");
+    expect(wire.messages[0]?.updatedAt).toBe("2026-09-01T01:31:30.862Z");
+    const unstamped = CHAT_STREAM.map(({ at: _at, ...e }) => e as SessionEvent);
+    const clock = deriveSession(unstamped, { at: (_e, i) => `2026-09-01T00:00:0${i}Z` });
+    expect(clock.messages[0]?.createdAt).toBe("2026-09-01T00:00:01Z");
+    expect(clock.turns[0]).toMatchObject({ startedAt: "2026-09-01T00:00:00Z", completedAt: "2026-09-01T00:00:07Z" });
+    expect(deriveSession(unstamped).messages[0]?.createdAt).toBe("");
+  });
+
+  it("turn id: the wire's turnId wins; without one the session id plus start ordinal stands in", () => {
+    const unkeyed = CHAT_STREAM.map(({ turnId: _t, ...e }) => e as SessionEvent);
+    expect(deriveSession(unkeyed).turns.map(t => t.turnId)).toEqual(["sess_0001#1"]);
+    expect(deriveSession([...unkeyed, ...unkeyed]).turns.map(t => t.turnId)).toEqual(["sess_0001#1", "sess_0001#2"]);
+  });
+
+  it("a delta whose turnId never started here opens its own turn (history cut mid-turn)", () => {
+    const m = deriveSession([
+      { type: "session.delta", ...scope, turnId: "turn_x", kind: "text", text: "tail of an older turn" },
+      { type: "session.done", ...scope, turnId: "turn_x", result: { status: "completed", durationMs: 5 } },
+      { ...start, turnId: "turn_y" },
+    ]);
+    expect(m.turns.map(t => [t.turnId, t.state])).toEqual([["turn_x", "completed"], ["turn_y", "running"]]);
+    expect(m.messages.map(x => [x.turnId, x.role])).toEqual([["turn_x", "assistant"], ["turn_y", "user"]]);
+  });
+
+  it("a fence-only tool result carries no detail", () => {
+    const m = deriveSession([start, tool("Bash", { command: "cat x" }), result("```")]);
+    expect(m.workEntries[0]?.detail).toBeUndefined();
+    expect(m.workEntries[0]?.toolLifecycleStatus).toBe("completed");
   });
 });
 
@@ -188,19 +214,19 @@ describe("deriveMessagesTimelineRows", () => {
   it("settled turn: work folds behind 'Worked for' and only the terminal assistant message shows meta", () => {
     const r = rows(CHAT_STREAM);
     expect(r.map(x => x.kind)).toEqual(["turn-fold", "message"]);
-    expect(r[0]).toMatchObject({ kind: "turn-fold", turnId: "sess_0001#1", label: "Worked for 10s", expanded: false });
+    expect(r[0]).toMatchObject({ kind: "turn-fold", turnId: CHAT_TURN, label: "Worked for 10s", expanded: false });
     expect(r[1]).toMatchObject({ kind: "message", showAssistantMeta: true, assistantCopyStreaming: false });
   });
 
   it("expanding the fold shows every entry: first message, the tool group toggle, the last message", () => {
-    const r = rows(CHAT_STREAM, { expandedTurnIds: new Set(["sess_0001#1"]) });
+    const r = rows(CHAT_STREAM, { expandedTurnIds: new Set([CHAT_TURN]) });
     expect(r.map(x => x.kind)).toEqual(["turn-fold", "message", "work-toggle", "message"]);
     expect(r[2]).toMatchObject({ kind: "work-toggle", summary: "Ran 1 command", summaryKind: "command", hiddenCount: 1, hasFailure: false });
     expect(r[1]).toMatchObject({ kind: "message", showAssistantMeta: false });
   });
 
   it("expanding the tool group appends the detail row with the thinking entry included", () => {
-    const r = rows(CHAT_STREAM, { expandedTurnIds: new Set(["sess_0001#1"]), expandedWorkGroupIds: new Set(["work-group:tool:sess_0001#1:toolu_01WspFixBash1"]) });
+    const r = rows(CHAT_STREAM, { expandedTurnIds: new Set([CHAT_TURN]), expandedWorkGroupIds: new Set([`work-group:tool:${CHAT_TURN}:toolu_01WspFixBash1`]) });
     const detail = r.find(x => x.kind === "work");
     expect(detail).toMatchObject({ kind: "work", isExpandedToolGroup: true });
     expect(detail?.kind === "work" && detail.groupedEntries.map(e => e.tone)).toEqual(["tool", "thinking"]);
@@ -242,7 +268,7 @@ describe("deriveMessagesTimelineRows", () => {
 
   it("snapshot: the chat fixture, settled and expanded", () => {
     expect(rows(CHAT_STREAM)).toMatchSnapshot();
-    expect(rows(CHAT_STREAM, { expandedTurnIds: new Set(["sess_0001#1"]) })).toMatchSnapshot();
+    expect(rows(CHAT_STREAM, { expandedTurnIds: new Set([CHAT_TURN]) })).toMatchSnapshot();
   });
 
   it("snapshot: live run 1", () => {

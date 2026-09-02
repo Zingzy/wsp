@@ -27,7 +27,7 @@ export function toTerminalAttachEvent(workspaceId: string, event: PtyEvent): Ter
       return { ...base, type: "activity", hasRunningSubprocess: event.mode === "raw", label: event.foreground };
     default: {
       const _exhaustive: never = event;
-      return { ...base, type: "output", data: "" };
+      throw new Error(`not a pty event: ${JSON.stringify(_exhaustive)}`);
     }
   }
 }

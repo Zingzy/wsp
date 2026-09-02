@@ -3,18 +3,20 @@
 // from t3code useDiscoveredLocalServers.ts PreviewableServer (commit
 // 57a66608). The ports.watch reply seeds the set and port.open/port.close keep
 // it current; the runtime's PortOpenEvent/PortCloseEvent (workspace-scoped)
-// fold the same way. The daemon reports pid only, so processName stays null.
+// fold the same way. processName is the daemon's /proc/<pid>/comm read, null
+// when it could not read one.
 import type { DaemonEvent, EventUnion } from "@wsp/protocol";
 import type { PreviewableServer } from "./view-model.js";
 
 export interface KnownPort {
   readonly port: number;
   readonly pid: number | null;
+  readonly process: string | null;
 }
 
 /** ports.watch's reply payload. */
 export interface PortsSnapshot {
-  readonly ports: ReadonlyArray<{ readonly port: number; readonly pid?: number | null }>;
+  readonly ports: ReadonlyArray<{ readonly port: number; readonly pid?: number | null; readonly process?: string | null }>;
 }
 
 type PortEvent =
@@ -23,7 +25,7 @@ type PortEvent =
 
 export function applyPortsSnapshot(snapshot: PortsSnapshot): KnownPort[] {
   const byPort = new Map<number, KnownPort>();
-  for (const p of snapshot.ports) if (!byPort.has(p.port)) byPort.set(p.port, { port: p.port, pid: p.pid ?? null });
+  for (const p of snapshot.ports) if (!byPort.has(p.port)) byPort.set(p.port, { port: p.port, pid: p.pid ?? null, process: p.process ?? null });
   return [...byPort.values()].sort((a, b) => a.port - b.port);
 }
 
@@ -32,7 +34,7 @@ export function applyPortEvent(ports: ReadonlyArray<KnownPort>, event: PortEvent
   switch (event.type) {
     case "port.open":
       if (ports.some(p => p.port === event.port)) return [...ports];
-      return [...ports, { port: event.port, pid: event.pid ?? null }].sort((a, b) => a.port - b.port);
+      return [...ports, { port: event.port, pid: event.pid ?? null, process: event.process ?? null }].sort((a, b) => a.port - b.port);
     case "port.close":
       return ports.filter(p => p.port !== event.port);
     default: {
@@ -55,7 +57,7 @@ export function toPreviewableServers(input: PreviewableServersInput): Previewabl
       host: "localhost",
       port: p.port,
       url: input.reachUrl?.(p.port) ?? requestedUrl,
-      processName: null,
+      processName: p.process,
       pid: p.pid,
       terminal: null,
       source: "scanner",

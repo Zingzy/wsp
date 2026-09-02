@@ -208,8 +208,11 @@ export interface StatusIndicator {
 export interface SidebarThreadSnapshot {
   readonly id: string;
   readonly workspaceId: string;
+  /** The user's prompt when the runtime recorded one, else the Claude session id, else the row id. */
   readonly title: string;
   readonly status: SessionStatus;
+  readonly startedAt: string | null;
+  readonly endedAt: string | null;
   readonly indicator: StatusIndicator | null;
 }
 
@@ -265,7 +268,7 @@ export interface ProviderModel {
 export interface PermissionMode {
   readonly slug: string;
   readonly name: string;
-  readonly description: string;
+  readonly description?: string;
   readonly isDefault?: boolean;
 }
 

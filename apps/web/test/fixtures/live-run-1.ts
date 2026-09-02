@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Live run 1 (2026-09-02, Solari sandbox golden v1) as the runtime's event
-// stream saw it, copied from ~/wsp-live/.home/events.log and events2.log.
-// The listener that wrote those logs kept golden.*, workspace.*, session.start,
+// stream saw it, copied from the live-run listener's events.log and events2.log.
+// These events predate the wire's at and turnId fields, so they exercise the
+// fallbacks. The listener kept golden.*, workspace.*, session.start,
 // session.done and session.end only (no session.delta), dropped result.text,
 // and cut every JSON payload at 140 characters. What that means for this copy:
 // - `at` is the listener's relative stamp turned into an ISO time; t0 is fixed
 //   by the golden's sealed timestamp in state.json (2026-09-02T17:18:49.268Z at
 //   +614.5s).
-// - Machine ids are redacted to machine-1 / machine-2.
+// - Machine ids are redacted to machine-1 / machine-2, the golden snapshot id
+//   to snap-golden-v1.
 // - Fields cut off by the 140-char limit are omitted where the schema allows
 //   (costUsd, tools, model) and filled from state.json and the cost events
 //   where it does not (golden, size, rateUsdPerHour, reach); those are marked
@@ -28,7 +30,7 @@ export const LIVE_WS = "ws_f2cb42d4";
 export const LIVE_WS_2 = "ws_d954eced";
 export const LIVE_SID = "59094224-bb3d-43b6-b054-322aa849fa00";
 const scope = { workspaceId: LIVE_WS, sessionId: LIVE_SID };
-const GOLDEN = "snap_dl502ms4vs8k"; // filled: state.json goldens.default.versions[0]
+const GOLDEN = "snap-golden-v1"; // filled: state.json goldens.default.versions[0], redacted
 const SIZE = { cpu: 2, memMb: 4096 }; // filled: the 0.11 USD/h rate in the cost events is this size's awake rate
 
 export const LIVE_WORKSPACE_1 = {
