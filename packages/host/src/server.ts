@@ -185,11 +185,16 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     });
   });
 
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    // The app carries the runtime token; never expose it beyond loopback.
-    server.listen(opts.port ?? 4400, "127.0.0.1", resolve);
-  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      // The app carries the runtime token; never expose it beyond loopback.
+      server.listen(opts.port ?? 4400, "127.0.0.1", resolve);
+    });
+  } catch (e) {
+    await rtServer.close();
+    throw e;
+  }
   const addr = server.address();
   const port = typeof addr === "object" && addr !== null ? addr.port : (opts.port ?? 4400);
 
