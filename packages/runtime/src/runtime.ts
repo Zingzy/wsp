@@ -442,6 +442,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     golden: r.golden,
     createdAt: r.createdAt,
     ...(r.claudeSessionId !== undefined ? { claudeSessionId: r.claudeSessionId } : {}),
+    ...(r.screen !== undefined ? { screen: r.screen } : {}),
   });
 
   const persist = async (r: WorkspaceRecord): Promise<void> => {
@@ -535,6 +536,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (shape !== undefined) record.shape = shape;
     else delete record.shape;
     record.size = sizeBuilt(shape, spec);
+    if (machine.streamUrl !== undefined) record.screen = { streamUrl: machine.streamUrl };
+    else delete record.screen;
     return machine;
   };
 
@@ -599,7 +602,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           if ((e as { kind?: string }).kind === "missing") return deadMachine(stored.machineId);
           throw e;
         });
-        attach({ ...stored, size: stored.size ?? sizeBuilt(await shapeOf(machine), backend.pricing.defaultSize) }, machine);
+        attach(
+          {
+            ...stored,
+            size: stored.size ?? sizeBuilt(await shapeOf(machine), backend.pricing.defaultSize),
+            ...(machine.streamUrl !== undefined ? { screen: { streamUrl: machine.streamUrl } } : {}),
+          },
+          machine,
+        );
       }
       for (const raw of await store.list(TRANSCRIPTS)) {
         const t = raw as TranscriptRecord;

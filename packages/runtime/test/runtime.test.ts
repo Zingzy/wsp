@@ -875,3 +875,52 @@ describe("runtime workspace size", () => {
     expect((await rt2.status.list())[0]!.size).toEqual({ cpu: 2, memMb: 2048 });
   });
 });
+
+describe("runtime workspace screen", () => {
+  /** A provider whose forks boot as desktop machines: every machine it builds streams a display. */
+  function desktopBackend() {
+    const backend = stubBackend();
+    const create = backend.create.bind(backend);
+    backend.create = spec => create({ ...spec, kind: "desktop" });
+    return backend;
+  }
+
+  it("a desktop machine's stream rides the view and the status; a sandbox carries no screen", async () => {
+    const desktop = desktopBackend();
+    const rt = createRuntime({ backend: desktop, store: memoryStore(), adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    expect(ws.screen).toEqual({ streamUrl: "wss://stub/stream/m1" });
+    expect((await rt.workspaces.get(ws.id)).screen).toEqual({ streamUrl: "wss://stub/stream/m1" });
+    expect((await rt.status.list())[0]!.screen).toEqual({ streamUrl: "wss://stub/stream/m1" });
+
+    const headless = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
+    const sandbox = await headless.workspaces.create({ golden: "snap_g", name: "b" });
+    expect(sandbox).not.toHaveProperty("screen");
+    expect((await headless.status.list())[0]).not.toHaveProperty("screen");
+  });
+
+  it("the stream survives a restart and a wake on the same machine; a resurrect refreshes it from the new machine", async () => {
+    const backend = desktopBackend();
+    const store = memoryStore();
+    const rt1 = createRuntime({ backend, store, adapters: {} });
+    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
+    await rt1.workspaces.nap(ws.id);
+
+    const rt2 = createRuntime({ backend, store, adapters: {} });
+    expect((await rt2.workspaces.get(ws.id)).screen).toEqual({ streamUrl: "wss://stub/stream/m1" });
+    const woken = await rt2.workspaces.wake(ws.id);
+    expect(woken.machineId).toBe("m1");
+    expect(woken.screen).toEqual({ streamUrl: "wss://stub/stream/m1" });
+
+    const pushed: EventUnion[] = [];
+    rt2.events.on("workspace.status", e => pushed.push(e));
+    await rt2.workspaces.nap(ws.id);
+    backend.machines[0]!.killed = true;
+    const resurrected = await rt2.workspaces.wake(ws.id);
+    expect(resurrected.machineId).toBe("m2");
+    expect(resurrected.screen).toEqual({ streamUrl: "wss://stub/stream/m2" });
+    const last = pushed.at(-1) as { status: { screen?: { streamUrl: string } } };
+    expect(last.status.screen).toEqual({ streamUrl: "wss://stub/stream/m2" });
+    expect((await store.get("workspaces", ws.id) as { screen?: unknown }).screen).toEqual({ streamUrl: "wss://stub/stream/m2" });
+  });
+});
