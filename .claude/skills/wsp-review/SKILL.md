@@ -48,6 +48,8 @@ Review wsp changes against the laws this project has already paid for. Generic c
 
 ## Process laws
 
+- Never kill processes by pattern (`pkill -f`, `killall`) in tests, scripts, or your own cleanup: a pattern built from a shell variable that is empty in a later tool call matched and killed the user's live host once. Start processes with a recorded pid and kill that pid. A pattern kill in a diff or a build log is a should-fix.
+
 - No process language in source comments: no ticket numbers, plan names, or merge-history narration. A comment states a constraint for the next reader; process lives in the tracker.
 
 - Conventional commit subject <72 chars + a why-paragraph; NO co-author trailers.
