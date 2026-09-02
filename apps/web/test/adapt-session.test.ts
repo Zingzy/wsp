@@ -48,7 +48,7 @@ describe("deriveSession: the chat fixture", () => {
       toolLifecycleStatus: "completed",
       sourceActivityKind: "tool.completed",
     });
-    expect(thinking).toMatchObject({ tone: "thinking", label: "Thinking", detail: "curl returned the greeting, so the server is live.", sourceActivityKind: "reasoning" });
+    expect(thinking).toMatchObject({ tone: "thinking", label: "Thinking", detail: "curl returned the greeting, so the server is live.", preview: "curl returned the greeting, so the server is live.", sourceActivityKind: "reasoning" });
   });
 
   it("summarises the turn from session.done and clears running on session.end", () => {
@@ -221,8 +221,28 @@ describe("deriveMessagesTimelineRows", () => {
   it("expanding the fold shows every entry: first message, the tool group toggle, the last message", () => {
     const r = rows(CHAT_STREAM, { expandedTurnIds: new Set([CHAT_TURN]) });
     expect(r.map(x => x.kind)).toEqual(["turn-fold", "message", "work-toggle", "message"]);
-    expect(r[2]).toMatchObject({ kind: "work-toggle", summary: "Ran 1 command", summaryKind: "command", hiddenCount: 1, hasFailure: false });
+    expect(r[2]).toMatchObject({ kind: "work-toggle", summary: "Ran 1 command", summaryKind: "command", hiddenCount: 2, hasFailure: false });
     expect(r[1]).toMatchObject({ kind: "message", showAssistantMeta: false });
+  });
+
+  it("reasoning rows carry a one-line preview and the full text, and a reasoning-only group reads Thinking", () => {
+    const m = deriveSession([start, { type: "session.delta", ...scope, kind: "thinking", text: "first line of thought\nsecond line" }, { type: "session.delta", ...scope, kind: "thinking", text: " continues" }, done, end]);
+    expect(m.workEntries[0]).toMatchObject({ tone: "thinking", preview: "first line of thought", detail: "first line of thought\nsecond line continues" });
+    const r = rows([start, { type: "session.delta", ...scope, kind: "thinking", text: "quiet reasoning" }, done, end], { expandedTurnIds: new Set(["sess_t#1"]) });
+    expect(r.map(x => x.kind)).toEqual(["message", "turn-fold", "work-toggle"]);
+    expect(r[2]).toMatchObject({ kind: "work-toggle", summary: "Thinking", summaryKind: "agent-tool", hiddenCount: 1 });
+  });
+
+  it("an empty reasoning marker stays neutral and out of the group", () => {
+    const r = rows([start, { type: "session.delta", ...scope, kind: "thinking", text: "" }, tool("Bash", { command: "ls" }), result("ok"), done, end], { expandedTurnIds: new Set(["sess_t#1"]) });
+    expect(r[2]).toMatchObject({ kind: "work-toggle", summary: "Ran 1 command", hiddenCount: 1 });
+  });
+
+  it("the live row names the reasoning when it came after the last tool", () => {
+    const r = rows([start, tool("Bash", { command: "ls" }), result("ok"), { type: "session.delta", ...scope, kind: "thinking", text: "weighing the output" }]);
+    const live = r.find(x => x.kind === "work-live");
+    expect(live?.kind === "work-live" && live.entry.tone).toBe("thinking");
+    expect(live?.kind === "work-live" && live.groupedEntries.map(e => e.tone)).toEqual(["tool", "thinking"]);
   });
 
   it("expanding the tool group appends the detail row with the thinking entry included", () => {

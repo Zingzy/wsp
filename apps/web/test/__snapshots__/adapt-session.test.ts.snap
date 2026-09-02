@@ -141,7 +141,7 @@ exports[`deriveMessagesTimelineRows > snapshot: the chat fixture, settled and ex
     "expanded": false,
     "groupId": "work-group:tool:turn_0001:toolu_01WspFixBash1",
     "hasFailure": false,
-    "hiddenCount": 1,
+    "hiddenCount": 2,
     "id": "work-toggle:turn_0001:w2",
     "kind": "work-toggle",
     "summary": "Ran 1 command",

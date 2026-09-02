@@ -116,8 +116,6 @@ export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTime
       if (visible.length > 0) {
         const id = groupId(entry.id, entry.entry);
         const expanded = input.expandedWorkGroupIds?.has(id) ?? false;
-        // Thinking rows are neutral and stay out of the summary; opening the group is how they are read.
-        const detail = grouped.filter(e => isVisibleInGroup(e, true));
         const activeInProgress = visible.filter(inActiveRun);
         if (activeInProgress.length > 0) {
           rows.push({
@@ -135,7 +133,7 @@ export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTime
             hasFailure: latestTool !== undefined && indicatesFailure(latestTool),
           });
         }
-        if (expanded) rows.push(expandedGroupRow(id, entry.createdAt, detail));
+        if (expanded) rows.push(expandedGroupRow(id, entry.createdAt, visible));
       }
       index = cursor - 1;
       continue;
@@ -309,13 +307,14 @@ export function indicatesSuccess(entry: WorkLogEntry): boolean {
   return s !== "inProgress" && s !== "stopped";
 }
 
-/** Tool-like with neither clear success nor failure: in progress, stopped, or thinking. */
+/** Tool-like with neither clear success nor failure: in progress or stopped. Reasoning with text is its own thing to show, never neutral. */
 export function indicatesNeutral(entry: WorkLogEntry): boolean {
+  if (entry.tone === "thinking" && entry.detail !== undefined && entry.detail.trim().length > 0) return false;
   return isToolLike(entry) && !indicatesFailure(entry) && !indicatesSuccess(entry);
 }
 
 function isVisibleInGroup(entry: WorkLogEntry, expandedOrActive: boolean): boolean {
-  return (expandedOrActive && (entry.toolLifecycleStatus === "inProgress" || entry.tone === "thinking")) || !indicatesNeutral(entry);
+  return (expandedOrActive && entry.toolLifecycleStatus === "inProgress") || !indicatesNeutral(entry);
 }
 
 function isActiveTurnActivity(entry: WorkLogEntry): boolean {
@@ -360,9 +359,12 @@ function actionLabel(action: ToolGroupAction, count: number): string {
   }
 }
 
+/** Reasoning rows sit in the group but are not tools: the summary counts tools, and a group of reasoning alone reads "Thinking". */
 export function summarizeToolGroup(entries: ReadonlyArray<WorkLogEntry>): string {
+  const tools = entries.filter(e => e.tone !== "thinking");
+  if (tools.length === 0 && entries.length > 0) return "Thinking";
   const byAction = new Map<ToolGroupAction, WorkLogEntry[]>();
-  for (const entry of entries) {
+  for (const entry of tools) {
     const action = toolGroupAction(entry);
     const group = byAction.get(action);
     if (group) group.push(entry);
@@ -378,7 +380,8 @@ export function summarizeToolGroup(entries: ReadonlyArray<WorkLogEntry>): string
 }
 
 export function toolGroupSummaryKind(entries: ReadonlyArray<WorkLogEntry>): ToolGroupSummaryKind {
-  const actions = new Set(entries.map(toolGroupAction));
+  const tools = entries.filter(e => e.tone !== "thinking");
+  const actions = new Set((tools.length > 0 ? tools : entries).map(toolGroupAction));
   if (actions.size !== 1) return "mixed";
   const action = [...actions][0]!;
   if (action !== "other") return action;

@@ -46,6 +46,8 @@ export interface WorkLogEntry {
   readonly toolCallId?: string;
   readonly label: string;
   readonly detail?: string;
+  /** The one collapsed line for a row whose detail is prose (reasoning): its first line, cut like a tool preview. */
+  readonly preview?: string;
   readonly command?: string;
   readonly changedFiles?: ReadonlyArray<string>;
   readonly tone: "thinking" | "tool" | "info" | "error";

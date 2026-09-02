@@ -200,10 +200,10 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
         closeOpenMessage(t);
         const last = timeline[timeline.length - 1];
         if (last?.kind === "work" && last.entry.tone === "thinking" && last.entry.turnId === t.summary.turnId) {
-          replace(timeline.length - 1, workEntry({ ...last.entry, detail: (last.entry.detail ?? "") + e.text }, last.createdAt));
+          replace(timeline.length - 1, workEntry(thinkingEntry(last.entry, (last.entry.detail ?? "") + e.text), last.createdAt));
           return;
         }
-        addWork(t, { createdAt: at, label: "Thinking", detail: e.text, tone: "thinking", sourceActivityKind: "reasoning" }, at);
+        addWork(t, thinkingEntry({ createdAt: at, label: "Thinking", tone: "thinking", sourceActivityKind: "reasoning" }, e.text), at);
         return;
       }
       case "tool_use": {
@@ -269,6 +269,12 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
     else if (entry.kind === "work") workEntries.push(entry.entry);
   }
   return { turns, messages, workEntries, timeline, latestTurn: turns[turns.length - 1] ?? null, running, model, harness };
+}
+
+/** Reasoning renders as one collapsed line (preview) that opens onto the text (detail). */
+function thinkingEntry<T extends Omit<WorkLogEntry, "id" | "turnId" | "detail" | "preview">>(base: T, text: string): T & Pick<WorkLogEntry, "detail" | "preview"> {
+  const preview = summarizeOutput(text);
+  return { ...base, detail: text, ...(preview !== undefined ? { preview } : {}) };
 }
 
 function messageEntry(m: ChatMessage): TimelineEntry {
