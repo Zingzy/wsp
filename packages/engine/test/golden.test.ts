@@ -1,17 +1,22 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { BUILDER_DISK_GB, BUILDER_IDLE_MS, buildGolden, forkGolden, prepareBuilder, rollback, sealGolden, type GoldenStage } from "../src/golden.js";
+import { BUILDER_DISK_GB, BUILDER_IDLE_MS, MachineAliveError, buildGolden, forkGolden, prepareBuilder, rollback, sealGolden, type GoldenStage } from "../src/golden.js";
 import { NotFirstLifeError } from "../src/lifecycle.js";
 import type { ExecResult, Machine, MachineBackend, MachineSpec } from "../src/machine.js";
 
-function recordingBackend(execResults: Record<string, ExecResult> = {}) {
+/** A fake whose kill() resolves like the provider's DELETE does: a call for
+ * which `ignoreKill` answers true is accepted and changes nothing. */
+function recordingBackend(execResults: Record<string, ExecResult> = {}, opts: { ignoreKill?: (id: string, nth: number) => boolean } = {}) {
   const created: MachineSpec[] = [];
   const snapshots: string[] = [];
   const killed: string[] = [];
   const deletedSnapshots: string[] = [];
   /** Every create/kill/snapshot in order, so sequencing under the machine cap is provable. */
   const timeline: string[] = [];
+  const machines = new Map<string, Machine>();
+  const gone = new Set<string>();
   let nextId = 0;
+  const killCount = new Map<string, number>();
   const backend: MachineBackend = {
     capabilities: { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true },
     pricing: { rateUsdPerHour: (s: { cpu: number; memMb: number }) => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 } },
@@ -24,18 +29,31 @@ function recordingBackend(execResults: Record<string, ExecResult> = {}) {
         exec: async (cmd) => execResults[cmd] ?? { exitCode: 0, stdout: "", stderr: "" },
         snapshot: async (name) => { snapshots.push(name); timeline.push(`snapshot ${id}`); return `snap_${name}`; },
         pause: async () => {}, resume: async () => {},
-        kill: async () => { killed.push(id); timeline.push(`kill ${id}`); },
-        state: async () => "running" as const,
+        kill: async () => {
+          killed.push(id);
+          timeline.push(`kill ${id}`);
+          const nth = (killCount.get(id) ?? 0) + 1;
+          killCount.set(id, nth);
+          if (!opts.ignoreKill?.(id, nth)) gone.add(id);
+        },
+        state: async () => (gone.has(id) ? "gone" : "running"),
         downloadUrl: async () => "https://x", uploadUrl: async () => "https://x",
       };
+      machines.set(id, machine);
       return machine;
     },
-    async get() { throw new Error("unused"); },
+    async get(id) {
+      const m = machines.get(id);
+      if (!m || gone.has(id)) throw Object.assign(new Error(`no machine ${id}`), { kind: "missing", status: 404 });
+      return m;
+    },
     async list() { return []; },
     async deleteSnapshot(id) { deletedSnapshots.push(id); },
   };
   return { backend, created, snapshots, killed, deletedSnapshots, timeline };
 }
+
+const FAST_KILL = { graceMs: 20, pollMs: 1 };
 
 function stageRecorder() {
   const stages: string[] = [];
@@ -174,6 +192,42 @@ describe("interactive golden: prepare then seal", () => {
       "creating:desktop from default", "installing-harness", "ready",
       "snapshotting:golden-v1", "smoke-forking:claude --version", "sealed:v1",
     ]);
+  });
+
+  it("seal retries a kill the provider accepted without acting on, and forks only once the builder reads gone", async () => {
+    const { backend, timeline } = recordingBackend({}, { ignoreKill: (id, nth) => id === "m1" && nth === 1 });
+    const { stages, onStage } = stageRecorder();
+    const builder = await prepareBuilder({ backend, setup: "true" });
+    const { version } = await sealGolden(builder, { backend, smoke: "true", killConfirm: FAST_KILL, onStage });
+    expect(version.version).toBe(1);
+    expect(stages.at(-1)).toBe("sealed:v1");
+    expect(timeline).toEqual(["create m1", "snapshot m1", "kill m1", "kill m1", "create m2", "kill m2"]);
+    expect(await builder.machine.state()).toBe("gone");
+  });
+
+  it("seal fails with a typed error when the builder outlives two kills, and never boots the smoke fork", async () => {
+    const { backend, created, timeline, deletedSnapshots } = recordingBackend({}, { ignoreKill: () => true });
+    const { stages, onStage } = stageRecorder();
+    const builder = await prepareBuilder({ backend, setup: "true" });
+    const err = await sealGolden(builder, { backend, smoke: "true", killConfirm: FAST_KILL, onStage }).catch(e => e as unknown);
+    expect(err).toBeInstanceOf(MachineAliveError);
+    expect(err).toMatchObject({ kind: "machineAlive", machineId: "m1", state: "running" });
+    expect((err as Error).message).toMatch(/m1/);
+    expect(created).toHaveLength(1);
+    expect(timeline.filter(t => t === "kill m1").length).toBeGreaterThanOrEqual(2);
+    expect(deletedSnapshots).toEqual(["snap_golden-v1"]);
+    expect(stages.at(-1)).toMatch(/^failed:/);
+  });
+
+  it("a smoke fork that outlives its kills still seals the proven image, and the sealed stage names the leak", async () => {
+    const { backend, timeline, deletedSnapshots } = recordingBackend({}, { ignoreKill: id => id === "m2" });
+    const { stages, onStage } = stageRecorder();
+    const builder = await prepareBuilder({ backend, setup: "true" });
+    const { manifest } = await sealGolden(builder, { backend, smoke: "true", killConfirm: FAST_KILL, onStage });
+    expect(manifest.head).toBe(1);
+    expect(deletedSnapshots).toEqual([]);
+    expect(timeline).toEqual(["create m1", "snapshot m1", "kill m1", "create m2", "kill m2", "kill m2"]);
+    expect(stages.at(-1)).toMatch(/^sealed:v1; machine m2 is still running after two kills/);
   });
 
   it("seal refuses a builder that is not first-life with a typed error and touches nothing", async () => {

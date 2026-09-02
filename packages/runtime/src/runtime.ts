@@ -2,10 +2,12 @@ import { randomBytes } from "node:crypto";
 import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
 import {
   DAEMON_PORT,
+  NotFirstLifeError,
   Workspace,
   buildGolden,
   exportPaths,
   importInto,
+  killUntilGone,
   prepareBuilder,
   reap,
   refreshPreviewToken,
@@ -15,6 +17,7 @@ import {
   type ExecResult,
   type GoldenManifest,
   type GoldenVersion,
+  type KillConfirm,
   type Machine,
   type MachineBackend,
   type MachineKind,
@@ -153,6 +156,8 @@ export interface RuntimeOptions {
   vaultPaths?: string[];
   /** Defaults for the status poller / cost ticker (tests shrink the intervals). */
   status?: StatusWatchOptions;
+  /** How long a seal waits for a killed machine to read gone (tests shrink it). */
+  killConfirm?: KillConfirm;
 }
 
 /** Dirs the golden image already provides on every fresh fork; re-vaulting
@@ -720,12 +725,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           labels: { ...recipe.labels, wsp: "1", "wsp-smoke": "1", createdAt: new Date().toISOString() },
           ...(prior !== undefined ? { manifest: prior } : {}),
           onStage: stageOf(entry.record.name),
+          ...(opts.killConfirm !== undefined ? { killConfirm: opts.killConfirm } : {}),
         });
         await store.put(GOLDENS, entry.record.name, result.manifest);
         return result;
+      } catch (e) {
+        // sealGolden consumes the builder on every road but a refusal; a refused
+        // builder can never seal and under a two-machine cap must not outlive it.
+        if (e instanceof NotFirstLifeError) await killUntilGone(backend, entry.builder.machine, opts.killConfirm);
+        throw e;
       } finally {
-        // A refused builder can never seal; under a two-machine cap it must not outlive the refusal.
-        await entry.builder.machine.kill().catch(() => {});
+        // The record goes whatever happened: a machine that outlived its kills
+        // is then unrecorded, which is exactly what reap sweeps.
         await forgetBuilder(builderId);
       }
     },

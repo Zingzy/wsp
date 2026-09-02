@@ -44,6 +44,19 @@ describe("orphan reaper", () => {
     expect(killed).toEqual(["orphan-old"]);
   });
 
+  it("kills an unknown running builder whatever its age, and never a poc-labeled machine even if it wears our labels", async () => {
+    const { backend, killed } = stubBackend([
+      { id: "own-builder", state: "running", labels: { wsp: "1", "wsp-builder": "1", createdAt: YOUNG } },
+      { id: "leaked-builder", state: "running", labels: { wsp: "1", "wsp-builder": "1", createdAt: YOUNG } },
+      { id: "ageless-builder", state: "running", labels: { wsp: "1", "wsp-builder": "1" } },
+      { id: "paused-builder", state: "paused", labels: { wsp: "1", "wsp-builder": "1", createdAt: OLD } },
+      { id: "experiment", state: "running", labels: { poc: "p1", wsp: "1", "wsp-builder": "1", createdAt: OLD } },
+    ]);
+    const reaped = await reap({ backend, knownIds: ["own-builder"], now: () => NOW });
+    expect(reaped).toEqual(["leaked-builder", "ageless-builder"]);
+    expect(killed).toEqual(["leaked-builder", "ageless-builder"]);
+  });
+
   it("honors a custom age threshold", async () => {
     const { backend, killed } = stubBackend([
       { id: "young-orphan", state: "running", labels: { wsp: "1", createdAt: YOUNG } },
