@@ -49,7 +49,7 @@ function fakeApi(workspaces: WorkspaceView[]): Api {
 
 beforeEach(() => {
   window.localStorage.clear();
-  useStore.setState({ api: null, capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, sessions: {}, ready: false, conn: "connecting" });
+  useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, sessions: {}, ready: false });
   useRightPanelStore.setState({ byWorkspaceId: {} });
 });
 
@@ -133,7 +133,7 @@ describe("app shell", () => {
     expect(useRightPanelStore.getState().byWorkspaceId["ws_a"]?.activeSurfaceId).toBe("machine");
   });
 
-  it("offers the screen surface only when the workspace streams a display", async () => {
+  it("offers the screen surface only when the status carries a display stream", async () => {
     await mountShell();
     const cardButton = () => screen.getByText("Screen", { selector: "span" }).closest("button");
     expect(cardButton()).toBeNull();
@@ -141,7 +141,7 @@ describe("app shell", () => {
       useStore.setState(s => ({
         statuses: {
           ...s.statuses,
-          ws_a: { ...view("ws_a", "api"), machineState: "running", reach: { state: "reachable" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.1, streamUrl: "wss://screen" } as never,
+          ws_a: { ...view("ws_a", "api"), machineState: "running", reach: { state: "reachable" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.1, screen: { streamUrl: "wss://screen" } },
         },
       }));
     });
@@ -155,7 +155,7 @@ class ScriptedSocket {
   static instances: ScriptedSocket[] = [];
   onopen: (() => void) | null = null;
   onmessage: ((e: { data: string }) => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((ev: { code: number }) => void) | null = null;
   onerror: (() => void) | null = null;
   constructor(readonly url: string) {
     ScriptedSocket.instances.push(this);
@@ -175,18 +175,30 @@ class ScriptedSocket {
     queueMicrotask(() => this.onmessage?.({ data: JSON.stringify(reply) }));
   }
   close(): void {
-    this.onclose?.();
+    this.onclose?.({ code: 1000 });
   }
 }
 
 describe("disconnected banner", () => {
-  it("appears when the runtime socket drops", async () => {
+  it("appears while the runtime socket redials and clears when it is back", async () => {
     ScriptedSocket.instances.length = 0;
     vi.stubGlobal("WebSocket", ScriptedSocket);
     render(<App wsUrl="ws://test" token="tok" />);
     await waitFor(() => expect(useStore.getState().conn).toBe("live"));
-    expect(screen.queryByText("wsp is not running.")).toBeNull();
+    expect(document.querySelector("[data-disconnected-banner]")).toBeNull();
     act(() => ScriptedSocket.instances[0]!.close());
+    expect(useStore.getState().conn).toBe("reconnecting");
+    expect(screen.getByText("wsp is not running, reconnecting.")).toBeTruthy();
+    // The scripted socket accepts the redial, so the client comes back on its own.
+    await waitFor(() => expect(useStore.getState().conn).toBe("live"));
+    expect(ScriptedSocket.instances.length).toBe(2);
+    expect(document.querySelector("[data-disconnected-banner]")).toBeNull();
+  });
+
+  it("asks for a reload once the socket is closed for good", async () => {
+    await mountShell();
+    act(() => useStore.setState({ conn: "closed" }));
     expect(screen.getByText("wsp is not running.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reload" })).toBeTruthy();
   });
 });

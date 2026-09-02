@@ -11,7 +11,7 @@ import type { PreviewPanelMode } from "../components/preview/PreviewPanelShell.j
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty.js";
 import { useStatus, useWorkspace } from "../protocol/store.js";
 import { useRightPanelStore, type WorkspaceRightPanelState } from "../rightPanelStore.js";
-import { resolveStreamUrl, ScreenTab } from "../tabs/ScreenTab.js";
+import { ScreenTab } from "../tabs/ScreenTab.js";
 import { getTerminals } from "../terminal/link.js";
 
 const NO_PENDING: ReadonlySet<string> = new Set();
@@ -66,7 +66,7 @@ export function RightPanel({
       diffAvailable={false}
       filesAvailable={false}
       machineAvailable={workspace !== null}
-      screenAvailable={resolveStreamUrl(status, undefined) !== null}
+      screenAvailable={status?.screen !== undefined}
       unavailableReasons={{ browser: CENTER_TABS_REASON, terminal: CENTER_TABS_REASON }}
     >
       {active?.kind === "machine" ? (

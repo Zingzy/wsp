@@ -1,21 +1,28 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Shown while the runtime socket is closed. The page's only way back is a
-// reload: the client authenticates once per socket and has no reconnect.
+// Shown while the runtime socket is down. The client redials on its own
+// after a drop, so the banner clears itself when the socket comes back;
+// a closed socket (refused token, or closed on purpose) needs a reload.
 import { Unplug } from "lucide-react";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "../components/ui/alert.js";
 import { Button } from "../components/ui/button.js";
 
-export function DisconnectedBanner() {
+export function DisconnectedBanner({ reconnecting }: { reconnecting: boolean }) {
   return (
-    <Alert variant="warning" className="m-2 shrink-0" data-disconnected-banner>
+    <Alert className="m-2 shrink-0" data-disconnected-banner={reconnecting ? "reconnecting" : "closed"}>
       <Unplug />
-      <AlertTitle>wsp is not running.</AlertTitle>
-      <AlertDescription>Start wsp in a terminal, then reload this page.</AlertDescription>
-      <AlertAction>
-        <Button size="compact" variant="outline" onClick={() => window.location.reload()}>
-          Reload
-        </Button>
-      </AlertAction>
+      <AlertTitle>{reconnecting ? "wsp is not running, reconnecting." : "wsp is not running."}</AlertTitle>
+      <AlertDescription>
+        {reconnecting
+          ? "The runtime socket dropped. Start wsp in a terminal and this page picks it up on its own."
+          : "Start wsp in a terminal, then reload this page."}
+      </AlertDescription>
+      {reconnecting ? null : (
+        <AlertAction>
+          <Button size="compact" variant="outline" onClick={() => window.location.reload()}>
+            Reload
+          </Button>
+        </AlertAction>
+      )}
     </Alert>
   );
 }

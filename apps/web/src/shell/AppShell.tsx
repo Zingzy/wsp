@@ -58,7 +58,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <SidebarRail />
       </Sidebar>
       <SidebarInset className="h-dvh min-h-0 overflow-hidden">
-        {conn === "closed" ? <DisconnectedBanner /> : null}
+        {conn === "closed" || conn === "reconnecting" ? <DisconnectedBanner reconnecting={conn === "reconnecting"} /> : null}
         <div className="flex min-h-0 flex-1 flex-row">
           <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-shell-center>
             <WorkspacePageHeader className="border-b border-border">
