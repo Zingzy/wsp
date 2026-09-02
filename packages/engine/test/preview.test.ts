@@ -95,16 +95,16 @@ describe("refreshPreviewToken", () => {
   });
 });
 
-describe("Workspace.daemonReach", () => {
-  const machineWithPreview = (id: string, expiresInMs: number) => {
-    const previewUrl = vi.fn(async (port: number): Promise<PreviewReach> => ({
-      url: `https://${id}-${port}.preview.getsolari.com?pt_token=t`,
-      token: "t",
-      expiresAt: Date.now() + expiresInMs,
-    }));
-    return { machine: stubMachine({ id, previewUrl }), previewUrl };
-  };
+const machineWithPreview = (id: string, expiresInMs: number) => {
+  const previewUrl = vi.fn(async (port: number): Promise<PreviewReach> => ({
+    url: `https://${id}-${port}.preview.getsolari.com?pt_token=t`,
+    token: "t",
+    expiresAt: Date.now() + expiresInMs,
+  }));
+  return { machine: stubMachine({ id, previewUrl }), previewUrl };
+};
 
+describe("Workspace.daemonReach", () => {
   it("mints once and reuses across calls and a nap+wake on the same machine", async () => {
     const { machine, previewUrl } = machineWithPreview("m1", PREVIEW_TTL_MS);
     const ws = new Workspace(machine, { goldenSnapshot: "snap_g" });
@@ -137,6 +137,33 @@ describe("Workspace.daemonReach", () => {
     const second = await ws.daemonReach();
     expect(first.url).toContain("m1-7070");
     expect(second.url).toContain("m2-7070");
+    expect(b.previewUrl).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Workspace.portReach", () => {
+  it("caches per port: two ports mint twice, asking again reuses each, and 7070 is the daemon's own route", async () => {
+    const { machine, previewUrl } = machineWithPreview("m1", PREVIEW_TTL_MS);
+    const ws = new Workspace(machine, { goldenSnapshot: "snap_g" });
+    const a = await ws.portReach(3000);
+    const b = await ws.portReach(5173);
+    expect(a.url).toContain("m1-3000");
+    expect(b.url).toContain("m1-5173");
+    expect(await ws.portReach(3000)).toBe(a);
+    expect(await ws.portReach(5173)).toBe(b);
+    expect(previewUrl).toHaveBeenCalledTimes(2);
+    const daemon = await ws.daemonReach();
+    expect(await ws.portReach(7070)).toBe(daemon);
+    expect(previewUrl).toHaveBeenCalledTimes(3);
+  });
+
+  it("a replaced machine voids every port's route", async () => {
+    const a = machineWithPreview("m1", PREVIEW_TTL_MS);
+    const b = machineWithPreview("m2", PREVIEW_TTL_MS);
+    const ws = new Workspace(a.machine, { goldenSnapshot: "snap_g", resurrect: async () => b.machine });
+    expect((await ws.portReach(3000)).url).toContain("m1-3000");
+    await ws.upgrade();
+    expect((await ws.portReach(3000)).url).toContain("m2-3000");
     expect(b.previewUrl).toHaveBeenCalledTimes(1);
   });
 });

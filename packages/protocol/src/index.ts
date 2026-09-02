@@ -49,6 +49,11 @@ export const DaemonReachView = z.object({
 });
 export type DaemonReachView = z.infer<typeof DaemonReachView>;
 
+/** The same minted route for any other guest port, as a browser frames it. The
+ * daemon token stays off this view: it opens the daemon's socket, not a page. */
+export const PortReachView = DaemonReachView.omit({ daemonToken: true });
+export type PortReachView = z.infer<typeof PortReachView>;
+
 export const WorkspaceSize = z.object({ cpu: z.number(), memMb: z.number() });
 export type WorkspaceSize = z.infer<typeof WorkspaceSize>;
 
@@ -403,6 +408,15 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
    * dials it). Asked per dial like workspaces.daemonReach: the edge token
    * expires hourly and a builder may sit for hours before it is sealed. */
   z.object({ id: reqId, op: z.literal("golden.builderReach"), builderId: z.string() }),
+  /** Replies with { reach: PortReachView } for one guest port, cached per port
+   * while fresh like workspaces.daemonReach. A port outside the daemon's
+   * listening set still mints: the user may have typed it. */
+  z.object({
+    id: reqId,
+    op: z.literal("workspaces.portReach"),
+    workspaceId: z.string(),
+    port: z.number().int().min(1).max(65535),
+  }),
 ]);
 export type RuntimeRequest = z.infer<typeof RuntimeRequest>;
 

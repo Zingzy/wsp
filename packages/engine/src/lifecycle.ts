@@ -39,9 +39,9 @@ export class Workspace {
   // machine that was ever resumed cross-host, and same-host vs cross-host is
   // invisible from outside. So any resume disqualifies direct snapshots.
   private firstLife = true;
-  // Keyed by machine id: pause+wake keeps a reach valid (measured), but a
-  // resurrect/upgrade replaces the machine and voids it.
-  private preview?: { machineId: string; reach: PreviewReach };
+  // Keyed by port under one machine id: pause+wake keeps a reach valid
+  // (measured), but a resurrect/upgrade replaces the machine and voids them all.
+  private preview: { machineId: string; byPort: Map<number, PreviewReach> } = { machineId: "", byPort: new Map() };
 
   constructor(
     machine: Machine,
@@ -69,12 +69,17 @@ export class Workspace {
     return this.hooks.goldenSnapshot;
   }
 
-  /** Reach for the in-guest daemon: mints the :7070 preview URL, reusing the
-   * cached one while it is fresh (under ~50 min old). */
+  /** Reach for the in-guest daemon: the :7070 route through portReach. */
   async daemonReach(): Promise<PreviewReach> {
-    const cached = this.preview?.machineId === this.machine.id ? this.preview.reach : undefined;
-    const reach = await refreshPreviewToken(this.machine, DAEMON_PORT, cached);
-    this.preview = { machineId: this.machine.id, reach };
+    return this.portReach(DAEMON_PORT);
+  }
+
+  /** Public route to one guest port, reusing the cached one while it is fresh
+   * (under ~50 min old). Whether anything listens there is not checked here. */
+  async portReach(port: number): Promise<PreviewReach> {
+    if (this.preview.machineId !== this.machine.id) this.preview = { machineId: this.machine.id, byPort: new Map() };
+    const reach = await refreshPreviewToken(this.machine, port, this.preview.byPort.get(port));
+    this.preview.byPort.set(port, reach);
     return reach;
   }
 

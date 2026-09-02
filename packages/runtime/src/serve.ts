@@ -204,6 +204,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "golden.builderReach":
               send({ id: msg.id, ok: true, reach: await rt.golden.builderReach(msg.builderId) });
               return;
+            case "workspaces.portReach":
+              send({ id: msg.id, ok: true, reach: await rt.workspaces.portReach(msg.workspaceId, msg.port) });
+              return;
           }
         } catch (e) {
           const kind = (e as { kind?: unknown }).kind;

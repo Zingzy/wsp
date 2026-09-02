@@ -242,6 +242,34 @@ describe("runtime daemon reach", () => {
   });
 });
 
+describe("runtime port reach", () => {
+  it("mints a guest port's route once while fresh, caches per port, and never reads or carries the daemon token", async () => {
+    const backend = stubBackend();
+    backend.execImpl = (_m, cmd) =>
+      cmd === "cat /root/.wsp-daemon-token" ? { exitCode: 0, stdout: "guest-token", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" };
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const minted: number[] = [];
+    backend.machines[0]!.previewUrl = async port => {
+      minted.push(port);
+      return { url: `https://m1-${port}.preview.example/?pt_token=edge`, token: "edge", expiresAt: Date.now() + 3_600_000 };
+    };
+
+    // Nothing listens on 3000 in this fixture: a typed-in port still mints, the tab decides what to show.
+    const reach = await rt.workspaces.portReach(ws.id, 3000);
+    expect(reach).toEqual({ url: "https://m1-3000.preview.example/?pt_token=edge", expiresAt: expect.any(Number) });
+    await rt.workspaces.portReach(ws.id, 3000);
+    await rt.workspaces.portReach(ws.id, 5173);
+    expect(minted).toEqual([3000, 5173]);
+    expect(backend.machines[0]!.execLog.filter(c => c.includes(".wsp-daemon-token"))).toHaveLength(0);
+  });
+
+  it("rejects an unknown workspace", async () => {
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
+    await expect(rt.workspaces.portReach("ws_nobody", 3000)).rejects.toThrow(/no such workspace/);
+  });
+});
+
 describe("runtime golden builders", () => {
   const recipe = { setup: "install", smoke: "true" };
 
