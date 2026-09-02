@@ -13,8 +13,8 @@
   border-radius: 7px 7px 0 0; margin-bottom: -1px; white-space: nowrap; cursor: pointer;
   transition: color 0.15s, background 0.15s;
 }
-.tab:hover { color: var(--muted); background: var(--hover); }
-.tab[data-active="true"] { color: var(--fg); background: var(--card); border-color: var(--soft); }
+.tab:hover { color: var(--dim); background: var(--hover); }
+.tab[data-active="true"] { color: var(--fg); background: var(--tile); border-color: var(--soft); }
 
 .exited { color: var(--deep); font-size: 10.5px; }
 
@@ -36,4 +36,4 @@
 .right { margin-left: auto; display: flex; align-items: center; padding: 0 6px 8px 12px; flex: none; }
 
 .body { flex: 1; min-height: 0; overflow: hidden; }
-.none { color: var(--muted); font-family: var(--mono); padding: 24px; }
+.none { color: var(--dim); font-family: var(--mono); padding: 24px; }

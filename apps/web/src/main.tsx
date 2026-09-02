@@ -2,6 +2,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.js";
+import "./index.css";
 import "./tokens.css";
 
 // keys: presence flags only; the host never hands a value to the browser.
