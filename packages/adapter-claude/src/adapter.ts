@@ -17,8 +17,22 @@ export interface TurnResult {
   error?: string;
 }
 
+/** What system/init says about the CLI beyond model and tools; a client builds its composer catalog from it. */
+export interface SessionHarness {
+  slashCommands?: string[];
+  permissionMode?: string;
+  agents?: string[];
+}
+
 export type AdapterEvent =
-  | { type: "session.start"; sessionId: string; model?: string; cwd?: string; tools?: string[] }
+  | {
+      type: "session.start";
+      sessionId: string;
+      model?: string;
+      cwd?: string;
+      tools?: string[];
+      harness?: SessionHarness;
+    }
   | {
       type: "turn.delta";
       sessionId: string;
@@ -94,6 +108,18 @@ function strArr(value: unknown): string[] | undefined {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : undefined;
 }
 
+function harnessOf(init: Record<string, unknown>): SessionHarness | undefined {
+  const slashCommands = strArr(init.slash_commands);
+  const permissionMode = str(init.permissionMode);
+  const agents = strArr(init.agents);
+  if (slashCommands === undefined && permissionMode === undefined && agents === undefined) return undefined;
+  return {
+    ...(slashCommands !== undefined ? { slashCommands } : {}),
+    ...(permissionMode !== undefined ? { permissionMode } : {}),
+    ...(agents !== undefined ? { agents } : {}),
+  };
+}
+
 function parseLine(raw: string): Record<string, unknown> | undefined {
   const line = raw.trim();
   if (!line.startsWith("{")) return undefined;
@@ -152,6 +178,7 @@ function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: strin
   switch (str(event.type)) {
     case "system": {
       if (str(event.subtype) !== "init") return [];
+      const harness = harnessOf(event);
       return [
         {
           type: "session.start",
@@ -159,6 +186,7 @@ function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: strin
           model: str(event.model),
           cwd: str(event.cwd),
           tools: strArr(event.tools),
+          ...(harness !== undefined ? { harness } : {}),
         },
       ];
     }
