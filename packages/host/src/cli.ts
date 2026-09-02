@@ -3,7 +3,7 @@
 // on loopback. There is no control plane; the Solari key is read here
 // and used only for direct calls from this process to the machine API.
 
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -201,33 +201,118 @@ export function makeRuntime(keys: Keys, statePath: string): Runtime {
   });
 }
 
+interface HostLock {
+  pid: number;
+  port: number;
+  wsPort: number;
+  startedAt: string;
+}
+
+function isHostLock(v: unknown): v is HostLock {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    "pid" in v &&
+    typeof v.pid === "number" &&
+    "port" in v &&
+    typeof v.port === "number" &&
+    "wsPort" in v &&
+    typeof v.wsPort === "number" &&
+    "startedAt" in v &&
+    typeof v.startedAt === "string"
+  );
+}
+
+function errnoCode(e: unknown): string | undefined {
+  return e instanceof Error && "code" in e && typeof e.code === "string" ? e.code : undefined;
+}
+
+/** EPERM means the pid exists under another user, so it counts as alive. */
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return errnoCode(e) === "EPERM";
+  }
+}
+
+function readLock(path: string): HostLock | undefined {
+  if (!existsSync(path)) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+    return isHostLock(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function heldBy(lock: HostLock, statePath: string): Error {
+  return new Error(
+    `another wsp host (pid ${lock.pid}) is already serving ${statePath} on port ${lock.port} (ws ${lock.wsPort}). ` +
+      "Stop it first, or point --state at a different file.",
+  );
+}
+
+/** One state file, one host. A lock whose pid is gone is a crash leftover and
+ * gives way; a lock this process cannot parse is treated the same. */
+function takeLock(lockPath: string, statePath: string): HostLock {
+  const held = readLock(lockPath);
+  if (held !== undefined && pidAlive(held.pid)) throw heldBy(held, statePath);
+  const lock: HostLock = { pid: process.pid, port: 0, wsPort: 0, startedAt: new Date().toISOString() };
+  mkdirSync(dirname(lockPath), { recursive: true });
+  rmSync(lockPath, { force: true });
+  try {
+    writeFileSync(lockPath, JSON.stringify(lock), { flag: "wx" });
+  } catch (e) {
+    if (errnoCode(e) !== "EEXIST") throw e;
+    const winner = readLock(lockPath);
+    throw winner !== undefined ? heldBy(winner, statePath) : new Error(`another wsp host just took ${lockPath}`);
+  }
+  return lock;
+}
+
 export async function serve(
   io: CliIO,
   opts: { port: number; wsPort: number; statePath: string; webDir?: string; runtime?: Runtime },
 ): Promise<HostHandle> {
-  const keys = await loadKeys(io);
-  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath);
-  const handle = await startHost({
-    runtime: rt,
-    port: opts.port,
-    wsPort: opts.wsPort,
-    webDir: opts.webDir ?? defaultWebDir(),
-    keys: { anthropic: keys.anthropic !== undefined },
-    ...(keys.anthropic !== undefined ? { workspaceEnvs: claudeEnvs(keys.anthropic) } : {}),
-    log: line => io.log(line),
-  });
-  // Other local tools read the token from disk; the WS never sees it in a URL.
-  const tokenPath = join(dirname(opts.statePath), "host-token");
-  mkdirSync(dirname(tokenPath), { recursive: true });
-  writeFileSync(tokenPath, handle.authToken, { mode: 0o600 });
+  const stateDir = dirname(opts.statePath);
+  const lockPath = join(stateDir, "host.lock");
+  const lock = takeLock(lockPath, opts.statePath);
+  try {
+    const keys = await loadKeys(io);
+    const rt = opts.runtime ?? makeRuntime(keys, opts.statePath);
+    const handle = await startHost({
+      runtime: rt,
+      port: opts.port,
+      wsPort: opts.wsPort,
+      webDir: opts.webDir ?? defaultWebDir(),
+      keys: { anthropic: keys.anthropic !== undefined },
+      ...(keys.anthropic !== undefined ? { workspaceEnvs: claudeEnvs(keys.anthropic) } : {}),
+      log: line => io.log(line),
+    });
+    writeFileSync(lockPath, JSON.stringify({ ...lock, port: handle.port, wsPort: handle.wsPort }));
+    // Other local tools read the token from disk; the WS never sees it in a URL.
+    const tokenPath = join(stateDir, "host-token");
+    writeFileSync(tokenPath, handle.authToken, { mode: 0o600 });
 
-  io.log(`app         http://127.0.0.1:${handle.port}`);
-  io.log(`runtime ws  ws://127.0.0.1:${handle.wsPort} (token: ${tokenPath})`);
-  io.log(`state       ${opts.statePath}`);
-  if (keys.anthropic === undefined) {
-    io.log("note: no ANTHROPIC_API_KEY found; new workspaces fork without claude credentials");
+    io.log(`app         http://127.0.0.1:${handle.port}`);
+    io.log(`runtime ws  ws://127.0.0.1:${handle.wsPort} (token: ${tokenPath})`);
+    io.log(`state       ${opts.statePath}`);
+    if (keys.anthropic === undefined) {
+      io.log("note: no ANTHROPIC_API_KEY found; new workspaces fork without claude credentials");
+    }
+    return {
+      ...handle,
+      close: async () => {
+        await handle.close();
+        rmSync(lockPath, { force: true });
+      },
+    };
+  } catch (e) {
+    rmSync(lockPath, { force: true });
+    throw e;
   }
-  return handle;
 }
 
 export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<number> {
