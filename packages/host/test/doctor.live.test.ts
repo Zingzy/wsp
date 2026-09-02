@@ -3,13 +3,9 @@ import { prepareBuilder, SolariBackend, type GoldenStage } from "@wsp/engine";
 import { afterAll, describe, expect, it } from "vitest";
 import { LIVE, liveEnv } from "../../engine/test/live.js";
 import { goldenRecipe } from "../src/cli.js";
-import { deployDaemon } from "../src/doctor.js";
+import { deployDaemon, isReserved as untouchable } from "../src/doctor.js";
 
 const LABEL = { wsp: "1", "wsp-test": "daemon-desktop-live" };
-
-function untouchable(labels: Record<string, string>): boolean {
-  return "poc" in labels;
-}
 
 describe.runIf(LIVE)("daemon deploy on a desktop builder (live)", () => {
   const env = LIVE ? liveEnv() : (undefined as never);

@@ -311,7 +311,10 @@ class Timings {
   }
 }
 
-const RESERVED = { key: "poc", value: "ttl-test" }; // sleeping experiment: never touch
+/** Sleeping experiments on the account carry a poc label (ttl-test, p1, ...): never touch them. */
+export function isReserved(labels: Record<string, string>): boolean {
+  return "poc" in labels;
+}
 /** Harness install and its proof; the scripted doctor build and the wizard recipe share them. */
 export const GOLDEN_SETUP = "curl -fsSL https://claude.ai/install.sh | bash";
 export const GOLDEN_SMOKE = "claude --version";
@@ -449,9 +452,7 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
       async () => {
         await rt.workspaces.delete(workspaceId!);
         workspaceId = undefined;
-        const leftover = (await rt.backend.list()).filter(
-          m => m.labels[RESERVED.key] !== RESERVED.value && m.state !== "gone",
-        );
+        const leftover = (await rt.backend.list()).filter(m => !isReserved(m.labels) && m.state !== "gone");
         if (leftover.length > 0) throw new Error(`machines still up: ${leftover.map(m => m.id).join(", ")}`);
       },
       () => "workspace deleted, no machines left on the account",

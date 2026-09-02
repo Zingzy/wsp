@@ -13,6 +13,7 @@ import {
   deployDaemon,
   deployScript,
   GUEST_NODE,
+  isReserved,
   packBundle,
   stageDaemonBundle,
   tarPackCommand,
@@ -23,6 +24,15 @@ import { stubBackend } from "./stub-backend.js";
 function tmp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
 }
+
+describe("isReserved", () => {
+  it("treats any poc-labelled machine as untouchable, not only poc=ttl-test", () => {
+    expect(isReserved({ poc: "ttl-test" })).toBe(true);
+    expect(isReserved({ poc: "p1", wsp: "1" })).toBe(true);
+    expect(isReserved({ wsp: "1", "wsp-doctor": "1" })).toBe(false);
+    expect(isReserved({})).toBe(false);
+  });
+});
 
 describe("stageDaemonBundle", () => {
   let dir: string | undefined;

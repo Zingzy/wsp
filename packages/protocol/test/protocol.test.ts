@@ -153,11 +153,13 @@ describe("runtime wire types", () => {
       { id: 17, op: "golden.prepare", name: "default" },
       { id: 18, op: "golden.prepare", name: "default", kind: "desktop" },
       { id: 19, op: "golden.seal", builderId: "m1" },
+      { id: 20, op: "golden.builderReach", builderId: "m1" },
     ];
     for (const r of reqs) expect(RuntimeRequest.parse(r)).toEqual(r);
     expect(() => RuntimeRequest.parse({ id: 1, op: "workspaces.create" })).toThrow(); // golden+name required
     expect(() => RuntimeRequest.parse({ id: 1, op: "golden.prepare", name: "d", kind: "browser" })).toThrow();
     expect(() => RuntimeRequest.parse({ id: 1, op: "golden.seal" })).toThrow(); // builderId required
+    expect(() => RuntimeRequest.parse({ id: 1, op: "golden.builderReach" })).toThrow();
     expect(RuntimeResponse.parse({ id: 4, ok: true, workspace: { id: "w" } })).toBeTruthy();
     expect(RuntimeResponse.parse({ id: 4, ok: false, error: "nope" })).toBeTruthy();
   });

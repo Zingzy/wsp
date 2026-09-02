@@ -176,6 +176,28 @@ describe("serveRuntime golden wizard ops", () => {
     c.close();
   });
 
+  it("golden.prepare defaults to a sandbox with no screen, and golden.builderReach hands back its daemon route", async () => {
+    const backend = stubBackend();
+    backend.execImpl = (_m, cmd) =>
+      cmd === "cat /root/.wsp-daemon-token" ? { exitCode: 0, stdout: "builder-token", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" };
+    const runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+
+    const prepared = await c.request("golden.prepare", { name: "default" });
+    expect(prepared["builder"]).toMatchObject({ id: "m1", kind: "sandbox" });
+    expect(prepared["builder"]).not.toHaveProperty("screen");
+    expect(backend.machines[0]!.spec).toMatchObject({ kind: "sandbox", template: "base", diskGb: 20 });
+
+    backend.machines[0]!.previewUrl = async port => ({ url: `https://m1-${port}.preview.example/?pt_token=edge`, token: "edge", expiresAt: Date.now() + 3_600_000 });
+    const reach = await c.request("golden.builderReach", { builderId: "m1" });
+    expect(reach.ok).toBe(true);
+    expect(reach["reach"]).toEqual({ url: "https://m1-7070.preview.example/?pt_token=edge", expiresAt: expect.any(Number), daemonToken: "builder-token" });
+    const missing = await c.request("golden.builderReach", { builderId: "m9" });
+    expect(missing).toMatchObject({ ok: false, error: expect.stringMatching(/no such builder/) });
+    c.close();
+  });
+
   it("golden.seal on a builder hydrated by a later process is refused as notFirstLife and the builder dies", async () => {
     const backend = stubBackend();
     const store = memoryStore();

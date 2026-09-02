@@ -201,6 +201,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               });
               return;
             }
+            case "golden.builderReach":
+              send({ id: msg.id, ok: true, reach: await rt.golden.builderReach(msg.builderId) });
+              return;
           }
         } catch (e) {
           const kind = (e as { kind?: unknown }).kind;
