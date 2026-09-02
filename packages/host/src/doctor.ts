@@ -51,16 +51,49 @@ export async function stageDaemonBundle(stageDir: string, daemonDir = resolveDae
   );
 }
 
+/** Desktop templates ship no node; the sandbox template carries its own.
+ * The pins are nodejs.org's SHASUMS256.txt entries for this release. */
+export const GUEST_NODE = {
+  version: "22.23.2",
+  sha256: {
+    x86_64: "b294a556e639d64338823920e5866c21c02741742d2e1529ee1a225c1ec9252a",
+    aarch64: "013b59cfd2819703a6f4a14ab891fc46fc2a4e3f5bcd92de3fb4929b43e35b30",
+  },
+} as const;
+
+function nodeBootstrap(): string {
+  const v = GUEST_NODE.version;
+  return [
+    "if ! command -v node >/dev/null 2>&1; then",
+    '  arch="$(uname -m)"',
+    '  case "$arch" in',
+    `    x86_64) pkg=node-v${v}-linux-x64.tar.gz sha=${GUEST_NODE.sha256.x86_64} ;;`,
+    `    aarch64) pkg=node-v${v}-linux-arm64.tar.gz sha=${GUEST_NODE.sha256.aarch64} ;;`,
+    '    *) echo "unsupported arch: $arch" >&2; exit 1 ;;',
+    "  esac",
+    `  curl -fsSL -o "/tmp/$pkg" "https://nodejs.org/dist/v${v}/$pkg"`,
+    '  echo "$sha  /tmp/$pkg" | sha256sum -c - >/dev/null',
+    '  tar -xzf "/tmp/$pkg" -C /usr/local --strip-components=1',
+    '  rm -f "/tmp/$pkg"',
+    "  export npm_config_nodedir=/usr/local",
+    "fi",
+  ].join("\n");
+}
+
 /** The in-guest install+start sequence. The setsid line ends in a bare `&`
  * with the sleep on the same statement: `&` already terminates a command, so
  * joining it with `;` would be a bash syntax error (a live run died on it). */
 export function deployScript(token: string): string {
   return [
     "set -e",
+    'export PATH="/usr/local/bin:$PATH"',
     "mkdir -p /root/wsp-daemon /root/inbox",
     "tar -xzf /root/wsp-daemon.tgz -C /root/wsp-daemon",
+    nodeBootstrap(),
+    'echo "NODE_VERSION $(node --version)"',
     "cd /root/wsp-daemon",
     "npm install --omit=dev --no-audit --no-fund > /tmp/wsp-npm.log 2>&1 || { tail -3 /tmp/wsp-npm.log; echo NPM_FAIL; false; }",
+    "rm -rf /root/.npm /root/.cache/node-gyp /root/wsp-daemon/node_modules/node-pty/prebuilds",
     "umask 077",
     `printf '%s' '${token}' > /root/.wsp-daemon-token`,
     "setsid nohup node /root/wsp-daemon/start.mjs > /root/daemon.log 2>&1 < /dev/null & sleep 1.5",
@@ -68,26 +101,49 @@ export function deployScript(token: string): string {
   ].join("\n");
 }
 
-/** Upload and start the daemon on a machine; returns the minted auth token. */
+/** macOS tar writes com.apple.provenance as pax xattr headers; GNU tar in the
+ * guest warns once per file and buries real errors. Measured on bsdtar 3.5.3:
+ * --no-xattrs strips them, --no-mac-metadata alone does not and is bsdtar-only. */
+export function tarPackCommand(
+  stage: string,
+  tgz: string,
+  platform: NodeJS.Platform = process.platform,
+): { file: string; args: string[]; env: NodeJS.ProcessEnv } {
+  const flags = platform === "darwin" ? ["--no-xattrs", "--no-mac-metadata"] : ["--no-xattrs"];
+  return {
+    file: "tar",
+    args: [...flags, "-czf", tgz, "-C", stage, "."],
+    env: { ...process.env, COPYFILE_DISABLE: "1" },
+  };
+}
+
+export async function packBundle(stage: string, tgz: string): Promise<void> {
+  const { file, args, env } = tarPackCommand(stage, tgz);
+  await execFileAsync(file, args, { env });
+}
+
+/** Upload and start the daemon on a machine; returns the minted auth token and
+ * the Node version the daemon runs on. */
 export async function deployDaemon(
   machine: Machine,
   opts: { token?: string; daemonDir?: string } = {},
-): Promise<{ token: string }> {
+): Promise<{ token: string; node: string }> {
   const token = opts.token ?? randomBytes(24).toString("hex");
   const stage = mkdtempSync(join(tmpdir(), "wsp-daemon-bundle-"));
   const tgz = `${stage}.tgz`;
   try {
     await stageDaemonBundle(stage, opts.daemonDir);
-    await execFileAsync("tar", ["-czf", tgz, "-C", stage, "."]);
+    await packBundle(stage, tgz);
     const putUrl = await machine.uploadUrl("/root/wsp-daemon.tgz");
     const put = await fetch(putUrl, { method: "PUT", body: readFileSync(tgz) });
     if (!put.ok) throw new Error(`bundle upload failed: HTTP ${put.status}`);
 
-    const res = await machine.exec(deployScript(token), { timeoutMs: 120_000 });
+    const res = await machine.exec(deployScript(token), { timeoutMs: 180_000 });
     if (res.exitCode !== 0 || !res.stdout.includes("DAEMON_UP")) {
       throw new Error(`daemon deploy failed: ${res.stdout.slice(-300)} ${res.stderr.slice(-200)}`);
     }
-    return { token };
+    const node = /NODE_VERSION (v\S+)/.exec(res.stdout)?.[1] ?? "unknown";
+    return { token, node };
   } finally {
     rmSync(stage, { recursive: true, force: true });
     rmSync(tgz, { force: true });
@@ -324,7 +380,7 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
     const { token } = await timings.time(
       "deploy daemon",
       () => deployDaemon(machine, opts.daemonDir !== undefined ? { daemonDir: opts.daemonDir } : {}),
-      () => "tar upload + in-guest npm install (node-pty compile) + start on 0.0.0.0:7070",
+      r => `node ${r.node}: tar upload + npm install (node-pty compile) + start on 0.0.0.0:7070`,
     );
 
     if (!machine.previewUrl) {
