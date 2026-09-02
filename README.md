@@ -17,10 +17,10 @@ Node 22+, pnpm, and a Solari API key. Add an Anthropic key if you want
 claude sessions.
 
 ```sh
-pnpm install && pnpm -r build
+pnpm install && pnpm build
 printf 'SOLARI_API_KEY=%s\n' "$YOUR_KEY" > .env
-npx wsp             # the app on http://127.0.0.1:4400
-npx wsp doctor      # prove the reach path against one live machine
+pnpm wsp            # the app on http://127.0.0.1:4400
+pnpm wsp doctor     # prove the reach path against one live machine
 ```
 
 `wsp` reads keys from `.env` in the working directory or from the
