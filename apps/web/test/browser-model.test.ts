@@ -44,3 +44,41 @@ describe("WorkspaceBrowser", () => {
     expect(b.ports()).toBe(b.ports()); // stable snapshot for useSyncExternalStore
   });
 });
+
+describe("WorkspaceBrowser.syncPorts", () => {
+  it("adopts the daemon's snapshot: adds missing, drops absent, keeps first-seen of survivors, notifies once", () => {
+    let now = 1000;
+    let notified = 0;
+    const b = new WorkspaceBrowser(() => now);
+    b.onChange(() => notified++);
+    b.feedEvent({ type: "port.open", workspaceId: WS, port: 80, pid: 1 });
+    b.feedEvent({ type: "port.open", workspaceId: WS, port: 81 });
+    now = 2000;
+    b.syncPorts([{ port: 80, pid: 7 }, { port: 3000, pid: null }]);
+    expect(b.ports()).toEqual([
+      { port: 80, pid: 1, firstSeen: 1000 },
+      { port: 3000, pid: null, firstSeen: 2000 },
+    ]);
+    expect(notified).toBe(3);
+  });
+
+  it("an identical snapshot changes nothing and does not notify", () => {
+    let notified = 0;
+    const b = new WorkspaceBrowser(() => 0);
+    b.syncPorts([{ port: 80, pid: 1 }]);
+    b.onChange(() => notified++);
+    const before = b.ports();
+    b.syncPorts([{ port: 80, pid: 9 }]);
+    expect(b.ports()).toBe(before);
+    expect(notified).toBe(0);
+  });
+
+  it("ignores a malformed reply rather than clearing the directory", () => {
+    const b = new WorkspaceBrowser(() => 0);
+    b.syncPorts([{ port: 80, pid: 1 }]);
+    b.syncPorts(undefined);
+    b.syncPorts("nope");
+    b.syncPorts([{ port: "80" }, null]);
+    expect(b.ports()).toEqual([{ port: 80, pid: 1, firstSeen: 0 }]);
+  });
+});
