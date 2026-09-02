@@ -8,13 +8,14 @@ here are included or relied upon under their own licenses, reproduced below.
 1. pingdotgg/t3code (MIT)
 
    Files under apps/web/src/components (the ui, chat and preview folders,
-   the right-panel, page-header and no-active-thread components),
-   apps/web/src/hooks,
-   apps/web/src/lib/utils.ts, apps/web/src/index.css,
+   ChatMarkdown.tsx, the right-panel, page-header and no-active-thread
+   components), apps/web/src/work-log, apps/web/src/hooks,
+   apps/web/src/lib, apps/web/src/index.css,
    apps/web/src/rightPanelStore.ts, apps/web/src/rightPanelLayout.ts and
    apps/web/src/workspaceTitlebar.ts are adapted from
    https://github.com/pingdotgg/t3code at commit 57a66608. Each file
-   carries an "Adapted from" line naming its source path. Trademarks,
+   carries an "Adapted from" line naming its source path. The two files
+   under patches/ are taken from t3code's patches directory. Trademarks,
    names and logos of T3 Tools Inc. are not licensed and do not appear.
 
    MIT License
@@ -125,9 +126,10 @@ here are included or relied upon under their own licenses, reproduced below.
 
 ------------------------------------------------------------------------
 
-5. @pierre/diffs and @pierre/trees (Apache-2.0), used by later tasks
+5. @pierre/diffs and @pierre/trees (Apache-2.0)
 
-   The files and diff panes will depend on these packages from
+   The chat's syntax highlighting and inline diffs depend on @pierre/diffs;
+   the files pane will depend on @pierre/trees. Both are from
    https://github.com/pierre-computer. Apache License, Version 2.0:
 
    Apache License
@@ -331,3 +333,32 @@ here are included or relied upon under their own licenses, reproduced below.
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+
+------------------------------------------------------------------------
+
+6. @legendapp/list (MIT), Moo.do LLC
+
+   The chat timeline virtualizes with this package, applied with the patch
+   at patches/@legendapp__list@3.3.5.patch.
+
+   MIT License
+
+   Copyright (c) 2022 Moo.do LLC
+
+   Permission is hereby granted, free of charge, to any person obtaining a copy
+   of this software and associated documentation files (the "Software"), to deal
+   in the Software without restriction, including without limitation the rights
+   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+   copies of the Software, and to permit persons to whom the Software is
+   furnished to do so, subject to the following conditions:
+
+   The above copyright notice and this permission notice shall be included in all
+   copies or substantial portions of the Software.
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+   SOFTWARE.
