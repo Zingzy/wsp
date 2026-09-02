@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Folds wsp session events into the chat view model. One wsp session is one
 // turn; a conversation is a chain of sessions resumed through the workspace's
-// claudeSessionId, so successive sessions accumulate into one thread. The wire
-// carries no timestamps, so `at` is the arrival time and is nudged forward by
-// a millisecond when two events share one, which keeps sort order stable.
+// claudeSessionId, so successive sessions accumulate into one thread. Events
+// stamped by the runtime carry `at` (ms epoch) and `turnId`; events recorded
+// before those fields existed fall back to the arrival time and the session
+// id. A stamp is nudged forward a millisecond when two events share one, which
+// keeps sort order stable.
 import type { EventUnion, SessionEvent, TurnResult } from "@wsp/protocol";
 import { deriveTimelineEntries } from "./sessionLogic";
 import type { ChatMessage, LatestTurn, TimelineEntry, ToolLifecycleItemType, TurnId, WorkLogEntry } from "./types";
@@ -51,6 +53,14 @@ export function isSessionEvent(e: EventUnion): e is SessionEvent {
 }
 
 const PENDING_TURN = "pending";
+
+function eventAt(e: SessionEvent, fallback: string): string {
+  return typeof e.at === "number" && Number.isFinite(e.at) ? new Date(e.at).toISOString() : fallback;
+}
+
+function eventTurnId(e: SessionEvent): TurnId {
+  return e.turnId ?? e.sessionId;
+}
 
 function stamp(state: ChatThreadState, at: string): { at: string; state: ChatThreadState } {
   const last = state.lastAt;
@@ -103,18 +113,20 @@ export function applySessionEvent(state: ChatThreadState, e: EventUnion, at: str
   if (!isSessionEvent(e)) return state;
   if (state.workspaceId !== null && e.workspaceId !== state.workspaceId) return state;
   const bound = state.workspaceId === null ? { ...state, workspaceId: e.workspaceId } : state;
+  const when = eventAt(e, at);
+  const turnId = eventTurnId(e);
   switch (e.type) {
     case "session.start":
-      return startTurn(bound, e, at);
+      return startTurn(bound, e, turnId, when);
     case "session.delta":
-      return applyDelta(bound, e, at);
+      return applyDelta(bound, e, turnId, when);
     case "session.done":
-      return settleTurn(bound, e.sessionId, e.result, at);
+      return settleTurn(bound, turnId, e.result, when);
     case "session.end": {
-      if (e.sawResult) return { ...bound, runningTurnId: bound.runningTurnId === e.sessionId ? null : bound.runningTurnId };
-      if (bound.turnResults[e.sessionId] !== undefined) return bound;
+      if (e.sawResult) return { ...bound, runningTurnId: bound.runningTurnId === turnId ? null : bound.runningTurnId };
+      if (bound.turnResults[turnId] !== undefined) return bound;
       const error = `session exited without a result (exit code ${e.exitCode ?? "unknown"})`;
-      return settleTurn(bound, e.sessionId, { status: "failed", error }, at);
+      return settleTurn(bound, turnId, { status: "failed", error }, when);
     }
     default: {
       const _exhaustive: never = e;
@@ -123,16 +135,16 @@ export function applySessionEvent(state: ChatThreadState, e: EventUnion, at: str
   }
 }
 
-function startTurn(state: ChatThreadState, e: Extract<SessionEvent, { type: "session.start" }>, at: string): ChatThreadState {
+function startTurn(state: ChatThreadState, e: Extract<SessionEvent, { type: "session.start" }>, turnId: TurnId, at: string): ChatThreadState {
   const s = stamp(state, at);
   let messages = s.state.messages;
   const pending = messages.findLast(m => m.role === "user" && m.turnId === PENDING_TURN);
   if (pending !== undefined && (e.prompt === undefined || pending.text === e.prompt)) {
-    messages = messages.map(m => (m === pending ? { ...m, turnId: e.sessionId } : m));
+    messages = messages.map(m => (m === pending ? { ...m, turnId } : m));
   } else if (e.prompt !== undefined) {
     messages = [
       ...messages,
-      { id: nextId(s.state, "user"), role: "user", text: e.prompt, turnId: e.sessionId, streaming: false, createdAt: s.at, updatedAt: s.at },
+      { id: nextId(s.state, "user"), role: "user", text: e.prompt, turnId, streaming: false, createdAt: s.at, updatedAt: s.at },
     ];
   }
   return {
@@ -140,9 +152,9 @@ function startTurn(state: ChatThreadState, e: Extract<SessionEvent, { type: "ses
     messages,
     model: e.model ?? s.state.model,
     cwd: e.cwd ?? s.state.cwd,
-    runningTurnId: e.sessionId,
+    runningTurnId: turnId,
     latestTurn: {
-      turnId: e.sessionId,
+      turnId,
       state: "running",
       requestedAt: s.at,
       startedAt: s.at,
@@ -203,9 +215,8 @@ function toolEntryFields(toolName: string, input: Record<string, unknown> | null
   }
 }
 
-function applyDelta(state: ChatThreadState, e: Extract<SessionEvent, { type: "session.delta" }>, at: string): ChatThreadState {
+function applyDelta(state: ChatThreadState, e: Extract<SessionEvent, { type: "session.delta" }>, turnId: TurnId, at: string): ChatThreadState {
   const s = stamp(state, at);
-  const turnId = e.sessionId;
   switch (e.kind) {
     case "text": {
       const messages = [...s.state.messages];
@@ -290,8 +301,18 @@ function stripUndefined<T extends object>(value: T): Partial<T> {
   return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as Partial<T>;
 }
 
+/** The runtime measures the turn; a replayed transcript has no other clock, so
+ * the settle stamp is the start plus that duration when it is later than the
+ * arrival time. Every later stamp then follows it. */
+function settledAt(state: ChatThreadState, turnId: TurnId, result: TurnResult, at: string): string {
+  const started = state.latestTurn?.turnId === turnId ? state.latestTurn.startedAt : null;
+  if (started === null || typeof result.durationMs !== "number") return at;
+  const measured = Date.parse(started) + result.durationMs;
+  return measured > Date.parse(at) ? new Date(measured).toISOString() : at;
+}
+
 function settleTurn(state: ChatThreadState, turnId: TurnId, result: TurnResult, at: string): ChatThreadState {
-  const s = stamp(state, at);
+  const s = stamp(state, settledAt(state, turnId, result, at));
   let messages = s.state.messages.map(m => (m.role === "assistant" && m.turnId === turnId ? { ...m, streaming: false, updatedAt: s.at } : m));
   const hasAssistant = messages.some(m => m.role === "assistant" && m.turnId === turnId);
   if (!hasAssistant && result.text !== undefined && result.text.length > 0) {

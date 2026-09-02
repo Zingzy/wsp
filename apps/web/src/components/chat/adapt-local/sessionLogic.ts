@@ -87,6 +87,9 @@ export function workEntryIndicatesToolSuccess(entry: WorkLogEntry): boolean {
 export function workEntryIndicatesToolNeutralStatus(entry: WorkLogEntry): boolean {
   // Spawn CTA rows derive from in-progress task rows mid-run; the neutral filter must not hide them.
   if (entry.agentSpawn !== undefined) return false;
+  // Reasoning carries its own text to show; it never reports a status, so
+  // the neutral filter would otherwise drop it the moment the turn settles.
+  if (entry.tone === "thinking" && entry.detail !== undefined && entry.detail.trim().length > 0) return false;
   if (!workLogEntryIsToolLike(entry)) return false;
   if (workEntryIndicatesToolFailure(entry)) return false;
   if (workEntryIndicatesToolSuccess(entry)) return false;

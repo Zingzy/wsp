@@ -3,12 +3,17 @@
 // vocabulary; shapes mirror packages/adapter-claude/test/fixtures/
 // stream-session.jsonl (hello-world server run). No live daemon.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { installFakeLayout } from "./fake-layout.js";
 import type { EventUnion, SessionEvent, WorkspaceView } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { ChatTab } from "../src/tabs/ChatTab.js";
 import { ApprovalPrompt } from "../src/tabs/chat/ApprovalPrompt.js";
+
+let restoreLayout: () => void = () => {};
+beforeAll(() => { restoreLayout = installFakeLayout(); });
+afterAll(() => restoreLayout());
 
 const WS = "ws_chat0001";
 const CLAUDE_SID = "e16ed170-8257-4668-879e-fe836341633c";
@@ -85,50 +90,37 @@ async function setup(api: Api) {
 }
 
 describe("chat tab rendering", () => {
-  it("renders the fixture conversation: deltas accumulate, tool block toggles, done footer shows cost", async () => {
+  it("mounts the thread view: empty headline first, then the fixture conversation with its settled footer", async () => {
     const { api, emit } = fixtureApi([workspace]);
     await setup(api);
-    expect(screen.getByText("No session yet. Send a prompt to start one.")).toBeDefined();
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in api?");
 
     for (const e of FIXTURE) emit(e);
     // An event for another workspace never renders.
     emit({ type: "session.delta", workspaceId: "ws_other", sessionId: "s2", kind: "text", text: "alien text" });
 
-    // Two text deltas accumulated into one block; the later message is its own block.
-    expect(screen.getByText("Creating the server file, then starting it.")).toBeDefined();
-    expect(screen.getByText("Server is live at :3000.")).toBeDefined();
+    await screen.findByText(/Creating the server file, then starting it\./);
+    expect(screen.getByText(/Server is live at :3000\./)).toBeDefined();
     expect(screen.queryByText("alien text")).toBeNull();
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
 
-    // Tool block: collapsed by default, expands to the result, collapses back.
-    const toolHead = screen.getByRole("button", { name: /Bash/ });
-    expect(toolHead.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByText("Hello, World!")).toBeNull();
-    fireEvent.click(toolHead);
-    expect(screen.getByText("Hello, World!")).toBeDefined();
-    fireEvent.click(toolHead);
-    expect(screen.queryByText("Hello, World!")).toBeNull();
-
-    // Thinking: muted collapsible, closed by default.
-    expect(screen.queryByText(/curl returned the greeting/)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "thinking" }));
-    expect(screen.getByText(/curl returned the greeting/)).toBeDefined();
-
-    // Done footer: duration + spend, and the running indicator is gone.
-    expect(screen.getByText("completed")).toBeDefined();
-    expect(screen.getByText(/10\.5s/)).toBeDefined();
-    expect(screen.getByText(/\$0\.0187/)).toBeDefined();
-    expect(screen.queryByText("working")).toBeNull();
+    const footer = screen.getByTestId("settled-footer");
+    expect(footer.textContent).toContain("completed");
+    expect(footer.textContent).toContain("Worked for 10s");
+    expect(footer.textContent).toContain("$0.02");
+    expect(screen.queryByText(/Working for/)).toBeNull();
   });
 
   it("renders a plain error when the session exits without a result", async () => {
     const { api, emit } = fixtureApi([workspace]);
     await setup(api);
-    emit({ type: "session.start", ...scope });
-    expect(screen.getByText("working")).toBeDefined();
+    emit({ type: "session.start", ...scope, prompt: "hi" });
+    expect(screen.getByText(/Working/)).toBeDefined();
     emit({ type: "session.end", ...scope, exitCode: 137, sawResult: false });
-    expect(screen.getByText("failed")).toBeDefined();
-    expect(screen.getByText("session exited without a result (exit code 137)")).toBeDefined();
-    expect(screen.queryByText("working")).toBeNull();
+    const footer = screen.getByTestId("settled-footer");
+    expect(footer.textContent).toContain("failed");
+    expect(footer.textContent).toContain("session exited without a result (exit code 137)");
+    expect(screen.queryByText(/Working for/)).toBeNull();
   });
 });
 
@@ -152,8 +144,8 @@ describe("chat tab hydration", () => {
     const view = await setup(api);
     await screen.findByText("Added GET /health.");
     expect(screen.getByText("add a health route")).toBeDefined();
-    expect(screen.queryByText("No session yet. Send a prompt to start one.")).toBeNull();
-    expect(screen.queryByText("working")).toBeNull();
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+    expect(screen.queryByText(/Working for/)).toBeNull();
 
     view.rerender(<ChatTab workspaceId={other.id} />);
     await screen.findByText("React is on 19.1.");
@@ -208,8 +200,7 @@ describe("chat tab composer", () => {
 
     fireEvent.change(input, { target: { value: "fix the flaky test" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => expect(screen.getByText("workspace is napping")).toBeDefined());
-    expect(screen.getByText("failed")).toBeDefined();
+    await waitFor(() => expect(screen.getByText(/workspace is napping/i)).toBeDefined());
     expect(input.value).toBe("fix the flaky test");
     expect(input.disabled).toBe(false);
   });

@@ -57,7 +57,9 @@ describe("foldSessionEvents", () => {
     expect(thinking.entry.detail).toBe("curl returned the greeting, so the server is live.");
 
     expect(view.latestTurn).toMatchObject({ turnId: "sess_0001", state: "completed" });
-    expect(view.latestTurn?.completedAt).not.toBeNull();
+    // The wire has no clock; the settle stamp is the start plus the measured duration.
+    expect(Date.parse(view.latestTurn!.completedAt!) - Date.parse(view.latestTurn!.startedAt!)).toBe(10458);
+    expect(assistant.message.updatedAt).toBe(view.latestTurn!.completedAt);
     expect(view.runningTurnId).toBeNull();
     expect(view.settled).toEqual({ status: "completed", durationMs: 10458, costUsd: 0.0187, text: "Server is live at :3000." });
     // Entries fold in arrival order even when every event lands in the same millisecond.
@@ -119,6 +121,25 @@ describe("foldSessionEvents", () => {
     expect(err.kind === "work" && err.entry.tone).toBe("error");
     expect(err.kind === "work" && err.entry.label).toBe("workspace is napping");
     expect(view.runningTurnId).toBeNull();
+  });
+
+  it("prefers the runtime's stamp and turn id over the arrival time and session id", () => {
+    const t0 = Date.parse("2026-09-01T01:31:29.000Z");
+    const stamped: SessionEvent[] = [
+      { type: "session.start", ...scope, at: t0, turnId: "turn_1", prompt: "hi" },
+      { type: "session.delta", ...scope, at: t0 + 1_200, turnId: "turn_1", kind: "text", text: "hello" },
+      { type: "session.done", ...scope, at: t0 + 4_000, turnId: "turn_1", result: { status: "completed", durationMs: 4000 } },
+      { type: "session.start", ...scope, at: t0 + 60_000, turnId: "turn_2", prompt: "again" },
+    ];
+    const view = deriveChatThread(replaySessionEvents(stamped, "2026-12-31T00:00:00.000Z"));
+    expect(view.entries.map(e => e.createdAt)).toEqual([
+      "2026-09-01T01:31:29.000Z",
+      "2026-09-01T01:31:30.200Z",
+      "2026-09-01T01:32:29.000Z",
+    ]);
+    expect(view.entries.map(e => (e.kind === "message" ? e.message.turnId : null))).toEqual(["turn_1", "turn_1", "turn_2"]);
+    expect(view.latestTurn).toMatchObject({ turnId: "turn_2", state: "running", startedAt: "2026-09-01T01:32:29.000Z" });
+    expect(view.runningTurnId).toBe("turn_2");
   });
 
   it("ignores events from other workspaces once the first event binds one", () => {
