@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { gunzipSync } from "node:zlib";
 import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
 import type { EventUnion } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
@@ -922,5 +923,45 @@ describe("runtime workspace screen", () => {
     const last = pushed.at(-1) as { status: { screen?: { streamUrl: string } } };
     expect(last.status.screen).toEqual({ streamUrl: "wss://stub/stream/m2" });
     expect((await store.get("workspaces", ws.id) as { screen?: unknown }).screen).toEqual({ streamUrl: "wss://stub/stream/m2" });
+  });
+});
+
+describe("nap vault against the stub backend", () => {
+  it("stores a real tar from the stub download URL without warning", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const rt = createRuntime({ backend, store, adapters: {} });
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+      await rt.workspaces.nap(ws.id);
+      expect(warn).not.toHaveBeenCalled();
+      const vault = await store.getBlob("vaults", ws.id);
+      expect(vault).toBeDefined();
+      expect(gunzipSync(vault!).equals(Buffer.alloc(1024))).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("warns once and keeps the previous vault when the download URL cannot be fetched", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const rt = createRuntime({ backend, store, adapters: {} });
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+      await rt.workspaces.nap(ws.id);
+      const first = await store.getBlob("vaults", ws.id);
+      await rt.workspaces.wake(ws.id);
+
+      backend.machines[0]!.downloadUrl = async () => "http://127.0.0.1:1/nothing-listens-here";
+      await rt.workspaces.nap(ws.id);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]![0]).toBe(`nap vault for ${ws.id} not stored, previous kept: fetch failed`);
+      expect(await store.getBlob("vaults", ws.id)).toEqual(first);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
