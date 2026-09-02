@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -21,6 +21,15 @@ function roundTrip(name: string, make: () => Store) {
       expect(await store.get("workspaces", "a")).toBeUndefined();
       expect(await store.list("goldens")).toEqual([]);
     });
+    it("blobs round-trip as bytes, latest write wins, delete forgets", async () => {
+      const store = make();
+      expect(await store.getBlob("vaults", "ws_1")).toBeUndefined();
+      await store.putBlob("vaults", "ws_1", Buffer.from("v1"));
+      await store.putBlob("vaults", "ws_1", Buffer.from([0, 255, 7]));
+      expect(await store.getBlob("vaults", "ws_1")).toEqual(Buffer.from([0, 255, 7]));
+      await store.deleteBlob("vaults", "ws_1");
+      expect(await store.getBlob("vaults", "ws_1")).toBeUndefined();
+    });
   });
 }
 
@@ -35,5 +44,13 @@ describe("jsonFileStore persistence", () => {
     const s2 = jsonFileStore(path);
     expect(await s2.get("goldens", "default")).toEqual({ head: 1 });
     expect(() => JSON.parse(readFileSync(path, "utf8"))).not.toThrow();
+  });
+  it("keeps blobs as files beside the json, never inside it", async () => {
+    const path = join(dir, "blobs-home", "state.json");
+    const store = jsonFileStore(path);
+    await store.putBlob("vaults", "ws_2", Buffer.from("tgz"));
+    expect(readFileSync(join(dir, "blobs-home", "blobs", "vaults", "ws_2"), "utf8")).toBe("tgz");
+    expect(existsSync(path) ? readFileSync(path, "utf8") : "").not.toContain("tgz");
+    expect(await jsonFileStore(path).getBlob("vaults", "ws_2")).toEqual(Buffer.from("tgz"));
   });
 });

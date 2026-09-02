@@ -1,10 +1,13 @@
-import type { ExecResult, Machine, MachineBackend, MachineSpec, MachineState } from "@wsp/engine";
+import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec, MachineState } from "@wsp/engine";
 
 export interface StubMachine extends Machine {
   spec: MachineSpec;
   paused: boolean;
   killed: boolean;
   execLog: string[];
+  resumes: number;
+  /** What describe() reports; tests mutate it to play a resume that rebuilt the VM. */
+  shape: MachineShape;
 }
 
 export interface StubBackend extends MachineBackend {
@@ -30,6 +33,8 @@ export function stubBackend(): StubBackend {
         paused: false,
         killed: false,
         execLog: [],
+        resumes: 0,
+        shape: { cpu: spec.cpu ?? 2, memMb: spec.memMb ?? 4096, createdAt: new Date().toISOString() },
         async exec(cmd: string): Promise<ExecResult> {
           if (m.killed) throw Object.assign(new Error("gone"), { kind: "missing", status: 404 });
           m.execLog.push(cmd);
@@ -43,6 +48,7 @@ export function stubBackend(): StubBackend {
         },
         async resume(): Promise<void> {
           if (m.killed) throw Object.assign(new Error("gone"), { kind: "missing", status: 404 });
+          m.resumes++;
           m.paused = false;
         },
         async kill(): Promise<void> {
@@ -50,6 +56,9 @@ export function stubBackend(): StubBackend {
         },
         async state(): Promise<MachineState> {
           return m.killed ? "gone" : m.paused ? "paused" : "running";
+        },
+        async describe(): Promise<MachineShape> {
+          return { ...m.shape };
         },
         async downloadUrl(): Promise<string> {
           return "https://stub/download";

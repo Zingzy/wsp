@@ -19,6 +19,14 @@ async function probe(url: string, timeoutMs: number): Promise<ReachState> {
   }
 }
 
+/** Rates and the assumed shape are provider facts; only the arithmetic lives here. */
+export function sizeOf(backend: MachineBackend, spec: { cpu?: number; memMb?: number }): WorkspaceSize {
+  return {
+    cpu: spec.cpu ?? backend.pricing.defaultSize.cpu,
+    memMb: spec.memMb ?? backend.pricing.defaultSize.memMb,
+  };
+}
+
 export interface StatusListOptions {
   probeTimeoutMs?: number;
 }
@@ -58,12 +66,6 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   const reachCache = new Map<string, PreviewReach>();
   const meters = new Map<string, Meter>();
 
-  // Rates and the assumed shape are provider facts; the tracker keeps only the arithmetic.
-  const sizeOf = (spec: { cpu?: number; memMb?: number }): WorkspaceSize => ({
-    cpu: spec.cpu ?? o.backend.pricing.defaultSize.cpu,
-    memMb: spec.memMb ?? o.backend.pricing.defaultSize.memMb,
-  });
-
   // Exact awake accounting comes from lifecycle events, not poll edges. A
   // workspace hydrated already-running starts its meter lazily at first tick.
   const meter = (id: string): Meter => {
@@ -101,7 +103,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
 
     return Promise.all(
       records.map(async ({ spec, ...view }): Promise<WorkspaceStatus> => {
-        const size = sizeOf(spec);
+        const size = sizeOf(o.backend, spec);
         const base = { ...view, size, rateUsdPerHour: o.backend.pricing.rateUsdPerHour(size) };
         // list() is best-effort (observed flake: empty while machines exist);
         // absence is only believed after get(id) throws "missing".
@@ -152,7 +154,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
       const m = meter(view.id);
       if (view.phase === "running") m.mark ??= now;
       const running = view.phase === "running" && m.mark !== undefined;
-      const rate = o.backend.pricing.rateUsdPerHour(sizeOf(spec));
+      const rate = o.backend.pricing.rateUsdPerHour(sizeOf(o.backend, spec));
       const awakeMs = m.awakeMs + (running ? now - m.mark! : 0);
       o.emit({
         type: "workspace.cost",
