@@ -20,7 +20,7 @@ export type Capabilities = z.infer<typeof Capabilities>;
 
 // --- views -----------------------------------------------------------------
 
-export const WorkspacePhase = z.enum(["running", "napping"]);
+export const WorkspacePhase = z.enum(["running", "napping", "waking"]);
 export type WorkspacePhase = z.infer<typeof WorkspacePhase>;
 
 /** Backend vocabulary: a napping workspace's machine reads "paused" here.
@@ -77,6 +77,8 @@ export const WorkspaceStatus = WorkspaceView.extend({
   size: WorkspaceSize,
   /** Awake burn rate for this size; 0 never appears here (napping costs ride the cost event). */
   rateUsdPerHour: z.number(),
+  /** Why the runtime pushed this status outside the poll: a wake that had to retry or replace the machine. */
+  reason: z.string().optional(),
 });
 export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
 

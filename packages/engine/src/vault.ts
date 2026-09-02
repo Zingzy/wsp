@@ -5,6 +5,8 @@ type Fetch = typeof globalThis.fetch;
 export interface VaultOptions {
   fetch?: Fetch;
   timeoutMs?: number;
+  /** Export only: an archive over this many bytes is removed and refused with kind vaultTooLarge. */
+  maxBytes?: number;
 }
 
 function quote(p: string): string {
@@ -23,6 +25,14 @@ export async function exportPaths(machine: Machine, paths: string[], opts: Vault
     throw new Error(`vault export tar failed (exit ${tar.exitCode}): ${tar.stderr.slice(-500)}`);
   }
   try {
+    if (opts.maxBytes !== undefined) {
+      const stat = await machine.exec(`stat -c %s ${quote(tmp)}`);
+      const bytes = Number(stat.stdout.trim());
+      if (stat.exitCode !== 0 || !Number.isFinite(bytes)) throw new Error(`vault export size unknown: ${stat.stderr.slice(-200)}`);
+      if (bytes > opts.maxBytes) {
+        throw Object.assign(new Error(`vault export is ${bytes} bytes, over the ${opts.maxBytes} byte cap`), { kind: "vaultTooLarge", bytes });
+      }
+    }
     const url = await machine.downloadUrl(tmp);
     const res = await doFetch(url);
     if (!res.ok) throw new Error(`vault export download failed: HTTP ${res.status}`);

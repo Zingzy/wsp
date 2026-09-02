@@ -18,7 +18,6 @@
     "@wsp/engine": "workspace:*",
     "@wsp/runtime": "workspace:*",
     "@wsp/web": "workspace:*",
-    "picocolors": "1.1.1",
     "ws": "^8.21.3"
   },
   "devDependencies": {

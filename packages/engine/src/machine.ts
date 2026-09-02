@@ -32,6 +32,16 @@ export interface PreviewReach {
   expiresAt: number;
 }
 
+/** The provider's own view of a machine's size and birth. Solari's resume can
+ * rebuild a VM on a fresh host at default size while keeping the id, so a wake
+ * compares the size against what was created. createdAt moves to the resume
+ * time on every Solari resume (measured), healthy or not: record it, never judge by it. */
+export interface MachineShape {
+  cpu?: number;
+  memMb?: number;
+  createdAt?: string;
+}
+
 export interface Machine {
   readonly id: string;
   readonly kind: MachineKind;
@@ -46,6 +56,8 @@ export interface Machine {
   uploadUrl(path: string): Promise<string>;
   /** Optional: only backends whose capabilities include previewUrls have it. */
   previewUrl?(port: number): Promise<PreviewReach>;
+  /** Optional: backends that expose size and creation time per machine. */
+  describe?(): Promise<MachineShape>;
 }
 
 /** What a size costs on this provider, and the shape a spec gets when it

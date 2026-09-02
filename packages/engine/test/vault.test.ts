@@ -61,3 +61,22 @@ describe("vault", () => {
     await expect(exportPaths(machine, ["/root/nope"], { fetch: fetchStub })).rejects.toThrow(/tar/);
   });
 });
+
+describe("vault size cap", () => {
+  it("exportPaths refuses an archive over maxBytes before downloading it, and removes it", async () => {
+    const { machine, execCmds, fetchStub } = vaultStub();
+    const sized: Machine = {
+      ...machine,
+      exec: async cmd => {
+        if (/^stat -c %s/.test(cmd)) return { exitCode: 0, stdout: "300000000\n", stderr: "" };
+        return machine.exec(cmd);
+      },
+    };
+    await expect(exportPaths(sized, ["/root/big"], { fetch: fetchStub, maxBytes: 200_000_000 })).rejects.toMatchObject({
+      kind: "vaultTooLarge",
+      bytes: 300_000_000,
+    });
+    expect(fetchStub).not.toHaveBeenCalled();
+    expect(execCmds.some(c => c.startsWith("rm -f"))).toBe(true);
+  });
+});

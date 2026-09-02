@@ -6,16 +6,16 @@
 .label { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--deep); }
 .count { margin-left: auto; font-size: 10.5px; color: var(--deep); }
 .add {
-  background: none; border: 1px solid var(--line); border-radius: 6px; color: var(--muted);
+  background: none; border: 1px solid var(--line); border-radius: 6px; color: var(--dim);
   font: 12px var(--mono); width: 20px; height: 20px; line-height: 1; cursor: pointer;
   transition: color 0.16s, background 0.16s;
 }
-.add:hover { color: var(--fg); background: color-mix(in srgb, var(--card), white 4%); }
+.add:hover { color: var(--fg); background: color-mix(in srgb, var(--tile), white 4%); }
 .nameInput {
-  margin: 0 8px 4px; padding: 8px 11px; background: var(--card); border: 1px solid var(--line);
+  margin: 0 8px 4px; padding: 8px 11px; background: var(--tile); border: 1px solid var(--line);
   border-radius: 8px; color: var(--fg); font: 12px var(--mono); outline: none;
 }
-.nameInput:focus { border-color: var(--muted); }
+.nameInput:focus { border-color: var(--dim); }
 .list { padding: 2px 8px 8px; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
 .empty { color: var(--deep); font-family: var(--mono); font-size: 12px; padding: 6px; }
 
@@ -27,11 +27,11 @@
   transition: background 0.16s, border-color 0.16s;
 }
 .card:hover { background: color-mix(in srgb, var(--fg) 3.5%, transparent); }
-.card[data-selected="true"] { background: var(--card); border-color: var(--line); }
+.card[data-selected="true"] { background: var(--tile); border-color: var(--line); }
 
 .dot { width: 7px; height: 7px; border-radius: 50%; position: relative; justify-self: start; }
 .dot[data-phase="running"] { background: var(--ok); box-shadow: 0 0 7px 1px color-mix(in srgb, var(--ok) 40%, transparent); }
-.dot[data-phase="napping"] { border: 1.5px solid var(--deep); }
+.dot[data-phase="napping"], .dot[data-phase="waking"] { border: 1.5px solid var(--deep); }
 /* mock's awake ping ring, always on while running; amber only while a live
  * agent session burns money */
 .dot[data-phase="running"]::after {
@@ -52,12 +52,12 @@
 }
 .phase:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 6%, transparent); }
 .size { grid-column: 2 / 4; font-size: 10.5px; color: var(--deep); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cost { grid-column: 2 / 4; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cost { grid-column: 2 / 4; font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cost .today { color: var(--deep); }
 
 /* errors stay zinc: orange means spend/confirm only */
 .toast {
   margin: auto 8px 8px; padding: 9px 11px; text-align: left;
-  background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+  background: var(--tile); border: 1px solid var(--line); border-radius: 8px;
   color: var(--fg); font: 11px var(--mono); cursor: pointer;
 }

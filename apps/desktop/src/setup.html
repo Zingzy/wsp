@@ -1,0 +1,116 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>wsp</title>
+    <style>
+      :root {
+        --bg: #09090b;
+        --card: #101014;
+        --fg: #f4f4f5;
+        --muted: #a1a1aa;
+        --deep: #82828c;
+        --line: rgba(255, 255, 255, 0.1);
+        --hover: rgba(255, 255, 255, 0.05);
+        --bevel: inset 0 0.7px 0 rgba(255, 255, 255, 0.1);
+        --key-primary-ink: #0b0b0d;
+        --key-primary-hover: #e6e6e8;
+        --mono: ui-monospace, "SF Mono", Menlo, monospace;
+        --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        display: grid;
+        place-items: center;
+        background: var(--bg);
+        color: var(--fg);
+        font: 13px/1.5 var(--sans);
+      }
+      main {
+        width: 440px;
+        padding: 20px;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+      h1 {
+        margin: 0 0 6px;
+        font: 11px var(--mono);
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--deep);
+      }
+      p { margin: 0 0 14px; color: var(--muted); }
+      .cmd {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 8px 10px;
+        background: var(--bg);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+      }
+      code { font: 12px var(--mono); color: var(--fg); user-select: all; }
+      button {
+        padding: 5px 10px;
+        font: 12px var(--mono);
+        color: var(--fg);
+        background: transparent;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        box-shadow: var(--bevel);
+        cursor: pointer;
+        transition: background 150ms;
+      }
+      button:hover { background: var(--hover); }
+      button:disabled { opacity: 0.5; cursor: default; }
+      button.primary { color: var(--key-primary-ink); background: var(--fg); }
+      button.primary:hover { background: var(--key-primary-hover); }
+      .row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-top: 18px;
+      }
+      #status { font: 11px var(--mono); color: var(--deep); min-height: 1.5em; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>first run</h1>
+      <p>Set up your first machine: run <code>wsp init</code> in a terminal. It asks for your keys, boots a machine, and saves your golden image. Come back here when it is done.</p>
+      <div class="cmd">
+        <code id="command">wsp init</code>
+        <button id="copy" type="button">copy</button>
+      </div>
+      <div class="row">
+        <span id="status"></span>
+        <button id="retry" type="button" class="primary">retry</button>
+      </div>
+    </main>
+    <script>
+      const status = document.getElementById("status");
+      const copy = document.getElementById("copy");
+      const retry = document.getElementById("retry");
+      copy.addEventListener("click", async () => {
+        await navigator.clipboard.writeText(document.getElementById("command").textContent);
+        copy.textContent = "copied";
+        setTimeout(() => (copy.textContent = "copy"), 1500);
+      });
+      retry.addEventListener("click", async () => {
+        retry.disabled = true;
+        status.textContent = "checking";
+        try {
+          status.textContent = (await window.wsp.retry()) ? "starting" : "not set up yet";
+        } catch (e) {
+          status.textContent = String(e && e.message ? e.message : e).replace(/^.*Error: /, "");
+        }
+        retry.disabled = false;
+      });
+    </script>
+  </body>
+</html>

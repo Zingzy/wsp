@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { useStore } from "../src/protocol/store.js";
 import { Rail } from "../src/components/Rail.js";
@@ -44,5 +44,21 @@ describe("shell scaffold", () => {
     expect(screen.getByText("web")).toBeDefined();
     // one selectable card per workspace (nap/wake and new-workspace are extra buttons)
     expect(screen.getAllByRole("button", { name: /^(api|web)/ }).length).toBe(2);
+  });
+
+  it("waking a napping card reads waking until the runtime says woken", async () => {
+    const ws: WorkspaceView[] = [
+      { id: "ws_cccccccc", name: "docs", machineId: "m3", phase: "napping", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" },
+    ];
+    let finish!: (w: WorkspaceView) => void;
+    const api = { ...fakeApi(ws), wake: () => new Promise<WorkspaceView>(resolve => { finish = resolve; }) };
+    useStore.getState().bind(api);
+    render(<Rail />);
+    await waitFor(() => expect(screen.getByText("napping")).toBeDefined());
+    fireEvent.click(screen.getByRole("button", { name: "wake docs" }));
+    await waitFor(() => expect(screen.getByText("waking")).toBeDefined());
+    finish({ ...ws[0]!, phase: "running" });
+    useStore.getState().applyEvent({ type: "workspace.woken", workspaceId: "ws_cccccccc", machineId: "m3", resurrected: false });
+    await waitFor(() => expect(screen.getByText("running")).toBeDefined());
   });
 });

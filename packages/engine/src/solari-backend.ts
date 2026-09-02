@@ -1,6 +1,6 @@
 import type { Capabilities } from "@wsp/protocol";
 import { backoffMs, classify, shouldRetry, type WspError } from "./errors.js";
-import type { ExecResult, Machine, MachineBackend, MachineKind, MachineSpec, MachineState, PreviewReach } from "./machine.js";
+import type { ExecResult, Machine, MachineBackend, MachineKind, MachineShape, MachineSpec, MachineState, PreviewReach } from "./machine.js";
 import { previewTokenExpiry } from "./preview.js";
 
 type Fetch = typeof globalThis.fetch;
@@ -16,6 +16,9 @@ interface SandboxView {
   kind: MachineKind;
   state: "starting" | "running" | "paused" | "archived" | "releasing" | "gone";
   metadata?: Record<string, string>;
+  cpu?: number;
+  memMb?: number;
+  createdAt?: string;
 }
 
 const STATE_MAP: Record<SandboxView["state"], MachineState> = {
@@ -176,6 +179,15 @@ class SolariMachine implements Machine {
       if ((e as WspError).kind === "missing") return "gone";
       throw e;
     }
+  }
+
+  async describe(): Promise<MachineShape> {
+    const view = await this.backend.request<SandboxView>("GET", this.path());
+    return {
+      ...(view.cpu !== undefined ? { cpu: view.cpu } : {}),
+      ...(view.memMb !== undefined ? { memMb: view.memMb } : {}),
+      ...(view.createdAt !== undefined ? { createdAt: view.createdAt } : {}),
+    };
   }
 
   async previewUrl(port: number): Promise<PreviewReach> {

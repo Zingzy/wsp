@@ -2,7 +2,8 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import type { GoldenBuilderView } from "@wsp/protocol";
-import { App } from "./App.js";
+import { Root } from "./App.js";
+import "./index.css";
 import "./tokens.css";
 
 // keys: presence flags only; the host never hands a value to the browser.
@@ -14,7 +15,7 @@ const cfg = (
 ).__WSP__;
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App
+    <Root
       wsUrl={`ws://localhost:${cfg.wsPort}`}
       token={cfg.token}
       {...(cfg.keys !== undefined ? { keys: cfg.keys } : {})}
