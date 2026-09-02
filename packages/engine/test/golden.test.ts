@@ -2,11 +2,14 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { BUILDER_DISK_GB, BUILDER_IDLE_MS, MachineAliveError, buildGolden, forkGolden, prepareBuilder, rollback, sealGolden, type GoldenStage } from "../src/golden.js";
 import { NotFirstLifeError } from "../src/lifecycle.js";
-import type { ExecResult, Machine, MachineBackend, MachineSpec } from "../src/machine.js";
+import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec } from "../src/machine.js";
 
 /** A fake whose kill() resolves like the provider's DELETE does: a call for
  * which `ignoreKill` answers true is accepted and changes nothing. */
-function recordingBackend(execResults: Record<string, ExecResult> = {}, opts: { ignoreKill?: (id: string, nth: number) => boolean } = {}) {
+function recordingBackend(
+  execResults: Record<string, ExecResult> = {},
+  opts: { ignoreKill?: (id: string, nth: number) => boolean; built?: (spec: MachineSpec) => MachineShape } = {},
+) {
   const created: MachineSpec[] = [];
   const snapshots: string[] = [];
   const killed: string[] = [];
@@ -38,6 +41,7 @@ function recordingBackend(execResults: Record<string, ExecResult> = {}, opts: { 
         },
         state: async () => (gone.has(id) ? "gone" : "running"),
         downloadUrl: async () => "https://x", uploadUrl: async () => "https://x",
+        ...(opts.built ? { describe: async () => opts.built!(spec) } : {}),
       };
       machines.set(id, machine);
       return machine;
@@ -252,5 +256,42 @@ describe("interactive golden: prepare then seal", () => {
     expect(killed).toEqual(["m1", "m2", "m3", "m4"]);
     expect(deletedSnapshots).toEqual(["snap_golden-v2"]);
     expect(stages.at(-1)).toMatch(/^failed:golden smoke failed/);
+  });
+});
+
+describe("golden size", () => {
+  /** A provider that clamps memory to 2048 MB whatever is asked. */
+  const clamped = (spec: MachineSpec): MachineShape => ({ cpu: spec.cpu ?? 2, memMb: 2048, createdAt: "2026-09-02T00:00:00.000Z" });
+
+  it("prepare asks for an explicit size, the pricing default when none is named, and records what the provider built", async () => {
+    const { backend, created } = recordingBackend({}, { built: clamped });
+    const builder = await prepareBuilder({ backend, setup: "true" });
+    expect(created[0]).toMatchObject({ cpu: 2, memMb: 4096 });
+    expect(builder.size).toEqual({ cpu: 2, memMb: 2048 });
+  });
+
+  it("a backend that cannot describe machines is taken at its word on the request", async () => {
+    const { backend, created } = recordingBackend();
+    const builder = await prepareBuilder({ backend, setup: "true", memMb: 8192 });
+    expect(created[0]).toMatchObject({ cpu: 2, memMb: 8192 });
+    expect(builder.size).toEqual({ cpu: 2, memMb: 8192 });
+  });
+
+  it("seal forks the smoke at the builder's size and records that size on the version", async () => {
+    const { backend, created } = recordingBackend({}, { built: clamped });
+    const builder = await prepareBuilder({ backend, setup: "true", memMb: 8192 });
+    const { version } = await sealGolden(builder, { backend, smoke: "true" });
+    expect(created[1]).toMatchObject({ fromSnapshot: "snap_golden-v1", cpu: 2, memMb: 2048 });
+    expect(version.size).toEqual({ cpu: 2, memMb: 2048 });
+  });
+
+  it("forkGolden inherits the sealed size unless overridden", async () => {
+    const { backend, created } = recordingBackend();
+    const { manifest } = await buildGolden({ backend, setup: "s", smoke: "true", memMb: 8192 });
+    expect(manifest.versions[0]!.size).toEqual({ cpu: 2, memMb: 8192 });
+    await forkGolden(backend, manifest);
+    await forkGolden(backend, manifest, { cpu: 4 });
+    expect(created[2]).toMatchObject({ cpu: 2, memMb: 8192 });
+    expect(created[3]).toMatchObject({ cpu: 4, memMb: 8192 });
   });
 });

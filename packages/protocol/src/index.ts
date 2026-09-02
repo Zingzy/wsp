@@ -217,6 +217,8 @@ export const GoldenVersion = z.object({
   setupSha: z.string(),
   createdAt: z.string(),
   smoke: z.object({ cmd: z.string(), exitCode: z.number() }),
+  /** What the provider built the builder at; forks of this version inherit it unless told otherwise. */
+  size: WorkspaceSize.optional(),
 });
 export type GoldenVersion = z.infer<typeof GoldenVersion>;
 

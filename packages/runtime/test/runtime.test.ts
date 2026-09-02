@@ -679,3 +679,112 @@ describe("runtime verified wake", () => {
     }
   });
 });
+
+describe("runtime workspace size", () => {
+  /** A provider that clamps memory: whatever is asked, the machine it builds has 2048 MB. */
+  function clampingBackend() {
+    const backend = stubBackend();
+    const create = backend.create.bind(backend);
+    backend.create = async spec => {
+      const m = (await create(spec)) as (typeof backend.machines)[number];
+      m.shape = { ...m.shape, memMb: 2048 };
+      return m;
+    };
+    return backend;
+  }
+
+  it("create asks for an explicit size: the pricing default when the caller names none", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await rt.workspaces.create({ golden: "snap_g", name: "b", memMb: 2048 });
+    expect(backend.machines[0]!.spec).toMatchObject({ cpu: 2, memMb: 4096 });
+    expect(backend.machines[1]!.spec).toMatchObject({ cpu: 2, memMb: 2048 });
+  });
+
+  it("the size shown and billed is what the provider built, not what was asked, and it survives a restart", async () => {
+    const backend = clampingBackend();
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: {}, status: { costIntervalMs: 15, pollIntervalMs: 60_000 } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    expect(backend.machines[0]!.spec.memMb).toBe(4096);
+    const built = { cpu: 2, memMb: 2048 };
+    const [status] = await rt.status.list();
+    expect(status).toMatchObject({ size: built, rateUsdPerHour: backend.pricing.rateUsdPerHour(built) });
+
+    const costs: number[] = [];
+    rt.events.on("workspace.cost", e => { if (e.type === "workspace.cost") costs.push(e.rateUsdPerHour); });
+    const stop = rt.status.watch();
+    while (costs.length === 0) await new Promise(r => setTimeout(r, 5));
+    stop();
+    expect(costs[0]).toBeCloseTo(backend.pricing.rateUsdPerHour(built), 10);
+
+    const rt2 = createRuntime({ backend, store, adapters: {} });
+    expect((await rt2.status.list())[0]).toMatchObject({ id: ws.id, size: built });
+  });
+
+  it("a resurrected fork asks for the recorded size and records what came back; an upgrade records its new size", async () => {
+    const backend = clampingBackend();
+    backend.execImpl = (_m, cmd) => (cmd.includes("ls -A /root") ? { exitCode: 0, stdout: "notes.md\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: { method?: string }) =>
+      init?.method === "PUT" ? new Response(null, { status: 200 }) : new Response(Buffer.from("tarbytes")),
+    ));
+    try {
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+      const events: EventUnion[] = [];
+      rt.events.on("workspace.status", e => events.push(e));
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      await rt.workspaces.nap(ws.id);
+      backend.machines[0]!.killed = true;
+      await rt.workspaces.wake(ws.id);
+      expect(backend.machines[1]!.spec).toMatchObject({ cpu: 2, memMb: 2048 });
+      const pushed = events.at(-1) as { status: { size: { cpu: number; memMb: number } } };
+      expect(pushed.status.size).toEqual({ cpu: 2, memMb: 2048 });
+
+      backend.machines[1]!.previewUrl = undefined;
+      await rt.workspaces.upgrade(ws.id, { cpu: 4 });
+      expect(backend.machines[2]!.spec).toMatchObject({ cpu: 4, memMb: 2048 });
+      expect((await rt.status.list())[0]!.size).toEqual({ cpu: 4, memMb: 2048 });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("a fork inherits the size its golden was sealed at unless the caller overrides it", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const version = { version: 1, snapshotId: "snap_golden-v1", baseTemplate: "base", setupSha: "s", createdAt: "2026-09-01T00:00:00.000Z", smoke: { cmd: "true", exitCode: 0 }, size: { cpu: 2, memMb: 8192 } };
+    await store.put("goldens", "big", { head: 1, versions: [version] });
+    const rt = createRuntime({ backend, store, adapters: {} });
+    await rt.workspaces.create({ golden: "snap_golden-v1", name: "a" });
+    await rt.workspaces.create({ golden: "snap_golden-v1", name: "b", memMb: 2048 });
+    await rt.workspaces.create({ golden: "snap_elsewhere", name: "c" });
+    expect(backend.machines[0]!.spec).toMatchObject({ cpu: 2, memMb: 8192 });
+    expect(backend.machines[1]!.spec).toMatchObject({ cpu: 2, memMb: 2048 });
+    expect(backend.machines[2]!.spec).toMatchObject({ cpu: 2, memMb: 4096 });
+    expect((await rt.status.list()).map(s => s.size.memMb).sort()).toEqual([2048, 4096, 8192]);
+  });
+
+  it("seal records the builder's size on the version, as the provider reported it", async () => {
+    const backend = clampingBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: { setup: "install", smoke: "true", cpu: 2, memMb: 4096 } });
+    const b = await rt.golden.prepare();
+    expect(backend.machines[0]!.spec).toMatchObject({ cpu: 2, memMb: 4096 });
+    const { version } = await rt.golden.seal(b.id);
+    expect(version.size).toEqual({ cpu: 2, memMb: 2048 });
+    expect(backend.machines[1]!.spec).toMatchObject({ cpu: 2, memMb: 4096 });
+  });
+
+  it("a stored workspace with no recorded size is sized from the provider's view on hydrate", async () => {
+    const backend = clampingBackend();
+    const store = memoryStore();
+    const rt1 = createRuntime({ backend, store, adapters: {} });
+    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
+    const raw = (await store.get("workspaces", ws.id)) as Record<string, unknown>;
+    delete raw["size"];
+    await store.put("workspaces", ws.id, raw);
+
+    const rt2 = createRuntime({ backend, store, adapters: {} });
+    expect((await rt2.status.list())[0]!.size).toEqual({ cpu: 2, memMb: 2048 });
+  });
+});
