@@ -198,7 +198,7 @@ export function makeRuntime(keys: Keys, statePath: string, recipe: GoldenRecipe 
   });
 }
 
-interface HostLock {
+export interface HostLock {
   pid: number;
   port: number;
   wsPort: number;
@@ -253,6 +253,12 @@ function heldBy(lock: HostLock, statePath: string): Error {
 
 function lockPathFor(statePath: string): string {
   return join(dirname(statePath), "host.lock");
+}
+
+/** The host whose lock names this state file, when that process is still alive. */
+export function servingHost(statePath: string): HostLock | undefined {
+  const held = readLock(lockPathFor(statePath));
+  return held !== undefined && pidAlive(held.pid) ? held : undefined;
 }
 
 /** One state file, one host. A lock whose pid is gone is a crash leftover and
@@ -311,6 +317,23 @@ async function collectNothing(): Promise<Manifest> {
   return { entries: [] };
 }
 
+/** Ctrl-C and a service stop both end with the lock removed. `once` leaves a
+ * second signal to node's default exit, so a close that hangs cannot trap the terminal. */
+function stopOnSignals(handle: HostHandle, io: CliIO): void {
+  let stopping: Promise<void> | undefined;
+  const stop = (): void => {
+    stopping ??= handle.close().then(
+      () => process.exit(0),
+      (e: unknown) => {
+        io.error(`host close failed: ${e instanceof Error ? e.message : String(e)}`);
+        process.exit(1);
+      },
+    );
+  };
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+}
+
 async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: string }, flags: { yes: boolean; manifest?: string }): Promise<number> {
   refuseIfServed(lockPathFor(opts.statePath), opts.statePath);
   const keys = await loadKeys(io, undefined, { anthropic: false });
@@ -326,6 +349,7 @@ async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: 
     },
     terminalInitIO(),
   );
+  if (result.handle !== undefined) stopOnSignals(result.handle, io);
   return result.code;
 }
 
@@ -419,7 +443,7 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
   const [cmd] = positionals;
   switch (cmd) {
     case undefined:
-      await serve(io, opts);
+      stopOnSignals(await serve(io, opts), io);
       return 0;
     case "init":
       return init(io, opts, { yes: values.yes === true, ...(values.manifest !== undefined ? { manifest: values.manifest } : {}) });
