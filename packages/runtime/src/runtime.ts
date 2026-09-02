@@ -38,6 +38,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
+import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy, idleReason } from "./idle.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
 import { createStatusTracker, machineStateOf, type StatusApi, type StatusWatchOptions } from "./status.js";
 import type { Store } from "./store.js";
@@ -111,10 +112,13 @@ export interface CreateWorkspaceOptions extends WorkspaceSpec {
   /** Snapshot id of the golden image to fork. */
   golden: string;
   name: string;
+  /** Auto-nap window; undefined takes the runtime default, null turns auto-nap off. */
+  idleWindowMs?: number | null;
 }
 
 interface WorkspaceRecord extends WorkspaceView {
   spec: Pick<WorkspaceSpec, "envs" | "labels">;
+  idleWindowMs?: number | null;
   /** What the provider built, read back after every create (it may clamp the
    * request); the rail and the rate use this, never what was asked for. */
   size: WorkspaceSize;
@@ -167,6 +171,7 @@ export interface RuntimeOptions {
   vaultPaths?: string[];
   /** Defaults for the status poller / cost ticker (tests shrink the intervals). */
   status?: StatusWatchOptions;
+  idle?: { defaultWindowMs?: number };
   /** How long a seal waits for a killed machine to read gone (tests shrink it). */
   killConfirm?: KillConfirm;
   wake?: WakeOptions;
@@ -251,6 +256,8 @@ export interface Runtime {
     wake(id: string): Promise<WorkspaceView>;
     upgrade(id: string, spec?: WorkspaceSpec): Promise<WorkspaceView>;
     delete(id: string): Promise<void>;
+    /** A person acted in the workspace; its idle window starts over. */
+    touch(id: string): Promise<void>;
     /** One-shot command on the workspace's machine (plumbing for clients; sessions are the main road). */
     exec(id: string, cmd: string, opts?: { timeoutMs?: number }): Promise<ExecResult>;
     /** How a browser dials this workspace's daemon; throws on backends without preview URLs. */
@@ -364,6 +371,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const bus = eventBus();
   const pingTimeoutMs = opts.wake?.pingTimeoutMs ?? WAKE_PING_TIMEOUT_MS;
   const vaultCapBytes = opts.wake?.vaultCapBytes ?? VAULT_CAP_BYTES;
+  const defaultIdleWindowMs = opts.idle?.defaultWindowMs ?? DEFAULT_IDLE_WINDOW_MS;
 
   const vaultPathsOf = async (m: Machine): Promise<string[]> => {
     if (opts.vaultPaths) return opts.vaultPaths;
@@ -527,6 +535,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       ? { envs: { ...r.spec.envs, ...override?.envs } }
       : {}),
     labels: { ...r.spec.labels, wsp: "1", createdAt: new Date().toISOString() },
+    onIdle: "pause",
+    idleTimeoutMs: backstopMs(idleWindowOf(r)),
   });
 
   /** Boots a golden fork for the record and writes back what the provider says it built.
@@ -597,6 +607,38 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return entry;
   };
 
+  const idleWindowOf = (r: WorkspaceRecord): number | null => (r.idleWindowMs === undefined ? defaultIdleWindowMs : r.idleWindowMs);
+
+  const napWith = async (id: string, reason?: string): Promise<WorkspaceView> => {
+    const entry = await entryOf(id);
+    if (entry.record.phase !== "running") return view(entry.record);
+    await entry.ws.nap();
+    entry.record.phase = "napping";
+    await persist(entry.record);
+    bus.emit({ type: "workspace.napped", workspaceId: id });
+    if (reason !== undefined) await emitStatus(entry, "napping", reason);
+    return view(entry.record);
+  };
+
+  const idle = createIdlePolicy({
+    windowOf: id => {
+      const entry = live.get(id);
+      return entry === undefined ? null : idleWindowOf(entry.record);
+    },
+    onIdle: async (id, windowMs) => {
+      await napWith(id, idleReason(windowMs));
+    },
+  });
+  // Every road into a workspace the runtime can see starts its window over;
+  // typing over the browser's daemon link arrives as workspaces.touch.
+  for (const type of ["session.start", "session.delta", "session.done", "session.end", "inbox.file", "workspace.woken", "workspace.upgraded"] as const) {
+    bus.on(type, e => idle.touch((e as { workspaceId: string }).workspaceId));
+  }
+  bus.on("workspace.created", e => e.type === "workspace.created" && idle.touch(e.workspace.id));
+  for (const type of ["workspace.napped", "workspace.deleted"] as const) {
+    bus.on(type, e => idle.forget((e as { workspaceId: string }).workspaceId));
+  }
+
   let hydrated: Promise<void> | undefined;
   const ready = (): Promise<void> => {
     hydrated ??= (async () => {
@@ -614,6 +656,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           },
           machine,
         );
+        if (stored.phase === "running") idle.touch(stored.id);
       }
       for (const raw of await store.list(TRANSCRIPTS)) {
         const t = raw as TranscriptRecord;
@@ -662,6 +705,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...(o.envs !== undefined ? { envs: o.envs } : {}),
           ...(o.labels !== undefined ? { labels: o.labels } : {}),
         },
+        ...(o.idleWindowMs !== undefined ? { idleWindowMs: o.idleWindowMs } : {}),
         size: {
           cpu: o.cpu ?? inherited?.cpu ?? backend.pricing.defaultSize.cpu,
           memMb: o.memMb ?? inherited?.memMb ?? backend.pricing.defaultSize.memMb,
@@ -687,12 +731,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
 
     async nap(id) {
-      const entry = await entryOf(id);
-      await entry.ws.nap();
-      entry.record.phase = "napping";
-      await persist(entry.record);
-      bus.emit({ type: "workspace.napped", workspaceId: id });
-      return view(entry.record);
+      return napWith(id);
     },
 
     async wake(id) {
@@ -755,6 +794,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await store.delete(TRANSCRIPTS, id);
       await store.deleteBlob(VAULTS, id);
       bus.emit({ type: "workspace.deleted", workspaceId: id });
+    },
+
+    async touch(id) {
+      await entryOf(id);
+      idle.touch(id);
     },
 
     async exec(id, cmd, o) {
@@ -847,12 +891,23 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         }
       };
 
-      const started = adapter.start({
-        prompt: o.prompt,
-        ...(o.resume !== undefined ? { resume: o.resume } : {}),
-        ...(o.cwd !== undefined ? { cwd: o.cwd } : {}),
-        onEvent: forward,
-      });
+      idle.hold(workspaceId);
+      let started: HarnessSession;
+      try {
+        started = adapter.start({
+          prompt: o.prompt,
+          ...(o.resume !== undefined ? { resume: o.resume } : {}),
+          ...(o.cwd !== undefined ? { cwd: o.cwd } : {}),
+          onEvent: forward,
+        });
+      } catch (e) {
+        idle.release(workspaceId);
+        throw e;
+      }
+      started.finished.then(
+        () => idle.release(workspaceId),
+        () => idle.release(workspaceId),
+      );
       const handleId = started.localId;
       sessionView.id = handleId;
       sessionView.claudeSessionId ??= started.claudeSessionId;
@@ -1023,6 +1078,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return [...live.values()].map(e => ({
         ...view(e.record),
         size: e.record.size,
+        ...(e.record.phase === "running" && idle.idleAt(e.record.id) !== undefined ? { idleAt: idle.idleAt(e.record.id)! } : {}),
         ...(e.machine.previewUrl ? { daemonReach: () => e.ws.daemonReach() } : {}),
         providerState: () => e.machine.state(),
       }));
@@ -1057,6 +1113,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return reaped.concat(swept.filter(id => !reaped.includes(id)));
     },
     close: async () => {
+      idle.close();
       for (const id of [...transcriptTimers.keys()]) void flushTranscript(id);
       await Promise.all(transcriptFlushes.values());
     },

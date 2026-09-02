@@ -477,6 +477,8 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     memMb: z.number().optional(),
     envs: z.record(z.string()).optional(),
     labels: z.record(z.string()).optional(),
+    /** Auto-nap window for this workspace; absent takes the runtime default (20 min), null turns it off. */
+    idleWindowMs: z.number().nullable().optional(),
   }),
   z.object({ id: reqId, op: z.literal("workspaces.list") }),
   z.object({ id: reqId, op: z.literal("workspaces.get"), workspaceId: z.string() }),
@@ -490,6 +492,9 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     memMb: z.number().optional(),
   }),
   z.object({ id: reqId, op: z.literal("workspaces.delete"), workspaceId: z.string() }),
+  /** A person acted in the workspace through a road the runtime cannot see (typed into
+   * a terminal over the browser's daemon link); the idle countdown starts over. */
+  z.object({ id: reqId, op: z.literal("workspaces.touch"), workspaceId: z.string() }),
   /** Replies with a DaemonReachView; the runtime remints the edge token when it nears expiry. */
   z.object({ id: reqId, op: z.literal("workspaces.daemonReach"), workspaceId: z.string() }),
   z.object({

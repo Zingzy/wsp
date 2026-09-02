@@ -149,6 +149,10 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               await rt.workspaces.delete(msg.workspaceId);
               send({ id: msg.id, ok: true });
               return;
+            case "workspaces.touch":
+              await rt.workspaces.touch(msg.workspaceId);
+              send({ id: msg.id, ok: true });
+              return;
             case "workspaces.daemonReach":
               send({ id: msg.id, ok: true, reach: await rt.workspaces.daemonReach(msg.workspaceId) });
               return;
