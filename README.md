@@ -85,10 +85,12 @@ reuses it.
 ## Capability flags
 
 Backends implement `MachineBackend` plus a `capabilities` descriptor:
-`{ liveCloneForks, ramPreservingPause, resize, previewUrls, signedUrls }`.
+`{ liveCloneForks, ramPreservingPause, resize, previewUrls, signedUrls, containers }`.
 Clients read the flags instead of assuming. A backend without preview URLs
 loses browser reach and the UI says so instead of pretending. Solari is the
-first backend.
+first backend, and it reports `containers: false`: its guest kernel (6.6.30)
+has no overlayfs or netfilter, so Docker does not run there and services get
+installed natively.
 
 ## Keys never leave your machine
 

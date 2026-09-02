@@ -33,7 +33,7 @@ const costEvent = (workspaceId: string, rate: number, awakeMs: number, at: strin
   at,
 });
 
-const CAPS: Capabilities = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true };
+const CAPS: Capabilities = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true };
 
 // Live emitter: MetaPanel's cost series listens through api.subscribe, exactly
 // like the store does, so tests push events through the same channel.
@@ -121,6 +121,20 @@ describe("machine facts", () => {
     const api = await bindAndRender([w]);
     act(() => api.emit({ type: "workspace.status", status: { ...status(w), machineState: "starting" } }));
     await waitFor(() => expect(fact("state")).toBe("running · starting"));
+  });
+
+  it("says machines cannot run containers when the backend reports containers: false", async () => {
+    const api = fakeApi([view("ws_a", "api")], { ...CAPS, containers: false });
+    useStore.getState().bind(api);
+    render(<MetaPanel />);
+    await waitFor(() => expect(useStore.getState().capabilities?.containers).toBe(false));
+    expect(fact("containers")).toBe("this provider's machines cannot run containers; install services natively");
+  });
+
+  it("shows no container line when the backend can run them", async () => {
+    await bindAndRender([view("ws_a", "api")]);
+    await waitFor(() => expect(useStore.getState().capabilities?.containers).toBe(true));
+    expect(document.querySelector('[data-k="containers"]')).toBeNull();
   });
 
   it("renders awake time from the cost event's awakeMs", async () => {
