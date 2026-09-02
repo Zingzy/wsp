@@ -129,6 +129,8 @@ export interface Api {
   prepareGolden(name?: string): Promise<GoldenBuilderView>;
   /** Snapshots the builder, smoke-tests a fork, seals a version. The builder is consumed on every outcome. */
   sealGolden(builderId: string): Promise<{ manifest: GoldenManifest; version: GoldenVersion }>;
+  /** How to dial the builder's daemon right now; asked per dial like daemonReach. */
+  builderReach(builderId: string): Promise<DaemonReachView>;
   /** Every sealed version of a golden and the head new forks use. */
   listSnapshots(name?: string): Promise<SnapshotLineage>;
   /** Moves head to a version in the manifest; workspaces already forked keep their image. */
@@ -179,6 +181,7 @@ export function makeApi(c: ProtocolClient): Api {
       const { manifest, version } = await c.request<{ manifest: GoldenManifest; version: GoldenVersion }>("golden.seal", { builderId });
       return { manifest, version };
     },
+    builderReach: async builderId => (await c.request<{ reach: DaemonReachView }>("golden.builderReach", { builderId })).reach,
     listSnapshots: async name =>
       (await c.request<{ lineage: SnapshotLineage }>("snapshots.list", name !== undefined ? { name } : {})).lineage,
     rollbackSnapshot: async (version, name) => {

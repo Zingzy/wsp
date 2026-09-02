@@ -399,6 +399,10 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
   /** Moves the golden's head to a version already in its manifest; replies with a
    * SnapshotRollbackResult. A version outside the manifest fails with kind "missing". */
   z.object({ id: reqId, op: z.literal("snapshots.rollback"), version: z.number(), name: z.string().optional() }),
+  /** Replies with a DaemonReachView for a live builder (the wizard's terminal
+   * dials it). Asked per dial like workspaces.daemonReach: the edge token
+   * expires hourly and a builder may sit for hours before it is sealed. */
+  z.object({ id: reqId, op: z.literal("golden.builderReach"), builderId: z.string() }),
 ]);
 export type RuntimeRequest = z.infer<typeof RuntimeRequest>;
 

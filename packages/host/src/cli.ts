@@ -163,7 +163,7 @@ function claudeEnvs(anthropicKey?: string): Record<string, string> {
  * smoke from the doctor, the daemon bundle deploy, and the loaded keys as envs. */
 export function goldenRecipe(
   keys: Pick<Keys, "anthropic">,
-  hooks: { deployDaemon?: (machine: Machine) => Promise<void> } = {},
+  hooks: { deployDaemon?: (machine: Machine) => Promise<void | string> } = {},
 ): GoldenRecipe {
   return {
     setup: GOLDEN_SETUP,
@@ -171,11 +171,7 @@ export function goldenRecipe(
     cpu: 2,
     memMb: 4096,
     envs: claudeEnvs(keys.anthropic),
-    deployDaemon:
-      hooks.deployDaemon ??
-      (async machine => {
-        await deployDaemon(machine);
-      }),
+    deployDaemon: hooks.deployDaemon ?? (async machine => `node ${(await deployDaemon(machine)).node}`),
   };
 }
 

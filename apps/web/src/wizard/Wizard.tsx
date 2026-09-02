@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // First run: the window is the wizard until a golden image exists. The hero
-// step is the builder's live screen (the screen tab's own component) with a
-// checklist beside it; nothing here probes the builder, the person ticks the
-// boxes themselves.
+// step is the builder itself (the screen tab's component when it streams a
+// display, the terminal tab's against its daemon otherwise) with a checklist
+// beside it; nothing here probes the builder, the person ticks the boxes.
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import type { GoldenStage } from "@wsp/protocol";
+import type { GoldenBuilderView, GoldenStage } from "@wsp/protocol";
+import type { Api } from "../protocol/client.js";
 import { useStore } from "../protocol/store.js";
 import { ScreenTab } from "../tabs/ScreenTab.js";
+import { TerminalTab } from "../tabs/TerminalTab.js";
+import { connectDaemonLink, type DaemonLink } from "../terminal/daemon-link.js";
+import { provideTerminals, WorkspaceTerminals } from "../terminal/link.js";
 import { INITIAL, PREPARE_STAGES, SEAL_STAGES, isReady, reduce, rowStates, type Step } from "./model.js";
 import styles from "./Wizard.module.css";
 
@@ -26,7 +30,7 @@ const STEP_WORD: Record<Step, string> = {
 const TRAIL: Step[] = ["welcome", "preparing", "hero", "sealing", "done"];
 
 const STAGE_WORD: Record<GoldenStage, string> = {
-  creating: "booting a fresh desktop",
+  creating: "booting a fresh machine",
   "deploying-daemon": "starting the workspace daemon",
   "installing-harness": "installing claude code",
   ready: "ready for you",
@@ -101,7 +105,7 @@ export function Wizard({ keys, onDone }: { keys?: KeyFlags; onDone: () => void }
       {state.step === "welcome" && <Welcome keys={keys} onPrepare={prepare} />}
       {state.step === "preparing" && <Stages title="Preparing your machine" list={PREPARE_STAGES} seen={state.seen} detail={state.detail} />}
       {state.step === "hero" && state.builder && (
-        <Hero streamUrl={state.builder.screen?.streamUrl} builderId={state.builder.id} keys={keys} ready={isReady(state)} onSeal={seal} />
+        <Hero builder={state.builder} keys={keys} ready={isReady(state)} onSeal={seal} />
       )}
       {state.step === "sealing" && <Stages title="Saving your golden image" list={SEAL_STAGES} seen={state.seen} detail={state.detail} />}
       {state.step === "done" && <Landing />}
@@ -117,7 +121,7 @@ function Welcome({ keys, onPrepare }: { keys?: KeyFlags; onPrepare: () => void }
       <span className={styles.lbl}>golden image</span>
       <h1 className={styles.h1}>Set up one machine. Fork it forever.</h1>
       <p className={styles.p}>
-        wsp boots a fresh cloud desktop and shows you its screen. You set it up the way you like a computer, then save it as your golden image.
+        wsp boots a fresh cloud machine and opens a terminal on it. You set it up the way you like a computer, then save it as your golden image.
         Every workspace after that is a fork of it.
       </p>
       <dl className={styles.kv}>
@@ -133,7 +137,7 @@ function Welcome({ keys, onPrepare }: { keys?: KeyFlags; onPrepare: () => void }
         <button type="button" className={`${styles.key} ${styles.keyPrimary}`} onClick={onPrepare}>
           Prepare my machine
         </button>
-        <span className={styles.hint}>boots one cloud desktop on your Solari account; it bills while it runs</span>
+        <span className={styles.hint}>boots one cloud machine on your Solari account; it bills while it runs</span>
       </div>
     </section>
   );
@@ -164,29 +168,46 @@ const CHECKLIST = [
   "install anything you always want on a fresh machine",
 ];
 
-function Hero({
-  streamUrl,
-  builderId,
-  keys,
-  ready,
-  onSeal,
-}: {
-  streamUrl: string | undefined;
-  builderId: string;
-  keys?: KeyFlags;
-  ready: boolean;
-  onSeal: () => void;
-}) {
+/** The builder is not a workspace, so the app's terminal wiring never links it;
+ * this links it for the hero's lifetime, through the builder's own reach op. */
+function useBuilderTerminals(api: Api | null, builderId: string, wanted: boolean): void {
+  useEffect(() => {
+    if (!api || !wanted) return;
+    const wired: { link: DaemonLink | null } = { link: null };
+    const wt = new WorkspaceTerminals({
+      request: (op, params) => (wired.link ? wired.link.request(op, params) : Promise.reject(new Error("daemon unreachable"))),
+    });
+    wired.link = connectDaemonLink({
+      reach: () => api.builderReach(builderId),
+      onEvent: e => wt.feedEvent(e),
+      onStatus: s => {
+        if (s !== "dead") wt.feedStatus(s);
+      },
+    });
+    provideTerminals(builderId, wt);
+    return () => {
+      wired.link?.close();
+      provideTerminals(builderId, null);
+    };
+  }, [api, builderId, wanted]);
+}
+
+function Hero({ builder, keys, ready, onSeal }: { builder: GoldenBuilderView; keys?: KeyFlags; ready: boolean; onSeal: () => void }) {
+  const api = useStore(s => s.api);
+  const streamUrl = builder.screen?.streamUrl;
+  useBuilderTerminals(api, builder.id, streamUrl === undefined);
   const [ticked, setTicked] = useState<boolean[]>(() => CHECKLIST.map(() => false));
   const items = keys?.anthropic ? CHECKLIST.slice(1) : CHECKLIST;
   return (
     <section className={styles.hero}>
       <div className={styles.screen}>
-        <ScreenTab workspaceId={builderId} {...(streamUrl !== undefined ? { streamUrl } : {})} />
+        {streamUrl !== undefined ? <ScreenTab workspaceId={builder.id} streamUrl={streamUrl} /> : <TerminalTab workspaceId={builder.id} />}
       </div>
       <aside className={styles.side}>
         <span className={styles.lbl}>set it up like your own computer</span>
-        <p className={styles.p}>This is your machine's live screen. Click control to type into it.</p>
+        <p className={styles.p}>
+          {streamUrl !== undefined ? "This is your machine's live screen. Click control to type into it." : "This is a shell on your machine. Type into it."}
+        </p>
         <ul className={styles.check}>
           {items.map((text, i) => (
             <li key={text}>

@@ -3,10 +3,15 @@
 // hands the test the event listener so golden.stage frames can be pushed by
 // hand. No timers drive steps; every transition here comes from a frame or a
 // resolved request.
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GoldenBuilderView, GoldenManifest, GoldenStage, GoldenVersion, WorkspaceView } from "@wsp/protocol";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
+import { getTerminals } from "../src/terminal/link.js";
 
 class FakeRfb extends EventTarget {
   static instances: FakeRfb[] = [];
@@ -24,17 +29,29 @@ class FakeRfb extends EventTarget {
   focus() {}
 }
 vi.mock("@novnc/novnc", () => ({ default: FakeRfb }));
+// WebGL cannot exist under jsdom; the terminal falls back to the DOM renderer.
+vi.mock("@xterm/addon-webgl", () => ({
+  WebglAddon: class {
+    activate(): void {}
+    dispose(): void {}
+    onContextLoss(): { dispose(): void } {
+      return { dispose() {} };
+    }
+  },
+}));
 
 const { Shell } = await import("../src/App.js");
 const { useStore } = await import("../src/protocol/store.js");
 
 const STREAM = "wss://stream.example.test/m_builder";
 const builder: GoldenBuilderView = { id: "m_builder", name: "default", kind: "desktop", createdAt: "2026-09-02T00:00:00Z", screen: { streamUrl: STREAM } };
+const headless: GoldenBuilderView = { id: "m_headless", name: "default", kind: "sandbox", createdAt: "2026-09-02T00:00:00Z" };
+const DAEMON_TOKEN = "wizard-daemon-token";
 const version: GoldenVersion = { version: 1, snapshotId: "snap_golden-v1", baseTemplate: "default", kind: "desktop", setupSha: "x", createdAt: "t", smoke: { cmd: "claude --version", exitCode: 0 } };
 const manifest: GoldenManifest = { head: 1, versions: [version] };
 const first: WorkspaceView = { id: "ws_first", name: "first", machineId: "m_fork", phase: "running", golden: "snap_golden-v1", createdAt: "t" };
 
-function fixture(opts: { golden?: GoldenManifest; workspaces?: WorkspaceView[] } = {}) {
+function fixture(opts: { golden?: GoldenManifest; workspaces?: WorkspaceView[]; builder?: GoldenBuilderView; daemonPort?: () => number } = {}) {
   let listener: ((e: ProtocolEvent) => void) | undefined;
   const api = {
     listWorkspaces: vi.fn(async () => opts.workspaces ?? []),
@@ -47,6 +64,7 @@ function fixture(opts: { golden?: GoldenManifest; workspaces?: WorkspaceView[] }
     upgrade: vi.fn(async () => first),
     capabilities: vi.fn(async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true })),
     daemonReach: vi.fn(async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 })),
+    builderReach: vi.fn(async () => ({ url: `ws://127.0.0.1:${opts.daemonPort?.() ?? 1}`, expiresAt: Date.now() + 3_600_000, daemonToken: DAEMON_TOKEN })),
     startSession: vi.fn(async () => ({ id: "s1", workspaceId: "ws_first", harness: "claude", status: "running" as const })),
     listSessions: vi.fn(async () => []),
     sessionHistory: vi.fn(async () => []),
@@ -55,7 +73,7 @@ function fixture(opts: { golden?: GoldenManifest; workspaces?: WorkspaceView[] }
       return () => {};
     }),
     getGolden: vi.fn(async () => opts.golden),
-    prepareGolden: vi.fn(async () => builder),
+    prepareGolden: vi.fn(async () => opts.builder ?? builder),
     sealGolden: vi.fn(async () => ({ manifest, version })),
     listSnapshots: vi.fn(async () => ({ name: "default", head: null, versions: [] })),
     rollbackSnapshot: vi.fn(async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" as const })),
@@ -137,6 +155,34 @@ describe("wizard steps follow the wire", () => {
     f.stage("ready");
     expect(save.disabled).toBe(false);
   });
+
+  it("a builder without a screen gets the terminal tab against its own reach, with one pty opened", async () => {
+    const inboxDir = mkdtempSync(join(tmpdir(), "wsp-wizard-inbox-"));
+    let daemon: DaemonHandle | undefined;
+    try {
+      daemon = await startDaemon({ port: 0, token: DAEMON_TOKEN, inboxDir, portsSource: async () => [], portsIntervalMs: 1000 });
+      const port = daemon.port;
+      const f = await mount({ builder: headless, daemonPort: () => port });
+      await waitFor(() => screen.getByRole("button", { name: "Prepare my machine" }));
+      fireEvent.click(screen.getByRole("button", { name: "Prepare my machine" }));
+      await waitFor(() => expect(screen.getByTestId("step").textContent).toBe("hero"));
+
+      expect(FakeRfb.instances).toHaveLength(0);
+      expect(screen.queryByText("this machine has no display")).toBeNull();
+      await waitFor(() => expect(f.api.builderReach).toHaveBeenCalledWith("m_headless"));
+      await waitFor(() => expect(daemon!.ptys.list()).toHaveLength(1), { timeout: 10_000 });
+      expect(getTerminals("m_headless")?.status()).toBe("live");
+      expect(screen.getByText("Save as my golden image")).toBeDefined();
+
+      f.stage("ready");
+      fireEvent.click(screen.getByRole("button", { name: "Save as my golden image" }));
+      await waitFor(() => expect(screen.getByTestId("step").textContent).toBe("sealing"));
+      expect(getTerminals("m_headless")).toBeNull();
+    } finally {
+      await daemon?.close();
+      rmSync(inboxDir, { recursive: true, force: true });
+    }
+  }, 20_000);
 
   it("the hero step says an idle builder is killed after six hours, in one line", async () => {
     const f = await mount();

@@ -275,6 +275,26 @@ describe("runtime golden builders", () => {
     expect(await store.get("builders", b.id)).toBeUndefined();
   });
 
+  it("builderReach mints the builder's daemon route once while fresh and reads its token off the guest", async () => {
+    const backend = stubBackend();
+    let minted = 0;
+    backend.execImpl = (_m, cmd) =>
+      cmd === "cat /root/.wsp-daemon-token" ? { exitCode: 0, stdout: "builder-token\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" };
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
+    const b = await rt.golden.prepare();
+    expect(b.screen).toBeUndefined();
+    backend.machines[0]!.previewUrl = async port => {
+      minted++;
+      return { url: `https://m1-${port}.preview.example/?pt_token=edge`, token: "edge", expiresAt: Date.now() + 3_600_000 };
+    };
+
+    const reach = await rt.golden.builderReach(b.id);
+    expect(reach).toEqual({ url: "https://m1-7070.preview.example/?pt_token=edge", expiresAt: expect.any(Number), daemonToken: "builder-token" });
+    await rt.golden.builderReach(b.id);
+    expect(minted).toBe(1);
+    await expect(rt.golden.builderReach("m_nobody")).rejects.toThrow(/no such builder/);
+  });
+
   it("a failed seal forgets the builder and writes no manifest", async () => {
     const backend = stubBackend();
     backend.execImpl = (_m, cmd) => (cmd === "true" ? { exitCode: 1, stdout: "", stderr: "broken" } : { exitCode: 0, stdout: "", stderr: "" });

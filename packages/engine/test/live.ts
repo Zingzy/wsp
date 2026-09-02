@@ -36,10 +36,9 @@ export function claudeEnvs(env: LiveEnv): Record<string, string> {
 
 export const CLAUDE_INSTALL = "curl -fsSL https://claude.ai/install.sh | bash";
 
-export const RESERVED_LABEL = { key: "poc", value: "ttl-test" }; // sleeping experiment: never touch
-
+/** Sleeping experiments on the account carry a poc label (ttl-test, p1, ...): never touch them. */
 export function isReserved(labels: Record<string, string>): boolean {
-  return labels[RESERVED_LABEL.key] === RESERVED_LABEL.value;
+  return "poc" in labels;
 }
 
 export async function sleep(ms: number): Promise<void> {

@@ -53,6 +53,7 @@ function fakeApi(workspaces: WorkspaceView[], daemonPort: () => number) {
       reaches++;
       return { url: `ws://127.0.0.1:${daemonPort()}`, expiresAt: Date.now() + 3_600_000, daemonToken: TOKEN };
     },
+    builderReach: async () => { throw new Error("no wizard in this fixture"); },
     getGolden: async () => undefined,
     prepareGolden: async () => { throw new Error("no wizard in this fixture"); },
     sealGolden: async () => { throw new Error("no wizard in this fixture"); },

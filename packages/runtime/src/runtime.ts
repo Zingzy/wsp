@@ -1,12 +1,14 @@
 import { randomBytes } from "node:crypto";
 import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
 import {
+  DAEMON_PORT,
   Workspace,
   buildGolden,
   exportPaths,
   importInto,
   prepareBuilder,
   reap,
+  refreshPreviewToken,
   sealGolden,
   type Builder,
   type BuildGoldenOptions,
@@ -17,6 +19,7 @@ import {
   type MachineBackend,
   type MachineKind,
   type MachineSpec,
+  type PreviewReach,
   rollback as rollbackGolden,
 } from "@wsp/engine";
 import type { DaemonReachView, EventUnion, GoldenBuilderView, GoldenStage, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
@@ -124,7 +127,8 @@ export interface GoldenRecipe {
   memMb?: number;
   envs?: Record<string, string>;
   labels?: Record<string, string>;
-  deployDaemon?: (machine: Machine) => Promise<void>;
+  /** A returned string rides the deploying-daemon stage as its detail (the guest's Node version). */
+  deployDaemon?: (machine: Machine) => Promise<void | string>;
 }
 
 export interface RuntimeOptions {
@@ -184,6 +188,8 @@ export interface Runtime {
     prepare(opts?: { name?: string; kind?: MachineKind }): Promise<GoldenBuilderView>;
     /** Snapshot, smoke-fork, append a version. The builder is consumed whether this succeeds, fails, or is refused. */
     seal(builderId: string): Promise<{ manifest: GoldenManifest; version: GoldenVersion }>;
+    /** How a browser dials the builder's daemon; the builder is not a workspace, so it has its own road. */
+    builderReach(builderId: string): Promise<DaemonReachView>;
     builders(): Promise<GoldenBuilderView[]>;
     /** Moves the golden's head; new forks follow it, workspaces already forked keep their image. */
     rollback(version: number, name?: string): Promise<GoldenManifest>;
@@ -227,6 +233,7 @@ interface LiveBuilder {
   builder: Builder;
   /** Hydrated from the store by a later process, so its first life cannot be vouched for. */
   stale: boolean;
+  reach?: PreviewReach;
 }
 
 /** Stand-in for a machine that vanished while we were away; resume() failing with
@@ -682,6 +689,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         await entry.builder.machine.kill().catch(() => {});
         await forgetBuilder(builderId);
       }
+    },
+
+    async builderReach(builderId) {
+      await ready();
+      const entry = builders.get(builderId);
+      if (!entry) throw new Error(`no such builder: ${builderId}`);
+      const reach = await refreshPreviewToken(entry.builder.machine, DAEMON_PORT, entry.reach);
+      entry.reach = reach;
+      const daemonToken = await daemonTokenOf(entry.builder.machine);
+      return { url: reach.url, expiresAt: reach.expiresAt, ...(daemonToken !== undefined ? { daemonToken } : {}) };
     },
 
     async builders() {

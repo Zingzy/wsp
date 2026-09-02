@@ -84,6 +84,7 @@ describe.runIf(LIVE)("interactive golden (live: prepare, sit, seal)", () => {
     const t0 = Date.now();
     const builder = await prepareBuilder({
       backend,
+      kind: "desktop",
       cpu: 2,
       memMb: 4096,
       envs: claudeEnvs(env),

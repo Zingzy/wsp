@@ -42,6 +42,15 @@ describe("SolariBackend", () => {
     expect(bodies[1]).not.toHaveProperty("lifecycle");
     expect(bodies[1]).not.toHaveProperty("timeoutMs");
   });
+  it("maps diskGb onto the create body and omits it when the spec names none", async () => {
+    const f = fakeFetch({ "POST /sandboxes": { status: 201, body: { sandboxId: "x", kind: "sandbox" } } });
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    await b.create({ kind: "sandbox", template: "base", diskGb: 20 });
+    await b.create({ kind: "sandbox", fromSnapshot: "snap_1" });
+    const bodies = f.mock.calls.map(c => JSON.parse(String(c[1]?.body)) as Record<string, unknown>);
+    expect(bodies[0]).toMatchObject({ kind: "sandbox", template: "base", diskGb: 20 });
+    expect(bodies[1]).not.toHaveProperty("diskGb");
+  });
   it("surfaces snapshotUnavailable without retrying", async () => {
     const id = "x";
     const f = fakeFetch({

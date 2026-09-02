@@ -32,6 +32,7 @@ function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
     capabilities: async () => CAPS,
     startSession: async o => ({ id: "s_new", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
     daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
+    builderReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
     sessionHistory: async () => [],
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
