@@ -9,7 +9,21 @@ import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
 
-function testRuntime(status?: { costIntervalMs?: number; pollIntervalMs?: number }): {
+/** Every road to the provider's view of a machine: backend.get/list and machine.state(). */
+function countProvider(backend: StubBackend): () => { get: number; list: number; state: number } {
+  const n = { get: 0, list: 0, state: 0 };
+  const get = backend.get.bind(backend);
+  const list = backend.list.bind(backend);
+  backend.get = async id => { n.get++; return get(id); };
+  backend.list = async labels => { n.list++; return list(labels); };
+  for (const m of backend.machines) {
+    const state = m.state.bind(m);
+    m.state = async () => { n.state++; return state(); };
+  }
+  return () => ({ ...n });
+}
+
+function testRuntime(status?: { costIntervalMs?: number; pollIntervalMs?: number; reconcileMinMs?: number }): {
   rt: Runtime;
   backend: StubBackend;
 } {
@@ -18,11 +32,13 @@ function testRuntime(status?: { costIntervalMs?: number; pollIntervalMs?: number
   return { rt, backend };
 }
 
-async function httpStub(statusCode: number): Promise<{ server: Server; port: number; hits: () => number }> {
+/** delayMs "never" holds the request open so the probe can only time out. */
+async function httpStub(statusCode: number, delayMs: number | "never" = 0): Promise<{ server: Server; port: number; hits: () => number }> {
   let hits = 0;
   const server = createServer((_req, res) => {
     hits++;
-    res.writeHead(statusCode).end();
+    if (delayMs === "never") return;
+    setTimeout(() => res.writeHead(statusCode).end(), delayMs);
   });
   await new Promise<void>(r => server.listen(0, "127.0.0.1", r));
   const addr = server.address();
@@ -35,7 +51,7 @@ let srv: RuntimeServer | undefined;
 afterEach(async () => {
   await srv?.close();
   srv = undefined;
-  await Promise.all(openServers.map(s => new Promise<void>(r => s.close(() => r()))));
+  await Promise.all(openServers.map(s => { s.closeAllConnections(); return new Promise<void>(r => s.close(() => r())); }));
   openServers.length = 0;
 });
 
@@ -101,17 +117,79 @@ describe("status.list", () => {
     expect(byName.get("b")).toMatchObject({ machineState: "gone", reach: { state: "gone" } });
   });
 
-  it("confirms absence with get(id) instead of trusting a list() flake", async () => {
+  it("an explicit list() asks the provider once per machine and never list()", async () => {
     const { rt, backend } = testRuntime();
     await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
-    const realList = backend.list.bind(backend);
-    backend.list = async () => []; // observed Solari flake: empty while machines exist
+    const calls = countProvider(backend);
     const statuses = await rt.status.list();
-    expect(statuses[0]).toMatchObject({ machineState: "running" }); // get(id) rescued it
-    backend.list = realList;
-    await backend.machines[0]!.kill(); // truly gone: get(id) throws kind "missing"
-    const after = await rt.status.list();
-    expect(after[0]).toMatchObject({ machineState: "gone", reach: { state: "gone" } });
+    expect(statuses[0]).toMatchObject({ machineState: "running" });
+    expect(calls()).toEqual({ get: 0, list: 0, state: 1 });
+    backend.machines[0]!.paused = true; // the provider paused it behind our back
+    expect((await rt.status.list())[0]).toMatchObject({ phase: "running", machineState: "paused" });
+    await backend.machines[0]!.kill();
+    expect((await rt.status.list())[0]).toMatchObject({ machineState: "gone", reach: { state: "gone" } });
+  });
+
+  it("maps a prompt 426 to reachable, a prompt 502 to no-daemon, a late answer to slow, and silence to unreachable", async () => {
+    const { rt, backend } = testRuntime();
+    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const opts = { probeTimeoutMs: 300, promptMs: 60 };
+    const cases: [number, number | "never", string][] = [
+      [426, 0, "reachable"],
+      [502, 0, "no-daemon"],
+      [502, 150, "slow"],
+      [426, 150, "slow"],
+      [426, "never", "unreachable"],
+    ];
+    for (const [code, delay, expected] of cases) {
+      const stub = await httpStub(code, delay);
+      openServers.push(stub.server);
+      backend.machines[0]!.previewUrl = async port => ({
+        url: `http://127.0.0.1:${stub.port}/?port=${port}&case=${code}-${delay}`,
+        token: "t",
+        expiresAt: Date.now() + 3_600_000,
+      });
+      // A fresh runtime per case so no cached reach carries the previous stub over.
+      const fresh = createRuntime({ backend, store: memoryStore(), adapters: {} });
+      await fresh.workspaces.create({ golden: "snap_g", name: `case-${code}-${delay}` });
+      const last = backend.machines.at(-1)!;
+      last.previewUrl = backend.machines[0]!.previewUrl;
+      const status = (await fresh.status.list(opts)).find(s => s.machineId === last.id)!;
+      expect(status.reach.state, `${code} after ${delay}`).toBe(expected);
+      expect(status.machineState).toBe("running");
+    }
+  });
+});
+
+describe("status.watch provider calls", () => {
+  it("asks the provider nothing across healthy polls", async () => {
+    const { rt, backend } = testRuntime({ costIntervalMs: 60_000, pollIntervalMs: 5 });
+    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const probe = await httpStub(426);
+    openServers.push(probe.server);
+    backend.machines[0]!.previewUrl = async port => ({ url: `http://127.0.0.1:${probe.port}/?port=${port}`, token: "t", expiresAt: Date.now() + 3_600_000 });
+    await rt.workspaces.create({ golden: "snap_g", name: "no-preview" }); // unsupported reach is healthy too
+    const calls = countProvider(backend);
+    const stop = rt.status.watch();
+    await until(() => probe.hits() >= 8);
+    stop();
+    expect(calls()).toEqual({ get: 0, list: 0, state: 0 });
+  });
+
+  it("asks the provider once after a failed reach, then not again inside the reconcile window", async () => {
+    const { rt, backend } = testRuntime({ costIntervalMs: 60_000, pollIntervalMs: 5, reconcileMinMs: 60_000 });
+    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const dead = await httpStub(502);
+    openServers.push(dead.server);
+    backend.machines[0]!.previewUrl = async port => ({ url: `http://127.0.0.1:${dead.port}/?port=${port}`, token: "t", expiresAt: Date.now() + 3_600_000 });
+    const calls = countProvider(backend);
+    const seen: WorkspaceStatus[] = [];
+    rt.events.on("workspace.status", e => seen.push((e as { status: WorkspaceStatus }).status));
+    const stop = rt.status.watch();
+    await until(() => dead.hits() >= 8);
+    stop();
+    expect(calls()).toEqual({ get: 0, list: 0, state: 1 });
+    expect(seen.at(-1)).toMatchObject({ machineState: "running", reach: { state: "no-daemon" } });
   });
 });
 

@@ -39,7 +39,7 @@ import type {
   WorkspaceView,
 } from "@wsp/protocol";
 import { connectDaemon, type DaemonReach } from "./reach.js";
-import { createStatusTracker, type StatusApi, type StatusWatchOptions } from "./status.js";
+import { createStatusTracker, machineStateOf, type StatusApi, type StatusWatchOptions } from "./status.js";
 import type { Store } from "./store.js";
 
 // --- adapter port -------------------------------------------------------------
@@ -470,15 +470,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return undefined;
   };
 
-  /** A status pushed outside the poll, for a phase change the poller would show late. */
+  /** A status pushed outside the poll, for a phase change the poller would show
+   * late. Machine state is what the phase implies: asking the provider here
+   * would reset its idle timer for a fact the runtime already knows. */
   const emitStatus = async (entry: LiveWorkspace, reach: ReachState, reason?: string): Promise<void> => {
-    const machineState = await entry.machine.state().catch(() => "gone" as const);
     const size = entry.record.size;
     bus.emit({
       type: "workspace.status",
       status: {
         ...view(entry.record),
-        machineState,
+        machineState: machineStateOf(entry.record.phase),
         reach: { state: reach },
         size,
         rateUsdPerHour: backend.pricing.rateUsdPerHour(size),
@@ -1016,10 +1017,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
 
   const status = createStatusTracker({
-    backend,
+    rateUsdPerHour: size => backend.pricing.rateUsdPerHour(size),
     records: async () => {
       await ready();
-      return [...live.values()].map(e => ({ ...view(e.record), size: e.record.size }));
+      return [...live.values()].map(e => ({
+        ...view(e.record),
+        size: e.record.size,
+        ...(e.machine.previewUrl ? { daemonReach: () => e.ws.daemonReach() } : {}),
+        providerState: () => e.machine.state(),
+      }));
     },
     emit: e => bus.emit(e),
     on: (type, l) => bus.on(type, l),
