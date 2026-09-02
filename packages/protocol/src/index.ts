@@ -31,7 +31,10 @@ export type WorkspacePhase = z.infer<typeof WorkspacePhase>;
 export const MachineState = z.enum(["starting", "running", "paused", "gone"]);
 export type MachineState = z.infer<typeof MachineState>;
 
-export const ReachState = z.enum(["reachable", "no-daemon", "unreachable", "napping", "unsupported", "gone"]);
+/** slow: the edge answered late or 502'd while the machine runs (a provider slow
+ * spell, measured: 502 after 5 to 11 s with an open socket to the same guest
+ * still working); it is not no-daemon (a prompt 502) and not unreachable (silence). */
+export const ReachState = z.enum(["reachable", "no-daemon", "unreachable", "napping", "unsupported", "gone", "slow"]);
 export type ReachState = z.infer<typeof ReachState>;
 
 export const ReachStatus = z.object({
@@ -81,8 +84,10 @@ export const WorkspaceStatus = WorkspaceView.extend({
   size: WorkspaceSize,
   /** Awake burn rate for this size; 0 never appears here (napping costs ride the cost event). */
   rateUsdPerHour: z.number(),
-  /** Why the runtime pushed this status outside the poll: a wake that had to retry or replace the machine. */
+  /** Why the runtime pushed this status outside the poll: a wake that had to retry or replace the machine, or "idle 20 min". */
   reason: z.string().optional(),
+  /** Epoch ms when the runtime's idle policy naps this workspace; absent while napping, held by a running session, or with auto-nap off. */
+  idleAt: z.number().optional(),
 });
 export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
 
@@ -472,6 +477,8 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     memMb: z.number().optional(),
     envs: z.record(z.string()).optional(),
     labels: z.record(z.string()).optional(),
+    /** Auto-nap window for this workspace; absent takes the runtime default (20 min), null turns it off. */
+    idleWindowMs: z.number().nullable().optional(),
   }),
   z.object({ id: reqId, op: z.literal("workspaces.list") }),
   z.object({ id: reqId, op: z.literal("workspaces.get"), workspaceId: z.string() }),
@@ -485,6 +492,9 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     memMb: z.number().optional(),
   }),
   z.object({ id: reqId, op: z.literal("workspaces.delete"), workspaceId: z.string() }),
+  /** A person acted in the workspace through a road the runtime cannot see (typed into
+   * a terminal over the browser's daemon link); the idle countdown starts over. */
+  z.object({ id: reqId, op: z.literal("workspaces.touch"), workspaceId: z.string() }),
   /** Replies with a DaemonReachView; the runtime remints the edge token when it nears expiry. */
   z.object({ id: reqId, op: z.literal("workspaces.daemonReach"), workspaceId: z.string() }),
   z.object({

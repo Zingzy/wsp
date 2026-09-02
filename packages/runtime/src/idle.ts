@@ -1,0 +1,101 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// The runtime owns when a workspace naps. The provider's idle timer cannot be
+// the policy: every GET /sandboxes/:id resets it, so any process that reads
+// machine state keeps the machine awake and billing. The provider timer is set
+// behind this one as a backstop, at twice the window, so it fires only when
+// this process is gone.
+
+export const DEFAULT_IDLE_WINDOW_MS = 20 * 60_000;
+
+/** Backstop for a workspace whose auto-nap is off: long enough that the
+ * provider never naps a person who chose "never", short enough that a crashed
+ * runtime still stops the bill. Six hours is the longest timeoutMs the provider
+ * has accepted from us (the golden builder's). */
+export const IDLE_OFF_BACKSTOP_MS = 6 * 60 * 60_000;
+
+export function backstopMs(windowMs: number | null): number {
+  return windowMs === null ? IDLE_OFF_BACKSTOP_MS : windowMs * 2;
+}
+
+/** The reason a status carries when this policy napped the workspace. */
+export function idleReason(windowMs: number): string {
+  return `idle ${Math.round(windowMs / 60_000)} min`;
+}
+
+export interface IdlePolicyOptions {
+  /** The window for a workspace right now; null means auto-nap is off for it. */
+  windowOf(id: string): number | null;
+  /** Fires once when a window runs out; the workspace is forgotten until its next touch. */
+  onIdle(id: string, windowMs: number): Promise<void>;
+}
+
+export interface IdlePolicy {
+  /** Activity: the window starts over from now. */
+  touch(id: string): void;
+  /** A running session: the window may not fire while any hold stands; the last release starts it over. */
+  hold(id: string): void;
+  release(id: string): void;
+  /** Napping or deleted: no window. */
+  forget(id: string): void;
+  /** Epoch ms when the window fires; undefined when off, held, or not counting. */
+  idleAt(id: string): number | undefined;
+  close(): void;
+}
+
+interface Armed {
+  at: number;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+export function createIdlePolicy(o: IdlePolicyOptions): IdlePolicy {
+  const armed = new Map<string, Armed>();
+  const holds = new Map<string, number>();
+  let closed = false;
+
+  const forget = (id: string): void => {
+    const a = armed.get(id);
+    if (!a) return;
+    clearTimeout(a.timer);
+    armed.delete(id);
+  };
+
+  const arm = (id: string): void => {
+    forget(id);
+    if (closed) return;
+    const windowMs = o.windowOf(id);
+    if (windowMs === null) return;
+    const timer = setTimeout(() => {
+      armed.delete(id);
+      if ((holds.get(id) ?? 0) > 0) {
+        arm(id);
+        return;
+      }
+      o.onIdle(id, windowMs).catch((e: unknown) => console.warn(`idle nap of ${id} failed: ${e instanceof Error ? e.message : String(e)}`));
+    }, windowMs);
+    timer.unref?.();
+    armed.set(id, { at: Date.now() + windowMs, timer });
+  };
+
+  return {
+    touch: arm,
+    hold: id => holds.set(id, (holds.get(id) ?? 0) + 1),
+    release: id => {
+      const left = (holds.get(id) ?? 0) - 1;
+      if (left > 0) {
+        holds.set(id, left);
+        return;
+      }
+      holds.delete(id);
+      if (armed.has(id)) arm(id);
+    },
+    forget: id => {
+      forget(id);
+      holds.delete(id);
+    },
+    idleAt: id => ((holds.get(id) ?? 0) > 0 ? undefined : armed.get(id)?.at),
+    close: () => {
+      closed = true;
+      for (const id of [...armed.keys()]) forget(id);
+    },
+  };
+}

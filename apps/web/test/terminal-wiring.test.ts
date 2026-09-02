@@ -34,7 +34,11 @@ const view = (id: string, phase: "running" | "napping" = "running"): WorkspaceVi
 function fakeApi(workspaces: WorkspaceView[], daemonPort: () => number) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
   let reaches = 0;
+  const touches: string[] = [];
   const api: Api = {
+    touch: async id => {
+      touches.push(id);
+    },
     listWorkspaces: async () => workspaces,
     getWorkspace: async id => workspaces.find(w => w.id === id)!,
     createWorkspace: async () => workspaces[0]!,
@@ -66,7 +70,7 @@ function fakeApi(workspaces: WorkspaceView[], daemonPort: () => number) {
   const emit = (e: ProtocolEvent) => {
     for (const fn of [...listeners]) fn(e);
   };
-  return { api, emit, reaches: () => reaches };
+  return { api, emit, reaches: () => reaches, touches };
 }
 
 let daemon: DaemonHandle | undefined;
@@ -111,6 +115,21 @@ describe("wireTerminals", () => {
 
     emit({ type: "workspace.deleted", workspaceId: "ws_run" });
     await until(() => getTerminals("ws_run") === null);
+  }, 15_000);
+
+  it("typing into a terminal touches the workspace once per throttle window, not per keystroke", async () => {
+    const { api, touches } = fakeApi([view("ws_a")], () => daemon!.port);
+    unwire = wireTerminals(useStore, { backoffMs: () => 30, touchMinMs: 200 });
+    useStore.getState().bind(api);
+    await until(() => getTerminals("ws_a")?.status() === "live");
+    const tab = await getTerminals("ws_a")!.open({ shell: "/bin/sh" });
+    expect(touches).toEqual([]); // opening a terminal is not a person acting in it
+    for (const ch of "echo hi") getTerminals("ws_a")!.write(tab.ptyId, ch);
+    await until(() => touches.length === 1);
+    await new Promise(r => setTimeout(r, 250));
+    getTerminals("ws_a")!.write(tab.ptyId, "\n");
+    await until(() => touches.length === 2);
+    expect(touches).toEqual(["ws_a", "ws_a"]);
   }, 15_000);
 
   it("a workspace created after wiring gets its link too", async () => {

@@ -11,15 +11,21 @@ import type { useStore } from "../protocol/store.js";
 import { connectDaemonLink, type DaemonLink, type DaemonLinkOptions } from "./daemon-link.js";
 import { provideTerminals, WorkspaceTerminals } from "./link.js";
 
-export type WiringOptions = Pick<DaemonLinkOptions, "WebSocketCtor" | "heartbeatMs" | "backoffMs">;
+export interface WiringOptions extends Pick<DaemonLinkOptions, "WebSocketCtor" | "heartbeatMs" | "backoffMs"> {
+  /** Keystrokes reach the runtime as one workspaces.touch per this window; the idle window is minutes, so 30 s loses nothing. */
+  touchMinMs?: number;
+}
 
 interface Wired {
   wt: WorkspaceTerminals;
   link: DaemonLink | null;
+  /** When the runtime last heard this workspace was typed into. */
+  touched: number;
 }
 
 export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}): () => void {
   const wired = new Map<string, Wired>();
+  const { touchMinMs = 30_000, ...linkOpts } = opts;
 
   const unlink = (entry: Wired): void => {
     entry.link?.close();
@@ -34,9 +40,15 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
       seen.add(w.id);
       let entry = wired.get(w.id);
       if (!entry) {
-        const fresh: Wired = { link: null, wt: undefined as unknown as WorkspaceTerminals };
+        const fresh: Wired = { link: null, touched: 0, wt: undefined as unknown as WorkspaceTerminals };
         fresh.wt = new WorkspaceTerminals({
-          request: (op, params) => (fresh.link ? fresh.link.request(op, params) : Promise.reject(new Error("daemon unreachable"))),
+          request: (op, params) => {
+            if (op === "pty.write" && Date.now() - fresh.touched >= touchMinMs) {
+              fresh.touched = Date.now();
+              store.getState().api?.touch?.(w.id).catch(() => {});
+            }
+            return fresh.link ? fresh.link.request(op, params) : Promise.reject(new Error("daemon unreachable"));
+          },
         });
         entry = fresh;
         wired.set(w.id, entry);
@@ -46,7 +58,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
       if (w.phase === "running" && !entry.link) {
         const browser = getBrowser(w.id);
         const link = connectDaemonLink({
-          ...opts,
+          ...linkOpts,
           reach: () => api.daemonReach(w.id),
           onEvent: e => {
             if (e.type === "port.open" || e.type === "port.close") browser.feedEvent({ ...e, workspaceId: w.id });
