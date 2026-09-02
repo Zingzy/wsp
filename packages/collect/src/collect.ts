@@ -20,9 +20,18 @@ export const DETECTORS: Record<Rung, Detector> = {
   logins: detectLogins,
 };
 
+export interface CollectOptions {
+  /** Called after each rung's detector with its row count, so a spinner can count rows as they land. */
+  onRung?: (rung: Rung, count: number) => void;
+}
+
 /** Runs every rung's detector in ladder order and validates the result against the schema. */
-export async function collect(host: Host): Promise<Manifest> {
+export async function collect(host: Host, opts: CollectOptions = {}): Promise<Manifest> {
   const entries = [];
-  for (const rung of RUNGS) entries.push(...(await DETECTORS[rung](host)));
+  for (const rung of RUNGS) {
+    const rows = await DETECTORS[rung](host);
+    opts.onRung?.(rung, rows.length);
+    entries.push(...rows);
+  }
   return parseManifest({ entries });
 }

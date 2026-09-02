@@ -40,13 +40,17 @@ export async function detectEditors(host: Host): Promise<ManifestEntry[]> {
   const rows: (ManifestEntry | undefined)[] = [];
   for (const spec of ROWS) rows.push(await row(host, spec));
 
+  let codeLike = false;
   for (const ed of CODE_LIKE) {
     const dir = ed.userDir[host.platform];
-    rows.push(await row(host, {
+    const settings = await row(host, {
       rung: "editors", id: `editors/${ed.id}`, label: `${ed.label} settings, keybindings, snippets`,
       paths: [`${dir}/settings.json`, `${dir}/keybindings.json`, `${dir}/snippets`],
-    }));
+    });
+    rows.push(settings);
+    if (settings !== undefined) codeLike = true;
     if (await host.exec.which(ed.bin)) {
+      codeLike = true;
       const out = await host.exec.run(ed.bin, ["--list-extensions"]);
       for (const ext of parseExtensionList(out ?? "")) {
         rows.push(item({ rung: "editors", id: `editors/${ed.id}-ext/${ext}`, label: ext, group: ed.group }));
@@ -59,6 +63,9 @@ export async function detectEditors(host: Host): Promise<ManifestEntry[]> {
   }
   if (await host.exec.which("tailscale")) {
     rows.push(item({ rung: "editors", id: "editors/tailscale", label: "Tailscale (join the machine to your tailnet)", default: "skip" }));
+  }
+  if (codeLike) {
+    rows.push(item({ rung: "editors", id: "editors/remote-ssh", label: "Remote SSH (open the machine from VS Code or Cursor)", default: "skip" }));
   }
   return present(rows);
 }

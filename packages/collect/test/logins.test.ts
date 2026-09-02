@@ -18,6 +18,8 @@ describe("logins", () => {
     ["Codex", "darwin", { "~/.codex/auth.json": 900 }, {}, "logins/codex", ["~/.codex/auth.json"], "bring"],
     ["Gemini CLI", "darwin", { "~/.gemini/oauth_creds.json": 500 }, {}, "logins/gemini", ["~/.gemini/oauth_creds.json"], "bring"],
     ["OpenCode", "darwin", { "~/.local/share/opencode/auth.json": 200 }, {}, "logins/opencode", ["~/.local/share/opencode/auth.json"], "bring"],
+    ["Pi", "darwin", { "~/.pi/agent/auth.json": 900, "~/.pi/agent/settings.json": 80 }, {}, "logins/pi", ["~/.pi/agent/auth.json"], "bring"],
+    ["Hermes Agent", "darwin", { "~/.hermes/.env": 25_000, "~/.hermes/auth.json": 400, "~/.hermes/config.yaml": 600 }, {}, "logins/hermes", ["~/.hermes/.env", "~/.hermes/auth.json"], "bring"],
   ])("%s", async (_name, platform, files, exec, id, paths, dflt) => {
     const rows = await detectLogins(fakeHost({ platform: platform === "linux" ? "linux" : "darwin", files, exec }));
     expect(rows).toEqual([{ rung: "logins", id, label: expect.any(String), group: expect.any(String), paths, bytes: expect.any(Number), default: dflt }]);
@@ -48,7 +50,7 @@ describe("logins", () => {
 
   it("never reads a login file and never asks the Keychain for a secret", async () => {
     const host = fakeHost({
-      files: { "~/.config/gh/hosts.yml": "oauth_token: x", "~/.codex/auth.json": "{}", "~/.aws/credentials": "k" },
+      files: { "~/.config/gh/hosts.yml": "oauth_token: x", "~/.codex/auth.json": "{}", "~/.aws/credentials": "k", "~/.hermes/.env": "ANTHROPIC_API_KEY=sk-ant-x", "~/.pi/agent/auth.json": "{}" },
       exec: { 'security find-generic-password -s Claude Code-credentials': "x" },
     });
     await detectLogins(host);

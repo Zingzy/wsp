@@ -55,6 +55,20 @@ describe("collect", () => {
     expect(await collect(LAPTOP)).toMatchSnapshot();
   });
 
+  it("reports each rung's row count as it finishes, in ladder order, before the manifest resolves", async () => {
+    const seen: [string, number][] = [];
+    const manifest = await collect(LAPTOP, { onRung: (rung, count) => seen.push([rung, count]) });
+    expect(seen.map(([r]) => r)).toEqual([...RUNGS]);
+    for (const [rung, count] of seen) expect(count).toBe(manifest.entries.filter(e => e.rung === rung).length);
+    expect(seen.every(([, n]) => n > 0)).toBe(true);
+  });
+
+  it("an empty laptop reports zero for every rung", async () => {
+    const seen: number[] = [];
+    await collect(fakeHost(), { onRung: (_rung, count) => seen.push(count) });
+    expect(seen).toEqual(RUNGS.map(() => 0));
+  });
+
   it("an empty laptop is an empty manifest", async () => {
     expect(await collect(fakeHost())).toEqual({ entries: [] });
   });
