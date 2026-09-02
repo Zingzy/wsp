@@ -10,7 +10,7 @@ import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { createClaudeAdapter } from "@wsp/adapter-claude";
-import { DETECTORS, RUNGS, nodeHost, parseManifest, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
+import { collect, nodeHost, type Manifest, type Rung } from "@wsp/collect";
 import {
   SolariBackend,
   createRuntime,
@@ -312,16 +312,9 @@ export function terminalInitIO(): InitIO {
   };
 }
 
-/** The collector's ladder, one rung at a time so the terminal can count rows as they land. */
-async function collectThisComputer(onRung: (rung: Rung, rows: number) => void): Promise<Manifest> {
-  const laptop = nodeHost();
-  const entries: ManifestEntry[] = [];
-  for (const rung of RUNGS) {
-    const rows = await DETECTORS[rung](laptop);
-    onRung(rung, rows.length);
-    entries.push(...rows);
-  }
-  return parseManifest({ entries });
+/** The collector's ladder over this laptop; onRung lets the terminal count rows as each rung lands. */
+function collectThisComputer(onRung: (rung: Rung, rows: number) => void): Promise<Manifest> {
+  return collect(nodeHost(), { onRung });
 }
 
 /** Ctrl-C and a service stop both end with the lock removed. `once` leaves a
