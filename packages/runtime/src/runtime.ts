@@ -21,6 +21,7 @@ import {
   type Machine,
   type MachineBackend,
   type MachineKind,
+  type MachineShape,
   type MachineSpec,
   type PreviewReach,
   rollback as rollbackGolden,
@@ -31,11 +32,13 @@ import type {
   GoldenBuilderView,
   GoldenStage,
   PortReachView,
+  ReachState,
   SessionEvent,
   SessionView,
   WorkspaceView,
 } from "@wsp/protocol";
-import { createStatusTracker, type StatusApi, type StatusWatchOptions } from "./status.js";
+import { connectDaemon, type DaemonReach } from "./reach.js";
+import { createStatusTracker, sizeOf, type StatusApi, type StatusWatchOptions } from "./status.js";
 import type { Store } from "./store.js";
 
 // --- adapter port -------------------------------------------------------------
@@ -112,12 +115,16 @@ export interface CreateWorkspaceOptions extends WorkspaceSpec {
 interface WorkspaceRecord extends WorkspaceView {
   spec: WorkspaceSpec;
   firstLife: boolean;
+  /** The provider's view of the current machine when it was created; a wake compares against it. */
+  shape?: MachineShape;
 }
 
 interface LiveWorkspace {
   record: WorkspaceRecord;
   ws: Workspace;
   machine: Machine;
+  /** The wake in flight, so a second caller joins it instead of resuming twice. */
+  waking?: Promise<WorkspaceView>;
 }
 
 export interface SessionHandle {
@@ -158,6 +165,45 @@ export interface RuntimeOptions {
   status?: StatusWatchOptions;
   /** How long a seal waits for a killed machine to read gone (tests shrink it). */
   killConfirm?: KillConfirm;
+  wake?: WakeOptions;
+}
+
+export interface WakeOptions {
+  /** How long a resumed guest's daemon gets to answer through the edge before the wake counts as failed. */
+  pingTimeoutMs?: number;
+  /** A nap-time vault archive over this is not stored (a warning names the size). */
+  vaultCapBytes?: number;
+}
+
+const WAKE_PING_TIMEOUT_MS = 30_000;
+const VAULT_CAP_BYTES = 200 * 1024 * 1024;
+/** Blob collection: the latest nap-time vault per workspace id. */
+const VAULTS = "vaults";
+
+/** Rejects once the deadline passes; the underlying promise is left to settle on its own. */
+function until<T>(p: Promise<T>, deadline: number, what: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const ms = Math.max(0, deadline - Date.now());
+    const timer = setTimeout(() => reject(new Error(`${what} timed out after ${ms} ms`)), ms);
+    p.then(
+      v => { clearTimeout(timer); resolve(v); },
+      e => { clearTimeout(timer); reject(e); },
+    );
+  });
+}
+
+/** Size fields the provider reports that differ from what was created, as
+ * "field got != expected". createdAt is left out on purpose: Solari moves it
+ * to the resume time on every resume, healthy ones included (measured 3/3
+ * with exec answering right after), so it only rides along in the reason. */
+function shapeFault(expected: MachineShape, actual: MachineShape): string | undefined {
+  const diffs: string[] = [];
+  for (const key of ["cpu", "memMb"] as const) {
+    const want = expected[key];
+    const got = actual[key];
+    if (want !== undefined && got !== undefined && want !== got) diffs.push(`${key} ${got} != ${want}`);
+  }
+  return diffs.length === 0 ? undefined : diffs.join(", ");
 }
 
 /** Dirs the golden image already provides on every fresh fork; re-vaulting
@@ -306,6 +352,8 @@ function deadMachine(id: string): Machine {
 export function createRuntime(opts: RuntimeOptions): Runtime {
   const { backend, store, adapters } = opts;
   const bus = eventBus();
+  const pingTimeoutMs = opts.wake?.pingTimeoutMs ?? WAKE_PING_TIMEOUT_MS;
+  const vaultCapBytes = opts.wake?.vaultCapBytes ?? VAULT_CAP_BYTES;
 
   const vaultPathsOf = async (m: Machine): Promise<string[]> => {
     if (opts.vaultPaths) return opts.vaultPaths;
@@ -372,6 +420,56 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     await store.put(WORKSPACES, r.id, r);
   };
 
+  const shapeOf = async (m: Machine): Promise<MachineShape | undefined> => {
+    if (!m.describe) return undefined;
+    return m.describe().catch(() => undefined);
+  };
+
+  /** A status pushed outside the poll, for a phase change the poller would show late. */
+  const emitStatus = async (entry: LiveWorkspace, reach: ReachState, reason?: string): Promise<void> => {
+    const machineState = await entry.machine.state().catch(() => "gone" as const);
+    const size = sizeOf(backend, entry.record.spec);
+    bus.emit({
+      type: "workspace.status",
+      status: {
+        ...view(entry.record),
+        machineState,
+        reach: { state: reach },
+        size,
+        rateUsdPerHour: backend.pricing.rateUsdPerHour(size),
+        ...(reason !== undefined ? { reason } : {}),
+      },
+    });
+  };
+
+  /** The daemon answering through the edge is what proves a resumed guest
+   * serves; resume() returning does not (a zombie reports running for 10+
+   * minutes while exec and the edge 502). Backends without preview routes
+   * have no edge to ask, so the check falls back to the shape comparison. */
+  const pingDaemon = async (entry: LiveWorkspace): Promise<string | undefined> => {
+    const machine = entry.machine;
+    if (!machine.previewUrl) return undefined;
+    const deadline = Date.now() + pingTimeoutMs;
+    let link: DaemonReach | undefined;
+    try {
+      const reach = await until(entry.ws.daemonReach(), deadline, "preview route");
+      const token = await until(daemonTokenOf(machine), deadline, "daemon token");
+      if (token === undefined) {
+        // No daemon to ask; an exec that returns is the guest's own answer.
+        await until(machine.exec("true"), deadline, "guest exec");
+        return undefined;
+      }
+      link = connectDaemon({ previewUrl: reach.url, token, onEvent: () => {}, heartbeatMs: pingTimeoutMs });
+      await until(link.ready, deadline, "daemon link");
+      await until(link.request("ping"), deadline, "daemon ping");
+      return undefined;
+    } catch (e) {
+      return `daemon on ${machine.id} did not answer within ${pingTimeoutMs} ms (${e instanceof Error ? e.message : String(e)})`;
+    } finally {
+      link?.close();
+    }
+  };
+
   const forkSpec = (r: WorkspaceRecord, override?: WorkspaceSpec): MachineSpec => ({
     kind: "sandbox",
     fromSnapshot: r.golden,
@@ -393,10 +491,45 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           const m = await backend.create(forkSpec(record, override));
           await setHostname(m, record.name);
           entry.machine = m;
+          const shape = await shapeOf(m);
+          if (shape !== undefined) record.shape = shape;
+          else delete record.shape;
           return m;
         },
         vaultExport: async m => exportPaths(m, await vaultPathsOf(m)),
         vaultImport: (m, payload) => importInto(m, payload, "/"),
+        stashVault: async m => {
+          try {
+            const payload = await exportPaths(m, await vaultPathsOf(m), { maxBytes: vaultCapBytes });
+            await store.putBlob(VAULTS, record.id, payload);
+          } catch (e) {
+            console.warn(`nap vault for ${record.id} not stored, previous kept: ${e instanceof Error ? e.message : String(e)}`);
+          }
+        },
+        restoreVault: async m => {
+          const payload = await store.getBlob(VAULTS, record.id);
+          if (payload !== undefined) await importInto(m, payload, "/");
+        },
+        wakeCheck: async m => {
+          const expected = record.shape;
+          let both = "";
+          if (expected !== undefined && m.describe) {
+            let actual: MachineShape;
+            try {
+              actual = await m.describe();
+            } catch (e) {
+              return `provider view of ${m.id} unavailable (${e instanceof Error ? e.message : String(e)})`;
+            }
+            both = `created as ${JSON.stringify(expected)}, provider view ${JSON.stringify(actual)}`;
+            const fault = shapeFault(expected, actual);
+            if (fault !== undefined) {
+              console.warn(`wake check on ${m.id}: ${fault}; ${both}`);
+              return `${fault} on ${m.id} (${both})`;
+            }
+          }
+          const fault = await pingDaemon(entry);
+          return fault === undefined || both === "" ? fault : `${fault} (${both})`;
+        },
       },
       { phase: record.phase, firstLife: record.firstLife },
     );
@@ -467,6 +600,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const machine = await backend.create(forkSpec(record));
       await setHostname(machine, o.name);
       record.machineId = machine.id;
+      const shape = await shapeOf(machine);
+      if (shape !== undefined) record.shape = shape;
       attach(record, machine);
       await persist(record);
       const v = view(record);
@@ -494,15 +629,32 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async wake(id) {
       const entry = await entryOf(id);
-      const before = entry.ws.machineId;
-      await entry.ws.wake();
-      const resurrected = entry.ws.machineId !== before;
-      entry.record.phase = "running";
-      entry.record.machineId = entry.ws.machineId;
-      entry.record.firstLife = entry.ws.isFirstLife;
-      await persist(entry.record);
-      bus.emit({ type: "workspace.woken", workspaceId: id, machineId: entry.record.machineId, resurrected });
-      return view(entry.record);
+      if (entry.waking) return entry.waking;
+      if (entry.record.phase === "running") return view(entry.record);
+      entry.waking = (async () => {
+        entry.record.phase = "waking";
+        await persist(entry.record);
+        await emitStatus(entry, "napping");
+        try {
+          const result = await entry.ws.wake();
+          entry.record.phase = "running";
+          entry.record.machineId = entry.ws.machineId;
+          entry.record.firstLife = entry.ws.isFirstLife;
+          await persist(entry.record);
+          bus.emit({ type: "workspace.woken", workspaceId: id, machineId: entry.record.machineId, resurrected: result.resurrected });
+          if (result.reason !== undefined) console.warn(`wake of ${id}: ${result.reason}`);
+          await emitStatus(entry, entry.machine.previewUrl ? "reachable" : "unsupported", result.reason);
+          return view(entry.record);
+        } catch (e) {
+          entry.record.phase = entry.ws.currentPhase;
+          await persist(entry.record);
+          await emitStatus(entry, "napping", e instanceof Error ? e.message : String(e));
+          throw e;
+        } finally {
+          delete entry.waking;
+        }
+      })();
+      return entry.waking;
     },
 
     async upgrade(id, spec) {
@@ -526,6 +678,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       transcripts.delete(id);
       await store.delete(WORKSPACES, id);
       await store.delete(TRANSCRIPTS, id);
+      await store.deleteBlob(VAULTS, id);
       bus.emit({ type: "workspace.deleted", workspaceId: id });
     },
 

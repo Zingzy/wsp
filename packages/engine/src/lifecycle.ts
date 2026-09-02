@@ -10,9 +10,24 @@ export interface WorkspaceHooks {
   vaultExport?: (m: Machine) => Promise<Buffer>;
   /** Restore durable state (vault) onto a replacement machine. */
   vaultImport?: (m: Machine, payload: Buffer) => Promise<void>;
+  /** Runs before every pause: keep a copy of the vault the machine may never hand back. */
+  stashVault?: (m: Machine) => Promise<void>;
+  /** Puts the last stashed vault onto a machine that replaced one that never came back. */
+  restoreVault?: (m: Machine) => Promise<void>;
+  /** Judges a resumed machine; undefined means healthy, a string names the fault. */
+  wakeCheck?: (m: Machine) => Promise<string | undefined>;
 }
 
-export type WorkspacePhase = "running" | "napping";
+export type WorkspacePhase = "running" | "napping" | "waking";
+
+export interface WakeResult {
+  resurrected: boolean;
+  /** Present when the wake did not go straight through: every fault met on the way, in order. */
+  reason?: string;
+}
+
+/** Resume, check, and one more resume+check before a machine is given up on. */
+const WAKE_ATTEMPTS = 2;
 
 /** Thrown when a snapshot is asked of a machine that has been resumed. Typed so
  * callers (the wizard) can tell "start over" from an ordinary failure. */
@@ -30,6 +45,10 @@ export class NotFirstLifeError extends Error {
 /** The snapshot-fresh rule as one check: every snapshot in the engine goes through it. */
 export function assertFirstLife(machineId: string, firstLife: boolean, action: string): void {
   if (!firstLife) throw new NotFirstLifeError(machineId, action);
+}
+
+function isMissing(e: unknown): boolean {
+  return (e as WspError).kind === "missing";
 }
 
 export class Workspace {
@@ -85,22 +104,58 @@ export class Workspace {
 
   async nap(): Promise<void> {
     if (this.phase === "napping") return;
+    await this.hooks.stashVault?.(this.machine);
     await this.machine.pause();
     this.phase = "napping";
   }
 
-  async wake(): Promise<void> {
-    if (this.phase === "running") return;
+  /** Done when the resumed machine passes the wake check, not when resume()
+   * returns: Solari has handed back a machine reporting running whose guest
+   * never served again (resume fell back to a fresh host at default size).
+   * Such a machine gets one more pause+resume, then a golden fork with the
+   * stashed vault replaces it and the zombie is killed. */
+  async wake(): Promise<WakeResult> {
+    if (this.phase === "running") return { resurrected: false };
+    this.phase = "waking";
     try {
-      await this.machine.resume();
-      this.firstLife = false;
-    } catch (e) {
-      if ((e as WspError).kind !== "missing" || !this.hooks.resurrect) throw e;
-      // Paused machines can vanish after hours (PoC overnight-pause finding).
+      const faults: string[] = [];
+      for (let attempt = 1; attempt <= WAKE_ATTEMPTS; attempt++) {
+        try {
+          await this.machine.resume();
+        } catch (e) {
+          if (!isMissing(e)) throw e;
+          // Paused machines can vanish after hours (PoC overnight-pause finding).
+          faults.push(`machine ${this.machine.id} vanished while paused`);
+          break;
+        }
+        this.firstLife = false;
+        const fault = this.hooks.wakeCheck ? await this.hooks.wakeCheck(this.machine) : undefined;
+        if (fault === undefined) {
+          this.phase = "running";
+          return faults.length === 0 ? { resurrected: false } : { resurrected: false, reason: faults.join("; ") };
+        }
+        faults.push(`attempt ${attempt}: ${fault}`);
+        if (attempt < WAKE_ATTEMPTS) {
+          await this.machine.pause().catch((e: unknown) => {
+            faults.push(`re-pause failed: ${e instanceof Error ? e.message : String(e)}`);
+          });
+        }
+      }
+      const reason = faults.join("; ");
+      if (!this.hooks.resurrect) throw new Error(`wake failed: ${reason}`);
+      const zombie = this.machine;
       this.machine = await this.hooks.resurrect();
       this.firstLife = true;
+      await this.hooks.restoreVault?.(this.machine);
+      await zombie.kill().catch((e: unknown) => {
+        if (!isMissing(e)) throw e;
+      });
+      this.phase = "running";
+      return { resurrected: true, reason };
+    } catch (e) {
+      this.phase = "napping";
+      throw e;
     }
-    this.phase = "running";
   }
 
   async checkpoint(name: string): Promise<string> {

@@ -510,3 +510,172 @@ describe("runtime guest hostname", () => {
     }
   });
 });
+
+describe("runtime verified wake", () => {
+  const TOKEN_CMD = "cat /root/.wsp-daemon-token";
+  const TOKEN = "guest-token";
+
+  /** A stub whose guest answers ls/tar/untar/token like a golden fork; tar and untar commands are recorded per machine. */
+  function guestBackend() {
+    const backend = stubBackend();
+    const tars: string[] = [];
+    const untars: string[] = [];
+    let tgzBytes = 1_000;
+    backend.execImpl = (m, cmd) => {
+      if (cmd === TOKEN_CMD) return { exitCode: 0, stdout: `${TOKEN}\n`, stderr: "" };
+      if (cmd.includes("ls -A /root")) return { exitCode: 0, stdout: "notes.md\n.local\n", stderr: "" };
+      if (cmd.startsWith("stat -c %s")) return { exitCode: 0, stdout: `${tgzBytes}\n`, stderr: "" };
+      if (cmd.includes("tar czf")) tars.push(m.id);
+      if (cmd.includes("tar xzf")) untars.push(m.id);
+      return { exitCode: 0, stdout: "", stderr: "" };
+    };
+    const fetchStub = vi.fn(async (_url: string, init?: { method?: string }) =>
+      init?.method === "PUT" ? new Response(null, { status: 200 }) : new Response(Buffer.from("tarbytes")),
+    );
+    vi.stubGlobal("fetch", fetchStub);
+    return { backend, tars, untars, setTgzBytes: (n: number) => { tgzBytes = n; } };
+  }
+
+  async function withDaemon<T>(fn: (port: number) => Promise<T>): Promise<T> {
+    const { startDaemon } = await import("@wsp/daemon");
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const inboxDir = mkdtempSync(join(tmpdir(), "wsp-wake-inbox-"));
+    const daemon = await startDaemon({ port: 0, token: TOKEN, inboxDir, inboxQuietMs: 100, inboxPollMs: 25, portsSource: async () => [], portsIntervalMs: 25 });
+    try {
+      return await fn(daemon.port);
+    } finally {
+      await daemon.close();
+      rmSync(inboxDir, { recursive: true, force: true });
+    }
+  }
+
+  /** A port nothing listens on: the edge dialed, the guest never answered. */
+  async function deadPort(): Promise<number> {
+    const { createServer } = await import("node:net");
+    return new Promise(resolve => {
+      const srv = createServer();
+      srv.listen(0, "127.0.0.1", () => {
+        const { port } = srv.address() as { port: number };
+        srv.close(() => resolve(port));
+      });
+    });
+  }
+
+  it("resume returns but the daemon never answers: waking, one retry, then a golden fork with the vault and the zombie killed", async () => {
+    const { backend, tars, untars } = guestBackend();
+    const port = await deadPort();
+    try {
+      const store = memoryStore();
+      const rt = createRuntime({ backend, store, adapters: {}, wake: { pingTimeoutMs: 300 } });
+      const events: EventUnion[] = [];
+      rt.events.on("*", e => events.push(e));
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+      const m1 = backend.machines[0]!;
+      m1.previewUrl = async () => ({ url: `ws://127.0.0.1:${port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
+
+      await rt.workspaces.nap(ws.id);
+      expect(tars).toEqual(["m1"]);
+      expect(await store.getBlob("vaults", ws.id)).toEqual(Buffer.from("tarbytes"));
+
+      const woken = await rt.workspaces.wake(ws.id);
+      const phases = events.filter(e => e.type === "workspace.status").map(e => (e as { status: { phase: string } }).status.phase);
+      expect(phases[0]).toBe("waking");
+      expect(m1.resumes).toBe(2);
+      expect(m1.killed).toBe(true);
+      expect(woken.machineId).toBe("m2");
+      expect(woken.phase).toBe("running");
+      expect(backend.machines[1]!.spec.fromSnapshot).toBe("snap_g");
+      expect(untars).toEqual(["m2"]);
+      expect(events.find(e => e.type === "workspace.woken")).toMatchObject({ machineId: "m2", resurrected: true });
+      const last = events.filter(e => e.type === "workspace.status").at(-1) as { status: { phase: string; reason?: string; machineId: string } };
+      expect(last.status.phase).toBe("running");
+      expect(last.status.machineId).toBe("m2");
+      expect(last.status.reason).toMatch(/attempt 1: daemon on m1 did not answer within 300 ms.*created as \{"cpu":2,"memMb":4096.*attempt 2:/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("a size mismatch fails the wake before any ping, naming both values", async () => {
+    const { backend } = guestBackend();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+      const events: EventUnion[] = [];
+      rt.events.on("*", e => events.push(e));
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "x", memMb: 4096 });
+      const m1 = backend.machines[0]!;
+      let minted = 0;
+      m1.previewUrl = async () => { minted++; return { url: "ws://127.0.0.1:1", token: "e", expiresAt: Date.now() + 3_600_000 }; };
+      await rt.workspaces.nap(ws.id);
+      m1.shape = { cpu: 2, memMb: 2048, createdAt: "2026-09-02T19:03:35.000Z" };
+
+      const started = Date.now();
+      const woken = await rt.workspaces.wake(ws.id);
+      expect(Date.now() - started).toBeLessThan(2_000);
+      expect(minted).toBe(0);
+      expect(woken.machineId).toBe("m2");
+      const last = events.filter(e => e.type === "workspace.status").at(-1) as { status: { reason?: string } };
+      expect(last.status.reason).toContain("memMb 2048 != 4096");
+      expect(last.status.reason).toContain('provider view {"cpu":2,"memMb":2048,"createdAt":"2026-09-02T19:03:35.000Z"}');
+      expect(warn.mock.calls.some(c => String(c[0]).includes("2048") && String(c[0]).includes("4096"))).toBe(true);
+    } finally {
+      warn.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("a healthy wake stays on the same machine even though createdAt moved, imports nothing, and reports the daemon reachable", async () => {
+    const { backend, untars } = guestBackend();
+    try {
+      await withDaemon(async port => {
+        const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+        const events: EventUnion[] = [];
+        rt.events.on("*", e => events.push(e));
+        const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+        const m1 = backend.machines[0]!;
+        m1.previewUrl = async () => ({ url: `ws://127.0.0.1:${port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
+        await rt.workspaces.nap(ws.id);
+        m1.shape = { ...m1.shape, createdAt: "2026-09-02T20:11:04.444Z" }; // every Solari resume does this
+        const woken = await rt.workspaces.wake(ws.id);
+        expect(woken).toMatchObject({ machineId: "m1", phase: "running" });
+        expect(m1.resumes).toBe(1);
+        expect(m1.killed).toBe(false);
+        expect(backend.machines).toHaveLength(1);
+        expect(untars).toEqual([]);
+        expect(events.find(e => e.type === "workspace.woken")).toMatchObject({ machineId: "m1", resurrected: false });
+        const last = events.filter(e => e.type === "workspace.status").at(-1) as { status: { reach: { state: string }; reason?: string } };
+        expect(last.status.reach.state).toBe("reachable");
+        expect(last.status.reason).toBeUndefined();
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("every nap replaces the stashed vault; one over the cap is refused with a warning and the previous stays", async () => {
+    const { backend, tars, setTgzBytes } = guestBackend();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const store = memoryStore();
+      const rt = createRuntime({ backend, store, adapters: {}, wake: { vaultCapBytes: 5_000 } });
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+      await rt.workspaces.nap(ws.id);
+      expect(await store.getBlob("vaults", ws.id)).toEqual(Buffer.from("tarbytes"));
+      await rt.workspaces.wake(ws.id);
+      setTgzBytes(6_000);
+      await rt.workspaces.nap(ws.id);
+      expect(tars).toEqual(["m1", "m1"]);
+      expect(await store.getBlob("vaults", ws.id)).toEqual(Buffer.from("tarbytes"));
+      expect(warn.mock.calls.some(c => /6000 bytes, over the 5000 byte cap/.test(String(c[0])))).toBe(true);
+      expect((await rt.workspaces.get(ws.id)).phase).toBe("napping");
+      await rt.workspaces.delete(ws.id);
+      expect(await store.getBlob("vaults", ws.id)).toBeUndefined();
+    } finally {
+      warn.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+});
