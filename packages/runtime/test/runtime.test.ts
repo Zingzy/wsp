@@ -180,6 +180,67 @@ describe("runtime session history", () => {
     };
   };
 
+  it("stamps at and one turnId per start on every session event, and forwards the adapter's harness", async () => {
+    const sessionId = "44444444-4444-4444-8444-444444444444";
+    const harness = { slashCommands: ["compact"], permissionMode: "bypassPermissions", agents: ["general-purpose"] };
+    const scripted: HarnessAdapterFactory = () => ({
+      start: o => {
+        const result: TurnResult = { status: "completed", text: "ok" };
+        const finished = Promise.resolve().then(() => {
+          o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5", harness });
+          o.onEvent({ type: "turn.delta", sessionId, kind: "text", text: "ok" });
+          o.onEvent({ type: "turn.done", sessionId, result });
+          o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+          return result;
+        });
+        return { localId: sessionId, claudeSessionId: sessionId, finished };
+      },
+    });
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: scripted } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const before = Date.now();
+    await (await rt.sessions.start(ws.id, { prompt: "first" })).finished;
+    await (await rt.sessions.start(ws.id, { prompt: "second", resume: sessionId })).finished;
+    const after = Date.now();
+
+    const history = await rt.sessions.history(ws.id);
+    expect(history).toHaveLength(8);
+    for (const e of history) {
+      expect(e.at).toBeGreaterThanOrEqual(before);
+      expect(e.at).toBeLessThanOrEqual(after);
+      expect(e.turnId).toMatch(/^[0-9a-f-]{36}$/);
+    }
+    const turnIds = new Set(history.map(e => e.turnId));
+    expect(turnIds.size).toBe(2);
+    expect(new Set(history.slice(0, 4).map(e => e.turnId)).size).toBe(1);
+    expect(new Set(history.slice(4).map(e => e.turnId)).size).toBe(1);
+    expect(history[0]).toMatchObject({ type: "session.start", harness });
+    await rt.close();
+  });
+
+  it("SessionView carries the prompt, when it started and when it ended", async () => {
+    const m = manual();
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: m.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const before = Date.now();
+    const handle = await rt.sessions.start(ws.id, { prompt: "go" });
+    m.start();
+    const running = handle.view();
+    expect(running.prompt).toBe("go");
+    expect(running.startedAt).toBeGreaterThanOrEqual(before);
+    expect(running.startedAt).toBeLessThanOrEqual(Date.now());
+    expect(running.endedAt).toBeUndefined();
+
+    m.done("done");
+    m.end();
+    await handle.finished;
+    const ended = rt.sessions.list(ws.id)[0]!;
+    expect(ended.endedAt).toBeGreaterThanOrEqual(ended.startedAt!);
+    expect(ended.endedAt).toBeLessThanOrEqual(Date.now());
+    expect(ended.prompt).toBe("go");
+    await rt.close();
+  });
+
   /** memoryStore that counts transcript puts and can hold the first one open until the test lets go. */
   const countingStore = () => {
     const inner = memoryStore();

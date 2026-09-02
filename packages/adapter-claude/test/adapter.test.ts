@@ -110,6 +110,36 @@ describe("ClaudeAdapter over the recorded fixture", () => {
     expect(session.claudeSessionId).toBe(FIXTURE_SESSION_ID);
   });
 
+  it("forwards system/init's slash_commands, permissionMode and agents as harness", async () => {
+    const exec = scriptedExec(fixtureLines());
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { events, onEvent } = collect();
+
+    await adapter.start({ prompt: "write a hello world server", onEvent }).finished;
+
+    const start = events[0];
+    if (start?.type !== "session.start") throw new Error("expected session.start");
+    expect(start.harness).toEqual({
+      slashCommands: ["compact", "context", "cost", "init", "review"],
+      permissionMode: "bypassPermissions",
+      agents: ["general-purpose"],
+    });
+  });
+
+  it("leaves harness unset when system/init carries none of its fields", async () => {
+    const init = `{"type":"system","subtype":"init","session_id":"${FIXTURE_SESSION_ID}"}`;
+    const exec = scriptedExec([init]);
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { events, onEvent } = collect();
+
+    await adapter.start({ prompt: "x", onEvent }).finished;
+
+    const start = events[0];
+    if (start?.type !== "session.start") throw new Error("expected session.start");
+    expect(start.harness).toBeUndefined();
+    expect("harness" in start).toBe(false);
+  });
+
   it("spawns with the landmine-safe command and env", async () => {
     const exec = scriptedExec(fixtureLines());
     const adapter = createClaudeAdapter({

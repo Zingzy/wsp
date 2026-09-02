@@ -6,6 +6,8 @@ export interface ListeningPort {
   pid: number | null;
   inode: number;
   uid: number;
+  /** /proc/<pid>/comm of the owner; unset when there is no pid or the read fails. */
+  process?: string;
 }
 
 const TCP_LISTEN = "0A";
@@ -44,8 +46,16 @@ export function procNetTcpSource(procRoot = "/proc"): PortSnapshotSource {
         if (!byPort.has(row.port)) byPort.set(row.port, row);
       }
     }
-    return [...byPort.values()];
+    return Promise.all([...byPort.values()].map(async row => {
+      const process = row.pid === null ? undefined : await readComm(procRoot, row.pid);
+      return process === undefined ? row : { ...row, process };
+    }));
   };
+}
+
+async function readComm(procRoot: string, pid: number): Promise<string | undefined> {
+  const comm = (await readFile(`${procRoot}/${pid}/comm`, "utf8").catch(() => "")).trim();
+  return comm.length > 0 ? comm : undefined;
 }
 
 // pgrep does not exist in the guests; walking /proc/[pid]/fd is the portable way.
@@ -68,6 +78,7 @@ export interface PortOpenEvent {
   type: "port.open";
   port: number;
   pid: number | null;
+  process?: string;
 }
 export interface PortCloseEvent {
   type: "port.close";
@@ -98,7 +109,12 @@ export class PortWatcher extends EventEmitter {
       const next = new Map((await this.source()).map(p => [p.port, p] as const));
       for (const [port, row] of next) {
         if (!this.known.has(port)) {
-          this.emit("port.open", { type: "port.open", port, pid: row.pid } satisfies PortOpenEvent);
+          this.emit("port.open", {
+            type: "port.open",
+            port,
+            pid: row.pid,
+            ...(row.process !== undefined ? { process: row.process } : {}),
+          } satisfies PortOpenEvent);
         }
       }
       for (const port of this.known.keys()) {
