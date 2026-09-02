@@ -926,6 +926,49 @@ describe("runtime workspace screen", () => {
   });
 });
 
+describe("runtime fork kind", () => {
+  const version = (kind?: "sandbox" | "desktop") => ({
+    version: 1,
+    snapshotId: "snap_golden-v1",
+    baseTemplate: "base",
+    ...(kind !== undefined ? { kind } : {}),
+    setupSha: "sha1",
+    createdAt: "2026-08-11T00:00:00.000Z",
+    smoke: { cmd: "true", exitCode: 0 },
+  });
+
+  it("forks a desktop golden as kind desktop on create, resurrect and upgrade, carrying the stream on the view", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    await store.put("goldens", "default", { head: 1, versions: [version("desktop")] });
+    const rt = createRuntime({ backend, store, adapters: {} });
+
+    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "a" });
+    expect(backend.machines[0]!.spec.kind).toBe("desktop");
+    expect(ws.screen).toEqual({ streamUrl: "wss://stub/stream/m1" });
+
+    await rt.workspaces.nap(ws.id);
+    backend.machines[0]!.killed = true;
+    const woken = await rt.workspaces.wake(ws.id);
+    expect(backend.machines[1]!.spec.kind).toBe("desktop");
+    expect(woken.screen).toEqual({ streamUrl: "wss://stub/stream/m2" });
+
+    const upgraded = await rt.workspaces.upgrade(ws.id, { cpu: 4 });
+    expect(backend.machines[2]!.spec.kind).toBe("desktop");
+    expect(upgraded.screen).toEqual({ streamUrl: "wss://stub/stream/m3" });
+  });
+
+  it("a manifest sealed before versions recorded a kind still forks sandbox", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    await store.put("goldens", "default", { head: 1, versions: [version()] });
+    const rt = createRuntime({ backend, store, adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "a" });
+    expect(backend.machines[0]!.spec.kind).toBe("sandbox");
+    expect(ws.screen).toBeUndefined();
+  });
+});
+
 describe("nap vault against the stub backend", () => {
   it("stores a real tar from the stub download URL without warning", async () => {
     const backend = stubBackend();

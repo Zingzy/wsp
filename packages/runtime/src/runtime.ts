@@ -460,11 +460,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     memMb: shape?.memMb ?? asked.memMb,
   });
 
-  /** The size a sealed golden records for this snapshot, if any manifest knows it. */
-  const goldenSizeOf = async (snapshotId: string): Promise<WorkspaceSize | undefined> => {
+  /** The sealed version behind this snapshot, if any manifest knows it. */
+  const goldenVersionOf = async (snapshotId: string): Promise<GoldenVersion | undefined> => {
     for (const raw of await store.list(GOLDENS)) {
       const hit = (raw as GoldenManifest).versions.find(v => v.snapshotId === snapshotId);
-      if (hit?.size !== undefined) return hit.size;
+      if (hit !== undefined) return hit;
     }
     return undefined;
   };
@@ -516,8 +516,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** Size is always explicit: a create that names none gets the provider's own
    * default (2048 MB on Solari), not the size the record and the rate assume. */
-  const forkSpec = (r: WorkspaceRecord, override?: WorkspaceSpec): MachineSpec & WorkspaceSize => ({
-    kind: "sandbox",
+  const forkSpec = (r: WorkspaceRecord, kind: MachineKind, override?: WorkspaceSpec): MachineSpec & WorkspaceSize => ({
+    kind,
     fromSnapshot: r.golden,
     cpu: override?.cpu ?? r.size.cpu,
     memMb: override?.memMb ?? r.size.memMb,
@@ -527,9 +527,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     labels: { ...r.spec.labels, wsp: "1", createdAt: new Date().toISOString() },
   });
 
-  /** Boots a golden fork for the record and writes back what the provider says it built. */
+  /** Boots a golden fork for the record and writes back what the provider says it built.
+   * A snapshot restores as the kind it was taken from, so the spec names that kind;
+   * versions sealed before it was recorded were all sandbox. */
   const fork = async (record: WorkspaceRecord, override?: WorkspaceSpec): Promise<Machine> => {
-    const spec = forkSpec(record, override);
+    const spec = forkSpec(record, (await goldenVersionOf(record.golden))?.kind ?? "sandbox", override);
     const machine = await backend.create(spec);
     await setHostname(machine, record.name);
     const shape = await shapeOf(machine);
@@ -646,7 +648,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const workspaces: Runtime["workspaces"] = {
     async create(o) {
       await ready();
-      const inherited = await goldenSizeOf(o.golden);
+      const inherited = (await goldenVersionOf(o.golden))?.size;
       const record: WorkspaceRecord = {
         id: `ws_${randomBytes(4).toString("hex")}`,
         name: o.name,
