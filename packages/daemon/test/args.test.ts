@@ -12,6 +12,11 @@ describe("wsp-daemon argv", () => {
     expect(parseDaemonArgs(["--token-path", "/tmp/tok"])).toEqual({ tokenPath: "/tmp/tok" });
   });
 
+  it("parses --root for a workspace root other than HOME", () => {
+    expect(parseDaemonArgs(["--root", "/srv/work"])).toEqual({ root: "/srv/work" });
+    expect(() => parseDaemonArgs(["--root"])).toThrow(/--root/);
+  });
+
   it("refuses a missing value or a non-numeric port", () => {
     expect(() => parseDaemonArgs(["--host"])).toThrow(/--host/);
     expect(() => parseDaemonArgs(["--port", "abc"])).toThrow(/--port/);

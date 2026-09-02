@@ -5,7 +5,7 @@ try {
   args = parseDaemonArgs(process.argv.slice(2));
 } catch (e) {
   console.error(e instanceof Error ? e.message : e);
-  console.error("usage: wsp-daemon [--host <addr>] [--port <n>] [--token-path <file>]");
+  console.error("usage: wsp-daemon [--host <addr>] [--port <n>] [--token-path <file>] [--root <dir>]");
   process.exit(2);
 }
 

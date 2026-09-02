@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
   Capabilities,
+  DaemonErrorResponse,
   DaemonEvent,
   DaemonReachView,
   DaemonRequest,
   DaemonResponse,
   EventUnion,
+  FsListReply,
+  FsReadReply,
+  GitDiffReply,
+  GitStatusReply,
   GoldenManifest,
   GoldenStageEvent,
   PortReachView,
@@ -310,5 +315,47 @@ describe("golden wire schemas", () => {
 
   it("error replies may carry a typed kind", () => {
     expect(RuntimeErrorResponse.parse({ id: 1, ok: false, error: "refused", kind: "notFirstLife" }).kind).toBe("notFirstLife");
+  });
+});
+
+describe("daemon files and diff ops", () => {
+  it("parses the four requests and refuses a bad scope or encoding", () => {
+    const reqs = [
+      { id: 1, op: "fs.list", path: "src", depth: 2, gitignore: true },
+      { id: 2, op: "fs.read", path: "src/index.ts", encoding: "base64" },
+      { id: 3, op: "git.status", cwd: "." },
+      { id: 4, op: "git.diff", cwd: ".", scope: "branch", path: "src" },
+    ];
+    for (const r of reqs) expect(DaemonRequest.parse(r)).toEqual(r);
+    expect(() => DaemonRequest.parse({ id: 5, op: "git.diff", cwd: ".", scope: "all" })).toThrow();
+    expect(() => DaemonRequest.parse({ id: 6, op: "fs.read", path: "x", encoding: "hex" })).toThrow();
+    expect(() => DaemonRequest.parse({ id: 7, op: "fs.list", path: "x", depth: 0 })).toThrow();
+  });
+
+  it("parses the typed replies", () => {
+    const list = { entries: [{ name: "a.ts", type: "file", size: 12, mtime: 1_700_000_000_000 }], truncated: false };
+    expect(FsListReply.parse(list)).toEqual(list);
+    expect(() => FsListReply.parse({ entries: [{ ...list.entries[0], type: "socket" }], truncated: false })).toThrow();
+    const read = { content: "aGk=", size: 2, truncated: false };
+    expect(FsReadReply.parse(read)).toEqual(read);
+    const status = {
+      branch: { oid: "abc", head: "main", upstream: "origin/main", ahead: 1, behind: 0 },
+      entries: [
+        { xy: ".M", path: "a.ts" },
+        { xy: "R.", path: "b.ts", origPath: "old.ts" },
+        { xy: "??", path: "new.ts" },
+      ],
+    };
+    expect(GitStatusReply.parse(status)).toEqual(status);
+    const diff = { base: "main", files: [{ path: "a.ts", patch: "diff --git a/a.ts b/a.ts\n" }], truncated: true };
+    expect(GitDiffReply.parse(diff)).toEqual(diff);
+  });
+
+  it("carries a typed error code on refusals", () => {
+    const err = { id: 1, ok: false, error: "path escapes the workspace root", code: "outside-root" };
+    expect(DaemonErrorResponse.parse(err)).toEqual(err);
+    expect(DaemonResponse.parse(err)).toEqual(err);
+    expect(DaemonErrorResponse.parse({ id: 1, ok: false, error: "plain" })).toEqual({ id: 1, ok: false, error: "plain" });
+    expect(() => DaemonErrorResponse.parse({ ...err, code: "whatever" })).toThrow();
   });
 });

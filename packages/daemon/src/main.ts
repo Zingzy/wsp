@@ -1,11 +1,16 @@
 import { readFileSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
+import { homedir } from "node:os";
+import { resolve } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
+import { listDir, readFileBounded, type FsReadEncoding } from "./fs-ops.js";
+import { gitDiff, gitStatus, type GitDiffScope } from "./git-ops.js";
 import { InboxWatcher } from "./inbox.js";
 import { ProcessManifest, type ManifestOptions } from "./manifest.js";
 import { linuxModeProbe, ModeWatcher, type ModeProbe } from "./mode.js";
 import { PortWatcher, procNetTcpSource, type PortSnapshotSource } from "./ports.js";
 import { PtyManager } from "./pty-manager.js";
+import { OpError, resolveInside } from "./workspace-paths.js";
 
 export const DEFAULT_PORT = 7070;
 // 0.0.0.0, not loopback: the previewUrl edge dials the guest's eth0 (loopback answers 502).
@@ -27,6 +32,8 @@ export interface DaemonOptions {
   manifest?: ManifestOptions;
   modeProbe?: ModeProbe;
   modeIntervalMs?: number;
+  /** Every fs.* and git.* path must resolve inside this directory; HOME by default. */
+  root?: string;
 }
 
 export interface DaemonHandle {
@@ -38,8 +45,8 @@ export interface DaemonHandle {
 /** CLI flags for the bin: --host matters for LOCAL runs (bind 127.0.0.1 so
  * macOS/Windows firewalls stay quiet); in-guest keeps the 0.0.0.0 default
  * because the previewUrl edge dials eth0. */
-export function parseDaemonArgs(argv: string[]): Pick<DaemonOptions, "host" | "port" | "tokenPath"> {
-  const out: { host?: string; port?: number; tokenPath?: string } = {};
+export function parseDaemonArgs(argv: string[]): Pick<DaemonOptions, "host" | "port" | "tokenPath" | "root"> {
+  const out: { host?: string; port?: number; tokenPath?: string; root?: string } = {};
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i]!;
     const value = argv[i + 1];
@@ -56,8 +63,12 @@ export function parseDaemonArgs(argv: string[]): Pick<DaemonOptions, "host" | "p
       if (!value) throw new Error("--token-path needs a file path");
       out.tokenPath = value;
       i++;
+    } else if (flag === "--root") {
+      if (!value) throw new Error("--root needs a directory path");
+      out.root = value;
+      i++;
     } else {
-      throw new Error(`unknown flag ${flag} (known: --host, --port, --token-path)`);
+      throw new Error(`unknown flag ${flag} (known: --host, --port, --token-path, --root)`);
     }
   }
   return out;
@@ -110,7 +121,8 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
     ...(opts.modeIntervalMs !== undefined ? { intervalMs: opts.modeIntervalMs } : {}),
   });
 
-  const ctx: Ctx = { ptys, manifest, modes, getPortWatcher, getInboxWatcher };
+  const root = resolve(opts.root ?? process.env["HOME"] ?? homedir());
+  const ctx: Ctx = { ptys, manifest, modes, root, getPortWatcher, getInboxWatcher };
   const wss = new WebSocketServer({ host: opts.host ?? DEFAULT_HOST, port: opts.port ?? DEFAULT_PORT });
 
   wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
@@ -135,7 +147,8 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
         return;
       }
       handle(ws, state, ctx, msg).catch((e: unknown) => {
-        ws.send(JSON.stringify({ id: msg.id ?? null, ok: false, error: e instanceof Error ? e.message : String(e) }));
+        const error = e instanceof Error ? e.message : String(e);
+        ws.send(JSON.stringify({ id: msg.id ?? null, ok: false, error, ...(e instanceof OpError ? { code: e.code } : {}) }));
       });
     });
   });
@@ -165,11 +178,12 @@ interface Ctx {
   ptys: PtyManager;
   manifest: ProcessManifest;
   modes: ModeWatcher;
+  root: string;
   getPortWatcher(): PortWatcher;
   getInboxWatcher(): InboxWatcher;
 }
 
-function reply(ws: WebSocket, id: Request["id"], payload: Record<string, unknown>): void {
+function reply(ws: WebSocket, id: Request["id"], payload: object): void {
   ws.send(JSON.stringify({ id: id ?? null, ok: true, ...payload }));
 }
 
@@ -186,6 +200,21 @@ function requirePty(ptys: PtyManager, msg: Request) {
   const s = ptys.get(ptyId);
   if (!s) throw new Error(`no such pty: ${ptyId}`);
   return s;
+}
+
+function requireString(msg: Request, key: string): string {
+  const v = msg[key];
+  if (typeof v !== "string") throw new OpError("bad-request", `${key} must be a string`);
+  return v;
+}
+
+function optionalEnum<T extends string>(msg: Request, key: string, allowed: readonly T[]): T | undefined {
+  const v = msg[key];
+  if (v === undefined) return undefined;
+  if (typeof v !== "string" || !allowed.includes(v as T)) {
+    throw new OpError("bad-request", `${key} must be one of ${allowed.join(", ")}`);
+  }
+  return v as T;
 }
 
 function subscribe(state: ConnState, ws: WebSocket, emitter: NodeJS.EventEmitter, events: string[]): void {
@@ -276,6 +305,38 @@ async function handle(ws: WebSocket, state: ConnState, ctx: Ctx, msg: Request): 
       const files = await ctx.getInboxWatcher().rescan();
       for (const e of files) push(ws, { ...e });
       reply(ws, msg.id, { count: files.length });
+      return;
+    }
+    case "fs.list": {
+      const depth = msg["depth"];
+      if (depth !== undefined && (!Number.isInteger(depth) || (depth as number) < 1)) {
+        throw new OpError("bad-request", "depth must be a positive integer");
+      }
+      const dir = await resolveInside(ctx.root, requireString(msg, "path"));
+      reply(ws, msg.id, await listDir(dir, {
+        ...(depth !== undefined ? { depth: depth as number } : {}),
+        gitignore: msg["gitignore"] === true,
+      }));
+      return;
+    }
+    case "fs.read": {
+      const encoding = optionalEnum<FsReadEncoding>(msg, "encoding", ["utf8", "base64"]);
+      const file = await resolveInside(ctx.root, requireString(msg, "path"));
+      reply(ws, msg.id, await readFileBounded(file, encoding));
+      return;
+    }
+    case "git.status": {
+      const cwd = await resolveInside(ctx.root, requireString(msg, "cwd"));
+      reply(ws, msg.id, await gitStatus(cwd));
+      return;
+    }
+    case "git.diff": {
+      const scope = optionalEnum<GitDiffScope>(msg, "scope", ["branch", "unstaged", "staged"]);
+      if (scope === undefined) throw new OpError("bad-request", "scope is required");
+      const path = msg["path"];
+      if (path !== undefined && typeof path !== "string") throw new OpError("bad-request", "path must be a string");
+      const cwd = await resolveInside(ctx.root, requireString(msg, "cwd"));
+      reply(ws, msg.id, await gitDiff(cwd, scope, path));
       return;
     }
     case "ping": {

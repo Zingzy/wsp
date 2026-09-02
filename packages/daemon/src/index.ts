@@ -30,3 +30,26 @@ export {
 } from "./mode.js";
 export { ProcessManifest, type ManifestEntry, type ManifestOptions } from "./manifest.js";
 export { InboxWatcher, type InboxOptions, type InboxFileEvent } from "./inbox.js";
+export { OpError, resolveInside, type OpErrorCode } from "./workspace-paths.js";
+export {
+  listDir,
+  readFileBounded,
+  FS_READ_CAP_BYTES,
+  FS_LIST_CAP_ENTRIES,
+  type FsEntry,
+  type FsListing,
+  type FsRead,
+  type ListOpts,
+} from "./fs-ops.js";
+export {
+  gitStatus,
+  gitDiff,
+  parsePorcelainV2,
+  GIT_DIFF_CAP_BYTES,
+  type GitStatus,
+  type GitBranch,
+  type GitStatusEntry,
+  type GitDiff,
+  type GitDiffFile,
+  type GitDiffScope,
+} from "./git-ops.js";
