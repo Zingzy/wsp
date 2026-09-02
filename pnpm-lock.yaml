@@ -140,6 +140,16 @@ importers:
         specifier: ^22.20.1
         version: 22.20.1
 
+  packages/collect:
+    dependencies:
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+
   packages/daemon:
     dependencies:
       node-pty:
