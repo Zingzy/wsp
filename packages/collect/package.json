@@ -5,7 +5,7 @@
   "scripts": {
     "build": "tsup src/index.ts src/live.ts --format esm --dts",
     "test": "vitest run",
-    "live": "pnpm run build && node dist/live.js"
+    "live": "tsup src/index.ts src/live.ts --format esm --dts --silent && node dist/live.js"
   },
   "dependencies": {
     "zod": "^3.25.76"
