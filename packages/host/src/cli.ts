@@ -198,7 +198,7 @@ export function makeRuntime(keys: Keys, statePath: string, recipe: GoldenRecipe 
   });
 }
 
-interface HostLock {
+export interface HostLock {
   pid: number;
   port: number;
   wsPort: number;
@@ -253,6 +253,12 @@ function heldBy(lock: HostLock, statePath: string): Error {
 
 function lockPathFor(statePath: string): string {
   return join(dirname(statePath), "host.lock");
+}
+
+/** The host whose lock names this state file, when that process is still alive. */
+export function servingHost(statePath: string): HostLock | undefined {
+  const held = readLock(lockPathFor(statePath));
+  return held !== undefined && pidAlive(held.pid) ? held : undefined;
 }
 
 /** One state file, one host. A lock whose pid is gone is a crash leftover and
