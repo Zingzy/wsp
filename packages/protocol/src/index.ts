@@ -312,6 +312,52 @@ export type DaemonLinkStatus = z.infer<typeof DaemonLinkStatus>;
 
 const reqId = z.union([z.string(), z.number()]);
 
+// Replies carry no op, so each files/diff op has its own reply schema here
+// instead of a discriminated union; DaemonOkResponse stays the loose envelope.
+
+export const FsEntryType = z.enum(["file", "dir", "symlink"]);
+export type FsEntryType = z.infer<typeof FsEntryType>;
+/** name is the path relative to the listed directory ("src/a.ts" at depth 2);
+ * size is 0 for anything but a file; mtime is epoch milliseconds. */
+export const FsEntry = z.object({ name: z.string(), type: FsEntryType, size: z.number(), mtime: z.number() });
+export type FsEntry = z.infer<typeof FsEntry>;
+export const FsListReply = z.object({ entries: z.array(FsEntry), truncated: z.boolean() });
+export type FsListReply = z.infer<typeof FsListReply>;
+
+export const FsReadEncoding = z.enum(["utf8", "base64"]);
+export type FsReadEncoding = z.infer<typeof FsReadEncoding>;
+/** size is the whole file's byte length; content holds at most the first 2 MiB. */
+export const FsReadReply = z.object({ content: z.string(), size: z.number(), truncated: z.boolean() });
+export type FsReadReply = z.infer<typeof FsReadReply>;
+
+/** Porcelain v2 branch header: head is "(detached)" off a branch, oid
+ * "(initial)" before the first commit; ahead/behind are 0 without an upstream. */
+export const GitBranch = z.object({
+  oid: z.string(),
+  head: z.string(),
+  upstream: z.string().optional(),
+  ahead: z.number(),
+  behind: z.number(),
+});
+export type GitBranch = z.infer<typeof GitBranch>;
+/** xy is the two-letter porcelain code ("??" untracked, "!!" ignored, "." for
+ * an unchanged side); origPath is set for renames and copies. */
+export const GitStatusEntry = z.object({ xy: z.string(), path: z.string(), origPath: z.string().optional() });
+export type GitStatusEntry = z.infer<typeof GitStatusEntry>;
+export const GitStatusReply = z.object({ branch: GitBranch, entries: z.array(GitStatusEntry) });
+export type GitStatusReply = z.infer<typeof GitStatusReply>;
+
+/** branch: working tree against the merge-base with the default branch;
+ * unstaged: working tree against the index; staged: index against HEAD. */
+export const GitDiffScope = z.enum(["branch", "unstaged", "staged"]);
+export type GitDiffScope = z.infer<typeof GitDiffScope>;
+export const GitDiffFile = z.object({ path: z.string(), patch: z.string() });
+export type GitDiffFile = z.infer<typeof GitDiffFile>;
+/** base is the ref the branch scope diffed against (null for other scopes);
+ * truncated means the 2 MiB patch budget cut files or a patch short. */
+export const GitDiffReply = z.object({ base: z.string().nullable(), files: z.array(GitDiffFile), truncated: z.boolean() });
+export type GitDiffReply = z.infer<typeof GitDiffReply>;
+
 export const DaemonRequest = z.discriminatedUnion("op", [
   z.object({
     id: reqId,
@@ -340,11 +386,42 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("inbox.watch") }),
   z.object({ id: reqId, op: z.literal("inbox.rescan") }),
   z.object({ id: reqId, op: z.literal("ping") }),
+  /** Paths are relative to the daemon's workspace root (HOME unless started
+   * with --root) or absolute inside it; anything resolving outside, through
+   * .. or a symlink, is refused with code outside-root. gitignore hides
+   * entries git would ignore and stops descent into ignored directories. */
+  z.object({
+    id: reqId,
+    op: z.literal("fs.list"),
+    path: z.string(),
+    depth: z.number().int().min(1).optional(),
+    gitignore: z.boolean().optional(),
+  }),
+  z.object({ id: reqId, op: z.literal("fs.read"), path: z.string(), encoding: FsReadEncoding.optional() }),
+  z.object({ id: reqId, op: z.literal("git.status"), cwd: z.string() }),
+  z.object({ id: reqId, op: z.literal("git.diff"), cwd: z.string(), scope: GitDiffScope, path: z.string().optional() }),
 ]);
 export type DaemonRequest = z.infer<typeof DaemonRequest>;
 
+export const DaemonErrorCode = z.enum([
+  "outside-root",
+  "not-found",
+  "not-a-directory",
+  "not-a-file",
+  "not-a-git-repo",
+  "bad-request",
+]);
+export type DaemonErrorCode = z.infer<typeof DaemonErrorCode>;
+
 export const DaemonOkResponse = z.object({ id: reqId.nullable(), ok: z.literal(true) }).passthrough();
-export const DaemonErrorResponse = z.object({ id: reqId.nullable(), ok: z.literal(false), error: z.string() });
+/** code is set by the files and diff ops so clients can branch on the refusal
+ * without matching message text; older ops send the message alone. */
+export const DaemonErrorResponse = z.object({
+  id: reqId.nullable(),
+  ok: z.literal(false),
+  error: z.string(),
+  code: DaemonErrorCode.optional(),
+});
 export const DaemonResponse = z.union([DaemonOkResponse, DaemonErrorResponse]);
 export type DaemonResponse = z.infer<typeof DaemonResponse>;
 
