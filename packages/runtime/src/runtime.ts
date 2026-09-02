@@ -22,7 +22,16 @@ import {
   type PreviewReach,
   rollback as rollbackGolden,
 } from "@wsp/engine";
-import type { DaemonReachView, EventUnion, GoldenBuilderView, GoldenStage, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
+import type {
+  DaemonReachView,
+  EventUnion,
+  GoldenBuilderView,
+  GoldenStage,
+  PortReachView,
+  SessionEvent,
+  SessionView,
+  WorkspaceView,
+} from "@wsp/protocol";
 import { createStatusTracker, type StatusApi, type StatusWatchOptions } from "./status.js";
 import type { Store } from "./store.js";
 
@@ -191,6 +200,8 @@ export interface Runtime {
     exec(id: string, cmd: string, opts?: { timeoutMs?: number }): Promise<ExecResult>;
     /** How a browser dials this workspace's daemon; throws on backends without preview URLs. */
     daemonReach(id: string): Promise<DaemonReachView>;
+    /** The public route to one guest port, for a browser to frame; same caching and refusal as daemonReach. */
+    portReach(id: string, port: number): Promise<PortReachView>;
   };
   readonly sessions: {
     start(
@@ -523,6 +534,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const reach = await entry.ws.daemonReach();
       const daemonToken = await daemonTokenOf(entry.machine);
       return { url: reach.url, expiresAt: reach.expiresAt, ...(daemonToken !== undefined ? { daemonToken } : {}) };
+    },
+
+    async portReach(id, port) {
+      const entry = await entryOf(id);
+      const reach = await entry.ws.portReach(port);
+      return { url: reach.url, expiresAt: reach.expiresAt };
     },
   };
 

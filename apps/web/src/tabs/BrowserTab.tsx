@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Browser tab: the new-tab page is the workspace's live port directory, fed by
-// the daemon's port watcher through the runtime event stream. Opening a port
-// shows a local placeholder because the wire exposes no per-port URL yet. The
+// the daemon's port watcher over the workspace's daemon link. Opening a port
+// frames it through the public route the runtime mints for that port. The
 // tabs and the directory live in ../browser/model.js, which also consumes the
 // port events, so tab-away keeps both current.
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { getBrowser, type BrowserTabView, type PortEntry, type WorkspaceBrowser } from "../browser/model.js";
+import { usePortReach, type PortReach } from "../browser/reach.js";
 import styles from "./BrowserTab.module.css";
-
-const localUrl = (port: number) => `http://localhost:${port}`;
 
 export function BrowserTab({ workspaceId }: { workspaceId: string }) {
   const browser = getBrowser(workspaceId);
@@ -16,6 +15,8 @@ export function BrowserTab({ workspaceId }: { workspaceId: string }) {
   const tabs = useSyncExternalStore(fn => browser.onChange(fn), () => browser.tabs());
   const activeId = useSyncExternalStore(fn => browser.onChange(fn), () => browser.activeId());
   const active = tabs.find(t => t.id === activeId) ?? tabs[0]!;
+  const reach = usePortReach(workspaceId, active.port);
+  const url = reach.state === "ready" ? reach.reach.url : "";
 
   return (
     <div className={styles.pane}>
@@ -33,14 +34,16 @@ export function BrowserTab({ workspaceId }: { workspaceId: string }) {
           className={styles.addr}
           aria-label="address"
           readOnly
-          value={active.port === null ? `wsp://${workspaceId}/ports` : localUrl(active.port)}
+          value={active.port === null ? `wsp://${workspaceId}/ports` : url}
+          placeholder={active.port === null ? undefined : "minting a public url"}
         />
+        {url !== "" && <CopyKey url={url} />}
       </div>
       <div className={styles.webview} role="tabpanel">
         {active.port === null ? (
           <Directory ports={ports} onOpen={port => browser.navigate(active.id, port)} />
         ) : (
-          <PortPage port={active.port} listening={ports.some(p => p.port === active.port)} />
+          <PortPage port={active.port} listening={ports.some(p => p.port === active.port)} reach={reach} />
         )}
       </div>
     </div>
@@ -133,8 +136,30 @@ function FirstSeen({ at }: { at: number }) {
   );
 }
 
-function PortPage({ port, listening }: { port: number; listening: boolean }) {
-  const url = localUrl(port);
+function PortPage({ port, listening, reach }: { port: number; listening: boolean; reach: PortReach }) {
+  if (reach.state === "failed") {
+    return (
+      <div className={styles.page}>
+        <div className={styles.t1}>:{port} has no public route</div>
+        <div className={styles.t2}>{reach.error}</div>
+      </div>
+    );
+  }
+  // No sandbox attribute: the guest app is the user's own code and needs
+  // scripts, forms and same-origin storage.
+  return (
+    <div className={styles.framed}>
+      {!listening && (
+        <div key="note" className={styles.note}>
+          :{port} stopped listening
+        </div>
+      )}
+      {reach.state === "ready" && <iframe key="frame" className={styles.frame} title={`:${port}`} src={reach.reach.url} />}
+    </div>
+  );
+}
+
+function CopyKey({ url }: { url: string }) {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
@@ -142,24 +167,15 @@ function PortPage({ port, listening }: { port: number; listening: boolean }) {
     return () => clearTimeout(t);
   }, [copied]);
   return (
-    <div className={styles.page}>
-      <div className={styles.t1}>{listening ? `:${port} has no stream yet` : `:${port} stopped listening`}</div>
-      <div className={styles.t2}>
-        {listening ? "no public url for this port yet. localhost resolves inside the workspace." : "nothing is listening on this port any more"}
-      </div>
-      <div className={styles.urlbox}>
-        <span className={styles.url}>{url}</span>
-        <button
-          className={styles.key}
-          aria-label="copy url"
-          onClick={() => {
-            void navigator.clipboard?.writeText(url).then(() => setCopied(true), () => {});
-          }}
-        >
-          {copied ? "copied" : "copy"}
-        </button>
-      </div>
-    </div>
+    <button
+      className={styles.key}
+      aria-label="copy url"
+      onClick={() => {
+        void navigator.clipboard?.writeText(url).then(() => setCopied(true), () => {});
+      }}
+    >
+      {copied ? "copied" : "copy"}
+    </button>
   );
 }
 

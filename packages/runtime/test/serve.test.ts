@@ -138,6 +138,25 @@ describe("serveRuntime daemon reach", () => {
   });
 });
 
+describe("serveRuntime port reach", () => {
+  it("workspaces.portReach returns the route a browser frames, without the daemon token; an unknown workspace is refused", async () => {
+    const backend = stubBackend();
+    backend.execImpl = (_m, cmd) => (cmd.includes(".wsp-daemon-token") ? { exitCode: 0, stdout: "guest-token", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+    srv = await serveRuntime(createRuntime({ backend, store: memoryStore(), adapters: {} }), { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const id = (created["workspace"] as { id: string }).id;
+    backend.machines[0]!.previewUrl = async port => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, token: "e", expiresAt: 1_800_000_000_000 });
+    const res = await c.request("workspaces.portReach", { workspaceId: id, port: 3000 });
+    expect(res.ok).toBe(true);
+    expect(res["reach"]).toEqual({ url: "https://m1-3000.preview.example/?pt_token=e", expiresAt: 1_800_000_000_000 });
+    const missing = await c.request("workspaces.portReach", { workspaceId: "ws_nobody", port: 3000 });
+    expect(missing.ok).toBe(false);
+    expect(missing["error"]).toMatch(/no such workspace/);
+    c.close();
+  });
+});
+
 describe("serveRuntime golden wizard ops", () => {
   const recipe = { setup: "curl install", smoke: "claude --version", envs: { ANTHROPIC_API_KEY: "k" } };
 

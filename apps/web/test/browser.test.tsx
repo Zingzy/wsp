@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Browser tab against a fake api feeding port events in the @wsp/protocol
 // vocabulary. No daemon, no cloud: the directory is whatever this client saw.
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EventUnion, WorkspaceView } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { BrowserTab } from "../src/tabs/BrowserTab.js";
 import { resetBrowsers } from "../src/browser/model.js";
+import { REACH_REASK_FLOOR_MS, REACH_REFRESH_WITH_MS_LEFT } from "../src/browser/reach.js";
 
 const WS = "ws_browser01";
 const OTHER = "ws_other0002";
@@ -21,7 +22,10 @@ const workspace: WorkspaceView = {
   createdAt: "2026-09-01T00:00:00Z",
 };
 
-function fakeApi(workspaces: WorkspaceView[]) {
+const PUBLIC = (port: number, token = "e") => `https://m1-${port}.preview.example/?pt_token=${token}`;
+const mint: Api["portReach"] = async (_id, port) => ({ url: PUBLIC(port), expiresAt: Date.now() + 3_600_000 });
+
+function fakeApi(workspaces: WorkspaceView[], portReach: Api["portReach"] = mint) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
   const api: Api = {
     listWorkspaces: async () => workspaces,
@@ -33,6 +37,7 @@ function fakeApi(workspaces: WorkspaceView[]) {
     wake: async id => workspaces.find(w => w.id === id)!,
     upgrade: async id => workspaces.find(w => w.id === id)!,
     capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true }),
+    portReach,
     daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
     builderReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
     startSession: async o => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
@@ -53,16 +58,19 @@ const open = (workspaceId: string, port: number, pid?: number): EventUnion =>
   ({ type: "port.open", workspaceId, port, ...(pid !== undefined ? { pid } : {}) });
 const close = (workspaceId: string, port: number): EventUnion => ({ type: "port.close", workspaceId, port });
 
-function setup(workspaceId = WS) {
-  const { api, emit } = fakeApi([workspace]);
+function setup(portReach?: Api["portReach"]) {
+  const { api, emit } = fakeApi([workspace], portReach);
   act(() => useStore.getState().bind(api));
-  const view = render(<BrowserTab workspaceId={workspaceId} />);
+  const view = render(<BrowserTab workspaceId={WS} />);
   return { emit, view };
 }
+
+const address = () => screen.getByRole("textbox", { name: "address" }) as HTMLInputElement;
 
 afterEach(() => {
   cleanup();
   resetBrowsers();
+  vi.useRealTimers();
 });
 
 describe("port directory", () => {
@@ -106,39 +114,101 @@ describe("port directory", () => {
   });
 });
 
-describe("click-through", () => {
-  it("clicking a card opens that port: address bar and a copyable localhost url", async () => {
+describe("port page", () => {
+  it("frames the port's public route: iframe src, address row and copy key all carry it, never localhost", async () => {
     const writeText = vi.fn(async () => {});
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
     const { emit } = setup();
     emit(open(WS, 5173, 4182));
     fireEvent.click(screen.getByRole("button", { name: "open :5173" }));
 
-    expect(screen.getByRole("textbox", { name: "address" })).toHaveProperty("value", "http://localhost:5173");
-    expect(screen.getByText("http://localhost:5173")).toBeDefined();
+    const frame = await screen.findByTitle(":5173");
+    expect(frame.tagName).toBe("IFRAME");
+    expect(frame.getAttribute("src")).toBe(PUBLIC(5173));
+    expect(frame.hasAttribute("sandbox")).toBe(false);
+    expect(address().value).toBe(PUBLIC(5173));
+    expect(screen.queryByText(/localhost/)).toBeNull();
     expect(screen.queryByText("no open ports")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "copy url" }));
-    expect(writeText).toHaveBeenCalledWith("http://localhost:5173");
+    expect(writeText).toHaveBeenCalledWith(PUBLIC(5173));
     await screen.findByText("copied");
 
     fireEvent.click(screen.getByRole("button", { name: "port directory" }));
-    expect(screen.getByRole("textbox", { name: "address" })).toHaveProperty("value", `wsp://${WS}/ports`);
+    expect(address().value).toBe(`wsp://${WS}/ports`);
+    expect(screen.queryByRole("button", { name: "copy url" })).toBeNull();
     expect(screen.getByRole("button", { name: "open :5173" })).toBeDefined();
   });
 
-  it("an open port view notes when its port stops listening", () => {
+  it("asks for a fresh route before the current one expires and swaps the frame onto it", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const { emit } = setup(async (_id, port) => {
+      calls++;
+      return { url: PUBLIC(port, `t${calls}`), expiresAt: Date.now() + 3_600_000 };
+    });
+    emit(open(WS, 5173));
+    fireEvent.click(screen.getByRole("button", { name: "open :5173" }));
+    await act(async () => {});
+    const frame = screen.getByTitle(":5173");
+    expect(frame.getAttribute("src")).toBe(PUBLIC(5173, "t1"));
+
+    await act(() => vi.advanceTimersByTimeAsync(3_600_000 - REACH_REFRESH_WITH_MS_LEFT - 1));
+    expect(calls).toBe(1);
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(calls).toBe(2);
+    expect(screen.getByTitle(":5173")).toBe(frame);
+    expect(frame.getAttribute("src")).toBe(PUBLIC(5173, "t2"));
+    expect(address().value).toBe(PUBLIC(5173, "t2"));
+  });
+
+  it("a route handed back with under nine minutes left is re-asked no sooner than the floor, never in a tight loop", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const { emit } = setup(async (_id, port) => {
+      calls++;
+      return { url: PUBLIC(port, `t${calls}`), expiresAt: Date.now() + 60_000 };
+    });
+    emit(open(WS, 5173));
+    fireEvent.click(screen.getByRole("button", { name: "open :5173" }));
+    await act(async () => {});
+    expect(calls).toBe(1);
+
+    await act(() => vi.advanceTimersByTimeAsync(REACH_REASK_FLOOR_MS - 1));
+    expect(calls).toBe(1);
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(calls).toBe(2);
+    await act(() => vi.advanceTimersByTimeAsync(REACH_REASK_FLOOR_MS - 1));
+    expect(calls).toBe(2);
+    expect(screen.getByTitle(":5173").getAttribute("src")).toBe(PUBLIC(5173, "t2"));
+  });
+
+  it("keeps the frame when the port stops listening and says so above it", async () => {
     const { emit } = setup();
     emit(open(WS, 5173));
     fireEvent.click(screen.getByRole("button", { name: "open :5173" }));
+    const frame = await screen.findByTitle(":5173");
     emit(close(WS, 5173));
     expect(screen.getByText(":5173 stopped listening")).toBeDefined();
-    expect(screen.getByRole("textbox", { name: "address" })).toHaveProperty("value", "http://localhost:5173");
+    expect(screen.getByTitle(":5173")).toBe(frame);
+    expect(address().value).toBe(PUBLIC(5173));
+  });
+
+  it("a route that cannot be minted is said plainly instead of a blank frame", async () => {
+    const { emit } = setup(async () => {
+      throw new Error("machine m1 is on a backend without preview URLs");
+    });
+    emit(open(WS, 5173));
+    fireEvent.click(screen.getByRole("button", { name: "open :5173" }));
+    expect(await screen.findByText(":5173 has no public route")).toBeDefined();
+    expect(screen.getByText("machine m1 is on a backend without preview URLs")).toBeDefined();
+    expect(screen.queryByTitle(":5173")).toBeNull();
+    expect(screen.queryByRole("button", { name: "copy url" })).toBeNull();
   });
 });
 
 describe("browser tabs inside the pane", () => {
-  it("new tab opens on the directory while the first keeps its port; switching restores each", () => {
+  it("new tab opens on the directory while the first keeps its port; switching restores each", async () => {
     const { emit } = setup();
     emit(open(WS, 5173));
     emit(open(WS, 5000));
@@ -152,12 +222,12 @@ describe("browser tabs inside the pane", () => {
     expect(screen.getByText("2 listening")).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "open :5000" }));
-    expect(screen.getByRole("textbox", { name: "address" })).toHaveProperty("value", "http://localhost:5000");
+    await screen.findByDisplayValue(PUBLIC(5000));
 
     fireEvent.click(screen.getByRole("tab", { name: ":5173" }));
-    expect(screen.getByRole("textbox", { name: "address" })).toHaveProperty("value", "http://localhost:5173");
+    await screen.findByDisplayValue(PUBLIC(5173));
     fireEvent.click(screen.getByRole("tab", { name: ":5000" }));
-    expect(screen.getByRole("textbox", { name: "address" })).toHaveProperty("value", "http://localhost:5000");
+    await screen.findByDisplayValue(PUBLIC(5000));
   });
 
   it("closing a tab activates its neighbour; the last tab cannot be closed", () => {
@@ -169,17 +239,17 @@ describe("browser tabs inside the pane", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "close tab :5173" }));
     expect(screen.getAllByRole("tab")).toHaveLength(1);
-    expect(screen.getByRole("textbox", { name: "address" })).toHaveProperty("value", `wsp://${WS}/ports`);
+    expect(address().value).toBe(`wsp://${WS}/ports`);
     expect(screen.queryByRole("button", { name: /^close tab/ })).toBeNull();
   });
 
-  it("tabs and directory survive tab-away: unmount and remount land on the same view", () => {
+  it("tabs and directory survive tab-away: unmount and remount land on the same view", async () => {
     const { emit, view } = setup();
     emit(open(WS, 5173, 7));
     fireEvent.click(screen.getByRole("button", { name: "open :5173" }));
     view.unmount();
     render(<BrowserTab workspaceId={WS} />);
-    expect(screen.getByRole("textbox", { name: "address" })).toHaveProperty("value", "http://localhost:5173");
+    await screen.findByDisplayValue(PUBLIC(5173));
     fireEvent.click(screen.getByRole("button", { name: "port directory" }));
     expect(screen.getByText("pid 7")).toBeDefined();
   });
@@ -217,6 +287,6 @@ describe("browser tabs inside the pane", () => {
     render(<BrowserTab workspaceId={OTHER} />);
     expect(screen.getByText("no open ports")).toBeDefined();
     expect(screen.getAllByRole("tab")).toHaveLength(1);
-    expect(screen.getByRole("textbox", { name: "address" })).toHaveProperty("value", `wsp://${OTHER}/ports`);
+    expect(address().value).toBe(`wsp://${OTHER}/ports`);
   });
 });

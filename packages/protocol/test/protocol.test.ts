@@ -7,6 +7,7 @@ import {
   EventUnion,
   GoldenManifest,
   GoldenStageEvent,
+  PortReachView,
   RuntimeErrorResponse,
   RuntimeRequest,
   RuntimeResponse,
@@ -184,6 +185,17 @@ describe("runtime wire types", () => {
     const rolled = { lineage, existingWorkspaces: "untouched" };
     expect(SnapshotRollbackResult.parse(rolled)).toEqual(rolled);
     expect(() => SnapshotRollbackResult.parse({ lineage, existingWorkspaces: "upgraded" })).toThrow();
+  });
+
+  it("workspaces.portReach names the workspace and one guest port; PortReachView is the route without the daemon token", () => {
+    const req = { id: 21, op: "workspaces.portReach", workspaceId: "ws_1", port: 3000 };
+    expect(RuntimeRequest.parse(req)).toEqual(req);
+    expect(() => RuntimeRequest.parse({ id: 21, op: "workspaces.portReach", workspaceId: "ws_1" })).toThrow();
+    for (const port of [0, 65536, 30.5]) expect(() => RuntimeRequest.parse({ ...req, port })).toThrow();
+    const reach = { url: "https://m-3000.preview.example/?pt_token=edge", expiresAt: 1_700_000_000_000 };
+    expect(PortReachView.parse(reach)).toEqual(reach);
+    expect(PortReachView.parse({ ...reach, daemonToken: "d" })).toEqual(reach);
+    expect(() => PortReachView.parse({ url: "x" })).toThrow();
   });
 
   it("DaemonReachView carries the preview route, its expiry, and the daemon token when the guest has one", () => {

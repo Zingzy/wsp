@@ -9,6 +9,7 @@ import type {
   GoldenBuilderView,
   GoldenManifest,
   GoldenVersion,
+  PortReachView,
   SessionEvent,
   SessionView,
   SnapshotLineage,
@@ -116,6 +117,8 @@ export interface Api {
   capabilities(): Promise<Capabilities>;
   /** How to dial the workspace's daemon right now; ask again per dial, the edge token expires hourly. */
   daemonReach(id: string): Promise<DaemonReachView>;
+  /** The public route to one guest port, for an iframe; the runtime remints near the hourly expiry, so ask again before expiresAt. */
+  portReach(id: string, port: number): Promise<PortReachView>;
   /** One turn on the workspace; events arrive on the subscription, this resolves with the row. */
   startSession(opts: StartSessionOptions): Promise<SessionView>;
   /** All sessions the runtime knows, or one workspace's. */
@@ -170,6 +173,7 @@ export function makeApi(c: ProtocolClient): Api {
       (await c.request<{ workspace: WorkspaceView }>("workspaces.upgrade", { workspaceId: id, ...size })).workspace,
     capabilities: async () => (await c.request<{ capabilities: Capabilities }>("capabilities.get")).capabilities,
     daemonReach: async id => (await c.request<{ reach: DaemonReachView }>("workspaces.daemonReach", { workspaceId: id })).reach,
+    portReach: async (id, port) => (await c.request<{ reach: PortReachView }>("workspaces.portReach", { workspaceId: id, port })).reach,
     startSession: async opts => (await c.request<{ session: SessionView }>("sessions.start", { ...opts })).session,
     sessionHistory: async id => (await c.request<{ events: SessionEvent[] }>("sessions.history", { workspaceId: id })).events,
     listSessions: async id =>

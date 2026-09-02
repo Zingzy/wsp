@@ -85,6 +85,14 @@ describe("makeApi wrappers", () => {
     expect(lastSent()).toMatchObject({ op: "workspaces.daemonReach", workspaceId: "ws_1" });
   });
 
+  it("portReach sends workspaces.portReach with the port and unwraps the reach view", async () => {
+    const { api, lastSent } = await connect();
+    const reach = { url: "https://m1-3000.preview.example/?pt_token=e", expiresAt: 1 };
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, reach });
+    expect(await api.portReach("ws_1", 3000)).toEqual(reach);
+    expect(lastSent()).toMatchObject({ op: "workspaces.portReach", workspaceId: "ws_1", port: 3000 });
+  });
+
   it("listSnapshots and rollbackSnapshot send the snapshots ops and unwrap their replies", async () => {
     const { api, lastSent } = await connect();
     const lineage = { name: "default", head: 2, versions: [] };
