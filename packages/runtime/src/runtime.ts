@@ -35,10 +35,11 @@ import type {
   ReachState,
   SessionEvent,
   SessionView,
+  WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
 import { connectDaemon, type DaemonReach } from "./reach.js";
-import { createStatusTracker, sizeOf, type StatusApi, type StatusWatchOptions } from "./status.js";
+import { createStatusTracker, type StatusApi, type StatusWatchOptions } from "./status.js";
 import type { Store } from "./store.js";
 
 // --- adapter port -------------------------------------------------------------
@@ -113,7 +114,10 @@ export interface CreateWorkspaceOptions extends WorkspaceSpec {
 }
 
 interface WorkspaceRecord extends WorkspaceView {
-  spec: WorkspaceSpec;
+  spec: Pick<WorkspaceSpec, "envs" | "labels">;
+  /** What the provider built, read back after every create (it may clamp the
+   * request); the rail and the rate use this, never what was asked for. */
+  size: WorkspaceSize;
   firstLife: boolean;
   /** The provider's view of the current machine when it was created; a wake compares against it. */
   shape?: MachineShape;
@@ -307,6 +311,7 @@ interface BuilderRecord {
   baseTemplate: string;
   setupSha: string;
   createdAt: string;
+  size: WorkspaceSize;
   streamUrl?: string;
 }
 
@@ -425,10 +430,25 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return m.describe().catch(() => undefined);
   };
 
+  /** The provider's word on what it built, falling back to the request where it has none. */
+  const sizeBuilt = (shape: MachineShape | undefined, asked: WorkspaceSize): WorkspaceSize => ({
+    cpu: shape?.cpu ?? asked.cpu,
+    memMb: shape?.memMb ?? asked.memMb,
+  });
+
+  /** The size a sealed golden records for this snapshot, if any manifest knows it. */
+  const goldenSizeOf = async (snapshotId: string): Promise<WorkspaceSize | undefined> => {
+    for (const raw of await store.list(GOLDENS)) {
+      const hit = (raw as GoldenManifest).versions.find(v => v.snapshotId === snapshotId);
+      if (hit?.size !== undefined) return hit.size;
+    }
+    return undefined;
+  };
+
   /** A status pushed outside the poll, for a phase change the poller would show late. */
   const emitStatus = async (entry: LiveWorkspace, reach: ReachState, reason?: string): Promise<void> => {
     const machineState = await entry.machine.state().catch(() => "gone" as const);
-    const size = sizeOf(backend, entry.record.spec);
+    const size = entry.record.size;
     bus.emit({
       type: "workspace.status",
       status: {
@@ -470,16 +490,30 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
   };
 
-  const forkSpec = (r: WorkspaceRecord, override?: WorkspaceSpec): MachineSpec => ({
+  /** Size is always explicit: a create that names none gets the provider's own
+   * default (2048 MB on Solari), not the size the record and the rate assume. */
+  const forkSpec = (r: WorkspaceRecord, override?: WorkspaceSpec): MachineSpec & WorkspaceSize => ({
     kind: "sandbox",
     fromSnapshot: r.golden,
-    ...((override?.cpu ?? r.spec.cpu) !== undefined ? { cpu: override?.cpu ?? r.spec.cpu } : {}),
-    ...((override?.memMb ?? r.spec.memMb) !== undefined ? { memMb: override?.memMb ?? r.spec.memMb } : {}),
+    cpu: override?.cpu ?? r.size.cpu,
+    memMb: override?.memMb ?? r.size.memMb,
     ...(r.spec.envs !== undefined || override?.envs !== undefined
       ? { envs: { ...r.spec.envs, ...override?.envs } }
       : {}),
     labels: { ...r.spec.labels, wsp: "1", createdAt: new Date().toISOString() },
   });
+
+  /** Boots a golden fork for the record and writes back what the provider says it built. */
+  const fork = async (record: WorkspaceRecord, override?: WorkspaceSpec): Promise<Machine> => {
+    const spec = forkSpec(record, override);
+    const machine = await backend.create(spec);
+    await setHostname(machine, record.name);
+    const shape = await shapeOf(machine);
+    if (shape !== undefined) record.shape = shape;
+    else delete record.shape;
+    record.size = sizeBuilt(shape, spec);
+    return machine;
+  };
 
   const attach = (record: WorkspaceRecord, machine: Machine): LiveWorkspace => {
     const entry: LiveWorkspace = { record, machine, ws: undefined as unknown as Workspace };
@@ -488,12 +522,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       {
         goldenSnapshot: record.golden,
         resurrect: async (override?: Partial<MachineSpec>) => {
-          const m = await backend.create(forkSpec(record, override));
-          await setHostname(m, record.name);
+          const m = await fork(record, override);
           entry.machine = m;
-          const shape = await shapeOf(m);
-          if (shape !== undefined) record.shape = shape;
-          else delete record.shape;
           return m;
         },
         vaultExport: async m => exportPaths(m, await vaultPathsOf(m)),
@@ -541,30 +571,31 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const ready = (): Promise<void> => {
     hydrated ??= (async () => {
       for (const raw of await store.list(WORKSPACES)) {
-        const record = raw as WorkspaceRecord;
-        const machine = await backend.get(record.machineId).catch((e: unknown) => {
-          if ((e as { kind?: string }).kind === "missing") return deadMachine(record.machineId);
+        const stored = raw as Omit<WorkspaceRecord, "size"> & { size?: WorkspaceSize };
+        const machine = await backend.get(stored.machineId).catch((e: unknown) => {
+          if ((e as { kind?: string }).kind === "missing") return deadMachine(stored.machineId);
           throw e;
         });
-        attach(record, machine);
+        attach({ ...stored, size: stored.size ?? sizeBuilt(await shapeOf(machine), backend.pricing.defaultSize) }, machine);
       }
       for (const raw of await store.list(TRANSCRIPTS)) {
         const t = raw as TranscriptRecord;
         transcripts.set(t.workspaceId, t.events);
       }
       for (const raw of await store.list(BUILDERS)) {
-        const record = raw as BuilderRecord;
-        const machine = await backend.get(record.id).catch((e: unknown) => {
+        const stored = raw as Omit<BuilderRecord, "size"> & { size?: WorkspaceSize };
+        const machine = await backend.get(stored.id).catch((e: unknown) => {
           if ((e as { kind?: string }).kind === "missing") return undefined;
           throw e;
         });
         if (!machine) {
-          await store.delete(BUILDERS, record.id);
+          await store.delete(BUILDERS, stored.id);
           continue;
         }
+        const record: BuilderRecord = { ...stored, size: stored.size ?? sizeBuilt(await shapeOf(machine), backend.pricing.defaultSize) };
         builders.set(record.id, {
           record,
-          builder: { machine, kind: record.kind, baseTemplate: record.baseTemplate, setupSha: record.setupSha, createdAt: record.createdAt, firstLife: false },
+          builder: { machine, kind: record.kind, baseTemplate: record.baseTemplate, setupSha: record.setupSha, createdAt: record.createdAt, firstLife: false, size: record.size },
           stale: true,
         });
       }
@@ -582,6 +613,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const workspaces: Runtime["workspaces"] = {
     async create(o) {
       await ready();
+      const inherited = await goldenSizeOf(o.golden);
       const record: WorkspaceRecord = {
         id: `ws_${randomBytes(4).toString("hex")}`,
         name: o.name,
@@ -590,18 +622,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         golden: o.golden,
         createdAt: new Date().toISOString(),
         spec: {
-          ...(o.cpu !== undefined ? { cpu: o.cpu } : {}),
-          ...(o.memMb !== undefined ? { memMb: o.memMb } : {}),
           ...(o.envs !== undefined ? { envs: o.envs } : {}),
           ...(o.labels !== undefined ? { labels: o.labels } : {}),
         },
+        size: {
+          cpu: o.cpu ?? inherited?.cpu ?? backend.pricing.defaultSize.cpu,
+          memMb: o.memMb ?? inherited?.memMb ?? backend.pricing.defaultSize.memMb,
+        },
         firstLife: true,
       };
-      const machine = await backend.create(forkSpec(record));
-      await setHostname(machine, o.name);
+      const machine = await fork(record);
       record.machineId = machine.id;
-      const shape = await shapeOf(machine);
-      if (shape !== undefined) record.shape = shape;
       attach(record, machine);
       await persist(record);
       const v = view(record);
@@ -663,7 +694,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       entry.record.machineId = entry.ws.machineId;
       entry.record.phase = "running";
       entry.record.firstLife = entry.ws.isFirstLife;
-      entry.record.spec = { ...entry.record.spec, ...spec };
+      entry.record.spec = {
+        ...entry.record.spec,
+        ...(spec?.envs !== undefined ? { envs: spec.envs } : {}),
+        ...(spec?.labels !== undefined ? { labels: spec.labels } : {}),
+      };
       await persist(entry.record);
       bus.emit({ type: "workspace.upgraded", workspaceId: id, machineId: entry.record.machineId });
       return view(entry.record);
@@ -855,6 +890,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         baseTemplate: builder.baseTemplate,
         setupSha: builder.setupSha,
         createdAt: builder.createdAt,
+        size: builder.size,
         ...(builder.machine.streamUrl !== undefined ? { streamUrl: builder.machine.streamUrl } : {}),
       };
       builders.set(record.id, { record, builder, stale: false });
@@ -929,7 +965,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     backend,
     records: async () => {
       await ready();
-      return [...live.values()].map(e => ({ ...view(e.record), spec: e.record.spec }));
+      return [...live.values()].map(e => ({ ...view(e.record), size: e.record.size }));
     },
     emit: e => bus.emit(e),
     on: (type, l) => bus.on(type, l),
