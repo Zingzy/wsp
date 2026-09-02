@@ -1,12 +1,24 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFile } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { gunzipSync } from "node:zlib";
 import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { afterEach, describe, expect, it } from "vitest";
-import { connectDaemonSocket, deployScript, stageDaemonBundle, type DaemonSocket } from "../src/doctor.js";
+import {
+  connectDaemonSocket,
+  deployDaemon,
+  deployScript,
+  GUEST_NODE,
+  packBundle,
+  stageDaemonBundle,
+  tarPackCommand,
+  type DaemonSocket,
+} from "../src/doctor.js";
+import { stubBackend } from "./stub-backend.js";
 
 function tmp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
@@ -54,6 +66,113 @@ describe("deployScript", () => {
       writeFileSync(path, deployScript("aabbcc"));
       await promisify(execFile)("bash", ["-n", path]);
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("bootstraps a pinned, sha256-checked Node into /usr/local only when the guest has none", () => {
+    const script = deployScript("aabbcc");
+    const bootstrap = script.indexOf("if ! command -v node");
+    const npm = script.indexOf("npm install");
+    expect(bootstrap).toBeGreaterThan(-1);
+    expect(bootstrap).toBeLessThan(npm);
+    expect(script).toContain(`https://nodejs.org/dist/v${GUEST_NODE.version}/`);
+    expect(script).toContain(`node-v${GUEST_NODE.version}-linux-x64.tar.gz sha=${GUEST_NODE.sha256.x86_64}`);
+    expect(script).toContain(`node-v${GUEST_NODE.version}-linux-arm64.tar.gz sha=${GUEST_NODE.sha256.aarch64}`);
+    expect(script).toContain("sha256sum -c");
+    expect(script).toContain("-C /usr/local --strip-components=1");
+    expect(script).not.toMatch(/apt|nvm|\| *sh\b|\| *bash\b/);
+    expect(GUEST_NODE.sha256.x86_64).toMatch(/^[0-9a-f]{64}$/);
+    expect(GUEST_NODE.sha256.aarch64).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("leaves no build caches or foreign prebuilds behind (the desktop template boots with ~570MB free)", () => {
+    const script = deployScript("aabbcc");
+    // Headers ship inside the node tarball; pointing node-gyp at them skips a 65MB download.
+    expect(script).toContain("export npm_config_nodedir=/usr/local");
+    const cleanup = script.indexOf("rm -rf /root/.npm /root/.cache/node-gyp /root/wsp-daemon/node_modules/node-pty/prebuilds");
+    expect(cleanup).toBeGreaterThan(script.indexOf("npm install"));
+    expect(cleanup).toBeLessThan(script.indexOf("setsid"));
+  });
+
+  it("names the node version on stdout before installing, so the deploy log can carry it", () => {
+    const script = deployScript("aabbcc");
+    expect(script.indexOf("NODE_VERSION $(node --version)")).toBeLessThan(script.indexOf("npm install"));
+  });
+});
+
+describe("tarPackCommand", () => {
+  it("disables AppleDouble copies and xattr headers so the guest tar prints nothing", () => {
+    const mac = tarPackCommand("/s", "/b.tgz", "darwin");
+    expect(mac.file).toBe("tar");
+    expect(mac.env["COPYFILE_DISABLE"]).toBe("1");
+    expect(mac.args).toContain("--no-xattrs");
+    expect(mac.args).toContain("--no-mac-metadata");
+    expect(mac.args.slice(-5)).toEqual(["-czf", "/b.tgz", "-C", "/s", "."]);
+  });
+
+  it("skips the bsdtar-only flag on linux (GNU tar rejects it)", () => {
+    const linux = tarPackCommand("/s", "/b.tgz", "linux");
+    expect(linux.args).toContain("--no-xattrs");
+    expect(linux.args).not.toContain("--no-mac-metadata");
+    expect(linux.env["COPYFILE_DISABLE"]).toBe("1");
+  });
+});
+
+describe("packBundle", () => {
+  it("produces a tarball with no xattr pax headers even when the source files carry them", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-pack-"));
+    try {
+      const src = join(dir, "src");
+      mkdirSync(src);
+      writeFileSync(join(src, "a.js"), "export const a = 1;");
+      if (process.platform === "darwin") {
+        await promisify(execFile)("xattr", ["-w", "com.apple.provenance", "x", join(src, "a.js")]);
+      }
+      const tgz = join(dir, "b.tgz");
+      await packBundle(src, tgz);
+      const raw = gunzipSync(readFileSync(tgz)).toString("latin1");
+      expect(raw).toContain("a.js");
+      expect(raw).not.toContain("xattr");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("deployDaemon", () => {
+  it("uploads the bundle, runs the deploy script, and reports the guest's node version", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-deploy-"));
+    const uploads: Buffer[] = [];
+    const server = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on("data", c => chunks.push(c as Buffer));
+      req.on("end", () => {
+        uploads.push(Buffer.concat(chunks));
+        res.writeHead(200).end();
+      });
+    });
+    await new Promise<void>(r => server.listen(0, "127.0.0.1", r));
+    try {
+      const daemonDir = join(dir, "daemon");
+      mkdirSync(join(daemonDir, "dist"), { recursive: true });
+      writeFileSync(join(daemonDir, "package.json"), JSON.stringify({ dependencies: { ws: "^8" } }));
+      writeFileSync(join(daemonDir, "dist", "index.js"), "export {};");
+
+      const backend = stubBackend();
+      backend.execImpl = () => ({ exitCode: 0, stdout: "NODE_VERSION v22.23.2\nDAEMON_UP\n", stderr: "" });
+      const machine = await backend.create({ kind: "sandbox" });
+      const stub = backend.machines[0]!;
+      const port = (server.address() as { port: number }).port;
+      stub.uploadUrl = async () => `http://127.0.0.1:${port}/put`;
+
+      const out = await deployDaemon(machine, { token: "tok", daemonDir });
+      expect(out).toEqual({ token: "tok", node: "v22.23.2" });
+      expect(stub.execLog).toEqual([deployScript("tok")]);
+      expect(uploads).toHaveLength(1);
+      expect(gunzipSync(uploads[0]!).toString("latin1")).toContain("start.mjs");
+    } finally {
+      server.close();
       rmSync(dir, { recursive: true, force: true });
     }
   });
