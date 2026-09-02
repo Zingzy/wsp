@@ -63,3 +63,15 @@ describe("SolariBackend", () => {
     expect(f.mock.calls.filter(c => String(c[0]).includes("/snapshots")).length).toBe(1);
   });
 });
+
+describe("SolariBackend describe", () => {
+  it("reads the provider's size and creation time off GET /sandboxes/:id", async () => {
+    const f = fakeFetch({
+      "POST /sandboxes": { status: 201, body: { sandboxId: "x", kind: "sandbox" } },
+      "GET /sandboxes/x": { status: 200, body: { sandboxId: "x", kind: "sandbox", state: "running", cpu: 2, memMb: 2048, createdAt: "2026-09-02T19:03:35Z" } },
+    });
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    const m = await b.create({ kind: "sandbox", memMb: 4096 });
+    await expect(m.describe!()).resolves.toEqual({ cpu: 2, memMb: 2048, createdAt: "2026-09-02T19:03:35Z" });
+  });
+});
