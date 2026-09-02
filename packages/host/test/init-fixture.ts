@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// A laptop as the collector would describe it: one entry per thing that could
-// be brought, grouped by rung. Mirrors the collector's schema (rung, id, label,
-// source paths, size, default bring/skip, skip reason) until that package merges.
-import type { Manifest, ManifestEntry } from "../src/init-recipe.js";
+// A small laptop as the collector would describe it, fixed so the screens'
+// tests can name rows; the real collector is what wsp init runs.
+import type { Manifest, ManifestEntry } from "@wsp/collect";
 
 export const FIXTURE: Manifest = {
   entries: [
