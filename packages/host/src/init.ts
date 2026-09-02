@@ -6,12 +6,12 @@
 // remote machine.
 import type { Readable, Writable } from "node:stream";
 import { styleText } from "node:util";
+import { RUNGS, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
 import type { GoldenBuilderView, GoldenRecipe, GoldenStage, Runtime } from "@wsp/runtime";
 import { S_BAR, S_STEP_ERROR, S_STEP_SUBMIT, cancel, confirm, intro, isCancel, log, note, outro } from "@clack/prompts";
 import type { Keys } from "./cli.js";
 import {
   LOGIN_CHOICES,
-  RUNGS,
   RUNG_TITLE,
   agentName,
   checklistFor,
@@ -24,9 +24,6 @@ import {
   recipePath,
   saveRecipe,
   type ChecklistItem,
-  type Manifest,
-  type ManifestEntry,
-  type Rung,
 } from "./init-recipe.js";
 import { readKey, rungSelect, type SelectItem } from "./init-select.js";
 import type { HostHandle } from "./server.js";
@@ -47,7 +44,8 @@ export interface InitOptions {
   yes: boolean;
   /** A collector manifest or a saved recipe to tick from instead of reading this machine. */
   manifestPath?: string;
-  collect(): Promise<Manifest>;
+  /** Reads this computer, telling onRung how many rows each rung found as it finishes. */
+  collect(onRung: (rung: Rung, rows: number) => void): Promise<Manifest>;
   keys: Keys;
   statePath: string;
   /** Builds the runtime around the recipe the ticks produced. */
@@ -255,19 +253,32 @@ class StageStream {
 
 }
 
+interface Spinner {
+  /** Text after the label, redrawn at once (a running tally). */
+  detail(text: string): void;
+  stop(): void;
+}
+
 /** One animated line while something short runs; off a terminal nothing is drawn. */
-function spin(output: Writable, label: string, animate: boolean): () => void {
-  if (!animate) return () => {};
+function spin(output: Writable, label: string, animate: boolean): Spinner {
+  if (!animate) return { detail: () => {}, stop: () => {} };
   let tick = 0;
+  let detail = "";
   const frames = ["◒", "◐", "◓", "◑"];
   const draw = (): void => {
-    output.write(`\r${styleText("cyan", frames[tick++ % frames.length]!)}  ${label}`);
+    output.write(`\r${styleText("cyan", frames[tick++ % frames.length]!)}  ${label}${detail !== "" ? `  ${dim(detail)}` : ""}`);
   };
   draw();
   const timer = setInterval(draw, 80);
-  return () => {
-    clearInterval(timer);
-    output.write("\r\x1b[2K");
+  return {
+    detail(text) {
+      detail = text;
+      draw();
+    },
+    stop() {
+      clearInterval(timer);
+      output.write("\r\x1b[2K");
+    },
   };
 }
 
@@ -414,21 +425,25 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
 
   let manifest: Manifest;
   let source: string;
-  const stopSpin = spin(io.output, "Reading this computer", io.isTTY);
+  const spinner = spin(io.output, "Reading this computer", io.isTTY);
+  const counts: string[] = [];
   try {
     if (opts.manifestPath !== undefined) {
       manifest = loadManifest(opts.manifestPath);
       source = `listed in ${opts.manifestPath}`;
     } else {
-      manifest = await opts.collect();
+      manifest = await opts.collect((rung, rows) => {
+        counts.push(`${RUNG_TITLE[rung]} ${rows}`);
+        spinner.detail(counts.join(", "));
+      });
       source = "found on this computer";
     }
   } catch (e) {
-    stopSpin();
+    spinner.stop();
     log.error(e instanceof Error ? e.message : String(e), out);
     return { code: 1 };
   }
-  stopSpin();
+  spinner.stop();
   note(detectionNote(manifest, source).join("\n"), "Found on this computer", out);
 
   let answers: Answers;

@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The manifest is what the collector found on this machine, one entry per
-// thing that could be brought; the recipe file is the same list with the
-// person's ticks, saved next to the state so golden v2 is a re-run of it.
+// What wsp init does with the collector's manifest: which rows start ticked,
+// what a login defaults to, the recipe file (the same list with the person's
+// ticks, saved next to the state so golden v2 is a re-run of it), and the
+// golden recipe the ticked rows add up to.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { type LoginChoice, type Manifest, type ManifestEntry, type Rung, parseManifest } from "@wsp/collect";
 import type { GoldenRecipe, Machine } from "@wsp/runtime";
 import type { Keys } from "./cli.js";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_ENVS, claudeEnvs } from "./doctor.js";
-
-export const RUNGS = ["identity", "shell", "editors", "toolchains", "tools", "agents", "logins"] as const;
-export type Rung = (typeof RUNGS)[number];
 
 export const RUNG_TITLE: Record<Rung, string> = {
   identity: "Identity",
@@ -21,36 +20,12 @@ export const RUNG_TITLE: Record<Rung, string> = {
   logins: "Sign-ins",
 };
 
-/** What happens to a login: copied from this computer, signed in on the machine, or left out. */
-export type LoginChoice = "copy" | "machine" | "skip";
+/** The prompt's words for each login choice; the choices themselves are the collector's. */
 export const LOGIN_CHOICES: readonly { value: LoginChoice; label: string }[] = [
   { value: "copy", label: "copy from this computer" },
   { value: "machine", label: "sign in on the machine" },
   { value: "skip", label: "skip" },
 ];
-
-export interface ManifestEntry {
-  rung: Rung;
-  id: string;
-  label: string;
-  paths: string[];
-  bytes: number;
-  default: "bring" | "skip";
-  /** Why the default is skip; with a reason the entry cannot be ticked (private key, macOS-only). */
-  reason?: string;
-  /** Heading the entry sits under inside its rung (a package manager, an editor). */
-  group?: string;
-  /** Always brought: shown, never unticked (git identity, public keys). */
-  required?: boolean;
-  /** The person's tick from a saved recipe; absent on a fresh collection. */
-  bring?: boolean;
-  /** The person's answer for a login, from a saved recipe. */
-  choice?: LoginChoice;
-}
-
-export interface Manifest {
-  entries: ManifestEntry[];
-}
 
 export function isTickable(e: ManifestEntry): boolean {
   return !(e.default === "skip" && e.reason !== undefined);
@@ -101,55 +76,6 @@ export function checklistFor(manifest: Manifest, choices: ReadonlyMap<string, st
 
 function isLoginChoice(v: unknown): v is LoginChoice {
   return LOGIN_CHOICES.some(c => c.value === v);
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
-function isRung(v: unknown): v is Rung {
-  return typeof v === "string" && (RUNGS as readonly string[]).includes(v);
-}
-
-function isStringArray(v: unknown): v is string[] {
-  return Array.isArray(v) && v.every(x => typeof x === "string");
-}
-
-function parseEntry(v: unknown, at: string): ManifestEntry {
-  if (!isRecord(v)) throw new Error(`${at} must be an object`);
-  const { rung, id, label, paths, bytes, reason, group, required, bring, choice } = v;
-  const dflt = v["default"];
-  if (!isRung(rung)) throw new Error(`${at}.rung must be one of ${RUNGS.join(", ")}`);
-  if (typeof id !== "string" || id === "") throw new Error(`${at}.id must be a string`);
-  if (typeof label !== "string") throw new Error(`${at}.label must be a string`);
-  if (!isStringArray(paths)) throw new Error(`${at}.paths must be a list of strings`);
-  if (typeof bytes !== "number") throw new Error(`${at}.bytes must be a number`);
-  if (dflt !== "bring" && dflt !== "skip") throw new Error(`${at}.default must be bring or skip`);
-  if (reason !== undefined && typeof reason !== "string") throw new Error(`${at}.reason must be a string`);
-  if (group !== undefined && typeof group !== "string") throw new Error(`${at}.group must be a string`);
-  if (required !== undefined && typeof required !== "boolean") throw new Error(`${at}.required must be a boolean`);
-  if (bring !== undefined && typeof bring !== "boolean") throw new Error(`${at}.bring must be a boolean`);
-  if (choice !== undefined && !isLoginChoice(choice)) throw new Error(`${at}.choice must be copy, machine or skip`);
-  return {
-    rung,
-    id,
-    label,
-    paths,
-    bytes,
-    default: dflt,
-    ...(reason !== undefined ? { reason } : {}),
-    ...(group !== undefined ? { group } : {}),
-    ...(required !== undefined ? { required } : {}),
-    ...(bring !== undefined ? { bring } : {}),
-    ...(choice !== undefined ? { choice } : {}),
-  };
-}
-
-export function parseManifest(data: unknown): Manifest {
-  if (!isRecord(data)) throw new Error("manifest must be an object");
-  const entries = data["entries"];
-  if (!Array.isArray(entries)) throw new Error("manifest.entries must be a list");
-  return { entries: entries.map((e, i) => parseEntry(e, `entries[${i}]`)) };
 }
 
 export function loadManifest(path: string): Manifest {

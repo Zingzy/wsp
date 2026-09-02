@@ -10,6 +10,7 @@ import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { createClaudeAdapter } from "@wsp/adapter-claude";
+import { DETECTORS, RUNGS, nodeHost, parseManifest, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
 import {
   SolariBackend,
   createRuntime,
@@ -22,7 +23,7 @@ import {
 } from "@wsp/runtime";
 import { CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, claudeEnvs, deployDaemon, doctor } from "./doctor.js";
 import { runInit, type InitIO } from "./init.js";
-import type { ChecklistItem, Manifest } from "./init-recipe.js";
+import type { ChecklistItem } from "./init-recipe.js";
 import { startHost, type HostHandle } from "./server.js";
 import { TerminalInput } from "./terminal-input.js";
 
@@ -311,10 +312,16 @@ export function terminalInitIO(): InitIO {
   };
 }
 
-/** Until the collector package lands, this machine reads as empty; --manifest
- * carries the list instead. */
-async function collectNothing(): Promise<Manifest> {
-  return { entries: [] };
+/** The collector's ladder, one rung at a time so the terminal can count rows as they land. */
+async function collectThisComputer(onRung: (rung: Rung, rows: number) => void): Promise<Manifest> {
+  const laptop = nodeHost();
+  const entries: ManifestEntry[] = [];
+  for (const rung of RUNGS) {
+    const rows = await DETECTORS[rung](laptop);
+    onRung(rung, rows.length);
+    entries.push(...rows);
+  }
+  return parseManifest({ entries });
 }
 
 /** Ctrl-C and a service stop both end with the lock removed. `once` leaves a
@@ -341,7 +348,7 @@ async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: 
     {
       yes: flags.yes,
       ...(flags.manifest !== undefined ? { manifestPath: resolve(flags.manifest) } : {}),
-      collect: collectNothing,
+      collect: collectThisComputer,
       keys,
       statePath: opts.statePath,
       runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `node ${(await deployDaemon(machine)).node}` }),

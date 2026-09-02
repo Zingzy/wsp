@@ -190,6 +190,9 @@ importers:
       '@wsp/adapter-claude':
         specifier: workspace:*
         version: link:../adapter-claude
+      '@wsp/collect':
+        specifier: workspace:*
+        version: link:../collect
       '@wsp/daemon':
         specifier: workspace:*
         version: link:../daemon
