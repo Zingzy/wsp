@@ -55,6 +55,7 @@ interface FactsProps {
 }
 
 function Facts({ w, status, awakeMs, pendingSize }: FactsProps) {
+  const capabilities = useCapabilities();
   const expected = expectedMachineState(w.phase);
   const diverged = status && status.machineState !== expected ? status.machineState : null;
   return (
@@ -88,6 +89,11 @@ function Facts({ w, status, awakeMs, pendingSize }: FactsProps) {
         <dt>awake</dt>
         <dd data-k="awake">{awakeMs === null ? "—" : fmtDur(awakeMs)}</dd>
       </dl>
+      {capabilities?.containers === false && (
+        <p className={styles.status} data-k="containers">
+          this provider's machines cannot run containers; install services natively
+        </p>
+      )}
     </section>
   );
 }

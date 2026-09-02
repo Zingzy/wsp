@@ -41,6 +41,7 @@ export class SolariBackend implements MachineBackend {
     resize: false, // Starter plan clamps every sandbox to 2 vCPU
     previewUrls: true,
     signedUrls: true,
+    containers: false, // guest kernel 6.6.30 lacks overlayfs and netfilter: dockerd falls back to vfs with no bridge and runc fails (measured)
   };
 
   // Solari's published Starter pricing: per vCPU-hour + per GB-hour

@@ -18,7 +18,7 @@ function recordingBackend(execResults: Record<string, ExecResult> = {}, opts: { 
   let nextId = 0;
   const killCount = new Map<string, number>();
   const backend: MachineBackend = {
-    capabilities: { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true },
+    capabilities: { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true },
     pricing: { rateUsdPerHour: (s: { cpu: number; memMb: number }) => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 } },
     async create(spec) {
       created.push(spec);
