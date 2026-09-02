@@ -311,6 +311,23 @@ async function collectNothing(): Promise<Manifest> {
   return { entries: [] };
 }
 
+/** Ctrl-C and a service stop both end with the lock removed. `once` leaves a
+ * second signal to node's default exit, so a close that hangs cannot trap the terminal. */
+function stopOnSignals(handle: HostHandle, io: CliIO): void {
+  let stopping: Promise<void> | undefined;
+  const stop = (): void => {
+    stopping ??= handle.close().then(
+      () => process.exit(0),
+      (e: unknown) => {
+        io.error(`host close failed: ${e instanceof Error ? e.message : String(e)}`);
+        process.exit(1);
+      },
+    );
+  };
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+}
+
 async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: string }, flags: { yes: boolean; manifest?: string }): Promise<number> {
   refuseIfServed(lockPathFor(opts.statePath), opts.statePath);
   const keys = await loadKeys(io, undefined, { anthropic: false });
@@ -326,6 +343,7 @@ async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: 
     },
     terminalInitIO(),
   );
+  if (result.handle !== undefined) stopOnSignals(result.handle, io);
   return result.code;
 }
 
@@ -419,7 +437,7 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
   const [cmd] = positionals;
   switch (cmd) {
     case undefined:
-      await serve(io, opts);
+      stopOnSignals(await serve(io, opts), io);
       return 0;
     case "init":
       return init(io, opts, { yes: values.yes === true, ...(values.manifest !== undefined ? { manifest: values.manifest } : {}) });
