@@ -135,6 +135,18 @@ describe("ClaudeAdapter over the recorded fixture", () => {
     expect(call.env.HOME).toBe("/Users/z");
   });
 
+  it("starts claude in the guest home unless a cwd is named", async () => {
+    const exec = scriptedExec(fixtureLines());
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { onEvent } = collect();
+
+    await adapter.start({ prompt: "say ok", onEvent }).finished;
+    await adapter.start({ prompt: "say ok", cwd: "/root/app", onEvent }).finished;
+
+    expect(exec.calls[0]?.command.startsWith("cd ~ && claude -p")).toBe(true);
+    expect(exec.calls[1]?.command.startsWith("cd '/root/app' && claude -p")).toBe(true);
+  });
+
   it("self-generates the session UUID and registers the session before any output", () => {
     const exec = scriptedExec(fixtureLines());
     const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });

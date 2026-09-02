@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { spawn, type IPty } from "node-pty";
 
 const SCROLLBACK_CAP_BYTES = 256 * 1024;
@@ -34,7 +35,7 @@ export class PtySession {
       name: "xterm-256color",
       cols: this.cols,
       rows: this.rows,
-      cwd: opts.cwd ?? process.cwd(),
+      cwd: opts.cwd ?? homedir(),
       env: { ...(process.env as Record<string, string>), ...opts.env },
     });
     this.pid = this.pty.pid;

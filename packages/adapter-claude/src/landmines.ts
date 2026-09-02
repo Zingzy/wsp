@@ -85,6 +85,9 @@ function shellQuote(value: string): string {
 /**
  * Print-mode stream-json refuses to run without --verbose, and `claude -p`
  * hangs unless stdin is closed (solari-poc probes, RESULTS.md P1).
+ * Guest exec carries no HOME (measured on Solari sandboxes), so the default
+ * cwd is `~`: tilde expansion falls back to the passwd entry where "$HOME"
+ * would expand to nothing.
  */
 export function buildCommand(options: BuildCommandOptions): string {
   const { prompt, sessionId, resume, cwd } = options;
@@ -104,7 +107,7 @@ export function buildCommand(options: BuildCommandOptions): string {
     idFlag,
     "</dev/null",
   ].join(" ");
-  return cwd === undefined ? claude : `cd ${shellQuote(cwd)} && ${claude}`;
+  return `cd ${cwd === undefined ? "~" : shellQuote(cwd)} && ${claude}`;
 }
 
 /**
