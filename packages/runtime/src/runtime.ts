@@ -151,6 +151,26 @@ export interface RuntimeOptions {
  * delete the fork's own copies first (the claude install lives in .local). */
 const VAULT_SKIP = new Set([".local", ".cache", ".npm"]);
 
+/** One RFC 1123 label: lowercase alphanumerics and hyphens, at most 63 chars, hyphen-free at both ends. */
+function hostnameFor(name: string): string {
+  const label = name
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 63)
+    .replace(/-+$/, "");
+  return label === "" ? "wsp" : label;
+}
+
+/** A fresh fork boots as "localhost"; naming it is cosmetic, so a guest that refuses is only logged. */
+async function setHostname(machine: Machine, name: string): Promise<void> {
+  const host = hostnameFor(name);
+  const res = await machine
+    .exec(`hostname ${host} && echo ${host} > /etc/hostname`)
+    .catch((e: unknown) => ({ exitCode: -1, stdout: "", stderr: e instanceof Error ? e.message : String(e) }));
+  if (res.exitCode !== 0) console.warn(`hostname ${host} on ${machine.id} failed: ${res.stderr.trim()}`);
+}
+
 export interface GoldenBuildRequest extends Omit<BuildGoldenOptions, "backend" | "manifest"> {
   /** Store key; several goldens can coexist. */
   name?: string;
@@ -355,6 +375,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         goldenSnapshot: record.golden,
         resurrect: async (override?: Partial<MachineSpec>) => {
           const m = await backend.create(forkSpec(record, override));
+          await setHostname(m, record.name);
           entry.machine = m;
           return m;
         },
@@ -428,6 +449,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         firstLife: true,
       };
       const machine = await backend.create(forkSpec(record));
+      await setHostname(machine, o.name);
       record.machineId = machine.id;
       attach(record, machine);
       await persist(record);

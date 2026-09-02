@@ -378,3 +378,75 @@ describe("runtime golden rollback", () => {
     expect(await rt.golden.get()).toEqual({ head: 1, versions: [version(1)] }); // untouched
   });
 });
+
+describe("runtime guest hostname", () => {
+  const ok = { exitCode: 0, stdout: "", stderr: "" };
+  const hostnameCmds = (m: { execLog: string[] }) => m.execLog.filter(c => c.startsWith("hostname "));
+
+  it("names the fresh guest after the workspace on create", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    expect(hostnameCmds(backend.machines[0]!)).toEqual(["hostname task-1 && echo task-1 > /etc/hostname"]);
+  });
+
+  it("names the fresh fork again on upgrade", async () => {
+    const backend = stubBackend();
+    backend.execImpl = (_m, cmd) => (cmd.includes("ls -A /root") ? { exitCode: 0, stdout: "notes.md\n", stderr: "" } : ok);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: { method?: string }) =>
+        init?.method === "PUT" ? new Response(null, { status: 200 }) : new Response(Buffer.from("tarbytes")),
+      ),
+    );
+    try {
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+      await rt.workspaces.upgrade(ws.id, { cpu: 4 });
+      expect(hostnameCmds(backend.machines[1]!)).toEqual(["hostname task-1 && echo task-1 > /etc/hostname"]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("sanitizes a name that is not a valid hostname", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    await rt.workspaces.create({ golden: "snap_g", name: "  My Workspace!! (v2) " });
+    await rt.workspaces.create({ golden: "snap_g", name: "a".repeat(70) });
+    await rt.workspaces.create({ golden: "snap_g", name: "!!!" });
+    expect(hostnameCmds(backend.machines[0]!)).toEqual(["hostname my-workspace-v2 && echo my-workspace-v2 > /etc/hostname"]);
+    expect(hostnameCmds(backend.machines[1]!)).toEqual([`hostname ${"a".repeat(63)} && echo ${"a".repeat(63)} > /etc/hostname`]);
+    expect(hostnameCmds(backend.machines[2]!)).toEqual(["hostname wsp && echo wsp > /etc/hostname"]);
+  });
+
+  it("a guest that refuses the hostname is logged and create still succeeds", async () => {
+    const backend = stubBackend();
+    backend.execImpl = (_m, cmd) => (cmd.startsWith("hostname ") ? { exitCode: 1, stdout: "", stderr: "hostname: you must be root" } : ok);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+      expect(ws.phase).toBe("running");
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("you must be root"));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("an exec that throws while setting the hostname is logged, not fatal", async () => {
+    const backend = stubBackend();
+    backend.execImpl = (_m, cmd) => {
+      if (cmd.startsWith("hostname ")) throw new Error("exec timed out");
+      return ok;
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+      await expect(rt.workspaces.create({ golden: "snap_g", name: "task-1" })).resolves.toMatchObject({ phase: "running" });
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("exec timed out"));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
