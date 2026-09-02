@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
 import {
   DAEMON_PORT,
@@ -35,10 +35,11 @@ import type {
   ReachState,
   SessionEvent,
   SessionView,
+  WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
 import { connectDaemon, type DaemonReach } from "./reach.js";
-import { createStatusTracker, sizeOf, type StatusApi, type StatusWatchOptions } from "./status.js";
+import { createStatusTracker, type StatusApi, type StatusWatchOptions } from "./status.js";
 import type { Store } from "./store.js";
 
 // --- adapter port -------------------------------------------------------------
@@ -113,7 +114,10 @@ export interface CreateWorkspaceOptions extends WorkspaceSpec {
 }
 
 interface WorkspaceRecord extends WorkspaceView {
-  spec: WorkspaceSpec;
+  spec: Pick<WorkspaceSpec, "envs" | "labels">;
+  /** What the provider built, read back after every create (it may clamp the
+   * request); the rail and the rate use this, never what was asked for. */
+  size: WorkspaceSize;
   firstLife: boolean;
   /** The provider's view of the current machine when it was created; a wake compares against it. */
   shape?: MachineShape;
@@ -279,6 +283,8 @@ export interface Runtime {
   /** Enriched status (machine state, daemon reach, size, rate) + cost ticker. */
   readonly status: StatusApi;
   reap(olderThanMs?: number): Promise<string[]>;
+  /** Writes every transcript still waiting on its debounce; the store is complete once this resolves. */
+  close(): Promise<void>;
 }
 
 const WORKSPACES = "workspaces";
@@ -290,6 +296,9 @@ const DAEMON_TOKEN_PATH = "/root/.wsp-daemon-token";
 const DAEMON_TOKEN_MISS_TTL_MS = 60_000;
 /** Events kept per workspace; the oldest fall off so one chatty workspace cannot grow the store forever. */
 const TRANSCRIPT_CAP = 5000;
+/** A turn boundary waits this long for more before the transcript is written; measured at one put per
+ * event, 5000 events cost 4 s of memory-store clones and 6.6 s of file rewrites after the last turn. */
+const TRANSCRIPT_FLUSH_MS = 250;
 
 interface TranscriptRecord {
   workspaceId: string;
@@ -307,6 +316,7 @@ interface BuilderRecord {
   baseTemplate: string;
   setupSha: string;
   createdAt: string;
+  size: WorkspaceSize;
   streamUrl?: string;
 }
 
@@ -371,9 +381,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const builders = new Map<string, LiveBuilder>();
   const sessions = new Map<string, { view: SessionView; handle: SessionHandle }>();
   const transcripts = new Map<string, SessionEvent[]>();
-  // done and end arrive back to back; puts are chained per workspace so the
-  // later snapshot always lands last, whatever order the store finishes in.
+  // Puts are chained per workspace so the later snapshot always lands last,
+  // whatever order the store finishes in.
   const transcriptFlushes = new Map<string, Promise<void>>();
+  const transcriptTimers = new Map<string, NodeJS.Timeout>();
   // Keyed by machine id: a resurrect or upgrade brings a fresh guest and file.
   const daemonTokens = new Map<string, { token: string | undefined; readAt: number }>();
   const daemonTokenOf = async (machine: Machine): Promise<string | undefined> => {
@@ -385,10 +396,31 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return token;
   };
 
+  const cancelFlush = (workspaceId: string): void => {
+    clearTimeout(transcriptTimers.get(workspaceId));
+    transcriptTimers.delete(workspaceId);
+  };
+
+  // The copy is taken here, not per event: a store may serialise after it
+  // returns, and the live array keeps moving under it.
+  const flushTranscript = (workspaceId: string): Promise<void> => {
+    cancelFlush(workspaceId);
+    const events = transcripts.get(workspaceId);
+    if (!events) return transcriptFlushes.get(workspaceId) ?? Promise.resolve();
+    const snapshot: TranscriptRecord = { workspaceId, events: [...events] };
+    const queued = (transcriptFlushes.get(workspaceId) ?? Promise.resolve())
+      .then(() => store.put(TRANSCRIPTS, workspaceId, snapshot))
+      .catch(() => {});
+    transcriptFlushes.set(workspaceId, queued);
+    return queued;
+  };
+
   // Deltas are only appended in memory; the store sees the transcript at turn
   // boundaries, so a crash mid-turn loses that turn's partial output and
-  // nothing else.
-  const record = (event: SessionEvent): void => {
+  // nothing else. A session's end is written at once, anything before it waits
+  // for the debounce.
+  const record = (unstamped: SessionEvent): void => {
+    const event: SessionEvent = { ...unstamped, at: Date.now() };
     let events = transcripts.get(event.workspaceId);
     if (!events) {
       events = [];
@@ -396,12 +428,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
     events.push(event);
     if (events.length > TRANSCRIPT_CAP) events.splice(0, events.length - TRANSCRIPT_CAP);
-    if (event.type !== "session.delta") {
-      const snapshot: TranscriptRecord = { workspaceId: event.workspaceId, events: [...events] };
-      const queued = (transcriptFlushes.get(event.workspaceId) ?? Promise.resolve())
-        .then(() => store.put(TRANSCRIPTS, event.workspaceId, snapshot))
-        .catch(() => {});
-      transcriptFlushes.set(event.workspaceId, queued);
+    if (event.type === "session.end") void flushTranscript(event.workspaceId);
+    else if (event.type !== "session.delta" && !transcriptTimers.has(event.workspaceId)) {
+      transcriptTimers.set(event.workspaceId, setTimeout(() => void flushTranscript(event.workspaceId), TRANSCRIPT_FLUSH_MS));
     }
     bus.emit(event);
   };
@@ -414,6 +443,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     golden: r.golden,
     createdAt: r.createdAt,
     ...(r.claudeSessionId !== undefined ? { claudeSessionId: r.claudeSessionId } : {}),
+    ...(r.screen !== undefined ? { screen: r.screen } : {}),
   });
 
   const persist = async (r: WorkspaceRecord): Promise<void> => {
@@ -425,10 +455,25 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return m.describe().catch(() => undefined);
   };
 
+  /** The provider's word on what it built, falling back to the request where it has none. */
+  const sizeBuilt = (shape: MachineShape | undefined, asked: WorkspaceSize): WorkspaceSize => ({
+    cpu: shape?.cpu ?? asked.cpu,
+    memMb: shape?.memMb ?? asked.memMb,
+  });
+
+  /** The sealed version behind this snapshot, if any manifest knows it. */
+  const goldenVersionOf = async (snapshotId: string): Promise<GoldenVersion | undefined> => {
+    for (const raw of await store.list(GOLDENS)) {
+      const hit = (raw as GoldenManifest).versions.find(v => v.snapshotId === snapshotId);
+      if (hit !== undefined) return hit;
+    }
+    return undefined;
+  };
+
   /** A status pushed outside the poll, for a phase change the poller would show late. */
   const emitStatus = async (entry: LiveWorkspace, reach: ReachState, reason?: string): Promise<void> => {
     const machineState = await entry.machine.state().catch(() => "gone" as const);
-    const size = sizeOf(backend, entry.record.spec);
+    const size = entry.record.size;
     bus.emit({
       type: "workspace.status",
       status: {
@@ -470,16 +515,34 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
   };
 
-  const forkSpec = (r: WorkspaceRecord, override?: WorkspaceSpec): MachineSpec => ({
-    kind: "sandbox",
+  /** Size is always explicit: a create that names none gets the provider's own
+   * default (2048 MB on Solari), not the size the record and the rate assume. */
+  const forkSpec = (r: WorkspaceRecord, kind: MachineKind, override?: WorkspaceSpec): MachineSpec & WorkspaceSize => ({
+    kind,
     fromSnapshot: r.golden,
-    ...((override?.cpu ?? r.spec.cpu) !== undefined ? { cpu: override?.cpu ?? r.spec.cpu } : {}),
-    ...((override?.memMb ?? r.spec.memMb) !== undefined ? { memMb: override?.memMb ?? r.spec.memMb } : {}),
+    cpu: override?.cpu ?? r.size.cpu,
+    memMb: override?.memMb ?? r.size.memMb,
     ...(r.spec.envs !== undefined || override?.envs !== undefined
       ? { envs: { ...r.spec.envs, ...override?.envs } }
       : {}),
     labels: { ...r.spec.labels, wsp: "1", createdAt: new Date().toISOString() },
   });
+
+  /** Boots a golden fork for the record and writes back what the provider says it built.
+   * A snapshot restores as the kind it was taken from, so the spec names that kind;
+   * versions sealed before it was recorded were all sandbox. */
+  const fork = async (record: WorkspaceRecord, override?: WorkspaceSpec): Promise<Machine> => {
+    const spec = forkSpec(record, (await goldenVersionOf(record.golden))?.kind ?? "sandbox", override);
+    const machine = await backend.create(spec);
+    await setHostname(machine, record.name);
+    const shape = await shapeOf(machine);
+    if (shape !== undefined) record.shape = shape;
+    else delete record.shape;
+    record.size = sizeBuilt(shape, spec);
+    if (machine.streamUrl !== undefined) record.screen = { streamUrl: machine.streamUrl };
+    else delete record.screen;
+    return machine;
+  };
 
   const attach = (record: WorkspaceRecord, machine: Machine): LiveWorkspace => {
     const entry: LiveWorkspace = { record, machine, ws: undefined as unknown as Workspace };
@@ -488,12 +551,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       {
         goldenSnapshot: record.golden,
         resurrect: async (override?: Partial<MachineSpec>) => {
-          const m = await backend.create(forkSpec(record, override));
-          await setHostname(m, record.name);
+          const m = await fork(record, override);
           entry.machine = m;
-          const shape = await shapeOf(m);
-          if (shape !== undefined) record.shape = shape;
-          else delete record.shape;
           return m;
         },
         vaultExport: async m => exportPaths(m, await vaultPathsOf(m)),
@@ -541,30 +600,38 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const ready = (): Promise<void> => {
     hydrated ??= (async () => {
       for (const raw of await store.list(WORKSPACES)) {
-        const record = raw as WorkspaceRecord;
-        const machine = await backend.get(record.machineId).catch((e: unknown) => {
-          if ((e as { kind?: string }).kind === "missing") return deadMachine(record.machineId);
+        const stored = raw as Omit<WorkspaceRecord, "size"> & { size?: WorkspaceSize };
+        const machine = await backend.get(stored.machineId).catch((e: unknown) => {
+          if ((e as { kind?: string }).kind === "missing") return deadMachine(stored.machineId);
           throw e;
         });
-        attach(record, machine);
+        attach(
+          {
+            ...stored,
+            size: stored.size ?? sizeBuilt(await shapeOf(machine), backend.pricing.defaultSize),
+            ...(machine.streamUrl !== undefined ? { screen: { streamUrl: machine.streamUrl } } : {}),
+          },
+          machine,
+        );
       }
       for (const raw of await store.list(TRANSCRIPTS)) {
         const t = raw as TranscriptRecord;
         transcripts.set(t.workspaceId, t.events);
       }
       for (const raw of await store.list(BUILDERS)) {
-        const record = raw as BuilderRecord;
-        const machine = await backend.get(record.id).catch((e: unknown) => {
+        const stored = raw as Omit<BuilderRecord, "size"> & { size?: WorkspaceSize };
+        const machine = await backend.get(stored.id).catch((e: unknown) => {
           if ((e as { kind?: string }).kind === "missing") return undefined;
           throw e;
         });
         if (!machine) {
-          await store.delete(BUILDERS, record.id);
+          await store.delete(BUILDERS, stored.id);
           continue;
         }
+        const record: BuilderRecord = { ...stored, size: stored.size ?? sizeBuilt(await shapeOf(machine), backend.pricing.defaultSize) };
         builders.set(record.id, {
           record,
-          builder: { machine, kind: record.kind, baseTemplate: record.baseTemplate, setupSha: record.setupSha, createdAt: record.createdAt, firstLife: false },
+          builder: { machine, kind: record.kind, baseTemplate: record.baseTemplate, setupSha: record.setupSha, createdAt: record.createdAt, firstLife: false, size: record.size },
           stale: true,
         });
       }
@@ -582,6 +649,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const workspaces: Runtime["workspaces"] = {
     async create(o) {
       await ready();
+      const inherited = (await goldenVersionOf(o.golden))?.size;
       const record: WorkspaceRecord = {
         id: `ws_${randomBytes(4).toString("hex")}`,
         name: o.name,
@@ -590,18 +658,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         golden: o.golden,
         createdAt: new Date().toISOString(),
         spec: {
-          ...(o.cpu !== undefined ? { cpu: o.cpu } : {}),
-          ...(o.memMb !== undefined ? { memMb: o.memMb } : {}),
           ...(o.envs !== undefined ? { envs: o.envs } : {}),
           ...(o.labels !== undefined ? { labels: o.labels } : {}),
         },
+        size: {
+          cpu: o.cpu ?? inherited?.cpu ?? backend.pricing.defaultSize.cpu,
+          memMb: o.memMb ?? inherited?.memMb ?? backend.pricing.defaultSize.memMb,
+        },
         firstLife: true,
       };
-      const machine = await backend.create(forkSpec(record));
-      await setHostname(machine, o.name);
+      const machine = await fork(record);
       record.machineId = machine.id;
-      const shape = await shapeOf(machine);
-      if (shape !== undefined) record.shape = shape;
       attach(record, machine);
       await persist(record);
       const v = view(record);
@@ -663,7 +730,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       entry.record.machineId = entry.ws.machineId;
       entry.record.phase = "running";
       entry.record.firstLife = entry.ws.isFirstLife;
-      entry.record.spec = { ...entry.record.spec, ...spec };
+      entry.record.spec = {
+        ...entry.record.spec,
+        ...(spec?.envs !== undefined ? { envs: spec.envs } : {}),
+        ...(spec?.labels !== undefined ? { labels: spec.labels } : {}),
+      };
       await persist(entry.record);
       bus.emit({ type: "workspace.upgraded", workspaceId: id, machineId: entry.record.machineId });
       return view(entry.record);
@@ -676,6 +747,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       });
       live.delete(id);
       transcripts.delete(id);
+      cancelFlush(id);
+      await transcriptFlushes.get(id);
+      transcriptFlushes.delete(id);
       await store.delete(WORKSPACES, id);
       await store.delete(TRANSCRIPTS, id);
       await store.deleteBlob(VAULTS, id);
@@ -711,7 +785,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
       // Created before adapter.start so events that fire synchronously during
       // start() still land on the view.
-      const sessionView: SessionView = { id: "", workspaceId, harness, status: "running" };
+      const sessionView: SessionView = {
+        id: "",
+        workspaceId,
+        harness,
+        status: "running",
+        prompt: o.prompt,
+        startedAt: Date.now(),
+      };
+      const turnId = randomUUID();
 
       const forward = (event: AdapterEvent): void => {
         const sessionId = event.sessionId;
@@ -724,10 +806,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               type: "session.start",
               workspaceId,
               sessionId,
+              turnId,
               prompt: o.prompt,
               ...(event.model !== undefined ? { model: event.model } : {}),
               ...(event.cwd !== undefined ? { cwd: event.cwd } : {}),
               ...(event.tools !== undefined ? { tools: event.tools } : {}),
+              ...(event.harness !== undefined ? { harness: event.harness } : {}),
             });
             return;
           }
@@ -736,6 +820,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               type: "session.delta",
               workspaceId,
               sessionId,
+              turnId,
               kind: event.kind,
               text: event.text,
               ...(event.toolName !== undefined ? { toolName: event.toolName } : {}),
@@ -745,13 +830,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             return;
           case "turn.done":
             sessionView.status = event.result.status;
-            record({ type: "session.done", workspaceId, sessionId, result: event.result });
+            record({ type: "session.done", workspaceId, sessionId, turnId, result: event.result });
             return;
           case "session.end":
+            sessionView.endedAt = Date.now();
             record({
               type: "session.end",
               workspaceId,
               sessionId,
+              turnId,
               exitCode: event.exitCode,
               sawResult: event.sawResult,
             });
@@ -782,9 +869,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       started.finished
         .then(result => {
           sessionView.status = result.status;
+          sessionView.endedAt ??= Date.now();
         })
         .catch(() => {
           sessionView.status = "failed";
+          sessionView.endedAt ??= Date.now();
         });
       return handle;
     },
@@ -855,6 +944,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         baseTemplate: builder.baseTemplate,
         setupSha: builder.setupSha,
         createdAt: builder.createdAt,
+        size: builder.size,
         ...(builder.machine.streamUrl !== undefined ? { streamUrl: builder.machine.streamUrl } : {}),
       };
       builders.set(record.id, { record, builder, stale: false });
@@ -929,7 +1019,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     backend,
     records: async () => {
       await ready();
-      return [...live.values()].map(e => ({ ...view(e.record), spec: e.record.spec }));
+      return [...live.values()].map(e => ({ ...view(e.record), size: e.record.size }));
     },
     emit: e => bus.emit(e),
     on: (type, l) => bus.on(type, l),
@@ -959,6 +1049,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(olderThanMs !== undefined ? { olderThanMs } : {}),
       });
       return reaped.concat(swept.filter(id => !reaped.includes(id)));
+    },
+    close: async () => {
+      for (const id of [...transcriptTimers.keys()]) void flushTranscript(id);
+      await Promise.all(transcriptFlushes.values());
     },
   };
 }

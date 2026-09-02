@@ -4,7 +4,7 @@
 // and used only for direct calls from this process to the machine API.
 
 import { spawn } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -198,6 +198,93 @@ export function makeRuntime(keys: Keys, statePath: string, recipe: GoldenRecipe 
   });
 }
 
+export interface HostLock {
+  pid: number;
+  port: number;
+  wsPort: number;
+  startedAt: string;
+}
+
+function isHostLock(v: unknown): v is HostLock {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    "pid" in v &&
+    typeof v.pid === "number" &&
+    "port" in v &&
+    typeof v.port === "number" &&
+    "wsPort" in v &&
+    typeof v.wsPort === "number" &&
+    "startedAt" in v &&
+    typeof v.startedAt === "string"
+  );
+}
+
+function errnoCode(e: unknown): string | undefined {
+  return e instanceof Error && "code" in e && typeof e.code === "string" ? e.code : undefined;
+}
+
+/** EPERM means the pid exists under another user, so it counts as alive. */
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return errnoCode(e) === "EPERM";
+  }
+}
+
+function readLock(path: string): HostLock | undefined {
+  if (!existsSync(path)) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+    return isHostLock(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function heldBy(lock: HostLock, statePath: string): Error {
+  return new Error(
+    `another wsp host (pid ${lock.pid}) is already serving ${statePath} on port ${lock.port} (ws ${lock.wsPort}). ` +
+      "Stop it first, or point --state at a different file.",
+  );
+}
+
+function lockPathFor(statePath: string): string {
+  return join(dirname(statePath), "host.lock");
+}
+
+/** The host whose lock names this state file, when that process is still alive. */
+export function servingHost(statePath: string): HostLock | undefined {
+  const held = readLock(lockPathFor(statePath));
+  return held !== undefined && pidAlive(held.pid) ? held : undefined;
+}
+
+/** One state file, one host. A lock whose pid is gone is a crash leftover and
+ * gives way; a lock this process cannot parse is treated the same. */
+function refuseIfServed(lockPath: string, statePath: string): void {
+  const held = readLock(lockPath);
+  if (held !== undefined && pidAlive(held.pid)) throw heldBy(held, statePath);
+}
+
+/** Seeded with the requested ports so a refusal during startup can name them;
+ * rewritten with the bound ports once the host is up. */
+function takeLock(lockPath: string, statePath: string, ports: { port: number; wsPort: number }): HostLock {
+  refuseIfServed(lockPath, statePath);
+  const lock: HostLock = { pid: process.pid, ...ports, startedAt: new Date().toISOString() };
+  mkdirSync(dirname(lockPath), { recursive: true });
+  rmSync(lockPath, { force: true });
+  try {
+    writeFileSync(lockPath, JSON.stringify(lock), { flag: "wx" });
+  } catch (e) {
+    if (errnoCode(e) !== "EEXIST") throw e;
+    const winner = readLock(lockPath);
+    throw winner !== undefined ? heldBy(winner, statePath) : new Error(`another wsp host just took ${lockPath}`);
+  }
+  return lock;
+}
+
 /** Runs a short-lived helper and reports whether it exited clean. */
 function runQuiet(cmd: string, args: string[], stdin?: string): Promise<boolean> {
   return new Promise(resolve => {
@@ -230,7 +317,25 @@ async function collectNothing(): Promise<Manifest> {
   return { entries: [] };
 }
 
+/** Ctrl-C and a service stop both end with the lock removed. `once` leaves a
+ * second signal to node's default exit, so a close that hangs cannot trap the terminal. */
+function stopOnSignals(handle: HostHandle, io: CliIO): void {
+  let stopping: Promise<void> | undefined;
+  const stop = (): void => {
+    stopping ??= handle.close().then(
+      () => process.exit(0),
+      (e: unknown) => {
+        io.error(`host close failed: ${e instanceof Error ? e.message : String(e)}`);
+        process.exit(1);
+      },
+    );
+  };
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+}
+
 async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: string }, flags: { yes: boolean; manifest?: string }): Promise<number> {
+  refuseIfServed(lockPathFor(opts.statePath), opts.statePath);
   const keys = await loadKeys(io, undefined, { anthropic: false });
   const result = await runInit(
     {
@@ -244,6 +349,7 @@ async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: 
     },
     terminalInitIO(),
   );
+  if (result.handle !== undefined) stopOnSignals(result.handle, io);
   return result.code;
 }
 
@@ -262,29 +368,42 @@ async function hostFor(
   opts: { port: number; wsPort: number; statePath: string; webDir?: string; builder?: GoldenBuilderView; checklist?: ChecklistItem[] },
   io: CliIO,
 ): Promise<HostHandle> {
-  const handle = await startHost({
-    runtime: rt,
-    port: opts.port,
-    wsPort: opts.wsPort,
-    webDir: opts.webDir ?? defaultWebDir(),
-    keys: { anthropic: keys.anthropic !== undefined },
-    ...(opts.builder !== undefined ? { builder: opts.builder } : {}),
-    ...(opts.checklist !== undefined ? { checklist: opts.checklist } : {}),
-    ...(keys.anthropic !== undefined ? { workspaceEnvs: claudeEnvs(keys.anthropic) } : {}),
-    log: line => io.log(line),
-  });
-  // Other local tools read the token from disk; the WS never sees it in a URL.
-  const tokenPath = join(dirname(opts.statePath), "host-token");
-  mkdirSync(dirname(tokenPath), { recursive: true });
-  writeFileSync(tokenPath, handle.authToken, { mode: 0o600 });
+  const lockPath = lockPathFor(opts.statePath);
+  const lock = takeLock(lockPath, opts.statePath, { port: opts.port, wsPort: opts.wsPort });
+  try {
+    const handle = await startHost({
+      runtime: rt,
+      port: opts.port,
+      wsPort: opts.wsPort,
+      webDir: opts.webDir ?? defaultWebDir(),
+      keys: { anthropic: keys.anthropic !== undefined },
+      ...(opts.builder !== undefined ? { builder: opts.builder } : {}),
+      ...(opts.checklist !== undefined ? { checklist: opts.checklist } : {}),
+      ...(keys.anthropic !== undefined ? { workspaceEnvs: claudeEnvs(keys.anthropic) } : {}),
+      log: line => io.log(line),
+    });
+    writeFileSync(lockPath, JSON.stringify({ ...lock, port: handle.port, wsPort: handle.wsPort }));
+    // Other local tools read the token from disk; the WS never sees it in a URL.
+    const tokenPath = join(dirname(opts.statePath), "host-token");
+    writeFileSync(tokenPath, handle.authToken, { mode: 0o600 });
 
-  io.log(`app         http://127.0.0.1:${handle.port}`);
-  io.log(`runtime ws  ws://127.0.0.1:${handle.wsPort} (token: ${tokenPath})`);
-  io.log(`state       ${opts.statePath}`);
-  if (keys.anthropic === undefined) {
-    io.log("note: no ANTHROPIC_API_KEY found; new workspaces fork without claude credentials");
+    io.log(`app         http://127.0.0.1:${handle.port}`);
+    io.log(`runtime ws  ws://127.0.0.1:${handle.wsPort} (token: ${tokenPath})`);
+    io.log(`state       ${opts.statePath}`);
+    if (keys.anthropic === undefined) {
+      io.log("note: no ANTHROPIC_API_KEY found; new workspaces fork without claude credentials");
+    }
+    return {
+      ...handle,
+      close: async () => {
+        await handle.close();
+        rmSync(lockPath, { force: true });
+      },
+    };
+  } catch (e) {
+    rmSync(lockPath, { force: true });
+    throw e;
   }
-  return handle;
 }
 
 export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<number> {
@@ -324,7 +443,7 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
   const [cmd] = positionals;
   switch (cmd) {
     case undefined:
-      await serve(io, opts);
+      stopOnSignals(await serve(io, opts), io);
       return 0;
     case "init":
       return init(io, opts, { yes: values.yes === true, ...(values.manifest !== undefined ? { manifest: values.manifest } : {}) });

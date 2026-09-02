@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { createServer as createTcpServer, type Server as TcpServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -50,6 +51,20 @@ async function bootOf(url: string): Promise<{ wsPort: number; token: string } | 
   const html = await (await fetch(url)).text();
   const m = html.match(/window\.__WSP__ = (\{[^<]*\});<\/script>/);
   return m ? (JSON.parse(m[1]!) as { wsPort: number; token: string }) : undefined;
+}
+
+/** A pid that was real a moment ago and is not alive now. */
+function deadPid(): number {
+  const child = spawnSync(process.execPath, ["-e", "0"]);
+  expect(child.status).toBe(0);
+  return child.pid;
+}
+
+async function freePort(): Promise<number> {
+  const probe = createTcpServer();
+  const port = await listen(probe);
+  await closeServer(probe);
+  return port;
 }
 
 async function refused(url: string): Promise<boolean> {
@@ -176,5 +191,32 @@ describe("openHost", () => {
     } finally {
       await closeServer(taken);
     }
+  });
+
+  it("attaches to the host named in host.lock when its pid is alive, whatever port it was asked for", async () => {
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), keys: { anthropic: false }, port: 0, wsPort: 0 });
+    const lock = { pid: process.pid, port: existing.port, wsPort: existing.wsPort, startedAt: new Date().toISOString() };
+    writeFileSync(join(home, "host.lock"), JSON.stringify(lock));
+
+    session = await open(await freePort(), 0);
+    expect(session.owned).toBe(false);
+    expect(session.url).toBe(`http://127.0.0.1:${existing.port}`);
+    await session.close();
+    session = undefined;
+    expect((await bootOf(`http://127.0.0.1:${existing.port}`))?.token).toBeDefined();
+    expect(JSON.parse(readFileSync(join(home, "host.lock"), "utf8"))).toEqual(lock);
+  });
+
+  it("ignores a host.lock whose pid is gone and starts its own host", async () => {
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), keys: { anthropic: false }, port: 0, wsPort: 0 });
+    const stale = { pid: deadPid(), port: existing.port, wsPort: existing.wsPort, startedAt: "2026-09-01T00:00:00.000Z" };
+    writeFileSync(join(home, "host.lock"), JSON.stringify(stale));
+
+    session = await open(await freePort(), 0);
+    expect(session.owned).toBe(true);
+    expect(session.port).not.toBe(existing.port);
+    const lock = JSON.parse(readFileSync(join(home, "host.lock"), "utf8")) as { pid: number; port: number };
+    expect(lock.pid).toBe(process.pid);
+    expect(lock.port).toBe(session.port);
   });
 });

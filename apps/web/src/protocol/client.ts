@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Browser-side client for the runtime WS (see packages/runtime/src/serve.ts).
 // Auth: open the socket, send one `auth` frame with the token (host injects it
-// via window.__WSP__), then ops flow. The token never rides in the URL.
+// via window.__WSP__), then ops flow. The token never rides in the URL. A
+// dropped socket is redialled with backoff and authed again with the same
+// token; the store re-runs its standing fetches when the status comes back
+// to live.
 import type {
   Capabilities,
   DaemonReachView,
@@ -25,9 +28,32 @@ export interface ProtocolClientOptions {
   url: string;
   token: string;
   WebSocketCtor?: typeof WebSocket;
+  /** Fires on every transition; "closed" is terminal (client closed, or the token was refused). */
   onStatus?: (s: ConnStatus) => void;
+  /** Delay before redial number `attempt` (1-based); the default doubles from 250 ms and caps at 5 s. */
+  backoffMs?: (attempt: number) => number;
 }
-export type ConnStatus = "connecting" | "live" | "reauth" | "closed";
+/** "connecting" until the first auth succeeds, "reconnecting" after a drop; both keep dialling. */
+export type ConnStatus = "connecting" | "live" | "reconnecting" | "closed";
+
+export type DisconnectReason = "lost" | "closed" | "unauthorized";
+const DISCONNECT_MESSAGE: Record<DisconnectReason, string> = {
+  lost: "runtime connection lost",
+  closed: "runtime client closed",
+  unauthorized: "runtime refused the token",
+};
+
+/** What every request settles with when no live socket can carry it. */
+export class DisconnectedError extends Error {
+  readonly reason: DisconnectReason;
+  constructor(reason: DisconnectReason) {
+    super(DISCONNECT_MESSAGE[reason]);
+    this.name = "DisconnectedError";
+    this.reason = reason;
+  }
+}
+
+export const defaultBackoffMs = (attempt: number): number => Math.min(5_000, 250 * 2 ** (attempt - 1));
 
 export class ProtocolClient {
   #ws: WebSocket | null = null;
@@ -36,34 +62,31 @@ export class ProtocolClient {
   #listeners = new Set<(e: ProtocolEvent) => void>();
   #opts: ProtocolClientOptions;
   #Ctor: typeof WebSocket;
+  #backoff: (attempt: number) => number;
   #subscribed = false;
+  #everLive = false;
+  #attempt = 0;
+  #retryTimer: ReturnType<typeof setTimeout> | null = null;
+  #dead: DisconnectReason | null = null;
+  #firstLive: { resolve: () => void; reject: (e: Error) => void } | null = null;
   status: ConnStatus = "connecting";
 
   constructor(opts: ProtocolClientOptions) {
     this.#opts = opts;
     this.#Ctor = opts.WebSocketCtor ?? globalThis.WebSocket;
+    this.#backoff = opts.backoffMs ?? defaultBackoffMs;
   }
 
+  /** Resolves on the first live socket, however many dials that takes; rejects only when the token is refused. */
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.#setStatus("connecting");
-      const ws = new this.#Ctor(this.#opts.url);
-      this.#ws = ws;
-      ws.onmessage = e => this.#onMessage(String((e as MessageEvent).data));
-      ws.onclose = () => { this.#setStatus("closed"); this.#failAll(new Error("socket closed")); };
-      ws.onerror = () => reject(new Error("socket error"));
-      ws.onopen = () => {
-        // auth frame, id 0, resolves connect
-        this.#raw({ id: 0, op: "auth", token: this.#opts.token });
-        this.#pending.set(0, {
-          resolve: () => { this.#setStatus("live"); if (this.#subscribed) this.#raw({ id: this.#next(), op: "events.subscribe" }); resolve(); },
-          reject: () => { this.#setStatus("reauth"); reject(new Error("auth rejected")); },
-        });
-      };
+      this.#firstLive = { resolve, reject };
+      this.#dial();
     });
   }
 
   async request<T = Record<string, unknown>>(op: string, params: Record<string, unknown> = {}): Promise<T> {
+    if (this.status !== "live") throw new DisconnectedError(this.#dead ?? "lost");
     const id = this.#next();
     return new Promise<T>((resolve, reject) => {
       this.#pending.set(id, { resolve: v => resolve(v as T), reject });
@@ -77,11 +100,67 @@ export class ProtocolClient {
     return () => this.#listeners.delete(fn);
   }
 
-  close(): void { this.#ws?.close(); }
+  close(): void { this.#die("closed"); }
 
   #next(): number { return ++this.#seq; }
   #raw(o: Record<string, unknown>): void { this.#ws?.send(JSON.stringify(o)); }
-  #setStatus(s: ConnStatus): void { this.status = s; this.#opts.onStatus?.(s); }
+  #setStatus(s: ConnStatus): void {
+    if (s === this.status) return;
+    this.status = s;
+    this.#opts.onStatus?.(s);
+  }
+
+  #dial(): void {
+    if (this.#dead) return;
+    const ws = new this.#Ctor(this.#opts.url);
+    this.#ws = ws;
+    ws.onopen = () => this.#raw({ id: 0, op: "auth", token: this.#opts.token });
+    ws.onmessage = e => { if (this.#ws === ws) this.#onMessage(String((e as MessageEvent).data)); };
+    ws.onerror = () => {}; // a close event always follows
+    ws.onclose = ev => {
+      if (this.#ws !== ws) return;
+      this.#ws = null;
+      this.#failAll(new DisconnectedError("lost"));
+      // 4401 is the runtime refusing the token; redialling cannot fix that.
+      if (ev.code === 4401) this.#die("unauthorized");
+      else this.#scheduleRedial();
+    };
+  }
+
+  #scheduleRedial(): void {
+    this.#setStatus(this.#everLive ? "reconnecting" : "connecting");
+    this.#attempt++;
+    this.#retryTimer = setTimeout(() => { this.#retryTimer = null; this.#dial(); }, this.#backoff(this.#attempt));
+  }
+
+  #onAuth(ok: boolean): void {
+    if (!ok) { this.#die("unauthorized"); return; }
+    this.#attempt = 0;
+    this.#everLive = true;
+    // Re-arm before the status flips so the store's refetches never race ahead of the subscription.
+    if (this.#subscribed) this.#raw({ id: this.#next(), op: "events.subscribe" });
+    this.#setStatus("live");
+    const first = this.#firstLive;
+    this.#firstLive = null;
+    first?.resolve();
+  }
+
+  /** Terminal: no socket, no redial. close() before the first live leaves connect() pending, since
+   * nothing awaits a client that was thrown away and a rejection there would fault every unmount. */
+  #die(reason: DisconnectReason): void {
+    if (this.#dead) return;
+    this.#dead = reason;
+    if (this.#retryTimer) clearTimeout(this.#retryTimer);
+    this.#retryTimer = null;
+    const ws = this.#ws;
+    this.#ws = null;
+    ws?.close();
+    this.#failAll(new DisconnectedError(reason));
+    this.#setStatus("closed");
+    const first = this.#firstLive;
+    this.#firstLive = null;
+    if (reason === "unauthorized") first?.reject(new DisconnectedError(reason));
+  }
 
   #onMessage(data: string): void {
     let msg: Record<string, unknown>;
@@ -90,8 +169,9 @@ export class ProtocolClient {
       for (const fn of this.#listeners) fn(msg as unknown as ProtocolEvent);
       return;
     }
-    const id = msg.id as number | null;
-    if (id === null || id === undefined) return;
+    const id = msg.id;
+    if (id === 0) { this.#onAuth(msg.ok === true); return; }
+    if (typeof id !== "number") return;
     const p = this.#pending.get(id);
     if (!p) return;
     this.#pending.delete(id);

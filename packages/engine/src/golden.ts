@@ -107,6 +107,8 @@ export interface Builder {
   readonly createdAt: string;
   /** False once the machine has ever been resumed; sealGolden refuses it then. */
   readonly firstLife: boolean;
+  /** What the provider built, read back after create (it may clamp the request); the sealed version records it. */
+  readonly size: { cpu: number; memMb: number };
 }
 
 export interface SealGoldenOptions extends MachineSize {
@@ -135,13 +137,26 @@ export interface ForkOverrides extends MachineSize {
   kind?: MachineKind;
 }
 
-function sizeSpec(o: MachineSize) {
+/** Always explicit: a create that names no size gets the provider's own
+ * default (2048 MB on Solari), which is not what the pricing default assumes. */
+function sizeAsked(backend: MachineBackend, o: MachineSize, inherit?: { cpu: number; memMb: number }): { cpu: number; memMb: number } {
   return {
-    ...(o.cpu ? { cpu: o.cpu } : {}),
-    ...(o.memMb ? { memMb: o.memMb } : {}),
+    cpu: o.cpu ?? inherit?.cpu ?? backend.pricing.defaultSize.cpu,
+    memMb: o.memMb ?? inherit?.memMb ?? backend.pricing.defaultSize.memMb,
+  };
+}
+
+function envSpec(o: MachineSize) {
+  return {
     ...(o.envs ? { envs: o.envs } : {}),
     ...(o.labels ? { labels: o.labels } : {}),
   };
+}
+
+/** The provider's word on what it built, falling back to the request where it has none. */
+async function sizeBuilt(machine: Machine, asked: { cpu: number; memMb: number }): Promise<{ cpu: number; memMb: number }> {
+  const shape = await machine.describe?.().catch(() => undefined);
+  return { cpu: shape?.cpu ?? asked.cpu, memMb: shape?.memMb ?? asked.memMb };
 }
 
 export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Builder> {
@@ -152,15 +167,18 @@ export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Build
   stage("creating", `${kind} from ${baseTemplate}`);
   // A builder that idle-pauses resumes not first-life, so its seal would 502 and
   // consume it anyway; killing on idle loses the same work but fails loud and free.
+  const asked = sizeAsked(opts.backend, opts);
   const machine = await opts.backend.create({
     kind,
     template: baseTemplate,
     diskGb: BUILDER_DISK_GB,
     onIdle: "kill",
     idleTimeoutMs: BUILDER_IDLE_MS,
-    ...sizeSpec(opts),
+    ...asked,
+    ...envSpec(opts),
   });
   try {
+    const size = await sizeBuilt(machine, asked);
     if (opts.deployDaemon) {
       stage("deploying-daemon");
       const detail = await opts.deployDaemon(machine);
@@ -179,6 +197,7 @@ export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Build
       setupSha: createHash("sha256").update(opts.setup).digest("hex"),
       createdAt: new Date().toISOString(),
       firstLife: true,
+      size,
     };
   } catch (e) {
     // Nothing records this machine yet, so one that survives here is reap's to sweep.
@@ -213,7 +232,12 @@ export async function sealGolden(
     builderAlive = false;
 
     stage("smoke-forking", opts.smoke);
-    fork = await opts.backend.create({ kind: builder.kind, fromSnapshot: snapshotId, ...sizeSpec(opts) });
+    fork = await opts.backend.create({
+      kind: builder.kind,
+      fromSnapshot: snapshotId,
+      ...sizeAsked(opts.backend, opts, builder.size),
+      ...envSpec(opts),
+    });
     const smokeRes = await fork.exec(opts.smoke, { timeoutMs: opts.smokeTimeoutMs ?? 120_000 });
     if (smokeRes.exitCode !== 0) {
       throw new Error(
@@ -235,6 +259,7 @@ export async function sealGolden(
       setupSha: builder.setupSha,
       createdAt: new Date().toISOString(),
       smoke: { cmd: opts.smoke, exitCode: smokeRes.exitCode },
+      size: builder.size,
     };
     stage("sealed", leak === undefined ? `v${versionNum}` : `v${versionNum}; ${leak}`);
     return { manifest: { head: versionNum, versions: [...prior, version] }, version };
@@ -285,7 +310,8 @@ export async function forkGolden(
   return backend.create({
     kind: overrides.kind ?? head.kind ?? "sandbox",
     fromSnapshot: head.snapshotId,
-    ...sizeSpec(overrides),
+    ...sizeAsked(backend, overrides, head.size),
+    ...envSpec(overrides),
   });
 }
 

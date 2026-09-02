@@ -40,7 +40,7 @@ const { useStore } = await import("../src/protocol/store.js");
 const WS = "ws_screen001";
 const URL = "wss://stream.example.test/desktop";
 
-function seedStatus(extra: Record<string, unknown> = {}) {
+function seedStatus(extra: Partial<WorkspaceStatus> = {}) {
   const status: WorkspaceStatus = {
     id: WS,
     name: "desk",
@@ -53,7 +53,7 @@ function seedStatus(extra: Record<string, unknown> = {}) {
     size: { cpu: 2, memMb: 4096 },
     rateUsdPerHour: 0.1,
   };
-  useStore.setState({ statuses: { [WS]: { ...status, ...extra } as WorkspaceStatus } });
+  useStore.setState({ statuses: { [WS]: { ...status, ...extra } } });
 }
 
 beforeEach(() => {
@@ -85,8 +85,8 @@ describe("screen tab", () => {
     expect(screen.getByTitle("live")).toBeDefined();
   });
 
-  it("reads a streamUrl carried on the workspace status", () => {
-    seedStatus({ streamUrl: URL });
+  it("reads the screen stream carried on the workspace status", () => {
+    seedStatus({ screen: { streamUrl: URL } });
     render(<ScreenTab workspaceId={WS} />);
     expect(FakeRfb.instances[0]?.url).toBe(URL);
   });

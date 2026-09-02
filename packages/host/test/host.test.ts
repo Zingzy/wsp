@@ -4,8 +4,9 @@ import { createServer, type Server } from "node:http";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
 import type { GoldenManifest } from "@wsp/engine";
-import { createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
+import { createRuntime, memoryStore, type HarnessAdapterFactory, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cli, serve, type CliIO } from "../src/cli.js";
 import { REAP_INTERVAL_MS, startHost, type HostHandle } from "../src/server.js";
@@ -297,6 +298,51 @@ describe("host serves the app", () => {
     const napped = await getJson(`http://127.0.0.1:${handle.port}/api/workspaces`);
     expect(napped.body.workspaces[0].reach.state).toBe("napping");
     expect(napped.body.workspaces[0].machineState).toBe("paused");
+  });
+});
+
+describe("host close flushes transcripts", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  /** An adapter the test drives by hand, so a turn boundary can land with no session.end behind it. */
+  function manualAdapter(): { adapter: HarnessAdapterFactory; start: () => void; done: (text: string) => void } {
+    const sessionId = "44444444-4444-4444-8444-444444444444";
+    let onEvent: ((e: AdapterEvent) => void) | undefined;
+    const finished = new Promise<TurnResult>(() => {});
+    const adapter: HarnessAdapterFactory = () => ({
+      start: o => {
+        onEvent = o.onEvent;
+        return { localId: sessionId, claudeSessionId: sessionId, finished };
+      },
+    });
+    return {
+      adapter,
+      start: () => onEvent!({ type: "session.start", sessionId, model: "claude-sonnet-4-5" }),
+      done: text => onEvent!({ type: "turn.done", sessionId, result: { status: "completed", text } }),
+    };
+  }
+
+  it("a turn boundary right before close() is in the store once close() resolves", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    await store.put("goldens", "default", GOLDEN);
+    const m = manualAdapter();
+    const rt = createRuntime({ backend, store, adapters: { claude: m.adapter } });
+    const dir = fakeWebDir();
+    dirs.push(dir);
+    const handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: dir, keys: { anthropic: false } });
+
+    const ws = await rt.workspaces.create({ golden: "snap_gold", name: "alpha" });
+    await rt.sessions.start(ws.id, { prompt: "go" });
+    m.start();
+    m.done("t0");
+    await handle.close();
+
+    const stored = (await store.get("transcripts", ws.id)) as { events: { type: string }[] } | undefined;
+    expect(stored?.events.map(e => e.type)).toEqual(["session.start", "session.done"]);
   });
 });
 

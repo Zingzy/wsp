@@ -4,18 +4,13 @@
 // display, so the no-display frame is the common case, not an error.
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import RFB from "@novnc/novnc";
+import type { WorkspaceStatus } from "@wsp/protocol";
 import { useStatus } from "../protocol/store.js";
 import styles from "./ScreenTab.module.css";
 
-// The wire does not carry streamUrl on WorkspaceStatus yet: read it if a
-// future status grows the field, otherwise take the injected prop.
-export function resolveStreamUrl(status: unknown, injected: string | undefined): string | null {
-  if (injected) return injected;
-  if (status && typeof status === "object" && "streamUrl" in status) {
-    const v = (status as { streamUrl?: unknown }).streamUrl;
-    if (typeof v === "string" && v.length > 0) return v;
-  }
-  return null;
+// The wizard injects the builder's stream; a workspace's rides its status.
+function resolveStreamUrl(status: WorkspaceStatus | null, injected: string | undefined): string | null {
+  return injected || status?.screen?.streamUrl || null;
 }
 
 export function ScreenTab({ workspaceId, streamUrl }: { workspaceId: string; streamUrl?: string }) {

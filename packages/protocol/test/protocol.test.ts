@@ -16,6 +16,7 @@ import {
   SnapshotLineage,
   SnapshotRollbackResult,
   SessionView,
+  WorkspaceStatus,
   WorkspaceView,
 } from "../src/index.js";
 
@@ -42,6 +43,27 @@ describe("protocol views", () => {
     };
     expect(SessionView.parse(s)).toEqual(s);
     expect(() => SessionView.parse({ ...s, status: "done" })).toThrow();
+  });
+
+  it("WorkspaceView and WorkspaceStatus carry the desktop stream as screen.streamUrl, absent for headless machines", () => {
+    const view = {
+      id: "ws_1",
+      name: "task-1",
+      machineId: "m1",
+      phase: "running",
+      golden: "snap_g",
+      createdAt: "2026-09-01T00:00:00.000Z",
+      screen: { streamUrl: "wss://stream.example/m1" },
+    };
+    expect(WorkspaceView.parse(view)).toEqual(view);
+    expect(WorkspaceView.parse(JSON.parse(JSON.stringify(view)))).toEqual(view);
+    const { screen, ...headless } = view;
+    void screen;
+    expect(WorkspaceView.parse(headless)).toEqual(headless);
+    expect(() => WorkspaceView.parse({ ...view, screen: {} })).toThrow();
+
+    const status = { ...view, machineState: "running", reach: { state: "unsupported" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 };
+    expect(WorkspaceStatus.parse(status)).toEqual(status);
   });
 });
 
@@ -96,6 +118,60 @@ describe("protocol event union", () => {
     expect(
       EventUnion.parse({ type: "session.end", workspaceId: "w", sessionId: "s", exitCode: null, sawResult: false }),
     ).toBeTruthy();
+  });
+});
+
+describe("session wire fields the face reads", () => {
+  it("every session event may carry at (ms epoch) and turnId; both survive a JSON round trip", () => {
+    const scope = { workspaceId: "ws_1", sessionId: "s1", at: 1756687889412, turnId: "turn_0001" };
+    const events = [
+      { type: "session.start", ...scope, prompt: "hello" },
+      { type: "session.delta", ...scope, kind: "text", text: "hi" },
+      { type: "session.done", ...scope, result: { status: "completed" } },
+      { type: "session.end", ...scope, exitCode: 0, sawResult: true },
+    ];
+    for (const e of events) {
+      expect(SessionEvent.parse(e)).toEqual(e);
+      expect(EventUnion.parse(JSON.parse(JSON.stringify(e)))).toEqual(e);
+    }
+    expect(() => SessionEvent.parse({ ...events[0], at: "2026-09-01T00:00:00Z" })).toThrow();
+    expect(() => SessionEvent.parse({ ...events[0], turnId: 7 })).toThrow();
+  });
+
+  it("session.start carries the harness catalog from system/init", () => {
+    const started = {
+      type: "session.start",
+      workspaceId: "ws_1",
+      sessionId: "s1",
+      harness: { slashCommands: ["compact", "review"], permissionMode: "bypassPermissions", agents: ["general-purpose"] },
+    };
+    expect(SessionEvent.parse(started)).toEqual(started);
+    const partial = { ...started, harness: { permissionMode: "default" } };
+    expect(SessionEvent.parse(partial)).toEqual(partial);
+    expect(() => SessionEvent.parse({ ...started, harness: { slashCommands: "compact" } })).toThrow();
+  });
+
+  it("SessionView carries prompt, startedAt and endedAt so the sidebar can title and sort threads", () => {
+    const running = {
+      id: "0b6a9c1e-0000-4000-8000-000000000000",
+      workspaceId: "ws_1",
+      harness: "claude",
+      status: "running",
+      prompt: "fix the flaky test",
+      startedAt: 1756687889412,
+    };
+    expect(SessionView.parse(running)).toEqual(running);
+    const ended = { ...running, status: "completed", endedAt: 1756687899870 };
+    expect(SessionView.parse(ended)).toEqual(ended);
+    expect(() => SessionView.parse({ ...running, startedAt: "soon" })).toThrow();
+  });
+
+  it("port.open names the listening process on both the daemon and runtime wires", () => {
+    const daemonSide = { type: "port.open", port: 8080, pid: 123, process: "node" };
+    expect(DaemonEvent.parse(daemonSide)).toEqual(daemonSide);
+    const runtimeSide = { ...daemonSide, workspaceId: "ws_1" };
+    expect(EventUnion.parse(runtimeSide)).toEqual(runtimeSide);
+    expect(() => DaemonEvent.parse({ ...daemonSide, process: 1 })).toThrow();
   });
 });
 
