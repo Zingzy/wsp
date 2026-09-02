@@ -51,6 +51,7 @@ export function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities 
   } = {
     upgrade: vi.fn(async (id: string, _size: WorkspaceSize) => view(id, "?", "running")),
     capabilities: vi.fn(async () => capabilities),
+    portReach: vi.fn(async (_id: string, port: number) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 })),
     daemonReach: vi.fn(async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 })),
     builderReach: vi.fn(async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 })),
     startSession: vi.fn(async (o: { workspaceId: string }) => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" as const })),

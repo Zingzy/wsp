@@ -53,6 +53,7 @@ function fakeApi(workspaces: WorkspaceView[], daemonPort: (workspaceId: string) 
     sessionHistory: async () => [],
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
+    portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
     daemonReach: async id => ({ url: `ws://127.0.0.1:${daemonPort(id)}`, expiresAt: Date.now() + 3_600_000, daemonToken: TOKEN }),
     builderReach: async () => { throw new Error("no wizard in this fixture"); },
     getGolden: async () => undefined,

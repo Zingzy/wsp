@@ -63,6 +63,7 @@ function fixture(opts: { golden?: GoldenManifest; workspaces?: WorkspaceView[]; 
     wake: vi.fn(async () => first),
     upgrade: vi.fn(async () => first),
     capabilities: vi.fn(async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true })),
+    portReach: vi.fn(async (_id: string, port: number) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 })),
     daemonReach: vi.fn(async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 })),
     builderReach: vi.fn(async () => ({ url: `ws://127.0.0.1:${opts.daemonPort?.() ?? 1}`, expiresAt: Date.now() + 3_600_000, daemonToken: DAEMON_TOKEN })),
     startSession: vi.fn(async () => ({ id: "s1", workspaceId: "ws_first", harness: "claude", status: "running" as const })),
