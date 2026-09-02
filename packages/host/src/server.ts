@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
-import { serveRuntime, type Runtime } from "@wsp/runtime";
+import { serveRuntime, type GoldenBuilderView, type Runtime } from "@wsp/runtime";
 
 // The enriched status now lives in @wsp/runtime (every client reads one
 // implementation); re-exported so host consumers keep their imports.
@@ -19,6 +19,10 @@ export interface HostOptions {
   /** The built web app: index.html plus its assets. */
   webDir: string;
   keys: KeyFlags;
+  /** The builder wsp init prepared; the page opens on its terminal for the sign-ins and the save. */
+  builder?: GoldenBuilderView;
+  /** The sign-ins the person chose to do on that machine, each with its command. */
+  checklist?: { label: string; command: string }[];
   /** HTTP port for the app (0 picks a free one). Default 4400. */
   port?: number;
   /** Port for serveRuntime's WS (0 picks a free one). Default 4410. */
@@ -59,7 +63,15 @@ const CONTENT_TYPES: Record<string, string> = {
   ".wasm": "application/wasm",
 };
 
-function loadPage(webDir: string, boot: { wsPort: number; token: string; keys: KeyFlags }): string {
+interface Boot {
+  wsPort: number;
+  token: string;
+  keys: KeyFlags;
+  builder?: GoldenBuilderView;
+  checklist?: { label: string; command: string }[];
+}
+
+function loadPage(webDir: string, boot: Boot): string {
   const path = join(webDir, "index.html");
   if (!existsSync(path)) throw new Error(`web app not built: ${path} is missing (pnpm --filter @wsp/web build)`);
   const html = readFileSync(path, "utf8");
@@ -119,7 +131,13 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const rtServer = await serveRuntime(rt, { port: opts.wsPort ?? 4410, authToken });
   let page: string;
   try {
-    page = loadPage(webDir, { wsPort: rtServer.port, token: authToken, keys: opts.keys });
+    page = loadPage(webDir, {
+      wsPort: rtServer.port,
+      token: authToken,
+      keys: opts.keys,
+      ...(opts.builder !== undefined ? { builder: opts.builder } : {}),
+      ...(opts.checklist !== undefined ? { checklist: opts.checklist } : {}),
+    });
   } catch (e) {
     await rtServer.close();
     throw e;
@@ -167,11 +185,16 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     });
   });
 
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    // The app carries the runtime token; never expose it beyond loopback.
-    server.listen(opts.port ?? 4400, "127.0.0.1", resolve);
-  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      // The app carries the runtime token; never expose it beyond loopback.
+      server.listen(opts.port ?? 4400, "127.0.0.1", resolve);
+    });
+  } catch (e) {
+    await rtServer.close();
+    throw e;
+  }
   const addr = server.address();
   const port = typeof addr === "object" && addr !== null ? addr.port : (opts.port ?? 4400);
 

@@ -18,6 +18,7 @@ describe("SolariBackend", () => {
       resize: false,
       previewUrls: true,
       signedUrls: true,
+      containers: false,
     });
   });
 

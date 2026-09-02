@@ -19,9 +19,18 @@ claude sessions.
 ```sh
 pnpm install && pnpm build
 printf 'SOLARI_API_KEY=%s\n' "$YOUR_KEY" > .env
+pnpm wsp init       # first run: tick what comes along, build your golden, finish in the browser
 pnpm wsp            # the app on http://127.0.0.1:4400
 pnpm wsp doctor     # prove the reach path against one live machine
 ```
+
+`wsp init` reads what this machine has, shows it, and walks seven screens
+(identity, shell, editors, toolchains, tools, agents, sign-ins) where you
+tick what comes along. One summary, one confirm, then it boots the machine
+and opens the browser on its terminal for the sign-ins and the save. Every
+prompt has a flag: `--yes` takes the defaults, `--manifest <path>` ticks
+from a file, and the ticks are saved as `golden-recipe.json` next to the
+state so a second golden is a re-run.
 
 `wsp` reads keys from `.env` in the working directory or from the
 environment, and asks once if neither is set. State is a JSON file:
@@ -76,10 +85,12 @@ reuses it.
 ## Capability flags
 
 Backends implement `MachineBackend` plus a `capabilities` descriptor:
-`{ liveCloneForks, ramPreservingPause, resize, previewUrls, signedUrls }`.
+`{ liveCloneForks, ramPreservingPause, resize, previewUrls, signedUrls, containers }`.
 Clients read the flags instead of assuming. A backend without preview URLs
 loses browser reach and the UI says so instead of pretending. Solari is the
-first backend.
+first backend, and it reports `containers: false`: its guest kernel (6.6.30)
+has no overlayfs or netfilter, so Docker does not run there and services get
+installed natively.
 
 ## Keys never leave your machine
 

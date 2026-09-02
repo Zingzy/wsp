@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
+import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { GoldenManifest } from "@wsp/engine";
@@ -65,6 +66,22 @@ async function getJson(url: string): Promise<{ status: number; body: any }> {
   return { status: res.status, body: await res.json() };
 }
 
+async function freePort(): Promise<number> {
+  const probe = createServer();
+  await new Promise<void>(r => probe.listen(0, "127.0.0.1", r));
+  const port = (probe.address() as { port: number }).port;
+  await new Promise<void>(r => probe.close(() => r()));
+  return port;
+}
+
+function refused(port: number): Promise<boolean> {
+  return new Promise(resolve => {
+    const sock = connect({ port, host: "127.0.0.1" });
+    sock.once("connect", () => sock.destroy(new Error("connected")));
+    sock.once("error", e => resolve((e as NodeJS.ErrnoException).code === "ECONNREFUSED"));
+  });
+}
+
 function inlineScripts(html: string): string[] {
   return [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]!);
 }
@@ -115,6 +132,14 @@ describe("host serves the app", () => {
       `window.__WSP__ = {"wsPort":${handle.wsPort},"token":"${handle.authToken}","keys":{"anthropic":true}};`,
     ]);
     expect(html).not.toContain("window.__WSP__ ||");
+  });
+
+  it("carries the builder wsp init prepared so the page lands on it", async () => {
+    const { rt } = testRuntime(false);
+    const builder = { id: "m_b", name: "default", kind: "sandbox" as const, createdAt: "2026-09-03T00:00:00Z" };
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, builder });
+    const html = await (await fetch(`http://127.0.0.1:${handle.port}/`)).text();
+    expect(inlineScripts(html)[0]).toContain(`"builder":${JSON.stringify(builder)}`);
   });
 
   it("says anthropic false when the host loaded no anthropic key", async () => {
@@ -171,6 +196,21 @@ describe("host serves the app", () => {
     await expect(
       startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir("<!doctype html><html><body></body></html>"), keys: { anthropic: false } }),
     ).rejects.toThrow(/__WSP__/);
+  });
+
+  it("releases the runtime port when the app port is already held", async () => {
+    const { rt } = testRuntime();
+    probeTarget = createServer();
+    await new Promise<void>(r => probeTarget!.listen(0, "127.0.0.1", r));
+    const held = (probeTarget.address() as { port: number }).port;
+    const wsPort = await freePort();
+
+    await expect(startHost({ runtime: rt, port: held, wsPort, webDir: webDir(), keys: { anthropic: false } })).rejects.toThrow(/EADDRINUSE/);
+    await new Promise<void>(r => probeTarget!.close(() => r()));
+    probeTarget = undefined;
+
+    expect(await refused(held)).toBe(true);
+    expect(await refused(wsPort)).toBe(true);
   });
 
   it("lists workspaces as JSON", async () => {

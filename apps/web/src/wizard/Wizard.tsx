@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// First run: the window is the wizard until a golden image exists. The hero
-// step is the builder itself (the screen tab's component when it streams a
-// display, the terminal tab's against its daemon otherwise) with a checklist
-// beside it; nothing here probes the builder, the person ticks the boxes.
+// First run: the window is the wizard until a golden image exists. wsp init
+// in the terminal picks what comes along and boots the builder; this is where
+// the builder gets pixels: the screen tab's component when it streams a
+// display, the terminal tab's against its daemon otherwise, with a checklist
+// of the sign-ins beside it. Nothing here probes the builder, the person
+// ticks the boxes.
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { GoldenBuilderView, GoldenStage } from "@wsp/protocol";
 import type { Api } from "../protocol/client.js";
@@ -11,7 +13,7 @@ import { ScreenTab } from "../tabs/ScreenTab.js";
 import { TerminalTab } from "../tabs/TerminalTab.js";
 import { connectDaemonLink, type DaemonLink } from "../terminal/daemon-link.js";
 import { provideTerminals, WorkspaceTerminals } from "../terminal/link.js";
-import { INITIAL, PREPARE_STAGES, SEAL_STAGES, isReady, reduce, rowStates, type Step } from "./model.js";
+import { SEAL_STAGES, initial, reduce, rowStates, type Step } from "./model.js";
 import styles from "./Wizard.module.css";
 
 /** Presence only. The host may omit the anthropic flag; the browser never sees a value. */
@@ -19,20 +21,25 @@ export interface KeyFlags {
   anthropic: boolean;
 }
 
+/** One sign-in the person chose to do on the machine, with the command that starts it. */
+export interface ChecklistItem {
+  label: string;
+  command: string;
+}
+
 const STEP_WORD: Record<Step, string> = {
-  welcome: "keys",
-  preparing: "preparing",
+  none: "terminal",
   hero: "set up",
   sealing: "saving",
   done: "done",
   failed: "failed",
 };
-const TRAIL: Step[] = ["welcome", "preparing", "hero", "sealing", "done"];
+const TRAIL: Step[] = ["none", "hero", "sealing", "done"];
 
 const STAGE_WORD: Record<GoldenStage, string> = {
   creating: "booting a fresh machine",
   "deploying-daemon": "starting the workspace daemon",
-  "installing-harness": "installing claude code",
+  "installing-harness": "running the setup",
   ready: "ready for you",
   snapshotting: "taking the snapshot",
   "smoke-forking": "booting a fork to prove it works",
@@ -41,13 +48,23 @@ const STAGE_WORD: Record<GoldenStage, string> = {
 };
 
 const FIRST_WORKSPACE = "first";
-/** The golden this wizard builds; stage frames for any other name belong to someone else's build. */
+/** The golden wsp init builds; stage frames for any other name belong to someone else's build. */
 const GOLDEN_NAME = "default";
 
-export function Wizard({ keys, onDone }: { keys?: KeyFlags; onDone: () => void }) {
+export function Wizard({
+  keys,
+  builder,
+  checklist,
+  onDone,
+}: {
+  keys?: KeyFlags;
+  builder?: GoldenBuilderView;
+  checklist?: ChecklistItem[];
+  onDone: () => void;
+}) {
   const api = useStore(s => s.api);
   const select = useStore(s => s.select);
-  const [state, dispatch] = useReducer(reduce, INITIAL);
+  const [state, dispatch] = useReducer(reduce, builder, initial);
   const landed = useRef(false);
 
   useEffect(() => {
@@ -60,12 +77,6 @@ export function Wizard({ keys, onDone }: { keys?: KeyFlags; onDone: () => void }
   }, [api]);
 
   const fail = useCallback((e: unknown) => dispatch({ type: "failed", detail: e instanceof Error ? e.message : String(e) }), []);
-
-  const prepare = (): void => {
-    if (!api) return;
-    dispatch({ type: "prepare" });
-    api.prepareGolden(GOLDEN_NAME).then(builder => dispatch({ type: "prepared", builder })).catch(fail);
-  };
 
   const seal = (): void => {
     if (!api || !state.builder) return;
@@ -102,43 +113,25 @@ export function Wizard({ keys, onDone }: { keys?: KeyFlags; onDone: () => void }
           {state.step}
         </span>
       </header>
-      {state.step === "welcome" && <Welcome keys={keys} onPrepare={prepare} />}
-      {state.step === "preparing" && <Stages title="Preparing your machine" list={PREPARE_STAGES} seen={state.seen} detail={state.detail} />}
-      {state.step === "hero" && state.builder && (
-        <Hero builder={state.builder} keys={keys} ready={isReady(state)} onSeal={seal} />
-      )}
+      {state.step === "none" && <NoBuilder />}
+      {state.step === "hero" && state.builder && <Hero builder={state.builder} keys={keys} checklist={checklist} onSeal={seal} />}
       {state.step === "sealing" && <Stages title="Saving your golden image" list={SEAL_STAGES} seen={state.seen} detail={state.detail} />}
       {state.step === "done" && <Landing />}
-      {state.step === "failed" && <Failed detail={state.detail ?? ""} onReset={() => dispatch({ type: "reset" })} />}
+      {state.step === "failed" && <Failed detail={state.detail ?? ""} />}
     </div>
   );
 }
 
-function Welcome({ keys, onPrepare }: { keys?: KeyFlags; onPrepare: () => void }) {
-  const anthropic = keys === undefined ? "unknown" : keys.anthropic ? "found" : "not found";
+function NoBuilder() {
   return (
     <section className={styles.column}>
       <span className={styles.lbl}>golden image</span>
       <h1 className={styles.h1}>Set up one machine. Fork it forever.</h1>
       <p className={styles.p}>
-        wsp boots a fresh cloud machine and opens a terminal on it. You set it up the way you like a computer, then save it as your golden image.
-        Every workspace after that is a fork of it.
+        Your first machine is built from the terminal. It reads what your laptop has, you tick what comes along, and it boots the machine.
+        This page opens on it when it is ready.
       </p>
-      <dl className={styles.kv}>
-        <dt>solari key</dt>
-        <dd data-testid="key-solari" data-found="true">found</dd>
-        <dt>anthropic key</dt>
-        <dd data-testid="key-anthropic" data-found={anthropic === "found"}>{anthropic}</dd>
-      </dl>
-      <p className={styles.note}>
-        No Anthropic key is fine: sign in with your Claude subscription inside the machine during setup, and wsp never sees that credential.
-      </p>
-      <div className={styles.actions}>
-        <button type="button" className={`${styles.key} ${styles.keyPrimary}`} onClick={onPrepare}>
-          Prepare my machine
-        </button>
-        <span className={styles.hint}>boots one cloud machine on your Solari account; it bills while it runs</span>
-      </div>
+      <pre className={styles.cmd}>wsp init</pre>
     </section>
   );
 }
@@ -162,9 +155,9 @@ function Stages({ title, list, seen, detail }: { title: string; list: readonly G
 }
 
 const CHECKLIST = [
-  "run claude and sign in with /login if you have no API key",
-  "gh auth login",
-  "bring your dotfiles and shell setup",
+  "sign in to each agent you brought (claude, then /login, for one)",
+  "gh auth login, and any other login you left unticked",
+  "check the files you brought landed where you expect",
   "install anything you always want on a fresh machine",
 ];
 
@@ -192,19 +185,20 @@ function useBuilderTerminals(api: Api | null, builderId: string, wanted: boolean
   }, [api, builderId, wanted]);
 }
 
-function Hero({ builder, keys, ready, onSeal }: { builder: GoldenBuilderView; keys?: KeyFlags; ready: boolean; onSeal: () => void }) {
+function Hero({ builder, keys, checklist, onSeal }: { builder: GoldenBuilderView; keys?: KeyFlags; checklist?: ChecklistItem[]; onSeal: () => void }) {
   const api = useStore(s => s.api);
   const streamUrl = builder.screen?.streamUrl;
   useBuilderTerminals(api, builder.id, streamUrl === undefined);
-  const [ticked, setTicked] = useState<boolean[]>(() => CHECKLIST.map(() => false));
-  const items = keys?.anthropic ? CHECKLIST.slice(1) : CHECKLIST;
+  // wsp init hands over exactly the sign-ins chosen for the machine; without it, the generic list.
+  const items = checklist !== undefined ? checklist.map(c => `${c.label}: ${c.command}`) : keys?.anthropic ? CHECKLIST.slice(1) : CHECKLIST;
+  const [ticked, setTicked] = useState<boolean[]>(() => items.map(() => false));
   return (
     <section className={styles.hero}>
       <div className={styles.screen}>
         {streamUrl !== undefined ? <ScreenTab workspaceId={builder.id} streamUrl={streamUrl} /> : <TerminalTab workspaceId={builder.id} />}
       </div>
       <aside className={styles.side}>
-        <span className={styles.lbl}>set it up like your own computer</span>
+        <span className={styles.lbl}>sign in, then save</span>
         <p className={styles.p}>
           {streamUrl !== undefined ? "This is your machine's live screen. Click control to type into it." : "This is a shell on your machine. Type into it."}
         </p>
@@ -220,10 +214,10 @@ function Hero({ builder, keys, ready, onSeal }: { builder: GoldenBuilderView; ke
         </ul>
         <p className={styles.note}>Take your time, but a machine idle for six hours is killed and this setup is lost.</p>
         <div className={styles.actions}>
-          <button type="button" className={`${styles.key} ${styles.keySpend}`} disabled={!ready} onClick={onSeal}>
+          <button type="button" className={`${styles.key} ${styles.keySpend}`} onClick={onSeal}>
             Save as my golden image
           </button>
-          <span className={styles.hint}>{ready ? "snapshots, then boots a fork to prove it" : "waiting for the machine to finish installing"}</span>
+          <span className={styles.hint}>snapshots, then boots a fork to prove it</span>
         </div>
       </aside>
     </section>
@@ -242,17 +236,12 @@ function Landing() {
   );
 }
 
-function Failed({ detail, onReset }: { detail: string; onReset: () => void }) {
+function Failed({ detail }: { detail: string }) {
   return (
     <section className={styles.column}>
       <span className={styles.lbl}>that did not work</span>
-      <p className={styles.p}>The machine from this attempt is gone. Start over boots a fresh one.</p>
+      <p className={styles.p}>The machine from this attempt is gone. Run wsp init again in your terminal to boot a fresh one.</p>
       <pre className={styles.err}>{detail}</pre>
-      <div className={styles.actions}>
-        <button type="button" className={`${styles.key} ${styles.keyPrimary}`} onClick={onReset}>
-          Start over
-        </button>
-      </div>
     </section>
   );
 }

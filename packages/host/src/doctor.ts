@@ -316,6 +316,24 @@ export function isReserved(labels: Record<string, string>): boolean {
 export const GOLDEN_SETUP = "curl -fsSL https://claude.ai/install.sh | bash";
 export const GOLDEN_SMOKE = "claude --version";
 
+export const CONFIG_DIR = "/root/.claude-cfg";
+
+/** Envs every guest needs: a PATH that reaches the daemon's node and the harness install. */
+export const GUEST_ENVS: Record<string, string> = {
+  IS_SANDBOX: "1",
+  PATH: "/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+};
+
+/** Without a key the guest still needs the config dir and PATH; a subscription
+ * user signs in with /login on the machine, so wsp never sees that credential. */
+export function claudeEnvs(anthropicKey?: string): Record<string, string> {
+  return {
+    ...(anthropicKey !== undefined ? { ANTHROPIC_API_KEY: anthropicKey } : {}),
+    CLAUDE_CONFIG_DIR: CONFIG_DIR,
+    ...GUEST_ENVS,
+  };
+}
+
 export interface DoctorOptions {
   /** Envs baked into golden builds and forks (claude credentials). */
   envs?: Record<string, string>;

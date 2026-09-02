@@ -15,6 +15,8 @@ export const Capabilities = z.object({
   resize: z.boolean(),
   previewUrls: z.boolean(),
   signedUrls: z.boolean(),
+  /** Guests can run containers; false means services get installed natively. */
+  containers: z.boolean(),
 });
 export type Capabilities = z.infer<typeof Capabilities>;
 

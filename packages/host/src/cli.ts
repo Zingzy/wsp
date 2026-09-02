@@ -3,9 +3,10 @@
 // on loopback. There is no control plane; the Solari key is read here
 // and used only for direct calls from this process to the machine API.
 
+import { spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { homedir } from "node:os";
+import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { createClaudeAdapter } from "@wsp/adapter-claude";
@@ -14,11 +15,14 @@ import {
   createRuntime,
   jsonFileStore,
   machineExecStream,
+  type GoldenBuilderView,
   type GoldenRecipe,
   type Machine,
   type Runtime,
 } from "@wsp/runtime";
-import { GOLDEN_SETUP, GOLDEN_SMOKE, deployDaemon, doctor } from "./doctor.js";
+import { CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, claudeEnvs, deployDaemon, doctor } from "./doctor.js";
+import { runInit, type InitIO } from "./init.js";
+import type { ChecklistItem, Manifest } from "./init-recipe.js";
 import { startHost, type HostHandle } from "./server.js";
 import { TerminalInput } from "./terminal-input.js";
 
@@ -26,12 +30,12 @@ const VERSION = (
   JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }
 ).version;
 
-const CONFIG_DIR = "/root/.claude-cfg";
-
 export const HELP = `wsp - local workspaces for coding agents
 
 usage:
   wsp                start the runtime and serve the app on localhost
+  wsp init           set up your first golden image: tick what comes along from
+                     this machine, build it, then finish in the browser
   wsp doctor         run the reach loop end to end against one live machine
   wsp --version      print the version
 
@@ -40,6 +44,9 @@ options:
   --ws-port N        runtime websocket port (default 4410)
   --state PATH       state file (default ~/.wsp/state.json, or ./.wsp/state.json
                      when the current directory has a .env)
+  --yes              init: take every default and ask nothing (required off a terminal)
+  --manifest PATH    init: tick from this file instead of reading the machine; a
+                     saved recipe (<state dir>/golden-recipe.json) works here
 
 keys are read from the environment, then ./.env, then ~/.wsp/.env (WSP_HOME
 overrides ~/.wsp). The prompt runs only when no Solari key is found; it asks
@@ -115,6 +122,7 @@ function writeEnvFile(path: string, set: Record<string, string>): void {
 export async function loadKeys(
   io: CliIO,
   sources: KeySources = { env: process.env, cwd: process.cwd(), home: wspHome() },
+  ask: { anthropic: boolean } = { anthropic: true },
 ): Promise<Keys> {
   const homeEnv = join(sources.home, ".env");
   const layers = [sources.env, parseEnvFile(join(sources.cwd, ".env")), parseEnvFile(homeEnv)];
@@ -129,7 +137,7 @@ export async function loadKeys(
   if (!solari) throw new Error("cannot start without a Solari API key");
   const set: Record<string, string> = { SOLARI_API_KEY: solari };
 
-  if (anthropic === undefined) {
+  if (anthropic === undefined && ask.anthropic) {
     io.log(
       "An Anthropic API key is optional. On a Claude subscription, press enter to skip and sign in with /login inside your machine later, so wsp never sees that credential.",
     );
@@ -146,17 +154,6 @@ export async function loadKeys(
     io.log(`saved ${homeEnv}`);
   }
   return { solari, ...(anthropic !== undefined ? { anthropic } : {}) };
-}
-
-/** Without a key the guest still needs the config dir and PATH; a subscription
- * user signs in with /login on the machine, so wsp never sees that credential. */
-function claudeEnvs(anthropicKey?: string): Record<string, string> {
-  return {
-    ...(anthropicKey !== undefined ? { ANTHROPIC_API_KEY: anthropicKey } : {}),
-    CLAUDE_CONFIG_DIR: CONFIG_DIR,
-    IS_SANDBOX: "1",
-    PATH: "/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-  };
 }
 
 /** What every golden the wizard seals is made of: the harness install and its
@@ -186,7 +183,7 @@ function defaultStatePath(): string {
   return join(wspHome(), "state.json");
 }
 
-export function makeRuntime(keys: Keys, statePath: string): Runtime {
+export function makeRuntime(keys: Keys, statePath: string, recipe: GoldenRecipe = goldenRecipe(keys)): Runtime {
   return createRuntime({
     backend: new SolariBackend({ apiKey: keys.solari }),
     store: jsonFileStore(statePath),
@@ -197,7 +194,7 @@ export function makeRuntime(keys: Keys, statePath: string): Runtime {
           configDir: CONFIG_DIR,
         }),
     },
-    goldenRecipe: goldenRecipe(keys),
+    goldenRecipe: recipe,
   });
 }
 
@@ -254,12 +251,22 @@ function heldBy(lock: HostLock, statePath: string): Error {
   );
 }
 
+function lockPathFor(statePath: string): string {
+  return join(dirname(statePath), "host.lock");
+}
+
 /** One state file, one host. A lock whose pid is gone is a crash leftover and
  * gives way; a lock this process cannot parse is treated the same. */
-function takeLock(lockPath: string, statePath: string): HostLock {
+function refuseIfServed(lockPath: string, statePath: string): void {
   const held = readLock(lockPath);
   if (held !== undefined && pidAlive(held.pid)) throw heldBy(held, statePath);
-  const lock: HostLock = { pid: process.pid, port: 0, wsPort: 0, startedAt: new Date().toISOString() };
+}
+
+/** Seeded with the requested ports so a refusal during startup can name them;
+ * rewritten with the bound ports once the host is up. */
+function takeLock(lockPath: string, statePath: string, ports: { port: number; wsPort: number }): HostLock {
+  refuseIfServed(lockPath, statePath);
+  const lock: HostLock = { pid: process.pid, ...ports, startedAt: new Date().toISOString() };
   mkdirSync(dirname(lockPath), { recursive: true });
   rmSync(lockPath, { force: true });
   try {
@@ -272,28 +279,88 @@ function takeLock(lockPath: string, statePath: string): HostLock {
   return lock;
 }
 
+/** Runs a short-lived helper and reports whether it exited clean. */
+function runQuiet(cmd: string, args: string[], stdin?: string): Promise<boolean> {
+  return new Promise(resolve => {
+    const child = spawn(cmd, args, { stdio: [stdin === undefined ? "ignore" : "pipe", "ignore", "ignore"] });
+    child.on("error", () => resolve(false));
+    child.on("exit", code => resolve(code === 0));
+    if (stdin !== undefined) child.stdin?.end(stdin);
+  });
+}
+
+export function terminalInitIO(): InitIO {
+  const os = platform();
+  return {
+    input: process.stdin,
+    output: process.stdout,
+    isTTY: process.stdin.isTTY === true && process.stdout.isTTY === true,
+    env: process.env,
+    open: url => runQuiet(os === "darwin" ? "open" : os === "win32" ? "explorer" : "xdg-open", [url]),
+    copy: async text => {
+      if (os === "darwin") return runQuiet("pbcopy", [], text);
+      if (os === "win32") return runQuiet("clip", [], text);
+      return (await runQuiet("wl-copy", [], text)) || runQuiet("xclip", ["-selection", "clipboard"], text);
+    },
+  };
+}
+
+/** Until the collector package lands, this machine reads as empty; --manifest
+ * carries the list instead. */
+async function collectNothing(): Promise<Manifest> {
+  return { entries: [] };
+}
+
+async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: string }, flags: { yes: boolean; manifest?: string }): Promise<number> {
+  refuseIfServed(lockPathFor(opts.statePath), opts.statePath);
+  const keys = await loadKeys(io, undefined, { anthropic: false });
+  const result = await runInit(
+    {
+      yes: flags.yes,
+      ...(flags.manifest !== undefined ? { manifestPath: resolve(flags.manifest) } : {}),
+      collect: collectNothing,
+      keys,
+      statePath: opts.statePath,
+      runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `node ${(await deployDaemon(machine)).node}` }),
+      host: (rt, builder, checklist) => hostFor(rt, keys, { ...opts, builder, checklist }, io),
+    },
+    terminalInitIO(),
+  );
+  return result.code;
+}
+
 export async function serve(
   io: CliIO,
   opts: { port: number; wsPort: number; statePath: string; webDir?: string; runtime?: Runtime },
 ): Promise<HostHandle> {
-  const stateDir = dirname(opts.statePath);
-  const lockPath = join(stateDir, "host.lock");
-  const lock = takeLock(lockPath, opts.statePath);
+  const keys = await loadKeys(io);
+  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath);
+  return hostFor(rt, keys, opts, io);
+}
+
+async function hostFor(
+  rt: Runtime,
+  keys: Keys,
+  opts: { port: number; wsPort: number; statePath: string; webDir?: string; builder?: GoldenBuilderView; checklist?: ChecklistItem[] },
+  io: CliIO,
+): Promise<HostHandle> {
+  const lockPath = lockPathFor(opts.statePath);
+  const lock = takeLock(lockPath, opts.statePath, { port: opts.port, wsPort: opts.wsPort });
   try {
-    const keys = await loadKeys(io);
-    const rt = opts.runtime ?? makeRuntime(keys, opts.statePath);
     const handle = await startHost({
       runtime: rt,
       port: opts.port,
       wsPort: opts.wsPort,
       webDir: opts.webDir ?? defaultWebDir(),
       keys: { anthropic: keys.anthropic !== undefined },
+      ...(opts.builder !== undefined ? { builder: opts.builder } : {}),
+      ...(opts.checklist !== undefined ? { checklist: opts.checklist } : {}),
       ...(keys.anthropic !== undefined ? { workspaceEnvs: claudeEnvs(keys.anthropic) } : {}),
       log: line => io.log(line),
     });
     writeFileSync(lockPath, JSON.stringify({ ...lock, port: handle.port, wsPort: handle.wsPort }));
     // Other local tools read the token from disk; the WS never sees it in a URL.
-    const tokenPath = join(stateDir, "host-token");
+    const tokenPath = join(dirname(opts.statePath), "host-token");
     writeFileSync(tokenPath, handle.authToken, { mode: 0o600 });
 
     io.log(`app         http://127.0.0.1:${handle.port}`);
@@ -316,7 +383,7 @@ export async function serve(
 }
 
 export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<number> {
-  let values: { version?: boolean; help?: boolean; port?: string; "ws-port"?: string; state?: string };
+  let values: { version?: boolean; help?: boolean; port?: string; "ws-port"?: string; state?: string; yes?: boolean; manifest?: string };
   let positionals: string[];
   try {
     ({ values, positionals } = parseArgs({
@@ -327,6 +394,8 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
         port: { type: "string" },
         "ws-port": { type: "string" },
         state: { type: "string" },
+        yes: { type: "boolean", short: "y" },
+        manifest: { type: "string" },
       },
       allowPositionals: true,
     }));
@@ -352,6 +421,8 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
     case undefined:
       await serve(io, opts);
       return 0;
+    case "init":
+      return init(io, opts, { yes: values.yes === true, ...(values.manifest !== undefined ? { manifest: values.manifest } : {}) });
     case "doctor": {
       const keys = await loadKeys(io);
       const rt = makeRuntime(keys, opts.statePath);

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The wizard's state machine, kept pure so every transition is a frame or a
 // resolved request and none is a timer. Stage names are the protocol's
-// GoldenStage enum; the step vocabulary is the ticket's.
+// GoldenStage enum. The builder arrives from wsp init through the boot object;
+// without one there is nothing to show but where to get one.
 import type { GoldenBuilderView, GoldenStage } from "@wsp/protocol";
 
-export type Step = "welcome" | "preparing" | "hero" | "sealing" | "done" | "failed";
+export type Step = "none" | "hero" | "sealing" | "done" | "failed";
 
 export interface WizardState {
   step: Step;
@@ -16,25 +17,19 @@ export interface WizardState {
 }
 
 export type Action =
-  | { type: "prepare" }
-  | { type: "prepared"; builder: GoldenBuilderView }
   | { type: "stage"; stage: GoldenStage; detail?: string }
   | { type: "seal" }
   | { type: "sealed" }
-  | { type: "failed"; detail: string }
-  | { type: "reset" };
+  | { type: "failed"; detail: string };
 
-export const INITIAL: WizardState = { step: "welcome", seen: [] };
+export function initial(builder?: GoldenBuilderView): WizardState {
+  return builder ? { step: "hero", seen: [], builder } : { step: "none", seen: [] };
+}
 
-export const PREPARE_STAGES: readonly GoldenStage[] = ["creating", "deploying-daemon", "installing-harness", "ready"];
 export const SEAL_STAGES: readonly GoldenStage[] = ["snapshotting", "smoke-forking", "sealed"];
 
 export function reduce(state: WizardState, action: Action): WizardState {
   switch (action.type) {
-    case "prepare":
-      return { step: "preparing", seen: [] };
-    case "prepared":
-      return state.step === "preparing" ? { ...state, step: "hero", builder: action.builder } : state;
     case "stage":
       if (action.stage === "failed") return { step: "failed", seen: state.seen, detail: action.detail ?? "no detail given" };
       return {
@@ -48,8 +43,6 @@ export function reduce(state: WizardState, action: Action): WizardState {
       return state.step === "sealing" ? { ...state, step: "done" } : state;
     case "failed":
       return state.step === "failed" ? state : { step: "failed", seen: state.seen, detail: action.detail };
-    case "reset":
-      return INITIAL;
     default: {
       const _exhaustive: never = action;
       return _exhaustive;
@@ -60,8 +53,7 @@ export function reduce(state: WizardState, action: Action): WizardState {
 export type RowState = "done" | "current" | "pending";
 
 /** Where each stage of a list stands given the frames seen so far; stages
- * before the latest seen one count as done even when no frame named them
- * (a builder without a daemon hook never reports deploying-daemon). */
+ * before the latest seen one count as done even when no frame named them. */
 export function rowStates(list: readonly GoldenStage[], seen: readonly GoldenStage[]): Record<string, RowState> {
   const latest = [...seen].reverse().find(s => list.includes(s));
   const at = latest === undefined ? -1 : list.indexOf(latest);
@@ -70,8 +62,4 @@ export function rowStates(list: readonly GoldenStage[], seen: readonly GoldenSta
     out[s] = i < at ? "done" : i === at ? "current" : "pending";
   });
   return out;
-}
-
-export function isReady(state: WizardState): boolean {
-  return state.seen.includes("ready");
 }
