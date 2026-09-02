@@ -1,5 +1,0 @@
-.app { display: grid; grid-template-columns: var(--rail-w) 1fr var(--meta-w); height: 100%; }
-.rail { background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; }
-.main { background: var(--bg); min-width: 0; display: flex; flex-direction: column; }
-.meta { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; }
-.boot { color: var(--dim); font-family: var(--mono); padding: 24px; }

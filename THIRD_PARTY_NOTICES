@@ -7,8 +7,11 @@ here are included or relied upon under their own licenses, reproduced below.
 
 1. pingdotgg/t3code (MIT)
 
-   Files under apps/web/src/components/ui, apps/web/src/hooks,
-   apps/web/src/lib/utils.ts and apps/web/src/index.css are adapted from
+   Files under apps/web/src/components (the ui, chat and preview folders
+   and the right-panel and workspace-page components), apps/web/src/hooks,
+   apps/web/src/lib/utils.ts, apps/web/src/index.css,
+   apps/web/src/rightPanelStore.ts, apps/web/src/rightPanelLayout.ts and
+   apps/web/src/workspaceTitlebar.ts are adapted from
    https://github.com/pingdotgg/t3code at commit 57a66608. Each file
    carries an "Adapted from" line naming its source path. Trademarks,
    names and logos of T3 Tools Inc. are not licensed and do not appear.

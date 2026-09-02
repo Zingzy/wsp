@@ -4,7 +4,7 @@
 import { useEffect } from "react";
 import { create } from "zustand";
 import type { Capabilities, SessionView, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
-import type { Api, ProtocolEvent } from "./client.js";
+import type { Api, ConnStatus, ProtocolEvent } from "./client.js";
 
 export interface CostTick {
   rateUsdPerHour: number;
@@ -14,6 +14,8 @@ export interface CostTick {
 
 interface State {
   api: Api | null;
+  /** The runtime socket as the client reports it; "closed" drives the disconnected banner. */
+  conn: ConnStatus;
   /** Backend feature flags; null until the first reply. Gate upgrade/resize on these. */
   capabilities: Capabilities | null;
   workspaces: WorkspaceView[];
@@ -26,6 +28,7 @@ interface State {
   sessions: Record<string, SessionView[]>;
   ready: boolean;
   bind(api: Api): void;
+  setConn(conn: ConnStatus): void;
   select(id: string | null): void;
   refresh(): Promise<void>;
   /** Optimistic nap/wake: paint now, reconcile on the event, revert + toast on failure. */
@@ -57,6 +60,7 @@ export const useStore = create<State>((set, get) => {
 
   return {
     api: null,
+    conn: "connecting",
     capabilities: null,
     workspaces: [],
     statuses: {},
@@ -79,6 +83,7 @@ export const useStore = create<State>((set, get) => {
         .then(statuses => set({ statuses: Object.fromEntries(statuses.map(s => [s.id, s])) }))
         .catch((e: unknown) => set({ toast: `live status unavailable: ${e instanceof Error ? e.message : String(e)}` }));
     },
+    setConn(conn) { set({ conn }); },
     select(id) { set({ selectedId: id }); },
     async refresh() {
       const api = get().api;

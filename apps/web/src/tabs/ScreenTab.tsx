@@ -9,7 +9,7 @@ import styles from "./ScreenTab.module.css";
 
 // The wire does not carry streamUrl on WorkspaceStatus yet: read it if a
 // future status grows the field, otherwise take the injected prop.
-function resolveStreamUrl(status: unknown, injected: string | undefined): string | null {
+export function resolveStreamUrl(status: unknown, injected: string | undefined): string | null {
   if (injected) return injected;
   if (status && typeof status === "object" && "streamUrl" in status) {
     const v = (status as { streamUrl?: unknown }).streamUrl;
