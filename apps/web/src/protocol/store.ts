@@ -100,7 +100,7 @@ export const useStore = create<State>((set, get) => {
       const api = get().api;
       const w = get().workspaces.find(x => x.id === id);
       if (!api || !w) return;
-      const to: WorkspacePhase = w.phase === "running" ? "napping" : "running";
+      const to: WorkspacePhase = w.phase === "running" ? "napping" : "waking";
       setPhase(id, to);
       try {
         await (to === "napping" ? api.nap(id) : api.wake(id));

@@ -31,7 +31,7 @@
 
 .dot { width: 7px; height: 7px; border-radius: 50%; position: relative; justify-self: start; }
 .dot[data-phase="running"] { background: var(--ok); box-shadow: 0 0 7px 1px color-mix(in srgb, var(--ok) 40%, transparent); }
-.dot[data-phase="napping"] { border: 1.5px solid var(--deep); }
+.dot[data-phase="napping"], .dot[data-phase="waking"] { border: 1.5px solid var(--deep); }
 /* mock's awake ping ring, always on while running; amber only while a live
  * agent session burns money */
 .dot[data-phase="running"]::after {

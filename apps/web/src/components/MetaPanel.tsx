@@ -20,7 +20,7 @@ const fmtDur = (ms: number): string => {
 
 /** Provider word for each phase; anything else (starting, gone) is divergence. */
 const expectedMachineState = (phase: WorkspaceView["phase"]): WorkspaceStatus["machineState"] =>
-  phase === "running" ? "running" : "paused";
+  phase === "napping" ? "paused" : "running";
 
 function Spark({ rates }: { rates: number[] }) {
   const W = 258;
