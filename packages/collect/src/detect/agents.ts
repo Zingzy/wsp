@@ -31,6 +31,19 @@ export const AGENTS: readonly Agent[] = [
     ],
   },
   { id: "aider", label: "Aider", bin: "aider", config: ["~/.aider.conf.yml", "~/.aider.model.settings.yml", "~/.aider.model.metadata.json"] },
+  {
+    // models.json stays: a provider entry may carry a literal apiKey. trust.json
+    // stays: it keys on this laptop's absolute project paths.
+    id: "pi", label: "Pi", bin: "pi",
+    config: [
+      "~/.pi/agent/settings.json", "~/.pi/agent/keybindings.json", "~/.pi/agent/AGENTS.md", "~/.pi/agent/SYSTEM.md", "~/.pi/agent/APPEND_SYSTEM.md",
+      "~/.pi/agent/prompts", "~/.pi/agent/skills", "~/.pi/agent/extensions", "~/.pi/agent/themes",
+    ],
+  },
+  {
+    id: "hermes", label: "Hermes Agent", bin: "hermes",
+    config: ["~/.hermes/config.yaml", "~/.hermes/SOUL.md", "~/.hermes/memories", "~/.hermes/skills", "~/.hermes/cron", "~/.hermes/hooks"],
+  },
 ];
 
 export async function detectAgents(host: Host): Promise<ManifestEntry[]> {

@@ -153,6 +153,14 @@ exports[`collect > matches the fixture laptop snapshot 1`] = `
       "rung": "editors",
     },
     {
+      "bytes": 0,
+      "default": "skip",
+      "id": "editors/remote-ssh",
+      "label": "Remote SSH (open the machine from VS Code or Cursor)",
+      "paths": [],
+      "rung": "editors",
+    },
+    {
       "bytes": 300,
       "default": "bring",
       "id": "toolchains/mise",

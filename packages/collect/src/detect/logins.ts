@@ -23,6 +23,8 @@ const LOGINS: readonly Login[] = [
   { id: "codex", label: "Codex login", group: "Agent logins", paths: { all: ["~/.codex/auth.json"] } },
   { id: "gemini", label: "Gemini CLI login", group: "Agent logins", paths: { all: ["~/.gemini/oauth_creds.json"] } },
   { id: "opencode", label: "OpenCode login", group: "Agent logins", paths: { all: ["~/.local/share/opencode/auth.json"] } },
+  { id: "pi", label: "Pi login", group: "Agent logins", paths: { all: ["~/.pi/agent/auth.json"] } },
+  { id: "hermes", label: "Hermes Agent API keys and logins", group: "Agent logins", paths: { all: ["~/.hermes/.env", "~/.hermes/auth.json"] } },
 ];
 
 async function keychainHas(host: Host, service: string): Promise<boolean> {

@@ -17,7 +17,7 @@ describe("editors", () => {
     expect(rows).toEqual([{ rung: "editors", id, label: expect.any(String), paths, bytes: 10, default: "bring" }]);
   });
 
-  it("VS Code on macOS: user settings from Library, extensions one row each, code tunnel unticked", async () => {
+  it("VS Code on macOS: user settings from Library, extensions one row each, code tunnel and Remote SSH unticked", async () => {
     const host = fakeHost({
       files: {
         "~/Library/Application Support/Code/User/settings.json": 2000,
@@ -38,6 +38,7 @@ describe("editors", () => {
       { rung: "editors", id: "editors/vscode-ext/ms-python.python", label: "ms-python.python", group: "VS Code extensions", paths: [], bytes: 0, default: "bring" },
       { rung: "editors", id: "editors/vscode-ext/esbenp.prettier-vscode", label: "esbenp.prettier-vscode", group: "VS Code extensions", paths: [], bytes: 0, default: "bring" },
       { rung: "editors", id: "editors/code-tunnel", label: "VS Code remote access (code tunnel)", paths: [], bytes: 0, default: "skip" },
+      { rung: "editors", id: "editors/remote-ssh", label: "Remote SSH (open the machine from VS Code or Cursor)", paths: [], bytes: 0, default: "skip" },
     ]);
   });
 
@@ -53,7 +54,21 @@ describe("editors", () => {
       ["editors/vscode", ["~/.config/Code/User/settings.json"], undefined],
       ["editors/cursor", ["~/.config/Cursor/User/settings.json"], undefined],
       ["editors/cursor-ext/anysphere.cursorpyright", [], "Cursor extensions"],
+      ["editors/remote-ssh", [], undefined],
     ]);
+  });
+
+  it.each([
+    ["cursor on PATH", { which: ["cursor"] }],
+    ["Cursor settings without the binary", { files: { "~/Library/Application Support/Cursor/User/settings.json": 10 } }],
+  ])("Remote SSH is offered unticked with %s", async (_name, laptop) => {
+    const rows = await detectEditors(fakeHost(laptop));
+    expect(rows.at(-1)).toEqual({ rung: "editors", id: "editors/remote-ssh", label: "Remote SSH (open the machine from VS Code or Cursor)", paths: [], bytes: 0, default: "skip" });
+  });
+
+  it("Remote SSH needs VS Code or Cursor; neovim alone does not get it", async () => {
+    const rows = await detectEditors(fakeHost({ files: { "~/.config/nvim/init.lua": 10 }, which: ["tailscale"] }));
+    expect(rows.map(r => r.id)).toEqual(["editors/nvim", "editors/tailscale"]);
   });
 
   it("tailscale on the laptop offers the tailnet as an unticked option", async () => {
