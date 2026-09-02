@@ -1,0 +1,25 @@
+{
+  "name": "@wsp/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "build/app/main/main.mjs",
+  "scripts": {
+    "build:deps": "pnpm --filter \"@wsp/desktop^...\" build",
+    "build:app": "tsup && node scripts/stage.mjs",
+    "build": "pnpm run build:deps && pnpm run build:app && electron-builder --config electron-builder.yml --mac --arm64 --x64 --linux",
+    "start": "pnpm run build:app && electron build/app",
+    "smoke": "WSP_DESKTOP_SMOKE=1 vitest run --project node apps/desktop/test/smoke.electron.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "@wsp/daemon": "workspace:*",
+    "@wsp/host": "workspace:*",
+    "@wsp/runtime": "workspace:*",
+    "@wsp/web": "workspace:*",
+    "electron": "43.5.1",
+    "electron-builder": "26.15.7",
+    "playwright": "1.62.1"
+  },
+  "license": "AGPL-3.0-only"
+}

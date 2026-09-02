@@ -10,6 +10,7 @@ const alias = {
   "@wsp/daemon": pkg("daemon"),
   "@wsp/protocol": pkg("protocol"),
   "@wsp/runtime": pkg("runtime"),
+  "@wsp/host": pkg("host"),
 };
 
 export default [
@@ -17,7 +18,7 @@ export default [
     resolve: { alias },
     test: {
       name: "node",
-      include: ["packages/*/test/**/*.test.ts", "apps/wspx/**/*.test.ts"],
+      include: ["packages/*/test/**/*.test.ts", "apps/wspx/**/*.test.ts", "apps/desktop/test/**/*.test.ts"],
       environment: "node",
       // Live tests create real machines under a 2-machine cap: no parallelism live.
       fileParallelism: process.env.WSP_LIVE !== "1",
