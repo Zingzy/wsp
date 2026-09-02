@@ -28,6 +28,8 @@ export interface HostOptions {
   /** Envs baked into workspaces created from the JSON route. */
   workspaceEnvs?: Record<string, string>;
   probeTimeoutMs?: number;
+  /** Receives one line per machine a sweep killed, and one when a sweep fails. */
+  log?: (line: string) => void;
 }
 
 export interface HostHandle {
@@ -36,6 +38,10 @@ export interface HostHandle {
   authToken: string;
   close(): Promise<void>;
 }
+
+/** Orphan sweep period after the one at start. Matches the age a stray
+ * workspace machine must reach before reap treats it as abandoned. */
+export const REAP_INTERVAL_MS = 10 * 60_000;
 
 // The dev default apps/web/index.html ships; the host swaps it for the real
 // boot object so the page carries exactly one inline script.
@@ -76,6 +82,22 @@ function sendAsset(res: ServerResponse, webDir: string, path: string): boolean {
   return true;
 }
 
+function describeLabels(labels: Record<string, string> | undefined): string {
+  if (!labels) return "";
+  return ` (${Object.entries(labels).map(([k, v]) => `${k}=${v}`).join(" ")})`;
+}
+
+/** Kills what nothing claims and says which machines went, labels included.
+ * The listing is only for the log line: reap decides on its own listing. */
+async function sweepOrphans(rt: Runtime, log: (line: string) => void): Promise<void> {
+  try {
+    const labels = new Map((await rt.backend.list()).map(m => [m.id, m.labels]));
+    for (const id of await rt.reap()) log(`reap: killed ${id}${describeLabels(labels.get(id))}`);
+  } catch (e) {
+    log(`reap: sweep failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
@@ -92,6 +114,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const authToken = opts.authToken ?? randomBytes(24).toString("base64url");
   const probeTimeoutMs = opts.probeTimeoutMs ?? 2500;
   const webDir = resolvePath(opts.webDir);
+  const log = opts.log ?? (() => {});
 
   const rtServer = await serveRuntime(rt, { port: opts.wsPort ?? 4410, authToken });
   let page: string;
@@ -152,11 +175,19 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const addr = server.address();
   const port = typeof addr === "object" && addr !== null ? addr.port : (opts.port ?? 4400);
 
+  // A sweep that outlives its period (a slow provider listing) must not be
+  // joined by the next one: two sweeps would race to kill the same machines.
+  let sweeping: Promise<void> | undefined;
+  const sweep = (): Promise<void> => (sweeping ??= sweepOrphans(rt, log).finally(() => (sweeping = undefined)));
+  await sweep();
+  const reapTimer = setInterval(() => void sweep(), REAP_INTERVAL_MS);
+
   return {
     port,
     wsPort: rtServer.port,
     authToken,
     close: async () => {
+      clearInterval(reapTimer);
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) => server.close(err => (err ? reject(err) : resolve())));
       await rtServer.close();

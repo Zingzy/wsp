@@ -203,10 +203,10 @@ export function makeRuntime(keys: Keys, statePath: string): Runtime {
 
 export async function serve(
   io: CliIO,
-  opts: { port: number; wsPort: number; statePath: string; webDir?: string },
+  opts: { port: number; wsPort: number; statePath: string; webDir?: string; runtime?: Runtime },
 ): Promise<HostHandle> {
   const keys = await loadKeys(io);
-  const rt = makeRuntime(keys, opts.statePath);
+  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath);
   const handle = await startHost({
     runtime: rt,
     port: opts.port,
@@ -214,6 +214,7 @@ export async function serve(
     webDir: opts.webDir ?? defaultWebDir(),
     keys: { anthropic: keys.anthropic !== undefined },
     ...(keys.anthropic !== undefined ? { workspaceEnvs: claudeEnvs(keys.anthropic) } : {}),
+    log: line => io.log(line),
   });
   // Other local tools read the token from disk; the WS never sees it in a URL.
   const tokenPath = join(dirname(opts.statePath), "host-token");

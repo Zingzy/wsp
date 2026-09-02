@@ -7,7 +7,7 @@ import type { GoldenManifest } from "@wsp/engine";
 import { createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cli, serve, type CliIO } from "../src/cli.js";
-import { startHost, type HostHandle } from "../src/server.js";
+import { REAP_INTERVAL_MS, startHost, type HostHandle } from "../src/server.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
@@ -92,6 +92,7 @@ describe("host serves the app", () => {
     return d;
   };
   afterEach(async () => {
+    vi.useRealTimers();
     await handle?.close();
     handle = undefined;
     await new Promise<void>(r => (probeTarget ? probeTarget.close(() => r()) : r()));
@@ -132,7 +133,8 @@ describe("host serves the app", () => {
     vi.stubEnv("ANTHROPIC_API_KEY", ANTHROPIC);
     vi.stubEnv("WSP_HOME", home);
 
-    handle = await serve(quietIO(), { port: 0, wsPort: 0, statePath: join(home, "state.json"), webDir: webDir() });
+    const { rt } = testRuntime();
+    handle = await serve(quietIO(), { port: 0, wsPort: 0, statePath: join(home, "state.json"), webDir: webDir(), runtime: rt });
     const html = await (await fetch(`http://127.0.0.1:${handle.port}/`)).text();
     expect(html).toContain('"keys":{"anthropic":true}');
     expect(html).not.toContain(ANTHROPIC);
@@ -255,5 +257,79 @@ describe("host serves the app", () => {
     const napped = await getJson(`http://127.0.0.1:${handle.port}/api/workspaces`);
     expect(napped.body.workspaces[0].reach.state).toBe("napping");
     expect(napped.body.workspaces[0].machineState).toBe("paused");
+  });
+});
+
+describe("host sweeps orphaned machines", () => {
+  let handle: HostHandle | undefined;
+  const dirs: string[] = [];
+  const webDir = (): string => {
+    const d = fakeWebDir();
+    dirs.push(d);
+    return d;
+  };
+  const TIMERS = ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] as const;
+  afterEach(async () => {
+    vi.useRealTimers();
+    await handle?.close();
+    handle = undefined;
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  it("kills a builder nothing recorded as soon as it starts, and logs the id with its labels", async () => {
+    const { rt, backend } = testRuntime();
+    await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-builder": "1" } });
+    await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-builder": "1", poc: "ttl-test" } });
+    const lines: string[] = [];
+
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
+
+    expect(backend.machines.map(m => m.killed)).toEqual([true, false]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("m1");
+    expect(lines[0]).toContain("wsp-builder=1");
+    expect(lines[0]).not.toContain("m2");
+  });
+
+  it("sweeps again every ten minutes until the host closes", async () => {
+    vi.useFakeTimers({ toFake: [...TIMERS] });
+    const { rt, backend } = testRuntime();
+    const lines: string[] = [];
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
+    const reap = vi.spyOn(rt, "reap");
+
+    await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-builder": "1" } });
+    await vi.advanceTimersByTimeAsync(REAP_INTERVAL_MS - 1);
+    expect(reap).not.toHaveBeenCalled();
+    expect(backend.machines[0]?.killed).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(reap).toHaveBeenCalledTimes(1);
+    expect(backend.machines[0]?.killed).toBe(true);
+    expect(lines).toEqual([expect.stringContaining("m1")]);
+
+    await vi.advanceTimersByTimeAsync(REAP_INTERVAL_MS);
+    expect(reap).toHaveBeenCalledTimes(2);
+    expect(lines).toHaveLength(1);
+
+    await handle.close();
+    handle = undefined;
+    await vi.advanceTimersByTimeAsync(REAP_INTERVAL_MS * 3);
+    expect(reap).toHaveBeenCalledTimes(2);
+  });
+
+  it("starts no sweep while one is still in flight", async () => {
+    vi.useFakeTimers({ toFake: [...TIMERS] });
+    const { rt } = testRuntime();
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: () => {} });
+    let finish!: (ids: string[]) => void;
+    const reap = vi.spyOn(rt, "reap").mockImplementationOnce(() => new Promise<string[]>(r => (finish = r)));
+
+    await vi.advanceTimersByTimeAsync(REAP_INTERVAL_MS * 3);
+    expect(reap).toHaveBeenCalledTimes(1);
+
+    finish([]);
+    await vi.advanceTimersByTimeAsync(REAP_INTERVAL_MS);
+    expect(reap).toHaveBeenCalledTimes(2);
   });
 });
