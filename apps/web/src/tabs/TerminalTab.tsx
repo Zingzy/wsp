@@ -20,7 +20,7 @@ function themeFromTokens(el: HTMLElement): ITheme {
   const cs = getComputedStyle(el);
   const v = (name: string) => cs.getPropertyValue(name).trim();
   const background = v("--term");
-  const foreground = v("--muted");
+  const foreground = v("--dim");
   const cursor = v("--fg");
   const selectionBackground = v("--line");
   return {

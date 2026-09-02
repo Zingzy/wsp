@@ -12,8 +12,8 @@
 
 .key {
   display: inline-flex; align-items: center; height: 24px; padding: 0 9px;
-  border: 1px solid var(--line); border-radius: 6px; background: var(--card);
-  box-shadow: var(--bevel); font-family: var(--mono); font-size: 11px; color: var(--muted);
+  border: 1px solid var(--line); border-radius: 6px; background: var(--tile);
+  box-shadow: var(--bevel); font-family: var(--mono); font-size: 11px; color: var(--dim);
   cursor: pointer; transition: color 0.16s, background 0.16s;
 }
 .key:hover { color: var(--fg); background: var(--raised); }
@@ -45,11 +45,11 @@
 .tr { top: -1px; right: -1px; border-top-width: 1px; border-right-width: 1px; }
 .bl { bottom: -1px; left: -1px; border-bottom-width: 1px; border-left-width: 1px; }
 .br { bottom: -1px; right: -1px; border-bottom-width: 1px; border-right-width: 1px; }
-.t1 { font-size: 13px; color: var(--muted); }
+.t1 { font-size: 13px; color: var(--dim); }
 .t2 { font-size: 11px; color: var(--deep); max-width: 34ch; line-height: 1.5; }
 
 .ell i {
-  display: inline-block; width: 3px; height: 3px; border-radius: 50%; background: var(--muted);
+  display: inline-block; width: 3px; height: 3px; border-radius: 50%; background: var(--dim);
   margin-left: 3px; animation: dotp 1.2s ease-in-out infinite;
 }
 .ell i:nth-child(2) { animation-delay: 0.15s; }

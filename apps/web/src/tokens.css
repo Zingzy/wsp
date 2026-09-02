@@ -1,14 +1,16 @@
 /* SPDX-License-Identifier: AGPL-3.0-only */
-/* Tokens ported verbatim from the approved mock (wsp-map prototype/design-direction). */
+/* Tokens ported from the approved mock (wsp-map prototype/design-direction).
+   --tile and --dim were the mock's --card and --muted; the kit's index.css declares
+   both names with other meanings, and both files are live until the old tabs go. */
 :root {
   --bg: #09090b;
   --panel: #0b0b0e;
-  --card: #101014;
+  --tile: #101014;
   --raised: #15151a;
   --overlay: #17171d;
   --term: #060607;
   --fg: #f4f4f5;
-  --muted: #a1a1aa;
+  --dim: #a1a1aa;
   --deep: #82828c;
   --line: rgba(255, 255, 255, 0.1);
   --soft: rgba(255, 255, 255, 0.055);
