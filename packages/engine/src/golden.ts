@@ -9,11 +9,58 @@
 import { createHash } from "node:crypto";
 import type { GoldenManifest, GoldenStage, GoldenVersion } from "@wsp/protocol";
 import { assertFirstLife } from "./lifecycle.js";
-import type { Machine, MachineBackend, MachineKind } from "./machine.js";
+import type { Machine, MachineBackend, MachineKind, MachineState } from "./machine.js";
 
 export type { GoldenManifest, GoldenStage, GoldenVersion };
 
 export type StageListener = (stage: GoldenStage, detail?: string) => void;
+
+/** How long to wait for the provider to report a killed machine gone before
+ * killing again; two rounds, then the caller fails. Tests shrink both. */
+export interface KillConfirm {
+  graceMs?: number;
+  pollMs?: number;
+}
+
+/** A machine that answered two kills with a success status and is still there.
+ * Typed so the wizard can say "still billing, reap it" rather than "try again". */
+export class MachineAliveError extends Error {
+  readonly kind = "machineAlive" as const;
+  constructor(
+    readonly machineId: string,
+    readonly state: MachineState,
+  ) {
+    super(`machine ${machineId} is still ${state} after two kills; it bills until reap or a kill by hand takes`);
+    this.name = "MachineAliveError";
+  }
+}
+
+const isMissing = (e: unknown): boolean => (e as { kind?: unknown }).kind === "missing";
+const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+/** The provider's kill acknowledges the request, not the machine's death: a live
+ * wizard run reported its seal done and the builder was still running 25 minutes
+ * later, so a kill is only done once get(id) reads the machine gone. */
+export async function killUntilGone(backend: MachineBackend, machine: Machine, confirm: KillConfirm = {}): Promise<void> {
+  const graceMs = confirm.graceMs ?? 30_000;
+  const pollMs = confirm.pollMs ?? 1_000;
+  let state: MachineState = "running";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await machine.kill().catch((e: unknown) => {
+      if (!isMissing(e)) throw e;
+    });
+    const deadline = Date.now() + graceMs;
+    do {
+      state = await backend.get(machine.id).then(
+        m => m.state(),
+        (e: unknown) => (isMissing(e) ? "gone" : Promise.reject(e)),
+      );
+      if (state === "gone") return;
+      await new Promise(r => setTimeout(r, pollMs));
+    } while (Date.now() < deadline);
+  }
+  throw new MachineAliveError(machine.id, state);
+}
 
 /** Solari's built-in templates are kind-specific (TemplateKindMismatch otherwise). */
 const DEFAULT_TEMPLATE: Record<MachineKind, string> = { sandbox: "base", desktop: "default" };
@@ -69,6 +116,7 @@ export interface SealGoldenOptions extends MachineSize {
   smokeTimeoutMs?: number;
   manifest?: GoldenManifest;
   onStage?: StageListener;
+  killConfirm?: KillConfirm;
 }
 
 export interface BuildGoldenOptions extends MachineSize {
@@ -133,8 +181,12 @@ export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Build
       firstLife: true,
     };
   } catch (e) {
-    await machine.kill().catch(() => {});
-    stage("failed", e instanceof Error ? e.message : String(e));
+    // Nothing records this machine yet, so one that survives here is reap's to sweep.
+    let detail = messageOf(e);
+    await killUntilGone(opts.backend, machine).catch((k: unknown) => {
+      detail += `; ${messageOf(k)}`;
+    });
+    stage("failed", detail);
     throw e;
   }
 }
@@ -153,10 +205,11 @@ export async function sealGolden(
   let snapshotId: string | undefined;
   let builderAlive = true;
   let fork: Machine | undefined;
+  const kill = (m: Machine) => killUntilGone(opts.backend, m, opts.killConfirm);
   try {
     stage("snapshotting", `golden-v${versionNum}`);
     snapshotId = await builder.machine.snapshot(`golden-v${versionNum}`);
-    await builder.machine.kill();
+    await kill(builder.machine);
     builderAlive = false;
 
     stage("smoke-forking", opts.smoke);
@@ -167,7 +220,12 @@ export async function sealGolden(
         `golden smoke failed (exit ${smokeRes.exitCode}) for ${JSON.stringify(opts.smoke)}: ${smokeRes.stderr.slice(-500)}`,
       );
     }
-    await fork.kill();
+    // The image is proven by now; a fork that outlives its kills is a leak to
+    // name, not a reason to throw the person's setup away.
+    let leak: string | undefined;
+    await kill(fork).catch((k: unknown) => {
+      leak = messageOf(k);
+    });
 
     const version: GoldenVersion = {
       version: versionNum,
@@ -178,13 +236,17 @@ export async function sealGolden(
       createdAt: new Date().toISOString(),
       smoke: { cmd: opts.smoke, exitCode: smokeRes.exitCode },
     };
-    stage("sealed", `v${versionNum}`);
+    stage("sealed", leak === undefined ? `v${versionNum}` : `v${versionNum}; ${leak}`);
     return { manifest: { head: versionNum, versions: [...prior, version] }, version };
   } catch (e) {
-    if (builderAlive) await builder.machine.kill().catch(() => {});
-    await fork?.kill().catch(() => {});
+    let detail = messageOf(e);
+    const leaked = (k: unknown) => {
+      detail += `; ${messageOf(k)}`;
+    };
+    if (builderAlive && !(e instanceof MachineAliveError)) await kill(builder.machine).catch(leaked);
+    if (fork) await kill(fork).catch(leaked);
     if (snapshotId !== undefined) await opts.backend.deleteSnapshot(snapshotId).catch(() => {});
-    stage("failed", e instanceof Error ? e.message : String(e));
+    stage("failed", detail);
     throw e;
   }
 }

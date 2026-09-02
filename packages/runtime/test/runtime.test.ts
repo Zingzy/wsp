@@ -178,8 +178,9 @@ describe("runtime session history", () => {
     expect((await read()).map(e => e.type)).toEqual(["session.start", "session.delta", "session.done", "session.end"]);
   });
 
-  it("caps the persisted transcript so a chatty workspace cannot grow the store without bound", async () => {
-    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: scripted("x") } });
+  it("caps the persisted transcript so a chatty workspace cannot grow the store without bound", { timeout: 20_000 }, async () => {
+    const store = memoryStore();
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: scripted("x") } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     for (let i = 0; i < 1300; i++) await (await rt.sessions.start(ws.id, { prompt: `t${i}` })).finished;
     const history = await rt.sessions.history(ws.id);
@@ -187,6 +188,10 @@ describe("runtime session history", () => {
     expect(history[history.length - 1]).toMatchObject({ type: "session.end" });
     expect(history.some(e => e.type === "session.start" && e.prompt === "t1299")).toBe(true);
     expect(history.some(e => e.type === "session.start" && e.prompt === "t0")).toBe(false);
+    // Thousands of queued snapshot puts drain after the turns finish; left running
+    // they starve the timers of whatever test comes next, so wait them out here.
+    const stored = async () => ((await store.get("transcripts", ws.id)) as { events: { type: string; prompt?: string }[] } | undefined)?.events ?? [];
+    while (!(await stored()).some(e => e.type === "session.start" && e.prompt === "t1299")) await new Promise(r => setTimeout(r, 10));
   });
 });
 
@@ -335,6 +340,33 @@ describe("runtime golden builders", () => {
     expect(backend.machines.every(m => m.killed)).toBe(true);
     expect(await rt.golden.builders()).toEqual([]);
     expect(await rt.golden.get()).toBeUndefined();
+  });
+
+  it("a seal whose builder outlives two kills fails with kind machineAlive, forks nothing, and writes no manifest", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe, killConfirm: { graceMs: 20, pollMs: 1 } });
+    const b = await rt.golden.prepare();
+    const machine = backend.machines.find(m => m.id === b.id)!;
+    let kills = 0;
+    machine.kill = async () => { kills++; };
+    await expect(rt.golden.seal(b.id)).rejects.toMatchObject({ kind: "machineAlive", machineId: b.id });
+    expect(kills).toBe(2);
+    expect(backend.machines).toHaveLength(1);
+    expect(await rt.golden.get()).toBeUndefined();
+    expect(await rt.golden.builders()).toEqual([]);
+  });
+
+  it("reap kills a builder-labeled machine this process has no record of, whatever its age, and never a poc machine", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
+    const own = await rt.golden.prepare();
+    const now = new Date().toISOString();
+    const leaked = await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-builder": "1", createdAt: now } });
+    const experiment = await backend.create({ kind: "sandbox", labels: { poc: "p1", wsp: "1", "wsp-builder": "1", createdAt: now } });
+    expect(await rt.reap()).toEqual([leaked.id]);
+    expect(backend.machines.find(m => m.id === leaked.id)!.killed).toBe(true);
+    expect(backend.machines.find(m => m.id === own.id)!.killed).toBe(false);
+    expect(backend.machines.find(m => m.id === experiment.id)!.killed).toBe(false);
   });
 });
 
