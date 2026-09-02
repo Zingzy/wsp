@@ -3,9 +3,10 @@
 // on loopback. There is no control plane; the Solari key is read here
 // and used only for direct calls from this process to the machine API.
 
+import { spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { homedir } from "node:os";
+import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { createClaudeAdapter } from "@wsp/adapter-claude";
@@ -14,11 +15,14 @@ import {
   createRuntime,
   jsonFileStore,
   machineExecStream,
+  type GoldenBuilderView,
   type GoldenRecipe,
   type Machine,
   type Runtime,
 } from "@wsp/runtime";
-import { GOLDEN_SETUP, GOLDEN_SMOKE, deployDaemon, doctor } from "./doctor.js";
+import { CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, claudeEnvs, deployDaemon, doctor } from "./doctor.js";
+import { runInit, type InitIO } from "./init.js";
+import type { Manifest } from "./init-recipe.js";
 import { startHost, type HostHandle } from "./server.js";
 import { TerminalInput } from "./terminal-input.js";
 
@@ -26,12 +30,12 @@ const VERSION = (
   JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }
 ).version;
 
-const CONFIG_DIR = "/root/.claude-cfg";
-
 export const HELP = `wsp - local workspaces for coding agents
 
 usage:
   wsp                start the runtime and serve the app on localhost
+  wsp init           set up your first golden image: tick what comes along from
+                     this machine, build it, then finish in the browser
   wsp doctor         run the reach loop end to end against one live machine
   wsp --version      print the version
 
@@ -40,6 +44,9 @@ options:
   --ws-port N        runtime websocket port (default 4410)
   --state PATH       state file (default ~/.wsp/state.json, or ./.wsp/state.json
                      when the current directory has a .env)
+  --yes              init: take every default and ask nothing (required off a terminal)
+  --manifest PATH    init: tick from this file instead of reading the machine; a
+                     saved recipe (<state dir>/golden-recipe.json) works here
 
 keys are read from the environment, then ./.env, then ~/.wsp/.env (WSP_HOME
 overrides ~/.wsp). The prompt runs only when no Solari key is found; it asks
@@ -115,6 +122,7 @@ function writeEnvFile(path: string, set: Record<string, string>): void {
 export async function loadKeys(
   io: CliIO,
   sources: KeySources = { env: process.env, cwd: process.cwd(), home: wspHome() },
+  ask: { anthropic: boolean } = { anthropic: true },
 ): Promise<Keys> {
   const homeEnv = join(sources.home, ".env");
   const layers = [sources.env, parseEnvFile(join(sources.cwd, ".env")), parseEnvFile(homeEnv)];
@@ -129,7 +137,7 @@ export async function loadKeys(
   if (!solari) throw new Error("cannot start without a Solari API key");
   const set: Record<string, string> = { SOLARI_API_KEY: solari };
 
-  if (anthropic === undefined) {
+  if (anthropic === undefined && ask.anthropic) {
     io.log(
       "An Anthropic API key is optional. On a Claude subscription, press enter to skip and sign in with /login inside your machine later, so wsp never sees that credential.",
     );
@@ -146,17 +154,6 @@ export async function loadKeys(
     io.log(`saved ${homeEnv}`);
   }
   return { solari, ...(anthropic !== undefined ? { anthropic } : {}) };
-}
-
-/** Without a key the guest still needs the config dir and PATH; a subscription
- * user signs in with /login on the machine, so wsp never sees that credential. */
-function claudeEnvs(anthropicKey?: string): Record<string, string> {
-  return {
-    ...(anthropicKey !== undefined ? { ANTHROPIC_API_KEY: anthropicKey } : {}),
-    CLAUDE_CONFIG_DIR: CONFIG_DIR,
-    IS_SANDBOX: "1",
-    PATH: "/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-  };
 }
 
 /** What every golden the wizard seals is made of: the harness install and its
@@ -186,7 +183,7 @@ function defaultStatePath(): string {
   return join(wspHome(), "state.json");
 }
 
-export function makeRuntime(keys: Keys, statePath: string): Runtime {
+export function makeRuntime(keys: Keys, statePath: string, recipe: GoldenRecipe = goldenRecipe(keys)): Runtime {
   return createRuntime({
     backend: new SolariBackend({ apiKey: keys.solari }),
     store: jsonFileStore(statePath),
@@ -197,8 +194,57 @@ export function makeRuntime(keys: Keys, statePath: string): Runtime {
           configDir: CONFIG_DIR,
         }),
     },
-    goldenRecipe: goldenRecipe(keys),
+    goldenRecipe: recipe,
   });
+}
+
+/** Runs a short-lived helper and reports whether it exited clean. */
+function runQuiet(cmd: string, args: string[], stdin?: string): Promise<boolean> {
+  return new Promise(resolve => {
+    const child = spawn(cmd, args, { stdio: [stdin === undefined ? "ignore" : "pipe", "ignore", "ignore"] });
+    child.on("error", () => resolve(false));
+    child.on("exit", code => resolve(code === 0));
+    if (stdin !== undefined) child.stdin?.end(stdin);
+  });
+}
+
+export function terminalInitIO(): InitIO {
+  const os = platform();
+  return {
+    input: process.stdin,
+    output: process.stdout,
+    isTTY: process.stdin.isTTY === true && process.stdout.isTTY === true,
+    env: process.env,
+    open: url => runQuiet(os === "darwin" ? "open" : os === "win32" ? "explorer" : "xdg-open", [url]),
+    copy: async text => {
+      if (os === "darwin") return runQuiet("pbcopy", [], text);
+      if (os === "win32") return runQuiet("clip", [], text);
+      return (await runQuiet("wl-copy", [], text)) || runQuiet("xclip", ["-selection", "clipboard"], text);
+    },
+  };
+}
+
+/** Until the collector package lands, this machine reads as empty; --manifest
+ * carries the list instead. */
+async function collectNothing(): Promise<Manifest> {
+  return { entries: [] };
+}
+
+async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: string }, flags: { yes: boolean; manifest?: string }): Promise<number> {
+  const keys = await loadKeys(io, undefined, { anthropic: false });
+  const result = await runInit(
+    {
+      yes: flags.yes,
+      ...(flags.manifest !== undefined ? { manifestPath: resolve(flags.manifest) } : {}),
+      collect: collectNothing,
+      keys,
+      statePath: opts.statePath,
+      runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `node ${(await deployDaemon(machine)).node}` }),
+      host: (rt, builder) => hostFor(rt, keys, { ...opts, builder }, io),
+    },
+    terminalInitIO(),
+  );
+  return result.code;
 }
 
 export async function serve(
@@ -207,12 +253,22 @@ export async function serve(
 ): Promise<HostHandle> {
   const keys = await loadKeys(io);
   const rt = opts.runtime ?? makeRuntime(keys, opts.statePath);
+  return hostFor(rt, keys, opts, io);
+}
+
+async function hostFor(
+  rt: Runtime,
+  keys: Keys,
+  opts: { port: number; wsPort: number; statePath: string; webDir?: string; builder?: GoldenBuilderView },
+  io: CliIO,
+): Promise<HostHandle> {
   const handle = await startHost({
     runtime: rt,
     port: opts.port,
     wsPort: opts.wsPort,
     webDir: opts.webDir ?? defaultWebDir(),
     keys: { anthropic: keys.anthropic !== undefined },
+    ...(opts.builder !== undefined ? { builder: opts.builder } : {}),
     ...(keys.anthropic !== undefined ? { workspaceEnvs: claudeEnvs(keys.anthropic) } : {}),
     log: line => io.log(line),
   });
@@ -231,7 +287,7 @@ export async function serve(
 }
 
 export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<number> {
-  let values: { version?: boolean; help?: boolean; port?: string; "ws-port"?: string; state?: string };
+  let values: { version?: boolean; help?: boolean; port?: string; "ws-port"?: string; state?: string; yes?: boolean; manifest?: string };
   let positionals: string[];
   try {
     ({ values, positionals } = parseArgs({
@@ -242,6 +298,8 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
         port: { type: "string" },
         "ws-port": { type: "string" },
         state: { type: "string" },
+        yes: { type: "boolean", short: "y" },
+        manifest: { type: "string" },
       },
       allowPositionals: true,
     }));
@@ -267,6 +325,8 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
     case undefined:
       await serve(io, opts);
       return 0;
+    case "init":
+      return init(io, opts, { yes: values.yes === true, ...(values.manifest !== undefined ? { manifest: values.manifest } : {}) });
     case "doctor": {
       const keys = await loadKeys(io);
       const rt = makeRuntime(keys, opts.statePath);

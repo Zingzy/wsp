@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useEffect, useState } from "react";
+import type { GoldenBuilderView } from "@wsp/protocol";
 import { makeApi, ProtocolClient } from "./protocol/client.js";
 import { useReady, useStore } from "./protocol/store.js";
 import { Rail } from "./components/Rail.js";
@@ -9,7 +10,7 @@ import { wireTerminals } from "./terminal/wiring.js";
 import { Wizard, type KeyFlags } from "./wizard/Wizard.js";
 import styles from "./App.module.css";
 
-export function App({ wsUrl, token, keys }: { wsUrl: string; token: string; keys?: KeyFlags }) {
+export function App({ wsUrl, token, keys, builder }: { wsUrl: string; token: string; keys?: KeyFlags; builder?: GoldenBuilderView }) {
   const bind = useStore(s => s.bind);
   useEffect(() => {
     const client = new ProtocolClient({ url: wsUrl, token });
@@ -18,14 +19,14 @@ export function App({ wsUrl, token, keys }: { wsUrl: string; token: string; keys
     return () => { live = false; client.close(); };
   }, [wsUrl, token, bind]);
   useEffect(() => wireTerminals(useStore), []);
-  return <Shell {...(keys !== undefined ? { keys } : {})} />;
+  return <Shell {...(keys !== undefined ? { keys } : {})} {...(builder !== undefined ? { builder } : {})} />;
 }
 
 type Golden = "unknown" | "none" | "present";
 
 /** The window below the connection: the first-run wizard until a golden
  * image exists, the three-column app from then on. */
-export function Shell({ keys }: { keys?: KeyFlags }) {
+export function Shell({ keys, builder }: { keys?: KeyFlags; builder?: GoldenBuilderView }) {
   const api = useStore(s => s.api);
   const ready = useReady();
   const [golden, setGolden] = useState<Golden>("unknown");
@@ -39,7 +40,7 @@ export function Shell({ keys }: { keys?: KeyFlags }) {
       .catch(() => { if (live) setGolden("present"); });
     return () => { live = false; };
   }, [api]);
-  if (golden === "none") return <Wizard {...(keys !== undefined ? { keys } : {})} onDone={() => setGolden("present")} />;
+  if (golden === "none") return <Wizard {...(keys !== undefined ? { keys } : {})} {...(builder !== undefined ? { builder } : {})} onDone={() => setGolden("present")} />;
   return (
     <div className={styles.app}>
       <aside className={styles.rail}><Rail /></aside>

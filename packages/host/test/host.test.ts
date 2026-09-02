@@ -117,6 +117,14 @@ describe("host serves the app", () => {
     expect(html).not.toContain("window.__WSP__ ||");
   });
 
+  it("carries the builder wsp init prepared so the page lands on it", async () => {
+    const { rt } = testRuntime(false);
+    const builder = { id: "m_b", name: "default", kind: "sandbox" as const, createdAt: "2026-09-03T00:00:00Z" };
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, builder });
+    const html = await (await fetch(`http://127.0.0.1:${handle.port}/`)).text();
+    expect(inlineScripts(html)[0]).toContain(`"builder":${JSON.stringify(builder)}`);
+  });
+
   it("says anthropic false when the host loaded no anthropic key", async () => {
     const { rt } = testRuntime();
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false } });

@@ -11,11 +11,14 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@clack/core": "1.4.3",
+    "@clack/prompts": "1.7.0",
     "@wsp/adapter-claude": "workspace:*",
     "@wsp/daemon": "workspace:*",
     "@wsp/engine": "workspace:*",
     "@wsp/runtime": "workspace:*",
     "@wsp/web": "workspace:*",
+    "picocolors": "1.1.1",
     "ws": "^8.21.3"
   },
   "devDependencies": {
