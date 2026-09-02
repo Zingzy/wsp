@@ -149,7 +149,7 @@ describe("serveRuntime golden wizard ops", () => {
     const c = await WsClient.connect(srv.port, { token: "secret" });
     await c.request("events.subscribe");
 
-    const prepared = await c.request("golden.prepare", { name: "default" });
+    const prepared = await c.request("golden.prepare", { name: "default", kind: "desktop" });
     expect(prepared.ok).toBe(true);
     expect(prepared["builder"]).toMatchObject({ id: "m1", name: "default", kind: "desktop", screen: { streamUrl: "wss://stub/stream/m1" } });
     expect(backend.machines[0]!.spec).toMatchObject({ kind: "desktop", template: "default", envs: { ANTHROPIC_API_KEY: "k" } });

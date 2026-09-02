@@ -24,6 +24,12 @@ const DEFAULT_TEMPLATE: Record<MachineKind, string> = { sandbox: "base", desktop
  * Starter rates over this window. */
 export const BUILDER_IDLE_MS = 6 * 60 * 60_000;
 
+/** Every desktop template boots with ~570 MB free, which the harness install
+ * (~410 MB peak) plus the daemon (~280 MB) cannot fit; the base sandbox boots
+ * with ~2.2 GB free and does. Builders default to sandbox and ask for this
+ * disk, which Solari ignores today (both kinds stay at 4 GB) but may honor. */
+export const BUILDER_DISK_GB = 20;
+
 export interface MachineSize {
   cpu?: number;
   memMb?: number;
@@ -33,11 +39,12 @@ export interface MachineSize {
 
 export interface PrepareBuilderOptions extends MachineSize {
   backend: MachineBackend;
-  /** Default desktop: the builder's own noVNC stream is what the wizard shows. */
+  /** Default sandbox (the wizard shows a terminal on it); desktop streams a display instead. */
   kind?: MachineKind;
   baseTemplate?: string;
-  /** Host-owned step (the daemon bundle lives outside the engine); skipped when absent. */
-  deployDaemon?: (machine: Machine) => Promise<void>;
+  /** Host-owned step (the daemon bundle lives outside the engine); skipped when
+   * absent. A returned string is reported as the deploying-daemon detail. */
+  deployDaemon?: (machine: Machine) => Promise<void | string>;
   /** Harness install; its sha is recorded in the manifest. */
   setup: string;
   setupTimeoutMs?: number;
@@ -68,7 +75,6 @@ export interface BuildGoldenOptions extends MachineSize {
   backend: MachineBackend;
   setup: string;
   smoke: string;
-  /** The scripted pipeline keeps its historical default; the wizard passes desktop. */
   kind?: MachineKind;
   baseTemplate?: string;
   manifest?: GoldenManifest;
@@ -92,7 +98,7 @@ function sizeSpec(o: MachineSize) {
 
 export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Builder> {
   const stage = opts.onStage ?? (() => {});
-  const kind = opts.kind ?? "desktop";
+  const kind = opts.kind ?? "sandbox";
   const baseTemplate = opts.baseTemplate ?? DEFAULT_TEMPLATE[kind];
 
   stage("creating", `${kind} from ${baseTemplate}`);
@@ -101,6 +107,7 @@ export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Build
   const machine = await opts.backend.create({
     kind,
     template: baseTemplate,
+    diskGb: BUILDER_DISK_GB,
     onIdle: "kill",
     idleTimeoutMs: BUILDER_IDLE_MS,
     ...sizeSpec(opts),
@@ -108,7 +115,8 @@ export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Build
   try {
     if (opts.deployDaemon) {
       stage("deploying-daemon");
-      await opts.deployDaemon(machine);
+      const detail = await opts.deployDaemon(machine);
+      if (detail !== undefined) stage("deploying-daemon", detail);
     }
     stage("installing-harness");
     const res = await machine.exec(opts.setup, { timeoutMs: opts.setupTimeoutMs ?? 300_000 });
@@ -188,9 +196,9 @@ export async function buildGolden(
   const { backend, setup, smoke, kind, baseTemplate, manifest, setupTimeoutMs, smokeTimeoutMs, onStage, ...size } = opts;
   const builder = await prepareBuilder({
     backend,
-    kind: kind ?? "sandbox",
     setup,
     ...size,
+    ...(kind !== undefined ? { kind } : {}),
     ...(baseTemplate !== undefined ? { baseTemplate } : {}),
     ...(setupTimeoutMs !== undefined ? { setupTimeoutMs } : {}),
     ...(onStage !== undefined ? { onStage } : {}),

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { BUILDER_IDLE_MS, buildGolden, forkGolden, prepareBuilder, rollback, sealGolden, type GoldenStage } from "../src/golden.js";
+import { BUILDER_DISK_GB, BUILDER_IDLE_MS, buildGolden, forkGolden, prepareBuilder, rollback, sealGolden, type GoldenStage } from "../src/golden.js";
 import { NotFirstLifeError } from "../src/lifecycle.js";
 import type { ExecResult, Machine, MachineBackend, MachineSpec } from "../src/machine.js";
 
@@ -105,7 +105,7 @@ describe("golden pipeline", () => {
 });
 
 describe("interactive golden: prepare then seal", () => {
-  it("prepare boots a desktop from the desktop template, runs daemon then harness, and reports stages", async () => {
+  it("prepare boots a sandbox from the sandbox template with the builder disk, runs daemon then harness, and reports stages", async () => {
     const { backend, created, timeline } = recordingBackend();
     const { stages, onStage } = stageRecorder();
     const daemonOn: string[] = [];
@@ -116,24 +116,34 @@ describe("interactive golden: prepare then seal", () => {
       onStage,
     });
     // An idle-paused builder resumes not first-life and the seal would 502; kill fails loud instead.
-    expect(created[0]).toMatchObject({ kind: "desktop", template: "default", onIdle: "kill" });
-    expect(builder.kind).toBe("desktop");
+    expect(created[0]).toMatchObject({ kind: "sandbox", template: "base", diskGb: BUILDER_DISK_GB, onIdle: "kill" });
+    expect(BUILDER_DISK_GB).toBe(20);
+    expect(builder.kind).toBe("sandbox");
     expect(builder.firstLife).toBe(true);
-    expect(builder.machine.streamUrl).toBe("wss://fake/stream/m1");
+    expect(builder.machine.streamUrl).toBeUndefined();
     expect(daemonOn).toEqual(["m1"]);
-    expect(stages).toEqual(["creating:desktop from default", "deploying-daemon", "installing-harness", "ready"]);
+    expect(stages).toEqual(["creating:sandbox from base", "deploying-daemon", "installing-harness", "ready"]);
     expect(timeline).toEqual(["create m1"]); // alive and waiting for the person
   });
 
-  it("prepare with a sandbox kind picks the sandbox template", async () => {
+  it("a daemon hook that reports a detail gets it on a second deploying-daemon frame", async () => {
+    const { backend } = recordingBackend();
+    const { stages, onStage } = stageRecorder();
+    await prepareBuilder({ backend, setup: "true", deployDaemon: async () => "node v22.23.2", onStage });
+    expect(stages).toEqual(["creating:sandbox from base", "deploying-daemon", "deploying-daemon:node v22.23.2", "installing-harness", "ready"]);
+  });
+
+  it("prepare with kind desktop picks the desktop template and streams a display", async () => {
     const { backend, created } = recordingBackend();
-    await prepareBuilder({ backend, kind: "sandbox", setup: "true" });
-    expect(created[0]).toMatchObject({ kind: "sandbox", template: "base" });
+    const builder = await prepareBuilder({ backend, kind: "desktop", setup: "true" });
+    expect(created[0]).toMatchObject({ kind: "desktop", template: "default", diskGb: BUILDER_DISK_GB });
+    expect(builder.kind).toBe("desktop");
+    expect(builder.machine.streamUrl).toBe("wss://fake/stream/m1");
   });
 
   it("only the builder idles to kill, after a window long enough for a person; the smoke fork keeps the provider default", async () => {
     const { backend, created } = recordingBackend();
-    const builder = await prepareBuilder({ backend, kind: "sandbox", setup: "true" });
+    const builder = await prepareBuilder({ backend, setup: "true" });
     await sealGolden(builder, { backend, smoke: "true" });
     expect(created[0]).toMatchObject({ onIdle: "kill", idleTimeoutMs: BUILDER_IDLE_MS });
     expect(BUILDER_IDLE_MS).toBeGreaterThanOrEqual(4 * 60 * 60_000);
@@ -153,7 +163,7 @@ describe("interactive golden: prepare then seal", () => {
   it("seal snapshots, kills the builder before the smoke fork boots, and records the kind", async () => {
     const { backend, created, timeline } = recordingBackend();
     const { stages, onStage } = stageRecorder();
-    const builder = await prepareBuilder({ backend, setup: "echo setup", onStage });
+    const builder = await prepareBuilder({ backend, kind: "desktop", setup: "echo setup", onStage });
     const { manifest, version } = await sealGolden(builder, { backend, smoke: "claude --version", onStage });
     expect(timeline).toEqual(["create m1", "snapshot m1", "kill m1", "create m2", "kill m2"]);
     expect(created[1]).toMatchObject({ kind: "desktop", fromSnapshot: "snap_golden-v1" });
