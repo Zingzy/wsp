@@ -69,6 +69,8 @@ export const WorkspaceView = z.object({
   createdAt: z.string(),
   /** Claude session id of the last session, so the next send can --resume it. */
   claudeSessionId: z.string().optional(),
+  /** Present when the machine streams a display (desktop kind); sandbox machines are headless. */
+  screen: z.object({ streamUrl: z.string() }).optional(),
 });
 export type WorkspaceView = z.infer<typeof WorkspaceView>;
 

@@ -16,6 +16,7 @@ import {
   SnapshotLineage,
   SnapshotRollbackResult,
   SessionView,
+  WorkspaceStatus,
   WorkspaceView,
 } from "../src/index.js";
 
@@ -42,6 +43,27 @@ describe("protocol views", () => {
     };
     expect(SessionView.parse(s)).toEqual(s);
     expect(() => SessionView.parse({ ...s, status: "done" })).toThrow();
+  });
+
+  it("WorkspaceView and WorkspaceStatus carry the desktop stream as screen.streamUrl, absent for headless machines", () => {
+    const view = {
+      id: "ws_1",
+      name: "task-1",
+      machineId: "m1",
+      phase: "running",
+      golden: "snap_g",
+      createdAt: "2026-09-01T00:00:00.000Z",
+      screen: { streamUrl: "wss://stream.example/m1" },
+    };
+    expect(WorkspaceView.parse(view)).toEqual(view);
+    expect(WorkspaceView.parse(JSON.parse(JSON.stringify(view)))).toEqual(view);
+    const { screen, ...headless } = view;
+    void screen;
+    expect(WorkspaceView.parse(headless)).toEqual(headless);
+    expect(() => WorkspaceView.parse({ ...view, screen: {} })).toThrow();
+
+    const status = { ...view, machineState: "running", reach: { state: "unsupported" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 };
+    expect(WorkspaceStatus.parse(status)).toEqual(status);
   });
 });
 
