@@ -2,7 +2,8 @@
 // The right region: one surface at a time over the copied tab strip, keyed
 // by the selected workspace. Surfaces whose panes still live in the center
 // tabs stay greyed out here with a reason, so the picker never opens a tab
-// that has nothing behind it.
+// that has nothing behind it. Terminal surfaces mount the Ghostty drawer in
+// panel mode over the workspace's daemon link.
 import type { ReactNode } from "react";
 import { MetaPanel } from "../components/MetaPanel.js";
 import { RightPanelSheet } from "../components/RightPanelSheet.js";
@@ -13,10 +14,10 @@ import { useStatus, useWorkspace } from "../protocol/store.js";
 import { useRightPanelStore, type WorkspaceRightPanelState } from "../rightPanelStore.js";
 import { ScreenTab } from "../tabs/ScreenTab.js";
 import { getTerminals } from "../terminal/link.js";
+import { useTerminalLabels, WorkspaceTerminalPanel } from "../components/WorkspaceTerminalPanel.js";
 
 const NO_PENDING: ReadonlySet<string> = new Set();
 const NO_PREVIEWS: Readonly<Record<string, PreviewTabSnapshot>> = {};
-const NO_LABELS: ReadonlyMap<string, string> = new Map();
 const CENTER_TABS_REASON = "Open it from the tabs above for now.";
 
 export function RightPanel({
@@ -37,6 +38,7 @@ export function RightPanel({
   const activateSurface = useRightPanelStore(s => s.activateSurface);
   const closeSurface = useRightPanelStore(s => s.closeSurface);
   const close = useRightPanelStore(s => s.close);
+  const terminalLabelsById = useTerminalLabels(workspaceId);
   const active = state.surfaces.find(surface => surface.id === state.activeSurfaceId) ?? null;
 
   const tabs = (
@@ -47,7 +49,7 @@ export function RightPanel({
       activeSurfaceId={state.activeSurfaceId}
       pendingSurfaceIds={NO_PENDING}
       previewSessions={NO_PREVIEWS}
-      terminalLabelsById={NO_LABELS}
+      terminalLabelsById={terminalLabelsById}
       onActivate={surface => activateSurface(workspaceId, surface.id)}
       onCloseSurface={surface => closeSurface(workspaceId, surface.id)}
       onAddBrowser={() => open(workspaceId, "preview")}
@@ -62,14 +64,16 @@ export function RightPanel({
       onAddMachine={() => open(workspaceId, "machine")}
       onAddScreen={() => open(workspaceId, "screen")}
       browserAvailable={false}
-      terminalAvailable={false}
+      terminalAvailable={workspace?.phase === "running"}
       diffAvailable={false}
       filesAvailable={false}
       machineAvailable={workspace !== null}
       screenAvailable={status?.screen !== undefined}
-      unavailableReasons={{ browser: CENTER_TABS_REASON, terminal: CENTER_TABS_REASON }}
+      unavailableReasons={{ browser: CENTER_TABS_REASON }}
     >
-      {active?.kind === "machine" ? (
+      {active?.kind === "terminal" ? (
+        <WorkspaceTerminalPanel workspaceId={workspaceId} surface={active} />
+      ) : active?.kind === "machine" ? (
         <MetaPanel />
       ) : active?.kind === "screen" ? (
         <ScreenTab workspaceId={workspaceId} />

@@ -11,6 +11,7 @@ import { useMediaQuery } from "../hooks/useMediaQuery.js";
 import { useSelectedId, useStore, useWorkspace } from "../protocol/store.js";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../rightPanelStore.js";
+import { selectTerminalUiState, useTerminalDrawerStore } from "../terminal/drawerStore.js";
 import { DisconnectedBanner } from "./DisconnectedBanner.js";
 import { RightPanel } from "./RightPanel.js";
 
@@ -24,21 +25,24 @@ export function AppShell({ children }: { children: ReactNode }) {
   const conn = useStore(s => s.conn);
   const panel = useRightPanelStore(s => selectWorkspaceRightPanelState(s.byWorkspaceId, workspaceId));
   const toggleVisibility = useRightPanelStore(s => s.toggleVisibility);
+  const terminalOpen = useTerminalDrawerStore(s => selectTerminalUiState(s.byWorkspaceId, workspaceId).terminalOpen);
+  const toggleTerminal = useTerminalDrawerStore(s => s.toggle);
   const useSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const rightPanelOpen = workspaceId !== null && panel.isOpen;
 
   const layoutControls = (
     <PanelLayoutControls
-      showTerminalControl={false}
-      terminalAvailable={false}
-      terminalOpen={false}
+      terminalAvailable={workspaceId !== null}
+      terminalOpen={terminalOpen}
       terminalShortcutLabel={null}
       rightPanelAvailable={workspaceId !== null}
       rightPanelOpen={rightPanelOpen}
       rightPanelShortcutLabel={null}
       rightPanelUnavailableLabel="Select a workspace to open the right panel"
       liveAgentCount={0}
-      onToggleTerminal={() => {}}
+      onToggleTerminal={() => {
+        if (workspaceId) toggleTerminal(workspaceId);
+      }}
       onToggleRightPanel={() => {
         if (workspaceId) toggleVisibility(workspaceId);
       }}

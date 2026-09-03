@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Per-workspace terminal state that must outlive the TerminalTab component:
+// Per-workspace terminal state that must outlive any terminal component:
 // pty tabs, a client-side scrollback mirror, and the connection status. The
 // daemon has no pty.detach op, so each pty is attached at most once per wire;
-// parking a tab drops its xterm instance (the heavy part) and a remount
+// parking a terminal drops its surface (the heavy part) and a remount
 // replays from the mirror instead of re-attaching.
 import type { DaemonEvent, DaemonLinkStatus } from "@wsp/protocol";
 import type { PtyModeReport } from "./compose.js";
