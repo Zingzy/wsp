@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The chat tab slot: the transplanted ChatView with the holdover textarea
-// composer under it until the transplanted composer lands. Enter starts
+// The chat tab slot: the transplanted ChatView with the textarea composer
+// under it in the view's composer slot. Enter starts
 // exactly one turn, resumed through the workspace's claudeSessionId.
 import { useEffect, useRef, useState } from "react";
 import { useStore, useWorkspace } from "../protocol/store.js";

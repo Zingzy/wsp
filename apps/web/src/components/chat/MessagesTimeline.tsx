@@ -1,18 +1,17 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/chat/MessagesTimeline.tsx at 57a66608 (MIT).
 import {
-  type ChatFileAttachment,
-  isFileAttachment,
-  isImageAttachment,
-  isVideoAttachment,
+  deriveMessagesTimelineRows,
+  indicatesFailure,
+  isToolLike,
   type MessageId,
+  type MessagesTimelineRow,
   type ProviderSkill,
   type TimelineEntry,
   type TimestampFormat,
+  toolGroupAction,
   type TurnDiffSummary,
   type TurnId,
-  workEntryDisplayIndicatesToolFailure,
-  workEntrySignalsSevereFailure,
-  workLogEntryIsToolLike,
+  type TurnSummary,
 } from "./adapt";
 import { resolveWorkEntryToolPresentation } from "../../work-log/presentation";
 import { resolveWorkGroupScrollAnchor } from "../../work-log/scrollAnchor";
@@ -40,13 +39,9 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   CircleAlertIcon,
-  DownloadIcon,
   EyeIcon,
-  FileIcon,
   GlobeIcon,
   HammerIcon,
-  MessageCircleIcon,
-  PlayIcon,
   SearchIcon,
   SquarePenIcon,
   TerminalIcon,
@@ -57,7 +52,7 @@ import {
 } from "lucide-react";
 import { Button } from "../ui/button";
 import { getVirtualizedScrollFadeClassName } from "../ui/scroll-area";
-import { buildExpandedImagePreview, type ExpandedImagePreview } from "./ExpandedImagePreview";
+import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { ChangedFilesCard } from "./ChangedFilesTree";
 import { shouldAutoExpandChangedFiles } from "./changedFilesPresentation";
@@ -68,7 +63,6 @@ import {
 import { MessageCopyButton } from "./MessageCopyButton";
 import {
   computeStableMessagesTimelineRows,
-  deriveMessagesTimelineRows,
   liveWorkEntryLabel,
   resolveAssistantMessageCopyState,
   resolveTimelineIsAtEnd,
@@ -81,13 +75,10 @@ import {
   resolveWorkGroupScrollIndex,
   shouldFollowWorkGroupAppend,
   shouldPreserveAssistantLineBreaks,
-  toolGroupAction,
   workEntryDisplayLabel,
   workEntryIsVisibleInGroup,
   type StableMessagesTimelineRowsState,
-  type MessagesTimelineRow,
   TIMELINE_MINIMAP_MIN_ITEMS,
-  type TimelineLatestTurn,
   type WorkGroupScrollAnchor,
 } from "./MessagesTimeline.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -97,7 +88,6 @@ import { formatWorkspaceRelativePath } from "../../lib/filePathDisplay";
 
 const NOOP_OPEN_TURN_DIFF = (_turnId: TurnId, _filePath?: string) => {};
 const NOOP_REVERT_USER_MESSAGE = (_messageId: MessageId) => {};
-const NOOP_OPEN_ATTACHMENT = (_attachment: ChatFileAttachment) => {};
 const NOOP_ANCHOR_READY = (_messageId: MessageId, _anchorIndex: number) => {};
 const NOOP_IS_AT_END_CHANGE = (_isAtEnd: boolean) => {};
 const NOOP_MANUAL_NAVIGATION = () => {};
@@ -118,10 +108,11 @@ interface TimelineRowSharedState {
   resolvedTheme: "light" | "dark";
   workspaceRoot: string | undefined;
   skills: ReadonlyArray<ProviderSkill>;
+  turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
+  revertTurnCountByUserMessageId: ReadonlyMap<MessageId, number>;
   onRevertUserMessage: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
-  onFileOpen: (attachment: ChatFileAttachment) => void;
-  openingVideoAttachmentId: string | null;
+  onOpenFile: ((path: string, line?: number) => void) | undefined;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   onToggleTurnFold: (turnId: TurnId) => void;
   onToggleWorkGroup: (groupId: string, anchorKey: string) => void;
@@ -174,8 +165,7 @@ export interface MessagesTimelineProps {
   activeTurnStartedAt: string | null;
   listRef: React.RefObject<LegendListRef | null>;
   timelineEntries: ReadonlyArray<TimelineEntry>;
-  latestTurn: TimelineLatestTurn | null;
-  runningTurnId: TurnId | null;
+  turns: ReadonlyArray<TurnSummary>;
   turnDiffSummaryByAssistantMessageId?: ReadonlyMap<MessageId, TurnDiffSummary>;
   threadKey: string;
   onOpenTurnDiff?: (turnId: TurnId, filePath?: string) => void;
@@ -183,8 +173,7 @@ export interface MessagesTimelineProps {
   onRevertUserMessage?: (messageId: MessageId) => void;
   isRevertingCheckpoint?: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
-  onFileOpen?: (attachment: ChatFileAttachment) => void;
-  openingVideoAttachmentId?: string | null;
+  onOpenFile?: (path: string, line?: number) => void;
   markdownCwd: string | undefined;
   resolvedTheme: "light" | "dark";
   timestampFormat: TimestampFormat;
@@ -216,8 +205,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   activeTurnStartedAt,
   listRef,
   timelineEntries,
-  latestTurn,
-  runningTurnId,
+  turns,
   turnDiffSummaryByAssistantMessageId = EMPTY_TURN_DIFF_SUMMARIES,
   threadKey,
   onOpenTurnDiff = NOOP_OPEN_TURN_DIFF,
@@ -225,8 +213,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onRevertUserMessage = NOOP_REVERT_USER_MESSAGE,
   isRevertingCheckpoint = false,
   onImageExpand,
-  onFileOpen = NOOP_OPEN_ATTACHMENT,
-  openingVideoAttachmentId = null,
+  onOpenFile,
   markdownCwd,
   resolvedTheme,
   timestampFormat,
@@ -241,6 +228,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   hideEmptyPlaceholder = false,
   topFadeEnabled = false,
 }: MessagesTimelineProps) {
+  const latestTurn = turns[turns.length - 1] ?? null;
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
   const [expandedWorkGroupIds, setExpandedWorkGroupIds] = useState<ReadonlySet<string>>(new Set());
   // Scroll/disclosure state outlives virtualized rows, but never the current thread.
@@ -363,26 +351,13 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     () =>
       deriveMessagesTimelineRows({
         timelineEntries,
-        latestTurn,
-        runningTurnId,
+        turns,
         expandedTurnIds,
         expandedWorkGroupIds,
         isWorking,
         activeTurnStartedAt,
-        turnDiffSummaryByAssistantMessageId,
-        revertTurnCountByUserMessageId,
       }),
-    [
-      timelineEntries,
-      latestTurn,
-      runningTurnId,
-      expandedTurnIds,
-      expandedWorkGroupIds,
-      isWorking,
-      activeTurnStartedAt,
-      turnDiffSummaryByAssistantMessageId,
-      revertTurnCountByUserMessageId,
-    ],
+    [timelineEntries, turns, expandedTurnIds, expandedWorkGroupIds, isWorking, activeTurnStartedAt],
   );
   const rows = useStableRows(rawRows);
   const minimapItems = useMemo(() => deriveTimelineMinimapItems(rows), [rows]);
@@ -492,10 +467,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       resolvedTheme,
       workspaceRoot,
       skills,
+      turnDiffSummaryByAssistantMessageId,
+      revertTurnCountByUserMessageId,
       onRevertUserMessage,
       onImageExpand,
-      onFileOpen,
-      openingVideoAttachmentId,
+      onOpenFile,
       onOpenTurnDiff,
       onToggleTurnFold,
       onToggleWorkGroup,
@@ -509,10 +485,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       resolvedTheme,
       workspaceRoot,
       skills,
+      turnDiffSummaryByAssistantMessageId,
+      revertTurnCountByUserMessageId,
       onRevertUserMessage,
       onImageExpand,
-      onFileOpen,
-      openingVideoAttachmentId,
+      onOpenFile,
       onOpenTurnDiff,
       onToggleTurnFold,
       onToggleWorkGroup,
@@ -947,127 +924,12 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
 
 function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
-  // The attachment union has an open member, so guards (not literal type
-  // comparisons) split it. Unknown types render as inert rows below the files.
-  const userImages = (row.message.attachments ?? []).filter(isImageAttachment);
-  const userFiles = (row.message.attachments ?? []).filter(isFileAttachment);
-  const userVideos = userFiles.filter(isVideoAttachment);
-  const otherUserFiles = userFiles.filter((file) => !isVideoAttachment(file));
-  const unknownAttachments = (row.message.attachments ?? []).filter(
-    (attachment) => !isImageAttachment(attachment) && !isFileAttachment(attachment),
-  );
-  const canRevertAgentWork = typeof row.revertTurnCount === "number";
+  const canRevertAgentWork =
+    typeof ctx.revertTurnCountByUserMessageId.get(row.message.id) === "number";
 
   return (
     <div className="group flex flex-col items-end gap-1">
       <div className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground">
-        {(userImages.length > 0 || userVideos.length > 0) && (
-          <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
-            {userImages.map((image) => (
-              <div
-                key={image.id}
-                className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
-              >
-                {image.previewUrl ? (
-                  <button
-                    type="button"
-                    className="h-full w-full cursor-zoom-in"
-                    aria-label={`Preview ${image.name}`}
-                    onClick={() => {
-                      const preview = buildExpandedImagePreview(userImages, image.id);
-                      if (!preview) return;
-                      ctx.onImageExpand(preview);
-                    }}
-                  >
-                    <img
-                      src={image.previewUrl}
-                      alt={image.name}
-                      className="block h-auto max-h-[220px] w-full object-cover"
-                    />
-                  </button>
-                ) : (
-                  <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-secondary-label text-[11px]">
-                    {image.name}
-                  </div>
-                )}
-              </div>
-            ))}
-            {userVideos.map((file) => {
-              const isOpening = ctx.openingVideoAttachmentId === file.id;
-              return (
-                <div
-                  key={file.id}
-                  className="overflow-hidden rounded-lg border border-border/80 bg-black"
-                >
-                  <button
-                    type="button"
-                    disabled={file.downloadable === false}
-                    className="flex min-h-[72px] w-full cursor-zoom-in flex-col items-center justify-center gap-1 px-2 py-2 text-white disabled:cursor-default disabled:opacity-50 aria-disabled:cursor-default aria-disabled:opacity-50"
-                    aria-busy={isOpening || undefined}
-                    aria-disabled={isOpening || undefined}
-                    aria-label={`${isOpening ? "Loading" : "Play"} ${file.name}`}
-                    onClick={() => {
-                      if (isOpening) return;
-                      ctx.onFileOpen(file);
-                    }}
-                  >
-                    {isOpening ? (
-                      <span className="text-[11px]">Loading…</span>
-                    ) : (
-                      <PlayIcon className="size-8 fill-current" />
-                    )}
-                    <span className="max-w-full truncate text-[11px]">{file.name}</span>
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-        {otherUserFiles.length > 0 || unknownAttachments.length > 0 ? (
-          <div className="mb-2 flex flex-col gap-1">
-            {otherUserFiles.map((file) => {
-              const content = (
-                <>
-                  <FileIcon className="size-4 shrink-0 text-secondary-label" />
-                  <span className="min-w-0 flex-1 truncate">{file.name}</span>
-                  {file.downloadable === false ? null : (
-                    <DownloadIcon className="size-4 shrink-0" />
-                  )}
-                </>
-              );
-              return file.previewUrl ? (
-                <a
-                  key={file.id}
-                  href={file.previewUrl}
-                  download={file.name}
-                  className="flex min-w-0 items-center gap-2 rounded-md py-1 text-sm hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
-                >
-                  {content}
-                </a>
-              ) : file.downloadable === false ? (
-                <div key={file.id} className="flex min-w-0 items-center gap-2 py-1 text-sm">
-                  {content}
-                </div>
-              ) : (
-                <button
-                  key={file.id}
-                  type="button"
-                  aria-label={`Download ${file.name}`}
-                  onClick={() => ctx.onFileOpen(file)}
-                  className="flex min-w-0 cursor-pointer items-center gap-2 rounded-md py-1 text-left text-sm hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
-                >
-                  {content}
-                </button>
-              );
-            })}
-            {unknownAttachments.map((attachment) => (
-              <div key={attachment.id} className="flex min-w-0 items-center gap-2 py-1 text-sm">
-                <FileIcon className="size-4 shrink-0 text-secondary-label" />
-                <span className="min-w-0 flex-1 truncate">{attachment.name}</span>
-              </div>
-            ))}
-          </div>
-        ) : null}
         <CollapsibleUserMessageBody
           text={row.message.text}
           skills={ctx.skills}
@@ -1155,10 +1017,11 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           lineBreaks={shouldPreserveAssistantLineBreaks(messageText)}
           skills={ctx.skills}
           onImageExpand={ctx.onImageExpand}
+          onOpenFile={ctx.onOpenFile}
           resolvedTheme={ctx.resolvedTheme}
         />
         <AssistantChangedFilesSection
-          turnSummary={row.assistantTurnDiffSummary}
+          turnSummary={ctx.turnDiffSummaryByAssistantMessageId.get(row.message.id)}
           resolvedTheme={ctx.resolvedTheme}
           onOpenTurnDiff={ctx.onOpenTurnDiff}
         />
@@ -1555,7 +1418,7 @@ function LiveActivityContent({
 function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "work-live" }> }) {
   const ctx = use(TimelineRowCtx);
   const label = liveWorkEntryLabel(row.entry, ctx.workspaceRoot, row.active);
-  const failed = workEntryDisplayIndicatesToolFailure(row.entry);
+  const failed = indicatesFailure(row.entry);
 
   return (
     <button
@@ -1798,6 +1661,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
       className="text-message-foreground"
       lineBreaks
       parseRawHtml={false}
+      onOpenFile={ctx.onOpenFile}
       resolvedTheme={ctx.resolvedTheme}
     />
   );
@@ -1863,7 +1727,6 @@ type WorkEntryIconName =
   | "eye"
   | "globe"
   | "hammer"
-  | "message-circle"
   | "search"
   | "square-pen"
   | "terminal"
@@ -1889,8 +1752,6 @@ function WorkEntryIcon({ name, className }: { name: WorkEntryIconName; className
       return <GlobeIcon className={className} aria-hidden />;
     case "hammer":
       return <HammerIcon className={className} aria-hidden />;
-    case "message-circle":
-      return <MessageCircleIcon className={className} aria-hidden />;
     case "search":
       return <SearchIcon className={className} aria-hidden />;
     case "square-pen":
@@ -1934,28 +1795,12 @@ function workToneIcon(tone: TimelineWorkEntry["tone"]): {
   };
 }
 
-function workEntryRawCommand(
-  workEntry: Pick<TimelineWorkEntry, "command" | "rawCommand">,
-): string | null {
-  const rawCommand = workEntry.rawCommand?.trim();
-  if (!rawCommand || !workEntry.command) {
-    return null;
-  }
-  return rawCommand === workEntry.command.trim() ? null : rawCommand;
-}
-
 function buildToolCallExpandedBody(
   workEntry: TimelineWorkEntry,
   workspaceRoot: string | undefined,
 ): string | null {
   const blocks: string[] = [];
-  if (workEntry.itemType === "mcp_tool_call" && workEntry.toolData !== undefined) {
-    blocks.push(`MCP call\n${JSON.stringify(workEntry.toolData, null, 2)}`);
-  }
-  const raw = workEntryRawCommand(workEntry);
-  if (raw?.trim()) {
-    blocks.push(raw.trim());
-  } else if (workEntry.command?.trim()) {
+  if (workEntry.command?.trim()) {
     blocks.push(workEntry.command.trim());
   }
   if (workEntry.detail?.trim()) {
@@ -1976,12 +1821,6 @@ const toolCallExpandedBodyClassName =
   "max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-secondary-label text-[length:var(--font-size-code,0.6875rem)] leading-relaxed select-text";
 
 function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
-  if (
-    workEntry.sourceActivityKind === "user-input.requested" ||
-    workEntry.sourceActivityKind === "user-input.resolved"
-  ) {
-    return "message-circle";
-  }
   const toolPresentation = resolveWorkEntryToolPresentation(workEntry);
   if (toolPresentation) return toolPresentation.icon;
   const action = toolGroupAction(workEntry);
@@ -1994,11 +1833,6 @@ function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
       return "hammer";
     case "collab_agent_tool_call":
       return "bot";
-  }
-
-  // Subagent lifecycle rows (grouped by taskId) get agent identity chrome.
-  if (workEntry.taskId) {
-    return "bot";
   }
 
   return workToneIcon(workEntry.tone).iconName;
@@ -2041,47 +1875,38 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
     setExpanded(next);
   };
   const iconConfig = workToneIcon(workEntry.tone);
-  const showWarningIndicator = workEntry.sourceActivityKind === "runtime.warning";
-  const showFailedIndicator = workEntryDisplayIndicatesToolFailure(workEntry);
+  const showFailedIndicator = indicatesFailure(workEntry);
   const toolPresentation = resolveWorkEntryToolPresentation(workEntry);
   const entryIconName =
-    showWarningIndicator || (showFailedIndicator && !toolPresentation)
-      ? "circle-alert"
-      : workEntryIconName(workEntry);
+    showFailedIndicator && !toolPresentation ? "circle-alert" : workEntryIconName(workEntry);
   const previewText = workEntryDisplayLabel(workEntry, workspaceRoot);
   const displayText =
     !toolPresentation && expanded && workEntry.command?.trim() ? "Command" : previewText;
-  const canExpand =
-    (workEntry.itemType === "mcp_tool_call" && workEntry.toolData !== undefined) ||
-    Boolean(
-      workEntryRawCommand(workEntry) ||
-      workEntry.command?.trim() ||
-      workEntry.detail?.trim() ||
+  const detailText = workEntry.detail?.trim();
+  const canExpand = Boolean(
+    workEntry.command?.trim() ||
+      (detailText && detailText !== previewText) ||
       workEntry.changedFiles?.length,
-    );
+  );
   const expandedBody = expanded ? buildToolCallExpandedBody(workEntry, workspaceRoot) : null;
   const showDestructiveRowStyle =
     showFailedIndicator &&
-    (workEntrySignalsSevereFailure(workEntry) || !workLogEntryIsToolLike(workEntry));
-  // Ordinary tool failures stay muted; only runtime errors and warnings get
-  // color. The red treatment is reserved for severe failures.
+    (workEntry.sourceActivityKind === "runtime.error" || !isToolLike(workEntry));
+  // Ordinary tool failures stay muted; only runtime errors get color. The red
+  // treatment is reserved for severe failures.
   const iconWrapperClass = cn(
     "flex size-6 shrink-0 items-center justify-center",
-    showWarningIndicator
-      ? "text-warning"
-      : showDestructiveRowStyle
-        ? "text-destructive"
-        : workEntry.tone === "tool" || showFailedIndicator
-          ? "text-icon-muted"
-          : iconConfig.className,
+    showDestructiveRowStyle
+      ? "text-destructive"
+      : workEntry.tone === "tool" || showFailedIndicator
+        ? "text-icon-muted"
+        : iconConfig.className,
   );
-  const headingClass = showWarningIndicator
-    ? "font-medium text-warning"
-    : showDestructiveRowStyle
-      ? "font-medium text-destructive"
-      : workLogEntryIsToolLike(workEntry)
-        ? "text-secondary-label"
-        : "text-foreground/80";
+  const headingClass = showDestructiveRowStyle
+    ? "font-medium text-destructive"
+    : isToolLike(workEntry)
+      ? "text-secondary-label"
+      : "text-foreground/80";
   const accessibleDisplayText = showFailedIndicator
     ? `${previewText}, tool call failed`
     : previewText;

@@ -10,18 +10,16 @@ import { useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { ChatTab } from "../src/tabs/ChatTab.js";
 import { ApprovalPrompt } from "../src/tabs/chat/ApprovalPrompt.js";
+import { CHAT_STREAM, CHAT_T0, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
 
 let restoreLayout: () => void = () => {};
 beforeAll(() => { restoreLayout = installFakeLayout(); });
 afterAll(() => restoreLayout());
 
-const WS = "ws_chat0001";
+const WS = CHAT_WS;
 const CLAUDE_SID = "e16ed170-8257-4668-879e-fe836341633c";
-const scope = { workspaceId: WS, sessionId: "sess_0001", turnId: "turn_0001" };
-/** Wall clock of the fixture run; each event is stamped in wire order. */
-const T0 = Date.parse("2026-09-01T01:31:29.412Z");
-const at = (ms: number) => ({ at: T0 + ms });
-const HARNESS = { slashCommands: ["compact", "context", "cost", "init", "review"], permissionMode: "bypassPermissions", agents: ["general-purpose"] };
+const T0 = CHAT_T0;
+const scope = { workspaceId: WS, sessionId: "sess_0001", turnId: CHAT_TURN };
 
 const workspace: WorkspaceView = {
   id: WS,
@@ -33,20 +31,7 @@ const workspace: WorkspaceView = {
   claudeSessionId: CLAUDE_SID,
 };
 
-const FIXTURE: EventUnion[] = [
-  { type: "session.start", ...scope, ...at(0), model: "claude-sonnet-4-5", cwd: "/root", tools: ["Bash", "Read"], harness: HARNESS },
-  { type: "session.delta", ...scope, ...at(1_200), kind: "text", text: "Creating the server file, " },
-  { type: "session.delta", ...scope, ...at(1_450), kind: "text", text: "then starting it." },
-  {
-    type: "session.delta", ...scope, ...at(4_495), kind: "tool_use", toolName: "Bash", toolUseId: "toolu_01WspFixBash1",
-    text: "node /root/server.js >/dev/null 2>&1 & sleep 0.3 && curl -s http://localhost:3000",
-  },
-  { type: "session.delta", ...scope, ...at(5_708), kind: "tool_result", toolUseId: "toolu_01WspFixBash1", text: "Hello, World!", isError: false },
-  { type: "session.delta", ...scope, ...at(7_900), kind: "thinking", text: "curl returned the greeting, so the server is live." },
-  { type: "session.delta", ...scope, ...at(9_300), kind: "text", text: "Server is live at :3000." },
-  { type: "session.done", ...scope, ...at(10_458), result: { status: "completed", durationMs: 10458, costUsd: 0.0187, text: "Server is live at :3000." } },
-  { type: "session.end", ...scope, ...at(10_600), exitCode: 0, sawResult: true },
-];
+const FIXTURE: ReadonlyArray<EventUnion> = CHAT_STREAM;
 
 function fixtureApi(workspaces: WorkspaceView[], history: Record<string, SessionEvent[]> = {}) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
@@ -99,8 +84,11 @@ describe("chat tab rendering", () => {
     // An event for another workspace never renders.
     emit({ type: "session.delta", workspaceId: "ws_other", sessionId: "s2", kind: "text", text: "alien text" });
 
-    await screen.findByText(/Creating the server file, then starting it\./);
-    expect(screen.getByText(/Server is live at :3000\./)).toBeDefined();
+    // The settled turn folds everything before its final answer behind one line.
+    await screen.findByText(/Server is live at :3000\./);
+    expect(screen.queryByText(/Creating the server file, then starting it\./)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Worked for 10s/ }));
+    expect(screen.getByText(/Creating the server file, then starting it\./)).toBeDefined();
     expect(screen.queryByText("alien text")).toBeNull();
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
 
@@ -117,9 +105,8 @@ describe("chat tab rendering", () => {
     emit({ type: "session.start", ...scope, prompt: "hi" });
     expect(screen.getByText(/Working/)).toBeDefined();
     emit({ type: "session.end", ...scope, exitCode: 137, sawResult: false });
-    const footer = screen.getByTestId("settled-footer");
-    expect(footer.textContent).toContain("failed");
-    expect(footer.textContent).toContain("session exited without a result (exit code 137)");
+    expect(screen.getByTestId("settled-footer").textContent).toContain("failed");
+    expect(screen.getByText(/session exited without a result \(exit code 137\)/i)).toBeDefined();
     expect(screen.queryByText(/Working for/)).toBeNull();
   });
 });

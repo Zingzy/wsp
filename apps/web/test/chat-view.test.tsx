@@ -10,15 +10,15 @@ import type { EventUnion, SessionEvent, WorkspaceView } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { ChatView } from "../src/components/chat/ChatView.js";
+import { CHAT_STREAM, CHAT_T0, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
 
 let restoreLayout: () => void = () => {};
 beforeAll(() => { restoreLayout = installFakeLayout(); });
 afterAll(() => restoreLayout());
 
-const WS = "ws_chat0001";
-const scope = { workspaceId: WS, sessionId: "sess_0001", turnId: "turn_0001" };
-const T0 = Date.parse("2026-09-01T01:31:29.000Z");
-const at = (offsetMs: number) => ({ at: T0 + offsetMs });
+const WS = CHAT_WS;
+const scope = { workspaceId: WS, sessionId: "sess_0001", turnId: CHAT_TURN };
+const T0 = CHAT_T0;
 
 const workspace: WorkspaceView = {
   id: WS,
@@ -30,19 +30,11 @@ const workspace: WorkspaceView = {
   claudeSessionId: "e16ed170-8257-4668-879e-fe836341633c",
 };
 
+// The shared stream plus one fenced code block in the closing text, so the highlighter has work.
 const FIXTURE: EventUnion[] = [
-  { type: "session.start", ...scope, ...at(0), model: "claude-sonnet-4-5", cwd: "/root", tools: ["Bash", "Read"] },
-  { type: "session.delta", ...scope, ...at(1_200), kind: "text", text: "Creating the server file, " },
-  { type: "session.delta", ...scope, ...at(1_450), kind: "text", text: "then starting it." },
-  {
-    type: "session.delta", ...scope, ...at(4_495), kind: "tool_use", toolName: "Bash", toolUseId: "toolu_01WspFixBash1",
-    text: JSON.stringify({ command: "node /root/server.js >/dev/null 2>&1 & sleep 0.3 && curl -s http://localhost:3000" }),
-  },
-  { type: "session.delta", ...scope, ...at(5_708), kind: "tool_result", toolUseId: "toolu_01WspFixBash1", text: "Hello, World!", isError: false },
-  { type: "session.delta", ...scope, ...at(7_900), kind: "thinking", text: "curl returned the greeting, so the server is live." },
-  { type: "session.delta", ...scope, ...at(9_300), kind: "text", text: "Server is live at :3000.\n\n```ts\nconst port: number = 3000;\n```\n" },
-  { type: "session.done", ...scope, ...at(10_458), result: { status: "completed", durationMs: 10458, costUsd: 0.0187, text: "Server is live at :3000." } },
-  { type: "session.end", ...scope, ...at(10_600), exitCode: 0, sawResult: true },
+  ...CHAT_STREAM.slice(0, 6),
+  { type: "session.delta", ...scope, at: T0 + 9_300, kind: "text", text: "Server is live at :3000.\n\n```ts\nconst port: number = 3000;\n```\n" },
+  ...CHAT_STREAM.slice(7),
 ];
 
 function fixtureApi(workspaces: WorkspaceView[], history: Record<string, SessionEvent[]> = {}) {
@@ -149,12 +141,9 @@ describe("ChatView", () => {
     expect(bashRow.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(bashRow);
     expect(within(group).getByText(/Hello, World!/)).toBeDefined();
-    // Reasoning survives the settle as one collapsed line that opens onto its text.
-    const thinkingRow = within(group).getByRole("button", { name: /curl returned the greeting/ });
-    expect(thinkingRow.getAttribute("aria-expanded")).toBe("false");
+    // Reasoning survives the settle as a row of its own; this one fits its preview, so there is nothing more to open.
     expect(within(group).getAllByText(/curl returned the greeting/)).toHaveLength(1);
-    fireEvent.click(thinkingRow);
-    expect(within(group).getAllByText(/curl returned the greeting/).length).toBeGreaterThan(1);
+    expect(within(group).queryByRole("button", { name: /curl returned the greeting/ })).toBeNull();
 
     const footer = screen.getByTestId("settled-footer");
     expect(footer.textContent).toContain("Worked for 10s");
@@ -168,9 +157,8 @@ describe("ChatView", () => {
     expect(screen.getByText(/Working/)).toBeDefined();
     emit({ type: "session.end", ...scope, exitCode: 137, sawResult: false });
     expect(screen.queryByText(/Working for/)).toBeNull();
-    const footer = screen.getByTestId("settled-footer");
-    expect(footer.textContent).toContain("failed");
-    expect(footer.textContent).toContain("session exited without a result (exit code 137)");
+    expect(screen.getByTestId("settled-footer").textContent).toContain("failed");
+    expect(screen.getByText(/session exited without a result \(exit code 137\)/i)).toBeDefined();
   });
 
   it("virtualizes a long transcript instead of mounting every row", async () => {

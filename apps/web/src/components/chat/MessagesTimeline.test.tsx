@@ -6,7 +6,7 @@ import { act, fireEvent, render, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { LegendListRef } from "@legendapp/list/react";
 import { MessagesTimeline } from "./MessagesTimeline";
-import type { TimelineEntry } from "./adapt";
+import type { TimelineEntry, TurnSummary } from "./adapt";
 
 globalThis.ResizeObserver = class {
   observe() {}
@@ -83,15 +83,13 @@ function buildProps() {
     isWorking: false,
     activeTurnStartedAt: null,
     listRef: createRef<LegendListRef | null>(),
-    latestTurn: null,
-    runningTurnId: null,
+    turns: [],
     turnDiffSummaryByAssistantMessageId: new Map(),
     threadKey: "thread-1",
     onOpenTurnDiff: () => {},
     revertTurnCountByUserMessageId: new Map(),
     onRevertUserMessage: () => {},
     isRevertingCheckpoint: false,
-    openingVideoAttachmentId: null,
     onImageExpand: () => {},
     markdownCwd: undefined,
     resolvedTheme: "light" as const,
@@ -106,6 +104,26 @@ function buildProps() {
   };
 }
 
+function buildTurn(
+  turnId: string,
+  state: TurnSummary["state"],
+  startedAt: string | null,
+  completedAt: string | null,
+): TurnSummary {
+  return {
+    turnId,
+    sessionId: "session-1",
+    state,
+    prompt: null,
+    model: null,
+    durationMs: null,
+    costUsd: null,
+    error: null,
+    startedAt,
+    completedAt,
+  };
+}
+
 function buildLongUserMessageText(tail = "deep hidden detail only after expand") {
   return Array.from({ length: 9 }, (_, index) =>
     index === 8 ? tail : `Line ${index + 1}: ${"verbose prompt content ".repeat(8).trim()}`,
@@ -114,7 +132,7 @@ function buildLongUserMessageText(tail = "deep hidden detail only after expand")
 
 function buildUserTimelineEntry(text: string) {
   return {
-    id: "entry-1",
+    id: "message-1",
     kind: "message" as const,
     createdAt: MESSAGE_CREATED_AT,
     message: {
@@ -147,12 +165,9 @@ describe("MessagesTimeline", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
-        latestTurn={{
-          turnId,
-          state: "completed",
-          startedAt: "2026-03-17T19:12:20.000Z",
-          completedAt: "2026-03-17T19:12:28.000Z",
-        }}
+        turns={[
+          buildTurn(turnId, "completed", "2026-03-17T19:12:20.000Z", "2026-03-17T19:12:28.000Z"),
+        ]}
         timelineEntries={[
           {
             id: "work-entry-with-fold",
@@ -165,6 +180,7 @@ describe("MessagesTimeline", () => {
               label: "Ran command",
               tone: "tool",
               toolLifecycleStatus: "completed",
+              sourceActivityKind: "tool.completed",
             },
           },
           {
@@ -184,15 +200,10 @@ describe("MessagesTimeline", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
-        latestTurn={{
-          turnId,
-          state: "completed",
-          startedAt: MESSAGE_CREATED_AT,
-          completedAt: MESSAGE_CREATED_AT,
-        }}
+        turns={[buildTurn(turnId, "completed", MESSAGE_CREATED_AT, MESSAGE_CREATED_AT)]}
         timelineEntries={[
           {
-            id: "entry-assistant-with-files",
+            id: assistantMessageId,
             kind: "message",
             createdAt: MESSAGE_CREATED_AT,
             message: {
@@ -322,154 +333,6 @@ describe("MessagesTimeline", () => {
     expect(resolveTimelineMinimapInteractiveWidth(40, true)).toBe("22rem");
   });
 
-  it("renders generic attachments as download links instead of image previews", () => {
-    const entry = {
-      ...buildUserTimelineEntry("Read the report."),
-      message: {
-        ...buildUserTimelineEntry("Read the report.").message,
-        attachments: [
-          {
-            type: "file" as const,
-            id: "attachment-report-pdf",
-            name: "report.pdf",
-            mimeType: "application/pdf",
-            sizeBytes: 42,
-            previewUrl: "https://environment.test/api/assets/report.pdf",
-          },
-        ],
-      },
-    };
-
-    const markup = renderToStaticMarkup(
-      <MessagesTimeline {...buildProps()} timelineEntries={[entry]} />,
-    );
-
-    expect(markup).toContain(
-      '<a href="https://environment.test/api/assets/report.pdf" download="report.pdf" class="flex min-w-0 items-center gap-2 rounded-md py-1 text-sm hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70">',
-    );
-    expect(markup).not.toContain('alt="report.pdf"');
-  });
-
-  it("renders video attachments as play buttons", () => {
-    const entry = {
-      ...buildUserTimelineEntry("Watch the demo."),
-      message: {
-        ...buildUserTimelineEntry("Watch the demo.").message,
-        attachments: [
-          {
-            type: "file" as const,
-            id: "attachment-demo-mp4",
-            name: "demo.mp4",
-            mimeType: "video/mp4",
-            sizeBytes: 42,
-          },
-        ],
-      },
-    };
-
-    const markup = renderToStaticMarkup(
-      <MessagesTimeline {...buildProps()} timelineEntries={[entry]} />,
-    );
-    const busyMarkup = renderToStaticMarkup(
-      <MessagesTimeline
-        {...buildProps()}
-        timelineEntries={[entry]}
-        openingVideoAttachmentId="attachment-demo-mp4"
-      />,
-    );
-
-    expect(markup).toContain('aria-label="Play demo.mp4"');
-    expect(markup).toContain("min-h-[72px]");
-    expect(markup).toContain(">demo.mp4</span>");
-    expect(markup).not.toContain('aria-label="Download demo.mp4"');
-    expect(busyMarkup).toContain('aria-busy="true"');
-    expect(busyMarkup).toContain('aria-disabled="true"');
-    expect(busyMarkup).not.toContain('disabled=""');
-    expect(busyMarkup).toContain(">Loading…</span>");
-  });
-
-  it("renders a file download button without creating its URL in advance", () => {
-    const entry = {
-      ...buildUserTimelineEntry("Read the report."),
-      message: {
-        ...buildUserTimelineEntry("Read the report.").message,
-        attachments: [
-          {
-            type: "file" as const,
-            id: "attachment-report-pdf",
-            name: "report.pdf",
-            mimeType: "application/pdf",
-            sizeBytes: 42,
-          },
-        ],
-      },
-    };
-
-    const markup = renderToStaticMarkup(
-      <MessagesTimeline {...buildProps()} timelineEntries={[entry]} />,
-    );
-
-    expect(markup).toContain(
-      '<button type="button" aria-label="Download report.pdf" class="flex min-w-0 cursor-pointer items-center gap-2 rounded-md py-1 text-left text-sm hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70">',
-    );
-    expect(markup).not.toContain("href=");
-  });
-
-  it("does not download an optimistic file before the server supplies its attachment ID", () => {
-    const entry = {
-      ...buildUserTimelineEntry("Read the report."),
-      message: {
-        ...buildUserTimelineEntry("Read the report.").message,
-        attachments: [
-          {
-            type: "file" as const,
-            id: "composer-local-report",
-            name: "report.pdf",
-            mimeType: "application/pdf",
-            sizeBytes: 42,
-            downloadable: false,
-          },
-        ],
-      },
-    };
-
-    const markup = renderToStaticMarkup(
-      <MessagesTimeline {...buildProps()} timelineEntries={[entry]} />,
-    );
-
-    expect(markup).toContain("report.pdf");
-    expect(markup).not.toContain('aria-label="Download report.pdf"');
-  });
-
-  it("renders unknown attachment types as inert rows instead of crashing", () => {
-    const entry = {
-      ...buildUserTimelineEntry("Play the recording."),
-      message: {
-        ...buildUserTimelineEntry("Play the recording.").message,
-        attachments: [
-          {
-            // A newer server can introduce attachment types this build does
-            // not know. They ride the open contract member.
-            type: "recording",
-            id: "attachment-voice-memo",
-            name: "voice-memo.ogg",
-            mimeType: "audio/ogg",
-            sizeBytes: 42,
-          },
-        ],
-      },
-    };
-
-    const markup = renderToStaticMarkup(
-      <MessagesTimeline {...buildProps()} timelineEntries={[entry]} />,
-    );
-
-    expect(markup).toContain("voice-memo.ogg");
-    expect(markup).not.toContain('aria-label="Download voice-memo.ogg"');
-    expect(markup).not.toContain('alt="voice-memo.ogg"');
-    expect(markup).not.toContain("href=");
-  });
-
   it("keeps reserved end space when tool work starts while reading history", () => {
     const turnId = "turn-with-active-tool";
     const firstEntry = buildUserTimelineEntry("Run the command.");
@@ -478,13 +341,7 @@ describe("MessagesTimeline", () => {
         {...buildProps()}
         isWorking
         activeTurnStartedAt={MESSAGE_CREATED_AT}
-        latestTurn={{
-          turnId,
-          state: "running",
-          startedAt: MESSAGE_CREATED_AT,
-          completedAt: null,
-        }}
-        runningTurnId={turnId}
+        turns={[buildTurn(turnId, "running", MESSAGE_CREATED_AT, null)]}
         anchorMessageId={firstEntry.message.id}
         liveFollowEnabled={false}
         timelineEntries={[
@@ -503,6 +360,7 @@ describe("MessagesTimeline", () => {
               itemType: "command_execution",
               command: "git status",
               toolLifecycleStatus: "inProgress",
+              sourceActivityKind: "tool.started",
             },
           },
         ]}
@@ -517,7 +375,7 @@ describe("MessagesTimeline", () => {
     const firstEntry = buildUserTimelineEntry("First prompt.");
     const secondEntry = {
       ...buildUserTimelineEntry("Newest prompt."),
-      id: "entry-2",
+      id: "message-2",
       message: {
         ...buildUserTimelineEntry("Newest prompt.").message,
         id: "message-2",
@@ -714,8 +572,10 @@ describe("MessagesTimeline", () => {
             entry: {
               id: "work-1",
               createdAt: "2026-03-17T19:12:28.000Z",
+              turnId: null,
               label: "Context compacted",
               tone: "info",
+              sourceActivityKind: "tool.completed",
             },
           },
         ]}
@@ -737,9 +597,11 @@ describe("MessagesTimeline", () => {
             entry: {
               id: "work-1",
               createdAt: "2026-03-17T19:12:28.000Z",
+              turnId: null,
               label: "Updated files",
               tone: "tool",
               changedFiles: ["C:/Users/mike/dev-stuff/repo/apps/web/src/session-logic.ts"],
+              sourceActivityKind: "tool.completed",
             },
           },
         ]}
@@ -763,10 +625,12 @@ describe("MessagesTimeline", () => {
             entry: {
               id: "work-failed",
               createdAt: "2026-03-17T19:12:28.000Z",
+              turnId: null,
               label: "Run search",
               tone: "tool",
               itemType: "command_execution",
               toolLifecycleStatus: "failed",
+              sourceActivityKind: "tool.completed",
             },
           },
           {
@@ -776,10 +640,12 @@ describe("MessagesTimeline", () => {
             entry: {
               id: "work-completed",
               createdAt: "2026-03-17T19:12:29.000Z",
+              turnId: null,
               label: "Run tests",
               tone: "tool",
               itemType: "command_execution",
               toolLifecycleStatus: "completed",
+              sourceActivityKind: "tool.completed",
             },
           },
         ]}
@@ -802,10 +668,12 @@ describe("MessagesTimeline", () => {
             entry: {
               id: "work-completed",
               createdAt: "2026-03-17T19:12:28.000Z",
+              turnId: null,
               label: "Run tests",
               tone: "tool",
               itemType: "command_execution",
               toolLifecycleStatus: "completed",
+              sourceActivityKind: "tool.completed",
             },
           },
           {
@@ -815,10 +683,12 @@ describe("MessagesTimeline", () => {
             entry: {
               id: "work-failed",
               createdAt: "2026-03-17T19:12:29.000Z",
+              turnId: null,
               label: "Run lint",
               tone: "tool",
               itemType: "command_execution",
               toolLifecycleStatus: "failed",
+              sourceActivityKind: "tool.completed",
             },
           },
         ]}
@@ -845,10 +715,12 @@ describe("MessagesTimeline", () => {
             entry: {
               id: "work-failed",
               createdAt: "2026-03-17T19:12:28.000Z",
+              turnId: null,
               label: "Run search",
               tone: "tool",
               itemType: "command_execution",
               toolLifecycleStatus: "failed",
+              sourceActivityKind: "tool.completed",
             },
           },
           {
@@ -858,8 +730,10 @@ describe("MessagesTimeline", () => {
             entry: {
               id: "work-info",
               createdAt: "2026-03-17T19:12:29.000Z",
+              turnId: null,
               label: "Status updated",
               tone: "info",
+              sourceActivityKind: "tool.completed",
             },
           },
           {
@@ -869,10 +743,12 @@ describe("MessagesTimeline", () => {
             entry: {
               id: "work-completed",
               createdAt: "2026-03-17T19:12:30.000Z",
+              turnId: null,
               label: "Run tests",
               tone: "tool",
               itemType: "command_execution",
               toolLifecycleStatus: "completed",
+              sourceActivityKind: "tool.completed",
             },
           },
         ]}
@@ -890,13 +766,7 @@ describe("MessagesTimeline", () => {
         {...buildProps()}
         isWorking
         activeTurnStartedAt={MESSAGE_CREATED_AT}
-        latestTurn={{
-          turnId,
-          state: "running",
-          startedAt: MESSAGE_CREATED_AT,
-          completedAt: null,
-        }}
-        runningTurnId={turnId}
+        turns={[buildTurn(turnId, "running", MESSAGE_CREATED_AT, null)]}
         timelineEntries={[
           {
             id: "entry-live",
@@ -912,6 +782,7 @@ describe("MessagesTimeline", () => {
               itemType: "command_execution",
               command: "pnpm test",
               toolLifecycleStatus: "inProgress",
+              sourceActivityKind: "tool.started",
             },
           },
         ]}
@@ -930,13 +801,7 @@ describe("MessagesTimeline", () => {
         {...buildProps()}
         isWorking
         activeTurnStartedAt={MESSAGE_CREATED_AT}
-        latestTurn={{
-          turnId,
-          state: "running",
-          startedAt: MESSAGE_CREATED_AT,
-          completedAt: null,
-        }}
-        runningTurnId={turnId}
+        turns={[buildTurn(turnId, "running", MESSAGE_CREATED_AT, null)]}
         timelineEntries={[
           {
             id: "entry-failed",
@@ -952,6 +817,7 @@ describe("MessagesTimeline", () => {
               itemType: "command_execution",
               command: "pnpm lint",
               toolLifecycleStatus: "failed",
+              sourceActivityKind: "tool.completed",
             },
           },
           {
@@ -968,6 +834,7 @@ describe("MessagesTimeline", () => {
               itemType: "command_execution",
               command: "pnpm test",
               toolLifecycleStatus: "inProgress",
+              sourceActivityKind: "tool.started",
             },
           },
         ]}
@@ -985,13 +852,7 @@ describe("MessagesTimeline", () => {
         {...buildProps()}
         isWorking
         activeTurnStartedAt={MESSAGE_CREATED_AT}
-        latestTurn={{
-          turnId,
-          state: "running",
-          startedAt: MESSAGE_CREATED_AT,
-          completedAt: null,
-        }}
-        runningTurnId={turnId}
+        turns={[buildTurn(turnId, "running", MESSAGE_CREATED_AT, null)]}
         timelineEntries={[]}
       />,
     );
@@ -1008,13 +869,7 @@ describe("MessagesTimeline", () => {
         {...buildProps()}
         isWorking
         activeTurnStartedAt={MESSAGE_CREATED_AT}
-        latestTurn={{
-          turnId,
-          state: "running",
-          startedAt: MESSAGE_CREATED_AT,
-          completedAt: null,
-        }}
-        runningTurnId={turnId}
+        turns={[buildTurn(turnId, "running", MESSAGE_CREATED_AT, null)]}
         timelineEntries={[
           {
             id: "entry-completed",
@@ -1030,6 +885,7 @@ describe("MessagesTimeline", () => {
               itemType: "command_execution",
               command: "pnpm lint",
               toolLifecycleStatus: "completed",
+              sourceActivityKind: "tool.completed",
             },
           },
         ]}
@@ -1056,8 +912,10 @@ describe("MessagesTimeline", () => {
             entry: {
               id: "work-info",
               createdAt: "2026-03-17T19:12:27.000Z",
+              turnId: null,
               label: "Status updated",
               tone: "info",
+              sourceActivityKind: "tool.completed",
             },
           },
           {
@@ -1067,10 +925,12 @@ describe("MessagesTimeline", () => {
             entry: {
               id: "work-1",
               createdAt: "2026-03-17T19:12:28.000Z",
+              turnId: null,
               label: "Glob",
               tone: "tool",
               toolLifecycleStatus: "failed",
               detail: "No files found",
+              sourceActivityKind: "tool.completed",
             },
           },
         ]}
@@ -1094,8 +954,10 @@ describe("MessagesTimeline", () => {
             entry: {
               id: "work-info",
               createdAt: "2026-03-17T19:12:27.000Z",
+              turnId: null,
               label: "Status updated",
               tone: "info",
+              sourceActivityKind: "tool.completed",
             },
           },
           {
@@ -1105,9 +967,10 @@ describe("MessagesTimeline", () => {
             entry: {
               id: "work-turn-failed",
               createdAt: "2026-03-17T19:12:28.000Z",
+              turnId: null,
               label: "Provider turn start failed",
               tone: "error",
-              sourceActivityKind: "provider.turn.start.failed",
+              sourceActivityKind: "runtime.error",
             },
           },
         ]}
@@ -1125,7 +988,7 @@ describe("MessagesTimeline", () => {
     );
     const assistantEntry = {
       ...assistantBase,
-      id: "entry-assistant",
+      id: "message-assistant",
       message: { ...assistantBase.message, id: "message-assistant" },
     };
     const timelineEntries: TimelineEntry[] = [
@@ -1138,11 +1001,13 @@ describe("MessagesTimeline", () => {
         entry: {
           id: "work-command",
           createdAt: "2026-03-17T19:12:29.000Z",
+          turnId: null,
           label: "Ran command",
           tone: "tool",
           itemType: "command_execution",
           command: "ls",
           toolLifecycleStatus: "completed",
+          sourceActivityKind: "tool.completed",
         },
       },
       {
@@ -1152,9 +1017,12 @@ describe("MessagesTimeline", () => {
         entry: {
           id: "work-thinking",
           createdAt: "2026-03-17T19:12:30.000Z",
+          turnId: null,
           label: "Thinking",
           tone: "thinking",
-          detail: "quiet reasoning",
+          preview: "quiet reasoning",
+          detail: "quiet reasoning, at length",
+          sourceActivityKind: "reasoning",
         },
       },
     ];
@@ -1164,12 +1032,9 @@ describe("MessagesTimeline", () => {
       render(
         <MessagesTimeline
           {...buildProps()}
-          latestTurn={{
-            turnId: "turn-settled",
-            state: "completed",
-            startedAt: MESSAGE_CREATED_AT,
-            completedAt: "2026-03-17T19:12:31.000Z",
-          }}
+          turns={[
+            buildTurn("turn-settled", "completed", MESSAGE_CREATED_AT, "2026-03-17T19:12:31.000Z"),
+          ]}
           timelineEntries={timelineEntries}
         />,
       ),
@@ -1198,11 +1063,19 @@ describe("MessagesTimeline", () => {
     expect(expandedGroup).not.toBeNull();
     const commandRow = within(expandedGroup as HTMLElement).getByRole("button", { name: "ls" });
     expect(commandRow.getAttribute("aria-expanded")).toBe("false");
-    // The reasoning row is one collapsed line inside the expanded group.
+    // The reasoning row collapses to its preview line and expands to the full text.
     const thinkingRow = within(expandedGroup as HTMLElement).getByRole("button", {
       name: "quiet reasoning",
     });
     expect(thinkingRow.getAttribute("aria-expanded")).toBe("false");
+    expect((expandedGroup as HTMLElement).textContent).not.toContain("at length");
+
+    await act(async () => {
+      fireEvent.click(thinkingRow);
+    });
+
+    expect(thinkingRow.getAttribute("aria-expanded")).toBe("true");
+    expect((expandedGroup as HTMLElement).textContent).toContain("quiet reasoning, at length");
 
     await act(async () => {
       fireEvent.click(commandRow);
