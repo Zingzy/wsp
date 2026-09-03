@@ -77,8 +77,6 @@ export const BUILDER_IDLE_MS = 6 * 60 * 60_000;
  * (~410 MB peak) plus the daemon (~280 MB) cannot fit; the base sandbox boots
  * with ~2.2 GB free and does. Builders default to sandbox and ask for this
  * disk, which Solari ignores today (both kinds stay at 4 GB) but may honor. */
-export const BUILDER_DISK_GB = 20;
-
 export interface MachineSize {
   cpu?: number;
   memMb?: number;
@@ -487,7 +485,6 @@ export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Build
   const machine = await opts.backend.create({
     kind,
     template: baseTemplate,
-    diskGb: BUILDER_DISK_GB,
     onIdle: "kill",
     idleTimeoutMs: BUILDER_IDLE_MS,
     ...asked,

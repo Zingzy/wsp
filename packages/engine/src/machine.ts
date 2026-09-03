@@ -12,7 +12,6 @@ export interface MachineSpec {
   /** Root disk in GB; the provider default applies when absent. Solari's API
    * documents it, but a create of either kind accepts it and still boots a
    * 4 GB root (measured on desktop and base sandbox, 2026-09-02). */
-  diskGb?: number;
   envs?: Record<string, string>;
   labels?: Record<string, string>;
   /** What the provider does when the machine sits idle past its window; the

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { BUILDER_DISK_GB, BUILDER_IDLE_MS, MachineAliveError, applyGoldenImport, buildGolden, forkGolden, prepareBuilder, rollback, sealGolden, type GoldenImport, type GoldenStage, type ImportResult } from "../src/golden.js";
+import { BUILDER_IDLE_MS, MachineAliveError, applyGoldenImport, buildGolden, forkGolden, prepareBuilder, rollback, sealGolden, type GoldenImport, type GoldenStage, type ImportResult } from "../src/golden.js";
 import { NotFirstLifeError } from "../src/lifecycle.js";
 import { HOMEBREW, type ToolInstall } from "../src/golden-import.js";
 import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec } from "../src/machine.js";
@@ -149,8 +149,8 @@ describe("interactive golden: prepare then seal", () => {
       onStage,
     });
     // An idle-paused builder resumes not first-life and the seal would 502; kill fails loud instead.
-    expect(created[0]).toMatchObject({ kind: "sandbox", template: "base", diskGb: BUILDER_DISK_GB, onIdle: "kill" });
-    expect(BUILDER_DISK_GB).toBe(20);
+    expect(created[0]).toMatchObject({ kind: "sandbox", template: "base", onIdle: "kill" });
+    expect(created[0]).not.toHaveProperty("diskGb");
     expect(builder.kind).toBe("sandbox");
     expect(builder.firstLife).toBe(true);
     expect(builder.machine.streamUrl).toBeUndefined();
@@ -169,7 +169,7 @@ describe("interactive golden: prepare then seal", () => {
   it("prepare with kind desktop picks the desktop template and streams a display", async () => {
     const { backend, created } = recordingBackend();
     const builder = await prepareBuilder({ backend, kind: "desktop", setup: "true" });
-    expect(created[0]).toMatchObject({ kind: "desktop", template: "default", diskGb: BUILDER_DISK_GB });
+    expect(created[0]).toMatchObject({ kind: "desktop", template: "default" });
     expect(builder.kind).toBe("desktop");
     expect(builder.machine.streamUrl).toBe("wss://fake/stream/m1");
   });

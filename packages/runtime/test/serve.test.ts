@@ -223,7 +223,7 @@ describe("serveRuntime golden wizard ops", () => {
     const prepared = await c.request("golden.prepare", { name: "default" });
     expect(prepared["builder"]).toMatchObject({ id: "m1", kind: "sandbox" });
     expect(prepared["builder"]).not.toHaveProperty("screen");
-    expect(backend.machines[0]!.spec).toMatchObject({ kind: "sandbox", template: "base", diskGb: 20 });
+    expect(backend.machines[0]!.spec).toMatchObject({ kind: "sandbox", template: "base" });
 
     backend.machines[0]!.previewUrl = async port => ({ url: `https://m1-${port}.preview.example/?pt_token=edge`, token: "edge", expiresAt: Date.now() + 3_600_000 });
     const reach = await c.request("golden.builderReach", { builderId: "m1" });
