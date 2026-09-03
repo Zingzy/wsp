@@ -9,10 +9,10 @@ import { type Machine, basename, dirname, tilde } from "./host.js";
 import { keychain, serviceOwner } from "./keychain.js";
 import { pair } from "./pairing.js";
 import { binaryNames, provenance } from "./provenance.js";
-import { type Dir, roles } from "./roles.js";
+import { type Dir, roleByName, roles } from "./roles.js";
 import { type Kind, type Measured, type Row, Rows } from "./row.js";
 import { type RcScan, shellRc } from "./shell-rc.js";
-import { EMPTY, type Tree, add, budget, fileTree, summarize } from "./walk.js";
+import { EMPTY, type Tree, add, budget, fileTree, linkTree, summarize } from "./walk.js";
 
 export const noLookup: Lookup = () => [];
 
@@ -101,29 +101,38 @@ async function catalogCredentials(m: Machine, dirs: readonly Dir[], lookup: Look
   return out;
 }
 
-/** The size of a file or tree at path, for taking a claimed path off the record that counted it. */
-async function measure(m: Machine, path: string, clock: () => number): Promise<Tree> {
+/** What the record counted under path: nothing when a split name sits between them, a file's size, or a walk with the record's own skip rule. */
+async function measure(m: Machine, d: Dir, path: string, clock: () => number): Promise<Tree> {
+  const split = d.role === "unknown" && d.kind === "dir" && d.linkTarget === undefined;
+  if (split && path.slice(d.path.length + 1).split("/").some(n => roleByName(n) !== undefined)) return EMPTY;
   const e = await m.fs.stat(path);
   if (e?.kind === "file") return fileTree(e);
-  if (e?.kind === "dir") return summarize(m.fs, path, { budget: budget(clock) });
-  return EMPTY;
+  if (e?.kind === "link") return linkTree(e);
+  if (e?.kind !== "dir") return EMPTY;
+  return summarize(m.fs, path, { budget: budget(clock), ...(split ? { skip: (n: string) => roleByName(n) !== undefined } : {}) });
 }
 
 function subtract(t: Tree, e: Tree): Tree {
   return { bytes: Math.max(0, t.bytes - e.bytes), files: Math.max(0, t.files - e.files), mtime: t.mtime };
 }
 
-/** Drops records the rungs above carry. A claimed path comes off the record whose counted set holds it, the longest match, and a split record loses the path itself. */
+/** Drops records and paths at or under a claimed path. A claimed path strictly inside a record comes off the record whose counted set holds it, the longest match. */
 async function unclaimed(m: Machine, dirs: readonly Dir[], claimed: string[], clock: () => number): Promise<Dir[]> {
-  const out = dirs.filter(d => !claimed.some(c => under(d.path, c))).map(d => ({ ...d, paths: [...d.paths] }));
+  const out: Dir[] = [];
+  for (const d of dirs) {
+    if (claimed.some(c => under(d.path, c))) continue;
+    const paths = d.paths.filter(p => !claimed.some(c => under(p, c)));
+    if (paths.length === 0) continue;
+    let tree: Tree = d;
+    for (const p of d.paths) if (!paths.includes(p)) tree = subtract(tree, await measure(m, d, p, clock));
+    out.push({ ...d, paths, ...tree });
+  }
   for (const c of claimed) {
     let hit: { d: Dir; p: string } | undefined;
-    for (const d of out) for (const p of d.paths) if (under(c, p) && (hit === undefined || p.length > hit.p.length)) hit = { d, p };
-    if (hit === undefined) continue;
-    if (hit.p === c) hit.d.paths = hit.d.paths.filter(p => p !== c);
-    Object.assign(hit.d, subtract(hit.d, await measure(m, c, clock)));
+    for (const d of out) for (const p of d.paths) if (c !== p && under(c, p) && (hit === undefined || p.length > hit.p.length)) hit = { d, p };
+    if (hit !== undefined) Object.assign(hit.d, subtract(hit.d, await measure(m, hit.d, c, clock)));
   }
-  return out.filter(d => d.paths.length > 0);
+  return out;
 }
 
 /** Rows sharing a name climb their parents, one level per round, until no name is shared; a row named for its own path keeps it when it is the only such row in its group. */
@@ -228,7 +237,7 @@ export async function everything(m: Machine, opts: EverythingOptions = {}): Prom
   }
   for (const p of scan.partial) {
     const r = drafts.find(d => d.row.paths.includes(p))?.row;
-    if (r !== undefined) flag(r, "large");
+    if (r !== undefined) flag(r, "partial");
   }
 
   const bins = binaryNames(prov);

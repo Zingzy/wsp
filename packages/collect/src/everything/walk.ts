@@ -49,6 +49,8 @@ export interface WalkOptions {
   skipTree?: (names: string[]) => boolean;
   maxDepth?: number;
   budget?: Budget;
+  /** Called for a symlink met on the way; the walk itself never follows one. */
+  onLink?: (path: string, e: Entry) => void;
 }
 
 /** Visits every regular file under dir, never following symlinks. */
@@ -61,7 +63,11 @@ export async function walk(fs: Fs, dir: string, opts: WalkOptions, visit: (path:
       if (opts.budget !== undefined && !spend(opts.budget)) return;
       const p = `${d}/${name}`;
       const e = await fs.stat(p);
-      if (e === undefined || e.kind === "link") return;
+      if (e === undefined) return;
+      if (e.kind === "link") {
+        opts.onLink?.(p, e);
+        return;
+      }
       if (e.kind === "file") {
         visit(p, e);
         return;
@@ -72,9 +78,15 @@ export async function walk(fs: Fs, dir: string, opts: WalkOptions, visit: (path:
   await step(dir, 1);
 }
 
+/** A symlink is an entry of no size. */
+export function linkTree(e: Entry): Tree {
+  return { bytes: 0, files: 1, mtime: e.mtime };
+}
+
+/** Sums a tree the way pass 2 counts it: regular files by size, symlinks as entries of no size. */
 export async function summarize(fs: Fs, dir: string, opts: WalkOptions = {}): Promise<Tree> {
   let t = EMPTY;
-  await walk(fs, dir, opts, (_, e) => {
+  await walk(fs, dir, { ...opts, onLink: (_, e) => { t = add(t, linkTree(e)); } }, (_, e) => {
     t = add(t, fileTree(e));
   });
   return t;

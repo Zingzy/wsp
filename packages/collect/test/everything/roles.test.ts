@@ -24,12 +24,12 @@ describe("pass 2: directory role", () => {
       ["~/.kube", "unknown", 1, ["~/.kube"]],
       ["~/.local/lib", "state", 1, ["~/.local/lib/node_modules"]],
       ["~/.local/lib", "unknown", 0, ["~/.local/lib"]],
-      ["~/.local/share/mise", "unknown", 0, ["~/.local/share/mise"]],
+      ["~/.local/share/mise", "unknown", 1, ["~/.local/share/mise"]],
       ["~/.local/share/uv", "unknown", 1, ["~/.local/share/uv"]],
       ["~/.local/state", "state", 0, ["~/.local/state"]],
       ["~/.mcp-auth", "unknown", 1, ["~/.mcp-auth"]],
       ["~/.netrc", "unknown", 1, ["~/.netrc"]],
-      ["~/.nix-profile", "unknown", 0, ["~/.nix-profile"]],
+      ["~/.nix-profile", "unknown", 1, ["~/.nix-profile"]],
       ["~/.oh-my-zsh", "state", 1, ["~/.oh-my-zsh/.git"]],
       ["~/.oh-my-zsh", "unknown", 2, ["~/.oh-my-zsh"]],
       ["~/.oldtool", "unknown", 1, ["~/.oldtool"]],
@@ -74,6 +74,11 @@ describe("pass 2: directory role", () => {
     const notes: string[] = [];
     await roles(laptop(home()), { notes });
     expect(notes).toEqual(["~/.broken is a broken symlink and is not listed"]);
+  });
+
+  it("a symlink inside a record counts as one entry of no size, so a stow-style directory is not empty", async () => {
+    const dirs = await roles(laptop({ links: { "~/.config/stowed/config.toml": "/Users/dev/dotfiles/stowed/config.toml", "~/.config/stowed/init.lua": "/Users/dev/dotfiles/stowed/init.lua" }, files: { "~/dotfiles/stowed/config.toml": 40, "~/dotfiles/stowed/init.lua": 10 } }));
+    expect(dirs.find(d => d.path === `${HOME}/.config/stowed`)).toMatchObject({ kind: "dir", bytes: 0, files: 2, measured: "exact" });
   });
 
   it("a root stops at the entry cap and says its size is a lower bound", async () => {

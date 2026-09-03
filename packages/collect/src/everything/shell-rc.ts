@@ -55,6 +55,14 @@ function isOpen(o: Open): boolean {
   return o.quote !== "" || o.parens > 0 || o.heredoc !== undefined || o.continues;
 }
 
+/** `<<WORD`, `<<-WORD`, `<<"WORD"`: the word starts with a letter or underscore, so `x << 2` is arithmetic, and `<<<` is a here-string. */
+const HEREDOC = /^<<(?!<)-?\s*(?:"([A-Za-z_]\w*)"|'([A-Za-z_]\w*)'|([A-Za-z_]\w*))/;
+
+/** A `#` outside quotes at the start of a word begins a comment; nothing after it is shell. */
+function commentAt(line: string, i: number): boolean {
+  return line[i] === "#" && (i === 0 || /\s/.test(line[i - 1] ?? ""));
+}
+
 /** Carries the shell's quoting state across a line. Inside a heredoc only the terminator word matters. */
 function scanLine(line: string, start: Open): Open {
   const o: Open = { ...start, continues: false };
@@ -74,6 +82,7 @@ function scanLine(line: string, start: Open): Open {
       if (c === o.quote) o.quote = "";
       continue;
     }
+    if (o.quote === "" && commentAt(line, i)) break;
     if (o.quote === "" && (c === "'" || c === "`")) {
       o.quote = c;
       continue;
@@ -91,14 +100,21 @@ function scanLine(line: string, start: Open): Open {
       o.parens -= 1;
       continue;
     }
-    if (o.quote === "" && c === "<" && line[i + 1] === "<") {
-      const m = /^<<-?\s*(?:"([^"]+)"|'([^']+)'|(\w+))/.exec(line.slice(i));
+    if (o.quote === "" && c === "<") {
+      const m = HEREDOC.exec(line.slice(i));
       const word = m?.[1] ?? m?.[2] ?? m?.[3];
-      if (word !== undefined) o.heredoc = word;
-      break;
+      if (word !== undefined) {
+        o.heredoc = word;
+        break;
+      }
     }
   }
   return o;
+}
+
+/** The heredoc a kept line opens, if any: the one construct a kept line may carry forward, since a comment's stray quote must never hide what follows. */
+function heredocOpened(line: string): string | undefined {
+  return scanLine(line, CLOSED).heredoc;
 }
 
 export function stripExports(text: string): { names: string[]; carried: string } {
@@ -106,17 +122,22 @@ export function stripExports(text: string): { names: string[]; carried: string }
   const kept: string[] = [];
   const eol = text.includes("\r\n") ? "\r\n" : "\n";
   let cutting: Open | undefined;
-  let passing: Open = CLOSED;
+  let heredoc: string | undefined;
   for (const line of text.split(/\r?\n/)) {
     if (cutting !== undefined) {
       const o = scanLine(line, cutting);
       cutting = isOpen(o) ? o : undefined;
       continue;
     }
-    const hits = isOpen(passing) ? [] : assignedNames(line).filter(isSecretName);
+    if (heredoc !== undefined) {
+      kept.push(line);
+      if (line.trim() === heredoc) heredoc = undefined;
+      continue;
+    }
+    const hits = assignedNames(line).filter(isSecretName);
     if (hits.length === 0) {
       kept.push(line);
-      passing = scanLine(line, passing);
+      heredoc = heredocOpened(line);
       continue;
     }
     for (const h of hits) if (!names.includes(h)) names.push(h);

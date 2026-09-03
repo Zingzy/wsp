@@ -7,7 +7,7 @@
 // gathered into one record per role so the app's own size is what could travel.
 import { type Machine, basename, tilde } from "./host.js";
 import type { Measured } from "./row.js";
-import { type Budget, EMPTY, type Tree, add, budget, fileTree, spend } from "./walk.js";
+import { type Budget, EMPTY, type Tree, add, budget, fileTree, linkTree, spend } from "./walk.js";
 
 export type Role = "config" | "state" | "cache" | "unknown";
 
@@ -54,7 +54,7 @@ function specRoots(m: Machine): { path: string; role: Role }[] {
   return roots;
 }
 
-/** Sums dir within the budget. With a split map, a subdirectory the name rule marks is summed into that role's record instead. */
+/** Sums dir within the budget; a symlink is one entry of no size, never followed. With a split map, a subdirectory the name rule marks is summed into that role's record instead. */
 async function scan(m: Machine, dir: string, root: string, split: Map<Role, Dir> | undefined, b: Budget): Promise<Tree> {
   let t = EMPTY;
   const names = await m.fs.list(dir);
@@ -62,7 +62,8 @@ async function scan(m: Machine, dir: string, root: string, split: Map<Role, Dir>
     if (!spend(b)) return EMPTY;
     const p = `${dir}/${name}`;
     const e = await m.fs.stat(p);
-    if (e === undefined || e.kind === "link") return EMPTY;
+    if (e === undefined) return EMPTY;
+    if (e.kind === "link") return linkTree(e);
     if (e.kind === "file") return fileTree(e);
     const role = split === undefined ? undefined : roleByName(name);
     if (split === undefined || role === undefined) return scan(m, p, root, split, b);

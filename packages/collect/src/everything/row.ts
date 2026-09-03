@@ -7,7 +7,8 @@ export const KINDS = ["config", "state", "cache", "credential", "device-bound-lo
 export const Kind = z.enum(KINDS);
 export type Kind = z.infer<typeof Kind>;
 
-export const FLAGS = ["credential", "large", "stale"] as const;
+/** partial: the credential check of this row stopped at its cap, so a secret inside may have been missed. */
+export const FLAGS = ["credential", "large", "stale", "partial"] as const;
 export const Flag = z.enum(FLAGS);
 export type Flag = z.infer<typeof Flag>;
 

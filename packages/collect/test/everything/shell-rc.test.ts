@@ -55,6 +55,18 @@ describe("pass 6: shell rc exports", () => {
     });
   });
 
+  it("a comment's stray quote, an arithmetic shift or a stray backtick on a kept line never hides a later export", () => {
+    const template = "# Set list of themes to pick from when loading at random\n# Setting this variable when ZSH_THEME=random will cause zsh to load\n# a theme from this variable instead of looking in $ZSH/themes/\n# If set to an empty array, this variable will have no effect.\n# ZSH_THEME_RANDOM_CANDIDATES=( \"robbyrussell\" \"agnoster\" )\n# Uncomment the following line to use case-sensitive completion.\n# Caution: this setting can cause issues with multiline prompts in zsh < 5.7.1 (see #5765)\n# Uncomment one of the following lines to change the auto-update behavior\n# zstyle ':omz:update' mode disabled  # disable automatic updates\n# Uncomment if you don't want to see the prompt.\nplugins=(git)\nexport ANTHROPIC_API_KEY=sk-ant-fake\n";
+    expect(stripExports(template)).toEqual({ names: ["ANTHROPIC_API_KEY"], carried: template.replace("export ANTHROPIC_API_KEY=sk-ant-fake\n", "") });
+    expect(stripExports("(( y = x << 2 ))\nexport GH_TOKEN=fake\nnext\n")).toEqual({ names: ["GH_TOKEN"], carried: "(( y = x << 2 ))\nnext\n" });
+    expect(stripExports("# see `man zsh\nexport DB_PASSWORD=fake\nnext\n")).toEqual({ names: ["DB_PASSWORD"], carried: "# see `man zsh\nnext\n" });
+    expect(stripExports("echo 'a' # it's fine\nexport A_TOKEN=fake\n").names).toEqual(["A_TOKEN"]);
+  });
+
+  it("a cut line's trailing comment does not swallow the lines after it", () => {
+    expect(stripExports("export A_TOKEN=fake # don't share\nalias b=c\nexport X_SECRET=fake # `note\nalias d=e\n")).toEqual({ names: ["A_TOKEN", "X_SECRET"], carried: "alias b=c\nalias d=e\n" });
+  });
+
   it("a value never appears in the output, and a file with no secret exports is not reported", async () => {
     const out = await shellRc(laptop(home()));
     expect(out).toEqual([{ path: "~/.zshrc", names: ["ANTHROPIC_API_KEY", "GITHUB_TOKEN"], carried: "export PATH=$HOME/.local/bin:$PATH\nexport KEYTIMEOUT=1\nalias ll='ls -l'\n" }]);

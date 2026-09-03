@@ -24,6 +24,7 @@ describe("everything: the seven passes folded into rows", () => {
       [".jcode", "unknown", "", "", "~/.jcode"],
       [".mcp-auth", "unknown", "", "", "~/.mcp-auth"],
       [".netrc", "credential", "credential", "", "~/.netrc"],
+      [".nix-profile", "unknown", "", "", "~/.nix-profile"],
       [".oh-my-zsh", "unknown", "", "", "~/.oh-my-zsh"],
       [".oh-my-zsh/.git", "state", "", "", "~/.oh-my-zsh/.git"],
       [".oldtool", "unknown", "stale", "", "~/.oldtool"],
@@ -49,6 +50,7 @@ describe("everything: the seven passes folded into rows", () => {
       ["hosts.yml", "credential", "credential", "homebrew", "~/.config/gh/hosts.yml"],
       ["id_ed25519", "credential", "credential", "", "~/.ssh/id_ed25519"],
       ["lib", "state", "", "", "~/.local/lib/node_modules"],
+      ["mise", "unknown", "", "", "~/.local/share/mise"],
       ["node", "unknown", "", "", ""],
       ["nvim", "unknown", "", "", "~/.config/nvim"],
       ["omp", "unknown", "", "", ""],
@@ -188,6 +190,23 @@ describe("everything: the seven passes folded into rows", () => {
     expect(rows.find(r => r.kind === "state")).toMatchObject({ paths: ["~/.app/plugins/x/node_modules"], bytes: 1_000, files: 1 });
   });
 
+  it("a claimed ancestor of a split path drops the split and takes only what the parent counted", async () => {
+    const app = (): ReturnType<typeof laptop> => laptop({ files: { "~/.app/settings.json": 100, "~/.app/notes.md": 50, "~/.app/plugins/x/node_modules/a/i.js": 1_000, "~/.app/plugins/y/node_modules/b/i.js": 2_000 } });
+    const { rows } = await everything(app(), { now: NOW, claimed: new Set(["~/.app/plugins"]) });
+    expect(rows.find(r => r.paths[0] === "~/.app")).toMatchObject({ bytes: 150, files: 2 });
+    expect(rows.filter(r => r.kind === "state")).toEqual([]);
+    expect(rows.flatMap(r => r.paths).some(p => p.startsWith("~/.app/plugins"))).toBe(false);
+    const tool = laptop({ files: { "~/.tool/a.toml": 120, "~/.tool/settings/config.toml": 30, "~/.tool/settings/cache/blob": 5_000 } });
+    const cut = await everything(tool, { now: NOW, claimed: new Set(["~/.tool/settings"]) });
+    expect(cut.rows.map(r => [r.paths[0], r.kind, r.bytes, r.files])).toEqual([["~/.tool", "unknown", 120, 1]]);
+  });
+
+  it("a directory holding only symlinks is a row, not a silent drop", async () => {
+    const m = laptop({ links: { "~/.config/stowed/config.toml": "/Users/dev/dotfiles/stowed/config.toml" }, files: { "~/dotfiles/stowed/config.toml": 40 } });
+    const { rows } = await everything(m, { now: NOW });
+    expect(rows.find(r => r.paths[0] === "~/.config/stowed")).toMatchObject({ name: "stowed", kind: "unknown", bytes: 0, files: 1, measured: "exact" });
+  });
+
   it("claimed accepts ~/x, bare x, the absolute path under HOME, a trailing slash and a Keychain item, and refuses anything else", async () => {
     for (const form of ["~/.ssh", ".ssh", `${HOME}/.ssh`, "~/.ssh/", ".ssh/", `${HOME}/.ssh/`]) {
       const { rows } = await everything(laptop(home()), { now: NOW, claimed: new Set([form]) });
@@ -211,15 +230,16 @@ describe("everything: the seven passes folded into rows", () => {
     expect(rows.find(r => r.paths[0] === "~/.cache")).toMatchObject({ measured: "none", bytes: 0, files: 0, flags: [] });
     expect(rows.find(r => r.paths[0] === "~/Library/Caches")).toMatchObject({ measured: "none" });
     expect(rows.find(r => r.paths[0] === "~/.local/state")).toMatchObject({ measured: "none" });
-    expect(rows.find(r => r.paths[0] === "~/.big")).toMatchObject({ measured: "lower-bound", flags: ["large"] });
+    expect(rows.find(r => r.paths[0] === "~/.big")).toMatchObject({ measured: "lower-bound", flags: expect.arrayContaining(["large"]) });
     expect(rows.find(r => r.name === "gh")?.measured).toBe("exact");
   });
 
-  it("a credential walk that hits its cap says so: a note and the large flag, never a silent miss", async () => {
+  it("a credential walk that hits its cap says so: a note and the partial flag, never a silent miss", async () => {
     const m = laptop({ files: { ...many("~/.ssh/known", 5_100), "~/.ssh/id_rsa": { text: "-----BEGIN OPENSSH PRIVATE KEY-----\nx\n", mode: 0o600 } } });
     const { rows, notes } = await everything(m, { now: NOW });
     expect(notes).toEqual(["credential scan of ~/.ssh stopped at the cap"]);
-    expect(rows.find(r => r.paths[0] === "~/.ssh")?.flags).toContain("large");
+    expect(rows.find(r => r.paths[0] === "~/.ssh")?.flags).toEqual(expect.arrayContaining(["partial", "large"]));
+    expect(rows.filter(r => r.flags.includes("partial"))).toHaveLength(1);
     const quiet = await everything(laptop(home()), { now: NOW });
     expect(quiet.notes.some(n => n.includes("stopped at the cap"))).toBe(false);
   });

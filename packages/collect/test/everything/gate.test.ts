@@ -15,6 +15,10 @@ describe("pass 7: size gate", () => {
     expect(sizeGate([row(2_000_000, 1, ["credential"]), row(2_000_000, 1, ["large"]), row(10, 1)]).map(r => r.flags)).toEqual([["credential", "large"], ["large"], []]);
   });
 
+  it("a partial credential scan is its own flag, not large", () => {
+    expect(sizeGate([row(10, 1, ["partial"])]).map(r => r.flags)).toEqual([["partial"]]);
+  });
+
   it("a row whose walk hit the cap is large whatever it counted, an unmeasured one is not", () => {
     expect(sizeGate([row(10, 1, [], "lower-bound"), row(0, 0, [], "none")]).map(r => r.flags)).toEqual([["large"], []]);
   });
