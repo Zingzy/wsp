@@ -211,6 +211,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "workspaces.portReach":
               send({ id: msg.id, ok: true, reach: await rt.workspaces.portReach(msg.workspaceId, msg.port) });
               return;
+            case "workspaces.rebuild":
+              send({ id: msg.id, ok: true, workspace: await rt.workspaces.rebuild(msg.workspaceId) });
+              return;
           }
         } catch (e) {
           const kind = (e as { kind?: unknown }).kind;

@@ -33,8 +33,12 @@ export type MachineState = z.infer<typeof MachineState>;
 
 /** slow: the edge answered late or 502'd while the machine runs (a provider slow
  * spell, measured: 502 after 5 to 11 s with an open socket to the same guest
- * still working); it is not no-daemon (a prompt 502) and not unreachable (silence). */
-export const ReachState = z.enum(["reachable", "no-daemon", "unreachable", "napping", "unsupported", "gone", "slow"]);
+ * still working); it is not no-daemon (a prompt 502) and not unreachable (silence).
+ * zombie: the provider reports the machine running, reach has been slow or
+ * unreachable for minutes, and a bounded exec probe failed too; the guest is
+ * dead behind a live control plane (measured twice at rest). Phase stays
+ * running; status.reason carries the timings; workspaces.rebuild is the way out. */
+export const ReachState = z.enum(["reachable", "no-daemon", "unreachable", "napping", "unsupported", "gone", "slow", "zombie"]);
 export type ReachState = z.infer<typeof ReachState>;
 
 export const ReachStatus = z.object({
@@ -193,6 +197,8 @@ export const WorkspaceWokenEvent = z.object({
   /** True when the paused machine had vanished and a fresh golden fork replaced it. */
   resurrected: z.boolean(),
 });
+/** The machine was replaced by a fresh golden fork carrying the vault: an
+ * upgrade under a new size, or a rebuild of a zombie. Clients re-dial reach. */
 export const WorkspaceUpgradedEvent = z.object({
   type: z.literal("workspace.upgraded"),
   workspaceId: z.string(),
@@ -536,6 +542,11 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     workspaceId: z.string(),
     port: z.number().int().min(1).max(65535),
   }),
+  /** Replaces the workspace's machine with a fresh golden fork, imports the
+   * nap-time vault if one exists, and kills the old machine whatever it
+   * reports. Replies with the WorkspaceView on its new machine; id and name
+   * are kept. The way out of a zombie reach state. */
+  z.object({ id: reqId, op: z.literal("workspaces.rebuild"), workspaceId: z.string() }),
 ]);
 export type RuntimeRequest = z.infer<typeof RuntimeRequest>;
 
