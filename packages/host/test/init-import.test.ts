@@ -139,6 +139,19 @@ describe("packPlan", () => {
     expect(statSync(join(home, "dotfiles", "zshrc")).mode & 0o777).toBe(0o644);
   });
 
+  it("a self link under a directory whose ancestor is itself a link is left out too, instead of looping the pack", async () => {
+    const home = laptop();
+    mkdirSync(join(home, "dotfiles", "config", "tool"), { recursive: true });
+    writeFileSync(join(home, "dotfiles", "config", "tool", "conf"), "a = 1\n");
+    symlinkSync(join(home, "dotfiles", "config"), join(home, ".config2"));
+    symlinkSync(join(home, ".config2", "tool"), join(home, ".config2", "tool", "self"));
+    const plan = planFiles([row({ rung: "editors", id: "editors/tool", paths: ["~/.config2/tool"] })], { home, stat: statOf, platform: "darwin" });
+    expect(plan.files.map(f => f.dest)).toEqual([".config2/tool"]);
+    const packed = await packPlan(plan, { secrets: new Map(), home });
+    expect(listTar(packed.tar).map(e => e.path).filter(p => p !== "").sort()).toEqual([".config2/", ".config2/tool/", ".config2/tool/conf"]);
+    expect(packed.skipped).toEqual([{ id: "editors/tool", path: "~/.config2/tool/self", note: "a link into its own directory" }]);
+  });
+
   it("readSecrets asks the reader once per Keychain login and turns a failed read into a refusal that carries security's reason", async () => {
     const rows = [
       row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml"], choice: "copy" }),

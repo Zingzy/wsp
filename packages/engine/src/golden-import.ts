@@ -380,6 +380,16 @@ export function toolInstallsFor(entries: readonly RecipeEntry[]): ToolsPlan {
   const rowsOf = (manager: ToolManager): RecipeEntry[] => entries.filter(e => ticked(e) && e.rung === "tools" && e.id.startsWith(`tools/${manager}/`));
   const npmTicked = new Set(rowsOf("npm").map(e => e.id.slice("tools/npm/".length)));
 
+  // Homebrew's own toolchain, each step waiting on the one before; everything brew installs waits on the last.
+  const toolchain = BREW_TOOLCHAIN.reduce<{ steps: ToolInstall[]; last: string }>(
+    (acc, f) => {
+      const id = `tools/brew-toolchain/${f}`;
+      acc.steps.push({ id, label: `Homebrew's ${f}`, manager: "brew", cmd: withPath(asLinuxbrew(`install ${f}`)), after: acc.last });
+      return { steps: acc.steps, last: id };
+    },
+    { steps: [], last: "tools/homebrew" },
+  );
+
   // One step per manager that has rows, unless it already comes along as a formula or an npm global.
   const managers = new Map<ToolManager, { after: string; step?: ToolInstall }>();
   for (const manager of MANAGER_ORDER) {
@@ -392,18 +402,14 @@ export function toolInstallsFor(entries: readonly RecipeEntry[]): ToolsPlan {
     const formula = MANAGER_FORMULA[manager];
     if (brew.formulae.includes(formula)) managers.set(manager, { after: `tools/brew/${formula}` });
     else if (npmTicked.has(manager)) managers.set(manager, { after: `tools/npm/${manager}` });
-    else managers.set(manager, { after: own, step: { id: own, label: manager, manager: "brew", cmd: withPath(asLinuxbrew(`install ${formula}`)), after: `tools/brew-toolchain/${BREW_TOOLCHAIN.at(-1)}` } });
+    else managers.set(manager, { after: own, step: { id: own, label: manager, manager: "brew", cmd: withPath(asLinuxbrew(`install ${formula}`)), after: toolchain.last } });
   }
 
   if (brew.taps.length + brew.formulae.length > 0 || [...managers.values()].some(m => m.step?.manager === "brew")) {
     installs.push({ id: "tools/homebrew", label: "Homebrew", manager: "brew", cmd: withPath(homebrewBootstrap()) });
-    let prior = "tools/homebrew";
-    for (const f of BREW_TOOLCHAIN) {
-      installs.push({ id: `tools/brew-toolchain/${f}`, label: `${f} (Homebrew's Linux toolchain)`, manager: "brew", cmd: withPath(asLinuxbrew(`install ${f}`)), after: prior });
-      prior = `tools/brew-toolchain/${f}`;
-    }
-    for (const t of brew.taps) installs.push({ id: `tools/brew-tap/${t}`, label: t, manager: "brew", cmd: withPath(asLinuxbrew(`tap ${t}`)), after: prior });
-    for (const f of brew.formulae) installs.push({ id: `tools/brew/${f}`, label: f, manager: "brew", cmd: withPath(asLinuxbrew(`install ${f}`)), after: prior });
+    installs.push(...toolchain.steps);
+    for (const t of brew.taps) installs.push({ id: `tools/brew-tap/${t}`, label: t, manager: "brew", cmd: withPath(asLinuxbrew(`tap ${t}`)), after: toolchain.last });
+    for (const f of brew.formulae) installs.push({ id: `tools/brew/${f}`, label: f, manager: "brew", cmd: withPath(asLinuxbrew(`install ${f}`)), after: toolchain.last });
   }
   for (const manager of MANAGER_ORDER) {
     const rows = rowsOf(manager);
@@ -529,7 +535,6 @@ export function nodeInstallScript(floor: number, release: NodeRelease): string {
     `echo "NODE_INSTALLED v${v}"`,
   ].join("\n");
 }
-
 
 const HERMES = { tag: "v2026.8.31", commit: "29112bef099274229cadff79cdff7bf7b99c4b77" } as const;
 

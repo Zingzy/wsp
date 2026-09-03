@@ -214,11 +214,13 @@ function squote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-/** The last line the command printed on stderr, else on stdout, for a warning; a 124 exit is the guest-side timeout. */
+/** The line that names the failure, for a warning: the last `Error:` line on stderr (Homebrew
+ * follows its error with advice), else the last stderr line, else stdout's; 124 is the guest-side timeout. */
 function reasonOf(res: ExecResult, timeoutS: number): string {
   if (res.exitCode === 124) return `timed out after ${timeoutS}s`;
-  const last = (text: string): string | undefined => text.split("\n").map(l => l.trim()).filter(l => l !== "").at(-1);
-  return (last(res.stderr) ?? last(res.stdout) ?? `exit ${res.exitCode}`).slice(0, 160);
+  const lines = (text: string): string[] => text.split("\n").map(l => l.trim()).filter(l => l !== "");
+  const err = lines(res.stderr);
+  return (err.filter(l => l.startsWith("Error:")).at(-1) ?? err.at(-1) ?? lines(res.stdout).at(-1) ?? `exit ${res.exitCode}`).slice(0, 160);
 }
 
 type FreeDisk = { kind: "free"; bytes: number } | { kind: "unknown"; reason: string };

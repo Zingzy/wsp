@@ -394,8 +394,11 @@ function summaryNote(manifest: Manifest, ticks: ReadonlySet<string>, choices: Re
   const upload = fmtBytes(manifest.entries.filter(e => ticks.has(e.id)).reduce((n, e) => n + e.bytes, 0));
   const bring = manifest.entries.filter(e => ticks.has(e.id)).map(e => ({ ...e, bring: true }));
   const agents = agentInstallsFor(bring, { claude: CLAUDE_INSTALLER }).installs.map(a => a.name);
-  const tools = toolInstallsFor(bring).installs.filter(t => t.id !== "tools/homebrew").length;
-  const installs = [...agents, ...(tools > 0 ? [`${tools} tool${tools === 1 ? "" : "s"}`] : [])];
+  // Only what the person ticked counts as their tools; Homebrew and its toolchain are named apart.
+  const steps = toolInstallsFor(bring).installs;
+  const tools = steps.filter(t => ticks.has(t.id)).length;
+  const toolchain = steps.some(t => t.id.startsWith("tools/brew-toolchain/")) ? " plus Homebrew's toolchain" : "";
+  const installs = [...agents, ...(tools > 0 ? [`${tools} tool${tools === 1 ? "" : "s"}${toolchain}`] : [])];
   return [
     ...table(rows, ["left", "right", "right"]),
     ...table(logins.map(e => [`  ${ellipsize(e.label, labelRoom)}`, answer(e)])),
@@ -527,29 +530,17 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   saveRecipe(path, manifest, ticks, choices);
   log.step(`Recipe saved to ${path}`, out);
 
-  const bringFor = (): ManifestEntry[] =>
-    manifest.entries.filter(e => ticks.has(e.id)).map(e => {
-      const choice = choices.get(e.id);
-      return isLoginChoice(choice) ? { ...e, choice } : e;
-    });
-  // Keychain consent is asked here, before anything boots, so a refusal costs no
-  // machine: the row turns into a sign-in on the machine and the confirm sees that.
-  const wanted = keychainLogins(bringFor(), opts.platform);
-  const reading = spin(io.output, "Reading your Keychain logins", io.isTTY && wanted.length > 0);
-  const secrets = await readSecrets(wanted, opts.secrets);
-  reading.stop();
-  if (secrets.refused.length > 0) {
-    const label = (id: string) => manifest.entries.find(e => e.id === id)?.label ?? id;
-    for (const r of secrets.refused) choices.set(r.id, "machine");
-    log.warn(secrets.refused.map(r => `${label(r.id)}: Keychain read failed (${r.reason}); you will sign in on the machine instead.`).join("\n"), out);
-    saveRecipe(path, manifest, ticks, choices);
-  }
-  const bring = bringFor();
+  const bring = manifest.entries.filter(e => ticks.has(e.id)).map(e => {
+    const choice = choices.get(e.id);
+    return isLoginChoice(choice) ? { ...e, choice } : e;
+  });
+  // Filled by the Keychain reads below, after the earlier-builder check; the pack reads it only at build time.
+  const secrets = new Map<string, string>();
   const resultsPath = importResultPath(opts.statePath);
   let installs: string[] | undefined;
   const imp = importFor(bring, {
     home: opts.home,
-    secrets: secrets.values,
+    secrets,
     platform: opts.platform,
     onResult: r => {
       writeFileSync(resultsPath, `${JSON.stringify(r, null, 2)}\n`);
@@ -574,6 +565,20 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     log.warn(["A builder from an earlier wsp init is still running on the account:", ...lines].join("\n"), out);
     cancel("Nothing was booted. Kill it first (the Solari console lists it); a builder cannot be sealed after a restart. Then run wsp init again.", out);
     return { code: 1 };
+  }
+  // Keychain consent is asked here, before anything boots and after every road that cancels the
+  // run, so a refusal costs no machine: the row turns into a sign-in on the machine and the pack
+  // finds no value for it.
+  const wanted = keychainLogins(bring, opts.platform);
+  const reading = spin(io.output, "Reading your Keychain logins", io.isTTY && wanted.length > 0);
+  const read = await readSecrets(wanted, opts.secrets);
+  reading.stop();
+  for (const [service, value] of read.values) secrets.set(service, value);
+  if (read.refused.length > 0) {
+    const label = (id: string) => manifest.entries.find(e => e.id === id)?.label ?? id;
+    for (const r of read.refused) choices.set(r.id, "machine");
+    log.warn(read.refused.map(r => `${label(r.id)}: Keychain read failed (${r.reason}); changed to sign in on the machine.`).join("\n"), out);
+    saveRecipe(path, manifest, ticks, choices);
   }
   const question = bootQuestion(recipe, opts.pricing);
   if (interactive) {

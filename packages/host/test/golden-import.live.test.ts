@@ -83,6 +83,8 @@ describe.runIf(LIVE)("golden import (live: apply a trimmed recipe, seal, fork, p
       expect(result?.tools.find(t => t.id === "tools/brew/jq")?.outcome).toBe("installed");
       expect(result?.agents.find(a => a.id === "agents/codex")?.outcome).toBe("installed");
 
+      const free = await (await backend.get(builder.id)).exec("df -Pk /root | awk 'NR==2{print $4}'", { timeoutMs: 30_000 });
+      print(`free on the builder after tools and agents: ${(Number(free.stdout.trim()) / 1024).toFixed(0)} MB`);
       const tSeal = Date.now();
       const { version } = await rt.golden.seal(builder.id);
       const sealMs = Date.now() - tSeal;

@@ -205,7 +205,8 @@ describe("wsp init, interactive", () => {
     expect(summary).toMatch(/Claude Code login\s+sign in/);
     expect(summary).not.toContain("id_ed25519");
     expect(summary).toMatch(/Upload\s+\d[\d.]* [KM]B, nothing has left this computer yet/);
-    expect(summary).toMatch(/Installs\s+Claude Code/);
+    // Their three ticked tools; Homebrew's own glibc and gcc are named apart, not counted as theirs.
+    expect(summary).toMatch(/Installs\s+Claude Code, 3 tools plus Homebrew's toolchain/);
     expect(f.backends.flatMap(b => b.machines)).toHaveLength(0);
     await f.press("y");
 
@@ -467,17 +468,17 @@ describe("wsp init, flags and no terminal", () => {
     expect(result.code).toBe(0);
     const out = f.text();
     expect(f.reads).toEqual(["gh:github.com"]);
-    const note = out.indexOf("GitHub CLI login: Keychain read failed (security: SecKeychainSearchCopyNext: User canceled the operation.); you will sign in on the machine instead.");
+    const note = out.indexOf("GitHub CLI login: Keychain read failed (security: SecKeychainSearchCopyNext: User canceled the operation.); changed to sign in on the machine.");
     expect(note).toBeGreaterThan(-1);
     expect(note).toBeLessThan(out.search(BOOT));
-    // The refusal happened with no machine on the account; the pack later asks the Keychain for nothing.
+    // The refusal happened with no machine on the account; the pack later asks the Keychain for nothing and notes the row.
     const saved = loadManifest(join(dirs[0]!, "golden-recipe.json"));
     expect(saved.entries.find(e => e.id === "logins/gh")?.choice).toBe("machine");
     expect(f.checklists[0]).toEqual(expect.arrayContaining([{ label: "GitHub CLI login", command: "gh auth login" }]));
     const log = f.backends[0]!.machines[0]!.execLog;
     expect(log.some(c => c.includes("tar xzf"))).toBe(true);
-    const skipped = JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8")).files.skipped as { path: string }[];
-    expect(skipped.filter(s => s.path.startsWith("Keychain:"))).toEqual([]);
+    const skipped = JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8")).files.skipped as { id: string; path: string; note: string }[];
+    expect(skipped.filter(s => s.path.startsWith("Keychain:"))).toEqual([{ id: "logins/gh", path: "Keychain: gh:github.com", note: "not read from the Keychain; sign in on the machine" }]);
   });
 
   it("--yes with --manifest takes the file's ticks, asks nothing, prints the address and never opens a browser", async () => {
@@ -620,6 +621,8 @@ describe("wsp init, flags and no terminal", () => {
     expect(out).toMatch(/default \(m1\), \d+\.\ds old, about \$\d+\.\d\d so far/);
     expect(out).toContain("Nothing was booted. Kill it first (the Solari console lists it); a builder cannot be sealed after a restart.");
     expect(out).not.toContain("save it");
+    // The refusal came before any consent dialog: the Keychain was never asked.
+    expect(f.reads).toEqual([]);
     expect(out).not.toMatch(BOOT);
     expect(shared.machines).toHaveLength(1);
     expect(shared.machines[0]!.killed).toBe(false);

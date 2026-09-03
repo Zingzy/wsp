@@ -465,6 +465,15 @@ describe("golden import stages", () => {
     expect(b3.import?.smoke).toBe("codex --version");
   });
 
+  it("a failure's reason is Homebrew's Error: line, not the advice line that follows it", async () => {
+    const { backend, fetch } = backendFor([
+      ["brew install gh", { exitCode: 1, stdout: "==> Fetching downloads for: gh\n", stderr: "Error: gh: A `brew install gh` process has already locked /home/linuxbrew/.linuxbrew/Cellar/gcc.\nPlease wait for it to finish or terminate it to continue.\n" }],
+    ]);
+    const results: ImportResult[] = [];
+    await prepareBuilder({ backend, setup: "true", fetch, import: importOf({ onResult: r => void results.push(r) }) });
+    expect(results[0]!.tools[1]!.note).toBe("Error: gh: A `brew install gh` process has already locked /home/linuxbrew/.linuxbrew/Cellar/gcc.");
+  });
+
   it("when Homebrew itself fails, every brew formula is skipped rather than tried", async () => {
     const { backend, cmds, fetch } = backendFor([["brew-bootstrap", { exitCode: 1, stdout: "", stderr: "git: not found" }]]);
     const { stages, onStage } = stageRecorder();

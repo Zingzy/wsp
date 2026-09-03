@@ -120,7 +120,7 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
         const real = resolved(src);
         if (real === undefined) skipped.push({ id: f.id, path: shown, note: "a link whose target is gone" });
         else if (!(real === opts.home || real.startsWith(`${opts.home}/`))) skipped.push({ id: f.id, path: shown, note: `a link to ${real}, outside your home directory` });
-        else if (src.startsWith(`${real}/`)) skipped.push({ id: f.id, path: shown, note: "a link into its own directory" });
+        else if (resolved(dirname(src)) === real || (resolved(dirname(src)) ?? "").startsWith(`${real}/`)) skipped.push({ id: f.id, path: shown, note: "a link into its own directory" });
         else {
           const why = refusedPath(relative(opts.home, real), statSync(real).isDirectory());
           if (why === undefined) return true;
