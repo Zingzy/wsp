@@ -4,6 +4,7 @@ import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
 import { WsClient } from "./ws-client.js";
 import { stubBackend } from "./stub-backend.js";
+import { until } from "./until.js";
 
 let srv: RuntimeServer | undefined;
 afterEach(async () => {
@@ -85,8 +86,7 @@ describe("serveRuntime events", () => {
 
     const created = await sub.request("workspaces.create", { golden: "snap_g", name: "x" });
     expect(created.ok).toBe(true);
-    await new Promise(r => setTimeout(r, 50));
-    expect(sub.events.map(e => e.type)).toContain("workspace.created");
+    await until(() => sub.events.some(e => e.type === "workspace.created"));
     expect(quiet.events).toEqual([]);
     sub.close();
     quiet.close();
@@ -205,7 +205,7 @@ describe("serveRuntime golden wizard ops", () => {
     expect(await store.list("builders")).toEqual([]);
     expect((await c.request("golden.get", { name: "default" }))["manifest"]).toEqual(sealed["manifest"]);
 
-    await new Promise(r => setTimeout(r, 20));
+    await until(() => c.events.some(e => e.type === "golden.stage" && e["stage"] === "sealed"));
     const stages = c.events.filter(e => e.type === "golden.stage").map(e => e["stage"]);
     expect(stages).toEqual(["creating", "installing-harness", "ready", "snapshotting", "smoke-forking", "sealed"]);
     expect(c.events.filter(e => e.type === "golden.stage").every(e => e["name"] === "default")).toBe(true);

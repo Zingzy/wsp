@@ -45,6 +45,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
+import { realClock, type Clock } from "./clock.js";
 import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy, idleReason } from "./idle.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
 import { createStatusTracker, machineStateOf, type StatusApi, type StatusWatchOptions } from "./status.js";
@@ -181,6 +182,8 @@ export interface RuntimeOptions {
   /** Defaults for the status poller / cost ticker (tests shrink the intervals). */
   status?: StatusWatchOptions;
   idle?: { defaultWindowMs?: number };
+  /** Drives the idle window and the transcript debounce; tests inject one they advance by hand. */
+  clock?: Clock;
   /** How long a seal waits for a killed machine to read gone (tests shrink it). */
   killConfirm?: KillConfirm;
   wake?: WakeOptions;
@@ -317,7 +320,7 @@ const DAEMON_TOKEN_MISS_TTL_MS = 60_000;
 const TRANSCRIPT_CAP = 5000;
 /** A turn boundary waits this long for more before the transcript is written; measured at one put per
  * event, 5000 events cost 4 s of memory-store clones and 6.6 s of file rewrites after the last turn. */
-const TRANSCRIPT_FLUSH_MS = 250;
+export const TRANSCRIPT_FLUSH_MS = 250;
 
 interface TranscriptRecord {
   workspaceId: string;
@@ -388,6 +391,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const pingTimeoutMs = opts.wake?.pingTimeoutMs ?? WAKE_PING_TIMEOUT_MS;
   const vaultCapBytes = opts.wake?.vaultCapBytes ?? VAULT_CAP_BYTES;
   const defaultIdleWindowMs = opts.idle?.defaultWindowMs ?? DEFAULT_IDLE_WINDOW_MS;
+  const clock = opts.clock ?? realClock;
 
   const vaultPathsOf = async (m: Machine): Promise<string[]> => {
     if (opts.vaultPaths) return opts.vaultPaths;
@@ -408,7 +412,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   // Puts are chained per workspace so the later snapshot always lands last,
   // whatever order the store finishes in.
   const transcriptFlushes = new Map<string, Promise<void>>();
-  const transcriptTimers = new Map<string, NodeJS.Timeout>();
+  const transcriptTimers = new Map<string, () => void>();
   // Keyed by machine id: a resurrect or upgrade brings a fresh guest and file.
   const daemonTokens = new Map<string, { token: string | undefined; readAt: number }>();
   const daemonTokenOf = async (machine: Machine): Promise<string | undefined> => {
@@ -421,7 +425,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
 
   const cancelFlush = (workspaceId: string): void => {
-    clearTimeout(transcriptTimers.get(workspaceId));
+    transcriptTimers.get(workspaceId)?.();
     transcriptTimers.delete(workspaceId);
   };
 
@@ -454,7 +458,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (events.length > TRANSCRIPT_CAP) events.splice(0, events.length - TRANSCRIPT_CAP);
     if (event.type === "session.end") void flushTranscript(event.workspaceId);
     else if (event.type !== "session.delta" && !transcriptTimers.has(event.workspaceId)) {
-      transcriptTimers.set(event.workspaceId, setTimeout(() => void flushTranscript(event.workspaceId), TRANSCRIPT_FLUSH_MS));
+      transcriptTimers.set(event.workspaceId, clock.schedule(() => void flushTranscript(event.workspaceId), TRANSCRIPT_FLUSH_MS));
     }
     bus.emit(event);
   };
@@ -644,6 +648,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     onIdle: async (id, windowMs) => {
       await napWith(id, idleReason(windowMs));
     },
+    clock,
   });
   // Every road into a workspace the runtime can see starts its window over;
   // typing over the browser's daemon link arrives as workspaces.touch.
