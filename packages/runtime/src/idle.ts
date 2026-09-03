@@ -5,6 +5,8 @@
 // behind this one as a backstop, at twice the window, so it fires only when
 // this process is gone.
 
+import { realClock, type Clock } from "./clock.js";
+
 export const DEFAULT_IDLE_WINDOW_MS = 20 * 60_000;
 
 /** Backstop for a workspace whose auto-nap is off: long enough that the
@@ -27,6 +29,8 @@ export interface IdlePolicyOptions {
   windowOf(id: string): number | null;
   /** Fires once when a window runs out; the workspace is forgotten until its next touch. */
   onIdle(id: string, windowMs: number): Promise<void>;
+  /** Defaults to the process timers; tests inject one they advance by hand. */
+  clock?: Clock;
 }
 
 export interface IdlePolicy {
@@ -44,18 +48,19 @@ export interface IdlePolicy {
 
 interface Armed {
   at: number;
-  timer: ReturnType<typeof setTimeout>;
+  cancel: () => void;
 }
 
 export function createIdlePolicy(o: IdlePolicyOptions): IdlePolicy {
   const armed = new Map<string, Armed>();
   const holds = new Map<string, number>();
+  const clock = o.clock ?? realClock;
   let closed = false;
 
   const forget = (id: string): void => {
     const a = armed.get(id);
     if (!a) return;
-    clearTimeout(a.timer);
+    a.cancel();
     armed.delete(id);
   };
 
@@ -64,16 +69,15 @@ export function createIdlePolicy(o: IdlePolicyOptions): IdlePolicy {
     if (closed) return;
     const windowMs = o.windowOf(id);
     if (windowMs === null) return;
-    const timer = setTimeout(() => {
+    const cancel = clock.schedule(() => {
       armed.delete(id);
       if ((holds.get(id) ?? 0) > 0) {
         arm(id);
         return;
       }
       o.onIdle(id, windowMs).catch((e: unknown) => console.warn(`idle nap of ${id} failed: ${e instanceof Error ? e.message : String(e)}`));
-    }, windowMs);
-    timer.unref?.();
-    armed.set(id, { at: Date.now() + windowMs, timer });
+    }, windowMs, { unref: true });
+    armed.set(id, { at: clock.now() + windowMs, cancel });
   };
 
   return {
