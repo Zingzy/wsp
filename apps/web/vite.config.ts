@@ -16,6 +16,9 @@ export default defineConfig({
   // the dev dependency prescan has its own esbuild target and needs the same.
   build: { target: "es2022" },
   optimizeDeps: { esbuildOptions: { target: "es2022" } },
+  // @pierre/diffs' highlighter worker loads its wasm engine with a dynamic
+  // import, which Vite 5's default iife worker format cannot bundle.
+  worker: { format: "es" },
   test: {
     environment: "jsdom",
     globals: true,

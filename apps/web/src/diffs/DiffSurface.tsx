@@ -1,0 +1,369 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// The right panel's Diff surface over git.diff: a scope picker (working
+// tree, staged, branch against its merge-base), a folder picker because the
+// daemon root is HOME and the repo sits below it, the changed-files tree,
+// and the copied code view with per-file collapse and inline comments that
+// stay in this surface until a composer exists to hand them to.
+import {
+  ArrowRightIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  ChevronsDownUpIcon,
+  ChevronsUpDownIcon,
+  Columns2Icon,
+  FolderIcon,
+  RefreshCwIcon,
+  Rows3Icon,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { GitDiffReply } from "@wsp/protocol";
+import { ChangedFilesTree } from "../components/chat/ChangedFilesTree.js";
+import { DiffStatLabel } from "../components/chat/DiffStatLabel.js";
+import { AnnotatableCodeView, type AnnotatableCodeViewHandle } from "../components/diffs/AnnotatableCodeView.js";
+import { Button } from "../components/ui/button.js";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu.js";
+import { Spinner } from "../components/ui/spinner.js";
+import { Toggle, ToggleGroup } from "../components/ui/toggle-group.js";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
+import { NotRunning } from "../files/FilesSurface.js";
+import { ROOT, useWorkspaceListing } from "../files/listing.js";
+import { useDaemonWire } from "../files/wire.js";
+import { areAllDiffFilesCollapsed, toggleAllDiffFiles } from "../lib/diffCollapse.js";
+import { getDiffCollapseIconClassName, resolveDiffThemeName, resolveFileDiffPath } from "../lib/diffRendering.js";
+import { PREFERRED_HIGHLIGHTER } from "../lib/syntaxHighlighting.js";
+import { cn } from "../lib/utils.js";
+import { useWorkspace } from "../protocol/store.js";
+import type { ReviewCommentContext } from "../reviewCommentContext.js";
+import { gitDiff } from "../terminal/daemon-fs.js";
+import { SCOPE_LABELS, SCOPES, toDiffModel, topLevelDirectories } from "./model.js";
+import { selectDiffSelection, useDiffStore } from "./store.js";
+
+type LoadState =
+  | { kind: "pending"; last: GitDiffReply | null }
+  | { kind: "ready"; reply: GitDiffReply }
+  | { kind: "error"; message: string; last: GitDiffReply | null };
+
+const NO_KEYS: ReadonlySet<string> = new Set();
+
+function lastReply(state: LoadState): GitDiffReply | null {
+  return state.kind === "ready" ? state.reply : state.last;
+}
+
+export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme: "light" | "dark" }) {
+  const wire = useDaemonWire(workspaceId);
+  const projectName = useWorkspace(workspaceId)?.name ?? "workspace";
+  const selection = useDiffStore(s => selectDiffSelection(s.byWorkspaceId, workspaceId));
+  const renderMode = useDiffStore(s => s.renderMode);
+  const setScope = useDiffStore(s => s.setScope);
+  const setCwd = useDiffStore(s => s.setCwd);
+  const setRenderMode = useDiffStore(s => s.setRenderMode);
+  const listing = useWorkspaceListing(workspaceId);
+  const folders = useMemo(() => topLevelDirectories(listing.entries ?? []), [listing.entries]);
+  const [load, setLoad] = useState<LoadState>({ kind: "pending", last: null });
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(NO_KEYS);
+  const [treeOpen, setTreeOpen] = useState(true);
+  const [comments, setComments] = useState<ReviewCommentContext[]>([]);
+  const viewerRef = useRef<AnnotatableCodeViewHandle>(null);
+  const { scope, cwd } = selection;
+  const scopeKey = `${cwd} ${scope}`;
+  const folderLabel = cwd === ROOT ? projectName : cwd;
+
+  const fetchDiff = useCallback(() => {
+    if (!wire) return;
+    let gone = false;
+    setLoad(current => ({ kind: "pending", last: lastReply(current) }));
+    gitDiff(wire, cwd, scope).then(
+      reply => {
+        if (!gone) setLoad({ kind: "ready", reply });
+      },
+      (e: unknown) => {
+        if (!gone) setLoad(current => ({ kind: "error", message: e instanceof Error ? e.message : String(e), last: lastReply(current) }));
+      },
+    );
+    return () => {
+      gone = true;
+    };
+  }, [wire, cwd, scope]);
+
+  useEffect(() => fetchDiff(), [fetchDiff]);
+  // A new scope or folder is a new set of files; stale collapse keys would pin
+  // the wrong ones shut and comments would point at lines that no longer exist.
+  useEffect(() => {
+    setCollapsed(NO_KEYS);
+    setComments([]);
+  }, [scopeKey]);
+
+  const reply = lastReply(load);
+  const model = useMemo(() => (reply ? toDiffModel(reply, scopeKey) : null), [reply, scopeKey]);
+  const fileKeys = useMemo(() => model?.files.map(f => f.fileKey) ?? [], [model]);
+  const allCollapsed = areAllDiffFilesCollapsed(fileKeys, collapsed);
+  const codeViewFiles = useMemo(
+    () => (model?.files ?? []).map(f => ({ ...f, collapsed: collapsed.has(f.fileKey) })),
+    [model, collapsed],
+  );
+
+  const toggleFile = (fileKey: string) => {
+    setCollapsed(current => {
+      const next = new Set(current);
+      if (next.has(fileKey)) next.delete(fileKey);
+      else next.add(fileKey);
+      return next;
+    });
+  };
+  const revealFile = (filePath: string) => {
+    const file = model?.files.find(f => f.filePath === filePath);
+    if (!file) return;
+    setCollapsed(current => {
+      if (!current.has(file.fileKey)) return current;
+      const next = new Set(current);
+      next.delete(file.fileKey);
+      return next;
+    });
+    viewerRef.current?.scrollTo({ type: "item", id: file.fileKey, align: "start" });
+  };
+
+  if (!wire) return <NotRunning />;
+
+  const isPending = load.kind === "pending";
+  const scopeLabel = SCOPE_LABELS[scope];
+
+  return (
+    <div className="flex h-full min-w-0 flex-col bg-background" data-diff-surface data-diff-scope={scope}>
+      <div
+        className="flex h-10 min-h-10 shrink-0 items-center justify-between gap-2 border-b border-border/60 bg-background px-3 in-data-[preview-panel-mode=inline]:mb-3 in-data-[preview-panel-mode=inline]:h-7 in-data-[preview-panel-mode=inline]:min-h-7 in-data-[preview-panel-mode=inline]:border-b-transparent"
+        data-surface-subheader
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <Menu>
+            <MenuTrigger
+              className="inline-flex h-6 max-w-full items-center gap-1 rounded-md bg-accent px-2 text-xs font-medium text-accent-foreground outline-none transition-colors hover:bg-accent/80 focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={`Diff scope: ${scopeLabel}`}
+            >
+              <span className="truncate">{scopeLabel}</span>
+              <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
+            </MenuTrigger>
+            <MenuPopup align="start" className="w-60">
+              {SCOPES.map(candidate => (
+                <MenuItem
+                  key={candidate}
+                  className={candidate === scope ? "bg-foreground/[0.08]" : undefined}
+                  onClick={() => setScope(workspaceId, candidate)}
+                >
+                  <span>{SCOPE_LABELS[candidate]}</span>
+                </MenuItem>
+              ))}
+            </MenuPopup>
+          </Menu>
+          <Menu>
+            <MenuTrigger
+              className="inline-flex h-6 min-w-0 max-w-48 items-center gap-1 rounded-md px-1.5 text-xs text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={`Diff folder: ${folderLabel}`}
+              title="Folder git runs in"
+            >
+              <FolderIcon className="size-3.5 shrink-0 opacity-70" />
+              <span className="min-w-0 truncate">{folderLabel}</span>
+              <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
+            </MenuTrigger>
+            <MenuPopup align="start" className="w-64">
+              <MenuItem className={cwd === ROOT ? "bg-foreground/[0.08]" : undefined} onClick={() => setCwd(workspaceId, ROOT)}>
+                <span>Workspace root</span>
+              </MenuItem>
+              {folders.map(folder => (
+                <MenuItem key={folder} className={cwd === folder ? "bg-foreground/[0.08]" : undefined} onClick={() => setCwd(workspaceId, folder)}>
+                  <span className="truncate font-mono text-xs">{folder}</span>
+                </MenuItem>
+              ))}
+              {folders.length === 0 ? <MenuItem disabled>No folders under the root.</MenuItem> : null}
+            </MenuPopup>
+          </Menu>
+          {scope === "branch" && reply?.base ? (
+            <div
+              className="flex min-w-0 max-w-full items-center gap-2 overflow-hidden text-xs text-muted-foreground"
+              aria-label={`Comparing HEAD against ${reply.base}`}
+              data-diff-base={reply.base}
+            >
+              <span className="min-w-0 truncate">HEAD</span>
+              <ArrowRightIcon className="size-3.5 shrink-0 opacity-70" />
+              <span className="min-w-0 max-w-48 truncate">{reply.base}</span>
+            </div>
+          ) : null}
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {model && model.files.length > 0 ? (
+            <DiffStatLabel additions={model.stat.additions} deletions={model.stat.deletions} className="mr-1 text-[11px]" layout="inline" />
+          ) : null}
+          <Tooltip>
+            <TooltipTrigger
+              render={<Button type="button" size="icon-sm" variant="ghost" aria-label={isPending ? "Refreshing diff" : "Refresh diff"} onClick={fetchDiff} />}
+            >
+              <RefreshCwIcon className={cn("size-3.5", isPending && "animate-spin")} />
+            </TooltipTrigger>
+            <TooltipPopup side="top">{isPending ? "Refreshing diff…" : "Refresh diff"}</TooltipPopup>
+          </Tooltip>
+          {fileKeys.length > 0 ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={allCollapsed ? "Expand all files" : "Collapse all files"}
+                    onClick={() => setCollapsed(toggleAllDiffFiles(fileKeys, collapsed))}
+                  />
+                }
+              >
+                {allCollapsed ? <ChevronsUpDownIcon className="size-3.5" /> : <ChevronsDownUpIcon className="size-3.5" />}
+              </TooltipTrigger>
+              <TooltipPopup side="top">{allCollapsed ? "Expand all files" : "Collapse all files"}</TooltipPopup>
+            </Tooltip>
+          ) : null}
+          <ToggleGroup
+            className="shrink-0 gap-1"
+            size="sm"
+            value={[renderMode]}
+            onValueChange={value => {
+              const next = value[0];
+              if (next === "stacked" || next === "split") setRenderMode(next);
+            }}
+          >
+            <Toggle aria-label="Stacked diff view" value="stacked" variant="ghost">
+              <Rows3Icon className="size-3.5" />
+            </Toggle>
+            <Toggle aria-label="Split diff view" value="split" variant="ghost">
+              <Columns2Icon className="size-3.5" />
+            </Toggle>
+          </ToggleGroup>
+        </div>
+      </div>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
+        {reply?.truncated ? (
+          <p className="shrink-0 border-b border-border/70 bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground" data-diff-truncated>
+            This diff was cut at the daemon's 2 MiB budget. Files listed without a patch changed too.
+          </p>
+        ) : null}
+        {load.kind === "error" ? (
+          <p className="shrink-0 border-b border-border/70 px-3 py-2 text-[11px] text-destructive" role="alert">
+            {load.message}
+          </p>
+        ) : null}
+        {model === null ? (
+          load.kind === "pending" ? (
+            <div className="flex flex-1 items-center justify-center text-muted-foreground" role="status" aria-label="Loading diff">
+              <Spinner className="size-5" />
+            </div>
+          ) : null
+        ) : model.raw ? (
+          <div className="min-h-0 flex-1 overflow-auto p-2">
+            <p className="mb-2 text-[11px] text-muted-foreground/75">{model.raw.reason}</p>
+            <pre className="rounded-md border border-border/70 bg-background/70 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground/90">{model.raw.text}</pre>
+          </div>
+        ) : model.changedFiles.length === 0 ? (
+          <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
+            No changes in {scopeLabel.toLowerCase()} for {folderLabel}.
+          </div>
+        ) : (
+          <>
+            <div className="shrink-0 border-b border-border/60" data-changed-files>
+              <button
+                type="button"
+                aria-expanded={treeOpen}
+                className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-xs font-medium text-foreground transition-colors hover:bg-accent/60"
+                onClick={() => setTreeOpen(open => !open)}
+              >
+                <ChevronRightIcon className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", treeOpen && "rotate-90")} />
+                <span>
+                  {model.changedFiles.length} changed file{model.changedFiles.length === 1 ? "" : "s"}
+                </span>
+              </button>
+              {treeOpen ? (
+                <div className="max-h-56 overflow-auto px-1 pb-1.5">
+                  <ChangedFilesTree
+                    turnId={scopeKey}
+                    files={model.changedFiles}
+                    allDirectoriesExpanded
+                    resolvedTheme={theme}
+                    onOpenTurnDiff={(_turn, filePath) => {
+                      if (filePath) revealFile(filePath);
+                    }}
+                  />
+                </div>
+              ) : null}
+            </div>
+            {codeViewFiles.length > 0 ? (
+              <div
+                className="min-h-0 flex-1"
+                onClickCapture={event => {
+                  const composedPath = event.nativeEvent.composedPath?.() ?? [];
+                  // Header controls keep their own actions; the chevron must not
+                  // also fire the row toggle or the two cancel each other.
+                  for (const node of composedPath) {
+                    if (node instanceof HTMLButtonElement || node instanceof HTMLAnchorElement) return;
+                  }
+                  const header = composedPath.find(
+                    (node): node is HTMLElement => node instanceof HTMLElement && node.hasAttribute("data-diffs-header"),
+                  );
+                  const headerFilePath = header?.querySelector("[data-title]")?.textContent?.trim();
+                  if (!headerFilePath) return;
+                  const file = codeViewFiles.find(candidate => candidate.filePath === headerFilePath);
+                  if (file) toggleFile(file.fileKey);
+                }}
+              >
+                <AnnotatableCodeView
+                  key={scopeKey}
+                  viewerRef={viewerRef}
+                  codeViewKey={scopeKey}
+                  className="h-full min-h-0 overflow-auto"
+                  files={codeViewFiles}
+                  sectionId={scopeKey}
+                  sectionTitle={scopeLabel}
+                  reviewComments={comments}
+                  onAddReviewComment={comment => setComments(current => [...current, comment])}
+                  onRemoveReviewComment={id => setComments(current => current.filter(c => c.id !== id))}
+                  renderHeaderPrefix={(fileDiff, fileKey, isCollapsed) => {
+                    const filePath = resolveFileDiffPath(fileDiff);
+                    return (
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Button
+                              size="icon-micro"
+                              variant="ghost"
+                              className={cn("-ms-0.5 [--control-icon-color:currentColor] bg-transparent hover:bg-foreground/10", getDiffCollapseIconClassName(fileDiff))}
+                              aria-label={isCollapsed ? `Expand ${filePath}` : `Collapse ${filePath}`}
+                              aria-expanded={!isCollapsed}
+                              onClick={event => {
+                                event.stopPropagation();
+                                toggleFile(fileKey);
+                              }}
+                            />
+                          }
+                        >
+                          {isCollapsed ? <ChevronRightIcon className="size-4" /> : <ChevronDownIcon className="size-4" />}
+                        </TooltipTrigger>
+                        <TooltipPopup side="top">{isCollapsed ? "Expand diff" : "Collapse diff"}</TooltipPopup>
+                      </Tooltip>
+                    );
+                  }}
+                  options={{
+                    diffStyle: renderMode === "split" ? "split" : "unified",
+                    lineDiffType: "none",
+                    overflow: "scroll",
+                    theme: resolveDiffThemeName(theme),
+                    preferredHighlighter: PREFERRED_HIGHLIGHTER,
+                    themeType: theme,
+                    stickyHeaders: true,
+                  }}
+                />
+              </div>
+            ) : (
+              <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
+                Every changed file was over the patch budget; nothing to render.
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}

@@ -77,8 +77,8 @@ type SurfaceKey = "browser" | "terminal" | "files" | "diff" | "machine" | "scree
 const SURFACE_UNAVAILABLE_HINTS: Record<SurfaceKey, string> = {
   browser: "Available while the workspace is running.",
   terminal: "Available while the workspace is running.",
-  files: "Not available in this build.",
-  diff: "Not available in this build.",
+  files: "Browse files once the workspace is running.",
+  diff: "Review changes once the workspace is running.",
   machine: "Available when a workspace is selected.",
   screen: "Available when the machine has a display.",
 };
