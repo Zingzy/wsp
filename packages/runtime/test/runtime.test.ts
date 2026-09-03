@@ -3,11 +3,12 @@ import { gunzipSync } from "node:zlib";
 import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
 import type { EventUnion } from "@wsp/protocol";
 import type { GoldenImport } from "@wsp/engine";
-import { createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
+import { TRANSCRIPT_FLUSH_MS, createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
 import { wsRequest } from "./ws-client.js";
 import { stubBackend } from "./stub-backend.js";
+import { fakeClock } from "./fake-clock.js";
 
 describe("runtime", () => {
   it("creates a workspace from a golden manifest and emits protocol events", async () => {
@@ -268,16 +269,19 @@ describe("runtime session history", () => {
   it("coalesces a burst of turn boundaries into one put after the debounce instead of one per event", async () => {
     const { store, stored, puts } = countingStore();
     const m = manual();
-    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: m.adapter } });
+    const fc = fakeClock();
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: m.adapter }, clock: fc.clock });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     await rt.sessions.start(ws.id, { prompt: "go" });
     m.start();
     for (let i = 0; i < 20; i++) m.done(`t${i}`);
-    await sleep(50);
+    fc.advance(TRANSCRIPT_FLUSH_MS - 1);
     expect(puts()).toBe(0);
-    await sleep(400);
-    expect(puts()).toBe(1);
+    fc.advance(1);
+    expect(await until(async () => puts() === 1, 1000)).toBe(true);
     expect((await stored(ws.id)).length).toBe(21);
+    fc.advance(TRANSCRIPT_FLUSH_MS * 2);
+    expect(puts()).toBe(1);
     m.end();
     await rt.close();
   });
@@ -292,10 +296,31 @@ describe("runtime session history", () => {
     expect(puts()).toBe(1);
   });
 
+  it("a pending debounce holds the process open until it flushes; the idle window does not", async () => {
+    const { store, puts } = countingStore();
+    const m = manual();
+    const fc = fakeClock();
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: m.adapter }, clock: fc.clock });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    expect(fc.pending()).toBe(1);
+    expect(fc.holding()).toBe(0);
+    await rt.sessions.start(ws.id, { prompt: "go" });
+    m.start();
+    m.done("t0");
+    expect(fc.pending()).toBe(2);
+    expect(fc.holding()).toBe(1);
+    fc.advance(TRANSCRIPT_FLUSH_MS);
+    expect(await until(async () => puts() === 1, 1000)).toBe(true);
+    expect(fc.holding()).toBe(0);
+    m.end();
+    await rt.close();
+  });
+
   it("close() writes what is still waiting on the debounce and leaves no timer behind", async () => {
     const { store, stored, puts } = countingStore();
     const m = manual();
-    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: m.adapter } });
+    const fc = fakeClock();
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: m.adapter }, clock: fc.clock });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     await rt.sessions.start(ws.id, { prompt: "go" });
     m.start();
@@ -303,7 +328,8 @@ describe("runtime session history", () => {
     await rt.close();
     expect(puts()).toBe(1);
     expect((await stored(ws.id)).map(e => e.type)).toEqual(["session.start", "session.done"]);
-    await sleep(400);
+    expect(fc.pending()).toBe(0);
+    fc.advance(TRANSCRIPT_FLUSH_MS * 2);
     expect(puts()).toBe(1);
   });
 
@@ -311,15 +337,17 @@ describe("runtime session history", () => {
     const { store, stored, puts, holdFirstPut, releaseFirstPut } = countingStore();
     holdFirstPut();
     const m = manual();
-    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: m.adapter } });
+    const fc = fakeClock();
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: m.adapter }, clock: fc.clock });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     await rt.sessions.start(ws.id, { prompt: "go" });
     m.start();
     m.done("t0");
     // the debounce fires and the first put stalls in the store; the end flush queues behind it
+    fc.advance(TRANSCRIPT_FLUSH_MS);
     expect(await until(async () => puts() === 1, 1000)).toBe(true);
     m.end();
-    await sleep(20);
+    await new Promise(r => setImmediate(r));
     expect(await stored(ws.id)).toEqual([]);
     releaseFirstPut();
     await rt.close();

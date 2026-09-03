@@ -1,3 +1,4 @@
+export * from "./clock.js";
 export * from "./runtime.js";
 export * from "./serve.js";
 export * from "./status.js";
