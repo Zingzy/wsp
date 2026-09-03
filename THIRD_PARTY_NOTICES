@@ -8,9 +8,12 @@ here are included or relied upon under their own licenses, reproduced below.
 1. pingdotgg/t3code (MIT)
 
    Files under apps/web/src/components (the ui, chat and preview folders,
-   the right-panel, page-header and no-active-thread components),
-   apps/web/src/hooks,
-   apps/web/src/lib/utils.ts, apps/web/src/index.css,
+   the right-panel, page-header, no-active-thread and terminal drawer
+   components), apps/web/src/hooks, apps/web/src/lib (utils, selection
+   actions, terminal context and labels), apps/web/src/terminal/ghostty
+   (the libghostty-vt browser adapter and its tests), apps/web/src/terminal/groups.ts,
+   apps/web/src/terminal-links.ts, apps/web/src/appearanceFonts.ts,
+   apps/web/src/index.css,
    apps/web/src/rightPanelStore.ts, apps/web/src/rightPanelLayout.ts and
    apps/web/src/workspaceTitlebar.ts are adapted from
    https://github.com/pingdotgg/t3code at commit 57a66608. Each file
@@ -67,10 +70,11 @@ here are included or relied upon under their own licenses, reproduced below.
 
 ------------------------------------------------------------------------
 
-3. libghostty vendor files (MIT), used by later tasks
+3. libghostty vendor files (MIT)
 
-   The terminal surface will ship ghostty-vt.wasm and ghostty-write-pty.wasm
-   built from https://github.com/ghostty-org/ghostty.
+   apps/web/src/terminal/ghostty/vendor/ghostty-vt.wasm and
+   ghostty-write-pty.wasm are built from https://github.com/ghostty-org/ghostty
+   and taken as-is from pingdotgg/t3code at commit 57a66608.
 
    MIT License
    
@@ -96,10 +100,10 @@ here are included or relied upon under their own licenses, reproduced below.
 
 ------------------------------------------------------------------------
 
-4. Nerd Fonts, Symbols Nerd Font Mono (MIT), used by later tasks
+4. Nerd Fonts, Symbols Nerd Font Mono (MIT)
 
-   The terminal surface will ship SymbolsNerdFontMono-Regular.woff2 from
-   https://github.com/ryanoasis/nerd-fonts.
+   apps/web/src/terminal/ghostty/fonts/SymbolsNerdFontMono-Regular.woff2 is
+   from https://github.com/ryanoasis/nerd-fonts; its LICENSE sits beside it.
 
    The MIT License (MIT)
    
