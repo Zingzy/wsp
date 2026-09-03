@@ -3,12 +3,10 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import type { GoldenBuilderView } from "@wsp/protocol";
 import { makeApi, ProtocolClient } from "./protocol/client.js";
 import { useReady, useStore } from "./protocol/store.js";
-import { Rail } from "./components/Rail.js";
 import { TabStrip } from "./components/TabStrip.js";
-import { MetaPanel } from "./components/MetaPanel.js";
+import { AppShell } from "./shell/AppShell.js";
 import { wireTerminals } from "./terminal/wiring.js";
 import { Wizard, type ChecklistItem, type KeyFlags } from "./wizard/Wizard.js";
-import styles from "./App.module.css";
 import { Gallery } from "./gallery/Gallery.js";
 
 const subscribeHash = (onChange: () => void) => {
@@ -37,12 +35,13 @@ export function App({
   checklist?: ChecklistItem[];
 }) {
   const bind = useStore(s => s.bind);
+  const setConn = useStore(s => s.setConn);
   useEffect(() => {
-    const client = new ProtocolClient({ url: wsUrl, token });
+    const client = new ProtocolClient({ url: wsUrl, token, onStatus: setConn });
     let live = true;
     void client.connect().then(() => { if (live) bind(makeApi(client)); });
     return () => { live = false; client.close(); };
-  }, [wsUrl, token, bind]);
+  }, [wsUrl, token, bind, setConn]);
   useEffect(() => wireTerminals(useStore), []);
   return <Shell {...(keys !== undefined ? { keys } : {})} {...(builder !== undefined ? { builder } : {})} {...(checklist !== undefined ? { checklist } : {})} />;
 }
@@ -50,7 +49,7 @@ export function App({
 type Golden = "unknown" | "none" | "present";
 
 /** The window below the connection: the first-run wizard until a golden
- * image exists, the three-column app from then on. */
+ * image exists, the three-region shell from then on. */
 export function Shell({ keys, builder, checklist }: { keys?: KeyFlags; builder?: GoldenBuilderView; checklist?: ChecklistItem[] }) {
   const api = useStore(s => s.api);
   const ready = useReady();
@@ -76,10 +75,12 @@ export function Shell({ keys, builder, checklist }: { keys?: KeyFlags; builder?:
     );
   }
   return (
-    <div className={styles.app}>
-      <aside className={styles.rail}><Rail /></aside>
-      <main className={styles.main}>{ready && golden === "present" ? <TabStrip /> : <div className={styles.boot}>connecting to runtime…</div>}</main>
-      <aside className={styles.meta}><MetaPanel /></aside>
-    </div>
+    <AppShell>
+      {ready && golden === "present" ? (
+        <TabStrip />
+      ) : (
+        <div className="p-6 font-mono text-sm text-muted-foreground">connecting to runtime…</div>
+      )}
+    </AppShell>
   );
 }
