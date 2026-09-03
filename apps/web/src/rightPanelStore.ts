@@ -75,6 +75,7 @@ interface RightPanelStoreState {
   closeSurfacesToRight: (workspaceId: string, surfaceId: string) => void;
   closeAllSurfaces: (workspaceId: string) => void;
   reconcileBrowserSurfaces: (workspaceId: string, tabIds: readonly string[]) => void;
+  reconcileTerminalSurfaces: (workspaceId: string, ptyIds: readonly string[]) => void;
   show: (workspaceId: string) => void;
   close: (workspaceId: string) => void;
   toggleVisibility: (workspaceId: string) => void;
@@ -413,6 +414,41 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             };
           }),
         })),
+      reconcileTerminalSurfaces: (workspaceId, ptyIds) =>
+        set((state) => ({
+          byWorkspaceId: updateWorkspace(state.byWorkspaceId, workspaceId, (current) => {
+            const live = new Set(ptyIds);
+            let changed = false;
+            const surfaces: RightPanelSurface[] = [];
+            for (const surface of current.surfaces) {
+              if (surface.kind !== "terminal") {
+                surfaces.push(surface);
+                continue;
+              }
+              const terminalIds = surface.terminalIds.filter((id) => live.has(id));
+              if (terminalIds.length === surface.terminalIds.length) {
+                surfaces.push(surface);
+                continue;
+              }
+              changed = true;
+              if (terminalIds.length === 0) continue;
+              surfaces.push({
+                ...surface,
+                terminalIds,
+                activeTerminalId: terminalIds.includes(surface.activeTerminalId)
+                  ? surface.activeTerminalId
+                  : terminalIds.at(-1)!,
+              });
+            }
+            if (!changed) return current;
+            const activeStillExists = surfaces.some((surface) => surface.id === current.activeSurfaceId);
+            return {
+              ...current,
+              surfaces,
+              activeSurfaceId: activeStillExists ? current.activeSurfaceId : (surfaces[0]?.id ?? null),
+            };
+          }),
+        })),
       show: (workspaceId) =>
         set((state) => ({
           byWorkspaceId: updateWorkspace(state.byWorkspaceId, workspaceId, (current) =>
@@ -498,4 +534,13 @@ export function selectSelectedRightPanelSurface(
 ): RightPanelSurface | null {
   const state = selectWorkspaceRightPanelState(byWorkspaceId, workspaceId);
   return state.surfaces.find((surface) => surface.id === state.activeSurfaceId) ?? null;
+}
+
+/** Every pty the workspace's right-panel terminal surfaces hold; the drawer arranges the rest. */
+export function selectPanelTerminalIds(
+  byWorkspaceId: Record<string, WorkspaceRightPanelState>,
+  workspaceId: string | null | undefined,
+): string[] {
+  const state = selectWorkspaceRightPanelState(byWorkspaceId, workspaceId);
+  return state.surfaces.flatMap((surface) => (surface.kind === "terminal" ? surface.terminalIds : []));
 }
