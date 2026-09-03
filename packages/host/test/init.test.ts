@@ -7,12 +7,14 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
+import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
 import { RUNGS } from "@wsp/collect";
+import type { BackendPricing } from "@wsp/engine";
 import { createRuntime, memoryStore, type GoldenRecipe, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { GOLDEN_SETUP } from "../src/doctor.js";
 import { loadManifest } from "../src/init-recipe.js";
-import { reduceStages, runInit, type InitIO, type InitOptions } from "../src/init.js";
+import { reduceStages, runInit, stageLine, type InitIO, type InitOptions } from "../src/init.js";
 import type { HostHandle } from "../src/server.js";
 import { FIXTURE } from "./init-fixture.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
@@ -20,6 +22,8 @@ import { stubBackend, type StubBackend } from "./stub-backend.js";
 const SOLARI = "slr_live_fake_solari_key";
 const KEY = { down: "\x1b[B", space: " ", enter: "\r", esc: "\x1b" };
 const URL_RE = /http:\/\/127\.0\.0\.1:\d+\//;
+const BOOT = /Boot a \d+ vCPU/;
+const PRICING: BackendPricing = { rateUsdPerHour: s => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 } };
 
 interface Fake {
   io: InitIO;
@@ -39,9 +43,10 @@ interface Fake {
   reads: string[];
 }
 
-function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string, string> } = {}): Fake {
+function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string, string>; columns?: number } = {}): Fake {
   const input = new PassThrough();
   const output = new PassThrough();
+  if (over.columns !== undefined) Object.assign(output, { columns: over.columns });
   const chunks: string[] = [];
   output.on("data", (c: Buffer) => chunks.push(c.toString()));
   const text = () => stripVTControlCharacters(chunks.join(""));
@@ -76,11 +81,12 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
   mkdirSync(join(home, ".ssh"), { mode: 0o700 });
   writeFileSync(join(home, ".ssh", "config"), "Host work\n", { mode: 0o600 });
   const reads: string[] = [];
-  const { tty: _tty, env: _env, ...rest } = over;
+  const { tty: _tty, env: _env, columns: _columns, ...rest } = over;
   const opts: InitOptions = {
     yes: false,
     collect: async () => FIXTURE,
     keys: { solari: SOLARI },
+    pricing: PRICING,
     statePath: join(dir, "state.json"),
     home,
     platform: "darwin",
@@ -158,7 +164,7 @@ describe("wsp init, interactive", () => {
     const first = f.text();
     // Screen one is the detection result, before any question.
     expect(first).toContain("Found on this computer");
-    expect(first).toContain("Tools          4  3 can come");
+    expect(first).toMatch(/Tools\s+4\s+3 can come/);
     expect(first).toContain("Nothing has left this computer.");
     expect(first.indexOf("Found on this computer")).toBeLessThan(first.indexOf("1/7"));
     expect(first).toContain("1/7");
@@ -177,19 +183,29 @@ describe("wsp init, interactive", () => {
     expect(f.text()).toContain("Claude Code");
     await f.press(KEY.enter);
     await f.until("Sign-ins");
-    expect(f.text()).toContain("GitHub CLI login  copy from this computer");
-    expect(f.text()).toContain("Claude Code login  sign in on the machine");
-    // gh: copy -> sign in on the machine.
-    await f.press(KEY.space, KEY.enter);
+    expect(f.text()).toMatch(/GitHub CLI login\s+copy/);
+    expect(f.text()).toMatch(/Claude Code login\s+sign in/);
+    expect(f.text()).toMatch(/Sign-ins\s+7\/7\s+1 copy, 1 sign in/);
+    // Codex was left unticked on the Agents screen, so its login is not offered.
+    expect(f.text()).not.toContain("Codex login");
+    // Past the CLI logins heading onto gh: copy -> sign in.
+    await f.press(KEY.down, KEY.space, KEY.enter);
 
-    await f.until("Boot a machine");
-    const summary = f.text().slice(f.text().lastIndexOf("Summary"));
-    expect(summary).toContain("Identity");
-    expect(summary).toContain("~/.ssh/config");
+    await f.until(BOOT);
+    const summary = f.text().slice(f.text().lastIndexOf("Summary"), f.text().lastIndexOf("Recipe saved"));
+    // One line per rung, the sign-ins under theirs with the answer each got, then the three closing lines.
+    const body = summary.split("\n").map(l => l.replace(/^│\s{2}|\s*│$/g, "").trimEnd()).filter(l => l !== "" && !/^[─├╯╮◇ ]*$/.test(l) && !l.startsWith("Summary"));
+    expect(body.map(l => l.trim().split(/\s{2,}/)[0])).toEqual([
+      "Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins", "GitHub CLI login", "Claude Code login", "Upload", "Installs",
+    ]);
+    expect(summary).toMatch(/Identity\s+2 of 3\s+1\.7 KB/);
+    expect(summary).toMatch(/Tools\s+3 of 4\s+│/);
+    expect(summary).toMatch(/Sign-ins\s+0 of 2/);
+    expect(summary).toMatch(/GitHub CLI login\s+sign in/);
+    expect(summary).toMatch(/Claude Code login\s+sign in/);
     expect(summary).not.toContain("id_ed25519");
-    expect(summary).toContain("Upload");
-    expect(summary).toContain("Nothing has left this computer yet.");
-    expect(summary).toContain("Sign in on the machine: GitHub CLI login, Claude Code login");
+    expect(summary).toMatch(/Upload\s+\d[\d.]* [KM]B, nothing has left this computer yet/);
+    expect(summary).toMatch(/Installs\s+Claude Code/);
     expect(f.backends).toHaveLength(0);
     await f.press("y");
 
@@ -207,6 +223,17 @@ describe("wsp init, interactive", () => {
     expect(out).toContain("3 files: identity 2, shell 1");
     expect(out).toContain("Claude Code installed");
     expect(out).toContain("golden-import.json");
+    // A finished stage: label, detail, and its duration flush against the right edge (80 columns off a terminal).
+    const base = out.split("\n").filter(l => /Base installed/.test(l)).at(-1)!;
+    expect(base).toMatch(/Base installed\s+node v22\.12\.0\s+\d+\.\ds$/);
+    expect(base.length).toBe(80);
+    // The hand-off is three lines: the address, what to do there, the keys.
+    const at = out.indexOf("Opened http://");
+    expect(out.slice(at).split("\n").slice(0, 3).map(l => l.replace(/^│\s+/, ""))).toEqual([
+      expect.stringMatching(/^Opened http:\/\/127\.0\.0\.1:\d+\/$/),
+      "Sign in where the checklist says, then save the golden.",
+      "c copy the address   enter continue",
+    ]);
     expect(out).not.toMatch(/—|\p{Emoji_Presentation}/u);
     expect(out).not.toContain(SOLARI);
     // gh was switched to sign in on the machine, so its Keychain token was never asked for.
@@ -235,7 +262,7 @@ describe("wsp init, interactive", () => {
       "identity/git-user", "identity/ssh-config", "shell/zshrc", "shell/starship", "editors/nvim", "toolchains/mise",
       "tools/brew/gh", "tools/brew/jq", "tools/npm/pnpm", "agents/claude",
     ]);
-    expect(saved.entries.filter(e => e.rung === "logins").map(e => e.choice)).toEqual(["machine", "machine"]);
+    expect(saved.entries.filter(e => e.rung === "logins").map(e => e.choice)).toEqual(["machine", "machine", undefined]);
     expect(out).toContain("golden-recipe.json");
     expect(f.checklists[0]).toEqual([
       { label: "GitHub CLI login", command: "gh auth login" },
@@ -268,8 +295,8 @@ describe("wsp init, interactive", () => {
       await f.until(rung);
       await f.press(KEY.enter);
     }
-    await f.until("Boot a machine");
-    expect(f.text()).not.toContain("~/.ssh/config");
+    await f.until(BOOT);
+    expect(f.text().slice(f.text().lastIndexOf("Summary"))).toMatch(/Identity\s+1 of 3/);
     await f.press("y");
     await f.until(URL_RE);
     await f.press("c");
@@ -282,19 +309,60 @@ describe("wsp init, interactive", () => {
     expect(saved.entries.find(e => e.id === "identity/git-user")?.bring).toBe(true);
   });
 
-  it("no at the confirm boots nothing and saves nothing", async () => {
+  it("enter at the confirm takes No: the marker sits on No, nothing boots, and the recipe is kept for --manifest", async () => {
     const f = fake();
     const run = runInit(f.opts, f.io);
     for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
       await f.until(rung);
       await f.press(KEY.enter);
     }
-    await f.until("Boot a machine");
-    await f.press("n");
+    await f.until(BOOT);
+    const ask = f.text().slice(f.text().lastIndexOf("Boot a"));
+    expect(ask).toMatch(/2 vCPU, 4 GB\s+builder/);
+    expect(ask).toMatch(/\$0\.11\/hr/);
+    expect(ask).toMatch(/No\s+costs\s+nothing/);
+    expect(ask).toContain(`${S_RADIO_INACTIVE} Yes`);
+    expect(ask).toContain(`${S_RADIO_ACTIVE} No`);
+    await f.press(KEY.enter);
     expect((await run).code).toBe(1);
     expect(f.backends).toHaveLength(0);
-    expect(existsSync(join(dirs[0]!, "golden-recipe.json"))).toBe(false);
     expect(f.hosts).toBe(0);
+    const saved = loadManifest(join(dirs[0]!, "golden-recipe.json"));
+    expect(saved.entries.filter(e => e.bring).map(e => e.id)).toContain("shell/zshrc");
+  });
+
+  it("an agent ticked then unticked on the Agents screen shows and then hides its login row", async () => {
+    const f = fake();
+    const run = runInit(f.opts, f.io);
+    for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools"]) {
+      await f.until(rung);
+      await f.press(KEY.enter);
+    }
+    await f.until("Agents");
+    // all row, Claude Code, Codex: tick codex.
+    await f.press(KEY.down, KEY.down, KEY.space, KEY.enter);
+    await f.until("Sign-ins");
+    expect(f.text()).toContain("Codex login");
+    expect(f.text()).toMatch(/Sign-ins\s+7\/7\s+2 copy, 1 sign in/);
+    expect(f.text()).toMatch(/Agent logins\s+2\n/);
+    await f.press(KEY.esc);
+    await f.until("6/7");
+    f.clear();
+    await f.press(KEY.down, KEY.down, KEY.space, KEY.enter);
+    await f.until("Sign-ins");
+    expect(f.text()).not.toContain("Codex login");
+    expect(f.text()).toMatch(/Sign-ins\s+7\/7\s+1 copy, 1 sign in/);
+    expect(f.text()).toMatch(/Agent logins\s+1\n/);
+    await f.press(KEY.enter);
+    await f.until(BOOT);
+    const summary = f.text().slice(f.text().lastIndexOf("Summary"));
+    expect(summary).not.toContain("Codex login");
+    expect(summary).toMatch(/Sign-ins\s+1 of 2/);
+    await f.press(KEY.enter);
+    expect((await run).code).toBe(1);
+    const saved = loadManifest(join(dirs[0]!, "golden-recipe.json"));
+    expect(saved.entries.find(e => e.id === "logins/codex")).toMatchObject({ bring: false });
+    expect(saved.entries.find(e => e.id === "logins/codex")?.choice).toBeUndefined();
   });
 
   it("a prepare that fails after the hand-off never happened is reported once, and a failed seal after it is reported too", async () => {
@@ -326,13 +394,37 @@ describe("wsp init, interactive", () => {
     await f.until("1/7");
     const t = f.text();
     expect(t).toContain("Reading this computer  Identity 3");
-    expect(t).toContain("Reading this computer  Identity 3, Shell 2, Editors 1, Toolchains 1, Tools 4, Agents 2, Sign-ins 2");
-    expect(t.indexOf("Sign-ins 2")).toBeLessThan(t.indexOf("Found on this computer"));
+    expect(t).toContain("Reading this computer  Identity 3, Shell 2, Editors 1, Toolchains 1, Tools 4, Agents 2, Sign-ins 3");
+    expect(t.indexOf("Sign-ins 3")).toBeLessThan(t.indexOf("Found on this computer"));
     for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
       await f.until(rung);
       await f.press(KEY.enter);
     }
-    await f.until("Boot a machine");
+    await f.until(BOOT);
+    await f.press("n");
+    expect((await run).code).toBe(1);
+  });
+
+  it("on a narrow terminal the tally is cut to the width so the spinner line never wraps onto itself", async () => {
+    const f = fake({
+      columns: 48,
+      collect: async onRung => {
+        for (const rung of RUNGS) onRung(rung, FIXTURE.entries.filter(e => e.rung === rung).length);
+        return FIXTURE;
+      },
+    });
+    const run = runInit(f.opts, f.io);
+    await f.until("1/7");
+    const spins = f.text().split("\r").filter(l => l.includes("Reading this computer"));
+    expect(spins.length).toBeGreaterThan(1);
+    expect(spins.map(l => l.length).filter(n => n > 48)).toEqual([]);
+    expect(spins.filter(l => /Identity 3$/.test(l)).length).toBeGreaterThan(0);
+    expect(spins.at(-1)).toMatch(/Identity 3, Shell 2.*…$/);
+    for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
+      await f.until(rung);
+      await f.press(KEY.enter);
+    }
+    await f.until(BOOT);
     await f.press("n");
     expect((await run).code).toBe(1);
   });
@@ -340,8 +432,8 @@ describe("wsp init, interactive", () => {
   it("nothing found on this machine still shows the screens' empty state and reaches the confirm", async () => {
     const f = fake({ collect: async () => ({ entries: [] }) });
     const run = runInit(f.opts, f.io);
-    await f.until("Boot a machine");
-    expect(f.text()).toContain("Found nothing to bring");
+    await f.until(BOOT);
+    expect(f.text()).toContain("Nothing found to bring");
     expect(f.text()).toContain("--manifest");
     await f.press("n");
     expect((await run).code).toBe(1);
@@ -353,7 +445,7 @@ describe("wsp init, flags and no terminal", () => {
     const f = fake({ tty: false });
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(0);
-    expect(f.text()).toContain("taken as yes");
+    expect(f.text()).toContain("Taken as yes (no terminal)");
     expect(f.text()).toMatch(URL_RE);
     expect(f.backends[0]!.machines).toHaveLength(1);
     expect(f.opened).toEqual([]);
@@ -380,9 +472,9 @@ describe("wsp init, flags and no terminal", () => {
     expect(log).toContain("true");
     expect(log.some(c => c.includes(GOLDEN_SETUP))).toBe(false);
     expect(log.some(c => c.includes("tar xzf"))).toBe(true);
-    // Off a terminal a step prints once, done, with its last detail and how long it took.
-    expect(out).toMatch(/Setup applied  [\d.]+ (B|KB) packed  \d+\.\ds/);
-    expect(out).toMatch(/Files uploaded  [\d.]+ (B|KB) in [\d.]+s  \d+\.\ds/);
+    // Off a terminal a step prints once, done, with its last detail and how long it took flush right.
+    expect(out).toMatch(/Setup applied\s+[\d.]+ (B|KB) packed\s+\d+\.\ds$/m);
+    expect(out).toMatch(/Files uploaded\s+[\d.]+ (B|KB) in [\d.]+s\s+\d+\.\ds$/m);
     expect(f.recipes[0]!.envs).not.toHaveProperty("CLAUDE_CONFIG_DIR");
     const written = loadManifest(join(dirname(f.opts.statePath), "golden-recipe.json"));
     expect(written.entries.filter(e => e.bring).map(e => e.id)).toEqual(["identity/git-user", "shell/zshrc"]);
@@ -445,8 +537,8 @@ describe("wsp init, flags and no terminal", () => {
     };
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(0);
-    expect(f.text()).toContain("3 installed, 1 failed: jq (curl: no route)");
-    expect(f.text()).toContain("Claude Code failed (curl: no route)");
+    expect(f.text()).toMatch(/Tools installed\s+3 installed, 1 failed/);
+    expect(f.text()).toMatch(/Agents installed\s+Claude Code failed/);
     expect(f.text()).toContain("Ready");
   });
 });
@@ -481,6 +573,28 @@ describe("stage stream", () => {
     const failed = reduceStages([ev("creating"), ev("failed", "golden setup failed (exit 1): curl: no route")]);
     expect(failed.steps[0]!.state).toBe("failed");
     expect(failed.failure).toBe("golden setup failed (exit 1): curl: no route");
+  });
+
+  it("a frame's arrival time gives the stage it ends its duration; the last stage has none", () => {
+    const view = reduceStages([
+      { ...ev("creating"), at: 1_000 },
+      { ...ev("deploying-daemon"), at: 4_200 },
+      { ...ev("deploying-daemon", "node v22"), at: 4_900 },
+      { ...ev("installing-harness"), at: 5_000 },
+      { ...ev("ready"), at: 65_500 },
+    ]);
+    // The second deploying-daemon frame carries the detail; it does not restart that stage's clock.
+    expect(view.steps.map(s => s.ms)).toEqual([3_200, 800, undefined, undefined, undefined, 60_500, undefined]);
+  });
+
+  it("a stage line pads the label, keeps the detail, and puts the duration flush right at the width", () => {
+    const line = stripVTControlCharacters(stageLine("o", "Base installed", "node v22.12.0", 3_200, 60, 20));
+    expect(line).toBe("o  Base installed        node v22.12.0                  3.2s");
+    expect(line.length).toBe(60);
+    const long = stripVTControlCharacters(stageLine("o", "Base installed", "x".repeat(80), 61_000, 60, 20));
+    expect(long.length).toBe(60);
+    expect(long).toMatch(/x…  1m 01s$/);
+    expect(stripVTControlCharacters(stageLine("o", "Ready", undefined, undefined, 60, 20))).toBe("o  Ready");
   });
 
   it("frames for another golden are ignored", () => {

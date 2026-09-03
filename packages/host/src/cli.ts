@@ -357,6 +357,7 @@ async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: 
       ...(flags.manifest !== undefined ? { manifestPath: resolve(flags.manifest) } : {}),
       collect: collectThisComputer,
       keys,
+      pricing: new SolariBackend({ apiKey: keys.solari }).pricing,
       statePath: opts.statePath,
       home: homedir(),
       secrets: keychainReader(),

@@ -110,3 +110,39 @@ describe("goldenRecipeFor", () => {
     expect(goldenRecipeFor([], {}, { deployDaemon: hook }).deployDaemon).toBe(hook);
   });
 });
+
+describe("recipe file", () => {
+  let dir: string;
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("lives next to the state file and round-trips the ticks as bring flags", () => {
+    dir = mkdtempSync(join(tmpdir(), "wsp-recipe-"));
+    const statePath = join(dir, "sub", "state.json");
+    const path = recipePath(statePath);
+    expect(path).toBe(join(dir, "sub", "golden-recipe.json"));
+
+    const choices = new Map([["logins/gh", "machine"], ["logins/claude", "copy"]] as const);
+    saveRecipe(path, FIXTURE, new Set(["identity/git-user", "shell/zshrc", "agents/claude", "logins/claude"]), choices);
+    const text = readFileSync(path, "utf8");
+    expect(text.endsWith("\n")).toBe(true);
+    const back = loadManifest(path);
+    expect(back.entries).toHaveLength(FIXTURE.entries.length);
+    expect(back.entries.map(e => [e.id, e.bring])).toEqual(
+      FIXTURE.entries.map(e => [e.id, ["identity/git-user", "shell/zshrc", "agents/claude", "logins/claude"].includes(e.id)]),
+    );
+    expect(back.entries.find(e => e.id === "logins/gh")?.choice).toBe("machine");
+    expect(back.entries.find(e => e.id === "logins/claude")?.choice).toBe("copy");
+    expect(back.entries.find(e => e.id === "shell/zshrc")).not.toHaveProperty("choice");
+    // A re-run of the saved file preselects exactly what was ticked and chosen.
+    expect(back.entries.filter(initialTicks).map(e => e.id)).toEqual(["identity/git-user", "shell/zshrc", "agents/claude", "logins/claude"]);
+    expect(back.entries.filter(e => e.rung === "logins").map(initialChoice)).toEqual(["machine", "copy", "machine"]);
+  });
+
+  it("loadManifest reports the path on a bad file, ahead of the collector's reason", () => {
+    dir = mkdtempSync(join(tmpdir(), "wsp-recipe-"));
+    expect(() => loadManifest(join(dir, "missing.json"))).toThrow(/missing\.json/);
+    const path = join(dir, "recipe.json");
+    writeFileSync(path, JSON.stringify({ entries: [{ ...byId("shell/zshrc"), choice: "copy" }] }));
+    expect(() => loadManifest(path)).toThrow(/recipe\.json: invalid manifest: entries\.0\.choice: only a logins row carries a choice/);
+  });
+});

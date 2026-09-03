@@ -9,18 +9,18 @@ import type { Readable, Writable } from "node:stream";
 import { styleText } from "node:util";
 import { Prompt, isCancel } from "@clack/core";
 import { S_BAR, S_BAR_END, S_CHECKBOX_INACTIVE, S_CHECKBOX_SELECTED, S_STEP_ACTIVE, S_STEP_CANCEL, S_STEP_SUBMIT } from "@clack/prompts";
+import { GUTTER, ellipsize, widthOf } from "./init-layout.js";
 
 export interface SelectItem {
   id: string;
   label: string;
-  /** Short text after the label (a size, a default). */
+  /** One dim word or size in the second column. */
   hint?: string;
   group?: string;
-  /** Lines for the detail pane while this item is highlighted. */
+  /** Lines for the detail pane while this item is highlighted; the reason a row is locked belongs here. */
   detail: string[];
-  /** on: always ticked, cannot be unticked. off: never ticked, with the reason shown. */
+  /** on: always ticked, cannot be unticked. off: never ticked. */
   lock?: "on" | "off";
-  lockReason?: string;
   /** A row that cycles through answers on space instead of ticking; the first one is the tick. */
   choices?: readonly { value: string; label: string }[];
 }
@@ -51,7 +51,10 @@ export interface RungAnswer {
 export type RungSelectResult = ({ kind: "next" } & RungAnswer) | ({ kind: "back" } & RungAnswer) | { kind: "cancel" };
 
 const DETAIL_LINES = 2;
+/** The bar and its two spaces before every row. */
+const EDGE = 3;
 const dim = (s: string): string => styleText("dim", s);
+const LOCK_WORD = { on: "always", off: "stays here" } as const;
 
 export function matches(item: SelectItem, query: string): boolean {
   const q = query.trim().toLowerCase();
@@ -115,6 +118,23 @@ function fmtCount(on: number, of: number): string {
   return `${on} of ${of}`;
 }
 
+/** Ticks for a group of tick rows; the row count for a group of choice rows. */
+function groupCount(items: readonly SelectItem[], ticks: ReadonlySet<string>): string {
+  if (items.some(i => i.choices !== undefined)) return String(items.length);
+  const free = items.filter(tickable);
+  return fmtCount(free.filter(i => ticks.has(i.id)).length, free.length);
+}
+
+/** How the choice rows answered, the answers with none left out: "6 copy, 2 sign in". */
+export function spreadOf(items: readonly SelectItem[], choices: ReadonlyMap<string, string>): string {
+  const first = items.find(i => i.choices !== undefined)?.choices ?? [];
+  return first
+    .map(c => ({ n: items.filter(i => choices.get(i.id) === c.value).length, label: c.label }))
+    .filter(p => p.n > 0)
+    .map(p => `${p.n} ${p.label}`)
+    .join(", ");
+}
+
 class RungPrompt extends Prompt<Set<string>> {
   cursor = 0;
   back = false;
@@ -124,7 +144,7 @@ class RungPrompt extends Prompt<Set<string>> {
 
   constructor(private readonly o: RungSelectOptions) {
     super({ render: () => this.frame(), ...(o.input ? { input: o.input } : {}), ...(o.output ? { output: o.output } : {}) }, true);
-    const ticks = new Set(o.initial);
+    const ticks = new Set([...o.initial].filter(id => o.items.some(i => i.id === id)));
     for (const i of o.items) {
       if (i.lock === "on") ticks.add(i.id);
       if (i.lock === "off") ticks.delete(i.id);
@@ -202,35 +222,46 @@ class RungPrompt extends Prompt<Set<string>> {
     else this.ticks().delete(item.id);
   }
 
-  private row(entry: Entry, current: boolean): string {
+  /** Two columns: labels as wide as the widest one that still leaves room for the second column, which is flush right. */
+  private columns(width: number): { label: number; second: number } {
+    const items = this.o.items;
+    const labels = [3, ...items.map(i => i.label.length + (i.group !== undefined ? 2 : 0)), ...items.map(i => i.group?.length ?? 0)];
+    const second = Math.max(
+      fmtCount(items.length, items.length).length,
+      ...items.map(i => this.second(i).length),
+      ...[...new Set(items.map(i => i.group))].map(g => (g === undefined ? 0 : groupCount(items.filter(i => i.group === g), this.ticks()).length)),
+    );
+    const room = width - EDGE - 2 - GUTTER.length - second;
+    return { label: Math.max(8, Math.min(Math.max(...labels), room)), second };
+  }
+
+  /** The second column of an item row: its answer, its lock, or its hint. */
+  private second(i: SelectItem): string {
+    if (i.choices !== undefined) return i.choices.find(c => c.value === this.choices.get(i.id))?.label ?? "";
+    if (i.lock !== undefined) return LOCK_WORD[i.lock];
+    return i.hint ?? "";
+  }
+
+  private line(glyph: string, label: string, second: string, indent: number, cols: { label: number; second: number }, current: boolean, primary: boolean): string {
+    const field = ellipsize(label, cols.label - indent).padEnd(cols.label - indent);
+    const text = current || primary ? field : dim(field);
+    return `${" ".repeat(indent)}${current ? styleText("cyan", glyph) : glyph} ${text}${second !== "" ? `${GUTTER}${dim(second.padStart(cols.second))}` : ""}`.trimEnd();
+  }
+
+  private row(entry: Entry, current: boolean, cols: { label: number; second: number }): string {
     const ticks = this.ticks();
-    const mark = current ? "❯" : " ";
-    const box = (on: boolean): string => (on ? S_CHECKBOX_SELECTED : S_CHECKBOX_INACTIVE);
+    const box = (on: boolean): string => (on ? S_CHECKBOX_SELECTED : dim(S_CHECKBOX_INACTIVE));
     switch (entry.type) {
       case "all": {
         const free = this.o.items.filter(tickable);
         const on = free.filter(i => ticks.has(i.id)).length;
-        return `${mark} ${box(free.length > 0 && on === free.length)} all  ${dim(fmtCount(on, free.length))}`;
+        return this.line(box(free.length > 0 && on === free.length), "all", fmtCount(on, free.length), 0, cols, current, false);
       }
-      case "group": {
-        const free = entry.items.filter(tickable);
-        const on = free.filter(i => ticks.has(i.id)).length;
-        const fold = entry.folded ? "▸" : "▾";
-        return `${mark} ${fold} ${styleText("bold", entry.group)}  ${dim(fmtCount(on, free.length))}`;
-      }
+      case "group":
+        return this.line(entry.folded ? "▸" : "▾", entry.group, groupCount(entry.items, ticks), 0, cols, current, true);
       case "item": {
         const i = entry.item;
-        const indent = i.group !== undefined ? "  " : "";
-        if (i.choices !== undefined) {
-          const chosen = i.choices.find(c => c.value === this.choices.get(i.id))?.label ?? "";
-          const text = `${i.label}  ${chosen}${i.lock === "off" && i.lockReason !== undefined ? `  ${i.lockReason}` : ""}`;
-          return `${mark} ${indent}${current && i.lock === undefined ? text : dim(text)}`;
-        }
-        if (i.lock === "on") return `${mark} ${indent}${dim(`${S_CHECKBOX_SELECTED} ${i.label}  always`)}`;
-        if (i.lock === "off") return `${mark} ${indent}${dim(`${S_CHECKBOX_INACTIVE} ${i.label}  ${i.lockReason ?? "not brought"}`)}`;
-        const label = current ? i.label : dim(i.label);
-        const hint = i.hint !== undefined ? `  ${dim(i.hint)}` : "";
-        return `${mark} ${indent}${box(ticks.has(i.id))} ${label}${hint}`;
+        return this.line(box(ticks.has(i.id)), i.label, this.second(i), i.group !== undefined ? 2 : 0, cols, current, false);
       }
       default: {
         const _exhaustive: never = entry;
@@ -244,38 +275,24 @@ class RungPrompt extends Prompt<Set<string>> {
       at === undefined
         ? []
         : at.type === "all"
-          ? ["everything on this screen that can be ticked"]
+          ? ["every row on this screen that can be ticked"]
           : at.type === "group"
-            ? [`${at.items.length} in ${at.group}`, "space ticks or clears the whole group"]
+            ? [`${at.items.length} in ${at.group}`, "space ticks or clears the group"]
             : at.item.detail;
     return Array.from({ length: DETAIL_LINES }, (_, i) => lines[i] ?? "");
   }
 
   private frame(): string {
-    const title = `${styleText("bold", this.o.title)}  ${dim(this.o.counter)}`;
+    const width = widthOf(this.o.output);
     const ticks = this.ticks();
     const withChoices = this.o.items.filter(i => i.choices !== undefined);
     const free = this.o.items.filter(tickable);
-    const on = free.filter(i => ticks.has(i.id)).length + this.o.items.filter(i => i.lock === "on").length;
-    const of = free.length + this.o.items.filter(i => i.lock === "on").length;
-    const countLine =
-      withChoices.length > 0
-        ? (withChoices[0]!.choices ?? [])
-            .map(c => `${withChoices.filter(i => this.choices.get(i.id) === c.value).length} ${c.label}`)
-            .join(", ")
-        : `${fmtCount(on, of)} ticked`;
+    const locked = this.o.items.filter(i => i.lock === "on").length;
+    const answer = withChoices.length > 0 ? spreadOf(withChoices, this.choices) : fmtCount(free.filter(i => ticks.has(i.id)).length + locked, free.length + locked);
+    const title = `${this.o.title}${GUTTER}${dim(this.o.counter)}`;
 
     if (this.state === "submit" || (this.state === "cancel" && this.back)) {
-      const picked = this.o.items.filter(i => ticks.has(i.id) && i.choices === undefined).map(i => i.label);
-      const chosen = withChoices.map(i => `${i.label}: ${i.choices?.find(c => c.value === this.choices.get(i.id))?.label ?? ""}`);
-      const line = this.back
-        ? "back"
-        : withChoices.length > 0
-          ? chosen.join(", ")
-          : picked.length === 0
-            ? "nothing ticked"
-            : `${fmtCount(on, of)}: ${picked.join(", ")}`;
-      return `${styleText("green", S_STEP_SUBMIT)}  ${title}\n${dim(S_BAR)}  ${dim(line)}`;
+      return `${styleText("green", S_STEP_SUBMIT)}  ${title}\n${dim(S_BAR)}  ${dim(this.back ? "back" : answer)}`;
     }
     if (this.state === "cancel") {
       return `${styleText("red", S_STEP_CANCEL)}  ${title}\n${dim(S_BAR)}  ${dim("cancelled")}`;
@@ -287,25 +304,24 @@ class RungPrompt extends Prompt<Set<string>> {
     const maxVisible = this.o.maxVisible ?? 10;
     const start = Math.max(0, Math.min(this.cursor - Math.floor(maxVisible / 2), entries.length - maxVisible));
     const end = Math.min(entries.length, start + maxVisible);
+    const cols = this.columns(width);
+    const bar = dim(S_BAR);
 
     const lines: string[] = [];
-    lines.push(`${styleText("cyan", S_STEP_ACTIVE)}  ${title}`);
-    lines.push(`${dim(S_BAR)}  ${dim("search")}  ${this.userInput}${styleText("inverse", " ")}`);
-    lines.push(dim(S_BAR));
-    if (this.o.items.length === 0) lines.push(`${dim(S_BAR)}  ${dim("nothing found for this screen")}`);
-    else if (entries.length === 0) lines.push(`${dim(S_BAR)}  ${dim("no match")}`);
-    for (let i = start; i < end; i++) lines.push(`${dim(S_BAR)}  ${this.row(entries[i]!, i === this.cursor)}`);
+    lines.push(`${styleText("cyan", S_STEP_ACTIVE)}  ${title}${withChoices.length > 0 ? `${GUTTER}${dim(answer)}` : ""}`);
+    lines.push(`${bar}  ${dim("search")}  ${this.userInput}${styleText("inverse", " ")}`);
+    if (this.o.items.length === 0) lines.push(`${bar}  ${dim("nothing found")}`);
+    else if (entries.length === 0) lines.push(`${bar}  ${dim("no match")}`);
+    for (let i = start; i < end; i++) lines.push(`${bar}  ${this.row(entries[i]!, i === this.cursor, cols)}`);
     const above = start;
     const below = entries.length - end;
     if (above > 0 || below > 0) {
       const parts = [above > 0 ? `↑ ${above} more` : "", below > 0 ? `↓ ${below} more` : ""].filter(p => p !== "");
-      lines.push(`${dim(S_BAR)}  ${dim(parts.join("  "))}`);
+      lines.push(`${bar}  ${dim(parts.join(GUTTER))}`);
     }
-    lines.push(dim(S_BAR));
-    for (const d of this.detail(at)) lines.push(`${dim(S_BAR)}  ${dim(d)}`);
-    lines.push(dim(S_BAR));
-    lines.push(`${dim(S_BAR)}  ${dim(countLine)}`);
-    lines.push(`${dim(S_BAR_END)}  ${dim(withChoices.length > 0 ? "space next answer   esc back   enter next" : "space tick   ← → fold   esc back   enter next")}`);
+    lines.push(bar);
+    for (const d of this.detail(at)) lines.push(`${bar}  ${dim(ellipsize(d, width - EDGE))}`.trimEnd());
+    lines.push(`${dim(S_BAR_END)}  ${dim(withChoices.length > 0 ? "space change   enter next   esc back" : "space tick   ← → fold   enter next   esc back")}`);
     return lines.join("\n");
   }
 }
