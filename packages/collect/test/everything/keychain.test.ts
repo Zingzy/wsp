@@ -42,6 +42,17 @@ describe("pass 5: Keychain inventory", () => {
     expect(linux.calls.some(c => c.startsWith("run security"))).toBe(false);
   });
 
+  it("a failing security command is a note, not an empty list", async () => {
+    const base = home();
+    const { [`security dump-keychain ${LOGIN_KEYCHAIN}`]: _dump, ...exec } = base.exec ?? {};
+    const notes: string[] = [];
+    expect(await keychain(laptop({ ...base, exec }), { notes })).toEqual([]);
+    expect(notes).toEqual(["security dump-keychain failed; Keychain logins are not listed"]);
+    const fine: string[] = [];
+    await keychain(laptop(home()), { notes: fine });
+    expect(fine).toEqual([]);
+  });
+
   it("a service belongs to the binary its first segment names", () => {
     const bins = new Set(["gh", "glab", "raycast"]);
     expect(serviceOwner("gh:github.com", bins)).toBe("gh");

@@ -104,6 +104,19 @@ describe("pass 4: credential shape", () => {
     expect(keysSignal('["token"]')).toBe(false);
   });
 
+  it("Chromium profile files are never credentials, wherever the browser lives", async () => {
+    const prefs = '{"sync":{"metadata_secret":"x"},"os_crypt":{"encrypted_key":"y"}}';
+    const m = laptop({ files: {
+      "~/Library/Application Support/Aside/Default/Preferences": prefs,
+      "~/Library/Application Support/Aside/Profile 1/Secure Preferences": prefs,
+      "~/Library/Application Support/Aside/Local State": prefs,
+      "~/.config/chromium/Default/Preferences": prefs,
+      "~/.tool/Preferences": prefs,
+    } });
+    const { found } = await credentials(m, await roles(m));
+    expect(found.map(c => rel(c.path))).toEqual(["~/.tool/Preferences"]);
+  });
+
   it("PEM header", () => {
     expect(pemSignal("-----BEGIN OPENSSH PRIVATE KEY-----\nx\n")).toBe(true);
     expect(pemSignal("-----BEGIN RSA PRIVATE KEY-----\n")).toBe(true);

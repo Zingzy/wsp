@@ -19,6 +19,9 @@ export function fileTree(e: Entry): Tree {
 
 export const WALK_ENTRIES = 5_000;
 export const WALK_MS = 2_000;
+/** A split-out cache or state subtree is display only and never ticked by default, so it gets a smaller allowance than the app's own files. */
+export const SPLIT_ENTRIES = 1_000;
+export const SPLIT_MS = 500;
 
 /** One root's allowance of entries and time; a walk that runs out stops and says so. */
 export interface Budget {

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
+import * as pkg from "../../src/index.js";
 import { type CatalogPath, type Lookup, Rows, everything, lookup as catalog } from "../../src/index.js";
-import { EXPECTED_SHAPES, HOME, NOW, RECENT, home, laptop, many, shapes } from "./fixture.js";
+import { EXPECTED_SHAPES, HOME, LOGIN_KEYCHAIN, NOW, RECENT, home, laptop, many, shapes } from "./fixture.js";
 
 const rel = (p: string): string => p.replace(HOME, "~");
 const path = (app: string, path: string, credential = false): CatalogPath => ({ app, path, credential });
@@ -17,40 +18,44 @@ describe("everything: the seven passes folded into rows", () => {
     expect(rows.every(r => r.ticked === false)).toBe(true);
     expect(rows.map(r => [r.name, r.kind, r.flags.join("+"), r.owner ?? "", r.paths.join(" ")])).toEqual([
       [".cache", "cache", "", "", "~/.cache"],
-      [".cargo", "unknown", "large", "", "~/.cargo"],
+      [".cargo", "unknown", "", "", "~/.cargo"],
+      [".cargo/bin", "state", "large", "", "~/.cargo/bin"],
       [".CFUserTextEncoding", "unknown", "", "", "~/.CFUserTextEncoding"],
-      [".env", "credential", "credential", "", "~/.hermes/.env"],
-      [".hermes", "state", "", "", "~/.hermes/node_modules"],
+      [".DS_Store", "cache", "", "", "~/.DS_Store"],
+      [".hermes/.env", "credential", "credential", "", "~/.hermes/.env"],
+      [".hermes/auth.json", "credential", "credential", "", "~/.hermes/auth.json"],
+      [".hermes/state", "state", "large", "", "~/.hermes/node/bin ~/.hermes/node_modules"],
       [".jcode", "unknown", "", "", "~/.jcode"],
+      [".kube/config", "credential", "credential", "", "~/.kube/config"],
       [".mcp-auth", "unknown", "", "", "~/.mcp-auth"],
       [".netrc", "credential", "credential", "", "~/.netrc"],
-      [".nix-profile", "unknown", "", "", "~/.nix-profile"],
+      [".nix-profile/bin", "state", "", "", "~/.nix-profile/bin"],
       [".oh-my-zsh", "unknown", "", "", "~/.oh-my-zsh"],
       [".oh-my-zsh/.git", "state", "", "", "~/.oh-my-zsh/.git"],
       [".oldtool", "unknown", "stale", "", "~/.oldtool"],
       [".rustup", "unknown", "", "", "~/.rustup"],
       [".rustup/toolchains", "state", "large", "", "~/.rustup/toolchains"],
       [".ssh", "unknown", "credential", "", "~/.ssh"],
+      [".ssh/id_ed25519", "credential", "credential", "", "~/.ssh/id_ed25519"],
       [".tmux.conf", "unknown", "", "", "~/.tmux.conf"],
       [".viminfo", "unknown", "", "", "~/.viminfo"],
+      [".wrangler/default.toml", "credential", "credential", "", "~/Library/Preferences/.wrangler/config/default.toml"],
+      [".zcompdump-mac-5.9", "cache", "", "", "~/.zcompdump-mac-5.9"],
       [".zsh_history", "state", "", "", "~/.zsh_history"],
       [".zsh_sessions", "state", "", "", "~/.zsh_sessions"],
       [".zshrc", "unknown", "", "", "~/.zshrc"],
-      ["auth.json", "credential", "credential", "", "~/.hermes/auth.json"],
       ["Caches", "cache", "", "", "~/Library/Caches"],
       ["Code", "unknown", "", "", "~/Library/Application Support/Code"],
-      ["config", "credential", "credential", "", "~/.kube/config"],
-      ["credentials.yaml", "credential", "credential", "", "~/.config/monid/credentials.yaml"],
-      ["default.toml", "credential", "credential", "", "~/Library/Preferences/.wrangler/config/default.toml"],
       ["gh", "config", "credential", "homebrew", "~/.config/gh"],
       ["gh:github.com", "device-bound-login", "", "gh", ""],
+      ["gh/hosts.yml", "credential", "credential", "homebrew", "~/.config/gh/hosts.yml"],
       ["github.com", "device-bound-login", "", "", ""],
       ["glab:gitlab.com:token", "device-bound-login", "", "", ""],
-      ["hermes", "config", "credential+large", "", "~/.hermes"],
-      ["hosts.yml", "credential", "credential", "homebrew", "~/.config/gh/hosts.yml"],
-      ["id_ed25519", "credential", "credential", "", "~/.ssh/id_ed25519"],
-      ["lib", "state", "", "", "~/.local/lib/node_modules"],
-      ["mise", "unknown", "", "", "~/.local/share/mise"],
+      ["hermes", "config", "credential", "", "~/.hermes"],
+      ["huggingface/token", "credential", "credential", "", "~/.cache/huggingface/token"],
+      ["lib/node_modules", "state", "", "", "~/.local/lib/node_modules"],
+      ["mise/shims", "state", "", "", "~/.local/share/mise/shims"],
+      ["monid/credentials.yaml", "credential", "credential", "", "~/.config/monid/credentials.yaml"],
       ["node", "unknown", "", "", ""],
       ["nvim", "unknown", "", "", "~/.config/nvim"],
       ["omp", "unknown", "", "", ""],
@@ -58,21 +63,81 @@ describe("everything: the seven passes folded into rows", () => {
       ["Raycast", "device-bound-login", "", "", ""],
       ["raycast/extensions", "state", "large", "", "~/.config/raycast/extensions"],
       ["state", "state", "", "", "~/.local/state"],
-      ["token", "credential", "credential", "", "~/.cache/huggingface/token"],
-      ["uv", "unknown", "large", "", "~/.local/share/uv"],
+      ["uv/bin", "state", "large", "", "~/.local/share/uv/tools/ty/bin"],
     ]);
   });
 
-  it("a pair is one row whose paths are the config side only and whose size is what the credential pass left in it", async () => {
+  it("a pair is one row whose paths are the config side only, whose size is config only, and whose excludes name what a copier must leave out", async () => {
     const { rows } = await everything(laptop(home()), { lookup, now: NOW });
-    expect(rows.find(r => r.name === "gh")).toEqual({ id: ".config/gh", name: "gh", kind: "config", paths: ["~/.config/gh"], bytes: Buffer.byteLength("git_protocol: https\n"), files: 1, mtime: RECENT, measured: "exact", owner: "homebrew", flags: ["credential"], ticked: false });
+    expect(rows.find(r => r.name === "gh")).toEqual({ id: ".config/gh", name: "gh", kind: "config", paths: ["~/.config/gh"], excludes: ["~/.config/gh/hosts.yml"], bytes: Buffer.byteLength("git_protocol: https\n"), files: 1, mtime: RECENT, measured: "exact", owner: "homebrew", flags: ["credential"], ticked: false });
     const hermes = rows.find(r => r.name === "hermes");
-    expect(hermes).toMatchObject({ id: ".hermes", paths: ["~/.hermes"], binary: "~/.local/bin/hermes", files: 3, bytes: 90_000_000 + Buffer.byteLength("HERMES_TOKEN=put-yours-here\n") + Buffer.byteLength("model: default\n") });
+    expect(hermes).toMatchObject({ id: ".hermes", paths: ["~/.hermes"], binary: "~/.local/bin/hermes", files: 2, bytes: Buffer.byteLength("HERMES_TOKEN=put-yours-here\n") + Buffer.byteLength("model: default\n"), flags: ["credential"] });
+    expect(hermes?.excludes).toEqual(["~/.hermes/.env", "~/.hermes/auth.json", "~/.hermes/node/bin", "~/.hermes/node_modules"]);
+    expect(rows.find(r => r.name === ".hermes/state")).toMatchObject({ kind: "state", paths: ["~/.hermes/node/bin", "~/.hermes/node_modules"], bytes: 90_002_000, flags: ["large"], excludes: [] });
+    expect(rows.find(r => r.name === ".cargo/bin")).toMatchObject({ kind: "state", paths: ["~/.cargo/bin"], bytes: 6_000_000 });
+    expect(rows.find(r => r.name === ".cargo")).toMatchObject({ kind: "unknown", files: 1, excludes: ["~/.cargo/bin"] });
+    expect(rows.find(r => r.name === "uv/bin")).toMatchObject({ kind: "state", paths: ["~/.local/share/uv/tools/ty/bin"] });
+    expect(rows.every(r => r.excludes.every(x => r.paths.some(p => x.startsWith(`${p}/`))))).toBe(true);
+  });
+
+  it("a binary directly in its app directory is not config, and a split record with several paths is named by its role", async () => {
+    const m = laptop({ path: ["~/.local/bin", "~/.cargo/bin"], links: { "~/.local/bin/x": "/Users/dev/.x/x" }, files: { "~/.x/x": { bytes: 5_000_000, mode: 0o755 }, "~/.x/config.toml": "a = 1\n", "~/.cargo/bin/bat": 6_000_000, "~/.cargo/registry/index/a": 10, "~/.cargo/config.toml": "b = 2\n", "~/.cargo/bin/rg": 1 } });
+    const { rows } = await everything(m, { now: NOW });
+    expect(rows.find(r => r.name === "x")).toMatchObject({ kind: "config", paths: ["~/.x"], bytes: 6, files: 1, excludes: ["~/.x/x"], binary: "~/.local/bin/x" });
+    expect(rows.find(r => r.name === ".x/x")).toMatchObject({ kind: "state", paths: ["~/.x/x"], bytes: 5_000_000 });
+    expect(rows.find(r => r.name === ".cargo/state")).toMatchObject({ kind: "state", paths: ["~/.cargo/bin", "~/.cargo/registry"] });
+    expect(rows.find(r => r.name === ".cargo")).toMatchObject({ kind: "unknown", files: 1 });
+    expect(rows.every(r => r.paths.every(p => !p.endsWith("/bin/bat")))).toBe(true);
+  });
+
+  it("a hand-installed binary whose directory folds to nothing stays as a leftover row", async () => {
+    const m = laptop({ path: ["~/.local/bin"], files: { "~/.local/bin/foo": 1_000, "~/.foo/auth.json": '{"access_token":"x"}', "~/.local/bin/qux": 1_000, "~/.qux/node_modules/x/i.js": 10 } });
+    const { rows } = await everything(m, { now: NOW });
+    expect(rows.find(r => r.name === "foo")).toEqual({ id: "bin:foo", name: "foo", kind: "unknown", paths: [], excludes: [], binary: "~/.local/bin/foo", bytes: 0, files: 0, mtime: RECENT, measured: "exact", flags: [], ticked: false });
+    expect(rows.find(r => r.name === "qux")).toMatchObject({ id: "bin:qux", paths: [], binary: "~/.local/bin/qux" });
+    expect(rows.find(r => r.name === ".foo/auth.json")).toMatchObject({ kind: "credential" });
+    expect(rows.find(r => r.name === ".qux/node_modules")).toMatchObject({ kind: "state" });
+  });
+
+  it("credential and split rows are named by their app directory; climbing happens only on a remaining collision", async () => {
+    const { rows } = await everything(laptop(home()), { lookup, now: NOW });
+    const names = rows.map(r => r.name);
+    expect(names).toEqual(expect.arrayContaining(["gh/hosts.yml", ".hermes/auth.json", ".hermes/.env", "monid/credentials.yaml", ".kube/config", ".ssh/id_ed25519", "huggingface/token", ".netrc", ".oh-my-zsh/.git", ".rustup/toolchains", "raycast/extensions", "lib/node_modules"]));
+    expect(names.filter(n => ["config", "token", "hosts.yml", ".env", "auth.json"].includes(n))).toEqual([]);
+    const deep = await everything(laptop({ files: { "~/.config/gcloud/legacy_credentials/dev@example.com/.boto": { text: "[Credentials]\ngs_oauth2_refresh_token = x\n", mode: 0o600 }, "~/.config/gcloud/configurations/config_default": "[core]\n", "~/.x/0/credentials.json": '{"token":"a"}', "~/.y/0/credentials.json": '{"token":"b"}' } }), { now: NOW });
+    expect(deep.rows.map(r => r.name).sort()).toEqual([".x/credentials.json", ".y/credentials.json", "gcloud", "gcloud/.boto"]);
+  });
+
+  it("no row is ever zero files with a lower bound", async () => {
+    const m = laptop({ ...home(), files: { ...home().files, ...many("~/.app/aaa", 6_000), "~/.app/node_modules/x/i.js": 1_000 } });
+    const { rows } = await everything(m, { now: NOW });
+    for (const r of rows) expect(r.files === 0 && r.measured === "lower-bound", r.id).toBe(false);
+    expect(rows.find(r => r.name === ".app/node_modules")).toMatchObject({ files: 1, measured: "exact" });
+  });
+
+  it("a failing Keychain dump and an unreadable rc file both leave a note", async () => {
+    const base = home();
+    const { [`security dump-keychain ${LOGIN_KEYCHAIN}`]: _dump, ...exec } = base.exec ?? {};
+    const { notes, rows } = await everything(laptop({ ...base, exec, files: { ...base.files, "~/.bashrc": { bytes: 3_000_000 } } }), { now: NOW });
+    expect(notes).toEqual(expect.arrayContaining(["security dump-keychain failed; Keychain logins are not listed", "~/.bashrc could not be read (over 1 MiB or unreadable) and was not scanned"]));
+    expect(rows.filter(r => r.kind === "device-bound-login")).toEqual([]);
+  });
+
+  it("HOME noise is a cache row, not an unknown one", async () => {
+    const { rows } = await everything(laptop(home()), { now: NOW });
+    expect(rows.find(r => r.paths[0] === "~/.DS_Store")?.kind).toBe("cache");
+    expect(rows.find(r => r.paths[0] === "~/.zcompdump-mac-5.9")?.kind).toBe("cache");
+  });
+
+  it("the package exports the module's public pieces by name and none of its helpers", () => {
+    const api = pkg as Record<string, unknown>;
+    for (const helper of ["basename", "dirname", "tilde", "walk", "budget", "spend", "summarize", "add", "EMPTY", "RC_FILES"]) expect(api[helper], helper).toBeUndefined();
+    for (const name of ["everything", "roles", "credentials", "keychain", "shellRc", "stripExports", "RC_PATHS", "sizeGate", "provenance", "pair", "nodeMachine", "Rows", "WALK_ENTRIES", "lookup"]) expect(api[name], name).toBeDefined();
   });
 
   it("a binary nobody installed by recipe is a row with no paths and the binary named, never something to copy", async () => {
     const { rows } = await everything(laptop(home()), { now: NOW });
-    expect(rows.find(r => r.name === "node")).toEqual({ id: "bin:node", name: "node", kind: "unknown", paths: [], binary: "~/.local/bin/node", bytes: 0, files: 0, mtime: RECENT, measured: "exact", flags: [], ticked: false });
+    expect(rows.find(r => r.name === "node")).toEqual({ id: "bin:node", name: "node", kind: "unknown", paths: [], excludes: [], binary: "~/.local/bin/node", bytes: 0, files: 0, mtime: RECENT, measured: "exact", flags: [], ticked: false });
     expect(rows.find(r => r.name === "omp")?.binary).toBe("~/.local/bin/omp");
     expect(rows.flatMap(r => r.paths).some(p => p.includes("/bin/"))).toBe(false);
   });
@@ -87,7 +152,7 @@ describe("everything: the seven passes folded into rows", () => {
     });
     const { rows } = await everything(m, { now: NOW });
     const hermes = rows.find(r => r.name === "hermes");
-    const env = rows.find(r => r.name === ".env");
+    const env = rows.find(r => r.name === ".hermes/.env");
     expect(hermes).toMatchObject({ kind: "config", flags: [], bytes: Buffer.byteLength("model: default\n"), files: 1 });
     expect(rows.find(r => r.kind === "state")).toBeUndefined();
     expect(env).toMatchObject({ kind: "credential", paths: ["~/.hermes/node_modules/x/.env"], id: ".hermes/node_modules/x/.env" });
@@ -99,6 +164,7 @@ describe("everything: the seven passes folded into rows", () => {
     const { rows } = await everything(m, { now: NOW });
     expect(rows.find(r => r.name === "npm")).toMatchObject({ kind: "config", paths: ["~/.npm"], binary: "~/.local/bin/npm", flags: ["credential"], files: 1 });
     expect(rows.find(r => r.name === ".npmrc")).toMatchObject({ kind: "credential", paths: ["~/.npmrc"], id: ".npmrc" });
+    expect(rows.find(r => r.name === "npm")?.excludes).toEqual(["~/.npm/_cacache"]);
   });
 
   it("a pair whose first candidate is a credential file keeps one id per row", async () => {
@@ -113,7 +179,7 @@ describe("everything: the seven passes folded into rows", () => {
   it("a row left with nothing to carry after the fold is dropped", async () => {
     const m = laptop({ files: { "~/.docker/config.json": '{"auths":{"r":{"auth":"x"}}}', "~/.empty/": 0 } });
     const { rows } = await everything(m, { now: NOW });
-    expect(rows.map(r => [r.name, r.kind, r.id])).toEqual([["config.json", "credential", ".docker/config.json"]]);
+    expect(rows.map(r => [r.name, r.kind, r.id])).toEqual([[".docker/config.json", "credential", ".docker/config.json"]]);
   });
 
   it("thirty credential shapes end up flagged with the shipped catalog, and the five look-alikes do not", async () => {
@@ -154,7 +220,7 @@ describe("everything: the seven passes folded into rows", () => {
       "~/Library/Application Support/Chrome/settings.json": 5,
     } }), { now: NOW });
     expect(deep.rows.filter(r => r.name.endsWith("default.toml")).map(r => r.name).sort()).toEqual([".config/.wrangler/config/default.toml", "Preferences/.wrangler/config/default.toml"]);
-    expect(deep.rows.filter(r => r.kind === "state").map(r => r.name).sort()).toEqual(["Aside/Default/Sessions", "Chrome/Default/Sessions"]);
+    expect(deep.rows.filter(r => r.kind === "state").map(r => r.name).sort()).toEqual(["Aside/Sessions", "Chrome/Sessions"]);
     const deepNames = deep.rows.map(r => r.name);
     expect(new Set(deepNames).size).toBe(deepNames.length);
     const twice = await everything(laptop({ files: { "~/.npmrc": { text: "//r/:_authToken=x\n", mode: 0o600 }, "~/.glaze/.npmrc": { text: "//r/:_authToken=y\n", mode: 0o600 } } }), { now: NOW });
@@ -186,7 +252,7 @@ describe("everything: the seven passes folded into rows", () => {
     const plain = await everything(m(), { now: NOW });
     expect(plain.rows.find(r => r.paths[0] === "~/.app")).toMatchObject({ bytes: 150, files: 2 });
     const { rows } = await everything(m(), { now: NOW, claimed: new Set(["~/.app/notes.md", "~/.app/plugins/y/node_modules"]) });
-    expect(rows.find(r => r.paths[0] === "~/.app")).toMatchObject({ bytes: 100, files: 1 });
+    expect(rows.find(r => r.paths[0] === "~/.app")).toMatchObject({ bytes: 100, files: 1, excludes: ["~/.app/notes.md", "~/.app/plugins/x/node_modules", "~/.app/plugins/y/node_modules"] });
     expect(rows.find(r => r.kind === "state")).toMatchObject({ paths: ["~/.app/plugins/x/node_modules"], bytes: 1_000, files: 1 });
   });
 
@@ -237,7 +303,7 @@ describe("everything: the seven passes folded into rows", () => {
   it("a credential walk that hits its cap says so: a note and the partial flag, never a silent miss", async () => {
     const m = laptop({ files: { ...many("~/.ssh/known", 5_100), "~/.ssh/id_rsa": { text: "-----BEGIN OPENSSH PRIVATE KEY-----\nx\n", mode: 0o600 } } });
     const { rows, notes } = await everything(m, { now: NOW });
-    expect(notes).toEqual(["credential scan of ~/.ssh stopped at the cap"]);
+    expect(notes).toContain("credential scan of ~/.ssh stopped at the cap");
     expect(rows.find(r => r.paths[0] === "~/.ssh")?.flags).toEqual(expect.arrayContaining(["partial", "large"]));
     expect(rows.filter(r => r.flags.includes("partial"))).toHaveLength(1);
     const quiet = await everything(laptop(home()), { now: NOW });
@@ -253,7 +319,7 @@ describe("everything: the seven passes folded into rows", () => {
     const named = await everything(laptop(home()), { lookup, now: NOW });
     expect(named.rows.find(r => r.paths[0] === "~/.config/monid")).toBeUndefined();
     expect(named.rows.find(r => r.paths[0] === "~/.config/monid/credentials.yaml")).toMatchObject({ kind: "credential", flags: ["credential"] });
-    expect(named.rows.find(r => r.paths[0] === "~/.kube/config")).toMatchObject({ name: "config", kind: "credential", flags: ["credential"] });
+    expect(named.rows.find(r => r.paths[0] === "~/.kube/config")).toMatchObject({ name: ".kube/config", kind: "credential", flags: ["credential"] });
     expect(named.rows.find(r => r.paths[0] === "~/.kube")).toBeUndefined();
     const withConfig = await everything(laptop({ ...home(), files: { ...home().files, "~/.config/monid/config.toml": "x = 1\n" } }), { lookup, now: NOW });
     expect(withConfig.rows.find(r => r.paths[0] === "~/.config/monid")).toMatchObject({ name: "Monid", kind: "config", flags: ["credential"], files: 1 });

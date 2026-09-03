@@ -38,9 +38,19 @@ async function loginKeychain(m: Machine): Promise<string> {
   return reported !== undefined && reported !== "" ? reported : `${m.home}/${LOGIN_KEYCHAIN}`;
 }
 
-export async function keychain(m: Machine): Promise<KeychainItem[]> {
+export interface KeychainOptions {
+  /** Collects why nothing came back, when that is the case. */
+  notes?: string[];
+}
+
+export async function keychain(m: Machine, opts: KeychainOptions = {}): Promise<KeychainItem[]> {
   if (m.platform !== "darwin") return [];
-  return parseKeychainDump((await m.exec.run("security", ["dump-keychain", await loginKeychain(m)])) ?? "");
+  const dump = await m.exec.run("security", ["dump-keychain", await loginKeychain(m)]);
+  if (dump === undefined) {
+    opts.notes?.push("security dump-keychain failed; Keychain logins are not listed");
+    return [];
+  }
+  return parseKeychainDump(dump);
 }
 
 /** The binary the service name points at: `gh:github.com` is gh's, `spoo-cli` is nobody's unless a binary has that exact name. */

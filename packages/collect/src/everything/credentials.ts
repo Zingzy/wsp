@@ -7,7 +7,7 @@ import { isLarge } from "./gate.js";
 import { type Entry, type Machine, basename, tilde } from "./host.js";
 import type { Dir } from "./roles.js";
 import { roleByName } from "./roles.js";
-import { RC_FILES } from "./shell-rc.js";
+import { RC_PATHS } from "./shell-rc.js";
 import { budget, walk } from "./walk.js";
 
 export type Signal = "name" | "mode" | "keys" | "pem" | "gitleaks" | "catalog";
@@ -74,6 +74,16 @@ function extension(name: string): string {
   return dot <= 0 ? "" : name.slice(dot + 1).toLowerCase();
 }
 
+/** A Chromium profile's own state files hold sync and encryption material that is the browser's, not a login anyone carries. */
+const CHROMIUM_PROFILE = /^(Default|Profile \d+)$/;
+const CHROMIUM_FILES = new Set(["Preferences", "Secure Preferences"]);
+
+function chromiumState(path: string): boolean {
+  const name = basename(path);
+  if (name === "Local State") return true;
+  return CHROMIUM_FILES.has(name) && CHROMIUM_PROFILE.test(basename(path.slice(0, path.lastIndexOf("/"))));
+}
+
 function skippedName(name: string): boolean {
   return SKIP_NAMES.has(name) || /_history$/.test(name) || SKIP_SUFFIXES.some(s => name.endsWith(s)) || SOURCE_EXTENSIONS.has(extension(name));
 }
@@ -133,7 +143,7 @@ export function pemSignal(text: string): boolean {
 async function inspect(m: Machine, path: string, e: Entry, shallow: boolean): Promise<Credential | undefined> {
   const name = basename(path);
   const ext = extension(name);
-  if (e.bytes === 0 || skippedName(name)) return undefined;
+  if (e.bytes === 0 || skippedName(name) || chromiumState(path)) return undefined;
   const signals: Signal[] = [];
   if (nameSignal(name)) signals.push("name");
   if (modeSignal(e)) signals.push("mode");
@@ -197,7 +207,7 @@ export async function credentials(m: Machine, dirs: readonly Dir[], opts: Creden
   const found = new Map<string, Credential>();
   const files: [string, Entry, boolean][] = [];
   const roots: string[] = [];
-  const rc = new Set(RC_FILES.map(n => `${m.home}/${n}`));
+  const rc = new Set(RC_PATHS.map(n => `${m.home}/${n}`));
   for (const d of dirs) {
     if (d.role !== "unknown" || rc.has(d.path)) continue;
     const e = await m.fs.stat(d.linkTarget ?? d.path);

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { WALK_ENTRIES, roleByName, roles } from "../../src/index.js";
+import { SPLIT_ENTRIES, WALK_ENTRIES, roleByName, roles } from "../../src/index.js";
 import { HOME, OLD, home, laptop, many } from "./fixture.js";
 
 const rel = (p: string): string => p.replace(HOME, "~");
@@ -18,6 +18,7 @@ describe("pass 2: directory role", () => {
       ["~/.config/nvim", "unknown", 1, ["~/.config/nvim"]],
       ["~/.config/raycast", "state", 1, ["~/.config/raycast/extensions"]],
       ["~/.config/raycast", "unknown", 1, ["~/.config/raycast"]],
+      ["~/.DS_Store", "cache", 1, ["~/.DS_Store"]],
       ["~/.hermes", "state", 1, ["~/.hermes/node_modules"]],
       ["~/.hermes", "unknown", 5, ["~/.hermes"]],
       ["~/.jcode", "unknown", 1, ["~/.jcode"]],
@@ -38,6 +39,7 @@ describe("pass 2: directory role", () => {
       ["~/.ssh", "unknown", 4, ["~/.ssh"]],
       ["~/.tmux.conf", "unknown", 1, ["~/.tmux.conf"]],
       ["~/.viminfo", "unknown", 1, ["~/.viminfo"]],
+      ["~/.zcompdump-mac-5.9", "cache", 1, ["~/.zcompdump-mac-5.9"]],
       ["~/.zsh_history", "state", 1, ["~/.zsh_history"]],
       ["~/.zsh_sessions", "state", 1, ["~/.zsh_sessions"]],
       ["~/.zshrc", "unknown", 1, ["~/.zshrc"]],
@@ -81,6 +83,44 @@ describe("pass 2: directory role", () => {
     expect(dirs.find(d => d.path === `${HOME}/.config/stowed`)).toMatchObject({ kind: "dir", bytes: 0, files: 2, measured: "exact" });
   });
 
+  it("a directory holding PATH binaries is split out as state, one record per app", async () => {
+    const dirs = await roles(laptop(home()), { binDirs: new Set([`${HOME}/.hermes/node/bin`, `${HOME}/.cargo/bin`, `${HOME}/.local/share/uv/tools/ty/bin`]) });
+    expect(dirs.find(d => d.path === `${HOME}/.hermes` && d.role === "state")).toMatchObject({ paths: [`${HOME}/.hermes/node/bin`, `${HOME}/.hermes/node_modules`], files: 2, bytes: 90_002_000 });
+    expect(dirs.find(d => d.path === `${HOME}/.hermes` && d.role === "unknown")).toMatchObject({ files: 4, excludes: [`${HOME}/.hermes/node/bin`, `${HOME}/.hermes/node_modules`] });
+    expect(dirs.find(d => d.path === `${HOME}/.cargo` && d.role === "state")).toMatchObject({ paths: [`${HOME}/.cargo/bin`], bytes: 6_000_000 });
+    expect(dirs.find(d => d.path === `${HOME}/.cargo` && d.role === "unknown")).toMatchObject({ files: 1 });
+    expect(dirs.find(d => d.path === `${HOME}/.local/share/uv` && d.role === "state")).toMatchObject({ paths: [`${HOME}/.local/share/uv/tools/ty/bin`], files: 1 });
+  });
+
+  it("a binary living directly in its app directory is state, not config", async () => {
+    const dirs = await roles(laptop({ links: { "~/.local/bin/x": "/Users/dev/.x/x" }, files: { "~/.x/x": { bytes: 5_000_000, mode: 0o755 }, "~/.x/config.toml": "a = 1\n" } }), { binDirs: new Set([`${HOME}/.x`, `${HOME}/.local/bin`]), binFiles: new Set([`${HOME}/.x/x`]) });
+    expect(dirs.find(d => d.path === `${HOME}/.x` && d.role === "unknown")).toMatchObject({ files: 1, bytes: 6, excludes: [`${HOME}/.x/x`] });
+    expect(dirs.find(d => d.path === `${HOME}/.x` && d.role === "state")).toMatchObject({ paths: [`${HOME}/.x/x`], files: 1, bytes: 5_000_000 });
+  });
+
+  it("each split subtree has its own budget, so the app's own files are always counted", async () => {
+    const dirs = await roles(laptop({ files: { ...many("~/.app/aaa", 6_000), "~/.app/node_modules/x/i.js": 1_000, "~/.app/settings.json": 100 } }));
+    const app = dirs.find(d => d.path === `${HOME}/.app` && d.role === "unknown");
+    const state = dirs.find(d => d.path === `${HOME}/.app` && d.role === "state");
+    expect(app?.measured).toBe("lower-bound");
+    expect(app?.files).toBeGreaterThan(0);
+    expect(state).toMatchObject({ files: 1, bytes: 1_000, measured: "exact" });
+    const flipped = await roles(laptop({ files: { "~/.app/settings.json": 100, ...many("~/.app/node_modules/big", 6_000) } }));
+    expect(flipped.find(d => d.path === `${HOME}/.app` && d.role === "unknown")).toMatchObject({ files: 1, bytes: 100, measured: "exact" });
+    const big = flipped.find(d => d.path === `${HOME}/.app` && d.role === "state");
+    expect(big?.measured).toBe("lower-bound");
+    expect(big?.files).toBeLessThanOrEqual(SPLIT_ENTRIES);
+    expect(big?.files).toBeGreaterThan(0);
+  });
+
+  it("a capped record that counted nothing is not measured at all, never a lower bound of zero", async () => {
+    const files: Record<string, number> = {};
+    for (let i = 0; i < 5_100; i += 1) files[`~/.dirs/d${i}/`] = 0;
+    const dirs = await roles(laptop({ files }));
+    expect(dirs.find(d => d.path === `${HOME}/.dirs`)).toMatchObject({ files: 0, measured: "none" });
+    for (const d of dirs) expect(d.files === 0 && d.measured === "lower-bound", d.path).toBe(false);
+  });
+
   it("a root stops at the entry cap and says its size is a lower bound", async () => {
     const dirs = await roles(laptop({ files: { ...many("~/.big", 6_000), "~/.small/a": 1 } }));
     const big = dirs.find(d => d.path === `${HOME}/.big`);
@@ -93,7 +133,7 @@ describe("pass 2: directory role", () => {
   it("a root stops at the time cap too", async () => {
     let t = 0;
     const clock = (): number => {
-      t += 1_500;
+      t += 100;
       return t;
     };
     const dirs = await roles(laptop({ files: many("~/.slow", 300) }), { clock });
@@ -118,6 +158,8 @@ describe("pass 2: directory role", () => {
   it("names that mean cache or state at any depth", () => {
     expect(["node_modules", ".venv", "virtenv", "logs", "extensions", "installs", "versions", "builds", "projects", "sessions", ".git", ".zsh_history", ".zsh_sessions", "toolchains", "registry", "avd", "_npx"].map(roleByName)).toEqual(Array<string>(17).fill("state"));
     expect(["cache", ".cache", "Cache", "_cacache", "CachedData"].map(roleByName)).toEqual(Array<string>(5).fill("cache"));
+    expect([".DS_Store", ".zcompdump-mac-5.9", ".zcompdump", "prompt.zwc", "db-shm", "db-wal", "yarn.lock", ".claude.json.tmp.123", "x.tmp.abc"].map(roleByName)).toEqual(Array<string>(9).fill("cache"));
+    expect(["locked", "shm", "settings.json", ".tmux.conf"].map(roleByName)).toEqual([undefined, undefined, undefined, undefined]);
     expect(["config", "gh", "bin", "tools"].map(roleByName)).toEqual([undefined, undefined, undefined, undefined]);
   });
 });

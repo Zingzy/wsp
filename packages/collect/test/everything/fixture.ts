@@ -249,6 +249,8 @@ export function home(): Laptop {
       "~/.zshrc": "export PATH=$HOME/.local/bin:$PATH\nexport ANTHROPIC_API_KEY=sk-redacted\nexport KEYTIMEOUT=1\nGITHUB_TOKEN=ghp_redacted\nalias ll='ls -l'\n",
       "~/.zsh_history": { bytes: 300_000, mode: 0o600 },
       "~/.viminfo": { bytes: 20_000, mode: 0o600 },
+      "~/.DS_Store": 6_000,
+      "~/.zcompdump-mac-5.9": 50_000,
       "~/.CFUserTextEncoding": { text: "0:0", mode: 0o600 },
       "~/.oh-my-zsh/.git/HEAD": "ref: refs/heads/master\n",
       "~/.oh-my-zsh/credentials.json": '{"token":"looks-like-one"}',
@@ -335,6 +337,8 @@ export function shapes(): Laptop {
       "~/.hfstuff/tokenizer_config.json": '{"model_max_length":512}',
       "~/.config/raycast/config.json": { text: '{"theme":"dark"}', mode: 0o600 },
       "~/.viminfo": { bytes: 20_000, mode: 0o600 },
+      "~/.DS_Store": 6_000,
+      "~/.zcompdump-mac-5.9": 50_000,
       "~/.CFUserTextEncoding": { text: "0:0", mode: 0o600 },
     },
   };

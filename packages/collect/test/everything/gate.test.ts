@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { type Row, isLarge, sizeGate } from "../../src/index.js";
 
-const row = (bytes: number, files: number, flags: Row["flags"] = [], measured: Row["measured"] = "exact"): Row => ({ id: ".x", name: "x", kind: "unknown", paths: ["~/.x"], bytes, files, mtime: 0, measured, flags, ticked: false });
+const row = (bytes: number, files: number, flags: Row["flags"] = [], measured: Row["measured"] = "exact"): Row => ({ id: ".x", name: "x", kind: "unknown", paths: ["~/.x"], excludes: [], bytes, files, mtime: 0, measured, flags, ticked: false });
 
 describe("pass 7: size gate", () => {
   it("over 1 MB or over 50 files is large; at the boundary is not", () => {

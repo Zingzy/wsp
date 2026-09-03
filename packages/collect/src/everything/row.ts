@@ -23,6 +23,8 @@ export const Row = z.object({
   kind: Kind,
   /** `~`-relative files that may travel; empty for a Keychain item, whose location is never recorded, and for a binary alone. */
   paths: z.array(z.string()),
+  /** `~`-relative paths under `paths` that are not this row's to carry: split-out cache and state, credentials, what another rung already holds. A copier uploads paths minus excludes. */
+  excludes: z.array(z.string()),
   /** `~`-relative binary this row belongs to when nothing recorded how it was installed; reinstalled on the machine, never copied. */
   binary: z.string().optional(),
   /** `~`-relative target when the primary path is a symlink; the tree was measured there. */

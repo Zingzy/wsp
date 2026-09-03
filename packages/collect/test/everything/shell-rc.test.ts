@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { RC_FILES, isSecretName, shellRc, stripExports } from "../../src/index.js";
+import { RC_PATHS, isSecretName, shellRc, stripExports } from "../../src/index.js";
 import { home, laptop } from "./fixture.js";
 
 describe("pass 6: shell rc exports", () => {
   it("scans the rc files the shell rung carries, plus fish's config", () => {
-    expect(RC_FILES).toEqual([".zshrc", ".zshenv", ".zprofile", ".zlogin", ".bashrc", ".bash_profile", ".profile", ".inputrc", ".aliases", ".zsh_aliases", ".config/fish/config.fish"]);
+    expect(RC_PATHS).toEqual([".zshrc", ".zshenv", ".zprofile", ".zlogin", ".bashrc", ".bash_profile", ".profile", ".inputrc", ".aliases", ".zsh_aliases", ".config/fish/config.fish"]);
   });
 
   it("names that mean a secret, as whole words between underscores", () => {
@@ -65,6 +65,30 @@ describe("pass 6: shell rc exports", () => {
 
   it("a cut line's trailing comment does not swallow the lines after it", () => {
     expect(stripExports("export A_TOKEN=fake # don't share\nalias b=c\nexport X_SECRET=fake # `note\nalias d=e\n")).toEqual({ names: ["A_TOKEN", "X_SECRET"], carried: "alias b=c\nalias d=e\n" });
+  });
+
+  it("an export that is not the first word of the line is found and the whole line cut", () => {
+    const shapes = ['[ -z "$X" ] && export FOO_TOKEN=lit', "if true; then export BAR_KEY=lit; fi", "cd /tmp && export BAZ_SECRET=lit", "env QUX_TOKEN=lit somecommand", "{ export A_KEY=lit; }", "alias x='y'; export E_TOKEN=lit"];
+    const names = ["FOO_TOKEN", "BAR_KEY", "BAZ_SECRET", "QUX_TOKEN", "A_KEY", "E_TOKEN"];
+    for (const [i, line] of shapes.entries()) {
+      expect(stripExports(`${line}\nnext\n`), line).toEqual({ names: [names[i]], carried: "next\n" });
+    }
+    expect(stripExports("exec env J_TOKEN=lit cmd\nnext\n")).toEqual({ names: ["J_TOKEN"], carried: "next\n" });
+    expect(stripExports("eval 'export I_TOKEN=lit'\nnext\n")).toEqual({ names: ["I_TOKEN"], carried: "next\n" });
+    expect(stripExports('eval "cd /tmp; export K_SECRET=lit"\ncommand export L_KEY=lit\nbuiltin export M_TOKEN=lit\nnext\n')).toEqual({ names: ["K_SECRET", "L_KEY", "M_TOKEN"], carried: "next\n" });
+    expect(stripExports("alias x=';export FAKE_TOKEN=1'\nnext\n")).toEqual({ names: [], carried: "alias x=';export FAKE_TOKEN=1'\nnext\n" });
+    expect(stripExports("echo \"a && export NOT_TOKEN=1\"\n").names).toEqual([]);
+  });
+
+  it("ANSI-C quoting on a cut line closes at its own quote", () => {
+    expect(stripExports("export D_PASSWORD=$'it\\'s'\nline1\nline2\nline3\n")).toEqual({ names: ["D_PASSWORD"], carried: "line1\nline2\nline3\n" });
+  });
+
+  it("an rc file that exists but cannot be read is a note, not silence", async () => {
+    const notes: string[] = [];
+    const out = await shellRc(laptop({ files: { "~/.zshrc": { bytes: 2_000_000 }, "~/.bashrc": "export GH_TOKEN=x\n" } }), { notes });
+    expect(out.map(o => o.path)).toEqual(["~/.bashrc"]);
+    expect(notes).toEqual(["~/.zshrc could not be read (over 1 MiB or unreadable) and was not scanned"]);
   });
 
   it("a value never appears in the output, and a file with no secret exports is not reported", async () => {

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { type Dir, type Provenance, type Tool, candidates, pair, provenance, roles } from "../../src/index.js";
 import { HOME, home, laptop } from "./fixture.js";
 
-const dir = (path: string, role: Dir["role"] = "unknown"): Dir => ({ path: `${HOME}/${path}`, kind: "dir", role, paths: [`${HOME}/${path}`], bytes: 10, files: 1, mtime: 1, measured: "exact" });
+const dir = (path: string, role: Dir["role"] = "unknown"): Dir => ({ path: `${HOME}/${path}`, kind: "dir", role, paths: [`${HOME}/${path}`], excludes: [], bytes: 10, files: 1, mtime: 1, measured: "exact" });
 const tool = (name: string, extra: Partial<Tool> = {}): Tool => ({ name, path: `/opt/homebrew/bin/${name}`, resolved: `/opt/homebrew/Cellar/${name}/1/bin/${name}`, owner: "homebrew", bytes: 1, mtime: 1, ...extra });
 const prov = (tools: Tool[], leftovers: Provenance["leftovers"] = []): Provenance => ({ tools, leftovers });
 

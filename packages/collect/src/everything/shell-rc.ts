@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Pass 6. Exported variables whose name says KEY, TOKEN, SECRET or PASSWORD
-// are listed by name and cut from a carried copy of the rc file. Values
-// never leave this pass, so a cut line takes its continuation and any open
-// quote, substitution or heredoc with it.
+// are listed by name and cut from a carried copy of the rc file, wherever
+// on the line the assignment sits. Values never leave this pass, so a cut
+// line takes its continuation and any open quote, substitution or heredoc
+// with it.
 import { RC_FILES as SHELL_RUNG_RC } from "../detect/shell.js";
 import { type Machine, tilde } from "./host.js";
 
 /** The rc files the shell rung carries, `~`-relative, plus fish's config. */
-export const RC_FILES = [...SHELL_RUNG_RC.map(n => `.${n}`), ".config/fish/config.fish"] as const;
+export const RC_PATHS = [...SHELL_RUNG_RC.map(n => `.${n}`), ".config/fish/config.fish"] as const;
 
 export interface RcScan {
   /** `~`-relative. */
@@ -26,24 +27,73 @@ export function isSecretName(name: string): boolean {
 }
 
 const NAME = "[A-Za-z_][A-Za-z0-9_]*";
-const EXPORTED = new RegExp(`^\\s*(?:export|typeset|declare|readonly|local)(?:\\s+-\\w+)*\\s+(.*)$`);
+const EXPORTED = new RegExp(`^\\s*(?:export|typeset|declare|readonly|local|env)(?:\\s+-\\w+)*\\s+(.*)$`);
 const FISH_SET = new RegExp(`^\\s*set(?:\\s+-\\w+)*\\s+(${NAME})(?:\\s|$)`);
 const ASSIGNED = new RegExp(`^["']?(${NAME})=`);
+const PLAIN = new RegExp(`^\\s*(${NAME})=`);
+/** Words that open a compound command's body; what follows is a simple command of its own. */
+const KEYWORDS = /^\s*(?:then|do|else|elif|if|while|until|exec|command|builtin|!)\s+/;
+/** `eval 'export X=1'`: the quoted argument is shell again. */
+const EVAL = /^\s*eval\s+(?:'([^']*)'|"((?:[^"\\]|\\.)*)"|(\S.*))$/;
 
-function assignedNames(line: string): string[] {
-  const fish = FISH_SET.exec(line);
+/** The simple commands of a line: split outside quotes on `;`, `&&`, `||`, `|`, `&` and braces or parentheses, comment dropped. */
+function simpleCommands(line: string): string[] {
+  const out: string[] = [];
+  let quote: "" | "'" | '"' = "";
+  let cur = "";
+  for (let i = 0; i < line.length; i += 1) {
+    const c = line[i] ?? "";
+    if (c === "\\" && quote !== "'") {
+      cur += c + (line[i + 1] ?? "");
+      i += 1;
+      continue;
+    }
+    if (quote !== "") {
+      cur += c;
+      if (c === quote) quote = "";
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      quote = c;
+      cur += c;
+      continue;
+    }
+    if (commentAt(line, i)) break;
+    if (";|&{}()".includes(c)) {
+      out.push(cur);
+      cur = "";
+      continue;
+    }
+    cur += c;
+  }
+  out.push(cur);
+  return out.map(s => {
+    let t = s;
+    for (let m = KEYWORDS.exec(t); m !== null; m = KEYWORDS.exec(t)) t = t.slice(m[0].length);
+    return t;
+  }).filter(s => s.trim() !== "");
+}
+
+function assignedIn(command: string): string[] {
+  const ev = EVAL.exec(command);
+  if (ev !== null) return assignedNames(ev[1] ?? ev[2] ?? ev[3] ?? "");
+  const fish = FISH_SET.exec(command);
   if (fish?.[1] !== undefined) return [fish[1]];
-  const exported = EXPORTED.exec(line);
+  const exported = EXPORTED.exec(command);
   if (exported?.[1] !== undefined) {
     return exported[1].split(/\s+/).map(t => ASSIGNED.exec(t)?.[1]).filter((n): n is string => n !== undefined);
   }
-  const plain = new RegExp(`^\\s*(${NAME})=`).exec(line);
+  const plain = PLAIN.exec(command);
   return plain?.[1] === undefined ? [] : [plain[1]];
+}
+
+function assignedNames(line: string): string[] {
+  return simpleCommands(line).flatMap(assignedIn);
 }
 
 /** What is still open at the end of a line: a quote, a backtick, `$(` groups, a heredoc waiting for its word, or a trailing backslash. */
 interface Open {
-  quote: "" | "'" | '"' | "`";
+  quote: "" | "'" | '"' | "`" | "$'";
   parens: number;
   heredoc?: string;
   continues: boolean;
@@ -78,11 +128,20 @@ function scanLine(line: string, start: Open): Open {
       i += 1;
       continue;
     }
+    if (o.quote === "$'") {
+      if (c === "'") o.quote = "";
+      continue;
+    }
     if (o.quote === "'" || o.quote === "`") {
       if (c === o.quote) o.quote = "";
       continue;
     }
     if (o.quote === "" && commentAt(line, i)) break;
+    if (o.quote === "" && c === "$" && line[i + 1] === "'") {
+      o.quote = "$'";
+      i += 1;
+      continue;
+    }
     if (o.quote === "" && (c === "'" || c === "`")) {
       o.quote = c;
       continue;
@@ -147,12 +206,20 @@ export function stripExports(text: string): { names: string[]; carried: string }
   return { names, carried: kept.join(eol) };
 }
 
-export async function shellRc(m: Machine): Promise<RcScan[]> {
+export interface ShellRcOptions {
+  /** Collects rc files that exist but could not be read. */
+  notes?: string[];
+}
+
+export async function shellRc(m: Machine, opts: ShellRcOptions = {}): Promise<RcScan[]> {
   const out: RcScan[] = [];
-  for (const name of RC_FILES) {
+  for (const name of RC_PATHS) {
     const path = `${m.home}/${name}`;
     const text = await m.fs.readText(path);
-    if (text === undefined) continue;
+    if (text === undefined) {
+      if ((await m.fs.stat(path))?.kind === "file") opts.notes?.push(`${tilde(m.home, path)} could not be read (over 1 MiB or unreadable) and was not scanned`);
+      continue;
+    }
     const s = stripExports(text);
     if (s.names.length > 0) out.push({ path: tilde(m.home, path), ...s });
   }
