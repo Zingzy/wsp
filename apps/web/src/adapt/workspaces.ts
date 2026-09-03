@@ -43,6 +43,8 @@ export function workspaceIndicator(workspace: Pick<WorkspaceView, "phase">, stat
   const machine = status?.machineState ?? null;
   const reach = status?.reach.state ?? null;
   if (machine === "gone") return { label: "Gone", tone: "error", pulse: false };
+  // The provider says running and the guest answers nothing: not Running, not Unreachable.
+  if (reach === "zombie") return { label: "Zombie", tone: "error", pulse: false };
   switch (workspace.phase) {
     case "waking":
       return { label: "Waking", tone: "connecting", pulse: true };

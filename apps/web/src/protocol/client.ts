@@ -53,6 +53,17 @@ export class DisconnectedError extends Error {
   }
 }
 
+/** A runtime refusal. kind is the typed failure when the runtime has one (engine
+ * WspError kinds such as "concurrency", the provider's machine cap). */
+export class RequestError extends Error {
+  readonly kind: string | undefined;
+  constructor(message: string, kind?: string) {
+    super(message);
+    this.name = "RequestError";
+    this.kind = kind;
+  }
+}
+
 export const defaultBackoffMs = (attempt: number): number => Math.min(5_000, 250 * 2 ** (attempt - 1));
 
 export class ProtocolClient {
@@ -175,7 +186,7 @@ export class ProtocolClient {
     const p = this.#pending.get(id);
     if (!p) return;
     this.#pending.delete(id);
-    if (msg.ok === false) p.reject(new Error(String(msg.error ?? "request failed")));
+    if (msg.ok === false) p.reject(new RequestError(String(msg.error ?? "request failed"), typeof msg.kind === "string" ? msg.kind : undefined));
     else p.resolve(msg);
   }
 

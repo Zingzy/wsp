@@ -34,7 +34,6 @@ interface State {
   refresh(): Promise<void>;
   /** Optimistic nap/wake: paint now, reconcile on the event, revert + toast on failure. */
   toggle(id: string): Promise<void>;
-  createWorkspace(name: string): Promise<void>;
   clearToast(): void;
   applyEvent(e: ProtocolEvent): void;
   /** Rows come from the runtime (only it knows harness and final status); events say when to ask. */
@@ -122,15 +121,6 @@ export const useStore = create<State>((set, get) => {
       } catch (e) {
         setPhase(id, w.phase);
         if (!(e instanceof DisconnectedError)) set({ toast: `${w.name}: ${e instanceof Error ? e.message : String(e)}` });
-      }
-    },
-    async createWorkspace(name) {
-      const api = get().api;
-      if (!api) return;
-      try {
-        await api.createFromGoldenHead(name); // workspace.created carries the view back
-      } catch (e) {
-        set({ toast: e instanceof Error ? e.message : String(e) });
       }
     },
     clearToast() { set({ toast: null }); },
