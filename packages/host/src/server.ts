@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
-import { serveRuntime, type GoldenBuilderView, type ReapedMachine, type Runtime, type SparedMachine } from "@wsp/runtime";
+import { describeAge, serveRuntime, type GoldenBuilderView, type ReapedMachine, type Runtime, type SparedMachine } from "@wsp/runtime";
 
 // The enriched status now lives in @wsp/runtime (every client reads one
 // implementation); re-exported so host consumers keep their imports.
@@ -99,15 +99,6 @@ function describeLabels(labels: Record<string, string> | undefined): string {
   return ` (${Object.entries(labels).map(([k, v]) => `${k}=${v}`).join(" ")})`;
 }
 
-/** A createdAt stamped by a clock ahead of ours reads as zero, never negative. */
-function describeAge(ms: number | undefined): string {
-  if (ms === undefined) return "age unknown";
-  const age = Math.max(0, ms);
-  if (age < 60_000) return `${Math.floor(age / 1000)} s old`;
-  if (age < 3_600_000) return `${Math.floor(age / 60_000)} min old`;
-  return `${(age / 3_600_000).toFixed(1)} h old`;
-}
-
 function describeCost(rateUsdPerHour: number, ageMs: number | undefined): string {
   const rate = `$${rateUsdPerHour.toFixed(2)}/h`;
   return ageMs === undefined ? rate : `${rate} (about $${((Math.max(0, ageMs) / 3_600_000) * rateUsdPerHour).toFixed(2)} so far)`;
@@ -132,7 +123,8 @@ function describeSpared(m: SparedMachine): string {
     return `reap: left alone ${m.id}: ${kind} from another wsp setup (owner ${m.owner}), ${describeAge(m.ageMs)}, ${cost}; kill it from the Solari console if it is yours and forgotten`;
   }
   const who = m.whose === "own" ? `${kind} from this setup that no record claims` : `${kind} with no owner`;
-  const then = m.ageMs === undefined ? "never reaped by this host" : `reaped once it is ${describeAge(m.backstopMs).replace(/ old$/, "")} old`;
+  const claim = m.whose === "own" ? " unless a record claims it first" : "";
+  const then = m.ageMs === undefined ? "never reaped by this host" : `reaped once it is ${describeAge(m.backstopMs)}${claim}`;
   return `reap: left alone ${m.id}: ${who}, ${describeAge(m.ageMs)}, ${cost}; ${then}`;
 }
 
@@ -143,7 +135,7 @@ async function sweepOrphans(rt: Runtime, log: (line: string) => void, listSpared
     const { reaped, spared, failed } = await rt.reap();
     for (const r of reaped) log(describeReaped(r));
     if (listSpared) for (const m of spared) log(describeSpared(m));
-    for (const f of failed ?? []) log(`reap: sweep failed: ${f}`);
+    for (const f of failed ?? []) log(f.id !== undefined ? `reap: could not stop ${f.id} (${f.message})` : `reap: sweep failed: ${f.message}`);
   } catch (e) {
     log(`reap: sweep failed: ${e instanceof Error ? e.message : String(e)}`);
   }

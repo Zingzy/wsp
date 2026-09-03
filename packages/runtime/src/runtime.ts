@@ -25,6 +25,7 @@ import {
   type MachineShape,
   type MachineSpec,
   type PreviewReach,
+  type ReapFailure,
   type ReapResult,
   type ReapedMachine,
   rollback as rollbackGolden,
@@ -1024,7 +1025,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const key = name ?? "default";
       const prior = (await store.get(GOLDENS, key)) as GoldenManifest | undefined;
       const result = await claiming(b =>
-        buildGolden({ ...build, backend: b, labels: { ...build.labels, [OWNER_LABEL]: owner }, ...(prior !== undefined ? { manifest: prior } : {}) }),
+        buildGolden({
+          ...build,
+          backend: b,
+          labels: { ...build.labels, wsp: "1", [OWNER_LABEL]: owner, createdAt: new Date().toISOString() },
+          ...(prior !== undefined ? { manifest: prior } : {}),
+        }),
       );
       await store.put(GOLDENS, key, result.manifest);
       return { manifest: result.manifest, version: result.version };
@@ -1158,14 +1164,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await ready();
       // A hydrated builder is not first-life and can never seal; stopping it is the only thing that ends its bill.
       const reaped: ReapedMachine[] = [];
-      const failed: string[] = [];
+      const failed: ReapFailure[] = [];
       const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
       for (const b of [...builders.values()].filter(b => b.stale)) {
         try {
           await b.builder.machine.kill();
         } catch (e) {
           if ((e as { kind?: string }).kind !== "missing") {
-            failed.push(`${b.record.id} could not be stopped (${messageOf(e)}); it stays recorded and is retried next sweep`);
+            failed.push({ id: b.record.id, message: `${messageOf(e)}; stays recorded, retried next sweep` });
             continue;
           }
         }
@@ -1186,7 +1192,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           }),
         );
       } catch (e) {
-        failed.push(messageOf(e));
+        failed.push({ message: messageOf(e) });
         return result({ reaped: [], spared: [] });
       }
     },

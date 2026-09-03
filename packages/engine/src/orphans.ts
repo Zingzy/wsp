@@ -54,11 +54,26 @@ export interface SparedMachine {
   rateUsdPerHour: number;
 }
 
+export interface ReapFailure {
+  /** The machine whose kill failed; absent when the listing itself failed. */
+  id?: string;
+  message: string;
+}
+
 export interface ReapResult {
   reaped: ReapedMachine[];
   spared: SparedMachine[];
   /** One entry per thing that went wrong: a kill that failed, or the listing itself; the rest of the sweep still ran. */
-  failed?: string[];
+  failed?: ReapFailure[];
+}
+
+/** An age for a person. A createdAt stamped by a clock ahead of ours reads as zero, never negative. */
+export function describeAge(ms: number | undefined): string {
+  if (ms === undefined) return "age unknown";
+  const age = Math.max(0, ms);
+  if (age < 60_000) return `${Math.floor(age / 1000)} s old`;
+  if (age < 3_600_000) return `${Math.floor(age / 60_000)} min old`;
+  return `${(age / 3_600_000).toFixed(1)} h old`;
 }
 
 // Kills running machines that carry our label but that nothing claims.
@@ -76,7 +91,7 @@ export async function reap(opts: ReapOptions): Promise<ReapResult> {
 
   const reaped: ReapedMachine[] = [];
   const spared: SparedMachine[] = [];
-  const failed: string[] = [];
+  const failed: ReapFailure[] = [];
   for (const m of rows) {
     if (m.state !== "running") continue;
     if (RESERVED_LABEL in m.labels) continue;
@@ -108,7 +123,7 @@ export async function reap(opts: ReapOptions): Promise<ReapResult> {
     } catch (e) {
       // The listing lags a kill (measured): a row that is gone by the time it is fetched is no failure.
       if ((e as { kind?: string }).kind === "missing") continue;
-      failed.push(`${m.id} could not be stopped (${e instanceof Error ? e.message : String(e)})`);
+      failed.push({ id: m.id, message: e instanceof Error ? e.message : String(e) });
       continue;
     }
     reaped.push({ id: m.id, labels: m.labels, builder, reason: whose === "own" ? "own" : "orphan", ...(ageMs !== undefined ? { ageMs } : {}) });

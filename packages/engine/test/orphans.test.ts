@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BUILDER_IDLE_MS } from "../src/golden.js";
-import { reap } from "../src/orphans.js";
+import { describeAge, reap } from "../src/orphans.js";
 import type { Machine, MachineBackend, MachineState } from "../src/machine.js";
 
 const NOW = Date.parse("2026-09-01T12:00:00Z");
@@ -8,6 +8,7 @@ const OLD = new Date(NOW - 11 * 60_000).toISOString();
 const YOUNG = new Date(NOW - 2 * 60_000).toISOString();
 const PAST_BACKSTOP = new Date(NOW - BUILDER_IDLE_MS - 60_000).toISOString();
 const FRESH = new Date(NOW - 30_000).toISOString();
+const AT_GRACE = new Date(NOW - 60_000).toISOString();
 const ME = "h_me";
 const RATE = 2 * 0.035 + 4 * 0.01;
 
@@ -62,6 +63,7 @@ describe("orphan reaper", () => {
     { name: "a builder this owner is still creating", row: { id: "inflight", labels: builder({ "wsp-owner": ME }) }, known: true, verdict: "kept" },
     { name: "a builder this owner made but lost the record of", row: { id: "owned", labels: builder({ "wsp-owner": ME, createdAt: YOUNG }) }, verdict: "own" },
     { name: "a builder this owner made less than a minute ago", row: { id: "owned-fresh", labels: builder({ "wsp-owner": ME, createdAt: FRESH }) }, verdict: "spared" },
+    { name: "a builder this owner made exactly a minute ago", row: { id: "owned-at-grace", labels: builder({ "wsp-owner": ME, createdAt: AT_GRACE }) }, verdict: "own" },
     { name: "a builder this owner made, record and createdAt both gone", row: { id: "owned-ageless", labels: builder({ "wsp-owner": ME }) }, verdict: "own" },
     { name: "another owner's young builder", row: { id: "foreign", labels: builder({ "wsp-owner": "h_other", createdAt: YOUNG }) }, verdict: "spared" },
     { name: "another owner's builder past the backstop", row: { id: "foreign-old", labels: builder({ "wsp-owner": "h_other", createdAt: PAST_BACKSTOP }) }, verdict: "spared" },
@@ -171,8 +173,18 @@ describe("orphan reaper", () => {
     const result = await reap({ backend, owner: ME, knownIds: () => [], now: () => NOW });
     expect(result.reaped.map(r => r.id)).toEqual(["orphan-before", "orphan-after"]);
     expect(result.spared.map(s => s.id)).toEqual(["foreign"]);
-    expect(result.failed).toEqual(["bad could not be stopped (Bad Gateway)"]);
+    expect(result.failed).toEqual([{ id: "bad", message: "Bad Gateway" }]);
     expect(killed).toEqual(["orphan-before", "orphan-after"]);
+  });
+
+  it("describes an age for a person: never negative, floored, hours with one decimal", () => {
+    expect(describeAge(undefined)).toBe("age unknown");
+    expect(describeAge(-45_000)).toBe("0 s old");
+    expect(describeAge(59_600)).toBe("59 s old");
+    expect(describeAge(60_000)).toBe("1 min old");
+    expect(describeAge(9.5 * 60_000)).toBe("9 min old");
+    expect(describeAge(6 * 3_600_000)).toBe("6.0 h old");
+    expect(describeAge(6 * 3_600_000 + 60_000)).toBe("6.0 h old");
   });
 
   it("refuses an empty owner before listing anything", async () => {

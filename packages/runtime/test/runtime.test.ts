@@ -536,13 +536,16 @@ describe("runtime golden builders", () => {
     const b = await rt.golden.prepare();
     await rt.golden.seal(b.id);
     await rt.workspaces.create({ golden: "snap_g", name: "x" });
-    await rt.golden.build({ setup: "true", smoke: "true", labels: { wsp: "1", createdAt: new Date().toISOString() } });
+    await rt.golden.build({ setup: "true", smoke: "true" });
     const owners = backend.machines.map(m => m.spec.labels?.["wsp-owner"]);
     expect(owners).toHaveLength(5);
     expect(new Set(owners).size).toBe(1);
     expect(owners[0]).toMatch(/^h_[0-9a-f]{8}$/);
     expect(backend.machines[1]!.spec.labels).toMatchObject({ wsp: "1", "wsp-smoke": "1" });
     expect(backend.machines[2]!.spec.labels).toMatchObject({ wsp: "1" });
+    // A scripted build with no labels of its own still gets the wsp mark and a readable age, like the wizard's builder.
+    expect(backend.machines[3]!.spec.labels).toMatchObject({ wsp: "1", "wsp-builder": "1", createdAt: expect.stringMatching(/^\d{4}-/) });
+    expect(backend.machines[4]!.spec.labels).toMatchObject({ wsp: "1", "wsp-smoke": "1", createdAt: expect.stringMatching(/^\d{4}-/) });
   });
 
   it("the sweep leaves a builder this process is still preparing alone", async () => {
@@ -634,7 +637,7 @@ describe("runtime golden builders", () => {
     expect(await rt.reap()).toEqual({
       reaped: [{ id: second.id, builder: true, reason: "recorded" }, expect.objectContaining({ id: orphan.id, reason: "orphan" })],
       spared: [],
-      failed: [`${first.id} could not be stopped (502 exec failed); it stays recorded and is retried next sweep`],
+      failed: [{ id: first.id, message: "502 exec failed; stays recorded, retried next sweep" }],
     });
     expect(backend.machines.map(m => m.killed)).toEqual([false, true, true]);
     expect((await rt.golden.builders()).map(b => b.id)).toEqual([first.id]);
@@ -648,7 +651,7 @@ describe("runtime golden builders", () => {
     const stale = await crashed.golden.prepare();
     const rt = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
     backend.list = async () => { throw new Error("list 502"); };
-    expect(await rt.reap()).toEqual({ reaped: [{ id: stale.id, builder: true, reason: "recorded" }], spared: [], failed: ["list 502"] });
+    expect(await rt.reap()).toEqual({ reaped: [{ id: stale.id, builder: true, reason: "recorded" }], spared: [], failed: [{ message: "list 502" }] });
     expect(backend.machines[0]!.killed).toBe(true);
     expect(await store.list("builders")).toEqual([]);
   });

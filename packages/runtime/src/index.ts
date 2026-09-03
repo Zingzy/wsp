@@ -9,11 +9,13 @@ export * from "./reach.js";
 export {
   SolariBackend,
   applyDotfiles,
+  describeAge,
   type SolariBackendOptions,
   type GoldenManifest,
   type GoldenVersion,
   type Machine,
   type DotfilesResult,
+  type ReapFailure,
   type ReapResult,
   type ReapedMachine,
   type SparedMachine,

@@ -440,7 +440,7 @@ describe("host sweeps orphaned machines", () => {
       `reap: stopped ${stray.id} (wsp=1 createdAt=${strayAt}): workspace with no owner, 12 min old`,
       `reap: stopped ${orphan.id} (wsp=1 wsp-builder=1 createdAt=${orphanAt}): builder with no owner, 6.0 h old`,
       `reap: left alone ${foreign.id}: builder from another wsp setup (owner h_other), 53 s old, $0.11/h (about $0.00 so far); kill it from the Solari console if it is yours and forgotten`,
-      `reap: sweep failed: ${lost.id} could not be stopped (Bad Gateway)`,
+      `reap: could not stop ${lost.id} (Bad Gateway)`,
     ]);
   });
 
@@ -453,6 +453,7 @@ describe("host sweeps orphaned machines", () => {
     const almostMinute = await backend.create({ kind: "sandbox", labels: { ...BUILDER, "wsp-owner": "h_other", createdAt: ago(59_600) } });
     const ownWs = await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-owner": owner, createdAt: ago(9.5 * 60_000) } });
     const hours = await backend.create({ kind: "sandbox", labels: { ...BUILDER, "wsp-owner": "h_other", createdAt: ago(6 * 3_600_000) } });
+    const freshOwn = await backend.create({ kind: "sandbox", labels: { ...BUILDER, "wsp-owner": owner, createdAt: ago(30_000) } });
     const lines: string[] = [];
 
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
@@ -461,8 +462,9 @@ describe("host sweeps orphaned machines", () => {
     expect(lines).toEqual([
       `reap: left alone ${ahead.id}: builder from another wsp setup (owner h_other), 0 s old, $0.11/h (about $0.00 so far); kill it from the Solari console if it is yours and forgotten`,
       `reap: left alone ${almostMinute.id}: builder from another wsp setup (owner h_other), 59 s old, $0.11/h (about $0.00 so far); kill it from the Solari console if it is yours and forgotten`,
-      `reap: left alone ${ownWs.id}: workspace from this setup that no record claims, 9 min old, $0.11/h (about $0.02 so far); reaped once it is 10 min old`,
+      `reap: left alone ${ownWs.id}: workspace from this setup that no record claims, 9 min old, $0.11/h (about $0.02 so far); reaped once it is 10 min old unless a record claims it first`,
       `reap: left alone ${hours.id}: builder from another wsp setup (owner h_other), 6.0 h old, $0.11/h (about $0.66 so far); kill it from the Solari console if it is yours and forgotten`,
+      `reap: left alone ${freshOwn.id}: builder from this setup that no record claims, 30 s old, $0.11/h (about $0.00 so far); reaped once it is 1 min old unless a record claims it first`,
     ]);
   });
 
@@ -480,7 +482,7 @@ describe("host sweeps orphaned machines", () => {
     expect(backend.machines.map(m => m.killed)).toEqual([false, true]);
     expect(lines).toEqual([
       `reap: stopped ${orphan.id} (wsp=1 wsp-builder=1 createdAt=${orphanAt}): builder with no owner, 6.0 h old`,
-      `reap: sweep failed: ${stuck.id} could not be stopped (502 exec failed); it stays recorded and is retried next sweep`,
+      `reap: could not stop ${stuck.id} (502 exec failed; stays recorded, retried next sweep)`,
     ]);
   });
 

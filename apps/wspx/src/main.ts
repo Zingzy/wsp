@@ -11,6 +11,7 @@ import {
   SolariBackend,
   applyDotfiles,
   createRuntime,
+  describeAge,
   jsonFileStore,
   machineExecStream,
   type EventUnion,
@@ -177,17 +178,9 @@ function watchEvents(rt: Runtime): void {
   });
 }
 
-function describeAge(ms: number): string {
-  const age = Math.max(0, ms);
-  if (age < 60_000) return `${Math.floor(age / 1000)} s old`;
-  if (age < 3_600_000) return `${Math.floor(age / 60_000)} min old`;
-  return `${(age / 3_600_000).toFixed(1)} h old`;
-}
-
 function describeSpared(s: SparedMachine): string {
   const whose = s.whose === "foreign" ? `owner ${s.owner}` : s.whose === "own" ? "this setup, no record" : "no owner";
-  const age = s.ageMs === undefined ? "age unknown" : describeAge(s.ageMs);
-  return `left alone ${s.id} (${whose}, ${age}, $${s.rateUsdPerHour.toFixed(2)}/h)`;
+  return `left alone ${s.id} (${whose}, ${describeAge(s.ageMs)}, $${s.rateUsdPerHour.toFixed(2)}/h)`;
 }
 
 async function listMachines(rt: Runtime): Promise<{ id: string; state: string; labels: Record<string, string> }[]> {
@@ -479,7 +472,7 @@ async function main(): Promise<void> {
       const { reaped, spared, failed } = await rt.reap(0);
       log(reaped.length > 0 ? `reaped: ${reaped.map(r => r.id).join(", ")}` : "nothing to reap");
       for (const s of spared) log(describeSpared(s));
-      for (const f of failed ?? []) log(`failed: ${f}`);
+      for (const f of failed ?? []) log(f.id !== undefined ? `could not stop ${f.id} (${f.message})` : `listing failed: ${f.message}`);
       return;
     }
     case "demo":
