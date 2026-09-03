@@ -7,9 +7,10 @@
 // to sockets that asked with ports.watch, and a subscription dies with its
 // socket, so every live transition asks again.
 import { getBrowser } from "../browser/model.js";
+import { provideDaemonWire } from "../files/wire.js";
 import type { useStore } from "../protocol/store.js";
 import { connectDaemonLink, type DaemonLink, type DaemonLinkOptions } from "./daemon-link.js";
-import { provideTerminals, WorkspaceTerminals } from "./link.js";
+import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "./link.js";
 
 export interface WiringOptions extends Pick<DaemonLinkOptions, "WebSocketCtor" | "heartbeatMs" | "backoffMs"> {
   /** Keystrokes reach the runtime as one workspaces.touch per this window; the idle window is minutes, so 30 s loses nothing. */
@@ -41,7 +42,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
       let entry = wired.get(w.id);
       if (!entry) {
         const fresh: Wired = { link: null, touched: 0, wt: undefined as unknown as WorkspaceTerminals };
-        fresh.wt = new WorkspaceTerminals({
+        const wire: TerminalWire = {
           request: (op, params) => {
             if (op === "pty.write" && Date.now() - fresh.touched >= touchMinMs) {
               fresh.touched = Date.now();
@@ -49,10 +50,12 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
             }
             return fresh.link ? fresh.link.request(op, params) : Promise.reject(new Error("daemon unreachable"));
           },
-        });
+        };
+        fresh.wt = new WorkspaceTerminals(wire);
         entry = fresh;
         wired.set(w.id, entry);
         provideTerminals(w.id, entry.wt);
+        provideDaemonWire(w.id, wire);
       }
       const { wt } = entry;
       if (w.phase === "running" && !entry.link) {
@@ -83,6 +86,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
       unlink(entry);
       wired.delete(id);
       provideTerminals(id, null);
+      provideDaemonWire(id, null);
     }
   };
 
@@ -93,6 +97,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
     for (const [id, entry] of wired) {
       unlink(entry);
       provideTerminals(id, null);
+      provideDaemonWire(id, null);
     }
     wired.clear();
   };

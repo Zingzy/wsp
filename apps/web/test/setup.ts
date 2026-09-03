@@ -85,3 +85,7 @@ globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
   }
   return realFetch(input, init);
 }) as typeof fetch;
+
+// The kit's sidebar persists its open state through the Cookie Store API,
+// which jsdom does not ship; toggling it in a test needs a sink.
+(globalThis as { cookieStore?: unknown }).cookieStore ??= { set: async () => {} };

@@ -7,21 +7,28 @@ here are included or relied upon under their own licenses, reproduced below.
 
 1. pingdotgg/t3code (MIT)
 
-   Files under apps/web/src/components (the ui, chat and preview folders,
-   the right-panel, page-header, no-active-thread and terminal drawer
-   components), apps/web/src/sidebar (the sidebar logic, thread sort,
-   status indicators, favicon and chrome; the WorkspaceSidebar container,
-   the new-workspace dialog and workspaceRows.ts are wsp's own),
+   Files under apps/web/src/components (the ui, chat, preview, files and
+   diffs folders, the right-panel, page-header, no-active-thread and
+   diff-worker-pool and terminal drawer components; FileMarkdownPreview.tsx is wsp's own),
+   apps/web/src/sidebar (the sidebar logic, thread sort, status
+   indicators, favicon and chrome; the WorkspaceSidebar container, the
+   new-workspace dialog and workspaceRows.ts are wsp's own),
+   apps/web/src/components/palette (the palette chrome, results and
+   logic; the CommandPalette container and paletteItems.tsx are wsp's own),
    apps/web/src/hooks, apps/web/src/lib (utils, timestampFormat,
-   selection actions, terminal context and labels),
+   selection actions, terminal context and labels, and the rest),
    apps/web/src/terminal/ghostty (the libghostty-vt browser adapter and
    its tests), apps/web/src/terminal/groups.ts,
    apps/web/src/terminal-links.ts, apps/web/src/appearanceFonts.ts,
    apps/web/src/index.css,
+   apps/web/src/reviewCommentContext.ts,
+   apps/web/src/commandPaletteBus.ts, apps/web/src/keybindings.ts,
+   apps/web/src/keybindingDefaults.ts,
    apps/web/src/rightPanelStore.ts, apps/web/src/rightPanelLayout.ts and
    apps/web/src/workspaceTitlebar.ts are adapted from
    https://github.com/pingdotgg/t3code at commit 57a66608. Each file
-   carries an "Adapted from" line naming its source path. Trademarks,
+   carries an "Adapted from" line naming its source path. The file under
+   patches/ is taken from t3code's patches directory. Trademarks,
    names and logos of T3 Tools Inc. are not licensed and do not appear.
 
    MIT License
@@ -133,9 +140,11 @@ here are included or relied upon under their own licenses, reproduced below.
 
 ------------------------------------------------------------------------
 
-5. @pierre/diffs and @pierre/trees (Apache-2.0), used by later tasks
+5. @pierre/diffs and @pierre/trees (Apache-2.0)
 
-   The files and diff panes will depend on these packages from
+   The file preview and diff surfaces render with @pierre/diffs, applied
+   with the patch at patches/@pierre%2Fdiffs@1.3.0-beta.10.patch; the files
+   surface's tree is @pierre/trees. Both are from
    https://github.com/pierre-computer. Apache License, Version 2.0:
 
    Apache License

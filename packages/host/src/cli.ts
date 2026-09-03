@@ -356,6 +356,7 @@ async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: 
       ...(flags.manifest !== undefined ? { manifestPath: resolve(flags.manifest) } : {}),
       collect: collectThisComputer,
       keys,
+      pricing: new SolariBackend({ apiKey: keys.solari }).pricing,
       statePath: opts.statePath,
       runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `node ${(await deployDaemon(machine)).node}` }),
       host: (rt, builder, checklist) => hostFor(rt, keys, { ...opts, builder, checklist }, io),

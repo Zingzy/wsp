@@ -22,8 +22,8 @@ export const RUNG_TITLE: Record<Rung, string> = {
 
 /** The prompt's words for each login choice; the choices themselves are the collector's. */
 export const LOGIN_CHOICES: readonly { value: LoginChoice; label: string }[] = [
-  { value: "copy", label: "copy from this computer" },
-  { value: "machine", label: "sign in on the machine" },
+  { value: "copy", label: "copy" },
+  { value: "machine", label: "sign in" },
   { value: "skip", label: "skip" },
 ];
 
@@ -72,6 +72,13 @@ export function checklistFor(manifest: Manifest, choices: ReadonlyMap<string, st
   return manifest.entries
     .filter(e => e.rung === "logins" && choices.get(e.id) === "machine")
     .map(e => ({ label: e.label, command: signInCommand(e) ?? "sign in as the tool asks" }));
+}
+
+/** A login that belongs to an agent is only offered when that agent comes along. */
+export function loginShown(e: ManifestEntry, manifest: Manifest, ticks: ReadonlySet<string>): boolean {
+  if (e.rung !== "logins") return true;
+  const agent = manifest.entries.find(a => a.rung === "agents" && agentName(a) === agentName(e));
+  return agent === undefined || ticks.has(agent.id);
 }
 
 function isLoginChoice(v: unknown): v is LoginChoice {

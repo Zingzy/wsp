@@ -9,3 +9,7 @@ export function cn(...inputs: CxOptions) {
 export function isMacPlatform(platform: string): boolean {
   return /mac|iphone|ipad|ipod/i.test(platform);
 }
+
+export function normalizeSearchText(value: string): string {
+  return value.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/\s+/g, " ").trim();
+}
