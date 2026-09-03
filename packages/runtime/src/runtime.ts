@@ -1100,6 +1100,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(e.record.phase === "running" && idle.idleAt(e.record.id) !== undefined ? { idleAt: idle.idleAt(e.record.id)! } : {}),
         ...(e.machine.previewUrl ? { daemonReach: () => e.ws.daemonReach() } : {}),
         providerState: () => e.machine.state(),
+        exec: (cmd, o) => e.machine.exec(cmd, o),
       }));
     },
     emit: e => bus.emit(e),

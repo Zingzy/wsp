@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createServer, type Server } from "node:http";
 import { EventUnion, type WorkspaceStatus } from "@wsp/protocol";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRuntime, type Runtime } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
+import type { StatusWatchOptions } from "../src/status.js";
 import { memoryStore } from "../src/store.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { until } from "./until.js";
@@ -23,7 +24,7 @@ function countProvider(backend: StubBackend): () => { get: number; list: number;
   return () => ({ ...n });
 }
 
-function testRuntime(status?: { costIntervalMs?: number; pollIntervalMs?: number; reconcileMinMs?: number }): {
+function testRuntime(status?: StatusWatchOptions): {
   rt: Runtime;
   backend: StubBackend;
 } {
@@ -255,5 +256,106 @@ describe("serveRuntime status.subscribe", () => {
     expect(statuses[0]).toMatchObject({ name: "alpha", machineState: "running" });
     await until(() => c.events.some(e => e.type === "workspace.cost"));
     c.close();
+  });
+});
+
+describe("status zombie at rest", () => {
+  /** A stub that answers 426 late: the machine is there, the edge is slow (the two measured zombies read this way for minutes). */
+  async function slowMachine(backend: StubBackend): Promise<{ hits: () => number }> {
+    const slow = await httpStub(426, 40);
+    openServers.push(slow.server);
+    backend.machines[0]!.previewUrl = async port => ({ url: `http://127.0.0.1:${slow.port}/?port=${port}`, token: "t", expiresAt: Date.now() + 3_600_000 });
+    return slow;
+  }
+  const probes = (backend: StubBackend) => backend.machines[0]!.execLog.filter(c => c === "echo ok").length;
+  const statuses = (rt: Runtime): WorkspaceStatus[] => {
+    const seen: WorkspaceStatus[] = [];
+    rt.events.on("workspace.status", e => seen.push((e as { status: WorkspaceStatus }).status));
+    return seen;
+  };
+  const opts = { costIntervalMs: 60_000, pollIntervalMs: 5, promptMs: 10, probeTimeoutMs: 500, zombieWindowMs: 80, zombieProbeTimeoutMs: 200 };
+
+  it("reach slow past the window and a failing exec probe mark the workspace zombie, with the machine id and timings in the reason, once", async () => {
+    const { rt, backend } = testRuntime(opts);
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "hello" });
+    await slowMachine(backend);
+    backend.execImpl = (_m, cmd) => (cmd === "echo ok" ? { exitCode: 1, stdout: "", stderr: "502 exec failed" } : { exitCode: 0, stdout: "", stderr: "" });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const seen = statuses(rt);
+    const stop = rt.status.watch();
+    try {
+      await until(() => seen.some(s => s.reach.state === "zombie"), 5_000);
+      const zombie = seen.find(s => s.reach.state === "zombie")!;
+      expect(zombie).toMatchObject({ id: ws.id, phase: "running", machineState: "running", machineId: "m1" });
+      expect(zombie.reason).toMatch(/m1/);
+      expect(zombie.reason).toMatch(/slow .*\d+ s/);
+      expect(zombie.reason).toMatch(/echo ok.*\d+ ms.*exit 1: 502 exec failed/);
+      expect(seen.filter(s => s.reach.state === "slow").length).toBeGreaterThan(0);
+      // The mark sticks: later polls keep saying zombie without probing again.
+      const before = probes(backend);
+      const pushed = seen.length;
+      await new Promise(r => setTimeout(r, 100));
+      expect(probes(backend)).toBe(before);
+      expect(before).toBe(1);
+      expect(seen.slice(pushed).every(s => s.reach.state === "zombie")).toBe(true);
+      expect(seen.filter(s => s.reach.state === "zombie").length).toBe(1);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]![0]).toMatch(/zombie.*m1/);
+    } finally {
+      stop();
+      warn.mockRestore();
+    }
+  });
+
+  it("a slow spell where exec answers never flags, and the probe repeats once per window rather than per poll", async () => {
+    const { rt, backend } = testRuntime(opts);
+    await rt.workspaces.create({ golden: "snap_g", name: "weather" });
+    const slow = await slowMachine(backend);
+    backend.execImpl = (_m, cmd) => (cmd === "echo ok" ? { exitCode: 0, stdout: "ok\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+    const seen = statuses(rt);
+    const stop = rt.status.watch();
+    try {
+      await until(() => probes(backend) >= 2, 5_000);
+      const polls = slow.hits();
+      expect(seen.every(s => s.reach.state === "slow")).toBe(true);
+      expect(seen.every(s => s.reason === undefined)).toBe(true);
+      expect(polls).toBeGreaterThan(probes(backend) * 2);
+    } finally {
+      stop();
+    }
+  });
+
+  it("an exec probe that never returns is cut at its timeout and counts as failed", async () => {
+    const { rt, backend } = testRuntime({ ...opts, zombieProbeTimeoutMs: 60 });
+    await rt.workspaces.create({ golden: "snap_g", name: "hang" });
+    await slowMachine(backend);
+    backend.execImpl = (_m, cmd) => (cmd === "echo ok" ? new Promise<never>(() => {}) : { exitCode: 0, stdout: "", stderr: "" });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const seen = statuses(rt);
+    const stop = rt.status.watch();
+    try {
+      await until(() => seen.some(s => s.reach.state === "zombie"), 5_000);
+      expect(seen.find(s => s.reach.state === "zombie")!.reason).toMatch(/timed out after 60 ms/);
+    } finally {
+      stop();
+      warn.mockRestore();
+    }
+  });
+
+  it("a machine the provider says is paused gets no probe: the divergence already explains the slow reach", async () => {
+    const { rt, backend } = testRuntime(opts);
+    await rt.workspaces.create({ golden: "snap_g", name: "behind-our-back" });
+    await slowMachine(backend);
+    backend.machines[0]!.paused = true;
+    const seen = statuses(rt);
+    const stop = rt.status.watch();
+    try {
+      await until(() => seen.some(s => s.machineState === "paused"), 5_000);
+      await new Promise(r => setTimeout(r, 200));
+      expect(probes(backend)).toBe(0);
+      expect(seen.some(s => s.reach.state === "zombie")).toBe(false);
+    } finally {
+      stop();
+    }
   });
 });

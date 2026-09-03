@@ -9,8 +9,8 @@
 // Solari's idle timer, so a poller that asked per tick kept every workspace
 // awake and billing forever.
 
-import type { MachineState, PreviewReach } from "@wsp/engine";
-import type { EventUnion, ReachState, WorkspacePhase, WorkspaceSize, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import type { ExecResult, MachineState, PreviewReach } from "@wsp/engine";
+import type { EventUnion, ReachState, ReachStatus, WorkspacePhase, WorkspaceSize, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 
 /** The provider word the runtime's own phase implies: a wake in flight is a machine starting. */
 export function machineStateOf(phase: WorkspacePhase): MachineState {
@@ -57,6 +57,10 @@ export interface StatusWatchOptions {
   promptMs?: number;
   /** How long the poller believes a provider answer before a failed reach may ask again. */
   reconcileMinMs?: number;
+  /** Reach slow or unreachable for this long on a machine the provider calls running earns one exec probe. */
+  zombieWindowMs?: number;
+  /** The exec probe's bound; past it the guest counts as dead. */
+  zombieProbeTimeoutMs?: number;
 }
 
 export interface StatusApi {
@@ -74,6 +78,7 @@ export interface StatusRecord extends WorkspaceView {
   idleAt?: number;
   daemonReach?: () => Promise<PreviewReach>;
   providerState: () => Promise<MachineState>;
+  exec: (cmd: string, opts?: { timeoutMs?: number }) => Promise<ExecResult>;
 }
 
 export interface StatusTrackerOptions {
@@ -93,15 +98,44 @@ interface Meter {
 const PROBE_TIMEOUT_MS = 10_000;
 const PROMPT_MS = 2_500;
 const RECONCILE_MIN_MS = 5 * 60_000;
+/** Both measured zombies sat slow or unreachable for well over this before anyone looked;
+ * a provider slow spell (5 to 11 s answers, minutes long) must not reach the probe. */
+const ZOMBIE_WINDOW_MS = 3 * 60_000;
+/** The zombies' own exec 502'd after 36 to 38 s; a live guest answers echo in under a second. */
+const ZOMBIE_PROBE_TIMEOUT_MS = 20_000;
+const ZOMBIE_PROBE_CMD = "echo ok";
+
+/** Rejects once ms pass; the underlying promise is left to settle on its own. */
+function bounded<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`timed out after ${ms} ms`)), ms);
+    p.then(
+      v => { clearTimeout(timer); resolve(v); },
+      e => { clearTimeout(timer); reject(e); },
+    );
+  });
+}
+
+/** A running machine whose reach has been slow or unreachable: when the spell
+ * began, the probe in flight if any, and the verdict once one was reached. */
+interface Suspect {
+  machineId: string;
+  badSince: number;
+  probe?: Promise<string | undefined>;
+  zombie?: string;
+}
 
 export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   const probeTimeoutMs = o.defaults?.probeTimeoutMs ?? PROBE_TIMEOUT_MS;
   const promptMs = o.defaults?.promptMs ?? PROMPT_MS;
   const reconcileMinMs = o.defaults?.reconcileMinMs ?? RECONCILE_MIN_MS;
+  const zombieWindowMs = o.defaults?.zombieWindowMs ?? ZOMBIE_WINDOW_MS;
+  const zombieProbeTimeoutMs = o.defaults?.zombieProbeTimeoutMs ?? ZOMBIE_PROBE_TIMEOUT_MS;
   const costIntervalMs = o.defaults?.costIntervalMs ?? 5_000;
   const pollIntervalMs = o.defaults?.pollIntervalMs ?? 15_000;
   const meters = new Map<string, Meter>();
   const reconciled = new Map<string, { state: MachineState; at: number }>();
+  const suspects = new Map<string, Suspect>();
 
   // Exact awake accounting comes from lifecycle events, not poll edges. A
   // workspace hydrated already-running starts its meter lazily at first tick.
@@ -130,6 +164,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     meters.delete(e.workspaceId);
     lastEmitted.delete(e.workspaceId);
     reconciled.delete(e.workspaceId);
+    suspects.delete(e.workspaceId);
   });
 
   /** The provider's word, or our own when it cannot be had (weather is not a
@@ -154,6 +189,66 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     return askProvider(r);
   };
 
+  /** undefined when the guest answered; otherwise what went wrong and how long it took. */
+  const probeExec = async (r: StatusRecord): Promise<string | undefined> => {
+    const started = Date.now();
+    const took = () => `failed after ${Date.now() - started} ms`;
+    try {
+      const res = await bounded(r.exec(ZOMBIE_PROBE_CMD, { timeoutMs: zombieProbeTimeoutMs }), zombieProbeTimeoutMs);
+      if (res.exitCode === 0 && res.stdout.trim() === "ok") return undefined;
+      const stderr = res.stderr.trim().slice(0, 200);
+      return `${took()} (exit ${res.exitCode}${stderr === "" ? "" : `: ${stderr}`})`;
+    } catch (e) {
+      return `${took()} (${e instanceof Error ? e.message : String(e)})`;
+    }
+  };
+
+  /** The spell this workspace's current machine is in; a replaced machine starts clean. */
+  const suspectOf = (r: StatusRecord): Suspect => {
+    const known = suspects.get(r.id);
+    if (known !== undefined && known.machineId === r.machineId) return known;
+    const fresh: Suspect = { machineId: r.machineId, badSince: Date.now() };
+    suspects.set(r.id, fresh);
+    return fresh;
+  };
+
+  /** A slow or unreachable reach on a running workspace. Inside the window it
+   * is weather. Past it, and only while the provider still says running, one
+   * exec probe decides: an answer restarts the window (a long slow spell with
+   * a live guest never flags), a failure marks the machine zombie until reach
+   * reads healthy again or the machine is replaced. */
+  const judge = async (
+    r: StatusRecord,
+    reach: ReachStatus,
+    reconcile: StatusListOptions["reconcile"],
+  ): Promise<{ state: MachineState; reach: ReachStatus; reason?: string }> => {
+    const s = suspectOf(r);
+    const elapsed = Date.now() - s.badSince;
+    if (s.zombie === undefined && elapsed < zombieWindowMs) {
+      return { state: await machineState(r, reconcile, reach.state === "unreachable"), reach };
+    }
+    const provider = await machineState(r, reconcile, true);
+    if (provider !== "running") {
+      suspects.delete(r.id);
+      return { state: provider, reach };
+    }
+    if (s.zombie !== undefined) return { state: provider, reach: { ...reach, state: "zombie" }, reason: s.zombie };
+    s.probe ??= probeExec(r).finally(() => {
+      s.probe = undefined;
+    });
+    const fault = await s.probe;
+    if (fault === undefined) {
+      s.badSince = Date.now();
+      return { state: provider, reach };
+    }
+    const reason =
+      `${r.machineId} reports running at the provider; reach ${reach.state} since ${new Date(s.badSince).toISOString()} ` +
+      `(${Math.round(elapsed / 1000)} s); exec probe "${ZOMBIE_PROBE_CMD}" ${fault}`;
+    s.zombie = reason;
+    console.warn(`zombie on ${r.machineId} (workspace ${r.id}): ${reason}`);
+    return { state: provider, reach: { ...reach, state: "zombie" }, reason };
+  };
+
   const list: StatusApi["list"] = async opts => {
     const records = await o.records();
     const probe: ProbeOptions = { promptMs: opts?.promptMs ?? promptMs, timeoutMs: opts?.probeTimeoutMs ?? probeTimeoutMs };
@@ -161,14 +256,18 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
 
     return Promise.all(
       records.map(async (r): Promise<WorkspaceStatus> => {
-        const { size, idleAt, daemonReach, providerState, ...view } = r;
+        const { size, idleAt, daemonReach, providerState, exec, ...view } = r;
         void providerState;
+        void exec;
         const base = { ...view, size, rateUsdPerHour: o.rateUsdPerHour(size), ...(idleAt !== undefined ? { idleAt } : {}) };
         const done = (state: MachineState, reach: WorkspaceStatus["reach"]): WorkspaceStatus =>
           state === "gone" ? { ...base, machineState: state, reach: { state: "gone" } } : { ...base, machineState: state, reach };
 
         // Measured: the reach goes dark only while paused and works again on wake.
-        if (view.phase !== "running") return done(await machineState(r, reconcile, false), { state: "napping" });
+        if (view.phase !== "running") {
+          suspects.delete(r.id);
+          return done(await machineState(r, reconcile, false), { state: "napping" });
+        }
         if (!daemonReach) return done(await machineState(r, reconcile, false), { state: "unsupported" });
 
         let reach: PreviewReach;
@@ -178,8 +277,13 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
           return done(await machineState(r, reconcile, true), { state: "unreachable" });
         }
         const state = await probeReach(reach.url, probe);
-        const failed = state === "no-daemon" || state === "unreachable";
-        return done(await machineState(r, reconcile, failed), { state, url: reach.url, expiresAt: reach.expiresAt });
+        const status: ReachStatus = { state, url: reach.url, expiresAt: reach.expiresAt };
+        if (state !== "slow" && state !== "unreachable") {
+          suspects.delete(r.id);
+          return done(await machineState(r, reconcile, state === "no-daemon"), status);
+        }
+        const judged = await judge(r, status, reconcile);
+        return { ...done(judged.state, judged.reach), ...(judged.reason !== undefined ? { reason: judged.reason } : {}) };
       }),
     );
   };
