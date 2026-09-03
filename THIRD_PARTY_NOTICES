@@ -352,3 +352,15 @@ here are included or relied upon under their own licenses, reproduced below.
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+
+------------------------------------------------------------------------
+
+6. mackup application catalog (GPL-3.0-or-later), Laurent Raufaste and
+   the mackup contributors
+
+   packages/collect/data/catalog.json is a conversion of the .cfg files
+   under src/mackup/applications in https://github.com/lra/mackup at a
+   pinned commit. The full notice, the commit, the conversion date and
+   the GPLv3 text are in packages/collect/data/NOTICE. The catalog stays
+   GPL-3.0-or-later; GPLv3 section 13 and AGPLv3 section 13 permit
+   combining it with the rest of wsp.
