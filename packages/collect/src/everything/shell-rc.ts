@@ -208,6 +208,7 @@ function carried(line: string, arith: number): Pick<Open, "heredoc" | "arith"> {
   return { heredoc: o.heredoc, arith: o.arith };
 }
 
+/** The arithmetic depth is one stream over the file: a cut line reads it and writes it back like a kept line does. */
 export function stripExports(text: string): { names: string[]; carried: string } {
   const names: string[] = [];
   const kept: string[] = [];
@@ -217,7 +218,11 @@ export function stripExports(text: string): { names: string[]; carried: string }
   for (const line of text.split(/\r?\n/)) {
     if (cutting !== undefined) {
       const o = scanLine(line, cutting);
-      cutting = isOpen(o) ? o : undefined;
+      if (isOpen(o)) cutting = o;
+      else {
+        cutting = undefined;
+        passing = { arith: o.arith };
+      }
       continue;
     }
     if (passing.heredoc !== undefined) {
@@ -232,8 +237,9 @@ export function stripExports(text: string): { names: string[]; carried: string }
       continue;
     }
     for (const h of hits) if (!names.includes(h)) names.push(h);
-    const o = scanLine(line, CLOSED);
+    const o = scanLine(line, { ...CLOSED, arith: passing.arith });
     if (isOpen(o)) cutting = o;
+    else passing = { arith: o.arith };
   }
   return { names, carried: kept.join(eol) };
 }
