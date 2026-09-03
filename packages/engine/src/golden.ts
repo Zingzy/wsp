@@ -280,11 +280,12 @@ export async function sealGolden(
 export async function buildGolden(
   opts: BuildGoldenOptions,
 ): Promise<{ manifest: GoldenManifest; version: GoldenVersion }> {
-  const { backend, setup, smoke, kind, baseTemplate, manifest, setupTimeoutMs, smokeTimeoutMs, onStage, ...size } = opts;
+  const { backend, setup, smoke, kind, baseTemplate, manifest, setupTimeoutMs, smokeTimeoutMs, onStage, labels, ...size } = opts;
   const builder = await prepareBuilder({
     backend,
     setup,
     ...size,
+    labels: { ...labels, "wsp-builder": "1" },
     ...(kind !== undefined ? { kind } : {}),
     ...(baseTemplate !== undefined ? { baseTemplate } : {}),
     ...(setupTimeoutMs !== undefined ? { setupTimeoutMs } : {}),
@@ -294,6 +295,7 @@ export async function buildGolden(
     backend,
     smoke,
     ...size,
+    labels: { ...labels, "wsp-smoke": "1", createdAt: new Date().toISOString() },
     ...(manifest !== undefined ? { manifest } : {}),
     ...(smokeTimeoutMs !== undefined ? { smokeTimeoutMs } : {}),
     ...(onStage !== undefined ? { onStage } : {}),
