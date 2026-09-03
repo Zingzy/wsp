@@ -17,12 +17,38 @@ export function fileTree(e: Entry): Tree {
   return { bytes: e.bytes, files: 1, mtime: e.mtime };
 }
 
+export const WALK_ENTRIES = 5_000;
+export const WALK_MS = 2_000;
+
+/** One root's allowance of entries and time; a walk that runs out stops and says so. */
+export interface Budget {
+  entries: number;
+  deadline: number;
+  clock: () => number;
+  capped: boolean;
+}
+
+export function budget(clock: () => number, entries = WALK_ENTRIES, ms = WALK_MS): Budget {
+  return { entries, deadline: clock() + ms, clock, capped: false };
+}
+
+/** Takes one entry from the budget; false once it is spent. */
+export function spend(b: Budget): boolean {
+  if (b.entries <= 0 || b.clock() > b.deadline) {
+    b.capped = true;
+    return false;
+  }
+  b.entries -= 1;
+  return true;
+}
+
 export interface WalkOptions {
   /** Directory names not entered at any depth. */
   skip?: (name: string) => boolean;
   /** Directories whose listing satisfies this are left whole, files included. */
   skipTree?: (names: string[]) => boolean;
   maxDepth?: number;
+  budget?: Budget;
 }
 
 /** Visits every regular file under dir, never following symlinks. */
@@ -32,6 +58,7 @@ export async function walk(fs: Fs, dir: string, opts: WalkOptions, visit: (path:
     if (opts.skipTree?.(names) === true) return;
     await Promise.all(names.map(async name => {
       if (opts.skip?.(name) === true) return;
+      if (opts.budget !== undefined && !spend(opts.budget)) return;
       const p = `${d}/${name}`;
       const e = await fs.stat(p);
       if (e === undefined || e.kind === "link") return;

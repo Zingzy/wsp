@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import { keychain, parseKeychainDump, serviceOwner } from "../../src/index.js";
-import { KEYCHAIN_DUMP, home, laptop } from "./fixture.js";
+import { KEYCHAIN_DUMP, LOGIN_KEYCHAIN, home, laptop } from "./fixture.js";
 
 describe("pass 5: Keychain inventory", () => {
-  it("groups items by service name, counts accounts, drops Apple's own namespace and items without a service", () => {
+  it("groups login keychain items by service name, counts accounts, drops Apple's namespace, Electron Safe Storage, System.keychain items and items without a service", () => {
     expect(parseKeychainDump(KEYCHAIN_DUMP)).toEqual([
       { service: "gh:github.com", accounts: 2 },
       { service: "github.com", accounts: 1 },
@@ -17,13 +17,14 @@ describe("pass 5: Keychain inventory", () => {
     const text = JSON.stringify(parseKeychainDump(KEYCHAIN_DUMP));
     expect(text).not.toContain("Keychains");
     expect(text).not.toContain("dev-work");
+    expect(text).not.toContain("AirPort");
+    expect(text).not.toContain("Safe Storage");
   });
 
-  it("runs security dump-keychain with no flags on macOS and not at all on Linux", async () => {
+  it("dumps only the login keychain, by path, never with -d, and not at all on Linux", async () => {
     const mac = laptop(home());
     expect((await keychain(mac)).map(i => i.service)).toContain("gh:github.com");
-    expect(mac.calls).toContain("run security dump-keychain");
-    expect(mac.calls.some(c => c.startsWith("run security") && c.includes("-d"))).toBe(false);
+    expect(mac.calls.filter(c => c.startsWith("run security"))).toEqual([`run security dump-keychain ${LOGIN_KEYCHAIN}`]);
 
     const linux = laptop({ ...home(), platform: "linux" });
     expect(await keychain(linux)).toEqual([]);

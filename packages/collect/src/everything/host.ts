@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // What the seven passes may ask the laptop. Every pass is pure over this
 // interface: tests hand in a fixture HOME, the live run hands in node.
-import type { Platform } from "../host.js";
+import type { HostExec, Platform } from "../host.js";
 
 export interface Entry {
   kind: "file" | "dir" | "link";
@@ -12,6 +12,9 @@ export interface Entry {
   mtime: number;
 }
 
+/** Largest file readText returns; anything bigger comes back undefined. */
+export const READ_LIMIT = 1024 * 1024;
+
 export interface Fs {
   /** lstat: a symlink reports kind link and is never followed. */
   stat(path: string): Promise<Entry | undefined>;
@@ -19,22 +22,22 @@ export interface Fs {
   list(dir: string): Promise<string[]>;
   /** Fully resolved target, or undefined when the chain is broken. */
   realpath(path: string): Promise<string | undefined>;
-  /** Callers only ever inspect key names and headers of what comes back, never values. */
+  /** Bounded by READ_LIMIT. Callers only ever inspect key names and headers of what comes back, never values. */
   readText(path: string): Promise<string | undefined>;
 }
 
-export interface Exec {
-  which(bin: string): Promise<boolean>;
-  /** stdout when the command exits 0, otherwise undefined. */
-  run(cmd: string, args: readonly string[]): Promise<string | undefined>;
-}
+export type Exec = HostExec;
+
+/** The only environment names any pass reads; the live machine carries nothing else. */
+export const ENV_NAMES = ["CARGO_HOME", "GOBIN", "GOPATH", "PIPX_HOME", "UV_TOOL_DIR", "MISE_DATA_DIR", "ASDF_DATA_DIR"] as const;
+export type EnvName = (typeof ENV_NAMES)[number];
 
 export interface Machine {
   platform: Platform;
   home: string;
   /** PATH entries in order, duplicates included. */
   path: readonly string[];
-  env: Readonly<Record<string, string | undefined>>;
+  env: Readonly<Partial<Record<EnvName, string>>>;
   fs: Fs;
   exec: Exec;
 }
@@ -47,4 +50,8 @@ export function tilde(home: string, path: string): string {
 
 export function basename(path: string): string {
   return path.slice(path.lastIndexOf("/") + 1);
+}
+
+export function dirname(path: string): string {
+  return path.slice(0, path.lastIndexOf("/"));
 }

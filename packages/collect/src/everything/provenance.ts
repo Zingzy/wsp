@@ -3,7 +3,7 @@
 // real file lives; the owner's receipt supplies package and version where
 // one exists. What no prefix claims is the leftover list.
 import { parseGoVersionM, parseNpmGlobals, parseUvToolList } from "../detect/tools.js";
-import type { Entry, Fs, Machine } from "./host.js";
+import type { Entry, EnvName, Fs, Machine } from "./host.js";
 
 export const OWNERS = ["homebrew", "nix", "mise", "asdf", "cargo", "pipx", "uv", "npm", "bun", "go", "app", "system"] as const;
 export type Owner = (typeof OWNERS)[number];
@@ -104,7 +104,7 @@ function app(rest: string[]): Claim | undefined {
 
 function prefixes(m: Machine, npmRoots: string[]): Prefix[] {
   const h = m.home;
-  const env = (k: string, fallback: string): string => m.env[k] ?? fallback;
+  const env = (k: EnvName, fallback: string): string => m.env[k] ?? fallback;
   const cargoBin = `${env("CARGO_HOME", `${h}/.cargo`)}/bin`;
   const goBin = env("GOBIN", `${env("GOPATH", `${h}/go`)}/bin`);
   const pipxHomes = [m.env["PIPX_HOME"], `${h}/.local/share/pipx`, `${h}/Library/Application Support/pipx`, `${h}/.local/pipx`].filter((p): p is string => p !== undefined);

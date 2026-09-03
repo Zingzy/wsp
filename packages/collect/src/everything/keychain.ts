@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Pass 5, macOS only. `security dump-keychain` with no flags prints item
-// attributes and nothing else: with -d it would read every secret and raise
-// one consent dialog per item. Only the service name and a count of accounts
-// leave this pass; the keychain path and account names are dropped.
+// Pass 5, macOS only. `security dump-keychain` on the login keychain prints
+// item attributes and nothing else: with -d it would read every secret and
+// raise one consent dialog per item. System.keychain holds Wi-Fi and Apple
+// service items nobody signs in to, and an Electron app's Safe Storage item
+// is its cookie key, so neither is a login. Only the service name and a count
+// of accounts leave this pass; the keychain path and account names are dropped.
 import type { Machine } from "./host.js";
 
 export interface KeychainItem {
@@ -11,14 +13,16 @@ export interface KeychainItem {
 }
 
 const APPLE_NAMESPACE = "com.apple.";
+const LOGIN_KEYCHAIN = "Library/Keychains/login.keychain-db";
 
-/** Groups `svce` (generic) and `srvr` (internet) attributes by service; Apple's own namespace is left out. */
+/** Groups `svce` (generic) and `srvr` (internet) attributes by service over login keychain blocks only. */
 export function parseKeychainDump(text: string): KeychainItem[] {
   const counts = new Map<string, number>();
   for (const block of text.split(/^keychain: /m)) {
+    if (!/^"[^"\n]*\/login\.keychain-db"/.test(block)) continue;
     const m = /^\s+"(?:svce|srvr)"<blob>="((?:[^"\\]|\\.)*)"/m.exec(block);
     const service = m?.[1];
-    if (service === undefined || service === "" || service.startsWith(APPLE_NAMESPACE)) continue;
+    if (service === undefined || service === "" || service.startsWith(APPLE_NAMESPACE) || / Safe Storage$/.test(service)) continue;
     counts.set(service, (counts.get(service) ?? 0) + 1);
   }
   return [...counts.entries()].map(([service, accounts]) => ({ service, accounts })).sort((a, b) => a.service.localeCompare(b.service));
@@ -26,7 +30,7 @@ export function parseKeychainDump(text: string): KeychainItem[] {
 
 export async function keychain(m: Machine): Promise<KeychainItem[]> {
   if (m.platform !== "darwin") return [];
-  return parseKeychainDump((await m.exec.run("security", ["dump-keychain"])) ?? "");
+  return parseKeychainDump((await m.exec.run("security", ["dump-keychain", `${m.home}/${LOGIN_KEYCHAIN}`])) ?? "");
 }
 
 /** The binary the service name points at: `gh:github.com` is gh's, `spoo-cli` is nobody's unless a binary has that exact name. */

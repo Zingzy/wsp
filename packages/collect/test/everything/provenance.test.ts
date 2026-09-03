@@ -19,6 +19,8 @@ describe("pass 1: provenance", () => {
       ["gopls", "go", "golang.org/x/tools/gopls", "v0.16.2", undefined],
       ["docker", "app", "Docker", undefined, undefined],
       ["ls", "system", undefined, undefined, undefined],
+      ["ssh", "system", undefined, undefined, undefined],
+      ["zsh", "system", undefined, undefined, undefined],
     ]);
     const gh = tools.find(t => t.name === "gh");
     expect(gh).toMatchObject({ path: "/opt/homebrew/bin/gh", resolved: "/opt/homebrew/Cellar/gh/2.97.0/bin/gh", bytes: 40_000_000, mtime: RECENT });
@@ -96,7 +98,7 @@ describe("pass 1: provenance", () => {
   });
 
   it("binaryNames covers owned tools and leftovers alike", async () => {
-    expect([...binaryNames(await provenance(laptop(home())))].sort()).toEqual(["adb", "bat", "brew", "docker", "gh", "gopls", "hermes", "jq", "litmus", "ls", "node", "omp", "python", "rg", "ty"]);
+    expect([...binaryNames(await provenance(laptop(home())))].sort()).toEqual(["adb", "bat", "brew", "docker", "gh", "gopls", "hermes", "jq", "litmus", "ls", "node", "omp", "python", "rg", "ssh", "ty", "zsh"]);
   });
 
   it("parses .crates2.json by bin name", () => {
