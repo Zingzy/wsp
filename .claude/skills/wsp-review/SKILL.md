@@ -54,7 +54,7 @@ Review wsp changes against the laws this project has already paid for. Generic c
 
 - Conventional commit subject <72 chars + a why-paragraph; NO co-author trailers.
 - One ticket = one branch = one session; branch names ticket/<n>-<slug>; worktrees under ~/wsp/.claude/worktrees/ (never /tmp).
-- Builders never merge to main; the coordinator merges. Ticket branches may be pushed to origin for PR review; main pushes are coordinator-only.
+- Builders never merge to main; the coordinator merges. Builders push their ticket branch at the first commit and open a draft PR on Zingzy/wsp titled after the ticket, mark it ready when the build report is posted, and push every amend. Main pushes are coordinator-only. PR bodies: ticket link, what it does, status; no em-dashes, no tool names.
 - Deviations from plan/ticket are fine when reality wins, but MUST be reported in the ticket comment: an unreported deviation is a should-fix even when the code is right.
 - Comments in code state constraints code can't show, with the source (a law, a measured finding): no narration, no TODO/FIXME/HACK.
 
