@@ -143,19 +143,35 @@ export class Workspace {
       }
       const reason = faults.join("; ");
       if (!this.hooks.resurrect) throw new Error(`wake failed: ${reason}`);
-      const zombie = this.machine;
-      this.machine = await this.hooks.resurrect();
-      this.firstLife = true;
-      await this.hooks.restoreVault?.(this.machine);
-      await zombie.kill().catch((e: unknown) => {
-        if (!isMissing(e)) throw e;
-      });
+      await this.replace(this.hooks.resurrect);
       this.phase = "running";
       return { resurrected: true, reason };
     } catch (e) {
       this.phase = "napping";
       throw e;
     }
+  }
+
+  /** Replace the machine with a golden fork carrying the stashed vault, then
+   * kill the old one whatever it reports. For a machine the provider calls
+   * running whose guest stopped serving at rest (exec and edge 502 for
+   * minutes, measured twice); the phase is not moved through napping, so a
+   * person sees running throughout and the idle window is untouched. */
+  async rebuild(): Promise<void> {
+    if (!this.hooks.resurrect) throw new Error("rebuild requires a resurrect hook");
+    await this.replace(this.hooks.resurrect);
+    this.phase = "running";
+  }
+
+  /** Fork first, vault second, kill last: the old machine dies only once its replacement holds the files. */
+  private async replace(resurrect: NonNullable<WorkspaceHooks["resurrect"]>): Promise<void> {
+    const old = this.machine;
+    this.machine = await resurrect();
+    this.firstLife = true;
+    await this.hooks.restoreVault?.(this.machine);
+    await old.kill().catch((e: unknown) => {
+      if (!isMissing(e)) throw e;
+    });
   }
 
   async checkpoint(name: string): Promise<string> {

@@ -9,7 +9,7 @@ import { startHost, type CliIO, type HostHandle } from "@wsp/host";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
-import { openHost, probeHost, type HostSession } from "../src/host-lifecycle.js";
+import { locateHost, openHost, probeHost, type HostSession } from "../src/host-lifecycle.js";
 
 const PAGE = `<!doctype html>
 <html><head><title>wsp</title></head>
@@ -112,6 +112,7 @@ describe("openHost", () => {
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), "wsp-desktop-home-"));
     vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_desktop_key");
+    vi.stubEnv("HOME", home);
     vi.stubEnv("WSP_HOME", home);
   });
   afterEach(async () => {
@@ -218,5 +219,81 @@ describe("openHost", () => {
     const lock = JSON.parse(readFileSync(join(home, "host.lock"), "utf8")) as { pid: number; port: number };
     expect(lock.pid).toBe(process.pid);
     expect(lock.port).toBe(session.port);
+  });
+});
+
+describe("locateHost", () => {
+  let user: string;
+  let cwd: string;
+  let existing: HostHandle | undefined;
+  const alive = (h: HostHandle): string => JSON.stringify({ pid: process.pid, port: h.port, wsPort: h.wsPort, startedAt: new Date().toISOString() });
+
+  beforeEach(() => {
+    user = mkdtempSync(join(tmpdir(), "wsp-desktop-user-"));
+    cwd = join(user, "cwd");
+    mkdirSync(cwd);
+    vi.stubEnv("HOME", user);
+  });
+  afterEach(async () => {
+    await existing?.close();
+    existing = undefined;
+    vi.unstubAllEnvs();
+    rmSync(user, { recursive: true, force: true });
+  });
+
+  function fixture(): Promise<HostHandle> {
+    return startHost({ runtime: testRuntime(), webDir: fakeWebDir(), keys: { anthropic: false }, port: 0, wsPort: 0 });
+  }
+
+  /** A home with a lock naming the fixture, the way a host serving it leaves things. */
+  function homeServedBy(h: HostHandle, lock: string = alive(h)): string {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-desktop-custom-"));
+    writeFileSync(join(dir, "host.lock"), lock);
+    return dir;
+  }
+
+  it("attaches to a wsp host on the port with an empty ~/.wsp and no keys anywhere", async () => {
+    existing = await fixture();
+    const found = await locateHost({ port: existing.port, cwd });
+    expect(found.home).toBe(join(user, ".wsp"));
+    expect(found.session?.owned).toBe(false);
+    expect(found.session?.url).toBe(`http://127.0.0.1:${existing.port}`);
+    expect(found.stalePointer).toBeUndefined();
+  });
+
+  it("follows current-home to a custom home whose host is live, on a port it was not asked about", async () => {
+    existing = await fixture();
+    const custom = homeServedBy(existing);
+    const found = await locateHost({ port: await freePort(), pointer: custom, cwd });
+    expect(found.home).toBe(custom);
+    expect(found.session?.url).toBe(`http://127.0.0.1:${existing.port}`);
+    expect(found.stalePointer).toBeUndefined();
+  });
+
+  it("reports a pointer whose host is gone and falls back to ~/.wsp without a session", async () => {
+    existing = await fixture();
+    const custom = homeServedBy(existing, JSON.stringify({ pid: deadPid(), port: existing.port, wsPort: existing.wsPort, startedAt: "2026-09-01T00:00:00.000Z" }));
+    const found = await locateHost({ port: await freePort(), pointer: custom, cwd });
+    expect(found).toEqual({ home: join(user, ".wsp"), stalePointer: custom });
+  });
+
+  it("names ~/.wsp with nothing to attach to when there is no host and no pointer", async () => {
+    expect(await locateHost({ port: await freePort(), cwd })).toEqual({ home: join(user, ".wsp") });
+  });
+
+  it("uses WSP_HOME when set and leaves the pointer unread", async () => {
+    existing = await fixture();
+    const custom = homeServedBy(existing);
+    const env = join(user, "env-home");
+    const found = await locateHost({ port: await freePort(), env, pointer: custom, cwd });
+    expect(found).toEqual({ home: env });
+  });
+
+  it("attaches through the lock next to the state file of the home it resolved", async () => {
+    existing = await fixture();
+    const env = homeServedBy(existing);
+    const found = await locateHost({ port: await freePort(), env, cwd });
+    expect(found.home).toBe(env);
+    expect(found.session?.url).toBe(`http://127.0.0.1:${existing.port}`);
   });
 });

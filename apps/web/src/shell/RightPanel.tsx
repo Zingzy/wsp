@@ -6,7 +6,7 @@
 import { useEffect, useMemo, type ReactNode } from "react";
 import { useWorkspacePorts } from "../browser/model.js";
 import { previewTabSnapshots, useBrowserTabs, useWorkspaceBrowserTabs } from "../browser/tabs.js";
-import { MetaPanel } from "../components/MetaPanel.js";
+import { MachineSurface } from "../components/machine/MachineSurface.js";
 import { RightPanelSheet } from "../components/RightPanelSheet.js";
 import { RightPanelTabs } from "../components/RightPanelTabs.js";
 import { BrowserSurface } from "../components/preview/BrowserSurface.js";
@@ -85,7 +85,7 @@ export function RightPanel({
       {active?.kind === "preview" ? (
         <BrowserSurface key={active.id} workspaceId={workspaceId} surface={active} />
       ) : active?.kind === "machine" ? (
-        <MetaPanel />
+        <MachineSurface workspaceId={workspaceId} />
       ) : active?.kind === "screen" ? (
         <ScreenTab workspaceId={workspaceId} />
       ) : (
