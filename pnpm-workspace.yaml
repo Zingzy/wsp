@@ -6,3 +6,5 @@ allowBuilds:
   electron-winstaller: false
   esbuild: true
   node-pty: true
+patchedDependencies:
+  "@pierre/diffs@1.3.0-beta.10": patches/@pierre%2Fdiffs@1.3.0-beta.10.patch
