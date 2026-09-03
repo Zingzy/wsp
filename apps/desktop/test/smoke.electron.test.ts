@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Drives the packaged app (pnpm --filter @wsp/desktop build first). Gated on
 // WSP_DESKTOP_SMOKE=1 so the unit suite stays free of a 200 MB binary.
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { startHost, type HostHandle } from "@wsp/host";
-import { createRuntime, memoryStore } from "@wsp/runtime";
+import { serve, startHost, type CliIO, type HostHandle } from "@wsp/host";
+import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
 
 const SMOKE = process.env["WSP_DESKTOP_SMOKE"] === "1";
@@ -39,19 +40,44 @@ interface Launched {
   home: string;
 }
 
-async function launch(env: Record<string, string>, prepare: (home: string) => void = () => {}): Promise<Launched> {
+const PAGE = `<!doctype html><html><head><title>wsp</title></head><body><script>window.__WSP__ = window.__WSP__ || { wsPort: 4410, token: "" };</script></body></html>`;
+
+function fakeWebDir(): string {
+  const webDir = mkdtempSync(join(tmpdir(), "wsp-desktop-smoke-web-"));
+  writeFileSync(join(webDir, "index.html"), PAGE);
+  return webDir;
+}
+
+function testRuntime(): Runtime {
+  return createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
+}
+
+function fixtureHost(): Promise<HostHandle> {
+  return startHost({ runtime: testRuntime(), webDir: fakeWebDir(), keys: { anthropic: false }, port: 0, wsPort: 0 });
+}
+
+/** A pid that was real a moment ago and is not alive now. */
+function deadPid(): number {
+  const child = spawnSync(process.execPath, ["-e", "0"]);
+  expect(child.status).toBe(0);
+  return child.pid;
+}
+
+/** HOME is the temp dir too, so the app's ~/.wsp (and the pointer a host it
+ * starts would write there) never touch this machine's. A value of undefined
+ * removes that variable, the way a Finder launch has no WSP_HOME. */
+async function launch(env: Record<string, string | undefined>, prepare: (home: string) => void = () => {}): Promise<Launched> {
   const home = mkdtempSync(join(tmpdir(), "wsp-desktop-smoke-"));
   const cwd = join(home, "cwd");
   mkdirSync(cwd);
   prepare(home);
-  const clean = { ...process.env };
-  delete clean["SOLARI_API_KEY"];
-  delete clean["ANTHROPIC_API_KEY"];
-  const app = await electron.launch({
-    executablePath: builtApp(),
-    cwd,
-    env: { ...clean, WSP_HOME: home, WSP_PORT: "0", WSP_WS_PORT: "0", ...env },
-  });
+  const inherited = { ...process.env };
+  delete inherited["SOLARI_API_KEY"];
+  delete inherited["ANTHROPIC_API_KEY"];
+  const merged = { ...inherited, HOME: home, WSP_HOME: home, WSP_PORT: "0", WSP_WS_PORT: "0", ...env };
+  const clean: Record<string, string> = {};
+  for (const [k, v] of Object.entries(merged)) if (v !== undefined) clean[k] = v;
+  const app = await electron.launch({ executablePath: builtApp(), cwd, env: clean });
   return { app, home };
 }
 
@@ -79,6 +105,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     launched = undefined;
     await existing?.close();
     existing = undefined;
+    vi.unstubAllEnvs();
   });
 
   it("is built", () => {
@@ -103,9 +130,11 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     launched = await launch({});
     const setup = await launched.app.firstWindow();
     await setup.waitForLoadState("domcontentloaded");
-    expect(setup.url()).toMatch(/setup\.html$/);
+    expect(setup.url()).toMatch(/setup\.html\?/);
     expect(await setup.title()).toBe("wsp");
     expect(await setup.innerText("main")).toContain("run wsp init in a terminal");
+    expect(await setup.innerText("main")).toContain(`Looked for keys and a golden in ${launched.home}.`);
+    expect(await setup.isHidden("#stale")).toBe(true);
     expect(await setup.textContent("#command")).toBe("wsp init");
     await setup.click("#retry");
     await setup.waitForFunction(() => document.getElementById("status")?.textContent === "not set up yet");
@@ -124,20 +153,52 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(launched.app.windows()).toHaveLength(1);
   });
 
-  it("attaches to a host already on the port and leaves it running after quit", async () => {
-    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
-    const webDir = mkdtempSync(join(tmpdir(), "wsp-desktop-smoke-web-"));
-    writeFileSync(
-      join(webDir, "index.html"),
-      `<!doctype html><html><head><title>wsp</title></head><body><script>window.__WSP__ = window.__WSP__ || { wsPort: 4410, token: "" };</script></body></html>`,
-    );
-    existing = await startHost({ runtime: rt, webDir, keys: { anthropic: false }, port: 0, wsPort: 0 });
-    launched = await launch({ SOLARI_API_KEY: FAKE_SOLARI, WSP_PORT: String(existing.port) }, seedGolden);
+  it("attaches to a host already on the port with an empty ~/.wsp and no key, skipping the gate, and leaves it running after quit", async () => {
+    existing = await fixtureHost();
+    launched = await launch({ WSP_HOME: undefined, WSP_PORT: String(existing.port) });
+    const win = await launched.app.firstWindow();
+    const boot = await bootOf(win);
+    expect(win.url()).toBe(`http://127.0.0.1:${existing.port}/`);
+    expect(boot.token).toBe(existing.authToken);
+    expect(existsSync(join(launched.home, ".wsp"))).toBe(false);
+    await launched.app.close();
+    expect(await refused(`http://127.0.0.1:${existing.port}/`)).toBe(false);
+  });
+
+  it("follows ~/.wsp/current-home to a host serving a custom home, with no WSP_HOME and no port hint", async () => {
+    const user = mkdtempSync(join(tmpdir(), "wsp-desktop-smoke-user-"));
+    const custom = join(user, "custom-home");
+    const quiet: CliIO = { log: () => {}, error: () => {}, ask: () => Promise.reject(new Error("prompt")), askSecret: () => Promise.reject(new Error("prompt")) };
+    vi.stubEnv("SOLARI_API_KEY", FAKE_SOLARI);
+    vi.stubEnv("HOME", user);
+    vi.stubEnv("WSP_HOME", custom);
+    existing = await serve(quiet, { port: 0, wsPort: 0, statePath: join(custom, "state.json"), webDir: fakeWebDir(), runtime: testRuntime() });
+    vi.unstubAllEnvs();
+    expect(existsSync(join(user, ".wsp", "current-home"))).toBe(true);
+
+    launched = await launch({ HOME: user, WSP_HOME: undefined });
     const win = await launched.app.firstWindow();
     const boot = await bootOf(win);
     expect(win.url()).toBe(`http://127.0.0.1:${existing.port}/`);
     expect(boot.token).toBe(existing.authToken);
     await launched.app.close();
     expect(await refused(`http://127.0.0.1:${existing.port}/`)).toBe(false);
+    rmSync(user, { recursive: true, force: true });
+  });
+
+  it("shows the setup screen naming ~/.wsp and the pointer whose host is gone", async () => {
+    launched = await launch({ WSP_HOME: undefined }, home => {
+      const custom = join(home, "old-home");
+      mkdirSync(custom);
+      writeFileSync(join(custom, "host.lock"), JSON.stringify({ pid: deadPid(), port: 1, wsPort: 2, startedAt: "2026-09-01T00:00:00.000Z" }));
+      mkdirSync(join(home, ".wsp"));
+      writeFileSync(join(home, ".wsp", "current-home"), `${custom}\n`);
+    });
+    const setup = await launched.app.firstWindow();
+    await setup.waitForLoadState("domcontentloaded");
+    expect(setup.url()).toMatch(/setup\.html/);
+    const text = await setup.innerText("main");
+    expect(text).toContain(`Looked for keys and a golden in ${join(launched.home, ".wsp")}.`);
+    expect(text).toContain(`~/.wsp/current-home names ${join(launched.home, "old-home")}, but no host is serving it.`);
   });
 });

@@ -10,6 +10,8 @@ export {
 } from "./server.js";
 export {
   cli,
+  currentHome,
+  currentHomePointer,
   goldenRecipe,
   loadKeys,
   makeRuntime,

@@ -42,14 +42,18 @@ function deadPid(): number {
 }
 
 describe("serve takes host.lock next to the state file", () => {
+  let dir: string;
   let home: string;
+  let pointerPath: string;
   let webDir: string;
   let statePath: string;
   let lockPath: string;
   const handles: HostHandle[] = [];
 
   beforeEach(() => {
-    home = mkdtempSync(join(tmpdir(), "wsp-lock-home-"));
+    dir = mkdtempSync(join(tmpdir(), "wsp-lock-home-"));
+    home = join(dir, "custom");
+    pointerPath = join(dir, "user", ".wsp", "current-home");
     webDir = join(home, "web");
     mkdirSync(join(webDir, "assets"), { recursive: true });
     writeFileSync(join(webDir, "assets", "app.js"), "console.log('app')\n");
@@ -57,12 +61,13 @@ describe("serve takes host.lock next to the state file", () => {
     statePath = join(home, "state", "state.json");
     lockPath = join(home, "state", "host.lock");
     vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_lock_key");
+    vi.stubEnv("HOME", join(dir, "user"));
     vi.stubEnv("WSP_HOME", home);
   });
   afterEach(async () => {
     for (const h of handles.splice(0)) await h.close();
     vi.unstubAllEnvs();
-    rmSync(home, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
   });
 
   async function start(dir: string = webDir): Promise<HostHandle> {
@@ -105,6 +110,24 @@ describe("serve takes host.lock next to the state file", () => {
     const lock = readLock(lockPath);
     expect(lock.pid).toBe(process.pid);
     expect(lock.port).toBe(h.port);
+  });
+
+  it("points ~/.wsp/current-home at the home it serves and removes it on close", async () => {
+    const h = await start();
+    expect(readFileSync(pointerPath, "utf8")).toBe(`${home}\n`);
+
+    await h.close();
+    handles.splice(0);
+    expect(existsSync(pointerPath)).toBe(false);
+  });
+
+  it("leaves a pointer that a later host rewrote to its own home alone on close", async () => {
+    const h = await start();
+    writeFileSync(pointerPath, `${join(dir, "newer")}\n`);
+
+    await h.close();
+    handles.splice(0);
+    expect(readFileSync(pointerPath, "utf8")).toBe(`${join(dir, "newer")}\n`);
   });
 
   it("does not leave a lock behind when the host fails to start", async () => {
