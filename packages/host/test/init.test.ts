@@ -14,7 +14,7 @@ import { createRuntime, memoryStore, type GoldenRecipe, type Runtime } from "@ws
 import { afterEach, describe, expect, it } from "vitest";
 import { GOLDEN_SETUP } from "../src/doctor.js";
 import { loadManifest } from "../src/init-recipe.js";
-import { reduceStages, runInit, type InitIO, type InitOptions } from "../src/init.js";
+import { reduceStages, runInit, stageLine, type InitIO, type InitOptions } from "../src/init.js";
 import type { HostHandle } from "../src/server.js";
 import { FIXTURE } from "./init-fixture.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
@@ -146,7 +146,7 @@ describe("wsp init, interactive", () => {
     const first = f.text();
     // Screen one is the detection result, before any question.
     expect(first).toContain("Found on this computer");
-    expect(first).toContain("Tools          4  3 can come");
+    expect(first).toMatch(/Tools\s+4\s+3 can come/);
     expect(first).toContain("Nothing has left this computer.");
     expect(first.indexOf("Found on this computer")).toBeLessThan(first.indexOf("1/7"));
     expect(first).toContain("1/7");
@@ -165,21 +165,30 @@ describe("wsp init, interactive", () => {
     expect(f.text()).toContain("Claude Code");
     await f.press(KEY.enter);
     await f.until("Sign-ins");
-    expect(f.text()).toContain("GitHub CLI login  copy from this computer");
-    expect(f.text()).toContain("Claude Code login  sign in on the machine");
+    expect(f.text()).toMatch(/GitHub CLI login\s+copy/);
+    expect(f.text()).toMatch(/Claude Code login\s+sign in/);
+    expect(f.text()).toMatch(/Sign-ins\s+7\/7\s+1 copy, 1 sign in/);
     // Codex was left unticked on the Agents screen, so its login is not offered.
     expect(f.text()).not.toContain("Codex login");
-    // Past the CLI logins heading onto gh: copy -> sign in on the machine.
+    // Past the CLI logins heading onto gh: copy -> sign in.
     await f.press(KEY.down, KEY.space, KEY.enter);
 
     await f.until(BOOT);
-    const summary = f.text().slice(f.text().lastIndexOf("Summary"));
-    expect(summary).toContain("Identity");
-    expect(summary).toContain("~/.ssh/config");
+    const summary = f.text().slice(f.text().lastIndexOf("Summary"), f.text().lastIndexOf("Recipe saved"));
+    // One line per rung, the sign-ins under theirs with the answer each got, then the three closing lines.
+    const body = summary.split("\n").map(l => l.replace(/^│\s{2}|\s*│$/g, "").trimEnd()).filter(l => l !== "" && !/^[─├╯╮◇ ]*$/.test(l) && !l.startsWith("Summary"));
+    expect(body.map(l => l.trim().split(/\s{2,}/)[0])).toEqual([
+      "Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins", "GitHub CLI login", "Claude Code login", "Upload", "Installs", "Later",
+    ]);
+    expect(summary).toMatch(/Identity\s+2 of 3\s+1\.7 KB/);
+    expect(summary).toMatch(/Tools\s+3 of 4\s+│/);
+    expect(summary).toMatch(/Sign-ins\s+0 of 2/);
+    expect(summary).toMatch(/GitHub CLI login\s+sign in/);
+    expect(summary).toMatch(/Claude Code login\s+sign in/);
     expect(summary).not.toContain("id_ed25519");
-    expect(summary).toContain("Upload");
-    expect(summary).toContain("Nothing has left this computer yet.");
-    expect(summary).toContain("Sign in on the machine: GitHub CLI login, Claude Code login");
+    expect(summary).toMatch(/Upload\s+\d[\d.]* [KM]B, nothing has left this computer yet/);
+    expect(summary).toMatch(/Installs\s+Claude Code/);
+    expect(summary).toMatch(/Later\s+the ticked files copy over with golden import/);
     expect(f.backends).toHaveLength(0);
     await f.press("y");
 
@@ -193,7 +202,17 @@ describe("wsp init, interactive", () => {
     const order = ["Machine created", "Base installed", "Agents installed", "Ready"].map(s => out.indexOf(s));
     expect(order.every(i => i >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(out).toContain("node v22.12.0");
+    // A finished stage: label, detail, and its duration flush against the right edge (80 columns off a terminal).
+    const base = out.split("\n").filter(l => /Base installed/.test(l)).at(-1)!;
+    expect(base).toMatch(/Base installed\s+node v22\.12\.0\s+\d+\.\ds$/);
+    expect(base.length).toBe(80);
+    // The hand-off is three lines: the address, what to do there, the keys.
+    const at = out.indexOf("Opened http://");
+    expect(out.slice(at).split("\n").slice(0, 3).map(l => l.replace(/^│\s+/, ""))).toEqual([
+      expect.stringMatching(/^Opened http:\/\/127\.0\.0\.1:\d+\/$/),
+      "Sign in where the checklist says, then save the golden.",
+      "c copy the address   enter continue",
+    ]);
     expect(out).not.toMatch(/—|\p{Emoji_Presentation}/u);
     expect(out).not.toContain(SOLARI);
 
@@ -245,7 +264,7 @@ describe("wsp init, interactive", () => {
       await f.press(KEY.enter);
     }
     await f.until(BOOT);
-    expect(f.text()).not.toContain("~/.ssh/config");
+    expect(f.text().slice(f.text().lastIndexOf("Summary"))).toMatch(/Identity\s+1 of 3/);
     await f.press("y");
     await f.until(URL_RE);
     await f.press("c");
@@ -292,19 +311,21 @@ describe("wsp init, interactive", () => {
     await f.press(KEY.down, KEY.down, KEY.space, KEY.enter);
     await f.until("Sign-ins");
     expect(f.text()).toContain("Codex login");
-    expect(f.text()).toContain("Agent logins  2: 1 copy, 1 sign in");
+    expect(f.text()).toMatch(/Sign-ins\s+7\/7\s+2 copy, 1 sign in/);
+    expect(f.text()).toMatch(/Agent logins\s+2\n/);
     await f.press(KEY.esc);
     await f.until("6/7");
     f.clear();
     await f.press(KEY.down, KEY.down, KEY.space, KEY.enter);
     await f.until("Sign-ins");
     expect(f.text()).not.toContain("Codex login");
-    expect(f.text()).not.toMatch(/Agent logins +\d/);
+    expect(f.text()).toMatch(/Sign-ins\s+7\/7\s+1 copy, 1 sign in/);
+    expect(f.text()).toMatch(/Agent logins\s+1\n/);
     await f.press(KEY.enter);
     await f.until(BOOT);
     const summary = f.text().slice(f.text().lastIndexOf("Summary"));
     expect(summary).not.toContain("Codex login");
-    expect(summary).toContain("Sign-ins  1 of 2");
+    expect(summary).toMatch(/Sign-ins\s+1 of 2/);
     await f.press(KEY.enter);
     expect((await run).code).toBe(1);
     const saved = loadManifest(join(dirs[0]!, "golden-recipe.json"));
@@ -380,7 +401,7 @@ describe("wsp init, interactive", () => {
     const f = fake({ collect: async () => ({ entries: [] }) });
     const run = runInit(f.opts, f.io);
     await f.until(BOOT);
-    expect(f.text()).toContain("Found nothing to bring");
+    expect(f.text()).toContain("Nothing found to bring");
     expect(f.text()).toContain("--manifest");
     await f.press("n");
     expect((await run).code).toBe(1);
@@ -489,6 +510,28 @@ describe("stage stream", () => {
     const failed = reduceStages([ev("creating"), ev("failed", "golden setup failed (exit 1): curl: no route")]);
     expect(failed.steps[0]!.state).toBe("failed");
     expect(failed.failure).toBe("golden setup failed (exit 1): curl: no route");
+  });
+
+  it("a frame's arrival time gives the stage it ends its duration; the last stage has none", () => {
+    const view = reduceStages([
+      { ...ev("creating"), at: 1_000 },
+      { ...ev("deploying-daemon"), at: 4_200 },
+      { ...ev("deploying-daemon", "node v22"), at: 4_900 },
+      { ...ev("installing-harness"), at: 5_000 },
+      { ...ev("ready"), at: 65_500 },
+    ]);
+    // The second deploying-daemon frame carries the detail; it does not restart that stage's clock.
+    expect(view.steps.map(s => s.ms)).toEqual([3_200, 800, 60_500, undefined]);
+  });
+
+  it("a stage line pads the label, keeps the detail, and puts the duration flush right at the width", () => {
+    const line = stripVTControlCharacters(stageLine("o", "Base installed", "node v22.12.0", 3_200, 60, 20));
+    expect(line).toBe("o  Base installed        node v22.12.0                  3.2s");
+    expect(line.length).toBe(60);
+    const long = stripVTControlCharacters(stageLine("o", "Base installed", "x".repeat(80), 61_000, 60, 20));
+    expect(long.length).toBe(60);
+    expect(long).toMatch(/x…  1m 01s$/);
+    expect(stripVTControlCharacters(stageLine("o", "Ready", undefined, undefined, 60, 20))).toBe("o  Ready");
   });
 
   it("frames for another golden are ignored", () => {
