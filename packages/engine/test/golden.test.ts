@@ -308,7 +308,8 @@ describe("golden import stages", () => {
         count: 3,
         rungs: { identity: 1, shell: 2 },
         bytes: 4096,
-        pack: async () => ({ tar: Buffer.from("tgz-bytes"), bytes: 1200, skipped: [{ id: "shell/bashrc", path: "~/.bashrc", note: "no longer on this computer" }] }),
+        skipped: [{ id: "shell/bashrc", path: "~/.bashrc", note: "no longer on this computer" }],
+        pack: async () => ({ tar: Buffer.from("tgz-bytes"), bytes: 1200, skipped: [] }),
       },
       tools: [
         { id: "tools/homebrew", label: "Homebrew", manager: "brew", cmd: "brew-bootstrap" },
@@ -439,7 +440,7 @@ describe("golden import stages", () => {
   });
 
   it("a failure packing or extracting the files is fatal with its reason", async () => {
-    const packFails = importOf({ files: { count: 1, rungs: { shell: 1 }, bytes: 10, pack: async () => { throw new Error("Keychain: user cancelled"); } } });
+    const packFails = importOf({ files: { count: 1, rungs: { shell: 1 }, bytes: 10, skipped: [], pack: async () => { throw new Error("Keychain: user cancelled"); } } });
     const a = backendFor();
     await expect(prepareBuilder({ backend: a.backend, setup: "true", fetch: a.fetch, import: packFails })).rejects.toThrow(/Keychain: user cancelled/);
     expect(a.killed).toEqual(["m1"]);
@@ -467,6 +468,10 @@ describe("golden import stages", () => {
     expect(puts).toEqual([]);
     expect(cmds).toEqual(["true"]);
     expect(builder.import?.smoke).toBe("true");
+
+    const gone = await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ files: { count: 0, rungs: {}, bytes: 0, skipped: [{ id: "shell/zshrc", path: "~/.zshrc", note: "no longer on this computer" }], pack: async () => { throw new Error("must not pack"); } } }) });
+    expect(stages).toContain("applying-setup:nothing left to pack; skipped ~/.zshrc (no longer on this computer)");
+    expect(gone.import?.applied).toContain("uploading-files");
   });
 
   it("applying the same recipe again to a builder that has it skips every stage and runs nothing", async () => {

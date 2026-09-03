@@ -10,6 +10,9 @@ import { RUNGS, type Manifest, type ManifestEntry, type Rung } from "@wsp/collec
 import type { GoldenBuilderView, GoldenRecipe, GoldenStage, Runtime } from "@wsp/runtime";
 import { S_BAR, S_STEP_ERROR, S_STEP_SUBMIT, cancel, confirm, intro, isCancel, log, note, outro } from "@clack/prompts";
 import type { Keys } from "./cli.js";
+import { writeFileSync } from "node:fs";
+import { agentInstallsFor, toolInstallsFor } from "@wsp/engine";
+import { CLAUDE_INSTALLER, importFor, importResultPath, type SecretReader } from "./init-import.js";
 import {
   LOGIN_CHOICES,
   RUNG_TITLE,
@@ -18,7 +21,7 @@ import {
   goldenRecipeFor,
   initialChoice,
   initialTicks,
-  installFor,
+  isLoginChoice,
   isTickable,
   loadManifest,
   recipePath,
@@ -48,6 +51,11 @@ export interface InitOptions {
   collect(onRung: (rung: Rung, rows: number) => void): Promise<Manifest>;
   keys: Keys;
   statePath: string;
+  /** This computer's home directory, where the ticked paths are read from at build time. */
+  home: string;
+  /** Reads Keychain-held logins chosen as copy; the real one raises macOS's consent dialog. */
+  secrets: SecretReader;
+  platform: "darwin" | "linux";
   /** Builds the runtime around the recipe the ticks produced. */
   runtime(recipe: GoldenRecipe): Runtime;
   /** Starts the app server over that runtime once the builder is ready; the page lands on that
@@ -65,6 +73,13 @@ export interface InitResult {
 const GOLDEN_NAME = "default";
 const DEFAULT_RETRY = { waitMs: 30_000, attempts: 20 };
 const dim = (s: string): string => styleText("dim", s);
+
+export function fmtSeconds(ms: number): string {
+  const s = ms / 1000;
+  if (s < 10) return `${s.toFixed(1)}s`;
+  if (s < 60) return `${Math.round(s)}s`;
+  return `${Math.floor(s / 60)}m ${String(Math.round(s % 60)).padStart(2, "0")}s`;
+}
 
 export function fmtBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -108,6 +123,9 @@ export interface StageFrame {
 export const PREPARE_STEPS: readonly StageWords[] = [
   { stage: "creating", start: "Creating the machine", end: "Machine created", fail: "Creating the machine failed" },
   { stage: "deploying-daemon", start: "Installing the base (Node, the daemon)", end: "Base installed", fail: "Installing the base failed" },
+  { stage: "applying-setup", start: "Applying your setup", end: "Setup applied", fail: "Applying your setup failed" },
+  { stage: "uploading-files", start: "Uploading your files", end: "Files uploaded", fail: "Uploading your files failed" },
+  { stage: "installing-tools", start: "Installing tools", end: "Tools installed", fail: "Installing tools failed" },
   { stage: "installing-harness", start: "Installing agents", end: "Agents installed", fail: "Installing agents failed" },
   { stage: "ready", start: "Waiting for the machine", end: "Ready", fail: "The machine never became ready" },
 ];
@@ -148,6 +166,8 @@ export function reduceStages(frames: readonly StageFrame[], words: readonly Stag
 class StageStream {
   private frames: StageFrame[] = [];
   private view: StageView;
+  private startedAt = new Map<string, number>();
+  private took = new Map<string, number>();
   private printed = 0;
   private timer: NodeJS.Timeout | undefined;
   private tick = 0;
@@ -170,6 +190,8 @@ class StageStream {
   }
 
   start(): void {
+    const first = this.view.steps[0];
+    if (first) this.startedAt.set(first.stage, Date.now());
     if (this.animate) {
       this.timer = setInterval(() => {
         this.tick += 1;
@@ -183,8 +205,29 @@ class StageStream {
     const prev = this.view;
     this.frames.push(frame);
     this.view = reduceStages(this.frames, this.words);
+    this.clock(prev);
     if (this.animate) this.draw();
     else this.announce(prev);
+  }
+
+  /** A step's clock starts when it turns current and stops when it is done or failed; a
+   * step never reported ends when the next one begins. */
+  private clock(prev: StageView): void {
+    const now = Date.now();
+    for (let i = 0; i < this.view.steps.length; i++) {
+      const s = this.view.steps[i]!;
+      const was = prev.steps[i]!.state;
+      if (s.state === was) continue;
+      if (!this.startedAt.has(s.stage)) this.startedAt.set(s.stage, now);
+      if (s.state === "done" || s.state === "failed") this.took.set(s.stage, now - this.startedAt.get(s.stage)!);
+    }
+  }
+
+  private tail(s: StageStep): string {
+    const last = s.tail.at(-1);
+    const took = this.took.get(s.stage);
+    const parts = [last, took !== undefined && s.state !== "current" ? fmtSeconds(took) : undefined].filter((p): p is string => p !== undefined);
+    return parts.length > 0 ? `  ${dim(parts.join("  "))}` : "";
   }
 
   stop(): StageView {
@@ -197,16 +240,15 @@ class StageStream {
   private lines(final: boolean): string[] {
     const out: string[] = [];
     for (const s of this.view.steps) {
-      const last = s.tail.at(-1);
       switch (s.state) {
         case "pending":
           out.push(`${dim(S_BAR)}  ${dim(s.start)}`);
           break;
         case "current":
-          out.push(`${styleText("cyan", StageStream.SPIN[this.tick % StageStream.SPIN.length]!)}  ${s.start}${last !== undefined ? `  ${dim(last)}` : ""}`);
+          out.push(`${styleText("cyan", StageStream.SPIN[this.tick % StageStream.SPIN.length]!)}  ${s.start}${this.tail(s)}`);
           break;
         case "done":
-          out.push(`${styleText("green", S_STEP_SUBMIT)}  ${s.end}${last !== undefined ? `  ${dim(last)}` : ""}`);
+          out.push(`${styleText("green", S_STEP_SUBMIT)}  ${s.end}${this.tail(s)}`);
           break;
         case "failed":
           out.push(`${styleText("red", S_STEP_ERROR)}  ${s.fail}`);
@@ -244,10 +286,7 @@ class StageStream {
       const s = this.view.steps[i]!;
       const was = prev.steps[i]!.state;
       if (s.state === "current" && was !== "current") this.output.write(`${dim(S_BAR)}  ${s.start}\n`);
-      if (s.state === "done" && was !== "done") {
-        const last = s.tail.at(-1);
-        this.output.write(`${styleText("green", S_STEP_SUBMIT)}  ${s.end}${last !== undefined ? `  ${dim(last)}` : ""}\n`);
-      }
+      if (s.state === "done" && was !== "done") this.output.write(`${styleText("green", S_STEP_SUBMIT)}  ${s.end}${this.tail(s)}\n`);
     }
   }
 
@@ -290,7 +329,7 @@ const CLAUDE_LOGIN_WHY = "Anthropic's terms forbid a host to collect or pass alo
 function selectItem(e: ManifestEntry): SelectItem {
   const where = e.paths.length > 0 ? e.paths.join(", ") : "reinstalled on the machine";
   const size = e.bytes > 0 ? fmtBytes(e.bytes) : undefined;
-  const install = installFor(e);
+  const install = e.rung === "agents" ? agentInstallsFor([{ ...e, bring: true }], { claude: CLAUDE_INSTALLER }).installs[0] : undefined;
   const detail =
     e.rung === "logins"
       ? [where, agentName(e) === "claude" ? CLAUDE_LOGIN_WHY : "copy puts this login in the golden; sign in on the machine does it in the browser, next"]
@@ -345,10 +384,12 @@ function summaryNote(manifest: Manifest, ticks: ReadonlySet<string>, choices: Re
   }
   const onMachine = manifest.entries.filter(e => e.rung === "logins" && choices.get(e.id) === "machine");
   if (onMachine.length > 0) lines.push(`Sign in on the machine: ${onMachine.map(e => e.label).join(", ")}`);
-  const installs = manifest.entries.filter(e => ticks.has(e.id) && installFor(e) !== undefined);
+  const bring = manifest.entries.filter(e => ticks.has(e.id)).map(e => ({ ...e, bring: true }));
+  const agents = agentInstallsFor(bring, { claude: CLAUDE_INSTALLER }).installs.map(a => a.name);
+  const tools = toolInstallsFor(bring).installs.filter(t => t.id !== "tools/homebrew").length;
   lines.push("", `Upload: ${fmtBytes(upload)}. Nothing has left this computer yet.`);
-  lines.push(installs.length > 0 ? `The machine installs: ${installs.map(e => e.label).join(", ")}.` : "The machine installs nothing; it boots bare.");
-  lines.push("Ticked files are recorded in the recipe; copying them onto the machine lands with golden import.");
+  const what = [agents.join(", "), tools > 0 ? `${tools} tool${tools === 1 ? "" : "s"}` : ""].filter(w => w !== "");
+  lines.push(what.length > 0 ? `The machine installs: ${what.join(" and ")}.` : "The machine installs nothing; it boots bare.");
   return lines;
 }
 
@@ -474,8 +515,24 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   saveRecipe(path, manifest, ticks, choices);
   log.info(`Recipe saved to ${path}. Rerun with wsp init --manifest ${path} --yes to build it again.`, out);
 
-  const bring = manifest.entries.filter(e => ticks.has(e.id));
-  const rt = opts.runtime(goldenRecipeFor(bring, opts.keys));
+  const bring = manifest.entries.filter(e => ticks.has(e.id)).map(e => {
+    const choice = choices.get(e.id);
+    return isLoginChoice(choice) ? { ...e, choice } : e;
+  });
+  const resultsPath = importResultPath(opts.statePath);
+  let installs: string | undefined;
+  const imp = importFor(bring, {
+    home: opts.home,
+    secrets: opts.secrets,
+    platform: opts.platform,
+    onResult: r => {
+      writeFileSync(resultsPath, `${JSON.stringify(r, null, 2)}\n`);
+      const all = [...r.tools, ...r.agents];
+      const n = (o: string) => all.filter(x => x.outcome === o).length;
+      installs = `${n("installed")} installed, ${n("failed")} failed, ${n("skipped")} skipped; the list is in ${resultsPath}`;
+    },
+  });
+  const rt = opts.runtime(goldenRecipeFor(bring, opts.keys, { import: imp }));
   const stream = new StageStream(io.output, io.isTTY);
   const off = rt.events.on("golden.stage", e => {
     if (e.type === "golden.stage") stream.push({ type: "golden.stage", name: e.name, stage: e.stage, ...(e.detail !== undefined ? { detail: e.detail } : {}) });
@@ -503,6 +560,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   }
   stream.stop();
   off();
+  if (installs !== undefined) log.info(`Tools and agents: ${installs}`, out);
 
   const checklist = checklistFor(manifest, choices);
   const handle = await opts.host(rt, builder, checklist);

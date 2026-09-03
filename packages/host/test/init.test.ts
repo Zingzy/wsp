@@ -2,9 +2,9 @@
 // wsp init end to end against the stub backend: keys in, the seven screens,
 // the summary and confirm, prepare with its stage stream, the hand-off. The
 // runtime and host are the real ones over fakes; only the terminal is faked.
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { RUNGS } from "@wsp/collect";
@@ -35,6 +35,8 @@ interface Fake {
   runtimes: Runtime[];
   checklists: { label: string; command: string }[][];
   hosts: number;
+  /** Keychain services the fake reader was asked for. */
+  reads: string[];
 }
 
 function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string, string> } = {}): Fake {
@@ -67,12 +69,27 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
   };
   const dir = mkdtempSync(join(tmpdir(), "wsp-init-"));
   dirs.push(dir);
+  const home = mkdtempSync(join(tmpdir(), "wsp-init-home-"));
+  dirs.push(home);
+  writeFileSync(join(home, ".gitconfig"), "[user]\n\tname = Me\n");
+  writeFileSync(join(home, ".zshrc"), "export A=1\n");
+  mkdirSync(join(home, ".ssh"), { mode: 0o700 });
+  writeFileSync(join(home, ".ssh", "config"), "Host work\n", { mode: 0o600 });
+  const reads: string[] = [];
   const { tty: _tty, env: _env, ...rest } = over;
   const opts: InitOptions = {
     yes: false,
     collect: async () => FIXTURE,
     keys: { solari: SOLARI },
     statePath: join(dir, "state.json"),
+    home,
+    platform: "darwin",
+    secrets: {
+      read: async service => {
+        reads.push(service);
+        return "gho_fake";
+      },
+    },
     runtime: recipe => {
       recipes.push(recipe);
       const backend = stubBackend();
@@ -123,6 +140,7 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
     get hosts() {
       return counters.hosts;
     },
+    reads,
   };
 }
 
@@ -182,16 +200,30 @@ describe("wsp init, interactive", () => {
     expect(result.handle?.port).toBe(4400);
 
     const out = f.text();
-    const order = ["Machine created", "Base installed", "Agents installed", "Ready"].map(s => out.indexOf(s));
+    const order = ["Machine created", "Base installed", "Setup applied", "Files uploaded", "Tools installed", "Agents installed", "Ready"].map(s => out.indexOf(s));
     expect(order.every(i => i >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(out).toContain("node v22.12.0");
+    expect(out).toContain("3 files: identity 2, shell 1");
+    expect(out).toContain("Claude Code installed");
+    expect(out).toContain("golden-import.json");
     expect(out).not.toMatch(/—|\p{Emoji_Presentation}/u);
     expect(out).not.toContain(SOLARI);
+    // gh was switched to sign in on the machine, so its Keychain token was never asked for.
+    expect(f.reads).toEqual([]);
 
     const backend = f.backends[0]!;
     expect(backend.machines).toHaveLength(1);
-    expect(backend.machines[0]!.execLog).toEqual([GOLDEN_SETUP]);
+    const log = backend.machines[0]!.execLog;
+    expect(log.some(c => c.includes("tar xzf") && c.includes("--no-same-owner"))).toBe(true);
+    expect(log.filter(c => c.includes("brew install") || c.includes("npm install -g pnpm"))).toHaveLength(3);
+    expect(log.some(c => c.includes(GOLDEN_SETUP))).toBe(true);
+    expect(log.indexOf(log.find(c => c.includes("tar xzf"))!)).toBeLessThan(log.indexOf(log.find(c => c.includes("brew install"))!));
+    expect(JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8"))).toMatchObject({
+      files: { bytes: expect.any(Number) },
+      tools: [{ id: "tools/homebrew", outcome: "installed" }, { id: "tools/brew/gh", outcome: "installed" }, { id: "tools/brew/jq", outcome: "installed" }, { id: "tools/npm/pnpm", outcome: "installed" }],
+      agents: [{ id: "agents/claude", outcome: "installed" }],
+    });
     expect(backend.machines[0]!.spec.labels).toMatchObject({ "wsp-builder": "1" });
     expect(f.recipes[0]!.envs).toHaveProperty("CLAUDE_CONFIG_DIR");
     expect(f.hosts).toBe(1);
@@ -325,6 +357,8 @@ describe("wsp init, flags and no terminal", () => {
     expect(f.text()).toMatch(URL_RE);
     expect(f.backends[0]!.machines).toHaveLength(1);
     expect(f.opened).toEqual([]);
+    // The gh login defaults to copy, so its token was read from the Keychain, once, through the injected reader.
+    expect(f.reads).toEqual(["gh:github.com"]);
   });
 
   it("--yes with --manifest takes the file's ticks, asks nothing, prints the address and never opens a browser", async () => {
@@ -341,10 +375,16 @@ describe("wsp init, flags and no terminal", () => {
     expect(out).toContain("Ready");
     expect(f.opened).toEqual([]);
     expect(f.copied).toEqual([]);
-    // No agent ticked: the setup installs nothing and names nothing.
-    expect(f.backends[0]!.machines[0]!.execLog).toEqual(["true"]);
+    // No agent ticked: the harness installs nothing and names nothing; the two files still travel.
+    const log = f.backends[0]!.machines[0]!.execLog;
+    expect(log).toContain("true");
+    expect(log.some(c => c.includes(GOLDEN_SETUP))).toBe(false);
+    expect(log.some(c => c.includes("tar xzf"))).toBe(true);
+    // Off a terminal a step prints once, done, with its last detail and how long it took.
+    expect(out).toMatch(/Setup applied  [\d.]+ (B|KB) packed  \d+\.\ds/);
+    expect(out).toMatch(/Files uploaded  [\d.]+ (B|KB) in [\d.]+s  \d+\.\ds/);
     expect(f.recipes[0]!.envs).not.toHaveProperty("CLAUDE_CONFIG_DIR");
-    const written = loadManifest(join(dirs.at(-1)!, "golden-recipe.json"));
+    const written = loadManifest(join(dirname(f.opts.statePath), "golden-recipe.json"));
     expect(written.entries.filter(e => e.bring).map(e => e.id)).toEqual(["identity/git-user", "shell/zshrc"]);
   });
 
@@ -380,19 +420,34 @@ describe("wsp init, flags and no terminal", () => {
     expect(f.backends[0]!.machines[0]!.killed).toBe(false);
   });
 
-  it("a failed prepare reports the stage and the detail and exits 1 with no host", async () => {
+  it("a failed upload reports the stage and the detail and exits 1 with no host", async () => {
     const f = fake({ yes: true });
     f.opts.runtime = recipe => {
       const backend = stubBackend();
-      backend.execImpl = () => ({ exitCode: 1, stdout: "", stderr: "curl: no route" });
+      backend.execImpl = (_m, cmd) => (cmd.includes("tar xzf") ? { exitCode: 2, stdout: "", stderr: "gzip: stdin: not in gzip format" } : { exitCode: 0, stdout: "", stderr: "" });
       f.backends.push(backend);
       return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
     };
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(1);
     expect(f.hosts).toBe(0);
-    expect(f.text()).toMatch(/Installing agents failed/);
-    expect(f.text()).toContain("no route");
+    expect(f.text()).toMatch(/Uploading your files failed/);
+    expect(f.text()).toContain("not in gzip format");
+  });
+
+  it("a tool or agent that fails is a warning in the stream, not the end of the build", async () => {
+    const f = fake({ yes: true });
+    f.opts.runtime = recipe => {
+      const backend = stubBackend();
+      backend.execImpl = (_m, cmd) => (cmd.includes("brew install jq") || cmd.includes(GOLDEN_SETUP) ? { exitCode: 1, stdout: "", stderr: "curl: no route" } : { exitCode: 0, stdout: "", stderr: "" });
+      f.backends.push(backend);
+      return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
+    };
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(0);
+    expect(f.text()).toContain("3 installed, 1 failed: jq (curl: no route)");
+    expect(f.text()).toContain("Claude Code failed (curl: no route)");
+    expect(f.text()).toContain("Ready");
   });
 });
 
@@ -404,8 +459,16 @@ describe("stage stream", () => {
     expect(view.steps.map(s => [s.stage, s.state])).toEqual([
       ["creating", "done"],
       ["deploying-daemon", "done"],
+      ["applying-setup", "done"],
+      ["uploading-files", "done"],
+      ["installing-tools", "done"],
       ["installing-harness", "current"],
       ["ready", "pending"],
+    ]);
+    expect(view.steps.slice(2, 5).map(s => [s.start, s.end])).toEqual([
+      ["Applying your setup", "Setup applied"],
+      ["Uploading your files", "Files uploaded"],
+      ["Installing tools", "Tools installed"],
     ]);
     expect(view.steps[0]).toMatchObject({ start: "Creating the machine", end: "Machine created", tail: ["sandbox from default"] });
     expect(view.steps[1]!.tail).toEqual(["node v22"]);
@@ -414,7 +477,7 @@ describe("stage stream", () => {
 
   it("a stage not reported counts as done once a later one arrives; ready finishes; failed carries the detail", () => {
     const done = reduceStages([ev("creating"), ev("installing-harness"), ev("ready")]);
-    expect(done.steps.map(s => s.state)).toEqual(["done", "done", "done", "done"]);
+    expect(done.steps.map(s => s.state)).toEqual(["done", "done", "done", "done", "done", "done", "done"]);
     const failed = reduceStages([ev("creating"), ev("failed", "golden setup failed (exit 1): curl: no route")]);
     expect(failed.steps[0]!.state).toBe("failed");
     expect(failed.failure).toBe("golden setup failed (exit 1): curl: no route");

@@ -22,6 +22,7 @@ import {
   type Runtime,
 } from "@wsp/runtime";
 import { CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, claudeEnvs, deployDaemon, doctor } from "./doctor.js";
+import { keychainReader } from "./init-import.js";
 import { runInit, type InitIO } from "./init.js";
 import type { ChecklistItem } from "./init-recipe.js";
 import { startHost, type HostHandle } from "./server.js";
@@ -357,6 +358,9 @@ async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: 
       collect: collectThisComputer,
       keys,
       statePath: opts.statePath,
+      home: homedir(),
+      secrets: keychainReader(),
+      platform: platform() === "darwin" ? "darwin" : "linux",
       runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `node ${(await deployDaemon(machine)).node}` }),
       host: (rt, builder, checklist) => hostFor(rt, keys, { ...opts, builder, checklist }, io),
     },

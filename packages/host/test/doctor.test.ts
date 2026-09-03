@@ -80,9 +80,10 @@ describe("deployScript", () => {
     }
   });
 
-  it("bootstraps a pinned, sha256-checked Node into /usr/local only when the guest has none", () => {
+  it("bootstraps a pinned, sha256-checked Node into /usr/local when the guest has none or one older than 22", () => {
     const script = deployScript("aabbcc");
-    const bootstrap = script.indexOf("if ! command -v node");
+    const bootstrap = script.indexOf('if [ "${node_major:-0}" -lt 22 ]');
+    expect(script).toContain("node_major=\"$(node --version 2>/dev/null | sed 's/^v//; s/\\..*//')\"");
     const npm = script.indexOf("npm install");
     expect(bootstrap).toBeGreaterThan(-1);
     expect(bootstrap).toBeLessThan(npm);

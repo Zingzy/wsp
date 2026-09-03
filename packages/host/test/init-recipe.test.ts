@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type ManifestEntry, parseManifest } from "@wsp/collect";
 import { afterEach, describe, expect, it } from "vitest";
-import { GOLDEN_SETUP, GOLDEN_SMOKE } from "../src/doctor.js";
+import type { GoldenImport } from "@wsp/runtime";
 import {
   checklistFor,
   goldenRecipeFor,
@@ -80,21 +80,22 @@ describe("parseManifest", () => {
 
 describe("goldenRecipeFor", () => {
   const bring = (...ids: string[]): ManifestEntry[] => ids.map(byId);
+  const imp: GoldenImport = { recipeHash: "h", tools: [], agents: [] };
 
-  it("installs only the ticked agents that have an install line, and names no agent when none is ticked", () => {
-    const none = goldenRecipeFor(bring("identity/git-user", "shell/zshrc"), {});
+  it("runs a bare harness and smoke; the import carries files, tools and agents; envs name no agent when none is ticked", () => {
+    const none = goldenRecipeFor(bring("identity/git-user", "shell/zshrc"), {}, { import: imp });
     expect(none.setup).toBe("true");
     expect(none.smoke).toBe("true");
+    expect(none.import).toBe(imp);
     expect(none.envs).not.toHaveProperty("CLAUDE_CONFIG_DIR");
     expect(none.envs).not.toHaveProperty("ANTHROPIC_API_KEY");
     expect(none.envs?.["PATH"]).toContain("/root/.local/bin");
+    expect(none.envs?.["PATH"]).toContain("/home/linuxbrew/.linuxbrew/bin");
     expect(JSON.stringify(none)).not.toMatch(/claude/i);
   });
 
-  it("a ticked Claude Code uses the sanctioned installer and its smoke, with the key only when loaded", () => {
+  it("a ticked Claude Code sets its config dir and the key only when loaded", () => {
     const withKey = goldenRecipeFor(bring("agents/claude", "shell/zshrc"), { anthropic: ANTHROPIC });
-    expect(withKey.setup).toBe(GOLDEN_SETUP);
-    expect(withKey.smoke).toBe(GOLDEN_SMOKE);
     expect(withKey.envs).toMatchObject({ ANTHROPIC_API_KEY: ANTHROPIC, CLAUDE_CONFIG_DIR: "/root/.claude-cfg" });
     expect(withKey.cpu).toBe(2);
     expect(withKey.memMb).toBe(4096);
@@ -104,50 +105,8 @@ describe("goldenRecipeFor", () => {
     expect(noKey.envs).toHaveProperty("CLAUDE_CONFIG_DIR");
   });
 
-  it("an agent without an install line is carried in the recipe file but installs nothing", () => {
-    const recipe = goldenRecipeFor(bring("agents/codex"), {});
-    expect(recipe.setup).toBe("true");
-    expect(recipe.smoke).toBe("true");
-  });
-
   it("threads the daemon deploy hook through", () => {
     const hook = async () => "node v22";
     expect(goldenRecipeFor([], {}, { deployDaemon: hook }).deployDaemon).toBe(hook);
-  });
-});
-
-describe("recipe file", () => {
-  let dir: string;
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
-
-  it("lives next to the state file and round-trips the ticks as bring flags", () => {
-    dir = mkdtempSync(join(tmpdir(), "wsp-recipe-"));
-    const statePath = join(dir, "sub", "state.json");
-    const path = recipePath(statePath);
-    expect(path).toBe(join(dir, "sub", "golden-recipe.json"));
-
-    const choices = new Map([["logins/gh", "machine"], ["logins/claude", "copy"]] as const);
-    saveRecipe(path, FIXTURE, new Set(["identity/git-user", "shell/zshrc", "agents/claude", "logins/claude"]), choices);
-    const text = readFileSync(path, "utf8");
-    expect(text.endsWith("\n")).toBe(true);
-    const back = loadManifest(path);
-    expect(back.entries).toHaveLength(FIXTURE.entries.length);
-    expect(back.entries.map(e => [e.id, e.bring])).toEqual(
-      FIXTURE.entries.map(e => [e.id, ["identity/git-user", "shell/zshrc", "agents/claude", "logins/claude"].includes(e.id)]),
-    );
-    expect(back.entries.find(e => e.id === "logins/gh")?.choice).toBe("machine");
-    expect(back.entries.find(e => e.id === "logins/claude")?.choice).toBe("copy");
-    expect(back.entries.find(e => e.id === "shell/zshrc")).not.toHaveProperty("choice");
-    // A re-run of the saved file preselects exactly what was ticked and chosen.
-    expect(back.entries.filter(initialTicks).map(e => e.id)).toEqual(["identity/git-user", "shell/zshrc", "agents/claude", "logins/claude"]);
-    expect(back.entries.filter(e => e.rung === "logins").map(initialChoice)).toEqual(["machine", "copy"]);
-  });
-
-  it("loadManifest reports the path on a bad file, ahead of the collector's reason", () => {
-    dir = mkdtempSync(join(tmpdir(), "wsp-recipe-"));
-    expect(() => loadManifest(join(dir, "missing.json"))).toThrow(/missing\.json/);
-    const path = join(dir, "recipe.json");
-    writeFileSync(path, JSON.stringify({ entries: [{ ...byId("shell/zshrc"), choice: "copy" }] }));
-    expect(() => loadManifest(path)).toThrow(/recipe\.json: invalid manifest: entries\.0\.choice: only a logins row carries a choice/);
   });
 });

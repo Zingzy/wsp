@@ -1125,7 +1125,7 @@ describe("nap vault against the stub backend", () => {
 describe("runtime golden import", () => {
   const importOf = (recipeHash = "h1"): GoldenImport => ({
     recipeHash,
-    files: { count: 1, rungs: { shell: 1 }, bytes: 10, pack: async () => ({ tar: Buffer.from("t"), bytes: 10, skipped: [] }) },
+    files: { count: 1, rungs: { shell: 1 }, bytes: 10, skipped: [], pack: async () => ({ tar: Buffer.from("t"), bytes: 10, skipped: [] }) },
     tools: [{ id: "tools/brew/jq", label: "jq", manager: "brew", cmd: "brew install jq" }],
     agents: [{ id: "agents/codex", name: "Codex", install: "codex-install", smoke: "codex --version" }],
   });

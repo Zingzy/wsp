@@ -10,7 +10,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
-import { DAEMON_PORT, type Machine } from "@wsp/engine";
+import { DAEMON_PORT, TOOLS_PATH, type Machine } from "@wsp/engine";
 import type { Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
 import type { CliIO } from "./cli.js";
@@ -61,10 +61,13 @@ export const GUEST_NODE = {
   },
 } as const;
 
+// Three of the agents the golden can carry need Node 20 or 22; the base
+// sandbox ships 18, so an older node is replaced the same way a missing one is.
 function nodeBootstrap(): string {
   const v = GUEST_NODE.version;
   return [
-    "if ! command -v node >/dev/null 2>&1; then",
+    "node_major=\"$(node --version 2>/dev/null | sed 's/^v//; s/\\..*//')\"",
+    'if [ "${node_major:-0}" -lt 22 ]; then',
     '  arch="$(uname -m)"',
     '  case "$arch" in',
     `    x86_64) pkg=node-v${v}-linux-x64.tar.gz sha=${GUEST_NODE.sha256.x86_64} ;;`,
@@ -318,10 +321,11 @@ export const GOLDEN_SMOKE = "claude --version";
 
 export const CONFIG_DIR = "/root/.claude-cfg";
 
-/** Envs every guest needs: a PATH that reaches the daemon's node and the harness install. */
+/** Envs every guest needs: a PATH that reaches the daemon's node, the harness
+ * install, and what the golden import's tools stage puts on the machine. */
 export const GUEST_ENVS: Record<string, string> = {
   IS_SANDBOX: "1",
-  PATH: "/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+  PATH: TOOLS_PATH,
 };
 
 /** Without a key the guest still needs the config dir and PATH; a subscription

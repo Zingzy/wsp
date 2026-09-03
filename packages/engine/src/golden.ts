@@ -132,9 +132,12 @@ export interface GoldenImport {
   recipeHash: string;
   /** Absent when no file was ticked. `pack` reads this computer and builds the archive; it runs on applying-setup. */
   files?: {
+    /** Files and secrets that will be packed; zero when every ticked path is gone from this computer. */
     count: number;
     rungs: Record<string, number>;
     bytes: number;
+    /** Ticked paths the plan set aside (missing on disk, a private key), reported before packing. */
+    skipped: SkippedPath[];
     pack: () => Promise<PackedFiles>;
   };
   tools: ToolInstall[];
@@ -242,15 +245,18 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
     if (done("uploading-files")) {
       stage("applying-setup", "already applied");
       stage("uploading-files", "already applied");
-    } else if (!imp.files) {
-      stage("applying-setup", "nothing ticked");
+    } else if (!imp.files || imp.files.count === 0) {
+      const notes = (imp.files?.skipped ?? []).map(s => `${s.path} (${s.note})`);
+      stage("applying-setup", notes.length > 0 ? `nothing left to pack; skipped ${notes.join(", ")}` : "nothing ticked");
       stage("uploading-files", "nothing to upload");
+      result.files = { bytes: 0, skipped: imp.files?.skipped ?? [] };
       mark("applying-setup");
       mark("uploading-files");
     } else {
       const rungs = Object.entries(imp.files.rungs).map(([r, n]) => `${r} ${n}`).join(", ");
       stage("applying-setup", `${imp.files.count} file${imp.files.count === 1 ? "" : "s"}: ${rungs}`);
       const packed = await imp.files.pack();
+      packed.skipped = [...imp.files.skipped, ...packed.skipped];
       const notes = packed.skipped.map(s => `${s.path} (${s.note})`);
       stage("applying-setup", `${fmtBytes(packed.bytes)} packed${notes.length > 0 ? `; skipped ${notes.join(", ")}` : ""}`);
       mark("applying-setup");
