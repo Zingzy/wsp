@@ -55,6 +55,8 @@ Review wsp changes against the laws this project has already paid for. Generic c
 - Conventional commit subject <72 chars + a why-paragraph; NO co-author trailers.
 - One ticket = one branch = one session; branch names ticket/<n>-<slug>; worktrees under ~/wsp/.claude/worktrees/ (never /tmp).
 - Builders never merge to main; the coordinator merges. Builders push their ticket branch at the first commit and open a draft PR on Zingzy/wsp titled after the ticket, mark it ready when the build report is posted, and push every amend. Main pushes are coordinator-only. PR bodies: ticket link, what it does, status; no em-dashes, no tool names.
+- Self-review before any report. Before posting a build or fix report, the builder reviews its own diff with the wsp-pr-review procedure: read every changed file whole, probe each acceptance item and each ruling against a fresh fake HOME or fake backend, walk the silent-bugs list, and revert the fix to prove each new test goes red. Findings are fixed before the report exists, and the report says the self-review ran and what it caught. A report without that line is incomplete.
+- Coordinator pre-review. The coordinator runs a cold reviewer on the branch before handing it to the user's reviewer; that reviewer posts nothing and returns findings to the builder. The user sees a branch only after it survived one full review.
 - Deviations from plan/ticket are fine when reality wins, but MUST be reported in the ticket comment: an unreported deviation is a should-fix even when the code is right.
 - Comments in code state constraints code can't show, with the source (a law, a measured finding): no narration, no TODO/FIXME/HACK.
 
