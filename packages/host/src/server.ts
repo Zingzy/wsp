@@ -99,17 +99,18 @@ function describeLabels(labels: Record<string, string> | undefined): string {
   return ` (${Object.entries(labels).map(([k, v]) => `${k}=${v}`).join(" ")})`;
 }
 
+/** A createdAt stamped by a clock ahead of ours reads as zero, never negative. */
 function describeAge(ms: number | undefined): string {
   if (ms === undefined) return "age unknown";
-  if (ms < 60_000) return `${Math.round(ms / 1000)} s old`;
-  if (ms < 3_600_000) return `${Math.round(ms / 60_000)} min old`;
-  const h = ms / 3_600_000;
-  return `${Number.isInteger(h) ? h : h.toFixed(1)} h old`;
+  const age = Math.max(0, ms);
+  if (age < 60_000) return `${Math.floor(age / 1000)} s old`;
+  if (age < 3_600_000) return `${Math.floor(age / 60_000)} min old`;
+  return `${(age / 3_600_000).toFixed(1)} h old`;
 }
 
 function describeCost(rateUsdPerHour: number, ageMs: number | undefined): string {
   const rate = `$${rateUsdPerHour.toFixed(2)}/h`;
-  return ageMs === undefined ? rate : `${rate} (about $${((ageMs / 3_600_000) * rateUsdPerHour).toFixed(2)} so far)`;
+  return ageMs === undefined ? rate : `${rate} (about $${((Math.max(0, ageMs) / 3_600_000) * rateUsdPerHour).toFixed(2)} so far)`;
 }
 
 function kindOf(labels: Record<string, string> | undefined, builder: boolean): string {

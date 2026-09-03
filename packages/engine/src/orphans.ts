@@ -7,6 +7,10 @@ export const BUILDER_LABEL = "wsp-builder";
  * provider's createdAt it survives a resume; a sweep from another state
  * file reads it and leaves the machine alone. */
 export const OWNER_LABEL = "wsp-owner";
+/** An own builder is claimed only once its create returns; a listing during
+ * the create could show it unclaimed. Whether the provider lists a machine
+ * mid-create is unmeasured, so a builder this young is spared on age alone. */
+export const OWN_BUILDER_GRACE_MS = 60_000;
 /** Sleeping experiments on the account wear this label; the reaper never
  * touches one, even when it also wears ours. */
 export const RESERVED_LABEL = "poc";
@@ -53,7 +57,7 @@ export interface SparedMachine {
 export interface ReapResult {
   reaped: ReapedMachine[];
   spared: SparedMachine[];
-  /** One entry per thing that went wrong: a recorded kill that failed, or the listing itself; the rest of the sweep still ran. */
+  /** One entry per thing that went wrong: a kill that failed, or the listing itself; the rest of the sweep still ran. */
   failed?: string[];
 }
 
@@ -72,6 +76,7 @@ export async function reap(opts: ReapOptions): Promise<ReapResult> {
 
   const reaped: ReapedMachine[] = [];
   const spared: SparedMachine[] = [];
+  const failed: string[] = [];
   for (const m of rows) {
     if (m.state !== "running") continue;
     if (RESERVED_LABEL in m.labels) continue;
@@ -82,9 +87,9 @@ export async function reap(opts: ReapOptions): Promise<ReapResult> {
     const whose: Whose = owner === undefined ? "none" : owner === opts.owner ? "own" : "foreign";
     const createdAt = Date.parse(m.labels["createdAt"] ?? "");
     const ageMs = Number.isNaN(createdAt) ? undefined : now - createdAt;
-    const backstopMs = builder ? BUILDER_IDLE_MS : olderThanMs;
+    const backstopMs = whose === "own" && builder ? OWN_BUILDER_GRACE_MS : builder ? BUILDER_IDLE_MS : olderThanMs;
     const pastBackstop = ageMs !== undefined && ageMs >= backstopMs;
-    const kill = whose === "own" ? builder || pastBackstop : whose === "none" && pastBackstop;
+    const kill = whose === "own" ? (builder && ageMs === undefined) || pastBackstop : whose === "none" && pastBackstop;
     if (!kill) {
       spared.push({
         id: m.id,
@@ -103,9 +108,10 @@ export async function reap(opts: ReapOptions): Promise<ReapResult> {
     } catch (e) {
       // The listing lags a kill (measured): a row that is gone by the time it is fetched is no failure.
       if ((e as { kind?: string }).kind === "missing") continue;
-      throw e;
+      failed.push(`${m.id} could not be stopped (${e instanceof Error ? e.message : String(e)})`);
+      continue;
     }
     reaped.push({ id: m.id, labels: m.labels, builder, reason: whose === "own" ? "own" : "orphan", ...(ageMs !== undefined ? { ageMs } : {}) });
   }
-  return { reaped, spared };
+  return { reaped, spared, ...(failed.length > 0 ? { failed } : {}) };
 }

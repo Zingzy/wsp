@@ -15,6 +15,7 @@ import {
   machineExecStream,
   type EventUnion,
   type Runtime,
+  type SparedMachine,
   type WorkspaceView,
 } from "@wsp/runtime";
 
@@ -176,6 +177,19 @@ function watchEvents(rt: Runtime): void {
   });
 }
 
+function describeAge(ms: number): string {
+  const age = Math.max(0, ms);
+  if (age < 60_000) return `${Math.floor(age / 1000)} s old`;
+  if (age < 3_600_000) return `${Math.floor(age / 60_000)} min old`;
+  return `${(age / 3_600_000).toFixed(1)} h old`;
+}
+
+function describeSpared(s: SparedMachine): string {
+  const whose = s.whose === "foreign" ? `owner ${s.owner}` : s.whose === "own" ? "this setup, no record" : "no owner";
+  const age = s.ageMs === undefined ? "age unknown" : describeAge(s.ageMs);
+  return `left alone ${s.id} (${whose}, ${age}, $${s.rateUsdPerHour.toFixed(2)}/h)`;
+}
+
 async function listMachines(rt: Runtime): Promise<{ id: string; state: string; labels: Record<string, string> }[]> {
   return (await rt.backend.list()).filter(m => m.labels[RESERVED.key] !== RESERVED.value);
 }
@@ -189,7 +203,7 @@ async function cmdLs(rt: Runtime): Promise<void> {
   const machines = await listMachines(rt);
   console.log(`machines on the account (${machines.length}):`);
   for (const m of machines) {
-    console.log(`  ${m.id.slice(0, 40)}…  ${m.state}  wsp=${m.labels["wsp"] ?? "-"}`);
+    console.log(`  ${m.id.slice(0, 40)}…  ${m.state}  wsp=${m.labels["wsp"] ?? "-"}  owner=${m.labels["wsp-owner"] ?? "-"}`);
   }
 }
 
@@ -317,17 +331,20 @@ async function cmdDemo(rt: Runtime, envs: Record<string, string>): Promise<void>
   } catch (e) {
     failed ??= e instanceof Error ? e.message : String(e);
   } finally {
-    await timings.time(
+    const swept = await timings.time(
       "teardown (delete + reap)",
       async () => {
         for (const w of await rt.workspaces.list()) {
           if (w.name.startsWith("demo-")) await rt.workspaces.delete(w.id).catch(() => {});
         }
-        return (await rt.reap(0)).reaped.map(r => r.id);
+        return rt.reap(0);
       },
-      reaped => (reaped.length > 0 ? `reaped strays: ${reaped.join(", ")}` : "no strays"),
+      r => (r.reaped.length > 0 ? `reaped strays: ${r.reaped.map(x => x.id).join(", ")}` : "no strays"),
     );
-    const leftover = (await listMachines(rt)).filter(m => m.state === "running");
+    for (const s of swept.spared) log(describeSpared(s));
+    // Another setup's machines are not ours to count against the demo.
+    const sparedIds = new Set(swept.spared.map(s => s.id));
+    const leftover = (await listMachines(rt)).filter(m => m.state === "running" && !sparedIds.has(m.id));
     timings.add("running machines after", 0, leftover.length === 0 ? "0 (clean)" : `${leftover.length} LEFT OVER`);
     timings.print();
     if (leftover.length > 0) {
@@ -359,7 +376,7 @@ usage:
   wspx wake <id>               resume a workspace (resurrects if it vanished)
   wspx upgrade <id> [--cpu N]  vault files, replace with a fresh golden fork
   wspx rm <id>                 kill a workspace
-  wspx reap                    kill unclaimed wsp-labeled machines
+  wspx reap                    kill this setup's unclaimed machines and orphans; list the rest
   wspx demo                    end-to-end showpiece with a timing table
 `;
 
@@ -459,8 +476,9 @@ async function main(): Promise<void> {
       return;
     }
     case "reap": {
-      const { reaped, failed } = await rt.reap(0);
+      const { reaped, spared, failed } = await rt.reap(0);
       log(reaped.length > 0 ? `reaped: ${reaped.map(r => r.id).join(", ")}` : "nothing to reap");
+      for (const s of spared) log(describeSpared(s));
       for (const f of failed ?? []) log(`failed: ${f}`);
       return;
     }

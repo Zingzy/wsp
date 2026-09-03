@@ -98,6 +98,16 @@ describe("golden pipeline", () => {
     expect(killed).toEqual(["m1", "m2"]);
   });
 
+  it("stamps the builder as wsp-builder and the smoke fork as wsp-smoke with its own createdAt", async () => {
+    const { backend, created } = recordingBackend();
+    const labels = { wsp: "1", "wsp-owner": "h_me", createdAt: "2026-09-01T00:00:00.000Z" };
+    await buildGolden({ backend, setup: "true", smoke: "true", labels });
+    expect(created[0]!.labels).toEqual({ ...labels, "wsp-builder": "1" });
+    expect(created[1]!.labels).toMatchObject({ wsp: "1", "wsp-owner": "h_me", "wsp-smoke": "1" });
+    expect(created[1]!.labels).not.toHaveProperty("wsp-builder");
+    expect(Date.parse(created[1]!.labels!["createdAt"]!)).toBeGreaterThan(Date.parse(labels.createdAt));
+  });
+
   it("appends versions and rollback only moves head", async () => {
     const { backend } = recordingBackend();
     const one = await buildGolden({ backend, setup: "a", smoke: "true" });

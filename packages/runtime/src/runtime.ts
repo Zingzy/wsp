@@ -294,7 +294,7 @@ export interface Runtime {
   };
   /** Enriched status (machine state, daemon reach, size, rate) + cost ticker. */
   readonly status: StatusApi;
-  /** Kills what this state file owns and nothing claims; lists the running builders it left alone. */
+  /** Kills what this state file owns and nothing claims, plus orphans past their backstop; lists the running machines it left alone. */
   reap(olderThanMs?: number): Promise<ReapResult>;
   /** Writes every transcript still waiting on its debounce; the store is complete once this resolves. */
   close(): Promise<void>;
@@ -321,7 +321,7 @@ interface TranscriptRecord {
 /** Builders live apart from workspaces: never in the rail, and a record left
  * by a crashed wizard is exactly what reap() sweeps. */
 const BUILDERS = "builders";
-/** One id per state file, stamped on its builders so another host's sweep can tell them apart from its own. */
+/** One id per state file, stamped on every machine it creates so another host's sweep can tell them apart from its own. */
 const OWNER = "owner";
 
 interface BuilderRecord {
@@ -1172,11 +1172,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         await forgetBuilder(b.record.id);
         reaped.push({ id: b.record.id, builder: true, reason: "recorded" });
       }
-      const result = (swept: ReapResult): ReapResult => ({
-        reaped: reaped.concat(swept.reaped),
-        spared: swept.spared,
-        ...(failed.length > 0 ? { failed } : {}),
-      });
+      const result = (swept: ReapResult): ReapResult => {
+        const allFailed = failed.concat(swept.failed ?? []);
+        return { reaped: reaped.concat(swept.reaped), spared: swept.spared, ...(allFailed.length > 0 ? { failed: allFailed } : {}) };
+      };
       try {
         return result(
           await reap({

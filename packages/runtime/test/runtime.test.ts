@@ -554,14 +554,21 @@ describe("runtime golden builders", () => {
     await vi.waitFor(() => expect(backend.machines).toHaveLength(1));
     expect(backend.machines[0]!.spec.labels).toMatchObject({ "wsp-builder": "1", "wsp-owner": expect.stringMatching(/^h_/) });
 
-    expect(await rt.reap()).toEqual({ reaped: [], spared: [] });
-    expect(backend.machines[0]!.killed).toBe(false);
+    // Well past the minute a fresh own builder gets anyway: only the in-flight claim protects it now.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 5 * 60_000);
+    try {
+      expect(await rt.reap()).toEqual({ reaped: [], spared: [] });
+      expect(backend.machines[0]!.killed).toBe(false);
 
-    release();
-    const b = await preparing;
-    expect(await rt.reap()).toEqual({ reaped: [], spared: [] });
-    expect(backend.machines[0]!.killed).toBe(false);
-    expect((await rt.golden.builders()).map(x => x.id)).toEqual([b.id]);
+      release();
+      const b = await preparing;
+      expect(await rt.reap()).toEqual({ reaped: [], spared: [] });
+      expect(backend.machines[0]!.killed).toBe(false);
+      expect((await rt.golden.builders()).map(x => x.id)).toEqual([b.id]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("a builder whose create lands while the sweep is already listing is left alone", async () => {
@@ -581,12 +588,17 @@ describe("runtime golden builders", () => {
     await listStarted;
     const preparing = rt.golden.prepare();
     await vi.waitFor(() => expect(backend.machines).toHaveLength(1));
-    releaseList();
-
-    expect(await sweeping).toEqual({ reaped: [], spared: [] });
-    expect(backend.machines[0]!.killed).toBe(false);
-    const b = await preparing;
-    expect((await rt.golden.builders()).map(x => x.id)).toEqual([b.id]);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 5 * 60_000);
+    try {
+      releaseList();
+      expect(await sweeping).toEqual({ reaped: [], spared: [] });
+      expect(backend.machines[0]!.killed).toBe(false);
+      const b = await preparing;
+      expect((await rt.golden.builders()).map(x => x.id)).toEqual([b.id]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("a recorded builder the provider still lists after its kill is not swept again and does not fail the sweep", async () => {
@@ -595,13 +607,18 @@ describe("runtime golden builders", () => {
     const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
     const stale = await crashed.golden.prepare();
     const orphan = await backend.create({ kind: "sandbox", labels: { wsp: "1", createdAt: new Date(Date.now() - 3_600_000).toISOString() } });
-    // The listing lags a kill on the real provider: killed machines keep listing as running for a while.
+    // The listing lags a kill on the real provider and GET still answers for the zombie, so both keep showing the killed machine.
     backend.list = async () => backend.machines.map(m => ({ id: m.id, state: "running" as const, labels: m.spec.labels ?? {} }));
+    backend.get = async id => backend.machines.find(m => m.id === id)!;
+    let kills = 0;
+    const realKill = backend.machines[0]!.kill;
+    backend.machines[0]!.kill = async () => { kills++; await realKill(); };
     const rt = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
     expect(await rt.reap()).toEqual({
       reaped: [{ id: stale.id, builder: true, reason: "recorded" }, expect.objectContaining({ id: orphan.id, reason: "orphan" })],
       spared: [],
     });
+    expect(kills).toBe(1);
     expect(backend.machines.map(m => m.killed)).toEqual([true, true]);
   });
 
@@ -642,7 +659,8 @@ describe("runtime golden builders", () => {
     const own = await rt.golden.prepare();
     const owner = backend.machines[0]!.spec.labels!["wsp-owner"]!;
     const now = new Date().toISOString();
-    const lost = await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-builder": "1", "wsp-owner": owner, createdAt: now } });
+    // Past the minute of grace a fresh own builder gets, so the label alone decides.
+    const lost = await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-builder": "1", "wsp-owner": owner, createdAt: new Date(Date.now() - 5 * 60_000).toISOString() } });
     const foreign = await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-builder": "1", "wsp-owner": "h_other", createdAt: now } });
     const unowned = await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-builder": "1", createdAt: now } });
     const experiment = await backend.create({ kind: "sandbox", labels: { poc: "p1", wsp: "1", "wsp-builder": "1", createdAt: now } });

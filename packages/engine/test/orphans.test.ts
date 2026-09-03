@@ -7,6 +7,7 @@ const NOW = Date.parse("2026-09-01T12:00:00Z");
 const OLD = new Date(NOW - 11 * 60_000).toISOString();
 const YOUNG = new Date(NOW - 2 * 60_000).toISOString();
 const PAST_BACKSTOP = new Date(NOW - BUILDER_IDLE_MS - 60_000).toISOString();
+const FRESH = new Date(NOW - 30_000).toISOString();
 const ME = "h_me";
 const RATE = 2 * 0.035 + 4 * 0.01;
 
@@ -60,6 +61,7 @@ describe("orphan reaper", () => {
     { name: "a builder this owner recorded", row: { id: "recorded", labels: builder({ "wsp-owner": ME, createdAt: YOUNG }) }, known: true, verdict: "kept" },
     { name: "a builder this owner is still creating", row: { id: "inflight", labels: builder({ "wsp-owner": ME }) }, known: true, verdict: "kept" },
     { name: "a builder this owner made but lost the record of", row: { id: "owned", labels: builder({ "wsp-owner": ME, createdAt: YOUNG }) }, verdict: "own" },
+    { name: "a builder this owner made less than a minute ago", row: { id: "owned-fresh", labels: builder({ "wsp-owner": ME, createdAt: FRESH }) }, verdict: "spared" },
     { name: "a builder this owner made, record and createdAt both gone", row: { id: "owned-ageless", labels: builder({ "wsp-owner": ME }) }, verdict: "own" },
     { name: "another owner's young builder", row: { id: "foreign", labels: builder({ "wsp-owner": "h_other", createdAt: YOUNG }) }, verdict: "spared" },
     { name: "another owner's builder past the backstop", row: { id: "foreign-old", labels: builder({ "wsp-owner": "h_other", createdAt: PAST_BACKSTOP }) }, verdict: "spared" },
@@ -94,6 +96,7 @@ describe("orphan reaper", () => {
       { id: "orphan-young", state: "running", labels: builder({ createdAt: YOUNG }) },
       { id: "ageless", state: "running", labels: builder({}) },
       { id: "own-ws", state: "running", labels: workspace({ "wsp-owner": ME, createdAt: YOUNG }) },
+      { id: "own-fresh", state: "running", labels: builder({ "wsp-owner": ME, createdAt: FRESH }) },
     ]);
     const { spared } = await reap({ backend, owner: ME, knownIds: () => [], now: () => NOW });
     expect(spared).toEqual([
@@ -101,6 +104,7 @@ describe("orphan reaper", () => {
       { id: "orphan-young", labels: builder({ createdAt: YOUNG }), builder: true, whose: "none", ageMs: 2 * 60_000, backstopMs: BUILDER_IDLE_MS, rateUsdPerHour: RATE },
       { id: "ageless", labels: builder({}), builder: true, whose: "none", backstopMs: BUILDER_IDLE_MS, rateUsdPerHour: RATE },
       { id: "own-ws", labels: workspace({ "wsp-owner": ME, createdAt: YOUNG }), builder: false, whose: "own", owner: ME, ageMs: 2 * 60_000, backstopMs: 10 * 60_000, rateUsdPerHour: RATE },
+      { id: "own-fresh", labels: builder({ "wsp-owner": ME, createdAt: FRESH }), builder: true, whose: "own", owner: ME, ageMs: 30_000, backstopMs: 60_000, rateUsdPerHour: RATE },
     ]);
   });
 
@@ -149,6 +153,26 @@ describe("orphan reaper", () => {
     expect(result.reaped.map(r => r.id)).toEqual(["orphan"]);
     expect(result.spared).toEqual([]);
     expect(killed).toEqual(["orphan"]);
+  });
+
+  it("a row whose kill fails with anything else is reported by id and the rest of the pass still runs", async () => {
+    const { backend, killed } = stubBackend([
+      { id: "orphan-before", state: "running", labels: workspace({ createdAt: OLD }) },
+      { id: "bad", state: "running", labels: builder({ "wsp-owner": ME, createdAt: YOUNG }) },
+      { id: "orphan-after", state: "running", labels: builder({ createdAt: PAST_BACKSTOP }) },
+      { id: "foreign", state: "running", labels: builder({ "wsp-owner": "h_other", createdAt: YOUNG }) },
+    ]);
+    const realGet = backend.get.bind(backend);
+    backend.get = async id => {
+      const m = await realGet(id);
+      if (id === "bad") m.kill = async () => { throw new Error("Bad Gateway"); };
+      return m;
+    };
+    const result = await reap({ backend, owner: ME, knownIds: () => [], now: () => NOW });
+    expect(result.reaped.map(r => r.id)).toEqual(["orphan-before", "orphan-after"]);
+    expect(result.spared.map(s => s.id)).toEqual(["foreign"]);
+    expect(result.failed).toEqual(["bad could not be stopped (Bad Gateway)"]);
+    expect(killed).toEqual(["orphan-before", "orphan-after"]);
   });
 
   it("refuses an empty owner before listing anything", async () => {

@@ -393,7 +393,7 @@ describe("host sweeps orphaned machines", () => {
       `reap: stopped ${orphan.id} (wsp=1 wsp-builder=1 createdAt=${orphanAt}): builder with no owner, 6.0 h old`,
       `reap: stopped ${strayWs.id} (wsp=1 createdAt=${strayAt}): workspace with no owner, 12 min old`,
       `reap: left alone ${foreign.id}: builder from another wsp setup (owner h_other), 53 s old, $0.11/h (about $0.00 so far); kill it from the Solari console if it is yours and forgotten`,
-      `reap: left alone ${young.id}: builder with no owner, 2 min old, $0.11/h (about $0.00 so far); reaped once it is 6 h old`,
+      `reap: left alone ${young.id}: builder with no owner, 2 min old, $0.11/h (about $0.00 so far); reaped once it is 6.0 h old`,
       `reap: left alone ${ageless.id}: builder with no owner, age unknown, $0.11/h; never reaped by this host`,
       `reap: left alone ${foreignWs.id}: workspace from another wsp setup (owner h_other), 20 min old, $0.11/h (about $0.04 so far); kill it from the Solari console if it is yours and forgotten`,
       `reap: left alone ${garbage.id}: builder with no owner, age unknown, $0.11/h; never reaped by this host`,
@@ -416,6 +416,53 @@ describe("host sweeps orphaned machines", () => {
     expect(lines).toEqual([
       `reap: stopped ${owned.id}: your earlier builder from this setup; a builder cannot be sealed after a restart`,
       "reap: sweep failed: list 502",
+    ]);
+  });
+
+  it("a listed machine that will not die is reported by id while everything before and after it is still handled", async () => {
+    const { rt, backend, store } = testRuntime();
+    const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true" } });
+    const strayAt = ago(12 * 60_000);
+    const stray = await backend.create({ kind: "sandbox", labels: { wsp: "1", createdAt: strayAt } });
+    const lost = await crashed.golden.prepare();
+    await store.delete("builders", lost.id);
+    backend.machines[1]!.spec.labels!["createdAt"] = ago(5 * 60_000);
+    backend.machines[1]!.kill = async () => { throw new Error("Bad Gateway"); };
+    const orphanAt = ago(BUILDER_IDLE_MS + 60_000);
+    const orphan = await backend.create({ kind: "sandbox", labels: { ...BUILDER, createdAt: orphanAt } });
+    const foreign = await backend.create({ kind: "sandbox", labels: { ...BUILDER, "wsp-owner": "h_other", createdAt: ago(53_000) } });
+    const lines: string[] = [];
+
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
+
+    expect(backend.machines.map(m => m.killed)).toEqual([true, false, true, false]);
+    expect(lines).toEqual([
+      `reap: stopped ${stray.id} (wsp=1 createdAt=${strayAt}): workspace with no owner, 12 min old`,
+      `reap: stopped ${orphan.id} (wsp=1 wsp-builder=1 createdAt=${orphanAt}): builder with no owner, 6.0 h old`,
+      `reap: left alone ${foreign.id}: builder from another wsp setup (owner h_other), 53 s old, $0.11/h (about $0.00 so far); kill it from the Solari console if it is yours and forgotten`,
+      `reap: sweep failed: ${lost.id} could not be stopped (Bad Gateway)`,
+    ]);
+  });
+
+  it("ages never read negative, never round up, and hours have one format", async () => {
+    const { rt, backend, store } = testRuntime();
+    const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true" } });
+    await crashed.golden.builders();
+    const { id: owner } = (await store.get("owner", "id")) as { id: string };
+    const ahead = await backend.create({ kind: "sandbox", labels: { ...BUILDER, "wsp-owner": "h_other", createdAt: ago(-45_000) } });
+    const almostMinute = await backend.create({ kind: "sandbox", labels: { ...BUILDER, "wsp-owner": "h_other", createdAt: ago(59_600) } });
+    const ownWs = await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-owner": owner, createdAt: ago(9.5 * 60_000) } });
+    const hours = await backend.create({ kind: "sandbox", labels: { ...BUILDER, "wsp-owner": "h_other", createdAt: ago(6 * 3_600_000) } });
+    const lines: string[] = [];
+
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
+
+    expect(backend.machines.some(m => m.killed)).toBe(false);
+    expect(lines).toEqual([
+      `reap: left alone ${ahead.id}: builder from another wsp setup (owner h_other), 0 s old, $0.11/h (about $0.00 so far); kill it from the Solari console if it is yours and forgotten`,
+      `reap: left alone ${almostMinute.id}: builder from another wsp setup (owner h_other), 59 s old, $0.11/h (about $0.00 so far); kill it from the Solari console if it is yours and forgotten`,
+      `reap: left alone ${ownWs.id}: workspace from this setup that no record claims, 9 min old, $0.11/h (about $0.02 so far); reaped once it is 10 min old`,
+      `reap: left alone ${hours.id}: builder from another wsp setup (owner h_other), 6.0 h old, $0.11/h (about $0.66 so far); kill it from the Solari console if it is yours and forgotten`,
     ]);
   });
 
