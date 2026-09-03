@@ -98,6 +98,7 @@ describe("pass 6: shell rc exports", () => {
     expect(stripExports("export A_TOKEN=fake; (( y = 1 +\nz << SHIFT ))\nexport B_KEY=fake\nnext\n")).toEqual({ names: ["A_TOKEN", "B_KEY"], carried: "z << SHIFT ))\nnext\n" });
     expect(stripExports("(( x = 1 +\nexport A_TOKEN=fake )); y=2\ncat <<EOF\nexport NOT_TOKEN=data\nEOF\nexport B_KEY=fake\n")).toEqual({ names: ["A_TOKEN", "B_KEY"], carried: "(( x = 1 +\ncat <<EOF\nexport NOT_TOKEN=data\nEOF\n" });
     expect(stripExports('(( x = 1 +\nexport A_TOKEN="a\nb" )); y=2\ncat <<EOF\nexport NOT_TOKEN=data\nEOF\nexport B_KEY=fake\n')).toEqual({ names: ["A_TOKEN", "B_KEY"], carried: "(( x = 1 +\ncat <<EOF\nexport NOT_TOKEN=data\nEOF\n" });
+    expect(stripExports("(( x = 1 +\nexport A_TOKEN=fake +\n2 << SHIFT ))\nexport B_TOKEN=fake\nnext\n")).toEqual({ names: ["A_TOKEN", "B_TOKEN"], carried: "(( x = 1 +\n2 << SHIFT ))\nnext\n" });
   });
 
   it("a parameter expansion spanning lines and a backslash-quoted heredoc word are cut whole", () => {
