@@ -75,6 +75,24 @@ describe("pass 6: shell rc exports", () => {
     expect(stripExports("(( f = 1 +\n  (1 << SHIFT) ))\nexport A_TOKEN=fake\nnext\n")).toEqual({ names: ["A_TOKEN"], carried: "(( f = 1 +\n  (1 << SHIFT) ))\nnext\n" });
   });
 
+  it("a zsh glob flag or a brace expansion holding # is not a comment, so an export after it on the same line is still cut", () => {
+    expect(stripExports("[[ $x == (#i)yes ]] && export A_TOKEN=fake\nnext\n")).toEqual({ names: ["A_TOKEN"], carried: "next\n" });
+    expect(stripExports("echo {#a,b}; export B_TOKEN=fake\nnext\n")).toEqual({ names: ["B_TOKEN"], carried: "next\n" });
+    expect(stripExports("echo {#a,b} # it's\nexport C_TOKEN=fake\n")).toEqual({ names: ["C_TOKEN"], carried: "echo {#a,b} # it's\n" });
+  });
+
+  it("(( inside double quotes counts for nothing, and an arithmetic depth does not outlive the next kept line", () => {
+    const text = 'echo "(("\ncat <<EOF\nexport NOT_TOKEN=data\nEOF\nexport A_TOKEN=fake\nnext\n';
+    expect(stripExports(text)).toEqual({ names: ["A_TOKEN"], carried: 'echo "(("\ncat <<EOF\nexport NOT_TOKEN=data\nEOF\nnext\n' });
+    expect(stripExports("(( x = 1\nl1\nl2\nl3\nl4\ncat <<EOF\nexport NOT_TOKEN=data\nEOF\nexport B_TOKEN=fake\n")).toEqual({ names: ["B_TOKEN"], carried: "(( x = 1\nl1\nl2\nl3\nl4\ncat <<EOF\nexport NOT_TOKEN=data\nEOF\n" });
+    expect(stripExports('echo "$((1+2))"\ncat <<EOF\nexport NOT_TOKEN=data\nEOF\nexport C_TOKEN=fake\n')).toEqual({ names: ["C_TOKEN"], carried: 'echo "$((1+2))"\ncat <<EOF\nexport NOT_TOKEN=data\nEOF\n' });
+  });
+
+  it("an arithmetic block spanning up to four kept lines keeps << a shift on every one of them", () => {
+    expect(stripExports("((\na = 1 +\nb << SHIFT\n))\nexport A_TOKEN=fake\nnext\n")).toEqual({ names: ["A_TOKEN"], carried: "((\na = 1 +\nb << SHIFT\n))\nnext\n" });
+    expect(stripExports("((\na = 1 +\nb = 2 +\nc << SHIFT\n))\nexport B_TOKEN=fake\n").names).toEqual(["B_TOKEN"]);
+  });
+
   it("a parameter expansion spanning lines and a backslash-quoted heredoc word are cut whole", () => {
     expect(stripExports("export A_TOKEN=${SECRET:-\nfake}\nnext\n")).toEqual({ names: ["A_TOKEN"], carried: "next\n" });
     expect(stripExports("export API_KEY=$(cat <<\\EOF\nline)\nfake\nEOF\n)\nnext\n")).toEqual({ names: ["API_KEY"], carried: "next\n" });
