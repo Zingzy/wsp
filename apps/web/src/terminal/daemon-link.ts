@@ -139,7 +139,7 @@ export function connectDaemonLink(opts: DaemonLinkOptions): DaemonLink {
       const p = pending.get(id)!;
       pending.delete(id);
       if (msg["ok"] === true) p.resolve(msg);
-      else p.reject(new Error(String(msg["error"] ?? "daemon error")));
+      else p.reject(Object.assign(new Error(String(msg["error"] ?? "daemon error")), { code: msg["code"] }));
       return;
     }
     const parsed = DaemonEvent.safeParse(msg);
