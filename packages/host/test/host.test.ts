@@ -5,8 +5,8 @@ import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
-import { BUILDER_IDLE_MS, type GoldenManifest, type ReapResult } from "@wsp/engine";
-import { createRuntime, memoryStore, type HarnessAdapterFactory, type Runtime, type Store } from "@wsp/runtime";
+import { BUILDER_IDLE_MS, type GoldenManifest } from "@wsp/engine";
+import { createRuntime, memoryStore, type HarnessAdapterFactory, type ReapResult, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cli, serve, type CliIO } from "../src/cli.js";
 import { REAP_INTERVAL_MS, startHost, type HostHandle } from "../src/server.js";
@@ -366,43 +366,61 @@ describe("host sweeps orphaned machines", () => {
   const BUILDER = { wsp: "1", "wsp-builder": "1" };
   const ago = (ms: number): string => new Date(Date.now() - ms).toISOString();
 
-  it("at start reaps only the builders its own state owns or nobody claimed past the backstop, lists the rest once, and touches no poc machine", async () => {
+  it("at start reaps what its own state owns or nobody claims past the backstop, lists the rest once in plain words, and touches no poc machine", async () => {
     const { rt, backend, store } = testRuntime();
     const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true" } });
     const owned = await crashed.golden.prepare();
-    const foreignAt = ago(53_000);
-    const youngAt = ago(2 * 60_000);
-    const foreign = await backend.create({ kind: "sandbox", labels: { ...BUILDER, "wsp-owner": "h_other", createdAt: foreignAt } });
-    const orphan = await backend.create({ kind: "sandbox", labels: { ...BUILDER, createdAt: ago(BUILDER_IDLE_MS + 60_000) } });
-    const young = await backend.create({ kind: "sandbox", labels: { ...BUILDER, createdAt: youngAt } });
+    const orphanAt = ago(BUILDER_IDLE_MS + 60_000);
+    const strayAt = ago(12 * 60_000);
+    const foreign = await backend.create({ kind: "sandbox", labels: { ...BUILDER, "wsp-owner": "h_other", createdAt: ago(53_000) } });
+    const orphan = await backend.create({ kind: "sandbox", labels: { ...BUILDER, createdAt: orphanAt } });
+    const young = await backend.create({ kind: "sandbox", labels: { ...BUILDER, createdAt: ago(2 * 60_000) } });
     const ageless = await backend.create({ kind: "sandbox", labels: BUILDER });
     const experiment = await backend.create({ kind: "sandbox", labels: { ...BUILDER, poc: "ttl-test" } });
+    const foreignWs = await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-owner": "h_other", createdAt: ago(20 * 60_000) } });
+    const strayWs = await backend.create({ kind: "sandbox", labels: { wsp: "1", createdAt: strayAt } });
+    const garbage = await backend.create({ kind: "sandbox", labels: { ...BUILDER, createdAt: "yesterday" } });
     const lines: string[] = [];
 
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
 
     const killed = (m: { id: string }): boolean => backend.machines.find(x => x.id === m.id)!.killed;
-    expect([owned, foreign, orphan, young, ageless, experiment].map(killed)).toEqual([true, false, true, false, false, false]);
+    expect([owned, foreign, orphan, young, ageless, experiment, foreignWs, strayWs, garbage].map(killed)).toEqual([true, false, true, false, false, false, false, true, false]);
     expect(lines).toEqual([
-      expect.stringMatching(new RegExp(`^reap: killed ${owned.id} \\(.*wsp-builder=1.*\\)$`)),
-      expect.stringMatching(new RegExp(`^reap: killed ${orphan.id} \\(.*wsp-builder=1.*\\)$`)),
-      `reap: left alone ${foreign.id} (wsp=1 wsp-builder=1 wsp-owner=h_other createdAt=${foreignAt}): another host's builder (h_other), 53 s old, $0.11/h`,
-      `reap: left alone ${young.id} (wsp=1 wsp-builder=1 createdAt=${youngAt}): builder with no owner, inside its idle window, 2 min old, $0.11/h`,
-      `reap: left alone ${ageless.id} (wsp=1 wsp-builder=1): builder with no owner, inside its idle window, age unknown, $0.11/h`,
+      `reap: stopped ${owned.id}: your earlier builder from this setup; a builder cannot be sealed after a restart`,
+      `reap: stopped ${orphan.id} (wsp=1 wsp-builder=1 createdAt=${orphanAt}): builder with no owner, 6.0 h old`,
+      `reap: stopped ${strayWs.id} (wsp=1 createdAt=${strayAt}): workspace with no owner, 12 min old`,
+      `reap: left alone ${foreign.id}: builder from another wsp setup (owner h_other), 53 s old, $0.11/h (about $0.00 so far); kill it from the Solari console if it is yours and forgotten`,
+      `reap: left alone ${young.id}: builder with no owner, 2 min old, $0.11/h (about $0.00 so far); reaped once it is 6 h old`,
+      `reap: left alone ${ageless.id}: builder with no owner, age unknown, $0.11/h; never reaped by this host`,
+      `reap: left alone ${foreignWs.id}: workspace from another wsp setup (owner h_other), 20 min old, $0.11/h (about $0.04 so far); kill it from the Solari console if it is yours and forgotten`,
+      `reap: left alone ${garbage.id}: builder with no owner, age unknown, $0.11/h; never reaped by this host`,
     ]);
     expect(await store.list("builders")).toEqual([]);
   });
 
-  it("a failed listing reaps nothing and logs the failure", async () => {
-    const { rt, backend } = testRuntime();
+  it("a failed listing reaps nothing beyond the recorded builder, and logs both", async () => {
+    const { rt, backend, store } = testRuntime();
+    const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true" } });
+    const owned = await crashed.golden.prepare();
     await backend.create({ kind: "sandbox", labels: { ...BUILDER, createdAt: ago(BUILDER_IDLE_MS + 60_000) } });
     backend.list = async () => { throw new Error("list 502"); };
     const lines: string[] = [];
 
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
 
-    expect(backend.machines[0]!.killed).toBe(false);
-    expect(lines).toEqual(["reap: sweep failed: list 502"]);
+    expect(backend.machines.map(m => m.killed)).toEqual([true, false]);
+    expect(lines).toEqual([
+      `reap: stopped ${owned.id}: your earlier builder from this setup; a builder cannot be sealed after a restart`,
+      "reap: sweep failed: list 502",
+    ]);
+  });
+
+  it("lists once per sweep", async () => {
+    const { rt, backend } = testRuntime();
+    const list = vi.spyOn(backend, "list");
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: () => {} });
+    expect(list).toHaveBeenCalledTimes(1);
   });
 
   it("sweeps again every ten minutes until the host closes", async () => {
@@ -422,7 +440,7 @@ describe("host sweeps orphaned machines", () => {
     expect(reap).toHaveBeenCalledTimes(1);
     expect(backend.machines.map(m => m.killed)).toEqual([true, false]);
     // The foreign builder is listed at start only; later sweeps stay quiet about it.
-    expect(lines).toEqual([expect.stringContaining("killed m1")]);
+    expect(lines).toEqual([expect.stringContaining("stopped m1")]);
 
     await vi.advanceTimersByTimeAsync(REAP_INTERVAL_MS);
     expect(reap).toHaveBeenCalledTimes(2);

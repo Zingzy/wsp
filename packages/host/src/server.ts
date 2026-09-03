@@ -3,8 +3,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
-import type { SparedBuilder } from "@wsp/engine";
-import { serveRuntime, type GoldenBuilderView, type Runtime } from "@wsp/runtime";
+import { serveRuntime, type GoldenBuilderView, type ReapedMachine, type Runtime, type SparedMachine } from "@wsp/runtime";
 
 // The enriched status now lives in @wsp/runtime (every client reads one
 // implementation); re-exported so host consumers keep their imports.
@@ -33,7 +32,7 @@ export interface HostOptions {
   /** Envs baked into workspaces created from the JSON route. */
   workspaceEnvs?: Record<string, string>;
   probeTimeoutMs?: number;
-  /** Receives one line per machine a sweep killed, one per running builder the first sweep left alone, and one when a sweep fails. */
+  /** Receives one line per machine a sweep killed, one per running machine the first sweep left alone, and one when a sweep fails. */
   log?: (line: string) => void;
 }
 
@@ -104,23 +103,46 @@ function describeAge(ms: number | undefined): string {
   if (ms === undefined) return "age unknown";
   if (ms < 60_000) return `${Math.round(ms / 1000)} s old`;
   if (ms < 3_600_000) return `${Math.round(ms / 60_000)} min old`;
-  return `${(ms / 3_600_000).toFixed(1)} h old`;
+  const h = ms / 3_600_000;
+  return `${Number.isInteger(h) ? h : h.toFixed(1)} h old`;
 }
 
-function describeSpared(b: SparedBuilder): string {
-  const whose = b.owner !== undefined ? `another host's builder (${b.owner})` : "builder with no owner, inside its idle window";
-  return `reap: left alone ${b.id}${describeLabels(b.labels)}: ${whose}, ${describeAge(b.ageMs)}, $${b.rateUsdPerHour.toFixed(2)}/h`;
+function describeCost(rateUsdPerHour: number, ageMs: number | undefined): string {
+  const rate = `$${rateUsdPerHour.toFixed(2)}/h`;
+  return ageMs === undefined ? rate : `${rate} (about $${((ageMs / 3_600_000) * rateUsdPerHour).toFixed(2)} so far)`;
 }
 
-/** Kills what this host owns and nothing claims, says which machines went,
- * labels included, and on the first sweep names the running builders it
- * left alone. The listing is only for the log line: reap decides on its own listing. */
+function kindOf(labels: Record<string, string> | undefined, builder: boolean): string {
+  if (builder) return "builder";
+  return labels?.["wsp-smoke"] === "1" ? "smoke fork" : "workspace";
+}
+
+function describeReaped(r: ReapedMachine): string {
+  const kind = kindOf(r.labels, r.builder);
+  if (r.reason === "recorded") return `reap: stopped ${r.id}: your earlier builder from this setup; a builder cannot be sealed after a restart`;
+  const why = r.reason === "own" ? `${kind} from this setup that no record claims` : `${kind} with no owner`;
+  return `reap: stopped ${r.id}${describeLabels(r.labels)}: ${why}, ${describeAge(r.ageMs)}`;
+}
+
+function describeSpared(m: SparedMachine): string {
+  const kind = kindOf(m.labels, m.builder);
+  const cost = describeCost(m.rateUsdPerHour, m.ageMs);
+  if (m.whose === "foreign") {
+    return `reap: left alone ${m.id}: ${kind} from another wsp setup (owner ${m.owner}), ${describeAge(m.ageMs)}, ${cost}; kill it from the Solari console if it is yours and forgotten`;
+  }
+  const who = m.whose === "own" ? `${kind} from this setup that no record claims` : `${kind} with no owner`;
+  const then = m.ageMs === undefined ? "never reaped by this host" : `reaped once it is ${describeAge(m.backstopMs).replace(/ old$/, "")} old`;
+  return `reap: left alone ${m.id}: ${who}, ${describeAge(m.ageMs)}, ${cost}; ${then}`;
+}
+
+/** Kills what this host owns and nothing claims, says which machines went and
+ * why, and on the first sweep names the running machines it left alone. */
 async function sweepOrphans(rt: Runtime, log: (line: string) => void, listSpared: boolean): Promise<void> {
   try {
-    const labels = new Map((await rt.backend.list()).map(m => [m.id, m.labels]));
-    const { reaped, spared } = await rt.reap();
-    for (const id of reaped) log(`reap: killed ${id}${describeLabels(labels.get(id))}`);
-    if (listSpared) for (const b of spared) log(describeSpared(b));
+    const { reaped, spared, failed } = await rt.reap();
+    for (const r of reaped) log(describeReaped(r));
+    if (listSpared) for (const m of spared) log(describeSpared(m));
+    if (failed !== undefined) log(`reap: sweep failed: ${failed}`);
   } catch (e) {
     log(`reap: sweep failed: ${e instanceof Error ? e.message : String(e)}`);
   }

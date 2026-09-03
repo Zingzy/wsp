@@ -76,3 +76,31 @@ describe("SolariBackend describe", () => {
     await expect(m.describe!()).resolves.toEqual({ cpu: 2, memMb: 2048, createdAt: "2026-09-02T19:03:35Z" });
   });
 });
+
+describe("SolariBackend list", () => {
+  it("reads labels off metadata and size off cpu and memMb per row, follows the cursor, and filters by label", async () => {
+    const pages: Record<string, unknown> = {
+      "": {
+        sandboxes: [
+          { sandboxId: "a", kind: "sandbox", state: "running", metadata: { wsp: "1" }, cpu: 2, memMb: 4096 },
+          { sandboxId: "b", kind: "sandbox", state: "paused" },
+        ],
+        nextCursor: "c2",
+      },
+      c2: { sandboxes: [{ sandboxId: "c", kind: "desktop", state: "archived", metadata: { poc: "p1" }, cpu: 4 }] },
+    };
+    const f = vi.fn(async (url: RequestInfo | URL) => {
+      const u = new URL(String(url));
+      expect(u.pathname).toBe("/sandboxes");
+      expect(u.searchParams.get("metadata.wsp")).toBe("1");
+      return new Response(JSON.stringify(pages[u.searchParams.get("cursor") ?? ""]), { status: 200 });
+    });
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    await expect(b.list({ wsp: "1" })).resolves.toEqual([
+      { id: "a", state: "running", labels: { wsp: "1" }, size: { cpu: 2, memMb: 4096 } },
+      { id: "b", state: "paused", labels: {} },
+      { id: "c", state: "gone", labels: { poc: "p1" } },
+    ]);
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+});
