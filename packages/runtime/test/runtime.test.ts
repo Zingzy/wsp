@@ -564,6 +564,66 @@ describe("runtime golden builders", () => {
     expect((await rt.golden.builders()).map(x => x.id)).toEqual([b.id]);
   });
 
+  it("a builder whose create lands while the sweep is already listing is left alone", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
+    let releaseList!: () => void;
+    const listGate = new Promise<void>(r => (releaseList = r));
+    let listing!: () => void;
+    const listStarted = new Promise<void>(r => (listing = r));
+    const realList = backend.list.bind(backend);
+    backend.list = async labels => {
+      listing();
+      await listGate;
+      return realList(labels);
+    };
+    const sweeping = rt.reap();
+    await listStarted;
+    const preparing = rt.golden.prepare();
+    await vi.waitFor(() => expect(backend.machines).toHaveLength(1));
+    releaseList();
+
+    expect(await sweeping).toEqual({ reaped: [], spared: [] });
+    expect(backend.machines[0]!.killed).toBe(false);
+    const b = await preparing;
+    expect((await rt.golden.builders()).map(x => x.id)).toEqual([b.id]);
+  });
+
+  it("a recorded builder the provider still lists after its kill is not swept again and does not fail the sweep", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
+    const stale = await crashed.golden.prepare();
+    const orphan = await backend.create({ kind: "sandbox", labels: { wsp: "1", createdAt: new Date(Date.now() - 3_600_000).toISOString() } });
+    // The listing lags a kill on the real provider: killed machines keep listing as running for a while.
+    backend.list = async () => backend.machines.map(m => ({ id: m.id, state: "running" as const, labels: m.spec.labels ?? {} }));
+    const rt = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
+    expect(await rt.reap()).toEqual({
+      reaped: [{ id: stale.id, builder: true, reason: "recorded" }, expect.objectContaining({ id: orphan.id, reason: "orphan" })],
+      spared: [],
+    });
+    expect(backend.machines.map(m => m.killed)).toEqual([true, true]);
+  });
+
+  it("a recorded kill that fails is reported per machine, keeps its record, and the sweep still runs", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
+    const first = await crashed.golden.prepare({ name: "a" });
+    const second = await crashed.golden.prepare({ name: "b" });
+    const orphan = await backend.create({ kind: "sandbox", labels: { wsp: "1", createdAt: new Date(Date.now() - 3_600_000).toISOString() } });
+    backend.machines[0]!.kill = async () => { throw new Error("502 exec failed"); };
+    const rt = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
+    expect(await rt.reap()).toEqual({
+      reaped: [{ id: second.id, builder: true, reason: "recorded" }, expect.objectContaining({ id: orphan.id, reason: "orphan" })],
+      spared: [],
+      failed: [`${first.id} could not be stopped (502 exec failed); it stays recorded and is retried next sweep`],
+    });
+    expect(backend.machines.map(m => m.killed)).toEqual([false, true, true]);
+    expect((await rt.golden.builders()).map(b => b.id)).toEqual([first.id]);
+    expect((await store.list("builders")).map(b => (b as { id: string }).id)).toEqual([first.id]);
+  });
+
   it("a listing failure after the recorded kills reports both, and touches nothing else", async () => {
     const backend = stubBackend();
     const store = memoryStore();
@@ -571,7 +631,7 @@ describe("runtime golden builders", () => {
     const stale = await crashed.golden.prepare();
     const rt = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
     backend.list = async () => { throw new Error("list 502"); };
-    expect(await rt.reap()).toEqual({ reaped: [{ id: stale.id, builder: true, reason: "recorded" }], spared: [], failed: "list 502" });
+    expect(await rt.reap()).toEqual({ reaped: [{ id: stale.id, builder: true, reason: "recorded" }], spared: [], failed: ["list 502"] });
     expect(backend.machines[0]!.killed).toBe(true);
     expect(await store.list("builders")).toEqual([]);
   });

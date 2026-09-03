@@ -1158,23 +1158,37 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await ready();
       // A hydrated builder is not first-life and can never seal; stopping it is the only thing that ends its bill.
       const reaped: ReapedMachine[] = [];
+      const failed: string[] = [];
+      const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
       for (const b of [...builders.values()].filter(b => b.stale)) {
-        await b.builder.machine.kill().catch((e: unknown) => {
-          if ((e as { kind?: string }).kind !== "missing") throw e;
-        });
+        try {
+          await b.builder.machine.kill();
+        } catch (e) {
+          if ((e as { kind?: string }).kind !== "missing") {
+            failed.push(`${b.record.id} could not be stopped (${messageOf(e)}); it stays recorded and is retried next sweep`);
+            continue;
+          }
+        }
         await forgetBuilder(b.record.id);
         reaped.push({ id: b.record.id, builder: true, reason: "recorded" });
       }
+      const result = (swept: ReapResult): ReapResult => ({
+        reaped: reaped.concat(swept.reaped),
+        spared: swept.spared,
+        ...(failed.length > 0 ? { failed } : {}),
+      });
       try {
-        const swept = await reap({
-          backend,
-          owner,
-          knownIds: [...live.values()].map(e => e.record.machineId).concat([...builders.keys()], [...inflight]),
-          ...(olderThanMs !== undefined ? { olderThanMs } : {}),
-        });
-        return { reaped: reaped.concat(swept.reaped.filter(r => !reaped.some(k => k.id === r.id))), spared: swept.spared };
+        return result(
+          await reap({
+            backend,
+            owner,
+            knownIds: () => [...live.values()].map(e => e.record.machineId).concat([...builders.keys()], [...inflight], reaped.map(r => r.id)),
+            ...(olderThanMs !== undefined ? { olderThanMs } : {}),
+          }),
+        );
       } catch (e) {
-        return { reaped, spared: [], failed: e instanceof Error ? e.message : String(e) };
+        failed.push(messageOf(e));
+        return result({ reaped: [], spared: [] });
       }
     },
     close: async () => {

@@ -13,8 +13,9 @@ export const RESERVED_LABEL = "poc";
 
 export interface ReapOptions {
   backend: MachineBackend;
-  /** Machine ids currently claimed by live workspaces, recorded builders, or creates still in flight. */
-  knownIds: Iterable<string>;
+  /** Ids claimed by live workspaces, recorded builders, creates still in flight and kills just done.
+   * Read after the listing returns, so a create that lands during it already counts. */
+  knownIds: () => Iterable<string>;
   /** The sweeping state file's id; machines stamped with it are its to kill. */
   owner: string;
   /** Age an unclaimed non-builder must reach before it is killed; the builder backstop is the idle window it was created with. */
@@ -52,8 +53,8 @@ export interface SparedMachine {
 export interface ReapResult {
   reaped: ReapedMachine[];
   spared: SparedMachine[];
-  /** Set when the listing failed after the recorded kills were already done; nothing else was touched. */
-  failed?: string;
+  /** One entry per thing that went wrong: a recorded kill that failed, or the listing itself; the rest of the sweep still ran. */
+  failed?: string[];
 }
 
 // Kills running machines that carry our label but that nothing claims.
@@ -66,11 +67,12 @@ export async function reap(opts: ReapOptions): Promise<ReapResult> {
   if (!opts.owner) throw new Error("reap needs the owner id; an empty one would claim every unowned machine");
   const olderThanMs = opts.olderThanMs ?? 10 * 60_000;
   const now = opts.now ? opts.now() : Date.now();
-  const known = new Set(opts.knownIds);
+  const rows = await opts.backend.list();
+  const known = new Set(opts.knownIds());
 
   const reaped: ReapedMachine[] = [];
   const spared: SparedMachine[] = [];
-  for (const m of await opts.backend.list()) {
+  for (const m of rows) {
     if (m.state !== "running") continue;
     if (RESERVED_LABEL in m.labels) continue;
     if (m.labels[WSP_LABEL] !== "1") continue;
@@ -96,7 +98,13 @@ export async function reap(opts: ReapOptions): Promise<ReapResult> {
       });
       continue;
     }
-    await (await opts.backend.get(m.id)).kill();
+    try {
+      await (await opts.backend.get(m.id)).kill();
+    } catch (e) {
+      // The listing lags a kill (measured): a row that is gone by the time it is fetched is no failure.
+      if ((e as { kind?: string }).kind === "missing") continue;
+      throw e;
+    }
     reaped.push({ id: m.id, labels: m.labels, builder, reason: whose === "own" ? "own" : "orphan", ...(ageMs !== undefined ? { ageMs } : {}) });
   }
   return { reaped, spared };

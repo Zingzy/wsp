@@ -142,7 +142,7 @@ async function sweepOrphans(rt: Runtime, log: (line: string) => void, listSpared
     const { reaped, spared, failed } = await rt.reap();
     for (const r of reaped) log(describeReaped(r));
     if (listSpared) for (const m of spared) log(describeSpared(m));
-    if (failed !== undefined) log(`reap: sweep failed: ${failed}`);
+    for (const f of failed ?? []) log(`reap: sweep failed: ${f}`);
   } catch (e) {
     log(`reap: sweep failed: ${e instanceof Error ? e.message : String(e)}`);
   }

@@ -242,6 +242,7 @@ describe("host serves the app", () => {
     const created = (await res.json()) as { workspace: { name: string; machineId: string } };
     expect(created.workspace.name).toBe("beta");
     expect(backend.machines[0]?.spec.fromSnapshot).toBe("snap_gold");
+    expect(backend.machines[0]?.spec.labels).toMatchObject({ wsp: "1", "wsp-host": "1", "wsp-owner": expect.stringMatching(/^h_[0-9a-f]{8}$/) });
 
     const list = await getJson(`http://127.0.0.1:${handle.port}/api/workspaces`);
     expect(list.body.workspaces).toHaveLength(1);
@@ -380,12 +381,13 @@ describe("host sweeps orphaned machines", () => {
     const foreignWs = await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-owner": "h_other", createdAt: ago(20 * 60_000) } });
     const strayWs = await backend.create({ kind: "sandbox", labels: { wsp: "1", createdAt: strayAt } });
     const garbage = await backend.create({ kind: "sandbox", labels: { ...BUILDER, createdAt: "yesterday" } });
+    const foreignSmoke = await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-smoke": "1", "wsp-owner": "h_other", createdAt: ago(20 * 60_000) } });
     const lines: string[] = [];
 
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
 
     const killed = (m: { id: string }): boolean => backend.machines.find(x => x.id === m.id)!.killed;
-    expect([owned, foreign, orphan, young, ageless, experiment, foreignWs, strayWs, garbage].map(killed)).toEqual([true, false, true, false, false, false, false, true, false]);
+    expect([owned, foreign, orphan, young, ageless, experiment, foreignWs, strayWs, garbage, foreignSmoke].map(killed)).toEqual([true, false, true, false, false, false, false, true, false, false]);
     expect(lines).toEqual([
       `reap: stopped ${owned.id}: your earlier builder from this setup; a builder cannot be sealed after a restart`,
       `reap: stopped ${orphan.id} (wsp=1 wsp-builder=1 createdAt=${orphanAt}): builder with no owner, 6.0 h old`,
@@ -395,6 +397,7 @@ describe("host sweeps orphaned machines", () => {
       `reap: left alone ${ageless.id}: builder with no owner, age unknown, $0.11/h; never reaped by this host`,
       `reap: left alone ${foreignWs.id}: workspace from another wsp setup (owner h_other), 20 min old, $0.11/h (about $0.04 so far); kill it from the Solari console if it is yours and forgotten`,
       `reap: left alone ${garbage.id}: builder with no owner, age unknown, $0.11/h; never reaped by this host`,
+      `reap: left alone ${foreignSmoke.id}: smoke fork from another wsp setup (owner h_other), 20 min old, $0.11/h (about $0.04 so far); kill it from the Solari console if it is yours and forgotten`,
     ]);
     expect(await store.list("builders")).toEqual([]);
   });
@@ -413,6 +416,24 @@ describe("host sweeps orphaned machines", () => {
     expect(lines).toEqual([
       `reap: stopped ${owned.id}: your earlier builder from this setup; a builder cannot be sealed after a restart`,
       "reap: sweep failed: list 502",
+    ]);
+  });
+
+  it("a recorded builder that will not die is reported and the sweep goes on", async () => {
+    const { rt, backend, store } = testRuntime();
+    const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true" } });
+    const stuck = await crashed.golden.prepare();
+    const orphanAt = ago(BUILDER_IDLE_MS + 60_000);
+    const orphan = await backend.create({ kind: "sandbox", labels: { ...BUILDER, createdAt: orphanAt } });
+    backend.machines[0]!.kill = async () => { throw new Error("502 exec failed"); };
+    const lines: string[] = [];
+
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
+
+    expect(backend.machines.map(m => m.killed)).toEqual([false, true]);
+    expect(lines).toEqual([
+      `reap: stopped ${orphan.id} (wsp=1 wsp-builder=1 createdAt=${orphanAt}): builder with no owner, 6.0 h old`,
+      `reap: sweep failed: ${stuck.id} could not be stopped (502 exec failed); it stays recorded and is retried next sweep`,
     ]);
   });
 

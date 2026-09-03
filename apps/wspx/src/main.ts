@@ -461,7 +461,7 @@ async function main(): Promise<void> {
     case "reap": {
       const { reaped, failed } = await rt.reap(0);
       log(reaped.length > 0 ? `reaped: ${reaped.map(r => r.id).join(", ")}` : "nothing to reap");
-      if (failed !== undefined) log(`listing failed, nothing else touched: ${failed}`);
+      for (const f of failed ?? []) log(`failed: ${f}`);
       return;
     }
     case "demo":

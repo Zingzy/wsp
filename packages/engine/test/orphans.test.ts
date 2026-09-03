@@ -49,7 +49,7 @@ describe("orphan reaper", () => {
       { id: "napping", state: "paused", labels: { wsp: "1", createdAt: OLD } },
       { id: "ageless", state: "running", labels: { wsp: "1" } },
     ]);
-    const result = await reap({ backend, owner: ME, knownIds: ["claimed"], now: () => NOW });
+    const result = await reap({ backend, owner: ME, knownIds: () => ["claimed"], now: () => NOW });
     expect(result.reaped).toEqual([{ id: "orphan-old", labels: { wsp: "1", createdAt: OLD }, builder: false, reason: "orphan", ageMs: 11 * 60_000 }]);
     expect(result.spared.map(s => s.id)).toEqual(["orphan-young", "ageless"]);
     expect(killed).toEqual(["orphan-old"]);
@@ -73,6 +73,7 @@ describe("orphan reaper", () => {
     { name: "a workspace this owner made, past ten minutes", row: { id: "own-ws-old", labels: workspace({ "wsp-owner": ME, createdAt: OLD }) }, verdict: "own" },
     { name: "a workspace this owner made, inside ten minutes", row: { id: "own-ws-young", labels: workspace({ "wsp-owner": ME, createdAt: YOUNG }) }, verdict: "spared" },
     { name: "a workspace this owner made with a garbage createdAt", row: { id: "own-ws-garbage", labels: workspace({ "wsp-owner": ME, createdAt: "yesterday" }) }, verdict: "spared" },
+    { name: "a workspace this owner made with no createdAt", row: { id: "own-ws-ageless", labels: workspace({ "wsp-owner": ME }) }, verdict: "spared" },
     { name: "another owner's workspace past ten minutes", row: { id: "foreign-ws", labels: workspace({ "wsp-owner": "h_other", createdAt: PAST_BACKSTOP }) }, verdict: "spared" },
     { name: "an unowned workspace past ten minutes", row: { id: "orphan-ws", labels: workspace({ createdAt: OLD }) }, verdict: "orphan" },
     { name: "an unowned workspace inside ten minutes", row: { id: "orphan-ws-young", labels: workspace({ createdAt: YOUNG }) }, verdict: "spared" },
@@ -80,7 +81,7 @@ describe("orphan reaper", () => {
     { name: "a poc workspace wearing our owner", row: { id: "experiment-ws", labels: workspace({ poc: "p1", "wsp-owner": ME, createdAt: OLD }) }, verdict: "kept" },
   ])("$name: $verdict", async ({ row, known, verdict }) => {
     const { backend, killed } = stubBackend([{ state: "running", ...row }]);
-    const result = await reap({ backend, owner: ME, knownIds: known ? [row.id] : [], now: () => NOW });
+    const result = await reap({ backend, owner: ME, knownIds: () => (known ? [row.id] : []), now: () => NOW });
     const dies = verdict === "own" || verdict === "orphan";
     expect(killed).toEqual(dies ? [row.id] : []);
     expect(result.reaped.map(r => [r.id, r.reason])).toEqual(dies ? [[row.id, verdict]] : []);
@@ -94,7 +95,7 @@ describe("orphan reaper", () => {
       { id: "ageless", state: "running", labels: builder({}) },
       { id: "own-ws", state: "running", labels: workspace({ "wsp-owner": ME, createdAt: YOUNG }) },
     ]);
-    const { spared } = await reap({ backend, owner: ME, knownIds: [], now: () => NOW });
+    const { spared } = await reap({ backend, owner: ME, knownIds: () => [], now: () => NOW });
     expect(spared).toEqual([
       { id: "foreign", labels: builder({ "wsp-owner": "h_other", createdAt: YOUNG }), builder: true, whose: "foreign", owner: "h_other", ageMs: 2 * 60_000, backstopMs: BUILDER_IDLE_MS, rateUsdPerHour: 4 * 0.035 + 8 * 0.01 },
       { id: "orphan-young", labels: builder({ createdAt: YOUNG }), builder: true, whose: "none", ageMs: 2 * 60_000, backstopMs: BUILDER_IDLE_MS, rateUsdPerHour: RATE },
@@ -108,7 +109,7 @@ describe("orphan reaper", () => {
       { id: "young-orphan", state: "running", labels: { wsp: "1", createdAt: YOUNG } },
       { id: "young-builder", state: "running", labels: builder({ createdAt: YOUNG }) },
     ]);
-    const { reaped, spared } = await reap({ backend, owner: ME, knownIds: [], olderThanMs: 60_000, now: () => NOW });
+    const { reaped, spared } = await reap({ backend, owner: ME, knownIds: () => [], olderThanMs: 60_000, now: () => NOW });
     expect(reaped.map(r => r.id)).toEqual(["young-orphan"]);
     expect(spared.map(s => [s.id, s.backstopMs])).toEqual([["young-builder", BUILDER_IDLE_MS]]);
     expect(killed).toEqual(["young-orphan"]);
@@ -116,13 +117,43 @@ describe("orphan reaper", () => {
 
   it("kills nothing when the listing fails", async () => {
     const { backend, killed } = stubBackend(() => { throw new Error("list 502"); });
-    await expect(reap({ backend, owner: ME, knownIds: [], now: () => NOW })).rejects.toThrow("list 502");
+    await expect(reap({ backend, owner: ME, knownIds: () => [], now: () => NOW })).rejects.toThrow("list 502");
     expect(killed).toEqual([]);
+  });
+
+  it("reads the claimed ids after the listing returns, so a create that lands during it is already claimed", async () => {
+    let claimed: string[] = [];
+    const { backend, killed } = stubBackend(() => {
+      claimed = ["late"];
+      return [{ id: "late", state: "running", labels: builder({ "wsp-owner": ME, createdAt: YOUNG }) }];
+    });
+    const result = await reap({ backend, owner: ME, knownIds: () => claimed, now: () => NOW });
+    expect(result).toEqual({ reaped: [], spared: [] });
+    expect(killed).toEqual([]);
+  });
+
+  it("skips a listed machine that is gone by the time it is fetched or killed, and still processes the rest", async () => {
+    const { backend, killed } = stubBackend([
+      { id: "gone-before-get", state: "running", labels: builder({ "wsp-owner": ME, createdAt: YOUNG }) },
+      { id: "gone-before-kill", state: "running", labels: builder({ "wsp-owner": ME, createdAt: YOUNG }) },
+      { id: "orphan", state: "running", labels: builder({ createdAt: PAST_BACKSTOP }) },
+    ]);
+    const realGet = backend.get.bind(backend);
+    backend.get = async id => {
+      if (id === "gone-before-get") throw Object.assign(new Error("gone"), { kind: "missing", status: 404 });
+      const m = await realGet(id);
+      if (id === "gone-before-kill") m.kill = async () => { throw Object.assign(new Error("gone"), { kind: "missing", status: 404 }); };
+      return m;
+    };
+    const result = await reap({ backend, owner: ME, knownIds: () => [], now: () => NOW });
+    expect(result.reaped.map(r => r.id)).toEqual(["orphan"]);
+    expect(result.spared).toEqual([]);
+    expect(killed).toEqual(["orphan"]);
   });
 
   it("refuses an empty owner before listing anything", async () => {
     const { backend, killed, listed } = stubBackend([{ id: "orphan-young", state: "running", labels: builder({ createdAt: YOUNG }) }]);
-    await expect(reap({ backend, owner: "", knownIds: [], now: () => NOW })).rejects.toThrow("owner id");
+    await expect(reap({ backend, owner: "", knownIds: () => [], now: () => NOW })).rejects.toThrow("owner id");
     expect(listed()).toBe(0);
     expect(killed).toEqual([]);
   });
