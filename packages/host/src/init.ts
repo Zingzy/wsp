@@ -11,6 +11,9 @@ import type { BackendPricing } from "@wsp/engine";
 import type { GoldenBuilderView, GoldenRecipe, GoldenStage, Runtime } from "@wsp/runtime";
 import { S_BAR, S_STEP_ERROR, S_STEP_SUBMIT, cancel, confirm, isCancel, log, note, outro } from "@clack/prompts";
 import type { Keys } from "./cli.js";
+import { writeFileSync } from "node:fs";
+import { agentInstallsFor, toolInstallsFor } from "@wsp/engine";
+import { CLAUDE_INSTALLER, importFor, importResultPath, keychainLogins, readSecrets, type SecretReader } from "./init-import.js";
 import {
   LOGIN_CHOICES,
   RUNG_TITLE,
@@ -19,7 +22,7 @@ import {
   goldenRecipeFor,
   initialChoice,
   initialTicks,
-  installFor,
+  isLoginChoice,
   isTickable,
   loadManifest,
   loginShown,
@@ -53,6 +56,11 @@ export interface InitOptions {
   /** Prices the builder the confirm names. */
   pricing: BackendPricing;
   statePath: string;
+  /** This computer's home directory, where the ticked paths are read from at build time. */
+  home: string;
+  /** Reads Keychain-held logins chosen as copy; the real one raises macOS's consent dialog. */
+  secrets: SecretReader;
+  platform: "darwin" | "linux";
   /** Builds the runtime around the recipe the ticks produced. */
   runtime(recipe: GoldenRecipe): Runtime;
   /** Starts the app server over that runtime once the builder is ready; the page lands on that
@@ -117,6 +125,9 @@ export interface StageFrame {
 export const PREPARE_STEPS: readonly StageWords[] = [
   { stage: "creating", start: "Creating the machine", end: "Machine created", fail: "Creating the machine failed" },
   { stage: "deploying-daemon", start: "Installing the base (Node, the daemon)", end: "Base installed", fail: "Installing the base failed" },
+  { stage: "applying-setup", start: "Applying your setup", end: "Setup applied", fail: "Applying your setup failed" },
+  { stage: "uploading-files", start: "Uploading your files", end: "Files uploaded", fail: "Uploading your files failed" },
+  { stage: "installing-tools", start: "Installing tools", end: "Tools installed", fail: "Installing tools failed" },
   { stage: "installing-harness", start: "Installing agents", end: "Agents installed", fail: "Installing agents failed" },
   { stage: "ready", start: "Waiting for the machine", end: "Ready", fail: "The machine never became ready" },
 ];
@@ -254,7 +265,7 @@ class StageStream {
         }
       }
     }
-    if (final && this.view.failure !== undefined) out.push(`${dim(S_BAR)}  ${this.view.failure}`);
+    if (final && this.view.failure !== undefined) for (const l of this.view.failure.split("\n")) out.push(`${dim(S_BAR)}  ${l}`);
     return out;
   }
 
@@ -270,7 +281,7 @@ class StageStream {
     if (final && this.view.failure !== undefined) {
       const failed = this.view.steps.find(s => s.state === "failed");
       if (failed) this.output.write(`${styleText("red", S_STEP_ERROR)}  ${failed.fail}\n`);
-      this.output.write(`${dim(S_BAR)}  ${this.view.failure}\n`);
+      for (const l of this.view.failure.split("\n")) this.output.write(`${dim(S_BAR)}  ${l}\n`);
     }
   }
 
@@ -329,7 +340,7 @@ function detailWhy(e: ManifestEntry, lock: "on" | "off" | undefined): string {
   if (lock === "off" && e.reason !== undefined) return e.reason;
   if (lock === "on") return "always comes along";
   if (e.rung === "logins") return agentName(e) === "claude" ? CLAUDE_LOGIN_WHY : "copy brings it along; sign in does it in the browser after the build";
-  if (e.rung === "agents") return installFor(e) !== undefined ? "installed on the machine; its config comes along" : "its config comes along; no installer yet, install it there yourself";
+  if (e.rung === "agents") return agentInstallsFor([{ ...e, bring: true }], { claude: CLAUDE_INSTALLER }).installs.length > 0 ? "installed on the machine; its config comes along" : "its config comes along; no installer yet, install it there yourself";
   const size = e.bytes > 0 ? `${fmtBytes(e.bytes)}, ` : "";
   return `${size}${e.default === "bring" ? "brought by default" : "left out by default"}`;
 }
@@ -368,7 +379,7 @@ function detectionNote(manifest: Manifest, source: string): string[] {
 }
 
 /** One row per rung with its ticks and size, the sign-ins under theirs with the answer each got,
- * then what uploads, what installs, and what waits for golden import. */
+ * then what uploads and what installs. */
 function summaryNote(manifest: Manifest, ticks: ReadonlySet<string>, choices: ReadonlyMap<string, string>, width: number): string[] {
   const rows = RUNGS.map(rung => manifest.entries.filter(e => e.rung === rung))
     .filter(entries => entries.length > 0)
@@ -381,7 +392,13 @@ function summaryNote(manifest: Manifest, ticks: ReadonlySet<string>, choices: Re
   // The note frame takes 6 columns; the label keeps room for the widest answer.
   const labelRoom = width - 6 - 2 - GUTTER.length - Math.max(...LOGIN_CHOICES.map(c => c.label.length));
   const upload = fmtBytes(manifest.entries.filter(e => ticks.has(e.id)).reduce((n, e) => n + e.bytes, 0));
-  const installs = manifest.entries.filter(e => ticks.has(e.id) && installFor(e) !== undefined).map(e => e.label);
+  const bring = manifest.entries.filter(e => ticks.has(e.id)).map(e => ({ ...e, bring: true }));
+  const agents = agentInstallsFor(bring, { claude: CLAUDE_INSTALLER }).installs.map(a => a.name);
+  // Only what the person ticked counts as their tools; Homebrew and its toolchain are named apart.
+  const steps = toolInstallsFor(bring).installs;
+  const tools = steps.filter(t => ticks.has(t.id)).length;
+  const toolchain = steps.some(t => t.id.startsWith("tools/brew-toolchain/")) ? " plus Homebrew's toolchain" : "";
+  const installs = [...agents, ...(tools > 0 ? [`${tools} tool${tools === 1 ? "" : "s"}${toolchain}`] : [])];
   return [
     ...table(rows, ["left", "right", "right"]),
     ...table(logins.map(e => [`  ${ellipsize(e.label, labelRoom)}`, answer(e)])),
@@ -389,7 +406,6 @@ function summaryNote(manifest: Manifest, ticks: ReadonlySet<string>, choices: Re
     ...table([
       ["Upload", `${upload}, nothing has left this computer yet`],
       ["Installs", installs.length > 0 ? installs.join(", ") : "nothing; the machine boots bare"],
-      ["Later", "the ticked files copy over with golden import"],
     ]),
   ];
 }
@@ -514,8 +530,62 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   saveRecipe(path, manifest, ticks, choices);
   log.step(`Recipe saved to ${path}`, out);
 
-  const bring = manifest.entries.filter(e => ticks.has(e.id));
-  const recipe = goldenRecipeFor(bring, opts.keys);
+  const bring = manifest.entries.filter(e => ticks.has(e.id)).map(e => {
+    const choice = choices.get(e.id);
+    return isLoginChoice(choice) ? { ...e, choice } : e;
+  });
+  // Filled by the Keychain reads below, after the earlier-builder check; the pack reads it only at build time.
+  const secrets = new Map<string, string>();
+  const resultsPath = importResultPath(opts.statePath);
+  let installs: string[] | undefined;
+  const imp = importFor(bring, {
+    home: opts.home,
+    secrets,
+    platform: opts.platform,
+    onResult: r => {
+      writeFileSync(resultsPath, `${JSON.stringify(r, null, 2)}\n`);
+      const all = [...r.tools.map(t => ({ ...t, name: t.label })), ...r.agents];
+      const n = (o: string) => all.filter(x => x.outcome === o).length;
+      installs = [
+        `Tools and agents: ${n("installed")} installed, ${n("failed")} failed, ${n("skipped")} skipped; the list is in ${resultsPath}`,
+        ...all.filter(x => x.outcome === "failed").map(x => dim(`${x.name} failed: ${x.note ?? "no reason given"}`)),
+      ];
+    },
+  });
+  const recipe = goldenRecipeFor(bring, opts.keys, { import: imp });
+  const rt = opts.runtime(recipe);
+  // A builder from an earlier run cannot be sealed (its first life is not known) and is
+  // never reaped from here: the person kills it, then runs init again.
+  const earlier = await rt.golden.builders();
+  if (earlier.length > 0) {
+    const lines = earlier.map(b => {
+      const hours = Math.max(0, Date.now() - Date.parse(b.createdAt)) / 3_600_000;
+      return `${b.name} (${b.id}), ${fmtDuration(hours * 3_600_000)} old, about $${(hours * opts.pricing.rateUsdPerHour(b.size)).toFixed(2)} so far`;
+    });
+    log.warn(["A builder from an earlier wsp init is still running on the account:", ...lines].join("\n"), out);
+    cancel("Nothing was booted. Kill it first (the Solari console lists it); a builder cannot be sealed after a restart. Then run wsp init again.", out);
+    return { code: 1 };
+  }
+  // A free exit, before any consent dialog: a recipe whose ticked agents none can install is refused here, not on the builder.
+  if (imp.agents.length === 0 && (imp.skippedAgents?.length ?? 0) > 0) {
+    log.error(["No ticked agent can be installed, so there would be nothing to seal:", ...imp.skippedAgents!.map(a => `${a.name}: ${a.note}`)].join("\n"), out);
+    cancel("Nothing was booted. Untick those agents or add one with an installer, then run wsp init again.", out);
+    return { code: 1 };
+  }
+  // Keychain consent is asked here, before anything boots and after every road that cancels the
+  // run, so a refusal costs no machine: the row turns into a sign-in on the machine and the pack
+  // finds no value for it.
+  const wanted = keychainLogins(bring, opts.platform);
+  const reading = spin(io.output, "Reading your Keychain logins", io.isTTY && wanted.length > 0);
+  const read = await readSecrets(wanted, opts.secrets);
+  reading.stop();
+  for (const [service, value] of read.values) secrets.set(service, value);
+  if (read.refused.length > 0) {
+    const label = (id: string) => manifest.entries.find(e => e.id === id)?.label ?? id;
+    for (const r of read.refused) choices.set(r.id, "machine");
+    log.warn(read.refused.map(r => `${label(r.id)}: Keychain read failed (${r.reason}); changed to sign in on the machine.`).join("\n"), out);
+    saveRecipe(path, manifest, ticks, choices);
+  }
   const question = bootQuestion(recipe, opts.pricing);
   if (interactive) {
     const go = await confirm({ message: `${question}\nNo costs nothing and keeps the recipe for wsp init --manifest.`, initialValue: false, input: io.input, output: io.output });
@@ -527,7 +597,6 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     log.step(`${question} Taken as yes (${opts.yes ? "--yes" : "no terminal"}).`, out);
   }
 
-  const rt = opts.runtime(recipe);
   const stream = new StageStream(io.output, io.isTTY);
   const off = rt.events.on("golden.stage", e => {
     if (e.type === "golden.stage") stream.push({ type: "golden.stage", name: e.name, stage: e.stage, ...(e.detail !== undefined ? { detail: e.detail } : {}) });
@@ -550,11 +619,13 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     const view = stream.stop();
     off();
     if (view.failure === undefined) log.error(e instanceof Error ? e.message : String(e), out);
-    outro("That machine is gone. Run wsp init again.", out);
+    // A failed frame means a machine existed and prepare killed it; without one the create itself refused.
+    outro(`${view.failure !== undefined ? "That machine is gone." : "Nothing was booted."} Run wsp init again to start over; the recipe is kept.`, out);
     return { code: 1 };
   }
   stream.stop();
   off();
+  if (installs !== undefined) log.info(installs.join("\n"), out);
 
   const checklist = checklistFor(manifest, choices);
   const handle = await opts.host(rt, builder, checklist);

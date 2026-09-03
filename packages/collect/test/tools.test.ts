@@ -105,13 +105,13 @@ describe("tools", () => {
     });
     const rows = await detectTools(host);
     expect(rows).toEqual([
-      { rung: "tools", id: "tools/npm/pnpm", label: "pnpm@9.12.0", group: "npm globals", paths: [], bytes: 0, default: "bring", linux: "yes" },
-      { rung: "tools", id: "tools/pnpm/typescript", label: "typescript@5.6.2", group: "pnpm globals", paths: [], bytes: 0, default: "bring", linux: "yes" },
-      { rung: "tools", id: "tools/bun/is-odd", label: "is-odd@3.0.1", group: "bun globals", paths: [], bytes: 0, default: "bring", linux: "yes" },
-      { rung: "tools", id: "tools/pipx/httpie", label: "httpie 3.2.4", group: "pipx", paths: [], bytes: 0, default: "bring", linux: "yes" },
-      { rung: "tools", id: "tools/uv/ruff", label: "ruff 0.6.3", group: "uv tools", paths: [], bytes: 0, default: "bring", linux: "yes" },
-      { rung: "tools", id: "tools/cargo/ripgrep", label: "ripgrep 14.1.0", group: "cargo installs", paths: [], bytes: 0, default: "bring", linux: "yes" },
-      { rung: "tools", id: "tools/go/gopls", label: "gopls", group: "Go binaries", paths: ["golang.org/x/tools/gopls@v0.16.2"], bytes: 0, default: "bring", linux: "yes" },
+      { rung: "tools", id: "tools/npm/pnpm", label: "pnpm@9.12.0", group: "npm globals", paths: [], bytes: 0, default: "bring", linux: "yes", version: "9.12.0" },
+      { rung: "tools", id: "tools/pnpm/typescript", label: "typescript@5.6.2", group: "pnpm globals", paths: [], bytes: 0, default: "bring", linux: "yes", version: "5.6.2" },
+      { rung: "tools", id: "tools/bun/is-odd", label: "is-odd@3.0.1", group: "bun globals", paths: [], bytes: 0, default: "bring", linux: "yes", version: "3.0.1" },
+      { rung: "tools", id: "tools/pipx/httpie", label: "httpie 3.2.4", group: "pipx", paths: [], bytes: 0, default: "bring", linux: "yes", version: "3.2.4" },
+      { rung: "tools", id: "tools/uv/ruff", label: "ruff 0.6.3", group: "uv tools", paths: [], bytes: 0, default: "bring", linux: "yes", version: "0.6.3" },
+      { rung: "tools", id: "tools/cargo/ripgrep", label: "ripgrep 14.1.0", group: "cargo installs", paths: [], bytes: 0, default: "bring", linux: "yes", version: "14.1.0" },
+      { rung: "tools", id: "tools/go/gopls", label: "gopls", group: "Go binaries", paths: ["golang.org/x/tools/gopls@v0.16.2"], bytes: 0, default: "bring", linux: "yes", version: "v0.16.2" },
     ]);
   });
 
@@ -130,7 +130,7 @@ describe("tools", () => {
     expect(LONG_MODULE).toHaveLength(78);
     const host = fakeHost({ files: { [`~/go/bin/${name}`]: 1 }, which: ["go"], exec: { [`go version -m /Users/dev/go/bin/${name}`]: `x\n\tpath\t${path}\n\tmod\t${path}\t${version}\th1:abc=\n` } });
     const rows = await detectTools(host);
-    expect(rows).toEqual([{ rung: "tools", id: `tools/go/${name}`, label: name, group: "Go binaries", paths: [`${path}@${version}`], bytes: 0, default: "bring", linux: "yes" }]);
+    expect(rows).toEqual([{ rung: "tools", id: `tools/go/${name}`, label: name, group: "Go binaries", paths: [`${path}@${version}`], bytes: 0, default: "bring", linux: "yes", version }]);
   });
 
   it("a go binary without module info is offered unticked", async () => {

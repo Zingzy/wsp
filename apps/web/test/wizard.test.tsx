@@ -45,8 +45,8 @@ const { Shell } = await import("../src/App.js");
 const { useStore } = await import("../src/protocol/store.js");
 
 const STREAM = "wss://stream.example.test/m_builder";
-const builder: GoldenBuilderView = { id: "m_builder", name: "default", kind: "desktop", createdAt: "2026-09-02T00:00:00Z", screen: { streamUrl: STREAM } };
-const headless: GoldenBuilderView = { id: "m_headless", name: "default", kind: "sandbox", createdAt: "2026-09-02T00:00:00Z" };
+const builder: GoldenBuilderView = { id: "m_builder", name: "default", kind: "desktop", createdAt: "2026-09-02T00:00:00Z", size: { cpu: 2, memMb: 4096 }, screen: { streamUrl: STREAM } };
+const headless: GoldenBuilderView = { id: "m_headless", name: "default", kind: "sandbox", createdAt: "2026-09-02T00:00:00Z", size: { cpu: 2, memMb: 4096 } };
 const DAEMON_TOKEN = "wizard-daemon-token";
 const version: GoldenVersion = { version: 1, snapshotId: "snap_golden-v1", baseTemplate: "default", kind: "desktop", setupSha: "x", createdAt: "t", smoke: { cmd: "claude --version", exitCode: 0 } };
 const manifest: GoldenManifest = { head: 1, versions: [version] };

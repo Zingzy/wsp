@@ -83,6 +83,7 @@ describe("deployScript", () => {
   it("bootstraps a pinned, sha256-checked Node into /usr/local only when the guest has none", () => {
     const script = deployScript("aabbcc");
     const bootstrap = script.indexOf("if ! command -v node");
+    expect(script).not.toContain("node_major");
     const npm = script.indexOf("npm install");
     expect(bootstrap).toBeGreaterThan(-1);
     expect(bootstrap).toBeLessThan(npm);

@@ -19,6 +19,10 @@ export {
   type ReapResult,
   type ReapedMachine,
   type SparedMachine,
+  type GoldenImport,
+  type ImportLedger,
+  type ImportResult,
+  type PackedFiles,
 } from "@wsp/engine";
 // The protocol types the runtime API surface speaks.
 export type {

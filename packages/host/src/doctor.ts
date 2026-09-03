@@ -10,7 +10,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
-import { DAEMON_PORT, type Machine } from "@wsp/engine";
+import { DAEMON_PORT, NODE_RELEASES, TOOLS_PATH, type Machine } from "@wsp/engine";
 import type { Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
 import type { CliIO } from "./cli.js";
@@ -51,15 +51,9 @@ export async function stageDaemonBundle(stageDir: string, daemonDir = resolveDae
   );
 }
 
-/** Desktop templates ship no node; the sandbox template carries its own.
- * The pins are nodejs.org's SHASUMS256.txt entries for this release. */
-export const GUEST_NODE = {
-  version: "22.23.2",
-  sha256: {
-    x86_64: "b294a556e639d64338823920e5866c21c02741742d2e1529ee1a225c1ec9252a",
-    aarch64: "013b59cfd2819703a6f4a14ab891fc46fc2a4e3f5bcd92de3fb4929b43e35b30",
-  },
-} as const;
+/** Desktop templates ship no node; the sandbox template carries its own and
+ * keeps it (an agent that needs a newer one asks for it in the import). */
+export const GUEST_NODE = NODE_RELEASES[22];
 
 function nodeBootstrap(): string {
   const v = GUEST_NODE.version;
@@ -318,10 +312,11 @@ export const GOLDEN_SMOKE = "claude --version";
 
 export const CONFIG_DIR = "/root/.claude-cfg";
 
-/** Envs every guest needs: a PATH that reaches the daemon's node and the harness install. */
+/** Envs every guest needs: a PATH that reaches the daemon's node, the harness
+ * install, and what the golden import's tools stage puts on the machine. */
 export const GUEST_ENVS: Record<string, string> = {
   IS_SANDBOX: "1",
-  PATH: "/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+  PATH: TOOLS_PATH,
 };
 
 /** Without a key the guest still needs the config dir and PATH; a subscription

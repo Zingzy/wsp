@@ -39,6 +39,9 @@ const TRAIL: Step[] = ["none", "hero", "sealing", "done"];
 const STAGE_WORD: Record<GoldenStage, string> = {
   creating: "booting a fresh machine",
   "deploying-daemon": "starting the workspace daemon",
+  "applying-setup": "applying your setup",
+  "uploading-files": "uploading your files",
+  "installing-tools": "installing tools",
   "installing-harness": "running the setup",
   ready: "ready for you",
   snapshotting: "taking the snapshot",

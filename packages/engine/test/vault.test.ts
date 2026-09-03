@@ -55,6 +55,14 @@ describe("vault", () => {
     expect(untar).toMatch(/-C '\/root'/);
   });
 
+  it("an overlay import merges into the destination: no recursive unlink, files owned by the guest user", async () => {
+    const { machine, execCmds, fetchStub } = vaultStub();
+    await importInto(machine, Buffer.from("payload-tgz"), "/root", { fetch: fetchStub, overlay: true });
+    const untar = execCmds.find(c => c.includes("tar xzf"))!;
+    expect(untar).toMatch(/-C '\/root' --no-same-owner/);
+    expect(untar).not.toContain("--recursive-unlink");
+  });
+
   it("surfaces a failing tar instead of returning garbage", async () => {
     const { machine, fetchStub } = vaultStub();
     machine.exec = async () => ({ exitCode: 2, stdout: "", stderr: "tar: /root/nope: No such file" });

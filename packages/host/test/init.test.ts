@@ -2,9 +2,9 @@
 // wsp init end to end against the stub backend: keys in, the seven screens,
 // the summary and confirm, prepare with its stage stream, the hand-off. The
 // runtime and host are the real ones over fakes; only the terminal is faked.
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
@@ -17,7 +17,7 @@ import { loadManifest } from "../src/init-recipe.js";
 import { reduceStages, runInit, stageLine, type InitIO, type InitOptions } from "../src/init.js";
 import type { HostHandle } from "../src/server.js";
 import { FIXTURE } from "./init-fixture.js";
-import { stubBackend, type StubBackend } from "./stub-backend.js";
+import { guestAnswer, stubBackend, type StubBackend } from "./stub-backend.js";
 
 const SOLARI = "slr_live_fake_solari_key";
 const KEY = { down: "\x1b[B", space: " ", enter: "\r", esc: "\x1b" };
@@ -39,6 +39,8 @@ interface Fake {
   runtimes: Runtime[];
   checklists: { label: string; command: string }[][];
   hosts: number;
+  /** Keychain services the fake reader was asked for. */
+  reads: string[];
 }
 
 function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string, string>; columns?: number } = {}): Fake {
@@ -72,6 +74,13 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
   };
   const dir = mkdtempSync(join(tmpdir(), "wsp-init-"));
   dirs.push(dir);
+  const home = mkdtempSync(join(tmpdir(), "wsp-init-home-"));
+  dirs.push(home);
+  writeFileSync(join(home, ".gitconfig"), "[user]\n\tname = Me\n");
+  writeFileSync(join(home, ".zshrc"), "export A=1\n");
+  mkdirSync(join(home, ".ssh"), { mode: 0o700 });
+  writeFileSync(join(home, ".ssh", "config"), "Host work\n", { mode: 0o600 });
+  const reads: string[] = [];
   const { tty: _tty, env: _env, columns: _columns, ...rest } = over;
   const opts: InitOptions = {
     yes: false,
@@ -79,6 +88,14 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
     keys: { solari: SOLARI },
     pricing: PRICING,
     statePath: join(dir, "state.json"),
+    home,
+    platform: "darwin",
+    secrets: {
+      read: async service => {
+        reads.push(service);
+        return "gho_fake";
+      },
+    },
     runtime: recipe => {
       recipes.push(recipe);
       const backend = stubBackend();
@@ -129,6 +146,7 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
     get hosts() {
       return counters.hosts;
     },
+    reads,
   };
 }
 
@@ -178,7 +196,7 @@ describe("wsp init, interactive", () => {
     // One line per rung, the sign-ins under theirs with the answer each got, then the three closing lines.
     const body = summary.split("\n").map(l => l.replace(/^│\s{2}|\s*│$/g, "").trimEnd()).filter(l => l !== "" && !/^[─├╯╮◇ ]*$/.test(l) && !l.startsWith("Summary"));
     expect(body.map(l => l.trim().split(/\s{2,}/)[0])).toEqual([
-      "Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins", "GitHub CLI login", "Claude Code login", "Upload", "Installs", "Later",
+      "Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins", "GitHub CLI login", "Claude Code login", "Upload", "Installs",
     ]);
     expect(summary).toMatch(/Identity\s+2 of 3\s+1\.7 KB/);
     expect(summary).toMatch(/Tools\s+3 of 4\s+│/);
@@ -187,9 +205,9 @@ describe("wsp init, interactive", () => {
     expect(summary).toMatch(/Claude Code login\s+sign in/);
     expect(summary).not.toContain("id_ed25519");
     expect(summary).toMatch(/Upload\s+\d[\d.]* [KM]B, nothing has left this computer yet/);
-    expect(summary).toMatch(/Installs\s+Claude Code/);
-    expect(summary).toMatch(/Later\s+the ticked files copy over with golden import/);
-    expect(f.backends).toHaveLength(0);
+    // Their three ticked tools; Homebrew's own glibc and gcc are named apart, not counted as theirs.
+    expect(summary).toMatch(/Installs\s+Claude Code, 3 tools plus Homebrew's toolchain/);
+    expect(f.backends.flatMap(b => b.machines)).toHaveLength(0);
     await f.press("y");
 
     await f.until(URL_RE);
@@ -199,9 +217,13 @@ describe("wsp init, interactive", () => {
     expect(result.handle?.port).toBe(4400);
 
     const out = f.text();
-    const order = ["Machine created", "Base installed", "Agents installed", "Ready"].map(s => out.indexOf(s));
+    const order = ["Machine created", "Base installed", "Setup applied", "Files uploaded", "Tools installed", "Agents installed", "Ready"].map(s => out.indexOf(s));
     expect(order.every(i => i >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(out).toContain("node v22.12.0");
+    expect(out).toContain("3 files: identity 2, shell 1");
+    expect(out).toContain("Claude Code installed");
+    expect(out).toContain("golden-import.json");
     // A finished stage: label, detail, and its duration flush against the right edge (80 columns off a terminal).
     const base = out.split("\n").filter(l => /Base installed/.test(l)).at(-1)!;
     expect(base).toMatch(/Base installed\s+node v22\.12\.0\s+\d+\.\ds$/);
@@ -215,10 +237,23 @@ describe("wsp init, interactive", () => {
     ]);
     expect(out).not.toMatch(/—|\p{Emoji_Presentation}/u);
     expect(out).not.toContain(SOLARI);
+    // gh was switched to sign in on the machine, so its Keychain token was never asked for.
+    expect(f.reads).toEqual([]);
 
     const backend = f.backends[0]!;
     expect(backend.machines).toHaveLength(1);
-    expect(backend.machines[0]!.execLog).toEqual([GOLDEN_SETUP]);
+    const log = backend.machines[0]!.execLog;
+    expect(log.some(c => c.includes("tar xzf") && c.includes("--no-same-owner"))).toBe(true);
+    expect(log.filter(c => c.includes("brew install") || c.includes("npm install -g pnpm"))).toHaveLength(5);
+    expect(log.map(c => /brew install ([a-z@.-]+)/.exec(c)?.[1]).filter(Boolean)).toEqual(["glibc", "gcc", "gh", "jq"]);
+    expect(log.some(c => c.includes(GOLDEN_SETUP))).toBe(true);
+    expect(log.indexOf(log.find(c => c.includes("tar xzf"))!)).toBeLessThan(log.indexOf(log.find(c => c.includes("brew install"))!));
+    expect(JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8"))).toMatchObject({
+      files: { bytes: expect.any(Number) },
+      homebrew: { tag: expect.stringMatching(/^6\./), commit: expect.stringMatching(/^[0-9a-f]{40}$/) },
+      tools: [{ id: "tools/homebrew", outcome: "installed" }, { id: "tools/brew-toolchain/glibc", outcome: "installed" }, { id: "tools/brew-toolchain/gcc", outcome: "installed" }, { id: "tools/brew/gh", outcome: "installed" }, { id: "tools/brew/jq", outcome: "installed" }, { id: "tools/npm/pnpm", outcome: "installed" }],
+      agents: [{ id: "agents/claude", outcome: "installed" }],
+    });
     expect(backend.machines[0]!.spec.labels).toMatchObject({ "wsp-builder": "1" });
     expect(f.recipes[0]!.envs).toHaveProperty("CLAUDE_CONFIG_DIR");
     expect(f.hosts).toBe(1);
@@ -293,7 +328,7 @@ describe("wsp init, interactive", () => {
     expect(ask).toContain(`${S_RADIO_ACTIVE} No`);
     await f.press(KEY.enter);
     expect((await run).code).toBe(1);
-    expect(f.backends).toHaveLength(0);
+    expect(f.backends.flatMap(b => b.machines)).toHaveLength(0);
     expect(f.hosts).toBe(0);
     const saved = loadManifest(join(dirs[0]!, "golden-recipe.json"));
     expect(saved.entries.filter(e => e.bring).map(e => e.id)).toContain("shell/zshrc");
@@ -417,6 +452,101 @@ describe("wsp init, flags and no terminal", () => {
     expect(f.text()).toMatch(URL_RE);
     expect(f.backends[0]!.machines).toHaveLength(1);
     expect(f.opened).toEqual([]);
+    // The gh login defaults to copy, so its token was read from the Keychain, once, through the injected reader.
+    expect(f.reads).toEqual(["gh:github.com"]);
+  });
+
+  it("a Keychain login the reader refuses is read before anything boots, turns into a sign-in on the machine, and says so before the confirm", async () => {
+    const f = fake({ yes: true });
+    f.opts.secrets = {
+      read: async service => {
+        f.reads.push(service);
+        throw new Error(`Command failed: security find-generic-password -s ${service} -w\nsecurity: SecKeychainSearchCopyNext: User canceled the operation.\n`);
+      },
+    };
+    mkdirSync(join(f.opts.home, ".config", "gh"), { recursive: true });
+    writeFileSync(join(f.opts.home, ".config", "gh", "hosts.yml"), "github.com:\n    user: Zingzy\n");
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(0);
+    const out = f.text();
+    expect(f.reads).toEqual(["gh:github.com"]);
+    const note = out.indexOf("GitHub CLI login: Keychain read failed (security: SecKeychainSearchCopyNext: User canceled the operation.); changed to sign in on the machine.");
+    expect(note).toBeGreaterThan(-1);
+    expect(note).toBeLessThan(out.search(BOOT));
+    // The refusal happened with no machine on the account; the pack later asks the Keychain for nothing and notes the row.
+    const saved = loadManifest(join(dirs[0]!, "golden-recipe.json"));
+    expect(saved.entries.find(e => e.id === "logins/gh")?.choice).toBe("machine");
+    expect(f.checklists[0]).toEqual(expect.arrayContaining([{ label: "GitHub CLI login", command: "gh auth login" }]));
+    const log = f.backends[0]!.machines[0]!.execLog;
+    expect(log.some(c => c.includes("tar xzf"))).toBe(true);
+    // The refused row travels with none of its files: hosts.yml stays home, and the saved list says so for both paths.
+    const skipped = JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8")).files.skipped as { id: string; path: string; note: string }[];
+    expect(skipped.filter(s => s.id === "logins/gh")).toEqual([
+      { id: "logins/gh", path: "~/.config/gh/hosts.yml", note: "not read from the Keychain; sign in on the machine" },
+      { id: "logins/gh", path: "Keychain: gh:github.com", note: "not read from the Keychain; sign in on the machine" },
+    ]);
+  });
+
+  it("a gh row that carries hosts.yml alone copies the file and never asks the Keychain", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
+    dirs.push(dir);
+    const path = join(dir, "recipe.json");
+    writeFileSync(path, JSON.stringify({ entries: FIXTURE.entries.map(e => (e.id === "logins/gh" ? { ...e, paths: ["~/.config/gh/hosts.yml"], bring: true, choice: "copy" } : { ...e, bring: e.id === "identity/git-user" })) }));
+    const f = fake({ yes: true, manifestPath: path });
+    mkdirSync(join(f.opts.home, ".config", "gh"), { recursive: true });
+    writeFileSync(join(f.opts.home, ".config", "gh", "hosts.yml"), "github.com:\n    oauth_token: gho_in_file\n");
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(0);
+    expect(f.reads).toEqual([]);
+    expect(f.text()).not.toContain("Keychain read failed");
+    expect(loadManifest(join(dirname(f.opts.statePath), "golden-recipe.json")).entries.find(e => e.id === "logins/gh")?.choice).toBe("copy");
+    expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8")).files.skipped).toEqual([]);
+  });
+
+  it("when no ticked agent can be installed the run is refused before the boot question, naming each agent", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
+    dirs.push(dir);
+    const path = join(dir, "recipe.json");
+    const zed = { rung: "agents", id: "agents/zed", label: "Zed", paths: [], bytes: 0, default: "bring", bring: true };
+    // gh is ticked as copy with its Keychain item, so a read would be asked for if the refusal came later.
+    writeFileSync(path, JSON.stringify({ entries: [...FIXTURE.entries.map(e => (e.id === "logins/gh" ? { ...e, bring: true, choice: "copy" } : { ...e, bring: e.id === "identity/git-user" })), zed] }));
+    const f = fake({ yes: true, manifestPath: path });
+    f.opts.secrets = {
+      read: async service => {
+        f.reads.push(service);
+        throw new Error("security: User canceled the operation.");
+      },
+    };
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(1);
+    expect(f.hosts).toBe(0);
+    const out = f.text();
+    expect(out).toContain("Zed: no installer known");
+    expect(out).toContain("Nothing was booted. Untick those agents or add one with an installer");
+    expect(out).not.toMatch(BOOT);
+    expect(f.backends.flatMap(b => b.machines)).toHaveLength(0);
+    // The refusal is a free exit before any consent dialog: the Keychain was never asked and the recipe keeps its answers.
+    expect(f.reads).toEqual([]);
+    expect(out).not.toContain("Keychain read failed");
+    expect(loadManifest(join(dirname(f.opts.statePath), "golden-recipe.json")).entries.find(e => e.id === "logins/gh")?.choice).toBe("copy");
+  });
+
+  it("a create the provider refuses ends with nothing booted, not a machine gone", async () => {
+    const f = fake({ yes: true });
+    f.opts.runtime = recipe => {
+      const backend = stubBackend();
+      backend.create = async () => {
+        throw Object.assign(new Error("Insufficient credit"), { kind: "quota", status: 402 });
+      };
+      f.backends.push(backend);
+      return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
+    };
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(1);
+    expect(f.text()).toContain("Insufficient credit");
+    expect(f.text()).toContain("Nothing was booted. Run wsp init again");
+    expect(f.text()).not.toContain("That machine is gone");
+    expect(f.backends[0]!.machines).toHaveLength(0);
   });
 
   it("--yes with --manifest takes the file's ticks, asks nothing, prints the address and never opens a browser", async () => {
@@ -433,10 +563,16 @@ describe("wsp init, flags and no terminal", () => {
     expect(out).toContain("Ready");
     expect(f.opened).toEqual([]);
     expect(f.copied).toEqual([]);
-    // No agent ticked: the setup installs nothing and names nothing.
-    expect(f.backends[0]!.machines[0]!.execLog).toEqual(["true"]);
+    // No agent ticked: the harness installs nothing and names nothing; the two files still travel.
+    const log = f.backends[0]!.machines[0]!.execLog;
+    expect(log).toContain("true");
+    expect(log.some(c => c.includes(GOLDEN_SETUP))).toBe(false);
+    expect(log.some(c => c.includes("tar xzf"))).toBe(true);
+    // Off a terminal a step prints once, done, with its last detail and how long it took flush right.
+    expect(out).toMatch(/Setup applied\s+[\d.]+ (B|KB) packed\s+\d+\.\ds$/m);
+    expect(out).toMatch(/Files uploaded\s+[\d.]+ (B|KB) in [\d.]+s\s+\d+\.\ds$/m);
     expect(f.recipes[0]!.envs).not.toHaveProperty("CLAUDE_CONFIG_DIR");
-    const written = loadManifest(join(dirs.at(-1)!, "golden-recipe.json"));
+    const written = loadManifest(join(dirname(f.opts.statePath), "golden-recipe.json"));
     expect(written.entries.filter(e => e.bring).map(e => e.id)).toEqual(["identity/git-user", "shell/zshrc"]);
   });
 
@@ -472,19 +608,92 @@ describe("wsp init, flags and no terminal", () => {
     expect(f.backends[0]!.machines[0]!.killed).toBe(false);
   });
 
-  it("a failed prepare reports the stage and the detail and exits 1 with no host", async () => {
+  it("a failed upload reports the stage and the detail and exits 1 with no host", async () => {
     const f = fake({ yes: true });
     f.opts.runtime = recipe => {
       const backend = stubBackend();
-      backend.execImpl = () => ({ exitCode: 1, stdout: "", stderr: "curl: no route" });
+      backend.execImpl = (_m, cmd) => (cmd.includes("tar xzf") ? { exitCode: 2, stdout: "", stderr: "gzip: stdin: not in gzip format" } : guestAnswer(cmd));
       f.backends.push(backend);
       return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
     };
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(1);
     expect(f.hosts).toBe(0);
-    expect(f.text()).toMatch(/Installing agents failed/);
-    expect(f.text()).toContain("no route");
+    expect(f.text()).toMatch(/Uploading your files failed/);
+    expect(f.text()).toContain("not in gzip format");
+  });
+
+  it("a tool or one of several agents that fails is a warning in the stream, named on its own line, not the end of the build", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
+    dirs.push(dir);
+    const path = join(dir, "recipe.json");
+    writeFileSync(path, JSON.stringify({ entries: FIXTURE.entries.map(e => ({ ...e, bring: e.id === "agents/codex" ? true : e.bring ?? (e.default === "bring" && e.reason === undefined) })) }));
+    const f = fake({ yes: true, manifestPath: path });
+    f.opts.runtime = recipe => {
+      const backend = stubBackend();
+      backend.execImpl = (_m, cmd) => (cmd.includes("brew install jq") || cmd.includes(GOLDEN_SETUP) ? { exitCode: 1, stdout: "", stderr: "curl: no route" } : guestAnswer(cmd));
+      f.backends.push(backend);
+      f.recipes.push(recipe);
+      return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
+    };
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(0);
+    const out = f.text();
+    expect(out).toMatch(/Tools installed\s+5 installed, 1 failed/);
+    expect(out).toMatch(/Agents installed\s+Codex installed; Claude/);
+    expect(out).toContain("Ready");
+    // The stage line is cut to the width; the names come back in full under the tally.
+    const tally = out.slice(out.indexOf("Tools and agents:"));
+    expect(tally.split("\n").slice(0, 3).map(l => l.replace(/^[│◇]\s+/, ""))).toEqual([
+      expect.stringMatching(/^Tools and agents: 6 installed, 2 failed, 0 skipped; the list is in .*golden-import\.json$/),
+      "jq failed: curl: no route",
+      "Claude Code failed: curl: no route",
+    ]);
+    expect(f.recipes[0]!.import?.node).toMatchObject({ floor: 16, agents: ["Codex"] });
+  });
+
+  it("every ticked agent failing ends the build: one line per agent with its reason, the builder killed, and an offer to start over", async () => {
+    const f = fake({ yes: true });
+    f.opts.runtime = recipe => {
+      const backend = stubBackend();
+      backend.execImpl = (_m, cmd) => (cmd.includes(GOLDEN_SETUP) ? { exitCode: 1, stdout: "", stderr: "curl: (6) Could not resolve host" } : guestAnswer(cmd));
+      f.backends.push(backend);
+      return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
+    };
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(1);
+    expect(f.hosts).toBe(0);
+    const out = f.text();
+    expect(out).toContain("Installing agents failed");
+    expect(out.split("\n").map(l => l.replace(/^│\s+/, ""))).toEqual(expect.arrayContaining(["no agent installed, so there is nothing to seal:", "Claude Code: curl: (6) Could not resolve host"]));
+    expect(out).toContain("Run wsp init again to start over; the recipe is kept.");
+    expect(f.backends[0]!.machines[0]!.killed).toBe(true);
+    expect(JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8"))).toMatchObject({ agents: [{ id: "agents/claude", outcome: "failed" }] });
+  });
+
+  it("a builder from an earlier run still on the account is listed with its age and cost, and nothing boots beside it", async () => {
+    const store = memoryStore();
+    const shared = stubBackend();
+    const earlier = createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true", cpu: 2, memMb: 4096 } });
+    await earlier.golden.prepare();
+    const f = fake({ yes: true });
+    f.opts.runtime = recipe => {
+      f.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: recipe });
+    };
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(1);
+    expect(f.hosts).toBe(0);
+    const out = f.text();
+    expect(out).toContain("A builder from an earlier wsp init is still running on the account:");
+    expect(out).toMatch(/default \(m1\), \d+\.\ds old, about \$\d+\.\d\d so far/);
+    expect(out).toContain("Nothing was booted. Kill it first (the Solari console lists it); a builder cannot be sealed after a restart.");
+    expect(out).not.toContain("save it");
+    // The refusal came before any consent dialog: the Keychain was never asked.
+    expect(f.reads).toEqual([]);
+    expect(out).not.toMatch(BOOT);
+    expect(shared.machines).toHaveLength(1);
+    expect(shared.machines[0]!.killed).toBe(false);
   });
 });
 
@@ -496,8 +705,16 @@ describe("stage stream", () => {
     expect(view.steps.map(s => [s.stage, s.state])).toEqual([
       ["creating", "done"],
       ["deploying-daemon", "done"],
+      ["applying-setup", "done"],
+      ["uploading-files", "done"],
+      ["installing-tools", "done"],
       ["installing-harness", "current"],
       ["ready", "pending"],
+    ]);
+    expect(view.steps.slice(2, 5).map(s => [s.start, s.end])).toEqual([
+      ["Applying your setup", "Setup applied"],
+      ["Uploading your files", "Files uploaded"],
+      ["Installing tools", "Tools installed"],
     ]);
     expect(view.steps[0]).toMatchObject({ start: "Creating the machine", end: "Machine created", tail: ["sandbox from default"] });
     expect(view.steps[1]!.tail).toEqual(["node v22"]);
@@ -506,7 +723,7 @@ describe("stage stream", () => {
 
   it("a stage not reported counts as done once a later one arrives; ready finishes; failed carries the detail", () => {
     const done = reduceStages([ev("creating"), ev("installing-harness"), ev("ready")]);
-    expect(done.steps.map(s => s.state)).toEqual(["done", "done", "done", "done"]);
+    expect(done.steps.map(s => s.state)).toEqual(["done", "done", "done", "done", "done", "done", "done"]);
     const failed = reduceStages([ev("creating"), ev("failed", "golden setup failed (exit 1): curl: no route")]);
     expect(failed.steps[0]!.state).toBe("failed");
     expect(failed.failure).toBe("golden setup failed (exit 1): curl: no route");
@@ -521,7 +738,7 @@ describe("stage stream", () => {
       { ...ev("ready"), at: 65_500 },
     ]);
     // The second deploying-daemon frame carries the detail; it does not restart that stage's clock.
-    expect(view.steps.map(s => s.ms)).toEqual([3_200, 800, 60_500, undefined]);
+    expect(view.steps.map(s => s.ms)).toEqual([3_200, 800, undefined, undefined, undefined, 60_500, undefined]);
   });
 
   it("a stage line pads the label, keeps the detail, and puts the duration flush right at the width", () => {
