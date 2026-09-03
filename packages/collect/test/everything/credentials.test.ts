@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import { GITLEAKS_MAX_ROOTS, credentials, keysSignal, modeSignal, nameSignal, parseGitleaks, pemSignal, roles, topLevelKeys } from "../../src/index.js";
-import { EXPECTED_SHAPES, HOME, home, laptop, shapes } from "./fixture.js";
+import { EXPECTED_SHAPES, HOME, home, laptop, many, shapes } from "./fixture.js";
 
 const rel = (p: string): string => p.replace(HOME, "~");
 const gitleaksArgs = (root: string): string => `gitleaks dir ${root} --redact --no-banner --exit-code 0 --report-format json --report-path /dev/stdout`;
@@ -18,6 +18,7 @@ describe("pass 4: credential shape", () => {
       ["~/.hermes/auth.json", ["name", "keys"]],
       ["~/.netrc", ["name", "mode"]],
       ["~/.ssh/id_ed25519", ["name", "mode", "pem"]],
+      ["~/Library/Preferences/.wrangler/config/default.toml", ["keys"]],
     ]);
     expect(found.find(c => c.path.endsWith("hosts.yml"))).toMatchObject({ mode: 0o600, files: 1, bytes: Buffer.byteLength("github.com:\n    user: dev\n    oauth_token: redacted\n") });
   });
@@ -138,6 +139,13 @@ describe("pass 4: credential shape", () => {
     await credentials(without, await roles(without));
     expect(without.calls.some(c => c.startsWith("run gitleaks"))).toBe(false);
     expect([...parseGitleaks("not json")]).toEqual([]);
+  });
+
+  it("a walk that hits its cap names the root as partial instead of stopping silently", async () => {
+    const m = laptop({ files: { ...many("~/.ssh/known", 5_100), "~/.ssh/id_rsa": { text: "-----BEGIN OPENSSH PRIVATE KEY-----\nx\n", mode: 0o600 }, "~/.tiny/a.toml": "x = 1\n" } });
+    const { partial, notes } = await credentials(m, await roles(m));
+    expect(partial).toEqual([`${HOME}/.ssh`]);
+    expect(notes).toEqual(["credential scan of ~/.ssh stopped at the cap"]);
   });
 
   it("gitleaks skips a large root and is skipped altogether, with a note, above the root cap", async () => {

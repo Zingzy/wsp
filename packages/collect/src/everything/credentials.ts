@@ -4,7 +4,7 @@
 // hit is a flag for the person to see; nothing here is ever pre-ticked, and
 // no value read here leaves this function.
 import { isLarge } from "./gate.js";
-import { type Entry, type Machine, basename } from "./host.js";
+import { type Entry, type Machine, basename, tilde } from "./host.js";
 import type { Dir } from "./roles.js";
 import { roleByName } from "./roles.js";
 import { RC_FILES } from "./shell-rc.js";
@@ -24,7 +24,9 @@ export interface Credential {
 
 export interface CredentialScan {
   found: Credential[];
-  /** What was skipped and why, for the person. */
+  /** Roots whose walk hit its cap, so their check is partial. */
+  partial: string[];
+  /** What was skipped or cut short and why, for the person. */
   notes: string[];
 }
 
@@ -191,6 +193,7 @@ async function gitleaks(m: Machine, roots: string[], notes: string[]): Promise<M
 export async function credentials(m: Machine, dirs: readonly Dir[], opts: CredentialsOptions = {}): Promise<CredentialScan> {
   const clock = opts.clock ?? Date.now;
   const notes: string[] = [];
+  const partial: string[] = [];
   const found = new Map<string, Credential>();
   const files: [string, Entry, boolean][] = [];
   const roots: string[] = [];
@@ -209,10 +212,15 @@ export async function credentials(m: Machine, dirs: readonly Dir[], opts: Creden
     }
     if (!isLarge(d) && d.measured === "exact") roots.push(d.path);
     const where = d.linkTarget ?? d.path;
-    await walk(m.fs, where, { maxDepth: SCAN_DEPTH, budget: budget(clock), skip: n => roleByName(n) !== undefined, skipTree: names => names.includes(".git") }, (p, fe) => {
+    const b = budget(clock);
+    await walk(m.fs, where, { maxDepth: SCAN_DEPTH, budget: b, skip: n => roleByName(n) !== undefined, skipTree: names => names.includes(".git") }, (p, fe) => {
       const inside = p.slice(where.length + 1);
       files.push([`${d.path}/${inside}`, fe, !inside.includes("/")]);
     });
+    if (b.capped) {
+      partial.push(d.path);
+      notes.push(`credential scan of ${tilde(m.home, d.path)} stopped at the cap`);
+    }
   }
   for (const [p, e, shallow] of files) {
     const c = await inspect(m, p, e, shallow);
@@ -227,5 +235,5 @@ export async function credentials(m: Machine, dirs: readonly Dir[], opts: Creden
     const e = await m.fs.stat(file);
     if (e?.kind === "file" && rules.length > 0) found.set(file, { path: file, bytes: e.bytes, files: 1, mode: e.mode, mtime: e.mtime, signals: ["gitleaks"] });
   }
-  return { found: [...found.values()].sort((a, b) => a.path.localeCompare(b.path)), notes };
+  return { found: [...found.values()].sort((a, b) => a.path.localeCompare(b.path)), partial, notes };
 }

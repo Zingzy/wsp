@@ -2,7 +2,7 @@
 // Pass 6. Exported variables whose name says KEY, TOKEN, SECRET or PASSWORD
 // are listed by name and cut from a carried copy of the rc file. Values
 // never leave this pass, so a cut line takes its continuation and any open
-// quote with it.
+// quote, substitution or heredoc with it.
 import { RC_FILES as SHELL_RUNG_RC } from "../detect/shell.js";
 import { type Machine, tilde } from "./host.js";
 
@@ -26,9 +26,9 @@ export function isSecretName(name: string): boolean {
 }
 
 const NAME = "[A-Za-z_][A-Za-z0-9_]*";
-const EXPORTED = new RegExp(`^\\s*(?:export|typeset|declare)(?:\\s+-\\w+)*\\s+(.*)$`);
-const FISH_SET = new RegExp(`^\\s*set(?:\\s+-\\w+)+\\s+(${NAME})(?:\\s|$)`);
-const ASSIGNED = new RegExp(`^(${NAME})=`);
+const EXPORTED = new RegExp(`^\\s*(?:export|typeset|declare|readonly|local)(?:\\s+-\\w+)*\\s+(.*)$`);
+const FISH_SET = new RegExp(`^\\s*set(?:\\s+-\\w+)*\\s+(${NAME})(?:\\s|$)`);
+const ASSIGNED = new RegExp(`^["']?(${NAME})=`);
 
 function assignedNames(line: string): string[] {
   const fish = FISH_SET.exec(line);
@@ -41,46 +41,87 @@ function assignedNames(line: string): string[] {
   return plain?.[1] === undefined ? [] : [plain[1]];
 }
 
-type Quote = "" | "'" | '"';
+/** What is still open at the end of a line: a quote, a backtick, `$(` groups, a heredoc waiting for its word, or a trailing backslash. */
+interface Open {
+  quote: "" | "'" | '"' | "`";
+  parens: number;
+  heredoc?: string;
+  continues: boolean;
+}
 
-/** Where the shell's quoting stands at the end of the line, and whether the line continues onto the next. */
-function scanQuotes(line: string, start: Quote): { quote: Quote; continues: boolean } {
-  let quote = start;
-  let continues = false;
+const CLOSED: Open = { quote: "", parens: 0, continues: false };
+
+function isOpen(o: Open): boolean {
+  return o.quote !== "" || o.parens > 0 || o.heredoc !== undefined || o.continues;
+}
+
+/** Carries the shell's quoting state across a line. Inside a heredoc only the terminator word matters. */
+function scanLine(line: string, start: Open): Open {
+  const o: Open = { ...start, continues: false };
+  if (o.heredoc !== undefined) {
+    if (line.trim() === o.heredoc) delete o.heredoc;
+    return o;
+  }
   for (let i = 0; i < line.length; i += 1) {
     const c = line[i];
-    continues = false;
-    if (c === "\\" && quote !== "'") {
-      if (i === line.length - 1) continues = true;
+    o.continues = false;
+    if (c === "\\" && o.quote !== "'") {
+      if (i === line.length - 1) o.continues = true;
       i += 1;
       continue;
     }
-    if (quote === "") {
-      if (c === "'" || c === '"') quote = c;
-    } else if (c === quote) quote = "";
+    if (o.quote === "'" || o.quote === "`") {
+      if (c === o.quote) o.quote = "";
+      continue;
+    }
+    if (o.quote === "" && (c === "'" || c === "`")) {
+      o.quote = c;
+      continue;
+    }
+    if (c === '"') {
+      o.quote = o.quote === '"' ? "" : '"';
+      continue;
+    }
+    if (c === "$" && line[i + 1] === "(") {
+      o.parens += 1;
+      i += 1;
+      continue;
+    }
+    if (c === ")" && o.parens > 0) {
+      o.parens -= 1;
+      continue;
+    }
+    if (o.quote === "" && c === "<" && line[i + 1] === "<") {
+      const m = /^<<-?\s*(?:"([^"]+)"|'([^']+)'|(\w+))/.exec(line.slice(i));
+      const word = m?.[1] ?? m?.[2] ?? m?.[3];
+      if (word !== undefined) o.heredoc = word;
+      break;
+    }
   }
-  return { quote, continues };
+  return o;
 }
 
 export function stripExports(text: string): { names: string[]; carried: string } {
   const names: string[] = [];
   const kept: string[] = [];
   const eol = text.includes("\r\n") ? "\r\n" : "\n";
-  let cutting: { quote: Quote } | undefined;
+  let cutting: Open | undefined;
+  let passing: Open = CLOSED;
   for (const line of text.split(/\r?\n/)) {
     if (cutting !== undefined) {
-      const s = scanQuotes(line, cutting.quote);
-      cutting = s.quote === "" && !s.continues ? undefined : { quote: s.quote };
+      const o = scanLine(line, cutting);
+      cutting = isOpen(o) ? o : undefined;
       continue;
     }
-    const hits = assignedNames(line).filter(isSecretName);
+    const hits = isOpen(passing) ? [] : assignedNames(line).filter(isSecretName);
     if (hits.length === 0) {
       kept.push(line);
+      passing = scanLine(line, passing);
       continue;
     }
     for (const h of hits) if (!names.includes(h)) names.push(h);
-    const s = scanQuotes(line, "");
-    if (s.quote !== "" || s.continues) cutting = { quote: s.quote };
+    const o = scanLine(line, CLOSED);
+    if (isOpen(o)) cutting = o;
   }
   return { names, carried: kept.join(eol) };
 }

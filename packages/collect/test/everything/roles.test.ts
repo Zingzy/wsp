@@ -43,7 +43,7 @@ describe("pass 2: directory role", () => {
       ["~/.zshrc", "unknown", 1, ["~/.zshrc"]],
       ["~/Library/Application Support/Code", "unknown", 1, ["~/Library/Application Support/Code"]],
       ["~/Library/Caches", "cache", 0, ["~/Library/Caches"]],
-      ["~/Library/Preferences/com.googlecode.iterm2.plist", "unknown", 1, ["~/Library/Preferences/com.googlecode.iterm2.plist"]],
+      ["~/Library/Preferences/.wrangler", "unknown", 1, ["~/Library/Preferences/.wrangler"]],
     ]);
   });
 
@@ -71,6 +71,9 @@ describe("pass 2: directory role", () => {
     expect(dirs.find(d => d.path === `${HOME}/.config/nvim`)).toMatchObject({ role: "unknown", bytes: 500, files: 1, linkTarget: `${HOME}/dotfiles/nvim`, paths: [`${HOME}/.config/nvim`] });
     expect(dirs.find(d => d.path === `${HOME}/.tmux.conf`)).toMatchObject({ role: "unknown", bytes: 300, files: 1, linkTarget: `${HOME}/dotfiles/tmux.conf` });
     expect(dirs.some(d => d.path === `${HOME}/.broken`)).toBe(false);
+    const notes: string[] = [];
+    await roles(laptop(home()), { notes });
+    expect(notes).toEqual(["~/.broken is a broken symlink and is not listed"]);
   });
 
   it("a root stops at the entry cap and says its size is a lower bound", async () => {
@@ -100,9 +103,9 @@ describe("pass 2: directory role", () => {
     expect(dirs.find(d => d.path === `${HOME}/.hermes` && d.role === "state")?.paths).toEqual([`${HOME}/.hermes/node_modules`]);
   });
 
-  it("Library roots are macOS only, and Apple's own entries under them are left out", async () => {
+  it("Library roots are macOS only; Apple's own entries and plist files under them are left out, dot-directories stay", async () => {
     const mac = await roles(laptop(home()));
-    expect(mac.map(d => rel(d.path)).filter(p => p.startsWith("~/Library"))).toEqual(["~/Library/Application Support/Code", "~/Library/Caches", "~/Library/Preferences/com.googlecode.iterm2.plist"]);
+    expect(mac.map(d => rel(d.path)).filter(p => p.startsWith("~/Library"))).toEqual(["~/Library/Application Support/Code", "~/Library/Caches", "~/Library/Preferences/.wrangler"]);
     const linux = await roles(laptop({ ...home(), platform: "linux" }));
     expect(linux.some(d => d.path.includes("/Library/"))).toBe(false);
   });

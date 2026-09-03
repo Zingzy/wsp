@@ -270,6 +270,7 @@ export function home(): Laptop {
       "~/dotfiles/tmux.conf": 300,
       "~/Library/Preferences/com.apple.finder.plist": 2_000,
       "~/Library/Preferences/com.googlecode.iterm2.plist": 9_000,
+      "~/Library/Preferences/.wrangler/config/default.toml": 'oauth_token = "redacted"\n',
       "~/Library/Application Support/Code/User/settings.json": '{"editor.fontSize":13}',
       "~/Library/Application Support/com.apple.TCC/TCC.db": 4_000,
       "~/Documents/notes.md": 1_000,
@@ -279,6 +280,7 @@ export function home(): Laptop {
       "npm ls -g --depth=0 --json": '{"dependencies":{"litmus-cli":{"version":"1.2.0"},"npm":{"version":"10.0.0"}}}',
       "uv tool list": "ty v0.0.1\n- ty\n",
       "go version -m /Users/dev/go/bin/gopls": "/Users/dev/go/bin/gopls: go1.23.1\n\tpath\tgolang.org/x/tools/gopls\n\tmod\tgolang.org/x/tools/gopls\tv0.16.2\th1:abc=\n",
+      "security login-keychain": `    "${LOGIN_KEYCHAIN}"\n`,
       [`security dump-keychain ${LOGIN_KEYCHAIN}`]: KEYCHAIN_DUMP,
     },
   };

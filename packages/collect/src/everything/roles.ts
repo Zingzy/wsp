@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Pass 2. Every dot entry in HOME, ~/.config/*, ~/.local/share/* and, on
 // macOS, ~/Library/Preferences/* and ~/Library/Application Support/* becomes
-// one record. Cache and state are marked by the spec'd roots and by
+// one record; a plist means nothing on a Linux machine and is left out. Cache
+// and state are marked by the spec'd roots and by
 // subdirectory name at any depth; what an app directory has of each is
 // gathered into one record per role so the app's own size is what could travel.
-import { type Machine, basename } from "./host.js";
+import { type Machine, basename, tilde } from "./host.js";
 import type { Measured } from "./row.js";
 import { type Budget, EMPTY, type Tree, add, budget, fileTree, spend } from "./walk.js";
 
@@ -25,6 +26,8 @@ export interface Dir extends Tree {
 export interface RolesOptions {
   /** Monotonic milliseconds for the walk budget; tests pin it. */
   clock?: () => number;
+  /** Collects what was left out and why. */
+  notes?: string[];
 }
 
 const STATE_NAMES = new Set(["node_modules", "venv", ".venv", "virtenv", "logs", "extensions", "installs", "versions", "builds", "projects", "sessions", ".git", "toolchains", "registry", "avd", "_npx"]);
@@ -72,12 +75,13 @@ async function scan(m: Machine, dir: string, root: string, split: Map<Role, Dir>
   return t;
 }
 
-async function record(m: Machine, path: string, out: Dir[], clock: () => number): Promise<void> {
+async function record(m: Machine, path: string, out: Dir[], clock: () => number, notes: string[]): Promise<void> {
   let e = await m.fs.stat(path);
   let linkTarget: string | undefined;
   if (e?.kind === "link") {
     linkTarget = await m.fs.realpath(path);
     e = linkTarget === undefined ? undefined : await m.fs.stat(linkTarget);
+    if (e === undefined) notes.push(`${tilde(m.home, path)} is a broken symlink and is not listed`);
   }
   if (e === undefined || e.kind === "link") return;
   const where = linkTarget ?? path;
@@ -102,6 +106,7 @@ async function record(m: Machine, path: string, out: Dir[], clock: () => number)
 
 export async function roles(m: Machine, opts: RolesOptions = {}): Promise<Dir[]> {
   const clock = opts.clock ?? Date.now;
+  const notes = opts.notes ?? [];
   const out: Dir[] = [];
   const spec = specRoots(m);
   for (const root of spec) {
@@ -121,11 +126,11 @@ export async function roles(m: Machine, opts: RolesOptions = {}): Promise<Dir[]>
   }
   if (m.platform === "darwin") {
     for (const dir of [`${m.home}/Library/Preferences`, `${m.home}/Library/Application Support`]) {
-      for (const name of await m.fs.list(dir)) if (!name.startsWith(APPLE)) candidates.push(`${dir}/${name}`);
+      for (const name of await m.fs.list(dir)) if (!name.startsWith(APPLE) && !name.endsWith(".plist")) candidates.push(`${dir}/${name}`);
     }
   }
   for (const c of candidates) {
-    if (!specPaths.has(c)) await record(m, c, out, clock);
+    if (!specPaths.has(c)) await record(m, c, out, clock, notes);
   }
 
   for (const rel of EXCEPTIONS) {

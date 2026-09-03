@@ -40,6 +40,21 @@ describe("pass 6: shell rc exports", () => {
     });
   });
 
+  it("heredocs, command substitutions and backticks spanning lines are cut whole", () => {
+    expect(stripExports("export API_KEY=$(cat <<EOF\nsecret-value\nEOF\n)\nexport B=2\n")).toEqual({ names: ["API_KEY"], carried: "export B=2\n" });
+    expect(stripExports("export A_TOKEN=$(\n  op read x\n)\nnext\n").carried).toBe("next\n");
+    expect(stripExports("export DB_PASSWORD=`cat \n  file`\nnext\n").carried).toBe("next\n");
+    expect(stripExports('export X_SECRET="$(cat <<-EOT\n\tv\n\tEOT\n)"\nnext\n').carried).toBe("next\n");
+    expect(stripExports("cat <<EOF\nexport NOT_A_TOKEN=inside-heredoc\nEOF\n").carried).toBe("cat <<EOF\nexport NOT_A_TOKEN=inside-heredoc\nEOF\n");
+  });
+
+  it("readonly, local, a quoted assignment and a flagless fish set are assignments too", () => {
+    expect(stripExports('readonly MY_TOKEN=x\nlocal DB_PASSWORD=y\nexport "GH_TOKEN=z"\nexport \'API_KEY=w\'\nset MY_KEY val\nset plain val\nreadonly PLAIN=1\n')).toEqual({
+      names: ["MY_TOKEN", "DB_PASSWORD", "GH_TOKEN", "API_KEY", "MY_KEY"],
+      carried: "set plain val\nreadonly PLAIN=1\n",
+    });
+  });
+
   it("a value never appears in the output, and a file with no secret exports is not reported", async () => {
     const out = await shellRc(laptop(home()));
     expect(out).toEqual([{ path: "~/.zshrc", names: ["ANTHROPIC_API_KEY", "GITHUB_TOKEN"], carried: "export PATH=$HOME/.local/bin:$PATH\nexport KEYTIMEOUT=1\nalias ll='ls -l'\n" }]);
