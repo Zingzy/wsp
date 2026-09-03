@@ -3,20 +3,25 @@
 // workspace's panes in the center, the surface panel on the right. State
 // drives every switch here; there is no router.
 import type { ReactNode } from "react";
+import { CommandPalette } from "../components/palette/CommandPalette.js";
 import { PanelLayoutControls } from "../components/chat/PanelLayoutControls.js";
 import { Sidebar, SidebarInset, SidebarProvider, SidebarRail, SidebarTrigger } from "../components/ui/sidebar.js";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader.js";
 import { useMediaQuery } from "../hooks/useMediaQuery.js";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
+import { shortcutLabelForCommand } from "../keybindings.js";
 import { useSelectedId, useStore, useWorkspace } from "../protocol/store.js";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../rightPanelStore.js";
 import { WorkspaceSidebar } from "../sidebar/WorkspaceSidebar.js";
 import { DisconnectedBanner } from "./DisconnectedBanner.js";
+import { KeybindingDispatcher } from "./KeybindingDispatcher.js";
 import { RightPanel } from "./RightPanel.js";
 
 const SIDEBAR_WIDTH_STORAGE_KEY = "wsp:sidebar-width";
 const SIDEBAR_MIN_WIDTH = 220;
 const SIDEBAR_MAX_WIDTH = 480;
+const RIGHT_PANEL_SHORTCUT_LABEL = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "rightPanel.toggle");
 
 export function AppShell({ children }: { children: ReactNode }) {
   const workspaceId = useSelectedId();
@@ -35,7 +40,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       terminalShortcutLabel={null}
       rightPanelAvailable={workspaceId !== null}
       rightPanelOpen={rightPanelOpen}
-      rightPanelShortcutLabel={null}
+      rightPanelShortcutLabel={RIGHT_PANEL_SHORTCUT_LABEL}
       rightPanelUnavailableLabel="Select a workspace to open the right panel"
       liveAgentCount={0}
       onToggleTerminal={() => {}}
@@ -47,6 +52,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <SidebarProvider className="h-dvh! min-h-0!" defaultOpen>
+      <KeybindingDispatcher />
+      <CommandPalette />
       <Sidebar
         side="left"
         collapsible="offcanvas"

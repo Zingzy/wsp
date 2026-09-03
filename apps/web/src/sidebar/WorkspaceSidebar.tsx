@@ -28,6 +28,7 @@ import { useLocalStorage, type Codec } from "../hooks/useLocalStorage.js";
 import { useNowMinute } from "../hooks/useNowMinute.js";
 import { cn } from "../lib/utils.js";
 import { useSelectedId, useStore } from "../protocol/store.js";
+import { onNewWorkspaceRequest } from "../shell/shellRequests.js";
 import { NewWorkspaceDialog } from "./NewWorkspaceDialog.js";
 import { ProjectFavicon } from "./ProjectFavicon.js";
 import {
@@ -129,6 +130,9 @@ export function WorkspaceSidebar() {
   const openDialog = (): void => {
     setDialog({ key: Date.now(), name: defaultWorkspaceName(workspaces.map(w => w.name)), error: null });
   };
+  const openDialogRef = useRef(openDialog);
+  openDialogRef.current = openDialog;
+  useEffect(() => onNewWorkspaceRequest(() => openDialogRef.current()), []);
 
   const create = async (name: string): Promise<void> => {
     if (!api) return;

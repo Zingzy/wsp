@@ -25,3 +25,7 @@ if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
       dispatchEvent: () => false,
     }) as MediaQueryList;
 }
+
+// The kit's sidebar persists its open state through the Cookie Store API,
+// which jsdom does not ship; toggling it in a test needs a sink.
+(globalThis as { cookieStore?: unknown }).cookieStore ??= { set: async () => {} };
