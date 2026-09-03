@@ -4,7 +4,7 @@
 // tabs stay greyed out here with a reason, so the picker never opens a tab
 // that has nothing behind it.
 import type { ReactNode } from "react";
-import { MetaPanel } from "../components/MetaPanel.js";
+import { MachineSurface } from "../components/machine/MachineSurface.js";
 import { RightPanelSheet } from "../components/RightPanelSheet.js";
 import { RightPanelTabs, type PreviewTabSnapshot } from "../components/RightPanelTabs.js";
 import type { PreviewPanelMode } from "../components/preview/PreviewPanelShell.js";
@@ -70,7 +70,7 @@ export function RightPanel({
       unavailableReasons={{ browser: CENTER_TABS_REASON, terminal: CENTER_TABS_REASON }}
     >
       {active?.kind === "machine" ? (
-        <MetaPanel />
+        <MachineSurface workspaceId={workspaceId} />
       ) : active?.kind === "screen" ? (
         <ScreenTab workspaceId={workspaceId} />
       ) : (

@@ -196,6 +196,8 @@ export interface Api {
   touch?(id: string): Promise<void>;
   /** Replaces the machine with a fresh golden fork at the new size; gate on capabilities().resize. */
   upgrade(id: string, size: WorkspaceSizeSpec): Promise<WorkspaceView>;
+  /** Replaces a zombie's machine with a fresh golden fork carrying the vault; id and name stay. Optional so fixtures without a zombie need not fake it. */
+  rebuild?(id: string): Promise<WorkspaceView>;
   capabilities(): Promise<Capabilities>;
   /** How to dial the workspace's daemon right now; ask again per dial, the edge token expires hourly. */
   daemonReach(id: string): Promise<DaemonReachView>;
@@ -254,6 +256,7 @@ export function makeApi(c: ProtocolClient): Api {
     touch: async id => void (await c.request("workspaces.touch", { workspaceId: id })),
     upgrade: async (id, size) =>
       (await c.request<{ workspace: WorkspaceView }>("workspaces.upgrade", { workspaceId: id, ...size })).workspace,
+    rebuild: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.rebuild", { workspaceId: id })).workspace,
     capabilities: async () => (await c.request<{ capabilities: Capabilities }>("capabilities.get")).capabilities,
     daemonReach: async id => (await c.request<{ reach: DaemonReachView }>("workspaces.daemonReach", { workspaceId: id })).reach,
     portReach: async (id, port) => (await c.request<{ reach: PortReachView }>("workspaces.portReach", { workspaceId: id, port })).reach,
