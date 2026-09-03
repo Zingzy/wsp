@@ -7,9 +7,22 @@ export * from "./reach.js";
 // Re-exported so clients (wspx) can wire a backend without importing the
 // engine directly; the runtime is the only layer that drives it.
 export {
-  SolariBackend, applyDotfiles,
-  type SolariBackendOptions, type GoldenManifest, type GoldenVersion, type Machine, type DotfilesResult,
-  type GoldenImport, type ImportLedger, type ImportResult, type PackedFiles,
+  SolariBackend,
+  applyDotfiles,
+  describeAge,
+  type SolariBackendOptions,
+  type GoldenManifest,
+  type GoldenVersion,
+  type Machine,
+  type DotfilesResult,
+  type ReapFailure,
+  type ReapResult,
+  type ReapedMachine,
+  type SparedMachine,
+  type GoldenImport,
+  type ImportLedger,
+  type ImportResult,
+  type PackedFiles,
 } from "@wsp/engine";
 // The protocol types the runtime API surface speaks.
 export type {
