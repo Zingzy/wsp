@@ -77,7 +77,7 @@ describe("app shell", () => {
   it("renders the sidebar, the center and the right panel", async () => {
     await mountShell();
     const sidebar = document.querySelector('[data-slot="sidebar"]');
-    expect(sidebar?.textContent).toContain("workspaces");
+    expect(sidebar?.textContent).toContain("Workspaces");
     expect(sidebar?.textContent).toContain("api");
     expect(screen.getByText("center content")).toBeTruthy();
     expect(tabbar()).not.toBeNull();
