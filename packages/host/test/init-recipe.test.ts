@@ -140,7 +140,7 @@ describe("recipe file", () => {
     expect(back.entries.find(e => e.id === "shell/zshrc")).not.toHaveProperty("choice");
     // A re-run of the saved file preselects exactly what was ticked and chosen.
     expect(back.entries.filter(initialTicks).map(e => e.id)).toEqual(["identity/git-user", "shell/zshrc", "agents/claude", "logins/claude"]);
-    expect(back.entries.filter(e => e.rung === "logins").map(initialChoice)).toEqual(["machine", "copy"]);
+    expect(back.entries.filter(e => e.rung === "logins").map(initialChoice)).toEqual(["machine", "copy", "machine"]);
   });
 
   it("loadManifest reports the path on a bad file, ahead of the collector's reason", () => {

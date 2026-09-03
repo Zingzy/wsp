@@ -7,6 +7,7 @@
 import type { Readable, Writable } from "node:stream";
 import { styleText } from "node:util";
 import { RUNGS, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
+import type { BackendPricing } from "@wsp/engine";
 import type { GoldenBuilderView, GoldenRecipe, GoldenStage, Runtime } from "@wsp/runtime";
 import { S_BAR, S_STEP_ERROR, S_STEP_SUBMIT, cancel, confirm, intro, isCancel, log, note, outro } from "@clack/prompts";
 import type { Keys } from "./cli.js";
@@ -21,6 +22,7 @@ import {
   installFor,
   isTickable,
   loadManifest,
+  loginShown,
   recipePath,
   saveRecipe,
   type ChecklistItem,
@@ -47,6 +49,8 @@ export interface InitOptions {
   /** Reads this computer, telling onRung how many rows each rung found as it finishes. */
   collect(onRung: (rung: Rung, rows: number) => void): Promise<Manifest>;
   keys: Keys;
+  /** Prices the builder the confirm names. */
+  pricing: BackendPricing;
   statePath: string;
   /** Builds the runtime around the recipe the ticks produced. */
   runtime(recipe: GoldenRecipe): Runtime;
@@ -265,8 +269,12 @@ function spin(output: Writable, label: string, animate: boolean): Spinner {
   let tick = 0;
   let detail = "";
   const frames = ["◒", "◐", "◓", "◑"];
+  const columns = (output as Writable & { columns?: number }).columns;
+  // Glyph, two gaps, one spare cell: past the width the line wraps and the carriage return redraws over the wrapped tail.
+  const room = columns === undefined ? Infinity : columns - label.length - 6;
   const draw = (): void => {
-    output.write(`\r${styleText("cyan", frames[tick++ % frames.length]!)}  ${label}${detail !== "" ? `  ${dim(detail)}` : ""}`);
+    const text = detail.length > room ? `${detail.slice(0, Math.max(0, room - 1))}…` : detail;
+    output.write(`\r${styleText("cyan", frames[tick++ % frames.length]!)}  ${label}${text !== "" ? `  ${dim(text)}` : ""}`);
   };
   draw();
   const timer = setInterval(draw, 80);
@@ -358,10 +366,19 @@ interface Answers {
 }
 
 function defaultAnswers(manifest: Manifest): Answers {
+  const agents = new Set(manifest.entries.filter(e => e.rung === "agents" && initialTicks(e)).map(e => e.id));
+  const shown = manifest.entries.filter(e => loginShown(e, manifest, agents));
   return {
-    ticks: new Set(manifest.entries.filter(e => (e.rung === "logins" ? initialChoice(e) === "copy" : initialTicks(e))).map(e => e.id)),
-    choices: new Map(manifest.entries.filter(e => e.rung === "logins").map(e => [e.id, initialChoice(e)])),
+    ticks: new Set(shown.filter(e => (e.rung === "logins" ? initialChoice(e) === "copy" : initialTicks(e))).map(e => e.id)),
+    choices: new Map(shown.filter(e => e.rung === "logins").map(e => [e.id, initialChoice(e)])),
   };
+}
+
+/** Names the builder about to bill: its size and the backend's rate for it. */
+function bootQuestion(recipe: GoldenRecipe, pricing: BackendPricing): string {
+  const size = { cpu: recipe.cpu ?? pricing.defaultSize.cpu, memMb: recipe.memMb ?? pricing.defaultSize.memMb };
+  const rate = pricing.rateUsdPerHour(size);
+  return `Boot a ${size.cpu} vCPU, ${Math.round(size.memMb / 1024)} GB builder on your Solari account and build this? About $${rate.toFixed(2)}/hr while it runs.`;
 }
 
 async function tickRungs(manifest: Manifest, io: InitIO): Promise<Answers | "cancel"> {
@@ -370,7 +387,8 @@ async function tickRungs(manifest: Manifest, io: InitIO): Promise<Answers | "can
   let i = 0;
   while (i < RUNGS.length) {
     const rung = RUNGS[i]!;
-    const entries = manifest.entries.filter(e => e.rung === rung);
+    const agents = answers.get("agents")?.ticks ?? new Set<string>();
+    const entries = manifest.entries.filter(e => e.rung === rung && loginShown(e, manifest, agents));
     const counter = `${i + 1}/${RUNGS.length}`;
     if (entries.length === 0) {
       log.message(`${styleText("bold", RUNG_TITLE[rung])}  ${dim(counter)}\n${dim("nothing found for this screen")}`, { output: io.output, symbol: styleText("green", S_STEP_SUBMIT) });
@@ -458,24 +476,27 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     answers = defaultAnswers(manifest);
   }
   const { ticks, choices } = answers;
+  const offered: Manifest = { entries: manifest.entries.filter(e => loginShown(e, manifest, ticks)) };
 
-  note(summaryNote(manifest, ticks, choices).join("\n"), "Summary", out);
-  if (interactive) {
-    const go = await confirm({ message: "Boot a machine on your Solari account and build this? It bills while it runs.", initialValue: false, input: io.input, output: io.output });
-    if (isCancel(go) || !go) {
-      cancel("Nothing was changed.", out);
-      return { code: 1 };
-    }
-  } else {
-    log.step(`Boot a machine on your Solari account and build this: taken as yes (${opts.yes ? "--yes" : "no terminal"}).`, out);
-  }
-
+  note(summaryNote(offered, ticks, choices).join("\n"), "Summary", out);
   const path = recipePath(opts.statePath);
   saveRecipe(path, manifest, ticks, choices);
   log.info(`Recipe saved to ${path}. Rerun with wsp init --manifest ${path} --yes to build it again.`, out);
 
   const bring = manifest.entries.filter(e => ticks.has(e.id));
-  const rt = opts.runtime(goldenRecipeFor(bring, opts.keys));
+  const recipe = goldenRecipeFor(bring, opts.keys);
+  const question = bootQuestion(recipe, opts.pricing);
+  if (interactive) {
+    const go = await confirm({ message: `${question}\nNo costs nothing and keeps the saved recipe for wsp init --manifest.`, initialValue: false, input: io.input, output: io.output });
+    if (isCancel(go) || !go) {
+      cancel(`Nothing was booted. The recipe stays at ${path}.`, out);
+      return { code: 1 };
+    }
+  } else {
+    log.step(`${question} Taken as yes (${opts.yes ? "--yes" : "no terminal"}).`, out);
+  }
+
+  const rt = opts.runtime(recipe);
   const stream = new StageStream(io.output, io.isTTY);
   const off = rt.events.on("golden.stage", e => {
     if (e.type === "golden.stage") stream.push({ type: "golden.stage", name: e.name, stage: e.stage, ...(e.detail !== undefined ? { detail: e.detail } : {}) });
