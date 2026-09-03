@@ -554,16 +554,19 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   });
   const recipe = goldenRecipeFor(bring, opts.keys, { import: imp });
   const rt = opts.runtime(recipe);
-  // A builder from an earlier run cannot be sealed (its first life is not known) and is
-  // never reaped from here: the person kills it, then runs init again.
+  // An earlier run's builder is attached to when it is still first-life and carries this
+  // recipe. Any other is never reaped from here: the person kills it, then runs init again.
   const earlier = await rt.golden.builders();
-  if (earlier.length > 0) {
-    const lines = earlier.map(b => {
-      const hours = Math.max(0, Date.now() - Date.parse(b.createdAt)) / 3_600_000;
-      return `${b.name} (${b.id}), ${fmtDuration(hours * 3_600_000)} old, about $${(hours * opts.pricing.rateUsdPerHour(b.size)).toFixed(2)} so far`;
-    });
+  const attach = earlier.find(b => b.name === GOLDEN_NAME && b.firstLife === true && b.recipeHash === imp.recipeHash);
+  const describeBuilder = (b: GoldenBuilderView): string => {
+    const hours = Math.max(0, Date.now() - Date.parse(b.createdAt)) / 3_600_000;
+    return `${b.name} (${b.id}), ${fmtDuration(hours * 3_600_000)} old, about $${(hours * opts.pricing.rateUsdPerHour(b.size)).toFixed(2)} so far`;
+  };
+  const blocking = earlier.filter(b => b !== attach);
+  if (blocking.length > 0) {
+    const lines = blocking.map(b => `${describeBuilder(b)}; ${b.firstLife === true ? "built from a different recipe" : "cannot be sealed after a restart"}`);
     log.warn(["A builder from an earlier wsp init is still running on the account:", ...lines].join("\n"), out);
-    cancel("Nothing was booted. Kill it first (the Solari console lists it); a builder cannot be sealed after a restart. Then run wsp init again.", out);
+    cancel("Nothing was booted. Kill it first (the Solari console lists it), then run wsp init again.", out);
     return { code: 1 };
   }
   // A free exit, before any consent dialog: a recipe whose ticked agents none can install is refused here, not on the builder.
@@ -587,7 +590,9 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     saveRecipe(path, manifest, ticks, choices);
   }
   const question = bootQuestion(recipe, opts.pricing);
-  if (interactive) {
+  if (attach !== undefined) {
+    log.step(`Attaching to your earlier builder: ${describeBuilder(attach)}. Nothing new boots; stages already applied are skipped.`, out);
+  } else if (interactive) {
     const go = await confirm({ message: `${question}\nNo costs nothing and keeps the recipe for wsp init --manifest.`, initialValue: false, input: io.input, output: io.output });
     if (isCancel(go) || !go) {
       cancel("Nothing was booted. The recipe is kept.", out);

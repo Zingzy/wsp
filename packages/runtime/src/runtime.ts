@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
 import {
+  BUILDER_IDLE_MS,
   DAEMON_PORT,
   NotFirstLifeError,
   OWNER_LABEL,
@@ -339,6 +340,8 @@ interface BuilderRecord {
   createdAt: string;
   size: WorkspaceSize;
   streamUrl?: string;
+  /** True from creation until the machine is ever paused, resumed or restored; only a first-life machine can be sealed. */
+  firstLife: boolean;
   /** What of the recipe this builder carries; a prepare with the same recipe hash reuses it. */
   import?: ImportLedger;
 }
@@ -346,8 +349,10 @@ interface BuilderRecord {
 interface LiveBuilder {
   record: BuilderRecord;
   builder: Builder;
-  /** Hydrated from the store by a later process, so its first life cannot be vouched for. */
+  /** Hydrated from the store and not proven first-life, so it can never seal; reap stops it. */
   stale: boolean;
+  /** Loaded from an earlier process's record, so nobody in this process is working on it. */
+  hydrated: boolean;
   reach?: PreviewReach;
 }
 
@@ -555,21 +560,44 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     idleTimeoutMs: backstopMs(idleWindowOf(r)),
   });
 
+  let owner = "";
+  /** Ids this process has created and not yet recorded; the sweep must not read them as lost. */
+  const inflight = new Set<string>();
+  const claiming = <T>(run: (b: MachineBackend) => Promise<T>): Promise<T> => {
+    const mine: string[] = [];
+    const b: MachineBackend = {
+      capabilities: backend.capabilities,
+      pricing: backend.pricing,
+      get: id => backend.get(id),
+      list: labels => backend.list(labels),
+      deleteSnapshot: id => backend.deleteSnapshot(id),
+      create: async spec => {
+        const m = await backend.create(spec);
+        inflight.add(m.id);
+        mine.push(m.id);
+        return m;
+      },
+    };
+    return run(b).finally(() => mine.forEach(id => inflight.delete(id)));
+  };
   /** Boots a golden fork for the record and writes back what the provider says it built.
    * A snapshot restores as the kind it was taken from, so the spec names that kind;
    * versions sealed before it was recorded were all sandbox. */
-  const fork = async (record: WorkspaceRecord, override?: WorkspaceSpec): Promise<Machine> => {
-    const spec = forkSpec(record, (await goldenVersionOf(record.golden))?.kind ?? "sandbox", override);
-    const machine = await backend.create(spec);
-    await setHostname(machine, record.name);
-    const shape = await shapeOf(machine);
-    if (shape !== undefined) record.shape = shape;
-    else delete record.shape;
-    record.size = sizeBuilt(shape, spec);
-    if (machine.streamUrl !== undefined) record.screen = { streamUrl: machine.streamUrl };
-    else delete record.screen;
-    return machine;
-  };
+  const fork = (record: WorkspaceRecord, bind: (machine: Machine) => void, override?: WorkspaceSpec): Promise<Machine> =>
+    claiming(async b => {
+      const spec = forkSpec(record, (await goldenVersionOf(record.golden))?.kind ?? "sandbox", override);
+      const machine = await b.create(spec);
+      // Named by its record before the claim is released, so no sweep sees it unclaimed.
+      bind(machine);
+      await setHostname(machine, record.name);
+      const shape = await shapeOf(machine);
+      if (shape !== undefined) record.shape = shape;
+      else delete record.shape;
+      record.size = sizeBuilt(shape, spec);
+      if (machine.streamUrl !== undefined) record.screen = { streamUrl: machine.streamUrl };
+      else delete record.screen;
+      return machine;
+    });
 
   const attach = (record: WorkspaceRecord, machine: Machine): LiveWorkspace => {
     const entry: LiveWorkspace = { record, machine, ws: undefined as unknown as Workspace };
@@ -577,11 +605,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       machine,
       {
         goldenSnapshot: record.golden,
-        resurrect: async (override?: Partial<MachineSpec>) => {
-          const m = await fork(record, override);
-          entry.machine = m;
-          return m;
-        },
+        resurrect: (override?: Partial<MachineSpec>) =>
+          fork(record, m => {
+            entry.machine = m;
+          }, override),
         vaultExport: async m => exportPaths(m, await vaultPathsOf(m)),
         vaultImport: (m, payload) => importInto(m, payload, "/"),
         stashVault: async m => {
@@ -655,26 +682,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     bus.on(type, e => idle.forget((e as { workspaceId: string }).workspaceId));
   }
 
-  let owner = "";
-  /** Ids this process has created and not yet recorded; the sweep must not read them as lost. */
-  const inflight = new Set<string>();
-  const claiming = <T>(run: (b: MachineBackend) => Promise<T>): Promise<T> => {
-    const mine: string[] = [];
-    const b: MachineBackend = {
-      capabilities: backend.capabilities,
-      pricing: backend.pricing,
-      get: id => backend.get(id),
-      list: labels => backend.list(labels),
-      deleteSnapshot: id => backend.deleteSnapshot(id),
-      create: async spec => {
-        const m = await backend.create(spec);
-        inflight.add(m.id);
-        mine.push(m.id);
-        return m;
-      },
-    };
-    return run(b).finally(() => mine.forEach(id => inflight.delete(id)));
-  };
   let hydrated: Promise<void> | undefined;
   const ready = (): Promise<void> => {
     hydrated ??= (async () => {
@@ -705,7 +712,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         transcripts.set(t.workspaceId, t.events);
       }
       for (const raw of await store.list(BUILDERS)) {
-        const stored = raw as Omit<BuilderRecord, "size"> & { size?: WorkspaceSize };
+        const stored = raw as Omit<BuilderRecord, "size" | "firstLife"> & { size?: WorkspaceSize; firstLife?: boolean };
         const machine = await backend.get(stored.id).catch((e: unknown) => {
           if ((e as { kind?: string }).kind === "missing") return undefined;
           throw e;
@@ -714,14 +721,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           await store.delete(BUILDERS, stored.id);
           continue;
         }
-        const record: BuilderRecord = { ...stored, size: stored.size ?? sizeBuilt(await shapeOf(machine), backend.pricing.defaultSize) };
+        // A machine found paused was paused: the marker is cleared for good. A pause and
+        // resume from outside wsp leaves no trace the provider reports, so it fails at the seal.
+        const firstLife = stored.firstLife === true && (await machine.state()) === "running";
+        const record: BuilderRecord = { ...stored, firstLife, size: stored.size ?? sizeBuilt(await shapeOf(machine), backend.pricing.defaultSize) };
+        if (stored.firstLife === true && !firstLife) await store.put(BUILDERS, record.id, record);
+        const reusable = firstLife && machine.labels?.[OWNER_LABEL] === owner;
         builders.set(record.id, {
           record,
           builder: {
-            machine, kind: record.kind, baseTemplate: record.baseTemplate, setupSha: record.setupSha, createdAt: record.createdAt, firstLife: false, size: record.size,
+            machine, kind: record.kind, baseTemplate: record.baseTemplate, setupSha: record.setupSha, createdAt: record.createdAt, firstLife: reusable, size: record.size,
             ...(record.import !== undefined ? { import: record.import } : {}),
           },
-          stale: true,
+          stale: !reusable,
+          hydrated: true,
         });
       }
     })();
@@ -757,9 +770,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         },
         firstLife: true,
       };
-      const machine = await fork(record);
-      record.machineId = machine.id;
-      attach(record, machine);
+      await fork(record, m => {
+        record.machineId = m.id;
+        attach(record, m);
+      });
       await persist(record);
       const v = view(record);
       bus.emit({ type: "workspace.created", workspace: v });
@@ -1007,13 +1021,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
   };
 
-  const builderView = (r: BuilderRecord): GoldenBuilderView => ({
+  const builderView = (r: BuilderRecord, b: LiveBuilder): GoldenBuilderView => ({
     id: r.id,
     name: r.name,
     kind: r.kind,
     createdAt: r.createdAt,
     size: r.size,
     ...(r.streamUrl !== undefined ? { screen: { streamUrl: r.streamUrl } } : {}),
+    firstLife: b.builder.firstLife,
+    ...(r.import !== undefined ? { recipeHash: r.import.recipeHash } : {}),
   });
 
   const forgetBuilder = async (id: string): Promise<void> => {
@@ -1058,15 +1074,27 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       void smoke;
       const stage = stageOf(name);
       return claiming(async b => {
-        // Reuse reaches only builders this process made: one hydrated from the
-        // store is not known first-life, so it could never seal (the host lists
-        // it and refuses to boot beside it). The stages skip on the ledger of a
-        // live builder from the same ticks instead of booting a second one.
+        // A first-life builder carrying the same ticks is attached to instead of
+        // booting a second one, whichever process made it; the stages skip on its
+        // ledger. A hydrated builder not proven first-life is stale: never reused.
         const same = imp === undefined ? undefined : [...builders.values()].find(x => !x.stale && x.record.name === name && x.record.import?.recipeHash === imp.recipeHash);
         if (same && imp) {
-          await applyGoldenImport(same.builder.machine, { import: imp, setup: recipe.setup, ...(same.record.import !== undefined ? { ledger: same.record.import } : {}), onStage: stage });
+          try {
+            const applied = await applyGoldenImport(same.builder.machine, { import: imp, setup: recipe.setup, ...(same.record.import !== undefined ? { ledger: same.record.import } : {}), onStage: stage });
+            same.record.import = applied.ledger;
+            await store.put(BUILDERS, same.record.id, same.record);
+          } catch (e) {
+            // Same road as a fresh builder that fails its stages: the machine goes, the person starts over.
+            let detail = e instanceof Error ? e.message : String(e);
+            await killUntilGone(backend, same.builder.machine, opts.killConfirm).catch((k: unknown) => {
+              detail += `; ${k instanceof Error ? k.message : String(k)}`;
+            });
+            await forgetBuilder(same.record.id);
+            stage("failed", detail);
+            throw e;
+          }
           stage("ready");
-          return builderView(same.record);
+          return builderView(same.record, same);
         }
         const builder = await prepareBuilder({
           backend: b,
@@ -1085,12 +1113,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           setupSha: builder.setupSha,
           createdAt: builder.createdAt,
           size: builder.size,
+          firstLife: true,
           ...(builder.machine.streamUrl !== undefined ? { streamUrl: builder.machine.streamUrl } : {}),
           ...(builder.import !== undefined ? { import: builder.import } : {}),
         };
-        builders.set(record.id, { record, builder, stale: false });
+        const entry: LiveBuilder = { record, builder, stale: false, hydrated: false };
+        builders.set(record.id, entry);
         await store.put(BUILDERS, record.id, record);
-        return builderView(record);
+        return builderView(record, entry);
       });
     },
 
@@ -1140,7 +1170,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async builders() {
       await ready();
-      return [...builders.values()].map(b => builderView(b.record));
+      return [...builders.values()].map(b => builderView(b.record, b));
     },
 
     async rollback(version, name) {
@@ -1186,11 +1216,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     status,
     reap: async olderThanMs => {
       await ready();
-      // A hydrated builder is not first-life and can never seal; stopping it is the only thing that ends its bill.
+      // A hydrated builder not proven first-life can never seal; stopping it is the only thing that ends its bill.
+      // A kept first-life one dies at six hours by our createdAt label: every get(id) on it resets the
+      // provider's rolling idle timer (measured), so the kill it was created with never fires while a host is up.
       const reaped: ReapedMachine[] = [];
       const failed: ReapFailure[] = [];
       const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
-      for (const b of [...builders.values()].filter(b => b.stale)) {
+      const now = Date.now();
+      for (const b of [...builders.values()]) {
+        const bornAt = Date.parse(b.builder.machine.labels?.["createdAt"] ?? b.record.createdAt);
+        const ageMs = Number.isNaN(bornAt) ? undefined : now - bornAt;
+        const expired = b.hydrated && ageMs !== undefined && ageMs >= BUILDER_IDLE_MS;
+        if (!b.stale && !expired) continue;
         try {
           await b.builder.machine.kill();
         } catch (e) {
@@ -1200,7 +1237,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           }
         }
         await forgetBuilder(b.record.id);
-        reaped.push({ id: b.record.id, builder: true, reason: "recorded" });
+        reaped.push(b.stale ? { id: b.record.id, builder: true, reason: "recorded" } : { id: b.record.id, builder: true, reason: "expired", ageMs: ageMs! });
       }
       const result = (swept: ReapResult): ReapResult => {
         const allFailed = failed.concat(swept.failed ?? []);
@@ -1211,7 +1248,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           await reap({
             backend,
             owner,
-            knownIds: () => [...live.values()].map(e => e.record.machineId).concat([...builders.keys()], [...inflight], reaped.map(r => r.id)),
+            knownIds: () => [...live.values()].flatMap(e => [e.record.machineId, e.machine.id]).concat([...builders.keys()], [...inflight], reaped.map(r => r.id)),
             ...(olderThanMs !== undefined ? { olderThanMs } : {}),
           }),
         );

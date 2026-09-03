@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { gunzipSync } from "node:zlib";
 import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
 import type { EventUnion } from "@wsp/protocol";
-import type { GoldenImport } from "@wsp/engine";
+import { BUILDER_IDLE_MS, type GoldenImport } from "@wsp/engine";
 import { createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
@@ -427,21 +427,24 @@ describe("runtime port reach", () => {
 describe("runtime golden builders", () => {
   const recipe = { setup: "install", smoke: "true" };
 
-  it("reap kills a builder left behind by a crashed wizard, whatever its age, and keeps this process's own", async () => {
+  it("reap keeps a first-life builder left behind by an earlier process, kills one found paused, and keeps this process's own", async () => {
     const backend = stubBackend();
     const store = memoryStore();
     const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
-    const stale = await crashed.golden.prepare({ name: "default" });
+    const kept = await crashed.golden.prepare({ name: "default" });
+    const paused = await crashed.golden.prepare({ name: "other" });
+    backend.machines[1]!.paused = true;
 
     const rt = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
-    const own = await rt.golden.prepare({ name: "default" });
-    expect((await rt.golden.builders()).map(b => b.id).sort()).toEqual([stale.id, own.id].sort());
+    const own = await rt.golden.prepare({ name: "mine" });
+    const byId = (a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id);
+    expect((await rt.golden.builders()).sort(byId).map(b => [b.id, b.firstLife])).toEqual([[kept.id, true], [paused.id, false], [own.id, true]]);
 
-    expect(await rt.reap()).toEqual({ reaped: [{ id: stale.id, builder: true, reason: "recorded" }], spared: [] });
-    expect(backend.machines.find(m => m.id === stale.id)!.killed).toBe(true);
-    expect(backend.machines.find(m => m.id === own.id)!.killed).toBe(false);
-    expect((await rt.golden.builders()).map(b => b.id)).toEqual([own.id]);
-    expect(await store.list("builders")).toHaveLength(1);
+    expect(await rt.reap()).toEqual({ reaped: [{ id: paused.id, builder: true, reason: "recorded" }], spared: [] });
+    expect(backend.machines.map(m => m.killed)).toEqual([false, true, false]);
+    expect((await rt.golden.builders()).sort(byId).map(b => b.id)).toEqual([kept.id, own.id]);
+    expect(await store.list("builders")).toHaveLength(2);
+    expect(await store.get("builders", kept.id)).toMatchObject({ firstLife: true });
     expect(await rt.workspaces.list()).toEqual([]);
   });
 
@@ -610,6 +613,7 @@ describe("runtime golden builders", () => {
     const store = memoryStore();
     const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
     const stale = await crashed.golden.prepare();
+    backend.machines[0]!.paused = true;
     const orphan = await backend.create({ kind: "sandbox", labels: { wsp: "1", createdAt: new Date(Date.now() - 3_600_000).toISOString() } });
     // The listing lags a kill on the real provider and GET still answers for the zombie, so both keep showing the killed machine.
     backend.list = async () => backend.machines.map(m => ({ id: m.id, state: "running" as const, labels: m.spec.labels ?? {} }));
@@ -632,6 +636,8 @@ describe("runtime golden builders", () => {
     const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
     const first = await crashed.golden.prepare({ name: "a" });
     const second = await crashed.golden.prepare({ name: "b" });
+    backend.machines[0]!.paused = true;
+    backend.machines[1]!.paused = true;
     const orphan = await backend.create({ kind: "sandbox", labels: { wsp: "1", createdAt: new Date(Date.now() - 3_600_000).toISOString() } });
     backend.machines[0]!.kill = async () => { throw new Error("502 exec failed"); };
     const rt = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
@@ -650,6 +656,7 @@ describe("runtime golden builders", () => {
     const store = memoryStore();
     const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
     const stale = await crashed.golden.prepare();
+    backend.machines[0]!.paused = true;
     const rt = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
     backend.list = async () => { throw new Error("list 502"); };
     expect(await rt.reap()).toEqual({ reaped: [{ id: stale.id, builder: true, reason: "recorded" }], spared: [], failed: [{ message: "list 502" }] });
@@ -673,6 +680,85 @@ describe("runtime golden builders", () => {
     expect(result.spared.map(b => [b.id, b.whose, b.owner])).toEqual([[foreign.id, "foreign", "h_other"], [unowned.id, "none", undefined]]);
     expect(backend.machines.filter(m => m.killed).map(m => m.id)).toEqual([lost.id]);
     for (const id of [own.id, foreign.id, unowned.id, experiment.id]) expect(backend.machines.find(m => m.id === id)!.killed).toBe(false);
+  });
+
+  it("a recorded marked builder at 6 h 1 min by our createdAt label is reaped although get(id) says running; one at 5 h 59 min is kept", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
+    const expired = await crashed.golden.prepare({ name: "old" });
+    const kept = await crashed.golden.prepare({ name: "young" });
+    // The label is our clock at creation; the provider's view of a fetched machine says running and moves its own createdAt on every read.
+    backend.machines[0]!.spec.labels!["createdAt"] = new Date(Date.now() - BUILDER_IDLE_MS - 60_000).toISOString();
+    backend.machines[1]!.spec.labels!["createdAt"] = new Date(Date.now() - BUILDER_IDLE_MS + 60_000).toISOString();
+
+    const rt = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
+    expect(await backend.machines[0]!.state()).toBe("running");
+    expect(await rt.reap()).toEqual({ reaped: [{ id: expired.id, builder: true, reason: "expired", ageMs: expect.any(Number) }], spared: [] });
+    expect(backend.machines.map(m => m.killed)).toEqual([true, false]);
+    expect((await rt.golden.builders()).map(b => [b.id, b.firstLife])).toEqual([[kept.id, true]]);
+    expect(await store.list("builders")).toHaveLength(1);
+    // This process's own builder is never aged out by the sweep: a person may be working on it.
+    const own = await rt.golden.prepare({ name: "mine" });
+    backend.machines[2]!.spec.labels!["createdAt"] = new Date(Date.now() - BUILDER_IDLE_MS - 60_000).toISOString();
+    expect(await rt.reap()).toEqual({ reaped: [], spared: [] });
+    expect(backend.machines[2]!.killed).toBe(false);
+    void own;
+  });
+
+  it("the sweep never fetches a machine it leaves alone", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
+    await rt.golden.builders();
+    const now = new Date().toISOString();
+    await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-builder": "1", "wsp-owner": "h_other", createdAt: now } });
+    await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-owner": "h_other", createdAt: new Date(Date.now() - 3_600_000).toISOString() } });
+    await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-builder": "1", createdAt: now } });
+    await backend.create({ kind: "sandbox", labels: { wsp: "1", createdAt: now } });
+    const get = vi.spyOn(backend, "get");
+    const result = await rt.reap();
+    expect(result.reaped).toEqual([]);
+    expect(result.spared.map(s => s.whose)).toEqual(["foreign", "foreign", "none", "none"]);
+    expect(get).not.toHaveBeenCalled();
+    expect(backend.machines.some(m => m.killed)).toBe(false);
+  });
+
+  it("the sweep leaves a workspace this process is still forking alone, on create and on a resurrect", async () => {
+    const backend = stubBackend();
+    let release!: () => void;
+    let gate = new Promise<void>(r => (release = r));
+    backend.execImpl = async (_m, cmd) => {
+      if (cmd.startsWith("hostname ")) await gate;
+      return { exitCode: 0, stdout: "", stderr: "" };
+    };
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    await rt.golden.builders();
+    const creating = rt.workspaces.create({ golden: "snap_g", name: "x" });
+    await vi.waitFor(() => expect(backend.machines).toHaveLength(1));
+    // Well past the minute a fresh own machine gets anyway: only the claim protects it now.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 5 * 60_000);
+    try {
+      expect(await rt.reap()).toEqual({ reaped: [], spared: [] });
+      expect(backend.machines[0]!.killed).toBe(false);
+      release();
+      const ws = await creating;
+      expect(ws.machineId).toBe("m1");
+
+      await rt.workspaces.nap(ws.id);
+      backend.machines[0]!.killed = true; // vanished while paused, so the wake forks anew
+      gate = new Promise<void>(r => (release = r));
+      const waking = rt.workspaces.wake(ws.id);
+      await vi.waitFor(() => expect(backend.machines).toHaveLength(2));
+      vi.setSystemTime(Date.now() + 5 * 60_000);
+      expect(await rt.reap()).toEqual({ reaped: [], spared: [] });
+      expect(backend.machines[1]!.killed).toBe(false);
+      release();
+      expect((await waking).machineId).toBe("m2");
+      expect(await rt.reap()).toEqual({ reaped: [], spared: [] });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -1332,17 +1418,122 @@ describe("runtime golden import", () => {
     expect(await rt.golden.builders()).toHaveLength(1);
   });
 
-  it("a different recipe hash or a builder from another process gets a fresh machine", async () => {
+  const recipeWith = (imp: GoldenImport) => ({ setup: "true", smoke: "true", import: imp });
+  const SKIPPED = ["applying-setup:already applied", "uploading-files:already applied", "installing-tools:already applied", "installing-harness:already applied", "ready:"];
+
+  it("a first-life builder from an earlier process with the same recipe is attached to: every stage skipped, one machine, and it seals", async () => {
     const backend = stubBackend();
     backend.execImpl = dfOk;
     const store = memoryStore();
-    const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true", import: importOf() } });
-    await crashed.golden.prepare();
-    const rt = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true", import: importOf() } });
-    const fresh = await rt.golden.prepare();
+    const first = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()) });
+    const b = await first.golden.prepare();
+    expect(await store.get("builders", b.id)).toMatchObject({ firstLife: true });
+
+    const second = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()) });
+    expect(await second.golden.builders()).toEqual([expect.objectContaining({ id: b.id, firstLife: true, recipeHash: "h1" })]);
+    const frames: string[] = [];
+    second.events.on("golden.stage", e => { if (e.type === "golden.stage") frames.push(`${e.stage}:${e.detail ?? ""}`); });
+    const again = await second.golden.prepare();
+    expect(again).toMatchObject({ id: b.id, firstLife: true, recipeHash: "h1" });
+    expect(backend.machines).toHaveLength(1);
+    expect(frames).toEqual(SKIPPED);
+    expect(await second.reap()).toEqual({ reaped: [], spared: [] });
+    const { version } = await second.golden.seal(b.id);
+    expect(version.smoke).toEqual({ cmd: "codex --version", exitCode: 0 });
+    expect(backend.machines[0]!.killed).toBe(true);
+    expect(await store.list("builders")).toEqual([]);
+  });
+
+  it("a builder found paused is refused: its marker is cleared for good, a fresh one boots, and reap stops it", async () => {
+    const backend = stubBackend();
+    backend.execImpl = dfOk;
+    const store = memoryStore();
+    const first = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()) });
+    const b = await first.golden.prepare();
+    backend.machines[0]!.paused = true;
+
+    const second = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()) });
+    expect(await second.golden.builders()).toEqual([expect.objectContaining({ id: b.id, firstLife: false })]);
+    expect(await store.get("builders", b.id)).toMatchObject({ firstLife: false });
+    const fresh = await second.golden.prepare();
+    expect(fresh.id).not.toBe(b.id);
     expect(backend.machines).toHaveLength(2);
-    const other = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true", import: importOf("h9") } });
-    void other;
-    expect(fresh.id).toBe(backend.machines[1]!.id);
+
+    // Resumed from outside wsp: the provider reports it running again, the record still says not first-life.
+    backend.machines[0]!.paused = false;
+    const third = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()) });
+    expect((await third.golden.builders()).map(x => [x.id, x.firstLife])).toEqual([[b.id, false], [fresh.id, true]]);
+    expect(await third.reap()).toEqual({ reaped: [{ id: b.id, builder: true, reason: "recorded" }], spared: [] });
+    expect(backend.machines.map(m => m.killed)).toEqual([true, false]);
+  });
+
+  it("a different recipe hash gets a fresh machine; the earlier first-life builder stays, listed with its hash", async () => {
+    const backend = stubBackend();
+    backend.execImpl = dfOk;
+    const store = memoryStore();
+    const first = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()) });
+    const b = await first.golden.prepare();
+
+    const second = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf("h9")) });
+    const fresh = await second.golden.prepare();
+    expect(fresh.id).not.toBe(b.id);
+    expect(backend.machines).toHaveLength(2);
+    expect((await second.golden.builders()).map(x => [x.id, x.firstLife, x.recipeHash])).toEqual([[b.id, true, "h1"], [fresh.id, true, "h9"]]);
+    expect(await second.reap()).toEqual({ reaped: [], spared: [] });
+    expect(backend.machines.some(m => m.killed)).toBe(false);
+  });
+
+  it("a builder wearing another owner's label is refused even though this store records it, and reap stops it", async () => {
+    const backend = stubBackend();
+    backend.execImpl = dfOk;
+    const store = memoryStore();
+    const first = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()) });
+    const b = await first.golden.prepare();
+    await store.put("owner", "id", { id: "h_other" });
+
+    const second = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()) });
+    expect(await second.golden.builders()).toEqual([expect.objectContaining({ id: b.id, firstLife: false })]);
+    expect(await store.get("builders", b.id)).toMatchObject({ firstLife: true });
+    const fresh = await second.golden.prepare();
+    expect(fresh.id).not.toBe(b.id);
+    expect(backend.machines[1]!.spec.labels).toMatchObject({ "wsp-owner": "h_other" });
+    expect(await second.reap()).toEqual({ reaped: [{ id: b.id, builder: true, reason: "recorded" }], spared: [] });
+  });
+
+  it("a record written before the marker existed is never reused", async () => {
+    const backend = stubBackend();
+    backend.execImpl = dfOk;
+    const store = memoryStore();
+    const first = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()) });
+    const b = await first.golden.prepare();
+    const { firstLife: _marker, ...older } = (await store.get("builders", b.id)) as { firstLife: boolean };
+    await store.put("builders", b.id, older);
+
+    const second = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()) });
+    expect(await second.golden.builders()).toEqual([expect.objectContaining({ id: b.id, firstLife: false })]);
+    await second.golden.prepare();
+    expect(backend.machines).toHaveLength(2);
+  });
+
+  it("a reused builder whose stages fail is killed and forgotten, the same as a fresh one", async () => {
+    const backend = stubBackend();
+    backend.execImpl = dfOk;
+    const store = memoryStore();
+    const first = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()) });
+    const b = await first.golden.prepare();
+    // A ledger with the harness still to run, as a builder whose earlier process died mid-stage would carry.
+    const stored = (await store.get("builders", b.id)) as { import: { applied: string[] } };
+    stored.import.applied = stored.import.applied.filter(s => s !== "installing-harness");
+    await store.put("builders", b.id, stored);
+    backend.execImpl = (m, cmd) => (cmd === "true" ? { exitCode: 1, stdout: "", stderr: "setup broke" } : dfOk(m, cmd));
+
+    const second = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()), killConfirm: { graceMs: 50, pollMs: 5 } });
+    const frames: string[] = [];
+    second.events.on("golden.stage", e => { if (e.type === "golden.stage") frames.push(`${e.stage}:${e.detail ?? ""}`); });
+    await expect(second.golden.prepare()).rejects.toThrow("golden setup failed");
+    expect(frames.at(-1)).toMatch(/^failed:golden setup failed/);
+    expect(backend.machines[0]!.killed).toBe(true);
+    expect(await second.golden.builders()).toEqual([]);
+    expect(await store.list("builders")).toEqual([]);
   });
 });

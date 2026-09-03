@@ -55,6 +55,7 @@ export function stubBackend(): StubBackend {
         id: `m${++seq}`,
         kind: spec.kind,
         streamUrl: undefined,
+        ...(spec.labels !== undefined ? { labels: spec.labels } : {}),
         spec,
         paused: false,
         killed: false,

@@ -46,6 +46,8 @@ export interface Machine {
   readonly id: string;
   readonly kind: MachineKind;
   readonly streamUrl?: string;
+  /** The labels the provider reported when this handle was made; absent on backends that carry none. */
+  readonly labels?: Record<string, string>;
   exec(cmd: string, opts?: { timeoutMs?: number }): Promise<ExecResult>; // always REST path
   snapshot(name: string): Promise<string>;
   pause(): Promise<void>;

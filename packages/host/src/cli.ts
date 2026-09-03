@@ -26,6 +26,7 @@ import {
 import { CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, claudeEnvs, deployDaemon, doctor } from "./doctor.js";
 import { keychainReader } from "./init-import.js";
 import { runInit, type InitIO } from "./init.js";
+import { recipePath } from "./init-recipe.js";
 import { TAGLINE, opening } from "./init-opening.js";
 import type { ChecklistItem } from "./init-recipe.js";
 import { startHost, type HostHandle } from "./server.js";
@@ -419,6 +420,7 @@ async function hostFor(
       ...(opts.checklist !== undefined ? { checklist: opts.checklist } : {}),
       ...(keys.anthropic !== undefined ? { workspaceEnvs: claudeEnvs(keys.anthropic) } : {}),
       log: line => io.log(line),
+      recipePath: recipePath(opts.statePath),
     });
     writeFileSync(lockPath, JSON.stringify({ ...lock, port: handle.port, wsPort: handle.wsPort }));
     // Other local tools read the token from disk; the WS never sees it in a URL.

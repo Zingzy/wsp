@@ -273,6 +273,10 @@ export const GoldenBuilderView = z.object({
   /** What the provider built, so a builder left running can be priced. */
   size: z.object({ cpu: z.number(), memMb: z.number() }),
   screen: z.object({ streamUrl: z.string() }).optional(),
+  /** True while the machine has never been paused, resumed or restored, so it can still be sealed. */
+  firstLife: z.boolean().optional(),
+  /** The recipe this builder carries; a prepare with the same hash attaches to it instead of booting. */
+  recipeHash: z.string().optional(),
 });
 export type GoldenBuilderView = z.infer<typeof GoldenBuilderView>;
 

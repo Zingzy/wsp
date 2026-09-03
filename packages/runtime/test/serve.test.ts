@@ -234,11 +234,12 @@ describe("serveRuntime golden wizard ops", () => {
     c.close();
   });
 
-  it("golden.seal on a builder hydrated by a later process is refused as notFirstLife and the builder dies", async () => {
+  it("golden.seal on a builder hydrated by a later process and found paused is refused as notFirstLife and the builder dies", async () => {
     const backend = stubBackend();
     const store = memoryStore();
     const first = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
     const builder = await first.golden.prepare();
+    backend.machines[0]!.paused = true;
     const second = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
     srv = await serveRuntime(second, { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });

@@ -371,6 +371,7 @@ describe("host sweeps orphaned machines", () => {
     const { rt, backend, store } = testRuntime();
     const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true" } });
     const owned = await crashed.golden.prepare();
+    backend.machines[0]!.paused = true; // paused from the console, so no longer first-life
     const orphanAt = ago(BUILDER_IDLE_MS + 60_000);
     const strayAt = ago(12 * 60_000);
     const foreign = await backend.create({ kind: "sandbox", labels: { ...BUILDER, "wsp-owner": "h_other", createdAt: ago(53_000) } });
@@ -406,6 +407,7 @@ describe("host sweeps orphaned machines", () => {
     const { rt, backend, store } = testRuntime();
     const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true" } });
     const owned = await crashed.golden.prepare();
+    backend.machines[0]!.paused = true;
     await backend.create({ kind: "sandbox", labels: { ...BUILDER, createdAt: ago(BUILDER_IDLE_MS + 60_000) } });
     backend.list = async () => { throw new Error("list 502"); };
     const lines: string[] = [];
@@ -451,7 +453,7 @@ describe("host sweeps orphaned machines", () => {
     const { id: owner } = (await store.get("owner", "id")) as { id: string };
     const ahead = await backend.create({ kind: "sandbox", labels: { ...BUILDER, "wsp-owner": "h_other", createdAt: ago(-45_000) } });
     const almostMinute = await backend.create({ kind: "sandbox", labels: { ...BUILDER, "wsp-owner": "h_other", createdAt: ago(59_600) } });
-    const ownWs = await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-owner": owner, createdAt: ago(9.5 * 60_000) } });
+    const ownWs = await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-owner": owner, createdAt: ago(45_000) } });
     const hours = await backend.create({ kind: "sandbox", labels: { ...BUILDER, "wsp-owner": "h_other", createdAt: ago(6 * 3_600_000) } });
     const freshOwn = await backend.create({ kind: "sandbox", labels: { ...BUILDER, "wsp-owner": owner, createdAt: ago(30_000) } });
     const lines: string[] = [];
@@ -462,7 +464,7 @@ describe("host sweeps orphaned machines", () => {
     expect(lines).toEqual([
       `reap: left alone ${ahead.id}: builder from another wsp setup (owner h_other), 0 s old, $0.11/h (about $0.00 so far); kill it from the Solari console if it is yours and forgotten`,
       `reap: left alone ${almostMinute.id}: builder from another wsp setup (owner h_other), 59 s old, $0.11/h (about $0.00 so far); kill it from the Solari console if it is yours and forgotten`,
-      `reap: left alone ${ownWs.id}: workspace from this setup that no record claims, 9 min old, $0.11/h (about $0.02 so far); reaped once it is 10 min old unless a record claims it first`,
+      `reap: left alone ${ownWs.id}: workspace from this setup that no record claims, 45 s old, $0.11/h (about $0.00 so far); reaped once it is 1 min old unless a record claims it first`,
       `reap: left alone ${hours.id}: builder from another wsp setup (owner h_other), 6.0 h old, $0.11/h (about $0.66 so far); kill it from the Solari console if it is yours and forgotten`,
       `reap: left alone ${freshOwn.id}: builder from this setup that no record claims, 30 s old, $0.11/h (about $0.00 so far); reaped once it is 1 min old unless a record claims it first`,
     ]);
@@ -472,6 +474,7 @@ describe("host sweeps orphaned machines", () => {
     const { rt, backend, store } = testRuntime();
     const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true" } });
     const stuck = await crashed.golden.prepare();
+    backend.machines[0]!.paused = true;
     const orphanAt = ago(BUILDER_IDLE_MS + 60_000);
     const orphan = await backend.create({ kind: "sandbox", labels: { ...BUILDER, createdAt: orphanAt } });
     backend.machines[0]!.kill = async () => { throw new Error("502 exec failed"); };
@@ -484,6 +487,35 @@ describe("host sweeps orphaned machines", () => {
       `reap: stopped ${orphan.id} (wsp=1 wsp-builder=1 createdAt=${orphanAt}): builder with no owner, 6.0 h old`,
       `reap: could not stop ${stuck.id} (502 exec failed; stays recorded, retried next sweep)`,
     ]);
+  });
+
+  it("a first-life builder from an earlier run is kept, claimed against the sweep, and named at start", async () => {
+    const { rt, backend, store } = testRuntime();
+    const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true" } });
+    const kept = await crashed.golden.prepare();
+    const lines: string[] = [];
+
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l), recipePath: "/home/me/.wsp/state/golden-recipe.json" });
+
+    expect(backend.machines[0]!.killed).toBe(false);
+    expect(lines).toEqual([
+      `reap: left alone ${kept.id}: your earlier builder from this setup, still first-life, 0 s old, $0.11/h (about $0.00 so far); reuse it with wsp init --manifest /home/me/.wsp/state/golden-recipe.json, or it is stopped at six hours`,
+    ]);
+    expect(await store.get("builders", kept.id)).toMatchObject({ firstLife: true });
+  });
+
+  it("a kept first-life builder past six hours by our createdAt label is stopped and forgotten at start, with the line saying so", async () => {
+    const { rt, backend, store } = testRuntime();
+    const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true" } });
+    const old = await crashed.golden.prepare();
+    backend.machines[0]!.spec.labels!["createdAt"] = ago(BUILDER_IDLE_MS + 60_000);
+    const lines: string[] = [];
+
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
+
+    expect(backend.machines[0]!.killed).toBe(true);
+    expect(lines).toEqual([`reap: stopped ${old.id}: your earlier builder from this setup, 6.0 h old; a kept builder is stopped at six hours`]);
+    expect(await store.list("builders")).toEqual([]);
   });
 
   it("lists once per sweep", async () => {
