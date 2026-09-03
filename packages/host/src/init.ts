@@ -613,7 +613,8 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     const view = stream.stop();
     off();
     if (view.failure === undefined) log.error(e instanceof Error ? e.message : String(e), out);
-    outro("That machine is gone. Run wsp init again to start over; the recipe is kept.", out);
+    // A failed frame means a machine existed and prepare killed it; without one the create itself refused.
+    outro(`${view.failure !== undefined ? "That machine is gone." : "Nothing was booted."} Run wsp init again to start over; the recipe is kept.`, out);
     return { code: 1 };
   }
   stream.stop();

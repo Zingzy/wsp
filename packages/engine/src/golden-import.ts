@@ -145,17 +145,21 @@ export function placeGhToken(host: string, token: string, existing: string | und
   return `${body.endsWith("\n") ? body : `${body}\n`}${block}`;
 }
 
-/** Logins whose macOS copy lives in the Keychain rather than in the files the
- * recipe lists; on Linux the same tools keep the token in the file itself. */
-const KEYCHAIN: Record<string, Omit<PlannedSecret, "id">> = {
-  "logins/claude": { service: "Claude Code-credentials", dest: ".claude/.credentials.json", place: secret => secret },
-  "logins/gh": { service: "gh:github.com", dest: ".config/gh/hosts.yml", place: (secret, existing) => placeGhToken("github.com", secret, existing) },
+/** Where a Keychain item the recipe lists as `Keychain: <service>` lands on the
+ * guest and how; on Linux the same tools keep the token in the file itself. */
+const KEYCHAIN: Record<string, Omit<PlannedSecret, "id" | "service">> = {
+  "Claude Code-credentials": { dest: ".claude/.credentials.json", place: secret => secret },
+  "gh:github.com": { dest: ".config/gh/hosts.yml", place: (secret, existing) => placeGhToken("github.com", secret, existing) },
 };
 
 export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOptions): FilesPlan {
   const rewrites = [...(opts.rewrites ?? []), ...(opts.platform === "darwin" ? MAC_REWRITES : [])];
+  // A prefix rewrite also moves the directory itself when a row names it bare.
   const rewrite = (rel: string): string => {
-    for (const [from, to] of rewrites) if (rel.startsWith(from)) return to + rel.slice(from.length);
+    for (const [from, to] of rewrites) {
+      if (rel.startsWith(from)) return to + rel.slice(from.length);
+      if (from.endsWith("/") && rel === from.slice(0, -1)) return to.endsWith("/") ? to.slice(0, -1) : to;
+    }
     return rel;
   };
   const plan: FilesPlan = { files: [], secrets: [], skipped: [], bytes: 0, rungs: {} };
@@ -166,7 +170,14 @@ export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOption
     for (const p of e.paths) {
       const skip = (note: string): void => void plan.skipped.push({ id: e.id, path: p, note });
       if (p.startsWith("Keychain:")) {
+        const service = p.slice("Keychain:".length).trim();
+        const keychain = KEYCHAIN[service];
         if (opts.platform !== "darwin") skip("a macOS Keychain item; sign in on the machine");
+        else if (keychain === undefined) skip("no Keychain reader for this login yet; sign in on the machine");
+        else {
+          plan.secrets.push({ id: e.id, service, dest: rewrite(keychain.dest), place: keychain.place });
+          brought++;
+        }
         continue;
       }
       if (!p.startsWith("~/")) {
@@ -203,11 +214,6 @@ export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOption
         }
       }
       plan.files.push({ id: e.id, source, dest: rewrite(rel), mode: st.mode & 0o7777, dir: st.kind === "dir", size: st.size, mtimeMs: st.mtimeMs });
-      brought++;
-    }
-    const keychain = opts.platform === "darwin" && e.rung === "logins" ? KEYCHAIN[e.id] : undefined;
-    if (keychain) {
-      plan.secrets.push({ id: e.id, ...keychain, dest: rewrite(keychain.dest) });
       brought++;
     }
     if (brought > 0) {

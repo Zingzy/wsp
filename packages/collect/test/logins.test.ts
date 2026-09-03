@@ -33,16 +33,16 @@ describe("logins", () => {
     ]);
   });
 
-  it("gh with its token in the macOS Keychain cannot be copied from hosts.yml alone", async () => {
+  it("gh with its token in the macOS Keychain carries that item as a second path and still defaults to copy", async () => {
     const host = fakeHost({ files: { "~/.config/gh/hosts.yml": 200 }, exec: { "security find-generic-password -s gh:github.com": "keychain: ...\n" } });
     const rows = await detectLogins(host);
     expect(rows).toEqual([
-      { rung: "logins", id: "logins/gh", label: "GitHub CLI login", group: "CLI logins", paths: ["~/.config/gh/hosts.yml"], bytes: 200, default: "skip", reason: "token in Keychain; sign in on the machine" },
+      { rung: "logins", id: "logins/gh", label: "GitHub CLI login", group: "CLI logins", paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"], bytes: 200, default: "bring" },
     ]);
   });
 
   it.each([
-    ["gh with its token in the Keychain", { "~/.config/gh/hosts.yml": 200 }, { "security find-generic-password -s gh:github.com": "keychain: ...\n" }, "GitHub CLI login", "token in Keychain; sign in on the machine"],
+    ["gh with its token in the Keychain", { "~/.config/gh/hosts.yml": 200 }, { "security find-generic-password -s gh:github.com": "keychain: ...\n" }, "GitHub CLI login", undefined],
     ["aws", { "~/.aws/credentials": 120, "~/.aws/config": 300 }, {}, "AWS keys and profiles", undefined],
   ])("%s is labelled by name; any sentence about it is a detail, not part of the label", async (_name, files, exec, label, reason) => {
     const [row] = await detectLogins(fakeHost({ files, exec }));

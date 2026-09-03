@@ -152,13 +152,59 @@ describe("packPlan", () => {
     expect(packed.skipped).toEqual([{ id: "editors/tool", path: "~/.config2/tool/self", note: "a link into its own directory" }]);
   });
 
+  it("a cycle of links between sibling directories inside a copied directory is left out, not walked to ELOOP", async () => {
+    const home = laptop();
+    mkdirSync(join(home, ".config", "a"), { recursive: true });
+    mkdirSync(join(home, ".config", "b"), { recursive: true });
+    writeFileSync(join(home, ".config", "a", "a.toml"), "a\n");
+    writeFileSync(join(home, ".config", "b", "b.toml"), "b\n");
+    symlinkSync(join(home, ".config", "b"), join(home, ".config", "a", "link"));
+    symlinkSync(join(home, ".config", "a"), join(home, ".config", "b", "link"));
+    const plan = planFiles([row({ rung: "editors", id: "editors/a", paths: ["~/.config/a"] })], { home, stat: statOf, platform: "darwin" });
+    const packed = await packPlan(plan, { secrets: new Map(), home });
+    // b is reached once through a's link and shipped; b's link back to a is the cycle and stays out.
+    expect(listTar(packed.tar).map(e => e.path).filter(p => p !== "").sort()).toEqual([".config/", ".config/a/", ".config/a/a.toml", ".config/a/link/", ".config/a/link/b.toml"]);
+    expect(packed.skipped).toEqual([{ id: "editors/a", path: "~/.config/a/link/link", note: "a link into a directory already copied" }]);
+  });
+
+  it("parent directories the pack creates keep the laptop's mode, also when a rewrite renames or shortens the path", async () => {
+    const home = laptop();
+    chmodSync(join(home, ".config"), 0o700);
+    chmodSync(join(home, ".config", "gh"), 0o700);
+    mkdirSync(join(home, ".claude"), { mode: 0o700 });
+    writeFileSync(join(home, ".claude", "settings.json"), "{}\n");
+    mkdirSync(join(home, "Library", "Application Support", "com.vercel.cli"), { recursive: true });
+    // macOS keeps Application Support at 700; paired from the end it stands for .config here.
+    chmodSync(join(home, "Library", "Application Support"), 0o700);
+    chmodSync(join(home, "Library", "Application Support", "com.vercel.cli"), 0o700);
+    writeFileSync(join(home, "Library", "Application Support", "com.vercel.cli", "auth.json"), "{}\n");
+    const plan = planFiles(
+      [
+        row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml"], choice: "copy" }),
+        row({ rung: "agents", id: "agents/claude", paths: ["~/.claude/settings.json"] }),
+        row({ rung: "logins", id: "logins/vercel", paths: ["~/Library/Application Support/com.vercel.cli/auth.json"], choice: "copy" }),
+      ],
+      { home, stat: statOf, platform: "darwin", rewrites: [[".claude/", ".claude-cfg/"]] },
+    );
+    expect(plan.files.map(f => f.dest)).toEqual([".config/gh/hosts.yml", ".claude-cfg/settings.json", ".config/com.vercel.cli/auth.json"]);
+    const packed = await packPlan(plan, { secrets: new Map(), home });
+    const entries = listTar(packed.tar);
+    const modeOf = (p: string) => entries.find(e => e.path === p || e.path === `${p}/`)?.mode;
+    expect(modeOf(".config")).toMatch(/^drwx------/);
+    expect(modeOf(".config/gh")).toMatch(/^drwx------/);
+    expect(modeOf(".claude-cfg")).toMatch(/^drwx------/);
+    expect(modeOf(".config/com.vercel.cli")).toMatch(/^drwx------/);
+  });
+
   it("readSecrets asks the reader once per Keychain login and turns a failed read into a refusal that carries security's reason", async () => {
     const rows = [
-      row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml"], choice: "copy" }),
+      row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"], choice: "copy" }),
       row({ rung: "logins", id: "logins/claude", paths: ["Keychain: Claude Code-credentials"], choice: "copy" }),
       row({ rung: "logins", id: "logins/codex", paths: ["~/.codex/auth.json"], choice: "machine" }),
+      row({ rung: "logins", id: "logins/gh2", paths: ["~/.config/gh/hosts.yml"], choice: "copy" }),
     ];
     const wanted = keychainLogins(rows, "darwin");
+    // gh2 carries hosts.yml alone, so nothing is read from the Keychain for it.
     expect(wanted.map(s => [s.id, s.service])).toEqual([["logins/gh", "gh:github.com"], ["logins/claude", "Claude Code-credentials"]]);
     expect(keychainLogins(rows, "linux")).toEqual([]);
     const secrets = reader({ "gh:github.com": "gho_fake_token" });
@@ -172,7 +218,7 @@ describe("packPlan", () => {
     const home = laptop();
     const plan = planFiles(
       [
-        row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml"], choice: "copy" }),
+        row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"], choice: "copy" }),
         row({ rung: "logins", id: "logins/claude", paths: ["Keychain: Claude Code-credentials"], choice: "copy" }),
       ],
       { home, stat: statOf, platform: "darwin", rewrites: [[".claude/", ".claude-cfg/"]] },
@@ -194,7 +240,7 @@ describe("packPlan", () => {
     const real = execFileSync("sh", ["-c", "command -v tar"], { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } }).trim();
     writeFileSync(join(shim, "tar"), `#!/bin/sh\nfor a in "$@"; do case "$a" in *.tgz) stat -f '%Lp' "$a" >> "${record}" ;; esac; done\nexec "${real}" "$@"\n`, { mode: 0o755 });
     const home = laptop();
-    const plan = planFiles([row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml"], choice: "copy" })], { home, stat: statOf, platform: "darwin" });
+    const plan = planFiles([row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"], choice: "copy" })], { home, stat: statOf, platform: "darwin" });
     const path = process.env["PATH"];
     process.env["PATH"] = `${shim}:${path}`;
     try {
@@ -236,7 +282,7 @@ describe("importFor", () => {
         row({ rung: "tools", id: "tools/brew/jq", linux: "yes" }),
         row({ rung: "tools", id: "tools/brew/zingzy/tap/diskbloom", label: "zingzy/tap/diskbloom", linux: "unknown" }),
         row({ rung: "tools", id: "tools/npm/bun", label: "bun@1.4.0", version: "1.4.0" }),
-        row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml"], choice: "copy" }),
+        row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"], choice: "copy" }),
         ...over,
       ],
       { home, secrets: new Map(), platform: "darwin" },
@@ -258,6 +304,8 @@ describe("importFor", () => {
       ["agents/claude", GOLDEN_SETUP, GOLDEN_SMOKE],
       ["agents/codex", expect.stringContaining("npm install -g @openai/codex@"), "codex --version"],
     ]);
+    expect(imp.skippedAgents).toEqual([]);
+    expect(ticks(home, row({ rung: "agents", id: "agents/zed", label: "Zed" })).skippedAgents).toEqual([{ id: "agents/zed", name: "Zed", note: "no installer known" }]);
   });
 
   it("the recipe hash follows the shipped file's contents changing, through its size and mtime", () => {

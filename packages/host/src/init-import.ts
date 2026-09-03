@@ -94,6 +94,18 @@ const resolved = (abs: string): string | undefined => {
   }
 };
 
+/** A parent directory the pack created keeps the mode of the laptop directory it stands
+ * for, paired from the end since a rewrite may change the depth (~/Library/Application
+ * Support/x lands at .config/x, ~/.claude at .claude-cfg); the umask decides nothing. */
+function keepParentModes(stage: string, source: string, dest: string, home: string): void {
+  const laptop = relative(home, source).split("/").slice(0, -1);
+  const guest = dest.split("/").slice(0, -1);
+  for (let back = 1; back <= Math.min(laptop.length, guest.length); back++) {
+    const info = statOf(join(home, ...laptop.slice(0, laptop.length - back + 1)));
+    if (info !== undefined && info.kind === "dir") chmodSync(join(stage, ...guest.slice(0, guest.length - back + 1)), info.mode);
+  }
+}
+
 export interface PackOptions {
   /** Secrets already read from the Keychain, by service; a planned secret with no value is left out with a note. */
   secrets: ReadonlyMap<string, string>;
@@ -114,16 +126,27 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
     for (const f of plan.files) {
       const target = join(stage, f.dest);
       mkdirSync(dirname(target), { recursive: true });
+      keepParentModes(stage, f.source, f.dest, opts.home);
+      // Directories this copy has walked, by realpath: a link back to any of them would loop the walk.
+      const entered = new Set<string>();
       const keep = (src: string): boolean => {
-        if (!lstatSync(src).isSymbolicLink()) return true;
+        if (!lstatSync(src).isSymbolicLink()) {
+          if (statSync(src).isDirectory()) entered.add(resolved(src) ?? src);
+          return true;
+        }
         const shown = `~/${relative(opts.home, src)}`;
         const real = resolved(src);
         if (real === undefined) skipped.push({ id: f.id, path: shown, note: "a link whose target is gone" });
         else if (!(real === opts.home || real.startsWith(`${opts.home}/`))) skipped.push({ id: f.id, path: shown, note: `a link to ${real}, outside your home directory` });
         else if (resolved(dirname(src)) === real || (resolved(dirname(src)) ?? "").startsWith(`${real}/`)) skipped.push({ id: f.id, path: shown, note: "a link into its own directory" });
+        else if (entered.has(real)) skipped.push({ id: f.id, path: shown, note: "a link into a directory already copied" });
         else {
-          const why = refusedPath(relative(opts.home, real), statSync(real).isDirectory());
-          if (why === undefined) return true;
+          const dir = statSync(real).isDirectory();
+          const why = refusedPath(relative(opts.home, real), dir);
+          if (why === undefined) {
+            if (dir) entered.add(real);
+            return true;
+          }
           skipped.push({ id: f.id, path: shown, note: `a link to ~/${relative(opts.home, real)}: ${why}` });
         }
         return false;
@@ -208,6 +231,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
     tools: tools.installs,
     ...(agents.node !== undefined ? { node: agents.node } : {}),
     agents: agents.installs,
+    skippedAgents: agents.skipped.map(s => ({ id: s.id, name: label(s.id), note: s.note })),
     ...(opts.onResult !== undefined
       ? {
           onResult: (r: ImportResult) =>

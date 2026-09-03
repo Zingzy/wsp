@@ -41,6 +41,7 @@ const present = new Set([
   `${HOME}/.oh-my-zsh/custom`,
   `${HOME}/Library/Application Support/Cursor/User/settings.json`,
   `${HOME}/Library/Preferences/.wrangler/config/default.toml`,
+  `${HOME}/.claude`,
   `${HOME}/.claude/settings.json`,
   `${HOME}/.claude.json`,
   `${HOME}/.config/gh/hosts.yml`,
@@ -54,7 +55,7 @@ const links: Record<string, string | undefined> = {
   [`${HOME}/.key-linked`]: `${HOME}/.ssh/id_ed25519`,
   [`${HOME}/.gone-linked`]: undefined,
 };
-const isDir = (abs: string) => abs.endsWith("custom") || abs.endsWith("/.ssh") || abs.endsWith("/.ssh/keys");
+const isDir = (abs: string) => abs.endsWith("custom") || abs.endsWith("/.ssh") || abs.endsWith("/.ssh/keys") || abs.endsWith("/.claude");
 const stat = (abs: string): PathInfo | undefined => {
   if (abs in links) {
     const target = links[abs];
@@ -171,12 +172,15 @@ describe("planFiles: which laptop files travel and where they land", () => {
       ".claude-cfg/settings.json",
       ".claude-cfg/.claude.json",
     ]);
+    // A row that names the directory itself moves with it; the guest's config dir is what CLAUDE_CONFIG_DIR reads.
+    const bare = plan([row({ rung: "agents", id: "agents/claude", paths: ["~/.claude"] })], { rewrites: [[".claude/", ".claude-cfg/"]] });
+    expect(bare.files.map(f => [f.dest, f.dir])).toEqual([[".claude-cfg", true]]);
   });
 
   it("a Keychain item becomes a secret to read at pack time on macOS, and a skip note elsewhere", () => {
     const rows = [
       row({ rung: "logins", id: "logins/claude", paths: ["Keychain: Claude Code-credentials"], choice: "copy" }),
-      row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml"], choice: "copy" }),
+      row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"], choice: "copy" }),
     ];
     const mac = plan(rows, { rewrites: [[".claude/", ".claude-cfg/"]] });
     expect(mac.secrets.map(s => [s.id, s.service, s.dest])).toEqual([
@@ -188,7 +192,23 @@ describe("planFiles: which laptop files travel and where they land", () => {
 
     const linux = plan(rows, { platform: "linux" });
     expect(linux.secrets).toEqual([]);
-    expect(linux.skipped).toEqual([{ id: "logins/claude", path: "Keychain: Claude Code-credentials", note: "a macOS Keychain item; sign in on the machine" }]);
+    expect(linux.skipped).toEqual([
+      { id: "logins/claude", path: "Keychain: Claude Code-credentials", note: "a macOS Keychain item; sign in on the machine" },
+      { id: "logins/gh", path: "Keychain: gh:github.com", note: "a macOS Keychain item; sign in on the machine" },
+    ]);
+  });
+
+  it("a Keychain read is planned only for a Keychain: path the row carries; a gh row with hosts.yml alone reads nothing", () => {
+    const p = plan([row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml"], choice: "copy" })]);
+    expect(p.secrets).toEqual([]);
+    expect(p.files.map(f => f.dest)).toEqual([".config/gh/hosts.yml"]);
+    expect(p.skipped).toEqual([]);
+  });
+
+  it("a Keychain: path for a login the table has no reader for is a note, not a silent drop", () => {
+    const p = plan([row({ rung: "logins", id: "logins/glab", paths: ["Keychain: glab:gitlab.com"], choice: "copy" })]);
+    expect(p.secrets).toEqual([]);
+    expect(p.skipped).toEqual([{ id: "logins/glab", path: "Keychain: glab:gitlab.com", note: "no Keychain reader for this login yet; sign in on the machine" }]);
   });
 
   it("a Keychain login not chosen as copy is neither read nor noted", () => {
@@ -198,7 +218,7 @@ describe("planFiles: which laptop files travel and where they land", () => {
   });
 
   it("places the gh token under github.com and its users only; another host keeps its own lines", () => {
-    const p = plan([row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml"], choice: "copy" })]);
+    const p = plan([row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"], choice: "copy" })]);
     const existing = [
       "ghe.corp.example:",
       "    oauth_token: ghe_theirs",

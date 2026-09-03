@@ -474,6 +474,23 @@ describe("golden import stages", () => {
     expect(results[0]!.tools[1]!.note).toBe("Error: gh: A `brew install gh` process has already locked /home/linuxbrew/.linuxbrew/Cellar/gcc.");
   });
 
+  it("an agent set aside at plan time lands in the result as skipped, counts as ticked for the zero check, and is named in the detail", async () => {
+    const aside = [{ id: "agents/zed", name: "Zed", note: "no installer known" }];
+    const { backend, fetch } = backendFor();
+    const { stages, onStage } = stageRecorder();
+    const results: ImportResult[] = [];
+    const b = await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ skippedAgents: aside, onResult: r => void results.push(r) }) });
+    expect(results[0]!.agents[0]).toEqual({ id: "agents/zed", name: "Zed", outcome: "skipped", note: "no installer known" });
+    expect(stages.at(-2)).toBe("installing-harness:Claude Code, Codex installed; Zed skipped (no installer known)");
+    expect(b.import?.smoke).toBe("claude --version && codex --version");
+
+    const only = backendFor();
+    const rec = stageRecorder();
+    await expect(prepareBuilder({ backend: only.backend, setup: "true", fetch: only.fetch, onStage: rec.onStage, import: importOf({ agents: [], skippedAgents: aside }) })).rejects.toThrow(/no agent installed/);
+    expect(rec.stages.at(-1)).toBe("failed:no agent installed, so there is nothing to seal:\nZed: no installer known");
+    expect(only.killed).toEqual(["m1"]);
+  });
+
   it("when Homebrew itself fails, every brew formula is skipped rather than tried", async () => {
     const { backend, cmds, fetch } = backendFor([["brew-bootstrap", { exitCode: 1, stdout: "", stderr: "git: not found" }]]);
     const { stages, onStage } = stageRecorder();

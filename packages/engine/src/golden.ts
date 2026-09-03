@@ -147,6 +147,8 @@ export interface GoldenImport {
   /** Runs once before the agents when a ticked agent's engines floor may be above the base image's Node. */
   node?: NodeInstall;
   agents: AgentInstall[];
+  /** Ticked agents the plan set aside (no installer, no pinned Node); they count as ticked and land in the result. */
+  skippedAgents?: { id: string; name: string; note: string }[];
   /** Called once per prepare that ran anything; a re-run that skipped every stage has nothing to report. */
   onResult?: (result: ImportResult) => void;
 }
@@ -171,9 +173,9 @@ export interface ToolResult {
 export interface AgentResult {
   id: string;
   name: string;
-  outcome: "installed" | "failed";
+  outcome: "installed" | "failed" | "skipped";
   note?: string;
-  ms: number;
+  ms?: number;
 }
 
 export interface ImportResult {
@@ -348,6 +350,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
     if (!only) {
       ran = true;
       const node = imp.node !== undefined ? await installNode(machine, imp.node, stage) : undefined;
+      for (const a of imp.skippedAgents ?? []) result.agents.push({ id: a.id, name: a.name, outcome: "skipped", note: a.note });
       for (const [i, agent] of imp.agents.entries()) {
         const t0 = Date.now();
         if (node?.failed !== undefined && agent.node !== undefined && agent.node > node.haveMajor) {
@@ -361,13 +364,13 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
         if (check.exitCode === 0) result.agents.push({ id: agent.id, name: agent.name, outcome: "installed", ms });
         else result.agents.push({ id: agent.id, name: agent.name, outcome: "failed", note: reasonOf(check, AGENT_TIMEOUT_S), ms });
       }
-      const installed = imp.agents.filter((_, i) => result.agents[i]?.outcome === "installed");
-      if (imp.agents.length > 0 && installed.length === 0) {
+      const installed = imp.agents.filter(a => result.agents.some(r => r.id === a.id && r.outcome === "installed"));
+      if (result.agents.length > 0 && installed.length === 0) {
         imp.onResult?.(result);
         throw new Error(["no agent installed, so there is nothing to seal:", ...result.agents.map(a => `${a.name}: ${a.note ?? "unknown reason"}`)].join("\n"));
       }
       ledger.smoke = installed.length > 0 ? installed.map(a => a.smoke).join(" && ") : "true";
-      stage("installing-harness", imp.agents.length === 0 ? "no agent ticked" : summarizeAgents(result.agents));
+      stage("installing-harness", result.agents.length === 0 ? "no agent ticked" : summarizeAgents(result.agents));
     }
     mark("installing-harness");
   }
@@ -412,7 +415,8 @@ function summarize(tools: ToolResult[], floor: string | undefined): string {
 function summarizeAgents(agents: AgentResult[]): string {
   const ok = agents.filter(a => a.outcome === "installed").map(a => a.name);
   const bad = agents.filter(a => a.outcome === "failed").map(a => `${a.name} failed (${a.note})`);
-  return [ok.length > 0 ? `${ok.join(", ")} installed` : "", ...bad].filter(s => s !== "").join("; ");
+  const aside = agents.filter(a => a.outcome === "skipped").map(a => `${a.name} skipped (${a.note})`);
+  return [ok.length > 0 ? `${ok.join(", ")} installed` : "", ...bad, ...aside].filter(s => s !== "").join("; ");
 }
 
 /** Pins which installers ran: the harness line and every agent's. */

@@ -481,6 +481,55 @@ describe("wsp init, flags and no terminal", () => {
     expect(skipped.filter(s => s.path.startsWith("Keychain:"))).toEqual([{ id: "logins/gh", path: "Keychain: gh:github.com", note: "not read from the Keychain; sign in on the machine" }]);
   });
 
+  it("a gh row that carries hosts.yml alone copies the file and never asks the Keychain", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
+    dirs.push(dir);
+    const path = join(dir, "recipe.json");
+    writeFileSync(path, JSON.stringify({ entries: FIXTURE.entries.map(e => (e.id === "logins/gh" ? { ...e, paths: ["~/.config/gh/hosts.yml"], bring: true, choice: "copy" } : { ...e, bring: e.id === "identity/git-user" })) }));
+    const f = fake({ yes: true, manifestPath: path });
+    mkdirSync(join(f.opts.home, ".config", "gh"), { recursive: true });
+    writeFileSync(join(f.opts.home, ".config", "gh", "hosts.yml"), "github.com:\n    oauth_token: gho_in_file\n");
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(0);
+    expect(f.reads).toEqual([]);
+    expect(f.text()).not.toContain("Keychain read failed");
+    expect(loadManifest(join(dirname(f.opts.statePath), "golden-recipe.json")).entries.find(e => e.id === "logins/gh")?.choice).toBe("copy");
+    expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8")).files.skipped).toEqual([]);
+  });
+
+  it("when every ticked agent has no installer the build stops before the seal and names it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
+    dirs.push(dir);
+    const path = join(dir, "recipe.json");
+    const zed = { rung: "agents", id: "agents/zed", label: "Zed", paths: [], bytes: 0, default: "bring", bring: true };
+    writeFileSync(path, JSON.stringify({ entries: [...FIXTURE.entries.map(e => ({ ...e, bring: e.id === "identity/git-user" })), zed] }));
+    const f = fake({ yes: true, manifestPath: path });
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(1);
+    expect(f.hosts).toBe(0);
+    expect(f.text()).toContain("Zed: no installer known");
+    expect(f.text()).toContain("That machine is gone.");
+    expect(f.backends[0]!.machines[0]!.killed).toBe(true);
+  });
+
+  it("a create the provider refuses ends with nothing booted, not a machine gone", async () => {
+    const f = fake({ yes: true });
+    f.opts.runtime = recipe => {
+      const backend = stubBackend();
+      backend.create = async () => {
+        throw Object.assign(new Error("Insufficient credit"), { kind: "quota", status: 402 });
+      };
+      f.backends.push(backend);
+      return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
+    };
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(1);
+    expect(f.text()).toContain("Insufficient credit");
+    expect(f.text()).toContain("Nothing was booted. Run wsp init again");
+    expect(f.text()).not.toContain("That machine is gone");
+    expect(f.backends[0]!.machines).toHaveLength(0);
+  });
+
   it("--yes with --manifest takes the file's ticks, asks nothing, prints the address and never opens a browser", async () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
     dirs.push(dir);
