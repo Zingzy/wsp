@@ -15,7 +15,7 @@ const view = (id: string): WorkspaceView => ({
   createdAt: "2026-09-01T00:00:00Z",
 });
 
-const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true };
+const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true };
 
 function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
   const listeners = new Set<(e: ProtocolEvent) => void>();

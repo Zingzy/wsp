@@ -8,9 +8,24 @@ export interface ListeningPort {
   uid: number;
   /** /proc/<pid>/comm of the owner; unset when there is no pid or the read fails. */
   process?: string;
+  /** Bound to 127.0.0.1 or ::1 (or ::ffff:127.0.0.1) only: a sign-in callback listener; unreachable through the preview edge. */
+  loopback: boolean;
 }
 
 const TCP_LISTEN = "0A";
+
+/** /proc/net/tcp prints each 32-bit word of the address little-endian in hex:
+ * 0100007F is 127.0.0.1, and tcp6 rows carry four such words. */
+export function isLoopbackHex(addr: string): boolean {
+  const hex = addr.toUpperCase();
+  const lastByte = (word: string): number => Number.parseInt(word.slice(6, 8), 16);
+  if (hex.length === 8) return lastByte(hex) === 127;
+  if (hex.length !== 32) return false;
+  const words = [hex.slice(0, 8), hex.slice(8, 16), hex.slice(16, 24), hex.slice(24, 32)];
+  if (words[0] !== "00000000" || words[1] !== "00000000") return false;
+  if (words[2] === "00000000") return words[3] === "01000000";
+  return words[2] === "FFFF0000" && lastByte(words[3]!) === 127;
+}
 
 /**
  * Parses /proc/net/tcp (or tcp6; same layout, wider address) into LISTEN rows.
@@ -26,7 +41,7 @@ export function parseProcNetTcp(text: string, inodeToPid?: Map<number, number>):
     const port = Number.parseInt(local[local.length - 1]!, 16);
     const inode = Number(f[9]);
     if (!Number.isFinite(port) || !Number.isFinite(inode)) continue;
-    rows.push({ port, inode, uid: Number(f[7]), pid: inodeToPid?.get(inode) ?? null });
+    rows.push({ port, inode, uid: Number(f[7]), pid: inodeToPid?.get(inode) ?? null, loopback: isLoopbackHex(local[0] ?? "") });
   }
   return rows;
 }
@@ -79,6 +94,7 @@ export interface PortOpenEvent {
   port: number;
   pid: number | null;
   process?: string;
+  loopback: boolean;
 }
 export interface PortCloseEvent {
   type: "port.close";
@@ -90,7 +106,10 @@ export class PortWatcher extends EventEmitter {
   private intervalMs: number;
   private timer: NodeJS.Timeout | null = null;
   private known = new Map<number, ListeningPort>();
-  private polling = false;
+  /** A poll awaited while one is in flight joins it: the first ports.watch reply must carry the seed, not race it. */
+  private inflight: Promise<void> | undefined;
+  /** The first poll seeds what is already listening without events: a listener that predates the watcher is not a change. */
+  private primed = false;
 
   constructor(source: PortSnapshotSource, opts: { intervalMs?: number } = {}) {
     super();
@@ -102,11 +121,20 @@ export class PortWatcher extends EventEmitter {
     return [...this.known.values()];
   }
 
-  async poll(): Promise<void> {
-    if (this.polling) return;
-    this.polling = true;
-    try {
+  poll(): Promise<void> {
+    return (this.inflight ??= this.diff().finally(() => {
+      this.inflight = undefined;
+    }));
+  }
+
+  private async diff(): Promise<void> {
+    {
       const next = new Map((await this.source()).map(p => [p.port, p] as const));
+      if (!this.primed) {
+        this.primed = true;
+        this.known = next;
+        return;
+      }
       for (const [port, row] of next) {
         if (!this.known.has(port)) {
           this.emit("port.open", {
@@ -114,6 +142,7 @@ export class PortWatcher extends EventEmitter {
             port,
             pid: row.pid,
             ...(row.process !== undefined ? { process: row.process } : {}),
+            loopback: row.loopback,
           } satisfies PortOpenEvent);
         }
       }
@@ -121,8 +150,6 @@ export class PortWatcher extends EventEmitter {
         if (!next.has(port)) this.emit("port.close", { type: "port.close", port } satisfies PortCloseEvent);
       }
       this.known = next;
-    } finally {
-      this.polling = false;
     }
   }
 

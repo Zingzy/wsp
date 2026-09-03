@@ -1,4 +1,21 @@
-export { PtyManager, PtySession, type PtyCreateOpts, type DataListener, type ExitListener } from "./pty-manager.js";
+export { PtyManager, PtySession, ptyEnv, type PtyCreateOpts, type DataListener, type ExitListener } from "./pty-manager.js";
+export {
+  OPEN_SHIM_PATH,
+  XDG_OPEN_PATH,
+  OPEN_SOCKET_PATH,
+  OPEN_SHIM_SCRIPT,
+  OPEN_URL_RE,
+  OPEN_URL_MAX,
+  isOpenUrl,
+  callbackPortOf,
+  callbackPortsIn,
+  stripOsc8,
+  TerminalUrlScanner,
+  CallbackSpotter,
+  listenOpenSocket,
+  type OpenSocket,
+  type SpotterOptions,
+} from "./relay.js";
 export {
   startDaemon,
   DEFAULT_HOST,
@@ -11,6 +28,7 @@ export {
 } from "./main.js";
 export {
   parseProcNetTcp,
+  isLoopbackHex,
   procNetTcpSource,
   PortWatcher,
   type ListeningPort,

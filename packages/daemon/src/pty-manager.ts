@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { spawn, type IPty } from "node-pty";
+import { OPEN_SHIM_PATH } from "./relay.js";
 
 const SCROLLBACK_CAP_BYTES = 256 * 1024;
 
@@ -36,7 +37,7 @@ export class PtySession {
       cols: this.cols,
       rows: this.rows,
       cwd: opts.cwd ?? homedir(),
-      env: { ...(process.env as Record<string, string>), ...opts.env },
+      env: ptyEnv(opts.env),
     });
     this.pid = this.pty.pid;
     this.pty.onData(d => {
@@ -95,6 +96,16 @@ export class PtySession {
       this.bufferedBytes = Buffer.byteLength(trimmed);
     }
   }
+}
+
+/** The image ships DISPLAY=:0 with no X server behind it, which gcloud, gemini
+ * and railway read as "a browser exists" and skip their paste-code paths; the
+ * shim as BROWSER is what makes a sign-in land in the laptop's browser. */
+export function ptyEnv(extra?: Record<string, string>): Record<string, string> {
+  const env: Record<string, string> = { ...(process.env as Record<string, string>), ...extra };
+  delete env["DISPLAY"];
+  env["BROWSER"] ??= OPEN_SHIM_PATH;
+  return env;
 }
 
 export class PtyManager {

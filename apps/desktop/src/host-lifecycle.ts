@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { serve, servingHost, type CliIO } from "@wsp/host";
+import { serve, servingHost, type CliIO, type UrlOpener } from "@wsp/host";
 import type { Runtime } from "@wsp/runtime";
 
 export type PortState = "free" | "wsp" | "other";
@@ -41,6 +41,8 @@ export interface OpenHostOptions {
   webDir: string;
   io: CliIO;
   runtime?: Runtime;
+  /** How a guest tool's sign-in URL reaches this computer's browser; the platform opener when absent. */
+  openUrl?: UrlOpener;
 }
 
 // The host serves the page with its boot object inlined; nothing else on
@@ -116,6 +118,7 @@ export async function openHost(opts: OpenHostOptions): Promise<HostSession> {
     statePath: opts.statePath,
     webDir: opts.webDir,
     ...(opts.runtime !== undefined ? { runtime: opts.runtime } : {}),
+    ...(opts.openUrl !== undefined ? { openUrl: opts.openUrl } : {}),
   });
   return { url: `http://127.0.0.1:${handle.port}`, port: handle.port, owned: true, close: () => handle.close() };
 }

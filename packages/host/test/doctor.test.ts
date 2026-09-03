@@ -1,18 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFile } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { gunzipSync } from "node:zlib";
 import { startDaemon, type DaemonHandle } from "@wsp/daemon";
+import { TOOLS_PATH } from "@wsp/engine";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   connectDaemonSocket,
   deployDaemon,
   deployScript,
+  GUEST_ENVS,
   GUEST_NODE,
+  claudeEnvs,
+  OPEN_SHIM_SCRIPT,
   isReserved,
   packBundle,
   stageDaemonBundle,
@@ -65,6 +69,28 @@ describe("stageDaemonBundle", () => {
     expect(readFileSync(join(stage, "dist", "index.js"), "utf8")).toContain("x = 1");
     // The one deploy gotcha: loopback binds are unreachable through the edge.
     expect(readFileSync(join(stage, "start.mjs"), "utf8")).toContain('host: "0.0.0.0"');
+    // The browser shim rides along and the daemon opens the socket it posts to.
+    expect(readFileSync(join(stage, "start.mjs"), "utf8")).toContain("openSocketPath: OPEN_SOCKET_PATH");
+    expect(readFileSync(join(stage, "wsp-open"), "utf8")).toBe(OPEN_SHIM_SCRIPT);
+    expect(statSync(join(stage, "wsp-open")).mode & 0o111).toBe(0o111);
+  });
+});
+
+describe("browser shim in the guest", () => {
+  it("is installed as BROWSER and as xdg-open, first on PATH, and login shells lose the image's DISPLAY", () => {
+    const script = deployScript("aabbcc");
+    // Not in every machine's envs: an old golden without the shim would otherwise point tools at a missing file.
+    expect(GUEST_ENVS["BROWSER"]).toBeUndefined();
+    expect(claudeEnvs("sk-ant-x", { browserShim: true })["BROWSER"]).toBe("/usr/local/bin/wsp-open");
+    expect(claudeEnvs("sk-ant-x", { browserShim: false })["BROWSER"]).toBeUndefined();
+    expect(claudeEnvs("sk-ant-x", {})["BROWSER"]).toBeUndefined();
+    expect(claudeEnvs(undefined, { browserShim: true })).toEqual({ CLAUDE_CONFIG_DIR: "/root/.claude-cfg", ...GUEST_ENVS, BROWSER: "/usr/local/bin/wsp-open" });
+    expect(script).toContain("install -m 0755 /root/wsp-daemon/wsp-open /usr/local/bin/wsp-open");
+    expect(script).toContain("ln -sfn /usr/local/bin/wsp-open /usr/local/bin/xdg-open");
+    expect(script).toContain("mkdir -p /etc/profile.d && printf 'export BROWSER=%s\\nunset DISPLAY\\n' /usr/local/bin/wsp-open > /etc/profile.d/wsp-open.sh");
+    expect(TOOLS_PATH.split(":").indexOf("/usr/local/bin")).toBeLessThan(TOOLS_PATH.split(":").indexOf("/usr/bin"));
+    // The shim runs before umask 077 so the file it installs stays world-executable.
+    expect(script.indexOf("install -m 0755")).toBeLessThan(script.indexOf("umask 077"));
   });
 });
 
@@ -242,6 +268,29 @@ describe("connectDaemonSocket", () => {
         }
       }, 20);
     });
+  });
+
+  it("an event handler that throws is reported once and the socket keeps working", async () => {
+    const { url, token } = await startLocalDaemon();
+    const failures: string[] = [];
+    let calls = 0;
+    socket = await connectDaemonSocket({
+      url,
+      token,
+      onEvent: () => {
+        calls++;
+        throw new TypeError("Invalid URL");
+      },
+      onEventError: e => failures.push(e instanceof Error ? e.message : String(e)),
+    });
+    await socket.op("inbox.watch");
+    writeFileSync(join(inboxDir!, "boom.txt"), "x");
+    const deadline = Date.now() + 3000;
+    while (calls === 0 && Date.now() < deadline) await new Promise(r => setTimeout(r, 20));
+    expect(calls).toBeGreaterThan(0);
+    expect(failures).toEqual(Array(calls).fill("Invalid URL"));
+    expect((await socket.op("manifest.get"))["ok"]).toBe(true);
+    expect(socket.open).toBe(true);
   });
 
   it("rejects on a bad daemon token (4401 through the socket close)", async () => {

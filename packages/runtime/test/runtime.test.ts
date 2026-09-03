@@ -1337,7 +1337,7 @@ describe("runtime golden import", () => {
     expect(await store.get("builders", b.id)).toMatchObject({ import: { recipeHash: "h1", applied: ["applying-setup", "uploading-files", "installing-tools", "installing-harness"], smoke: "codex --version" } });
     const { version } = await rt.golden.seal(b.id);
     expect(version.smoke).toEqual({ cmd: "codex --version", exitCode: 0 });
-    expect(backend.machines[1]!.execLog).toEqual(["codex --version"]);
+    expect(backend.machines[1]!.execLog).toEqual(["codex --version", "test -x /usr/local/bin/wsp-open"]);
   });
 
   it("a second prepare with the same recipe hash reuses the live builder instead of booting another, skipping every stage", async () => {

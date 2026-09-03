@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { DAEMON_PORT, NODE_RELEASES, TOOLS_PATH, type Machine } from "@wsp/engine";
-import type { Runtime } from "@wsp/runtime";
+import type { GoldenVersion, Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
 import type { CliIO } from "./cli.js";
 
@@ -21,9 +21,20 @@ const execFileAsync = promisify(execFile);
 
 // Runs inside /root/wsp-daemon. Loopback binds are unreachable through the
 // preview edge (it dials eth0), so 0.0.0.0 is the whole point of this file.
-const START_MJS = `import { startDaemon } from "./dist/index.js";
-const d = await startDaemon({ host: "0.0.0.0" });
+const START_MJS = `import { OPEN_SOCKET_PATH, startDaemon } from "./dist/index.js";
+const d = await startDaemon({ host: "0.0.0.0", openSocketPath: OPEN_SOCKET_PATH });
 console.log(\`wsp-daemon listening on 0.0.0.0:\${d.port}\`);
+`;
+
+// Mirror @wsp/daemon's relay constants: importing the package here would pull
+// node-pty into the host and the desktop bundle. The shim posts to the socket
+// start.mjs opens; the daemon's own tests pin the script against its copy.
+export const OPEN_SHIM_PATH = "/usr/local/bin/wsp-open";
+const OPEN_SOCKET_PATH = "/root/.wsp/open.sock";
+export const OPEN_SHIM_SCRIPT = `#!/bin/sh
+[ "$#" -ge 1 ] || exit 0
+printf '%s' "$1" | curl -s -m 1 -o /dev/null --unix-socket ${OPEN_SOCKET_PATH} -X POST --data-binary @- http://wsp/open >/dev/null 2>&1
+exit 0
 `;
 
 function resolveDaemonDir(): string {
@@ -41,6 +52,7 @@ export async function stageDaemonBundle(stageDir: string, daemonDir = resolveDae
   mkdirSync(stageDir, { recursive: true });
   cpSync(join(daemonDir, "dist"), join(stageDir, "dist"), { recursive: true });
   writeFileSync(join(stageDir, "start.mjs"), START_MJS);
+  writeFileSync(join(stageDir, "wsp-open"), OPEN_SHIM_SCRIPT, { mode: 0o755 });
   writeFileSync(
     join(stageDir, "package.json"),
     JSON.stringify(
@@ -88,6 +100,12 @@ export function deployScript(token: string): string {
     "cd /root/wsp-daemon",
     "npm install --omit=dev --no-audit --no-fund > /tmp/wsp-npm.log 2>&1 || { tail -3 /tmp/wsp-npm.log; echo NPM_FAIL; false; }",
     "rm -rf /root/.npm /root/.cache/node-gyp /root/wsp-daemon/node_modules/node-pty/prebuilds",
+    // Both names: only some tools read BROWSER; the rest exec xdg-open by name, and /usr/local/bin is first on PATH.
+    // BROWSER itself is set by the daemon for its ptys, by profile.d for login shells, and in a fork's envs only
+    // when its golden was sealed with the shim (claudeEnvs), never on a machine that may lack the file.
+    `install -m 0755 /root/wsp-daemon/wsp-open ${OPEN_SHIM_PATH}`,
+    `ln -sfn ${OPEN_SHIM_PATH} /usr/local/bin/xdg-open`,
+    `mkdir -p /etc/profile.d && printf 'export BROWSER=%s\\nunset DISPLAY\\n' ${OPEN_SHIM_PATH} > /etc/profile.d/wsp-open.sh`,
     "umask 077",
     `printf '%s' '${token}' > /root/.wsp-daemon-token`,
     "setsid nohup node /root/wsp-daemon/start.mjs > /root/daemon.log 2>&1 < /dev/null & sleep 1.5",
@@ -164,6 +182,8 @@ export interface ConnectOptions {
    * out and browsers cannot send protocol pings. Default 10s (measured). */
   heartbeatMs?: number;
   onEvent?: (event: Record<string, unknown>) => void;
+  /** A throw out of onEvent lands here instead of the process: an event from the machine must never end the host. */
+  onEventError?: (error: unknown) => void;
   connectTimeoutMs?: number;
 }
 
@@ -222,7 +242,11 @@ export function connectDaemonSocket(opts: ConnectOptions): Promise<DaemonSocket>
         pending.get(id)!.resolve(m);
         pending.delete(id);
       } else if (typeof m["type"] === "string") {
-        opts.onEvent?.(m);
+        try {
+          opts.onEvent?.(m);
+        } catch (e) {
+          opts.onEventError?.(e);
+        }
       }
     });
 
@@ -320,12 +344,17 @@ export const GUEST_ENVS: Record<string, string> = {
 };
 
 /** Without a key the guest still needs the config dir and PATH; a subscription
- * user signs in with /login on the machine, so wsp never sees that credential. */
-export function claudeEnvs(anthropicKey?: string): Record<string, string> {
+ * user signs in with /login on the machine, so wsp never sees that credential.
+ * BROWSER rides along only for a golden sealed with the shim: Claude Code in an
+ * agent session (no TTY, no BROWSER) opens nothing at all, so a remote MCP
+ * sign-in from an agent run needs it; a golden without the shim would point
+ * every tool at a missing file. */
+export function claudeEnvs(anthropicKey?: string, golden?: Pick<GoldenVersion, "browserShim">): Record<string, string> {
   return {
     ...(anthropicKey !== undefined ? { ANTHROPIC_API_KEY: anthropicKey } : {}),
     CLAUDE_CONFIG_DIR: CONFIG_DIR,
     ...GUEST_ENVS,
+    ...(golden?.browserShim === true ? { BROWSER: OPEN_SHIM_PATH } : {}),
   };
 }
 

@@ -67,6 +67,9 @@ export async function killUntilGone(backend: MachineBackend, machine: Machine, c
 /** Solari's built-in templates are kind-specific (TemplateKindMismatch otherwise). */
 const DEFAULT_TEMPLATE: Record<MachineKind, string> = { sandbox: "base", desktop: "default" };
 
+/** Mirrors @wsp/daemon's OPEN_SHIM_PATH (the engine cannot import the daemon package, which only runs inside guests); a host test pins the two equal. */
+export const BROWSER_SHIM_PATH = "/usr/local/bin/wsp-open";
+
 /** How long a builder may sit with no API activity before it is killed. Whether
  * a live noVNC stream counts as activity is unmeasured, so this covers a person
  * reading docs on the builder screen; a forgotten builder costs under $1 at
@@ -561,6 +564,8 @@ export async function sealGolden(
         `golden smoke failed (exit ${smokeRes.exitCode}) for ${JSON.stringify(smoke)}: ${smokeRes.stderr.slice(-500)}`,
       );
     }
+    // Read on the fork, which is the image: forks of this version get BROWSER only when the shim is there.
+    const browserShim = (await fork.exec(`test -x ${BROWSER_SHIM_PATH}`)).exitCode === 0;
     // The image is proven by now; a fork that outlives its kills is a leak to
     // name, not a reason to throw the person's setup away.
     let leak: string | undefined;
@@ -577,6 +582,7 @@ export async function sealGolden(
       createdAt: new Date().toISOString(),
       smoke: { cmd: smoke, exitCode: smokeRes.exitCode },
       size: builder.size,
+      browserShim,
     };
     stage("sealed", leak === undefined ? `v${versionNum}` : `v${versionNum}; ${leak}`);
     return { manifest: { head: versionNum, versions: [...prior, version] }, version };

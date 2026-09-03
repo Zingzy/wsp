@@ -26,6 +26,17 @@ export {
   type KeySources,
 } from "./cli.js";
 export {
+  startCallbackRelay,
+  systemOpener,
+  RELAY_MIN_PORT,
+  RELAY_WINDOW_MS,
+  RELAY_CAP_MS,
+  type CallbackRelay,
+  type RelayOptions,
+  type ForwardView,
+  type UrlOpener,
+} from "./relay.js";
+export {
   doctor,
   deployDaemon,
   GOLDEN_SETUP,

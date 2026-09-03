@@ -3,7 +3,8 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
-import { describeAge, serveRuntime, type GoldenBuilderView, type ReapedMachine, type Runtime, type SparedMachine } from "@wsp/runtime";
+import { describeAge, serveRuntime, type GoldenBuilderView, type GoldenVersion, type ReapedMachine, type Runtime, type SparedMachine } from "@wsp/runtime";
+import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
 
 // The enriched status now lives in @wsp/runtime (every client reads one
 // implementation); re-exported so host consumers keep their imports.
@@ -29,11 +30,18 @@ export interface HostOptions {
   wsPort?: number;
   /** Auth token for the runtime WS; generated when omitted. */
   authToken?: string;
-  /** Envs baked into workspaces created from the JSON route. */
-  workspaceEnvs?: Record<string, string>;
+  /** Envs baked into a workspace created from the JSON route, given the golden version it forks. */
+  workspaceEnvs?: (golden: GoldenVersion) => Record<string, string>;
   probeTimeoutMs?: number;
-  /** Receives one line per machine a sweep killed, one per running machine the first sweep left alone, and one when a sweep fails. */
+  /** Receives one line per machine a sweep killed, one per running machine the first sweep left alone, and one when a sweep fails;
+   * also one per sign-in page opened, callback port forwarded, refused or closed. */
   log?: (line: string) => void;
+  /** Opens a guest tool's sign-in URL on this computer; the platform opener by default (the desktop app passes its own). */
+  openUrl?: UrlOpener;
+  /** Whether a workspace's sign-in page opens here without a click; off by default, the app shows it instead. */
+  autoOpen?: (workspaceId: string) => boolean;
+  /** The line logged when a sign-in page arrives and nothing opens, given the workspace name and the page's hostname. */
+  openLine?: (workspace: string, hostname: string) => string;
 }
 
 export interface HostHandle {
@@ -202,7 +210,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
         const workspace = await rt.workspaces.create({
           golden: head.snapshotId,
           name,
-          ...(opts.workspaceEnvs !== undefined ? { envs: opts.workspaceEnvs } : {}),
+          ...(opts.workspaceEnvs !== undefined ? { envs: opts.workspaceEnvs(head) } : {}),
           labels: { wsp: "1", "wsp-host": "1", createdAt: new Date().toISOString() },
         });
         sendJson(res, 200, { workspace });
@@ -236,6 +244,14 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     (sweeping ??= sweepOrphans(rt, log, listSpared).finally(() => (sweeping = undefined)));
   await sweep(true);
   const reapTimer = setInterval(() => void sweep(false), REAP_INTERVAL_MS);
+  const relay = startCallbackRelay({
+    runtime: rt,
+    openUrl: opts.openUrl ?? systemOpener(),
+    log,
+    ...(opts.autoOpen !== undefined ? { autoOpen: opts.autoOpen } : {}),
+    ...(opts.openLine !== undefined ? { openLine: opts.openLine } : {}),
+    ...(opts.builder !== undefined ? { builder: opts.builder } : {}),
+  });
 
   return {
     port,
@@ -243,6 +259,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     authToken,
     close: async () => {
       clearInterval(reapTimer);
+      await relay.close();
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) => server.close(err => (err ? reject(err) : resolve())));
       await rtServer.close();

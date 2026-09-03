@@ -9,6 +9,7 @@ import { BUILDER_IDLE_MS, type GoldenManifest } from "@wsp/engine";
 import { createRuntime, memoryStore, type HarnessAdapterFactory, type ReapResult, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cli, serve, type CliIO } from "../src/cli.js";
+import { claudeEnvs } from "../src/doctor.js";
 import { REAP_INTERVAL_MS, startHost, type HostHandle } from "../src/server.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 
@@ -246,6 +247,26 @@ describe("host serves the app", () => {
 
     const list = await getJson(`http://127.0.0.1:${handle.port}/api/workspaces`);
     expect(list.body.workspaces).toHaveLength(1);
+  });
+
+  it("bakes BROWSER into a fork only when its golden head was sealed with the shim", async () => {
+    for (const browserShim of [true, false]) {
+      const backend = stubBackend();
+      const store = memoryStore();
+      const head = { ...GOLDEN.versions[0]!, ...(browserShim ? { browserShim } : {}) };
+      void store.put("goldens", "default", { head: 1, versions: [head] });
+      const rt = createRuntime({ backend, store, adapters: {} });
+      const h = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: true }, workspaceEnvs: g => claudeEnvs("sk-ant-x", g) });
+      try {
+        const res = await fetch(`http://127.0.0.1:${h.port}/api/workspaces`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "beta" }) });
+        expect(res.status).toBe(200);
+        const envs = backend.machines[0]?.spec.envs ?? {};
+        expect(envs["CLAUDE_CONFIG_DIR"]).toBe("/root/.claude-cfg");
+        expect(envs["BROWSER"]).toBe(browserShim ? "/usr/local/bin/wsp-open" : undefined);
+      } finally {
+        await h.close();
+      }
+    }
   });
 
   it("refuses workspace creation without a golden image", async () => {

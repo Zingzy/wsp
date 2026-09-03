@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
+import { connect as connectTcp, type Socket } from "node:net";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
@@ -8,8 +9,9 @@ import { gitDiff, gitStatus, type GitDiffScope } from "./git-ops.js";
 import { InboxWatcher } from "./inbox.js";
 import { ProcessManifest, type ManifestOptions } from "./manifest.js";
 import { linuxModeProbe, ModeWatcher, type ModeProbe } from "./mode.js";
-import { PortWatcher, procNetTcpSource, type PortSnapshotSource } from "./ports.js";
+import { PortWatcher, procNetTcpSource, type PortOpenEvent, type PortSnapshotSource } from "./ports.js";
 import { PtyManager } from "./pty-manager.js";
+import { CallbackSpotter, TerminalUrlScanner, callbackPortOf, listenOpenSocket, type OpenSocket } from "./relay.js";
 import { OpError, resolveInside } from "./workspace-paths.js";
 
 export const DEFAULT_PORT = 7070;
@@ -34,6 +36,9 @@ export interface DaemonOptions {
   modeIntervalMs?: number;
   /** Every fs.* and git.* path must resolve inside this directory; HOME by default. */
   root?: string;
+  /** Unix socket the browser shim posts URLs to; absent means no shim socket (local and test daemons). */
+  openSocketPath?: string;
+  spotter?: CallbackSpotter;
 }
 
 export interface DaemonHandle {
@@ -82,7 +87,11 @@ interface Request {
 
 interface ConnState {
   detaches: (() => void)[];
+  tunnels: Map<string, Socket>;
 }
+
+/** Laptop connections one socket may hold open through the forward at once. */
+const TUNNEL_CAP = 64;
 
 export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandle> {
   const token = opts.token ?? readFileSync(opts.tokenPath ?? DEFAULT_TOKEN_PATH, "utf8").trim();
@@ -90,6 +99,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
 
   const ptys = new PtyManager();
   const manifest = new ProcessManifest(opts.manifest ?? { path: DEFAULT_MANIFEST_PATH });
+  const spotter = opts.spotter ?? new CallbackSpotter();
   // Watchers are created on first watch op so darwin tests never touch /proc.
   let portWatcher: PortWatcher | null = null;
   let inboxWatcher: InboxWatcher | null = null;
@@ -99,6 +109,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
       portWatcher = new PortWatcher(opts.portsSource ?? procNetTcpSource(), {
         intervalMs: opts.portsIntervalMs ?? 1000,
       });
+      portWatcher.on("port.open", (e: PortOpenEvent) => spotter.noteOpen(e.port, e.loopback));
       portWatcher.start();
     }
     return portWatcher;
@@ -122,8 +133,37 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
   });
 
   const root = resolve(opts.root ?? process.env["HOME"] ?? homedir());
-  const ctx: Ctx = { ptys, manifest, modes, root, getPortWatcher, getInboxWatcher };
   const wss = new WebSocketServer({ host: opts.host ?? DEFAULT_HOST, port: opts.port ?? DEFAULT_PORT });
+  // Armed before any await: the listening event fires as soon as the loop turns.
+  const listening = new Promise<void>((resolve, reject) => {
+    wss.once("listening", resolve);
+    wss.once("error", reject);
+  });
+
+  // Pushed to every authed socket, not to subscribers: the host's link
+  // reconnects through the edge and would lose a subscription with it.
+  const broadcast = (event: Record<string, unknown>): void => {
+    for (const client of wss.clients) push(client, event);
+  };
+  const relay = {
+    /** A tool asked for a browser: open on the laptop now, name the callback port when the URL or a new loopback listener gives one. */
+    open(url: string): void {
+      const port = callbackPortOf(url);
+      broadcast({ type: "browser.open", url, ...(port !== undefined ? { port } : {}) });
+      if (port === undefined) spotter.spot(p => broadcast({ type: "callback.port", port: p }));
+    },
+  };
+  const ctx: Ctx = { ptys, manifest, modes, root, getPortWatcher, getInboxWatcher, spotter, broadcast };
+  let openSocket: OpenSocket | undefined;
+  if (opts.openSocketPath !== undefined) {
+    try {
+      openSocket = await listenOpenSocket(opts.openSocketPath);
+    } catch (e) {
+      await new Promise<void>(resolve => wss.close(() => resolve()));
+      throw e;
+    }
+    openSocket.on("url", url => relay.open(url));
+  }
 
   wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     const url = new URL(req.url ?? "/", "ws://localhost");
@@ -132,11 +172,13 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
       ws.close(4401, "unauthorized");
       return;
     }
-    const state: ConnState = { detaches: [] };
+    const state: ConnState = { detaches: [], tunnels: new Map() };
     ws.on("close", () => {
-      // Client is gone; ptys keep running. Only this socket's subscriptions die.
+      // Client is gone; ptys keep running. Only this socket's subscriptions and tunnels die.
       for (const un of state.detaches) un();
       state.detaches = [];
+      for (const t of state.tunnels.values()) t.destroy();
+      state.tunnels.clear();
     });
     ws.on("message", raw => {
       let msg: Request;
@@ -153,10 +195,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
     });
   });
 
-  await new Promise<void>((resolve, reject) => {
-    wss.once("listening", resolve);
-    wss.once("error", reject);
-  });
+  await listening;
   const addr = wss.address();
   const boundPort = typeof addr === "object" && addr !== null ? addr.port : (opts.port ?? DEFAULT_PORT);
 
@@ -167,6 +206,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
       portWatcher?.stop();
       inboxWatcher?.stop();
       modes.stop();
+      await openSocket?.close();
       for (const ws of wss.clients) ws.terminate();
       await new Promise<void>((resolve, reject) => wss.close(err => (err ? reject(err) : resolve())));
       ptys.destroyAll();
@@ -181,6 +221,26 @@ interface Ctx {
   root: string;
   getPortWatcher(): PortWatcher;
   getInboxWatcher(): InboxWatcher;
+  spotter: CallbackSpotter;
+  broadcast(event: Record<string, unknown>): void;
+}
+
+/** 127.0.0.1 first, then ::1: a Node 22 tool listening on "localhost" binds [::1] only (measured, wrangler). */
+function connectLoopback(port: number): Promise<Socket> {
+  const dial = (host: string): Promise<Socket> =>
+    new Promise((resolve, reject) => {
+      const s = connectTcp({ host, port });
+      s.once("connect", () => resolve(s));
+      s.once("error", reject);
+    });
+  return dial("127.0.0.1").catch(() => dial("::1"));
+}
+
+function requireTunnel(state: ConnState, msg: Request): Socket {
+  const id = String(msg["tunnelId"] ?? "");
+  const s = state.tunnels.get(id);
+  if (!s) throw new OpError("not-found", `no such tunnel: ${id}`);
+  return s;
 }
 
 function reply(ws: WebSocket, id: Request["id"], payload: object): void {
@@ -234,6 +294,11 @@ async function handle(ws: WebSocket, state: ConnState, ctx: Ctx, msg: Request): 
         shell: msg["shell"] as string | undefined,
         cwd: msg["cwd"] as string | undefined,
         env: msg["env"] as Record<string, string> | undefined,
+      });
+      // The forward's fallback: a printed sign-in URL names its callback port even when no shim ran.
+      const scanner = new TerminalUrlScanner();
+      s.attach(data => {
+        for (const port of scanner.feed(data)) ctx.broadcast({ type: "callback.port", port });
       });
       reply(ws, msg.id, { ptyId: s.id, pid: s.pid });
       return;
@@ -337,6 +402,41 @@ async function handle(ws: WebSocket, state: ConnState, ctx: Ctx, msg: Request): 
       if (path !== undefined && typeof path !== "string") throw new OpError("bad-request", "path must be a string");
       const cwd = await resolveInside(ctx.root, requireString(msg, "cwd"));
       reply(ws, msg.id, await gitDiff(cwd, scope, path));
+      return;
+    }
+    case "tunnel.open": {
+      const tunnelId = requireString(msg, "tunnelId");
+      const port = msg["port"];
+      if (!Number.isInteger(port) || (port as number) < 1 || (port as number) > 65535) {
+        throw new OpError("bad-request", "port must be an integer in 1..65535");
+      }
+      if (state.tunnels.has(tunnelId)) throw new OpError("bad-request", `tunnel ${tunnelId} is already open`);
+      if (state.tunnels.size >= TUNNEL_CAP) throw new OpError("bad-request", `too many tunnels open (${TUNNEL_CAP})`);
+      const sock = await connectLoopback(port as number);
+      if (ws.readyState !== ws.OPEN) {
+        sock.destroy();
+        throw new Error("client went away while the guest port was dialled");
+      }
+      state.tunnels.set(tunnelId, sock);
+      sock.on("data", (d: Buffer) => push(ws, { type: "tunnel.data", tunnelId, data: d.toString("base64") }));
+      sock.on("error", () => {});
+      sock.on("close", () => {
+        if (state.tunnels.get(tunnelId) === sock) state.tunnels.delete(tunnelId);
+        push(ws, { type: "tunnel.end", tunnelId });
+      });
+      reply(ws, msg.id, {});
+      return;
+    }
+    case "tunnel.write": {
+      requireTunnel(state, msg).write(Buffer.from(requireString(msg, "data"), "base64"));
+      reply(ws, msg.id, {});
+      return;
+    }
+    case "tunnel.close": {
+      const id = String(msg["tunnelId"] ?? "");
+      state.tunnels.get(id)?.destroy();
+      state.tunnels.delete(id);
+      reply(ws, msg.id, {});
       return;
     }
     case "ping": {

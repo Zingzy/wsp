@@ -39,7 +39,7 @@ function fakeApi(workspaces: WorkspaceView[], portReach: Api["portReach"] = mint
     nap: async id => workspaces.find(w => w.id === id)!,
     wake: async id => workspaces.find(w => w.id === id)!,
     upgrade: async id => workspaces.find(w => w.id === id)!,
-    capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true }),
+    capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true }),
     portReach,
     daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
     builderReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
