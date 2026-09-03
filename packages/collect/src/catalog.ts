@@ -50,8 +50,8 @@ export function parseMackupCfg(id: string, text: string): CatalogEntry {
     const key = (delim === -1 ? line : line.slice(0, delim)).trim();
     const value = delim === -1 ? "" : line.slice(delim + 1).trim();
     if (section === "application" && key === "name") name = value;
-    else if (section === "configuration_files") paths.push(key);
-    else if (section === "xdg_configuration_files") xdg.push(key);
+    else if (section === "configuration_files") paths.push(key.replace(/\/+$/, ""));
+    else if (section === "xdg_configuration_files") xdg.push(key.replace(/\/+$/, ""));
   }
   return { id, name, paths, xdg };
 }
@@ -90,11 +90,11 @@ export function renderCatalog(c: MackupCatalog): string {
   return `${head},\n  "entries": [\n${entries.map(e => `    ${JSON.stringify(e)}`).join(",\n")}\n  ]\n}\n`;
 }
 
-const STRIPPED_PREFIXES = ["~/", "Library/Application Support/", "Library/Preferences/", ".local/share/", ".config/"];
+const STRIPPED_PREFIXES = ["~/", "Library/Application Support/", "Library/Preferences/", "Library/", ".local/share/", ".config/"];
 
-/** The directory name the collector walks: `.aws`, `gh` (under ~/.config), `Code` (under Application Support). */
+/** The directory name the collector walks: `.aws`, `gh` (under ~/.config), `Code` (under Application Support), `Rime` (under Library). Case-sensitive, as readdir reports it. */
 export function dirKey(path: string): string {
-  let p = path;
+  let p = path.replace(/\/+$/, "");
   for (const prefix of STRIPPED_PREFIXES) if (p.startsWith(prefix)) p = p.slice(prefix.length);
   const slash = p.indexOf("/");
   return slash === -1 ? p : p.slice(0, slash);
@@ -122,7 +122,14 @@ export function isCredential(rel: string, overlay: CredentialOverlay): boolean {
 
 export type Lookup = (dirName: string) => CatalogPath[];
 
-/** Builds the lookup over any entry lists; the shipped data goes through `lookup` below. */
+/** A name with a slash is a location: only paths at or under it come back. A bare name returns the whole bucket. */
+function narrow(dirName: string, rows: Iterable<CatalogPath>): CatalogPath[] {
+  if (!dirName.includes("/")) return [...rows];
+  const prefix = `~/${dirName.replace(/^~\//, "").replace(/\/+$/, "")}`;
+  return [...rows].filter(r => r.path === prefix || r.path.startsWith(`${prefix}/`));
+}
+
+/** Builds the lookup over any entry lists; the shipped data goes through `lookup` below. A path two apps list keeps the first app's label. */
 export function buildLookup(entries: readonly CatalogEntry[], overlay: CredentialOverlay): Lookup {
   const index = new Map<string, Map<string, CatalogPath>>();
   for (const e of entries) {
@@ -137,16 +144,25 @@ export function buildLookup(entries: readonly CatalogEntry[], overlay: Credentia
       if (!bucket.has(path)) bucket.set(path, { app: e.name, path, credential: isCredential(rel, overlay) });
     }
   }
-  return dirName => [...(index.get(dirKey(dirName))?.values() ?? [])];
+  return dirName => narrow(dirName, index.get(dirKey(dirName))?.values() ?? []);
+}
+
+/** Parses one data file's text against its schema; a failure names the file so a hand edit is found in one step. */
+export function parseDataFile<T>(file: string, text: string, schema: z.ZodType<T>): T {
+  try {
+    return schema.parse(JSON.parse(text));
+  } catch (e) {
+    throw new Error(`${file}: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
+  }
 }
 
 function readData<T>(file: string, schema: z.ZodType<T>): T {
-  return schema.parse(JSON.parse(readFileSync(new URL(`../data/${file}`, import.meta.url), "utf8")));
+  return parseDataFile(file, readFileSync(new URL(`../data/${file}`, import.meta.url), "utf8"), schema);
 }
 
 let shipped: Lookup | undefined;
 
-/** Catalog paths for a directory name, `~/`-relative, each flagged if the overlay calls it a credential. Empty on a miss. */
+/** Catalog paths for a directory name (`.aws`, `Code`) or a location (`~/.config/atuin`, narrowed to paths under it), `~/`-relative, each flagged if the overlay calls it a credential. Empty on a miss. */
 export function lookup(dirName: string): CatalogPath[] {
   if (shipped === undefined) {
     const entries = [...readData("catalog.json", EntryFile).entries, ...readData("wsp-entries.json", EntryFile).entries];

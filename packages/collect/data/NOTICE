@@ -8,8 +8,12 @@ one JSON entry (id, name, paths, xdg); entries whose only paths sit under
 Library/ were left out because they mean nothing on Linux. The
 conversion is scripts/convert-mackup.mjs in this package.
 
+Converted on 2026-09-03. This is a modified form of mackup's catalog,
+not the original.
+
 mackup is Copyright (C) 2013-2025 Laurent Raufaste <http://glop.org/>
-and licensed GPL-3.0-or-later. catalog.json stays under that license.
+and the mackup contributors, and licensed GPL-3.0-or-later.
+catalog.json stays under that license.
 wsp is licensed AGPL-3.0-only; GPLv3 section 13 permits combining the
 two and conveying the result, with the GPL continuing to apply to the
 converted catalog. The license text below is mackup's LICENSE file,
