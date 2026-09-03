@@ -9,6 +9,12 @@ import { buildEntries, matches, rungSelect, toggleEntry, type SelectItem } from 
 
 const KEY = { up: "\x1b[A", down: "\x1b[B", left: "\x1b[D", right: "\x1b[C", space: " ", enter: "\r", esc: "\x1b", ctrlC: "\x03" };
 
+const CHOICES = [
+  { value: "copy", label: "copy from this computer", short: "copy" },
+  { value: "machine", label: "sign in on the machine", short: "sign in" },
+  { value: "skip", label: "skip", short: "skip" },
+];
+
 const ITEMS: SelectItem[] = [
   { id: "git", label: "git name and email", detail: ["~/.gitconfig", "512 B"], lock: "on" },
   { id: "gh", label: "gh", group: "Homebrew", detail: ["Brewfile", "reinstalled by brew"] },
@@ -124,12 +130,43 @@ describe("rungSelect", () => {
     expect(await p).toEqual({ kind: "cancel" });
   });
 
-  it("a row with choices cycles them on space, has no all row, and reports the choice; copy counts as a tick", async () => {
-    const CHOICES = [
-      { value: "copy", label: "copy from this computer" },
-      { value: "machine", label: "sign in on the machine" },
-      { value: "skip", label: "skip" },
+  it("initial ticks for rows not on the screen are dropped from the answer", async () => {
+    const { input, output } = streams();
+    const p = rungSelect({ title: "Shell", counter: "2/7", items: ITEMS, initial: new Set(["zshrc", "gone"]), input, output });
+    await press(input, KEY.enter);
+    expect(await p).toEqual({ kind: "next", ticks: new Set(["git", "zshrc"]), choices: new Map() });
+  });
+
+  it("a group of choice rows heads with the spread of answers, or with nothing when they all agree", async () => {
+    const items: SelectItem[] = [
+      { id: "gh", label: "GitHub CLI login", group: "CLI logins", detail: [], choices: CHOICES },
+      { id: "claude", label: "Claude Code login", group: "Agent logins", detail: [], choices: CHOICES },
+      { id: "codex", label: "Codex login", group: "Agent logins", detail: [], choices: CHOICES },
+      { id: "gemini", label: "Gemini CLI login", group: "Agent logins", detail: [], choices: CHOICES },
     ];
+    const { input, output, text, clear } = streams();
+    const p = rungSelect({
+      title: "Sign-ins",
+      counter: "7/7",
+      items,
+      initial: new Set(["gh", "codex"]),
+      initialChoices: new Map([["gh", "copy"], ["claude", "machine"], ["codex", "copy"], ["gemini", "skip"]]),
+      input,
+      output,
+    });
+    await settle();
+    expect(text()).toContain("Agent logins  3: 1 copy, 1 sign in, 1 skip");
+    expect(text()).toMatch(/CLI logins\n/);
+    expect(text()).not.toContain("0 of 0");
+    clear();
+    // Past the CLI heading, gh, and the Agent heading onto claude: sign in on the machine -> skip.
+    await press(input, KEY.down, KEY.down, KEY.down, KEY.space);
+    expect(text()).toContain("Agent logins  3: 1 copy, 2 skip");
+    await press(input, KEY.enter);
+    await p;
+  });
+
+  it("a row with choices cycles them on space, has no all row, and reports the choice; copy counts as a tick", async () => {
     const items: SelectItem[] = [
       { id: "gh", label: "GitHub CLI login", detail: ["~/.config/gh/hosts.yml"], choices: CHOICES },
       { id: "claude", label: "Claude Code login", detail: ["Keychain"], choices: CHOICES },

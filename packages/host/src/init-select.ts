@@ -21,8 +21,8 @@ export interface SelectItem {
   /** on: always ticked, cannot be unticked. off: never ticked, with the reason shown. */
   lock?: "on" | "off";
   lockReason?: string;
-  /** A row that cycles through answers on space instead of ticking; the first one is the tick. */
-  choices?: readonly { value: string; label: string }[];
+  /** A row that cycles through answers on space instead of ticking; the first one is the tick. short heads the group tally. */
+  choices?: readonly { value: string; label: string; short: string }[];
 }
 
 export type Entry =
@@ -115,6 +115,19 @@ function fmtCount(on: number, of: number): string {
   return `${on} of ${of}`;
 }
 
+/** Ticks for a group of tick rows; the spread of answers for a group of choice rows, empty when they all agree. */
+function groupCount(items: readonly SelectItem[], ticks: ReadonlySet<string>, choices: ReadonlyMap<string, string>): string {
+  const withChoices = items.filter(i => i.choices !== undefined);
+  if (withChoices.length === 0) {
+    const free = items.filter(tickable);
+    return fmtCount(free.filter(i => ticks.has(i.id)).length, free.length);
+  }
+  const parts = (withChoices[0]!.choices ?? [])
+    .map(c => ({ n: withChoices.filter(i => choices.get(i.id) === c.value).length, short: c.short }))
+    .filter(p => p.n > 0);
+  return parts.length > 1 ? `${withChoices.length}: ${parts.map(p => `${p.n} ${p.short}`).join(", ")}` : "";
+}
+
 class RungPrompt extends Prompt<Set<string>> {
   cursor = 0;
   back = false;
@@ -124,7 +137,7 @@ class RungPrompt extends Prompt<Set<string>> {
 
   constructor(private readonly o: RungSelectOptions) {
     super({ render: () => this.frame(), ...(o.input ? { input: o.input } : {}), ...(o.output ? { output: o.output } : {}) }, true);
-    const ticks = new Set(o.initial);
+    const ticks = new Set([...o.initial].filter(id => o.items.some(i => i.id === id)));
     for (const i of o.items) {
       if (i.lock === "on") ticks.add(i.id);
       if (i.lock === "off") ticks.delete(i.id);
@@ -213,10 +226,9 @@ class RungPrompt extends Prompt<Set<string>> {
         return `${mark} ${box(free.length > 0 && on === free.length)} all  ${dim(fmtCount(on, free.length))}`;
       }
       case "group": {
-        const free = entry.items.filter(tickable);
-        const on = free.filter(i => ticks.has(i.id)).length;
         const fold = entry.folded ? "▸" : "▾";
-        return `${mark} ${fold} ${styleText("bold", entry.group)}  ${dim(fmtCount(on, free.length))}`;
+        const count = groupCount(entry.items, ticks, this.choices);
+        return `${mark} ${fold} ${styleText("bold", entry.group)}${count !== "" ? `  ${dim(count)}` : ""}`;
       }
       case "item": {
         const i = entry.item;

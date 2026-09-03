@@ -2,12 +2,14 @@
 // wsp init end to end against the stub backend: keys in, the seven screens,
 // the summary and confirm, prepare with its stage stream, the hand-off. The
 // runtime and host are the real ones over fakes; only the terminal is faked.
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
+import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
 import { RUNGS } from "@wsp/collect";
+import type { BackendPricing } from "@wsp/engine";
 import { createRuntime, memoryStore, type GoldenRecipe, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { GOLDEN_SETUP } from "../src/doctor.js";
@@ -20,6 +22,8 @@ import { stubBackend, type StubBackend } from "./stub-backend.js";
 const SOLARI = "slr_live_fake_solari_key";
 const KEY = { down: "\x1b[B", space: " ", enter: "\r", esc: "\x1b" };
 const URL_RE = /http:\/\/127\.0\.0\.1:\d+\//;
+const BOOT = /Boot a \d+ vCPU/;
+const PRICING: BackendPricing = { rateUsdPerHour: s => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 } };
 
 interface Fake {
   io: InitIO;
@@ -37,9 +41,10 @@ interface Fake {
   hosts: number;
 }
 
-function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string, string> } = {}): Fake {
+function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string, string>; columns?: number } = {}): Fake {
   const input = new PassThrough();
   const output = new PassThrough();
+  if (over.columns !== undefined) Object.assign(output, { columns: over.columns });
   const chunks: string[] = [];
   output.on("data", (c: Buffer) => chunks.push(c.toString()));
   const text = () => stripVTControlCharacters(chunks.join(""));
@@ -67,11 +72,12 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
   };
   const dir = mkdtempSync(join(tmpdir(), "wsp-init-"));
   dirs.push(dir);
-  const { tty: _tty, env: _env, ...rest } = over;
+  const { tty: _tty, env: _env, columns: _columns, ...rest } = over;
   const opts: InitOptions = {
     yes: false,
     collect: async () => FIXTURE,
     keys: { solari: SOLARI },
+    pricing: PRICING,
     statePath: join(dir, "state.json"),
     runtime: recipe => {
       recipes.push(recipe);
@@ -161,10 +167,12 @@ describe("wsp init, interactive", () => {
     await f.until("Sign-ins");
     expect(f.text()).toContain("GitHub CLI login  copy from this computer");
     expect(f.text()).toContain("Claude Code login  sign in on the machine");
-    // gh: copy -> sign in on the machine.
-    await f.press(KEY.space, KEY.enter);
+    // Codex was left unticked on the Agents screen, so its login is not offered.
+    expect(f.text()).not.toContain("Codex login");
+    // Past the CLI logins heading onto gh: copy -> sign in on the machine.
+    await f.press(KEY.down, KEY.space, KEY.enter);
 
-    await f.until("Boot a machine");
+    await f.until(BOOT);
     const summary = f.text().slice(f.text().lastIndexOf("Summary"));
     expect(summary).toContain("Identity");
     expect(summary).toContain("~/.ssh/config");
@@ -203,7 +211,7 @@ describe("wsp init, interactive", () => {
       "identity/git-user", "identity/ssh-config", "shell/zshrc", "shell/starship", "editors/nvim", "toolchains/mise",
       "tools/brew/gh", "tools/brew/jq", "tools/npm/pnpm", "agents/claude",
     ]);
-    expect(saved.entries.filter(e => e.rung === "logins").map(e => e.choice)).toEqual(["machine", "machine"]);
+    expect(saved.entries.filter(e => e.rung === "logins").map(e => e.choice)).toEqual(["machine", "machine", undefined]);
     expect(out).toContain("golden-recipe.json");
     expect(f.checklists[0]).toEqual([
       { label: "GitHub CLI login", command: "gh auth login" },
@@ -236,7 +244,7 @@ describe("wsp init, interactive", () => {
       await f.until(rung);
       await f.press(KEY.enter);
     }
-    await f.until("Boot a machine");
+    await f.until(BOOT);
     expect(f.text()).not.toContain("~/.ssh/config");
     await f.press("y");
     await f.until(URL_RE);
@@ -250,19 +258,58 @@ describe("wsp init, interactive", () => {
     expect(saved.entries.find(e => e.id === "identity/git-user")?.bring).toBe(true);
   });
 
-  it("no at the confirm boots nothing and saves nothing", async () => {
+  it("enter at the confirm takes No: the marker sits on No, nothing boots, and the recipe is kept for --manifest", async () => {
     const f = fake();
     const run = runInit(f.opts, f.io);
     for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
       await f.until(rung);
       await f.press(KEY.enter);
     }
-    await f.until("Boot a machine");
-    await f.press("n");
+    await f.until(BOOT);
+    const ask = f.text().slice(f.text().lastIndexOf("Boot a"));
+    expect(ask).toMatch(/2 vCPU, 4 GB\s+builder/);
+    expect(ask).toMatch(/\$0\.11\/hr/);
+    expect(ask).toMatch(/No\s+costs\s+nothing/);
+    expect(ask).toContain(`${S_RADIO_INACTIVE} Yes`);
+    expect(ask).toContain(`${S_RADIO_ACTIVE} No`);
+    await f.press(KEY.enter);
     expect((await run).code).toBe(1);
     expect(f.backends).toHaveLength(0);
-    expect(existsSync(join(dirs[0]!, "golden-recipe.json"))).toBe(false);
     expect(f.hosts).toBe(0);
+    const saved = loadManifest(join(dirs[0]!, "golden-recipe.json"));
+    expect(saved.entries.filter(e => e.bring).map(e => e.id)).toContain("shell/zshrc");
+  });
+
+  it("an agent ticked then unticked on the Agents screen shows and then hides its login row", async () => {
+    const f = fake();
+    const run = runInit(f.opts, f.io);
+    for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools"]) {
+      await f.until(rung);
+      await f.press(KEY.enter);
+    }
+    await f.until("Agents");
+    // all row, Claude Code, Codex: tick codex.
+    await f.press(KEY.down, KEY.down, KEY.space, KEY.enter);
+    await f.until("Sign-ins");
+    expect(f.text()).toContain("Codex login");
+    expect(f.text()).toContain("Agent logins  2: 1 copy, 1 sign in");
+    await f.press(KEY.esc);
+    await f.until("6/7");
+    f.clear();
+    await f.press(KEY.down, KEY.down, KEY.space, KEY.enter);
+    await f.until("Sign-ins");
+    expect(f.text()).not.toContain("Codex login");
+    expect(f.text()).not.toMatch(/Agent logins +\d/);
+    await f.press(KEY.enter);
+    await f.until(BOOT);
+    const summary = f.text().slice(f.text().lastIndexOf("Summary"));
+    expect(summary).not.toContain("Codex login");
+    expect(summary).toContain("Sign-ins  1 of 2");
+    await f.press(KEY.enter);
+    expect((await run).code).toBe(1);
+    const saved = loadManifest(join(dirs[0]!, "golden-recipe.json"));
+    expect(saved.entries.find(e => e.id === "logins/codex")).toMatchObject({ bring: false });
+    expect(saved.entries.find(e => e.id === "logins/codex")?.choice).toBeUndefined();
   });
 
   it("a prepare that fails after the hand-off never happened is reported once, and a failed seal after it is reported too", async () => {
@@ -294,13 +341,37 @@ describe("wsp init, interactive", () => {
     await f.until("1/7");
     const t = f.text();
     expect(t).toContain("Reading this computer  Identity 3");
-    expect(t).toContain("Reading this computer  Identity 3, Shell 2, Editors 1, Toolchains 1, Tools 4, Agents 2, Sign-ins 2");
-    expect(t.indexOf("Sign-ins 2")).toBeLessThan(t.indexOf("Found on this computer"));
+    expect(t).toContain("Reading this computer  Identity 3, Shell 2, Editors 1, Toolchains 1, Tools 4, Agents 2, Sign-ins 3");
+    expect(t.indexOf("Sign-ins 3")).toBeLessThan(t.indexOf("Found on this computer"));
     for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
       await f.until(rung);
       await f.press(KEY.enter);
     }
-    await f.until("Boot a machine");
+    await f.until(BOOT);
+    await f.press("n");
+    expect((await run).code).toBe(1);
+  });
+
+  it("on a narrow terminal the tally is cut to the width so the spinner line never wraps onto itself", async () => {
+    const f = fake({
+      columns: 48,
+      collect: async onRung => {
+        for (const rung of RUNGS) onRung(rung, FIXTURE.entries.filter(e => e.rung === rung).length);
+        return FIXTURE;
+      },
+    });
+    const run = runInit(f.opts, f.io);
+    await f.until("1/7");
+    const spins = f.text().split("\r").filter(l => l.includes("Reading this computer"));
+    expect(spins.length).toBeGreaterThan(1);
+    expect(spins.map(l => l.length).filter(n => n > 48)).toEqual([]);
+    expect(spins.filter(l => /Identity 3$/.test(l)).length).toBeGreaterThan(0);
+    expect(spins.at(-1)).toMatch(/Identity 3, Shell 2.*…$/);
+    for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
+      await f.until(rung);
+      await f.press(KEY.enter);
+    }
+    await f.until(BOOT);
     await f.press("n");
     expect((await run).code).toBe(1);
   });
@@ -308,7 +379,7 @@ describe("wsp init, interactive", () => {
   it("nothing found on this machine still shows the screens' empty state and reaches the confirm", async () => {
     const f = fake({ collect: async () => ({ entries: [] }) });
     const run = runInit(f.opts, f.io);
-    await f.until("Boot a machine");
+    await f.until(BOOT);
     expect(f.text()).toContain("Found nothing to bring");
     expect(f.text()).toContain("--manifest");
     await f.press("n");
@@ -321,7 +392,7 @@ describe("wsp init, flags and no terminal", () => {
     const f = fake({ tty: false });
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(0);
-    expect(f.text()).toContain("taken as yes");
+    expect(f.text()).toContain("Taken as yes (no terminal)");
     expect(f.text()).toMatch(URL_RE);
     expect(f.backends[0]!.machines).toHaveLength(1);
     expect(f.opened).toEqual([]);
