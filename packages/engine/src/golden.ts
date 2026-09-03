@@ -484,6 +484,8 @@ export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Build
   // A builder that idle-pauses resumes not first-life, so its seal would 502 and
   // consume it anyway; killing on idle loses the same work but fails loud and free.
   const asked = sizeAsked(opts.backend, opts);
+  // Taken before the create, so the age a person reads matches the createdAt label the sweep ages by.
+  const createdAt = new Date().toISOString();
   const machine = await opts.backend.create({
     kind,
     template: baseTemplate,
@@ -513,7 +515,7 @@ export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Build
       kind,
       baseTemplate,
       setupSha: setupShaOf(opts.setup, opts.import),
-      createdAt: new Date().toISOString(),
+      createdAt,
       firstLife: true,
       size,
       ...(opts.import !== undefined ? { import: applied.ledger } : {}),

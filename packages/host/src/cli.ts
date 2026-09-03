@@ -16,6 +16,7 @@ import { collect, nodeHost, type Manifest, type Rung } from "@wsp/collect";
 import {
   SolariBackend,
   createRuntime,
+  hostIdentity,
   jsonFileStore,
   machineExecStream,
   type GoldenBuilderView,
@@ -229,6 +230,7 @@ export function makeRuntime(keys: Keys, statePath: string, recipe: GoldenRecipe 
         }),
     },
     goldenRecipe: recipe,
+    hostId: hostIdentity(),
   });
 }
 

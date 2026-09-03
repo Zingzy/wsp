@@ -7,7 +7,7 @@
 import type { Readable, Writable } from "node:stream";
 import { styleText } from "node:util";
 import { RUNGS, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
-import type { BackendPricing } from "@wsp/engine";
+import { describeAge, type BackendPricing } from "@wsp/engine";
 import type { GoldenBuilderView, GoldenRecipe, GoldenStage, Runtime } from "@wsp/runtime";
 import { S_BAR, S_STEP_ERROR, S_STEP_SUBMIT, cancel, confirm, isCancel, log, note, outro } from "@clack/prompts";
 import type { Keys } from "./cli.js";
@@ -419,7 +419,8 @@ function defaultAnswers(manifest: Manifest): Answers {
   const agents = new Set(manifest.entries.filter(e => e.rung === "agents" && initialTicks(e)).map(e => e.id));
   const shown = manifest.entries.filter(e => loginShown(e, manifest, agents));
   return {
-    ticks: new Set(shown.filter(e => (e.rung === "logins" ? initialChoice(e) === "copy" : initialTicks(e))).map(e => e.id)),
+    // A saved recipe keeps its ticks: a login it brought as a sign-in on the machine stays ticked, as the run that saved it had it.
+    ticks: new Set(shown.filter(e => (e.rung === "logins" ? e.bring ?? (initialChoice(e) === "copy") : initialTicks(e))).map(e => e.id)),
     choices: new Map(shown.filter(e => e.rung === "logins").map(e => [e.id, initialChoice(e)])),
   };
 }
@@ -530,45 +531,63 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   saveRecipe(path, manifest, ticks, choices);
   log.step(`Recipe saved to ${path}`, out);
 
-  const bring = manifest.entries.filter(e => ticks.has(e.id)).map(e => {
-    const choice = choices.get(e.id);
-    return isLoginChoice(choice) ? { ...e, choice } : e;
-  });
+  const bringing = (): ManifestEntry[] =>
+    manifest.entries.filter(e => ticks.has(e.id)).map(e => {
+      const choice = choices.get(e.id);
+      return isLoginChoice(choice) ? { ...e, choice } : e;
+    });
+  let bring = bringing();
   // Filled by the Keychain reads below, after the earlier-builder check; the pack reads it only at build time.
   const secrets = new Map<string, string>();
   const resultsPath = importResultPath(opts.statePath);
   let installs: string[] | undefined;
-  const imp = importFor(bring, {
-    home: opts.home,
-    secrets,
-    platform: opts.platform,
-    onResult: r => {
-      writeFileSync(resultsPath, `${JSON.stringify(r, null, 2)}\n`);
-      const all = [...r.tools.map(t => ({ ...t, name: t.label })), ...r.agents];
-      const n = (o: string) => all.filter(x => x.outcome === o).length;
-      installs = [
-        `Tools and agents: ${n("installed")} installed, ${n("failed")} failed, ${n("skipped")} skipped; the list is in ${resultsPath}`,
-        ...all.filter(x => x.outcome === "failed").map(x => dim(`${x.name} failed: ${x.note ?? "no reason given"}`)),
-      ];
-    },
-  });
-  const recipe = goldenRecipeFor(bring, opts.keys, { import: imp });
-  const rt = opts.runtime(recipe);
-  // An earlier run's builder is attached to when it is still first-life and carries this
-  // recipe. Any other is never reaped from here: the person kills it, then runs init again.
-  const earlier = await rt.golden.builders();
-  const attach = earlier.find(b => b.name === GOLDEN_NAME && b.firstLife === true && b.recipeHash === imp.recipeHash);
+  const importOf = (rows: readonly ManifestEntry[]) =>
+    importFor(rows, {
+      home: opts.home,
+      secrets,
+      platform: opts.platform,
+      onResult: r => {
+        writeFileSync(resultsPath, `${JSON.stringify(r, null, 2)}\n`);
+        const all = [...r.tools.map(t => ({ ...t, name: t.label })), ...r.agents];
+        const n = (o: string) => all.filter(x => x.outcome === o).length;
+        installs = [
+          `Tools and agents: ${n("installed")} installed, ${n("failed")} failed, ${n("skipped")} skipped; the list is in ${resultsPath}`,
+          ...all.filter(x => x.outcome === "failed").map(x => dim(`${x.name} failed: ${x.note ?? "no reason given"}`)),
+        ];
+      },
+    });
+  let imp = importOf(bring);
+  let recipe = goldenRecipeFor(bring, opts.keys, { import: imp });
+  let rt = opts.runtime(recipe);
   const describeBuilder = (b: GoldenBuilderView): string => {
-    const hours = Math.max(0, Date.now() - Date.parse(b.createdAt)) / 3_600_000;
-    return `${b.name} (${b.id}), ${fmtDuration(hours * 3_600_000)} old, about $${(hours * opts.pricing.rateUsdPerHour(b.size)).toFixed(2)} so far`;
+    const ageMs = Math.max(0, Date.now() - Date.parse(b.createdAt));
+    return `${b.name} (${b.id}), ${describeAge(ageMs)}, about $${((ageMs / 3_600_000) * opts.pricing.rateUsdPerHour(b.size)).toFixed(2)} so far`;
   };
-  const blocking = earlier.filter(b => b !== attach);
-  if (blocking.length > 0) {
-    const lines = blocking.map(b => `${describeBuilder(b)}; ${b.firstLife === true ? "built from a different recipe" : "cannot be sealed after a restart"}`);
+  const reasonOf = (b: GoldenBuilderView): string => {
+    if (b.foreignOwner !== undefined) return "not this setup's builder";
+    if (b.heldBy !== undefined) return `in use by another wsp process (pid ${b.heldBy.pid})`;
+    if (b.building === true) return "its setup never finished";
+    return b.firstLife !== true ? "cannot be sealed after a restart" : "built from a different recipe";
+  };
+  // An earlier run's builder is attached to when it is still first-life, this setup's, and carries this
+  // recipe. Any other is never reaped from here: the person kills it, then runs init again.
+  const earlierBuilder = async (): Promise<GoldenBuilderView | undefined | "blocked"> => {
+    const earlier = await rt.golden.builders();
+    const attach = earlier.find(b => b.name === GOLDEN_NAME && b.firstLife === true && b.foreignOwner === undefined && b.heldBy === undefined && b.building !== true && b.recipeHash === imp.recipeHash);
+    const blocking = earlier.filter(b => b !== attach);
+    if (blocking.length === 0) return attach;
+    const lines = blocking.map(b => `${describeBuilder(b)}; ${reasonOf(b)}`);
+    if (attach !== undefined) lines.push(`${describeBuilder(attach)}; reusable by this run once the others are stopped`);
     log.warn(["A builder from an earlier wsp init is still running on the account:", ...lines].join("\n"), out);
-    cancel("Nothing was booted. Kill it first (the Solari console lists it), then run wsp init again.", out);
-    return { code: 1 };
-  }
+    // A builder another live process is using is that process's to finish; only the rest are the person's to kill.
+    const pids = blocking.flatMap(b => (b.heldBy !== undefined ? [b.heldBy.pid] : []));
+    if (pids.length === blocking.length) cancel(`Nothing was booted. Another wsp process (pid ${pids.join(", ")}) is using it; wait for it or stop that process, then run wsp init again.`, out);
+    else if (blocking.every(b => b.building === true)) cancel("Nothing was booted. Kill it first (the Solari console lists it), or run wsp, whose first sweep stops it; then run wsp init again.", out);
+    else cancel(`Nothing was booted. Kill it first (the Solari console lists it), then run wsp init again.${pids.length > 0 ? " The one another wsp process is using is that process's to finish, not yours to kill." : ""}`, out);
+    return "blocked";
+  };
+  let attach = await earlierBuilder();
+  if (attach === "blocked") return { code: 1 };
   // A free exit, before any consent dialog: a recipe whose ticked agents none can install is refused here, not on the builder.
   if (imp.agents.length === 0 && (imp.skippedAgents?.length ?? 0) > 0) {
     log.error(["No ticked agent can be installed, so there would be nothing to seal:", ...imp.skippedAgents!.map(a => `${a.name}: ${a.note}`)].join("\n"), out);
@@ -588,6 +607,15 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     for (const r of read.refused) choices.set(r.id, "machine");
     log.warn(read.refused.map(r => `${label(r.id)}: Keychain read failed (${r.reason}); changed to sign in on the machine.`).join("\n"), out);
     saveRecipe(path, manifest, ticks, choices);
+    // The flipped rows change the recipe hash; the builder must carry the hash the saved recipe now has,
+    // so wsp init --manifest on that file attaches to it later.
+    bring = bringing();
+    imp = importOf(bring);
+    recipe = goldenRecipeFor(bring, opts.keys, { import: imp });
+    await rt.close();
+    rt = opts.runtime(recipe);
+    attach = await earlierBuilder();
+    if (attach === "blocked") return { code: 1 };
   }
   const question = bootQuestion(recipe, opts.pricing);
   if (attach !== undefined) {

@@ -48,6 +48,10 @@ export interface Machine {
   readonly streamUrl?: string;
   /** The labels the provider reported when this handle was made; absent on backends that carry none. */
   readonly labels?: Record<string, string>;
+  /** The provider's view when get() made this handle, so a caller needs no second read; absent on a handle from
+   * create(). Its createdAt moves on a running machine nobody touched (+306 s at ten minutes, canary 2026-09-04 UTC)
+   * with no lifecycle event behind it, so nothing decides on it; state is the field worth reading. */
+  readonly seen?: { state: MachineState; createdAt?: string };
   exec(cmd: string, opts?: { timeoutMs?: number }): Promise<ExecResult>; // always REST path
   snapshot(name: string): Promise<string>;
   pause(): Promise<void>;

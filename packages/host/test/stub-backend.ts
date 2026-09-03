@@ -9,6 +9,8 @@ export interface StubMachine extends Machine {
   paused: boolean;
   killed: boolean;
   execLog: string[];
+  /** What the provider's view says it was created at; tests move it to play a resume. */
+  createdAt: string;
 }
 
 export interface StubBackend extends MachineBackend {
@@ -60,6 +62,7 @@ export function stubBackend(): StubBackend {
         paused: false,
         killed: false,
         execLog: [],
+        createdAt: new Date().toISOString(),
         async exec(cmd: string): Promise<ExecResult> {
           if (m.killed) throw Object.assign(new Error("gone"), { kind: "missing", status: 404 });
           m.execLog.push(cmd);
@@ -80,6 +83,9 @@ export function stubBackend(): StubBackend {
         },
         async state(): Promise<MachineState> {
           return m.killed ? "gone" : m.paused ? "paused" : "running";
+        },
+        get seen() {
+          return { state: (m.killed ? "gone" : m.paused ? "paused" : "running") as MachineState, createdAt: m.createdAt };
         },
         async downloadUrl(path: string): Promise<string> {
           return `${await vaultOrigin()}/download${path}`;

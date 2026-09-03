@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SolariBackend, killUntilGone } from "@wsp/engine";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { LIVE, liveEnv } from "../../engine/test/live.js";
 
 const BIN = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
@@ -25,7 +25,7 @@ const MANIFEST = {
 
 interface State {
   owner?: { id?: { id?: string } };
-  builders?: Record<string, { id: string; firstLife?: boolean; import?: { applied: string[] } }>;
+  builders?: Record<string, { id: string; firstLife?: boolean; building?: true; heldBy?: { pid: number }; import?: { applied: string[] } }>;
 }
 
 const scrub = (s: string): string => s.replace(/slr_live_\S+/g, "slr_live_[hidden]");
@@ -52,8 +52,7 @@ describe.runIf(LIVE)("builder reuse across processes (live: wsp init twice on on
     await gone;
   };
 
-  /** Runs `wsp init --manifest --yes` and resolves once the hand-off line is printed, with everything printed so far. */
-  const runInit = (manifestPath: string): { child: ChildProcess; handedOff: Promise<string> } => {
+  const spawnInit = (manifestPath: string): { child: ChildProcess; output: string[] } => {
     const output: string[] = [];
     const child = spawn(process.execPath, [BIN, "init", "--manifest", manifestPath, "--yes", "--port", "0", "--ws-port", "0", "--state", statePath], {
       cwd: home,
@@ -61,17 +60,41 @@ describe.runIf(LIVE)("builder reuse across processes (live: wsp init twice on on
       stdio: ["ignore", "pipe", "pipe"],
     });
     children.push(child);
+    child.stdout?.on("data", (chunk: Buffer) => output.push(chunk.toString()));
+    child.stderr?.on("data", (chunk: Buffer) => output.push(chunk.toString()));
+    return { child, output };
+  };
+
+  /** Runs `wsp init --manifest --yes` and resolves once `needle` is printed, with everything printed so far. */
+  const runInit = (manifestPath: string, needle = "This terminal reports the save."): { child: ChildProcess; handedOff: Promise<string> } => {
+    const { child, output } = spawnInit(manifestPath);
     const handedOff = new Promise<string>((resolve, reject) => {
-      const onData = (chunk: Buffer): void => {
-        output.push(chunk.toString());
-        if (output.join("").includes("This terminal reports the save.")) resolve(output.join(""));
+      const check = (): void => {
+        if (output.join("").includes(needle)) resolve(output.join(""));
       };
-      child.stdout?.on("data", onData);
-      child.stderr?.on("data", onData);
-      child.once("exit", (code, signal) => reject(new Error(`wsp init exited before the hand-off (code ${code}, signal ${signal}):\n${scrub(output.join(""))}`)));
+      child.stdout?.on("data", check);
+      child.stderr?.on("data", check);
+      child.once("exit", (code, signal) => reject(new Error(`wsp init exited before "${needle}" (code ${code}, signal ${signal}):\n${scrub(output.join(""))}`)));
     });
     return { child, handedOff };
   };
+
+  /** Runs `wsp init --manifest --yes` to its exit; one that starts serving instead is stopped and reported as such. */
+  const runToExit = (manifestPath: string): Promise<{ code: number | null; output: string }> =>
+    new Promise(resolve => {
+      const { child, output } = spawnInit(manifestPath);
+      const onData = (): void => {
+        if (output.join("").includes("This terminal reports the save.")) void stop(child).then(() => resolve({ code: null, output: `${output.join("")}\n[the process began serving; stopped by the test]` }));
+      };
+      child.stdout?.on("data", onData);
+      child.stderr?.on("data", onData);
+      child.once("exit", code => resolve({ code, output: output.join("") }));
+    });
+
+  // A failing assertion must not leave a serving host behind for the next scenario to refuse against.
+  afterEach(async () => {
+    for (const child of children.splice(0)) await stop(child);
+  });
 
   afterAll(async () => {
     if (!LIVE) return;
@@ -139,11 +162,60 @@ describe.runIf(LIVE)("builder reuse across processes (live: wsp init twice on on
     expect(ours[0]!.labels).toMatchObject({ wsp: "1", "wsp-builder": "1" });
 
     await stop(second.child);
+    // The per-machine GET view is what the owner check reads; this is the one reading of its metadata on the real provider.
+    const handle = await backend.get(builderId);
+    print(`get(${builderId.slice(0, 24)}..) labels: ${JSON.stringify(handle.labels)} seen: ${JSON.stringify(handle.seen)}`);
+    expect(handle.labels).toMatchObject({ "wsp-owner": owner, "wsp-builder": "1", wsp: "1" });
+    expect(handle.seen).toMatchObject({ state: "running" });
     const tKill = Date.now();
-    await killUntilGone(backend, await backend.get(builderId));
+    await killUntilGone(backend, handle);
     mine.delete(builderId);
     print(`killed ${builderId} by recorded id in ${Date.now() - tKill} ms; timings: run 1 ${run1Ms} ms, run 2 ${run2Ms} ms`);
     const left = (await backend.list()).filter(m => m.labels["wsp-owner"] === owner && m.state !== "gone");
     expect(left).toEqual([]);
+  });
+
+  it("a process stopped mid-prepare leaves a placeholder its dead holder cannot finish: the next init, at once and again after a minute, lists it, boots nothing and kills nothing; the machine is stopped by its recorded id", { timeout: 900_000 }, async () => {
+    const manifestPath = join(home, "manifest.json");
+    writeFileSync(manifestPath, JSON.stringify(MANIFEST));
+    const before = new Set(Object.keys(readState().builders ?? {}));
+
+    const t1 = Date.now();
+    const a = runInit(manifestPath, "Installing agents");
+    await a.handedOff;
+    const midPrepareMs = Date.now() - t1;
+    const placeholder = Object.values(readState().builders ?? {}).find(b => !before.has(b.id));
+    expect(placeholder).toBeDefined();
+    const id = placeholder!.id;
+    mine.add(id);
+    print(`mid-prepare: created ${id} after ${midPrepareMs} ms; record ${JSON.stringify({ ...placeholder, id: id.slice(0, 24) })}`);
+    expect(placeholder).toMatchObject({ building: true, firstLife: true, heldBy: { pid: a.child.pid } });
+    await stop(a.child);
+    const owner = readState().owner?.id?.id;
+
+    const t2 = Date.now();
+    const b = await runToExit(manifestPath);
+    print(`init within a second (after ${t2 - t1} ms): exit ${b.code}\n${scrub(b.output)}`);
+    expect(b.code).toBe(1);
+    expect(b.output).toContain(`default (${id})`);
+    expect(b.output).toContain("its setup never finished");
+    expect(b.output).toContain("Kill it first");
+    expect(b.output).not.toContain("Attaching");
+    expect(b.output).not.toMatch(/Boot a \d+ vCPU/);
+
+    await new Promise(r => setTimeout(r, 60_000));
+    const c = await runToExit(manifestPath);
+    print(`init after a minute: exit ${c.code}\n${scrub(c.output)}`);
+    expect(c.code).toBe(1);
+    expect(c.output).toContain("its setup never finished");
+    expect(c.output).not.toContain("Attaching");
+
+    const ours = (await backend.list()).filter(m => m.labels["wsp-owner"] === owner && m.state === "running");
+    expect(ours.map(m => m.id)).toEqual([id]);
+    const tKill = Date.now();
+    await killUntilGone(backend, await backend.get(id));
+    mine.delete(id);
+    print(`killed ${id} by recorded id in ${Date.now() - tKill} ms`);
+    expect((await backend.list()).filter(m => m.labels["wsp-owner"] === owner && m.state !== "gone")).toEqual([]);
   });
 });

@@ -34,10 +34,10 @@ export interface ReapedMachine {
   /** Off the listing; a machine killed from its record alone has none. */
   labels?: Record<string, string>;
   builder: boolean;
-  /** recorded: this state file's record from an earlier process, not sealable; expired: a kept
-   * first-life record past six hours by its createdAt label; own: wears this owner's label with
-   * no record left; orphan: no owner label and past its backstop. */
-  reason: "recorded" | "expired" | "own" | "orphan";
+  /** recorded: this state file's record from an earlier process, not sealable; unfinished: such a record
+   * whose stages never completed; expired: a kept first-life record past six hours by its createdAt label;
+   * own: wears this owner's label with no record left; orphan: no owner label and past its backstop. */
+  reason: "recorded" | "unfinished" | "expired" | "own" | "orphan";
   ageMs?: number;
 }
 

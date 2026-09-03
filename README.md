@@ -35,7 +35,8 @@ state so a second golden is a re-run.
 `wsp` reads keys from `.env` in the working directory or from the
 environment, and asks once if neither is set. State is a JSON file:
 `./.wsp/state.json` in a checkout with a `.env`, `~/.wsp/state.json`
-otherwise.
+otherwise. One state file belongs to one machine: a WSP_HOME on a shared
+or synced drive is not supported.
 
 ## The reach path, measured
 

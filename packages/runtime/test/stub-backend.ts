@@ -80,6 +80,9 @@ export function stubBackend(): StubBackend {
         async state(): Promise<MachineState> {
           return m.killed ? "gone" : m.paused ? "paused" : "running";
         },
+        get seen() {
+          return { state: (m.killed ? "gone" : m.paused ? "paused" : "running") as MachineState, ...(m.shape.createdAt !== undefined ? { createdAt: m.shape.createdAt } : {}) };
+        },
         async describe(): Promise<MachineShape> {
           return { ...m.shape };
         },
