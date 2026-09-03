@@ -32,13 +32,13 @@ async function keychainHas(host: Host, service: string): Promise<boolean> {
   return (await host.exec.run("security", ["find-generic-password", "-s", service])) !== undefined;
 }
 
+// hosts.yml names the account; on macOS the token sits in the Keychain, so that
+// item rides along as a second path and the copy step reads it there.
 async function ghRow(host: Host): Promise<ManifestEntry | undefined> {
   const f = await found(host, ["~/.config/gh/hosts.yml"]);
   if (f.paths.length === 0) return undefined;
-  if (await keychainHas(host, "gh:github.com")) {
-    return entry({ rung: "logins", id: "logins/gh", label: "GitHub CLI login", group: "CLI logins", ...f, default: "skip", reason: "token in Keychain; sign in on the machine" });
-  }
-  return entry({ rung: "logins", id: "logins/gh", label: "GitHub CLI login", group: "CLI logins", ...f });
+  const paths = (await keychainHas(host, "gh:github.com")) ? [...f.paths, "Keychain: gh:github.com"] : f.paths;
+  return entry({ rung: "logins", id: "logins/gh", label: "GitHub CLI login", group: "CLI logins", paths, bytes: f.bytes });
 }
 
 // Claude defaults to signing in on the machine: the vendor's terms forbid a

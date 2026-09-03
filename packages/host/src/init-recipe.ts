@@ -6,9 +6,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type LoginChoice, type Manifest, type ManifestEntry, type Rung, parseManifest } from "@wsp/collect";
-import type { GoldenRecipe, Machine } from "@wsp/runtime";
+import type { GoldenImport, GoldenRecipe, Machine } from "@wsp/runtime";
 import type { Keys } from "./cli.js";
-import { GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_ENVS, claudeEnvs } from "./doctor.js";
+import { GUEST_ENVS, claudeEnvs } from "./doctor.js";
 
 export const RUNG_TITLE: Record<Rung, string> = {
   identity: "Identity",
@@ -81,7 +81,7 @@ export function loginShown(e: ManifestEntry, manifest: Manifest, ticks: Readonly
   return agent === undefined || ticks.has(agent.id);
 }
 
-function isLoginChoice(v: unknown): v is LoginChoice {
+export function isLoginChoice(v: unknown): v is LoginChoice {
   return LOGIN_CHOICES.some(c => c.value === v);
 }
 
@@ -113,42 +113,27 @@ export function saveRecipe(path: string, manifest: Manifest, ticks: ReadonlySet<
   writeFileSync(path, `${JSON.stringify({ entries }, null, 2)}\n`);
 }
 
-interface AgentInstall {
-  setup: string;
-  smoke: string;
-}
-
-/** The agents wsp can install on a builder today. The Claude installer is the
- * one curl|sh the security rules allow; other agents wait for the pinned
- * recipe catalog and are carried in the recipe file only. */
-const AGENT_INSTALLS: Record<string, AgentInstall> = {
-  claude: { setup: GOLDEN_SETUP, smoke: GOLDEN_SMOKE },
-};
-
 export function agentName(e: ManifestEntry): string {
   return e.id.split("/").at(-1) ?? e.id;
 }
 
-export function installFor(e: ManifestEntry): AgentInstall | undefined {
-  return e.rung === "agents" ? AGENT_INSTALLS[agentName(e)] : undefined;
-}
-
-/** What the builder runs: the install line of every ticked agent that has
- * one, and their version checks as the smoke. Nothing ticked means a bare
- * machine that still has to fork and boot to seal. */
+/** What the builder runs. The harness line and smoke are bare: the import
+ * carries every ticked agent with its own installer and version check, and
+ * the builder's seal smokes the ones that installed. Nothing ticked means a
+ * bare machine that still has to fork and boot to seal. */
 export function goldenRecipeFor(
   bring: readonly ManifestEntry[],
   keys: Pick<Keys, "anthropic">,
-  hooks: { deployDaemon?: (machine: Machine) => Promise<void | string> } = {},
+  hooks: { deployDaemon?: (machine: Machine) => Promise<void | string>; import?: GoldenImport } = {},
 ): GoldenRecipe {
-  const installs = bring.map(installFor).filter((i): i is AgentInstall => i !== undefined);
   const claude = bring.some(e => e.rung === "agents" && agentName(e) === "claude");
   return {
-    setup: installs.length > 0 ? installs.map(i => i.setup).join(" && ") : "true",
-    smoke: installs.length > 0 ? installs.map(i => i.smoke).join(" && ") : "true",
+    setup: "true",
+    smoke: "true",
     cpu: 2,
     memMb: 4096,
     envs: claude ? claudeEnvs(keys.anthropic) : { ...GUEST_ENVS },
     ...(hooks.deployDaemon !== undefined ? { deployDaemon: hooks.deployDaemon } : {}),
+    ...(hooks.import !== undefined ? { import: hooks.import } : {}),
   };
 }

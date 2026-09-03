@@ -7,6 +7,8 @@ export interface VaultOptions {
   timeoutMs?: number;
   /** Export only: an archive over this many bytes is removed and refused with kind vaultTooLarge. */
   maxBytes?: number;
+  /** Import only: merge into what the destination already holds instead of replacing its directories. */
+  overlay?: boolean;
 }
 
 function quote(p: string): string {
@@ -49,9 +51,12 @@ export async function importInto(machine: Machine, tar: Buffer, destDir: string,
   const put = await doFetch(url, { method: "PUT", body: new Uint8Array(tar) });
   if (!put.ok) throw new Error(`vault import upload failed: HTTP ${put.status}`);
   // --recursive-unlink: imported dirs replace existing ones wholesale, so a
-  // stale config dir on the target can't shadow the vaulted one.
+  // stale config dir on the target can't shadow the vaulted one. An overlay
+  // (laptop files onto a fresh guest) merges instead, and --no-same-owner
+  // keeps root from inheriting the laptop's uid off the archive.
+  const flags = opts.overlay ? "--no-same-owner" : "--recursive-unlink";
   const untar = await machine.exec(
-    `tar xzf ${quote(tmp)} -C ${quote(destDir)} --recursive-unlink && rm -f ${quote(tmp)}`,
+    `tar xzf ${quote(tmp)} -C ${quote(destDir)} ${flags} && rm -f ${quote(tmp)}`,
     { timeoutMs: opts.timeoutMs ?? 120_000 },
   );
   if (untar.exitCode !== 0) {

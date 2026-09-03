@@ -43,6 +43,8 @@ const Fields = z.object({
   choice: LoginChoice.optional(),
   /** Only on a tools row; the TUI greys out a "no". */
   linux: Linux.optional(),
+  /** Only on a tools row: the version the laptop runs, which the machine installs by pin. */
+  version: z.string().min(1).optional(),
 });
 
 export const ManifestEntry = Fields.superRefine((e, ctx) => {
@@ -54,6 +56,9 @@ export const ManifestEntry = Fields.superRefine((e, ctx) => {
   }
   if (e.linux !== undefined && e.rung !== "tools") {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["linux"], message: "only a tools row carries a linux marker" });
+  }
+  if (e.version !== undefined && e.rung !== "tools") {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["version"], message: "only a tools row carries a version" });
   }
   if (e.required === true && e.default === "skip") {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["required"], message: "a required row cannot default to skip" });

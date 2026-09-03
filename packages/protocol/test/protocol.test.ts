@@ -304,6 +304,9 @@ describe("golden wire schemas", () => {
     expect(EventUnion.parse(e)).toEqual(e);
     expect(GoldenStageEvent.parse({ type: "golden.stage", name: "default", stage: "sealed" })).toBeTruthy();
     expect(() => GoldenStageEvent.parse({ type: "golden.stage", name: "default", stage: "vibing" })).toThrow();
+    for (const stage of ["applying-setup", "uploading-files", "installing-tools"]) {
+      expect(GoldenStageEvent.parse({ type: "golden.stage", name: "default", stage, detail: "3 files" })).toMatchObject({ stage });
+    }
   });
 
   it("a manifest sealed before kind was recorded still parses; new ones carry the kind", () => {

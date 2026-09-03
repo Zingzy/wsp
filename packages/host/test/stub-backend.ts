@@ -34,6 +34,12 @@ function vaultServer(): () => Promise<string> {
     }));
 }
 
+/** What a bare guest answers: nothing, except the Node step, which finds the base Node and keeps it. */
+export function guestAnswer(cmd: string): ExecResult {
+  if (cmd.includes("NODE_HAVE")) return { exitCode: 0, stdout: "NODE_HAVE v18.20.4\nNODE_KEPT v18.20.4\n", stderr: "" };
+  return { exitCode: 0, stdout: "", stderr: "" };
+}
+
 export function stubBackend(): StubBackend {
   let seq = 0;
   const machines: StubMachine[] = [];
@@ -43,7 +49,7 @@ export function stubBackend(): StubBackend {
     capabilities: { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true },
     pricing: { rateUsdPerHour: (s: { cpu: number; memMb: number }) => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 } },
     machines,
-    execImpl: () => ({ exitCode: 0, stdout: "", stderr: "" }),
+    execImpl: (_m, cmd) => guestAnswer(cmd),
     async create(spec: MachineSpec): Promise<Machine> {
       const m: StubMachine = {
         id: `m${++seq}`,

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type ManifestEntry, parseManifest } from "@wsp/collect";
 import { afterEach, describe, expect, it } from "vitest";
-import { GOLDEN_SETUP, GOLDEN_SMOKE } from "../src/doctor.js";
+import type { GoldenImport } from "@wsp/runtime";
 import {
   checklistFor,
   goldenRecipeFor,
@@ -80,21 +80,22 @@ describe("parseManifest", () => {
 
 describe("goldenRecipeFor", () => {
   const bring = (...ids: string[]): ManifestEntry[] => ids.map(byId);
+  const imp: GoldenImport = { recipeHash: "h", tools: [], agents: [] };
 
-  it("installs only the ticked agents that have an install line, and names no agent when none is ticked", () => {
-    const none = goldenRecipeFor(bring("identity/git-user", "shell/zshrc"), {});
+  it("runs a bare harness and smoke; the import carries files, tools and agents; envs name no agent when none is ticked", () => {
+    const none = goldenRecipeFor(bring("identity/git-user", "shell/zshrc"), {}, { import: imp });
     expect(none.setup).toBe("true");
     expect(none.smoke).toBe("true");
+    expect(none.import).toBe(imp);
     expect(none.envs).not.toHaveProperty("CLAUDE_CONFIG_DIR");
     expect(none.envs).not.toHaveProperty("ANTHROPIC_API_KEY");
     expect(none.envs?.["PATH"]).toContain("/root/.local/bin");
+    expect(none.envs?.["PATH"]).toContain("/home/linuxbrew/.linuxbrew/bin");
     expect(JSON.stringify(none)).not.toMatch(/claude/i);
   });
 
-  it("a ticked Claude Code uses the sanctioned installer and its smoke, with the key only when loaded", () => {
+  it("a ticked Claude Code sets its config dir and the key only when loaded", () => {
     const withKey = goldenRecipeFor(bring("agents/claude", "shell/zshrc"), { anthropic: ANTHROPIC });
-    expect(withKey.setup).toBe(GOLDEN_SETUP);
-    expect(withKey.smoke).toBe(GOLDEN_SMOKE);
     expect(withKey.envs).toMatchObject({ ANTHROPIC_API_KEY: ANTHROPIC, CLAUDE_CONFIG_DIR: "/root/.claude-cfg" });
     expect(withKey.cpu).toBe(2);
     expect(withKey.memMb).toBe(4096);
@@ -102,12 +103,6 @@ describe("goldenRecipeFor", () => {
     const noKey = goldenRecipeFor(bring("agents/claude"), {});
     expect(noKey.envs).not.toHaveProperty("ANTHROPIC_API_KEY");
     expect(noKey.envs).toHaveProperty("CLAUDE_CONFIG_DIR");
-  });
-
-  it("an agent without an install line is carried in the recipe file but installs nothing", () => {
-    const recipe = goldenRecipeFor(bring("agents/codex"), {});
-    expect(recipe.setup).toBe("true");
-    expect(recipe.smoke).toBe("true");
   });
 
   it("threads the daemon deploy hook through", () => {

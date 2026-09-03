@@ -15,6 +15,7 @@ export interface RowSpec {
   group?: string;
   required?: boolean;
   linux?: Linux;
+  version?: string;
   /** Emit the row even when none of the candidate paths exist. */
   always?: boolean;
 }
@@ -65,6 +66,7 @@ export function entry(spec: EntrySpec): ManifestEntry {
     ...(spec.reason !== undefined ? { reason: spec.reason } : {}),
     ...(spec.required !== undefined ? { required: spec.required } : {}),
     ...(spec.linux !== undefined ? { linux: spec.linux } : {}),
+    ...(spec.version !== undefined ? { version: spec.version } : {}),
   };
 }
 
