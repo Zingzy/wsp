@@ -282,8 +282,8 @@ describe("wsp init, interactive", () => {
     const f = fake();
     const run = runInit(f.opts, f.io);
     await f.until("Identity");
-    // all row, git (locked), ssh config: untick ssh config.
-    await f.press(KEY.down, KEY.down, KEY.space, KEY.enter);
+    // The cursor starts on the all row and skips the git bullet: one down is ssh config, untick it.
+    await f.press(KEY.down, KEY.space, KEY.enter);
     await f.until("Shell");
     f.clear();
     await f.press(KEY.esc);

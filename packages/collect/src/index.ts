@@ -16,3 +16,4 @@ export { classifyFormulae, linuxSupport, renderSnapshot, type BottleSnapshot } f
 export { LINUX_BOTTLES } from "./data/linux-bottles.js";
 export { AGENTS, detectAgents } from "./detect/agents.js";
 export { detectLogins } from "./detect/logins.js";
+export { buildLookup, convertMackup, dirKey, isCredential, isMacOnly, lookup, parseMackupCfg, renderCatalog, type CatalogEntry, type CatalogPath, type CredentialOverlay, type Lookup, type MackupCatalog } from "./catalog.js";

@@ -13,6 +13,7 @@ import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { AppShell } from "../src/shell/AppShell.js";
 import { KeybindingDispatcher } from "../src/shell/KeybindingDispatcher.js";
 import { onNewThreadRequest } from "../src/shell/shellRequests.js";
+import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { provideTerminals, WorkspaceTerminals } from "../src/terminal/link.js";
 
 const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running"): WorkspaceView => ({
@@ -77,6 +78,7 @@ const inPalette = () => within(palette()!);
 const tabbar = () => document.querySelector("[data-right-panel-tabbar]");
 const sidebarState = () => document.querySelector('[data-slot="sidebar"]')?.getAttribute("data-state");
 const panel = (id: string) => useRightPanelStore.getState().byWorkspaceId[id];
+const drawer = (id: string) => useTerminalDrawerStore.getState().byWorkspaceId[id];
 const settle = () => act(() => new Promise<void>(resolve => setTimeout(resolve, 0)));
 
 beforeEach(() => {
@@ -84,6 +86,7 @@ beforeEach(() => {
   vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
   useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, sessions: {}, ready: false });
   useRightPanelStore.setState({ byWorkspaceId: {} });
+  useTerminalDrawerStore.setState({ byWorkspaceId: {} });
 });
 
 afterEach(() => {
@@ -197,26 +200,47 @@ describe("default shortcuts", () => {
     await waitFor(() => expect(panel("ws_a")?.isOpen).toBe(false));
   });
 
-  it("mod+j opens a terminal surface, then hides the panel, then shows it again", async () => {
+  it("mod+j toggles the terminal drawer and never touches the right panel", async () => {
     await mountShell();
     provideTerminals("ws_a", fakeTerminals());
     mod("j");
-    await waitFor(() => expect(panel("ws_a")?.activeSurfaceId).toBe("terminal:pty1"));
+    await waitFor(() => expect(drawer("ws_a")?.terminalOpen).toBe(true));
     mod("j");
-    await waitFor(() => expect(panel("ws_a")?.isOpen).toBe(false));
-    mod("j");
-    await waitFor(() => expect(panel("ws_a")?.isOpen).toBe(true));
-    expect(panel("ws_a")?.surfaces.filter(s => s.kind === "terminal").length).toBe(1);
+    await waitFor(() => expect(drawer("ws_a")?.terminalOpen ?? false).toBe(false));
+    expect(panel("ws_a")?.surfaces.filter(s => s.kind === "terminal") ?? []).toEqual([]);
   });
 
-  it("mod+d splits and mod+n opens a terminal only while the terminal has focus", async () => {
+  it("mod+d splits and mod+n opens a drawer terminal only while the terminal has focus", async () => {
     await mountShell();
     provideTerminals("ws_a", fakeTerminals());
-    mod("j");
-    await waitFor(() => expect(panel("ws_a")?.activeSurfaceId).toBe("terminal:pty1"));
     mod("d");
     await settle();
-    expect(panel("ws_a")?.surfaces.length).toBe(1);
+    expect(drawer("ws_a")).toBeUndefined();
+
+    const term = document.createElement("div");
+    term.dataset["terminalOwner"] = "drawer";
+    const ta = document.createElement("textarea");
+    term.appendChild(ta);
+    document.body.appendChild(term);
+    ta.focus();
+    mod("n", {}, ta);
+    await waitFor(() => expect(drawer("ws_a")?.terminalIds).toEqual(["pty1"]));
+    expect(drawer("ws_a")?.terminalOpen).toBe(true);
+    mod("d", {}, ta);
+    await waitFor(() => expect(drawer("ws_a")?.terminalGroups.map(g => g.terminalIds)).toEqual([["pty1", "pty2"]]));
+    mod("n", {}, ta);
+    await waitFor(() => expect(drawer("ws_a")?.terminalGroups.map(g => g.terminalIds)).toEqual([["pty1", "pty2"], ["pty3"]]));
+    expect(panel("ws_a")?.surfaces.filter(s => s.kind === "terminal") ?? []).toEqual([]);
+    term.remove();
+  });
+
+  it("mod+d and mod+n act on the right panel's terminal while one of its terminals has focus", async () => {
+    await mountShell();
+    const terms = fakeTerminals();
+    provideTerminals("ws_a", terms);
+    const tab = await terms.open();
+    act(() => useRightPanelStore.getState().openTerminal("ws_a", tab.ptyId));
+    await waitFor(() => expect(panel("ws_a")?.activeSurfaceId).toBe("terminal:pty1"));
 
     const term = document.createElement("div");
     term.dataset["terminalOwner"] = "right-panel";
@@ -231,13 +255,21 @@ describe("default shortcuts", () => {
     });
     mod("n", {}, ta);
     await waitFor(() => expect(panel("ws_a")?.activeSurfaceId).toBe("terminal:pty3"));
+    expect(drawer("ws_a")).toBeUndefined();
     term.remove();
   });
 
   it("reports a missing terminal link instead of failing silently", async () => {
     await mountShell();
-    mod("j");
+    const term = document.createElement("div");
+    term.dataset["terminalOwner"] = "drawer";
+    const ta = document.createElement("textarea");
+    term.appendChild(ta);
+    document.body.appendChild(term);
+    ta.focus();
+    mod("n", {}, ta);
     await waitFor(() => expect(useStore.getState().toast).toContain("no terminal link"));
+    term.remove();
   });
 });
 

@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // One place that turns a keybinding command into store calls, shared by the
-// shortcut dispatcher and the palette so both agree on what a command does.
-// Terminal commands go through the right panel store's surface actions; the
-// pty itself comes from the workspace's terminal link.
+// shortcut dispatcher, the palette, the header button and the terminal
+// surfaces so they all agree on what a command does. The terminal shortcuts
+// drive the drawer under the chat, except that new and split act on the right
+// panel's terminal while one of its terminals has focus; the panel surface
+// itself opens only from its own tab strip. Every pty comes from the link.
 import { toggleCommandPalette } from "../commandPaletteBus.js";
 import type { KeybindingCommand } from "../keybindingTypes.js";
+import { getTerminalFocusOwner } from "../lib/terminalFocus.js";
 import { useStore } from "../protocol/store.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../rightPanelStore.js";
-import { getTerminals } from "../terminal/link.js";
+import { useTerminalDrawerStore } from "../terminal/drawerStore.js";
+import { getTerminals, type WorkspaceTerminals } from "../terminal/link.js";
 import { requestNewThread } from "./shellRequests.js";
 
 export interface ShellCommandTarget {
@@ -15,50 +19,62 @@ export interface ShellCommandTarget {
   readonly toggleSidebar: () => void;
 }
 
-const reportTerminalFailure = (error: unknown): void => {
+export type SplitDirection = "horizontal" | "vertical";
+
+export function reportTerminalFailure(error: unknown): void {
   useStore.setState({ toast: `terminal: ${error instanceof Error ? error.message : String(error)}` });
-};
+}
 
-/** A fresh pty in its own surface. */
-export function openNewTerminal(workspaceId: string): Promise<void> {
+/** Runs fn against the workspace's link; no link or a refused create ends in a toast, never in silence. */
+function withTerminals(workspaceId: string, fn: (terminals: WorkspaceTerminals) => Promise<unknown>): Promise<void> {
   const terminals = getTerminals(workspaceId);
   if (!terminals) {
     reportTerminalFailure(new Error("no terminal link for this workspace"));
     return Promise.resolve();
   }
-  return terminals
-    .open()
-    .then(tab => useRightPanelStore.getState().openTerminal(workspaceId, tab.ptyId))
-    .catch(reportTerminalFailure);
+  return fn(terminals).then(() => undefined, reportTerminalFailure);
 }
 
-/** The last terminal surface if there is one, else a new one. */
+/** The drawer, shown; a workspace that never had a pty spawns one on mount. */
 export function showTerminal(workspaceId: string): Promise<void> {
-  const panel = useRightPanelStore.getState();
-  const state = selectWorkspaceRightPanelState(panel.byWorkspaceId, workspaceId);
-  const last = [...state.surfaces].reverse().find(surface => surface.kind === "terminal");
-  if (last) {
-    panel.activateSurface(workspaceId, last.id);
-    return Promise.resolve();
-  }
-  return openNewTerminal(workspaceId);
+  useTerminalDrawerStore.getState().setOpen(workspaceId, true);
+  return Promise.resolve();
 }
 
-/** A fresh pty split into the active terminal surface, or a new surface when none is active. */
-export function splitTerminal(workspaceId: string): Promise<void> {
-  const panel = useRightPanelStore.getState();
-  const state = selectWorkspaceRightPanelState(panel.byWorkspaceId, workspaceId);
+/** A fresh pty as its own drawer tab; the drawer opens if it was closed. */
+export function openDrawerTerminal(workspaceId: string): Promise<void> {
+  return withTerminals(workspaceId, terminals =>
+    terminals.open().then(tab => useTerminalDrawerStore.getState().add(workspaceId, tab.ptyId)),
+  );
+}
+
+/** A fresh pty split into the drawer's active group. */
+export function splitDrawerTerminal(workspaceId: string, direction: SplitDirection = "horizontal"): Promise<void> {
+  return withTerminals(workspaceId, terminals =>
+    terminals.open().then(tab => useTerminalDrawerStore.getState().split(workspaceId, tab.ptyId, direction)),
+  );
+}
+
+/** A fresh pty in its own right-panel surface. */
+export function openPanelTerminal(workspaceId: string): Promise<void> {
+  return withTerminals(workspaceId, terminals =>
+    terminals.open().then(tab => useRightPanelStore.getState().openTerminal(workspaceId, tab.ptyId)),
+  );
+}
+
+/** A fresh pty split into one right-panel terminal surface. */
+export function splitPanelTerminal(workspaceId: string, surfaceId: string, direction: SplitDirection = "horizontal"): Promise<void> {
+  return withTerminals(workspaceId, terminals =>
+    terminals.open().then(tab => useRightPanelStore.getState().splitTerminal(workspaceId, surfaceId, tab.ptyId, direction)),
+  );
+}
+
+/** A fresh pty split into the panel's active terminal surface, or a new surface when none is active. */
+export function splitActivePanelTerminal(workspaceId: string, direction: SplitDirection = "horizontal"): Promise<void> {
+  const state = selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, workspaceId);
   const active = state.surfaces.find(surface => surface.id === state.activeSurfaceId);
-  if (!active || active.kind !== "terminal") return openNewTerminal(workspaceId);
-  const terminals = getTerminals(workspaceId);
-  if (!terminals) {
-    reportTerminalFailure(new Error("no terminal link for this workspace"));
-    return Promise.resolve();
-  }
-  return terminals
-    .open()
-    .then(tab => useRightPanelStore.getState().splitTerminal(workspaceId, active.id, tab.ptyId))
-    .catch(reportTerminalFailure);
+  if (!active || active.kind !== "terminal") return openPanelTerminal(workspaceId);
+  return splitPanelTerminal(workspaceId, active.id, direction);
 }
 
 export function runShellCommand(command: KeybindingCommand, target: ShellCommandTarget): void {
@@ -76,23 +92,16 @@ export function runShellCommand(command: KeybindingCommand, target: ShellCommand
     case "preview.toggle":
       if (workspaceId) useRightPanelStore.getState().toggle(workspaceId, "preview");
       return;
-    case "terminal.toggle": {
-      if (!workspaceId) return;
-      const panel = useRightPanelStore.getState();
-      const state = selectWorkspaceRightPanelState(panel.byWorkspaceId, workspaceId);
-      const active = state.surfaces.find(surface => surface.id === state.activeSurfaceId);
-      if (state.isOpen && active?.kind === "terminal") {
-        panel.close(workspaceId);
-        return;
-      }
-      void showTerminal(workspaceId);
+    case "terminal.toggle":
+      if (workspaceId) useTerminalDrawerStore.getState().toggle(workspaceId);
       return;
-    }
     case "terminal.new":
-      if (workspaceId) void openNewTerminal(workspaceId);
+      if (!workspaceId) return;
+      void (getTerminalFocusOwner() === "right-panel" ? openPanelTerminal(workspaceId) : openDrawerTerminal(workspaceId));
       return;
     case "terminal.split":
-      if (workspaceId) void splitTerminal(workspaceId);
+      if (!workspaceId) return;
+      void (getTerminalFocusOwner() === "right-panel" ? splitActivePanelTerminal(workspaceId) : splitDrawerTerminal(workspaceId));
       return;
     case "chat.new":
       if (workspaceId) requestNewThread({ workspaceId });

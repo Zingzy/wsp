@@ -9,13 +9,18 @@ here are included or relied upon under their own licenses, reproduced below.
 
    Files under apps/web/src/components (the ui, chat, preview, files and
    diffs folders, the right-panel, page-header, no-active-thread and
-   diff-worker-pool components; FileMarkdownPreview.tsx is wsp's own),
+   diff-worker-pool and terminal drawer components; FileMarkdownPreview.tsx is wsp's own),
    apps/web/src/sidebar (the sidebar logic, thread sort, status
    indicators, favicon and chrome; the WorkspaceSidebar container, the
    new-workspace dialog and workspaceRows.ts are wsp's own),
    apps/web/src/components/palette (the palette chrome, results and
    logic; the CommandPalette container and paletteItems.tsx are wsp's own),
-   apps/web/src/hooks, apps/web/src/lib, apps/web/src/index.css,
+   apps/web/src/hooks, apps/web/src/lib (utils, timestampFormat,
+   selection actions, terminal context and labels, and the rest),
+   apps/web/src/terminal/ghostty (the libghostty-vt browser adapter and
+   its tests), apps/web/src/terminal/groups.ts,
+   apps/web/src/terminal-links.ts, apps/web/src/appearanceFonts.ts,
+   apps/web/src/index.css,
    apps/web/src/reviewCommentContext.ts,
    apps/web/src/commandPaletteBus.ts, apps/web/src/keybindings.ts,
    apps/web/src/keybindingDefaults.ts,
@@ -76,10 +81,13 @@ here are included or relied upon under their own licenses, reproduced below.
 
 ------------------------------------------------------------------------
 
-3. libghostty vendor files (MIT), used by later tasks
+3. libghostty vendor files (MIT)
 
-   The terminal surface will ship ghostty-vt.wasm and ghostty-write-pty.wasm
-   built from https://github.com/ghostty-org/ghostty.
+   apps/web/src/terminal/ghostty/vendor/ghostty-vt.wasm and
+   ghostty-write-pty.wasm are built from https://github.com/ghostty-org/ghostty
+   at commit 9f62873bf195e4d8a762d768a1405a5f2f7b1697 (the pin in t3code's
+   native/libghostty-vt/VERSION) and taken as-is from pingdotgg/t3code at
+   commit 57a66608.
 
    MIT License
    
@@ -105,10 +113,12 @@ here are included or relied upon under their own licenses, reproduced below.
 
 ------------------------------------------------------------------------
 
-4. Nerd Fonts, Symbols Nerd Font Mono (MIT), used by later tasks
+4. Nerd Fonts, Symbols Nerd Font Mono (MIT)
 
-   The terminal surface will ship SymbolsNerdFontMono-Regular.woff2 from
-   https://github.com/ryanoasis/nerd-fonts.
+   apps/web/src/terminal/ghostty/fonts/SymbolsNerdFontMono-Regular.woff2 is
+   Nerd Fonts release 3.4.0 (the version string in the font's name table;
+   t3code, where the file was taken from, does not record it) from
+   https://github.com/ryanoasis/nerd-fonts; its LICENSE sits beside it.
 
    The MIT License (MIT)
    
@@ -342,3 +352,15 @@ here are included or relied upon under their own licenses, reproduced below.
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+
+------------------------------------------------------------------------
+
+6. mackup application catalog (GPL-3.0-or-later), Laurent Raufaste and
+   the mackup contributors
+
+   packages/collect/data/catalog.json is a conversion of the .cfg files
+   under src/mackup/applications in https://github.com/lra/mackup at a
+   pinned commit. The full notice, the commit, the conversion date and
+   the GPLv3 text are in packages/collect/data/NOTICE. The catalog stays
+   GPL-3.0-or-later; GPLv3 section 13 and AGPLv3 section 13 permit
+   combining it with the rest of wsp.

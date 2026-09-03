@@ -324,6 +324,15 @@ const MANAGER_ORDER: readonly Exclude<ToolManager, "brew">[] = ["npm", "pnpm", "
  * checksummed release, the rest as Homebrew for Linux formulae (npm rides the base Node). */
 const MANAGER_FORMULA: Record<Exclude<ToolManager, "brew" | "npm" | "uv">, string> = { pnpm: "pnpm", bun: "bun", pipx: "pipx", cargo: "rust", go: "go" };
 
+/** The collector puts a Go binary's `path@version` in its first path; recipes saved
+ * before that carried it in the label as `name (path@version)`. */
+function goModule(e: RecipeEntry): { path: string; version: string } | undefined {
+  const spec = e.paths[0] ?? /\(([^()\s]+)\)/.exec(e.label)?.[1];
+  const at = spec?.lastIndexOf("@") ?? -1;
+  if (spec === undefined || at <= 0 || at === spec.length - 1) return undefined;
+  return { path: spec.slice(0, at), version: spec.slice(at + 1) };
+}
+
 function managerCommand(e: RecipeEntry, manager: ToolManager): { cmd: string } | { note: string } {
   const pkg = e.id.slice(`tools/${manager}/`.length);
   const v = e.version;
@@ -342,8 +351,8 @@ function managerCommand(e: RecipeEntry, manager: ToolManager): { cmd: string } |
     case "cargo":
       return { cmd: v === undefined ? `cargo install ${pkg}` : `cargo install ${pkg} --version ${v}` };
     case "go": {
-      const m = /\(([^()@\s]+)@([^()\s]+)\)/.exec(e.label);
-      return m ? { cmd: `go install ${m[1]}@${v ?? m[2]}` } : { note: "no module to install from" };
+      const mod = goModule(e);
+      return mod ? { cmd: `go install ${mod.path}@${v ?? mod.version}` } : { note: "no module to install from" };
     }
     case "brew":
       return { cmd: asLinuxbrew(`install ${pkg}`) };

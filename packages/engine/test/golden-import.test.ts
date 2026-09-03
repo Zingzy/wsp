@@ -292,7 +292,7 @@ describe("brewfileFor", () => {
 describe("toolInstallsFor", () => {
   it("Homebrew comes first (pinned clone, as its own user), then taps, then formulae, then each manager after its own install, with the row's pinned version", () => {
     const t = toolInstallsFor([
-      row({ rung: "tools", id: "tools/go/sqlc", label: "sqlc (github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1)", version: "v1.31.1" }),
+      row({ rung: "tools", id: "tools/go/sqlc", label: "sqlc", paths: ["github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1"], version: "v1.31.1" }),
       row({ rung: "tools", id: "tools/brew/gh", linux: "yes" }),
       row({ rung: "tools", id: "tools/brew-tap/zingzy/tap", linux: "yes" }),
       row({ rung: "tools", id: "tools/npm/bun", label: "bun@1.4.0", version: "1.4.0" }),
@@ -353,6 +353,16 @@ describe("toolInstallsFor", () => {
       { id: "tools/go/junk", note: "no module to install from" },
     ]);
     expect(t.brewfile).toBe(['tap "zingzy/tap"', 'brew "gh"', ""].join("\n"));
+  });
+
+  it("a Go row's module rides in its first path (the collector's shape) and the version field pins it; an older recipe's label shape still works", () => {
+    const fresh = toolInstallsFor([row({ rung: "tools", id: "tools/go/gopls", label: "gopls", paths: ["golang.org/x/tools/gopls@v0.16.2"], version: "v0.16.2" })]);
+    expect(fresh.installs.at(-1)!.cmd).toMatch(/go install golang\.org\/x\/tools\/gopls@v0\.16\.2$/);
+    const pinned = toolInstallsFor([row({ rung: "tools", id: "tools/go/gopls", label: "gopls", paths: ["golang.org/x/tools/gopls@v0.16.2"], version: "v0.17.0" })]);
+    expect(pinned.installs.at(-1)!.cmd).toMatch(/gopls@v0\.17\.0$/);
+    const old = toolInstallsFor([row({ rung: "tools", id: "tools/go/gopls", label: "gopls (golang.org/x/tools/gopls@v0.16.2)" })]);
+    expect(old.installs.at(-1)!.cmd).toMatch(/go install golang\.org\/x\/tools\/gopls@v0\.16\.2$/);
+    expect(toolInstallsFor([row({ rung: "tools", id: "tools/go/mystery", label: "mystery (no module info)" })]).skipped).toEqual([{ id: "tools/go/mystery", note: "no module to install from" }]);
   });
 
   it("a row with no version installs the manager's latest; a manager already ticked as a formula is not installed twice", () => {

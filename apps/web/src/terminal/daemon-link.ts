@@ -6,8 +6,18 @@
 // liveness is an app-level ping op; every redial asks the runtime for a fresh
 // reach because the edge token expires hourly; 4401 is terminal, retrying
 // cannot fix a wrong token.
-import { DaemonEvent, type DaemonLinkStatus } from "@wsp/protocol";
+import { DaemonErrorCode, DaemonEvent, type DaemonLinkStatus } from "@wsp/protocol";
 import type { TerminalWire } from "./link.js";
+
+/** The daemon refused a request; code is set when the op sends a typed one (files and diff ops do). */
+export class DaemonRequestError extends Error {
+  readonly code: DaemonErrorCode | undefined;
+  constructor(message: string, code: DaemonErrorCode | undefined) {
+    super(message);
+    this.name = "DaemonRequestError";
+    this.code = code;
+  }
+}
 
 export interface DaemonReachTarget {
   url: string;
@@ -139,7 +149,10 @@ export function connectDaemonLink(opts: DaemonLinkOptions): DaemonLink {
       const p = pending.get(id)!;
       pending.delete(id);
       if (msg["ok"] === true) p.resolve(msg);
-      else p.reject(new Error(String(msg["error"] ?? "daemon error")));
+      else {
+        const code = DaemonErrorCode.safeParse(msg["code"]);
+        p.reject(new DaemonRequestError(String(msg["error"] ?? "daemon error"), code.success ? code.data : undefined));
+      }
       return;
     }
     const parsed = DaemonEvent.safeParse(msg);

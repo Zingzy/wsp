@@ -2,8 +2,9 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { GoldenBuilderView } from "@wsp/protocol";
 import { makeApi, ProtocolClient } from "./protocol/client.js";
-import { useReady, useStore } from "./protocol/store.js";
+import { useReady, useSelectedId, useStore } from "./protocol/store.js";
 import { TabStrip } from "./components/TabStrip.js";
+import { WorkspaceTerminalDrawer } from "./components/WorkspaceTerminalDrawer.js";
 import { AppShell } from "./shell/AppShell.js";
 import { wireTerminals } from "./terminal/wiring.js";
 import { Wizard, type ChecklistItem, type KeyFlags } from "./wizard/Wizard.js";
@@ -48,6 +49,19 @@ export function App({
 
 type Golden = "unknown" | "none" | "present";
 
+/** The center slot: the tabs, with the terminal drawer under them. */
+function WorkspaceCenter() {
+  const workspaceId = useSelectedId();
+  return (
+    <>
+      <div className="flex min-h-0 flex-1 flex-col">
+        <TabStrip />
+      </div>
+      {workspaceId ? <WorkspaceTerminalDrawer workspaceId={workspaceId} /> : null}
+    </>
+  );
+}
+
 /** The window below the connection: the first-run wizard until a golden
  * image exists, the three-region shell from then on. */
 export function Shell({ keys, builder, checklist }: { keys?: KeyFlags; builder?: GoldenBuilderView; checklist?: ChecklistItem[] }) {
@@ -77,7 +91,7 @@ export function Shell({ keys, builder, checklist }: { keys?: KeyFlags; builder?:
   return (
     <AppShell>
       {ready && golden === "present" ? (
-        <TabStrip />
+        <WorkspaceCenter />
       ) : (
         <div className="p-6 font-mono text-sm text-muted-foreground">connecting to runtime…</div>
       )}
