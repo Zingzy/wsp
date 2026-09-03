@@ -9,8 +9,12 @@ here are included or relied upon under their own licenses, reproduced below.
 
    Files under apps/web/src/components (the ui, chat and preview folders,
    the right-panel, page-header and no-active-thread components),
+   apps/web/src/sidebar (the sidebar logic, thread sort, status
+   indicators, favicon and chrome; the WorkspaceSidebar container, the
+   new-workspace dialog and workspaceRows.ts are wsp's own),
    apps/web/src/hooks,
-   apps/web/src/lib/utils.ts, apps/web/src/index.css,
+   apps/web/src/lib/utils.ts, apps/web/src/lib/timestampFormat.ts,
+   apps/web/src/index.css,
    apps/web/src/rightPanelStore.ts, apps/web/src/rightPanelLayout.ts and
    apps/web/src/workspaceTitlebar.ts are adapted from
    https://github.com/pingdotgg/t3code at commit 57a66608. Each file
