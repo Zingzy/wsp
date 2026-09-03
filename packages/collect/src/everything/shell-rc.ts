@@ -202,22 +202,10 @@ function scanLine(line: string, start: Open): Open {
   return o;
 }
 
-/** How many kept lines an open `((` may span before the depth is dropped; an unbalanced `((` then only stops `<<` from reading as a heredoc on those lines. */
-const ARITH_LINES = 4;
-
-interface Passing {
-  heredoc?: string;
-  arith: number;
-  /** Kept lines carried since the `((` opened. */
-  since: number;
-}
-
-/** What a kept line may carry forward: a heredoc it opens and the depth of an arithmetic block it left open, for at most ARITH_LINES lines, and nothing else, since a comment's stray quote must never hide what follows. */
-function carried(line: string, prev: Passing): Passing {
-  const o = scanLine(line, { ...CLOSED, arith: prev.arith });
-  if (o.arith === 0) return { heredoc: o.heredoc, arith: 0, since: 0 };
-  const since = prev.arith > 0 ? prev.since + 1 : 1;
-  return since >= ARITH_LINES ? { heredoc: o.heredoc, arith: 0, since: 0 } : { heredoc: o.heredoc, arith: o.arith, since };
+/** What a kept line may carry forward: a heredoc it opens and the depth of an arithmetic block it left open, and nothing else, since a comment's stray quote must never hide what follows. An open `((` only stops `<<` from being read as a heredoc until its `))`, which over-cuts a heredoc body and never leaks. */
+function carried(line: string, arith: number): Pick<Open, "heredoc" | "arith"> {
+  const o = scanLine(line, { ...CLOSED, arith });
+  return { heredoc: o.heredoc, arith: o.arith };
 }
 
 export function stripExports(text: string): { names: string[]; carried: string } {
@@ -225,7 +213,7 @@ export function stripExports(text: string): { names: string[]; carried: string }
   const kept: string[] = [];
   const eol = text.includes("\r\n") ? "\r\n" : "\n";
   let cutting: Open | undefined;
-  let passing: Passing = { arith: 0, since: 0 };
+  let passing: Pick<Open, "heredoc" | "arith"> = { arith: 0 };
   for (const line of text.split(/\r?\n/)) {
     if (cutting !== undefined) {
       const o = scanLine(line, cutting);
@@ -234,13 +222,13 @@ export function stripExports(text: string): { names: string[]; carried: string }
     }
     if (passing.heredoc !== undefined) {
       kept.push(line);
-      if (line.trim() === passing.heredoc) passing = { arith: passing.arith, since: passing.since };
+      if (line.trim() === passing.heredoc) passing = { arith: passing.arith };
       continue;
     }
     const hits = assignedNames(line).filter(isSecretName);
     if (hits.length === 0) {
       kept.push(line);
-      passing = carried(line, passing);
+      passing = carried(line, passing.arith);
       continue;
     }
     for (const h of hits) if (!names.includes(h)) names.push(h);
