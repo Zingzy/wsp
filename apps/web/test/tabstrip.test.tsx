@@ -77,13 +77,13 @@ describe("tab strip default tab", () => {
     act(() => useStore.getState().bind(api));
     await flush();
     render(<TabStrip />);
-    fireEvent.click(screen.getByRole("tab", { name: "browser" }));
-    expect(activeTab()).toBe("browser");
+    fireEvent.click(screen.getByRole("tab", { name: "screen" }));
+    expect(activeTab()).toBe("screen");
 
     sessions.push(row("ws_a"));
     emit({ type: "session.start", workspaceId: "ws_a", sessionId: "c1" });
     await flush();
-    expect(activeTab()).toBe("browser");
+    expect(activeTab()).toBe("screen");
   });
 
   it("forgets a pick when its workspace is deleted, so a reused id starts on the default again", async () => {
@@ -91,8 +91,8 @@ describe("tab strip default tab", () => {
     act(() => useStore.getState().bind(api));
     await flush();
     render(<TabStrip />);
-    fireEvent.click(screen.getByRole("tab", { name: "browser" }));
-    expect(activeTab()).toBe("browser");
+    fireEvent.click(screen.getByRole("tab", { name: "screen" }));
+    expect(activeTab()).toBe("screen");
 
     emit({ type: "workspace.deleted", workspaceId: "ws_a" });
     emit({ type: "workspace.created", workspace: view("ws_a") });

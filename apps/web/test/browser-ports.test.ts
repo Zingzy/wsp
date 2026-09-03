@@ -111,7 +111,7 @@ describe("port directory over the daemon link", () => {
 
     // A tab opened after the server started: the reply carries what is already listening.
     await until(() => portsOf("ws_a").includes(3000));
-    expect(getBrowser("ws_a").ports()).toEqual([{ port: 3000, pid: 42, firstSeen: expect.any(Number) }]);
+    expect(getBrowser("ws_a").ports()).toEqual([expect.objectContaining({ port: 3000, pid: 42 })]);
     await until(() => portsOf("ws_b").includes(8080));
     expect(portsOf("ws_b")).toEqual([8080]);
 

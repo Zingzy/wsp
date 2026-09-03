@@ -46,7 +46,7 @@ describe("terminal tabs in the strip", () => {
     render(<TabStrip />);
     await waitFor(() => expect(wt.sinkCount()).toBe(1), { timeout: 10_000 });
 
-    fireEvent.click(screen.getByRole("tab", { name: "browser" }));
+    fireEvent.click(screen.getByRole("tab", { name: "screen" }));
     expect(wt.sinkCount()).toBe(0);
     expect(document.querySelector(".xterm")).toBeNull();
     expect(daemon.ptys.list()).toHaveLength(1);
