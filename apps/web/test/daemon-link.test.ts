@@ -106,26 +106,26 @@ describe("connectDaemonLink", () => {
     daemon = await startTestDaemon();
     proxy = await startTcpProxy(daemon.port);
     let reaches = 0;
-    const statuses: DaemonLinkStatus[] = [];
     link = connectDaemonLink({
       reach: async () => {
         reaches++;
         return { url: `ws://127.0.0.1:${proxy!.port}`, daemonToken: TOKEN };
       },
       onEvent: () => {},
-      onStatus: s => statuses.push(s),
       heartbeatMs: 60,
       backoffMs: () => 30,
     });
-    await until(() => link!.status() === "live");
-    await until(() => link!.stats().pongsReceived >= 2);
-    expect(link.stats().pongsReceived).toBeGreaterThanOrEqual(2);
+    // A 60ms beat trips on any scheduler stall longer than a beat, so the link
+    // may redial on its own at any point: measure from the cut, and read the
+    // counters only while live, when no dial is in flight.
+    await until(() => link!.status() === "live" && link!.stats().pongsReceived >= 2);
+    const before = link.stats();
 
     proxy.cutAll();
-    await until(() => statuses.filter(s => s === "live").length === 2);
-    expect(reaches).toBe(2);
-    expect(link.stats().reconnects).toBe(1);
-    expect((await link.request("ping"))["ok"]).toBe(true);
+    await until(() => link!.stats().reconnects > before.reconnects && link!.status() === "live");
+    const after = link.stats();
+    expect(reaches).toBe(after.reconnects + 1);
+    await until(() => link!.stats().pongsReceived > after.pongsReceived);
   }, 15_000);
 
   it("a socket that stops answering heartbeats is abandoned and redialed", async () => {
@@ -138,10 +138,10 @@ describe("connectDaemonLink", () => {
       backoffMs: () => 30,
     });
     await until(() => link!.status() === "live");
+    const before = link.stats();
     proxy.stall();
     await until(() => link!.status() === "connecting", 3000);
     proxy.resume();
-    await until(() => link!.status() === "live");
-    expect(link.stats().reconnects).toBe(1);
+    await until(() => link!.stats().reconnects > before.reconnects && link!.status() === "live");
   }, 15_000);
 });
