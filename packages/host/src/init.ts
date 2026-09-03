@@ -9,7 +9,7 @@ import { styleText } from "node:util";
 import { RUNGS, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
 import type { BackendPricing } from "@wsp/engine";
 import type { GoldenBuilderView, GoldenRecipe, GoldenStage, Runtime } from "@wsp/runtime";
-import { S_BAR, S_STEP_ERROR, S_STEP_SUBMIT, cancel, confirm, intro, isCancel, log, note, outro } from "@clack/prompts";
+import { S_BAR, S_STEP_ERROR, S_STEP_SUBMIT, cancel, confirm, isCancel, log, note, outro } from "@clack/prompts";
 import type { Keys } from "./cli.js";
 import {
   LOGIN_CHOICES,
@@ -471,7 +471,6 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const out = { output: io.output };
   // Off a terminal there is nobody to ask: it runs as if --yes were given.
   const interactive = io.isTTY && !opts.yes;
-  intro("wsp init", out);
 
   let manifest: Manifest;
   let source: string;

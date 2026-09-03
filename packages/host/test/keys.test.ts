@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
+import { stripVTControlCharacters } from "node:util";
+import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadKeys, type CliIO } from "../src/cli.js";
+import { loadKeys, saveQuestion, terminalIO, type CliIO } from "../src/cli.js";
 
 const SOLARI = "slr_live_fake_solari_key";
 const ANTHROPIC = "sk-ant-x-fake-anthropic-key";
@@ -34,23 +37,23 @@ function mode(path: string): number {
   return statSync(path).mode & 0o777;
 }
 
-describe("loadKeys", () => {
-  let dir: string;
-  let cwd: string;
-  let home: string;
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
-  function setup(): void {
-    dir = mkdtempSync(join(tmpdir(), "wsp-keys-"));
-    cwd = join(dir, "cwd");
-    home = join(dir, "home");
-    mkdirSync(cwd);
-  }
+let dir: string;
+let cwd: string;
+let home: string;
+afterEach(() => {
+  rmSync(dir, { recursive: true, force: true });
+});
+function setup(): void {
+  dir = mkdtempSync(join(tmpdir(), "wsp-keys-"));
+  cwd = join(dir, "cwd");
+  home = join(dir, "home");
+  mkdirSync(cwd);
+}
 
+describe("loadKeys", () => {
   it("prompts for both keys and persists them to <home>/.env with mode 600", async () => {
     setup();
-    const io = fakeIO([SOLARI, ANTHROPIC, "y"]);
+    const io = fakeIO([SOLARI, ANTHROPIC, "yes"]);
     const keys = await loadKeys(io, { env: {}, cwd, home });
     expect(keys).toEqual({ solari: SOLARI, anthropic: ANTHROPIC });
     const envPath = join(home, ".env");
@@ -63,6 +66,17 @@ describe("loadKeys", () => {
     expect(io.output.join("\n")).not.toContain(ANTHROPIC);
   });
 
+  it("says no key was found, where to get one, and names the file only because this home is not the default", async () => {
+    setup();
+    const io = fakeIO([SOLARI, ANTHROPIC, "yes"]);
+    await loadKeys(io, { env: {}, cwd, home });
+    const [key, anthropic, save] = io.output.map(stripVTControlCharacters);
+    expect(key).toBe("No Solari key found.\nSolari API key  console.getsolari.com");
+    expect(anthropic).toMatch(/^Anthropic API key  optional, enter skips\n/);
+    expect(save).toBe(`Save the keys to ${join(home, ".env")} so wsp stops asking?`);
+    expect(io.output.join("\n")).not.toMatch(/—|!|SOLARI_API_KEY/);
+  });
+
   it("rewrites an existing 644 file down to 600 and keeps lines it did not set", async () => {
     setup();
     mkdirSync(home);
@@ -71,7 +85,7 @@ describe("loadKeys", () => {
     chmodSync(envPath, 0o644);
     expect(mode(envPath)).toBe(0o644);
 
-    await loadKeys(fakeIO([SOLARI, "", "y"]), { env: {}, cwd, home });
+    await loadKeys(fakeIO([SOLARI, "", "yes"]), { env: {}, cwd, home });
 
     expect(mode(envPath)).toBe(0o600);
     const lines = readFileSync(envPath, "utf8").split("\n");
@@ -106,18 +120,20 @@ describe("loadKeys", () => {
     });
   });
 
-  it("enter skips the Anthropic key and the saved file has no ANTHROPIC line", async () => {
+  it("enter skips the Anthropic key, the save question says key not keys, and the saved file has no ANTHROPIC line", async () => {
     setup();
-    const keys = await loadKeys(fakeIO([SOLARI, "", "y"]), { env: {}, cwd, home });
+    const io = fakeIO([SOLARI, "", "yes"]);
+    const keys = await loadKeys(io, { env: {}, cwd, home });
     expect(keys).toEqual({ solari: SOLARI });
+    expect(io.output[2]).toMatch(/^Save the key to /);
     const text = readFileSync(join(home, ".env"), "utf8");
     expect(text).not.toContain("ANTHROPIC");
     expect(text).toContain(`SOLARI_API_KEY=${SOLARI}`);
   });
 
-  it("does not persist by default (enter means no)", async () => {
+  it("does not persist by default (no means no)", async () => {
     setup();
-    const io = fakeIO([SOLARI, ANTHROPIC, ""]);
+    const io = fakeIO([SOLARI, ANTHROPIC, "no"]);
     const keys = await loadKeys(io, { env: {}, cwd, home });
     expect(keys).toEqual({ solari: SOLARI, anthropic: ANTHROPIC });
     expect(existsSync(join(home, ".env"))).toBe(false);
@@ -127,16 +143,92 @@ describe("loadKeys", () => {
 
   it("mentions subscriptions in the Anthropic prompt but never in the Solari one", async () => {
     setup();
-    const io = fakeIO([SOLARI, "", ""]);
+    const io = fakeIO([SOLARI, "", "no"]);
     await loadKeys(io, { env: {}, cwd, home });
-    const text = io.output.join("\n");
-    expect(text).toContain("/login");
-    expect(text).not.toContain("\u2014");
+    expect(io.output[0]).not.toContain("/login");
+    expect(io.output[1]).toContain("/login");
+    expect(io.output.join("\n")).not.toContain("—");
   });
 
   it("refuses to start on an empty Solari key without leaking anything", async () => {
     setup();
     await expect(loadKeys(fakeIO(["   "]), { env: {}, cwd, home })).rejects.toThrow(/Solari API key/);
     expect(existsSync(join(home, ".env"))).toBe(false);
+  });
+
+  it("the save question names the file only when WSP_HOME is not the default", () => {
+    expect(saveQuestion(join(homedir(), ".wsp"), 1)).toBe("Save the key so wsp stops asking?");
+    expect(saveQuestion(join(homedir(), ".wsp"), 2)).toBe("Save the keys so wsp stops asking?");
+    expect(saveQuestion("/srv/wsp", 1)).toBe("Save the key to /srv/wsp/.env so wsp stops asking?");
+  });
+});
+
+interface Screen {
+  io: CliIO;
+  input: PassThrough;
+  text(): string;
+  type(keys: string): Promise<void>;
+}
+
+function screen(tty: boolean): Screen {
+  const input = Object.assign(new PassThrough(), { isTTY: tty, setRawMode: () => input });
+  const output = Object.assign(new PassThrough(), { isTTY: tty, columns: 160 });
+  const chunks: string[] = [];
+  output.on("data", (c: Buffer) => chunks.push(c.toString()));
+  return {
+    io: terminalIO(input, output),
+    input,
+    text: () => stripVTControlCharacters(chunks.join("")),
+    type: async keys => {
+      await new Promise(r => setTimeout(r, 20));
+      input.write(keys);
+      await new Promise(r => setTimeout(r, 20));
+    },
+  };
+}
+
+describe("terminalIO", () => {
+  it("on a terminal the key is a masked clack prompt with the extra line framed, and the save is a confirm that defaults to No", async () => {
+    setup();
+    const s = screen(true);
+    const run = loadKeys(s.io, { env: {}, cwd, home }, { anthropic: false });
+    await s.type(`${SOLARI}\r`);
+    await s.type("\r");
+    expect(await run).toEqual({ solari: SOLARI });
+    const out = s.text();
+    expect(out).toContain("◆  No Solari key found.\n│  Solari API key  console.getsolari.com\n");
+    expect(out).toContain(`◆  Save the key to ${join(home, ".env")} so wsp stops asking?\n│  ${S_RADIO_INACTIVE} Yes / ${S_RADIO_ACTIVE} No`);
+    expect(out).not.toContain(SOLARI);
+    expect(existsSync(join(home, ".env"))).toBe(false);
+  });
+
+  it("yes at the confirm writes <home>/.env at mode 600", async () => {
+    setup();
+    const s = screen(true);
+    const run = loadKeys(s.io, { env: {}, cwd, home }, { anthropic: false });
+    await s.type(`${SOLARI}\r`);
+    await s.type("y");
+    expect(await run).toEqual({ solari: SOLARI });
+    expect(mode(join(home, ".env"))).toBe(0o600);
+    expect(readFileSync(join(home, ".env"), "utf8")).toBe(`SOLARI_API_KEY=${SOLARI}\n`);
+    expect(s.text()).not.toContain(SOLARI);
+  });
+
+  it("ctrl-c at the key prompt stops with nothing written", async () => {
+    setup();
+    const s = screen(true);
+    const stopped = expect(loadKeys(s.io, { env: {}, cwd, home })).rejects.toThrow("Nothing was changed.");
+    await s.type("\x03");
+    await stopped;
+    expect(existsSync(join(home, ".env"))).toBe(false);
+  });
+
+  it("off a terminal there is nobody to ask: a plain error names the key and where it is read from, and nothing is drawn", async () => {
+    setup();
+    const s = screen(false);
+    await expect(loadKeys(s.io, { env: {}, cwd, home })).rejects.toThrow(
+      "No Solari key found. No terminal to ask on; set it in the environment, ./.env, or ~/.wsp/.env.",
+    );
+    expect(s.text()).toBe("");
   });
 });
