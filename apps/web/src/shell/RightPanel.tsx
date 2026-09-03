@@ -2,16 +2,21 @@
 // The right region: one surface at a time over the copied tab strip, keyed
 // by the selected workspace. Surfaces whose panes still live in the center
 // tabs stay greyed out here with a reason, so the picker never opens a tab
-// that has nothing behind it.
+// that has nothing behind it. Files, file and diff share one diff worker
+// pool so switching between them keeps the highlighter warm.
 import { useEffect, useMemo, type ReactNode } from "react";
 import { useWorkspacePorts } from "../browser/model.js";
 import { previewTabSnapshots, useBrowserTabs, useWorkspaceBrowserTabs } from "../browser/tabs.js";
+import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider.js";
 import { MachineSurface } from "../components/machine/MachineSurface.js";
 import { RightPanelSheet } from "../components/RightPanelSheet.js";
 import { RightPanelTabs } from "../components/RightPanelTabs.js";
 import { BrowserSurface } from "../components/preview/BrowserSurface.js";
 import type { PreviewPanelMode } from "../components/preview/PreviewPanelShell.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty.js";
+import { DiffSurface } from "../diffs/DiffSurface.js";
+import { FilePreviewSurface } from "../files/FilePreviewSurface.js";
+import { FilesSurface } from "../files/FilesSurface.js";
 import { useStatus, useWorkspace } from "../protocol/store.js";
 import { useRightPanelStore, type WorkspaceRightPanelState } from "../rightPanelStore.js";
 import { ScreenTab } from "../tabs/ScreenTab.js";
@@ -20,6 +25,8 @@ import { getTerminals } from "../terminal/link.js";
 const NO_PENDING: ReadonlySet<string> = new Set();
 const NO_LABELS: ReadonlyMap<string, string> = new Map();
 const CENTER_TABS_REASON = "Open it from the tabs above for now.";
+/** index.html pins the dark theme; the code views take it as a prop. */
+const THEME = "dark";
 
 export function RightPanel({
   workspaceId,
@@ -76,8 +83,8 @@ export function RightPanel({
       onAddScreen={() => open(workspaceId, "screen")}
       browserAvailable={workspace?.phase === "running"}
       terminalAvailable={false}
-      diffAvailable={false}
-      filesAvailable={false}
+      diffAvailable={workspace?.phase === "running"}
+      filesAvailable={workspace?.phase === "running"}
       machineAvailable={workspace !== null}
       screenAvailable={status?.screen !== undefined}
       unavailableReasons={{ terminal: CENTER_TABS_REASON }}
@@ -88,6 +95,16 @@ export function RightPanel({
         <MachineSurface workspaceId={workspaceId} />
       ) : active?.kind === "screen" ? (
         <ScreenTab workspaceId={workspaceId} />
+      ) : active?.kind === "files" || active?.kind === "file" || active?.kind === "diff" ? (
+        <DiffWorkerPoolProvider theme={THEME}>
+          {active.kind === "files" ? (
+            <FilesSurface workspaceId={workspaceId} theme={THEME} />
+          ) : active.kind === "file" ? (
+            <FilePreviewSurface key={active.id} workspaceId={workspaceId} surface={active} theme={THEME} />
+          ) : (
+            <DiffSurface workspaceId={workspaceId} theme={THEME} />
+          )}
+        </DiffWorkerPoolProvider>
       ) : (
         <Empty className="flex-1">
           <EmptyHeader>
