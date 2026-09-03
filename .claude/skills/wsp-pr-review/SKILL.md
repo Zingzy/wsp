@@ -1,19 +1,23 @@
 ---
 name: wsp-pr-review
-description: Review a wsp pull request from just its number or URL. Maps the PR to its wayfinder ticket on Zingzy/wsp-map and the plan it serves, reviews the diff for ticket fidelity, product behaviour, blast radius, silent bugs and library misuse, runs the gates, then posts a full internal review on the ticket and a short code-only review on the PR. Use when asked to "review PR 3", "review #3", or given a github.com/Zingzy/wsp/pull URL.
+description: Review a wsp ticket's pull request from just the ticket number. Finds the PR on Zingzy/wsp from the ticket/<n>- branch prefix, reads the ticket and its plan on Zingzy/wsp-map, reviews the diff for ticket fidelity, product behaviour, blast radius, silent bugs and library misuse, runs the gates, then posts a full internal review on the ticket and a short code-only review on the PR. Use when asked to "review 87", "review #87", "review ticket 87", or given a wsp-map issue URL; a PR number or URL also works.
 ---
 
 # wsp PR review
 
-You get a PR number. You leave two comments: the whole truth on the ticket, and a short code review on the PR that would read fine in a public repo. Load `wsp-review` first; it holds the laws. This skill is the procedure around them.
+You get a ticket number. You leave two comments: the whole truth on the ticket, and a short code review on the PR that would read fine in a public repo. Load `wsp-review` first; it holds the laws. This skill is the procedure around them.
 
-## 1. Resolve the PR to its ticket and plan
+## 1. Resolve the ticket to its PR and plan
 
-```
-gh pr view <n> --repo Zingzy/wsp --json number,title,headRefName,body,isDraft,url,commits,files
-```
+The ticket is the unit. Everything hangs off its number `t` on Zingzy/wsp-map.
 
-- Branch `ticket/<t>-<slug>` gives the ticket number `t` on Zingzy/wsp-map. If the branch is not shaped like that, take the `Ticket:` link from the PR body. If neither exists, stop and say so; do not review blind.
+- Find the PR by branch prefix:
+  ```
+  gh pr list --repo Zingzy/wsp --state all --json number,headRefName,state,isDraft,url -q '.[] | select(.headRefName | startswith("ticket/<t>-"))'
+  ```
+  Exactly one open PR is the normal case. None: the builder has not pushed yet; say so on the ticket and stop. More than one: review the open one and say the others exist.
+- Given a PR number or URL instead, go the other way: `gh pr view <n> --repo Zingzy/wsp --json headRefName` and read `t` off the `ticket/<t>-` prefix, or the `Ticket:` link in the body. If neither exists, stop and say so; do not review blind.
+- Then `gh pr view <n> --repo Zingzy/wsp --json number,title,headRefName,body,isDraft,url,commits,files`.
 - Read the ticket and every comment on it: `gh issue view <t> --repo Zingzy/wsp-map --json title,body,comments`. Comments carry three things you need: coordinator rulings (they refine or override the body), the build report (gates, deviations, what was run live), and earlier review rounds.
 - The ticket body names its plan ("Plan 5 task 3", a `plans/0N-*.md` link). Fetch that plan at HEAD of the `plans` branch, never from memory or a local copy:
   `gh api "repos/Zingzy/wsp-map/contents/plans/0N-name.md?ref=plans" -q .content | base64 -d`
