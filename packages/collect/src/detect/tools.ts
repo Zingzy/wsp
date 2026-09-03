@@ -180,7 +180,8 @@ async function goRows(host: Host): Promise<ManifestEntry[]> {
     const mod = parseGoVersionM((await host.exec.run("go", ["version", "-m", `${bin}/${name}`])) ?? "");
     rows.push(mod === undefined
       ? item({ rung: "tools", id: `tools/go/${name}`, label: `${name} (no module info)`, group: "Go binaries", default: "skip", linux: "yes" })
-      : item({ rung: "tools", id: `tools/go/${name}`, label: `${name} (${mod.path}@${mod.version})`, group: "Go binaries", linux: "yes" }));
+      // The module path rides in paths so the detail pane shows it first; bytes 0 says there is nothing to upload.
+      : entry({ rung: "tools", id: `tools/go/${name}`, label: name, group: "Go binaries", paths: [`${mod.path}@${mod.version}`], bytes: 0, linux: "yes" }));
   }
   return rows;
 }

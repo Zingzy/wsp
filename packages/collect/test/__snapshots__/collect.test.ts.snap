@@ -234,9 +234,11 @@ exports[`collect > matches the fixture laptop snapshot 1`] = `
       "default": "bring",
       "group": "Go binaries",
       "id": "tools/go/gopls",
-      "label": "gopls (golang.org/x/tools/gopls@v0.16.2)",
+      "label": "gopls",
       "linux": "yes",
-      "paths": [],
+      "paths": [
+        "golang.org/x/tools/gopls@v0.16.2",
+      ],
       "rung": "tools",
     },
     {
@@ -276,7 +278,7 @@ exports[`collect > matches the fixture laptop snapshot 1`] = `
       "default": "bring",
       "group": "CLI logins",
       "id": "logins/aws",
-      "label": "AWS keys and profiles (SSO caches expire; sign in on the machine for those)",
+      "label": "AWS keys and profiles",
       "paths": [
         "~/.aws/config",
       ],

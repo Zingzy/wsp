@@ -18,7 +18,7 @@ const LOGINS: readonly Login[] = [
   { id: "wrangler", label: "Cloudflare Wrangler login", group: "CLI logins", paths: { darwin: ["~/Library/Preferences/.wrangler/config/default.toml"], linux: ["~/.config/.wrangler/config/default.toml"] } },
   { id: "cloudflared", label: "cloudflared login", group: "CLI logins", paths: { all: ["~/.cloudflared/cert.pem"] } },
   { id: "vercel", label: "Vercel login", group: "CLI logins", paths: { darwin: ["~/Library/Application Support/com.vercel.cli/auth.json"], linux: ["~/.config/com.vercel.cli/auth.json"], all: ["~/.vercel/auth.json"] } },
-  { id: "aws", label: "AWS keys and profiles (SSO caches expire; sign in on the machine for those)", group: "CLI logins", paths: { all: ["~/.aws/credentials", "~/.aws/config"] } },
+  { id: "aws", label: "AWS keys and profiles", group: "CLI logins", paths: { all: ["~/.aws/credentials", "~/.aws/config"] } },
   { id: "kube", label: "kubectl config", group: "CLI logins", paths: { all: ["~/.kube/config"] } },
   { id: "codex", label: "Codex login", group: "Agent logins", paths: { all: ["~/.codex/auth.json"] } },
   { id: "gemini", label: "Gemini CLI login", group: "Agent logins", paths: { all: ["~/.gemini/oauth_creds.json"] } },
@@ -36,7 +36,7 @@ async function ghRow(host: Host): Promise<ManifestEntry | undefined> {
   const f = await found(host, ["~/.config/gh/hosts.yml"]);
   if (f.paths.length === 0) return undefined;
   if (await keychainHas(host, "gh:github.com")) {
-    return entry({ rung: "logins", id: "logins/gh", label: "GitHub CLI login (token in Keychain; sign in on the machine)", group: "CLI logins", ...f, default: "skip" });
+    return entry({ rung: "logins", id: "logins/gh", label: "GitHub CLI login", group: "CLI logins", ...f, default: "skip", reason: "token in Keychain; sign in on the machine" });
   }
   return entry({ rung: "logins", id: "logins/gh", label: "GitHub CLI login", group: "CLI logins", ...f });
 }
