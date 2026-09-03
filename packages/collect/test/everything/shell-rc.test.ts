@@ -63,6 +63,30 @@ describe("pass 6: shell rc exports", () => {
     expect(stripExports("echo 'a' # it's fine\nexport A_TOKEN=fake\n").names).toEqual(["A_TOKEN"]);
   });
 
+  it("a here-string or a shift inside arithmetic on a kept line opens nothing, so the export after it is still cut", () => {
+    expect(stripExports("read x <<< hello\nexport A_TOKEN=fake\nnext\n")).toEqual({ names: ["A_TOKEN"], carried: "read x <<< hello\nnext\n" });
+    expect(stripExports('cat <<< "hello"\nexport B_TOKEN=fake\n').names).toEqual(["B_TOKEN"]);
+    expect(stripExports("(( f = 1 << SHIFT ))\nexport C_TOKEN=fake\nnext\n")).toEqual({ names: ["C_TOKEN"], carried: "(( f = 1 << SHIFT ))\nnext\n" });
+    expect(stripExports("(( f = 1 << SHIFT ))\ncat <<EOF\nexport NOT_TOKEN=inside\nEOF\nexport D_TOKEN=fake\n")).toEqual({ names: ["D_TOKEN"], carried: "(( f = 1 << SHIFT ))\ncat <<EOF\nexport NOT_TOKEN=inside\nEOF\n" });
+    expect(stripExports("read x <<< $y\nexport E_TOKEN=fake\n").names).toEqual(["E_TOKEN"]);
+  });
+
+  it("an arithmetic block spanning kept lines opens no heredoc on its later line", () => {
+    expect(stripExports("(( f = 1 +\n  (1 << SHIFT) ))\nexport A_TOKEN=fake\nnext\n")).toEqual({ names: ["A_TOKEN"], carried: "(( f = 1 +\n  (1 << SHIFT) ))\nnext\n" });
+  });
+
+  it("a parameter expansion spanning lines and a backslash-quoted heredoc word are cut whole", () => {
+    expect(stripExports("export A_TOKEN=${SECRET:-\nfake}\nnext\n")).toEqual({ names: ["A_TOKEN"], carried: "next\n" });
+    expect(stripExports("export API_KEY=$(cat <<\\EOF\nline)\nfake\nEOF\n)\nnext\n")).toEqual({ names: ["API_KEY"], carried: "next\n" });
+    expect(stripExports("cat <<\\EOF\nexport NOT_TOKEN=inside\nEOF\nexport F_TOKEN=fake\n")).toEqual({ names: ["F_TOKEN"], carried: "cat <<\\EOF\nexport NOT_TOKEN=inside\nEOF\n" });
+  });
+
+  it("a comment right after ; & or ( on a cut line ends the scan there, and ${#var} is a length, not a comment", () => {
+    expect(stripExports("export A_TOKEN=x;# don't\nalias a=b\nexport B_KEY=y &# it's\nalias c=d\n")).toEqual({ names: ["A_TOKEN", "B_KEY"], carried: "alias a=b\nalias c=d\n" });
+    expect(stripExports("export A_TOKEN=${#x}rest\nnext\n")).toEqual({ names: ["A_TOKEN"], carried: "next\n" });
+    expect(stripExports("echo ${#arr}\nexport B_KEY=v\nnext\n")).toEqual({ names: ["B_KEY"], carried: "echo ${#arr}\nnext\n" });
+  });
+
   it("a cut line's trailing comment does not swallow the lines after it", () => {
     expect(stripExports("export A_TOKEN=fake # don't share\nalias b=c\nexport X_SECRET=fake # `note\nalias d=e\n")).toEqual({ names: ["A_TOKEN", "X_SECRET"], carried: "alias b=c\nalias d=e\n" });
   });

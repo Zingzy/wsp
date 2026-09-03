@@ -91,26 +91,31 @@ function assignedNames(line: string): string[] {
   return simpleCommands(line).flatMap(assignedIn);
 }
 
-/** What is still open at the end of a line: a quote, a backtick, `$(` groups, a heredoc waiting for its word, or a trailing backslash. */
+/** What is still open at the end of a line: a quote, a backtick, `$(` or `${` groups, `((` arithmetic, a heredoc waiting for its word, or a trailing backslash. */
 interface Open {
   quote: "" | "'" | '"' | "`" | "$'";
   parens: number;
+  braces: number;
+  /** Depth of `((` and `$((`; while open, `<<` is a shift and never a heredoc. */
+  arith: number;
   heredoc?: string;
   continues: boolean;
 }
 
-const CLOSED: Open = { quote: "", parens: 0, continues: false };
+const CLOSED: Open = { quote: "", parens: 0, braces: 0, arith: 0, continues: false };
 
 function isOpen(o: Open): boolean {
-  return o.quote !== "" || o.parens > 0 || o.heredoc !== undefined || o.continues;
+  return o.quote !== "" || o.parens > 0 || o.braces > 0 || o.heredoc !== undefined || o.continues;
 }
 
-/** `<<WORD`, `<<-WORD`, `<<"WORD"`: the word starts with a letter or underscore, so `x << 2` is arithmetic, and `<<<` is a here-string. */
-const HEREDOC = /^<<(?!<)-?\s*(?:"([A-Za-z_]\w*)"|'([A-Za-z_]\w*)'|([A-Za-z_]\w*))/;
+/** `<<WORD`, `<<-WORD`, `<<"WORD"`, `<<\WORD`: the word starts with a letter or underscore, so `x << 2` is arithmetic. The caller skips `<<<` (a here-string) and `<<` inside `(( ))` before this runs. */
+const HEREDOC = /^<<-?\s*(?:"([A-Za-z_]\w*)"|'([A-Za-z_]\w*)'|\\([A-Za-z_]\w*)|([A-Za-z_]\w*))/;
 
-/** A `#` outside quotes at the start of a word begins a comment; nothing after it is shell. */
+/** A `#` outside quotes at the start of a word begins a comment; nothing after it is shell. `${#var}` is a length, not a comment. */
 function commentAt(line: string, i: number): boolean {
-  return line[i] === "#" && (i === 0 || /\s/.test(line[i - 1] ?? ""));
+  if (line[i] !== "#") return false;
+  if (line[i - 1] === "{" && line[i - 2] === "$") return false;
+  return i === 0 || /[\s;&|({]/.test(line[i - 1] ?? "");
 }
 
 /** Carries the shell's quoting state across a line. Inside a heredoc only the terminator word matters. */
@@ -150,8 +155,28 @@ function scanLine(line: string, start: Open): Open {
       o.quote = o.quote === '"' ? "" : '"';
       continue;
     }
+    if (c === "$" && line[i + 1] === "(" && line[i + 2] === "(") {
+      o.arith += 1;
+      i += 2;
+      continue;
+    }
     if (c === "$" && line[i + 1] === "(") {
       o.parens += 1;
+      i += 1;
+      continue;
+    }
+    if (c === "$" && line[i + 1] === "{") {
+      o.braces += 1;
+      i += 1;
+      continue;
+    }
+    if (c === "(" && line[i + 1] === "(") {
+      o.arith += 1;
+      i += 1;
+      continue;
+    }
+    if (c === ")" && line[i + 1] === ")" && o.arith > 0) {
+      o.arith -= 1;
       i += 1;
       continue;
     }
@@ -159,9 +184,17 @@ function scanLine(line: string, start: Open): Open {
       o.parens -= 1;
       continue;
     }
-    if (o.quote === "" && c === "<") {
+    if (c === "}" && o.braces > 0) {
+      o.braces -= 1;
+      continue;
+    }
+    if (c === "<" && line[i + 1] === "<" && line[i + 2] === "<") {
+      i += 2;
+      continue;
+    }
+    if (o.quote === "" && o.arith === 0 && c === "<") {
       const m = HEREDOC.exec(line.slice(i));
-      const word = m?.[1] ?? m?.[2] ?? m?.[3];
+      const word = m?.[1] ?? m?.[2] ?? m?.[3] ?? m?.[4];
       if (word !== undefined) {
         o.heredoc = word;
         break;
@@ -171,9 +204,10 @@ function scanLine(line: string, start: Open): Open {
   return o;
 }
 
-/** The heredoc a kept line opens, if any: the one construct a kept line may carry forward, since a comment's stray quote must never hide what follows. */
-function heredocOpened(line: string): string | undefined {
-  return scanLine(line, CLOSED).heredoc;
+/** What a kept line may carry forward: a heredoc it opens and the depth of an arithmetic block, and nothing else, since a comment's stray quote must never hide what follows. An open `((` only stops `<<` from being read as a heredoc, which fails safe. */
+function carried(line: string, arith: number): Pick<Open, "heredoc" | "arith"> {
+  const o = scanLine(line, { ...CLOSED, arith });
+  return { heredoc: o.heredoc, arith: o.arith };
 }
 
 export function stripExports(text: string): { names: string[]; carried: string } {
@@ -181,22 +215,22 @@ export function stripExports(text: string): { names: string[]; carried: string }
   const kept: string[] = [];
   const eol = text.includes("\r\n") ? "\r\n" : "\n";
   let cutting: Open | undefined;
-  let heredoc: string | undefined;
+  let passing: Pick<Open, "heredoc" | "arith"> = { arith: 0 };
   for (const line of text.split(/\r?\n/)) {
     if (cutting !== undefined) {
       const o = scanLine(line, cutting);
       cutting = isOpen(o) ? o : undefined;
       continue;
     }
-    if (heredoc !== undefined) {
+    if (passing.heredoc !== undefined) {
       kept.push(line);
-      if (line.trim() === heredoc) heredoc = undefined;
+      if (line.trim() === passing.heredoc) passing = { arith: passing.arith };
       continue;
     }
     const hits = assignedNames(line).filter(isSecretName);
     if (hits.length === 0) {
       kept.push(line);
-      heredoc = heredocOpened(line);
+      passing = carried(line, passing.arith);
       continue;
     }
     for (const h of hits) if (!names.includes(h)) names.push(h);

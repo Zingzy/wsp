@@ -118,23 +118,33 @@ function subtract(t: Tree, e: Tree): Tree {
   return { bytes: Math.max(0, t.bytes - e.bytes), files: Math.max(0, t.files - e.files), mtime: t.mtime };
 }
 
-/** Drops records and paths at or under a claimed path. A claimed path strictly inside a record comes off the record whose counted set holds it, the longest match. */
+/** Takes a measured part off a record. A lower bound from which the part removes more than was counted, in bytes or in files, was never a count of what remains, so it becomes no measure at all. */
+function take<T extends Tree & { measured: Measured }>(d: T, part: Tree): T {
+  const t = subtract(d, part);
+  const gone = d.measured === "lower-bound" && (t.files === 0 || part.bytes > d.bytes || part.files > d.files);
+  return gone ? { ...d, ...EMPTY, mtime: d.mtime, measured: "none" } : { ...d, ...t };
+}
+
+/** Drops records and paths at or under a claimed path. A claimed path strictly inside a record comes off the record whose counted set holds it, the longest match; a claimed path under another claimed path is already gone with it. */
 async function unclaimed(m: Machine, dirs: readonly Dir[], claimed: string[], clock: () => number): Promise<Dir[]> {
+  const tops = claimed.filter(c => !claimed.some(o => o !== c && under(c, o)));
   const out: Dir[] = [];
   for (const d of dirs) {
-    if (claimed.some(c => under(d.path, c))) continue;
-    const paths = d.paths.filter(p => !claimed.some(c => under(p, c)));
+    if (tops.some(c => under(d.path, c))) continue;
+    const paths = d.paths.filter(p => !tops.some(c => under(p, c)));
     if (paths.length === 0) continue;
-    let tree: Tree = d;
-    for (const p of d.paths) if (!paths.includes(p)) tree = subtract(tree, await measure(m, d, p, clock));
-    out.push({ ...d, paths, excludes: [...d.excludes], ...tree });
+    let r: Dir = { ...d, paths, excludes: [...d.excludes] };
+    for (const p of d.paths) if (!paths.includes(p)) r = take(r, await measure(m, d, p, clock));
+    out.push(r);
   }
-  for (const c of claimed) {
-    let hit: { d: Dir; p: string } | undefined;
-    for (const d of out) for (const p of d.paths) if (c !== p && under(c, p) && (hit === undefined || p.length > hit.p.length)) hit = { d, p };
+  for (const c of tops) {
+    let hit: { i: number; p: string } | undefined;
+    out.forEach((d, i) => { for (const p of d.paths) if (c !== p && under(c, p) && (hit === undefined || p.length > hit.p.length)) hit = { i, p }; });
     if (hit === undefined) continue;
-    Object.assign(hit.d, subtract(hit.d, await measure(m, hit.d, c, clock)));
-    if (!hit.d.excludes.includes(c)) hit.d.excludes = [...hit.d.excludes, c].sort();
+    const d = out[hit.i];
+    if (d === undefined) continue;
+    const next = take(d, await measure(m, d, c, clock));
+    out[hit.i] = { ...next, excludes: next.excludes.includes(c) ? next.excludes : [...next.excludes, c].sort() };
   }
   return out;
 }
@@ -244,7 +254,7 @@ export async function everything(m: Machine, opts: EverythingOptions = {}): Prom
       flag(parent.row, "credential");
       if (parent.row.paths.includes(c.path)) parent.row.paths = parent.row.paths.filter(p => p !== c.path);
       else if (!parent.row.excludes.includes(c.path)) parent.row.excludes = [...parent.row.excludes, c.path].sort();
-      if (!skip) Object.assign(parent.row, subtract(parent.row, c));
+      if (!skip) Object.assign(parent.row, take(parent.row, c));
     }
     if (skip) continue;
     const r = row(c.path, inside(m.home, parent?.dirs ?? [], c.path), "credential", [c.path], c, "exact", { owner: parent?.row.owner });

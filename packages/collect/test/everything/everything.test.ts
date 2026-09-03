@@ -273,6 +273,32 @@ describe("everything: the seven passes folded into rows", () => {
     expect(rows.find(r => r.paths[0] === "~/.config/stowed")).toMatchObject({ name: "stowed", kind: "unknown", bytes: 0, files: 1, measured: "exact" });
   });
 
+  it("nested claimed paths are subtracted once", async () => {
+    const m = laptop({ files: { "~/.app/settings.json": 100, "~/.app/sub/file": 100, "~/.app/sub/other": 25 } });
+    const { rows } = await everything(m, { now: NOW, claimed: new Set(["~/.app/sub", "~/.app/sub/file"]) });
+    expect(rows.find(r => r.paths[0] === "~/.app")).toMatchObject({ bytes: 100, files: 1, excludes: ["~/.app/sub"] });
+  });
+
+  it("a lower-bound record with a claimed child is not clamped to a false zero", async () => {
+    const m = laptop({ files: { ...many("~/.big/aaa", 6_000), "~/.big/settings.json": 80 } });
+    const { rows } = await everything(m, { now: NOW, claimed: new Set(["~/.big/aaa"]) });
+    const big = rows.find(r => r.paths[0] === "~/.big");
+    expect(big).toBeDefined();
+    expect(big?.files === 0 && big?.measured === "lower-bound").toBe(false);
+    expect(big?.flags.includes("large") && big?.bytes === 0).toBe(false);
+    expect(big?.excludes).toEqual(["~/.big/aaa"]);
+  });
+
+  it("a lower-bound record whose claimed child measures more than the walk counted is not measured at all", async () => {
+    const files: Record<string, number> = { "~/.big/settings.json": 80 };
+    for (let i = 0; i < 5_000; i += 1) files[`~/.big/aaa/f${i}`] = 1;
+    for (let i = 0; i < 100; i += 1) files[`~/.big/zzz/f${i}`] = 1_000_000;
+    const { rows } = await everything(laptop({ files }), { now: NOW, claimed: new Set(["~/.big/zzz"]) });
+    const big = rows.find(r => r.paths[0] === "~/.big");
+    expect(big).toMatchObject({ measured: "none", bytes: 0, files: 0, excludes: ["~/.big/zzz"] });
+    expect(big?.flags).not.toContain("large");
+  });
+
   it("claimed accepts ~/x, bare x, the absolute path under HOME, a trailing slash and a Keychain item, and refuses anything else", async () => {
     for (const form of ["~/.ssh", ".ssh", `${HOME}/.ssh`, "~/.ssh/", ".ssh/", `${HOME}/.ssh/`]) {
       const { rows } = await everything(laptop(home()), { now: NOW, claimed: new Set([form]) });
