@@ -8,7 +8,9 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { createRequire } from "node:module";
 import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { parseArgs } from "node:util";
+import type { Readable, Writable } from "node:stream";
+import { parseArgs, styleText } from "node:util";
+import { S_BAR, confirm, isCancel, password } from "@clack/prompts";
 import { createClaudeAdapter } from "@wsp/adapter-claude";
 import { collect, nodeHost, type Manifest, type Rung } from "@wsp/collect";
 import {
@@ -23,15 +25,15 @@ import {
 } from "@wsp/runtime";
 import { CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, claudeEnvs, deployDaemon, doctor } from "./doctor.js";
 import { runInit, type InitIO } from "./init.js";
+import { TAGLINE, opening } from "./init-opening.js";
 import type { ChecklistItem } from "./init-recipe.js";
 import { startHost, type HostHandle } from "./server.js";
-import { TerminalInput } from "./terminal-input.js";
 
 const VERSION = (
   JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }
 ).version;
 
-export const HELP = `wsp - local workspaces for coding agents
+export const HELP = `wsp - ${TAGLINE}
 
 usage:
   wsp                start the runtime and serve the app on localhost
@@ -58,7 +60,9 @@ With a Solari key present, a missing Anthropic key is only noted at start.
 export interface CliIO {
   log(line: string): void;
   error(line: string): void;
+  /** A yes-or-no question; resolves to "yes" or "no". */
   ask(question: string): Promise<string>;
+  /** A key, typed without echo. Lines after the first are shown under the question. */
   askSecret(question: string): Promise<string>;
 }
 
@@ -73,8 +77,10 @@ export interface KeySources {
   home: string;
 }
 
+const DEFAULT_HOME = join(homedir(), ".wsp");
+
 export function wspHome(): string {
-  return process.env["WSP_HOME"] ?? join(homedir(), ".wsp");
+  return process.env["WSP_HOME"] ?? DEFAULT_HOME;
 }
 
 /** Fixed spot a launcher without WSP_HOME (Finder, a service) can read to
@@ -90,13 +96,25 @@ export function currentHome(): string | undefined {
   return home === "" ? undefined : home;
 }
 
-export function terminalIO(): CliIO {
-  const input = new TerminalInput(process.stdin, process.stdout);
+type Stream<T> = T & { isTTY?: boolean };
+
+/** Questions are clack prompts on the terminal; off a terminal there is nobody to answer them. */
+export function terminalIO(input: Stream<Readable> = process.stdin, output: Stream<Writable> = process.stdout): CliIO {
+  const screen = input.isTTY === true && output.isTTY === true;
+  const nobody = (q: string): Promise<never> =>
+    Promise.reject(new Error(`${q.split("\n")[0]} No terminal to ask on; set it in the environment, ./.env, or ~/.wsp/.env.`));
+  // clack frames the extra lines of a confirm's message but not a password's.
+  const framed = (q: string): string => q.replace(/\n/g, `\n${styleText("gray", S_BAR)}  `);
+  const answered = async <T>(prompt: Promise<T | symbol>): Promise<T> => {
+    const value = await prompt;
+    if (isCancel(value)) throw new Error("Nothing was changed.");
+    return value as T;
+  };
   return {
     log: line => console.log(line),
     error: line => console.error(line),
-    ask: q => input.ask(q),
-    askSecret: q => input.askSecret(q),
+    ask: q => (screen ? answered(confirm({ message: framed(q), initialValue: false, input, output })).then(yes => (yes ? "yes" : "no")) : nobody(q)),
+    askSecret: q => (screen ? answered(password({ message: framed(q), input, output })) : nobody(q)),
   };
 }
 
@@ -146,28 +164,28 @@ export async function loadKeys(
   let anthropic = find("ANTHROPIC_API_KEY");
   if (solari !== undefined) return { solari, ...(anthropic !== undefined ? { anthropic } : {}) };
 
-  io.log(`No SOLARI_API_KEY in the environment, ./.env, or ${homeEnv}.`);
-  solari = (await io.askSecret("Solari API key: ")).trim();
-  if (!solari) throw new Error("cannot start without a Solari API key");
+  solari = (await io.askSecret(`No Solari key found.\nSolari API key  ${styleText("dim", "console.getsolari.com")}`)).trim();
+  if (!solari) throw new Error("A Solari API key is needed to start.");
   const set: Record<string, string> = { SOLARI_API_KEY: solari };
 
   if (anthropic === undefined && ask.anthropic) {
-    io.log(
-      "An Anthropic API key is optional. On a Claude subscription, press enter to skip and sign in with /login inside your machine later, so wsp never sees that credential.",
-    );
-    const typed = (await io.askSecret("Anthropic API key (enter to skip): ")).trim();
+    const typed = (
+      await io.askSecret(`Anthropic API key  ${styleText("dim", "optional, enter skips")}\nOn a Claude subscription, skip this and sign in with /login on the machine instead.`)
+    ).trim();
     if (typed) {
       anthropic = typed;
       set["ANTHROPIC_API_KEY"] = typed;
     }
   }
 
-  const save = (await io.ask(`Save to ${homeEnv} (mode 600) so wsp stops asking? [y/N] `)).trim().toLowerCase();
-  if (save === "y" || save === "yes") {
-    writeEnvFile(homeEnv, set);
-    io.log(`saved ${homeEnv}`);
-  }
+  if ((await io.ask(saveQuestion(sources.home, Object.keys(set).length))) === "yes") writeEnvFile(homeEnv, set);
   return { solari, ...(anthropic !== undefined ? { anthropic } : {}) };
+}
+
+/** Names the file only when WSP_HOME moved it off the default. */
+export function saveQuestion(home: string, keys: number): string {
+  const what = keys > 1 ? "keys" : "key";
+  return home === DEFAULT_HOME ? `Save the ${what} so wsp stops asking?` : `Save the ${what} to ${join(home, ".env")} so wsp stops asking?`;
 }
 
 /** What every golden the wizard seals is made of: the harness install and its
@@ -349,6 +367,8 @@ function stopOnSignals(handle: HostHandle, io: CliIO): void {
 
 async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: string }, flags: { yes: boolean; manifest?: string }): Promise<number> {
   refuseIfServed(lockPathFor(opts.statePath), opts.statePath);
+  const screen = terminalInitIO();
+  opening(screen, { command: "init", version: VERSION, yes: flags.yes });
   const keys = await loadKeys(io, undefined, { anthropic: false });
   const result = await runInit(
     {
@@ -361,7 +381,7 @@ async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: 
       runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `node ${(await deployDaemon(machine)).node}` }),
       host: (rt, builder, checklist) => hostFor(rt, keys, { ...opts, builder, checklist }, io),
     },
-    terminalInitIO(),
+    screen,
   );
   if (result.handle !== undefined) stopOnSignals(result.handle, io);
   return result.code;

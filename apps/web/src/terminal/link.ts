@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Per-workspace terminal state that must outlive the TerminalTab component:
+// Per-workspace terminal state that must outlive any terminal component:
 // pty tabs, a client-side scrollback mirror, and the connection status. The
 // daemon has no pty.detach op, so each pty is attached at most once per wire;
-// parking a tab drops its xterm instance (the heavy part) and a remount
+// parking a terminal drops its surface (the heavy part) and a remount
 // replays from the mirror instead of re-attaching.
 import type { DaemonEvent, DaemonLinkStatus } from "@wsp/protocol";
 import type { PtyModeReport } from "./compose.js";
+import { composedPtyIo, type TerminalIo } from "./pty-io.js";
 
 /** Mirrors the daemon's per-pty scrollback cap (pty-manager.ts), in UTF-16 units. */
 const MIRROR_CAP = 256 * 1024;
@@ -57,6 +58,7 @@ export class WorkspaceTerminals {
   #tabsView: PtyTabView[] = [];
   #opening: Promise<PtyTabView> | null = null;
   #everOpened = false;
+  #ios = new Map<string, TerminalIo>();
 
   constructor(wire: TerminalWire) {
     this.#wire = wire;
@@ -177,6 +179,7 @@ export class WorkspaceTerminals {
     const p = this.#ptys.get(ptyId);
     if (!p) return;
     this.#ptys.delete(ptyId);
+    this.#ios.delete(ptyId);
     const at = this.#order.indexOf(ptyId);
     this.#order.splice(at, 1);
     if (this.#activeId === ptyId) this.#activeId = this.#order[at] ?? this.#order[at - 1] ?? null;
@@ -189,6 +192,16 @@ export class WorkspaceTerminals {
   }
 
   // --- per-tab data path ---------------------------------------------------------
+
+  /** The one io for a pty: its compose buffer must not fork across the surfaces that show it. */
+  io(ptyId: string): TerminalIo {
+    let io = this.#ios.get(ptyId);
+    if (!io) {
+      io = composedPtyIo(this, ptyId);
+      this.#ios.set(ptyId, io);
+    }
+    return io;
+  }
 
   /** Replays the mirror into sink, then streams live data. Returns unbind. */
   bind(ptyId: string, sink: TerminalSink): () => void {

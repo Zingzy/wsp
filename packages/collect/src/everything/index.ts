@@ -10,5 +10,5 @@ export { type KeychainItem, keychain, parseKeychainDump, serviceOwner } from "./
 export { RC_FILES, type RcScan, isSecretName, shellRc, stripExports } from "./shell-rc.js";
 export { LARGE_BYTES, LARGE_FILES, isLarge, sizeGate } from "./gate.js";
 export { type Tree, summarize, walk } from "./walk.js";
-export { type Everything, type EverythingOptions, type Lookup, everything, noLookup } from "./everything.js";
+export { type Everything, type EverythingOptions, type NameLookup, everything, noLookup } from "./everything.js";
 export { nodeMachine, nodeMachineFs } from "./node-machine.js";

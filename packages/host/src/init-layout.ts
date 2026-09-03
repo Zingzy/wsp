@@ -36,3 +36,25 @@ export function widthOf(output: Writable | undefined, cap = 100): number {
   const columns = output !== undefined && "columns" in output && typeof output.columns === "number" ? output.columns : 80;
   return Math.min(columns, cap);
 }
+
+/** The terminal height when the stream knows it, else clack's 20. */
+export function rowsOf(output: Writable | undefined): number {
+  return output !== undefined && "rows" in output && typeof output.rows === "number" ? output.rows : 20;
+}
+
+/** The slice of `total` rows that fits `height` rows with the cursor kept near the middle. */
+export function viewport(total: number, cursor: number, height: number): { start: number; end: number } {
+  const h = Math.max(1, height);
+  const start = Math.max(0, Math.min(cursor - Math.floor(h / 2), total - h));
+  return { start, end: Math.min(total, start + h) };
+}
+
+/** The first labels then "+N more", naming up to three and fewer when the width is short; the last label is cut rather than dropped. */
+export function summarize(labels: readonly string[], width: number, named = 3): string {
+  const more = (n: number): string => (labels.length > n ? ` +${labels.length - n} more` : "");
+  for (let n = Math.min(named, labels.length); n > 1; n--) {
+    const line = `${labels.slice(0, n).join(", ")}${more(n)}`;
+    if (line.length <= width) return line;
+  }
+  return labels.length === 0 ? "" : `${ellipsize(labels[0]!, width - more(1).length)}${more(1)}`;
+}

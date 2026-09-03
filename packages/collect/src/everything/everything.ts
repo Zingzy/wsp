@@ -12,12 +12,12 @@ import { type Kind, type Row, Rows } from "./row.js";
 import { type RcScan, shellRc } from "./shell-rc.js";
 import { EMPTY, type Tree, add } from "./walk.js";
 
-/** The catalog (#89): the app a directory name belongs to, or undefined when it has never heard of it. */
-export type Lookup = (dirName: string) => string | undefined;
-export const noLookup: Lookup = () => undefined;
+/** The app a directory name belongs to, or undefined when the catalog has never heard of it. */
+export type NameLookup = (dirName: string) => string | undefined;
+export const noLookup: NameLookup = () => undefined;
 
 export interface EverythingOptions {
-  lookup?: Lookup;
+  lookup?: NameLookup;
   /** Epoch ms the stale check counts back from; tests pin it. */
   now?: number;
 }

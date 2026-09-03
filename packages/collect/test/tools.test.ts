@@ -111,7 +111,7 @@ describe("tools", () => {
       { rung: "tools", id: "tools/pipx/httpie", label: "httpie 3.2.4", group: "pipx", paths: [], bytes: 0, default: "bring", linux: "yes" },
       { rung: "tools", id: "tools/uv/ruff", label: "ruff 0.6.3", group: "uv tools", paths: [], bytes: 0, default: "bring", linux: "yes" },
       { rung: "tools", id: "tools/cargo/ripgrep", label: "ripgrep 14.1.0", group: "cargo installs", paths: [], bytes: 0, default: "bring", linux: "yes" },
-      { rung: "tools", id: "tools/go/gopls", label: "gopls (golang.org/x/tools/gopls@v0.16.2)", group: "Go binaries", paths: [], bytes: 0, default: "bring", linux: "yes" },
+      { rung: "tools", id: "tools/go/gopls", label: "gopls", group: "Go binaries", paths: ["golang.org/x/tools/gopls@v0.16.2"], bytes: 0, default: "bring", linux: "yes" },
     ]);
   });
 
@@ -119,6 +119,18 @@ describe("tools", () => {
     const host = fakeHost({ which: ["bun"] });
     expect(await detectTools(host)).toEqual([]);
     expect(host.calls).toEqual(["run bun pm ls -g"]);
+  });
+
+  const LONG_MODULE = "github.com/some-organisation/some-very-long-repository-name/cmd/tooling/wsp-go";
+
+  it.each([
+    ["gopls", "golang.org/x/tools/gopls", "v0.16.2"],
+    ["wsp-go", LONG_MODULE, "v1.4.0"],
+  ])("a go binary is labelled %s; the module path is its first detail line", async (name, path, version) => {
+    expect(LONG_MODULE).toHaveLength(78);
+    const host = fakeHost({ files: { [`~/go/bin/${name}`]: 1 }, which: ["go"], exec: { [`go version -m /Users/dev/go/bin/${name}`]: `x\n\tpath\t${path}\n\tmod\t${path}\t${version}\th1:abc=\n` } });
+    const rows = await detectTools(host);
+    expect(rows).toEqual([{ rung: "tools", id: `tools/go/${name}`, label: name, group: "Go binaries", paths: [`${path}@${version}`], bytes: 0, default: "bring", linux: "yes" }]);
   });
 
   it("a go binary without module info is offered unticked", async () => {
