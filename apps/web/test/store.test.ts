@@ -171,3 +171,56 @@ describe("store connection", () => {
     expect(useStore.getState().toast).toBeNull();
   });
 });
+
+describe("store workspaces", () => {
+  it("a refused nap reverts the optimistic phase and toasts the reason", async () => {
+    const { api } = fakeApi([view("ws_a")], []);
+    api.nap = async () => {
+      throw new Error("backend said no");
+    };
+    useStore.getState().bind(api);
+    await flush();
+    const toggling = useStore.getState().toggle("ws_a");
+    expect(useStore.getState().workspaces[0]!.phase).toBe("napping");
+    await toggling;
+    expect(useStore.getState().workspaces[0]!.phase).toBe("running");
+    expect(useStore.getState().toast).toContain("backend said no");
+  });
+
+  it("napped carries the phase; woken and upgraded carry the phase and the new machine", async () => {
+    const { api, emit } = fakeApi([view("ws_a")], []);
+    useStore.getState().bind(api);
+    await flush();
+    emit({ type: "workspace.napped", workspaceId: "ws_a" });
+    expect(useStore.getState().workspaces[0]!.phase).toBe("napping");
+    expect(useStore.getState().statuses["ws_a"]?.phase).toBe("napping");
+    emit({ type: "workspace.woken", workspaceId: "ws_a", machineId: "m2", resurrected: true });
+    expect(useStore.getState().workspaces[0]!).toMatchObject({ phase: "running", machineId: "m2" });
+    emit({ type: "workspace.upgraded", workspaceId: "ws_a", machineId: "m3" });
+    expect(useStore.getState().workspaces[0]!.machineId).toBe("m3");
+    expect(useStore.getState().statuses["ws_a"]?.machineId).toBe("m3");
+  });
+
+  it("session.start counts spending and workspace.deleted prunes it", async () => {
+    const { api, emit } = fakeApi([view("ws_a")], []);
+    useStore.getState().bind(api);
+    await flush();
+    emit({ type: "session.start", workspaceId: "ws_a", sessionId: "s1" });
+    expect(useStore.getState().spending["ws_a"]).toBe(1);
+    emit({ type: "session.end", workspaceId: "ws_a", sessionId: "s1", exitCode: 0, sawResult: true });
+    expect(useStore.getState().spending["ws_a"]).toBe(0);
+    emit({ type: "session.start", workspaceId: "ws_a", sessionId: "s2" });
+    emit({ type: "workspace.deleted", workspaceId: "ws_a" });
+    expect(useStore.getState().spending["ws_a"]).toBeUndefined();
+  });
+
+  it("a failed status subscription becomes a toast instead of silence", async () => {
+    const { api } = fakeApi([view("ws_a")], []);
+    api.watchStatuses = async () => {
+      throw new Error("runtime unreachable");
+    };
+    useStore.getState().bind(api);
+    await flush();
+    expect(useStore.getState().toast).toContain("runtime unreachable");
+  });
+});

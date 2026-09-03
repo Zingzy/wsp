@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The flat strip from the approved mock: chat, one tab per terminal pty,
-// browser, screen. Pty tabs are a view over the workspace's WorkspaceTerminals
+// screen. The browser lives in the right panel. Pty tabs are a view over the workspace's WorkspaceTerminals
 // (../terminal/link.js), which owns their order, titles and the active one.
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { useSelectedId, useSession, useWorkspaces } from "../protocol/store.js";
 import { getTerminals, onTerminals, type WorkspaceTerminals } from "../terminal/link.js";
 import { ChatTab } from "../tabs/ChatTab.js";
 import { TerminalLinkState, TerminalTab } from "../tabs/TerminalTab.js";
-import { BrowserTab } from "../tabs/BrowserTab.js";
 import { ScreenTab } from "../tabs/ScreenTab.js";
 import styles from "./TabStrip.module.css";
 
-type TabKind = "chat" | "terminal" | "browser" | "screen";
+type TabKind = "chat" | "terminal" | "screen";
 
 export function TabStrip() {
   const workspaceId = useSelectedId();
@@ -41,14 +40,12 @@ export function TabStrip() {
       <div className={styles.strip} role="tablist">
         {plain("chat")}
         {terms ? <PtyTabs terms={terms} shown={active === "terminal"} onPick={() => setActive("terminal")} /> : plain("terminal")}
-        {plain("browser")}
         {plain("screen")}
         {terms && <span className={styles.right}><TerminalLinkState terms={terms} /></span>}
       </div>
       <div className={styles.body}>
         {active === "chat" && <ChatTab workspaceId={workspaceId} />}
         {active === "terminal" && <TerminalTab workspaceId={workspaceId} />}
-        {active === "browser" && <BrowserTab workspaceId={workspaceId} />}
         {active === "screen" && <ScreenTab workspaceId={workspaceId} />}
       </div>
     </>

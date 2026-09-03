@@ -113,14 +113,14 @@ describe("first run: wizard or rail", () => {
     await mount();
     await waitFor(() => expect(screen.getByText("wsp init")).toBeDefined());
     expect(screen.getByTestId("step").textContent).toBe("none");
-    expect(screen.queryByText("workspaces")).toBeNull();
+    expect(screen.queryByText("Workspaces")).toBeNull();
     expect(screen.queryByRole("button", { name: "Save as my golden image" })).toBeNull();
     expect(document.body.textContent).not.toMatch(/Prepare my machine|sk-ant|slr_live/);
   });
 
   it("renders the rail, not the wizard, the moment a golden exists", async () => {
     await mount({ golden: manifest, workspaces: [first] });
-    await waitFor(() => expect(screen.getByText("workspaces")).toBeDefined());
+    await waitFor(() => expect(screen.getByText("Workspaces")).toBeDefined());
     expect(screen.queryByText("wsp init")).toBeNull();
   });
 });
@@ -233,7 +233,7 @@ describe("wizard steps follow the wire", () => {
     act(() => {
       f.api.subscribe.mock.calls[0]![0]({ type: "workspace.created", workspace: first });
     });
-    await waitFor(() => expect(screen.getByText("workspaces")).toBeDefined());
+    await waitFor(() => expect(screen.getByText("Workspaces")).toBeDefined());
     expect(useStore.getState().selectedId).toBe("ws_first");
     expect(screen.queryByRole("button", { name: "Save as my golden image" })).toBeNull();
   });

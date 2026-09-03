@@ -4,13 +4,13 @@
 // drives every switch here; there is no router.
 import type { ReactNode } from "react";
 import { PanelLayoutControls } from "../components/chat/PanelLayoutControls.js";
-import { Rail } from "../components/Rail.js";
 import { Sidebar, SidebarInset, SidebarProvider, SidebarRail, SidebarTrigger } from "../components/ui/sidebar.js";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader.js";
 import { useMediaQuery } from "../hooks/useMediaQuery.js";
 import { useSelectedId, useStore, useWorkspace } from "../protocol/store.js";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../rightPanelStore.js";
+import { WorkspaceSidebar } from "../sidebar/WorkspaceSidebar.js";
 import { selectTerminalUiState, useTerminalDrawerStore } from "../terminal/drawerStore.js";
 import { DisconnectedBanner } from "./DisconnectedBanner.js";
 import { RightPanel } from "./RightPanel.js";
@@ -58,7 +58,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         className="sidebar-glass border-r border-sidebar-border text-sidebar-foreground"
         resizable={{ minWidth: SIDEBAR_MIN_WIDTH, maxWidth: SIDEBAR_MAX_WIDTH, storageKey: SIDEBAR_WIDTH_STORAGE_KEY }}
       >
-        <Rail />
+        <WorkspaceSidebar />
         <SidebarRail />
       </Sidebar>
       <SidebarInset className="h-dvh min-h-0 overflow-hidden">

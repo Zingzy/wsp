@@ -22,6 +22,8 @@ describe("workspaceIndicator", () => {
     ["running", "running", "no-daemon", "Unreachable", "error", false],
     ["running", "gone", "gone", "Gone", "error", false],
     ["napping", "gone", "gone", "Gone", "error", false],
+    ["running", "running", "zombie", "Zombie", "error", false],
+    ["running", "running", "slow", "Running", "running", false],
   ])("phase %s, machine %s, reach %s -> %s", (phase, machineState, reach, label, tone, pulse) => {
     const s = machineState !== null && reach !== null ? status(phase, machineState, reach) : null;
     expect(workspaceIndicator({ phase }, s)).toEqual({ label, tone, pulse });

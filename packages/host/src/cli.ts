@@ -77,6 +77,19 @@ export function wspHome(): string {
   return process.env["WSP_HOME"] ?? join(homedir(), ".wsp");
 }
 
+/** Fixed spot a launcher without WSP_HOME (Finder, a service) can read to
+ * learn which home the running host serves. */
+export function currentHomePointer(): string {
+  return join(homedir(), ".wsp", "current-home");
+}
+
+export function currentHome(): string | undefined {
+  const path = currentHomePointer();
+  if (!existsSync(path)) return undefined;
+  const home = readFileSync(path, "utf8").trim();
+  return home === "" ? undefined : home;
+}
+
 export function terminalIO(): CliIO {
   const input = new TerminalInput(process.stdin, process.stdout);
   return {
@@ -386,6 +399,10 @@ async function hostFor(
     // Other local tools read the token from disk; the WS never sees it in a URL.
     const tokenPath = join(dirname(opts.statePath), "host-token");
     writeFileSync(tokenPath, handle.authToken, { mode: 0o600 });
+    const home = resolve(wspHome());
+    const pointer = currentHomePointer();
+    mkdirSync(dirname(pointer), { recursive: true });
+    writeFileSync(pointer, `${home}\n`);
 
     io.log(`app         http://127.0.0.1:${handle.port}`);
     io.log(`runtime ws  ws://127.0.0.1:${handle.wsPort} (token: ${tokenPath})`);
@@ -398,6 +415,8 @@ async function hostFor(
       close: async () => {
         await handle.close();
         rmSync(lockPath, { force: true });
+        // A host that started later owns the pointer now.
+        if (currentHome() === home) rmSync(pointer, { force: true });
       },
     };
   } catch (e) {

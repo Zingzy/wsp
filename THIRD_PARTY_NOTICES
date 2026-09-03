@@ -9,9 +9,13 @@ here are included or relied upon under their own licenses, reproduced below.
 
    Files under apps/web/src/components (the ui, chat and preview folders,
    the right-panel, page-header, no-active-thread and terminal drawer
-   components), apps/web/src/hooks, apps/web/src/lib (utils, selection
-   actions, terminal context and labels), apps/web/src/terminal/ghostty
-   (the libghostty-vt browser adapter and its tests), apps/web/src/terminal/groups.ts,
+   components), apps/web/src/sidebar (the sidebar logic, thread sort,
+   status indicators, favicon and chrome; the WorkspaceSidebar container,
+   the new-workspace dialog and workspaceRows.ts are wsp's own),
+   apps/web/src/hooks, apps/web/src/lib (utils, timestampFormat,
+   selection actions, terminal context and labels),
+   apps/web/src/terminal/ghostty (the libghostty-vt browser adapter and
+   its tests), apps/web/src/terminal/groups.ts,
    apps/web/src/terminal-links.ts, apps/web/src/appearanceFonts.ts,
    apps/web/src/index.css,
    apps/web/src/rightPanelStore.ts, apps/web/src/rightPanelLayout.ts and

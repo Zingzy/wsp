@@ -43,6 +43,8 @@
         color: var(--deep);
       }
       p { margin: 0 0 14px; color: var(--muted); }
+      .where { margin: 14px 0 0; font-size: 12px; color: var(--deep); word-break: break-all; }
+      .where code { font-size: 11px; color: var(--muted); }
       .cmd {
         display: flex;
         align-items: center;
@@ -87,6 +89,8 @@
         <code id="command">wsp init</code>
         <button id="copy" type="button">copy</button>
       </div>
+      <p class="where">Looked for keys and a golden in <code id="home"></code>.</p>
+      <p class="where" id="stale" hidden><code>~/.wsp/current-home</code> names <code id="stale-home"></code>, but no host is serving it. Start <code>wsp</code> there and retry, or run <code>wsp init</code> here.</p>
       <div class="row">
         <span id="status"></span>
         <button id="retry" type="button" class="primary">retry</button>
@@ -96,6 +100,13 @@
       const status = document.getElementById("status");
       const copy = document.getElementById("copy");
       const retry = document.getElementById("retry");
+      const where = (home, stale) => {
+        document.getElementById("home").textContent = home;
+        document.getElementById("stale-home").textContent = stale || "";
+        document.getElementById("stale").hidden = !stale;
+      };
+      const params = new URLSearchParams(location.search);
+      where(params.get("home") || "", params.get("stale") || "");
       copy.addEventListener("click", async () => {
         await navigator.clipboard.writeText(document.getElementById("command").textContent);
         copy.textContent = "copied";
@@ -105,7 +116,9 @@
         retry.disabled = true;
         status.textContent = "checking";
         try {
-          status.textContent = (await window.wsp.retry()) ? "starting" : "not set up yet";
+          const found = await window.wsp.retry();
+          where(found.home, found.stalePointer);
+          status.textContent = found.ready ? "starting" : "not set up yet";
         } catch (e) {
           status.textContent = String(e && e.message ? e.message : e).replace(/^.*Error: /, "");
         }

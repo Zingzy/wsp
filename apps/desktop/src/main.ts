@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { wspHome, type CliIO } from "@wsp/host";
-import type { Runtime } from "@wsp/runtime";
+import { currentHome, type CliIO } from "@wsp/host";
 import { BrowserWindow, app, dialog, ipcMain } from "electron";
-import { openHost, type HostSession } from "./host-lifecycle.js";
+import { locateHost, openHost, statePathIn, type HostSession, type Located } from "./host-lifecycle.js";
+import type { Retry } from "./preload.js";
 import { checkSetup } from "./setup.js";
 
 const here = (rel: string): string => fileURLToPath(new URL(rel, import.meta.url));
@@ -19,12 +17,6 @@ const io: CliIO = { log: l => console.log(l), error: l => console.error(l), ask:
 function envPort(name: string, fallback: number): number {
   const raw = process.env[name];
   return raw === undefined || raw === "" ? fallback : Number(raw);
-}
-
-// Same rule as the bin: a .env in cwd marks a dev checkout whose .wsp state is shared with wspx.
-function statePath(): string {
-  if (existsSync(join(process.cwd(), ".env"))) return join(process.cwd(), ".wsp", "state.json");
-  return join(wspHome(), "state.json");
 }
 
 function newWindow(preload?: string): BrowserWindow {
@@ -44,35 +36,58 @@ function newWindow(preload?: string): BrowserWindow {
 
 let session: HostSession | undefined;
 
-async function showApp(runtime: Runtime): Promise<void> {
-  session = await openHost({
+function locate(): Promise<Located> {
+  const env = process.env["WSP_HOME"];
+  const pointer = currentHome();
+  return locateHost({
     port: envPort("WSP_PORT", 4400),
-    wsPort: envPort("WSP_WS_PORT", 4410),
-    statePath: statePath(),
-    webDir: WEB_DIR,
-    io,
-    runtime,
+    ...(env !== undefined ? { env } : {}),
+    ...(pointer !== undefined ? { pointer } : {}),
+    cwd: process.cwd(),
   });
+}
+
+/** A serving host is attached to with no gate; otherwise the gate runs against
+ * the located home and, when it passes, a host is started there. */
+async function showApp(located: Located): Promise<boolean> {
+  const statePath = statePathIn(located.home, process.cwd());
+  if (located.session === undefined) {
+    const state = await checkSetup({ statePath });
+    if (!state.ready) return false;
+    session = await openHost({
+      port: envPort("WSP_PORT", 4400),
+      wsPort: envPort("WSP_WS_PORT", 4410),
+      statePath,
+      webDir: WEB_DIR,
+      io,
+      runtime: state.runtime,
+    });
+  } else {
+    session = located.session;
+  }
+  io.log(`${session.owned ? "serving" : "attached"} ${session.url} (home ${located.home})`);
   await newWindow().loadURL(session.url);
+  return true;
 }
 
 /** The setup screen carries the only preload; the app window gets none. The
  * host starts before the setup window closes so the window count never hits zero. */
-async function showSetup(): Promise<void> {
+async function showSetup(located: Located): Promise<void> {
   const setup = newWindow(PRELOAD);
-  let checking: Promise<boolean> | undefined;
+  let checking: Promise<Retry> | undefined;
   ipcMain.handle("setup:retry", () => {
-    checking ??= (async () => {
-      const state = await checkSetup({ statePath: statePath() });
-      if (!state.ready) return false;
-      ipcMain.removeHandler("setup:retry");
-      await showApp(state.runtime);
-      setup.close();
-      return true;
+    checking ??= (async (): Promise<Retry> => {
+      const found = await locate();
+      const ready = await showApp(found);
+      if (ready) {
+        ipcMain.removeHandler("setup:retry");
+        setup.close();
+      }
+      return { ready, home: found.home, ...(found.stalePointer !== undefined ? { stalePointer: found.stalePointer } : {}) };
     })().finally(() => (checking = undefined));
     return checking;
   });
-  await setup.loadFile(SETUP_PAGE);
+  await setup.loadFile(SETUP_PAGE, { query: { home: located.home, stale: located.stalePointer ?? "" } });
 }
 
 let stopping: Promise<void> | undefined;
@@ -89,8 +104,8 @@ app.on("window-all-closed", () => app.quit());
 app
   .whenReady()
   .then(async () => {
-    const state = await checkSetup({ statePath: statePath() });
-    return state.ready ? showApp(state.runtime) : showSetup();
+    const located = await locate();
+    if (!(await showApp(located))) await showSetup(located);
   })
   .catch((e: unknown) => {
     dialog.showErrorBox("wsp could not start", e instanceof Error ? e.message : String(e));
