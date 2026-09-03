@@ -135,3 +135,43 @@ describe("Workspace verified wake", () => {
     expect(ws.currentPhase).toBe("napping");
   });
 });
+
+describe("Workspace rebuild", () => {
+  it("replaces a running machine with a golden fork, restores the vault, kills the old one, and stays running first-life", async () => {
+    const calls = { kill: 0, pause: 0, resume: 0 };
+    const zombie = stubMachine({
+      kill: async () => { calls.kill++; },
+      pause: async () => { calls.pause++; },
+      resume: async () => { calls.resume++; },
+    });
+    const order: string[] = [];
+    const ws = new Workspace(zombie, {
+      goldenSnapshot: "snap_g",
+      resurrect: async () => { order.push("resurrect"); return stubMachine({ id: "m2" }); },
+      restoreVault: async m => { order.push(`restore:${m.id}`); },
+    }, { firstLife: false });
+    await ws.rebuild();
+    expect(order).toEqual(["resurrect", "restore:m2"]);
+    expect(calls).toEqual({ kill: 1, pause: 0, resume: 0 });
+    expect(ws.machineId).toBe("m2");
+    expect(ws.currentPhase).toBe("running");
+    expect(ws.isFirstLife).toBe(true);
+  });
+
+  it("a napping workspace rebuilds too and comes back running", async () => {
+    const ws = new Workspace(stubMachine(), {
+      goldenSnapshot: "snap_g",
+      resurrect: async () => stubMachine({ id: "m2" }),
+    });
+    await ws.nap();
+    await ws.rebuild();
+    expect(ws.machineId).toBe("m2");
+    expect(ws.currentPhase).toBe("running");
+  });
+
+  it("refuses without a resurrect hook and keeps the machine", async () => {
+    const ws = new Workspace(stubMachine(), { goldenSnapshot: "snap_g" });
+    await expect(ws.rebuild()).rejects.toThrow(/resurrect/);
+    expect(ws.machineId).toBe("m1");
+  });
+});

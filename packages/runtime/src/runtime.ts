@@ -255,6 +255,8 @@ export interface Runtime {
     nap(id: string): Promise<WorkspaceView>;
     wake(id: string): Promise<WorkspaceView>;
     upgrade(id: string, spec?: WorkspaceSpec): Promise<WorkspaceView>;
+    /** Fresh golden fork with the nap-time vault, old machine killed, id and name kept: the way out of a zombie. */
+    rebuild(id: string): Promise<WorkspaceView>;
     delete(id: string): Promise<void>;
     /** A person acted in the workspace; its idle window starts over. */
     touch(id: string): Promise<void>;
@@ -777,6 +779,23 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       };
       await persist(entry.record);
       bus.emit({ type: "workspace.upgraded", workspaceId: id, machineId: entry.record.machineId });
+      return view(entry.record);
+    },
+
+    async rebuild(id) {
+      const entry = await entryOf(id);
+      if (entry.waking) await entry.waking.catch(() => {});
+      const old = entry.record.machineId;
+      const vaulted = (await store.getBlob(VAULTS, id)) !== undefined;
+      await entry.ws.rebuild();
+      entry.record.machineId = entry.ws.machineId;
+      entry.record.phase = "running";
+      entry.record.firstLife = true;
+      await persist(entry.record);
+      bus.emit({ type: "workspace.upgraded", workspaceId: id, machineId: entry.record.machineId });
+      const reason = `rebuilt: ${old} replaced by ${entry.record.machineId}, ${vaulted ? "nap-time vault imported" : "no vault to import"}`;
+      console.warn(`rebuild of ${id}: ${reason}`);
+      await emitStatus(entry, entry.machine.previewUrl ? "reachable" : "unsupported", reason);
       return view(entry.record);
     },
 

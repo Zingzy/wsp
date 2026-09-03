@@ -156,6 +156,22 @@ describe("serveRuntime port reach", () => {
     expect(missing["error"]).toMatch(/no such workspace/);
     c.close();
   });
+
+  it("workspaces.rebuild replies with the workspace on a fresh golden fork and the old machine is dead", async () => {
+    const backend = stubBackend();
+    srv = await serveRuntime(createRuntime({ backend, store: memoryStore(), adapters: {} }), { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const id = (created["workspace"] as { id: string }).id;
+    const res = await c.request("workspaces.rebuild", { workspaceId: id });
+    expect(res.ok).toBe(true);
+    expect(res["workspace"]).toMatchObject({ id, name: "x", machineId: "m2", phase: "running" });
+    expect(backend.machines[0]!.killed).toBe(true);
+    expect(backend.machines[1]!.spec.fromSnapshot).toBe("snap_g");
+    const missing = await c.request("workspaces.rebuild", { workspaceId: "ws_nobody" });
+    expect(missing.ok).toBe(false);
+    c.close();
+  });
 });
 
 describe("serveRuntime golden wizard ops", () => {

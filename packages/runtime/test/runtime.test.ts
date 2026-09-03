@@ -827,6 +827,57 @@ describe("runtime verified wake", () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it("rebuild forks the golden, imports the nap-time vault, kills the old machine, keeps the id and name, and pushes status", async () => {
+    const { backend, untars } = guestBackend();
+    try {
+      const store = memoryStore();
+      const rt = createRuntime({ backend, store, adapters: {} });
+      const events: EventUnion[] = [];
+      rt.events.on("*", e => events.push(e));
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "hello", memMb: 2048 });
+      const m1 = backend.machines[0]!;
+      await rt.workspaces.nap(ws.id);
+      expect(await store.getBlob("vaults", ws.id)).toEqual(Buffer.from("tarbytes"));
+      // The provider resumed it behind our back and handed back a running machine whose guest is dead.
+      m1.paused = false;
+      const rec = (await store.get("workspaces", ws.id)) as { phase: string };
+      expect(rec.phase).toBe("napping");
+
+      const rebuilt = await rt.workspaces.rebuild(ws.id);
+      expect(rebuilt).toMatchObject({ id: ws.id, name: "hello", machineId: "m2", phase: "running", golden: "snap_g" });
+      expect(m1.killed).toBe(true);
+      expect(m1.resumes).toBe(0);
+      expect(backend.machines[1]!.spec).toMatchObject({ fromSnapshot: "snap_g", memMb: 2048 });
+      expect(untars).toEqual(["m2"]);
+      expect(events.find(e => e.type === "workspace.upgraded")).toMatchObject({ workspaceId: ws.id, machineId: "m2" });
+      const last = events.filter(e => e.type === "workspace.status").at(-1) as { status: { phase: string; machineId: string; reason?: string } };
+      expect(last.status).toMatchObject({ phase: "running", machineId: "m2" });
+      expect(last.status.reason).toMatch(/rebuilt.*m1.*m2.*vault/);
+      expect((await store.get("workspaces", ws.id)) as object).toMatchObject({ machineId: "m2", phase: "running", firstLife: true });
+      expect((await rt.status.list())[0]!.reach.state).not.toBe("zombie");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("rebuild of a workspace that never napped imports nothing and says so", async () => {
+    const { backend, untars } = guestBackend();
+    try {
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+      const events: EventUnion[] = [];
+      rt.events.on("*", e => events.push(e));
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "fresh" });
+      const rebuilt = await rt.workspaces.rebuild(ws.id);
+      expect(rebuilt.machineId).toBe("m2");
+      expect(backend.machines[0]!.killed).toBe(true);
+      expect(untars).toEqual([]);
+      const last = events.filter(e => e.type === "workspace.status").at(-1) as { status: { reason?: string } };
+      expect(last.status.reason).toMatch(/rebuilt.*m1.*m2.*no vault/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
 
 describe("runtime workspace size", () => {
