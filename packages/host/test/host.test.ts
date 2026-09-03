@@ -137,7 +137,7 @@ describe("host serves the app", () => {
 
   it("carries the builder wsp init prepared so the page lands on it", async () => {
     const { rt } = testRuntime(false);
-    const builder = { id: "m_b", name: "default", kind: "sandbox" as const, createdAt: "2026-09-03T00:00:00Z" };
+    const builder = { id: "m_b", name: "default", kind: "sandbox" as const, createdAt: "2026-09-03T00:00:00Z", size: { cpu: 2, memMb: 4096 } };
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, builder });
     const html = await (await fetch(`http://127.0.0.1:${handle.port}/`)).text();
     expect(inlineScripts(html)[0]).toContain(`"builder":${JSON.stringify(builder)}`);

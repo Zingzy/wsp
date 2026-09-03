@@ -38,6 +38,8 @@ describe("manifest schema", () => {
     const formula = { rung: "tools", id: "tools/brew/mas", label: "mas", group: "Homebrew", paths: [], bytes: 0, default: "skip", reason: "no Linux bottle", linux: "no" };
     expect(ManifestEntry.parse(formula)).toEqual(formula);
     expect(LINUX).toEqual(["yes", "no", "unknown"]);
+    const pinned = { rung: "tools", id: "tools/uv/ruff", label: "ruff 0.6.3", group: "uv tools", paths: [], bytes: 0, default: "bring", linux: "yes", version: "0.6.3" };
+    expect(ManifestEntry.parse(pinned)).toEqual(pinned);
   });
 
   it.each([
@@ -52,6 +54,7 @@ describe("manifest schema", () => {
     ["a required row that defaults to skip", { ...entry, required: true, default: "skip" }],
     ["a linux marker outside yes, no, unknown", { ...entry, rung: "tools", id: "tools/brew/x", linux: "maybe" }],
     ["a linux marker on a row that is not a tool", { ...entry, linux: "yes" }],
+    ["a version on a row that is not a tool", { ...entry, version: "1.0.0" }],
   ])("rejects %s", (_name, bad) => {
     expect(ManifestEntry.safeParse(bad).success).toBe(false);
   });

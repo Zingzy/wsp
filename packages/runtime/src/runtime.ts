@@ -979,6 +979,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     name: r.name,
     kind: r.kind,
     createdAt: r.createdAt,
+    size: r.size,
     ...(r.streamUrl !== undefined ? { screen: { streamUrl: r.streamUrl } } : {}),
   });
 
@@ -1015,8 +1016,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const { deployDaemon, smoke, import: imp, ...size } = recipe;
       void smoke;
       const stage = stageOf(name);
-      // A live builder this process made from the same ticks is the re-run's
-      // machine: the stages skip on its ledger instead of booting a second one.
+      // Reuse reaches only builders this process made: one hydrated from the
+      // store is not known first-life, so it could never seal (the host lists
+      // it and refuses to boot beside it). The stages skip on the ledger of a
+      // live builder from the same ticks instead of booting a second one.
       const same = imp === undefined ? undefined : [...builders.values()].find(b => !b.stale && b.record.name === name && b.record.import?.recipeHash === imp.recipeHash);
       if (same && imp) {
         await applyGoldenImport(same.builder.machine, { import: imp, setup: recipe.setup, ...(same.record.import !== undefined ? { ledger: same.record.import } : {}), onStage: stage });

@@ -5,6 +5,7 @@
 // of every ticked agent. Nothing here touches a disk or a machine; golden.ts
 // runs the plan on the builder.
 import { createHash } from "node:crypto";
+import { join } from "node:path";
 
 /** The recipe row as this module reads it: a structural subset of the
  * collector's manifest entry, so a recipe file parses straight into it. */
@@ -20,7 +21,15 @@ export interface RecipeEntry {
   bring?: boolean;
   choice?: string;
   linux?: string;
+  /** The version the laptop runs (tools rows); the install pins it. */
+  version?: string;
 }
+
+/** What the planner's injected stat says about one laptop path. A link reports
+ * its target's kind, mode and size, and where it resolves to. */
+export type PathInfo =
+  | { kind: "file" | "dir"; mode: number; size: number; mtimeMs: number; realpath: string }
+  | { kind: "dangling"; target: string };
 
 export interface PlannedFile {
   id: string;
@@ -30,6 +39,8 @@ export interface PlannedFile {
   dest: string;
   mode: number;
   dir: boolean;
+  size: number;
+  mtimeMs: number;
 }
 
 /** A credential read from the macOS Keychain at pack time; `place` renders the
@@ -58,8 +69,9 @@ export interface FilesPlan {
 }
 
 export interface PlanFilesOptions {
+  /** This computer's home with every link in it resolved, so link targets compare against it. */
   home: string;
-  stat: (abs: string) => { mode: number; dir: boolean } | undefined;
+  stat: (abs: string) => PathInfo | undefined;
   platform: "darwin" | "linux";
   /** Guest-side prefix rewrites tried before the built-in macOS ones (a config dir the guest keeps elsewhere). */
   rewrites?: readonly [string, string][];
@@ -74,24 +86,51 @@ const MAC_REWRITES: readonly [string, string][] = [
   ["Library/Preferences/", ".config/"],
 ];
 
-const SSH_PUBLIC = /^(config|authorized_keys|allowed_signers|environment|rc|.*\.pub|.*known_hosts.*)$/;
+const SSH_PUBLIC = /^(config|authorized_keys|allowed_signers|environment|rc|.*\.pub)$/;
 
-function neverCopied(e: RecipeEntry, rel: string): string | undefined {
-  if (e.id.startsWith("identity/ssh-key")) return "private key, never copied";
-  if (e.id === "identity/gpg" || rel === ".gnupg" || rel.startsWith(".gnupg/")) return "GPG keys are never copied";
-  const m = /^\.ssh\/([^/]+)$/.exec(rel);
-  if (m && !SSH_PUBLIC.test(m[1]!)) return "private key, never copied";
+/** Paths that never travel whatever the tick says, by name; `dir` is known once the path is stat'ed. */
+export function refusedPath(rel: string, dir: boolean | undefined): string | undefined {
+  if (rel === ".gnupg" || rel.startsWith(".gnupg/")) return "GPG keys are never copied";
+  if (rel === ".ssh") return "the .ssh directory is never copied whole; tick its config and public keys";
+  if (rel.startsWith(".ssh/")) {
+    if (dir === true) return "a directory under .ssh is never copied whole";
+    const base = rel.slice(rel.lastIndexOf("/") + 1);
+    if (/known_hosts/.test(base)) return "known_hosts is never copied";
+    if (!SSH_PUBLIC.test(base)) return "private key, never copied";
+  }
   return undefined;
 }
 
-function placeGhToken(token: string, existing: string | undefined): string {
-  if (existing === undefined) return `github.com:\n    oauth_token: ${token}\n    git_protocol: https\n`;
+function neverCopied(e: RecipeEntry, rel: string, dir: boolean | undefined): string | undefined {
+  if (e.id.startsWith("identity/ssh-key")) return "private key, never copied";
+  if (e.id === "identity/gpg") return "GPG keys are never copied";
+  return refusedPath(rel, dir);
+}
+
+const under = (home: string, abs: string): boolean => abs === home || abs.startsWith(`${home}/`);
+
+/** The token goes under one host block and its users, and nowhere else; other
+ * hosts in the file keep their own lines. A file without the host gets the block appended. */
+export function placeGhToken(host: string, token: string, existing: string | undefined): string {
+  const block = `${host}:\n    oauth_token: ${token}\n    git_protocol: https\n`;
+  if (existing === undefined) return block;
   const out: string[] = [];
+  let inHost = false;
   let inUsers = false;
+  let seen = false;
   for (const line of existing.split("\n")) {
-    if (/^\s*oauth_token:/.test(line)) continue;
     const indent = line.length - line.trimStart().length;
     const key = line.trim().endsWith(":");
+    if (indent === 0 && line.trim() !== "") {
+      inHost = line.trim() === `${host}:`;
+      inUsers = false;
+      if (inHost) seen = true;
+    }
+    if (!inHost) {
+      out.push(line);
+      continue;
+    }
+    if (/^\s*oauth_token:/.test(line)) continue;
     if (indent === 4) inUsers = line.trim() === "users:";
     if (indent === 0 && key) {
       out.push(line, `    oauth_token: ${token}`);
@@ -101,14 +140,16 @@ function placeGhToken(token: string, existing: string | undefined): string {
       out.push(line);
     }
   }
-  return out.join("\n");
+  if (seen) return out.join("\n");
+  const body = out.join("\n");
+  return `${body.endsWith("\n") ? body : `${body}\n`}${block}`;
 }
 
 /** Logins whose macOS copy lives in the Keychain rather than in the files the
  * recipe lists; on Linux the same tools keep the token in the file itself. */
 const KEYCHAIN: Record<string, Omit<PlannedSecret, "id">> = {
   "logins/claude": { service: "Claude Code-credentials", dest: ".claude/.credentials.json", place: secret => secret },
-  "logins/gh": { service: "gh:github.com", dest: ".config/gh/hosts.yml", place: placeGhToken },
+  "logins/gh": { service: "gh:github.com", dest: ".config/gh/hosts.yml", place: (secret, existing) => placeGhToken("github.com", secret, existing) },
 };
 
 export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOptions): FilesPlan {
@@ -123,27 +164,45 @@ export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOption
     if (e.rung === "logins" && e.choice !== "copy") continue;
     let brought = 0;
     for (const p of e.paths) {
+      const skip = (note: string): void => void plan.skipped.push({ id: e.id, path: p, note });
       if (p.startsWith("Keychain:")) {
-        if (opts.platform !== "darwin") plan.skipped.push({ id: e.id, path: p, note: "a macOS Keychain item; sign in on the machine" });
+        if (opts.platform !== "darwin") skip("a macOS Keychain item; sign in on the machine");
         continue;
       }
       if (!p.startsWith("~/")) {
-        plan.skipped.push({ id: e.id, path: p, note: "not under your home directory" });
+        skip("not under your home directory");
         continue;
       }
       const rel = p.slice(2);
-      const blocked = neverCopied(e, rel);
-      if (blocked !== undefined) {
-        plan.skipped.push({ id: e.id, path: p, note: blocked });
-        continue;
-      }
-      const source = `${opts.home}/${rel}`;
+      const source = join(opts.home, rel);
       const st = opts.stat(source);
-      if (!st) {
-        plan.skipped.push({ id: e.id, path: p, note: "no longer on this computer" });
+      const dir = st === undefined || st.kind === "dangling" ? undefined : st.kind === "dir";
+      const blocked = neverCopied(e, rel, dir);
+      if (blocked !== undefined) {
+        skip(blocked);
         continue;
       }
-      plan.files.push({ id: e.id, source, dest: rewrite(rel), mode: st.mode & 0o7777, dir: st.dir });
+      if (!st) {
+        skip("no longer on this computer");
+        continue;
+      }
+      if (st.kind === "dangling") {
+        skip(`a link to ${st.target}, which is gone`);
+        continue;
+      }
+      if (st.realpath !== source) {
+        if (!under(opts.home, st.realpath)) {
+          skip(`a link to ${st.realpath}, outside your home directory`);
+          continue;
+        }
+        const targetRel = st.realpath.slice(opts.home.length + 1);
+        const blockedTarget = neverCopied(e, targetRel, dir === true);
+        if (blockedTarget !== undefined) {
+          skip(`a link to ~/${targetRel}: ${blockedTarget}`);
+          continue;
+        }
+      }
+      plan.files.push({ id: e.id, source, dest: rewrite(rel), mode: st.mode & 0o7777, dir: st.kind === "dir", size: st.size, mtimeMs: st.mtimeMs });
       brought++;
     }
     const keychain = opts.platform === "darwin" && e.rung === "logins" ? KEYCHAIN[e.id] : undefined;
@@ -159,15 +218,15 @@ export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOption
   return plan;
 }
 
-/** What a golden was built from, as far as the person's choices go: the ticked
- * ids and the login answers. Bytes and labels change between runs without
- * changing what should be on the machine. */
-export function recipeHash(entries: readonly RecipeEntry[]): string {
-  const ticks = entries
-    .filter(ticked)
-    .map(e => [e.id, e.choice ?? null] as const)
-    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
-  return createHash("sha256").update(JSON.stringify(ticks)).digest("hex");
+/** What a golden was built from: the ticked ids with their login answers and
+ * tool pins, and for every file that travels its size and mtime. Contents,
+ * labels and row order do not enter; a builder carrying the same hash needs
+ * nothing re-applied. */
+export function recipeHash(entries: readonly RecipeEntry[], files: readonly Pick<PlannedFile, "id" | "dest" | "size" | "mtimeMs">[] = []): string {
+  const byKey = <T extends readonly unknown[]>(rows: T[]): T[] => rows.sort((a, b) => (JSON.stringify(a) < JSON.stringify(b) ? -1 : 1));
+  const ticks = byKey(entries.filter(ticked).map(e => [e.id, e.choice ?? null, e.version ?? null] as const));
+  const shipped = byKey(files.map(f => [f.id, f.dest, f.size, f.mtimeMs] as const));
+  return createHash("sha256").update(JSON.stringify({ ticks, files: shipped })).digest("hex");
 }
 
 // --- tools -------------------------------------------------------------------
@@ -180,6 +239,8 @@ export interface ToolInstall {
   manager: ToolManager;
   /** One bash -c script; exits non-zero on failure. */
   cmd: string;
+  /** The install this one needs on the machine first; when that one did not install, this is skipped. */
+  after?: string;
 }
 
 export interface SkippedItem {
@@ -198,11 +259,12 @@ export interface Brewfile {
  * before anything runs (https://docs.brew.sh/Homebrew-on-Linux#alternative-installation). */
 export const HOMEBREW = { tag: "6.0.21", commit: "560147012b9678b42ef5e83b690f0895552d1366" } as const;
 const BREW_PREFIX = "/home/linuxbrew/.linuxbrew";
+const PNPM_HOME = "/root/.local/share/pnpm";
 
 /** Where the guest finds what the tools stage installs; each install line exports it so
  * it does not depend on the machine's own environment, and login shells get it from profile.d. */
-export const TOOLS_PATH = `/root/.local/bin:/usr/local/sbin:/usr/local/bin:${BREW_PREFIX}/bin:${BREW_PREFIX}/sbin:/root/go/bin:/root/.cargo/bin:/usr/sbin:/usr/bin:/sbin:/bin`;
-const PATH_LINE = `export PATH=${TOOLS_PATH}`;
+export const TOOLS_PATH = `/root/.local/bin:/usr/local/sbin:/usr/local/bin:${BREW_PREFIX}/bin:${BREW_PREFIX}/sbin:/root/go/bin:/root/.cargo/bin:${PNPM_HOME}:/root/.bun/bin:/usr/sbin:/usr/bin:/sbin:/bin`;
+const PATH_LINE = `export PATH=${TOOLS_PATH} PNPM_HOME=${PNPM_HOME}`;
 
 const BREW_ENV = "HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 HOMEBREW_NO_ENV_HINTS=1 HOMEBREW_NO_INSTALL_CLEANUP=1 NONINTERACTIVE=1";
 
@@ -216,7 +278,7 @@ function asLinuxbrew(cmd: string): string {
   return `su -s /bin/bash linuxbrew -c ${squote(`${BREW_ENV} ${BREW_PREFIX}/bin/brew ${cmd}`)}`;
 }
 
-function homebrewBootstrap(brewfile: string): string {
+function homebrewBootstrap(): string {
   return [
     "set -euo pipefail",
     "export DEBIAN_FRONTEND=noninteractive",
@@ -230,9 +292,6 @@ function homebrewBootstrap(brewfile: string): string {
     "  chown -R linuxbrew:linuxbrew /home/linuxbrew",
     "fi",
     `printf '%s\\n' ${squote(PATH_LINE)} > /etc/profile.d/wsp-golden.sh`,
-    "cat > /root/.Brewfile <<'WSP_BREWFILE'",
-    brewfile.trimEnd(),
-    "WSP_BREWFILE",
     `${asLinuxbrew("--version")} >/dev/null`,
   ].join("\n");
 }
@@ -259,39 +318,32 @@ export function brewfileFor(entries: readonly RecipeEntry[]): Brewfile {
   return out;
 }
 
-const MANAGER_ORDER: readonly ToolManager[] = ["npm", "pnpm", "bun", "uv", "pipx", "cargo", "go"];
+const MANAGER_ORDER: readonly Exclude<ToolManager, "brew">[] = ["npm", "pnpm", "bun", "uv", "pipx", "cargo", "go"];
 
-/** `name@version` labels (npm, pnpm, bun) and `name version` labels (uv, pipx, cargo). */
-function pinOf(e: RecipeEntry, sep: "@" | " "): string | undefined {
-  const n = name(e).slice(name(e).indexOf("/") + 1);
-  if (!e.label.startsWith(n + sep)) return undefined;
-  const v = e.label.slice(n.length + 1).trim();
-  return v === "" ? undefined : v;
-}
+/** How each manager gets onto the machine before its first tool: uv by its
+ * checksummed release, the rest as Homebrew for Linux formulae (npm rides the base Node). */
+const MANAGER_FORMULA: Record<Exclude<ToolManager, "brew" | "npm" | "uv">, string> = { pnpm: "pnpm", bun: "bun", pipx: "pipx", cargo: "rust", go: "go" };
 
 function managerCommand(e: RecipeEntry, manager: ToolManager): { cmd: string } | { note: string } {
   const pkg = e.id.slice(`tools/${manager}/`.length);
+  const v = e.version;
   switch (manager) {
     case "npm":
     case "pnpm":
     case "bun": {
-      const v = pinOf(e, "@");
       const spec = v === undefined ? pkg : `${pkg}@${v}`;
       return { cmd: manager === "npm" ? `npm install -g ${spec}` : `${manager} add -g ${spec}` };
     }
     case "uv":
     case "pipx": {
-      const v = pinOf(e, " ");
       const spec = v === undefined ? pkg : `${pkg}==${v}`;
       return { cmd: manager === "uv" ? `uv tool install ${spec}` : `pipx install ${spec}` };
     }
-    case "cargo": {
-      const v = pinOf(e, " ");
+    case "cargo":
       return { cmd: v === undefined ? `cargo install ${pkg}` : `cargo install ${pkg} --version ${v}` };
-    }
     case "go": {
-      const m = /\(([^()@\s]+@[^()\s]+)\)/.exec(e.label);
-      return m ? { cmd: `go install ${m[1]}` } : { note: "no module to install from" };
+      const m = /\(([^()@\s]+)@([^()\s]+)\)/.exec(e.label);
+      return m ? { cmd: `go install ${m[1]}@${v ?? m[2]}` } : { note: "no module to install from" };
     }
     case "brew":
       return { cmd: asLinuxbrew(`install ${pkg}`) };
@@ -309,17 +361,38 @@ export function toolInstallsFor(entries: readonly RecipeEntry[]): ToolsPlan {
   const installs: ToolInstall[] = [];
   const skipped: SkippedItem[] = [...brew.skipped];
   const withPath = (cmd: string): string => `${PATH_LINE}\n${cmd}`;
-  if (brew.taps.length + brew.formulae.length > 0) {
-    installs.push({ id: "tools/homebrew", label: "Homebrew", manager: "brew", cmd: withPath(homebrewBootstrap(brew.text)) });
-    for (const t of brew.taps) installs.push({ id: `tools/brew-tap/${t}`, label: t, manager: "brew", cmd: withPath(asLinuxbrew(`tap ${t}`)) });
-    for (const f of brew.formulae) installs.push({ id: `tools/brew/${f}`, label: f, manager: "brew", cmd: withPath(asLinuxbrew(`install ${f}`)) });
+  const rowsOf = (manager: ToolManager): RecipeEntry[] => entries.filter(e => ticked(e) && e.rung === "tools" && e.id.startsWith(`tools/${manager}/`));
+  const npmTicked = new Set(rowsOf("npm").map(e => e.id.slice("tools/npm/".length)));
+
+  // One step per manager that has rows, unless it already comes along as a formula or an npm global.
+  const managers = new Map<ToolManager, { after: string; step?: ToolInstall }>();
+  for (const manager of MANAGER_ORDER) {
+    if (manager === "npm" || rowsOf(manager).length === 0) continue;
+    const own = `tools/manager/${manager}`;
+    if (manager === "uv") {
+      managers.set(manager, { after: own, step: { id: own, label: "uv", manager: "uv", cmd: withPath(`set -euo pipefail\n${UV_INSTALL}`) } });
+      continue;
+    }
+    const formula = MANAGER_FORMULA[manager];
+    if (brew.formulae.includes(formula)) managers.set(manager, { after: `tools/brew/${formula}` });
+    else if (npmTicked.has(manager)) managers.set(manager, { after: `tools/npm/${manager}` });
+    else managers.set(manager, { after: own, step: { id: own, label: manager, manager: "brew", cmd: withPath(asLinuxbrew(`install ${formula}`)), after: "tools/homebrew" } });
+  }
+
+  if (brew.taps.length + brew.formulae.length > 0 || [...managers.values()].some(m => m.step?.manager === "brew")) {
+    installs.push({ id: "tools/homebrew", label: "Homebrew", manager: "brew", cmd: withPath(homebrewBootstrap()) });
+    for (const t of brew.taps) installs.push({ id: `tools/brew-tap/${t}`, label: t, manager: "brew", cmd: withPath(asLinuxbrew(`tap ${t}`)), after: "tools/homebrew" });
+    for (const f of brew.formulae) installs.push({ id: `tools/brew/${f}`, label: f, manager: "brew", cmd: withPath(asLinuxbrew(`install ${f}`)), after: "tools/homebrew" });
   }
   for (const manager of MANAGER_ORDER) {
-    for (const e of entries) {
-      if (!ticked(e) || e.rung !== "tools" || !e.id.startsWith(`tools/${manager}/`)) continue;
+    const rows = rowsOf(manager);
+    if (rows.length === 0) continue;
+    const m = managers.get(manager);
+    if (m?.step !== undefined) installs.push(m.step);
+    for (const e of rows) {
       const r = managerCommand(e, manager);
       if ("note" in r) skipped.push({ id: e.id, note: r.note });
-      else installs.push({ id: e.id, label: e.label, manager, cmd: withPath(r.cmd) });
+      else installs.push({ id: e.id, label: e.label, manager, cmd: withPath(r.cmd), ...(m !== undefined ? { after: m.after } : {}) });
     }
   }
   return { installs, skipped, brewfile: brew.text };
@@ -333,6 +406,8 @@ export interface AgentInstaller {
   install: string;
   /** Exits 0 once the agent is on the machine. */
   smoke: string;
+  /** The lowest Node major its package's engines field accepts; absent when it declares none. */
+  node?: number;
 }
 
 export interface AgentInstall extends AgentInstaller {
@@ -367,21 +442,65 @@ const UV_INSTALL = [
   "fi",
 ].join("\n");
 
+/** Node releases the guest may get, one per major, pinned to nodejs.org's
+ * SHASUMS256.txt entries (https://nodejs.org/dist/). */
+export const NODE_RELEASES = {
+  20: {
+    version: "20.20.2",
+    sha256: { x86_64: "19e56f0825510207dd904f087fe52faa0a4eb6b2aab5f0ea7a33830d04888b8b", aarch64: "47ef73d543ecf6eb19435f6c03a0ac4809b3bf0dd6b26c7c571efc2a6572a74d" },
+  },
+  22: {
+    version: "22.23.2",
+    sha256: { x86_64: "b294a556e639d64338823920e5866c21c02741742d2e1529ee1a225c1ec9252a", aarch64: "013b59cfd2819703a6f4a14ab891fc46fc2a4e3f5bcd92de3fb4929b43e35b30" },
+  },
+} as const;
+
+export type NodeMajor = keyof typeof NODE_RELEASES;
+
+export interface NodeRelease {
+  version: string;
+  sha256: { x86_64: string; aarch64: string };
+}
+
+/** Installs the release into /usr/local when the guest's Node major is under
+ * `floor`, and reports what it had and what it did on stdout. */
+export function nodeInstallScript(floor: number, release: NodeRelease): string {
+  const v = release.version;
+  return [
+    "node_have=\"$(node --version 2>/dev/null || echo v0)\"",
+    "node_major=\"$(printf '%s' \"$node_have\" | sed 's/^v//; s/\\..*//')\"",
+    'echo "NODE_HAVE $node_have"',
+    `if [ "\${node_major:-0}" -ge ${floor} ]; then echo "NODE_KEPT $node_have"; exit 0; fi`,
+    'arch="$(uname -m)"',
+    'case "$arch" in',
+    `  x86_64) pkg=node-v${v}-linux-x64.tar.gz sha=${release.sha256.x86_64} ;;`,
+    `  aarch64) pkg=node-v${v}-linux-arm64.tar.gz sha=${release.sha256.aarch64} ;;`,
+    '  *) echo "unsupported arch: $arch" >&2; exit 1 ;;',
+    "esac",
+    `curl -fsSL -o "/tmp/$pkg" "https://nodejs.org/dist/v${v}/$pkg"`,
+    'echo "$sha  /tmp/$pkg" | sha256sum -c - >/dev/null',
+    'tar -xzf "/tmp/$pkg" -C /usr/local --strip-components=1',
+    'rm -f "/tmp/$pkg"',
+    `echo "NODE_INSTALLED v${v}"`,
+  ].join("\n");
+}
+
 const HERMES = { tag: "v2026.8.31", commit: "29112bef099274229cadff79cdff7bf7b99c4b77" } as const;
 
 /** Every installer pins a version; npm checks the registry's integrity hash
- * for each tarball, uv is checksummed above, git checkouts compare the commit. */
+ * for each tarball, uv is checksummed above, git checkouts compare the commit.
+ * `node` is the package's engines floor, read from the registry at pin time. */
 export const AGENT_INSTALLERS: Record<string, AgentInstaller> = {
   // https://github.com/openai/codex#quickstart
-  codex: { name: "Codex", install: "npm install -g @openai/codex@0.153.0", smoke: "codex --version" },
+  codex: { name: "Codex", install: "npm install -g @openai/codex@0.153.0", smoke: "codex --version", node: 16 },
   // https://github.com/google-gemini/gemini-cli#quickstart
-  gemini: { name: "Gemini CLI", install: "npm install -g @google/gemini-cli@0.58.0", smoke: "gemini --version" },
+  gemini: { name: "Gemini CLI", install: "npm install -g @google/gemini-cli@0.58.0", smoke: "gemini --version", node: 20 },
   // https://opencode.ai/docs/#install
   opencode: { name: "OpenCode", install: "npm install -g opencode-ai@1.18.27", smoke: "opencode --version" },
   // https://aider.chat/docs/install.html (the uv tool line, with the version pinned)
   aider: { name: "Aider", install: `${UV_INSTALL}\nuv tool install --force --python 3.12 --with pip aider-chat==0.86.2`, smoke: "aider --version" },
   // https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/README.md
-  pi: { name: "Pi", install: "npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.84.4", smoke: "pi --version" },
+  pi: { name: "Pi", install: "npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.84.4", smoke: "pi --version", node: 22 },
   // https://hermes-agent.nousresearch.com/docs/developer-guide/contributing#manual-clone-fallback
   hermes: {
     name: "Hermes Agent",
@@ -399,9 +518,20 @@ export const AGENT_INSTALLERS: Record<string, AgentInstaller> = {
   },
 };
 
+/** The one Node step a golden gets when a ticked agent's engines floor may be
+ * above the base image's: the lowest pinned major that satisfies every ticked agent. */
+export interface NodeInstall {
+  floor: number;
+  version: string;
+  /** The agents whose engines asked for it, in recipe order. */
+  agents: string[];
+  cmd: string;
+}
+
 export interface AgentsPlan {
   installs: AgentInstall[];
   skipped: SkippedItem[];
+  node?: NodeInstall;
 }
 
 /** The ticked agents with an installer, in recipe order; `extra` adds or
@@ -414,6 +544,14 @@ export function agentInstallsFor(entries: readonly RecipeEntry[], extra: Record<
     const installer = table[name(e)];
     if (installer) out.installs.push({ id: e.id, ...installer });
     else out.skipped.push({ id: e.id, note: "no installer known" });
+  }
+  const floors = out.installs.filter(a => a.node !== undefined);
+  if (floors.length > 0) {
+    const floor = Math.max(...floors.map(a => a.node!));
+    const majors = (Object.keys(NODE_RELEASES).map(Number) as NodeMajor[]).sort((a, b) => a - b);
+    const major = majors.find(m => m >= floor) ?? majors.at(-1)!;
+    const release = NODE_RELEASES[major];
+    out.node = { floor, version: release.version, agents: floors.map(a => a.name), cmd: nodeInstallScript(floor, release) };
   }
   return out;
 }

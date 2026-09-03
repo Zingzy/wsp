@@ -17,7 +17,7 @@ import { loadManifest } from "../src/init-recipe.js";
 import { reduceStages, runInit, stageLine, type InitIO, type InitOptions } from "../src/init.js";
 import type { HostHandle } from "../src/server.js";
 import { FIXTURE } from "./init-fixture.js";
-import { stubBackend, type StubBackend } from "./stub-backend.js";
+import { guestAnswer, stubBackend, type StubBackend } from "./stub-backend.js";
 
 const SOLARI = "slr_live_fake_solari_key";
 const KEY = { down: "\x1b[B", space: " ", enter: "\r", esc: "\x1b" };
@@ -206,7 +206,7 @@ describe("wsp init, interactive", () => {
     expect(summary).not.toContain("id_ed25519");
     expect(summary).toMatch(/Upload\s+\d[\d.]* [KM]B, nothing has left this computer yet/);
     expect(summary).toMatch(/Installs\s+Claude Code/);
-    expect(f.backends).toHaveLength(0);
+    expect(f.backends.flatMap(b => b.machines)).toHaveLength(0);
     await f.press("y");
 
     await f.until(URL_RE);
@@ -325,7 +325,7 @@ describe("wsp init, interactive", () => {
     expect(ask).toContain(`${S_RADIO_ACTIVE} No`);
     await f.press(KEY.enter);
     expect((await run).code).toBe(1);
-    expect(f.backends).toHaveLength(0);
+    expect(f.backends.flatMap(b => b.machines)).toHaveLength(0);
     expect(f.hosts).toBe(0);
     const saved = loadManifest(join(dirs[0]!, "golden-recipe.json"));
     expect(saved.entries.filter(e => e.bring).map(e => e.id)).toContain("shell/zshrc");
@@ -516,7 +516,7 @@ describe("wsp init, flags and no terminal", () => {
     const f = fake({ yes: true });
     f.opts.runtime = recipe => {
       const backend = stubBackend();
-      backend.execImpl = (_m, cmd) => (cmd.includes("tar xzf") ? { exitCode: 2, stdout: "", stderr: "gzip: stdin: not in gzip format" } : { exitCode: 0, stdout: "", stderr: "" });
+      backend.execImpl = (_m, cmd) => (cmd.includes("tar xzf") ? { exitCode: 2, stdout: "", stderr: "gzip: stdin: not in gzip format" } : guestAnswer(cmd));
       f.backends.push(backend);
       return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
     };
@@ -527,19 +527,74 @@ describe("wsp init, flags and no terminal", () => {
     expect(f.text()).toContain("not in gzip format");
   });
 
-  it("a tool or agent that fails is a warning in the stream, not the end of the build", async () => {
-    const f = fake({ yes: true });
+  it("a tool or one of several agents that fails is a warning in the stream, named on its own line, not the end of the build", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
+    dirs.push(dir);
+    const path = join(dir, "recipe.json");
+    writeFileSync(path, JSON.stringify({ entries: FIXTURE.entries.map(e => ({ ...e, bring: e.id === "agents/codex" ? true : e.bring ?? (e.default === "bring" && e.reason === undefined) })) }));
+    const f = fake({ yes: true, manifestPath: path });
     f.opts.runtime = recipe => {
       const backend = stubBackend();
-      backend.execImpl = (_m, cmd) => (cmd.includes("brew install jq") || cmd.includes(GOLDEN_SETUP) ? { exitCode: 1, stdout: "", stderr: "curl: no route" } : { exitCode: 0, stdout: "", stderr: "" });
+      backend.execImpl = (_m, cmd) => (cmd.includes("brew install jq") || cmd.includes(GOLDEN_SETUP) ? { exitCode: 1, stdout: "", stderr: "curl: no route" } : guestAnswer(cmd));
       f.backends.push(backend);
+      f.recipes.push(recipe);
       return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
     };
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(0);
-    expect(f.text()).toMatch(/Tools installed\s+3 installed, 1 failed/);
-    expect(f.text()).toMatch(/Agents installed\s+Claude Code failed/);
-    expect(f.text()).toContain("Ready");
+    const out = f.text();
+    expect(out).toMatch(/Tools installed\s+3 installed, 1 failed/);
+    expect(out).toMatch(/Agents installed\s+Codex installed; Claude/);
+    expect(out).toContain("Ready");
+    // The stage line is cut to the width; the names come back in full under the tally.
+    const tally = out.slice(out.indexOf("Tools and agents:"));
+    expect(tally.split("\n").slice(0, 3).map(l => l.replace(/^[│◇]\s+/, ""))).toEqual([
+      expect.stringMatching(/^Tools and agents: 4 installed, 2 failed, 0 skipped; the list is in .*golden-import\.json$/),
+      "jq failed: curl: no route",
+      "Claude Code failed: curl: no route",
+    ]);
+    expect(f.recipes[0]!.import?.node).toMatchObject({ floor: 16, agents: ["Codex"] });
+  });
+
+  it("every ticked agent failing ends the build: one line per agent with its reason, the builder killed, and an offer to start over", async () => {
+    const f = fake({ yes: true });
+    f.opts.runtime = recipe => {
+      const backend = stubBackend();
+      backend.execImpl = (_m, cmd) => (cmd.includes(GOLDEN_SETUP) ? { exitCode: 1, stdout: "", stderr: "curl: (6) Could not resolve host" } : guestAnswer(cmd));
+      f.backends.push(backend);
+      return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
+    };
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(1);
+    expect(f.hosts).toBe(0);
+    const out = f.text();
+    expect(out).toContain("Installing agents failed");
+    expect(out.split("\n").map(l => l.replace(/^│\s+/, ""))).toEqual(expect.arrayContaining(["no agent installed, so there is nothing to seal:", "Claude Code: curl: (6) Could not resolve host"]));
+    expect(out).toContain("Run wsp init again to start over; the recipe is kept.");
+    expect(f.backends[0]!.machines[0]!.killed).toBe(true);
+    expect(JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8"))).toMatchObject({ agents: [{ id: "agents/claude", outcome: "failed" }] });
+  });
+
+  it("a builder from an earlier run still on the account is listed with its age and cost, and nothing boots beside it", async () => {
+    const store = memoryStore();
+    const shared = stubBackend();
+    const earlier = createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true", cpu: 2, memMb: 4096 } });
+    await earlier.golden.prepare();
+    const f = fake({ yes: true });
+    f.opts.runtime = recipe => {
+      f.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: recipe });
+    };
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(1);
+    expect(f.hosts).toBe(0);
+    const out = f.text();
+    expect(out).toContain("A builder from an earlier wsp init is still running on the account:");
+    expect(out).toMatch(/default \(m1\), \d+\.\ds old, about \$\d+\.\d\d so far/);
+    expect(out).toContain("Nothing was booted. Kill it or save it first");
+    expect(out).not.toMatch(BOOT);
+    expect(shared.machines).toHaveLength(1);
+    expect(shared.machines[0]!.killed).toBe(false);
   });
 });
 

@@ -265,7 +265,7 @@ class StageStream {
         }
       }
     }
-    if (final && this.view.failure !== undefined) out.push(`${dim(S_BAR)}  ${this.view.failure}`);
+    if (final && this.view.failure !== undefined) for (const l of this.view.failure.split("\n")) out.push(`${dim(S_BAR)}  ${l}`);
     return out;
   }
 
@@ -281,7 +281,7 @@ class StageStream {
     if (final && this.view.failure !== undefined) {
       const failed = this.view.steps.find(s => s.state === "failed");
       if (failed) this.output.write(`${styleText("red", S_STEP_ERROR)}  ${failed.fail}\n`);
-      this.output.write(`${dim(S_BAR)}  ${this.view.failure}\n`);
+      for (const l of this.view.failure.split("\n")) this.output.write(`${dim(S_BAR)}  ${l}\n`);
     }
   }
 
@@ -533,19 +533,35 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     return isLoginChoice(choice) ? { ...e, choice } : e;
   });
   const resultsPath = importResultPath(opts.statePath);
-  let installs: string | undefined;
+  let installs: string[] | undefined;
   const imp = importFor(bring, {
     home: opts.home,
     secrets: opts.secrets,
     platform: opts.platform,
     onResult: r => {
       writeFileSync(resultsPath, `${JSON.stringify(r, null, 2)}\n`);
-      const all = [...r.tools, ...r.agents];
+      const all = [...r.tools.map(t => ({ ...t, name: t.label })), ...r.agents];
       const n = (o: string) => all.filter(x => x.outcome === o).length;
-      installs = `${n("installed")} installed, ${n("failed")} failed, ${n("skipped")} skipped; the list is in ${resultsPath}`;
+      installs = [
+        `Tools and agents: ${n("installed")} installed, ${n("failed")} failed, ${n("skipped")} skipped; the list is in ${resultsPath}`,
+        ...all.filter(x => x.outcome === "failed").map(x => dim(`${x.name} failed: ${x.note ?? "no reason given"}`)),
+      ];
     },
   });
   const recipe = goldenRecipeFor(bring, opts.keys, { import: imp });
+  const rt = opts.runtime(recipe);
+  // A builder from an earlier run cannot be reused (its first life is not known) and is
+  // never reaped from here: the person kills or saves it, then runs init again.
+  const earlier = await rt.golden.builders();
+  if (earlier.length > 0) {
+    const lines = earlier.map(b => {
+      const hours = Math.max(0, Date.now() - Date.parse(b.createdAt)) / 3_600_000;
+      return `${b.name} (${b.id}), ${fmtDuration(hours * 3_600_000)} old, about $${(hours * opts.pricing.rateUsdPerHour(b.size)).toFixed(2)} so far`;
+    });
+    log.warn(["A builder from an earlier wsp init is still running on the account:", ...lines].join("\n"), out);
+    cancel("Nothing was booted. Kill it or save it first (the Solari console lists it), then run wsp init again.", out);
+    return { code: 1 };
+  }
   const question = bootQuestion(recipe, opts.pricing);
   if (interactive) {
     const go = await confirm({ message: `${question}\nNo costs nothing and keeps the recipe for wsp init --manifest.`, initialValue: false, input: io.input, output: io.output });
@@ -557,7 +573,6 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     log.step(`${question} Taken as yes (${opts.yes ? "--yes" : "no terminal"}).`, out);
   }
 
-  const rt = opts.runtime(recipe);
   const stream = new StageStream(io.output, io.isTTY);
   const off = rt.events.on("golden.stage", e => {
     if (e.type === "golden.stage") stream.push({ type: "golden.stage", name: e.name, stage: e.stage, ...(e.detail !== undefined ? { detail: e.detail } : {}) });
@@ -580,12 +595,12 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     const view = stream.stop();
     off();
     if (view.failure === undefined) log.error(e instanceof Error ? e.message : String(e), out);
-    outro("That machine is gone. Run wsp init again.", out);
+    outro("That machine is gone. Run wsp init again to start over; the recipe is kept.", out);
     return { code: 1 };
   }
   stream.stop();
   off();
-  if (installs !== undefined) log.info(`Tools and agents: ${installs}`, out);
+  if (installs !== undefined) log.info(installs.join("\n"), out);
 
   const checklist = checklistFor(manifest, choices);
   const handle = await opts.host(rt, builder, checklist);

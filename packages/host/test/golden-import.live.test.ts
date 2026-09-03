@@ -73,10 +73,12 @@ describe.runIf(LIVE)("golden import (live: apply a trimmed recipe, seal, fork, p
         "creating", "deploying-daemon", "deploying-daemon",
         "applying-setup", "applying-setup", "uploading-files", "uploading-files",
         "installing-tools", "installing-tools", "installing-tools",
-        "installing-harness", "installing-harness", "installing-harness", "installing-harness",
+        // bare harness line, the Node step (asked for and kept or installed), Claude, Codex, summary
+        "installing-harness", "installing-harness", "installing-harness", "installing-harness", "installing-harness", "installing-harness",
         "ready",
       ]);
       const uploadFrame = stages.find(s => s.stage === "uploading-files" && /in [\d.]+s$/.test(s.detail ?? ""));
+      expect(stages.some(s => s.stage === "installing-harness" && /^Node v\S+ (kept|installed)/.test(s.detail ?? ""))).toBe(true);
       expect(result?.tools.find(t => t.id === "tools/brew/jq")?.outcome).toBe("installed");
       expect(result?.agents.find(a => a.id === "agents/codex")?.outcome).toBe("installed");
 

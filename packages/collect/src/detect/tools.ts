@@ -180,7 +180,7 @@ async function goRows(host: Host): Promise<ManifestEntry[]> {
     const mod = parseGoVersionM((await host.exec.run("go", ["version", "-m", `${bin}/${name}`])) ?? "");
     rows.push(mod === undefined
       ? item({ rung: "tools", id: `tools/go/${name}`, label: `${name} (no module info)`, group: "Go binaries", default: "skip", linux: "yes" })
-      : item({ rung: "tools", id: `tools/go/${name}`, label: `${name} (${mod.path}@${mod.version})`, group: "Go binaries", linux: "yes" }));
+      : item({ rung: "tools", id: `tools/go/${name}`, label: `${name} (${mod.path}@${mod.version})`, group: "Go binaries", linux: "yes", version: mod.version }));
   }
   return rows;
 }
@@ -197,7 +197,7 @@ export async function detectTools(host: Host): Promise<ManifestEntry[]> {
     if (!(await host.exec.which(g.bin))) continue;
     const out = await host.exec.run(g.bin, g.args);
     for (const p of g.parse(out ?? "")) {
-      rows.push(item({ rung: "tools", id: `tools/${g.id}/${p.name}`, label: versioned(p, g.sep), group: g.group, linux: "yes" }));
+      rows.push(item({ rung: "tools", id: `tools/${g.id}/${p.name}`, label: versioned(p, g.sep), group: g.group, linux: "yes", ...(p.version !== undefined ? { version: p.version } : {}) }));
     }
   }
   rows.push(...(await goRows(host)));

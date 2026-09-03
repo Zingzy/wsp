@@ -270,6 +270,8 @@ export const GoldenBuilderView = z.object({
   name: z.string(),
   kind: MachineKind,
   createdAt: z.string(),
+  /** What the provider built, so a builder left running can be priced. */
+  size: z.object({ cpu: z.number(), memMb: z.number() }),
   screen: z.object({ streamUrl: z.string() }).optional(),
 });
 export type GoldenBuilderView = z.infer<typeof GoldenBuilderView>;
