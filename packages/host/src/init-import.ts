@@ -20,6 +20,7 @@ import {
   type ImportResult,
   type PackedFiles,
   type PathInfo,
+  type PlannedFile,
   type PlannedSecret,
   type SkippedPath,
 } from "@wsp/engine";
@@ -94,16 +95,27 @@ const resolved = (abs: string): string | undefined => {
   }
 };
 
-/** A parent directory the pack created keeps the mode of the laptop directory it stands
- * for, paired from the end since a rewrite may change the depth (~/Library/Application
- * Support/x lands at .config/x, ~/.claude at .claude-cfg); the umask decides nothing. */
-function keepParentModes(stage: string, source: string, dest: string, home: string): void {
-  const laptop = relative(home, source).split("/").slice(0, -1);
-  const guest = dest.split("/").slice(0, -1);
-  for (let back = 1; back <= Math.min(laptop.length, guest.length); back++) {
-    const info = statOf(join(home, ...laptop.slice(0, laptop.length - back + 1)));
-    if (info !== undefined && info.kind === "dir") chmodSync(join(stage, ...guest.slice(0, guest.length - back + 1)), info.mode);
+/** The laptop directory each guest parent directory stands for, paired from the end since a
+ * rewrite may change the depth (~/Library/Application Support/x lands at .config/x, ~/.claude at
+ * .claude-cfg). A guest directory several laptop directories map onto takes the one with the same
+ * relative path, else the mode when they all agree, else the umask; tick order never decides. */
+function parentModes(files: readonly PlannedFile[], home: string): Map<string, number> {
+  const sources = new Map<string, Set<string>>();
+  for (const f of files) {
+    const laptop = relative(home, f.source).split("/").slice(0, -1);
+    const guest = f.dest.split("/").slice(0, -1);
+    for (let back = 1; back <= Math.min(laptop.length, guest.length); back++) {
+      const g = guest.slice(0, guest.length - back + 1).join("/");
+      (sources.get(g) ?? sources.set(g, new Set()).get(g)!).add(laptop.slice(0, laptop.length - back + 1).join("/"));
+    }
   }
+  const modes = new Map<string, number>();
+  for (const [g, from] of sources) {
+    const pick = from.has(g) ? [g] : [...from];
+    const found = pick.map(rel => statOf(join(home, rel))).filter((i): i is PathInfo & { kind: "dir" } => i !== undefined && i.kind === "dir");
+    if (found.length > 0 && found.every(i => i.mode === found[0]!.mode)) modes.set(g, found[0]!.mode);
+  }
+  return modes;
 }
 
 export interface PackOptions {
@@ -123,10 +135,17 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
   const tgz = join(out, "files.tgz");
   const skipped: SkippedPath[] = [];
   try {
-    for (const f of plan.files) {
+    // A login whose Keychain item was not read was changed to a sign-in on the machine: none of its files travel.
+    const refused = new Set(plan.secrets.filter(s => !opts.secrets.has(s.service)).map(s => s.id));
+    const files = plan.files.filter(f => {
+      if (!refused.has(f.id)) return true;
+      skipped.push({ id: f.id, path: `~/${relative(opts.home, f.source)}`, note: "not read from the Keychain; sign in on the machine" });
+      return false;
+    });
+    const modes = parentModes(files, opts.home);
+    for (const f of files) {
       const target = join(stage, f.dest);
       mkdirSync(dirname(target), { recursive: true });
-      keepParentModes(stage, f.source, f.dest, opts.home);
       // Directories this copy has walked, by realpath: a link back to any of them would loop the walk.
       const entered = new Set<string>();
       const keep = (src: string): boolean => {
@@ -166,6 +185,7 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
       writeFileSync(target, s.place(secret, existing), { mode: 0o600 });
       chmodSync(target, 0o600);
     }
+    for (const [g, mode] of modes) if (existsSync(join(stage, g))) chmodSync(join(stage, g), mode);
     if (existsSync(join(stage, ".ssh"))) chmodSync(join(stage, ".ssh"), 0o700);
     const unpacked = treeBytes(stage);
     // tar truncates an existing archive in place, so the mode set here is the one it keeps.

@@ -464,6 +464,8 @@ describe("wsp init, flags and no terminal", () => {
         throw new Error(`Command failed: security find-generic-password -s ${service} -w\nsecurity: SecKeychainSearchCopyNext: User canceled the operation.\n`);
       },
     };
+    mkdirSync(join(f.opts.home, ".config", "gh"), { recursive: true });
+    writeFileSync(join(f.opts.home, ".config", "gh", "hosts.yml"), "github.com:\n    user: Zingzy\n");
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(0);
     const out = f.text();
@@ -477,8 +479,12 @@ describe("wsp init, flags and no terminal", () => {
     expect(f.checklists[0]).toEqual(expect.arrayContaining([{ label: "GitHub CLI login", command: "gh auth login" }]));
     const log = f.backends[0]!.machines[0]!.execLog;
     expect(log.some(c => c.includes("tar xzf"))).toBe(true);
+    // The refused row travels with none of its files: hosts.yml stays home, and the saved list says so for both paths.
     const skipped = JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8")).files.skipped as { id: string; path: string; note: string }[];
-    expect(skipped.filter(s => s.path.startsWith("Keychain:"))).toEqual([{ id: "logins/gh", path: "Keychain: gh:github.com", note: "not read from the Keychain; sign in on the machine" }]);
+    expect(skipped.filter(s => s.id === "logins/gh")).toEqual([
+      { id: "logins/gh", path: "~/.config/gh/hosts.yml", note: "not read from the Keychain; sign in on the machine" },
+      { id: "logins/gh", path: "Keychain: gh:github.com", note: "not read from the Keychain; sign in on the machine" },
+    ]);
   });
 
   it("a gh row that carries hosts.yml alone copies the file and never asks the Keychain", async () => {
@@ -497,19 +503,32 @@ describe("wsp init, flags and no terminal", () => {
     expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8")).files.skipped).toEqual([]);
   });
 
-  it("when every ticked agent has no installer the build stops before the seal and names it", async () => {
+  it("when no ticked agent can be installed the run is refused before the boot question, naming each agent", async () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
     dirs.push(dir);
     const path = join(dir, "recipe.json");
     const zed = { rung: "agents", id: "agents/zed", label: "Zed", paths: [], bytes: 0, default: "bring", bring: true };
-    writeFileSync(path, JSON.stringify({ entries: [...FIXTURE.entries.map(e => ({ ...e, bring: e.id === "identity/git-user" })), zed] }));
+    // gh is ticked as copy with its Keychain item, so a read would be asked for if the refusal came later.
+    writeFileSync(path, JSON.stringify({ entries: [...FIXTURE.entries.map(e => (e.id === "logins/gh" ? { ...e, bring: true, choice: "copy" } : { ...e, bring: e.id === "identity/git-user" })), zed] }));
     const f = fake({ yes: true, manifestPath: path });
+    f.opts.secrets = {
+      read: async service => {
+        f.reads.push(service);
+        throw new Error("security: User canceled the operation.");
+      },
+    };
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(1);
     expect(f.hosts).toBe(0);
-    expect(f.text()).toContain("Zed: no installer known");
-    expect(f.text()).toContain("That machine is gone.");
-    expect(f.backends[0]!.machines[0]!.killed).toBe(true);
+    const out = f.text();
+    expect(out).toContain("Zed: no installer known");
+    expect(out).toContain("Nothing was booted. Untick those agents or add one with an installer");
+    expect(out).not.toMatch(BOOT);
+    expect(f.backends.flatMap(b => b.machines)).toHaveLength(0);
+    // The refusal is a free exit before any consent dialog: the Keychain was never asked and the recipe keeps its answers.
+    expect(f.reads).toEqual([]);
+    expect(out).not.toContain("Keychain read failed");
+    expect(loadManifest(join(dirname(f.opts.statePath), "golden-recipe.json")).entries.find(e => e.id === "logins/gh")?.choice).toBe("copy");
   });
 
   it("a create the provider refuses ends with nothing booted, not a machine gone", async () => {

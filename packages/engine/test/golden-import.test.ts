@@ -205,6 +205,12 @@ describe("planFiles: which laptop files travel and where they land", () => {
     expect(p.skipped).toEqual([]);
   });
 
+  it("the Keychain: prefix is read whatever its case, as the collector's claims are", () => {
+    const p = plan([row({ rung: "logins", id: "logins/gh", paths: ["keychain:gh:github.com"], choice: "copy" })]);
+    expect(p.secrets.map(s => [s.id, s.service, s.dest])).toEqual([["logins/gh", "gh:github.com", ".config/gh/hosts.yml"]]);
+    expect(p.skipped).toEqual([]);
+  });
+
   it("a Keychain: path for a login the table has no reader for is a note, not a silent drop", () => {
     const p = plan([row({ rung: "logins", id: "logins/glab", paths: ["Keychain: glab:gitlab.com"], choice: "copy" })]);
     expect(p.secrets).toEqual([]);

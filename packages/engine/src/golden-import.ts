@@ -169,8 +169,9 @@ export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOption
     let brought = 0;
     for (const p of e.paths) {
       const skip = (note: string): void => void plan.skipped.push({ id: e.id, path: p, note });
-      if (p.startsWith("Keychain:")) {
-        const service = p.slice("Keychain:".length).trim();
+      const keychainPath = /^keychain:\s*(.+)$/i.exec(p);
+      if (keychainPath !== null) {
+        const service = keychainPath[1]!.trim();
         const keychain = KEYCHAIN[service];
         if (opts.platform !== "darwin") skip("a macOS Keychain item; sign in on the machine");
         else if (keychain === undefined) skip("no Keychain reader for this login yet; sign in on the machine");

@@ -196,6 +196,40 @@ describe("packPlan", () => {
     expect(modeOf(".config/com.vercel.cli")).toMatch(/^drwx------/);
   });
 
+  it("a login whose Keychain item was not read travels with none of its files, so the warn about signing in on the machine is true", async () => {
+    const home = laptop();
+    const plan = planFiles(
+      [
+        row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"], choice: "copy" }),
+        row({ rung: "identity", id: "identity/git-user", paths: ["~/.gitconfig"] }),
+      ],
+      { home, stat: statOf, platform: "darwin" },
+    );
+    expect(plan.files.map(f => f.dest)).toEqual([".config/gh/hosts.yml", ".gitconfig"]);
+    const packed = await packPlan(plan, { secrets: new Map(), home });
+    expect(listTar(packed.tar).map(e => e.path).filter(p => p !== "")).toEqual([".gitconfig"]);
+    expect(packed.skipped).toEqual([
+      { id: "logins/gh", path: "~/.config/gh/hosts.yml", note: "not read from the Keychain; sign in on the machine" },
+      { id: "logins/gh", path: "Keychain: gh:github.com", note: "not read from the Keychain; sign in on the machine" },
+    ]);
+  });
+
+  it("a guest directory two laptop directories map onto takes the same-named one's mode whatever the tick order", async () => {
+    for (const order of ["gh first", "vercel first"]) {
+      const home = laptop();
+      chmodSync(join(home, ".config"), 0o755);
+      mkdirSync(join(home, "Library", "Application Support", "com.vercel.cli"), { recursive: true });
+      chmodSync(join(home, "Library", "Application Support"), 0o700);
+      writeFileSync(join(home, "Library", "Application Support", "com.vercel.cli", "auth.json"), "{}\n");
+      const gh = row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml"], choice: "copy" });
+      const vercel = row({ rung: "logins", id: "logins/vercel", paths: ["~/Library/Application Support/com.vercel.cli/auth.json"], choice: "copy" });
+      const plan = planFiles(order === "gh first" ? [gh, vercel] : [vercel, gh], { home, stat: statOf, platform: "darwin" });
+      const packed = await packPlan(plan, { secrets: new Map(), home });
+      const mode = listTar(packed.tar).find(e => e.path === ".config/")?.mode;
+      expect(mode, order).toMatch(/^drwxr-xr-x/);
+    }
+  });
+
   it("readSecrets asks the reader once per Keychain login and turns a failed read into a refusal that carries security's reason", async () => {
     const rows = [
       row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"], choice: "copy" }),

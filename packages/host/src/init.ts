@@ -566,6 +566,12 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     cancel("Nothing was booted. Kill it first (the Solari console lists it); a builder cannot be sealed after a restart. Then run wsp init again.", out);
     return { code: 1 };
   }
+  // A free exit, before any consent dialog: a recipe whose ticked agents none can install is refused here, not on the builder.
+  if (imp.agents.length === 0 && (imp.skippedAgents?.length ?? 0) > 0) {
+    log.error(["No ticked agent can be installed, so there would be nothing to seal:", ...imp.skippedAgents!.map(a => `${a.name}: ${a.note}`)].join("\n"), out);
+    cancel("Nothing was booted. Untick those agents or add one with an installer, then run wsp init again.", out);
+    return { code: 1 };
+  }
   // Keychain consent is asked here, before anything boots and after every road that cancels the
   // run, so a refusal costs no machine: the row turns into a sign-in on the machine and the pack
   // finds no value for it.
