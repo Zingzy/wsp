@@ -1,0 +1,18 @@
+{
+  "license": "AGPL-3.0-only",
+  "notice": "wsp's own catalog entries for tools mackup does not cover, same shape as catalog.json: paths are $HOME-relative, xdg paths are $XDG_CONFIG_HOME-relative.",
+  "entries": [
+    {"id":"gh","name":"GitHub CLI","paths":[],"xdg":["gh/config.yml","gh/hosts.yml"]},
+    {"id":"gcloud","name":"Google Cloud CLI","paths":[],"xdg":["gcloud/configurations","gcloud/active_config","gcloud/credentials.db","gcloud/access_tokens.db","gcloud/legacy_credentials","gcloud/application_default_credentials.json"]},
+    {"id":"wrangler","name":"Cloudflare Wrangler","paths":["Library/Preferences/.wrangler/config/default.toml",".wrangler/config/default.toml"],"xdg":[".wrangler/config/default.toml"]},
+    {"id":"vercel","name":"Vercel CLI","paths":["Library/Application Support/com.vercel.cli/auth.json","Library/Application Support/com.vercel.cli/config.json",".local/share/com.vercel.cli/auth.json",".local/share/com.vercel.cli/config.json"],"xdg":[]},
+    {"id":"fly","name":"Fly.io CLI","paths":[".fly/config.yml"],"xdg":[]},
+    {"id":"supabase","name":"Supabase CLI","paths":[".supabase/access-token"],"xdg":[]},
+    {"id":"doppler","name":"Doppler CLI","paths":[".doppler/.doppler.yaml"],"xdg":[]},
+    {"id":"railway","name":"Railway CLI","paths":[".railway/config.json"],"xdg":[]},
+    {"id":"glab","name":"GitLab CLI","paths":[],"xdg":["glab-cli/config.yml","glab-cli/aliases.yml"]},
+    {"id":"uv","name":"uv","paths":[],"xdg":["uv/uv.toml"]},
+    {"id":"bun","name":"Bun","paths":[".bunfig.toml"],"xdg":[]},
+    {"id":"atuin","name":"Atuin","paths":[".local/share/atuin/key",".local/share/atuin/session"],"xdg":["atuin/config.toml"]}
+  ]
+}
