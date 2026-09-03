@@ -12,8 +12,11 @@ import {
   reap,
   refreshPreviewToken,
   sealGolden,
+  applyGoldenImport,
   type Builder,
   type BuildGoldenOptions,
+  type GoldenImport,
+  type ImportLedger,
   type ExecResult,
   type GoldenManifest,
   type GoldenVersion,
@@ -156,6 +159,8 @@ export interface GoldenRecipe {
   labels?: Record<string, string>;
   /** A returned string rides the deploying-daemon stage as its detail (the guest's Node version). */
   deployDaemon?: (machine: Machine) => Promise<void | string>;
+  /** The person's files, tools and agents from the saved recipe; applied after the daemon, before the harness. */
+  import?: GoldenImport;
 }
 
 export interface RuntimeOptions {
@@ -327,6 +332,8 @@ interface BuilderRecord {
   createdAt: string;
   size: WorkspaceSize;
   streamUrl?: string;
+  /** What of the recipe this builder carries; a prepare with the same recipe hash reuses it. */
+  import?: ImportLedger;
 }
 
 interface LiveBuilder {
@@ -677,7 +684,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const record: BuilderRecord = { ...stored, size: stored.size ?? sizeBuilt(await shapeOf(machine), backend.pricing.defaultSize) };
         builders.set(record.id, {
           record,
-          builder: { machine, kind: record.kind, baseTemplate: record.baseTemplate, setupSha: record.setupSha, createdAt: record.createdAt, firstLife: false, size: record.size },
+          builder: {
+            machine, kind: record.kind, baseTemplate: record.baseTemplate, setupSha: record.setupSha, createdAt: record.createdAt, firstLife: false, size: record.size,
+            ...(record.import !== undefined ? { import: record.import } : {}),
+          },
           stale: true,
         });
       }
@@ -1002,15 +1012,25 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await ready();
       const recipe = recipeOrThrow();
       const name = o?.name ?? "default";
-      const { deployDaemon, smoke, ...size } = recipe;
+      const { deployDaemon, smoke, import: imp, ...size } = recipe;
       void smoke;
+      const stage = stageOf(name);
+      // A live builder this process made from the same ticks is the re-run's
+      // machine: the stages skip on its ledger instead of booting a second one.
+      const same = imp === undefined ? undefined : [...builders.values()].find(b => !b.stale && b.record.name === name && b.record.import?.recipeHash === imp.recipeHash);
+      if (same && imp) {
+        await applyGoldenImport(same.builder.machine, { import: imp, setup: recipe.setup, ...(same.record.import !== undefined ? { ledger: same.record.import } : {}), onStage: stage });
+        stage("ready");
+        return builderView(same.record);
+      }
       const builder = await prepareBuilder({
         backend,
         ...size,
         ...(o?.kind !== undefined ? { kind: o.kind } : {}),
         ...(deployDaemon !== undefined ? { deployDaemon } : {}),
+        ...(imp !== undefined ? { import: imp } : {}),
         labels: { ...recipe.labels, wsp: "1", "wsp-builder": "1", createdAt: new Date().toISOString() },
-        onStage: stageOf(name),
+        onStage: stage,
       });
       const record: BuilderRecord = {
         id: builder.machine.id,
@@ -1021,6 +1041,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         createdAt: builder.createdAt,
         size: builder.size,
         ...(builder.machine.streamUrl !== undefined ? { streamUrl: builder.machine.streamUrl } : {}),
+        ...(builder.import !== undefined ? { import: builder.import } : {}),
       };
       builders.set(record.id, { record, builder, stale: false });
       await store.put(BUILDERS, record.id, record);

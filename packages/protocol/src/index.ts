@@ -277,6 +277,9 @@ export type GoldenBuilderView = z.infer<typeof GoldenBuilderView>;
 export const GoldenStage = z.enum([
   "creating",
   "deploying-daemon",
+  "applying-setup",
+  "uploading-files",
+  "installing-tools",
   "installing-harness",
   "ready",
   "snapshotting",

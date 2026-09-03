@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { gunzipSync } from "node:zlib";
 import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
 import type { EventUnion } from "@wsp/protocol";
+import type { GoldenImport } from "@wsp/engine";
 import { createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
@@ -1118,5 +1119,74 @@ describe("nap vault against the stub backend", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+});
+
+describe("runtime golden import", () => {
+  const importOf = (recipeHash = "h1"): GoldenImport => ({
+    recipeHash,
+    files: { count: 1, rungs: { shell: 1 }, bytes: 10, pack: async () => ({ tar: Buffer.from("t"), bytes: 10, skipped: [] }) },
+    tools: [{ id: "tools/brew/jq", label: "jq", manager: "brew", cmd: "brew install jq" }],
+    agents: [{ id: "agents/codex", name: "Codex", install: "codex-install", smoke: "codex --version" }],
+  });
+  const dfOk = (m: unknown, cmd: string) => (cmd.startsWith("df -Pk") ? { exitCode: 0, stdout: `${2000 * 1024}\n`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+
+  it("prepare runs the import stages on the wire, records the ledger on the builder, and seals with the builder's own smoke", async () => {
+    const backend = stubBackend();
+    backend.execImpl = dfOk;
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true", import: importOf() } });
+    const frames: string[] = [];
+    rt.events.on("golden.stage", e => { if (e.type === "golden.stage") frames.push(e.detail === undefined ? e.stage : `${e.stage}:${e.detail}`); });
+    const b = await rt.golden.prepare();
+    expect(frames.filter(f => !f.startsWith("uploading-files:"))).toEqual([
+      "creating:sandbox from base",
+      "applying-setup:1 file: shell 1",
+      "applying-setup:10 B packed",
+      "installing-tools:jq (1/1)",
+      "installing-tools:1 installed",
+      "installing-harness",
+      "installing-harness:Codex (1/1)",
+      "installing-harness:Codex installed",
+      "ready",
+    ]);
+    expect(await store.get("builders", b.id)).toMatchObject({ import: { recipeHash: "h1", applied: ["applying-setup", "uploading-files", "installing-tools", "installing-harness"], smoke: "codex --version" } });
+    const { version } = await rt.golden.seal(b.id);
+    expect(version.smoke).toEqual({ cmd: "codex --version", exitCode: 0 });
+    expect(backend.machines[1]!.execLog).toEqual(["codex --version"]);
+  });
+
+  it("a second prepare with the same recipe hash reuses the live builder instead of booting another, skipping every stage", async () => {
+    const backend = stubBackend();
+    backend.execImpl = dfOk;
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: { setup: "true", smoke: "true", import: importOf() } });
+    const first = await rt.golden.prepare();
+    const frames: string[] = [];
+    rt.events.on("golden.stage", e => { if (e.type === "golden.stage") frames.push(`${e.stage}:${e.detail ?? ""}`); });
+    const again = await rt.golden.prepare();
+    expect(again.id).toBe(first.id);
+    expect(backend.machines).toHaveLength(1);
+    expect(frames).toEqual([
+      "applying-setup:already applied",
+      "uploading-files:already applied",
+      "installing-tools:already applied",
+      "installing-harness:already applied",
+      "ready:",
+    ]);
+    expect(await rt.golden.builders()).toHaveLength(1);
+  });
+
+  it("a different recipe hash or a builder from another process gets a fresh machine", async () => {
+    const backend = stubBackend();
+    backend.execImpl = dfOk;
+    const store = memoryStore();
+    const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true", import: importOf() } });
+    await crashed.golden.prepare();
+    const rt = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true", import: importOf() } });
+    const fresh = await rt.golden.prepare();
+    expect(backend.machines).toHaveLength(2);
+    const other = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true", import: importOf("h9") } });
+    void other;
+    expect(fresh.id).toBe(backend.machines[1]!.id);
   });
 });

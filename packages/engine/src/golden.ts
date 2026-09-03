@@ -8,8 +8,10 @@
 
 import { createHash } from "node:crypto";
 import type { GoldenManifest, GoldenStage, GoldenVersion } from "@wsp/protocol";
+import type { AgentInstall, SkippedPath, ToolInstall } from "./golden-import.js";
 import { assertFirstLife } from "./lifecycle.js";
-import type { Machine, MachineBackend, MachineKind, MachineState } from "./machine.js";
+import type { ExecResult, Machine, MachineBackend, MachineKind, MachineState } from "./machine.js";
+import { importInto } from "./vault.js";
 
 export type { GoldenManifest, GoldenStage, GoldenVersion };
 
@@ -95,6 +97,10 @@ export interface PrepareBuilderOptions extends MachineSize {
   /** Harness install; its sha is recorded in the manifest. */
   setup: string;
   setupTimeoutMs?: number;
+  /** The person's files, tools and agents, applied between the daemon and the harness. */
+  import?: GoldenImport;
+  /** The upload's transport; tests inject one. */
+  fetch?: typeof globalThis.fetch;
   onStage?: StageListener;
 }
 
@@ -109,6 +115,247 @@ export interface Builder {
   readonly firstLife: boolean;
   /** What the provider built, read back after create (it may clamp the request); the sealed version records it. */
   readonly size: { cpu: number; memMb: number };
+  /** What of the recipe is on this machine; absent when it was built without an import. */
+  readonly import?: ImportLedger;
+}
+
+// --- golden import: the person's files, tools and agents on the builder ------
+
+export interface PackedFiles {
+  tar: Buffer;
+  bytes: number;
+  skipped: SkippedPath[];
+}
+
+export interface GoldenImport {
+  /** Identifies the ticks this plan came from; a builder carrying the same hash needs nothing re-applied. */
+  recipeHash: string;
+  /** Absent when no file was ticked. `pack` reads this computer and builds the archive; it runs on applying-setup. */
+  files?: {
+    count: number;
+    rungs: Record<string, number>;
+    bytes: number;
+    pack: () => Promise<PackedFiles>;
+  };
+  tools: ToolInstall[];
+  agents: AgentInstall[];
+  onResult?: (result: ImportResult) => void;
+}
+
+export type ImportStage = "applying-setup" | "uploading-files" | "installing-tools" | "installing-harness";
+
+export interface ImportLedger {
+  recipeHash: string;
+  applied: ImportStage[];
+  /** The version checks of the agents that installed, joined; the seal runs this on the fork. */
+  smoke: string;
+}
+
+export interface ToolResult {
+  id: string;
+  label: string;
+  outcome: "installed" | "failed" | "skipped";
+  note?: string;
+  ms?: number;
+}
+
+export interface AgentResult {
+  id: string;
+  name: string;
+  outcome: "installed" | "failed";
+  note?: string;
+  ms: number;
+}
+
+export interface ImportResult {
+  recipeHash: string;
+  files?: { bytes: number; skipped: SkippedPath[] };
+  tools: ToolResult[];
+  agents: AgentResult[];
+}
+
+export interface ApplyImportOptions {
+  import?: GoldenImport;
+  setup: string;
+  setupTimeoutMs?: number;
+  /** Stages this builder already carries; those for the same recipe hash are skipped. */
+  ledger?: ImportLedger;
+  fetch?: typeof globalThis.fetch;
+  onStage?: StageListener;
+}
+
+const FREE_KB_CMD = "df -Pk /root | awk 'NR==2{print $4}'";
+const MIB = 1024 * 1024;
+/** Extraction needs the archive and its contents at once, plus what the agents install after. */
+const UPLOAD_HEADROOM = 256 * MIB;
+/** The Claude installer peaks near 410 MB and every other agent adds to it; tools stop before eating into it. */
+const TOOLS_DISK_FLOOR = 800 * MIB;
+const TOOL_TIMEOUT_S = 600;
+const AGENT_TIMEOUT_S = 900;
+const IMPORT_STAGES: readonly ImportStage[] = ["applying-setup", "uploading-files", "installing-tools", "installing-harness"];
+
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < MIB) return `${(n / 1024).toFixed(1)} KB`;
+  return `${Math.round(n / MIB)} MB`;
+}
+
+function squote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+/** The last line the command printed, for a warning; a 124 exit is the guest-side timeout. */
+function reasonOf(res: ExecResult, timeoutS: number): string {
+  if (res.exitCode === 124) return `timed out after ${timeoutS}s`;
+  const lines = `${res.stderr}\n${res.stdout}`.split("\n").map(l => l.trim()).filter(l => l !== "");
+  return (lines.at(-1) ?? `exit ${res.exitCode}`).slice(0, 160);
+}
+
+async function freeBytes(machine: Machine): Promise<number | undefined> {
+  const res = await machine.exec(FREE_KB_CMD, { timeoutMs: 30_000 });
+  const kb = Number(res.stdout.trim());
+  return res.exitCode === 0 && Number.isFinite(kb) && kb > 0 ? kb * 1024 : undefined;
+}
+
+// The guest kills a runaway install itself (timeout), so a tool that hangs
+// never leaves a second one racing it for the same lock.
+function guarded(script: string, timeoutS: number): string {
+  return `timeout -k 10 ${timeoutS} bash -c ${squote(script)}`;
+}
+
+/** Runs the import stages and the harness on a builder, skipping what the
+ * ledger says is already there for the same recipe. Files and upload fail the
+ * build; each tool and agent fails alone and is named in the stage detail. */
+export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptions): Promise<{ ledger: ImportLedger; result: ImportResult }> {
+  const stage = opts.onStage ?? (() => {});
+  const imp = opts.import ?? { recipeHash: "", tools: [], agents: [] };
+  const prior = opts.ledger?.recipeHash === imp.recipeHash ? opts.ledger : undefined;
+  const ledger: ImportLedger = { recipeHash: imp.recipeHash, applied: [...(prior?.applied ?? [])], smoke: prior?.smoke ?? "true" };
+  const result: ImportResult = { recipeHash: imp.recipeHash, tools: [], agents: [] };
+  const done = (s: ImportStage): boolean => ledger.applied.includes(s);
+  const mark = (s: ImportStage): void => {
+    if (!done(s)) ledger.applied.push(s);
+  };
+  const only = opts.import === undefined;
+
+  if (!only) {
+    if (done("uploading-files")) {
+      stage("applying-setup", "already applied");
+      stage("uploading-files", "already applied");
+    } else if (!imp.files) {
+      stage("applying-setup", "nothing ticked");
+      stage("uploading-files", "nothing to upload");
+      mark("applying-setup");
+      mark("uploading-files");
+    } else {
+      const rungs = Object.entries(imp.files.rungs).map(([r, n]) => `${r} ${n}`).join(", ");
+      stage("applying-setup", `${imp.files.count} file${imp.files.count === 1 ? "" : "s"}: ${rungs}`);
+      const packed = await imp.files.pack();
+      const notes = packed.skipped.map(s => `${s.path} (${s.note})`);
+      stage("applying-setup", `${fmtBytes(packed.bytes)} packed${notes.length > 0 ? `; skipped ${notes.join(", ")}` : ""}`);
+      mark("applying-setup");
+
+      stage("uploading-files", fmtBytes(packed.bytes));
+      const free = await freeBytes(machine);
+      if (free !== undefined && imp.files.bytes + UPLOAD_HEADROOM > free) {
+        throw new Error(`your files need ${fmtBytes(imp.files.bytes)} plus ${fmtBytes(UPLOAD_HEADROOM)} of headroom but the machine has ${fmtBytes(free)} free`);
+      }
+      const t0 = Date.now();
+      await importInto(machine, packed.tar, "/root", { overlay: true, timeoutMs: 300_000, ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}) });
+      stage("uploading-files", `${fmtBytes(packed.bytes)} in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+      result.files = { bytes: packed.bytes, skipped: packed.skipped };
+      mark("uploading-files");
+    }
+
+    if (done("installing-tools")) {
+      stage("installing-tools", "already applied");
+    } else if (imp.tools.length === 0) {
+      stage("installing-tools", "nothing ticked");
+      mark("installing-tools");
+    } else {
+      let brewOk = true;
+      let floor: string | undefined;
+      for (const [i, tool] of imp.tools.entries()) {
+        if (tool.manager === "brew" && !brewOk) {
+          result.tools.push({ id: tool.id, label: tool.label, outcome: "skipped", note: "Homebrew did not install" });
+          continue;
+        }
+        if (floor !== undefined) {
+          result.tools.push({ id: tool.id, label: tool.label, outcome: "skipped", note: floor });
+          continue;
+        }
+        const free = await freeBytes(machine);
+        if (free !== undefined && free < TOOLS_DISK_FLOOR) {
+          floor = `${fmtBytes(free)} free, keeping ${fmtBytes(TOOLS_DISK_FLOOR)} for the agents`;
+          result.tools.push({ id: tool.id, label: tool.label, outcome: "skipped", note: floor });
+          continue;
+        }
+        stage("installing-tools", `${tool.label} (${i + 1}/${imp.tools.length})`);
+        const t0 = Date.now();
+        const res = await machine.exec(guarded(tool.cmd, TOOL_TIMEOUT_S), { timeoutMs: (TOOL_TIMEOUT_S + 30) * 1000 });
+        const ms = Date.now() - t0;
+        if (res.exitCode === 0) {
+          result.tools.push({ id: tool.id, label: tool.label, outcome: "installed", ms });
+        } else {
+          if (tool.id === "tools/homebrew") brewOk = false;
+          result.tools.push({ id: tool.id, label: tool.label, outcome: "failed", note: reasonOf(res, TOOL_TIMEOUT_S), ms });
+        }
+      }
+      stage("installing-tools", summarize(result.tools, floor));
+      mark("installing-tools");
+    }
+  }
+
+  if (done("installing-harness")) {
+    stage("installing-harness", "already applied");
+  } else {
+    stage("installing-harness");
+    const res = await machine.exec(opts.setup, { timeoutMs: opts.setupTimeoutMs ?? 300_000 });
+    if (res.exitCode !== 0) {
+      throw new Error(`golden setup failed (exit ${res.exitCode}): ${res.stderr.slice(-500)}`);
+    }
+    if (!only) {
+      for (const [i, agent] of imp.agents.entries()) {
+        stage("installing-harness", `${agent.name} (${i + 1}/${imp.agents.length})`);
+        const t0 = Date.now();
+        const install = await machine.exec(guarded(`set -euo pipefail\n${agent.install}`, AGENT_TIMEOUT_S), { timeoutMs: (AGENT_TIMEOUT_S + 30) * 1000 });
+        const check = install.exitCode === 0 ? await machine.exec(agent.smoke, { timeoutMs: 60_000 }) : install;
+        const ms = Date.now() - t0;
+        if (check.exitCode === 0) result.agents.push({ id: agent.id, name: agent.name, outcome: "installed", ms });
+        else result.agents.push({ id: agent.id, name: agent.name, outcome: "failed", note: reasonOf(check, AGENT_TIMEOUT_S), ms });
+      }
+      const installed = imp.agents.filter((_, i) => result.agents[i]?.outcome === "installed");
+      ledger.smoke = installed.length > 0 ? installed.map(a => a.smoke).join(" && ") : "true";
+      stage("installing-harness", imp.agents.length === 0 ? "no agent ticked" : summarizeAgents(result.agents));
+    }
+    mark("installing-harness");
+  }
+  if (!only && imp.onResult) imp.onResult(result);
+  return { ledger, result };
+}
+
+function summarize(tools: ToolResult[], floor: string | undefined): string {
+  const parts: string[] = [];
+  const n = (o: ToolResult["outcome"]) => tools.filter(t => t.outcome === o);
+  parts.push(`${n("installed").length} installed`);
+  const failed = n("failed");
+  if (failed.length > 0) parts.push(`${failed.length} failed: ${failed.map(t => `${t.label} (${t.note})`).join(", ")}`);
+  const skipped = n("skipped");
+  if (skipped.length > 0) parts.push(`${skipped.length} skipped${floor !== undefined ? ` (${floor})` : ""}`);
+  return parts.join(", ");
+}
+
+function summarizeAgents(agents: AgentResult[]): string {
+  const ok = agents.filter(a => a.outcome === "installed").map(a => a.name);
+  const bad = agents.filter(a => a.outcome === "failed").map(a => `${a.name} failed (${a.note})`);
+  return [ok.length > 0 ? `${ok.join(", ")} installed` : "", ...bad].filter(s => s !== "").join("; ");
+}
+
+/** Pins which installers ran: the harness line and every agent's. */
+function setupShaOf(setup: string, imp: GoldenImport | undefined): string {
+  const h = createHash("sha256").update(setup);
+  for (const a of imp?.agents ?? []) h.update(`\n${a.install}`);
+  return h.digest("hex");
 }
 
 export interface SealGoldenOptions extends MachineSize {
@@ -184,20 +431,23 @@ export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Build
       const detail = await opts.deployDaemon(machine);
       if (detail !== undefined) stage("deploying-daemon", detail);
     }
-    stage("installing-harness");
-    const res = await machine.exec(opts.setup, { timeoutMs: opts.setupTimeoutMs ?? 300_000 });
-    if (res.exitCode !== 0) {
-      throw new Error(`golden setup failed (exit ${res.exitCode}): ${res.stderr.slice(-500)}`);
-    }
+    const applied = await applyGoldenImport(machine, {
+      setup: opts.setup,
+      onStage: stage,
+      ...(opts.import !== undefined ? { import: opts.import } : {}),
+      ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}),
+      ...(opts.setupTimeoutMs !== undefined ? { setupTimeoutMs: opts.setupTimeoutMs } : {}),
+    });
     stage("ready");
     return {
       machine,
       kind,
       baseTemplate,
-      setupSha: createHash("sha256").update(opts.setup).digest("hex"),
+      setupSha: setupShaOf(opts.setup, opts.import),
       createdAt: new Date().toISOString(),
       firstLife: true,
       size,
+      ...(opts.import !== undefined ? { import: applied.ledger } : {}),
     };
   } catch (e) {
     // Nothing records this machine yet, so one that survives here is reap's to sweep.
@@ -218,6 +468,7 @@ export async function sealGolden(
 ): Promise<{ manifest: GoldenManifest; version: GoldenVersion }> {
   const stage = opts.onStage ?? (() => {});
   assertFirstLife(builder.machine.id, builder.firstLife, "seal");
+  const smoke = builder.import?.smoke ?? opts.smoke;
 
   const prior = opts.manifest?.versions ?? [];
   const versionNum = (prior[prior.length - 1]?.version ?? 0) + 1;
@@ -231,17 +482,17 @@ export async function sealGolden(
     await kill(builder.machine);
     builderAlive = false;
 
-    stage("smoke-forking", opts.smoke);
+    stage("smoke-forking", smoke);
     fork = await opts.backend.create({
       kind: builder.kind,
       fromSnapshot: snapshotId,
       ...sizeAsked(opts.backend, opts, builder.size),
       ...envSpec(opts),
     });
-    const smokeRes = await fork.exec(opts.smoke, { timeoutMs: opts.smokeTimeoutMs ?? 120_000 });
+    const smokeRes = await fork.exec(smoke, { timeoutMs: opts.smokeTimeoutMs ?? 120_000 });
     if (smokeRes.exitCode !== 0) {
       throw new Error(
-        `golden smoke failed (exit ${smokeRes.exitCode}) for ${JSON.stringify(opts.smoke)}: ${smokeRes.stderr.slice(-500)}`,
+        `golden smoke failed (exit ${smokeRes.exitCode}) for ${JSON.stringify(smoke)}: ${smokeRes.stderr.slice(-500)}`,
       );
     }
     // The image is proven by now; a fork that outlives its kills is a leak to
@@ -258,7 +509,7 @@ export async function sealGolden(
       kind: builder.kind,
       setupSha: builder.setupSha,
       createdAt: new Date().toISOString(),
-      smoke: { cmd: opts.smoke, exitCode: smokeRes.exitCode },
+      smoke: { cmd: smoke, exitCode: smokeRes.exitCode },
       size: builder.size,
     };
     stage("sealed", leak === undefined ? `v${versionNum}` : `v${versionNum}; ${leak}`);
