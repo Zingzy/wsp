@@ -21,10 +21,10 @@ export const RUNG_TITLE: Record<Rung, string> = {
 };
 
 /** The prompt's words for each login choice; the choices themselves are the collector's. */
-export const LOGIN_CHOICES: readonly { value: LoginChoice; label: string; short: string }[] = [
-  { value: "copy", label: "copy from this computer", short: "copy" },
-  { value: "machine", label: "sign in on the machine", short: "sign in" },
-  { value: "skip", label: "skip", short: "skip" },
+export const LOGIN_CHOICES: readonly { value: LoginChoice; label: string }[] = [
+  { value: "copy", label: "copy" },
+  { value: "machine", label: "sign in" },
+  { value: "skip", label: "skip" },
 ];
 
 export function isTickable(e: ManifestEntry): boolean {
