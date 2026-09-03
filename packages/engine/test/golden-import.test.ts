@@ -2,11 +2,13 @@
 import { describe, expect, it } from "vitest";
 import {
   AGENT_INSTALLERS,
+  CURRENT_LTS,
   NODE_RELEASES,
   agentInstallsFor,
   brewfileFor,
   HOMEBREW,
   nodeInstallScript,
+  nodeMajorFor,
   placeGhToken,
   planFiles,
   recipeHash,
@@ -56,7 +58,7 @@ const isDir = (abs: string) => abs.endsWith("custom") || abs.endsWith("/.ssh") |
 const stat = (abs: string): PathInfo | undefined => {
   if (abs in links) {
     const target = links[abs];
-    if (target === undefined) return { kind: "dangling", target: "../nowhere" };
+    if (target === undefined) return { kind: "dangling", target: `${HOME}/nowhere` };
     return { kind: "file", mode: 0o644, size: 7, mtimeMs: 7_000, realpath: target };
   }
   if (!present.has(abs)) return undefined;
@@ -138,7 +140,7 @@ describe("planFiles: which laptop files travel and where they land", () => {
     expect(p.skipped).toEqual([
       { id: "shell/hosts", path: "~/.hosts-linked", note: "a link to /etc/hosts, outside your home directory" },
       { id: "shell/key", path: "~/.key-linked", note: "a link to ~/.ssh/id_ed25519: private key, never copied" },
-      { id: "shell/gone", path: "~/.gone-linked", note: "a link to ../nowhere, which is gone" },
+      { id: "shell/gone", path: "~/.gone-linked", note: "a link to ~/nowhere, which is gone" },
     ]);
   });
 
@@ -308,8 +310,11 @@ describe("toolInstallsFor", () => {
     ]);
     expect(t.installs.map(i => [i.id, i.manager, i.after])).toEqual([
       ["tools/homebrew", "brew", undefined],
-      ["tools/brew-tap/zingzy/tap", "brew", "tools/homebrew"],
-      ["tools/brew/gh", "brew", "tools/homebrew"],
+      // Homebrew's own glibc then gcc, each its own brew process, before any formula (the 6.0.21 lock race).
+      ["tools/brew-toolchain/glibc", "brew", "tools/homebrew"],
+      ["tools/brew-toolchain/gcc", "brew", "tools/brew-toolchain/glibc"],
+      ["tools/brew-tap/zingzy/tap", "brew", "tools/brew-toolchain/gcc"],
+      ["tools/brew/gh", "brew", "tools/brew-toolchain/gcc"],
       ["tools/npm/bun", "npm", undefined],
       ["tools/npm/@monid-ai/cli", "npm", undefined],
       ["tools/npm/pnpm", "npm", undefined],
@@ -318,11 +323,11 @@ describe("toolInstallsFor", () => {
       ["tools/bun/eslint", "bun", "tools/npm/bun"],
       ["tools/manager/uv", "uv", undefined],
       ["tools/uv/ty", "uv", "tools/manager/uv"],
-      ["tools/manager/pipx", "brew", "tools/homebrew"],
+      ["tools/manager/pipx", "brew", "tools/brew-toolchain/gcc"],
       ["tools/pipx/black", "pipx", "tools/manager/pipx"],
-      ["tools/manager/cargo", "brew", "tools/homebrew"],
+      ["tools/manager/cargo", "brew", "tools/brew-toolchain/gcc"],
       ["tools/cargo/ripgrep", "cargo", "tools/manager/cargo"],
-      ["tools/manager/go", "brew", "tools/homebrew"],
+      ["tools/manager/go", "brew", "tools/brew-toolchain/gcc"],
       ["tools/go/sqlc", "go", "tools/manager/go"],
     ]);
     const cmd = (id: string) => t.installs.find(i => i.id === id)!.cmd;
@@ -331,6 +336,8 @@ describe("toolInstallsFor", () => {
     expect(cmd("tools/homebrew")).toContain("useradd");
     expect(cmd("tools/homebrew")).toContain("/etc/profile.d/wsp-golden.sh");
     expect(cmd("tools/homebrew")).not.toContain("Brewfile");
+    expect(cmd("tools/brew-toolchain/glibc")).toMatch(/brew install glibc'$/);
+    expect(cmd("tools/brew-toolchain/gcc")).toMatch(/brew install gcc'$/);
     expect(cmd("tools/brew-tap/zingzy/tap")).toMatch(/su -s \/bin\/bash linuxbrew -c '.*brew tap zingzy\/tap'$/);
     expect(cmd("tools/brew/gh")).toMatch(/su -s \/bin\/bash linuxbrew -c '.*HOMEBREW_NO_AUTO_UPDATE=1.*brew install gh'$/);
     expect(cmd("tools/npm/bun")).toMatch(/npm install -g bun@1\.4\.0$/);
@@ -373,7 +380,9 @@ describe("toolInstallsFor", () => {
     ]);
     expect(t.installs.map(i => [i.id, i.after])).toEqual([
       ["tools/homebrew", undefined],
-      ["tools/brew/pnpm", "tools/homebrew"],
+      ["tools/brew-toolchain/glibc", "tools/homebrew"],
+      ["tools/brew-toolchain/gcc", "tools/brew-toolchain/glibc"],
+      ["tools/brew/pnpm", "tools/brew-toolchain/gcc"],
       ["tools/pnpm/turbo", "tools/brew/pnpm"],
       ["tools/manager/uv", undefined],
       ["tools/uv/ty", "tools/manager/uv"],
@@ -384,7 +393,7 @@ describe("toolInstallsFor", () => {
 
   it("a manager needed only for its rows brings Homebrew along even when no formula is ticked", () => {
     const t = toolInstallsFor([row({ rung: "tools", id: "tools/cargo/ripgrep", label: "ripgrep 14.1.0", version: "14.1.0" })]);
-    expect(t.installs.map(i => i.id)).toEqual(["tools/homebrew", "tools/manager/cargo", "tools/cargo/ripgrep"]);
+    expect(t.installs.map(i => i.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/manager/cargo", "tools/cargo/ripgrep"]);
   });
 
   it("no Homebrew step when no formula, tap or manager needs it; unticked rows install nothing", () => {
@@ -438,15 +447,33 @@ describe("agentInstallsFor", () => {
     expect(a.skipped).toEqual([{ id: "agents/unknown-thing", note: "no installer known" }]);
   });
 
-  it("asks for Node once, at the lowest pinned major that satisfies every ticked agent's engines floor, and never without a floor", () => {
-    const codexOnly = agentInstallsFor([row({ rung: "agents", id: "agents/codex" })]);
-    expect(codexOnly.node).toMatchObject({ floor: 16, version: NODE_RELEASES[20].version, agents: ["Codex"] });
-    const gemini = agentInstallsFor([row({ rung: "agents", id: "agents/gemini" }), row({ rung: "agents", id: "agents/opencode" })]);
-    expect(gemini.node).toMatchObject({ floor: 20, version: NODE_RELEASES[20].version, agents: ["Gemini CLI"] });
-    const both = agentInstallsFor([row({ rung: "agents", id: "agents/gemini" }), row({ rung: "agents", id: "agents/pi" })]);
+  it("asks for Node once, at the lowest supported pinned major that meets every ticked agent's floor, else the current LTS, and never without a floor", () => {
+    const today = new Date("2026-09-03T00:00:00Z");
+    // Node 20 left maintenance in April 2026: a Gemini-only recipe gets 22, not 20.
+    const gemini = agentInstallsFor([row({ rung: "agents", id: "agents/gemini" }), row({ rung: "agents", id: "agents/opencode" })], {}, today);
+    expect(gemini.node).toMatchObject({ floor: 20, version: NODE_RELEASES[22].version, agents: ["Gemini CLI"] });
+    const codexOnly = agentInstallsFor([row({ rung: "agents", id: "agents/codex" })], {}, today);
+    expect(codexOnly.node).toMatchObject({ floor: 16, version: NODE_RELEASES[22].version, agents: ["Codex"] });
+    const both = agentInstallsFor([row({ rung: "agents", id: "agents/gemini" }), row({ rung: "agents", id: "agents/pi" })], {}, today);
     expect(both.node).toMatchObject({ floor: 22, version: NODE_RELEASES[22].version, agents: ["Gemini CLI", "Pi"] });
-    expect(agentInstallsFor([row({ rung: "agents", id: "agents/opencode" }), row({ rung: "agents", id: "agents/aider" })]).node).toBeUndefined();
-    expect(agentInstallsFor([row({ rung: "agents", id: "agents/pi", bring: false })]).node).toBeUndefined();
+    expect(agentInstallsFor([row({ rung: "agents", id: "agents/opencode" }), row({ rung: "agents", id: "agents/aider" })], {}, today).node).toBeUndefined();
+    expect(agentInstallsFor([row({ rung: "agents", id: "agents/pi", bring: false })], {}, today).node).toBeUndefined();
+    // While 20 was still in maintenance it was the lowest satisfying major.
+    expect(nodeMajorFor(20, new Date("2026-01-15T00:00:00Z"))).toBe(20);
+    expect(nodeMajorFor(20, today)).toBe(22);
+    expect(nodeMajorFor(16, today)).toBe(22);
+    expect(nodeMajorFor(22, new Date("2028-01-01T00:00:00Z"))).toBe(CURRENT_LTS);
+    expect(nodeMajorFor(24, today)).toBeUndefined();
+  });
+
+  it("an agent whose floor no pinned major meets is set aside with a note rather than installed on a Node its engines refuse", () => {
+    const a = agentInstallsFor(
+      [row({ rung: "agents", id: "agents/future" }), row({ rung: "agents", id: "agents/codex" })],
+      { future: { name: "Future", install: "npm install -g future@1.0.0", smoke: "future --version", node: 24 } },
+    );
+    expect(a.installs.map(i => i.id)).toEqual(["agents/codex"]);
+    expect(a.skipped).toEqual([{ id: "agents/future", note: "needs Node 24, none pinned" }]);
+    expect(a.node).toMatchObject({ floor: 16, agents: ["Codex"] });
   });
 
   it("the Node script keeps a guest whose major meets the floor, else installs the pinned, sha256-checked release into /usr/local", () => {
@@ -458,7 +485,13 @@ describe("agentInstallsFor", () => {
     expect(script).toContain(`node-v${NODE_RELEASES[20].version}-linux-arm64.tar.gz sha=${NODE_RELEASES[20].sha256.aarch64}`);
     expect(script).toContain("sha256sum -c");
     expect(script).toContain("-C /usr/local --strip-components=1");
-    expect(script).toContain(`echo "NODE_INSTALLED v${NODE_RELEASES[20].version}"`);
+    // The install is proven by the node on the agents' PATH being the pinned one before it is reported.
+    const installed = script.indexOf(`echo "NODE_INSTALLED v${NODE_RELEASES[20].version}"`);
+    const check = script.indexOf(`test "$(node --version)" = "v${NODE_RELEASES[20].version}"`);
+    const path = script.indexOf('export PATH="/usr/local/bin:$PATH"');
+    expect(path).toBeGreaterThan(script.indexOf("--strip-components=1"));
+    expect(check).toBeGreaterThan(path);
+    expect(installed).toBeGreaterThan(check);
     expect(script).not.toMatch(/apt|nvm|\| *sh\b|\| *bash\b/);
     for (const r of Object.values(NODE_RELEASES)) {
       expect(r.sha256.x86_64).toMatch(/^[0-9a-f]{64}$/);

@@ -5,7 +5,7 @@
 import { execFile } from "node:child_process";
 import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { ManifestEntry } from "@wsp/collect";
 import {
@@ -20,6 +20,7 @@ import {
   type ImportResult,
   type PackedFiles,
   type PathInfo,
+  type PlannedSecret,
   type SkippedPath,
 } from "@wsp/engine";
 import { CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, tarPackCommand } from "./doctor.js";
@@ -53,6 +54,31 @@ function secretFailure(e: unknown): string {
   return lines.at(-1) ?? "unknown error";
 }
 
+export interface ReadSecrets {
+  /** Secret by Keychain service, for the pack. */
+  values: Map<string, string>;
+  /** Logins whose read failed or was refused, with the reason security gave. */
+  refused: { id: string; service: string; reason: string }[];
+}
+
+/** The Keychain logins the ticked rows would copy, in plan order. Runs before
+ * anything boots so a refused consent dialog never costs a machine. */
+export function keychainLogins(picked: readonly ManifestEntry[], platform: "darwin" | "linux"): PlannedSecret[] {
+  return planFiles(picked.map(e => ({ ...e, bring: true })), { home: "/", stat: () => undefined, platform }).secrets;
+}
+
+export async function readSecrets(wanted: readonly PlannedSecret[], reader: SecretReader): Promise<ReadSecrets> {
+  const out: ReadSecrets = { values: new Map(), refused: [] };
+  for (const s of wanted) {
+    try {
+      out.values.set(s.service, await reader.read(s.service));
+    } catch (e) {
+      out.refused.push({ id: s.id, service: s.service, reason: secretFailure(e) });
+    }
+  }
+  return out;
+}
+
 /** Bytes a tree takes once extracted, links counted as their targets since the archive ships those. */
 function treeBytes(path: string): number {
   const st = statSync(path);
@@ -69,16 +95,16 @@ const resolved = (abs: string): string | undefined => {
 };
 
 export interface PackOptions {
-  secrets: SecretReader;
+  /** Secrets already read from the Keychain, by service; a planned secret with no value is left out with a note. */
+  secrets: ReadonlyMap<string, string>;
   /** This computer's home, links resolved; a link inside a copied directory must resolve under it. */
   home: string;
 }
 
 /** Copies the planned files into a staging tree, renders each secret into it,
  * and tars the tree. Links are followed so the target's bytes land at the
- * link's path; one that leaves home or points at a refused path is left out
- * with a note. A secret that cannot be read is a note, not a failure: the
- * person can still sign in on the machine. */
+ * link's path; one that leaves home, points at a refused path, or points back
+ * into its own directory is left out with a note. */
 export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<PackedFiles> {
   const stage = mkdtempSync(join(tmpdir(), "wsp-golden-import-"));
   const out = mkdtempSync(join(tmpdir(), "wsp-golden-import-tar-"));
@@ -94,6 +120,7 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
         const real = resolved(src);
         if (real === undefined) skipped.push({ id: f.id, path: shown, note: "a link whose target is gone" });
         else if (!(real === opts.home || real.startsWith(`${opts.home}/`))) skipped.push({ id: f.id, path: shown, note: `a link to ${real}, outside your home directory` });
+        else if (src.startsWith(`${real}/`)) skipped.push({ id: f.id, path: shown, note: "a link into its own directory" });
         else {
           const why = refusedPath(relative(opts.home, real), statSync(real).isDirectory());
           if (why === undefined) return true;
@@ -105,11 +132,9 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
       chmodSync(target, f.mode);
     }
     for (const s of plan.secrets) {
-      let secret: string;
-      try {
-        secret = await opts.secrets.read(s.service);
-      } catch (e) {
-        skipped.push({ id: s.id, path: `Keychain: ${s.service}`, note: `Keychain read failed (${secretFailure(e)}); sign in on the machine` });
+      const secret = opts.secrets.get(s.service);
+      if (secret === undefined) {
+        skipped.push({ id: s.id, path: `Keychain: ${s.service}`, note: "not read from the Keychain; sign in on the machine" });
         continue;
       }
       const target = join(stage, s.dest);
@@ -134,7 +159,8 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
 
 export interface ImportOptions {
   home: string;
-  secrets: SecretReader;
+  /** Keychain secrets already read, by service (see readSecrets). */
+  secrets: ReadonlyMap<string, string>;
   platform: "darwin" | "linux";
   onResult?: (result: ImportResult) => void;
 }
@@ -148,7 +174,7 @@ export function statOf(abs: string): PathInfo | undefined {
     return undefined;
   }
   const realpath = link ? resolved(abs) : abs;
-  if (realpath === undefined) return { kind: "dangling", target: readlinkSync(abs) };
+  if (realpath === undefined) return { kind: "dangling", target: resolve(dirname(abs), readlinkSync(abs)) };
   const st = statSync(realpath);
   return { kind: st.isDirectory() ? "dir" : "file", mode: st.mode & 0o7777, size: st.size, mtimeMs: st.mtimeMs, realpath };
 }

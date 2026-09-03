@@ -11,7 +11,7 @@ import type { ManifestEntry } from "@wsp/collect";
 import { NODE_RELEASES, planFiles } from "@wsp/engine";
 import { afterEach, describe, expect, it } from "vitest";
 import { GOLDEN_SETUP, GOLDEN_SMOKE } from "../src/doctor.js";
-import { importFor, importResultPath, keychainReader, packPlan, statOf, type SecretReader } from "../src/init-import.js";
+import { importFor, importResultPath, keychainLogins, keychainReader, packPlan, readSecrets, statOf, type SecretReader } from "../src/init-import.js";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -90,12 +90,10 @@ describe("packPlan", () => {
       ],
       { home, stat: statOf, platform: "darwin" },
     );
-    const secrets = reader({});
-    const packed = await packPlan(plan, { secrets, home });
+    const packed = await packPlan(plan, { secrets: new Map(), home });
     expect(packed.bytes).toBe(packed.tar.length);
     expect(packed.unpacked).toBe("[user]\n\tname = Me\n".length + "Host work\n".length + "echo x\n".length);
     expect(packed.skipped).toEqual([]);
-    expect(secrets.reads).toEqual([]);
     const entries = listTar(packed.tar);
     const modeOf = (p: string) => entries.find(e => e.path === p || e.path === `${p}/`)?.mode;
     expect(modeOf(".gitconfig")).toMatch(/^-rw-r--r--/);
@@ -116,16 +114,17 @@ describe("packPlan", () => {
     symlinkSync("/etc/hosts", join(home, ".config", "tool", "outside"));
     symlinkSync(join(home, ".ssh", "id_ed25519"), join(home, ".config", "tool", "key"));
     symlinkSync(join(home, "nowhere"), join(home, ".config", "tool", "gone"));
+    symlinkSync(join(home, ".config", "tool"), join(home, ".config", "tool", "self"));
     const plan = planFiles(
       [row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"] }), row({ rung: "editors", id: "editors/tool", paths: ["~/.config/tool"] })],
       { home, stat: statOf, platform: "darwin" },
     );
     expect(plan.files.map(f => [f.dest, f.dir])).toEqual([[".zshrc", false], [".config/tool", true]]);
-    const packed = await packPlan(plan, { secrets: reader({}), home });
+    const packed = await packPlan(plan, { secrets: new Map(), home });
     const entries = listTar(packed.tar);
     expect(entries.find(e => e.path === ".zshrc")?.mode).toMatch(/^-rw-r--r--/);
     expect(entries.find(e => e.path === ".config/tool/fine")?.mode).toMatch(/^-/);
-    expect(entries.map(e => e.path).filter(p => /outside|key|gone/.test(p))).toEqual([]);
+    expect(entries.map(e => e.path).filter(p => /outside|key|gone|self/.test(p))).toEqual([]);
     expect(entries.some(e => e.mode.startsWith("l"))).toBe(false);
     const dir = extract(packed.tar);
     expect(readFileSync(join(dir, ".zshrc"), "utf8")).toBe("export FROM=dotfiles\n");
@@ -134,12 +133,29 @@ describe("packPlan", () => {
       { id: "editors/tool", path: "~/.config/tool/gone", note: "a link whose target is gone" },
       { id: "editors/tool", path: "~/.config/tool/key", note: "a link to ~/.ssh/id_ed25519: private key, never copied" },
       { id: "editors/tool", path: "~/.config/tool/outside", note: `a link to ${realpathSync("/etc/hosts")}, outside your home directory` },
+      { id: "editors/tool", path: "~/.config/tool/self", note: "a link into its own directory" },
     ]);
     // The laptop's own link and target are untouched.
     expect(statSync(join(home, "dotfiles", "zshrc")).mode & 0o777).toBe(0o644);
   });
 
-  it("reads each Keychain login once, places it, and turns a failed read into a note that carries security's reason", async () => {
+  it("readSecrets asks the reader once per Keychain login and turns a failed read into a refusal that carries security's reason", async () => {
+    const rows = [
+      row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml"], choice: "copy" }),
+      row({ rung: "logins", id: "logins/claude", paths: ["Keychain: Claude Code-credentials"], choice: "copy" }),
+      row({ rung: "logins", id: "logins/codex", paths: ["~/.codex/auth.json"], choice: "machine" }),
+    ];
+    const wanted = keychainLogins(rows, "darwin");
+    expect(wanted.map(s => [s.id, s.service])).toEqual([["logins/gh", "gh:github.com"], ["logins/claude", "Claude Code-credentials"]]);
+    expect(keychainLogins(rows, "linux")).toEqual([]);
+    const secrets = reader({ "gh:github.com": "gho_fake_token" });
+    const read = await readSecrets(wanted, secrets);
+    expect(secrets.reads).toEqual(["gh:github.com", "Claude Code-credentials"]);
+    expect([...read.values]).toEqual([["gh:github.com", "gho_fake_token"]]);
+    expect(read.refused).toEqual([{ id: "logins/claude", service: "Claude Code-credentials", reason: "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain." }]);
+  });
+
+  it("places each secret it was given, and notes a planned secret it was not given instead of failing", async () => {
     const home = laptop();
     const plan = planFiles(
       [
@@ -148,16 +164,8 @@ describe("packPlan", () => {
       ],
       { home, stat: statOf, platform: "darwin", rewrites: [[".claude/", ".claude-cfg/"]] },
     );
-    const secrets = reader({ "gh:github.com": "gho_fake_token" });
-    const packed = await packPlan(plan, { secrets, home });
-    expect(secrets.reads).toEqual(["gh:github.com", "Claude Code-credentials"]);
-    expect(packed.skipped).toEqual([
-      {
-        id: "logins/claude",
-        path: "Keychain: Claude Code-credentials",
-        note: "Keychain read failed (security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.); sign in on the machine",
-      },
-    ]);
+    const packed = await packPlan(plan, { secrets: new Map([["gh:github.com", "gho_fake_token"]]), home });
+    expect(packed.skipped).toEqual([{ id: "logins/claude", path: "Keychain: Claude Code-credentials", note: "not read from the Keychain; sign in on the machine" }]);
     const dir = extract(packed.tar);
     const hosts = readFileSync(join(dir, ".config/gh/hosts.yml"), "utf8");
     expect(hosts).toBe("github.com:\n    oauth_token: gho_fake_token\n    git_protocol: ssh\n    users:\n        Zingzy:\n            oauth_token: gho_fake_token\n    user: Zingzy\n");
@@ -177,7 +185,7 @@ describe("packPlan", () => {
     const path = process.env["PATH"];
     process.env["PATH"] = `${shim}:${path}`;
     try {
-      await packPlan(plan, { secrets: reader({ "gh:github.com": "gho_fake_token" }), home });
+      await packPlan(plan, { secrets: new Map([["gh:github.com", "gho_fake_token"]]), home });
     } finally {
       process.env["PATH"] = path;
     }
@@ -189,7 +197,7 @@ describe("statOf", () => {
   it("reports a file, a directory, a link by its target, and a dangling link by where it pointed", () => {
     const home = laptop();
     symlinkSync(join(home, ".gitconfig"), join(home, "link"));
-    symlinkSync(join(home, "missing"), join(home, "dangling"));
+    symlinkSync("missing", join(home, "dangling"));
     expect(statOf(join(home, ".gitconfig"))).toMatchObject({ kind: "file", mode: 0o644, size: "[user]\n\tname = Me\n".length, realpath: join(home, ".gitconfig") });
     expect(statOf(join(home, ".ssh"))).toMatchObject({ kind: "dir", mode: 0o700, realpath: join(home, ".ssh") });
     expect(statOf(join(home, "link"))).toMatchObject({ kind: "file", mode: 0o644, realpath: join(home, ".gitconfig") });
@@ -218,7 +226,7 @@ describe("importFor", () => {
         row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml"], choice: "copy" }),
         ...over,
       ],
-      { home, secrets: reader({}), platform: "darwin" },
+      { home, secrets: new Map(), platform: "darwin" },
     );
 
   it("maps the ticks to files (Claude's dir under the guest config dir), tools, the Node the agents need, and agents with Claude on the sanctioned line", () => {
@@ -231,8 +239,8 @@ describe("importFor", () => {
       { id: "agents/claude", path: "~/.claude.json", note: "no longer on this computer" },
       { id: "agents/codex", path: "~/.codex/config.toml", note: "no longer on this computer" },
     ]);
-    expect(imp.tools.map(t => t.id)).toEqual(["tools/homebrew", "tools/brew/jq", "tools/npm/bun"]);
-    expect(imp.node).toMatchObject({ floor: 16, version: NODE_RELEASES[20].version, agents: ["Codex"] });
+    expect(imp.tools.map(t => t.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/brew/jq", "tools/npm/bun"]);
+    expect(imp.node).toMatchObject({ floor: 16, version: NODE_RELEASES[22].version, agents: ["Codex"] });
     expect(imp.agents.map(a => [a.id, a.install, a.smoke])).toEqual([
       ["agents/claude", GOLDEN_SETUP, GOLDEN_SMOKE],
       ["agents/codex", expect.stringContaining("npm install -g @openai/codex@"), "codex --version"],
@@ -252,7 +260,7 @@ describe("importFor", () => {
     const results: unknown[] = [];
     const imp = importFor([row({ rung: "tools", id: "tools/brew/zingzy/tap/diskbloom", label: "zingzy/tap/diskbloom", linux: "unknown" })], {
       home,
-      secrets: reader({}),
+      secrets: new Map(),
       platform: "darwin",
       onResult: r => void results.push(r),
     });

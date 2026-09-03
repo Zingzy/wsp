@@ -187,7 +187,7 @@ export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOption
         continue;
       }
       if (st.kind === "dangling") {
-        skip(`a link to ${st.target}, which is gone`);
+        skip(`a link to ${under(opts.home, st.target) ? `~/${st.target.slice(opts.home.length + 1)}` : st.target}, which is gone`);
         continue;
       }
       if (st.realpath !== source) {
@@ -320,6 +320,13 @@ export function brewfileFor(entries: readonly RecipeEntry[]): Brewfile {
 
 const MANAGER_ORDER: readonly Exclude<ToolManager, "brew">[] = ["npm", "pnpm", "bun", "uv", "pipx", "cargo", "go"];
 
+// Homebrew's Linux bottles are built against a newer glibc than the base image
+// ships, so its first formula pulls Homebrew's own glibc and gcc in and, on
+// 6.0.21, a nested brew racing the parent for those locks fails one run in
+// two (measured: 4 of 7 plain runs failed, 3 of 3 passed with these first).
+// Each is its own single brew process, in this order, before any formula.
+const BREW_TOOLCHAIN: readonly string[] = ["glibc", "gcc"];
+
 /** How each manager gets onto the machine before its first tool: uv by its
  * checksummed release, the rest as Homebrew for Linux formulae (npm rides the base Node). */
 const MANAGER_FORMULA: Record<Exclude<ToolManager, "brew" | "npm" | "uv">, string> = { pnpm: "pnpm", bun: "bun", pipx: "pipx", cargo: "rust", go: "go" };
@@ -385,13 +392,18 @@ export function toolInstallsFor(entries: readonly RecipeEntry[]): ToolsPlan {
     const formula = MANAGER_FORMULA[manager];
     if (brew.formulae.includes(formula)) managers.set(manager, { after: `tools/brew/${formula}` });
     else if (npmTicked.has(manager)) managers.set(manager, { after: `tools/npm/${manager}` });
-    else managers.set(manager, { after: own, step: { id: own, label: manager, manager: "brew", cmd: withPath(asLinuxbrew(`install ${formula}`)), after: "tools/homebrew" } });
+    else managers.set(manager, { after: own, step: { id: own, label: manager, manager: "brew", cmd: withPath(asLinuxbrew(`install ${formula}`)), after: `tools/brew-toolchain/${BREW_TOOLCHAIN.at(-1)}` } });
   }
 
   if (brew.taps.length + brew.formulae.length > 0 || [...managers.values()].some(m => m.step?.manager === "brew")) {
     installs.push({ id: "tools/homebrew", label: "Homebrew", manager: "brew", cmd: withPath(homebrewBootstrap()) });
-    for (const t of brew.taps) installs.push({ id: `tools/brew-tap/${t}`, label: t, manager: "brew", cmd: withPath(asLinuxbrew(`tap ${t}`)), after: "tools/homebrew" });
-    for (const f of brew.formulae) installs.push({ id: `tools/brew/${f}`, label: f, manager: "brew", cmd: withPath(asLinuxbrew(`install ${f}`)), after: "tools/homebrew" });
+    let prior = "tools/homebrew";
+    for (const f of BREW_TOOLCHAIN) {
+      installs.push({ id: `tools/brew-toolchain/${f}`, label: `${f} (Homebrew's Linux toolchain)`, manager: "brew", cmd: withPath(asLinuxbrew(`install ${f}`)), after: prior });
+      prior = `tools/brew-toolchain/${f}`;
+    }
+    for (const t of brew.taps) installs.push({ id: `tools/brew-tap/${t}`, label: t, manager: "brew", cmd: withPath(asLinuxbrew(`tap ${t}`)), after: prior });
+    for (const f of brew.formulae) installs.push({ id: `tools/brew/${f}`, label: f, manager: "brew", cmd: withPath(asLinuxbrew(`install ${f}`)), after: prior });
   }
   for (const manager of MANAGER_ORDER) {
     const rows = rowsOf(manager);
@@ -452,24 +464,45 @@ const UV_INSTALL = [
 ].join("\n");
 
 /** Node releases the guest may get, one per major, pinned to nodejs.org's
- * SHASUMS256.txt entries (https://nodejs.org/dist/). */
+ * SHASUMS256.txt entries (https://nodejs.org/dist/); `eol` is the day the
+ * release schedule ends maintenance (https://github.com/nodejs/Release). */
 export const NODE_RELEASES = {
   20: {
     version: "20.20.2",
     sha256: { x86_64: "19e56f0825510207dd904f087fe52faa0a4eb6b2aab5f0ea7a33830d04888b8b", aarch64: "47ef73d543ecf6eb19435f6c03a0ac4809b3bf0dd6b26c7c571efc2a6572a74d" },
+    eol: "2026-04-30",
   },
   22: {
     version: "22.23.2",
     sha256: { x86_64: "b294a556e639d64338823920e5866c21c02741742d2e1529ee1a225c1ec9252a", aarch64: "013b59cfd2819703a6f4a14ab891fc46fc2a4e3f5bcd92de3fb4929b43e35b30" },
+    eol: "2027-04-30",
   },
 } as const;
 
 export type NodeMajor = keyof typeof NODE_RELEASES;
 
+/** The line a guest gets when no supported pinned major meets an agent's floor. */
+export const CURRENT_LTS: NodeMajor = 22;
+
 export interface NodeRelease {
   version: string;
   sha256: { x86_64: string; aarch64: string };
+  eol: string;
 }
+
+/** The major a set of engines floors gets: the lowest pinned major at or above the
+ * floor that is still in active or maintenance support on `now`, else the current
+ * LTS; nothing when the floor is above every pinned major. */
+export function nodeMajorFor(floor: number, now: Date): NodeMajor | undefined {
+  const majors = (Object.keys(NODE_RELEASES).map(Number) as NodeMajor[]).sort((a, b) => a - b);
+  if (floor > majors.at(-1)!) return undefined;
+  const supported = (m: NodeMajor): boolean => now.getTime() < Date.parse(`${NODE_RELEASES[m].eol}T23:59:59Z`);
+  return majors.find(m => m >= floor && supported(m)) ?? CURRENT_LTS;
+}
+
+/** Puts the Node the golden installed ahead of any the image shipped, so the
+ * agents and their version checks run on it. */
+export const NODE_PATH_LINE = 'export PATH="/usr/local/bin:$PATH"';
 
 /** Installs the release into /usr/local when the guest's Node major is under
  * `floor`, and reports what it had and what it did on stdout. */
@@ -490,9 +523,13 @@ export function nodeInstallScript(floor: number, release: NodeRelease): string {
     'echo "$sha  /tmp/$pkg" | sha256sum -c - >/dev/null',
     'tar -xzf "/tmp/$pkg" -C /usr/local --strip-components=1',
     'rm -f "/tmp/$pkg"',
+    // The install is only real once the node the agents will run is this one.
+    NODE_PATH_LINE,
+    `test "$(node --version)" = "v${v}"`,
     `echo "NODE_INSTALLED v${v}"`,
   ].join("\n");
 }
+
 
 const HERMES = { tag: "v2026.8.31", commit: "29112bef099274229cadff79cdff7bf7b99c4b77" } as const;
 
@@ -545,7 +582,7 @@ export interface AgentsPlan {
 
 /** The ticked agents with an installer, in recipe order; `extra` adds or
  * overrides installers the table lacks (the host owns the Claude Code line). */
-export function agentInstallsFor(entries: readonly RecipeEntry[], extra: Record<string, AgentInstaller> = {}): AgentsPlan {
+export function agentInstallsFor(entries: readonly RecipeEntry[], extra: Record<string, AgentInstaller> = {}, now: Date = new Date()): AgentsPlan {
   const table = { ...AGENT_INSTALLERS, ...extra };
   const out: AgentsPlan = { installs: [], skipped: [] };
   for (const e of entries) {
@@ -554,12 +591,17 @@ export function agentInstallsFor(entries: readonly RecipeEntry[], extra: Record<
     if (installer) out.installs.push({ id: e.id, ...installer });
     else out.skipped.push({ id: e.id, note: "no installer known" });
   }
+  // An agent whose floor no pinned major meets is set aside rather than installed on a Node its engines refuse.
+  const pinnable = out.installs.filter(a => {
+    if (a.node === undefined || nodeMajorFor(a.node, now) !== undefined) return true;
+    out.skipped.push({ id: a.id, note: `needs Node ${a.node}, none pinned` });
+    return false;
+  });
+  out.installs = pinnable;
   const floors = out.installs.filter(a => a.node !== undefined);
   if (floors.length > 0) {
     const floor = Math.max(...floors.map(a => a.node!));
-    const majors = (Object.keys(NODE_RELEASES).map(Number) as NodeMajor[]).sort((a, b) => a - b);
-    const major = majors.find(m => m >= floor) ?? majors.at(-1)!;
-    const release = NODE_RELEASES[major];
+    const release = NODE_RELEASES[nodeMajorFor(floor, now)!];
     out.node = { floor, version: release.version, agents: floors.map(a => a.name), cmd: nodeInstallScript(floor, release) };
   }
   return out;

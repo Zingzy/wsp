@@ -243,12 +243,14 @@ describe("wsp init, interactive", () => {
     expect(backend.machines).toHaveLength(1);
     const log = backend.machines[0]!.execLog;
     expect(log.some(c => c.includes("tar xzf") && c.includes("--no-same-owner"))).toBe(true);
-    expect(log.filter(c => c.includes("brew install") || c.includes("npm install -g pnpm"))).toHaveLength(3);
+    expect(log.filter(c => c.includes("brew install") || c.includes("npm install -g pnpm"))).toHaveLength(5);
+    expect(log.map(c => /brew install ([a-z@.-]+)/.exec(c)?.[1]).filter(Boolean)).toEqual(["glibc", "gcc", "gh", "jq"]);
     expect(log.some(c => c.includes(GOLDEN_SETUP))).toBe(true);
     expect(log.indexOf(log.find(c => c.includes("tar xzf"))!)).toBeLessThan(log.indexOf(log.find(c => c.includes("brew install"))!));
     expect(JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8"))).toMatchObject({
       files: { bytes: expect.any(Number) },
-      tools: [{ id: "tools/homebrew", outcome: "installed" }, { id: "tools/brew/gh", outcome: "installed" }, { id: "tools/brew/jq", outcome: "installed" }, { id: "tools/npm/pnpm", outcome: "installed" }],
+      homebrew: { tag: expect.stringMatching(/^6\./), commit: expect.stringMatching(/^[0-9a-f]{40}$/) },
+      tools: [{ id: "tools/homebrew", outcome: "installed" }, { id: "tools/brew-toolchain/glibc", outcome: "installed" }, { id: "tools/brew-toolchain/gcc", outcome: "installed" }, { id: "tools/brew/gh", outcome: "installed" }, { id: "tools/brew/jq", outcome: "installed" }, { id: "tools/npm/pnpm", outcome: "installed" }],
       agents: [{ id: "agents/claude", outcome: "installed" }],
     });
     expect(backend.machines[0]!.spec.labels).toMatchObject({ "wsp-builder": "1" });
@@ -453,6 +455,31 @@ describe("wsp init, flags and no terminal", () => {
     expect(f.reads).toEqual(["gh:github.com"]);
   });
 
+  it("a Keychain login the reader refuses is read before anything boots, turns into a sign-in on the machine, and says so before the confirm", async () => {
+    const f = fake({ yes: true });
+    f.opts.secrets = {
+      read: async service => {
+        f.reads.push(service);
+        throw new Error(`Command failed: security find-generic-password -s ${service} -w\nsecurity: SecKeychainSearchCopyNext: User canceled the operation.\n`);
+      },
+    };
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(0);
+    const out = f.text();
+    expect(f.reads).toEqual(["gh:github.com"]);
+    const note = out.indexOf("GitHub CLI login: Keychain read failed (security: SecKeychainSearchCopyNext: User canceled the operation.); you will sign in on the machine instead.");
+    expect(note).toBeGreaterThan(-1);
+    expect(note).toBeLessThan(out.search(BOOT));
+    // The refusal happened with no machine on the account; the pack later asks the Keychain for nothing.
+    const saved = loadManifest(join(dirs[0]!, "golden-recipe.json"));
+    expect(saved.entries.find(e => e.id === "logins/gh")?.choice).toBe("machine");
+    expect(f.checklists[0]).toEqual(expect.arrayContaining([{ label: "GitHub CLI login", command: "gh auth login" }]));
+    const log = f.backends[0]!.machines[0]!.execLog;
+    expect(log.some(c => c.includes("tar xzf"))).toBe(true);
+    const skipped = JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8")).files.skipped as { path: string }[];
+    expect(skipped.filter(s => s.path.startsWith("Keychain:"))).toEqual([]);
+  });
+
   it("--yes with --manifest takes the file's ticks, asks nothing, prints the address and never opens a browser", async () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
     dirs.push(dir);
@@ -543,13 +570,13 @@ describe("wsp init, flags and no terminal", () => {
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(0);
     const out = f.text();
-    expect(out).toMatch(/Tools installed\s+3 installed, 1 failed/);
+    expect(out).toMatch(/Tools installed\s+5 installed, 1 failed/);
     expect(out).toMatch(/Agents installed\s+Codex installed; Claude/);
     expect(out).toContain("Ready");
     // The stage line is cut to the width; the names come back in full under the tally.
     const tally = out.slice(out.indexOf("Tools and agents:"));
     expect(tally.split("\n").slice(0, 3).map(l => l.replace(/^[│◇]\s+/, ""))).toEqual([
-      expect.stringMatching(/^Tools and agents: 4 installed, 2 failed, 0 skipped; the list is in .*golden-import\.json$/),
+      expect.stringMatching(/^Tools and agents: 6 installed, 2 failed, 0 skipped; the list is in .*golden-import\.json$/),
       "jq failed: curl: no route",
       "Claude Code failed: curl: no route",
     ]);
@@ -591,7 +618,8 @@ describe("wsp init, flags and no terminal", () => {
     const out = f.text();
     expect(out).toContain("A builder from an earlier wsp init is still running on the account:");
     expect(out).toMatch(/default \(m1\), \d+\.\ds old, about \$\d+\.\d\d so far/);
-    expect(out).toContain("Nothing was booted. Kill it or save it first");
+    expect(out).toContain("Nothing was booted. Kill it first (the Solari console lists it); a builder cannot be sealed after a restart.");
+    expect(out).not.toContain("save it");
     expect(out).not.toMatch(BOOT);
     expect(shared.machines).toHaveLength(1);
     expect(shared.machines[0]!.killed).toBe(false);

@@ -11,7 +11,7 @@ import { createRuntime, memoryStore, type ImportResult } from "@wsp/runtime";
 import { afterAll, describe, expect, it } from "vitest";
 import { LIVE, liveEnv } from "../../engine/test/live.js";
 import { deployDaemon, isReserved } from "../src/doctor.js";
-import { importFor, keychainReader } from "../src/init-import.js";
+import { importFor } from "../src/init-import.js";
 import { goldenRecipeFor } from "../src/init-recipe.js";
 import type { ManifestEntry } from "@wsp/collect";
 
@@ -41,7 +41,7 @@ describe.runIf(LIVE)("golden import (live: apply a trimmed recipe, seal, fork, p
     const t0 = Date.now();
     const stages: { stage: GoldenStage; at: number; detail?: string }[] = [];
     let result: ImportResult | undefined;
-    const imp = importFor(BRING, { home: homedir(), secrets: keychainReader(), platform: "darwin", onResult: r => (result = r) });
+    const imp = importFor(BRING, { home: homedir(), secrets: new Map(), platform: "darwin", onResult: r => (result = r) });
     const rt = createRuntime({
       backend,
       store: memoryStore(),
@@ -72,7 +72,8 @@ describe.runIf(LIVE)("golden import (live: apply a trimmed recipe, seal, fork, p
       expect(stages.map(s => s.stage)).toEqual([
         "creating", "deploying-daemon", "deploying-daemon",
         "applying-setup", "applying-setup", "uploading-files", "uploading-files",
-        "installing-tools", "installing-tools", "installing-tools",
+        // Homebrew, its glibc and gcc, jq, summary
+        "installing-tools", "installing-tools", "installing-tools", "installing-tools", "installing-tools",
         // bare harness line, the Node step (asked for and kept or installed), Claude, Codex, summary
         "installing-harness", "installing-harness", "installing-harness", "installing-harness", "installing-harness", "installing-harness",
         "ready",

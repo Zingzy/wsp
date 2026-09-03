@@ -8,7 +8,7 @@
 
 import { createHash } from "node:crypto";
 import type { GoldenManifest, GoldenStage, GoldenVersion } from "@wsp/protocol";
-import type { AgentInstall, NodeInstall, SkippedPath, ToolInstall } from "./golden-import.js";
+import { HOMEBREW, NODE_PATH_LINE, type AgentInstall, type NodeInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { assertFirstLife } from "./lifecycle.js";
 import type { ExecResult, Machine, MachineBackend, MachineKind, MachineState } from "./machine.js";
 import { importInto } from "./vault.js";
@@ -179,6 +179,8 @@ export interface AgentResult {
 export interface ImportResult {
   recipeHash: string;
   files?: { bytes: number; skipped: SkippedPath[] };
+  /** The Homebrew checkout the formulae installed under, when the tools stage put one on the machine. */
+  homebrew?: { tag: string; commit: string };
   tools: ToolResult[];
   agents: AgentResult[];
 }
@@ -322,6 +324,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
         const ms = Date.now() - t0;
         if (res.exitCode === 0) {
           installed.add(tool.id);
+          if (tool.id === "tools/homebrew") result.homebrew = { ...HOMEBREW };
           result.tools.push({ id: tool.id, label: tool.label, outcome: "installed", ms });
         } else {
           result.tools.push({ id: tool.id, label: tool.label, outcome: "failed", note: reasonOf(res, TOOL_TIMEOUT_S), ms });
@@ -350,8 +353,8 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
           continue;
         }
         stage("installing-harness", `${agent.name} (${i + 1}/${imp.agents.length})`);
-        const install = await machine.exec(guarded(`set -euo pipefail\n${agent.install}`, AGENT_TIMEOUT_S), { timeoutMs: (AGENT_TIMEOUT_S + 30) * 1000 });
-        const check = install.exitCode === 0 ? await machine.exec(agent.smoke, { timeoutMs: 60_000 }) : install;
+        const install = await machine.exec(guarded(`set -euo pipefail\n${NODE_PATH_LINE}\n${agent.install}`, AGENT_TIMEOUT_S), { timeoutMs: (AGENT_TIMEOUT_S + 30) * 1000 });
+        const check = install.exitCode === 0 ? await machine.exec(`${NODE_PATH_LINE}\n${agent.smoke}`, { timeoutMs: 60_000 }) : install;
         const ms = Date.now() - t0;
         if (check.exitCode === 0) result.agents.push({ id: agent.id, name: agent.name, outcome: "installed", ms });
         else result.agents.push({ id: agent.id, name: agent.name, outcome: "failed", note: reasonOf(check, AGENT_TIMEOUT_S), ms });

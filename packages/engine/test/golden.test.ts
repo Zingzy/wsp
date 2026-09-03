@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { BUILDER_DISK_GB, BUILDER_IDLE_MS, MachineAliveError, applyGoldenImport, buildGolden, forkGolden, prepareBuilder, rollback, sealGolden, type GoldenImport, type GoldenStage, type ImportResult } from "../src/golden.js";
 import { NotFirstLifeError } from "../src/lifecycle.js";
-import type { ToolInstall } from "../src/golden-import.js";
+import { HOMEBREW, type ToolInstall } from "../src/golden-import.js";
 import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec } from "../src/machine.js";
 
 /** A fake whose kill() resolves like the provider's DELETE does: a call for
@@ -375,9 +375,10 @@ describe("golden import stages", () => {
     expect(tool).toMatch(/^timeout -k 10 600 bash -c '/);
     expect(cmds.filter(c => c.includes("brew install gh") || c.includes("brew-bootstrap") || c.includes("bun@1.4.0"))).toHaveLength(3);
     const agent = cmds.find(c => c.includes("codex-install"))!;
-    expect(agent).toMatch(/^timeout -k 10 900 bash -c 'set -euo pipefail/);
-    expect(cmds).toContain("claude --version");
-    expect(cmds).toContain("codex --version");
+    expect(agent).toMatch(/^timeout -k 10 900 bash -c 'set -euo pipefail\nexport PATH="\/usr\/local\/bin:\$PATH"\n/);
+    // Agents and their checks run with the Node the golden installed ahead of any the image shipped.
+    expect(cmds).toContain('export PATH="/usr/local/bin:$PATH"\nclaude --version');
+    expect(cmds).toContain('export PATH="/usr/local/bin:$PATH"\ncodex --version');
     expect(cmds.indexOf("true")).toBeLessThan(cmds.indexOf(agent));
     expect(cmds.indexOf(tool)).toBeLessThan(cmds.indexOf("true"));
     expect(builder.import).toEqual({ recipeHash: "h1", applied: ["applying-setup", "uploading-files", "installing-tools", "installing-harness"], smoke: "claude --version && codex --version" });
@@ -385,6 +386,7 @@ describe("golden import stages", () => {
     expect(results).toEqual([{
       recipeHash: "h1",
       files: { bytes: 1200, skipped: [{ id: "shell/bashrc", path: "~/.bashrc", note: "no longer on this computer" }] },
+      homebrew: HOMEBREW,
       tools: [
         { id: "tools/homebrew", label: "Homebrew", outcome: "installed", ms: expect.any(Number) },
         { id: "tools/brew/gh", label: "gh", outcome: "installed", ms: expect.any(Number) },

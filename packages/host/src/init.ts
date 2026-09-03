@@ -13,7 +13,7 @@ import { S_BAR, S_STEP_ERROR, S_STEP_SUBMIT, cancel, confirm, isCancel, log, not
 import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { agentInstallsFor, toolInstallsFor } from "@wsp/engine";
-import { CLAUDE_INSTALLER, importFor, importResultPath, type SecretReader } from "./init-import.js";
+import { CLAUDE_INSTALLER, importFor, importResultPath, keychainLogins, readSecrets, type SecretReader } from "./init-import.js";
 import {
   LOGIN_CHOICES,
   RUNG_TITLE,
@@ -527,15 +527,29 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   saveRecipe(path, manifest, ticks, choices);
   log.step(`Recipe saved to ${path}`, out);
 
-  const bring = manifest.entries.filter(e => ticks.has(e.id)).map(e => {
-    const choice = choices.get(e.id);
-    return isLoginChoice(choice) ? { ...e, choice } : e;
-  });
+  const bringFor = (): ManifestEntry[] =>
+    manifest.entries.filter(e => ticks.has(e.id)).map(e => {
+      const choice = choices.get(e.id);
+      return isLoginChoice(choice) ? { ...e, choice } : e;
+    });
+  // Keychain consent is asked here, before anything boots, so a refusal costs no
+  // machine: the row turns into a sign-in on the machine and the confirm sees that.
+  const wanted = keychainLogins(bringFor(), opts.platform);
+  const reading = spin(io.output, "Reading your Keychain logins", io.isTTY && wanted.length > 0);
+  const secrets = await readSecrets(wanted, opts.secrets);
+  reading.stop();
+  if (secrets.refused.length > 0) {
+    const label = (id: string) => manifest.entries.find(e => e.id === id)?.label ?? id;
+    for (const r of secrets.refused) choices.set(r.id, "machine");
+    log.warn(secrets.refused.map(r => `${label(r.id)}: Keychain read failed (${r.reason}); you will sign in on the machine instead.`).join("\n"), out);
+    saveRecipe(path, manifest, ticks, choices);
+  }
+  const bring = bringFor();
   const resultsPath = importResultPath(opts.statePath);
   let installs: string[] | undefined;
   const imp = importFor(bring, {
     home: opts.home,
-    secrets: opts.secrets,
+    secrets: secrets.values,
     platform: opts.platform,
     onResult: r => {
       writeFileSync(resultsPath, `${JSON.stringify(r, null, 2)}\n`);
@@ -549,8 +563,8 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   });
   const recipe = goldenRecipeFor(bring, opts.keys, { import: imp });
   const rt = opts.runtime(recipe);
-  // A builder from an earlier run cannot be reused (its first life is not known) and is
-  // never reaped from here: the person kills or saves it, then runs init again.
+  // A builder from an earlier run cannot be sealed (its first life is not known) and is
+  // never reaped from here: the person kills it, then runs init again.
   const earlier = await rt.golden.builders();
   if (earlier.length > 0) {
     const lines = earlier.map(b => {
@@ -558,7 +572,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       return `${b.name} (${b.id}), ${fmtDuration(hours * 3_600_000)} old, about $${(hours * opts.pricing.rateUsdPerHour(b.size)).toFixed(2)} so far`;
     });
     log.warn(["A builder from an earlier wsp init is still running on the account:", ...lines].join("\n"), out);
-    cancel("Nothing was booted. Kill it or save it first (the Solari console lists it), then run wsp init again.", out);
+    cancel("Nothing was booted. Kill it first (the Solari console lists it); a builder cannot be sealed after a restart. Then run wsp init again.", out);
     return { code: 1 };
   }
   const question = bootQuestion(recipe, opts.pricing);
