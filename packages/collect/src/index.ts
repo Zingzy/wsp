@@ -16,3 +16,4 @@ export { classifyFormulae, linuxSupport, renderSnapshot, type BottleSnapshot } f
 export { LINUX_BOTTLES } from "./data/linux-bottles.js";
 export { AGENTS, detectAgents } from "./detect/agents.js";
 export { detectLogins } from "./detect/logins.js";
+export * from "./everything/index.js";
