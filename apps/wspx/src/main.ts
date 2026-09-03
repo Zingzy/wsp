@@ -323,7 +323,7 @@ async function cmdDemo(rt: Runtime, envs: Record<string, string>): Promise<void>
         for (const w of await rt.workspaces.list()) {
           if (w.name.startsWith("demo-")) await rt.workspaces.delete(w.id).catch(() => {});
         }
-        return rt.reap(0);
+        return (await rt.reap(0)).reaped;
       },
       reaped => (reaped.length > 0 ? `reaped strays: ${reaped.join(", ")}` : "no strays"),
     );
@@ -459,7 +459,7 @@ async function main(): Promise<void> {
       return;
     }
     case "reap": {
-      const reaped = await rt.reap(0);
+      const { reaped } = await rt.reap(0);
       log(reaped.length > 0 ? `reaped: ${reaped.join(", ")}` : "nothing to reap");
       return;
     }

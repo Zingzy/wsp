@@ -5,7 +5,7 @@ import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
-import type { GoldenManifest } from "@wsp/engine";
+import { BUILDER_IDLE_MS, type GoldenManifest, type ReapResult } from "@wsp/engine";
 import { createRuntime, memoryStore, type HarnessAdapterFactory, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cli, serve, type CliIO } from "../src/cli.js";
@@ -363,19 +363,46 @@ describe("host sweeps orphaned machines", () => {
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
-  it("kills a builder nothing recorded as soon as it starts, and logs the id with its labels", async () => {
-    const { rt, backend } = testRuntime();
-    await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-builder": "1" } });
-    await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-builder": "1", poc: "ttl-test" } });
+  const BUILDER = { wsp: "1", "wsp-builder": "1" };
+  const ago = (ms: number): string => new Date(Date.now() - ms).toISOString();
+
+  it("at start reaps only the builders its own state owns or nobody claimed past the backstop, lists the rest once, and touches no poc machine", async () => {
+    const { rt, backend, store } = testRuntime();
+    const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true" } });
+    const owned = await crashed.golden.prepare();
+    const foreignAt = ago(53_000);
+    const youngAt = ago(2 * 60_000);
+    const foreign = await backend.create({ kind: "sandbox", labels: { ...BUILDER, "wsp-owner": "h_other", createdAt: foreignAt } });
+    const orphan = await backend.create({ kind: "sandbox", labels: { ...BUILDER, createdAt: ago(BUILDER_IDLE_MS + 60_000) } });
+    const young = await backend.create({ kind: "sandbox", labels: { ...BUILDER, createdAt: youngAt } });
+    const ageless = await backend.create({ kind: "sandbox", labels: BUILDER });
+    const experiment = await backend.create({ kind: "sandbox", labels: { ...BUILDER, poc: "ttl-test" } });
     const lines: string[] = [];
 
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
 
-    expect(backend.machines.map(m => m.killed)).toEqual([true, false]);
-    expect(lines).toHaveLength(1);
-    expect(lines[0]).toContain("m1");
-    expect(lines[0]).toContain("wsp-builder=1");
-    expect(lines[0]).not.toContain("m2");
+    const killed = (m: { id: string }): boolean => backend.machines.find(x => x.id === m.id)!.killed;
+    expect([owned, foreign, orphan, young, ageless, experiment].map(killed)).toEqual([true, false, true, false, false, false]);
+    expect(lines).toEqual([
+      expect.stringMatching(new RegExp(`^reap: killed ${owned.id} \\(.*wsp-builder=1.*\\)$`)),
+      expect.stringMatching(new RegExp(`^reap: killed ${orphan.id} \\(.*wsp-builder=1.*\\)$`)),
+      `reap: left alone ${foreign.id} (wsp=1 wsp-builder=1 wsp-owner=h_other createdAt=${foreignAt}): another host's builder (h_other), 53 s old, $0.11/h`,
+      `reap: left alone ${young.id} (wsp=1 wsp-builder=1 createdAt=${youngAt}): builder with no owner, inside its idle window, 2 min old, $0.11/h`,
+      `reap: left alone ${ageless.id} (wsp=1 wsp-builder=1): builder with no owner, inside its idle window, age unknown, $0.11/h`,
+    ]);
+    expect(await store.list("builders")).toEqual([]);
+  });
+
+  it("a failed listing reaps nothing and logs the failure", async () => {
+    const { rt, backend } = testRuntime();
+    await backend.create({ kind: "sandbox", labels: { ...BUILDER, createdAt: ago(BUILDER_IDLE_MS + 60_000) } });
+    backend.list = async () => { throw new Error("list 502"); };
+    const lines: string[] = [];
+
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
+
+    expect(backend.machines[0]!.killed).toBe(false);
+    expect(lines).toEqual(["reap: sweep failed: list 502"]);
   });
 
   it("sweeps again every ten minutes until the host closes", async () => {
@@ -385,15 +412,17 @@ describe("host sweeps orphaned machines", () => {
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
     const reap = vi.spyOn(rt, "reap");
 
-    await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-builder": "1" } });
+    await backend.create({ kind: "sandbox", labels: { ...BUILDER, createdAt: ago(BUILDER_IDLE_MS + 60_000) } });
+    await backend.create({ kind: "sandbox", labels: { ...BUILDER, "wsp-owner": "h_other", createdAt: ago(60_000) } });
     await vi.advanceTimersByTimeAsync(REAP_INTERVAL_MS - 1);
     expect(reap).not.toHaveBeenCalled();
     expect(backend.machines[0]?.killed).toBe(false);
 
     await vi.advanceTimersByTimeAsync(1);
     expect(reap).toHaveBeenCalledTimes(1);
-    expect(backend.machines[0]?.killed).toBe(true);
-    expect(lines).toEqual([expect.stringContaining("m1")]);
+    expect(backend.machines.map(m => m.killed)).toEqual([true, false]);
+    // The foreign builder is listed at start only; later sweeps stay quiet about it.
+    expect(lines).toEqual([expect.stringContaining("killed m1")]);
 
     await vi.advanceTimersByTimeAsync(REAP_INTERVAL_MS);
     expect(reap).toHaveBeenCalledTimes(2);
@@ -409,13 +438,13 @@ describe("host sweeps orphaned machines", () => {
     vi.useFakeTimers({ toFake: [...TIMERS] });
     const { rt } = testRuntime();
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: () => {} });
-    let finish!: (ids: string[]) => void;
-    const reap = vi.spyOn(rt, "reap").mockImplementationOnce(() => new Promise<string[]>(r => (finish = r)));
+    let finish!: (result: ReapResult) => void;
+    const reap = vi.spyOn(rt, "reap").mockImplementationOnce(() => new Promise<ReapResult>(r => (finish = r)));
 
     await vi.advanceTimersByTimeAsync(REAP_INTERVAL_MS * 3);
     expect(reap).toHaveBeenCalledTimes(1);
 
-    finish([]);
+    finish({ reaped: [], spared: [] });
     await vi.advanceTimersByTimeAsync(REAP_INTERVAL_MS);
     expect(reap).toHaveBeenCalledTimes(2);
   });

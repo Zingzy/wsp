@@ -108,8 +108,7 @@ describe("runtime", () => {
       kind: "sandbox",
       labels: { wsp: "1", createdAt: new Date(Date.now() - 3_600_000).toISOString() },
     });
-    const reaped = await rt.reap();
-    expect(reaped).toEqual(["m2"]);
+    expect(await rt.reap()).toEqual({ reaped: ["m2"], spared: [] });
     expect(backend.machines[0]!.killed).toBe(false);
     await rt.workspaces.delete(ws.id);
     expect(backend.machines[0]!.killed).toBe(true);
@@ -437,8 +436,7 @@ describe("runtime golden builders", () => {
     const own = await rt.golden.prepare({ name: "default" });
     expect((await rt.golden.builders()).map(b => b.id).sort()).toEqual([stale.id, own.id].sort());
 
-    const reaped = await rt.reap();
-    expect(reaped).toEqual([stale.id]);
+    expect(await rt.reap()).toEqual({ reaped: [stale.id], spared: [] });
     expect(backend.machines.find(m => m.id === stale.id)!.killed).toBe(true);
     expect(backend.machines.find(m => m.id === own.id)!.killed).toBe(false);
     expect((await rt.golden.builders()).map(b => b.id)).toEqual([own.id]);
@@ -505,17 +503,37 @@ describe("runtime golden builders", () => {
     expect(await rt.golden.builders()).toEqual([]);
   });
 
-  it("reap kills a builder-labeled machine this process has no record of, whatever its age, and never a poc machine", async () => {
+  it("stamps its builders with one owner id per store, kept across processes", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const first = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
+    await first.golden.prepare();
+    const again = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
+    await again.golden.prepare();
+    const other = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
+    await other.golden.prepare();
+    const owners = backend.machines.map(m => m.spec.labels?.["wsp-owner"]);
+    expect(owners[0]).toMatch(/^h_[0-9a-f]{8}$/);
+    expect(owners[1]).toBe(owners[0]);
+    expect(owners[2]).not.toBe(owners[0]);
+    expect(await store.get("owner", "id")).toEqual({ id: owners[0] });
+  });
+
+  it("reap kills a lost builder wearing this store's owner label, lists another owner's and an unowned young one, and never a poc machine", async () => {
     const backend = stubBackend();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
     const own = await rt.golden.prepare();
+    const owner = backend.machines[0]!.spec.labels!["wsp-owner"]!;
     const now = new Date().toISOString();
-    const leaked = await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-builder": "1", createdAt: now } });
+    const lost = await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-builder": "1", "wsp-owner": owner, createdAt: now } });
+    const foreign = await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-builder": "1", "wsp-owner": "h_other", createdAt: now } });
+    const unowned = await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-builder": "1", createdAt: now } });
     const experiment = await backend.create({ kind: "sandbox", labels: { poc: "p1", wsp: "1", "wsp-builder": "1", createdAt: now } });
-    expect(await rt.reap()).toEqual([leaked.id]);
-    expect(backend.machines.find(m => m.id === leaked.id)!.killed).toBe(true);
-    expect(backend.machines.find(m => m.id === own.id)!.killed).toBe(false);
-    expect(backend.machines.find(m => m.id === experiment.id)!.killed).toBe(false);
+    const result = await rt.reap();
+    expect(result.reaped).toEqual([lost.id]);
+    expect(result.spared.map(b => [b.id, b.owner])).toEqual([[foreign.id, "h_other"], [unowned.id, undefined]]);
+    expect(backend.machines.filter(m => m.killed).map(m => m.id)).toEqual([lost.id]);
+    for (const id of [own.id, foreign.id, unowned.id, experiment.id]) expect(backend.machines.find(m => m.id === id)!.killed).toBe(false);
   });
 });
 

@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
+import type { SparedBuilder } from "@wsp/engine";
 import { serveRuntime, type GoldenBuilderView, type Runtime } from "@wsp/runtime";
 
 // The enriched status now lives in @wsp/runtime (every client reads one
@@ -32,7 +33,7 @@ export interface HostOptions {
   /** Envs baked into workspaces created from the JSON route. */
   workspaceEnvs?: Record<string, string>;
   probeTimeoutMs?: number;
-  /** Receives one line per machine a sweep killed, and one when a sweep fails. */
+  /** Receives one line per machine a sweep killed, one per running builder the first sweep left alone, and one when a sweep fails. */
   log?: (line: string) => void;
 }
 
@@ -99,12 +100,27 @@ function describeLabels(labels: Record<string, string> | undefined): string {
   return ` (${Object.entries(labels).map(([k, v]) => `${k}=${v}`).join(" ")})`;
 }
 
-/** Kills what nothing claims and says which machines went, labels included.
- * The listing is only for the log line: reap decides on its own listing. */
-async function sweepOrphans(rt: Runtime, log: (line: string) => void): Promise<void> {
+function describeAge(ms: number | undefined): string {
+  if (ms === undefined) return "age unknown";
+  if (ms < 60_000) return `${Math.round(ms / 1000)} s old`;
+  if (ms < 3_600_000) return `${Math.round(ms / 60_000)} min old`;
+  return `${(ms / 3_600_000).toFixed(1)} h old`;
+}
+
+function describeSpared(b: SparedBuilder): string {
+  const whose = b.owner !== undefined ? `another host's builder (${b.owner})` : "builder with no owner, inside its idle window";
+  return `reap: left alone ${b.id}${describeLabels(b.labels)}: ${whose}, ${describeAge(b.ageMs)}, $${b.rateUsdPerHour.toFixed(2)}/h`;
+}
+
+/** Kills what this host owns and nothing claims, says which machines went,
+ * labels included, and on the first sweep names the running builders it
+ * left alone. The listing is only for the log line: reap decides on its own listing. */
+async function sweepOrphans(rt: Runtime, log: (line: string) => void, listSpared: boolean): Promise<void> {
   try {
     const labels = new Map((await rt.backend.list()).map(m => [m.id, m.labels]));
-    for (const id of await rt.reap()) log(`reap: killed ${id}${describeLabels(labels.get(id))}`);
+    const { reaped, spared } = await rt.reap();
+    for (const id of reaped) log(`reap: killed ${id}${describeLabels(labels.get(id))}`);
+    if (listSpared) for (const b of spared) log(describeSpared(b));
   } catch (e) {
     log(`reap: sweep failed: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -201,9 +217,10 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   // A sweep that outlives its period (a slow provider listing) must not be
   // joined by the next one: two sweeps would race to kill the same machines.
   let sweeping: Promise<void> | undefined;
-  const sweep = (): Promise<void> => (sweeping ??= sweepOrphans(rt, log).finally(() => (sweeping = undefined)));
-  await sweep();
-  const reapTimer = setInterval(() => void sweep(), REAP_INTERVAL_MS);
+  const sweep = (listSpared: boolean): Promise<void> =>
+    (sweeping ??= sweepOrphans(rt, log, listSpared).finally(() => (sweeping = undefined)));
+  await sweep(true);
+  const reapTimer = setInterval(() => void sweep(false), REAP_INTERVAL_MS);
 
   return {
     port,

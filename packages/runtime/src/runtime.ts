@@ -3,6 +3,7 @@ import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
 import {
   DAEMON_PORT,
   NotFirstLifeError,
+  OWNER_LABEL,
   Workspace,
   buildGolden,
   exportPaths,
@@ -24,6 +25,7 @@ import {
   type MachineShape,
   type MachineSpec,
   type PreviewReach,
+  type ReapResult,
   rollback as rollbackGolden,
 } from "@wsp/engine";
 import type {
@@ -291,7 +293,8 @@ export interface Runtime {
   };
   /** Enriched status (machine state, daemon reach, size, rate) + cost ticker. */
   readonly status: StatusApi;
-  reap(olderThanMs?: number): Promise<string[]>;
+  /** Kills what this state file owns and nothing claims; lists the running builders it left alone. */
+  reap(olderThanMs?: number): Promise<ReapResult>;
   /** Writes every transcript still waiting on its debounce; the store is complete once this resolves. */
   close(): Promise<void>;
 }
@@ -317,6 +320,8 @@ interface TranscriptRecord {
 /** Builders live apart from workspaces: never in the rail, and a record left
  * by a crashed wizard is exactly what reap() sweeps. */
 const BUILDERS = "builders";
+/** One id per state file, stamped on its builders so another host's sweep can tell them apart from its own. */
+const OWNER = "owner";
 
 interface BuilderRecord {
   id: string;
@@ -641,9 +646,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     bus.on(type, e => idle.forget((e as { workspaceId: string }).workspaceId));
   }
 
+  let owner = "";
   let hydrated: Promise<void> | undefined;
   const ready = (): Promise<void> => {
     hydrated ??= (async () => {
+      const stored = (await store.get(OWNER, "id")) as { id: string } | undefined;
+      owner = stored?.id ?? `h_${randomBytes(4).toString("hex")}`;
+      if (!stored) await store.put(OWNER, "id", { id: owner });
       for (const raw of await store.list(WORKSPACES)) {
         const stored = raw as Omit<WorkspaceRecord, "size"> & { size?: WorkspaceSize };
         const machine = await backend.get(stored.machineId).catch((e: unknown) => {
@@ -1009,7 +1018,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...size,
         ...(o?.kind !== undefined ? { kind: o.kind } : {}),
         ...(deployDaemon !== undefined ? { deployDaemon } : {}),
-        labels: { ...recipe.labels, wsp: "1", "wsp-builder": "1", createdAt: new Date().toISOString() },
+        labels: { ...recipe.labels, wsp: "1", "wsp-builder": "1", [OWNER_LABEL]: owner, createdAt: new Date().toISOString() },
         onStage: stageOf(name),
       });
       const record: BuilderRecord = {
@@ -1127,10 +1136,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
       const swept = await reap({
         backend,
+        owner,
         knownIds: [...live.values()].map(e => e.record.machineId).concat([...builders.keys()]),
         ...(olderThanMs !== undefined ? { olderThanMs } : {}),
       });
-      return reaped.concat(swept.filter(id => !reaped.includes(id)));
+      return { reaped: reaped.concat(swept.reaped.filter(id => !reaped.includes(id))), spared: swept.spared };
     },
     close: async () => {
       idle.close();

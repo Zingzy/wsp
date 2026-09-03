@@ -110,8 +110,8 @@ export class SolariBackend implements MachineBackend {
     return new SolariMachine(this, view.sandboxId ?? id, view.kind ?? "sandbox");
   }
 
-  async list(labels?: Record<string, string>): Promise<{ id: string; state: MachineState; labels: Record<string, string> }[]> {
-    const out: { id: string; state: MachineState; labels: Record<string, string> }[] = [];
+  async list(labels?: Record<string, string>): Promise<{ id: string; state: MachineState; labels: Record<string, string>; size?: { cpu: number; memMb: number } }[]> {
+    const out: { id: string; state: MachineState; labels: Record<string, string>; size?: { cpu: number; memMb: number } }[] = [];
     let cursor: string | undefined;
     do {
       const params = new URLSearchParams();
@@ -122,7 +122,12 @@ export class SolariBackend implements MachineBackend {
         "GET", `/sandboxes${qs ? `?${qs}` : ""}`,
       );
       for (const s of page.sandboxes ?? []) {
-        out.push({ id: s.sandboxId, state: STATE_MAP[s.state] ?? "gone", labels: s.metadata ?? {} });
+        out.push({
+          id: s.sandboxId,
+          state: STATE_MAP[s.state] ?? "gone",
+          labels: s.metadata ?? {},
+          ...(s.cpu !== undefined && s.memMb !== undefined ? { size: { cpu: s.cpu, memMb: s.memMb } } : {}),
+        });
       }
       cursor = page.nextCursor;
     } while (cursor);
