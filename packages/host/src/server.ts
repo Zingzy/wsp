@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
-import { serveRuntime, type GoldenBuilderView, type Runtime } from "@wsp/runtime";
+import { describeAge, serveRuntime, type GoldenBuilderView, type ReapedMachine, type Runtime, type SparedMachine } from "@wsp/runtime";
 
 // The enriched status now lives in @wsp/runtime (every client reads one
 // implementation); re-exported so host consumers keep their imports.
@@ -32,7 +32,7 @@ export interface HostOptions {
   /** Envs baked into workspaces created from the JSON route. */
   workspaceEnvs?: Record<string, string>;
   probeTimeoutMs?: number;
-  /** Receives one line per machine a sweep killed, and one when a sweep fails. */
+  /** Receives one line per machine a sweep killed, one per running machine the first sweep left alone, and one when a sweep fails. */
   log?: (line: string) => void;
 }
 
@@ -99,12 +99,43 @@ function describeLabels(labels: Record<string, string> | undefined): string {
   return ` (${Object.entries(labels).map(([k, v]) => `${k}=${v}`).join(" ")})`;
 }
 
-/** Kills what nothing claims and says which machines went, labels included.
- * The listing is only for the log line: reap decides on its own listing. */
-async function sweepOrphans(rt: Runtime, log: (line: string) => void): Promise<void> {
+function describeCost(rateUsdPerHour: number, ageMs: number | undefined): string {
+  const rate = `$${rateUsdPerHour.toFixed(2)}/h`;
+  return ageMs === undefined ? rate : `${rate} (about $${((Math.max(0, ageMs) / 3_600_000) * rateUsdPerHour).toFixed(2)} so far)`;
+}
+
+function kindOf(labels: Record<string, string> | undefined, builder: boolean): string {
+  if (builder) return "builder";
+  return labels?.["wsp-smoke"] === "1" ? "smoke fork" : "workspace";
+}
+
+function describeReaped(r: ReapedMachine): string {
+  const kind = kindOf(r.labels, r.builder);
+  if (r.reason === "recorded") return `reap: stopped ${r.id}: your earlier builder from this setup; a builder cannot be sealed after a restart`;
+  const why = r.reason === "own" ? `${kind} from this setup that no record claims` : `${kind} with no owner`;
+  return `reap: stopped ${r.id}${describeLabels(r.labels)}: ${why}, ${describeAge(r.ageMs)}`;
+}
+
+function describeSpared(m: SparedMachine): string {
+  const kind = kindOf(m.labels, m.builder);
+  const cost = describeCost(m.rateUsdPerHour, m.ageMs);
+  if (m.whose === "foreign") {
+    return `reap: left alone ${m.id}: ${kind} from another wsp setup (owner ${m.owner}), ${describeAge(m.ageMs)}, ${cost}; kill it from the Solari console if it is yours and forgotten`;
+  }
+  const who = m.whose === "own" ? `${kind} from this setup that no record claims` : `${kind} with no owner`;
+  const claim = m.whose === "own" ? " unless a record claims it first" : "";
+  const then = m.ageMs === undefined ? "never reaped by this host" : `reaped once it is ${describeAge(m.backstopMs)}${claim}`;
+  return `reap: left alone ${m.id}: ${who}, ${describeAge(m.ageMs)}, ${cost}; ${then}`;
+}
+
+/** Kills what this host owns and nothing claims, says which machines went and
+ * why, and on the first sweep names the running machines it left alone. */
+async function sweepOrphans(rt: Runtime, log: (line: string) => void, listSpared: boolean): Promise<void> {
   try {
-    const labels = new Map((await rt.backend.list()).map(m => [m.id, m.labels]));
-    for (const id of await rt.reap()) log(`reap: killed ${id}${describeLabels(labels.get(id))}`);
+    const { reaped, spared, failed } = await rt.reap();
+    for (const r of reaped) log(describeReaped(r));
+    if (listSpared) for (const m of spared) log(describeSpared(m));
+    for (const f of failed ?? []) log(f.id !== undefined ? `reap: could not stop ${f.id} (${f.message})` : `reap: sweep failed: ${f.message}`);
   } catch (e) {
     log(`reap: sweep failed: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -201,9 +232,10 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   // A sweep that outlives its period (a slow provider listing) must not be
   // joined by the next one: two sweeps would race to kill the same machines.
   let sweeping: Promise<void> | undefined;
-  const sweep = (): Promise<void> => (sweeping ??= sweepOrphans(rt, log).finally(() => (sweeping = undefined)));
-  await sweep();
-  const reapTimer = setInterval(() => void sweep(), REAP_INTERVAL_MS);
+  const sweep = (listSpared: boolean): Promise<void> =>
+    (sweeping ??= sweepOrphans(rt, log, listSpared).finally(() => (sweeping = undefined)));
+  await sweep(true);
+  const reapTimer = setInterval(() => void sweep(false), REAP_INTERVAL_MS);
 
   return {
     port,

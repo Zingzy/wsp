@@ -72,6 +72,7 @@ export interface MachineBackend {
   readonly pricing: BackendPricing;
   create(spec: MachineSpec): Promise<Machine>;
   get(id: string): Promise<Machine>;
-  list(labels?: Record<string, string>): Promise<{ id: string; state: MachineState; labels: Record<string, string> }[]>;
+  /** size comes off the listing itself; a per-machine GET would reset that machine's idle timer. */
+  list(labels?: Record<string, string>): Promise<{ id: string; state: MachineState; labels: Record<string, string>; size?: { cpu: number; memMb: number } }[]>;
   deleteSnapshot(id: string): Promise<void>;
 }

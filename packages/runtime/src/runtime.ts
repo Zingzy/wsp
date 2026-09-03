@@ -3,6 +3,7 @@ import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
 import {
   DAEMON_PORT,
   NotFirstLifeError,
+  OWNER_LABEL,
   Workspace,
   buildGolden,
   exportPaths,
@@ -24,6 +25,9 @@ import {
   type MachineShape,
   type MachineSpec,
   type PreviewReach,
+  type ReapFailure,
+  type ReapResult,
+  type ReapedMachine,
   rollback as rollbackGolden,
 } from "@wsp/engine";
 import type {
@@ -291,7 +295,8 @@ export interface Runtime {
   };
   /** Enriched status (machine state, daemon reach, size, rate) + cost ticker. */
   readonly status: StatusApi;
-  reap(olderThanMs?: number): Promise<string[]>;
+  /** Kills what this state file owns and nothing claims, plus orphans past their backstop; lists the running machines it left alone. */
+  reap(olderThanMs?: number): Promise<ReapResult>;
   /** Writes every transcript still waiting on its debounce; the store is complete once this resolves. */
   close(): Promise<void>;
 }
@@ -317,6 +322,8 @@ interface TranscriptRecord {
 /** Builders live apart from workspaces: never in the rail, and a record left
  * by a crashed wizard is exactly what reap() sweeps. */
 const BUILDERS = "builders";
+/** One id per state file, stamped on every machine it creates so another host's sweep can tell them apart from its own. */
+const OWNER = "owner";
 
 interface BuilderRecord {
   id: string;
@@ -536,7 +543,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     ...(r.spec.envs !== undefined || override?.envs !== undefined
       ? { envs: { ...r.spec.envs, ...override?.envs } }
       : {}),
-    labels: { ...r.spec.labels, wsp: "1", createdAt: new Date().toISOString() },
+    labels: { ...r.spec.labels, wsp: "1", [OWNER_LABEL]: owner, createdAt: new Date().toISOString() },
     onIdle: "pause",
     idleTimeoutMs: backstopMs(idleWindowOf(r)),
   });
@@ -641,9 +648,35 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     bus.on(type, e => idle.forget((e as { workspaceId: string }).workspaceId));
   }
 
+  let owner = "";
+  /** Ids this process has created and not yet recorded; the sweep must not read them as lost. */
+  const inflight = new Set<string>();
+  const claiming = <T>(run: (b: MachineBackend) => Promise<T>): Promise<T> => {
+    const mine: string[] = [];
+    const b: MachineBackend = {
+      capabilities: backend.capabilities,
+      pricing: backend.pricing,
+      get: id => backend.get(id),
+      list: labels => backend.list(labels),
+      deleteSnapshot: id => backend.deleteSnapshot(id),
+      create: async spec => {
+        const m = await backend.create(spec);
+        inflight.add(m.id);
+        mine.push(m.id);
+        return m;
+      },
+    };
+    return run(b).finally(() => mine.forEach(id => inflight.delete(id)));
+  };
   let hydrated: Promise<void> | undefined;
   const ready = (): Promise<void> => {
     hydrated ??= (async () => {
+      const stored = (await store.get(OWNER, "id")) as { id?: unknown } | undefined;
+      if (typeof stored?.id === "string" && stored.id !== "") owner = stored.id;
+      else {
+        owner = `h_${randomBytes(4).toString("hex")}`;
+        await store.put(OWNER, "id", { id: owner });
+      }
       for (const raw of await store.list(WORKSPACES)) {
         const stored = raw as Omit<WorkspaceRecord, "size"> & { size?: WorkspaceSize };
         const machine = await backend.get(stored.machineId).catch((e: unknown) => {
@@ -987,10 +1020,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   const golden: Runtime["golden"] = {
     async build(o) {
+      await ready();
       const { name, ...build } = o;
       const key = name ?? "default";
       const prior = (await store.get(GOLDENS, key)) as GoldenManifest | undefined;
-      const result = await buildGolden({ ...build, backend, ...(prior !== undefined ? { manifest: prior } : {}) });
+      const result = await claiming(b =>
+        buildGolden({
+          ...build,
+          backend: b,
+          labels: { ...build.labels, wsp: "1", [OWNER_LABEL]: owner, createdAt: new Date().toISOString() },
+          ...(prior !== undefined ? { manifest: prior } : {}),
+        }),
+      );
       await store.put(GOLDENS, key, result.manifest);
       return { manifest: result.manifest, version: result.version };
     },
@@ -1004,27 +1045,29 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const name = o?.name ?? "default";
       const { deployDaemon, smoke, ...size } = recipe;
       void smoke;
-      const builder = await prepareBuilder({
-        backend,
-        ...size,
-        ...(o?.kind !== undefined ? { kind: o.kind } : {}),
-        ...(deployDaemon !== undefined ? { deployDaemon } : {}),
-        labels: { ...recipe.labels, wsp: "1", "wsp-builder": "1", createdAt: new Date().toISOString() },
-        onStage: stageOf(name),
+      return claiming(async b => {
+        const builder = await prepareBuilder({
+          backend: b,
+          ...size,
+          ...(o?.kind !== undefined ? { kind: o.kind } : {}),
+          ...(deployDaemon !== undefined ? { deployDaemon } : {}),
+          labels: { ...recipe.labels, wsp: "1", "wsp-builder": "1", [OWNER_LABEL]: owner, createdAt: new Date().toISOString() },
+          onStage: stageOf(name),
+        });
+        const record: BuilderRecord = {
+          id: builder.machine.id,
+          name,
+          kind: builder.kind,
+          baseTemplate: builder.baseTemplate,
+          setupSha: builder.setupSha,
+          createdAt: builder.createdAt,
+          size: builder.size,
+          ...(builder.machine.streamUrl !== undefined ? { streamUrl: builder.machine.streamUrl } : {}),
+        };
+        builders.set(record.id, { record, builder, stale: false });
+        await store.put(BUILDERS, record.id, record);
+        return builderView(record);
       });
-      const record: BuilderRecord = {
-        id: builder.machine.id,
-        name,
-        kind: builder.kind,
-        baseTemplate: builder.baseTemplate,
-        setupSha: builder.setupSha,
-        createdAt: builder.createdAt,
-        size: builder.size,
-        ...(builder.machine.streamUrl !== undefined ? { streamUrl: builder.machine.streamUrl } : {}),
-      };
-      builders.set(record.id, { record, builder, stale: false });
-      await store.put(BUILDERS, record.id, record);
-      return builderView(record);
     },
 
     async seal(builderId) {
@@ -1034,17 +1077,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const recipe = recipeOrThrow();
       const prior = (await store.get(GOLDENS, entry.record.name)) as GoldenManifest | undefined;
       try {
-        const result = await sealGolden(entry.builder, {
-          backend,
-          smoke: recipe.smoke,
-          ...(recipe.cpu !== undefined ? { cpu: recipe.cpu } : {}),
-          ...(recipe.memMb !== undefined ? { memMb: recipe.memMb } : {}),
-          ...(recipe.envs !== undefined ? { envs: recipe.envs } : {}),
-          labels: { ...recipe.labels, wsp: "1", "wsp-smoke": "1", createdAt: new Date().toISOString() },
-          ...(prior !== undefined ? { manifest: prior } : {}),
-          onStage: stageOf(entry.record.name),
-          ...(opts.killConfirm !== undefined ? { killConfirm: opts.killConfirm } : {}),
-        });
+        const result = await claiming(b =>
+          sealGolden(entry.builder, {
+            backend: b,
+            smoke: recipe.smoke,
+            ...(recipe.cpu !== undefined ? { cpu: recipe.cpu } : {}),
+            ...(recipe.memMb !== undefined ? { memMb: recipe.memMb } : {}),
+            ...(recipe.envs !== undefined ? { envs: recipe.envs } : {}),
+            labels: { ...recipe.labels, wsp: "1", "wsp-smoke": "1", [OWNER_LABEL]: owner, createdAt: new Date().toISOString() },
+            ...(prior !== undefined ? { manifest: prior } : {}),
+            onStage: stageOf(entry.record.name),
+            ...(opts.killConfirm !== undefined ? { killConfirm: opts.killConfirm } : {}),
+          }),
+        );
         await store.put(GOLDENS, entry.record.name, result.manifest);
         return result;
       } catch (e) {
@@ -1117,20 +1162,39 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     status,
     reap: async olderThanMs => {
       await ready();
-      const reaped: string[] = [];
+      // A hydrated builder is not first-life and can never seal; stopping it is the only thing that ends its bill.
+      const reaped: ReapedMachine[] = [];
+      const failed: ReapFailure[] = [];
+      const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
       for (const b of [...builders.values()].filter(b => b.stale)) {
-        await b.builder.machine.kill().catch((e: unknown) => {
-          if ((e as { kind?: string }).kind !== "missing") throw e;
-        });
+        try {
+          await b.builder.machine.kill();
+        } catch (e) {
+          if ((e as { kind?: string }).kind !== "missing") {
+            failed.push({ id: b.record.id, message: `${messageOf(e)}; stays recorded, retried next sweep` });
+            continue;
+          }
+        }
         await forgetBuilder(b.record.id);
-        reaped.push(b.record.id);
+        reaped.push({ id: b.record.id, builder: true, reason: "recorded" });
       }
-      const swept = await reap({
-        backend,
-        knownIds: [...live.values()].map(e => e.record.machineId).concat([...builders.keys()]),
-        ...(olderThanMs !== undefined ? { olderThanMs } : {}),
-      });
-      return reaped.concat(swept.filter(id => !reaped.includes(id)));
+      const result = (swept: ReapResult): ReapResult => {
+        const allFailed = failed.concat(swept.failed ?? []);
+        return { reaped: reaped.concat(swept.reaped), spared: swept.spared, ...(allFailed.length > 0 ? { failed: allFailed } : {}) };
+      };
+      try {
+        return result(
+          await reap({
+            backend,
+            owner,
+            knownIds: () => [...live.values()].map(e => e.record.machineId).concat([...builders.keys()], [...inflight], reaped.map(r => r.id)),
+            ...(olderThanMs !== undefined ? { olderThanMs } : {}),
+          }),
+        );
+      } catch (e) {
+        failed.push({ message: messageOf(e) });
+        return result({ reaped: [], spared: [] });
+      }
     },
     close: async () => {
       idle.close();
