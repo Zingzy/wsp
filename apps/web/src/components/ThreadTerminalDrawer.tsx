@@ -341,6 +341,8 @@ export interface ThreadTerminalDrawerProps {
   onHeightChange: (height: number) => void;
   /** Prefer link-provided tab titles when present (the shell name, the foreground process). */
   terminalLabelsById?: ReadonlyMap<string, string>;
+  /** False while the workspace's link is down: the empty state then says so instead of offering a terminal. */
+  terminalsReachable?: boolean;
   /** Bytes in, keys out and resize for one terminal; the drawer itself never talks to the daemon. */
   terminalIo: (terminalId: string) => TerminalIo;
   terminalConfig?: TerminalViewportConfig;
@@ -396,6 +398,7 @@ export default function ThreadTerminalDrawer({
   onCloseTerminal,
   onHeightChange,
   terminalLabelsById,
+  terminalsReachable = true,
   terminalIo,
   terminalConfig = EMPTY_CONFIG,
 }: ThreadTerminalDrawerProps) {
@@ -706,10 +709,16 @@ export default function ThreadTerminalDrawer({
           />
         ) : null}
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-4 py-6 text-center text-sm text-muted-foreground">
-          <p>No terminals for this workspace yet.</p>
-          <Button size="xs" variant="outline" onClick={onNewTerminalAction}>
-            {newTerminalActionLabel}
-          </Button>
+          {terminalsReachable ? (
+            <>
+              <p>No terminals for this workspace yet.</p>
+              <Button size="xs" variant="outline" onClick={onNewTerminalAction}>
+                {newTerminalActionLabel}
+              </Button>
+            </>
+          ) : (
+            <p>Not connected to this workspace. Terminals open once it is running.</p>
+          )}
         </div>
       </aside>
     );

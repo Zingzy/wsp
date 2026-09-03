@@ -23,6 +23,7 @@ const SIDEBAR_WIDTH_STORAGE_KEY = "wsp:sidebar-width";
 const SIDEBAR_MIN_WIDTH = 220;
 const SIDEBAR_MAX_WIDTH = 480;
 const RIGHT_PANEL_SHORTCUT_LABEL = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "rightPanel.toggle");
+const TERMINAL_SHORTCUT_LABEL = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "terminal.toggle");
 
 export function AppShell({ children }: { children: ReactNode }) {
   const workspaceId = useSelectedId();
@@ -39,7 +40,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <PanelLayoutControls
       terminalAvailable={workspaceId !== null}
       terminalOpen={terminalOpen}
-      terminalShortcutLabel={null}
+      terminalShortcutLabel={TERMINAL_SHORTCUT_LABEL}
       rightPanelAvailable={workspaceId !== null}
       rightPanelOpen={rightPanelOpen}
       rightPanelShortcutLabel={RIGHT_PANEL_SHORTCUT_LABEL}

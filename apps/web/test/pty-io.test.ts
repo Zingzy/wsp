@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The per-pty io the viewport is handed: bytes replay then stream into the
 // screen, keys go through the compose table (line mode buffers locally and
-// echoes, raw mode passes through), a mode change flushes, a reconnect resets.
+// echoes, raw mode passes through), a mode change flushes, a reconnect resets
+// and gives a typed line back once the re-attach says the shell still reads lines.
 import { describe, expect, it } from "vitest";
 import { WorkspaceTerminals, type TerminalWire } from "../src/terminal/link.js";
 import { composedPtyIo, type TerminalScreen } from "../src/terminal/pty-io.js";
@@ -90,10 +91,59 @@ describe("composedPtyIo", () => {
     expect(writes).toEqual(["y"]);
   });
 
+  it("a line typed before a reconnect is repainted and kept once the re-attach reports line mode", async () => {
+    const { wt, io, screen, writes, painted, mode, settle } = await setup();
+    io.attach(screen);
+    mode("line");
+    io.write("l");
+    io.write("s");
+    wt.feedStatus("connecting");
+    wt.feedStatus("live");
+    painted.length = 0;
+    mode("line");
+    expect(painted.join("")).toBe("ls");
+    io.write("\r");
+    await settle();
+    expect(writes).toEqual(["ls\r"]);
+  });
+
+  it("a line typed before a reconnect is dropped when the re-attach reports raw mode", async () => {
+    const { wt, io, screen, writes, painted, mode, settle } = await setup();
+    io.attach(screen);
+    mode("line");
+    io.write("l");
+    wt.feedStatus("connecting");
+    wt.feedStatus("live");
+    painted.length = 0;
+    mode("raw");
+    io.write("j");
+    await settle();
+    expect(painted).toEqual([]);
+    expect(writes).toEqual(["j"]);
+  });
+
   it("resize goes to the pty as pty.resize", async () => {
     const { io, resizes, settle } = await setup();
     io.resize(100, 40);
     await settle();
     expect(resizes).toEqual([{ ptyId: "p1", cols: 100, rows: 40 }]);
+  });
+});
+
+describe("WorkspaceTerminals.io", () => {
+  it("hands out one io per pty, so every surface shares its compose buffer, and drops it on close", async () => {
+    const { wt, writes, mode, settle } = await setup();
+    const io = wt.io("p1");
+    expect(wt.io("p1")).toBe(io);
+    const a: TerminalScreen = { write: () => {}, reset: () => {} };
+    io.attach(a);
+    mode("line");
+    io.write("c");
+    wt.io("p1").write("d");
+    wt.io("p1").write("\r");
+    await settle();
+    expect(writes).toEqual(["cd\r"]);
+    await wt.close("p1");
+    expect(wt.io("p1")).not.toBe(io);
   });
 });

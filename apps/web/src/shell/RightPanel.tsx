@@ -21,8 +21,8 @@ import { FilesSurface } from "../files/FilesSurface.js";
 import { useStatus, useWorkspace } from "../protocol/store.js";
 import { useRightPanelStore, type WorkspaceRightPanelState } from "../rightPanelStore.js";
 import { ScreenTab } from "../tabs/ScreenTab.js";
-import { getTerminals } from "../terminal/link.js";
-import { useTerminalLabels, WorkspaceTerminalPanel } from "../components/WorkspaceTerminalPanel.js";
+import { openPanelTerminal } from "./shellCommands.js";
+import { useTerminalSurfaces, WorkspaceTerminalPanel } from "../components/WorkspaceTerminalPanel.js";
 
 const NO_PENDING: ReadonlySet<string> = new Set();
 /** index.html pins the dark theme; the code views take it as a prop. */
@@ -42,11 +42,10 @@ export function RightPanel({
   const workspace = useWorkspace(workspaceId);
   const status = useStatus(workspaceId);
   const open = useRightPanelStore(s => s.open);
-  const openTerminal = useRightPanelStore(s => s.openTerminal);
   const activateSurface = useRightPanelStore(s => s.activateSurface);
   const closeSurface = useRightPanelStore(s => s.closeSurface);
   const close = useRightPanelStore(s => s.close);
-  const terminalLabelsById = useTerminalLabels(workspaceId);
+  const terminalLabelsById = useTerminalSurfaces(workspaceId);
   const active = state.surfaces.find(surface => surface.id === state.activeSurfaceId) ?? null;
   const browserTabs = useWorkspaceBrowserTabs(workspaceId);
   const ports = useWorkspacePorts(workspaceId);
@@ -72,12 +71,7 @@ export function RightPanel({
       onActivate={surface => activateSurface(workspaceId, surface.id)}
       onCloseSurface={surface => closeSurface(workspaceId, surface.id)}
       onAddBrowser={() => open(workspaceId, "preview")}
-      onAddTerminal={() => {
-        void getTerminals(workspaceId)
-          ?.open()
-          .then(tab => openTerminal(workspaceId, tab.ptyId))
-          .catch(() => {});
-      }}
+      onAddTerminal={() => void openPanelTerminal(workspaceId)}
       onAddDiff={() => open(workspaceId, "diff")}
       onAddFiles={() => open(workspaceId, "files")}
       onAddMachine={() => open(workspaceId, "machine")}

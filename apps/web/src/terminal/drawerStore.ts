@@ -57,7 +57,7 @@ const update = (
   return { ...byWorkspaceId, [workspaceId]: next };
 };
 
-function migrate(persisted: unknown): { byWorkspaceId: Record<string, TerminalUiState> } {
+function normalizePersisted(persisted: unknown): { byWorkspaceId: Record<string, TerminalUiState> } {
   if (!persisted || typeof persisted !== "object") return { byWorkspaceId: {} };
   const raw = (persisted as { byWorkspaceId?: unknown }).byWorkspaceId;
   if (!raw || typeof raw !== "object") return { byWorkspaceId: {} };
@@ -107,7 +107,9 @@ export const useTerminalDrawerStore = create<TerminalDrawerStoreState>()(
       version: 1,
       storage: createJSONStorage(() => window.localStorage),
       partialize: s => ({ byWorkspaceId: s.byWorkspaceId }),
-      migrate,
+      migrate: normalizePersisted,
+      // migrate runs only on a version change; a bad shape stored at this version must be caught on every hydrate.
+      merge: (persisted, current) => ({ ...current, ...normalizePersisted(persisted) }),
     },
   ),
 );

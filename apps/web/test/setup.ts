@@ -39,8 +39,12 @@ if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
     }) as MediaQueryList;
 }
 
+// Base UI's scroll area calls getAnimations on its viewport; with the stub in
+// place Base UI would also wait for animations before unmounting a dialog, so
+// its own switch keeps that path synchronous, as it is with no getAnimations.
 if (typeof Element !== "undefined" && typeof Element.prototype.getAnimations !== "function") {
   Element.prototype.getAnimations = () => [];
+  (globalThis as { BASE_UI_ANIMATIONS_DISABLED?: boolean }).BASE_UI_ANIMATIONS_DISABLED = true;
 }
 
 if (typeof ResizeObserver === "undefined") {

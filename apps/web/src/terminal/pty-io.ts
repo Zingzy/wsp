@@ -23,6 +23,8 @@ export interface TerminalIo {
 export function composedPtyIo(wt: WorkspaceTerminals, ptyId: string): TerminalIo {
   let compose: ComposeState = RAW_STATE;
   let screen: TerminalScreen | null = null;
+  // A line typed but not sent when the wire dropped; it comes back only if the re-attach reports line mode.
+  let held = "";
   const apply = (step: ComposeStep): void => {
     compose = step.state;
     if (step.toScreen) screen?.write(step.toScreen);
@@ -35,10 +37,16 @@ export function composedPtyIo(wt: WorkspaceTerminals, ptyId: string): TerminalIo
         data: d => next.write(d),
         reset: () => {
           // The screen is wiped and the mode is unknown until re-attach reports it.
+          held = compose.mode === "line" ? compose.buffer : "";
           compose = RAW_STATE;
           next.reset();
         },
-        mode: report => apply(composeMode(compose, report)),
+        mode: report => {
+          const line = held;
+          held = "";
+          apply(composeMode(compose, report));
+          if (line && compose.mode === "line") apply({ state: { ...compose, buffer: line }, toPty: "", toScreen: compose.echo ? line : "" });
+        },
       });
       return () => {
         unbind();

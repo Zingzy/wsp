@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import type { DaemonEvent, DaemonLinkStatus } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
-import { connectDaemonLink, daemonSocketUrl, type DaemonLink } from "../src/terminal/daemon-link.js";
+import { connectDaemonLink, daemonSocketUrl, DaemonRequestError, type DaemonLink } from "../src/terminal/daemon-link.js";
 import { startTcpProxy, type TcpProxy } from "../../../packages/runtime/test/tcp-proxy.js";
 
 const TOKEN = "link-token";
@@ -70,6 +70,22 @@ describe("connectDaemonLink", () => {
     await link.request("pty.write", { ptyId, data: "echo link-mark-$((40 + 2))\r" });
     await until(() => events.some(e => e.type === "pty.data" && e.data.includes("link-mark-42")), 10_000);
   }, 15_000);
+
+  it("a refusal rejects as DaemonRequestError, with the typed code when the op sends one", async () => {
+    daemon = await startTestDaemon();
+    link = connectDaemonLink({
+      reach: async () => ({ url: `ws://127.0.0.1:${daemon!.port}`, daemonToken: TOKEN }),
+      onEvent: () => {},
+    });
+    await until(() => link!.status() === "live");
+    const coded = await link.request("fs.list", { path: ".", depth: 0 }).catch((e: unknown) => e);
+    expect(coded).toBeInstanceOf(DaemonRequestError);
+    expect((coded as DaemonRequestError).code).toBe("bad-request");
+    expect((coded as DaemonRequestError).message).toBe("depth must be a positive integer");
+    const plain = await link.request("pty.write", { ptyId: "nope", data: "x" }).catch((e: unknown) => e);
+    expect(plain).toBeInstanceOf(DaemonRequestError);
+    expect((plain as DaemonRequestError).code).toBeUndefined();
+  });
 
   it("a rejected token is terminal: reauth-needed, no redial", async () => {
     daemon = await startTestDaemon();

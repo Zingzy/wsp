@@ -85,7 +85,9 @@ here are included or relied upon under their own licenses, reproduced below.
 
    apps/web/src/terminal/ghostty/vendor/ghostty-vt.wasm and
    ghostty-write-pty.wasm are built from https://github.com/ghostty-org/ghostty
-   and taken as-is from pingdotgg/t3code at commit 57a66608.
+   at commit 9f62873bf195e4d8a762d768a1405a5f2f7b1697 (the pin in t3code's
+   native/libghostty-vt/VERSION) and taken as-is from pingdotgg/t3code at
+   commit 57a66608.
 
    MIT License
    
@@ -114,7 +116,9 @@ here are included or relied upon under their own licenses, reproduced below.
 4. Nerd Fonts, Symbols Nerd Font Mono (MIT)
 
    apps/web/src/terminal/ghostty/fonts/SymbolsNerdFontMono-Regular.woff2 is
-   from https://github.com/ryanoasis/nerd-fonts; its LICENSE sits beside it.
+   Nerd Fonts release 3.4.0 (the version string in the font's name table;
+   t3code, where the file was taken from, does not record it) from
+   https://github.com/ryanoasis/nerd-fonts; its LICENSE sits beside it.
 
    The MIT License (MIT)
    
