@@ -157,6 +157,7 @@ describe("host serves the app", () => {
     dirs.push(home);
     vi.stubEnv("SOLARI_API_KEY", SOLARI);
     vi.stubEnv("ANTHROPIC_API_KEY", ANTHROPIC);
+    vi.stubEnv("HOME", home);
     vi.stubEnv("WSP_HOME", home);
 
     const { rt } = testRuntime();

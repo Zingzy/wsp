@@ -65,7 +65,7 @@ describe("the wsp bin stops cleanly on a signal", () => {
     const output: string[] = [];
     child = spawn(process.execPath, [BIN, "--port", "0", "--ws-port", "0", "--state", statePath], {
       cwd: home,
-      env: { ...process.env, SOLARI_API_KEY: "slr_live_fake_signal_key", WSP_HOME: home },
+      env: { ...process.env, SOLARI_API_KEY: "slr_live_fake_signal_key", HOME: home, WSP_HOME: home },
       stdio: ["ignore", "pipe", "pipe"],
     });
     const ports = await untilServing(child, output);

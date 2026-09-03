@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Meta-panel protocol hooks: live cost-series accumulation (no history op
-// exists on the wire, so the series starts when the app opens) and the
+// Machine surface protocol hooks: live cost-series accumulation (no history op
+// exists on the wire, so the series starts when the surface mounts) and the
 // optimistic upgrade flow, mirroring the store's nap/wake pattern.
 import { useCallback, useEffect, useState } from "react";
 import type { WorkspaceSize, WorkspaceView } from "@wsp/protocol";
@@ -14,7 +14,7 @@ export interface CostPoint {
   at: string;
 }
 
-/** ~4 minutes of 5s cost ticks; enough for a 258px sparkline. */
+/** ~4 minutes of 5s cost ticks; one bar each in the usage chart. */
 const MAX_POINTS = 48;
 
 export function useCostSeries(id: string | null): CostPoint[] {

@@ -207,7 +207,7 @@ export interface Api {
   touch?(id: string): Promise<void>;
   /** Replaces the machine with a fresh golden fork at the new size; gate on capabilities().resize. */
   upgrade(id: string, size: WorkspaceSizeSpec): Promise<WorkspaceView>;
-  /** Replaces a zombie's machine with a fresh golden fork; id and name stay, workspace.upgraded carries the new machineId. Optional like touch so fixtures need not fake it. */
+  /** Replaces a zombie's machine with a fresh golden fork carrying the vault; id and name stay. Optional so fixtures without a zombie need not fake it. */
   rebuild?(id: string): Promise<WorkspaceView>;
   capabilities(): Promise<Capabilities>;
   /** How to dial the workspace's daemon right now; ask again per dial, the edge token expires hourly. */
