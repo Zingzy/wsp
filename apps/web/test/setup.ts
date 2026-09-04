@@ -93,3 +93,31 @@ globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
 // The kit's sidebar persists its open state through the Cookie Store API,
 // which jsdom does not ship; toggling it in a test needs a sink.
 (globalThis as { cookieStore?: unknown }).cookieStore ??= { set: async () => {} };
+
+// jsdom has no CSS.escape or scrollIntoView; the composer's slash menu uses both to keep the active row in view.
+if (typeof globalThis.CSS === "undefined") {
+  (globalThis as { CSS?: unknown }).CSS = { escape: (value: string) => value.replace(/[^\w-]/g, ch => `\\${ch}`) };
+}
+if (typeof Element !== "undefined" && typeof Element.prototype.scrollIntoView !== "function") {
+  Element.prototype.scrollIntoView = () => {};
+}
+
+// jsdom's Range has no geometry; the editor measures the caret's range to keep it scrolled into view.
+if (typeof Range !== "undefined" && typeof Range.prototype.getBoundingClientRect !== "function") {
+  const empty = () => ({ x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, toJSON: () => ({}) }) as DOMRect;
+  Range.prototype.getBoundingClientRect = empty;
+  Range.prototype.getClientRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] }) as unknown as DOMRectList;
+}
+
+// jsdom has no ClipboardEvent; the editor's paste path checks the event's class name before reading clipboardData.
+if (typeof globalThis.ClipboardEvent === "undefined") {
+  class ClipboardEvent extends Event {
+    readonly clipboardData: DataTransfer | null;
+    constructor(type: string, init?: ClipboardEventInit) {
+      super(type, init);
+      this.clipboardData = init?.clipboardData ?? null;
+    }
+  }
+  (globalThis as { ClipboardEvent?: unknown }).ClipboardEvent = ClipboardEvent;
+  (window as unknown as { ClipboardEvent?: unknown }).ClipboardEvent = ClipboardEvent;
+}
