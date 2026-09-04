@@ -3,7 +3,7 @@ import type { Host } from "../host.js";
 import type { ManifestEntry } from "../manifest.js";
 import { type RowSpec, exists, item, present, row } from "./common.js";
 
-const RC_FILES = ["zshrc", "zshenv", "zprofile", "zlogin", "bashrc", "bash_profile", "profile", "inputrc", "aliases", "zsh_aliases"];
+export const RC_FILES = ["zshrc", "zshenv", "zprofile", "zlogin", "bashrc", "bash_profile", "profile", "inputrc", "aliases", "zsh_aliases"];
 
 const ROWS: readonly RowSpec[] = [
   { rung: "shell", id: "shell/fish", label: "fish config", paths: ["~/.config/fish"] },
