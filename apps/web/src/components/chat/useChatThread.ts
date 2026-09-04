@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// One workspace's chat thread: the persisted transcript replayed from
-// sessions.history on mount, then live session.* events appended. Live events
-// are ignored until the history reply lands, because the socket is FIFO:
-// anything pushed before the reply is already in it, anything after is not.
+// One workspace's chat thread: the last thread of the persisted transcript
+// replayed from sessions.history on mount, then live session.* events
+// appended. Live events are ignored until the history reply lands, because
+// the socket is FIFO: anything pushed before the reply is already in it,
+// anything after is not.
 // The adapter derives the view; this hook only keeps the event list, the
 // arrival clock for unstamped events, and the things the wire cannot know
 // yet: a prompt the user just sent, a send that failed locally, and a new
@@ -57,9 +58,13 @@ export interface ThreadState {
   readonly localErrors: ReadonlyArray<{ message: string; at: string }>;
   readonly fresh: boolean;
   readonly stale: StaleTurn | null;
+  /** A send in flight, until the first live event that changes this state or a reload rebuilds it. */
+  readonly sending: boolean;
+  /** Thread id of the transcript a new-thread request left; read while fresh to tell the person's own thread from it. */
+  readonly left: string | undefined;
 }
 
-const EMPTY: ThreadState = { events: [], arrivals: [], pendingPrompt: null, localErrors: [], fresh: false, stale: null };
+const EMPTY: ThreadState = { events: [], arrivals: [], pendingPrompt: null, localErrors: [], fresh: false, stale: null, sending: false, left: undefined };
 const SESSION_TYPES: ReadonlySet<string> = new Set(["session.start", "session.delta", "session.done", "session.end"]);
 const now = () => new Date().toISOString();
 
@@ -84,6 +89,32 @@ function runningTurn(events: ReadonlyArray<SessionEvent>): StaleTurn | null {
   if (live === null || live.state !== "running") return null;
   const start = events.findLast(e => e.type === "session.start");
   return { kind: "turn", turnId: start?.turnId, sessionId: live.sessionId };
+}
+
+/** The last thread of a transcript: every event sharing the last event's thread id, a missing id being its own value. */
+function lastThread(events: ReadonlyArray<SessionEvent>): SessionEvent[] {
+  const id = events.at(-1)?.threadId;
+  return events.filter(e => e.threadId === id);
+}
+
+/**
+ * The history reply, folded to its last thread. A new-thread request that landed while history was
+ * in flight wins over the transcript it asked to leave, unless the transcript already holds the
+ * thread that request opened: the runtime minted it an id the left thread did not have, so it is
+ * the person's own and loads as such, and only the left thread can hold a stale turn. Otherwise
+ * the transcript decides whether the left turn is still running, except for a send whose
+ * session.start it cannot hold yet.
+ */
+export function reloadTranscript(s: ThreadState, events: ReadonlyArray<SessionEvent>, at: string): ThreadState {
+  const thread = lastThread(events);
+  const arrivals = thread.map(() => at);
+  if (!s.fresh) return { ...EMPTY, events: thread, arrivals };
+  if (s.stale?.kind === "pending-send") return { ...s, stale: runningTurn(events) ?? s.stale };
+  const id = thread[0]?.threadId;
+  if (id !== undefined && id !== s.left) {
+    return { ...EMPTY, events: thread, arrivals, stale: runningTurn(events.filter(e => e.threadId === s.left)) };
+  }
+  return { ...s, stale: runningTurn(events) };
 }
 
 function belongsToStale(stale: Extract<StaleTurn, { kind: "turn" }>, e: SessionEvent): boolean {
@@ -174,7 +205,6 @@ export function useChatThread(workspaceId: string): ChatThreadHandle {
   // Moves when a reconnect could not replay what the socket missed: the thread below is rebuilt from history.
   const gaps = useStore(s => s.gaps);
   const [state, setState] = useState<ThreadState>(EMPTY);
-  const [sending, setSending] = useState(false);
   const [viewedWs, setViewedWs] = useState(workspaceId);
   const [hydratedFor, setHydratedFor] = useState<string | null>(null);
   const hydratedRef = useRef<string | null>(null);
@@ -183,7 +213,6 @@ export function useChatThread(workspaceId: string): ChatThreadHandle {
   if (viewedWs !== workspaceId) {
     setViewedWs(workspaceId);
     setState(EMPTY);
-    setSending(false);
   }
 
   useEffect(() => {
@@ -193,14 +222,7 @@ export function useChatThread(workspaceId: string): ChatThreadHandle {
       events => {
         if (!current) return;
         const at = now();
-        // A new-thread request that landed while history was in flight wins over the transcript it asked to
-        // leave; the transcript decides whether the turn it left behind is still running, except for a send
-        // whose session.start the transcript cannot hold yet.
-        setState(s =>
-          s.fresh
-            ? { ...s, stale: runningTurn(events) ?? (s.stale?.kind === "pending-send" ? s.stale : null) }
-            : { ...EMPTY, events, arrivals: events.map(() => at) },
-        );
+        setState(s => reloadTranscript(s, events, at));
         hydratedRef.current = workspaceId;
         setHydratedFor(workspaceId);
       },
@@ -222,13 +244,10 @@ export function useChatThread(workspaceId: string): ChatThreadHandle {
     (e: ProtocolEvent) => {
       if (hydratedRef.current !== workspaceId) return;
       if (!isSessionEvent(e) || e.workspaceId !== workspaceId) return;
-      let changed = false;
       setState(s => {
         const next = reduceEvent(s, e, now());
-        changed = next !== s;
-        return next;
+        return next !== s && next.sending ? { ...next, sending: false } : next;
       });
-      if (changed) setSending(false);
     },
     [workspaceId],
   );
@@ -239,6 +258,7 @@ export function useChatThread(workspaceId: string): ChatThreadHandle {
     previousEntries.current = next.entries;
     return next;
   }, [state]);
+  const setSending = useCallback((sending: boolean) => setState(s => (s.sending === sending ? s : { ...s, sending })), []);
   const appendUserTurn = useCallback((text: string) => setState(s => ({ ...s, pendingPrompt: { text, at: now() } })), []);
   const appendLocalError = useCallback(
     (message: string) =>
@@ -252,15 +272,19 @@ export function useChatThread(workspaceId: string): ChatThreadHandle {
   );
   const startNewThread = useCallback(() => {
     // A second request while the left turn is still finishing keeps that record; nothing new was left behind.
-    setState(s => ({ ...EMPTY, fresh: true, stale: s.stale ?? (s.pendingPrompt !== null ? { kind: "pending-send" } : runningTurn(s.events)) }));
-    setSending(false);
+    setState(s => ({
+      ...EMPTY,
+      fresh: true,
+      left: s.fresh ? s.left : s.events.at(-1)?.threadId,
+      stale: s.stale ?? (s.pendingPrompt !== null ? { kind: "pending-send" } : runningTurn(s.events)),
+    }));
   }, []);
 
   const finishing = state.stale !== null;
   return {
     view,
     hydrated: hydratedFor === workspaceId,
-    busy: sending || view.running || finishing,
+    busy: state.sending || view.running || finishing,
     fresh: state.fresh,
     finishing,
     appendUserTurn,
