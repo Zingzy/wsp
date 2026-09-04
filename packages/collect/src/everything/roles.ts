@@ -34,6 +34,8 @@ export interface RolesOptions {
   binDirs?: ReadonlySet<string>;
   /** The binaries themselves, for one that sits directly in its app directory. */
   binFiles?: ReadonlySet<string>;
+  /** Absolute directories to record besides the dot entries (a dotfiles manager's home under a plain name); one a candidate already covers is left to it. */
+  extra?: readonly string[];
 }
 
 interface Scan {
@@ -153,6 +155,15 @@ export async function roles(m: Machine, opts: RolesOptions = {}): Promise<Dir[]>
   if (m.platform === "darwin") {
     for (const dir of [`${m.home}/Library/Preferences`, `${m.home}/Library/Application Support`]) {
       for (const name of await m.fs.list(dir)) if (!name.startsWith(APPLE) && !name.endsWith(".plist")) candidates.push(`${dir}/${name}`);
+    }
+  }
+  const extras = (opts.extra ?? []).filter(p => !candidates.some(x => p === x || p.startsWith(`${x}/`)) && !specPaths.has(p));
+  if (extras.length > 0) {
+    // A candidate that is a link to the extra already records that directory, under the link.
+    const reals = new Set(await Promise.all(candidates.map(c => m.fs.realpath(c))));
+    for (const p of extras) {
+      const e = await m.fs.stat(p);
+      if ((e?.kind === "dir" || e?.kind === "link") && !reals.has(await m.fs.realpath(p))) candidates.push(p);
     }
   }
   for (const path of candidates) {

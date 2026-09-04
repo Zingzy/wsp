@@ -46,8 +46,8 @@ export function spend(b: Budget): boolean {
 }
 
 export interface WalkOptions {
-  /** Directory names not entered at any depth. */
-  skip?: (name: string) => boolean;
+  /** Entries not entered or visited at any depth, by name; the path is there for a caller that records what it skipped. */
+  skip?: (name: string, path: string) => boolean;
   /** Directories whose listing satisfies this are left whole, files included. */
   skipTree?: (names: string[]) => boolean;
   maxDepth?: number;
@@ -62,9 +62,9 @@ export async function walk(fs: Fs, dir: string, opts: WalkOptions, visit: (path:
     const names = await fs.list(d);
     if (opts.skipTree?.(names) === true) return;
     await Promise.all(names.map(async name => {
-      if (opts.skip?.(name) === true) return;
-      if (opts.budget !== undefined && !spend(opts.budget)) return;
       const p = `${d}/${name}`;
+      if (opts.skip?.(name, p) === true) return;
+      if (opts.budget !== undefined && !spend(opts.budget)) return;
       const e = await fs.stat(p);
       if (e === undefined) return;
       if (e.kind === "link") {

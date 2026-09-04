@@ -48,6 +48,7 @@ describe("everything: the seven passes folded into rows", () => {
       [".zshrc", "unknown", "", "", "~/.zshrc"],
       ["Caches", "cache", "", "", "~/Library/Caches"],
       ["Code", "unknown", "", "", "~/Library/Application Support/Code"],
+      ["dotfiles", "config", "", "", "~/dotfiles"],
       ["gh", "config", "credential", "homebrew", "~/.config/gh"],
       ["gh:github.com", "device-bound-login", "", "gh", ""],
       ["gh/hosts.yml", "credential", "credential", "homebrew", "~/.config/gh/hosts.yml"],

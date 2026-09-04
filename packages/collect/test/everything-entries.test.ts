@@ -71,6 +71,30 @@ describe("entriesFor: one manifest row per found row", () => {
       row: row({ id: ".config/nvim", name: "nvim", kind: "config", linkTarget: "~/dotfiles/nvim" }),
       want: { detail: "looks like config; a link to ~/dotfiles/nvim" },
     },
+    {
+      row: row({ id: ".local/share/chezmoi", name: "chezmoi", kind: "config", manager: "chezmoi", rcCopies: ["dot_zshrc.tmpl", "private_dot_bashrc"], rcSecrets: ["dot_zshrc.tmpl"], flags: ["credential"], excludes: ["~/.local/share/chezmoi/run_once_install.sh.tmpl"] }),
+      want: { manager: "chezmoi", excludes: ["~/.local/share/chezmoi/run_once_install.sh.tmpl"], detail: "a chezmoi source state holding rc copies; secret-shaped exports in dot_zshrc.tmpl are cut from the copy; holds credential-shaped files" },
+    },
+    {
+      row: row({ id: ".dotfiles", name: ".dotfiles", kind: "config", manager: "stow", rcCopies: ["zsh/.zshrc"], rcSecrets: [] }),
+      want: { manager: "stow", detail: "a stow directory holding rc copies" },
+    },
+    {
+      row: row({ id: "dotfiles", name: "dotfiles", kind: "config", manager: "dotfiles", rcCopies: [], rcSecrets: [] }),
+      want: { manager: "dotfiles", detail: "a dotfiles directory" },
+    },
+    {
+      row: row({ id: ".config/yadm", name: "yadm", kind: "config", manager: "yadm", rcCopies: [], rcSecrets: [] }),
+      want: { manager: "yadm", detail: "yadm's directory" },
+    },
+    {
+      row: row({ id: ".local/share/yadm/repo.git", name: "yadm/repo.git", kind: "credential", flags: ["credential", "history"] }),
+      want: { role: "credential", consent: true, detail: "credential-shaped; a git history: every version ever committed travels with it, secrets included" },
+    },
+    {
+      row: row({ id: ".dotfiles/work.sh", name: ".dotfiles/work.sh", kind: "credential", flags: ["credential", "exports"] }),
+      want: { role: "credential", consent: true, detail: "credential-shaped; secret-shaped exports under a name the copy does not strip" },
+    },
   ];
 
   it.each(cases.map(c => [c.row.id, c] as const))("%s", (_id, c) => {
@@ -79,6 +103,7 @@ describe("entriesFor: one manifest row per found row", () => {
     expect(e).not.toHaveProperty("required");
     expect(e).not.toHaveProperty("bring");
     if (!("consent" in c.want)) expect(e).not.toHaveProperty("consent");
+    if (!("manager" in c.want)) expect(e).not.toHaveProperty("manager");
     if (!("excludes" in c.want)) expect(e).not.toHaveProperty("excludes");
     if ("reason" in c.want) expect(e).not.toHaveProperty("detail");
     else expect(e).not.toHaveProperty("reason");
@@ -164,6 +189,23 @@ describe("collect with a machine", () => {
     const manifest = await collect(host, { machine: fish, lookup: () => [] });
     expect(manifest.entries.find(e => e.id === "shell/fish")).toMatchObject({ paths: ["~/.config/fish"], secrets: ["FISH_KEY"] });
     expect(JSON.stringify(manifest)).not.toContain("FISH_KEY fake");
+  });
+
+  it("a manager home's rc copies hand their cut names to the home's row, and a copy the name rule cannot strip is its own consent row", async () => {
+    const dots = laptop({ files: { "~/.dotfiles/zshrc": "export GH_TOKEN=fake-plain\nalias a=b\n", "~/.dotfiles/zsh/aliases": "export ALIAS_TOKEN=fake-alias\n", "~/.dotfiles/work.sh": "export WORK_TOKEN=fake-work\n", "~/.dotfiles/install.sh": "echo hi\n" } });
+    const manifest = await collect(fakeHost({ files: { "~/.zshrc": 10 } }), { machine: dots, lookup: () => [] });
+    expect(manifest.entries.find(e => e.id === "everything/.dotfiles")).toMatchObject({
+      manager: "dotfiles",
+      role: "config",
+      secrets: ["ALIAS_TOKEN", "GH_TOKEN"],
+      excludes: ["~/.dotfiles/work.sh"],
+      detail: "a dotfiles directory holding rc copies; secret-shaped exports in zsh/aliases, zshrc are cut from the copy; holds credential-shaped files",
+    });
+    const whole = manifest.entries.find(e => e.id === "everything/.dotfiles/work.sh");
+    expect(whole).toMatchObject({ consent: true, role: "credential", detail: "credential-shaped; secret-shaped exports under a name the copy does not strip" });
+    expect(whole).not.toHaveProperty("secrets");
+    expect(whole).not.toHaveProperty("manager");
+    expect(JSON.stringify(manifest)).not.toContain("fake-");
   });
 
   it("a directory named .env (a Python environment) is a plain unknown row: no consent, no reason", async () => {

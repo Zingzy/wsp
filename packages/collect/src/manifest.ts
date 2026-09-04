@@ -4,7 +4,7 @@
 // the same shape with bring and choice filled in is saved as the recipe file,
 // so one schema covers both a fresh collection and a saved recipe.
 import { z } from "zod";
-import { Kind } from "./everything/row.js";
+import { Kind, Manager } from "./everything/row.js";
 
 export const RUNGS = ["identity", "shell", "editors", "toolchains", "tools", "agents", "logins", "everything"] as const;
 export const Rung = z.enum(RUNGS);
@@ -52,6 +52,8 @@ const Fields = z.object({
   consent: z.boolean().optional(),
   /** Only on an everything row: the role the passes guessed. */
   role: Kind.optional(),
+  /** Only on an everything row: the dotfiles manager whose home this directory is; the pack maps rc copies under it by name. */
+  manager: Manager.optional(),
   /** Only on an everything row: files under paths minus excludes. */
   files: z.number().int().nonnegative().optional(),
   /** Only on an everything row: newest file under it, epoch ms; 0 when nothing on disk backs it. */
@@ -69,7 +71,7 @@ export const ManifestEntry = Fields.superRefine((e, ctx) => {
   if (e.choice !== undefined && e.rung !== "logins" && e.consent !== true) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["choice"], message: "only a logins row or a consent row carries a choice" });
   }
-  for (const k of ["role", "files", "mtime"] as const) {
+  for (const k of ["role", "files", "mtime", "manager"] as const) {
     if (e[k] !== undefined && e.rung !== "everything") {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: [k], message: `only an everything row carries ${k}` });
     }

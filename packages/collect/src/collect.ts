@@ -53,7 +53,7 @@ export async function collect(host: Host, opts: CollectOptions = {}): Promise<Ma
       // The row carrying an rc file, itself or the directory around it, learns which exported names its copy drops; values stay on the laptop.
       const under = (p: string, root: string): boolean => p === root || p.startsWith(`${root}/`);
       for (const scan of found.shell) {
-        for (const e of entries) {
+        for (const e of [...entries, ...rows]) {
           if (!e.paths.some(p => under(scan.path, p))) continue;
           e.secrets = [...new Set([...(e.secrets ?? []), ...scan.names])];
         }

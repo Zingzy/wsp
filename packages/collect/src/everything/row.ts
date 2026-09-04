@@ -7,10 +7,16 @@ export const KINDS = ["config", "state", "cache", "credential", "device-bound-lo
 export const Kind = z.enum(KINDS);
 export type Kind = z.infer<typeof Kind>;
 
-/** partial: the credential check of this row stopped at its cap, so a secret inside may have been missed. */
-export const FLAGS = ["credential", "large", "stale", "partial"] as const;
+/** partial: the credential check of this row stopped at its cap, so a secret inside may have been missed.
+ * history: a git repository, every version of every file ever committed. exports: secret-shaped exports under a name the copy does not strip. */
+export const FLAGS = ["credential", "large", "stale", "partial", "history", "exports"] as const;
 export const Flag = z.enum(FLAGS);
 export type Flag = z.infer<typeof Flag>;
+
+/** The dotfiles manager whose home a row is. */
+export const MANAGERS = ["chezmoi", "yadm", "stow", "dotfiles"] as const;
+export const Manager = z.enum(MANAGERS);
+export type Manager = z.infer<typeof Manager>;
 
 export const MEASURED = ["exact", "lower-bound", "none"] as const;
 export const Measured = z.enum(MEASURED);
@@ -39,6 +45,12 @@ export const Row = z.object({
   owner: z.string().optional(),
   flags: z.array(Flag),
   ticked: z.boolean(),
+  /** Set on the row that is a dotfiles manager's home. */
+  manager: Manager.optional(),
+  /** Files under a manager home that stand for an rc file, relative to it; the pack strips them by the same mapping. */
+  rcCopies: z.array(z.string()).optional(),
+  /** Those of rcCopies that carry secret-shaped exports. */
+  rcSecrets: z.array(z.string()).optional(),
 });
 export type Row = z.infer<typeof Row>;
 

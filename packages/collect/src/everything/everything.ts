@@ -7,6 +7,7 @@ import { type Credential, credentials } from "./credentials.js";
 import { sizeGate } from "./gate.js";
 import { type Machine, basename, dirname, tilde } from "./host.js";
 import { keychain, serviceOwner } from "./keychain.js";
+import { managerHomes, scanManagers } from "./managers.js";
 import { pair } from "./pairing.js";
 import { binaryNames, provenance } from "./provenance.js";
 import { type Dir, roleByName, roles } from "./roles.js";
@@ -29,7 +30,7 @@ export interface EverythingOptions {
 
 export interface Everything {
   rows: Row[];
-  /** Pass 6: rc files with secret exports, names only, plus the copy to carry. */
+  /** Pass 6 and 8: rc files, what they source and their copies under a manager home, with secret exports: names only, plus the copy to carry. */
   shell: RcScan[];
   /** What a pass skipped or could not finish, and why. */
   notes: string[];
@@ -193,12 +194,24 @@ export async function everything(m: Machine, opts: EverythingOptions = {}): Prom
   const bins = [...prov.tools, ...prov.leftovers];
   const binDirs = new Set(bins.flatMap(t => [dirname(t.path), dirname(t.resolved)]).filter(d => under(d, m.home) && d !== m.home));
   const binFiles = new Set(bins.flatMap(t => [t.path, t.resolved]).filter(f => under(f, m.home)));
-  const dirs = await unclaimed(m, await roles(m, { clock, notes, binDirs, binFiles }), claimed.paths, clock);
+  const homes = await managerHomes(m);
+  const recorded = await roles(m, { clock, notes, binDirs, binFiles, extra: homes.map(h => h.path) });
+  // A home pass 2 reached through a link at a listed path is scanned and shown under that path: one directory, one row.
+  for (const h of homes) {
+    if (recorded.some(d => d.path === h.path)) continue;
+    const via = recorded.find(d => d.linkTarget === h.path);
+    if (via !== undefined) h.path = via.path;
+  }
+  const dirs = await unclaimed(m, recorded, claimed.paths, clock);
   const { pairs, rest } = pair(m.home, prov, dirs);
   const scan = await credentials(m, dirs, { clock });
   notes.push(...scan.notes);
+  const sourced = new Set<string>();
+  const shell = await shellRc(m, { notes, sourced });
+  const managed = await scanManagers(m, homes, { clock, sourced, notes });
+  shell.push(...managed.flatMap(x => x.shell));
   const creds = new Map<string, Credential>();
-  for (const c of [...scan.found, ...(await catalogCredentials(m, dirs, lookup, clock))]) {
+  for (const c of [...scan.found, ...(await catalogCredentials(m, dirs, lookup, clock)), ...managed.flatMap(x => x.credentials)]) {
     const prior = creds.get(c.path);
     if (prior === undefined) creds.set(c.path, c);
     else for (const s of c.signals) if (!prior.signals.includes(s)) prior.signals.push(s);
@@ -207,7 +220,6 @@ export async function everything(m: Machine, opts: EverythingOptions = {}): Prom
     if ([...creds.keys()].some(k => k !== c.path && under(c.path, k))) creds.delete(c.path);
   }
   const items = (await keychain(m, { notes })).filter(it => !claimed.services.has(it.service));
-  const shell = await shellRc(m, { notes });
 
   const drafts: Draft[] = [];
   for (const p of pairs) {
@@ -231,13 +243,17 @@ export async function everything(m: Machine, opts: EverythingOptions = {}): Prom
   const paired = new Set(pairs.map(p => p.binary?.name));
   for (const l of prov.leftovers) if (!paired.has(l.name)) drafts.push(leftover(l));
 
+  const mark = (r: Row, c: Credential): void => {
+    flag(r, "credential");
+    for (const sig of c.signals) if (sig === "history" || sig === "exports") flag(r, sig);
+  };
   for (const c of [...creds.values()].sort((a, b) => a.path.localeCompare(b.path))) {
     const skip = isClaimed(c.path);
     const own = drafts.find(d => d.row.paths.length === 1 && d.row.paths[0] === c.path);
     if (own !== undefined) {
       own.row.kind = "credential";
-      flag(own.row, "credential");
-      if (!own.named && own.dirs[0]?.kind === "file") own.row.name = inside(m.home, own.dirs, c.path);
+      mark(own.row, c);
+      if (!own.named && (own.dirs[0]?.kind === "file" || c.signals.includes("history"))) own.row.name = inside(m.home, own.dirs, c.path);
       continue;
     }
     let parent: Draft | undefined;
@@ -258,7 +274,7 @@ export async function everything(m: Machine, opts: EverythingOptions = {}): Prom
     }
     if (skip) continue;
     const r = row(c.path, inside(m.home, parent?.dirs ?? [], c.path), "credential", [c.path], c, "exact", { owner: parent?.row.owner });
-    flag(r, "credential");
+    mark(r, c);
     drafts.push({ row: r, named: false, dirs: parent?.dirs ?? [] });
   }
   for (const p of scan.partial) {
@@ -276,6 +292,15 @@ export async function everything(m: Machine, opts: EverythingOptions = {}): Prom
     if (r.binary === undefined) return [];
     return [leftover({ name: r.name, path: `${m.home}/${r.binary.slice(2)}`, mtime: r.mtime })];
   });
+  for (const d of kept) {
+    const home = homes.find(h => d.row.paths.length === 1 && d.row.paths[0] === h.path);
+    const found = managed.find(x => x.home === home);
+    if (home === undefined || found === undefined) continue;
+    d.row.manager = home.manager;
+    if (d.row.kind === "unknown") d.row.kind = "config";
+    d.row.rcCopies = found.rcCopies;
+    d.row.rcSecrets = found.rcSecrets;
+  }
   for (const d of kept) {
     const primary = d.row.paths[0];
     if (primary !== undefined) d.row.id = rel(primary);
