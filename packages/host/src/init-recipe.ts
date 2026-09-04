@@ -6,7 +6,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type LoginChoice, type Manifest, type ManifestEntry, type Rung, parseManifest } from "@wsp/collect";
-import { neverCopied } from "@wsp/engine";
+import { neverCopied, type RecipeDigest } from "@wsp/engine";
 import type { ChecklistItem } from "@wsp/protocol";
 import type { GoldenImport, GoldenRecipe, Machine } from "@wsp/runtime";
 import type { Keys } from "./cli.js";
@@ -151,6 +151,43 @@ export function saveRecipe(path: string, manifest: Manifest, ticks: ReadonlySet<
 
 export function agentName(e: ManifestEntry): string {
   return e.id.split("/").at(-1) ?? e.id;
+}
+
+/** What differs between the recipe a builder carries and this run's, in the
+ * person's words: a row ticked or unticked, a login answer or tool pin changed,
+ * a file added, gone or changed. A row whose tick changed is named once; the
+ * files that came or went with it are not listed again. */
+export function recipeChanges(from: RecipeDigest, to: RecipeDigest, manifest: Manifest): string[] {
+  const label = (id: string): string => manifest.entries.find(e => e.id === id)?.label ?? id;
+  const word = (choice: string | undefined): string => LOGIN_CHOICES.find(c => c.value === choice)?.label ?? choice ?? "ticked";
+  const out: string[] = [];
+  const noted = new Set<string>();
+  const was = new Map(from.ticks.map(t => [t.id, t]));
+  const now = new Map(to.ticks.map(t => [t.id, t]));
+  for (const [id, t] of now) {
+    const b = was.get(id);
+    if (b === undefined) out.push(`${label(id)} ticked`);
+    else if (b.choice !== t.choice) out.push(`${label(id)} now ${word(t.choice)}`);
+    else if (b.version !== t.version) out.push(`${label(id)} now ${t.version ?? "unpinned"}`);
+    else continue;
+    noted.add(id);
+  }
+  for (const id of was.keys()) {
+    if (now.has(id)) continue;
+    out.push(`${label(id)} unticked`);
+    noted.add(id);
+  }
+  // Volatile entries are recorded, never hashed, so they never made the hash differ and are not named.
+  const had = new Map(from.files.filter(f => f.volatile !== true).map(f => [f.path, f]));
+  const has = new Map(to.files.filter(f => f.volatile !== true).map(f => [f.path, f]));
+  for (const [path, f] of has) {
+    if (noted.has(f.id)) continue;
+    const b = had.get(path);
+    if (b === undefined) out.push(`${path} added`);
+    else if (b.digest !== f.digest || b.dest !== f.dest) out.push(`${path} changed`);
+  }
+  for (const [path, f] of had) if (!has.has(path) && !noted.has(f.id)) out.push(`${path} gone`);
+  return out;
 }
 
 /** What the builder runs. The harness line and smoke are bare: the import

@@ -12,10 +12,13 @@ import {
   nodeMajorFor,
   placeGhToken,
   planFiles,
+  recipeDigest,
   recipeHash,
   refusedPath,
   toolInstallsFor,
+  type DigestedFile,
   type PathInfo,
+  type RecipeDigest,
   type RecipeEntry,
 } from "../src/golden-import.js";
 
@@ -80,7 +83,7 @@ const plan = (entries: RecipeEntry[], over: { platform?: "darwin" | "linux"; rew
   planFiles(entries, { home: HOME, stat, platform: over.platform ?? "darwin", ...(over.rewrites !== undefined ? { rewrites: over.rewrites } : {}) });
 
 describe("planFiles: which laptop files travel and where they land", () => {
-  it("maps ~ paths to guest-home relative destinations, keeping the mode, size and mtime the laptop has", () => {
+  it("maps ~ paths to guest-home relative destinations, keeping the mode the laptop has", () => {
     const p = plan([
       row({ rung: "identity", id: "identity/git-user", paths: ["~/.gitconfig"], bytes: 225 }),
       row({ rung: "shell", id: "shell/starship", paths: ["~/.config/starship.toml"], bytes: 2258 }),
@@ -88,10 +91,10 @@ describe("planFiles: which laptop files travel and where they land", () => {
       row({ rung: "identity", id: "identity/ssh-config", paths: ["~/.ssh/config"], bytes: 2267 }),
     ]);
     expect(p.files).toEqual([
-      { id: "identity/git-user", source: `${HOME}/.gitconfig`, dest: ".gitconfig", mode: 0o644, dir: false, size: `${HOME}/.gitconfig`.length, mtimeMs: 1_000, excludes: [] },
-      { id: "shell/starship", source: `${HOME}/.config/starship.toml`, dest: ".config/starship.toml", mode: 0o644, dir: false, size: `${HOME}/.config/starship.toml`.length, mtimeMs: 1_000, excludes: [] },
-      { id: "shell/oh-my-zsh", source: `${HOME}/.oh-my-zsh/custom`, dest: ".oh-my-zsh/custom", mode: 0o755, dir: true, size: `${HOME}/.oh-my-zsh/custom`.length, mtimeMs: 1_000, excludes: [] },
-      { id: "identity/ssh-config", source: `${HOME}/.ssh/config`, dest: ".ssh/config", mode: 0o600, dir: false, size: `${HOME}/.ssh/config`.length, mtimeMs: 1_000, excludes: [] },
+      { id: "identity/git-user", source: `${HOME}/.gitconfig`, dest: ".gitconfig", mode: 0o644, dir: false, excludes: [], volatile: false },
+      { id: "shell/starship", source: `${HOME}/.config/starship.toml`, dest: ".config/starship.toml", mode: 0o644, dir: false, excludes: [], volatile: false },
+      { id: "shell/oh-my-zsh", source: `${HOME}/.oh-my-zsh/custom`, dest: ".oh-my-zsh/custom", mode: 0o755, dir: true, excludes: [], volatile: false },
+      { id: "identity/ssh-config", source: `${HOME}/.ssh/config`, dest: ".ssh/config", mode: 0o600, dir: false, excludes: [], volatile: false },
     ]);
     expect(p.bytes).toBe(225 + 2258 + 1_031_384 + 2267);
     expect(p.rungs).toEqual({ identity: 2, shell: 2 });
@@ -147,7 +150,7 @@ describe("planFiles: which laptop files travel and where they land", () => {
       row({ rung: "shell", id: "shell/gone", paths: ["~/.gone-linked"] }),
     ]);
     // The target's bytes ship at the link's path: dest is the link, source is the link (packing follows it).
-    expect(p.files).toEqual([{ id: "shell/zshrc", source: `${HOME}/.zshrc-linked`, dest: ".zshrc-linked", mode: 0o644, dir: false, size: 7, mtimeMs: 7_000, excludes: [] }]);
+    expect(p.files).toEqual([{ id: "shell/zshrc", source: `${HOME}/.zshrc-linked`, dest: ".zshrc-linked", mode: 0o644, dir: false, excludes: [], volatile: false }]);
     expect(p.skipped).toEqual([
       { id: "shell/hosts", path: "~/.hosts-linked", note: "a link to /etc/hosts, outside your home directory" },
       { id: "shell/key", path: "~/.key-linked", note: "a link to ~/.ssh/id_ed25519: private key, never copied" },
@@ -309,6 +312,14 @@ describe("planFiles: files never copied by name", () => {
 });
 
 describe("planFiles: everything rows", () => {
+  it("marks the planned paths a row calls volatile, and only those", () => {
+    const p = plan([row({ rung: "agents", id: "agents/claude", paths: ["~/.claude/settings.json", "~/.claude.json"], volatile: ["~/.claude.json"] })], { rewrites: [[".claude/", ".claude-cfg/"], [".claude.json", ".claude-cfg/.claude.json"]] });
+    expect(p.files.map(f => [f.dest, f.volatile])).toEqual([
+      [".claude-cfg/settings.json", false],
+      [".claude-cfg/.claude.json", true],
+    ]);
+  });
+
   it("carries a row's excludes as absolute paths under the copied source, and only those", () => {
     const p = plan([
       row({ rung: "everything", id: "everything/.config/demo", paths: ["~/.config/demo"], excludes: ["~/.config/demo/cache", "~/.other/thing"], bytes: 300 }),
@@ -339,34 +350,53 @@ describe("planFiles: everything rows", () => {
   });
 });
 
-describe("recipeHash", () => {
-  const files = (mtimeMs: number, size = 10) => [{ id: "shell/zshrc", dest: ".zshrc", size, mtimeMs, excludes: [] }];
+describe("recipeDigest and recipeHash", () => {
+  const zshrc = (digest = "d1") => ({ id: "shell/zshrc", path: "~/.zshrc", dest: ".zshrc", digest });
+  const hashOf = (entries: RecipeEntry[], files: DigestedFile[] = []) => recipeHash(recipeDigest(entries, files));
 
-  it("depends on the ticked ids, login choices and tool pins, not on order, bytes or labels", () => {
+  it("the digest holds the ticked ids with their login answers and tool pins, and the planned files by path with their digest, each sorted", () => {
+    const entries = [row({ rung: "tools", id: "tools/npm/bun", version: "1.4.0" }), row({ rung: "logins", id: "logins/gh", choice: "copy" }), row({ rung: "shell", id: "shell/zshrc", bytes: 3 }), row({ rung: "shell", id: "shell/bashrc", bring: false })];
+    const files = [{ id: "shell/zshrc", path: "~/.zshrc", dest: ".zshrc", digest: "d1" }, { id: "logins/gh", path: "~/.config/gh/hosts.yml", dest: ".config/gh/hosts.yml", digest: "d2" }];
+    expect(recipeDigest(entries, files)).toEqual({
+      ticks: [{ id: "logins/gh", choice: "copy" }, { id: "shell/zshrc" }, { id: "tools/npm/bun", version: "1.4.0" }],
+      files: [{ id: "logins/gh", path: "~/.config/gh/hosts.yml", dest: ".config/gh/hosts.yml", digest: "d2" }, { id: "shell/zshrc", path: "~/.zshrc", dest: ".zshrc", digest: "d1" }],
+    });
+  });
+
+  it("the hash depends on the ticked ids, login choices and tool pins, not on order, byte counts or labels", () => {
     const a = [row({ rung: "shell", id: "shell/zshrc", bytes: 1 }), row({ rung: "logins", id: "logins/gh", choice: "copy" }), row({ rung: "shell", id: "shell/bashrc", bring: false })];
     const b = [row({ rung: "logins", id: "logins/gh", choice: "copy" }), row({ rung: "shell", id: "shell/zshrc", bytes: 99, label: "renamed" })];
-    expect(recipeHash(a)).toBe(recipeHash(b));
-    expect(recipeHash(a)).toMatch(/^[0-9a-f]{64}$/);
-    expect(recipeHash([row({ rung: "logins", id: "logins/gh", choice: "machine" }), row({ rung: "shell", id: "shell/zshrc" })])).not.toBe(recipeHash(a));
-    expect(recipeHash([row({ rung: "shell", id: "shell/zshrc" })])).not.toBe(recipeHash(a));
+    expect(hashOf(a)).toBe(hashOf(b));
+    expect(hashOf(a)).toMatch(/^[0-9a-f]{64}$/);
+    expect(hashOf([row({ rung: "logins", id: "logins/gh", choice: "machine" }), row({ rung: "shell", id: "shell/zshrc" })])).not.toBe(hashOf(a));
+    expect(hashOf([row({ rung: "shell", id: "shell/zshrc" })])).not.toBe(hashOf(a));
     const bun = (version: string) => [row({ rung: "tools", id: "tools/npm/bun", label: `bun@${version}`, version })];
-    expect(recipeHash(bun("1.4.0"))).not.toBe(recipeHash(bun("1.5.0")));
+    expect(hashOf(bun("1.4.0"))).not.toBe(hashOf(bun("1.5.0")));
   });
 
-  it("changes when a shipped file's excludes change, since a different subtree lands", () => {
-    const entries = [row({ rung: "everything", id: "everything/.config/demo", paths: ["~/.config/demo"] })];
-    const file = { id: "everything/.config/demo", dest: ".config/demo", size: 1, mtimeMs: 1, excludes: [`${HOME}/.config/demo/cache`] };
-    expect(recipeHash(entries, [file])).not.toBe(recipeHash(entries, [{ ...file, excludes: [] }]));
-    expect(recipeHash(entries, [file])).toBe(recipeHash(entries, [{ ...file, excludes: [`${HOME}/.config/demo/cache`] }]));
-    expect(recipeHash(entries, [{ ...file, excludes: [`${HOME}/.config/demo/b`, `${HOME}/.config/demo/a`] }])).toBe(recipeHash(entries, [{ ...file, excludes: [`${HOME}/.config/demo/a`, `${HOME}/.config/demo/b`] }]));
+  it("a volatile file is in the digest, marked, and never in the hash, whatever its bytes; the same file not volatile is", () => {
+    const rows = [row({ rung: "agents", id: "agents/claude", paths: ["~/.claude/settings.json", "~/.claude.json"], volatile: ["~/.claude.json"] })];
+    const settings = { id: "agents/claude", path: "~/.claude/settings.json", dest: ".claude-cfg/settings.json", digest: "s1" };
+    const state = (digest: string, volatile = true) => ({ id: "agents/claude", path: "~/.claude.json", dest: ".claude-cfg/.claude.json", digest, volatile });
+    expect(recipeDigest(rows, [settings, state("c1")]).files).toEqual([{ ...state("c1"), volatile: true }, settings]);
+    expect(recipeDigest(rows, [settings, state("c1", false)]).files).toEqual([{ id: "agents/claude", path: "~/.claude.json", dest: ".claude-cfg/.claude.json", digest: "c1" }, settings]);
+    expect(hashOf(rows, [settings, state("c1")])).toBe(hashOf(rows, [settings, state("c2")]));
+    expect(hashOf(rows, [settings, state("c1")])).toBe(hashOf(rows, [settings]));
+    expect(hashOf(rows, [settings, state("c1", false)])).not.toBe(hashOf(rows, [settings, state("c2", false)]));
+    expect(hashOf(rows, [{ ...settings, digest: "s2" }, state("c1")])).not.toBe(hashOf(rows, [settings, state("c1")]));
   });
 
-  it("changes when a shipped file's size or mtime changes, so an edited dotfile is applied again", () => {
-    const rows = [row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"] })];
-    expect(recipeHash(rows, files(1_000))).toBe(recipeHash(rows, files(1_000)));
-    expect(recipeHash(rows, files(1_000))).not.toBe(recipeHash(rows, files(2_000)));
-    expect(recipeHash(rows, files(1_000, 10))).not.toBe(recipeHash(rows, files(1_000, 11)));
-    expect(recipeHash(rows, files(1_000))).not.toBe(recipeHash(rows));
+  it("the hash follows a planned file's digest, path and where it lands, in any order, and nothing about the disk", () => {
+    const rows = [row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"] }), row({ rung: "identity", id: "identity/git-user", paths: ["~/.gitconfig"] })];
+    const git = { id: "identity/git-user", path: "~/.gitconfig", dest: ".gitconfig", digest: "g1" };
+    expect(hashOf(rows, [zshrc(), git])).toBe(hashOf(rows, [git, zshrc()]));
+    expect(hashOf(rows, [zshrc(), git])).not.toBe(hashOf(rows, [zshrc("d2"), git]));
+    expect(hashOf(rows, [zshrc(), git])).not.toBe(hashOf(rows, [zshrc(), { ...git, dest: ".config/git/config" }]));
+    expect(hashOf(rows, [zshrc(), git])).not.toBe(hashOf(rows, [zshrc()]));
+    expect(hashOf(rows, [zshrc()])).not.toBe(hashOf(rows));
+    // A digest read back from a store hashes the same as the one just computed, whatever its key order.
+    const stored = JSON.parse(JSON.stringify(recipeDigest(rows, [git, zshrc()]))) as RecipeDigest;
+    expect(recipeHash({ files: stored.files.map(f => ({ digest: f.digest, dest: f.dest, path: f.path, id: f.id })), ticks: stored.ticks })).toBe(hashOf(rows, [zshrc(), git]));
   });
 });
 

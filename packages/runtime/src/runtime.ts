@@ -333,6 +333,8 @@ export interface Runtime {
     /** How a browser dials the builder's daemon; the builder is not a workspace, so it has its own road. */
     builderReach(builderId: string): Promise<DaemonReachView>;
     builders(): Promise<GoldenBuilderView[]>;
+    /** Stops a builder of this setup by its recorded id and drops the record; one another live process holds or another setup owns is refused. */
+    kill(builderId: string): Promise<void>;
     /** Moves the golden's head; new forks follow it, workspaces already forked keep their image. */
     rollback(version: number, name?: string): Promise<GoldenManifest>;
   };
@@ -1136,6 +1138,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     ...(r.streamUrl !== undefined ? { screen: { streamUrl: r.streamUrl } } : {}),
     firstLife: b.builder.firstLife,
     ...(r.import !== undefined ? { recipeHash: r.import.recipeHash } : {}),
+    ...(r.import?.recipe !== undefined ? { recipe: r.import.recipe } : {}),
     ...(b.life === "foreign" ? { foreignOwner: b.builder.machine.labels?.[OWNER_LABEL] ?? "" } : {}),
     ...(b.life === "held" && r.heldBy !== undefined ? { heldBy: r.heldBy } : {}),
     ...(r.building === true ? { building: true } : {}),
@@ -1240,7 +1243,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             stage("creating", ALREADY_APPLIED);
             stage("deploying-daemon", ALREADY_APPLIED);
             const applied = await applyGoldenImport(same.builder.machine, { import: imp, setup: recipe.setup, ...(same.record.import !== undefined ? { ledger: same.record.import } : {}), onStage: stage });
-            // A complete ledger touches nothing, so this is what proves the machine outlived the earlier process.
+            // A complete ledger only re-imports the volatile files, and that never fails the apply, so this no-op is what
+            // proves the machine outlived the earlier process.
             const alive = await same.builder.machine.exec("true");
             if (alive.exitCode !== 0) throw new Error(`the builder answered exit ${alive.exitCode} to a no-op; it is not serving`);
             same.record.import = applied.ledger;
@@ -1278,7 +1282,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               firstLife: true,
               building: true,
               ...(machine.streamUrl !== undefined ? { streamUrl: machine.streamUrl } : {}),
-              ...(imp !== undefined ? { import: { recipeHash: imp.recipeHash, applied: [], smoke: "true" } } : {}),
+              ...(imp !== undefined ? { import: { recipeHash: imp.recipeHash, ...(imp.recipe !== undefined ? { recipe: imp.recipe } : {}), applied: [], smoke: "true" } } : {}),
             };
             placeholder = { record, builder: { machine, kind: spec.kind, baseTemplate: record.baseTemplate, setupSha: "", createdAt: record.createdAt, firstLife: true, size: asked }, life: "own" };
             builders.set(machine.id, placeholder);
@@ -1375,6 +1379,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async builders() {
       await ready();
       return [...builders.values()].map(b => builderView(b.record, b));
+    },
+
+    async kill(builderId) {
+      await ready();
+      const entry = builders.get(builderId);
+      if (!entry) throw new Error(`no such builder: ${builderId}`);
+      // A record its dead holder left mid-setup is stopped here as the sweep would stop it; only seal and reach need finished stages.
+      if (entry.life === "foreign" || entry.life === "held") refuseUntouchable(entry);
+      await killUntilGone(backend, entry.builder.machine, opts.killConfirm);
+      await forgetBuilder(builderId);
     },
 
     async rollback(version, name) {

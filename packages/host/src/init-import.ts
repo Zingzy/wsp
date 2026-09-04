@@ -3,14 +3,16 @@
 // ticked files with their modes, the Keychain reads behind an injected
 // reader, and the import object the runtime hands to the builder.
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { FISH_CONF_D, MANAGER_HOMES, type ManifestEntry, RC_NAMES, READ_LIMIT, isRcPath, managedRc, rcFiles, sourcedPaths, stripExports } from "@wsp/collect";
+import { AGENTS, FISH_CONF_D, MANAGER_HOMES, type ManifestEntry, RC_NAMES, READ_LIMIT, isRcPath, managedRc, rcFiles, sourcedPaths, stripExports } from "@wsp/collect";
 import {
   agentInstallsFor,
   planFiles,
+  recipeDigest,
   recipeHash,
   refusedPath,
   toolInstallsFor,
@@ -302,15 +304,80 @@ export function statOf(abs: string): PathInfo | undefined {
   return { kind: st.isDirectory() ? "dir" : "file", mode: st.mode & 0o7777, size: st.size, mtimeMs: st.mtimeMs, realpath };
 }
 
+const underHome = (abs: string, home: string): boolean => abs === home || abs.startsWith(`${home}/`);
+
+/** sha256 of what a planned path ships: every entry under it by relative path,
+ * mode and bytes, excludes left out, links followed only into home and never
+ * into a refused path or a directory already walked, as the pack follows them.
+ * Stat times never enter, so a file rewritten with the same bytes digests the
+ * same. An entry that cannot be read digests by its error; the pack is what
+ * fails on it, with the person watching. */
+export function digestOf(source: string, excludes: readonly string[], home: string): string {
+  const hash = createHash("sha256");
+  const entered = new Set<string>();
+  const walk = (abs: string, rel: string): void => {
+    if (excludes.some(x => abs === x || abs.startsWith(`${x}/`))) return;
+    try {
+      let real = abs;
+      if (lstatSync(abs).isSymbolicLink()) {
+        const target = resolved(abs);
+        if (target === undefined) {
+          hash.update(`L ${rel} ${relative(home, resolve(dirname(abs), readlinkSync(abs)))} gone\n`);
+          return;
+        }
+        // The pack's rules for a link, in its order: never out of home, never back into the directory being
+        // walked or one already walked, never into a refused path.
+        const parent = resolved(dirname(abs)) ?? dirname(abs);
+        const own = parent === target || parent.startsWith(`${target}/`);
+        const why = !underHome(target, home) ? "outside home" : own ? "own directory" : entered.has(target) ? "already walked" : refusedPath(relative(home, target), statSync(target).isDirectory());
+        if (why !== undefined) {
+          hash.update(`L ${rel} ${relative(home, target)} ${why}\n`);
+          return;
+        }
+        real = target;
+      }
+      const st = statSync(real);
+      const mode = (st.mode & 0o7777).toString(8);
+      if (st.isDirectory()) {
+        entered.add(real);
+        hash.update(`D ${rel} ${mode}\n`);
+        for (const name of readdirSync(real).sort()) walk(join(abs, name), `${rel}/${name}`);
+      } else {
+        hash.update(`F ${rel} ${mode} ${st.size}\n`);
+        hash.update(readFileSync(real));
+      }
+    } catch (e) {
+      hash.update(`X ${rel} ${(e as { code?: string }).code ?? "error"}\n`);
+    }
+  };
+  walk(source, "");
+  return hash.digest("hex");
+}
+
 /** The guest's Claude config dir, relative to its home; the laptop's ~/.claude lands there. */
 const CLAUDE_REL = CONFIG_DIR.replace(/^\/root\//, "");
+
+/** Which of a row's paths its tool rewrites while it runs. Volatility is the tool's property, not a saved choice:
+ * the catalog decides for every row it knows, so a recipe file saved before the list existed, or with a list the
+ * catalog never gave, reads the same as a fresh collection; the saved field stands only for a row the catalog
+ * does not know. */
+function volatileOf(e: ManifestEntry): string[] | undefined {
+  const known = AGENTS.find(a => `agents/${a.id}` === e.id);
+  const list = known !== undefined ? (known.volatile ?? []).filter(p => e.paths.includes(p)) : e.volatile;
+  return list !== undefined && list.length > 0 ? [...list] : undefined;
+}
 
 /** What the ticked rows add up to for the builder. Results reported back carry
  * the rows the plan itself set aside (a formula with no Linux bottle) so the
  * saved list is complete. */
 export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions): GoldenImport {
   // Rows arrive as the person's selection; a fresh collection carries no bring flag yet.
-  const bring = picked.map(e => ({ ...e, bring: true }));
+  const bring = picked.map(e => {
+    const row: ManifestEntry = { ...e };
+    delete row.volatile;
+    const volatile = volatileOf(e);
+    return { ...row, bring: true, ...(volatile !== undefined ? { volatile } : {}) };
+  });
   const home = resolved(opts.home) ?? opts.home;
   const plan = planFiles(bring, {
     home,
@@ -324,10 +391,31 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
   const anyFiles = bring.some(e => e.bring && e.rung !== "tools" && e.paths.length > 0 && (e.rung !== "logins" || e.choice === "copy"));
   const count = plan.files.length + plan.secrets.length;
   const managerHomes = bring.filter(e => e.manager !== undefined).flatMap(e => e.paths).filter(p => p.startsWith("~/")).map(p => p.slice(2));
+  const tilde = (f: PlannedFile): string => `~/${relative(home, f.source)}`;
+  // A login whose value comes from the Keychain is one unit with its file: a re-login is the same golden with a
+  // fresher token, so the file is volatile too and the pair re-renders on attach.
+  const withSecret = new Set(plan.secrets.map(s => s.id));
+  const files = plan.files.map(f => (withSecret.has(f.id) && !f.volatile ? { ...f, volatile: true } : f));
+  const digested = files.map(f => ({ id: f.id, path: tilde(f), dest: f.dest, digest: digestOf(f.source, f.excludes, home), volatile: f.volatile }));
+  // The values are read after the earlier-builder check, so they are digested when the recipe is read, not here.
+  const secretDigests = () =>
+    plan.secrets.flatMap(s => {
+      const value = opts.secrets.get(s.service);
+      return value === undefined ? [] : [{ id: s.id, path: `Keychain: ${s.service}`, dest: s.dest, digest: createHash("sha256").update(value).digest("hex"), volatile: true }];
+    });
+  const hash = recipeHash(recipeDigest(bring, digested));
+  const volatileFiles = files.filter(f => f.volatile);
+  const volatile =
+    volatileFiles.length > 0 || plan.secrets.length > 0
+      ? { paths: [...volatileFiles.map(tilde), ...plan.secrets.map(s => `Keychain: ${s.service}`)], pack: () => packPlan({ ...plan, files: volatileFiles }, { secrets: opts.secrets, home, managerHomes }) }
+      : undefined;
   return {
-    recipeHash: recipeHash(bring, plan.files),
+    recipeHash: hash,
+    get recipe() {
+      return recipeDigest(bring, [...digested, ...secretDigests()]);
+    },
     ...(anyFiles
-      ? { files: { count, rungs: plan.rungs, bytes: plan.bytes, skipped: plan.skipped, pack: () => packPlan(plan, { secrets: opts.secrets, home, managerHomes }) } }
+      ? { files: { count, rungs: plan.rungs, bytes: plan.bytes, skipped: plan.skipped, pack: () => packPlan(plan, { secrets: opts.secrets, home, managerHomes }), ...(volatile !== undefined ? { volatile } : {}) } }
       : {}),
     tools: tools.installs,
     ...(agents.node !== undefined ? { node: agents.node } : {}),

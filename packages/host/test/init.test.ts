@@ -2,7 +2,8 @@
 // wsp init end to end against the stub backend: keys in, the seven screens,
 // the summary and confirm, prepare with its stage stream, the hand-off. The
 // runtime and host are the real ones over fakes; only the terminal is faked.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -150,7 +151,7 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
     },
     host: async (rt: Runtime, builder, h) => {
       counters.hosts += 1;
-      expect(builder.id).toBe(backends.at(-1)?.machines[0]?.id);
+      expect(builder.id).toBe(backends.at(-1)?.machines.find(m => !m.killed)?.id);
       hooks.push(h);
       served.push(rt);
       const handle: HostHandle = { port: 4400, wsPort: 4410, authToken: "tok", close: async () => {} };
@@ -1319,32 +1320,297 @@ describe("wsp init, flags and no terminal", () => {
     expect(JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8"))).toMatchObject({ agents: [{ id: "agents/claude", outcome: "failed" }] });
   });
 
-  it("a builder from an earlier run built from a different recipe is listed with its age, cost and reason, and nothing boots beside it", async () => {
+  it("a builder from an earlier run built from a different recipe is listed with its age, cost and reason; under --yes it is stopped by its recorded id and a fresh one boots", async () => {
     const store = memoryStore();
     const shared = stubBackend();
     const earlier = createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true", cpu: 2, memMb: 4096 } });
     await earlier.golden.prepare();
     const f = fake({ yes: true });
+    withGhCopy(f);
     f.opts.runtime = recipe => {
       f.backends.push(shared);
-      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: recipe });
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
     };
     const result = await runInit(f.opts, f.io);
-    expect(result.code).toBe(1);
-    expect(f.hosts).toBe(0);
+    expect(result.code).toBe(0);
+    expect(f.hosts).toBe(1);
     const out = f.text();
     expect(out).toContain("A builder from an earlier wsp init is still running on the account:");
-    expect(out).toMatch(/default \(m1\), \d+ s old, about \$\d+\.\d\d so far; built from a different recipe/);
-    expect(out).toContain("Nothing was booted. Kill it first (the Solari console lists it), then run wsp init again.");
+    // A record with no digest behind its hash can say no more than this.
+    expect(out).toMatch(/default \(m1\), \d+ s old, about \$\d+\.\d\d so far; built from a different recipe$/m);
+    expect(out).toMatch(/Stop it, then boot a 2 vCPU, 4 GB builder on Solari and build this\? About \$0\.11\/hr while it runs\. Taken as yes \(--yes\)\./);
+    expect(out).toContain("Stopped default (m1).");
+    expect(out).not.toContain("Solari console");
     expect(out).not.toContain("save it");
-    // The refusal came before any consent dialog: the Keychain was never asked.
-    expect(f.reads).toEqual([]);
+    // The stop comes after the consent dialog and right before the boot, so a refused dialog costs no machine.
+    expect(f.reads).toEqual(["gh:github.com"]);
+    expect(out.indexOf("Reading your Keychain")).toBeLessThan(out.indexOf("Stopped default (m1)."));
+    expect(out.indexOf("Stopped default (m1).")).toBeLessThan(out.indexOf("Ready"));
+    expect(shared.machines.map(m => [m.id, m.killed])).toEqual([["m1", true], ["m2", false]]);
+    expect(await store.list("builders")).toHaveLength(1);
+  });
+
+  it("a changed byte in a planned file is named in the refusal; the earlier builder is stopped on the yes and a fresh one boots", async () => {
+    const store = memoryStore();
+    const shared = stubBackend();
+    const first = fake({ yes: true });
+    first.opts.runtime = recipe => {
+      first.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+    };
+    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    writeFileSync(join(first.opts.home, ".zshrc"), "export A=2\n");
+
+    const f = fake({ yes: true, home: first.opts.home });
+    f.opts.runtime = recipe => {
+      f.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+    };
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    const out = f.text();
+    expect(out).toMatch(/default \(m1\), \d+ s old, about \$\d+\.\d\d so far; built from a different recipe: ~\/\.zshrc changed$/m);
+    expect(out).toContain("Stopped default (m1).");
+    expect(out).not.toContain("Attaching");
+    expect(shared.machines.map(m => [m.id, m.killed])).toEqual([["m1", true], ["m2", false]]);
+  });
+
+  it("a planned file rewritten with the same bytes and a moved mtime still attaches: the hash reads bytes, not stat times", async () => {
+    const store = memoryStore();
+    const shared = stubBackend();
+    const first = fake({ yes: true });
+    first.opts.runtime = recipe => {
+      first.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+    };
+    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    const zshrc = join(first.opts.home, ".zshrc");
+    writeFileSync(zshrc, readFileSync(zshrc));
+    const later = new Date(Date.now() + 90_000);
+    utimesSync(zshrc, later, later);
+
+    const f = fake({ yes: true, tty: false, home: first.opts.home, manifestPath: recipePath(first.opts.statePath) });
+    f.opts.runtime = recipe => {
+      f.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+    };
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    const out = f.text();
+    expect(out).toContain("Attaching to your earlier builder: default (m1)");
+    expect(out).not.toContain("still running on the account");
     expect(out).not.toMatch(BOOT);
     expect(shared.machines).toHaveLength(1);
     expect(shared.machines[0]!.killed).toBe(false);
   });
 
-  it("a builder from an earlier run that was paused is listed as unsealable, and nothing boots beside it", async () => {
+  it("a volatile file with changed bytes still attaches and is uploaded again on attach; a changed non-volatile file still refuses and is named", async () => {
+    const store = memoryStore();
+    const shared = stubBackend();
+    const first = fake({ yes: true });
+    const home = first.opts.home;
+    writeFileSync(join(home, ".claude.json"), JSON.stringify({ projects: { one: {} } }));
+    const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
+    dirs.push(dir);
+    const manifestPath = join(dir, "recipe.json");
+    writeFileSync(manifestPath, JSON.stringify({ entries: [
+      { rung: "identity", id: "identity/git-user", label: "git name and email", paths: ["~/.gitconfig"], bytes: 20, default: "bring", required: true, bring: true },
+      // A row the catalog does not know keeps its saved list; Codex is ticked beside it so an agent installs.
+      { rung: "agents", id: "agents/zed", label: "Zed", paths: ["~/.claude.json"], volatile: ["~/.claude.json"], bytes: 30, default: "bring", bring: true },
+      { rung: "agents", id: "agents/codex", label: "Codex", paths: ["~/.codex/config.toml"], bytes: 30, default: "bring", bring: true },
+    ] }));
+    first.opts.manifestPath = manifestPath;
+    first.opts.runtime = recipe => {
+      first.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+    };
+    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    const uploads = () => shared.machines[0]!.execLog.filter(c => c.startsWith("tar xzf")).length;
+    expect(uploads()).toBe(1);
+
+    writeFileSync(join(home, ".claude.json"), JSON.stringify({ projects: { one: {}, two: {} } }));
+    const f = fake({ yes: true, tty: false, home, manifestPath });
+    f.opts.runtime = recipe => {
+      f.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+    };
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    const out = f.text();
+    expect(out).toContain("Attaching to your earlier builder: default (m1)");
+    // Off a terminal the detail is cut at 80 columns, so the size and time may not survive; the path and the word do.
+    expect(out).toMatch(/Files uploaded\s+~\/\.claude\.json re-imported/);
+    expect(out).not.toContain("still running on the account");
+    expect(uploads()).toBe(2);
+    expect(shared.machines).toHaveLength(1);
+
+    writeFileSync(join(home, ".gitconfig"), "[user]\n\tname = Someone Else\n");
+    const g = fake({ yes: true, tty: false, home, manifestPath });
+    g.opts.runtime = recipe => {
+      g.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+    };
+    expect((await runInit(g.opts, g.io)).code).toBe(0);
+    expect(g.text()).toMatch(/built from a different recipe: ~\/\.gitconfig changed$/m);
+    expect(g.text()).toContain("Stopped default (m1).");
+    expect(shared.machines.map(m => [m.id, m.killed])).toEqual([["m1", true], ["m2", false]]);
+  });
+
+  it("a recipe saved before the volatile list existed still attaches once ~/.claude.json moved: the catalog supplies the list, the file is re-imported and never reads as gone", async () => {
+    const store = memoryStore();
+    const shared = stubBackend();
+    const first = fake({ yes: true });
+    const home = first.opts.home;
+    mkdirSync(join(home, ".claude"), { recursive: true });
+    writeFileSync(join(home, ".claude", "settings.json"), "{}\n");
+    writeFileSync(join(home, ".claude.json"), JSON.stringify({ projects: { one: {} } }));
+    const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
+    dirs.push(dir);
+    const manifestPath = join(dir, "recipe.json");
+    writeFileSync(manifestPath, JSON.stringify({ entries: [
+      { rung: "identity", id: "identity/git-user", label: "git name and email", paths: ["~/.gitconfig"], bytes: 20, default: "bring", required: true, bring: true },
+      { rung: "agents", id: "agents/claude", label: "Claude Code", paths: ["~/.claude/settings.json", "~/.claude.json"], bytes: 30, default: "bring", bring: true },
+    ] }));
+    first.opts.manifestPath = manifestPath;
+    first.opts.runtime = recipe => {
+      first.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+    };
+    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    const [recorded] = (await store.list("builders")) as { import: { recipe: { files: { path: string; volatile?: boolean }[] } } }[];
+    expect(recorded!.import.recipe.files.map(f => [f.path, f.volatile])).toEqual([["~/.claude.json", true], ["~/.claude/settings.json", undefined], ["~/.gitconfig", undefined]]);
+
+    writeFileSync(join(home, ".claude.json"), JSON.stringify({ projects: { one: {}, two: {} } }));
+    const f = fake({ yes: true, tty: false, home, manifestPath });
+    f.opts.runtime = recipe => {
+      f.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+    };
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    const out = f.text();
+    expect(out).toContain("Attaching to your earlier builder: default (m1)");
+    expect(out).toMatch(/Files uploaded\s+~\/\.claude\.json re-imported/);
+    expect(out).not.toContain("gone");
+    expect(out).not.toContain("still running on the account");
+    expect(shared.machines).toHaveLength(1);
+  });
+
+  it("a re-login on this computer attaches: the Keychain value is out of the hash, the login file re-renders with the new token on attach, and the record carries the new value's digest", async () => {
+    const store = memoryStore();
+    const shared = stubBackend();
+    const first = fake({ yes: true });
+    withGhCopy(first);
+    first.opts.runtime = recipe => {
+      first.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+    };
+    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    const sha = (v: string) => createHash("sha256").update(v).digest("hex");
+    const keychainOf = async () => ((await store.list("builders")) as { import: { recipe: { files: { path: string; digest: string; volatile?: boolean }[] } } }[])[0]!.import.recipe.files.find(f => f.path === "Keychain: gh:github.com");
+    expect(await keychainOf()).toMatchObject({ digest: sha("gho_fake"), volatile: true });
+    const uploads = () => shared.machines[0]!.execLog.filter(c => c.startsWith("tar xzf")).length;
+    expect(uploads()).toBe(1);
+
+    const f = fake({ yes: true, tty: false, home: first.opts.home, manifestPath: recipePath(first.opts.statePath) });
+    f.opts.secrets = { read: async () => "gho_new" };
+    f.opts.runtime = recipe => {
+      f.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+    };
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    const out = f.text();
+    expect(out).toContain("Attaching to your earlier builder: default (m1)");
+    // The fake home has no hosts.yml, so the login file is rendered from the Keychain value alone.
+    // Off a terminal the detail is cut at 80 columns; the path and the start of the word survive.
+    expect(out).toMatch(/Files uploaded\s+Keychain: gh:github\.com re-imp/);
+    expect(uploads()).toBe(2);
+    expect(await keychainOf()).toMatchObject({ digest: sha("gho_new"), volatile: true });
+    expect(shared.machines).toHaveLength(1);
+  });
+
+  it("when the second of two stops fails, the message names the builder still running", async () => {
+    const store = memoryStore();
+    const shared = stubBackend();
+    for (const n of [1, 2]) {
+      const earlier = createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true", cpu: 2, memMb: 4096, labels: { n: String(n) } } });
+      await earlier.golden.prepare();
+    }
+    expect(shared.machines.map(m => m.id)).toEqual(["m1", "m2"]);
+    shared.machines[1]!.kill = async () => { throw new Error("provider said no"); };
+    const f = fake({ yes: true });
+    f.opts.runtime = recipe => {
+      f.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+    };
+    expect((await runInit(f.opts, f.io)).code).toBe(1);
+    expect(f.hosts).toBe(0);
+    const out = f.text();
+    expect(out).toMatch(/Stop them, then boot a 2 vCPU/);
+    expect(out).toContain("Stopped default (m1).");
+    expect(out).toContain("Stopping default (m2) failed: provider said no");
+    expect(out).toContain("Nothing was booted. default (m2) is still running; run wsp init again to retry.");
+    expect(out).not.toContain("It is still running");
+    expect(shared.machines.map(m => [m.id, m.killed])).toEqual([["m1", true], ["m2", false]]);
+  });
+
+  it("a changed tick is named in the refusal: the saved recipe with Codex ticked reads as Codex ticked", async () => {
+    const store = memoryStore();
+    const shared = stubBackend();
+    const first = fake({ yes: true });
+    first.opts.runtime = recipe => {
+      first.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+    };
+    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    const path = recipePath(first.opts.statePath);
+    const saved = JSON.parse(readFileSync(path, "utf8")) as { entries: { id: string; bring?: boolean }[] };
+    for (const e of saved.entries) if (e.id === "agents/codex") e.bring = true;
+    writeFileSync(path, JSON.stringify(saved));
+
+    const f = fake({ yes: true, tty: false, home: first.opts.home, manifestPath: path });
+    f.opts.runtime = recipe => {
+      f.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+    };
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    const out = f.text();
+    expect(out).toMatch(/default \(m1\), \d+ s old, about \$\d+\.\d\d so far; built from a different recipe: Codex ticked$/m);
+    expect(out).toContain("Stopped default (m1).");
+    expect(shared.machines.map(m => [m.id, m.killed])).toEqual([["m1", true], ["m2", false]]);
+  });
+
+  it("No at the stop question leaves the earlier builder running, boots nothing, and keeps the recipe", async () => {
+    const store = memoryStore();
+    const shared = stubBackend();
+    const first = fake({ yes: true });
+    withGhCopy(first);
+    first.opts.runtime = recipe => {
+      first.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+    };
+    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    writeFileSync(join(first.opts.home, ".zshrc"), "export A=2\n");
+
+    const f = fake({ home: first.opts.home });
+    f.opts.runtime = recipe => {
+      f.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+    };
+    const run = runInit(f.opts, f.io);
+    for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
+      await f.until(rung);
+      await f.press(KEY.enter);
+    }
+    await f.until("Stop it, then boot");
+    const ask = f.text().slice(f.text().lastIndexOf("A builder from an earlier"));
+    expect(ask).toMatch(/built from a different recipe: ~\/\.zshrc changed/);
+    expect(ask).toMatch(/No\s+costs\s+nothing;\s+nothing\s+is\s+stopped\s+and\s+the\s+recipe\s+is\s+kept/);
+    expect(ask).toContain(`${S_RADIO_ACTIVE} No`);
+    await f.press(KEY.enter);
+    expect((await run).code).toBe(1);
+    expect(f.hosts).toBe(0);
+    expect(f.text()).toContain("Nothing was booted or stopped. The recipe is kept.");
+    expect(shared.machines.map(m => [m.id, m.killed])).toEqual([["m1", false]]);
+  });
+
+  it("a builder from an earlier run that was paused is listed as unsealable and stopped on the yes; a fresh one boots", async () => {
     const store = memoryStore();
     const shared = stubBackend();
     const first = fake({ yes: true });
@@ -1361,12 +1627,13 @@ describe("wsp init, flags and no terminal", () => {
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: recipe });
     };
     const result = await runInit(f.opts, f.io);
-    expect(result.code).toBe(1);
-    expect(f.hosts).toBe(0);
+    expect(result.code).toBe(0);
+    expect(f.hosts).toBe(1);
     const out = f.text();
-    expect(out).toMatch(/default \(m1\), \d+ s old, about \$\d+\.\d\d so far; cannot be sealed after a restart/);
-    expect(out).toContain("Nothing was booted. Kill it first (the Solari console lists it), then run wsp init again.");
-    expect(shared.machines).toHaveLength(1);
+    expect(out).toMatch(/default \(m1\), \d+ s old, about \$\d+\.\d\d so far; cannot be sealed after a restart$/m);
+    expect(out).toContain("Stopped default (m1).");
+    expect(out).not.toContain("Solari console");
+    expect(shared.machines.map(m => [m.id, m.killed])).toEqual([["m1", true], ["m2", false]]);
   });
 
   it("an earlier builder wearing another setup's owner label is refused with those words, and nothing boots beside it", async () => {
@@ -1390,6 +1657,9 @@ describe("wsp init, flags and no terminal", () => {
     const out = f.text();
     expect(out).toMatch(/default \(m1\), \d+ s old, about \$\d+\.\d\d so far; not this setup's builder/);
     expect(out).not.toContain("cannot be sealed");
+    expect(out).toContain("Nothing was booted. It belongs to another wsp setup: stop it from there, or from the Solari console if it is yours and forgotten; then run wsp init again.");
+    expect(out).not.toContain("Stop it");
+    expect(f.reads).toEqual([]);
     expect(shared.machines).toHaveLength(1);
     expect(shared.machines[0]!.killed).toBe(false);
   });
@@ -1415,12 +1685,13 @@ describe("wsp init, flags and no terminal", () => {
     const out = f.text();
     expect(out).toMatch(new RegExp(`default \\(m1\\), \\d+ s old, about \\$\\d+\\.\\d\\d so far; in use by another wsp process \\(pid ${process.ppid}\\)`));
     expect(out).toContain(`Nothing was booted. Another wsp process (pid ${process.ppid}) is using it; wait for it or stop that process, then run wsp init again.`);
-    expect(out).not.toContain("Kill it first");
+    expect(out).not.toContain("Stop it");
+    expect(f.reads).toEqual([]);
     expect(shared.machines).toHaveLength(1);
     expect(shared.machines[0]!.killed).toBe(false);
   });
 
-  it("a placeholder left mid-setup by a dead process is listed as unfinished and refused, even on the same recipe; nothing boots beside it", async () => {
+  it("a placeholder left mid-setup by a dead process is listed as unfinished, never attached to even on the same recipe, and stopped on the yes before a fresh one boots", async () => {
     const store = memoryStore();
     const shared = stubBackend();
     const gate = new Promise<void>(() => {});
@@ -1440,18 +1711,17 @@ describe("wsp init, flags and no terminal", () => {
       f.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: recipe });
     };
-    expect((await runInit(f.opts, f.io)).code).toBe(1);
-    expect(f.hosts).toBe(0);
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    expect(f.hosts).toBe(1);
     const out = f.text();
-    expect(out).toMatch(/default \(m1\), \d+ s old, about \$\d+\.\d\d so far; its setup never finished/);
-    expect(out).toContain("Nothing was booted. Kill it first (the Solari console lists it), or run wsp, whose first sweep stops it; then run wsp init again.");
+    expect(out).toMatch(/default \(m1\), \d+ s old, about \$\d+\.\d\d so far; its setup never finished$/m);
+    expect(out).toContain("Stopped default (m1).");
+    expect(out).not.toContain("Solari console");
     expect(out).not.toContain("Attaching");
-    expect(out).not.toMatch(BOOT);
-    expect(shared.machines).toHaveLength(1);
-    expect(shared.machines[0]!.killed).toBe(false);
+    expect(shared.machines.map(m => [m.id, m.killed])).toEqual([["m1", true], ["m2", false]]);
   });
 
-  it("when another builder blocks, the refusal names the one this run could reuse", async () => {
+  it("when another builder blocks, the one this run can reuse is named; the yes stops the blocker and attaches to it", async () => {
     const store = memoryStore();
     const shared = stubBackend();
     const first = fake({ yes: true });
@@ -1468,12 +1738,16 @@ describe("wsp init, flags and no terminal", () => {
       f.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: recipe });
     };
-    expect((await runInit(f.opts, f.io)).code).toBe(1);
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    expect(f.hosts).toBe(1);
     const out = f.text();
-    expect(out).toMatch(/default \(m2\), \d+ s old, about \$\d+\.\d\d so far; built from a different recipe/);
+    expect(out).toMatch(/default \(m2\), \d+ s old, about \$\d+\.\d\d so far; built from a different recipe$/m);
     expect(out).toMatch(/default \(m1\), \d+ s old, about \$\d+\.\d\d so far; reusable by this run once the others are stopped/);
-    expect(shared.machines).toHaveLength(2);
-    expect(shared.machines.some(m => m.killed)).toBe(false);
+    expect(out).toMatch(/Stop it, then attach to your earlier builder default \(m1\), \d+ s old, about \$\d+\.\d\d so far\? Taken as yes \(--yes\)\./);
+    expect(out).toContain("Stopped default (m2).");
+    expect(out).toContain("Attaching to your earlier builder: default (m1)");
+    expect(out).not.toMatch(BOOT);
+    expect(shared.machines.map(m => [m.id, m.killed])).toEqual([["m1", false], ["m2", true]]);
   });
 
   it("a Keychain refusal rehashes the recipe the builder carries, so wsp init --manifest on the saved recipe attaches after a crash", async () => {
@@ -1517,6 +1791,7 @@ describe("wsp init, flags and no terminal", () => {
     const store = memoryStore();
     const shared = stubBackend();
     const first = fake({ yes: true });
+    withGhCopy(first);
     first.opts.runtime = recipe => {
       first.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
@@ -1527,6 +1802,7 @@ describe("wsp init, flags and no terminal", () => {
     // The same home, so the file rows hash the same; a second process is a second runtime over the same
     // store. Off a terminal each stage prints once, so the lines can be counted.
     const f = fake({ yes: true, tty: false, home: first.opts.home });
+    withGhCopy(f);
     f.opts.runtime = recipe => {
       f.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
@@ -1538,7 +1814,9 @@ describe("wsp init, flags and no terminal", () => {
     expect(out).toMatch(/Attaching to your earlier builder: default \(m1\), \d+ s old, about \$\d+\.\d\d so far\. Nothing new boots; stages already applied are skipped\./);
     expect(out).not.toMatch(BOOT);
     expect(out).not.toContain("Creating the machine");
-    expect(out.match(/(Setup applied|Files uploaded|Tools installed|Agents installed)\s+already applied/g)).toHaveLength(4);
+    // The GitHub login is copied from the Keychain, so its rendered file goes up again on every attach; the rest is skipped.
+    expect(out.match(/(Setup applied|Tools installed|Agents installed)\s+already applied/g)).toHaveLength(3);
+    expect(out).toMatch(/Files uploaded\s+Keychain: gh:github\.com re-imp/);
     // The two stages an attach never runs say so as well, and no skipped stage carries a duration: the reach
     // check that follows the last one is nobody's stage.
     expect(out).toMatch(/Machine created\s+already applied$/m);

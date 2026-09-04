@@ -16,6 +16,8 @@ export interface RowSpec {
   required?: boolean;
   linux?: Linux;
   version?: string;
+  /** Candidates the tool rewrites while it runs; those found land on the row as volatile. */
+  volatile?: readonly string[];
   /** Emit the row even when none of the candidate paths exist. */
   always?: boolean;
 }
@@ -55,6 +57,7 @@ export interface EntrySpec extends Omit<RowSpec, "paths" | "always"> {
 
 /** Optional fields are left off rather than set to undefined so equality and snapshots stay exact. */
 export function entry(spec: EntrySpec): ManifestEntry {
+  const volatile = (spec.volatile ?? []).filter(p => spec.paths.includes(p));
   return {
     rung: spec.rung,
     id: spec.id,
@@ -67,6 +70,7 @@ export function entry(spec: EntrySpec): ManifestEntry {
     ...(spec.required !== undefined ? { required: spec.required } : {}),
     ...(spec.linux !== undefined ? { linux: spec.linux } : {}),
     ...(spec.version !== undefined ? { version: spec.version } : {}),
+    ...(volatile.length > 0 ? { volatile } : {}),
   };
 }
 
