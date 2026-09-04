@@ -2,7 +2,7 @@
 // The palette over the shell: opens on its shortcut, filters, runs actions;
 // every default shortcut dispatches into the sidebar, the right panel store
 // and the terminal link; when-clauses and typing contexts are respected.
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionView, WorkspaceView } from "@wsp/protocol";
 import { SidebarProvider, useSidebar } from "../src/components/ui/sidebar.js";
@@ -80,6 +80,11 @@ const sidebarState = () => document.querySelector('[data-slot="sidebar"]')?.getA
 const panel = (id: string) => useRightPanelStore.getState().byWorkspaceId[id];
 const drawer = (id: string) => useTerminalDrawerStore.getState().byWorkspaceId[id];
 const settle = () => act(() => new Promise<void>(resolve => setTimeout(resolve, 0)));
+
+// Shell render plus palette open and close: about 250 ms idle, under 1.5 s with eight CPU hogs; a saturated box has pushed the whole test past 5 s.
+// Every waitFor in the file shares the 10 s ceiling too, else one wait trips at the library's 1 s default before the test budget applies.
+vi.setConfig({ testTimeout: 15_000 });
+configure({ asyncUtilTimeout: 10_000 });
 
 beforeEach(() => {
   window.localStorage.clear();

@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import * as pkg from "../../src/index.js";
-import { type CatalogPath, type Lookup, Rows, everything, lookup as catalog } from "../../src/index.js";
+import { type CatalogPath, type EverythingOptions, type Lookup, type Machine, Rows, everything as fold, lookup as catalog } from "../../src/index.js";
 import { EXPECTED_SHAPES, HOME, LOGIN_KEYCHAIN, NOW, RECENT, home, laptop, many, shapes } from "./fixture.js";
 
 const rel = (p: string): string => p.replace(HOME, "~");
+/** The walks' time caps read this clock, so what a test sees is decided by the entry caps alone, however slow the box. */
+const everything = (m: Machine, opts: EverythingOptions = {}): ReturnType<typeof fold> => fold(m, { clock: () => 0, ...opts });
 const path = (app: string, path: string, credential = false): CatalogPath => ({ app, path, credential });
 const lookup: Lookup = dirName => {
   if (dirName === "~/.config/monid") return [path("Monid", "~/.config/monid/config.toml"), path("Monid", "~/.config/monid/credentials.yaml", true)];

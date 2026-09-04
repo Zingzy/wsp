@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { GITLEAKS_MAX_ROOTS, credentials, keysSignal, modeSignal, nameSignal, parseGitleaks, pemSignal, roles, topLevelKeys } from "../../src/index.js";
+import { type CredentialsOptions, type Dir, GITLEAKS_MAX_ROOTS, type Machine, type RolesOptions, credentials as scanCredentials, keysSignal, modeSignal, nameSignal, parseGitleaks, pemSignal, roles as scanRoles, topLevelKeys } from "../../src/index.js";
 import { EXPECTED_SHAPES, HOME, home, laptop, many, shapes } from "./fixture.js";
 
 const rel = (p: string): string => p.replace(HOME, "~");
+/** The walks' time caps read this clock, so what a test sees is decided by the entry caps alone, however slow the box. */
+const roles = (m: Machine, opts: RolesOptions = {}): ReturnType<typeof scanRoles> => scanRoles(m, { clock: () => 0, ...opts });
+const credentials = (m: Machine, dirs: readonly Dir[], opts: CredentialsOptions = {}): ReturnType<typeof scanCredentials> => scanCredentials(m, dirs, { clock: () => 0, ...opts });
 const gitleaksArgs = (root: string): string => `gitleaks dir ${root} --redact --no-banner --exit-code 0 --report-format json --report-path /dev/stdout`;
 
 describe("pass 4: credential shape", () => {

@@ -1180,6 +1180,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     emit: e => bus.emit(e),
     on: (type, l) => bus.on(type, l),
     ...(opts.status !== undefined ? { defaults: opts.status } : {}),
+    clock,
   });
 
   return {
