@@ -3,6 +3,7 @@
 // the summary and confirm, prepare with its stage stream, the hand-off. The
 // runtime and host are the real ones over fakes; only the terminal is faked.
 import { createHash } from "node:crypto";
+import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -24,7 +25,7 @@ import type { ConnectOptions, DaemonSocket } from "../src/doctor.js";
 import { noteLogins } from "../src/init-signin.js";
 import { fakePtyLink, type FakePtyLink } from "./fake-pty-link.js";
 import { EVERYTHING, FIXTURE } from "./init-fixture.js";
-import { guestAnswer, stubBackend, type StubBackend } from "./stub-backend.js";
+import { guestAnswer, stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
 
 const SOLARI = "slr_live_fake_solari_key";
 const KEY = { down: "\x1b[B", space: " ", enter: "\r", esc: "\x1b" };
@@ -52,6 +53,10 @@ interface Fake {
   hosts: number;
   /** Keychain services the fake reader was asked for. */
   reads: string[];
+  /** Where a test delivers Ctrl-C; the real one is process. */
+  signals: EventEmitter;
+  /** Exit codes the run asked for, in order; the real one ends the process. */
+  exits: number[];
 }
 
 const DEVICE_URL = "https://github.com/login/device";
@@ -101,6 +106,8 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
   const served: Runtime[] = [];
   const link = scriptedLink({ signedIn: over.signedIn ?? true, hold: over.hold ?? false, missing: over.missing ?? false });
   const counters = { hosts: 0 };
+  const signals = new EventEmitter();
+  const exits: number[] = [];
   const io: InitIO = {
     input,
     output,
@@ -113,6 +120,10 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
     copy: async t => {
       copied.push(t);
       return true;
+    },
+    signals,
+    exit: code => {
+      exits.push(code);
     },
   };
   const dir = mkdtempSync(join(tmpdir(), "wsp-init-"));
@@ -195,6 +206,8 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
       return counters.hosts;
     },
     reads,
+    signals,
+    exits,
   };
 }
 
@@ -1852,6 +1865,251 @@ describe("wsp init, flags and no terminal", () => {
     expect(second.text()).toMatch(/Golden v2 sealed in \d+s on the builder kept since the save/);
     expect(second.text()).not.toContain("Golden v1 sealed");
     expect(shared.machines.filter(m => !m.killed)).toHaveLength(1);
+  });
+});
+
+describe("wsp init, a signal during prepare", () => {
+  const gone = () => Object.assign(new Error("gone"), { kind: "missing", status: 404 });
+  const SWEEP = "the next wsp or wsp init on this computer stops it, or stop it from the Solari console.";
+
+  /** The tools stage hangs on its first install until the machine is deleted, as the provider fails a call on a machine that is gone;
+   * the signal lands while that call is in flight. `onKill` sees the machine's kill before it runs. */
+  function toolsStageHeld(f: Fake, store: ReturnType<typeof memoryStore>, onKill?: (m: StubMachine, kill: () => Promise<void>) => Promise<void>, signal: "SIGINT" | "SIGTERM" = "SIGINT"): void {
+    f.opts.runtime = recipe => {
+      const backend = stubBackend();
+      backend.execImpl = (m, cmd) => {
+        if (!cmd.includes("brew install jq")) return guestAnswer(cmd);
+        return new Promise((_, reject) => {
+          const kill = m.kill.bind(m);
+          m.kill = async () => {
+            if (onKill !== undefined) await onKill(m, kill);
+            else await kill();
+            reject(gone());
+          };
+          f.signals.emit(signal);
+        });
+      };
+      f.backends.push(backend);
+      return createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
+    };
+  }
+
+  it.each([
+    ["--yes", { yes: true }, "SIGINT", 130],
+    ["no terminal", { yes: false, tty: false }, "SIGTERM", 143],
+  ] as const)("a signal during the tools stage (%s) kills the builder by its recorded id, drops the record, says so on one line and exits", async (_label, over, signal, code) => {
+    const f = fake(over);
+    const store = memoryStore();
+    toolsStageHeld(f, store, undefined, signal);
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(code);
+    expect(f.exits).toEqual([code]);
+    expect(f.hosts).toBe(0);
+    expect(f.backends[0]!.machines.map(m => [m.id, m.killed])).toEqual([["m1", true]]);
+    expect(await store.list("builders")).toEqual([]);
+    const out = f.text();
+    expect(out).toContain("Stopped while installing tools. Builder m1 is gone; nothing is billing.");
+    expect(out).not.toContain("Installing tools failed");
+    expect(out).not.toContain("Run wsp init again");
+    expect(f.signals.listenerCount("SIGINT") + f.signals.listenerCount("SIGTERM")).toBe(0);
+  });
+
+  it("a second signal while the kill is still running exits at once with the builder id and the sweep line; the record stays for the sweep", async () => {
+    const f = fake({ yes: true });
+    const store = memoryStore();
+    let release!: () => void;
+    const held = new Promise<void>(r => {
+      release = r;
+    });
+    let killing!: () => void;
+    const killStarted = new Promise<void>(r => {
+      killing = r;
+    });
+    toolsStageHeld(f, store, async (_m, kill) => {
+      killing();
+      await held;
+      await kill();
+    });
+    const run = runInit(f.opts, f.io);
+    await killStarted;
+    f.signals.emit("SIGINT");
+    await vi.waitFor(() => expect(f.exits).toEqual([130]));
+    expect(f.text()).toContain(`Stopping was cut short. Builder m1 may still be running; ${SWEEP}`);
+    expect(await store.get("builders", "m1")).toMatchObject({ building: true, heldBy: { pid: process.pid } });
+    expect(f.backends[0]!.machines[0]!.killed).toBe(false);
+    release();
+    expect((await run).code).toBe(130);
+    expect(f.backends[0]!.machines[0]!.killed).toBe(true);
+  });
+
+  it("a signal while the create is still in flight waits for the machine, then kills it: nothing leaks", async () => {
+    const f = fake({ yes: true });
+    const store = memoryStore();
+    f.opts.runtime = recipe => {
+      const backend = stubBackend();
+      const create = backend.create.bind(backend);
+      backend.create = spec => {
+        f.signals.emit("SIGINT");
+        return create(spec);
+      };
+      f.backends.push(backend);
+      return createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
+    };
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(130);
+    expect(f.backends[0]!.machines.map(m => [m.id, m.killed])).toEqual([["m1", true]]);
+    expect(await store.list("builders")).toEqual([]);
+    expect(f.text()).toContain("Stopped while creating the machine. Builder m1 is gone; nothing is billing.");
+    expect(f.exits).toEqual([130]);
+  });
+
+  it("a signal during the wait for a machine slot cuts the wait: nothing was booted", async () => {
+    const f = fake({ yes: true, retry: { waitMs: 60_000, attempts: 3 } });
+    f.opts.runtime = recipe => {
+      const backend = stubBackend();
+      backend.create = async () => {
+        throw Object.assign(new Error("Sandbox limit reached"), { kind: "concurrency", status: 429 });
+      };
+      f.backends.push(backend);
+      return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
+    };
+    const run = runInit(f.opts, f.io);
+    await f.until("at its machine cap");
+    f.signals.emit("SIGINT");
+    const result = await run;
+    expect(result.code).toBe(130);
+    expect(f.backends[0]!.machines).toHaveLength(0);
+    expect(f.text()).toContain("Stopped while waiting for a machine slot. Nothing was booted; nothing is billing.");
+    expect(f.exits).toEqual([130]);
+  });
+
+  it("a builder that outlives its kill is named with the sweep line, and its record stays for the sweep", async () => {
+    const f = fake({ yes: true });
+    const store = memoryStore();
+    toolsStageHeld(f, store, async () => {
+      throw new Error("provider said no");
+    });
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(130);
+    expect(f.text()).toContain(`Stopped while installing tools. Builder m1 did not stop (provider said no); ${SWEEP}`);
+    expect(f.text()).not.toContain("nothing is billing");
+    expect(await store.get("builders", "m1")).toMatchObject({ building: true });
+    expect(f.exits).toEqual([130]);
+  });
+
+  it("a second signal while the stop's line, close and exit run still answers, with the line the stop settled on", async () => {
+    const f = fake({ yes: true });
+    const store = memoryStore();
+    toolsStageHeld(f, store);
+    const exit = f.io.exit;
+    f.io.exit = code => {
+      exit(code);
+      if (f.exits.length === 1) f.signals.emit("SIGINT");
+    };
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(130);
+    expect(f.exits).toEqual([130, 130]);
+    expect(f.text().match(/Stopped while installing tools\. Builder m1 is gone; nothing is billing\./g)).toHaveLength(2);
+    expect(f.text()).not.toContain("cut short");
+  });
+
+  it("a last exec that outruns the kill never writes a finished record: the placeholder stays building until the stop drops it", async () => {
+    const f = fake({ yes: true });
+    const store = memoryStore();
+    const puts: { id: string; building?: true }[] = [];
+    const put = store.put.bind(store);
+    store.put = async (collection, id, value) => {
+      if (collection === "builders") puts.push({ id, ...(value as { building?: true }) });
+      return put(collection, id, value);
+    };
+    let release!: () => void;
+    const held = new Promise<void>(r => {
+      release = r;
+    });
+    let ready!: () => void;
+    const prepared = new Promise<void>(r => {
+      ready = r;
+    });
+    f.opts.runtime = recipe => {
+      const backend = stubBackend();
+      backend.execImpl = (m, cmd) => {
+        // The signal lands inside the agents install, which then finishes on its own; the kill waits until told.
+        if (cmd.includes(GOLDEN_SETUP)) {
+          const kill = m.kill.bind(m);
+          m.kill = async () => {
+            await held;
+            await kill();
+          };
+          f.signals.emit("SIGINT");
+        }
+        return guestAnswer(cmd);
+      };
+      f.backends.push(backend);
+      const rt = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
+      rt.events.on("golden.stage", e => {
+        if (e.type === "golden.stage" && e.stage === "ready") ready();
+      });
+      return rt;
+    };
+    const run = runInit(f.opts, f.io);
+    await prepared;
+    expect(puts.length).toBeGreaterThan(0);
+    expect(puts.every(p => p.building === true)).toBe(true);
+    release();
+    expect((await run).code).toBe(130);
+    expect(puts.every(p => p.building === true)).toBe(true);
+    expect(await store.list("builders")).toEqual([]);
+    expect(f.backends[0]!.machines[0]!.killed).toBe(true);
+    expect(f.text()).toContain("Builder m1 is gone; nothing is billing.");
+  });
+
+  it("a signal while attaching to an earlier first-life builder leaves it running: the hold is released, the record stays reusable, and the line says what bills", async () => {
+    const store = memoryStore();
+    const shared = stubBackend();
+    const first = fake({ yes: true });
+    withGhCopy(first);
+    first.opts.runtime = recipe => {
+      first.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+    };
+    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    expect(shared.machines).toHaveLength(1);
+
+    const f = fake({ yes: true, home: first.opts.home });
+    withGhCopy(f);
+    f.opts.runtime = recipe => {
+      f.backends.push(shared);
+      // The attach's liveness check never answers; the signal lands while it is in flight.
+      shared.execImpl = (_m, cmd) => {
+        if (cmd !== "true") return guestAnswer(cmd);
+        f.signals.emit("SIGINT");
+        return new Promise<never>(() => {});
+      };
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+    };
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(130);
+    expect(f.exits).toEqual([130]);
+    expect(f.hosts).toBe(0);
+    expect(shared.machines.map(m => [m.id, m.killed])).toEqual([["m1", false]]);
+    const record = (await store.get("builders", "m1")) as { firstLife: boolean; building?: true; heldBy?: unknown };
+    expect(record).toMatchObject({ firstLife: true });
+    expect(record.building).toBeUndefined();
+    expect(record.heldBy).toBeUndefined();
+    const out = f.text();
+    expect(out).toMatch(/Stopped between stages\. Your earlier builder default \(m1\) was not stopped: it has a first life worth keeping and stays up at about \$\d+\.\d\d\/hr\. wsp init --manifest .*golden-recipe\.json attaches to it again; the sweep stops it once it is six hours old\./);
+    expect(out).not.toContain("nothing is billing");
+  });
+
+  it("after the hand-off no handler of init's is left: a signal then is the host's to handle", async () => {
+    const f = fake({ yes: true });
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(0);
+    expect(f.hosts).toBe(1);
+    expect(f.signals.listenerCount("SIGINT") + f.signals.listenerCount("SIGTERM")).toBe(0);
+    f.signals.emit("SIGINT");
+    expect(f.exits).toEqual([]);
+    expect(f.backends[0]!.machines[0]!.killed).toBe(false);
   });
 });
 

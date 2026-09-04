@@ -353,6 +353,8 @@ export function terminalInitIO(): InitIO {
       if (os === "win32") return runQuiet("clip", [], text);
       return (await runQuiet("wl-copy", [], text)) || runQuiet("xclip", ["-selection", "clipboard"], text);
     },
+    signals: process,
+    exit: code => process.exit(code),
   };
 }
 
