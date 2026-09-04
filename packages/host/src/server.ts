@@ -42,6 +42,8 @@ export interface HostOptions {
   autoOpen?: (workspaceId: string) => boolean;
   /** The line logged when a sign-in page arrives and nothing opens, given the workspace name and the page's hostname. */
   openLine?: (workspace: string, hostname: string) => string;
+  /** The saved recipe file, named as the way to reuse a kept builder. */
+  recipePath?: string;
 }
 
 export interface HostHandle {
@@ -120,6 +122,9 @@ function kindOf(labels: Record<string, string> | undefined, builder: boolean): s
 function describeReaped(r: ReapedMachine): string {
   const kind = kindOf(r.labels, r.builder);
   if (r.reason === "recorded") return `reap: stopped ${r.id}: your earlier builder from this setup; a builder cannot be sealed after a restart`;
+  if (r.reason === "unfinished") return `reap: stopped ${r.id}: your earlier builder from this setup; its setup never finished`;
+  if (r.reason === "expired" && r.ageMs === undefined) return `reap: stopped ${r.id}: your earlier builder from this setup, age unknown; a kept builder with no readable age is stopped at once`;
+  if (r.reason === "expired") return `reap: stopped ${r.id}: your earlier builder from this setup, ${describeAge(r.ageMs)}; a kept builder is stopped at six hours`;
   const why = r.reason === "own" ? `${kind} from this setup that no record claims` : `${kind} with no owner`;
   return `reap: stopped ${r.id}${describeLabels(r.labels)}: ${why}, ${describeAge(r.ageMs)}`;
 }
@@ -134,6 +139,13 @@ function describeSpared(m: SparedMachine): string {
   const claim = m.whose === "own" ? " unless a record claims it first" : "";
   const then = m.ageMs === undefined ? "never reaped by this host" : `reaped once it is ${describeAge(m.backstopMs)}${claim}`;
   return `reap: left alone ${m.id}: ${who}, ${describeAge(m.ageMs)}, ${cost}; ${then}`;
+}
+
+/** A first-life builder from an earlier run is claimed, so the sweep never names it; the person still sees what bills. */
+function describeKept(b: GoldenBuilderView, rateUsdPerHour: number, recipePath: string | undefined): string {
+  const ageMs = Date.now() - Date.parse(b.createdAt);
+  const reuse = recipePath === undefined ? "wsp init" : `wsp init --manifest ${recipePath}`;
+  return `reap: left alone ${b.id}: your earlier builder from this setup, still first-life, ${describeAge(ageMs)}, ${describeCost(rateUsdPerHour, ageMs)}; reuse it with ${reuse}, or it is stopped at six hours`;
 }
 
 /** Kills what this host owns and nothing claims, says which machines went and
@@ -243,6 +255,12 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const sweep = (listSpared: boolean): Promise<void> =>
     (sweeping ??= sweepOrphans(rt, log, listSpared).finally(() => (sweeping = undefined)));
   await sweep(true);
+  for (const b of await rt.golden.builders()) {
+    if (b.foreignOwner !== undefined) log(`reap: left alone ${b.id}: recorded builder wearing another setup's owner label (${b.foreignOwner}); never touched by this host`);
+    else if (b.heldBy !== undefined) log(`reap: left alone ${b.id}: your earlier builder from this setup, in use by another wsp process (pid ${b.heldBy.pid}); never touched by this host`);
+    else if (b.building === true) log(`reap: left alone ${b.id}: your earlier builder from this setup; its setup never finished; the next sweep stops it`);
+    else if (b.firstLife === true && b.id !== opts.builder?.id) log(describeKept(b, rt.backend.pricing.rateUsdPerHour(b.size), opts.recipePath));
+  }
   const reapTimer = setInterval(() => void sweep(false), REAP_INTERVAL_MS);
   const relay = startCallbackRelay({
     runtime: rt,

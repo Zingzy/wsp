@@ -1,6 +1,8 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import { hostname } from "node:os";
 import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
 import {
+  BUILDER_IDLE_MS,
   DAEMON_PORT,
   NotFirstLifeError,
   OWNER_LABEL,
@@ -186,6 +188,9 @@ export interface RuntimeOptions {
   clock?: Clock;
   /** How long a seal waits for a killed machine to read gone (tests shrink it). */
   killConfirm?: KillConfirm;
+  /** Names this machine and install on the holds it writes, so two machines over one state file never mistake
+   * each other's. The entry points pass hostIdentity(); the bare hostname when absent, which touches no disk. */
+  hostId?: string;
   wake?: WakeOptions;
 }
 
@@ -332,6 +337,19 @@ interface TranscriptRecord {
 const BUILDERS = "builders";
 /** One id per state file, stamped on every machine it creates so another host's sweep can tell them apart from its own. */
 const OWNER = "owner";
+/** A holder's heartbeat older than this, or a holder whose pid is gone, no longer keeps a builder from another process. */
+const HELD_TTL_MS = 15 * 60_000;
+/** Own builders beat this often on their own timer, so a sweep stuck on a slow listing cannot starve the hold. */
+const HEARTBEAT_MS = 5 * 60_000;
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as { code?: string }).code === "EPERM";
+  }
+}
 
 interface BuilderRecord {
   id: string;
@@ -342,6 +360,14 @@ interface BuilderRecord {
   createdAt: string;
   size: WorkspaceSize;
   streamUrl?: string;
+  /** True from creation until the machine is ever paused, resumed or restored; only a first-life machine can be sealed. */
+  firstLife: boolean;
+  /** The process using this builder: written at creation and attach, refreshed every sweep, cleared on close.
+   * Another process over the same store leaves the record alone while the holder is alive and the heartbeat fresh. */
+  heldBy?: { host: string; pid: number; heartbeat: string };
+  /** Written the moment the machine exists, before any stage runs, and dropped when prepare finishes; a
+   * record still marked by a dead holder never completed its setup and can never seal. */
+  building?: true;
   /** What of the recipe this builder carries; a prepare with the same recipe hash reuses it. */
   import?: ImportLedger;
 }
@@ -349,8 +375,12 @@ interface BuilderRecord {
 interface LiveBuilder {
   record: BuilderRecord;
   builder: Builder;
-  /** Hydrated from the store by a later process, so its first life cannot be vouched for. */
-  stale: boolean;
+  /** own: made or attached to by this process. reusable: an earlier process's record, marked and running,
+   * wearing this owner's label or none; the sweep ages it out at six hours. stale: an earlier record that
+   * can never seal; the sweep stops it. foreign: wears another state file's label; never touched.
+   * held: another live process is using it; never touched while its heartbeat is fresh. Read once at load: a
+   * host that runs on keeps what it read, and host.lock keeps a second init from starting beside it. */
+  life: "own" | "reusable" | "stale" | "foreign" | "held";
   reach?: PreviewReach;
 }
 
@@ -391,6 +421,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const pingTimeoutMs = opts.wake?.pingTimeoutMs ?? WAKE_PING_TIMEOUT_MS;
   const vaultCapBytes = opts.wake?.vaultCapBytes ?? VAULT_CAP_BYTES;
   const defaultIdleWindowMs = opts.idle?.defaultWindowMs ?? DEFAULT_IDLE_WINDOW_MS;
+  const hostId = opts.hostId ?? hostname();
   const clock = opts.clock ?? realClock;
 
   const vaultPathsOf = async (m: Machine): Promise<string[]> => {
@@ -407,6 +438,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
   const live = new Map<string, LiveWorkspace>();
   const builders = new Map<string, LiveBuilder>();
+  /** The prepare in flight per golden name; a second call for the same recipe joins it instead of running the stages twice on one machine. */
+  const preparing = new Map<string, { hash: string | undefined; promise: Promise<GoldenBuilderView> }>();
   const sessions = new Map<string, { view: SessionView; handle: SessionHandle }>();
   const transcripts = new Map<string, SessionEvent[]>();
   // Puts are chained per workspace so the later snapshot always lands last,
@@ -559,21 +592,44 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     idleTimeoutMs: backstopMs(idleWindowOf(r)),
   });
 
+  let owner = "";
+  /** Ids this process has created and not yet recorded; the sweep must not read them as lost. */
+  const inflight = new Set<string>();
+  const claiming = <T>(run: (b: MachineBackend) => Promise<T>): Promise<T> => {
+    const mine: string[] = [];
+    const b: MachineBackend = {
+      capabilities: backend.capabilities,
+      pricing: backend.pricing,
+      get: id => backend.get(id),
+      list: labels => backend.list(labels),
+      deleteSnapshot: id => backend.deleteSnapshot(id),
+      create: async spec => {
+        const m = await backend.create(spec);
+        inflight.add(m.id);
+        mine.push(m.id);
+        return m;
+      },
+    };
+    return run(b).finally(() => mine.forEach(id => inflight.delete(id)));
+  };
   /** Boots a golden fork for the record and writes back what the provider says it built.
    * A snapshot restores as the kind it was taken from, so the spec names that kind;
    * versions sealed before it was recorded were all sandbox. */
-  const fork = async (record: WorkspaceRecord, override?: WorkspaceSpec): Promise<Machine> => {
-    const spec = forkSpec(record, (await goldenVersionOf(record.golden))?.kind ?? "sandbox", override);
-    const machine = await backend.create(spec);
-    await setHostname(machine, record.name);
-    const shape = await shapeOf(machine);
-    if (shape !== undefined) record.shape = shape;
-    else delete record.shape;
-    record.size = sizeBuilt(shape, spec);
-    if (machine.streamUrl !== undefined) record.screen = { streamUrl: machine.streamUrl };
-    else delete record.screen;
-    return machine;
-  };
+  const fork = (record: WorkspaceRecord, bind: (machine: Machine) => void, override?: WorkspaceSpec): Promise<Machine> =>
+    claiming(async b => {
+      const spec = forkSpec(record, (await goldenVersionOf(record.golden))?.kind ?? "sandbox", override);
+      const machine = await b.create(spec);
+      // Named by its record before the claim is released, so no sweep sees it unclaimed.
+      bind(machine);
+      await setHostname(machine, record.name);
+      const shape = await shapeOf(machine);
+      if (shape !== undefined) record.shape = shape;
+      else delete record.shape;
+      record.size = sizeBuilt(shape, spec);
+      if (machine.streamUrl !== undefined) record.screen = { streamUrl: machine.streamUrl };
+      else delete record.screen;
+      return machine;
+    });
 
   const attach = (record: WorkspaceRecord, machine: Machine): LiveWorkspace => {
     const entry: LiveWorkspace = { record, machine, ws: undefined as unknown as Workspace };
@@ -581,11 +637,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       machine,
       {
         goldenSnapshot: record.golden,
-        resurrect: async (override?: Partial<MachineSpec>) => {
-          const m = await fork(record, override);
-          entry.machine = m;
-          return m;
-        },
+        resurrect: (override?: Partial<MachineSpec>) =>
+          fork(record, m => {
+            entry.machine = m;
+          }, override),
         vaultExport: async m => exportPaths(m, await vaultPathsOf(m)),
         vaultImport: (m, payload) => importInto(m, payload, "/"),
         stashVault: async m => {
@@ -660,26 +715,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     bus.on(type, e => idle.forget((e as { workspaceId: string }).workspaceId));
   }
 
-  let owner = "";
-  /** Ids this process has created and not yet recorded; the sweep must not read them as lost. */
-  const inflight = new Set<string>();
-  const claiming = <T>(run: (b: MachineBackend) => Promise<T>): Promise<T> => {
-    const mine: string[] = [];
-    const b: MachineBackend = {
-      capabilities: backend.capabilities,
-      pricing: backend.pricing,
-      get: id => backend.get(id),
-      list: labels => backend.list(labels),
-      deleteSnapshot: id => backend.deleteSnapshot(id),
-      create: async spec => {
-        const m = await backend.create(spec);
-        inflight.add(m.id);
-        mine.push(m.id);
-        return m;
-      },
-    };
-    return run(b).finally(() => mine.forEach(id => inflight.delete(id)));
-  };
   let hydrated: Promise<void> | undefined;
   const ready = (): Promise<void> => {
     hydrated ??= (async () => {
@@ -710,7 +745,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         transcripts.set(t.workspaceId, t.events);
       }
       for (const raw of await store.list(BUILDERS)) {
-        const stored = raw as Omit<BuilderRecord, "size"> & { size?: WorkspaceSize };
+        const stored = raw as Omit<BuilderRecord, "size" | "firstLife"> & { size?: WorkspaceSize; firstLife?: boolean };
         const machine = await backend.get(stored.id).catch((e: unknown) => {
           if ((e as { kind?: string }).kind === "missing") return undefined;
           throw e;
@@ -719,14 +754,32 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           await store.delete(BUILDERS, stored.id);
           continue;
         }
-        const record: BuilderRecord = { ...stored, size: stored.size ?? sizeBuilt(await shapeOf(machine), backend.pricing.defaultSize) };
+        // The view get() fetched is read once: a second read would reset the provider's idle timer again.
+        const seen = machine.seen;
+        const state = seen?.state ?? (await machine.state());
+        // A machine found paused was paused: that alone clears the marker for good. Nothing is read from the
+        // provider's createdAt: on a running machine never paused, resumed or exec'd it read +6.4 s at two minutes
+        // and +306 s at ten (canary, 2026-09-04 UTC), so it moves with no lifecycle event and decides nothing.
+        const firstLife = stored.firstLife === true && state === "running";
+        const record: BuilderRecord = { ...stored, firstLife, size: stored.size ?? sizeBuilt(await shapeOf(machine), backend.pricing.defaultSize) };
+        if (stored.firstLife === true && !firstLife) await store.put(BUILDERS, record.id, record);
+        // Only a label that names another state file makes it foreign; a view with no labels is ours.
+        const label = machine.labels?.[OWNER_LABEL];
+        // A hold from this host is checked against its pid; one from another host is trusted while its heartbeat
+        // is fresh, and a heartbeat that cannot be read counts as fresh: when unsure, the builder is held.
+        const holder = stored.heldBy;
+        const mine = holder !== undefined && holder.host === hostId && holder.pid === process.pid;
+        const beatAge = holder !== undefined ? Date.now() - Date.parse(holder.heartbeat) : Number.NaN;
+        const fresh = Number.isNaN(beatAge) || beatAge < HELD_TTL_MS;
+        const held = holder !== undefined && !mine && fresh && (holder.host !== hostId || pidAlive(holder.pid));
         builders.set(record.id, {
           record,
           builder: {
-            machine, kind: record.kind, baseTemplate: record.baseTemplate, setupSha: record.setupSha, createdAt: record.createdAt, firstLife: false, size: record.size,
+            machine, kind: record.kind, baseTemplate: record.baseTemplate, setupSha: record.setupSha, createdAt: record.createdAt, firstLife, size: record.size,
             ...(record.import !== undefined ? { import: record.import } : {}),
           },
-          stale: true,
+          // A placeholder its dead holder left mid-setup never finished its stages: stale, whatever the marker says.
+          life: label !== undefined && label !== owner ? "foreign" : held ? "held" : !firstLife || stored.building === true ? "stale" : "reusable",
         });
       }
     })();
@@ -762,9 +815,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         },
         firstLife: true,
       };
-      const machine = await fork(record);
-      record.machineId = machine.id;
-      attach(record, machine);
+      await fork(record, m => {
+        record.machineId = m.id;
+        attach(record, m);
+      });
       await persist(record);
       const v = view(record);
       bus.emit({ type: "workspace.created", workspace: v });
@@ -1012,14 +1066,59 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
   };
 
-  const builderView = (r: BuilderRecord): GoldenBuilderView => ({
+  const builderView = (r: BuilderRecord, b: LiveBuilder): GoldenBuilderView => ({
     id: r.id,
     name: r.name,
     kind: r.kind,
     createdAt: r.createdAt,
     size: r.size,
     ...(r.streamUrl !== undefined ? { screen: { streamUrl: r.streamUrl } } : {}),
+    firstLife: b.builder.firstLife,
+    ...(r.import !== undefined ? { recipeHash: r.import.recipeHash } : {}),
+    ...(b.life === "foreign" ? { foreignOwner: b.builder.machine.labels?.[OWNER_LABEL] ?? "" } : {}),
+    ...(b.life === "held" && r.heldBy !== undefined ? { heldBy: r.heldBy } : {}),
+    ...(r.building === true ? { building: true } : {}),
   });
+
+  /** Marks the record as this process's, now; the sweep and the heartbeat timer refresh it and close() clears it. */
+  let beat: (() => void) | undefined;
+  let closed = false;
+  let ticking: Promise<void> | undefined;
+  const arm = (): void => {
+    if (closed || beat !== undefined) return;
+    beat = clock.schedule(
+      () => {
+        beat = undefined;
+        ticking = tick();
+      },
+      HEARTBEAT_MS,
+      { unref: true },
+    );
+  };
+  // One failed write costs one beat, never the timer: the hold is what keeps other processes off the builder.
+  const tick = async (): Promise<void> => {
+    const own = [...builders.values()].filter(x => x.life === "own");
+    for (const b of own) {
+      await hold(b).catch((e: unknown) => console.warn(`heartbeat for builder ${b.record.id} not written: ${e instanceof Error ? e.message : String(e)}`));
+    }
+    if (own.length > 0) arm();
+  };
+  // The record is written whatever the runtime's state, so a prepare that finishes after close() leaves a finished
+  // record and not a placeholder; the hold stamp and its timer are this process's and stop with it. A caller that
+  // closes while a prepare still runs leaves the placeholder unheld until its stages finish; none does today.
+  const hold = async (b: LiveBuilder): Promise<void> => {
+    if (!closed) b.record.heldBy = { host: hostId, pid: process.pid, heartbeat: new Date().toISOString() };
+    await store.put(BUILDERS, b.record.id, b.record);
+    if (!closed) arm();
+  };
+
+  /** A record wearing another state file's label, or held by another live process, is listed and nothing else;
+   * acting on it by id would touch a machine that is not this process's to touch. */
+  const refuseUntouchable = (entry: LiveBuilder): void => {
+    if (entry.life === "foreign") throw new Error(`${entry.record.id} wears another setup's owner label (${entry.builder.machine.labels?.[OWNER_LABEL]}); it is never sealed or reached from here`);
+    if (entry.life === "held") throw new Error(`${entry.record.id} is in use by another wsp process (pid ${entry.record.heldBy?.pid}); it is never sealed or reached from here`);
+    if (entry.record.building) throw new Error(`${entry.record.id} is still being prepared; it is never sealed or reached until its stages finish`);
+  };
 
   const forgetBuilder = async (id: string): Promise<void> => {
     builders.delete(id);
@@ -1061,27 +1160,85 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const name = o?.name ?? "default";
       const { deployDaemon, smoke, import: imp, ...size } = recipe;
       void smoke;
+      const active = preparing.get(name);
+      if (active !== undefined) {
+        if (active.hash === imp?.recipeHash) return active.promise;
+        throw new Error(`a builder named ${name} is still being prepared for a different recipe; wait for it to finish, then run again`);
+      }
       const stage = stageOf(name);
-      return claiming(async b => {
-        // Reuse reaches only builders this process made: one hydrated from the
-        // store is not known first-life, so it could never seal (the host lists
-        // it and refuses to boot beside it). The stages skip on the ledger of a
-        // live builder from the same ticks instead of booting a second one.
-        const same = imp === undefined ? undefined : [...builders.values()].find(x => !x.stale && x.record.name === name && x.record.import?.recipeHash === imp.recipeHash);
+      const run = claiming(async b => {
+        // A first-life builder carrying the same ticks is attached to instead of
+        // booting a second one, whichever process made it; the stages skip on its
+        // ledger. A stale, foreign or held record is never reused, and a recipe with no
+        // import never attaches: nothing says which ticks the builder carries. The
+        // building check is a second wall: the join above holds it in this process,
+        // life does across processes.
+        const same = imp === undefined ? undefined : [...builders.values()].find(x => (x.life === "own" || x.life === "reusable") && x.record.building !== true && x.record.name === name && x.record.import?.recipeHash === imp.recipeHash);
         if (same && imp) {
-          await applyGoldenImport(same.builder.machine, { import: imp, setup: recipe.setup, ...(same.record.import !== undefined ? { ledger: same.record.import } : {}), onStage: stage });
+          try {
+            const applied = await applyGoldenImport(same.builder.machine, { import: imp, setup: recipe.setup, ...(same.record.import !== undefined ? { ledger: same.record.import } : {}), onStage: stage });
+            // A complete ledger touches nothing, so this is what proves the machine outlived the earlier process.
+            const alive = await same.builder.machine.exec("true");
+            if (alive.exitCode !== 0) throw new Error(`the builder answered exit ${alive.exitCode} to a no-op; it is not serving`);
+            same.record.import = applied.ledger;
+            same.life = "own";
+            await hold(same);
+          } catch (e) {
+            // Same road as a fresh builder that fails its stages: the machine goes, the person starts over.
+            let detail = e instanceof Error ? e.message : String(e);
+            await killUntilGone(backend, same.builder.machine, opts.killConfirm).catch((k: unknown) => {
+              detail += `; ${k instanceof Error ? k.message : String(k)}`;
+            });
+            await forgetBuilder(same.record.id);
+            stage("failed", detail);
+            throw e;
+          }
           stage("ready");
-          return builderView(same.record);
+          return builderView(same.record, same);
         }
-        const builder = await prepareBuilder({
-          backend: b,
-          ...size,
-          ...(o?.kind !== undefined ? { kind: o.kind } : {}),
-          ...(deployDaemon !== undefined ? { deployDaemon } : {}),
-          ...(imp !== undefined ? { import: imp } : {}),
-          labels: { ...recipe.labels, wsp: "1", "wsp-builder": "1", [OWNER_LABEL]: owner, createdAt: new Date().toISOString() },
-          onStage: stage,
-        });
+        // The hold begins the moment the machine exists: a held placeholder is on the store before any
+        // stage runs, so another process over it (a second host, wspx) never reads this machine as lost.
+        let placeholder: LiveBuilder | undefined;
+        const recording: MachineBackend = {
+          ...b,
+          create: async spec => {
+            const machine = await b.create(spec);
+            const asked = { cpu: spec.cpu ?? backend.pricing.defaultSize.cpu, memMb: spec.memMb ?? backend.pricing.defaultSize.memMb };
+            const record: BuilderRecord = {
+              id: machine.id,
+              name,
+              kind: spec.kind,
+              baseTemplate: spec.template ?? "",
+              setupSha: "",
+              createdAt: spec.labels?.["createdAt"] ?? new Date().toISOString(),
+              size: asked,
+              firstLife: true,
+              building: true,
+              ...(machine.streamUrl !== undefined ? { streamUrl: machine.streamUrl } : {}),
+              ...(imp !== undefined ? { import: { recipeHash: imp.recipeHash, applied: [], smoke: "true" } } : {}),
+            };
+            placeholder = { record, builder: { machine, kind: spec.kind, baseTemplate: record.baseTemplate, setupSha: "", createdAt: record.createdAt, firstLife: true, size: asked }, life: "own" };
+            builders.set(machine.id, placeholder);
+            await hold(placeholder);
+            return machine;
+          },
+        };
+        let builder: Builder;
+        try {
+          builder = await prepareBuilder({
+            backend: recording,
+            ...size,
+            ...(o?.kind !== undefined ? { kind: o.kind } : {}),
+            ...(deployDaemon !== undefined ? { deployDaemon } : {}),
+            ...(imp !== undefined ? { import: imp } : {}),
+            labels: { ...recipe.labels, wsp: "1", "wsp-builder": "1", [OWNER_LABEL]: owner, createdAt: new Date().toISOString() },
+            onStage: stage,
+          });
+        } catch (e) {
+          // prepareBuilder killed the machine on its way out; the placeholder goes with it.
+          if (placeholder !== undefined) await forgetBuilder(placeholder.record.id);
+          throw e;
+        }
         const record: BuilderRecord = {
           id: builder.machine.id,
           name,
@@ -1090,19 +1247,26 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           setupSha: builder.setupSha,
           createdAt: builder.createdAt,
           size: builder.size,
+          firstLife: true,
           ...(builder.machine.streamUrl !== undefined ? { streamUrl: builder.machine.streamUrl } : {}),
           ...(builder.import !== undefined ? { import: builder.import } : {}),
         };
-        builders.set(record.id, { record, builder, stale: false });
-        await store.put(BUILDERS, record.id, record);
-        return builderView(record);
-      });
+        const entry: LiveBuilder = placeholder ?? { record, builder, life: "own" };
+        entry.record = record;
+        entry.builder = builder;
+        builders.set(record.id, entry);
+        await hold(entry);
+        return builderView(record, entry);
+      }).finally(() => preparing.delete(name));
+      preparing.set(name, { hash: imp?.recipeHash, promise: run });
+      return run;
     },
 
     async seal(builderId) {
       await ready();
       const entry = builders.get(builderId);
       if (!entry) throw new Error(`no such builder: ${builderId}`);
+      refuseUntouchable(entry);
       const recipe = recipeOrThrow();
       const prior = (await store.get(GOLDENS, entry.record.name)) as GoldenManifest | undefined;
       try {
@@ -1137,6 +1301,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await ready();
       const entry = builders.get(builderId);
       if (!entry) throw new Error(`no such builder: ${builderId}`);
+      refuseUntouchable(entry);
       const reach = await refreshPreviewToken(entry.builder.machine, DAEMON_PORT, entry.reach);
       entry.reach = reach;
       const daemonToken = await daemonTokenOf(entry.builder.machine);
@@ -1145,7 +1310,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async builders() {
       await ready();
-      return [...builders.values()].map(b => builderView(b.record));
+      return [...builders.values()].map(b => builderView(b.record, b));
     },
 
     async rollback(version, name) {
@@ -1192,11 +1357,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     status,
     reap: async olderThanMs => {
       await ready();
-      // A hydrated builder is not first-life and can never seal; stopping it is the only thing that ends its bill.
+      // A stale record can never seal; stopping it is the only thing that ends its bill. A reusable one no
+      // process is using dies at six hours by our createdAt label, or at once when no age can be read: every
+      // get(id) on it resets the provider's rolling idle timer (measured), so the kill it was created with
+      // never fires while a host is up. Own builders get their heartbeat here, so other processes leave them be.
       const reaped: ReapedMachine[] = [];
       const failed: ReapFailure[] = [];
       const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
-      for (const b of [...builders.values()].filter(b => b.stale)) {
+      const now = Date.now();
+      for (const b of [...builders.values()]) {
+        if (b.life === "own") await hold(b);
+        const bornAt = Date.parse(b.builder.machine.labels?.["createdAt"] ?? b.record.createdAt);
+        const ageMs = Number.isNaN(bornAt) ? undefined : now - bornAt;
+        const expired = b.life === "reusable" && (ageMs === undefined || ageMs >= BUILDER_IDLE_MS);
+        if (b.life !== "stale" && !expired) continue;
         try {
           await b.builder.machine.kill();
         } catch (e) {
@@ -1206,7 +1380,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           }
         }
         await forgetBuilder(b.record.id);
-        reaped.push({ id: b.record.id, builder: true, reason: "recorded" });
+        reaped.push(
+          b.life === "stale"
+            ? { id: b.record.id, builder: true, reason: b.record.building === true ? "unfinished" : "recorded" }
+            : { id: b.record.id, builder: true, reason: "expired", ...(ageMs !== undefined ? { ageMs } : {}) },
+        );
       }
       const result = (swept: ReapResult): ReapResult => {
         const allFailed = failed.concat(swept.failed ?? []);
@@ -1217,7 +1395,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           await reap({
             backend,
             owner,
-            knownIds: () => [...live.values()].map(e => e.record.machineId).concat([...builders.keys()], [...inflight], reaped.map(r => r.id)),
+            knownIds: () => [...live.values()].flatMap(e => [e.record.machineId, e.machine.id]).concat([...builders.keys()], [...inflight], reaped.map(r => r.id)),
             ...(olderThanMs !== undefined ? { olderThanMs } : {}),
           }),
         );
@@ -1228,6 +1406,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
     close: async () => {
       idle.close();
+      closed = true;
+      beat?.();
+      beat = undefined;
+      await ticking;
+      // A clean exit frees its builders at once; a crash leaves the heartbeat to age and the pid to die.
+      for (const b of [...builders.values()].filter(b => b.life === "own" && b.record.heldBy !== undefined)) {
+        delete b.record.heldBy;
+        await store.put(BUILDERS, b.record.id, b.record);
+      }
       for (const id of [...transcriptTimers.keys()]) void flushTranscript(id);
       await Promise.all(transcriptFlushes.values());
     },

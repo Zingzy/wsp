@@ -16,6 +16,7 @@ import { collect, nodeHost, type Manifest, type Rung } from "@wsp/collect";
 import {
   SolariBackend,
   createRuntime,
+  hostIdentity,
   jsonFileStore,
   machineExecStream,
   type GoldenBuilderView,
@@ -27,6 +28,7 @@ import {
 import { CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, claudeEnvs, deployDaemon, doctor } from "./doctor.js";
 import { keychainReader } from "./init-import.js";
 import { runInit, type InitIO } from "./init.js";
+import { recipePath } from "./init-recipe.js";
 import { TAGLINE, opening } from "./init-opening.js";
 import type { ChecklistItem } from "./init-recipe.js";
 import { systemOpener, type UrlOpener } from "./relay.js";
@@ -230,6 +232,7 @@ export function makeRuntime(keys: Keys, statePath: string, recipe: GoldenRecipe 
         }),
     },
     goldenRecipe: recipe,
+    hostId: hostIdentity(),
   });
 }
 
@@ -422,6 +425,7 @@ async function hostFor(
       ...(keys.anthropic !== undefined ? { workspaceEnvs: (golden: GoldenVersion) => claudeEnvs(keys.anthropic, golden) } : {}),
       ...(opts.openUrl !== undefined ? { openUrl: opts.openUrl } : {}),
       log: line => io.log(line),
+      recipePath: recipePath(opts.statePath),
     });
     writeFileSync(lockPath, JSON.stringify({ ...lock, port: handle.port, wsPort: handle.wsPort }));
     // Other local tools read the token from disk; the WS never sees it in a URL.

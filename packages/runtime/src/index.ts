@@ -43,3 +43,4 @@ export type {
   WorkspaceStatus,
   WorkspaceView,
 } from "@wsp/protocol";
+export { hostIdentity, localConfigDir } from "./host-id.js";

@@ -308,6 +308,16 @@ export const GoldenBuilderView = z.object({
   /** What the provider built, so a builder left running can be priced. */
   size: z.object({ cpu: z.number(), memMb: z.number() }),
   screen: z.object({ streamUrl: z.string() }).optional(),
+  /** True while the machine has never been paused, resumed or restored, so it can still be sealed. */
+  firstLife: z.boolean().optional(),
+  /** The recipe this builder carries; a prepare with the same hash attaches to it instead of booting. */
+  recipeHash: z.string().optional(),
+  /** The owner label on the machine when it names another state file; absent when it is this one's or the provider reports none. */
+  foreignOwner: z.string().optional(),
+  /** The other live wsp process using this builder, when there is one; such a builder is listed and left alone. */
+  heldBy: z.object({ host: z.string(), pid: z.number(), heartbeat: z.string() }).optional(),
+  /** True while its stages still run in the process that holds it; left this way by a dead process, it can never seal. */
+  building: z.boolean().optional(),
 });
 export type GoldenBuilderView = z.infer<typeof GoldenBuilderView>;
 

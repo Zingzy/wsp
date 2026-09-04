@@ -19,6 +19,7 @@ import {
   type Runtime,
   type SparedMachine,
   type WorkspaceView,
+  hostIdentity,
 } from "@wsp/runtime";
 
 const CLAUDE_INSTALL = "curl -fsSL https://claude.ai/install.sh | bash";
@@ -72,6 +73,7 @@ function makeRuntime(): { rt: Runtime; envs: Record<string, string> } {
           configDir: CONFIG_DIR,
         }),
     },
+    hostId: hostIdentity(),
   });
   return { rt, envs: claudeEnvs(env.ANTHROPIC_API_KEY) };
 }

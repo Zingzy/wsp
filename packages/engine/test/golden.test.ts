@@ -159,6 +159,18 @@ describe("interactive golden: prepare then seal", () => {
     expect(timeline).toEqual(["create m1"]); // alive and waiting for the person
   });
 
+  it("the builder's createdAt is taken before the create, so the age a person reads covers the whole prepare", async () => {
+    const { backend } = recordingBackend();
+    let createCalledAt = 0;
+    const realCreate = backend.create.bind(backend);
+    backend.create = async spec => {
+      createCalledAt = Date.now();
+      return realCreate(spec);
+    };
+    const builder = await prepareBuilder({ backend, setup: "true", deployDaemon: () => new Promise(r => setTimeout(r, 15)) });
+    expect(Date.parse(builder.createdAt)).toBeLessThanOrEqual(createCalledAt);
+  });
+
   it("a daemon hook that reports a detail gets it on a second deploying-daemon frame", async () => {
     const { backend } = recordingBackend();
     const { stages, onStage } = stageRecorder();

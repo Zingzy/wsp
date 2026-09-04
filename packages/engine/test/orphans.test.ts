@@ -17,11 +17,13 @@ type Row = { id: string; state: MachineState; labels: Record<string, string>; si
 function stubBackend(rows: Row[] | (() => Row[])) {
   const killed: string[] = [];
   let listed = 0;
+  let fetched = 0;
   const backend: MachineBackend = {
     capabilities: { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true },
     pricing: { rateUsdPerHour: (s: { cpu: number; memMb: number }) => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 } },
     async create() { throw new Error("unused"); },
     async get(id) {
+      fetched++;
       return {
         id, kind: "sandbox", streamUrl: undefined,
         exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
@@ -34,7 +36,7 @@ function stubBackend(rows: Row[] | (() => Row[])) {
     async list() { listed++; return typeof rows === "function" ? rows() : rows; },
     async deleteSnapshot() {},
   };
-  return { backend, killed, listed: () => listed };
+  return { backend, killed, listed: () => listed, fetched: () => fetched };
 }
 
 const builder = (labels: Record<string, string>): Record<string, string> => ({ wsp: "1", "wsp-builder": "1", ...labels });
@@ -75,9 +77,11 @@ describe("orphan reaper", () => {
     { name: "a poc machine wearing our labels, owner included", row: { id: "experiment", labels: builder({ poc: "p1", "wsp-owner": ME, createdAt: PAST_BACKSTOP }) }, verdict: "kept" },
     // non-builders: own and none die past ten minutes, foreign never
     { name: "a workspace this owner made, past ten minutes", row: { id: "own-ws-old", labels: workspace({ "wsp-owner": ME, createdAt: OLD }) }, verdict: "own" },
-    { name: "a workspace this owner made, inside ten minutes", row: { id: "own-ws-young", labels: workspace({ "wsp-owner": ME, createdAt: YOUNG }) }, verdict: "spared" },
-    { name: "a workspace this owner made with a garbage createdAt", row: { id: "own-ws-garbage", labels: workspace({ "wsp-owner": ME, createdAt: "yesterday" }) }, verdict: "spared" },
-    { name: "a workspace this owner made with no createdAt", row: { id: "own-ws-ageless", labels: workspace({ "wsp-owner": ME }) }, verdict: "spared" },
+    { name: "a workspace this owner made two minutes ago", row: { id: "own-ws-young", labels: workspace({ "wsp-owner": ME, createdAt: YOUNG }) }, verdict: "own" },
+    { name: "a workspace this owner made exactly a minute ago", row: { id: "own-ws-at-grace", labels: workspace({ "wsp-owner": ME, createdAt: AT_GRACE }) }, verdict: "own" },
+    { name: "a workspace this owner made less than a minute ago", row: { id: "own-ws-fresh", labels: workspace({ "wsp-owner": ME, createdAt: FRESH }) }, verdict: "spared" },
+    { name: "a workspace this owner made with a garbage createdAt", row: { id: "own-ws-garbage", labels: workspace({ "wsp-owner": ME, createdAt: "yesterday" }) }, verdict: "own" },
+    { name: "a workspace this owner made with no createdAt", row: { id: "own-ws-ageless", labels: workspace({ "wsp-owner": ME }) }, verdict: "own" },
     { name: "another owner's workspace past ten minutes", row: { id: "foreign-ws", labels: workspace({ "wsp-owner": "h_other", createdAt: PAST_BACKSTOP }) }, verdict: "spared" },
     { name: "an unowned workspace past ten minutes", row: { id: "orphan-ws", labels: workspace({ createdAt: OLD }) }, verdict: "orphan" },
     { name: "an unowned workspace inside ten minutes", row: { id: "orphan-ws-young", labels: workspace({ createdAt: YOUNG }) }, verdict: "spared" },
@@ -97,7 +101,7 @@ describe("orphan reaper", () => {
       { id: "foreign", state: "running", labels: builder({ "wsp-owner": "h_other", createdAt: YOUNG }), size: { cpu: 4, memMb: 8192 } },
       { id: "orphan-young", state: "running", labels: builder({ createdAt: YOUNG }) },
       { id: "ageless", state: "running", labels: builder({}) },
-      { id: "own-ws", state: "running", labels: workspace({ "wsp-owner": ME, createdAt: YOUNG }) },
+      { id: "own-ws-fresh", state: "running", labels: workspace({ "wsp-owner": ME, createdAt: FRESH }) },
       { id: "own-fresh", state: "running", labels: builder({ "wsp-owner": ME, createdAt: FRESH }) },
     ]);
     const { spared } = await reap({ backend, owner: ME, knownIds: () => [], now: () => NOW });
@@ -105,9 +109,34 @@ describe("orphan reaper", () => {
       { id: "foreign", labels: builder({ "wsp-owner": "h_other", createdAt: YOUNG }), builder: true, whose: "foreign", owner: "h_other", ageMs: 2 * 60_000, backstopMs: BUILDER_IDLE_MS, rateUsdPerHour: 4 * 0.035 + 8 * 0.01 },
       { id: "orphan-young", labels: builder({ createdAt: YOUNG }), builder: true, whose: "none", ageMs: 2 * 60_000, backstopMs: BUILDER_IDLE_MS, rateUsdPerHour: RATE },
       { id: "ageless", labels: builder({}), builder: true, whose: "none", backstopMs: BUILDER_IDLE_MS, rateUsdPerHour: RATE },
-      { id: "own-ws", labels: workspace({ "wsp-owner": ME, createdAt: YOUNG }), builder: false, whose: "own", owner: ME, ageMs: 2 * 60_000, backstopMs: 10 * 60_000, rateUsdPerHour: RATE },
+      { id: "own-ws-fresh", labels: workspace({ "wsp-owner": ME, createdAt: FRESH }), builder: false, whose: "own", owner: ME, ageMs: 30_000, backstopMs: 60_000, rateUsdPerHour: RATE },
       { id: "own-fresh", labels: builder({ "wsp-owner": ME, createdAt: FRESH }), builder: true, whose: "own", owner: ME, ageMs: 30_000, backstopMs: 60_000, rateUsdPerHour: RATE },
     ]);
+  });
+
+  it("fetches no machine it leaves alone: a spared row is judged from the listing, since a GET resets the provider's idle timer", async () => {
+    const left = stubBackend([
+      { id: "foreign", state: "running", labels: builder({ "wsp-owner": "h_other", createdAt: PAST_BACKSTOP }) },
+      { id: "foreign-ws", state: "running", labels: workspace({ "wsp-owner": "h_other", createdAt: OLD }) },
+      { id: "orphan-young", state: "running", labels: builder({ createdAt: YOUNG }) },
+      { id: "orphan-ws-young", state: "running", labels: workspace({ createdAt: YOUNG }) },
+      { id: "own-fresh", state: "running", labels: builder({ "wsp-owner": ME, createdAt: FRESH }) },
+      { id: "own-ws-fresh", state: "running", labels: workspace({ "wsp-owner": ME, createdAt: FRESH }) },
+      { id: "ageless", state: "running", labels: builder({}) },
+      { id: "paused", state: "paused", labels: builder({ createdAt: PAST_BACKSTOP }) },
+      { id: "experiment", state: "running", labels: builder({ poc: "p1", "wsp-owner": ME, createdAt: PAST_BACKSTOP }) },
+      { id: "not-ours", state: "running", labels: {} },
+    ]);
+    const result = await reap({ backend: left.backend, owner: ME, knownIds: () => [], now: () => NOW });
+    expect(result.reaped).toEqual([]);
+    expect(result.spared.map(s => s.id)).toEqual(["foreign", "foreign-ws", "orphan-young", "orphan-ws-young", "own-fresh", "own-ws-fresh", "ageless"]);
+    expect(left.fetched()).toBe(0);
+    expect(left.killed).toEqual([]);
+
+    const dies = stubBackend([{ id: "orphan", state: "running", labels: builder({ createdAt: PAST_BACKSTOP }) }]);
+    await reap({ backend: dies.backend, owner: ME, knownIds: () => [], now: () => NOW });
+    expect(dies.fetched()).toBe(1);
+    expect(dies.killed).toEqual(["orphan"]);
   });
 
   it("honors a custom age threshold for workspaces, not for builders", async () => {

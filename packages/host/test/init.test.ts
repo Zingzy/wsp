@@ -11,9 +11,9 @@ import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
 import { RUNGS } from "@wsp/collect";
 import type { BackendPricing } from "@wsp/engine";
 import { createRuntime, memoryStore, type GoldenRecipe, type Runtime } from "@wsp/runtime";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { GOLDEN_SETUP } from "../src/doctor.js";
-import { loadManifest } from "../src/init-recipe.js";
+import { loadManifest, recipePath } from "../src/init-recipe.js";
 import { reduceStages, runInit, stageLine, type InitIO, type InitOptions } from "../src/init.js";
 import type { HostHandle } from "../src/server.js";
 import { FIXTURE } from "./init-fixture.js";
@@ -81,6 +81,7 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
   mkdirSync(join(home, ".ssh"), { mode: 0o700 });
   writeFileSync(join(home, ".ssh", "config"), "Host work\n", { mode: 0o600 });
   const reads: string[] = [];
+  const store = memoryStore();
   const { tty: _tty, env: _env, columns: _columns, ...rest } = over;
   const opts: InitOptions = {
     yes: false,
@@ -96,11 +97,12 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
         return "gho_fake";
       },
     },
+    // One account and one state file per fake, as the cli has: a runtime rebuilt after a Keychain refusal sees the same machines.
     runtime: recipe => {
       recipes.push(recipe);
-      const backend = stubBackend();
-      backends.push(backend);
-      const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+      const backend = backends[0] ?? stubBackend();
+      if (backends.length === 0) backends.push(backend);
+      const rt = createRuntime({ backend, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
       runtimes.push(rt);
       return rt;
     },
@@ -479,12 +481,13 @@ describe("wsp init, flags and no terminal", () => {
     expect(f.checklists[0]).toEqual(expect.arrayContaining([{ label: "GitHub CLI login", command: "gh auth login" }]));
     const log = f.backends[0]!.machines[0]!.execLog;
     expect(log.some(c => c.includes("tar xzf"))).toBe(true);
-    // The refused row travels with none of its files: hosts.yml stays home, and the saved list says so for both paths.
-    const skipped = JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8")).files.skipped as { id: string; path: string; note: string }[];
-    expect(skipped.filter(s => s.id === "logins/gh")).toEqual([
-      { id: "logins/gh", path: "~/.config/gh/hosts.yml", note: "not read from the Keychain; sign in on the machine" },
-      { id: "logins/gh", path: "Keychain: gh:github.com", note: "not read from the Keychain; sign in on the machine" },
-    ]);
+    // The refused row travels with none of its files: the recipe is replanned with gh as a sign-in, so the builder
+    // carries two items fewer than first planned (hosts.yml and the Keychain item stay home) and the same hash a
+    // reload of the saved recipe gives.
+    expect(f.recipes).toHaveLength(2);
+    expect(f.recipes[1]!.import!.files!.count).toBe(f.recipes[0]!.import!.files!.count - 2);
+    const skipped = JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8")).files.skipped as { id: string }[];
+    expect(skipped.filter(s => s.id === "logins/gh")).toEqual([]);
   });
 
   it("a gh row that carries hosts.yml alone copies the file and never asks the Keychain", async () => {
@@ -671,7 +674,7 @@ describe("wsp init, flags and no terminal", () => {
     expect(JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8"))).toMatchObject({ agents: [{ id: "agents/claude", outcome: "failed" }] });
   });
 
-  it("a builder from an earlier run still on the account is listed with its age and cost, and nothing boots beside it", async () => {
+  it("a builder from an earlier run built from a different recipe is listed with its age, cost and reason, and nothing boots beside it", async () => {
     const store = memoryStore();
     const shared = stubBackend();
     const earlier = createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true", cpu: 2, memMb: 4096 } });
@@ -686,14 +689,214 @@ describe("wsp init, flags and no terminal", () => {
     expect(f.hosts).toBe(0);
     const out = f.text();
     expect(out).toContain("A builder from an earlier wsp init is still running on the account:");
-    expect(out).toMatch(/default \(m1\), \d+\.\ds old, about \$\d+\.\d\d so far/);
-    expect(out).toContain("Nothing was booted. Kill it first (the Solari console lists it); a builder cannot be sealed after a restart.");
+    expect(out).toMatch(/default \(m1\), \d+ s old, about \$\d+\.\d\d so far; built from a different recipe/);
+    expect(out).toContain("Nothing was booted. Kill it first (the Solari console lists it), then run wsp init again.");
     expect(out).not.toContain("save it");
     // The refusal came before any consent dialog: the Keychain was never asked.
     expect(f.reads).toEqual([]);
     expect(out).not.toMatch(BOOT);
     expect(shared.machines).toHaveLength(1);
     expect(shared.machines[0]!.killed).toBe(false);
+  });
+
+  it("a builder from an earlier run that was paused is listed as unsealable, and nothing boots beside it", async () => {
+    const store = memoryStore();
+    const shared = stubBackend();
+    const first = fake({ yes: true });
+    first.opts.runtime = recipe => {
+      first.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+    };
+    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    shared.machines[0]!.paused = true;
+
+    const f = fake({ yes: true, home: first.opts.home });
+    f.opts.runtime = recipe => {
+      f.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: recipe });
+    };
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(1);
+    expect(f.hosts).toBe(0);
+    const out = f.text();
+    expect(out).toMatch(/default \(m1\), \d+ s old, about \$\d+\.\d\d so far; cannot be sealed after a restart/);
+    expect(out).toContain("Nothing was booted. Kill it first (the Solari console lists it), then run wsp init again.");
+    expect(shared.machines).toHaveLength(1);
+  });
+
+  it("an earlier builder wearing another setup's owner label is refused with those words, and nothing boots beside it", async () => {
+    const store = memoryStore();
+    const shared = stubBackend();
+    const first = fake({ yes: true });
+    first.opts.runtime = recipe => {
+      first.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+    };
+    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    shared.machines[0]!.spec.labels!["wsp-owner"] = "h_other";
+
+    const f = fake({ yes: true, home: first.opts.home });
+    f.opts.runtime = recipe => {
+      f.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: recipe });
+    };
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(1);
+    const out = f.text();
+    expect(out).toMatch(/default \(m1\), \d+ s old, about \$\d+\.\d\d so far; not this setup's builder/);
+    expect(out).not.toContain("cannot be sealed");
+    expect(shared.machines).toHaveLength(1);
+    expect(shared.machines[0]!.killed).toBe(false);
+  });
+
+  it("when the only blocker is a builder another wsp process is using, the guard says to wait for or stop that process, never to kill the machine", async () => {
+    const store = memoryStore();
+    const shared = stubBackend();
+    const first = fake({ yes: true });
+    first.opts.runtime = recipe => {
+      first.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+    };
+    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    const record = (await store.get("builders", "m1")) as { heldBy: { host: string; pid: number; heartbeat: string } };
+    await store.put("builders", "m1", { ...record, heldBy: { ...record.heldBy, pid: process.ppid } });
+
+    const f = fake({ yes: true, home: first.opts.home });
+    f.opts.runtime = recipe => {
+      f.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: recipe });
+    };
+    expect((await runInit(f.opts, f.io)).code).toBe(1);
+    const out = f.text();
+    expect(out).toMatch(new RegExp(`default \\(m1\\), \\d+ s old, about \\$\\d+\\.\\d\\d so far; in use by another wsp process \\(pid ${process.ppid}\\)`));
+    expect(out).toContain(`Nothing was booted. Another wsp process (pid ${process.ppid}) is using it; wait for it or stop that process, then run wsp init again.`);
+    expect(out).not.toContain("Kill it first");
+    expect(shared.machines).toHaveLength(1);
+    expect(shared.machines[0]!.killed).toBe(false);
+  });
+
+  it("a placeholder left mid-setup by a dead process is listed as unfinished and refused, even on the same recipe; nothing boots beside it", async () => {
+    const store = memoryStore();
+    const shared = stubBackend();
+    const gate = new Promise<void>(() => {});
+    const dying = fake({ yes: true });
+    dying.opts.runtime = recipe => {
+      dying.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: () => gate } });
+    };
+    void runInit(dying.opts, dying.io);
+    await vi.waitFor(() => expect(shared.machines).toHaveLength(1));
+    const record = (await store.get("builders", "m1")) as { building?: true; heldBy: { host: string; pid: number; heartbeat: string } };
+    expect(record.building).toBe(true);
+    await store.put("builders", "m1", { ...record, heldBy: { ...record.heldBy, pid: 999_999_999 } });
+
+    const f = fake({ yes: true, home: dying.opts.home });
+    f.opts.runtime = recipe => {
+      f.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: recipe });
+    };
+    expect((await runInit(f.opts, f.io)).code).toBe(1);
+    expect(f.hosts).toBe(0);
+    const out = f.text();
+    expect(out).toMatch(/default \(m1\), \d+ s old, about \$\d+\.\d\d so far; its setup never finished/);
+    expect(out).toContain("Nothing was booted. Kill it first (the Solari console lists it), or run wsp, whose first sweep stops it; then run wsp init again.");
+    expect(out).not.toContain("Attaching");
+    expect(out).not.toMatch(BOOT);
+    expect(shared.machines).toHaveLength(1);
+    expect(shared.machines[0]!.killed).toBe(false);
+  });
+
+  it("when another builder blocks, the refusal names the one this run could reuse", async () => {
+    const store = memoryStore();
+    const shared = stubBackend();
+    const first = fake({ yes: true });
+    first.opts.runtime = recipe => {
+      first.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+    };
+    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    const other = createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true", cpu: 2, memMb: 4096 } });
+    await other.golden.prepare();
+
+    const f = fake({ yes: true, home: first.opts.home });
+    f.opts.runtime = recipe => {
+      f.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: recipe });
+    };
+    expect((await runInit(f.opts, f.io)).code).toBe(1);
+    const out = f.text();
+    expect(out).toMatch(/default \(m2\), \d+ s old, about \$\d+\.\d\d so far; built from a different recipe/);
+    expect(out).toMatch(/default \(m1\), \d+ s old, about \$\d+\.\d\d so far; reusable by this run once the others are stopped/);
+    expect(shared.machines).toHaveLength(2);
+    expect(shared.machines.some(m => m.killed)).toBe(false);
+  });
+
+  it("a Keychain refusal rehashes the recipe the builder carries, so wsp init --manifest on the saved recipe attaches after a crash", async () => {
+    const store = memoryStore();
+    const shared = stubBackend();
+    const first = fake({ yes: true });
+    first.opts.secrets = {
+      read: async service => {
+        if (service.includes("gh")) throw new Error("User canceled");
+        return "tok";
+      },
+    };
+    first.opts.runtime = recipe => {
+      first.backends.push(shared);
+      const rt = createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+      first.runtimes.push(rt);
+      return rt;
+    };
+    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    expect(first.text()).toContain("changed to sign in on the machine");
+    const saved = JSON.parse(readFileSync(recipePath(first.opts.statePath), "utf8")) as { entries: { id: string; choice?: string }[] };
+    expect(saved.entries.find(e => e.id === "logins/gh")).toMatchObject({ choice: "machine" });
+    // The runtime that prepared the builder is the one built after the refusal, around the rehashed recipe.
+    expect(first.runtimes).toHaveLength(2);
+    const [recorded] = (await store.list("builders")) as { import: { recipeHash: string } }[];
+    expect(recorded!.import.recipeHash).toBe((await first.runtimes[1]!.golden.builders())[0]!.recipeHash);
+
+    const f = fake({ yes: true, tty: false, home: first.opts.home, manifestPath: recipePath(first.opts.statePath) });
+    f.opts.runtime = recipe => {
+      f.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+    };
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    expect(f.reads).toEqual([]);
+    expect(f.text()).toContain("Attaching to your earlier builder: default (m1)");
+    expect(shared.machines).toHaveLength(1);
+  });
+
+  it("a first-life builder from an earlier run with the same recipe is attached to: no boot question, every stage already applied, one machine", async () => {
+    const store = memoryStore();
+    const shared = stubBackend();
+    const first = fake({ yes: true });
+    first.opts.runtime = recipe => {
+      first.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+    };
+    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    expect(shared.machines).toHaveLength(1);
+
+    // The same home, so the file rows hash the same; a second process is a second runtime over the same
+    // store. Off a terminal each stage prints once, so the lines can be counted.
+    const f = fake({ yes: true, tty: false, home: first.opts.home });
+    f.opts.runtime = recipe => {
+      f.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+    };
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(0);
+    expect(f.hosts).toBe(1);
+    const out = f.text();
+    expect(out).toMatch(/Attaching to your earlier builder: default \(m1\), \d+ s old, about \$\d+\.\d\d so far\. Nothing new boots; stages already applied are skipped\./);
+    expect(out).not.toMatch(BOOT);
+    expect(out).not.toContain("Creating the machine");
+    expect(out.match(/(Setup applied|Files uploaded|Tools installed|Agents installed)\s+already applied/g)).toHaveLength(4);
+    expect(out).toContain("Ready");
+    expect(shared.machines).toHaveLength(1);
+    expect(shared.machines[0]!.killed).toBe(false);
+    expect((await store.list("builders")).map(b => (b as { id: string; firstLife: boolean }).firstLife)).toEqual([true]);
   });
 });
 

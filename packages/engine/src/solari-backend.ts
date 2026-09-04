@@ -89,7 +89,7 @@ export class SolariBackend implements MachineBackend {
   }
 
   async create(spec: MachineSpec): Promise<Machine> {
-    const res = await this.request<{ sandboxId: string; kind: MachineKind; streamUrl?: string }>(
+    const res = await this.request<{ sandboxId: string; kind: MachineKind; streamUrl?: string; state?: SandboxView["state"]; createdAt?: string }>(
       "POST", "/sandboxes", {
         kind: spec.kind,
         ...(spec.template ? { template: spec.template } : {}),
@@ -102,12 +102,17 @@ export class SolariBackend implements MachineBackend {
         ...(spec.idleTimeoutMs ? { timeoutMs: spec.idleTimeoutMs } : {}),
       },
     );
-    return new SolariMachine(this, res.sandboxId, res.kind ?? spec.kind, res.streamUrl);
+    // The create response has carried no createdAt (measured 2026-09-04); when it does, it rides on seen for information and nothing reads it.
+    const seen = res.createdAt !== undefined ? { state: STATE_MAP[res.state ?? "running"] ?? "running", createdAt: res.createdAt } : undefined;
+    return new SolariMachine(this, res.sandboxId, res.kind ?? spec.kind, res.streamUrl, spec.labels, seen);
   }
 
   async get(id: string): Promise<Machine> {
     const view = await this.request<SandboxView>("GET", `/sandboxes/${encodeURIComponent(id)}`);
-    return new SolariMachine(this, view.sandboxId ?? id, view.kind ?? "sandbox");
+    return new SolariMachine(this, view.sandboxId ?? id, view.kind ?? "sandbox", undefined, view.metadata, {
+      state: STATE_MAP[view.state] ?? "gone",
+      ...(view.createdAt !== undefined ? { createdAt: view.createdAt } : {}),
+    });
   }
 
   async list(labels?: Record<string, string>): Promise<{ id: string; state: MachineState; labels: Record<string, string>; size?: { cpu: number; memMb: number } }[]> {
@@ -145,6 +150,8 @@ class SolariMachine implements Machine {
     readonly id: string,
     readonly kind: MachineKind,
     readonly streamUrl?: string,
+    readonly labels?: Record<string, string>,
+    readonly seen?: { state: MachineState; createdAt?: string },
   ) {}
 
   private path(suffix = ""): string {

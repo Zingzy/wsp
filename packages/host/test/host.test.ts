@@ -392,6 +392,7 @@ describe("host sweeps orphaned machines", () => {
     const { rt, backend, store } = testRuntime();
     const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true" } });
     const owned = await crashed.golden.prepare();
+    backend.machines[0]!.paused = true; // paused from the console, so no longer first-life
     const orphanAt = ago(BUILDER_IDLE_MS + 60_000);
     const strayAt = ago(12 * 60_000);
     const foreign = await backend.create({ kind: "sandbox", labels: { ...BUILDER, "wsp-owner": "h_other", createdAt: ago(53_000) } });
@@ -427,6 +428,7 @@ describe("host sweeps orphaned machines", () => {
     const { rt, backend, store } = testRuntime();
     const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true" } });
     const owned = await crashed.golden.prepare();
+    backend.machines[0]!.paused = true;
     await backend.create({ kind: "sandbox", labels: { ...BUILDER, createdAt: ago(BUILDER_IDLE_MS + 60_000) } });
     backend.list = async () => { throw new Error("list 502"); };
     const lines: string[] = [];
@@ -472,7 +474,7 @@ describe("host sweeps orphaned machines", () => {
     const { id: owner } = (await store.get("owner", "id")) as { id: string };
     const ahead = await backend.create({ kind: "sandbox", labels: { ...BUILDER, "wsp-owner": "h_other", createdAt: ago(-45_000) } });
     const almostMinute = await backend.create({ kind: "sandbox", labels: { ...BUILDER, "wsp-owner": "h_other", createdAt: ago(59_600) } });
-    const ownWs = await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-owner": owner, createdAt: ago(9.5 * 60_000) } });
+    const ownWs = await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-owner": owner, createdAt: ago(45_000) } });
     const hours = await backend.create({ kind: "sandbox", labels: { ...BUILDER, "wsp-owner": "h_other", createdAt: ago(6 * 3_600_000) } });
     const freshOwn = await backend.create({ kind: "sandbox", labels: { ...BUILDER, "wsp-owner": owner, createdAt: ago(30_000) } });
     const lines: string[] = [];
@@ -483,7 +485,7 @@ describe("host sweeps orphaned machines", () => {
     expect(lines).toEqual([
       `reap: left alone ${ahead.id}: builder from another wsp setup (owner h_other), 0 s old, $0.11/h (about $0.00 so far); kill it from the Solari console if it is yours and forgotten`,
       `reap: left alone ${almostMinute.id}: builder from another wsp setup (owner h_other), 59 s old, $0.11/h (about $0.00 so far); kill it from the Solari console if it is yours and forgotten`,
-      `reap: left alone ${ownWs.id}: workspace from this setup that no record claims, 9 min old, $0.11/h (about $0.02 so far); reaped once it is 10 min old unless a record claims it first`,
+      `reap: left alone ${ownWs.id}: workspace from this setup that no record claims, 45 s old, $0.11/h (about $0.00 so far); reaped once it is 1 min old unless a record claims it first`,
       `reap: left alone ${hours.id}: builder from another wsp setup (owner h_other), 6.0 h old, $0.11/h (about $0.66 so far); kill it from the Solari console if it is yours and forgotten`,
       `reap: left alone ${freshOwn.id}: builder from this setup that no record claims, 30 s old, $0.11/h (about $0.00 so far); reaped once it is 1 min old unless a record claims it first`,
     ]);
@@ -493,6 +495,7 @@ describe("host sweeps orphaned machines", () => {
     const { rt, backend, store } = testRuntime();
     const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true" } });
     const stuck = await crashed.golden.prepare();
+    backend.machines[0]!.paused = true;
     const orphanAt = ago(BUILDER_IDLE_MS + 60_000);
     const orphan = await backend.create({ kind: "sandbox", labels: { ...BUILDER, createdAt: orphanAt } });
     backend.machines[0]!.kill = async () => { throw new Error("502 exec failed"); };
@@ -505,6 +508,114 @@ describe("host sweeps orphaned machines", () => {
       `reap: stopped ${orphan.id} (wsp=1 wsp-builder=1 createdAt=${orphanAt}): builder with no owner, 6.0 h old`,
       `reap: could not stop ${stuck.id} (502 exec failed; stays recorded, retried next sweep)`,
     ]);
+  });
+
+  it("a first-life builder from an earlier run is kept, claimed against the sweep, and named at start", async () => {
+    const { rt, backend, store } = testRuntime();
+    const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true" } });
+    const kept = await crashed.golden.prepare();
+    const lines: string[] = [];
+
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l), recipePath: "/home/me/.wsp/state/golden-recipe.json" });
+
+    expect(backend.machines[0]!.killed).toBe(false);
+    expect(lines).toEqual([
+      `reap: left alone ${kept.id}: your earlier builder from this setup, still first-life, 0 s old, $0.11/h (about $0.00 so far); reuse it with wsp init --manifest /home/me/.wsp/state/golden-recipe.json, or it is stopped at six hours`,
+    ]);
+    expect(await store.get("builders", kept.id)).toMatchObject({ firstLife: true });
+  });
+
+  it("a recorded builder wearing another setup's owner label is named as such at start and never touched", async () => {
+    const { rt, backend, store } = testRuntime();
+    const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true" } });
+    const foreign = await crashed.golden.prepare();
+    backend.machines[0]!.spec.labels!["wsp-owner"] = "h_other";
+    const lines: string[] = [];
+
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l), recipePath: "/home/me/.wsp/state/golden-recipe.json" });
+
+    expect(backend.machines[0]!.killed).toBe(false);
+    expect(lines).toEqual([`reap: left alone ${foreign.id}: recorded builder wearing another setup's owner label (h_other); never touched by this host`]);
+  });
+
+  it("a recorded builder another live wsp process holds is named as in use at start and never touched", async () => {
+    const { rt, backend, store } = testRuntime();
+    const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true" } });
+    const held = await crashed.golden.prepare();
+    const record = (await store.get("builders", held.id)) as { heldBy: { host: string; pid: number; heartbeat: string } };
+    await store.put("builders", held.id, { ...record, heldBy: { ...record.heldBy, pid: process.ppid } });
+    const lines: string[] = [];
+
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l), recipePath: "/home/me/.wsp/state/golden-recipe.json" });
+
+    expect(backend.machines[0]!.killed).toBe(false);
+    expect(lines).toEqual([`reap: left alone ${held.id}: your earlier builder from this setup, in use by another wsp process (pid ${process.ppid}); never touched by this host`]);
+  });
+
+  it("a placeholder left mid-setup by a dead process is stopped at start with the line saying its setup never finished", async () => {
+    const { rt, backend, store } = testRuntime();
+    const gate = new Promise<void>(() => {});
+    const dying = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true", deployDaemon: () => gate } });
+    void dying.golden.prepare();
+    await vi.waitFor(() => expect(backend.machines).toHaveLength(1));
+    const record = (await store.get("builders", "m1")) as { heldBy: { host: string; pid: number; heartbeat: string } };
+    await store.put("builders", "m1", { ...record, heldBy: { ...record.heldBy, pid: 999_999_999 } });
+    const lines: string[] = [];
+
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l), recipePath: "/home/me/.wsp/state/golden-recipe.json" });
+
+    expect(backend.machines[0]!.killed).toBe(true);
+    expect(lines).toEqual(["reap: stopped m1: your earlier builder from this setup; its setup never finished"]);
+    expect(await store.list("builders")).toEqual([]);
+  });
+
+  it("an unfinished placeholder that will not die is reported and named as unfinished at start, never as reusable", async () => {
+    const { rt, backend, store } = testRuntime();
+    const gate = new Promise<void>(() => {});
+    const dying = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true", deployDaemon: () => gate } });
+    void dying.golden.prepare();
+    await vi.waitFor(() => expect(backend.machines).toHaveLength(1));
+    const record = (await store.get("builders", "m1")) as { heldBy: { host: string; pid: number; heartbeat: string } };
+    await store.put("builders", "m1", { ...record, heldBy: { ...record.heldBy, pid: 999_999_999 } });
+    backend.machines[0]!.kill = async () => { throw new Error("Bad Gateway"); };
+    const lines: string[] = [];
+
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l), recipePath: "/home/me/.wsp/state/golden-recipe.json" });
+
+    expect(lines).toEqual([
+      "reap: could not stop m1 (Bad Gateway; stays recorded, retried next sweep)",
+      "reap: left alone m1: your earlier builder from this setup; its setup never finished; the next sweep stops it",
+    ]);
+    expect(lines.join("\n")).not.toContain("reuse it");
+  });
+
+  it("a kept builder whose age cannot be read is stopped at start, with the line saying the age is unknown", async () => {
+    const { rt, backend, store } = testRuntime();
+    const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true" } });
+    const ageless = await crashed.golden.prepare();
+    backend.machines[0]!.spec.labels!["createdAt"] = "yesterday";
+    await store.put("builders", ageless.id, { ...((await store.get("builders", ageless.id)) as object), createdAt: "yesterday" });
+    const lines: string[] = [];
+
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
+
+    expect(backend.machines[0]!.killed).toBe(true);
+    expect(lines).toEqual([`reap: stopped ${ageless.id}: your earlier builder from this setup, age unknown; a kept builder with no readable age is stopped at once`]);
+    expect(await store.list("builders")).toEqual([]);
+  });
+
+  it("a kept first-life builder past six hours by our createdAt label is stopped and forgotten at start, with the line saying so", async () => {
+    const { rt, backend, store } = testRuntime();
+    const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true" } });
+    const old = await crashed.golden.prepare();
+    backend.machines[0]!.spec.labels!["createdAt"] = ago(BUILDER_IDLE_MS + 60_000);
+    const lines: string[] = [];
+
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
+
+    expect(backend.machines[0]!.killed).toBe(true);
+    expect(lines).toEqual([`reap: stopped ${old.id}: your earlier builder from this setup, 6.0 h old; a kept builder is stopped at six hours`]);
+    expect(await store.list("builders")).toEqual([]);
   });
 
   it("lists once per sweep", async () => {
