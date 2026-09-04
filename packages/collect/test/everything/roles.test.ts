@@ -80,6 +80,14 @@ describe("pass 2: directory role", () => {
     expect(notes).toEqual(["~/.broken is a broken symlink and is not listed"]);
   });
 
+  it("an extra candidate is recorded like a dot entry, unless one already covers it", async () => {
+    const dirs = await roles(laptop(home()), { extra: [`${HOME}/dotfiles`, `${HOME}/.cargo`, `${HOME}/.local/share/mise/shims`, `${HOME}/missing`] });
+    expect(dirs.find(d => d.path === `${HOME}/dotfiles`)).toMatchObject({ kind: "dir", role: "unknown", files: 2, bytes: 800, paths: [`${HOME}/dotfiles`] });
+    expect(dirs.filter(d => d.path === `${HOME}/.cargo`)).toHaveLength(1);
+    expect(dirs.some(d => d.path === `${HOME}/.local/share/mise/shims`)).toBe(false);
+    expect(dirs.some(d => d.path === `${HOME}/missing`)).toBe(false);
+  });
+
   it("a symlink inside a record counts as one entry of no size, so a stow-style directory is not empty", async () => {
     const dirs = await roles(laptop({ links: { "~/.config/stowed/config.toml": "/Users/dev/dotfiles/stowed/config.toml", "~/.config/stowed/init.lua": "/Users/dev/dotfiles/stowed/init.lua" }, files: { "~/dotfiles/stowed/config.toml": 40, "~/dotfiles/stowed/init.lua": 10 } }));
     expect(dirs.find(d => d.path === `${HOME}/.config/stowed`)).toMatchObject({ kind: "dir", bytes: 0, files: 2, measured: "exact" });

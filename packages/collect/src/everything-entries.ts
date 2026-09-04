@@ -3,7 +3,7 @@
 // that no rung claimed, one entry per row, none ticked. The screen groups
 // them by app directory, the pack copies paths minus excludes, and a
 // credential-shaped row travels only on the person's own answer.
-import type { Kind, Row } from "./everything/row.js";
+import type { Kind, Manager, Row } from "./everything/row.js";
 import type { ManifestEntry } from "./manifest.js";
 
 export const LARGE_GROUP = "large, review";
@@ -39,8 +39,18 @@ export function appDir(path: string): string {
   return segs.slice(0, depth).join("/");
 }
 
+const MANAGER_WORDS: Record<Manager, string> = {
+  chezmoi: "a chezmoi source state",
+  yadm: "yadm's directory",
+  stow: "a stow directory",
+  dotfiles: "a dotfiles directory",
+};
+
 function detailOf(r: Row): string {
-  const words = [ROLE_WORDS[r.kind]];
+  const words = [r.manager === undefined ? ROLE_WORDS[r.kind] : `${MANAGER_WORDS[r.manager]}${(r.rcCopies?.length ?? 0) > 0 ? " holding rc copies" : ""}`];
+  if (r.rcSecrets !== undefined && r.rcSecrets.length > 0) words.push(`secret-shaped exports in ${r.rcSecrets.join(", ")} are cut from the copy`);
+  if (r.flags.includes("history")) words.push("a git history: every version ever committed travels with it, secrets included");
+  if (r.flags.includes("exports")) words.push("secret-shaped exports under a name the copy does not strip");
   if (r.flags.includes("credential") && r.kind !== "credential") words.push("holds credential-shaped files");
   if (r.owner !== undefined) words.push(r.owner === "app" ? "installed as a macOS app" : `installed by ${r.owner}`);
   if (r.binary !== undefined) words.push(`config for ${r.binary.startsWith("~/") ? r.binary : r.binary.slice(r.binary.lastIndexOf("/") + 1)}`);
@@ -72,6 +82,7 @@ function entryOf(r: Row): ManifestEntry {
     ...(nothingToCopy ? { reason: r.kind === "device-bound-login" ? KEYCHAIN_REASON : BY_HAND_REASON } : { detail: detailOf(r) }),
     ...(needsConsent(r) ? { consent: true } : {}),
     role: r.kind,
+    ...(r.manager !== undefined ? { manager: r.manager } : {}),
     files: r.files,
     mtime: r.mtime,
   };

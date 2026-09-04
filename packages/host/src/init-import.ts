@@ -7,7 +7,7 @@ import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readF
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { type ManifestEntry, RC_PATHS, stripExports } from "@wsp/collect";
+import { FISH_CONF_D, MANAGER_HOMES, type ManifestEntry, RC_NAMES, READ_LIMIT, isRcPath, managedRc, rcFiles, sourcedPaths, stripExports } from "@wsp/collect";
 import {
   agentInstallsFor,
   planFiles,
@@ -29,19 +29,54 @@ import { CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, tarPackCommand } from "./doctor
 
 const execFileAsync = promisify(execFile);
 
-/** An rc file by name at HOME or one directory deep (a dotfiles directory keeps dotted copies), plus fish's own config;
- * a same-named file deeper down belongs to some program and is left as found. Inside a dotfiles manager's home
- * the copies are plain files whose names lost their dot or gained chezmoi's `dot_`, so the name is mapped back first. */
-const RC_NAMES = new Set(RC_PATHS.map(p => p.slice(p.lastIndexOf("/") + 1)));
-const MANAGER_HOMES = [".dotfiles", "dotfiles", ".local/share/chezmoi", ".local/share/yadm", ".config/yadm"];
-const rcByName = (rel: string): boolean => {
-  const segs = rel.split("/");
-  const name = segs.at(-1) ?? "";
-  if (RC_PATHS.includes(rel as (typeof RC_PATHS)[number]) || (segs.length <= 2 && RC_NAMES.has(name))) return true;
-  if (!MANAGER_HOMES.some(h => rel.startsWith(`${h}/`))) return false;
-  const mapped = name.startsWith("dot_") ? `.${name.slice(4)}` : name.startsWith(".") ? name : `.${name}`;
-  return RC_NAMES.has(name) || RC_NAMES.has(mapped);
-};
+/** An rc file by name at HOME or one directory deep (a dotfiles directory keeps dotted copies), plus fish's own config
+ * and conf.d; a same-named file deeper down belongs to some program and is left as found. Inside a dotfiles manager's
+ * home, named by the collector or known by its usual path, a copy is mapped back to the rc file it stands for. */
+function rcMatcher(homes: readonly string[]): (rel: string) => boolean {
+  const managers = [...new Set([...MANAGER_HOMES, ...homes])];
+  return rel => {
+    const segs = rel.split("/");
+    if (isRcPath(rel) || (segs.length <= 2 && RC_NAMES.has(segs.at(-1) ?? ""))) return true;
+    const home = managers.find(h => rel.startsWith(`${h}/`));
+    return home !== undefined && managedRc(rel.slice(home.length + 1));
+  };
+}
+
+function listDir(dir: string): string[] {
+  try {
+    return readdirSync(dir);
+  } catch {
+    return [];
+  }
+}
+
+function isFile(abs: string): boolean {
+  try {
+    return statSync(abs).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** A regular file's text, within the collector's read limit. */
+function readSmall(abs: string): string | undefined {
+  return isFile(abs) && statSync(abs).size <= READ_LIMIT ? readFileSync(abs, "utf8") : undefined;
+}
+
+/** The laptop's rc files by identity, plus one level of what they source by a literal path, so a copy of any of them
+ * carried under another row is stripped too. */
+function rcIdentities(home: string): Set<string> {
+  const out = new Set(rcFiles(listDir(join(home, FISH_CONF_D))).map(rc => resolved(join(home, rc))).filter((p): p is string => p !== undefined));
+  for (const rc of [...out]) {
+    const text = readSmall(rc);
+    if (text === undefined) continue;
+    for (const s of sourcedPaths(text, home)) {
+      const real = resolved(s);
+      if (real !== undefined && (real === home || real.startsWith(`${home}/`)) && isFile(real)) out.add(real);
+    }
+  }
+  return out;
+}
 
 export interface SecretReader {
   /** The secret stored under a Keychain service; rejects when the item is missing or the person refuses the consent dialog. */
@@ -138,6 +173,8 @@ export interface PackOptions {
   secrets: ReadonlyMap<string, string>;
   /** This computer's home, links resolved; a link inside a copied directory must resolve under it. */
   home: string;
+  /** `~`-relative directories the recipe marks as a dotfiles manager's home, besides the usual ones. */
+  managerHomes?: readonly string[];
 }
 
 /** Copies the planned files into a staging tree, renders each secret into it,
@@ -158,8 +195,8 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
       return false;
     });
     const modes = parentModes(files, opts.home);
-    // The laptop's rc files by identity, so the target of a linked rc carried under another row is stripped too.
-    const rcReal = new Set(RC_PATHS.map(rc => resolved(join(opts.home, rc))).filter((p): p is string => p !== undefined));
+    const rcReal = rcIdentities(opts.home);
+    const rcByName = rcMatcher(opts.managerHomes ?? []);
     const twins = new Set<string>();
     for (const f of files) {
       const target = join(stage, f.dest);
@@ -286,10 +323,11 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
   const label = (id: string) => bring.find(e => e.id === id)?.label ?? id;
   const anyFiles = bring.some(e => e.bring && e.rung !== "tools" && e.paths.length > 0 && (e.rung !== "logins" || e.choice === "copy"));
   const count = plan.files.length + plan.secrets.length;
+  const managerHomes = bring.filter(e => e.manager !== undefined).flatMap(e => e.paths).filter(p => p.startsWith("~/")).map(p => p.slice(2));
   return {
     recipeHash: recipeHash(bring, plan.files),
     ...(anyFiles
-      ? { files: { count, rungs: plan.rungs, bytes: plan.bytes, skipped: plan.skipped, pack: () => packPlan(plan, { secrets: opts.secrets, home }) } }
+      ? { files: { count, rungs: plan.rungs, bytes: plan.bytes, skipped: plan.skipped, pack: () => packPlan(plan, { secrets: opts.secrets, home, managerHomes }) } }
       : {}),
     tools: tools.installs,
     ...(agents.node !== undefined ? { node: agents.node } : {}),

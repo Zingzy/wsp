@@ -10,7 +10,8 @@ import { roleByName } from "./roles.js";
 import { RC_PATHS } from "./shell-rc.js";
 import { budget, walk } from "./walk.js";
 
-export type Signal = "name" | "mode" | "keys" | "pem" | "gitleaks" | "catalog";
+/** exports and history come from pass 8: a file under a manager home with secret-shaped exports the name mapping does not reach, and a git repository there. */
+export type Signal = "name" | "mode" | "keys" | "pem" | "gitleaks" | "catalog" | "exports" | "history";
 
 export interface Credential {
   /** Absolute. A directory when the whole tree is key material. */

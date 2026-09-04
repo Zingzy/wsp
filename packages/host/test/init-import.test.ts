@@ -460,6 +460,70 @@ describe("packPlan: rc files with secret exports", () => {
     ]);
   });
 
+  it("the mapping reaches chezmoi's attribute prefixes and .tmpl, fish's conf.d, a stow directory the row names, and one level of what an rc sources", async () => {
+    const home = laptop();
+    writeFileSync(join(home, ".zshrc"), "source ~/.zsh/secrets.zsh\nsource ~/.zsh/*.zsh\nexport PATH=$HOME/bin:$PATH\n");
+    mkdirSync(join(home, ".zsh"));
+    writeFileSync(join(home, ".zsh", "secrets.zsh"), "export SRC_KEY=fake-sourced\nsource ~/.zsh/level2.zsh\nalias s=ls\n");
+    writeFileSync(join(home, ".zsh", "level2.zsh"), "export L2_KEY=kept-two-levels-down\n");
+    mkdirSync(join(home, ".config", "fish", "conf.d"), { recursive: true });
+    writeFileSync(join(home, ".config", "fish", "conf.d", "work.fish"), "set -gx WORK_KEY fake-confd\nset -g theme x\n");
+    writeFileSync(join(home, ".config", "fish", "conf.d", "notes.txt"), "set -gx NOTE_KEY kept-not-fish\n");
+    const chez = join(home, ".local", "share", "chezmoi");
+    mkdirSync(join(chez, "exact_dot_config", "fish", "conf.d"), { recursive: true });
+    mkdirSync(join(chez, "dot_config", "app"), { recursive: true });
+    writeFileSync(join(chez, "private_dot_zshrc"), "export PRIV_KEY=fake-priv\nalias a=b\n");
+    writeFileSync(join(chez, "dot_zshrc.tmpl"), "export TMPL_KEY={{ fake-tmpl }}\nalias c=d\n");
+    writeFileSync(join(chez, "exact_dot_config", "fish", "conf.d", "private_work.fish.tmpl"), "set -gx CHEZ_CONFD_KEY fake-chez-confd\nset -g y 1\n");
+    writeFileSync(join(chez, "dot_config", "app", "settings"), "export APP_TOKEN=kept-not-rc\n");
+    writeFileSync(join(chez, "private_dot_gitconfig"), "[user]\n\tname = Me\n");
+    mkdirSync(join(home, "code", "dots", "zsh"), { recursive: true });
+    writeFileSync(join(home, "code", "dots", "zsh", ".zshrc"), "export STOW_KEY=fake-stow\nalias e=f\n");
+    writeFileSync(join(home, "code", "dots", "zsh", "aliases"), "export STOW_ALIAS_TOKEN=fake-stow-alias\n");
+    mkdirSync(join(home, "code", "other"));
+    writeFileSync(join(home, "code", "other", "zshrc"), "export OTHER_KEY=kept-not-a-manager-home\n");
+    const imp = importFor(
+      [
+        row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"] }),
+        row({ rung: "shell", id: "shell/fish", paths: ["~/.config/fish"] }),
+        row({ rung: "everything", id: "everything/.zsh", paths: ["~/.zsh"] }),
+        row({ rung: "everything", id: "everything/.local/share/chezmoi", paths: ["~/.local/share/chezmoi"], manager: "chezmoi" }),
+        row({ rung: "everything", id: "everything/code/dots", paths: ["~/code/dots"], manager: "stow" }),
+        row({ rung: "everything", id: "everything/code/other", paths: ["~/code/other"] }),
+      ],
+      { home, secrets: new Map(), platform: "darwin" },
+    );
+    const packed = await imp.files!.pack();
+    const dir = extract(packed.tar);
+    const read = (...p: string[]) => readFileSync(join(dir, ...p), "utf8");
+    expect(read(".zshrc")).toBe("source ~/.zsh/secrets.zsh\nsource ~/.zsh/*.zsh\nexport PATH=$HOME/bin:$PATH\n");
+    expect(read(".zsh", "secrets.zsh")).toBe("source ~/.zsh/level2.zsh\nalias s=ls\n");
+    expect(read(".zsh", "level2.zsh")).toBe("export L2_KEY=kept-two-levels-down\n");
+    expect(read(".config", "fish", "conf.d", "work.fish")).toBe("set -g theme x\n");
+    expect(read(".config", "fish", "conf.d", "notes.txt")).toBe("set -gx NOTE_KEY kept-not-fish\n");
+    expect(read(".local", "share", "chezmoi", "private_dot_zshrc")).toBe("alias a=b\n");
+    expect(read(".local", "share", "chezmoi", "dot_zshrc.tmpl")).toBe("alias c=d\n");
+    expect(read(".local", "share", "chezmoi", "exact_dot_config", "fish", "conf.d", "private_work.fish.tmpl")).toBe("set -g y 1\n");
+    expect(read(".local", "share", "chezmoi", "dot_config", "app", "settings")).toBe("export APP_TOKEN=kept-not-rc\n");
+    expect(read(".local", "share", "chezmoi", "private_dot_gitconfig")).toBe("[user]\n\tname = Me\n");
+    expect(read("code", "dots", "zsh", ".zshrc")).toBe("alias e=f\n");
+    expect(read("code", "dots", "zsh", "aliases")).toBe("");
+    expect(read("code", "other", "zshrc")).toBe("export OTHER_KEY=kept-not-a-manager-home\n");
+    const bytes = gunzipSync(packed.tar);
+    expect(bytes.includes("fake-")).toBe(false);
+    for (const v of ["kept-two-levels-down", "kept-not-fish", "kept-not-rc", "kept-not-a-manager-home"]) expect(bytes.includes(v), v).toBe(true);
+    expect(packed.cut).toEqual([
+      { path: "~/.config/fish/conf.d/work.fish", names: ["WORK_KEY"] },
+      { path: "~/.local/share/chezmoi/dot_zshrc.tmpl", names: ["TMPL_KEY"] },
+      { path: "~/.local/share/chezmoi/exact_dot_config/fish/conf.d/private_work.fish.tmpl", names: ["CHEZ_CONFD_KEY"] },
+      { path: "~/.local/share/chezmoi/private_dot_zshrc", names: ["PRIV_KEY"] },
+      { path: "~/.zsh/secrets.zsh", names: ["SRC_KEY"] },
+      { path: "~/code/dots/zsh/.zshrc", names: ["STOW_KEY"] },
+      { path: "~/code/dots/zsh/aliases", names: ["STOW_ALIAS_TOKEN"] },
+    ]);
+    expect(packed.skipped).toEqual([]);
+  });
+
   it("a read-only rc file ships stripped at its own mode, and one without a secret ships untouched", async () => {
     const home = laptop();
     writeFileSync(join(home, ".zshrc"), "export RO_KEY=fake-ro-value\nalias ll='ls -l'\n", { mode: 0o444 });

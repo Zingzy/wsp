@@ -1,11 +1,65 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { RC_PATHS, isSecretName, shellRc, stripExports } from "../../src/index.js";
+import { FISH_CONF_D, RC_NAMES, RC_PATHS, isRcPath, isSecretName, rcFiles, shellRc, sourcedPaths, stripExports } from "../../src/index.js";
 import { home, laptop } from "./fixture.js";
 
 describe("pass 6: shell rc exports", () => {
-  it("scans the rc files the shell rung carries, plus fish's config", () => {
+  it("scans the rc files the shell rung carries, plus fish's config and its conf.d", () => {
     expect(RC_PATHS).toEqual([".zshrc", ".zshenv", ".zprofile", ".zlogin", ".bashrc", ".bash_profile", ".profile", ".inputrc", ".aliases", ".zsh_aliases", ".config/fish/config.fish"]);
+    expect(FISH_CONF_D).toBe(".config/fish/conf.d");
+    expect([...RC_NAMES]).toEqual([".zshrc", ".zshenv", ".zprofile", ".zlogin", ".bashrc", ".bash_profile", ".profile", ".inputrc", ".aliases", ".zsh_aliases", "config.fish"]);
+    expect(rcFiles(["work.fish", "notes.txt", "env.fish"])).toEqual([...RC_PATHS, ".config/fish/conf.d/work.fish", ".config/fish/conf.d/env.fish"]);
+    for (const rel of [".zshrc", ".config/fish/config.fish", ".config/fish/conf.d/work.fish"]) expect(isRcPath(rel), rel).toBe(true);
+    for (const rel of ["x/.zshrc", ".config/fish/conf.d/sub/deep.fish", ".config/fish/conf.d/notes.txt", ".config/fish/functions/x.fish", "config.fish"]) expect(isRcPath(rel), rel).toBe(false);
+  });
+
+  it("fish's conf.d files are scanned one level down and .fish only", async () => {
+    const out = await shellRc(laptop({ files: { "~/.config/fish/conf.d/work.fish": "set -gx WORK_KEY fake-confd\nset -g x 1\n", "~/.config/fish/conf.d/notes.txt": "set -gx NOT_KEY fake-txt\n", "~/.config/fish/conf.d/sub/deep.fish": "set -gx DEEP_KEY fake-deep\n" } }));
+    expect(out.map(s => [s.path, s.names, s.carried])).toEqual([["~/.config/fish/conf.d/work.fish", ["WORK_KEY"], "set -g x 1\n"]]);
+    expect(JSON.stringify(out)).not.toContain("fake-");
+  });
+
+  it("the paths an rc file sources by a literal path: ~, $HOME and absolute forms, quoted or not, behind a test or a keyword; a variable, a glob, a substitution, a comment or an alias body is not followed", () => {
+    const text = [
+      "source ~/.zsh/secrets.zsh",
+      '. "$HOME/.zsh/work.zsh"',
+      "[ -f ~/.zsh/local.zsh ] && source ~/.zsh/local.zsh",
+      "if [ -f ${HOME}/.zsh/if.zsh ]; then . ${HOME}/.zsh/if.zsh; fi",
+      "source /Users/dev/.zsh/abs.zsh 2>/dev/null",
+      "source '/Users/dev/.zsh/quoted.zsh'",
+      "source $ZDOTDIR/.zshrc",
+      "source ~/.zsh/*.zsh",
+      "for f in ~/.zsh/*.zsh; do source $f; done",
+      'source "$(brew --prefix)/etc/x"',
+      "# source ~/.zsh/commented.zsh",
+      "alias s='source ~/.zsh/aliased.zsh'",
+      "source relative/path.zsh",
+      "source ~/.zsh/secrets.zsh",
+    ].join("\n");
+    expect(sourcedPaths(text, "/Users/dev")).toEqual(["/Users/dev/.zsh/secrets.zsh", "/Users/dev/.zsh/work.zsh", "/Users/dev/.zsh/local.zsh", "/Users/dev/.zsh/if.zsh", "/Users/dev/.zsh/abs.zsh", "/Users/dev/.zsh/quoted.zsh"]);
+  });
+
+  it("follows one level of what an rc file sources, names the sourced file under the path as written, and reads a linked rc through its target", async () => {
+    const sourced = new Set<string>();
+    const out = await shellRc(
+      laptop({
+        links: { "~/.bashrc": "/Users/dev/.dotfiles/bash/.bashrc" },
+        files: {
+          "~/.zshrc": 'source ~/.zsh/secrets.zsh\n. "$HOME/.zsh/plain.zsh"\nsource ~/.zsh/missing.zsh\nsource ~/.zsh\nexport A=1\n',
+          "~/.zsh/secrets.zsh": "export GH_TOKEN=fake-sourced\nsource ~/.zsh/level2.zsh\n",
+          "~/.zsh/plain.zsh": "alias g=git\n",
+          "~/.zsh/level2.zsh": "export L2_KEY=fake-two-levels-down\n",
+          "~/.dotfiles/bash/.bashrc": "export B_KEY=fake-linked\nalias b=c\n",
+        },
+      }),
+      { sourced },
+    );
+    expect(out.map(s => [s.path, s.names, s.carried])).toEqual([
+      ["~/.zsh/secrets.zsh", ["GH_TOKEN"], "source ~/.zsh/level2.zsh\n"],
+      ["~/.bashrc", ["B_KEY"], "alias b=c\n"],
+    ]);
+    expect([...sourced].sort()).toEqual(["/Users/dev/.zsh/plain.zsh", "/Users/dev/.zsh/secrets.zsh"]);
+    expect(JSON.stringify(out)).not.toContain("fake-");
   });
 
   it("names that mean a secret, as whole words between underscores", () => {

@@ -77,6 +77,20 @@ export function laptop(l: Laptop = {}): Machine & { calls: string[] } {
   }
 
   const which = new Set(l.which ?? []);
+  /** Every link on the way is followed, so a path through a linked directory reads as the real filesystem reads it. */
+  const resolve = (path: string, hops = 0): string | undefined => {
+    if (hops > 40) return undefined;
+    let cur = "";
+    for (const seg of path.split("/").filter(x => x !== "")) {
+      cur = `${cur}/${seg}`;
+      const target = links.get(cur);
+      if (target === undefined) continue;
+      const real = resolve(target, hops + 1);
+      if (real === undefined) return undefined;
+      cur = real;
+    }
+    return cur;
+  };
   return {
     platform: l.platform ?? "darwin",
     home: HOME,
@@ -84,34 +98,32 @@ export function laptop(l: Laptop = {}): Machine & { calls: string[] } {
     env: l.env ?? {},
     fs: {
       async stat(path): Promise<Entry | undefined> {
-        if (links.has(path)) return { kind: "link", bytes: 0, mode: 0o755, mtime: RECENT };
-        const f = files.get(path);
+        const parent = resolve(dirname(path));
+        const p = parent === undefined ? path : `${parent}/${path.slice(path.lastIndexOf("/") + 1)}`;
+        if (links.has(p)) return { kind: "link", bytes: 0, mode: 0o755, mtime: RECENT };
+        const f = files.get(p);
         if (f !== undefined) return { kind: "file", bytes: f.bytes, mode: f.mode, mtime: f.mtime };
-        return dirs.has(path) ? { kind: "dir", bytes: 0, mode: 0o755, mtime: RECENT } : undefined;
+        return dirs.has(p) ? { kind: "dir", bytes: 0, mode: 0o755, mtime: RECENT } : undefined;
       },
       async list(dir) {
         calls.push(`list ${dir}`);
+        const real = resolve(dir) ?? dir;
         const names = new Set<string>();
         for (const k of [...files.keys(), ...links.keys(), ...dirs]) {
-          if (k.startsWith(`${dir}/`)) {
-            const name = k.slice(dir.length + 1).split("/")[0];
+          if (k.startsWith(`${real}/`)) {
+            const name = k.slice(real.length + 1).split("/")[0];
             if (name !== undefined && name !== "") names.add(name);
           }
         }
         return [...names].sort();
       },
       async realpath(path) {
-        let p = path;
-        for (let hops = 0; hops < 40; hops += 1) {
-          const target = links.get(p);
-          if (target === undefined) return files.has(p) || dirs.has(p) ? p : undefined;
-          p = target;
-        }
-        return undefined;
+        const p = resolve(path);
+        return p !== undefined && (files.has(p) || dirs.has(p)) ? p : undefined;
       },
       async readText(path) {
         calls.push(`read ${path}`);
-        return files.get(path)?.text;
+        return files.get(resolve(path) ?? path)?.text;
       },
     },
     exec: {
