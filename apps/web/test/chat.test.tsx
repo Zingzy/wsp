@@ -3,20 +3,24 @@
 // vocabulary; shapes mirror packages/adapter-claude/test/fixtures/
 // stream-session.jsonl (hello-world server run). No live daemon.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { installFakeLayout } from "./fake-layout.js";
 import type { EventUnion, SessionEvent, WorkspaceView } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { ChatTab } from "../src/tabs/ChatTab.js";
 import { ApprovalPrompt } from "../src/tabs/chat/ApprovalPrompt.js";
+import { requestNewThread } from "../src/shell/shellRequests.js";
+import { CHAT_STREAM, CHAT_T0, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
 
-const WS = "ws_chat0001";
+let restoreLayout: () => void = () => {};
+beforeAll(() => { restoreLayout = installFakeLayout(); });
+afterAll(() => restoreLayout());
+
+const WS = CHAT_WS;
 const CLAUDE_SID = "e16ed170-8257-4668-879e-fe836341633c";
-const scope = { workspaceId: WS, sessionId: "sess_0001", turnId: "turn_0001" };
-/** Wall clock of the fixture run; each event is stamped in wire order. */
-const T0 = Date.parse("2026-09-01T01:31:29.412Z");
-const at = (ms: number) => ({ at: T0 + ms });
-const HARNESS = { slashCommands: ["compact", "context", "cost", "init", "review"], permissionMode: "bypassPermissions", agents: ["general-purpose"] };
+const T0 = CHAT_T0;
+const scope = { workspaceId: WS, sessionId: "sess_0001", turnId: CHAT_TURN };
 
 const workspace: WorkspaceView = {
   id: WS,
@@ -28,20 +32,7 @@ const workspace: WorkspaceView = {
   claudeSessionId: CLAUDE_SID,
 };
 
-const FIXTURE: EventUnion[] = [
-  { type: "session.start", ...scope, ...at(0), model: "claude-sonnet-4-5", cwd: "/root", tools: ["Bash", "Read"], harness: HARNESS },
-  { type: "session.delta", ...scope, ...at(1_200), kind: "text", text: "Creating the server file, " },
-  { type: "session.delta", ...scope, ...at(1_450), kind: "text", text: "then starting it." },
-  {
-    type: "session.delta", ...scope, ...at(4_495), kind: "tool_use", toolName: "Bash", toolUseId: "toolu_01WspFixBash1",
-    text: "node /root/server.js >/dev/null 2>&1 & sleep 0.3 && curl -s http://localhost:3000",
-  },
-  { type: "session.delta", ...scope, ...at(5_708), kind: "tool_result", toolUseId: "toolu_01WspFixBash1", text: "Hello, World!", isError: false },
-  { type: "session.delta", ...scope, ...at(7_900), kind: "thinking", text: "curl returned the greeting, so the server is live." },
-  { type: "session.delta", ...scope, ...at(9_300), kind: "text", text: "Server is live at :3000." },
-  { type: "session.done", ...scope, ...at(10_458), result: { status: "completed", durationMs: 10458, costUsd: 0.0187, text: "Server is live at :3000." } },
-  { type: "session.end", ...scope, ...at(10_600), exitCode: 0, sawResult: true },
-];
+const FIXTURE: ReadonlyArray<EventUnion> = CHAT_STREAM;
 
 function fixtureApi(workspaces: WorkspaceView[], history: Record<string, SessionEvent[]> = {}) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
@@ -85,50 +76,39 @@ async function setup(api: Api) {
 }
 
 describe("chat tab rendering", () => {
-  it("renders the fixture conversation: deltas accumulate, tool block toggles, done footer shows cost", async () => {
+  it("mounts the thread view: empty headline first, then the fixture conversation with its settled footer", async () => {
     const { api, emit } = fixtureApi([workspace]);
     await setup(api);
-    expect(screen.getByText("No session yet. Send a prompt to start one.")).toBeDefined();
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in api?");
 
     for (const e of FIXTURE) emit(e);
     // An event for another workspace never renders.
     emit({ type: "session.delta", workspaceId: "ws_other", sessionId: "s2", kind: "text", text: "alien text" });
 
-    // Two text deltas accumulated into one block; the later message is its own block.
-    expect(screen.getByText("Creating the server file, then starting it.")).toBeDefined();
-    expect(screen.getByText("Server is live at :3000.")).toBeDefined();
+    // The settled turn folds everything before its final answer behind one line.
+    await screen.findByText(/Server is live at :3000\./);
+    expect(screen.queryByText(/Creating the server file, then starting it\./)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Worked for 10s/ }));
+    expect(screen.getByText(/Creating the server file, then starting it\./)).toBeDefined();
     expect(screen.queryByText("alien text")).toBeNull();
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
 
-    // Tool block: collapsed by default, expands to the result, collapses back.
-    const toolHead = screen.getByRole("button", { name: /Bash/ });
-    expect(toolHead.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByText("Hello, World!")).toBeNull();
-    fireEvent.click(toolHead);
-    expect(screen.getByText("Hello, World!")).toBeDefined();
-    fireEvent.click(toolHead);
-    expect(screen.queryByText("Hello, World!")).toBeNull();
-
-    // Thinking: muted collapsible, closed by default.
-    expect(screen.queryByText(/curl returned the greeting/)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "thinking" }));
-    expect(screen.getByText(/curl returned the greeting/)).toBeDefined();
-
-    // Done footer: duration + spend, and the running indicator is gone.
-    expect(screen.getByText("completed")).toBeDefined();
-    expect(screen.getByText(/10\.5s/)).toBeDefined();
-    expect(screen.getByText(/\$0\.0187/)).toBeDefined();
-    expect(screen.queryByText("working")).toBeNull();
+    const footer = screen.getByTestId("settled-footer");
+    expect(footer.textContent).toContain("completed");
+    expect(footer.textContent).toContain("Worked for 10s");
+    expect(footer.textContent).toContain("$0.02");
+    expect(screen.queryByText(/Working for/)).toBeNull();
   });
 
   it("renders a plain error when the session exits without a result", async () => {
     const { api, emit } = fixtureApi([workspace]);
     await setup(api);
-    emit({ type: "session.start", ...scope });
-    expect(screen.getByText("working")).toBeDefined();
+    emit({ type: "session.start", ...scope, prompt: "hi" });
+    expect(screen.getByText(/Working/)).toBeDefined();
     emit({ type: "session.end", ...scope, exitCode: 137, sawResult: false });
-    expect(screen.getByText("failed")).toBeDefined();
-    expect(screen.getByText("session exited without a result (exit code 137)")).toBeDefined();
-    expect(screen.queryByText("working")).toBeNull();
+    expect(screen.getByTestId("settled-footer").textContent).toContain("failed");
+    expect(screen.getByText(/session exited without a result \(exit code 137\)/i)).toBeDefined();
+    expect(screen.queryByText(/Working for/)).toBeNull();
   });
 });
 
@@ -152,8 +132,8 @@ describe("chat tab hydration", () => {
     const view = await setup(api);
     await screen.findByText("Added GET /health.");
     expect(screen.getByText("add a health route")).toBeDefined();
-    expect(screen.queryByText("No session yet. Send a prompt to start one.")).toBeNull();
-    expect(screen.queryByText("working")).toBeNull();
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+    expect(screen.queryByText(/Working for/)).toBeNull();
 
     view.rerender(<ChatTab workspaceId={other.id} />);
     await screen.findByText("React is on 19.1.");
@@ -208,8 +188,7 @@ describe("chat tab composer", () => {
 
     fireEvent.change(input, { target: { value: "fix the flaky test" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => expect(screen.getByText("workspace is napping")).toBeDefined());
-    expect(screen.getByText("failed")).toBeDefined();
+    await waitFor(() => expect(screen.getByText(/workspace is napping/i)).toBeDefined());
     expect(input.value).toBe("fix the flaky test");
     expect(input.disabled).toBe(false);
   });
@@ -222,6 +201,121 @@ describe("chat tab composer", () => {
     fireEvent.change(input, { target: { value: "   " } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(started.length).toBe(0);
+  });
+});
+
+describe("chat tab new thread", () => {
+  it("clears the thread on a new-thread request for this workspace and sends the next prompt without resume", async () => {
+    const { api, started, emit } = fixtureApi([workspace], { [WS]: CHAT_STREAM.slice() });
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+
+    act(() => requestNewThread({ workspaceId: "ws_other" }));
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+
+    act(() => requestNewThread({ workspaceId: WS }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in api?");
+    expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();
+    expect(screen.queryByTestId("settled-footer")).toBeNull();
+    const input = screen.getByRole("textbox", { name: "prompt" }) as HTMLTextAreaElement;
+    expect(document.activeElement).toBe(input);
+
+    fireEvent.change(input, { target: { value: "start over" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(started.length).toBe(1));
+    expect(started[0]).toEqual({ workspaceId: WS, prompt: "start over" });
+    expect(screen.getByText("start over")).toBeDefined();
+
+    // The fresh session's events land in the cleared thread; the store remembers its id and the next send resumes it.
+    const fresh = { workspaceId: WS, sessionId: "sess_0002", turnId: "turn_0002" };
+    emit({ type: "session.start", ...fresh, at: T0 + 100_000, prompt: "start over" });
+    emit({ type: "session.delta", ...fresh, at: T0 + 100_500, kind: "text", text: "Fresh start." });
+    emit({ type: "session.done", ...fresh, at: T0 + 101_000, result: { status: "completed", durationMs: 1000, costUsd: 0.001 } });
+    emit({ type: "session.end", ...fresh, at: T0 + 101_100, exitCode: 0, sawResult: true });
+    await screen.findByText("Fresh start.");
+    fireEvent.change(input, { target: { value: "and then" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(started.length).toBe(2));
+    expect(started[1]).toEqual({ workspaceId: WS, prompt: "and then", resume: "sess_0002" });
+  });
+});
+
+describe("chat tab new thread mid-turn", () => {
+  it("keeps the composer closed as finishing the previous turn until that turn ends, then enables and focuses it", async () => {
+    const { api, started, emit } = fixtureApi([workspace]);
+    await setup(api);
+    for (const e of FIXTURE.slice(0, 6)) emit(e);
+    const input = screen.getByRole("textbox", { name: "prompt" }) as HTMLTextAreaElement;
+    expect(input.disabled).toBe(true);
+    act(() => requestNewThread({ workspaceId: WS }));
+    expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
+    expect(input.disabled).toBe(true);
+    expect(screen.getByText("finishing the previous turn")).toBeDefined();
+    fireEvent.change(input, { target: { value: "too early" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(started.length).toBe(0);
+    for (const e of FIXTURE.slice(6, -1)) emit(e);
+    expect(input.disabled).toBe(true);
+    expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
+    emit(FIXTURE.at(-1)!);
+    expect(input.disabled).toBe(false);
+    expect(document.activeElement).toBe(input);
+    expect(screen.queryByText("finishing the previous turn")).toBeNull();
+    fireEvent.change(input, { target: { value: "start over" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(started.length).toBe(1));
+    expect(started[0]).toEqual({ workspaceId: WS, prompt: "start over" });
+  });
+
+  it("keeps the composer closed and the left turn out when a second request lands while finishing", async () => {
+    const { api, started, emit } = fixtureApi([workspace]);
+    await setup(api);
+    for (const e of FIXTURE.slice(0, 6)) emit(e);
+    const input = screen.getByRole("textbox", { name: "prompt" }) as HTMLTextAreaElement;
+    act(() => requestNewThread({ workspaceId: WS }));
+    expect(screen.getByText("finishing the previous turn")).toBeDefined();
+    act(() => requestNewThread({ workspaceId: WS }));
+    expect(input.disabled).toBe(true);
+    expect(screen.getByText("finishing the previous turn")).toBeDefined();
+    fireEvent.change(input, { target: { value: "too early" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(started.length).toBe(0);
+    for (const e of FIXTURE.slice(6, -1)) emit(e);
+    expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
+    expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();
+    expect(input.disabled).toBe(true);
+    emit(FIXTURE.at(-1)!);
+    expect(input.disabled).toBe(false);
+    expect(screen.queryByText("finishing the previous turn")).toBeNull();
+  });
+
+  it("treats a send whose session.start has not landed as the turn the new thread left behind", async () => {
+    const { api, started, emit } = fixtureApi([workspace]);
+    await setup(api);
+    const input = screen.getByRole("textbox", { name: "prompt" }) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "hello" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(started.length).toBe(1));
+    act(() => requestNewThread({ workspaceId: WS }));
+    expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
+    expect(screen.queryByText("hello")).toBeNull();
+    expect(input.disabled).toBe(true);
+    expect(screen.getByText("finishing the previous turn")).toBeDefined();
+    // The sent turn's events arrive after the request: none of them reaches the fresh thread.
+    emit({ type: "session.start", ...scope, at: T0, prompt: "hello" });
+    emit({ type: "session.delta", ...scope, at: T0 + 300, kind: "text", text: "Creating the server file," });
+    expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
+    expect(screen.queryByText(/Creating the server file/)).toBeNull();
+    expect(input.disabled).toBe(true);
+    emit({ type: "session.done", ...scope, at: T0 + 900, result: { status: "completed", durationMs: 900, costUsd: 0.001 } });
+    expect(input.disabled).toBe(true);
+    emit({ type: "session.end", ...scope, at: T0 + 950, exitCode: 0, sawResult: true });
+    expect(input.disabled).toBe(false);
+    expect(screen.queryByTestId("settled-footer")).toBeNull();
+    fireEvent.change(input, { target: { value: "start over" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(started.length).toBe(2));
+    expect(started[1]).toEqual({ workspaceId: WS, prompt: "start over" });
   });
 });
 

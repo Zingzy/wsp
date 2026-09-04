@@ -1,56 +1,8 @@
 /* SPDX-License-Identifier: AGPL-3.0-only */
-/* Chat lens, styled after the approved mock's terminal transcript vocabulary:
-   dense mono lines on --term, green = running only, orange = spend only. */
+/* The chat tab's holdover composer and the fixture-only approval prompt; the
+   thread itself renders through components/chat. */
 
 .root { height: 100%; display: flex; flex-direction: column; }
-
-.scroll {
-  flex: 1; min-height: 0; overflow-y: auto; background: var(--term);
-  padding: 18px 20px 26px;
-  font-family: var(--mono); font-size: 12.5px; line-height: 1.62;
-  color: var(--dim); white-space: pre-wrap; word-break: break-word;
-}
-
-.empty {
-  height: 100%; display: grid; place-content: center;
-  font-family: var(--sans); color: var(--deep);
-}
-
-.user { margin-top: 14px; color: var(--fg); }
-.user:first-child { margin-top: 0; }
-.prompt { color: var(--deep); }
-
-.assistant { margin-top: 10px; }
-.tdot {
-  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
-  background: var(--fg); margin-right: 6px; vertical-align: baseline;
-}
-
-.blockHead {
-  display: block; width: 100%; text-align: left; margin-top: 10px; padding: 0;
-  background: transparent; border: none; cursor: pointer;
-  font: inherit; color: var(--dim);
-  transition: color 0.16s;
-}
-.blockHead:hover { color: var(--fg); }
-.toolName { color: var(--fg); font-weight: 600; }
-.dim { color: var(--deep); }
-.blockBody { padding-left: 16px; }
-.blockBody pre {
-  margin: 2px 0 0; font: inherit; white-space: pre-wrap; word-break: break-word;
-}
-.thinkingHead { color: var(--deep); }
-.thinkingBody { padding-left: 16px; color: var(--deep); }
-
-.done { margin-top: 10px; font-size: 11px; color: var(--deep); }
-.cost { color: var(--acc); }
-.errText { color: var(--fg); margin-top: 2px; font-size: 12.5px; }
-
-.working { margin-top: 12px; color: var(--deep); font-size: 11px; }
-.okDot {
-  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
-  background: var(--ok); margin-right: 6px;
-}
 
 .composer { border-top: 1px solid var(--soft); background: var(--panel); padding: 10px 12px 8px; }
 .input {
