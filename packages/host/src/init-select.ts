@@ -125,6 +125,15 @@ export function settle(entries: readonly Entry[], at: number, dir: 1 | -1 = 1): 
 const tickable = (i: SelectItem): boolean => i.lock === undefined && i.choices === undefined;
 /** What the all row flips: the tickable rows that do not take their own tick. */
 const byAll = (i: SelectItem): boolean => tickable(i) && i.own !== true;
+/** A row that comes along or can: always included, a tick, a tick of its own, or an answer. Only a row locked out is out, so
+ * a screen's one denominator is what the found table called able to come. */
+const unlocked = (i: SelectItem): boolean => i.lock !== "off";
+/** A row that brings something: ticked, or answered with anything but its last choice. */
+function chosen(i: SelectItem, ticks: ReadonlySet<string>, choices: ReadonlyMap<string, string>): boolean {
+  if (i.choices === undefined) return ticks.has(i.id);
+  const answer = choices.get(i.id);
+  return answer !== undefined && answer !== i.choices.at(-1)?.value;
+}
 
 function flipAll(ticks: Set<string>, items: readonly SelectItem[], pick: (i: SelectItem) => boolean = tickable): void {
   const free = items.filter(pick);
@@ -163,17 +172,17 @@ function fmtCount(on: number, of: number): string {
   return `${on} of ${of}`;
 }
 
-/** Ticks over a group's tickable rows; the row count for a group with none. */
-function groupCount(items: readonly SelectItem[], ticks: ReadonlySet<string>): string {
-  const free = items.filter(tickable);
-  if (free.length === 0) return String(items.length);
-  return fmtCount(free.filter(i => ticks.has(i.id)).length, free.length);
+/** What was chosen over a group's rows that can come; the row count for a group of answered rows alone (the header carries their spread) or of locked rows. */
+function groupCount(items: readonly SelectItem[], ticks: ReadonlySet<string>, choices: ReadonlyMap<string, string>): string {
+  const free = items.filter(unlocked);
+  if (!free.some(i => i.choices === undefined)) return String(items.length);
+  return fmtCount(free.filter(i => chosen(i, ticks, choices)).length, free.length);
 }
 
-/** How the choice rows answered, the answers with none left out: "6 copy, 2 sign in". */
-export function spreadOf(items: readonly SelectItem[], choices: ReadonlyMap<string, string>): string {
+/** How the choice rows answered, the answers with none left out: "6 copy, 2 sign in"; with chosenOnly the last choice, the one that brings nothing, is left out too. */
+export function spreadOf(items: readonly SelectItem[], choices: ReadonlyMap<string, string>, chosenOnly = false): string {
   const first = items.find(i => i.choices !== undefined)?.choices ?? [];
-  return first
+  return (chosenOnly ? first.slice(0, -1) : first)
     .map(c => ({ n: items.filter(i => choices.get(i.id) === c.value).length, label: c.label }))
     .filter(p => p.n > 0)
     .map(p => `${p.n} ${p.label}`)
@@ -279,7 +288,7 @@ class RungPrompt extends Prompt<Set<string>> {
       fmtCount(items.length, items.length).length,
       hasLocked ? LOCKED_WORD.length : 0,
       ...items.map(i => this.second(i, width).length),
-      ...[...new Set(items.map(i => i.group))].map(g => (g === undefined ? 0 : groupCount(items.filter(i => i.group === g), this.ticks()).length)),
+      ...[...new Set(items.map(i => i.group))].map(g => (g === undefined ? 0 : groupCount(items.filter(i => i.group === g), this.ticks(), this.choices).length)),
     );
     const room = width - EDGE - 2 - GUTTER.length - second;
     return { label: Math.max(8, Math.min(Math.max(...labels), room, LABEL_CAP)), second };
@@ -320,9 +329,10 @@ class RungPrompt extends Prompt<Set<string>> {
     const box = (on: boolean): string => (on ? styleText("cyan", "●") : dim("○"));
     switch (entry.type) {
       case "all": {
-        const free = this.o.items.filter(byAll);
-        const on = free.filter(i => ticks.has(i.id)).length;
-        return this.line(box(free.length > 0 && on === free.length), "all", fmtCount(on, free.length), 0, cols, current, false);
+        // The box says what space does next (the rows it flips are all on); the count runs over every row that can come.
+        const flips = this.o.items.filter(byAll);
+        const free = this.o.items.filter(unlocked);
+        return this.line(box(flips.length > 0 && flips.every(i => ticks.has(i.id))), "all", fmtCount(free.filter(i => chosen(i, ticks, this.choices)).length, free.length), 0, cols, current, false);
       }
       case "locked":
         return this.line(dim("▾"), this.o.title, LOCKED_WORD, 0, cols, false, false);
@@ -331,7 +341,7 @@ class RungPrompt extends Prompt<Set<string>> {
       case "more":
         return `      ${dim(`…and ${entry.count} more`)}`;
       case "group":
-        return this.line(entry.folded ? "▸" : "▾", entry.group, groupCount(entry.items, ticks), 0, cols, current, true);
+        return this.line(entry.folded ? "▸" : "▾", entry.group, groupCount(entry.items, ticks, this.choices), 0, cols, current, true);
       case "item": {
         const i = entry.item;
         return this.line(box(ticks.has(i.id)), i.label, this.second(i, width), i.group !== undefined ? 2 : 0, cols, current, false);
@@ -349,7 +359,7 @@ class RungPrompt extends Prompt<Set<string>> {
       at === undefined
         ? []
         : at.type === "all"
-          ? ["every row on this screen that can be ticked"]
+          ? [this.o.items.some(i => i.own === true || i.choices !== undefined) ? "every plain row; rows with their own tick or answer stay as they are" : "every row on this screen that can be ticked"]
           : at.type === "group"
             ? [`${at.items.length} in ${at.group}`, "space ticks or clears the group"]
             : at.type === "item"
@@ -401,7 +411,11 @@ class RungPrompt extends Prompt<Set<string>> {
     if (end < entries.length) lines.push(`${bar}  ${dim(`↓ ${entries.length - end} more`)}`);
     lines.push(bar);
     for (const d of detail) lines.push(`${bar}  ${dim(ellipsize(d, width - EDGE))}`.trimEnd());
-    lines.push(`${bar}  ${dim(`${SELECTED}${this.selected(width - EDGE - SELECTED.length)}`)}`);
+    // The line names the ticked rows; where it would say none on a screen of answered rows it counts what was chosen instead,
+    // as the header does, since a sign-in is chosen though nothing is ticked.
+    const named = this.selected(width - EDGE - SELECTED.length);
+    const picked = named !== "none" || !spread ? named : spreadOf(withChoices, this.choices, true) || "none";
+    lines.push(`${bar}  ${dim(`${SELECTED}${picked}`)}`);
     for (const f of footer) lines.push(`${bar}  ${dim(ellipsize(f, width - EDGE))}`.trimEnd());
     const keys: HelpKey[] = this.mixed
       ? [{ key: "space", does: "tick or change" }, KEY_FOLD, KEY_NEXT, KEY_BACK]

@@ -14,6 +14,7 @@ import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { agentInstallsFor, toolInstallsFor } from "@wsp/engine";
+import { ALREADY_APPLIED } from "@wsp/protocol";
 import { CLAUDE_INSTALLER, importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
   CONSENT_CHOICES,
@@ -34,7 +35,7 @@ import {
   saveRecipe,
   type ChecklistItem,
 } from "./init-recipe.js";
-import { GUTTER, card, colourDepth, ellipsize, fmtDuration, helpLine, table, widthOf } from "./init-layout.js";
+import { CARD_FRAME, GUTTER, card, colourDepth, ellipsize, fmtDuration, helpLine, table, widthOf, wrap } from "./init-layout.js";
 import { readKey, rungSelect, type SelectItem } from "./init-select.js";
 import type { HostHandle } from "./server.js";
 
@@ -155,7 +156,10 @@ export function reduceStages(frames: readonly StageFrame[], words: readonly Stag
     if (f.name !== GOLDEN_NAME) continue;
     if (f.stage === "failed") {
       failure = f.detail ?? "no detail given";
-      if (at >= 0) steps[at]!.state = "failed";
+      // After a skipped stage the step named last is already done, so the failure lands on the one about to run.
+      const running = at >= 0 && steps[at]!.state !== "done" ? at : steps.findIndex(s => s.state === "pending");
+      const failing = running >= 0 ? running : at;
+      if (failing >= 0) steps[failing]!.state = "failed";
       continue;
     }
     const i = steps.findIndex(s => s.stage === f.stage);
@@ -164,6 +168,14 @@ export function reduceStages(frames: readonly StageFrame[], words: readonly Stag
       if (steps[j]!.state === "done") continue;
       if (steps[j]!.state === "current" && since !== undefined && f.at !== undefined) steps[j]!.ms = f.at - since;
       steps[j]!.state = "done";
+    }
+    // A stage the builder already holds is over the moment it is named: no clock, so whatever runs next is not charged to it.
+    if (f.detail === ALREADY_APPLIED) {
+      steps[i]!.state = "done";
+      steps[i]!.tail.push(f.detail);
+      at = i;
+      since = undefined;
+      continue;
     }
     // A stage reports twice when it ends with a detail; its clock starts at the first frame.
     if (at !== i) since = f.at;
@@ -175,15 +187,15 @@ export function reduceStages(frames: readonly StageFrame[], words: readonly Stag
 }
 
 /** One stage as one line: the glyph, the label padded so details line up, the latest detail,
- * and once the stage is done its duration flush against the right edge. */
-export function stageLine(glyph: string, label: string, detail: string | undefined, ms: number | undefined, width: number, labelWidth: number): string {
+ * and once the stage is done its duration flush against the right edge. With no width (off a
+ * terminal, where a log has no edge) nothing is cut and the duration follows the detail. */
+export function stageLine(glyph: string, label: string, detail: string | undefined, ms: number | undefined, width: number | undefined, labelWidth: number): string {
   const duration = ms === undefined ? "" : fmtDuration(ms);
-  const room = width - 3 - labelWidth - GUTTER.length - (duration === "" ? 0 : GUTTER.length + duration.length);
-  const cut = detail === undefined || detail === "" ? "" : ellipsize(detail, room);
   const head = label.padEnd(labelWidth);
-  const shown = head.length + (cut === "" ? 0 : GUTTER.length + cut.length);
-  const gap = duration === "" ? "" : " ".repeat(Math.max(GUTTER.length, width - 3 - shown - duration.length));
-  return `${glyph}  ${head}${cut === "" ? "" : `${GUTTER}${dim(cut)}`}${gap}${dim(duration)}`.trimEnd();
+  const text = detail === undefined || detail === "" ? "" : width === undefined ? detail : ellipsize(detail, width - 3 - labelWidth - GUTTER.length - (duration === "" ? 0 : GUTTER.length + duration.length));
+  const shown = head.length + (text === "" ? 0 : GUTTER.length + text.length);
+  const gap = duration === "" ? "" : width === undefined ? GUTTER : " ".repeat(Math.max(GUTTER.length, width - 3 - shown - duration.length));
+  return `${glyph}  ${head}${text === "" ? "" : `${GUTTER}${dim(text)}`}${gap}${dim(duration)}`.trimEnd();
 }
 
 /** One line per step, redrawn as frames arrive: a spinner glyph on the current
@@ -242,13 +254,18 @@ class StageStream {
     return Math.max(...this.words.flatMap(w => [w.start.length, w.end.length]));
   }
 
+  /** The edge lines are laid out to; a log off a terminal has none. */
+  private get width(): number | undefined {
+    return this.animate ? widthOf(this.output) : undefined;
+  }
+
   private doneLine(s: StageStep): string {
-    return stageLine(styleText("green", S_STEP_SUBMIT), s.end, s.tail.at(-1), s.ms, widthOf(this.output), this.labelWidth);
+    return stageLine(styleText("green", S_STEP_SUBMIT), s.end, s.tail.at(-1), s.ms, this.width, this.labelWidth);
   }
 
   private lines(final: boolean): string[] {
     const out: string[] = [];
-    const width = widthOf(this.output);
+    const width = this.width;
     for (const s of this.view.steps) {
       switch (s.state) {
         case "pending":
@@ -404,8 +421,9 @@ export function everythingItems(entries: readonly ManifestEntry[]): SelectItem[]
   return entries.map(e => (e.paths.length > 0 ? selectItem(e, width => hintAt(e.id, width)) : selectItem(e)));
 }
 
+/** The size alone: the screen's one count is the all row's, over the rows that can come, as the found table put it. */
 export function everythingTitle(entries: readonly ManifestEntry[]): string {
-  return `${RUNG_TITLE.everything} (${entries.length} item${entries.length === 1 ? "" : "s"}, ${fmtBytes(entries.reduce((n, e) => n + e.bytes, 0))})`;
+  return `${RUNG_TITLE.everything} (${fmtBytes(entries.reduce((n, e) => n + e.bytes, 0))})`;
 }
 
 function everythingFooter(entries: readonly ManifestEntry[]): (ticks: ReadonlySet<string>) => string[] {
@@ -436,20 +454,29 @@ function detectionNote(manifest: Manifest, source: string): string[] {
 
 /** One row per rung with its ticks and size, the sign-ins under theirs with the answer each
  * got, a credential-shaped row under Everything else when it got an answer other than skip,
- * then what uploads and what installs. */
-function summaryNote(manifest: Manifest, ticks: ReadonlySet<string>, choices: ReadonlyMap<string, string>, width: number): string[] {
+ * then what uploads and what installs, wrapped under their own column. */
+export function summaryNote(manifest: Manifest, ticks: ReadonlySet<string>, choices: ReadonlyMap<string, string>, width: number): string[] {
   const perRung = RUNGS.map(rung => manifest.entries.filter(e => e.rung === rung)).filter(entries => entries.length > 0);
+  const answer = (e: ManifestEntry): string => LOGIN_CHOICES.find(c => c.value === choices.get(e.id))?.label ?? "skip";
+  // The sign-ins row counts the answers that bring something, as its screen's header does: a sign-in is chosen though nothing is ticked.
+  const loginSpread = (entries: readonly ManifestEntry[]): string =>
+    LOGIN_CHOICES.slice(0, -1)
+      .map(c => ({ n: entries.filter(e => answer(e) === c.label).length, label: c.label }))
+      .filter(p => p.n > 0)
+      .map(p => `${p.n} ${p.label}`)
+      .join(", ");
   const rows = table(
     perRung.map(entries => {
       const on = entries.filter(e => ticks.has(e.id));
-      return [RUNG_TITLE[entries[0]!.rung], `${on.length} of ${entries.length}`, bytesOf(on)];
+      const spread = entries[0]!.rung === "logins" ? loginSpread(entries) : "";
+      return [RUNG_TITLE[entries[0]!.rung], spread !== "" ? spread : `${on.length} of ${entries.length}`, bytesOf(on)];
     }),
     ["left", "right", "right"],
   );
-  const answer = (e: ManifestEntry): string => LOGIN_CHOICES.find(c => c.value === choices.get(e.id))?.label ?? "skip";
   const listed = manifest.entries.filter(e => e.rung === "logins" || (e.consent === true && answer(e) !== "skip"));
-  // The card's bar takes 3 columns; the label keeps room for the widest answer.
-  const labelRoom = width - 3 - 2 - GUTTER.length - Math.max(...LOGIN_CHOICES.map(c => c.label.length));
+  // Lines are wrapped here to what the card leaves, so the card prints them as they are; the label keeps room for the widest answer.
+  const inner = width - CARD_FRAME;
+  const labelRoom = inner - 2 - GUTTER.length - Math.max(...LOGIN_CHOICES.map(c => c.label.length));
   const answered = new Map(table(listed.map(e => [`  ${ellipsize(e.label, labelRoom)}`, answer(e)])).map((line, i) => [listed[i]!.id, line]));
   const lines = perRung.flatMap((entries, i) => [rows[i]!, ...entries.flatMap(e => answered.get(e.id) ?? [])]);
   const upload = fmtBytes(manifest.entries.filter(e => ticks.has(e.id)).reduce((n, e) => n + e.bytes, 0));
@@ -460,14 +487,12 @@ function summaryNote(manifest: Manifest, ticks: ReadonlySet<string>, choices: Re
   const tools = steps.filter(t => ticks.has(t.id)).length;
   const toolchain = steps.some(t => t.id.startsWith("tools/brew-toolchain/")) ? " plus Homebrew's toolchain" : "";
   const installs = [...agents, ...(tools > 0 ? [`${tools} tool${tools === 1 ? "" : "s"}${toolchain}`] : [])];
-  return [
-    ...lines,
-    "",
-    ...table([
-      ["Upload", `${upload}, nothing has left this computer yet`],
-      ["Installs", installs.length > 0 ? installs.join(", ") : "nothing; the machine boots bare"],
-    ]),
+  const closing: [string, string][] = [
+    ["Upload", `${upload}, nothing has left this computer yet`],
+    ["Installs", installs.length > 0 ? installs.join(", ") : "nothing; the machine boots bare"],
   ];
+  const column = Math.max(...closing.map(([label]) => label.length)) + GUTTER.length;
+  return [...lines, "", ...closing.flatMap(([label, text]) => wrap(`${label.padEnd(column)}${text}`, inner, " ".repeat(column)))];
 }
 
 interface Answers {
@@ -594,6 +619,13 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     answers = picked;
   } else {
     answers = defaultAnswers(manifest);
+    // Nobody is here to click macOS's consent dialog: a login the Keychain holds signs in on the machine
+    // unless a saved answer says copy, which is the person's own and keeps the recipe hash it was saved with.
+    const defaulted = manifest.entries.filter(e => e.rung === "logins" && e.choice === undefined && answers.choices.get(e.id) === "copy").map(e => ({ ...e, choice: "copy" as const }));
+    for (const s of keychainLogins(defaulted, opts.platform)) {
+      answers.choices.set(s.id, "machine");
+      answers.ticks.delete(s.id);
+    }
   }
   const { ticks, choices } = answers;
   const offered: Manifest = { entries: manifest.entries.filter(e => loginShown(e, manifest, ticks)) };
@@ -672,6 +704,8 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   // run, so a refusal costs no machine: the row turns into a sign-in on the machine and the pack
   // finds no value for it.
   const wanted = keychainLogins(bring, opts.platform);
+  // Off a terminal the spinner draws nothing, and only a saved copy answer gets here; a scripted run would otherwise sit on macOS's dialog with no word why.
+  if (!io.isTTY && wanted.length > 0) log.step(`Reading ${wanted.map(s => s.service).join(", ")} from your Keychain, as the saved recipe answered copy; macOS may ask you to allow it.`, out);
   const reading = spin(io.output, "Reading your Keychain logins", io.isTTY && wanted.length > 0);
   const read = await readSecrets(wanted, opts.secrets);
   reading.stop();
@@ -754,13 +788,15 @@ function reportSeal(rt: Runtime, io: InitIO): void {
     }
     stream.push({ type: "golden.stage", name: e.name, stage: e.stage, ...(e.detail !== undefined ? { detail: e.detail } : {}) });
     if (!stream.finished) return;
-    stream.stop();
+    const view = stream.stop();
     off();
     const out = { output: io.output };
     if (stream.failed) {
       log.error("Seal failed and the builder is gone. Run wsp init again; the recipe is kept.", out);
     } else {
-      log.success("Golden v1 sealed. The app forks your first workspace; wsp keeps serving it here.", out);
+      // The sealed frame's detail is the version, with a leak note after a semicolon when there was one.
+      const version = view.steps.find(s => s.stage === "sealed")?.tail.at(-1)?.split(";")[0]?.trim();
+      log.success(`Golden${version !== undefined && version !== "" ? ` ${version}` : ""} sealed. The app forks your first workspace; wsp keeps serving it here.`, out);
     }
   });
 }

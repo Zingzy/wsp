@@ -66,12 +66,15 @@ export function summarize(labels: readonly string[], width: number, named = 3): 
   return labels.length === 0 ? "" : `${ellipsize(labels[0]!, width - more(1).length)}${more(1)}`;
 }
 
-/** The line broken at word ends to fit the width, the rest indented by two; a line that fits is left as it is, a word longer than the width is cut. */
-export function wrap(text: string, width: number): string[] {
+/** The line broken at word ends to fit the width, the rest indented (by two unless the caller says); a line that fits is left
+ * as it is, a word longer than the width is cut on its own and the words after it go on. */
+export function wrap(text: string, width: number, indent = "  "): string[] {
   if (text.length <= width) return [text];
-  const cut = text.lastIndexOf(" ", width);
-  if (cut < 1 || text.slice(0, cut).trim() === "") return [ellipsize(text, width)];
-  return [text.slice(0, cut).trimEnd(), ...wrap(`  ${text.slice(cut + 1).trimStart()}`, width)];
+  const lead = text.length - text.trimStart().length;
+  let cut = text.lastIndexOf(" ", width);
+  if (cut < lead) cut = text.indexOf(" ", lead);
+  if (cut < 0) return [ellipsize(text, width)];
+  return [ellipsize(text.slice(0, cut).trimEnd(), width), ...wrap(`${indent}${text.slice(cut + 1).trimStart()}`, width, indent)];
 }
 
 /** Whether the stream is a terminal. */
@@ -102,8 +105,12 @@ export function helpLine(keys: readonly HelpKey[], depth: number): string {
   return keys.map(k => `${grey(KEY_GREY, k.key)} ${grey(DESC_GREY, k.does)}`).join(grey(DESC_GREY, DOT));
 }
 
+/** The columns a card's bar and its two spaces take before each line. clack's log.message writes lines as they are
+ * (its note is what wraps, at the columns minus 6), so a line kept inside widthOf minus this is never wrapped again. */
+export const CARD_FRAME = 3;
+
 /** A block in the frame: a bold title on the step glyph, then its lines down the bar, wrapped to the width. */
 export function card(title: string, lines: readonly string[], output: Writable): void {
-  const width = widthOf(output) - 3;
+  const width = widthOf(output) - CARD_FRAME;
   log.message([styleText("bold", title), ...lines.flatMap(l => wrap(l, width))], { output, symbol: styleText("green", S_STEP_SUBMIT) });
 }

@@ -48,6 +48,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
+import { ALREADY_APPLIED } from "@wsp/protocol";
 import { realClock, type Clock } from "./clock.js";
 import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy, idleReason } from "./idle.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
@@ -1211,6 +1212,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const same = imp === undefined ? undefined : [...builders.values()].find(x => (x.life === "own" || x.life === "reusable") && x.record.building !== true && x.record.name === name && x.record.import?.recipeHash === imp.recipeHash);
         if (same && imp) {
           try {
+            stage("creating", ALREADY_APPLIED);
+            stage("deploying-daemon", ALREADY_APPLIED);
             const applied = await applyGoldenImport(same.builder.machine, { import: imp, setup: recipe.setup, ...(same.record.import !== undefined ? { ledger: same.record.import } : {}), onStage: stage });
             // A complete ledger touches nothing, so this is what proves the machine outlived the earlier process.
             const alive = await same.builder.machine.exec("true");

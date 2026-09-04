@@ -47,6 +47,11 @@ describe("entriesFor: one manifest row per found row", () => {
       want: { role: "credential", consent: true, detail: "credential-shaped" },
     },
     {
+      // A key split out of its directory inherits the directory's owner guess; nobody installed the key.
+      row: row({ id: ".android/adbkey", name: ".android/adbkey", kind: "credential", flags: ["credential"], owner: "homebrew" }),
+      want: { role: "credential", consent: true, detail: "credential-shaped" },
+    },
+    {
       row: row({ id: "keychain:gh:github.com", name: "gh:github.com", kind: "device-bound-login", paths: [], bytes: 0, files: 0, mtime: 0, owner: "homebrew" }),
       want: { paths: [], reason: "signed in here; the login is bound to this device, sign in on the machine", group: KEYCHAIN_GROUP, role: "device-bound-login" },
     },

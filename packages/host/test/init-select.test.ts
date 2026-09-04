@@ -131,7 +131,11 @@ describe("rungSelect", () => {
     expect(frame).toMatch(/▾ Tools\s+always included\n┃\s+• git name and email\n/);
     expect(frame).not.toMatch(/[●○] git name/);
     // The focused row carries the marker in the gutter; every other row keeps a space there so the glyphs line up.
-    expect(frame).toMatch(/\n┃ ❯ ● all\s+4 of 4\n┃\s{3}▾ Homebrew/);
+    // The all row counts the always-included row as on and able to come, as the found table does; only the locked-out cask is out.
+    expect(frame).toMatch(/\n┃ ❯ ● all\s+5 of 5\n┃\s{3}▾ Homebrew/);
+    // With the cursor on the all row and no row that keeps its own tick or answer, the detail says what all does, plainly.
+    expect(frame).toContain("every row on this screen that can be ticked");
+    expect(frame).not.toContain("every plain row");
     expect(frame).toMatch(/\n┃\s{5}○ rectangle/);
     // The screen being answered runs the thick bar down its left and ends with the help line; nothing under the title keeps the thin one.
     expect(frame.split("\n").slice(1, -1).every(l => l.startsWith("┃"))).toBe(true);
@@ -568,7 +572,7 @@ describe("rungSelect", () => {
     await p;
   });
 
-  it("the all row leaves a row that takes its own tick alone and counts only what it flips; the row's group header still flips it", async () => {
+  it("the all row leaves a row that takes its own tick alone but counts every row that can come; the row's group header still flips it", async () => {
     const items: SelectItem[] = [
       { id: "a", label: "alpha", detail: [] },
       { id: "big", label: ".big", group: "large, review", detail: [], own: true },
@@ -576,14 +580,40 @@ describe("rungSelect", () => {
     const { input, output, text, clear } = streams();
     const p = rungSelect({ title: "Everything else", counter: "8/8", items, initial: new Set(), input, output });
     await settle();
-    expect(text()).toMatch(/all\s+0 of 1\n/);
+    expect(text()).toMatch(/all\s+0 of 2\n/);
+    // A row that keeps its own tick is on the screen, so the all row's detail says it is left alone.
+    expect(text()).toContain("every plain row; rows with their own tick or answer stay as they are");
     await press(input, KEY.space);
-    expect(text()).toMatch(/all\s+1 of 1\n/);
+    expect(text()).toMatch(/all\s+1 of 2\n/);
     clear();
     await press(input, KEY.down, KEY.down, KEY.space);
     expect(text()).toMatch(/large, review\s+1 of 1\n/);
+    expect(text()).toMatch(/all\s+2 of 2\n/);
     await press(input, KEY.enter);
     expect((await p)).toMatchObject({ kind: "next", ticks: new Set(["a", "big"]) });
+  });
+
+  it("on a screen of answered rows the Selected line names the ticked rows, and where it would say none counts the answers that bring something", async () => {
+    const items: SelectItem[] = [
+      { id: "gh", label: "GitHub CLI login", detail: [], choices: CHOICES },
+      { id: "claude", label: "Claude Code login", detail: [], choices: CHOICES },
+    ];
+    const { input, output, text, clear } = streams();
+    const p = rungSelect({ title: "Sign-ins", counter: "7/8", items, initial: new Set(["gh"]), initialChoices: new Map([["gh", "copy"], ["claude", "machine"]]), input, output });
+    await settle();
+    expect(text()).toMatch(/Sign-ins\s+7\/8\s+1 copy, 1 sign in\n/);
+    expect(text()).toContain("Selected: GitHub CLI login");
+    clear();
+    // gh: copy -> sign in; nothing is ticked now, so the line counts the sign-ins as the header does.
+    await press(input, KEY.space);
+    expect(text()).toContain("Selected: 2 sign in");
+    // gh: sign in -> skip; a skip is not a choice of anything.
+    await press(input, KEY.space);
+    expect(text()).toContain("Selected: 1 sign in");
+    await press(input, KEY.down, KEY.space);
+    expect(text()).toContain("Selected: none");
+    await press(input, KEY.enter);
+    await p;
   });
 
   it("a screen of answered rows that all carry hints keeps the hint and answer columns", async () => {
@@ -620,7 +650,7 @@ describe("rungSelect", () => {
     expect(await p).toMatchObject({ kind: "next", ticks: new Set(), choices: new Map([["t", "skip"]]) });
   });
 
-  it("a group with tick rows and answered rows counts the ticks over its tickable members", async () => {
+  it("a group with tick rows and answered rows counts what was chosen over every member that can come", async () => {
     const items: SelectItem[] = [
       { id: "c", label: "cmux", group: ".config/cmux", detail: [], hint: "1 KB" },
       { id: "s", label: "cmux/secret", group: ".config/cmux", detail: [], hint: "32 B", choices: CHOICES },
@@ -628,9 +658,12 @@ describe("rungSelect", () => {
     const { input, output, text } = streams();
     const p = rungSelect({ title: "Everything else", counter: "8/8", items, initial: new Set(), initialChoices: new Map([["s", "skip"]]), input, output });
     await settle();
-    expect(text()).toMatch(/\.config\/cmux\s+0 of 1\n/);
+    expect(text()).toMatch(/\.config\/cmux\s+0 of 2\n/);
     await press(input, KEY.down, KEY.down, KEY.space);
-    expect(text()).toMatch(/\.config\/cmux\s+1 of 1\n/);
+    expect(text()).toMatch(/\.config\/cmux\s+1 of 2\n/);
+    // The answered row: skip -> copy counts too.
+    await press(input, KEY.down, KEY.space);
+    expect(text()).toMatch(/\.config\/cmux\s+2 of 2\n/);
     await press(input, KEY.enter);
     await p;
   });
