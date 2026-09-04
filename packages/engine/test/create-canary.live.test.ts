@@ -1,0 +1,184 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Live canary: post every create body wsp sends to the real provider and, on a
+// refusal, quote the provider's answer word for word next to the body sent.
+// On 2026-09-04 the host pool began refusing diskGb, a field it had accepted
+// and ignored two days earlier, and every init booted nothing until a person
+// read the error off a live run. Each case builds its body with the code the
+// runtime calls, asserts the 201, and kills what it made by recorded id. The
+// listing case pins the row fields the sweep's cost and owner lines read.
+
+import { afterAll, describe, expect, it } from "vitest";
+import type { WspError } from "../src/errors.js";
+import { BUILDER_IDLE_MS, forkGolden, killUntilGone, prepareBuilder, sealGolden, type GoldenManifest } from "../src/golden.js";
+import { SolariBackend } from "../src/solari-backend.js";
+import { LIVE, sleep, solariKey } from "./live.js";
+
+const TEST = "create-canary";
+const OWNER = "h_canary";
+const SIZE = { cpu: 2, memMb: 4096 };
+const ENVS = { WSP_CANARY: "1" };
+
+/** The labels the runtime stamps, with a foreign owner so no host's sweep claims these machines. */
+const labelsFor = (role: Record<string, string>): Record<string, string> => ({
+  wsp: "1",
+  ...role,
+  "wsp-owner": OWNER,
+  "wsp-test": TEST,
+  createdAt: new Date().toISOString(),
+});
+
+const short = (id: string): string => `${id.slice(0, 20)}...`;
+// Cleanup may run killUntilGone, two kills with a 30 s grace each, per leftover
+// machine plus a snapshot delete; vitest's default hook budget is 10 s.
+const CLEANUP_MS = 180_000;
+
+interface Create {
+  status: number;
+  body: Record<string, unknown>;
+  reply: Record<string, unknown>;
+}
+
+/** The provider's answer word for word, minus the fields that double as credentials on a
+ * success; the body sent with env names only, so a case forking with real envs prints no value. */
+const refused = (c: Create): string => {
+  const reply = { ...c.reply };
+  for (const k of ["sandboxId", "controlUrl", "streamUrl"]) delete reply[k];
+  const body = { ...c.body, ...(c.body.envs !== undefined ? { envs: Object.keys(c.body.envs as object) } : {}) };
+  return `POST /sandboxes answered ${c.status} with ${JSON.stringify(reply)}; body sent: ${JSON.stringify(body)}`;
+};
+
+describe.runIf(LIVE)("create canary, live", () => {
+  const creates: Create[] = [];
+  const created: string[] = [];
+  const backend = LIVE
+    ? new SolariBackend({
+        apiKey: solariKey(),
+        fetch: async (url, init) => {
+          const res = await fetch(url, init);
+          if ((init?.method ?? "GET") === "POST" && new URL(String(url)).pathname === "/sandboxes") {
+            const text = await res.clone().text();
+            let reply: Record<string, unknown>;
+            try {
+              reply = JSON.parse(text) as Record<string, unknown>;
+            } catch {
+              reply = { error: text };
+            }
+            creates.push({ status: res.status, body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>, reply });
+            if (res.status === 201 && typeof reply.sandboxId === "string") created.push(reply.sandboxId);
+          }
+          return res;
+        },
+      })
+    : (undefined as never);
+  let manifest: GoldenManifest | undefined;
+
+  const stateOf = (id: string): Promise<string> =>
+    backend.get(id).then(
+      m => m.state(),
+      (e: unknown) => ((e as WspError).kind === "missing" ? "gone" : Promise.reject(e)),
+    );
+
+  /** Runs one create through the real code and judges the POST it sent, not the exception it raised. */
+  async function posted<T>(run: () => Promise<T>): Promise<{ result: T; create: Create }> {
+    const mark = creates.length;
+    let failure: unknown;
+    let result: T | undefined;
+    try {
+      result = await run();
+    } catch (e) {
+      failure = e;
+    }
+    const create = creates.slice(mark).reverse()[0];
+    if (create === undefined) throw failure ?? new Error("no POST /sandboxes was sent");
+    expect(create.status, refused(create)).toBe(201);
+    if (failure !== undefined) throw failure;
+    return { result: result as T, create };
+  }
+
+  afterAll(async () => {
+    if (!LIVE) return;
+    const alive: string[] = [];
+    for (const id of created) {
+      if ((await stateOf(id)) === "gone") continue;
+      await killUntilGone(backend, await backend.get(id)).catch(() => alive.push(id));
+    }
+    const snapshotId = manifest?.versions.find(v => v.version === manifest?.head)?.snapshotId;
+    let snapshot = "no snapshot";
+    if (snapshotId !== undefined) {
+      snapshot = await backend.deleteSnapshot(snapshotId).then(
+        () => "snapshot deleted",
+        (e: unknown) => `snapshot ${snapshotId} not deleted: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+    console.log(`[create-canary] ${created.length} machine${created.length === 1 ? "" : "s"} created, ${alive.length === 0 ? "all gone" : `still alive: ${alive.map(short).join(", ")}`}; ${snapshot}`);
+    if (alive.length > 0) throw new Error(`machines still alive after the canary: ${alive.join(", ")}`);
+  }, CLEANUP_MS);
+
+  it("builder: the body prepareBuilder posts is accepted", { timeout: 180_000 }, async () => {
+    const { result: builder, create } = await posted(() =>
+      prepareBuilder({ backend, ...SIZE, envs: ENVS, labels: labelsFor({ "wsp-builder": "1" }), setup: "true" }),
+    );
+    expect(create.body).toMatchObject({ kind: "sandbox", template: "base", ...SIZE, lifecycle: { onTimeout: "kill" }, timeoutMs: BUILDER_IDLE_MS });
+    console.log(`[create-canary] builder ${short(builder.machine.id)}: 201 for ${Object.keys(create.body).join(", ")}; built as cpu ${builder.size.cpu} memMb ${builder.size.memMb}`);
+    await killUntilGone(backend, builder.machine);
+    expect(await stateOf(builder.machine.id)).toBe("gone");
+  });
+
+  it("smoke fork: the body sealGolden posts from a fresh snapshot is accepted", { timeout: 300_000 }, async () => {
+    const { result: builder } = await posted(() =>
+      prepareBuilder({ backend, ...SIZE, envs: ENVS, labels: labelsFor({ "wsp-builder": "1" }), setup: "true" }),
+    );
+    const stages: string[] = [];
+    const { result, create } = await posted(() =>
+      sealGolden(builder, {
+        backend,
+        smoke: "true",
+        ...SIZE,
+        envs: ENVS,
+        labels: labelsFor({ "wsp-smoke": "1" }),
+        onStage: (stage, detail) => stages.push(detail === undefined ? stage : `${stage}:${detail}`),
+      }),
+    );
+    manifest = result.manifest;
+    expect(create.body).toMatchObject({ kind: "sandbox", fromSnapshot: result.version.snapshotId, ...SIZE });
+    const forkId = String(create.reply.sandboxId);
+    console.log(`[create-canary] smoke fork ${short(forkId)}: 201 for ${Object.keys(create.body).join(", ")}; stages ${stages.join(" > ")}`);
+    expect(await stateOf(builder.machine.id)).toBe("gone");
+    expect(await stateOf(forkId)).toBe("gone");
+  });
+
+  it("workspace fork: the body forkGolden posts is accepted", { timeout: 180_000 }, async () => {
+    if (manifest === undefined) throw new Error("nothing to fork: the smoke fork case sealed no snapshot");
+    const sealed = manifest;
+    const { result: fork, create } = await posted(() => forkGolden(backend, sealed, { ...SIZE, envs: ENVS, labels: labelsFor({}) }));
+    expect(create.body).toMatchObject({ kind: "sandbox", fromSnapshot: sealed.versions[0]?.snapshotId, ...SIZE });
+    console.log(`[create-canary] fork ${short(fork.id)}: 201 for ${Object.keys(create.body).join(", ")}`);
+    await killUntilGone(backend, fork);
+    expect(await stateOf(fork.id)).toBe("gone");
+  });
+
+  it("listing rows carry metadata, cpu and memMb for a machine just created", { timeout: 180_000 }, async () => {
+    interface Row { sandboxId: string; state: string; metadata?: Record<string, string>; cpu?: number; memMb?: number }
+    const labels = labelsFor({});
+    const { result: m } = await posted(() => backend.create({ kind: "sandbox", template: "base", cpu: 1, memMb: 2048, labels }));
+    try {
+      let row: Row | undefined;
+      for (let attempt = 1; attempt <= 6 && row === undefined; attempt++) {
+        const page = await backend.request<{ sandboxes?: Row[] }>("GET", `/sandboxes?metadata.wsp-test=${TEST}`);
+        row = (page.sandboxes ?? []).find(r => r.sandboxId === m.id);
+        if (row === undefined) await sleep(2000);
+      }
+      if (row === undefined) throw new Error(`the listing never showed ${short(m.id)} in six reads over ten seconds`);
+      for (const field of ["metadata", "cpu", "memMb"] as const) {
+        expect(row, `listing row lacks ${field}: ${JSON.stringify(row)}`).toHaveProperty(field);
+      }
+      expect(row.metadata).toEqual(labels);
+      expect(typeof row.cpu).toBe("number");
+      expect(typeof row.memMb).toBe("number");
+      console.log(`[create-canary] listing row for ${short(m.id)}: state ${row.state}, cpu ${row.cpu}, memMb ${row.memMb}, metadata keys ${Object.keys(row.metadata ?? {}).join(", ")}`);
+    } finally {
+      await killUntilGone(backend, m);
+    }
+    expect(await stateOf(m.id)).toBe("gone");
+  });
+});

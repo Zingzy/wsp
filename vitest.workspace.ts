@@ -25,8 +25,6 @@ export default [
       environment: "node",
       // Anything a test writes to the OS-local config dir (the install id) lands here, never in the developer's own.
       env: { XDG_CONFIG_HOME: join(tmpdir(), "wsp-test-config") },
-      // Live tests create real machines under a 2-machine cap: no parallelism live.
-      fileParallelism: process.env.WSP_LIVE !== "1",
     },
   },
   "./apps/web/vite.config.ts",

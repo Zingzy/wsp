@@ -10,17 +10,29 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
 export interface LiveEnv { SOLARI_API_KEY: string; ANTHROPIC_API_KEY: string }
 
-export function liveEnv(): LiveEnv {
+function readEnv(): Record<string, string> {
   const out: Record<string, string> = {};
   const text = readFileSync(join(root, ".env"), "utf8");
   for (const line of text.split("\n")) {
     const m = line.match(/^([A-Z_]+)=(.*)$/);
     if (m && m[2]) out[m[1]!] = m[2]!.trim();
   }
+  return out;
+}
+
+export function liveEnv(): LiveEnv {
+  const out = readEnv();
   for (const k of ["SOLARI_API_KEY", "ANTHROPIC_API_KEY"] as const) {
     if (!out[k]) throw new Error(`Missing ${k} in .env at repo root`);
   }
   return out as unknown as LiveEnv;
+}
+
+/** The Solari key alone, for files that boot machines and never run Claude. */
+export function solariKey(): string {
+  const key = readEnv().SOLARI_API_KEY;
+  if (!key) throw new Error("Missing SOLARI_API_KEY in .env at repo root");
+  return key;
 }
 
 // Env for any machine that runs Claude Code. Config dir on purpose: carried

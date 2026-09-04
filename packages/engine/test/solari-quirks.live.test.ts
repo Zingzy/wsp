@@ -16,14 +16,14 @@ import WebSocket from "ws";
 import { classify, shouldRetry, type WspError } from "../src/errors.js";
 import { SolariBackend } from "../src/solari-backend.js";
 import type { Machine } from "../src/machine.js";
-import { isReserved, LIVE, liveEnv, sleep } from "./live.js";
+import { isReserved, LIVE, sleep, solariKey } from "./live.js";
 
 const TEST_LABEL = { wsp: "1", "wsp-test": "quirks", createdAt: new Date().toISOString() };
 const SHOUT = (msg: string) => console.error(`\n${"!".repeat(72)}\n!! ${msg}\n${"!".repeat(72)}\n`);
 
 describe.runIf(LIVE)("solari platform-bug canaries", () => {
-  const env = LIVE ? liveEnv() : (undefined as never);
-  const backend = LIVE ? new SolariBackend({ apiKey: env.SOLARI_API_KEY }) : (undefined as never);
+  const apiKey = LIVE ? solariKey() : (undefined as never);
+  const backend = LIVE ? new SolariBackend({ apiKey }) : (undefined as never);
 
   afterAll(async () => {
     if (!LIVE) return;
@@ -98,10 +98,10 @@ describe.runIf(LIVE)("solari platform-bug canaries", () => {
     });
     try {
       // Two attempts absorb fresh-boot flake without hiding a real regression.
-      let outcome = await firstCommandOverControlWs(env.SOLARI_API_KEY, desktop.id);
+      let outcome = await firstCommandOverControlWs(apiKey, desktop.id);
       if (outcome.kind !== "success") {
         await sleep(5000);
-        outcome = await firstCommandOverControlWs(env.SOLARI_API_KEY, desktop.id);
+        outcome = await firstCommandOverControlWs(apiKey, desktop.id);
       }
       if (outcome.kind === "success") {
         SHOUT(
