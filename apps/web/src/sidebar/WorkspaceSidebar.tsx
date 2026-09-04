@@ -142,6 +142,7 @@ export function WorkspaceSidebar() {
     try {
       const created = await api.createFromGoldenHead(name);
       setPending(p => (p && p.name === name ? { ...p, id: created.id } : p));
+      if (created.notice !== undefined) useStore.setState({ toast: created.notice });
     } catch (e) {
       setPending(null);
       setDialog({ key: Date.now(), name, error: explainCreateRefusal(e) });

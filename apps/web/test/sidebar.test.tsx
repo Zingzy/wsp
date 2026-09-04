@@ -235,6 +235,16 @@ describe("new workspace dialog", () => {
     return { dialog, input: within(dialog).getByLabelText("Name") as HTMLInputElement };
   };
 
+  it("a create that made room shows the notice as a toast, the way a failure shows its line", async () => {
+    const api = fakeApi([API], [status(API)]);
+    api.createFromGoldenHead = vi.fn(async (name: string) => ({ ...view("ws_new", name), notice: "Stopped the builder kept from golden v1 (m1) to make room at the machine cap." }));
+    await mount(api, "api");
+    const { input } = await openDialog();
+    fireEvent.keyDown(input, { key: "Enter" });
+    await screen.findByRole("status", { name: /Stopped the builder kept from golden v1/ });
+    expect(useStore.getState().toast).toBe("Stopped the builder kept from golden v1 (m1) to make room at the machine cap.");
+  });
+
   it("offers a default name, creates on Enter, shows a pending row until workspace.created, then selects it", async () => {
     let finish!: (w: WorkspaceView) => void;
     const api = fakeApi([API], [status(API)]);

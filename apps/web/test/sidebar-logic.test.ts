@@ -137,6 +137,8 @@ describe("new workspace helpers", () => {
     const explained = explainCreateRefusal(new RequestError("Sandbox limit reached (2)", "concurrency"));
     expect(explained.title).toMatch(/machine cap/i);
     expect(explained.detail).toMatch(/pause or delete a workspace/i);
+    // The runtime stops a builder kept after a save before this refusal can reach the app; the message says so.
+    expect(explained.detail).toContain("every slot is taken. A builder kept after a save and not in use is stopped first to make room; pause or delete a workspace to free one, then try again.");
     expect(explained.detail).toContain("Sandbox limit reached (2)");
   });
 

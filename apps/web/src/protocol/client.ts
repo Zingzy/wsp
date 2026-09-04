@@ -18,6 +18,7 @@ import {
   type SessionView,
   type SnapshotLineage,
   type SnapshotRollbackResult,
+  type WorkspaceCreateResult,
   type WorkspaceStatus,
   type WorkspaceView,
 } from "@wsp/protocol";
@@ -226,9 +227,9 @@ export class ProtocolClient {
 export interface Api {
   listWorkspaces(): Promise<WorkspaceView[]>;
   getWorkspace(id: string): Promise<WorkspaceView>;
-  createWorkspace(golden: string, name?: string): Promise<WorkspaceView>;
+  createWorkspace(golden: string, name?: string): Promise<CreatedWorkspace>;
   /** Resolves the default golden manifest's head so the UI never handles snapshot ids. */
-  createFromGoldenHead(name: string): Promise<WorkspaceView>;
+  createFromGoldenHead(name: string): Promise<CreatedWorkspace>;
   /** Snapshot of enriched statuses; keeps the runtime's poller + cost ticker running for this socket. */
   watchStatuses(): Promise<WorkspaceStatus[]>;
   nap(id: string): Promise<WorkspaceView>;
@@ -281,9 +282,16 @@ export interface StartSessionOptions {
   cwd?: string;
 }
 
+/** The created view plus the runtime's notice when it stopped a builder kept after a save to make room. */
+export interface CreatedWorkspace extends WorkspaceView {
+  notice?: string;
+}
+
 export function makeApi(c: ProtocolClient): Api {
-  const create = async (golden: string, name?: string) =>
-    (await c.request<{ workspace: WorkspaceView }>("workspaces.create", { golden, ...(name ? { name } : {}) })).workspace;
+  const create = async (golden: string, name?: string): Promise<CreatedWorkspace> => {
+    const { workspace, notice } = await c.request<WorkspaceCreateResult>("workspaces.create", { golden, ...(name ? { name } : {}) });
+    return notice === undefined ? workspace : { ...workspace, notice };
+  };
   return {
     listWorkspaces: async () => (await c.request<{ workspaces: WorkspaceView[] }>("workspaces.list")).workspaces,
     getWorkspace: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.get", { workspaceId: id })).workspace,

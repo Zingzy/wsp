@@ -5,7 +5,7 @@ import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
-import { BUILDER_IDLE_MS, type GoldenManifest } from "@wsp/engine";
+import { BUILDER_IDLE_MS, type GoldenImport, type GoldenManifest } from "@wsp/engine";
 import { createRuntime, memoryStore, type HarnessAdapterFactory, type ReapResult, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cli, serve, type CliIO } from "../src/cli.js";
@@ -532,6 +532,31 @@ describe("host sweeps orphaned machines", () => {
       `reap: left alone ${kept.id}: your earlier builder from this setup, still first-life, 0 s old, $0.11/h (about $0.00 so far); reuse it with wsp init --manifest /home/me/.wsp/state/golden-recipe.json, or it is stopped at six hours`,
     ]);
     expect(await store.get("builders", kept.id)).toMatchObject({ firstLife: true });
+  });
+
+  it("a builder kept after its save is named at start with its version and window; one past the window is stopped with reason grace", async () => {
+    const { rt, backend, store } = testRuntime(false);
+    const imp: GoldenImport = { recipeHash: "h1", recipe: { ticks: [], files: [] }, tools: [], agents: [] };
+    const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true", import: imp } });
+    const b = await crashed.golden.prepare();
+    await crashed.golden.seal(b.id);
+    await crashed.close();
+    expect(backend.machines.map(m => m.killed)).toEqual([false, true]);
+    const lines: string[] = [];
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
+    expect(backend.machines[0]!.killed).toBe(false);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(new RegExp(`^reap: left alone ${b.id}: your builder saved as golden v1, kept \\d+ s since the save and holding one of the account's machine slots, \\$0\\.11/h \\(about \\$0\\.00 so far\\); wsp init updates the golden on it, or it is stopped ten minutes after the save$`));
+    await handle.close();
+    handle = undefined;
+
+    const record = (await store.get("builders", b.id)) as { sealed: { at: string; version: number } };
+    await store.put("builders", b.id, { ...record, sealed: { ...record.sealed, at: ago(11 * 60_000) } });
+    const later: string[] = [];
+    handle = await startHost({ runtime: createRuntime({ backend, store, adapters: {} }), port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => later.push(l) });
+    expect(later).toEqual([`reap: stopped ${b.id}: the builder kept after the save for one more change; its ten-minute window is over`]);
+    expect(backend.machines[0]!.killed).toBe(true);
+    expect(await store.list("builders")).toEqual([]);
   });
 
   it("a recorded builder wearing another setup's owner label is named as such at start and never touched", async () => {

@@ -126,6 +126,7 @@ function describeReaped(r: ReapedMachine): string {
   if (r.reason === "unfinished") return `reap: stopped ${r.id}: your earlier builder from this setup; its setup never finished`;
   if (r.reason === "expired" && r.ageMs === undefined) return `reap: stopped ${r.id}: your earlier builder from this setup, age unknown; a kept builder with no readable age is stopped at once`;
   if (r.reason === "expired") return `reap: stopped ${r.id}: your earlier builder from this setup, ${describeAge(r.ageMs)}; a kept builder is stopped at six hours`;
+  if (r.reason === "grace") return `reap: stopped ${r.id}: the builder kept after the save for one more change; its ten-minute window is over`;
   const why = r.reason === "own" ? `${kind} from this setup that no record claims` : `${kind} with no owner`;
   return `reap: stopped ${r.id}${describeLabels(r.labels)}: ${why}, ${describeAge(r.ageMs)}`;
 }
@@ -147,6 +148,13 @@ function describeKept(b: GoldenBuilderView, rateUsdPerHour: number, recipePath: 
   const ageMs = Date.now() - Date.parse(b.createdAt);
   const reuse = recipePath === undefined ? "wsp init" : `wsp init --manifest ${recipePath}`;
   return `reap: left alone ${b.id}: your earlier builder from this setup, still first-life, ${describeAge(ageMs)}, ${describeCost(rateUsdPerHour, ageMs)}; reuse it with ${reuse}, or it is stopped at six hours`;
+}
+
+/** A builder kept after its save is claimed, so the sweep never names it; the person still sees what bills and why. */
+function describeSealed(b: GoldenBuilderView, sealed: { at: string; version: number }, rateUsdPerHour: number): string {
+  const ageMs = Date.now() - Date.parse(b.createdAt);
+  const since = describeAge(Date.now() - Date.parse(sealed.at)).replace(/ old$/, "");
+  return `reap: left alone ${b.id}: your builder saved as golden v${sealed.version}, kept ${since} since the save and holding one of the account's machine slots, ${describeCost(rateUsdPerHour, ageMs)}; wsp init updates the golden on it, or it is stopped ten minutes after the save`;
 }
 
 /** Kills what this host owns and nothing claims, says which machines went and
@@ -240,13 +248,13 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
           sendJson(res, 409, { error: "no golden image yet; build one first (wspx golden build)" });
           return;
         }
-        const workspace = await rt.workspaces.create({
+        const { notice, ...workspace } = await rt.workspaces.create({
           golden: head.snapshotId,
           name,
           ...(opts.workspaceEnvs !== undefined ? { envs: opts.workspaceEnvs(head) } : {}),
           labels: { wsp: "1", "wsp-host": "1", createdAt: new Date().toISOString() },
         });
-        sendJson(res, 200, { workspace });
+        sendJson(res, 200, { workspace, ...(notice !== undefined ? { notice } : {}) });
         return;
       }
       if (req.method === "GET" && sendAsset(res, webDir, path)) return;
@@ -281,6 +289,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     if (b.foreignOwner !== undefined) log(`reap: left alone ${b.id}: recorded builder wearing another setup's owner label (${b.foreignOwner}); never touched by this host`);
     else if (b.heldBy !== undefined) log(`reap: left alone ${b.id}: your earlier builder from this setup, in use by another wsp process (pid ${b.heldBy.pid}); never touched by this host`);
     else if (b.building === true) log(`reap: left alone ${b.id}: your earlier builder from this setup; its setup never finished; the next sweep stops it`);
+    else if (b.sealed !== undefined) log(describeSealed(b, b.sealed, rt.backend.pricing.rateUsdPerHour(b.size)));
     else if (b.firstLife === true && b.id !== opts.builder?.id) log(describeKept(b, rt.backend.pricing.rateUsdPerHour(b.size), opts.recipePath));
   }
   const reapTimer = setInterval(() => void sweep(false), REAP_INTERVAL_MS);
