@@ -79,7 +79,7 @@ describe("runtime", () => {
           for (const e of feed) onEvent(e);
           return result;
         })();
-        return { localId: sessionId, claudeSessionId: sessionId, finished };
+        return { localId: sessionId, claudeSessionId: sessionId, finished, interrupt: async () => {} };
       },
     });
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: scripted } });
@@ -134,7 +134,7 @@ describe("runtime session history", () => {
         for (const e of feed) onEvent(e);
         return result;
       })();
-      return { localId: sessionId, claudeSessionId: sessionId, finished };
+      return { localId: sessionId, claudeSessionId: sessionId, finished, interrupt: async () => {} };
     },
   });
 
@@ -168,7 +168,7 @@ describe("runtime session history", () => {
     const adapter: HarnessAdapterFactory = () => ({
       start: o => {
         onEvent = o.onEvent;
-        return { localId: sessionId, claudeSessionId: sessionId, finished };
+        return { localId: sessionId, claudeSessionId: sessionId, finished, interrupt: async () => {} };
       },
     });
     return {
@@ -195,7 +195,7 @@ describe("runtime session history", () => {
           o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
           return result;
         });
-        return { localId: sessionId, claudeSessionId: sessionId, finished };
+        return { localId: sessionId, claudeSessionId: sessionId, finished, interrupt: async () => {} };
       },
     });
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: scripted } });

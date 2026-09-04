@@ -338,7 +338,7 @@ describe("host close flushes transcripts", () => {
     const adapter: HarnessAdapterFactory = () => ({
       start: o => {
         onEvent = o.onEvent;
-        return { localId: sessionId, claudeSessionId: sessionId, finished };
+        return { localId: sessionId, claudeSessionId: sessionId, finished, interrupt: async () => {} };
       },
     });
     return {

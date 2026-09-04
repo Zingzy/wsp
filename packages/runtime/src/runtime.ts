@@ -43,6 +43,7 @@ import type {
   PortReachView,
   ReachState,
   SessionEvent,
+  SessionInterruptResult,
   SessionView,
   WorkspaceSize,
   WorkspaceView,
@@ -71,7 +72,8 @@ export interface HarnessSession {
   readonly localId: string;
   readonly claudeSessionId: string;
   readonly finished: Promise<TurnResult>;
-  interrupt?(): Promise<void>;
+  /** Stops the process this session owns; finished settles after it, once session.end has been emitted. */
+  interrupt(): Promise<void>;
 }
 
 export interface HarnessAdapter {
@@ -292,6 +294,8 @@ export interface Runtime {
     list(workspaceId?: string): SessionView[];
     /** The workspace's persisted session events, oldest first; a chat replays these on mount. */
     history(workspaceId: string): Promise<SessionEvent[]>;
+    /** Stops the session's running turn through its harness; a turn already over or an unknown id answers, never throws. */
+    interrupt(sessionId: string): Promise<SessionInterruptResult>;
   };
   readonly golden: {
     build(opts: GoldenBuildRequest): Promise<{ manifest: GoldenManifest; version: GoldenVersion }>;
@@ -1038,9 +1042,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         workspaceId,
         finished: started.finished,
         view: () => ({ ...sessionView }),
-        interrupt: async () => {
-          await started.interrupt?.();
-        },
+        interrupt: () => started.interrupt(),
       };
       sessions.set(handleId, { view: sessionView, handle });
       started.finished
@@ -1063,6 +1065,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async history(workspaceId) {
       await entryOf(workspaceId);
       return [...(transcripts.get(workspaceId) ?? [])];
+    },
+
+    async interrupt(sessionId) {
+      const s = sessions.get(sessionId);
+      if (!s) return { outcome: "not-found" };
+      if (s.view.status !== "running") return { outcome: "not-running" };
+      await s.handle.interrupt();
+      // The harness resolves finished only after session.end, so accepted means the turn is over on the transcript too.
+      await s.handle.finished.catch(() => {});
+      return { outcome: "accepted" };
     },
   };
 
