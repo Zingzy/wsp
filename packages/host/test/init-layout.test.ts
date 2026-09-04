@@ -2,8 +2,9 @@
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it } from "vitest";
+import { isCancel } from "@clack/core";
 import { unicode } from "@clack/prompts";
-import { S_BAR_FOCUS, S_BAR_FOCUS_END, card, colourDepth, ellipsize, fmtDuration, helpLine, rowsOf, summarize, table, viewport, widthOf, wrap } from "../src/init-layout.js";
+import { S_BAR_FOCUS, S_BAR_FOCUS_END, card, colourDepth, confirmPrompt, ellipsize, fmtDuration, helpLine, passwordPrompt, rowsOf, summarize, table, viewport, widthOf, wrap } from "../src/init-layout.js";
 
 describe("init layout", () => {
   it("ellipsize keeps text that fits and ends cut text with one ellipsis inside the width", () => {
@@ -93,7 +94,8 @@ describe("init layout", () => {
     const raw = chunks.join("");
     const lines = stripVTControlCharacters(raw).split("\n");
     expect(lines).toEqual(["│", "◇  Summary", "│  Identity  2 of 3  1.7 KB", "│    GitHub CLI login  copy", "│", "│  Installs  Claude Code, Codex, 89", "│    tools plus Homebrew's toolchain", ""]);
-    expect(lines.map(l => l.length).filter(n => n > 40)).toEqual([]);
+    // The help line is not wrapped, as on the rung screens.
+    expect(lines.slice(0, -1).map(l => l.length).filter(n => n > 40)).toEqual([]);
     expect(raw).not.toMatch(/[╮╯─├]/);
   });
 
@@ -145,4 +147,243 @@ describe("init layout", () => {
       expect(coloured).not.toContain("\x1b[38;5;247mtick");
     }
   });
+});
+
+const KEY = { left: "\x1b[D", right: "\x1b[C", enter: "\r", esc: "\x1b", ctrlC: "\x03" };
+const SECRET = "slr_live_fake_solari_key";
+const CONFIRM_HELP = unicode ? "← → change • y n answer • enter choose • esc cancel" : "← → change   y n answer   enter choose   esc cancel";
+const PASSWORD_HELP = unicode ? "enter next • esc cancel" : "enter next   esc cancel";
+
+function streams(columns?: number) {
+  const input = new PassThrough();
+  const output = columns === undefined ? new PassThrough() : Object.assign(new PassThrough(), { columns });
+  const chunks: string[] = [];
+  output.on("data", (c: Buffer) => chunks.push(c.toString()));
+  return { input, output, text: () => stripVTControlCharacters(chunks.join("")), raw: () => chunks.join("") };
+}
+
+const settle = (ms = 5) => new Promise(r => setTimeout(r, ms));
+async function press(input: PassThrough, ...keys: string[]): Promise<void> {
+  for (const k of keys) {
+    input.write(k);
+    await settle();
+  }
+}
+
+/** Waits for the output to show the text; a lone escape is only an escape once readline's sequence timeout passes, so the cancelled frame is polled for, not slept for. */
+async function until(text: () => string, needle: string, ms = 2000): Promise<void> {
+  const t0 = Date.now();
+  while (!text().includes(needle)) {
+    if (Date.now() - t0 > ms) throw new Error(`never saw ${needle} in:\n${text()}`);
+    await settle();
+  }
+}
+
+/** Runs the body with the env var set, then puts it back. */
+async function withEnv(name: string, value: string | undefined, body: () => Promise<void>): Promise<void> {
+  const was = process.env[name];
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+  try {
+    await body();
+  } finally {
+    if (was === undefined) delete process.env[name];
+    else process.env[name] = was;
+  }
+}
+
+const sgrSet = (raw: string): string[] => [...new Set([...raw.matchAll(/\x1b\[([0-9;]*)m/g)].map(m => m[1]!))].sort();
+
+describe("confirm prompt", () => {
+  it("draws the question on the step glyph, the hint and the two answers down the thick bar, the help line on the heavy end; enter takes the marked answer and the finished screen keeps clack's thin bar", async () => {
+    const { input, output, text } = streams();
+    const p = confirmPrompt({ message: "Boot it?", hint: "No costs nothing.", input, output });
+    await settle();
+    expect(text()).toBe(`◆  Boot it?\n┃  No costs nothing.\n┃  ○ Yes / ● No\n┗  ${CONFIRM_HELP}`);
+    await press(input, KEY.enter);
+    expect(await p).toBe(false);
+    const done = text().slice(text().lastIndexOf("◇"));
+    expect(done).toBe("◇  Boot it?\n│  No costs nothing.\n│  No\n");
+  });
+
+  it("left and right move the marker, y and n answer at once, esc and ctrl-c cancel with the answer struck through", async () => {
+    const a = streams();
+    const pa = confirmPrompt({ message: "Boot it?", input: a.input, output: a.output });
+    await settle();
+    expect(a.text()).toBe(`◆  Boot it?\n┃  ○ Yes / ● No\n┗  ${CONFIRM_HELP}`);
+    await press(a.input, KEY.left);
+    expect(a.text().slice(a.text().lastIndexOf("◆"))).toContain("┃  ● Yes / ○ No");
+    await press(a.input, KEY.right, KEY.left, KEY.enter);
+    expect(await pa).toBe(true);
+    expect(a.text().slice(a.text().lastIndexOf("◇"))).toBe("◇  Boot it?\n│  Yes\n");
+
+    const b = streams();
+    const pb = confirmPrompt({ message: "Boot it?", input: b.input, output: b.output });
+    await settle();
+    await press(b.input, "y");
+    expect(await pb).toBe(true);
+    const c = streams();
+    const pc = confirmPrompt({ message: "Boot it?", initialValue: true, input: c.input, output: c.output });
+    await settle();
+    await press(c.input, "n");
+    expect(await pc).toBe(false);
+
+    const d = streams();
+    const pd = confirmPrompt({ message: "Boot it?", input: d.input, output: d.output });
+    await settle();
+    await press(d.input, KEY.esc);
+    await until(d.text, "■");
+    expect(isCancel(await pd)).toBe(true);
+    // The answer that was marked is the one struck through; clack's escape alias must not flip it first.
+    expect(d.text().slice(d.text().lastIndexOf("■"))).toBe("■  Boot it?\n│  No\n");
+    const e = streams();
+    const pe = confirmPrompt({ message: "Boot it?", input: e.input, output: e.output });
+    await settle();
+    await press(e.input, KEY.ctrlC);
+    expect(isCancel(await pe)).toBe(true);
+  });
+
+  it("wraps a long question and hint at the width, the rest under the bar with the two-space indent", async () => {
+    const { input, output, text } = streams(40);
+    const p = confirmPrompt({ message: "Boot a 2 vCPU, 4 GB builder on Solari and build this?", hint: "No costs nothing and keeps the recipe for wsp init --manifest.", input, output });
+    await settle();
+    const lines = text().split("\n");
+    expect(lines).toEqual(["◆  Boot a 2 vCPU, 4 GB builder on Solari", "┃    and build this?", "┃  No costs nothing and keeps the recipe", "┃    for wsp init --manifest.", "┃  ○ Yes / ● No", `┗  ${CONFIRM_HELP}`]);
+    // The help line is not wrapped, as on the rung screens.
+    expect(lines.slice(0, -1).map(l => l.length).filter(n => n > 40)).toEqual([]);
+    await press(input, KEY.enter);
+    await p;
+    // A newline in the question is a line break, as in the hint.
+    const two = streams();
+    const q = confirmPrompt({ message: "Boot it?\nIt bills while it runs.", hint: "No costs nothing.", input: two.input, output: two.output });
+    await settle();
+    expect(two.text()).toBe(`◆  Boot it?\n┃  It bills while it runs.\n┃  No costs nothing.\n┃  ○ Yes / ● No\n┗  ${CONFIRM_HELP}`);
+    await press(two.input, KEY.enter);
+    await q;
+  });
+
+  it("with colour on: cyan glyph and question, dim hint and bar, cyan marker, the two help greys, and no other colour", () =>
+    withEnv("FORCE_COLOR", "3", async () => {
+      const { input, output, raw } = streams();
+      const p = confirmPrompt({ message: "Boot it?", hint: "No costs nothing.", input, output });
+      await settle();
+      const frame = raw();
+      expect(frame).toContain("\x1b[36m◆\x1b[39m  \x1b[36mBoot it?\x1b[39m");
+      expect(frame).toContain("\x1b[2m┃\x1b[22m  \x1b[2mNo costs nothing.\x1b[22m");
+      expect(frame).toContain("\x1b[2m○\x1b[22m \x1b[2mYes\x1b[22m \x1b[2m/\x1b[22m \x1b[36m●\x1b[39m No");
+      expect(frame).toContain("\x1b[2m┗\x1b[22m  \x1b[38;5;247m← →\x1b[39m \x1b[38;5;243mchange\x1b[39m");
+      expect(sgrSet(frame)).toEqual(["2", "22", "36", "38;5;243", "38;5;247", "39"].sort());
+      await press(input, KEY.enter);
+      await p;
+      const done = raw().slice(raw().lastIndexOf("\x1b[32m"));
+      // The finished frame, then clack's newline and its cursor-show.
+      expect(done).toBe("\x1b[32m◇\x1b[39m  Boot it?\n\x1b[2m│\x1b[22m  \x1b[2mNo costs nothing.\x1b[22m\n\x1b[2m│\x1b[22m  \x1b[2mNo\x1b[22m\n\x1b[?25h");
+    }));
+
+  it("at 16 colours the help words are dim and no 256-colour code leaves the frame", () =>
+    withEnv("FORCE_COLOR", "1", async () => {
+      const { input, output, raw } = streams();
+      const p = confirmPrompt({ message: "Boot it?", input, output });
+      await settle();
+      expect(raw()).toContain("← → \x1b[2mchange\x1b[22m");
+      expect(raw()).not.toContain("38;5;");
+      expect(sgrSet(raw())).toEqual(["2", "22", "36", "39"].sort());
+      await press(input, KEY.enter);
+      await p;
+    }));
+
+  it("under NO_COLOR the frame carries no SGR at all and keeps its glyphs and dots", () =>
+    withEnv("FORCE_COLOR", undefined, () =>
+      withEnv("NO_COLOR", "1", async () => {
+        const { input, output, raw, text } = streams();
+        const p = confirmPrompt({ message: "Boot it?", hint: "No costs nothing.", input, output });
+        await settle();
+        expect(sgrSet(raw())).toEqual([]);
+        expect(text()).toBe(`◆  Boot it?\n┃  No costs nothing.\n┃  ○ Yes / ● No\n┗  ${CONFIRM_HELP}`);
+        await press(input, KEY.enter);
+        await p;
+      }),
+    ));
+});
+
+describe("password prompt", () => {
+  it("masks every character, never echoes the text, and returns it on enter; the finished screen shows the mask on the thin bar", async () => {
+    const { input, output, text, raw } = streams();
+    const p = passwordPrompt({ message: "No Solari key found.", hint: "Solari API key  console.getsolari.com", input, output });
+    await settle();
+    expect(text()).toBe(`◆  No Solari key found.\n┃  Solari API key  console.getsolari.com\n┃  _\n┗  ${PASSWORD_HELP}`);
+    await press(input, SECRET);
+    const typed = text().slice(text().lastIndexOf("◆"));
+    expect(typed).toContain(`┃  ${"▪".repeat(SECRET.length)}_`);
+    await press(input, KEY.enter);
+    expect(await p).toBe(SECRET);
+    expect(raw()).not.toContain(SECRET);
+    expect(raw()).not.toContain(SECRET.slice(0, 4));
+    expect(text().slice(text().lastIndexOf("◇"))).toBe(`◇  No Solari key found.\n│  Solari API key  console.getsolari.com\n│  ${"▪".repeat(SECRET.length)}\n`);
+  });
+
+  it("enter on nothing returns the empty string with no mask line; esc and ctrl-c cancel", async () => {
+    const a = streams();
+    const pa = passwordPrompt({ message: "Anthropic API key", input: a.input, output: a.output });
+    await settle();
+    await press(a.input, KEY.enter);
+    expect(await pa).toBe("");
+    expect(a.text().slice(a.text().lastIndexOf("◇"))).toBe("◇  Anthropic API key\n");
+    const b = streams();
+    const pb = passwordPrompt({ message: "Anthropic API key", input: b.input, output: b.output });
+    await settle();
+    await press(b.input, "abc", KEY.esc);
+    await until(b.text, "■");
+    expect(isCancel(await pb)).toBe(true);
+    expect(b.text().slice(b.text().lastIndexOf("■"))).toBe("■  Anthropic API key\n│  ▪▪▪\n");
+    expect(b.raw()).not.toContain("abc");
+    const c = streams();
+    const pc = passwordPrompt({ message: "Anthropic API key", input: c.input, output: c.output });
+    await settle();
+    await press(c.input, KEY.ctrlC);
+    expect(isCancel(await pc)).toBe(true);
+  });
+
+  it("with colour on: cyan glyph and question, dim hint and bar, the inverse cursor, the two help greys, and no other colour", () =>
+    withEnv("FORCE_COLOR", "3", async () => {
+      const { input, output, raw } = streams();
+      const p = passwordPrompt({ message: "No Solari key found.", hint: "Solari API key  console.getsolari.com", input, output });
+      await settle();
+      await press(input, "ab");
+      const frame = raw().slice(raw().lastIndexOf("\x1b[36m◆"));
+      expect(frame).toContain("\x1b[36m◆\x1b[39m  \x1b[36mNo Solari key found.\x1b[39m");
+      expect(frame).toContain("\x1b[2m┃\x1b[22m  \x1b[2mSolari API key  console.getsolari.com\x1b[22m");
+      expect(frame).toContain("\x1b[2m┃\x1b[22m  ▪▪\x1b[7m\x1b[8m_\x1b[28m\x1b[27m");
+      expect(frame).toContain("\x1b[2m┗\x1b[22m  \x1b[38;5;247menter\x1b[39m \x1b[38;5;243mnext\x1b[39m");
+      expect(sgrSet(frame)).toEqual(["2", "22", "27", "28", "36", "38;5;243", "38;5;247", "39", "7", "8"].sort());
+      await press(input, KEY.enter);
+      await p;
+      expect(raw()).not.toContain("ab\x1b");
+      expect(raw().slice(raw().lastIndexOf("\x1b[32m"))).toBe("\x1b[32m◇\x1b[39m  No Solari key found.\n\x1b[2m│\x1b[22m  \x1b[2mSolari API key  console.getsolari.com\x1b[22m\n\x1b[2m│\x1b[22m  \x1b[2m▪▪\x1b[22m\n\x1b[?25h");
+    }));
+
+  it("at 16 colours the help words are dim and no 256-colour code leaves the frame", () =>
+    withEnv("FORCE_COLOR", "1", async () => {
+      const { input, output, raw } = streams();
+      const p = passwordPrompt({ message: "Anthropic API key", input, output });
+      await settle();
+      expect(raw()).toContain("enter \x1b[2mnext\x1b[22m");
+      expect(raw()).not.toContain("38;5;");
+      expect(sgrSet(raw())).toEqual(["2", "22", "27", "28", "36", "39", "7", "8"].sort());
+      await press(input, KEY.enter);
+      await p;
+    }));
+
+  it("under NO_COLOR the frame carries no SGR at all and keeps its glyphs and dots", () =>
+    withEnv("FORCE_COLOR", undefined, () =>
+      withEnv("NO_COLOR", "1", async () => {
+        const { input, output, raw, text } = streams();
+        const p = passwordPrompt({ message: "Anthropic API key", hint: "optional, enter skips", input, output });
+        await settle();
+        expect(sgrSet(raw())).toEqual([]);
+        expect(text()).toBe(`◆  Anthropic API key\n┃  optional, enter skips\n┃  _\n┗  ${PASSWORD_HELP}`);
+        await press(input, KEY.enter);
+        await p;
+      }),
+    ));
 });

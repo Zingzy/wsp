@@ -10,7 +10,7 @@ import { LARGE_GROUP, RUNGS, type Manifest, type ManifestEntry, type Rung } from
 import { describeAge, type BackendPricing } from "@wsp/engine";
 import type { ChecklistItem } from "@wsp/protocol";
 import type { GoldenBuilderView, GoldenRecipe, GoldenStage, Runtime } from "@wsp/runtime";
-import { S_BAR, S_STEP_ERROR, S_STEP_SUBMIT, cancel, confirm, isCancel, log, outro } from "@clack/prompts";
+import { S_BAR, S_STEP_ERROR, S_STEP_SUBMIT, cancel, isCancel, log, outro } from "@clack/prompts";
 import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -36,7 +36,7 @@ import {
   saveRecipe,
   secretLinesFor,
 } from "./init-recipe.js";
-import { CARD_FRAME, GUTTER, card, colourDepth, ellipsize, fmtDuration, helpLine, table, widthOf, wrap } from "./init-layout.js";
+import { CARD_FRAME, GUTTER, card, colourDepth, confirmPrompt, ellipsize, fmtDuration, helpLine, table, widthOf, wrap } from "./init-layout.js";
 import { readKey, rungSelect, type SelectItem } from "./init-select.js";
 import { OPEN_LINE, builderLink, machineLogins, noteLogins, openLogins, signInStage, type BuilderLink, type LoginOutcome, type SignInFlow } from "./init-signin.js";
 import type { HostHandle } from "./server.js";
@@ -748,7 +748,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   if (attach !== undefined) {
     log.step(`Attaching to your earlier builder: ${describeBuilder(attach)}. Nothing new boots; stages already applied are skipped.`, out);
   } else if (interactive) {
-    const go = await confirm({ message: `${question}\nNo costs nothing and keeps the recipe for wsp init --manifest.`, initialValue: false, input: io.input, output: io.output });
+    const go = await confirmPrompt({ message: question, hint: "No costs nothing and keeps the recipe for wsp init --manifest.", input: io.input, output: io.output });
     if (isCancel(go) || !go) {
       cancel("Nothing was booted. The recipe is kept.", out);
       return { code: 1 };

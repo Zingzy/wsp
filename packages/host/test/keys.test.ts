@@ -78,8 +78,8 @@ describe("loadKeys", () => {
     const io = fakeIO([SOLARI, ANTHROPIC, "yes"]);
     await loadKeys(io, { env: {}, cwd, home });
     const [key, anthropic, save] = io.output.map(stripVTControlCharacters);
-    expect(key).toBe("No Solari key found.\nSolari API key  console.getsolari.com");
-    expect(anthropic).toMatch(/^Anthropic API key  optional, enter skips\n/);
+    expect(key).toBe("Solari API key\nNo Solari key found.\nconsole.getsolari.com");
+    expect(anthropic).toMatch(/^Anthropic API key\noptional, enter skips\n/);
     expect(save).toBe(`Save the keys to ${join(home, ".env")} so wsp stops asking?`);
     expect(io.output.join("\n")).not.toMatch(/—|!|SOLARI_API_KEY/);
   });
@@ -195,7 +195,7 @@ function screen(tty: boolean): Screen {
 }
 
 describe("terminalIO", () => {
-  it("on a terminal the key is a masked clack prompt with the extra line framed, and the save is a confirm that defaults to No", async () => {
+  it("on a terminal the key is a masked prompt with its hint lines under the question, and the save is a confirm that defaults to No", async () => {
     setup();
     const s = screen(true);
     const run = loadKeys(s.io, { env: {}, cwd, home }, { anthropic: false });
@@ -203,8 +203,11 @@ describe("terminalIO", () => {
     await s.type("\r");
     expect(await run).toEqual({ solari: SOLARI });
     const out = s.text();
-    expect(out).toContain("◆  No Solari key found.\n│  Solari API key  console.getsolari.com\n");
-    expect(out).toContain(`◆  Save the key to ${join(home, ".env")} so wsp stops asking?\n│  ${S_RADIO_INACTIVE} Yes / ${S_RADIO_ACTIVE} No`);
+    expect(out).toContain("◆  Solari API key\n┃  No Solari key found.\n┃  console.getsolari.com\n┃  _\n┗  enter next • esc cancel");
+    // The question is wrapped at the frame's width, so the path may push "so wsp stops asking?" under the bar.
+    expect(out).toContain(`◆  Save the key to ${join(home, ".env")} so wsp`);
+    expect(out).toMatch(/◆  Save the key to [^\n]*\n(┃    [^\n]*\n)?┃  ○ Yes \/ ● No\n┗  ← → change • y n answer • enter choose • esc cancel/);
+    expect(out).toMatch(/◇  Save the key to [^\n]*\n(│    [^\n]*\n)?│  No\n/);
     expect(out).not.toContain(SOLARI);
     expect(existsSync(join(home, ".env"))).toBe(false);
   });
@@ -234,7 +237,7 @@ describe("terminalIO", () => {
     setup();
     const s = screen(false);
     await expect(loadKeys(s.io, { env: {}, cwd, home })).rejects.toThrow(
-      "No Solari key found. No terminal to ask on; set it in the environment, ./.env, or ~/.wsp/.env.",
+      "Solari API key: no terminal to ask on; set it in the environment, ./.env, or ~/.wsp/.env.",
     );
     expect(s.text()).toBe("");
   });

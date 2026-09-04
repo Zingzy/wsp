@@ -8,10 +8,10 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@clack/prompts", async importOriginal => {
   const real = await importOriginal<typeof import("@clack/prompts")>();
-  return { ...real, unicode: false, S_BAR: "|", S_BAR_END: "\u2014", S_STEP_ACTIVE: "*", S_STEP_SUBMIT: "o", S_STEP_CANCEL: "x" };
+  return { ...real, unicode: false, S_BAR: "|", S_BAR_END: "\u2014", S_STEP_ACTIVE: "*", S_STEP_SUBMIT: "o", S_STEP_CANCEL: "x", S_RADIO_ACTIVE: ">", S_RADIO_INACTIVE: " " };
 });
 
-const { S_BAR_FOCUS, S_BAR_FOCUS_END, card, helpLine } = await import("../src/init-layout.js");
+const { S_BAR_FOCUS, S_BAR_FOCUS_END, card, confirmPrompt, helpLine, passwordPrompt } = await import("../src/init-layout.js");
 const { rungSelect } = await import("../src/init-select.js");
 
 function streams() {
@@ -43,5 +43,26 @@ describe("rung screen without unicode", () => {
     const { output, text } = streams();
     card("Summary", ["Identity  2 of 3"], output);
     expect(text().split("\n")[1]).toBe("o  Summary");
+  });
+
+  it("the confirm and the password take the same pipe, plus and spaced help line; clack's ASCII marker and a star for the mask", async () => {
+    const a = streams();
+    const pa = confirmPrompt({ message: "Boot it?", hint: "No costs nothing.", input: a.input, output: a.output });
+    await new Promise(r => setTimeout(r, 5));
+    expect(a.text()).toBe("*  Boot it?\n|  No costs nothing.\n|    Yes / > No\n+  ← → change   y n answer   enter choose   esc cancel");
+    a.input.write("\r");
+    expect(await pa).toBe(false);
+    expect(a.text().slice(a.text().lastIndexOf("o  Boot"))).toBe("o  Boot it?\n|  No costs nothing.\n|  No\n");
+    const b = streams();
+    const pb = passwordPrompt({ message: "Solari API key", input: b.input, output: b.output });
+    await new Promise(r => setTimeout(r, 5));
+    expect(b.text()).toBe("*  Solari API key\n|  _\n+  enter next   esc cancel");
+    b.input.write("abc");
+    await new Promise(r => setTimeout(r, 5));
+    // Each key redraws the one line that changed.
+    expect(b.text().endsWith("|  ***_")).toBe(true);
+    b.input.write("\r");
+    expect(await pb).toBe("abc");
+    expect(a.text() + b.text()).not.toMatch(/[\u2014•┃┗│└▪●○]/);
   });
 });
