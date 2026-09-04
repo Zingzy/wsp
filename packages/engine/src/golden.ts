@@ -8,6 +8,7 @@
 
 import { createHash } from "node:crypto";
 import { ALREADY_APPLIED, type GoldenLogin, type GoldenManifest, type GoldenStage, type GoldenVersion, type RecipeDigest } from "@wsp/protocol";
+import type { Removal } from "./golden-diff.js";
 import { HOMEBREW, NODE_PATH_LINE, type AgentInstall, type NodeInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { assertFirstLife } from "./lifecycle.js";
 import type { ExecResult, Machine, MachineBackend, MachineKind, MachineState } from "./machine.js";
@@ -263,7 +264,8 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
   const stage = opts.onStage ?? (() => {});
   const imp = opts.import ?? { recipeHash: "", tools: [], agents: [] };
   const prior = opts.ledger?.recipeHash === imp.recipeHash ? opts.ledger : undefined;
-  const ledger: ImportLedger = { recipeHash: imp.recipeHash, ...(imp.recipe !== undefined ? { recipe: imp.recipe } : {}), applied: [...(prior?.applied ?? [])], smoke: prior?.smoke ?? "true" };
+  const recipe = imp.recipe ?? prior?.recipe;
+  const ledger: ImportLedger = { recipeHash: imp.recipeHash, applied: [...(prior?.applied ?? [])], smoke: prior?.smoke ?? "true", ...(recipe !== undefined ? { recipe } : {}) };
   const result: ImportResult = { recipeHash: imp.recipeHash, tools: [], agents: [] };
   const done = (s: ImportStage): boolean => ledger.applied.includes(s);
   const mark = (s: ImportStage): void => {
@@ -460,6 +462,11 @@ function summarizeAgents(agents: AgentResult[]): string {
   return [ok.length > 0 ? `${ok.join(", ")} installed` : "", ...bad, ...aside].filter(s => s !== "").join("; ");
 }
 
+/** An updated version's sha chains the version it came from with what the delta ran, so it names both. */
+export function nextSetupSha(previous: string, setup: string, imp: GoldenImport): string {
+  return createHash("sha256").update(`${previous}\n${setupShaOf(setup, imp)}`).digest("hex");
+}
+
 /** Pins which installers ran: the harness line and every agent's. */
 function setupShaOf(setup: string, imp: GoldenImport | undefined): string {
   const h = createHash("sha256").update(setup);
@@ -478,6 +485,17 @@ export interface SealGoldenOptions extends MachineSize {
   killConfirm?: KillConfirm;
   /** How each sign-in asked of the builder ended; stamped on the version as given. */
   logins?: GoldenLogin[];
+  /** Leave the builder running after the snapshot (snapshotting does not end first-life, measured), so one more
+   * change can re-snapshot it. When the account cap refuses the smoke fork beside it, the builder is killed first
+   * and the fork tried once more, as a seal without this option does. */
+  keepBuilder?: boolean;
+}
+
+export interface SealResult {
+  manifest: GoldenManifest;
+  version: GoldenVersion;
+  /** True when keepBuilder was asked and the builder is still running. */
+  builderKept: boolean;
 }
 
 export interface BuildGoldenOptions extends MachineSize {
@@ -573,12 +591,11 @@ export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Build
   }
 }
 
-// Sequenced for a two-machine cap: the builder dies before the smoke fork
-// boots, so the seal itself never holds more than one machine.
-export async function sealGolden(
-  builder: Builder,
-  opts: SealGoldenOptions,
-): Promise<{ manifest: GoldenManifest; version: GoldenVersion }> {
+const isCapRefusal = (e: unknown): boolean => (e as { kind?: unknown }).kind === "concurrency";
+
+// Sequenced for a two-machine cap: unless the builder is kept, it dies before
+// the smoke fork boots, so the seal itself never holds more than one machine.
+export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Promise<SealResult> {
   const stage = opts.onStage ?? (() => {});
   assertFirstLife(builder.machine.id, builder.firstLife, "seal");
   const smoke = builder.import?.smoke ?? opts.smoke;
@@ -589,19 +606,30 @@ export async function sealGolden(
   let builderAlive = true;
   let fork: Machine | undefined;
   const kill = (m: Machine) => killUntilGone(opts.backend, m, opts.killConfirm);
+  const forkSpec = () => ({
+    kind: builder.kind,
+    fromSnapshot: snapshotId!,
+    ...sizeAsked(opts.backend, opts, builder.size),
+    ...envSpec(opts),
+  });
   try {
     stage("snapshotting", `golden-v${versionNum}`);
     snapshotId = await builder.machine.snapshot(`golden-v${versionNum}`);
-    await kill(builder.machine);
-    builderAlive = false;
+    if (opts.keepBuilder !== true) {
+      await kill(builder.machine);
+      builderAlive = false;
+    }
 
     stage("smoke-forking", smoke);
-    fork = await opts.backend.create({
-      kind: builder.kind,
-      fromSnapshot: snapshotId,
-      ...sizeAsked(opts.backend, opts, builder.size),
-      ...envSpec(opts),
-    });
+    try {
+      fork = await opts.backend.create(forkSpec());
+    } catch (e) {
+      if (!builderAlive || !isCapRefusal(e)) throw e;
+      stage("smoke-forking", `${smoke}; the account is at its machine cap, so the builder is not kept`);
+      await kill(builder.machine);
+      builderAlive = false;
+      fork = await opts.backend.create(forkSpec());
+    }
     const smokeRes = await fork.exec(smoke, { timeoutMs: opts.smokeTimeoutMs ?? 120_000 });
     if (smokeRes.exitCode !== 0) {
       throw new Error(
@@ -629,8 +657,9 @@ export async function sealGolden(
       browserShim,
       ...(opts.logins !== undefined ? { logins: opts.logins } : {}),
     };
-    stage("sealed", leak === undefined ? `v${versionNum}` : `v${versionNum}; ${leak}`);
-    return { manifest: { head: versionNum, versions: [...prior, version] }, version };
+    const kept = builderAlive ? "; builder kept for one more change" : "";
+    stage("sealed", leak === undefined ? `v${versionNum}${kept}` : `v${versionNum}${kept}; ${leak}`);
+    return { manifest: { head: versionNum, versions: [...prior, version] }, version, builderKept: builderAlive };
   } catch (e) {
     let detail = messageOf(e);
     const leaked = (k: unknown) => {
@@ -639,6 +668,123 @@ export async function sealGolden(
     if (builderAlive && !(e instanceof MachineAliveError)) await kill(builder.machine).catch(leaked);
     if (fork) await kill(fork).catch(leaked);
     if (snapshotId !== undefined) await opts.backend.deleteSnapshot(snapshotId).catch(() => {});
+    stage("failed", detail);
+    throw e;
+  }
+}
+
+// --- golden update: the recipe delta on a fork of the golden, or on the kept builder --
+
+/** What changed between the recipe a golden was built from and the recipe now:
+ * rows to apply, planned like a first build and hashed as the whole new
+ * recipe, and what comes off the machine first. */
+export interface GoldenDelta {
+  import: GoldenImport;
+  removals: Removal[];
+}
+
+export interface ApplyDeltaOptions {
+  setup: string;
+  setupTimeoutMs?: number;
+  /** The smoke of the version being updated; removed agents leave it, added ones join it. */
+  previousSmoke: string;
+  fetch?: typeof globalThis.fetch;
+  onStage?: StageListener;
+}
+
+/** The version checks of what is on the image after the delta: the previous
+ * smoke without the removed agents', joined with the added agents'. */
+export function nextSmoke(previous: string, removed: readonly string[], added: string): string {
+  const parts = previous.split(" && ").filter(p => p !== "true" && !removed.includes(p));
+  for (const p of added.split(" && ")) if (p !== "true" && !parts.includes(p)) parts.push(p);
+  return parts.length === 0 ? "true" : parts.join(" && ");
+}
+
+/** Takes the removals off the machine, then runs the delta through the import
+ * stages. A removal that fails is a warning named in the stage detail; the
+ * files and upload fail the update as they fail a build. */
+export async function applyDelta(machine: Machine, delta: GoldenDelta, opts: ApplyDeltaOptions): Promise<{ ledger: ImportLedger; result: ImportResult }> {
+  const stage = opts.onStage ?? (() => {});
+  if (delta.removals.length > 0) {
+    stage("applying-setup", `removing ${delta.removals.length} item${delta.removals.length === 1 ? "" : "s"}`);
+    const removed: string[] = [];
+    const notes: string[] = [];
+    for (const r of delta.removals) {
+      if (r.cmd === undefined) {
+        notes.push(`${r.label}: ${r.note ?? "left on the machine"}`);
+        continue;
+      }
+      const res = await machine.exec(guarded(r.cmd, TOOL_TIMEOUT_S), { timeoutMs: (TOOL_TIMEOUT_S + 30) * 1000 });
+      if (res.exitCode === 0) removed.push(r.label);
+      else notes.push(`${r.label} not removed (${reasonOf(res, TOOL_TIMEOUT_S)})`);
+    }
+    stage("applying-setup", [removed.length > 0 ? `removed ${removed.join(", ")}` : "", ...notes].filter(s => s !== "").join("; "));
+  }
+  const applied = await applyGoldenImport(machine, {
+    import: delta.import,
+    setup: opts.setup,
+    onStage: stage,
+    ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}),
+    ...(opts.setupTimeoutMs !== undefined ? { setupTimeoutMs: opts.setupTimeoutMs } : {}),
+  });
+  const gone = delta.removals.flatMap(r => (r.smoke !== undefined ? [r.smoke] : []));
+  applied.ledger.smoke = nextSmoke(opts.previousSmoke, gone, applied.ledger.smoke);
+  return applied;
+}
+
+export interface UpgradeBuilderOptions extends MachineSize {
+  backend: MachineBackend;
+  /** The version being updated; the fork boots from its snapshot at its size and kind. */
+  head: GoldenVersion;
+  delta: GoldenDelta;
+  setup: string;
+  setupTimeoutMs?: number;
+  fetch?: typeof globalThis.fetch;
+  onStage?: StageListener;
+}
+
+/** Forks the golden into a fresh first-life machine and applies the delta on
+ * it: a builder to seal as the next version. The fork carries the daemon and
+ * everything the recipe already put there, so nothing but the delta runs. */
+export async function upgradeBuilder(opts: UpgradeBuilderOptions): Promise<Builder> {
+  const stage = opts.onStage ?? (() => {});
+  const kind = opts.head.kind ?? "sandbox";
+  stage("creating", `fork of golden v${opts.head.version}`);
+  const asked = sizeAsked(opts.backend, opts, opts.head.size);
+  const createdAt = new Date().toISOString();
+  const machine = await opts.backend.create({
+    kind,
+    fromSnapshot: opts.head.snapshotId,
+    onIdle: "kill",
+    idleTimeoutMs: BUILDER_IDLE_MS,
+    ...asked,
+    ...envSpec(opts),
+  });
+  try {
+    const size = await sizeBuilt(machine, asked);
+    const applied = await applyDelta(machine, opts.delta, {
+      setup: opts.setup,
+      previousSmoke: opts.head.smoke.cmd,
+      onStage: stage,
+      ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}),
+      ...(opts.setupTimeoutMs !== undefined ? { setupTimeoutMs: opts.setupTimeoutMs } : {}),
+    });
+    stage("ready");
+    return {
+      machine,
+      kind,
+      baseTemplate: opts.head.baseTemplate,
+      setupSha: nextSetupSha(opts.head.setupSha, opts.setup, opts.delta.import),
+      createdAt,
+      firstLife: true,
+      size,
+      import: applied.ledger,
+    };
+  } catch (e) {
+    let detail = messageOf(e);
+    await killUntilGone(opts.backend, machine).catch((k: unknown) => {
+      detail += `; ${messageOf(k)}`;
+    });
     stage("failed", detail);
     throw e;
   }

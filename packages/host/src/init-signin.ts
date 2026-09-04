@@ -96,6 +96,7 @@ const dim = (s: string): string => styleText("dim", s);
 const STATE_WORDS: Record<LoginState, string> = {
   "signed-in": "signed in",
   "not-signed-in": "not signed in",
+  copied: "copied",
   "not-verified": "not verified",
   skipped: "skipped",
 };

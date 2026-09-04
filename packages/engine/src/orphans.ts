@@ -36,8 +36,9 @@ export interface ReapedMachine {
   builder: boolean;
   /** recorded: this state file's record from an earlier process, not sealable; unfinished: such a record
    * whose stages never completed; expired: a kept first-life record past six hours by its createdAt label;
-   * own: wears this owner's label with no record left; orphan: no owner label and past its backstop. */
-  reason: "recorded" | "unfinished" | "expired" | "own" | "orphan";
+   * own: wears this owner's label with no record left; orphan: no owner label and past its backstop;
+   * grace: a builder kept after its seal for one more change, past that window. */
+  reason: "recorded" | "unfinished" | "expired" | "grace" | "own" | "orphan";
   ageMs?: number;
 }
 

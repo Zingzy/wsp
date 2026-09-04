@@ -15,11 +15,16 @@ import {
   reap,
   refreshPreviewToken,
   sealGolden,
+  applyDelta,
   applyGoldenImport,
+  upgradeBuilder,
+  nextSetupSha,
   type Builder,
   type BuildGoldenOptions,
+  type GoldenDelta,
   type GoldenImport,
   type ImportLedger,
+  type SealResult,
   type ExecResult,
   type GoldenManifest,
   type GoldenVersion,
@@ -41,6 +46,7 @@ import type {
   GoldenBuilderView,
   GoldenLogin,
   GoldenStage,
+  RecipeDigest,
   PortReachView,
   ReachState,
   SessionEvent,
@@ -143,6 +149,11 @@ export interface WorkspaceSpec {
   memMb?: number;
   envs?: Record<string, string>;
   labels?: Record<string, string>;
+}
+
+/** What a create answers: the view, and a notice when a builder kept after a save was stopped to make room. */
+export interface CreatedWorkspace extends WorkspaceView {
+  notice?: string;
 }
 
 export interface CreateWorkspaceOptions extends WorkspaceSpec {
@@ -289,11 +300,26 @@ export interface GoldenBuildRequest extends Omit<BuildGoldenOptions, "backend" |
   name?: string;
 }
 
+export interface GoldenUpgradeResult {
+  manifest: GoldenManifest;
+  version: GoldenVersion;
+  /** builder: the delta went onto the builder kept since the save; fork: onto a fresh fork of the previous head. */
+  road: "builder" | "fork";
+  /** The previous version's snapshot was deleted and the version dropped from the manifest. */
+  previousDropped: boolean;
+  /** The builder is still running for its window; false when the cap fallback or a drop ended it. */
+  builderKept: boolean;
+}
+
+/** How long a builder built from a recipe stays running after its seal, so one more change re-snapshots it (about
+ * 11 s, measured) instead of forking. Our clock on the record, since every read of the machine resets the provider's. */
+export const GRACE_MS = 10 * 60_000;
+
 export interface Runtime {
   readonly events: EventBus;
   readonly backend: MachineBackend;
   readonly workspaces: {
-    create(opts: CreateWorkspaceOptions): Promise<WorkspaceView>;
+    create(opts: CreateWorkspaceOptions): Promise<CreatedWorkspace>;
     get(id: string): Promise<WorkspaceView>;
     list(): Promise<WorkspaceView[]>;
     nap(id: string): Promise<WorkspaceView>;
@@ -327,9 +353,15 @@ export interface Runtime {
     get(name?: string): Promise<GoldenManifest | undefined>;
     /** Boots a first-life builder from the recipe; a person sets it up on its live screen, then seals it. */
     prepare(opts?: { name?: string; kind?: MachineKind }): Promise<GoldenBuilderView>;
-    /** Snapshot, smoke-fork, append a version. The builder is consumed whether this succeeds, fails, or is refused. */
-    /** logins: what each sign-in asked of the builder came to, stamped on the version. */
+    /** Snapshot, smoke-fork, append a version. A builder built from a recipe is kept running for GRACE_MS after a
+     * successful seal so one more change re-snapshots it; any other builder, and every failed or refused seal, consumes it.
+     * logins: what each sign-in asked of the builder came to, stamped on the version. */
     seal(builderId: string, opts?: { logins?: GoldenLogin[] }): Promise<{ manifest: GoldenManifest; version: GoldenVersion }>;
+    /** The recipe the golden's head was built from, or nothing when it was not built from one. */
+    recipe(name?: string): Promise<RecipeDigest | undefined>;
+    /** The next version from the recipe delta: on the builder kept since the save when there is one, else on a
+     * fresh fork of the head. Seals it, repoints the head, and drops the previous version's snapshot when asked. */
+    upgrade(opts: { name?: string; delta: GoldenDelta; keepPrevious?: boolean; logins?: GoldenLogin[] }): Promise<GoldenUpgradeResult>;
     /** How a browser dials the builder's daemon; the builder is not a workspace, so it has its own road. */
     builderReach(builderId: string): Promise<DaemonReachView>;
     builders(): Promise<GoldenBuilderView[]>;
@@ -348,6 +380,9 @@ export interface Runtime {
 
 const WORKSPACES = "workspaces";
 const GOLDENS = "goldens";
+/** The recipe each sealed version was built from, keyed `<name>@v<version>`; the next update diffs against the head's. */
+const GOLDEN_RECIPES = "golden-recipes";
+const recipeKey = (name: string, version: number): string => `${name}@v${version}`;
 const TRANSCRIPTS = "transcripts";
 /** Mirrors @wsp/daemon's DEFAULT_TOKEN_PATH; the runtime cannot import the daemon package (it only runs inside guests). */
 const DAEMON_TOKEN_PATH = "/root/.wsp-daemon-token";
@@ -373,6 +408,8 @@ const OWNER = "owner";
 const HELD_TTL_MS = 15 * 60_000;
 /** Own builders beat this often on their own timer, so a sweep stuck on a slow listing cannot starve the hold. */
 const HEARTBEAT_MS = 5 * 60_000;
+
+const isCapRefusal = (e: unknown): boolean => (e as { kind?: unknown }).kind === "concurrency";
 
 function pidAlive(pid: number): boolean {
   try {
@@ -402,6 +439,8 @@ interface BuilderRecord {
   building?: true;
   /** What of the recipe this builder carries; a prepare with the same recipe hash reuses it. */
   import?: ImportLedger;
+  /** Saved as this version and kept running since; an update of that version lands on it, the sweep stops it at GRACE_MS. */
+  sealed?: { at: string; version: number };
 }
 
 interface LiveBuilder {
@@ -834,6 +873,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           // A placeholder its dead holder left mid-setup never finished its stages: stale, whatever the marker says.
           life: label !== undefined && label !== owner ? "foreign" : held ? "held" : !firstLife || stored.building === true ? "stale" : "reusable",
         });
+        if (stored.sealed !== undefined) armGrace(record.id, stored.sealed.at);
       }
     })();
     return hydrated;
@@ -868,14 +908,43 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         },
         firstLife: true,
       };
-      await fork(record, m => {
+      const bind = (m: Machine): void => {
         record.machineId = m.id;
         attach(record, m);
-      });
+      };
+      const notices: string[] = [];
+      try {
+        await fork(record, bind);
+      } catch (e) {
+        // A slot for work beats a builder kept for one more change: at the cap one kept builder of this setup is
+        // stopped and the fork tried again, the next one only on the next refusal; a refusal with none left to
+        // stop is the caller's to show. A held or foreign builder is never touched.
+        if (!isCapRefusal(e)) throw e;
+        let refusal: unknown = e;
+        let made = false;
+        for (const x of [...builders.values()].filter(x => (x.life === "own" || x.life === "reusable") && x.record.sealed !== undefined)) {
+          const stopped = `Stopped the builder kept from golden v${x.record.sealed!.version} (${x.record.id}) to make room at the machine cap.`;
+          graceTimers.get(x.record.id)?.();
+          graceTimers.delete(x.record.id);
+          await killUntilGone(backend, x.builder.machine, opts.killConfirm);
+          await forgetBuilder(x.record.id);
+          notices.push(stopped);
+          console.warn(`workspace ${record.id}: ${stopped.charAt(0).toLowerCase()}${stopped.slice(1, -1)}`);
+          try {
+            await fork(record, bind);
+            made = true;
+            break;
+          } catch (again) {
+            if (!isCapRefusal(again)) throw again;
+            refusal = again;
+          }
+        }
+        if (!made) throw refusal;
+      }
       await persist(record);
       const v = view(record);
       bus.emit({ type: "workspace.created", workspace: v });
-      return v;
+      return notices.length > 0 ? { ...v, notice: notices.join(" ") } : v;
     },
 
     async get(id) {
@@ -1144,7 +1213,49 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     ...(b.life === "foreign" ? { foreignOwner: b.builder.machine.labels?.[OWNER_LABEL] ?? "" } : {}),
     ...(b.life === "held" && r.heldBy !== undefined ? { heldBy: r.heldBy } : {}),
     ...(r.building === true ? { building: true } : {}),
+    ...(r.sealed !== undefined ? { sealed: r.sealed } : {}),
   });
+
+  /** One timer per kept builder, so the grace ends on time inside a process; the sweep is the road across processes. */
+  const graceTimers = new Map<string, () => void>();
+  const armGrace = (id: string, sealedAt: string): void => {
+    graceTimers.get(id)?.();
+    const left = Math.max(0, GRACE_MS - (clock.now() - Date.parse(sealedAt)));
+    graceTimers.set(id, clock.schedule(() => {
+      graceTimers.delete(id);
+      void expireGrace().catch((e: unknown) => console.warn(`grace sweep failed: ${e instanceof Error ? e.message : String(e)}`));
+    }, left, { unref: true }));
+  };
+  /** True while a kept builder's window is still open by our clock. */
+  const inWindow = (sealedAt: string): boolean => {
+    const ageMs = clock.now() - Date.parse(sealedAt);
+    return !Number.isNaN(ageMs) && ageMs < GRACE_MS;
+  };
+  let expiring: Promise<{ reaped: ReapedMachine[]; failed: ReapFailure[] }> | undefined;
+  /** Stops every kept builder whose window is over, each on its own: a kill that fails is reported and the record
+   * kept for the next sweep. A builder another process holds is that process's to stop. One pass at a time: two
+   * timers falling due together, or a timer beside a sweep, must not both kill and forget the same builder. */
+  const expireGrace = (): Promise<{ reaped: ReapedMachine[]; failed: ReapFailure[] }> => (expiring ??= expireGraceNow().finally(() => (expiring = undefined)));
+  const expireGraceNow = async (): Promise<{ reaped: ReapedMachine[]; failed: ReapFailure[] }> => {
+    const reaped: ReapedMachine[] = [];
+    const failed: ReapFailure[] = [];
+    for (const b of [...builders.values()]) {
+      if (b.record.sealed === undefined || !(b.life === "own" || b.life === "reusable") || inWindow(b.record.sealed.at)) continue;
+      try {
+        await b.builder.machine.kill();
+      } catch (e) {
+        if ((e as { kind?: string }).kind !== "missing") {
+          failed.push({ id: b.record.id, message: `${e instanceof Error ? e.message : String(e)}; stays recorded, retried next sweep` });
+          continue;
+        }
+      }
+      graceTimers.get(b.record.id)?.();
+      graceTimers.delete(b.record.id);
+      await forgetBuilder(b.record.id);
+      reaped.push({ id: b.record.id, builder: true, reason: "grace", ageMs: clock.now() - Date.parse(b.record.sealed.at) });
+    }
+    return { reaped, failed };
+  };
 
   /** Marks the record as this process's, now; the sweep and the heartbeat timer refresh it and close() clears it. */
   let beat: (() => void) | undefined;
@@ -1173,6 +1284,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   // record and not a placeholder; the hold stamp and its timer are this process's and stop with it. A caller that
   // closes while a prepare still runs leaves the placeholder unheld until its stages finish; none does today.
   const hold = async (b: LiveBuilder): Promise<void> => {
+    // A record forgotten while a heartbeat was in flight must not come back: the write is skipped for a builder no longer live.
+    if (builders.get(b.record.id) !== b) return;
     if (!closed) b.record.heldBy = { host: hostId, pid: process.pid, heartbeat: new Date().toISOString() };
     await store.put(BUILDERS, b.record.id, b.record);
     if (!closed) arm();
@@ -1197,6 +1310,101 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const recipeOrThrow = (): GoldenRecipe => {
     if (!opts.goldenRecipe) throw new Error("this runtime has no golden recipe; the host wires one (setup + smoke) before the wizard can run");
     return opts.goldenRecipe;
+  };
+
+  const builderLabels = (extra: Record<string, string> | undefined): Record<string, string> => ({ ...extra, wsp: "1", "wsp-builder": "1", [OWNER_LABEL]: owner, createdAt: new Date().toISOString() });
+
+  /** The hold begins the moment the machine exists: a held placeholder is on the store before any stage runs, so
+   * another process over it (a second host, wspx) never reads this machine as lost. */
+  const recordingCreates = (b: MachineBackend, name: string, imp: Pick<GoldenImport, "recipeHash" | "recipe"> | undefined, made: (placeholder: LiveBuilder) => void): MachineBackend => ({
+    ...b,
+    create: async spec => {
+      const machine = await b.create(spec);
+      const asked = { cpu: spec.cpu ?? backend.pricing.defaultSize.cpu, memMb: spec.memMb ?? backend.pricing.defaultSize.memMb };
+      const record: BuilderRecord = {
+        id: machine.id,
+        name,
+        kind: spec.kind,
+        baseTemplate: spec.template ?? "",
+        setupSha: "",
+        createdAt: spec.labels?.["createdAt"] ?? new Date().toISOString(),
+        size: asked,
+        firstLife: true,
+        building: true,
+        ...(machine.streamUrl !== undefined ? { streamUrl: machine.streamUrl } : {}),
+        ...(imp !== undefined ? { import: { recipeHash: imp.recipeHash, ...(imp.recipe !== undefined ? { recipe: imp.recipe } : {}), applied: [], smoke: "true" } } : {}),
+      };
+      const placeholder: LiveBuilder = { record, builder: { machine, kind: spec.kind, baseTemplate: record.baseTemplate, setupSha: "", createdAt: record.createdAt, firstLife: true, size: asked }, life: "own" };
+      builders.set(machine.id, placeholder);
+      made(placeholder);
+      await hold(placeholder);
+      return machine;
+    },
+  });
+
+  /** The finished builder replaces its placeholder on the record and stays this process's own. */
+  const settleBuilder = async (name: string, builder: Builder, placeholder: LiveBuilder | undefined): Promise<LiveBuilder> => {
+    const record: BuilderRecord = {
+      id: builder.machine.id,
+      name,
+      kind: builder.kind,
+      baseTemplate: builder.baseTemplate,
+      setupSha: builder.setupSha,
+      createdAt: builder.createdAt,
+      size: builder.size,
+      firstLife: true,
+      ...(builder.machine.streamUrl !== undefined ? { streamUrl: builder.machine.streamUrl } : {}),
+      ...(builder.import !== undefined ? { import: builder.import } : {}),
+    };
+    const entry: LiveBuilder = placeholder ?? { record, builder, life: "own" };
+    entry.record = record;
+    entry.builder = builder;
+    builders.set(record.id, entry);
+    await hold(entry);
+    return entry;
+  };
+
+  /** Snapshot, smoke fork, manifest. A kept builder stays recorded with the version it was saved as and its grace
+   * armed; every other road drops the record, so a machine that outlived its kills is exactly what reap sweeps. */
+  const sealEntry = async (entry: LiveBuilder, keep: boolean, logins?: GoldenLogin[]): Promise<SealResult> => {
+    const recipe = recipeOrThrow();
+    const name = entry.record.name;
+    const prior = (await store.get(GOLDENS, name)) as GoldenManifest | undefined;
+    try {
+      const result = await claiming(b =>
+        sealGolden(entry.builder, {
+          backend: b,
+          smoke: recipe.smoke,
+          ...(recipe.cpu !== undefined ? { cpu: recipe.cpu } : {}),
+          ...(recipe.memMb !== undefined ? { memMb: recipe.memMb } : {}),
+          ...(recipe.envs !== undefined ? { envs: recipe.envs } : {}),
+          labels: { ...recipe.labels, wsp: "1", "wsp-smoke": "1", [OWNER_LABEL]: owner, createdAt: new Date().toISOString() },
+          ...(prior !== undefined ? { manifest: prior } : {}),
+          onStage: stageOf(name),
+          ...(opts.killConfirm !== undefined ? { killConfirm: opts.killConfirm } : {}),
+          ...(logins !== undefined ? { logins } : {}),
+          keepBuilder: keep,
+        }),
+      );
+      await store.put(GOLDENS, name, result.manifest);
+      const snapshot = entry.builder.import?.recipe;
+      if (snapshot !== undefined) await store.put(GOLDEN_RECIPES, recipeKey(name, result.version.version), snapshot);
+      if (result.builderKept) {
+        entry.record.sealed = { at: new Date(clock.now()).toISOString(), version: result.version.version };
+        entry.life = "own";
+        await hold(entry);
+        armGrace(entry.record.id, entry.record.sealed.at);
+      } else {
+        await forgetBuilder(entry.record.id);
+      }
+      return result;
+    } catch (e) {
+      // sealGolden consumes the builder on every road but a refusal; a refused
+      // builder can never seal and under a two-machine cap must not outlive it.
+      if (e instanceof NotFirstLifeError) await killUntilGone(backend, entry.builder.machine, opts.killConfirm);
+      await forgetBuilder(entry.record.id);
+      throw e;
+    }
   };
 
   const golden: Runtime["golden"] = {
@@ -1239,7 +1447,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // import never attaches: nothing says which ticks the builder carries. The
         // building check is a second wall: the join above holds it in this process,
         // life does across processes.
-        const same = imp === undefined ? undefined : [...builders.values()].find(x => (x.life === "own" || x.life === "reusable") && x.record.building !== true && x.record.name === name && x.record.import?.recipeHash === imp.recipeHash);
+        const same = imp === undefined ? undefined : [...builders.values()].find(x => (x.life === "own" || x.life === "reusable") && x.record.building !== true && x.record.sealed === undefined && x.record.name === name && x.record.import?.recipeHash === imp.recipeHash);
         if (same && imp) {
           try {
             stage("creating", ALREADY_APPLIED);
@@ -1265,42 +1473,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           stage("ready");
           return builderView(same.record, same);
         }
-        // The hold begins the moment the machine exists: a held placeholder is on the store before any
-        // stage runs, so another process over it (a second host, wspx) never reads this machine as lost.
         let placeholder: LiveBuilder | undefined;
-        const recording: MachineBackend = {
-          ...b,
-          create: async spec => {
-            const machine = await b.create(spec);
-            const asked = { cpu: spec.cpu ?? backend.pricing.defaultSize.cpu, memMb: spec.memMb ?? backend.pricing.defaultSize.memMb };
-            const record: BuilderRecord = {
-              id: machine.id,
-              name,
-              kind: spec.kind,
-              baseTemplate: spec.template ?? "",
-              setupSha: "",
-              createdAt: spec.labels?.["createdAt"] ?? new Date().toISOString(),
-              size: asked,
-              firstLife: true,
-              building: true,
-              ...(machine.streamUrl !== undefined ? { streamUrl: machine.streamUrl } : {}),
-              ...(imp !== undefined ? { import: { recipeHash: imp.recipeHash, ...(imp.recipe !== undefined ? { recipe: imp.recipe } : {}), applied: [], smoke: "true" } } : {}),
-            };
-            placeholder = { record, builder: { machine, kind: spec.kind, baseTemplate: record.baseTemplate, setupSha: "", createdAt: record.createdAt, firstLife: true, size: asked }, life: "own" };
-            builders.set(machine.id, placeholder);
-            await hold(placeholder);
-            return machine;
-          },
-        };
         let builder: Builder;
         try {
           builder = await prepareBuilder({
-            backend: recording,
+            backend: recordingCreates(b, name, imp, p => (placeholder = p)),
             ...size,
             ...(o?.kind !== undefined ? { kind: o.kind } : {}),
             ...(deployDaemon !== undefined ? { deployDaemon } : {}),
             ...(imp !== undefined ? { import: imp } : {}),
-            labels: { ...recipe.labels, wsp: "1", "wsp-builder": "1", [OWNER_LABEL]: owner, createdAt: new Date().toISOString() },
+            labels: builderLabels(recipe.labels),
             onStage: stage,
           });
         } catch (e) {
@@ -1308,24 +1490,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           if (placeholder !== undefined) await forgetBuilder(placeholder.record.id);
           throw e;
         }
-        const record: BuilderRecord = {
-          id: builder.machine.id,
-          name,
-          kind: builder.kind,
-          baseTemplate: builder.baseTemplate,
-          setupSha: builder.setupSha,
-          createdAt: builder.createdAt,
-          size: builder.size,
-          firstLife: true,
-          ...(builder.machine.streamUrl !== undefined ? { streamUrl: builder.machine.streamUrl } : {}),
-          ...(builder.import !== undefined ? { import: builder.import } : {}),
-        };
-        const entry: LiveBuilder = placeholder ?? { record, builder, life: "own" };
-        entry.record = record;
-        entry.builder = builder;
-        builders.set(record.id, entry);
-        await hold(entry);
-        return builderView(record, entry);
+        const entry = await settleBuilder(name, builder, placeholder);
+        return builderView(entry.record, entry);
       }).finally(() => preparing.delete(name));
       preparing.set(name, { hash: imp?.recipeHash, promise: run });
       return run;
@@ -1336,36 +1502,122 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const entry = builders.get(builderId);
       if (!entry) throw new Error(`no such builder: ${builderId}`);
       refuseUntouchable(entry);
+      // A builder built from a recipe is what an update can land on; a bare one has no recipe to diff.
+      return sealEntry(entry, entry.record.import?.recipe !== undefined, o?.logins);
+    },
+
+    async recipe(name) {
+      await ready();
+      const key = name ?? "default";
+      const manifest = (await store.get(GOLDENS, key)) as GoldenManifest | undefined;
+      if (manifest === undefined) return undefined;
+      return (await store.get(GOLDEN_RECIPES, recipeKey(key, manifest.head))) as RecipeDigest | undefined;
+    },
+
+    async upgrade(o) {
+      await ready();
       const recipe = recipeOrThrow();
-      const prior = (await store.get(GOLDENS, entry.record.name)) as GoldenManifest | undefined;
-      try {
-        const result = await claiming(b =>
-          sealGolden(entry.builder, {
-            backend: b,
-            smoke: recipe.smoke,
+      const name = o.name ?? "default";
+      const prior = (await store.get(GOLDENS, name)) as GoldenManifest | undefined;
+      const head = prior?.versions.find(v => v.version === prior.head);
+      if (prior === undefined || head === undefined) throw new Error(`no golden named "${name}" to update; wsp init builds one`);
+      const stage = stageOf(name);
+      // Past its window a kept builder is never used, running or not: it is stopped here and the update forks; one
+      // the pass could not stop is named so the person knows it still bills. Inside the window, it is suspended for
+      // the update's length: the record loses `sealed` and gains `building` before the first exec, so neither the
+      // timer nor a sweep stops the machine mid-stage, and a process that dies here leaves a record the next one
+      // stops as unfinished; the seal re-arms the window.
+      const swept = await expireGrace();
+      for (const f of swept.failed) stage("creating", `an earlier kept builder ${f.id} was not stopped (${f.message})`);
+      const kept = [...builders.values()].find(x => (x.life === "own" || x.life === "reusable") && x.record.name === name && x.record.sealed?.version === head.version && inWindow(x.record.sealed.at));
+      let entry: LiveBuilder | undefined;
+      if (kept !== undefined) {
+        graceTimers.get(kept.record.id)?.();
+        graceTimers.delete(kept.record.id);
+        delete kept.record.sealed;
+        kept.record.building = true;
+        await store.put(BUILDERS, kept.record.id, kept.record);
+        const alive = await kept.builder.machine.exec("true").then(r => r.exitCode === 0, () => false);
+        if (!alive) {
+          // A machine that does not answer may still bill: it is killed until the provider says gone, then forgotten.
+          await killUntilGone(backend, kept.builder.machine, opts.killConfirm);
+          await forgetBuilder(kept.record.id);
+        } else {
+          stage("creating", `your builder from v${head.version}, kept since the save`);
+          try {
+            const applied = await applyDelta(kept.builder.machine, o.delta, { setup: recipe.setup, previousSmoke: head.smoke.cmd, onStage: stage });
+            const setupSha = nextSetupSha(head.setupSha, recipe.setup, o.delta.import);
+            kept.record.import = applied.ledger;
+            kept.record.setupSha = setupSha;
+            delete kept.record.building;
+            kept.builder = { ...kept.builder, import: applied.ledger, setupSha };
+            kept.life = "own";
+            await hold(kept);
+          } catch (e) {
+            // Same road as a fresh builder that fails its stages: the machine goes, the golden stays as it was.
+            let detail = e instanceof Error ? e.message : String(e);
+            await killUntilGone(backend, kept.builder.machine, opts.killConfirm).catch((k: unknown) => {
+              detail += `; ${k instanceof Error ? k.message : String(k)}`;
+            });
+            await forgetBuilder(kept.record.id);
+            stage("failed", detail);
+            throw e;
+          }
+          stage("ready");
+          entry = kept;
+        }
+      }
+      const road = entry !== undefined ? "builder" : "fork";
+      entry ??= await claiming(async b => {
+        let placeholder: LiveBuilder | undefined;
+        let builder: Builder;
+        try {
+          builder = await upgradeBuilder({
+            backend: recordingCreates(b, name, o.delta.import, p => (placeholder = p)),
+            head,
+            delta: o.delta,
+            setup: recipe.setup,
             ...(recipe.cpu !== undefined ? { cpu: recipe.cpu } : {}),
             ...(recipe.memMb !== undefined ? { memMb: recipe.memMb } : {}),
             ...(recipe.envs !== undefined ? { envs: recipe.envs } : {}),
-            labels: { ...recipe.labels, wsp: "1", "wsp-smoke": "1", [OWNER_LABEL]: owner, createdAt: new Date().toISOString() },
-            ...(prior !== undefined ? { manifest: prior } : {}),
-            onStage: stageOf(entry.record.name),
-            ...(opts.killConfirm !== undefined ? { killConfirm: opts.killConfirm } : {}),
-            ...(o?.logins !== undefined ? { logins: o.logins } : {}),
-          }),
-        );
-        await store.put(GOLDENS, entry.record.name, result.manifest);
-        return result;
-      } catch (e) {
-        // sealGolden consumes the builder on every road but a refusal; a refused
-        // builder can never seal and under a two-machine cap must not outlive it.
-        if (e instanceof NotFirstLifeError) await killUntilGone(backend, entry.builder.machine, opts.killConfirm);
-        throw e;
-      } finally {
-        // The record goes whatever happened: a machine that outlived its kills
-        // is then unrecorded, which is exactly what reap sweeps.
-        await forgetBuilder(builderId);
+            labels: builderLabels(recipe.labels),
+            onStage: stage,
+          });
+        } catch (e) {
+          if (placeholder !== undefined) await forgetBuilder(placeholder.record.id);
+          throw e;
+        }
+        return settleBuilder(name, builder, placeholder);
+      });
+      // The update keeps the golden's disk, so what was signed in stays signed in: the caller passes the previous
+      // version's outcomes, with the rows it re-imported as copies rewritten.
+      const sealed = await sealEntry(entry, true, o.logins);
+      let manifest = sealed.manifest;
+      let previousDropped = false;
+      let builderKept = sealed.builderKept;
+      if (o.keepPrevious === false) {
+        // A snapshot with live forks under it cannot be deleted (409 on Solari): the builder forked from it goes
+        // first, window or not; a version with workspaces still on it stays for them.
+        if (road === "fork" && builderKept) {
+          graceTimers.get(entry.record.id)?.();
+          graceTimers.delete(entry.record.id);
+          await killUntilGone(backend, entry.builder.machine, opts.killConfirm);
+          await forgetBuilder(entry.record.id);
+          builderKept = false;
+        }
+        try {
+          await backend.deleteSnapshot(head.snapshotId);
+          manifest = { ...manifest, versions: manifest.versions.filter(v => v.version !== head.version) };
+          await store.put(GOLDENS, name, manifest);
+          await store.delete(GOLDEN_RECIPES, recipeKey(name, head.version));
+          previousDropped = true;
+        } catch (e) {
+          console.warn(`golden ${name} v${head.version} kept: its snapshot was not deleted (${e instanceof Error ? e.message : String(e)})`);
+        }
       }
+      return { manifest, version: sealed.version, road, previousDropped, builderKept };
     },
+
 
     async builderReach(builderId) {
       await ready();
@@ -1441,9 +1693,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // process is using dies at six hours by our createdAt label, or at once when no age can be read: every
       // get(id) on it resets the provider's rolling idle timer (measured), so the kill it was created with
       // never fires while a host is up. Own builders get their heartbeat here, so other processes leave them be.
-      const reaped: ReapedMachine[] = [];
       const failed: ReapFailure[] = [];
       const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+      const grace = await expireGrace().catch((e: unknown) => {
+        failed.push({ message: `grace sweep: ${messageOf(e)}` });
+        return { reaped: [], failed: [] };
+      });
+      const reaped: ReapedMachine[] = grace.reaped;
+      failed.push(...grace.failed);
       const now = Date.now();
       for (const b of [...builders.values()]) {
         if (b.life === "own") await hold(b);
@@ -1489,6 +1746,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       closed = true;
       beat?.();
       beat = undefined;
+      for (const cancel of graceTimers.values()) cancel();
+      graceTimers.clear();
       await ticking;
       // A clean exit frees its builders at once; a crash leaves the heartbeat to age and the pid to die.
       for (const b of [...builders.values()].filter(b => b.life === "own" && b.record.heldBy !== undefined)) {

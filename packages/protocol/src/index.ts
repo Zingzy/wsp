@@ -293,8 +293,9 @@ export type MachineKind = z.infer<typeof MachineKind>;
 export const ChecklistItem = z.object({ label: z.string(), command: z.string() });
 export type ChecklistItem = z.infer<typeof ChecklistItem>;
 
-/** What a login chosen as "sign in on the machine" came to by the time the golden sealed. */
-export const LoginState = z.enum(["signed-in", "not-signed-in", "not-verified", "skipped"]);
+/** What a login chosen as "sign in on the machine" came to by the time the golden sealed; `copied` is a login an
+ * update re-imported from this computer, its choice having moved to copy since the version it came from. */
+export const LoginState = z.enum(["signed-in", "not-signed-in", "not-verified", "skipped", "copied"]);
 export type LoginState = z.infer<typeof LoginState>;
 export const GoldenLogin = z.object({ name: z.string(), state: LoginState });
 export type GoldenLogin = z.infer<typeof GoldenLogin>;
@@ -357,6 +358,9 @@ export const GoldenBuilderView = z.object({
   heldBy: z.object({ host: z.string(), pid: z.number(), heartbeat: z.string() }).optional(),
   /** True while its stages still run in the process that holds it; left this way by a dead process, it can never seal. */
   building: z.boolean().optional(),
+  /** Set once the builder was saved as this golden version and kept running for a short window, so one more
+   * change re-snapshots it instead of forking; the sweep stops it when the window ends. */
+  sealed: z.object({ at: z.string(), version: z.number() }).optional(),
 });
 export type GoldenBuilderView = z.infer<typeof GoldenBuilderView>;
 
@@ -757,3 +761,8 @@ export const SnapshotRollbackResult = z.object({
   existingWorkspaces: z.literal("untouched"),
 });
 export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;
+
+/** The create's own answer: the workspace, and what the runtime had to do to make room for it (a builder kept
+ * after a save, stopped at the machine cap), so the person who asked reads why. Absent when nothing was stopped. */
+export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
+export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;

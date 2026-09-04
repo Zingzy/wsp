@@ -1843,16 +1843,15 @@ describe("wsp init, flags and no terminal", () => {
     await first.runtimes[0]!.golden.seal(shared.machines[0]!.id);
     await first.until("Golden v1 sealed");
 
-    // The seal killed that builder, so this run boots a fresh one; the store already holds v1.
+    // The seal kept that builder for its window; a changed recipe updates the golden on it and seals v2 there.
+    writeFileSync(join(first.opts.home, ".zshrc"), "export A=1\nexport B=2\n");
     const second = fake({ yes: true, tty: false, home: first.opts.home });
     second.opts.runtime = runtimeOver(second);
-    second.opts.host = async () => ({ port: 4400, wsPort: 4410, authToken: "tok", close: async () => {} });
     expect((await runInit(second.opts, second.io)).code).toBe(0);
-    const builder = shared.machines.filter(m => !m.killed).at(-1)!;
-    await second.runtimes[0]!.golden.seal(builder.id);
     await second.until("Sealed");
-    expect(second.text()).toContain("Golden v2 sealed");
+    expect(second.text()).toMatch(/Golden v2 sealed in \d+s on the builder kept since the save/);
     expect(second.text()).not.toContain("Golden v1 sealed");
+    expect(shared.machines.filter(m => !m.killed)).toHaveLength(1);
   });
 });
 
@@ -2007,5 +2006,274 @@ describe("pack size before the boot", () => {
     expect(out).not.toMatch(BOOT);
     expect(f.backends[0]?.machines ?? []).toHaveLength(0);
     expect(f.hosts).toBe(0);
+  });
+});
+
+describe("wsp init with a golden already built from a recipe", () => {
+  /** A first init that prepared and, as the browser would, sealed golden v1; the builder stays for its window. */
+  async function sealed(over: Partial<InitOptions> = {}) {
+    const store = memoryStore();
+    const shared = stubBackend();
+    const first = fake({ yes: true, ...over });
+    first.opts.runtime = recipe => {
+      first.backends.push(shared);
+      const rt = createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+      first.runtimes.push(rt);
+      return rt;
+    };
+    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    const builder = shared.machines[0]!;
+    await first.runtimes.at(-1)!.golden.seal(builder.id, { logins: [{ name: "GitHub CLI login", state: "signed-in" }] });
+    await first.runtimes.at(-1)!.close();
+    expect(builder.killed).toBe(false);
+    expect(await store.get("golden-recipes", "default@v1")).toBeDefined();
+    const next = (o: Partial<InitOptions> & { tty?: boolean } = {}) => {
+      const f = fake({ yes: true, home: first.opts.home, ...o });
+      f.opts.runtime = recipe => {
+        f.backends.push(shared);
+        const rt = createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+        f.runtimes.push(rt);
+        return rt;
+      };
+      return f;
+    };
+    return { store, shared, first, next };
+  }
+
+  it("--yes with a small change: the changes since v1 are listed, the update runs on the kept builder with the one sentence, v2 is current, and no machine boots", async () => {
+    const { store, shared, first, next } = await sealed();
+    writeFileSync(join(first.opts.home, ".zshrc"), "export A=1\nexport B=2\n");
+    const f = next({ tty: false });
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(0);
+    expect(f.hosts).toBe(0);
+    const out = f.text();
+    expect(out).toContain("Changes since golden v1");
+    expect(out).toContain("update 1 file: ~/.zshrc");
+    expect(out).toContain("Small change: update on the builder kept since the save, under a minute");
+    expect(out).toMatch(/about \$0\.11\/hr/);
+    expect(out).toContain("Updating the golden. Taken as the default (--yes).");
+    expect(out.match(/Updating the golden to v2: files, tools, agents and logins on it are kept and only the changes above are applied; workspaces on v1 stay there until you upgrade them\./g)).toHaveLength(1);
+    expect(out).not.toMatch(BOOT);
+    expect(out).not.toContain("A builder from an earlier wsp init is still running");
+    for (const step of ["Machine ready", "Changes applied", "Files uploaded", "Tools installed", "Agents installed", "Ready", "Snapshot taken", "Fork booted and checked", "Sealed"]) expect(out).toContain(step);
+    expect(out).toContain("your builder from v1, kept since the save");
+    expect(out).toMatch(/Golden v2 sealed in \d+s on the builder kept since the save; new workspaces fork it\./);
+    expect(out).toContain("The builder stays up (about $0.11/h, one of the account's machine slots) until wsp init updates on it again, a wsp sweep stops it ten minutes after the save, or the provider's six-hour idle kill fires.");
+    // The builder, v1's smoke fork, v2's smoke fork: nothing else booted.
+    expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_golden-v1", true], ["snap_golden-v2", true]]);
+    expect(await store.get("goldens", "default")).toMatchObject({ head: 2 });
+    // The update kept the golden's disk, so what was signed in on v1 is stamped on v2 as it was.
+    expect(((await store.get("goldens", "default")) as { versions: { logins?: unknown }[] }).versions.map(v => v.logins)).toEqual([[{ name: "GitHub CLI login", state: "signed-in" }], [{ name: "GitHub CLI login", state: "signed-in" }]]);
+    expect(await store.get("golden-recipes", "default@v2")).toBeDefined();
+    // The saved recipe is the new one, and a run on it finds nothing to update.
+    const again = next({ tty: false, manifestPath: recipePath(f.opts.statePath) });
+    expect((await runInit(again.opts, again.io)).code).toBe(0);
+    expect(again.text()).toContain("Golden v2 already matches this recipe. Nothing to update; run wsp to serve it.");
+    expect(shared.machines).toHaveLength(3);
+  });
+
+  it("when the cap refuses the smoke fork the update falls back and the line about the builder staying up is not printed", async () => {
+    const { shared, first, next } = await sealed();
+    writeFileSync(join(first.opts.home, ".zshrc"), "export A=1\nexport B=2\n");
+    const create = shared.create.bind(shared);
+    let refused = false;
+    shared.create = async spec => {
+      if (spec.fromSnapshot === "snap_golden-v2" && !refused) {
+        refused = true;
+        throw Object.assign(new Error("Too many concurrent sessions"), { kind: "concurrency" });
+      }
+      return create(spec);
+    };
+    const f = next({ tty: false });
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    const out = f.text();
+    expect(out).toMatch(/Golden v2 sealed in \d+s on the builder kept since the save; new workspaces fork it\./);
+    expect(out).not.toContain("The builder stays up");
+    expect(out).toContain("Run wsp to serve.");
+    expect(shared.machines[0]!.killed).toBe(true);
+  });
+
+  it("the seal report names the kept builder only when it was kept: a cap fallback prints no such line", async () => {
+    const store = memoryStore();
+    const shared = stubBackend();
+    const create = shared.create.bind(shared);
+    shared.create = async spec => {
+      if (spec.fromSnapshot !== undefined) throw Object.assign(new Error("Too many concurrent sessions"), { kind: "concurrency" });
+      return create(spec);
+    };
+    const f = fake({ yes: true, tty: false });
+    f.opts.runtime = recipe => {
+      f.backends.push(shared);
+      const rt = createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+      f.runtimes.push(rt);
+      return rt;
+    };
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    shared.create = async spec => {
+      if (spec.fromSnapshot !== undefined && shared.machines.filter(m => !m.killed).length >= 1) throw Object.assign(new Error("Too many concurrent sessions"), { kind: "concurrency" });
+      return create(spec);
+    };
+    await f.runtimes.at(-1)!.golden.seal(shared.machines[0]!.id);
+    await vi.waitFor(() => expect(f.text()).toContain("Golden v1 sealed"));
+    expect(f.text()).not.toContain("The builder stays up ten minutes");
+    expect(shared.machines[0]!.killed).toBe(true);
+  });
+
+  it("a reusable builder already carrying the new recipe is attached to; the update road does not run beside it", async () => {
+    const { shared, first, next } = await sealed();
+    const manifestPath = join(first.opts.home, "manifest.json");
+    writeFileSync(manifestPath, JSON.stringify({ entries: FIXTURE.entries.map(e => (e.id === "agents/codex" ? { ...e, bring: true } : e)) }));
+    const quiet = () => async () => ({ port: 4400, wsPort: 4410, authToken: "tok", close: async () => {} });
+    // A rebuild with the new recipe that was never sealed: its builder stays, first-life, carrying the new hash.
+    const rebuilt = next({ manifestPath });
+    rebuilt.opts.host = quiet();
+    expect((await runInit(rebuilt.opts, rebuilt.io)).code).toBe(0);
+    expect(shared.machines.map(m => m.killed)).toEqual([true, true, false]);
+    await rebuilt.runtimes.at(-1)!.close();
+
+    const again = next({ manifestPath, tty: false });
+    again.opts.host = quiet();
+    expect((await runInit(again.opts, again.io)).code).toBe(0);
+    const out = again.text();
+    expect(out).toContain("Attaching to your earlier builder: default (m3)");
+    expect(out).not.toContain("Changes since golden v1");
+    expect(out).not.toMatch(BOOT);
+    expect(shared.machines).toHaveLength(3);
+    expect(shared.machines[2]!.killed).toBe(false);
+  });
+
+  it("a failed update on the kept builder says that builder is gone and what a retry costs", async () => {
+    const { shared, first, next } = await sealed();
+    writeFileSync(join(first.opts.home, ".zshrc"), "export A=1\nexport B=2\n");
+    shared.execImpl = (m, cmd) => (cmd.startsWith("df -Pk") ? { exitCode: 0, stdout: "1\n", stderr: "" } : guestAnswer(cmd));
+    const f = next({ tty: false });
+    expect((await runInit(f.opts, f.io)).code).toBe(1);
+    const out = f.text();
+    expect(out).toContain("Golden v1 is unchanged and the builder kept since the save is gone. Run wsp init again to retry on a fork of the golden (about two minutes), or pick the rebuild.");
+    expect(shared.machines[0]!.killed).toBe(true);
+  });
+
+  it("an unchanged recipe says the golden already matches and boots nothing", async () => {
+    const { shared, next } = await sealed();
+    const f = next();
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    expect(f.text()).toContain("Golden v1 already matches this recipe. Nothing to update; run wsp to serve it.");
+    expect(f.text()).not.toContain("Changes since");
+    expect(f.hosts).toBe(0);
+    expect(shared.machines).toHaveLength(2);
+  });
+
+  it("--yes with a big change (an agent added) takes the rebuild: the boot question follows, the kept builder is no blocker, and a fresh builder boots beside it", async () => {
+    const { shared, first, next } = await sealed();
+    const manifestPath = join(first.opts.home, "manifest.json");
+    writeFileSync(manifestPath, JSON.stringify({ entries: FIXTURE.entries.map(e => (e.id === "agents/codex" ? { ...e, bring: true } : e)) }));
+    const f = next({ manifestPath });
+    // The fresh builder is the third machine, not the first the fake's default host expects.
+    const hosted: string[] = [];
+    f.opts.host = async (rt, builder) => {
+      hosted.push(builder.id);
+      void rt;
+      return { port: 4400, wsPort: 4410, authToken: "tok", close: async () => {} };
+    };
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    const out = f.text();
+    expect(out).toContain("add 1 agent: Codex");
+    expect(out).toContain("A big change: a rebuild from scratch is the safer road, about ten minutes.");
+    expect(out).toContain("Rebuilding from scratch. Taken as the default (--yes).");
+    // The kept builder holds a slot the rebuild needs; it goes after the confirm and before the boot, said once.
+    expect(out).toContain("Stopping the builder kept from golden v1 (m1) to free its machine slot.");
+    expect(out.indexOf("Stopping the builder kept")).toBeGreaterThan(out.indexOf("Boot a "));
+    expect(out.indexOf("Stopping the builder kept")).toBeLessThan(out.indexOf("Creating the machine"));
+    expect(out).toMatch(BOOT);
+    expect(out).not.toContain("A builder from an earlier wsp init is still running");
+    expect(out).not.toContain("Nothing was booted");
+    expect(hosted).toEqual(["m3"]);
+    expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_golden-v1", true], [undefined, false]]);
+  });
+
+  it("interactive: the offer is a choice with the update first when the change is small; enter takes it", async () => {
+    const { shared, first, next } = await sealed();
+    writeFileSync(join(first.opts.home, ".zshrc"), "export A=1\nexport B=2\n");
+    const f = next({ yes: false, tty: true });
+    const run = runInit(f.opts, f.io);
+    for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
+      await f.until(rung);
+      await f.press(KEY.enter);
+    }
+    await f.until("How do you want to apply them?");
+    const asked = f.text();
+    expect(asked).toContain("Update the golden (under a minute, about $0.11/hr while it runs)");
+    expect(asked).toContain("Rebuild from scratch (about ten minutes)");
+    expect(asked.indexOf("Update the golden")).toBeLessThan(asked.indexOf("Rebuild from scratch"));
+    await f.press(KEY.enter);
+    expect((await run).code).toBe(0);
+    expect(f.text()).toMatch(/Golden v2 sealed in \d+s on the builder kept since the save/);
+    expect(f.text()).not.toMatch(BOOT);
+    expect(shared.machines).toHaveLength(3);
+  });
+
+  it("a kept builder another process holds does not count as the update's machine: the offer names the fork road and its two minutes", async () => {
+    const { store, first, next } = await sealed();
+    writeFileSync(join(first.opts.home, ".zshrc"), "export A=1\nexport B=2\n");
+    const record = (await store.get("builders", "m1")) as { heldBy: { host: string; pid: number; heartbeat: string } };
+    await store.put("builders", "m1", { ...record, heldBy: { ...record.heldBy, pid: process.ppid } });
+    const f = next({ tty: false });
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    const out = f.text();
+    expect(out).toContain("Small change: update on a fork of the golden, about two minutes");
+    expect(out).toMatch(/Golden v2 sealed in \d+s from a fork of the golden/);
+  });
+
+  it("a login flipped to sign in on the machine is not done by an update: the offer says it would not be in the golden and the rebuild is the default", async () => {
+    const { shared, first, next } = await sealed();
+    const manifestPath = join(first.opts.home, "manifest.json");
+    writeFileSync(manifestPath, JSON.stringify({ entries: FIXTURE.entries.map(e => (e.id === "logins/gh" ? { ...e, bring: true, choice: "machine" } : e)) }));
+    const f = next({ manifestPath });
+    const hosted: string[] = [];
+    f.opts.host = async (rt, builder) => {
+      hosted.push(builder.id);
+      void rt;
+      return { port: 4400, wsPort: 4410, authToken: "tok", close: async () => {} };
+    };
+    const flipped = await runInit(f.opts, f.io);
+    expect(flipped.code).toBe(0);
+    const out = f.text();
+    expect(out).toContain("GitHub CLI login: sign in on the machine is not done by an update");
+    // The rebuild road ran the sign-in stage for the flipped login (skipped under --yes, but asked).
+    expect(flipped.logins?.map(l => [l.id, l.state])).toContainEqual(["logins/gh", "skipped"]);
+    expect(out).toContain("Rebuilding from scratch. Taken as the default (--yes).");
+    expect(hosted).toEqual(["m3"]);
+    expect(shared.machines[0]!.killed).toBe(true);
+  });
+
+  it("interactive: down then enter picks the rebuild, and the boot question follows", async () => {
+    const { shared, first, next } = await sealed();
+    writeFileSync(join(first.opts.home, ".zshrc"), "export A=1\nexport B=2\n");
+    const f = next({ yes: false, tty: true });
+    const run = runInit(f.opts, f.io);
+    for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
+      await f.until(rung);
+      await f.press(KEY.enter);
+    }
+    await f.until("How do you want to apply them?");
+    await f.press(KEY.down, KEY.enter);
+    await f.until(BOOT);
+    await f.press(KEY.esc);
+    expect((await run).code).toBe(1);
+    expect(f.text()).toContain("Nothing was booted. The recipe is kept.");
+    // No costs nothing: the kept builder is as it was.
+    expect(f.text()).not.toContain("Stopping the builder kept");
+    expect(shared.machines[0]!.killed).toBe(false);
+  });
+
+  it("a kept builder that is no longer first-life is not the update's machine", async () => {
+    const { store, first, next } = await sealed();
+    writeFileSync(join(first.opts.home, ".zshrc"), "export A=1\nexport B=2\n");
+    const record = (await store.get("builders", "m1")) as { firstLife: boolean };
+    await store.put("builders", "m1", { ...record, firstLife: false });
+    const f = next({ tty: false });
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    expect(f.text()).toContain("Small change: update on a fork of the golden, about two minutes");
   });
 });

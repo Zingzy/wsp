@@ -38,6 +38,7 @@ import {
   secretLinesFor,
 } from "./init-recipe.js";
 import { CARD_FRAME, GUTTER, card, colourDepth, confirmPrompt, ellipsize, fmtDuration, helpLine, table, widthOf, wrap } from "./init-layout.js";
+import { stopKeptBuilder, updateRoad } from "./init-upgrade.js";
 import { readKey, rungSelect, type SelectItem } from "./init-select.js";
 import { OPEN_LINE, builderLink, machineLogins, noteLogins, openLogins, signInStage, type BuilderLink, type LoginOutcome, type SignInFlow } from "./init-signin.js";
 import type { HostHandle } from "./server.js";
@@ -732,8 +733,9 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   // live process holds or another setup owns is never touched from here.
   const earlierBuilder = async (): Promise<Earlier | "blocked"> => {
     const earlier = await rt.golden.builders();
-    const attach = earlier.find(b => b.name === GOLDEN_NAME && b.firstLife === true && b.foreignOwner === undefined && b.heldBy === undefined && b.building !== true && b.recipeHash === imp.recipeHash);
-    const blocking = earlier.filter(b => b !== attach);
+    // A builder kept since a save is the golden's own machine: the update's, never an attach target or a blocker.
+    const attach = earlier.find(b => b.name === GOLDEN_NAME && b.firstLife === true && b.foreignOwner === undefined && b.heldBy === undefined && b.building !== true && b.sealed === undefined && b.recipeHash === imp.recipeHash);
+    const blocking = earlier.filter(b => b !== attach && b.sealed === undefined);
     const pids = blocking.flatMap(b => (b.heldBy !== undefined ? [b.heldBy.pid] : []));
     if (pids.length > 0 || blocking.some(b => b.foreignOwner !== undefined)) {
       listEarlier(blocking, attach);
@@ -778,6 +780,13 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   }
   const question = bootQuestion(recipe, opts.pricing);
   const { attach, stop } = earlier;
+  // A golden built from a recipe takes the delta instead of a rebuild, unless the person picks the rebuild; a
+  // builder already carrying this recipe is attached to instead, since the update would bill beside it.
+  const current = attach === undefined ? await rt.golden.recipe(GOLDEN_NAME) : undefined;
+  if (current !== undefined) {
+    const road = await updateRoad({ rt, current, imp, bring, rows: manifest.entries, importOf, interactive, yes: opts.yes, input: io.input, output: io.output, stream: (words, run) => streamStages(rt, io, words, run) });
+    if (road !== "rebuild") return { code: road };
+  }
   if (stop.length > 0) {
     listEarlier(stop, attach);
     const then = attach !== undefined ? `attach to your earlier builder ${describeBuilder(attach)}?` : `${question.charAt(0).toLowerCase()}${question.slice(1)}`;
@@ -813,6 +822,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   } else if (stop.length === 0) {
     log.step(`${question} Taken as yes (${opts.yes ? "--yes" : "no terminal"}).`, out);
   }
+  if (attach === undefined) await stopKeptBuilder(rt, io.output);
 
   const stream = new StageStream(io.output, io.isTTY);
   const off = rt.events.on("golden.stage", e => {
@@ -887,12 +897,27 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const url = `http://127.0.0.1:${handle.port}/`;
   await handoff(url, handle, io, interactive, checklist.length > 0, out);
   outro("This terminal reports the save.", out);
-  reportSeal(rt, io);
+  reportSeal(rt, io, opts.pricing.rateUsdPerHour(builder.size));
   return { code: 0, handle, ...(outcomes !== undefined ? { logins: outcomes } : {}) };
 }
 
+/** One stage stream around one runtime call; the frames it draws are the golden's, whatever the call. */
+async function streamStages(rt: Runtime, io: InitIO, words: readonly StageWords[], run: () => Promise<unknown>): Promise<StageView> {
+  const stream = new StageStream(io.output, io.isTTY, words);
+  const off = rt.events.on("golden.stage", e => {
+    if (e.type === "golden.stage") stream.push({ type: "golden.stage", name: e.name, stage: e.stage, ...(e.detail !== undefined ? { detail: e.detail } : {}) });
+  });
+  stream.start();
+  try {
+    await run();
+  } finally {
+    off();
+  }
+  return stream.stop();
+}
+
 /** After the hand-off the browser drives the seal; the terminal shows it as it happens. */
-function reportSeal(rt: Runtime, io: InitIO): void {
+function reportSeal(rt: Runtime, io: InitIO, rateUsdPerHour: number): void {
   let stream: StageStream | undefined;
   const off = rt.events.on("golden.stage", e => {
     if (e.type !== "golden.stage" || e.name !== GOLDEN_NAME) return;
@@ -908,9 +933,18 @@ function reportSeal(rt: Runtime, io: InitIO): void {
     if (stream.failed) {
       log.error("Seal failed and the builder is gone. Run wsp init again; the recipe is kept.", out);
     } else {
-      // The sealed frame's detail is the version, with a leak note after a semicolon when there was one.
-      const version = view.steps.find(s => s.stage === "sealed")?.tail.at(-1)?.split(";")[0]?.trim();
-      log.success(`Golden${version !== undefined && version !== "" ? ` ${version}` : ""} sealed. The app forks your first workspace; wsp keeps serving it here.`, out);
+      // The sealed frame's detail is the version, then a note after each semicolon: a leak, or that the builder is
+      // kept; under the account cap the seal kills it first and says nothing about keeping it.
+      const tail = view.steps.find(s => s.stage === "sealed")?.tail.at(-1);
+      const version = tail?.split(";")[0]?.trim();
+      const kept = tail?.includes("builder kept") === true;
+      log.success(
+        [
+          `Golden${version !== undefined && version !== "" ? ` ${version}` : ""} sealed. The app forks your first workspace; wsp keeps serving it here.`,
+          ...(kept ? [dim(`The builder stays up ten minutes (about $${rateUsdPerHour.toFixed(2)}/h, one of the account's machine slots) for one more change: stop wsp, run wsp init, and the golden updates on it.`)] : []),
+        ].join("\n"),
+        out,
+      );
     }
   });
 }

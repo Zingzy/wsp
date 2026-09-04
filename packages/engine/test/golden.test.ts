@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { BUILDER_IDLE_MS, MachineAliveError, applyGoldenImport, buildGolden, forkGolden, prepareBuilder, rollback, sealGolden, type GoldenImport, type GoldenStage, type ImportResult, type PackedFiles } from "../src/golden.js";
+import { BUILDER_IDLE_MS, MachineAliveError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextSetupSha, nextSmoke, prepareBuilder, rollback, sealGolden, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
+import type { RecipeDigest } from "@wsp/protocol";
 import { NotFirstLifeError } from "../src/lifecycle.js";
 import { HOMEBREW, type ToolInstall } from "../src/golden-import.js";
 import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec } from "../src/machine.js";
@@ -725,5 +726,148 @@ describe("golden import stages", () => {
     expect(stages).toEqual(["creating:sandbox from base", "installing-harness", "ready"]);
     expect(builder.import).toBeUndefined();
     expect(builder.setupSha).toBe(createHash("sha256").update("echo setup").digest("hex"));
+  });
+
+  describe("golden update", () => {
+    const SNAPSHOT: RecipeDigest = { ticks: [], files: [] };
+    const head: GoldenVersion = { version: 1, snapshotId: "snap_golden-v1", baseTemplate: "base", kind: "desktop", setupSha: "s1", createdAt: "2026-09-01T00:00:00.000Z", smoke: { cmd: "claude --version && gemini --version", exitCode: 0 }, size: { cpu: 2, memMb: 8192 } };
+    const deltaOf = (over: Partial<GoldenDelta> = {}): GoldenDelta => ({
+      import: importOf({ recipeHash: "h2", recipe: SNAPSHOT, tools: [{ id: "tools/brew/jq", label: "jq", manager: "brew", cmd: "brew install jq" }], agents: [{ id: "agents/codex", name: "Codex", install: "codex-install", smoke: "codex --version" }] }),
+      removals: [
+        { what: "file", id: "shell/zshrc", label: "~/.zshrc", cmd: "rm -rf -- '/root/.zshrc'" },
+        { what: "tool", id: "tools/npm/bun", label: "bun", cmd: "npm uninstall -g bun" },
+        { what: "agent", id: "agents/gemini", label: "Gemini CLI", cmd: "npm uninstall -g @google/gemini-cli", smoke: "gemini --version" },
+        { what: "agent", id: "agents/claude", label: "Claude Code", note: "Claude Code has no uninstaller; left on the machine", smoke: "claude --version" },
+      ],
+      ...over,
+    });
+
+    it("a seal that keeps the builder snapshots it, boots and kills the fork, and leaves the builder running", async () => {
+      const { backend, killed, timeline, fetch } = backendFor();
+      const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf({ recipe: SNAPSHOT }) });
+      const { stages, onStage } = stageRecorder();
+      const result = await sealGolden(builder, { backend, smoke: "unused", keepBuilder: true, onStage });
+      expect(result.builderKept).toBe(true);
+      expect(result.version.version).toBe(1);
+      expect(killed).toEqual(["m2"]);
+      expect(timeline).toEqual(["create m1", "snapshot m1", "create m2", "kill m2"]);
+      expect(stages.at(-1)).toBe("sealed:v1; builder kept for one more change");
+      expect(builder.import?.recipe).toEqual(SNAPSHOT);
+    });
+
+    it("a seal without the option consumes the builder as before, and says nothing about keeping it", async () => {
+      const { backend, killed } = recordingBackend();
+      const builder = await prepareBuilder({ backend, setup: "true" });
+      const { stages, onStage } = stageRecorder();
+      const result = await sealGolden(builder, { backend, smoke: "true", onStage });
+      expect(result.builderKept).toBe(false);
+      expect(killed).toEqual(["m1", "m2"]);
+      expect(stages.at(-1)).toBe("sealed:v1");
+    });
+
+    it("when the account cap refuses the fork beside a kept builder, the builder is killed first and the fork tried again", async () => {
+      const { backend, killed, timeline } = recordingBackend();
+      let refused = false;
+      const capped = {
+        ...backend,
+        create: async (spec: Parameters<typeof backend.create>[0]) => {
+          if (spec.fromSnapshot !== undefined && !refused) {
+            refused = true;
+            throw Object.assign(new Error("Too many concurrent sessions"), { kind: "concurrency" });
+          }
+          return backend.create(spec);
+        },
+      };
+      const builder = await prepareBuilder({ backend: capped, setup: "true" });
+      const { stages, onStage } = stageRecorder();
+      const result = await sealGolden(builder, { backend: capped, smoke: "true", keepBuilder: true, onStage });
+      expect(result.builderKept).toBe(false);
+      expect(killed).toEqual(["m1", "m2"]);
+      expect(timeline).toEqual(["create m1", "snapshot m1", "kill m1", "create m2", "kill m2"]);
+      expect(stages).toContain("smoke-forking:true; the account is at its machine cap, so the builder is not kept");
+      expect(stages.at(-1)).toBe("sealed:v1");
+    });
+
+    it("a smoke that fails on a kept builder still kills the builder and drops the snapshot", async () => {
+      const { backend, killed, deletedSnapshots } = recordingBackend({ "boom --version": { exitCode: 127, stdout: "", stderr: "not found" } });
+      const builder = await prepareBuilder({ backend, setup: "true" });
+      await expect(sealGolden(builder, { backend, smoke: "boom --version", keepBuilder: true })).rejects.toThrow(/smoke/);
+      expect(killed).toEqual(["m1", "m2"]);
+      expect(deletedSnapshots).toEqual(["snap_golden-v1"]);
+    });
+
+    it("applyDelta takes the removals off first, one guarded command each with failures and notes in the detail, then runs the delta's stages and folds the smoke", async () => {
+      const { backend, cmds, fetch } = backendFor([["npm uninstall -g bun", { exitCode: 1, stdout: "", stderr: "npm ERR! not installed" }]]);
+      const machine = await backend.create({ kind: "sandbox", template: "base" });
+      const { stages, onStage } = stageRecorder();
+      const { ledger } = await applyDelta(machine, deltaOf(), { setup: "true", previousSmoke: head.smoke.cmd, fetch, onStage });
+      expect(stages.slice(0, 2)).toEqual([
+        "applying-setup:removing 4 items",
+        "applying-setup:removed ~/.zshrc, Gemini CLI; bun not removed (npm ERR! not installed); Claude Code: Claude Code has no uninstaller; left on the machine",
+      ]);
+      expect(stages.slice(2)).toEqual([
+        "applying-setup:3 files: identity 1, shell 2",
+        "applying-setup:1.2 KB packed; skipped ~/.bashrc (no longer on this computer)",
+        "uploading-files:1.2 KB",
+        expect.stringMatching(/^uploading-files:1\.2 KB in /),
+        "installing-tools:jq (1/1)",
+        "installing-tools:1 installed",
+        "installing-harness",
+        "installing-harness:Codex (1/1)",
+        "installing-harness:Codex installed",
+      ]);
+      const removals = cmds.slice(0, 3);
+      expect(removals.every(c => c.startsWith("timeout -k 10 600 bash -c '"))).toBe(true);
+      expect(removals[0]).toContain("rm -rf -- '\\''/root/.zshrc'\\''");
+      expect(removals[2]).toContain("npm uninstall -g @google/gemini-cli");
+      expect(cmds.indexOf(FREE_KB_CMD)).toBeGreaterThan(2);
+      // Claude Code was removed from the recipe even though nothing could uninstall it, so its check leaves the smoke.
+      expect(ledger).toEqual({ recipeHash: "h2", applied: ["applying-setup", "uploading-files", "installing-tools", "installing-harness"], smoke: "codex --version", recipe: SNAPSHOT });
+    });
+
+    it("a delta with nothing to remove goes straight to the stages", async () => {
+      const { backend, cmds, fetch } = backendFor();
+      const machine = await backend.create({ kind: "sandbox", template: "base" });
+      const { stages, onStage } = stageRecorder();
+      await applyDelta(machine, deltaOf({ removals: [] }), { setup: "true", previousSmoke: "true", fetch, onStage });
+      expect(stages[0]).toBe("applying-setup:3 files: identity 1, shell 2");
+      expect(cmds[0]).toBe(FREE_KB_CMD);
+    });
+
+    it.each([
+      ["true", [], "true", "true"],
+      ["a --version && b --version", ["b --version"], "true", "a --version"],
+      ["a --version", [], "a --version && c --version", "a --version && c --version"],
+      ["true", [], "x --version", "x --version"],
+      ["a --version", ["a --version"], "true", "true"],
+    ])("nextSmoke(%j, %j, %j) is %j", (previous, removed, added, want) => {
+      expect(nextSmoke(previous, removed, added)).toBe(want);
+    });
+
+    it("upgradeBuilder forks the head at its kind and size as a builder, applies only the delta, and returns a first-life builder with the new ledger", async () => {
+      const { backend, created, cmds, fetch } = backendFor();
+      const { stages, onStage } = stageRecorder();
+      const labels = { wsp: "1", "wsp-builder": "1", "wsp-owner": "h_me", createdAt: "2026-09-04T00:00:00.000Z" };
+      const builder = await upgradeBuilder({ backend, head, delta: deltaOf({ removals: [] }), setup: "true", fetch, onStage, labels });
+      expect(created[0]).toMatchObject({ kind: "desktop", fromSnapshot: "snap_golden-v1", cpu: 2, memMb: 8192, onIdle: "kill", idleTimeoutMs: BUILDER_IDLE_MS, labels });
+      expect(created[0]!.template).toBeUndefined();
+      expect(stages[0]).toBe("creating:fork of golden v1");
+      expect(stages.at(-1)).toBe("ready");
+      expect(cmds.filter(c => c.includes("brew install jq"))).toHaveLength(1);
+      expect(cmds.some(c => c.includes("brew-bootstrap"))).toBe(false);
+      expect(builder).toMatchObject({ kind: "desktop", baseTemplate: "base", firstLife: true, size: { cpu: 2, memMb: 8192 } });
+      expect(builder.import).toEqual({ recipeHash: "h2", applied: ["applying-setup", "uploading-files", "installing-tools", "installing-harness"], smoke: "claude --version && gemini --version && codex --version", recipe: SNAPSHOT });
+      // The version's sha chains the previous version's with what this delta ran, so v(n+1)'s sha says both.
+      expect(builder.setupSha).toBe(nextSetupSha("s1", "true", deltaOf({ removals: [] }).import));
+      expect(builder.setupSha).toBe(createHash("sha256").update(`s1\n${createHash("sha256").update("true\ncodex-install").digest("hex")}`).digest("hex"));
+    });
+
+    it("an upgrade whose delta fails kills the fork and reports the failure", async () => {
+      const { backend, killed, fetch } = backendFor([], mb(1));
+      const { stages, onStage } = stageRecorder();
+      await expect(upgradeBuilder({ backend, head, delta: deltaOf(), setup: "true", fetch, onStage })).rejects.toThrow(/your files need/);
+      expect(killed).toEqual(["m1"]);
+      expect(stages.at(-1)).toMatch(/^failed:your files need/);
+    });
   });
 });

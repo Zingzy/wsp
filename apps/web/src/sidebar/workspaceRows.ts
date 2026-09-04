@@ -119,7 +119,7 @@ export function explainCreateRefusal(error: unknown): CreateRefusal {
   if (error instanceof RequestError && error.kind === "concurrency") {
     return {
       title: "The provider refused: machine cap reached",
-      detail: `Your machine provider runs a fixed number of machines at once and every slot is taken. Pause or delete a workspace to free one, then try again. (${message})`,
+      detail: `Your machine provider runs a fixed number of machines at once and every slot is taken. A builder kept after a save and not in use is stopped first to make room; pause or delete a workspace to free one, then try again. (${message})`,
     };
   }
   if (error instanceof DisconnectedError) {

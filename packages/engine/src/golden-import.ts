@@ -323,6 +323,7 @@ export interface Brewfile {
 export const HOMEBREW = { tag: "6.0.21", commit: "560147012b9678b42ef5e83b690f0895552d1366" } as const;
 const BREW_PREFIX = "/home/linuxbrew/.linuxbrew";
 const PNPM_HOME = "/root/.local/share/pnpm";
+const GO_BIN = "/root/go/bin";
 
 /** Where the guest finds what the tools stage installs; each install line exports it so
  * it does not depend on the machine's own environment, and login shells get it from profile.d. */
@@ -426,6 +427,33 @@ function managerCommand(e: RecipeEntry, manager: ToolManager): { cmd: string } |
     }
     case "brew":
       return { cmd: asLinuxbrew(`install ${pkg}`) };
+  }
+}
+
+/** How a removed tool comes off the machine; Go has no uninstall, so its binary is noted and left. */
+export function toolUninstall(e: RecipeEntry): { cmd: string } | { note: string } {
+  const withPath = (cmd: string): string => `${PATH_LINE}\n${cmd}`;
+  if (e.id.startsWith("tools/brew-tap/")) return { cmd: withPath(asLinuxbrew(`untap ${e.id.slice("tools/brew-tap/".length)}`)) };
+  if (e.id.startsWith("tools/brew-cask/") || e.id.startsWith("tools/mas/")) return { note: "never installed on Linux" };
+  const manager = (["brew", ...MANAGER_ORDER] as const).find(m => e.id.startsWith(`tools/${m}/`));
+  if (manager === undefined) return { note: "no manager known for this row" };
+  const pkg = e.id.slice(`tools/${manager}/`.length);
+  switch (manager) {
+    case "brew":
+      return { cmd: withPath(asLinuxbrew(`uninstall ${pkg}`)) };
+    case "npm":
+      return { cmd: withPath(`npm uninstall -g ${pkg}`) };
+    case "pnpm":
+    case "bun":
+      return { cmd: withPath(`${manager} remove -g ${pkg}`) };
+    case "uv":
+      return { cmd: withPath(`uv tool uninstall ${pkg}`) };
+    case "pipx":
+      return { cmd: withPath(`pipx uninstall ${pkg}`) };
+    case "cargo":
+      return { cmd: withPath(`cargo uninstall ${pkg}`) };
+    case "go":
+      return { note: `go has no uninstall; the binary stays in ${GO_BIN}` };
   }
 }
 
@@ -631,6 +659,18 @@ export const AGENT_INSTALLERS: Record<string, AgentInstaller> = {
     smoke: "hermes --version",
   },
 };
+
+/** The inverse of an installer, read off its install line: an npm global is
+ * uninstalled, a uv tool uninstalled, Hermes's checkout and venv removed;
+ * anything else (Claude Code's own installer) has no inverse and is noted. */
+export function agentUninstall(installer: AgentInstaller): { cmd: string } | { note: string } {
+  const npm = /npm install -g (?:--ignore-scripts )?(\S+?)@\S+/.exec(installer.install);
+  if (npm !== null) return { cmd: `${NODE_PATH_LINE}\nnpm uninstall -g ${npm[1]}` };
+  const uv = /uv tool install .*?([\w.-]+)==[\w.-]+\s*$/m.exec(installer.install);
+  if (uv !== null) return { cmd: `uv tool uninstall ${uv[1]}` };
+  if (installer.install.includes("/root/.hermes/")) return { cmd: "rm -rf /root/.hermes/venvs/hermes /root/.hermes/hermes-agent /usr/local/bin/hermes" };
+  return { note: `${installer.name} has no uninstaller; left on the machine` };
+}
 
 /** The one Node step a golden gets when a ticked agent's engines floor may be
  * above the base image's: the lowest pinned major that satisfies every ticked agent. */
