@@ -484,12 +484,12 @@ describe("chat tab threads", () => {
     history[WS] = [...FIRST, ...again.slice(0, 2)];
     act(() => useStore.getState().noteGap());
     await waitFor(() => expect(status()).toContain("Finishing the previous turn"));
-    expect(isEditable(composerEditor())).toBe(false);
+    await waitFor(() => expect(isEditable(composerEditor())).toBe(false));
     expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
     expect(screen.queryByText("still the old thread.")).toBeNull();
     expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();
     for (const e of again.slice(2)) emit(e);
-    expect(isEditable(composerEditor())).toBe(true);
+    await waitFor(() => expect(isEditable(composerEditor())).toBe(true));
     expect(status()).toBeNull();
     expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
     await typeInto(composerEditor(), "start over");
