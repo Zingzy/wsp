@@ -37,7 +37,7 @@ Review wsp changes against the laws this project has already paid for. Generic c
 - TDD for logic (test exists and failed first, or the report says why not); components need render + interaction tests minimum.
 - apps/web tests run under jsdom via the root vitest.workspace.ts: don't add per-file environment hacks.
 - No cloud in unit tests: fake backends/stores/daemons in-process. The tcp-proxy harness exists for reconnect tests: reuse it.
-- `pnpm test` green without creds AND `tsc --noEmit` clean are merge gates. New source files carry `// SPDX-License-Identifier: AGPL-3.0-only`.
+- `pnpm test` green without creds AND `tsc --noEmit` clean are merge gates. When several gates share the machine and a known timing flake trips, do not re-run the full suite in a loop: one full run with every failing file named, each failing file rerun alone and green, and a note that none of them is in the diff is the evidence; the coordinator's merge gate on an idle machine is the final word. New source files carry `// SPDX-License-Identifier: AGPL-3.0-only`.
 
 ## Design laws (web)
 
