@@ -122,6 +122,12 @@ export interface Builder {
 
 // --- golden import: the person's files, tools and agents on the builder ------
 
+/** An rc file the pack shipped without its secret exports: where it lands under the guest home and the names it lost. */
+export interface CutNames {
+  path: string;
+  names: string[];
+}
+
 export interface PackedFiles {
   tar: Buffer;
   /** The archive's size, what the upload moves. */
@@ -129,6 +135,8 @@ export interface PackedFiles {
   /** What the archive holds once extracted, what the guest disk has to take on top. */
   unpacked: number;
   skipped: SkippedPath[];
+  /** The rc files stripped at pack time, so the checklist names what to set from what actually left. */
+  cut: CutNames[];
 }
 
 export interface GoldenImport {
@@ -181,7 +189,7 @@ export interface AgentResult {
 
 export interface ImportResult {
   recipeHash: string;
-  files?: { bytes: number; skipped: SkippedPath[] };
+  files?: { bytes: number; skipped: SkippedPath[]; cut?: CutNames[] };
   /** The Homebrew checkout the formulae installed under, when the tools stage put one on the machine. */
   homebrew?: { tag: string; commit: string };
   tools: ToolResult[];
@@ -266,6 +274,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
       const notes = (imp.files?.skipped ?? []).map(s => `${s.path} (${s.note})`);
       stage("applying-setup", notes.length > 0 ? `nothing left to pack; skipped ${notes.join(", ")}` : "nothing ticked");
       stage("uploading-files", "nothing to upload");
+      // No pack ran, so nothing is known about cuts; a reader falls back to the recipe's own names.
       result.files = { bytes: 0, skipped: imp.files?.skipped ?? [] };
       mark("applying-setup");
       mark("uploading-files");
@@ -290,7 +299,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
       const t0 = Date.now();
       await importInto(machine, packed.tar, "/root", { overlay: true, timeoutMs: 300_000, ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}) });
       stage("uploading-files", `${fmtBytes(packed.bytes)} in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
-      result.files = { bytes: packed.bytes, skipped: packed.skipped };
+      result.files = { bytes: packed.bytes, skipped: packed.skipped, cut: packed.cut };
       mark("uploading-files");
     }
 

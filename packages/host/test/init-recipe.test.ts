@@ -8,7 +8,10 @@ import type { GoldenImport } from "@wsp/runtime";
 import {
   checklistFor,
   goldenRecipeFor,
+  hasChoices,
   initialChoice,
+  lockRefused,
+  refusedNote,
   initialTicks,
   isTickable,
   loadManifest,
@@ -55,8 +58,112 @@ describe("login choices", () => {
 
   it("the checklist is exactly the logins chosen as sign in on the machine", () => {
     const choices = new Map([["logins/gh", "machine"], ["logins/claude", "skip"]] as const);
-    expect(checklistFor(FIXTURE, choices)).toEqual([{ label: "GitHub CLI login", command: "gh auth login" }]);
-    expect(checklistFor(FIXTURE, new Map([["logins/claude", "machine"]]))).toEqual([{ label: "Claude Code login", command: "claude, then /login" }]);
+    expect(checklistFor(FIXTURE, choices, new Set())).toEqual([{ label: "GitHub CLI login", command: "gh auth login" }]);
+    expect(checklistFor(FIXTURE, new Map([["logins/claude", "machine"]]), new Set())).toEqual([{ label: "Claude Code login", command: "claude, then /login" }]);
+  });
+});
+
+describe("rows the plan refuses by name", () => {
+  const env: ManifestEntry = { rung: "everything", id: "everything/.env", label: ".env", paths: ["~/.env"], bytes: 20, default: "skip", role: "unknown", files: 1, mtime: 1 };
+  const netrc: ManifestEntry = { rung: "everything", id: "everything/.netrc", label: ".netrc", paths: ["~/.netrc"], bytes: 30, default: "skip", consent: true, role: "credential", files: 1, mtime: 1 };
+
+  const file = () => false;
+  const dir = () => true;
+  const missing = () => undefined;
+
+  it("an unconsented .env or .netrc file gets the plan's note; a directory of that name, a consent row and a login's own .env do not", () => {
+    expect(refusedNote(env, file)).toBe(".env files are never copied; set the values on the machine");
+    expect(refusedNote(env, dir)).toBeUndefined();
+    expect(refusedNote(env, missing)).toBeUndefined();
+    expect(refusedNote(netrc, file)).toBeUndefined();
+    expect(refusedNote({ ...env, rung: "logins", id: "logins/hermes", paths: ["~/.hermes/.env"] }, file)).toBeUndefined();
+    expect(refusedNote({ ...env, paths: ["~/.env", "~/.app/config"] }, file)).toBeUndefined();
+    expect(refusedNote(byId("tools/brew/gh"), file)).toBeUndefined();
+    expect(refusedNote(byId("identity/ssh-key"), file)).toBe("private key, never copied");
+  });
+
+  it("lockRefused writes the plan's note onto the rows it would refuse whole and leaves every other row as it was", () => {
+    const manifest = { entries: [env, netrc, byId("shell/zshrc")] };
+    const locked = lockRefused(manifest, rel => (rel === ".env" ? false : undefined));
+    expect(locked.entries[0]).toEqual({ ...env, default: "skip", reason: ".env files are never copied; set the values on the machine" });
+    expect(isTickable(locked.entries[0]!)).toBe(false);
+    expect(initialTicks({ ...locked.entries[0]!, bring: true })).toBe(false);
+    expect(locked.entries.slice(1)).toEqual([netrc, byId("shell/zshrc")]);
+    // A directory named .env is a Python environment more often than a secret: it stays a plain row.
+    expect(lockRefused(manifest, dir).entries).toEqual(manifest.entries);
+    expect(isTickable(env)).toBe(true);
+  });
+});
+
+describe("consent rows", () => {
+  const token: ManifestEntry = { rung: "everything", id: "everything/.demo-token", label: ".demo-token", paths: ["~/.demo-token"], bytes: 40, default: "skip", consent: true, role: "credential", files: 1, mtime: 1 };
+  const plain: ManifestEntry = { rung: "everything", id: "everything/.config/demo", label: "demo", paths: ["~/.config/demo"], bytes: 300, default: "skip", role: "config", files: 2, mtime: 1 };
+
+  it("a login or a credential-shaped row is answered, not ticked; its answer starts at skip, a saved tick alone is not consent, and a saved choice wins", () => {
+    expect(hasChoices(token)).toBe(true);
+    expect(hasChoices(plain)).toBe(false);
+    expect(hasChoices(byId("logins/gh"))).toBe(true);
+    expect(initialChoice(token)).toBe("skip");
+    expect(initialChoice({ ...token, bring: true })).toBe("skip");
+    expect(initialChoice({ ...token, bring: true, choice: "copy" })).toBe("copy");
+    // An answer a consent row never offered (saved as sign in by an older recipe) reads as skip.
+    expect(initialChoice({ ...token, bring: true, choice: "machine" })).toBe("skip");
+    expect(initialTicks(plain)).toBe(false);
+    expect(initialTicks({ ...plain, bring: true })).toBe(true);
+  });
+
+  it("a credential-shaped row never joins the sign-in checklist, whatever its answer", () => {
+    const manifest = { entries: [...FIXTURE.entries, token] };
+    expect(checklistFor(manifest, new Map([["everything/.demo-token", "machine"]]), new Set())).toEqual([]);
+    expect(checklistFor(manifest, new Map([["everything/.demo-token", "copy"]]), new Set(["everything/.demo-token"]))).toEqual([]);
+  });
+
+  it("a ticked rc file whose secret exports were cut adds one set-on-the-machine line naming them; unticked it adds none", () => {
+    const zshrc = { ...byId("shell/zshrc"), secrets: ["A_KEY", "B_TOKEN"] };
+    const manifest = { entries: [...FIXTURE.entries.filter(e => e.id !== "shell/zshrc"), zshrc] };
+    expect(checklistFor(manifest, new Map([["logins/gh", "machine"]]), new Set(["shell/zshrc"]))).toEqual([
+      { label: "GitHub CLI login", command: "gh auth login" },
+      { label: "~/.zshrc", command: "set A_KEY, B_TOKEN on the machine" },
+    ]);
+    expect(checklistFor(manifest, new Map(), new Set())).toEqual([]);
+    expect(parseManifest({ entries: [zshrc] }).entries[0]).toMatchObject({ secrets: ["A_KEY", "B_TOKEN"] });
+  });
+
+  it("when the pack reports what it cut, the checklist names come from there, not from the recipe", () => {
+    const bare = { ...byId("shell/zshrc") };
+    const manifest = { entries: [...FIXTURE.entries.filter(e => e.id !== "shell/zshrc"), bare] };
+    const cut = [{ path: "~/.zshrc", names: ["NEW_TOKEN"] }, { path: "~/.config/fish/config.fish", names: ["FISH_KEY"] }];
+    expect(checklistFor(manifest, new Map(), new Set(["shell/zshrc"]), cut)).toEqual([
+      { label: "~/.zshrc", command: "set NEW_TOKEN on the machine" },
+      { label: "~/.config/fish/config.fish", command: "set FISH_KEY on the machine" },
+    ]);
+    const stale = { ...byId("shell/zshrc"), secrets: ["OLD_KEY"] };
+    expect(checklistFor({ entries: [stale] }, new Map(), new Set(["shell/zshrc"]), [])).toEqual([]);
+    expect(checklistFor({ entries: [stale] }, new Map(), new Set(["shell/zshrc"]))).toEqual([{ label: "~/.zshrc", command: "set OLD_KEY on the machine" }]);
+  });
+
+  it("the schema takes a choice on a consent row and refuses one on a plain row, and keeps role, files and mtime to the everything rung", () => {
+    expect(parseManifest({ entries: [{ ...token, choice: "copy" }] }).entries[0]).toMatchObject({ choice: "copy", consent: true });
+    expect(() => parseManifest({ entries: [{ ...plain, choice: "copy" }] })).toThrow(/entries\.0\.choice: only a logins row or a consent row carries a choice/);
+    expect(() => parseManifest({ entries: [{ ...byId("shell/zshrc"), role: "config" }] })).toThrow(/entries\.0\.role: only an everything row carries role/);
+    expect(() => parseManifest({ entries: [{ ...byId("shell/zshrc"), files: 2 }] })).toThrow(/entries\.0\.files/);
+    expect(parseManifest({ entries: [{ ...byId("shell/zshrc"), excludes: ["~/.zshrc.d/secret"] }] }).entries[0]).toMatchObject({ excludes: ["~/.zshrc.d/secret"] });
+  });
+
+  it("the recipe round-trips an everything row: tick, answer, excludes and the row facts come back as saved", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-recipe-"));
+    try {
+      const path = join(dir, "golden-recipe.json");
+      const withExcludes = { ...plain, excludes: ["~/.config/demo/cache"], detail: "looks like config" };
+      saveRecipe(path, { entries: [...FIXTURE.entries, withExcludes, token] }, new Set(["everything/.config/demo", "everything/.demo-token"]), new Map([["everything/.demo-token", "copy"]]));
+      const back = loadManifest(path);
+      expect(back.entries.find(e => e.id === "everything/.config/demo")).toEqual({ ...withExcludes, bring: true });
+      expect(back.entries.find(e => e.id === "everything/.demo-token")).toEqual({ ...token, bring: true, choice: "copy" });
+      expect(back.entries.filter(e => e.rung === "everything").map(initialTicks)).toEqual([true, true]);
+      expect(initialChoice(back.entries.find(e => e.id === "everything/.demo-token")!)).toBe("copy");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -143,6 +250,6 @@ describe("recipe file", () => {
     expect(() => loadManifest(join(dir, "missing.json"))).toThrow(/missing\.json/);
     const path = join(dir, "recipe.json");
     writeFileSync(path, JSON.stringify({ entries: [{ ...byId("shell/zshrc"), choice: "copy" }] }));
-    expect(() => loadManifest(path)).toThrow(/recipe\.json: invalid manifest: entries\.0\.choice: only a logins row carries a choice/);
+    expect(() => loadManifest(path)).toThrow(/recipe\.json: invalid manifest: entries\.0\.choice: only a logins row or a consent row carries a choice/);
   });
 });

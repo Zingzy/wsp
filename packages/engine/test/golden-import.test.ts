@@ -8,6 +8,7 @@ import {
   brewfileFor,
   HOMEBREW,
   nodeInstallScript,
+  neverCopied,
   nodeMajorFor,
   placeGhToken,
   planFiles,
@@ -47,6 +48,15 @@ const present = new Set([
   `${HOME}/.config/gh/hosts.yml`,
   `${HOME}/.codex/auth.json`,
   `${HOME}/dotfiles/zshrc`,
+  `${HOME}/.config/demo`,
+  `${HOME}/.config/demo/settings.toml`,
+  `${HOME}/.config/demo/cache`,
+  `${HOME}/.demo-token`,
+  `${HOME}/.env`,
+  `${HOME}/.netrc`,
+  `${HOME}/.app/.env.local`,
+  `${HOME}/.hermes/.env`,
+  `${HOME}/proj/.env`,
 ]);
 /** Links on the fixture laptop: where each resolves, or nowhere. */
 const links: Record<string, string | undefined> = {
@@ -55,7 +65,7 @@ const links: Record<string, string | undefined> = {
   [`${HOME}/.key-linked`]: `${HOME}/.ssh/id_ed25519`,
   [`${HOME}/.gone-linked`]: undefined,
 };
-const isDir = (abs: string) => abs.endsWith("custom") || abs.endsWith("/.ssh") || abs.endsWith("/.ssh/keys") || abs.endsWith("/.claude");
+const isDir = (abs: string) => abs.endsWith("custom") || abs.endsWith("/.ssh") || abs.endsWith("/.ssh/keys") || abs.endsWith("/.claude") || abs.endsWith("/.config/demo") || abs.endsWith("/demo/cache") || abs.endsWith("/proj/.env");
 const stat = (abs: string): PathInfo | undefined => {
   if (abs in links) {
     const target = links[abs];
@@ -63,7 +73,7 @@ const stat = (abs: string): PathInfo | undefined => {
     return { kind: "file", mode: 0o644, size: 7, mtimeMs: 7_000, realpath: target };
   }
   if (!present.has(abs)) return undefined;
-  const mode = isDir(abs) ? 0o755 : abs.includes("/.ssh/") || abs.endsWith("auth.json") ? 0o600 : 0o644;
+  const mode = isDir(abs) ? 0o755 : abs.includes("/.ssh/") || abs.endsWith("auth.json") || abs.endsWith("-token") || abs.endsWith("/.netrc") ? 0o600 : 0o644;
   return { kind: isDir(abs) ? "dir" : "file", mode, size: abs.length, mtimeMs: 1_000, realpath: abs };
 };
 const plan = (entries: RecipeEntry[], over: { platform?: "darwin" | "linux"; rewrites?: readonly [string, string][] } = {}) =>
@@ -78,10 +88,10 @@ describe("planFiles: which laptop files travel and where they land", () => {
       row({ rung: "identity", id: "identity/ssh-config", paths: ["~/.ssh/config"], bytes: 2267 }),
     ]);
     expect(p.files).toEqual([
-      { id: "identity/git-user", source: `${HOME}/.gitconfig`, dest: ".gitconfig", mode: 0o644, dir: false, size: `${HOME}/.gitconfig`.length, mtimeMs: 1_000 },
-      { id: "shell/starship", source: `${HOME}/.config/starship.toml`, dest: ".config/starship.toml", mode: 0o644, dir: false, size: `${HOME}/.config/starship.toml`.length, mtimeMs: 1_000 },
-      { id: "shell/oh-my-zsh", source: `${HOME}/.oh-my-zsh/custom`, dest: ".oh-my-zsh/custom", mode: 0o755, dir: true, size: `${HOME}/.oh-my-zsh/custom`.length, mtimeMs: 1_000 },
-      { id: "identity/ssh-config", source: `${HOME}/.ssh/config`, dest: ".ssh/config", mode: 0o600, dir: false, size: `${HOME}/.ssh/config`.length, mtimeMs: 1_000 },
+      { id: "identity/git-user", source: `${HOME}/.gitconfig`, dest: ".gitconfig", mode: 0o644, dir: false, size: `${HOME}/.gitconfig`.length, mtimeMs: 1_000, excludes: [] },
+      { id: "shell/starship", source: `${HOME}/.config/starship.toml`, dest: ".config/starship.toml", mode: 0o644, dir: false, size: `${HOME}/.config/starship.toml`.length, mtimeMs: 1_000, excludes: [] },
+      { id: "shell/oh-my-zsh", source: `${HOME}/.oh-my-zsh/custom`, dest: ".oh-my-zsh/custom", mode: 0o755, dir: true, size: `${HOME}/.oh-my-zsh/custom`.length, mtimeMs: 1_000, excludes: [] },
+      { id: "identity/ssh-config", source: `${HOME}/.ssh/config`, dest: ".ssh/config", mode: 0o600, dir: false, size: `${HOME}/.ssh/config`.length, mtimeMs: 1_000, excludes: [] },
     ]);
     expect(p.bytes).toBe(225 + 2258 + 1_031_384 + 2267);
     expect(p.rungs).toEqual({ identity: 2, shell: 2 });
@@ -137,7 +147,7 @@ describe("planFiles: which laptop files travel and where they land", () => {
       row({ rung: "shell", id: "shell/gone", paths: ["~/.gone-linked"] }),
     ]);
     // The target's bytes ship at the link's path: dest is the link, source is the link (packing follows it).
-    expect(p.files).toEqual([{ id: "shell/zshrc", source: `${HOME}/.zshrc-linked`, dest: ".zshrc-linked", mode: 0o644, dir: false, size: 7, mtimeMs: 7_000 }]);
+    expect(p.files).toEqual([{ id: "shell/zshrc", source: `${HOME}/.zshrc-linked`, dest: ".zshrc-linked", mode: 0o644, dir: false, size: 7, mtimeMs: 7_000, excludes: [] }]);
     expect(p.skipped).toEqual([
       { id: "shell/hosts", path: "~/.hosts-linked", note: "a link to /etc/hosts, outside your home directory" },
       { id: "shell/key", path: "~/.key-linked", note: "a link to ~/.ssh/id_ed25519: private key, never copied" },
@@ -268,8 +278,69 @@ describe("planFiles: which laptop files travel and where they land", () => {
   });
 });
 
+describe("planFiles: files never copied by name", () => {
+  it("refuses .env files and .netrc by name on rows without consent; a consent row answered copy and a login row's own .env copy", () => {
+    const p = plan([
+      row({ rung: "everything", id: "everything/.env", paths: ["~/.env"] }),
+      row({ rung: "everything", id: "everything/.netrc", paths: ["~/.netrc"], consent: true, choice: "copy" }),
+      row({ rung: "everything", id: "everything/.app/.env.local", paths: ["~/.app/.env.local"], consent: true, choice: "skip" }),
+      row({ rung: "shell", id: "shell/app-env", paths: ["~/.app/.env.local"] }),
+      row({ rung: "logins", id: "logins/hermes", paths: ["~/.hermes/.env"], choice: "copy" }),
+    ]);
+    expect(p.files.map(f => [f.dest, f.mode])).toEqual([[".netrc", 0o600], [".hermes/.env", 0o644]]);
+    expect(p.skipped.map(s => [s.id, s.note])).toEqual([
+      ["everything/.env", ".env files are never copied; set the values on the machine"],
+      ["everything/.app/.env.local", "credential-shaped; not copied without your answer on its row"],
+      ["shell/app-env", ".env files are never copied; set the values on the machine"],
+    ]);
+    expect(neverCopied(row({ rung: "everything", id: "everything/.netrc", paths: ["~/.netrc"] }), ".netrc", false)).toBe(".netrc is never copied; sign in on the machine");
+    expect(neverCopied(row({ rung: "everything", id: "everything/.netrc", paths: ["~/.netrc"], consent: true, choice: "copy" }), ".netrc", false)).toBeUndefined();
+  });
+
+  it("the name rule is about files: a directory named .env (a Python environment) copies, and a missing .env is only missing", () => {
+    const p = plan([row({ rung: "everything", id: "everything/proj/.env", paths: ["~/proj/.env"] }), row({ rung: "everything", id: "everything/.gone/.env", paths: ["~/.gone/.env"] })]);
+    expect(p.files.map(f => [f.dest, f.dir])).toEqual([["proj/.env", true]]);
+    expect(p.skipped).toEqual([{ id: "everything/.gone/.env", path: "~/.gone/.env", note: "no longer on this computer" }]);
+    const bare = row({ rung: "everything", id: "everything/.env", paths: ["~/.env"] });
+    expect(neverCopied(bare, ".env", false)).toBe(".env files are never copied; set the values on the machine");
+    expect(neverCopied(bare, ".env", true)).toBeUndefined();
+    expect(neverCopied(bare, ".env", undefined)).toBeUndefined();
+  });
+});
+
+describe("planFiles: everything rows", () => {
+  it("carries a row's excludes as absolute paths under the copied source, and only those", () => {
+    const p = plan([
+      row({ rung: "everything", id: "everything/.config/demo", paths: ["~/.config/demo"], excludes: ["~/.config/demo/cache", "~/.other/thing"], bytes: 300 }),
+      row({ rung: "everything", id: "everything/.zshrc", paths: ["~/.zshrc"] }),
+    ]);
+    expect(p.files.map(f => [f.dest, f.excludes])).toEqual([
+      [".config/demo", [`${HOME}/.config/demo/cache`]],
+      [".zshrc", []],
+    ]);
+    expect(p.rungs).toEqual({ everything: 2 });
+    expect(p.skipped).toEqual([]);
+  });
+
+  it("a credential-shaped row ticked without copy as its answer is skipped with a note; with copy it is planned at its mode", () => {
+    const withoutAnswer = plan([row({ rung: "everything", id: "everything/.demo-token", paths: ["~/.demo-token"], consent: true })]);
+    expect(withoutAnswer.files).toEqual([]);
+    expect(withoutAnswer.skipped).toEqual([{ id: "everything/.demo-token", path: "~/.demo-token", note: "credential-shaped; not copied without your answer on its row" }]);
+    const skip = plan([row({ rung: "everything", id: "everything/.demo-token", paths: ["~/.demo-token"], consent: true, choice: "skip" })]);
+    expect(skip.files).toEqual([]);
+    expect(skip.skipped).toHaveLength(1);
+    const machine = plan([row({ rung: "everything", id: "everything/.demo-token", paths: ["~/.demo-token"], consent: true, choice: "machine" })]);
+    expect(machine.files).toEqual([]);
+    expect(machine.skipped.map(s => s.note)).toEqual(["credential-shaped; not copied without your answer on its row"]);
+    const copy = plan([row({ rung: "everything", id: "everything/.demo-token", paths: ["~/.demo-token"], consent: true, choice: "copy", bytes: 40 })]);
+    expect(copy.files.map(f => [f.dest, f.mode])).toEqual([[".demo-token", 0o600]]);
+    expect(copy.skipped).toEqual([]);
+    expect(copy.bytes).toBe(40);
+  });
+});
+
 describe("recipeHash", () => {
-  const files = (mtimeMs: number, size = 10) => [{ id: "shell/zshrc", dest: ".zshrc", size, mtimeMs }];
+  const files = (mtimeMs: number, size = 10) => [{ id: "shell/zshrc", dest: ".zshrc", size, mtimeMs, excludes: [] }];
 
   it("depends on the ticked ids, login choices and tool pins, not on order, bytes or labels", () => {
     const a = [row({ rung: "shell", id: "shell/zshrc", bytes: 1 }), row({ rung: "logins", id: "logins/gh", choice: "copy" }), row({ rung: "shell", id: "shell/bashrc", bring: false })];
@@ -280,6 +351,14 @@ describe("recipeHash", () => {
     expect(recipeHash([row({ rung: "shell", id: "shell/zshrc" })])).not.toBe(recipeHash(a));
     const bun = (version: string) => [row({ rung: "tools", id: "tools/npm/bun", label: `bun@${version}`, version })];
     expect(recipeHash(bun("1.4.0"))).not.toBe(recipeHash(bun("1.5.0")));
+  });
+
+  it("changes when a shipped file's excludes change, since a different subtree lands", () => {
+    const entries = [row({ rung: "everything", id: "everything/.config/demo", paths: ["~/.config/demo"] })];
+    const file = { id: "everything/.config/demo", dest: ".config/demo", size: 1, mtimeMs: 1, excludes: [`${HOME}/.config/demo/cache`] };
+    expect(recipeHash(entries, [file])).not.toBe(recipeHash(entries, [{ ...file, excludes: [] }]));
+    expect(recipeHash(entries, [file])).toBe(recipeHash(entries, [{ ...file, excludes: [`${HOME}/.config/demo/cache`] }]));
+    expect(recipeHash(entries, [{ ...file, excludes: [`${HOME}/.config/demo/b`, `${HOME}/.config/demo/a`] }])).toBe(recipeHash(entries, [{ ...file, excludes: [`${HOME}/.config/demo/a`, `${HOME}/.config/demo/b`] }]));
   });
 
   it("changes when a shipped file's size or mtime changes, so an edited dotfile is applied again", () => {

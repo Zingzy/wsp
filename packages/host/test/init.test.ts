@@ -14,9 +14,9 @@ import { createRuntime, memoryStore, type GoldenRecipe, type Runtime } from "@ws
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GOLDEN_SETUP } from "../src/doctor.js";
 import { loadManifest, recipePath } from "../src/init-recipe.js";
-import { reduceStages, runInit, stageLine, type InitIO, type InitOptions } from "../src/init.js";
+import { everythingItems, fmtBytes, reduceStages, runInit, stageLine, type InitIO, type InitOptions } from "../src/init.js";
 import type { HostHandle } from "../src/server.js";
-import { FIXTURE } from "./init-fixture.js";
+import { EVERYTHING, FIXTURE } from "./init-fixture.js";
 import { guestAnswer, stubBackend, type StubBackend } from "./stub-backend.js";
 
 const SOLARI = "slr_live_fake_solari_key";
@@ -168,12 +168,12 @@ describe("wsp init, interactive", () => {
     expect(first).toContain("Found on this computer");
     expect(first).toMatch(/Tools\s+4\s+3 can come/);
     expect(first).toContain("Nothing has left this computer.");
-    expect(first.indexOf("Found on this computer")).toBeLessThan(first.indexOf("1/7"));
-    expect(first).toContain("1/7");
+    expect(first.indexOf("Found on this computer")).toBeLessThan(first.indexOf("1/8"));
+    expect(first).toContain("1/8");
     expect(first).not.toMatch(/claude|codex/i);
     await f.press(KEY.enter);
     await f.until("Shell");
-    expect(f.text()).toContain("2/7");
+    expect(f.text()).toContain("2/8");
     await f.press(KEY.enter);
     await f.until("Editors");
     await f.press(KEY.enter);
@@ -187,7 +187,7 @@ describe("wsp init, interactive", () => {
     await f.until("Sign-ins");
     expect(f.text()).toMatch(/GitHub CLI login\s+copy/);
     expect(f.text()).toMatch(/Claude Code login\s+sign in/);
-    expect(f.text()).toMatch(/Sign-ins\s+7\/7\s+1 copy, 1 sign in/);
+    expect(f.text()).toMatch(/Sign-ins\s+7\/8\s+1 copy, 1 sign in/);
     // Codex was left unticked on the Agents screen, so its login is not offered.
     expect(f.text()).not.toContain("Codex login");
     // Past the CLI logins heading onto gh: copy -> sign in.
@@ -292,10 +292,10 @@ describe("wsp init, interactive", () => {
     await f.until("Shell");
     f.clear();
     await f.press(KEY.esc);
-    await f.until("1/7");
+    await f.until("1/8");
     f.clear();
     await f.press(KEY.enter);
-    await f.until("2/7");
+    await f.until("2/8");
     for (const rung of ["Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
       await f.until(rung);
       await f.press(KEY.enter);
@@ -348,15 +348,15 @@ describe("wsp init, interactive", () => {
     await f.press(KEY.down, KEY.down, KEY.space, KEY.enter);
     await f.until("Sign-ins");
     expect(f.text()).toContain("Codex login");
-    expect(f.text()).toMatch(/Sign-ins\s+7\/7\s+2 copy, 1 sign in/);
+    expect(f.text()).toMatch(/Sign-ins\s+7\/8\s+2 copy, 1 sign in/);
     expect(f.text()).toMatch(/Agent logins\s+2\n/);
     await f.press(KEY.esc);
-    await f.until("6/7");
+    await f.until("6/8");
     f.clear();
     await f.press(KEY.down, KEY.down, KEY.space, KEY.enter);
     await f.until("Sign-ins");
     expect(f.text()).not.toContain("Codex login");
-    expect(f.text()).toMatch(/Sign-ins\s+7\/7\s+1 copy, 1 sign in/);
+    expect(f.text()).toMatch(/Sign-ins\s+7\/8\s+1 copy, 1 sign in/);
     expect(f.text()).toMatch(/Agent logins\s+1\n/);
     await f.press(KEY.enter);
     await f.until(BOOT);
@@ -396,7 +396,7 @@ describe("wsp init, interactive", () => {
       },
     });
     const run = runInit(f.opts, f.io);
-    await f.until("1/7");
+    await f.until("1/8");
     const t = f.text();
     expect(t).toContain("Reading this computer  Identity 3");
     expect(t).toContain("Reading this computer  Identity 3, Shell 2, Editors 1, Toolchains 1, Tools 4, Agents 2, Sign-ins 3");
@@ -419,7 +419,7 @@ describe("wsp init, interactive", () => {
       },
     });
     const run = runInit(f.opts, f.io);
-    await f.until("1/7");
+    await f.until("1/8");
     const spins = f.text().split("\r").filter(l => l.includes("Reading this computer"));
     expect(spins.length).toBeGreaterThan(1);
     expect(spins.map(l => l.length).filter(n => n > 48)).toEqual([]);
@@ -442,6 +442,256 @@ describe("wsp init, interactive", () => {
     expect(f.text()).toContain("--manifest");
     await f.press("n");
     expect((await run).code).toBe(1);
+  });
+});
+
+describe("wsp init, everything else", () => {
+  const found = (): typeof FIXTURE => ({ entries: [...FIXTURE.entries, ...EVERYTHING] });
+
+  it("under 100 columns the rows keep size and role only, so the label has room", async () => {
+    const f = fake({ collect: async () => found() });
+    const run = runInit(f.opts, f.io);
+    for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
+      await f.until(rung);
+      await f.press(KEY.enter);
+    }
+    await f.until("Everything else (4 items");
+    const screen = f.text().slice(f.text().lastIndexOf("Everything else (4 items"));
+    expect(screen).toMatch(/○ demo\s+300 B\s+config\n/);
+    expect(screen).toMatch(/○ \.demo-token\s+40 B\s+credential\s+skip\n/);
+    expect(screen).not.toContain("2 files");
+    expect(screen).not.toContain("2026-08-12");
+    // Two cells: sizes end together, role words start together.
+    const rowOf = (re: RegExp) => screen.split("\n").find(l => re.test(l))!;
+    expect(rowOf(/○ demo /).indexOf("config")).toBe(rowOf(/○ \.demo-token/).indexOf("credential"));
+    expect(rowOf(/○ \.big/).indexOf("unknown")).toBe(rowOf(/○ demo /).indexOf("config"));
+    // Room for a label of at least thirty characters at eighty columns.
+    expect(screen).toMatch(/▾ Keychain, device-bound\s+1\n/);
+    await f.press(KEY.enter);
+    await f.until(BOOT);
+    await f.press(KEY.enter);
+    expect((await run).code).toBe(1);
+  });
+
+  it("the eighth screen lists the unclaimed rows unticked with size, files, date and role, answers a credential row per item, and saves both", async () => {
+    const f = fake({ collect: async () => found(), columns: 100 });
+    mkdirSync(join(f.opts.home, ".config", "demo", "cache"), { recursive: true });
+    writeFileSync(join(f.opts.home, ".config", "demo", "settings.toml"), "theme = 1\n");
+    writeFileSync(join(f.opts.home, ".config", "demo", "cache", "blob"), "x".repeat(500));
+    writeFileSync(join(f.opts.home, ".demo-token"), "fake-token\n", { mode: 0o600 });
+    const run = runInit(f.opts, f.io);
+    await f.until("Identity");
+    expect(f.text()).toMatch(/Everything else\s+4\s+1\.2 MB\s+3 can come/);
+    for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
+      await f.until(rung);
+      await f.press(KEY.enter);
+    }
+    await f.until("Everything else (4 items");
+    const screen = f.text().slice(f.text().lastIndexOf("Everything else (4 items"));
+    expect(screen).toMatch(/^Everything else \(4 items, 1\.2 MB\)\s+8\/8\n/);
+    expect(screen).toMatch(/all\s+0 of 1\n/);
+    expect(screen).toMatch(/○ demo\s+300 B\s+2 files\s+2026-08-12\s+config\n/);
+    expect(screen).toMatch(/○ \.demo-token\s+40 B\s+1 file\s+2026-08-12\s+credential\s+skip\n/);
+    // The role column lines up between a tick row and an answered row, and the size column is right-aligned.
+    const rowOf = (re: RegExp) => screen.split("\n").find(l => re.test(l))!;
+    const demoRow = rowOf(/○ demo /);
+    const tokenRow = rowOf(/○ \.demo-token/);
+    const bigRow = rowOf(/○ \.big/);
+    expect(demoRow.indexOf("config")).toBe(tokenRow.indexOf("credential"));
+    expect(bigRow.indexOf("unknown")).toBe(demoRow.indexOf("config"));
+    expect(demoRow.indexOf("300 B") + "300 B".length).toBe(tokenRow.indexOf("40 B") + "40 B".length);
+    expect(bigRow.indexOf("1.2 MB") + "1.2 MB".length).toBe(demoRow.indexOf("300 B") + "300 B".length);
+    expect(screen).toMatch(/▾ large, review\s+0 of 1\n/);
+    expect(screen).toMatch(/○ \.big\s+1\.2 MB\s+900 files\s+2026-01-05\s+unknown\n/);
+    expect(screen).toMatch(/▾ Keychain, device-bound\s+1\n/);
+    expect(screen).toMatch(/○ Raycast\s+stays here\n/);
+    expect(screen).toContain("Selected: none");
+    expect(screen).toContain("0 ticked\n");
+    expect(screen).toContain("large items are listed but never copied without a tick");
+    expect(screen).toContain("know what one of these is? add it to the catalog");
+    expect(screen).toContain("space tick or change   ← → fold   enter next   esc back");
+    // The all row ticks the plain rows and leaves the large one alone.
+    await f.press(KEY.space);
+    expect(f.text().slice(f.text().lastIndexOf("Selected:"))).toMatch(/Selected: demo\n│  1 ticked, 300 B\n/);
+    await f.press(KEY.space);
+    // all row, demo: tick it; .demo-token: skip -> copy (two answers, copy and skip).
+    await f.press(KEY.down, KEY.space);
+    let last = f.text().slice(f.text().lastIndexOf("Selected:"));
+    expect(last).toMatch(/Selected: demo\n│  1 ticked, 300 B\n/);
+    expect(f.text()).toContain("~/.config/demo minus ~/.config/demo/cache");
+    expect(f.text()).toContain("looks like config; installed by homebrew");
+    await f.press(KEY.down, KEY.space);
+    last = f.text().slice(f.text().lastIndexOf("Selected:"));
+    expect(last).toMatch(/Selected: demo, \.demo-token\n│  2 ticked, 340 B\n/);
+    expect(f.text()).toContain("copy brings it along; skip leaves it here");
+    await f.press(KEY.space, KEY.space);
+    expect(f.text().slice(f.text().lastIndexOf("Selected:"))).toMatch(/Selected: demo, \.demo-token\n/);
+    await f.press(KEY.enter);
+
+    await f.until(BOOT);
+    const summary = f.text().slice(f.text().lastIndexOf("Summary"), f.text().lastIndexOf("Recipe saved"));
+    expect(summary).toMatch(/Everything else\s+2 of 4\s+340 B\s+│\n│\s+\.demo-token\s+copy\s+│/);
+    expect(summary).not.toMatch(/\n│\s+demo\s/);
+    expect(summary).toMatch(/Sign-ins\s+1 of 2[^\n]*\n│\s+GitHub CLI login\s+copy/);
+    await f.press(KEY.enter);
+    expect((await run).code).toBe(1);
+    expect(f.backends.flatMap(b => b.machines)).toHaveLength(0);
+
+    const saved = loadManifest(join(dirs[0]!, "golden-recipe.json"));
+    const everything = saved.entries.filter(e => e.rung === "everything");
+    expect(everything.map(e => [e.id, e.bring, e.choice])).toEqual([
+      ["everything/.config/demo", true, undefined],
+      ["everything/.demo-token", true, "copy"],
+      ["everything/.big", false, undefined],
+      ["everything/keychain:Raycast", false, undefined],
+    ]);
+    expect(everything[0]).toMatchObject({ excludes: ["~/.config/demo/cache"], role: "config", files: 2, detail: "looks like config; installed by homebrew" });
+
+    // A re-run from the saved recipe packs the directory minus its cache and the credential file, and skips nothing.
+    const again = fake({ yes: true, columns: 140, manifestPath: join(dirs[0]!, "golden-recipe.json"), collect: async () => { throw new Error("collect must not run with --manifest"); } });
+    mkdirSync(join(again.opts.home, ".config", "demo", "cache"), { recursive: true });
+    writeFileSync(join(again.opts.home, ".config", "demo", "settings.toml"), "theme = 1\n");
+    writeFileSync(join(again.opts.home, ".config", "demo", "cache", "blob"), "x".repeat(500));
+    writeFileSync(join(again.opts.home, ".demo-token"), "fake-token\n", { mode: 0o600 });
+    expect((await runInit(again.opts, again.io)).code).toBe(0);
+    expect(again.text()).toMatch(/\d files: identity \d, shell 1, logins 1, everything 2/);
+    // The credential row is not a sign-in; the checklist carries only the login chosen for the machine.
+    expect(again.checklists[0]).toEqual([{ label: "Claude Code login", command: "claude, then /login" }]);
+    const result = JSON.parse(readFileSync(join(dirname(again.opts.statePath), "golden-import.json"), "utf8")) as { files: { bytes: number; skipped: { id: string }[] } };
+    expect(result.files.skipped.filter(s => s.id.startsWith("everything/"))).toEqual([]);
+    expect(result.files.bytes).toBeGreaterThan(0);
+  });
+
+  it("an rc file with a cut secret export adds its set-on-the-machine line to the checklist from what the pack cut, and a failed eighth rung is one warning", async () => {
+    // The recipe row carries no secrets field: the names come from the pack, which strips the file as it stands at build time.
+    const f = fake({
+      yes: true,
+      collect: async (_onRung, onNote) => {
+        onNote("Everything else could not be read and is left out: EIO");
+        return FIXTURE;
+      },
+    });
+    writeFileSync(join(f.opts.home, ".zshrc"), "export A=1\nexport A_KEY=fake\n");
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    const out = f.text();
+    expect(out.split("Everything else could not be read and is left out: EIO").length).toBe(2);
+    expect(out.indexOf("could not be read")).toBeLessThan(out.indexOf("Found on this computer"));
+    expect(f.checklists[0]).toEqual(expect.arrayContaining([{ label: "~/.zshrc", command: "set A_KEY on the machine" }]));
+  });
+
+  it("a consent row saved as sign in before this round replays as skip: nothing uploads, the summary says skip, the resaved recipe says skip", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
+    dirs.push(dir);
+    const path = join(dir, "recipe.json");
+    writeFileSync(path, JSON.stringify({ entries: [...FIXTURE.entries.map(e => ({ ...e, bring: e.id === "identity/git-user" })), ...EVERYTHING.map(e => (e.id === "everything/.demo-token" ? { ...e, bring: true, choice: "machine" } : { ...e, bring: false }))] }));
+    const f = fake({ yes: true, manifestPath: path });
+    writeFileSync(join(f.opts.home, ".demo-token"), "fake-token\n", { mode: 0o600 });
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    const out = f.text();
+    expect(out).toContain("1 file: identity 1");
+    expect(out).toMatch(/Everything else\s+0 of 4/);
+    expect(out).not.toMatch(/\.demo-token\s+sign in/);
+    // Only the unticked gh login is a sign-in here; the credential row never is.
+    expect(f.checklists[0]).toEqual([{ label: "GitHub CLI login", command: "gh auth login" }]);
+    const saved = loadManifest(join(dirname(f.opts.statePath), "golden-recipe.json"));
+    expect(saved.entries.find(e => e.id === "everything/.demo-token")).toMatchObject({ bring: false, choice: "skip" });
+    expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8")).files.skipped).toEqual([]);
+  });
+
+  it("a consented .netrc copies on a copy answer and an unconsented .env is locked on the screen, out of the summary and refused by the plan, all saying the same", async () => {
+    const netrc = { rung: "everything" as const, id: "everything/.netrc", label: ".netrc", paths: ["~/.netrc"], bytes: 30, default: "skip" as const, consent: true, role: "credential" as const, files: 1, mtime: Date.UTC(2026, 7, 12, 12), detail: "credential-shaped" };
+    const env = { rung: "everything" as const, id: "everything/.env", label: ".env", paths: ["~/.env"], bytes: 20, default: "skip" as const, role: "unknown" as const, files: 1, mtime: Date.UTC(2026, 7, 12, 12), detail: "nothing says what this is" };
+    const f = fake({ collect: async () => ({ entries: [...FIXTURE.entries, netrc, env, ...EVERYTHING] }), columns: 100 });
+    writeFileSync(join(f.opts.home, ".netrc"), "machine api.example.com login me password fake-netrc\n", { mode: 0o600 });
+    writeFileSync(join(f.opts.home, ".env"), "TOKEN=fake-env\n");
+    const run = runInit(f.opts, f.io);
+    await f.until("Identity");
+    expect(f.text()).toMatch(/Everything else\s+6\s+1\.2 MB\s+4 can come/);
+    for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
+      await f.until(rung);
+      await f.press(KEY.enter);
+    }
+    await f.until("Everything else (6 items");
+    const screen = f.text().slice(f.text().lastIndexOf("Everything else (6 items"));
+    expect(screen).toMatch(/○ \.env\s+stays here\n/);
+    expect(screen).toMatch(/○ \.netrc\s+30 B\s+1 file\s+2026-08-12\s+credential\s+skip\n/);
+    // all row, then .netrc: skip -> copy. The locked .env shows the plan's note when highlighted.
+    await f.press(KEY.down, KEY.space);
+    expect(f.text().slice(f.text().lastIndexOf("Selected:"))).toMatch(/Selected: \.netrc\n│  1 ticked, 30 B\n/);
+    await f.press(KEY.down);
+    expect(f.text()).toContain(".env files are never copied; set the values on the machine");
+    await f.press(KEY.enter);
+    await f.until(BOOT);
+    const summary = f.text().slice(f.text().lastIndexOf("Summary"), f.text().lastIndexOf("Recipe saved"));
+    expect(summary).toMatch(/Everything else\s+1 of 6\s+30 B\s+│\n│\s+\.netrc\s+copy\s+│/);
+    expect(summary).not.toMatch(/\n│\s+\.env\s/);
+    await f.press(KEY.enter);
+    expect((await run).code).toBe(1);
+    const saved = loadManifest(join(dirs[0]!, "golden-recipe.json"));
+    expect(saved.entries.find(e => e.id === "everything/.netrc")).toMatchObject({ bring: true, choice: "copy" });
+    expect(saved.entries.find(e => e.id === "everything/.env")).toMatchObject({ bring: false });
+
+    // The plan agrees: a re-run copies the .netrc and, even with bring forced on in the file, never the .env.
+    const path = join(dirs[0]!, "golden-recipe.json");
+    writeFileSync(path, JSON.stringify({ entries: saved.entries.map(e => (e.id === "everything/.env" ? { ...e, bring: true } : e)) }));
+    const again = fake({ yes: true, columns: 140, manifestPath: path, collect: async () => { throw new Error("collect must not run with --manifest"); } });
+    writeFileSync(join(again.opts.home, ".netrc"), "machine api.example.com login me password fake-netrc\n", { mode: 0o600 });
+    writeFileSync(join(again.opts.home, ".env"), "TOKEN=fake-env\n");
+    expect((await runInit(again.opts, again.io)).code).toBe(0);
+    expect(again.text()).toMatch(/Everything else\s+1 of 6/);
+    expect(again.text()).toMatch(/files: identity \d, shell 1, logins 1, everything 1/);
+    const result = JSON.parse(readFileSync(join(dirname(again.opts.statePath), "golden-import.json"), "utf8")) as { files: { skipped: { id: string; note: string }[] } };
+    expect(result.files.skipped.filter(s => s.id.startsWith("everything/"))).toEqual([]);
+  });
+
+  it("a directory named .env on this computer is offered as a plain row, ticks, and is copied", async () => {
+    const env = { rung: "everything" as const, id: "everything/.env", label: ".env", paths: ["~/.env"], bytes: 60, default: "skip" as const, role: "unknown" as const, files: 2, mtime: Date.UTC(2026, 7, 12, 12), detail: "nothing says what this is" };
+    const f = fake({ collect: async () => ({ entries: [...FIXTURE.entries, env, ...EVERYTHING] }), columns: 100 });
+    mkdirSync(join(f.opts.home, ".env", "bin"), { recursive: true });
+    writeFileSync(join(f.opts.home, ".env", "bin", "activate"), "export VIRTUAL_ENV=$HOME/.env\n");
+    writeFileSync(join(f.opts.home, ".env", "pyvenv.cfg"), "home = /usr/bin\n");
+    const run = runInit(f.opts, f.io);
+    await f.until("Identity");
+    expect(f.text()).toMatch(/Everything else\s+5\s+1\.2 MB\s+4 can come/);
+    for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
+      await f.until(rung);
+      await f.press(KEY.enter);
+    }
+    await f.until("Everything else (5 items");
+    const screen = f.text().slice(f.text().lastIndexOf("Everything else (5 items"));
+    expect(screen).toMatch(/○ \.env\s+60 B\s+2 files\s+2026-08-12\s+unknown\n/);
+    expect(screen).not.toContain(".env files are never copied");
+    expect(screen).not.toMatch(/\.env\s+stays here/);
+    await f.press(KEY.down, KEY.space);
+    expect(f.text()).toContain("nothing says what this is");
+    await f.press(KEY.enter);
+    await f.until(BOOT);
+    expect(f.text().slice(f.text().lastIndexOf("Summary"))).toMatch(/Everything else\s+1 of 5\s+60 B/);
+    await f.press(KEY.enter);
+    expect((await run).code).toBe(1);
+    const again = fake({ yes: true, columns: 140, manifestPath: join(dirs[0]!, "golden-recipe.json"), collect: async () => { throw new Error("collect must not run with --manifest"); } });
+    mkdirSync(join(again.opts.home, ".env", "bin"), { recursive: true });
+    writeFileSync(join(again.opts.home, ".env", "bin", "activate"), "export VIRTUAL_ENV=$HOME/.env\n");
+    expect((await runInit(again.opts, again.io)).code).toBe(0);
+    expect(again.text()).toMatch(/files: identity \d, shell 1, logins 1, everything 1/);
+    const result = JSON.parse(readFileSync(join(dirname(again.opts.statePath), "golden-import.json"), "utf8")) as { files: { skipped: { id: string }[] } };
+    expect(result.files.skipped.filter(s => s.id.startsWith("everything/"))).toEqual([]);
+  });
+
+  it("a credential row ticked in a recipe without its answer is not consent: nothing of it uploads and the saved recipe says skip", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
+    dirs.push(dir);
+    const path = join(dir, "recipe.json");
+    writeFileSync(path, JSON.stringify({ entries: [...FIXTURE.entries.map(e => ({ ...e, bring: e.id === "identity/git-user" })), ...EVERYTHING.map(e => ({ ...e, bring: e.id === "everything/.demo-token" }))] }));
+    const f = fake({ yes: true, manifestPath: path });
+    writeFileSync(join(f.opts.home, ".demo-token"), "fake-token\n", { mode: 0o600 });
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    expect(f.text()).toContain("1 file: identity 1");
+    expect(f.text()).toMatch(/Everything else\s+0 of 4/);
+    const saved = loadManifest(join(dirname(f.opts.statePath), "golden-recipe.json"));
+    expect(saved.entries.find(e => e.id === "everything/.demo-token")).toMatchObject({ bring: false, choice: "skip" });
+    const result = JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"));
+    expect(result.files.skipped).toEqual([]);
   });
 });
 
@@ -897,6 +1147,25 @@ describe("wsp init, flags and no terminal", () => {
     expect(shared.machines).toHaveLength(1);
     expect(shared.machines[0]!.killed).toBe(false);
     expect((await store.list("builders")).map(b => (b as { id: string; firstLife: boolean }).firstLife)).toEqual([true]);
+  });
+});
+
+describe("everythingItems", () => {
+  it("a row that was never measured says so in the size cell instead of leaving it blank", () => {
+    const cache = { rung: "everything" as const, id: "everything/.cache", label: ".cache", paths: ["~/.cache"], bytes: 0, default: "skip" as const, role: "cache" as const, files: 0, mtime: 0, detail: "cache, rebuilt on use; not measured" };
+    const demo = EVERYTHING[0]!;
+    const [c, d] = everythingItems([cache, demo]);
+    for (const width of [80, 100]) {
+      expect(c!.hintFor!(width)).toMatch(/^\s*not measured\s+cache\s*$/);
+      expect(d!.hintFor!(width)).toMatch(/^\s*300 B/);
+      expect(c!.hintFor!(width).length).toBe(d!.hintFor!(width).length);
+    }
+  });
+});
+
+describe("fmtBytes", () => {
+  it("steps through B, KB, MB and GB", () => {
+    expect([12, 2_048, 3 * 1024 * 1024, 32_000_000_000].map(fmtBytes)).toEqual(["12 B", "2.0 KB", "3.0 MB", "29.8 GB"]);
   });
 });
 
