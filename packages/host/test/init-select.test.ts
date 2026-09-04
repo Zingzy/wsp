@@ -128,11 +128,14 @@ describe("rungSelect", () => {
     expect(frame).toContain("Tools");
     expect(frame).toContain("5/7");
     expect(frame).toMatch(/rectangle\s+stays here/);
-    expect(frame).toMatch(/▾ Tools\s+always included\n│\s+• git name and email\n/);
+    expect(frame).toMatch(/▾ Tools\s+always included\n┃\s+• git name and email\n/);
     expect(frame).not.toMatch(/[●○] git name/);
     // The focused row carries the marker in the gutter; every other row keeps a space there so the glyphs line up.
-    expect(frame).toMatch(/\n│ ❯ ● all\s+4 of 4\n│\s{3}▾ Homebrew/);
-    expect(frame).toMatch(/\n│\s{5}○ rectangle/);
+    expect(frame).toMatch(/\n┃ ❯ ● all\s+4 of 4\n┃\s{3}▾ Homebrew/);
+    expect(frame).toMatch(/\n┃\s{5}○ rectangle/);
+    // The screen being answered runs the thick bar down its left and ends with the help line; nothing under the title keeps the thin one.
+    expect(frame.split("\n").slice(1, -1).every(l => l.startsWith("┃"))).toBe(true);
+    expect(frame.split("\n").at(-1)).toBe("┗  space tick • ← → fold • enter next • esc back");
     expect(frame).not.toContain("macOS app, no Linux build");
     expect(frame).not.toMatch(/—|\p{Emoji_Presentation}/u);
     // Cursor starts on the all row; down once lands on the Homebrew heading, space clears it.
@@ -143,6 +146,79 @@ describe("rungSelect", () => {
     expect(result.kind).toBe("next");
     if (result.kind !== "next") return;
     expect([...result.ticks].sort()).toEqual(["git", "pnpm", "zshrc"]);
+    // Once answered the screen is a finished block: clack's thin bar, no thick one left anywhere in it.
+    const done = text().slice(text().lastIndexOf("◇  Tools")).split("\n");
+    expect(done[0]).toMatch(/◇  Tools\s+5\/7$/);
+    expect(done[1]).toBe("│  git name and email, pnpm, ~/.zshrc");
+    expect(done.slice(1).some(l => l.includes("┃") || l.includes("┗"))).toBe(false);
+  });
+
+  it("with colour on, the title is cyan, a group name is bold, and the frame uses no other colour", async () => {
+    // styleText reads FORCE_COLOR at each call, so colour can be turned on for this test alone and turned back off after it.
+    const was = process.env["FORCE_COLOR"];
+    process.env["FORCE_COLOR"] = "3";
+    try {
+      const { input, output, raw } = streams();
+      // A choice row in a group takes the same look as a tick row: its answer sits in the dim second column, nothing else lights up.
+      const items: SelectItem[] = [...ITEMS.slice(0, 3), { id: "tok", label: ".demo-token", group: "Homebrew", detail: [], choices: [{ value: "copy", label: "copy" }, { value: "skip", label: "skip" }] }, ...ITEMS.slice(3)];
+      Object.assign(output, { rows: 40 });
+      const p = rungSelect({ title: "Tools", counter: "5/7", items, initial: new Set(["gh"]), initialChoices: new Map([["tok", "skip"]]), input, output });
+      await settle();
+      const frame = raw();
+      expect(frame).toContain("\x1b[36m◆\x1b[39m  \x1b[36mTools\x1b[39m");
+      expect(frame).toMatch(/▾ \x1b\[1mHomebrew\s*\x1b\[22m/);
+      expect(frame).toMatch(/\x1b\[2m○\x1b\[22m \x1b\[2m\.demo-token\s*\x1b\[22m  \x1b\[2m\s*skip\x1b\[22m/);
+      expect(frame).toContain("\x1b[38;5;247mspace\x1b[39m \x1b[38;5;243mchange\x1b[39m");
+      // One accent, dim for the rest, bold on headings, inverse for the search cursor, the two help greys, and their resets.
+      const sgr = new Set([...frame.matchAll(/\x1b\[([0-9;]*)m/g)].map(m => m[1]));
+      expect([...sgr].sort()).toEqual(["1", "2", "22", "27", "36", "38;5;243", "38;5;247", "39", "7"].sort());
+      await press(input, KEY.enter);
+      await p;
+    } finally {
+      if (was === undefined) delete process.env["FORCE_COLOR"];
+      else process.env["FORCE_COLOR"] = was;
+    }
+  });
+
+  it("at 16 colours the help line falls back to dim words and plain keys, and no 256-colour code leaves the frame", async () => {
+    const was = process.env["FORCE_COLOR"];
+    process.env["FORCE_COLOR"] = "1";
+    try {
+      const { input, output, raw } = streams();
+      const p = rungSelect({ title: "Tools", counter: "5/7", items: ITEMS, initial: new Set(["gh"]), input, output });
+      await settle();
+      const frame = raw();
+      expect(frame).toContain("\x1b[36m◆\x1b[39m  \x1b[36mTools\x1b[39m");
+      expect(frame).toMatch(/▾ \x1b\[1mHomebrew\s*\x1b\[22m/);
+      expect(frame).toContain("space \x1b[2mtick\x1b[22m");
+      expect(frame).not.toContain("38;5;");
+      const sgr = new Set([...frame.matchAll(/\x1b\[([0-9;]*)m/g)].map(m => m[1]));
+      expect([...sgr].sort()).toEqual(["1", "2", "22", "27", "36", "39", "7"].sort());
+      await press(input, KEY.enter);
+      await p;
+    } finally {
+      if (was === undefined) delete process.env["FORCE_COLOR"];
+      else process.env["FORCE_COLOR"] = was;
+    }
+  });
+
+  it("under NO_COLOR nothing in the frame is coloured, bold or dim, and the help line is plain text with its dots", async () => {
+    const was = { force: process.env["FORCE_COLOR"], no: process.env["NO_COLOR"] };
+    delete process.env["FORCE_COLOR"];
+    process.env["NO_COLOR"] = "1";
+    try {
+      const { input, output, raw, text } = streams();
+      const p = rungSelect({ title: "Tools", counter: "5/7", items: ITEMS, initial: new Set(["gh"]), input, output });
+      await settle();
+      expect([...raw().matchAll(/\x1b\[([0-9;]*)m/g)]).toEqual([]);
+      expect(text().split("\n").at(-1)).toBe("┗  space tick • ← → fold • enter next • esc back");
+      await press(input, KEY.enter);
+      await p;
+    } finally {
+      if (was.force !== undefined) process.env["FORCE_COLOR"] = was.force;
+      if (was.no === undefined) delete process.env["NO_COLOR"];
+      else process.env["NO_COLOR"] = was.no;
+    }
   });
 
   it("a locked row shows why only in the detail pane, once it is highlighted", async () => {
@@ -242,6 +318,7 @@ describe("rungSelect", () => {
     expect(text()).not.toContain("all ");
     expect(text()).toMatch(/GitHub CLI login\s+copy/);
     expect(text()).toMatch(/Claude Code login\s+sign in/);
+    expect(text()).toContain("┗  space change • enter next • esc back");
     clear();
     await press(input, KEY.space);
     expect(text()).toMatch(/GitHub CLI login\s+sign in/);
@@ -305,7 +382,7 @@ describe("rungSelect", () => {
     // Bar, space, marker, space, glyph, space, then the label column; the second column follows the gutter.
     const secondAt = 4 + 2 + LABEL_CAP + 2;
     const long = rows.find(l => l.includes("ggg"))!;
-    expect(long).toMatch(/^│ {5}● g+…\s+1\.2 MB$/);
+    expect(long).toMatch(/^┃ {5}● g+…\s+1\.2 MB$/);
     expect(long.indexOf("…")).toBe(secondAt - 3);
     expect(long.indexOf("1.2 MB")).toBe(secondAt);
     expect(rows.find(l => l.includes("bat"))!.indexOf("3 KB")).toBe(secondAt + 2);
@@ -336,18 +413,18 @@ describe("rungSelect", () => {
     // Where the cursor is shows in what space does: the all row flips both free rows, a bullet does nothing.
     const selected = () => text().split("\n").filter(l => l.includes("Selected:")).at(-1);
     await press(input, KEY.up, KEY.space);
-    expect(selected()).toBe("│  Selected: base 0, base 1, base 2");
+    expect(selected()).toBe("┃  Selected: base 0, base 1, base 2");
     clear();
     await press(input, KEY.space);
-    expect(selected()).toBe("│  Selected: base 0, base 1, base 2 +2 more");
+    expect(selected()).toBe("┃  Selected: base 0, base 1, base 2 +2 more");
     clear();
     await press(input, KEY.down);
     expect(text()).toContain("1.2 KB");
     await press(input, KEY.space);
-    expect(selected()).toBe("│  Selected: base 0, base 1, base 2 +1 more");
+    expect(selected()).toBe("┃  Selected: base 0, base 1, base 2 +1 more");
     clear();
     await press(input, KEY.up, KEY.up, KEY.up, KEY.space);
-    expect(selected()).toBe("│  Selected: base 0, base 1, base 2 +2 more");
+    expect(selected()).toBe("┃  Selected: base 0, base 1, base 2 +2 more");
     await press(input, KEY.enter);
     const result = await p;
     expect(result.kind === "next" && [...result.ticks].sort()).toEqual(["base/0", "base/1", "base/2", "cfg", "zshrc"]);
@@ -402,14 +479,14 @@ describe("rungSelect", () => {
     const p = rungSelect({ title: "Identity", counter: "1/7", items, initial: new Set(["a", "b", "c", "d"]), input, output });
     await settle();
     const selectedLine = () => text().split("\n").filter(l => l.includes("Selected:")).at(-1);
-    expect(selectedLine()).toBe("│  Selected: git name and email, alpha tool +3 more");
+    expect(selectedLine()).toBe("┃  Selected: git name and email, alpha tool +3 more");
     expect(selectedLine()!.length).toBeLessThanOrEqual(60);
     clear();
     await press(input, KEY.space);
-    expect(selectedLine()).toBe("│  Selected: git name and email");
+    expect(selectedLine()).toBe("┃  Selected: git name and email");
     clear();
     await press(input, KEY.down, KEY.space);
-    expect(selectedLine()).toBe("│  Selected: git name and email, alpha tool");
+    expect(selectedLine()).toBe("┃  Selected: git name and email, alpha tool");
     await press(input, KEY.enter);
     await p;
     // The submitted line is the same list without the label.
@@ -436,7 +513,7 @@ describe("rungSelect", () => {
     expect(text()).toMatch(/Everything else \(3 items, 340 B\)\s+8\/8\n/);
     expect(text()).not.toContain("1 skip");
     expect(text()).toMatch(/Keychain, device-bound\s+1\n/);
-    expect(text()).toContain("space tick or change   ← → fold   enter next   esc back");
+    expect(text()).toContain("┗  space tick or change • ← → fold • enter next • esc back");
     clear();
     await press(input, KEY.down, KEY.down, KEY.space);
     expect(lines().filter(l => /[○●] \.demo-token/.test(l)).at(-1)).toMatch(/credential  copy$/);
@@ -465,17 +542,17 @@ describe("rungSelect", () => {
     const tail = () => text().split("\n").slice(-4);
     expect(tail()).toEqual([
       expect.stringMatching(/Selected: none$/),
-      expect.stringMatching(/^│  0 ticked$/),
-      expect.stringMatching(/^│  large items are listed but never copied without a tick$/),
-      expect.stringMatching(/^└  space tick/),
+      expect.stringMatching(/^┃  0 ticked$/),
+      expect.stringMatching(/^┃  large items are listed but never copied without a tick$/),
+      expect.stringMatching(/^┗  space tick/),
     ]);
     // 20 rows less the cursor line, the five fixed lines, three detail rows and two footer rows leaves 9: twelve entries do not fit.
     expect(text()).toMatch(/↓ \d+ more/);
-    const blankDetail = text().split("\n").filter(l => l === "│").length;
+    const blankDetail = text().split("\n").filter(l => l === "┃").length;
     expect(blankDetail).toBeGreaterThanOrEqual(3);
     clear();
     await press(input, KEY.down, KEY.space);
-    expect(tail()[1]).toMatch(/^│  1 ticked$/);
+    expect(tail()[1]).toMatch(/^┃  1 ticked$/);
     await press(input, KEY.enter);
     await p;
   });

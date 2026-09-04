@@ -14,7 +14,7 @@ function capture(): { output: PassThrough; text(): string; raw(): string } {
 describe("wsp init opening", () => {
   it("on a terminal: the wordmark in greys, then the badge line with the tagline and version opens the frame", () => {
     const c = capture();
-    opening({ output: c.output, isTTY: true, env: {} }, { command: "init", version: "0.1.0", yes: false });
+    opening({ output: c.output, isTTY: true, env: { TERM: "xterm-256color" } }, { command: "init", version: "0.1.0", yes: false });
     const lines = c.text().split("\n");
     expect(lines[0]).toBe("");
     expect(lines.slice(1, 7)).toEqual(WORDMARK);
@@ -33,11 +33,13 @@ describe("wsp init opening", () => {
     expect(new Set(WORDMARK.map(r => r.length)).size).toBe(1);
   });
 
-  it("NO_COLOR keeps the letters and drops the shades", () => {
-    const c = capture();
-    opening({ output: c.output, isTTY: true, env: { NO_COLOR: "1" } }, { command: "init", version: "0.1.0", yes: false });
-    expect(c.raw()).not.toContain("\x1b[38;5;");
-    expect(c.text().split("\n").slice(1, 7)).toEqual(WORDMARK);
+  it("NO_COLOR, TERM=dumb and a 16-colour terminal keep the letters and drop the shades", () => {
+    for (const env of [{ TERM: "xterm-256color", NO_COLOR: "1" }, { TERM: "dumb" }, { TERM: "xterm" }]) {
+      const c = capture();
+      opening({ output: c.output, isTTY: true, env }, { command: "init", version: "0.1.0", yes: false });
+      expect(c.raw()).not.toContain("\x1b[38;5;");
+      expect(c.text().split("\n").slice(1, 7)).toEqual(WORDMARK);
+    }
   });
 
   it("off a terminal, and under --yes, one plain line with the version", () => {

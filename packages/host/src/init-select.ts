@@ -9,8 +9,8 @@ import { createInterface, emitKeypressEvents } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import { styleText } from "node:util";
 import { Prompt, isCancel } from "@clack/core";
-import { S_BAR, S_BAR_END, S_STEP_ACTIVE, S_STEP_CANCEL, S_STEP_SUBMIT } from "@clack/prompts";
-import { GUTTER, ellipsize, rowsOf, summarize, viewport, widthOf } from "./init-layout.js";
+import { S_BAR, S_STEP_ACTIVE, S_STEP_CANCEL, S_STEP_SUBMIT } from "@clack/prompts";
+import { GUTTER, S_BAR_FOCUS, S_BAR_FOCUS_END, colourDepth, ellipsize, helpLine, isTTY, rowsOf, summarize, viewport, widthOf, type HelpKey } from "./init-layout.js";
 
 export interface SelectItem {
   id: string;
@@ -73,6 +73,9 @@ export const LABEL_CAP = 40;
 const dim = (s: string): string => styleText("dim", s);
 const LOCKED_WORD = "always included";
 const SELECTED = "Selected: ";
+const KEY_NEXT: HelpKey = { key: "enter", does: "next" };
+const KEY_BACK: HelpKey = { key: "esc", does: "back" };
+const KEY_FOLD: HelpKey = { key: "← →", does: "fold" };
 
 export function matches(item: SelectItem, query: string): boolean {
   const q = query.trim().toLowerCase();
@@ -306,9 +309,9 @@ class RungPrompt extends Prompt<Set<string>> {
     return `${hint}${GUTTER}${(answer ?? "").padEnd(this.answerWidth)}`;
   }
 
-  private line(glyph: string, label: string, second: string, indent: number, cols: { label: number; second: number }, current: boolean, primary: boolean): string {
+  private line(glyph: string, label: string, second: string, indent: number, cols: { label: number; second: number }, current: boolean, heading: boolean): string {
     const field = ellipsize(label, cols.label - indent).padEnd(cols.label - indent);
-    const text = current || primary ? field : dim(field);
+    const text = heading ? styleText("bold", field) : current ? field : dim(field);
     return `${current ? styleText("cyan", "❯") : " "} ${" ".repeat(indent)}${glyph} ${text}${second !== "" ? `${GUTTER}${dim(second.padStart(cols.second))}` : ""}`.trimEnd();
   }
 
@@ -368,13 +371,13 @@ class RungPrompt extends Prompt<Set<string>> {
     const withChoices = this.o.items.filter(i => i.choices !== undefined);
     const spread = withChoices.length > 0 && !this.mixed;
     const answer = spread ? spreadOf(withChoices, this.choices) : this.selected(width - EDGE);
-    const title = `${this.o.title}${GUTTER}${dim(this.o.counter)}`;
+    const counter = `${GUTTER}${dim(this.o.counter)}`;
 
     if (this.state === "submit" || (this.state === "cancel" && this.back)) {
-      return `${styleText("green", S_STEP_SUBMIT)}  ${title}\n${dim(S_BAR)}  ${dim(this.back ? "back" : answer)}`;
+      return `${styleText("green", S_STEP_SUBMIT)}  ${this.o.title}${counter}\n${dim(S_BAR)}  ${dim(this.back ? "back" : answer)}`;
     }
     if (this.state === "cancel") {
-      return `${styleText("red", S_STEP_CANCEL)}  ${title}\n${dim(S_BAR)}  ${dim("cancelled")}`;
+      return `${styleText("red", S_STEP_CANCEL)}  ${this.o.title}${counter}\n${dim(S_BAR)}  ${dim("cancelled")}`;
     }
 
     const entries = this.entries();
@@ -386,10 +389,10 @@ class RungPrompt extends Prompt<Set<string>> {
     const room = rowsOf(this.o.output) - 1 - FIXED_LINES - detail.length - footer.length;
     const { start, end } = viewport(entries.length, this.cursor, entries.length <= room ? entries.length : room - 2);
     const cols = this.columns(width);
-    const bar = dim(S_BAR);
+    const bar = dim(S_BAR_FOCUS);
 
     const lines: string[] = [];
-    lines.push(`${styleText("cyan", S_STEP_ACTIVE)}  ${title}${spread ? `${GUTTER}${dim(answer)}` : ""}`);
+    lines.push(`${styleText("cyan", S_STEP_ACTIVE)}  ${styleText("cyan", this.o.title)}${counter}${spread ? `${GUTTER}${dim(answer)}` : ""}`);
     lines.push(`${bar}  ${dim("search")}  ${this.userInput}${styleText("inverse", " ")}`);
     if (this.o.items.length === 0) lines.push(`${bar}  ${dim("nothing found")}`);
     else if (entries.length === 0) lines.push(`${bar}  ${dim("no match")}`);
@@ -400,8 +403,12 @@ class RungPrompt extends Prompt<Set<string>> {
     for (const d of detail) lines.push(`${bar}  ${dim(ellipsize(d, width - EDGE))}`.trimEnd());
     lines.push(`${bar}  ${dim(`${SELECTED}${this.selected(width - EDGE - SELECTED.length)}`)}`);
     for (const f of footer) lines.push(`${bar}  ${dim(ellipsize(f, width - EDGE))}`.trimEnd());
-    const keys = this.mixed ? "space tick or change   ← → fold   enter next   esc back" : withChoices.length > 0 ? "space change   enter next   esc back" : "space tick   ← → fold   enter next   esc back";
-    lines.push(`${dim(S_BAR_END)}  ${dim(keys)}`);
+    const keys: HelpKey[] = this.mixed
+      ? [{ key: "space", does: "tick or change" }, KEY_FOLD, KEY_NEXT, KEY_BACK]
+      : withChoices.length > 0
+        ? [{ key: "space", does: "change" }, KEY_NEXT, KEY_BACK]
+        : [{ key: "space", does: "tick" }, KEY_FOLD, KEY_NEXT, KEY_BACK];
+    lines.push(`${dim(S_BAR_FOCUS_END)}  ${helpLine(keys, colourDepth(isTTY(this.o.output)))}`);
     return lines.join("\n");
   }
 }

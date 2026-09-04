@@ -1,9 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The few width rules every wsp init screen shares: cut to a width with an
-// ellipsis, pad cells into aligned columns, and print a duration.
+// The few rules every wsp init screen shares: cut to a width with an
+// ellipsis, pad cells into aligned columns, print a duration, the bar down the
+// left of the screen being answered, the help line, and a card in the frame.
 import type { Writable } from "node:stream";
+import { WriteStream } from "node:tty";
+import { styleText } from "node:util";
+import { S_STEP_SUBMIT, log, unicode } from "@clack/prompts";
 
 export const GUTTER = "  ";
+/** The bar and its end on the screen being answered; finished screens keep clack's thin ones. Both one cell wide, so focus moving never shifts a column. */
+export const S_BAR_FOCUS = unicode ? "┃" : "|";
+export const S_BAR_FOCUS_END = unicode ? "┗" : "+";
 
 /** The text cut to fit width, ending in an ellipsis when anything was dropped. */
 export function ellipsize(text: string, width: number): string {
@@ -57,4 +64,46 @@ export function summarize(labels: readonly string[], width: number, named = 3): 
     if (line.length <= width) return line;
   }
   return labels.length === 0 ? "" : `${ellipsize(labels[0]!, width - more(1).length)}${more(1)}`;
+}
+
+/** The line broken at word ends to fit the width, the rest indented by two; a line that fits is left as it is, a word longer than the width is cut. */
+export function wrap(text: string, width: number): string[] {
+  if (text.length <= width) return [text];
+  const cut = text.lastIndexOf(" ", width);
+  if (cut < 1 || text.slice(0, cut).trim() === "") return [ellipsize(text, width)];
+  return [text.slice(0, cut).trimEnd(), ...wrap(`  ${text.slice(cut + 1).trimStart()}`, width)];
+}
+
+/** Whether the stream is a terminal. */
+export const isTTY = (output: Writable | undefined): boolean => output !== undefined && "isTTY" in output && output.isTTY === true;
+
+/** Colour depth in bits for what this process draws: 1 (none) off a terminal and when the env says so (NO_COLOR, TERM=dumb), else Node's reading of TERM and COLORTERM; FORCE_COLOR wins, as it does for styleText. */
+export function colourDepth(tty: boolean, env: NodeJS.ProcessEnv = process.env): number {
+  if (!tty && env["FORCE_COLOR"] === undefined) return 1;
+  return WriteStream.prototype.getColorDepth(env);
+}
+
+/** One 256-colour grey around text; written only where colourDepth says the terminal has 256 colours (8 bits) or more. */
+export const grey = (n: number, s: string): string => `\x1b[38;5;${n}m${s}\x1b[39m`;
+// Greys from the middle of the ramp, so they read on dark and light backgrounds alike; the keys a step brighter than what they do.
+const KEY_GREY = 247;
+const DESC_GREY = 243;
+const DOT = unicode ? " • " : "   ";
+
+export interface HelpKey {
+  key: string;
+  does: string;
+}
+
+/** The help line under a screen at a colour depth: keys in one grey and what they do in a dimmer one from 256 colours up, plain keys and dim words at 16, plain text at none; entries joined with a dot. */
+export function helpLine(keys: readonly HelpKey[], depth: number): string {
+  if (depth <= 1) return keys.map(k => `${k.key} ${k.does}`).join(DOT);
+  if (depth < 8) return keys.map(k => `${k.key} ${styleText("dim", k.does)}`).join(styleText("dim", DOT));
+  return keys.map(k => `${grey(KEY_GREY, k.key)} ${grey(DESC_GREY, k.does)}`).join(grey(DESC_GREY, DOT));
+}
+
+/** A block in the frame: a bold title on the step glyph, then its lines down the bar, wrapped to the width. */
+export function card(title: string, lines: readonly string[], output: Writable): void {
+  const width = widthOf(output) - 3;
+  log.message([styleText("bold", title), ...lines.flatMap(l => wrap(l, width))], { output, symbol: styleText("green", S_STEP_SUBMIT) });
 }
