@@ -128,29 +128,27 @@ export class PortWatcher extends EventEmitter {
   }
 
   private async diff(): Promise<void> {
-    {
-      const next = new Map((await this.source()).map(p => [p.port, p] as const));
-      if (!this.primed) {
-        this.primed = true;
-        this.known = next;
-        return;
-      }
-      for (const [port, row] of next) {
-        if (!this.known.has(port)) {
-          this.emit("port.open", {
-            type: "port.open",
-            port,
-            pid: row.pid,
-            ...(row.process !== undefined ? { process: row.process } : {}),
-            loopback: row.loopback,
-          } satisfies PortOpenEvent);
-        }
-      }
-      for (const port of this.known.keys()) {
-        if (!next.has(port)) this.emit("port.close", { type: "port.close", port } satisfies PortCloseEvent);
-      }
+    const next = new Map((await this.source()).map(p => [p.port, p] as const));
+    if (!this.primed) {
+      this.primed = true;
       this.known = next;
+      return;
     }
+    for (const [port, row] of next) {
+      if (!this.known.has(port)) {
+        this.emit("port.open", {
+          type: "port.open",
+          port,
+          pid: row.pid,
+          ...(row.process !== undefined ? { process: row.process } : {}),
+          loopback: row.loopback,
+        } satisfies PortOpenEvent);
+      }
+    }
+    for (const port of this.known.keys()) {
+      if (!next.has(port)) this.emit("port.close", { type: "port.close", port } satisfies PortCloseEvent);
+    }
+    this.known = next;
   }
 
   start(): void {

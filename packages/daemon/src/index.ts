@@ -71,3 +71,4 @@ export {
   type GitDiffFile,
   type GitDiffScope,
 } from "./git-ops.js";
+export { localhostPortOf, localhostPortsIn, settledLocalPorts } from "./local-urls.js";

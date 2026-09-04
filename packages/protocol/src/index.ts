@@ -36,6 +36,16 @@ export function hostOf(url: string): string | undefined {
 /** A callback port the laptop can bind without root; the host refuses anything else before it listens. */
 export const RelayPort = z.number().int().min(1024).max(65535);
 
+/** A guest port the host forwards to this computer's loopback (localhost:<port>
+ * here reaches the workspace's listener). The host holds them; the app lists
+ * them and stops them. name is what the app shows: the workspace's, or the
+ * builder's, since a builder's forwards carry the builder id. kind says why the
+ * port is open: url, a link the workspace printed, which the app offers to
+ * open; callback, a sign-in flow's redirect, which the app names and never
+ * dials (a bare request would end the flow). */
+export const PortForward = z.object({ workspaceId: z.string(), port: RelayPort, startedAt: z.string(), name: z.string(), kind: z.enum(["url", "callback"]) });
+export type PortForward = z.infer<typeof PortForward>;
+
 // --- backend capabilities ----------------------------------------------------
 
 /** Honest per-backend feature flags; the UI degrades based on these, never on probing. */
@@ -368,6 +378,11 @@ export const ALREADY_APPLIED = "already applied";
  * runtime and on sessions.history replies, which a client reads whole. */
 const sequenced = { seq: z.number().int().positive().optional() };
 
+/** The host opened or closed a forward; the runtime relays these to the app's socket and emits none itself. */
+export const ForwardOpenEvent = z.object({ type: z.literal("forward.open"), forward: PortForward });
+export const ForwardCloseEvent = z.object({ type: z.literal("forward.close"), workspaceId: z.string(), port: RelayPort });
+export type ForwardEvent = z.infer<typeof ForwardOpenEvent> | z.infer<typeof ForwardCloseEvent>;
+
 export const EventUnion = z.discriminatedUnion("type", [
   WorkspaceCreatedEvent.extend(sequenced),
   WorkspaceNappedEvent.extend(sequenced),
@@ -384,6 +399,8 @@ export const EventUnion = z.discriminatedUnion("type", [
   PortCloseEvent.extend(sequenced),
   InboxFileEvent.extend(sequenced),
   GoldenStageEvent.extend(sequenced),
+  ForwardOpenEvent.extend(sequenced),
+  ForwardCloseEvent.extend(sequenced),
 ]);
 export type EventUnion = z.infer<typeof EventUnion>;
 
@@ -574,6 +591,10 @@ export const DaemonEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("tunnel.data"), tunnelId: z.string(), data: z.string() }),
   /** The guest side closed; the laptop connection ends after any data before it. */
   z.object({ type: z.literal("tunnel.end"), tunnelId: z.string() }),
+  /** A pty printed, or a tool asked to open, a plain http URL on a local host
+   * with an explicit port (http://localhost:8123/, 127.0.0.1:8123): the port a
+   * person would click. Only the port travels; the host forwards it here. */
+  z.object({ type: z.literal("localhost.url"), port: RelayPort }),
 ]);
 export type DaemonEvent = z.infer<typeof DaemonEvent>;
 
@@ -673,6 +694,10 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
    * reports. Replies with the WorkspaceView on its new machine; id and name
    * are kept. The way out of a zombie reach state. */
   z.object({ id: reqId, op: z.literal("workspaces.rebuild"), workspaceId: z.string() }),
+  /** Replies with { forwards: PortForward[] }, the host's open forwards; empty when no host holds any. */
+  z.object({ id: reqId, op: z.literal("forwards.list") }),
+  /** Closes one forward; refused when none is open on that workspace and port. */
+  z.object({ id: reqId, op: z.literal("forwards.stop"), workspaceId: z.string(), port: RelayPort }),
 ]);
 export type RuntimeRequest = z.infer<typeof RuntimeRequest>;
 

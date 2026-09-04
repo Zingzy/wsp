@@ -80,6 +80,22 @@ describe("terminal URL detection", () => {
     expect(callbackPortsIn("nothing here")).toEqual([]);
   });
 
+  it("strips SGR colour and bold inside a URL and joins readline's soft wrap before matching", () => {
+    expect(callbackPortsIn(`Visit \x1b[36m${WRANGLER}\x1b[39m\n`)).toEqual([8976]);
+    // Bold around the port digits, the way vite prints its own: the URL must not end at the escape.
+    expect(callbackPortsIn(`${WRANGLER.replace("%3A8976", "%3A\x1b[1m8976\x1b[22m")}\n`)).toEqual([8976]);
+    const head = WRANGLER.slice(0, WRANGLER.indexOf("%3A8976") + "%3A89".length);
+    const wrapped = `${head} \r${WRANGLER.slice(head.length)}`;
+    expect(callbackPortsIn(`${wrapped}\n`, head.length)).toEqual([8976]);
+    expect(callbackPortsIn(`${wrapped}\n`, head.length + 1)).toEqual([]);
+    // Without the width, or at another width, the carriage return is a redraw and the URL ends at the space.
+    expect(callbackPortsIn(`${wrapped}\n`)).toEqual([]);
+    expect(callbackPortsIn(`${wrapped}\n`, 80)).toEqual([]);
+    // An OSC 8 hyperlink whose visible text is a word: the URL is in the parameter.
+    expect(callbackPortsIn(`\x1b]8;;${WRANGLER}\x07Open\x1b]8;;\x07\n`)).toEqual([8976]);
+    expect(stripOsc8(`\x1b[1mhttp://x.test/\x1b[22m`)).toBe(`\x1b[1mhttp://x.test/\x1b[22m`);
+  });
+
   it("matches a URL split across chunks once, through the kept tail", () => {
     const s = new TerminalUrlScanner();
     const cut = WRANGLER.indexOf("redirect_uri") + 20;

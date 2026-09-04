@@ -29,6 +29,7 @@ import { useNowMinute } from "../hooks/useNowMinute.js";
 import { cn } from "../lib/utils.js";
 import { useSelectedId, useStore } from "../protocol/store.js";
 import { onNewWorkspaceRequest } from "../shell/shellRequests.js";
+import { ForwardsList } from "./ForwardsList.js";
 import { NewWorkspaceDialog } from "./NewWorkspaceDialog.js";
 import { ProjectFavicon } from "./ProjectFavicon.js";
 import {
@@ -346,6 +347,7 @@ export function WorkspaceSidebar() {
               ) : null}
             </SidebarGroupContent>
           </SidebarGroup>
+          <ForwardsList />
         </SidebarContent>
       </div>
       <SidebarChromeFooter primary={{ icon: <PlusIcon />, label: "New workspace", onClick: openDialog, disabled: api === null }} items={[]}>

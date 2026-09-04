@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
+import type { ForwardEvent, PortForward } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type HarnessSession } from "../src/runtime.js";
-import { serveRuntime, type RuntimeServer } from "../src/serve.js";
+import { serveRuntime, type ForwardsSource, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
 import { WsClient } from "./ws-client.js";
 import { stubBackend } from "./stub-backend.js";
@@ -403,6 +404,75 @@ describe("serveRuntime snapshot lineage", () => {
     expect(refused).toMatchObject({ ok: false, kind: "missing" });
     expect(String(refused["error"])).toContain("v9");
     expect((await c.request("snapshots.list"))["lineage"]).toMatchObject({ head: 1 });
+    c.close();
+  });
+});
+
+describe("serveRuntime forwards (the host's, listed and stopped from the app)", () => {
+  function fakeForwards() {
+    const listeners = new Set<(e: ForwardEvent) => void>();
+    const open: PortForward[] = [];
+    const stops: [string, number][] = [];
+    const source: ForwardsSource = {
+      list: () => [...open],
+      stop: (workspaceId, port) => {
+        stops.push([workspaceId, port]);
+        const i = open.findIndex(f => f.workspaceId === workspaceId && f.port === port);
+        if (i < 0) return false;
+        open.splice(i, 1);
+        return true;
+      },
+      on: fn => {
+        listeners.add(fn);
+        return () => listeners.delete(fn);
+      },
+    };
+    const emit = (e: ForwardEvent): void => {
+      for (const fn of listeners) fn(e);
+    };
+    return { source, open, stops, emit, listeners };
+  }
+
+  it("forwards.list is the source's list, forwards.stop closes one and refuses an unknown one", async () => {
+    const { source, open, stops } = fakeForwards();
+    open.push({ workspaceId: "ws_1", port: 8123, startedAt: "2026-09-04T10:00:00.000Z", name: "api", kind: "url" });
+    srv = await serveRuntime(rt(), { port: 0, authToken: "secret", forwards: source });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    expect((await c.request("forwards.list"))["forwards"]).toEqual([{ workspaceId: "ws_1", port: 8123, startedAt: "2026-09-04T10:00:00.000Z", name: "api", kind: "url" }]);
+    expect((await c.request("forwards.stop", { workspaceId: "ws_1", port: 8123 })).ok).toBe(true);
+    const again = await c.request("forwards.stop", { workspaceId: "ws_1", port: 8123 });
+    expect(again.ok).toBe(false);
+    expect(again["error"]).toBe("nothing is forwarding localhost:8123 for that workspace");
+    expect(stops).toEqual([["ws_1", 8123], ["ws_1", 8123]]);
+    expect((await c.request("forwards.list"))["forwards"]).toEqual([]);
+    // Below 1024 never reaches the source: the wire refuses it.
+    expect((await c.request("forwards.stop", { workspaceId: "ws_1", port: 80 })).ok).toBe(false);
+    expect(stops).toHaveLength(2);
+    c.close();
+  });
+
+  it("forward events reach subscribed sockets only, and the subscription dies with the socket", async () => {
+    const { source, emit, listeners } = fakeForwards();
+    srv = await serveRuntime(rt(), { port: 0, authToken: "secret", forwards: source });
+    const sub = await WsClient.connect(srv.port, { token: "secret" });
+    const quiet = await WsClient.connect(srv.port, { token: "secret" });
+    await sub.request("events.subscribe");
+    const f = { workspaceId: "ws_1", port: 8123, startedAt: "2026-09-04T10:00:00.000Z", name: "api", kind: "url" as const };
+    emit({ type: "forward.open", forward: f });
+    emit({ type: "forward.close", workspaceId: "ws_1", port: 8123 });
+    await until(() => sub.events.length === 2);
+    expect(sub.events).toEqual([{ type: "forward.open", forward: f }, { type: "forward.close", workspaceId: "ws_1", port: 8123 }]);
+    expect(quiet.events).toEqual([]);
+    sub.close();
+    await until(() => listeners.size === 0);
+    quiet.close();
+  });
+
+  it("without a source the list is empty and a stop is refused", async () => {
+    srv = await serveRuntime(rt(), { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    expect((await c.request("forwards.list"))["forwards"]).toEqual([]);
+    expect((await c.request("forwards.stop", { workspaceId: "ws_1", port: 8123 })).ok).toBe(false);
     c.close();
   });
 });

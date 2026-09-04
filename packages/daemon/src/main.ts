@@ -11,6 +11,7 @@ import { ProcessManifest, type ManifestOptions } from "./manifest.js";
 import { linuxModeProbe, ModeWatcher, type ModeProbe } from "./mode.js";
 import { PortWatcher, procNetTcpSource, type PortOpenEvent, type PortSnapshotSource } from "./ports.js";
 import { PtyManager } from "./pty-manager.js";
+import { localhostPortOf, settledLocalPorts } from "./local-urls.js";
 import { CallbackSpotter, TerminalUrlScanner, callbackPortOf, listenOpenSocket, type OpenSocket } from "./relay.js";
 import { OpError, resolveInside } from "./workspace-paths.js";
 
@@ -149,8 +150,12 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
     /** A tool asked for a browser: open on the laptop now, name the callback port when the URL or a new loopback listener gives one. */
     open(url: string): void {
       const port = callbackPortOf(url);
-      broadcast({ type: "browser.open", url, ...(port !== undefined ? { port } : {}) });
-      if (port === undefined) spotter.spot(p => broadcast({ type: "callback.port", port: p }));
+      const local = localhostPortOf(url);
+      // A local page with no callback port (a dev server opening itself) is not a sign-in: forwarded and listed, no page announced.
+      // A local authorize page whose redirect_uri names a port (a local Supabase or Keycloak) is both: the page to click and a local URL.
+      if (port !== undefined || local === undefined) broadcast({ type: "browser.open", url, ...(port !== undefined ? { port } : {}) });
+      if (local !== undefined) broadcast({ type: "localhost.url", port: local });
+      else if (port === undefined) spotter.spot(p => broadcast({ type: "callback.port", port: p }));
     },
   };
   const ctx: Ctx = { ptys, manifest, modes, root, getPortWatcher, getInboxWatcher, spotter, broadcast };
@@ -296,9 +301,11 @@ async function handle(ws: WebSocket, state: ConnState, ctx: Ctx, msg: Request): 
         env: msg["env"] as Record<string, string> | undefined,
       });
       // The forward's fallback: a printed sign-in URL names its callback port even when no shim ran.
-      const scanner = new TerminalUrlScanner();
+      const scanner = new TerminalUrlScanner(undefined, () => s.cols);
+      const local = new TerminalUrlScanner(settledLocalPorts, () => s.cols);
       s.attach(data => {
         for (const port of scanner.feed(data)) ctx.broadcast({ type: "callback.port", port });
+        for (const port of local.feed(data)) ctx.broadcast({ type: "localhost.url", port });
       });
       reply(ws, msg.id, { ptyId: s.id, pid: s.pid });
       return;

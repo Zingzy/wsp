@@ -7,10 +7,11 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { OPEN_SHIM_SCRIPT as DAEMON_SHIM_SCRIPT, OPEN_SHIM_PATH as DAEMON_SHIM_PATH, startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { BROWSER_SHIM_PATH, type GoldenManifest, type Machine } from "@wsp/engine";
+import type { ForwardEvent } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Clock, type GoldenRecipe, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
-import { OPEN_SHIM_PATH, OPEN_SHIM_SCRIPT, type ConnectOptions, type DaemonSocket } from "../src/doctor.js";
-import { RELAY_CAP_MS, RELAY_MIN_PORT, RELAY_WINDOW_MS, startCallbackRelay, type CallbackRelay } from "../src/relay.js";
+import { OPEN_SHIM_PATH, OPEN_SHIM_SCRIPT, connectDaemonSocket, type ConnectOptions, type DaemonSocket } from "../src/doctor.js";
+import { FORWARD_IDLE_MS, FORWARD_MAX_PER_TARGET, RELAY_CAP_MS, RELAY_MIN_PORT, RELAY_WINDOW_MS, startCallbackRelay, type CallbackRelay } from "../src/relay.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 
 const execFileAsync = promisify(execFile);
@@ -114,7 +115,8 @@ function relayRuntime(guestUrl: string, goldenRecipe?: GoldenRecipe): { rt: Runt
   };
   const store = memoryStore();
   void store.put("goldens", "default", GOLDEN);
-  return { rt: createRuntime({ backend, store, adapters: {}, ...(goldenRecipe !== undefined ? { goldenRecipe } : {}) }), backend };
+  // A wake pings the daemon through the preview route; nothing answers on guest.test, so the wait is kept short.
+  return { rt: createRuntime({ backend, store, adapters: {}, wake: { pingTimeoutMs: 100 }, ...(goldenRecipe !== undefined ? { goldenRecipe } : {}) }), backend };
 }
 
 async function freePort(): Promise<number> {
@@ -674,5 +676,516 @@ describe("callback relay end to end through a real daemon", () => {
     } finally {
       process.off("uncaughtException", onThrow);
     }
+  });
+});
+
+describe("localhost forwards over a fake daemon link", () => {
+  let relay: CallbackRelay | undefined;
+  const servers: Server[] = [];
+  afterEach(async () => {
+    await relay?.close();
+    relay = undefined;
+    for (const s of servers.splice(0)) await new Promise<void>(r => s.close(() => r()));
+  });
+
+  async function setup(o: { idle?: number; guestPorts?: number[] } = {}) {
+    const { rt } = relayRuntime("http://guest.test");
+    const fake = fakeConnect();
+    const clock = fakeClock();
+    const lines: string[] = [];
+    const events: ForwardEvent[] = [];
+    /** What every link's ports.watch answers; a test mutates it before a redial or a wake. */
+    const guestPorts = o.guestPorts ?? [];
+    const ws = await rt.workspaces.create({ golden: "snap_gold", name: "task-1" });
+    relay = startCallbackRelay({
+      runtime: rt,
+      openUrl: async () => true,
+      log: l => lines.push(l),
+      clock,
+      connect: async c => {
+        const l = (await fake.connect(c)) as FakeLink;
+        l.ports = guestPorts;
+        return l;
+      },
+      ...(o.idle !== undefined ? { idleMs: o.idle } : {}),
+      jitter: () => 0,
+    });
+    relay.on(e => events.push(e));
+    await until(() => fake.links.length >= 1);
+    const link = fake.links[0]!;
+    await until(() => link.ops.some(x => x.op === "ports.watch"));
+    return { rt, fake, clock, lines, events, ws, link, guestPorts };
+  }
+
+  it("the default idle window is ten minutes", () => {
+    expect(FORWARD_IDLE_MS).toBe(10 * 60_000);
+  });
+
+  it("localhost.url forwards its port, one per port per workspace, and the app hears each one open", async () => {
+    const { lines, events, link, ws, clock } = await setup();
+    const a = await freePort();
+    const b = await freePort();
+    link.emit({ type: "localhost.url", port: a });
+    link.emit({ type: "localhost.url", port: b });
+    await until(() => relay!.forwards().length === 2);
+    expect(relay!.forwards().map(f => ({ port: f.port, kind: f.kind })).sort((x, y) => x.port - y.port)).toEqual([{ port: a, kind: "url" }, { port: b, kind: "url" }].sort((x, y) => x.port - y.port));
+    expect(relay!.list()).toEqual(expect.arrayContaining([
+      { workspaceId: ws.id, port: a, startedAt: new Date(clock.t).toISOString(), name: "task-1", kind: "url" },
+      { workspaceId: ws.id, port: b, startedAt: new Date(clock.t).toISOString(), name: "task-1", kind: "url" },
+    ]));
+    expect(events.map(e => e.type)).toEqual(["forward.open", "forward.open"]);
+    expect(lines).toContain(`task-1: forwarding localhost:${a} on this computer to the workspace (closes after 10 min without traffic)`);
+
+    // The same port again is the same forward: no second bind, no second line, no second event.
+    link.emit({ type: "localhost.url", port: a });
+    await new Promise(r => setTimeout(r, 50));
+    expect(relay!.forwards()).toHaveLength(2);
+    expect(lines.filter(l => l.includes(`localhost:${a}`))).toHaveLength(1);
+    expect(events).toHaveLength(2);
+
+    // Both families listen, and a connection rides the tunnel to the guest.
+    const c = await dial(a, "::1");
+    await until(() => link.ops.some(x => x.op === "tunnel.open" && x.extra["port"] === a));
+    c.destroy();
+  });
+
+  it("traffic keeps a url forward alive; the idle window without any closes it and frees the port", async () => {
+    const { clock, lines, events, link, ws } = await setup({ idle: 1_000 });
+    const port = await freePort();
+    link.emit({ type: "localhost.url", port });
+    await until(() => relay!.forwards().length === 1);
+    expect(relay!.forwards()[0]).toMatchObject({ kind: "url", expiresAt: clock.t + 1_000 });
+
+    // A connection at 500 ms moves the close to 1500 ms.
+    clock.advance(500);
+    const c = await dial(port);
+    await until(() => link.ops.some(x => x.op === "tunnel.open"));
+    expect(relay!.forwards()[0]!.expiresAt).toBe(clock.t + 1_000);
+
+    // Bytes from this computer at 900 ms move it to 1900 ms.
+    clock.advance(400);
+    c.write("GET / HTTP/1.1\r\n\r\n");
+    await until(() => link.ops.some(x => x.op === "tunnel.write"));
+    expect(relay!.forwards()[0]!.expiresAt).toBe(clock.t + 1_000);
+
+    // Bytes from the guest at 1300 ms move it to 2300 ms.
+    clock.advance(400);
+    const tunnelId = link.ops.find(x => x.op === "tunnel.open")!.extra["tunnelId"] as string;
+    link.emit({ type: "tunnel.data", tunnelId, data: Buffer.from("hi").toString("base64") });
+    expect(relay!.forwards()[0]!.expiresAt).toBe(clock.t + 1_000);
+    c.destroy();
+    clock.advance(999);
+    expect(relay!.forwards()).toHaveLength(1);
+    clock.advance(1);
+    expect(relay!.forwards()).toEqual([]);
+    expect(lines).toContain(`task-1: stopped forwarding localhost:${port} (no traffic for 0 min)`);
+    expect(events.at(-1)).toEqual({ type: "forward.close", workspaceId: ws.id, port });
+    expect(await refused(port)).toBe(true);
+  });
+
+  it("no cap: a url forward with traffic outlives the callback cap", async () => {
+    const { clock, link } = await setup();
+    const port = await freePort();
+    link.emit({ type: "localhost.url", port });
+    await until(() => relay!.forwards().length === 1);
+    for (let i = 0; i < 4; i++) {
+      clock.advance(FORWARD_IDLE_MS - 60_000);
+      const c = await dial(port);
+      await until(() => link.ops.filter(x => x.op === "tunnel.open").length === i + 1);
+      c.destroy();
+    }
+    expect(clock.t - 1_000_000).toBeGreaterThan(RELAY_CAP_MS);
+    expect(relay!.forwards()).toHaveLength(1);
+  });
+
+  it("a port this computer already uses is refused with one line, no forward and no event; nothing ends the process", async () => {
+    const { lines, events, link } = await setup();
+    const held = createServer();
+    servers.push(held);
+    await new Promise<void>(r => held.listen(0, "127.0.0.1", r));
+    const port = (held.address() as { port: number }).port;
+    const rejections: unknown[] = [];
+    const onReject = (e: unknown) => rejections.push(e);
+    process.on("unhandledRejection", onReject);
+    try {
+      link.emit({ type: "localhost.url", port });
+      await until(() => lines.length === 1);
+      expect(lines).toEqual([`task-1: port ${port} is already in use on this computer; localhost:${port} here will not reach the workspace`]);
+      for (const bad of [80, 1023, 65536, 70000, 1.5, -1, "8123"]) link.emit({ type: "localhost.url", port: bad });
+      await until(() => lines.length === 8);
+      expect(lines.slice(1)).toEqual(Array(7).fill("task-1: ignored a malformed localhost.url event from the workspace"));
+      await new Promise(r => setTimeout(r, 50));
+      expect(rejections).toEqual([]);
+      expect(relay!.forwards()).toEqual([]);
+      expect(events).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onReject);
+    }
+  });
+
+  it("a connection to a forwarded port nothing on the guest answers gets a 502 that names the forward, and one line without a URL", async () => {
+    const { lines, link } = await setup();
+    const port = await freePort();
+    link.emit({ type: "localhost.url", port });
+    await until(() => relay!.forwards().length === 1);
+    link.refuseTunnels = true;
+    const res = await fetch(`http://127.0.0.1:${port}/`);
+    expect(res.status).toBe(502);
+    expect(await res.text()).toBe(`localhost:${port} on this computer is forwarded to workspace task-1, but nothing there answered on port ${port}.\n`);
+    await until(() => lines.length === 2);
+    expect(lines[1]).toBe(`task-1: a connection to localhost:${port} here reached the workspace but nothing there answered on port ${port}`);
+    expect(lines.join("\n")).not.toContain("http://");
+  });
+
+  it("at most 16 url forwards per workspace: the next port is refused with one line until one is stopped", async () => {
+    const { lines, link, ws } = await setup();
+    const ports: number[] = [];
+    for (let i = 0; i < FORWARD_MAX_PER_TARGET + 1; i++) ports.push(await freePort());
+    for (const port of ports) link.emit({ type: "localhost.url", port });
+    await until(() => lines.length === FORWARD_MAX_PER_TARGET + 1, 5000);
+    expect(relay!.forwards()).toHaveLength(FORWARD_MAX_PER_TARGET);
+    const refusal = lines.find(l => l.includes("stop one first"))!;
+    expect(refusal).toMatch(/^task-1: not forwarding localhost:\d+; 16 ports are already forwarded for this workspace, stop one first$/);
+    const refusedPort = Number(refusal.match(/localhost:(\d+)/)![1]);
+    expect(relay!.forwards().some(f => f.port === refusedPort)).toBe(false);
+    // Stopping one makes room.
+    expect(relay!.stop(ws.id, ports.find(p => p !== refusedPort)!)).toBe(true);
+    link.emit({ type: "localhost.url", port: refusedPort });
+    await until(() => relay!.forwards().some(f => f.port === refusedPort));
+    expect(relay!.forwards()).toHaveLength(FORWARD_MAX_PER_TARGET);
+  });
+
+  it("stop from the app closes the forward and frees the port; a second stop is false", async () => {
+    const { lines, events, link, ws } = await setup();
+    const port = await freePort();
+    link.emit({ type: "localhost.url", port });
+    await until(() => relay!.forwards().length === 1);
+    expect(relay!.stop(ws.id, port)).toBe(true);
+    expect(relay!.forwards()).toEqual([]);
+    expect(relay!.list()).toEqual([]);
+    expect(lines).toContain(`task-1: stopped forwarding localhost:${port} (stopped from the app)`);
+    expect(events.at(-1)).toEqual({ type: "forward.close", workspaceId: ws.id, port });
+    expect(await refused(port)).toBe(true);
+    expect(relay!.stop(ws.id, port)).toBe(false);
+    expect(relay!.stop("nobody", port)).toBe(false);
+  });
+
+  it("a port the callback forward already holds is not forwarded twice; a link drop closes the callback forward and keeps the url forward", async () => {
+    const { lines, events, link } = await setup();
+    const p = await freePort();
+    const q = await freePort();
+    link.emit({ type: "callback.port", port: p });
+    await until(() => relay!.forwards().length === 1);
+    link.emit({ type: "localhost.url", port: p });
+    await new Promise(r => setTimeout(r, 50));
+    expect(relay!.forwards().map(f => f.kind)).toEqual(["callback"]);
+    expect(lines.some(l => l.includes("already in use"))).toBe(false);
+    // The app sees the callback forward too, told apart by its kind: a port on this computer the person can stop.
+    expect(relay!.list()).toMatchObject([{ port: p, kind: "callback" }]);
+
+    link.emit({ type: "localhost.url", port: q });
+    await until(() => relay!.forwards().length === 2);
+    link.drop();
+    await until(() => relay!.forwards().length === 1);
+    expect(relay!.forwards()).toMatchObject([{ port: q, kind: "url" }]);
+    expect(lines.filter(l => l.includes("(the daemon link dropped)"))).toEqual([`task-1: stopped forwarding localhost:${p} (the daemon link dropped)`]);
+    expect(events.filter(e => e.type === "forward.close").map(e => e.port)).toEqual([p]);
+    expect(await refused(p)).toBe(true);
+    expect(await refused(q)).toBe(false);
+  });
+
+  it("a link drop keeps a url forward bound with its idle clock running; a connection meanwhile gets the 502; the redial plumbs it through the new link with one line", async () => {
+    const { fake, clock, lines, events, link } = await setup({ idle: 10_000 });
+    const port = await freePort();
+    link.emit({ type: "localhost.url", port });
+    await until(() => relay!.forwards().length === 1);
+    const expiresAt = relay!.forwards()[0]!.expiresAt;
+    clock.advance(3_000);
+    link.drop();
+    await new Promise(r => setTimeout(r, 50));
+    expect(relay!.forwards()).toMatchObject([{ port, kind: "url", expiresAt }]);
+    expect(events.filter(e => e.type === "forward.close")).toEqual([]);
+
+    // A tab left open pings once a second: one line for the stretch, not one per connection.
+    for (let i = 0; i < 3; i++) {
+      const res = await fetch(`http://127.0.0.1:${port}/`);
+      expect(res.status).toBe(502);
+      expect(await res.text()).toContain(`localhost:${port} on this computer is forwarded to workspace task-1`);
+    }
+    expect(lines.filter(l => l.includes("found the workspace unreachable"))).toEqual([`task-1: a connection to localhost:${port} here found the workspace unreachable`]);
+
+    clock.advance(2_000);
+    await until(() => fake.links.length === 2);
+    const second = fake.links[1]!;
+    await until(() => lines.some(l => l.includes("the daemon link is back")));
+    expect(lines.filter(l => l.includes("the daemon link is back"))).toEqual([`task-1: the daemon link is back; localhost:${port} still forwarded`]);
+    expect(relay!.forwards()[0]!.expiresAt).toBe(expiresAt);
+    expect(events.filter(e => e.type === "forward.open")).toHaveLength(1);
+    const c = await dial(port);
+    await until(() => second.ops.some(x => x.op === "tunnel.open" && x.extra["port"] === port));
+    c.destroy();
+
+    // A second stretch gets its own line.
+    second.drop();
+    await new Promise(r => setTimeout(r, 50));
+    expect((await fetch(`http://127.0.0.1:${port}/`)).status).toBe(502);
+    expect((await fetch(`http://127.0.0.1:${port}/`)).status).toBe(502);
+    expect(lines.filter(l => l.includes("found the workspace unreachable"))).toHaveLength(2);
+  });
+
+  it("a connection that resets with the 502 unread, while the workspace refuses the tunnel and then while it is unreachable, does not end the host", async () => {
+    const { link } = await setup();
+    const port = await freePort();
+    link.emit({ type: "localhost.url", port });
+    await until(() => relay!.forwards().length === 1);
+    const thrown: unknown[] = [];
+    const onThrow = (e: unknown) => thrown.push(e);
+    process.on("uncaughtException", onThrow);
+    process.on("unhandledRejection", onThrow);
+    // Write a request and answer the reply with a reset instead of reading it, as a browser closing a keep-alive socket does.
+    const slam = async (): Promise<void> => {
+      const c = await dial(port);
+      c.setNoDelay(true);
+      c.write("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+      await new Promise(r => setImmediate(r));
+      c.resetAndDestroy();
+      await new Promise(r => setTimeout(r, 60));
+    };
+    try {
+      // Refusing: the link is up and the guest rejects tunnel.open, so plumb ends the socket with the 502.
+      link.refuseTunnels = true;
+      for (let i = 0; i < 5; i++) await slam();
+      await until(() => link.ops.filter(x => x.op === "tunnel.open").length === 5);
+      expect(thrown).toEqual([]);
+      // Unreachable: no link at all, so onConn ends the socket with the 502.
+      link.drop();
+      await new Promise(r => setTimeout(r, 50));
+      for (let i = 0; i < 5; i++) await slam();
+      expect(thrown).toEqual([]);
+    } finally {
+      process.off("uncaughtException", onThrow);
+      process.off("unhandledRejection", onThrow);
+    }
+    expect(relay!.forwards()).toHaveLength(1);
+  });
+
+  it("a stretch where nothing on the guest answers logs one line, and a connection that gets through starts a new stretch", async () => {
+    const { lines, link } = await setup();
+    const port = await freePort();
+    link.emit({ type: "localhost.url", port });
+    await until(() => relay!.forwards().length === 1);
+    link.refuseTunnels = true;
+    for (let i = 0; i < 3; i++) expect((await fetch(`http://127.0.0.1:${port}/`)).status).toBe(502);
+    const line = `task-1: a connection to localhost:${port} here reached the workspace but nothing there answered on port ${port}`;
+    expect(lines.filter(l => l === line)).toHaveLength(1);
+    link.refuseTunnels = false;
+    const c = await dial(port);
+    await until(() => link.ops.filter(x => x.op === "tunnel.open").length === 4);
+    c.destroy();
+    link.refuseTunnels = true;
+    expect((await fetch(`http://127.0.0.1:${port}/`)).status).toBe(502);
+    expect(lines.filter(l => l === line)).toHaveLength(2);
+  });
+
+  it("a nap pauses the idle clock and keeps the row; the wake resumes it, closes a port the workspace no longer listens on, and says so in one line per link", async () => {
+    const { rt, fake, clock, lines, events, ws, link, guestPorts } = await setup({ idle: 10_000 });
+    const a = await freePort();
+    const b = await freePort();
+    link.emit({ type: "localhost.url", port: a });
+    link.emit({ type: "localhost.url", port: b });
+    await until(() => relay!.forwards().length === 2);
+    clock.advance(4_000);
+    await rt.workspaces.nap(ws.id);
+    await until(() => !link.open);
+    // Napping: nothing closes, nothing expires, a click here gets the 502 that names the workspace.
+    clock.advance(60_000);
+    expect(relay!.forwards()).toHaveLength(2);
+    expect(events.filter(e => e.type === "forward.close")).toEqual([]);
+    const napped = await fetch(`http://127.0.0.1:${a}/`);
+    expect(napped.status).toBe(502);
+
+    // The machine kept a; b is gone.
+    guestPorts.push(a);
+    await rt.workspaces.wake(ws.id);
+    await until(() => fake.links.length === 2);
+    await until(() => relay!.forwards().length === 1);
+    expect(relay!.forwards()).toMatchObject([{ port: a, kind: "url", expiresAt: clock.t + 6_000 }]);
+    expect(lines).toContain(`task-1: stopped forwarding localhost:${b} (not listening on the workspace after the wake)`);
+    // A connection during the nap logged once; a connection after the wake goes through and a later stretch logs again.
+    expect(lines.filter(l => l.includes("found the workspace unreachable"))).toEqual([`task-1: a connection to localhost:${a} here found the workspace unreachable`]);
+    expect(lines.filter(l => l.includes("awake again"))).toEqual([`task-1: awake again; localhost:${a} still forwarded`]);
+    expect(events.filter(e => e.type === "forward.close").map(e => e.port)).toEqual([b]);
+    expect(events.filter(e => e.type === "forward.open")).toHaveLength(2);
+    expect(await refused(b)).toBe(true);
+    // The clock resumes with the 6 s it had left, not a fresh window.
+    clock.advance(5_999);
+    expect(relay!.forwards()).toHaveLength(1);
+    clock.advance(1);
+    expect(relay!.forwards()).toEqual([]);
+    expect(lines).toContain(`task-1: stopped forwarding localhost:${a} (no traffic for 0 min)`);
+  });
+
+  it("a nap closes a callback forward saying the workspace napped; a delete closes a url forward for good", async () => {
+    const { rt, fake, lines, ws, link, guestPorts } = await setup();
+    const p = await freePort();
+    const q = await freePort();
+    link.emit({ type: "callback.port", port: p });
+    link.emit({ type: "localhost.url", port: q });
+    await until(() => relay!.forwards().length === 2);
+    await rt.workspaces.nap(ws.id);
+    await until(() => relay!.forwards().length === 1);
+    expect(lines).toContain(`task-1: stopped forwarding localhost:${p} (the workspace napped)`);
+    guestPorts.push(q);
+    await rt.workspaces.wake(ws.id);
+    await until(() => fake.links.length === 2 && lines.some(l => l.includes("awake again")));
+    expect(relay!.forwards()).toMatchObject([{ port: q, kind: "url" }]);
+    await rt.workspaces.delete(ws.id);
+    await until(() => relay!.forwards().length === 0);
+    expect(lines).toContain(`task-1: stopped forwarding localhost:${q} (the workspace was deleted)`);
+    expect(await refused(q)).toBe(true);
+  });
+
+  it("after the workspace moves to a new machine, a url forward whose port the new machine does not serve closes saying so", async () => {
+    const { rt, fake, lines, ws, link } = await setup();
+    const port = await freePort();
+    link.emit({ type: "localhost.url", port });
+    await until(() => relay!.forwards().length === 1);
+    await rt.workspaces.upgrade(ws.id, { cpu: 4 });
+    await until(() => fake.links.length === 2 && relay!.forwards().length === 0);
+    expect(lines).toContain(`task-1: stopped forwarding localhost:${port} (not listening on the workspace after it moved to a new machine)`);
+    expect(await refused(port)).toBe(true);
+  });
+
+  it("a callback bind in flight does not count toward the url cap", async () => {
+    const { link } = await setup();
+    const ports: number[] = [];
+    for (let i = 0; i < FORWARD_MAX_PER_TARGET - 1; i++) ports.push(await freePort());
+    for (const port of ports) link.emit({ type: "localhost.url", port });
+    await until(() => relay!.forwards().length === FORWARD_MAX_PER_TARGET - 1);
+    const x = await freePort();
+    const y = await freePort();
+    link.emit({ type: "callback.port", port: x });
+    link.emit({ type: "localhost.url", port: y });
+    await until(() => relay!.forwards().length === FORWARD_MAX_PER_TARGET + 1);
+    expect(relay!.forwards().filter(f => f.kind === "url")).toHaveLength(FORWARD_MAX_PER_TARGET);
+    expect(relay!.forwards().find(f => f.port === x)?.kind).toBe("callback");
+  });
+
+  it("two workspaces asking for the same laptop port: the second is refused as in use, the first keeps it", async () => {
+    const { rt, fake, lines, link } = await setup();
+    const port = await freePort();
+    link.emit({ type: "localhost.url", port });
+    await until(() => relay!.forwards().length === 1);
+    await rt.workspaces.create({ golden: "snap_gold", name: "task-2" });
+    await until(() => fake.links.length === 2);
+    const second = fake.links[1]!;
+    await until(() => second.ops.some(x => x.op === "ports.watch"));
+    second.emit({ type: "localhost.url", port });
+    await until(() => lines.some(l => l.startsWith("task-2:")));
+    expect(lines.filter(l => l.startsWith("task-2:"))).toEqual([`task-2: port ${port} is already in use on this computer; localhost:${port} here will not reach the workspace`]);
+    expect(relay!.forwards()).toHaveLength(1);
+    const c = await dial(port);
+    await until(() => link.ops.some(x => x.op === "tunnel.open"));
+    c.destroy();
+  });
+});
+
+describe("localhost forwards end to end through a real daemon", () => {
+  let daemon: DaemonHandle | undefined;
+  let relay: CallbackRelay | undefined;
+  let guest: Server | undefined;
+  let dir: string | undefined;
+  afterEach(async () => {
+    await relay?.close();
+    await daemon?.close();
+    await new Promise<void>(r => (guest ? guest.close(() => r()) : r()));
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    relay = daemon = guest = dir = undefined;
+  });
+
+  it("a URL printed in a workspace pty forwards its port; a request here reaches the guest listener; stop closes it", { timeout: 15_000 }, async () => {
+    dir = mkdtempSync(join(tmpdir(), "wsp-forward-e2e-"));
+    daemon = await startDaemon({ host: "127.0.0.1", port: 0, token: TOKEN, openSocketPath: join(dir, "open.sock"), portsSource: async () => [] });
+    const { rt } = relayRuntime(`http://127.0.0.1:${daemon.port}/?pt_token=ignored`);
+    const ws = await rt.workspaces.create({ golden: "snap_gold", name: "task-1" });
+
+    // Guest and laptop share this machine's loopback: the guest server takes 127.0.0.1 (where the daemon dials first), the laptop side [::1].
+    const seen: string[] = [];
+    const body = "<h1>Directory listing</h1>\n";
+    guest = createServer(s => {
+      s.on("data", d => {
+        seen.push(d.toString());
+        s.end(`HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
+      });
+    });
+    await new Promise<void>(r => guest!.listen(0, "127.0.0.1", r));
+    const port = (guest.address() as { port: number }).port;
+
+    const lines: string[] = [];
+    const events: ForwardEvent[] = [];
+    let linked = false;
+    relay = startCallbackRelay({
+      runtime: rt,
+      openUrl: async () => true,
+      log: l => lines.push(l),
+      listenHosts: ["::1"],
+      retryMs: 200,
+      jitter: () => 0,
+      connect: async c => {
+        const s = await connectDaemonSocket(c);
+        linked = true;
+        void s.closed.then(() => {
+          linked = false;
+        });
+        return s;
+      },
+    });
+    relay.on(e => events.push(e));
+    // The daemon pushes to the sockets it has; the host's link must be one of them before the tool prints.
+    await until(() => linked, 5000);
+
+    // A wsp terminal: a pty on the daemon, the tool prints its URL. The typed line carries the port only
+    // as a variable: readline wraps its own echo at the pty width, and a wrap inside a literal URL is not
+    // what a tool's output looks like.
+    const sock = await connectDaemonSocket({ url: `ws://127.0.0.1:${daemon.port}`, token: TOKEN });
+    try {
+      const created = await sock.op("pty.create", { shell: "bash" });
+      await sock.op("pty.write", { ptyId: created["ptyId"], data: `P=${port}; printf 'Serving HTTP on 0.0.0.0 port %s (http://0.0.0.0:%s/) ...\\n' $P $P\n` });
+      await until(() => relay!.forwards().length === 1, 8000);
+    } finally {
+      sock.close();
+    }
+    expect(lines).toEqual([`task-1: forwarding localhost:${port} on this computer to the workspace (closes after 10 min without traffic)`]);
+    expect(relay.list()).toEqual([{ workspaceId: ws.id, port, startedAt: expect.any(String), name: "task-1", kind: "url" }]);
+    expect(events).toEqual([{ type: "forward.open", forward: relay.list()[0] }]);
+
+    const res = await fetch(`http://[::1]:${port}/`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe(body);
+    expect(seen.join("")).toContain("GET / HTTP/1.1");
+
+    // The daemon goes away and comes back on the same port: the forward is still there and rides the new link.
+    const daemonPort = daemon.port;
+    await daemon.close();
+    daemon = undefined;
+    // The link's socket is gone before the daemon comes back; the forward stays.
+    await until(() => !linked, 5000);
+    expect(relay.forwards()).toMatchObject([{ port, kind: "url" }]);
+    for (let i = 0; i < 50 && daemon === undefined; i++) {
+      daemon = await startDaemon({ host: "127.0.0.1", port: daemonPort, token: TOKEN, portsSource: async () => [] }).catch(() => undefined);
+      if (daemon === undefined) await new Promise(r => setTimeout(r, 100));
+    }
+    expect(daemon).toBeDefined();
+    await until(() => lines.some(l => l.includes("the daemon link is back")), 8000);
+    expect(lines.filter(l => l.includes("the daemon link is back"))).toEqual([`task-1: the daemon link is back; localhost:${port} still forwarded`]);
+    const again = await fetch(`http://[::1]:${port}/`);
+    expect(again.status).toBe(200);
+    expect(await again.text()).toBe(body);
+
+    expect(relay.stop(ws.id, port)).toBe(true);
+    expect(relay.list()).toEqual([]);
+    expect(events.at(-1)).toEqual({ type: "forward.close", workspaceId: ws.id, port });
+    expect(await refused(port, "::1")).toBe(true);
+    expect(lines.join("\n")).not.toContain("http://");
   });
 });
