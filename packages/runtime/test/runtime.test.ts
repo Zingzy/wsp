@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
+import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
 import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
-import type { EventUnion } from "@wsp/protocol";
+import { SessionEvent, type EventUnion } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, type GoldenImport } from "@wsp/engine";
 import { TRANSCRIPT_FLUSH_MS, createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
 import { serveRuntime } from "../src/serve.js";
@@ -217,6 +218,172 @@ describe("runtime session history", () => {
     expect(new Set(history.slice(0, 4).map(e => e.turnId)).size).toBe(1);
     expect(new Set(history.slice(4).map(e => e.turnId)).size).toBe(1);
     expect(history[0]).toMatchObject({ type: "session.start", harness });
+    await rt.close();
+  });
+
+  /** Emits one full turn per start, under the resume id when given, else a fresh id; `rekey` makes a resumed
+   * start announce a different id in system/init, as the CLI is allowed to. */
+  const threaded = (rekey?: (resume: string) => string): HarnessAdapterFactory => () => ({
+    start: o => {
+      const localId = o.resume ?? randomUUID();
+      const sessionId = o.resume !== undefined && rekey !== undefined ? rekey(o.resume) : localId;
+      const result: TurnResult = { status: "completed", text: o.prompt };
+      const finished = Promise.resolve().then(() => {
+        o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" });
+        o.onEvent({ type: "turn.delta", sessionId, kind: "text", text: o.prompt });
+        o.onEvent({ type: "turn.done", sessionId, result });
+        o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+        return result;
+      });
+      return { localId, claudeSessionId: sessionId, finished, interrupt: async () => {} };
+    },
+  });
+  /** Counts runs of one threadId in wire order. Enough here, where turns never overlap; a consumer folding a
+   * transcript keeps the events whose threadId equals the last event's, which also holds when turns interleave. */
+  const threads = (events: ReadonlyArray<{ threadId?: string }>): number =>
+    events.reduce((n, e, i) => (i === 0 || e.threadId !== events[i - 1]!.threadId ? n + 1 : n), 0);
+  const UUID = /^[0-9a-f-]{36}$/;
+
+  it("stamps a threadId that resume keeps and a start without resume replaces, so two threads replay as two", async () => {
+    const live: EventUnion[] = [];
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: threaded() } });
+    rt.events.on("*", e => live.push(e));
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await (await rt.sessions.start(ws.id, { prompt: "first" })).finished;
+    const resume = (await rt.workspaces.get(ws.id)).claudeSessionId!;
+    await (await rt.sessions.start(ws.id, { prompt: "second", resume })).finished;
+    await (await rt.sessions.start(ws.id, { prompt: "third" })).finished;
+
+    const history = await rt.sessions.history(ws.id);
+    expect(history).toHaveLength(12);
+    for (const e of history) expect(e.threadId).toMatch(UUID);
+    expect(new Set(history.slice(0, 8).map(e => e.threadId)).size).toBe(1);
+    expect(new Set(history.slice(8).map(e => e.threadId)).size).toBe(1);
+    expect(history[8]!.threadId).not.toBe(history[0]!.threadId);
+    expect(threads(history)).toBe(2);
+    expect(live.flatMap(e => ("threadId" in e ? [e.threadId] : []))).toEqual(history.map(e => e.threadId));
+    await rt.close();
+  });
+
+  it("a resumed start joins the thread of the session it resumes, across a CLI re-key; an unknown resume id starts a new one", async () => {
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: threaded(id => `${id.slice(0, 8)}-rekeyed`) } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await (await rt.sessions.start(ws.id, { prompt: "first" })).finished;
+    const first = (await rt.workspaces.get(ws.id)).claudeSessionId!;
+    await (await rt.sessions.start(ws.id, { prompt: "second", resume: first })).finished;
+    const rekeyed = (await rt.workspaces.get(ws.id)).claudeSessionId!;
+    expect(rekeyed).not.toBe(first);
+    await (await rt.sessions.start(ws.id, { prompt: "third", resume: rekeyed })).finished;
+    await (await rt.sessions.start(ws.id, { prompt: "fourth", resume: "never-started" })).finished;
+
+    const history = await rt.sessions.history(ws.id);
+    expect(history).toHaveLength(16);
+    expect(new Set(history.slice(0, 12).map(e => e.threadId)).size).toBe(1);
+    expect(history[12]!.threadId).toMatch(UUID);
+    expect(threads(history)).toBe(2);
+    await rt.close();
+  });
+
+  it("a transcript written before threads existed replays as one thread, and a resume into it stamps it in place", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const setup = createRuntime({ backend, store, adapters: {} });
+    const a = await setup.workspaces.create({ golden: "snap_g", name: "a" });
+    const b = await setup.workspaces.create({ golden: "snap_g", name: "b" });
+    await setup.close();
+    const legacy = (workspaceId: string, sessionId: string) => [
+      { type: "session.start", workspaceId, sessionId, prompt: "old" },
+      { type: "session.delta", workspaceId, sessionId, kind: "text", text: "old answer" },
+      { type: "session.done", workspaceId, sessionId, result: { status: "completed", text: "old answer" } },
+      { type: "session.end", workspaceId, sessionId, exitCode: 0, sawResult: true },
+    ];
+    await store.put("transcripts", a.id, { workspaceId: a.id, events: legacy(a.id, "old-a") });
+    await store.put("transcripts", b.id, { workspaceId: b.id, events: legacy(b.id, "old-b") });
+
+    const rt = createRuntime({ backend, store, adapters: { claude: threaded() } });
+    for (const id of [a.id, b.id]) {
+      const old = await rt.sessions.history(id);
+      expect(old).toHaveLength(4);
+      for (const e of old) {
+        expect(SessionEvent.parse(e)).toEqual(e);
+        expect(e.threadId).toBeUndefined();
+      }
+      expect(threads(old)).toBe(1);
+    }
+
+    // continuing the old conversation: the old events take the new thread's id, in memory and in the store
+    await (await rt.sessions.start(a.id, { prompt: "more", resume: "old-a" })).finished;
+    const continued = await rt.sessions.history(a.id);
+    expect(continued).toHaveLength(8);
+    expect(new Set(continued.map(e => e.threadId)).size).toBe(1);
+    expect(continued[0]!.threadId).toMatch(UUID);
+    expect(threads(continued)).toBe(1);
+    // a new thread: the old events stay as they were and fold as the thread before it
+    await (await rt.sessions.start(b.id, { prompt: "fresh" })).finished;
+    const split = await rt.sessions.history(b.id);
+    expect(split.slice(0, 4).map(e => e.threadId)).toEqual([undefined, undefined, undefined, undefined]);
+    expect(new Set(split.slice(4).map(e => e.threadId)).size).toBe(1);
+    expect(threads(split)).toBe(2);
+    await rt.close();
+    const storedA = (await store.get("transcripts", a.id)) as { events: { threadId?: string }[] };
+    expect(storedA.events.map(e => e.threadId)).toEqual(continued.map(e => e.threadId));
+  });
+
+  it("a resume whose session.start fell off the cap opens a new thread; the surviving head keeps its own id", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const setup = createRuntime({ backend, store, adapters: {} });
+    const ws = await setup.workspaces.create({ golden: "snap_g", name: "a" });
+    await setup.close();
+    const scope = { workspaceId: ws.id, sessionId: "X", turnId: "turn_x", threadId: "T" };
+    await store.put("transcripts", ws.id, {
+      workspaceId: ws.id,
+      events: [
+        { type: "session.delta", ...scope, kind: "text", text: "tail of an old answer" },
+        { type: "session.done", ...scope, result: { status: "completed" } },
+        { type: "session.end", ...scope, exitCode: 0, sawResult: true },
+      ],
+    });
+
+    const rt = createRuntime({ backend, store, adapters: { claude: threaded() } });
+    await (await rt.sessions.start(ws.id, { prompt: "more", resume: "X" })).finished;
+    const history = await rt.sessions.history(ws.id);
+    expect(history.slice(0, 3).map(e => e.threadId)).toEqual(["T", "T", "T"]);
+    expect(new Set(history.slice(3).map(e => e.threadId)).size).toBe(1);
+    expect(history[3]!.threadId).toMatch(UUID);
+    expect(threads(history)).toBe(2);
+    await rt.close();
+  });
+
+  it("sessions.history hands out copies, so an earlier result does not change when a legacy transcript is stamped", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const setup = createRuntime({ backend, store, adapters: {} });
+    const ws = await setup.workspaces.create({ golden: "snap_g", name: "a" });
+    await setup.close();
+    await store.put("transcripts", ws.id, {
+      workspaceId: ws.id,
+      events: [{ type: "session.start", workspaceId: ws.id, sessionId: "old", prompt: "old" }],
+    });
+    const rt = createRuntime({ backend, store, adapters: { claude: threaded() } });
+    const earlier = await rt.sessions.history(ws.id);
+    await (await rt.sessions.start(ws.id, { prompt: "more", resume: "old" })).finished;
+    expect(earlier).toEqual([{ type: "session.start", workspaceId: ws.id, sessionId: "old", prompt: "old" }]);
+    expect((await rt.sessions.history(ws.id))[0]!.threadId).toMatch(UUID);
+    await rt.close();
+  });
+
+  it("sessions.history over the socket carries the threadId", async () => {
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: threaded() } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await (await rt.sessions.start(ws.id, { prompt: "first" })).finished;
+    const srv = await serveRuntime(rt, { port: 0, authToken: "t" });
+    const res = await wsRequest(srv.port, "t", { op: "sessions.history", workspaceId: ws.id });
+    const events = res["events"] as { type: string; threadId?: string }[];
+    expect(events.map(e => e.type)).toEqual(["session.start", "session.delta", "session.done", "session.end"]);
+    for (const e of events) expect(e.threadId).toMatch(UUID);
+    expect(events.map(e => e.threadId)).toEqual((await rt.sessions.history(ws.id)).map(e => e.threadId));
+    await srv.close();
     await rt.close();
   });
 

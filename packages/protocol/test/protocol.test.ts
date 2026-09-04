@@ -145,6 +145,23 @@ describe("session wire fields the face reads", () => {
     expect(() => SessionEvent.parse({ ...events[0], turnId: 7 })).toThrow();
   });
 
+  it("every session event may carry a threadId; a transcript without one still parses", () => {
+    const scope = { workspaceId: "ws_1", sessionId: "s1", turnId: "turn_0001", threadId: "thread_0001" };
+    const events = [
+      { type: "session.start", ...scope, prompt: "hello" },
+      { type: "session.delta", ...scope, kind: "text", text: "hi" },
+      { type: "session.done", ...scope, result: { status: "completed" } },
+      { type: "session.end", ...scope, exitCode: 0, sawResult: true },
+    ];
+    for (const e of events) {
+      expect(SessionEvent.parse(e)).toEqual(e);
+      expect(EventUnion.parse(JSON.parse(JSON.stringify(e)))).toEqual(e);
+      const { threadId: _threadId, ...before } = e;
+      expect(SessionEvent.parse(before)).toEqual(before);
+    }
+    expect(() => SessionEvent.parse({ ...events[0], threadId: 7 })).toThrow();
+  });
+
   it("session.start carries the harness catalog from system/init", () => {
     const started = {
       type: "session.start",
