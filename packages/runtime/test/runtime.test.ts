@@ -1682,6 +1682,75 @@ describe("runtime golden import", () => {
     expect(backend.machines.map(m => m.killed)).toEqual([true, false]);
   });
 
+  it("the digest behind the recipe hash is recorded on the builder and read back on its view, in this process and the next", async () => {
+    const backend = stubBackend();
+    backend.execImpl = dfOk;
+    const store = memoryStore();
+    const recipe = { ticks: [{ id: "shell/zshrc" }, { id: "tools/npm/bun", version: "1.4.0" }], files: [{ id: "shell/zshrc", path: "~/.zshrc", dest: ".zshrc", digest: "d1" }] };
+    const first = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith({ ...importOf(), recipe }) });
+    const b = await first.golden.prepare();
+    expect(b.recipe).toEqual(recipe);
+    expect(await store.get("builders", b.id)).toMatchObject({ import: { recipeHash: "h1", recipe } });
+    const second = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf("h9")) });
+    expect(await second.golden.builders()).toEqual([expect.objectContaining({ id: b.id, recipeHash: "h1", recipe })]);
+  });
+
+  it("an attach whose volatile re-import fails keeps the builder: the machine lives, the record stays, the stage carries the reason", async () => {
+    const backend = stubBackend();
+    backend.execImpl = dfOk;
+    const store = memoryStore();
+    const first = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()) });
+    const b = await first.golden.prepare();
+    const files = { ...importOf().files!, volatile: { paths: ["~/.claude.json"], pack: async (): Promise<never> => { throw new Error("upload refused"); } } };
+    const second = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith({ ...importOf(), files }) });
+    const frames: string[] = [];
+    second.events.on("golden.stage", e => { if (e.type === "golden.stage") frames.push(`${e.stage}:${e.detail ?? ""}`); });
+    const again = await second.golden.prepare();
+    expect(again.id).toBe(b.id);
+    expect(backend.machines[0]!.killed).toBe(false);
+    expect(frames).toContain("uploading-files:~/.claude.json not re-imported: upload refused");
+    expect(frames.at(-1)).toBe("ready:");
+    expect(await store.get("builders", b.id)).toMatchObject({ import: { recipeHash: "h1", applied: ["applying-setup", "uploading-files", "installing-tools", "installing-harness"] } });
+  });
+
+  it("kill stops a builder of this setup by its recorded id and drops the record, from this process or the next", async () => {
+    const backend = stubBackend();
+    backend.execImpl = dfOk;
+    const store = memoryStore();
+    const first = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()) });
+    const b = await first.golden.prepare();
+    const second = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf("h9")) });
+    await second.golden.kill(b.id);
+    expect(backend.machines[0]!.killed).toBe(true);
+    expect(await store.list("builders")).toEqual([]);
+    expect(await second.golden.builders()).toEqual([]);
+    await expect(second.golden.kill(b.id)).rejects.toThrow(`no such builder: ${b.id}`);
+    const own = await second.golden.prepare();
+    await second.golden.kill(own.id);
+    expect(backend.machines[1]!.killed).toBe(true);
+    expect(await second.golden.builders()).toEqual([]);
+  });
+
+  it("kill refuses a builder another live process holds and one wearing another setup's label, and touches neither", async () => {
+    const backend = stubBackend();
+    backend.execImpl = dfOk;
+    const store = memoryStore();
+    const first = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()) });
+    const b = await first.golden.prepare();
+    const record = (await store.get("builders", b.id)) as { heldBy: { host: string; pid: number; heartbeat: string } };
+    await store.put("builders", b.id, { ...record, heldBy: { ...record.heldBy, pid: process.ppid } });
+    const second = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf("h9")) });
+    await expect(second.golden.kill(b.id)).rejects.toThrow(`${b.id} is in use by another wsp process (pid ${process.ppid}); it is never sealed or reached from here`);
+    expect(backend.machines[0]!.killed).toBe(false);
+
+    await store.put("builders", b.id, record);
+    await store.put("owner", "id", { id: "h_other" });
+    const third = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf("h9")) });
+    await expect(third.golden.kill(b.id)).rejects.toThrow("wears another setup's owner label");
+    expect(backend.machines[0]!.killed).toBe(false);
+    expect(await store.list("builders")).toHaveLength(1);
+  });
+
   it("a different recipe hash gets a fresh machine; the earlier first-life builder stays, listed with its hash", async () => {
     const backend = stubBackend();
     backend.execImpl = dfOk;

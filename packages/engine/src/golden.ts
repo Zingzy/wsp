@@ -7,7 +7,7 @@
 // long as they like, as long as nobody pauses it (snapshot-fresh rule).
 
 import { createHash } from "node:crypto";
-import { ALREADY_APPLIED, type GoldenLogin, type GoldenManifest, type GoldenStage, type GoldenVersion } from "@wsp/protocol";
+import { ALREADY_APPLIED, type GoldenLogin, type GoldenManifest, type GoldenStage, type GoldenVersion, type RecipeDigest } from "@wsp/protocol";
 import { HOMEBREW, NODE_PATH_LINE, type AgentInstall, type NodeInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { assertFirstLife } from "./lifecycle.js";
 import type { ExecResult, Machine, MachineBackend, MachineKind, MachineState } from "./machine.js";
@@ -142,6 +142,8 @@ export interface PackedFiles {
 export interface GoldenImport {
   /** Identifies the ticks this plan came from; a builder carrying the same hash needs nothing re-applied. */
   recipeHash: string;
+  /** The parts behind recipeHash; recorded on the builder so a later run can say what changed. */
+  recipe?: RecipeDigest;
   /** Absent when no file was ticked. `pack` reads this computer and builds the archive; it runs on applying-setup. */
   files?: {
     /** Files and secrets that will be packed; zero when every ticked path is gone from this computer. */
@@ -151,6 +153,9 @@ export interface GoldenImport {
     /** Ticked paths the plan set aside (missing on disk, a private key), reported before packing. */
     skipped: SkippedPath[];
     pack: () => Promise<PackedFiles>;
+    /** The planned files a tool rewrites while it runs, `~`-relative: they never decide the hash, so an
+     * attach uploads the latest copy again. Absent when none was ticked. */
+    volatile?: { paths: string[]; pack: () => Promise<PackedFiles> };
   };
   tools: ToolInstall[];
   /** Runs once before the agents when a ticked agent's engines floor may be above the base image's Node. */
@@ -166,6 +171,7 @@ export type ImportStage = "applying-setup" | "uploading-files" | "installing-too
 
 export interface ImportLedger {
   recipeHash: string;
+  recipe?: RecipeDigest;
   applied: ImportStage[];
   /** The version checks of the agents that installed, joined; the seal runs this on the fork. */
   smoke: string;
@@ -257,7 +263,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
   const stage = opts.onStage ?? (() => {});
   const imp = opts.import ?? { recipeHash: "", tools: [], agents: [] };
   const prior = opts.ledger?.recipeHash === imp.recipeHash ? opts.ledger : undefined;
-  const ledger: ImportLedger = { recipeHash: imp.recipeHash, applied: [...(prior?.applied ?? [])], smoke: prior?.smoke ?? "true" };
+  const ledger: ImportLedger = { recipeHash: imp.recipeHash, ...(imp.recipe !== undefined ? { recipe: imp.recipe } : {}), applied: [...(prior?.applied ?? [])], smoke: prior?.smoke ?? "true" };
   const result: ImportResult = { recipeHash: imp.recipeHash, tools: [], agents: [] };
   const done = (s: ImportStage): boolean => ledger.applied.includes(s);
   const mark = (s: ImportStage): void => {
@@ -265,11 +271,38 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
   };
   const only = opts.import === undefined;
   let ran = false;
+  const upload = async (packed: PackedFiles, label: string): Promise<void> => {
+    const free = await freeBytes(machine);
+    const need = packed.bytes + packed.unpacked + UPLOAD_HEADROOM;
+    if (free.kind === "unknown") {
+      stage("uploading-files", `free disk unknown (${free.reason}); uploading ${fmtBytes(packed.bytes)} anyway`);
+    } else if (need > free.bytes) {
+      throw new Error(`your files need ${fmtBytes(packed.bytes)} packed and ${fmtBytes(packed.unpacked)} unpacked, plus ${fmtBytes(UPLOAD_HEADROOM)} of headroom, but the machine has ${fmtBytes(free.bytes)} free`);
+    }
+    const t0 = Date.now();
+    await importInto(machine, packed.tar, "/root", { overlay: true, timeoutMs: 300_000, ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}) });
+    stage("uploading-files", `${label}${fmtBytes(packed.bytes)} in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+  };
 
   if (!only) {
     if (done("uploading-files")) {
       stage("applying-setup", ALREADY_APPLIED);
-      stage("uploading-files", ALREADY_APPLIED);
+      const volatile = imp.files?.volatile;
+      if (volatile === undefined) {
+        stage("uploading-files", ALREADY_APPLIED);
+      } else {
+        // A volatile file is not in the hash, so the builder may hold an older copy; the latest one goes up again. The
+        // saved result stands: no rc file is volatile, so the cuts and installs it lists are still what the builder has.
+        // A re-import that fails leaves a builder that is still the same golden with an older copy: it is reported,
+        // never failed, since the caller kills a builder whose stages fail.
+        try {
+          const packed = await volatile.pack();
+          stage("uploading-files", `${volatile.paths.length} volatile file${volatile.paths.length === 1 ? "" : "s"}, ${fmtBytes(packed.bytes)}`);
+          await upload(packed, `${volatile.paths.join(", ")} re-imported, `);
+        } catch (e) {
+          stage("uploading-files", `${volatile.paths.join(", ")} not re-imported: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
     } else if (!imp.files || imp.files.count === 0) {
       const notes = (imp.files?.skipped ?? []).map(s => `${s.path} (${s.note})`);
       stage("applying-setup", notes.length > 0 ? `nothing left to pack; skipped ${notes.join(", ")}` : "nothing ticked");
@@ -289,16 +322,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
 
       stage("uploading-files", fmtBytes(packed.bytes));
       ran = true;
-      const free = await freeBytes(machine);
-      const need = packed.bytes + packed.unpacked + UPLOAD_HEADROOM;
-      if (free.kind === "unknown") {
-        stage("uploading-files", `free disk unknown (${free.reason}); uploading ${fmtBytes(packed.bytes)} anyway`);
-      } else if (need > free.bytes) {
-        throw new Error(`your files need ${fmtBytes(packed.bytes)} packed and ${fmtBytes(packed.unpacked)} unpacked, plus ${fmtBytes(UPLOAD_HEADROOM)} of headroom, but the machine has ${fmtBytes(free.bytes)} free`);
-      }
-      const t0 = Date.now();
-      await importInto(machine, packed.tar, "/root", { overlay: true, timeoutMs: 300_000, ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}) });
-      stage("uploading-files", `${fmtBytes(packed.bytes)} in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+      await upload(packed, "");
       result.files = { bytes: packed.bytes, skipped: packed.skipped, cut: packed.cut };
       mark("uploading-files");
     }

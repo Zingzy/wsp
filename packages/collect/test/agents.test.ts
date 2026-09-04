@@ -25,6 +25,8 @@ describe("agents", () => {
         rung: "agents", id: "agents/claude", label: "Claude Code",
         paths: ["~/.claude/settings.json", "~/.claude/CLAUDE.md", "~/.claude/skills", "~/.claude/agents", "~/.claude/plugins/installed_plugins.json", "~/.claude.json"],
         bytes: 7000, default: "bring",
+        // Rewritten by Claude Code while it runs (project state, plugin timestamps): they travel but never decide the recipe hash.
+        volatile: ["~/.claude/plugins/installed_plugins.json", "~/.claude.json"],
       },
     ]);
   });

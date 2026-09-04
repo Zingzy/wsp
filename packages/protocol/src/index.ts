@@ -312,6 +312,18 @@ export type GoldenVersion = z.infer<typeof GoldenVersion>;
 export const GoldenManifest = z.object({ head: z.number(), versions: z.array(GoldenVersion) });
 export type GoldenManifest = z.infer<typeof GoldenManifest>;
 
+/** What a golden is built from, as its builder records it: every ticked row
+ * with its login answer and tool pin, and every planned path with a digest of
+ * the bytes that travel. Two recipes with equal digests build the same golden;
+ * the hash a builder carries is this object's, so a later run can say what
+ * changed instead of only that something did. */
+export const RecipeDigest = z.object({
+  ticks: z.array(z.object({ id: z.string(), choice: z.string().optional(), version: z.string().optional() })),
+  /** A volatile entry (its tool rewrites it, or it is a Keychain value the machine gets rendered) is recorded but never hashed. */
+  files: z.array(z.object({ id: z.string(), path: z.string(), dest: z.string(), digest: z.string(), volatile: z.boolean().optional() })),
+});
+export type RecipeDigest = z.infer<typeof RecipeDigest>;
+
 /** The live machine a person sets up before sealing it as a golden. It is not
  * a workspace and never appears in the rail; `screen` is present when the
  * machine streams a display (desktop kind). */
@@ -327,6 +339,8 @@ export const GoldenBuilderView = z.object({
   firstLife: z.boolean().optional(),
   /** The recipe this builder carries; a prepare with the same hash attaches to it instead of booting. */
   recipeHash: z.string().optional(),
+  /** The parts behind recipeHash; absent on a builder recorded without them. */
+  recipe: RecipeDigest.optional(),
   /** The owner label on the machine when it names another state file; absent when it is this one's or the provider reports none. */
   foreignOwner: z.string().optional(),
   /** The other live wsp process using this builder, when there is one; such a builder is listed and left alone. */

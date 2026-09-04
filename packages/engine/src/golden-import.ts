@@ -6,6 +6,9 @@
 // runs the plan on the builder.
 import { createHash } from "node:crypto";
 import { join } from "node:path";
+import type { RecipeDigest } from "@wsp/protocol";
+
+export type { RecipeDigest };
 
 /** The recipe row as this module reads it: a structural subset of the
  * collector's manifest entry, so a recipe file parses straight into it. */
@@ -16,6 +19,8 @@ export interface RecipeEntry {
   paths: readonly string[];
   /** `~`-relative subtrees under paths that stay on the laptop. */
   excludes?: readonly string[];
+  /** Entries of paths the tool rewrites while it runs; they travel but never decide the recipe hash. */
+  volatile?: readonly string[];
   bytes: number;
   default: "bring" | "skip";
   reason?: string;
@@ -45,10 +50,10 @@ export interface PlannedFile {
   dest: string;
   mode: number;
   dir: boolean;
-  size: number;
-  mtimeMs: number;
   /** Absolute laptop paths under `source` the copy leaves out. */
   excludes: string[];
+  /** The tool rewrites this path while it runs: it ships, and an attach ships it again, but it never enters the recipe hash. */
+  volatile: boolean;
 }
 
 /** A credential read from the macOS Keychain at pack time; `place` renders the
@@ -235,7 +240,7 @@ export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOption
         }
       }
       const excludes = (e.excludes ?? []).filter(x => x.startsWith(`${p}/`)).map(x => join(opts.home, x.slice(2)));
-      plan.files.push({ id: e.id, source, dest: rewrite(rel), mode: st.mode & 0o7777, dir: st.kind === "dir", size: st.size, mtimeMs: st.mtimeMs, excludes });
+      plan.files.push({ id: e.id, source, dest: rewrite(rel), mode: st.mode & 0o7777, dir: st.kind === "dir", excludes, volatile: (e.volatile ?? []).includes(p) });
       brought++;
     }
     if (brought > 0) {
@@ -246,15 +251,37 @@ export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOption
   return plan;
 }
 
-/** What a golden was built from: the ticked ids with their login answers and
- * tool pins, and for every file that travels its size, mtime and excludes.
- * Contents, labels and row order do not enter; a builder carrying the same
- * hash needs nothing re-applied. */
-export function recipeHash(entries: readonly RecipeEntry[], files: readonly Pick<PlannedFile, "id" | "dest" | "size" | "mtimeMs" | "excludes">[] = []): string {
-  const byKey = <T extends readonly unknown[]>(rows: T[]): T[] => rows.sort((a, b) => (JSON.stringify(a) < JSON.stringify(b) ? -1 : 1));
-  const ticks = byKey(entries.filter(ticked).map(e => [e.id, e.choice ?? null, e.version ?? null] as const));
-  const shipped = byKey(files.map(f => [f.id, f.dest, f.size, f.mtimeMs, [...f.excludes].sort()] as const));
-  return createHash("sha256").update(JSON.stringify({ ticks, files: shipped })).digest("hex");
+/** A planned path with a digest of the bytes that would travel; the host
+ * computes it, since the planner never reads a disk. */
+export interface DigestedFile {
+  id: string;
+  /** `~`-relative laptop path, the one the person knows it by. */
+  path: string;
+  dest: string;
+  digest: string;
+  /** Recorded but never hashed: the tool rewrites it while it runs, or it is a login value rendered on the machine. */
+  volatile?: boolean;
+}
+
+const sorted = <T extends object>(rows: T[]): T[] => rows.sort((a, b) => (JSON.stringify(a) < JSON.stringify(b) ? -1 : 1));
+
+/** What a golden is built from: the ticked ids with their login answers and
+ * tool pins, and every planned path with its digest, volatile ones marked.
+ * Labels, row order and disk stats do not enter, so a file rewritten with the
+ * same bytes reads the same. */
+export function recipeDigest(entries: readonly RecipeEntry[], files: readonly DigestedFile[] = []): RecipeDigest {
+  return {
+    ticks: sorted(entries.filter(ticked).map(e => ({ id: e.id, ...(e.choice !== undefined ? { choice: e.choice } : {}), ...(e.version !== undefined ? { version: e.version } : {}) }))),
+    files: sorted(files.map(f => ({ id: f.id, path: f.path, dest: f.dest, digest: f.digest, ...(f.volatile === true ? { volatile: true } : {}) }))),
+  };
+}
+
+/** The digest's hash, the same for any key or row order, with the volatile entries left out; a builder
+ * carrying it needs nothing re-applied but those. */
+export function recipeHash(digest: RecipeDigest): string {
+  const ticks = sorted(digest.ticks.map(t => [t.id, t.choice ?? null, t.version ?? null]));
+  const files = sorted(digest.files.filter(f => f.volatile !== true).map(f => [f.id, f.path, f.dest, f.digest]));
+  return createHash("sha256").update(JSON.stringify({ ticks, files })).digest("hex");
 }
 
 // --- tools -------------------------------------------------------------------

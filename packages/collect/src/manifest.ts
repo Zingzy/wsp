@@ -32,6 +32,8 @@ const Fields = z.object({
   paths: z.array(z.string()),
   /** `~`-relative subtrees under `paths` that stay on the laptop; the pack copies paths minus excludes. */
   excludes: z.array(z.string()).optional(),
+  /** `~`-relative entries of `paths` the tool rewrites while it runs (project state, plugin timestamps); they travel but never decide the recipe hash. */
+  volatile: z.array(z.string()).optional(),
   bytes: z.number().int().nonnegative(),
   default: Default,
   /** Why the default is skip. With a reason the row renders locked off and cannot be ticked. */

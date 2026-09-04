@@ -4,15 +4,16 @@
 // injected reader (the real one is never run here), and the import the
 // recipe's ticks add up to.
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ManifestEntry } from "@wsp/collect";
 import { NODE_RELEASES, planFiles } from "@wsp/engine";
 import { afterEach, describe, expect, it } from "vitest";
 import { GOLDEN_SETUP, GOLDEN_SMOKE } from "../src/doctor.js";
-import { importFor, importResultPath, keychainLogins, keychainReader, packPlan, readSecrets, statOf, type SecretReader } from "../src/init-import.js";
+import { digestOf, importFor, importResultPath, keychainLogins, keychainReader, packPlan, readSecrets, statOf, type SecretReader } from "../src/init-import.js";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -561,6 +562,92 @@ describe("keychainReader", () => {
   });
 });
 
+describe("digestOf", () => {
+  it("reads the names, modes and bytes under a path, leaves excludes out, and never reads stat times", () => {
+    const home = laptop();
+    const demo = join(home, ".config", "demo");
+    mkdirSync(join(demo, "cache"), { recursive: true });
+    writeFileSync(join(demo, "settings.json"), "{}\n");
+    writeFileSync(join(demo, "cache", "blob"), "1");
+    const excludes = [join(demo, "cache")];
+    const d0 = digestOf(demo, excludes, home);
+    expect(d0).toMatch(/^[0-9a-f]{64}$/);
+    writeFileSync(join(demo, "cache", "blob"), "22");
+    writeFileSync(join(demo, "settings.json"), "{}\n");
+    const later = new Date(Date.now() + 60_000);
+    utimesSync(join(demo, "settings.json"), later, later);
+    utimesSync(demo, later, later);
+    expect(digestOf(demo, excludes, home)).toBe(d0);
+    expect(digestOf(demo, [], home)).not.toBe(d0);
+    // Same length, one byte different: only the bytes read can tell these apart.
+    writeFileSync(join(demo, "settings.json"), "{]\n");
+    const d1 = digestOf(demo, excludes, home);
+    expect(d1).not.toBe(d0);
+    chmodSync(join(demo, "settings.json"), 0o600);
+    const d2 = digestOf(demo, excludes, home);
+    expect(d2).not.toBe(d1);
+    writeFileSync(join(demo, "extra"), "");
+    const d3 = digestOf(demo, excludes, home);
+    expect(d3).not.toBe(d2);
+    // A file that cannot be read digests by its error and is left for the pack to fail on.
+    chmodSync(join(demo, "settings.json"), 0o000);
+    expect(digestOf(demo, excludes, home)).toMatch(/^[0-9a-f]{64}$/);
+    expect(digestOf(demo, excludes, home)).not.toBe(d3);
+    chmodSync(join(demo, "settings.json"), 0o600);
+    expect(digestOf(demo, excludes, home)).toBe(d3);
+  });
+
+  it("a link to the planned directory or one of its parents digests as the pack refuses it: the siblings behind it never enter", () => {
+    const home = laptop();
+    const demo = join(home, ".config", "demo");
+    mkdirSync(demo, { recursive: true });
+    writeFileSync(join(demo, "settings.json"), "{}\n");
+    symlinkSync(join(home, ".config"), join(demo, "up"));
+    symlinkSync(demo, join(demo, "self"));
+    const d0 = digestOf(demo, [], home);
+    writeFileSync(join(home, ".config", "sibling.txt"), "new\n");
+    expect(digestOf(demo, [], home)).toBe(d0);
+    writeFileSync(join(demo, "settings.json"), "{]\n");
+    expect(digestOf(demo, [], home)).not.toBe(d0);
+  });
+
+  it("link targets enter the digest relative to home, so the same layout under another home digests the same", () => {
+    const layout = (home: string): string => {
+      const demo = join(home, ".config", "demo");
+      mkdirSync(demo, { recursive: true });
+      writeFileSync(join(demo, "settings.json"), "{}\n");
+      symlinkSync(join(home, "nowhere"), join(demo, "gone"));
+      symlinkSync(join(home, ".ssh", "id_ed25519"), join(demo, "key"));
+      symlinkSync("/etc/hosts", join(demo, "outside"));
+      symlinkSync(join(home, ".config"), join(demo, "up"));
+      return demo;
+    };
+    const a = laptop();
+    const b = laptop();
+    expect(a).not.toBe(b);
+    expect(digestOf(layout(a), [], a)).toBe(digestOf(layout(b), [], b));
+  });
+
+  it("follows a link into home and reads its target's bytes; a link outside home, to a private key or back into a walked directory digests by where it points", () => {
+    const home = laptop();
+    const demo = join(home, ".config", "demo");
+    mkdirSync(demo, { recursive: true });
+    writeFileSync(join(home, ".shared"), "shared\n");
+    symlinkSync(join(home, ".shared"), join(demo, "inside"));
+    symlinkSync("/etc/hosts", join(demo, "outside"));
+    symlinkSync(join(home, ".ssh", "id_ed25519"), join(demo, "key"));
+    symlinkSync(demo, join(demo, "loop"));
+    const d0 = digestOf(demo, [], home);
+    expect(d0).toMatch(/^[0-9a-f]{64}$/);
+    writeFileSync(join(home, ".shared"), "changed\n");
+    const d1 = digestOf(demo, [], home);
+    expect(d1).not.toBe(d0);
+    writeFileSync(join(home, ".ssh", "id_ed25519"), "OTHER PRIVATE", { mode: 0o600 });
+    expect(digestOf(demo, [], home)).toBe(d1);
+    expect(digestOf(join(demo, "inside"), [], home)).toBe(digestOf(join(home, ".shared"), [], home));
+  });
+});
+
 describe("importFor", () => {
   const ticks = (home: string, ...over: ManifestEntry[]) =>
     importFor(
@@ -597,12 +684,100 @@ describe("importFor", () => {
     expect(ticks(home, row({ rung: "agents", id: "agents/zed", label: "Zed" })).skippedAgents).toEqual([{ id: "agents/zed", name: "Zed", note: "no installer known" }]);
   });
 
-  it("the recipe hash follows the shipped file's contents changing, through its size and mtime", () => {
+  it("the recipe hash follows the shipped file's bytes, not its stat times: a rewrite with the same bytes keeps it, a changed byte moves it", () => {
     const home = laptop();
     const before = ticks(home).recipeHash;
+    writeFileSync(join(home, ".gitconfig"), "[user]\n\tname = Me\n");
+    const later = new Date(Date.now() + 60_000);
+    utimesSync(join(home, ".gitconfig"), later, later);
     expect(ticks(home).recipeHash).toBe(before);
-    writeFileSync(join(home, ".gitconfig"), "[user]\n\tname = Someone Else\n");
+    expect(ticks(home).recipe).toMatchObject({
+      ticks: expect.arrayContaining([{ id: "identity/git-user" }, { id: "logins/gh", choice: "copy" }, { id: "tools/npm/bun", version: "1.4.0" }]),
+      files: expect.arrayContaining([{ id: "identity/git-user", path: "~/.gitconfig", dest: ".gitconfig", digest: expect.stringMatching(/^[0-9a-f]{64}$/) }]),
+    });
+    // Same length, one byte different: the size in the digest line cannot carry this.
+    writeFileSync(join(home, ".gitconfig"), "[user]\n\tname = Mo\n");
     expect(ticks(home).recipeHash).not.toBe(before);
+  });
+
+  it("a volatile file travels but never moves the recipe hash, and packs on its own for the re-import on attach", async () => {
+    const home = laptop();
+    mkdirSync(join(home, ".claude"), { recursive: true });
+    writeFileSync(join(home, ".claude", "settings.json"), "{}\n");
+    writeFileSync(join(home, ".claude.json"), JSON.stringify({ projects: { a: 1 } }));
+    // A row the catalog does not know, so the saved list alone decides here; the catalog's own row is the next test.
+    const rows = (volatile?: string[]) => [
+      row({ rung: "identity", id: "identity/git-user", paths: ["~/.gitconfig"], bytes: 20 }),
+      row({ rung: "agents", id: "agents/zed", paths: ["~/.claude/settings.json", "~/.claude.json"], ...(volatile !== undefined ? { volatile } : {}), bytes: 5 }),
+    ];
+    const imp = (volatile?: string[]) => importFor(rows(volatile), { home, secrets: new Map(), platform: "darwin" });
+    const before = imp(["~/.claude.json"]);
+    expect(before.recipe?.files.map(f => [f.path, f.volatile])).toEqual([["~/.claude.json", true], ["~/.claude/settings.json", undefined], ["~/.gitconfig", undefined]]);
+    expect(before.files?.volatile?.paths).toEqual(["~/.claude.json"]);
+    const plain = imp().recipeHash;
+    writeFileSync(join(home, ".claude.json"), JSON.stringify({ projects: { a: 1, b: 2 } }));
+    expect(imp(["~/.claude.json"]).recipeHash).toBe(before.recipeHash);
+    expect(imp().recipeHash).not.toBe(plain);
+    writeFileSync(join(home, ".claude", "settings.json"), "{]\n");
+    expect(imp(["~/.claude.json"]).recipeHash).not.toBe(before.recipeHash);
+    const packed = await before.files!.volatile!.pack();
+    expect(listTar(packed.tar).map(e => e.path).filter(p => p !== "" && !p.endsWith("/"))).toEqual([".claude-cfg/.claude.json"]);
+    expect(packed.skipped).toEqual([]);
+    expect(imp().files?.volatile).toBeUndefined();
+  });
+
+  it("a Claude row saved without a volatile list gets the catalog's: ~/.claude.json stays out of the hash and packs for the re-import", () => {
+    const home = laptop();
+    mkdirSync(join(home, ".claude"), { recursive: true });
+    writeFileSync(join(home, ".claude", "settings.json"), "{}\n");
+    writeFileSync(join(home, ".claude.json"), JSON.stringify({ projects: { a: 1 } }));
+    // The row as a recipe file from before the list existed carries it: paths only.
+    const saved = [row({ rung: "agents", id: "agents/claude", paths: ["~/.claude/settings.json", "~/.claude.json"], bytes: 5 })];
+    const imp = () => importFor(saved, { home, secrets: new Map(), platform: "darwin" });
+    const before = imp();
+    expect(before.recipe?.files.map(f => [f.path, f.volatile])).toEqual([["~/.claude.json", true], ["~/.claude/settings.json", undefined]]);
+    expect(before.files?.volatile?.paths).toEqual(["~/.claude.json"]);
+    writeFileSync(join(home, ".claude.json"), JSON.stringify({ projects: { a: 1, b: 2 } }));
+    expect(imp().recipeHash).toBe(before.recipeHash);
+    // A saved list that names a path the catalog does not is kept only where the catalog has no row.
+    const other = importFor([row({ rung: "agents", id: "agents/zed", paths: ["~/.gitconfig"], volatile: ["~/.gitconfig"], bytes: 5 })], { home, secrets: new Map(), platform: "darwin" });
+    expect(other.recipe?.files.map(f => [f.path, f.volatile])).toEqual([["~/.gitconfig", true]]);
+    expect(other.files?.volatile?.paths).toEqual(["~/.gitconfig"]);
+  });
+
+  it("a row the catalog knows takes the catalog's list even when the saved row carries one: a codex config change moves the hash", () => {
+    const home = laptop();
+    mkdirSync(join(home, ".codex"), { recursive: true });
+    writeFileSync(join(home, ".codex", "config.toml"), "model = \"a\"\n");
+    const saved = [row({ rung: "agents", id: "agents/codex", paths: ["~/.codex/config.toml"], volatile: ["~/.codex/config.toml"], bytes: 5 })];
+    const imp = () => importFor(saved, { home, secrets: new Map(), platform: "darwin" });
+    const before = imp();
+    expect(before.recipe?.files.map(f => [f.path, f.volatile])).toEqual([["~/.codex/config.toml", undefined]]);
+    expect(before.files?.volatile).toBeUndefined();
+    writeFileSync(join(home, ".codex", "config.toml"), "model = \"b\"\n");
+    expect(imp().recipeHash).not.toBe(before.recipeHash);
+  });
+
+  it("a Keychain login enters the digest as the sha256 of its value once read, marked volatile, out of the hash; its files re-render and re-upload on attach", async () => {
+    const home = laptop();
+    const secrets = new Map<string, string>();
+    const gh = [row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"], choice: "copy", bytes: 200 })];
+    const imp = () => importFor(gh, { home, secrets, platform: "darwin" });
+    const unread = imp();
+    // Before the Keychain is read the file is already volatile and the value has no entry yet.
+    expect(unread.recipe?.files).toEqual([{ id: "logins/gh", path: "~/.config/gh/hosts.yml", dest: ".config/gh/hosts.yml", digest: expect.stringMatching(/^[0-9a-f]{64}$/), volatile: true }]);
+    secrets.set("gh:github.com", "gho_one");
+    const one = imp();
+    expect(one.recipe?.files.find(f => f.path === "Keychain: gh:github.com")).toEqual({ id: "logins/gh", path: "Keychain: gh:github.com", dest: ".config/gh/hosts.yml", digest: createHash("sha256").update("gho_one").digest("hex"), volatile: true });
+    expect(one.recipeHash).toBe(unread.recipeHash);
+    // The same import read after the Keychain: the getter sees the value the Map holds now.
+    secrets.set("gh:github.com", "gho_two");
+    expect(unread.recipe?.files.find(f => f.path === "Keychain: gh:github.com")?.digest).toBe(createHash("sha256").update("gho_two").digest("hex"));
+    expect(imp().recipeHash).toBe(unread.recipeHash);
+    expect(one.files?.volatile?.paths).toEqual(["~/.config/gh/hosts.yml", "Keychain: gh:github.com"]);
+    const packed = await one.files!.volatile!.pack();
+    expect(listTar(packed.tar).map(e => e.path).filter(p => p !== "" && !p.endsWith("/"))).toEqual([".config/gh/hosts.yml"]);
+    expect(gunzipSync(packed.tar).toString("utf8")).toContain("oauth_token: gho_two");
   });
 
   it("the results it reports carry the planned skips too, and go next to the recipe", async () => {

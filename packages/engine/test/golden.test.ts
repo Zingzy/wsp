@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { BUILDER_IDLE_MS, MachineAliveError, applyGoldenImport, buildGolden, forkGolden, prepareBuilder, rollback, sealGolden, type GoldenImport, type GoldenStage, type ImportResult } from "../src/golden.js";
+import { BUILDER_IDLE_MS, MachineAliveError, applyGoldenImport, buildGolden, forkGolden, prepareBuilder, rollback, sealGolden, type GoldenImport, type GoldenStage, type ImportResult, type PackedFiles } from "../src/golden.js";
 import { NotFirstLifeError } from "../src/lifecycle.js";
 import { HOMEBREW, type ToolInstall } from "../src/golden-import.js";
 import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec } from "../src/machine.js";
@@ -654,6 +654,57 @@ describe("golden import stages", () => {
     const other = await applyGoldenImport(builder.machine, { import: importOf({ recipeHash: "h2" }), setup: "true", ledger: builder.import, fetch, onStage });
     expect(cmds.length).toBeGreaterThan(before);
     expect(other.ledger.recipeHash).toBe("h2");
+  });
+
+  it("applying the same recipe to a builder that has it uploads its volatile files again, so the golden carries the latest copy; nothing else runs", async () => {
+    const { backend, cmds, puts, fetch } = backendFor();
+    const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf() });
+    const before = { cmds: cmds.length, puts: puts.length };
+    const { stages, onStage } = stageRecorder();
+    const volatile = {
+      paths: ["~/.claude.json", "~/.claude/plugins/installed_plugins.json"],
+      pack: async () => ({ tar: Buffer.from("volatile-tgz"), bytes: 300, unpacked: 2048, skipped: [], cut: [] }),
+    };
+    const results: ImportResult[] = [];
+    const again = await applyGoldenImport(builder.machine, { import: importOf({ files: { ...importOf().files!, volatile }, onResult: r => void results.push(r) }), setup: "true", ledger: builder.import, fetch, onStage });
+    expect(puts.slice(before.puts).map(b => b.toString())).toEqual(["volatile-tgz"]);
+    expect(cmds.slice(before.cmds).filter(c => c.startsWith("tar xzf"))).toHaveLength(1);
+    expect(stages).toEqual([
+      "applying-setup:already applied",
+      "uploading-files:2 volatile files, 300 B",
+      expect.stringMatching(/^uploading-files:~\/\.claude\.json, ~\/\.claude\/plugins\/installed_plugins\.json re-imported, 300 B in \d+\.\ds$/),
+      "installing-tools:already applied",
+      "installing-harness:already applied",
+    ]);
+    expect(again.ledger).toEqual(builder.import);
+    // The saved result from the first run stands: a re-import of state files changes no cut and no install.
+    expect(results).toEqual([]);
+  });
+
+  it("a volatile re-import that fails on attach is reported on the stage and never fails the attach: the ledger stands and nothing else runs", async () => {
+    let free = mb(2000);
+    const { backend, cmds, puts, fetch } = backendFor([], () => free);
+    const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf() });
+    const before = { cmds: cmds.length, puts: puts.length };
+    // A default recipe leaves about 250 MB free after the install stages, under the 256 MiB upload headroom.
+    free = mb(200);
+    const volatile = { paths: ["~/.claude.json"], pack: async () => ({ tar: Buffer.from("volatile-tgz"), bytes: 300, unpacked: 2048, skipped: [], cut: [] }) };
+    const { stages, onStage } = stageRecorder();
+    const again = await applyGoldenImport(builder.machine, { import: importOf({ files: { ...importOf().files!, volatile } }), setup: "true", ledger: builder.import, fetch, onStage });
+    expect(puts.length).toBe(before.puts);
+    expect(stages).toEqual([
+      "applying-setup:already applied",
+      "uploading-files:1 volatile file, 300 B",
+      expect.stringMatching(/^uploading-files:~\/\.claude\.json not re-imported: your files need 300 B packed and 2\.0 KB unpacked, plus 256 MB of headroom, but the machine has 200 MB free$/),
+      "installing-tools:already applied",
+      "installing-harness:already applied",
+    ]);
+    expect(again.ledger).toEqual(builder.import);
+    // A pack that throws takes the same road.
+    const broken = { paths: ["~/.claude.json"], pack: async (): Promise<PackedFiles> => { throw new Error("EACCES: permission denied"); } };
+    const rec = stageRecorder();
+    await applyGoldenImport(builder.machine, { import: importOf({ files: { ...importOf().files!, volatile: broken } }), setup: "true", ledger: builder.import, fetch, onStage: rec.onStage });
+    expect(rec.stages).toContain("uploading-files:~/.claude.json not re-imported: EACCES: permission denied");
   });
 
   it("without an import the harness path is unchanged", async () => {

@@ -32,6 +32,7 @@ import {
   loadManifest,
   lockRefused,
   loginShown,
+  recipeChanges,
   recipePath,
   saveRecipe,
   secretLinesFor,
@@ -97,6 +98,14 @@ export interface InitResult {
   code: number;
   handle?: HostHandle;
   logins?: LoginOutcome[];
+}
+
+/** What an earlier run left on the account for this recipe. */
+interface Earlier {
+  /** The first-life builder of this setup carrying this recipe, when there is one. */
+  attach?: GoldenBuilderView;
+  /** This setup's builders that cannot be attached to; the boot question offers to stop them first. */
+  stop: GoldenBuilderView[];
 }
 
 const GOLDEN_NAME = "default";
@@ -692,27 +701,36 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     if (b.foreignOwner !== undefined) return "not this setup's builder";
     if (b.heldBy !== undefined) return `in use by another wsp process (pid ${b.heldBy.pid})`;
     if (b.building === true) return "its setup never finished";
-    return b.firstLife !== true ? "cannot be sealed after a restart" : "built from a different recipe";
+    if (b.firstLife !== true) return "cannot be sealed after a restart";
+    const changes = b.recipe !== undefined && imp.recipe !== undefined ? recipeChanges(b.recipe, imp.recipe, manifest) : [];
+    if (changes.length === 0) return "built from a different recipe";
+    const named = changes.slice(0, 4);
+    if (changes.length > named.length) named.push(`${changes.length - named.length} more`);
+    return `built from a different recipe: ${named.join(", ")}`;
   };
-  // An earlier run's builder is attached to when it is still first-life, this setup's, and carries this
-  // recipe. Any other is never reaped from here: the person kills it, then runs init again.
-  const earlierBuilder = async (): Promise<GoldenBuilderView | undefined | "blocked"> => {
-    const earlier = await rt.golden.builders();
-    const attach = earlier.find(b => b.name === GOLDEN_NAME && b.firstLife === true && b.foreignOwner === undefined && b.heldBy === undefined && b.building !== true && b.recipeHash === imp.recipeHash);
-    const blocking = earlier.filter(b => b !== attach);
-    if (blocking.length === 0) return attach;
+  const listEarlier = (blocking: GoldenBuilderView[], attach: GoldenBuilderView | undefined): void => {
     const lines = blocking.map(b => `${describeBuilder(b)}; ${reasonOf(b)}`);
     if (attach !== undefined) lines.push(`${describeBuilder(attach)}; reusable by this run once the others are stopped`);
     log.warn(["A builder from an earlier wsp init is still running on the account:", ...lines].join("\n"), out);
-    // A builder another live process is using is that process's to finish; only the rest are the person's to kill.
-    const pids = blocking.flatMap(b => (b.heldBy !== undefined ? [b.heldBy.pid] : []));
-    if (pids.length === blocking.length) cancel(`Nothing was booted. Another wsp process (pid ${pids.join(", ")}) is using it; wait for it or stop that process, then run wsp init again.`, out);
-    else if (blocking.every(b => b.building === true)) cancel("Nothing was booted. Kill it first (the Solari console lists it), or run wsp, whose first sweep stops it; then run wsp init again.", out);
-    else cancel(`Nothing was booted. Kill it first (the Solari console lists it), then run wsp init again.${pids.length > 0 ? " The one another wsp process is using is that process's to finish, not yours to kill." : ""}`, out);
-    return "blocked";
   };
-  let attach = await earlierBuilder();
-  if (attach === "blocked") return { code: 1 };
+  // An earlier run's builder is attached to when it is still first-life, this setup's, and carries this
+  // recipe. Another of this setup's is stopped by its recorded id once the person says so; one another
+  // live process holds or another setup owns is never touched from here.
+  const earlierBuilder = async (): Promise<Earlier | "blocked"> => {
+    const earlier = await rt.golden.builders();
+    const attach = earlier.find(b => b.name === GOLDEN_NAME && b.firstLife === true && b.foreignOwner === undefined && b.heldBy === undefined && b.building !== true && b.recipeHash === imp.recipeHash);
+    const blocking = earlier.filter(b => b !== attach);
+    const pids = blocking.flatMap(b => (b.heldBy !== undefined ? [b.heldBy.pid] : []));
+    if (pids.length > 0 || blocking.some(b => b.foreignOwner !== undefined)) {
+      listEarlier(blocking, attach);
+      if (pids.length > 0) cancel(`Nothing was booted. Another wsp process (pid ${pids.join(", ")}) is using it; wait for it or stop that process, then run wsp init again.`, out);
+      else cancel("Nothing was booted. It belongs to another wsp setup: stop it from there, or from the Solari console if it is yours and forgotten; then run wsp init again.", out);
+      return "blocked";
+    }
+    return { ...(attach !== undefined ? { attach } : {}), stop: blocking };
+  };
+  let earlier = await earlierBuilder();
+  if (earlier === "blocked") return { code: 1 };
   // A free exit, before any consent dialog: a recipe whose ticked agents none can install is refused here, not on the builder.
   if (imp.agents.length === 0 && (imp.skippedAgents?.length ?? 0) > 0) {
     log.error(["No ticked agent can be installed, so there would be nothing to seal:", ...imp.skippedAgents!.map(a => `${a.name}: ${a.note}`)].join("\n"), out);
@@ -741,19 +759,44 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     recipe = goldenRecipeFor(bring, opts.keys, { import: imp });
     await rt.close();
     rt = opts.runtime(recipe);
-    attach = await earlierBuilder();
-    if (attach === "blocked") return { code: 1 };
+    earlier = await earlierBuilder();
+    if (earlier === "blocked") return { code: 1 };
   }
   const question = bootQuestion(recipe, opts.pricing);
+  const { attach, stop } = earlier;
+  if (stop.length > 0) {
+    listEarlier(stop, attach);
+    const then = attach !== undefined ? `attach to your earlier builder ${describeBuilder(attach)}?` : `${question.charAt(0).toLowerCase()}${question.slice(1)}`;
+    const ask = `Stop ${stop.length === 1 ? "it" : "them"}, then ${then}`;
+    if (interactive) {
+      const go = await confirmPrompt({ message: ask, hint: "No costs nothing; nothing is stopped and the recipe is kept.", input: io.input, output: io.output });
+      if (isCancel(go) || !go) {
+        cancel("Nothing was booted or stopped. The recipe is kept.", out);
+        return { code: 1 };
+      }
+    } else {
+      log.step(`${ask} Taken as yes (${opts.yes ? "--yes" : "no terminal"}).`, out);
+    }
+    for (const b of stop) {
+      try {
+        await rt.golden.kill(b.id);
+      } catch (e) {
+        log.error(`Stopping ${b.name} (${b.id}) failed: ${e instanceof Error ? e.message : String(e)}`, out);
+        cancel(`Nothing was booted. ${b.name} (${b.id}) is still running; run wsp init again to retry.`, out);
+        return { code: 1 };
+      }
+      log.step(`Stopped ${b.name} (${b.id}).`, out);
+    }
+  }
   if (attach !== undefined) {
     log.step(`Attaching to your earlier builder: ${describeBuilder(attach)}. Nothing new boots; stages already applied are skipped.`, out);
-  } else if (interactive) {
+  } else if (stop.length === 0 && interactive) {
     const go = await confirmPrompt({ message: question, hint: "No costs nothing and keeps the recipe for wsp init --manifest.", input: io.input, output: io.output });
     if (isCancel(go) || !go) {
       cancel("Nothing was booted. The recipe is kept.", out);
       return { code: 1 };
     }
-  } else {
+  } else if (stop.length === 0) {
     log.step(`${question} Taken as yes (${opts.yes ? "--yes" : "no terminal"}).`, out);
   }
 
