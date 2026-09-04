@@ -7,7 +7,7 @@ import { SessionEvent, type EventUnion, type RecipeDigest } from "@wsp/protocol"
 import { BUILDER_IDLE_MS, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { GRACE_MS, TRANSCRIPT_FLUSH_MS, createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
 import { serveRuntime } from "../src/serve.js";
-import { memoryStore } from "../src/store.js";
+import { memoryStore, type Store } from "../src/store.js";
 import { wsRequest } from "./ws-client.js";
 import { stubBackend } from "./stub-backend.js";
 import { fakeClock } from "./fake-clock.js";
@@ -1963,6 +1963,118 @@ describe("runtime golden import", () => {
     expect(await readerSees()).toMatchObject({ heldBy: { host: "beta:2" } });
     await setHold("alpha:1", process.ppid, "yesterday");
     expect(await readerSees()).toMatchObject({ heldBy: { host: "alpha:1" } });
+  });
+
+  it("a builder another process made after this one hydrated is never reaped while it is held or building, past the create grace", async () => {
+    const backend = stubBackend();
+    backend.execImpl = dfOk;
+    const store = memoryStore();
+    const host = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()), hostId: "host:1" });
+    expect(await host.golden.builders()).toEqual([]);
+
+    let release!: () => void;
+    const gate = new Promise<void>(r => (release = r));
+    const init = createRuntime({ backend, store, adapters: {}, goldenRecipe: { ...recipeWith(importOf()), deployDaemon: m => (m.id === "m2" ? gate : Promise.resolve()) }, hostId: "init:2" });
+    const held = await init.golden.prepare({ name: "done" });
+    const building = init.golden.prepare({ name: "mid" });
+    await vi.waitFor(async () => expect(await store.get("builders", "m2")).toMatchObject({ building: true }));
+    for (const m of backend.machines) m.spec.labels!["createdAt"] = new Date(Date.now() - 2 * 60_000).toISOString();
+
+    const swept = await host.reap();
+    expect(swept.reaped).toEqual([]);
+    expect(backend.machines.map(m => m.killed)).toEqual([false, false]);
+    expect((await host.golden.builders()).map(b => [b.id, b.heldBy?.host, b.building])).toEqual([[held.id, "init:2", undefined], ["m2", "init:2", true]]);
+    release();
+    expect((await building).id).toBe("m2");
+    await init.close();
+  });
+
+  /** A builder an earlier process left, hydrated here as reusable, then taken by a third process. */
+  const takenAfterHydration = async () => {
+    const backend = stubBackend();
+    backend.execImpl = dfOk;
+    const store = memoryStore();
+    const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()), hostId: "old:1" });
+    const b = await crashed.golden.prepare();
+    await crashed.close();
+    const host = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()), hostId: "host:2" });
+    expect((await host.golden.builders())[0]).not.toHaveProperty("heldBy");
+    const other = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()), hostId: "other:3" });
+    expect((await other.golden.prepare()).id).toBe(b.id);
+    return { backend, store, host, other, id: b.id };
+  };
+
+  it("a hold written after this process hydrated is seen by the sweep", async () => {
+    const { backend, store, host, other, id } = await takenAfterHydration();
+    const machine = backend.machines[0]!;
+    machine.spec.labels!["createdAt"] = new Date(Date.now() - 7 * 3_600_000).toISOString();
+
+    expect((await host.reap()).reaped).toEqual([]);
+    expect(machine.killed).toBe(false);
+    expect(await store.get("builders", id)).toMatchObject({ heldBy: { host: "other:3" } });
+    await other.close();
+  });
+
+  it("a hold written after this process hydrated is seen by the attach lookup", async () => {
+    const { backend, store, host, other, id } = await takenAfterHydration();
+
+    expect((await host.golden.prepare()).id).not.toBe(id);
+    expect(backend.machines).toHaveLength(2);
+    expect(await store.get("builders", id)).toMatchObject({ heldBy: { host: "other:3" } });
+    await other.close();
+  });
+
+  it("kill re-reads the record and refuses a builder another process has taken since hydration", async () => {
+    const { backend, store, host, other, id } = await takenAfterHydration();
+
+    await expect(host.golden.kill(id)).rejects.toThrow(/in use by another wsp process/);
+    expect(backend.machines[0]!.killed).toBe(false);
+    expect(await store.get("builders", id)).toMatchObject({ heldBy: { host: "other:3" } });
+    await other.close();
+  });
+
+  it("a sweep whose last listing is older than a pass that admitted a row neither drops nor kills that row", async () => {
+    const backend = stubBackend();
+    backend.execImpl = dfOk;
+    const inner = memoryStore();
+    // The n-th listing of the builders is held after it read the store, so a pass started later lists and admits first.
+    let gate: Promise<void> | undefined;
+    let holdAt = 0;
+    let listings = 0;
+    let listed = false;
+    const store: Store = {
+      ...inner,
+      list: async collection => {
+        const rows = await inner.list(collection);
+        if (collection === "builders" && ++listings === holdAt && gate !== undefined) {
+          listed = true;
+          await gate;
+        }
+        return rows;
+      },
+    };
+    const host = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()), hostId: "host:1" });
+    expect(await host.golden.builders()).toEqual([]);
+
+    // The sweep lists once for itself and once inside its grace pass; the second is the last read before it kills.
+    let release!: () => void;
+    gate = new Promise<void>(r => (release = r));
+    listings = 0;
+    holdAt = 2;
+    const sweep = host.reap();
+    await vi.waitFor(() => expect(listed).toBe(true));
+    const other = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()), hostId: "other:2" });
+    const b = await other.golden.prepare();
+    backend.machines[0]!.spec.labels!["createdAt"] = new Date(Date.now() - 2 * 60_000).toISOString();
+    const mine = await host.golden.prepare({ name: "mine" });
+    const listing = async () => (await host.golden.builders()).map(x => [x.id, x.heldBy?.host]).sort();
+    expect(await listing()).toEqual([[b.id, "other:2"], [mine.id, undefined]]);
+
+    release();
+    expect((await sweep).reaped).toEqual([]);
+    expect(backend.machines.map(m => m.killed)).toEqual([false, false]);
+    expect(await listing()).toEqual([[b.id, "other:2"], [mine.id, undefined]]);
+    await other.close();
   });
 
   it("a prepare that finishes after close() still writes its finished record, without a hold, and the next process attaches", async () => {

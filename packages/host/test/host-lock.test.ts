@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { serve, type CliIO } from "../src/cli.js";
+import { cli, serve, type CliIO } from "../src/cli.js";
 import type { HostHandle } from "../src/server.js";
 import { stubBackend } from "./stub-backend.js";
 
@@ -128,6 +128,17 @@ describe("serve takes host.lock next to the state file", () => {
     await h.close();
     handles.splice(0);
     expect(readFileSync(pointerPath, "utf8")).toBe(`${join(dir, "newer")}\n`);
+  });
+
+  it("wsp init refuses while a host serves the state, naming the pid and how to stop it, and boots nothing", async () => {
+    const first = await start();
+    const errors: string[] = [];
+    const code = await cli(["init", "--state", statePath], { ...quietIO, error: line => errors.push(line) });
+    expect(code).toBe(1);
+    expect(errors).toEqual([
+      `wsp init: a wsp host (pid ${process.pid}) is already serving ${statePath}. Stop it first (Ctrl-C in its terminal, or kill ${process.pid}), then run wsp init again, or point --state at a different file.`,
+    ]);
+    expect(readLock(lockPath).port).toBe(first.port);
   });
 
   it("does not leave a lock behind when the host fails to start", async () => {
