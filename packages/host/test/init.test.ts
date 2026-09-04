@@ -169,6 +169,11 @@ describe("wsp init, interactive", () => {
     expect(first).toMatch(/Tools\s+4\s+3 can come/);
     expect(first).toContain("Nothing has left this computer.");
     expect(first.indexOf("Found on this computer")).toBeLessThan(first.indexOf("1/8"));
+    // The detection result is a card down the bar, not a closed box: no corners, no rule, every line under the title starts with the thin bar.
+    const found = first.slice(first.indexOf("Found on this computer"), first.indexOf("1/8"));
+    expect(found).not.toMatch(/[╮╯─├]/);
+    expect(found.split("\n").slice(1, -1).filter(l => l !== "").every(l => l.startsWith("│"))).toBe(true);
+    expect(found).toMatch(/^Found on this computer\n│  Identity\s+\d+/);
     expect(first).toContain("1/8");
     expect(first).not.toMatch(/claude|codex/i);
     await f.press(KEY.enter);
@@ -200,8 +205,9 @@ describe("wsp init, interactive", () => {
     expect(body.map(l => l.trim().split(/\s{2,}/)[0])).toEqual([
       "Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins", "GitHub CLI login", "Claude Code login", "Upload", "Installs",
     ]);
+    expect(summary).not.toMatch(/[╮╯─├]/);
     expect(summary).toMatch(/Identity\s+2 of 3\s+1\.7 KB/);
-    expect(summary).toMatch(/Tools\s+3 of 4\s+│/);
+    expect(summary).toMatch(/Tools\s+3 of 4\n/);
     expect(summary).toMatch(/Sign-ins\s+0 of 2/);
     expect(summary).toMatch(/GitHub CLI login\s+sign in/);
     expect(summary).toMatch(/Claude Code login\s+sign in/);
@@ -235,7 +241,7 @@ describe("wsp init, interactive", () => {
     expect(out.slice(at).split("\n").slice(0, 3).map(l => l.replace(/^│\s+/, ""))).toEqual([
       expect.stringMatching(/^Opened http:\/\/127\.0\.0\.1:\d+\/$/),
       "Sign in where the checklist says, then save the golden.",
-      "c copy the address   enter continue",
+      "c copy the address • enter continue",
     ]);
     expect(out).not.toMatch(/—|\p{Emoji_Presentation}/u);
     expect(out).not.toContain(SOLARI);
@@ -509,20 +515,20 @@ describe("wsp init, everything else", () => {
     expect(screen).toContain("0 ticked\n");
     expect(screen).toContain("large items are listed but never copied without a tick");
     expect(screen).toContain("know what one of these is? add it to the catalog");
-    expect(screen).toContain("space tick or change   ← → fold   enter next   esc back");
+    expect(screen).toContain("space tick or change • ← → fold • enter next • esc back");
     // The all row ticks the plain rows and leaves the large one alone.
     await f.press(KEY.space);
-    expect(f.text().slice(f.text().lastIndexOf("Selected:"))).toMatch(/Selected: demo\n│  1 ticked, 300 B\n/);
+    expect(f.text().slice(f.text().lastIndexOf("Selected:"))).toMatch(/Selected: demo\n┃  1 ticked, 300 B\n/);
     await f.press(KEY.space);
     // all row, demo: tick it; .demo-token: skip -> copy (two answers, copy and skip).
     await f.press(KEY.down, KEY.space);
     let last = f.text().slice(f.text().lastIndexOf("Selected:"));
-    expect(last).toMatch(/Selected: demo\n│  1 ticked, 300 B\n/);
+    expect(last).toMatch(/Selected: demo\n┃  1 ticked, 300 B\n/);
     expect(f.text()).toContain("~/.config/demo minus ~/.config/demo/cache");
     expect(f.text()).toContain("looks like config; installed by homebrew");
     await f.press(KEY.down, KEY.space);
     last = f.text().slice(f.text().lastIndexOf("Selected:"));
-    expect(last).toMatch(/Selected: demo, \.demo-token\n│  2 ticked, 340 B\n/);
+    expect(last).toMatch(/Selected: demo, \.demo-token\n┃  2 ticked, 340 B\n/);
     expect(f.text()).toContain("copy brings it along; skip leaves it here");
     await f.press(KEY.space, KEY.space);
     expect(f.text().slice(f.text().lastIndexOf("Selected:"))).toMatch(/Selected: demo, \.demo-token\n/);
@@ -530,7 +536,7 @@ describe("wsp init, everything else", () => {
 
     await f.until(BOOT);
     const summary = f.text().slice(f.text().lastIndexOf("Summary"), f.text().lastIndexOf("Recipe saved"));
-    expect(summary).toMatch(/Everything else\s+2 of 4\s+340 B\s+│\n│\s+\.demo-token\s+copy\s+│/);
+    expect(summary).toMatch(/Everything else\s+2 of 4\s+340 B\n│\s+\.demo-token\s+copy\n/);
     expect(summary).not.toMatch(/\n│\s+demo\s/);
     expect(summary).toMatch(/Sign-ins\s+1 of 2[^\n]*\n│\s+GitHub CLI login\s+copy/);
     await f.press(KEY.enter);
@@ -617,13 +623,13 @@ describe("wsp init, everything else", () => {
     expect(screen).toMatch(/○ \.netrc\s+30 B\s+1 file\s+2026-08-12\s+credential\s+skip\n/);
     // all row, then .netrc: skip -> copy. The locked .env shows the plan's note when highlighted.
     await f.press(KEY.down, KEY.space);
-    expect(f.text().slice(f.text().lastIndexOf("Selected:"))).toMatch(/Selected: \.netrc\n│  1 ticked, 30 B\n/);
+    expect(f.text().slice(f.text().lastIndexOf("Selected:"))).toMatch(/Selected: \.netrc\n┃  1 ticked, 30 B\n/);
     await f.press(KEY.down);
     expect(f.text()).toContain(".env files are never copied; set the values on the machine");
     await f.press(KEY.enter);
     await f.until(BOOT);
     const summary = f.text().slice(f.text().lastIndexOf("Summary"), f.text().lastIndexOf("Recipe saved"));
-    expect(summary).toMatch(/Everything else\s+1 of 6\s+30 B\s+│\n│\s+\.netrc\s+copy\s+│/);
+    expect(summary).toMatch(/Everything else\s+1 of 6\s+30 B\n│\s+\.netrc\s+copy\n/);
     expect(summary).not.toMatch(/\n│\s+\.env\s/);
     await f.press(KEY.enter);
     expect((await run).code).toBe(1);

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { PassThrough } from "node:stream";
+import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it } from "vitest";
-import { ellipsize, fmtDuration, rowsOf, summarize, table, viewport, widthOf } from "../src/init-layout.js";
+import { unicode } from "@clack/prompts";
+import { S_BAR_FOCUS, S_BAR_FOCUS_END, card, colourDepth, ellipsize, fmtDuration, helpLine, rowsOf, summarize, table, viewport, widthOf, wrap } from "../src/init-layout.js";
 
 describe("init layout", () => {
   it("ellipsize keeps text that fits and ends cut text with one ellipsis inside the width", () => {
@@ -63,5 +65,77 @@ describe("init layout", () => {
     expect(summarize(["alpha", "beta", "gamma", "delta"], 14)).toBe("alpha +3 more");
     expect(summarize(["a".repeat(30), "beta"], 20)).toBe("aaaaaaaaaaa… +1 more");
     expect(summarize([], 20)).toBe("");
+  });
+
+  it("wrap breaks a line at word ends inside the width, indents the rest by two, and cuts a word longer than the width", () => {
+    expect(wrap("short line", 20)).toEqual(["short line"]);
+    expect(wrap("Installs  Claude Code, Codex, 89 tools plus Homebrew's toolchain", 40)).toEqual(["Installs  Claude Code, Codex, 89 tools", "  plus Homebrew's toolchain"]);
+    expect(wrap("a".repeat(30), 10)).toEqual(["aaaaaaaaa…"]);
+    expect(wrap("  " + "a".repeat(30), 10)).toEqual(["  aaaaaaa…"]);
+    expect(wrap("", 10)).toEqual([""]);
+    // A line that fits keeps its spacing: the summary indents the sign-ins under their rung and pads its columns with two spaces.
+    expect(wrap("  GitHub CLI login  copy", 40)).toEqual(["  GitHub CLI login  copy"]);
+    expect(wrap("Upload    77.0 MB, nothing has left this computer yet", 30)).toEqual(["Upload    77.0 MB, nothing has", "  left this computer yet"]);
+  });
+
+  it("card prints a bold title on the step glyph and its lines down the bar, an empty line as a bare bar, and long lines wrapped to the width", () => {
+    const output = Object.assign(new PassThrough(), { columns: 40 });
+    const chunks: string[] = [];
+    output.on("data", (c: Buffer) => chunks.push(c.toString()));
+    card("Summary", ["Identity  2 of 3  1.7 KB", "  GitHub CLI login  copy", "", "Installs  Claude Code, Codex, 89 tools plus Homebrew's toolchain"], output);
+    const raw = chunks.join("");
+    const lines = stripVTControlCharacters(raw).split("\n");
+    expect(lines).toEqual(["│", "◇  Summary", "│  Identity  2 of 3  1.7 KB", "│    GitHub CLI login  copy", "│", "│  Installs  Claude Code, Codex, 89", "│    tools plus Homebrew's toolchain", ""]);
+    expect(lines.map(l => l.length).filter(n => n > 40)).toEqual([]);
+    expect(raw).not.toMatch(/[╮╯─├]/);
+  });
+
+  it("the focused bar and its end are one cell wide like clack's thin ones, so focus moving never shifts a column; ASCII off a unicode terminal", () => {
+    expect([S_BAR_FOCUS, S_BAR_FOCUS_END]).toEqual(unicode ? ["┃", "┗"] : ["|", "+"]);
+    expect(S_BAR_FOCUS.length).toBe(1);
+    expect(S_BAR_FOCUS_END.length).toBe(1);
+  });
+
+  it("colourDepth is 1 off a terminal and when the env says no colour, Node's depth for TERM and COLORTERM otherwise, and FORCE_COLOR wins", () => {
+    expect(colourDepth(false, { TERM: "xterm-256color" })).toBe(1);
+    expect(colourDepth(true, { TERM: "dumb" })).toBe(1);
+    expect(colourDepth(true, { TERM: "xterm-256color", NO_COLOR: "1" })).toBe(1);
+    expect(colourDepth(true, { TERM: "xterm" })).toBe(4);
+    expect(colourDepth(true, { TERM: "linux" })).toBe(4);
+    expect(colourDepth(true, { TERM: "xterm-256color" })).toBe(8);
+    expect(colourDepth(true, { TERM: "xterm-256color", COLORTERM: "truecolor" })).toBe(24);
+    expect(colourDepth(false, { FORCE_COLOR: "1" })).toBe(4);
+    expect(colourDepth(false, { FORCE_COLOR: "3" })).toBe(24);
+    expect(colourDepth(false, { FORCE_COLOR: "0" })).toBe(1);
+  });
+
+  it("helpLine joins keys and what they do with dot separators: plain at depth 1, keys plain and the rest dim under 256 colours, two greys from 256 colours up", () => {
+    const keys = [
+      { key: "space", does: "tick" },
+      { key: "← →", does: "fold" },
+      { key: "esc", does: "back" },
+    ];
+    const plain = unicode ? "space tick • ← → fold • esc back" : "space tick   ← → fold   esc back";
+    expect(helpLine(keys, 1)).toBe(plain);
+    const was = process.env["FORCE_COLOR"];
+    process.env["FORCE_COLOR"] = "1";
+    try {
+      const sixteen = helpLine(keys, 4);
+      expect(stripVTControlCharacters(sixteen)).toBe(plain);
+      expect(sixteen).toContain("space \x1b[2mtick\x1b[22m");
+      expect(sixteen).not.toContain("38;5;");
+      expect([...sixteen.matchAll(/\x1b\[([0-9;]*)m/g)].map(m => m[1]).every(c => c === "2" || c === "22")).toBe(true);
+    } finally {
+      if (was === undefined) delete process.env["FORCE_COLOR"];
+      else process.env["FORCE_COLOR"] = was;
+    }
+    for (const depth of [8, 24]) {
+      const coloured = helpLine(keys, depth);
+      expect(stripVTControlCharacters(coloured)).toBe(plain);
+      expect(coloured).toContain("\x1b[38;5;247mspace\x1b[39m");
+      expect(coloured).toContain("\x1b[38;5;243mtick\x1b[39m");
+      expect(coloured).toContain(unicode ? "\x1b[38;5;243m • \x1b[39m" : "\x1b[38;5;243m   \x1b[39m");
+      expect(coloured).not.toContain("\x1b[38;5;247mtick");
+    }
   });
 });

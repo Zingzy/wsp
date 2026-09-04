@@ -9,7 +9,7 @@ import { styleText } from "node:util";
 import { LARGE_GROUP, RUNGS, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
 import { describeAge, type BackendPricing } from "@wsp/engine";
 import type { GoldenBuilderView, GoldenRecipe, GoldenStage, Runtime } from "@wsp/runtime";
-import { S_BAR, S_STEP_ERROR, S_STEP_SUBMIT, cancel, confirm, isCancel, log, note, outro } from "@clack/prompts";
+import { S_BAR, S_STEP_ERROR, S_STEP_SUBMIT, cancel, confirm, isCancel, log, outro } from "@clack/prompts";
 import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -34,7 +34,7 @@ import {
   saveRecipe,
   type ChecklistItem,
 } from "./init-recipe.js";
-import { GUTTER, ellipsize, fmtDuration, table, widthOf } from "./init-layout.js";
+import { GUTTER, card, colourDepth, ellipsize, fmtDuration, helpLine, table, widthOf } from "./init-layout.js";
 import { readKey, rungSelect, type SelectItem } from "./init-select.js";
 import type { HostHandle } from "./server.js";
 
@@ -448,8 +448,8 @@ function summaryNote(manifest: Manifest, ticks: ReadonlySet<string>, choices: Re
   );
   const answer = (e: ManifestEntry): string => LOGIN_CHOICES.find(c => c.value === choices.get(e.id))?.label ?? "skip";
   const listed = manifest.entries.filter(e => e.rung === "logins" || (e.consent === true && answer(e) !== "skip"));
-  // The note frame takes 6 columns; the label keeps room for the widest answer.
-  const labelRoom = width - 6 - 2 - GUTTER.length - Math.max(...LOGIN_CHOICES.map(c => c.label.length));
+  // The card's bar takes 3 columns; the label keeps room for the widest answer.
+  const labelRoom = width - 3 - 2 - GUTTER.length - Math.max(...LOGIN_CHOICES.map(c => c.label.length));
   const answered = new Map(table(listed.map(e => [`  ${ellipsize(e.label, labelRoom)}`, answer(e)])).map((line, i) => [listed[i]!.id, line]));
   const lines = perRung.flatMap((entries, i) => [rows[i]!, ...entries.flatMap(e => answered.get(e.id) ?? [])]);
   const upload = fmtBytes(manifest.entries.filter(e => ticks.has(e.id)).reduce((n, e) => n + e.bytes, 0));
@@ -582,7 +582,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     return st === undefined || st.kind === "dangling" ? undefined : st.kind === "dir";
   });
   if (notes.length > 0) log.warn(notes.join("\n"), out);
-  note(detectionNote(manifest, source).join("\n"), "Found on this computer", out);
+  card("Found on this computer", detectionNote(manifest, source), io.output);
 
   let answers: Answers;
   if (interactive) {
@@ -598,7 +598,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const { ticks, choices } = answers;
   const offered: Manifest = { entries: manifest.entries.filter(e => loginShown(e, manifest, ticks)) };
 
-  note(summaryNote(offered, ticks, choices, widthOf(io.output)).join("\n"), "Summary", out);
+  card("Summary", summaryNote(offered, ticks, choices, widthOf(io.output)), io.output);
   const path = recipePath(opts.statePath);
   saveRecipe(path, manifest, ticks, choices);
   log.step(`Recipe saved to ${path}`, out);
@@ -775,7 +775,7 @@ async function handoff(url: string, handle: HostHandle, io: InitIO, interactive:
     return;
   }
   const opened = await io.open(url);
-  log.step([`${opened ? "Opened" : "Open"} ${url}`, finish, ...(interactive ? [dim("c copy the address   enter continue")] : [])].join("\n"), out);
+  log.step([`${opened ? "Opened" : "Open"} ${url}`, finish, ...(interactive ? [helpLine([{ key: "c", does: "copy the address" }, { key: "enter", does: "continue" }], colourDepth(io.isTTY, io.env))] : [])].join("\n"), out);
   if (!interactive) return;
   for (;;) {
     const key = await readKey(io.input, io.output, ["c", "return"]);

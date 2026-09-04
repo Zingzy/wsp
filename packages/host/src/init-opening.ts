@@ -5,6 +5,7 @@
 import { styleText } from "node:util";
 import { intro } from "@clack/prompts";
 import type { InitIO } from "./init.js";
+import { colourDepth, grey } from "./init-layout.js";
 
 export const TAGLINE = "your setup, on cloud machines, for coding agents";
 
@@ -18,10 +19,9 @@ export const WORDMARK: readonly string[] = [
   " ╚══╝╚══╝ ╚══════╝╚═╝     ",
 ];
 
-// 256-colour greys in the middle of the ramp, so they read on dark and light backgrounds alike.
+// Greys in the middle of the ramp, so they read on dark and light backgrounds alike.
 const FILL = [250, 248, 246, 244, 242, 240];
 const OUTLINE = 237;
-const grey = (n: number, s: string): string => `\x1b[38;5;${n}m${s}\x1b[39m`;
 
 /** Each row a step darker than the one above; the box-drawing outline darker than the blocks it edges. */
 export function wordmark(colour = true): string[] {
@@ -35,6 +35,6 @@ export function opening(io: Pick<InitIO, "output" | "isTTY" | "env">, o: { comma
     intro(`wsp ${o.version}`, out);
     return;
   }
-  io.output.write(`\n${wordmark((io.env["NO_COLOR"] ?? "") === "").join("\n")}\n\n`);
+  io.output.write(`\n${wordmark(colourDepth(io.isTTY, io.env) >= 8).join("\n")}\n\n`);
   intro(`${styleText("inverse", ` ${o.command} `)}  ${styleText("dim", `${TAGLINE}  ${o.version}`)}`, out);
 }
