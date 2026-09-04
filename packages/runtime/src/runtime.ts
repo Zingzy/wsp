@@ -523,6 +523,25 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     bus.emit(event);
   };
 
+  /** A start without resume opens a thread; a resumed start joins the thread of the session it resumes, found by
+   * the id the CLI announced (it may differ from the one first minted). A transcript from before threads existed
+   * was one thread, so resuming into it stamps every event in place: the stamp fills an absent field once and never
+   * changes a value, so it runs at most once per transcript. A new thread leaves the old events as they were. */
+  const threadOf = (workspaceId: string, resume: string | undefined): string => {
+    const events = transcripts.get(workspaceId) ?? [];
+    if (resume !== undefined) {
+      for (let i = events.length - 1; i >= 0; i--) {
+        const e = events[i]!;
+        if (e.type !== "session.start" || e.sessionId !== resume) continue;
+        if (e.threadId !== undefined) return e.threadId;
+        const id = randomUUID();
+        for (const legacy of events) legacy.threadId ??= id;
+        return id;
+      }
+    }
+    return randomUUID();
+  };
+
   const view = (r: WorkspaceRecord): WorkspaceView => ({
     id: r.id,
     name: r.name,
@@ -987,6 +1006,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         startedAt: Date.now(),
       };
       const turnId = randomUUID();
+      const threadId = threadOf(workspaceId, o.resume);
 
       const forward = (event: AdapterEvent): void => {
         const sessionId = event.sessionId;
@@ -1000,6 +1020,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               workspaceId,
               sessionId,
               turnId,
+              threadId,
               prompt: o.prompt,
               ...(event.model !== undefined ? { model: event.model } : {}),
               ...(event.cwd !== undefined ? { cwd: event.cwd } : {}),
@@ -1014,6 +1035,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               workspaceId,
               sessionId,
               turnId,
+              threadId,
               kind: event.kind,
               text: event.text,
               ...(event.toolName !== undefined ? { toolName: event.toolName } : {}),
@@ -1023,7 +1045,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             return;
           case "turn.done":
             sessionView.status = event.result.status;
-            record({ type: "session.done", workspaceId, sessionId, turnId, result: event.result });
+            record({ type: "session.done", workspaceId, sessionId, turnId, threadId, result: event.result });
             return;
           case "session.end":
             sessionView.endedAt = Date.now();
@@ -1032,6 +1054,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               workspaceId,
               sessionId,
               turnId,
+              threadId,
               exitCode: event.exitCode,
               sawResult: event.sawResult,
             });
@@ -1087,7 +1110,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async history(workspaceId) {
       await entryOf(workspaceId);
-      return [...(transcripts.get(workspaceId) ?? [])];
+      return (transcripts.get(workspaceId) ?? []).map(e => ({ ...e }));
     },
 
     async interrupt(sessionId) {

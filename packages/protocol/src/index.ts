@@ -171,6 +171,9 @@ const sessionScope = {
   /** Minted by the runtime per sessions.start. The Claude session id repeats across --resume, so it
    * cannot split a transcript into turns; this can. */
   turnId: z.string().optional(),
+  /** Minted by the runtime at a start without resume and kept by every start that resumes into it, so a
+   * transcript folds into threads where it changes. Absent on transcripts from before it: those are one thread. */
+  threadId: z.string().optional(),
 };
 
 /** What the CLI announces about itself in system/init, beyond model and tools. */
