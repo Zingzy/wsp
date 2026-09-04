@@ -6,6 +6,36 @@
 
 import { z } from "zod";
 
+/** The one rule for a URL a guest may hand to the laptop: http or https in any
+ * case, no whitespace or control characters, at most HTTP_URL_MAX bytes, and
+ * it parses (so a hostname can always be read from it without throwing). The
+ * machine is the untrusted side, so the host and the app apply it too. The
+ * daemon carries a copy (it must not bundle this package); a test pins the two
+ * equal. */
+export const HTTP_URL_RE = /^https?:\/\/[^\s\x00-\x1f\x7f]+$/i;
+export const HTTP_URL_MAX = 8192;
+export function isHttpUrl(url: unknown): url is string {
+  if (typeof url !== "string" || url.length > HTTP_URL_MAX || !HTTP_URL_RE.test(url)) return false;
+  try {
+    new URL(url);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The host of a URL that passed isHttpUrl (with its port, without userinfo), or undefined when it does not parse: never throws. */
+export function hostOf(url: string): string | undefined {
+  try {
+    return new URL(url).host;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A callback port the laptop can bind without root; the host refuses anything else before it listens. */
+export const RelayPort = z.number().int().min(1024).max(65535);
+
 // --- backend capabilities ----------------------------------------------------
 
 /** Honest per-backend feature flags; the UI degrades based on these, never on probing. */
@@ -17,6 +47,9 @@ export const Capabilities = z.object({
   signedUrls: z.boolean(),
   /** Guests can run containers; false means services get installed natively. */
   containers: z.boolean(),
+  /** A daemon link exists, so sign-in URLs a guest tool opens land in the laptop's browser and the
+   * callback port is forwarded back; false means the person finishes sign-ins by copy and paste. */
+  callbackRelay: z.boolean(),
 });
 export type Capabilities = z.infer<typeof Capabilities>;
 
@@ -256,6 +289,8 @@ export const GoldenVersion = z.object({
   smoke: z.object({ cmd: z.string(), exitCode: z.number() }),
   /** What the provider built the builder at; forks of this version inherit it unless told otherwise. */
   size: WorkspaceSize.optional(),
+  /** The browser shim was on the machine when it was sealed, so its forks can be told BROWSER; versions sealed before it existed have no flag and get none. */
+  browserShim: z.boolean().optional(),
 });
 export type GoldenVersion = z.infer<typeof GoldenVersion>;
 
@@ -416,6 +451,13 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("fs.read"), path: z.string(), encoding: FsReadEncoding.optional() }),
   z.object({ id: reqId, op: z.literal("git.status"), cwd: z.string() }),
   z.object({ id: reqId, op: z.literal("git.diff"), cwd: z.string(), scope: GitDiffScope, path: z.string().optional() }),
+  /** One laptop-side connection to a guest loopback port, for the sign-in
+   * callback forward. The daemon dials 127.0.0.1 then ::1 (a Node 22 tool
+   * binds [::1] only). data is base64; the reply to tunnel.open comes after
+   * the guest accepted. */
+  z.object({ id: reqId, op: z.literal("tunnel.open"), tunnelId: z.string(), port: z.number().int().min(1).max(65535) }),
+  z.object({ id: reqId, op: z.literal("tunnel.write"), tunnelId: z.string(), data: z.string() }),
+  z.object({ id: reqId, op: z.literal("tunnel.close"), tunnelId: z.string() }),
 ]);
 export type DaemonRequest = z.infer<typeof DaemonRequest>;
 
@@ -449,7 +491,14 @@ export const DaemonEvent = z.discriminatedUnion("type", [
     exitCode: z.number(),
     signal: z.number().optional(),
   }),
-  z.object({ type: z.literal("port.open"), port: z.number(), pid: z.number().optional(), process: z.string().optional() }),
+  /** loopback: bound to 127.0.0.1 or ::1 only, so the preview edge (which dials eth0) cannot reach it. */
+  z.object({
+    type: z.literal("port.open"),
+    port: z.number(),
+    pid: z.number().optional(),
+    process: z.string().optional(),
+    loopback: z.boolean().optional(),
+  }),
   z.object({ type: z.literal("port.close"), port: z.number() }),
   z.object({ type: z.literal("inbox.file"), path: z.string(), bytes: z.number() }),
   /** Broadcast on pty.attach (current state) and afterwards only on change.
@@ -463,6 +512,17 @@ export const DaemonEvent = z.discriminatedUnion("type", [
     echo: z.boolean(),
     foreground: z.string(),
   }),
+  /** A guest tool asked for a browser (through the BROWSER or xdg-open shim).
+   * Pushed to every authed socket; clients show it and open it on a click.
+   * http(s) only: the machine is the untrusted side. port is the localhost
+   * port in the URL's redirect_uri when it carries one. */
+  z.object({ type: z.literal("browser.open"), url: z.string().refine(isHttpUrl, "http or https URL"), port: RelayPort.optional() }),
+  /** A loopback listener appeared around a browser.open whose URL named no
+   * port: the flow's callback, for the host to forward. */
+  z.object({ type: z.literal("callback.port"), port: RelayPort }),
+  z.object({ type: z.literal("tunnel.data"), tunnelId: z.string(), data: z.string() }),
+  /** The guest side closed; the laptop connection ends after any data before it. */
+  z.object({ type: z.literal("tunnel.end"), tunnelId: z.string() }),
 ]);
 export type DaemonEvent = z.infer<typeof DaemonEvent>;
 

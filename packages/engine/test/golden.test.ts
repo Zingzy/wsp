@@ -22,7 +22,7 @@ function recordingBackend(
   let nextId = 0;
   const killCount = new Map<string, number>();
   const backend: MachineBackend = {
-    capabilities: { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true },
+    capabilities: { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true },
     pricing: { rateUsdPerHour: (s: { cpu: number; memMb: number }) => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 } },
     async create(spec) {
       created.push(spec);
@@ -207,6 +207,16 @@ describe("interactive golden: prepare then seal", () => {
       "creating:desktop from default", "installing-harness", "ready",
       "snapshotting:golden-v1", "smoke-forking:claude --version", "sealed:v1",
     ]);
+  });
+
+  it("seal records whether the image carries the browser shim, read on the smoke fork", async () => {
+    const withShim = recordingBackend({}, { exec: cmd => (cmd === "test -x /usr/local/bin/wsp-open" ? { exitCode: 0, stdout: "", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" }) });
+    const b1 = await prepareBuilder({ backend: withShim.backend, setup: "true" });
+    expect((await sealGolden(b1, { backend: withShim.backend, smoke: "true" })).version.browserShim).toBe(true);
+
+    const without = recordingBackend({}, { exec: cmd => (cmd === "test -x /usr/local/bin/wsp-open" ? { exitCode: 1, stdout: "", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" }) });
+    const b2 = await prepareBuilder({ backend: without.backend, setup: "true" });
+    expect((await sealGolden(b2, { backend: without.backend, smoke: "true" })).version.browserShim).toBe(false);
   });
 
   it("seal retries a kill the provider accepted without acting on, and forks only once the builder reads gone", async () => {

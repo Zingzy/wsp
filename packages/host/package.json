@@ -17,6 +17,7 @@
     "@wsp/collect": "workspace:*",
     "@wsp/daemon": "workspace:*",
     "@wsp/engine": "workspace:*",
+    "@wsp/protocol": "workspace:*",
     "@wsp/runtime": "workspace:*",
     "@wsp/web": "workspace:*",
     "ws": "^8.21.3"

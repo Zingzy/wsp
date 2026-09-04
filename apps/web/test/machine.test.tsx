@@ -42,7 +42,7 @@ const costEvent = (workspaceId: string, rate: number, awakeMs: number, at: strin
   at,
 });
 
-const CAPS: Capabilities = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true };
+const CAPS: Capabilities = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true };
 const EMPTY_LINEAGE: SnapshotLineage = { name: "default", head: null, versions: [] };
 
 // The surface's cost series listens through api.subscribe like the store does,

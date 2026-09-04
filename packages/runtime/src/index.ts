@@ -8,6 +8,7 @@ export * from "./reach.js";
 // Re-exported so clients (wspx) can wire a backend without importing the
 // engine directly; the runtime is the only layer that drives it.
 export {
+  BROWSER_SHIM_PATH,
   SolariBackend,
   applyDotfiles,
   describeAge,

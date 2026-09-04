@@ -20,6 +20,7 @@ import {
   machineExecStream,
   type GoldenBuilderView,
   type GoldenRecipe,
+  type GoldenVersion,
   type Machine,
   type Runtime,
 } from "@wsp/runtime";
@@ -28,6 +29,7 @@ import { keychainReader } from "./init-import.js";
 import { runInit, type InitIO } from "./init.js";
 import { TAGLINE, opening } from "./init-opening.js";
 import type { ChecklistItem } from "./init-recipe.js";
+import { systemOpener, type UrlOpener } from "./relay.js";
 import { startHost, type HostHandle } from "./server.js";
 
 const VERSION = (
@@ -335,7 +337,7 @@ export function terminalInitIO(): InitIO {
     output: process.stdout,
     isTTY: process.stdin.isTTY === true && process.stdout.isTTY === true,
     env: process.env,
-    open: url => runQuiet(os === "darwin" ? "open" : os === "win32" ? "explorer" : "xdg-open", [url]),
+    open: systemOpener(os),
     copy: async text => {
       if (os === "darwin") return runQuiet("pbcopy", [], text);
       if (os === "win32") return runQuiet("clip", [], text);
@@ -393,7 +395,7 @@ async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: 
 
 export async function serve(
   io: CliIO,
-  opts: { port: number; wsPort: number; statePath: string; webDir?: string; runtime?: Runtime },
+  opts: { port: number; wsPort: number; statePath: string; webDir?: string; runtime?: Runtime; openUrl?: UrlOpener },
 ): Promise<HostHandle> {
   const keys = await loadKeys(io);
   const rt = opts.runtime ?? makeRuntime(keys, opts.statePath);
@@ -403,7 +405,7 @@ export async function serve(
 async function hostFor(
   rt: Runtime,
   keys: Keys,
-  opts: { port: number; wsPort: number; statePath: string; webDir?: string; builder?: GoldenBuilderView; checklist?: ChecklistItem[] },
+  opts: { port: number; wsPort: number; statePath: string; webDir?: string; builder?: GoldenBuilderView; checklist?: ChecklistItem[]; openUrl?: UrlOpener },
   io: CliIO,
 ): Promise<HostHandle> {
   const lockPath = lockPathFor(opts.statePath);
@@ -417,7 +419,8 @@ async function hostFor(
       keys: { anthropic: keys.anthropic !== undefined },
       ...(opts.builder !== undefined ? { builder: opts.builder } : {}),
       ...(opts.checklist !== undefined ? { checklist: opts.checklist } : {}),
-      ...(keys.anthropic !== undefined ? { workspaceEnvs: claudeEnvs(keys.anthropic) } : {}),
+      ...(keys.anthropic !== undefined ? { workspaceEnvs: (golden: GoldenVersion) => claudeEnvs(keys.anthropic, golden) } : {}),
+      ...(opts.openUrl !== undefined ? { openUrl: opts.openUrl } : {}),
       log: line => io.log(line),
     });
     writeFileSync(lockPath, JSON.stringify({ ...lock, port: handle.port, wsPort: handle.wsPort }));

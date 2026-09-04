@@ -42,6 +42,7 @@ export class SolariBackend implements MachineBackend {
     previewUrls: true,
     signedUrls: true,
     containers: false, // guest kernel 6.6.30 lacks overlayfs and netfilter: dockerd falls back to vfs with no bridge and runc fails (measured)
+    callbackRelay: true, // the daemon link rides previewUrls
   };
 
   // Solari's published Starter pricing: per vCPU-hour + per GB-hour

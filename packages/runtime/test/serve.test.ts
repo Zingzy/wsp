@@ -201,7 +201,7 @@ describe("serveRuntime golden wizard ops", () => {
     expect((sealed["manifest"] as { head: number }).head).toBe(1);
     expect(backend.machines.map(m => [m.id, m.kind, m.killed])).toEqual([["m1", "desktop", true], ["m2", "desktop", true]]);
     expect(backend.machines[1]!.spec.fromSnapshot).toBe("snap_golden-v1");
-    expect(backend.machines[1]!.execLog).toEqual(["claude --version"]);
+    expect(backend.machines[1]!.execLog).toEqual(["claude --version", "test -x /usr/local/bin/wsp-open"]);
     expect(await store.list("builders")).toEqual([]);
     expect((await c.request("golden.get", { name: "default" }))["manifest"]).toEqual(sealed["manifest"]);
 

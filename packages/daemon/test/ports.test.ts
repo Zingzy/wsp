@@ -30,7 +30,7 @@ describe("parseProcNetTcp", () => {
 
 describe("PortWatcher", () => {
   it("emits port.open and port.close on diffs between polls", async () => {
-    let snapshot: ListeningPort[] = [{ port: 8080, pid: 123, inode: 45678, uid: 0 }];
+    let snapshot: ListeningPort[] = [{ port: 8080, pid: 123, inode: 45678, uid: 0, loopback: false }];
     const w = new PortWatcher(async () => snapshot);
     const opened: number[] = [];
     const closed: number[] = [];
@@ -38,18 +38,36 @@ describe("PortWatcher", () => {
     w.on("port.close", e => closed.push(e.port));
 
     await w.poll();
+    // The first poll seeds what is already there without events; only changes after it are events.
+    expect(opened).toEqual([]);
+    expect(w.current().map(p => p.port)).toEqual([8080]);
     snapshot = [
-      { port: 8080, pid: 123, inode: 45678, uid: 0 },
-      { port: 3000, pid: 456, inode: 45700, uid: 1000 },
+      { port: 8080, pid: 123, inode: 45678, uid: 0, loopback: false },
+      { port: 3000, pid: 456, inode: 45700, uid: 1000, loopback: true },
     ];
     await w.poll();
-    snapshot = [{ port: 3000, pid: 456, inode: 45700, uid: 1000 }];
+    snapshot = [{ port: 3000, pid: 456, inode: 45700, uid: 1000, loopback: true }];
     await w.poll();
     await w.poll(); // steady state: no repeat events
 
-    expect(opened).toEqual([8080, 3000]);
+    expect(opened).toEqual([3000]);
     expect(closed).toEqual([8080]);
     expect(w.current().map(p => p.port)).toEqual([3000]);
+  });
+});
+
+describe("PortWatcher first poll and its subscriber", () => {
+  it("a poll awaited while the seeding poll is in flight waits for it, so the first ports.watch reply lists what was already listening", async () => {
+    // The real source walks /proc and takes longer than a microtask; the seed must not be lost to that.
+    const slow = (): Promise<ListeningPort[]> => new Promise(r => setTimeout(() => r([{ port: 3000, pid: 1, inode: 1, uid: 0, loopback: true }]), 40));
+    const w = new PortWatcher(slow, { intervalMs: 60_000 });
+    const opened: number[] = [];
+    w.on("port.open", e => opened.push(e.port));
+    w.start();
+    await w.poll();
+    expect(w.current().map(p => p.port)).toEqual([3000]);
+    expect(opened).toEqual([]);
+    w.stop();
   });
 });
 
@@ -74,19 +92,23 @@ describe("procNetTcpSource against a fake proc root", () => {
   it("names the listening process from /proc/<pid>/comm and leaves it unset when comm is unreadable", async () => {
     const rows = await procNetTcpSource(root)();
     expect(rows).toEqual([
-      { port: 8080, pid: 123, inode: 45678, uid: 0, process: "node" },
-      { port: 3000, pid: 456, inode: 45700, uid: 1000 },
+      { port: 8080, pid: 123, inode: 45678, uid: 0, process: "node", loopback: false },
+      { port: 3000, pid: 456, inode: 45700, uid: 1000, loopback: true },
     ]);
   });
 
   it("port.open carries process when the row has one", async () => {
-    const w = new PortWatcher(procNetTcpSource(root));
+    // Seed with nothing listening so the fixture's rows are changes, not the first poll's baseline.
+    let source = async (): Promise<ListeningPort[]> => [];
+    const w = new PortWatcher(() => source());
     const opened: unknown[] = [];
     w.on("port.open", e => opened.push(e));
     await w.poll();
+    source = procNetTcpSource(root);
+    await w.poll();
     expect(opened).toEqual([
-      { type: "port.open", port: 8080, pid: 123, process: "node" },
-      { type: "port.open", port: 3000, pid: 456 },
+      { type: "port.open", port: 8080, pid: 123, process: "node", loopback: false },
+      { type: "port.open", port: 3000, pid: 456, loopback: true },
     ]);
   });
 });

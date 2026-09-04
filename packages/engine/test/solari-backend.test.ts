@@ -19,6 +19,7 @@ describe("SolariBackend", () => {
       previewUrls: true,
       signedUrls: true,
       containers: false,
+      callbackRelay: true,
     });
   });
 

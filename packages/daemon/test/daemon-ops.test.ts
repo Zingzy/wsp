@@ -78,12 +78,12 @@ describe("daemon ops: ports, manifest, inbox", () => {
     expect(res.ok).toBe(true);
     expect(res["ports"]).toEqual([]);
 
-    snapshot = [{ port: 8080, pid: 123, inode: 1, uid: 0, process: "node" }];
+    snapshot = [{ port: 8080, pid: 123, inode: 1, uid: 0, process: "node", loopback: false }];
     await new Promise(r => setTimeout(r, 120));
     snapshot = [];
     await new Promise(r => setTimeout(r, 120));
 
-    expect(c.events).toContainEqual({ type: "port.open", port: 8080, pid: 123, process: "node" });
+    expect(c.events).toContainEqual({ type: "port.open", port: 8080, pid: 123, process: "node", loopback: false });
     expect(c.events).toContainEqual({ type: "port.close", port: 8080 });
     c.close();
   });

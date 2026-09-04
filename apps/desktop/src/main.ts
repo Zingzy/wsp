@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { fileURLToPath } from "node:url";
 import { currentHome, type CliIO } from "@wsp/host";
-import { BrowserWindow, app, dialog, ipcMain } from "electron";
+import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
 import { locateHost, openHost, statePathIn, type HostSession, type Located } from "./host-lifecycle.js";
 import type { Retry } from "./preload.js";
 import { checkSetup } from "./setup.js";
@@ -61,12 +61,20 @@ async function showApp(located: Located): Promise<boolean> {
       webDir: WEB_DIR,
       io,
       runtime: state.runtime,
+      // When a sign-in page opens without a click, it goes to the default browser, not into this window.
+      openUrl: url => shell.openExternal(url).then(() => true, () => false),
     });
   } else {
     session = located.session;
   }
   io.log(`${session.owned ? "serving" : "attached"} ${session.url} (home ${located.home})`);
-  await newWindow().loadURL(session.url);
+  const win = newWindow();
+  // A link the page opens (a workspace's sign-in page, a preview in a new tab) belongs in the default browser, not a second window.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//.test(url)) void shell.openExternal(url);
+    return { action: "deny" };
+  });
+  await win.loadURL(session.url);
   return true;
 }
 

@@ -103,7 +103,7 @@ describe("connectDaemon", () => {
     await until(() => reach!.stats().reconnects >= 1);
 
     // ports.watch was re-subscribed on the new connection
-    snapshot = [{ port: 9999, pid: 42, inode: 7, uid: 0 }];
+    snapshot = [{ port: 9999, pid: 42, inode: 7, uid: 0, loopback: false }];
     await until(() => events.some(e => e.type === "port.open" && e.port === 9999));
 
     // inbox.watch was re-subscribed too: a post-reconnect file still arrives

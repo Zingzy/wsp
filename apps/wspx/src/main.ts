@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { createClaudeAdapter } from "@wsp/adapter-claude";
 import {
+  BROWSER_SHIM_PATH,
   SolariBackend,
   applyDotfiles,
   createRuntime,
@@ -46,12 +47,14 @@ function loadEnv(root: string): { SOLARI_API_KEY: string; ANTHROPIC_API_KEY: str
   return out as { SOLARI_API_KEY: string; ANTHROPIC_API_KEY: string };
 }
 
-function claudeEnvs(anthropicKey: string): Record<string, string> {
+function claudeEnvs(anthropicKey: string, golden?: { browserShim?: boolean }): Record<string, string> {
   return {
     ANTHROPIC_API_KEY: anthropicKey,
     CLAUDE_CONFIG_DIR: CONFIG_DIR,
     IS_SANDBOX: "1",
     PATH: "/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    // Only a golden sealed with the browser shim may point tools at it.
+    ...(golden?.browserShim === true ? { BROWSER: BROWSER_SHIM_PATH } : {}),
   };
 }
 

@@ -18,6 +18,7 @@ import { selectTerminalUiState, useTerminalDrawerStore } from "../terminal/drawe
 import { DisconnectedBanner } from "./DisconnectedBanner.js";
 import { KeybindingDispatcher } from "./KeybindingDispatcher.js";
 import { RightPanel } from "./RightPanel.js";
+import { SignInBanner } from "./SignInBanner.js";
 
 const SIDEBAR_WIDTH_STORAGE_KEY = "wsp:sidebar-width";
 const SIDEBAR_MIN_WIDTH = 220;
@@ -71,6 +72,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </Sidebar>
       <SidebarInset className="h-dvh min-h-0 overflow-hidden">
         {conn === "closed" || conn === "reconnecting" ? <DisconnectedBanner reconnecting={conn === "reconnecting"} /> : null}
+        <SignInBanner />
         <div className="flex min-h-0 flex-1 flex-row">
           <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-shell-center>
             <WorkspacePageHeader className="border-b border-border">

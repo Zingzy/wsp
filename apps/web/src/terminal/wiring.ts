@@ -9,6 +9,7 @@
 import { getBrowser } from "../browser/model.js";
 import { provideDaemonWire } from "../files/wire.js";
 import type { useStore } from "../protocol/store.js";
+import { useSignInStore } from "../shell/signInStore.js";
 import { connectDaemonLink, type DaemonLink, type DaemonLinkOptions } from "./daemon-link.js";
 import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "./link.js";
 
@@ -65,6 +66,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
           reach: () => api.daemonReach(w.id),
           onEvent: e => {
             if (e.type === "port.open" || e.type === "port.close") browser.feedEvent({ ...e, workspaceId: w.id });
+            else if (e.type === "browser.open") useSignInStore.getState().announce(w.id, e.url);
             else wt.feedEvent(e);
           },
           // "dead" is the link we closed on purpose; the model hears "connecting" instead.
@@ -87,6 +89,8 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
       wired.delete(id);
       provideTerminals(id, null);
       provideDaemonWire(id, null);
+      // A bar for a workspace that is gone would name it by id.
+      useSignInStore.getState().dismiss(id);
     }
   };
 

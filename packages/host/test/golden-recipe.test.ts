@@ -42,7 +42,7 @@ describe("host golden recipe", () => {
     const smokeFork = backend.machines[1]!;
     expect(smokeFork.spec.fromSnapshot).toBe(version.snapshotId);
     expect(smokeFork.spec.onIdle).toBeUndefined();
-    expect(smokeFork.execLog).toEqual([GOLDEN_SMOKE]);
+    expect(smokeFork.execLog).toEqual([GOLDEN_SMOKE, "test -x /usr/local/bin/wsp-open"]);
     expect(builder.killed).toBe(true);
     expect(await rt.golden.builders()).toEqual([]);
   });

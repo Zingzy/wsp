@@ -151,6 +151,9 @@ importers:
       '@types/node':
         specifier: ^22.20.1
         version: 22.20.1
+      '@wsp/daemon':
+        specifier: workspace:*
+        version: link:../../packages/daemon
 
   packages/adapter-claude:
     devDependencies:
@@ -183,6 +186,9 @@ importers:
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1
+      '@wsp/protocol':
+        specifier: workspace:*
+        version: link:../protocol
 
   packages/engine:
     dependencies:
@@ -217,6 +223,9 @@ importers:
       '@wsp/engine':
         specifier: workspace:*
         version: link:../engine
+      '@wsp/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       '@wsp/runtime':
         specifier: workspace:*
         version: link:../runtime
