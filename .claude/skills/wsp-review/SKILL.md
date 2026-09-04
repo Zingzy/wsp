@@ -80,3 +80,7 @@ Since 2026-09-04 main has a root `vitest.config.ts` (from #104). A worktree on a
 ## A fix round is its own comment
 
 Appending a fix round to the build report by id hides it: the reviewer reads the ticket top down and the last comment is still the ruling, so the round reads as unanswered (#111 round 2, 2026-09-05). Every fix round is a new comment titled `Fix round N (review round N)` with the sha, each finding by number, the self-review line, and whether a live run was repeated for the changed path. Edit by id only to correct a comment's own text, never to add a round to it.
+
+## Gates cost one run, not three
+
+A builder's gate skips the Electron packaging unless the diff touches apps/desktop: `pnpm -r --filter '!@wsp/desktop' build` for the build step, then `pnpm test`, `pnpm -r exec tsc --noEmit`, `pnpm --filter @wsp/web build`. The desktop package builds in the coordinator's merge gate, which always runs the full `pnpm build`. The coordinator's merge gate runs once, on the branch merged with origin/main in a fresh worktree; the merge onto main then re-checks that origin/main has not moved, merges, builds and pushes without a second test run, since the gated tree and the merged tree are the same. A flaky file that fails in the gate is rerun alone in that worktree before the chain continues.
