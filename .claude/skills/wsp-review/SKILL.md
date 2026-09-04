@@ -76,3 +76,7 @@ Since 2026-09-04 main has a root `vitest.config.ts` (from #104). A worktree on a
 ## Long runs on this Mac: what is not installed
 
 `timeout` and `setsid` do not exist on macOS. A gate launched as `timeout 900 pnpm test` or `nohup setsid gate.sh` dies at once and leaves an empty status file that reads as "still running" until someone checks the pid (#104's canary and #110's gate both lost an hour this way). Detach with `nohup sh -c '...' > log 2>&1 &`, record `$!`, and confirm it is alive with `kill -0` before waiting on it; bound a step with the tool's own timeout, not a coreutils one.
+
+## A fix round is its own comment
+
+Appending a fix round to the build report by id hides it: the reviewer reads the ticket top down and the last comment is still the ruling, so the round reads as unanswered (#111 round 2, 2026-09-05). Every fix round is a new comment titled `Fix round N (review round N)` with the sha, each finding by number, the self-review line, and whether a live run was repeated for the changed path. Edit by id only to correct a comment's own text, never to add a round to it.
