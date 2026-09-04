@@ -68,3 +68,7 @@ Review wsp changes against the laws this project has already paid for. Generic c
 ## Verdict format
 
 End with: BLOCKERS (n) / SHOULD-FIX (n) / NITS (n), one line each with file:line and the law violated, then MERGE / MERGE-AFTER-FIXES / NEEDS-REWORK. If everything passes, say what the diff did WELL against this list: reviewers who only find faults train builders to hide things.
+
+## A worktree gates only on a base that carries the root vitest config
+
+Since 2026-09-04 main has a root `vitest.config.ts` (from #104). A worktree on a branch that predates it has none, and vitest walks up to `~/wsp`, takes the main checkout as its root and aliases `@wsp/*` to the main checkout's sources. Two builders (#103, #115) watched their tests run against main's protocol and pass or fail for the wrong reason. Before any gate counts, the branch is rebased onto a main that carries the file (`test -f vitest.config.ts` in the worktree root is the check). Reviewers' fresh worktrees merge origin/main first, so their gates were never exposed.
