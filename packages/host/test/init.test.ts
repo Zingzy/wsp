@@ -346,10 +346,11 @@ describe("wsp init, interactive", () => {
     expect(ask).toMatch(/2 vCPU, 4 GB\s+builder/);
     expect(ask).toMatch(/\$0\.11\/hr/);
     expect(ask).toMatch(/No\s+costs\s+nothing/);
-    expect(ask).toContain(`${S_RADIO_INACTIVE} Yes`);
-    expect(ask).toContain(`${S_RADIO_ACTIVE} No`);
+    // The confirm is the screen being answered: thick bar, the marker on No, the help line on the heavy end.
+    expect(ask).toContain(`\n┃  ${S_RADIO_INACTIVE} Yes / ${S_RADIO_ACTIVE} No\n┗  ← → change • y n answer • enter choose • esc cancel`);
     await f.press(KEY.enter);
     expect((await run).code).toBe(1);
+    expect(f.text().slice(f.text().lastIndexOf("◇  Boot a"))).toMatch(/^◇  Boot a[^\n]*\n(│    [^\n]*\n)?│  No costs nothing[^\n]*\n│  No\n└  Nothing was booted\. The recipe is kept\./);
     expect(f.backends.flatMap(b => b.machines)).toHaveLength(0);
     expect(f.hosts).toBe(0);
     const saved = loadManifest(join(dirs[0]!, "golden-recipe.json"));

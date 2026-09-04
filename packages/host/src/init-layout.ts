@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The few rules every wsp init screen shares: cut to a width with an
 // ellipsis, pad cells into aligned columns, print a duration, the bar down the
-// left of the screen being answered, the help line, and a card in the frame.
-import type { Writable } from "node:stream";
+// left of the screen being answered, the help line, a card in the frame, and
+// the confirm and password prompts drawn with those same rules.
+import type { Readable, Writable } from "node:stream";
 import { WriteStream } from "node:tty";
 import { styleText } from "node:util";
-import { S_STEP_SUBMIT, log, unicode } from "@clack/prompts";
+import { ConfirmPrompt, PasswordPrompt, type State as PromptState } from "@clack/core";
+import { S_BAR, S_RADIO_ACTIVE, S_RADIO_INACTIVE, S_STEP_ACTIVE, S_STEP_CANCEL, S_STEP_SUBMIT, log, unicode } from "@clack/prompts";
 
 export const GUTTER = "  ";
 /** The bar and its end on the screen being answered; finished screens keep clack's thin ones. Both one cell wide, so focus moving never shifts a column. */
@@ -113,4 +115,73 @@ export const CARD_FRAME = 3;
 export function card(title: string, lines: readonly string[], output: Writable): void {
   const width = widthOf(output) - CARD_FRAME;
   log.message([styleText("bold", title), ...lines.flatMap(l => wrap(l, width))], { output, symbol: styleText("green", S_STEP_SUBMIT) });
+}
+
+const dim = (s: string): string => styleText("dim", s);
+const MASK = unicode ? "▪" : "*";
+const CONFIRM_KEYS: readonly HelpKey[] = [{ key: "← →", does: "change" }, { key: "y n", does: "answer" }, { key: "enter", does: "choose" }, { key: "esc", does: "cancel" }];
+const PASSWORD_KEYS: readonly HelpKey[] = [{ key: "enter", does: "next" }, { key: "esc", does: "cancel" }];
+
+export interface PromptOptions {
+  /** The question: cyan on the step glyph while the prompt is being answered, plain once it is done. */
+  message: string;
+  /** Lines under the question, dim. In both, a newline separates lines and long ones wrap to the width. */
+  hint?: string;
+  input?: Readable;
+  output?: Writable;
+}
+
+/** The frame the two prompts share: the question, the hint, then the body rows down the bar; the screen being answered takes the thick bar, the cyan question and the help line, a finished one clack's thin bar. */
+function promptFrame(state: PromptState, o: PromptOptions, body: readonly string[], keys: readonly HelpKey[]): string {
+  const output = o.output ?? process.stdout;
+  const width = widthOf(output) - CARD_FRAME;
+  const open = state !== "submit" && state !== "cancel";
+  const bar = dim(open ? S_BAR_FOCUS : S_BAR);
+  const glyph = state === "submit" ? styleText("green", S_STEP_SUBMIT) : state === "cancel" ? styleText("red", S_STEP_CANCEL) : styleText("cyan", S_STEP_ACTIVE);
+  const lines = o.message.split("\n").flatMap(m => wrap(m, width)).map((l, i) => `${i === 0 ? glyph : bar}  ${open ? styleText("cyan", l) : l}`);
+  for (const h of o.hint === undefined ? [] : o.hint.split("\n")) for (const l of wrap(h, width)) lines.push(`${bar}  ${dim(l)}`);
+  for (const b of body) lines.push(`${bar}  ${b}`);
+  if (open) lines.push(`${dim(S_BAR_FOCUS_END)}  ${helpLine(keys, colourDepth(isTTY(output)))}`);
+  return lines.join("\n");
+}
+
+const streamsOf = (o: PromptOptions) => ({ ...(o.input ? { input: o.input } : {}), ...(o.output ? { output: o.output } : {}) });
+
+/** A yes or no question in the frame; the marker starts on No unless told otherwise, arrows move it, y and n answer, esc and ctrl-c cancel. */
+export async function confirmPrompt(o: PromptOptions & { initialValue?: boolean }): Promise<boolean | symbol> {
+  const yes = "Yes";
+  const no = "No";
+  const answer = (label: string, on: boolean): string => (on ? `${styleText("cyan", S_RADIO_ACTIVE)} ${label}` : `${dim(S_RADIO_INACTIVE)} ${dim(label)}`);
+  const prompt = new ConfirmPrompt({
+    active: yes,
+    inactive: no,
+    initialValue: o.initialValue ?? false,
+    ...streamsOf(o),
+    render() {
+      const on = this.value === true;
+      const picked = on ? yes : no;
+      const body = this.state === "submit" ? [dim(picked)] : this.state === "cancel" ? [styleText(["strikethrough", "dim"], picked)] : [`${answer(yes, on)} ${dim("/")} ${answer(no, !on)}`];
+      return promptFrame(this.state, o, body, CONFIRM_KEYS);
+    },
+  });
+  // clack sends the escape key through as a cursor action too, which flips the marker before the cancel is drawn; this runs after clack's own listener and flips it back.
+  prompt.on("cursor", action => {
+    if (action === "cancel") prompt.value = prompt.value !== true;
+  });
+  // The prompt holds a boolean from construction on; the undefined in clack's type never comes back.
+  return (await prompt.prompt()) as boolean | symbol;
+}
+
+/** A secret typed in the frame: every character drawn as the mask, the text itself never written to the output. */
+export async function passwordPrompt(o: PromptOptions): Promise<string | symbol> {
+  const prompt = new PasswordPrompt({
+    mask: MASK,
+    ...streamsOf(o),
+    render() {
+      const body = this.state === "submit" || this.state === "cancel" ? (this.masked === "" ? [] : [styleText(this.state === "submit" ? "dim" : ["strikethrough", "dim"], this.masked)]) : [this.userInputWithCursor];
+      return promptFrame(this.state, o, body, PASSWORD_KEYS);
+    },
+  });
+  // An untouched prompt settles to "" before it resolves; the undefined in clack's type never comes back.
+  return (await prompt.prompt()) as string | symbol;
 }

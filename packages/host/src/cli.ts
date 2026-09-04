@@ -9,8 +9,8 @@ import { createRequire } from "node:module";
 import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
-import { parseArgs, styleText } from "node:util";
-import { S_BAR, confirm, isCancel, password } from "@clack/prompts";
+import { parseArgs } from "node:util";
+import { isCancel } from "@clack/prompts";
 import { createClaudeAdapter } from "@wsp/adapter-claude";
 import { collect, nodeHost, nodeMachine, type Manifest, type Rung } from "@wsp/collect";
 import {
@@ -29,6 +29,7 @@ import { CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, claudeEnvs, deployDaemon, docto
 import { keychainReader } from "./init-import.js";
 import { runInit, type InitIO } from "./init.js";
 import { recipePath } from "./init-recipe.js";
+import { confirmPrompt, passwordPrompt, type PromptOptions } from "./init-layout.js";
 import { TAGLINE, opening } from "./init-opening.js";
 import type { ChecklistItem } from "./init-recipe.js";
 import { systemOpener, type UrlOpener } from "./relay.js";
@@ -110,9 +111,12 @@ type Stream<T> = T & { isTTY?: boolean };
 export function terminalIO(input: Stream<Readable> = process.stdin, output: Stream<Writable> = process.stdout): CliIO {
   const screen = input.isTTY === true && output.isTTY === true;
   const nobody = (q: string): Promise<never> =>
-    Promise.reject(new Error(`${q.split("\n")[0]} No terminal to ask on; set it in the environment, ./.env, or ~/.wsp/.env.`));
-  // clack frames the extra lines of a confirm's message but not a password's.
-  const framed = (q: string): string => q.replace(/\n/g, `\n${styleText("gray", S_BAR)}  `);
+    Promise.reject(new Error(`${q.split("\n")[0]}: no terminal to ask on; set it in the environment, ./.env, or ~/.wsp/.env.`));
+  // The first line of a question is the question; the lines under it are its hint.
+  const split = (q: string): PromptOptions => {
+    const nl = q.indexOf("\n");
+    return nl < 0 ? { message: q, input, output } : { message: q.slice(0, nl), hint: q.slice(nl + 1), input, output };
+  };
   const answered = async <T>(prompt: Promise<T | symbol>): Promise<T> => {
     const value = await prompt;
     if (isCancel(value)) throw new Error("Nothing was changed.");
@@ -121,8 +125,8 @@ export function terminalIO(input: Stream<Readable> = process.stdin, output: Stre
   return {
     log: line => console.log(line),
     error: line => console.error(line),
-    ask: q => (screen ? answered(confirm({ message: framed(q), initialValue: false, input, output })).then(yes => (yes ? "yes" : "no")) : nobody(q)),
-    askSecret: q => (screen ? answered(password({ message: framed(q), input, output })) : nobody(q)),
+    ask: q => (screen ? answered(confirmPrompt(split(q))).then(yes => (yes ? "yes" : "no")) : nobody(q)),
+    askSecret: q => (screen ? answered(passwordPrompt(split(q))) : nobody(q)),
   };
 }
 
@@ -172,13 +176,13 @@ export async function loadKeys(
   let anthropic = find("ANTHROPIC_API_KEY");
   if (solari !== undefined) return { solari, ...(anthropic !== undefined ? { anthropic } : {}) };
 
-  solari = (await io.askSecret(`No Solari key found.\nSolari API key  ${styleText("dim", "console.getsolari.com")}`)).trim();
+  solari = (await io.askSecret("Solari API key\nNo Solari key found.\nconsole.getsolari.com")).trim();
   if (!solari) throw new Error("A Solari API key is needed to start.");
   const set: Record<string, string> = { SOLARI_API_KEY: solari };
 
   if (anthropic === undefined && ask.anthropic) {
     const typed = (
-      await io.askSecret(`Anthropic API key  ${styleText("dim", "optional, enter skips")}\nOn a Claude subscription, skip this and sign in with /login on the machine instead.`)
+      await io.askSecret("Anthropic API key\noptional, enter skips\nOn a Claude subscription, skip this and sign in with /login on the machine instead.")
     ).trim();
     if (typed) {
       anthropic = typed;
