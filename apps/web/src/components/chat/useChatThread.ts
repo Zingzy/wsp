@@ -7,11 +7,11 @@
 // The adapter derives the view; this hook only keeps the event list, the
 // arrival clock for unstamped events, and the things the wire cannot know
 // yet: a prompt the user just sent, a send that failed locally, and a new
-// thread requested while a turn was still running. The wire has no interrupt
-// op and the runtime no per-workspace guard, so that turn keeps running
-// unseen and the composer stays closed until its end arrives.
+// thread requested while a turn was still running. The web client sends no
+// interrupt and the runtime has no per-workspace guard, so that turn keeps
+// running unseen and the composer stays closed until its end arrives.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { SessionEvent } from "@wsp/protocol";
+import type { SessionEvent, SessionHarness } from "@wsp/protocol";
 import { useProtocolEvents, useStore } from "../../protocol/store";
 import type { ProtocolEvent } from "../../protocol/client";
 import { deriveSession, type TimelineEntry, type TurnSummary } from "./adapt";
@@ -25,6 +25,9 @@ export interface ChatThreadView {
   /** The latest turn once it has settled; null while it runs or before any turn. */
   readonly settled: TurnSummary | null;
   readonly cwd: string | null;
+  /** What the last session.start announced about the CLI; the composer's catalog reads it. */
+  readonly harness: SessionHarness | null;
+  readonly model: string | null;
 }
 
 export interface ChatThreadHandle {
@@ -197,6 +200,8 @@ export function deriveChatThread(state: ThreadState, previous: ReadonlyArray<Tim
     activeTurnStartedAt: model.running ? (latestTurn?.startedAt ?? null) : null,
     settled: latestTurn !== null && !model.running ? latestTurn : null,
     cwd,
+    harness: model.harness,
+    model: model.model,
   };
 }
 

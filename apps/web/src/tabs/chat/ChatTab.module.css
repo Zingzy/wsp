@@ -1,20 +1,8 @@
 /* SPDX-License-Identifier: AGPL-3.0-only */
-/* The chat tab's holdover composer and the fixture-only approval prompt; the
-   thread itself renders through components/chat. */
+/* The chat tab's root and the fixture-only approval prompt; the thread and
+   the composer render through components/chat. */
 
 .root { height: 100%; display: flex; flex-direction: column; }
-
-.composer { border-top: 1px solid var(--soft); background: var(--panel); padding: 10px 12px 8px; }
-.input {
-  display: block; width: 100%; resize: none; overflow-y: auto;
-  background: var(--term); color: var(--fg);
-  border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px;
-  font-family: var(--mono); font-size: 12.5px; line-height: 1.5; outline: none;
-  transition: border-color 0.16s;
-}
-.input:focus { border-color: color-mix(in srgb, var(--fg) 22%, transparent); }
-.input:disabled { opacity: 0.55; }
-.hint { margin-top: 6px; min-height: 14px; font-family: var(--mono); font-size: 10.5px; color: var(--deep); }
 
 .approval {
   display: inline-block; border: 1px solid var(--line); border-radius: 8px;

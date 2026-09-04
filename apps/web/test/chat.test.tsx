@@ -3,19 +3,22 @@
 // vocabulary; shapes mirror packages/adapter-claude/test/fixtures/
 // stream-session.jsonl (hello-world server run). No live daemon.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { installFakeLayout } from "./fake-layout.js";
+import { composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
 import type { EventUnion, SessionEvent, WorkspaceView } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { ChatTab } from "../src/tabs/ChatTab.js";
 import { ApprovalPrompt } from "../src/tabs/chat/ApprovalPrompt.js";
+import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { requestNewThread } from "../src/shell/shellRequests.js";
 import { CHAT_STREAM, CHAT_T0, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
 
 let restoreLayout: () => void = () => {};
 beforeAll(() => { restoreLayout = installFakeLayout(); });
 afterAll(() => restoreLayout());
+beforeEach(() => useComposerDraftStore.setState({ drafts: {} }));
 
 const WS = CHAT_WS;
 const CLAUDE_SID = "e16ed170-8257-4668-879e-fe836341633c";
@@ -69,11 +72,14 @@ function fixtureApi(workspaces: WorkspaceView[], history: Record<string, Session
 
 async function setup(api: Api) {
   useStore.getState().bind(api);
+  useStore.getState().setConn("live");
   await waitFor(() => expect(useStore.getState().workspaces.length).toBeGreaterThan(0));
   const view = render(<ChatTab workspaceId={WS} />);
   await waitFor(() => expect(screen.queryByText("loading transcript")).toBeNull());
   return view;
 }
+
+const sendButton = () => screen.getByRole("button", { name: /Send message|Turn in flight|Finishing the previous turn/ }) as HTMLButtonElement;
 
 describe("chat tab rendering", () => {
   it("mounts the thread view: empty headline first, then the fixture conversation with its settled footer", async () => {
@@ -148,19 +154,18 @@ describe("chat tab hydration", () => {
     api.sessionHistory = fetches;
     await setup(api);
     await screen.findByText("one.");
-    const input = screen.getByRole("textbox", { name: "prompt" }) as HTMLTextAreaElement;
-    expect(input.disabled).toBe(true);
+    expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
     expect(fetches).toHaveBeenCalledTimes(1);
 
     history[WS] = replay(WS, "first", "one.");
     act(() => useStore.getState().noteGap());
-    await waitFor(() => expect(input.disabled).toBe(false));
+    await waitFor(() => expect(sendButton().getAttribute("aria-label")).toBe("Send message"));
     expect(fetches).toHaveBeenCalledTimes(2);
     expect(screen.getByText("one.")).toBeDefined();
     expect(screen.queryByText(/Working for/)).toBeNull();
     // Live events land again once the reload is in.
     emit({ type: "session.start", ...scope });
-    expect(input.disabled).toBe(true);
+    expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
   });
 
   it("a replay gap while finishing the previous turn: history shows that turn ended, so the composer opens", async () => {
@@ -169,18 +174,18 @@ describe("chat tab hydration", () => {
     await setup(api);
     for (const e of FIXTURE.slice(0, 6)) emit(e);
     act(() => requestNewThread({ workspaceId: WS }));
-    const input = screen.getByRole("textbox", { name: "prompt" }) as HTMLTextAreaElement;
-    expect(input.disabled).toBe(true);
-    expect(screen.getByText("finishing the previous turn")).toBeDefined();
+    const editor = composerEditor();
+    expect(isEditable(editor)).toBe(false);
+    expect(screen.getByRole("status").textContent).toContain("Finishing the previous turn");
 
     // The turn ended while the socket was down for longer than the runtime replays.
     history[WS] = [...FIXTURE] as SessionEvent[];
     act(() => useStore.getState().noteGap());
-    await waitFor(() => expect(input.disabled).toBe(false));
-    expect(screen.queryByText("finishing the previous turn")).toBeNull();
+    await waitFor(() => expect(isEditable(editor)).toBe(true));
+    expect(screen.queryByRole("status")).toBeNull();
     expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
-    fireEvent.change(input, { target: { value: "start over" } });
-    fireEvent.keyDown(input, { key: "Enter" });
+    await typeInto(editor, "start over");
+    await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(1));
     expect(started[0]).toEqual({ workspaceId: WS, prompt: "start over" });
   });
@@ -193,54 +198,61 @@ describe("chat tab hydration", () => {
     await setup(api);
     for (const e of FIXTURE.slice(0, 6)) emit(e);
     act(() => requestNewThread({ workspaceId: WS }));
-    const input = screen.getByRole("textbox", { name: "prompt" }) as HTMLTextAreaElement;
+    const editor = composerEditor();
 
     history[WS] = FIXTURE.slice(0, 7) as SessionEvent[];
     act(() => useStore.getState().noteGap());
     await waitFor(() => expect(fetches).toHaveBeenCalledTimes(2));
     await act(() => new Promise(r => setTimeout(r, 0)));
-    expect(input.disabled).toBe(true);
-    expect(screen.getByText("finishing the previous turn")).toBeDefined();
+    expect(isEditable(editor)).toBe(false);
+    expect(screen.getByRole("status").textContent).toContain("Finishing the previous turn");
     for (const e of FIXTURE.slice(7)) emit(e);
-    expect(input.disabled).toBe(false);
+    expect(isEditable(editor)).toBe(true);
   });
 
-  it("live events keep landing after hydration and the composer follows the replayed state", async () => {
+  it("live events keep landing after hydration and the send button follows the replayed state", async () => {
     const { api, emit } = fixtureApi([workspace], { [WS]: replay(WS, "first", "one.") });
     await setup(api);
     await screen.findByText("one.");
-    const input = screen.getByRole("textbox", { name: "prompt" }) as HTMLTextAreaElement;
-    expect(input.disabled).toBe(false);
+    expect(isEditable(composerEditor())).toBe(true);
+    expect(sendButton().getAttribute("aria-label")).toBe("Send message");
     emit({ type: "session.start", ...scope });
     emit({ type: "session.delta", ...scope, kind: "text", text: "two." });
     expect(screen.getByText("two.")).toBeDefined();
-    expect(input.disabled).toBe(true);
+    // The editor stays open for the next prompt; only sending waits for the turn.
+    expect(isEditable(composerEditor())).toBe(true);
+    expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
+    expect(sendButton().disabled).toBe(true);
   });
 });
 
 describe("chat tab composer", () => {
-  it("enter sends exactly one turn with resume, disables while in flight, re-enables on done", async () => {
+  it("enter sends exactly one turn with resume, blocks sending while in flight, re-enables on done", async () => {
     const { api, started, emit } = fixtureApi([workspace]);
     await setup(api);
-    const input = screen.getByRole("textbox", { name: "prompt" }) as HTMLTextAreaElement;
+    const editor = composerEditor();
 
-    fireEvent.change(input, { target: { value: "fix the flaky test" } });
-    fireEvent.keyDown(input, { key: "Enter" });
+    await typeInto(editor, "fix the flaky test");
+    expect(editor.textContent).toBe("fix the flaky test");
+    await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(1));
     expect(started[0]).toEqual({ workspaceId: WS, prompt: "fix the flaky test", resume: CLAUDE_SID });
 
-    // Local echo of the user turn; composer disabled with the reason shown.
+    // Local echo of the user turn; the draft is gone and the send button says why it waits.
     expect(screen.getByText("fix the flaky test")).toBeDefined();
-    expect(input.disabled).toBe(true);
-    expect(screen.getByText("turn in flight")).toBeDefined();
-    fireEvent.keyDown(input, { key: "Enter" });
+    expect(editor.textContent).toBe("");
+    expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
+    await typeInto(editor, "again");
+    await press(editor, "Enter");
     expect(started.length).toBe(1);
+    expect(editor.textContent).toBe("again");
 
     emit({ type: "session.start", ...scope });
-    expect(input.disabled).toBe(true);
+    expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
     emit({ type: "session.done", ...scope, result: { status: "completed", durationMs: 900, costUsd: 0.001 } });
     emit({ type: "session.end", ...scope, exitCode: 0, sawResult: true });
-    expect(input.disabled).toBe(false);
+    expect(sendButton().getAttribute("aria-label")).toBe("Send message");
+    expect(sendButton().disabled).toBe(false);
     expect(started.length).toBe(1);
   });
 
@@ -248,28 +260,30 @@ describe("chat tab composer", () => {
     const { api } = fixtureApi([workspace]);
     api.startSession = async () => { throw new Error("workspace is napping"); };
     await setup(api);
-    const input = screen.getByRole("textbox", { name: "prompt" }) as HTMLTextAreaElement;
+    const editor = composerEditor();
 
-    fireEvent.change(input, { target: { value: "fix the flaky test" } });
-    fireEvent.keyDown(input, { key: "Enter" });
+    await typeInto(editor, "fix the flaky test");
+    await press(editor, "Enter");
     await waitFor(() => expect(screen.getByText(/workspace is napping/i)).toBeDefined());
-    expect(input.value).toBe("fix the flaky test");
-    expect(input.disabled).toBe(false);
+    expect(editor.textContent).toBe("fix the flaky test");
+    expect(sendButton().getAttribute("aria-label")).toBe("Send message");
+    expect(sendButton().disabled).toBe(false);
   });
 
   it("ignores empty and whitespace-only drafts", async () => {
     const { api, started } = fixtureApi([workspace]);
     await setup(api);
-    const input = screen.getByRole("textbox", { name: "prompt" });
-    fireEvent.keyDown(input, { key: "Enter" });
-    fireEvent.change(input, { target: { value: "   " } });
-    fireEvent.keyDown(input, { key: "Enter" });
+    const editor = composerEditor();
+    await press(editor, "Enter");
+    await typeInto(editor, "   ");
+    await press(editor, "Enter");
     expect(started.length).toBe(0);
+    expect(sendButton().disabled).toBe(true);
   });
 });
 
 describe("chat tab new thread", () => {
-  it("clears the thread on a new-thread request for this workspace and sends the next prompt without resume", async () => {
+  it("clears the thread on a new-thread request for this workspace, focuses the composer, and sends the next prompt without resume", async () => {
     const { api, started, emit } = fixtureApi([workspace], { [WS]: CHAT_STREAM.slice() });
     await setup(api);
     await screen.findByText(/Server is live at :3000\./);
@@ -281,11 +295,11 @@ describe("chat tab new thread", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in api?");
     expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();
     expect(screen.queryByTestId("settled-footer")).toBeNull();
-    const input = screen.getByRole("textbox", { name: "prompt" }) as HTMLTextAreaElement;
-    expect(document.activeElement).toBe(input);
+    const editor = composerEditor();
+    expect(document.activeElement).toBe(editor);
 
-    fireEvent.change(input, { target: { value: "start over" } });
-    fireEvent.keyDown(input, { key: "Enter" });
+    await typeInto(editor, "start over");
+    await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(1));
     expect(started[0]).toEqual({ workspaceId: WS, prompt: "start over" });
     expect(screen.getByText("start over")).toBeDefined();
@@ -297,36 +311,41 @@ describe("chat tab new thread", () => {
     emit({ type: "session.done", ...fresh, at: T0 + 101_000, result: { status: "completed", durationMs: 1000, costUsd: 0.001 } });
     emit({ type: "session.end", ...fresh, at: T0 + 101_100, exitCode: 0, sawResult: true });
     await screen.findByText("Fresh start.");
-    fireEvent.change(input, { target: { value: "and then" } });
-    fireEvent.keyDown(input, { key: "Enter" });
+    await typeInto(editor, "and then");
+    await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(2));
     expect(started[1]).toEqual({ workspaceId: WS, prompt: "and then", resume: "sess_0002" });
   });
 });
 
 describe("chat tab new thread mid-turn", () => {
+  const finishing = () => screen.queryByRole("status")?.textContent ?? null;
+
   it("keeps the composer closed as finishing the previous turn until that turn ends, then enables and focuses it", async () => {
     const { api, started, emit } = fixtureApi([workspace]);
     await setup(api);
     for (const e of FIXTURE.slice(0, 6)) emit(e);
-    const input = screen.getByRole("textbox", { name: "prompt" }) as HTMLTextAreaElement;
-    expect(input.disabled).toBe(true);
+    const editor = composerEditor();
+    expect(isEditable(editor)).toBe(true);
+    expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
     act(() => requestNewThread({ workspaceId: WS }));
     expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
-    expect(input.disabled).toBe(true);
-    expect(screen.getByText("finishing the previous turn")).toBeDefined();
-    fireEvent.change(input, { target: { value: "too early" } });
-    fireEvent.keyDown(input, { key: "Enter" });
+    expect(isEditable(editor)).toBe(false);
+    expect(finishing()).toBe("Finishing the previous turn");
+    expect(sendButton().getAttribute("aria-label")).toBe("Finishing the previous turn");
+    await typeInto(editor, "too early");
+    await press(editor, "Enter");
     expect(started.length).toBe(0);
+    expect(editor.textContent).toBe("");
     for (const e of FIXTURE.slice(6, -1)) emit(e);
-    expect(input.disabled).toBe(true);
+    expect(isEditable(editor)).toBe(false);
     expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
     emit(FIXTURE.at(-1)!);
-    expect(input.disabled).toBe(false);
-    expect(document.activeElement).toBe(input);
-    expect(screen.queryByText("finishing the previous turn")).toBeNull();
-    fireEvent.change(input, { target: { value: "start over" } });
-    fireEvent.keyDown(input, { key: "Enter" });
+    expect(isEditable(editor)).toBe(true);
+    expect(document.activeElement).toBe(editor);
+    expect(finishing()).toBeNull();
+    await typeInto(editor, "start over");
+    await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(1));
     expect(started[0]).toEqual({ workspaceId: WS, prompt: "start over" });
   });
@@ -335,49 +354,48 @@ describe("chat tab new thread mid-turn", () => {
     const { api, started, emit } = fixtureApi([workspace]);
     await setup(api);
     for (const e of FIXTURE.slice(0, 6)) emit(e);
-    const input = screen.getByRole("textbox", { name: "prompt" }) as HTMLTextAreaElement;
+    const editor = composerEditor();
     act(() => requestNewThread({ workspaceId: WS }));
-    expect(screen.getByText("finishing the previous turn")).toBeDefined();
+    expect(finishing()).toBe("Finishing the previous turn");
     act(() => requestNewThread({ workspaceId: WS }));
-    expect(input.disabled).toBe(true);
-    expect(screen.getByText("finishing the previous turn")).toBeDefined();
-    fireEvent.change(input, { target: { value: "too early" } });
-    fireEvent.keyDown(input, { key: "Enter" });
+    expect(isEditable(editor)).toBe(false);
+    expect(finishing()).toBe("Finishing the previous turn");
+    await press(editor, "Enter");
     expect(started.length).toBe(0);
     for (const e of FIXTURE.slice(6, -1)) emit(e);
     expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
     expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();
-    expect(input.disabled).toBe(true);
+    expect(isEditable(editor)).toBe(false);
     emit(FIXTURE.at(-1)!);
-    expect(input.disabled).toBe(false);
-    expect(screen.queryByText("finishing the previous turn")).toBeNull();
+    expect(isEditable(editor)).toBe(true);
+    expect(finishing()).toBeNull();
   });
 
   it("treats a send whose session.start has not landed as the turn the new thread left behind", async () => {
     const { api, started, emit } = fixtureApi([workspace]);
     await setup(api);
-    const input = screen.getByRole("textbox", { name: "prompt" }) as HTMLTextAreaElement;
-    fireEvent.change(input, { target: { value: "hello" } });
-    fireEvent.keyDown(input, { key: "Enter" });
+    const editor = composerEditor();
+    await typeInto(editor, "hello");
+    await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(1));
     act(() => requestNewThread({ workspaceId: WS }));
     expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
     expect(screen.queryByText("hello")).toBeNull();
-    expect(input.disabled).toBe(true);
-    expect(screen.getByText("finishing the previous turn")).toBeDefined();
+    expect(isEditable(editor)).toBe(false);
+    expect(finishing()).toBe("Finishing the previous turn");
     // The sent turn's events arrive after the request: none of them reaches the fresh thread.
     emit({ type: "session.start", ...scope, at: T0, prompt: "hello" });
     emit({ type: "session.delta", ...scope, at: T0 + 300, kind: "text", text: "Creating the server file," });
     expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
     expect(screen.queryByText(/Creating the server file/)).toBeNull();
-    expect(input.disabled).toBe(true);
+    expect(isEditable(editor)).toBe(false);
     emit({ type: "session.done", ...scope, at: T0 + 900, result: { status: "completed", durationMs: 900, costUsd: 0.001 } });
-    expect(input.disabled).toBe(true);
+    expect(isEditable(editor)).toBe(false);
     emit({ type: "session.end", ...scope, at: T0 + 950, exitCode: 0, sawResult: true });
-    expect(input.disabled).toBe(false);
+    expect(isEditable(editor)).toBe(true);
     expect(screen.queryByTestId("settled-footer")).toBeNull();
-    fireEvent.change(input, { target: { value: "start over" } });
-    fireEvent.keyDown(input, { key: "Enter" });
+    await typeInto(editor, "start over");
+    await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(2));
     expect(started[1]).toEqual({ workspaceId: WS, prompt: "start over" });
   });
@@ -396,7 +414,7 @@ describe("chat tab threads", () => {
   const FIRST: SessionEvent[] = CHAT_STREAM.map(e => ({ ...e, threadId: "thr_a" }));
   const SECOND = turn({ sessionId: "sess_0002", turnId: "turn_0002", threadId: "thr_b" }, "second", "two.");
   const THIRD = turn({ sessionId: "sess_0003", turnId: "turn_0003", threadId: "thr_c" }, "third", "three.");
-  const prompt = () => screen.getByRole("textbox", { name: "prompt" }) as HTMLTextAreaElement;
+  const status = () => screen.queryByRole("status")?.textContent ?? null;
 
   it("two threads in one history render as the last one, on mount and again after a replay gap", async () => {
     const history: Record<string, SessionEvent[]> = { [WS]: [...FIRST, ...SECOND] };
@@ -406,7 +424,8 @@ describe("chat tab threads", () => {
     expect(screen.getByText("second")).toBeDefined();
     expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();
     expect(screen.getByTestId("settled-footer").textContent).toContain("completed");
-    expect(prompt().disabled).toBe(false);
+    expect(isEditable(composerEditor())).toBe(true);
+    expect(sendButton().getAttribute("aria-label")).toBe("Send message");
 
     history[WS] = [...FIRST, ...SECOND, ...THIRD];
     act(() => useStore.getState().noteGap());
@@ -432,14 +451,14 @@ describe("chat tab threads", () => {
     await screen.findByText(/Server is live at :3000\./);
     act(() => requestNewThread({ workspaceId: WS }));
     expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
-    fireEvent.change(prompt(), { target: { value: "second" } });
-    fireEvent.keyDown(prompt(), { key: "Enter" });
+    await typeInto(composerEditor(), "second");
+    await press(composerEditor(), "Enter");
     await waitFor(() => expect(started.length).toBe(1));
     expect(started[0]).toEqual({ workspaceId: WS, prompt: "second" });
     for (const e of SECOND) emit(e);
     expect(screen.getByText("two.")).toBeDefined();
     expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();
-    expect(prompt().disabled).toBe(false);
+    expect(sendButton().getAttribute("aria-label")).toBe("Send message");
 
     // The runtime's transcript holds both threads; the reload keeps the one the person is in.
     history[WS] = [...FIRST, ...turn({ sessionId: "sess_0002", turnId: "turn_0002", threadId: "thr_b" }, "second", "two, reloaded.")];
@@ -447,7 +466,7 @@ describe("chat tab threads", () => {
     await screen.findByText("two, reloaded.");
     expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();
     expect(screen.getByText("second")).toBeDefined();
-    expect(prompt().disabled).toBe(false);
+    expect(sendButton().getAttribute("aria-label")).toBe("Send message");
   });
 
   it("a replay gap while a new thread waits over a stamped history keeps the left thread out, its running turn included", async () => {
@@ -458,21 +477,23 @@ describe("chat tab threads", () => {
     act(() => requestNewThread({ workspaceId: WS }));
     act(() => requestNewThread({ workspaceId: WS }));
     expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
-    expect(prompt().disabled).toBe(false);
+    expect(isEditable(composerEditor())).toBe(true);
 
     // While the socket was down a turn started in the left thread; it is the turn the new thread waits on, not the person's.
     const again = turn({ sessionId: "sess_0001", turnId: "turn_0009", threadId: "thr_a" }, "again", "still the old thread.");
     history[WS] = [...FIRST, ...again.slice(0, 2)];
     act(() => useStore.getState().noteGap());
-    await screen.findByText("finishing the previous turn");
+    await waitFor(() => expect(status()).toContain("Finishing the previous turn"));
+    expect(isEditable(composerEditor())).toBe(false);
     expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
     expect(screen.queryByText("still the old thread.")).toBeNull();
     expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();
     for (const e of again.slice(2)) emit(e);
-    expect(prompt().disabled).toBe(false);
+    expect(isEditable(composerEditor())).toBe(true);
+    expect(status()).toBeNull();
     expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
-    fireEvent.change(prompt(), { target: { value: "start over" } });
-    fireEvent.keyDown(prompt(), { key: "Enter" });
+    await typeInto(composerEditor(), "start over");
+    await press(composerEditor(), "Enter");
     await waitFor(() => expect(started.length).toBe(1));
     expect(started[0]).toEqual({ workspaceId: WS, prompt: "start over" });
   });
@@ -483,12 +504,12 @@ describe("chat tab threads", () => {
     await setup(api);
     await screen.findByText(/Server is live at :3000\./);
     act(() => requestNewThread({ workspaceId: WS }));
-    fireEvent.change(prompt(), { target: { value: "start over" } });
-    fireEvent.keyDown(prompt(), { key: "Enter" });
+    await typeInto(composerEditor(), "start over");
+    await press(composerEditor(), "Enter");
     await waitFor(() => expect(started.length).toBe(1));
     expect(started[0]).toEqual({ workspaceId: WS, prompt: "start over" });
-    expect(prompt().disabled).toBe(true);
-    expect(screen.getByText("turn in flight")).toBeDefined();
+    expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
+    expect(status()).toContain("Turn in flight");
 
     // The socket dropped before the fresh session.start reached the tab; the runtime ran the turn to its end.
     history[WS] = [...FIRST, ...turn({ sessionId: "sess_0002", turnId: "turn_0002", threadId: "thr_b" }, "start over", "Fresh start.")];
@@ -496,8 +517,8 @@ describe("chat tab threads", () => {
     await screen.findByText("Fresh start.");
     expect(screen.getByText("start over")).toBeDefined();
     expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();
-    expect(screen.queryByText("finishing the previous turn")).toBeNull();
-    expect(prompt().disabled).toBe(false);
+    expect(status()).toBeNull();
+    expect(sendButton().getAttribute("aria-label")).toBe("Send message");
     expect(screen.getByTestId("settled-footer").textContent).toContain("completed");
   });
 
@@ -507,8 +528,8 @@ describe("chat tab threads", () => {
     await setup(api);
     await screen.findByText(/Server is live at :3000\./);
     act(() => requestNewThread({ workspaceId: WS }));
-    fireEvent.change(prompt(), { target: { value: "start over" } });
-    fireEvent.keyDown(prompt(), { key: "Enter" });
+    await typeInto(composerEditor(), "start over");
+    await press(composerEditor(), "Enter");
     await waitFor(() => expect(started.length).toBe(1));
 
     const fresh = turn({ sessionId: "sess_0002", turnId: "turn_0002", threadId: "thr_b" }, "start over", "Fresh start.");
@@ -516,12 +537,13 @@ describe("chat tab threads", () => {
     act(() => useStore.getState().noteGap());
     await screen.findByText("Fresh start.");
     expect(screen.getByText("start over")).toBeDefined();
-    expect(screen.queryByText("finishing the previous turn")).toBeNull();
-    expect(screen.getByText("turn in flight")).toBeDefined();
-    expect(prompt().disabled).toBe(true);
+    expect(status()).toBe("Turn in flight");
+    expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
+    expect(isEditable(composerEditor())).toBe(true);
     // The rest of the turn lands live and opens the composer.
     for (const e of fresh.slice(2)) emit(e);
-    expect(prompt().disabled).toBe(false);
+    expect(status()).toBeNull();
+    expect(sendButton().getAttribute("aria-label")).toBe("Send message");
     expect(screen.getByTestId("settled-footer").textContent).toContain("completed");
   });
 });
