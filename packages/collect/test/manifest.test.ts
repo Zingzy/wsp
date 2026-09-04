@@ -13,8 +13,14 @@ const entry = {
 };
 
 describe("manifest schema", () => {
-  it("lists the seven rungs in ladder order and the three login choices", () => {
-    expect(RUNGS).toEqual(["identity", "shell", "editors", "toolchains", "tools", "agents", "logins"]);
+  it("a choice sits on a logins row or a consent row, never on a plain one", () => {
+    const token = { rung: "everything", id: "everything/.demo-token", label: ".demo-token", paths: ["~/.demo-token"], bytes: 40, default: "skip", consent: true, choice: "copy" };
+    expect(parseManifest({ entries: [token] }).entries[0]).toMatchObject({ choice: "copy" });
+    expect(() => parseManifest({ entries: [{ ...token, consent: undefined }] })).toThrow(/entries\.0\.choice: only a logins row or a consent row carries a choice/);
+  });
+
+  it("lists the eight rungs in ladder order and the three login choices", () => {
+    expect(RUNGS).toEqual(["identity", "shell", "editors", "toolchains", "tools", "agents", "logins", "everything"]);
     expect(LOGIN_CHOICES).toEqual(["copy", "machine", "skip"]);
   });
 

@@ -24,6 +24,15 @@ export const FIXTURE: Manifest = {
   ],
 };
 
+/** What the everything rung finds on the same laptop: a config directory with a cache split out, a
+ * credential-shaped file, a large directory, and a Keychain item, as the adapter shapes them. */
+export const EVERYTHING: ManifestEntry[] = [
+  { rung: "everything", id: "everything/.config/demo", label: "demo", paths: ["~/.config/demo"], excludes: ["~/.config/demo/cache"], bytes: 300, default: "skip", role: "config", files: 2, mtime: Date.UTC(2026, 7, 12, 12), detail: "looks like config; installed by homebrew" },
+  { rung: "everything", id: "everything/.demo-token", label: ".demo-token", paths: ["~/.demo-token"], bytes: 40, default: "skip", consent: true, role: "credential", files: 1, mtime: Date.UTC(2026, 7, 12, 12), detail: "credential-shaped" },
+  { rung: "everything", id: "everything/.big", label: ".big", paths: ["~/.big"], bytes: 1_258_291, default: "skip", group: "large, review", role: "unknown", files: 900, mtime: Date.UTC(2026, 0, 5, 12), detail: "nothing says what this is; large; never copied without a tick" },
+  { rung: "everything", id: "everything/keychain:Raycast", label: "Raycast", paths: [], bytes: 0, default: "skip", reason: "signed in here; the login is bound to this device, sign in on the machine", group: "Keychain, device-bound", role: "device-bound-login", files: 0, mtime: 0 },
+];
+
 export const byId = (id: string): ManifestEntry => {
   const e = FIXTURE.entries.find(x => x.id === id);
   if (!e) throw new Error(`no fixture entry ${id}`);

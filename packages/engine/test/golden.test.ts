@@ -342,7 +342,7 @@ describe("golden import stages", () => {
         rungs: { identity: 1, shell: 2 },
         bytes: 4096,
         skipped: [{ id: "shell/bashrc", path: "~/.bashrc", note: "no longer on this computer" }],
-        pack: async () => ({ tar: Buffer.from("tgz-bytes"), bytes: 1200, unpacked: 4096, skipped: [] }),
+        pack: async () => ({ tar: Buffer.from("tgz-bytes"), bytes: 1200, unpacked: 4096, skipped: [], cut: [] }),
       },
       tools: [
         { id: "tools/homebrew", label: "Homebrew", manager: "brew", cmd: "brew-bootstrap" },
@@ -417,7 +417,7 @@ describe("golden import stages", () => {
     expect(builder.setupSha).toBe(createHash("sha256").update("true\nclaude-install\ncodex-install").digest("hex"));
     expect(results).toEqual([{
       recipeHash: "h1",
-      files: { bytes: 1200, skipped: [{ id: "shell/bashrc", path: "~/.bashrc", note: "no longer on this computer" }] },
+      files: { bytes: 1200, skipped: [{ id: "shell/bashrc", path: "~/.bashrc", note: "no longer on this computer" }], cut: [] },
       homebrew: HOMEBREW,
       tools: [
         { id: "tools/homebrew", label: "Homebrew", outcome: "installed", ms: expect.any(Number) },
@@ -613,9 +613,13 @@ describe("golden import stages", () => {
     expect(cmds).toEqual(["true"]);
     expect(builder.import?.smoke).toBe("true");
 
-    const gone = await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ files: { count: 0, rungs: {}, bytes: 0, skipped: [{ id: "shell/zshrc", path: "~/.zshrc", note: "no longer on this computer" }], pack: async () => { throw new Error("must not pack"); } } }) });
+    let result: ImportResult | undefined;
+    const gone = await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ files: { count: 0, rungs: {}, bytes: 0, skipped: [{ id: "shell/zshrc", path: "~/.zshrc", note: "no longer on this computer" }], pack: async () => { throw new Error("must not pack"); } }, onResult: r => (result = r) }) });
     expect(stages).toContain("applying-setup:nothing left to pack; skipped ~/.zshrc (no longer on this computer)");
     expect(gone.import?.applied).toContain("uploading-files");
+    // No pack ran, so nothing was cut: the result says nothing about it rather than claiming an empty cut.
+    expect(result?.files).toEqual({ bytes: 0, skipped: [{ id: "shell/zshrc", path: "~/.zshrc", note: "no longer on this computer" }] });
+    expect(result?.files).not.toHaveProperty("cut");
   });
 
   it("applying the same recipe again to a builder that has it skips every stage and runs nothing", async () => {

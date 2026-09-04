@@ -24,13 +24,13 @@ pnpm wsp            # the app on http://127.0.0.1:4400
 pnpm wsp doctor     # prove the reach path against one live machine
 ```
 
-`wsp init` reads what this machine has, shows it, and walks seven screens
-(identity, shell, editors, toolchains, tools, agents, sign-ins) where you
-tick what comes along. One summary, one confirm, then it boots the machine
-and opens the browser on its terminal for the sign-ins and the save. Every
-prompt has a flag: `--yes` takes the defaults, `--manifest <path>` ticks
-from a file, and the ticks are saved as `golden-recipe.json` next to the
-state so a second golden is a re-run.
+`wsp init` reads what this machine has, shows it, and walks eight screens
+(identity, shell, editors, toolchains, tools, agents, sign-ins, everything
+else) where you tick what comes along. One summary, one confirm, then it
+boots the machine and opens the browser on its terminal for the sign-ins
+and the save. Every prompt has a flag: `--yes` takes the defaults,
+`--manifest <path>` ticks from a file, and the ticks are saved as
+`golden-recipe.json` next to the state so a second golden is a re-run.
 
 `wsp` reads keys from `.env` in the working directory or from the
 environment, and asks once if neither is set. State is a JSON file:

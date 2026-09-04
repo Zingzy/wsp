@@ -4,8 +4,9 @@
 // the same shape with bring and choice filled in is saved as the recipe file,
 // so one schema covers both a fresh collection and a saved recipe.
 import { z } from "zod";
+import { Kind } from "./everything/row.js";
 
-export const RUNGS = ["identity", "shell", "editors", "toolchains", "tools", "agents", "logins"] as const;
+export const RUNGS = ["identity", "shell", "editors", "toolchains", "tools", "agents", "logins", "everything"] as const;
 export const Rung = z.enum(RUNGS);
 export type Rung = z.infer<typeof Rung>;
 
@@ -29,6 +30,8 @@ const Fields = z.object({
   label: z.string(),
   /** Source paths on the laptop, `~`-relative; empty for a row that is a list item (a formula, an extension). */
   paths: z.array(z.string()),
+  /** `~`-relative subtrees under `paths` that stay on the laptop; the pack copies paths minus excludes. */
+  excludes: z.array(z.string()).optional(),
   bytes: z.number().int().nonnegative(),
   default: Default,
   /** Why the default is skip. With a reason the row renders locked off and cannot be ticked. */
@@ -45,14 +48,31 @@ const Fields = z.object({
   linux: Linux.optional(),
   /** Only on a tools row: the version the laptop runs, which the machine installs by pin. */
   version: z.string().min(1).optional(),
+  /** Credential-shaped: travels only when the person answers copy on this row, never on a bare tick. */
+  consent: z.boolean().optional(),
+  /** Only on an everything row: the role the passes guessed. */
+  role: Kind.optional(),
+  /** Only on an everything row: files under paths minus excludes. */
+  files: z.number().int().nonnegative().optional(),
+  /** Only on an everything row: newest file under it, epoch ms; 0 when nothing on disk backs it. */
+  mtime: z.number().int().nonnegative().optional(),
+  /** One line for the detail pane: what found the row and what the flags mean. */
+  detail: z.string().optional(),
+  /** Exported variable names cut from the carried copy of this file, for the person to set on the machine. Names only, never values. */
+  secrets: z.array(z.string()).optional(),
 });
 
 export const ManifestEntry = Fields.superRefine((e, ctx) => {
   if (!e.id.startsWith(`${e.rung}/`)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["id"], message: `id must start with ${e.rung}/` });
   }
-  if (e.choice !== undefined && e.rung !== "logins") {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["choice"], message: "only a logins row carries a choice" });
+  if (e.choice !== undefined && e.rung !== "logins" && e.consent !== true) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["choice"], message: "only a logins row or a consent row carries a choice" });
+  }
+  for (const k of ["role", "files", "mtime"] as const) {
+    if (e[k] !== undefined && e.rung !== "everything") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: [k], message: `only an everything row carries ${k}` });
+    }
   }
   if (e.linux !== undefined && e.rung !== "tools") {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["linux"], message: "only a tools row carries a linux marker" });

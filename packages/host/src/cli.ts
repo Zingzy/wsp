@@ -12,7 +12,7 @@ import type { Readable, Writable } from "node:stream";
 import { parseArgs, styleText } from "node:util";
 import { S_BAR, confirm, isCancel, password } from "@clack/prompts";
 import { createClaudeAdapter } from "@wsp/adapter-claude";
-import { collect, nodeHost, type Manifest, type Rung } from "@wsp/collect";
+import { collect, nodeHost, nodeMachine, type Manifest, type Rung } from "@wsp/collect";
 import {
   SolariBackend,
   createRuntime,
@@ -349,9 +349,9 @@ export function terminalInitIO(): InitIO {
   };
 }
 
-/** The collector's ladder over this laptop; onRung lets the terminal count rows as each rung lands. */
-function collectThisComputer(onRung: (rung: Rung, rows: number) => void): Promise<Manifest> {
-  return collect(nodeHost(), { onRung });
+/** The collector's ladder over this laptop, then everything else it left unclaimed; onRung lets the terminal count rows as each rung lands. */
+function collectThisComputer(onRung: (rung: Rung, rows: number) => void, onNote: (note: string) => void): Promise<Manifest> {
+  return collect(nodeHost(), { onRung, onNote, machine: nodeMachine() });
 }
 
 /** Ctrl-C and a service stop both end with the lock removed. `once` leaves a

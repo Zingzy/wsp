@@ -14,6 +14,8 @@ export interface RecipeEntry {
   id: string;
   label: string;
   paths: readonly string[];
+  /** `~`-relative subtrees under paths that stay on the laptop. */
+  excludes?: readonly string[];
   bytes: number;
   default: "bring" | "skip";
   reason?: string;
@@ -23,6 +25,10 @@ export interface RecipeEntry {
   linux?: string;
   /** The version the laptop runs (tools rows); the install pins it. */
   version?: string;
+  /** Credential-shaped: copied only when `choice` is copy, never on the tick alone. */
+  consent?: boolean;
+  /** Exported names cut from the carried copy of this file, for the checklist; the pack strips every rc file it stages on its own. */
+  secrets?: readonly string[];
 }
 
 /** What the planner's injected stat says about one laptop path. A link reports
@@ -41,6 +47,8 @@ export interface PlannedFile {
   dir: boolean;
   size: number;
   mtimeMs: number;
+  /** Absolute laptop paths under `source` the copy leaves out. */
+  excludes: string[];
 }
 
 /** A credential read from the macOS Keychain at pack time; `place` renders the
@@ -101,9 +109,17 @@ export function refusedPath(rel: string, dir: boolean | undefined): string | und
   return undefined;
 }
 
-function neverCopied(e: RecipeEntry, rel: string, dir: boolean | undefined): string | undefined {
+/** Why a row's path never travels, or nothing. Environment files and .netrc hold values, not config: they
+ * copy only as a login row's own file or on a credential row the person answered copy. The name rule is
+ * about files; a directory called .env is a Python environment more often than a secret. */
+export function neverCopied(e: RecipeEntry, rel: string, dir: boolean | undefined): string | undefined {
   if (e.id.startsWith("identity/ssh-key")) return "private key, never copied";
   if (e.id === "identity/gpg") return "GPG keys are never copied";
+  const base = rel.slice(rel.lastIndexOf("/") + 1);
+  if (e.rung !== "logins" && e.consent !== true && dir === false) {
+    if (/^\.env(\..+)?$/.test(base)) return ".env files are never copied; set the values on the machine";
+    if (base === ".netrc") return ".netrc is never copied; sign in on the machine";
+  }
   return refusedPath(rel, dir);
 }
 
@@ -169,6 +185,10 @@ export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOption
     let brought = 0;
     for (const p of e.paths) {
       const skip = (note: string): void => void plan.skipped.push({ id: e.id, path: p, note });
+      if (e.consent === true && e.choice !== "copy") {
+        skip("credential-shaped; not copied without your answer on its row");
+        continue;
+      }
       const keychainPath = /^keychain:\s*(.+)$/i.exec(p);
       if (keychainPath !== null) {
         const service = keychainPath[1]!.trim();
@@ -214,7 +234,8 @@ export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOption
           continue;
         }
       }
-      plan.files.push({ id: e.id, source, dest: rewrite(rel), mode: st.mode & 0o7777, dir: st.kind === "dir", size: st.size, mtimeMs: st.mtimeMs });
+      const excludes = (e.excludes ?? []).filter(x => x.startsWith(`${p}/`)).map(x => join(opts.home, x.slice(2)));
+      plan.files.push({ id: e.id, source, dest: rewrite(rel), mode: st.mode & 0o7777, dir: st.kind === "dir", size: st.size, mtimeMs: st.mtimeMs, excludes });
       brought++;
     }
     if (brought > 0) {
@@ -226,13 +247,13 @@ export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOption
 }
 
 /** What a golden was built from: the ticked ids with their login answers and
- * tool pins, and for every file that travels its size and mtime. Contents,
- * labels and row order do not enter; a builder carrying the same hash needs
- * nothing re-applied. */
-export function recipeHash(entries: readonly RecipeEntry[], files: readonly Pick<PlannedFile, "id" | "dest" | "size" | "mtimeMs">[] = []): string {
+ * tool pins, and for every file that travels its size, mtime and excludes.
+ * Contents, labels and row order do not enter; a builder carrying the same
+ * hash needs nothing re-applied. */
+export function recipeHash(entries: readonly RecipeEntry[], files: readonly Pick<PlannedFile, "id" | "dest" | "size" | "mtimeMs" | "excludes">[] = []): string {
   const byKey = <T extends readonly unknown[]>(rows: T[]): T[] => rows.sort((a, b) => (JSON.stringify(a) < JSON.stringify(b) ? -1 : 1));
   const ticks = byKey(entries.filter(ticked).map(e => [e.id, e.choice ?? null, e.version ?? null] as const));
-  const shipped = byKey(files.map(f => [f.id, f.dest, f.size, f.mtimeMs] as const));
+  const shipped = byKey(files.map(f => [f.id, f.dest, f.size, f.mtimeMs, [...f.excludes].sort()] as const));
   return createHash("sha256").update(JSON.stringify({ ticks, files: shipped })).digest("hex");
 }
 

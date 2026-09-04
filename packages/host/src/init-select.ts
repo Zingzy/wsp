@@ -15,8 +15,10 @@ import { GUTTER, ellipsize, rowsOf, summarize, viewport, widthOf } from "./init-
 export interface SelectItem {
   id: string;
   label: string;
-  /** One dim word or size in the second column. */
+  /** The dim second column: a size, a state word, or a screen's own aligned columns (every row then padded to one width). */
   hint?: string;
+  /** The second column as a function of the terminal width, read every frame; wins over hint. */
+  hintFor?: (width: number) => string;
   group?: string;
   /** Lines for the detail pane while this item is highlighted; the reason a row is locked belongs here. */
   detail: string[];
@@ -24,6 +26,8 @@ export interface SelectItem {
   lock?: "on" | "off";
   /** A row that cycles through answers on space instead of ticking; the first one is the tick. */
   choices?: readonly { value: string; label: string }[];
+  /** Takes its own tick: the all row leaves it alone; its group header still flips it. */
+  own?: boolean;
 }
 
 export type Entry =
@@ -42,6 +46,10 @@ export interface RungSelectOptions {
   initial: ReadonlySet<string>;
   /** Current answer per row that has choices. */
   initialChoices?: ReadonlyMap<string, string>;
+  /** Lines under the Selected line, rebuilt from the current ticks. */
+  footer?: (ticks: ReadonlySet<string>) => string[];
+  /** Rows the detail pane keeps for the highlighted item; two unless a screen has more to say. */
+  detailLines?: number;
   input?: Readable;
   output?: Writable;
 }
@@ -56,8 +64,8 @@ export type RungSelectResult = ({ kind: "next" } & RungAnswer) | ({ kind: "back"
 const DETAIL_LINES = 2;
 /** The bar, a space, the focus marker, a space before every row. */
 const EDGE = 4;
-/** Title, search, blank, the detail pane, the selected line, the hint; the two more-lines come on top when the list is windowed. */
-const FIXED_LINES = 5 + DETAIL_LINES;
+/** Title, search, blank, the selected line, the hint; the detail pane, the footer and the two more-lines of a windowed list come on top. */
+const FIXED_LINES = 5;
 /** A locked group longer than this shows its first rows and "…and N more". */
 export const LOCKED_CAP = 12;
 /** The label column stops here; one long label is cut rather than pushing every second cell to the far edge. */
@@ -112,9 +120,11 @@ export function settle(entries: readonly Entry[], at: number, dir: 1 | -1 = 1): 
 }
 
 const tickable = (i: SelectItem): boolean => i.lock === undefined && i.choices === undefined;
+/** What the all row flips: the tickable rows that do not take their own tick. */
+const byAll = (i: SelectItem): boolean => tickable(i) && i.own !== true;
 
-function flipAll(ticks: Set<string>, items: readonly SelectItem[]): void {
-  const free = items.filter(tickable);
+function flipAll(ticks: Set<string>, items: readonly SelectItem[], pick: (i: SelectItem) => boolean = tickable): void {
+  const free = items.filter(pick);
   const allOn = free.length > 0 && free.every(i => ticks.has(i.id));
   for (const i of free) {
     if (allOn) ticks.delete(i.id);
@@ -125,7 +135,7 @@ function flipAll(ticks: Set<string>, items: readonly SelectItem[]): void {
 export function toggleEntry(ticks: Set<string>, entry: Entry, items: readonly SelectItem[]): void {
   switch (entry.type) {
     case "all":
-      flipAll(ticks, items);
+      flipAll(ticks, items, byAll);
       return;
     case "group":
       flipAll(ticks, entry.items);
@@ -150,10 +160,10 @@ function fmtCount(on: number, of: number): string {
   return `${on} of ${of}`;
 }
 
-/** Ticks for a group of tick rows; the row count for a group of choice rows. */
+/** Ticks over a group's tickable rows; the row count for a group with none. */
 function groupCount(items: readonly SelectItem[], ticks: ReadonlySet<string>): string {
-  if (items.some(i => i.choices !== undefined)) return String(items.length);
   const free = items.filter(tickable);
+  if (free.length === 0) return String(items.length);
   return fmtCount(free.filter(i => ticks.has(i.id)).length, free.length);
 }
 
@@ -182,7 +192,9 @@ class RungPrompt extends Prompt<Set<string>> {
       if (i.lock === "off") ticks.delete(i.id);
       if (i.choices !== undefined) {
         const first = i.choices[0]?.value;
-        const chosen = o.initialChoices?.get(i.id) ?? first;
+        // Without a saved answer, or with one this row never offered, it starts on its last choice, the one that brings nothing.
+        const saved = o.initialChoices?.get(i.id);
+        const chosen = i.choices.some(c => c.value === saved) ? saved : i.choices.at(-1)?.value;
         if (chosen !== undefined) this.choices.set(i.id, chosen);
         if (chosen === first) ticks.add(i.id);
         else ticks.delete(i.id);
@@ -263,18 +275,35 @@ class RungPrompt extends Prompt<Set<string>> {
     const second = Math.max(
       fmtCount(items.length, items.length).length,
       hasLocked ? LOCKED_WORD.length : 0,
-      ...items.map(i => this.second(i).length),
+      ...items.map(i => this.second(i, width).length),
       ...[...new Set(items.map(i => i.group))].map(g => (g === undefined ? 0 : groupCount(items.filter(i => i.group === g), this.ticks()).length)),
     );
     const room = width - EDGE - 2 - GUTTER.length - second;
     return { label: Math.max(8, Math.min(Math.max(...labels), room, LABEL_CAP)), second };
   }
 
-  /** The second column of an item row: its answer, its lock, or its hint. */
-  private second(i: SelectItem): string {
-    if (i.choices !== undefined) return i.choices.find(c => c.value === this.choices.get(i.id))?.label ?? "";
+  private hint(i: SelectItem, width: number): string | undefined {
+    return i.hintFor?.(width) ?? i.hint;
+  }
+
+  /** Choice rows on a screen whose rows carry hints: the answer becomes a column after the hint. */
+  private get mixed(): boolean {
+    return this.o.items.some(i => i.choices !== undefined) && this.o.items.some(i => i.hint !== undefined || i.hintFor !== undefined);
+  }
+
+  private get answerWidth(): number {
+    return Math.max(0, ...this.o.items.flatMap(i => (i.choices ?? []).map(c => c.label.length)));
+  }
+
+  /** The second column of an item row: its answer, its lock, or its hint; on a mixed screen the hint and then the answer. */
+  private second(i: SelectItem, width: number): string {
+    const answer = i.choices?.find(c => c.value === this.choices.get(i.id))?.label;
+    const hint = this.hint(i, width);
+    const both = this.mixed && hint !== undefined;
+    if (answer !== undefined && !both) return answer;
     if (i.lock === "off") return "stays here";
-    return i.hint ?? "";
+    if (!both) return hint ?? "";
+    return `${hint}${GUTTER}${(answer ?? "").padEnd(this.answerWidth)}`;
   }
 
   private line(glyph: string, label: string, second: string, indent: number, cols: { label: number; second: number }, current: boolean, primary: boolean): string {
@@ -283,12 +312,12 @@ class RungPrompt extends Prompt<Set<string>> {
     return `${current ? styleText("cyan", "❯") : " "} ${" ".repeat(indent)}${glyph} ${text}${second !== "" ? `${GUTTER}${dim(second.padStart(cols.second))}` : ""}`.trimEnd();
   }
 
-  private row(entry: Entry, current: boolean, cols: { label: number; second: number }): string {
+  private row(entry: Entry, current: boolean, cols: { label: number; second: number }, width: number): string {
     const ticks = this.ticks();
     const box = (on: boolean): string => (on ? styleText("cyan", "●") : dim("○"));
     switch (entry.type) {
       case "all": {
-        const free = this.o.items.filter(tickable);
+        const free = this.o.items.filter(byAll);
         const on = free.filter(i => ticks.has(i.id)).length;
         return this.line(box(free.length > 0 && on === free.length), "all", fmtCount(on, free.length), 0, cols, current, false);
       }
@@ -302,7 +331,7 @@ class RungPrompt extends Prompt<Set<string>> {
         return this.line(entry.folded ? "▸" : "▾", entry.group, groupCount(entry.items, ticks), 0, cols, current, true);
       case "item": {
         const i = entry.item;
-        return this.line(box(ticks.has(i.id)), i.label, this.second(i), i.group !== undefined ? 2 : 0, cols, current, false);
+        return this.line(box(ticks.has(i.id)), i.label, this.second(i, width), i.group !== undefined ? 2 : 0, cols, current, false);
       }
       default: {
         const _exhaustive: never = entry;
@@ -312,6 +341,7 @@ class RungPrompt extends Prompt<Set<string>> {
   }
 
   private detail(at: Entry | undefined): string[] {
+    const rows = this.o.detailLines ?? DETAIL_LINES;
     const lines =
       at === undefined
         ? []
@@ -322,7 +352,7 @@ class RungPrompt extends Prompt<Set<string>> {
             : at.type === "item"
               ? at.item.detail
               : [];
-    return Array.from({ length: DETAIL_LINES }, (_, i) => lines[i] ?? "");
+    return Array.from({ length: rows }, (_, i) => lines[i] ?? "");
   }
 
   /** The ticked labels in list order: the rows that always come along first, then the rest. */
@@ -336,7 +366,8 @@ class RungPrompt extends Prompt<Set<string>> {
   private frame(): string {
     const width = widthOf(this.o.output);
     const withChoices = this.o.items.filter(i => i.choices !== undefined);
-    const answer = withChoices.length > 0 ? spreadOf(withChoices, this.choices) : this.selected(width - EDGE);
+    const spread = withChoices.length > 0 && !this.mixed;
+    const answer = spread ? spreadOf(withChoices, this.choices) : this.selected(width - EDGE);
     const title = `${this.o.title}${GUTTER}${dim(this.o.counter)}`;
 
     if (this.state === "submit" || (this.state === "cancel" && this.back)) {
@@ -349,24 +380,28 @@ class RungPrompt extends Prompt<Set<string>> {
     const entries = this.entries();
     this.cursor = settle(entries, this.cursor);
     const at = entries[this.cursor];
+    const detail = this.detail(at);
+    const footer = this.o.footer?.(this.ticks()) ?? [];
     // One row is left for the terminal's cursor line; a list that does not fit gives two more rows to the arrows.
-    const room = rowsOf(this.o.output) - 1 - FIXED_LINES;
+    const room = rowsOf(this.o.output) - 1 - FIXED_LINES - detail.length - footer.length;
     const { start, end } = viewport(entries.length, this.cursor, entries.length <= room ? entries.length : room - 2);
     const cols = this.columns(width);
     const bar = dim(S_BAR);
 
     const lines: string[] = [];
-    lines.push(`${styleText("cyan", S_STEP_ACTIVE)}  ${title}${withChoices.length > 0 ? `${GUTTER}${dim(answer)}` : ""}`);
+    lines.push(`${styleText("cyan", S_STEP_ACTIVE)}  ${title}${spread ? `${GUTTER}${dim(answer)}` : ""}`);
     lines.push(`${bar}  ${dim("search")}  ${this.userInput}${styleText("inverse", " ")}`);
     if (this.o.items.length === 0) lines.push(`${bar}  ${dim("nothing found")}`);
     else if (entries.length === 0) lines.push(`${bar}  ${dim("no match")}`);
     if (start > 0) lines.push(`${bar}  ${dim(`↑ ${start} more`)}`);
-    for (let i = start; i < end; i++) lines.push(`${bar} ${this.row(entries[i]!, i === this.cursor, cols)}`);
+    for (let i = start; i < end; i++) lines.push(`${bar} ${this.row(entries[i]!, i === this.cursor, cols, width)}`);
     if (end < entries.length) lines.push(`${bar}  ${dim(`↓ ${entries.length - end} more`)}`);
     lines.push(bar);
-    for (const d of this.detail(at)) lines.push(`${bar}  ${dim(ellipsize(d, width - EDGE))}`.trimEnd());
+    for (const d of detail) lines.push(`${bar}  ${dim(ellipsize(d, width - EDGE))}`.trimEnd());
     lines.push(`${bar}  ${dim(`${SELECTED}${this.selected(width - EDGE - SELECTED.length)}`)}`);
-    lines.push(`${dim(S_BAR_END)}  ${dim(withChoices.length > 0 ? "space change   enter next   esc back" : "space tick   ← → fold   enter next   esc back")}`);
+    for (const f of footer) lines.push(`${bar}  ${dim(ellipsize(f, width - EDGE))}`.trimEnd());
+    const keys = this.mixed ? "space tick or change   ← → fold   enter next   esc back" : withChoices.length > 0 ? "space change   enter next   esc back" : "space tick   ← → fold   enter next   esc back";
+    lines.push(`${dim(S_BAR_END)}  ${dim(keys)}`);
     return lines.join("\n");
   }
 }

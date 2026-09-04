@@ -7,7 +7,7 @@ import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readF
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import type { ManifestEntry } from "@wsp/collect";
+import { type ManifestEntry, RC_PATHS, stripExports } from "@wsp/collect";
 import {
   agentInstallsFor,
   planFiles,
@@ -18,6 +18,7 @@ import {
   type FilesPlan,
   type GoldenImport,
   type ImportResult,
+  type CutNames,
   type PackedFiles,
   type PathInfo,
   type PlannedFile,
@@ -27,6 +28,20 @@ import {
 import { CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, tarPackCommand } from "./doctor.js";
 
 const execFileAsync = promisify(execFile);
+
+/** An rc file by name at HOME or one directory deep (a dotfiles directory keeps dotted copies), plus fish's own config;
+ * a same-named file deeper down belongs to some program and is left as found. Inside a dotfiles manager's home
+ * the copies are plain files whose names lost their dot or gained chezmoi's `dot_`, so the name is mapped back first. */
+const RC_NAMES = new Set(RC_PATHS.map(p => p.slice(p.lastIndexOf("/") + 1)));
+const MANAGER_HOMES = [".dotfiles", "dotfiles", ".local/share/chezmoi", ".local/share/yadm", ".config/yadm"];
+const rcByName = (rel: string): boolean => {
+  const segs = rel.split("/");
+  const name = segs.at(-1) ?? "";
+  if (RC_PATHS.includes(rel as (typeof RC_PATHS)[number]) || (segs.length <= 2 && RC_NAMES.has(name))) return true;
+  if (!MANAGER_HOMES.some(h => rel.startsWith(`${h}/`))) return false;
+  const mapped = name.startsWith("dot_") ? `.${name.slice(4)}` : name.startsWith(".") ? name : `.${name}`;
+  return RC_NAMES.has(name) || RC_NAMES.has(mapped);
+};
 
 export interface SecretReader {
   /** The secret stored under a Keychain service; rejects when the item is missing or the person refuses the consent dialog. */
@@ -143,12 +158,17 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
       return false;
     });
     const modes = parentModes(files, opts.home);
+    // The laptop's rc files by identity, so the target of a linked rc carried under another row is stripped too.
+    const rcReal = new Set(RC_PATHS.map(rc => resolved(join(opts.home, rc))).filter((p): p is string => p !== undefined));
+    const twins = new Set<string>();
     for (const f of files) {
       const target = join(stage, f.dest);
       mkdirSync(dirname(target), { recursive: true });
       // Directories this copy has walked, by realpath: a link back to any of them would loop the walk.
       const entered = new Set<string>();
-      const keep = (src: string): boolean => {
+      const keep = (src: string, dest: string): boolean => {
+        if (f.excludes.some(x => src === x || src.startsWith(`${x}/`))) return false;
+        if (rcReal.has(resolved(src) ?? "")) twins.add(dest);
         if (!lstatSync(src).isSymbolicLink()) {
           if (statSync(src).isDirectory()) entered.add(resolved(src) ?? src);
           return true;
@@ -173,6 +193,29 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
       cpSync(f.source, target, { recursive: true, dereference: true, filter: keep });
       chmodSync(target, f.mode);
     }
+    // Every rc file staged, by name where dotfiles live or by identity with one of the laptop's, ships as its
+    // carried copy: secret exports are set on the machine by hand, never carried in the file. The copy keeps
+    // the laptop's mode, so a read-only file is opened writable for the one write and closed again.
+    const cut: CutNames[] = [];
+    const strip = (staged: string): void => {
+      const { names, carried } = stripExports(readFileSync(staged, "utf8"));
+      if (names.length === 0) return;
+      const mode = statSync(staged).mode & 0o7777;
+      chmodSync(staged, 0o600);
+      writeFileSync(staged, carried);
+      chmodSync(staged, mode);
+      cut.push({ path: `~/${relative(stage, staged)}`, names });
+    };
+    const walk = (dir: string): void => {
+      for (const name of readdirSync(dir)) {
+        const p = join(dir, name);
+        const st = lstatSync(p);
+        if (st.isDirectory()) walk(p);
+        else if (st.isFile() && (rcByName(relative(stage, p)) || twins.has(p))) strip(p);
+      }
+    };
+    walk(stage);
+    cut.sort((a, b) => (a.path < b.path ? -1 : 1));
     for (const s of plan.secrets) {
       const secret = opts.secrets.get(s.service);
       if (secret === undefined) {
@@ -193,7 +236,7 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
     const { file, args, env } = tarPackCommand(stage, tgz);
     await execFileAsync(file, args, { env });
     const tar = readFileSync(tgz);
-    return { tar, bytes: tar.length, unpacked, skipped };
+    return { tar, bytes: tar.length, unpacked, skipped, cut };
   } finally {
     rmSync(stage, { recursive: true, force: true });
     rmSync(out, { recursive: true, force: true });

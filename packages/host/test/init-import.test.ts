@@ -4,6 +4,7 @@
 // injected reader (the real one is never run here), and the import the
 // recipe's ticks add up to.
 import { execFileSync } from "node:child_process";
+import { gunzipSync } from "node:zlib";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -283,6 +284,196 @@ describe("packPlan", () => {
       process.env["PATH"] = path;
     }
     expect(readFileSync(record, "utf8").trim().split("\n")).toEqual(["600"]);
+  });
+});
+
+describe("packPlan: everything rows", () => {
+  function demo(home: string): void {
+    mkdirSync(join(home, ".config", "demo", "cache"), { recursive: true });
+    writeFileSync(join(home, ".config", "demo", "settings.toml"), "theme = 1\n");
+    writeFileSync(join(home, ".config", "demo", "cache", "blob"), "x".repeat(2_000));
+    writeFileSync(join(home, ".demo-token"), "fake-token\n", { mode: 0o600 });
+  }
+
+  it("copies a row's paths minus its excludes: the excluded subtree is not in the archive and is not a skip", async () => {
+    const home = laptop();
+    demo(home);
+    const plan = planFiles(
+      [row({ rung: "everything", id: "everything/.config/demo", paths: ["~/.config/demo"], excludes: ["~/.config/demo/cache"], bytes: 10 })],
+      { home, stat: statOf, platform: "darwin" },
+    );
+    expect(plan.files.map(f => f.excludes)).toEqual([[join(home, ".config", "demo", "cache")]]);
+    const packed = await packPlan(plan, { secrets: new Map(), home });
+    const paths = listTar(packed.tar).map(e => e.path.replace(/\/$/, ""));
+    expect(paths).toContain(".config/demo/settings.toml");
+    expect(paths.filter(p => p.includes("cache"))).toEqual([]);
+    expect(packed.skipped).toEqual([]);
+    expect(packed.unpacked).toBe("theme = 1\n".length);
+  });
+
+  it("a credential-shaped row travels only with copy as its answer, at 0600; ticked without it, it is a note and nothing is packed", async () => {
+    const home = laptop();
+    demo(home);
+    const token = (over: Partial<ManifestEntry>): ManifestEntry => row({ rung: "everything", id: "everything/.demo-token", paths: ["~/.demo-token"], bytes: 11, consent: true, ...over });
+    const noAnswer = importFor([token({})], { home, secrets: new Map(), platform: "darwin" });
+    expect(noAnswer.files).toMatchObject({ count: 0, skipped: [{ id: "everything/.demo-token", path: "~/.demo-token", note: "credential-shaped; not copied without your answer on its row" }] });
+    const yes = importFor([token({ choice: "copy" })], { home, secrets: new Map(), platform: "darwin" });
+    expect(yes.files).toMatchObject({ count: 1, skipped: [], rungs: { everything: 1 } });
+    const packed = await yes.files!.pack();
+    const entry = listTar(packed.tar).find(e => e.path === ".demo-token");
+    expect(entry?.mode).toMatch(/^-rw-------/);
+    expect(packed.skipped).toEqual([]);
+  });
+});
+
+describe("packPlan: rc files with secret exports", () => {
+  it("writes the carried copy of an rc file the recipe marks, without the export lines, and the archive never holds the value", async () => {
+    const home = laptop();
+    writeFileSync(join(home, ".zshrc"), "export PATH=$HOME/bin:$PATH\nexport A_KEY=sk-ant-fake-value\nalias ll='ls -l'\n", { mode: 0o644 });
+    const plan = planFiles(
+      [row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"], secrets: ["A_KEY"], bytes: 10 }), row({ rung: "identity", id: "identity/git-user", paths: ["~/.gitconfig"] })],
+      { home, stat: statOf, platform: "darwin" },
+    );
+    const packed = await packPlan(plan, { secrets: new Map(), home });
+    const dir = extract(packed.tar);
+    expect(readFileSync(join(dir, ".zshrc"), "utf8")).toBe("export PATH=$HOME/bin:$PATH\nalias ll='ls -l'\n");
+    expect(gunzipSync(packed.tar).includes("sk-ant-fake-value")).toBe(false);
+    expect(packed.cut).toEqual([{ path: "~/.zshrc", names: ["A_KEY"] }]);
+    expect(listTar(packed.tar).find(e => e.path === ".zshrc")?.mode).toMatch(/^-rw-r--r--/);
+    expect(packed.skipped).toEqual([]);
+    // The laptop's file is untouched.
+    expect(readFileSync(join(home, ".zshrc"), "utf8")).toContain("A_KEY");
+  });
+
+  it("strips every rc file it stages whatever the recipe says: a row without a secrets field, and fish's config inside its directory row", async () => {
+    const home = laptop();
+    writeFileSync(join(home, ".zshrc"), "export PATH=$HOME/bin:$PATH\nexport OLD_TOKEN=fake-old\n", { mode: 0o644 });
+    mkdirSync(join(home, ".config", "fish", "functions"), { recursive: true });
+    writeFileSync(join(home, ".config", "fish", "config.fish"), "set -gx FISH_KEY fake-fish\nset -g theme x\n");
+    writeFileSync(join(home, ".config", "fish", "functions", "ll.fish"), "function ll\n  ls -l\nend\n");
+    const plan = planFiles(
+      [row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"], bytes: 10 }), row({ rung: "shell", id: "shell/fish", paths: ["~/.config/fish"], bytes: 60 })],
+      { home, stat: statOf, platform: "darwin" },
+    );
+    const packed = await packPlan(plan, { secrets: new Map(), home });
+    const dir = extract(packed.tar);
+    expect(readFileSync(join(dir, ".zshrc"), "utf8")).toBe("export PATH=$HOME/bin:$PATH\n");
+    expect(readFileSync(join(dir, ".config", "fish", "config.fish"), "utf8")).toBe("set -g theme x\n");
+    expect(readFileSync(join(dir, ".config", "fish", "functions", "ll.fish"), "utf8")).toBe("function ll\n  ls -l\nend\n");
+    const bytes = gunzipSync(packed.tar);
+    expect(bytes.includes("fake-old")).toBe(false);
+    expect(bytes.includes("fake-fish")).toBe(false);
+    expect(packed.skipped).toEqual([]);
+    expect(packed.cut).toEqual([{ path: "~/.config/fish/config.fish", names: ["FISH_KEY"] }, { path: "~/.zshrc", names: ["OLD_TOKEN"] }]);
+  });
+
+  it("an rc file's other copies are stripped too: the target of a linked rc inside a directory row, and a dotted copy by name", async () => {
+    const home = laptop();
+    mkdirSync(join(home, ".dotfiles"));
+    writeFileSync(join(home, ".dotfiles", "zshrc"), "export PATH=$HOME/bin:$PATH\nexport GH_TOKEN=fake-twin-value\n");
+    writeFileSync(join(home, ".dotfiles", ".bashrc"), "export B_KEY=fake-dotted-value\nalias g=git\n");
+    writeFileSync(join(home, ".dotfiles", "README.md"), "export NOT_RC_TOKEN=kept-here\n");
+    symlinkSync(join(home, ".dotfiles", "zshrc"), join(home, ".zshrc"));
+    const plan = planFiles(
+      [row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"] }), row({ rung: "everything", id: "everything/.dotfiles", paths: ["~/.dotfiles"] })],
+      { home, stat: statOf, platform: "darwin" },
+    );
+    const packed = await packPlan(plan, { secrets: new Map(), home });
+    const dir = extract(packed.tar);
+    expect(readFileSync(join(dir, ".zshrc"), "utf8")).toBe("export PATH=$HOME/bin:$PATH\n");
+    expect(readFileSync(join(dir, ".dotfiles", "zshrc"), "utf8")).toBe("export PATH=$HOME/bin:$PATH\n");
+    expect(readFileSync(join(dir, ".dotfiles", ".bashrc"), "utf8")).toBe("alias g=git\n");
+    // A file that is not an rc file by name or by identity keeps its lines: the strip is not a grep over the tree.
+    expect(readFileSync(join(dir, ".dotfiles", "README.md"), "utf8")).toBe("export NOT_RC_TOKEN=kept-here\n");
+    const bytes = gunzipSync(packed.tar);
+    expect(bytes.includes("fake-twin-value")).toBe(false);
+    expect(bytes.includes("fake-dotted-value")).toBe(false);
+    expect(packed.cut).toEqual([
+      { path: "~/.dotfiles/.bashrc", names: ["B_KEY"] },
+      { path: "~/.dotfiles/zshrc", names: ["GH_TOKEN"] },
+      { path: "~/.zshrc", names: ["GH_TOKEN"] },
+    ]);
+  });
+
+  it("strips by name only at HOME, one directory deep, and fish's own config; a deeper file with an rc name is left as it is", async () => {
+    const home = laptop();
+    mkdirSync(join(home, ".dotfiles"));
+    writeFileSync(join(home, ".dotfiles", ".zshrc"), "export SHALLOW_KEY=fake-shallow\nalias a=b\n");
+    mkdirSync(join(home, ".config", "app", "shell"), { recursive: true });
+    writeFileSync(join(home, ".config", "app", ".profile"), "export DEEP_KEY=kept-deep\nset -o vi\n");
+    writeFileSync(join(home, ".config", "app", "shell", ".bashrc"), "export DEEPER_KEY=kept-deeper\n");
+    mkdirSync(join(home, ".config", "fish"), { recursive: true });
+    writeFileSync(join(home, ".config", "fish", "config.fish"), "set -gx FISH_KEY fake-fish\nset -g theme x\n");
+    const plan = planFiles(
+      [
+        row({ rung: "everything", id: "everything/.dotfiles", paths: ["~/.dotfiles"] }),
+        row({ rung: "everything", id: "everything/.config/app", paths: ["~/.config/app"] }),
+        row({ rung: "shell", id: "shell/fish", paths: ["~/.config/fish"] }),
+      ],
+      { home, stat: statOf, platform: "darwin" },
+    );
+    const packed = await packPlan(plan, { secrets: new Map(), home });
+    const dir = extract(packed.tar);
+    expect(readFileSync(join(dir, ".dotfiles", ".zshrc"), "utf8")).toBe("alias a=b\n");
+    expect(readFileSync(join(dir, ".config", "fish", "config.fish"), "utf8")).toBe("set -g theme x\n");
+    expect(readFileSync(join(dir, ".config", "app", ".profile"), "utf8")).toBe("export DEEP_KEY=kept-deep\nset -o vi\n");
+    expect(readFileSync(join(dir, ".config", "app", "shell", ".bashrc"), "utf8")).toBe("export DEEPER_KEY=kept-deeper\n");
+    expect(packed.cut).toEqual([{ path: "~/.config/fish/config.fish", names: ["FISH_KEY"] }, { path: "~/.dotfiles/.zshrc", names: ["SHALLOW_KEY"] }]);
+  });
+
+  it("inside a dotfiles-manager home a plain copy is stripped by its mapped name: ~/.dotfiles/zshrc and chezmoi's dot_zshrc, not a README", async () => {
+    const home = laptop();
+    writeFileSync(join(home, ".zshrc"), "export PATH=$HOME/bin:$PATH\nexport OWN_KEY=fake-own\n");
+    mkdirSync(join(home, ".dotfiles", "zsh"), { recursive: true });
+    writeFileSync(join(home, ".dotfiles", "zshrc"), "export PATH=$HOME/bin:$PATH\nexport PLAIN_KEY=fake-plain\n");
+    writeFileSync(join(home, ".dotfiles", "zsh", "aliases"), "alias g=git\nexport ALIAS_TOKEN=fake-alias\n");
+    writeFileSync(join(home, ".dotfiles", "README.md"), "export README_TOKEN=kept\n");
+    mkdirSync(join(home, ".local", "share", "chezmoi", "dot_config", "fish"), { recursive: true });
+    writeFileSync(join(home, ".local", "share", "chezmoi", "dot_zshrc"), "export CHEZ_KEY=fake-chez\nalias ll='ls -l'\n");
+    writeFileSync(join(home, ".local", "share", "chezmoi", "dot_config", "fish", "config.fish"), "set -gx CHEZ_FISH_KEY fake-chez-fish\nset -g theme x\n");
+    writeFileSync(join(home, ".local", "share", "chezmoi", "dot_gitconfig"), "[user]\n\tname = Me\n");
+    const plan = planFiles(
+      [
+        row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"] }),
+        row({ rung: "everything", id: "everything/.dotfiles", paths: ["~/.dotfiles"] }),
+        row({ rung: "everything", id: "everything/.local/share/chezmoi", paths: ["~/.local/share/chezmoi"] }),
+      ],
+      { home, stat: statOf, platform: "darwin" },
+    );
+    const packed = await packPlan(plan, { secrets: new Map(), home });
+    const dir = extract(packed.tar);
+    expect(readFileSync(join(dir, ".zshrc"), "utf8")).toBe("export PATH=$HOME/bin:$PATH\n");
+    expect(readFileSync(join(dir, ".dotfiles", "zshrc"), "utf8")).toBe("export PATH=$HOME/bin:$PATH\n");
+    expect(readFileSync(join(dir, ".dotfiles", "zsh", "aliases"), "utf8")).toBe("alias g=git\n");
+    expect(readFileSync(join(dir, ".dotfiles", "README.md"), "utf8")).toBe("export README_TOKEN=kept\n");
+    expect(readFileSync(join(dir, ".local", "share", "chezmoi", "dot_zshrc"), "utf8")).toBe("alias ll='ls -l'\n");
+    expect(readFileSync(join(dir, ".local", "share", "chezmoi", "dot_config", "fish", "config.fish"), "utf8")).toBe("set -g theme x\n");
+    expect(readFileSync(join(dir, ".local", "share", "chezmoi", "dot_gitconfig"), "utf8")).toBe("[user]\n\tname = Me\n");
+    const bytes = gunzipSync(packed.tar);
+    for (const v of ["fake-own", "fake-plain", "fake-alias", "fake-chez", "fake-chez-fish"]) expect(bytes.includes(v)).toBe(false);
+    expect(packed.cut).toEqual([
+      { path: "~/.dotfiles/zsh/aliases", names: ["ALIAS_TOKEN"] },
+      { path: "~/.dotfiles/zshrc", names: ["PLAIN_KEY"] },
+      { path: "~/.local/share/chezmoi/dot_config/fish/config.fish", names: ["CHEZ_FISH_KEY"] },
+      { path: "~/.local/share/chezmoi/dot_zshrc", names: ["CHEZ_KEY"] },
+      { path: "~/.zshrc", names: ["OWN_KEY"] },
+    ]);
+  });
+
+  it("a read-only rc file ships stripped at its own mode, and one without a secret ships untouched", async () => {
+    const home = laptop();
+    writeFileSync(join(home, ".zshrc"), "export RO_KEY=fake-ro-value\nalias ll='ls -l'\n", { mode: 0o444 });
+    writeFileSync(join(home, ".bashrc"), "alias g=git\n", { mode: 0o444 });
+    const plan = planFiles([row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"] }), row({ rung: "shell", id: "shell/bashrc", paths: ["~/.bashrc"] })], { home, stat: statOf, platform: "darwin" });
+    const packed = await packPlan(plan, { secrets: new Map(), home });
+    const modeOf = (p: string) => listTar(packed.tar).find(e => e.path === p)?.mode;
+    expect(modeOf(".zshrc")).toMatch(/^-r--r--r--/);
+    expect(modeOf(".bashrc")).toMatch(/^-r--r--r--/);
+    const dir = extract(packed.tar);
+    expect(readFileSync(join(dir, ".zshrc"), "utf8")).toBe("alias ll='ls -l'\n");
+    expect(readFileSync(join(dir, ".bashrc"), "utf8")).toBe("alias g=git\n");
+    expect(packed.cut).toEqual([{ path: "~/.zshrc", names: ["RO_KEY"] }]);
+    expect(packed.skipped).toEqual([]);
   });
 });
 

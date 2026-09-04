@@ -6,25 +6,29 @@
 // remote machine.
 import type { Readable, Writable } from "node:stream";
 import { styleText } from "node:util";
-import { RUNGS, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
+import { LARGE_GROUP, RUNGS, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
 import { describeAge, type BackendPricing } from "@wsp/engine";
 import type { GoldenBuilderView, GoldenRecipe, GoldenStage, Runtime } from "@wsp/runtime";
 import { S_BAR, S_STEP_ERROR, S_STEP_SUBMIT, cancel, confirm, isCancel, log, note, outro } from "@clack/prompts";
 import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { agentInstallsFor, toolInstallsFor } from "@wsp/engine";
-import { CLAUDE_INSTALLER, importFor, importResultPath, keychainLogins, readSecrets, type SecretReader } from "./init-import.js";
+import { CLAUDE_INSTALLER, importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
+  CONSENT_CHOICES,
   LOGIN_CHOICES,
   RUNG_TITLE,
   agentName,
   checklistFor,
   goldenRecipeFor,
+  hasChoices,
   initialChoice,
   initialTicks,
   isLoginChoice,
   isTickable,
   loadManifest,
+  lockRefused,
   loginShown,
   recipePath,
   saveRecipe,
@@ -50,8 +54,8 @@ export interface InitOptions {
   yes: boolean;
   /** A collector manifest or a saved recipe to tick from instead of reading this machine. */
   manifestPath?: string;
-  /** Reads this computer, telling onRung how many rows each rung found as it finishes. */
-  collect(onRung: (rung: Rung, rows: number) => void): Promise<Manifest>;
+  /** Reads this computer, telling onRung how many rows each rung found as it finishes and onNote what could not be read. */
+  collect(onRung: (rung: Rung, rows: number) => void, onNote: (note: string) => void): Promise<Manifest>;
   keys: Keys;
   /** Prices the builder the confirm names. */
   pricing: BackendPricing;
@@ -82,7 +86,8 @@ const dim = (s: string): string => styleText("dim", s);
 export function fmtBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
 // --- stage stream ----------------------------------------------------------
@@ -334,28 +339,79 @@ function spin(output: Writable, label: string, animate: boolean): Spinner {
 
 /** Anthropic forbids a host to collect or pass along this credential, which is why its login is signed in on the machine unless the person opts in. */
 const CLAUDE_LOGIN_WHY = "Anthropic's terms forbid passing this credential along, so the default is to sign in on the machine.";
+/** What the answers on a login row do, and on a credential-shaped row. */
+const LOGIN_WHY = "copy brings it along; sign in does it in the browser after the build";
+const CONSENT_WHY = "copy brings it along; skip leaves it here";
+const EVERYTHING_FOOTER = ["large items are listed but never copied without a tick", "know what one of these is? add it to the catalog"];
 
 /** The second detail line: why a row is locked, else what ticking it means. */
 function detailWhy(e: ManifestEntry, lock: "on" | "off" | undefined): string {
-  if (lock === "off" && e.reason !== undefined) return e.reason;
+  if (lock === "off") return e.reason ?? "";
   if (lock === "on") return "always comes along";
-  if (e.rung === "logins") return agentName(e) === "claude" ? CLAUDE_LOGIN_WHY : "copy brings it along; sign in does it in the browser after the build";
+  if (e.rung === "logins") return agentName(e) === "claude" ? CLAUDE_LOGIN_WHY : LOGIN_WHY;
+  if (e.rung === "everything") return e.detail ?? "";
   if (e.rung === "agents") return agentInstallsFor([{ ...e, bring: true }], { claude: CLAUDE_INSTALLER }).installs.length > 0 ? "installed on the machine; its config comes along" : "its config comes along; no installer yet, install it there yourself";
   const size = e.bytes > 0 ? `${fmtBytes(e.bytes)}, ` : "";
   return `${size}${e.default === "bring" ? "brought by default" : "left out by default"}`;
 }
 
-function selectItem(e: ManifestEntry): SelectItem {
-  const where = e.paths.length > 0 ? e.paths.join(", ") : "reinstalled on the machine";
+function selectItem(e: ManifestEntry, hintFor?: (width: number) => string): SelectItem {
+  const nothing = e.rung === "everything" ? "nothing to copy" : "reinstalled on the machine";
+  const minus = e.excludes !== undefined && e.excludes.length > 0 ? ` minus ${e.excludes.join(", ")}` : "";
+  const where = e.paths.length > 0 ? `${e.paths.join(", ")}${minus}` : nothing;
   const lock = e.required ? "on" : !isTickable(e) ? "off" : undefined;
   return {
     id: e.id,
     label: e.label,
-    ...(e.bytes > 0 && e.rung !== "logins" ? { hint: fmtBytes(e.bytes) } : {}),
+    ...(hintFor !== undefined ? { hintFor } : e.bytes > 0 && e.rung !== "logins" ? { hint: fmtBytes(e.bytes) } : {}),
     ...(e.group !== undefined ? { group: e.group } : {}),
-    detail: [where, detailWhy(e, lock)],
+    detail: [where, detailWhy(e, lock), ...(e.consent === true && lock === undefined ? [CONSENT_WHY] : [])],
     ...(lock !== undefined ? { lock } : {}),
-    ...(e.rung === "logins" ? { choices: LOGIN_CHOICES } : {}),
+    ...(hasChoices(e) ? { choices: e.rung === "logins" ? LOGIN_CHOICES : CONSENT_CHOICES } : {}),
+    ...(e.group === LARGE_GROUP ? { own: true } : {}),
+  };
+}
+
+/** The day a file last changed, in this computer's own calendar. */
+function localDay(ms: number): string {
+  if (ms <= 0) return "";
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** The everything rows with size, file count, last change and role guess as one aligned second
+ * column, read from the terminal width every frame: under 100 columns only size and role, so the
+ * label keeps its room. A row with nothing to copy shows its lock instead and does not widen the columns. */
+export function everythingItems(entries: readonly ManifestEntry[]): SelectItem[] {
+  const files = (n: number | undefined): string => (n === undefined || n === 0 ? "" : `${n} file${n === 1 ? "" : "s"}`);
+  const shown = entries.filter(e => e.paths.length > 0);
+  // A row the walk never entered has neither bytes nor files; a measured empty row still has a file.
+  const size = (e: ManifestEntry): string => (e.bytes > 0 || (e.files ?? 0) > 0 ? fmtBytes(e.bytes) : "not measured");
+  const cells = (e: ManifestEntry, wide: boolean): string[] => (wide ? [size(e), files(e.files), localDay(e.mtime ?? 0), e.role ?? ""] : [size(e), e.role ?? ""]);
+  // table() trims each row's tail; one width for every hint keeps the size column in line whatever the role word's length.
+  const hintsFor = (wide: boolean): Map<string, string> => {
+    const hints = table(shown.map(e => cells(e, wide)), wide ? ["right", "right", "left", "left"] : ["right", "left"]);
+    const span = Math.max(0, ...hints.map(h => h.length));
+    return new Map(shown.map((e, i) => [e.id, hints[i]!.padEnd(span)]));
+  };
+  const byLayout = new Map<boolean, Map<string, string>>();
+  const hintAt = (id: string, width: number): string => {
+    const wide = width >= 100;
+    const hints = byLayout.get(wide) ?? hintsFor(wide);
+    byLayout.set(wide, hints);
+    return hints.get(id) ?? "";
+  };
+  return entries.map(e => (e.paths.length > 0 ? selectItem(e, width => hintAt(e.id, width)) : selectItem(e)));
+}
+
+export function everythingTitle(entries: readonly ManifestEntry[]): string {
+  return `${RUNG_TITLE.everything} (${entries.length} item${entries.length === 1 ? "" : "s"}, ${fmtBytes(entries.reduce((n, e) => n + e.bytes, 0))})`;
+}
+
+function everythingFooter(entries: readonly ManifestEntry[]): (ticks: ReadonlySet<string>) => string[] {
+  return ticks => {
+    const on = entries.filter(e => ticks.has(e.id));
+    return [`${on.length} ticked${on.length > 0 ? `, ${fmtBytes(on.reduce((n, e) => n + e.bytes, 0))}` : ""}`, ...EVERYTHING_FOOTER];
   };
 }
 
@@ -378,19 +434,24 @@ function detectionNote(manifest: Manifest, source: string): string[] {
   return [...table(rows, ["left", "right", "right"]), "", `${manifest.entries.length} ${source}. Nothing has left this computer.`];
 }
 
-/** One row per rung with its ticks and size, the sign-ins under theirs with the answer each got,
+/** One row per rung with its ticks and size, the sign-ins under theirs with the answer each
+ * got, a credential-shaped row under Everything else when it got an answer other than skip,
  * then what uploads and what installs. */
 function summaryNote(manifest: Manifest, ticks: ReadonlySet<string>, choices: ReadonlyMap<string, string>, width: number): string[] {
-  const rows = RUNGS.map(rung => manifest.entries.filter(e => e.rung === rung))
-    .filter(entries => entries.length > 0)
-    .map(entries => {
+  const perRung = RUNGS.map(rung => manifest.entries.filter(e => e.rung === rung)).filter(entries => entries.length > 0);
+  const rows = table(
+    perRung.map(entries => {
       const on = entries.filter(e => ticks.has(e.id));
       return [RUNG_TITLE[entries[0]!.rung], `${on.length} of ${entries.length}`, bytesOf(on)];
-    });
-  const logins = manifest.entries.filter(e => e.rung === "logins");
+    }),
+    ["left", "right", "right"],
+  );
   const answer = (e: ManifestEntry): string => LOGIN_CHOICES.find(c => c.value === choices.get(e.id))?.label ?? "skip";
+  const listed = manifest.entries.filter(e => e.rung === "logins" || (e.consent === true && answer(e) !== "skip"));
   // The note frame takes 6 columns; the label keeps room for the widest answer.
   const labelRoom = width - 6 - 2 - GUTTER.length - Math.max(...LOGIN_CHOICES.map(c => c.label.length));
+  const answered = new Map(table(listed.map(e => [`  ${ellipsize(e.label, labelRoom)}`, answer(e)])).map((line, i) => [listed[i]!.id, line]));
+  const lines = perRung.flatMap((entries, i) => [rows[i]!, ...entries.flatMap(e => answered.get(e.id) ?? [])]);
   const upload = fmtBytes(manifest.entries.filter(e => ticks.has(e.id)).reduce((n, e) => n + e.bytes, 0));
   const bring = manifest.entries.filter(e => ticks.has(e.id)).map(e => ({ ...e, bring: true }));
   const agents = agentInstallsFor(bring, { claude: CLAUDE_INSTALLER }).installs.map(a => a.name);
@@ -400,8 +461,7 @@ function summaryNote(manifest: Manifest, ticks: ReadonlySet<string>, choices: Re
   const toolchain = steps.some(t => t.id.startsWith("tools/brew-toolchain/")) ? " plus Homebrew's toolchain" : "";
   const installs = [...agents, ...(tools > 0 ? [`${tools} tool${tools === 1 ? "" : "s"}${toolchain}`] : [])];
   return [
-    ...table(rows, ["left", "right", "right"]),
-    ...table(logins.map(e => [`  ${ellipsize(e.label, labelRoom)}`, answer(e)])),
+    ...lines,
     "",
     ...table([
       ["Upload", `${upload}, nothing has left this computer yet`],
@@ -419,9 +479,10 @@ function defaultAnswers(manifest: Manifest): Answers {
   const agents = new Set(manifest.entries.filter(e => e.rung === "agents" && initialTicks(e)).map(e => e.id));
   const shown = manifest.entries.filter(e => loginShown(e, manifest, agents));
   return {
-    // A saved recipe keeps its ticks: a login it brought as a sign-in on the machine stays ticked, as the run that saved it had it.
-    ticks: new Set(shown.filter(e => (e.rung === "logins" ? e.bring ?? (initialChoice(e) === "copy") : initialTicks(e))).map(e => e.id)),
-    choices: new Map(shown.filter(e => e.rung === "logins").map(e => [e.id, initialChoice(e)])),
+    // A saved recipe keeps its ticks: a login it brought as a sign-in on the machine stays ticked, as the run that saved it had it;
+    // a credential-shaped row is ticked only by its copy answer.
+    ticks: new Set(shown.filter(e => (e.rung === "logins" ? e.bring ?? (initialChoice(e) === "copy") : hasChoices(e) ? initialChoice(e) === "copy" : initialTicks(e))).map(e => e.id)),
+    choices: new Map(shown.filter(hasChoices).map(e => [e.id, initialChoice(e)])),
   };
 }
 
@@ -449,11 +510,12 @@ async function tickRungs(manifest: Manifest, io: InitIO): Promise<Answers | "can
     const prior = answers.get(rung);
     const fresh = defaultAnswers({ entries });
     const result = await rungSelect({
-      title: RUNG_TITLE[rung],
+      title: rung === "everything" ? everythingTitle(entries) : RUNG_TITLE[rung],
       counter,
-      items: entries.map(selectItem),
+      items: rung === "everything" ? everythingItems(entries) : entries.map(e => selectItem(e)),
       initial: prior?.ticks ?? fresh.ticks,
       initialChoices: prior?.choices ?? fresh.choices,
+      ...(rung === "everything" ? { footer: everythingFooter(entries), detailLines: 3 } : {}),
       input: io.input,
       output: io.output,
     });
@@ -493,15 +555,19 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   let source: string;
   const spinner = spin(io.output, "Reading this computer", io.isTTY);
   const counts: string[] = [];
+  const notes: string[] = [];
   try {
     if (opts.manifestPath !== undefined) {
       manifest = loadManifest(opts.manifestPath);
       source = `listed in ${opts.manifestPath}`;
     } else {
-      manifest = await opts.collect((rung, rows) => {
-        counts.push(`${RUNG_TITLE[rung]} ${rows}`);
-        spinner.detail(counts.join(", "));
-      });
+      manifest = await opts.collect(
+        (rung, rows) => {
+          counts.push(`${RUNG_TITLE[rung]} ${rows}`);
+          spinner.detail(counts.join(", "));
+        },
+        note => notes.push(note),
+      );
       source = "found on this computer";
     }
   } catch (e) {
@@ -510,6 +576,12 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     return { code: 1 };
   }
   spinner.stop();
+  // A row the pack would refuse whole is locked here with the pack's own sentence, judged on the same disk the pack reads.
+  manifest = lockRefused(manifest, rel => {
+    const st = statOf(join(opts.home, rel));
+    return st === undefined || st.kind === "dangling" ? undefined : st.kind === "dir";
+  });
+  if (notes.length > 0) log.warn(notes.join("\n"), out);
   note(detectionNote(manifest, source).join("\n"), "Found on this computer", out);
 
   let answers: Answers;
@@ -541,6 +613,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const secrets = new Map<string, string>();
   const resultsPath = importResultPath(opts.statePath);
   let installs: string[] | undefined;
+  let cut: Parameters<typeof checklistFor>[3];
   const importOf = (rows: readonly ManifestEntry[]) =>
     importFor(rows, {
       home: opts.home,
@@ -548,6 +621,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       platform: opts.platform,
       onResult: r => {
         writeFileSync(resultsPath, `${JSON.stringify(r, null, 2)}\n`);
+        cut = r.files?.cut;
         const all = [...r.tools.map(t => ({ ...t, name: t.label })), ...r.agents];
         const n = (o: string) => all.filter(x => x.outcome === o).length;
         installs = [
@@ -660,7 +734,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   off();
   if (installs !== undefined) log.info(installs.join("\n"), out);
 
-  const checklist = checklistFor(manifest, choices);
+  const checklist = checklistFor(manifest, choices, ticks, cut);
   const handle = await opts.host(rt, builder, checklist);
   const url = `http://127.0.0.1:${handle.port}/`;
   await handoff(url, handle, io, interactive, out);

@@ -255,6 +255,21 @@ describe("rungSelect", () => {
     expect([...result.ticks]).toEqual(["gh"]);
   });
 
+  it("a locked row with choices shows its forced answer, not the lock word, and space leaves it alone", async () => {
+    const items: SelectItem[] = [
+      { id: "gh", label: "GitHub CLI login", detail: [], choices: CHOICES },
+      { id: "op", label: "1Password CLI", detail: ["needs the desktop app"], choices: CHOICES, lock: "off" },
+    ];
+    const { input, output, text } = streams();
+    const p = rungSelect({ title: "Sign-ins", counter: "7/8", items, initial: new Set(["gh"]), initialChoices: new Map([["gh", "copy"], ["op", "machine"]]), input, output });
+    await settle();
+    expect(text()).toMatch(/1Password CLI\s+sign in\n/);
+    expect(text()).not.toContain("stays here");
+    await press(input, KEY.down, KEY.space, KEY.enter);
+    const result = await p;
+    expect(result).toMatchObject({ kind: "next", choices: new Map([["gh", "copy"], ["op", "machine"]]) });
+  });
+
   it("rows line up in two columns cut to the width, and never wrap", async () => {
     const wide: SelectItem[] = [
       { id: "a", label: "a".repeat(120), group: "Go binaries", detail: ["go install", "reinstalled by go"], hint: "1.2 MB" },
@@ -399,6 +414,164 @@ describe("rungSelect", () => {
     await p;
     // The submitted line is the same list without the label.
     expect(text().split("\n").filter(l => l.includes("git name and email")).at(-1)).toBe("│  git name and email, alpha tool");
+  });
+
+  it("tick rows and answered rows on one screen: the answer is a column after the hint, the title carries no spread, and the keys name both", async () => {
+    const items: SelectItem[] = [
+      { id: "demo", label: "demo", hint: "300 B  2 files  2026-08-12  config", detail: [] },
+      { id: "token", label: ".demo-token", hint: " 40 B   1 file  2026-08-12  credential", detail: [], choices: CHOICES },
+      { id: "kc", label: "Raycast", group: "Keychain, device-bound", hint: "device-bound-login", detail: [], lock: "off" },
+    ];
+    const { input, output, text, clear } = streams();
+    const p = rungSelect({ title: "Everything else (3 items, 340 B)", counter: "8/8", items, initial: new Set(), initialChoices: new Map([["token", "skip"]]), input, output });
+    await settle();
+    // clack redraws only the rows that changed, so the newest copy of a row is the last one in the stream.
+    const lines = () => text().split("\n");
+    const demo = lines().filter(l => /[○●] demo /.test(l)).at(-1)!;
+    const token = lines().filter(l => /[○●] \.demo-token/.test(l)).at(-1)!;
+    expect(demo).toMatch(/demo\s+300 B  2 files  2026-08-12  config$/);
+    expect(token).toMatch(/\.demo-token\s+40 B   1 file  2026-08-12  credential  skip$/);
+    // The role column lines up across the two kinds of row; the answer sits after it.
+    expect(demo.indexOf("config") + "config".length).toBe(token.indexOf("credential") + "credential".length);
+    expect(text()).toMatch(/Everything else \(3 items, 340 B\)\s+8\/8\n/);
+    expect(text()).not.toContain("1 skip");
+    expect(text()).toMatch(/Keychain, device-bound\s+1\n/);
+    expect(text()).toContain("space tick or change   ← → fold   enter next   esc back");
+    clear();
+    await press(input, KEY.down, KEY.down, KEY.space);
+    expect(lines().filter(l => /[○●] \.demo-token/.test(l)).at(-1)).toMatch(/credential  copy$/);
+    expect(text()).toContain("Selected: .demo-token");
+    await press(input, KEY.enter);
+    const result = await p;
+    expect(result).toMatchObject({ kind: "next", ticks: new Set(["token"]), choices: new Map([["token", "copy"]]) });
+    expect(text().split("\n").filter(l => l.includes("Everything else")).at(-1)).toMatch(/Everything else \(3 items, 340 B\)\s+8\/8$/);
+  });
+
+  it("footer lines follow the Selected line, are rebuilt from the ticks, and take rows from the window", async () => {
+    const items: SelectItem[] = Array.from({ length: 11 }, (_, i) => ({ id: `r${i}`, label: `row ${i}`, detail: [] }));
+    const { input, output, text, clear } = streams();
+    Object.assign(output, { rows: 20 });
+    const p = rungSelect({
+      title: "Everything else",
+      counter: "8/8",
+      items,
+      initial: new Set(),
+      footer: ticks => [`${ticks.size} ticked`, "large items are listed but never copied without a tick"],
+      detailLines: 3,
+      input,
+      output,
+    });
+    await settle();
+    const tail = () => text().split("\n").slice(-4);
+    expect(tail()).toEqual([
+      expect.stringMatching(/Selected: none$/),
+      expect.stringMatching(/^│  0 ticked$/),
+      expect.stringMatching(/^│  large items are listed but never copied without a tick$/),
+      expect.stringMatching(/^└  space tick/),
+    ]);
+    // 20 rows less the cursor line, the five fixed lines, three detail rows and two footer rows leaves 9: twelve entries do not fit.
+    expect(text()).toMatch(/↓ \d+ more/);
+    const blankDetail = text().split("\n").filter(l => l === "│").length;
+    expect(blankDetail).toBeGreaterThanOrEqual(3);
+    clear();
+    await press(input, KEY.down, KEY.space);
+    expect(tail()[1]).toMatch(/^│  1 ticked$/);
+    await press(input, KEY.enter);
+    await p;
+  });
+
+  it("without a footer the same list fits, so the footer is what costs the rows", async () => {
+    const items: SelectItem[] = Array.from({ length: 11 }, (_, i) => ({ id: `r${i}`, label: `row ${i}`, detail: [] }));
+    const { input, output, text } = streams();
+    Object.assign(output, { rows: 20 });
+    const p = rungSelect({ title: "Shell", counter: "2/8", items, initial: new Set(), input, output });
+    await settle();
+    expect(text()).not.toMatch(/more/);
+    await press(input, KEY.enter);
+    await p;
+  });
+
+  it("the all row leaves a row that takes its own tick alone and counts only what it flips; the row's group header still flips it", async () => {
+    const items: SelectItem[] = [
+      { id: "a", label: "alpha", detail: [] },
+      { id: "big", label: ".big", group: "large, review", detail: [], own: true },
+    ];
+    const { input, output, text, clear } = streams();
+    const p = rungSelect({ title: "Everything else", counter: "8/8", items, initial: new Set(), input, output });
+    await settle();
+    expect(text()).toMatch(/all\s+0 of 1\n/);
+    await press(input, KEY.space);
+    expect(text()).toMatch(/all\s+1 of 1\n/);
+    clear();
+    await press(input, KEY.down, KEY.down, KEY.space);
+    expect(text()).toMatch(/large, review\s+1 of 1\n/);
+    await press(input, KEY.enter);
+    expect((await p)).toMatchObject({ kind: "next", ticks: new Set(["a", "big"]) });
+  });
+
+  it("a screen of answered rows that all carry hints keeps the hint and answer columns", async () => {
+    const items: SelectItem[] = [
+      { id: "t1", label: ".a-token", hint: "40 B  credential", detail: [], choices: CHOICES },
+      { id: "t2", label: ".b-token", hint: "50 B  credential", detail: [], choices: CHOICES },
+    ];
+    const { input, output, text } = streams();
+    const p = rungSelect({ title: "Everything else", counter: "8/8", items, initial: new Set(), initialChoices: new Map([["t1", "skip"], ["t2", "copy"]]), input, output });
+    await settle();
+    expect(text()).toMatch(/\.a-token\s+40 B  credential  skip\n/);
+    expect(text()).toMatch(/\.b-token\s+50 B  credential  copy\n/);
+    await press(input, KEY.enter);
+    await p;
+  });
+
+  it("a choice row with no initial answer starts on the last choice, unticked", async () => {
+    const items: SelectItem[] = [{ id: "t", label: ".a-token", detail: [], choices: CHOICES }];
+    const { input, output, text } = streams();
+    const p = rungSelect({ title: "Everything else", counter: "8/8", items, initial: new Set(), input, output });
+    await settle();
+    expect(text()).toMatch(/\.a-token\s+skip\n/);
+    await press(input, KEY.enter);
+    expect(await p).toMatchObject({ kind: "next", ticks: new Set(), choices: new Map([["t", "skip"]]) });
+  });
+
+  it("a saved answer the row's choices do not offer falls back to the last choice, unticked", async () => {
+    const items: SelectItem[] = [{ id: "t", label: ".a-token", detail: [], choices: [{ value: "copy", label: "copy" }, { value: "skip", label: "skip" }] }];
+    const { input, output, text } = streams();
+    const p = rungSelect({ title: "Everything else", counter: "8/8", items, initial: new Set(["t"]), initialChoices: new Map([["t", "machine"]]), input, output });
+    await settle();
+    expect(text()).toMatch(/\.a-token\s+skip\n/);
+    await press(input, KEY.enter);
+    expect(await p).toMatchObject({ kind: "next", ticks: new Set(), choices: new Map([["t", "skip"]]) });
+  });
+
+  it("a group with tick rows and answered rows counts the ticks over its tickable members", async () => {
+    const items: SelectItem[] = [
+      { id: "c", label: "cmux", group: ".config/cmux", detail: [], hint: "1 KB" },
+      { id: "s", label: "cmux/secret", group: ".config/cmux", detail: [], hint: "32 B", choices: CHOICES },
+    ];
+    const { input, output, text } = streams();
+    const p = rungSelect({ title: "Everything else", counter: "8/8", items, initial: new Set(), initialChoices: new Map([["s", "skip"]]), input, output });
+    await settle();
+    expect(text()).toMatch(/\.config\/cmux\s+0 of 1\n/);
+    await press(input, KEY.down, KEY.down, KEY.space);
+    expect(text()).toMatch(/\.config\/cmux\s+1 of 1\n/);
+    await press(input, KEY.enter);
+    await p;
+  });
+
+  it("a hint given as a function of the width is recomputed every frame, so a resize changes the cells", async () => {
+    const items: SelectItem[] = [{ id: "a", label: "alpha", detail: [], hintFor: w => (w < 100 ? "300 B  config" : "300 B  2 files  2026-08-12  config") }];
+    const { input, output, text, clear } = streams();
+    Object.assign(output, { columns: 80 });
+    const p = rungSelect({ title: "Everything else", counter: "8/8", items, initial: new Set(), input, output });
+    await settle();
+    expect(text()).toMatch(/alpha\s+300 B  config\n/);
+    expect(text()).not.toContain("2 files");
+    clear();
+    Object.assign(output, { columns: 120 });
+    await press(input, KEY.down);
+    expect(text()).toMatch(/alpha\s+300 B  2 files  2026-08-12  config\n/);
+    await press(input, KEY.enter);
+    await p;
   });
 
   it("with nothing ticked the Selected line says none", async () => {
