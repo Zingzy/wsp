@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The composer under the chat thread: the transplanted prompt editor, slash
-// menu and send button over one draft per workspace. Enter starts one turn
-// through sessions.start, resumed with the workspace's Claude session unless
-// a new thread was requested; a failed send puts the draft back. The editor is
-// disabled with the reason while the runtime or the workspace is not live, and
-// the banner names whatever blocks a send, a running turn included, so Enter
-// never fails silently. It is also disabled while the turn a new thread left
-// behind is still finishing: the web client speaks no interrupt yet, so a
-// second session must not start until that turn ends. Stop, model and
-// permission-mode controls wait for their client methods and start options.
+// menu, send and stop buttons over one draft per workspace. Enter starts one
+// turn through sessions.start, resumed with the workspace's Claude session
+// unless a new thread was requested; a failed send puts the draft back. Stop
+// sends one sessions.interrupt for the turn on screen and waits, disabled,
+// for the reply or the turn's end; the runtime pushes the interrupted done
+// before it answers, so the composer opens on that event. not-running means
+// the turn beat the click and is no error; not-found and a refused request
+// show in the status row. The editor is disabled with the reason while the
+// runtime or the workspace is not live, and the banner names whatever blocks
+// a send, a running turn included, so Enter never fails silently. It is also
+// disabled while the turn a new thread left behind is still finishing: stop
+// reaches only the visible turn, so a second session must not start until
+// that one ends. Model and permission-mode controls wait for start options.
 import { CircleAlertIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MachineState, WorkspacePhase } from "@wsp/protocol";
@@ -51,11 +55,20 @@ export function composerUnavailableReason(input: {
   return null;
 }
 
+/** What one stop click left behind for the turn it targeted; the turn id keeps it from leaking onto the next turn. */
+interface StopAttempt {
+  readonly turnId: string;
+  readonly pending: boolean;
+  readonly error: string | null;
+}
+
 export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thread: ChatThreadHandle }) {
   const api = useStore(s => s.api);
   const conn = useStore(s => s.conn);
+  const sessions = useStore(s => s.sessions[workspaceId]);
   const workspace = useWorkspace(workspaceId);
   const status = useStatus(workspaceId);
+  const [stop, setStop] = useState<StopAttempt | null>(null);
   const draft = useComposerDraft(workspaceId);
   const setDraft = useComposerDraftStore(s => s.setDraft);
   const editorRef = useRef<ComposerPromptEditorHandle | null>(null);
@@ -74,6 +87,23 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   });
   const sendDisabledReason = unavailable ?? (thread.busy ? "Turn in flight" : null);
   const hasText = draft.prompt.trim().length > 0;
+
+  const runningTurn = thread.view.running ? thread.view.latestTurn : null;
+  // The runtime keys sessions.interrupt by its own session id; the events carry the harness id, which differs after a
+  // resume, so the row from sessions.list maps one to the other. Without a row the events' id goes, and the runtime answers.
+  const stopTarget = useMemo(() => {
+    if (runningTurn === null) return null;
+    const row = sessions?.find(r => r.claudeSessionId === runningTurn.sessionId || r.id === runningTurn.sessionId);
+    return row?.id ?? runningTurn.sessionId;
+  }, [runningTurn, sessions]);
+  const stopAttempt = stop !== null && runningTurn !== null && stop.turnId === runningTurn.turnId ? stop : null;
+  const canStop = runningTurn !== null && api?.interruptSession !== undefined;
+  const banner =
+    stopAttempt !== null && stopAttempt.error !== null
+      ? { text: `Could not stop: ${stopAttempt.error}`, variant: "error" as const }
+      : sendDisabledReason !== null
+        ? { text: sendDisabledReason, variant: "warning" as const }
+        : null;
 
   const trigger = useMemo(() => detectComposerTrigger(draft.prompt, draft.cursor), [draft]);
   const searchKey = trigger ? `${trigger.kind}:${trigger.query.trim().toLowerCase()}` : null;
@@ -124,6 +154,17 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
       thread.appendLocalError(err instanceof Error ? err.message : String(err));
     });
   }, [api, draft, sendDisabledReason, setDraft, thread, workspace?.claudeSessionId, workspaceId]);
+
+  const interrupt = useCallback(() => {
+    const method = api?.interruptSession;
+    if (!method || runningTurn === null || stopTarget === null || stopAttempt?.pending) return;
+    const { turnId } = runningTurn;
+    setStop({ turnId, pending: true, error: null });
+    void method(stopTarget).then(
+      outcome => setStop({ turnId, pending: false, error: outcome === "not-found" ? "the runtime does not know this session" : null }),
+      (err: unknown) => setStop({ turnId, pending: false, error: err instanceof Error ? err.message : String(err) }),
+    );
+  }, [api, runningTurn, stopAttempt?.pending, stopTarget]);
 
   const selectItem = useCallback(
     (item: ComposerCommandItem) => {
@@ -194,15 +235,15 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
           >
             <ComposerBanner.Dock>
               <ComposerBanner.Column>
-                {sendDisabledReason !== null ? (
+                {banner !== null ? (
                   <ComposerBanner.Attachment>
-                    <ComposerBanner.Root variant="warning" role="status">
+                    <ComposerBanner.Root variant={banner.variant} role="status">
                       <ComposerBanner.Row>
                         <ComposerBanner.Icon>
                           <CircleAlertIcon />
                         </ComposerBanner.Icon>
                         <ComposerBanner.Content>
-                          <span className="truncate">{sendDisabledReason}</span>
+                          <span className="truncate">{banner.text}</span>
                         </ComposerBanner.Content>
                       </ComposerBanner.Row>
                     </ComposerBanner.Root>
@@ -244,7 +285,8 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
                       <ComposerPrimaryActions
                         compact={false}
                         pendingAction={null}
-                        isRunning={false}
+                        isRunning={canStop}
+                        isInterruptPending={stopAttempt?.pending ?? false}
                         showPlanFollowUpPrompt={false}
                         promptHasText={hasText}
                         isSendBusy={thread.busy}
@@ -254,7 +296,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
                         isPreparingWorktree={false}
                         hasSendableContent={hasText}
                         onPreviousPendingQuestion={noop}
-                        onInterrupt={noop}
+                        onInterrupt={interrupt}
                         onImplementPlanInNewThread={noop}
                       />
                     </div>

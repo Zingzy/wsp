@@ -65,6 +65,7 @@ function fixtureApi(workspaces: WorkspaceView[], history: Record<string, Session
       started.push(opts);
       return { id: "s1", workspaceId: opts.workspaceId, harness: "claude", status: "running", prompt: opts.prompt, startedAt: T0 };
     },
+    interruptSession: async () => "accepted",
   };
   const emit = (e: EventUnion) => act(() => { for (const fn of [...listeners]) fn(e); });
   return { api, started, emit };
@@ -80,6 +81,8 @@ async function setup(api: Api) {
 }
 
 const sendButton = () => screen.getByRole("button", { name: /Send message|Turn in flight|Finishing the previous turn/ }) as HTMLButtonElement;
+/** While a turn runs, stop stands where send was; the status row carries the reason. */
+const stopButton = () => screen.getByRole("button", { name: "Stop generation" }) as HTMLButtonElement;
 
 describe("chat tab rendering", () => {
   it("mounts the thread view: empty headline first, then the fixture conversation with its settled footer", async () => {
@@ -154,7 +157,7 @@ describe("chat tab hydration", () => {
     api.sessionHistory = fetches;
     await setup(api);
     await screen.findByText("one.");
-    expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
+    expect(stopButton()).toBeDefined();
     expect(fetches).toHaveBeenCalledTimes(1);
 
     history[WS] = replay(WS, "first", "one.");
@@ -165,7 +168,7 @@ describe("chat tab hydration", () => {
     expect(screen.queryByText(/Working for/)).toBeNull();
     // Live events land again once the reload is in.
     emit({ type: "session.start", ...scope });
-    expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
+    expect(stopButton()).toBeDefined();
   });
 
   it("a replay gap while finishing the previous turn: history shows that turn ended, so the composer opens", async () => {
@@ -221,8 +224,8 @@ describe("chat tab hydration", () => {
     expect(screen.getByText("two.")).toBeDefined();
     // The editor stays open for the next prompt; only sending waits for the turn.
     expect(isEditable(composerEditor())).toBe(true);
-    expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
-    expect(sendButton().disabled).toBe(true);
+    expect(stopButton()).toBeDefined();
+    expect(screen.getByRole("status").textContent).toContain("Turn in flight");
   });
 });
 
@@ -248,7 +251,7 @@ describe("chat tab composer", () => {
     expect(editor.textContent).toBe("again");
 
     emit({ type: "session.start", ...scope });
-    expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
+    expect(stopButton()).toBeDefined();
     emit({ type: "session.done", ...scope, result: { status: "completed", durationMs: 900, costUsd: 0.001 } });
     emit({ type: "session.end", ...scope, exitCode: 0, sawResult: true });
     expect(sendButton().getAttribute("aria-label")).toBe("Send message");
@@ -327,7 +330,7 @@ describe("chat tab new thread mid-turn", () => {
     for (const e of FIXTURE.slice(0, 6)) emit(e);
     const editor = composerEditor();
     expect(isEditable(editor)).toBe(true);
-    expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
+    expect(stopButton()).toBeDefined();
     act(() => requestNewThread({ workspaceId: WS }));
     expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
     expect(isEditable(editor)).toBe(false);
@@ -538,7 +541,7 @@ describe("chat tab threads", () => {
     await screen.findByText("Fresh start.");
     expect(screen.getByText("start over")).toBeDefined();
     expect(status()).toBe("Turn in flight");
-    expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
+    expect(stopButton()).toBeDefined();
     expect(isEditable(composerEditor())).toBe(true);
     // The rest of the turn lands live and opens the composer.
     for (const e of fresh.slice(2)) emit(e);

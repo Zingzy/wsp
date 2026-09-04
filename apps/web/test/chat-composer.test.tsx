@@ -34,7 +34,9 @@ const workspace: WorkspaceView = {
 function fixtureApi(workspaces: WorkspaceView[], history: Record<string, SessionEvent[]> = {}, statuses: WorkspaceStatus[] = []) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
   const started: Array<{ workspaceId: string; prompt: string; resume?: string }> = [];
+  const interrupted: string[] = [];
   const api: Api = {
+    interruptSession: async id => { interrupted.push(id); return "accepted"; },
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
     daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
     builderReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
@@ -61,7 +63,7 @@ function fixtureApi(workspaces: WorkspaceView[], history: Record<string, Session
     },
   };
   const emit = (e: EventUnion) => act(() => { for (const fn of [...listeners]) fn(e); });
-  return { api, started, emit };
+  return { api, started, interrupted, emit };
 }
 
 async function setup(api: Api, conn: ConnStatus = "live") {
@@ -243,13 +245,14 @@ describe("composer while the workspace is not live", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
-  it("offers no stop while a turn streams: the web client sends no interrupt yet", async () => {
-    const { api, emit } = fixtureApi([workspace]);
+  it("offers stop while a turn streams and names the running turn as what blocks a send", async () => {
+    const { api, emit, interrupted } = fixtureApi([workspace]);
     await setup(api);
     emit({ type: "session.start", ...scope, prompt: "go" });
     emit({ type: "session.delta", ...scope, kind: "text", text: "on it" });
-    expect(screen.queryByRole("button", { name: "Stop generation" })).toBeNull();
-    expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
+    expect(screen.getByRole("button", { name: "Stop generation" })).toBeDefined();
+    expect(interrupted).toEqual([]);
+    expect(screen.queryByRole("button", { name: /Send message|Turn in flight/ })).toBeNull();
     expect(screen.getByRole("status").textContent).toContain("Turn in flight");
     expect(isEditable(composerEditor())).toBe(true);
     await typeInto(composerEditor(), "follow up");

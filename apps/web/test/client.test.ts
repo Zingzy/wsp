@@ -4,8 +4,7 @@
 // runtime that dies and comes back for the reconnect tests.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DisconnectedError, makeApi, ProtocolClient, type ConnStatus, type ProtocolClientOptions } from "../src/protocol/client.js";
-
-type Frame = Record<string, unknown>;
+import { ScriptedSocket, type Frame } from "./scripted-socket.js";
 
 /** Polls cond every 5 ms until it holds; the redial timer is a real setTimeout, so these tests wait on the wall clock. */
 async function until(cond: () => boolean, ms = 2000): Promise<void> {
@@ -13,45 +12,6 @@ async function until(cond: () => boolean, ms = 2000): Promise<void> {
   while (!cond()) {
     if (Date.now() > deadline) throw new Error("condition not met in time");
     await new Promise(r => setTimeout(r, 5));
-  }
-}
-
-class ScriptedSocket {
-  static instances: ScriptedSocket[] = [];
-  static reply: (frame: Frame) => Frame | undefined = () => undefined;
-  static authOk = true;
-  /** false plays a runtime that is down: every new socket closes before it opens. */
-  static serverUp = true;
-  sent: Frame[] = [];
-  onopen: (() => void) | null = null;
-  onmessage: ((e: { data: string }) => void) | null = null;
-  onclose: ((e: { code: number }) => void) | null = null;
-  onerror: (() => void) | null = null;
-  constructor(readonly url: string) {
-    ScriptedSocket.instances.push(this);
-    queueMicrotask(() => (ScriptedSocket.serverUp ? this.onopen?.() : this.drop(1006)));
-  }
-  send(data: string): void {
-    const frame = JSON.parse(data) as Frame;
-    this.sent.push(frame);
-    if (frame["op"] === "auth") {
-      const reply = ScriptedSocket.authOk ? { id: frame["id"], ok: true } : { id: frame["id"], ok: false, error: "unauthorized" };
-      queueMicrotask(() => this.onmessage?.({ data: JSON.stringify(reply) }));
-      if (!ScriptedSocket.authOk) queueMicrotask(() => this.drop(4401));
-      return;
-    }
-    const reply = ScriptedSocket.reply(frame);
-    if (reply) queueMicrotask(() => this.onmessage?.({ data: JSON.stringify(reply) }));
-  }
-  /** The server side going away, as a wsp restart looks from the tab. */
-  drop(code: number): void {
-    this.onclose?.({ code });
-  }
-  close(): void {
-    this.drop(1000);
-  }
-  frames(op: string): Frame[] {
-    return this.sent.filter(f => f["op"] === op);
   }
 }
 
@@ -75,6 +35,17 @@ describe("makeApi wrappers", () => {
     const got = await api.startSession({ workspaceId: "ws_1", prompt: "fix it", resume: "claude-sid" });
     expect(lastSent()).toMatchObject({ op: "sessions.start", workspaceId: "ws_1", prompt: "fix it", resume: "claude-sid" });
     expect(got).toEqual(session);
+  });
+
+  it("interruptSession sends sessions.interrupt with the runtime's session id and unwraps the outcome", async () => {
+    const { api, lastSent } = await connect();
+    const interrupt = api.interruptSession!;
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, outcome: "not-running" });
+    expect(await interrupt("s1")).toBe("not-running");
+    expect(lastSent()).toEqual({ id: expect.any(Number), op: "sessions.interrupt", sessionId: "s1" });
+    // An outcome outside the enum must not read as accepted.
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, outcome: "maybe" });
+    await expect(interrupt("s1")).rejects.toThrow();
   });
 
   it("upgrade sends workspaces.upgrade with the size and unwraps the workspace", async () => {
