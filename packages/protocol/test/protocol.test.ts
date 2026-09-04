@@ -7,6 +7,7 @@ import {
   DaemonRequest,
   DaemonResponse,
   EventUnion,
+  EventsSubscribeReply,
   FsListReply,
   FsReadReply,
   GitDiffReply,
@@ -177,6 +178,49 @@ describe("session wire fields the face reads", () => {
     const runtimeSide = { ...daemonSide, workspaceId: "ws_1" };
     expect(EventUnion.parse(runtimeSide)).toEqual(runtimeSide);
     expect(() => DaemonEvent.parse({ ...daemonSide, process: 1 })).toThrow();
+  });
+});
+
+describe("event replay wire fields", () => {
+  it("every event may carry seq, a positive integer that survives a JSON round trip; history events need not", () => {
+    const events = [
+      { type: "workspace.napped", workspaceId: "ws_1", seq: 1 },
+      { type: "workspace.status", status: { id: "ws_1", name: "x", machineId: "m1", phase: "running", golden: "g", createdAt: "t", machineState: "running", reach: { state: "unsupported" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.1 }, seq: 2 },
+      { type: "session.delta", workspaceId: "ws_1", sessionId: "s1", kind: "text", text: "hi", seq: 3 },
+      { type: "port.open", workspaceId: "ws_1", port: 8080, seq: 4 },
+      { type: "golden.stage", name: "default", stage: "ready", seq: 5 },
+    ];
+    for (const e of events) expect(EventUnion.parse(JSON.parse(JSON.stringify(e)))).toEqual(e);
+    const { seq, ...unstamped } = events[0]!;
+    void seq;
+    expect(EventUnion.parse(unstamped)).toEqual(unstamped);
+    expect(() => EventUnion.parse({ ...events[0], seq: 0 })).toThrow();
+    expect(() => EventUnion.parse({ ...events[0], seq: 1.5 })).toThrow();
+    expect(() => EventUnion.parse({ ...events[0], seq: "1" })).toThrow();
+    const history = { type: "session.delta", workspaceId: "ws_1", sessionId: "s1", kind: "text", text: "hi" };
+    expect(SessionEvent.parse(history)).toEqual(history);
+  });
+
+  it("events.subscribe takes an optional after cursor, a non-negative integer", () => {
+    const bare = { id: 1, op: "events.subscribe" };
+    const cursor = { id: 2, op: "events.subscribe", after: 41 };
+    const start = { id: 3, op: "events.subscribe", after: 0 };
+    const resumed = { id: 4, op: "events.subscribe", after: 41, stream: "0b6a9c1e-0000-4000-8000-000000000000" };
+    for (const r of [bare, cursor, start, resumed]) expect(RuntimeRequest.parse(r)).toEqual(r);
+    expect(() => RuntimeRequest.parse({ ...bare, stream: 7 })).toThrow();
+    expect(() => RuntimeRequest.parse({ ...bare, after: -1 })).toThrow();
+    expect(() => RuntimeRequest.parse({ ...bare, after: 2.5 })).toThrow();
+    expect(() => RuntimeRequest.parse({ ...bare, after: "41" })).toThrow();
+  });
+
+  it("the subscribe reply names the runtime's head and stream and, when the cursor is gone, gap", () => {
+    expect(EventsSubscribeReply.parse({ seq: 0 })).toEqual({ seq: 0 });
+    const stamped = { seq: 5002, gap: true, stream: "0b6a9c1e-0000-4000-8000-000000000000" };
+    expect(EventsSubscribeReply.parse(JSON.parse(JSON.stringify(stamped)))).toEqual(stamped);
+    expect(() => EventsSubscribeReply.parse({ seq: 1, stream: 7 })).toThrow();
+    expect(() => EventsSubscribeReply.parse({ seq: 5002, gap: false })).toThrow();
+    expect(() => EventsSubscribeReply.parse({ gap: true })).toThrow();
+    expect(RuntimeResponse.parse({ id: 1, ok: true, seq: 7, gap: true })).toBeTruthy();
   });
 });
 

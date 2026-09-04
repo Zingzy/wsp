@@ -27,7 +27,10 @@ interface State {
   selectedId: string | null;
   sessions: Record<string, SessionView[]>;
   ready: boolean;
+  /** How many reconnects the runtime could not replay events for; anything built from sessions.history reloads when it moves. */
+  gaps: number;
   bind(api: Api): void;
+  noteGap(): void;
   /** Mirrors the client's status; live with an api bound pulls list and statuses again so a reconnect converges. */
   setConn(conn: ConnStatus): void;
   select(id: string | null): void;
@@ -79,6 +82,8 @@ export const useStore = create<State>((set, get) => {
     selectedId: null,
     sessions: {},
     ready: false,
+    gaps: 0,
+    noteGap() { set(s => ({ gaps: s.gaps + 1 })); },
     bind(api) {
       set({ api });
       api.subscribe(e => get().applyEvent(e));

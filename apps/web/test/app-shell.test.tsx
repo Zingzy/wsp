@@ -49,7 +49,7 @@ function fakeApi(workspaces: WorkspaceView[]): Api {
 
 beforeEach(() => {
   window.localStorage.clear();
-  useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, sessions: {}, ready: false });
+  useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, sessions: {}, ready: false, gaps: 0 });
   useRightPanelStore.setState({ byWorkspaceId: {} });
 });
 
@@ -153,6 +153,8 @@ type Frame = Record<string, unknown>;
 
 class ScriptedSocket {
   static instances: ScriptedSocket[] = [];
+  /** The runtime process answering events.subscribe; a test changes it to play a wsp restart. */
+  static stream = "stream-a";
   onopen: (() => void) | null = null;
   onmessage: ((e: { data: string }) => void) | null = null;
   onclose: ((ev: { code: number }) => void) | null = null;
@@ -163,6 +165,10 @@ class ScriptedSocket {
   }
   send(data: string): void {
     const frame = JSON.parse(data) as Frame;
+    if (frame["op"] === "events.subscribe") {
+      queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ id: frame["id"], ok: true, seq: 1, stream: ScriptedSocket.stream }) }));
+      return;
+    }
     const reply: Frame = {
       id: frame["id"],
       ok: true,
@@ -193,6 +199,20 @@ describe("disconnected banner", () => {
     await waitFor(() => expect(useStore.getState().conn).toBe("live"));
     expect(ScriptedSocket.instances.length).toBe(2);
     expect(document.querySelector("[data-disconnected-banner]")).toBeNull();
+  });
+
+  it("a redial answered by another runtime process counts a gap in the store", async () => {
+    ScriptedSocket.instances.length = 0;
+    ScriptedSocket.stream = "stream-a";
+    vi.stubGlobal("WebSocket", ScriptedSocket);
+    render(<App wsUrl="ws://test" token="tok" />);
+    await waitFor(() => expect(useStore.getState().conn).toBe("live"));
+    await waitFor(() => expect(useStore.getState().ready).toBe(true));
+    expect(useStore.getState().gaps).toBe(0);
+    ScriptedSocket.stream = "stream-b";
+    act(() => ScriptedSocket.instances[0]!.close());
+    await waitFor(() => expect(useStore.getState().conn).toBe("live"));
+    await waitFor(() => expect(useStore.getState().gaps).toBe(1));
   });
 
   it("asks for a reload once the socket is closed for good", async () => {

@@ -141,6 +141,70 @@ describe("chat tab hydration", () => {
     expect(screen.queryByText("Added GET /health.")).toBeNull();
   });
 
+  it("a replay gap reloads the transcript from history: a turn that ended in the dark frees the composer", async () => {
+    const history: Record<string, SessionEvent[]> = { [WS]: replay(WS, "first", "one.").slice(0, 2) };
+    const { api, emit } = fixtureApi([workspace], history);
+    const fetches = vi.fn(api.sessionHistory);
+    api.sessionHistory = fetches;
+    await setup(api);
+    await screen.findByText("one.");
+    const input = screen.getByRole("textbox", { name: "prompt" }) as HTMLTextAreaElement;
+    expect(input.disabled).toBe(true);
+    expect(fetches).toHaveBeenCalledTimes(1);
+
+    history[WS] = replay(WS, "first", "one.");
+    act(() => useStore.getState().noteGap());
+    await waitFor(() => expect(input.disabled).toBe(false));
+    expect(fetches).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("one.")).toBeDefined();
+    expect(screen.queryByText(/Working for/)).toBeNull();
+    // Live events land again once the reload is in.
+    emit({ type: "session.start", ...scope });
+    expect(input.disabled).toBe(true);
+  });
+
+  it("a replay gap while finishing the previous turn: history shows that turn ended, so the composer opens", async () => {
+    const history: Record<string, SessionEvent[]> = { [WS]: [] };
+    const { api, emit, started } = fixtureApi([workspace], history);
+    await setup(api);
+    for (const e of FIXTURE.slice(0, 6)) emit(e);
+    act(() => requestNewThread({ workspaceId: WS }));
+    const input = screen.getByRole("textbox", { name: "prompt" }) as HTMLTextAreaElement;
+    expect(input.disabled).toBe(true);
+    expect(screen.getByText("finishing the previous turn")).toBeDefined();
+
+    // The turn ended while the socket was down for longer than the runtime replays.
+    history[WS] = [...FIXTURE] as SessionEvent[];
+    act(() => useStore.getState().noteGap());
+    await waitFor(() => expect(input.disabled).toBe(false));
+    expect(screen.queryByText("finishing the previous turn")).toBeNull();
+    expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
+    fireEvent.change(input, { target: { value: "start over" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(started.length).toBe(1));
+    expect(started[0]).toEqual({ workspaceId: WS, prompt: "start over" });
+  });
+
+  it("a replay gap while finishing the previous turn keeps the composer closed when history shows it still running", async () => {
+    const history: Record<string, SessionEvent[]> = { [WS]: [] };
+    const { api, emit } = fixtureApi([workspace], history);
+    const fetches = vi.fn(api.sessionHistory);
+    api.sessionHistory = fetches;
+    await setup(api);
+    for (const e of FIXTURE.slice(0, 6)) emit(e);
+    act(() => requestNewThread({ workspaceId: WS }));
+    const input = screen.getByRole("textbox", { name: "prompt" }) as HTMLTextAreaElement;
+
+    history[WS] = FIXTURE.slice(0, 7) as SessionEvent[];
+    act(() => useStore.getState().noteGap());
+    await waitFor(() => expect(fetches).toHaveBeenCalledTimes(2));
+    await act(() => new Promise(r => setTimeout(r, 0)));
+    expect(input.disabled).toBe(true);
+    expect(screen.getByText("finishing the previous turn")).toBeDefined();
+    for (const e of FIXTURE.slice(7)) emit(e);
+    expect(input.disabled).toBe(false);
+  });
+
   it("live events keep landing after hydration and the composer follows the replayed state", async () => {
     const { api, emit } = fixtureApi([workspace], { [WS]: replay(WS, "first", "one.") });
     await setup(api);

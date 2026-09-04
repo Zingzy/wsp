@@ -65,7 +65,7 @@ function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
 const flush = () => new Promise(r => setTimeout(r, 0));
 
 beforeEach(() => {
-  useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, sessions: {}, ready: false });
+  useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, sessions: {}, ready: false, gaps: 0 });
 });
 
 describe("store sessions", () => {
@@ -222,5 +222,14 @@ describe("store workspaces", () => {
     useStore.getState().bind(api);
     await flush();
     expect(useStore.getState().toast).toContain("runtime unreachable");
+  });
+});
+
+describe("store replay gaps", () => {
+  it("noteGap counts every reconnect the runtime could not replay, so history readers know to reload", () => {
+    expect(useStore.getState().gaps).toBe(0);
+    useStore.getState().noteGap();
+    useStore.getState().noteGap();
+    expect(useStore.getState().gaps).toBe(2);
   });
 });
