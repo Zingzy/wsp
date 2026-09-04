@@ -42,7 +42,8 @@ export function appDir(path: string): string {
 function detailOf(r: Row): string {
   const words = [ROLE_WORDS[r.kind]];
   if (r.flags.includes("credential") && r.kind !== "credential") words.push("holds credential-shaped files");
-  if (r.owner !== undefined) words.push(r.owner === "app" ? "installed as a macOS app" : `installed by ${r.owner}`);
+  // A credential split out of a directory carries that directory's owner guess; nobody installed the key.
+  if (r.owner !== undefined && r.kind !== "credential") words.push(r.owner === "app" ? "installed as a macOS app" : `installed by ${r.owner}`);
   if (r.binary !== undefined) words.push(`config for ${r.binary.startsWith("~/") ? r.binary : r.binary.slice(r.binary.lastIndexOf("/") + 1)}`);
   if (r.linkTarget !== undefined) words.push(`a link to ${r.linkTarget}`);
   if (r.measured === "lower-bound") words.push("size is a lower bound");

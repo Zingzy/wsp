@@ -76,6 +76,13 @@ describe("init layout", () => {
     // A line that fits keeps its spacing: the summary indents the sign-ins under their rung and pads its columns with two spaces.
     expect(wrap("  GitHub CLI login  copy", 40)).toEqual(["  GitHub CLI login  copy"]);
     expect(wrap("Upload    77.0 MB, nothing has left this computer yet", 30)).toEqual(["Upload    77.0 MB, nothing has", "  left this computer yet"]);
+    // A caller with columns hands in the indent that lands the rest under its value.
+    expect(wrap("Installs  Claude Code, Codex, 89 tools plus Homebrew's toolchain", 40, " ".repeat(10))).toEqual(["Installs  Claude Code, Codex, 89 tools", "          plus Homebrew's toolchain"]);
+    // A word wider than the width is cut on its own and the words after it still come through, whatever the indent.
+    const path = "/p".repeat(50);
+    expect(wrap(`Save the key to ${path} so wsp stops asking?`, 40)).toEqual(["Save the key to", `  ${path.slice(0, 37)}…`, "  so wsp stops asking?"]);
+    expect(wrap(`${path} so`, 40)).toEqual([`${path.slice(0, 39)}…`, "  so"]);
+    expect(wrap(`Installs  ${path} plus jq`, 40, " ".repeat(10))).toEqual(["Installs", `          ${path.slice(0, 29)}…`, "          plus jq"]);
   });
 
   it("card prints a bold title on the step glyph and its lines down the bar, an empty line as a bare bar, and long lines wrapped to the width", () => {

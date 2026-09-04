@@ -52,7 +52,10 @@ options:
   --ws-port N        runtime websocket port (default 4410)
   --state PATH       state file (default ~/.wsp/state.json, or ./.wsp/state.json
                      when the current directory has a .env)
-  --yes              init: take every default and ask nothing (required off a terminal)
+  --yes              init: take every default and ask nothing (required off a
+                     terminal); a login held in the Keychain defaults to sign
+                     in on the machine unless a saved recipe answered copy, so
+                     macOS has nothing to ask either
   --manifest PATH    init: tick from this file instead of reading the machine; a
                      saved recipe (<state dir>/golden-recipe.json) works here
 

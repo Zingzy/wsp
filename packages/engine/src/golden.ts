@@ -7,7 +7,7 @@
 // long as they like, as long as nobody pauses it (snapshot-fresh rule).
 
 import { createHash } from "node:crypto";
-import type { GoldenManifest, GoldenStage, GoldenVersion } from "@wsp/protocol";
+import { ALREADY_APPLIED, type GoldenManifest, type GoldenStage, type GoldenVersion } from "@wsp/protocol";
 import { HOMEBREW, NODE_PATH_LINE, type AgentInstall, type NodeInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { assertFirstLife } from "./lifecycle.js";
 import type { ExecResult, Machine, MachineBackend, MachineKind, MachineState } from "./machine.js";
@@ -268,8 +268,8 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
 
   if (!only) {
     if (done("uploading-files")) {
-      stage("applying-setup", "already applied");
-      stage("uploading-files", "already applied");
+      stage("applying-setup", ALREADY_APPLIED);
+      stage("uploading-files", ALREADY_APPLIED);
     } else if (!imp.files || imp.files.count === 0) {
       const notes = (imp.files?.skipped ?? []).map(s => `${s.path} (${s.note})`);
       stage("applying-setup", notes.length > 0 ? `nothing left to pack; skipped ${notes.join(", ")}` : "nothing ticked");
@@ -304,7 +304,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
     }
 
     if (done("installing-tools")) {
-      stage("installing-tools", "already applied");
+      stage("installing-tools", ALREADY_APPLIED);
     } else if (imp.tools.length === 0) {
       stage("installing-tools", "nothing ticked");
       mark("installing-tools");
@@ -350,7 +350,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
   }
 
   if (done("installing-harness")) {
-    stage("installing-harness", "already applied");
+    stage("installing-harness", ALREADY_APPLIED);
   } else {
     stage("installing-harness");
     const res = await machine.exec(opts.setup, { timeoutMs: opts.setupTimeoutMs ?? 300_000 });

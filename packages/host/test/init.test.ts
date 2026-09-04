@@ -10,11 +10,13 @@ import { stripVTControlCharacters } from "node:util";
 import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
 import { RUNGS } from "@wsp/collect";
 import type { BackendPricing } from "@wsp/engine";
+import { ALREADY_APPLIED } from "@wsp/protocol";
 import { createRuntime, memoryStore, type GoldenRecipe, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GOLDEN_SETUP } from "../src/doctor.js";
 import { loadManifest, recipePath } from "../src/init-recipe.js";
-import { everythingItems, fmtBytes, reduceStages, runInit, stageLine, type InitIO, type InitOptions } from "../src/init.js";
+import { CARD_FRAME, card, widthOf } from "../src/init-layout.js";
+import { everythingItems, fmtBytes, reduceStages, runInit, stageLine, summaryNote, type InitIO, type InitOptions } from "../src/init.js";
 import type { HostHandle } from "../src/server.js";
 import { EVERYTHING, FIXTURE } from "./init-fixture.js";
 import { guestAnswer, stubBackend, type StubBackend } from "./stub-backend.js";
@@ -157,6 +159,14 @@ afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
+/** A saved recipe with the gh login answered copy: under --yes a saved answer is kept, where the default would sign in on the machine. */
+function withGhCopy(f: Fake): void {
+  const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
+  dirs.push(dir);
+  f.opts.manifestPath = join(dir, "recipe.json");
+  writeFileSync(f.opts.manifestPath, JSON.stringify({ entries: FIXTURE.entries.map(e => (e.id === "logins/gh" ? { ...e, bring: true, choice: "copy" } : e)) }));
+}
+
 describe("wsp init, interactive", () => {
   it("detects first, walks the seven rungs, confirms once, prepares through the runtime, hands off", async () => {
     const f = fake();
@@ -169,6 +179,9 @@ describe("wsp init, interactive", () => {
     expect(first).toMatch(/Tools\s+4\s+3 can come/);
     expect(first).toContain("Nothing has left this computer.");
     expect(first.indexOf("Found on this computer")).toBeLessThan(first.indexOf("1/8"));
+    // The all row counts what the table counted: the required row comes along, the private key cannot.
+    expect(first).toMatch(/Identity\s+3\s+[\d.]+ KB\s+2 can come/);
+    expect(first).toMatch(/all\s+2 of 2\n/);
     // The detection result is a card down the bar, not a closed box: no corners, no rule, every line under the title starts with the thin bar.
     const found = first.slice(first.indexOf("Found on this computer"), first.indexOf("1/8"));
     expect(found).not.toMatch(/[╮╯─├]/);
@@ -208,7 +221,8 @@ describe("wsp init, interactive", () => {
     expect(summary).not.toMatch(/[╮╯─├]/);
     expect(summary).toMatch(/Identity\s+2 of 3\s+1\.7 KB/);
     expect(summary).toMatch(/Tools\s+3 of 4\n/);
-    expect(summary).toMatch(/Sign-ins\s+0 of 2/);
+    // Both logins sign in on the machine: chosen, as the rung header counted them, not "0 of 2".
+    expect(summary).toMatch(/Sign-ins\s+2 sign in\n/);
     expect(summary).toMatch(/GitHub CLI login\s+sign in/);
     expect(summary).toMatch(/Claude Code login\s+sign in/);
     expect(summary).not.toContain("id_ed25519");
@@ -368,7 +382,7 @@ describe("wsp init, interactive", () => {
     await f.until(BOOT);
     const summary = f.text().slice(f.text().lastIndexOf("Summary"));
     expect(summary).not.toContain("Codex login");
-    expect(summary).toMatch(/Sign-ins\s+1 of 2/);
+    expect(summary).toMatch(/Sign-ins\s+1 copy, 1 sign in\s+200 B/);
     await f.press(KEY.enter);
     expect((await run).code).toBe(1);
     const saved = loadManifest(join(dirs[0]!, "golden-recipe.json"));
@@ -461,8 +475,8 @@ describe("wsp init, everything else", () => {
       await f.until(rung);
       await f.press(KEY.enter);
     }
-    await f.until("Everything else (4 items");
-    const screen = f.text().slice(f.text().lastIndexOf("Everything else (4 items"));
+    await f.until("Everything else (1.2 MB");
+    const screen = f.text().slice(f.text().lastIndexOf("Everything else (1.2 MB"));
     expect(screen).toMatch(/○ demo\s+300 B\s+config\n/);
     expect(screen).toMatch(/○ \.demo-token\s+40 B\s+credential\s+skip\n/);
     expect(screen).not.toContain("2 files");
@@ -492,10 +506,11 @@ describe("wsp init, everything else", () => {
       await f.until(rung);
       await f.press(KEY.enter);
     }
-    await f.until("Everything else (4 items");
-    const screen = f.text().slice(f.text().lastIndexOf("Everything else (4 items"));
-    expect(screen).toMatch(/^Everything else \(4 items, 1\.2 MB\)\s+8\/8\n/);
-    expect(screen).toMatch(/all\s+0 of 1\n/);
+    await f.until("Everything else (1.2 MB");
+    const screen = f.text().slice(f.text().lastIndexOf("Everything else (1.2 MB"));
+    // One denominator on the screen: the rows that can come (the found table's "3 can come"); the title carries the size alone.
+    expect(screen).toMatch(/^Everything else \(1\.2 MB\)\s+8\/8\n/);
+    expect(screen).toMatch(/all\s+0 of 3\n/);
     expect(screen).toMatch(/○ demo\s+300 B\s+2 files\s+2026-08-12\s+config\n/);
     expect(screen).toMatch(/○ \.demo-token\s+40 B\s+1 file\s+2026-08-12\s+credential\s+skip\n/);
     // The role column lines up between a tick row and an answered row, and the size column is right-aligned.
@@ -516,8 +531,9 @@ describe("wsp init, everything else", () => {
     expect(screen).toContain("large items are listed but never copied without a tick");
     expect(screen).toContain("know what one of these is? add it to the catalog");
     expect(screen).toContain("space tick or change • ← → fold • enter next • esc back");
-    // The all row ticks the plain rows and leaves the large one alone.
+    // The all row ticks the plain rows and leaves the large one alone; its count still runs over every row that can come.
     await f.press(KEY.space);
+    expect(f.text()).toMatch(/all\s+1 of 3\n/);
     expect(f.text().slice(f.text().lastIndexOf("Selected:"))).toMatch(/Selected: demo\n┃  1 ticked, 300 B\n/);
     await f.press(KEY.space);
     // all row, demo: tick it; .demo-token: skip -> copy (two answers, copy and skip).
@@ -538,7 +554,7 @@ describe("wsp init, everything else", () => {
     const summary = f.text().slice(f.text().lastIndexOf("Summary"), f.text().lastIndexOf("Recipe saved"));
     expect(summary).toMatch(/Everything else\s+2 of 4\s+340 B\n│\s+\.demo-token\s+copy\n/);
     expect(summary).not.toMatch(/\n│\s+demo\s/);
-    expect(summary).toMatch(/Sign-ins\s+1 of 2[^\n]*\n│\s+GitHub CLI login\s+copy/);
+    expect(summary).toMatch(/Sign-ins\s+1 copy, 1 sign in[^\n]*\n│\s+GitHub CLI login\s+copy/);
     await f.press(KEY.enter);
     expect((await run).code).toBe(1);
     expect(f.backends.flatMap(b => b.machines)).toHaveLength(0);
@@ -617,8 +633,8 @@ describe("wsp init, everything else", () => {
       await f.until(rung);
       await f.press(KEY.enter);
     }
-    await f.until("Everything else (6 items");
-    const screen = f.text().slice(f.text().lastIndexOf("Everything else (6 items"));
+    await f.until("Everything else (1.2 MB");
+    const screen = f.text().slice(f.text().lastIndexOf("Everything else (1.2 MB"));
     expect(screen).toMatch(/○ \.env\s+stays here\n/);
     expect(screen).toMatch(/○ \.netrc\s+30 B\s+1 file\s+2026-08-12\s+credential\s+skip\n/);
     // all row, then .netrc: skip -> copy. The locked .env shows the plan's note when highlighted.
@@ -663,8 +679,8 @@ describe("wsp init, everything else", () => {
       await f.until(rung);
       await f.press(KEY.enter);
     }
-    await f.until("Everything else (5 items");
-    const screen = f.text().slice(f.text().lastIndexOf("Everything else (5 items"));
+    await f.until("Everything else (1.2 MB");
+    const screen = f.text().slice(f.text().lastIndexOf("Everything else (1.2 MB"));
     expect(screen).toMatch(/○ \.env\s+60 B\s+2 files\s+2026-08-12\s+unknown\n/);
     expect(screen).not.toContain(".env files are never copied");
     expect(screen).not.toMatch(/\.env\s+stays here/);
@@ -710,12 +726,31 @@ describe("wsp init, flags and no terminal", () => {
     expect(f.text()).toMatch(URL_RE);
     expect(f.backends[0]!.machines).toHaveLength(1);
     expect(f.opened).toEqual([]);
-    // The gh login defaults to copy, so its token was read from the Keychain, once, through the injected reader.
+    // Nobody is here to click macOS's consent dialog: the gh login, held in the Keychain, defaults to sign in on the
+    // machine instead of copy, so the Keychain is never asked and the row lands on the checklist.
+    expect(f.reads).toEqual([]);
+    expect(f.text()).toMatch(/GitHub CLI login\s+sign in/);
+    expect(f.checklists[0]).toEqual(expect.arrayContaining([{ label: "GitHub CLI login", command: "gh auth login" }]));
+    expect(loadManifest(join(dirs[0]!, "golden-recipe.json")).entries.find(e => e.id === "logins/gh")?.choice).toBe("machine");
+    expect(f.text()).not.toContain("from your Keychain");
+  });
+
+  it("off a terminal a saved copy answer still reads the Keychain, and says what is read before macOS can ask", async () => {
+    const f = fake({ tty: false });
+    withGhCopy(f);
+    mkdirSync(join(f.opts.home, ".config", "gh"), { recursive: true });
+    writeFileSync(join(f.opts.home, ".config", "gh", "hosts.yml"), "github.com:\n    user: Zingzy\n");
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
     expect(f.reads).toEqual(["gh:github.com"]);
+    const out = f.text();
+    const said = out.indexOf("Reading gh:github.com from your Keychain, as the saved recipe answered copy; macOS may ask you to allow it.");
+    expect(said).toBeGreaterThan(-1);
+    expect(said).toBeLessThan(out.search(BOOT));
   });
 
   it("a Keychain login the reader refuses is read before anything boots, turns into a sign-in on the machine, and says so before the confirm", async () => {
     const f = fake({ yes: true });
+    withGhCopy(f);
     f.opts.secrets = {
       read: async service => {
         f.reads.push(service);
@@ -827,9 +862,9 @@ describe("wsp init, flags and no terminal", () => {
     expect(log).toContain("true");
     expect(log.some(c => c.includes(GOLDEN_SETUP))).toBe(false);
     expect(log.some(c => c.includes("tar xzf"))).toBe(true);
-    // Off a terminal a step prints once, done, with its last detail and how long it took flush right.
-    expect(out).toMatch(/Setup applied\s+[\d.]+ (B|KB) packed\s+\d+\.\ds$/m);
-    expect(out).toMatch(/Files uploaded\s+[\d.]+ (B|KB) in [\d.]+s\s+\d+\.\ds$/m);
+    // Off a terminal a step prints once, done, with its whole detail and how long it took two spaces after it: no edge to cut at or pad to.
+    expect(out).toMatch(/Setup applied\s+[\d.]+ (B|KB) packed  \d+\.\ds$/m);
+    expect(out).toMatch(/Files uploaded\s+[\d.]+ (B|KB) in [\d.]+s  \d+\.\ds$/m);
     expect(f.recipes[0]!.envs).not.toHaveProperty("CLAUDE_CONFIG_DIR");
     const written = loadManifest(join(dirname(f.opts.statePath), "golden-recipe.json"));
     expect(written.entries.filter(e => e.bring).map(e => e.id)).toEqual(["identity/git-user", "shell/zshrc"]);
@@ -1091,6 +1126,7 @@ describe("wsp init, flags and no terminal", () => {
     const store = memoryStore();
     const shared = stubBackend();
     const first = fake({ yes: true });
+    withGhCopy(first);
     first.opts.secrets = {
       read: async service => {
         if (service.includes("gh")) throw new Error("User canceled");
@@ -1149,10 +1185,72 @@ describe("wsp init, flags and no terminal", () => {
     expect(out).not.toMatch(BOOT);
     expect(out).not.toContain("Creating the machine");
     expect(out.match(/(Setup applied|Files uploaded|Tools installed|Agents installed)\s+already applied/g)).toHaveLength(4);
+    // The two stages an attach never runs say so as well, and no skipped stage carries a duration: the reach
+    // check that follows the last one is nobody's stage.
+    expect(out).toMatch(/Machine created\s+already applied$/m);
+    expect(out).toMatch(/Base installed\s+already applied$/m);
+    expect(out).not.toMatch(/already applied\s+\d/);
     expect(out).toContain("Ready");
     expect(shared.machines).toHaveLength(1);
     expect(shared.machines[0]!.killed).toBe(false);
     expect((await store.list("builders")).map(b => (b as { id: string; firstLife: boolean }).firstLife)).toEqual([true]);
+  });
+
+  it("the seal report names the version sealed: a second golden on the same store is v2", async () => {
+    const store = memoryStore();
+    const shared = stubBackend();
+    const runtimeOver = (f: Fake) => (recipe: GoldenRecipe) => {
+      f.backends.push(shared);
+      const rt = createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+      f.runtimes.push(rt);
+      return rt;
+    };
+    const first = fake({ yes: true, tty: false });
+    first.opts.runtime = runtimeOver(first);
+    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    await first.runtimes[0]!.golden.seal(shared.machines[0]!.id);
+    await first.until("Golden v1 sealed");
+
+    // The seal killed that builder, so this run boots a fresh one; the store already holds v1.
+    const second = fake({ yes: true, tty: false, home: first.opts.home });
+    second.opts.runtime = runtimeOver(second);
+    second.opts.host = async () => ({ port: 4400, wsPort: 4410, authToken: "tok", close: async () => {} });
+    expect((await runInit(second.opts, second.io)).code).toBe(0);
+    const builder = shared.machines.filter(m => !m.killed).at(-1)!;
+    await second.runtimes[0]!.golden.seal(builder.id);
+    await second.until("Sealed");
+    expect(second.text()).toContain("Golden v2 sealed");
+    expect(second.text()).not.toContain("Golden v1 sealed");
+  });
+});
+
+describe("summaryNote", () => {
+  it("wraps a long Installs line under its own column instead of letting the frame break it with a stray indent", () => {
+    const ticks = new Set(["tools/brew/gh", "tools/brew/jq", "tools/npm/pnpm", "agents/claude"]);
+    const narrow = summaryNote(FIXTURE, ticks, new Map(), 48);
+    const at = narrow.indexOf("Installs  Claude Code, 3 tools plus");
+    expect(at).toBeGreaterThan(-1);
+    expect(narrow[at + 1]).toBe("          Homebrew's toolchain");
+    // The card's bar takes three columns; every line fits inside what is left.
+    expect(narrow.every(l => l.length <= 48 - CARD_FRAME)).toBe(true);
+    expect(summaryNote(FIXTURE, ticks, new Map(), 80)).toContain("Installs  Claude Code, 3 tools plus Homebrew's toolchain");
+  });
+
+  it("the card prints the pre-wrapped lines one for one, none past the columns, so nothing is wrapped twice", () => {
+    const ticks = new Set(["tools/brew/gh", "tools/brew/jq", "tools/npm/pnpm", "agents/claude"]);
+    for (const columns of [50, 80]) {
+      const output = Object.assign(new PassThrough(), { columns });
+      const chunks: string[] = [];
+      output.on("data", (c: Buffer) => chunks.push(c.toString()));
+      const lines = summaryNote(FIXTURE, ticks, new Map(), widthOf(output));
+      card("Summary", lines, output);
+      const printed = stripVTControlCharacters(chunks.join("")).split("\n");
+      expect(printed.filter(l => l.length > columns)).toEqual([]);
+      // Past the bar and the title line, each printed line is one of ours, with the bar's three columns before it.
+      expect(printed.slice(2, -1).map(l => l.replace(/^│( {2})?/, ""))).toEqual(lines);
+      // At 50 the Installs line had to wrap, so the one-to-one check above saw a continuation line go through.
+      if (columns === 50) expect(lines.some(l => l.startsWith(" ".repeat(10)) && l.trim() !== "")).toBe(true);
+    }
   });
 });
 
@@ -1219,6 +1317,25 @@ describe("stage stream", () => {
     expect(view.steps.map(s => s.ms)).toEqual([3_200, 800, undefined, undefined, undefined, 60_500, undefined]);
   });
 
+  it("a stage already applied is done the moment its frame arrives and is charged no time, whatever follows it", () => {
+    const skipped = ["creating", "deploying-daemon", "applying-setup", "uploading-files", "installing-tools", "installing-harness"].map((stage, i) => ({ ...ev(stage, ALREADY_APPLIED), at: 1_000 + i }));
+    const view = reduceStages([...skipped, { ...ev("ready"), at: 2_200 }]);
+    expect(view.steps.map(s => s.state)).toEqual(Array<string>(7).fill("done"));
+    expect(view.steps.map(s => s.ms)).toEqual(Array<undefined>(7).fill(undefined));
+    expect(view.steps.slice(0, 6).map(s => s.tail)).toEqual(Array<string[]>(6).fill(["already applied"]));
+  });
+
+  it("a failure after skipped stages lands on the stage about to run, not on the last stage the builder already held", () => {
+    const skipped = ["creating", "deploying-daemon", "applying-setup", "uploading-files", "installing-tools", "installing-harness"].map(stage => ev(stage, ALREADY_APPLIED));
+    const view = reduceStages([...skipped, ev("failed", "the builder answered exit 1 to a no-op; it is not serving")]);
+    expect(view.steps.map(s => s.state)).toEqual([...Array<string>(6).fill("done"), "failed"]);
+    expect(view.steps[6]!.fail).toBe("The machine never became ready");
+    expect(view.failure).toBe("the builder answered exit 1 to a no-op; it is not serving");
+    // A failure while a stage runs still lands on that stage.
+    const running = reduceStages([ev("creating"), ev("uploading-files", "4 MB"), ev("failed", "HTTP 413")]);
+    expect(running.steps.map(s => s.state)).toEqual(["done", "done", "done", "failed", "pending", "pending", "pending"]);
+  });
+
   it("a stage line pads the label, keeps the detail, and puts the duration flush right at the width", () => {
     const line = stripVTControlCharacters(stageLine("o", "Base installed", "node v22.12.0", 3_200, 60, 20));
     expect(line).toBe("o  Base installed        node v22.12.0                  3.2s");
@@ -1227,6 +1344,8 @@ describe("stage stream", () => {
     expect(long.length).toBe(60);
     expect(long).toMatch(/x…  1m 01s$/);
     expect(stripVTControlCharacters(stageLine("o", "Ready", undefined, undefined, 60, 20))).toBe("o  Ready");
+    // Off a terminal there is no width: nothing is cut and the duration follows two spaces after the detail.
+    expect(stripVTControlCharacters(stageLine("o", "Base installed", "x".repeat(80), 61_000, undefined, 20))).toBe(`o  Base installed        ${"x".repeat(80)}  1m 01s`);
   });
 
   it("frames for another golden are ignored", () => {

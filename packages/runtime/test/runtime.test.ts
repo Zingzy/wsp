@@ -1443,7 +1443,10 @@ describe("runtime golden import", () => {
     const again = await rt.golden.prepare();
     expect(again.id).toBe(first.id);
     expect(backend.machines).toHaveLength(1);
+    // The machine and its daemon are already there too: the terminal shows every stage the same way.
     expect(frames).toEqual([
+      "creating:already applied",
+      "deploying-daemon:already applied",
       "applying-setup:already applied",
       "uploading-files:already applied",
       "installing-tools:already applied",
@@ -1454,7 +1457,7 @@ describe("runtime golden import", () => {
   });
 
   const recipeWith = (imp: GoldenImport) => ({ setup: "true", smoke: "true", import: imp });
-  const SKIPPED = ["applying-setup:already applied", "uploading-files:already applied", "installing-tools:already applied", "installing-harness:already applied", "ready:"];
+  const SKIPPED = ["creating:already applied", "deploying-daemon:already applied", "applying-setup:already applied", "uploading-files:already applied", "installing-tools:already applied", "installing-harness:already applied", "ready:"];
 
   it("a first-life builder from an earlier process with the same recipe is attached to: every stage skipped, one machine, and it seals", async () => {
     const backend = stubBackend();

@@ -345,6 +345,8 @@ export const GoldenStageEvent = z.object({
   detail: z.string().optional(),
 });
 export type GoldenStageEvent = z.infer<typeof GoldenStageEvent>;
+/** The detail a golden.stage frame carries for a step the builder already holds; a reader closes the step at once and charges it no time. */
+export const ALREADY_APPLIED = "already applied";
 
 /** Where the event sits in its runtime's stream: one counter per runtime process, monotonic from 1, so a client that
  * lost its socket can ask events.subscribe for everything after the last one it saw. Absent on events from an older
