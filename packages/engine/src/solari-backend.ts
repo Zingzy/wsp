@@ -95,7 +95,6 @@ export class SolariBackend implements MachineBackend {
         ...(spec.fromSnapshot ? { fromSnapshot: spec.fromSnapshot } : {}),
         ...(spec.cpu ? { cpu: spec.cpu } : {}),
         ...(spec.memMb ? { memMb: spec.memMb } : {}),
-        ...(spec.diskGb ? { diskGb: spec.diskGb } : {}),
         ...(spec.envs ? { envs: spec.envs } : {}),
         ...(spec.labels ? { metadata: spec.labels } : {}),
         ...(spec.onIdle ? { lifecycle: { onTimeout: spec.onIdle } } : {}),

@@ -37,7 +37,7 @@ Review wsp changes against the laws this project has already paid for. Generic c
 - TDD for logic (test exists and failed first, or the report says why not); components need render + interaction tests minimum.
 - apps/web tests run under jsdom via the root vitest.workspace.ts: don't add per-file environment hacks.
 - No cloud in unit tests: fake backends/stores/daemons in-process. The tcp-proxy harness exists for reconnect tests: reuse it.
-- `pnpm test` green without creds AND `tsc --noEmit` clean are merge gates. New source files carry `// SPDX-License-Identifier: AGPL-3.0-only`.
+- `pnpm test` green without creds AND `tsc --noEmit` clean are merge gates. When several gates share the machine and a known timing flake trips, do not re-run the full suite in a loop: one full run with every failing file named, each failing file rerun alone and green, and a note that none of them is in the diff is the evidence; the coordinator's merge gate on an idle machine is the final word. New source files carry `// SPDX-License-Identifier: AGPL-3.0-only`.
 
 ## Design laws (web)
 
@@ -57,6 +57,8 @@ Review wsp changes against the laws this project has already paid for. Generic c
 - Builders never merge to main; the coordinator merges. Builders push their ticket branch at the first commit and open a draft PR on Zingzy/wsp titled after the ticket, mark it ready when the build report is posted, and push every amend. Main pushes are coordinator-only. PR bodies: ticket link, what it does, status; no em-dashes, no tool names.
 - Self-review before any report. Before posting a build or fix report, the builder reviews its own diff with the wsp-pr-review procedure: read every changed file whole, probe each acceptance item and each ruling against a fresh fake HOME or fake backend, walk the silent-bugs list, and revert the fix to prove each new test goes red. Findings are fixed before the report exists, and the report says the self-review ran and what it caught. A report without that line is incomplete.
 - Re-fetch before reporting. A fix report is written against the ticket as it is at posting time, not as it was when the round started: re-read every comment posted since the last report and address each review round by number, each item fixed or declined with a reason. Reviews arrive while fixes are in flight; a report that misses one is incomplete.
+- A report is text on the ticket. A comment whose body is a file path, a placeholder or a pointer to a local file is not a report; the builder re-reads the posted comment after posting and confirms it holds the report before replying to the coordinator.
+- Never `gh issue comment --edit-last`. Every account here shares one GitHub login, so the last comment is often the coordinator's ruling; twice a builder overwrote a ruling with its report. Edit a comment by its id (`gh api -X PATCH repos/.../issues/comments/<id>`) and re-read it afterwards.
 - Only the reviewer who opened a thread resolves it. Builders reply on PR threads with the sha and what changed; they never resolve.
 - Rulings live on the ticket. A ruling the coordinator gives in a private message or a pre-review is posted as its own ticket comment before the builder acts on it; a report may quote it but cannot be its only home.
 - Coordinator pre-review. The coordinator runs a cold reviewer on the branch before handing it to the user's reviewer; that reviewer posts nothing and returns findings to the builder. The user sees a branch only after it survived one full review.
