@@ -2,14 +2,15 @@
 // The drawer under the chat, bound to the workspace's daemon link: ptys come
 // from WorkspaceTerminals, their arrangement from the drawer store, and each
 // viewport gets its io from the link. Ptys the right panel opened belong to
-// the panel and never appear here. The drawer's first open with no pty of its
-// own spawns one; closing the last never respawns.
+// the panel and never appear here; a pty no store claims after a reload is
+// the drawer's. The drawer's first open with no pty of its own spawns one;
+// closing the last never respawns.
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { selectPanelTerminalIds, useRightPanelStore } from "../rightPanelStore.js";
 import { openDrawerTerminal, reportTerminalFailure, splitDrawerTerminal, type SplitDirection } from "../shell/shellCommands.js";
 import { selectTerminalUiState, useTerminalDrawerStore } from "../terminal/drawerStore.js";
-import type { TerminalUiState } from "../terminal/groups.js";
+import { reconcileTerminalIds, type TerminalUiState } from "../terminal/groups.js";
 import { getTerminals, onTerminals, type PtyTabView, type WorkspaceTerminals } from "../terminal/link.js";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer.js";
 
@@ -49,9 +50,12 @@ function LinkedDrawer({ terms, workspaceId, ui }: { terms: WorkspaceTerminals; w
   const terminalIo = useCallback((id: string) => terms.io(id), [terms]);
   const store = useTerminalDrawerStore;
 
+  // Until the link is live its tab list is not the daemon's: the stored arrangement is kept as is and only ptys the link knows get a viewport.
+  const shown = useMemo(() => reconcileTerminalIds(ui, ui.terminalIds.filter(id => ids.includes(id))), [ui, ids]);
+
   useEffect(() => {
-    store.getState().reconcile(workspaceId, ids);
-  }, [store, workspaceId, ids]);
+    if (status === "live") store.getState().reconcile(workspaceId, ids);
+  }, [store, workspaceId, ids, status]);
 
   useEffect(() => {
     if (status !== "live" || ids.length > 0) return;
@@ -64,10 +68,10 @@ function LinkedDrawer({ terms, workspaceId, ui }: { terms: WorkspaceTerminals; w
     <ThreadTerminalDrawer
       workspaceId={workspaceId}
       height={ui.terminalHeight}
-      terminalIds={ui.terminalIds}
-      activeTerminalId={ui.activeTerminalId}
-      terminalGroups={ui.terminalGroups}
-      activeTerminalGroupId={ui.activeTerminalGroupId}
+      terminalIds={shown.terminalIds}
+      activeTerminalId={shown.activeTerminalId}
+      terminalGroups={shown.terminalGroups}
+      activeTerminalGroupId={shown.activeTerminalGroupId}
       focusRequestId={0}
       terminalsReachable={status === "live"}
       onSplitTerminal={() => split("horizontal")}
