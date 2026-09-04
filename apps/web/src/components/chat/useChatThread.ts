@@ -171,6 +171,8 @@ export function deriveChatThread(state: ThreadState, previous: ReadonlyArray<Tim
 
 export function useChatThread(workspaceId: string): ChatThreadHandle {
   const api = useStore(s => s.api);
+  // Moves when a reconnect could not replay what the socket missed: the thread below is rebuilt from history.
+  const gaps = useStore(s => s.gaps);
   const [state, setState] = useState<ThreadState>(EMPTY);
   const [sending, setSending] = useState(false);
   const [viewedWs, setViewedWs] = useState(workspaceId);
@@ -192,8 +194,13 @@ export function useChatThread(workspaceId: string): ChatThreadHandle {
         if (!current) return;
         const at = now();
         // A new-thread request that landed while history was in flight wins over the transcript it asked to
-        // leave; a turn that transcript shows still running is the one the request left behind.
-        setState(s => (s.fresh ? { ...s, stale: s.stale ?? runningTurn(events) } : { ...EMPTY, events, arrivals: events.map(() => at) }));
+        // leave; the transcript decides whether the turn it left behind is still running, except for a send
+        // whose session.start the transcript cannot hold yet.
+        setState(s =>
+          s.fresh
+            ? { ...s, stale: runningTurn(events) ?? (s.stale?.kind === "pending-send" ? s.stale : null) }
+            : { ...EMPTY, events, arrivals: events.map(() => at) },
+        );
         hydratedRef.current = workspaceId;
         setHydratedFor(workspaceId);
       },
@@ -209,7 +216,7 @@ export function useChatThread(workspaceId: string): ChatThreadHandle {
       current = false;
       hydratedRef.current = null;
     };
-  }, [api, workspaceId]);
+  }, [api, workspaceId, gaps]);
 
   const onEvent = useCallback(
     (e: ProtocolEvent) => {

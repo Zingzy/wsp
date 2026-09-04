@@ -346,24 +346,42 @@ export const GoldenStageEvent = z.object({
 });
 export type GoldenStageEvent = z.infer<typeof GoldenStageEvent>;
 
+/** Where the event sits in its runtime's stream: one counter per runtime process, monotonic from 1, so a client that
+ * lost its socket can ask events.subscribe for everything after the last one it saw. Absent on events from an older
+ * runtime and on sessions.history replies, which a client reads whole. */
+const sequenced = { seq: z.number().int().positive().optional() };
+
 export const EventUnion = z.discriminatedUnion("type", [
-  WorkspaceCreatedEvent,
-  WorkspaceNappedEvent,
-  WorkspaceWokenEvent,
-  WorkspaceUpgradedEvent,
-  WorkspaceDeletedEvent,
-  WorkspaceStatusEvent,
-  WorkspaceCostEvent,
-  SessionStartEvent,
-  SessionDeltaEvent,
-  SessionDoneEvent,
-  SessionEndEvent,
-  PortOpenEvent,
-  PortCloseEvent,
-  InboxFileEvent,
-  GoldenStageEvent,
+  WorkspaceCreatedEvent.extend(sequenced),
+  WorkspaceNappedEvent.extend(sequenced),
+  WorkspaceWokenEvent.extend(sequenced),
+  WorkspaceUpgradedEvent.extend(sequenced),
+  WorkspaceDeletedEvent.extend(sequenced),
+  WorkspaceStatusEvent.extend(sequenced),
+  WorkspaceCostEvent.extend(sequenced),
+  SessionStartEvent.extend(sequenced),
+  SessionDeltaEvent.extend(sequenced),
+  SessionDoneEvent.extend(sequenced),
+  SessionEndEvent.extend(sequenced),
+  PortOpenEvent.extend(sequenced),
+  PortCloseEvent.extend(sequenced),
+  InboxFileEvent.extend(sequenced),
+  GoldenStageEvent.extend(sequenced),
 ]);
 export type EventUnion = z.infer<typeof EventUnion>;
+
+/** What events.subscribe answers before it pushes anything. seq is the newest sequence the runtime has issued (0
+ * before its first event): the cursor a client that has seen no event yet resubscribes from. stream names the
+ * runtime process that issued it; sequences from two streams never compare, so a client that stored one and sees
+ * another treats the reply as a gap whatever else it says. gap: the `after` sent is not a cursor into this stream
+ * (the runtime no longer retains it, or it came with another stream id), nothing was replayed, and a client that
+ * folds events must refetch sessions.history. */
+export const EventsSubscribeReply = z.object({
+  seq: z.number().int().nonnegative(),
+  stream: z.string().optional(),
+  gap: z.literal(true).optional(),
+});
+export type EventsSubscribeReply = z.infer<typeof EventsSubscribeReply>;
 
 // --- daemon wire protocol (ws://0.0.0.0:7070/?token=..., 4401 on bad token) ---
 
@@ -550,7 +568,15 @@ export type TicketPurpose = z.infer<typeof TicketPurpose>;
 export const RuntimeRequest = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("auth"), token: z.string() }),
   z.object({ id: reqId, op: z.literal("ticket.issue"), purpose: TicketPurpose }),
-  z.object({ id: reqId, op: z.literal("events.subscribe") }),
+  /** Replies with an EventsSubscribeReply, then pushes events on this socket. With `after`, the seq of the last event
+   * this client saw, every retained event past it is pushed first, oldest first, before anything live; `stream` is
+   * the id that came with that seq, so a runtime that is not the one that issued it answers gap instead. */
+  z.object({
+    id: reqId,
+    op: z.literal("events.subscribe"),
+    after: z.number().int().nonnegative().optional(),
+    stream: z.string().optional(),
+  }),
   /** Replies with a WorkspaceStatus[] snapshot and keeps the runtime's status
    * poller + cost ticker running while this socket lives; the events ride the
    * events.subscribe channel. */

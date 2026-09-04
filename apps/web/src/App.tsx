@@ -37,12 +37,13 @@ export function App({
 }) {
   const bind = useStore(s => s.bind);
   const setConn = useStore(s => s.setConn);
+  const noteGap = useStore(s => s.noteGap);
   useEffect(() => {
-    const client = new ProtocolClient({ url: wsUrl, token, onStatus: setConn });
+    const client = new ProtocolClient({ url: wsUrl, token, onStatus: setConn, onGap: noteGap });
     let live = true;
     void client.connect().then(() => { if (live) bind(makeApi(client)); });
     return () => { live = false; client.close(); };
-  }, [wsUrl, token, bind, setConn]);
+  }, [wsUrl, token, bind, setConn, noteGap]);
   useEffect(() => wireTerminals(useStore), []);
   return <Shell {...(keys !== undefined ? { keys } : {})} {...(builder !== undefined ? { builder } : {})} {...(checklist !== undefined ? { checklist } : {})} />;
 }

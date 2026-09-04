@@ -32,6 +32,9 @@ export interface ProtocolClientOptions {
   onStatus?: (s: ConnStatus) => void;
   /** Delay before redial number `attempt` (1-based); the default doubles from 250 ms and caps at 5 s. */
   backoffMs?: (attempt: number) => number;
+  /** A re-subscribe found the runtime could not replay what this socket missed: anything folded from events is
+   * stale and must be refetched. Fires after the redial is live, before any event from the new socket. */
+  onGap?: () => void;
 }
 /** "connecting" until the first auth succeeds, "reconnecting" after a drop; both keep dialling. */
 export type ConnStatus = "connecting" | "live" | "reconnecting" | "closed";
@@ -75,6 +78,11 @@ export class ProtocolClient {
   #Ctor: typeof WebSocket;
   #backoff: (attempt: number) => number;
   #subscribed = false;
+  /** seq of the last event seen, or the runtime's head when none was; sent as `after` on every re-subscribe. */
+  #cursor: number | undefined;
+  /** The runtime process the cursor belongs to; sent with it, and a reply from another one is a gap. */
+  #stream: string | undefined;
+  #subscribeId: number | null = null;
   #everLive = false;
   #attempt = 0;
   #retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -107,8 +115,27 @@ export class ProtocolClient {
 
   subscribe(fn: (e: ProtocolEvent) => void): () => void {
     this.#listeners.add(fn);
-    if (!this.#subscribed) { this.#subscribed = true; if (this.status === "live") this.#raw({ id: this.#next(), op: "events.subscribe" }); }
+    if (!this.#subscribed) { this.#subscribed = true; if (this.status === "live") this.#sendSubscribe(); }
     return () => this.#listeners.delete(fn);
+  }
+
+  #sendSubscribe(): void {
+    this.#subscribeId = this.#next();
+    this.#raw({
+      id: this.#subscribeId,
+      op: "events.subscribe",
+      ...(this.#cursor !== undefined ? { after: this.#cursor } : {}),
+      ...(this.#stream !== undefined ? { stream: this.#stream } : {}),
+    });
+  }
+
+  #onSubscribed(msg: Record<string, unknown>): void {
+    if (typeof msg.seq !== "number") return;
+    const stream = typeof msg.stream === "string" ? msg.stream : undefined;
+    const gap = msg.gap === true || (this.#stream !== undefined && stream !== undefined && stream !== this.#stream);
+    if (gap || this.#cursor === undefined) this.#cursor = msg.seq;
+    this.#stream = stream;
+    if (gap) this.#opts.onGap?.();
   }
 
   close(): void { this.#die("closed"); }
@@ -149,7 +176,7 @@ export class ProtocolClient {
     this.#attempt = 0;
     this.#everLive = true;
     // Re-arm before the status flips so the store's refetches never race ahead of the subscription.
-    if (this.#subscribed) this.#raw({ id: this.#next(), op: "events.subscribe" });
+    if (this.#subscribed) this.#sendSubscribe();
     this.#setStatus("live");
     const first = this.#firstLive;
     this.#firstLive = null;
@@ -177,12 +204,14 @@ export class ProtocolClient {
     let msg: Record<string, unknown>;
     try { msg = JSON.parse(data); } catch { return; }
     if (typeof msg.type === "string" && !("ok" in msg)) { // server-push event
+      if (typeof msg.seq === "number") this.#cursor = msg.seq;
       for (const fn of this.#listeners) fn(msg as unknown as ProtocolEvent);
       return;
     }
     const id = msg.id;
     if (id === 0) { this.#onAuth(msg.ok === true); return; }
     if (typeof id !== "number") return;
+    if (id === this.#subscribeId) { this.#onSubscribed(msg); return; }
     const p = this.#pending.get(id);
     if (!p) return;
     this.#pending.delete(id);

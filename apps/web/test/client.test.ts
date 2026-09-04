@@ -7,6 +7,15 @@ import { DisconnectedError, makeApi, ProtocolClient, type ConnStatus, type Proto
 
 type Frame = Record<string, unknown>;
 
+/** Polls cond every 5 ms until it holds; the redial timer is a real setTimeout, so these tests wait on the wall clock. */
+async function until(cond: () => boolean, ms = 2000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!cond()) {
+    if (Date.now() > deadline) throw new Error("condition not met in time");
+    await new Promise(r => setTimeout(r, 5));
+  }
+}
+
 class ScriptedSocket {
   static instances: ScriptedSocket[] = [];
   static reply: (frame: Frame) => Frame | undefined = () => undefined;
@@ -170,13 +179,6 @@ describe("makeApi golden wrappers", () => {
 });
 
 describe("ProtocolClient reconnect", () => {
-  const until = async (cond: () => boolean, ms = 2000): Promise<void> => {
-    const deadline = Date.now() + ms;
-    while (!cond()) {
-      if (Date.now() > deadline) throw new Error("condition not met in time");
-      await new Promise(r => setTimeout(r, 5));
-    }
-  };
   function newClient(extra: Partial<ProtocolClientOptions> = {}) {
     ScriptedSocket.instances.length = 0;
     const statuses: ConnStatus[] = [];
@@ -300,6 +302,122 @@ describe("ProtocolClient reconnect", () => {
     await vi.advanceTimersByTimeAsync(5_000);
     await opened;
     expect(statuses).toEqual(["live"]);
+    client.close();
+  });
+});
+
+describe("ProtocolClient event cursor", () => {
+  function newClient(extra: Partial<ProtocolClientOptions> = {}) {
+    ScriptedSocket.instances.length = 0;
+    const gaps: number[] = [];
+    const client = new ProtocolClient({
+      url: "ws://test",
+      token: "tok",
+      WebSocketCtor: ScriptedSocket as unknown as typeof WebSocket,
+      backoffMs: () => 0,
+      onGap: () => gaps.push(gaps.length + 1),
+      ...extra,
+    });
+    return { client, gaps, socket: (n: number) => ScriptedSocket.instances[n]! };
+  }
+  /** The runtime's subscribe reply: head first, the same head after a redial unless a test overrides it. */
+  const subscribeReply = (seq: number, gap = false, stream = "stream-a") => (f: Frame) =>
+    f["op"] === "events.subscribe" ? { id: f["id"], ok: true, seq, stream, ...(gap ? { gap: true } : {}) } : undefined;
+  const push = (sock: ScriptedSocket, e: Record<string, unknown>) => sock.onmessage?.({ data: JSON.stringify(e) });
+  /** Lets the scripted socket deliver the subscribe reply, which a real socket puts on the wire before any event. */
+  const replied = () => new Promise(r => setTimeout(r, 0));
+  const redial = async (client: ProtocolClient, sock: ScriptedSocket) => {
+    sock.drop(1006);
+    await until(() => client.status === "live");
+  };
+  beforeEach(() => {
+    ScriptedSocket.authOk = true;
+    ScriptedSocket.serverUp = true;
+    ScriptedSocket.reply = () => undefined;
+  });
+
+  it("the first subscribe carries no cursor; a re-subscribe carries the seq of the last event seen", async () => {
+    ScriptedSocket.reply = subscribeReply(2);
+    const { client, socket } = newClient();
+    await client.connect();
+    const seen: unknown[] = [];
+    client.subscribe(e => seen.push(e));
+    expect(socket(0).frames("events.subscribe")).toEqual([{ id: expect.any(Number), op: "events.subscribe" }]);
+    await replied();
+
+    push(socket(0), { type: "workspace.napped", workspaceId: "ws_1", seq: 3 });
+    push(socket(0), { type: "workspace.woken", workspaceId: "ws_1", machineId: "m2", resurrected: false, seq: 4 });
+    expect(seen).toHaveLength(2);
+
+    await redial(client, socket(0));
+    expect(socket(1).frames("events.subscribe")).toEqual([{ id: expect.any(Number), op: "events.subscribe", after: 4, stream: "stream-a" }]);
+    // Replayed events move the cursor like live ones.
+    push(socket(1), { type: "workspace.napped", workspaceId: "ws_1", seq: 5 });
+    await redial(client, socket(1));
+    expect(socket(2).frames("events.subscribe")[0]).toMatchObject({ after: 5 });
+    client.close();
+  });
+
+  it("with no event seen yet the cursor starts at the reply's head, so a quiet tab still gets what a drop hid", async () => {
+    ScriptedSocket.reply = subscribeReply(9);
+    const { client, socket } = newClient();
+    await client.connect();
+    client.subscribe(() => {});
+    await until(() => socket(0).frames("events.subscribe").length === 1);
+    await new Promise(r => setTimeout(r, 0));
+    await redial(client, socket(0));
+    expect(socket(1).frames("events.subscribe")[0]).toMatchObject({ after: 9 });
+    client.close();
+  });
+
+  it("a gap reply fires onGap once and moves the cursor to the runtime's head", async () => {
+    ScriptedSocket.reply = subscribeReply(2);
+    const { client, gaps, socket } = newClient();
+    await client.connect();
+    client.subscribe(() => {});
+    push(socket(0), { type: "workspace.napped", workspaceId: "ws_1", seq: 3 });
+
+    ScriptedSocket.reply = subscribeReply(40, true);
+    await redial(client, socket(0));
+    await until(() => gaps.length === 1);
+    expect(socket(1).frames("events.subscribe")[0]).toMatchObject({ after: 3 });
+
+    ScriptedSocket.reply = subscribeReply(40);
+    await redial(client, socket(1));
+    expect(socket(2).frames("events.subscribe")[0]).toMatchObject({ after: 40 });
+    expect(gaps).toEqual([1]);
+    client.close();
+  });
+
+  it("a reply from a different stream is a gap even without the marker: onGap fires and the cursor restarts at that head", async () => {
+    ScriptedSocket.reply = subscribeReply(2);
+    const { client, gaps, socket } = newClient();
+    await client.connect();
+    client.subscribe(() => {});
+    await replied();
+    push(socket(0), { type: "workspace.napped", workspaceId: "ws_1", seq: 3 });
+
+    ScriptedSocket.reply = subscribeReply(1, false, "stream-b");
+    await redial(client, socket(0));
+    expect(socket(1).frames("events.subscribe")[0]).toMatchObject({ after: 3, stream: "stream-a" });
+    await until(() => gaps.length === 1);
+
+    ScriptedSocket.reply = subscribeReply(1, false, "stream-b");
+    await redial(client, socket(1));
+    expect(socket(2).frames("events.subscribe")[0]).toMatchObject({ after: 1, stream: "stream-b" });
+    expect(gaps).toEqual([1]);
+    client.close();
+  });
+
+  it("a reply without a head and events without seq leave the cursor where it was", async () => {
+    ScriptedSocket.reply = f => (f["op"] === "events.subscribe" ? { id: f["id"], ok: true } : undefined);
+    const { client, gaps, socket } = newClient();
+    await client.connect();
+    client.subscribe(() => {});
+    push(socket(0), { type: "workspace.napped", workspaceId: "ws_1" });
+    await redial(client, socket(0));
+    expect(socket(1).frames("events.subscribe")).toEqual([{ id: expect.any(Number), op: "events.subscribe" }]);
+    expect(gaps).toEqual([]);
     client.close();
   });
 });

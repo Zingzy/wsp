@@ -89,10 +89,23 @@ export type EventListener = (event: EventUnion) => void;
 
 export interface EventBus {
   on(type: EventUnion["type"] | "*", listener: EventListener): () => void;
+  /** The retained events after sequence `after`, oldest first, with head, the newest sequence issued (0 before any),
+   * and stream, the id minted for this process's sequences. gap: `after` is not a cursor into this stream, because it
+   * came with another stream id, is older than what is retained, or is past head, so nothing is replayed and the
+   * caller must refetch. */
+  since(after: number | undefined, stream: string | undefined): { stream: string; head: number; events: EventUnion[]; gap: boolean };
 }
+
+/** Events kept for a socket that comes back: one ring shared by every workspace, holding the status and cost ticks
+ * that no transcript keeps. 5000 bounds it at one transcript's worth of memory (TRANSCRIPT_CAP); a cursor that fell
+ * off it gets a gap, and the client refetches the list, the statuses and sessions.history and converges from those. */
+const EVENT_RING_CAP = 5000;
 
 function eventBus(): EventBus & { emit(event: EventUnion): void } {
   const listeners = new Map<string, Set<EventListener>>();
+  const ring: EventUnion[] = [];
+  const stream = randomUUID();
+  let head = 0;
   return {
     on(type, listener) {
       let set = listeners.get(type);
@@ -103,9 +116,19 @@ function eventBus(): EventBus & { emit(event: EventUnion): void } {
       set.add(listener);
       return () => set.delete(listener);
     },
+    since(after, from) {
+      if (after === undefined) return { stream, head, events: [], gap: false };
+      const oldest = head - ring.length + 1;
+      const foreign = from !== undefined && from !== stream;
+      if (foreign || after > head || after < oldest - 1) return { stream, head, events: [], gap: true };
+      return { stream, head, events: ring.slice(after - oldest + 1), gap: false };
+    },
     emit(event) {
+      const stamped: EventUnion = { ...event, seq: ++head };
+      ring.push(stamped);
+      if (ring.length > EVENT_RING_CAP) ring.splice(0, ring.length - EVENT_RING_CAP);
       for (const type of [event.type, "*"] as const) {
-        for (const l of listeners.get(type) ?? []) l(event);
+        for (const l of listeners.get(type) ?? []) l(stamped);
       }
     },
   };

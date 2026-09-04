@@ -109,10 +109,14 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, ticket, expiresAt });
               return;
             }
-            case "events.subscribe":
+            case "events.subscribe": {
+              // Replay is read and the listener attached in one synchronous step, so no event falls between them.
+              const { stream, head, events, gap } = rt.events.since(msg.after, msg.stream);
               detaches.push(rt.events.on("*", e => send(e as unknown as Record<string, unknown>)));
-              send({ id: msg.id, ok: true });
+              send({ id: msg.id, ok: true, seq: head, stream, ...(gap ? { gap: true } : {}) });
+              for (const e of events) send(e as unknown as Record<string, unknown>);
               return;
+            }
             case "status.subscribe":
               // Watch before the snapshot so no change falls between them;
               // socket close releases the watcher via detaches.
