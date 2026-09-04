@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Chat tab against a fixture event stream built in the @wsp/protocol
-// vocabulary; shapes mirror packages/adapter-claude/test/fixtures/
+// The workspace thread against a fixture event stream built in the
+// @wsp/protocol vocabulary; shapes mirror packages/adapter-claude/test/fixtures/
 // stream-session.jsonl (hello-world server run). No live daemon.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,8 +9,7 @@ import { composerEditor, isEditable, press, typeInto } from "./composer-harness.
 import type { EventUnion, SessionEvent, WorkspaceView } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
-import { ChatTab } from "../src/tabs/ChatTab.js";
-import { ApprovalPrompt } from "../src/tabs/chat/ApprovalPrompt.js";
+import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { requestNewThread } from "../src/shell/shellRequests.js";
 import { CHAT_STREAM, CHAT_T0, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
@@ -74,7 +73,7 @@ async function setup(api: Api) {
   useStore.getState().bind(api);
   useStore.getState().setConn("live");
   await waitFor(() => expect(useStore.getState().workspaces.length).toBeGreaterThan(0));
-  const view = render(<ChatTab workspaceId={WS} />);
+  const view = render(<WorkspaceThread workspaceId={WS} />);
   await waitFor(() => expect(screen.queryByText("loading transcript")).toBeNull());
   return view;
 }
@@ -141,7 +140,7 @@ describe("chat tab hydration", () => {
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
     expect(screen.queryByText(/Working for/)).toBeNull();
 
-    view.rerender(<ChatTab workspaceId={other.id} />);
+    view.rerender(<WorkspaceThread workspaceId={other.id} />);
     await screen.findByText("React is on 19.1.");
     expect(screen.getByText("bump react")).toBeDefined();
     expect(screen.queryByText("Added GET /health.")).toBeNull();
@@ -545,20 +544,5 @@ describe("chat tab threads", () => {
     expect(status()).toBeNull();
     expect(sendButton().getAttribute("aria-label")).toBe("Send message");
     expect(screen.getByTestId("settled-footer").textContent).toContain("completed");
-  });
-});
-
-describe("approval prompt (fixture mode: no wire event exists yet, wsp-map #22)", () => {
-  it("resolves the chosen option exactly once", () => {
-    const onRespond = vi.fn();
-    render(
-      <ApprovalPrompt
-        request={{ id: "apr_1", kind: "approval", title: "Run pnpm install?", detail: "Bash wants network access.", options: ["allow", "deny"] }}
-        onRespond={onRespond}
-      />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "allow" }));
-    expect(onRespond).toHaveBeenCalledTimes(1);
-    expect(onRespond).toHaveBeenCalledWith("apr_1", "allow");
   });
 });

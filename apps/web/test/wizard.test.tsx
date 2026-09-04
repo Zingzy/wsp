@@ -30,16 +30,6 @@ class FakeRfb extends EventTarget {
   focus() {}
 }
 vi.mock("@novnc/novnc", () => ({ default: FakeRfb }));
-// WebGL cannot exist under jsdom; the terminal falls back to the DOM renderer.
-vi.mock("@xterm/addon-webgl", () => ({
-  WebglAddon: class {
-    activate(): void {}
-    dispose(): void {}
-    onContextLoss(): { dispose(): void } {
-      return { dispose() {} };
-    }
-  },
-}));
 
 const { Shell } = await import("../src/App.js");
 const { useStore } = await import("../src/protocol/store.js");
@@ -108,8 +98,8 @@ async function mount(
   return f;
 }
 
-describe("first run: wizard or rail", () => {
-  it("with no golden and no builder handed over, the page points at wsp init and shows no rail", async () => {
+describe("first run: wizard or shell", () => {
+  it("with no golden and no builder handed over, the page points at wsp init and shows no sidebar", async () => {
     await mount();
     await waitFor(() => expect(screen.getByText("wsp init")).toBeDefined());
     expect(screen.getByTestId("step").textContent).toBe("none");
@@ -118,7 +108,7 @@ describe("first run: wizard or rail", () => {
     expect(document.body.textContent).not.toMatch(/Prepare my machine|sk-ant|slr_live/);
   });
 
-  it("renders the rail, not the wizard, the moment a golden exists", async () => {
+  it("renders the shell with its sidebar, not the wizard, the moment a golden exists", async () => {
     await mount({ golden: manifest, workspaces: [first] });
     await waitFor(() => expect(screen.getByText("Workspaces")).toBeDefined());
     expect(screen.queryByText("wsp init")).toBeNull();
@@ -135,7 +125,7 @@ describe("wizard steps follow the wire", () => {
     expect(save.disabled).toBe(false);
   });
 
-  it("a builder without a screen gets the terminal tab against its own reach, with one pty opened", async () => {
+  it("a builder without a screen gets a terminal against its own reach, one pty opened on the libghostty surface", async () => {
     const inboxDir = mkdtempSync(join(tmpdir(), "wsp-wizard-inbox-"));
     let daemon: DaemonHandle | undefined;
     try {
@@ -145,10 +135,11 @@ describe("wizard steps follow the wire", () => {
       await waitFor(() => expect(screen.getByTestId("step").textContent).toBe("hero"));
 
       expect(FakeRfb.instances).toHaveLength(0);
-      expect(screen.queryByText("this machine has no display")).toBeNull();
+      expect(screen.queryByText("This machine has no display")).toBeNull();
       await waitFor(() => expect(f.api.builderReach).toHaveBeenCalledWith("m_headless"));
       await waitFor(() => expect(daemon!.ptys.list()).toHaveLength(1), { timeout: 10_000 });
       expect(getTerminals("m_headless")?.status()).toBe("live");
+      await waitFor(() => expect(document.querySelectorAll('[data-terminal-owner="builder"] canvas')).toHaveLength(1), { timeout: 15_000 });
       expect(screen.getByText("Save as my golden image")).toBeDefined();
 
       fireEvent.click(screen.getByRole("button", { name: "Save as my golden image" }));
@@ -233,7 +224,7 @@ describe("wizard steps follow the wire", () => {
     expect(screen.getByText("no such builder: m_builder")).toBeDefined();
   });
 
-  it("seal runs on the wire, creates one workspace from the golden head, and lands on the rail with it selected", async () => {
+  it("seal runs on the wire, creates one workspace from the golden head, and lands in the shell with it selected", async () => {
     const f = await mount({}, undefined, builder);
     await waitFor(() => expect(screen.getByTestId("step").textContent).toBe("hero"));
 

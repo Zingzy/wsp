@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The right region: one surface at a time over the copied tab strip, keyed
-// by the selected workspace. Surfaces whose panes still live in the center
-// tabs stay greyed out here with a reason, so the picker never opens a tab
-// that has nothing behind it. Terminal surfaces mount the Ghostty drawer in
-// panel mode over the workspace's daemon link. Files, file and diff share one
-// diff worker pool so switching between them keeps the highlighter warm.
+// by the selected workspace. A surface the workspace cannot serve yet (not
+// running, no display) stays greyed out in the picker with a reason. Terminal
+// surfaces mount the Ghostty drawer in panel mode over the workspace's daemon
+// link. Files, file and diff share one diff worker pool so switching between
+// them keeps the highlighter warm.
 import { useEffect, useMemo, type ReactNode } from "react";
 import { useWorkspacePorts } from "../browser/model.js";
 import { previewTabSnapshots, useBrowserTabs, useWorkspaceBrowserTabs } from "../browser/tabs.js";
@@ -20,7 +20,7 @@ import { FilePreviewSurface } from "../files/FilePreviewSurface.js";
 import { FilesSurface } from "../files/FilesSurface.js";
 import { useStatus, useWorkspace } from "../protocol/store.js";
 import { useRightPanelStore, type WorkspaceRightPanelState } from "../rightPanelStore.js";
-import { ScreenTab } from "../tabs/ScreenTab.js";
+import { ScreenSurface } from "../screen/ScreenSurface.js";
 import { openPanelTerminal } from "./shellCommands.js";
 import { useTerminalSurfaces, WorkspaceTerminalPanel } from "../components/WorkspaceTerminalPanel.js";
 
@@ -90,7 +90,7 @@ export function RightPanel({
       ) : active?.kind === "machine" ? (
         <MachineSurface workspaceId={workspaceId} />
       ) : active?.kind === "screen" ? (
-        <ScreenTab workspaceId={workspaceId} />
+        <ScreenSurface workspaceId={workspaceId} />
       ) : active?.kind === "files" || active?.kind === "file" || active?.kind === "diff" ? (
         <DiffWorkerPoolProvider theme={THEME}>
           {active.kind === "files" ? (
@@ -104,8 +104,8 @@ export function RightPanel({
       ) : (
         <Empty className="flex-1">
           <EmptyHeader>
-            <EmptyTitle>Nothing to show here yet.</EmptyTitle>
-            <EmptyDescription>This surface has no pane behind it in this build.</EmptyDescription>
+            <EmptyTitle>Nothing open here.</EmptyTitle>
+            <EmptyDescription>Pick a surface from the tab strip above.</EmptyDescription>
           </EmptyHeader>
         </Empty>
       )}

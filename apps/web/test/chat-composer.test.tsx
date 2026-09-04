@@ -9,7 +9,7 @@ import { installFakeLayout } from "./fake-layout.js";
 import { composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ConnStatus, ProtocolEvent } from "../src/protocol/client.js";
-import { ChatTab } from "../src/tabs/ChatTab.js";
+import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
 import { composerUnavailableReason } from "../src/components/chat/ChatComposer.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { CHAT_STREAM, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
@@ -69,7 +69,7 @@ async function setup(api: Api, conn: ConnStatus = "live") {
   useStore.getState().bind(api);
   useStore.getState().setConn(conn);
   await waitFor(() => expect(useStore.getState().workspaces.length).toBeGreaterThan(0));
-  const view = render(<ChatTab workspaceId={WS} />);
+  const view = render(<WorkspaceThread workspaceId={WS} />);
   await waitFor(() => expect(screen.queryByText("loading transcript")).toBeNull());
   return view;
 }
@@ -112,7 +112,7 @@ describe("composer keys", () => {
     const view = await setup(api);
     await typeInto(composerEditor(), "half a thought");
     view.unmount();
-    render(<ChatTab workspaceId={WS} />);
+    render(<WorkspaceThread workspaceId={WS} />);
     await waitFor(() => expect(composerEditor().textContent).toBe("half a thought"));
   });
 
@@ -121,7 +121,7 @@ describe("composer keys", () => {
     const { api } = fixtureApi([workspace, other]);
     const view = await setup(api);
     await typeInto(composerEditor(), "alpha draft");
-    view.rerender(<ChatTab workspaceId={other.id} />);
+    view.rerender(<WorkspaceThread workspaceId={other.id} />);
     await waitFor(() => expect(screen.queryByText("loading transcript")).toBeNull());
     const editor = composerEditor();
     expect(editor.textContent).toBe("");

@@ -63,8 +63,8 @@
   font-family: var(--mono); font-size: 11px; line-height: 1.5; color: var(--dim); white-space: pre-wrap; word-break: break-word;
 }
 
-/* hero: the screen takes the window, the checklist sits where the meta panel will */
-.hero { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr var(--meta-w); }
+/* hero: the screen takes the window, the checklist sits in a column at its right */
+.hero { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr var(--side-w); }
 .screen { min-width: 0; min-height: 0; border-right: 1px solid var(--line); }
 .side { display: flex; flex-direction: column; gap: 12px; padding: 16px; background: var(--panel); overflow-y: auto; }
 .check { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }

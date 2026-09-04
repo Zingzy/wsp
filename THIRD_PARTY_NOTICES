@@ -10,7 +10,7 @@ here are included or relied upon under their own licenses, reproduced below.
    Files under apps/web/src/components (the ui, chat, preview, files and
    diffs folders, ChatMarkdown.tsx, ComposerPromptEditor.tsx,
    composerInlineChip.ts, RenderErrorBoundary.tsx, the right-panel,
-   page-header, no-active-thread, diff-worker-pool and terminal drawer
+   page-header, diff-worker-pool and terminal drawer
    components; FileMarkdownPreview.tsx, ChatView.tsx, useChatThread.ts,
    newThreadRequests.ts, ChatComposer.tsx and composerDraftStore.ts are
    wsp's own),

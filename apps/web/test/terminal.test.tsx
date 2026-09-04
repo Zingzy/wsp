@@ -1,25 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Terminal tab against the real daemon: startDaemon in-process, the reach
-// client as the wire, jsdom for the component. WebGL cannot exist under
-// jsdom, so that addon is mocked; real rendering is the browser pass's job.
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { TerminalTab } from "../src/tabs/TerminalTab.js";
+// The per-workspace terminal model against the real daemon: startDaemon
+// in-process, the reach client as the wire. No component renders here; the
+// surfaces over this model have their own suites.
+import { waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
 import { WorkspaceTerminals, type TerminalWire } from "../src/terminal/link.js";
 import { boot, teardown, WS_ID } from "./terminal-harness.js";
 
-vi.mock("@xterm/addon-webgl", () => ({
-  WebglAddon: class {
-    activate(): void {}
-    dispose(): void {}
-    onContextLoss(): { dispose(): void } {
-      return { dispose() {} };
-    }
-  },
-}));
-
 afterEach(async () => {
-  cleanup();
   await teardown();
 });
 
@@ -371,12 +359,5 @@ describe("WorkspaceTerminals", () => {
     wt.bind(a.ptyId, { data: d => late.push(d), reset: () => {} })();
     expect(late).toEqual([]);
     un();
-  });
-});
-
-describe("TerminalTab", () => {
-  it("renders a placeholder when no terminal link exists for the workspace", () => {
-    render(<TerminalTab workspaceId="ws_unlinked" />);
-    screen.getByText(/no terminal link/);
   });
 });
