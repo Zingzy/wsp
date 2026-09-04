@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { SPLIT_ENTRIES, WALK_ENTRIES, roleByName, roles } from "../../src/index.js";
+import { type Machine, type RolesOptions, SPLIT_ENTRIES, WALK_ENTRIES, roleByName, roles as scan } from "../../src/index.js";
 import { HOME, OLD, home, laptop, many } from "./fixture.js";
 
 const rel = (p: string): string => p.replace(HOME, "~");
+/** The walk's time cap reads this clock, so what a test sees is decided by the entry caps alone, however slow the box. */
+const roles = (m: Machine, opts: RolesOptions = {}): ReturnType<typeof scan> => scan(m, { clock: () => 0, ...opts });
 
 describe("pass 2: directory role", () => {
   it("marks cache and state by spec root and by subdirectory name, splitting marked subtrees out of their parent", async () => {

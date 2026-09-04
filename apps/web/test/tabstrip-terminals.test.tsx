@@ -34,7 +34,7 @@ describe("terminal tabs in the strip", () => {
     render(<TabStrip />);
     expect(screen.getByRole("tab", { name: "terminal" }).getAttribute("aria-selected")).toBe("true");
     await waitFor(() => expect(daemon.ptys.list()).toHaveLength(1), { timeout: 10_000 });
-    await waitFor(() => expect(ptyTabs()).toHaveLength(1));
+    await waitFor(() => expect(ptyTabs()).toHaveLength(1), { timeout: 10_000 });
     expect(screen.queryByRole("tab", { name: "terminal" })).toBeNull();
     expect(ptyTabs()[0]!.getAttribute("aria-selected")).toBe("true");
     expect(ptyTabs()[0]!.textContent).toContain(wt.tabs()[0]!.title);
@@ -52,7 +52,7 @@ describe("terminal tabs in the strip", () => {
     expect(daemon.ptys.list()).toHaveLength(1);
 
     fireEvent.click(ptyTabs()[0]!);
-    await waitFor(() => expect(wt.sinkCount()).toBe(1));
+    await waitFor(() => expect(wt.sinkCount()).toBe(1), { timeout: 10_000 });
     expect(daemon.ptys.list()).toHaveLength(1);
   }, 15_000);
 
@@ -62,7 +62,7 @@ describe("terminal tabs in the strip", () => {
     await waitFor(() => expect(daemon.ptys.list()).toHaveLength(1), { timeout: 10_000 });
     fireEvent.click(screen.getByLabelText("new terminal"));
     await waitFor(() => expect(daemon.ptys.list()).toHaveLength(2), { timeout: 10_000 });
-    await waitFor(() => expect(ptyTabs()).toHaveLength(2));
+    await waitFor(() => expect(ptyTabs()).toHaveLength(2), { timeout: 10_000 });
     const second = daemon.ptys.list()[1]!.id;
     expect(wt.activeId()).toBe(second);
     expect(ptyTabs()[1]!.getAttribute("aria-selected")).toBe("true");

@@ -6,6 +6,7 @@ import { createRuntime, type Runtime } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import type { StatusWatchOptions } from "../src/status.js";
 import { memoryStore } from "../src/store.js";
+import { fakeClock } from "./fake-clock.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
@@ -33,11 +34,12 @@ function testRuntime(status?: StatusWatchOptions): {
   return { rt, backend };
 }
 
-/** delayMs "never" holds the request open so the probe can only time out. */
-async function httpStub(statusCode: number, delayMs: number | "never" = 0): Promise<{ server: Server; port: number; hits: () => number }> {
+/** delayMs "never" holds the request open so the probe can only time out; onRequest runs as each request lands. */
+async function httpStub(statusCode: number, delayMs: number | "never" = 0, onRequest?: () => void): Promise<{ server: Server; port: number; hits: () => number }> {
   let hits = 0;
   const server = createServer((_req, res) => {
     hits++;
+    onRequest?.();
     if (delayMs === "never") return;
     setTimeout(() => res.writeHead(statusCode).end(), delayMs);
   });
@@ -132,31 +134,32 @@ describe("status.list", () => {
   });
 
   it("maps a prompt 426 to reachable, a prompt 502 to no-daemon, a late answer to slow, and silence to unreachable", async () => {
-    const { rt, backend } = testRuntime();
-    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
-    const opts = { probeTimeoutMs: 300, promptMs: 60 };
-    const cases: [number, number | "never", string][] = [
-      [426, 0, "reachable"],
-      [502, 0, "no-daemon"],
-      [502, 150, "slow"],
-      [426, 150, "slow"],
-      [426, "never", "unreachable"],
+    const backend = stubBackend();
+    const fc = fakeClock();
+    // The stub moves the clock as the request lands, so "late" is what the clock says and not how fast the box answered.
+    // The probe timeout is a real abort: only the silent case keeps it short, the answering ones get more than any local fetch needs.
+    const cases: [number, number | "never", number, string][] = [
+      [426, 0, 5_000, "reachable"],
+      [502, 0, 5_000, "no-daemon"],
+      [502, 150, 5_000, "slow"],
+      [426, 150, 5_000, "slow"],
+      [426, "never", 300, "unreachable"],
     ];
-    for (const [code, delay, expected] of cases) {
-      const stub = await httpStub(code, delay);
+    for (const [code, took, probeTimeoutMs, expected] of cases) {
+      const opts = { probeTimeoutMs, promptMs: 60 };
+      const stub = await httpStub(code, took === "never" ? "never" : 0, () => fc.advance(took === "never" ? 0 : took));
       openServers.push(stub.server);
-      backend.machines[0]!.previewUrl = async port => ({
-        url: `http://127.0.0.1:${stub.port}/?port=${port}&case=${code}-${delay}`,
+      // A fresh runtime per case so no cached reach carries the previous stub over.
+      const fresh = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock });
+      await fresh.workspaces.create({ golden: "snap_g", name: `case-${code}-${took}` });
+      const last = backend.machines.at(-1)!;
+      last.previewUrl = async port => ({
+        url: `http://127.0.0.1:${stub.port}/?port=${port}&case=${code}-${took}`,
         token: "t",
         expiresAt: Date.now() + 3_600_000,
       });
-      // A fresh runtime per case so no cached reach carries the previous stub over.
-      const fresh = createRuntime({ backend, store: memoryStore(), adapters: {} });
-      await fresh.workspaces.create({ golden: "snap_g", name: `case-${code}-${delay}` });
-      const last = backend.machines.at(-1)!;
-      last.previewUrl = backend.machines[0]!.previewUrl;
       const status = (await fresh.status.list(opts)).find(s => s.machineId === last.id)!;
-      expect(status.reach.state, `${code} after ${delay}`).toBe(expected);
+      expect(status.reach.state, `${code} after ${took}`).toBe(expected);
       expect(status.machineState).toBe("running");
     }
   });

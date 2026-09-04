@@ -11,6 +11,7 @@
 
 import type { ExecResult, MachineState, PreviewReach } from "@wsp/engine";
 import type { EventUnion, ReachState, ReachStatus, WorkspacePhase, WorkspaceSize, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import { realClock, type Clock } from "./clock.js";
 
 /** The provider word the runtime's own phase implies: a wake in flight is a machine starting. */
 export function machineStateOf(phase: WorkspacePhase): MachineState {
@@ -29,12 +30,12 @@ export interface ProbeOptions {
  * response came from inside the guest (the daemon's ws server answers plain
  * HTTP with 426). A late answer, 502 included, is a provider slow spell: the
  * machine is there, the edge is not keeping up. Silence is unreachable. */
-export async function probeReach(url: string, o: ProbeOptions): Promise<ReachState> {
-  const started = Date.now();
+export async function probeReach(url: string, o: ProbeOptions, now: () => number = Date.now): Promise<ReachState> {
+  const started = now();
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(o.timeoutMs) });
     await res.text().catch(() => "");
-    if (Date.now() - started > o.promptMs) return "slow";
+    if (now() - started > o.promptMs) return "slow";
     return res.status === 502 ? "no-daemon" : "reachable";
   } catch {
     return "unreachable";
@@ -87,6 +88,8 @@ export interface StatusTrackerOptions {
   emit(event: EventUnion): void;
   on(type: EventUnion["type"] | "*", listener: (e: EventUnion) => void): () => void;
   defaults?: StatusWatchOptions;
+  /** Time source for the meters, the reconcile and zombie windows and the probe's elapsed read; tests inject one they can advance. */
+  clock?: Clock;
 }
 
 interface Meter {
@@ -133,6 +136,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   const zombieProbeTimeoutMs = o.defaults?.zombieProbeTimeoutMs ?? ZOMBIE_PROBE_TIMEOUT_MS;
   const costIntervalMs = o.defaults?.costIntervalMs ?? 5_000;
   const pollIntervalMs = o.defaults?.pollIntervalMs ?? 15_000;
+  const clock = o.clock ?? realClock;
   const meters = new Map<string, Meter>();
   const reconciled = new Map<string, { state: MachineState; at: number }>();
   const suspects = new Map<string, Suspect>();
@@ -148,15 +152,15 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     return m;
   };
   o.on("workspace.created", e => {
-    if (e.type === "workspace.created") meter(e.workspace.id).mark = Date.now();
+    if (e.type === "workspace.created") meter(e.workspace.id).mark = clock.now();
   });
   o.on("workspace.woken", e => {
-    if (e.type === "workspace.woken") meter(e.workspaceId).mark ??= Date.now();
+    if (e.type === "workspace.woken") meter(e.workspaceId).mark ??= clock.now();
   });
   o.on("workspace.napped", e => {
     if (e.type !== "workspace.napped") return;
     const m = meter(e.workspaceId);
-    if (m.mark !== undefined) m.awakeMs += Date.now() - m.mark;
+    if (m.mark !== undefined) m.awakeMs += clock.now() - m.mark;
     m.mark = undefined;
   });
   o.on("workspace.deleted", e => {
@@ -172,11 +176,11 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   const askProvider = async (r: StatusRecord): Promise<MachineState> => {
     try {
       const state = await r.providerState();
-      reconciled.set(r.id, { state, at: Date.now() });
+      reconciled.set(r.id, { state, at: clock.now() });
       return state;
     } catch (e) {
       if ((e as { kind?: string }).kind !== "missing") return machineStateOf(r.phase);
-      reconciled.set(r.id, { state: "gone", at: Date.now() });
+      reconciled.set(r.id, { state: "gone", at: clock.now() });
       return "gone";
     }
   };
@@ -185,14 +189,14 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     if (reconcile === "always") return askProvider(r);
     if (!reachFailed) return machineStateOf(r.phase);
     const known = reconciled.get(r.id);
-    if (known && Date.now() - known.at < reconcileMinMs) return known.state;
+    if (known && clock.now() - known.at < reconcileMinMs) return known.state;
     return askProvider(r);
   };
 
   /** undefined when the guest answered; otherwise what went wrong and how long it took. */
   const probeExec = async (r: StatusRecord): Promise<string | undefined> => {
-    const started = Date.now();
-    const took = () => `failed after ${Date.now() - started} ms`;
+    const started = clock.now();
+    const took = () => `failed after ${clock.now() - started} ms`;
     try {
       const res = await bounded(r.exec(ZOMBIE_PROBE_CMD, { timeoutMs: zombieProbeTimeoutMs }), zombieProbeTimeoutMs);
       if (res.exitCode === 0 && res.stdout.trim() === "ok") return undefined;
@@ -207,7 +211,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   const suspectOf = (r: StatusRecord): Suspect => {
     const known = suspects.get(r.id);
     if (known !== undefined && known.machineId === r.machineId) return known;
-    const fresh: Suspect = { machineId: r.machineId, badSince: Date.now() };
+    const fresh: Suspect = { machineId: r.machineId, badSince: clock.now() };
     suspects.set(r.id, fresh);
     return fresh;
   };
@@ -223,7 +227,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     reconcile: StatusListOptions["reconcile"],
   ): Promise<{ state: MachineState; reach: ReachStatus; reason?: string }> => {
     const s = suspectOf(r);
-    const elapsed = Date.now() - s.badSince;
+    const elapsed = clock.now() - s.badSince;
     if (s.zombie === undefined && elapsed < zombieWindowMs) {
       return { state: await machineState(r, reconcile, reach.state === "unreachable"), reach };
     }
@@ -238,7 +242,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     });
     const fault = await s.probe;
     if (fault === undefined) {
-      s.badSince = Date.now();
+      s.badSince = clock.now();
       return { state: provider, reach };
     }
     const reason =
@@ -276,7 +280,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
         } catch {
           return done(await machineState(r, reconcile, true), { state: "unreachable" });
         }
-        const state = await probeReach(reach.url, probe);
+        const state = await probeReach(reach.url, probe, clock.now);
         const status: ReachStatus = { state, url: reach.url, expiresAt: reach.expiresAt };
         if (state !== "slow" && state !== "unreachable") {
           suspects.delete(r.id);
@@ -294,7 +298,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   const lastEmitted = new Map<string, string>();
 
   const costTick = async (): Promise<void> => {
-    const now = Date.now();
+    const now = clock.now();
     for (const { size, ...view } of await o.records()) {
       const m = meter(view.id);
       if (view.phase === "running") m.mark ??= now;
