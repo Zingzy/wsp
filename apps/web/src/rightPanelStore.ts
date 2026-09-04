@@ -172,7 +172,60 @@ function normalizeRevealLine(line: number | undefined): number | null {
 const isKnownKind = (kind: unknown): kind is RightPanelKind =>
   typeof kind === "string" && (RIGHT_PANEL_KINDS as readonly string[]).includes(kind);
 
-/** Drops anything persisted under a kind this build does not know. */
+const isStringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((entry) => typeof entry === "string");
+
+/**
+ * A persisted surface rebuilt from the fields its kind needs; anything short
+ * of them is dropped, since the tab strip and the surfaces read those fields
+ * on every render.
+ */
+function usableSurface(raw: unknown): RightPanelSurface | null {
+  if (!raw || typeof raw !== "object") return null;
+  const surface = raw as Record<string, unknown>;
+  const kind = surface["kind"];
+  if (!isKnownKind(kind)) return null;
+  switch (kind) {
+    case "diff":
+    case "files":
+    case "machine":
+    case "screen":
+      return singletonSurface(kind);
+    case "preview": {
+      const resourceId = surface["resourceId"];
+      if (resourceId !== null && typeof resourceId !== "string") return null;
+      return browserSurface(resourceId);
+    }
+    case "file": {
+      const relativePath = surface["relativePath"];
+      if (typeof relativePath !== "string") return null;
+      const revealLine = surface["revealLine"];
+      const revealRequestId = surface["revealRequestId"];
+      return fileSurface(
+        relativePath,
+        typeof revealLine === "number" ? normalizeRevealLine(revealLine) : null,
+        typeof revealRequestId === "number" ? revealRequestId : 0,
+      );
+    }
+    case "terminal": {
+      const terminalIds = isStringArray(surface["terminalIds"]) ? surface["terminalIds"] : [];
+      const first = terminalIds[0];
+      if (first === undefined) return null;
+      const active = surface["activeTerminalId"];
+      const resourceId = surface["resourceId"];
+      return {
+        id: `terminal:${typeof resourceId === "string" ? resourceId : first}`,
+        kind,
+        resourceId: typeof resourceId === "string" ? resourceId : first,
+        terminalIds,
+        activeTerminalId: typeof active === "string" && terminalIds.includes(active) ? active : first,
+        ...(surface["splitDirection"] === "vertical" ? { splitDirection: "vertical" as const } : {}),
+      };
+    }
+  }
+}
+
+/** Drops anything persisted under a kind or shape this build does not know. */
 export function migratePersistedRightPanelState(persistedState: unknown): {
   byWorkspaceId: Record<string, WorkspaceRightPanelState>;
 } {
@@ -183,7 +236,10 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
     Object.entries(raw as Record<string, Partial<WorkspaceRightPanelState> | null>).map(
       ([workspaceId, state]) => {
         const surfaces = Array.isArray(state?.surfaces)
-          ? (state.surfaces as RightPanelSurface[]).filter((surface) => isKnownKind(surface?.kind))
+          ? state.surfaces.flatMap((surface) => {
+              const usable = usableSurface(surface);
+              return usable ? [usable] : [];
+            })
           : [];
         const activeSurfaceId = surfaces.some((surface) => surface.id === state?.activeSurfaceId)
           ? (state?.activeSurfaceId ?? null)
@@ -497,6 +553,8 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
       storage: createJSONStorage(() => window.localStorage),
       partialize: (state) => ({ byWorkspaceId: state.byWorkspaceId }),
       migrate: migratePersistedRightPanelState,
+      // migrate runs only on a version change; a bad shape stored at this version must be caught on every hydrate.
+      merge: (persisted, current) => ({ ...current, ...migratePersistedRightPanelState(persisted) }),
     },
   ),
 );

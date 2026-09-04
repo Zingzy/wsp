@@ -374,6 +374,12 @@ export type GitDiffFile = z.infer<typeof GitDiffFile>;
 export const GitDiffReply = z.object({ base: z.string().nullable(), files: z.array(GitDiffFile), truncated: z.boolean() });
 export type GitDiffReply = z.infer<typeof GitDiffReply>;
 
+/** One live or exited pty the daemon still holds; exited ones stay until pty.kill. */
+export const PtyListEntry = z.object({ id: z.string(), pid: z.number(), cols: z.number(), rows: z.number(), exited: z.boolean() });
+export type PtyListEntry = z.infer<typeof PtyListEntry>;
+export const PtyListReply = z.object({ ptys: z.array(PtyListEntry) });
+export type PtyListReply = z.infer<typeof PtyListReply>;
+
 export const DaemonRequest = z.discriminatedUnion("op", [
   z.object({
     id: reqId,

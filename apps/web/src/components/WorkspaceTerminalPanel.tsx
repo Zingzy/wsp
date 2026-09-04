@@ -16,16 +16,19 @@ const NO_TABS: readonly never[] = [];
 /**
  * Tab titles for the panel's terminal surfaces, from the link's pty list. The
  * same list prunes surfaces whose pty the link no longer has (closed elsewhere,
- * or persisted from a session whose ptys are gone), so no surface outlives its pty.
+ * or persisted from a session whose ptys are gone), so no surface outlives its
+ * pty. Pruning waits for a live link, whose list is the daemon's.
  */
 export function useTerminalSurfaces(workspaceId: string): ReadonlyMap<string, string> {
   const terms = useSyncExternalStore(onTerminals, () => getTerminals(workspaceId));
   const subscribe = useCallback((fn: () => void) => (terms ? terms.onTabs(fn) : () => {}), [terms]);
   const tabs = useSyncExternalStore(subscribe, () => (terms ? terms.tabs() : NO_TABS));
+  const subscribeStatus = useCallback((fn: () => void) => (terms ? terms.onStatus(fn) : () => {}), [terms]);
+  const status = useSyncExternalStore(subscribeStatus, () => (terms ? terms.status() : "connecting"));
   const reconcile = useRightPanelStore(s => s.reconcileTerminalSurfaces);
   useEffect(() => {
-    if (terms) reconcile(workspaceId, tabs.map(t => t.ptyId));
-  }, [terms, reconcile, workspaceId, tabs]);
+    if (terms && status === "live") reconcile(workspaceId, tabs.map(t => t.ptyId));
+  }, [terms, reconcile, workspaceId, tabs, status]);
   return useMemo(() => terminalLabels(tabs), [tabs]);
 }
 
@@ -60,19 +63,23 @@ function LinkedPanel({
   surface: Extract<RightPanelSurface, { kind: "terminal" }>;
 }) {
   const tabs = useSyncExternalStore(fn => terms.onTabs(fn), () => terms.tabs());
+  const status = useSyncExternalStore(fn => terms.onStatus(fn), () => terms.status());
   const labels = useMemo(() => terminalLabels(tabs), [tabs]);
   const terminalIo = useCallback((id: string) => terms.io(id), [terms]);
   const activateTerminal = useRightPanelStore(s => s.activateTerminal);
   const closeTerminal = useRightPanelStore(s => s.closeTerminal);
+  // Only ptys the link knows get a viewport; a surface persisted across a reload waits for the link to adopt its ptys.
+  const terminalIds = useMemo(() => surface.terminalIds.filter(id => tabs.some(t => t.ptyId === id)), [surface.terminalIds, tabs]);
+  const activeTerminalId = terminalIds.includes(surface.activeTerminalId) ? surface.activeTerminalId : (terminalIds[0] ?? "");
   const groups = useMemo(
     () => [
       {
         id: surface.id,
-        terminalIds: surface.terminalIds,
+        terminalIds,
         ...(surface.splitDirection === "vertical" ? { splitDirection: "vertical" as const } : {}),
       },
     ],
-    [surface.id, surface.terminalIds, surface.splitDirection],
+    [surface.id, terminalIds, surface.splitDirection],
   );
   const split = (direction: SplitDirection) => void splitPanelTerminal(workspaceId, surface.id, direction);
 
@@ -81,11 +88,12 @@ function LinkedPanel({
       mode="panel"
       workspaceId={workspaceId}
       height={0}
-      terminalIds={surface.terminalIds}
-      activeTerminalId={surface.activeTerminalId}
+      terminalIds={terminalIds}
+      activeTerminalId={activeTerminalId}
       terminalGroups={groups}
       activeTerminalGroupId={surface.id}
       focusRequestId={0}
+      terminalsReachable={status === "live"}
       onSplitTerminal={() => split("horizontal")}
       onSplitTerminalVertical={() => split("vertical")}
       onNewTerminal={() => void openPanelTerminal(workspaceId)}

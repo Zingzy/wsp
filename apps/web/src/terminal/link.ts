@@ -3,8 +3,10 @@
 // pty tabs, a client-side scrollback mirror, and the connection status. The
 // daemon has no pty.detach op, so each pty is attached at most once per wire;
 // parking a terminal drops its surface (the heavy part) and a remount
-// replays from the mirror instead of re-attaching.
-import type { DaemonEvent, DaemonLinkStatus } from "@wsp/protocol";
+// replays from the mirror instead of re-attaching. "live" is reported only
+// after the daemon's pty.list has been adopted and attached, so a consumer
+// that sees live can trust tabs() and spawn only when it is truly empty.
+import { PtyListReply, type DaemonEvent, type DaemonLinkStatus } from "@wsp/protocol";
 import type { PtyModeReport } from "./compose.js";
 import { composedPtyIo, type TerminalIo } from "./pty-io.js";
 
@@ -53,6 +55,8 @@ export class WorkspaceTerminals {
   #activeId: string | null = null;
   #status: DaemonLinkStatus = "connecting";
   #wasLive = false;
+  /** Bumped on every status change; an attach ritual that outlives its transition stops at the next await. */
+  #liveGen = 0;
   #statusFns = new Set<() => void>();
   #tabsFns = new Set<() => void>();
   #tabsView: PtyTabView[] = [];
@@ -67,12 +71,15 @@ export class WorkspaceTerminals {
   // --- fed by the transport owner -------------------------------------------
 
   feedStatus(s: DaemonLinkStatus): void {
-    const relive = s === "live" && this.#wasLive;
-    if (s === "live") this.#wasLive = true;
-    this.#status = s;
-    // A new socket lost the daemon-side pty subscriptions; re-attach them all.
-    if (relive) void this.#reattachAll();
-    for (const fn of this.#statusFns) fn();
+    this.#liveGen += 1;
+    if (s !== "live") {
+      this.#status = s;
+      for (const fn of this.#statusFns) fn();
+      return;
+    }
+    const relive = this.#wasLive;
+    this.#wasLive = true;
+    void this.#goLive(relive, this.#liveGen);
   }
 
   feedEvent(e: DaemonEvent): void {
@@ -86,11 +93,7 @@ export class WorkspaceTerminals {
     if (e.type === "pty.exit") {
       const p = this.#ptys.get(e.ptyId);
       if (!p || p.exited) return;
-      p.exited = true;
-      const note = "\r\n[process exited]\r\n";
-      this.#mirror(p, note);
-      for (const s of p.sinks) s.data(note);
-      this.#notifyTabs();
+      this.#markExited(p);
       return;
     }
     if (e.type === "pty.mode") {
@@ -243,7 +246,74 @@ export class WorkspaceTerminals {
     }
   }
 
-  async #reattachAll(): Promise<void> {
+  async #goLive(relive: boolean, gen: number): Promise<void> {
+    // A new socket lost the daemon-side pty subscriptions; re-attach them all.
+    if (relive) await this.#reattachAll(gen);
+    if (gen !== this.#liveGen) return;
+    await this.#adopt(gen);
+    if (gen !== this.#liveGen) return;
+    this.#status = "live";
+    for (const fn of this.#statusFns) fn();
+  }
+
+  /** Ptys the daemon holds that this model never opened (a reload, another client) become tabs, attached like our own. */
+  async #adopt(gen: number): Promise<void> {
+    let listed: Record<string, unknown>;
+    try {
+      listed = await this.#wire.request("pty.list");
+    } catch {
+      // The wire dropped, or the list is refused: the tabs stay as they are and the next live transition lists again.
+      return;
+    }
+    if (gen !== this.#liveGen) return;
+    const reply = PtyListReply.safeParse(listed);
+    if (!reply.success) return;
+    for (const entry of reply.data.ptys) {
+      if (this.#ptys.has(entry.id)) continue;
+      // Registered before the attach, and not yet exited: the daemon replays scrollback as pty.data ahead of its
+      // reply and pushes pty.exit for a dead pty, and feedEvent drops both for an unknown or already exited pty.
+      const p: PtyState = {
+        ptyId: entry.id,
+        title: "shell",
+        exited: false,
+        chunks: [],
+        length: 0,
+        sinks: new Set(),
+        mode: null,
+      };
+      this.#ptys.set(entry.id, p);
+      this.#order.push(entry.id);
+      let attached = false;
+      try {
+        await this.#wire.request("pty.attach", { ptyId: entry.id });
+        attached = gen === this.#liveGen;
+      } catch {
+        // Killed between list and attach: it was never shown, so nothing to mark lost.
+      }
+      if (!attached) {
+        this.#ptys.delete(entry.id);
+        this.#order.splice(this.#order.indexOf(entry.id), 1);
+        if (gen !== this.#liveGen) break;
+        continue;
+      }
+      if (entry.exited && !p.exited) this.#markExited(p);
+      this.#activeId ??= entry.id;
+      this.#everOpened = true;
+    }
+    // Unconditional, also out of a cancelled ritual: a pty.exit during an attach publishes the list mid-loop, and
+    // if that attach is then cut the pty leaves #order, so the view must be rebuilt even when nothing was adopted.
+    this.#notifyTabs();
+  }
+
+  #markExited(p: PtyState): void {
+    p.exited = true;
+    const note = "\r\n[process exited]\r\n";
+    this.#mirror(p, note);
+    for (const s of p.sinks) s.data(note);
+    this.#notifyTabs();
+  }
+
+  async #reattachAll(gen: number): Promise<void> {
     for (const p of this.#ptys.values()) {
       p.chunks = [];
       p.length = 0;
@@ -255,7 +325,7 @@ export class WorkspaceTerminals {
         // The wire dropping again rejects everything: stop, the next live
         // transition re-runs the full ritual. A per-pty refusal on a live wire
         // means that pty is gone (daemon restarted); the rest must still attach.
-        if (this.#status !== "live") return;
+        if (gen !== this.#liveGen) return;
         if (!p.exited) {
           p.exited = true;
           const note = "\r\n[terminal lost: could not re-attach]\r\n";
@@ -264,6 +334,7 @@ export class WorkspaceTerminals {
           this.#notifyTabs();
         }
       }
+      if (gen !== this.#liveGen) return;
     }
   }
 

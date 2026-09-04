@@ -30,25 +30,42 @@ vi.mock("../src/components/ui/popover.js", () => ({
 
 const WS = "ws_drawer_test";
 
-function fakeLink(refuseCreate = false) {
-  let next = 1;
+// The daemon side of the wire: the ptys it holds outlive any WorkspaceTerminals
+// over it, so relink() is a reload (a fresh model over the same daemon).
+function fakeLink({ refuseCreate = false, ptys = [], holdList = false }: { refuseCreate?: boolean; ptys?: string[]; holdList?: boolean } = {}) {
+  let next = ptys.length + 1;
+  const held = new Set(ptys);
   const ops: { op: string; params: Record<string, unknown> }[] = [];
+  // With holdList the daemon answers pty.list only when the test says so, to see what renders before adoption.
+  let releaseList = (): void => {};
+  const listGate = holdList ? new Promise<void>(resolve => (releaseList = resolve)) : Promise.resolve();
   const wire: TerminalWire = {
     request: async (op, params = {}) => {
       ops.push({ op, params });
       if (op === "pty.create") {
         if (refuseCreate) throw new Error("daemon unreachable");
-        return { ok: true, ptyId: `p${next++}` };
+        const ptyId = `p${next++}`;
+        held.add(ptyId);
+        return { ok: true, ptyId };
+      }
+      if (op === "pty.kill") held.delete(String(params["ptyId"]));
+      if (op === "pty.list") {
+        await listGate;
+        return { ok: true, ptys: [...held].map(id => ({ id, pid: 1, cols: 80, rows: 24, exited: false })) };
       }
       return { ok: true };
     },
   };
-  const wt = new WorkspaceTerminals(wire);
-  wt.feedStatus("live");
-  provideTerminals(WS, wt);
+  const relink = () => {
+    const wt = new WorkspaceTerminals(wire);
+    wt.feedStatus("live");
+    provideTerminals(WS, wt);
+    return wt;
+  };
+  const wt = relink();
   const writes = () => ops.filter(o => o.op === "pty.write").map(o => String(o.params["data"]));
   const count = (op: string) => ops.filter(o => o.op === op).length;
-  return { wt, ops, writes, count };
+  return { wt, ops, writes, count, relink, releaseList: () => releaseList() };
 }
 
 // Surfaces size their grid from the mount; jsdom lays nothing out, so give every viewport a box.
@@ -256,6 +273,82 @@ describe("one owner per pty", () => {
   });
 });
 
+describe("reload adopts the daemon's ptys", () => {
+  beforeEach(() => {
+    useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [view], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: WS, sessions: {}, ready: true });
+  });
+
+  it("two attaches over one daemon make one pty: the second link adopts the first's and the drawer spawns none", async () => {
+    const { count, relink } = fakeLink();
+    useTerminalDrawerStore.getState().setOpen(WS, true);
+    const first = render(<WorkspaceTerminalDrawer workspaceId={WS} />);
+    await waitFor(() => expect(inputs("drawer")).toHaveLength(1), { timeout: 15_000 });
+    expect(count("pty.create")).toBe(1);
+    first.unmount();
+
+    const wt = relink();
+    render(<WorkspaceTerminalDrawer workspaceId={WS} />);
+    await waitFor(() => expect(wt.tabs().map(t => t.ptyId)).toEqual(["p1"]));
+    await waitFor(() => expect(inputs("drawer")).toHaveLength(1), { timeout: 15_000 });
+    await new Promise(r => setTimeout(r, 50));
+    expect(count("pty.create")).toBe(1);
+    expect(count("pty.list")).toBe(2);
+    expect(count("pty.attach")).toBe(2);
+    expect(useTerminalDrawerStore.getState().byWorkspaceId[WS]?.terminalIds).toEqual(["p1"]);
+  }, 30_000);
+
+  it("a reload with two live ptys shows both in the stored arrangement (a split, p2 active) and spawns none", async () => {
+    const { wt, ops, count, releaseList } = fakeLink({ ptys: ["p1", "p2"], holdList: true });
+    const drawer = useTerminalDrawerStore.getState();
+    drawer.setOpen(WS, true);
+    drawer.add(WS, "p1");
+    drawer.split(WS, "p2", "vertical");
+    render(<WorkspaceTerminalDrawer workspaceId={WS} />);
+    // Until the daemon has answered, the stored ptys are not shown as terminals: no surface binds to a pty the link does not know.
+    await screen.findByText(/Not connected to this workspace/);
+    expect(canvases("drawer")).toHaveLength(0);
+    releaseList();
+    await waitFor(() => expect(canvases("drawer")).toHaveLength(2));
+    sizeViewports();
+    await waitFor(() => expect(inputs("drawer")).toHaveLength(2), { timeout: 15_000 });
+    await new Promise(r => setTimeout(r, 50));
+    expect(count("pty.create")).toBe(0);
+    expect(count("pty.attach")).toBe(2);
+    const ui = useTerminalDrawerStore.getState().byWorkspaceId[WS]!;
+    expect(ui.terminalIds).toEqual(["p1", "p2"]);
+    expect(ui.activeTerminalId).toBe("p2");
+    expect(ui.terminalGroups.map(g => [g.terminalIds, g.splitDirection])).toEqual([[["p1", "p2"], "vertical"]]);
+    // Both surfaces are bound to their adopted ptys: bytes in come back out.
+    act(() => wt.feedEvent({ type: "pty.data", ptyId: "p2", data: "\x1b[6n" }));
+    await waitFor(() => expect(ops.filter(o => o.op === "pty.write" && o.params["ptyId"] === "p2").map(o => o.params["data"]).join("")).toContain("\x1b[1;1R"));
+  }, 20_000);
+
+  it("ownership survives a reload: the panel keeps its pty, the drawer takes its own and any pty no store claims", async () => {
+    const { wt, ops, count, releaseList } = fakeLink({ ptys: ["p1", "p2", "p3"], holdList: true });
+    useRightPanelStore.getState().openTerminal(WS, "p2");
+    useTerminalDrawerStore.getState().setOpen(WS, true);
+    useTerminalDrawerStore.getState().add(WS, "p1");
+    render(
+      <>
+        <WorkspaceTerminalDrawer workspaceId={WS} />
+        <Panel />
+      </>,
+    );
+    // Before the daemon answers, neither side shows a terminal or drops the panel's surface.
+    await waitFor(() => expect(screen.getAllByText(/Not connected to this workspace/)).toHaveLength(2));
+    expect(selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, WS).surfaces.map(s => s.id)).toEqual(["terminal:p2"]);
+    releaseList();
+    await waitFor(() => expect(useTerminalDrawerStore.getState().byWorkspaceId[WS]?.terminalIds).toEqual(["p1", "p3"]));
+    await waitFor(() => expect(inputs("right-panel")).toHaveLength(1), { timeout: 15_000 });
+    await waitFor(() => expect(inputs("drawer")).toHaveLength(1), { timeout: 15_000 });
+    expect(selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, WS).surfaces.map(s => s.id)).toEqual(["terminal:p2"]);
+    expect(count("pty.create")).toBe(0);
+    expect(count("pty.attach")).toBe(3);
+    act(() => wt.feedEvent({ type: "pty.data", ptyId: "p2", data: "\x1b[6n" }));
+    await waitFor(() => expect(ops.filter(o => o.op === "pty.write" && o.params["ptyId"] === "p2").map(o => o.params["data"]).join("")).toContain("\x1b[1;1R"));
+  }, 30_000);
+});
+
 describe("drawer resilience", () => {
   it("a stored value with a bad shape at the current version hydrates to a usable state and renders", async () => {
     window.localStorage.setItem("wsp:terminal-drawer:v1", JSON.stringify({ state: { byWorkspaceId: { [WS]: { terminalOpen: true } } }, version: 1 }));
@@ -279,7 +372,7 @@ describe("drawer resilience", () => {
   });
 
   it("a refused pty.create reaches the toast from the first open, New Terminal and the panel", async () => {
-    const { count } = fakeLink(true);
+    const { count } = fakeLink({ refuseCreate: true });
     useTerminalDrawerStore.getState().setOpen(WS, true);
     render(<WorkspaceTerminalDrawer workspaceId={WS} />);
     await waitFor(() => expect(useStore.getState().toast).toBe("terminal: daemon unreachable"));
