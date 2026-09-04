@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { createRuntime } from "../src/runtime.js";
+import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
+import { createRuntime, type HarnessAdapterFactory, type HarnessSession } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
 import { WsClient } from "./ws-client.js";
 import { stubBackend } from "./stub-backend.js";
+import { fakeClock } from "./fake-clock.js";
 import { until } from "./until.js";
 
 let srv: RuntimeServer | undefined;
@@ -118,6 +120,104 @@ describe("serveRuntime session history", () => {
     expect(res["events"]).toEqual([]);
     const missing = await c.request("sessions.history", { workspaceId: "ws_nope" });
     expect(missing.ok).toBe(false);
+    c.close();
+  });
+});
+
+// A harness that cannot stop the process it owns is not a harness; the port refuses one at compile time.
+const noStop = { localId: "s", claudeSessionId: "s", finished: Promise.resolve<TurnResult>({ status: "completed" }) };
+// @ts-expect-error interrupt is required on HarnessSession
+noStop satisfies HarnessSession;
+
+/** A harness the test ends by hand. Its interrupt does what the real one does: the turn reports
+ * interrupted and the session ends on a later turn of the event loop than interrupt() resolves on. */
+function stoppableHarness() {
+  const sessionId = "55555555-5555-4555-8555-555555555555";
+  let onEvent: ((e: AdapterEvent) => void) | undefined;
+  let finish!: (r: TurnResult) => void;
+  const finished = new Promise<TurnResult>(r => (finish = r));
+  const end = (result: TurnResult): void => {
+    onEvent!({ type: "turn.done", sessionId, result });
+    onEvent!({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+    finish(result);
+  };
+  const h = {
+    sessionId,
+    interrupts: 0,
+    complete: () => end({ status: "completed", text: "done" }),
+    adapter: (() => ({
+      start: o => {
+        onEvent = o.onEvent;
+        onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" });
+        return {
+          localId: sessionId,
+          claudeSessionId: sessionId,
+          finished,
+          interrupt: async () => {
+            h.interrupts++;
+            setImmediate(() => end({ status: "interrupted" }));
+          },
+        };
+      },
+    })) as HarnessAdapterFactory,
+  };
+  return h;
+}
+
+describe("serveRuntime session interrupt", () => {
+  type Harness = ReturnType<typeof stoppableHarness>;
+  const table: { name: string; before?: (h: Harness) => void; sessionId?: string; outcome: string; interrupts: number; status?: string }[] = [
+    { name: "mid-turn: the harness is told to stop and the turn ends interrupted", outcome: "accepted", interrupts: 1, status: "interrupted" },
+    { name: "after the turn: not-running, and the harness is not asked", before: h => h.complete(), outcome: "not-running", interrupts: 0, status: "completed" },
+    { name: "unknown session: not-found", sessionId: "ws_nobody", outcome: "not-found", interrupts: 0 },
+  ];
+
+  it.each(table)("$name", async row => {
+    const h = stoppableHarness();
+    const fc = fakeClock();
+    const runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter }, clock: fc.clock });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    await c.request("events.subscribe");
+    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const workspaceId = (created["workspace"] as { id: string }).id;
+    const started = await c.request("sessions.start", { workspaceId, prompt: "go" });
+    expect(started["session"]).toMatchObject({ id: h.sessionId, status: "running" });
+    row.before?.(h);
+    // Frames in arrival order, so the check below reads the wire and not a coalesced read of c.events.
+    const arrived: string[] = [];
+    c.ws.on("message", raw => {
+      const m = JSON.parse(String(raw)) as { id?: number; type?: string };
+      arrived.push(m.type ?? `reply:${String(m.id)}`);
+    });
+
+    const res = await c.request("sessions.interrupt", { sessionId: row.sessionId ?? h.sessionId });
+    expect(res).toEqual({ id: expect.any(Number), ok: true, outcome: row.outcome });
+    expect(h.interrupts).toBe(row.interrupts);
+
+    if (row.status !== undefined) {
+      const listed = await c.request("sessions.list", { workspaceId });
+      expect(listed["sessions"]).toMatchObject([{ id: h.sessionId, status: row.status }]);
+      const history = (await c.request("sessions.history", { workspaceId }))["events"] as { type: string; result?: { status: string } }[];
+      expect(history.map(e => e.type)).toEqual(["session.start", "session.done", "session.end"]);
+      expect(history[1]).toMatchObject({ type: "session.done", result: { status: row.status } });
+      expect(c.events.filter(e => e.type === "session.done")).toMatchObject([{ result: { status: row.status } }]);
+      const reply = `reply:${String(res.id)}`;
+      if (row.outcome === "accepted") expect(arrived.slice(0, arrived.indexOf(reply) + 1)).toEqual(["session.done", "session.end", reply]);
+    }
+    c.close();
+  });
+
+  it("interrupting the same turn twice is accepted once, then not-running", async () => {
+    const h = stoppableHarness();
+    const runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter }, clock: fakeClock().clock });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    await c.request("sessions.start", { workspaceId: (created["workspace"] as { id: string }).id, prompt: "go" });
+    expect((await c.request("sessions.interrupt", { sessionId: h.sessionId }))["outcome"]).toBe("accepted");
+    expect((await c.request("sessions.interrupt", { sessionId: h.sessionId }))["outcome"]).toBe("not-running");
+    expect(h.interrupts).toBe(1);
     c.close();
   });
 });

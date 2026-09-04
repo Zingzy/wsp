@@ -18,6 +18,7 @@ import {
   RuntimeRequest,
   RuntimeResponse,
   SessionEvent,
+  SessionInterruptResult,
   SnapshotLineage,
   SnapshotRollbackResult,
   SessionView,
@@ -248,14 +249,23 @@ describe("runtime wire types", () => {
       { id: 18, op: "golden.prepare", name: "default", kind: "desktop" },
       { id: 19, op: "golden.seal", builderId: "m1" },
       { id: 20, op: "golden.builderReach", builderId: "m1" },
+      { id: 21, op: "sessions.interrupt", sessionId: "s1" },
     ];
     for (const r of reqs) expect(RuntimeRequest.parse(r)).toEqual(r);
+    expect(() => RuntimeRequest.parse({ id: 21, op: "sessions.interrupt" })).toThrow(); // sessionId required
     expect(() => RuntimeRequest.parse({ id: 1, op: "workspaces.create" })).toThrow(); // golden+name required
     expect(() => RuntimeRequest.parse({ id: 1, op: "golden.prepare", name: "d", kind: "browser" })).toThrow();
     expect(() => RuntimeRequest.parse({ id: 1, op: "golden.seal" })).toThrow(); // builderId required
     expect(() => RuntimeRequest.parse({ id: 1, op: "golden.builderReach" })).toThrow();
     expect(RuntimeResponse.parse({ id: 4, ok: true, workspace: { id: "w" } })).toBeTruthy();
     expect(RuntimeResponse.parse({ id: 4, ok: false, error: "nope" })).toBeTruthy();
+  });
+
+  it("sessions.interrupt answers one of three outcomes, none of them an error reply", () => {
+    for (const outcome of ["accepted", "not-running", "not-found"]) expect(SessionInterruptResult.parse({ outcome })).toEqual({ outcome });
+    expect(() => SessionInterruptResult.parse({ outcome: "stopped" })).toThrow();
+    expect(() => SessionInterruptResult.parse({})).toThrow();
+    expect(RuntimeResponse.parse({ id: 21, ok: true, outcome: "not-running" })).toBeTruthy();
   });
 
   it("snapshots.list / snapshots.rollback parse, and SnapshotLineage is the manifest plus its name", () => {

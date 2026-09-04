@@ -172,6 +172,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "sessions.history":
               send({ id: msg.id, ok: true, events: await rt.sessions.history(msg.workspaceId) });
               return;
+            case "sessions.interrupt":
+              send({ id: msg.id, ok: true, ...(await rt.sessions.interrupt(msg.sessionId)) });
+              return;
             case "golden.get":
               send({ id: msg.id, ok: true, manifest: await rt.golden.get(msg.name) });
               return;

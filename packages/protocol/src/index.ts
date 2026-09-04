@@ -590,6 +590,8 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("sessions.list"), workspaceId: z.string().optional() }),
   /** Replies with the workspace's persisted SessionEvent[] (oldest first, capped by the runtime). */
   z.object({ id: reqId, op: z.literal("sessions.history"), workspaceId: z.string() }),
+  /** Asks the harness to stop the session's running turn; replies with a SessionInterruptResult. */
+  z.object({ id: reqId, op: z.literal("sessions.interrupt"), sessionId: z.string() }),
   z.object({ id: reqId, op: z.literal("golden.get"), name: z.string() }),
   /** Replies with the backend's Capabilities; the UI gates features on these. */
   z.object({ id: reqId, op: z.literal("capabilities.get") }),
@@ -636,6 +638,17 @@ export const RuntimeErrorResponse = z.object({
 });
 export const RuntimeResponse = z.union([RuntimeOkResponse, RuntimeErrorResponse]);
 export type RuntimeResponse = z.infer<typeof RuntimeResponse>;
+
+// --- session interrupt (what a stop button gets back) -------------------------
+
+/** accepted: the harness was told to stop and the turn ends with status interrupted.
+ * not-running: the turn had already ended, so there was nothing to stop.
+ * not-found: this runtime holds no such session (sessions live in memory; a restart forgets them).
+ * None of these is an error reply: a stop button has nothing to recover from. */
+export const SessionInterruptOutcome = z.enum(["accepted", "not-running", "not-found"]);
+export type SessionInterruptOutcome = z.infer<typeof SessionInterruptOutcome>;
+export const SessionInterruptResult = z.object({ outcome: SessionInterruptOutcome });
+export type SessionInterruptResult = z.infer<typeof SessionInterruptResult>;
 
 // --- snapshot lineage (golden manifest as the rollback UI reads it) -----------
 
