@@ -7,9 +7,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type LoginChoice, type Manifest, type ManifestEntry, type Rung, parseManifest } from "@wsp/collect";
 import { neverCopied } from "@wsp/engine";
+import type { ChecklistItem } from "@wsp/protocol";
 import type { GoldenImport, GoldenRecipe, Machine } from "@wsp/runtime";
 import type { Keys } from "./cli.js";
 import { GUEST_ENVS, claudeEnvs } from "./doctor.js";
+import { signInFor, signInWords } from "./signin-table.js";
 
 export const RUNG_TITLE: Record<Rung, string> = {
   identity: "Identity",
@@ -79,27 +81,11 @@ export function initialChoice(e: ManifestEntry): LoginChoice {
   return e.default === "bring" ? "copy" : "machine";
 }
 
-const SIGN_IN_COMMANDS: Record<string, string> = {
-  gh: "gh auth login",
-  claude: "claude, then /login",
-  codex: "codex login",
-  gemini: "gemini",
-  opencode: "opencode auth login",
-  gcloud: "gcloud auth login",
-  aws: "aws sso login",
-  wrangler: "wrangler login",
-  vercel: "vercel login",
-  cloudflared: "cloudflared tunnel login",
-};
-
-export function signInCommand(e: ManifestEntry): string | undefined {
-  return SIGN_IN_COMMANDS[agentName(e)];
+/** The words the desktop builder's checklist shows for a login: the table's command, or what to do instead. */
+export function signInCommand(e: ManifestEntry): string {
+  return signInWords(signInFor(agentName(e)));
 }
 
-export interface ChecklistItem {
-  label: string;
-  command: string;
-}
 
 /** The browser's checklist: the sign-ins the person chose to do on the machine, then one line per rc
  * file that lost its secret exports, naming what to set there. The names come from what the pack cut
@@ -112,13 +98,16 @@ export function checklistFor(
 ): ChecklistItem[] {
   const signIns = manifest.entries
     .filter(e => e.rung === "logins" && choices.get(e.id) === "machine")
-    .map(e => ({ label: e.label, command: signInCommand(e) ?? "sign in as the tool asks" }));
+    .map(e => ({ label: e.label, command: signInCommand(e) }));
+  return [...signIns, ...secretLinesFor(manifest, ticks, cut)];
+}
+
+/** The set-on-the-machine lines alone: they stay on the page after the sign-in stage has run its logins. */
+export function secretLinesFor(manifest: Manifest, ticks: ReadonlySet<string>, cut?: readonly { path: string; names: readonly string[] }[]): ChecklistItem[] {
   const line = (label: string, names: readonly string[]): ChecklistItem => ({ label, command: `set ${names.join(", ")} on the machine` });
-  const secrets =
-    cut !== undefined
-      ? cut.filter(c => c.names.length > 0).map(c => line(c.path, c.names))
-      : manifest.entries.filter(e => ticks.has(e.id) && e.secrets !== undefined && e.secrets.length > 0).map(e => line(e.label, e.secrets!));
-  return [...signIns, ...secrets];
+  return cut !== undefined
+    ? cut.filter(c => c.names.length > 0).map(c => line(c.path, c.names))
+    : manifest.entries.filter(e => ticks.has(e.id) && e.secrets !== undefined && e.secrets.length > 0).map(e => line(e.label, e.secrets!));
 }
 
 /** A login that belongs to an agent is only offered when that agent comes along. */

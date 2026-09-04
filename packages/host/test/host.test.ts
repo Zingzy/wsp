@@ -144,6 +144,15 @@ describe("host serves the app", () => {
     expect(inlineScripts(html)[0]).toContain(`"builder":${JSON.stringify(builder)}`);
   });
 
+  it("a checklist given as a function is read on every page load, so the page shows what is still open", async () => {
+    const { rt } = testRuntime(false);
+    let items = [{ label: "GitHub CLI login", command: "gh auth login" }, { label: "Codex login", command: "codex login" }];
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, checklist: () => items });
+    expect(inlineScripts(await (await fetch(`http://127.0.0.1:${handle.port}/`)).text())[0]).toContain(`"checklist":${JSON.stringify(items)}`);
+    items = [items[1]!];
+    expect(inlineScripts(await (await fetch(`http://127.0.0.1:${handle.port}/`)).text())[0]).toContain(`"checklist":${JSON.stringify(items)}`);
+  });
+
   it("says anthropic false when the host loaded no anthropic key", async () => {
     const { rt } = testRuntime();
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false } });

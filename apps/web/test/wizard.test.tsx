@@ -167,6 +167,28 @@ describe("wizard steps follow the wire", () => {
     expect(rows).toEqual(["GitHub CLI login: gh auth login"]);
   });
 
+  it("a sandbox builder's hero lists the logins still open as its checklist, with the command, and never claims they ran", async () => {
+    await mount({}, undefined, headless, [{ label: "Codex login", command: "codex login" }, { label: "kubectl config", command: "kubectl has no sign-in; copy the kubeconfig instead" }]);
+    await waitFor(() => expect(screen.getByTestId("step").textContent).toBe("hero"));
+    const rows = screen.getAllByRole("checkbox").map(c => c.parentElement?.textContent);
+    expect(rows).toEqual(["Codex login: codex login", "kubectl config: kubectl has no sign-in; copy the kubeconfig instead"]);
+    expect(screen.getByText("sign in, then save")).toBeDefined();
+    expect(document.body.textContent).not.toMatch(/ran in the wsp init terminal|Your sign-ins ran/);
+  });
+
+  it("a sandbox builder with nothing left to sign into shows no checklist and never the generic one", async () => {
+    await mount({}, undefined, headless, []);
+    await waitFor(() => expect(screen.getByTestId("step").textContent).toBe("hero"));
+    expect(screen.queryAllByRole("checkbox")).toEqual([]);
+    expect(screen.getByText("check it over, then save")).toBeDefined();
+    expect(document.body.textContent).not.toMatch(/gh auth login|ran in the wsp init terminal/);
+    // The generic list is the live screen's fallback only.
+    cleanup();
+    await mount({}, undefined, headless);
+    await waitFor(() => expect(screen.getByTestId("step").textContent).toBe("hero"));
+    expect(screen.queryAllByRole("checkbox")).toEqual([]);
+  });
+
   it("with no checklist handed over the hero keeps the generic one", async () => {
     await mount({}, undefined, builder);
     await waitFor(() => expect(screen.getByTestId("step").textContent).toBe("hero"));

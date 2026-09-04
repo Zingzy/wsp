@@ -1,0 +1,305 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// The signing-in stage of wsp init: each login chosen as "sign in on the
+// machine" runs in this terminal over a pty on the builder, the tool's own
+// status command then says whether it landed, and the summary before the
+// hand-off offers a retry (with the no-browser variant when the table has one)
+// or a skip. What each login came to is written next to the import result so
+// the golden's notes carry it.
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { styleText } from "node:util";
+import type { ManifestEntry } from "@wsp/collect";
+import type { LoginState } from "@wsp/protocol";
+import type { GoldenBuilderView, Runtime } from "@wsp/runtime";
+import { S_BAR, log, note } from "@clack/prompts";
+import { connectDaemonSocket, type ConnectOptions, type DaemonSocket } from "./doctor.js";
+import { GUTTER, ellipsize, table, widthOf } from "./init-layout.js";
+import { agentName } from "./init-recipe.js";
+import { readKey } from "./init-select.js";
+import { relayPty, runQuiet, type PtyLink, type RelayTerminal } from "./signin-relay.js";
+import { signInFor, signInWords, type SignIn } from "./signin-table.js";
+
+export interface LoginOutcome {
+  id: string;
+  label: string;
+  state: LoginState;
+  /** The command that ran last, when one did. */
+  command?: string;
+  /** How the last command's pty ended; -1 when it never did. */
+  exit?: number;
+  note?: string;
+}
+
+/** What the sign-in stage shares with the host's callback relay: whether one
+ * page the machine asks to open may open here without a click (the person
+ * pressed o in this flow; one o, one open), and where a host line goes while
+ * a pty is shown. */
+export interface SignInFlow {
+  armed: boolean;
+  /** The page o opened here; the relay declines to open that one again. */
+  openedUrl?: string;
+  show?: (line: string) => void;
+}
+
+/** The line the relay logs for a page it did not open, while a pty is on screen. */
+export const OPEN_LINE = "press o on the link above to open it here";
+
+export interface BuilderLink {
+  link: PtyLink;
+  close(): void;
+}
+
+/** One daemon socket to the builder, its events fanned out to whoever asks. */
+export async function builderLink(rt: Runtime, builder: GoldenBuilderView, connect: (o: ConnectOptions) => Promise<DaemonSocket> = connectDaemonSocket): Promise<BuilderLink> {
+  const reach = await rt.golden.builderReach(builder.id);
+  if (reach.daemonToken === undefined) throw new Error("the machine has no daemon token yet");
+  const fns = new Set<(e: Record<string, unknown>) => void>();
+  const sock = await connect({
+    url: reach.url,
+    token: reach.daemonToken,
+    onEvent: e => {
+      for (const f of fns) f(e);
+    },
+  });
+  return {
+    link: {
+      op: (op, extra) => sock.op(op, extra),
+      onEvent: fn => {
+        fns.add(fn);
+        return () => fns.delete(fn);
+      },
+      closed: sock.closed,
+    },
+    close: () => sock.close(),
+  };
+}
+
+export interface SignInStageOptions {
+  logins: readonly ManifestEntry[];
+  /** A fresh link to the builder's daemon, dialled before each command so a dropped one costs that command alone. */
+  dial(): Promise<BuilderLink>;
+  terminal: RelayTerminal;
+  /** Set when nobody can type here (no terminal, or --yes): every login is skipped with this note. */
+  skipWhy?: string;
+  open(url: string): Promise<boolean>;
+  flow: SignInFlow;
+  /** A tool that never gives up is stopped after this. Default 15 min. */
+  capMs?: number;
+  /** A status command that hangs is stopped after this. Default 1 min. */
+  statusTimeoutMs?: number;
+  now?: () => number;
+}
+
+const CAP_MS = 15 * 60_000;
+const STATUS_MS = 60_000;
+const dim = (s: string): string => styleText("dim", s);
+
+const STATE_WORDS: Record<LoginState, string> = {
+  "signed-in": "signed in",
+  "not-signed-in": "not signed in",
+  "not-verified": "not verified",
+  skipped: "skipped",
+};
+
+function minutes(ms: number): string {
+  return `${Math.round(ms / 60_000)} min`;
+}
+
+function stateLine(o: LoginOutcome): string {
+  const word = STATE_WORDS[o.state];
+  const colored = o.state === "signed-in" ? styleText("green", word) : o.state === "not-signed-in" ? styleText("yellow", word) : dim(word);
+  return `${o.label}: ${colored}${o.note !== undefined ? dim(` (${o.note})`) : ""}`;
+}
+
+/** Label, state, note per login; the note is cut so the note frame (6 columns) never wraps a row. */
+function summaryRows(outcomes: readonly LoginOutcome[], width: number): string[] {
+  const labelW = Math.max(...outcomes.map(r => r.label.length));
+  const stateW = Math.max(...outcomes.map(r => STATE_WORDS[r.state].length));
+  const room = Math.max(12, width - 6 - labelW - stateW - 2 * GUTTER.length);
+  return table(outcomes.map(r => [r.label, STATE_WORDS[r.state], r.note === undefined ? "" : ellipsize(r.note, room)]));
+}
+
+export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]> {
+  const out = { output: o.terminal.output };
+  const capMs = o.capMs ?? CAP_MS;
+  const statusMs = o.statusTimeoutMs ?? STATUS_MS;
+  const outcomes: LoginOutcome[] = o.logins.map(e => ({ id: e.id, label: e.label, state: "skipped" }));
+  if (outcomes.length === 0) return outcomes;
+
+  if (o.skipWhy !== undefined) {
+    for (const r of outcomes) r.note = o.skipWhy;
+    log.step(`Sign-ins on the machine skipped: ${outcomes.map(r => r.label).join(", ")}. ${o.skipWhy[0]!.toUpperCase()}${o.skipWhy.slice(1)}.`, out);
+    return outcomes;
+  }
+
+  log.step("Signing in on the machine", out);
+
+  /** The command's pty and its status check over one fresh link; every failure is this login's note, never the run's end. */
+  const attempt = async (entry: ManifestEntry, r: LoginOutcome, s: SignIn, command: string | undefined): Promise<void> => {
+    const timeoutMs = s.kind === "command" && s.toolTimeoutMs !== undefined ? s.toolTimeoutMs + 60_000 : capMs;
+    const daemon = await o.dial();
+    try {
+      const show = (line: string): void => void o.terminal.output.write(`\r\n  ${dim(line)}\r\n`);
+      o.flow.show = show;
+      o.flow.armed = false;
+      let relayed: Awaited<ReturnType<typeof relayPty>>;
+      try {
+        relayed = await relayPty({
+          link: daemon.link,
+          ...(command !== undefined ? { command } : {}),
+          terminal: o.terminal,
+          open: o.open,
+          onConsent: url => {
+            o.flow.openedUrl = url;
+            o.flow.armed = true;
+          },
+          timeoutMs,
+          ...(o.now !== undefined ? { now: o.now } : {}),
+        });
+      } finally {
+        o.flow.armed = false;
+        delete o.flow.openedUrl;
+        delete o.flow.show;
+      }
+      o.terminal.output.write("\n");
+      r.exit = relayed.exitCode;
+      if (relayed.dropped) {
+        r.state = "not-signed-in";
+        r.note = "the machine's terminal link dropped";
+        return;
+      }
+      if (relayed.timedOut) {
+        r.state = "not-signed-in";
+        r.note = `stopped after ${minutes(timeoutMs)}`;
+        return;
+      }
+      // The shell's own "not found": the tool is not on the machine, and no retry or status check can change that.
+      if (s.kind === "command" && relayed.exitCode === 127) {
+        r.state = "skipped";
+        r.note = `${toolOf(command ?? "")} is not on the machine`;
+        return;
+      }
+      if (s.kind !== "command" || s.status === undefined) {
+        r.state = "not-verified";
+        r.note = [`no status command known for ${agentName(entry)}`, ...(relayed.exitCode !== 0 ? [`exit ${relayed.exitCode}`] : []), ...(s.kind === "command" && s.note !== undefined ? [s.note] : [])].join("; ");
+        return;
+      }
+      const status = await runQuiet(daemon.link, s.status.command, statusMs);
+      if (status.dropped) {
+        r.state = "not-signed-in";
+        r.note = "the machine's terminal link dropped during the status check";
+        return;
+      }
+      if (status.timedOut) {
+        r.state = "not-signed-in";
+        r.note = `${s.status.command} did not answer within ${minutes(statusMs)}`;
+        return;
+      }
+      const signedIn = s.status.signedIn(status.output, status.exitCode);
+      r.state = signedIn ? "signed-in" : "not-signed-in";
+      r.note = signedIn ? `${s.status.command}` : `${s.status.command} says not signed in`;
+    } finally {
+      daemon.close();
+    }
+  };
+
+  const run = async (entry: ManifestEntry, r: LoginOutcome, s: SignIn, command: string | undefined): Promise<void> => {
+    const shown = command ?? "a shell on the machine; type the tool's sign-in command, then exit";
+    o.terminal.output.write(`${styleText("cyan", "◇")}  ${r.label}${GUTTER}${dim(shown)}\n${dim(S_BAR)}  ${dim("the terminal below is the machine's; Ctrl-C ends the command")}\n`);
+    r.command = command;
+    delete r.note;
+    try {
+      await attempt(entry, r, s, command);
+    } catch (e) {
+      r.state = "not-signed-in";
+      r.note = e instanceof Error ? e.message : String(e);
+    }
+  };
+
+  const pass = async (entry: ManifestEntry, r: LoginOutcome, useFallback: boolean): Promise<void> => {
+    const s = signInFor(agentName(entry));
+    switch (s.kind) {
+      case "none":
+        r.state = "skipped";
+        r.note = s.note;
+        return;
+      case "shell":
+        await run(entry, r, s, undefined);
+        return;
+      case "command":
+        await run(entry, r, s, useFallback && s.fallback !== undefined ? s.fallback : s.login);
+        return;
+      default: {
+        const _exhaustive: never = s;
+        return _exhaustive;
+      }
+    }
+  };
+
+  for (const [i, entry] of o.logins.entries()) {
+    await pass(entry, outcomes[i]!, false);
+    log.message(stateLine(outcomes[i]!), { output: o.terminal.output, symbol: dim(S_BAR) });
+  }
+
+  for (;;) {
+    note(summaryRows(outcomes, widthOf(o.terminal.output)).join("\n"), "Sign-ins", out);
+    // Not signed in, or not verifiable after a command that did not end clean: both get a retry or a skip.
+    const pending = outcomes.map((r, i) => [r, i] as const).filter(([r]) => r.state === "not-signed-in" || (r.state === "not-verified" && r.exit !== undefined && r.exit !== 0));
+    if (pending.length === 0) break;
+    for (const [r, i] of pending) {
+      const entry = o.logins[i]!;
+      const s = signInFor(agentName(entry));
+      const fallback = s.kind === "command" ? s.fallback : undefined;
+      const keys = ["r", ...(fallback !== undefined ? ["f"] : []), "s"];
+      const hint = [`r retry`, ...(fallback !== undefined ? [`f retry with ${fallback}`] : []), `s skip`].join("   ");
+      log.message(`${r.label}${GUTTER}${dim(hint)}`, { output: o.terminal.output, symbol: styleText("yellow", "▲") });
+      const key = await readKey(o.terminal.input, o.terminal.output, keys);
+      if (key === "s" || key === "cancel") {
+        r.state = "skipped";
+        r.note = "skipped by you";
+        continue;
+      }
+      await pass(entry, r, key === "f");
+      log.message(stateLine(r), { output: o.terminal.output, symbol: dim(S_BAR) });
+    }
+  }
+  return outcomes;
+}
+
+/** The first word of a command past its NAME=value prefixes: the tool the shell could not find. */
+function toolOf(command: string): string {
+  return command.split(" ").find(w => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w)) ?? command;
+}
+
+/** The logins still open after the stage, for the page's checklist: everything not proven signed in, each with what to run there. */
+export function openLogins(logins: readonly ManifestEntry[], outcomes: readonly LoginOutcome[]): { label: string; command: string }[] {
+  return outcomes
+    .filter(r => r.state !== "signed-in")
+    .map(r => {
+      const entry = logins.find(l => l.id === r.id);
+      const words = entry === undefined ? "sign in as the tool asks" : signInWords(signInFor(agentName(entry)));
+      // The shell's 127: the page says to install the tool before running it.
+      return { label: r.label, command: r.exit === 127 && r.command !== undefined ? `install ${toolOf(r.command)}, then ${words}` : words };
+    });
+}
+
+/** Adds the logins' states to the import result file, the golden's notes; creates it when nothing was imported.
+ * replaced says the file was there but could not be read, so the caller can say so. */
+export function noteLogins(path: string, outcomes: readonly LoginOutcome[]): { replaced: boolean } {
+  let existing: Record<string, unknown> = {};
+  let replaced = false;
+  if (existsSync(path)) {
+    try {
+      const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+      if (typeof parsed === "object" && parsed !== null) existing = parsed as Record<string, unknown>;
+      else replaced = true;
+    } catch {
+      replaced = true;
+    }
+  }
+  writeFileSync(path, `${JSON.stringify({ ...existing, logins: outcomes }, null, 2)}\n`);
+  return { replaced };
+}
+
+export function machineLogins(manifest: { entries: readonly ManifestEntry[] }, choices: ReadonlyMap<string, string>): ManifestEntry[] {
+  return manifest.entries.filter(e => e.rung === "logins" && choices.get(e.id) === "machine");
+}

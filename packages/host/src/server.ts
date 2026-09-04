@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
+import type { ChecklistItem } from "@wsp/protocol";
 import { describeAge, serveRuntime, type GoldenBuilderView, type GoldenVersion, type ReapedMachine, type Runtime, type SparedMachine } from "@wsp/runtime";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
 
@@ -22,8 +23,8 @@ export interface HostOptions {
   keys: KeyFlags;
   /** The builder wsp init prepared; the page opens on its terminal for the sign-ins and the save. */
   builder?: GoldenBuilderView;
-  /** The sign-ins the person chose to do on that machine, each with its command. */
-  checklist?: { label: string; command: string }[];
+  /** The sign-ins still to do on that machine, each with its command; a function is read on every page load. */
+  checklist?: ChecklistItem[] | (() => ChecklistItem[]);
   /** HTTP port for the app (0 picks a free one). Default 4400. */
   port?: number;
   /** Port for serveRuntime's WS (0 picks a free one). Default 4410. */
@@ -39,9 +40,9 @@ export interface HostOptions {
   /** Opens a guest tool's sign-in URL on this computer; the platform opener by default (the desktop app passes its own). */
   openUrl?: UrlOpener;
   /** Whether a workspace's sign-in page opens here without a click; off by default, the app shows it instead. */
-  autoOpen?: (workspaceId: string) => boolean;
+  autoOpen?: (workspaceId: string, url: string) => boolean;
   /** The line logged when a sign-in page arrives and nothing opens, given the workspace name and the page's hostname. */
-  openLine?: (workspace: string, hostname: string) => string;
+  openLine?: (workspace: string, hostname: string, url: string) => string;
   /** The saved recipe file, named as the way to reuse a kept builder. */
   recipePath?: string;
 }
@@ -78,7 +79,7 @@ interface Boot {
   token: string;
   keys: KeyFlags;
   builder?: GoldenBuilderView;
-  checklist?: { label: string; command: string }[];
+  checklist?: ChecklistItem[];
 }
 
 function loadPage(webDir: string, boot: Boot): string {
@@ -180,15 +181,19 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const log = opts.log ?? (() => {});
 
   const rtServer = await serveRuntime(rt, { port: opts.wsPort ?? 4410, authToken });
-  let page: string;
-  try {
-    page = loadPage(webDir, {
+  // Rendered per request: the checklist can change while the host runs (wsp init's sign-in stage).
+  const page = (): string => {
+    const checklist = typeof opts.checklist === "function" ? opts.checklist() : opts.checklist;
+    return loadPage(webDir, {
       wsPort: rtServer.port,
       token: authToken,
       keys: opts.keys,
       ...(opts.builder !== undefined ? { builder: opts.builder } : {}),
-      ...(opts.checklist !== undefined ? { checklist: opts.checklist } : {}),
+      ...(checklist !== undefined ? { checklist } : {}),
     });
+  };
+  try {
+    page();
   } catch (e) {
     await rtServer.close();
     throw e;
@@ -199,7 +204,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       const path = new URL(req.url ?? "/", "http://localhost").pathname;
       if (req.method === "GET" && path === "/") {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-        res.end(page);
+        res.end(page());
         return;
       }
       if (req.method === "GET" && path === "/api/workspaces") {

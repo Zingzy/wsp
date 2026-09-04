@@ -7,13 +7,13 @@
 // long as they like, as long as nobody pauses it (snapshot-fresh rule).
 
 import { createHash } from "node:crypto";
-import { ALREADY_APPLIED, type GoldenManifest, type GoldenStage, type GoldenVersion } from "@wsp/protocol";
+import { ALREADY_APPLIED, type GoldenLogin, type GoldenManifest, type GoldenStage, type GoldenVersion } from "@wsp/protocol";
 import { HOMEBREW, NODE_PATH_LINE, type AgentInstall, type NodeInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { assertFirstLife } from "./lifecycle.js";
 import type { ExecResult, Machine, MachineBackend, MachineKind, MachineState } from "./machine.js";
 import { importInto } from "./vault.js";
 
-export type { GoldenManifest, GoldenStage, GoldenVersion };
+export type { GoldenLogin, GoldenManifest, GoldenStage, GoldenVersion };
 
 export type StageListener = (stage: GoldenStage, detail?: string) => void;
 
@@ -445,6 +445,8 @@ export interface SealGoldenOptions extends MachineSize {
   manifest?: GoldenManifest;
   onStage?: StageListener;
   killConfirm?: KillConfirm;
+  /** How each sign-in asked of the builder ended; stamped on the version as given. */
+  logins?: GoldenLogin[];
 }
 
 export interface BuildGoldenOptions extends MachineSize {
@@ -594,6 +596,7 @@ export async function sealGolden(
       smoke: { cmd: smoke, exitCode: smokeRes.exitCode },
       size: builder.size,
       browserShim,
+      ...(opts.logins !== undefined ? { logins: opts.logins } : {}),
     };
     stage("sealed", leak === undefined ? `v${versionNum}` : `v${versionNum}; ${leak}`);
     return { manifest: { head: versionNum, versions: [...prior, version] }, version };

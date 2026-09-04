@@ -34,9 +34,9 @@ export interface RelayOptions {
    * from the TUI is the case that turns it on (the caller decides). Asked once
    * per event, right before openUrl runs, so a caller that clears its arm
    * inside openUrl is one-shot without a race. */
-  autoOpen?: (targetId: string) => boolean;
+  autoOpen?: (targetId: string, url: string) => boolean;
   /** The one line logged when a page arrives and nothing opens, given the workspace name and the URL's hostname; the TUI supplies its own. */
-  openLine?: (workspace: string, hostname: string) => string;
+  openLine?: (workspace: string, hostname: string, url: string) => string;
   /** One line per open, forward, refusal and close; never the URL. */
   log: (line: string) => void;
   builder?: GoldenBuilderView;
@@ -295,7 +295,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
         if (f?.port === e.port && f.listener) closeForward(f, "the workspace stopped listening");
         return;
       case "browser.open":
-        if (autoOpen(link.target.id)) {
+        if (autoOpen(link.target.id, e.url)) {
           void o.openUrl(e.url).then(ok =>
             o.log(ok ? `${link.target.name}: opened a sign-in page in your browser` : `${link.target.name}: could not open your browser for a sign-in page`),
           );
@@ -306,7 +306,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
             o.log(`${link.target.name}: ignored a sign-in page that is not an http(s) link`);
             return;
           }
-          o.log(openLine(link.target.name, host));
+          o.log(openLine(link.target.name, host, e.url));
         }
         // The forward arms now, so the port is ready by the time the person clicks.
         if (e.port !== undefined) tryForward(link, e.port);

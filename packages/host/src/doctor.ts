@@ -213,6 +213,8 @@ export function connectDaemonSocket(opts: ConnectOptions): Promise<DaemonSocket>
     }, opts.connectTimeoutMs ?? 15_000);
 
     const op = (name: string, extra: Record<string, unknown> = {}): Promise<Record<string, unknown>> => {
+      // ws neither throws nor calls back for a send on a closed socket, and the close handler already emptied pending.
+      if (ws.readyState !== ws.OPEN) return Promise.reject(new Error(`daemon socket is not open (${name})`));
       const id = nextId++;
       return new Promise((res, rej) => {
         pending.set(id, { resolve: res, reject: rej });

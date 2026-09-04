@@ -5,7 +5,7 @@
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it } from "vitest";
-import { LABEL_CAP, LOCKED_CAP, buildEntries, focusable, matches, rungSelect, settle as settleCursor, toggleEntry, type Entry, type SelectItem } from "../src/init-select.js";
+import { LABEL_CAP, LOCKED_CAP, buildEntries, focusable, matches, readKey, rungSelect, settle as settleCursor, toggleEntry, type Entry, type SelectItem } from "../src/init-select.js";
 
 const KEY = { up: "\x1b[A", down: "\x1b[B", left: "\x1b[D", right: "\x1b[C", space: " ", enter: "\r", esc: "\x1b", ctrlC: "\x03" };
 
@@ -692,5 +692,19 @@ describe("rungSelect", () => {
     expect(text()).toContain("Selected: none");
     await press(input, KEY.enter);
     expect(await p).toEqual({ kind: "next", ticks: new Set(), choices: new Map() });
+  });
+});
+
+describe("readKey", () => {
+  it("resolves on an accepted key without echoing it, ignores others, and reads Ctrl-C or escape as cancel", async () => {
+    const { input, output, text } = streams();
+    const p = readKey(input, output, ["r", "s"]);
+    await press(input, "x", "s");
+    expect(await p).toBe("s");
+    expect(text()).toBe("");
+    const q = readKey(input, output, ["r", "s"]);
+    await press(input, KEY.ctrlC);
+    expect(await q).toBe("cancel");
+    expect(text()).toBe("");
   });
 });

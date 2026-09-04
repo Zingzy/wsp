@@ -168,7 +168,7 @@ describe("callback relay over a fake daemon link", () => {
     for (const s of servers.splice(0)) await new Promise<void>(r => s.close(() => r()));
   });
 
-  async function setup(o: { window?: number; cap?: number; autoOpen?: boolean; guestPorts?: number[]; jitter?: number; openLine?: (workspace: string, hostname: string) => string } = {}) {
+  async function setup(o: { window?: number; cap?: number; autoOpen?: boolean; guestPorts?: number[]; jitter?: number; openLine?: (workspace: string, hostname: string, url: string) => string } = {}) {
     const { rt } = relayRuntime("http://guest.test");
     const fake = fakeConnect();
     const guestPorts = o.guestPorts ?? [];
@@ -240,11 +240,38 @@ describe("callback relay over a fake daemon link", () => {
     expect(lines.join("\n")).not.toMatch(/login\/device|redirect_uri|state=/);
   });
 
-  it("the line logged when nothing opens comes from the openLine hook when one is given", async () => {
-    const { lines, link } = await setup({ openLine: (workspace, hostname) => `${workspace}: press o on the link above to open ${hostname} here` });
+  it("the line logged when nothing opens comes from the openLine hook when one is given, told the page's URL too", async () => {
+    const urls: string[] = [];
+    const { lines, link } = await setup({ openLine: (workspace, hostname, url) => (urls.push(url), `${workspace}: press o on the link above to open ${hostname} here`) });
     link.emit({ type: "browser.open", url: DEVICE });
     await until(() => lines.length === 1);
     expect(lines).toEqual(["task-1: press o on the link above to open github.com here"]);
+    expect(urls).toEqual([DEVICE]);
+  });
+
+  it("autoOpen is asked with the target and the page's URL, so a caller can decline one it already opened", async () => {
+    const asked: [string, string][] = [];
+    const { rt } = relayRuntime("http://guest.test");
+    const fake = fakeConnect();
+    const opened: string[] = [];
+    const ws = await rt.workspaces.create({ golden: "snap_gold", name: "task-1" });
+    relay = startCallbackRelay({
+      runtime: rt,
+      openUrl: async url => (opened.push(url), true),
+      log: () => {},
+      clock: fakeClock(),
+      connect: fake.connect,
+      autoOpen: (id, url) => (asked.push([id, url]), url !== DEVICE),
+      jitter: () => 0,
+    });
+    await until(() => fake.links.length >= 1);
+    const link = fake.links[0]!;
+    await until(() => link.ops.some(x => x.op === "ports.watch"));
+    link.emit({ type: "browser.open", url: DEVICE });
+    link.emit({ type: "browser.open", url: "https://auth.example.com/device" });
+    await until(() => opened.length === 1);
+    expect(asked).toEqual([[ws.id, DEVICE], [ws.id, "https://auth.example.com/device"]]);
+    expect(opened).toEqual(["https://auth.example.com/device"]);
   });
 
   it("with autoOpen on, browser.open opens the URL on this computer and logs the workspace, never the URL", async () => {

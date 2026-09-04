@@ -50,16 +50,17 @@ describe("login choices", () => {
     expect(initialChoice({ ...byId("logins/claude"), choice: "copy" })).toBe("copy");
   });
 
-  it("knows the sign-in command of the common logins and says nothing for the rest", () => {
+  it("words each login from the sign-in table: the command, what to do instead, or a plain ask", () => {
     expect(signInCommand(byId("logins/gh"))).toBe("gh auth login");
-    expect(signInCommand(byId("logins/claude"))).toBe("claude, then /login");
-    expect(signInCommand({ ...byId("logins/gh"), id: "logins/kube" })).toBeUndefined();
+    expect(signInCommand(byId("logins/claude"))).toBe("claude auth login");
+    expect(signInCommand({ ...byId("logins/gh"), id: "logins/kube" })).toBe("kubectl has no sign-in; copy the kubeconfig instead");
+    expect(signInCommand({ ...byId("logins/gh"), id: "logins/brand-new" })).toBe("sign in as the tool asks");
   });
 
   it("the checklist is exactly the logins chosen as sign in on the machine", () => {
     const choices = new Map([["logins/gh", "machine"], ["logins/claude", "skip"]] as const);
     expect(checklistFor(FIXTURE, choices, new Set())).toEqual([{ label: "GitHub CLI login", command: "gh auth login" }]);
-    expect(checklistFor(FIXTURE, new Map([["logins/claude", "machine"]]), new Set())).toEqual([{ label: "Claude Code login", command: "claude, then /login" }]);
+    expect(checklistFor(FIXTURE, new Map([["logins/claude", "machine"]]), new Set())).toEqual([{ label: "Claude Code login", command: "claude auth login" }]);
   });
 });
 
