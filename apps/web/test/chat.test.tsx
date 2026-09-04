@@ -383,6 +383,149 @@ describe("chat tab new thread mid-turn", () => {
   });
 });
 
+describe("chat tab threads", () => {
+  const turn = (sc: { sessionId: string; turnId: string; threadId?: string }, prompt: string, text: string): SessionEvent[] => {
+    const s = { workspaceId: WS, ...sc };
+    return [
+      { type: "session.start", ...s, prompt },
+      { type: "session.delta", ...s, kind: "text", text },
+      { type: "session.done", ...s, result: { status: "completed", durationMs: 900, costUsd: 0.001 } },
+      { type: "session.end", ...s, exitCode: 0, sawResult: true },
+    ];
+  };
+  const FIRST: SessionEvent[] = CHAT_STREAM.map(e => ({ ...e, threadId: "thr_a" }));
+  const SECOND = turn({ sessionId: "sess_0002", turnId: "turn_0002", threadId: "thr_b" }, "second", "two.");
+  const THIRD = turn({ sessionId: "sess_0003", turnId: "turn_0003", threadId: "thr_c" }, "third", "three.");
+  const prompt = () => screen.getByRole("textbox", { name: "prompt" }) as HTMLTextAreaElement;
+
+  it("two threads in one history render as the last one, on mount and again after a replay gap", async () => {
+    const history: Record<string, SessionEvent[]> = { [WS]: [...FIRST, ...SECOND] };
+    const { api } = fixtureApi([workspace], history);
+    await setup(api);
+    await screen.findByText("two.");
+    expect(screen.getByText("second")).toBeDefined();
+    expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();
+    expect(screen.getByTestId("settled-footer").textContent).toContain("completed");
+    expect(prompt().disabled).toBe(false);
+
+    history[WS] = [...FIRST, ...SECOND, ...THIRD];
+    act(() => useStore.getState().noteGap());
+    await screen.findByText("three.");
+    expect(screen.queryByText("two.")).toBeNull();
+    expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();
+  });
+
+  it("a history without thread ids renders whole", async () => {
+    const legacy = [...turn({ sessionId: "sess_0001", turnId: "turn_0001" }, "first", "one."), ...turn({ sessionId: "sess_0001", turnId: "turn_0002" }, "second", "two.")];
+    const { api } = fixtureApi([workspace], { [WS]: legacy });
+    await setup(api);
+    await screen.findByText("two.");
+    expect(screen.getByText("one.")).toBeDefined();
+    expect(screen.getByText("first")).toBeDefined();
+    expect(screen.getByText("second")).toBeDefined();
+  });
+
+  it("a live new thread is unchanged, and a replay gap after it reloads that thread alone", async () => {
+    const history: Record<string, SessionEvent[]> = { [WS]: [...FIRST] };
+    const { api, started, emit } = fixtureApi([workspace], history);
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    act(() => requestNewThread({ workspaceId: WS }));
+    expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
+    fireEvent.change(prompt(), { target: { value: "second" } });
+    fireEvent.keyDown(prompt(), { key: "Enter" });
+    await waitFor(() => expect(started.length).toBe(1));
+    expect(started[0]).toEqual({ workspaceId: WS, prompt: "second" });
+    for (const e of SECOND) emit(e);
+    expect(screen.getByText("two.")).toBeDefined();
+    expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();
+    expect(prompt().disabled).toBe(false);
+
+    // The runtime's transcript holds both threads; the reload keeps the one the person is in.
+    history[WS] = [...FIRST, ...turn({ sessionId: "sess_0002", turnId: "turn_0002", threadId: "thr_b" }, "second", "two, reloaded.")];
+    act(() => useStore.getState().noteGap());
+    await screen.findByText("two, reloaded.");
+    expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();
+    expect(screen.getByText("second")).toBeDefined();
+    expect(prompt().disabled).toBe(false);
+  });
+
+  it("a replay gap while a new thread waits over a stamped history keeps the left thread out, its running turn included", async () => {
+    const history: Record<string, SessionEvent[]> = { [WS]: [...FIRST] };
+    const { api, started, emit } = fixtureApi([workspace], history);
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    act(() => requestNewThread({ workspaceId: WS }));
+    act(() => requestNewThread({ workspaceId: WS }));
+    expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
+    expect(prompt().disabled).toBe(false);
+
+    // While the socket was down a turn started in the left thread; it is the turn the new thread waits on, not the person's.
+    const again = turn({ sessionId: "sess_0001", turnId: "turn_0009", threadId: "thr_a" }, "again", "still the old thread.");
+    history[WS] = [...FIRST, ...again.slice(0, 2)];
+    act(() => useStore.getState().noteGap());
+    await screen.findByText("finishing the previous turn");
+    expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
+    expect(screen.queryByText("still the old thread.")).toBeNull();
+    expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();
+    for (const e of again.slice(2)) emit(e);
+    expect(prompt().disabled).toBe(false);
+    expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
+    fireEvent.change(prompt(), { target: { value: "start over" } });
+    fireEvent.keyDown(prompt(), { key: "Enter" });
+    await waitFor(() => expect(started.length).toBe(1));
+    expect(started[0]).toEqual({ workspaceId: WS, prompt: "start over" });
+  });
+
+  it("fresh thread, send, drop, gap, reload: the person's turn shows and the composer opens once it ended", async () => {
+    const history: Record<string, SessionEvent[]> = { [WS]: [...FIRST] };
+    const { api, started } = fixtureApi([workspace], history);
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    act(() => requestNewThread({ workspaceId: WS }));
+    fireEvent.change(prompt(), { target: { value: "start over" } });
+    fireEvent.keyDown(prompt(), { key: "Enter" });
+    await waitFor(() => expect(started.length).toBe(1));
+    expect(started[0]).toEqual({ workspaceId: WS, prompt: "start over" });
+    expect(prompt().disabled).toBe(true);
+    expect(screen.getByText("turn in flight")).toBeDefined();
+
+    // The socket dropped before the fresh session.start reached the tab; the runtime ran the turn to its end.
+    history[WS] = [...FIRST, ...turn({ sessionId: "sess_0002", turnId: "turn_0002", threadId: "thr_b" }, "start over", "Fresh start.")];
+    act(() => useStore.getState().noteGap());
+    await screen.findByText("Fresh start.");
+    expect(screen.getByText("start over")).toBeDefined();
+    expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();
+    expect(screen.queryByText("finishing the previous turn")).toBeNull();
+    expect(prompt().disabled).toBe(false);
+    expect(screen.getByTestId("settled-footer").textContent).toContain("completed");
+  });
+
+  it("fresh thread, send, drop, gap, reload while the person's turn still runs: it shows as in flight, never as the previous turn", async () => {
+    const history: Record<string, SessionEvent[]> = { [WS]: [...FIRST] };
+    const { api, started, emit } = fixtureApi([workspace], history);
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    act(() => requestNewThread({ workspaceId: WS }));
+    fireEvent.change(prompt(), { target: { value: "start over" } });
+    fireEvent.keyDown(prompt(), { key: "Enter" });
+    await waitFor(() => expect(started.length).toBe(1));
+
+    const fresh = turn({ sessionId: "sess_0002", turnId: "turn_0002", threadId: "thr_b" }, "start over", "Fresh start.");
+    history[WS] = [...FIRST, ...fresh.slice(0, 2)];
+    act(() => useStore.getState().noteGap());
+    await screen.findByText("Fresh start.");
+    expect(screen.getByText("start over")).toBeDefined();
+    expect(screen.queryByText("finishing the previous turn")).toBeNull();
+    expect(screen.getByText("turn in flight")).toBeDefined();
+    expect(prompt().disabled).toBe(true);
+    // The rest of the turn lands live and opens the composer.
+    for (const e of fresh.slice(2)) emit(e);
+    expect(prompt().disabled).toBe(false);
+    expect(screen.getByTestId("settled-footer").textContent).toContain("completed");
+  });
+});
+
 describe("approval prompt (fixture mode: no wire event exists yet, wsp-map #22)", () => {
   it("resolves the chosen option exactly once", () => {
     const onRespond = vi.fn();

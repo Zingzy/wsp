@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { SessionEvent } from "@wsp/protocol";
 import { CHAT_STREAM, CHAT_WS } from "../../../test/fixtures/chat-stream";
-import { deriveChatThread, stabilizeEntries, type ThreadState } from "./useChatThread";
+import { deriveChatThread, reloadTranscript, stabilizeEntries, type StaleTurn, type ThreadState } from "./useChatThread";
 
 const T0 = "2026-09-01T02:00:00.000Z";
 const state = (events: ReadonlyArray<SessionEvent>, extra: Partial<ThreadState> = {}): ThreadState => ({
@@ -12,6 +12,8 @@ const state = (events: ReadonlyArray<SessionEvent>, extra: Partial<ThreadState> 
   localErrors: [],
   fresh: false,
   stale: null,
+  sending: false,
+  left: undefined,
   ...extra,
 });
 
@@ -75,5 +77,84 @@ describe("stabilizeEntries", () => {
     expect(stable).toEqual(a);
     stable.forEach((entry, i) => expect(entry).toBe(a[i]));
     expect(stabilizeEntries([], a)).toEqual([]);
+  });
+});
+
+describe("reloadTranscript", () => {
+  const A = CHAT_STREAM.map(e => ({ ...e, threadId: "thr_a" }));
+  const A_RUNNING = A.slice(0, 3);
+  const A_TURN: StaleTurn = { kind: "turn", turnId: "turn_0001", sessionId: "sess_0001" };
+  const b = { workspaceId: CHAT_WS, sessionId: "sess_0002", turnId: "turn_0002", threadId: "thr_b" };
+  const B_RUNNING: SessionEvent[] = [
+    { type: "session.start", ...b, prompt: "start over" },
+    { type: "session.delta", ...b, kind: "text", text: "Fresh start." },
+  ];
+  const B_DONE: SessionEvent[] = [
+    ...B_RUNNING,
+    { type: "session.done", ...b, result: { status: "completed", durationMs: 900, costUsd: 0.001 } },
+    { type: "session.end", ...b, exitCode: 0, sawResult: true },
+  ];
+  const B_TURN: StaleTurn = { kind: "turn", turnId: "turn_0002", sessionId: "sess_0002" };
+  const unstamped = CHAT_STREAM;
+
+  it("keeps only the last thread of a transcript, arrivals alongside", () => {
+    const next = reloadTranscript(state([]), [...A, ...B_DONE], T0);
+    expect(next.events).toEqual(B_DONE);
+    expect(next.arrivals).toEqual(B_DONE.map(() => T0));
+    expect(next.fresh).toBe(false);
+    expect(next.stale).toBeNull();
+  });
+
+  it("a transcript without thread ids is one thread", () => {
+    const second = unstamped.map(e => ({ ...e, sessionId: "sess_0009", turnId: "turn_0009" }));
+    const next = reloadTranscript(state([]), [...unstamped, ...second], T0);
+    expect(next.events.length).toBe(unstamped.length * 2);
+  });
+
+  it("folds by the last event's id, not by runs, so interleaved turns keep every event of the last thread", () => {
+    const events = [A[0]!, A[1]!, B_RUNNING[0]!, A[2]!, B_RUNNING[1]!, ...B_DONE.slice(2)];
+    expect(reloadTranscript(state([]), events, T0).events).toEqual(B_DONE);
+  });
+
+  it("while fresh, a left thread that ended in the dark leaves nothing stale and keeps the fresh state", () => {
+    const fresh = state([], { fresh: true, left: "thr_a", stale: A_TURN, pendingPrompt: { text: "start over", at: T0 } });
+    const next = reloadTranscript(fresh, A, T0);
+    expect(next).toEqual({ ...fresh, stale: null });
+  });
+
+  it("while fresh, a left thread still running keeps its turn as the stale one", () => {
+    const fresh = state([], { fresh: true, left: "thr_a", stale: A_TURN });
+    expect(reloadTranscript(fresh, A_RUNNING, T0)).toEqual({ ...fresh, stale: A_TURN });
+  });
+
+  it("while fresh, a thread with an id the left one did not have is the person's own and loads as such", () => {
+    const fresh = state([], { fresh: true, left: "thr_a", pendingPrompt: { text: "start over", at: T0 } });
+    const next = reloadTranscript(fresh, [...A, ...B_RUNNING], T0);
+    expect(next.events).toEqual(B_RUNNING);
+    expect(next.fresh).toBe(false);
+    expect(next.pendingPrompt).toBeNull();
+    expect(next.stale).toBeNull();
+    expect(next.left).toBeUndefined();
+  });
+
+  it("while fresh, the left thread alone decides the stale record when the person's thread is present", () => {
+    const fresh = state([], { fresh: true, left: "thr_a", stale: A_TURN });
+    const next = reloadTranscript(fresh, [...A_RUNNING, ...B_RUNNING], T0);
+    expect(next.events).toEqual(B_RUNNING);
+    expect(next.stale).toEqual(A_TURN);
+  });
+
+  it("while fresh from an empty thread, a new id is the person's own; a legacy thread is the left one", () => {
+    const fresh = state([], { fresh: true, left: undefined });
+    expect(reloadTranscript(fresh, B_RUNNING, T0).events).toEqual(B_RUNNING);
+    const legacy = reloadTranscript(fresh, unstamped.slice(0, 3), T0);
+    expect(legacy.events).toEqual([]);
+    expect(legacy.stale).toEqual(A_TURN);
+  });
+
+  it("a pending send is never read as the person's thread: its turn in the transcript is the stale one", () => {
+    const pending = state([], { fresh: true, left: undefined, stale: { kind: "pending-send" } });
+    expect(reloadTranscript(pending, B_RUNNING, T0)).toEqual({ ...pending, stale: B_TURN });
+    expect(reloadTranscript(pending, B_DONE, T0)).toEqual(pending);
   });
 });
