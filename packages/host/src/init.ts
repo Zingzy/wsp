@@ -14,7 +14,7 @@ import { S_BAR, S_STEP_ERROR, S_STEP_SUBMIT, cancel, isCancel, log, outro } from
 import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { agentInstallsFor, toolInstallsFor } from "@wsp/engine";
+import { PACK_BUDGET_BYTES, agentInstallsFor, toolInstallsFor } from "@wsp/engine";
 import { ALREADY_APPLIED } from "@wsp/protocol";
 import { CLAUDE_INSTALLER, importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
@@ -482,8 +482,15 @@ function detectionNote(manifest: Manifest, source: string): string[] {
 
 /** One row per rung with its ticks and size, the sign-ins under theirs with the answer each
  * got, a credential-shaped row under Everything else when it got an answer other than skip,
- * then what uploads and what installs, wrapped under their own column. */
-export function summaryNote(manifest: Manifest, ticks: ReadonlySet<string>, choices: ReadonlyMap<string, string>, width: number): string[] {
+ * then what uploads and what installs, wrapped under their own column. `upload` is the plan's own
+ * count of the bytes that travel; without it the ticked rows' sizes stand in. */
+export function summaryNote(
+  manifest: Manifest,
+  ticks: ReadonlySet<string>,
+  choices: ReadonlyMap<string, string>,
+  width: number,
+  upload: number = manifest.entries.filter(e => ticks.has(e.id)).reduce((n, e) => n + e.bytes, 0),
+): string[] {
   const perRung = RUNGS.map(rung => manifest.entries.filter(e => e.rung === rung)).filter(entries => entries.length > 0);
   const answer = (e: ManifestEntry): string => LOGIN_CHOICES.find(c => c.value === choices.get(e.id))?.label ?? "skip";
   // The sign-ins row counts the answers that bring something, as its screen's header does: a sign-in is chosen though nothing is ticked.
@@ -507,7 +514,6 @@ export function summaryNote(manifest: Manifest, ticks: ReadonlySet<string>, choi
   const labelRoom = inner - 2 - GUTTER.length - Math.max(...LOGIN_CHOICES.map(c => c.label.length));
   const answered = new Map(table(listed.map(e => [`  ${ellipsize(e.label, labelRoom)}`, answer(e)])).map((line, i) => [listed[i]!.id, line]));
   const lines = perRung.flatMap((entries, i) => [rows[i]!, ...entries.flatMap(e => answered.get(e.id) ?? [])]);
-  const upload = fmtBytes(manifest.entries.filter(e => ticks.has(e.id)).reduce((n, e) => n + e.bytes, 0));
   const bring = manifest.entries.filter(e => ticks.has(e.id)).map(e => ({ ...e, bring: true }));
   const agents = agentInstallsFor(bring, { claude: CLAUDE_INSTALLER }).installs.map(a => a.name);
   // Only what the person ticked counts as their tools; Homebrew and its toolchain are named apart.
@@ -516,7 +522,7 @@ export function summaryNote(manifest: Manifest, ticks: ReadonlySet<string>, choi
   const toolchain = steps.some(t => t.id.startsWith("tools/brew-toolchain/")) ? " plus Homebrew's toolchain" : "";
   const installs = [...agents, ...(tools > 0 ? [`${tools} tool${tools === 1 ? "" : "s"}${toolchain}`] : [])];
   const closing: [string, string][] = [
-    ["Upload", `${upload}, nothing has left this computer yet`],
+    ["Upload", upload > PACK_BUDGET_BYTES ? `${fmtBytes(upload)}, over the ${fmtBytes(PACK_BUDGET_BYTES)} the machine's disk allows` : `${fmtBytes(upload)}, nothing has left this computer yet`],
     ["Installs", installs.length > 0 ? installs.join(", ") : "nothing; the machine boots bare"],
   ];
   const column = Math.max(...closing.map(([label]) => label.length)) + GUTTER.length;
@@ -658,11 +664,6 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const { ticks, choices } = answers;
   const offered: Manifest = { entries: manifest.entries.filter(e => loginShown(e, manifest, ticks)) };
 
-  card("Summary", summaryNote(offered, ticks, choices, widthOf(io.output)), io.output);
-  const path = recipePath(opts.statePath);
-  saveRecipe(path, manifest, ticks, choices);
-  log.step(`Recipe saved to ${path}`, out);
-
   const bringing = (): ManifestEntry[] =>
     manifest.entries.filter(e => ticks.has(e.id)).map(e => {
       const choice = choices.get(e.id);
@@ -691,6 +692,19 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       },
     });
   let imp = importOf(bring);
+  const uploadBytes = imp.files?.bytes ?? 0;
+  card("Summary", summaryNote(offered, ticks, choices, widthOf(io.output), uploadBytes), io.output);
+  const path = recipePath(opts.statePath);
+  saveRecipe(path, manifest, ticks, choices);
+  log.step(`Recipe saved to ${path}`, out);
+  // Judged on the recipe's own sizes, before the account is read or anything boots: the builder's disk
+  // check would refuse the same files after the machine billed.
+  if (uploadBytes > PACK_BUDGET_BYTES) {
+    log.error(`Your files add up to ${fmtBytes(uploadBytes)}; the machine's disk leaves ${fmtBytes(PACK_BUDGET_BYTES)} for them beside the tools and agents.`, out);
+    const fix = interactive ? "Untick the larger rows (each screen shows sizes) and run wsp init again" : `Set bring to false on the larger rows in ${path}, then run wsp init --yes --manifest ${path}`;
+    cancel(`Nothing was booted. ${fix}; the recipe is kept.`, out);
+    return { code: 1 };
+  }
   let recipe = goldenRecipeFor(bring, opts.keys, { import: imp });
   let rt = opts.runtime(recipe);
   const describeBuilder = (b: GoldenBuilderView): string => {

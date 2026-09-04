@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { backoffMs, classify, shouldRetry } from "./errors.js";
 import type { Machine } from "./machine.js";
 
 type Fetch = typeof globalThis.fetch;
@@ -9,6 +11,15 @@ export interface VaultOptions {
   maxBytes?: number;
   /** Import only: merge into what the destination already holds instead of replacing its directories. */
   overlay?: boolean;
+  /** Import only: called as each part lands, with the bytes sent so far. */
+  onPart?: (progress: UploadProgress) => void;
+}
+
+export interface UploadProgress {
+  part: number;
+  parts: number;
+  bytes: number;
+  total: number;
 }
 
 function quote(p: string): string {
@@ -16,8 +27,7 @@ function quote(p: string): string {
 }
 
 // Signed-URL transport on both directions (PoC P5: ~1s round trips). exec
-// stdout could carry base64 for small exports but hits response-size limits;
-// signed URLs have no such ceiling, so no chunking is needed either.
+// stdout could carry base64 for small exports but hits response-size limits.
 export async function exportPaths(machine: Machine, paths: string[], opts: VaultOptions = {}): Promise<Buffer> {
   const doFetch = opts.fetch ?? globalThis.fetch;
   const tmp = `/tmp/wsp-vault-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tgz`;
@@ -44,22 +54,94 @@ export async function exportPaths(machine: Machine, paths: string[], opts: Vault
   }
 }
 
-export async function importInto(machine: Machine, tar: Buffer, destDir: string, opts: VaultOptions = {}): Promise<void> {
+/** The signed upload URL takes one PUT of at most this many bytes (measured 2026-09-04: 200 at 32 MiB,
+ * 413 from 33 MiB, the body naming the limit); a larger archive travels in parts of this size. */
+export const UPLOAD_PART_BYTES = 32 * 1024 * 1024;
+
+type UploadBody = { error?: unknown; limit?: unknown };
+
+function parseBody(body: string): UploadBody | undefined {
+  try {
+    return JSON.parse(body) as UploadBody;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The provider answers a refused upload with `{error, limit}`; the limit is the one figure worth repeating. */
+function uploadFailure(status: number, body: string, part: number, parts: number, attempts: number): string {
+  const where = parts === 1 ? "" : ` on part ${part} of ${parts}`;
+  const parsed = parseBody(body);
+  const reason = typeof parsed?.error === "string" ? parsed.error : body.trim().slice(0, 300);
+  const limit = typeof parsed?.limit === "number" ? `; the upload takes at most ${parsed.limit} bytes per PUT` : "";
+  const tries = attempts > 1 ? ` after ${attempts} attempts` : "";
+  return `vault import upload failed${where}: HTTP ${status}${reason === "" ? "" : ` ${reason}`}${tries}${limit}`;
+}
+
+/** One part, PUT until it lands. The signed URL truncates the path on every PUT, so a retry after a lost
+ * response or a 502 to 504 is safe; the bound and backoff are the backend's own. A 413 or any 4xx is final. */
+async function putPart(doFetch: Fetch, url: string, bytes: Uint8Array<ArrayBuffer>, part: number, parts: number): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    let res: Response;
+    try {
+      res = await doFetch(url, { method: "PUT", body: bytes });
+    } catch (e) {
+      if (attempt >= 3) throw new Error(`vault import upload failed${parts === 1 ? "" : ` on part ${part} of ${parts}`}: ${e instanceof Error ? e.message : String(e)} after ${attempt} attempts`);
+      await new Promise(r => setTimeout(r, backoffMs(attempt)));
+      continue;
+    }
+    if (res.ok) return;
+    const body = await res.text().catch(() => "");
+    const parsed = parseBody(body);
+    const kind = classify(res.status, typeof parsed?.error === "string" ? { error: parsed.error } : {});
+    if (!shouldRetry(kind, attempt)) throw new Error(uploadFailure(res.status, body, part, parts, attempt));
+    await new Promise(r => setTimeout(r, backoffMs(attempt)));
+  }
+}
+
+// A hash mismatch exits with its own code so the caller can tell it from a failed extraction.
+const HASH_MISMATCH_EXIT = 65;
+
+export async function importInto(machine: Machine, tar: Buffer, destDir: string, opts: VaultOptions = {}): Promise<{ parts: number }> {
   const doFetch = opts.fetch ?? globalThis.fetch;
+  if (tar.length === 0) throw new Error("vault import: empty archive, nothing to import");
   const tmp = `/tmp/wsp-vault-in-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tgz`;
-  const url = await machine.uploadUrl(tmp);
-  const put = await doFetch(url, { method: "PUT", body: new Uint8Array(tar) });
-  if (!put.ok) throw new Error(`vault import upload failed: HTTP ${put.status}`);
+  const parts = Math.ceil(tar.length / UPLOAD_PART_BYTES);
+  const partPaths = parts === 1 ? [tmp] : Array.from({ length: parts }, (_, i) => `${tmp}.part${i}`);
+  try {
+    for (const [i, path] of partPaths.entries()) {
+      const url = await machine.uploadUrl(path);
+      const end = Math.min((i + 1) * UPLOAD_PART_BYTES, tar.length);
+      await putPart(doFetch, url, new Uint8Array(tar.subarray(i * UPLOAD_PART_BYTES, end)), i + 1, parts);
+      opts.onPart?.({ part: i + 1, parts, bytes: end, total: tar.length });
+    }
+  } catch (e) {
+    // Every part path, not only those that answered ok: a body can land before the response fails.
+    await machine.exec(`rm -f ${partPaths.map(quote).join(" ")}`).catch(() => {});
+    throw e;
+  }
+  const digest = createHash("sha256").update(tar).digest("hex");
   // --recursive-unlink: imported dirs replace existing ones wholesale, so a
   // stale config dir on the target can't shadow the vaulted one. An overlay
   // (laptop files onto a fresh guest) merges instead, and --no-same-owner
   // keeps root from inheriting the laptop's uid off the archive.
   const flags = opts.overlay ? "--no-same-owner" : "--recursive-unlink";
-  const untar = await machine.exec(
-    `tar xzf ${quote(tmp)} -C ${quote(destDir)} ${flags} && rm -f ${quote(tmp)}`,
-    { timeoutMs: opts.timeoutMs ?? 120_000 },
-  );
+  // The parts are streamed into tar in order, never joined on disk, so the guest holds the archive once.
+  // pipefail: a part cat cannot read fails the hash line with cat's message instead of hashing what flowed.
+  const joined = `cat ${partPaths.map(quote).join(" ")}`;
+  const script = [
+    "set -eo pipefail",
+    `trap "rm -f ${partPaths.map(quote).join(" ")}" EXIT`,
+    `sum=$(${joined} | sha256sum | cut -d' ' -f1)`,
+    `test "$sum" = ${digest} || exit ${HASH_MISMATCH_EXIT}`,
+    `${joined} | tar xzf - -C ${quote(destDir)} ${flags}`,
+  ].join("\n");
+  const untar = await machine.exec(script, { timeoutMs: opts.timeoutMs ?? 120_000 });
+  if (untar.exitCode === HASH_MISMATCH_EXIT) {
+    throw new Error(`vault import: the uploaded archive (${tar.length} bytes in ${parts} part${parts === 1 ? "" : "s"}) did not match its hash on the machine`);
+  }
   if (untar.exitCode !== 0) {
     throw new Error(`vault import untar failed (exit ${untar.exitCode}): ${untar.stderr.slice(-500)}`);
   }
+  return { parts };
 }

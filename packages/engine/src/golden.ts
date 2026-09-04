@@ -280,8 +280,15 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
       throw new Error(`your files need ${fmtBytes(packed.bytes)} packed and ${fmtBytes(packed.unpacked)} unpacked, plus ${fmtBytes(UPLOAD_HEADROOM)} of headroom, but the machine has ${fmtBytes(free.bytes)} free`);
     }
     const t0 = Date.now();
-    await importInto(machine, packed.tar, "/root", { overlay: true, timeoutMs: 300_000, ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}) });
-    stage("uploading-files", `${label}${fmtBytes(packed.bytes)} in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+    const { parts } = await importInto(machine, packed.tar, "/root", {
+      overlay: true,
+      timeoutMs: 300_000,
+      onPart: p => {
+        if (p.parts > 1) stage("uploading-files", `part ${p.part} of ${p.parts}, ${fmtBytes(p.bytes)} of ${fmtBytes(p.total)}`);
+      },
+      ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}),
+    });
+    stage("uploading-files", `${label}${fmtBytes(packed.bytes)}${parts > 1 ? ` in ${parts} parts` : ""} in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
   };
 
   if (!only) {

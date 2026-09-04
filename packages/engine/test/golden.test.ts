@@ -387,6 +387,17 @@ describe("golden import stages", () => {
     return { ...rb, cmds, puts, fetch: fetchStub };
   }
 
+  it("an archive over one upload part says how many parts it went up in", async () => {
+    const { backend, puts, fetch } = backendFor();
+    const stages: string[] = [];
+    const big = importOf({ files: { ...importOf().files!, pack: async () => ({ tar: Buffer.alloc(33 * 1024 * 1024), bytes: 33 * 1024 * 1024, unpacked: 4096, skipped: [], cut: [] }) } });
+    await prepareBuilder({ backend, setup: "true", fetch, onStage: (s, d) => void stages.push(`${s}:${d ?? ""}`), import: big });
+    expect(puts).toHaveLength(2);
+    expect(stages).toContainEqual("uploading-files:part 1 of 2, 32 MB of 33 MB");
+    expect(stages).toContainEqual("uploading-files:part 2 of 2, 33 MB of 33 MB");
+    expect(stages).toContainEqual(expect.stringMatching(/^uploading-files:33 MB in 2 parts in \d+(\.\d)?s$/));
+  });
+
   it("runs setup, upload, tools and agents in order after the daemon, with a detail on every frame", async () => {
     const { backend, cmds, puts, fetch } = backendFor();
     const { stages, onStage } = stageRecorder();
@@ -668,7 +679,7 @@ describe("golden import stages", () => {
     const results: ImportResult[] = [];
     const again = await applyGoldenImport(builder.machine, { import: importOf({ files: { ...importOf().files!, volatile }, onResult: r => void results.push(r) }), setup: "true", ledger: builder.import, fetch, onStage });
     expect(puts.slice(before.puts).map(b => b.toString())).toEqual(["volatile-tgz"]);
-    expect(cmds.slice(before.cmds).filter(c => c.startsWith("tar xzf"))).toHaveLength(1);
+    expect(cmds.slice(before.cmds).filter(c => c.includes("tar xzf"))).toHaveLength(1);
     expect(stages).toEqual([
       "applying-setup:already applied",
       "uploading-files:2 volatile files, 300 B",

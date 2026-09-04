@@ -81,6 +81,14 @@ export interface FilesPlan {
   rungs: Record<string, number>;
 }
 
+/** The most a recipe's files may add up to on this computer before the plan refuses to boot. A base
+ * sandbox at the upload stage (daemon deployed, nothing else) had 2,245,024 KiB free of a 4 GB root,
+ * 2192 MiB (measured 2026-09-04, df -Pk on a fresh machine). The upload needs the archive, its files
+ * and 256 MiB of headroom under that, and the archive is at most as large as the files, so the files
+ * must stay under (2192 - 256) / 2 = 968 MiB, rounded down. The tools stage's 800 MiB floor for the
+ * agents allows more (1392 MiB), so the upload is the bound that counts. */
+export const PACK_BUDGET_BYTES = 960 * 1024 * 1024;
+
 export interface PlanFilesOptions {
   /** This computer's home with every link in it resolved, so link targets compare against it. */
   home: string;

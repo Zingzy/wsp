@@ -1423,7 +1423,7 @@ describe("wsp init, flags and no terminal", () => {
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
     };
     expect((await runInit(first.opts, first.io)).code).toBe(0);
-    const uploads = () => shared.machines[0]!.execLog.filter(c => c.startsWith("tar xzf")).length;
+    const uploads = () => shared.machines[0]!.execLog.filter(c => c.includes("tar xzf")).length;
     expect(uploads()).toBe(1);
 
     writeFileSync(join(home, ".claude.json"), JSON.stringify({ projects: { one: {}, two: {} } }));
@@ -1505,7 +1505,7 @@ describe("wsp init, flags and no terminal", () => {
     const sha = (v: string) => createHash("sha256").update(v).digest("hex");
     const keychainOf = async () => ((await store.list("builders")) as { import: { recipe: { files: { path: string; digest: string; volatile?: boolean }[] } } }[])[0]!.import.recipe.files.find(f => f.path === "Keychain: gh:github.com");
     expect(await keychainOf()).toMatchObject({ digest: sha("gho_fake"), volatile: true });
-    const uploads = () => shared.machines[0]!.execLog.filter(c => c.startsWith("tar xzf")).length;
+    const uploads = () => shared.machines[0]!.execLog.filter(c => c.includes("tar xzf")).length;
     expect(uploads()).toBe(1);
 
     const f = fake({ yes: true, tty: false, home: first.opts.home, manifestPath: recipePath(first.opts.statePath) });
@@ -1983,5 +1983,29 @@ describe("stage stream", () => {
   it("frames for another golden are ignored", () => {
     const view = reduceStages([{ type: "golden.stage" as const, name: "nightly", stage: "ready" }]);
     expect(view.steps.every(s => s.state === "pending")).toBe(true);
+  });
+});
+
+describe("pack size before the boot", () => {
+  it("a recipe whose files would not fit the machine's disk is refused after the summary, before anything boots", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
+    dirs.push(dir);
+    const path = join(dir, "recipe.json");
+    const big = 1200 * 1024 * 1024;
+    writeFileSync(path, JSON.stringify({ entries: FIXTURE.entries.map(e => ({ ...e, ...(e.id === "shell/zshrc" ? { bytes: big } : {}), bring: e.bring ?? (e.default === "bring" && e.reason === undefined) })) }));
+    const f = fake({ yes: true, manifestPath: path });
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(1);
+    const out = f.text();
+    expect(out).toMatch(/Upload\s+1\.2 GB, over the 960\.0 MB the machine's disk allows/);
+    expect(out).toContain("Recipe saved to");
+    expect(out).toContain("Nothing was booted.");
+    // Off a terminal there are no screens to untick on; the fix is the recipe file, named.
+    expect(out).toContain(`Set bring to false on the larger rows in ${recipePath(f.opts.statePath)}`);
+    expect(out).toContain(`wsp init --yes --manifest ${recipePath(f.opts.statePath)}`);
+    expect(out).not.toContain("each screen shows sizes");
+    expect(out).not.toMatch(BOOT);
+    expect(f.backends[0]?.machines ?? []).toHaveLength(0);
+    expect(f.hosts).toBe(0);
   });
 });

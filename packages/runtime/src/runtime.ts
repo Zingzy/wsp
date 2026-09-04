@@ -693,7 +693,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             entry.machine = m;
           }, override),
         vaultExport: async m => exportPaths(m, await vaultPathsOf(m)),
-        vaultImport: (m, payload) => importInto(m, payload, "/"),
+        vaultImport: async (m, payload) => {
+          await importInto(m, payload, "/");
+        },
         stashVault: async m => {
           try {
             const payload = await exportPaths(m, await vaultPathsOf(m), { maxBytes: vaultCapBytes });
