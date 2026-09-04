@@ -72,3 +72,7 @@ End with: BLOCKERS (n) / SHOULD-FIX (n) / NITS (n), one line each with file:line
 ## A worktree gates only on a base that carries the root vitest config
 
 Since 2026-09-04 main has a root `vitest.config.ts` (from #104). A worktree on a branch that predates it has none, and vitest walks up to `~/wsp`, takes the main checkout as its root and aliases `@wsp/*` to the main checkout's sources. Two builders (#103, #115) watched their tests run against main's protocol and pass or fail for the wrong reason. Before any gate counts, the branch is rebased onto a main that carries the file (`test -f vitest.config.ts` in the worktree root is the check). Reviewers' fresh worktrees merge origin/main first, so their gates were never exposed.
+
+## Long runs on this Mac: what is not installed
+
+`timeout` and `setsid` do not exist on macOS. A gate launched as `timeout 900 pnpm test` or `nohup setsid gate.sh` dies at once and leaves an empty status file that reads as "still running" until someone checks the pid (#104's canary and #110's gate both lost an hour this way). Detach with `nohup sh -c '...' > log 2>&1 &`, record `$!`, and confirm it is alive with `kill -0` before waiting on it; bound a step with the tool's own timeout, not a coreutils one.
