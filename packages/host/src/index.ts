@@ -31,8 +31,11 @@ export {
   RELAY_MIN_PORT,
   RELAY_WINDOW_MS,
   RELAY_CAP_MS,
+  FORWARD_IDLE_MS,
+  FORWARD_MAX_PER_TARGET,
   type CallbackRelay,
   type RelayOptions,
+  type ForwardKind,
   type ForwardView,
   type UrlOpener,
 } from "./relay.js";

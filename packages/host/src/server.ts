@@ -4,7 +4,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import type { ChecklistItem } from "@wsp/protocol";
-import { describeAge, serveRuntime, type GoldenBuilderView, type GoldenVersion, type ReapedMachine, type Runtime, type SparedMachine } from "@wsp/runtime";
+import { describeAge, serveRuntime, type GoldenBuilderView, type GoldenVersion, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
 
 // The enriched status now lives in @wsp/runtime (every client reads one
@@ -35,7 +35,7 @@ export interface HostOptions {
   workspaceEnvs?: (golden: GoldenVersion) => Record<string, string>;
   probeTimeoutMs?: number;
   /** Receives one line per machine a sweep killed, one per running machine the first sweep left alone, and one when a sweep fails;
-   * also one per sign-in page opened, callback port forwarded, refused or closed. */
+   * also one per sign-in page opened and per port forwarded, refused or closed. */
   log?: (line: string) => void;
   /** Opens a guest tool's sign-in URL on this computer; the platform opener by default (the desktop app passes its own). */
   openUrl?: UrlOpener;
@@ -180,7 +180,22 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const webDir = resolvePath(opts.webDir);
   const log = opts.log ?? (() => {});
 
-  const rtServer = await serveRuntime(rt, { port: opts.wsPort ?? 4410, authToken });
+  // Before the runtime socket: the app lists and stops the relay's forwards through it.
+  const relay = startCallbackRelay({
+    runtime: rt,
+    openUrl: opts.openUrl ?? systemOpener(),
+    log,
+    ...(opts.autoOpen !== undefined ? { autoOpen: opts.autoOpen } : {}),
+    ...(opts.openLine !== undefined ? { openLine: opts.openLine } : {}),
+    ...(opts.builder !== undefined ? { builder: opts.builder } : {}),
+  });
+  let rtServer: RuntimeServer;
+  try {
+    rtServer = await serveRuntime(rt, { port: opts.wsPort ?? 4410, authToken, forwards: relay });
+  } catch (e) {
+    await relay.close();
+    throw e;
+  }
   // Rendered per request: the checklist can change while the host runs (wsp init's sign-in stage).
   const page = (): string => {
     const checklist = typeof opts.checklist === "function" ? opts.checklist() : opts.checklist;
@@ -195,6 +210,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   try {
     page();
   } catch (e) {
+    await relay.close();
     await rtServer.close();
     throw e;
   }
@@ -248,6 +264,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       server.listen(opts.port ?? 4400, "127.0.0.1", resolve);
     });
   } catch (e) {
+    await relay.close();
     await rtServer.close();
     throw e;
   }
@@ -267,14 +284,6 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     else if (b.firstLife === true && b.id !== opts.builder?.id) log(describeKept(b, rt.backend.pricing.rateUsdPerHour(b.size), opts.recipePath));
   }
   const reapTimer = setInterval(() => void sweep(false), REAP_INTERVAL_MS);
-  const relay = startCallbackRelay({
-    runtime: rt,
-    openUrl: opts.openUrl ?? systemOpener(),
-    log,
-    ...(opts.autoOpen !== undefined ? { autoOpen: opts.autoOpen } : {}),
-    ...(opts.openLine !== undefined ? { openLine: opts.openLine } : {}),
-    ...(opts.builder !== undefined ? { builder: opts.builder } : {}),
-  });
 
   return {
     port,

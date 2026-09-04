@@ -21,21 +21,21 @@ export function SignInBanner() {
       {entries.map(([workspaceId, { url }]) => {
         const host = hostOf(url);
         return (
-        <Alert key={workspaceId} data-sign-in-banner={workspaceId} title={url}>
-          <ExternalLink />
-          <AlertTitle>
-            {host === undefined ? "A sign-in page" : `A sign-in page for ${host}`} is ready on{" "}
-            {workspaces.find(w => w.id === workspaceId)?.name ?? workspaceId}
-          </AlertTitle>
-          <AlertAction>
-            <Button size="compact" variant="outline" onClick={() => window.open(url, "_blank", "noopener,noreferrer")}>
-              Open
-            </Button>
-            <Button size="compact" variant="ghost" onClick={() => dismiss(workspaceId)}>
-              Dismiss
-            </Button>
-          </AlertAction>
-        </Alert>
+          <Alert key={workspaceId} data-sign-in-banner={workspaceId} title={url}>
+            <ExternalLink />
+            <AlertTitle>
+              {host === undefined ? "A sign-in page" : `A sign-in page for ${host}`} is ready on{" "}
+              {workspaces.find(w => w.id === workspaceId)?.name ?? workspaceId}
+            </AlertTitle>
+            <AlertAction>
+              <Button size="compact" variant="outline" onClick={() => window.open(url, "_blank", "noopener,noreferrer")}>
+                Open
+              </Button>
+              <Button size="compact" variant="ghost" onClick={() => dismiss(workspaceId)}>
+                Dismiss
+              </Button>
+            </AlertAction>
+          </Alert>
         );
       })}
     </div>

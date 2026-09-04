@@ -89,6 +89,7 @@ afterEach(() => {
   resetBrowsers();
   resetBrowserTabs();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe("availability", () => {
@@ -275,5 +276,30 @@ describe("recents", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove localhost:5173 from history" }));
     expect(screen.queryByText("Recently used")).toBeNull();
     expect(window.localStorage.getItem(`wsp:browser-recents:v1:${OTHER}`)).toBeNull();
+  });
+});
+
+describe("open on laptop", () => {
+  it("a framed port the host forwards offers Open on laptop, which opens localhost:<port> here; a port it does not forward offers nothing", async () => {
+    const opened = vi.fn(() => null);
+    vi.stubGlobal("open", opened);
+    const { emit } = await setup();
+    emit(open(WS, 5173, 4182, "node"));
+    fireEvent.click(serverCard(5173));
+    await screen.findByTitle(":5173");
+    expect(screen.queryByRole("button", { name: "Open on laptop" })).toBeNull();
+
+    // A sign-in callback on the framed port is not a page to open here.
+    emit({ type: "forward.open", forward: { workspaceId: WS, port: 5173, startedAt: "2026-09-04T10:00:00.000Z", name: "api", kind: "callback" } });
+    await new Promise(r => setTimeout(r, 20));
+    expect(screen.queryByRole("button", { name: "Open on laptop" })).toBeNull();
+    emit({ type: "forward.open", forward: { workspaceId: WS, port: 5173, startedAt: "2026-09-04T10:00:00.000Z", name: "api", kind: "url" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Open on laptop" }));
+    expect(opened).toHaveBeenCalledWith("http://localhost:5173", "_blank", "noopener,noreferrer");
+
+    // Another workspace's forward on the same port is not this one's.
+    emit({ type: "forward.close", workspaceId: WS, port: 5173 });
+    emit({ type: "forward.open", forward: { workspaceId: OTHER, port: 5173, startedAt: "2026-09-04T10:00:00.000Z", name: "other", kind: "url" } });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Open on laptop" })).toBeNull());
   });
 });

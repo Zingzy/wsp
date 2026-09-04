@@ -66,8 +66,18 @@ export function callbackPortOf(url: string): number | undefined {
   return Number.isInteger(port) && port >= MIN_RELAY_PORT && port <= 65535 ? port : undefined;
 }
 
-// OSC 8 ; params ; URI ST, terminated by BEL or ESC backslash.
-const OSC8 = /\x1b\]8;[^;\x07\x1b]*;[^\x07\x1b]*(?:\x07|\x1b\\)/g;
+// OSC 8 ; params ; URI ST, terminated by BEL or ESC backslash; the URI is what the link points at.
+const OSC8 = /\x1b\]8;[^;\x07\x1b]*;([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
+// Any other OSC (a window title, a prompt mark): invisible, so it must not count toward the width.
+const OSC = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+// CSI: ESC [ parameter bytes (0x30..0x3F, so ? < = > too), intermediates, one final byte. Colour and bold land
+// inside URLs (vite bolds the port); a TUI leaves private-parameter sequences on the line it exits to.
+const CSI = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+// DCS and APC strings (ESC P ... ST, ESC _ ... ST): invisible, so they must not count toward the width either.
+const DCS_APC = /\x1b[P_][^\x1b\x07]*(?:\x1b\\|\x07)/g;
+// A space and a bare carriage return, no line feed: readline's soft wrap when the typed line reaches the pty
+// width, and also how a progress bar redraws. Only the width tells them apart.
+const SPACE_CR = / \r(?!\n)/g;
 const URL_IN_TEXT = /https?:\/\/[^\s"'`<>\x07\x1b]+/gi;
 
 /** Claude Code wraps its URL in an OSC 8 hyperlink, so the raw stream carries
@@ -76,11 +86,30 @@ export function stripOsc8(text: string): string {
   return text.replace(OSC8, "");
 }
 
+/** Terminal text as a URL matcher must see it: each hyperlink escape replaced
+ * by the URI it carried (the visible text may be a word), colour and bold gone,
+ * and a typed line readline wrapped at the pty width joined back into one. With
+ * no width known, a space and carriage return stay what they are: a redraw. */
+export function cleanTerminalText(text: string, cols?: number): string {
+  const flat = text
+    .replace(OSC8, (_m, uri: string) => (uri === "" ? "" : `${uri} `))
+    .replace(OSC, "")
+    .replace(DCS_APC, "")
+    .replace(CSI, "");
+  if (cols === undefined) return flat;
+  return flat.replace(SPACE_CR, (m, at: number) => {
+    // readline emits the space and carriage return once the typed line has filled the width: cols visible
+    // characters since the last line break (measured on bash 3.2 and bash 5 in a 40 column pty).
+    const lineStart = Math.max(flat.lastIndexOf("\n", at - 1), flat.lastIndexOf("\r", at - 1)) + 1;
+    return at - lineStart === cols ? "" : m;
+  });
+}
+
 /** Callback ports named by URLs in a terminal chunk: the forward's fallback
  * for a tool that prints its URL but reaches neither shim. */
-export function callbackPortsIn(text: string): number[] {
+export function callbackPortsIn(text: string, cols?: number): number[] {
   const ports = new Set<number>();
-  for (const m of stripOsc8(text).matchAll(URL_IN_TEXT)) {
+  for (const m of cleanTerminalText(text, cols).matchAll(URL_IN_TEXT)) {
     const port = callbackPortOf(m[0].replace(/[.,;!?)]+$/, ""));
     if (port !== undefined) ports.add(port);
   }
@@ -89,8 +118,8 @@ export function callbackPortsIn(text: string): number[] {
 
 /** Ports named by URLs that end before the text does: a URL still running at
  * the end may be cut mid-port (":8" of ":8976"), so it waits for the next chunk. */
-function settledCallbackPorts(text: string): number[] {
-  const clean = stripOsc8(text);
+function settledCallbackPorts(text: string, cols?: number): number[] {
+  const clean = cleanTerminalText(text, cols);
   const ports = new Set<number>();
   for (const m of clean.matchAll(URL_IN_TEXT)) {
     if (m.index + m[0].length === clean.length) continue;
@@ -100,16 +129,23 @@ function settledCallbackPorts(text: string): number[] {
   return [...ports];
 }
 
-/** Keeps the tail of a pty's output so a URL split across chunks still matches. */
+/** Keeps the tail of a pty's output so a URL split across chunks still matches;
+ * the extractor decides which ports a text names (callback ports by default),
+ * and reads the pty's width at scan time so a wrapped typed line is joined. */
 export class TerminalUrlScanner {
   private tail = "";
-  constructor(private readonly tailChars = 2048) {}
+  constructor(
+    private readonly extract: (text: string, cols?: number) => number[] = settledCallbackPorts,
+    private readonly cols?: () => number,
+    private readonly tailChars = 2048,
+  ) {}
   /** Ports newly seen in this chunk (with the kept tail in front of it). */
   feed(chunk: string): number[] {
     const text = this.tail + chunk;
-    const before = new Set(settledCallbackPorts(this.tail));
+    const width = this.cols?.();
+    const before = new Set(this.extract(this.tail, width));
     this.tail = text.slice(-this.tailChars);
-    return settledCallbackPorts(text).filter(p => !before.has(p));
+    return this.extract(text, width).filter(p => !before.has(p));
   }
 }
 

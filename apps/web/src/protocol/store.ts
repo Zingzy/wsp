@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect } from "react";
 import { create } from "zustand";
-import type { Capabilities, SessionView, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import type { Capabilities, PortForward, SessionView, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 import { DisconnectedError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
 
 export interface CostTick {
@@ -23,6 +23,8 @@ interface State {
   costs: Record<string, CostTick>;
   /** Live session count per workspace; > 0 renders the spend-pulse. */
   spending: Record<string, number>;
+  /** Guest ports the host forwards to localhost here, from the host's list and its forward events. */
+  forwards: PortForward[];
   toast: string | null;
   selectedId: string | null;
   sessions: Record<string, SessionView[]>;
@@ -37,6 +39,8 @@ interface State {
   refresh(): Promise<void>;
   /** Optimistic nap/wake: paint now, reconcile on the event, revert + toast on failure. */
   toggle(id: string): Promise<void>;
+  /** The row leaves on the host's forward.close; a refusal is a toast. */
+  stopForward(workspaceId: string, port: number): Promise<void>;
   clearToast(): void;
   applyEvent(e: ProtocolEvent): void;
   /** Rows come from the runtime (only it knows harness and final status); events say when to ask. */
@@ -68,6 +72,11 @@ export const useStore = create<State>((set, get) => {
       .watchStatuses()
       .then(statuses => set({ statuses: Object.fromEntries(statuses.map(s => [s.id, s])) }))
       .catch((e: unknown) => set({ toast: `live status unavailable: ${e instanceof Error ? e.message : String(e)}` }));
+    // A refused list clears the rows: a forward that closed while the socket was down must not stay listed.
+    void api
+      .listForwards?.()
+      .then(forwards => set({ forwards }))
+      .catch((e: unknown) => set({ forwards: [], toast: `forward list unavailable: ${e instanceof Error ? e.message : String(e)}` }));
   };
 
   return {
@@ -78,6 +87,7 @@ export const useStore = create<State>((set, get) => {
     statuses: {},
     costs: {},
     spending: {},
+    forwards: [],
     toast: null,
     selectedId: null,
     sessions: {},
@@ -128,6 +138,15 @@ export const useStore = create<State>((set, get) => {
         if (!(e instanceof DisconnectedError)) set({ toast: `${w.name}: ${e instanceof Error ? e.message : String(e)}` });
       }
     },
+    async stopForward(workspaceId, port) {
+      const api = get().api;
+      if (!api?.stopForward) return;
+      try {
+        await api.stopForward(workspaceId, port);
+      } catch (e) {
+        if (!(e instanceof DisconnectedError)) set({ toast: `localhost:${port}: ${e instanceof Error ? e.message : String(e)}` });
+      }
+    },
     clearToast() { set({ toast: null }); },
     applyEvent(e) {
       switch (e.type) {
@@ -137,8 +156,21 @@ export const useStore = create<State>((set, get) => {
             const { [e.workspaceId]: _c, ...costs } = s.costs;
             const { [e.workspaceId]: _p, ...spending } = s.spending;
             const { [e.workspaceId]: _r, ...sessions } = s.sessions;
-            return { workspaces: s.workspaces.filter(x => x.id !== e.workspaceId), statuses, costs, spending, sessions };
+            return {
+              workspaces: s.workspaces.filter(x => x.id !== e.workspaceId),
+              statuses,
+              costs,
+              spending,
+              sessions,
+              forwards: s.forwards.filter(f => f.workspaceId !== e.workspaceId),
+            };
           });
+          return;
+        case "forward.open":
+          set(s => ({ forwards: [...s.forwards.filter(f => !(f.workspaceId === e.forward.workspaceId && f.port === e.forward.port)), e.forward] }));
+          return;
+        case "forward.close":
+          set(s => ({ forwards: s.forwards.filter(f => !(f.workspaceId === e.workspaceId && f.port === e.port)) }));
           return;
         case "workspace.created":
           set(s => {
@@ -212,6 +244,11 @@ export function useSession(workspaceId: string | null): SessionView[] {
   return useStore(s => (workspaceId ? s.sessions[workspaceId] ?? NO_SESSIONS : NO_SESSIONS));
 }
 export function useReady(): boolean { return useStore(s => s.ready); }
+export function useForwards(): PortForward[] { return useStore(s => s.forwards); }
+/** Whether localhost:port on this computer is a page of that workspace to open: a printed link, not a sign-in callback. */
+export function useForwarded(workspaceId: string | null, port: number | null): boolean {
+  return useStore(s => workspaceId !== null && port !== null && s.forwards.some(f => f.workspaceId === workspaceId && f.port === port && f.kind === "url"));
+}
 export function useCapabilities(): Capabilities | null { return useStore(s => s.capabilities); }
 
 /** Subscribe a component to raw protocol events (terminal/chat/browser tabs use this). */

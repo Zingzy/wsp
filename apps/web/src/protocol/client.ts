@@ -5,20 +5,21 @@
 // dropped socket is redialled with backoff and authed again with the same
 // token; the store re-runs its standing fetches when the status comes back
 // to live.
-import type {
-  Capabilities,
-  DaemonReachView,
-  EventUnion,
-  GoldenBuilderView,
-  GoldenManifest,
-  GoldenVersion,
-  PortReachView,
-  SessionEvent,
-  SessionView,
-  SnapshotLineage,
-  SnapshotRollbackResult,
-  WorkspaceStatus,
-  WorkspaceView,
+import {
+  PortForward,
+  type Capabilities,
+  type DaemonReachView,
+  type EventUnion,
+  type GoldenBuilderView,
+  type GoldenManifest,
+  type GoldenVersion,
+  type PortReachView,
+  type SessionEvent,
+  type SessionView,
+  type SnapshotLineage,
+  type SnapshotRollbackResult,
+  type WorkspaceStatus,
+  type WorkspaceView,
 } from "@wsp/protocol";
 
 export type ProtocolEvent = EventUnion;
@@ -238,6 +239,9 @@ export interface Api {
   upgrade(id: string, size: WorkspaceSizeSpec): Promise<WorkspaceView>;
   /** Replaces a zombie's machine with a fresh golden fork carrying the vault; id and name stay. Optional so fixtures without a zombie need not fake it. */
   rebuild?(id: string): Promise<WorkspaceView>;
+  /** The guest ports the host forwards to this computer's loopback; forward.open and forward.close keep the list current. Optional so fixtures without forwards need not fake it. */
+  listForwards?(): Promise<PortForward[]>;
+  stopForward?(workspaceId: string, port: number): Promise<void>;
   capabilities(): Promise<Capabilities>;
   /** How to dial the workspace's daemon right now; ask again per dial, the edge token expires hourly. */
   daemonReach(id: string): Promise<DaemonReachView>;
@@ -297,6 +301,9 @@ export function makeApi(c: ProtocolClient): Api {
     upgrade: async (id, size) =>
       (await c.request<{ workspace: WorkspaceView }>("workspaces.upgrade", { workspaceId: id, ...size })).workspace,
     rebuild: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.rebuild", { workspaceId: id })).workspace,
+    // Parsed, not trusted: a reply without the list must not become the list.
+    listForwards: async () => PortForward.array().parse((await c.request<{ forwards?: unknown }>("forwards.list")).forwards),
+    stopForward: async (workspaceId, port) => void (await c.request("forwards.stop", { workspaceId, port })),
     capabilities: async () => (await c.request<{ capabilities: Capabilities }>("capabilities.get")).capabilities,
     daemonReach: async id => (await c.request<{ reach: DaemonReachView }>("workspaces.daemonReach", { workspaceId: id })).reach,
     portReach: async (id, port) => (await c.request<{ reach: PortReachView }>("workspaces.portReach", { workspaceId: id, port })).reach,

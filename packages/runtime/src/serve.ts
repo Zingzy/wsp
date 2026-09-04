@@ -8,8 +8,17 @@ import { randomBytes } from "node:crypto";
 import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
-import { RuntimeRequest } from "@wsp/protocol";
+import { RuntimeRequest, type ForwardEvent, type PortForward } from "@wsp/protocol";
 import type { Runtime } from "./runtime.js";
+
+/** The port forwards a host holds, as the app lists and stops them. The
+ * runtime keeps none itself: the host that owns the daemon links supplies this. */
+export interface ForwardsSource {
+  list(): PortForward[];
+  /** True when a forward was open on that workspace and port and is now closed. */
+  stop(workspaceId: string, port: number): boolean;
+  on(fn: (e: ForwardEvent) => void): () => void;
+}
 
 export interface ServeOptions {
   port: number;
@@ -18,6 +27,7 @@ export interface ServeOptions {
   ticketTtlMs?: number;
   /** Injectable clock for ticket-expiry tests. */
   now?: () => number;
+  forwards?: ForwardsSource;
 }
 
 export interface RuntimeServer {
@@ -113,6 +123,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               // Replay is read and the listener attached in one synchronous step, so no event falls between them.
               const { stream, head, events, gap } = rt.events.since(msg.after, msg.stream);
               detaches.push(rt.events.on("*", e => send(e as unknown as Record<string, unknown>)));
+              if (opts.forwards) detaches.push(opts.forwards.on(e => send(e)));
               send({ id: msg.id, ok: true, seq: head, stream, ...(gap ? { gap: true } : {}) });
               for (const e of events) send(e as unknown as Record<string, unknown>);
               return;
@@ -220,6 +231,13 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               return;
             case "workspaces.rebuild":
               send({ id: msg.id, ok: true, workspace: await rt.workspaces.rebuild(msg.workspaceId) });
+              return;
+            case "forwards.list":
+              send({ id: msg.id, ok: true, forwards: opts.forwards?.list() ?? [] });
+              return;
+            case "forwards.stop":
+              if (!opts.forwards?.stop(msg.workspaceId, msg.port)) throw new Error(`nothing is forwarding localhost:${msg.port} for that workspace`);
+              send({ id: msg.id, ok: true });
               return;
           }
         } catch (e) {

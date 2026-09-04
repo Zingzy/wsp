@@ -3,7 +3,7 @@
 // the route the runtime mints for one guest port. The servers list is the
 // workspace's port directory; recents live in local storage per workspace.
 // The bar shows the route without its token; copy and the frame keep it.
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, Laptop } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toPreviewableServers } from "../../adapt/ports.js";
 import { useWorkspacePorts } from "../../browser/model.js";
@@ -11,6 +11,7 @@ import { usePortReach } from "../../browser/reach.js";
 import { recordVisit, removeVisit, useRecents } from "../../browser/recents.js";
 import { currentPort, useBrowserTab, useBrowserTabs, ZOOM_STEP } from "../../browser/tabs.js";
 import { elideToken, loopbackUrl, parsePortInput } from "../../browser/url.js";
+import { useForwarded } from "../../protocol/store.js";
 import { useRightPanelStore, type RightPanelSurface } from "../../rightPanelStore.js";
 import { Button } from "../ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty.js";
@@ -40,6 +41,7 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
   const realUrl = reach.state === "ready" ? reach.reach.url : null;
   const shownUrl = realUrl !== null ? elideToken(realUrl) : port !== null ? loopbackUrl(port) : "";
   const listening = port === null || ports.some(p => p.port === port);
+  const forwarded = useForwarded(workspaceId, port);
   const zoom = tab?.zoom ?? 1;
 
   useEffect(() => {
@@ -87,6 +89,7 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
         onOpenInBrowser={realUrl !== null ? openOutside : undefined}
         trailingActions={
           <>
+            {forwarded && port !== null ? <OpenOnLaptopButton port={port} /> : null}
             {realUrl !== null ? <CopyUrlButton url={realUrl} /> : null}
             <PreviewMoreMenu
               tabId={tabId}
@@ -149,6 +152,28 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
         )}
       </div>
     </div>
+  );
+}
+
+/** Shown only while the host forwards this port: localhost:<port> on this computer reaches the workspace. */
+function OpenOnLaptopButton({ port }: { port: number }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            type="button"
+            aria-label="Open on laptop"
+            onClick={() => window.open(loopbackUrl(port), "_blank", "noopener,noreferrer")}
+          />
+        }
+      >
+        <Laptop />
+      </TooltipTrigger>
+      <TooltipPopup>Open localhost:{port} on this computer</TooltipPopup>
+    </Tooltip>
   );
 }
 
