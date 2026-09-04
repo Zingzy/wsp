@@ -30,7 +30,7 @@ import { keychainReader } from "./init-import.js";
 import { runInit, type InitIO } from "./init.js";
 import { recipePath } from "./init-recipe.js";
 import { TAGLINE, opening } from "./init-opening.js";
-import type { ChecklistItem } from "./init-recipe.js";
+import type { ChecklistItem } from "@wsp/protocol";
 import { systemOpener, type UrlOpener } from "./relay.js";
 import { startHost, type HostHandle } from "./server.js";
 
@@ -391,7 +391,7 @@ async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: 
       secrets: keychainReader(),
       platform: platform() === "darwin" ? "darwin" : "linux",
       runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `node ${(await deployDaemon(machine)).node}` }),
-      host: (rt, builder, checklist) => hostFor(rt, keys, { ...opts, builder, checklist }, io),
+      host: (rt, builder, hooks) => hostFor(rt, keys, { ...opts, builder, ...hooks }, io),
     },
     screen,
   );
@@ -411,7 +411,18 @@ export async function serve(
 async function hostFor(
   rt: Runtime,
   keys: Keys,
-  opts: { port: number; wsPort: number; statePath: string; webDir?: string; builder?: GoldenBuilderView; checklist?: ChecklistItem[]; openUrl?: UrlOpener },
+  opts: {
+    port: number;
+    wsPort: number;
+    statePath: string;
+    webDir?: string;
+    builder?: GoldenBuilderView;
+    checklist?: ChecklistItem[] | (() => ChecklistItem[]);
+    openUrl?: UrlOpener;
+    autoOpen?: (targetId: string, url: string) => boolean;
+    openLine?: (workspace: string, hostname: string, url: string) => string;
+    onLine?: (line: string) => boolean;
+  },
   io: CliIO,
 ): Promise<HostHandle> {
   const lockPath = lockPathFor(opts.statePath);
@@ -427,7 +438,11 @@ async function hostFor(
       ...(opts.checklist !== undefined ? { checklist: opts.checklist } : {}),
       ...(keys.anthropic !== undefined ? { workspaceEnvs: (golden: GoldenVersion) => claudeEnvs(keys.anthropic, golden) } : {}),
       ...(opts.openUrl !== undefined ? { openUrl: opts.openUrl } : {}),
-      log: line => io.log(line),
+      ...(opts.autoOpen !== undefined ? { autoOpen: opts.autoOpen } : {}),
+      ...(opts.openLine !== undefined ? { openLine: opts.openLine } : {}),
+      log: line => {
+        if (!opts.onLine?.(line)) io.log(line);
+      },
       recipePath: recipePath(opts.statePath),
     });
     writeFileSync(lockPath, JSON.stringify({ ...lock, port: handle.port, wsPort: handle.wsPort }));

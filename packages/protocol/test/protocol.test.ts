@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   Capabilities,
+  ChecklistItem,
+  GoldenVersion,
   DaemonErrorResponse,
   DaemonEvent,
   DaemonReachView,
@@ -433,5 +435,22 @@ describe("daemon files and diff ops", () => {
     expect(DaemonResponse.parse(err)).toEqual(err);
     expect(DaemonErrorResponse.parse({ id: 1, ok: false, error: "plain" })).toEqual({ id: 1, ok: false, error: "plain" });
     expect(() => DaemonErrorResponse.parse({ ...err, code: "whatever" })).toThrow();
+  });
+});
+
+describe("golden version logins", () => {
+  const base = { version: 1, snapshotId: "snap_1", baseTemplate: "base", setupSha: "x", createdAt: "t", smoke: { cmd: "true", exitCode: 0 } };
+  it("carries name and state per login when the seal was given them, and stays optional for older versions", () => {
+    const logins = [{ name: "GitHub CLI login", state: "signed-in" }, { name: "Codex login", state: "skipped" }];
+    expect(GoldenVersion.parse({ ...base, logins })).toEqual({ ...base, logins });
+    expect(GoldenVersion.parse(base).logins).toBeUndefined();
+    expect(() => GoldenVersion.parse({ ...base, logins: [{ name: "x", state: "done" }] })).toThrow();
+  });
+});
+
+describe("checklist item", () => {
+  it("is the one shape the host's boot payload and the page share: a label and a command", () => {
+    expect(ChecklistItem.parse({ label: "GitHub CLI login", command: "gh auth login" })).toEqual({ label: "GitHub CLI login", command: "gh auth login" });
+    expect(() => ChecklistItem.parse({ label: "x" })).toThrow();
   });
 });

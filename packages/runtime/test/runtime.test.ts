@@ -730,6 +730,16 @@ describe("runtime golden builders", () => {
     expect(await store.get("owner", "id")).toEqual({ id: owner });
   });
 
+  it("seal passes the logins it is given through to the version", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
+    const b = await rt.golden.prepare();
+    const logins = [{ name: "Codex login", state: "not-signed-in" as const }];
+    const { version } = await rt.golden.seal(b.id, { logins });
+    expect(version.logins).toEqual(logins);
+    expect((await rt.golden.get())?.versions[0]?.logins).toEqual(logins);
+  });
+
   it("stamps the owner on workspaces, smoke forks and command-line golden builds as well", async () => {
     const backend = stubBackend();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });

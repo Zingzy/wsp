@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // wsp init: read this machine, let the person tick what comes along one rung
-// at a time, confirm once, then build the golden's first machine through the
-// runtime and hand off to the browser for the sign-ins and the save. Nothing
-// leaves the disk before the confirm, and no question is ever asked on the
-// remote machine.
+// at a time, confirm once, build the golden's first machine through the
+// runtime, run the sign-ins chosen for the machine in this terminal, then hand
+// off to the browser for the save. Nothing leaves the disk before the confirm,
+// and no question is ever asked on the remote machine.
 import type { Readable, Writable } from "node:stream";
 import { styleText } from "node:util";
 import { LARGE_GROUP, RUNGS, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
 import { describeAge, type BackendPricing } from "@wsp/engine";
+import type { ChecklistItem } from "@wsp/protocol";
 import type { GoldenBuilderView, GoldenRecipe, GoldenStage, Runtime } from "@wsp/runtime";
 import { S_BAR, S_STEP_ERROR, S_STEP_SUBMIT, cancel, confirm, isCancel, log, outro } from "@clack/prompts";
 import type { Keys } from "./cli.js";
@@ -33,10 +34,11 @@ import {
   loginShown,
   recipePath,
   saveRecipe,
-  type ChecklistItem,
+  secretLinesFor,
 } from "./init-recipe.js";
 import { CARD_FRAME, GUTTER, card, colourDepth, ellipsize, fmtDuration, helpLine, table, widthOf, wrap } from "./init-layout.js";
 import { readKey, rungSelect, type SelectItem } from "./init-select.js";
+import { OPEN_LINE, builderLink, machineLogins, noteLogins, openLogins, signInStage, type BuilderLink, type LoginOutcome, type SignInFlow } from "./init-signin.js";
 import type { HostHandle } from "./server.js";
 
 export interface InitIO {
@@ -69,15 +71,32 @@ export interface InitOptions {
   /** Builds the runtime around the recipe the ticks produced. */
   runtime(recipe: GoldenRecipe): Runtime;
   /** Starts the app server over that runtime once the builder is ready; the page lands on that
-   * builder with the sign-ins the person chose to do there. */
-  host(rt: Runtime, builder: GoldenBuilderView, checklist: ChecklistItem[]): Promise<HostHandle>;
+   * builder. The hooks wire the sign-in stage into the host's callback relay. */
+  host(rt: Runtime, builder: GoldenBuilderView, hooks: HostHooks): Promise<HostHandle>;
+  /** A pty link to the builder's daemon for the sign-in stage, dialled before each command; the real one dials its reach. */
+  daemon?(rt: Runtime, builder: GoldenBuilderView): Promise<BuilderLink>;
   /** How long to wait when the account is at its machine cap, and how often. */
   retry?: { waitMs: number; attempts: number };
+}
+
+export interface HostHooks {
+  /** The sign-ins still to do on the machine, read on every page load: all of them for a desktop builder,
+   * what the terminal stage left open for a sandbox one. */
+  checklist(): ChecklistItem[];
+  /** Whether a sign-in page the machine asks for may open here without a click: one open per o the person pressed,
+   * and never the page o itself opened. */
+  autoOpen(targetId: string, url: string): boolean;
+  /** The line for a page the relay did not open: while a pty is on screen for the builder it says what to press here,
+   * or that the page is the one o already opened; otherwise the relay's own words. */
+  openLine(workspace: string, hostname: string, url: string): string;
+  /** A host line to show; true when the sign-in stage took it (a pty is on screen), false to print it as usual. */
+  onLine(line: string): boolean;
 }
 
 export interface InitResult {
   code: number;
   handle?: HostHandle;
+  logins?: LoginOutcome[];
 }
 
 const GOLDEN_NAME = "default";
@@ -768,13 +787,51 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   off();
   if (installs !== undefined) log.info(installs.join("\n"), out);
 
-  const checklist = checklistFor(manifest, choices, ticks, cut);
-  const handle = await opts.host(rt, builder, checklist);
+  const flow: SignInFlow = { armed: false };
+  // The relay names the builder's link this way; the line hook only gets the name.
+  const builderTarget = `${builder.name} (builder)`;
+  const machine = machineLogins(offered, choices);
+  let outcomes: LoginOutcome[] | undefined;
+  let checklist = checklistFor(manifest, choices, ticks, cut);
+  // The page's seal stamps what each sign-in came to on the version; the served runtime carries that in.
+  const served: Runtime = { ...rt, golden: { ...rt.golden, seal: (id, o) => rt.golden.seal(id, { ...o, ...(outcomes !== undefined ? { logins: outcomes.map(r => ({ name: r.label, state: r.state })) } : {}) }) } };
+  const handle = await opts.host(served, builder, {
+    checklist: () => checklist,
+    autoOpen: (id, url) => {
+      if (id !== builder.id || !flow.armed || url === flow.openedUrl) return false;
+      flow.armed = false;
+      return true;
+    },
+    openLine: (workspace, hostname, url) => {
+      if (workspace !== builderTarget || flow.show === undefined) return `${workspace}: a sign-in page for ${hostname} is ready; open it from the app`;
+      return `${workspace}: ${url === flow.openedUrl ? "that page is already open here" : OPEN_LINE}`;
+    },
+    onLine: line => {
+      if (flow.show === undefined) return false;
+      flow.show(line);
+      return true;
+    },
+  });
+  // A desktop builder keeps the checklist beside its live screen; a sandbox builder signs in here and hands the page what is left.
+  if (builder.screen === undefined) {
+    const skipWhy = interactive ? undefined : io.isTTY ? "--yes asks nothing; sign in from the app's terminal" : "no terminal to sign in from; use the app's terminal";
+    outcomes = await signInStage({
+      logins: machine,
+      dial: () => (opts.daemon ?? builderLink)(rt, builder),
+      terminal: { input: io.input, output: io.output },
+      ...(skipWhy !== undefined ? { skipWhy } : {}),
+      open: url => io.open(url),
+      flow,
+    });
+    const notes = importResultPath(opts.statePath);
+    if (noteLogins(notes, outcomes).replaced) log.warn(`${notes} could not be read; it was rewritten with the logins alone.`, out);
+    checklist = [...openLogins(machine, outcomes), ...secretLinesFor(manifest, ticks, cut)];
+  }
   const url = `http://127.0.0.1:${handle.port}/`;
-  await handoff(url, handle, io, interactive, out);
+  await handoff(url, handle, io, interactive, checklist.length > 0, out);
   outro("This terminal reports the save.", out);
   reportSeal(rt, io);
-  return { code: 0, handle };
+  return { code: 0, handle, ...(outcomes !== undefined ? { logins: outcomes } : {}) };
 }
 
 /** After the hand-off the browser drives the seal; the terminal shows it as it happens. */
@@ -802,8 +859,8 @@ function reportSeal(rt: Runtime, io: InitIO): void {
 }
 
 /** Three lines: the address, what to do there, and the keys (or the ssh forward when the address is remote). */
-async function handoff(url: string, handle: HostHandle, io: InitIO, interactive: boolean, out: { output: Writable }): Promise<void> {
-  const finish = "Sign in where the checklist says, then save the golden.";
+async function handoff(url: string, handle: HostHandle, io: InitIO, interactive: boolean, checklist: boolean, out: { output: Writable }): Promise<void> {
+  const finish = checklist ? "Sign in where the checklist says, then save the golden." : "Save the golden there once the machine is the way you want it.";
   if (!io.isTTY || overSsh(io.env)) {
     const lines = [`Open ${url}`, finish];
     if (overSsh(io.env)) lines.push(dim(`loopback address; forward it first: ssh -L ${handle.port}:127.0.0.1:${handle.port} <this host>`));

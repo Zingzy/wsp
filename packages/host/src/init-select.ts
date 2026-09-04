@@ -5,7 +5,7 @@
 // highlighted item. Built on @clack/core so the frame diffing, raw mode, and
 // cancel handling are clack's; the keys and the layout are ours.
 import type { Key } from "node:readline";
-import { createInterface, emitKeypressEvents } from "node:readline";
+import { emitKeypressEvents } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import { styleText } from "node:util";
 import { Prompt, isCancel } from "@clack/core";
@@ -438,14 +438,13 @@ export async function rungSelect(o: RungSelectOptions): Promise<RungSelectResult
 /** One keypress, by name ("c", "return"); ctrl-c and escape resolve as "cancel". */
 export function readKey(input: Readable, output: Writable, accept: readonly string[]): Promise<string> {
   return new Promise(resolve => {
-    const rl = createInterface({ input, output, terminal: true, prompt: "" });
-    emitKeypressEvents(input, rl);
+    emitKeypressEvents(input);
     const tty = input as Readable & { isTTY?: boolean; setRawMode?: (on: boolean) => void };
     if (tty.isTTY && tty.setRawMode) tty.setRawMode(true);
     const done = (value: string): void => {
       input.off("keypress", onKey);
       if (tty.isTTY && tty.setRawMode) tty.setRawMode(false);
-      rl.close();
+      input.pause();
       resolve(value);
     };
     const onKey = (char: string | undefined, key: Key): void => {
@@ -454,5 +453,6 @@ export function readKey(input: Readable, output: Writable, accept: readonly stri
       if (name !== undefined && accept.includes(name)) done(name);
     };
     input.on("keypress", onKey);
+    input.resume();
   });
 }

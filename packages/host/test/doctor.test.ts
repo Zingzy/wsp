@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { gunzipSync } from "node:zlib";
 import { startDaemon, type DaemonHandle } from "@wsp/daemon";
+import { WebSocketServer } from "ws";
 import { TOOLS_PATH } from "@wsp/engine";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -291,6 +292,31 @@ describe("connectDaemonSocket", () => {
     expect(failures).toEqual(Array(calls).fill("Invalid URL"));
     expect((await socket.op("manifest.get"))["ok"]).toBe(true);
     expect(socket.open).toBe(true);
+  });
+
+  it("an op sent after the server closed the socket rejects at once instead of hanging forever", async () => {
+    // A server that answers ops and then closes the connection under the client: the send has nowhere to go and no callback.
+    const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    await new Promise<void>(r => server.once("listening", r));
+    server.on("connection", ws => {
+      ws.on("message", raw => {
+        const m = JSON.parse(String(raw)) as { id: number };
+        ws.send(JSON.stringify({ id: m.id, ok: true }));
+      });
+    });
+    const port = (server.address() as { port: number }).port;
+    try {
+      socket = await connectDaemonSocket({ url: `http://127.0.0.1:${port}/`, token: "any", heartbeatMs: 60_000 });
+      expect((await socket.op("manifest.get"))["ok"]).toBe(true);
+      for (const client of server.clients) client.close();
+      await socket.closed;
+      expect(socket.open).toBe(false);
+      const t0 = Date.now();
+      await expect(socket.op("pty.kill", { ptyId: "pty_1" })).rejects.toThrow(/not open/);
+      expect(Date.now() - t0).toBeLessThan(500);
+    } finally {
+      await new Promise<void>(r => server.close(() => r()));
+    }
   });
 
   it("rejects on a bad daemon token (4401 through the socket close)", async () => {

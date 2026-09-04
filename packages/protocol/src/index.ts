@@ -279,6 +279,16 @@ export const InboxFileEvent = z.object({
 export const MachineKind = z.enum(["sandbox", "desktop"]);
 export type MachineKind = z.infer<typeof MachineKind>;
 
+/** One line of the builder page's checklist, in the host's boot payload: what to sign into or set, and how. */
+export const ChecklistItem = z.object({ label: z.string(), command: z.string() });
+export type ChecklistItem = z.infer<typeof ChecklistItem>;
+
+/** What a login chosen as "sign in on the machine" came to by the time the golden sealed. */
+export const LoginState = z.enum(["signed-in", "not-signed-in", "not-verified", "skipped"]);
+export type LoginState = z.infer<typeof LoginState>;
+export const GoldenLogin = z.object({ name: z.string(), state: LoginState });
+export type GoldenLogin = z.infer<typeof GoldenLogin>;
+
 /** One sealed image. `kind` is the machine kind the snapshot was taken from and
  * therefore restores as; entries sealed before kind was recorded were all
  * sandboxes, so readers treat a missing kind as sandbox. */
@@ -294,6 +304,8 @@ export const GoldenVersion = z.object({
   size: WorkspaceSize.optional(),
   /** The browser shim was on the machine when it was sealed, so its forks can be told BROWSER; versions sealed before it existed have no flag and get none. */
   browserShim: z.boolean().optional(),
+  /** The sign-ins the builder was asked for and how each ended, so the app can say what a fork carries. */
+  logins: z.array(GoldenLogin).optional(),
 });
 export type GoldenVersion = z.infer<typeof GoldenVersion>;
 

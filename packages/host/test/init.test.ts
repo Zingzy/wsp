@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
-import { RUNGS } from "@wsp/collect";
+import { RUNGS, type Manifest } from "@wsp/collect";
 import type { BackendPricing } from "@wsp/engine";
 import { ALREADY_APPLIED } from "@wsp/protocol";
 import { createRuntime, memoryStore, type GoldenRecipe, type Runtime } from "@wsp/runtime";
@@ -16,8 +16,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GOLDEN_SETUP } from "../src/doctor.js";
 import { loadManifest, recipePath } from "../src/init-recipe.js";
 import { CARD_FRAME, card, widthOf } from "../src/init-layout.js";
-import { everythingItems, fmtBytes, reduceStages, runInit, stageLine, summaryNote, type InitIO, type InitOptions } from "../src/init.js";
+import { everythingItems, fmtBytes, reduceStages, runInit, stageLine, summaryNote, type HostHooks, type InitIO, type InitOptions } from "../src/init.js";
 import type { HostHandle } from "../src/server.js";
+import { startCallbackRelay } from "../src/relay.js";
+import type { ConnectOptions, DaemonSocket } from "../src/doctor.js";
+import { noteLogins } from "../src/init-signin.js";
+import { fakePtyLink, type FakePtyLink } from "./fake-pty-link.js";
 import { EVERYTHING, FIXTURE } from "./init-fixture.js";
 import { guestAnswer, stubBackend, type StubBackend } from "./stub-backend.js";
 
@@ -39,13 +43,47 @@ interface Fake {
   backends: StubBackend[];
   recipes: GoldenRecipe[];
   runtimes: Runtime[];
-  checklists: { label: string; command: string }[][];
+  hooks: HostHooks[];
+  /** The runtime each host hook was given: the one the page's seal goes through. */
+  served: Runtime[];
+  /** The scripted daemon link the sign-in stage talks to. */
+  link: FakePtyLink;
   hosts: number;
   /** Keychain services the fake reader was asked for. */
   reads: string[];
 }
 
-function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string, string>; columns?: number } = {}): Fake {
+const DEVICE_URL = "https://github.com/login/device";
+const CLAUDE_URL = "https://claude.com/cai/oauth/authorize?code=true&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback";
+
+/** Ptys on the fake builder: a login prints its page's URL and exits (or waits for Ctrl-C when held); a status run answers as told. */
+function scriptedLink(state: { signedIn: boolean; hold: boolean; missing: boolean }): FakePtyLink {
+  const link = fakePtyLink();
+  link.script = (pty, line) => {
+    if (state.missing && line.startsWith("exec ")) {
+      link.data(pty, `bash: exec: ${line.split(" ")[1]}: not found\r\n`);
+      link.exit(pty, 127);
+      return;
+    }
+    if (line.includes("WSP_STATUS")) {
+      link.data(pty, state.signedIn ? "Logged in using ChatGPT\r\nLogged in to github.com account someone (keyring)\r\n{\"loggedIn\": true}\r\nWSP_STATUS 0\r\n" : "Not logged in\r\nWSP_STATUS 1\r\n");
+      link.exit(pty, state.signedIn ? 0 : 1);
+      return;
+    }
+    if (line.includes("exec claude")) link.data(pty, `Opening browser to sign in...\r\nIf the browser didn't open, visit: \x1b]8;;${CLAUDE_URL}\x1b\\${CLAUDE_URL}\x1b]8;;\x1b\\\r\nPaste code here if prompted > `);
+    else link.data(pty, `Press Enter to open ${DEVICE_URL} in your browser...\r\n`);
+    if (!state.hold) link.exit(pty, 0);
+  };
+  const op = link.op.bind(link);
+  link.op = async (name, extra = {}) => {
+    const r = await op(name, extra);
+    if (name === "pty.write" && extra["data"] === "\x03") link.exit(link.ptys.find(x => x.id === extra["ptyId"])!, 130);
+    return r;
+  };
+  return link;
+}
+
+function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string, string>; columns?: number; signedIn?: boolean; hold?: boolean; missing?: boolean } = {}): Fake {
   const input = new PassThrough();
   const output = new PassThrough();
   if (over.columns !== undefined) Object.assign(output, { columns: over.columns });
@@ -58,7 +96,9 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
   const backends: StubBackend[] = [];
   const recipes: GoldenRecipe[] = [];
   const runtimes: Runtime[] = [];
-  const checklists: { label: string; command: string }[][] = [];
+  const hooks: HostHooks[] = [];
+  const served: Runtime[] = [];
+  const link = scriptedLink({ signedIn: over.signedIn ?? true, hold: over.hold ?? false, missing: over.missing ?? false });
   const counters = { hosts: 0 };
   const io: InitIO = {
     input,
@@ -84,7 +124,7 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
   writeFileSync(join(home, ".ssh", "config"), "Host work\n", { mode: 0o600 });
   const reads: string[] = [];
   const store = memoryStore();
-  const { tty: _tty, env: _env, columns: _columns, ...rest } = over;
+  const { tty: _tty, env: _env, columns: _columns, signedIn: _signedIn, hold: _hold, missing: _missing, ...rest } = over;
   const opts: InitOptions = {
     yes: false,
     collect: async () => FIXTURE,
@@ -108,14 +148,15 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
       runtimes.push(rt);
       return rt;
     },
-    host: async (rt: Runtime, builder, checklist) => {
+    host: async (rt: Runtime, builder, h) => {
       counters.hosts += 1;
       expect(builder.id).toBe(backends.at(-1)?.machines[0]?.id);
-      checklists.push(checklist);
-      void rt;
+      hooks.push(h);
+      served.push(rt);
       const handle: HostHandle = { port: 4400, wsPort: 4410, authToken: "tok", close: async () => {} };
       return handle;
     },
+    daemon: async () => ({ link: link.dial(), close: () => {} }),
     retry: { waitMs: 1, attempts: 3 },
     ...rest,
   };
@@ -146,7 +187,9 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
     backends,
     recipes,
     runtimes,
-    checklists,
+    hooks,
+    served,
+    link,
     get hosts() {
       return counters.hosts;
     },
@@ -250,11 +293,29 @@ describe("wsp init, interactive", () => {
     const base = out.split("\n").filter(l => /Base installed/.test(l)).at(-1)!;
     expect(base).toMatch(/Base installed\s+node v22\.12\.0\s+\d+\.\ds$/);
     expect(base.length).toBe(80);
+    // The sign-ins chosen for the machine ran here, each proved by the tool's status command, before the hand-off.
+    const signing = out.indexOf("Signing in on the machine");
+    expect(signing).toBeGreaterThan(out.indexOf("Ready"));
+    expect(out).toMatch(/GitHub CLI login\s+gh auth login/);
+    expect(out).toMatch(/GitHub CLI login: signed in \(gh auth status\)/);
+    expect(out).toMatch(/Claude Code login\s+claude auth login/);
+    expect(out).toMatch(/Claude Code login: signed in \(claude auth status\)/);
+    expect(out).toContain("Press Enter to open https://github.com/login/device");
+    expect(out.slice(signing)).toContain("o opens it on this computer");
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual([
+      "exec gh auth login || exit\r",
+      "gh auth status; printf '\\nWSP_STATUS %s\\n' $?; exit\r",
+      "exec claude auth login || exit\r",
+      "claude auth status; printf '\\nWSP_STATUS %s\\n' $?; exit\r",
+    ]);
+    expect(f.link.ptys.every(p => p.killed)).toBe(true);
+    expect(f.hooks[0]!.autoOpen(f.backends[0]!.machines[0]!.id, DEVICE_URL)).toBe(false);
     // The hand-off is three lines: the address, what to do there, the keys.
     const at = out.indexOf("Opened http://");
+    expect(at).toBeGreaterThan(signing);
     expect(out.slice(at).split("\n").slice(0, 3).map(l => l.replace(/^│\s+/, ""))).toEqual([
       expect.stringMatching(/^Opened http:\/\/127\.0\.0\.1:\d+\/$/),
-      "Sign in where the checklist says, then save the golden.",
+      "Save the golden there once the machine is the way you want it.",
       "c copy the address • enter continue",
     ]);
     expect(out).not.toMatch(/—|\p{Emoji_Presentation}/u);
@@ -275,6 +336,10 @@ describe("wsp init, interactive", () => {
       homebrew: { tag: expect.stringMatching(/^6\./), commit: expect.stringMatching(/^[0-9a-f]{40}$/) },
       tools: [{ id: "tools/homebrew", outcome: "installed" }, { id: "tools/brew-toolchain/glibc", outcome: "installed" }, { id: "tools/brew-toolchain/gcc", outcome: "installed" }, { id: "tools/brew/gh", outcome: "installed" }, { id: "tools/brew/jq", outcome: "installed" }, { id: "tools/npm/pnpm", outcome: "installed" }],
       agents: [{ id: "agents/claude", outcome: "installed" }],
+      logins: [
+        { id: "logins/gh", label: "GitHub CLI login", state: "signed-in", command: "gh auth login", note: "gh auth status" },
+        { id: "logins/claude", label: "Claude Code login", state: "signed-in", command: "claude auth login", note: "claude auth status" },
+      ],
     });
     expect(backend.machines[0]!.spec.labels).toMatchObject({ "wsp-builder": "1" });
     expect(f.recipes[0]!.envs).toHaveProperty("CLAUDE_CONFIG_DIR");
@@ -289,14 +354,19 @@ describe("wsp init, interactive", () => {
     ]);
     expect(saved.entries.filter(e => e.rung === "logins").map(e => e.choice)).toEqual(["machine", "machine", undefined]);
     expect(out).toContain("golden-recipe.json");
-    expect(f.checklists[0]).toEqual([
-      { label: "GitHub CLI login", command: "gh auth login" },
-      { label: "Claude Code login", command: "claude, then /login" },
-    ]);
+    // Both signed in, so the page has nothing left to ask for; one link per command pair.
+    expect(f.hooks[0]!.checklist()).toEqual([]);
+    expect(f.link.dials).toBe(2);
+    expect(result.logins?.map(l => l.state)).toEqual(["signed-in", "signed-in"]);
 
-    // The terminal keeps reporting after the hand-off: the seal stages arrive as the browser drives them.
-    const rt = f.runtimes[0]!;
-    await rt.golden.seal(f.backends[0]!.machines[0]!.id);
+    // The terminal keeps reporting after the hand-off: the seal stages arrive as the browser drives them,
+    // through the runtime the host serves, which stamps the logins onto the version.
+    const rt = f.served[0]!;
+    const sealed = await rt.golden.seal(f.backends[0]!.machines[0]!.id);
+    expect(sealed.version.logins).toEqual([
+      { name: "GitHub CLI login", state: "signed-in" },
+      { name: "Claude Code login", state: "signed-in" },
+    ]);
     await f.until("Sealed");
     const after = f.text().slice(out.length);
     expect(after.indexOf("Snapshot taken")).toBeLessThan(after.indexOf("Fork booted and checked"));
@@ -578,7 +648,7 @@ describe("wsp init, everything else", () => {
     expect((await runInit(again.opts, again.io)).code).toBe(0);
     expect(again.text()).toMatch(/\d files: identity \d, shell 1, logins 1, everything 2/);
     // The credential row is not a sign-in; the checklist carries only the login chosen for the machine.
-    expect(again.checklists[0]).toEqual([{ label: "Claude Code login", command: "claude, then /login" }]);
+    expect(again.hooks[0]!.checklist()).toEqual([{ label: "Claude Code login", command: "claude auth login" }]);
     const result = JSON.parse(readFileSync(join(dirname(again.opts.statePath), "golden-import.json"), "utf8")) as { files: { bytes: number; skipped: { id: string }[] } };
     expect(result.files.skipped.filter(s => s.id.startsWith("everything/"))).toEqual([]);
     expect(result.files.bytes).toBeGreaterThan(0);
@@ -598,7 +668,7 @@ describe("wsp init, everything else", () => {
     const out = f.text();
     expect(out.split("Everything else could not be read and is left out: EIO").length).toBe(2);
     expect(out.indexOf("could not be read")).toBeLessThan(out.indexOf("Found on this computer"));
-    expect(f.checklists[0]).toEqual(expect.arrayContaining([{ label: "~/.zshrc", command: "set A_KEY on the machine" }]));
+    expect(f.hooks[0]!.checklist()).toEqual(expect.arrayContaining([{ label: "~/.zshrc", command: "set A_KEY on the machine" }]));
   });
 
   it("a consent row saved as sign in before this round replays as skip: nothing uploads, the summary says skip, the resaved recipe says skip", async () => {
@@ -614,7 +684,7 @@ describe("wsp init, everything else", () => {
     expect(out).toMatch(/Everything else\s+0 of 4/);
     expect(out).not.toMatch(/\.demo-token\s+sign in/);
     // Only the unticked gh login is a sign-in here; the credential row never is.
-    expect(f.checklists[0]).toEqual([{ label: "GitHub CLI login", command: "gh auth login" }]);
+    expect(f.hooks[0]!.checklist()).toEqual([{ label: "GitHub CLI login", command: "gh auth login" }]);
     const saved = loadManifest(join(dirname(f.opts.statePath), "golden-recipe.json"));
     expect(saved.entries.find(e => e.id === "everything/.demo-token")).toMatchObject({ bring: false, choice: "skip" });
     expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8")).files.skipped).toEqual([]);
@@ -717,6 +787,280 @@ describe("wsp init, everything else", () => {
   });
 });
 
+describe("wsp init, the sign-in stage", () => {
+  const CODEX_MANIFEST: Manifest = {
+    entries: [
+      FIXTURE.entries[0]!,
+      { rung: "logins", id: "logins/codex", label: "Codex login", group: "Agent logins", paths: ["~/.codex/auth.json"], bytes: 300, default: "skip" },
+      { rung: "logins", id: "logins/kube", label: "kubectl config", group: "CLI logins", paths: ["~/.kube/config"], bytes: 900, default: "skip" },
+    ],
+  };
+
+  it("a login the status check does not confirm is offered a retry, then the table's fallback, then a skip; o opens the page here and arms auto-open for that command only; the skip lands in the notes", async () => {
+    const f = fake({ signedIn: false, hold: true, collect: async () => CODEX_MANIFEST });
+    const run = runInit(f.opts, f.io);
+    await f.until("Identity");
+    await f.press(KEY.enter);
+    await f.until("Sign-ins");
+    expect(f.text()).toMatch(/Codex login\s+sign in/);
+    await f.press(KEY.enter);
+    await f.until(BOOT);
+    await f.press("y");
+
+    // The default flow first: the shim would open the page; here the printed URL is offered with o.
+    await f.until(/Codex login\s+codex login\n/);
+    await f.until("Press Enter to open https://github.com/login/device");
+    const builderId = f.backends[0]!.machines[0]!.id;
+    expect(f.hooks[0]!.autoOpen(builderId, DEVICE_URL)).toBe(false);
+    // While the pty is on screen the shim's line says what to press here; outside it the relay keeps its own words.
+    expect(f.hooks[0]!.openLine("default (builder)", "github.com", DEVICE_URL)).toBe("default (builder): press o on the link above to open it here");
+    expect(f.hooks[0]!.openLine("task-1", "github.com", DEVICE_URL)).toBe("task-1: a sign-in page for github.com is ready; open it from the app");
+    await f.press("o");
+    await f.until("opened on this computer");
+    expect(f.opened).toEqual([DEVICE_URL]);
+    // gh's Enter re-sends the page o just opened: the pty says so instead of asking for o again.
+    expect(f.hooks[0]!.openLine("default (builder)", "github.com", DEVICE_URL)).toBe("default (builder): that page is already open here");
+    expect(f.hooks[0]!.openLine("default (builder)", "other.test", "https://other.test/a")).toBe("default (builder): press o on the link above to open it here");
+    // One o arms exactly one auto-open, and never for the page o already opened here (gh's Enter re-sends that one).
+    expect(f.hooks[0]!.autoOpen("some-other-workspace", "https://other.test/a")).toBe(false);
+    expect(f.hooks[0]!.autoOpen(builderId, DEVICE_URL)).toBe(false);
+    expect(f.hooks[0]!.autoOpen(builderId, "https://other.test/a")).toBe(true);
+    expect(f.hooks[0]!.autoOpen(builderId, "https://other.test/a")).toBe(false);
+    await f.press("o");
+    await f.until(/opened on this computer[\s\S]*opened on this computer/);
+    expect(f.hooks[0]!.autoOpen(builderId, "https://other.test/b")).toBe(true);
+    // A host line during the pty lands inside it, dim, instead of breaking the raw terminal.
+    expect(f.hooks[0]!.onLine("default (builder): forwarding localhost:1455 on this computer")).toBe(true);
+    expect(f.text()).toContain("default (builder): forwarding localhost:1455 on this computer");
+    await f.press("\x03");
+    await f.until("Codex login: not signed in (codex login status says not signed in)");
+    expect(f.hooks[0]!.autoOpen(builderId, "https://other.test/c")).toBe(false);
+    expect(f.hooks[0]!.onLine("later")).toBe(false);
+    expect(f.hooks[0]!.openLine("default (builder)", "github.com", DEVICE_URL)).toBe("default (builder): a sign-in page for github.com is ready; open it from the app");
+
+    // kubectl has no sign-in: skipped with the reason, no pty.
+    await f.until("kubectl config: skipped (kubectl has no sign-in; copy the kubeconfig instead)");
+    await f.until(/kubectl config\s+skipped\s+kubectl has no sign-in/);
+    await f.until("r retry   f retry with codex login --device-auth   s skip");
+    await f.press("r");
+    await f.until(/codex login\n[\s\S]*Press Enter to open[\s\S]*Press Enter to open/);
+    await f.press("\x03");
+    await f.until(/not signed in[\s\S]*not signed in[\s\S]*r retry/);
+    await f.press("f");
+    await f.until(/Codex login\s+codex login --device-auth/);
+    await f.press("\x03");
+    await f.until(/not signed in[\s\S]*not signed in[\s\S]*not signed in[\s\S]*r retry/);
+    await f.press("s");
+
+    await f.until(URL_RE);
+    await f.press(KEY.enter);
+    const result = await run;
+    expect(result.code).toBe(0);
+    const out = f.text();
+    expect(out).toMatch(/Codex login\s+skipped\s+skipped by you/);
+    // Two logins are still open, so the terminal says what the page says.
+    expect(out).toContain("Sign in where the checklist says, then save the golden.");
+    expect(out).not.toContain("Save the golden there once the machine is the way you want it.");
+    // Three login ptys (default, retry, fallback), each followed by a status run; o never reached the machine.
+    expect(f.link.ptys.filter(p => !p.writes[0]!.includes("WSP_STATUS")).map(p => p.writes[0])).toEqual([
+      "exec codex login || exit\r",
+      "exec codex login || exit\r",
+      "exec codex login --device-auth || exit\r",
+    ]);
+    expect(f.link.ptys.filter(p => p.writes[0]!.includes("WSP_STATUS"))).toHaveLength(3);
+    expect(f.link.ptys.flatMap(p => p.writes.slice(1))).toEqual(["\x03", "\x03", "\x03"]);
+    expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({
+      logins: [
+        { id: "logins/codex", label: "Codex login", state: "skipped", command: "codex login --device-auth", note: "skipped by you" },
+        { id: "logins/kube", label: "kubectl config", state: "skipped", note: "kubectl has no sign-in; copy the kubeconfig instead" },
+      ],
+    });
+    expect(result.logins?.map(l => l.state)).toEqual(["skipped", "skipped"]);
+    expect(out).not.toMatch(/—/);
+    // The open logins are the page's checklist, each with its command; the seal stamps their states on the version.
+    expect(f.hooks[0]!.checklist()).toEqual([
+      { label: "Codex login", command: "codex login" },
+      { label: "kubectl config", command: "kubectl has no sign-in; copy the kubeconfig instead" },
+    ]);
+    // o opened the page twice; the device URL, the second o, then the app at the hand-off.
+    expect(f.opened).toEqual([DEVICE_URL, DEVICE_URL, expect.stringMatching(URL_RE)]);
+    const sealed = await f.served[0]!.golden.seal(builderId);
+    expect(sealed.version.logins).toEqual([
+      { name: "Codex login", state: "skipped" },
+      { name: "kubectl config", state: "skipped" },
+    ]);
+  });
+
+  it("a tool that is not on the machine (exit 127) is skipped with that reason, its status command never runs, and nothing is asked", async () => {
+    const f = fake({ missing: true, collect: async () => CODEX_MANIFEST });
+    const run = runInit(f.opts, f.io);
+    await f.until("Identity");
+    await f.press(KEY.enter);
+    await f.until("Sign-ins");
+    await f.press(KEY.enter);
+    await f.until(BOOT);
+    await f.press("y");
+    await f.until("Codex login: skipped (codex is not on the machine)");
+    await f.until(URL_RE);
+    await f.press(KEY.enter);
+    const result = await run;
+    expect(result.code).toBe(0);
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual(["exec codex login || exit\r"]);
+    expect(f.text()).not.toContain("r retry");
+    expect(result.logins?.[0]).toEqual({ id: "logins/codex", label: "Codex login", state: "skipped", command: "codex login", exit: 127, note: "codex is not on the machine" });
+    expect(f.hooks[0]!.checklist()).toEqual([
+      { label: "Codex login", command: "install codex, then codex login" },
+      { label: "kubectl config", command: "kubectl has no sign-in; copy the kubeconfig instead" },
+    ]);
+  });
+
+  it("a login with no status command that ended with a non-zero exit is offered a retry or a skip and stays on the page's checklist", async () => {
+    const GEMINI_MANIFEST: Manifest = { entries: [FIXTURE.entries[0]!, { rung: "logins", id: "logins/gemini", label: "Gemini CLI login", group: "Agent logins", paths: ["~/.gemini/oauth_creds.json"], bytes: 300, default: "skip" }] };
+    const f = fake({ hold: true, collect: async () => GEMINI_MANIFEST });
+    const run = runInit(f.opts, f.io);
+    await f.until("Identity");
+    await f.press(KEY.enter);
+    await f.until("Sign-ins");
+    await f.press(KEY.enter);
+    await f.until(BOOT);
+    await f.press("y");
+    await f.until(/Gemini CLI login\s+gemini\n/);
+    await f.until("Press Enter to open");
+    await f.press("\x03");
+    await f.until("Gemini CLI login: not verified (no status command known for gemini; exit 130)");
+    await f.until("Gemini CLI login  r retry   s skip");
+    await f.press("r");
+    await f.until(/Press Enter to open[\s\S]*Press Enter to open/);
+    // A clean exit with no status command is not verified but nothing to retry; it still stays on the page.
+    f.link.exit(f.link.ptys.at(-1)!, 0);
+    await f.until(/not verified \(no status command known for gemini\)\n/);
+    await f.until(URL_RE);
+    expect(f.text().split("r retry")).toHaveLength(2);
+    await f.press(KEY.enter);
+    const result = await run;
+    expect(result.logins?.map(l => [l.state, l.exit])).toEqual([["not-verified", 0]]);
+    expect(f.hooks[0]!.checklist()).toEqual([{ label: "Gemini CLI login", command: "gemini" }]);
+    expect(f.text()).toContain("Sign in where the checklist says, then save the golden.");
+  });
+
+  it("an unreadable golden-import.json is said so when the logins are written into a fresh one", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-notes-"));
+    dirs.push(dir);
+    const path = join(dir, "golden-import.json");
+    writeFileSync(path, "{ not json");
+    expect(noteLogins(path, [{ id: "logins/gh", label: "GitHub CLI login", state: "skipped" }])).toEqual({ replaced: true });
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ logins: [{ id: "logins/gh", label: "GitHub CLI login", state: "skipped" }] });
+    expect(noteLogins(path, [])).toEqual({ replaced: false });
+  });
+
+  it("a daemon link that drops under a login ends that command as not signed in, and the retry dials a fresh link", async () => {
+    const f = fake({ signedIn: false, hold: true, collect: async () => CODEX_MANIFEST });
+    const run = runInit(f.opts, f.io);
+    await f.until("Identity");
+    await f.press(KEY.enter);
+    await f.until("Sign-ins");
+    await f.press(KEY.enter);
+    await f.until(BOOT);
+    await f.press("y");
+    await f.until("Press Enter to open https://github.com/login/device");
+    expect(f.link.dials).toBe(1);
+    f.link.drop();
+    await f.until("Codex login: not signed in (the machine's terminal link dropped)");
+    await f.until("r retry   f retry with codex login --device-auth   s skip");
+    await f.press("r");
+    await f.until(/Press Enter to open[\s\S]*Press Enter to open/);
+    expect(f.link.dials).toBe(2);
+    await f.press("\x03");
+    await f.until(/not signed in \(codex login status says not signed in\)/);
+    await f.until(/says not signed in[\s\S]*r retry   f retry/);
+    await f.press("s");
+    await f.until(URL_RE);
+    await f.press(KEY.enter);
+    const result = await run;
+    expect(result.code).toBe(0);
+    expect(result.logins?.map(l => [l.state, l.note])).toEqual([["skipped", "skipped by you"], ["skipped", "kubectl has no sign-in; copy the kubeconfig instead"]]);
+  });
+
+  it("outside a pty the openLine hook says exactly what the relay says by itself, hostname and all", async () => {
+    // The relay's default line, read off a real relay over a fake link and a workspace named task-1.
+    const backend = stubBackend();
+    backend.execImpl = (_m, cmd) => (cmd.startsWith("cat ") ? { exitCode: 0, stdout: "tok\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+    const create = backend.create.bind(backend);
+    backend.create = async spec => Object.assign(await create(spec), { previewUrl: async () => ({ url: "http://guest.test", token: "pt", expiresAt: Date.now() + 3_600_000 }) });
+    const store = memoryStore();
+    await store.put("goldens", "default", { head: 1, versions: [{ version: 1, snapshotId: "snap_g", baseTemplate: "base", setupSha: "x", createdAt: "t", smoke: { cmd: "true", exitCode: 0 } }] });
+    const rt = createRuntime({ backend, store, adapters: {} });
+    await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const lines: string[] = [];
+    let emit: ((e: Record<string, unknown>) => void) | undefined;
+    const connect = async (c: ConnectOptions): Promise<DaemonSocket> => {
+      emit = c.onEvent ?? (() => {});
+      let settle: (code: number) => void = () => {};
+      const closed = new Promise<number>(r => (settle = r));
+      return { op: async op => (op === "ports.watch" ? { ok: true, ports: [] } : { ok: true }), close: () => settle(1000), closed, beats: 0, open: true };
+    };
+    const relay = startCallbackRelay({ runtime: rt, openUrl: async () => true, log: l => lines.push(l), connect });
+    for (let i = 0; i < 200 && emit === undefined; i++) await new Promise(r => setTimeout(r, 5));
+    emit!({ type: "browser.open", url: "https://github.com/login/device" });
+    for (let i = 0; i < 200 && lines.length === 0; i++) await new Promise(r => setTimeout(r, 5));
+    await relay.close();
+    expect(lines).toHaveLength(1);
+
+    // init's hook, for a target that is not the builder, produces the same line.
+    const f = fake({ yes: true, collect: async () => CODEX_MANIFEST });
+    await runInit(f.opts, f.io);
+    expect(f.hooks[0]!.openLine("task-1", "github.com", "https://github.com/login/device")).toBe(lines[0]);
+  });
+
+  it("a desktop builder keeps the checklist beside its live screen and signs in nothing here", async () => {
+    const f = fake({ yes: true, collect: async () => CODEX_MANIFEST });
+    f.opts.runtime = recipe => {
+      const backend = stubBackend();
+      const create = backend.create.bind(backend);
+      backend.create = async spec => Object.assign(await create(spec), { streamUrl: "wss://stream.example/vm" });
+      f.backends.push(backend);
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+      f.runtimes.push(rt);
+      return rt;
+    };
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(0);
+    expect(result.logins).toBeUndefined();
+    expect(f.hooks[0]!.checklist()).toEqual([
+      { label: "Codex login", command: "codex login" },
+      { label: "kubectl config", command: "kubectl has no sign-in; copy the kubeconfig instead" },
+    ]);
+    expect(f.link.ptys).toEqual([]);
+    expect(f.text()).toContain("Sign in where the checklist says, then save the golden.");
+    expect(f.text()).not.toContain("Signing in on the machine");
+    expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).not.toHaveProperty("logins");
+  });
+
+  it("when the machine's terminal cannot be reached the login is not signed in with the reason, can be skipped, and the hand-off still comes", async () => {
+    const f = fake({ collect: async () => CODEX_MANIFEST, daemon: async () => { throw new Error("no daemon token"); } });
+    const run = runInit(f.opts, f.io);
+    await f.until("Identity");
+    await f.press(KEY.enter);
+    await f.until("Sign-ins");
+    await f.press(KEY.enter);
+    await f.until(BOOT);
+    await f.press("y");
+    await f.until("Codex login: not signed in (no daemon token)");
+    await f.until("r retry   f retry with codex login --device-auth   s skip");
+    await f.press("s");
+    await f.until(URL_RE);
+    await f.press(KEY.enter);
+    const result = await run;
+    expect(result.code).toBe(0);
+    expect(result.logins).toEqual([
+      { id: "logins/codex", label: "Codex login", state: "skipped", command: "codex login", note: "skipped by you" },
+      { id: "logins/kube", label: "kubectl config", state: "skipped", note: "kubectl has no sign-in; copy the kubeconfig instead" },
+    ]);
+    // The typed key never echoes into the next line.
+    expect(f.text()).not.toMatch(/\ns[│◇]/);
+  });
+});
+
 describe("wsp init, flags and no terminal", () => {
   it("without a terminal it behaves as --yes: defaults taken, nothing asked, the address printed", async () => {
     const f = fake({ tty: false });
@@ -730,7 +1074,7 @@ describe("wsp init, flags and no terminal", () => {
     // machine instead of copy, so the Keychain is never asked and the row lands on the checklist.
     expect(f.reads).toEqual([]);
     expect(f.text()).toMatch(/GitHub CLI login\s+sign in/);
-    expect(f.checklists[0]).toEqual(expect.arrayContaining([{ label: "GitHub CLI login", command: "gh auth login" }]));
+    expect(f.hooks[0]!.checklist()).toEqual(expect.arrayContaining([{ label: "GitHub CLI login", command: "gh auth login" }]));
     expect(loadManifest(join(dirs[0]!, "golden-recipe.json")).entries.find(e => e.id === "logins/gh")?.choice).toBe("machine");
     expect(f.text()).not.toContain("from your Keychain");
   });
@@ -746,6 +1090,15 @@ describe("wsp init, flags and no terminal", () => {
     const said = out.indexOf("Reading gh:github.com from your Keychain, as the saved recipe answered copy; macOS may ask you to allow it.");
     expect(said).toBeGreaterThan(-1);
     expect(said).toBeLessThan(out.search(BOOT));
+    // Nobody can type here, so the one sign-in chosen for the machine is skipped and said so; no pty was opened.
+    expect(f.text()).toContain("Sign-ins on the machine skipped: Claude Code login. No terminal to sign in from; use the app's terminal.");
+    expect(f.link.ptys).toEqual([]);
+    expect(f.link.dials).toBe(0);
+    expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({
+      logins: [{ id: "logins/claude", state: "skipped", note: "no terminal to sign in from; use the app's terminal" }],
+    });
+    // The page still gets the login as its checklist: nothing ran here.
+    expect(f.hooks[0]!.checklist()).toEqual([{ label: "Claude Code login", command: "claude auth login" }]);
   });
 
   it("a Keychain login the reader refuses is read before anything boots, turns into a sign-in on the machine, and says so before the confirm", async () => {
@@ -769,7 +1122,7 @@ describe("wsp init, flags and no terminal", () => {
     // The refusal happened with no machine on the account; the pack later asks the Keychain for nothing and notes the row.
     const saved = loadManifest(join(dirs[0]!, "golden-recipe.json"));
     expect(saved.entries.find(e => e.id === "logins/gh")?.choice).toBe("machine");
-    expect(f.checklists[0]).toEqual(expect.arrayContaining([{ label: "GitHub CLI login", command: "gh auth login" }]));
+    expect(f.hooks[0]!.checklist()).toEqual(expect.arrayContaining([{ label: "GitHub CLI login", command: "gh auth login" }]));
     const log = f.backends[0]!.machines[0]!.execLog;
     expect(log.some(c => c.includes("tar xzf"))).toBe(true);
     // The refused row travels with none of its files: the recipe is replanned with gh as a sign-in, so the builder

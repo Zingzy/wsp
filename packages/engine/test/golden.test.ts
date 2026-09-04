@@ -231,6 +231,16 @@ describe("interactive golden: prepare then seal", () => {
     expect((await sealGolden(b2, { backend: without.backend, smoke: "true" })).version.browserShim).toBe(false);
   });
 
+  it("seal stamps the logins it is given onto the version, name and state only", async () => {
+    const { backend } = recordingBackend();
+    const b = await prepareBuilder({ backend, setup: "true" });
+    const logins = [{ name: "GitHub CLI login", state: "signed-in" as const }, { name: "Codex login", state: "skipped" as const }];
+    const { version } = await sealGolden(b, { backend, smoke: "true", logins });
+    expect(version.logins).toEqual(logins);
+    const b2 = await prepareBuilder({ backend, setup: "true" });
+    expect((await sealGolden(b2, { backend, smoke: "true" })).version.logins).toBeUndefined();
+  });
+
   it("seal retries a kill the provider accepted without acting on, and forks only once the builder reads gone", async () => {
     const { backend, timeline } = recordingBackend({}, { ignoreKill: (id, nth) => id === "m1" && nth === 1 });
     const { stages, onStage } = stageRecorder();

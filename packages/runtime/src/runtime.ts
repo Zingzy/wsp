@@ -39,6 +39,7 @@ import type {
   DaemonReachView,
   EventUnion,
   GoldenBuilderView,
+  GoldenLogin,
   GoldenStage,
   PortReachView,
   ReachState,
@@ -327,7 +328,8 @@ export interface Runtime {
     /** Boots a first-life builder from the recipe; a person sets it up on its live screen, then seals it. */
     prepare(opts?: { name?: string; kind?: MachineKind }): Promise<GoldenBuilderView>;
     /** Snapshot, smoke-fork, append a version. The builder is consumed whether this succeeds, fails, or is refused. */
-    seal(builderId: string): Promise<{ manifest: GoldenManifest; version: GoldenVersion }>;
+    /** logins: what each sign-in asked of the builder came to, stamped on the version. */
+    seal(builderId: string, opts?: { logins?: GoldenLogin[] }): Promise<{ manifest: GoldenManifest; version: GoldenVersion }>;
     /** How a browser dials the builder's daemon; the builder is not a workspace, so it has its own road. */
     builderReach(builderId: string): Promise<DaemonReachView>;
     builders(): Promise<GoldenBuilderView[]>;
@@ -1323,7 +1325,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return run;
     },
 
-    async seal(builderId) {
+    async seal(builderId, o) {
       await ready();
       const entry = builders.get(builderId);
       if (!entry) throw new Error(`no such builder: ${builderId}`);
@@ -1342,6 +1344,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             ...(prior !== undefined ? { manifest: prior } : {}),
             onStage: stageOf(entry.record.name),
             ...(opts.killConfirm !== undefined ? { killConfirm: opts.killConfirm } : {}),
+            ...(o?.logins !== undefined ? { logins: o.logins } : {}),
           }),
         );
         await store.put(GOLDENS, entry.record.name, result.manifest);

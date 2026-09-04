@@ -2,11 +2,11 @@
 // First run: the window is the wizard until a golden image exists. wsp init
 // in the terminal picks what comes along and boots the builder; this is where
 // the builder gets pixels: the screen tab's component when it streams a
-// display, the terminal tab's against its daemon otherwise, with a checklist
-// of the sign-ins beside it. Nothing here probes the builder, the person
-// ticks the boxes.
+// display, with a checklist of the sign-ins beside it; the terminal tab's
+// against its daemon otherwise, where the sign-ins already ran in the wsp init
+// terminal. Nothing here probes the builder, the person ticks the boxes.
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import type { GoldenBuilderView, GoldenStage } from "@wsp/protocol";
+import type { ChecklistItem, GoldenBuilderView, GoldenStage } from "@wsp/protocol";
 import type { Api } from "../protocol/client.js";
 import { useStore } from "../protocol/store.js";
 import { ScreenTab } from "../tabs/ScreenTab.js";
@@ -21,11 +21,7 @@ export interface KeyFlags {
   anthropic: boolean;
 }
 
-/** One sign-in the person chose to do on the machine, with the command that starts it. */
-export interface ChecklistItem {
-  label: string;
-  command: string;
-}
+export type { ChecklistItem };
 
 const STEP_WORD: Record<Step, string> = {
   none: "terminal",
@@ -192,8 +188,9 @@ function Hero({ builder, keys, checklist, onSeal }: { builder: GoldenBuilderView
   const api = useStore(s => s.api);
   const streamUrl = builder.screen?.streamUrl;
   useBuilderTerminals(api, builder.id, streamUrl === undefined);
-  // wsp init hands over exactly the sign-ins chosen for the machine; without it, the generic list.
-  const items = checklist !== undefined ? checklist.map(c => `${c.label}: ${c.command}`) : keys?.anthropic ? CHECKLIST.slice(1) : CHECKLIST;
+  // wsp init hands over what is still to sign into (for a sandbox builder, what its own terminal stage
+  // left open); the generic list is the live screen's fallback only.
+  const items = checklist !== undefined ? checklist.map(c => `${c.label}: ${c.command}`) : streamUrl !== undefined ? (keys?.anthropic ? CHECKLIST.slice(1) : CHECKLIST) : [];
   const [ticked, setTicked] = useState<boolean[]>(() => items.map(() => false));
   return (
     <section className={styles.hero}>
@@ -201,20 +198,22 @@ function Hero({ builder, keys, checklist, onSeal }: { builder: GoldenBuilderView
         {streamUrl !== undefined ? <ScreenTab workspaceId={builder.id} streamUrl={streamUrl} /> : <TerminalTab workspaceId={builder.id} />}
       </div>
       <aside className={styles.side}>
-        <span className={styles.lbl}>sign in, then save</span>
+        <span className={styles.lbl}>{items.length > 0 ? "sign in, then save" : "check it over, then save"}</span>
         <p className={styles.p}>
           {streamUrl !== undefined ? "This is your machine's live screen. Click control to type into it." : "This is a shell on your machine. Type into it."}
         </p>
-        <ul className={styles.check}>
-          {items.map((text, i) => (
-            <li key={text}>
-              <label>
-                <input type="checkbox" checked={ticked[i] ?? false} onChange={e => setTicked(t => t.map((v, j) => (j === i ? e.target.checked : v)))} />
-                <span>{text}</span>
-              </label>
-            </li>
-          ))}
-        </ul>
+        {items.length > 0 && (
+          <ul className={styles.check}>
+            {items.map((text, i) => (
+              <li key={text}>
+                <label>
+                  <input type="checkbox" checked={ticked[i] ?? false} onChange={e => setTicked(t => t.map((v, j) => (j === i ? e.target.checked : v)))} />
+                  <span>{text}</span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        )}
         <p className={styles.note}>Take your time, but a machine idle for six hours is killed and this setup is lost.</p>
         <div className={styles.actions}>
           <button type="button" className={`${styles.key} ${styles.keySpend}`} onClick={onSeal}>
