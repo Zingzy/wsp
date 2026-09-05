@@ -23,10 +23,10 @@ import { editorsIntro, everythingItems, fmtBytes, reduceStages, runInit, selectI
 import type { HostHandle } from "../src/server.js";
 import { startCallbackRelay } from "../src/relay.js";
 import type { ConnectOptions, DaemonSocket } from "../src/doctor.js";
-import { appendCommand, readCommand } from "../src/init-secrets.js";
-import { noteOutcomes, statusLine } from "../src/init-signin.js";
-import { CLAUDE_STATUS, CLOUDFLARED_STATUS } from "../src/signin-table.js";
-import { fakePtyLink, type FakePtyLink } from "./fake-pty-link.js";
+import { SH_FILE, appendCommand, readCommand } from "../src/init-secrets.js";
+import { noteOutcomes } from "../src/init-signin.js";
+import { checkScript } from "../src/signin-relay.js";
+import { answersChecks, checkTag, fakePtyLink, type CheckAnswer, type FakePty, type FakePtyLink } from "./fake-pty-link.js";
 import { EVERYTHING, FIXTURE } from "./init-fixture.js";
 import { guestAnswer, stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
 
@@ -66,28 +66,35 @@ interface Fake {
 const DEVICE_URL = "https://github.com/login/device";
 const CLAUDE_URL = "https://claude.com/cai/oauth/authorize?code=true&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback";
 
-/** Ptys on the fake builder: a login prints its page's URL and exits (or waits for Ctrl-C when held); a status run answers as told. */
-function scriptedLink(state: { signedIn: boolean; hold: boolean; missing: boolean }): FakePtyLink {
+/** The check script typed on this pty of the fake builder for these status commands, as its writes read joined. */
+const typed = (pty: FakePty, ...commands: string[]): string => checkScript(commands, SH_FILE, checkTag(pty)).map(l => `${l}\r`).join("");
+
+/** Ptys on the fake builder: a login prints its page's URL and exits (or waits for Ctrl-C when held); the check script
+ * is answered per status command, by `answer` first and as told otherwise. */
+function scriptedLink(state: { signedIn: boolean; hold: boolean; missing: boolean }, answer?: (command: string) => CheckAnswer | undefined): FakePtyLink {
   const link = fakePtyLink();
+  const checks = answersChecks(link, command => {
+    const own = answer?.(command);
+    if (own !== undefined) return own;
+    if (command.includes("kubectl config current-context")) return { output: "minikube", exitCode: 0 };
+    return state.signedIn ? { output: 'Logged in using ChatGPT\nLogged in to github.com account someone (keyring)\n{"loggedIn": true}', exitCode: 0 } : { output: "Not logged in", exitCode: 1 };
+  });
   link.script = (pty, line) => {
+    if (checks(pty, line)) return;
+    // The secrets step's quiet runs: nothing set on the machine yet, no fish.
+    if (line.includes("WSP_STATUS")) {
+      link.data(pty, "\r\nWSP_STATUS 0\r\n");
+      link.exit(pty, 0);
+      return;
+    }
     if (state.missing && line.startsWith("exec ")) {
       link.data(pty, `bash: exec: ${line.split(" ")[1]}: not found\r\n`);
       link.exit(pty, 127);
       return;
     }
-    if (line.includes("kubectl config current-context")) {
-      link.data(pty, "minikube\r\nWSP_STATUS 0\r\n");
-      link.exit(pty, 0);
-      return;
-    }
-    if (line.includes("WSP_STATUS")) {
-      link.data(pty, state.signedIn ? "Logged in using ChatGPT\r\nLogged in to github.com account someone (keyring)\r\n{\"loggedIn\": true}\r\nWSP_STATUS 0\r\n" : "Not logged in\r\nWSP_STATUS 1\r\n");
-      link.exit(pty, state.signedIn ? 0 : 1);
-      return;
-    }
     if (line.includes("exec claude")) link.data(pty, `Opening browser to sign in...\r\nIf the browser didn't open, visit: \x1b]8;;${CLAUDE_URL}\x1b\\${CLAUDE_URL}\x1b]8;;\x1b\\\r\nPaste code here if prompted > `);
     else link.data(pty, `Press Enter to open ${DEVICE_URL} in your browser...\r\n`);
-    if (!state.hold) link.exit(pty, 0);
+    if (!state.hold) link.exit(pty, state.signedIn ? 0 : 1);
   };
   const op = link.op.bind(link);
   link.op = async (name, extra = {}) => {
@@ -383,17 +390,12 @@ describe("wsp init, interactive", () => {
     const signing = out.indexOf("Signing in on the machine");
     expect(signing).toBeGreaterThan(out.indexOf("Ready"));
     expect(out).toMatch(/GitHub CLI login\s+gh auth login/);
-    expect(out).toMatch(/GitHub CLI login: signed in \(gh auth status\)/);
+    expect(out).toMatch(/GitHub CLI login: signed in \(gh auth login exited 0\)/);
     expect(out).toMatch(/Claude Code login\s+claude auth login/);
-    expect(out).toMatch(/Claude Code login: signed in \(claude auth status\)/);
+    expect(out).toMatch(/Claude Code login: signed in \(claude auth login exited 0\)/);
     expect(out).toContain("Press Enter to open https://github.com/login/device");
     expect(out.slice(signing)).toContain("o opens it on this computer");
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual([
-      "exec gh auth login || exit\r",
-      `${statusLine("gh auth status")}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`,
-      "exec claude auth login || exit\r",
-      `${statusLine(CLAUDE_STATUS)}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`,
-    ]);
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual(["exec gh auth login || exit\r", "exec claude auth login || exit\r"]);
     expect(f.link.ptys.every(p => p.killed)).toBe(true);
     expect(f.hooks[0]!.autoOpen(f.backends[0]!.machines[0]!.id, DEVICE_URL)).toBe(false);
     // After the sign-ins the seal summary: what landed, one section each, then the question with enter as yes.
@@ -440,8 +442,8 @@ describe("wsp init, interactive", () => {
       tools: [{ id: "editors/nvim", outcome: "installed" }, { id: "tools/homebrew", outcome: "installed" }, { id: "tools/brew-toolchain/glibc", outcome: "installed" }, { id: "tools/brew-toolchain/gcc", outcome: "installed" }, { id: "tools/brew-shared", outcome: "installed" }, { id: "tools/brew/gh", outcome: "installed" }, { id: "tools/brew/jq", outcome: "installed" }, { id: "tools/npm/pnpm", outcome: "installed" }],
       agents: [{ id: "agents/claude", outcome: "installed" }],
       logins: [
-        { id: "logins/gh", label: "GitHub CLI login", state: "signed-in", command: "gh auth login", note: "gh auth status" },
-        { id: "logins/claude", label: "Claude Code login", state: "signed-in", command: "claude auth login", note: "claude auth status" },
+        { id: "logins/gh", label: "GitHub CLI login", state: "signed-in", command: "gh auth login", note: "gh auth login exited 0" },
+        { id: "logins/claude", label: "Claude Code login", state: "signed-in", command: "claude auth login", note: "claude auth login exited 0" },
       ],
     });
     expect(backend.machines[0]!.spec.labels).toMatchObject({ "wsp-builder": "1" });
@@ -857,21 +859,9 @@ describe("wsp init, everything else", () => {
     expect(f.link.ptys.filter(p => p.created["env"] !== undefined && "WSP_SECRET_LINE" in (p.created["env"] as object))).toEqual([]);
   });
 
-  it("on a terminal each cut secret is asked for hidden and set before any login is checked; the pasted value rides the pty's environment into the machine's secrets file, out of the screen and the run log, and the check that then names it says which file it came from", async () => {
+  it("on a terminal each cut secret is asked for hidden and set before any login is checked; the pasted value rides the pty's environment into the machine's secrets file, out of the screen and the run log, and the copied logins' check reads that file first", async () => {
     const f = fake();
     writeFileSync(join(f.opts.home, ".zshrc"), "export A=1\nexport ANTHROPIC_API_KEY=fake\n");
-    // claude on the builder sees the key once the secrets file holds it, and says so the way 2.1.257 does.
-    let keySet = false;
-    const script = f.link.script!;
-    f.link.script = (pty, line) => {
-      if (line.startsWith(appendCommand(false))) keySet = true;
-      if (line.includes("claude auth status") && line.includes("WSP_STATUS")) {
-        f.link.data(pty, keySet ? '{"loggedIn": true, "authMethod": "api_key", "apiKeySource": "ANTHROPIC_API_KEY"}\r\nWSP_STATUS 0\r\n' : '{"loggedIn": false, "authMethod": "none"}\r\nWSP_STATUS 1\r\n');
-        f.link.exit(pty, keySet ? 0 : 1);
-        return;
-      }
-      script(pty, line);
-    };
     const run = runInit(f.opts, f.io);
     for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
       await f.until(rung);
@@ -884,7 +874,7 @@ describe("wsp init, everything else", () => {
     await f.until("cut from ~/.zshrc; the value is set on the machine and never shown here");
     await f.press(..."s3cret-value".split(""), KEY.enter);
     await f.until("ANTHROPIC_API_KEY: set in /etc/profile.d/wsp-secrets.sh on the machine");
-    await f.until("Claude Code login: signed in (API key from ~/.zshrc, set on the machine as a secret; claude auth status)");
+    await f.until("Claude Code login: signed in (claude auth login exited 0)");
     await sealIt(f);
     const result = await run;
     expect(result.code).toBe(0);
@@ -905,11 +895,11 @@ describe("wsp init, everything else", () => {
     expect(pty.killed).toBe(true);
     const lines = f.link.ptys.map(p => p.writes[0]!);
     expect(lines.indexOf(pty.writes[0]!)).toBeLessThan(lines.findIndex(l => l.includes("auth status")));
-    expect(lines.filter(l => l.includes("auth status")).every(l => l.startsWith(". /etc/profile.d/wsp-secrets.sh 2>/dev/null; "))).toBe(true);
-    // The read, the write, gh's copy check, claude's sign-in with its check on the same link.
+    for (const l of lines.filter(l => l.includes("auth status"))) expect(l.indexOf("[ -r /etc/profile.d/wsp-secrets.sh ] && . /etc/profile.d/wsp-secrets.sh\r")).toBeLessThan(l.indexOf("auth status"));
+    // The read, the write, gh's copy check, claude's sign-in.
     expect(f.link.dials).toBe(4);
     expect(JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8"))).toMatchObject({
-      logins: [{ id: "logins/gh" }, { id: "logins/claude", state: "signed-in", note: "API key from ~/.zshrc, set on the machine as a secret; claude auth status" }],
+      logins: [{ id: "logins/gh" }, { id: "logins/claude", state: "signed-in", note: "claude auth login exited 0" }],
       secrets: [{ name: "ANTHROPIC_API_KEY", path: "~/.zshrc", state: "set" }],
     });
     expect(readFileSync(join(dirname(f.opts.statePath), "init.log"), "utf8")).not.toContain("s3cret");
@@ -1082,7 +1072,7 @@ describe("wsp init, the sign-in stage", () => {
     expect(f.hooks[0]!.onLine("default (builder): forwarding localhost:1455 on this computer")).toBe(true);
     expect(f.text()).toContain("default (builder): forwarding localhost:1455 on this computer");
     await f.press("\x03");
-    await f.until("Codex login: not signed in (codex login status says not signed in)");
+    await f.until("Codex login: not signed in (codex login exited 130)");
     expect(f.hooks[0]!.autoOpen(builderId, "https://other.test/c")).toBe(false);
     expect(f.hooks[0]!.onLine("later")).toBe(false);
     expect(f.hooks[0]!.openLine("default (builder)", "github.com", DEVICE_URL)).toBe("default (builder): a sign-in page for github.com is ready; open it from the app");
@@ -1106,13 +1096,8 @@ describe("wsp init, the sign-in stage", () => {
     expect(result.code).toBe(0);
     const out = f.text();
     expect(out).toMatch(/Codex login\s+skipped\s+skipped by you/);
-    // Three login ptys (default, retry, fallback), each followed by a status run; o never reached the machine.
-    expect(f.link.ptys.filter(p => !p.writes[0]!.includes("WSP_STATUS")).map(p => p.writes[0])).toEqual([
-      "exec codex login || exit\r",
-      "exec codex login || exit\r",
-      "exec codex login --device-auth || exit\r",
-    ]);
-    expect(f.link.ptys.filter(p => p.writes[0]!.includes("WSP_STATUS"))).toHaveLength(3);
+    // Three login ptys (default, retry, fallback), no status run after any of them and no check script since nothing was copied; o never reached the machine.
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual(["exec codex login || exit\r", "exec codex login || exit\r", "exec codex login --device-auth || exit\r"]);
     expect(f.link.ptys.flatMap(p => p.writes.slice(1))).toEqual(["\x03", "\x03", "\x03"]);
     expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({
       logins: [
@@ -1151,7 +1136,7 @@ describe("wsp init, the sign-in stage", () => {
     expect(result.logins?.[0]).toEqual({ id: "logins/codex", label: "Codex login", state: "skipped", command: "codex login", exit: 127, note: "codex is not on the machine" });
   });
 
-  it("a login whose status is a shell check over its file is proved or refused by that line, and refused gets the retry offer", async () => {
+  it("a machine sign-in that ended with a non-zero exit is not signed in and offered a retry or a skip; a clean exit signs it in", async () => {
     // A login whose command is not coming starts at skip and is never staged, so the tools row that brings cloudflared is here.
     const CLOUDFLARED_MANIFEST: Manifest = {
       entries: [
@@ -1173,14 +1158,18 @@ describe("wsp init, the sign-in stage", () => {
     await f.until(/cloudflared login\s+cloudflared tunnel login\n/);
     await f.until("Press Enter to open");
     await f.press("\x03");
-    await f.until(`cloudflared login: not signed in (${CLOUDFLARED_STATUS} says not signed in)`);
-    expect(f.link.ptys.at(-1)!.writes[0]).toBe(`${statusLine(CLOUDFLARED_STATUS)}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`);
+    await f.until("cloudflared login: not signed in (cloudflared tunnel login exited 130)");
     await f.until("cloudflared login  r retry   s skip");
-    await f.press("s");
+    await f.press("r");
+    await f.until(/Press Enter to open[\s\S]*Press Enter to open/);
+    // A clean exit is the sign-in landing: nothing to check and nothing to retry.
+    f.link.exit(f.link.ptys.at(-1)!, 0);
+    await f.until(/signed in \(cloudflared tunnel login exited 0\)\n/);
     await f.until(SEAL_Q(1));
     await f.press(KEY.enter);
     const result = await run;
-    expect(result.logins?.map(l => [l.state, l.exit, l.note])).toEqual([["skipped", 130, "skipped by you"]]);
+    expect(result.logins?.map(l => [l.state, l.exit])).toEqual([["signed-in", 0]]);
+    expect(f.text()).toMatch(/Sign-ins\n│\s+cloudflared login\s+signed in\n/);
   });
 
   it("an unreadable golden-import.json is said so when the logins and secrets are written into a fresh one", () => {
@@ -1214,8 +1203,8 @@ describe("wsp init, the sign-in stage", () => {
     await f.until(/Press Enter to open[\s\S]*Press Enter to open/);
     expect(f.link.dials).toBe(2);
     await f.press("\x03");
-    await f.until(/not signed in \(codex login status says not signed in\)/);
-    await f.until(/says not signed in[\s\S]*r retry   f retry/);
+    await f.until(/not signed in \(codex login exited 130\)/);
+    await f.until(/exited 130[\s\S]*r retry   f retry/);
     await f.press("s");
     await sealIt(f);
     const result = await run;
@@ -1291,34 +1280,20 @@ describe("wsp init, logins copied to the machine", () => {
       { rung: "logins", id: "logins/kube", label: "kubectl config", group: "CLI logins", paths: ["~/.kube/config"], bytes: 900, default: "bring" },
     ],
   };
-  const STATUS_LINE = `${statusLine("gh auth status")}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`;
-  const KUBE_LINE = `${statusLine("kubectl config current-context 2>/dev/null")}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`;
+  /** The one check script for the two copied logins. */
+  const CHECKS = (pty: FakePty): string => typed(pty, "gh auth status", "kubectl config current-context 2>/dev/null");
 
   /** gh on the fake builder: its status names the copied token invalid (with `stale`, the second account's beside a
-   * good first one) until gh auth login has run there. */
-  function ghOnBuilder(f: Fake, o: { missing?: boolean; stale?: boolean } = {}): void {
-    let loggedIn = false;
+   * good first one); gh auth login there exits 0. */
+  function ghOnBuilder(f: Fake, o: { missing?: boolean } = {}): void {
+    const checks = answersChecks(f.link, command => {
+      if (command.includes("kubectl config current-context")) return { output: "minikube", exitCode: 0 };
+      if (o.missing) return { output: "sh: gh: not found", exitCode: 127 };
+      return { output: "X Failed to log in to github.com account someone (keyring)\n- The token in /root/.config/gh/hosts.yml is invalid.", exitCode: 1 };
+    });
     f.link.script = (pty, line) => {
-      if (line.includes("kubectl config current-context")) {
-        f.link.data(pty, "minikube\r\nWSP_STATUS 0\r\n");
-        f.link.exit(pty, 0);
-        return;
-      }
-      if (line.includes("WSP_STATUS")) {
-        if (o.missing) {
-          f.link.data(pty, "sh: gh: not found\r\nWSP_STATUS 127\r\n");
-          f.link.exit(pty, 127);
-          return;
-        }
-        const good = (user: string) => `✓ Logged in to github.com account ${user} (default)\r\n`;
-        const bad = (user: string) => `X Failed to log in to github.com account ${user} (default)\r\n- The token in default is invalid.\r\n`;
-        if (o.stale) f.link.data(pty, `${good("Zingzy")}\r\n${loggedIn ? good("other") : bad("other")}WSP_STATUS ${loggedIn ? 0 : 1}\r\n`);
-        else f.link.data(pty, loggedIn ? "✓ Logged in to github.com account someone (keyring)\r\nWSP_STATUS 0\r\n" : "X Failed to log in to github.com account someone (keyring)\r\n- The token in /root/.config/gh/hosts.yml is invalid.\r\nWSP_STATUS 1\r\n");
-        f.link.exit(pty, loggedIn ? 0 : 1);
-        return;
-      }
+      if (checks(pty, line)) return;
       if (line.startsWith("exec gh auth login")) {
-        loggedIn = true;
         f.link.data(pty, `Press Enter to open ${DEVICE_URL} in your browser...\r\n`);
         f.link.exit(pty, 0);
       }
@@ -1358,20 +1333,20 @@ describe("wsp init, logins copied to the machine", () => {
     expect(f.text()).not.toContain("Signing in on the machine");
     await f.press("r");
     await f.until(/GitHub CLI login\s+gh auth login\n/);
-    await f.until("GitHub CLI login: signed in (gh auth status)");
+    await f.until("GitHub CLI login: signed in (gh auth login exited 0)");
     await sealIt(f);
     const result = await run;
     expect(result.code).toBe(0);
     expect(f.reads).toEqual(["gh:github.com"]);
-    // The quiet checks, the sign-in pty, then the gh check again.
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual([STATUS_LINE, KUBE_LINE, "exec gh auth login || exit\r", STATUS_LINE]);
+    // The one check script for both copied logins, then the sign-in pty; its exit is the row's proof.
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual([CHECKS(f.link.ptys[0]!), "exec gh auth login || exit\r"]);
     expect(result.logins).toEqual([
-      { id: "logins/gh", label: "GitHub CLI login", state: "signed-in", command: "gh auth login", exit: 0, note: "gh auth status" },
+      { id: "logins/gh", label: "GitHub CLI login", state: "signed-in", command: "gh auth login", exit: 0, note: "gh auth login exited 0" },
       { id: "logins/kube", label: "kubectl config", state: "signed-in", note: "copied; context minikube; kubectl config current-context" },
     ]);
     expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({
       logins: [
-        { id: "logins/gh", state: "signed-in", note: "gh auth status" },
+        { id: "logins/gh", state: "signed-in", note: "gh auth login exited 0" },
         { id: "logins/kube", state: "signed-in" },
       ],
     });
@@ -1385,18 +1360,18 @@ describe("wsp init, logins copied to the machine", () => {
     const f = fake({ collect: async () => COPIED_MANIFEST });
     mkdirSync(join(f.opts.home, ".config", "gh"), { recursive: true });
     writeFileSync(join(f.opts.home, ".config", "gh", "hosts.yml"), "github.com:\n    git_protocol: ssh\n    users:\n        other:\n        Zingzy:\n    user: Zingzy\n");
-    ghOnBuilder(f, { stale: true });
+    ghOnBuilder(f);
     const { run } = await toTheBuilder(f);
     await f.until("GitHub CLI login: not signed in (copied, but gh auth status says not signed in)");
     await f.until("GitHub CLI login  r sign in on the machine   s skip");
     await f.press("r");
-    await f.until("GitHub CLI login: signed in (gh auth status)");
+    await f.until("GitHub CLI login: signed in (gh auth login exited 0)");
     await sealIt(f);
     const result = await run;
     expect(result.code).toBe(0);
     expect(f.reads).toEqual(["gh:github.com (other)", "gh:github.com (Zingzy)"]);
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual([STATUS_LINE, KUBE_LINE, "exec gh auth login || exit\r", STATUS_LINE]);
-    expect(result.logins?.[0]).toEqual({ id: "logins/gh", label: "GitHub CLI login", state: "signed-in", command: "gh auth login", exit: 0, note: "gh auth status" });
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual([CHECKS(f.link.ptys[0]!), "exec gh auth login || exit\r"]);
+    expect(result.logins?.[0]).toEqual({ id: "logins/gh", label: "GitHub CLI login", state: "signed-in", command: "gh auth login", exit: 0, note: "gh auth login exited 0" });
   });
 
   it("a gh account with no Keychain item is left behind: the copy goes on without it, the row detail names it, and the check passes without it", async () => {
@@ -1427,7 +1402,7 @@ describe("wsp init, logins copied to the machine", () => {
     // The row stays a copy, so the recipe is not replanned and the check ran once.
     expect(f.recipes).toHaveLength(1);
     expect(loadManifest(join(dirname(f.opts.statePath), "golden-recipe.json")).entries.find(e => e.id === "logins/gh")?.choice).toBe("copy");
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual([STATUS_LINE, KUBE_LINE]);
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual([CHECKS(f.link.ptys[0]!)]);
     expect(result.logins?.[0]).toEqual({ id: "logins/gh", label: "GitHub CLI login", state: "signed-in", note: "copied; gh auth status", left: "other left behind: no token in the Keychain" });
     const landed = JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"));
     expect((landed.files.skipped as { id: string }[]).filter(s => s.id === "logins/gh")).toEqual([{ id: "logins/gh", path: "Keychain: gh:github.com (other)", note: "other left behind: no token in the Keychain" }]);
@@ -1563,7 +1538,7 @@ describe("wsp init, logins copied to the machine", () => {
     await sealIt(f);
     const result = await run;
     expect(result.code).toBe(0);
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual([STATUS_LINE, KUBE_LINE]);
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual([CHECKS(f.link.ptys[0]!)]);
     expect(result.logins?.[0]).toEqual({ id: "logins/gh", label: "GitHub CLI login", state: "skipped", note: "skipped by you" });
     expect((await f.runtimes.at(-1)!.golden.get())?.versions[0]?.logins?.[0]).toEqual({ name: "GitHub CLI login", state: "skipped" });
   });
@@ -1576,7 +1551,7 @@ describe("wsp init, logins copied to the machine", () => {
     expect(result.code).toBe(0);
     expect(f.text()).toContain("GitHub CLI login: not signed in (copied, but gh auth status says not signed in)");
     expect(f.text()).not.toContain("r sign in on the machine");
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual([STATUS_LINE, KUBE_LINE]);
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual([CHECKS(f.link.ptys[0]!)]);
     expect(result.logins).toEqual([
       { id: "logins/gh", label: "GitHub CLI login", state: "not-signed-in", note: "copied, but gh auth status says not signed in" },
       { id: "logins/kube", label: "kubectl config", state: "signed-in", note: "copied; context minikube; kubectl config current-context" },
@@ -1659,7 +1634,7 @@ describe("wsp init, flags and no terminal", () => {
     // The copied gh login is checked on the builder with nobody here; the one sign-in chosen for the machine is skipped and said so.
     expect(f.text()).toContain("GitHub CLI login: signed in (copied; gh auth status)");
     expect(f.text()).toContain("Sign-ins on the machine skipped: Claude Code login. No terminal to sign in from; use the app's terminal.");
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual([`${statusLine("gh auth status")}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`]);
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual([typed(f.link.ptys[0]!, "gh auth status")]);
     expect(f.link.dials).toBe(1);
     expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({
       logins: [

@@ -13,10 +13,12 @@ import { detectLogins, type ManifestEntry } from "@wsp/collect";
 import type { LoginState } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
 import { fakeHost, type FakeLaptop } from "../../collect/test/fake-host.js";
-import { signInStage, statusLine } from "../src/init-signin.js";
+import { SH_FILE } from "../src/init-secrets.js";
+import { signInStage } from "../src/init-signin.js";
+import { checkScript } from "../src/signin-relay.js";
 import { AWS_STATUS, CLOUDFLARED_STATUS, GEMINI_STATUS, SIGN_INS, statusOf, type LoginSource } from "../src/signin-table.js";
 import { collectorLogins } from "./collector-logins.js";
-import { fakePtyLink } from "./fake-pty-link.js";
+import { answersChecks, checkTag, fakePtyLink, type FakePty } from "./fake-pty-link.js";
 
 type Source = LoginSource | "none";
 const SOURCES: readonly Source[] = ["keychain", "rc-key", "file", "helper", "none"];
@@ -309,11 +311,7 @@ const entryFor = (tool: string, choice: "copy" | "machine"): ManifestEntry => ({
 /** The fake guest answers the status command with this output and exit code; a stage over it with one login. */
 function guest(tool: string, choice: "copy" | "machine", answer: Answer | undefined) {
   const link = fakePtyLink();
-  link.script = (pty, line) => {
-    if (!line.includes("WSP_STATUS") || answer === undefined) return;
-    link.data(pty, `${answer.output.replace(/\n/g, "\r\n")}\r\nWSP_STATUS ${answer.exitCode}\r\n`);
-    link.exit(pty, answer.exitCode);
-  };
+  link.script = answersChecks(link, () => answer);
   const output = new PassThrough();
   const chunks: string[] = [];
   output.on("data", (c: Buffer) => chunks.push(c.toString()));
@@ -330,10 +328,11 @@ function guest(tool: string, choice: "copy" | "machine", answer: Answer | undefi
   return { run, link, text: () => stripVTControlCharacters(chunks.join("")) };
 }
 
-const typedLine = (tool: string): string => {
+/** The script typed on this pty for the tool's check alone, as its writes read joined. */
+const typedScript = (pty: FakePty, tool: string): string => {
   const status = statusOf(SIGN_INS[tool]!);
   if (status === undefined) throw new Error(`${tool} has no status command`);
-  return `${statusLine(status.typed ?? status.command)}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`;
+  return checkScript([status.typed ?? status.command], SH_FILE, checkTag(pty)).map(l => `${l}\r`).join("");
 };
 
 describe("the sign-in matrix covers every tool and source", () => {
@@ -369,11 +368,12 @@ describe("the sign-in matrix covers every tool and source", () => {
     }
   });
 
-  it("every status check is typed with the secrets file sourced first, so a key the secrets step set counts before any check reads", () => {
+  it("every status check runs after the script reads the secrets file, when it is there, so a key the secrets step set counts before any check reads", () => {
     for (const tool of tools) {
       const status = statusOf(SIGN_INS[tool]!);
       if (status === undefined) continue;
-      expect(typedLine(tool), tool).toMatch(/^\. \/etc\/profile\.d\/wsp-secrets\.sh 2>\/dev\/null; /);
+      const lines = checkScript([status.typed ?? status.command], SH_FILE, "t");
+      expect(lines.indexOf("[ -r /etc/profile.d/wsp-secrets.sh ] && . /etc/profile.d/wsp-secrets.sh"), tool).toBeLessThan(lines.findIndex(l => l.includes(status.typed ?? status.command)));
       expect(status.command, tool).not.toMatch(/2>\/dev\/null$/);
     }
   });
@@ -400,8 +400,8 @@ describe("the sign-in matrix, cell by cell", () => {
     expect(r).toMatchObject({ id: `logins/${c.tool}`, state: c.state, note: c.note });
     if (c.answer === undefined) expect(g.link.ptys).toEqual([]);
     else {
-      expect(g.link.ptys.map(p => p.writes)).toEqual([[typedLine(c.tool)]]);
-      expect(g.link.ptys[0]!.created).toEqual({ cols: 200, rows: 50, shell: "/bin/sh", env: { PS1: "" } });
+      expect(g.link.ptys.map(p => p.writes.join(""))).toEqual([typedScript(g.link.ptys[0]!, c.tool)]);
+      expect(g.link.ptys[0]!.created).toEqual({ cols: 200, rows: 50, shell: "/bin/sh", env: { PS1: "", PS2: "" } });
     }
     const words = JSON.stringify([r, g.text()]);
     for (const v of FAKE_VALUES) expect(words).not.toContain(v);
@@ -412,7 +412,7 @@ describe("the sign-in matrix, cell by cell", () => {
     const g = guest("claude", "copy", { output: CLAUDE_HELPER, exitCode: 0 });
     const [r] = await g.run;
     expect(r).toEqual({ id: "logins/claude", label: "claude", state: "not-signed-in", note: "copied, but claude auth status names the settings.json helper while its key file is missing or empty on the machine" });
-    expect(g.link.ptys.map(p => p.writes)).toEqual([[typedLine("claude")]]);
+    expect(g.link.ptys.map(p => p.writes.join(""))).toEqual([typedScript(g.link.ptys[0]!, "claude")]);
   });
 
   it.each(MISSING)("%s: a guest without the tool leaves the copied login not verified, with the shell's own 127 and no status read", async tool => {
