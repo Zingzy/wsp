@@ -6,7 +6,8 @@
 import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { ALREADY_APPLIED } from "@wsp/protocol";
-import { StageStream, type StageFrame } from "../src/init.js";
+import type { Runtime } from "@wsp/runtime";
+import { SEAL_STEPS, StageStream, streamStages, type StageFrame } from "../src/init.js";
 
 const SPINNERS = /[◒◐◓◑]/;
 const ev = (stage: string, at: number, detail?: string): StageFrame => ({ type: "golden.stage", name: "default", stage, at, ...(detail !== undefined ? { detail } : {}) });
@@ -219,6 +220,26 @@ describe("stage stream on a terminal", () => {
     } finally {
       console.warn = warn;
       console.error = error;
+      vi.useRealTimers();
+    }
+  });
+
+  it("a stream around a call that rejects still stops: the console comes back and the spinner timer ends", async () => {
+    vi.useFakeTimers();
+    const warn = console.warn;
+    try {
+      const { output, screen } = terminal(80, 30);
+      const rt = { events: { on: () => () => {} } } as unknown as Pick<Runtime, "events">;
+      const sunk: string[] = [];
+      const failing = streamStages(rt, { output, isTTY: true }, SEAL_STEPS, () => Promise.reject(new Error("the seal call died")), l => sunk.push(l));
+      await expect(failing).rejects.toThrow("the seal call died");
+      expect(console.warn).toBe(warn);
+      const rows = screen.lines().length;
+      vi.advanceTimersByTime(500);
+      expect(screen.lines().length).toBe(rows);
+      expect(sunk).toEqual([]);
+    } finally {
+      console.warn = warn;
       vi.useRealTimers();
     }
   });

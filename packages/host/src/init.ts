@@ -1072,18 +1072,21 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
 }
 
 /** One stage stream around one runtime call; the frames it draws are the golden's, whatever the call. */
-async function streamStages(rt: Runtime, io: InitIO, words: readonly StageWords[], run: () => Promise<unknown>, sink: (line: string) => void): Promise<StageView> {
+export async function streamStages(rt: Pick<Runtime, "events">, io: Pick<InitIO, "output" | "isTTY">, words: readonly StageWords[], run: () => Promise<unknown>, sink: (line: string) => void): Promise<StageView> {
   const stream = new StageStream(io.output, io.isTTY, words, sink);
   const off = rt.events.on("golden.stage", e => {
     if (e.type === "golden.stage") stream.push({ type: "golden.stage", name: e.name, stage: e.stage, ...(e.detail !== undefined ? { detail: e.detail } : {}) });
   });
   stream.start();
+  let view!: StageView;
+  // The stop sits in the finally so a run that rejects still hands the console back and settles the block.
   try {
     await run();
   } finally {
     off();
+    view = stream.stop();
   }
-  return stream.stop();
+  return view;
 }
 
 /** After the hand-off the browser drives the seal; the terminal shows it as it happens. */
