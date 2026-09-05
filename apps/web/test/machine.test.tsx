@@ -334,6 +334,33 @@ describe("lineage", () => {
     expect(screen.queryByRole("button", { name: "roll back to v12" })).toBeNull();
   });
 
+  it("lists the tools missing from the forked version under a micro-label, one row per tool with its cause and reason, under that version alone", async () => {
+    const missing = [
+      { name: "gopls", outcome: "skipped" as const, note: "no Linux bottle" },
+      { name: "Homebrew", outcome: "failed" as const, note: "git: not found" },
+    ];
+    const lineage: SnapshotLineage = { name: "default", head: 12, versions: [{ ...gv(11), missingTools: [{ name: "Raycast", outcome: "skipped", note: "macOS app, no Linux build" }] }, { ...gv(12), missingTools: missing }] };
+    await mount([onV12()], CAPS, lineage);
+    await waitFor(() => expect(fact("v12")).toBe("v12headthis fork"));
+    const lists = document.querySelectorAll("[data-k='missing-tools']");
+    expect(lists).toHaveLength(1);
+    expect(lists[0]!.closest("li")?.querySelector("[data-k='v12']")).not.toBeNull();
+    expect(lists[0]!.querySelector("p")?.textContent).toBe("not on this image");
+    const rows = [...lists[0]!.querySelectorAll("li")].map(li => [li.querySelector("[data-k='missing-tool']")?.textContent, li.querySelector("[data-k='missing-note']")?.textContent]);
+    expect(rows).toEqual([
+      ["gopls", "skipped: no Linux bottle"],
+      ["Homebrew", "failed: git: not found"],
+    ]);
+    expect(screen.queryByText("Raycast")).toBeNull();
+  });
+
+  it("a version that recorded no missing tools gets no list and no label", async () => {
+    await mount([onV12()], CAPS, twoVersions);
+    await waitFor(() => expect(fact("v12")).toBe("v12headthis fork"));
+    expect(document.querySelector("[data-k='missing-tools']")).toBeNull();
+    expect(screen.queryByText("not on this image")).toBeNull();
+  });
+
   it("asks before rolling back; confirming calls the api once and moves head", async () => {
     const api = await mount([onV12()], CAPS, twoVersions);
     fireEvent.click(await screen.findByRole("button", { name: "roll back to v11" }));

@@ -411,6 +411,10 @@ export const LoginState = z.enum(["signed-in", "not-signed-in", "not-verified", 
 export type LoginState = z.infer<typeof LoginState>;
 export const GoldenLogin = z.object({ name: z.string(), state: LoginState });
 export type GoldenLogin = z.infer<typeof GoldenLogin>;
+/** A tool the builder's import did not put on the image: set aside at plan or install time, or failed to install,
+ * with the reason it gave. Forks of the version are missing it. */
+export const GoldenMissingTool = z.object({ name: z.string(), outcome: z.enum(["skipped", "failed"]), note: z.string() });
+export type GoldenMissingTool = z.infer<typeof GoldenMissingTool>;
 
 /** One sealed image. `kind` is the machine kind the snapshot was taken from and
  * therefore restores as; entries sealed before kind was recorded were all
@@ -429,6 +433,9 @@ export const GoldenVersion = z.object({
   browserShim: z.boolean().optional(),
   /** The sign-ins the builder was asked for and how each ended, so the app can say what a fork carries. */
   logins: z.array(GoldenLogin).optional(),
+  /** Every tool the import skipped or failed to install, by name with the cause and reason, so a workspace can say why
+   * one is missing; absent when every tool installed or the version was sealed before this was recorded. */
+  missingTools: z.array(GoldenMissingTool).optional(),
   /** The snapshot the builder that sealed this version descends from: an update's head. Absent on a version built
    * from a fresh machine, and on versions sealed before this was recorded. */
   parentSnapshotId: z.string().optional(),
