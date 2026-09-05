@@ -178,6 +178,8 @@ describe("workspace creation view", () => {
     expect(lines[0]!.className).not.toContain("text-destructive-foreground");
     expect(view.textContent).toContain("The provider refused: machine cap reached");
     expect(view.textContent).toMatch(/every slot is taken/);
+    // The provider's words appear once, on the failing line.
+    expect(view.textContent!.split("Sandbox limit reached (2)")).toHaveLength(2);
 
     fireEvent.click(within(view).getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(2));

@@ -221,7 +221,9 @@ describe("new thread", () => {
     const seen: string[] = [];
     const off = onNewThreadRequest(d => seen.push(d.workspaceId));
     const item = (row: HTMLElement) => row.closest<HTMLElement>('[data-sidebar="menu-item"]')!;
-    const line = screen.getByText(/No threads yet/).parentElement!;
+    const line = screen.getByText(/No threads yet/);
+    // Flowing text, not a truncating row: the sentence wraps rather than cuts at a narrow sidebar.
+    expect(line.className).not.toMatch(/truncate|whitespace-nowrap/);
     expect(item(line)).toBe(item(rowOf("web")));
     expect(within(item(rowOf("api"))).queryByText(/No threads yet/)).toBeNull();
     fireEvent.click(within(line).getByRole("button", { name: /New thread/ }));

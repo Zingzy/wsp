@@ -89,7 +89,7 @@ configure({ asyncUtilTimeout: 10_000 });
 beforeEach(() => {
   window.localStorage.clear();
   vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
-  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, sessions: {}, ready: false });
+  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, creations: [], sessions: {}, ready: false });
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useTerminalDrawerStore.setState({ byWorkspaceId: {} });
 });
@@ -153,6 +153,21 @@ describe("command palette", () => {
     await waitFor(() => expect(palette()).not.toBeNull());
     fireEvent.click(screen.getByText("New workspace", { selector: "[data-slot=command-item] span" }));
     await waitFor(() => expect(screen.getByRole("dialog", { name: "New workspace" })).toBeTruthy());
+  });
+
+  it("while a creation row is selected, the shortcuts act on no workspace: no thread request, no drawer, no panel", async () => {
+    await mountShell();
+    const seen: string[] = [];
+    const off = onNewThreadRequest(d => seen.push(d.workspaceId));
+    act(() => useStore.setState({ creations: [{ key: "creating:1", name: "beta", workspaceId: null, lines: [], failed: null }], selectedId: "creating:1" }));
+    mod("n");
+    mod("j");
+    mod("b", { altKey: true });
+    await settle();
+    expect(seen).toEqual([]);
+    expect(drawer("creating:1")).toBeUndefined();
+    expect(panel("creating:1")).toBeUndefined();
+    off();
   });
 
   it("raises a new-thread request for the selected workspace", async () => {

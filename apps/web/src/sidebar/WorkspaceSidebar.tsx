@@ -290,12 +290,12 @@ export function WorkspaceSidebar() {
                       {!zombie && project.threads.length === 0 && !searching ? (
                         <SidebarMenuSub>
                           <SidebarMenuSubItem data-thread-selection-safe>
-                            <span className="flex h-8 min-w-0 items-center gap-1 whitespace-nowrap px-2 text-[11px] text-muted-foreground/50">
-                              <span className="truncate">No threads yet.</span>
+                            <span className="block min-h-8 px-2 py-2 text-[11px] leading-4 text-muted-foreground">
+                              No threads yet.{" "}
                               <button
                                 type="button"
                                 onClick={() => newThread(project.id)}
-                                className="shrink-0 cursor-pointer rounded-sm outline-hidden ring-ring hover:text-sidebar-foreground focus-visible:ring-2"
+                                className="cursor-pointer rounded-sm outline-hidden ring-ring hover:text-sidebar-foreground focus-visible:ring-2"
                               >
                                 New thread {NEW_THREAD_SHORTCUT}
                               </button>

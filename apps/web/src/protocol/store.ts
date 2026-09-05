@@ -43,7 +43,7 @@ export function explainCreateRefusal(error: unknown): CreateRefusal {
   if (error instanceof RequestError && error.kind === "concurrency") {
     return {
       title: "The provider refused: machine cap reached",
-      detail: `Your machine provider runs a fixed number of machines at once and every slot is taken. A builder kept after a save and not in use is stopped first to make room; pause or delete a workspace to free one, then try again. (${message})`,
+      detail: "Your machine provider runs a fixed number of machines at once and every slot is taken. A builder kept after a save and not in use is stopped first to make room; pause or delete a workspace to free one, then try again.",
     };
   }
   if (error instanceof DisconnectedError) {
@@ -128,11 +128,11 @@ export const useStore = create<State>((set, get) => {
       set(s => (s.workspaces.some(w => w.id === workspace.id) ? {} : { workspaces: [...s.workspaces, workspace].sort((a, b) => a.id.localeCompare(b.id)) }));
       finishCreation(key, workspace.id);
     } catch (e) {
-      const refusal = explainCreateRefusal(e);
+      const message = e instanceof Error ? e.message : String(e);
       patchCreation(key, c => ({
         ...c,
-        failed: refusal,
-        lines: c.lines.at(-1)?.stage === "failed" ? c.lines : [...c.lines, { stage: "failed", message: refusal.detail, at: new Date().toISOString(), elapsedMs: c.lines.at(-1)?.elapsedMs ?? 0 }],
+        failed: explainCreateRefusal(e),
+        lines: c.lines.at(-1)?.stage === "failed" ? c.lines : [...c.lines, { stage: "failed", message, at: new Date().toISOString(), elapsedMs: c.lines.at(-1)?.elapsedMs ?? 0 }],
       }));
     }
   };
@@ -287,7 +287,9 @@ export const useStore = create<State>((set, get) => {
         case "workspace.creating": {
           const line: CreationLine = { stage: e.stage, message: e.message, at: new Date().toISOString(), elapsedMs: e.elapsedMs, ...(e.notice !== undefined ? { notice: e.notice } : {}) };
           set(s => {
-            // Ours is matched by the id once known, before that by the name it was asked for; another client's create shows up too.
+            // Ours is matched by the id once known, before that by the name it was asked for; another client's create shows up
+            // too. Two clients creating the same name at once can swap logs until the reply lands, and workspace.created
+            // settles which row is whose; the runtime's id is not known here any earlier than its first stage.
             const own = s.creations.find(c => c.workspaceId === e.workspaceId) ?? s.creations.find(c => c.workspaceId === null && c.name === e.name && c.failed === null);
             const failed = e.stage === "failed" ? { title: "Could not create the workspace", detail: e.message } : null;
             if (own === undefined) {
@@ -357,6 +359,10 @@ export const useStore = create<State>((set, get) => {
 });
 
 export function useSelectedId(): string | null { return useStore(s => s.selectedId); }
+/** The selected workspace's id, or null while a creation row is selected: no command may act on a creation's key. */
+export function useSelectedWorkspaceId(): string | null {
+  return useStore(s => (s.selectedId !== null && s.creations.some(c => c.key === s.selectedId) ? null : s.selectedId));
+}
 export function useCreation(key: string | null): Creation | null {
   return useStore(s => (key ? s.creations.find(c => c.key === key) ?? null : null));
 }

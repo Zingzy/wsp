@@ -7,7 +7,7 @@ import { deriveSidebarProjects } from "../../adapt/index.js";
 import { isCommandPaletteOpen, onOpenCommandPalette } from "../../commandPaletteBus.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../../keybindingDefaults.js";
 import type { ResolvedKeybindingsConfig } from "../../keybindingTypes.js";
-import { useSelectedId, useStore } from "../../protocol/store.js";
+import { useSelectedWorkspaceId, useStore } from "../../protocol/store.js";
 import { useRightPanelStore } from "../../rightPanelStore.js";
 import { showTerminal } from "../../shell/shellCommands.js";
 import { requestNewThread, requestNewWorkspace } from "../../shell/shellRequests.js";
@@ -38,7 +38,7 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
   const sessions = useStore(s => s.sessions);
   const select = useStore(s => s.select);
   const togglePhase = useStore(s => s.toggle);
-  const selectedId = useSelectedId();
+  const selectedId = useSelectedWorkspaceId();
   const openSurface = useRightPanelStore(s => s.open);
   const toggleRightPanel = useRightPanelStore(s => s.toggleVisibility);
 

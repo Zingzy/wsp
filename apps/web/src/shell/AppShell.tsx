@@ -13,7 +13,7 @@ import { WorkspacePageHeader } from "../components/WorkspacePageHeader.js";
 import { useMediaQuery } from "../hooks/useMediaQuery.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
-import { useCreation, useSelectedId, useStore, useWorkspace } from "../protocol/store.js";
+import { useCreation, useSelectedId, useSelectedWorkspaceId, useStore, useWorkspace } from "../protocol/store.js";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../rightPanelStore.js";
 import { WorkspaceSidebar } from "../sidebar/WorkspaceSidebar.js";
@@ -32,10 +32,8 @@ const TERMINAL_SHORTCUT_LABEL = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBIND
 const NEW_THREAD_SHORTCUT_LABEL = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "chat.new");
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const selectedId = useSelectedId();
-  const creation = useCreation(selectedId);
-  // A creation is selected by its key; no pane is a workspace's until it exists.
-  const workspaceId = creation ? null : selectedId;
+  const creation = useCreation(useSelectedId());
+  const workspaceId = useSelectedWorkspaceId();
   const workspace = useWorkspace(workspaceId);
   const conn = useStore(s => s.conn);
   const panel = useRightPanelStore(s => selectWorkspaceRightPanelState(s.byWorkspaceId, workspaceId));
