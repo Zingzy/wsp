@@ -13,6 +13,7 @@ import { SidebarProvider, useSidebar } from "../src/components/ui/sidebar.js";
 import { isTerminalAppShortcut } from "../src/keybindings.js";
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
+import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { KeybindingDispatcher } from "../src/shell/KeybindingDispatcher.js";
 import { GhosttyTerminalCore } from "../src/terminal/ghostty/core.js";
 import type { TerminalIo, TerminalScreen } from "../src/terminal/pty-io.js";
@@ -107,6 +108,7 @@ describe("the drawer's viewport under the keybinding dispatcher", () => {
     usePlatform(platform);
     useStore.setState({ selectedId: "ws_a" });
     useRightPanelStore.setState({ byWorkspaceId: {} });
+    useTerminalDrawerStore.setState({ byWorkspaceId: {} });
     const data: string[] = [];
     // The textarea exists before the wasm surface listens on it; attach runs once it does.
     let attached: TerminalScreen | null = null;
@@ -137,8 +139,9 @@ describe("the drawer's viewport under the keybinding dispatcher", () => {
     };
     const sidebarOpen = () => screen.getByTestId("sidebar-open").textContent;
     const panelOpen = () => useRightPanelStore.getState().byWorkspaceId["ws_a"]?.isOpen ?? true;
+    const drawerOpen = () => useTerminalDrawerStore.getState().byWorkspaceId["ws_a"]?.terminalOpen ?? false;
     const program = (bytes: string) => attached!.write(bytes);
-    return { data, press, sidebarOpen, panelOpen, program };
+    return { data, press, sidebarOpen, panelOpen, drawerOpen, program };
   }
 
   it("hands a bound Command chord to the app and keeps it out of the pty", async () => {
@@ -146,6 +149,15 @@ describe("the drawer's viewport under the keybinding dispatcher", () => {
     expect(sidebarOpen()).toBe("true");
     const event = press({ key: "b", code: "KeyB", metaKey: true });
     await vi.waitFor(() => expect(sidebarOpen()).toBe("false"));
+    expect(event.defaultPrevented).toBe(true);
+    expect(data).toEqual([]);
+  });
+
+  it("toggles the drawer on Cmd+J while the surface has focus, pty untouched", async () => {
+    const { data, press, drawerOpen } = await mountViewport(MAC);
+    expect(drawerOpen()).toBe(false);
+    const event = press({ key: "j", code: "KeyJ", metaKey: true });
+    await vi.waitFor(() => expect(drawerOpen()).toBe(true));
     expect(event.defaultPrevented).toBe(true);
     expect(data).toEqual([]);
   });
@@ -198,12 +210,20 @@ describe("the drawer's viewport under the keybinding dispatcher", () => {
   });
 
   it("leaves Control and Option chords to the terminal on macOS", async () => {
-    const { data, press, sidebarOpen } = await mountViewport(MAC);
+    const { data, press, sidebarOpen, drawerOpen } = await mountViewport(MAC);
     press({ key: "c", code: "KeyC", ctrlKey: true });
     press({ key: "j", code: "KeyJ", ctrlKey: true });
     press({ key: "Backspace", code: "Backspace", altKey: true });
     press({ key: "Backspace", code: "Backspace" });
     await vi.waitFor(() => expect(data).toEqual(["\x03", "\n", "\x1b\x7f", "\x7f"]));
+    expect(sidebarOpen()).toBe("true");
+    expect(drawerOpen()).toBe(false);
+  });
+
+  it("types Option+B as the layout's character, the way the native app does with option-as-alt off", async () => {
+    const { data, press, sidebarOpen } = await mountViewport(MAC);
+    press({ key: "∫", code: "KeyB", altKey: true });
+    await vi.waitFor(() => expect(data).toEqual(["∫"]));
     expect(sidebarOpen()).toBe("true");
   });
 
@@ -211,7 +231,8 @@ describe("the drawer's viewport under the keybinding dispatcher", () => {
     const { data, press, sidebarOpen } = await mountViewport(LINUX);
     press({ key: "x", code: "KeyX", metaKey: true });
     press({ key: "Backspace", code: "Backspace", metaKey: true });
-    await vi.waitFor(() => expect(data).toEqual(["x", "\x7f"]));
+    press({ key: "b", code: "KeyB", altKey: true });
+    await vi.waitFor(() => expect(data).toEqual(["x", "\x7f", "\x1bb"]));
     expect(sidebarOpen()).toBe("true");
   });
 });
