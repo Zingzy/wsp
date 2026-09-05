@@ -4,9 +4,9 @@
 // reload does not lose what was typed. The prompt editor is controlled from
 // here; a queue holds what was entered while its thread's turn ran, oldest
 // first, until the composer sends its head at the turn's end. A queue read
-// back from storage, one whose head the runtime refused, or one riding a
-// fresh send that has not yet named its thread is held: its rows stay put
-// until the person's next Enter or send-now on this thread.
+// back from storage, or one whose thread has a send in flight that has not
+// yet landed its start, is held: its rows stay put until the person's next
+// Enter or send-now on this thread.
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 

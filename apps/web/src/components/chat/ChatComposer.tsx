@@ -13,11 +13,12 @@
 // then queues the message under the thread's key in the draft store, the rows
 // stack above the box, and when the turn ends the head row starts the next
 // turn; a fresh thread's rows wait under the workspace id until its own first
-// start names it, then move under that id. Rows read back from storage, a
-// row the runtime refused, and rows riding a fresh send that has not named
-// its thread are held: they go only after the person's next Enter or send-now
-// here, never on their own, and a row typed during a turn goes ahead of the
-// held ones it releases. Send-now on a row puts it at
+// start names it, then move under that id. Every send holds the thread's rows
+// until its start lands, so a start the runtime refuses or a harness that
+// dies before init drains nothing behind it. Rows read back from storage are
+// held too. Held rows go only after the person's next Enter or send-now here,
+// never on their own, and a row typed during a turn goes ahead of the held
+// ones it releases. Send-now on a row puts it at
 // the head and stops the turn, since the harness runs one process per turn
 // with stdin closed and takes no message mid-turn. The editor is also
 // disabled while the turn a new thread left behind is still finishing: stop
@@ -104,9 +105,9 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const rekeyQueue = useComposerDraftStore(s => s.rekeyQueue);
   useEffect(() => {
     if (named === null) return;
-    if (named === workspaceId) release(workspaceId);
-    else rekeyQueue(workspaceId, named);
-  }, [named, rekeyQueue, release, workspaceId]);
+    if (named !== threadKey) rekeyQueue(named, threadKey);
+    release(threadKey);
+  }, [named, rekeyQueue, release, threadKey]);
   const editorRef = useRef<ComposerPromptEditorHandle | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
@@ -177,17 +178,18 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
 
   const { setSending, appendUserTurn, appendLocalError, resume, busy, sending } = thread;
   const start = useCallback(
-    (prompt: string, onRefused: () => void, onAccepted: () => void = noop) => {
+    (prompt: string, onRefused: () => void) => {
       if (!api) return;
       setSending(true);
+      hold(threadKey);
       appendUserTurn(prompt);
-      void api.startSession({ workspaceId, prompt, ...(resume ? { resume } : {}), ...(cwd !== null ? { cwd } : {}), ...startOptions }).then(onAccepted, (err: unknown) => {
+      void api.startSession({ workspaceId, prompt, ...(resume ? { resume } : {}), ...(cwd !== null ? { cwd } : {}), ...startOptions }).catch((err: unknown) => {
         setSending(false);
         onRefused();
         appendLocalError(err instanceof Error ? err.message : String(err));
       });
     },
-    [api, appendLocalError, appendUserTurn, cwd, resume, setSending, startOptions, workspaceId],
+    [api, appendLocalError, appendUserTurn, cwd, hold, resume, setSending, startOptions, threadKey, workspaceId],
   );
 
   const send = useCallback(() => {
@@ -197,26 +199,20 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     if (prompt === "") return;
     setDraft(workspaceId, EMPTY_DRAFT);
     if (!busy) {
-      // Held rows are released once the runtime takes this send, so a refusal does not try the head row too.
-      start(
-        prompt,
-        () => {
-          const current = useComposerDraftStore.getState().drafts[workspaceId];
-          if (current === undefined || current.prompt === "") setDraft(workspaceId, { prompt, cursor: prompt.length });
-        },
-        () => release(threadKey),
-      );
+      start(prompt, () => {
+        const current = useComposerDraftStore.getState().drafts[workspaceId];
+        if (current === undefined || current.prompt === "") setDraft(workspaceId, { prompt, cursor: prompt.length });
+      });
       return;
     }
-    // Rows riding a fresh send stay held until its start names the thread, so a pin or a dead harness leaves them waiting.
-    if (sending && threadKey === workspaceId) {
+    // Behind a pending send the row waits with the rest, held since that send began; its start releases them.
+    if (sending) {
       enqueue(threadKey, prompt);
-      hold(threadKey);
       return;
     }
     enqueue(threadKey, prompt, held ? "head" : "tail");
     release(threadKey);
-  }, [busy, draft, enqueue, held, hold, release, sending, setDraft, start, threadKey, unavailable, workspaceId]);
+  }, [busy, draft, enqueue, held, release, sending, setDraft, start, threadKey, unavailable, workspaceId]);
 
   // The head row goes as soon as nothing blocks a send; starting flips busy, so the rest wait for the next end.
   const head = queue[0];

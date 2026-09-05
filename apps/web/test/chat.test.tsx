@@ -471,6 +471,44 @@ describe("chat tab threads", () => {
     expect(sendButton().getAttribute("aria-label")).toBe("Send message");
   });
 
+  it("a send whose start never lands frees the new thread waiting on it when its harness dies, and nothing of it lands there", async () => {
+    const { api, started, emit } = fixtureApi([workspace]);
+    await setup(api);
+    const editor = composerEditor();
+    await typeInto(editor, "hello");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started.length).toBe(1));
+    act(() => requestNewThread({ workspaceId: WS }));
+    expect(status()).toBe("Finishing the previous turn");
+    const X = { workspaceId: WS, sessionId: "sess_x", turnId: "turn_x1", threadId: "thr_x" };
+    emit({ type: "session.done", ...X, at: T0 + 900, result: { status: "failed", error: "claude: command not found" } });
+    expect(isEditable(editor)).toBe(false);
+    emit({ type: "session.end", ...X, at: T0 + 950, exitCode: 127, sawResult: true });
+    expect(isEditable(editor)).toBe(true);
+    expect(status()).toBeNull();
+    expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
+    expect(screen.queryByText(/claude: command not found/)).toBeNull();
+    expect(screen.queryByTestId("settled-footer")).toBeNull();
+  });
+
+  it("a new thread asked for after a send died before its start waits on nothing", async () => {
+    const { api, started, emit } = fixtureApi([workspace]);
+    await setup(api);
+    const editor = composerEditor();
+    await typeInto(editor, "hello");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started.length).toBe(1));
+    const X = { workspaceId: WS, sessionId: "sess_x", turnId: "turn_x1", threadId: "thr_x" };
+    emit({ type: "session.done", ...X, at: T0 + 900, result: { status: "failed", error: "claude: command not found" } });
+    emit({ type: "session.end", ...X, at: T0 + 950, exitCode: 127, sawResult: true });
+    await waitFor(() => expect(sendButton().getAttribute("aria-label")).toBe("Send message"));
+    expect(screen.getByText("hello")).toBeDefined();
+    act(() => requestNewThread({ workspaceId: WS }));
+    expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
+    expect(isEditable(editor)).toBe(true);
+    expect(status()).toBeNull();
+  });
+
   it("a replay gap while a new thread waits over a stamped history keeps the left thread out, its running turn included", async () => {
     const history: Record<string, SessionEvent[]> = { [WS]: [...FIRST] };
     const { api, started, emit } = fixtureApi([workspace], history);

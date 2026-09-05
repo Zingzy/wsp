@@ -229,7 +229,7 @@ describe("composer queue", () => {
     expect(rowFor("second").querySelectorAll("button").length).toBe(before);
   });
 
-  it("a send whose harness dies before its start frees the composer at that turn's end and holds the rows that rode it; the next Enter goes first", async () => {
+  it("a first send whose harness dies before its start frees the composer at that turn's end and holds the rows that rode it; the next Enter goes first", async () => {
     const { api, started, emit } = fixtureApi();
     await setup(api);
     await enter("first");
@@ -237,19 +237,122 @@ describe("composer queue", () => {
     expect(screen.getByRole("button", { name: "Turn in flight" })).toBeDefined();
     await enter("second");
     expect(queued()).toEqual(["second"]);
-    const X = { workspaceId: WS, sessionId: "sess_x", turnId: "turn_x1" };
+    const X = { workspaceId: WS, sessionId: "sess_x", turnId: "turn_x1", threadId: "thr_x" };
     emit({ type: "session.done", ...X, result: { status: "failed", error: "claude: command not found" } });
     emit({ type: "session.end", ...X, exitCode: 127, sawResult: true });
     await waitFor(() => expect(screen.getByRole("button", { name: "Send message" })).toBeDefined());
+    expect(screen.getByText(/claude: command not found/i)).toBeDefined();
     expect(started).toHaveLength(1);
     expect(queued()).toEqual(["second"]);
     await enter("third");
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "third"]));
     expect(queued()).toEqual(["second"]);
-    emit({ type: "session.start", ...scope, prompt: "third" });
-    emit(done("completed"));
-    emit(end());
+    const Y = { workspaceId: WS, sessionId: "sess_y", turnId: "turn_y1", threadId: "thr_y" };
+    emit({ type: "session.start", ...Y, prompt: "third" });
+    expect(useComposerDraftStore.getState().queues["thr_y"]?.map(r => r.prompt)).toEqual(["second"]);
+    emit({ type: "session.done", ...Y, result: { status: "completed", durationMs: 500 } });
+    emit({ type: "session.end", ...Y, exitCode: 0, sawResult: true });
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "third", "second"]));
+    expect(started[2]?.resume).toBe("sess_y");
+    expect(queued()).toEqual([]);
+  });
+
+  it("on a thread with an id, rows behind a send whose harness dies before its start stay held: none goes into the dead harness, every prompt stays on screen and editable", async () => {
+    const history: Record<string, SessionEvent[]> = { [WS]: CHAT_STREAM.map(e => ({ ...e, sessionId: "sess_a", threadId: "thr_a" })) };
+    const { api, started, emit } = fixtureApi(history);
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    await enter("go on");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]?.resume).toBe("sess_a");
+    await enter("second");
+    await enter("third");
+    expect(queued()).toEqual(["second", "third"]);
+    expect(useComposerDraftStore.getState().queues["thr_a"]?.map(r => r.prompt)).toEqual(["second", "third"]);
+    const A2 = { workspaceId: WS, sessionId: "sess_a", turnId: "turn_a2", threadId: "thr_a" };
+    emit({ type: "session.done", ...A2, result: { status: "failed", error: "claude: command not found" } });
+    emit({ type: "session.end", ...A2, exitCode: 127, sawResult: true });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send message" })).toBeDefined());
+    expect(isEditable(composerEditor())).toBe(true);
+    expect(started).toHaveLength(1);
+    expect(queued()).toEqual(["second", "third"]);
+    expect(screen.getByText("go on")).toBeDefined();
+    expect(screen.getByText(/claude: command not found/i)).toBeDefined();
+    fireEvent.change(rowFor("third").querySelector("textarea")!, { target: { value: "third, edited" } });
+    expect(queued()).toEqual(["second", "third, edited"]);
+    fireEvent.click(within(rowFor("second"), "Send now")!);
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["go on", "second"]));
+    expect(started[1]?.resume).toBe("sess_a");
+    expect(queued()).toEqual(["third, edited"]);
+    const A3 = { ...A2, turnId: "turn_a3" };
+    emit({ type: "session.start", ...A3, prompt: "second" });
+    expect(started).toHaveLength(2);
+    emit({ type: "session.done", ...A3, result: { status: "completed", durationMs: 500 } });
+    emit({ type: "session.end", ...A3, exitCode: 0, sawResult: true });
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["go on", "second", "third, edited"]));
+    expect(queued()).toEqual([]);
+  });
+
+  it("a head row sent at a turn's end whose harness dies before its start leaves the rows behind it held until the person acts", async () => {
+    const history: Record<string, SessionEvent[]> = { [WS]: CHAT_STREAM.map(e => ({ ...e, sessionId: "sess_a", threadId: "thr_a" })) };
+    const { api, started, emit } = fixtureApi(history);
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    const A2 = { workspaceId: WS, sessionId: "sess_a", turnId: "turn_a2", threadId: "thr_a" };
+    emit({ type: "session.start", ...A2, prompt: "go again" });
+    await enter("one");
+    await enter("two");
+    await enter("three");
+    emit({ type: "session.done", ...A2, result: { status: "completed", durationMs: 700 } });
+    emit({ type: "session.end", ...A2, exitCode: 0, sawResult: true });
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["one"]));
+    expect(queued()).toEqual(["two", "three"]);
+    const A3 = { ...A2, turnId: "turn_a3" };
+    emit({ type: "session.done", ...A3, result: { status: "failed", error: "claude: command not found" } });
+    emit({ type: "session.end", ...A3, exitCode: 127, sawResult: true });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send message" })).toBeDefined());
+    expect(started).toHaveLength(1);
+    expect(queued()).toEqual(["two", "three"]);
+    expect(screen.getByText("one")).toBeDefined();
+    fireEvent.click(within(rowFor("two"), "Send now")!);
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["one", "two"]));
+    expect(queued()).toEqual(["three"]);
+  });
+
+  it("a thread the view knows that wakes while a fresh send is pending stays out of the new thread and does not settle the send", async () => {
+    const A = { workspaceId: WS, sessionId: "sess_a", turnId: "turn_a1", threadId: "thr_a" };
+    const history: Record<string, SessionEvent[]> = {
+      [WS]: [
+        { type: "session.start", ...A, prompt: "long job" },
+        { type: "session.delta", ...A, kind: "text", text: "Working on it." },
+        ...CHAT_STREAM.map(e => ({ ...e, sessionId: "sess_b", threadId: "thr_b" })),
+      ],
+    };
+    const { api, started, emit } = fixtureApi(history);
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    act(() => requestNewThread({ workspaceId: WS }));
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toBeDefined());
+    expect(isEditable(composerEditor())).toBe(true);
+    await enter("first");
+    await waitFor(() => expect(started).toHaveLength(1));
+    await enter("second");
+    expect(queued()).toEqual(["second"]);
+    emit({ type: "session.delta", ...A, kind: "text", text: "A LEAKED INTO NEW THREAD" });
+    emit({ type: "session.done", ...A, result: { status: "completed", durationMs: 9_000 } });
+    emit({ type: "session.end", ...A, exitCode: 0, sawResult: true });
+    expect(screen.queryByText(/A LEAKED INTO NEW THREAD/)).toBeNull();
+    expect(screen.queryByTestId("settled-footer")).toBeNull();
+    expect(screen.getByRole("button", { name: "Turn in flight" })).toBeDefined();
+    expect(started).toHaveLength(1);
+    expect(queued()).toEqual(["second"]);
+    const N = { workspaceId: WS, sessionId: "sess_n", turnId: "turn_n1", threadId: "thr_n" };
+    emit({ type: "session.start", ...N, prompt: "first" });
+    expect(useComposerDraftStore.getState().queues["thr_n"]?.map(r => r.prompt)).toEqual(["second"]);
+    emit({ type: "session.done", ...N, result: { status: "completed", durationMs: 500 } });
+    emit({ type: "session.end", ...N, exitCode: 0, sawResult: true });
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "second"]));
+    expect(started[1]?.resume).toBe("sess_n");
     expect(queued()).toEqual([]);
   });
 
