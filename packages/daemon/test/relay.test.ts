@@ -313,10 +313,9 @@ async function client(port: number): Promise<{ request(op: string, p?: Record<st
     ws.once("open", resolve);
     ws.once("error", reject);
   });
-  ws.send(JSON.stringify({ id: 0, op: "auth", token: TOKEN }));
   const events: WireMsg[] = [];
   const pending = new Map<number, (m: WireMsg) => void>();
-  let nextId = 1;
+  let nextId = 0;
   ws.on("message", raw => {
     const m = JSON.parse(String(raw)) as WireMsg;
     if (typeof m.id === "number" && pending.has(m.id)) {
@@ -324,17 +323,49 @@ async function client(port: number): Promise<{ request(op: string, p?: Record<st
       pending.delete(m.id);
     } else if (m.type && m.type !== "daemon.hello") events.push(m);
   });
-  return {
-    events,
-    request: (op, p = {}) => {
-      const id = nextId++;
-      return new Promise(resolve => {
-        pending.set(id, resolve);
-        ws.send(JSON.stringify({ id, op, ...p }));
-      });
-    },
-    close: () => ws.close(),
+  const request = (op: string, p: Record<string, unknown> = {}): Promise<WireMsg> => {
+    const id = nextId++;
+    return new Promise(resolve => {
+      pending.set(id, resolve);
+      ws.send(JSON.stringify({ id, op, ...p }));
+    });
   };
+  // A broadcast reaches only sockets whose auth frame the daemon has handled; the reply is the proof it has.
+  await request("auth", { token: TOKEN });
+  return { events, request, close: () => ws.close() };
+}
+
+/** True when nothing listens on host:port at this moment. */
+function canBind(port: number, host: string): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    const probe = createServer();
+    probe.once("error", (e: NodeJS.ErrnoException) => (e.code === "EADDRINUSE" ? resolve(false) : reject(e)));
+    probe.listen(port, host, () => probe.close(() => resolve(true)));
+  });
+}
+
+/** [::1] only, at a port free on 127.0.0.1: the daemon dials v4 first and must be refused there, not answered by another test's server. */
+async function listenV6Only(server: Server): Promise<number> {
+  for (;;) {
+    await new Promise<void>(r => server.listen(0, "::1", r));
+    const port = (server.address() as { port: number }).port;
+    if (await canBind(port, "127.0.0.1")) return port;
+    await new Promise<void>(r => server.close(() => r()));
+  }
+}
+
+/** A port nothing listens on, on either loopback address the daemon dials. */
+async function refusedPort(): Promise<number> {
+  for (;;) {
+    const port = await new Promise<number>(r => {
+      const s = createServer();
+      s.listen(0, "127.0.0.1", () => {
+        const p = (s.address() as { port: number }).port;
+        s.close(() => r(p));
+      });
+    });
+    if (await canBind(port, "::1")) return port;
+  }
 }
 
 async function until(cond: () => boolean, ms = 3000): Promise<void> {
@@ -436,8 +467,7 @@ describe("daemon: browser.open, callback.port and tunnels", () => {
       s.on("data", d => s.write(Buffer.from(`echo:${d.toString()}`)));
       s.on("end", () => s.end());
     });
-    await new Promise<void>(r => echo!.listen(0, "::1", r));
-    const port = (echo.address() as { port: number }).port;
+    const port = await listenV6Only(echo);
     const c = await client(daemon!.port);
     const opened = await c.request("tunnel.open", { tunnelId: "t1", port });
     expect(opened.ok).toBe(true);
@@ -456,14 +486,7 @@ describe("daemon: browser.open, callback.port and tunnels", () => {
     await start();
     const c = await client(daemon!.port);
     expect((await c.request("tunnel.open", { tunnelId: "x", port: 0 })).ok).toBe(false);
-    const closedPort = await new Promise<number>(r => {
-      const s = createServer();
-      s.listen(0, "127.0.0.1", () => {
-        const p = (s.address() as { port: number }).port;
-        s.close(() => r(p));
-      });
-    });
-    const refused = await c.request("tunnel.open", { tunnelId: "x", port: closedPort });
+    const refused = await c.request("tunnel.open", { tunnelId: "x", port: await refusedPort() });
     expect(refused.ok).toBe(false);
     expect(String(refused["error"])).toMatch(/ECONNREFUSED/);
     echo = createServer(s => s.end());
