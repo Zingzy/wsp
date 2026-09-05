@@ -1,19 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The machine context over fixtures: the probe's lines parsed, the facts
 // folded, the document rendered, each agent's hook rendered or refused, and
-// the fallbacks per agent, and the guest scripts run under this machine's bash
-// against a temp root.
+// the fallbacks per agent, and the guest scripts run under this machine's
+// shells against a temp root and a fake home.
 import { execFile } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  ALIAS_PROBES,
+  BROWSER_SHIM_PATH,
   CONTEXT_AGENTS,
   CONTEXT_MARKER,
   agentFiles,
   applyMachineContext,
+  boundedCommand,
   contextLine,
   contextPath,
   mergeFacts,
@@ -27,6 +30,7 @@ import {
   SKILL_DESCRIPTION,
   SKILL_NAME,
   type BuildFacts,
+  type ContextAgent,
   type ContextProbe,
   type GuestFile,
 } from "../src/machine-context.js";
@@ -51,6 +55,7 @@ const PROBE_OUT = [
   "HAS fish",
   "HAS brew",
   "HAS golden-path",
+  "HAS wsp-open",
   "AGENT claude",
   "AGENT codex",
   "AGENT gemini",
@@ -72,7 +77,7 @@ function probeOf(over: Partial<ContextProbe> = {}): ContextProbe {
     kernel: "6.6.30",
     disk: { sizeBytes: 20466256 * 1024, freeBytes: 11720704 * 1024 },
     overlay: false,
-    has: new Set(["tmux", "fish", "brew", "golden-path"]),
+    has: new Set(["tmux", "fish", "brew", "golden-path", "wsp-open"]),
     agents: [...CONTEXT_AGENTS],
     secrets: ["OPENAI_API_KEY", "GH_TOKEN"],
     shell: "zsh",
@@ -93,7 +98,7 @@ describe("the probe", () => {
     expect(probe.kernel).toBe("6.6.30");
     expect(probe.disk).toEqual({ sizeBytes: 20466256 * 1024, freeBytes: 11720704 * 1024 });
     expect(probe.overlay).toBe(false);
-    expect([...probe.has]).toEqual(["tmux", "fish", "brew", "golden-path"]);
+    expect([...probe.has]).toEqual(["tmux", "fish", "brew", "golden-path", "wsp-open"]);
     expect(probe.agents).toEqual([...CONTEXT_AGENTS]);
     expect(probe.secrets).toEqual(["OPENAI_API_KEY", "GH_TOKEN"]);
     expect(probe.shell).toBe("zsh");
@@ -158,7 +163,19 @@ describe("the document", () => {
     expect(doc.startsWith(`${CONTEXT_MARKER}\n`)).toBe(true);
     expect(doc).toContain("- Workspace: task-1.");
     expect(doc).toContain("- Golden: v3, sealed 2026-09-05, setup 9f2a7c1d4e5b.");
-    expect(doc).toContain("- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free");
+    expect(doc).toContain("- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written. wsp keeps 2.0 GiB free");
+    expect(doc).toContain("- Every new shell starts in the thread's folder, and the panes show the thread's folder.");
+    expect(doc).toContain("- Work in a folder: cd <dir> && <cmd> on one line, or absolute paths.");
+    expect(doc).not.toContain("does not move the thread");
+    expect(doc).not.toContain("persists across");
+    const claude = renderMachineContext({ workspace: { name: "task-1" }, golden: GOLDEN, probe: probeOf(), facts: FACTS, agent: "claude" });
+    expect(claude).toContain("- Every new shell and every agent session starts in the thread's folder. A cd moves your own shell, which persists across your tool calls, not the thread's folder, and the files pane follows that shell's folder.");
+    expect(claude).toContain("- Work in a folder: cd <dir> in your shell and it stays there across your tool calls; the thread's folder does not move. Absolute paths work from anywhere.");
+    expect(claude).not.toContain("panes show the thread's folder");
+    expect(renderMachineContext({ workspace: { name: "task-1" }, golden: GOLDEN, probe: probeOf(), facts: FACTS, agent: "codex" })).toBe(doc);
+    expect(doc).toContain("- Sign-ins go through wsp: BROWSER is /usr/local/bin/wsp-open");
+    expect(doc).toContain("run wsp-open <url>");
+    expect(doc).toContain("- Ask for a sign-in: run the tool's own login command");
     expect(doc).toContain("- Secrets set in /etc/profile.d/wsp-secrets.sh: OPENAI_API_KEY, GH_TOKEN.");
     expect(doc).toContain("- Tools that did not install: raycast (macOS app, no Linux build).");
     expect(doc).toContain("- Aliases whose command is not here: o runs open; rc runs code.");
@@ -182,6 +199,9 @@ describe("the document", () => {
     expect(doc).not.toContain("tmux");
     expect(doc).not.toContain("Homebrew");
     expect(doc).not.toContain("wsp-secrets.fish");
+    expect(doc).not.toContain("wsp-open");
+    expect(doc).not.toContain("sign-in");
+    expect(doc).not.toContain("Sign-ins");
     expect(doc).toContain("- Linux, user root, home /root.");
     expect(doc).toMatchSnapshot();
   });
@@ -191,10 +211,15 @@ describe("the document", () => {
     expect(short.startsWith(`${CONTEXT_MARKER}\n`)).toBe(true);
     expect(short).toContain("The wsp-machine skill has the full picture");
     expect(short).toContain("dies when that call's shell exits. Detach it: setsid nohup <cmd> > /tmp/<name>.log 2>&1 < /dev/null &, or tmux new -d -s <name> '<cmd>'.");
-    expect(short).toContain("starts in the thread's folder. A cd inside a tool call lasts for that command only");
+    expect(short).toContain("- Every new shell starts in the thread's folder, and the panes show the thread's folder.");
+    expect(short).not.toContain("lasts for that command only");
+    expect(short).not.toContain("persists across");
+    expect(renderShortContext({ workspace: { name: "task-1" }, golden: GOLDEN, probe: probeOf(), facts: FACTS, agent: "claude" })).toContain("- Every new shell and every agent session starts in the thread's folder. A cd moves your own shell, which persists across your tool calls, not the thread's folder, and the files pane follows that shell's folder.");
+    expect(renderShortContext({ workspace: { name: "task-1" }, golden: GOLDEN, probe: probeOf(), facts: FACTS, agent: "gemini" })).toBe(short);
+    expect(short).toContain("- Sign-ins go through wsp: run the tool's own login command");
     expect(short).toContain("bind 0.0.0.0, not 127.0.0.1");
     expect(short).toContain("- Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed.");
-    expect(short).toContain("- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free.");
+    expect(short).toContain("- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written. wsp keeps 2.0 GiB free.");
     expect(short).toContain("- Secrets are exported by /etc/profile.d/wsp-secrets.sh. Use them by name ($NAME); never print, log or commit a value");
     expect(short).not.toContain("OPENAI_API_KEY");
     expect(short).not.toContain("raycast");
@@ -203,7 +228,8 @@ describe("the document", () => {
     const bare = renderShortContext({ probe: probeOf({ has: new Set(), overlay: true, disk: undefined }), facts: FACTS });
     expect(bare).not.toContain("tmux");
     expect(bare).toContain("- Docker and Podman are not installed.");
-    expect(bare).toContain("- Disk: size unknown when this file was written. wsp keeps 2.0 GB free.");
+    expect(bare).toContain("- Disk: size unknown when this file was written. wsp keeps 2.0 GiB free.");
+    expect(bare).not.toContain("Sign-ins");
   });
 
   it("the skill is the full document under a name and a one-line description every agent's parser reads", () => {
@@ -220,11 +246,13 @@ describe("each agent's hooks", () => {
   const input = { workspace: { name: "task-1" }, golden: GOLDEN, probe: probeOf(), facts: FACTS };
   const short = renderShortContext(input);
   const skill = renderSkill(renderMachineContext(input));
+  const shortFor = (agent: ContextAgent) => renderShortContext({ ...input, agent });
+  const skillFor = (agent: ContextAgent) => renderSkill(renderMachineContext({ ...input, agent }));
   const paths = (out: { files: GuestFile[] }) => out.files.map(f => f.path);
   const content = (out: { files: GuestFile[] }, path: string) => out.files.find(f => f.path === path)!.content;
 
   it("writes the short text through each always-loaded hook and the skill into each global skills directory", () => {
-    const out = Object.fromEntries(CONTEXT_AGENTS.map(a => [a, agentFiles(a, short, skill, probeOf())])) as Record<string, ReturnType<typeof agentFiles>>;
+    const out = Object.fromEntries(CONTEXT_AGENTS.map(a => [a, agentFiles(a, shortFor(a), skillFor(a), probeOf())])) as Record<string, ReturnType<typeof agentFiles>>;
     for (const a of CONTEXT_AGENTS) expect(out[a]!.outcome).toBe("written");
     expect(paths(out["claude"]!)).toEqual(["/etc/claude-code/CLAUDE.md", "/etc/claude-code/.claude/skills/wsp-machine/SKILL.md"]);
     expect(paths(out["codex"]!)).toEqual(["/etc/codex/requirements.toml", "/etc/codex/skills/wsp-machine/SKILL.md"]);
@@ -236,11 +264,12 @@ describe("each agent's hooks", () => {
       const o = out[a]!;
       for (const f of o.files) expect(f.mode).toBe(0o644);
       expect(o.skill).toBe(o.files.at(-1)!.path);
-      expect(o.files.at(-1)!.content).toBe(skill);
+      expect(o.files.at(-1)!.content).toBe(a === "claude" ? skillFor("claude") : skill);
       expect(o.path).toBe(o.files[0]!.path === "/etc/gemini-cli/system-defaults.json" ? "/root/.gemini/WSP-MACHINE.md" : o.files[0]!.path);
       expect(o.files.map(f => `${f.path}\n${f.content}`).join("\n----\n")).toMatchSnapshot(a);
     }
-    expect(content(out["claude"]!, "/etc/claude-code/CLAUDE.md")).toBe(short);
+    expect(content(out["claude"]!, "/etc/claude-code/CLAUDE.md")).toBe(shortFor("claude"));
+    expect(content(out["claude"]!, "/etc/claude-code/CLAUDE.md")).toContain("persists across your tool calls");
     expect(content(out["gemini"]!, "/root/.gemini/WSP-MACHINE.md")).toBe(short);
     expect(content(out["pi"]!, "/root/.pi/agent/APPEND_SYSTEM.md")).toBe(short);
   });
@@ -362,6 +391,7 @@ describe("the guest scripts on a local bash", () => {
     expect(probe).toBeDefined();
     expect(probe.kernel).toBeTruthy();
     expect(probe.disk?.sizeBytes).toBeGreaterThan(0);
+    expect(probe.has.has("wsp-open")).toBe(existsSync(BROWSER_SHIM_PATH));
     expect(probe.conflicts.size).toBe(0);
     expect(probe.facts).toBeUndefined();
 
@@ -388,6 +418,63 @@ describe("the guest scripts on a local bash", () => {
     writeFileSync(join(roots.home, ".gemini/settings.json"), '{ "theme": "dark" }\n');
     probe = parseProbe((await run(probeCommand(roots))).stdout)!;
     expect([...probe.conflicts].sort()).toEqual(["hermes", "pi"]);
+  }, 30_000);
+
+  const shellOf = (name: string): string | undefined => ["/bin", "/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"].map(d => join(d, name)).find(p => existsSync(p));
+  const ALIASES = [
+    ["g", "git"],
+    ["ll", "ls -la"],
+    ["o", "open-not-here"],
+    ["s", "sudo not-here-either"],
+    ["e", "FOO=1 not-here-third"],
+    ["q", "\\not-here-fourth --flag"],
+    ["kca", "_kca(){ kubectl \"$@\" --all-namespaces; unset -f _kca; }; _kca"],
+    ["grp", "{ grep -rn . ; }"],
+    ["abs", "/Applications/Nowhere.app/Contents/MacOS/nowhere"],
+  ] as const;
+  const MISSING = [
+    { name: "e", word: "not-here-third" },
+    { name: "o", word: "open-not-here" },
+    { name: "q", word: "not-here-fourth" },
+    { name: "s", word: "not-here-either" },
+  ];
+  /** The aliases as a POSIX rc file, plus one whose body starts on a new line, the shape of oh-my-zsh's deprecation wrappers. */
+  const SH_RC = `${ALIASES.map(([k, v]) => `alias ${k}='${v.replace(/'/g, "'\\''")}'`).join("\n")}\nalias cb=$'\\n  echo deprecated >&2\\n  git_current_branch'\n`;
+  const aliasLines = (stdout: string) => parseProbe(`WSP_CTX\n${stdout}WSP_CTX_END\n`)!.aliases;
+  const runIn = async (shell: string, args: string[], env: Record<string, string>): Promise<string> => {
+    const { stdout } = await bash(shell, args, { env: { ...process.env, ...env }, maxBuffer: 4 * 1024 * 1024 });
+    return stdout;
+  };
+
+  it.skipIf(shellOf("zsh") === undefined)("the zsh alias probe names only aliases whose first word is a missing command, run on this machine's zsh", async () => {
+    const roots = fakeGuest();
+    writeFileSync(join(roots.home, ".zshrc"), SH_RC);
+    writeFileSync(join(roots.home, ".zshenv"), "");
+    const out = await runIn(shellOf("zsh")!, ["-lic", ALIAS_PROBES.zsh!], { ZDOTDIR: roots.home, HOME: roots.home });
+    expect(aliasLines(out)).toEqual(MISSING);
+  }, 30_000);
+
+  it.skipIf(shellOf("bash") === undefined)("the bash alias probe does the same on this machine's bash, from a fake home's profile", async () => {
+    const roots = fakeGuest();
+    writeFileSync(join(roots.home, ".bash_profile"), SH_RC);
+    const out = await runIn(shellOf("bash")!, ["-lic", ALIAS_PROBES.bash!], { HOME: roots.home });
+    expect(aliasLines(out)).toEqual(MISSING);
+  }, 30_000);
+
+  it.skipIf(shellOf("fish") === undefined)("the fish alias probe does the same on this machine's fish, from a fake config dir", async () => {
+    const roots = fakeGuest();
+    mkdirSync(join(roots.home, ".config/fish"), { recursive: true });
+    writeFileSync(join(roots.home, ".config/fish/config.fish"), `${ALIASES.filter(([, v]) => !v.includes("{")).map(([k, v]) => `alias ${k} '${v.replace(/'/g, "\\'")}'`).join("\n")}\n`);
+    const out = await runIn(shellOf("fish")!, ["-lic", ALIAS_PROBES.fish!], { HOME: roots.home, XDG_CONFIG_HOME: join(roots.home, ".config") });
+    expect(aliasLines(out)).toEqual(MISSING);
+  }, 30_000);
+
+  it("a bounded command is killed at its bound and the script goes on", async () => {
+    const started = Date.now();
+    const res = await run(`${boundedCommand(1, "sleep 20")}\necho after`);
+    expect(res.stdout).toBe("after\n");
+    expect(Date.now() - started).toBeLessThan(6_000);
+    expect((await run(`${boundedCommand(5, "echo quick")}\necho after`)).stdout).toBe("quick\nafter\n");
   }, 30_000);
 });
 
@@ -420,8 +507,15 @@ describe("applyMachineContext on a fake guest", () => {
     expect(execs).toHaveLength(2);
     const short = decoded(execs[1]!, "/etc/wsp/machine-context.md");
     expect(short).toContain("The wsp-machine skill has the full picture");
+    expect(short).toContain("the panes show the thread's folder");
+    expect(short).not.toContain("persists across");
     const skill = decoded(execs[1]!, "/etc/wsp/skills/wsp-machine/SKILL.md");
     expect(skill).toContain("- Workspace: task-1.");
+    expect(skill).not.toContain("persists across");
+    expect(decoded(execs[1]!, "/etc/claude-code/CLAUDE.md")).toContain("persists across your tool calls");
+    expect(decoded(execs[1]!, "/etc/claude-code/.claude/skills/wsp-machine/SKILL.md")).toContain("persists across your tool calls");
+    expect(execs[1]).toContain("install -m 644 '/etc/wsp/machine-context.md' '/root/.gemini/WSP-MACHINE.md'");
+    expect(execs[1]).toContain("install -m 644 '/etc/wsp/skills/wsp-machine/SKILL.md' '/etc/codex/skills/wsp-machine/SKILL.md'");
     expect(skill).toContain("- Tools that did not install: raycast (macOS app, no Linux build); x (boom).");
     for (const path of ["/etc/wsp/machine-context.json", "/etc/claude-code/CLAUDE.md", "/etc/claude-code/.claude/skills/wsp-machine/SKILL.md", "/etc/codex/requirements.toml", "/etc/codex/skills/wsp-machine/SKILL.md", "/root/.gemini/WSP-MACHINE.md", "/root/.gemini/skills/wsp-machine/SKILL.md", "/etc/opencode/opencode.json", "/root/.config/opencode/skills/wsp-machine/SKILL.md", "/root/.pi/agent/APPEND_SYSTEM.md", "/root/.pi/agent/skills/wsp-machine/SKILL.md", "/etc/profile.d/wsp-machine.sh", "/root/.hermes/skills/wsp-machine/SKILL.md"]) {
       expect(execs[1]).toContain(`'${path}'`);

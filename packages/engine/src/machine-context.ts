@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The machine context: one markdown file every agent on the guest loads at
-// start, saying what this machine is and how the common things are done on
-// it. A probe reads the facts off the guest, the document is rendered here,
-// and a second exec writes it back as the source file plus one copy or
-// pointer per agent, each through a hook that agent loads without any file of
-// the person's being touched. A hook the person's own file already claims is
-// left alone and named in the result.
+// The machine context: two renders for every agent on the guest, a short text
+// each agent loads at start with the facts it must not get wrong, and a skill
+// in its global skills directory with the full document of what this machine
+// is and how the common things are done on it. A probe reads the facts off the
+// guest, both are rendered here, and a second exec writes them back through a
+// hook per agent without any file of the person's being touched. A hook the
+// person's own file already claims is left alone and named in the result.
 import type { GoldenVersion } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { TOOLS_PATH } from "./golden-import.js";
 import { TOOLS_DISK_FLOOR } from "./golden-tools.js";
 import type { ImportResult } from "./golden.js";
 import type { Machine } from "./machine.js";
+import { DAEMON_PORT } from "./preview.js";
 
 export type ContextAgent = "claude" | "codex" | "gemini" | "opencode" | "pi" | "hermes";
 
@@ -42,8 +43,10 @@ export const skillPath = (roots: GuestRoots = GUEST_ROOTS): string => `${roots.e
 const factsPath = (roots: GuestRoots): string => `${roots.etc}/wsp/machine-context.json`;
 const SECRETS_SH = "/etc/profile.d/wsp-secrets.sh";
 const SECRETS_FISH = "/etc/fish/conf.d/wsp-secrets.fish";
-const DAEMON_PORT = 7070;
 const GIB = 1024 * 1024 * 1024;
+
+/** Mirrors @wsp/daemon's OPEN_SHIM_PATH (the engine cannot import the daemon package, which only runs inside guests); a host test pins the two equal. */
+export const BROWSER_SHIM_PATH = "/usr/local/bin/wsp-open";
 
 // --- what did not land, kept on the guest between builds ---------------------
 
@@ -103,7 +106,7 @@ export interface ContextProbe {
   disk?: { sizeBytes: number; freeBytes: number };
   /** The kernel lists overlayfs, which containers need. */
   overlay: boolean;
-  /** Binaries and files found: docker, podman, tmux, fish, brew, golden-path. */
+  /** Binaries and files found: docker, podman, tmux, fish, brew, golden-path, wsp-open. */
   has: Set<string>;
   agents: ContextAgent[];
   /** Names the secrets file exports, never values. */
@@ -123,28 +126,31 @@ function squote(s: string): string {
 /** Words an alias may start with before the command it runs. */
 const ALIAS_PREFIX = "sudo|command|builtin|exec|env|nohup|noglob|nocorrect|time";
 
-/** Each alias the login shell defines, checked in that shell: the first word that is not an assignment or a
- * prefix word is looked up, and one the shell cannot find is printed with the alias. */
-const ALIAS_PROBES: Record<string, string> = {
-  zsh: [
-    "for k in ${(k)aliases}; do",
-    "  w=; for t in ${(z)aliases[$k]}; do",
-    `    case $t in [A-Za-z_]*=*|${ALIAS_PREFIX}) continue;; esac`,
-    "    w=${t#\\\\}; w=${w#\\'}; w=${w#\\\"}; break",
-    "  done",
-    '  [ -n "$w" ] || continue',
-    '  whence -w -- "$w" >/dev/null 2>&1 || echo "ALIAS $k $w"',
-    "done",
-  ].join("\n"),
+/** A word shaped like a command name; anything else (a brace, a semicolon from a body that starts on a new line,
+ * a path) is not reported, since the sentence "x runs y" must be true. */
+const ALIAS_WORD_SHAPE = "''|*[!A-Za-z0-9_.+-]*|[!A-Za-z0-9_]*";
+
+/** The POSIX tail shared by zsh and bash: the first word, its shape, and a body that defines that word itself. */
+const aliasTail = (body: string, lookup: string): string[] => [
+  `  for t in ${body}; do`,
+  `    case $t in [A-Za-z_]*=*|${ALIAS_PREFIX}) continue;; esac`,
+  "    w=${t#\\\\}; w=${w#\\'}; w=${w#\\\"}; break",
+  "  done",
+  `  case $w in ${ALIAS_WORD_SHAPE}) continue;; esac`,
+  '  case $b in *"$w()"*|*"$w ()"*|*"function $w"*) continue;; esac',
+  `  ${lookup} >/dev/null 2>&1 || echo "ALIAS $k $w"`,
+];
+
+/** Each alias the login shell defines, checked in that shell from its own alias listing: the first word that is not
+ * an assignment or a prefix word is looked up, and one the shell cannot find is printed with the alias. */
+export const ALIAS_PROBES: Record<string, string> = {
+  zsh: ["for k in ${(k)aliases}; do", "  b=$aliases[$k]; w=", ...aliasTail("${(z)b}", 'whence -w -- "$w"'), "done"].join("\n"),
   bash: [
     "set -f",
-    'for k in "${!BASH_ALIASES[@]}"; do',
-    "  w=; for t in ${BASH_ALIASES[$k]}; do",
-    `    case $t in [A-Za-z_]*=*|${ALIAS_PREFIX}) continue;; esac`,
-    "    w=${t#\\\\}; w=${w#\\'}; w=${w#\\\"}; break",
-    "  done",
-    '  [ -n "$w" ] || continue',
-    '  type -t "$w" >/dev/null 2>&1 || echo "ALIAS $k $w"',
+    "alias | while IFS= read -r line; do",
+    '  case $line in "alias "*=*) ;; *) continue;; esac',
+    "  rest=${line#alias }; k=${rest%%=*}; b=${rest#*=}; b=${b#\\'}; b=${b%\\'}; w=",
+    ...aliasTail("$b", 'type -t "$w"'),
     "done",
   ].join("\n"),
   fish: [
@@ -162,7 +168,7 @@ const ALIAS_PROBES: Record<string, string> = {
     `    if contains -- $t ${ALIAS_PREFIX.split("|").join(" ")}; continue; end`,
     "    set w $t; break",
     "  end",
-    '  test -n "$w"; or continue',
+    "  string match -qr '^[A-Za-z0-9_][A-Za-z0-9_.+-]*$' -- $w; or continue",
     '  type -q -- $w; or echo "ALIAS $name $w"',
     "end",
   ].join("\n"),
@@ -190,6 +196,11 @@ const HERMES_HINT_CHECK = [
   "END{exit !f}",
 ].join(" ");
 
+/** Runs a command in the background and kills it at the bound, so a login shell that waits cannot hold the probe. */
+export function boundedCommand(seconds: number, cmd: string): string {
+  return `${cmd} & p=$!; ( sleep ${seconds}; kill $p 2>/dev/null ) >/dev/null 2>&1 & k=$!; wait $p; kill $k 2>/dev/null`;
+}
+
 /** One short exec that prints the facts between two markers: the kernel, the disk, what is installed, the secret
  * names, the aliases the login shell cannot resolve, each hook the person's file already claims, and the facts a
  * build left on the guest. Every read fails alone. */
@@ -204,14 +215,15 @@ export function probeCommand(roots: GuestRoots = GUEST_ROOTS): string {
     "if grep -qw overlay /proc/filesystems 2>/dev/null; then echo OVERLAY yes; else echo OVERLAY no; fi",
     'for b in docker podman tmux fish brew; do if command -v "$b" >/dev/null 2>&1; then echo "HAS $b"; fi; done',
     `if [ -f ${e}/profile.d/wsp-golden.sh ]; then echo "HAS golden-path"; fi`,
+    `if [ -x ${BROWSER_SHIM_PATH} ]; then echo "HAS wsp-open"; fi`,
     `for a in ${CONTEXT_AGENTS.join(" ")}; do if command -v "$a" >/dev/null 2>&1; then echo "AGENT $a"; fi; done`,
     `sed -n 's/^export \\([A-Za-z_][A-Za-z0-9_]*\\)=.*/SECRET \\1/p' ${e}/profile.d/wsp-secrets.sh 2>/dev/null`,
     'shell=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7); shell=${shell##*/}; shell=${shell:-bash}',
     'echo "SHELL $shell"',
     "case $shell in",
-    `  zsh) timeout 8 zsh -lic ${squote(ALIAS_PROBES["zsh"]!)} </dev/null 2>/dev/null ;;`,
-    `  fish) timeout 8 fish -lic ${squote(ALIAS_PROBES["fish"]!)} </dev/null 2>/dev/null ;;`,
-    `  *) timeout 8 bash -lic ${squote(ALIAS_PROBES["bash"]!)} </dev/null 2>/dev/null ;;`,
+    `  zsh) ${boundedCommand(8, `zsh -lic ${squote(ALIAS_PROBES["zsh"]!)} </dev/null 2>/dev/null`)} ;;`,
+    `  fish) ${boundedCommand(8, `fish -lic ${squote(ALIAS_PROBES["fish"]!)} </dev/null 2>/dev/null`)} ;;`,
+    `  *) ${boundedCommand(8, `bash -lic ${squote(ALIAS_PROBES["bash"]!)} </dev/null 2>/dev/null`)} ;;`,
     "esac",
     `if [ -f ${h}/.gemini/settings.json ] && node -e ${squote(GEMINI_FILENAME_CHECK)} ${h}/.gemini/settings.json 2>/dev/null; then echo "CONFLICT gemini"; fi`,
     `if [ -f ${h}/.pi/agent/APPEND_SYSTEM.md ] && ! head -n 1 ${h}/.pi/agent/APPEND_SYSTEM.md | grep -qF ${squote(CONTEXT_MARKER)}; then echo "CONFLICT pi"; fi`,
@@ -286,9 +298,23 @@ export interface ContextInput {
   golden?: Pick<GoldenVersion, "version" | "createdAt" | "setupSha">;
   probe: ContextProbe;
   facts: BuildFacts;
+  /** The agent this render is for; absent for the shared source files, which state nothing agent-specific. */
+  agent?: ContextAgent;
 }
 
-const gb = (bytes: number): string => `${(bytes / GIB).toFixed(1)} GB`;
+/** What is true of a cd for this agent. Only Claude Code's shell is known to persist across tool calls, with the
+ * files pane following it; every other agent gets the facts wsp has verified for all of them. */
+const cdFact = (agent: ContextAgent | undefined): string =>
+  agent === "claude"
+    ? "- Every new shell and every agent session starts in the thread's folder. A cd moves your own shell, which persists across your tool calls, not the thread's folder, and the files pane follows that shell's folder."
+    : "- Every new shell starts in the thread's folder, and the panes show the thread's folder.";
+
+const cdHowto = (agent: ContextAgent | undefined): string =>
+  agent === "claude"
+    ? "- Work in a folder: cd <dir> in your shell and it stays there across your tool calls; the thread's folder does not move. Absolute paths work from anywhere."
+    : "- Work in a folder: cd <dir> && <cmd> on one line, or absolute paths.";
+
+const gib = (bytes: number): string => `${(bytes / GIB).toFixed(1)} GiB`;
 
 function missingList(items: readonly { label: string; note: string }[]): string {
   return items.map(m => `${m.label} (${m.note})`).join("; ");
@@ -299,6 +325,7 @@ function missingList(items: readonly { label: string; note: string }[]): string 
 export function renderMachineContext(input: ContextInput): string {
   const { probe, facts } = input;
   const fish = probe.has.has("fish");
+  const shim = probe.has.has("wsp-open");
   const secretsFile = fish ? `${SECRETS_SH} and ${SECRETS_FISH}` : SECRETS_SH;
   const machine: string[] = [];
   machine.push(`- Linux${probe.kernel !== undefined ? ` ${probe.kernel}` : ""}, user root, home /root. macOS apps, casks and Mac App Store apps are not here.`);
@@ -309,9 +336,9 @@ export function renderMachineContext(input: ContextInput): string {
   else if (containers.length === 0) machine.push("- Docker and Podman are not installed.");
   machine.push(`- wsp-daemon listens on 0.0.0.0:${DAEMON_PORT} with its own token. Do not stop it and do not bind port ${DAEMON_PORT}.`);
   machine.push("- A background process started with a plain & inside a tool call dies when that call's shell exits.");
-  machine.push("- Every shell and every agent session starts in the thread's folder. A cd inside a tool call lasts for that command only.");
+  machine.push(cdFact(input.agent));
   machine.push("- A server listening on a port shows in the app as a server the person can open. A loopback-only bind (127.0.0.1) is unreachable through the preview edge; bind 0.0.0.0. Ports below 1024 are not forwarded.");
-  machine.push("- Sign-ins go through wsp: BROWSER is /usr/local/bin/wsp-open and xdg-open is the same shim. The page opens on the person's computer and the callback port is tunnelled back here.");
+  if (shim) machine.push(`- Sign-ins go through wsp: BROWSER is ${BROWSER_SHIM_PATH} and xdg-open is the same shim. The page opens on the person's computer and the callback port is tunnelled back here.`);
   machine.push(`- Secrets are exported by ${secretsFile}. They are never printed, logged or committed, and that file is never read or copied. .env files, .netrc and private keys were never copied from the person's computer.`);
 
   const workspace: string[] = [];
@@ -319,8 +346,8 @@ export function renderMachineContext(input: ContextInput): string {
   workspace.push(input.golden !== undefined ? `- Golden: v${input.golden.version}, sealed ${input.golden.createdAt.slice(0, 10)}, setup ${input.golden.setupSha.slice(0, 12)}.` : input.workspace !== undefined ? "- Golden: version not recorded." : "- Golden: not sealed yet.");
   workspace.push(
     probe.disk !== undefined
-      ? `- Disk: ${gb(probe.disk.sizeBytes)} root disk, ${gb(probe.disk.freeBytes)} free when this file was written. wsp keeps ${gb(TOOLS_DISK_FLOOR)} free and skips tool installs that would go under it.`
-      : `- Disk: size unknown when this file was written. wsp keeps ${gb(TOOLS_DISK_FLOOR)} free and skips tool installs that would go under it.`,
+      ? `- Disk: ${gib(probe.disk.sizeBytes)} root disk, ${gib(probe.disk.freeBytes)} free when this file was written. wsp keeps ${gib(TOOLS_DISK_FLOOR)} free and skips tool installs that would go under it.`
+      : `- Disk: size unknown when this file was written. wsp keeps ${gib(TOOLS_DISK_FLOOR)} free and skips tool installs that would go under it.`,
   );
   workspace.push(`- Secrets set in ${SECRETS_SH}: ${probe.secrets.length > 0 ? probe.secrets.join(", ") : "none"}. Use them by name ($NAME); a missing one is asked for through wsp, not typed here.`);
   workspace.push(`- Tools that did not install: ${facts.tools.length > 0 ? missingList(facts.tools) : "none"}.`);
@@ -331,9 +358,9 @@ export function renderMachineContext(input: ContextInput): string {
   const tmux = probe.has.has("tmux");
   const howto: string[] = [];
   howto.push(`- Keep a server alive: setsid nohup <cmd> > /tmp/<name>.log 2>&1 < /dev/null &${tmux ? ", or tmux new -d -s <name> '<cmd>'" : ""}. Read the log file, not the tool output. Bind 0.0.0.0 if the person should open it.`);
-  howto.push("- Hand the person a URL: print it as http://localhost:<port>; wsp forwards the port and the link opens on their computer. For a page that is not a local server, run wsp-open <url>; it appears in the app for them to open.");
-  howto.push("- Ask for a sign-in: run the tool's own login command (gh auth login, gcloud auth login). It opens through $BROWSER, the person signs in on their computer, and the callback comes back here. Do not paste tokens into the terminal and do not ask for a password.");
-  howto.push("- Work in a folder: use cd <dir> && <cmd> on one line, or absolute paths. A cd on its own does not move the thread.");
+  howto.push(`- Hand the person a URL: print it as http://localhost:<port>; wsp forwards the port and the link opens on their computer.${shim ? " For a page that is not a local server, run wsp-open <url>; it appears in the app for them to open." : ""}`);
+  if (shim) howto.push("- Ask for a sign-in: run the tool's own login command (gh auth login, gcloud auth login). It opens through $BROWSER, the person signs in on their computer, and the callback comes back here. Do not paste tokens into the terminal and do not ask for a password.");
+  howto.push(cdHowto(input.agent));
   howto.push(`- Use a secret: $NAME is set from ${SECRETS_SH}. Never echo, log or commit a value, and never cat that file.`);
 
   return [
@@ -368,19 +395,19 @@ export function renderShortContext(input: ContextInput): string {
     `This is a Linux machine in the cloud that wsp set up from the recipe of the person's computer; it is not that computer. The ${SKILL_NAME} skill has the full picture: what did not install, the secret names, the aliases whose commands are missing, and how the common things are done here.`,
     "",
     `- A background process started with a plain & inside a tool call dies when that call's shell exits. Detach it: setsid nohup <cmd> > /tmp/<name>.log 2>&1 < /dev/null &${tmux ? ", or tmux new -d -s <name> '<cmd>'" : ""}.`,
-    "- Every shell and every agent session starts in the thread's folder. A cd inside a tool call lasts for that command only; use cd <dir> && <cmd> or absolute paths.",
+    cdFact(input.agent),
     "- A server listening on a port shows in the app for the person to open; bind 0.0.0.0, not 127.0.0.1. A printed http://localhost:<port> link has its port forwarded to their computer. Ports below 1024 are not forwarded.",
   ];
   if (!probe.overlay) lines.push(`- Containers do not run here: the kernel has no overlayfs${containers.length === 0 ? ", and Docker and Podman are not installed" : ""}. Install services natively.`);
   else if (containers.length === 0) lines.push("- Docker and Podman are not installed.");
   lines.push(
     probe.disk !== undefined
-      ? `- Disk: ${gb(probe.disk.sizeBytes)} root disk, ${gb(probe.disk.freeBytes)} free when this file was written. wsp keeps ${gb(TOOLS_DISK_FLOOR)} free.`
-      : `- Disk: size unknown when this file was written. wsp keeps ${gb(TOOLS_DISK_FLOOR)} free.`,
+      ? `- Disk: ${gib(probe.disk.sizeBytes)} root disk, ${gib(probe.disk.freeBytes)} free when this file was written. wsp keeps ${gib(TOOLS_DISK_FLOOR)} free.`
+      : `- Disk: size unknown when this file was written. wsp keeps ${gib(TOOLS_DISK_FLOOR)} free.`,
     `- Secrets are exported by ${SECRETS_SH}. Use them by name ($NAME); never print, log or commit a value, and never read that file.`,
-    "- Sign-ins go through wsp: run the tool's own login command and the page opens on the person's computer. Do not paste tokens into the terminal and do not ask for a password.",
-    "",
   );
+  if (probe.has.has("wsp-open")) lines.push("- Sign-ins go through wsp: run the tool's own login command and the page opens on the person's computer. Do not paste tokens into the terminal and do not ask for a password.");
+  lines.push("");
   return lines.join("\n");
 }
 
@@ -553,8 +580,8 @@ function summarize(results: readonly ContextResult[], agents: readonly ContextAg
 
 const failed = (failure: string): ContextOutcome => ({ context: [], summary: `not written (${failure})`, failure });
 
-/** Probes the guest, renders the short text and the skill, and writes them with every agent's hooks in two short
- * execs. Never throws: a guest that does not answer is reported in the outcome and the caller decides what that
+/** Probes the guest, renders the short text and the skill once for the shared source files and once per agent, and
+ * writes them with every agent's hooks in two short execs. Never throws: a guest that does not answer is reported in the outcome and the caller decides what that
  * means. */
 export async function applyMachineContext(machine: Machine, opts: ApplyContextOptions = {}): Promise<ContextOutcome> {
   const roots = opts.roots ?? GUEST_ROOTS;
@@ -568,17 +595,16 @@ export async function applyMachineContext(machine: Machine, opts: ApplyContextOp
   if (probe === undefined) return failed(`probe answered exit ${probed.exitCode} without its markers`);
   const facts = mergeFacts(probe.facts ?? EMPTY_FACTS, opts.result);
   const input: ContextInput = { ...(opts.workspace !== undefined ? { workspace: opts.workspace } : {}), ...(opts.golden !== undefined ? { golden: opts.golden } : {}), probe, facts };
-  const short = renderShortContext(input);
-  const skill = renderSkill(renderMachineContext(input));
   const files: GuestFile[] = [
-    { path: contextPath(roots), mode: MODE, content: short },
-    { path: skillPath(roots), mode: MODE, content: skill },
+    { path: contextPath(roots), mode: MODE, content: renderShortContext(input) },
+    { path: skillPath(roots), mode: MODE, content: renderSkill(renderMachineContext(input)) },
     { path: factsPath(roots), mode: MODE, content: `${JSON.stringify(facts, null, 2)}\n` },
   ];
   const context: ContextResult[] = [];
   for (const agent of CONTEXT_AGENTS) {
     if (!probe.agents.includes(agent)) continue;
-    const out = agentFiles(agent, short, skill, probe, roots);
+    const forAgent = { ...input, agent };
+    const out = agentFiles(agent, renderShortContext(forAgent), renderSkill(renderMachineContext(forAgent)), probe, roots);
     files.push(...out.files);
     context.push({ agent, outcome: out.outcome, ...(out.path !== undefined ? { path: out.path } : {}), ...(out.note !== undefined ? { note: out.note } : {}), skill: out.skill });
   }

@@ -16,10 +16,10 @@ wsp writes this file when a workspace is forked; edits are overwritten.
 This is a Linux machine in the cloud that wsp set up from the recipe of the person's computer; it is not that computer. The wsp-machine skill has the full picture: what did not install, the secret names, the aliases whose commands are missing, and how the common things are done here.
 
 - A background process started with a plain & inside a tool call dies when that call's shell exits. Detach it: setsid nohup <cmd> > /tmp/<name>.log 2>&1 < /dev/null &, or tmux new -d -s <name> '<cmd>'.
-- Every shell and every agent session starts in the thread's folder. A cd inside a tool call lasts for that command only; use cd <dir> && <cmd> or absolute paths.
+- Every new shell and every agent session starts in the thread's folder. A cd moves your own shell, which persists across your tool calls, not the thread's folder, and the files pane follows that shell's folder.
 - A server listening on a port shows in the app for the person to open; bind 0.0.0.0, not 127.0.0.1. A printed http://localhost:<port> link has its port forwarded to their computer. Ports below 1024 are not forwarded.
 - Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed. Install services natively.
-- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free.
+- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written. wsp keeps 2.0 GiB free.
 - Secrets are exported by /etc/profile.d/wsp-secrets.sh. Use them by name ($NAME); never print, log or commit a value, and never read that file.
 - Sign-ins go through wsp: run the tool's own login command and the page opens on the person's computer. Do not paste tokens into the terminal and do not ask for a password.
 
@@ -42,7 +42,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 - Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed. Install services natively.
 - wsp-daemon listens on 0.0.0.0:7070 with its own token. Do not stop it and do not bind port 7070.
 - A background process started with a plain & inside a tool call dies when that call's shell exits.
-- Every shell and every agent session starts in the thread's folder. A cd inside a tool call lasts for that command only.
+- Every new shell and every agent session starts in the thread's folder. A cd moves your own shell, which persists across your tool calls, not the thread's folder, and the files pane follows that shell's folder.
 - A server listening on a port shows in the app as a server the person can open. A loopback-only bind (127.0.0.1) is unreachable through the preview edge; bind 0.0.0.0. Ports below 1024 are not forwarded.
 - Sign-ins go through wsp: BROWSER is /usr/local/bin/wsp-open and xdg-open is the same shim. The page opens on the person's computer and the callback port is tunnelled back here.
 - Secrets are exported by /etc/profile.d/wsp-secrets.sh and /etc/fish/conf.d/wsp-secrets.fish. They are never printed, logged or committed, and that file is never read or copied. .env files, .netrc and private keys were never copied from the person's computer.
@@ -51,7 +51,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 
 - Workspace: task-1.
 - Golden: v3, sealed 2026-09-05, setup 9f2a7c1d4e5b.
-- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free and skips tool installs that would go under it.
+- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written. wsp keeps 2.0 GiB free and skips tool installs that would go under it.
 - Secrets set in /etc/profile.d/wsp-secrets.sh: OPENAI_API_KEY, GH_TOKEN. Use them by name ($NAME); a missing one is asked for through wsp, not typed here.
 - Tools that did not install: raycast (macOS app, no Linux build).
 - Agents that did not install: Zed (no installer known).
@@ -63,7 +63,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 - Keep a server alive: setsid nohup <cmd> > /tmp/<name>.log 2>&1 < /dev/null &, or tmux new -d -s <name> '<cmd>'. Read the log file, not the tool output. Bind 0.0.0.0 if the person should open it.
 - Hand the person a URL: print it as http://localhost:<port>; wsp forwards the port and the link opens on their computer. For a page that is not a local server, run wsp-open <url>; it appears in the app for them to open.
 - Ask for a sign-in: run the tool's own login command (gh auth login, gcloud auth login). It opens through $BROWSER, the person signs in on their computer, and the callback comes back here. Do not paste tokens into the terminal and do not ask for a password.
-- Work in a folder: use cd <dir> && <cmd> on one line, or absolute paths. A cd on its own does not move the thread.
+- Work in a folder: cd <dir> in your shell and it stays there across your tool calls; the thread's folder does not move. Absolute paths work from anywhere.
 - Use a secret: $NAME is set from /etc/profile.d/wsp-secrets.sh. Never echo, log or commit a value, and never cat that file.
 "
 `;
@@ -77,10 +77,10 @@ wsp writes this file when a workspace is forked; edits are overwritten.
 This is a Linux machine in the cloud that wsp set up from the recipe of the person's computer; it is not that computer. The wsp-machine skill has the full picture: what did not install, the secret names, the aliases whose commands are missing, and how the common things are done here.
 
 - A background process started with a plain & inside a tool call dies when that call's shell exits. Detach it: setsid nohup <cmd> > /tmp/<name>.log 2>&1 < /dev/null &, or tmux new -d -s <name> '<cmd>'.
-- Every shell and every agent session starts in the thread's folder. A cd inside a tool call lasts for that command only; use cd <dir> && <cmd> or absolute paths.
+- Every new shell starts in the thread's folder, and the panes show the thread's folder.
 - A server listening on a port shows in the app for the person to open; bind 0.0.0.0, not 127.0.0.1. A printed http://localhost:<port> link has its port forwarded to their computer. Ports below 1024 are not forwarded.
 - Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed. Install services natively.
-- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free.
+- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written. wsp keeps 2.0 GiB free.
 - Secrets are exported by /etc/profile.d/wsp-secrets.sh. Use them by name ($NAME); never print, log or commit a value, and never read that file.
 - Sign-ins go through wsp: run the tool's own login command and the page opens on the person's computer. Do not paste tokens into the terminal and do not ask for a password.
 '''
@@ -104,7 +104,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 - Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed. Install services natively.
 - wsp-daemon listens on 0.0.0.0:7070 with its own token. Do not stop it and do not bind port 7070.
 - A background process started with a plain & inside a tool call dies when that call's shell exits.
-- Every shell and every agent session starts in the thread's folder. A cd inside a tool call lasts for that command only.
+- Every new shell starts in the thread's folder, and the panes show the thread's folder.
 - A server listening on a port shows in the app as a server the person can open. A loopback-only bind (127.0.0.1) is unreachable through the preview edge; bind 0.0.0.0. Ports below 1024 are not forwarded.
 - Sign-ins go through wsp: BROWSER is /usr/local/bin/wsp-open and xdg-open is the same shim. The page opens on the person's computer and the callback port is tunnelled back here.
 - Secrets are exported by /etc/profile.d/wsp-secrets.sh and /etc/fish/conf.d/wsp-secrets.fish. They are never printed, logged or committed, and that file is never read or copied. .env files, .netrc and private keys were never copied from the person's computer.
@@ -113,7 +113,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 
 - Workspace: task-1.
 - Golden: v3, sealed 2026-09-05, setup 9f2a7c1d4e5b.
-- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free and skips tool installs that would go under it.
+- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written. wsp keeps 2.0 GiB free and skips tool installs that would go under it.
 - Secrets set in /etc/profile.d/wsp-secrets.sh: OPENAI_API_KEY, GH_TOKEN. Use them by name ($NAME); a missing one is asked for through wsp, not typed here.
 - Tools that did not install: raycast (macOS app, no Linux build).
 - Agents that did not install: Zed (no installer known).
@@ -125,7 +125,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 - Keep a server alive: setsid nohup <cmd> > /tmp/<name>.log 2>&1 < /dev/null &, or tmux new -d -s <name> '<cmd>'. Read the log file, not the tool output. Bind 0.0.0.0 if the person should open it.
 - Hand the person a URL: print it as http://localhost:<port>; wsp forwards the port and the link opens on their computer. For a page that is not a local server, run wsp-open <url>; it appears in the app for them to open.
 - Ask for a sign-in: run the tool's own login command (gh auth login, gcloud auth login). It opens through $BROWSER, the person signs in on their computer, and the callback comes back here. Do not paste tokens into the terminal and do not ask for a password.
-- Work in a folder: use cd <dir> && <cmd> on one line, or absolute paths. A cd on its own does not move the thread.
+- Work in a folder: cd <dir> && <cmd> on one line, or absolute paths.
 - Use a secret: $NAME is set from /etc/profile.d/wsp-secrets.sh. Never echo, log or commit a value, and never cat that file.
 "
 `;
@@ -148,10 +148,10 @@ wsp writes this file when a workspace is forked; edits are overwritten.
 This is a Linux machine in the cloud that wsp set up from the recipe of the person's computer; it is not that computer. The wsp-machine skill has the full picture: what did not install, the secret names, the aliases whose commands are missing, and how the common things are done here.
 
 - A background process started with a plain & inside a tool call dies when that call's shell exits. Detach it: setsid nohup <cmd> > /tmp/<name>.log 2>&1 < /dev/null &, or tmux new -d -s <name> '<cmd>'.
-- Every shell and every agent session starts in the thread's folder. A cd inside a tool call lasts for that command only; use cd <dir> && <cmd> or absolute paths.
+- Every new shell starts in the thread's folder, and the panes show the thread's folder.
 - A server listening on a port shows in the app for the person to open; bind 0.0.0.0, not 127.0.0.1. A printed http://localhost:<port> link has its port forwarded to their computer. Ports below 1024 are not forwarded.
 - Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed. Install services natively.
-- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free.
+- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written. wsp keeps 2.0 GiB free.
 - Secrets are exported by /etc/profile.d/wsp-secrets.sh. Use them by name ($NAME); never print, log or commit a value, and never read that file.
 - Sign-ins go through wsp: run the tool's own login command and the page opens on the person's computer. Do not paste tokens into the terminal and do not ask for a password.
 
@@ -174,7 +174,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 - Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed. Install services natively.
 - wsp-daemon listens on 0.0.0.0:7070 with its own token. Do not stop it and do not bind port 7070.
 - A background process started with a plain & inside a tool call dies when that call's shell exits.
-- Every shell and every agent session starts in the thread's folder. A cd inside a tool call lasts for that command only.
+- Every new shell starts in the thread's folder, and the panes show the thread's folder.
 - A server listening on a port shows in the app as a server the person can open. A loopback-only bind (127.0.0.1) is unreachable through the preview edge; bind 0.0.0.0. Ports below 1024 are not forwarded.
 - Sign-ins go through wsp: BROWSER is /usr/local/bin/wsp-open and xdg-open is the same shim. The page opens on the person's computer and the callback port is tunnelled back here.
 - Secrets are exported by /etc/profile.d/wsp-secrets.sh and /etc/fish/conf.d/wsp-secrets.fish. They are never printed, logged or committed, and that file is never read or copied. .env files, .netrc and private keys were never copied from the person's computer.
@@ -183,7 +183,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 
 - Workspace: task-1.
 - Golden: v3, sealed 2026-09-05, setup 9f2a7c1d4e5b.
-- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free and skips tool installs that would go under it.
+- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written. wsp keeps 2.0 GiB free and skips tool installs that would go under it.
 - Secrets set in /etc/profile.d/wsp-secrets.sh: OPENAI_API_KEY, GH_TOKEN. Use them by name ($NAME); a missing one is asked for through wsp, not typed here.
 - Tools that did not install: raycast (macOS app, no Linux build).
 - Agents that did not install: Zed (no installer known).
@@ -195,7 +195,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 - Keep a server alive: setsid nohup <cmd> > /tmp/<name>.log 2>&1 < /dev/null &, or tmux new -d -s <name> '<cmd>'. Read the log file, not the tool output. Bind 0.0.0.0 if the person should open it.
 - Hand the person a URL: print it as http://localhost:<port>; wsp forwards the port and the link opens on their computer. For a page that is not a local server, run wsp-open <url>; it appears in the app for them to open.
 - Ask for a sign-in: run the tool's own login command (gh auth login, gcloud auth login). It opens through $BROWSER, the person signs in on their computer, and the callback comes back here. Do not paste tokens into the terminal and do not ask for a password.
-- Work in a folder: use cd <dir> && <cmd> on one line, or absolute paths. A cd on its own does not move the thread.
+- Work in a folder: cd <dir> && <cmd> on one line, or absolute paths.
 - Use a secret: $NAME is set from /etc/profile.d/wsp-secrets.sh. Never echo, log or commit a value, and never cat that file.
 "
 `;
@@ -229,7 +229,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 - Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed. Install services natively.
 - wsp-daemon listens on 0.0.0.0:7070 with its own token. Do not stop it and do not bind port 7070.
 - A background process started with a plain & inside a tool call dies when that call's shell exits.
-- Every shell and every agent session starts in the thread's folder. A cd inside a tool call lasts for that command only.
+- Every new shell starts in the thread's folder, and the panes show the thread's folder.
 - A server listening on a port shows in the app as a server the person can open. A loopback-only bind (127.0.0.1) is unreachable through the preview edge; bind 0.0.0.0. Ports below 1024 are not forwarded.
 - Sign-ins go through wsp: BROWSER is /usr/local/bin/wsp-open and xdg-open is the same shim. The page opens on the person's computer and the callback port is tunnelled back here.
 - Secrets are exported by /etc/profile.d/wsp-secrets.sh and /etc/fish/conf.d/wsp-secrets.fish. They are never printed, logged or committed, and that file is never read or copied. .env files, .netrc and private keys were never copied from the person's computer.
@@ -238,7 +238,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 
 - Workspace: task-1.
 - Golden: v3, sealed 2026-09-05, setup 9f2a7c1d4e5b.
-- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free and skips tool installs that would go under it.
+- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written. wsp keeps 2.0 GiB free and skips tool installs that would go under it.
 - Secrets set in /etc/profile.d/wsp-secrets.sh: OPENAI_API_KEY, GH_TOKEN. Use them by name ($NAME); a missing one is asked for through wsp, not typed here.
 - Tools that did not install: raycast (macOS app, no Linux build).
 - Agents that did not install: Zed (no installer known).
@@ -250,7 +250,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 - Keep a server alive: setsid nohup <cmd> > /tmp/<name>.log 2>&1 < /dev/null &, or tmux new -d -s <name> '<cmd>'. Read the log file, not the tool output. Bind 0.0.0.0 if the person should open it.
 - Hand the person a URL: print it as http://localhost:<port>; wsp forwards the port and the link opens on their computer. For a page that is not a local server, run wsp-open <url>; it appears in the app for them to open.
 - Ask for a sign-in: run the tool's own login command (gh auth login, gcloud auth login). It opens through $BROWSER, the person signs in on their computer, and the callback comes back here. Do not paste tokens into the terminal and do not ask for a password.
-- Work in a folder: use cd <dir> && <cmd> on one line, or absolute paths. A cd on its own does not move the thread.
+- Work in a folder: cd <dir> && <cmd> on one line, or absolute paths.
 - Use a secret: $NAME is set from /etc/profile.d/wsp-secrets.sh. Never echo, log or commit a value, and never cat that file.
 "
 `;
@@ -282,7 +282,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 - Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed. Install services natively.
 - wsp-daemon listens on 0.0.0.0:7070 with its own token. Do not stop it and do not bind port 7070.
 - A background process started with a plain & inside a tool call dies when that call's shell exits.
-- Every shell and every agent session starts in the thread's folder. A cd inside a tool call lasts for that command only.
+- Every new shell starts in the thread's folder, and the panes show the thread's folder.
 - A server listening on a port shows in the app as a server the person can open. A loopback-only bind (127.0.0.1) is unreachable through the preview edge; bind 0.0.0.0. Ports below 1024 are not forwarded.
 - Sign-ins go through wsp: BROWSER is /usr/local/bin/wsp-open and xdg-open is the same shim. The page opens on the person's computer and the callback port is tunnelled back here.
 - Secrets are exported by /etc/profile.d/wsp-secrets.sh and /etc/fish/conf.d/wsp-secrets.fish. They are never printed, logged or committed, and that file is never read or copied. .env files, .netrc and private keys were never copied from the person's computer.
@@ -291,7 +291,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 
 - Workspace: task-1.
 - Golden: v3, sealed 2026-09-05, setup 9f2a7c1d4e5b.
-- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free and skips tool installs that would go under it.
+- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written. wsp keeps 2.0 GiB free and skips tool installs that would go under it.
 - Secrets set in /etc/profile.d/wsp-secrets.sh: OPENAI_API_KEY, GH_TOKEN. Use them by name ($NAME); a missing one is asked for through wsp, not typed here.
 - Tools that did not install: raycast (macOS app, no Linux build).
 - Agents that did not install: Zed (no installer known).
@@ -303,7 +303,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 - Keep a server alive: setsid nohup <cmd> > /tmp/<name>.log 2>&1 < /dev/null &, or tmux new -d -s <name> '<cmd>'. Read the log file, not the tool output. Bind 0.0.0.0 if the person should open it.
 - Hand the person a URL: print it as http://localhost:<port>; wsp forwards the port and the link opens on their computer. For a page that is not a local server, run wsp-open <url>; it appears in the app for them to open.
 - Ask for a sign-in: run the tool's own login command (gh auth login, gcloud auth login). It opens through $BROWSER, the person signs in on their computer, and the callback comes back here. Do not paste tokens into the terminal and do not ask for a password.
-- Work in a folder: use cd <dir> && <cmd> on one line, or absolute paths. A cd on its own does not move the thread.
+- Work in a folder: cd <dir> && <cmd> on one line, or absolute paths.
 - Use a secret: $NAME is set from /etc/profile.d/wsp-secrets.sh. Never echo, log or commit a value, and never cat that file.
 "
 `;
@@ -315,10 +315,10 @@ wsp writes this file when a workspace is forked; edits are overwritten.
 This is a Linux machine in the cloud that wsp set up from the recipe of the person's computer; it is not that computer. The wsp-machine skill has the full picture: what did not install, the secret names, the aliases whose commands are missing, and how the common things are done here.
 
 - A background process started with a plain & inside a tool call dies when that call's shell exits. Detach it: setsid nohup <cmd> > /tmp/<name>.log 2>&1 < /dev/null &, or tmux new -d -s <name> '<cmd>'.
-- Every shell and every agent session starts in the thread's folder. A cd inside a tool call lasts for that command only; use cd <dir> && <cmd> or absolute paths.
+- Every new shell starts in the thread's folder, and the panes show the thread's folder.
 - A server listening on a port shows in the app for the person to open; bind 0.0.0.0, not 127.0.0.1. A printed http://localhost:<port> link has its port forwarded to their computer. Ports below 1024 are not forwarded.
 - Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed. Install services natively.
-- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free.
+- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written. wsp keeps 2.0 GiB free.
 - Secrets are exported by /etc/profile.d/wsp-secrets.sh. Use them by name ($NAME); never print, log or commit a value, and never read that file.
 - Sign-ins go through wsp: run the tool's own login command and the page opens on the person's computer. Do not paste tokens into the terminal and do not ask for a password.
 
@@ -341,7 +341,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 - Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed. Install services natively.
 - wsp-daemon listens on 0.0.0.0:7070 with its own token. Do not stop it and do not bind port 7070.
 - A background process started with a plain & inside a tool call dies when that call's shell exits.
-- Every shell and every agent session starts in the thread's folder. A cd inside a tool call lasts for that command only.
+- Every new shell starts in the thread's folder, and the panes show the thread's folder.
 - A server listening on a port shows in the app as a server the person can open. A loopback-only bind (127.0.0.1) is unreachable through the preview edge; bind 0.0.0.0. Ports below 1024 are not forwarded.
 - Sign-ins go through wsp: BROWSER is /usr/local/bin/wsp-open and xdg-open is the same shim. The page opens on the person's computer and the callback port is tunnelled back here.
 - Secrets are exported by /etc/profile.d/wsp-secrets.sh and /etc/fish/conf.d/wsp-secrets.fish. They are never printed, logged or committed, and that file is never read or copied. .env files, .netrc and private keys were never copied from the person's computer.
@@ -350,7 +350,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 
 - Workspace: task-1.
 - Golden: v3, sealed 2026-09-05, setup 9f2a7c1d4e5b.
-- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free and skips tool installs that would go under it.
+- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written. wsp keeps 2.0 GiB free and skips tool installs that would go under it.
 - Secrets set in /etc/profile.d/wsp-secrets.sh: OPENAI_API_KEY, GH_TOKEN. Use them by name ($NAME); a missing one is asked for through wsp, not typed here.
 - Tools that did not install: raycast (macOS app, no Linux build).
 - Agents that did not install: Zed (no installer known).
@@ -362,7 +362,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 - Keep a server alive: setsid nohup <cmd> > /tmp/<name>.log 2>&1 < /dev/null &, or tmux new -d -s <name> '<cmd>'. Read the log file, not the tool output. Bind 0.0.0.0 if the person should open it.
 - Hand the person a URL: print it as http://localhost:<port>; wsp forwards the port and the link opens on their computer. For a page that is not a local server, run wsp-open <url>; it appears in the app for them to open.
 - Ask for a sign-in: run the tool's own login command (gh auth login, gcloud auth login). It opens through $BROWSER, the person signs in on their computer, and the callback comes back here. Do not paste tokens into the terminal and do not ask for a password.
-- Work in a folder: use cd <dir> && <cmd> on one line, or absolute paths. A cd on its own does not move the thread.
+- Work in a folder: cd <dir> && <cmd> on one line, or absolute paths.
 - Use a secret: $NAME is set from /etc/profile.d/wsp-secrets.sh. Never echo, log or commit a value, and never cat that file.
 "
 `;
@@ -378,16 +378,15 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 - Docker and Podman are not installed.
 - wsp-daemon listens on 0.0.0.0:7070 with its own token. Do not stop it and do not bind port 7070.
 - A background process started with a plain & inside a tool call dies when that call's shell exits.
-- Every shell and every agent session starts in the thread's folder. A cd inside a tool call lasts for that command only.
+- Every new shell starts in the thread's folder, and the panes show the thread's folder.
 - A server listening on a port shows in the app as a server the person can open. A loopback-only bind (127.0.0.1) is unreachable through the preview edge; bind 0.0.0.0. Ports below 1024 are not forwarded.
-- Sign-ins go through wsp: BROWSER is /usr/local/bin/wsp-open and xdg-open is the same shim. The page opens on the person's computer and the callback port is tunnelled back here.
 - Secrets are exported by /etc/profile.d/wsp-secrets.sh. They are never printed, logged or committed, and that file is never read or copied. .env files, .netrc and private keys were never copied from the person's computer.
 
 # This workspace
 
 - This machine is a golden builder, not a workspace yet.
 - Golden: not sealed yet.
-- Disk: size unknown when this file was written. wsp keeps 2.0 GB free and skips tool installs that would go under it.
+- Disk: size unknown when this file was written. wsp keeps 2.0 GiB free and skips tool installs that would go under it.
 - Secrets set in /etc/profile.d/wsp-secrets.sh: none. Use them by name ($NAME); a missing one is asked for through wsp, not typed here.
 - Tools that did not install: none.
 - Agents that did not install: none.
@@ -397,9 +396,8 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 # How to
 
 - Keep a server alive: setsid nohup <cmd> > /tmp/<name>.log 2>&1 < /dev/null &. Read the log file, not the tool output. Bind 0.0.0.0 if the person should open it.
-- Hand the person a URL: print it as http://localhost:<port>; wsp forwards the port and the link opens on their computer. For a page that is not a local server, run wsp-open <url>; it appears in the app for them to open.
-- Ask for a sign-in: run the tool's own login command (gh auth login, gcloud auth login). It opens through $BROWSER, the person signs in on their computer, and the callback comes back here. Do not paste tokens into the terminal and do not ask for a password.
-- Work in a folder: use cd <dir> && <cmd> on one line, or absolute paths. A cd on its own does not move the thread.
+- Hand the person a URL: print it as http://localhost:<port>; wsp forwards the port and the link opens on their computer.
+- Work in a folder: cd <dir> && <cmd> on one line, or absolute paths.
 - Use a secret: $NAME is set from /etc/profile.d/wsp-secrets.sh. Never echo, log or commit a value, and never cat that file.
 "
 `;
@@ -417,7 +415,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 - Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed. Install services natively.
 - wsp-daemon listens on 0.0.0.0:7070 with its own token. Do not stop it and do not bind port 7070.
 - A background process started with a plain & inside a tool call dies when that call's shell exits.
-- Every shell and every agent session starts in the thread's folder. A cd inside a tool call lasts for that command only.
+- Every new shell starts in the thread's folder, and the panes show the thread's folder.
 - A server listening on a port shows in the app as a server the person can open. A loopback-only bind (127.0.0.1) is unreachable through the preview edge; bind 0.0.0.0. Ports below 1024 are not forwarded.
 - Sign-ins go through wsp: BROWSER is /usr/local/bin/wsp-open and xdg-open is the same shim. The page opens on the person's computer and the callback port is tunnelled back here.
 - Secrets are exported by /etc/profile.d/wsp-secrets.sh and /etc/fish/conf.d/wsp-secrets.fish. They are never printed, logged or committed, and that file is never read or copied. .env files, .netrc and private keys were never copied from the person's computer.
@@ -426,7 +424,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 
 - Workspace: task-1.
 - Golden: v3, sealed 2026-09-05, setup 9f2a7c1d4e5b.
-- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free and skips tool installs that would go under it.
+- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written. wsp keeps 2.0 GiB free and skips tool installs that would go under it.
 - Secrets set in /etc/profile.d/wsp-secrets.sh: OPENAI_API_KEY, GH_TOKEN. Use them by name ($NAME); a missing one is asked for through wsp, not typed here.
 - Tools that did not install: raycast (macOS app, no Linux build).
 - Agents that did not install: Zed (no installer known).
@@ -438,7 +436,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 - Keep a server alive: setsid nohup <cmd> > /tmp/<name>.log 2>&1 < /dev/null &, or tmux new -d -s <name> '<cmd>'. Read the log file, not the tool output. Bind 0.0.0.0 if the person should open it.
 - Hand the person a URL: print it as http://localhost:<port>; wsp forwards the port and the link opens on their computer. For a page that is not a local server, run wsp-open <url>; it appears in the app for them to open.
 - Ask for a sign-in: run the tool's own login command (gh auth login, gcloud auth login). It opens through $BROWSER, the person signs in on their computer, and the callback comes back here. Do not paste tokens into the terminal and do not ask for a password.
-- Work in a folder: use cd <dir> && <cmd> on one line, or absolute paths. A cd on its own does not move the thread.
+- Work in a folder: cd <dir> && <cmd> on one line, or absolute paths.
 - Use a secret: $NAME is set from /etc/profile.d/wsp-secrets.sh. Never echo, log or commit a value, and never cat that file.
 "
 `;
@@ -449,10 +447,10 @@ exports[`the document > the short always-loaded text carries the facts an agent 
 This is a Linux machine in the cloud that wsp set up from the recipe of the person's computer; it is not that computer. The wsp-machine skill has the full picture: what did not install, the secret names, the aliases whose commands are missing, and how the common things are done here.
 
 - A background process started with a plain & inside a tool call dies when that call's shell exits. Detach it: setsid nohup <cmd> > /tmp/<name>.log 2>&1 < /dev/null &, or tmux new -d -s <name> '<cmd>'.
-- Every shell and every agent session starts in the thread's folder. A cd inside a tool call lasts for that command only; use cd <dir> && <cmd> or absolute paths.
+- Every new shell starts in the thread's folder, and the panes show the thread's folder.
 - A server listening on a port shows in the app for the person to open; bind 0.0.0.0, not 127.0.0.1. A printed http://localhost:<port> link has its port forwarded to their computer. Ports below 1024 are not forwarded.
 - Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed. Install services natively.
-- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free.
+- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written. wsp keeps 2.0 GiB free.
 - Secrets are exported by /etc/profile.d/wsp-secrets.sh. Use them by name ($NAME); never print, log or commit a value, and never read that file.
 - Sign-ins go through wsp: run the tool's own login command and the page opens on the person's computer. Do not paste tokens into the terminal and do not ask for a password.
 "

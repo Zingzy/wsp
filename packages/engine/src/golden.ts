@@ -15,7 +15,7 @@ import { MIB, TOOL_TIMEOUT_S, fmtBytes, freeBytes, guardDeadlineMs, guarded, ins
 import { BUILDER_DISK_GB } from "./tool-sizes.js";
 import { assertFirstLife } from "./lifecycle.js";
 import { applyMcp, type McpPlan, type McpResult } from "./golden-mcp.js";
-import { applyMachineContext, type ContextResult } from "./machine-context.js";
+import { BROWSER_SHIM_PATH, applyMachineContext, type ContextResult } from "./machine-context.js";
 import type { Machine, MachineBackend, MachineKind, MachineState } from "./machine.js";
 import { importInto } from "./vault.js";
 
@@ -72,9 +72,6 @@ export async function killUntilGone(backend: MachineBackend, machine: Machine, c
 
 /** Solari's built-in templates are kind-specific (TemplateKindMismatch otherwise). */
 const DEFAULT_TEMPLATE: Record<MachineKind, string> = { sandbox: "base", desktop: "default" };
-
-/** Mirrors @wsp/daemon's OPEN_SHIM_PATH (the engine cannot import the daemon package, which only runs inside guests); a host test pins the two equal. */
-export const BROWSER_SHIM_PATH = "/usr/local/bin/wsp-open";
 
 /** How long a builder may sit with no API activity before it is killed. Whether
  * a live noVNC stream counts as activity is unmeasured, so this covers a person
