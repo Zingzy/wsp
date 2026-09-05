@@ -244,8 +244,8 @@ const present = <T>(v: T | undefined): T[] => (v === undefined ? [] : [v]);
 
 /** Absolute prefixes with no Linux equivalent. */
 const MAC_ONLY = ["/Applications/", "/System/", "/Library/", "/Volumes/", "/private/", "/opt/homebrew/Caskroom/"];
-/** Directories whose binaries the machine finds on its own PATH under the same name. */
-const BIN_DIRS = ["/opt/homebrew/bin/", "/opt/homebrew/sbin/", "/usr/local/bin/", "/usr/bin/", "/bin/"];
+/** Directories whose binaries the machine finds on its own PATH under the same name; the import's plan strips them too. */
+export const MCP_BIN_DIRS: readonly string[] = ["/opt/homebrew/bin/", "/opt/homebrew/sbin/", "/usr/local/bin/", "/usr/bin/", "/bin/"];
 
 function tilde(home: string, p: string): string {
   return p === home ? "~" : p.startsWith(`${home}/`) ? `~${p.slice(home.length)}` : p;
@@ -263,7 +263,7 @@ const pathOf = (s: string): string => (/^--?[\w-]+=/.test(s) ? s.slice(s.indexOf
 function binaryOf(command: string, home: string): string {
   const abs = command.startsWith("~/") ? `${home}${command.slice(1)}` : command;
   if (!abs.startsWith("/")) return abs;
-  if (BIN_DIRS.some(d => abs.startsWith(d)) || abs.startsWith(`${home}/.local/bin/`)) return abs.slice(abs.lastIndexOf("/") + 1);
+  if (MCP_BIN_DIRS.some(d => abs.startsWith(d)) || abs.startsWith(`${home}/.local/bin/`)) return abs.slice(abs.lastIndexOf("/") + 1);
   return tilde(home, abs);
 }
 
@@ -286,22 +286,37 @@ export function linuxFit(server: McpServer, home: string): LinuxFit {
 
 const isUrl = (s: string): boolean => /^https?:\/\//.test(s);
 
-/** The store key mcp-remote derives for a definition that runs it: md5 of the server url, joined with `|` to
- * the sorted JSON of any `--header` pairs. Undefined when the definition does not run mcp-remote. */
+const sortedJson = (o: Record<string, string>): string[] => (Object.keys(o).length > 0 ? [JSON.stringify(o, Object.keys(o).sort())] : []);
+
+/** The store key mcp-remote derives for a definition that runs it, as its getServerUrlHash does: md5 of the server
+ * url, the `--resource`, the sorted `--authorize-param` pairs, the sorted `--header` pairs and the
+ * `--client-metadata-url`, joined with `|`. Undefined when the definition does not run mcp-remote. */
 export function mcpRemoteHash(args: readonly string[]): string | undefined {
   const at = args.findIndex(a => /^mcp-remote(@[^/]*)?$/.test(a));
   if (at < 0) return undefined;
-  const url = args.slice(at + 1).find(isUrl);
+  const rest = args.slice(at + 1);
+  const url = rest.find(isUrl);
   if (url === undefined) return undefined;
   const headers: Record<string, string> = {};
-  for (let i = at + 1; i < args.length; i++) {
-    if (args[i] !== "--header" && args[i] !== "-H") continue;
-    const pair = args[i + 1];
-    const colon = pair?.indexOf(":") ?? -1;
-    if (pair !== undefined && colon > 0) headers[pair.slice(0, colon).trim()] = pair.slice(colon + 1).trim();
+  const params: Record<string, string> = {};
+  const after = (flag: string): string | undefined => {
+    const i = rest.indexOf(flag);
+    return i >= 0 ? rest[i + 1]?.trim() : undefined;
+  };
+  for (let i = 0; i < rest.length; i++) {
+    const value = rest[i + 1];
+    if (value === undefined) continue;
+    if (rest[i] === "--header" || rest[i] === "-H") {
+      const colon = value.indexOf(":");
+      if (colon > 0) headers[value.slice(0, colon).trim()] = value.slice(colon + 1).trim();
+    } else if (rest[i] === "--authorize-param") {
+      const eq = value.indexOf("=");
+      if (eq > 0) params[value.slice(0, eq).trim()] = value.slice(eq + 1).trim();
+    }
   }
-  const keys = Object.keys(headers).sort();
-  const parts = [url, ...(keys.length > 0 ? [JSON.stringify(headers, keys)] : [])];
+  const resource = after("--resource");
+  const metadata = after("--client-metadata-url");
+  const parts = [url, ...(resource !== undefined ? [resource] : []), ...sortedJson(params), ...sortedJson(headers), ...(metadata !== undefined ? [metadata] : [])];
   return createHash("md5").update(parts.join("|")).digest("hex");
 }
 
@@ -318,6 +333,17 @@ function secretNamed(name: string): boolean {
   return isSecretName(name) || name.toUpperCase().split("_").some(w => ["CREDENTIAL", "CREDENTIALS", "AUTH", "CERT", "PASSWD"].includes(w));
 }
 
+/** `--api-key`, `--token=`: a flag whose name is secret-shaped; its value is a secret. */
+const secretFlag = (arg: string): string | undefined => {
+  const m = /^(--?[A-Za-z][\w-]*)(=|$)/.exec(arg);
+  return m !== null && secretNamed(m[1]!.replace(/-/g, "_")) ? m[1]! : undefined;
+};
+/** `API_KEY=...` as an argument. */
+const secretAssign = (arg: string): string | undefined => {
+  const m = /^([A-Za-z_]\w*)=/.exec(arg);
+  return m !== null && secretNamed(m[1]!) ? m[1]! : undefined;
+};
+
 const shownUrl = (url: string): string => {
   try {
     const u = new URL(url);
@@ -328,16 +354,23 @@ const shownUrl = (url: string): string => {
 };
 
 /** The definition in a few words: the command and its arguments with npx's yes flag dropped, urls shown as
- * host and path, and the value of a --header flag hidden. */
+ * host and path, and every value that is a secret hidden: after --header, after or inside a secret-named flag,
+ * inside a secret-named NAME=value. */
 function transportLine(t: McpTransport, home: string): string {
   if (t.kind === "http") return `http: ${shownUrl(t.url)}`;
   const shown: string[] = [];
   for (let i = 0; i < t.args.length; i++) {
     const a = t.args[i]!;
     if (a === "-y" || a === "--yes") continue;
-    if (a === "--header" || a === "-H") {
+    const flag = secretFlag(a);
+    const assign = secretAssign(a);
+    if (a === "--header" || a === "-H" || (flag !== undefined && !a.includes("="))) {
       shown.push(a, "…");
       i++;
+      continue;
+    }
+    if (flag !== undefined || assign !== undefined) {
+      shown.push(`${flag ?? assign}=…`);
       continue;
     }
     shown.push(isUrl(a) ? `(${shownUrl(a)})` : tilde(home, a));
@@ -351,6 +384,32 @@ interface Carried {
   notes: string[];
   paths: string[];
   bytes: number;
+}
+
+/** Home paths a stdio definition runs against (arguments, cwd, env values), `~`-relative, the command itself and
+ * anything under ~/.local/bin left out: what the machine needs beside the definition. */
+export function homePaths(server: McpServer, home: string): string[] {
+  const t = server.transport;
+  if (t.kind === "http") return [];
+  const out = new Set<string>();
+  for (const s of [...t.args.map(pathOf), ...(t.cwd !== undefined ? [t.cwd] : []), ...Object.values(t.env)]) {
+    const abs = s.startsWith("~/") ? `${home}${s.slice(1)}` : s;
+    if (!abs.startsWith(`${home}/`) || abs.startsWith(`${home}/.local/bin/`)) continue;
+    out.add(tilde(home, abs));
+  }
+  return [...out];
+}
+
+/** Whether each home path a definition runs against is here: one that is gone locks the row, one that is here and
+ * travels on no row of this server is named as a dependency. */
+async function homeDeps(host: Host, server: McpServer, carriedPaths: readonly string[]): Promise<{ notes: string[]; gone?: string }> {
+  const notes: string[] = [];
+  for (const p of homePaths(server, host.home)) {
+    if (carriedPaths.includes(p)) continue;
+    if ((await host.fs.stat(expand(host, p))) === undefined) return { notes, gone: `path ${p} is not on this computer, will not run` };
+    notes.push(`depends on ${p}, which comes along only if a row carries it`);
+  }
+  return { notes };
 }
 
 /** What a definition carries: secret-named env values by size, the file such a value points at (which travels on
@@ -369,7 +428,7 @@ async function carried(host: Host, server: McpServer, format: McpFormat, remoteT
     const st = abs.startsWith("/") ? await host.fs.stat(abs) : undefined;
     if (st?.kind === "file") {
       if (!abs.startsWith(`${host.home}/`)) {
-        out.notes.push(`the file ${k} points at, ${abs}, is outside your home and is not copied`);
+        out.notes.push(`the file ${k} points at is outside your home and is not copied`);
         continue;
       }
       out.secrets.push(`the file ${k} points at (${fmt(st.bytes)})`);
@@ -379,6 +438,18 @@ async function carried(host: Host, server: McpServer, format: McpFormat, remoteT
     }
     out.secrets.push(`env ${k} (${Buffer.byteLength(v)} B)`);
   }
+  for (let i = 0; i < t.args.length; i++) {
+    const a = t.args[i]!;
+    const flag = secretFlag(a);
+    const assign = secretAssign(a);
+    if (flag !== undefined && !a.includes("=")) {
+      const value = t.args[i + 1];
+      if (value !== undefined) out.secrets.push(`flag ${flag} (${Buffer.byteLength(value)} B)`);
+      i++;
+    } else if (flag !== undefined || assign !== undefined) {
+      out.secrets.push(`${flag !== undefined ? "flag" : "arg"} ${flag ?? assign} (${Buffer.byteLength(a.slice(a.indexOf("=") + 1))} B)`);
+    }
+  }
   const hash = mcpRemoteHash(t.args);
   if (hash !== undefined) {
     const bytes = remoteTokens.get(hash);
@@ -387,12 +458,13 @@ async function carried(host: Host, server: McpServer, format: McpFormat, remoteT
   return out;
 }
 
-function serverRow(config: McpConfig, server: McpServer, fit: LinuxFit, c: Carried, home: string): ManifestEntry {
+function serverRow(config: McpConfig, server: McpServer, fit: LinuxFit, deps: { notes: string[]; gone?: string }, c: Carried, home: string): ManifestEntry {
   const id = `${MCP_ID_PREFIX}${config.agent}/${server.scope === "home" ? "home/" : ""}${server.name}`;
+  const reason = fit.ok ? deps.gone : fit.reason;
   const words = [
     ...(server.scope === "home" ? ["local to ~"] : []),
     transportLine(server.transport, home),
-    ...(fit.ok ? [fit.needs] : []),
+    ...(reason === undefined && fit.ok ? [fit.needs, ...deps.notes] : []),
     ...server.envRefs.map(n => `reads ${n} from the environment, set it on the machine`),
     ...(c.secrets.length > 0 ? [`carries ${c.secrets.length === 1 ? "a secret" : "secrets"}: ${c.secrets.join(", ")}`] : c.notes.length === 0 ? ["carries no secret"] : []),
     ...c.notes,
@@ -404,8 +476,8 @@ function serverRow(config: McpConfig, server: McpServer, fit: LinuxFit, c: Carri
     group: `${config.label} MCP servers`,
     paths: c.paths,
     bytes: c.bytes,
-    default: fit.ok ? "bring" : "skip",
-    ...(fit.ok ? {} : { reason: fit.reason }),
+    default: reason === undefined ? "bring" : "skip",
+    ...(reason !== undefined ? { reason } : {}),
     detail: words.join("; "),
   };
 }
@@ -413,7 +485,7 @@ function serverRow(config: McpConfig, server: McpServer, fit: LinuxFit, c: Carri
 interface RemoteStore {
   /** Token file size by server hash. */
   tokens: Map<string, number>;
-  /** client_info and token files together. */
+  /** Every file that travels: tokens, client registrations and the verifiers beside them. */
   bytes: number;
   excludes: string[];
 }
@@ -425,15 +497,14 @@ async function remoteStore(host: Host): Promise<RemoteStore | undefined> {
   const out: RemoteStore = { tokens: new Map(), bytes: 0, excludes: [] };
   for (const name of await host.fs.list(expand(host, MCP_AUTH))) if (/^mcp-remote-\d/.test(name)) out.excludes.push(`${MCP_AUTH}/${name}`);
   for (const name of await host.fs.list(expand(host, MCP_REMOTE_STORE))) {
-    const m = /^([0-9a-f]{32})_(tokens|client_info|lock)\.json$/.exec(name);
-    if (m === null) continue;
-    if (m[2] === "lock") {
+    if (/^[0-9a-f]{32}_lock\.json$/.test(name)) {
       out.excludes.push(`${MCP_REMOTE_STORE}/${name}`);
       continue;
     }
     const bytes = (await host.fs.stat(expand(host, `${MCP_REMOTE_STORE}/${name}`)))?.bytes ?? 0;
     out.bytes += bytes;
-    if (m[2] === "tokens") out.tokens.set(m[1]!, bytes);
+    const token = /^([0-9a-f]{32})_tokens\.json$/.exec(name);
+    if (token !== null) out.tokens.set(token[1]!, bytes);
   }
   return out;
 }
@@ -470,9 +541,10 @@ export async function detectMcp(host: Host): Promise<ManifestEntry[]> {
     for (const server of parseMcp(config.format, text, host.home)) {
       const fit = linuxFit(server, host.home);
       const c = await carried(host, server, config.format, tokens);
+      const deps = await homeDeps(host, server, c.paths);
       const hash = server.transport.kind === "stdio" ? mcpRemoteHash(server.transport.args) : undefined;
       if (hash !== undefined && tokens.has(hash)) matched.push(server.name);
-      rows.push(serverRow(config, server, fit, c, host.home));
+      rows.push(serverRow(config, server, fit, deps, c, host.home));
     }
   }
   if (store !== undefined) rows.push(remoteRow(store, matched));

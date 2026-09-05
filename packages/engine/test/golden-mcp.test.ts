@@ -109,7 +109,8 @@ const CODEX = [
   "",
   "[mcp_servers.grafana]",
   'command = "/opt/homebrew/bin/uvx"',
-  'args = ["mcp-grafana", "--config=/Users/dev/.config/grafana.toml"]',
+  'args = ["mcp-grafana", "--config=/Users/dev/.config/grafana.toml", "/Users/dev/tab\\there"]',
+  'note = "keep \\u00e9 \\"quoted\\" and\\ttab"',
   "",
   "[mcp_servers.grafana.env]",
   'GRAFANA_SERVICE_ACCOUNT_TOKEN = "glsa_x" # keep the comment',
@@ -185,7 +186,9 @@ describe("applyMcp", () => {
       "",
       "[mcp_servers.grafana]",
       'command = "uvx"',
-      `args = ["mcp-grafana", "--config=${root}/.config/grafana.toml"]`,
+      // A rewritten string keeps its escapes; one the rewrite never touched is left byte for byte.
+      `args = ["mcp-grafana", "--config=${root}/.config/grafana.toml", "${root}/tab\\there"]`,
+      'note = "keep \\u00e9 \\"quoted\\" and\\ttab"',
       "",
       "[mcp_servers.grafana.env]",
       'GRAFANA_SERVICE_ACCOUNT_TOKEN = "glsa_x" # keep the comment',
@@ -200,13 +203,14 @@ describe("applyMcp", () => {
 
     expect(JSON.parse(readFileSync(join(root, ".gemini", "settings.json"), "utf8"))).toEqual({ mcpServers: { memory: { command: "codebase-memory-mcp" } }, theme: "dark" });
 
+    // A definition whose package npx or uv pulls down when the agent first starts it is in place, not installed.
     expect(results).toEqual<McpResult[]>([
-      { id: `${MCP_ID_PREFIX}claude/github`, agent: "Claude Code", name: "github", outcome: "installed" },
-      { id: `${MCP_ID_PREFIX}claude/gsc`, agent: "Claude Code", name: "gsc", outcome: "installed", note: "uv installed for it" },
+      { id: `${MCP_ID_PREFIX}claude/github`, agent: "Claude Code", name: "github", outcome: "fetched-on-first-use", note: "npx fetches the package on first use" },
+      { id: `${MCP_ID_PREFIX}claude/gsc`, agent: "Claude Code", name: "gsc", outcome: "fetched-on-first-use", note: "uv installed for it; uv fetches the package on first use" },
       { id: `${MCP_ID_PREFIX}claude/notes`, agent: "Claude Code", name: "notes", outcome: "skipped", note: "command ~/Library/Application Support/Notes/mcp is macOS-only, will not run" },
-      { id: `${MCP_ID_PREFIX}claude/home/zomato`, agent: "Claude Code", name: "zomato", outcome: "installed" },
-      { id: `${MCP_ID_PREFIX}claude/home/whatsapp`, agent: "Claude Code", name: "whatsapp", outcome: "installed", note: "uv installed for it" },
-      { id: `${MCP_ID_PREFIX}codex/grafana`, agent: "Codex", name: "grafana", outcome: "installed", note: "uv installed for it" },
+      { id: `${MCP_ID_PREFIX}claude/home/zomato`, agent: "Claude Code", name: "zomato", outcome: "fetched-on-first-use", note: "npx fetches the package on first use" },
+      { id: `${MCP_ID_PREFIX}claude/home/whatsapp`, agent: "Claude Code", name: "whatsapp", outcome: "fetched-on-first-use", note: "uv installed for it; uv fetches the package on first use" },
+      { id: `${MCP_ID_PREFIX}codex/grafana`, agent: "Codex", name: "grafana", outcome: "fetched-on-first-use", note: "uv installed for it; uv fetches the package on first use" },
       { id: `${MCP_ID_PREFIX}codex/sentry`, agent: "Codex", name: "sentry", outcome: "skipped", note: "unticked" },
       { id: `${MCP_ID_PREFIX}gemini/memory`, agent: "Gemini CLI", name: "memory", outcome: "installed" },
       { id: `${MCP_ID_PREFIX}gemini/gone`, agent: "Gemini CLI", name: "gone", outcome: "skipped", note: "path /Applications/X.app/x is macOS-only, will not run" },
@@ -216,7 +220,7 @@ describe("applyMcp", () => {
     expect(stages).toEqual([
       "installing-mcp:Claude Code 5, Codex 2, Gemini CLI 2, OpenCode 2",
       "installing-mcp:uv for gsc, whatsapp, grafana",
-      "installing-mcp:github, gsc, zomato, whatsapp, grafana, memory installed; gsc, whatsapp, grafana: uv installed; notes skipped (command ~/Library/Application Support/Notes/mcp is macOS-only, will not run); sentry skipped (unticked); gone skipped (path /Applications/X.app/x is macOS-only, will not run); ctx skipped (OpenCode's config is not on the machine); late skipped (OpenCode is not ticked, so its config did not travel)",
+      "installing-mcp:memory installed; github, zomato: package fetched on first use by npx; gsc, whatsapp, grafana: uv installed, package fetched on first use by uv; notes skipped (command ~/Library/Application Support/Notes/mcp is macOS-only, will not run); sentry skipped (unticked); gone skipped (path /Applications/X.app/x is macOS-only, will not run); ctx skipped (OpenCode's config is not on the machine); late skipped (OpenCode is not ticked, so its config did not travel)",
     ]);
     // Every command is looked for once on the machine's PATH; uv, found missing, is installed by its checksummed release.
     const checks = cmds.filter(c => c.includes("command -v '"));
@@ -237,23 +241,25 @@ describe("applyMcp", () => {
       { id: `${MCP_ID_PREFIX}gemini/memory`, agent: "Gemini CLI", name: "memory", outcome: "installed", note: "codebase-memory-mcp is not on the machine; the server starts once it is installed there" },
       { id: `${MCP_ID_PREFIX}gemini/vanished`, agent: "Gemini CLI", name: "vanished", outcome: "skipped", note: "not in the config that travelled" },
     ]);
-    expect(stages.at(-1)).toBe("memory installed; memory: codebase-memory-mcp is not on the machine; vanished skipped (not in the config that travelled)");
+    expect(stages.at(-1)).toBe("memory: codebase-memory-mcp is not on the machine; vanished skipped (not in the config that travelled)");
   });
 
-  it("running twice leaves the files as they were after the first run", async () => {
+  it("running twice leaves the files as they were after the first run and reports the same, the moved home servers included", async () => {
     const { root, machine } = guest(["npx", "uv", "codebase-memory-mcp"]);
     seed(root);
-    await applyMcp(machine, planOn(root), () => {});
+    const first = await applyMcp(machine, planOn(root), () => {});
     const after = [".claude-cfg/.claude.json", ".codex/config.toml", ".gemini/settings.json"].map(f => readFileSync(join(root, f), "utf8"));
-    await applyMcp(machine, planOn(root), () => {});
+    const second = await applyMcp(machine, planOn(root), () => {});
     expect([".claude-cfg/.claude.json", ".codex/config.toml", ".gemini/settings.json"].map(f => readFileSync(join(root, f), "utf8"))).toEqual(after);
+    expect(second).toEqual(first);
+    expect(second.filter(r => r.name === "zomato" || r.name === "whatsapp").map(r => r.outcome)).toEqual(["fetched-on-first-use", "fetched-on-first-use"]);
   });
 
   it("a failed uv install is named on every server that needed it, and the definitions still land", async () => {
     const { root, machine } = guest(["npx"], { uv: { exitCode: 1, stdout: "", stderr: "curl: (6) Could not resolve host" } });
     seed(root);
     const results = await applyMcp(machine, planOn(root), () => {});
-    expect(results.find(r => r.name === "gsc")).toEqual({ id: `${MCP_ID_PREFIX}claude/gsc`, agent: "Claude Code", name: "gsc", outcome: "installed", note: "uv did not install (curl: (6) Could not resolve host); the server starts once it is installed there" });
+    expect(results.find(r => r.name === "gsc")).toEqual({ id: `${MCP_ID_PREFIX}claude/gsc`, agent: "Claude Code", name: "gsc", outcome: "fetched-on-first-use", note: "uv did not install (curl: (6) Could not resolve host); the server starts once it is installed there; uv fetches the package on first use" });
     expect(Object.keys(JSON.parse(readFileSync(join(root, ".claude-cfg", ".claude.json"), "utf8")).mcpServers)).toEqual(["github", "gsc", "survivor"]);
   });
 });

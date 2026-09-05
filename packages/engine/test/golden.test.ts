@@ -903,6 +903,21 @@ describe("golden import stages", () => {
     expect(other.ledger.recipeHash).toBe("h2");
   });
 
+  it("an attach with an MCP plan runs the config edit and the reach check, and still reports no result: the saved list from the build stands", async () => {
+    const { backend, cmds, fetch } = backendFor();
+    const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf() });
+    const before = cmds.length;
+    const { stages, onStage } = stageRecorder();
+    const results: ImportResult[] = [];
+    const mcp = { agents: [{ id: "claude", label: "Claude Code", scopes: [{ files: ["/root/.claude-cfg/.claude.json"], format: "claude" as const, keep: ["github"], drop: [] }], aside: [] }], guestHome: "/root", rewrites: [], binDirs: [] };
+    await applyGoldenImport(builder.machine, { import: importOf({ mcp, onResult: r => void results.push(r) }), setup: "true", ledger: builder.import, fetch, onStage });
+    expect(results).toEqual([]);
+    expect(stages.slice(0, 5)).toEqual(["applying-setup:already applied", "uploading-files:already applied", "installing-harness:already applied", "installing-tools:already applied", "installing-mcp:Claude Code 1"]);
+    expect(stages.at(-1)).toBe("installing-mcp:github skipped (the config edit did not run (exit 0))");
+    expect(cmds.length).toBeGreaterThan(before);
+    expect(cmds.at(-1)).toBe("echo ok");
+  });
+
   it("applying the same recipe to a builder that has it uploads its volatile files again, so the golden carries the latest copy; nothing else runs", async () => {
     const { backend, cmds, puts, fetch } = backendFor();
     const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf() });

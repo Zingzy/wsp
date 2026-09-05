@@ -366,9 +366,11 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
       mark("installing-tools");
     }
     // The edit runs on every pass that has a plan: an attach re-uploads the volatile ~/.claude.json, which brings every
-    // laptop definition back as it was. It is idempotent and touches only the servers the plan names.
+    // laptop definition back as it was. It is idempotent and touches only the servers the plan names. It does not count
+    // as a run for the result: on an attach the saved result from the build stands, tools and agents included.
+    let edited = false;
     if (imp.mcp !== undefined) {
-      ran = true;
+      edited = true;
       result.mcp = await applyMcp(machine, imp.mcp, stage);
       mark("installing-mcp");
     } else if (done("installing-mcp")) {
@@ -377,7 +379,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
       stage("installing-mcp", "none configured");
       mark("installing-mcp");
     }
-    if (ran) {
+    if (ran || edited) {
       // A builder whose exec died (a full disk did it once) would be sealed and handed off answering nothing.
       const answer = await machine.exec("echo ok", { timeoutMs: 30_000 });
       if (answer.exitCode !== 0 || answer.stdout.trim() !== "ok") {

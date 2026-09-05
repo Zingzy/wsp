@@ -33,6 +33,7 @@ describe("mcp servers", () => {
         [`~/.mcp-auth/mcp-remote-v1/${hash("https://mcp.zomato.com/mcp")}_tokens.json`]: 1400,
         [`~/.mcp-auth/mcp-remote-v1/${hash("https://mcp.zomato.com/mcp")}_client_info.json`]: 300,
         [`~/.mcp-auth/mcp-remote-v1/${hash("https://mcp.zomato.com/mcp")}_lock.json`]: 60,
+        [`~/.mcp-auth/mcp-remote-v1/${hash("https://mcp.zomato.com/mcp")}_code_verifier_2f1.txt`]: 100,
         "~/.mcp-auth/mcp-remote-0.1.37/abc_tokens.json": 900,
       },
     });
@@ -66,7 +67,7 @@ describe("mcp servers", () => {
     expect(rows[5]).toEqual({
       rung: "agents", id: "agents/mcp/mcp-remote", label: "mcp-remote sign-ins", group: "MCP sign-ins", paths: ["~/.mcp-auth"],
       excludes: ["~/.mcp-auth/mcp-remote-0.1.37", `~/.mcp-auth/mcp-remote-v1/${hash("https://mcp.zomato.com/mcp")}_lock.json`],
-      bytes: 1700, default: "bring",
+      bytes: 1800, default: "bring",
       detail: "browser sign-ins saved by mcp-remote for remote servers: 1 token (1.4 KB), for zomato; older bridge versions' folders stay here",
     });
     // The config itself is never listed here; it travels with the agent's row. No token file is read.
@@ -141,6 +142,29 @@ describe("mcp servers", () => {
     ]);
   });
 
+  it("a value after a secret-named flag, or inside a secret-named assignment, is a secret: hidden on the row and counted by size", async () => {
+    const rows = await detectMcp(fakeHost({ files: { "~/.claude.json": JSON.stringify({ mcpServers: { s: { command: "npx", args: ["-y", "some-server", "--api-key", "sk-123", "--token=abcdef", "API_KEY=zzz"] } } }) } }));
+    expect(rows.map(r => r.detail)).toEqual(["stdio: npx some-server --api-key … --token=… API_KEY=…; runs via npx; carries secrets: flag --api-key (6 B), flag --token (6 B), arg API_KEY (3 B)"]);
+    expect(JSON.stringify(rows)).not.toMatch(/sk-123|abcdef|zzz/);
+  });
+
+  it("a secret-named env value pointing outside home is named without its value; a home path the server runs against is a dependency, or locks the row when it is gone", async () => {
+    const config = JSON.stringify({
+      mcpServers: {
+        outside: { command: "npx", args: ["x"], env: { CREDENTIALS_PATH: "/etc/creds.json" } },
+        whatsapp: { command: `${HOME}/.local/bin/uv`, args: ["--directory", `${HOME}/whatsapp-mcp/server`, "run", "main.py"] },
+        gone: { command: "node", args: [`${HOME}/code/gone/server.js`] },
+      },
+    });
+    const rows = await detectMcp(fakeHost({ files: { "~/.claude.json": config, "/etc/creds.json": 10, "~/whatsapp-mcp/server/main.py": 20 } }));
+    expect(rows.map(r => [r.default, r.reason, r.detail])).toEqual([
+      ["bring", undefined, "stdio: npx x; runs via npx; the file CREDENTIALS_PATH points at is outside your home and is not copied"],
+      ["bring", undefined, "stdio: ~/.local/bin/uv --directory ~/whatsapp-mcp/server run main.py; needs uv, installed on the machine when missing; depends on ~/whatsapp-mcp/server, which comes along only if a row carries it; carries no secret"],
+      ["skip", "path ~/code/gone/server.js is not on this computer, will not run", "stdio: node ~/code/gone/server.js; carries no secret"],
+    ]);
+    expect(JSON.stringify(rows)).not.toContain("/etc/creds.json");
+  });
+
   it("a config that does not parse, or has no servers, adds no row", async () => {
     expect(await detectMcp(fakeHost({ files: { "~/.claude.json": "{not json", "~/.gemini/settings.json": "{}", "~/.codex/config.toml": "model = \"x\"\n" } }))).toEqual([]);
     expect(await detectMcp(fakeHost())).toEqual([]);
@@ -166,9 +190,12 @@ describe("mcp servers", () => {
     expect(linuxFit({ name: "h", scope: "user", transport: { kind: "http", url: "https://h", headers: {} }, envRefs: [] }, HOME)).toEqual({ ok: true, needs: "nothing to install" });
   });
 
-  it("mcpRemoteHash matches the bridge's store: md5 of the url, with --header pairs appended as sorted JSON", () => {
+  it("mcpRemoteHash matches the bridge's store: md5 of the url, resource, sorted authorize params, sorted headers and client metadata url", () => {
     expect(mcpRemoteHash(["-y", "mcp-remote", NOTION])).toBe(hash(NOTION));
     expect(mcpRemoteHash(["mcp-remote@0.8.3", NOTION, "--header", "X-B: 2", "--header", "A: 1"])).toBe(createHash("md5").update(`${NOTION}|${JSON.stringify({ A: "1", "X-B": "2" })}`).digest("hex"));
+    expect(mcpRemoteHash(["mcp-remote", NOTION, "--client-metadata-url", "https://m.example/c.json", "--resource", "https://r.example", "--authorize-param", "b=2", "--authorize-param", "a=1", "--header", "K: v"])).toBe(
+      createHash("md5").update(`${NOTION}|https://r.example|${JSON.stringify({ a: "1", b: "2" })}|${JSON.stringify({ K: "v" })}|https://m.example/c.json`).digest("hex"),
+    );
     expect(mcpRemoteHash(["-y", "@scope/other", NOTION])).toBeUndefined();
     expect(MCP_ID_PREFIX).toBe("agents/mcp/");
   });

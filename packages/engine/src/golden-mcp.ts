@@ -50,13 +50,16 @@ export interface McpPlanOptions {
   home: string;
   guestHome?: string;
   agents: Record<string, McpAgentSource>;
+  /** Absolute bin directories the machine's PATH covers by name, the collector's list; ~/.local/bin is added here. */
+  binDirs?: readonly string[];
 }
 
+/** `fetched-on-first-use`: the definition is in place, but its package comes down when the agent first starts it (npx, uv). */
 export interface McpResult {
   id: string;
   agent: string;
   name: string;
-  outcome: "installed" | "skipped";
+  outcome: "installed" | "fetched-on-first-use" | "skipped";
   note?: string;
 }
 
@@ -108,7 +111,7 @@ export function mcpPlanFor(rows: readonly RecipeEntry[], opts: McpPlanOptions): 
     agents,
     guestHome,
     rewrites: [[`${opts.home}/`, `${guestHome}/`], ["/opt/homebrew/", LINUXBREW]],
-    binDirs: [`${opts.home}/.local/bin/`, "~/.local/bin/", "/opt/homebrew/bin/", "/opt/homebrew/sbin/"],
+    binDirs: [`${opts.home}/.local/bin/`, "~/.local/bin/", ...(opts.binDirs ?? ["/opt/homebrew/bin/", "/opt/homebrew/sbin/"])],
   };
 }
 
@@ -169,10 +172,15 @@ function jsonScope(scope, file) {
     root.projects[project.to][key] = root.projects[project.to][key] || {};
     return root.projects[project.to][key];
   }
+  const moved = project && root.projects && root.projects[project.to] && root.projects[project.to][key] ? root.projects[project.to][key] : {};
   const results = [];
   for (const name of scope.keep) {
     const def = servers[name];
-    if (def === undefined) { results.push({ name, outcome: "missing" }); continue; }
+    if (def === undefined) {
+      if (moved[name] !== undefined) results.push({ name, outcome: "written", command: commandOf(moved[name]) });
+      else results.push({ name, outcome: "missing" });
+      continue;
+    }
     const next = walk(def, false);
     if (project) delete servers[name];
     target()[name] = next;
@@ -195,12 +203,28 @@ function uncomment(line) {
 }
 const HEADER = /^\[\s*mcp_servers\s*\.\s*(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9_-]+))\s*(?:\.\s*[A-Za-z0-9_-]+\s*)?\]$/;
 const STRING = /"((?:[^"\\]|\\.)*)"|'([^']*)'/g;
+const ESCAPES = { b: "\b", t: "\t", n: "\n", f: "\f", r: "\r", '"': '"', "\\": "\\" };
+function decodeToml(s) {
+  return s.replace(/\\(u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}|.)/g, (m, e) => (e[0] === "u" || e[0] === "U" ? String.fromCodePoint(parseInt(e.slice(1), 16)) : e in ESCAPES ? ESCAPES[e] : m));
+}
+function encodeToml(s) {
+  return s.replace(/[\\"\u0000-\u001f\u007f]/g, c => {
+    const back = Object.keys(ESCAPES).find(k => ESCAPES[k] === c);
+    return back !== undefined ? "\\" + back : "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0");
+  });
+}
 function rewriteTomlLine(line) {
   const code = uncomment(line);
   const isCommand = /^\s*command\s*=/.test(code);
+  // A token is re-emitted only when its value changed, so escapes the rewrite never touched stay as written.
   const next = code.replace(STRING, (m, basic, literal) => {
-    if (literal !== undefined) return "'" + rewriteString(literal, isCommand) + "'";
-    return '"' + rewriteString(basic.replace(/\\(["\\])/g, "$1"), isCommand).replace(/(["\\])/g, "\\$1") + '"';
+    if (literal !== undefined) {
+      const value = rewriteString(literal, isCommand);
+      return value === literal ? m : "'" + value + "'";
+    }
+    const value = decodeToml(basic);
+    const rewritten = rewriteString(value, isCommand);
+    return rewritten === value ? m : '"' + encodeToml(rewritten) + '"';
   });
   return next + line.slice(code.length);
 }
@@ -228,7 +252,7 @@ function codexScope(scope, file) {
     out.forEach((l, i) => {
       if (outOwner[i] !== name) return;
       const m = /^\s*command\s*=\s*(?:"((?:[^"\\]|\\.)*)"|'([^']*)')/.exec(uncomment(l));
-      if (m) command = m[1] !== undefined ? m[1].replace(/\\(["\\])/g, "$1") : m[2];
+      if (m) command = m[1] !== undefined ? decodeToml(m[1]) : m[2];
     });
     results.push({ name, outcome: "written", command });
   }
@@ -274,24 +298,34 @@ function parseReport(stdout: string): { scopes: ScopeOutcome[] } | undefined {
 interface Pending extends McpResult {
   /** The command as the machine will run it; absent for a remote server or a skipped row. */
   command?: string;
-  /** The summary's words for the note. */
-  short?: string;
+  /** Full sentences for the saved result. */
+  notes: string[];
+  /** The summary's words, one per note. */
+  shorts: string[];
 }
 
 const basename = (p: string): string => p.slice(p.lastIndexOf("/") + 1);
+/** Runners that pull the server's package down when the agent first starts it: the definition is in place, the package is not. */
+const FETCHERS: Record<string, string> = { npx: "npx", uvx: "uv", uv: "uv" };
 
+/** Installed servers by name; then, per distinct wording, the servers whose package is fetched on first use or
+ * whose runner was installed or is missing; then each skipped server with its reason. */
 function summarize(rows: readonly Pending[]): string {
-  const installed = rows.filter(r => r.outcome === "installed");
   const parts: string[] = [];
+  const installed = rows.filter(r => r.outcome === "installed" && r.shorts.length === 0);
   if (installed.length > 0) parts.push(`${installed.map(r => r.name).join(", ")} installed`);
   const byNote = new Map<string, string[]>();
-  for (const r of installed) if (r.short !== undefined) (byNote.get(r.short) ?? byNote.set(r.short, []).get(r.short)!).push(r.name);
+  for (const r of rows) {
+    if (r.outcome === "skipped" || r.shorts.length === 0) continue;
+    const key = r.shorts.join(", ");
+    (byNote.get(key) ?? byNote.set(key, []).get(key)!).push(r.name);
+  }
   for (const [short, names] of byNote) parts.push(`${names.join(", ")}: ${short}`);
-  for (const r of rows) if (r.outcome === "skipped") parts.push(`${r.name} skipped (${r.note ?? "no reason given"})`);
+  for (const r of rows) if (r.outcome === "skipped") parts.push(`${r.name} skipped (${r.notes[0] ?? "no reason given"})`);
   return parts.length > 0 ? parts.join("; ") : "nothing to do";
 }
 
-const strip = (r: Pending): McpResult => ({ id: r.id, agent: r.agent, name: r.name, outcome: r.outcome, ...(r.note !== undefined ? { note: r.note } : {}) });
+const strip = (r: Pending): McpResult => ({ id: r.id, agent: r.agent, name: r.name, outcome: r.outcome, ...(r.notes.length > 0 ? { note: r.notes.join("; ") } : {}) });
 
 /** Runs the plan on the builder: the guest script edits the configs, then every kept command is looked for on
  * the machine's PATH, uv is installed by its checksummed release when a server runs through it and it is missing,
@@ -313,14 +347,21 @@ export async function applyMcp(machine: Machine, plan: McpPlan, stage: StageList
       for (const name of scope.keep) {
         const r = outcome?.results.find(x => x.name === name);
         if (skippedKeep !== undefined || r === undefined || r.outcome === "missing") {
-          rows.push({ id: id(name), agent: agent.label, name, outcome: "skipped", note: skippedKeep ?? "not in the config that travelled" });
+          rows.push(skipped(id(name), agent.label, name, skippedKeep ?? "not in the config that travelled"));
           continue;
         }
-        rows.push({ id: id(name), agent: agent.label, name, outcome: "installed", ...(r.command !== undefined ? { command: r.command } : {}) });
+        const fetcher = r.command !== undefined ? FETCHERS[basename(r.command)] : undefined;
+        rows.push({
+          id: id(name), agent: agent.label, name,
+          outcome: fetcher === undefined ? "installed" : "fetched-on-first-use",
+          ...(r.command !== undefined ? { command: r.command } : {}),
+          notes: fetcher === undefined ? [] : [`${fetcher} fetches the package on first use`],
+          shorts: fetcher === undefined ? [] : [`package fetched on first use by ${fetcher}`],
+        });
       }
-      for (const d of scope.drop) rows.push({ id: id(d.name), agent: agent.label, name: d.name, outcome: "skipped", note: d.reason });
+      for (const d of scope.drop) rows.push(skipped(id(d.name), agent.label, d.name, d.reason));
     }
-    for (const a of agent.aside) rows.push({ id: a.id, agent: agent.label, name: a.name, outcome: "skipped", note: a.reason });
+    for (const a of agent.aside) rows.push(skipped(a.id, agent.label, a.name, a.reason));
   }
 
   const asRun = (command: string): string => (command.startsWith("~/") ? `${plan.guestHome}${command.slice(1)}` : command);
@@ -336,19 +377,24 @@ export async function applyMcp(machine: Machine, plan: McpPlan, stage: StageList
     const install = await machine.exec(guarded(`set -euo pipefail\n${UV_INSTALL}`, TOOL_TIMEOUT_S), { timeoutMs: (TOOL_TIMEOUT_S + GUARD_SLACK_S) * 1000 });
     for (const r of viaUv) {
       if (install.exitCode === 0) {
-        r.note = "uv installed for it";
-        r.short = "uv installed";
+        r.notes.unshift("uv installed for it");
+        r.shorts.unshift("uv installed");
       } else {
-        r.short = `uv did not install (${reasonOf(install, TOOL_TIMEOUT_S)})`;
-        r.note = `${r.short}; the server starts once it is installed there`;
+        const short = `uv did not install (${reasonOf(install, TOOL_TIMEOUT_S)})`;
+        r.shorts.unshift(short);
+        r.notes.unshift(`${short}; the server starts once it is installed there`);
       }
     }
   }
+  const viaUvNames = new Set(viaUv.map(r => r.id));
   for (const r of rows) {
-    if (r.command === undefined || r.note !== undefined || !missing.has(asRun(r.command))) continue;
-    r.short = `${basename(r.command)} is not on the machine`;
-    r.note = `${r.short}; the server starts once it is installed there`;
+    if (r.command === undefined || viaUvNames.has(r.id) || !missing.has(asRun(r.command))) continue;
+    const short = `${basename(r.command)} is not on the machine`;
+    r.shorts.push(short);
+    r.notes.push(`${short}; the server starts once it is installed there`);
   }
   stage("installing-mcp", summarize(rows));
   return rows.map(strip);
 }
+
+const skipped = (id: string, agent: string, name: string, note: string): Pending => ({ id, agent, name, outcome: "skipped", notes: [note], shorts: [] });
