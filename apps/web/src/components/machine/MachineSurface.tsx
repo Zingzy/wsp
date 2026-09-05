@@ -629,12 +629,12 @@ function LineageRow({ dot, title, detail, aside, below }: { dot: string; title: 
 function MissingTools({ tools }: { tools: GoldenMissingTool[] }) {
   return (
     <div className="mt-1.5 ml-3.5" data-k="missing-tools">
-      <p className="font-mono text-[.65rem] uppercase tracking-wider text-muted-foreground/80">not on this image</p>
+      <p className="text-[.65rem] font-medium uppercase tracking-wider text-muted-foreground">not on this image</p>
       <ul className="mt-0.5 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 font-mono text-[11px] tabular-nums text-muted-foreground" aria-label="tools not on this image">
         {tools.map(t => (
           <li key={t.name} className="contents">
             <span data-k="missing-tool">{t.name}</span>
-            <span className="min-w-0 break-words text-muted-foreground/70" data-k="missing-note">
+            <span className="min-w-0 break-words" data-k="missing-note">
               {t.outcome}: {t.note}
             </span>
           </li>

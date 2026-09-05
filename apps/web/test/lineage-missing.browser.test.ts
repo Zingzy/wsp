@@ -89,7 +89,7 @@ describe.skipIf(skipped !== undefined)("the lineage's missing tools laid out in 
     const long = await page!.locator("[data-k=missing-note]").last().boundingBox();
     expect(label!.y).toBeGreaterThan(v12!.y + v12!.height);
     expect(long!.y + long!.height).toBeLessThanOrEqual(v11!.y);
-    // The long reason wraps onto more lines instead of running past the tab's edge.
+    // Height is the wrap proof: the grid clamps the span's box whether or not its glyphs overflow it.
     expect(long!.height).toBeGreaterThan(short!.height * 1.8);
     expect(long!.x + long!.width).toBeLessThanOrEqual(tab!.x + tab!.width);
     expect(await page!.locator("text=Raycast").count()).toBe(0);
