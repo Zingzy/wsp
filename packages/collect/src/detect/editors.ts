@@ -28,6 +28,7 @@ interface CodeLike {
 // Only settings.json has a home on the remote server; keybindings and snippets stay with the client.
 const CODE_LIKE: readonly CodeLike[] = [
   { id: "vscode", label: "VS Code", bin: "code", userDir: { darwin: "~/Library/Application Support/Code/User", linux: "~/.config/Code/User" } },
+  { id: "vscode-insiders", label: "VS Code Insiders", bin: "code-insiders", userDir: { darwin: "~/Library/Application Support/Code - Insiders/User", linux: "~/.config/Code - Insiders/User" } },
   { id: "cursor", label: "Cursor", bin: "cursor", userDir: { darwin: "~/Library/Application Support/Cursor/User", linux: "~/.config/Cursor/User" } },
 ];
 
@@ -49,8 +50,10 @@ export async function detectEditors(host: Host): Promise<ManifestEntry[]> {
     if (!(await host.exec.which(ed.bin))) continue;
     const out = await host.exec.run(ed.bin, ["--list-extensions"]);
     for (const ext of parseExtensionList(out ?? "")) {
-      rows.push(item({ rung: "editors", id: `editors/${ed.id}-ext/${ext}`, label: ext, group: `${ed.label} extensions, ${over}`, default: "skip" }));
+      rows.push(item({ rung: "editors", id: `editors/${ed.id}-ext/${ext}`, label: ext, group: `${ed.label} extensions, ${over}` }));
     }
   }
+  // Zed's extensions stay on the client; its settings, prompts and themes are one directory on both platforms.
+  rows.push(await row(host, { rung: "editors", id: "editors/zed", label: "Zed settings, for Zed over SSH", paths: ["~/.config/zed"], default: "skip" }));
   return present(rows);
 }
