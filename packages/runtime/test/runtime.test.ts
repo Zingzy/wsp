@@ -3590,6 +3590,24 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(first.backend.machines[0]!.killed).toBe(false);
   });
 
+  it("the seal stamps the tools missing from the image on the version, and an update carries them on both roads", async () => {
+    const backend = stubBackend();
+    backend.execImpl = dfOk;
+    const skippedTools = [{ id: "tools/brew-cask/raycast", label: "Raycast", note: "macOS app, no Linux build" }];
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipeWith({ ...importOf(), skippedTools }), clock: fakeClock().clock });
+    const b = await rt.golden.prepare();
+    const want = [{ name: "Raycast", outcome: "skipped", note: "macOS app, no Linux build" }];
+    expect((await rt.golden.seal(b.id)).version.missingTools).toEqual(want);
+    const two = await rt.golden.upgrade({ delta: deltaOf("h2") });
+    expect(two.road).toBe("builder");
+    expect(two.version.missingTools).toEqual(want);
+    backend.machines[0]!.killed = true;
+    const three = await rt.golden.upgrade({ delta: deltaOf("h3") });
+    expect(three.road).toBe("fork");
+    expect(three.version.missingTools).toEqual(want);
+    expect((await rt.golden.get())?.versions.map(v => v.missingTools)).toEqual([want, want, want]);
+  });
+
   it("an update stamps the logins it is given on the new version, on both roads; one given none carries none", async () => {
     const { backend, rt } = started();
     const b = await rt.golden.prepare();

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { editorInstallsFor, recipeDigest, toolInstallsFor, type BrewTable, type RecipeEntry } from "../src/golden-import.js";
 import { diffRecipes, removalsFor, rowsToApply } from "../src/golden-diff.js";
-import { BUILDER_IDLE_MS, MachineAliveError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextSetupSha, nextSmoke, prepareBuilder, rollback, sealGolden, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
+import { BUILDER_IDLE_MS, MachineAliveError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, rollback, sealGolden, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import type { RecipeDigest } from "@wsp/protocol";
 import { NotFirstLifeError } from "../src/lifecycle.js";
@@ -1308,6 +1308,34 @@ describe("golden import stages", () => {
     expect(builder.setupSha).toBe(createHash("sha256").update("echo setup").digest("hex"));
   });
 
+  it("the ledger names every tool not on the image with its cause and reason, plan-time skips, failures and run-time skips alike, and the seal stamps them on the version", async () => {
+    const { backend, fetch } = backendFor([["brew-bootstrap", { exitCode: 1, stdout: "", stderr: "git: not found" }]]);
+    const skippedTools = [{ id: "tools/brew-cask/raycast", label: "Raycast", note: "macOS app, no Linux build" }];
+    const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf({ skippedTools }) });
+    const want = [
+      { name: "Raycast", outcome: "skipped", note: "macOS app, no Linux build" },
+      { name: "Homebrew", outcome: "failed", note: "git: not found" },
+      { name: "gh", outcome: "skipped", note: "Homebrew did not install" },
+    ];
+    expect(builder.import?.missingTools).toEqual(want);
+    expect((await sealGolden(builder, { backend, smoke: "true" })).version.missingTools).toEqual(want);
+  });
+
+  it("a builder whose tools all installed records no missing list, and its version carries none", async () => {
+    const { backend, fetch } = backendFor();
+    const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf() });
+    expect(builder.import?.missingTools).toBeUndefined();
+    expect((await sealGolden(builder, { backend, smoke: "true" })).version.missingTools).toBeUndefined();
+  });
+
+  it("an attach whose tools stage is already applied carries the earlier missing list", async () => {
+    const { backend, fetch } = backendFor();
+    const skippedTools = [{ id: "tools/brew-cask/raycast", label: "Raycast", note: "macOS app, no Linux build" }];
+    const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf({ skippedTools }) });
+    const again = await applyGoldenImport(builder.machine, { import: importOf(), setup: "true", ledger: builder.import, fetch });
+    expect(again.ledger.missingTools).toEqual([{ name: "Raycast", outcome: "skipped", note: "macOS app, no Linux build" }]);
+  });
+
   describe("golden update", () => {
     const SNAPSHOT: RecipeDigest = { ticks: [], files: [] };
     const head: GoldenVersion = { version: 1, snapshotId: "snap_golden-v1", baseTemplate: "base", kind: "desktop", setupSha: "s1", createdAt: "2026-09-01T00:00:00.000Z", smoke: { cmd: "claude --version && gemini --version", exitCode: 0 }, size: { cpu: 2, memMb: 8192 } };
@@ -1425,6 +1453,37 @@ describe("golden import stages", () => {
       ["a --version", ["a --version"], "true", "true"],
     ])("nextSmoke(%j, %j, %j) is %j", (previous, removed, added, want) => {
       expect(nextSmoke(previous, removed, added)).toBe(want);
+    });
+
+    const gopls = { name: "gopls", outcome: "skipped" as const, note: "no Linux bottle" };
+    const bun = { name: "bun", outcome: "skipped" as const, note: "no Linux bottle known" };
+    const jq = { name: "jq", outcome: "failed" as const, note: "exit 1: no bottle available" };
+    const raycast = { name: "Raycast", outcome: "skipped" as const, note: "macOS app, no Linux build" };
+    it.each([
+      [[], [], []],
+      [[gopls, bun, jq], [], [gopls]],
+      [[gopls], [raycast], [gopls, raycast]],
+      [[jq], [jq], [jq]],
+    ])("nextMissing(%j, delta, %j) is %j", (previous, fresh, want) => {
+      expect(nextMissing(previous, deltaOf(), fresh)).toEqual(want);
+    });
+
+    it("applyDelta keeps the previous version's missing tools the delta neither removed nor planned again, beside what this run skipped or failed", async () => {
+      const { backend, fetch } = backendFor();
+      const machine = await backend.create({ kind: "sandbox", template: "base" });
+      const previousMissing = [gopls, bun, jq];
+      const replanned = deltaOf({ import: { ...deltaOf().import, tools: [], skippedTools: [{ id: "tools/brew/jq", label: "jq", note: "no Linux bottle known" }] } });
+      const { ledger } = await applyDelta(machine, replanned, { setup: "true", previousSmoke: head.smoke.cmd, previousMissing, fetch });
+      expect(ledger.missingTools).toEqual([gopls, { name: "jq", outcome: "skipped", note: "no Linux bottle known" }]);
+      const clean = await applyDelta(await backend.create({ kind: "sandbox", template: "base" }), deltaOf(), { setup: "true", previousSmoke: head.smoke.cmd, previousMissing: [bun, jq], fetch });
+      expect(clean.ledger.missingTools).toBeUndefined();
+    });
+
+    it("upgradeBuilder hands the head's missing tools to the delta, so the next version still names them", async () => {
+      const { backend, fetch } = backendFor();
+      const builder = await upgradeBuilder({ backend, head: { ...head, missingTools: [gopls] }, delta: deltaOf({ removals: [] }), setup: "true", fetch });
+      expect(builder.import?.missingTools).toEqual([gopls]);
+      expect((await sealGolden(builder, { backend, smoke: "true" })).version.missingTools).toEqual([gopls]);
     });
 
     it("upgradeBuilder forks the head at its kind and size as a builder, applies only the delta, and returns a first-life builder with the new ledger", async () => {

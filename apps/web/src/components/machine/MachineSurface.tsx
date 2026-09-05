@@ -4,7 +4,7 @@
 // machine.
 import { CopyIcon } from "lucide-react";
 import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
-import type { GoldenVersion, SnapshotLineage, SysSample, WorkspaceSize, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import type { GoldenMissingTool, GoldenVersion, SnapshotLineage, SysSample, WorkspaceSize, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 import { cn } from "../../lib/utils.js";
 import { LIVE_WINDOW, useWorkspaceLive } from "../../machine/live.js";
 import { upgradeOptions, useCostSeries, useUpgrade, type CostPoint, type Upgrade } from "../../protocol/machine.js";
@@ -553,6 +553,7 @@ function Lineage({ workspace }: { workspace: WorkspaceView }) {
         ) : (
           versions.map(v => {
             const head = v.version === lineage?.head;
+            const fork = v.snapshotId === workspace.golden;
             return (
               <LineageRow
                 key={v.version}
@@ -565,7 +566,7 @@ function Lineage({ workspace }: { workspace: WorkspaceView }) {
                         head
                       </Badge>
                     )}
-                    {v.snapshotId === workspace.golden && (
+                    {fork && (
                       <Badge size="sm" variant="outline">
                         this fork
                       </Badge>
@@ -573,6 +574,7 @@ function Lineage({ workspace }: { workspace: WorkspaceView }) {
                   </span>
                 }
                 detail={`built ${v.createdAt.slice(0, 10)}`}
+                below={fork && v.missingTools !== undefined && v.missingTools.length > 0 ? <MissingTools tools={v.missingTools} /> : undefined}
                 aside={
                   !head && (
                     <Button size="xs" variant="outline" disabled={busy} aria-label={`roll back to v${v.version}`} onClick={() => setArmed(v)}>
@@ -607,16 +609,38 @@ function Lineage({ workspace }: { workspace: WorkspaceView }) {
   );
 }
 
-function LineageRow({ dot, title, detail, aside }: { dot: string; title: ReactNode; detail: string; aside?: ReactNode }) {
+function LineageRow({ dot, title, detail, aside, below }: { dot: string; title: ReactNode; detail: string; aside?: ReactNode; below?: ReactNode }) {
   return (
-    <li className="grid grid-cols-[0.375rem_minmax(0,1fr)_auto] items-center gap-x-2 py-1.5 text-xs">
-      <span aria-hidden className={cn("size-1.5 rounded-full", dot)} />
-      <span className="flex min-w-0 flex-col gap-0.5">
-        {title}
-        <span className="text-[11px] text-muted-foreground">{detail}</span>
-      </span>
-      <span className="flex items-center text-[11px]">{aside}</span>
+    <li className="py-1.5 text-xs">
+      <div className="grid grid-cols-[0.375rem_minmax(0,1fr)_auto] items-center gap-x-2">
+        <span aria-hidden className={cn("size-1.5 rounded-full", dot)} />
+        <span className="flex min-w-0 flex-col gap-0.5">
+          {title}
+          <span className="text-[11px] text-muted-foreground">{detail}</span>
+        </span>
+        <span className="flex items-center text-[11px]">{aside}</span>
+      </div>
+      {below}
     </li>
+  );
+}
+
+/** One row per tool the import left off the image, with its cause and reason: a count would not say why a tool is missing. */
+function MissingTools({ tools }: { tools: GoldenMissingTool[] }) {
+  return (
+    <div className="mt-1.5 ml-3.5" data-k="missing-tools">
+      <p className="text-[.65rem] font-medium uppercase tracking-wider text-muted-foreground">not on this image</p>
+      <ul className="mt-0.5 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 font-mono text-[11px] tabular-nums text-muted-foreground" aria-label="tools not on this image">
+        {tools.map(t => (
+          <li key={t.name} className="contents">
+            <span data-k="missing-tool">{t.name}</span>
+            <span className="min-w-0 break-words" data-k="missing-note">
+              {t.outcome}: {t.note}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

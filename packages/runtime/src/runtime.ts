@@ -2117,7 +2117,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         } else {
           stage("creating", `your builder from v${head.version}, kept since the save`);
           try {
-            const applied = await applyDelta(kept.builder.machine, o.delta, { setup: recipe.setup, previousSmoke: head.smoke.cmd, onStage: stage });
+            const applied = await applyDelta(kept.builder.machine, o.delta, { setup: recipe.setup, previousSmoke: head.smoke.cmd, ...(head.missingTools !== undefined ? { previousMissing: head.missingTools } : {}), onStage: stage });
             const setupSha = nextSetupSha(head.setupSha, recipe.setup, o.delta.import);
             kept.record.import = applied.ledger;
             kept.record.setupSha = setupSha;
