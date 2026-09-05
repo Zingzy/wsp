@@ -110,14 +110,17 @@ export function ptyEnv(extra?: Record<string, string>): Record<string, string> {
   env["BROWSER"] ??= OPEN_SHIM_PATH;
   if (!env["HOME"] || !env["USER"]) {
     // A uid with no passwd row (an arbitrary uid in a container) has no home to give;
-    // the shell still opens.
+    // the shell still opens, without the blank ones and with whatever was inherited.
+    let me: { homedir: string; username: string } | undefined;
     try {
-      const me = userInfo();
-      if (!env["HOME"]) env["HOME"] = me.homedir;
-      if (!env["USER"]) env["USER"] = me.username;
+      me = userInfo();
     } catch {
-      delete env["HOME"];
-      delete env["USER"];
+      me = undefined;
+    }
+    for (const [name, value] of [["HOME", me?.homedir], ["USER", me?.username]] as const) {
+      if (env[name]) continue;
+      if (value !== undefined) env[name] = value;
+      else delete env[name];
     }
   }
   return env;

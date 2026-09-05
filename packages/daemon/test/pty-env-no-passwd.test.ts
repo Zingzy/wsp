@@ -36,4 +36,15 @@ describe("ptyEnv on a uid without a passwd row", () => {
     process.env["USER"] = "someone";
     expect(ptyEnv()).toMatchObject({ HOME: "/srv/elsewhere", USER: "someone" });
   });
+
+  it("with HOME inherited and USER blank, the failed lookup drops only USER", () => {
+    process.env["HOME"] = "/root";
+    delete process.env["USER"];
+    const env = ptyEnv();
+    expect(env["HOME"]).toBe("/root");
+    expect(env).not.toHaveProperty("USER");
+    process.env["USER"] = "";
+    expect(ptyEnv()).toMatchObject({ HOME: "/root" });
+    expect(ptyEnv()).not.toHaveProperty("USER");
+  });
 });
