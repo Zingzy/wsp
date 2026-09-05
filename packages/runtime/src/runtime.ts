@@ -208,6 +208,20 @@ export interface GoldenRecipe {
   deployDaemon?: (machine: Machine) => Promise<void | string>;
   /** The person's files, tools and agents from the saved recipe; applied after the daemon, before the harness. */
   import?: GoldenImport;
+  /** Every exec on a builder or its smoke fork, once it has returned or failed; the host's run log. */
+  onExec?: (exec: GoldenExec) => void;
+}
+
+/** One exec on a golden machine as the run log records it: the command, what came back, and how long it took. */
+export interface GoldenExec {
+  machineId: string;
+  cmd: string;
+  ms: number;
+  exitCode?: number;
+  stdout?: string;
+  stderr?: string;
+  /** The exec itself failed (the machine gone, the request refused); no exit code exists. */
+  error?: string;
 }
 
 export interface RuntimeOptions {
@@ -738,6 +752,30 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     };
     return run(b).finally(() => mine.forEach(id => inflight.delete(id)));
   };
+  /** The machine with its exec reported to the recipe's listener; every other member is the provider's own, bound to it. */
+  const observed = (machine: Machine): Machine => {
+    const onExec = opts.goldenRecipe?.onExec;
+    if (onExec === undefined) return machine;
+    const exec = async (cmd: string, o?: { timeoutMs?: number }): Promise<ExecResult> => {
+      const t0 = Date.now();
+      try {
+        const res = await machine.exec(cmd, o);
+        onExec({ machineId: machine.id, cmd, ms: Date.now() - t0, ...res });
+        return res;
+      } catch (e) {
+        onExec({ machineId: machine.id, cmd, ms: Date.now() - t0, error: e instanceof Error ? e.message : String(e) });
+        throw e;
+      }
+    };
+    return new Proxy(machine, {
+      get(target, prop) {
+        if (prop === "exec") return exec;
+        const v = Reflect.get(target, prop, target) as unknown;
+        return typeof v === "function" ? (v as (...args: unknown[]) => unknown).bind(target) : v;
+      },
+    });
+  };
+  const observing = (b: MachineBackend): MachineBackend => ({ ...b, create: async spec => observed(await b.create(spec)), get: async id => observed(await b.get(id)) });
   /** Boots a golden fork for the record and writes back what the provider says it built.
    * A snapshot restores as the kind it was taken from, so the spec names that kind;
    * versions sealed before it was recorded were all sandbox. */
@@ -912,7 +950,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   });
   /** A stored record this process has no entry for yet; its machine is fetched once, here. */
   const admit = async (stored: StoredBuilder): Promise<void> => {
-    const machine = await backend.get(stored.id).catch((e: unknown) => {
+    const machine = await backend.get(stored.id).then(observed, (e: unknown) => {
       if ((e as { kind?: string }).kind === "missing") return undefined;
       throw e;
     });
@@ -1462,7 +1500,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (stop?.signal?.aborted) return Promise.reject(new PrepareStoppedError());
       // Handed out before the provider is called, so a stop that lands inside the call waits for the machine it returns.
       const creating = Promise.resolve().then(async () => {
-        const machine = await b.create(spec);
+        const machine = observed(await b.create(spec));
         const asked = { cpu: spec.cpu ?? backend.pricing.defaultSize.cpu, memMb: spec.memMb ?? backend.pricing.defaultSize.memMb };
         const record: BuilderRecord = {
           id: machine.id,
@@ -1519,7 +1557,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     try {
       const result = await claiming(b =>
         sealGolden(entry.builder, {
-          backend: b,
+          backend: observing(b),
           smoke: recipe.smoke,
           ...(recipe.cpu !== undefined ? { cpu: recipe.cpu } : {}),
           ...(recipe.memMb !== undefined ? { memMb: recipe.memMb } : {}),

@@ -341,14 +341,17 @@ describe("wsp init, interactive", () => {
     expect(backend.machines).toHaveLength(1);
     const log = backend.machines[0]!.execLog;
     expect(log.some(c => c.includes("tar xzf") && c.includes("--no-same-owner"))).toBe(true);
-    expect(log.filter(c => c.includes("brew install") || c.includes("npm install -g pnpm"))).toHaveLength(5);
+    expect(log.filter(c => c.includes("brew install") || c.includes("npm install -g pnpm"))).toHaveLength(6);
     expect(log.map(c => /brew install ([a-z@.-]+)/.exec(c)?.[1]).filter(Boolean)).toEqual(["glibc", "gcc", "gh", "jq"]);
+    // gh and jq share dependencies: one brew process installs those before either formula.
+    expect(log.filter(c => c.includes("brew deps --for-each"))).toHaveLength(1);
+    expect(log.findIndex(c => c.includes("brew deps --for-each"))).toBeLessThan(log.findIndex(c => c.includes("brew install gh")));
     expect(log.some(c => c.includes(GOLDEN_SETUP))).toBe(true);
     expect(log.indexOf(log.find(c => c.includes("tar xzf"))!)).toBeLessThan(log.indexOf(log.find(c => c.includes("brew install"))!));
     expect(JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8"))).toMatchObject({
       files: { bytes: expect.any(Number) },
       homebrew: { tag: expect.stringMatching(/^6\./), commit: expect.stringMatching(/^[0-9a-f]{40}$/) },
-      tools: [{ id: "tools/homebrew", outcome: "installed" }, { id: "tools/brew-toolchain/glibc", outcome: "installed" }, { id: "tools/brew-toolchain/gcc", outcome: "installed" }, { id: "tools/brew/gh", outcome: "installed" }, { id: "tools/brew/jq", outcome: "installed" }, { id: "tools/npm/pnpm", outcome: "installed" }],
+      tools: [{ id: "tools/homebrew", outcome: "installed" }, { id: "tools/brew-toolchain/glibc", outcome: "installed" }, { id: "tools/brew-toolchain/gcc", outcome: "installed" }, { id: "tools/brew-shared", outcome: "installed" }, { id: "tools/brew/gh", outcome: "installed" }, { id: "tools/brew/jq", outcome: "installed" }, { id: "tools/npm/pnpm", outcome: "installed" }],
       agents: [{ id: "agents/claude", outcome: "installed" }],
       logins: [
         { id: "logins/gh", label: "GitHub CLI login", state: "signed-in", command: "gh auth login", note: "gh auth status" },
@@ -385,6 +388,22 @@ describe("wsp init, interactive", () => {
     const after = f.text().slice(out.length);
     expect(after.indexOf("Snapshot taken")).toBeLessThan(after.indexOf("Fork booted and checked"));
     expect(after).toContain("Golden v1 sealed");
+
+    // The run log beside the state holds every frame and every exec of the run, the seal's included, and the hand-off names it.
+    const logPath = join(dirs[0]!, "init.log");
+    expect(out).toContain(`The run log is ${logPath}`);
+    const runLog = readFileSync(logPath, "utf8").split("\n");
+    const stamped = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z /;
+    const heads = runLog.filter(l => stamped.test(l)).map(l => l.replace(stamped, ""));
+    expect(heads[0]).toMatch(/^run [0-9a-f]{6} wsp init \(pid \d+\)$/);
+    expect(heads.filter(h => h.startsWith("exec m1 "))).toHaveLength(backend.machines[0]!.execLog.length);
+    expect(heads.filter(h => h.startsWith("exec m2 "))).toHaveLength(backend.machines[1]!.execLog.length);
+    expect(heads).toEqual(expect.arrayContaining(["stage creating: sandbox from base", "stage ready", "note handoff http://127.0.0.1:4400/", expect.stringMatching(/^stage sealed: v1/)]));
+    expect(heads.filter(h => h.startsWith("stage installing-tools: ")).length).toBeGreaterThan(6);
+    // The free-disk reads are execs like any other, command and answer.
+    expect(runLog).toContain("  $ df -Pk /root | awk 'NR==2{print $4}'");
+    expect(runLog.filter(l => l.startsWith("  $ ")).length).toBeGreaterThan(heads.filter(h => h.startsWith("exec ")).length);
+    expect(readFileSync(logPath, "utf8")).not.toContain(SOLARI);
   });
 
   it("escape on a later rung replays the earlier answer; c copies the address at the hand-off", async () => {
@@ -1469,13 +1488,13 @@ describe("wsp init, flags and no terminal", () => {
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(0);
     const out = f.text();
-    expect(out).toMatch(/Tools installed\s+5 installed, 1 failed/);
+    expect(out).toMatch(/Tools installed\s+6 installed, 1 failed/);
     expect(out).toMatch(/Agents installed\s+Claude Code, Codex installed/);
     expect(out).toContain("Ready");
     // The stage line is cut to the width; the names come back in full under the tally.
     const tally = out.slice(out.indexOf("Tools and agents:"));
     expect(tally.split("\n").slice(0, 2).map(l => l.replace(/^[│◇]\s+/, ""))).toEqual([
-      expect.stringMatching(/^Tools and agents: 7 installed, 1 failed, 0 skipped; the list is in .*golden-import\.json$/),
+      expect.stringMatching(/^Tools and agents: 8 installed, 1 failed, 0 skipped; the list is in .*golden-import\.json$/),
       "jq failed: curl: no route",
     ]);
     expect(f.recipes[0]!.import?.node).toMatchObject({ floor: 16, agents: ["Codex"] });
@@ -1498,6 +1517,32 @@ describe("wsp init, flags and no terminal", () => {
     expect(out).toContain("Run wsp init again to start over; the recipe is kept.");
     expect(f.backends[0]!.machines[0]!.killed).toBe(true);
     expect(JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8"))).toMatchObject({ agents: [{ id: "agents/claude", outcome: "failed" }] });
+    // The terminal shows one line per agent; the log has the install's whole stderr under its exec, and the failure.
+    const logPath = join(dirs[0]!, "init.log");
+    expect(out).toContain(`The run log is ${logPath}`);
+    const runLog = readFileSync(logPath, "utf8");
+    expect(runLog).toContain("  ! curl: (6) Could not resolve host");
+    expect(runLog).toMatch(/ note failed: no agent installed, so there is nothing to seal:\n/);
+    expect(runLog).toMatch(/ stage failed: no agent installed/);
+  });
+
+  it("a Keychain value never reaches the run log, whatever the machine prints it in", async () => {
+    const f = fake({ yes: true, tty: false });
+    withGhCopy(f);
+    mkdirSync(join(f.opts.home, ".config", "gh"), { recursive: true });
+    writeFileSync(join(f.opts.home, ".config", "gh", "hosts.yml"), "github.com:\n    user: Zingzy\n");
+    f.opts.runtime = recipe => {
+      const backend = stubBackend();
+      backend.execImpl = (_m, cmd) => (cmd === "true" ? { exitCode: 0, stdout: "export GH_TOKEN=gho_fake\ntoken gho_fake seen\n", stderr: "" } : guestAnswer(cmd));
+      f.backends.push(backend);
+      return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
+    };
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    expect(f.reads).toEqual(["gh:github.com"]);
+    const runLog = readFileSync(join(dirname(f.opts.statePath), "init.log"), "utf8");
+    expect(runLog).toContain("  > export GH_TOKEN=<redacted>");
+    expect(runLog).toContain("  > token <redacted> seen");
+    expect(runLog).not.toContain("gho_fake");
   });
 
   it("a builder from an earlier run built from a different recipe is listed with its age, cost and reason; under --yes it is stopped by its recorded id and a fresh one boots", async () => {

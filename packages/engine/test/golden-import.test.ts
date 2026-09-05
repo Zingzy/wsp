@@ -16,6 +16,7 @@ import {
   recipeHash,
   refusedPath,
   toolInstallsFor,
+  BREW_HOUSEKEEPING,
   type DigestedFile,
   type PathInfo,
   type RecipeDigest,
@@ -449,6 +450,8 @@ describe("toolInstallsFor", () => {
       ["tools/brew-toolchain/glibc", "brew", "tools/homebrew"],
       ["tools/brew-toolchain/gcc", "brew", "tools/brew-toolchain/glibc"],
       ["tools/brew-tap/zingzy/tap", "brew", "tools/brew-toolchain/gcc"],
+      // What two or more of the formulae (gh and the managers' pipx, rust, go) share installs once, after the taps it may need.
+      ["tools/brew-shared", "brew", "tools/brew-toolchain/gcc"],
       ["tools/brew/gh", "brew", "tools/brew-toolchain/gcc"],
       ["tools/npm/bun", "npm", undefined],
       ["tools/npm/@monid-ai/cli", "npm", undefined],
@@ -475,6 +478,16 @@ describe("toolInstallsFor", () => {
     expect(cmd("tools/brew-toolchain/gcc")).toMatch(/brew install gcc'$/);
     expect(cmd("tools/brew-tap/zingzy/tap")).toMatch(/su -s \/bin\/bash linuxbrew -c '.*brew tap zingzy\/tap'$/);
     expect(cmd("tools/brew/gh")).toMatch(/su -s \/bin\/bash linuxbrew -c '.*HOMEBREW_NO_AUTO_UPDATE=1.*brew install gh'$/);
+    const shared = cmd("tools/brew-shared");
+    expect(shared).toMatch(/su -s \/bin\/bash linuxbrew -c 'export HOMEBREW_NO_AUTO_UPDATE=1 .*NONINTERACTIVE=1\n/);
+    expect(shared).toContain(`brew deps --for-each '\\''gh'\\'' '\\''pipx'\\'' '\\''rust'\\'' '\\''go'\\'' | sed`);
+    // Homebrew's own toolchain is never in the shared set: it installed before, on request, and stays that way.
+    expect(shared).toContain(`grep -vx -e '\\'''\\'' -e glibc -e gcc | sort | uniq -d`);
+    expect(shared).toContain("brew install $shared; rc=$?");
+    // Installed as dependencies, so autoremove takes them with the formula that fails or leaves.
+    expect(shared).toContain("brew tab --no-installed-on-request $shared || true\nexit $rc");
+    // Homebrew cleans after each install; one recipe with it off left 2.6 GB of bottles on a 20 GB disk.
+    for (const i of t.installs) expect(i.cmd).not.toContain("HOMEBREW_NO_INSTALL_CLEANUP");
     expect(cmd("tools/npm/bun")).toMatch(/npm install -g bun@1\.4\.0$/);
     expect(cmd("tools/npm/@monid-ai/cli")).toMatch(/npm install -g @monid-ai\/cli@0\.3\.1$/);
     expect(cmd("tools/npm/pnpm")).toMatch(/npm install -g pnpm$/);
@@ -524,6 +537,21 @@ describe("toolInstallsFor", () => {
     ]);
     expect(t.installs.find(i => i.id === "tools/pnpm/turbo")!.cmd).toMatch(/pnpm add -g turbo$/);
     expect(t.installs.find(i => i.id === "tools/uv/ty")!.cmd).toMatch(/uv tool install ty$/);
+  });
+
+  it("one formula has nothing to share, so no shared step; two get one between the taps and the first formula", () => {
+    const one = toolInstallsFor([row({ rung: "tools", id: "tools/brew/gh", linux: "yes" })]);
+    expect(one.installs.map(i => i.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/brew/gh"]);
+    const two = toolInstallsFor([row({ rung: "tools", id: "tools/brew/gh", linux: "yes" }), row({ rung: "tools", id: "tools/brew/jq", linux: "yes" }), row({ rung: "tools", id: "tools/brew-tap/zingzy/tap", linux: "yes" })]);
+    expect(two.installs.map(i => i.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/brew-tap/zingzy/tap", "tools/brew-shared", "tools/brew/gh", "tools/brew/jq"]);
+    expect(two.installs.find(i => i.id === "tools/brew-shared")).toMatchObject({ label: "shared Homebrew dependencies", after: "tools/brew-toolchain/gcc" });
+    expect(two.installs.find(i => i.id === "tools/brew-shared")!.cmd).toContain(`brew deps --for-each '\\''gh'\\'' '\\''jq'\\'' |`);
+  });
+
+  it("the housekeeping after the loop is autoremove then a full cleanup, each as linuxbrew with the tools PATH", () => {
+    expect(BREW_HOUSEKEEPING).toHaveLength(2);
+    expect(BREW_HOUSEKEEPING[0]).toMatch(/^export PATH=\/root\/\.local\/bin:.*\nsu -s \/bin\/bash linuxbrew -c '.*brew autoremove'$/);
+    expect(BREW_HOUSEKEEPING[1]).toMatch(/\nsu -s \/bin\/bash linuxbrew -c '.*brew cleanup -s --prune=all'$/);
   });
 
   it("a manager needed only for its rows brings Homebrew along even when no formula is ticked", () => {
