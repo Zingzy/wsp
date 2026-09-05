@@ -7,7 +7,7 @@
 // the run), so the menu primitives are stood in by a plain open/closed
 // context here and the picker's own browsing and picking run for real.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { cloneElement, createContext, useContext, useState, type ReactElement, type ReactNode } from "react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EventUnion, SessionEvent, WorkspaceView } from "@wsp/protocol";
 
@@ -52,12 +52,19 @@ vi.mock("../src/components/ui/menu.js", () => {
   return { Menu, MenuTrigger, MenuPopup, MenuItem, MenuGroup, MenuSeparator };
 });
 
+vi.mock("../src/components/ui/tooltip.js", () => ({
+  Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
+  TooltipTrigger: ({ render: element, children }: { render: ReactElement<{ children?: ReactNode }>; children?: ReactNode }) => cloneElement(element, {}, children),
+  TooltipPopup: ({ children }: { children: ReactNode }) => <div role="tooltip">{children}</div>,
+}));
+
 import { installFakeLayout } from "./fake-layout.js";
 import { composerEditor, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
+import { useNewThreadRequests } from "../src/components/chat/newThreadRequests.js";
 import { selectRoot, useRootStore } from "../src/files/root.js";
 import { provideDaemonRoot, provideDaemonWire } from "../src/files/wire.js";
 import { DAEMON_ROOT, fakeWire, LISTING, resetSurfaces } from "./surface-harness.js";
@@ -209,5 +216,48 @@ describe("composer checkout row", () => {
     emit({ type: "session.start", workspaceId: WS, sessionId: "sess_0003", turnId: "turn_0003", at: Date.now(), cwd: "/root/app/packages/web" });
     await waitFor(() => expect(folder()).toBe("/root/app/packages/web"));
     expect(root()).toBe("/root/app");
+  });
+
+  it("follows the agent's shell when a tool call moves it, while the strip keeps the harness folder, until pinned", async () => {
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
+    const { api, emit } = fixtureApi(CHAT_STREAM.slice());
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    expect(folder()).toBe("/root");
+    expect(root()).toBe("/root");
+
+    const scope = { workspaceId: WS, sessionId: "sess_0002", turnId: "turn_0002" };
+    emit({ type: "session.start", ...scope, at: Date.now(), cwd: "/root" });
+    emit({ type: "session.delta", ...scope, at: Date.now(), kind: "tool_use", toolName: "Bash", toolUseId: "t1", text: JSON.stringify({ command: "cd /root/app && ls" }), cwd: "/root/app" });
+    await waitFor(() => expect(root()).toBe("/root/app"));
+    expect(folder()).toBe("/root");
+
+    act(() => useRootStore.getState().pin(WS, "/root/app"));
+    emit({ type: "session.delta", ...scope, at: Date.now(), kind: "tool_use", toolName: "Bash", toolUseId: "t2", text: JSON.stringify({ command: "cd /root/app/lib" }), cwd: "/root/app/lib" });
+    await waitFor(() => expect(useRootStore.getState().byWorkspaceId[WS]?.shell).toBe("/root/app/lib"));
+    expect(root()).toBe("/root/app");
+    expect(folder()).toBe("/root");
+    act(() => useRootStore.getState().unpin(WS));
+    expect(root()).toBe("/root/app/lib");
+
+    // The shell folder is the thread's: a new thread starts over from the harness folder.
+    act(() => useNewThreadRequests.getState().request(WS));
+    await waitFor(() => expect(root()).toBe("/root"));
+  });
+
+  it("explains the locked folder on hover and offers a new thread here with the picker open", async () => {
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
+    const { api } = fixtureApi(CHAT_STREAM.slice());
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    expect(row()?.dataset["pickable"]).toBeUndefined();
+    expect(screen.getByText("The folder this thread's harness runs in. A cd inside the agent's shell does not move it; start a new thread to work from another folder.").getAttribute("role")).toBe("tooltip");
+
+    fireEvent.click(screen.getByRole("button", { name: "New thread here" }));
+    await waitFor(() => expect(row()?.dataset["pickable"]).toBe("true"));
+    expect(screen.getByRole("button", { name: "Working folder: /root" })).toBeTruthy();
+    await waitFor(() => expect(menuEntry("/root/app")).not.toBeNull());
+    expect(menuPick("/root")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "New thread here" })).toBeNull();
   });
 });

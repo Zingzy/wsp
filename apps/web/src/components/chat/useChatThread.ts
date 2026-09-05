@@ -25,7 +25,10 @@ export interface ChatThreadView {
   readonly activeTurnStartedAt: string | null;
   /** The latest turn once it has settled; null while it runs or before any turn. */
   readonly settled: TurnSummary | null;
+  /** The folder the thread's harness runs in, as its last session.start named it. */
   readonly cwd: string | null;
+  /** Where the agent's tool shell last was, as its tool calls moved it; null until one did. */
+  readonly shellCwd: string | null;
   /** What the last session.start announced about the CLI; the composer's catalog reads it. */
   readonly harness: SessionHarness | null;
   readonly model: string | null;
@@ -192,7 +195,11 @@ export function deriveChatThread(state: ThreadState, previous: ReadonlyArray<Tim
   });
   const latestTurn = model.latestTurn;
   let cwd: string | null = null;
-  for (const e of state.events) if (e.type === "session.start" && e.cwd !== undefined) cwd = e.cwd;
+  let shellCwd: string | null = null;
+  for (const e of state.events) {
+    if (e.type === "session.start" && e.cwd !== undefined) cwd = e.cwd;
+    if (e.type === "session.delta" && e.cwd !== undefined) shellCwd = e.cwd;
+  }
   return {
     entries: stabilizeEntries(entries, previous),
     turns: model.turns,
@@ -201,6 +208,7 @@ export function deriveChatThread(state: ThreadState, previous: ReadonlyArray<Tim
     activeTurnStartedAt: model.running ? (latestTurn?.startedAt ?? null) : null,
     settled: latestTurn !== null && !model.running ? latestTurn : null,
     cwd,
+    shellCwd,
     harness: model.harness,
     model: model.model,
   };
