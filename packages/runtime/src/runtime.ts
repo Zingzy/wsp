@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { hostname } from "node:os";
-import { catalogProbeCommand, parseCatalogProbe, type AdapterEvent, type TurnResult } from "@wsp/adapter-claude";
+import { parseCatalogProbe, type AdapterEvent, type TurnResult } from "@wsp/adapter-claude";
 import {
   BUILDER_IDLE_MS,
   DAEMON_PORT,
@@ -102,6 +102,8 @@ export interface HarnessSession {
 
 export interface HarnessAdapter {
   start(options: HarnessStartOptions): HarnessSession;
+  /** A shell line that makes the binary describe itself for harnesses.list; without one the table answers. */
+  readonly catalogProbe?: string;
 }
 
 /** Called per session start with the workspace's CURRENT machine (it can change on wake/upgrade). */
@@ -1440,14 +1442,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** One probe per machine per TTL, a failed one included and one in flight shared: a binary that does not answer
    * costs one exec, not one per composer mount. */
   const catalogs = new Map<string, { at: number; catalog: Promise<HarnessCatalog> }>();
-  const claudeCatalogOn = (machine: Machine): Promise<HarnessCatalog> => {
+  const claudeCatalogOn = (machine: Machine, adapter: HarnessAdapter): Promise<HarnessCatalog> => {
+    const probe = adapter.catalogProbe;
+    if (probe === undefined) return Promise.resolve({ ...harnessCatalog("claude")! });
     const hit = catalogs.get(machine.id);
     const now = clock.now();
     if (hit !== undefined && now - hit.at < CATALOG_TTL_MS) return hit.catalog;
     const catalog = machine
-      .exec(catalogProbeCommand(), { timeoutMs: CATALOG_PROBE_TIMEOUT_MS })
+      .exec(probe, { timeoutMs: CATALOG_PROBE_TIMEOUT_MS })
       .then(res => parseCatalogProbe(res.stdout), () => null)
-      .then(probe => (probe === null ? { ...harnessCatalog("claude")! } : catalogFromProbe(probe)));
+      .then(parsed => (parsed === null ? { ...harnessCatalog("claude")! } : catalogFromProbe(parsed)));
     catalogs.set(machine.id, { at: now, catalog });
     return catalog;
   };
@@ -1462,7 +1466,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (!factory) throw new Error(`no adapter registered for harness "${harness}"`);
       const adapter = factory({ machine: entry.machine, workspaceId });
       // A start is when the binary may have changed under us, so the catalog is refreshed here too, within its TTL.
-      if (harness === "claude") void claudeCatalogOn(entry.machine);
+      if (harness === "claude") void claudeCatalogOn(entry.machine, adapter);
 
       const turnId = randomUUID();
       const threadId = threadOf(workspaceId, o.resume);
@@ -2220,7 +2224,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (workspaceId === undefined) return table;
         const entry = await entryOf(workspaceId);
         if (entry.record.phase !== "running") return table;
-        return Promise.all(table.map(c => (c.harness === "claude" ? claudeCatalogOn(entry.machine) : c)));
+        return Promise.all(table.map(c => (c.harness === "claude" ? claudeCatalogOn(entry.machine, adapters[c.harness]!({ machine: entry.machine, workspaceId })) : c)));
       },
     },
     golden,

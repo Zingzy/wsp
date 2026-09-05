@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { catalogProbeCommand, parseCatalogProbe } from "../src/catalog.js";
 
@@ -10,8 +13,13 @@ import { catalogProbeCommand, parseCatalogProbe } from "../src/catalog.js";
 const REAL = readFileSync(new URL("./fixtures/catalog-probe.txt", import.meta.url), "utf8");
 
 describe("catalogProbeCommand", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
   it("asks for the version, the help and one initialize handshake, and never a prompt", () => {
-    const cmd = catalogProbeCommand();
+    const cmd = catalogProbeCommand({ configDir: "/root/.claude-cfg" });
     expect(cmd).toContain("claude --version");
     expect(cmd).toContain("claude --help");
     expect(cmd).toContain("--bare");
@@ -19,9 +27,30 @@ describe("catalogProbeCommand", () => {
     expect(cmd).toContain('\\"subtype\\":\\"initialize\\"');
     expect(cmd).toMatch(/^cd ~ && /);
     expect(cmd).not.toMatch(/--permission-mode|--dangerously-skip-permissions|--session-id|--resume/);
-    // Inherited nesting marks are dropped and IDE discovery is off, as for a session.
-    expect(cmd).toContain("unset CLAUDECODE");
-    expect(cmd).toContain("CLAUDE_CODE_AUTO_CONNECT_IDE=0");
+    // IDE discovery is off, as for a session; the env the binary sees is proven by the run below.
+    expect(cmd).toContain("CLAUDE_CODE_AUTO_CONNECT_IDE='0'");
+  });
+
+  it("runs the binary under the session's config dir with every inherited nesting mark gone", () => {
+    // A fake claude on PATH prints its environment; the probe calls it three times, so each call is checked.
+    const dir = mkdtempSync(join(tmpdir(), "wsp-probe-"));
+    dirs.push(dir);
+    const bin = join(dir, "bin");
+    execFileSync("mkdir", [bin]);
+    writeFileSync(join(bin, "claude"), "#!/bin/sh\ncat >/dev/null; echo CALL; env\n");
+    chmodSync(join(bin, "claude"), 0o755);
+    const out = execFileSync("bash", ["-c", catalogProbeCommand({ configDir: "/root/.claude-cfg" })], {
+      encoding: "utf8",
+      env: { PATH: `${bin}:/usr/bin:/bin`, HOME: dir, CLAUDECODE: "1", CLAUDE_CODE_ENTRYPOINT: "cli", FORCE_CODE_TERMINAL: "1" },
+    });
+    expect(out.match(/^CALL$/gm)).toHaveLength(3);
+    expect(out.match(/^CLAUDE_CONFIG_DIR=\/root\/\.claude-cfg$/gm)).toHaveLength(3);
+    expect(out).not.toMatch(/^CLAUDECODE=|^CLAUDE_CODE_ENTRYPOINT=|^FORCE_CODE_TERMINAL=/m);
+    expect(out.match(/^CLAUDE_CODE_AUTO_CONNECT_IDE=0$/gm)).toHaveLength(3);
+  });
+
+  it("refuses a relative config dir, as the session env does", () => {
+    expect(() => catalogProbeCommand({ configDir: ".claude-cfg" })).toThrow(/absolute/);
   });
 });
 

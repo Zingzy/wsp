@@ -73,12 +73,13 @@ export function startOptionsFrom(catalog: HarnessCatalog, picked: ComposerOption
   const effort = picked.effort !== undefined && effortsFor(catalog, model).some(o => o.value === picked.effort) ? picked.effort : undefined;
   const contextWindow =
     picked.contextWindow !== undefined && contextWindowsFor(catalog, model).some(o => o.value === picked.contextWindow) ? picked.contextWindow : undefined;
+  const permissionMode = picked.permissionMode !== undefined && catalog.permissionModes.some(o => o.value === picked.permissionMode) ? picked.permissionMode : undefined;
   const modelValue = picked.model ?? (contextWindow !== undefined ? model?.value : undefined);
   return {
     ...(picked.harness !== undefined ? { harness: picked.harness } : {}),
     ...(modelValue !== undefined ? { model: modelValue } : {}),
     ...(effort !== undefined ? { effort } : {}),
-    ...(picked.permissionMode !== undefined ? { permissionMode: picked.permissionMode } : {}),
+    ...(permissionMode !== undefined ? { permissionMode } : {}),
     ...(contextWindow !== undefined ? { contextWindow } : {}),
   };
 }

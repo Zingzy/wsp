@@ -63,6 +63,8 @@ describe("ClaudeAdapter over the recorded fixture", () => {
     expect(exec.calls[0]?.command).toContain("--model 'claude-opus-5'");
     expect(exec.calls[0]?.command).toContain("--effort 'low'");
     expect(exec.calls[0]?.command).toContain("--permission-mode 'plan'");
+    // The probe line the runtime runs carries the same config dir as the session.
+    expect(adapter.catalogProbe).toContain("CLAUDE_CONFIG_DIR='/root/.claude-cfg'");
   });
 
   it("normalizes the stream into session.start / turn.delta / turn.done / session.end", async () => {

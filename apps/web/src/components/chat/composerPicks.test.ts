@@ -81,4 +81,9 @@ describe("effectivePicks and startOptionsFrom", () => {
     expect(startOptionsFrom(CLAUDE, { model: "claude-haiku-4-5", effort: "high" })).toEqual({ model: "claude-haiku-4-5" });
     expect(startOptionsFrom(CLAUDE, { harness: "claude", model: "claude-old-3", effort: "low" })).toEqual({ harness: "claude", model: "claude-old-3", effort: "low" });
   });
+
+  it("a remembered access mode the catalog no longer lists is shown as nothing and not sent", () => {
+    expect(effectivePicks(CLAUDE, { picked: { permissionMode: "auto" }, running: {} }).permissionMode).toBeNull();
+    expect(startOptionsFrom(CLAUDE, { permissionMode: "auto", effort: "high" })).toEqual({ effort: "high" });
+  });
 });

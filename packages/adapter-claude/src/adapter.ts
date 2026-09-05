@@ -3,6 +3,7 @@
 // t3code ClaudeAdapter.ts (MIT, see NOTICE); event shapes are the ones
 // recorded in solari-poc/RESULTS.md.
 
+import { catalogProbeCommand } from "./catalog.js";
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv, newSessionId } from "./landmines.js";
 
 export type DeltaKind = "text" | "thinking" | "tool_use" | "tool_result";
@@ -93,6 +94,8 @@ export interface AdapterDeps {
 export interface ClaudeAdapter {
   start(options: StartOptions): ClaudeSession;
   readonly sessions: ReadonlyMap<string, ClaudeSession>;
+  /** The shell line that makes the binary describe itself, under the same config dir as a session. */
+  readonly catalogProbe: string;
 }
 
 function rec(value: unknown): Record<string, unknown> | undefined {
@@ -340,5 +343,5 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     return session;
   };
 
-  return { start, sessions };
+  return { start, sessions, catalogProbe: catalogProbeCommand({ configDir: deps.configDir }) };
 }

@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
-import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
+import { catalogProbeCommand, type AdapterEvent, type TurnResult } from "@wsp/adapter-claude";
 import { SessionEvent, type EventUnion, type RecipeDigest } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
@@ -172,6 +172,7 @@ describe("runtime session history", () => {
     let finish!: (r: TurnResult) => void;
     const finished = new Promise<TurnResult>(r => (finish = r));
     const adapter: HarnessAdapterFactory = () => ({
+      catalogProbe: catalogProbeCommand({ configDir: "/root/.claude-cfg" }),
       start: o => {
         onEvent = o.onEvent;
         lastStart = o;
@@ -479,6 +480,19 @@ describe("runtime session history", () => {
       expect(claude.models[0]).toMatchObject({ label: "Opus 5", isDefault: true, contextWindows: ["200k", "1m"] });
       expect(claude.permissionModes.map(o => o.value)).toEqual(["default", "acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan"]);
       expect(probes(backend)).toHaveLength(1);
+      // The probe is the adapter's line, so it runs under the session's isolated config dir, never HOME.
+      expect(probes(backend)[0]).toContain("CLAUDE_CONFIG_DIR='/root/.claude-cfg'");
+      await rt.close();
+    });
+
+    it("an adapter without a probe line gets the table, marked so, and the machine is not asked", async () => {
+      const backend = stubBackend();
+      backend.execImpl = (_m, cmd) => (cmd.includes("claude --help") ? { exitCode: 0, stdout: PROBE_OUTPUT, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: threaded() } });
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const claude = (await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")!;
+      expect(claude).toMatchObject({ source: "table", version: TABLE_PIN });
+      expect(probes(backend)).toHaveLength(0);
       await rt.close();
     });
 

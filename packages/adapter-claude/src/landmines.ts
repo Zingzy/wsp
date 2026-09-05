@@ -85,7 +85,7 @@ export interface BuildCommandOptions {
   contextWindow?: string;
 }
 
-function shellQuote(value: string): string {
+export function shellQuote(value: string): string {
   return `'${value.replaceAll("'", String.raw`'\''`)}'`;
 }
 

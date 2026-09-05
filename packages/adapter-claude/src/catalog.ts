@@ -6,6 +6,8 @@
 // CLI spells a 1M context as a "[1m]" suffix on the model. Measured on
 // 2.1.257: one line, exit 0 on stdin EOF, no API call.
 
+import { buildEnv, shellQuote } from "./landmines.js";
+
 const SEP = "__WSP_CATALOG_SEP__";
 const INIT_REQUEST = JSON.stringify({ type: "control_request", request_id: "init", request: { subtype: "initialize", hooks: {} } });
 const ONE_M = /\[1m\]$/;
@@ -38,11 +40,16 @@ export interface ClaudeCatalogProbe {
  * One shell line for the guest. --bare skips hooks, plugins and CLAUDE.md, so the
  * handshake answers in about a second and the user's SessionStart hooks do not run
  * on a probe. `cd ~` for the same reason as a session: guest exec carries no HOME.
+ * The handshake still writes .claude.json into the config dir it sees, so the probe
+ * runs under the session's CLAUDE_CONFIG_DIR, never HOME, and drops every inherited
+ * CLAUDE_CODE_* mark the way the session env does (the exec shell is bash).
  */
-export function catalogProbeCommand(): string {
-  const env = "unset CLAUDECODE FORCE_CODE_TERMINAL; export CLAUDE_CODE_AUTO_CONNECT_IDE=0 CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL=1";
+export function catalogProbeCommand(options: { configDir: string }): string {
+  const env = buildEnv({ configDir: options.configDir });
+  const exports = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ");
+  const clean = `unset \${!CLAUDE_CODE_@} CLAUDECODE FORCE_CODE_TERMINAL; export ${exports}`;
   const handshake = `printf '%s\\n' "${INIT_REQUEST.replaceAll('"', '\\"')}" | claude -p --bare --output-format stream-json --input-format stream-json --verbose`;
-  return `cd ~ && ${env}; claude --version; echo ${SEP}; claude --help; echo ${SEP}; ${handshake}`;
+  return `cd ~ && ${clean}; claude --version; echo ${SEP}; claude --help; echo ${SEP}; ${handshake}`;
 }
 
 function quotedList(help: string, flag: string): string[] {
