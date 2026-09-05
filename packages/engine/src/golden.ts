@@ -11,7 +11,7 @@ import { ALREADY_APPLIED, type GoldenLogin, type GoldenManifest, type GoldenStag
 import type { Removal } from "./golden-diff.js";
 import { NODE_PATH_LINE, type AgentInstall, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
-import { MIB, TOOL_TIMEOUT_S, fmtBytes, freeBytes, guardDeadlineMs, guarded, installTools, reasonOf, type ToolResult } from "./golden-tools.js";
+import { MIB, TOOL_TIMEOUT_S, closing, fmtBytes, freeBytes, freeNote, guardDeadlineMs, guarded, installTools, reasonOf, sweepCaches, type ToolResult } from "./golden-tools.js";
 import { BUILDER_DISK_GB } from "./tool-sizes.js";
 import { assertFirstLife } from "./lifecycle.js";
 import { applyMcp, type McpPlan, type McpResult } from "./golden-mcp.js";
@@ -265,7 +265,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
       },
       ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}),
     });
-    stage("uploading-files", `${label}${fmtBytes(packed.bytes)}${parts > 1 ? ` in ${parts} parts` : ""} in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+    stage("uploading-files", closing(`${label}${fmtBytes(packed.bytes)}${parts > 1 ? ` in ${parts} parts` : ""} in ${((Date.now() - t0) / 1000).toFixed(1)}s`, await freeNote(machine)));
   };
 
   if (!only) {
@@ -309,7 +309,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
         const named = frameworks.join(", ");
         stage("applying-setup", `${shell}: installing${named !== "" ? `, with ${named}` : ""}`);
         const res = await machine.run(guarded(cmd, SHELL_TIMEOUT_S), { deadlineMs: guardDeadlineMs(SHELL_TIMEOUT_S), onLine: line => stage("applying-setup", `${shell}: ${line}`) });
-        if (res.exitCode === 0) stage("applying-setup", `${shell} installed as the login shell${named !== "" ? `; ${named} reinstalled` : ""}`);
+        if (res.exitCode === 0) stage("applying-setup", closing(`${shell} installed as the login shell${named !== "" ? `; ${named} reinstalled` : ""}`, await freeNote(machine)));
         else stage("applying-setup", `${shell} step failed, chsh skipped: ${reasonOf(res, SHELL_TIMEOUT_S)}`);
       }
 
@@ -362,7 +362,8 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
         throw new Error([header, ...result.agents.filter(r => r.outcome !== "installed").map(a => `${a.name}: ${a.note ?? "unknown reason"}`)].join("\n"));
       }
       ledger.smoke = installed.length > 0 ? installed.map(a => a.smoke).join(" && ") : "true";
-      stage("installing-harness", result.agents.length === 0 ? "no agent ticked" : summarizeAgents(result.agents));
+      const summary = result.agents.length === 0 ? "no agent ticked" : summarizeAgents(result.agents);
+      stage("installing-harness", imp.agents.length > 0 || node !== undefined ? closing(summary, await sweepCaches(machine), await freeNote(machine)) : summary);
     }
     mark("installing-harness");
   }
@@ -542,8 +543,9 @@ export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Build
     const size = await sizeBuilt(machine, asked);
     if (opts.deployDaemon) {
       stage("deploying-daemon");
-      const detail = await opts.deployDaemon(machine);
-      if (detail !== undefined) stage("deploying-daemon", detail);
+      const deployed = await opts.deployDaemon(machine);
+      const detail = closing(typeof deployed === "string" ? deployed : undefined, await freeNote(machine));
+      if (detail !== "") stage("deploying-daemon", detail);
     }
     const applied = await applyGoldenImport(machine, {
       setup: opts.setup,

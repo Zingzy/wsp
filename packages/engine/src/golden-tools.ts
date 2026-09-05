@@ -90,6 +90,35 @@ export async function freeBytes(machine: Machine): Promise<FreeDisk> {
   return { kind: "unknown", reason: `df failed: ${reasonOf(res, INLINE_EXEC_MS / 1000)}` };
 }
 
+/** The df reading that closes a stage's last line, so the run's log says what each stage left on the disk. */
+export async function freeNote(machine: Machine): Promise<string | undefined> {
+  const free = await freeBytes(machine);
+  return free.kind === "free" ? `${fmtBytes(free.bytes)} free` : undefined;
+}
+
+/** A stage's closing line: its parts in order, the empty ones left out. */
+export const closing = (...parts: (string | undefined)[]): string => parts.filter(p => p !== undefined && p !== "").join("; ");
+
+const SWEEP_TIMEOUT_S = 300;
+/** The caches the installs leave on the root disk: npm's tarballs, uv's wheels, go's module and build caches,
+ * apt's debs. Each is rebuilt on use; together they held about 2 GB of the 20 GB builder after one recipe. */
+const SWEEP_CACHES_CMD = [
+  "set -euo pipefail",
+  `export PATH=${TOOLS_PATH}`,
+  "if command -v go >/dev/null 2>&1; then go clean -cache -modcache; fi",
+  "rm -rf /root/.npm /root/.cache/uv /root/.cache/go-build",
+  "if command -v apt-get >/dev/null 2>&1; then apt-get clean; fi",
+].join("\n");
+
+/** After an install stage the caches go, under the guard; the phrase says what came back, or why nothing did. */
+export async function sweepCaches(machine: Machine): Promise<string> {
+  const before = await freeBytes(machine);
+  const res = await machine.run(guarded(SWEEP_CACHES_CMD, SWEEP_TIMEOUT_S), { deadlineMs: guardDeadlineMs(SWEEP_TIMEOUT_S) });
+  if (res.exitCode !== 0) return `cache sweep failed (${reasonOf(res, SWEEP_TIMEOUT_S)})`;
+  const after = await freeBytes(machine);
+  return before.kind === "free" && after.kind === "free" && after.bytes > before.bytes ? `caches swept, ${fmtBytes(after.bytes - before.bytes)} back` : "caches swept";
+}
+
 // Descendants of $1 by parent pid from /proc, widened until no new pid turns up: su -c
 // starts its command in a fresh session, so the session's process group alone misses it.
 const TREE_FN = [
@@ -231,6 +260,6 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
     if (failed.length > 0) housekeeping = `Homebrew cleanup failed (${failed.join("; ")})`;
     else if (before.kind === "free" && after.kind === "free" && after.bytes > before.bytes) housekeeping = `Homebrew cleanup freed ${fmtBytes(after.bytes - before.bytes)}`;
   }
-  stage("installing-tools", summarize(out.tools, housekeeping));
+  stage("installing-tools", closing(summarize(out.tools, housekeeping), await sweepCaches(machine), await freeNote(machine)));
   return out;
 }

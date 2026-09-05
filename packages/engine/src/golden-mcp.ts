@@ -7,7 +7,7 @@
 import { MCP_ID_PREFIX } from "@wsp/protocol";
 import { TOOLS_PATH, UV_INSTALL, type RecipeEntry } from "./golden-import.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
-import { TOOL_TIMEOUT_S, type ToolResult, guardDeadlineMs, guarded, reasonOf } from "./golden-tools.js";
+import { TOOL_TIMEOUT_S, type ToolResult, closing, freeNote, guardDeadlineMs, guarded, reasonOf } from "./golden-tools.js";
 import type { Machine } from "./machine.js";
 import type { StageListener } from "./golden.js";
 
@@ -462,7 +462,7 @@ export async function applyMcp(machine: Machine, plan: McpPlan, stage: StageList
     r.shorts.push(short);
     r.notes.push(`${short}; the server starts once it is installed there`);
   }
-  stage("installing-mcp", summarize(rows));
+  stage("installing-mcp", closing(summarize(rows), await freeNote(machine)));
   return rows.map(strip);
 }
 

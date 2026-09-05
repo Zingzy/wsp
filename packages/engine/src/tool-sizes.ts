@@ -2,55 +2,94 @@
 // What a recipe costs on the builder's disk, judged before anything boots: a
 // Homebrew formula is its dependency closure, sized from a table measured on
 // Linux where one exists and from this Mac's own Homebrew otherwise; Homebrew's
-// toolchain is one line; agents have measured install sizes. Nothing here runs
-// a command: the host reads the Mac's Homebrew and hands the table in.
-import { AGENT_INSTALLERS, BREW_TOOLCHAIN, MANAGER_FORMULA, MACOS_ONLY_FORMULAE, toolInstallsFor, type BrewFormula, type BrewTable, type RecipeEntry, type ToolSource } from "./golden-import.js";
+// toolchain is one line; agents have measured install sizes; a row nothing
+// measured counts at a stated default for its kind. Nothing here runs a
+// command: the host reads the Mac's Homebrew and hands the table in.
+import { AGENT_INSTALLERS, BREW_TOOLCHAIN, MANAGER_FORMULA, MACOS_ONLY_FORMULAE, agentInstallsFor, cliRoad, toolInstallsFor, type BrewFormula, type BrewTable, type RecipeEntry, type ToolSource } from "./golden-import.js";
 import { MIB, TOOLS_DISK_FLOOR } from "./golden-tools.js";
-
-const GIB = 1024 * MIB;
 
 /** Root disk asked for every builder and fork, Solari's cap: a 4 GB root filled during the tools stage and
  * five agents failed to install on it (measured 2026-09-05). */
 export const BUILDER_DISK_GB = 20;
-export const DISK_BYTES = BUILDER_DISK_GB * GIB;
-/** A fresh 4 GB sandbox with the daemon deployed had 2,245,024 KiB free (df -Pk, measured 2026-09-04): the base image's share. */
-export const BASE_IMAGE_BYTES = (4 * 1024 - 2192) * MIB;
+/** What df -Pk said was free on a 20 GB builder with the daemon and the login shell on it, before the upload:
+ * 17,992,136 KiB (measured 2026-09-05). The base image and the filesystem's reserved blocks are both inside it. */
+export const BUILDER_FREE_BYTES = 17570 * MIB;
 const UPLOAD_HEADROOM_BYTES = 256 * MIB;
 /** The most a recipe's files may add up to on this computer before the plan refuses to boot. The upload needs
- * the archive, its files and headroom under what the base image leaves, and the archive is at most as large as the files. */
-export const PACK_BUDGET_BYTES = Math.floor((DISK_BYTES - BASE_IMAGE_BYTES - UPLOAD_HEADROOM_BYTES) / 2);
-/** What the recipe may take: the disk less the base image and the floor the tools stage keeps free for unpack peaks. */
-export const DISK_ROOM_BYTES = DISK_BYTES - BASE_IMAGE_BYTES - TOOLS_DISK_FLOOR;
+ * the archive, its files and headroom under what the builder has free, and the archive is at most as large as the files. */
+export const PACK_BUDGET_BYTES = Math.floor((BUILDER_FREE_BYTES - UPLOAD_HEADROOM_BYTES) / 2);
+/** What the recipe may take: what the builder has free less the floor the tools stage keeps free for unpack peaks. */
+export const DISK_ROOM_BYTES = BUILDER_FREE_BYTES - TOOLS_DISK_FLOOR;
 
-/** The day the formula and agent tables below were read off a Linux builder with du; the screens name it so
- * the numbers read as a measurement, not as catalog truth. */
+/** The day the tables below were read off a 20 GB Linux builder: Cellar sizes as brew printed them, agents and the
+ * toolchain as df moved across their installs; the screens name it so the numbers read as a measurement, not as catalog truth. */
 export const MEASURED_ON = "2026-09-05";
-/** The day Homebrew's toolchain was measured, on the 4 GB root of live run 2. */
-export const TOOLCHAIN_MEASURED_ON = "2026-09-04";
 
-/** Homebrew's checkout with its own glibc and gcc, pulled in by the first formula (about 1.6 GB). */
-export const BREW_TOOLCHAIN_BYTES = 1600 * MIB;
+/** Homebrew's checkout with its own glibc and gcc, pulled in by the first formula: df moved 1006 MB across the three installs. */
+export const BREW_TOOLCHAIN_BYTES = 1024 * MIB;
 
-/** Cellar sizes on a Linux builder after this recipe's tools stage, on MEASURED_ON. */
+/** Cellar sizes on the Linux builder, as brew printed them after each pour on MEASURED_ON; the Mac's Cellar
+ * stands in for the rest, and for these two llvm builds it was a gigabyte short. */
 const LINUX_FORMULA_MIB: Record<string, number> = {
-  "llvm@21": 2400,
+  "llvm@21": 2560,
+  "llvm@20": 2458,
+  openjdk: 412,
   "openjdk@21": 343,
   "openjdk@17": 316,
-  go: 282,
+  go: 251,
   "firebase-cli": 262,
-  zig: 254,
+  gradle: 220,
+  zig: 214,
+  "zig@0.15": 200,
   swiftlint: 169,
   mongosh: 156,
-  binutils: 140,
+  binutils: 135,
   beads: 138,
   logcli: 121,
+  node: 113,
+  rclone: 110,
+  "node@24": 106,
+  "icu4c@78": 94,
+  goreleaser: 85,
+  "python@3.14": 82,
+  "python@3.12": 77,
+  helm: 65,
+  uv: 60,
+  "helm@3": 60,
 };
 
-/** Install sizes on the same builder: the npm globals under /usr/local, Hermes's clone and venv under /root/.hermes,
- * Claude Code's installer output under /root/.local. */
-const AGENT_MIB: Record<string, number> = { opencode: 353, codex: 320, pi: 136, gemini: 100, hermes: 344, claude: 211 };
+/** What df moved across each agent's install on the same builder: the global, its caches and whatever the
+ * installer put under /root; the cache sweep after the stage gives some of it back. */
+const AGENT_MIB: Record<string, number> = { opencode: 673, codex: 455, pi: 165, gemini: 189, hermes: 484, claude: 208 };
+
+/** The Node release the agents stage puts under /usr/local when the base's major is under their floor. */
+export const NODE_BYTES = 250 * MIB;
+/** The Node major the base image ships: the builder's log read `node v18.20.4` before the Node step (2026-09-05);
+ * a floor at or under it keeps the base's Node and installs nothing. */
+const BASE_NODE_MAJOR = 18;
 
 const OTHER_TOOL_MIB: Record<string, number> = { "tools/npm/bun": 78 };
+
+/** What a row nothing measured counts as, by what installs it: two go installs moved df by 115 MB and 924 MB
+ * (module and build caches), three uv tools by 12 to 222 MB, three npm globals by 0 to 25 MB, six agents by
+ * 165 to 673 MB. */
+const ASSUMED_MIB = { go: 500, uv: 100, npm: 50, agent: 350, other: 100 } as const;
+
+/** The default a row without a size counts at, and the words for where it came from. */
+export interface AssumedSize {
+  bytes: number;
+  kind: "a go install" | "a uv tool" | "an npm global" | "an agent" | "an install";
+}
+
+/** The stated default for a tools or agents row nothing measured. A command cask's row that falls back to
+ * `go install` counts as a go install: the fallback fills the same module and build caches. */
+export function assumedSize(e: RecipeEntry): AssumedSize {
+  if (e.rung === "agents") return { bytes: ASSUMED_MIB.agent * MIB, kind: "an agent" };
+  if (e.id.startsWith("tools/go/") || (e.id.startsWith("tools/cli/") && cliRoad(e)?.go !== undefined)) return { bytes: ASSUMED_MIB.go * MIB, kind: "a go install" };
+  if (e.id.startsWith("tools/uv/")) return { bytes: ASSUMED_MIB.uv * MIB, kind: "a uv tool" };
+  if (/^tools\/(npm|pnpm|bun)\//.test(e.id)) return { bytes: ASSUMED_MIB.npm * MIB, kind: "an npm global" };
+  return { bytes: ASSUMED_MIB.other * MIB, kind: "an install" };
+}
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -183,9 +222,12 @@ export interface DiskEstimate {
   toolchain: number;
   /** Every formula the ticked rows and the plan's managers pull in, each once, plus measured globals. */
   tools: number;
+  /** The measured agents, and the Node release the stage installs when an agent's floor is above the base's. */
   agents: number;
   /** Ticked rows that install something whose size nothing knows, by label. */
   unknown: string[];
+  /** What the unknown rows count as in the total, each at the default for its kind. */
+  assumed: number;
   total: number;
   room: number;
   /** How far the total is past the room; zero when it fits. */
@@ -199,17 +241,22 @@ export function estimateDisk(ticked: readonly RecipeEntry[], files: number, brew
   const toolchain = installs.has("tools/homebrew") ? BREW_TOOLCHAIN_BYTES : 0;
   const members = new Set<string>();
   let tools = 0;
+  let assumed = 0;
   const unknown: string[] = [];
+  const assume = (e: RecipeEntry): void => {
+    unknown.push(e.label);
+    assumed += assumedSize(e).bytes;
+  };
   for (const e of ticked) {
     if (e.rung !== "tools" || !installs.has(e.id) || e.id.startsWith("tools/brew-tap/")) continue;
     const formula = formulaOf(e);
     if (formula !== undefined) {
-      if (formulaBytes(formula, brew) === undefined) unknown.push(e.label);
+      if (formulaBytes(formula, brew) === undefined) assume(e);
       else for (const m of closureOf(formula, brew)) members.add(m);
       continue;
     }
     const size = toolSize(e, brew);
-    if (size === undefined) unknown.push(e.label);
+    if (size === undefined) assume(e);
     else tools += size.bytes;
   }
   for (const t of plan.installs) {
@@ -222,9 +269,11 @@ export function estimateDisk(ticked: readonly RecipeEntry[], files: number, brew
   for (const e of ticked) {
     if (e.rung !== "agents" || !installable(e)) continue;
     const size = agentSize(e);
-    if (size === undefined) unknown.push(e.label);
+    if (size === undefined) assume(e);
     else agents += size;
   }
-  const total = files + toolchain + tools + agents;
-  return { files, toolchain, tools, agents, unknown, total, room: DISK_ROOM_BYTES, over: Math.max(0, total - DISK_ROOM_BYTES) };
+  const node = agentInstallsFor(ticked).node;
+  if (node !== undefined && node.floor > BASE_NODE_MAJOR) agents += NODE_BYTES;
+  const total = files + toolchain + tools + agents + assumed;
+  return { files, toolchain, tools, agents, unknown, assumed, total, room: DISK_ROOM_BYTES, over: Math.max(0, total - DISK_ROOM_BYTES) };
 }
