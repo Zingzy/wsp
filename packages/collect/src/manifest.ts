@@ -84,7 +84,7 @@ const Fields = z.object({
   font: z.string().min(1).optional(),
   /** Only on the login shell's rc row: what the shell defines that runs a program, so the screens can say which point at a tool that is not coming and the machine can drop those. */
   aliases: z.array(ShellAlias).optional(),
-  /** Only on the login shell's rc row: whether the shell listed its own aliases or, when it did not answer, the rc files were read. */
+  /** Only on the login shell's rc row: whether the shell listed aliases of its own or, when it listed none or did not answer, the rc files were read. */
   aliasesFrom: z.enum(["shell", "files"]).optional(),
 });
 

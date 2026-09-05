@@ -88,16 +88,30 @@ export const nodeExec: HostExec = {
       let failed = false;
       let settled = false;
       let grace: NodeJS.Timeout | undefined;
+      // The child leads its own process group so a job an rc file left behind dies with it, not just the shell.
       const child = spawn(cmd, [...args], {
         stdio: ["ignore", "pipe", "pipe"],
         env: opts.env === undefined ? process.env : { ...process.env, ...opts.env },
-        timeout: opts.timeoutMs ?? 120_000,
-        killSignal: opts.killSignal ?? "SIGTERM",
+        detached: true,
       });
+      const killGroup = (signal: NodeJS.Signals): void => {
+        if (child.pid === undefined) return;
+        try {
+          process.kill(-child.pid, signal);
+        } catch {
+          return;
+        }
+      };
+      const budget = setTimeout(() => {
+        failed = true;
+        killGroup(opts.killSignal ?? "SIGTERM");
+      }, opts.timeoutMs ?? 120_000);
       const settle = (code: number | null, signal: NodeJS.Signals | null): void => {
         if (settled) return;
         settled = true;
+        clearTimeout(budget);
         if (grace !== undefined) clearTimeout(grace);
+        killGroup("SIGKILL");
         child.stdout.destroy();
         child.stderr.destroy();
         resolve(!failed && code === 0 && signal === null ? Buffer.concat(chunks).toString("utf8") : undefined);
@@ -106,7 +120,7 @@ export const nodeExec: HostExec = {
         bytes += b.length;
         if (bytes > MAX_OUTPUT) {
           failed = true;
-          child.kill("SIGKILL");
+          killGroup("SIGKILL");
         } else chunks.push(b);
       });
       child.stderr.resume();

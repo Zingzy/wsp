@@ -72,11 +72,11 @@ describe("aliasLines", () => {
   it("a row whose listing came from the rc files says so first, outside the cap", () => {
     const files = zshrc([a("ls", "eza", "tools/brew/eza"), a("cat", "bat", "tools/brew/bat"), a("o", "open")], { aliasesFrom: "files" });
     expect(aliasLines(files, [files, ...TOOLS], new Set(), NONE, 2)).toEqual([
-      "aliases read from the rc files, not the shell, which did not answer",
+      "aliases read from the rc files: the shell listed none or did not finish in time",
       "alias cat points at bat, which is not coming (unticked, tick to bring)",
       "2 more: eza, open",
     ]);
-    expect(aliasLines(zshrc([], { aliasesFrom: "files" }), TOOLS, new Set(), NONE, 3)).toEqual(["aliases read from the rc files, not the shell, which did not answer"]);
+    expect(aliasLines(zshrc([], { aliasesFrom: "files" }), TOOLS, new Set(), NONE, 3)).toEqual(["aliases read from the rc files: the shell listed none or did not finish in time"]);
     expect(aliasLines(zshrc([a("o", "open")], { aliasesFrom: "shell" }), TOOLS, new Set(), NONE, 3)).toEqual(["alias o points at open, which nothing here installs (kept on the machine only if it has open)"]);
   });
 

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Host, HostExec, RunOptions } from "../src/host.js";
-import { LIST_BUDGET_MS, shellAliases } from "../src/index.js";
+import { LIST_BUDGET_MS, LIST_SCRIPTS, shellAliases } from "../src/index.js";
 import { nodeExec } from "../src/live-host.js";
 import { fakeHost } from "./fake-host.js";
 
@@ -30,6 +30,12 @@ const alive = (pid: number): boolean => {
   } catch {
     return false;
   }
+};
+
+/** A job whose parent is gone is reaped by launchd, so it may read as alive for a moment after the kill. */
+const gone = async (pid: number): Promise<boolean> => {
+  for (let i = 0; i < 100 && alive(pid); i += 1) await new Promise(r => setTimeout(r, 20));
+  return !alive(pid);
 };
 
 const scratch = (): string => {
@@ -71,12 +77,25 @@ describe("nodeExec.run", () => {
     expect(alive(pid)).toBe(false);
   }, 15_000);
 
-  it("does not wait on a grandchild that kept stdout after the child exited", async () => {
+  it("does not wait on a grandchild that kept stdout after the child exited, and ends it with the run", async () => {
     const d = scratch();
     const out = await nodeExec.run("/bin/sh", ["-c", `sleep 30 & echo $! > ${join(d, "pid")}; echo listed`]);
     const pid = await pidIn(join(d, "pid"));
     expect(out).toBe("listed\n");
-    expect(alive(pid)).toBe(true);
+    expect(await gone(pid)).toBe(true);
+  }, 15_000);
+
+  it("the budget ends the whole process group: a job a real zshrc started is dead when the run ends", async () => {
+    const d = scratch();
+    writeFileSync(join(d, ".zshrc"), `sleep 100 & echo $! > ${join(d, "job")}; echo $$ > ${join(d, "pid")}; wait\n`);
+    const out = nodeExec.run("/bin/zsh", ["-ic", LIST_SCRIPTS["zsh"]], { env: { ZDOTDIR: d, WSP_COLLECT: "1" }, timeoutMs: 500, killSignal: "SIGKILL" });
+    const shell = await pidIn(join(d, "pid"));
+    const job = await pidIn(join(d, "job"));
+    expect(alive(shell)).toBe(true);
+    expect(alive(job)).toBe(true);
+    expect(await out).toBeUndefined();
+    expect(alive(shell)).toBe(false);
+    expect(await gone(job)).toBe(true);
   }, 15_000);
 });
 

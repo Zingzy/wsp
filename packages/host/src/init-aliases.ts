@@ -57,7 +57,7 @@ function subject(members: readonly ShellAlias[]): string {
 
 const verb = (n: number): string => (n === 1 ? "points" : "point");
 
-const FROM_FILES_LINE = "aliases read from the rc files, not the shell, which did not answer";
+const FROM_FILES_LINE = "aliases read from the rc files: the shell listed none or did not finish in time";
 
 /** The detail pane's lines under a shell row: where the list came from when not the shell, then one per command its
  * aliases point at that is not coming, capped. */

@@ -239,14 +239,21 @@ describe("shellAliases", () => {
     ]);
   });
 
-  it("a shell that opts out through WSP_COLLECT and prints nothing is read from its files, and a row with no definitions still says where it looked", async () => {
-    const host = laptop({ files: { "~/.zshrc": "[ \"$WSP_COLLECT\" = 1 ] && return\nalias v=nvim\n" }, exec: { [`WSP_COLLECT=1 /bin/zsh -ic ${LIST_SCRIPTS["zsh"]}`]: "\n" } });
+  it("a listing of only what zsh defines by itself, as an rc file that returns on WSP_COLLECT leaves it, is read from the files; a row with no definitions still says where it looked", async () => {
+    const host = laptop({ files: { "~/.zshrc": "[ \"$WSP_COLLECT\" = 1 ] && return\nalias v=nvim\n" }, exec: { [`WSP_COLLECT=1 /bin/zsh -ic ${LIST_SCRIPTS["zsh"]}`]: "alias run-help=man\nalias which-command=whence\n" } });
     const entries = [rc("shell/zshrc", "~/.zshrc"), tool("tools/brew/neovim")];
     await shellAliases(host, entries);
     expect(entries[0]).toMatchObject({ aliasesFrom: "files", aliases: [{ name: "v", kind: "alias", runs: "nvim" }] });
     const bare = [rc("shell/zshrc", "~/.zshrc")];
     await shellAliases(laptop({ exec: { [`WSP_COLLECT=1 /bin/zsh -ic ${LIST_SCRIPTS["zsh"]}`]: "alias g=git\n" } }), bare);
     expect(bare[0]).toEqual({ ...rc("shell/zshrc", "~/.zshrc"), aliasesFrom: "shell" });
+  });
+
+  it("bash with nothing defined prints an empty listing, which is read from the files too", async () => {
+    const host = fakeHost({ shell: "/bin/bash", files: { "/etc/shells": SHELLS, "~/.bashrc": "alias ls=eza\n" }, exec: { [`WSP_COLLECT=1 /bin/bash -ic ${LIST_SCRIPTS["bash"]}`]: "" } });
+    const entries = [rc("shell/bashrc", "~/.bashrc"), tool("tools/brew/eza")];
+    await shellAliases(host, entries);
+    expect(entries[0]).toMatchObject({ aliasesFrom: "files", aliases: [{ name: "ls", kind: "alias", runs: "eza", tool: "tools/brew/eza" }] });
   });
 
   it("nothing runs for fish, an unlisted shell or a shell with no rc row", async () => {

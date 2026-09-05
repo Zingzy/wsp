@@ -230,10 +230,6 @@ export interface PackOptions {
   guard?: AliasGuard;
 }
 
-/** Copies the planned files into a staging tree, renders each secret into it,
- * and tars the tree. Links are followed so the target's bytes land at the
- * link's path; one that leaves home, points at a refused path, or points back
- * into its own directory is left out with a note. */
 /** Ships the guard under the staged home and has the rc file that carried the aliases read it last, once, at the rc file's own mode; nothing when that rc file is not in this pack. */
 function placeGuard(stage: string, guard: AliasGuard): void {
   const rc = join(stage, guard.rc);
@@ -249,6 +245,10 @@ function placeGuard(stage: string, guard: AliasGuard): void {
   chmodSync(rc, mode);
 }
 
+/** Copies the planned files into a staging tree, renders each secret into it,
+ * and tars the tree. Links are followed so the target's bytes land at the
+ * link's path; one that leaves home, points at a refused path, or points back
+ * into its own directory is left out with a note. */
 export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<PackedFiles> {
   const stage = mkdtempSync(join(tmpdir(), "wsp-golden-import-"));
   const out = mkdtempSync(join(tmpdir(), "wsp-golden-import-tar-"));
