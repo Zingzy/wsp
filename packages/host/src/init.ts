@@ -5,12 +5,12 @@
 // off to the browser for the save. Nothing leaves the disk before the confirm,
 // and no question is ever asked on the remote machine.
 import type { Readable, Writable } from "node:stream";
-import { styleText } from "node:util";
+import { format, styleText } from "node:util";
 import { LARGE_GROUP, RUNGS, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
 import { describeAge, type BackendPricing } from "@wsp/engine";
 import type { ChecklistItem } from "@wsp/protocol";
 import { PrepareStoppedError, type GoldenBuilderView, type GoldenRecipe, type GoldenStage, type Runtime } from "@wsp/runtime";
-import { S_BAR, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, S_WARN, cancel, isCancel, log, outro } from "@clack/prompts";
+import { S_BAR, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, cancel, isCancel, log, outro } from "@clack/prompts";
 import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -258,19 +258,25 @@ export function stageLine(glyph: string, label: string, detail: string | undefin
  * step with its latest detail, the end label once it is done, the tail of
  * details kept under a failed step. Animation only on a terminal, where the
  * block is the stream's alone: every redraw rewinds to its first row and no
- * line is ever wider than the terminal, so the rows it counts are the rows it holds. */
+ * line is ever wider than the terminal, so the rows it counts are the rows it
+ * holds. While it animates it owns console.warn and console.error too, since a
+ * line written under the block would push it down a row; those lines settle
+ * above the block and go to the sink when there is one. */
 export class StageStream {
   private frames: StageFrame[] = [];
   private view: StageView;
   private printed = 0;
   private timer: NodeJS.Timeout | undefined;
   private tick = 0;
+  private taken: { warn: typeof console.warn; error: typeof console.error } | undefined;
   private static readonly SPIN = ["◒", "◐", "◓", "◑"];
 
   constructor(
     private readonly output: Writable,
     private readonly animate: boolean,
     private readonly words: readonly StageWords[] = PREPARE_STEPS,
+    /** Where every line said while the stream ran also goes, the run log once there is one. */
+    private readonly sink?: (line: string) => void,
   ) {
     this.view = reduceStages([], words);
   }
@@ -285,6 +291,9 @@ export class StageStream {
 
   start(): void {
     if (this.animate) {
+      this.taken = { warn: console.warn, error: console.error };
+      console.warn = (...args: unknown[]) => this.note(format(...args));
+      console.error = (...args: unknown[]) => this.note(format(...args));
       this.timer = setInterval(() => {
         this.tick += 1;
         this.draw();
@@ -301,23 +310,30 @@ export class StageStream {
     else this.announce(prev);
   }
 
-  /** A settled line while the stream runs: it lands above the block, which is drawn again under it. */
+  /** A line said while the stream runs: it settles above the block, which is drawn again under it. */
   note(text: string): void {
-    const lines = this.width === undefined ? [text] : wrap(text, this.width - 3, "");
-    const styled = lines.map((l, i) => (i === 0 ? `${styleText("yellow", S_WARN)}  ${l}` : `${dim(S_BAR)}  ${l}`));
+    const lines = text.split("\n");
+    for (const line of lines) this.sink?.(line);
+    const width = this.width;
+    const said = lines.flatMap(l => (width === undefined ? [l] : wrap(l, width - 3, ""))).map(l => `${dim(S_BAR)}  ${dim(l)}`);
     if (!this.animate) {
-      this.output.write(`${styled.join("\n")}\n`);
+      this.output.write(`${said.join("\n")}\n`);
       return;
     }
     const block = this.lines(false, false);
-    this.output.write(`${this.rewind()}${[...styled, ...block].join("\n")}\n`);
+    this.output.write(`${this.rewind()}${[...said, ...block].join("\n")}\n`);
     this.printed = block.length;
   }
 
-  /** Draws the last frame; `stopped` marks the stage in flight as cut off rather than spinning. */
+  /** Draws the last frame and hands the console back; `stopped` marks the stage in flight as cut off rather than spinning. */
   stop(stopped = false): StageView {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
+    if (this.taken !== undefined) {
+      console.warn = this.taken.warn;
+      console.error = this.taken.error;
+      this.taken = undefined;
+    }
     this.draw(true, stopped);
     return this.view;
   }

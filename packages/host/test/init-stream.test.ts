@@ -162,7 +162,7 @@ describe("stage stream on a terminal", () => {
     expect(lines.at(-1)).toContain("no space left on device");
   });
 
-  it("a settled line goes above the block, never into it", () => {
+  it("a line said while the stream runs settles above the block, which stays whole under it", () => {
     vi.useFakeTimers();
     try {
       const { output, screen } = terminal(80, 30);
@@ -175,8 +175,8 @@ describe("stage stream on a terminal", () => {
       stream.push(ev("deploying-daemon", 1_000));
       vi.advanceTimersByTime(100);
       const lines = screen.lines();
-      // The note is longer than the row, so it wraps onto a second line under the bar; both sit above the block.
-      expect(lines[0]).toBe("▲  Solari account at its machine cap; waiting 30s for a slot (1/20). Nothing is");
+      // The note is longer than the row, so it wraps onto a second line; both sit above the block.
+      expect(lines[0]).toBe("│  Solari account at its machine cap; waiting 30s for a slot (1/20). Nothing is");
       expect(lines[1]).toBe("│  killed.");
       expect(count(lines, "Machine created")).toBe(1);
       expect(count(lines, "Creating the machine")).toBe(0);
@@ -184,6 +184,41 @@ describe("stage stream on a terminal", () => {
       expect(lines).toHaveLength(4);
       stream.stop();
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("console.warn and console.error mid-frame settle above the block, reach the sink, and the console comes back on stop", () => {
+    vi.useFakeTimers();
+    const warn = console.warn;
+    const error = console.error;
+    try {
+      const { output, screen } = terminal(80, 30);
+      const sunk: string[] = [];
+      const stream = new StageStream(output, true, undefined, line => sunk.push(line));
+      stream.start();
+      expect(console.warn).not.toBe(warn);
+      stream.push(ev("creating", 0, "sandbox from default"));
+      vi.advanceTimersByTime(100);
+      console.warn("heartbeat for builder %s not written: %s", "b1", "ETIMEDOUT");
+      vi.advanceTimersByTime(100);
+      stream.push(ev("deploying-daemon", 1_000));
+      console.error("hostname first on m1 failed: no route");
+      vi.advanceTimersByTime(100);
+      const lines = screen.lines();
+      expect(lines[0]).toBe("│  heartbeat for builder b1 not written: ETIMEDOUT");
+      expect(lines[1]).toBe("│  hostname first on m1 failed: no route");
+      expect(lines[2]).toMatch(/^◇  Machine created\s+sandbox from default\s+1\.0s$/);
+      expect(lines[3]).toMatch(/^[◒◐◓◑]  Installing the base \(Node, the daemon\)$/);
+      expect(lines).toHaveLength(4);
+      expect(sunk).toEqual(["heartbeat for builder b1 not written: ETIMEDOUT", "hostname first on m1 failed: no route"]);
+      stream.stop();
+      expect(console.warn).toBe(warn);
+      expect(console.error).toBe(error);
+      expect(count(screen.lines(), "heartbeat for builder b1")).toBe(1);
+    } finally {
+      console.warn = warn;
+      console.error = error;
       vi.useRealTimers();
     }
   });

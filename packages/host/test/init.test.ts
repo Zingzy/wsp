@@ -1502,6 +1502,33 @@ describe("wsp init, flags and no terminal", () => {
     expect(f.recipes[0]!.import?.node).toMatchObject({ floor: 16, agents: ["Codex"] });
   });
 
+  it("a console warning while the stages animate is drawn by the stream, and a build that fails hands the console back", async () => {
+    const warn = console.warn;
+    const error = console.error;
+    let duringPrepare: { warn: typeof console.warn; error: typeof console.error } | undefined;
+    const f = fake({ yes: true });
+    f.opts.runtime = recipe => {
+      const backend = stubBackend();
+      backend.execImpl = (_m, cmd) => {
+        if (!cmd.includes(GOLDEN_SETUP)) return guestAnswer(cmd);
+        duringPrepare = { warn: console.warn, error: console.error };
+        console.warn("heartbeat for builder m1 not written: ETIMEDOUT");
+        return { exitCode: 1, stdout: "", stderr: "curl: (6) Could not resolve host" };
+      };
+      f.backends.push(backend);
+      return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
+    };
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(1);
+    expect(duringPrepare?.warn).not.toBe(warn);
+    expect(duringPrepare?.error).not.toBe(error);
+    expect(console.warn).toBe(warn);
+    expect(console.error).toBe(error);
+    const out = f.text();
+    expect(out).toContain("│  heartbeat for builder m1 not written: ETIMEDOUT");
+    expect(out.indexOf("heartbeat for builder m1")).toBeLessThan(out.indexOf("Installing agents failed"));
+  });
+
   it("an agent failing ends the build: one line per agent with its reason, the builder killed, and an offer to start over", async () => {
     const f = fake({ yes: true });
     f.opts.runtime = recipe => {
@@ -2136,6 +2163,37 @@ describe("wsp init, a signal during prepare", () => {
     expect(out).not.toContain("Installing tools failed");
     expect(out).not.toContain("Run wsp init again");
     expect(f.signals.listenerCount("SIGINT") + f.signals.listenerCount("SIGTERM")).toBe(0);
+  });
+
+  it("a signal during the stages hands the console back with the stream it stops", async () => {
+    const warn = console.warn;
+    const error = console.error;
+    let duringPrepare: typeof console.warn | undefined;
+    const f = fake({ yes: true });
+    f.opts.runtime = recipe => {
+      const backend = stubBackend();
+      backend.execImpl = (m, cmd) => {
+        if (!cmd.includes("brew install jq")) return guestAnswer(cmd);
+        // The stream is animating here; the signal that follows stops it and must hand the console back.
+        duringPrepare = console.warn;
+        return new Promise((_, reject) => {
+          const kill = m.kill.bind(m);
+          m.kill = async () => {
+            await kill();
+            reject(gone());
+          };
+          f.signals.emit("SIGINT");
+        });
+      };
+      f.backends.push(backend);
+      return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
+    };
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(130);
+    expect(duringPrepare).toBeDefined();
+    expect(duringPrepare).not.toBe(warn);
+    expect(console.warn).toBe(warn);
+    expect(console.error).toBe(error);
   });
 
   it("a second signal while the kill is still running exits at once with the builder id and the sweep line; the record stays for the sweep", async () => {
