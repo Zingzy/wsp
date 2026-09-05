@@ -370,9 +370,13 @@ function requireString(msg: Request, key: string): string {
   return v;
 }
 
+// Linux pid_max ceiling; above int32 process.kill throws instead of ESRCH, so both proc ops refuse alike.
+const PID_MAX = 4_194_304;
 function requirePid(msg: Request): number {
   const pid = msg["pid"];
-  if (!Number.isInteger(pid) || (pid as number) < 1) throw new OpError("bad-request", "pid must be a positive integer");
+  if (!Number.isInteger(pid) || (pid as number) < 1 || (pid as number) > PID_MAX) {
+    throw new OpError("bad-request", `pid must be an integer between 1 and ${PID_MAX}`);
+  }
   return pid as number;
 }
 

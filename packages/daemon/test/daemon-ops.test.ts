@@ -150,6 +150,9 @@ describe("daemon ops: ports, manifest, inbox", () => {
     expect(await a.request("proc.inspect", { pid: 50 })).toMatchObject({ ok: true, pid: 50, cwd: "/root/app", ports: [], threads: 1, children: [51] });
     expect(await a.request("proc.inspect", { pid: "x" })).toMatchObject({ ok: false, code: "bad-request" });
     expect(await a.request("proc.inspect", { pid: 999_999 })).toMatchObject({ ok: false, code: "not-found" });
+    // Above pid_max both ops refuse as bad-request; process.kill would otherwise throw a codeless error.
+    expect(await a.request("proc.inspect", { pid: 2 ** 40 })).toMatchObject({ ok: false, code: "bad-request" });
+    expect(await a.request("proc.kill", { pid: 2 ** 40, signal: "TERM" })).toMatchObject({ ok: false, code: "bad-request" });
 
     for (const pid of [1, process.pid, process.ppid]) {
       expect(await a.request("proc.kill", { pid, signal: "TERM" })).toMatchObject({ ok: false, code: "forbidden" });
@@ -162,6 +165,40 @@ describe("daemon ops: ports, manifest, inbox", () => {
     const after = a.events.filter(e => e.type === "proc.snapshot").length;
     await new Promise(r => setTimeout(r, 80));
     expect(a.events.filter(e => e.type === "proc.snapshot").length).toBe(after);
+    a.close();
+  });
+
+  it("an exited pty stops labelling its pid, so a stranger who reuses it carries no pty id", async () => {
+    const a = await connect(daemon.port);
+    const created = await a.request("pty.create", { shell: "bash", cols: 40, rows: 10 });
+    expect(created.ok).toBe(true);
+    const ptyId = created["ptyId"] as string;
+    const pid = created["pid"] as number;
+    // The fake tree stands in for /proc: this entry is whatever process holds the pid, alive or reused.
+    writeProc(procRoot, { pid, ppid: 1, comm: "bash" });
+    expect((await a.request("proc.watch")).ok).toBe(true);
+    const labelled = () => a.events.filter(e => e.type === "proc.snapshot").flatMap(e => (e["procs"] as { pid: number; pty?: string }[]).filter(p => p.pid === pid));
+    let deadline = Date.now() + 2000;
+    while (labelled().length === 0 && Date.now() < deadline) await new Promise(r => setTimeout(r, 10));
+    expect(labelled()[0]).toMatchObject({ pid, pty: ptyId });
+
+    await a.request("pty.write", { ptyId, data: "exit\n" });
+    deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      const ptys = (await a.request("pty.list"))["ptys"] as { id: string; exited: boolean }[];
+      if (ptys.find(p => p.id === ptyId)?.exited) break;
+      await new Promise(r => setTimeout(r, 20));
+    }
+    expect((await a.request("pty.list"))["ptys"]).toContainEqual(expect.objectContaining({ id: ptyId, exited: true }));
+    const seen = a.events.filter(e => e.type === "proc.snapshot").length;
+    deadline = Date.now() + 2000;
+    while (a.events.filter(e => e.type === "proc.snapshot").length <= seen && Date.now() < deadline) await new Promise(r => setTimeout(r, 10));
+    const after = labelled().at(-1)!;
+    expect(after.pid).toBe(pid);
+    expect(after.pty).toBeUndefined();
+
+    expect((await a.request("proc.unwatch")).ok).toBe(true);
+    rmSync(join(procRoot, String(pid)), { recursive: true, force: true });
     a.close();
   });
 

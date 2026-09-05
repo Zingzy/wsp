@@ -128,7 +128,6 @@ function Row({ proc, depth, label, lit, onSelect }: RowProps) {
     <div
       role="row"
       tabIndex={0}
-      aria-selected={lit}
       data-proc-row={proc.pid}
       {...(lit ? { "data-selected": "" } : {})}
       onClick={onSelect}
