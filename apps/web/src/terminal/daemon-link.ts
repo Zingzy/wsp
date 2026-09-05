@@ -70,6 +70,7 @@ export function connectDaemonLink(opts: DaemonLinkOptions): DaemonLink {
   const backoff = opts.backoffMs ?? defaultBackoff;
 
   let ws: WebSocket | null = null;
+  let authed: WebSocket | null = null;
   let closed = false;
   let nextId = 1;
   let attempt = 0;
@@ -87,14 +88,20 @@ export function connectDaemonLink(opts: DaemonLinkOptions): DaemonLink {
     opts.onStatus?.(s);
   }
 
-  function send(op: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
-    const sock = ws;
-    if (!sock || sock.readyState !== 1) return Promise.reject(new Error("daemon unreachable"));
+  function sendOn(sock: WebSocket, op: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (sock.readyState !== 1) return Promise.reject(new Error("daemon unreachable"));
     const id = nextId++;
     return new Promise((resolve, reject) => {
       pending.set(id, { resolve, reject });
       sock.send(JSON.stringify({ id, op, ...params }));
     });
+  }
+
+  /** The daemon caps unauthenticated bytes, so nothing goes out until the auth reply is in. */
+  function send(op: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+    const sock = ws;
+    if (!sock || sock !== authed) return Promise.reject(new Error("daemon unreachable"));
+    return sendOn(sock, op, params);
   }
 
   function flushPending(reason: string): void {
@@ -187,8 +194,11 @@ export function connectDaemonLink(opts: DaemonLinkOptions): DaemonLink {
     sock.onopen = () => {
       // Auth first, then live only once the daemon answers a ping: a 4401
       // close follows the open event, and that must not flap through live.
-      send("auth", { token })
-        .then(() => send("ping"))
+      sendOn(sock, "auth", { token })
+        .then(() => {
+          authed = sock;
+          return send("ping");
+        })
         .then(
         () => {
           if (ws !== sock || closed) return;
