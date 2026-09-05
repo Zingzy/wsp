@@ -1148,10 +1148,19 @@ describe("wsp init, the sign-in stage", () => {
   });
 
   it("a login with no status command that ended with a non-zero exit is offered a retry or a skip; a clean exit stays not verified", async () => {
-    const CLOUDFLARED_MANIFEST: Manifest = { entries: [FIXTURE.entries[0]!, { rung: "logins", id: "logins/cloudflared", label: "cloudflared login", group: "CLI logins", paths: ["~/.cloudflared/cert.pem"], bytes: 300, default: "skip" }] };
+    // A login whose command is not coming starts at skip and is never staged, so the tools row that brings cloudflared is here.
+    const CLOUDFLARED_MANIFEST: Manifest = {
+      entries: [
+        FIXTURE.entries[0]!,
+        { rung: "tools", id: "tools/brew/cloudflared", label: "cloudflared", group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "yes" },
+        { rung: "logins", id: "logins/cloudflared", label: "cloudflared login", group: "CLI logins", paths: ["~/.cloudflared/cert.pem"], bytes: 300, default: "skip" },
+      ],
+    };
     const f = fake({ hold: true, collect: async () => CLOUDFLARED_MANIFEST });
     const run = runInit(f.opts, f.io);
     await f.until("Identity");
+    await f.press(KEY.enter);
+    await f.until("Tools");
     await f.press(KEY.enter);
     await f.until("Sign-ins");
     await f.press(KEY.enter);
