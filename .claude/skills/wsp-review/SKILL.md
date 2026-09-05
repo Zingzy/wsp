@@ -26,7 +26,7 @@ Review wsp changes against the laws this project has already paid for. Generic c
 
 ## Security laws
 
-- The daemon's query-token is the sole gate on 0.0.0.0: the token check must run before ANY handler registration (there is a test; don't weaken it). Ticket #16 owns the rotation question: don't invent auth changes in unrelated PRs.
+- The daemon's token is the sole gate on 0.0.0.0. Since #16 (2026-09-05) it travels in the first WebSocket frame, never in a URL; the host mints a fresh token on every start and the daemon reads its token file at every frame. No handler is registered before the auth frame passes and every pre-auth socket carries an error listener (there are tests; don't weaken them). Don't invent auth changes in unrelated PRs; #153 owns the pre-auth payload cap and per-port scoping.
 - No bearers in URLs on OUR protocol (first-frame auth or 5-min single-purpose tickets). previewUrl's pt_token is theirs, not a precedent for us.
 - Nothing may collect, store, or proxy Anthropic credentials outside the user's machine/VM (the carve-out we build under). Model traffic never transits our code.
 - Never print or commit key material; .env stays gitignored; fake keys in tests look fake (sk-ant-x).
