@@ -68,11 +68,13 @@ export interface GitStatusEntry {
 export interface GitStatus {
   branch: GitBranch;
   entries: GitStatusEntry[];
+  /** The working tree's top level, absolute. */
+  root: string;
 }
 
 /** Porcelain v2 with -z: every record is NUL-terminated and a rename's
  * original path follows as its own record instead of a tab suffix. */
-export function parsePorcelainV2(text: string): GitStatus {
+export function parsePorcelainV2(text: string): Omit<GitStatus, "root"> {
   const branch: GitBranch = { oid: "", head: "", ahead: 0, behind: 0 };
   const entries: GitStatusEntry[] = [];
   const tokens = text.split("\0");
@@ -107,7 +109,9 @@ export function parsePorcelainV2(text: string): GitStatus {
 export async function gitStatus(cwd: string): Promise<GitStatus> {
   const res = await runGit(cwd, ["status", "--porcelain=v2", "--branch", "-z"]);
   checkGit(res, "status");
-  return parsePorcelainV2(res.stdout.toString("utf8"));
+  const top = await runGit(cwd, ["rev-parse", "--show-toplevel"]);
+  checkGit(top, "rev-parse");
+  return { ...parsePorcelainV2(res.stdout.toString("utf8")), root: top.stdout.toString("utf8").trim() };
 }
 
 export type GitDiffScope = "branch" | "unstaged" | "staged";

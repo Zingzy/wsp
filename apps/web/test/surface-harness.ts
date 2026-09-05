@@ -3,12 +3,15 @@
 // every call recorded, with the store holding one running workspace.
 import type { WorkspaceView } from "@wsp/protocol";
 import { resetListings } from "../src/files/listing.js";
-import { provideDaemonWire } from "../src/files/wire.js";
+import { useRootStore } from "../src/files/root.js";
+import { provideDaemonRoot, provideDaemonWire } from "../src/files/wire.js";
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import type { TerminalWire } from "../src/terminal/link.js";
 
 export const WS = "ws_a";
+/** What the fake daemon's hello names as its root. */
+export const DAEMON_ROOT = "/root";
 
 export const view: WorkspaceView = {
   id: WS,
@@ -19,7 +22,8 @@ export const view: WorkspaceView = {
   createdAt: "2026-09-01T00:00:00Z",
 };
 
-export type Reply = Record<string, unknown> | ((params: Record<string, unknown>) => Record<string, unknown>);
+/** A canned body, or a function of the params returning one; a returned Error rejects the call with it. */
+export type Reply = Record<string, unknown> | ((params: Record<string, unknown>) => Record<string, unknown> | Error);
 
 export interface FakeWire extends TerminalWire {
   calls: [string, Record<string, unknown>][];
@@ -47,17 +51,31 @@ export function resetSurfaces(): void {
   window.localStorage.clear();
   resetListings();
   provideDaemonWire(WS, null);
+  provideDaemonRoot(WS, DAEMON_ROOT);
   useStore.setState({ workspaces: [view], selectedId: WS });
   useRightPanelStore.setState({ byWorkspaceId: {} });
+  useRootStore.setState({ byWorkspaceId: {} });
 }
 
-export const LISTING = {
-  entries: [
-    { name: "docs", type: "dir", size: 0, mtime: 1 },
-    { name: "src", type: "dir", size: 0, mtime: 1 },
-    { name: "README.md", type: "file", size: 12, mtime: 1 },
-    { name: "docs/guide.md", type: "file", size: 5, mtime: 1 },
-    { name: "src/a.ts", type: "file", size: 12, mtime: 1 },
-  ],
-  truncated: false,
+const dir = (name: string) => ({ name, type: "dir", size: 0, mtime: 1 });
+const file = (name: string, size = 12) => ({ name, type: "file", size, mtime: 1 });
+const level = (entries: Record<string, unknown>[], extra: Record<string, unknown> = {}) => ({ entries, truncated: false, total: entries.length, ...extra });
+
+/** One reply per folder, as the daemon lists them: the root, its folders, a wide folder cut at the cap, a folder that fails. */
+export const LEVELS: Record<string, Record<string, unknown>> = {
+  "/root": level([dir("app"), dir("docs"), dir("locked"), dir("src"), dir("wide"), file("README.md")]),
+  "/root/docs": level([file("guide.md", 5)]),
+  "/root/src": level([file("a.ts")]),
+  "/root/wide": level([file("w0.txt")], { truncated: true, total: 10_001 }),
+  "/root/app": level([dir("lib"), file("package.json")]),
+  "/root/app/lib": level([file("index.ts")]),
+};
+
+/** The fs.list reply for a folder; a folder outside LEVELS is the daemon's not-found, the locked one its refusal. */
+export const LISTING: Reply = params => {
+  const path = String(params["path"]);
+  if (path === "/root/locked") throw new Error("EACCES: permission denied, scandir '/root/locked'");
+  const found = LEVELS[path];
+  if (!found) throw Object.assign(new Error(`${path} does not exist`), { code: "not-found" });
+  return found;
 };

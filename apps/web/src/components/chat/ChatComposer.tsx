@@ -13,15 +13,19 @@
 // disabled while the turn a new thread left behind is still finishing: stop
 // reaches only the visible turn, so a second session must not start until
 // that one ends. Model and permission-mode controls wait for start options.
+// The checkout row under the composer picks the folder a fresh thread starts
+// in; a resumed one is started where its harness last said it was.
 import { CircleAlertIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sendRefusal, workspaceState, type MachineState, type ReachState, type WorkspacePhase } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
 import { useStatus, useStore, useWorkspace } from "../../protocol/store";
+import { useThreadFolder } from "../../files/root";
 import { composerSubmissionIntentForEnter, detectComposerTrigger, replaceTextRange } from "../../composer-logic";
 import { ComposerPromptEditor, type ComposerCommandKey, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
 import { catalogFromHarness } from "./adapt";
 import { ComposerBanner } from "./ComposerBanner";
+import { ComposerCheckoutRow } from "./ComposerCheckoutRow";
 import { ComposerCommandMenu, type ComposerCommandItem } from "./ComposerCommandMenu";
 import { ComposerCommandMenuLayer } from "./ComposerCommandMenuLayer";
 import { EMPTY_DRAFT, useComposerDraft, useComposerDraftStore } from "./composerDraftStore";
@@ -70,6 +74,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const status = useStatus(workspaceId);
   const [stop, setStop] = useState<StopAttempt | null>(null);
   const draft = useComposerDraft(workspaceId);
+  const cwd = useThreadFolder(workspaceId);
   const setDraft = useComposerDraftStore(s => s.setDraft);
   const editorRef = useRef<ComposerPromptEditorHandle | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
@@ -148,13 +153,13 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     thread.setSending(true);
     thread.appendUserTurn(prompt);
     const resume = thread.fresh ? undefined : workspace?.claudeSessionId;
-    void api.startSession({ workspaceId, prompt, ...(resume ? { resume } : {}) }).catch((err: unknown) => {
+    void api.startSession({ workspaceId, prompt, ...(resume ? { resume } : {}), ...(cwd !== null ? { cwd } : {}) }).catch((err: unknown) => {
       thread.setSending(false);
       const current = useComposerDraftStore.getState().drafts[workspaceId];
       if (current === undefined || current.prompt === "") setDraft(workspaceId, { prompt, cursor: prompt.length });
       thread.appendLocalError(err instanceof Error ? err.message : String(err));
     });
-  }, [api, draft, sendDisabledReason, setDraft, thread, workspace?.claudeSessionId, workspaceId]);
+  }, [api, cwd, draft, sendDisabledReason, setDraft, thread, workspace?.claudeSessionId, workspaceId]);
 
   const interrupt = useCallback(() => {
     const method = api?.interruptSession;
@@ -224,7 +229,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
 
   return (
     <div className="w-full px-3 pt-1.5 pb-4 sm:px-5 sm:pt-2 sm:pb-5">
-      <ComposerSurface.Shell>
+      <ComposerSurface.Shell contextStrip>
         <ComposerSurface.Host>
           <form
             className="mx-auto w-full min-w-0 max-w-3xl"
@@ -307,6 +312,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
             </div>
           </form>
         </ComposerSurface.Host>
+        <ComposerCheckoutRow workspaceId={workspaceId} thread={thread} />
       </ComposerSurface.Shell>
     </div>
   );

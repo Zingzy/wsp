@@ -74,8 +74,3 @@ export function toDiffModel(reply: GitDiffReply, cacheScope: string): DiffModel 
   }
   return { files, stat: getDiffLineStat(files.map(f => f.fileDiff)), changedFiles, raw: null };
 }
-
-/** The folder picker's choices: the root and its direct subdirectories. */
-export function topLevelDirectories(entries: readonly { path: string; kind: string }[]): string[] {
-  return entries.filter(e => e.kind === "directory" && !e.path.includes("/")).map(e => e.path);
-}

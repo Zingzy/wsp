@@ -189,7 +189,7 @@ describe("chat tab hydration", () => {
     await typeInto(editor, "start over");
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(1));
-    expect(started[0]).toEqual({ workspaceId: WS, prompt: "start over" });
+    expect(started[0]).toEqual({ workspaceId: WS, prompt: "start over", cwd: "/root" });
   });
 
   it("a replay gap while finishing the previous turn keeps the composer closed when history shows it still running", async () => {
@@ -238,7 +238,7 @@ describe("chat tab composer", () => {
     expect(editor.textContent).toBe("fix the flaky test");
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(1));
-    expect(started[0]).toEqual({ workspaceId: WS, prompt: "fix the flaky test", resume: CLAUDE_SID });
+    expect(started[0]).toEqual({ workspaceId: WS, prompt: "fix the flaky test", resume: CLAUDE_SID, cwd: "/root" });
 
     // Local echo of the user turn; the draft is gone and the send button says why it waits.
     expect(screen.getByText("fix the flaky test")).toBeDefined();
@@ -303,7 +303,7 @@ describe("chat tab new thread", () => {
     await typeInto(editor, "start over");
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(1));
-    expect(started[0]).toEqual({ workspaceId: WS, prompt: "start over" });
+    expect(started[0]).toEqual({ workspaceId: WS, prompt: "start over", cwd: "/root" });
     expect(screen.getByText("start over")).toBeDefined();
 
     // The fresh session's events land in the cleared thread; the store remembers its id and the next send resumes it.
@@ -316,7 +316,7 @@ describe("chat tab new thread", () => {
     await typeInto(editor, "and then");
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(2));
-    expect(started[1]).toEqual({ workspaceId: WS, prompt: "and then", resume: "sess_0002" });
+    expect(started[1]).toEqual({ workspaceId: WS, prompt: "and then", resume: "sess_0002", cwd: "/root" });
   });
 });
 
@@ -349,7 +349,7 @@ describe("chat tab new thread mid-turn", () => {
     await typeInto(editor, "start over");
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(1));
-    expect(started[0]).toEqual({ workspaceId: WS, prompt: "start over" });
+    expect(started[0]).toEqual({ workspaceId: WS, prompt: "start over", cwd: "/root" });
   });
 
   it("keeps the composer closed and the left turn out when a second request lands while finishing", async () => {
@@ -399,7 +399,7 @@ describe("chat tab new thread mid-turn", () => {
     await typeInto(editor, "start over");
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(2));
-    expect(started[1]).toEqual({ workspaceId: WS, prompt: "start over" });
+    expect(started[1]).toEqual({ workspaceId: WS, prompt: "start over", cwd: "/root" });
   });
 });
 
@@ -456,7 +456,7 @@ describe("chat tab threads", () => {
     await typeInto(composerEditor(), "second");
     await press(composerEditor(), "Enter");
     await waitFor(() => expect(started.length).toBe(1));
-    expect(started[0]).toEqual({ workspaceId: WS, prompt: "second" });
+    expect(started[0]).toEqual({ workspaceId: WS, prompt: "second", cwd: "/root" });
     for (const e of SECOND) emit(e);
     expect(screen.getByText("two.")).toBeDefined();
     expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();
@@ -497,7 +497,7 @@ describe("chat tab threads", () => {
     await typeInto(composerEditor(), "start over");
     await press(composerEditor(), "Enter");
     await waitFor(() => expect(started.length).toBe(1));
-    expect(started[0]).toEqual({ workspaceId: WS, prompt: "start over" });
+    expect(started[0]).toEqual({ workspaceId: WS, prompt: "start over", cwd: "/root" });
   });
 
   it("fresh thread, send, drop, gap, reload: the person's turn shows and the composer opens once it ended", async () => {
@@ -509,7 +509,7 @@ describe("chat tab threads", () => {
     await typeInto(composerEditor(), "start over");
     await press(composerEditor(), "Enter");
     await waitFor(() => expect(started.length).toBe(1));
-    expect(started[0]).toEqual({ workspaceId: WS, prompt: "start over" });
+    expect(started[0]).toEqual({ workspaceId: WS, prompt: "start over", cwd: "/root" });
     expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
     expect(status()).toContain("Turn in flight");
 

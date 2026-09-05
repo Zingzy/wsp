@@ -41,13 +41,11 @@ async function call<T>(wire: TerminalWire, op: string, params: Record<string, un
 }
 
 export interface FsListOpts {
-  depth?: number;
   gitignore?: boolean;
 }
 
 export function fsList(wire: TerminalWire, path: string, opts: FsListOpts = {}): Promise<FsListReply> {
   const params: Record<string, unknown> = { path };
-  if (opts.depth !== undefined) params["depth"] = opts.depth;
   if (opts.gitignore !== undefined) params["gitignore"] = opts.gitignore;
   return call(wire, "fs.list", params, FsListReply);
 }

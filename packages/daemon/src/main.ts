@@ -177,6 +177,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
       ws.close(4401, "unauthorized");
       return;
     }
+    push(ws, { type: "daemon.hello", root });
     const state: ConnState = { detaches: [], tunnels: new Map() };
     ws.on("close", () => {
       // Client is gone; ptys keep running. Only this socket's subscriptions and tunnels die.
@@ -380,15 +381,8 @@ async function handle(ws: WebSocket, state: ConnState, ctx: Ctx, msg: Request): 
       return;
     }
     case "fs.list": {
-      const depth = msg["depth"];
-      if (depth !== undefined && (!Number.isInteger(depth) || (depth as number) < 1)) {
-        throw new OpError("bad-request", "depth must be a positive integer");
-      }
       const dir = await resolveInside(ctx.root, requireString(msg, "path"));
-      reply(ws, msg.id, await listDir(dir, {
-        ...(depth !== undefined ? { depth: depth as number } : {}),
-        gitignore: msg["gitignore"] === true,
-      }));
+      reply(ws, msg.id, await listDir(dir, { gitignore: msg["gitignore"] === true }));
       return;
     }
     case "fs.read": {

@@ -1304,6 +1304,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         status: "running",
         prompt: o.prompt,
         startedAt: Date.now(),
+        ...(o.cwd !== undefined ? { cwd: o.cwd } : {}),
       };
       const turnId = randomUUID();
       const threadId = threadOf(workspaceId, o.resume);
@@ -1315,6 +1316,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         switch (event.type) {
           case "session.start": {
             sessionView.claudeSessionId = sessionId;
+            if (event.cwd !== undefined) sessionView.cwd = event.cwd;
             entry.record.claudeSessionId = sessionId;
             void persist(entry.record);
             record({

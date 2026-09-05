@@ -7,12 +7,10 @@ import { OpError } from "./workspace-paths.js";
 
 export const FS_READ_CAP_BYTES = 2 * 1024 * 1024;
 export const FS_LIST_CAP_ENTRIES = 10_000;
-export const FS_LIST_MAX_DEPTH = 8;
 
 export type FsEntryType = "file" | "dir" | "symlink";
 
 export interface FsEntry {
-  /** Relative to the listed directory, slash-joined below depth 1. */
   name: string;
   type: FsEntryType;
   size: number;
@@ -22,58 +20,47 @@ export interface FsEntry {
 export interface FsListing {
   entries: FsEntry[];
   truncated: boolean;
+  /** Entries the directory holds after filtering, cut or not. */
+  total: number;
 }
 
 export interface ListOpts {
-  depth?: number;
   gitignore?: boolean;
   maxEntries?: number;
 }
 
-async function readLevel(dir: string, sub: string): Promise<FsEntry[]> {
-  const dirents = await readdir(join(dir, sub), { withFileTypes: true });
-  const rows = await Promise.all(
-    dirents.map(async de => {
-      const name = sub === "" ? de.name : `${sub}/${de.name}`;
+/** git check-ignore over the whole level in one call; exit 1 means nothing
+ * matched and 128 means no repo here, both leave the level as it is. Inside
+ * an ignored directory every child reports ignored, so a directory that is
+ * itself ignored lists in full: someone asked to look in there. */
+async function dropIgnored(dir: string, names: string[]): Promise<string[]> {
+  if (names.length === 0) return names;
+  const self = await runGit(dir, ["check-ignore", "-q", "."]);
+  if (self.code !== 1) return names;
+  const res = await runGit(dir, ["check-ignore", "-z", "--stdin"], { input: names.join("\0") + "\0" });
+  if (res.code !== 0) return names;
+  const ignored = new Set(res.stdout.toString("utf8").split("\0"));
+  return names.filter(n => !ignored.has(n));
+}
+
+/** One directory's direct children, directories first, the cap spent on this
+ * directory alone; only the kept entries are stat'ed. Symlinks are reported,
+ * never followed. */
+export async function listDir(dir: string, opts: ListOpts = {}): Promise<FsListing> {
+  const cap = opts.maxEntries ?? FS_LIST_CAP_ENTRIES;
+  if (!(await stat(dir)).isDirectory()) throw new OpError("not-a-directory", `${dir} is not a directory`);
+  const dirents = new Map((await readdir(dir, { withFileTypes: true })).map(de => [de.name, de]));
+  let names = [...dirents.keys()];
+  if (opts.gitignore) names = await dropIgnored(dir, names.filter(n => n !== ".git"));
+  names.sort((a, b) => Number(dirents.get(b)!.isDirectory()) - Number(dirents.get(a)!.isDirectory()) || a.localeCompare(b));
+  const entries = await Promise.all(
+    names.slice(0, cap).map(async name => {
       const st = await lstat(join(dir, name));
       const type: FsEntryType = st.isSymbolicLink() ? "symlink" : st.isDirectory() ? "dir" : "file";
       return { name, type, size: type === "file" ? st.size : 0, mtime: Math.round(st.mtimeMs) };
     }),
   );
-  rows.sort((a, b) => Number(b.type === "dir") - Number(a.type === "dir") || a.name.localeCompare(b.name));
-  return rows;
-}
-
-/** git check-ignore over the whole level in one call; exit 1 means nothing
- * matched and 128 means no repo here, both leave the level as it is. */
-async function dropIgnored(dir: string, rows: FsEntry[]): Promise<FsEntry[]> {
-  if (rows.length === 0) return rows;
-  const res = await runGit(dir, ["check-ignore", "-z", "--stdin"], { input: rows.map(r => r.name).join("\0") + "\0" });
-  if (res.code !== 0) return rows;
-  const ignored = new Set(res.stdout.toString("utf8").split("\0"));
-  return rows.filter(r => !ignored.has(r.name));
-}
-
-/** Breadth-first to depth; symlinks are reported, never followed. */
-export async function listDir(dir: string, opts: ListOpts = {}): Promise<FsListing> {
-  const depth = Math.min(opts.depth ?? 1, FS_LIST_MAX_DEPTH);
-  const cap = opts.maxEntries ?? FS_LIST_CAP_ENTRIES;
-  if (!(await stat(dir)).isDirectory()) throw new OpError("not-a-directory", `${dir} is not a directory`);
-  const entries: FsEntry[] = [];
-  let level: string[] = [""];
-  for (let d = 0; d < depth && level.length > 0; d++) {
-    const next: string[] = [];
-    let rows: FsEntry[] = [];
-    for (const sub of level) rows.push(...(await readLevel(dir, sub)));
-    if (opts.gitignore) rows = await dropIgnored(dir, rows);
-    for (const row of rows) {
-      if (entries.length >= cap) return { entries, truncated: true };
-      entries.push(row);
-      if (row.type === "dir") next.push(row.name);
-    }
-    level = next;
-  }
-  return { entries, truncated: false };
+  return { entries, truncated: names.length > cap, total: names.length };
 }
 
 export type FsReadEncoding = "utf8" | "base64";

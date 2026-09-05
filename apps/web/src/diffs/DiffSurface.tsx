@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The right panel's Diff surface over git.diff: a scope picker (working
-// tree, staged, branch against its merge-base), a folder picker because the
-// daemon root is HOME and the repo sits below it, the changed-files tree,
-// and the copied code view with per-file collapse and inline comments that
-// stay in this surface until a composer exists to hand them to.
+// tree, staged, branch against its merge-base), git run in the panes' shared
+// root (the thread's folder unless pinned) with the repository it resolved to
+// named in the header, the changed-files tree, and the copied code view with
+// per-file collapse and inline comments that stay in this surface until a
+// composer exists to hand them to.
 import {
   ArrowRightIcon,
   ChevronDownIcon,
@@ -11,12 +12,14 @@ import {
   ChevronsDownUpIcon,
   ChevronsUpDownIcon,
   Columns2Icon,
-  FolderIcon,
+  FolderGitIcon,
+  PinIcon,
+  PinOffIcon,
   RefreshCwIcon,
   Rows3Icon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { GitDiffReply } from "@wsp/protocol";
+import type { GitDiffReply, GitStatusReply } from "@wsp/protocol";
 import { ChangedFilesTree } from "../components/chat/ChangedFilesTree.js";
 import { DiffStatLabel } from "../components/chat/DiffStatLabel.js";
 import { AnnotatableCodeView, type AnnotatableCodeViewHandle } from "../components/diffs/AnnotatableCodeView.js";
@@ -26,22 +29,24 @@ import { Spinner } from "../components/ui/spinner.js";
 import { Toggle, ToggleGroup } from "../components/ui/toggle-group.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { NotRunning } from "../files/FilesSurface.js";
-import { ROOT, useWorkspaceListing } from "../files/listing.js";
+import { usePinned, useRoot, useRootStore } from "../files/root.js";
 import { useDaemonWire } from "../files/wire.js";
 import { areAllDiffFilesCollapsed, toggleAllDiffFiles } from "../lib/diffCollapse.js";
 import { getDiffCollapseIconClassName, resolveDiffThemeName, resolveFileDiffPath } from "../lib/diffRendering.js";
 import { PREFERRED_HIGHLIGHTER } from "../lib/syntaxHighlighting.js";
 import { cn } from "../lib/utils.js";
-import { useWorkspace } from "../protocol/store.js";
 import type { ReviewCommentContext } from "../reviewCommentContext.js";
-import { gitDiff } from "../terminal/daemon-fs.js";
-import { SCOPE_LABELS, SCOPES, toDiffModel, topLevelDirectories } from "./model.js";
-import { selectDiffSelection, useDiffStore } from "./store.js";
+import { DaemonOpError, gitDiff, gitStatus } from "../terminal/daemon-fs.js";
+import { SCOPE_LABELS, SCOPES, toDiffModel } from "./model.js";
+import { DEFAULT_SCOPE, useDiffStore } from "./store.js";
 
 type LoadState =
   | { kind: "pending"; last: GitDiffReply | null }
   | { kind: "ready"; reply: GitDiffReply }
   | { kind: "error"; message: string; last: GitDiffReply | null };
+
+/** The repository git resolved for one folder: its top level and branch, or the word that there is none. */
+type RepoState = { kind: "unknown" } | { kind: "repo"; root: string; branch: string } | { kind: "none" };
 
 const NO_KEYS: ReadonlySet<string> = new Set();
 
@@ -49,35 +54,49 @@ function lastReply(state: LoadState): GitDiffReply | null {
   return state.kind === "ready" ? state.reply : state.last;
 }
 
+function repoOf(status: GitStatusReply): RepoState {
+  return { kind: "repo", root: status.root, branch: status.branch.head };
+}
+
 export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme: "light" | "dark" }) {
   const wire = useDaemonWire(workspaceId);
-  const projectName = useWorkspace(workspaceId)?.name ?? "workspace";
-  const selection = useDiffStore(s => selectDiffSelection(s.byWorkspaceId, workspaceId));
+  const root = useRoot(workspaceId);
+  const cwd = root ?? "";
+  const pinned = usePinned(workspaceId);
+  const pin = useRootStore(s => s.pin);
+  const unpin = useRootStore(s => s.unpin);
+  const scope = useDiffStore(s => s.scopeByWorkspaceId[workspaceId] ?? DEFAULT_SCOPE);
   const renderMode = useDiffStore(s => s.renderMode);
   const setScope = useDiffStore(s => s.setScope);
-  const setCwd = useDiffStore(s => s.setCwd);
   const setRenderMode = useDiffStore(s => s.setRenderMode);
-  const listing = useWorkspaceListing(workspaceId);
-  const folders = useMemo(() => topLevelDirectories(listing.entries ?? []), [listing.entries]);
   const [load, setLoad] = useState<LoadState>({ kind: "pending", last: null });
+  const [repo, setRepo] = useState<{ cwd: string; state: RepoState }>({ cwd, state: { kind: "unknown" } });
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(NO_KEYS);
   const [treeOpen, setTreeOpen] = useState(true);
   const [comments, setComments] = useState<ReviewCommentContext[]>([]);
   const viewerRef = useRef<AnnotatableCodeViewHandle>(null);
-  const { scope, cwd } = selection;
   const scopeKey = `${cwd} ${scope}`;
-  const folderLabel = cwd === ROOT ? projectName : cwd;
 
   const fetchDiff = useCallback(() => {
-    if (!wire) return;
+    if (!wire || cwd === "") return;
     let gone = false;
     setLoad(current => ({ kind: "pending", last: lastReply(current) }));
+    // The repository label stays through a refresh of the same folder and resets only for a new one.
+    setRepo(current => (current.cwd === cwd ? current : { cwd, state: { kind: "unknown" } }));
     gitDiff(wire, cwd, scope).then(
       reply => {
         if (!gone) setLoad({ kind: "ready", reply });
       },
       (e: unknown) => {
         if (!gone) setLoad(current => ({ kind: "error", message: e instanceof Error ? e.message : String(e), last: lastReply(current) }));
+      },
+    );
+    gitStatus(wire, cwd).then(
+      status => {
+        if (!gone) setRepo({ cwd, state: repoOf(status) });
+      },
+      (e: unknown) => {
+        if (!gone) setRepo({ cwd, state: e instanceof DaemonOpError && e.code === "not-a-git-repo" ? { kind: "none" } : { kind: "unknown" } });
       },
     );
     return () => {
@@ -122,13 +141,15 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
     viewerRef.current?.scrollTo({ type: "item", id: file.fileKey, align: "start" });
   };
 
-  if (!wire) return <NotRunning />;
+  if (!wire || root === null) return <NotRunning />;
 
   const isPending = load.kind === "pending";
   const scopeLabel = SCOPE_LABELS[scope];
+  const shown = repo.cwd === cwd ? repo.state : { kind: "unknown" as const };
+  const folderLabel = shown.kind === "repo" ? shown.root : cwd;
 
   return (
-    <div className="flex h-full min-w-0 flex-col bg-background" data-diff-surface data-diff-scope={scope}>
+    <div className="flex h-full min-w-0 flex-col bg-background" data-diff-surface data-diff-scope={scope} data-diff-cwd={cwd}>
       <div
         className="flex h-10 min-h-10 shrink-0 items-center justify-between gap-2 border-b border-border/60 bg-background px-3 in-data-[preview-panel-mode=inline]:mb-3 in-data-[preview-panel-mode=inline]:h-7 in-data-[preview-panel-mode=inline]:min-h-7 in-data-[preview-panel-mode=inline]:border-b-transparent"
         data-surface-subheader
@@ -154,28 +175,32 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
               ))}
             </MenuPopup>
           </Menu>
-          <Menu>
-            <MenuTrigger
-              className="inline-flex h-6 min-w-0 max-w-48 items-center gap-1 rounded-md px-1.5 text-xs text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-              aria-label={`Diff folder: ${folderLabel}`}
-              title="Folder git runs in"
+          <span
+            className="inline-flex h-6 min-w-0 items-center gap-1 px-1 font-mono text-[11px] text-muted-foreground"
+            title={shown.kind === "repo" ? `git: ${shown.root}` : shown.kind === "none" ? `no repository at or above ${cwd}` : cwd}
+            data-diff-repo={shown.kind === "repo" ? shown.root : undefined}
+          >
+            <FolderGitIcon className={cn("size-3.5 shrink-0", shown.kind === "repo" ? "opacity-70" : "opacity-40")} />
+            <span className="min-w-0 truncate">{shown.kind === "none" ? `no git at ${cwd}` : folderLabel}</span>
+            {shown.kind === "repo" ? <span className="shrink-0 truncate opacity-70">· {shown.branch}</span> : null}
+          </span>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  size="icon-micro"
+                  variant="ghost"
+                  aria-label={pinned ? "Follow the agent's folder" : "Stay in this folder"}
+                  aria-pressed={pinned}
+                  onClick={() => (pinned ? unpin(workspaceId) : pin(workspaceId, cwd))}
+                />
+              }
             >
-              <FolderIcon className="size-3.5 shrink-0 opacity-70" />
-              <span className="min-w-0 truncate">{folderLabel}</span>
-              <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
-            </MenuTrigger>
-            <MenuPopup align="start" className="w-64">
-              <MenuItem className={cwd === ROOT ? "bg-foreground/[0.08]" : undefined} onClick={() => setCwd(workspaceId, ROOT)}>
-                <span>Workspace root</span>
-              </MenuItem>
-              {folders.map(folder => (
-                <MenuItem key={folder} className={cwd === folder ? "bg-foreground/[0.08]" : undefined} onClick={() => setCwd(workspaceId, folder)}>
-                  <span className="truncate font-mono text-xs">{folder}</span>
-                </MenuItem>
-              ))}
-              {folders.length === 0 ? <MenuItem disabled>No folders under the root.</MenuItem> : null}
-            </MenuPopup>
-          </Menu>
+              {pinned ? <PinOffIcon className="size-3.5" /> : <PinIcon className="size-3.5" />}
+            </TooltipTrigger>
+            <TooltipPopup side="top">{pinned ? "Follow the agent's folder again" : "Stay here when the agent moves"}</TooltipPopup>
+          </Tooltip>
           {scope === "branch" && reply?.base ? (
             <div
               className="flex min-w-0 max-w-full items-center gap-2 overflow-hidden text-xs text-muted-foreground"
@@ -260,7 +285,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
           </div>
         ) : model.changedFiles.length === 0 ? (
           <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
-            No changes in {scopeLabel.toLowerCase()} for {folderLabel}.
+            No changes in {scopeLabel.toLowerCase()} at {folderLabel}.
           </div>
         ) : (
           <>

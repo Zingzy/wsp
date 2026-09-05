@@ -174,7 +174,7 @@ describe("runtime session history", () => {
     });
     return {
       adapter,
-      start: () => onEvent!({ type: "session.start", sessionId, model: "claude-sonnet-4-5" }),
+      start: (cwd?: string) => onEvent!({ type: "session.start", sessionId, model: "claude-sonnet-4-5", ...(cwd !== undefined ? { cwd } : {}) }),
       done: (text: string) => onEvent!({ type: "turn.done", sessionId, result: { status: "completed", text } }),
       end: () => {
         onEvent!({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
@@ -407,6 +407,20 @@ describe("runtime session history", () => {
     expect(ended.endedAt).toBeGreaterThanOrEqual(ended.startedAt!);
     expect(ended.endedAt).toBeLessThanOrEqual(Date.now());
     expect(ended.prompt).toBe("go");
+    await rt.close();
+  });
+
+  it("SessionView carries the folder: the start request's until the harness announces its own", async () => {
+    const m = manual();
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: m.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "go", cwd: "/root/app" });
+    expect(handle.view().cwd).toBe("/root/app");
+    m.start("/root/app/packages/web");
+    expect(rt.sessions.list(ws.id)[0]!.cwd).toBe("/root/app/packages/web");
+    m.done("done");
+    m.end();
+    await handle.finished;
     await rt.close();
   });
 

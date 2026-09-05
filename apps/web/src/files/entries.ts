@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// What the copied tree and breadcrumbs read: the daemon's fs.list rows
-// flattened to workspace-relative paths with a file-or-directory kind. Paths
-// are relative to the daemon root, which is the workspace HOME unless the
-// daemon was started with --root, so "" names that root everywhere here.
+// Paths as the daemon takes them: absolute, inside the root its hello named
+// (the workspace HOME unless it was started with --root). Every entry the
+// panes hold is one, so a file can be read, a directory listed and a session
+// started with the string as it is.
 import type { FsListReply } from "@wsp/protocol";
 
 export interface ProjectEntry {
@@ -10,12 +10,27 @@ export interface ProjectEntry {
   readonly kind: "file" | "directory";
 }
 
-/** The daemon lists breadth-first to this depth; deeper trees show truncated. */
-export const LIST_DEPTH = 8;
+export function joinPath(dir: string, name: string): string {
+  return dir.endsWith("/") ? `${dir}${name}` : `${dir}/${name}`;
+}
+
+/** null at the filesystem root, where there is nowhere up to go. */
+export function parentPath(path: string): string | null {
+  if (path === "/") return null;
+  const cut = path.lastIndexOf("/");
+  return cut <= 0 ? "/" : path.slice(0, cut);
+}
+
+/** path below root as the tree shows it; the root itself is "". */
+export function relativeTo(root: string, path: string): string {
+  if (path === root) return "";
+  const prefix = root.endsWith("/") ? root : `${root}/`;
+  return path.startsWith(prefix) ? path.slice(prefix.length) : path;
+}
 
 /** A symlink is listed as a file: fs.read follows it, fs.list never descends. */
-export function toProjectEntries(reply: FsListReply): ProjectEntry[] {
-  return reply.entries.map(entry => ({ path: entry.name, kind: entry.type === "dir" ? "directory" : "file" }));
+export function toProjectEntries(reply: FsListReply, dir: string): ProjectEntry[] {
+  return reply.entries.map(entry => ({ path: joinPath(dir, entry.name), kind: entry.type === "dir" ? "directory" : "file" }));
 }
 
 export function isMarkdownFile(path: string): boolean {

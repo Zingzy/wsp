@@ -1,31 +1,31 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/files/FileBrowserPanel.tsx at 57a66608 (MIT).
-import { FileTree, useFileTree, useFileTreeSearch, useFileTreeSelector } from "@pierre/trees/react";
-import { ChevronsDownUpIcon, ChevronsUpDownIcon, RotateCw } from "lucide-react";
+// Differs from upstream: the tree fills in one folder at a time as folders
+// are expanded, over the daemon's per-folder listing, instead of one deep
+// walk; the expand-all control and the preview reveal sync are gone with it.
+import { FileTree, useFileTree, useFileTreeSearch } from "@pierre/trees/react";
+import { RotateCw } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 
-import type { ProjectEntry } from "../../files/entries";
+import { joinPath } from "../../files/entries";
+import type { Levels } from "../../files/listing";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { InputGroup, InputGroupInput } from "../ui/input-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
-import { areAllDirectoriesExpanded, setAllDirectoriesExpanded } from "./fileTreeExpansion";
 import { buildFileTreePathUpdates } from "./fileTreePathReconciliation";
+import { fileTreeRows, sortTreeRows } from "./fileTreeRows";
 
 interface FileBrowserPanelProps {
   projectName: string;
-  /** Null until the first listing arrives; kept across refreshes. */
-  entries: readonly ProjectEntry[] | null;
-  /** The listing hit the daemon's entry or depth cap. */
-  truncated: boolean;
-  isPending: boolean;
-  error: string | null;
-  /** File currently open in the preview pane; revealed and selected in the tree. */
-  selectedPath: string | null;
-  /** Bumped when the same path should be revealed again (e.g. re-opened from search). */
-  selectedPathRevealId: number;
-  onOpenFile: (relativePath: string) => void;
-  onRefresh: () => void;
+  /** The folder the tree is rooted at, as the daemon names it. */
+  root: string;
+  levels: Levels;
+  /** A folder row was opened whose listing nobody asked for yet. */
+  onExpandDirectory: (dir: string) => void;
+  onOpenFile: (path: string) => void;
+  /** Called with every folder the tree currently shows a listing for. */
+  onRefresh: (dirs: string[]) => void;
   theme: "light" | "dark";
 }
 
@@ -40,10 +40,6 @@ const TREE_UNSAFE_CSS = `
   }
   button[data-type='item'] { border-radius: 5px; }
 `;
-
-function treePath(entry: ProjectEntry): string {
-  return entry.kind === "directory" ? `${entry.path}/` : entry.path;
-}
 
 function RefreshFilesButton(props: { isPending: boolean; onRefresh: () => void }) {
   return (
@@ -96,59 +92,42 @@ function FileSearchField(props: {
 
 export default function FileBrowserPanel({
   projectName,
-  entries: entriesProp,
-  truncated,
-  isPending,
-  error,
-  selectedPath,
-  selectedPathRevealId,
+  root,
+  levels,
+  onExpandDirectory,
   onOpenFile,
   onRefresh,
   theme,
 }: FileBrowserPanelProps) {
-  const entries = entriesProp ?? [];
-  const entryKinds = useMemo(
-    () => new Map(entries.map((entry) => [entry.path, entry.kind] as const)),
-    [entries],
-  );
-  const entryKindsRef = useRef<ReadonlyMap<string, ProjectEntry["kind"]>>(entryKinds);
-  const treePaths = useMemo(() => entries.map(treePath), [entries]);
-  const directoryPaths = useMemo(
-    () => entries.filter((entry) => entry.kind === "directory").map(treePath),
-    [entries],
-  );
-  const previousTreePathsRef = useRef<readonly string[] | null>(null);
-  const syncingSelectionRef = useRef(false);
-  const treeSelectionPathRef = useRef<string | null>(null);
-  const handledRevealRef = useRef<{ path: string; revealId: number } | null>(null);
+  const rootLevel = levels.get(root);
+  const rows = useMemo(() => fileTreeRows(root, levels), [root, levels]);
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  const levelsRef = useRef(levels);
+  levelsRef.current = levels;
+  const expandRef = useRef(onExpandDirectory);
+  expandRef.current = onExpandDirectory;
+  // The tree model reads its options once, so the selection handler goes through refs for the current root and opener.
+  const openRef = useRef({ root, onOpenFile });
+  openRef.current = { root, onOpenFile };
+  const previousRef = useRef<{ root: string; paths: readonly string[] } | null>(null);
 
   const { model } = useFileTree({
     density: "compact",
     fileTreeSearchMode: "hide-non-matches",
-    flattenEmptyDirectories: true,
-    initialExpansion: 1,
+    flattenEmptyDirectories: false,
+    initialExpansion: "closed",
     icons: { set: "complete", colored: true },
     onSelectionChange: (selectedPaths) => {
-      // Selection changes driven by the reveal sync below are echoes of an
-      // already-open file, not a request to open it again.
-      if (syncingSelectionRef.current) return;
-      const selectedPath = selectedPaths.at(-1)?.replace(/\/$/, "");
-      if (selectedPath && entryKindsRef.current.get(selectedPath) === "file") {
-        treeSelectionPathRef.current = selectedPath;
-        onOpenFile(selectedPath);
-      }
+      const selected = selectedPaths.at(-1)?.replace(/\/$/, "");
+      if (selected && rowsRef.current.kinds.get(selected) === "file") openRef.current.onOpenFile(joinPath(openRef.current.root, selected));
     },
     paths: [],
     search: false,
+    sort: sortTreeRows,
     unsafeCSS: TREE_UNSAFE_CSS,
   });
   const search = useFileTreeSearch(model);
-  const allDirectoriesExpanded = useFileTreeSelector(model, (currentModel) =>
-    areAllDirectoriesExpanded(currentModel, directoryPaths),
-  );
-  const toggleAllDirectories = () => {
-    setAllDirectoriesExpanded(model, directoryPaths, !allDirectoriesExpanded);
-  };
   const handleSearchValueChange = (value: string) => {
     if (value.trim().length === 0) {
       search.close();
@@ -158,86 +137,40 @@ export default function FileBrowserPanel({
   };
 
   useEffect(() => {
-    if (entriesProp === null) return;
-    if (previousTreePathsRef.current === treePaths) return;
-    entryKindsRef.current = entryKinds;
-    const previousTreePaths = previousTreePathsRef.current;
-    previousTreePathsRef.current = treePaths;
-    if (previousTreePaths === null) {
-      model.resetPaths(treePaths);
+    if (rootLevel?.entries == null) return;
+    const previous = previousRef.current;
+    if (previous?.root === root && previous.paths === rows.paths) return;
+    previousRef.current = { root, paths: rows.paths };
+    if (previous === null || previous.root !== root) {
+      model.resetPaths(rows.paths);
       return;
     }
-    const updates = buildFileTreePathUpdates(previousTreePaths, treePaths);
+    const updates = buildFileTreePathUpdates(previous.paths, rows.paths);
     if (updates.length > 0) model.batch(updates);
-  }, [entriesProp, entryKinds, model, treePaths]);
+  }, [model, root, rootLevel?.entries, rows.paths]);
 
-  useEffect(() => {
-    if (!selectedPath) {
-      handledRevealRef.current = null;
-      return;
-    }
-    const revealRequest = { path: selectedPath, revealId: selectedPathRevealId };
-    const handledReveal = handledRevealRef.current;
-    // Entry refreshes rebuild treePaths while the same preview stays open.
-    // Replaying a handled reveal would close an active tree search and steal focus.
-    if (
-      handledReveal?.path === revealRequest.path &&
-      handledReveal.revealId === revealRequest.revealId
-    ) {
-      return;
-    }
-    if (entryKinds.get(selectedPath) !== "file") return;
-    const selectedItem = model.getItem(selectedPath);
-    if (!selectedItem) return;
+  // The tree has no lazy-load hook, so every change is checked for a folder that is open without a listing.
+  useEffect(
+    () =>
+      model.subscribe(() => {
+        for (const [treePath, dir] of rowsRef.current.directories) {
+          if (levelsRef.current.has(dir)) continue;
+          const item = model.getItem(treePath);
+          if (item !== null && "isExpanded" in item && item.isExpanded()) expandRef.current(dir);
+        }
+      }),
+    [model],
+  );
 
-    // A selection that originated inside the tree (clicking a row, possibly
-    // in an active tree search) is already visible; re-revealing it would
-    // close the search and clobber the user's context. Only sync external
-    // opens (breadcrumb menus, the diff's file list).
-    const selectedInTree = model
-      .getSelectedPaths()
-      .some((path) => path.replace(/\/$/, "") === selectedPath);
-    if (selectedInTree && treeSelectionPathRef.current === selectedPath) {
-      treeSelectionPathRef.current = null;
-      handledRevealRef.current = revealRequest;
-      return;
-    }
-    treeSelectionPathRef.current = null;
-    handledRevealRef.current = revealRequest;
-
-    syncingSelectionRef.current = true;
-    model.closeSearch();
-    for (const path of model.getSelectedPaths()) {
-      model.getItem(path)?.deselect();
-    }
-
-    // Directory rows are registered with a trailing slash (see treePath), so
-    // ancestor lookups must use the same form to expand them.
-    const segments = selectedPath.split("/");
-    let ancestorPath = "";
-    for (const segment of segments.slice(0, -1)) {
-      ancestorPath = ancestorPath ? `${ancestorPath}/${segment}` : segment;
-      const item = model.getItem(`${ancestorPath}/`) ?? model.getItem(ancestorPath);
-      if (item && "expand" in item) item.expand();
-    }
-
-    selectedItem.select();
-    model.scrollToPath(selectedPath, { focus: true, offset: "center" });
-    queueMicrotask(() => {
-      syncingSelectionRef.current = false;
-    });
-  }, [entryKinds, model, selectedPath, selectedPathRevealId, treePaths]);
+  const showError = rootLevel?.error !== null && rootLevel?.error !== undefined && rootLevel.entries === null;
 
   return (
-    <div
-      className="flex min-h-0 flex-1 flex-col bg-background"
-      data-file-browser-panel={projectName}
-    >
+    <div className="flex min-h-0 flex-1 flex-col bg-background" data-file-browser-panel={projectName} data-file-browser-root={root}>
       <div
         className="flex h-10 min-h-10 shrink-0 items-center gap-1 border-b border-border/60 bg-background px-2 in-data-[preview-panel-mode=inline]:mb-3 in-data-[preview-panel-mode=inline]:h-7 in-data-[preview-panel-mode=inline]:min-h-7 in-data-[preview-panel-mode=inline]:border-b-transparent"
         data-surface-subheader
       >
-        <RefreshFilesButton isPending={isPending} onRefresh={onRefresh} />
+        <RefreshFilesButton isPending={rootLevel?.isPending ?? false} onRefresh={() => onRefresh(rows.loaded.length > 0 ? rows.loaded : [root])} />
         <FileSearchField
           name="project-files-search"
           ariaLabel={`Search ${projectName} files`}
@@ -245,35 +178,9 @@ export default function FileBrowserPanel({
           onValueChange={handleSearchValueChange}
           onClose={search.close}
         />
-        {directoryPaths.length > 0 ? (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  type="button"
-                  size="icon-xs"
-                  variant="ghost"
-                  aria-label={
-                    allDirectoriesExpanded ? "Collapse all folders" : "Expand all folders"
-                  }
-                  onClick={toggleAllDirectories}
-                />
-              }
-            >
-              {allDirectoriesExpanded ? (
-                <ChevronsDownUpIcon className="size-3.5" />
-              ) : (
-                <ChevronsUpDownIcon className="size-3.5" />
-              )}
-            </TooltipTrigger>
-            <TooltipPopup>
-              {allDirectoriesExpanded ? "Collapse all folders" : "Expand all folders"}
-            </TooltipPopup>
-          </Tooltip>
-        ) : null}
       </div>
-      {error && entriesProp === null ? (
-        <div className="p-4 text-xs leading-relaxed text-destructive">{error}</div>
+      {showError ? (
+        <div className="p-4 text-xs leading-relaxed text-destructive">{rootLevel.error}</div>
       ) : (
         <FileTree
           model={model}
@@ -285,14 +192,11 @@ export default function FileBrowserPanel({
           }}
         />
       )}
-      {truncated ? (
-        <p
-          className="shrink-0 border-t border-border/70 bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground"
-          data-files-truncated
-        >
-          Some workspace entries are not shown; the listing hit the daemon's cap.
+      {rows.errors.map(error => (
+        <p key={error.dir} className="shrink-0 truncate border-t border-border/70 px-3 py-1.5 font-mono text-[11px] text-destructive" title={error.message} data-files-error={error.dir}>
+          {error.dir}: {error.message}
         </p>
-      ) : null}
+      ))}
     </div>
   );
 }

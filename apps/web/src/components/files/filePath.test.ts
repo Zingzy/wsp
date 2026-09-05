@@ -1,21 +1,22 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/files/filePath.test.ts at 57a66608 (MIT).
 import { describe, expect, it } from "vitest";
 
-import { fileBreadcrumbChildren, fileBreadcrumbParent, fileBreadcrumbs } from "./filePath";
+import type { LevelState } from "../../files/listing";
+import { fileBreadcrumbChildren, fileBreadcrumbs } from "./filePath";
 
 describe("fileBreadcrumbs", () => {
-  it("builds project, directory, and file crumbs", () => {
-    expect(fileBreadcrumbs("wsp", "apps/web/src/main.tsx")).toEqual([
-      { label: "wsp", path: "", kind: "project" },
-      { label: "apps", path: "apps", kind: "directory" },
-      { label: "web", path: "apps/web", kind: "directory" },
-      { label: "src", path: "apps/web/src", kind: "directory" },
-      { label: "main.tsx", path: "apps/web/src/main.tsx", kind: "file" },
+  it("builds project, directory, and file crumbs below the daemon root", () => {
+    expect(fileBreadcrumbs("wsp", "/root", "/root/apps/web/src/main.tsx")).toEqual([
+      { label: "wsp", path: "/root", kind: "project" },
+      { label: "apps", path: "/root/apps", kind: "directory" },
+      { label: "web", path: "/root/apps/web", kind: "directory" },
+      { label: "src", path: "/root/apps/web/src", kind: "directory" },
+      { label: "main.tsx", path: "/root/apps/web/src/main.tsx", kind: "file" },
     ]);
   });
 
   it("normalizes repeated separators", () => {
-    expect(fileBreadcrumbs("workspace", "src//index.ts").map((crumb) => crumb.label)).toEqual([
+    expect(fileBreadcrumbs("workspace", "/root", "/root/src//index.ts").map((crumb) => crumb.label)).toEqual([
       "workspace",
       "src",
       "index.ts",
@@ -24,50 +25,25 @@ describe("fileBreadcrumbs", () => {
 });
 
 describe("fileBreadcrumbChildren", () => {
-  const entries = [
-    { path: "README.md", kind: "file" as const },
-    { path: "src", kind: "directory" as const },
-    { path: "src-old", kind: "directory" as const },
-    { path: "src/index.ts", kind: "file" as const },
-    { path: "src/lib", kind: "directory" as const },
-    { path: "src/lib/file10.ts", kind: "file" as const },
-    { path: "src/lib/file2.ts", kind: "file" as const },
-    { path: "src-old/index.ts", kind: "file" as const },
-  ];
+  const level = (entries: LevelState["entries"]): LevelState => ({ entries, truncated: false, total: entries?.length ?? 0, isPending: false, error: null });
+  const levels = new Map<string, LevelState>([
+    ["/root", level([{ path: "/root/README.md", kind: "file" }, { path: "/root/src", kind: "directory" }, { path: "/root/src-old", kind: "directory" }])],
+    ["/root/src/lib", level([{ path: "/root/src/lib/file10.ts", kind: "file" }, { path: "/root/src/lib/file2.ts", kind: "file" }])],
+  ]);
 
-  it("returns only the immediate children of the project root", () => {
-    expect(fileBreadcrumbChildren(entries, "")).toEqual([
-      { path: "src", kind: "directory", label: "src" },
-      { path: "src-old", kind: "directory", label: "src-old" },
-      { path: "README.md", kind: "file", label: "README.md" },
-    ]);
-  });
-
-  it("honors segment boundaries and sorts folders before files", () => {
-    expect(fileBreadcrumbChildren(entries, "src")).toEqual([
-      { path: "src/lib", kind: "directory", label: "lib" },
-      { path: "src/index.ts", kind: "file", label: "index.ts" },
+  it("labels a listed folder's children by name, folders first", () => {
+    expect(fileBreadcrumbChildren(levels, "/root")).toEqual([
+      { path: "/root/src", kind: "directory", label: "src" },
+      { path: "/root/src-old", kind: "directory", label: "src-old" },
+      { path: "/root/README.md", kind: "file", label: "README.md" },
     ]);
   });
 
   it("uses natural file-name ordering", () => {
-    expect(fileBreadcrumbChildren(entries, "src/lib").map((entry) => entry.label)).toEqual([
-      "file2.ts",
-      "file10.ts",
-    ]);
+    expect(fileBreadcrumbChildren(levels, "/root/src/lib")!.map((entry) => entry.label)).toEqual(["file2.ts", "file10.ts"]);
   });
 
-  it("returns an empty list for an empty or missing directory", () => {
-    expect(fileBreadcrumbChildren(entries, "missing")).toEqual([]);
-  });
-});
-
-describe("fileBreadcrumbParent", () => {
-  it.each([
-    ["src/lib", "src"],
-    ["src", ""],
-    ["", null],
-  ])("returns the parent of %j", (path, expected) => {
-    expect(fileBreadcrumbParent(path)).toBe(expected);
+  it("is null for a folder nobody listed yet", () => {
+    expect(fileBreadcrumbChildren(levels, "missing")).toBeNull();
   });
 });

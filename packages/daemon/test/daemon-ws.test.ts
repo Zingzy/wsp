@@ -1,4 +1,5 @@
-import { networkInterfaces } from "node:os";
+import { homedir, networkInterfaces } from "node:os";
+import { resolve } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import { startDaemon, type DaemonHandle } from "../src/main.js";
@@ -42,11 +43,13 @@ class Client {
 
   static async connect(port: number, token: string): Promise<Client> {
     const ws = new WebSocket(`ws://127.0.0.1:${port}/?token=${token}`);
+    // Listening before open: the hello frame can ride in with the handshake.
+    const client = new Client(ws);
     await new Promise<void>((resolve, reject) => {
       ws.once("open", resolve);
       ws.once("error", reject);
     });
-    return new Client(ws);
+    return client;
   }
 
   request(op: string, params: Record<string, unknown> = {}): Promise<WireMsg> {
@@ -84,6 +87,14 @@ describe("daemon WS server", () => {
     expect(code).toBe(4401);
     await new Promise(r => setTimeout(r, 100));
     expect(daemon.ptys.list().length).toBe(before);
+  });
+
+  it("greets an authed socket with its root before anything else", async () => {
+    const c = await Client.connect(daemon.port, TOKEN);
+    const pong = await c.request("ping");
+    expect(pong.ok).toBe(true);
+    expect(c.events[0]).toEqual({ type: "daemon.hello", root: resolve(process.env["HOME"] ?? homedir()) });
+    c.close();
   });
 
   it("accepts connections on non-loopback interfaces (previewUrl edge dials eth0)", async () => {

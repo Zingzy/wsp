@@ -24,17 +24,17 @@ function fakeWire(replies: Record<string, Record<string, unknown>>): TerminalWir
 describe("daemon-fs wrapper over a wire", () => {
   it("sends only the params given and returns the parsed reply", async () => {
     const w = fakeWire({
-      "fs.list": { entries: [{ name: "src", type: "dir", size: 0, mtime: 1 }], truncated: false },
+      "fs.list": { entries: [{ name: "src", type: "dir", size: 0, mtime: 1 }], truncated: false, total: 1 },
       "fs.read": { content: "hi", size: 2, truncated: false },
-      "git.status": { branch: { oid: "a", head: "main", ahead: 0, behind: 0 }, entries: [] },
+      "git.status": { branch: { oid: "a", head: "main", ahead: 0, behind: 0 }, entries: [], root: "/root/repo" },
       "git.diff": { base: null, files: [], truncated: false },
     });
     const list = await fsList(w, "repo");
     expect(list.entries[0]?.type).toBe("dir");
     expect(w.calls[0]).toEqual(["fs.list", { path: "repo" }]);
 
-    await fsList(w, "repo", { depth: 2, gitignore: true });
-    expect(w.calls[1]).toEqual(["fs.list", { path: "repo", depth: 2, gitignore: true }]);
+    await fsList(w, "repo", { gitignore: true });
+    expect(w.calls[1]).toEqual(["fs.list", { path: "repo", gitignore: true }]);
 
     const read = await fsRead(w, "repo/a.txt", "base64");
     expect(read.content).toBe("hi");

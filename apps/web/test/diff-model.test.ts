@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { toDiffModel, topLevelDirectories } from "../src/diffs/model.js";
+import { toDiffModel } from "../src/diffs/model.js";
 
 const PATCH = [
   "diff --git a/src/a.txt b/src/a.txt",
@@ -31,18 +31,5 @@ describe("toDiffModel", () => {
     const model = toDiffModel({ base: "main", files: [], truncated: false }, "test");
     expect(model.files).toEqual([]);
     expect(model.changedFiles).toEqual([]);
-  });
-});
-
-describe("topLevelDirectories", () => {
-  it("keeps only directories directly under the root", () => {
-    expect(
-      topLevelDirectories([
-        { path: "repo", kind: "directory" },
-        { path: "repo/src", kind: "directory" },
-        { path: "notes.md", kind: "file" },
-        { path: ".dotfiles", kind: "directory" },
-      ]),
-    ).toEqual(["repo", ".dotfiles"]);
   });
 });

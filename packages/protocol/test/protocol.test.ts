@@ -268,6 +268,7 @@ describe("daemon wire types (one home for the ops from @wsp/daemon)", () => {
     expect(DaemonResponse.parse({ id: 1, ok: false, error: "no such pty" })).toBeTruthy();
 
     const events = [
+      { type: "daemon.hello", root: "/root" },
       { type: "pty.data", ptyId: "p1", data: "hello" },
       { type: "pty.exit", ptyId: "p1", exitCode: 0, signal: undefined },
       { type: "port.open", port: 8080, pid: 12 },
@@ -275,6 +276,7 @@ describe("daemon wire types (one home for the ops from @wsp/daemon)", () => {
       { type: "inbox.file", path: "/root/inbox/x.png", bytes: 10 },
     ];
     for (const e of events) expect(DaemonEvent.parse(e)).toBeTruthy();
+    expect(() => DaemonEvent.parse({ type: "daemon.hello" })).toThrow();
   });
 });
 
@@ -399,7 +401,7 @@ describe("golden wire schemas", () => {
 describe("daemon files and diff ops", () => {
   it("parses the four requests and refuses a bad scope or encoding", () => {
     const reqs = [
-      { id: 1, op: "fs.list", path: "src", depth: 2, gitignore: true },
+      { id: 1, op: "fs.list", path: "src", gitignore: true },
       { id: 2, op: "fs.read", path: "src/index.ts", encoding: "base64" },
       { id: 3, op: "git.status", cwd: "." },
       { id: 4, op: "git.diff", cwd: ".", scope: "branch", path: "src" },
@@ -407,13 +409,14 @@ describe("daemon files and diff ops", () => {
     for (const r of reqs) expect(DaemonRequest.parse(r)).toEqual(r);
     expect(() => DaemonRequest.parse({ id: 5, op: "git.diff", cwd: ".", scope: "all" })).toThrow();
     expect(() => DaemonRequest.parse({ id: 6, op: "fs.read", path: "x", encoding: "hex" })).toThrow();
-    expect(() => DaemonRequest.parse({ id: 7, op: "fs.list", path: "x", depth: 0 })).toThrow();
+    expect(() => DaemonRequest.parse({ id: 7, op: "fs.list", path: 7 })).toThrow();
   });
 
   it("parses the typed replies", () => {
-    const list = { entries: [{ name: "a.ts", type: "file", size: 12, mtime: 1_700_000_000_000 }], truncated: false };
+    const list = { entries: [{ name: "a.ts", type: "file", size: 12, mtime: 1_700_000_000_000 }], truncated: false, total: 1 };
     expect(FsListReply.parse(list)).toEqual(list);
-    expect(() => FsListReply.parse({ entries: [{ ...list.entries[0], type: "socket" }], truncated: false })).toThrow();
+    expect(() => FsListReply.parse({ entries: [{ ...list.entries[0], type: "socket" }], truncated: false, total: 1 })).toThrow();
+    expect(() => FsListReply.parse({ entries: list.entries, truncated: false })).toThrow();
     const read = { content: "aGk=", size: 2, truncated: false };
     expect(FsReadReply.parse(read)).toEqual(read);
     const status = {
@@ -423,6 +426,7 @@ describe("daemon files and diff ops", () => {
         { xy: "R.", path: "b.ts", origPath: "old.ts" },
         { xy: "??", path: "new.ts" },
       ],
+      root: "/root/app",
     };
     expect(GitStatusReply.parse(status)).toEqual(status);
     const diff = { base: "main", files: [{ path: "a.ts", patch: "diff --git a/a.ts b/a.ts\n" }], truncated: true };
