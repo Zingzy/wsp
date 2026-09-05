@@ -25,6 +25,7 @@ import { startCallbackRelay } from "../src/relay.js";
 import type { ConnectOptions, DaemonSocket } from "../src/doctor.js";
 import { appendCommand, readCommand } from "../src/init-secrets.js";
 import { noteOutcomes, statusLine } from "../src/init-signin.js";
+import { CLAUDE_STATUS } from "../src/signin-table.js";
 import { fakePtyLink, type FakePtyLink } from "./fake-pty-link.js";
 import { EVERYTHING, FIXTURE } from "./init-fixture.js";
 import { guestAnswer, stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
@@ -388,7 +389,7 @@ describe("wsp init, interactive", () => {
       "exec gh auth login || exit\r",
       `${statusLine("gh auth status")}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`,
       "exec claude auth login || exit\r",
-      `${statusLine("claude auth status")}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`,
+      `${statusLine(CLAUDE_STATUS)}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`,
     ]);
     expect(f.link.ptys.every(p => p.killed)).toBe(true);
     expect(f.hooks[0]!.autoOpen(f.backends[0]!.machines[0]!.id, DEVICE_URL)).toBe(false);
@@ -1354,7 +1355,7 @@ describe("wsp init, logins copied to the machine", () => {
     ghOnBuilder(f);
     const { run } = await toTheBuilder(f);
     await f.until("GitHub CLI login: not signed in (copied, but gh auth status says not signed in)");
-    await f.until("kubectl config: signed in (copied; context minikube; kubectl config current-context 2>/dev/null)");
+    await f.until("kubectl config: signed in (copied; context minikube; kubectl config current-context)");
     await f.until("GitHub CLI login  r sign in on the machine   s skip");
     expect(f.text()).not.toContain("Signing in on the machine");
     await f.press("r");
@@ -1368,7 +1369,7 @@ describe("wsp init, logins copied to the machine", () => {
     expect(f.link.ptys.map(p => p.writes[0])).toEqual([STATUS_LINE, KUBE_LINE, "exec gh auth login || exit\r", STATUS_LINE]);
     expect(result.logins).toEqual([
       { id: "logins/gh", label: "GitHub CLI login", state: "signed-in", command: "gh auth login", exit: 0, note: "gh auth status" },
-      { id: "logins/kube", label: "kubectl config", state: "signed-in", note: "copied; context minikube; kubectl config current-context 2>/dev/null" },
+      { id: "logins/kube", label: "kubectl config", state: "signed-in", note: "copied; context minikube; kubectl config current-context" },
     ]);
     expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({
       logins: [
@@ -1580,7 +1581,7 @@ describe("wsp init, logins copied to the machine", () => {
     expect(f.link.ptys.map(p => p.writes[0])).toEqual([STATUS_LINE, KUBE_LINE]);
     expect(result.logins).toEqual([
       { id: "logins/gh", label: "GitHub CLI login", state: "not-signed-in", note: "copied, but gh auth status says not signed in" },
-      { id: "logins/kube", label: "kubectl config", state: "signed-in", note: "copied; context minikube; kubectl config current-context 2>/dev/null" },
+      { id: "logins/kube", label: "kubectl config", state: "signed-in", note: "copied; context minikube; kubectl config current-context" },
     ]);
   });
 
