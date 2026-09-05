@@ -1527,6 +1527,10 @@ describe("wsp init, flags and no terminal", () => {
     const out = f.text();
     expect(out).toContain("│  heartbeat for builder m1 not written: ETIMEDOUT");
     expect(out.indexOf("heartbeat for builder m1")).toBeLessThan(out.indexOf("Installing agents failed"));
+    // The line the terminal showed for a moment is kept in the run log as a note.
+    const runLog = readFileSync(join(dirname(f.opts.statePath), "init.log"), "utf8").split("\n");
+    expect(runLog.some(l => / note heartbeat for builder m1 not written: ETIMEDOUT$/.test(l))).toBe(true);
+    expect(runLog.findIndex(l => l.includes("note heartbeat"))).toBeLessThan(runLog.findIndex(l => l.includes("stage failed")));
   });
 
   it("an agent failing ends the build: one line per agent with its reason, the builder killed, and an offer to start over", async () => {

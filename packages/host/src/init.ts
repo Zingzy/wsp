@@ -886,7 +886,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   // builder already carrying this recipe is attached to instead, since the update would bill beside it.
   const current = attach === undefined ? await rt.golden.recipe(GOLDEN_NAME) : undefined;
   if (current !== undefined) {
-    const road = await updateRoad({ rt, current, imp, bring, rows: manifest.entries, importOf, interactive, yes: opts.yes, input: io.input, output: io.output, stream: (words, run) => streamStages(rt, io, words, run) });
+    const road = await updateRoad({ rt, current, imp, bring, rows: manifest.entries, importOf, interactive, yes: opts.yes, input: io.input, output: io.output, stream: (words, run) => streamStages(rt, io, words, run, runLog.note) });
     if (road !== "rebuild") return { code: road };
   }
   if (stop.length > 0) {
@@ -926,7 +926,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   }
   if (attach === undefined) await stopKeptBuilder(rt, io.output);
 
-  const stream = new StageStream(io.output, io.isTTY);
+  const stream = new StageStream(io.output, io.isTTY, PREPARE_STEPS, runLog.note);
   const off = rt.events.on("golden.stage", e => {
     if (e.type === "golden.stage") stream.push({ type: "golden.stage", name: e.name, stage: e.stage, ...(e.detail !== undefined ? { detail: e.detail } : {}) });
   });
@@ -1067,13 +1067,13 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   runLog.note(`handoff ${url}`);
   await handoff(url, handle, io, interactive, checklist.length > 0, logLine(), out);
   outro("This terminal reports the save.", out);
-  reportSeal(rt, io, opts.pricing.rateUsdPerHour(builder.size), logLine);
+  reportSeal(rt, io, opts.pricing.rateUsdPerHour(builder.size), logLine, runLog.note);
   return { code: 0, handle, ...(outcomes !== undefined ? { logins: outcomes } : {}) };
 }
 
 /** One stage stream around one runtime call; the frames it draws are the golden's, whatever the call. */
-async function streamStages(rt: Runtime, io: InitIO, words: readonly StageWords[], run: () => Promise<unknown>): Promise<StageView> {
-  const stream = new StageStream(io.output, io.isTTY, words);
+async function streamStages(rt: Runtime, io: InitIO, words: readonly StageWords[], run: () => Promise<unknown>, sink: (line: string) => void): Promise<StageView> {
+  const stream = new StageStream(io.output, io.isTTY, words, sink);
   const off = rt.events.on("golden.stage", e => {
     if (e.type === "golden.stage") stream.push({ type: "golden.stage", name: e.name, stage: e.stage, ...(e.detail !== undefined ? { detail: e.detail } : {}) });
   });
@@ -1087,12 +1087,12 @@ async function streamStages(rt: Runtime, io: InitIO, words: readonly StageWords[
 }
 
 /** After the hand-off the browser drives the seal; the terminal shows it as it happens. */
-function reportSeal(rt: Runtime, io: InitIO, rateUsdPerHour: number, logLine: () => string): void {
+function reportSeal(rt: Runtime, io: InitIO, rateUsdPerHour: number, logLine: () => string, sink: (line: string) => void): void {
   let stream: StageStream | undefined;
   const off = rt.events.on("golden.stage", e => {
     if (e.type !== "golden.stage" || e.name !== GOLDEN_NAME) return;
     if (!stream) {
-      stream = new StageStream(io.output, io.isTTY, SEAL_STEPS);
+      stream = new StageStream(io.output, io.isTTY, SEAL_STEPS, sink);
       stream.start();
     }
     stream.push({ type: "golden.stage", name: e.name, stage: e.stage, ...(e.detail !== undefined ? { detail: e.detail } : {}) });
