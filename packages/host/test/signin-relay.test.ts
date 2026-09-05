@@ -177,6 +177,33 @@ describe("relayPty", () => {
     expect(outcome).toEqual({ exitCode: 0, timedOut: false, dropped: false, urls: 1, opened: 2 });
   });
 
+  it("o opens the page the machine asked for when one arrived that returns through a forwarded port, and says so; without one, the printed link with the paste-code line", async () => {
+    const link = fakePtyLink();
+    const term = terminal();
+    const opened: string[] = [];
+    const consented: string[] = [];
+    let page: string | undefined;
+    const run = relayPty({ link, command: "claude auth login", terminal: term, open: async u => (opened.push(u), true), onConsent: u => consented.push(u), callbackUrl: () => page, timeoutMs: 60_000 });
+    const pty = await firstPty(link);
+    await tick();
+    const printed = "https://claude.com/cai/oauth/authorize?code=true&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback";
+    link.data(pty, `If the browser didn't open, visit: ${printed}\r\nPaste code here if prompted > `);
+    term.input.write("o");
+    await tick();
+    expect(opened).toEqual([printed]);
+    expect(stripVTControlCharacters(term.text())).toContain("opened on this computer; if the page shows a code, paste it into the terminal above");
+
+    page = "https://claude.com/cai/oauth/authorize?code=true&redirect_uri=http%3A%2F%2Flocalhost%3A42485%2Fcallback";
+    term.input.write("o");
+    await tick();
+    expect(opened).toEqual([printed, page]);
+    expect(consented).toEqual([printed, page]);
+    expect(stripVTControlCharacters(term.text())).toContain("opened the sign-in page; it returns to the machine on its own");
+    expect(pty.writes.slice(1)).toEqual([]);
+    link.exit(pty, 0);
+    expect((await run).opened).toBe(2);
+  });
+
   it("arrow keys and other CSI sequences keep the o offer; typed text ends it", async () => {
     const link = fakePtyLink();
     const term = terminal();

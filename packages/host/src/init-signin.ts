@@ -36,17 +36,57 @@ export interface LoginOutcome {
 
 /** What the sign-in stage shares with the host's callback relay: whether one
  * page the machine asks to open may open here without a click (the person
- * pressed o in this flow; one o, one open), and where a host line goes while
+ * pressed o in this flow; one o, one open), the page it asked for that o
+ * should open instead of the printed link, and where a host line goes while
  * a pty is shown. */
 export interface SignInFlow {
   armed: boolean;
   /** The page o opened here; the relay declines to open that one again. */
   openedUrl?: string;
+  /** A page the machine asked to open that returns through a forwarded port, arrived while nothing was armed. */
+  callbackUrl?: string;
   show?: (line: string) => void;
 }
 
 /** The line the relay logs for a page it did not open, while a pty is on screen. */
 export const OPEN_LINE = "press o on the link above to open it here";
+
+export interface HostHooks {
+  /** Whether a sign-in page the machine asks for may open here without a click: one open per o the person pressed,
+   * and never the page o itself opened. A declined page that names a callback port is kept for the next o. */
+  autoOpen(targetId: string, url: string, port?: number): boolean;
+  /** The line for a page the relay did not open: while a pty is on screen for the builder it says what to press here,
+   * or that the page is the one o already opened; otherwise the relay's own words. */
+  openLine(workspace: string, hostname: string, url: string): string;
+  /** A host line to show; true when the sign-in stage took it (a pty is on screen), false to print it as usual. */
+  onLine(line: string): boolean;
+}
+
+/** The host relay's hooks over the flow, for the builder's pages. */
+export function flowHooks(flow: SignInFlow, builder: { id: string; name: string }): HostHooks {
+  // The relay names the builder's link this way; the line hook only gets the name.
+  const target = `${builder.name} (builder)`;
+  return {
+    autoOpen: (id, url, port) => {
+      if (id !== builder.id || url === flow.openedUrl) return false;
+      if (flow.armed) {
+        flow.armed = false;
+        return true;
+      }
+      if (port !== undefined && flow.show !== undefined) flow.callbackUrl = url;
+      return false;
+    },
+    openLine: (workspace, hostname, url) => {
+      if (workspace !== target || flow.show === undefined) return `${workspace}: a sign-in page for ${hostname} is ready; open it from the app`;
+      return `${workspace}: ${url === flow.openedUrl ? "that page is already open here" : OPEN_LINE}`;
+    },
+    onLine: line => {
+      if (flow.show === undefined) return false;
+      flow.show(line);
+      return true;
+    },
+  };
+}
 
 export interface BuilderLink {
   link: PtyLink;
@@ -229,9 +269,11 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
           ...(command !== undefined ? { command } : {}),
           terminal: o.terminal,
           open: o.open,
+          callbackUrl: () => o.flow.callbackUrl,
+          // o on the printed link consents to the one page the machine then asks for; o on that page itself leaves nothing to arm.
           onConsent: url => {
             o.flow.openedUrl = url;
-            o.flow.armed = true;
+            o.flow.armed = url !== o.flow.callbackUrl;
           },
           timeoutMs,
           ...(o.now !== undefined ? { now: o.now } : {}),
@@ -239,6 +281,7 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
       } finally {
         o.flow.armed = false;
         delete o.flow.openedUrl;
+        delete o.flow.callbackUrl;
         delete o.flow.show;
       }
       o.terminal.output.write("\n");

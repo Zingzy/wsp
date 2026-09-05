@@ -43,7 +43,7 @@ import { keptBuilder, stopKeptBuilder, updateRoad } from "./init-upgrade.js";
 import { retentionOffer } from "./storage.js";
 import { rungSelect, type FooterLine, type RungSelectOptions, type SelectItem, type Tone } from "./init-select.js";
 import { DISK_HOLD_SHARE, HEAVY_BYTES, diskTone, weighed, weightTone } from "./init-weight.js";
-import { OPEN_LINE, builderLink, noteOutcomes, signInStage, stageLogins, type BuilderLink, type LoginOutcome, type SignInFlow } from "./init-signin.js";
+import { builderLink, flowHooks, noteOutcomes, signInStage, stageLogins, type BuilderLink, type HostHooks, type LoginOutcome, type SignInFlow } from "./init-signin.js";
 import type { HostHandle } from "./server.js";
 
 export interface InitIO {
@@ -89,16 +89,7 @@ export interface InitOptions {
   retry?: { waitMs: number; attempts: number };
 }
 
-export interface HostHooks {
-  /** Whether a sign-in page the machine asks for may open here without a click: one open per o the person pressed,
-   * and never the page o itself opened. */
-  autoOpen(targetId: string, url: string): boolean;
-  /** The line for a page the relay did not open: while a pty is on screen for the builder it says what to press here,
-   * or that the page is the one o already opened; otherwise the relay's own words. */
-  openLine(workspace: string, hostname: string, url: string): string;
-  /** A host line to show; true when the sign-in stage took it (a pty is on screen), false to print it as usual. */
-  onLine(line: string): boolean;
-}
+export type { HostHooks };
 
 export interface InitResult {
   code: number;
@@ -1264,24 +1255,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   if (landed !== undefined) log.info(installsTally(landed, resultsPath).join("\n"), out);
 
   const flow: SignInFlow = { armed: false };
-  // The relay names the builder's link this way; the line hook only gets the name.
-  const builderTarget = `${builder.name} (builder)`;
-  const handle = await opts.host(rt, builder, {
-    autoOpen: (id, url) => {
-      if (id !== builder.id || !flow.armed || url === flow.openedUrl) return false;
-      flow.armed = false;
-      return true;
-    },
-    openLine: (workspace, hostname, url) => {
-      if (workspace !== builderTarget || flow.show === undefined) return `${workspace}: a sign-in page for ${hostname} is ready; open it from the app`;
-      return `${workspace}: ${url === flow.openedUrl ? "that page is already open here" : OPEN_LINE}`;
-    },
-    onLine: line => {
-      if (flow.show === undefined) return false;
-      flow.show(line);
-      return true;
-    },
-  });
+  const handle = await opts.host(rt, builder, flowHooks(flow, builder));
   const dial = (): Promise<BuilderLink> => (opts.daemon ?? builderLink)(rt, builder);
   // Secrets first: a key cut from an rc file is on the machine before any status check looks for it.
   const skipSecretsWhy = interactive ? undefined : io.isTTY ? "--yes asks nothing; set them from the app's terminal" : "no terminal to paste into; set them from the app's terminal";

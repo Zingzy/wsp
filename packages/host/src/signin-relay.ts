@@ -3,7 +3,8 @@
 // go up, bytes come down, the local terminal sits in raw mode for the
 // duration and its size follows. The only thing read from the stream is a
 // URL the tool printed, which is re-shown as a hyperlink with `o` to open it
-// on this computer; codes and tokens are never looked at.
+// on this computer, unless the tool asked for a page that returns through a
+// forwarded port, which o opens instead; codes and tokens are never looked at.
 import type { Readable, Writable } from "node:stream";
 import { styleText } from "node:util";
 
@@ -25,9 +26,12 @@ export interface RelayOptions {
   /** The line the guest shell runs; the pty exits with its status. Absent: a bare shell the person exits. */
   command?: string;
   terminal: RelayTerminal;
-  /** Opens a URL the tool printed, on this computer; called only when the person presses o. */
+  /** Opens a URL on this computer; called only when the person presses o. */
   open(url: string): Promise<boolean>;
-  /** The person pressed o on this URL: consent for this flow to open one more sign-in page here. */
+  /** The page the tool asked the machine to open, when one arrived that returns through a forwarded port:
+   * o opens it in place of the printed link, whose page only shows a code to paste. */
+  callbackUrl?(): string | undefined;
+  /** The person pressed o and this URL opened here. */
   onConsent?(url: string): void;
   /** The pty is killed after this long. */
   timeoutMs: number;
@@ -51,6 +55,8 @@ export interface RelayOutcome {
 /** A pressed o opens the URL only this soon after it appeared, and only before any text was typed
  * (Enter and other control keys keep the offer: gh asks for an Enter before its own open). */
 export const OFFER_MS = 60_000;
+const OPENED_PRINTED = "opened on this computer; if the page shows a code, paste it into the terminal above";
+const OPENED_PAGE = "opened the sign-in page; it returns to the machine on its own";
 const FLUSH_MS = 300;
 const PRINTABLE = /[\x20-\x7e\u00a0-\uffff]/;
 /** Arrow keys and the like, CSI or application-mode SS3: a menu moved is not text typed. */
@@ -171,11 +177,12 @@ export async function relayPty(o: RelayOptions): Promise<RelayOutcome> {
   const onData = (chunk: Buffer | string): void => {
     const s = typeof chunk === "string" ? chunk : chunk.toString("utf8");
     if (s === "o" && offer !== undefined && !offer.typed && now() - offer.at <= OFFER_MS) {
-      const { url } = offer;
+      const page = o.callbackUrl?.();
+      const url = page ?? offer.url;
       o.onConsent?.(url);
       void o.open(url).then(ok => {
         if (ok) outcome.opened += 1;
-        output.write(`\r\n  ${dim(ok ? "opened on this computer" : "could not open a browser here; use the link above")}\r\n`);
+        output.write(`\r\n  ${dim(ok ? (page !== undefined ? OPENED_PAGE : OPENED_PRINTED) : "could not open a browser here; use the link above")}\r\n`);
       });
       return;
     }

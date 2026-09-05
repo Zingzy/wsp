@@ -33,7 +33,7 @@ export interface HostOptions {
   /** Opens a guest tool's sign-in URL on this computer; the platform opener by default (the desktop app passes its own). */
   openUrl?: UrlOpener;
   /** Whether a workspace's sign-in page opens here without a click; off by default, the app shows it instead. */
-  autoOpen?: (workspaceId: string, url: string) => boolean;
+  autoOpen?: (workspaceId: string, url: string, port?: number) => boolean;
   /** The line logged when a sign-in page arrives and nothing opens, given the workspace name and the page's hostname. */
   openLine?: (workspace: string, hostname: string, url: string) => string;
   /** The saved recipe file, named as the way to reuse a kept builder and read for the terminal font its ticks name. */
