@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { SessionEvent } from "@wsp/protocol";
 import { CHAT_STREAM, CHAT_WS } from "../../../test/fixtures/chat-stream";
-import { deriveChatThread, dropEvent, reduceEvent, reloadTranscript, stabilizeEntries, type StaleTurn, type ThreadState } from "./useChatThread";
+import { deriveChatThread, dropEvent, reduceEvent, reloadTranscript, stabilizeEntries, startedSession, type StaleTurn, type ThreadState } from "./useChatThread";
 
 const T0 = "2026-09-01T02:00:00.000Z";
 const state = (events: ReadonlyArray<SessionEvent>, extra: Partial<ThreadState> = {}): ThreadState => ({
@@ -80,6 +80,24 @@ describe("stabilizeEntries", () => {
     expect(stable).toEqual(a);
     stable.forEach((entry, i) => expect(entry).toBe(a[i]));
     expect(stabilizeEntries([], a)).toEqual([]);
+  });
+});
+
+describe("startedSession", () => {
+  const dead = { workspaceId: CHAT_WS, sessionId: "local_0002", turnId: "turn_0002" };
+  const DEATH: SessionEvent[] = [
+    { type: "session.done", ...dead, result: { status: "failed", error: "claude exited before init" } },
+    { type: "session.end", ...dead, exitCode: 1, sawResult: true },
+  ];
+
+  it("names the session of the last session.start; a turn that ended without one names nothing", () => {
+    expect(startedSession(CHAT_STREAM)).toBe("sess_0001");
+    expect(startedSession(DEATH)).toBeUndefined();
+    expect(startedSession([])).toBeUndefined();
+  });
+
+  it("a death before init on a thread that has a started turn keeps that turn's session", () => {
+    expect(startedSession([...CHAT_STREAM, ...DEATH])).toBe("sess_0001");
   });
 });
 

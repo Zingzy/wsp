@@ -45,7 +45,7 @@ export interface ChatThreadHandle {
   readonly sending: boolean;
   /** True from a new-thread request until its first session.start: the next send must not resume the old session. */
   readonly fresh: boolean;
-  /** The harness session the next send resumes: the shown thread's latest turn, else the workspace's remembered one; none while fresh. */
+  /** The harness session the next send resumes: the shown thread's last started turn, else the workspace's remembered one; none while fresh. */
   readonly resume: string | undefined;
   /** True while the turn a new thread left behind is still running on the machine. */
   readonly finishing: boolean;
@@ -346,6 +346,11 @@ function leaveView(s: ThreadState, sameWorkspace: boolean, latest: boolean): Thr
   return { ...EMPTY, known: knowing(s.known, s.events), stray: prompt === undefined ? s.stray : { prompt } };
 }
 
+/** The session the thread's last session.start opened; a turn that ended without one, its harness dead before init, names an id no harness ever held. */
+export function startedSession(events: ReadonlyArray<SessionEvent>): string | undefined {
+  return events.findLast(e => e.type === "session.start")?.sessionId;
+}
+
 /** A thread pinned from the sidebar, or the workspace's latest when none is. */
 export function useChatThread(workspaceId: string, threadId: string | null = null): ChatThreadHandle {
   const api = useStore(s => s.api);
@@ -443,7 +448,7 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
     busy: state.sending !== null || view.running || finishing,
     sending: state.sending !== null,
     fresh: state.fresh,
-    resume: state.fresh ? undefined : (view.latestTurn?.sessionId ?? (threadId === null ? remembered : undefined)),
+    resume: state.fresh ? undefined : (startedSession(state.events) ?? (threadId === null ? remembered : undefined)),
     finishing,
     threadKey: threadId ?? heldThreadId(state) ?? workspaceId,
     named: state.named,

@@ -284,6 +284,32 @@ describe("chat tab composer", () => {
   });
 });
 
+describe("chat tab send after a harness died before its init", () => {
+  it("on a workspace with no thread yet, the next send carries no resume: that session never existed", async () => {
+    const bare: WorkspaceView = { ...workspace, claudeSessionId: undefined };
+    const { api, started, emit } = fixtureApi([bare]);
+    await setup(api);
+    const editor = composerEditor();
+
+    await typeInto(editor, "hello");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started.length).toBe(1));
+    expect(started[0]).toEqual({ workspaceId: WS, prompt: "hello", cwd: "/root" });
+
+    // The adapter minted this id for the CLI; the CLI died before announcing it, so no session.start ever carries it.
+    const dead = { workspaceId: WS, sessionId: "9b2a7c1e-0d4f-4a6b-8e3c-5f7a9d1b2c3e", turnId: "turn_dead" };
+    emit({ type: "session.done", ...dead, result: { status: "failed", error: "claude exited before init (exit code 1)" } });
+    emit({ type: "session.end", ...dead, exitCode: 1, sawResult: true });
+    expect(screen.getByText(/exited before init/)).toBeDefined();
+    expect(sendButton().getAttribute("aria-label")).toBe("Send message");
+
+    await typeInto(editor, "again");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started.length).toBe(2));
+    expect(started[1]).toEqual({ workspaceId: WS, prompt: "again", cwd: "/root" });
+  });
+});
+
 describe("chat tab new thread", () => {
   it("clears the thread on a new-thread request for this workspace, focuses the composer, and sends the next prompt without resume", async () => {
     const { api, started, emit } = fixtureApi([workspace], { [WS]: CHAT_STREAM.slice() });
