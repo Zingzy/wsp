@@ -102,6 +102,13 @@ describe("everything: the seven passes folded into rows", () => {
     expect(rows.find(r => r.name === ".qux/node_modules")).toMatchObject({ kind: "state" });
   });
 
+  it("a binary on two PATH entries with an empty directory named for it is one bin row, resolved from the first entry", async () => {
+    const m = laptop({ path: ["~/proj/node_modules/.bin", "~/proj/pkg/node_modules/.bin"], files: { "~/proj/node_modules/.bin/vitest": { bytes: 2_000, mode: 0o755 }, "~/proj/pkg/node_modules/.bin/vitest": { bytes: 2_000, mode: 0o755 }, "~/Library/Application Support/vitest/": 0 } });
+    const { rows } = await everything(m, { now: NOW });
+    expect(rows.filter(r => r.id === "bin:vitest")).toEqual([expect.objectContaining({ name: "vitest", binary: "~/proj/node_modules/.bin/vitest", paths: [], mtime: RECENT })]);
+    expect(new Set(rows.map(r => r.id)).size).toBe(rows.length);
+  });
+
   it("credential and split rows are named by their real path under their app directory; climbing happens only on a remaining collision", async () => {
     const { rows } = await everything(laptop(home()), { lookup, now: NOW });
     const names = rows.map(r => r.name);
