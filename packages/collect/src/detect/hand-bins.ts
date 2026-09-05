@@ -11,7 +11,13 @@ export const HAND_GROUP = "Installed by hand";
 export const HAND_PREFIX = "tools/hand/";
 export const HAND_DIRS: readonly string[] = ["~/.local/bin", "~/bin"];
 
-export type BinFormat = { kind: "mach-o" } | { kind: "elf"; arch: string } | { kind: "script"; interpreter: string } | { kind: "unknown" };
+export type BinFormat =
+  | { kind: "mach-o" }
+  /** arch is absent when the header names one no machine runs. */
+  | { kind: "elf"; arch?: string }
+  /** at is the interpreter's path when the shebang names one outside the system dirs, so it exists only on this laptop. */
+  | { kind: "script"; interpreter: string; at?: string }
+  | { kind: "unknown" };
 
 export interface HandBin {
   name: string;
@@ -32,11 +38,24 @@ const ELF_ARCH: Record<number, string> = { 0x3e: "x86_64", 0xb7: "aarch64" };
 
 const startsWith = (head: Uint8Array, magic: readonly number[]): boolean => magic.every((b, i) => head[i] === b);
 
-/** The interpreter a shebang names: the command after `env` and its flags, else the interpreter's basename. */
-function interpreterOf(line: string): string {
+/** Interpreter directories every Linux machine has; a shebang naming one elsewhere points at a laptop install. */
+const SYSTEM_BIN = ["/bin/", "/usr/bin/"];
+
+/** The interpreter a shebang names: the command after `env` and its flags, else the interpreter's basename, with its path when the machine will not have it. */
+function shebang(line: string): { interpreter: string; at?: string } {
   const [first = "", ...rest] = line.slice(2).trim().split(/\s+/);
   const name = first.slice(first.lastIndexOf("/") + 1);
-  return name === "env" ? (rest.find(w => !w.startsWith("-")) ?? name) : name;
+  if (name === "env") return { interpreter: rest.find(w => !w.startsWith("-")) ?? name };
+  return first.startsWith("/") && !SYSTEM_BIN.some(d => first.startsWith(d)) ? { interpreter: name, at: first } : { interpreter: name };
+}
+
+/** The first line a copied script carries so the machine finds its interpreter by name on PATH; undefined when the line already does. */
+export function portableShebang(line: string): string | undefined {
+  if (!line.startsWith("#!")) return undefined;
+  const { interpreter, at } = shebang(line);
+  if (at === undefined) return undefined;
+  const args = line.slice(2).trim().split(/\s+/).slice(1);
+  return args.length === 0 ? `#!/usr/bin/env ${interpreter}` : `#!/usr/bin/env -S ${interpreter} ${args.join(" ")}`;
 }
 
 export function formatOf(head: Uint8Array): BinFormat {
@@ -44,11 +63,12 @@ export function formatOf(head: Uint8Array): BinFormat {
   if (startsWith(head, ELF)) {
     const little = head[5] === 1;
     const machine = little ? (head[18] ?? 0) | ((head[19] ?? 0) << 8) : ((head[18] ?? 0) << 8) | (head[19] ?? 0);
-    return { kind: "elf", arch: ELF_ARCH[machine] ?? "another arch" };
+    const arch = ELF_ARCH[machine];
+    return arch === undefined ? { kind: "elf" } : { kind: "elf", arch };
   }
   if (head[0] === 0x23 && head[1] === 0x21) {
     const text = Buffer.from(head).toString("utf8").split("\n")[0] ?? "";
-    return { kind: "script", interpreter: interpreterOf(text) };
+    return { kind: "script", ...shebang(text) };
   }
   return { kind: "unknown" };
 }
@@ -80,15 +100,17 @@ export async function handBins(host: Host): Promise<HandBin[]> {
       if (probe === undefined || !probe.executable) continue;
       if (probe.target !== undefined && managed(probe.target, host.home)) continue;
       const bytes = (await host.fs.stat(abs))?.bytes ?? 0;
-      out.push({ name, path, ...(probe.target !== undefined ? { target: tilde(host.home, probe.target) } : {}), format: formatOf(probe.head), bytes });
+      const format = formatOf(probe.head);
+      if (format.kind === "script" && format.at !== undefined) format.at = tilde(host.home, format.at);
+      out.push({ name, path, ...(probe.target !== undefined ? { target: tilde(host.home, probe.target) } : {}), format, bytes });
     }
   }
   return out;
 }
 
-const LOCKED = "installed by hand; no Linux build known";
+const NO_ARCH = "for neither x86_64 nor aarch64";
 
-function words(bin: HandBin): string {
+function words(bin: HandBin, brings: ReadonlySet<string>): string {
   const dir = bin.path.slice(0, bin.path.lastIndexOf("/"));
   const size = fmt(bin.bytes);
   const copy = `travels as a copy into ${dir} on the machine if ticked${dir === "~/bin" ? ", and ~/bin is not on the machine's PATH" : ""}`;
@@ -97,23 +119,47 @@ function words(bin: HandBin): string {
     case "mach-o":
       return `a macOS binary (Mach-O) of ${size} in ${dir}, installed by hand; a Linux build has to be installed on the machine by hand`;
     case "elf":
-      return `a Linux binary (ELF, ${f.arch}) of ${size} in ${dir}, installed by hand; ${copy}`;
-    case "script":
-      return `a ${f.interpreter} script of ${size} in ${dir}, installed by hand; ${copy}`;
+      if (f.arch === undefined) return `a Linux binary (ELF) of ${size} in ${dir} ${NO_ARCH}, installed by hand; no machine runs it`;
+      return `a Linux binary (ELF, ${f.arch}) of ${size} in ${dir}, installed by hand; runs only on an ${f.arch} machine; ${copy}`;
+    case "script": {
+      const lead = `a ${f.interpreter} script of ${size} in ${dir}, installed by hand`;
+      if (f.at === undefined) return `${lead}; ${copy}`;
+      if (brings.has(f.interpreter)) return `${lead}; runs with ${f.at} here; the copy finds ${f.interpreter} on the machine's PATH instead, so the ${f.interpreter} row has to be ticked too; ${copy}`;
+      return `${lead}; runs with ${f.at} here, and nothing here brings ${f.interpreter} to the machine`;
+    }
     case "unknown":
       return `a file of ${size} in ${dir} of no recognised format, installed by hand; nothing can install it on the machine`;
   }
 }
 
-/** Whether the file itself can run on the machine when copied there. */
-export const carries = (f: BinFormat): boolean => f.kind === "script" || f.kind === "elf";
-
-export function handRow(bin: HandBin): ManifestEntry {
-  const detail = bin.target === undefined ? words(bin) : `${words(bin)}; a link to ${bin.target}`;
-  const base = { rung: "tools" as const, id: `${HAND_PREFIX}${bin.name}`, label: bin.name, group: HAND_GROUP, paths: [bin.path], bytes: bin.bytes, default: "skip" as const, detail };
-  return carries(bin.format) ? entry({ ...base, linux: "unknown" }) : entry({ ...base, reason: LOCKED, linux: "no" });
+/** Why the row is locked off; undefined when a copy of the file can run on the machine. */
+function locked(f: BinFormat, brings: ReadonlySet<string>): string | undefined {
+  switch (f.kind) {
+    case "mach-o":
+      return "installed by hand; no Linux build known";
+    case "elf":
+      return f.arch === undefined ? `installed by hand; a Linux binary ${NO_ARCH}` : undefined;
+    case "script":
+      return f.at !== undefined && !brings.has(f.interpreter) ? `installed by hand; needs ${f.interpreter}, which no tools row brings to the machine` : undefined;
+    case "unknown":
+      return "installed by hand; no recognised format";
+  }
 }
 
-export async function handRows(host: Host): Promise<ManifestEntry[]> {
-  return (await handBins(host)).map(handRow);
+/** Whether the file's format can run on a Linux machine when copied there; a script may still want its interpreter brought. */
+export const carries = (f: BinFormat): boolean => f.kind === "script" || (f.kind === "elf" && f.arch !== undefined);
+
+/** The commands the other tools rows put on the machine, by the last segment of each installable row's id. */
+export const brought = (rows: readonly ManifestEntry[]): Set<string> => new Set(rows.filter(r => r.reason === undefined).map(r => r.id.slice(r.id.lastIndexOf("/") + 1)));
+
+export function handRow(bin: HandBin, brings: ReadonlySet<string>): ManifestEntry {
+  const detail = bin.target === undefined ? words(bin, brings) : `${words(bin, brings)}; a link to ${bin.target}`;
+  const base = { rung: "tools" as const, id: `${HAND_PREFIX}${bin.name}`, label: bin.name, group: HAND_GROUP, paths: [bin.path], bytes: bin.bytes, default: "skip" as const, detail };
+  const reason = locked(bin.format, brings);
+  if (reason !== undefined) return entry({ ...base, reason, linux: "no" });
+  return entry({ ...base, linux: "unknown", ...(bin.format.kind === "elf" && bin.format.arch !== undefined ? { arch: bin.format.arch } : {}) });
+}
+
+export async function handRows(host: Host, brings: ReadonlySet<string>): Promise<ManifestEntry[]> {
+  return (await handBins(host)).map(b => handRow(b, brings));
 }

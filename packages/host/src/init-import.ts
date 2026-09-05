@@ -4,14 +4,15 @@
 // reader, and the import object the runtime hands to the builder.
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { AGENTS, CLAUDE_SETTINGS, FISH_CONF_D, MANAGER_HOMES, MCP_BIN_DIRS, MCP_CONFIGS, type ManifestEntry, RC_NAMES, READ_LIMIT, isRcPath, managedRc, rcFiles, sourcedPaths, stripExports } from "@wsp/collect";
+import { AGENTS, CLAUDE_SETTINGS, FISH_CONF_D, HAND_PREFIX, MANAGER_HOMES, MCP_BIN_DIRS, MCP_CONFIGS, type ManifestEntry, RC_NAMES, READ_LIMIT, isRcPath, managedRc, portableShebang, rcFiles, sourcedPaths, stripExports } from "@wsp/collect";
 import {
   agentInstallsFor,
   editorInstallsFor,
+  forGuest,
   mcpPlanFor,
   planFiles,
   recipeDigest,
@@ -23,6 +24,7 @@ import {
   type BrewTable,
   type FilesPlan,
   type GoldenImport,
+  type GuestFacts,
   type ImportResult,
   type CutNames,
   type PackedFiles,
@@ -231,6 +233,26 @@ export interface PackOptions {
  * and tars the tree. Links are followed so the target's bytes land at the
  * link's path; one that leaves home, points at a refused path, or points back
  * into its own directory is left out with a note. */
+/** A staged hand-installed script whose first line names an interpreter only this laptop has is rewritten to find it by name on the machine's PATH. */
+function portable(staged: string): void {
+  const magic = Buffer.alloc(2);
+  const fd = openSync(staged, "r");
+  try {
+    readSync(fd, magic, 0, 2, 0);
+  } finally {
+    closeSync(fd);
+  }
+  if (magic.toString("latin1") !== "#!") return;
+  const text = readFileSync(staged, "utf8");
+  const first = text.split("\n")[0] ?? "";
+  const line = portableShebang(first);
+  if (line === undefined) return;
+  const mode = statSync(staged).mode & 0o7777;
+  chmodSync(staged, 0o600);
+  writeFileSync(staged, `${line}${text.slice(first.length)}`);
+  chmodSync(staged, mode);
+}
+
 export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<PackedFiles> {
   const stage = mkdtempSync(join(tmpdir(), "wsp-golden-import-"));
   const out = mkdtempSync(join(tmpdir(), "wsp-golden-import-tar-"));
@@ -281,6 +303,7 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
       };
       cpSync(f.source, target, { recursive: true, dereference: true, filter: keep });
       chmodSync(target, f.mode);
+      if (f.id.startsWith(HAND_PREFIX) && !f.dir) portable(target);
     }
     // Every rc file staged, by name where dotfiles live or by identity with one of the laptop's, ships as its
     // carried copy: secret exports are set on the machine by hand, never carried in the file. The copy keeps
@@ -493,7 +516,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
   const agents = agentInstallsFor(bring, { claude: CLAUDE_INSTALLER });
   const mcp = opts.rows !== undefined ? mcpPlanFor(opts.rows, { home, guestHome: GUEST_HOME, agents: MCP_AGENTS, binDirs: MCP_BIN_DIRS }) : undefined;
   const label = (id: string) => bring.find(e => e.id === id)?.label ?? id;
-  const anyFiles = bring.some(e => e.bring && e.rung !== "tools" && e.paths.length > 0 && (e.rung !== "logins" || e.choice === "copy"));
+  const anyFiles = plan.files.length + plan.secrets.length + plan.skipped.length > 0;
   // A login's Keychain items count once, however many accounts they are read for.
   const count = plan.files.length + new Set(plan.secrets.map(s => `${s.id} ${s.service}`)).size;
   const managerHomes = bring.filter(e => e.manager !== undefined).flatMap(e => e.paths).filter(p => p.startsWith("~/")).map(p => p.slice(2));
@@ -512,6 +535,11 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
   const hash = recipeHash(recipeDigest(bring, digested));
   const settingsSource = join(home, CLAUDE_SETTINGS.slice(2));
   const packOpts: PackOptions = { secrets: opts.secrets, home, managerHomes, settingsPlanned: plan.files.some(f => f.source === settingsSource || f.source === dirname(settingsSource)) };
+  const pack = async (guest: GuestFacts): Promise<PackedFiles> => {
+    const fit = forGuest(plan, guest, home);
+    const packed = await packPlan({ ...plan, files: fit.files }, packOpts);
+    return { ...packed, skipped: [...fit.skipped, ...packed.skipped] };
+  };
   const volatileFiles = files.filter(f => f.volatile);
   const volatile =
     volatileFiles.length > 0 || plan.secrets.length > 0
@@ -523,7 +551,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
       return recipeDigest(bring, [...digested, ...secretDigests()]);
     },
     ...(anyFiles
-      ? { files: { count, rungs: plan.rungs, bytes: plan.bytes, skipped: plan.skipped, pack: () => packPlan(plan, packOpts), ...(volatile !== undefined ? { volatile } : {}) } }
+      ? { files: { count, rungs: plan.rungs, bytes: plan.bytes, skipped: plan.skipped, pack, ...(volatile !== undefined ? { volatile } : {}) } }
       : {}),
     ...(shell !== undefined ? { shell } : {}),
     tools: [...editors.installs, ...tools.installs],

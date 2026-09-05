@@ -3,6 +3,7 @@
 // that no rung claimed, one entry per row, none ticked. The screen groups
 // them by where they sit, the pack copies paths minus excludes, and a
 // credential-shaped row travels only on the person's own answer.
+import { HAND_PREFIX } from "./detect/hand-bins.js";
 import { isBundleId } from "./everything/location.js";
 import type { Kind, Manager, Row } from "./everything/row.js";
 import type { ManifestEntry } from "./manifest.js";
@@ -26,11 +27,12 @@ const ROLE_WORDS: Record<Kind, string> = {
   unknown: "nothing says what this is",
 };
 
-/** What rungs 1 to 7 already carry: their `~/` paths and Keychain items. A list row (a formula, a Go module) names no file. */
-export function claimedPaths(entries: readonly Pick<ManifestEntry, "rung" | "paths">[]): Set<string> {
+/** What rungs 1 to 7 already carry: their `~/` paths and Keychain items. A list row (a formula, a Go module) names no
+ * file; of the tools rung only a hand-installed row carries one. */
+export function claimedPaths(entries: readonly Pick<ManifestEntry, "rung" | "id" | "paths">[]): Set<string> {
   const out = new Set<string>();
   for (const e of entries) {
-    if (e.rung === "tools" || e.rung === "everything") continue;
+    if (e.rung === "everything" || (e.rung === "tools" && !e.id.startsWith(HAND_PREFIX))) continue;
     for (const p of e.paths) if (p.startsWith("~/") || /^keychain:/i.test(p)) out.add(p);
   }
   return out;

@@ -399,7 +399,7 @@ describe("packPlan", () => {
     const read = await readSecrets(keychainLogins(rows, "darwin", home), reader({ [HELPER]: "sk-ant-x-helper" }));
     const imp = importFor(rows, { home, secrets: read.values, platform: "darwin" });
     expect(imp.files?.volatile?.paths).toEqual(["~/.claude.json", "Helper: ~/.claude/settings.json"]);
-    const first = await imp.files!.pack();
+    const first = await imp.files!.pack({ arch: "x86_64" });
     expect(readFileSync(join(extract(first.tar), ".claude-cfg", "settings.json"), "utf8")).toBe('{\n  "apiKeyHelper": "cat /root/.claude-cfg/anthropic-api-key",\n  "model": "opus"\n}\n');
     const again = await imp.files!.volatile!.pack();
     expect(listTar(again.tar).map(e => e.path).filter(p => p !== "" && !p.endsWith("/")).sort()).toEqual([".claude-cfg/.claude.json", ".claude-cfg/anthropic-api-key"]);
@@ -407,7 +407,7 @@ describe("packPlan", () => {
     // With no settings.json among the plan's files both packs write the one naming the key file, the same bytes over the same bytes.
     const bare = importFor([{ ...rows[0]!, paths: ["~/.claude.json"], volatile: ["~/.claude.json"] }, rows[1]!], { home, secrets: read.values, platform: "darwin" });
     const stub = '{\n  "apiKeyHelper": "cat /root/.claude-cfg/anthropic-api-key"\n}\n';
-    expect(readFileSync(join(extract((await bare.files!.pack()).tar), ".claude-cfg", "settings.json"), "utf8")).toBe(stub);
+    expect(readFileSync(join(extract((await bare.files!.pack({ arch: "x86_64" })).tar), ".claude-cfg", "settings.json"), "utf8")).toBe(stub);
     expect(readFileSync(join(extract((await bare.files!.volatile!.pack()).tar), ".claude-cfg", "settings.json"), "utf8")).toBe(stub);
   });
 
@@ -538,7 +538,7 @@ describe("packPlan: everything rows", () => {
     expect(noAnswer.files).toMatchObject({ count: 0, skipped: [{ id: "everything/.demo-token", path: "~/.demo-token", note: "credential-shaped; not copied without your answer on its row" }] });
     const yes = importFor([token({ choice: "copy" })], { home, secrets: new Map(), platform: "darwin" });
     expect(yes.files).toMatchObject({ count: 1, skipped: [], rungs: { everything: 1 } });
-    const packed = await yes.files!.pack();
+    const packed = await yes.files!.pack({ arch: "x86_64" });
     const entry = listTar(packed.tar).find(e => e.path === ".demo-token");
     expect(entry?.mode).toMatch(/^-rw-------/);
     expect(packed.skipped).toEqual([]);
@@ -712,7 +712,7 @@ describe("packPlan: rc files with secret exports", () => {
       ],
       { home, secrets: new Map(), platform: "darwin" },
     );
-    const packed = await imp.files!.pack();
+    const packed = await imp.files!.pack({ arch: "x86_64" });
     const dir = extract(packed.tar);
     const read = (...p: string[]) => readFileSync(join(dir, ...p), "utf8");
     expect(read(".zshrc")).toBe("source ~/.zsh/secrets.zsh\nsource ~/.zsh/*.zsh\nexport PATH=$HOME/bin:$PATH\n");
@@ -1099,5 +1099,32 @@ describe("importFor", () => {
     expect(imp.skippedTools).toEqual([{ id: "tools/brew/zingzy/tap/diskbloom", label: "zingzy/tap/diskbloom", note: "no Linux bottle known" }]);
     expect(imp.onResult).toBe(onResult);
     expect(importResultPath("/x/state.json")).toBe("/x/golden-import.json");
+  });
+});
+
+describe("hand-installed copies", () => {
+  it("a script whose first line names an interpreter outside the system dirs is packed to find it by name; an ELF built for another arch than the machine's is set aside", async () => {
+    const home = laptop();
+    mkdirSync(join(home, ".local", "bin"), { recursive: true });
+    writeFileSync(join(home, ".local", "bin", "notes"), "#!/opt/homebrew/bin/node\nconsole.log(1)\n", { mode: 0o755 });
+    writeFileSync(join(home, ".local", "bin", "hermes"), "#!/usr/bin/env bash\nexec run\n", { mode: 0o755 });
+    writeFileSync(join(home, ".local", "bin", "agent"), Buffer.from([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0xb7, 0, 1, 0, 0, 0]), { mode: 0o755 });
+    const imp = importFor(
+      [
+        row({ rung: "tools", id: "tools/hand/notes", paths: ["~/.local/bin/notes"], bytes: 40, linux: "unknown" }),
+        row({ rung: "tools", id: "tools/hand/hermes", paths: ["~/.local/bin/hermes"], bytes: 30, linux: "unknown" }),
+        row({ rung: "tools", id: "tools/hand/agent", paths: ["~/.local/bin/agent"], bytes: 24, linux: "unknown", arch: "aarch64" }),
+      ],
+      { home, secrets: new Map(), platform: "darwin" },
+    );
+    expect(imp.files).toMatchObject({ count: 3, rungs: { tools: 3 }, skipped: [] });
+    const packed = await imp.files!.pack({ arch: "x86_64" });
+    expect(packed.skipped).toEqual([{ id: "tools/hand/agent", path: "~/.local/bin/agent", note: "built for aarch64; the machine is x86_64" }]);
+    expect(listTar(packed.tar).map(e => e.path).filter(p => p.startsWith(".local/bin/") && !p.endsWith("/")).sort()).toEqual([".local/bin/hermes", ".local/bin/notes"]);
+    const dir = extract(packed.tar);
+    expect(readFileSync(join(dir, ".local", "bin", "notes"), "utf8")).toBe("#!/usr/bin/env node\nconsole.log(1)\n");
+    expect(readFileSync(join(dir, ".local", "bin", "hermes"), "utf8")).toBe("#!/usr/bin/env bash\nexec run\n");
+    expect(statSync(join(dir, ".local", "bin", "notes")).mode & 0o777).toBe(0o755);
+    expect((await imp.files!.pack({ arch: "aarch64" })).skipped).toEqual([]);
   });
 });

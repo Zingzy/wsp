@@ -143,11 +143,13 @@ describe("mcp servers", () => {
   });
 
   it("a command in ~/.local/bin that is installed by hand: a macOS binary locks the row off, a script travels with its Installed by hand row", async () => {
-    const gemini = JSON.stringify({ mcpServers: { memory: { command: "~/.local/bin/codebase-memory-mcp" }, notes: { command: "/Users/dev/.local/bin/notes-mcp", args: ["--v"] }, gone: { command: "~/.local/bin/gone-mcp" } } });
-    const rows = await detectMcp(fakeHost({ files: { "~/.gemini/settings.json": gemini }, bins: { "~/.local/bin/codebase-memory-mcp": { head: "mach-o", bytes: 30_000_000 }, "~/.local/bin/notes-mcp": { head: "#!/usr/bin/env node\n" } } }));
+    const gemini = JSON.stringify({ mcpServers: { memory: { command: "~/.local/bin/codebase-memory-mcp" }, notes: { command: "/Users/dev/.local/bin/notes-mcp", args: ["--v"] }, lint: { command: "~/.local/bin/lint-mcp" }, gone: { command: "~/.local/bin/gone-mcp" } } });
+    const bins = { "~/.local/bin/codebase-memory-mcp": { head: "mach-o", bytes: 30_000_000 }, "~/.local/bin/notes-mcp": { head: "#!/usr/bin/env node\n" }, "~/.local/bin/lint-mcp": { head: "#!/opt/homebrew/bin/python3\n" } };
+    const rows = await detectMcp(fakeHost({ files: { "~/.gemini/settings.json": gemini }, bins }));
     expect(rows.map(r => [r.id, r.default, r.reason, r.detail])).toEqual([
       ["agents/mcp/gemini/memory", "skip", "command codebase-memory-mcp is a macOS binary installed by hand, will not run", "stdio: ~/.local/bin/codebase-memory-mcp; carries no secret"],
       ["agents/mcp/gemini/notes", "bring", undefined, "stdio: ~/.local/bin/notes-mcp --v; needs notes-mcp on the machine; it travels as a copy when its row under Installed by hand is ticked; carries no secret"],
+      ["agents/mcp/gemini/lint", "bring", undefined, "stdio: ~/.local/bin/lint-mcp; needs lint-mcp on the machine; it travels as a copy when its row under Installed by hand is ticked, and runs with python3, which a tools row has to bring; carries no secret"],
       ["agents/mcp/gemini/gone", "bring", undefined, "stdio: ~/.local/bin/gone-mcp; needs gone-mcp on the machine; carries no secret"],
     ]);
   });

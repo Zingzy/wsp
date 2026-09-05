@@ -19,6 +19,7 @@ import {
   neverCopied,
   nodeMajorFor,
   placeGhToken,
+  forGuest,
   planFiles,
   recipeDigest,
   recipeHash,
@@ -60,6 +61,7 @@ const present = new Set([
   `${HOME}/.zshrc`,
   `${HOME}/.local/bin/deploy`,
   `${HOME}/.local/bin/omp`,
+  `${HOME}/.local/bin/agent`,
   `${HOME}/.config/starship.toml`,
   `${HOME}/.oh-my-zsh/custom`,
   `${HOME}/Library/Application Support/Cursor/User/settings.json`,
@@ -138,14 +140,35 @@ describe("planFiles: which laptop files travel and where they land", () => {
     expect(p.skipped).toEqual([]);
   });
 
-  it("a hand-installed script or ELF is the one tools row that travels: as a copy with its execute bit; a macOS binary's row does not", () => {
+  it("a hand-installed script or ELF is the one tools row that travels: as a copy with its execute bit, an ELF with its arch; a macOS binary's row does not", () => {
     const p = plan([
       row({ rung: "tools", id: "tools/hand/deploy", paths: ["~/.local/bin/deploy"], bytes: 18, linux: "unknown" }),
+      row({ rung: "tools", id: "tools/hand/agent", paths: ["~/.local/bin/agent"], bytes: 9_000_000, linux: "unknown", arch: "aarch64" }),
       row({ rung: "tools", id: "tools/hand/omp", paths: ["~/.local/bin/omp"], bytes: 122_000_000, linux: "no", default: "skip", reason: "installed by hand; no Linux build known" }),
     ]);
-    expect(p.files).toEqual([{ id: "tools/hand/deploy", source: `${HOME}/.local/bin/deploy`, dest: ".local/bin/deploy", mode: 0o755, dir: false, excludes: [], volatile: false }]);
-    expect(p.rungs).toEqual({ tools: 1 });
+    expect(p.files).toEqual([
+      { id: "tools/hand/deploy", source: `${HOME}/.local/bin/deploy`, dest: ".local/bin/deploy", mode: 0o755, dir: false, excludes: [], volatile: false },
+      { id: "tools/hand/agent", source: `${HOME}/.local/bin/agent`, dest: ".local/bin/agent", mode: 0o755, dir: false, excludes: [], volatile: false, arch: "aarch64" },
+    ]);
+    expect(p.rungs).toEqual({ tools: 2 });
     expect(p.skipped).toEqual([]);
+  });
+
+  it("forGuest sets aside a copy built for another arch than the machine's, or for any arch when the machine's could not be read", () => {
+    const p = plan([
+      row({ rung: "tools", id: "tools/hand/deploy", paths: ["~/.local/bin/deploy"], bytes: 18, linux: "unknown" }),
+      row({ rung: "tools", id: "tools/hand/agent", paths: ["~/.local/bin/agent"], bytes: 9_000_000, linux: "unknown", arch: "aarch64" }),
+    ]);
+    const same = forGuest(p, { arch: "aarch64" }, HOME);
+    expect(same.files.map(f => f.id)).toEqual(["tools/hand/deploy", "tools/hand/agent"]);
+    expect(same.skipped).toEqual([]);
+    const other = forGuest(p, { arch: "x86_64" }, HOME);
+    expect(other.files.map(f => f.id)).toEqual(["tools/hand/deploy"]);
+    expect(other.skipped).toEqual([{ id: "tools/hand/agent", path: "~/.local/bin/agent", note: "built for aarch64; the machine is x86_64" }]);
+    const unread = forGuest(p, {}, HOME);
+    expect(unread.files.map(f => f.id)).toEqual(["tools/hand/deploy"]);
+    expect(unread.skipped).toEqual([{ id: "tools/hand/agent", path: "~/.local/bin/agent", note: "built for aarch64; the machine's architecture could not be read" }]);
+    expect(p.files).toHaveLength(2);
   });
 
   it("a login chosen as copy travels with its mode", () => {
@@ -555,13 +578,14 @@ describe("brewfileFor", () => {
     ]);
   });
 
-  it("a hand-installed row is no install: a macOS binary is noted as skipped, a copied script is neither installed nor skipped here", () => {
+  it("a hand-installed row is no install: a locked row is noted as skipped with its own reason, a copied script is neither installed nor skipped here", () => {
     const t = toolInstallsFor([
-      row({ rung: "tools", id: "tools/hand/omp", linux: "no" }),
+      row({ rung: "tools", id: "tools/hand/omp", linux: "no", default: "skip", reason: "installed by hand; no Linux build known" }),
+      row({ rung: "tools", id: "tools/hand/blob", linux: "no", default: "skip", reason: "installed by hand; no recognised format" }),
       row({ rung: "tools", id: "tools/hand/deploy", paths: ["~/.local/bin/deploy"], bytes: 18, linux: "unknown" }),
     ]);
     expect(t.installs).toEqual([]);
-    expect(t.skipped).toEqual([{ id: "tools/hand/omp", note: "macOS binary, no Linux build" }]);
+    expect(t.skipped).toEqual([{ id: "tools/hand/omp", note: "installed by hand; no Linux build known" }, { id: "tools/hand/blob", note: "installed by hand; no recognised format" }]);
     expect(toolUninstall(row({ rung: "tools", id: "tools/hand/deploy" }))).toEqual({ note: "a copied file; it comes off with the files" });
   });
 

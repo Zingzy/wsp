@@ -8,7 +8,7 @@ export interface FakeBin {
   link?: string;
   noexec?: true;
   /** A binary format's magic, or a script's text. */
-  head?: "mach-o" | "elf-x86_64" | "elf-aarch64" | string;
+  head?: "mach-o" | "elf-x86_64" | "elf-aarch64" | "elf-i386" | string;
   bytes?: number;
 }
 
@@ -33,6 +33,7 @@ const MAGIC: Record<string, number[]> = {
   "mach-o": [0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01],
   "elf-x86_64": [0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0x3e, 0],
   "elf-aarch64": [0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0xb7, 0],
+  "elf-i386": [0x7f, 0x45, 0x4c, 0x46, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0x03, 0],
 };
 
 const headOf = (text: string): Uint8Array => new Uint8Array(MAGIC[text] ?? [...Buffer.from(text, "latin1")]);

@@ -274,8 +274,9 @@ function binaryOf(command: string, home: string): string {
 /** The hand-installed binary a command names, when the command sits in one of the hand bin directories. */
 function handOf(command: string, home: string, hands: ReadonlyMap<string, HandBin>): HandBin | undefined {
   const abs = command.startsWith("~/") ? `${home}${command.slice(1)}` : command;
-  const dir = abs.slice(0, abs.lastIndexOf("/"));
-  return HAND_DIRS.some(d => `${home}${d.slice(1)}` === dir) ? hands.get(abs.slice(dir.length + 1)) : undefined;
+  const slash = abs.lastIndexOf("/");
+  if (slash === -1) return undefined;
+  return HAND_DIRS.some(d => `${home}${d.slice(1)}` === abs.slice(0, slash)) ? hands.get(abs.slice(slash + 1)) : undefined;
 }
 
 /** Whether a definition can run on the machine and what it needs there. A path under ~/Library or a macOS
@@ -289,8 +290,13 @@ export function linuxFit(server: McpServer, home: string, hands: ReadonlyMap<str
     if (isMacOnly(s, home)) return { ok: false, reason: `path ${tilde(home, s)} is macOS-only, will not run` };
   }
   const hand = handOf(t.command, home, hands);
-  if (hand !== undefined && !carries(hand.format)) return { ok: false, reason: `command ${hand.name} is a macOS binary installed by hand, will not run` };
-  if (hand !== undefined) return { ok: true, needs: `needs ${hand.name} on the machine; it travels as a copy when its row under ${HAND_GROUP} is ticked` };
+  if (hand !== undefined && !carries(hand.format)) {
+    return { ok: false, reason: hand.format.kind === "mach-o" ? `command ${hand.name} is a macOS binary installed by hand, will not run` : `command ${hand.name} is installed by hand and has no build the machine can run, will not run` };
+  }
+  if (hand !== undefined) {
+    const via = hand.format.kind === "script" && hand.format.at !== undefined ? `, and runs with ${hand.format.interpreter}, which a tools row has to bring` : "";
+    return { ok: true, needs: `needs ${hand.name} on the machine; it travels as a copy when its row under ${HAND_GROUP} is ticked${via}` };
+  }
   const bin = binaryOf(t.command, home);
   if (bin === "npx") return { ok: true, needs: "runs via npx" };
   if (bin === "uvx" || bin === "uv") return { ok: true, needs: "needs uv, installed on the machine when missing" };

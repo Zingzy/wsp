@@ -13,7 +13,7 @@ export {
   CLI_GROUP, detectTools, parseBrewfile, parseBunGlobals, parseCargoInstalls, parseCaskInfo, parseGoVersionM, parseNpmGlobals, parsePipxList, parsePnpmGlobals, parseUvToolList,
   type BrewLine, type CaskInfo, type GoModule, type Pkg,
 } from "./detect/tools.js";
-export { HAND_DIRS, HAND_GROUP, HAND_PREFIX, carries, formatOf, handBins, handRow, type BinFormat, type HandBin } from "./detect/hand-bins.js";
+export { HAND_DIRS, HAND_GROUP, HAND_PREFIX, brought, carries, formatOf, handBins, handRow, portableShebang, type BinFormat, type HandBin } from "./detect/hand-bins.js";
 export { classifyFormulae, linuxSupport, renderSnapshot, type BottleSnapshot } from "./brew-bottles.js";
 export { LINUX_BOTTLES } from "./data/linux-bottles.js";
 export { AGENTS, detectAgents } from "./detect/agents.js";

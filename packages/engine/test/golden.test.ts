@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { editorInstallsFor, recipeDigest, toolInstallsFor, type BrewTable, type RecipeEntry } from "../src/golden-import.js";
+import { editorInstallsFor, recipeDigest, toolInstallsFor, type BrewTable, type GuestFacts, type RecipeEntry } from "../src/golden-import.js";
 import { diffRecipes, removalsFor, rowsToApply } from "../src/golden-diff.js";
 import { BUILDER_IDLE_MS, MachineAliveError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextSetupSha, nextSmoke, prepareBuilder, rollback, sealGolden, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
@@ -484,6 +484,16 @@ describe("golden import stages", () => {
     expect(stages).toContainEqual("uploading-files:part 1 of 2, 32 MB of 33 MB");
     expect(stages).toContainEqual("uploading-files:part 2 of 2, 33 MB of 33 MB");
     expect(stages).toContainEqual(expect.stringMatching(/^uploading-files:33 MB in 2 parts in \d+(\.\d)?s; 3000 MB free$/));
+  });
+
+  it("the pack is told the machine's arch, read with uname -m before packing; when the read fails it is told nothing", async () => {
+    const seen: GuestFacts[] = [];
+    const files = { ...importOf().files!, pack: async (guest: GuestFacts) => { seen.push(guest); return { tar: Buffer.from("tgz-bytes"), bytes: 1200, unpacked: 4096, skipped: [], cut: [] }; } };
+    const arm = backendFor([["uname -m", { exitCode: 0, stdout: "aarch64\n", stderr: "" }]]);
+    await prepareBuilder({ backend: arm.backend, setup: "true", fetch: arm.fetch, onStage: () => {}, import: importOf({ files }) });
+    const broken = backendFor([["uname -m", { exitCode: 127, stdout: "", stderr: "uname: not found" }]]);
+    await prepareBuilder({ backend: broken.backend, setup: "true", fetch: broken.fetch, onStage: () => {}, import: importOf({ files }) });
+    expect(seen).toEqual([{ arch: "aarch64" }, {}]);
   });
 
   it("runs setup, upload, agents and then tools in order after the daemon, with a detail on every frame, and checks the machine still answers", async () => {
@@ -1414,7 +1424,7 @@ describe("golden import stages", () => {
       const { stages, onStage } = stageRecorder();
       await applyDelta(machine, deltaOf({ removals: [] }), { setup: "true", previousSmoke: "true", fetch, onStage });
       expect(stages[0]).toBe("applying-setup:3 files: identity 1, shell 2");
-      expect(cmds[0]).toBe(FREE_KB_CMD);
+      expect(cmds.slice(0, 2)).toEqual(["uname -m", FREE_KB_CMD]);
     });
 
     it.each([

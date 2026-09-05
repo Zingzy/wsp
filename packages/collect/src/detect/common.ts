@@ -16,6 +16,7 @@ export interface RowSpec {
   required?: boolean;
   linux?: Linux;
   version?: string;
+  arch?: string;
   /** Candidates the tool rewrites while it runs; those found land on the row as volatile. */
   volatile?: readonly string[];
   /** Emit the row even when none of the candidate paths exist. */
@@ -72,6 +73,7 @@ export function entry(spec: EntrySpec): ManifestEntry {
     ...(spec.required !== undefined ? { required: spec.required } : {}),
     ...(spec.linux !== undefined ? { linux: spec.linux } : {}),
     ...(spec.version !== undefined ? { version: spec.version } : {}),
+    ...(spec.arch !== undefined ? { arch: spec.arch } : {}),
     ...(volatile.length > 0 ? { volatile } : {}),
     ...(spec.detail !== undefined ? { detail: spec.detail } : {}),
   };
