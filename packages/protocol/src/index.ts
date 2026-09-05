@@ -596,6 +596,10 @@ export const DaemonResponse = z.union([DaemonOkResponse, DaemonErrorResponse]);
 export type DaemonResponse = z.infer<typeof DaemonResponse>;
 
 export const DaemonEvent = z.discriminatedUnion("type", [
+  /** The first frame after a socket passes the token check: root is the
+   * absolute directory every fs.* and git.* path must resolve inside, so a
+   * client can build absolute paths for pickers, pins and session starts. */
+  z.object({ type: z.literal("daemon.hello"), root: z.string() }),
   z.object({ type: z.literal("pty.data"), ptyId: z.string(), data: z.string() }),
   z.object({
     type: z.literal("pty.exit"),

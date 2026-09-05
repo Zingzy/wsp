@@ -192,6 +192,11 @@ export default function FileBrowserPanel({
           }}
         />
       )}
+      {rows.errors.map(error => (
+        <p key={error.dir} className="shrink-0 truncate border-t border-border/70 px-3 py-1.5 font-mono text-[11px] text-destructive" title={error.message} data-files-error={error.dir}>
+          {error.dir}: {error.message}
+        </p>
+      ))}
     </div>
   );
 }

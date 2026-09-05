@@ -177,6 +177,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
       ws.close(4401, "unauthorized");
       return;
     }
+    push(ws, { type: "daemon.hello", root });
     const state: ConnState = { detaches: [], tunnels: new Map() };
     ws.on("close", () => {
       // Client is gone; ptys keep running. Only this socket's subscriptions and tunnels die.

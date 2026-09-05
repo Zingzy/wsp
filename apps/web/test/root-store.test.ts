@@ -4,18 +4,19 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { selectRoot, useRootStore } from "../src/files/root.js";
 
 const WS = "ws_root";
-const root = () => selectRoot(useRootStore.getState().byWorkspaceId, WS);
+const root = () => selectRoot(useRootStore.getState().byWorkspaceId, WS, "/root");
 
 beforeEach(() => useRootStore.setState({ byWorkspaceId: {} }));
 
 describe("pane root", () => {
   it("is the daemon root until a thread names a folder, then follows every change", () => {
-    expect(root()).toBe(".");
+    expect(selectRoot({}, WS, null)).toBeNull();
+    expect(root()).toBe("/root");
     useRootStore.getState().follow(WS, "/root/app");
     expect(root()).toBe("/root/app");
     useRootStore.getState().follow(WS, "/root/app/packages/web");
     expect(root()).toBe("/root/app/packages/web");
-    expect(selectRoot(useRootStore.getState().byWorkspaceId, "ws_other")).toBe(".");
+    expect(selectRoot(useRootStore.getState().byWorkspaceId, "ws_other", "/root")).toBe("/root");
   });
 
   it("stays where it was pinned while the thread moves, and follows again when unpinned", () => {

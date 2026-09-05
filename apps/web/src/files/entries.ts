@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Paths as the daemon takes them: "." for its root (the workspace HOME unless
-// it was started with --root), a root-relative path, or an absolute path
-// inside the root. Every entry the panes hold is one of these, so a file can
-// be read and a directory listed with the string as it is.
+// Paths as the daemon takes them: absolute, inside the root its hello named
+// (the workspace HOME unless it was started with --root). Every entry the
+// panes hold is one, so a file can be read, a directory listed and a session
+// started with the string as it is.
 import type { FsListReply } from "@wsp/protocol";
-
-export const ROOT = ".";
 
 export interface ProjectEntry {
   readonly path: string;
@@ -13,25 +11,21 @@ export interface ProjectEntry {
 }
 
 export function joinPath(dir: string, name: string): string {
-  return dir === ROOT ? name : `${dir}/${name}`;
+  return dir.endsWith("/") ? `${dir}${name}` : `${dir}/${name}`;
 }
 
-/** null at the daemon root or the filesystem root, where there is nowhere up to go. */
+/** null at the filesystem root, where there is nowhere up to go. */
 export function parentPath(path: string): string | null {
-  if (path === ROOT || path === "/") return null;
+  if (path === "/") return null;
   const cut = path.lastIndexOf("/");
-  if (cut === -1) return ROOT;
-  return cut === 0 ? "/" : path.slice(0, cut);
+  return cut <= 0 ? "/" : path.slice(0, cut);
 }
 
 /** path below root as the tree shows it; the root itself is "". */
 export function relativeTo(root: string, path: string): string {
-  if (root === ROOT) return path;
-  return path === root ? "" : path.startsWith(`${root}/`) ? path.slice(root.length + 1) : path;
-}
-
-export function displayPath(path: string): string {
-  return path === ROOT ? "~" : path;
+  if (path === root) return "";
+  const prefix = root.endsWith("/") ? root : `${root}/`;
+  return path.startsWith(prefix) ? path.slice(prefix.length) : path;
 }
 
 /** A symlink is listed as a file: fs.read follows it, fs.list never descends. */

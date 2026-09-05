@@ -2,13 +2,14 @@
 // Production wiring: every running workspace in the store gets a
 // WorkspaceTerminals in the registry, dialed through the api's daemonReach.
 import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import type { WorkspaceView } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
+import { getDaemonRoot } from "../src/files/wire.js";
 import { getTerminals } from "../src/terminal/link.js";
 import { wireTerminals } from "../src/terminal/wiring.js";
 
@@ -98,6 +99,8 @@ describe("wireTerminals", () => {
     useStore.getState().bind(api);
 
     await until(() => getTerminals("ws_run")?.status() === "live");
+    expect(getDaemonRoot("ws_run")).toBe(process.env["HOME"] ?? homedir());
+    expect(getDaemonRoot("ws_nap")).toBeNull();
     const napping = getTerminals("ws_nap");
     expect(napping).not.toBeNull();
     expect(napping!.status()).toBe("connecting");
@@ -115,6 +118,7 @@ describe("wireTerminals", () => {
 
     emit({ type: "workspace.deleted", workspaceId: "ws_run" });
     await until(() => getTerminals("ws_run") === null);
+    expect(getDaemonRoot("ws_run")).toBeNull();
   }, 15_000);
 
   it("typing into a terminal touches the workspace once per throttle window, not per keystroke", async () => {

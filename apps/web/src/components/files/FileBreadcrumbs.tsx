@@ -3,7 +3,7 @@
 import { ArrowLeftIcon, ChevronRightIcon, LoaderCircleIcon, RotateCwIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { parentPath, ROOT } from "../../files/entries";
+import { parentPath } from "../../files/entries";
 import type { Levels } from "../../files/listing";
 import { cn } from "../../lib/utils";
 import { PierreEntryIcon } from "../chat/PierreEntryIcon";
@@ -25,6 +25,8 @@ import {
 
 interface FileBreadcrumbsProps {
   readonly projectName: string;
+  /** The daemon root, which the project crumb stands for. */
+  readonly root: string;
   /** The open file, as the daemon names it. */
   readonly path: string;
   readonly levels: Levels;
@@ -35,8 +37,8 @@ interface FileBreadcrumbsProps {
   readonly theme: "light" | "dark";
 }
 
-function pathLabel(path: string, projectName: string): string {
-  return path === ROOT ? projectName : path.slice(path.lastIndexOf("/") + 1) || path;
+function pathLabel(path: string, root: string, projectName: string): string {
+  return path === root ? projectName : path.slice(path.lastIndexOf("/") + 1) || path;
 }
 
 function BreadcrumbLabel(props: {
@@ -98,7 +100,7 @@ function BreadcrumbMenuContent(props: {
         <>
           <MenuItem closeOnClick={false} onClick={() => props.onDirectoryChange(parent)}>
             <ArrowLeftIcon />
-            <span className="truncate">Back to {pathLabel(parent, crumbs.projectName)}</span>
+            <span className="truncate">Back to {pathLabel(parent, crumbs.root, crumbs.projectName)}</span>
           </MenuItem>
           <MenuSeparator />
         </>
@@ -201,7 +203,7 @@ function DirectoryBreadcrumb(props: FileBreadcrumbsProps & { readonly crumb: Fil
           <span className="block truncate">{props.crumb.label}</span>
         </TooltipTrigger>
         <TooltipPopup side="top" className="max-w-80">
-          {props.crumb.path === ROOT ? props.projectName : props.crumb.path}
+          {props.crumb.path === props.root ? props.projectName : props.crumb.path}
         </TooltipPopup>
       </Tooltip>
       {open ? (
@@ -219,8 +221,8 @@ function DirectoryBreadcrumb(props: FileBreadcrumbsProps & { readonly crumb: Fil
 
 export function FileBreadcrumbs(props: FileBreadcrumbsProps) {
   const breadcrumbs = useMemo(
-    () => fileBreadcrumbs(props.projectName, props.path),
-    [props.projectName, props.path],
+    () => fileBreadcrumbs(props.projectName, props.root, props.path),
+    [props.projectName, props.root, props.path],
   );
 
   return breadcrumbs.map((crumb, index) => (

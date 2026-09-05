@@ -41,7 +41,7 @@ function buildRepo(): void {
   git(repo, "config", "commit.gpgsign", "false");
   writeFileSync(join(repo, "README.md"), "# readme\n");
   writeFileSync(join(repo, "src", "index.ts"), "export const a = 1;\n");
-  writeFileSync(join(repo, ".gitignore"), "ignored.log\nbuild/\n");
+  writeFileSync(join(repo, ".gitignore"), "ignored.log\nbuild/\nnode_modules/\n");
   git(repo, "add", "-A");
   git(repo, "commit", "-q", "-m", "init");
   git(repo, "checkout", "-q", "-b", "feature");
@@ -56,6 +56,8 @@ function buildRepo(): void {
   writeFileSync(join(repo, "ignored.log"), "log\n");
   mkdirSync(join(repo, "build"));
   writeFileSync(join(repo, "build", "out.js"), "out\n");
+  mkdirSync(join(repo, "node_modules", "pkg"), { recursive: true });
+  writeFileSync(join(repo, "node_modules", "pkg", "index.js"), "module.exports = 1;\n");
   writeFileSync(join(outside, "secret.txt"), "secret\n");
   symlinkSync(outside, join(repo, "escape"));
   symlinkSync(join(repo, "docs.md"), join(repo, "docs-link.md"));
@@ -135,7 +137,7 @@ describe("fs.list", () => {
     expect(res.ok).toBe(true);
     expect(res["truncated"]).toBe(false);
     expect(names(res)).toEqual(
-      [".git", ".gitignore", "build", "docs-link.md", "docs.md", "escape", "feature.txt", "ignored.log", "src", "staged.txt", "untracked.txt"].sort(),
+      [".git", ".gitignore", "build", "docs-link.md", "docs.md", "escape", "feature.txt", "ignored.log", "node_modules", "src", "staged.txt", "untracked.txt"].sort(),
     );
     expect(byName(res, "src")).toMatchObject({ type: "dir", size: 0 });
     expect(byName(res, "escape")).toMatchObject({ type: "symlink" });
@@ -163,17 +165,22 @@ describe("fs.list", () => {
     expect(await c.request("fs.list", { path: "repo/escape" })).toMatchObject({ ok: false, code: "outside-root" });
   });
 
-  it("hides .git and gitignored entries when asked; an ignored directory still lists on request", async () => {
+  it("hides .git and gitignored entries when asked; an ignored directory still lists in full through the flag", async () => {
     const plain = await c.request("fs.list", { path: "repo" });
     expect(names(plain)).toContain("ignored.log");
     expect(names(plain)).toContain(".git");
     const filtered = await c.request("fs.list", { path: "repo", gitignore: true });
     expect(names(filtered)).not.toContain("ignored.log");
     expect(names(filtered)).not.toContain("build");
+    expect(names(filtered)).not.toContain("node_modules");
     expect(names(filtered)).not.toContain(".git");
     expect(names(filtered)).toContain("untracked.txt");
     expect(names(filtered)).toContain(".gitignore");
-    expect(names(await c.request("fs.list", { path: "repo/build" }))).toEqual(["out.js"]);
+    expect(names(await c.request("fs.list", { path: "repo/build", gitignore: true }))).toEqual(["out.js"]);
+    const modules = await c.request("fs.list", { path: "repo/node_modules", gitignore: true });
+    expect(names(modules)).toEqual(["pkg"]);
+    expect(modules["total"]).toBe(1);
+    expect(names(await c.request("fs.list", { path: "repo/node_modules/pkg", gitignore: true }))).toEqual(["index.js"]);
   });
 
   it("treats the gitignore flag as a no-op outside a git repo", async () => {

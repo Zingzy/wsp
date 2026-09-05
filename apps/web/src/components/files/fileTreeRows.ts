@@ -2,8 +2,9 @@
 // The tree's rows from the folders listed so far under one root: every entry
 // as a path relative to the root (directories with a trailing slash, as the
 // tree registers them), plus one note row under a folder the daemon cut at
-// its cap or could not list. Folders nobody expanded yet are rows without
-// children; expanding one asks for its listing.
+// its cap. A folder that could not list is reported beside the tree, never as
+// a path: error messages carry slashes. Folders nobody expanded yet are rows
+// without children; expanding one asks for its listing.
 import type { FileTreeSortComparator } from "@pierre/trees";
 import { relativeTo, type ProjectEntry } from "../../files/entries";
 import type { Levels } from "../../files/listing";
@@ -19,6 +20,8 @@ export interface FileTreeRows {
   readonly directories: ReadonlyMap<string, string>;
   /** Folders whose listing the tree shows; a refresh asks for these again. */
   readonly loaded: string[];
+  /** Folders under the root that failed to list, with the daemon's word. */
+  readonly errors: { readonly dir: string; readonly message: string }[];
 }
 
 function noteRow(relDir: string, text: string): string {
@@ -30,6 +33,7 @@ export function fileTreeRows(root: string, levels: Levels): FileTreeRows {
   const kinds = new Map<string, ProjectEntry["kind"]>();
   const directories = new Map<string, string>();
   const loaded: string[] = [];
+  const errors: FileTreeRows["errors"] = [];
   const queue = [root];
   for (let i = 0; i < queue.length; i++) {
     const dir = queue[i]!;
@@ -37,7 +41,7 @@ export function fileTreeRows(root: string, levels: Levels): FileTreeRows {
     if (!level) continue;
     const relDir = relativeTo(root, dir);
     if (level.entries === null) {
-      if (level.error !== null) paths.push(noteRow(relDir, level.error));
+      if (level.error !== null && dir !== root) errors.push({ dir: relDir, message: level.error });
       continue;
     }
     loaded.push(dir);
@@ -57,7 +61,7 @@ export function fileTreeRows(root: string, levels: Levels): FileTreeRows {
       paths.push(noteRow(relDir, `${hidden.toLocaleString("en-US")} more ${hidden === 1 ? "entry" : "entries"} not shown`));
     }
   }
-  return { paths, kinds, directories, loaded };
+  return { paths, kinds, directories, loaded, errors };
 }
 
 /** Folders first, note rows last, names in natural order. */

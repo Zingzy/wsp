@@ -7,7 +7,7 @@
 // to sockets that asked with ports.watch, and a subscription dies with its
 // socket, so every live transition asks again.
 import { getBrowser } from "../browser/model.js";
-import { provideDaemonWire } from "../files/wire.js";
+import { provideDaemonRoot, provideDaemonWire } from "../files/wire.js";
 import type { useStore } from "../protocol/store.js";
 import { useSignInStore } from "../shell/signInStore.js";
 import { connectDaemonLink, type DaemonLink, type DaemonLinkOptions } from "./daemon-link.js";
@@ -67,6 +67,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
           onEvent: e => {
             if (e.type === "port.open" || e.type === "port.close") browser.feedEvent({ ...e, workspaceId: w.id });
             else if (e.type === "browser.open") useSignInStore.getState().announce(w.id, e.url);
+            else if (e.type === "daemon.hello") provideDaemonRoot(w.id, e.root);
             else wt.feedEvent(e);
           },
           // "dead" is the link we closed on purpose; the model hears "connecting" instead.
@@ -89,6 +90,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
       wired.delete(id);
       provideTerminals(id, null);
       provideDaemonWire(id, null);
+      provideDaemonRoot(id, null);
       // A bar for a workspace that is gone would name it by id.
       useSignInStore.getState().dismiss(id);
     }
@@ -102,6 +104,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
       unlink(entry);
       provideTerminals(id, null);
       provideDaemonWire(id, null);
+      provideDaemonRoot(id, null);
     }
     wired.clear();
   };

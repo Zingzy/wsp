@@ -30,9 +30,13 @@ export interface ListOpts {
 }
 
 /** git check-ignore over the whole level in one call; exit 1 means nothing
- * matched and 128 means no repo here, both leave the level as it is. */
+ * matched and 128 means no repo here, both leave the level as it is. Inside
+ * an ignored directory every child reports ignored, so a directory that is
+ * itself ignored lists in full: someone asked to look in there. */
 async function dropIgnored(dir: string, names: string[]): Promise<string[]> {
   if (names.length === 0) return names;
+  const self = await runGit(dir, ["check-ignore", "-q", "."]);
+  if (self.code !== 1) return names;
   const res = await runGit(dir, ["check-ignore", "-z", "--stdin"], { input: names.join("\0") + "\0" });
   if (res.code !== 0) return names;
   const ignored = new Set(res.stdout.toString("utf8").split("\0"));

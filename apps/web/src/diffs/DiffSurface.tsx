@@ -28,7 +28,6 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu.js
 import { Spinner } from "../components/ui/spinner.js";
 import { Toggle, ToggleGroup } from "../components/ui/toggle-group.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
-import { displayPath } from "../files/entries.js";
 import { NotRunning } from "../files/FilesSurface.js";
 import { usePinned, useRoot, useRootStore } from "../files/root.js";
 import { useDaemonWire } from "../files/wire.js";
@@ -46,7 +45,7 @@ type LoadState =
   | { kind: "ready"; reply: GitDiffReply }
   | { kind: "error"; message: string; last: GitDiffReply | null };
 
-/** The repository git resolved for the root: its top level and branch, or the word that there is none. */
+/** The repository git resolved for one folder: its top level and branch, or the word that there is none. */
 type RepoState = { kind: "unknown" } | { kind: "repo"; root: string; branch: string } | { kind: "none" };
 
 const NO_KEYS: ReadonlySet<string> = new Set();
@@ -61,7 +60,8 @@ function repoOf(status: GitStatusReply): RepoState {
 
 export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme: "light" | "dark" }) {
   const wire = useDaemonWire(workspaceId);
-  const cwd = useRoot(workspaceId);
+  const root = useRoot(workspaceId);
+  const cwd = root ?? "";
   const pinned = usePinned(workspaceId);
   const pin = useRootStore(s => s.pin);
   const unpin = useRootStore(s => s.unpin);
@@ -70,7 +70,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
   const setScope = useDiffStore(s => s.setScope);
   const setRenderMode = useDiffStore(s => s.setRenderMode);
   const [load, setLoad] = useState<LoadState>({ kind: "pending", last: null });
-  const [repo, setRepo] = useState<RepoState>({ kind: "unknown" });
+  const [repo, setRepo] = useState<{ cwd: string; state: RepoState }>({ cwd, state: { kind: "unknown" } });
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(NO_KEYS);
   const [treeOpen, setTreeOpen] = useState(true);
   const [comments, setComments] = useState<ReviewCommentContext[]>([]);
@@ -78,10 +78,11 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
   const scopeKey = `${cwd} ${scope}`;
 
   const fetchDiff = useCallback(() => {
-    if (!wire) return;
+    if (!wire || cwd === "") return;
     let gone = false;
     setLoad(current => ({ kind: "pending", last: lastReply(current) }));
-    setRepo({ kind: "unknown" });
+    // The repository label stays through a refresh of the same folder and resets only for a new one.
+    setRepo(current => (current.cwd === cwd ? current : { cwd, state: { kind: "unknown" } }));
     gitDiff(wire, cwd, scope).then(
       reply => {
         if (!gone) setLoad({ kind: "ready", reply });
@@ -92,10 +93,10 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
     );
     gitStatus(wire, cwd).then(
       status => {
-        if (!gone) setRepo(repoOf(status));
+        if (!gone) setRepo({ cwd, state: repoOf(status) });
       },
       (e: unknown) => {
-        if (!gone) setRepo(e instanceof DaemonOpError && e.code === "not-a-git-repo" ? { kind: "none" } : { kind: "unknown" });
+        if (!gone) setRepo({ cwd, state: e instanceof DaemonOpError && e.code === "not-a-git-repo" ? { kind: "none" } : { kind: "unknown" } });
       },
     );
     return () => {
@@ -140,11 +141,12 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
     viewerRef.current?.scrollTo({ type: "item", id: file.fileKey, align: "start" });
   };
 
-  if (!wire) return <NotRunning />;
+  if (!wire || root === null) return <NotRunning />;
 
   const isPending = load.kind === "pending";
   const scopeLabel = SCOPE_LABELS[scope];
-  const folderLabel = repo.kind === "repo" ? repo.root : displayPath(cwd);
+  const shown = repo.cwd === cwd ? repo.state : { kind: "unknown" as const };
+  const folderLabel = shown.kind === "repo" ? shown.root : cwd;
 
   return (
     <div className="flex h-full min-w-0 flex-col bg-background" data-diff-surface data-diff-scope={scope} data-diff-cwd={cwd}>
@@ -175,12 +177,12 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
           </Menu>
           <span
             className="inline-flex h-6 min-w-0 items-center gap-1 px-1 font-mono text-[11px] text-muted-foreground"
-            title={repo.kind === "repo" ? `git: ${repo.root}` : repo.kind === "none" ? `no repository at or above ${displayPath(cwd)}` : displayPath(cwd)}
-            data-diff-repo={repo.kind === "repo" ? repo.root : undefined}
+            title={shown.kind === "repo" ? `git: ${shown.root}` : shown.kind === "none" ? `no repository at or above ${cwd}` : cwd}
+            data-diff-repo={shown.kind === "repo" ? shown.root : undefined}
           >
-            <FolderGitIcon className={cn("size-3.5 shrink-0", repo.kind === "repo" ? "opacity-70" : "opacity-40")} />
-            <span className="min-w-0 truncate">{repo.kind === "none" ? `no git at ${displayPath(cwd)}` : folderLabel}</span>
-            {repo.kind === "repo" ? <span className="shrink-0 truncate opacity-70">· {repo.branch}</span> : null}
+            <FolderGitIcon className={cn("size-3.5 shrink-0", shown.kind === "repo" ? "opacity-70" : "opacity-40")} />
+            <span className="min-w-0 truncate">{shown.kind === "none" ? `no git at ${cwd}` : folderLabel}</span>
+            {shown.kind === "repo" ? <span className="shrink-0 truncate opacity-70">· {shown.branch}</span> : null}
           </span>
           <Tooltip>
             <TooltipTrigger

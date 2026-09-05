@@ -25,9 +25,9 @@ describe("file preview surface", () => {
   it("reads the file over the wire and shows it as code under its breadcrumbs", async () => {
     const wire = fakeWire({ "fs.list": LISTING, "fs.read": { content: "const a = 1;\n", size: 13, truncated: false } });
     provideDaemonWire(WS, wire);
-    const { container } = render(<FilePreviewSurface workspaceId={WS} surface={fileSurface("src/a.ts")} theme="dark" />);
-    await waitFor(() => expect(container.querySelector("[data-code-view='src/a.ts']")).not.toBeNull());
-    expect(wire.calls).toContainEqual(["fs.read", { path: "src/a.ts" }]);
+    const { container } = render(<FilePreviewSurface workspaceId={WS} surface={fileSurface("/root/src/a.ts")} theme="dark" />);
+    await waitFor(() => expect(container.querySelector("[data-code-view='/root/src/a.ts']")).not.toBeNull());
+    expect(wire.calls).toContainEqual(["fs.read", { path: "/root/src/a.ts" }]);
     expect(container.querySelector("[data-code-view]")?.textContent).toBe("const a = 1;\n");
     const crumbs = container.querySelector("[data-file-breadcrumbs]")!;
     expect(crumbs.textContent).toContain("api");
@@ -38,27 +38,27 @@ describe("file preview surface", () => {
 
   it("renders markdown and toggles back to the source", async () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "fs.read": { content: "# Guide\n\nSome *words*.\n", size: 22, truncated: false } }));
-    const { container } = render(<FilePreviewSurface workspaceId={WS} surface={fileSurface("docs/guide.md")} theme="dark" />);
+    const { container } = render(<FilePreviewSurface workspaceId={WS} surface={fileSurface("/root/docs/guide.md")} theme="dark" />);
     await waitFor(() => expect(container.querySelector("[data-markdown-preview] h1")?.textContent).toBe("Guide"));
     expect(container.querySelector("[data-markdown-preview] em")?.textContent).toBe("words");
 
     fireEvent.click(screen.getByRole("button", { name: "Show markdown source" }));
     await settle();
     expect(container.querySelector("[data-markdown-preview]")).toBeNull();
-    expect(container.querySelector("[data-code-view='docs/guide.md']")?.textContent).toContain("# Guide");
+    expect(container.querySelector("[data-code-view='/root/docs/guide.md']")?.textContent).toContain("# Guide");
     expect(window.localStorage.getItem("wsp:render-markdown")).toBe("false");
   });
 
   it("says when the daemon cut the read at its cap", async () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "fs.read": { content: "x".repeat(64), size: 3 * 1024 * 1024, truncated: true } }));
-    const { container } = render(<FilePreviewSurface workspaceId={WS} surface={fileSurface("src/a.ts")} theme="dark" />);
+    const { container } = render(<FilePreviewSurface workspaceId={WS} surface={fileSurface("/root/src/a.ts")} theme="dark" />);
     await waitFor(() => expect(container.querySelector("[data-file-truncated]")).not.toBeNull());
     expect(container.querySelector("[data-file-truncated]")?.textContent).toContain("3.0 MiB");
   });
 
   it("shows a read refusal as the body", async () => {
-    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "fs.read": () => { throw new Error("src/a.ts does not exist"); } }));
-    render(<FilePreviewSurface workspaceId={WS} surface={fileSurface("src/a.ts")} theme="dark" />);
-    await waitFor(() => expect(screen.getByText("src/a.ts does not exist")).toBeTruthy());
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "fs.read": () => { throw new Error("/root/src/a.ts does not exist"); } }));
+    render(<FilePreviewSurface workspaceId={WS} surface={fileSurface("/root/src/a.ts")} theme="dark" />);
+    await waitFor(() => expect(screen.getByText("/root/src/a.ts does not exist")).toBeTruthy());
   });
 });

@@ -11,6 +11,7 @@ import { provideDaemonWire } from "../src/files/wire.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { onNewThreadRequest } from "../src/shell/shellRequests.js";
 import { fakeWire, LISTING, resetSurfaces, WS } from "./surface-harness.js";
+import { provideDaemonRoot } from "../src/files/wire.js";
 
 beforeEach(resetSurfaces);
 
@@ -41,15 +42,16 @@ describe("files surface", () => {
     provideDaemonWire(WS, wire);
     const { container } = render(<FilesSurface workspaceId={WS} theme="dark" />);
     await waitFor(() => expect(treeRows(container).length).toBeGreaterThan(0));
-    expect(wire.calls[0]).toEqual(["fs.list", { path: ".", gitignore: true }]);
-    expect(listCalls(wire)).toEqual(["."]);
-    expect(treeRows(container).map(r => r.path)).toEqual(["docs/", "src/", "wide/", "README.md"]);
+    expect(wire.calls[0]).toEqual(["fs.list", { path: "/root", gitignore: true }]);
+    expect(listCalls(wire)).toEqual(["/root"]);
+    expect(treeRows(container).map(r => r.path)).toEqual(["app/", "docs/", "locked/", "src/", "wide/", "README.md"]);
     expect(rowFor(container, "src/").getAttribute("aria-expanded")).toBe("false");
 
     fireEvent.click(rowFor(container, "src/"));
     await waitFor(() => expect(treeRows(container).map(r => r.path)).toContain("src/a.ts"));
-    expect(listCalls(wire)).toEqual([".", "src"]);
-    expect(rootLabel(container)).toBe("~");
+    expect(listCalls(wire)).toEqual(["/root", "/root/src"]);
+    expect(rootLabel(container)).toBe("/root");
+    expect((screen.getByRole("button", { name: "Up one folder" }) as HTMLButtonElement).disabled).toBe(true);
 
     fireEvent.click(rowFor(container, "src/"));
     await settle();
@@ -57,7 +59,7 @@ describe("files surface", () => {
     fireEvent.click(rowFor(container, "src/"));
     await settle();
     expect(treeRows(container).map(r => r.path)).toContain("src/a.ts");
-    expect(listCalls(wire)).toEqual([".", "src"]);
+    expect(listCalls(wire)).toEqual(["/root", "/root/src"]);
   });
 
   it("puts a note row with the count under a folder the daemon cut at its cap", async () => {
@@ -68,9 +70,20 @@ describe("files surface", () => {
     fireEvent.click(rowFor(container, "wide/"));
     await waitFor(() => expect(treeRows(container).map(r => r.path)).toContain("wide/… 10,000 more entries not shown"));
     expect(treeRows(container).map(r => r.path).slice(-3)).toEqual(["wide/w0.txt", "wide/… 10,000 more entries not shown", "README.md"]);
+    expect(container.querySelector("[data-files-error]")).toBeNull();
     fireEvent.click(rowFor(container, "wide/… 10,000 more entries not shown"));
     await settle();
     expect(useRightPanelStore.getState().byWorkspaceId[WS]!.surfaces.map(s => s.id)).toEqual(["files"]);
+  });
+
+  it("reports a folder that would not list beside the tree, never as rows", async () => {
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING }));
+    const { container } = render(<FilesSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(treeRows(container).length).toBeGreaterThan(0));
+    fireEvent.click(rowFor(container, "locked/"));
+    await waitFor(() => expect(container.querySelector("[data-files-error='locked']")).not.toBeNull());
+    expect(container.querySelector("[data-files-error='locked']")?.textContent).toBe("locked: EACCES: permission denied, scandir '/root/locked'");
+    expect(treeRows(container).map(r => r.path).filter(p => p.startsWith("locked/"))).toEqual(["locked/"]);
   });
 
   it("opens a clicked file as a surface and keeps the explorer tab", async () => {
@@ -82,8 +95,8 @@ describe("files surface", () => {
     fireEvent.click(rowFor(container, "README.md"));
     await settle();
     const panel = useRightPanelStore.getState().byWorkspaceId[WS]!;
-    expect(panel.activeSurfaceId).toBe("file:README.md");
-    expect(panel.surfaces.map(s => s.id)).toEqual(["files", "file:README.md"]);
+    expect(panel.activeSurfaceId).toBe("file:/root/README.md");
+    expect(panel.surfaces.map(s => s.id)).toEqual(["files", "file:/root/README.md"]);
   });
 
   it("roots at the thread's folder, opens files by their full path, and the pin stops following", async () => {
@@ -108,10 +121,10 @@ describe("files surface", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Follow the agent's folder" }));
     await waitFor(() => expect(rootLabel(container)).toBe("/root"));
-    expect(treeRows(container).map(r => r.path)).toEqual(["app/", "notes.md"]);
-    fireEvent.click(rowFor(container, "notes.md"));
+    expect(treeRows(container).map(r => r.path)).toContain("README.md");
+    fireEvent.click(rowFor(container, "README.md"));
     await settle();
-    expect(useRightPanelStore.getState().byWorkspaceId[WS]!.activeSurfaceId).toBe("file:/root/notes.md");
+    expect(useRightPanelStore.getState().byWorkspaceId[WS]!.activeSurfaceId).toBe("file:/root/README.md");
   });
 
   it("up one folder pins the parent; new thread here follows the shown folder and asks for a thread", async () => {
@@ -119,9 +132,12 @@ describe("files surface", () => {
     act(() => useRootStore.getState().follow(WS, "/root/app"));
     const { container } = render(<FilesSurface workspaceId={WS} theme="dark" />);
     await waitFor(() => expect(rootLabel(container)).toBe("/root/app"));
-    fireEvent.click(screen.getByRole("button", { name: "Up one folder" }));
+    const up = () => screen.getByRole("button", { name: "Up one folder" }) as HTMLButtonElement;
+    expect(up().disabled).toBe(false);
+    fireEvent.click(up());
     await waitFor(() => expect(rootLabel(container)).toBe("/root"));
     expect(useRootStore.getState().byWorkspaceId[WS]).toEqual({ followed: "/root/app", pinned: "/root" });
+    expect(up().disabled).toBe(true);
 
     const requests: string[] = [];
     const off = onNewThreadRequest(detail => requests.push(detail.workspaceId));
@@ -140,7 +156,7 @@ describe("files surface", () => {
     await waitFor(() => expect(treeRows(container).map(r => r.path)).toContain("docs/guide.md"));
     fireEvent.click(screen.getByRole("button", { name: "Refresh workspace files" }));
     await settle();
-    expect(listCalls(wire)).toEqual([".", "docs", ".", "docs"]);
+    expect(listCalls(wire)).toEqual(["/root", "/root/docs", "/root", "/root/docs"]);
   });
 
   it("shows the listing error with the last good tree gone", async () => {
@@ -149,8 +165,12 @@ describe("files surface", () => {
     await waitFor(() => expect(screen.getByText("daemon unreachable")).toBeTruthy());
   });
 
-  it("explains itself when the workspace has no daemon wire", () => {
+  it("explains itself when the workspace has no daemon wire, and waits for the daemon's root", () => {
     render(<FilesSurface workspaceId={WS} theme="dark" />);
     expect(screen.getByText("The workspace is not running.")).toBeTruthy();
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING }));
+    provideDaemonRoot(WS, null);
+    render(<FilesSurface workspaceId={WS} theme="dark" />);
+    expect(screen.getAllByText("The workspace is not running.")).toHaveLength(2);
   });
 });

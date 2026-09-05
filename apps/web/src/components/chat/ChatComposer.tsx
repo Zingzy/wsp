@@ -20,8 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sendRefusal, workspaceState, type MachineState, type ReachState, type WorkspacePhase } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
 import { useStatus, useStore, useWorkspace } from "../../protocol/store";
-import { ROOT } from "../../files/entries";
-import { useFollowed } from "../../files/root";
+import { useThreadFolder } from "../../files/root";
 import { composerSubmissionIntentForEnter, detectComposerTrigger, replaceTextRange } from "../../composer-logic";
 import { ComposerPromptEditor, type ComposerCommandKey, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
 import { catalogFromHarness } from "./adapt";
@@ -75,7 +74,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const status = useStatus(workspaceId);
   const [stop, setStop] = useState<StopAttempt | null>(null);
   const draft = useComposerDraft(workspaceId);
-  const cwd = useFollowed(workspaceId);
+  const cwd = useThreadFolder(workspaceId);
   const setDraft = useComposerDraftStore(s => s.setDraft);
   const editorRef = useRef<ComposerPromptEditorHandle | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
@@ -154,7 +153,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     thread.setSending(true);
     thread.appendUserTurn(prompt);
     const resume = thread.fresh ? undefined : workspace?.claudeSessionId;
-    void api.startSession({ workspaceId, prompt, ...(resume ? { resume } : {}), ...(cwd !== null && cwd !== ROOT ? { cwd } : {}) }).catch((err: unknown) => {
+    void api.startSession({ workspaceId, prompt, ...(resume ? { resume } : {}), ...(cwd !== null ? { cwd } : {}) }).catch((err: unknown) => {
       thread.setSending(false);
       const current = useComposerDraftStore.getState().drafts[workspaceId];
       if (current === undefined || current.prompt === "") setDraft(workspaceId, { prompt, cursor: prompt.length });

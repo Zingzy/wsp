@@ -2,10 +2,56 @@
 // The checkout row under the composer: before the first message it offers
 // the folder and names its branch over the daemon wire, and the send starts
 // the session in that folder; after a turn it is a label carrying the
-// harness's own cwd, which the panes follow until pinned.
-import { act, render, screen, waitFor } from "@testing-library/react";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+// harness's own cwd, which the panes follow until pinned. Base UI's menu
+// popup never settles under jsdom (its positioner loops and a close hangs
+// the run), so the menu primitives are stood in by a plain open/closed
+// context here and the picker's own browsing and picking run for real.
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { createContext, useContext, useState, type ReactNode } from "react";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EventUnion, SessionEvent, WorkspaceView } from "@wsp/protocol";
+
+vi.mock("../src/components/ui/menu.js", () => {
+  const Ctx = createContext<{ open: boolean; set: (open: boolean) => void }>({ open: false, set: () => {} });
+  const Menu = ({ children, open, onOpenChange }: { children: ReactNode; open?: boolean; onOpenChange?: (open: boolean) => void }) => {
+    const [own, setOwn] = useState(false);
+    const set = (next: boolean) => {
+      setOwn(next);
+      onOpenChange?.(next);
+    };
+    return <Ctx.Provider value={{ open: open ?? own, set }}>{children}</Ctx.Provider>;
+  };
+  const MenuTrigger = ({ children, render: _render, className, ...props }: { children: ReactNode; render?: unknown; className?: string; [key: string]: unknown }) => {
+    const ctx = useContext(Ctx);
+    return (
+      <button type="button" className={className} onClick={() => ctx.set(!ctx.open)} {...(props as Record<string, unknown>)}>
+        {children}
+      </button>
+    );
+  };
+  const MenuPopup = ({ children }: { children: ReactNode }) => (useContext(Ctx).open ? <div role="menu">{children}</div> : null);
+  const MenuItem = ({ children, onClick, closeOnClick = true, disabled, ...props }: { children: ReactNode; onClick?: () => void; closeOnClick?: boolean; disabled?: boolean; [key: string]: unknown }) => {
+    const ctx = useContext(Ctx);
+    return (
+      <div
+        role="menuitem"
+        aria-disabled={disabled || undefined}
+        onClick={() => {
+          if (disabled) return;
+          onClick?.();
+          if (closeOnClick) ctx.set(false);
+        }}
+        {...(props as Record<string, unknown>)}
+      >
+        {children}
+      </div>
+    );
+  };
+  const MenuGroup = ({ children }: { children: ReactNode }) => <div role="group">{children}</div>;
+  const MenuSeparator = () => <hr />;
+  return { Menu, MenuTrigger, MenuPopup, MenuItem, MenuGroup, MenuSeparator };
+});
+
 import { installFakeLayout } from "./fake-layout.js";
 import { composerEditor, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
@@ -13,8 +59,8 @@ import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { selectRoot, useRootStore } from "../src/files/root.js";
-import { provideDaemonWire } from "../src/files/wire.js";
-import { fakeWire, LISTING, resetSurfaces } from "./surface-harness.js";
+import { provideDaemonRoot, provideDaemonWire } from "../src/files/wire.js";
+import { DAEMON_ROOT, fakeWire, LISTING, resetSurfaces } from "./surface-harness.js";
 import { CHAT_STREAM, CHAT_WS } from "./fixtures/chat-stream.js";
 
 let restoreLayout: () => void = () => {};
@@ -22,6 +68,7 @@ beforeAll(() => { restoreLayout = installFakeLayout(); });
 afterAll(() => restoreLayout());
 beforeEach(() => {
   resetSurfaces();
+  provideDaemonRoot(WS, DAEMON_ROOT);
   useComposerDraftStore.setState({ drafts: {} });
 });
 
@@ -82,7 +129,9 @@ async function setup(api: Api) {
 const row = () => document.querySelector<HTMLElement>("[data-composer-checkout]");
 const folder = () => document.querySelector<HTMLElement>("[data-composer-folder]")?.dataset["composerFolder"];
 const branch = () => document.querySelector<HTMLElement>("[data-composer-branch]")?.dataset["composerBranch"];
-const root = () => selectRoot(useRootStore.getState().byWorkspaceId, WS);
+const root = () => selectRoot(useRootStore.getState().byWorkspaceId, WS, DAEMON_ROOT);
+const menuEntry = (path: string) => document.querySelector<HTMLElement>(`[data-composer-folder-entry="${path}"]`);
+const menuPick = (path: string) => document.querySelector<HTMLElement>(`[data-composer-folder-pick="${path}"]`);
 
 describe("composer checkout row", () => {
   it("offers the folder before the first message, names its branch, and starts the session there", async () => {
@@ -91,14 +140,20 @@ describe("composer checkout row", () => {
     const { api, started } = fixtureApi();
     await setup(api);
     expect(row()?.dataset["pickable"]).toBe("true");
-    expect(folder()).toBe(".");
+    expect(folder()).toBe("/root");
     await waitFor(() => expect(branch()).toBe("feature/panes"));
-    expect(screen.getByRole("button", { name: "Working folder: ~" })).toBeTruthy();
 
-    // Base UI menus do not open under jsdom, so the pick lands the way a menu item does: on the store.
-    act(() => useRootStore.getState().follow(WS, "/root/app"));
+    // The picker browses the daemon's listings from the daemon root down; the pick is the folder's absolute path.
+    fireEvent.click(screen.getByRole("button", { name: "Working folder: /root" }));
+    await waitFor(() => expect(menuEntry("/root/app")).not.toBeNull());
+    expect(menuPick("/root")).not.toBeNull();
+    expect(screen.queryByText(/Up to/)).toBeNull();
+    fireEvent.click(menuEntry("/root/app")!);
+    await waitFor(() => expect(menuEntry("/root/app/lib")).not.toBeNull());
+    expect(wire.calls.filter(([op]) => op === "fs.list").map(([, p]) => p["path"])).toEqual(["/root", "/root/app"]);
+    fireEvent.click(menuPick("/root/app")!);
     await waitFor(() => expect(screen.getByRole("button", { name: "Working folder: /root/app" })).toBeTruthy());
-    expect(wire.calls.filter(([op]) => op === "git.status").map(([, p]) => p["cwd"])).toEqual([".", "/root/app"]);
+    expect(wire.calls.filter(([op]) => op === "git.status").map(([, p]) => p["cwd"])).toEqual(["/root", "/root/app"]);
     expect(root()).toBe("/root/app");
 
     const editor = composerEditor();
@@ -108,10 +163,23 @@ describe("composer checkout row", () => {
     expect(started[0]).toMatchObject({ prompt: "build it here", cwd: "/root/app" });
   });
 
-  it("sends no cwd while the folder is the daemon root", async () => {
+  it("starts an unpicked thread in the daemon root", async () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
     const { api, started } = fixtureApi();
     await setup(api);
+    const editor = composerEditor();
+    await typeInto(editor, "hello");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]?.cwd).toBe("/root");
+  });
+
+  it("offers no picker and sends no cwd before the daemon named its root", async () => {
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
+    provideDaemonRoot(WS, null);
+    const { api, started } = fixtureApi();
+    await setup(api);
+    expect(screen.queryByRole("button", { name: /Working folder/ })).toBeNull();
     const editor = composerEditor();
     await typeInto(editor, "hello");
     await press(editor, "Enter");

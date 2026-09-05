@@ -268,6 +268,7 @@ describe("daemon wire types (one home for the ops from @wsp/daemon)", () => {
     expect(DaemonResponse.parse({ id: 1, ok: false, error: "no such pty" })).toBeTruthy();
 
     const events = [
+      { type: "daemon.hello", root: "/root" },
       { type: "pty.data", ptyId: "p1", data: "hello" },
       { type: "pty.exit", ptyId: "p1", exitCode: 0, signal: undefined },
       { type: "port.open", port: 8080, pid: 12 },
@@ -275,6 +276,7 @@ describe("daemon wire types (one home for the ops from @wsp/daemon)", () => {
       { type: "inbox.file", path: "/root/inbox/x.png", bytes: 10 },
     ];
     for (const e of events) expect(DaemonEvent.parse(e)).toBeTruthy();
+    expect(() => DaemonEvent.parse({ type: "daemon.hello" })).toThrow();
   });
 });
 

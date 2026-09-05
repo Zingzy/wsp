@@ -28,18 +28,20 @@ describe("fileTreeRows", () => {
 
   it("puts one note row under a folder the daemon cut, with the count", () => {
     const levels = new Map<string, LevelState>([
-      [".", level([{ path: "wide", kind: "directory" }])],
-      ["wide", level([{ path: "wide/a.txt", kind: "file" }], { truncated: true, total: 10_001 })],
+      ["/root", level([{ path: "/root/wide", kind: "directory" }])],
+      ["/root/wide", level([{ path: "/root/wide/a.txt", kind: "file" }], { truncated: true, total: 10_001 })],
     ]);
-    expect(fileTreeRows(".", levels).paths).toEqual(["wide/", "wide/a.txt", `wide/${NOTE_PREFIX}10,000 more entries not shown`]);
+    expect(fileTreeRows("/root", levels).paths).toEqual(["wide/", "wide/a.txt", `wide/${NOTE_PREFIX}10,000 more entries not shown`]);
   });
 
-  it("shows a folder's listing error as its note row", () => {
+  it("keeps a folder's listing error out of the rows and reports it beside them", () => {
     const levels = new Map<string, LevelState>([
-      [".", level([{ path: "locked", kind: "directory" }])],
-      ["locked", { entries: null, truncated: false, total: 0, isPending: false, error: "permission denied" }],
+      ["/root", level([{ path: "/root/locked", kind: "directory" }])],
+      ["/root/locked", { entries: null, truncated: false, total: 0, isPending: false, error: "EACCES: permission denied, scandir '/root/locked'" }],
     ]);
-    expect(fileTreeRows(".", levels).paths).toEqual(["locked/", `locked/${NOTE_PREFIX}permission denied`]);
+    const rows = fileTreeRows("/root", levels);
+    expect(rows.paths).toEqual(["locked/"]);
+    expect(rows.errors).toEqual([{ dir: "locked", message: "EACCES: permission denied, scandir '/root/locked'" }]);
   });
 
   it("sorts folders first, note rows last, names naturally", () => {

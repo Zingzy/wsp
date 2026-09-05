@@ -45,7 +45,7 @@ describe("diff surface", () => {
     provideDaemonWire(WS, wire);
     const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
     await waitFor(() => expect(items(container)).toHaveLength(2));
-    expect(diffCalls(wire)).toEqual([{ cwd: ".", scope: "unstaged" }]);
+    expect(diffCalls(wire)).toEqual([{ cwd: "/root", scope: "unstaged" }]);
     expect(container.querySelector("[data-diff-surface]")?.getAttribute("data-diff-scope")).toBe("unstaged");
     await waitFor(() => expect(container.querySelector("[data-diff-repo]")?.getAttribute("data-diff-repo")).toBe("/root/app"));
     expect(container.querySelector("[data-diff-repo]")?.textContent).toContain("main");
@@ -66,12 +66,12 @@ describe("diff surface", () => {
     expect(screen.getByRole("button", { name: "Diff scope: Working tree" })).toBeTruthy();
 
     act(() => useDiffStore.getState().setScope(WS, "staged"));
-    await waitFor(() => expect(diffCalls(wire).at(-1)).toEqual({ cwd: ".", scope: "staged" }));
+    await waitFor(() => expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root", scope: "staged" }));
     expect(screen.getByRole("button", { name: "Diff scope: Staged" })).toBeTruthy();
     expect(container.querySelector("[data-diff-base]")).toBeNull();
 
     act(() => useDiffStore.getState().setScope(WS, "branch"));
-    await waitFor(() => expect(diffCalls(wire).at(-1)).toEqual({ cwd: ".", scope: "branch" }));
+    await waitFor(() => expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root", scope: "branch" }));
     await waitFor(() => expect(container.querySelector("[data-diff-base]")?.getAttribute("data-diff-base")).toBe("main"));
     expect(container.querySelector("[data-diff-base]")?.textContent).toContain("HEAD");
     expect(container.querySelector("[data-diff-surface]")?.getAttribute("data-diff-scope")).toBe("branch");
@@ -102,6 +102,18 @@ describe("diff surface", () => {
     const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
     await waitFor(() => expect(container.querySelector("[data-surface-subheader]")?.textContent).toContain("no git at /root/scratch"));
     expect(screen.getByRole("alert").textContent).toBe("not inside a git repository");
+  });
+
+  it("keeps the repository label through a refresh of the same folder", async () => {
+    const wire = fakeWire({ "fs.list": LISTING, "git.diff": DIFF, "git.status": STATUS });
+    provideDaemonWire(WS, wire);
+    const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(container.querySelector("[data-diff-repo]")?.getAttribute("data-diff-repo")).toBe("/root/app"));
+    // Checked before the replies land: the label must not drop while the same folder's status is in flight.
+    fireEvent.click(screen.getByRole("button", { name: "Refresh diff" }));
+    expect(container.querySelector("[data-diff-repo]")?.getAttribute("data-diff-repo")).toBe("/root/app");
+    act(() => useRootStore.getState().follow(WS, "/root/other"));
+    expect(container.querySelector("[data-diff-repo]")).toBeNull();
   });
 
   it("collapses and expands every file", async () => {

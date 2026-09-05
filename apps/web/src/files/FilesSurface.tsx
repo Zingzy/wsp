@@ -12,14 +12,15 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.
 import { useWorkspace } from "../protocol/store.js";
 import { useRightPanelStore } from "../rightPanelStore.js";
 import { requestNewThread } from "../shell/shellRequests.js";
-import { displayPath, parentPath } from "./entries.js";
+import { parentPath } from "./entries.js";
 import { useWorkspaceListing } from "./listing.js";
 import { usePinned, useRoot, useRootStore } from "./root.js";
-import { useDaemonWire } from "./wire.js";
+import { useDaemonRoot, useDaemonWire } from "./wire.js";
 
 export function FilesSurface({ workspaceId, theme }: { workspaceId: string; theme: "light" | "dark" }) {
   const workspace = useWorkspace(workspaceId);
   const wire = useDaemonWire(workspaceId);
+  const daemonRoot = useDaemonRoot(workspaceId);
   const root = useRoot(workspaceId);
   const pinned = usePinned(workspaceId);
   const pin = useRootStore(s => s.pin);
@@ -27,11 +28,14 @@ export function FilesSurface({ workspaceId, theme }: { workspaceId: string; them
   const follow = useRootStore(s => s.follow);
   const { levels, ensure, refresh } = useWorkspaceListing(workspaceId);
   const openFile = useRightPanelStore(s => s.openFile);
-  const parent = parentPath(root);
+  // The daemon refuses anything above its root, so up stops there.
+  const parent = root === null || root === daemonRoot ? null : parentPath(root);
 
-  useEffect(() => ensure(root), [ensure, root]);
+  useEffect(() => {
+    if (root !== null) ensure(root);
+  }, [ensure, root]);
 
-  if (!wire) return <NotRunning />;
+  if (!wire || root === null) return <NotRunning />;
   const newThreadHere = () => {
     follow(workspaceId, root);
     requestNewThread({ workspaceId });
@@ -48,8 +52,8 @@ export function FilesSurface({ workspaceId, theme }: { workspaceId: string; them
           </TooltipTrigger>
           <TooltipPopup>Up one folder</TooltipPopup>
         </Tooltip>
-        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground" title={displayPath(root)} data-files-root>
-          {displayPath(root)}
+        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground" title={root} data-files-root>
+          {root}
         </span>
         <Tooltip>
           <TooltipTrigger

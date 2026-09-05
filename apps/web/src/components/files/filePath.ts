@@ -1,6 +1,6 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/files/filePath.ts at 57a66608 (MIT).
-// Differs from upstream: crumbs are daemon paths, so an absolute file keeps absolute directory crumbs.
-import { baseName, ROOT, type ProjectEntry } from "../../files/entries";
+// Differs from upstream: crumbs are absolute daemon paths below the daemon root, which the project crumb stands for.
+import { baseName, joinPath, relativeTo, type ProjectEntry } from "../../files/entries";
 import type { Levels } from "../../files/listing";
 
 export interface FileBreadcrumb {
@@ -13,15 +13,14 @@ export interface FileBreadcrumbChild extends ProjectEntry {
   label: string;
 }
 
-/** Crumbs start at the project, which stands for the daemon root; an absolute path's directories stay absolute. */
-export function fileBreadcrumbs(projectName: string, path: string): FileBreadcrumb[] {
-  const absolute = path.startsWith("/");
-  const parts = path.split("/").filter(Boolean);
+/** Crumbs start at the project, which stands for the daemon root, then one per segment below it. */
+export function fileBreadcrumbs(projectName: string, root: string, path: string): FileBreadcrumb[] {
+  const parts = relativeTo(root, path).split("/").filter(Boolean);
   return [
-    { label: projectName, path: ROOT, kind: "project" as const },
+    { label: projectName, path: root, kind: "project" as const },
     ...parts.map((part, index) => ({
       label: part,
-      path: (absolute ? "/" : "") + parts.slice(0, index + 1).join("/"),
+      path: joinPath(root, parts.slice(0, index + 1).join("/")),
       kind: index === parts.length - 1 ? ("file" as const) : ("directory" as const),
     })),
   ];

@@ -7,10 +7,10 @@
 // branch is read, not switched: the daemon has no checkout op.
 import { ArrowLeftIcon, ChevronDownIcon, CheckIcon, FolderGitIcon, FolderIcon, GitBranchIcon, LoaderCircleIcon } from "lucide-react";
 import { useEffect, useState } from "react";
-import { displayPath, parentPath, ROOT } from "../../files/entries";
+import { baseName, parentPath } from "../../files/entries";
 import { useWorkspaceListing } from "../../files/listing";
-import { useFollowed, useRootStore } from "../../files/root";
-import { useDaemonWire } from "../../files/wire";
+import { useRootStore, useThreadFolder } from "../../files/root";
+import { useDaemonRoot, useDaemonWire } from "../../files/wire";
 import { cn } from "../../lib/utils";
 import { DaemonOpError, gitStatus } from "../../terminal/daemon-fs";
 import type { TerminalWire } from "../../terminal/link";
@@ -22,10 +22,10 @@ import type { ChatThreadHandle } from "./useChatThread";
 /** What git said about the folder; "none" is a folder outside any repository, "unknown" a failed or unsent ask. */
 type Branch = { readonly kind: "unknown" } | { readonly kind: "none" } | { readonly kind: "repo"; readonly head: string };
 
-function useBranch(wire: TerminalWire | null, folder: string, running: boolean): Branch {
-  const [state, setState] = useState<{ folder: string; branch: Branch }>({ folder, branch: { kind: "unknown" } });
+function useBranch(wire: TerminalWire | null, folder: string | null, running: boolean): Branch {
+  const [state, setState] = useState<{ folder: string | null; branch: Branch }>({ folder, branch: { kind: "unknown" } });
   useEffect(() => {
-    if (!wire || running) return;
+    if (!wire || folder === null || running) return;
     let gone = false;
     gitStatus(wire, folder).then(
       status => {
@@ -42,14 +42,16 @@ function useBranch(wire: TerminalWire | null, folder: string, running: boolean):
   return state.folder === folder ? state.branch : { kind: "unknown" };
 }
 
-const labelClass = "inline-flex h-7 min-w-0 items-center gap-1 px-2 text-xs text-muted-foreground/70 sm:h-6";
+/** Sized like the picker button (size xs), so the row does not move when the label replaces it. */
+const labelClass = "inline-flex h-7 min-w-0 items-center gap-1 px-2 text-sm text-muted-foreground/70 sm:h-6 sm:text-xs";
 
-function FolderMenu({ workspaceId, folder, onPick }: { workspaceId: string; folder: string; onPick: (dir: string) => void }) {
+function FolderMenu({ workspaceId, daemonRoot, folder, onPick }: { workspaceId: string; daemonRoot: string; folder: string; onPick: (dir: string) => void }) {
   const [open, setOpen] = useState(false);
   const [dir, setDir] = useState(folder);
   const { levels, ensure } = useWorkspaceListing(workspaceId);
   const level = levels.get(dir);
-  const parent = parentPath(dir);
+  // The daemon refuses anything above its root, so the menu stops there.
+  const parent = dir === daemonRoot ? null : parentPath(dir);
   const folders = level?.entries?.filter(entry => entry.kind === "directory") ?? null;
 
   useEffect(() => {
@@ -67,24 +69,24 @@ function FolderMenu({ workspaceId, folder, onPick }: { workspaceId: string; fold
       <MenuTrigger
         render={<Button type="button" variant="ghost" size="xs" />}
         className="min-w-0 justify-start font-medium text-muted-foreground/70 hover:text-foreground/80"
-        aria-label={`Working folder: ${displayPath(folder)}`}
+        aria-label={`Working folder: ${folder}`}
         data-composer-folder={folder}
       >
         <FolderIcon className="size-3 shrink-0" />
-        <span className="min-w-0 truncate font-mono">{displayPath(folder)}</span>
+        <span className="min-w-0 truncate font-mono">{folder}</span>
         <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
       </MenuTrigger>
       <MenuPopup align="start" side="top" className="w-72">
         <MenuItem onClick={() => onPick(dir)} data-composer-folder-pick={dir}>
           <CheckIcon />
           <span className="min-w-0 flex-1 truncate">
-            Work in <span className="font-mono">{displayPath(dir)}</span>
+            Work in <span className="font-mono">{dir}</span>
           </span>
         </MenuItem>
         {parent !== null ? (
           <MenuItem closeOnClick={false} onClick={() => setDir(parent)}>
             <ArrowLeftIcon />
-            <span className="min-w-0 flex-1 truncate">Up to <span className="font-mono">{displayPath(parent)}</span></span>
+            <span className="min-w-0 flex-1 truncate">Up to <span className="font-mono">{parent}</span></span>
           </MenuItem>
         ) : null}
         <MenuSeparator />
@@ -100,9 +102,9 @@ function FolderMenu({ workspaceId, folder, onPick }: { workspaceId: string; fold
             <MenuItem disabled>No folders here.</MenuItem>
           ) : (
             folders.map(entry => (
-              <MenuItem key={entry.path} closeOnClick={false} onClick={() => setDir(entry.path)}>
+              <MenuItem key={entry.path} closeOnClick={false} onClick={() => setDir(entry.path)} data-composer-folder-entry={entry.path}>
                 <FolderIcon />
-                <span className="min-w-0 flex-1 truncate font-mono">{entry.path.slice(entry.path.lastIndexOf("/") + 1)}</span>
+                <span className="min-w-0 flex-1 truncate font-mono">{baseName(entry.path)}</span>
               </MenuItem>
             ))
           )}
@@ -114,9 +116,9 @@ function FolderMenu({ workspaceId, folder, onPick }: { workspaceId: string; fold
 
 export function ComposerCheckoutRow({ workspaceId, thread }: { workspaceId: string; thread: ChatThreadHandle }) {
   const wire = useDaemonWire(workspaceId);
+  const daemonRoot = useDaemonRoot(workspaceId);
   const follow = useRootStore(s => s.follow);
-  const followed = useFollowed(workspaceId);
-  const folder = followed ?? ROOT;
+  const folder = useThreadFolder(workspaceId);
   const { cwd, entries, running } = thread.view;
   const pickable = thread.hydrated && (thread.fresh || (entries.length === 0 && !running));
   const branch = useBranch(wire, folder, running);
@@ -128,12 +130,12 @@ export function ComposerCheckoutRow({ workspaceId, thread }: { workspaceId: stri
   return (
     <ComposerSurface.ContextStrip data-composer-checkout data-pickable={pickable || undefined}>
       <div className="flex min-w-10 flex-1 items-center gap-1">
-        {pickable && wire ? (
-          <FolderMenu workspaceId={workspaceId} folder={folder} onPick={dir => follow(workspaceId, dir)} />
+        {pickable && wire && daemonRoot !== null && folder !== null ? (
+          <FolderMenu workspaceId={workspaceId} daemonRoot={daemonRoot} folder={folder} onPick={dir => follow(workspaceId, dir)} />
         ) : (
-          <span className={labelClass} data-composer-folder={folder}>
+          <span className={labelClass} data-composer-folder={folder ?? undefined}>
             {branch.kind === "repo" ? <FolderGitIcon className="size-3 shrink-0" /> : <FolderIcon className="size-3 shrink-0" />}
-            <span className="min-w-0 truncate font-mono">{displayPath(folder)}</span>
+            <span className="min-w-0 truncate font-mono">{folder ?? ""}</span>
           </span>
         )}
       </div>
