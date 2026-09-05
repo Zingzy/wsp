@@ -387,6 +387,30 @@ describe("packPlan", () => {
     expect(listTar(none.tar).some(e => e.path.includes("settings.json"))).toBe(false);
   });
 
+  it("the volatile re-pack ships the key file and never a settings.json when the agent row brought one: the first pack's copy, rewritten to read the key, stays on the machine", async () => {
+    const home = laptop();
+    mkdirSync(join(home, ".claude"), { recursive: true });
+    writeFileSync(join(home, ".claude", "settings.json"), CLAUDE_SETTINGS);
+    writeFileSync(join(home, ".claude.json"), JSON.stringify({ projects: { a: 1 } }));
+    const rows = [
+      row({ rung: "agents", id: "agents/claude", paths: ["~/.claude/settings.json", "~/.claude.json"], volatile: ["~/.claude.json"], bytes: 5 }),
+      row({ rung: "logins", id: "logins/claude", paths: ["Helper: ~/.claude/settings.json"], choice: "copy" }),
+    ];
+    const read = await readSecrets(keychainLogins(rows, "darwin", home), reader({ [HELPER]: "sk-ant-x-helper" }));
+    const imp = importFor(rows, { home, secrets: read.values, platform: "darwin" });
+    expect(imp.files?.volatile?.paths).toEqual(["~/.claude.json", "Helper: ~/.claude/settings.json"]);
+    const first = await imp.files!.pack();
+    expect(readFileSync(join(extract(first.tar), ".claude-cfg", "settings.json"), "utf8")).toBe('{\n  "apiKeyHelper": "cat /root/.claude-cfg/anthropic-api-key",\n  "model": "opus"\n}\n');
+    const again = await imp.files!.volatile!.pack();
+    expect(listTar(again.tar).map(e => e.path).filter(p => p !== "" && !p.endsWith("/")).sort()).toEqual([".claude-cfg/.claude.json", ".claude-cfg/anthropic-api-key"]);
+    expect(again.skipped).toEqual([]);
+    // With no settings.json among the plan's files both packs write the one naming the key file, the same bytes over the same bytes.
+    const bare = importFor([{ ...rows[0]!, paths: ["~/.claude.json"], volatile: ["~/.claude.json"] }, rows[1]!], { home, secrets: read.values, platform: "darwin" });
+    const stub = '{\n  "apiKeyHelper": "cat /root/.claude-cfg/anthropic-api-key"\n}\n';
+    expect(readFileSync(join(extract((await bare.files!.pack()).tar), ".claude-cfg", "settings.json"), "utf8")).toBe(stub);
+    expect(readFileSync(join(extract((await bare.files!.volatile!.pack()).tar), ".claude-cfg", "settings.json"), "utf8")).toBe(stub);
+  });
+
   it("a failed helper is reported by its exit status alone: the command line, which may carry the key, never reaches the reason", async () => {
     const home = laptop();
     const inline = "printf sk-ant-x-inline; exit 3";

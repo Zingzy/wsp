@@ -223,6 +223,8 @@ export interface PackOptions {
   home: string;
   /** `~`-relative directories the recipe marks as a dotfiles manager's home, besides the usual ones. */
   managerHomes?: readonly string[];
+  /** Whether ~/.claude/settings.json is among the plan's files, in this pack or an earlier one this pack lands over; left out, this pack's files decide. */
+  settingsPlanned?: boolean;
 }
 
 /** Copies the planned files into a staging tree, renders each secret into it,
@@ -343,7 +345,7 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
         writeFileSync(settingsStaged, rewritten);
         if (key === undefined) skipped.push({ id: claude.id, path: CLAUDE_SETTINGS, note: "apiKeyHelper left out of the copy: the command runs on this computer only" });
       }
-    } else if (key !== undefined) {
+    } else if (key !== undefined && (claude !== undefined || !opts.settingsPlanned)) {
       // A settings.json that did not travel stays here whole, by the person's tick; the one written names the key file and nothing else.
       const minimal = withApiKeyHelper(undefined, reads(key));
       if (minimal !== undefined) {
@@ -508,10 +510,12 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
       return value === undefined ? [] : [{ id: s.id, path: secretPath(s), dest: s.dest, digest: createHash("sha256").update(value).digest("hex"), volatile: true }];
     });
   const hash = recipeHash(recipeDigest(bring, digested));
+  const settingsSource = join(home, CLAUDE_SETTINGS.slice(2));
+  const packOpts: PackOptions = { secrets: opts.secrets, home, managerHomes, settingsPlanned: plan.files.some(f => f.source === settingsSource || f.source === dirname(settingsSource)) };
   const volatileFiles = files.filter(f => f.volatile);
   const volatile =
     volatileFiles.length > 0 || plan.secrets.length > 0
-      ? { paths: [...volatileFiles.map(tilde), ...plan.secrets.map(secretPath)], pack: () => packPlan({ ...plan, files: volatileFiles }, { secrets: opts.secrets, home, managerHomes }) }
+      ? { paths: [...volatileFiles.map(tilde), ...plan.secrets.map(secretPath)], pack: () => packPlan({ ...plan, files: volatileFiles }, packOpts) }
       : undefined;
   return {
     recipeHash: hash,
@@ -519,7 +523,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
       return recipeDigest(bring, [...digested, ...secretDigests()]);
     },
     ...(anyFiles
-      ? { files: { count, rungs: plan.rungs, bytes: plan.bytes, skipped: plan.skipped, pack: () => packPlan(plan, { secrets: opts.secrets, home, managerHomes }), ...(volatile !== undefined ? { volatile } : {}) } }
+      ? { files: { count, rungs: plan.rungs, bytes: plan.bytes, skipped: plan.skipped, pack: () => packPlan(plan, packOpts), ...(volatile !== undefined ? { volatile } : {}) } }
       : {}),
     ...(shell !== undefined ? { shell } : {}),
     tools: [...editors.installs, ...tools.installs],
