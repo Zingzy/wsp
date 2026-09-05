@@ -762,7 +762,7 @@ describe("packPlan: rc files with secret exports", () => {
 });
 
 describe("packPlan: alias guard", () => {
-  const guard = { text: "# ls points at eza: not coming (unticked, tick to bring)\ncommand -v eza >/dev/null 2>&1 || unalias ls 2>/dev/null\n", rc: ".zshrc" };
+  const guard = { text: "# ls points at eza: not coming (unticked, tick to bring)\n_wsp_on_path 'eza' || unalias -- 'ls' 2>/dev/null\n", rc: ".zshrc" };
 
   it("ships the guard under .config/wsp and the rc file reads it after its own lines, once, at the rc file's own mode", async () => {
     const home = laptop();
@@ -800,11 +800,11 @@ describe("packPlan: alias guard", () => {
       return { rc: readFileSync(join(dir, ".zshrc"), "utf8"), guard: existsSync(join(dir, ".config", "wsp", "aliases.sh")) ? readFileSync(join(dir, ".config", "wsp", "aliases.sh"), "utf8") : undefined };
     };
     const unticked = await packOf([zshrc, { ...eza, bring: false }]);
-    expect(unticked.guard).toContain("# ls points at eza: not coming (unticked, tick to bring)\ncommand -v eza >/dev/null 2>&1 || unalias ls 2>/dev/null");
-    expect(unticked.guard).toContain("# o points at open: nothing here installs it\ncommand -v open >/dev/null 2>&1 || unalias o 2>/dev/null");
+    expect(unticked.guard).toContain("# ls points at eza: not coming (unticked, tick to bring)\n_wsp_on_path 'eza' || unalias -- 'ls' 2>/dev/null");
+    expect(unticked.guard).toContain("# o points at open: nothing here installs it\n_wsp_on_path 'open' || unalias -- 'o' 2>/dev/null");
     expect(unticked.rc).toContain(GUARD_SOURCE_LINE);
     const ticked = await packOf([zshrc, eza]);
-    expect(ticked.guard).toContain("unalias o");
+    expect(ticked.guard).toContain("unalias -- 'o'");
     expect(ticked.guard).not.toContain("eza");
     const plain = await packOf([{ ...zshrc, aliases: [zshrc.aliases![0]!] }, eza]);
     expect(plain.guard).toBeUndefined();

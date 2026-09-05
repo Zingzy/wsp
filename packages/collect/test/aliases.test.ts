@@ -157,7 +157,7 @@ describe("shellAliases", () => {
       shell: "/bin/zsh",
       ...over,
       files: { "/etc/shells": SHELLS, "~/.zshrc": "plugins=(git eza)\n", "/opt/homebrew/opt/bat/bin/bat": 1, "/opt/homebrew/opt/python@3.13/bin/pip3": 1, "/opt/homebrew/opt/python@3.13/bin/python3": 1, ...over.files },
-      exec: { [`/bin/zsh -ic ${LIST_SCRIPTS["zsh"]}`]: ZSH_LISTING, ...over.exec },
+      exec: { [`WSP_COLLECT=1 /bin/zsh -ic ${LIST_SCRIPTS["zsh"]}`]: ZSH_LISTING, ...over.exec },
     });
   const tools = [tool("tools/brew/eza"), tool("tools/brew/bat"), tool("tools/brew/python@3.13"), tool("tools/cli/kubectl", { default: "skip" }), tool("tools/brew/glow", { default: "skip", reason: "no Linux bottle" })];
 
@@ -165,8 +165,10 @@ describe("shellAliases", () => {
     const entries = [rc("shell/zshrc", "~/.zshrc"), rc("shell/zshenv", "~/.zshenv"), ...tools];
     const host = laptop();
     await shellAliases(host, entries);
-    expect(host.calls.filter(c => c.startsWith("run /bin/zsh"))).toHaveLength(1);
+    expect(host.calls.filter(c => c.startsWith("run "))).toEqual([`run WSP_COLLECT=1 /bin/zsh -ic ${LIST_SCRIPTS["zsh"]} (10000 ms, SIGKILL)`]);
     expect(entries[1]).not.toHaveProperty("aliases");
+    expect(entries[1]).not.toHaveProperty("aliasesFrom");
+    expect(entries[0]!.aliasesFrom).toBe("shell");
     expect(entries[0]!.aliases).toEqual([
       { name: "L", kind: "alias", runs: "bat", tool: "tools/brew/bat" },
       { name: "cat", kind: "alias", runs: "bat", tool: "tools/brew/bat" },
@@ -205,6 +207,7 @@ describe("shellAliases", () => {
     });
     const entries = [rc("shell/zshrc", "~/.zshrc"), tool("tools/brew/neovim"), tool("tools/brew/bat")];
     await shellAliases(host, entries);
+    expect(entries[0]!.aliasesFrom).toBe("files");
     expect(entries[0]!.aliases).toEqual([
       { name: "cat", kind: "alias", runs: "bat", tool: "tools/brew/bat" },
       { name: "e", kind: "alias", runs: "eza" },
@@ -215,7 +218,7 @@ describe("shellAliases", () => {
   });
 
   it("a formula whose command has another name is found through Homebrew's opt links, on either prefix", async () => {
-    const host = laptop({ files: { "/usr/local/opt/ripgrep/bin/rg": 1, "/opt/homebrew/opt/neovim/bin/nvim": 1 }, exec: { [`/bin/zsh -ic ${LIST_SCRIPTS["zsh"]}`]: "alias rg='rg --smart-case'\nalias v=nvim\n" } });
+    const host = laptop({ files: { "/usr/local/opt/ripgrep/bin/rg": 1, "/opt/homebrew/opt/neovim/bin/nvim": 1 }, exec: { [`WSP_COLLECT=1 /bin/zsh -ic ${LIST_SCRIPTS["zsh"]}`]: "alias rg='rg --smart-case'\nalias v=nvim\n" } });
     const entries = [rc("shell/zshrc", "~/.zshrc"), tool("tools/brew/ripgrep"), tool("tools/brew/neovim")];
     await shellAliases(host, entries);
     expect(entries[0]!.aliases).toEqual([
@@ -225,14 +228,25 @@ describe("shellAliases", () => {
   });
 
   it("bash is listed through bash, on its rc row", async () => {
-    const host = fakeHost({ shell: "/bin/bash", files: { "/etc/shells": SHELLS }, exec: { [`/bin/bash -ic ${LIST_SCRIPTS["bash"]}`]: "alias ls='eza'\nserve () \n{ \n    python3 -m http.server\n}\n" } });
+    const host = fakeHost({ shell: "/bin/bash", files: { "/etc/shells": SHELLS }, exec: { [`WSP_COLLECT=1 /bin/bash -ic ${LIST_SCRIPTS["bash"]}`]: "alias ls='eza'\nserve () \n{ \n    python3 -m http.server\n}\n" } });
     const entries = [rc("shell/zshrc", "~/.zshrc"), rc("shell/bashrc", "~/.bashrc"), tool("tools/brew/eza")];
     await shellAliases(host, entries);
     expect(entries[0]).not.toHaveProperty("aliases");
+    expect(entries[1]!.aliasesFrom).toBe("shell");
     expect(entries[1]!.aliases).toEqual([
       { name: "ls", kind: "alias", runs: "eza", tool: "tools/brew/eza" },
       { name: "serve", kind: "function", runs: "python3" },
     ]);
+  });
+
+  it("a shell that opts out through WSP_COLLECT and prints nothing is read from its files, and a row with no definitions still says where it looked", async () => {
+    const host = laptop({ files: { "~/.zshrc": "[ \"$WSP_COLLECT\" = 1 ] && return\nalias v=nvim\n" }, exec: { [`WSP_COLLECT=1 /bin/zsh -ic ${LIST_SCRIPTS["zsh"]}`]: "\n" } });
+    const entries = [rc("shell/zshrc", "~/.zshrc"), tool("tools/brew/neovim")];
+    await shellAliases(host, entries);
+    expect(entries[0]).toMatchObject({ aliasesFrom: "files", aliases: [{ name: "v", kind: "alias", runs: "nvim" }] });
+    const bare = [rc("shell/zshrc", "~/.zshrc")];
+    await shellAliases(laptop({ exec: { [`WSP_COLLECT=1 /bin/zsh -ic ${LIST_SCRIPTS["zsh"]}`]: "alias g=git\n" } }), bare);
+    expect(bare[0]).toEqual({ ...rc("shell/zshrc", "~/.zshrc"), aliasesFrom: "shell" });
   });
 
   it("nothing runs for fish, an unlisted shell or a shell with no rc row", async () => {
@@ -241,6 +255,7 @@ describe("shellAliases", () => {
     await shellAliases(fish, fishRows);
     expect(fish.calls.some(c => c.startsWith("run "))).toBe(false);
     expect(fishRows[0]).not.toHaveProperty("aliases");
+    expect(fishRows[0]).not.toHaveProperty("aliasesFrom");
     const noRow = laptop();
     const rows = [...tools];
     await shellAliases(noRow, rows);

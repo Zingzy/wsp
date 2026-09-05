@@ -57,14 +57,18 @@ function subject(members: readonly ShellAlias[]): string {
 
 const verb = (n: number): string => (n === 1 ? "points" : "point");
 
-/** The detail pane's lines under a shell row: one per command its aliases point at that is not coming, capped. */
+const FROM_FILES_LINE = "aliases read from the rc files, not the shell, which did not answer";
+
+/** The detail pane's lines under a shell row: where the list came from when not the shell, then one per command its
+ * aliases point at that is not coming, capped. */
 export function aliasLines(row: ManifestEntry, entries: readonly ManifestEntry[], ticks: ReadonlySet<string>, brew: BrewTable, max: number): string[] {
   const all = groups(row, entries, ticks, brew);
   const shown = all.length > max ? all.slice(0, max - 1) : all;
-  const lines = shown.map(g => {
+  const lines = row.aliasesFrom === "files" ? [FROM_FILES_LINE] : [];
+  for (const g of shown) {
     const tail = g.fate.fate === "missing" ? `which is not coming (${g.fate.why})` : `which nothing here installs (kept on the machine only if it has ${g.runs})`;
-    return `${subject(g.members)} ${verb(g.members.length)} at ${g.runs}, ${tail}`;
-  });
+    lines.push(`${subject(g.members)} ${verb(g.members.length)} at ${g.runs}, ${tail}`);
+  }
   if (all.length > max) lines.push(`${all.length - shown.length} more: ${all.slice(shown.length).map(g => g.runs).join(", ")}`);
   return lines;
 }
@@ -80,8 +84,14 @@ export interface AliasGuard {
   rc: string;
 }
 
+/** Single-quoted for the shell: a quoted word is never alias-expanded, which matters for a global alias's name. */
+const sq = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`;
+
+/** command -v would also answer for an alias or a function, so a self-alias like eza='eza --icons' would hide a missing eza. */
+const ON_PATH = 'if [ -n "${ZSH_VERSION-}" ]; then _wsp_on_path() { whence -p -- "$1" >/dev/null 2>&1; }; else _wsp_on_path() { type -P -- "$1" >/dev/null 2>&1; }; fi';
+
 /** The guard file for the ticked rows: each alias whose tool is not coming, undone on the machine when its command
- * is missing, one `command -v` per command; a function is listed on the screen but never undone here. */
+ * is off PATH, one lookup per command; a function is listed on the screen but never undone here. */
 export function aliasGuardFor(rows: readonly ManifestEntry[], brew: BrewTable = new Map()): AliasGuard | undefined {
   const ticks = new Set(rows.filter(e => e.bring === true).map(e => e.id));
   const row = rows.find(e => e.bring === true && e.rung === "shell" && (e.aliases?.length ?? 0) > 0);
@@ -95,14 +105,15 @@ export function aliasGuardFor(rows: readonly ManifestEntry[], brew: BrewTable = 
     const names = [...plain, ...suffix];
     const why = g.fate.fate === "missing" ? `not coming (${g.fate.why})` : "nothing here installs it";
     lines.push(`# ${named(names)} ${verb(names.length)} at ${g.runs}: ${why}`);
-    const drops = [...(plain.length > 0 ? [`unalias ${plain.join(" ")} 2>/dev/null`] : []), ...(suffix.length > 0 ? [`[ -n "\${ZSH_VERSION-}" ] && unalias -s ${suffix.join(" ")} 2>/dev/null`] : [])];
-    lines.push(`command -v ${g.runs} >/dev/null 2>&1 || ${drops.length === 1 && plain.length > 0 ? drops[0] : `{ ${drops.join("; ")}; }`}`);
+    const drops = [...(plain.length > 0 ? [`unalias -- ${plain.map(sq).join(" ")} 2>/dev/null`] : []), ...(suffix.length > 0 ? [`[ -n "\${ZSH_VERSION-}" ] && unalias -s -- ${suffix.map(sq).join(" ")} 2>/dev/null`] : [])];
+    lines.push(`_wsp_on_path ${sq(g.runs)} || ${drops.length === 1 && plain.length > 0 ? drops[0] : `{ ${drops.join("; ")}; }`}`);
   }
   if (lines.length === 0) return undefined;
   const head = [
     "# wsp writes this file from the recipe; the next import overwrites it.",
-    "# Each alias below points at a command this machine may not have. When the command is missing the alias is",
+    "# Each alias below points at a command this machine may not have. When the command is off PATH the alias is",
     `# removed, so the plain command runs instead of nothing. ~/${rc.slice(2)} reads this file last.`,
+    ON_PATH,
   ];
-  return { text: `${[...head, ...lines].join("\n")}\n`, rc: rc.slice(2) };
+  return { text: `${[...head, ...lines, "unset -f _wsp_on_path"].join("\n")}\n`, rc: rc.slice(2) };
 }

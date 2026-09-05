@@ -84,6 +84,8 @@ const Fields = z.object({
   font: z.string().min(1).optional(),
   /** Only on the login shell's rc row: what the shell defines that runs a program, so the screens can say which point at a tool that is not coming and the machine can drop those. */
   aliases: z.array(ShellAlias).optional(),
+  /** Only on the login shell's rc row: whether the shell listed its own aliases or, when it did not answer, the rc files were read. */
+  aliasesFrom: z.enum(["shell", "files"]).optional(),
 });
 
 export const ManifestEntry = Fields.superRefine((e, ctx) => {
@@ -112,6 +114,9 @@ export const ManifestEntry = Fields.superRefine((e, ctx) => {
   }
   if (e.aliases !== undefined && e.rung !== "shell") {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["aliases"], message: "only a shell row carries aliases" });
+  }
+  if (e.aliasesFrom !== undefined && e.rung !== "shell") {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["aliasesFrom"], message: "only a shell row says where its aliases were read" });
   }
   if (e.required === true && e.default === "skip") {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["required"], message: "a required row cannot default to skip" });

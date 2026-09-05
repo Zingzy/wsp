@@ -17,10 +17,19 @@ export interface HostFs {
   readText(path: string): Promise<string | undefined>;
 }
 
+export interface RunOptions {
+  /** Variables added to the collector's own environment for this child. */
+  env?: Readonly<Record<string, string>>;
+  /** How long the child may run before it is killed; two minutes when unset. */
+  timeoutMs?: number;
+  /** SIGTERM when unset; an interactive shell ignores TERM, so its listing asks for SIGKILL. */
+  killSignal?: "SIGTERM" | "SIGKILL";
+}
+
 export interface HostExec {
   which(bin: string): Promise<boolean>;
-  /** stdout when the command exits 0, otherwise undefined. */
-  run(cmd: string, args: readonly string[]): Promise<string | undefined>;
+  /** stdout when the command exits 0, otherwise undefined. Every child reads end of file on stdin. */
+  run(cmd: string, args: readonly string[], opts?: RunOptions): Promise<string | undefined>;
 }
 
 export interface Host {

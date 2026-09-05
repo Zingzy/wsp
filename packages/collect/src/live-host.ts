@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { access, constants, readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import type { Host, HostExec, HostFs, Platform, Stat } from "./host.js";
-
-const execFileP = promisify(execFile);
 
 // Plugin checkouts and dependency trees live under config dirs (nvim's lazy
 // lock is fine, its .git clones are not); their size would swamp the summary
@@ -78,15 +75,50 @@ async function onPath(bin: string): Promise<boolean> {
   return false;
 }
 
+const MAX_OUTPUT = 64 * 1024 * 1024;
+/** A background job the child left holding its stdout would otherwise keep the run open after the child exited. */
+const CLOSE_GRACE_MS = 1000;
+
 export const nodeExec: HostExec = {
   which: onPath,
-  async run(cmd, args) {
-    try {
-      const { stdout } = await execFileP(cmd, [...args], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 120_000 });
-      return stdout;
-    } catch {
-      return undefined;
-    }
+  run(cmd, args, opts = {}) {
+    return new Promise(resolve => {
+      const chunks: Buffer[] = [];
+      let bytes = 0;
+      let failed = false;
+      let settled = false;
+      let grace: NodeJS.Timeout | undefined;
+      const child = spawn(cmd, [...args], {
+        stdio: ["ignore", "pipe", "pipe"],
+        env: opts.env === undefined ? process.env : { ...process.env, ...opts.env },
+        timeout: opts.timeoutMs ?? 120_000,
+        killSignal: opts.killSignal ?? "SIGTERM",
+      });
+      const settle = (code: number | null, signal: NodeJS.Signals | null): void => {
+        if (settled) return;
+        settled = true;
+        if (grace !== undefined) clearTimeout(grace);
+        child.stdout.destroy();
+        child.stderr.destroy();
+        resolve(!failed && code === 0 && signal === null ? Buffer.concat(chunks).toString("utf8") : undefined);
+      };
+      child.stdout.on("data", (b: Buffer) => {
+        bytes += b.length;
+        if (bytes > MAX_OUTPUT) {
+          failed = true;
+          child.kill("SIGKILL");
+        } else chunks.push(b);
+      });
+      child.stderr.resume();
+      child.on("error", () => {
+        failed = true;
+        settle(null, null);
+      });
+      child.on("exit", (code, signal) => {
+        grace = setTimeout(() => settle(code, signal), CLOSE_GRACE_MS);
+      });
+      child.on("close", settle);
+    });
   },
 };
 

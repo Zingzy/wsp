@@ -63,6 +63,7 @@ describe("manifest schema", () => {
     ["a version on a row that is not a tool", { ...entry, version: "1.0.0" }],
     ["a login shell on a row that is not a shell row", { ...entry, login: "zsh" }],
     ["a terminal font on a row that is not a shell row", { ...entry, font: "Hack" }],
+    ["where the aliases were read on a row that is not a shell row", { ...entry, aliasesFrom: "files" }],
   ])("rejects %s", (_name, bad) => {
     expect(ManifestEntry.safeParse(bad).success).toBe(false);
   });

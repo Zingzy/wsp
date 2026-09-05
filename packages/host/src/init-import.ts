@@ -234,6 +234,21 @@ export interface PackOptions {
  * and tars the tree. Links are followed so the target's bytes land at the
  * link's path; one that leaves home, points at a refused path, or points back
  * into its own directory is left out with a note. */
+/** Ships the guard under the staged home and has the rc file that carried the aliases read it last, once, at the rc file's own mode; nothing when that rc file is not in this pack. */
+function placeGuard(stage: string, guard: AliasGuard): void {
+  const rc = join(stage, guard.rc);
+  if (!existsSync(rc) || !statSync(rc).isFile()) return;
+  const file = join(stage, GUARD_PATH);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, guard.text, { mode: 0o644 });
+  const text = readFileSync(rc, "utf8");
+  if (text.includes(GUARD_SOURCE_LINE)) return;
+  const mode = statSync(rc).mode & 0o7777;
+  chmodSync(rc, 0o600);
+  writeFileSync(rc, `${text}${text === "" || text.endsWith("\n") ? "" : "\n"}\n${GUARD_SOURCE_COMMENT}\n${GUARD_SOURCE_LINE}\n`);
+  chmodSync(rc, mode);
+}
+
 export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<PackedFiles> {
   const stage = mkdtempSync(join(tmpdir(), "wsp-golden-import-"));
   const out = mkdtempSync(join(tmpdir(), "wsp-golden-import-tar-"));
@@ -308,19 +323,7 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
     };
     walk(stage);
     cut.sort((a, b) => (a.path < b.path ? -1 : 1));
-    const rc = opts.guard === undefined ? undefined : join(stage, opts.guard.rc);
-    if (opts.guard !== undefined && rc !== undefined && existsSync(rc) && statSync(rc).isFile()) {
-      const guard = join(stage, GUARD_PATH);
-      mkdirSync(dirname(guard), { recursive: true });
-      writeFileSync(guard, opts.guard.text, { mode: 0o644 });
-      const text = readFileSync(rc, "utf8");
-      if (!text.includes(GUARD_SOURCE_LINE)) {
-        const mode = statSync(rc).mode & 0o7777;
-        chmodSync(rc, 0o600);
-        writeFileSync(rc, `${text}${text === "" || text.endsWith("\n") ? "" : "\n"}\n${GUARD_SOURCE_COMMENT}\n${GUARD_SOURCE_LINE}\n`);
-        chmodSync(rc, mode);
-      }
-    }
+    if (opts.guard !== undefined) placeGuard(stage, opts.guard);
     // A dropped account leaves the staged file before any token lands, so the active mark has moved by the time
     // the account it moved to is placed and the host token follows it.
     for (const s of plan.secrets) {

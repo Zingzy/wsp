@@ -2,9 +2,10 @@
 // The aliases and functions the login shell defines that run a program. The
 // interactive shell lists them itself, so an alias a plugin builds at startup
 // (oh-my-zsh's eza plugin writes alias ls=eza from a helper) is seen; when the
-// shell does not answer, the rc files are read instead. Each program is matched
-// to the tools row that installs it, so the screens and the machine can tell
-// which aliases point at a tool that is not coming.
+// shell does not answer inside its budget, or prints nothing because an rc file
+// opted out on WSP_COLLECT, the rc files are read instead and the row says so.
+// Each program is matched to the tools row that installs it, so the screens and
+// the machine can tell which aliases point at a tool that is not coming.
 import { simpleCommands, sourcedPaths } from "../everything/shell-rc.js";
 import { type Host, expand } from "../host.js";
 import type { ManifestEntry, ShellAlias } from "../manifest.js";
@@ -22,6 +23,9 @@ export const LIST_SCRIPTS: Record<"zsh" | "bash", string> = {
   zsh: "alias -L; alias -Ls; f=(${(k)functions:#_*}); (( $#f )) && functions $f; true",
   bash: "alias; for f in $(compgen -A function | grep -v '^_'); do declare -f \"$f\"; done; true",
 };
+
+/** Opening a terminal takes a moment, not minutes; past this the shell is killed, since an interactive shell ignores TERM. */
+export const LIST_BUDGET_MS = 10_000;
 
 /** The rc files each shell reads, in the order it reads them, for the fallback. */
 const RC_BY_SHELL: Record<"zsh" | "bash", readonly string[]> = {
@@ -289,8 +293,10 @@ export async function shellAliases(host: Host, entries: readonly ManifestEntry[]
   if ((login !== "zsh" && login !== "bash") || host.shell === undefined) return;
   const row = rcRow(entries, login);
   if (row === undefined) return;
-  const listed = await host.exec.run(host.shell, ["-ic", LIST_SCRIPTS[login]]);
-  const defs = parseShell(listed !== undefined && listed.trim() !== "" ? listed : await rcText(host, login));
+  const listed = await host.exec.run(host.shell, ["-ic", LIST_SCRIPTS[login]], { env: { WSP_COLLECT: "1" }, timeoutMs: LIST_BUDGET_MS, killSignal: "SIGKILL" });
+  const answered = listed !== undefined && listed.trim() !== "";
+  row.aliasesFrom = answered ? "shell" : "files";
+  const defs = parseShell(answered ? listed : await rcText(host, login));
   const names = new Set(defs.map(d => d.name));
   const tool = await toolIndex(host, entries);
   const byKey = new Map<string, ShellAlias>();
