@@ -12,6 +12,8 @@ export interface FakeLaptop {
   exec?: Record<string, string>;
   /** SHELL of the process running the collector. */
   shell?: string;
+  /** TERM_PROGRAM of the process running the collector. */
+  terminal?: string;
 }
 
 const HOME = "/Users/dev";
@@ -68,5 +70,5 @@ export function fakeHost(laptop: FakeLaptop = {}): Host & { calls: string[] } {
     },
   };
 
-  return { platform: laptop.platform ?? "darwin", home: HOME, ...(laptop.shell !== undefined ? { shell: laptop.shell } : {}), fs, exec, calls };
+  return { platform: laptop.platform ?? "darwin", home: HOME, ...(laptop.shell !== undefined ? { shell: laptop.shell } : {}), ...(laptop.terminal !== undefined ? { terminal: laptop.terminal } : {}), fs, exec, calls };
 }

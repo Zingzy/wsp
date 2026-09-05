@@ -39,6 +39,7 @@
     "@wsp/daemon": "workspace:*",
     "@wsp/runtime": "workspace:*",
     "jsdom": "^25.0.1",
+    "playwright": "1.62.1",
     "tailwindcss": "^4.0.0",
     "vite": "^5.4.0"
   }

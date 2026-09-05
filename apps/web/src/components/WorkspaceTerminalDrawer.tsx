@@ -13,6 +13,7 @@ import { useStatus, useStore, useWorkspace } from "../protocol/store.js";
 import { selectPanelTerminalIds, useRightPanelStore } from "../rightPanelStore.js";
 import { openDrawerTerminal, reportTerminalFailure, splitDrawerTerminal, type SplitDirection } from "../shell/shellCommands.js";
 import { selectTerminalUiState, useTerminalDrawerStore } from "../terminal/drawerStore.js";
+import { useTerminalViewportConfig } from "../terminal/fontSetting.js";
 import { reconcileTerminalIds, type TerminalUiState } from "../terminal/groups.js";
 import { getTerminals, onTerminals, type PtyTabView, type WorkspaceTerminals } from "../terminal/link.js";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer.js";
@@ -73,6 +74,7 @@ function LinkedDrawer({ terms, workspaceId, ui }: { terms: WorkspaceTerminals; w
   const lost = useMemo(() => lostTerminals(tabs), [tabs]);
   const { pane, onWake } = useTerminalPane(workspaceId, status);
   const terminalIo = useCallback((id: string) => terms.io(id), [terms]);
+  const terminalConfig = useTerminalViewportConfig();
   const store = useTerminalDrawerStore;
 
   // Until the link is live its tab list is not the daemon's: the stored arrangement is kept as is and only ptys the link knows get a viewport.
@@ -115,6 +117,7 @@ function LinkedDrawer({ terms, workspaceId, ui }: { terms: WorkspaceTerminals; w
       onHeightChange={h => store.getState().setHeight(workspaceId, h)}
       terminalLabelsById={labels}
       terminalIo={terminalIo}
+      terminalConfig={terminalConfig}
     />
   );
 }

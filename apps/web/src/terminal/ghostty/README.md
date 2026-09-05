@@ -9,8 +9,11 @@ It is intentionally not an xterm compatibility layer.
 - `core.ts` owns per-terminal Ghostty handles and translates the C ABI into render snapshots.
 - `renderer.ts` batches backgrounds and style runs into a Canvas 2D frame.
 - `surface.ts` owns browser input, IME, selection, scrolling, sizing, links, and cursor blinking.
-- `fonts/` vendors the symbols-only Nerd Font (MIT) the surface registers lazily, so
-  prompt glyphs render without a locally installed Nerd Font.
+- `fontChain.ts` builds the canvas font list: the chosen family, the installed faces
+  `localFonts.ts` registered for it (the desktop shell reads them from the computer's font
+  directories), then the bundled symbols face. No Nerd Font is named that nobody chose.
+- `fonts/` vendors the symbols-only Nerd Font (MIT) the surface registers lazily as the last
+  fallback, so prompt glyphs render without a locally installed Nerd Font.
 - `vendor/` holds only the two wasm artifacts, taken as-is from pingdotgg/t3code at 57a66608,
   whose `native/libghostty-vt/VERSION` pins ghostty at
   `9f62873bf195e4d8a762d768a1405a5f2f7b1697`. This repo has no build script for them; a newer

@@ -506,6 +506,7 @@ function detailWhy(e: ManifestEntry, lock: "on" | "off" | undefined, brew: BrewT
   if (lock === "on") return "always comes along";
   if (e.rung === "logins") return agentName(e) === "claude" ? CLAUDE_LOGIN_WHY : LOGIN_WHY;
   if (e.rung === "everything" || isMcpRow(e)) return e.detail ?? "";
+  if (e.font !== undefined) return "the app's terminal draws with it when this computer has it installed; unticked, the app uses its own font";
   if (e.rung === "agents") {
     if (!hasInstaller(e)) return "its config comes along; no installer yet, install it there yourself";
     const size = agentSize(e);
@@ -527,6 +528,7 @@ function whereNothing(e: ManifestEntry): string {
   const remote = e.rung === "editors" ? remoteEditorFor(e.id) : undefined;
   if (remote !== undefined) return `listed in ~/${extensionsFile(remote.dir)} on the machine; nothing installs until you connect`;
   if (isMcpRow(e)) return "defined in the agent's config, which travels with the agent's row";
+  if (e.font !== undefined) return "read from your terminal's config; nothing to copy";
   return e.rung === "everything" || e.rung === "editors" ? "nothing to copy" : "reinstalled on the machine";
 }
 

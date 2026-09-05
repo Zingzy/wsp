@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import type { DesktopBridge, LocalFontFace } from "@wsp/protocol";
 import { contextBridge, ipcRenderer } from "electron";
 
 export interface Retry {
@@ -7,6 +8,9 @@ export interface Retry {
   stalePointer?: string;
 }
 
-contextBridge.exposeInMainWorld("wsp", {
-  retry: (): Promise<Retry> => ipcRenderer.invoke("setup:retry"),
-});
+const bridge: DesktopBridge & { retry(): Promise<Retry> } = {
+  retry: () => ipcRenderer.invoke("setup:retry"),
+  localFonts: (family: string): Promise<LocalFontFace[]> => ipcRenderer.invoke("fonts:local", family),
+};
+
+contextBridge.exposeInMainWorld("wsp", bridge);

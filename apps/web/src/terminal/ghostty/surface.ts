@@ -16,24 +16,14 @@ import {
   type GhosttyCellMetrics,
 } from "./renderer";
 import symbolsFontUrl from "./fonts/SymbolsNerdFontMono-Regular.woff2?url";
-import { isMonospaceFamily } from "../../appearanceFonts";
+import { cssFontFamilies, isMonospaceFamily } from "../../appearanceFonts";
+import { TERMINAL_SYMBOLS_FACE, terminalFontChain } from "./fontChain";
+import { localFontFamilies, registerLocalFonts } from "./localFonts";
 
 export const DEFAULT_TERMINAL_FONT_SIZE = 12;
 const MIN_TERMINAL_FONT_SIZE = 6;
 const MAX_TERMINAL_FONT_SIZE = 32;
-// The glyph fallbacks only supply symbols the text faces are missing (powerline
-// separators, devicons, and other private-use prompt symbols), so shells
-// configured for a locally installed Nerd Font keep their prompt glyphs no
-// matter which text face is active.
-const TERMINAL_GLYPH_FALLBACKS =
-  '"Symbols Nerd Font Mono", "Symbols Nerd Font", "JetBrainsMono Nerd Font", ' +
-  '"JetBrainsMono NF", "FiraCode Nerd Font", "Hack Nerd Font", "MesloLGS NF", ' +
-  '"CaskaydiaCove Nerd Font", "PowerlineSymbols", monospace';
-// The platform's own monospace faces; concrete names only, because an
-// unknown keyword (like ui-monospace) makes canvas font shorthand parsing
-// reject the whole string.
-export const DEFAULT_TERMINAL_FONT_FAMILY =
-  '"SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", ' + TERMINAL_GLYPH_FALLBACKS;
+export const DEFAULT_TERMINAL_FONT_FAMILY = terminalFontChain(undefined);
 const CONTENT_PADDING = 4;
 const MIN_SCROLLBAR_THUMB_HEIGHT = 18;
 /** Half a blink cycle: the visible and hidden phases are equally long. */
@@ -57,14 +47,14 @@ let symbolsFontLoad: Promise<void> | null = null;
 /**
  * Register the bundled symbols-only Nerd Font once per page. It loads lazily
  * with the first terminal, and because it carries no regular text glyphs it
- * composes with any text face without changing metrics — prompt symbols and
+ * composes with any text face without changing metrics: prompt symbols and
  * devicons render even on machines without a locally installed Nerd Font.
  */
 function ensureTerminalSymbolsFont(): Promise<void> {
   if (symbolsFontLoad !== null) return symbolsFontLoad;
   symbolsFontLoad = (async () => {
     try {
-      const face = new FontFace("Symbols Nerd Font Mono", `url(${symbolsFontUrl})`);
+      const face = new FontFace(TERMINAL_SYMBOLS_FACE, `url(${symbolsFontUrl})`);
       document.fonts.add(await face.load());
     } catch {
       // Locally installed fallback faces still apply.
@@ -73,41 +63,24 @@ function ensureTerminalSymbolsFont(): Promise<void> {
   return symbolsFontLoad;
 }
 
-function quoteTerminalFontFamilies(list: string): string {
-  return list
-    .split(",")
-    .map((name) => {
-      const bare = name.trim();
-      if (bare.length === 0) return "";
-      if (/^(['"]).*\1$/.test(bare)) return bare;
-      if (/^[a-zA-Z][a-zA-Z0-9-]*$/.test(bare)) return bare;
-      return `"${bare.replaceAll('"', "")}"`;
-    })
-    .filter((name) => name.length > 0)
-    .join(", ");
-}
-
 function uncheckedTerminalFontFamily(family?: string): string {
-  const custom = family === undefined ? "" : quoteTerminalFontFamilies(family);
-  return custom.length === 0
-    ? DEFAULT_TERMINAL_FONT_FAMILY
-    : `${custom}, ${TERMINAL_GLYPH_FALLBACKS}`;
+  const custom = family === undefined ? null : cssFontFamilies(family);
+  return custom === null ? DEFAULT_TERMINAL_FONT_FAMILY : terminalFontChain(custom, localFontFamilies(family));
 }
 
 export function terminalFontFamily(family?: string): string {
   // Quote non-ident names ("3270 Nerd Font", "M+ 1m"): an unquoted one makes
   // the whole canvas font string invalid and the assignment silently no-ops.
-  const custom = family === undefined ? "" : quoteTerminalFontFamilies(family);
-  if (custom.length === 0) return DEFAULT_TERMINAL_FONT_FAMILY;
+  const custom = family === undefined ? null : cssFontFamilies(family);
+  if (custom === null) return DEFAULT_TERMINAL_FONT_FAMILY;
   // The grid places the cursor and selection on one cell advance, so a
   // proportional face would draw its text narrower than its own cells. Refuse
   // it here rather than render a ragged grid with a stranded cursor.
   if (!isMonospaceFamily(custom)) return DEFAULT_TERMINAL_FONT_FAMILY;
-  // A custom face keeps the glyph fallbacks so prompt symbols stay covered.
-  return uncheckedTerminalFontFamily(custom);
+  return uncheckedTerminalFontFamily(family);
 }
 
-/** Load every style the renderer can request, then validate the actual face. */
+/** Register the computer's faces for the family, load every style the renderer can request, then validate the actual face. */
 export async function loadTerminalFontFamily(
   family: string | undefined,
   size: number,
@@ -116,6 +89,7 @@ export async function loadTerminalFontFamily(
     readonly resolve: (family: string | undefined) => string;
   },
 ): Promise<string> {
+  await registerLocalFonts(family);
   const candidate = uncheckedTerminalFontFamily(family);
   const load =
     environment?.load ?? ((font: string, text: string) => document.fonts.load(font, text));

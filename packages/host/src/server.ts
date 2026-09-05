@@ -35,7 +35,7 @@ export interface HostOptions {
   autoOpen?: (workspaceId: string, url: string) => boolean;
   /** The line logged when a sign-in page arrives and nothing opens, given the workspace name and the page's hostname. */
   openLine?: (workspace: string, hostname: string, url: string) => string;
-  /** The saved recipe file, named as the way to reuse a kept builder. */
+  /** The saved recipe file, named as the way to reuse a kept builder and read for the terminal font its ticks name. */
   recipePath?: string;
 }
 
@@ -71,6 +71,20 @@ const CONTENT_TYPES: Record<string, string> = {
 interface Boot {
   wsPort: number;
   token: string;
+  /** The family the person's terminal draws with, when the saved recipe ticks its row; the app's terminal pane defaults to it. */
+  terminalFont?: string;
+}
+
+/** The ticked shell row's font from the saved recipe; nothing when the file is missing, unreadable or names none. */
+function terminalFontOf(recipePath: string | undefined): string | undefined {
+  if (recipePath === undefined) return undefined;
+  try {
+    const data = JSON.parse(readFileSync(recipePath, "utf8")) as { entries?: { rung?: unknown; bring?: unknown; font?: unknown }[] };
+    const row = data.entries?.find(e => e.rung === "shell" && e.bring === true && typeof e.font === "string" && e.font !== "");
+    return row?.font as string | undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function loadPage(webDir: string, boot: Boot): string {
@@ -201,9 +215,13 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     await relay.close();
     throw e;
   }
-  let page: string;
+  // Rendered per request: wsp init saves the recipe while a host may already be serving.
+  const page = (): string => {
+    const terminalFont = terminalFontOf(opts.recipePath);
+    return loadPage(webDir, { wsPort: rtServer.port, token: authToken, ...(terminalFont !== undefined ? { terminalFont } : {}) });
+  };
   try {
-    page = loadPage(webDir, { wsPort: rtServer.port, token: authToken });
+    page();
   } catch (e) {
     await relay.close();
     await rtServer.close();
@@ -227,7 +245,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       const path = new URL(req.url ?? "/", "http://localhost").pathname;
       if (req.method === "GET" && path === "/") {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-        res.end(page);
+        res.end(page());
         return;
       }
       if (req.method === "GET" && path === "/api/workspaces") {

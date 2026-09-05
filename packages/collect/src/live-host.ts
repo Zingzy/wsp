@@ -98,5 +98,6 @@ export function nodeHost(): Host {
   const platform = platformOf(process.platform);
   if (platform === undefined) throw new Error(`wsp collect runs on macOS or Linux, not ${process.platform}`);
   const shell = process.env["SHELL"];
-  return { platform, home: homedir(), ...(shell ? { shell } : {}), fs: nodeFs, exec: nodeExec };
+  const terminal = process.env["TERM_PROGRAM"];
+  return { platform, home: homedir(), ...(shell ? { shell } : {}), ...(terminal ? { terminal } : {}), fs: nodeFs, exec: nodeExec };
 }

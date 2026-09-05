@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { currentHome, type CliIO } from "@wsp/host";
 import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
+import { fontDirs, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
 import { locateHost, openHost, statePathIn, type HostSession, type Located } from "./host-lifecycle.js";
 import type { Retry } from "./preload.js";
 import { checkSetup } from "./setup.js";
@@ -36,6 +38,11 @@ function newWindow(preload?: string): BrowserWindow {
 
 let session: HostSession | undefined;
 
+// Read once per run: a font installed while the app is open is seen after a restart.
+let fontIndex: Promise<FontFile[]> | undefined;
+const fonts = (): Promise<FontFile[]> => (fontIndex ??= indexFonts(fontDirs(process.platform, homedir(), process.env)));
+ipcMain.handle("fonts:local", (_event, family: unknown) => localFontFaces(typeof family === "string" ? family : "", fonts));
+
 function locate(): Promise<Located> {
   const env = process.env["WSP_HOME"];
   const pointer = currentHome();
@@ -68,7 +75,7 @@ async function showApp(located: Located): Promise<boolean> {
     session = located.session;
   }
   io.log(`${session.owned ? "serving" : "attached"} ${session.url} (home ${located.home})`);
-  const win = newWindow();
+  const win = newWindow(PRELOAD);
   // A link the page opens (a workspace's sign-in page, a preview in a new tab) belongs in the default browser, not a second window.
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//.test(url)) void shell.openExternal(url);
@@ -78,8 +85,8 @@ async function showApp(located: Located): Promise<boolean> {
   return true;
 }
 
-/** The setup screen carries the only preload; the app window gets none. The
- * host starts before the setup window closes so the window count never hits zero. */
+/** The setup screen and the app window share the one preload. The host
+ * starts before the setup window closes so the window count never hits zero. */
 async function showSetup(located: Located): Promise<void> {
   const setup = newWindow(PRELOAD);
   let checking: Promise<Retry> | undefined;

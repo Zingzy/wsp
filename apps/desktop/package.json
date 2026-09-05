@@ -15,6 +15,7 @@
     "@types/node": "^22.20.1",
     "@wsp/daemon": "workspace:*",
     "@wsp/host": "workspace:*",
+    "@wsp/protocol": "workspace:*",
     "@wsp/runtime": "workspace:*",
     "@wsp/web": "workspace:*",
     "electron": "43.5.1",
