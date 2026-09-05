@@ -15,7 +15,7 @@ import { flowHooks, signInStage, type SignInFlow, type SignInStageOptions } from
 import { SH_FILE } from "../src/init-secrets.js";
 import { CHECK_RUN_LINE, checkScript } from "../src/signin-relay.js";
 import { CLAUDE_STATUS } from "../src/signin-table.js";
-import { answersChecks, fakePtyLink, type FakePty, type FakePtyLink } from "./fake-pty-link.js";
+import { answersChecks, checkTag, fakePtyLink, type FakePty, type FakePtyLink } from "./fake-pty-link.js";
 
 const CLAUDE: ManifestEntry = { rung: "logins", id: "logins/claude", label: "Claude Code login", group: "Agent logins", paths: [], bytes: 0, default: "bring", choice: "copy" };
 const KUBE: ManifestEntry = { rung: "logins", id: "logins/kube", label: "kubectl config", group: "CLI logins", paths: [], bytes: 0, default: "bring", choice: "copy" };
@@ -29,7 +29,8 @@ function answering(status: string, exitCode = 0): FakePtyLink {
 
 const GH: ManifestEntry = { rung: "logins", id: "logins/gh", label: "GitHub CLI login", group: "CLI logins", paths: [], bytes: 0, default: "bring", choice: "copy" };
 const GH_IN = "github.com\n  ✓ Logged in to github.com account someone (keyring)";
-const typed = (...commands: string[]): string => checkScript(commands, SH_FILE).map(l => `${l}\r`).join("");
+/** The check script typed on this pty for these status commands, as its writes read joined. */
+const typed = (pty: FakePty, ...commands: string[]): string => checkScript(commands, SH_FILE, checkTag(pty)).map(l => `${l}\r`).join("");
 
 function stage(link: FakePtyLink, over: Partial<SignInStageOptions> & { tty?: boolean } = {}) {
   const input = new PassThrough();
@@ -96,8 +97,8 @@ describe("the sign-in stage and the key sources", () => {
     const { run } = stage(link, { secrets: new Map([["ANTHROPIC_API_KEY", "~/.zshrc"]]) });
     const [r] = await run;
     expect(link.ptys.map(p => p.created)).toEqual([{ cols: 200, rows: 50, shell: "/bin/sh", env: { PS1: "", PS2: "" } }]);
-    expect(link.ptys[0]!.writes.join("")).toBe(typed(CLAUDE_STATUS));
-    expect(checkScript([CLAUDE_STATUS], SH_FILE)[4]).toBe("[ -r /etc/profile.d/wsp-secrets.sh ] && . /etc/profile.d/wsp-secrets.sh");
+    expect(link.ptys[0]!.writes.join("")).toBe(typed(link.ptys[0]!, CLAUDE_STATUS));
+    expect(checkScript([CLAUDE_STATUS], SH_FILE, "t")[4]).toBe("[ -r /etc/profile.d/wsp-secrets.sh ] && . /etc/profile.d/wsp-secrets.sh");
     expect(r).toEqual({ id: "logins/claude", label: "Claude Code login", state: "signed-in", note: "copied; API key from ~/.zshrc, set on the machine as a secret; claude auth status" });
   });
 
@@ -107,7 +108,7 @@ describe("the sign-in stage and the key sources", () => {
     const st = stage(link, { logins: [GH, CLAUDE] });
     const rows = await st.run;
     expect(link.dials).toBe(1);
-    expect(link.ptys.map(p => p.writes.join(""))).toEqual([typed("gh auth status", CLAUDE_STATUS)]);
+    expect(link.ptys.map(p => p.writes.join(""))).toEqual([typed(link.ptys[0]!, "gh auth status", CLAUDE_STATUS)]);
     expect(rows).toEqual([
       { id: "logins/gh", label: "GitHub CLI login", state: "signed-in", note: "copied; gh auth status" },
       { id: "logins/claude", label: "Claude Code login", state: "signed-in", note: "copied; OAuth credentials; claude auth status" },

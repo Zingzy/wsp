@@ -5,6 +5,7 @@
 // URL the tool printed, which is re-shown as a hyperlink with `o` to open it
 // on this computer, unless the tool asked for a page that returns through a
 // forwarded port, which o opens instead; codes and tokens are never looked at.
+import { randomBytes } from "node:crypto";
 import type { Readable, Writable } from "node:stream";
 import { stripVTControlCharacters, styleText } from "node:util";
 
@@ -298,16 +299,16 @@ const HEREDOC_END = "WSP_EOF";
 export const CHECK_RUN_LINE = 'sh "$d/run"; exit';
 /** One pty.write carries at most this much: the line discipline's input buffer is 4096 bytes. */
 const WRITE_BYTES = 2000;
-const STATUS_LINE = /^WSP_STATUS (\d+) (\d+)$/;
 
 /** The lines typed into the guest's sh: a heredoc that writes a script, then runs it. The script reads the
  * secrets file only when it is there, since a `.` of a missing file is fatal in a POSIX sh (dash drops the
  * rest of the line, a non-interactive sh exits); starts every command at once, each in a background subshell
  * with stdin closed so none can wait on the terminal or stop the rest with an exit; and prints one marker
  * pair per command as it finishes. The exit code lands by rename, so a marker never reads a half-written file.
- * The script removes its own dir when it ends, including on the hangup a killed pty sends, so a run the budget
- * cut short leaves nothing on the machine. */
-export function checkScript(commands: readonly string[], secretsFile: string): string[] {
+ * The markers carry a tag minted on this side per run, so nothing a tool prints can spell one. The script
+ * removes its own dir when it ends, including on the hangup a killed pty sends, so a run the budget cut short
+ * leaves nothing on the machine. */
+export function checkScript(commands: readonly string[], secretsFile: string, tag: string): string[] {
   const ids = commands.map((_, i) => String(i + 1));
   return [
     `d=$(mktemp -d "\${TMPDIR:-/tmp}/wsp-check.XXXXXX") && cat >"$d/run" <<'${HEREDOC_END}'`,
@@ -316,7 +317,7 @@ export function checkScript(commands: readonly string[], secretsFile: string): s
     `trap exit HUP TERM`,
     `[ -r ${secretsFile} ] && . ${secretsFile}`,
     ...commands.map((c, i) => `{ ( ${c} ) >"$d/${ids[i]}" 2>&1 </dev/null; echo $? >"$d/${ids[i]}.tmp"; mv "$d/${ids[i]}.tmp" "$d/${ids[i]}.rc"; } &`),
-    `n=0; while [ $n -lt ${ids.length} ]; do for i in ${ids.join(" ")}; do if [ -f "$d/$i.rc" ]; then printf 'WSP_STATUS %s %s\\n' "$i" "$(cat "$d/$i.rc")"; cat "$d/$i"; printf '\\nWSP_END %s\\n' "$i"; rm "$d/$i.rc"; n=$((n+1)); fi; done; sleep 0.2; done`,
+    `n=0; while [ $n -lt ${ids.length} ]; do for i in ${ids.join(" ")}; do if [ -f "$d/$i.rc" ]; then printf 'WSP_STATUS ${tag} %s %s\\n' "$i" "$(cat "$d/$i.rc")"; cat "$d/$i"; printf '\\nWSP_END ${tag} %s\\n' "$i"; rm "$d/$i.rc"; n=$((n+1)); fi; done; sleep 0.2; done`,
     HEREDOC_END,
     CHECK_RUN_LINE,
   ];
@@ -338,6 +339,8 @@ export async function runChecks(link: PtyLink, o: ChecksOptions, onAnswer: (inde
   const { commands } = o;
   const ptyId = ptyIdOf(await link.op("pty.create", { cols: 200, rows: 50, shell: o.shell ?? "/bin/sh", env: { PS1: "", PS2: "" } }));
   const answers: (CheckAnswer | undefined)[] = commands.map(() => undefined);
+  const tag = randomBytes(6).toString("hex");
+  const statusLine = new RegExp(`^WSP_STATUS ${tag} (\\d+) (\\d+)$`);
   let text = "";
   let done: (() => void) | undefined;
   const ended = new Promise<void>(r => (done = r));
@@ -348,12 +351,12 @@ export async function runChecks(link: PtyLink, o: ChecksOptions, onAnswer: (inde
   const read = (): void => {
     const lines = text.replace(/\r/g, "").split("\n");
     for (let i = 0; i < lines.length; i++) {
-      const m = STATUS_LINE.exec(lines[i]!);
+      const m = statusLine.exec(lines[i]!);
       if (!m) continue;
-      const end = lines.indexOf(`WSP_END ${m[1]}`, i + 1);
+      const end = lines.indexOf(`WSP_END ${tag} ${m[1]}`, i + 1);
       if (end < 0) break;
       const index = Number(m[1]) - 1;
-      if (index < commands.length && answers[index] === undefined) {
+      if (index >= 0 && index < commands.length && answers[index] === undefined) {
         const answer = { output: stripVTControlCharacters(lines.slice(i + 1, end).join("\n")).trim(), exitCode: Number(m[2]) };
         answers[index] = answer;
         onAnswer(index, answer);
@@ -383,7 +386,7 @@ export async function runChecks(link: PtyLink, o: ChecksOptions, onAnswer: (inde
   });
   try {
     okOrThrow("pty.attach", await link.op("pty.attach", { ptyId }));
-    for (const data of batched(checkScript(commands, o.secretsFile).map(l => `${l}\r`))) await link.op("pty.write", { ptyId, data });
+    for (const data of batched(checkScript(commands, o.secretsFile, tag).map(l => `${l}\r`))) await link.op("pty.write", { ptyId, data });
     await ended;
   } finally {
     clearTimeout(timer);

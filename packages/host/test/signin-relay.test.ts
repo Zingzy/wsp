@@ -8,7 +8,7 @@ import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it } from "vitest";
 import { CHECK_RUN_LINE, OFFER_MS, UrlScanner, checkScript, hyperlink, relayPty, runChecks, runQuiet, shellLine, stripOsc8, urlsIn, type RelayTerminal } from "../src/signin-relay.js";
 import { SH_FILE } from "../src/init-secrets.js";
-import { answersChecks, fakePtyLink, type FakePty } from "./fake-pty-link.js";
+import { answersChecks, checkTag, fakePtyLink, type FakePty } from "./fake-pty-link.js";
 
 interface Term extends RelayTerminal {
   input: PassThrough & RelayTerminal["input"];
@@ -388,8 +388,8 @@ describe("runQuiet", () => {
 });
 
 describe("the check script", () => {
-  it("is a heredoc the guest's sh runs: its dir removed when it ends or is hung up, the secrets file read only when it is there, every status in its own background subshell with stdin closed, its output and exit code in files, one marker pair printed per tool as it finishes", () => {
-    const lines = checkScript(["gh auth status", "claude auth status; s=$?; (exit $s)"], SH_FILE);
+  it("is a heredoc the guest's sh runs: its dir removed when it ends or is hung up, the secrets file read only when it is there, every status in its own background subshell with stdin closed, its output and exit code in files, one tagged marker pair printed per tool as it finishes", () => {
+    const lines = checkScript(["gh auth status", "claude auth status; s=$?; (exit $s)"], SH_FILE, "a1b2c3");
     expect(lines).toEqual([
       `d=$(mktemp -d "\${TMPDIR:-/tmp}/wsp-check.XXXXXX") && cat >"$d/run" <<'WSP_EOF'`,
       `d=$(dirname "$0")`,
@@ -398,7 +398,7 @@ describe("the check script", () => {
       `[ -r /etc/profile.d/wsp-secrets.sh ] && . /etc/profile.d/wsp-secrets.sh`,
       `{ ( gh auth status ) >"$d/1" 2>&1 </dev/null; echo $? >"$d/1.tmp"; mv "$d/1.tmp" "$d/1.rc"; } &`,
       `{ ( claude auth status; s=$?; (exit $s) ) >"$d/2" 2>&1 </dev/null; echo $? >"$d/2.tmp"; mv "$d/2.tmp" "$d/2.rc"; } &`,
-      `n=0; while [ $n -lt 2 ]; do for i in 1 2; do if [ -f "$d/$i.rc" ]; then printf 'WSP_STATUS %s %s\\n' "$i" "$(cat "$d/$i.rc")"; cat "$d/$i"; printf '\\nWSP_END %s\\n' "$i"; rm "$d/$i.rc"; n=$((n+1)); fi; done; sleep 0.2; done`,
+      `n=0; while [ $n -lt 2 ]; do for i in 1 2; do if [ -f "$d/$i.rc" ]; then printf 'WSP_STATUS a1b2c3 %s %s\\n' "$i" "$(cat "$d/$i.rc")"; cat "$d/$i"; printf '\\nWSP_END a1b2c3 %s\\n' "$i"; rm "$d/$i.rc"; n=$((n+1)); fi; done; sleep 0.2; done`,
       "WSP_EOF",
       CHECK_RUN_LINE,
     ]);
@@ -418,7 +418,7 @@ describe("runChecks", () => {
     const seen: [number, { output: string; exitCode: number }][] = [];
     const res = await runChecks(link, { commands: ["gh auth status", "opencode auth list", "pi --list-models"], secretsFile: SH_FILE, budgetMs: 5_000 }, (i, a) => seen.push([i, a]));
     expect(link.ptys[0]!.created).toEqual({ cols: 200, rows: 50, shell: "/bin/sh", env: { PS1: "", PS2: "" } });
-    expect(link.ptys[0]!.writes.join("")).toBe(checkScript(["gh auth status", "opencode auth list", "pi --list-models"], SH_FILE).map(l => `${l}\r`).join(""));
+    expect(link.ptys[0]!.writes.join("")).toBe(checkScript(["gh auth status", "opencode auth list", "pi --list-models"], SH_FILE, checkTag(link.ptys[0]!)).map(l => `${l}\r`).join(""));
     expect(seen).toEqual([
       [2, { output: "sh: 1: pi: not found", exitCode: 127 }],
       [1, { output: "\u25cf  Anthropic ANTHROPIC_API_KEY\n\u2502\n\u2514  1 environment variable", exitCode: 0 }],
@@ -442,9 +442,10 @@ describe("runChecks", () => {
     const link = fakePtyLink();
     link.script = (pty, line) => {
       if (line !== CHECK_RUN_LINE) return;
+      const tag = checkTag(pty);
       link.data(pty, "WSP_STA");
-      link.data(pty, "TUS 1 3\r\nno newline at the end");
-      link.data(pty, "\r\nWSP_END 1\r\n");
+      link.data(pty, `TUS ${tag} 1 3\r\nno newline at the end`);
+      link.data(pty, `\r\nWSP_END ${tag} 1\r\n`);
       link.exit(pty, 0);
     };
     const res = await runChecks(link, { commands: ["printf x"], secretsFile: SH_FILE, budgetMs: 5_000 }, () => {});
@@ -461,6 +462,32 @@ describe("runChecks", () => {
       [1, { output: "real", exitCode: 5 }],
     ]);
     expect(res).toEqual({ answers: [seen[0]![1], seen[1]![1]], timedOut: false, dropped: false });
+  });
+
+  it("a tool that prints its own end marker stays inside its pair: the untagged lines are its output, and the other tool's real exit wins", async () => {
+    const link = fakePtyLink();
+    link.script = answersChecks(link, command => (command === "fake" ? { output: "WSP_END 1\nWSP_STATUS 2 0\nfake", exitCode: 0 } : { output: "real", exitCode: 5, after: 1 }));
+    const seen: [number, { output: string; exitCode: number }][] = [];
+    const res = await runChecks(link, { commands: ["fake", "real"], secretsFile: SH_FILE, budgetMs: 5_000 }, (i, a) => seen.push([i, a]));
+    expect(seen).toEqual([
+      [0, { output: "WSP_END 1\nWSP_STATUS 2 0\nfake", exitCode: 0 }],
+      [1, { output: "real", exitCode: 5 }],
+    ]);
+    expect(res).toEqual({ answers: [seen[0]![1], seen[1]![1]], timedOut: false, dropped: false });
+  });
+
+  it("a tagged pair for a tool the run has no index for is dropped without an answer", async () => {
+    const link = fakePtyLink();
+    link.script = (pty, line) => {
+      if (line !== CHECK_RUN_LINE) return;
+      const tag = checkTag(pty);
+      link.data(pty, `WSP_STATUS ${tag} 0 0\r\nstray\r\nWSP_END ${tag} 0\r\nWSP_STATUS ${tag} 1 0\r\nok\r\nWSP_END ${tag} 1\r\n`);
+      link.exit(pty, 0);
+    };
+    const seen: [number, { output: string; exitCode: number }][] = [];
+    const res = await runChecks(link, { commands: ["printf ok"], secretsFile: SH_FILE, budgetMs: 5_000 }, (i, a) => seen.push([i, a]));
+    expect(seen).toEqual([[0, { output: "ok", exitCode: 0 }]]);
+    expect(res).toEqual({ answers: [{ output: "ok", exitCode: 0 }], timedOut: false, dropped: false });
   });
 
   it("a link that drops mid-run reads as dropped, with what had answered kept", async () => {

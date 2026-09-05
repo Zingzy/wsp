@@ -18,7 +18,7 @@ import { signInStage } from "../src/init-signin.js";
 import { checkScript } from "../src/signin-relay.js";
 import { AWS_STATUS, GEMINI_STATUS, SIGN_INS, statusOf, type LoginSource } from "../src/signin-table.js";
 import { collectorLogins } from "./collector-logins.js";
-import { answersChecks, fakePtyLink } from "./fake-pty-link.js";
+import { answersChecks, checkTag, fakePtyLink, type FakePty } from "./fake-pty-link.js";
 
 type Source = LoginSource | "none";
 const SOURCES: readonly Source[] = ["keychain", "rc-key", "file", "helper", "none"];
@@ -328,11 +328,11 @@ function guest(tool: string, choice: "copy" | "machine", answer: Answer | undefi
   return { run, link, text: () => stripVTControlCharacters(chunks.join("")) };
 }
 
-/** The script typed on the guest for this tool's check alone, as one pty's writes read joined. */
-const typedScript = (tool: string): string => {
+/** The script typed on this pty for the tool's check alone, as its writes read joined. */
+const typedScript = (pty: FakePty, tool: string): string => {
   const status = statusOf(SIGN_INS[tool]!);
   if (status === undefined) throw new Error(`${tool} has no status command`);
-  return checkScript([status.typed ?? status.command], SH_FILE).map(l => `${l}\r`).join("");
+  return checkScript([status.typed ?? status.command], SH_FILE, checkTag(pty)).map(l => `${l}\r`).join("");
 };
 
 describe("the sign-in matrix covers every tool and source", () => {
@@ -372,7 +372,7 @@ describe("the sign-in matrix covers every tool and source", () => {
     for (const tool of tools) {
       const status = statusOf(SIGN_INS[tool]!);
       if (status === undefined) continue;
-      const lines = checkScript([status.typed ?? status.command], SH_FILE);
+      const lines = checkScript([status.typed ?? status.command], SH_FILE, "t");
       expect(lines.indexOf("[ -r /etc/profile.d/wsp-secrets.sh ] && . /etc/profile.d/wsp-secrets.sh"), tool).toBeLessThan(lines.findIndex(l => l.includes(status.typed ?? status.command)));
       expect(status.command, tool).not.toMatch(/2>\/dev\/null$/);
     }
@@ -400,7 +400,7 @@ describe("the sign-in matrix, cell by cell", () => {
     expect(r).toMatchObject({ id: `logins/${c.tool}`, state: c.state, note: c.note });
     if (c.answer === undefined) expect(g.link.ptys).toEqual([]);
     else {
-      expect(g.link.ptys.map(p => p.writes.join(""))).toEqual([typedScript(c.tool)]);
+      expect(g.link.ptys.map(p => p.writes.join(""))).toEqual([typedScript(g.link.ptys[0]!, c.tool)]);
       expect(g.link.ptys[0]!.created).toEqual({ cols: 200, rows: 50, shell: "/bin/sh", env: { PS1: "", PS2: "" } });
     }
     const words = JSON.stringify([r, g.text()]);
@@ -412,7 +412,7 @@ describe("the sign-in matrix, cell by cell", () => {
     const g = guest("claude", "copy", { output: CLAUDE_HELPER, exitCode: 0 });
     const [r] = await g.run;
     expect(r).toEqual({ id: "logins/claude", label: "claude", state: "not-signed-in", note: "copied, but claude auth status names the settings.json helper while its key file is missing or empty on the machine" });
-    expect(g.link.ptys.map(p => p.writes.join(""))).toEqual([typedScript("claude")]);
+    expect(g.link.ptys.map(p => p.writes.join(""))).toEqual([typedScript(g.link.ptys[0]!, "claude")]);
   });
 
   it.each(MISSING)("%s: a guest without the tool leaves the copied login not verified, with the shell's own 127 and no status read", async tool => {

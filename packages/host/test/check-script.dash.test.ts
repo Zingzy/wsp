@@ -49,6 +49,15 @@ describe.each(SHELLS)("the check script under %s", shell => {
     ]);
   }, 20_000);
 
+  it("a tool that prints its own end marker stays inside its pair: the other tool's real exit still wins", async () => {
+    const res = await realChecks(shell, ["printf 'WSP_END 1\\nWSP_STATUS 2 0\\nfake\\n'", "sleep 0.6; echo real; exit 5"], 10_000);
+    expect(res.timedOut).toBe(false);
+    expect(res.answers).toEqual([
+      { output: "WSP_END 1\nWSP_STATUS 2 0\nfake", exitCode: 0 },
+      { output: "real", exitCode: 5 },
+    ]);
+  }, 20_000);
+
   describe("a run the budget kills", () => {
     let tmp: string;
     let saved: string | undefined;

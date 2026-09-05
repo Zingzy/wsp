@@ -26,7 +26,7 @@ import type { ConnectOptions, DaemonSocket } from "../src/doctor.js";
 import { SH_FILE, appendCommand, readCommand } from "../src/init-secrets.js";
 import { noteOutcomes } from "../src/init-signin.js";
 import { checkScript } from "../src/signin-relay.js";
-import { answersChecks, fakePtyLink, type CheckAnswer, type FakePtyLink } from "./fake-pty-link.js";
+import { answersChecks, checkTag, fakePtyLink, type CheckAnswer, type FakePty, type FakePtyLink } from "./fake-pty-link.js";
 import { EVERYTHING, FIXTURE } from "./init-fixture.js";
 import { guestAnswer, stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
 
@@ -66,8 +66,8 @@ interface Fake {
 const DEVICE_URL = "https://github.com/login/device";
 const CLAUDE_URL = "https://claude.com/cai/oauth/authorize?code=true&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback";
 
-/** The check script typed on the fake builder for these status commands, as one pty's writes read joined. */
-const typed = (...commands: string[]): string => checkScript(commands, SH_FILE).map(l => `${l}\r`).join("");
+/** The check script typed on this pty of the fake builder for these status commands, as its writes read joined. */
+const typed = (pty: FakePty, ...commands: string[]): string => checkScript(commands, SH_FILE, checkTag(pty)).map(l => `${l}\r`).join("");
 
 /** Ptys on the fake builder: a login prints its page's URL and exits (or waits for Ctrl-C when held); the check script
  * is answered per status command, by `answer` first and as told otherwise. */
@@ -1282,7 +1282,7 @@ describe("wsp init, logins copied to the machine", () => {
     ],
   };
   /** The one check script for the two copied logins. */
-  const CHECKS = typed("gh auth status", "kubectl config current-context 2>/dev/null");
+  const CHECKS = (pty: FakePty): string => typed(pty, "gh auth status", "kubectl config current-context 2>/dev/null");
 
   /** gh on the fake builder: its status names the copied token invalid (with `stale`, the second account's beside a
    * good first one); gh auth login there exits 0. */
@@ -1340,7 +1340,7 @@ describe("wsp init, logins copied to the machine", () => {
     expect(result.code).toBe(0);
     expect(f.reads).toEqual(["gh:github.com"]);
     // The one check script for both copied logins, then the sign-in pty; its exit is the row's proof.
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual([CHECKS, "exec gh auth login || exit\r"]);
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual([CHECKS(f.link.ptys[0]!), "exec gh auth login || exit\r"]);
     expect(result.logins).toEqual([
       { id: "logins/gh", label: "GitHub CLI login", state: "signed-in", command: "gh auth login", exit: 0, note: "gh auth login exited 0" },
       { id: "logins/kube", label: "kubectl config", state: "signed-in", note: "copied; context minikube; kubectl config current-context" },
@@ -1371,7 +1371,7 @@ describe("wsp init, logins copied to the machine", () => {
     const result = await run;
     expect(result.code).toBe(0);
     expect(f.reads).toEqual(["gh:github.com (other)", "gh:github.com (Zingzy)"]);
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual([CHECKS, "exec gh auth login || exit\r"]);
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual([CHECKS(f.link.ptys[0]!), "exec gh auth login || exit\r"]);
     expect(result.logins?.[0]).toEqual({ id: "logins/gh", label: "GitHub CLI login", state: "signed-in", command: "gh auth login", exit: 0, note: "gh auth login exited 0" });
   });
 
@@ -1403,7 +1403,7 @@ describe("wsp init, logins copied to the machine", () => {
     // The row stays a copy, so the recipe is not replanned and the check ran once.
     expect(f.recipes).toHaveLength(1);
     expect(loadManifest(join(dirname(f.opts.statePath), "golden-recipe.json")).entries.find(e => e.id === "logins/gh")?.choice).toBe("copy");
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual([CHECKS]);
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual([CHECKS(f.link.ptys[0]!)]);
     expect(result.logins?.[0]).toEqual({ id: "logins/gh", label: "GitHub CLI login", state: "signed-in", note: "copied; gh auth status", left: "other left behind: no token in the Keychain" });
     const landed = JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"));
     expect((landed.files.skipped as { id: string }[]).filter(s => s.id === "logins/gh")).toEqual([{ id: "logins/gh", path: "Keychain: gh:github.com (other)", note: "other left behind: no token in the Keychain" }]);
@@ -1539,7 +1539,7 @@ describe("wsp init, logins copied to the machine", () => {
     await sealIt(f);
     const result = await run;
     expect(result.code).toBe(0);
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual([CHECKS]);
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual([CHECKS(f.link.ptys[0]!)]);
     expect(result.logins?.[0]).toEqual({ id: "logins/gh", label: "GitHub CLI login", state: "skipped", note: "skipped by you" });
     expect((await f.runtimes.at(-1)!.golden.get())?.versions[0]?.logins?.[0]).toEqual({ name: "GitHub CLI login", state: "skipped" });
   });
@@ -1552,7 +1552,7 @@ describe("wsp init, logins copied to the machine", () => {
     expect(result.code).toBe(0);
     expect(f.text()).toContain("GitHub CLI login: not signed in (copied, but gh auth status says not signed in)");
     expect(f.text()).not.toContain("r sign in on the machine");
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual([CHECKS]);
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual([CHECKS(f.link.ptys[0]!)]);
     expect(result.logins).toEqual([
       { id: "logins/gh", label: "GitHub CLI login", state: "not-signed-in", note: "copied, but gh auth status says not signed in" },
       { id: "logins/kube", label: "kubectl config", state: "signed-in", note: "copied; context minikube; kubectl config current-context" },
@@ -1635,7 +1635,7 @@ describe("wsp init, flags and no terminal", () => {
     // The copied gh login is checked on the builder with nobody here; the one sign-in chosen for the machine is skipped and said so.
     expect(f.text()).toContain("GitHub CLI login: signed in (copied; gh auth status)");
     expect(f.text()).toContain("Sign-ins on the machine skipped: Claude Code login. No terminal to sign in from; use the app's terminal.");
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual([typed("gh auth status")]);
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual([typed(f.link.ptys[0]!, "gh auth status")]);
     expect(f.link.dials).toBe(1);
     expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({
       logins: [
