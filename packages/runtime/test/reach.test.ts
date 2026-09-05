@@ -45,13 +45,14 @@ afterEach(async () => {
 });
 
 describe("daemonWsUrl", () => {
-  it("turns a previewUrl into a wss url carrying both tokens", () => {
-    const url = daemonWsUrl("https://abc123-7070.preview.getsolari.com/?pt_token=edge", "ours");
-    expect(url).toBe("wss://abc123-7070.preview.getsolari.com/?pt_token=edge&token=ours");
+  it("turns a previewUrl into a wss url carrying the edge token and never ours", () => {
+    const url = daemonWsUrl("https://abc123-7070.preview.getsolari.com/?pt_token=edge");
+    expect(url).toBe("wss://abc123-7070.preview.getsolari.com/?pt_token=edge");
+    expect(new URL(url).searchParams.has("token")).toBe(false);
   });
 
-  it("keeps ws urls as-is apart from the token", () => {
-    expect(daemonWsUrl("ws://127.0.0.1:7070", "t")).toBe("ws://127.0.0.1:7070/?token=t");
+  it("keeps ws urls as they are", () => {
+    expect(daemonWsUrl("ws://127.0.0.1:7070")).toBe("ws://127.0.0.1:7070/");
   });
 });
 

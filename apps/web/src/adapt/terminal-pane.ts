@@ -9,6 +9,8 @@ export type TerminalPaneState =
   | { readonly kind: "live" }
   /** The machine runs and the pane is dialling its daemon: a fresh link, a drop, or a reach the runtime calls unreachable. */
   | { readonly kind: "reconnecting" }
+  /** The daemon refused the token this tab dialled with; the link is asking wsp for the current one. */
+  | { readonly kind: "reauth" }
   /** The runtime's reach tracker spent its budget: the provider says running, the guest answers nothing. */
   | { readonly kind: "not-answering" }
   | { readonly kind: "paused"; readonly pausing: boolean }
@@ -34,7 +36,8 @@ export function terminalPaneState(input: TerminalPaneInput): TerminalPaneState {
     case "unreachable":
       return input.reach === "zombie" ? { kind: "not-answering" } : { kind: "reconnecting" };
     case "running":
-      return input.socket === "live" ? { kind: "live" } : { kind: "reconnecting" };
+      if (input.socket === "live") return { kind: "live" };
+      return input.socket === "reauth-needed" ? { kind: "reauth" } : { kind: "reconnecting" };
     default: {
       const _exhaustive: never = input.state;
       return { kind: "live" };
@@ -49,6 +52,8 @@ export function terminalPaneTitle(pane: TerminalPaneState): string | null {
       return null;
     case "reconnecting":
       return "Reconnecting to the machine";
+    case "reauth":
+      return "The machine refused a stale daemon token; reconnecting with the one wsp holds now";
     case "not-answering":
       return "The machine is not answering";
     case "paused":
@@ -71,6 +76,8 @@ export function terminalEmptyLine(pane: TerminalPaneState): string | null {
       return null;
     case "reconnecting":
       return "The daemon link is reconnecting; terminals open when it is back";
+    case "reauth":
+      return "The machine refused a stale daemon token; terminals open once the link carries the current one";
     case "not-answering":
       return "The machine is not answering; terminals open when it does";
     case "paused":
@@ -93,6 +100,8 @@ export function terminalInputRefusal(pane: TerminalPaneState): string | null {
       return null;
     case "reconnecting":
       return "Typing is refused while the machine is reconnecting";
+    case "reauth":
+      return "Typing is refused until the machine takes the current daemon token";
     case "not-answering":
       return "Typing is refused: the machine is not answering";
     case "paused":

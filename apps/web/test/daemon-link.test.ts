@@ -43,13 +43,29 @@ afterEach(async () => {
 });
 
 describe("daemonSocketUrl", () => {
-  it("turns a previewUrl into a wss url carrying the edge token and ours", () => {
-    expect(daemonSocketUrl("https://abc-7070.preview.getsolari.com/?pt_token=edge", "ours")).toBe(
-      "wss://abc-7070.preview.getsolari.com/?pt_token=edge&token=ours",
-    );
-    expect(daemonSocketUrl("ws://127.0.0.1:7070", "ours")).toBe("ws://127.0.0.1:7070/?token=ours");
+  it("turns a previewUrl into a wss url carrying the edge token and never ours", () => {
+    expect(daemonSocketUrl("https://abc-7070.preview.getsolari.com/?pt_token=edge")).toBe("wss://abc-7070.preview.getsolari.com/?pt_token=edge");
+    expect(daemonSocketUrl("ws://127.0.0.1:7070")).toBe("ws://127.0.0.1:7070/");
   });
 });
+
+/** The browser socket with what it dialled and the first frame it sent, per socket. */
+function spyingSockets(): { Ctor: typeof WebSocket; dials: { url: string; first: Record<string, unknown> | undefined }[] } {
+  const dials: { url: string; first: Record<string, unknown> | undefined }[] = [];
+  class Spy extends WebSocket {
+    private readonly dial: { url: string; first: Record<string, unknown> | undefined };
+    constructor(url: string | URL) {
+      super(url);
+      this.dial = { url: String(url), first: undefined };
+      dials.push(this.dial);
+    }
+    override send(data: string): void {
+      this.dial.first ??= JSON.parse(data) as Record<string, unknown>;
+      super.send(data);
+    }
+  }
+  return { Ctor: Spy, dials };
+}
 
 describe("connectDaemonLink", () => {
   it("goes live, round-trips pty ops, and delivers pty.data events", async () => {
@@ -87,22 +103,65 @@ describe("connectDaemonLink", () => {
     expect((plain as DaemonRequestError).code).toBeUndefined();
   });
 
-  it("a rejected token is terminal: reauth-needed, no redial", async () => {
+  it("a refused token says reauth-needed, then redials with the token the host hands out next", async () => {
     daemon = await startTestDaemon();
+    const statuses: DaemonLinkStatus[] = [];
     let dials = 0;
     link = connectDaemonLink({
       reach: async () => {
         dials++;
-        return { url: `ws://127.0.0.1:${daemon!.port}`, daemonToken: "wrong" };
+        return { url: `ws://127.0.0.1:${daemon!.port}`, daemonToken: dials === 1 ? "stale" : TOKEN };
       },
       onEvent: () => {},
-      backoffMs: () => 20,
+      onStatus: s => statuses.push(s),
+      backoffMs: () => 40,
     });
     await until(() => link!.status() === "reauth-needed");
-    await new Promise(r => setTimeout(r, 150));
-    expect(dials).toBe(1);
-    await expect(link.request("ping")).rejects.toThrow();
+    await expect(link.request("ping")).rejects.toThrow("daemon unreachable");
+    await until(() => link!.status() === "live");
+    expect(statuses).toEqual(["connecting", "reauth-needed", "connecting", "live"]);
+    expect(dials).toBe(2);
   });
+
+  it("a token the host keeps handing out and the daemon keeps refusing stays reauth-needed between dials, never live", async () => {
+    daemon = await startTestDaemon();
+    const statuses: DaemonLinkStatus[] = [];
+    let dials = 0;
+    link = connectDaemonLink({
+      reach: async () => {
+        dials++;
+        return { url: `ws://127.0.0.1:${daemon!.port}`, daemonToken: "stale" };
+      },
+      onEvent: () => {},
+      onStatus: s => statuses.push(s),
+      backoffMs: () => 30,
+    });
+    await until(() => dials >= 3);
+    expect(statuses).not.toContain("live");
+    expect(statuses.filter(s => s === "reauth-needed").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("every dial carries the edge url without our token and sends the auth frame first, redials included", async () => {
+    daemon = await startTestDaemon();
+    proxy = await startTcpProxy(daemon.port);
+    const { Ctor, dials } = spyingSockets();
+    link = connectDaemonLink({
+      reach: async () => ({ url: `http://127.0.0.1:${proxy!.port}/?pt_token=edge`, daemonToken: TOKEN }),
+      onEvent: () => {},
+      WebSocketCtor: Ctor,
+      heartbeatMs: 60,
+      backoffMs: () => 30,
+    });
+    await until(() => link!.status() === "live");
+    proxy.cutAll();
+    await until(() => link!.stats().reconnects >= 1 && link!.status() === "live");
+    expect(dials.length).toBeGreaterThanOrEqual(2);
+    for (const d of dials) {
+      expect(d.url).toBe(`ws://127.0.0.1:${proxy!.port}/?pt_token=edge`);
+      expect(new URL(d.url).searchParams.has("token")).toBe(false);
+      expect(d.first).toEqual({ id: expect.any(Number), op: "auth", token: TOKEN });
+    }
+  }, 15_000);
 
   it("without a daemon token it keeps waiting and dials once the runtime reports one", async () => {
     daemon = await startTestDaemon();

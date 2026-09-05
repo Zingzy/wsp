@@ -8,14 +8,14 @@ import { promisify } from "node:util";
 import { OPEN_SHIM_SCRIPT as DAEMON_SHIM_SCRIPT, OPEN_SHIM_PATH as DAEMON_SHIM_PATH, startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { BROWSER_SHIM_PATH, type GoldenManifest, type Machine } from "@wsp/engine";
 import type { ForwardEvent } from "@wsp/protocol";
-import { createRuntime, memoryStore, type Clock, type GoldenRecipe, type Runtime } from "@wsp/runtime";
+import { DAEMON_TOKEN_SET, createRuntime, memoryStore, type Clock, type GoldenRecipe, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { OPEN_SHIM_PATH, OPEN_SHIM_SCRIPT, connectDaemonSocket, type ConnectOptions, type DaemonSocket } from "../src/doctor.js";
 import { FORWARD_IDLE_MS, FORWARD_MAX_PER_TARGET, RELAY_CAP_MS, RELAY_MIN_PORT, RELAY_WINDOW_MS, startCallbackRelay, type CallbackRelay } from "../src/relay.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 
 const execFileAsync = promisify(execFile);
-const TOKEN = "relay-token";
+const TOKEN = "0123456789abcdef".repeat(2);
 const GOLDEN: GoldenManifest = {
   head: 1,
   versions: [{ version: 1, snapshotId: "snap_gold", baseTemplate: "base", setupSha: "x", createdAt: "2026-09-01T00:00:00Z", smoke: { cmd: "true", exitCode: 0 } }],
@@ -106,7 +106,7 @@ function fakeConnect(): { connect(o: ConnectOptions): Promise<DaemonSocket>; lin
 /** Machines answer as a guest with a daemon: a preview route to `guestUrl` and the token file. */
 function relayRuntime(guestUrl: string, goldenRecipe?: GoldenRecipe): { rt: Runtime; backend: StubBackend } {
   const backend = stubBackend();
-  backend.execImpl = (_m, cmd) => (cmd.startsWith("cat ") ? { exitCode: 0, stdout: `${TOKEN}\n`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+  backend.execImpl = (_m, cmd) => (cmd.includes("/root/.wsp-daemon-token") ? { exitCode: 0, stdout: `${DAEMON_TOKEN_SET}\n`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
   const create = backend.create.bind(backend);
   backend.create = async spec => {
     const m: Machine = await create(spec);
@@ -116,7 +116,7 @@ function relayRuntime(guestUrl: string, goldenRecipe?: GoldenRecipe): { rt: Runt
   const store = memoryStore();
   void store.put("goldens", "default", GOLDEN);
   // A wake pings the daemon through the preview route; nothing answers on guest.test, so the wait is kept short.
-  return { rt: createRuntime({ backend, store, adapters: {}, wake: { pingTimeoutMs: 100 }, ...(goldenRecipe !== undefined ? { goldenRecipe } : {}) }), backend };
+  return { rt: createRuntime({ backend, store, adapters: {}, wake: { pingTimeoutMs: 100 }, daemonToken: TOKEN, ...(goldenRecipe !== undefined ? { goldenRecipe } : {}) }), backend };
 }
 
 async function freePort(): Promise<number> {

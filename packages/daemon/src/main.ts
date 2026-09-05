@@ -1,8 +1,9 @@
+import { timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
-import type { IncomingMessage } from "node:http";
 import { connect as connectTcp, type Socket } from "node:net";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
+import { DaemonAuthRequest } from "@wsp/protocol";
 import { WebSocketServer, type WebSocket } from "ws";
 import { listDir, readFileBounded, type FsReadEncoding } from "./fs-ops.js";
 import { gitDiff, gitStatus, type GitDiffScope } from "./git-ops.js";
@@ -25,8 +26,11 @@ export const DEFAULT_MANIFEST_PATH = "/root/.wsp/manifest.json";
 export interface DaemonOptions {
   host?: string;
   port?: number;
+  /** A fixed token (local runs, tests); without it every auth frame is checked against tokenPath as it is then. */
   token?: string;
   tokenPath?: string;
+  /** How long a fresh socket has to send its auth frame. */
+  authDeadlineMs?: number;
   portsSource?: PortSnapshotSource;
   portsIntervalMs?: number;
   inboxDir?: string;
@@ -93,10 +97,19 @@ interface ConnState {
 
 /** Laptop connections one socket may hold open through the forward at once. */
 const TUNNEL_CAP = 64;
+const AUTH_DEADLINE_MS = 5_000;
+
+function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  return ab.length === bb.length && timingSafeEqual(ab, bb);
+}
 
 export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandle> {
-  const token = opts.token ?? readFileSync(opts.tokenPath ?? DEFAULT_TOKEN_PATH, "utf8").trim();
-  if (!token) throw new Error("daemon refuses to start without an auth token");
+  // Read per auth frame, not once: the host rotates the file on every start and the daemon keeps running.
+  const currentToken = (): string => (opts.token ?? readFileSync(opts.tokenPath ?? DEFAULT_TOKEN_PATH, "utf8")).trim();
+  if (!currentToken()) throw new Error("daemon refuses to start without an auth token");
+  const authDeadlineMs = opts.authDeadlineMs ?? AUTH_DEADLINE_MS;
 
   const ptys = new PtyManager();
   const manifest = new ProcessManifest(opts.manifest ?? { path: DEFAULT_MANIFEST_PATH });
@@ -141,10 +154,11 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
     wss.once("error", reject);
   });
 
+  const authed = new Set<WebSocket>();
   // Pushed to every authed socket, not to subscribers: the host's link
   // reconnects through the edge and would lose a subscription with it.
   const broadcast = (event: Record<string, unknown>): void => {
-    for (const client of wss.clients) push(client, event);
+    for (const client of authed) push(client, event);
   };
   const relay = {
     /** A tool asked for a browser: open on the laptop now, name the callback port when the URL or a new loopback listener gives one. */
@@ -170,17 +184,47 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
     openSocket.on("url", url => relay.open(url));
   }
 
-  wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
-    const url = new URL(req.url ?? "/", "ws://localhost");
-    // With the server on 0.0.0.0 this check is the only gate; nothing below may run before it.
-    if (url.searchParams.get("token") !== token) {
-      ws.close(4401, "unauthorized");
-      return;
-    }
+  wss.on("connection", (ws: WebSocket) => {
+    // A malformed frame from any peer, authed or not, ends that socket and nothing else: without a listener ws throws.
+    ws.on("error", () => {});
+    // With the server on 0.0.0.0 the first frame is the only gate: no handler exists until it passes.
+    const deadline = setTimeout(() => ws.close(4401, "no auth frame arrived in time"), authDeadlineMs);
+    ws.once("close", () => clearTimeout(deadline));
+    ws.once("message", raw => {
+      clearTimeout(deadline);
+      let frame: unknown;
+      try {
+        frame = JSON.parse(String(raw));
+      } catch {
+        frame = undefined;
+      }
+      const auth = DaemonAuthRequest.safeParse(frame);
+      if (!auth.success) {
+        ws.close(4401, "the first frame must be auth");
+        return;
+      }
+      let expected = "";
+      try {
+        expected = currentToken();
+      } catch {
+        expected = "";
+      }
+      if (expected === "" || !safeEqual(auth.data.token, expected)) {
+        ws.close(4401, "daemon token refused; the host holds the current one");
+        return;
+      }
+      reply(ws, auth.data.id, {});
+      serve(ws);
+    });
+  });
+
+  const serve = (ws: WebSocket): void => {
+    authed.add(ws);
     push(ws, { type: "daemon.hello", root });
     const state: ConnState = { detaches: [], tunnels: new Map() };
     ws.on("close", () => {
       // Client is gone; ptys keep running. Only this socket's subscriptions and tunnels die.
+      authed.delete(ws);
       for (const un of state.detaches) un();
       state.detaches = [];
       for (const t of state.tunnels.values()) t.destroy();
@@ -199,7 +243,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
         ws.send(JSON.stringify({ id: msg.id ?? null, ok: false, error, ...(e instanceof OpError ? { code: e.code } : {}) }));
       });
     });
-  });
+  };
 
   await listening;
   const addr = wss.address();

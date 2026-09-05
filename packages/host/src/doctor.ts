@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { DAEMON_PORT, NODE_RELEASES, TOOLS_PATH, type Machine } from "@wsp/engine";
-import type { GoldenVersion, Runtime } from "@wsp/runtime";
+import { writeDaemonTokenScript, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
 import type { CliIO } from "./cli.js";
 
@@ -122,8 +122,7 @@ export function deployScript(token: string, previewHostSuffix?: string): string 
           `export ${VITE_ALLOWED_HOSTS_ENV}='${previewHostSuffix}'`,
         ]
       : []),
-    "umask 077",
-    `printf '%s' '${token}' > /root/.wsp-daemon-token`,
+    writeDaemonTokenScript(token),
     "setsid nohup node /root/wsp-daemon/start.mjs > /root/daemon.log 2>&1 < /dev/null & sleep 1.5",
     "ss -ltn | grep -q 7070 && echo DAEMON_UP || { cat /root/daemon.log; echo DAEMON_DOWN; }",
   ].join("\n");
@@ -160,8 +159,9 @@ export async function packBundle(stage: string, tgz: string): Promise<void> {
   await execFileAsync(file, args, { env });
 }
 
-/** Upload and start the daemon on a machine; returns the minted auth token and
- * the Node version the daemon runs on. */
+/** Upload and start the daemon on a machine; returns the token it starts with
+ * (the runtime replaces it the first time a client reaches the daemon) and the
+ * Node version the daemon runs on. */
 export async function deployDaemon(
   machine: Machine,
   opts: { token?: string; daemonDir?: string } = {},
@@ -203,7 +203,7 @@ export interface DaemonSocket {
 export interface ConnectOptions {
   /** Preview URL (pt_token in the query) or a plain local daemon URL. */
   url: string;
-  /** The daemon's own token; the second gate behind the edge's pt_token. */
+  /** The daemon's own token, sent as the socket's first frame; the second gate behind the edge's pt_token. */
   token: string;
   /** App-level beat cadence; the edge's idle sweep kills quiet sockets ~30s
    * out and browsers cannot send protocol pings. Default 10s (measured). */
@@ -214,12 +214,11 @@ export interface ConnectOptions {
   connectTimeoutMs?: number;
 }
 
-/** Connect through the preview edge and prove auth with one op round trip
- * before resolving; then keep the socket warm with app-level heartbeats. */
+/** Connect through the preview edge, send the auth frame and prove it with one
+ * op round trip before resolving; then keep the socket warm with app-level heartbeats. */
 export function connectDaemonSocket(opts: ConnectOptions): Promise<DaemonSocket> {
   const u = new URL(opts.url);
   u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
-  u.searchParams.set("token", opts.token);
 
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(u.toString());
@@ -280,9 +279,11 @@ export function connectDaemonSocket(opts: ConnectOptions): Promise<DaemonSocket>
     });
 
     ws.on("open", () => {
-      // The daemon accepts the upgrade before checking the token, so only a
+      // The daemon accepts the upgrade before reading the frame, so only a
       // successful op proves we are in (a bad token closes 4401 instead).
-      op("manifest.get").then(
+      op("auth", { token: opts.token })
+        .then(() => op("manifest.get"))
+        .then(
         () => {
           clearTimeout(connectTimer);
           settled = true;

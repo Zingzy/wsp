@@ -63,6 +63,7 @@ import type {
 } from "@wsp/protocol";
 import { ALREADY_APPLIED, sendRefusal, workspaceState } from "@wsp/protocol";
 import { realClock, type Clock } from "./clock.js";
+import { DAEMON_TOKEN_SET, assertTokenShape, rotateDaemonTokenScript } from "./daemon-token.js";
 import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy, idleReason } from "./idle.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
 import { createStatusTracker, machineStateOf, type StatusApi, type StatusWatchOptions } from "./status.js";
@@ -257,6 +258,8 @@ export interface RuntimeOptions {
    * each other's. The entry points pass hostIdentity(); the bare hostname when absent, which touches no disk. */
   hostId?: string;
   wake?: WakeOptions;
+  /** The token every daemon this runtime reaches is given; minted fresh per process when absent (tests pin one). */
+  daemonToken?: string;
 }
 
 export interface WakeOptions {
@@ -433,9 +436,7 @@ const TRANSCRIPTS = "transcripts";
 const PAUSED_REASON = "machine paused while the agent was working";
 const DELETED_REASON = "machine deleted while the agent was working";
 const UNANSWERING_REASON = "machine stopped answering while the agent was working";
-/** Mirrors @wsp/daemon's DEFAULT_TOKEN_PATH; the runtime cannot import the daemon package (it only runs inside guests). */
-const DAEMON_TOKEN_PATH = "/root/.wsp-daemon-token";
-/** A guest with no token file is asked again after this long (a daemon may be deployed later). */
+/** A guest with no daemon is asked again after this long (one may be deployed later). */
 const DAEMON_TOKEN_MISS_TTL_MS = 60_000;
 /** Events kept per workspace; the oldest fall off so one chatty workspace cannot grow the store forever. */
 const TRANSCRIPT_CAP = 5000;
@@ -613,15 +614,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   // whatever order the store finishes in.
   const transcriptFlushes = new Map<string, Promise<void>>();
   const transcriptTimers = new Map<string, () => void>();
-  // Keyed by machine id: a resurrect or upgrade brings a fresh guest and file.
-  const daemonTokens = new Map<string, { token: string | undefined; readAt: number }>();
+  // One token per process, written to a guest the first time a client asks to reach its daemon; the file the
+  // guest carried before (the golden's, or an earlier run's) stops working then. Keyed by machine id: a
+  // resurrect or upgrade brings a fresh guest and file.
+  const daemonToken = opts.daemonToken ?? randomBytes(24).toString("hex");
+  assertTokenShape(daemonToken);
+  const daemonTokens = new Map<string, { hasDaemon: boolean; at: number }>();
   const daemonTokenOf = async (machine: Machine): Promise<string | undefined> => {
     const cached = daemonTokens.get(machine.id);
-    if (cached && (cached.token !== undefined || Date.now() - cached.readAt < DAEMON_TOKEN_MISS_TTL_MS)) return cached.token;
-    const res = await machine.exec(`cat ${DAEMON_TOKEN_PATH}`);
-    const token = res.exitCode === 0 && res.stdout.trim() !== "" ? res.stdout.trim() : undefined;
-    daemonTokens.set(machine.id, { token, readAt: Date.now() });
-    return token;
+    if (cached && (cached.hasDaemon || Date.now() - cached.at < DAEMON_TOKEN_MISS_TTL_MS)) return cached.hasDaemon ? daemonToken : undefined;
+    const res = await machine.exec(rotateDaemonTokenScript(daemonToken));
+    const hasDaemon = res.exitCode === 0 && res.stdout.includes(DAEMON_TOKEN_SET);
+    daemonTokens.set(machine.id, { hasDaemon, at: Date.now() });
+    return hasDaemon ? daemonToken : undefined;
   };
 
   const cancelFlush = (workspaceId: string): void => {

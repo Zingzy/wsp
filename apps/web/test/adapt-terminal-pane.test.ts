@@ -15,6 +15,8 @@ describe("terminalPaneState", () => {
     ["running", "running", "reachable", "connecting", { kind: "reconnecting" }],
     ["running", "running", "unreachable", "connecting", { kind: "reconnecting" }],
     ["running", "running", "unreachable", "live", { kind: "reconnecting" }],
+    ["running", "running", "reachable", "reauth-needed", { kind: "reauth" }],
+    ["running", "running", "unreachable", "reauth-needed", { kind: "reconnecting" }],
     ["running", "running", "zombie", "connecting", { kind: "not-answering" }],
     ["napping", "paused", "napping", "connecting", { kind: "paused", pausing: false }],
     ["napping", "paused", "napping", "live", { kind: "paused", pausing: false }],
@@ -34,6 +36,9 @@ describe("terminalPaneState", () => {
     expect(terminalPaneTitle({ kind: "paused", pausing: true })).toBe("Pausing. The shell is kept; wake the workspace to continue");
     expect(terminalPaneTitle({ kind: "reconnecting" })).toBe("Reconnecting to the machine");
     expect(terminalPaneTitle({ kind: "not-answering" })).toBe("The machine is not answering");
+    expect(terminalPaneTitle({ kind: "reauth" })).toBe("The machine refused a stale daemon token; reconnecting with the one wsp holds now");
+    expect(terminalEmptyLine({ kind: "reauth" })).toBe("The machine refused a stale daemon token; terminals open once the link carries the current one");
+    expect(terminalInputRefusal({ kind: "reauth" })).toBe("Typing is refused until the machine takes the current daemon token");
     expect(terminalEmptyLine({ kind: "reconnecting" })).toBe("The daemon link is reconnecting; terminals open when it is back");
     expect(terminalEmptyLine({ kind: "paused", pausing: false })).toBe("Workspace is paused; wake it to open a terminal");
     expect(terminalInputRefusal({ kind: "paused", pausing: false })).toBe("Typing is refused: the workspace is paused");

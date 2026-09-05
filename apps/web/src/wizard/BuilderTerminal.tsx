@@ -29,7 +29,7 @@ function LinkedTerminal({ terms }: { terms: WorkspaceTerminals }) {
   return (
     <div data-terminal-owner="builder" className="flex h-full min-h-0 flex-col bg-[var(--terminal-background)]">
       {status === "reauth-needed" ? (
-        <Notice>The daemon rejected this machine's token. The terminal reconnects once the machine re-authenticates.</Notice>
+        <Notice>The machine refused a stale daemon token. The terminal reconnects with the one wsp holds now.</Notice>
       ) : null}
       {activeId ? (
         <div className="min-h-0 flex-1 p-2">

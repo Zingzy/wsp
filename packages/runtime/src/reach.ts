@@ -10,7 +10,7 @@ import WebSocket from "ws";
 export interface ReachOptions {
   /** Solari previewUrl (https, pt_token already embedded) or a ws:// url in tests. */
   previewUrl: string;
-  /** The daemon's own token, appended as the `token` query param. */
+  /** The daemon's own token, sent as the first frame on every dial; never in the URL. */
   token: string;
   onEvent: (e: DaemonEvent) => void;
   /** Fires on every transition; reauth-needed and dead are terminal. */
@@ -34,12 +34,11 @@ export interface DaemonReach {
   close(): void;
 }
 
-/** previewUrl → dialable ws(s) url carrying both the edge pt_token and our token. */
-export function daemonWsUrl(previewUrl: string, token: string): string {
+/** previewUrl → dialable ws(s) url; the edge's pt_token rides along, ours never does. */
+export function daemonWsUrl(previewUrl: string): string {
   const url = new URL(previewUrl);
   if (url.protocol === "https:") url.protocol = "wss:";
   else if (url.protocol === "http:") url.protocol = "ws:";
-  url.searchParams.set("token", token);
   return url.toString();
 }
 
@@ -52,7 +51,7 @@ interface Pending {
 }
 
 export function connectDaemon(opts: ReachOptions): DaemonReach {
-  const url = daemonWsUrl(opts.previewUrl, opts.token);
+  const url = daemonWsUrl(opts.previewUrl);
   const heartbeatMs = opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
   const backoff = opts.backoffMs ?? defaultBackoff;
 
@@ -150,6 +149,7 @@ export function connectDaemon(opts: ReachOptions): DaemonReach {
 
   async function ritual(sock: WebSocket): Promise<void> {
     try {
+      await send("auth", { token: opts.token });
       await send("ports.watch");
       await send("inbox.watch");
       await send("inbox.rescan");
@@ -179,8 +179,9 @@ export function connectDaemon(opts: ReachOptions): DaemonReach {
       flushPending("connection lost");
       if (closed) return;
       if (ev.code === 4401) {
-        setStatus("reauth-needed"); // retrying cannot fix a bad token; a new one must be provisioned
-        readyReject(new Error("daemon rejected token (4401)")); // no-op once ready resolved
+        // The host owns the token it sent; a guest refusing it will refuse the same one again.
+        setStatus("reauth-needed");
+        readyReject(new Error(`daemon rejected token (4401 ${String(ev.reason)})`)); // no-op once ready resolved
         return;
       }
       scheduleReconnect();

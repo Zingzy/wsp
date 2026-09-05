@@ -308,11 +308,12 @@ interface WireMsg {
 }
 
 async function client(port: number): Promise<{ request(op: string, p?: Record<string, unknown>): Promise<WireMsg>; events: WireMsg[]; close(): void }> {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/?token=${TOKEN}`);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/`);
   await new Promise<void>((resolve, reject) => {
     ws.once("open", resolve);
     ws.once("error", reject);
   });
+  ws.send(JSON.stringify({ id: 0, op: "auth", token: TOKEN }));
   const events: WireMsg[] = [];
   const pending = new Map<number, (m: WireMsg) => void>();
   let nextId = 1;
@@ -321,7 +322,7 @@ async function client(port: number): Promise<{ request(op: string, p?: Record<st
     if (typeof m.id === "number" && pending.has(m.id)) {
       pending.get(m.id)!(m);
       pending.delete(m.id);
-    } else if (m.type) events.push(m);
+    } else if (m.type && m.type !== "daemon.hello") events.push(m);
   });
   return {
     events,

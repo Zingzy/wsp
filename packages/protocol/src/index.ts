@@ -95,8 +95,9 @@ export const ReachStatus = z.object({
 export type ReachStatus = z.infer<typeof ReachStatus>;
 
 /** What a browser needs to dial a workspace's daemon: the minted preview route
- * (edge token embedded, hourly expiry) and the daemon's own query token as read
- * off the guest. No daemonToken means no daemon token file on that machine. */
+ * (edge token embedded, hourly expiry) and the daemon token the host minted at
+ * start and wrote to the guest, sent as the socket's first frame, never in the
+ * URL. No daemonToken means no daemon on that machine. */
 export const DaemonReachView = z.object({
   url: z.string(),
   expiresAt: z.number(),
@@ -468,13 +469,19 @@ export const EventsSubscribeReply = z.object({
 });
 export type EventsSubscribeReply = z.infer<typeof EventsSubscribeReply>;
 
-// --- daemon wire protocol (ws://0.0.0.0:7070/?token=..., 4401 on bad token) ---
+// --- daemon wire protocol (ws://0.0.0.0:7070, auth frame first, 4401 on anything else) ---
 
-/** Client-side health of a daemon link; reauth-needed and dead are terminal. */
+/** Client-side health of a daemon link. reauth-needed: the daemon refused the token, and a browser link asks the
+ * host for its current one before redialling; the host's own link stops there. dead is terminal. */
 export const DaemonLinkStatus = z.enum(["connecting", "live", "reauth-needed", "dead"]);
 export type DaemonLinkStatus = z.infer<typeof DaemonLinkStatus>;
 
 const reqId = z.union([z.string(), z.number()]);
+
+/** The first frame on every daemon socket, the URL carries no token: answered {id, ok} then daemon.hello, or
+ * the socket closes 4401 with one sentence of reason. Anything else first, or nothing, closes the same way. */
+export const DaemonAuthRequest = z.object({ id: reqId, op: z.literal("auth"), token: z.string() });
+export type DaemonAuthRequest = z.infer<typeof DaemonAuthRequest>;
 
 // Replies carry no op, so each files/diff op has its own reply schema here
 // instead of a discriminated union; DaemonOkResponse stays the loose envelope.
@@ -606,7 +613,7 @@ export const DaemonResponse = z.union([DaemonOkResponse, DaemonErrorResponse]);
 export type DaemonResponse = z.infer<typeof DaemonResponse>;
 
 export const DaemonEvent = z.discriminatedUnion("type", [
-  /** The first frame after a socket passes the token check: root is the
+  /** The first frame after the auth reply: root is the
    * absolute directory every fs.* and git.* path must resolve inside, so a
    * client can build absolute paths for pickers, pins and session starts. */
   z.object({ type: z.literal("daemon.hello"), root: z.string() }),
