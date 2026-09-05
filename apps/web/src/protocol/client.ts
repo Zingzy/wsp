@@ -7,6 +7,7 @@
 // to live.
 import {
   PortForward,
+  SessionInterruptOutcome,
   type Capabilities,
   type DaemonReachView,
   type EventUnion,
@@ -254,6 +255,10 @@ export interface Api {
   listSessions(id?: string): Promise<SessionView[]>;
   /** The workspace's persisted session events, oldest first: what a chat replays on mount. */
   sessionHistory(id: string): Promise<SessionEvent[]>;
+  /** Stops the session's running turn; takes the runtime's session id (SessionView.id), not the harness id the events carry.
+   * accepted means the turn's done is already on the wire; not-running and not-found are answers, not errors. Optional so
+   * fixtures that never stop a turn need not fake it; the composer offers no stop without it. */
+  interruptSession?(sessionId: string): Promise<SessionInterruptOutcome>;
   subscribe(fn: (e: ProtocolEvent) => void): () => void;
   /** The named golden manifest, undefined on a fresh install: that absence is what opens the first-run wizard. */
   getGolden(name?: string): Promise<GoldenManifest | undefined>;
@@ -319,6 +324,9 @@ export function makeApi(c: ProtocolClient): Api {
     sessionHistory: async id => (await c.request<{ events: SessionEvent[] }>("sessions.history", { workspaceId: id })).events,
     listSessions: async id =>
       (await c.request<{ sessions: SessionView[] }>("sessions.list", id !== undefined ? { workspaceId: id } : {})).sessions,
+    // Parsed, not trusted: an outcome outside the enum must not read as accepted.
+    interruptSession: async sessionId =>
+      SessionInterruptOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.interrupt", { sessionId })).outcome),
     subscribe: fn => c.subscribe(fn),
     getGolden: async (name = "default") => (await c.request<{ manifest?: GoldenManifest }>("golden.get", { name })).manifest,
     prepareGolden: async (name = "default") => (await c.request<{ builder: GoldenBuilderView }>("golden.prepare", { name })).builder,

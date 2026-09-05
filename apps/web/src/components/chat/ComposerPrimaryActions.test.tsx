@@ -55,6 +55,28 @@ function renderRunningActions(showSendWhileRunning: boolean, hasSendableContent:
   );
 }
 
+function renderStoppingActions() {
+  return renderToStaticMarkup(
+    createElement(ComposerPrimaryActions, {
+      compact: true,
+      pendingAction: null,
+      isRunning: true,
+      isInterruptPending: true,
+      showPlanFollowUpPrompt: false,
+      promptHasText: false,
+      isSendBusy: false,
+      sendDisabledReason: null,
+      isConnecting: false,
+      isEnvironmentUnavailable: false,
+      isPreparingWorktree: false,
+      hasSendableContent: false,
+      onPreviousPendingQuestion: () => {},
+      onInterrupt: () => {},
+      onImplementPlanInNewThread: () => {},
+    }),
+  );
+}
+
 function renderSendButton(sendDisabledReason: string | null = null) {
   return renderToStaticMarkup(
     createElement(ComposerPrimaryActions, {
@@ -195,6 +217,15 @@ describe("ComposerPrimaryActions", () => {
     expect(markup).toContain('aria-label="Stop generation"');
     expect(markup).toContain('aria-label="Send message"');
     expect(markup).toContain('type="submit"');
+  });
+
+  it("disables stop and labels it Stopping while the interrupt request is in flight", () => {
+    const markup = renderStoppingActions();
+
+    expect(markup).toContain('aria-label="Stopping"');
+    // The attribute, not the disabled: class prefix the button always carries.
+    expect(markup).toContain('disabled=""');
+    expect(markup).not.toContain('aria-label="Stop generation"');
   });
 
   it("keeps stop as the only action while running with an empty composer", () => {

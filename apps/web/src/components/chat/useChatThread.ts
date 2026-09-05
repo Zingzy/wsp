@@ -7,9 +7,10 @@
 // The adapter derives the view; this hook only keeps the event list, the
 // arrival clock for unstamped events, and the things the wire cannot know
 // yet: a prompt the user just sent, a send that failed locally, and a new
-// thread requested while a turn was still running. The web client sends no
-// interrupt and the runtime has no per-workspace guard, so that turn keeps
-// running unseen and the composer stays closed until its end arrives.
+// thread requested while a turn was still running. The composer's stop
+// reaches only the turn it shows and the runtime has no per-workspace guard,
+// so that turn keeps running unseen and the composer stays closed until its
+// end arrives.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SessionEvent, SessionHarness } from "@wsp/protocol";
 import { useProtocolEvents, useStore } from "../../protocol/store";
