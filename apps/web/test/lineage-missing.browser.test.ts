@@ -11,6 +11,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { stopVite } from "./vite-child";
 
 const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SHOTS = join(WEB_DIR, "artifacts", "render");
@@ -67,8 +68,7 @@ describe.skipIf(skipped !== undefined)("the lineage's missing tools laid out in 
 
   afterAll(async () => {
     await browser?.close();
-    // Only the process this file spawned, by the handle it kept.
-    vite?.kill();
+    await stopVite(vite);
   });
 
   it.each(["dark", "light"] as const)("in the %s theme every missing tool is a visible row under the forked version's label, a long reason wraps inside the tab, and nothing sits under the others", async theme => {

@@ -11,6 +11,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { stopVite } from "../../../test/vite-child";
 import type { CellSignature } from "../../../test/glyphs/probe";
 import { DEFAULT_TERMINAL_TEXT_FACES, TERMINAL_SYMBOLS_FACE } from "./fontChain";
 
@@ -74,8 +75,7 @@ describe.skipIf(skipped !== undefined)("Nerd Font glyphs through the pane in Chr
 
   afterAll(async () => {
     await browser?.close();
-    // Only the process this file spawned, by the handle it kept.
-    vite?.kill();
+    await stopVite(vite);
   });
 
   /** Each glyph drawn alone on the one surface, in the given family's chain. */

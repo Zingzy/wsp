@@ -12,6 +12,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { stopVite } from "./vite-child";
 
 const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SHOTS_DIR = join(tmpdir(), "wsp-render");
@@ -75,8 +76,7 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
 
   afterAll(async () => {
     await browser?.close();
-    // Only the process this file spawned, by the handle it kept.
-    vite?.kill();
+    await stopVite(vite);
   });
 
   async function open(theme: "dark" | "light"): Promise<void> {
