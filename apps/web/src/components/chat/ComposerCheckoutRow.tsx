@@ -7,8 +7,7 @@
 // (the CLI keys a session to it), so the label explains itself on hover and
 // offers a new thread with the picker open; the shell's own folder, as the
 // agent's tool calls move it, is what the panes follow. The branch is read,
-// not switched: the daemon has no checkout op. The model, effort and
-// permission pickers share the strip after the branch.
+// not switched: the daemon has no checkout op.
 import { ArrowLeftIcon, ChevronDownIcon, CheckIcon, FolderGitIcon, FolderIcon, GitBranchIcon, LoaderCircleIcon, MessageSquarePlusIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { baseName, parentPath } from "../../files/entries";
@@ -21,7 +20,6 @@ import type { TerminalWire } from "../../terminal/link";
 import { Button } from "../ui/button";
 import { Menu, MenuGroup, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { ComposerOptionPickers } from "./ComposerOptionPickers";
 import { ComposerSurface } from "./ComposerSurface";
 import type { ChatThreadHandle } from "./useChatThread";
 
@@ -192,7 +190,6 @@ export function ComposerCheckoutRow({ workspaceId, thread }: { workspaceId: stri
         <GitBranchIcon className={cn("size-3 shrink-0", branch.kind !== "repo" && "opacity-50")} />
         <span className="truncate">{branch.kind === "repo" ? branch.head : branch.kind === "none" ? "no repository" : ""}</span>
       </span>
-      <ComposerOptionPickers workspaceId={workspaceId} thread={thread} />
     </ComposerSurface.ContextStrip>
   );
 }

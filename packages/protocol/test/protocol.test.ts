@@ -329,31 +329,38 @@ describe("runtime wire types", () => {
   });
 
   it("sessions.start carries the composer's model, effort and permission mode as the harness's own slugs", () => {
-    const picked = { id: 22, op: "sessions.start", workspaceId: "ws_1", prompt: "go", model: "claude-opus-5", effort: "high", permissionMode: "acceptEdits" };
+    const picked = { id: 22, op: "sessions.start", workspaceId: "ws_1", prompt: "go", model: "claude-opus-5", effort: "high", permissionMode: "acceptEdits", contextWindow: "1m" };
     expect(RuntimeRequest.parse(picked)).toEqual(picked);
-    const { model: _m, effort: _e, permissionMode: _p, ...bare } = picked;
+    const { model: _m, effort: _e, permissionMode: _p, contextWindow: _c, ...bare } = picked;
     expect(RuntimeRequest.parse(bare)).toEqual(bare);
     expect(() => RuntimeRequest.parse({ ...picked, effort: 3 })).toThrow();
     expect(RuntimeRequest.parse({ id: 23, op: "harnesses.list" })).toEqual({ id: 23, op: "harnesses.list" });
+    expect(RuntimeRequest.parse({ id: 23, op: "harnesses.list", workspaceId: "ws_1" })).toEqual({ id: 23, op: "harnesses.list", workspaceId: "ws_1" });
   });
 
-  it("a harness catalog lists what each picker may offer; an empty list hides that picker", () => {
+  it("a harness catalog lists what each picker may offer, says where the lists came from, and a model may narrow them", () => {
     const catalog = {
       harness: "claude",
       label: "Claude Code",
-      models: [{ value: "claude-opus-5", label: "Opus 5" }],
+      source: "harness",
+      version: "2.1.257",
+      models: [{ value: "claude-opus-5", label: "Opus 5", isDefault: true, contextWindows: ["200k", "1m"] }, { value: "claude-haiku-4-5", label: "Haiku", efforts: [], contextWindows: [] }],
       efforts: [{ value: "high", label: "High", isDefault: true }],
+      contextWindows: [{ value: "200k", label: "200k" }, { value: "1m", label: "1M", isDefault: true }],
       permissionModes: [{ value: "plan", label: "Plan", description: "Read and plan only" }],
     };
     expect(HarnessCatalog.parse(catalog)).toEqual(catalog);
-    const bare = { harness: "pi", label: "Pi", models: [], efforts: [], permissionModes: [] };
+    const bare = { harness: "pi", label: "Pi", source: "table", version: null, models: [], efforts: [], contextWindows: [], permissionModes: [] };
     expect(HarnessCatalog.parse(bare)).toEqual(bare);
     expect(() => HarnessCatalog.parse({ ...catalog, models: [{ value: "x" }] })).toThrow();
     expect(() => HarnessCatalog.parse({ ...catalog, efforts: undefined })).toThrow();
+    expect(() => HarnessCatalog.parse({ ...catalog, source: "guess" })).toThrow();
+    const { source: _s, version: _v, contextWindows: _w, ...old } = catalog;
+    expect(() => HarnessCatalog.parse(old)).toThrow();
   });
 
-  it("SessionView records the model, effort and permission mode the session runs with", () => {
-    const view = { id: "s1", workspaceId: "ws_1", harness: "claude", status: "running", model: "claude-opus-5", effort: "high", permissionMode: "bypassPermissions" };
+  it("SessionView records the model, effort, permission mode and context window the session runs with", () => {
+    const view = { id: "s1", workspaceId: "ws_1", harness: "claude", status: "running", model: "claude-opus-5", effort: "high", permissionMode: "bypassPermissions", contextWindow: "1m" };
     expect(SessionView.parse(view)).toEqual(view);
     expect(() => SessionView.parse({ ...view, model: 5 })).toThrow();
   });

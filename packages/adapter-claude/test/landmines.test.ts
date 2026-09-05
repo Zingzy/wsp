@@ -111,6 +111,13 @@ describe("buildCommand", () => {
     expect(plain).not.toContain("--permission-mode");
   });
 
+  it("a context window rides the model as the CLI's own suffix; 200k is the plain slug", () => {
+    expect(buildCommand({ prompt: "x", sessionId, model: "claude-opus-5", contextWindow: "1m" })).toContain("--model 'claude-opus-5[1m]'");
+    expect(buildCommand({ prompt: "x", sessionId, model: "claude-opus-5", contextWindow: "200k" })).toContain("--model 'claude-opus-5'");
+    expect(() => buildCommand({ prompt: "x", sessionId, model: "claude-opus-5", contextWindow: "2m" })).toThrow(/contextWindow/);
+    expect(() => buildCommand({ prompt: "x", sessionId, contextWindow: "1m" })).toThrow(/contextWindow/);
+  });
+
   it("sends no model or effort flag when none was picked", () => {
     const cmd = buildCommand({ prompt: "x", sessionId });
     expect(cmd).not.toContain("--model");

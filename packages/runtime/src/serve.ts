@@ -181,12 +181,13 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 ...(msg.model !== undefined ? { model: msg.model } : {}),
                 ...(msg.effort !== undefined ? { effort: msg.effort } : {}),
                 ...(msg.permissionMode !== undefined ? { permissionMode: msg.permissionMode } : {}),
+                ...(msg.contextWindow !== undefined ? { contextWindow: msg.contextWindow } : {}),
               });
               send({ id: msg.id, ok: true, session: handle.view() });
               return;
             }
             case "harnesses.list":
-              send({ id: msg.id, ok: true, harnesses: rt.harnesses.list() });
+              send({ id: msg.id, ok: true, harnesses: await rt.harnesses.list(msg.workspaceId) });
               return;
             case "sessions.list":
               send({ id: msg.id, ok: true, sessions: rt.sessions.list(msg.workspaceId) });

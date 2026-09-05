@@ -81,9 +81,11 @@ export interface BuildCommandOptions {
   effort?: string;
   /** "default" sends no permission flag; absent keeps skipping permissions, what every session did before there was a picker. */
   permissionMode?: string;
+  /** "1m" or "200k" from the catalog; the CLI takes 1M as a "[1m]" suffix on the model, so it needs one. */
+  contextWindow?: string;
 }
 
-function shellQuote(value: string): string {
+export function shellQuote(value: string): string {
   return `'${value.replaceAll("'", String.raw`'\''`)}'`;
 }
 
@@ -94,6 +96,14 @@ function slugFlag(flag: string, name: string, value: string | undefined): string
   if (value === undefined) return [];
   if (!SLUG_RE.test(value)) throw new Error(`${name} must be a plain slug, got "${value}"`);
   return [`${flag} ${shellQuote(value)}`];
+}
+
+function modelWithContext(model: string | undefined, contextWindow: string | undefined): string | undefined {
+  if (contextWindow === undefined) return model;
+  if (model === undefined) throw new Error("contextWindow needs a model to ride on");
+  if (contextWindow === "200k") return model;
+  if (contextWindow === "1m") return `${model}[1m]`;
+  throw new Error(`contextWindow must be "200k" or "1m", got "${contextWindow}"`);
 }
 
 function permissionFlags(mode: string | undefined): string[] {
@@ -110,7 +120,7 @@ function permissionFlags(mode: string | undefined): string[] {
  * would expand to nothing.
  */
 export function buildCommand(options: BuildCommandOptions): string {
-  const { prompt, sessionId, resume, cwd, model, effort, permissionMode } = options;
+  const { prompt, sessionId, resume, cwd, model, effort, permissionMode, contextWindow } = options;
   if ((sessionId === undefined) === (resume === undefined)) {
     throw new Error("buildCommand needs exactly one of sessionId or resume");
   }
@@ -124,7 +134,7 @@ export function buildCommand(options: BuildCommandOptions): string {
     "--output-format stream-json",
     "--verbose",
     ...permissionFlags(permissionMode),
-    ...slugFlag("--model", "model", model),
+    ...slugFlag("--model", "model", modelWithContext(model, contextWindow)),
     ...slugFlag("--effort", "effort", effort),
     idFlag,
     "</dev/null",

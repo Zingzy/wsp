@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The last model, effort and permission mode picked per workspace, kept in
-// local storage so the next thread in that workspace starts the same way. A
-// key absent means nothing was picked and the CLI's own default runs. Values
-// are the harness's slugs; the runtime passes them through unchanged.
+// The last harness, model, effort, context window and permission mode picked
+// per workspace, kept in local storage so the next thread in that workspace
+// starts the same way. A key absent means nothing was picked and the CLI's
+// own default runs. Values are the harness's slugs; the runtime passes them
+// through unchanged.
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-export type ComposerOptionKey = "model" | "effort" | "permissionMode";
+export type ComposerOptionKey = "harness" | "model" | "effort" | "contextWindow" | "permissionMode";
 
 export type ComposerOptions = Partial<Record<ComposerOptionKey, string>>;
 
 const STORAGE_KEY = "wsp:composer-options:v1";
-const KEYS: readonly ComposerOptionKey[] = ["model", "effort", "permissionMode"];
+const KEYS: readonly ComposerOptionKey[] = ["harness", "model", "effort", "contextWindow", "permissionMode"];
 const NONE: ComposerOptions = {};
 
 interface ComposerOptionsState {
