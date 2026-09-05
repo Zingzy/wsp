@@ -84,15 +84,18 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         .catch(() => undefined);
     };
 
+    // The exit file is read before the log, so a poll that sees an exit code reads a log that is complete.
     const pollCmd = (offset: number): string =>
+      `E=$(cat ${base}.exit 2>/dev/null); ` +
       `tail -c +${offset + 1} ${base}.log 2>/dev/null | head -c ${CHUNK_BYTES} | base64 -w0; ` +
       `P=$(cat ${base}.pid 2>/dev/null); ` +
-      `printf '\\n${sentinel} %s %s\\n' "$(cat ${base}.exit 2>/dev/null)" ` +
+      `printf '\\n${sentinel} %s %s\\n' "$E" ` +
       `"$([ -n "$P" ] && kill -0 "$P" 2>/dev/null && echo up || echo down)"`;
 
     async function* lines(): AsyncGenerator<string> {
       const startedAt = Date.now();
       let offset = 0;
+      let downs = 0;
       let pending = Buffer.alloc(0);
       const drainPending = (): string | undefined =>
         pending.length > 0 ? pending.toString("utf8") : undefined;
@@ -149,7 +152,8 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
           finish(Number.parseInt(exitStr, 10));
           return;
         }
-        if (live === "down") {
+        // The pid is checked after the exit file: a leader that finished in between shows as down with no exit yet.
+        if (live === "down" && ++downs > 1) {
           const tail = drainPending();
           if (tail !== undefined) yield tail;
           finish(null);

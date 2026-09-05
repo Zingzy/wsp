@@ -110,6 +110,17 @@ describe("machineExecStream", () => {
     expect(await stream.exited).toBeNull();
   });
 
+  it("waits one more poll when the leader is gone before its exit file is there", async () => {
+    const { backend, machine } = await makeMachine();
+    scriptGuest(backend, [{ append: "almost\n" }, { dead: true }, { append: "done\n", exit: 0 }, {}]);
+    const factory = machineExecStream(machine, { pollMs: 5 });
+    const stream = factory("claude -p 'hi'", { env: {} });
+    const lines: string[] = [];
+    for await (const l of stream.lines) lines.push(l);
+    expect(lines).toEqual(["almost", "done"]);
+    expect(await stream.exited).toBe(0);
+  });
+
   it("kill() SIGKILLs the process group and unblocks exited", async () => {
     const { backend, machine } = await makeMachine();
     // never exits on its own: every poll just says "up" with no new output
@@ -194,5 +205,19 @@ describe("machineExecStream over this machine's bash", () => {
     expect(await stream.exited).toBe(0);
     expect(lines).toEqual(["hi"]);
     expect(readFileSync(marks, "utf8")).toBe("ran\n");
+  });
+});
+
+describe("machineExecStream polling a script that ends at once", () => {
+  it("keeps the last line and the exit code when the poll lands as the script ends", async () => {
+    const { machine, runDir } = localGuest();
+    const results: { lines: string[]; exited: number | null }[] = [];
+    for (let i = 0; i < 20; i++) {
+      const stream = machineExecStream(machine, { pollMs: 1, runDir })("echo hi", { env: {} });
+      const lines: string[] = [];
+      for await (const l of stream.lines) lines.push(l);
+      results.push({ lines, exited: await stream.exited });
+    }
+    expect(results).toEqual(Array.from({ length: 20 }, () => ({ lines: ["hi"], exited: 0 })));
   });
 });
