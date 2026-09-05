@@ -20,6 +20,7 @@ export {
   type ReapFailure,
   type ReapResult,
   type ReapedMachine,
+  type RetentionPlan,
   type SparedMachine,
   type GoldenImport,
   type ImportLedger,

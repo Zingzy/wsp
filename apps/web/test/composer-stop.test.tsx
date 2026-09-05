@@ -36,7 +36,7 @@ const workspace: WorkspaceView = {
 };
 /** The runtime's row for the running turn: its own id, which sessions.interrupt takes, beside the harness id the events carry. */
 const runningRow: SessionView = { id: "sess_local_1", workspaceId: WS, harness: "claude", status: "running", claudeSessionId: CLAUDE_SESSION, prompt: "go", startedAt: 0 };
-const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true };
+const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true };
 
 let rows: SessionView[] = [];
 let onInterrupt: (frame: Frame) => Frame | undefined = () => undefined;

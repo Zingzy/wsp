@@ -545,8 +545,10 @@ describe("host sweeps orphaned machines", () => {
     const lines: string[] = [];
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
     expect(backend.machines[0]!.killed).toBe(false);
-    expect(lines).toHaveLength(1);
+    expect(lines).toHaveLength(2);
     expect(lines[0]).toMatch(new RegExp(`^reap: left alone ${b.id}: your builder saved as golden v1, kept \\d+ s since the save and holding one of the account's machine slots, \\$0\\.11/h \\(about \\$0\\.00 so far\\); wsp init updates the golden on it, or it is stopped ten minutes after the save$`));
+    // The seal's snapshot is on the account now, so the storage line follows the sweep.
+    expect(lines[1]).toBe("storage: 1 snapshot, 8.0 GB; inside the free 10 GB, nothing to pay from 2026-10-01");
     await handle.close();
     handle = undefined;
 
@@ -554,7 +556,7 @@ describe("host sweeps orphaned machines", () => {
     await store.put("builders", b.id, { ...record, sealed: { ...record.sealed, at: ago(11 * 60_000) } });
     const later: string[] = [];
     handle = await startHost({ runtime: createRuntime({ backend, store, adapters: {} }), port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => later.push(l) });
-    expect(later).toEqual([`reap: stopped ${b.id}: the builder kept after the save for one more change; its ten-minute window is over`]);
+    expect(later).toEqual([`reap: stopped ${b.id}: the builder kept after the save for one more change; its ten-minute window is over`, "storage: 1 snapshot, 8.0 GB; inside the free 10 GB, nothing to pay from 2026-10-01"]);
     expect(backend.machines[0]!.killed).toBe(true);
     expect(await store.list("builders")).toEqual([]);
   });
@@ -701,5 +703,42 @@ describe("host sweeps orphaned machines", () => {
     finish({ reaped: [], spared: [] });
     await vi.advanceTimersByTimeAsync(REAP_INTERVAL_MS);
     expect(reap).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("host names snapshot storage at start", () => {
+  let handle: HostHandle | undefined;
+  const dirs: string[] = [];
+  const webDir = (): string => {
+    const d = fakeWebDir();
+    dirs.push(d);
+    return d;
+  };
+  afterEach(async () => {
+    await handle?.close();
+    handle = undefined;
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  it("prints the count, the size the listing reports and the monthly cost above the free GB, sized from the listing and not from any machine", async () => {
+    const { rt, backend } = testRuntime();
+    backend.snapshots.push({ id: "snap_gold", sizeBytes: 8_500_000_000 }, { id: "snap_old-golden", sizeBytes: 20_000_000_000 }, { id: "snap_other", sizeBytes: 7_700_000_000 });
+    const lines: string[] = [];
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
+    expect(lines).toEqual(["storage: 3 snapshots, 36.2 GB; about $1.31/month above the free 10 GB from 2026-10-01"]);
+  });
+
+  it("says nothing with no snapshots on the account, and names a listing the provider refused", async () => {
+    const quiet = testRuntime();
+    const lines: string[] = [];
+    handle = await startHost({ runtime: quiet.rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
+    expect(lines).toEqual([]);
+    await handle.close();
+    const { rt, backend } = testRuntime();
+    backend.listSnapshots = async () => {
+      throw new Error("502 Bad Gateway");
+    };
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
+    expect(lines).toEqual(["storage: snapshot listing failed (502 Bad Gateway)"]);
   });
 });

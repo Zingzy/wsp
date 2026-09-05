@@ -31,7 +31,7 @@ const SOLARI = "slr_live_fake_solari_key";
 const KEY = { down: "\x1b[B", space: " ", enter: "\r", esc: "\x1b" };
 const URL_RE = /http:\/\/127\.0\.0\.1:\d+\//;
 const BOOT = /Boot a \d+ vCPU/;
-const PRICING: BackendPricing = { rateUsdPerHour: s => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 } };
+const PRICING: BackendPricing = { rateUsdPerHour: s => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: { freeGb: 10, usdPerGbMonth: 0.05, billedFrom: "2026-10-01" } };
 
 interface Fake {
   io: InitIO;
@@ -2763,6 +2763,28 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(f.text()).not.toContain("Changes since");
     expect(f.hosts).toBe(0);
     expect(shared.machines).toHaveLength(2);
+  });
+
+  it("once a third version seals, wsp init offers the oldest for deletion in one line and --yes takes it, keeping the head and its parent", async () => {
+    const { store, shared, first, next } = await sealed();
+    writeFileSync(join(first.opts.home, ".zshrc"), "export A=1\nexport B=2\n");
+    const second = next({ tty: false });
+    expect((await runInit(second.opts, second.io)).code).toBe(0);
+    // Two versions: nothing to offer yet.
+    expect(second.text()).not.toContain("Delete golden");
+    expect(shared.snapshots.map(r => r.id)).toEqual(["snap_golden-v1", "snap_golden-v2"]);
+    writeFileSync(join(first.opts.home, ".zshrc"), "export A=1\nexport B=2\nexport C=3\n");
+    const third = next({ tty: false });
+    expect((await runInit(third.opts, third.io)).code).toBe(0);
+    const out = third.text();
+    expect(out).toMatch(/Golden v3 sealed in \d+s/);
+    expect(out).toContain("Delete golden v1, 8.0 GB, saving about $0.40/month from 2026-10-01? v3 and v2 stay. Taken as yes (--yes).");
+    expect(out).toContain("Deleted golden v1.");
+    expect(out).toContain("storage: 2 snapshots, 16.0 GB; about $0.30/month above the free 10 GB from 2026-10-01");
+    expect(shared.snapshots.map(r => r.id)).toEqual(["snap_golden-v2", "snap_golden-v3"]);
+    expect(await store.get("goldens", "default")).toMatchObject({ head: 3, versions: [{ version: 2 }, { version: 3 }] });
+    expect(await store.get("golden-recipes", "default@v1")).toBeUndefined();
+    expect(await store.get("golden-recipes", "default@v3")).toBeDefined();
   });
 
   it("--yes with a big change (an agent added) takes the rebuild: the boot question follows, the kept builder is no blocker, and a fresh builder boots beside it", async () => {

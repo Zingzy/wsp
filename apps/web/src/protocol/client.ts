@@ -19,6 +19,7 @@ import {
   type SessionView,
   type SnapshotLineage,
   type SnapshotRollbackResult,
+  type SnapshotStorage,
   type WorkspaceCreateResult,
   type WorkspaceStatus,
   type WorkspaceView,
@@ -270,6 +271,8 @@ export interface Api {
   builderReach(builderId: string): Promise<DaemonReachView>;
   /** Every sealed version of a golden and the head new forks use. */
   listSnapshots(name?: string): Promise<SnapshotLineage>;
+  /** Every snapshot on the account by count, size and monthly cost; null when the provider cannot list them. Optional so fixtures without a storage line need not fake it. */
+  snapshotStorage?(): Promise<SnapshotStorage | null>;
   /** Moves head to a version in the manifest; workspaces already forked keep their image. */
   rollbackSnapshot(version: number, name?: string): Promise<SnapshotRollbackResult>;
 }
@@ -337,6 +340,7 @@ export function makeApi(c: ProtocolClient): Api {
     builderReach: async builderId => (await c.request<{ reach: DaemonReachView }>("golden.builderReach", { builderId })).reach,
     listSnapshots: async name =>
       (await c.request<{ lineage: SnapshotLineage }>("snapshots.list", name !== undefined ? { name } : {})).lineage,
+    snapshotStorage: async () => (await c.request<{ storage: SnapshotStorage | null }>("snapshots.storage")).storage,
     rollbackSnapshot: async (version, name) => {
       const { lineage, existingWorkspaces } = await c.request<SnapshotRollbackResult>("snapshots.rollback", {
         version,

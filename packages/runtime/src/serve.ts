@@ -213,6 +213,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, lineage: { name, head: manifest?.head ?? null, versions: manifest?.versions ?? [] } });
               return;
             }
+            case "snapshots.storage":
+              send({ id: msg.id, ok: true, storage: (await rt.golden.storage()) ?? null });
+              return;
             case "snapshots.rollback": {
               const name = msg.name ?? "default";
               const manifest = await rt.golden.rollback(msg.version, name);

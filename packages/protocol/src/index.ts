@@ -60,6 +60,8 @@ export const Capabilities = z.object({
   /** A daemon link exists, so sign-in URLs a guest tool opens land in the laptop's browser and the
    * callback port is forwarded back; false means the person finishes sign-ins by copy and paste. */
   callbackRelay: z.boolean(),
+  /** The provider lists every snapshot on the account with its size, so storage can be counted and priced. */
+  snapshotListing: z.boolean(),
 });
 export type Capabilities = z.infer<typeof Capabilities>;
 
@@ -721,6 +723,9 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("golden.seal"), builderId: z.string() }),
   /** Replies with { lineage: SnapshotLineage } for golden `name` (default "default"). */
   z.object({ id: reqId, op: z.literal("snapshots.list"), name: z.string().optional() }),
+  /** Replies with { storage: SnapshotStorage | null }: every snapshot on the account by count, size and monthly
+   * cost; null on a backend whose capabilities lack snapshotListing. */
+  z.object({ id: reqId, op: z.literal("snapshots.storage") }),
   /** Moves the golden's head to a version already in its manifest; replies with a
    * SnapshotRollbackResult. A version outside the manifest fails with kind "missing". */
   z.object({ id: reqId, op: z.literal("snapshots.rollback"), version: z.number(), name: z.string().optional() }),
@@ -783,6 +788,19 @@ export const SnapshotLineage = z.object({
   versions: z.array(GoldenVersion),
 });
 export type SnapshotLineage = z.infer<typeof SnapshotLineage>;
+
+/** Every snapshot on the account as the provider bills it: a snapshot is a full disk image, the free GB are shared
+ * by all of them, and the rest costs usdPerGbMonth from billedFrom. Sizes come from the provider's snapshot
+ * listing, never from a machine's requested disk. */
+export const SnapshotStorage = z.object({
+  count: z.number(),
+  totalBytes: z.number(),
+  freeGb: z.number(),
+  usdPerGbMonth: z.number(),
+  billedFrom: z.string(),
+  monthlyUsd: z.number(),
+});
+export type SnapshotStorage = z.infer<typeof SnapshotStorage>;
 
 /** Rollback only moves head. Workspaces already forked keep their machines and
  * image; the field says so on the wire so no client reads it as a fleet change. */

@@ -2,7 +2,7 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { gzipSync } from "node:zlib";
-import type { ExecResult, Machine, MachineBackend, MachineSpec, MachineState } from "@wsp/engine";
+import type { ExecResult, Machine, MachineBackend, MachineSpec, MachineState, SnapshotRow } from "@wsp/engine";
 
 export interface StubMachine extends Machine {
   spec: MachineSpec;
@@ -16,6 +16,11 @@ export interface StubMachine extends Machine {
 export interface StubBackend extends MachineBackend {
   machines: StubMachine[];
   execImpl: (m: StubMachine, cmd: string) => Promise<ExecResult> | ExecResult;
+  /** Every snapshot taken and not deleted, as the provider would list it. */
+  snapshots: SnapshotRow[];
+  /** What the next snapshot is listed at; a golden measured 7.8 to 8.5 GB live. */
+  snapshotBytes: number;
+  listSnapshots(): Promise<SnapshotRow[]>;
 }
 
 // Two zero blocks is a complete empty tar, so downloads are real archives.
@@ -46,12 +51,15 @@ export function guestAnswer(cmd: string): ExecResult {
 export function stubBackend(): StubBackend {
   let seq = 0;
   const machines: StubMachine[] = [];
+  const snapshots: SnapshotRow[] = [];
   const vaultOrigin = vaultServer();
 
   const backend: StubBackend = {
-    capabilities: { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true },
-    pricing: { rateUsdPerHour: (s: { cpu: number; memMb: number }) => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 } },
+    capabilities: { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true },
+    pricing: { rateUsdPerHour: (s: { cpu: number; memMb: number }) => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: { freeGb: 10, usdPerGbMonth: 0.05, billedFrom: "2026-10-01" } },
     machines,
+    snapshots,
+    snapshotBytes: 8_000_000_000,
     execImpl: (_m, cmd) => guestAnswer(cmd),
     async create(spec: MachineSpec): Promise<Machine> {
       const m: StubMachine = {
@@ -70,7 +78,9 @@ export function stubBackend(): StubBackend {
           return backend.execImpl(m, cmd);
         },
         async snapshot(name: string): Promise<string> {
-          return `snap_${name}`;
+          const id = `snap_${name}`;
+          if (!snapshots.some(r => r.id === id)) snapshots.push({ id, sizeBytes: backend.snapshotBytes, createdAt: new Date().toISOString() });
+          return id;
         },
         async pause(): Promise<void> {
           m.paused = true;
@@ -112,7 +122,15 @@ export function stubBackend(): StubBackend {
           labels: m.spec.labels ?? {},
         }));
     },
-    async deleteSnapshot(): Promise<void> {},
+    // Solari refuses a snapshot with live machines forked from it (409 SnapshotHasChildren).
+    async deleteSnapshot(id: string): Promise<void> {
+      if (machines.some(m => !m.killed && m.spec.fromSnapshot === id)) throw Object.assign(new Error("SnapshotHasChildren"), { kind: "conflict", status: 409 });
+      const at = snapshots.findIndex(r => r.id === id);
+      if (at >= 0) snapshots.splice(at, 1);
+    },
+    async listSnapshots(): Promise<SnapshotRow[]> {
+      return snapshots.map(r => ({ ...r }));
+    },
   };
   return backend;
 }

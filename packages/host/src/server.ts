@@ -6,6 +6,7 @@ import { extname, join, resolve as resolvePath, sep } from "node:path";
 import type { ChecklistItem } from "@wsp/protocol";
 import { describeAge, serveRuntime, type GoldenBuilderView, type GoldenVersion, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
+import { describeStorage } from "./storage.js";
 
 // The enriched status now lives in @wsp/runtime (every client reads one
 // implementation); re-exported so host consumers keep their imports.
@@ -291,6 +292,12 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     else if (b.building === true) log(`reap: left alone ${b.id}: your earlier builder from this setup; its setup never finished; the next sweep stops it`);
     else if (b.sealed !== undefined) log(describeSealed(b, b.sealed, rt.backend.pricing.rateUsdPerHour(b.size)));
     else if (b.firstLife === true && b.id !== opts.builder?.id) log(describeKept(b, rt.backend.pricing.rateUsdPerHour(b.size), opts.recipePath));
+  }
+  try {
+    const storage = await rt.golden.storage();
+    if (storage !== undefined && storage.count > 0) log(describeStorage(storage));
+  } catch (e) {
+    log(`storage: snapshot listing failed (${e instanceof Error ? e.message : String(e)})`);
   }
   const reapTimer = setInterval(() => void sweep(false), REAP_INTERVAL_MS);
 
