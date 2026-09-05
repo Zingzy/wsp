@@ -166,7 +166,7 @@ describe("command palette", () => {
     off();
   });
 
-  it("stays shut while the terminal owns focus", async () => {
+  it("opens from a focused terminal on macOS, where Command is never the shell's", async () => {
     await mountShell();
     const term = document.createElement("div");
     term.dataset["terminalOwner"] = "drawer";
@@ -175,6 +175,20 @@ describe("command palette", () => {
     document.body.appendChild(term);
     ta.focus();
     mod("k", {}, ta);
+    await waitFor(() => expect(palette()).not.toBeNull());
+    term.remove();
+  });
+
+  it("stays shut from a focused terminal where mod is Control, which the shell reads", async () => {
+    vi.spyOn(navigator, "platform", "get").mockReturnValue("Linux x86_64");
+    await mountShell();
+    const term = document.createElement("div");
+    term.dataset["terminalOwner"] = "drawer";
+    const ta = document.createElement("textarea");
+    term.appendChild(ta);
+    document.body.appendChild(term);
+    ta.focus();
+    fireEvent.keyDown(ta, { key: "k", code: "KeyK", ctrlKey: true });
     await settle();
     expect(palette()).toBeNull();
     term.remove();

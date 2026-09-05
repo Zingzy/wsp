@@ -3,6 +3,7 @@
 // lookup and the platform labels. Left out: the thread-jump and model-picker
 // hint helpers and the raw terminal key sequences, which belong to features
 // this shell does not have. Contract types come from keybindingTypes.ts.
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "./keybindingDefaults.js";
 import {
   type KeybindingCommand,
   type KeybindingShortcut,
@@ -33,6 +34,12 @@ export interface ShortcutMatchContext {
   terminalOpen: boolean;
   previewFocus: boolean;
   previewOpen: boolean;
+  /**
+   * Derived, never passed: a focused terminal owns mod chords where mod is
+   * Control, which the shell reads. On macOS mod is Command, which no shell
+   * reads, so a Command chord the app binds fires whatever has focus.
+   */
+  terminalOwnsMod: boolean;
   [key: string]: boolean;
 }
 
@@ -116,13 +123,18 @@ function resolvePlatform(options: ShortcutMatchOptions | undefined): string {
   return options?.platform ?? navigator.platform;
 }
 
-function resolveContext(options: ShortcutMatchOptions | undefined): ShortcutMatchContext {
+function resolveContext(
+  options: ShortcutMatchOptions | undefined,
+  platform: string,
+): ShortcutMatchContext {
+  const terminalFocus = options?.context?.terminalFocus ?? false;
   return {
-    terminalFocus: false,
     terminalOpen: false,
     previewFocus: false,
     previewOpen: false,
     ...options?.context,
+    terminalFocus,
+    terminalOwnsMod: terminalFocus && !isMacPlatform(platform),
   };
 }
 
@@ -169,7 +181,7 @@ function findEffectiveShortcutForCommand(
   options?: ShortcutMatchOptions,
 ): KeybindingShortcut | null {
   const platform = resolvePlatform(options);
-  const context = resolveContext(options);
+  const context = resolveContext(options, platform);
   const claimedShortcuts = new Set<string>();
 
   for (let index = keybindings.length - 1; index >= 0; index -= 1) {
@@ -197,7 +209,7 @@ export function resolveShortcutCommand(
   options?: ShortcutMatchOptions,
 ): KeybindingCommand | null {
   const platform = resolvePlatform(options);
-  const context = resolveContext(options);
+  const context = resolveContext(options, platform);
 
   for (let index = keybindings.length - 1; index >= 0; index -= 1) {
     const binding = keybindings[index];
@@ -207,6 +219,21 @@ export function resolveShortcutCommand(
     return binding.command;
   }
   return null;
+}
+
+/**
+ * A Command chord the rules bind while a terminal has focus. The surface lets
+ * it bubble to the dispatcher instead of encoding it. Control and Option
+ * chords are the terminal's on every platform, so a Control-based mod never
+ * claims one.
+ */
+export function isTerminalAppShortcut(
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig = DEFAULT_RESOLVED_KEYBINDINGS,
+  platform = navigator.platform,
+): boolean {
+  if (!event.metaKey) return false;
+  return resolveShortcutCommand(event, keybindings, { platform, context: { terminalFocus: true } }) !== null;
 }
 
 function formatShortcutKeyLabel(key: string): string {

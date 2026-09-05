@@ -66,8 +66,10 @@ describe("default shortcuts", () => {
     expect(resolve(cmd("o", { shiftKey: true }), MAC)).toBe("chat.new");
   });
 
-  it("leaves mod+k to the terminal while it has focus", () => {
-    expect(resolve(cmd("k"), MAC, { terminalFocus: true })).toBeNull();
+  it("opens the palette from a focused terminal on macOS and leaves ctrl+k to the shell elsewhere", () => {
+    expect(resolve(cmd("k"), MAC, { terminalFocus: true })).toBe("commandPalette.toggle");
+    expect(resolve(ctrl("k"), LINUX, { terminalFocus: true })).toBeNull();
+    expect(resolve(ctrl("k"), LINUX)).toBe("commandPalette.toggle");
   });
 
   it("matches on the physical key for non-Latin layouts", () => {
