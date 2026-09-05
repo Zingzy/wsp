@@ -19,6 +19,7 @@ import {
   useCallback,
   useEffect,
   useEffectEvent,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -412,16 +413,22 @@ function Elapsed() {
 
 /**
  * Dims the frozen frame and says why it is frozen. It takes focus only when the pane already held it (the surface
- * or the overlay itself), so a person typing elsewhere keeps their place; a key pressed on it shows the refusal
- * instead of vanishing into a socket that is down. Keys on its own button are the button's.
+ * or the overlay itself), so a person typing elsewhere keeps their place, and hands it back to the surface when it
+ * lifts; a key pressed on it shows the refusal instead of vanishing into a socket that is down. Keys on its own
+ * button are the button's.
  */
-function TerminalPaneOverlay({ pane, refused, onWake }: { pane: TerminalPaneState; refused: string | null; onWake?: () => void }) {
+function TerminalPaneOverlay({ pane, refused, onWake, onLift }: { pane: TerminalPaneState; refused: string | null; onWake?: () => void; onLift: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [keyRefused, setKeyRefused] = useState<string | null>(null);
   useEffect(() => {
     const el = ref.current;
     if (el && el.parentElement?.contains(document.activeElement)) el.focus({ preventScroll: true });
   }, [pane.kind]);
+  // Layout cleanup runs while the node is still in the document, so it can still tell whether it held focus.
+  const lift = useEffectEvent(() => {
+    if (ref.current?.contains(document.activeElement)) onLift();
+  });
+  useLayoutEffect(() => () => lift(), []);
   const line = refused ?? keyRefused;
   return (
     <div
@@ -505,6 +512,9 @@ export default function ThreadTerminalDrawer({
   const [refused, setRefused] = useState<string | null>(null);
   const inputRefusal = useCallback(() => refusalRef.current, []);
   const onInputRefused = useCallback((reason: string) => setRefused(reason), []);
+  // Bumped when the overlay lifts with focus, so the active surface asks for it back the way a focus request does.
+  const [lifted, setLifted] = useState(0);
+  const onOverlayLift = useCallback(() => setLifted(n => n + 1), []);
   useEffect(() => {
     if (pane.kind === "live") setRefused(null);
   }, [pane.kind]);
@@ -841,7 +851,7 @@ export default function ThreadTerminalDrawer({
       terminalId={terminalId}
       io={terminalIo(terminalId)}
       config={terminalConfig}
-      focusRequestId={focusRequestId}
+      focusRequestId={focusRequestId + lifted}
       autoFocus={autoFocus}
       resizeEpoch={resizeEpoch}
       drawerHeight={drawerHeight}
@@ -918,7 +928,7 @@ export default function ThreadTerminalDrawer({
 
       <div className="relative min-h-0 w-full flex-1">
         {pane.kind !== "live" ? (
-          <TerminalPaneOverlay pane={pane} refused={refused} {...(onWake !== undefined ? { onWake } : {})} />
+          <TerminalPaneOverlay pane={pane} refused={refused} onLift={onOverlayLift} {...(onWake !== undefined ? { onWake } : {})} />
         ) : activeLost ? (
           <ShellGoneOverlay onNewTerminal={onNewTerminalAction} label={newTerminalActionLabel} />
         ) : null}

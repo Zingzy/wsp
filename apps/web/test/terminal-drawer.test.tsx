@@ -453,6 +453,8 @@ describe("panes on a workspace that is not running", () => {
     document.body.appendChild(elsewhere);
     render(<WorkspaceTerminalDrawer workspaceId={WS} />);
     await waitFor(() => expect(inputs("drawer")).toHaveLength(1), { timeout: 15_000 });
+    // The surface focuses itself on the frame after it mounts; that frame must land before focus is arranged here.
+    await act(() => new Promise<void>(r => requestAnimationFrame(() => r())));
     elsewhere.focus();
     act(() => {
       setPane("napping", { machineState: "paused", reach: { state: "napping" } }, wakes);
@@ -471,6 +473,21 @@ describe("panes on a workspace that is not running", () => {
     act(() => setPane("waking", { machineState: "starting", reach: { state: "napping" } }, wakes));
     await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("waking"));
     expect(document.activeElement).toBe(overlay());
+    // The overlay held focus, so when it lifts the surface gets it back instead of the body.
+    act(() => {
+      setPane("running", {}, wakes);
+      wt.feedStatus("live");
+    });
+    await waitFor(() => expect(overlay()).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(inputs("drawer")[0]));
+    // Lifting while focus was elsewhere leaves it there.
+    act(() => setPane("napping", { machineState: "paused", reach: { state: "napping" } }, wakes));
+    await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("paused"));
+    elsewhere.focus();
+    act(() => setPane("running", {}, wakes));
+    await waitFor(() => expect(overlay()).toBeNull());
+    await act(() => new Promise<void>(r => requestAnimationFrame(() => r())));
+    expect(document.activeElement).toBe(elsewhere);
     elsewhere.remove();
   }, 20_000);
 
