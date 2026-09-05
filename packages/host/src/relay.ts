@@ -12,7 +12,7 @@ import { createServer, type Server, type Socket } from "node:net";
 import { platform } from "node:os";
 import { DaemonEvent, hostOf, isHttpUrl, type DaemonReachView, type ForwardEvent, type GoldenBuilderView, type PortForward } from "@wsp/protocol";
 import { realClock, type Clock, type EventUnion, type Runtime } from "@wsp/runtime";
-import { connectDaemonSocket, type ConnectOptions, type DaemonSocket } from "./doctor.js";
+import { DAEMON_CONNECT_TIMEOUT_MS, connectDaemonSocket, type ConnectOptions, type DaemonSocket } from "./doctor.js";
 
 export type UrlOpener = (url: string) => Promise<boolean>;
 
@@ -95,8 +95,13 @@ export const FORWARD_IDLE_MS = 10 * 60_000;
 export const FORWARD_MAX_PER_TARGET = 16;
 /** The longest pause between redials of a dropped daemon link, before jitter. */
 export const REDIAL_CEILING_MS = 30_000;
-/** A callback that lands while the link is down waits this long for it: the longest jittered redial pause, so one redial always falls inside the hold. */
-export const CALLBACK_HOLD_MS = REDIAL_CEILING_MS * 1.5;
+/** A callback that lands while the link is down waits this long for it: the longest jittered redial pause plus the dial's
+ * budget, so the redial that starts inside every hold also lands inside it. */
+export const CALLBACK_HOLD_MS = REDIAL_CEILING_MS * 1.5 + DAEMON_CONNECT_TIMEOUT_MS;
+/** A callback is a GET whose head is a few hundred bytes; a held socket that sends more is not one. */
+export const CALLBACK_HOLD_MAX_BYTES = 64 * 1024;
+/** Held callback connections per forward; a browser opens a handful per host, a page probing loopback opens many. */
+export const CALLBACK_HOLD_MAX_CONNS = 8;
 
 interface Target {
   id: string;
@@ -115,10 +120,10 @@ interface Link {
 }
 
 interface Held {
-  /** Ends the wait clock. */
   cancel: () => void;
   /** What the browser sent so far; put back on the socket when it is plumbed. */
   chunks: Buffer[];
+  bytes: number;
   onData: (d: Buffer) => void;
 }
 
@@ -157,9 +162,8 @@ function refusedResponse(f: Forward): string {
   );
 }
 
-/** What a held callback hears when its wait ends without a link, or its forward closes first. */
-function heldResponse(f: Forward, why: string | undefined): string {
-  const what = why === undefined ? `and the daemon link did not come back within ${seconds(CALLBACK_HOLD_MS)}` : `but its forward on port ${f.port} closed (${why})`;
+/** What a held callback hears when its wait ends without a link, its forward closes first, or the hold is full. */
+function heldResponse(f: Forward, what: string): string {
   return badGateway(`The sign-in callback reached this computer while workspace ${f.target.name} was reconnecting, ${what}. Start the sign-in again.`);
 }
 
@@ -245,7 +249,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
     f.conns.clear();
     for (const [c, h] of f.held) {
       h.cancel();
-      c.end(heldResponse(f, why));
+      c.end(heldResponse(f, `but its forward on port ${f.port} closed (${why})`));
     }
     f.held.clear();
     for (const s of f.servers) s.close();
@@ -330,11 +334,29 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
   /** A redirect that lands inside the redial wait would otherwise die with a 502; it waits for the link or the hold's end.
    * The socket keeps reading meanwhile (a paused one never sees the browser leave), so its bytes are kept here. */
   const hold = (f: Forward, c: Socket): void => {
-    const h: Held = { chunks: [], onData: d => h.chunks.push(d), cancel: () => {} };
+    if (f.held.size >= CALLBACK_HOLD_MAX_CONNS) {
+      c.end(heldResponse(f, `and ${CALLBACK_HOLD_MAX_CONNS} connections were already waiting for it`));
+      return;
+    }
+    const h: Held = {
+      chunks: [],
+      bytes: 0,
+      onData: d => {
+        h.bytes += d.length;
+        if (h.bytes > CALLBACK_HOLD_MAX_BYTES) {
+          f.held.delete(c);
+          h.cancel();
+          c.destroy();
+          return;
+        }
+        h.chunks.push(d);
+      },
+      cancel: () => {},
+    };
     h.cancel = clock.schedule(
       () => {
         f.held.delete(c);
-        c.end(heldResponse(f, undefined));
+        c.end(heldResponse(f, `and the daemon link did not come back within ${seconds(CALLBACK_HOLD_MS)}`));
         o.log(`${f.target.name}: a sign-in callback held on localhost:${f.port} for ${seconds(CALLBACK_HOLD_MS)} found no daemon link; start the sign-in again`);
       },
       CALLBACK_HOLD_MS,

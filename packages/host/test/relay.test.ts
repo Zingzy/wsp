@@ -10,8 +10,8 @@ import { BROWSER_SHIM_PATH, type GoldenManifest, type Machine } from "@wsp/engin
 import type { ForwardEvent } from "@wsp/protocol";
 import { DAEMON_TOKEN_SET, createRuntime, memoryStore, type Clock, type GoldenRecipe, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
-import { OPEN_SHIM_PATH, OPEN_SHIM_SCRIPT, connectDaemonSocket, type ConnectOptions, type DaemonSocket } from "../src/doctor.js";
-import { CALLBACK_HOLD_MS, FORWARD_IDLE_MS, FORWARD_MAX_PER_TARGET, REDIAL_CEILING_MS, RELAY_CAP_MS, RELAY_MIN_PORT, RELAY_WINDOW_MS, startCallbackRelay, type CallbackRelay } from "../src/relay.js";
+import { DAEMON_CONNECT_TIMEOUT_MS, OPEN_SHIM_PATH, OPEN_SHIM_SCRIPT, connectDaemonSocket, type ConnectOptions, type DaemonSocket } from "../src/doctor.js";
+import { CALLBACK_HOLD_MAX_BYTES, CALLBACK_HOLD_MAX_CONNS, CALLBACK_HOLD_MS, FORWARD_IDLE_MS, FORWARD_MAX_PER_TARGET, REDIAL_CEILING_MS, RELAY_CAP_MS, RELAY_MIN_PORT, RELAY_WINDOW_MS, startCallbackRelay, type CallbackRelay } from "../src/relay.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 
 const execFileAsync = promisify(execFile);
@@ -61,7 +61,7 @@ interface FakeLink extends DaemonSocket {
 }
 
 /** A daemon socket the test drives: records ops, answers ok, pushes events. */
-function fakeConnect(): { connect(o: ConnectOptions): Promise<DaemonSocket>; links: FakeLink[]; targets: string[]; refuseDials: boolean } {
+function fakeConnect(): { connect(o: ConnectOptions): Promise<DaemonSocket>; links: FakeLink[]; targets: string[]; refuseDials: boolean; slowDial?: () => Promise<void> } {
   const links: FakeLink[] = [];
   const targets: string[] = [];
   const fake = {
@@ -69,9 +69,12 @@ function fakeConnect(): { connect(o: ConnectOptions): Promise<DaemonSocket>; lin
     targets,
     /** When set, every dial fails the way an edge that is down fails it. */
     refuseDials: false,
+    /** When set, a dial waits on it after it is counted in targets, the way a slow edge holds the connect open. */
+    slowDial: undefined as (() => Promise<void>) | undefined,
     async connect(o: ConnectOptions): Promise<DaemonSocket> {
       if (fake.refuseDials) throw new Error("connect ECONNREFUSED edge");
       targets.push(o.url);
+      if (fake.slowDial) await fake.slowDial();
       let resolveClosed: (c: number) => void = () => {};
       const closed = new Promise<number>(r => (resolveClosed = r));
       let open = true;
@@ -678,7 +681,7 @@ describe("callback relay over a fake daemon link", () => {
   });
 
   it("a held callback past the hold gets a 502 saying the machine was reconnecting and to retry the sign-in", async () => {
-    expect(CALLBACK_HOLD_MS).toBe(REDIAL_CEILING_MS * 1.5);
+    expect(CALLBACK_HOLD_MS).toBe(REDIAL_CEILING_MS * 1.5 + DAEMON_CONNECT_TIMEOUT_MS);
     const port = await freePort();
     const { fake, clock, lines, link } = await setup({ guestPorts: [port] });
     link.emit({ type: "callback.port", port });
@@ -695,8 +698,8 @@ describe("callback relay over a fake daemon link", () => {
     clock.advance(1);
     const answer = await res;
     expect(answer.status).toBe(502);
-    expect(await answer.text()).toBe(`The sign-in callback reached this computer while workspace task-1 was reconnecting, and the daemon link did not come back within 45 s. Start the sign-in again.\n`);
-    expect(lines).toContain(`task-1: a sign-in callback held on localhost:${port} for 45 s found no daemon link; start the sign-in again`);
+    expect(await answer.text()).toBe(`The sign-in callback reached this computer while workspace task-1 was reconnecting, and the daemon link did not come back within 60 s. Start the sign-in again.\n`);
+    expect(lines).toContain(`task-1: a sign-in callback held on localhost:${port} for 60 s found no daemon link; start the sign-in again`);
     expect(fake.links).toHaveLength(1);
     expect(relay!.forwards()).toHaveLength(1);
   });
@@ -718,6 +721,113 @@ describe("callback relay over a fake daemon link", () => {
     expect(answer.status).toBe(502);
     expect(await answer.text()).toBe(`The sign-in callback reached this computer while workspace task-1 was reconnecting, but its forward on port ${port} closed (the workspace stopped listening while the daemon link was down). Start the sign-in again.\n`);
     expect(relay!.forwards()).toEqual([]);
+  });
+
+  it("a callback at the top of a full redial pause outlives the dial that carries it, and is plumbed on the new link", async () => {
+    const port = await freePort();
+    const { fake, clock, lines, link } = await setup({ guestPorts: [port], jitter: 1 });
+    link.emit({ type: "callback.port", port });
+    await until(() => relay!.forwards()[0]?.listener === true);
+    fake.refuseDials = true;
+    link.drop();
+    await new Promise(r => setTimeout(r, 50));
+    // Four refused redials at 2, 4, 8 and 16 s (each times the full jitter) bring the pause to the ceiling.
+    for (const base of [2_000, 4_000, 8_000, 16_000]) {
+      clock.advance(base * 1.5);
+      await new Promise(r => setTimeout(r, 50));
+    }
+    expect(fake.links).toHaveLength(1);
+
+    const c = await dial(port);
+    const got: Buffer[] = [];
+    c.on("data", d => got.push(d));
+    c.write("GET /oauth/callback?code=abc HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    await until(() => lines.some(l => l.includes("holding")));
+    let release: () => void = () => {};
+    fake.refuseDials = false;
+    fake.slowDial = () => new Promise<void>(r => (release = r));
+    clock.advance(REDIAL_CEILING_MS * 1.5);
+    await until(() => fake.targets.length === 2);
+    // The dial is in flight for its whole budget; the hold must not run out under it.
+    clock.advance(DAEMON_CONNECT_TIMEOUT_MS - 1);
+    await new Promise(r => setTimeout(r, 50));
+    expect(got).toEqual([]);
+    expect(lines.some(l => l.includes("start the sign-in again"))).toBe(false);
+    release();
+    await until(() => fake.links.length === 2);
+    const second = fake.links[1]!;
+    await until(() => second.ops.some(x => x.op === "tunnel.write"));
+    expect(second.ops.filter(x => x.op === "tunnel.open")).toHaveLength(1);
+    clock.advance(CALLBACK_HOLD_MS);
+    await new Promise(r => setTimeout(r, 50));
+    expect(got).toEqual([]);
+    expect(c.destroyed).toBe(false);
+    expect(lines.some(l => l.includes("start the sign-in again"))).toBe(false);
+    c.destroy();
+  });
+
+  it("a held socket that sends more than the byte cap is dropped, and never tunnelled at the redial; one under it still is", async () => {
+    const port = await freePort();
+    const { fake, clock, lines, link } = await setup({ guestPorts: [port] });
+    link.emit({ type: "callback.port", port });
+    await until(() => relay!.forwards()[0]?.listener === true);
+    link.drop();
+    await new Promise(r => setTimeout(r, 50));
+
+    const flood = await dial(port);
+    const floodClosed = new Promise<void>(r => flood.once("close", () => r()));
+    flood.write(Buffer.alloc(CALLBACK_HOLD_MAX_BYTES, 0x41));
+    await new Promise(r => setTimeout(r, 100));
+    expect(flood.destroyed).toBe(false);
+    flood.write("B");
+    await floodClosed;
+
+    const request = "GET /oauth/callback?code=abc HTTP/1.1\r\nHost: localhost\r\n\r\n";
+    const c = await dial(port);
+    c.write(request);
+    await new Promise(r => setTimeout(r, 50));
+    expect(c.destroyed).toBe(false);
+    expect(lines.filter(l => l.includes("holding"))).toHaveLength(1);
+
+    clock.advance(2_000);
+    await until(() => fake.links.length === 2);
+    const second = fake.links[1]!;
+    await until(() => second.ops.some(x => x.op === "tunnel.write"));
+    expect(second.ops.filter(x => x.op === "tunnel.open")).toHaveLength(1);
+    const writes = second.ops.filter(x => x.op === "tunnel.write");
+    expect(writes.map(w => Buffer.from(w.extra["data"] as string, "base64").toString())).toEqual([request]);
+    c.destroy();
+  });
+
+  it("past the held-connection cap a callback is answered 502 at once, and the redial plumbs only the held ones", async () => {
+    const port = await freePort();
+    const { fake, clock, link } = await setup({ guestPorts: [port] });
+    link.emit({ type: "callback.port", port });
+    await until(() => relay!.forwards()[0]?.listener === true);
+    link.drop();
+    await new Promise(r => setTimeout(r, 50));
+
+    const held: Socket[] = [];
+    for (let i = 0; i < CALLBACK_HOLD_MAX_CONNS; i++) {
+      const c = await dial(port);
+      c.write(`GET /oauth/callback?n=${i} HTTP/1.1\r\nHost: localhost\r\n\r\n`);
+      held.push(c);
+    }
+    await new Promise(r => setTimeout(r, 50));
+    expect(held.every(c => !c.destroyed)).toBe(true);
+    const answer = await fetch(`http://127.0.0.1:${port}/oauth/callback?code=abc`);
+    expect(answer.status).toBe(502);
+    expect(await answer.text()).toBe(
+      `The sign-in callback reached this computer while workspace task-1 was reconnecting, and ${CALLBACK_HOLD_MAX_CONNS} connections were already waiting for it. Start the sign-in again.\n`,
+    );
+    expect(held.every(c => !c.destroyed)).toBe(true);
+
+    clock.advance(2_000);
+    await until(() => fake.links.length === 2);
+    const second = fake.links[1]!;
+    await until(() => second.ops.filter(x => x.op === "tunnel.write").length === CALLBACK_HOLD_MAX_CONNS);
+    expect(second.ops.filter(x => x.op === "tunnel.open")).toHaveLength(CALLBACK_HOLD_MAX_CONNS);
+    for (const c of held) c.destroy();
   });
 
   it("a napped workspace loses its link and the redial stops; a deleted one for good", async () => {
