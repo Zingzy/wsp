@@ -5,7 +5,6 @@
 import type { ReachState, WorkspacePhase, WorkspaceStatus } from "@wsp/protocol";
 import type { SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
 import { formatRelativeTimeLabel } from "../lib/timestampFormat.js";
-import { DisconnectedError, RequestError } from "../protocol/client.js";
 import { formatWorkingDurationLabel, type ThreadStatusPill } from "./Sidebar.logic.js";
 
 /** Countdown to the runtime's auto-nap while the workspace runs; "active" when nothing is scheduled. */
@@ -96,23 +95,4 @@ export function defaultWorkspaceName(existing: ReadonlyArray<string>): string {
     const candidate = `workspace-${n}`;
     if (!taken.has(candidate)) return candidate;
   }
-}
-
-export interface CreateRefusal {
-  readonly title: string;
-  readonly detail: string;
-}
-
-export function explainCreateRefusal(error: unknown): CreateRefusal {
-  const message = error instanceof Error ? error.message : String(error);
-  if (error instanceof RequestError && error.kind === "concurrency") {
-    return {
-      title: "The provider refused: machine cap reached",
-      detail: `Your machine provider runs a fixed number of machines at once and every slot is taken. A builder kept after a save and not in use is stopped first to make room; pause or delete a workspace to free one, then try again. (${message})`,
-    };
-  }
-  if (error instanceof DisconnectedError) {
-    return { title: "Not connected to the runtime", detail: message };
-  }
-  return { title: "Could not create the workspace", detail: message };
 }

@@ -2,11 +2,11 @@
 // The center region under the shell header: the selected workspace's thread
 // with its composer and the terminal drawer under it, or a prompt to pick a
 // workspace. Nothing stands between the header and the thread.
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { GoldenManifest, WorkspaceView } from "@wsp/protocol";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import type { EventUnion, GoldenManifest, WorkspaceView } from "@wsp/protocol";
 import { Shell } from "../src/App.js";
-import type { Api } from "../src/protocol/client.js";
+import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { provideTerminals, WorkspaceTerminals } from "../src/terminal/link.js";
@@ -51,7 +51,7 @@ afterAll(() => restoreLayout());
 
 beforeEach(() => {
   window.localStorage.clear();
-  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, sessions: {}, ready: false, gaps: 0 });
+  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, creations: [], sessions: {}, ready: false, gaps: 0 });
   useTerminalDrawerStore.setState({ byWorkspaceId: {} });
 });
 afterEach(() => {
@@ -94,5 +94,110 @@ describe("workspace center", () => {
     await screen.findByText("Pick a workspace to continue");
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
     expect(screen.queryByRole("tablist")).toBeNull();
+  });
+});
+
+describe("workspace creation view", () => {
+  const stage = (over: Partial<Extract<EventUnion, { type: "workspace.creating" }>>): EventUnion => ({
+    type: "workspace.creating",
+    workspaceId: "ws_beta",
+    name: "beta",
+    stage: "fork-requested",
+    message: "Fork of the golden image requested.",
+    elapsedMs: 0,
+    ...over,
+  });
+  const emit = (e: EventUnion) => act(() => useStore.getState().applyEvent(e));
+
+  it("creating opens the view in the center with the name, a moving wave and the log growing with timestamps; created swaps in the thread", async () => {
+    let finish!: (w: WorkspaceView) => void;
+    const api = fakeApi([workspace]);
+    api.createFromGoldenHead = () => new Promise<WorkspaceView>(resolve => { finish = resolve; });
+    useStore.getState().bind(api);
+    render(<Shell />);
+    await screen.findByRole("heading", { level: 1 });
+    void useStore.getState().createWorkspace("beta");
+    const view = await screen.findByTestId("workspace-creation");
+    expect(view.getAttribute("aria-busy")).toBe("true");
+    expect(within(view).getByRole("heading", { level: 1 }).textContent).toBe("beta");
+    expect(screen.getByRole("banner").textContent).toContain("beta");
+    expect(screen.queryByRole("button", { name: "New thread" })).toBeNull();
+    const wave = within(view).getByRole("progressbar", { name: "Creating" });
+    expect(wave.querySelector("svg")!.getAttribute("data-state")).toBe("moving");
+    expect(wave.querySelector("pattern path")!.getAttribute("stroke")).toBe("currentColor");
+    const log = within(view).getByRole("list", { name: "Creation log" });
+    expect(log.textContent).toContain("Asking the runtime for a fork.");
+
+    emit(stage({}));
+    emit(stage({ stage: "machine-booting", message: "Machine m1 is booting.", elapsedMs: 3_400 }));
+    emit(stage({ stage: "hostname-set", message: "Hostname set to beta.", elapsedMs: 5_100, notice: "hostname beta on m1 failed: read-only" }));
+    const lines = within(log).getAllByRole("listitem");
+    expect(lines.map(l => l.textContent)).toEqual([
+      expect.stringMatching(/^\d\d:\d\d:\d\dFork of the golden image requested\.0\.0s$/),
+      expect.stringMatching(/^\d\d:\d\d:\d\dMachine m1 is booting\.3\.4s$/),
+      expect.stringMatching(/^\d\d:\d\d:\d\dHostname set to beta\.hostname beta on m1 failed: read-only5\.1s$/),
+    ]);
+    expect(lines.map(l => l.querySelector("time")!.getAttribute("datetime")).every(iso => !Number.isNaN(Date.parse(iso!)))).toBe(true);
+    expect(lines[2]!.className).toContain("text-foreground");
+    expect(lines[0]!.className).toContain("text-muted-foreground");
+    expect(within(view).queryByRole("button", { name: "Retry" })).toBeNull();
+
+    const created: WorkspaceView = { ...workspace, id: "ws_beta", name: "beta" };
+    emit({ type: "workspace.created", workspace: created });
+    await act(async () => { finish(created); });
+    await waitFor(() => expect(screen.queryByTestId("workspace-creation")).toBeNull());
+    const heading = await screen.findByRole("heading", { level: 1 });
+    expect(heading.textContent).toContain("What should we build in");
+    expect(heading.textContent).toContain("beta");
+    expect(screen.getByRole("button", { name: "New thread" })).toBeDefined();
+  });
+
+  it("a failure keeps the log with the failing line in red, stops the wave, explains the refusal, and retry runs the create again", async () => {
+    const api = fakeApi([workspace]);
+    const create = vi.fn<(name: string) => Promise<WorkspaceView>>();
+    create.mockImplementationOnce(async () => {
+      useStore.getState().applyEvent(stage({}));
+      useStore.getState().applyEvent(stage({ stage: "failed", message: "Sandbox limit reached (2)", elapsedMs: 800 }));
+      throw new RequestError("Sandbox limit reached (2)", "concurrency");
+    });
+    create.mockImplementation(() => new Promise<WorkspaceView>(() => {}));
+    api.createFromGoldenHead = create;
+    useStore.getState().bind(api);
+    render(<Shell />);
+    await screen.findByRole("heading", { level: 1 });
+    await act(() => useStore.getState().createWorkspace("beta"));
+    const view = await screen.findByTestId("workspace-creation");
+    expect(view.getAttribute("aria-busy")).toBe("false");
+    expect(view.textContent).toContain("Creation failed");
+    const wave = within(view).getByRole("progressbar", { name: "Creation stopped" });
+    expect(wave.querySelector("svg")!.getAttribute("data-state")).toBe("stopped");
+    const lines = within(within(view).getByRole("list", { name: "Creation log" })).getAllByRole("listitem");
+    expect(lines).toHaveLength(2);
+    expect(lines[1]!.textContent).toContain("Sandbox limit reached (2)");
+    expect(lines[1]!.className).toContain("text-destructive-foreground");
+    expect(lines[0]!.className).not.toContain("text-destructive-foreground");
+    expect(view.textContent).toContain("The provider refused: machine cap reached");
+    expect(view.textContent).toMatch(/every slot is taken/);
+
+    fireEvent.click(within(view).getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+    expect(create).toHaveBeenLastCalledWith("beta");
+    await waitFor(() => expect(screen.getByTestId("workspace-creation").getAttribute("aria-busy")).toBe("true"));
+    expect(within(screen.getByTestId("workspace-creation")).queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  it("dismissing a failed creation returns the center to the first workspace", async () => {
+    const api = fakeApi([workspace]);
+    api.createFromGoldenHead = async () => { throw new Error("no golden image yet"); };
+    useStore.getState().bind(api);
+    render(<Shell />);
+    await screen.findByRole("heading", { level: 1 });
+    await act(() => useStore.getState().createWorkspace("beta"));
+    const view = await screen.findByTestId("workspace-creation");
+    expect(view.textContent).toContain("no golden image yet");
+    fireEvent.click(within(view).getByRole("button", { name: "Dismiss" }));
+    await waitFor(() => expect(screen.queryByTestId("workspace-creation")).toBeNull());
+    expect(useStore.getState().selectedId).toBe(WS);
+    expect((await screen.findByRole("heading", { level: 1 })).textContent).toContain("api");
   });
 });

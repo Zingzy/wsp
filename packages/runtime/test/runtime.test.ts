@@ -541,8 +541,6 @@ describe("runtime session history", () => {
 });
 
 describe("runtime daemon reach", () => {
-  const TOKEN_CMD = "cat /root/.wsp-daemon-token";
-
   it("hands back the preview route plus the daemon token read once off the guest", async () => {
     const backend = stubBackend();
     let minted = 0;
@@ -1115,9 +1113,137 @@ describe("runtime guest hostname", () => {
   });
 });
 
+const TOKEN_CMD = "cat /root/.wsp-daemon-token";
+const TOKEN = "guest-token";
+
+/** A real daemon on a loopback port for the runtime to ping, torn down with its inbox. */
+async function withDaemon<T>(fn: (port: number) => Promise<T>): Promise<T> {
+  const { startDaemon } = await import("@wsp/daemon");
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const inboxDir = mkdtempSync(join(tmpdir(), "wsp-wake-inbox-"));
+  const daemon = await startDaemon({ port: 0, token: TOKEN, inboxDir, inboxQuietMs: 100, inboxPollMs: 25, portsSource: async () => [], portsIntervalMs: 25 });
+  try {
+    return await fn(daemon.port);
+  } finally {
+    await daemon.close();
+    rmSync(inboxDir, { recursive: true, force: true });
+  }
+}
+
+/** A port nothing listens on: the edge dialed, the guest never answered. */
+async function deadPort(): Promise<number> {
+  const { createServer } = await import("node:net");
+  return new Promise(resolve => {
+    const srv = createServer();
+    srv.listen(0, "127.0.0.1", () => {
+      const { port } = srv.address() as { port: number };
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
+describe("runtime create stages", () => {
+  const ok = { exitCode: 0, stdout: "", stderr: "" };
+  /** A stub whose forks carry an edge route to the given port and whose guest hands out the daemon token. */
+  function edgeBackend(port: number) {
+    const backend = stubBackend();
+    backend.execImpl = (_m, cmd) => (cmd === TOKEN_CMD ? { exitCode: 0, stdout: `${TOKEN}\n`, stderr: "" } : ok);
+    const create = backend.create.bind(backend);
+    backend.create = async spec => {
+      const m = await create(spec);
+      m.previewUrl = async () => ({ url: `ws://127.0.0.1:${port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
+      return m;
+    };
+    return backend;
+  }
+  const creating = (events: EventUnion[]) => events.filter(e => e.type === "workspace.creating");
+
+  it("a plain create reports every awaited step in order, names the hostname before the daemon is asked, and announces created last", async () => {
+    await withDaemon(async port => {
+      const backend = edgeBackend(port);
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+      const events: EventUnion[] = [];
+      rt.events.on("*", e => events.push(e));
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+      const stages = creating(events);
+      expect(stages.map(e => e.stage)).toEqual(["fork-requested", "machine-booting", "hostname-set", "preview-route", "daemon-answering", "ready"]);
+      expect(stages.map(e => e.message)).toEqual([
+        "Fork of the golden image requested.",
+        "Machine m1 is booting.",
+        "Hostname set to task-1.",
+        "Preview route to the daemon minted.",
+        "Daemon answered through the edge.",
+        "Ready.",
+      ]);
+      for (const e of stages) expect(e).toMatchObject({ workspaceId: ws.id, name: "task-1", elapsedMs: expect.any(Number) });
+      expect(stages.some(e => "notice" in e)).toBe(false);
+      const log = backend.machines[0]!.execLog;
+      expect(log.indexOf("hostname task-1 && echo task-1 > /etc/hostname")).toBeLessThan(log.indexOf(TOKEN_CMD));
+      const ready = events.findIndex(e => e.type === "workspace.creating" && e.stage === "ready");
+      expect(events.findIndex(e => e.type === "workspace.created")).toBe(ready + 1);
+    });
+  });
+
+  it("a fork whose daemon never answers still becomes a workspace: the stage says so, with the fault as its notice", async () => {
+    const port = await deadPort();
+    const backend = edgeBackend(port);
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, wake: { pingTimeoutMs: 300 } });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const stages = creating(events);
+    expect(stages.map(e => e.stage)).toEqual(["fork-requested", "machine-booting", "hostname-set", "preview-route", "daemon-answering", "ready"]);
+    expect(stages[4]).toMatchObject({ message: "Daemon did not answer through the edge.", notice: expect.stringMatching(/daemon on m1 did not answer within 300 ms/) });
+    expect(backend.machines[0]!.killed).toBe(false);
+    expect((await rt.workspaces.list()).map(w => w.id)).toEqual([ws.id]);
+  });
+
+  it("a create that fails after the fork kills its machine, reports failed with the reason, and lists nothing", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const put = store.put.bind(store);
+    store.put = async (collection, id, value) => {
+      if (collection === "workspaces") throw new Error("disk full");
+      return put(collection, id, value);
+    };
+    const rt = createRuntime({ backend, store, adapters: {} });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    await expect(rt.workspaces.create({ golden: "snap_g", name: "task-1" })).rejects.toThrow("disk full");
+    const stages = creating(events);
+    expect(stages.map(e => e.stage)).toEqual(["fork-requested", "machine-booting", "hostname-set", "failed"]);
+    expect(stages.at(-1)!.message).toBe("disk full");
+    expect(backend.machines[0]!.killed).toBe(true);
+    expect(await rt.workspaces.list()).toEqual([]);
+    expect(events.some(e => e.type === "workspace.created")).toBe(false);
+  });
+
+  it("until ready the workspace is neither listed nor reachable, so nothing opens a shell under the old hostname", async () => {
+    const backend = stubBackend();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    backend.execImpl = async (_m, cmd) => {
+      if (cmd.startsWith("hostname ")) await gate;
+      return ok;
+    };
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const ids: string[] = [];
+    rt.events.on("workspace.creating", e => { if (e.type === "workspace.creating") ids.push(e.workspaceId); });
+    const made = rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    await vi.waitFor(() => expect(backend.machines[0]!.execLog.some(c => c.startsWith("hostname "))).toBe(true));
+    expect(await rt.workspaces.list()).toEqual([]);
+    expect((await rt.status.list()).map(s => s.id)).toEqual([]);
+    await expect(rt.workspaces.get(ids[0]!)).rejects.toThrow(/no such workspace/);
+    release();
+    const ws = await made;
+    expect((await rt.workspaces.list()).map(w => w.id)).toEqual([ws.id]);
+    expect((await rt.workspaces.get(ws.id)).id).toBe(ws.id);
+  });
+});
+
 describe("runtime verified wake", () => {
-  const TOKEN_CMD = "cat /root/.wsp-daemon-token";
-  const TOKEN = "guest-token";
 
   /** A stub whose guest answers ls/tar/untar/token like a golden fork; tar and untar commands are recorded per machine. */
   function guestBackend() {
@@ -1138,33 +1264,6 @@ describe("runtime verified wake", () => {
     );
     vi.stubGlobal("fetch", fetchStub);
     return { backend, tars, untars, setTgzBytes: (n: number) => { tgzBytes = n; } };
-  }
-
-  async function withDaemon<T>(fn: (port: number) => Promise<T>): Promise<T> {
-    const { startDaemon } = await import("@wsp/daemon");
-    const { mkdtempSync, rmSync } = await import("node:fs");
-    const { tmpdir } = await import("node:os");
-    const { join } = await import("node:path");
-    const inboxDir = mkdtempSync(join(tmpdir(), "wsp-wake-inbox-"));
-    const daemon = await startDaemon({ port: 0, token: TOKEN, inboxDir, inboxQuietMs: 100, inboxPollMs: 25, portsSource: async () => [], portsIntervalMs: 25 });
-    try {
-      return await fn(daemon.port);
-    } finally {
-      await daemon.close();
-      rmSync(inboxDir, { recursive: true, force: true });
-    }
-  }
-
-  /** A port nothing listens on: the edge dialed, the guest never answered. */
-  async function deadPort(): Promise<number> {
-    const { createServer } = await import("node:net");
-    return new Promise(resolve => {
-      const srv = createServer();
-      srv.listen(0, "127.0.0.1", () => {
-        const { port } = srv.address() as { port: number };
-        srv.close(() => resolve(port));
-      });
-    });
   }
 
   it("resume returns but the daemon never answers: waking, one retry, then a golden fork with the vault and the zombie killed", async () => {
@@ -2758,6 +2857,30 @@ describe("runtime golden update and the post-seal grace", () => {
     // Nothing left to stop: the refusal reaches the caller with its kind, and nothing of ours is killed.
     await expect(rt.workspaces.create({ golden: version.snapshotId, name: "two" })).rejects.toMatchObject({ kind: "concurrency" });
     expect(backend.machines.filter(m => m.killed).map(m => m.id)).toEqual([backend.machines[0]!.id, backend.machines[1]!.id]);
+  });
+
+  it("a create that made room reports the fork twice, the second time with the builder it stopped as the notice", async () => {
+    const { backend, rt } = started();
+    const b = await rt.golden.prepare();
+    const { version } = await rt.golden.seal(b.id);
+    const create = backend.create.bind(backend);
+    backend.create = async spec => {
+      if (spec.fromSnapshot !== undefined && backend.machines.some(m => !m.killed)) throw Object.assign(new Error("Sandbox limit reached (2)"), { kind: "concurrency" });
+      return create(spec);
+    };
+    const stages: EventUnion[] = [];
+    rt.events.on("workspace.creating", e => stages.push(e));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const ws = await rt.workspaces.create({ golden: version.snapshotId, name: "one" });
+    warn.mockRestore();
+    expect(stages.map(e => (e.type === "workspace.creating" ? e.stage : e.type))).toEqual(["fork-requested", "fork-requested", "machine-booting", "hostname-set", "ready"]);
+    expect(stages[0]).not.toHaveProperty("notice");
+    expect(stages[1]).toMatchObject({
+      workspaceId: ws.id,
+      message: "Fork of the golden image requested again.",
+      notice: `Stopped the builder kept from golden v1 (${b.id}) to make room at the machine cap.`,
+    });
+    expect(stages.map(e => (e.type === "workspace.creating" ? e.name : ""))).toEqual(Array<string>(5).fill("one"));
   });
 
   it("a create that needs no room carries no notice, on the result and on the wire; one that made room carries it beside the workspace", async () => {

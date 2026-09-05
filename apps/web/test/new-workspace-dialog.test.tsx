@@ -13,7 +13,7 @@ const before = (a: Node, b: Node): boolean => (a.compareDocumentPosition(b) & No
 
 describe("new workspace dialog", () => {
   it("lays header, panel and footer out in one flex column that is the popup's child", async () => {
-    render(<NewWorkspaceDialog initialName="workspace-1" error={null} onCreate={() => {}} onCancel={() => {}} />);
+    render(<NewWorkspaceDialog initialName="workspace-1" onCreate={() => {}} onCancel={() => {}} />);
     const dialog = await screen.findByRole("dialog");
     const popup = dialog.closest<HTMLElement>('[data-slot="dialog-popup"]') ?? dialog;
     const header = slot(popup, "header");
@@ -30,7 +30,7 @@ describe("new workspace dialog", () => {
 
   it("Enter in the name and the Create button both submit the trimmed name", async () => {
     const onCreate = vi.fn();
-    render(<NewWorkspaceDialog initialName="workspace-1" error={null} onCreate={onCreate} onCancel={() => {}} />);
+    render(<NewWorkspaceDialog initialName="workspace-1" onCreate={onCreate} onCancel={() => {}} />);
     const dialog = await screen.findByRole("dialog");
     const input = within(dialog).getByLabelText("Name") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "  beta " } });

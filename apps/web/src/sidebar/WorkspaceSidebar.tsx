@@ -30,7 +30,7 @@ import { useNowMinute } from "../hooks/useNowMinute.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
 import { cn } from "../lib/utils.js";
-import { useSelectedId, useStore } from "../protocol/store.js";
+import { useSelectedId, useStore, type Creation } from "../protocol/store.js";
 import { onNewWorkspaceRequest, requestNewThread } from "../shell/shellRequests.js";
 import { ForwardsList } from "./ForwardsList.js";
 import { NewWorkspaceDialog } from "./NewWorkspaceDialog.js";
@@ -50,12 +50,10 @@ import {
   costLabel,
   defaultWorkspaceName,
   dotClassForTone,
-  explainCreateRefusal,
   idleCountdownLabel,
   threadPill,
   reachNote,
   textClassForTone,
-  type CreateRefusal,
 } from "./workspaceRows.js";
 
 const SETTLED_EXPANDED_KEY = "wsp:sidebar-settled-expanded";
@@ -87,16 +85,9 @@ function visibleProjects(projects: ReadonlyArray<SidebarProjectSnapshot>, query:
   return out;
 }
 
-interface PendingCreate {
-  readonly name: string;
-  /** Set once the runtime answered; the row clears when that id shows up in the list. */
-  readonly id: string | null;
-}
-
 interface DialogState {
   readonly key: number;
   readonly name: string;
-  readonly error: CreateRefusal | null;
 }
 
 export function WorkspaceSidebar() {
@@ -108,6 +99,8 @@ export function WorkspaceSidebar() {
   const toast = useStore(s => s.toast);
   const clearToast = useStore(s => s.clearToast);
   const select = useStore(s => s.select);
+  const creations = useStore(s => s.creations);
+  const createWorkspace = useStore(s => s.createWorkspace);
   const selectedId = useSelectedId();
   const nowMinute = useNowMinute();
   // One clock sample per minute tick so every idle countdown reads the same now.
@@ -116,7 +109,6 @@ export function WorkspaceSidebar() {
   const [query, setQuery] = useState("");
   const [settledExpanded, setSettledExpanded] = useLocalStorage(SETTLED_EXPANDED_KEY, true, booleanCodec);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
-  const [pending, setPending] = useState<PendingCreate | null>(null);
   const [dialog, setDialog] = useState<DialogState | null>(null);
   /** Workspace id to the machine id a rebuild was asked for; the action stays disabled while that machine is still the one reported. */
   const [rebuilding, setRebuilding] = useState<Readonly<Record<string, string>>>({});
@@ -126,32 +118,16 @@ export function WorkspaceSidebar() {
   const searching = query.trim().length > 0;
   const visible = useMemo(() => visibleProjects(projects, query), [projects, query]);
 
-  useEffect(() => {
-    if (pending?.id && workspaces.some(w => w.id === pending.id)) {
-      setPending(null);
-      select(pending.id);
-    }
-  }, [pending, workspaces, select]);
-
   const openDialog = (): void => {
-    setDialog({ key: Date.now(), name: defaultWorkspaceName(workspaces.map(w => w.name)), error: null });
+    setDialog({ key: Date.now(), name: defaultWorkspaceName([...workspaces.map(w => w.name), ...creations.map(c => c.name)]) });
   };
   const openDialogRef = useRef(openDialog);
   openDialogRef.current = openDialog;
   useEffect(() => onNewWorkspaceRequest(() => openDialogRef.current()), []);
 
-  const create = async (name: string): Promise<void> => {
-    if (!api) return;
+  const create = (name: string): void => {
     setDialog(null);
-    setPending({ name, id: null });
-    try {
-      const created = await api.createFromGoldenHead(name);
-      setPending(p => (p && p.name === name ? { ...p, id: created.id } : p));
-      if (created.notice !== undefined) useStore.setState({ toast: created.notice });
-    } catch (e) {
-      setPending(null);
-      setDialog({ key: Date.now(), name, error: explainCreateRefusal(e) });
-    }
+    void createWorkspace(name);
   };
 
   const rebuild = async (project: SidebarProjectSnapshot): Promise<void> => {
@@ -365,19 +341,11 @@ export function WorkspaceSidebar() {
                     </SidebarMenuItem>
                   );
                 })}
-                {pending ? (
-                  <SidebarMenuItem>
-                    <SidebarMenuButton size="lg" disabled aria-busy="true" data-sidebar-row data-row-id="pending">
-                      <Spinner className="size-3.5" />
-                      <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
-                        <span className="truncate text-sidebar-foreground">{pending.name}</span>
-                        <span className="truncate text-[11px] font-normal text-sidebar-muted-foreground">Creating a machine from the golden image</span>
-                      </span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ) : null}
+                {creations.map(creation => (
+                  <CreationRow key={creation.key} creation={creation} active={selectedId === creation.key} onSelect={() => select(creation.key)} />
+                ))}
               </SidebarMenu>
-              {visible.length === 0 && !pending ? (
+              {visible.length === 0 && creations.length === 0 ? (
                 <Empty className="py-8">
                   <EmptyHeader>
                     <EmptyTitle>{searching ? "No matches" : "No workspaces yet"}</EmptyTitle>
@@ -408,12 +376,40 @@ export function WorkspaceSidebar() {
         <NewWorkspaceDialog
           key={dialog.key}
           initialName={dialog.name}
-          error={dialog.error}
-          onCreate={name => void create(name)}
+          onCreate={create}
           onCancel={() => setDialog(null)}
         />
       ) : null}
     </>
+  );
+}
+
+/** A workspace still being created: the spinner and the runtime's latest stage, wrapped rather than cut at the sidebar's width. */
+function CreationRow({ creation, active, onSelect }: { creation: Creation; active: boolean; onSelect: () => void }) {
+  const failed = creation.failed !== null;
+  const line = failed ? creation.failed.title : creation.lines.at(-1)?.message ?? "Asking the runtime for a fork.";
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        size="lg"
+        isActive={active}
+        aria-busy={failed ? undefined : "true"}
+        data-sidebar-row
+        data-row-id={creation.key}
+        className="h-auto min-h-12 items-start"
+        onClick={onSelect}
+      >
+        {failed ? (
+          <span aria-hidden className="mt-1.5 size-2 shrink-0 rounded-full bg-destructive" />
+        ) : (
+          <Spinner className="mt-1 size-3.5" />
+        )}
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
+          <span className="truncate text-sidebar-foreground">{creation.name}</span>
+          <span className={cn("whitespace-normal break-words text-[11px] font-normal", failed ? "text-destructive-foreground" : "text-sidebar-muted-foreground")}>{line}</span>
+        </span>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
   );
 }
 

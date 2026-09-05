@@ -2,10 +2,11 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { GoldenBuilderView } from "@wsp/protocol";
 import { makeApi, ProtocolClient } from "./protocol/client.js";
-import { useReady, useSelectedId, useStore } from "./protocol/store.js";
+import { useCreation, useReady, useSelectedId, useStore } from "./protocol/store.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./components/ui/empty.js";
 import { WorkspaceTerminalDrawer } from "./components/WorkspaceTerminalDrawer.js";
 import { AppShell } from "./shell/AppShell.js";
+import { WorkspaceCreation } from "./shell/WorkspaceCreation.js";
 import { WorkspaceThread } from "./shell/WorkspaceThread.js";
 import { wireTerminals } from "./terminal/wiring.js";
 import { Wizard, type ChecklistItem, type KeyFlags } from "./wizard/Wizard.js";
@@ -51,9 +52,11 @@ export function App({
 
 type Golden = "unknown" | "none" | "present";
 
-/** The center slot: the selected workspace's thread, with the terminal drawer under it. */
+/** The center slot: the selected workspace's thread with the terminal drawer under it, or the creation in progress. */
 function WorkspaceCenter() {
   const workspaceId = useSelectedId();
+  const creation = useCreation(workspaceId);
+  if (creation) return <WorkspaceCreation creation={creation} />;
   if (!workspaceId) {
     return (
       <Empty className="flex-1">

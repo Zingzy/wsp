@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 import type { WorkspaceStatus } from "@wsp/protocol";
 import { RequestError } from "../src/protocol/client.js";
+import { explainCreateRefusal } from "../src/protocol/store.js";
 import {
   resolveAdjacentThreadId,
   searchSidebarThreadsByTitle,
@@ -15,7 +16,6 @@ import {
   compactTimeLabel,
   costLabel,
   defaultWorkspaceName,
-  explainCreateRefusal,
   idleCountdownLabel,
   dotClassForTone,
   threadPill,
