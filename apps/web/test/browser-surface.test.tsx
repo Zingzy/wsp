@@ -8,7 +8,7 @@ import { useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { resetBrowsers } from "../src/browser/model.js";
 import { REACH_REASK_FLOOR_MS, REACH_REFRESH_WITH_MS_LEFT } from "../src/browser/reach.js";
-import { resetBrowserTabs } from "../src/browser/tabs.js";
+import { resetBrowserTabs, useBrowserTabs } from "../src/browser/tabs.js";
 import { RightPanel } from "../src/shell/RightPanel.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../src/rightPanelStore.js";
 
@@ -259,6 +259,34 @@ describe("framing a port", () => {
     await waitFor(() => expect(frame(8412)).not.toBe(first));
     expect(frame(8412).getAttribute("src")).toBe(PUBLIC(8412));
     await waitFor(() => expect(probed).toEqual([8412, 8412]));
+    await act(() => new Promise(r => setTimeout(r, 50)));
+    expect(probed).toEqual([8412, 8412]);
+    expect(Object.values(useBrowserTabs.getState().byWorkspaceId[WS]!).map(t => t.reloadNonce)).toEqual([1]);
+  });
+
+  it("a port that came back behind a full-page refusal card is probed again too, and the card goes when the new server allows the host", async () => {
+    const probed: number[] = [];
+    let blocked = true;
+    const { emit } = await setup({
+      portProbe: async (_id, port) => {
+        probed.push(port);
+        return blocked
+          ? { status: 403, body: "Blocked request. This host (\"m1-8412.preview.example\") is not allowed." }
+          : { status: 200, body: "<!doctype html>" };
+      },
+    });
+    emit(open(WS, 8412, 100, "node"));
+    fireEvent.click(serverCard(8412));
+    await screen.findByText(":8412 refused the preview host");
+    expect(screen.queryByTitle(":8412")).toBeNull();
+    expect(probed).toEqual([8412]);
+
+    emit(close(WS, 8412));
+    blocked = false;
+    emit(open(WS, 8412, 200, "node"));
+    await waitFor(() => expect(probed).toEqual([8412, 8412]));
+    await screen.findByTitle(":8412");
+    expect(screen.queryByText(":8412 refused the preview host")).toBeNull();
   });
 
   it("says nothing about listening until the daemon has answered; the first word without the port shows the banner", async () => {

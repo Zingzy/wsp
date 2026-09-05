@@ -50,13 +50,13 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
     setLoading(framed);
   }, [framed, realUrl, tab?.reloadNonce]);
 
-  // A frame loaded while its port was down holds the edge's error page; the port coming back is the only cue to load it again.
+  // The port listening again is the cue to probe its route anew, whether the last answer was framed or a refusal card.
   const wasListening = useRef({ port, listening });
   useEffect(() => {
     const prev = wasListening.current;
     wasListening.current = { port, listening };
-    if (tabId !== null && framed && listening && !prev.listening && prev.port === port) tabs.reload(workspaceId, tabId);
-  }, [port, listening, framed, tabId, workspaceId, tabs]);
+    if (tabId !== null && realUrl !== null && listening && !prev.listening && prev.port === port) tabs.reload(workspaceId, tabId);
+  }, [port, listening, realUrl, tabId, workspaceId, tabs]);
 
   const framePort = (next: number): void => {
     setHint(null);

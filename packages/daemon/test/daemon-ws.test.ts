@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import { startDaemon, type DaemonHandle } from "../src/main.js";
+import { rejectedEvents } from "./wire-events.js";
 
 function lanIPv4(): string | null {
   for (const infos of Object.values(networkInterfaces())) {
@@ -23,6 +24,9 @@ interface WireMsg {
   type?: string;
   [k: string]: unknown;
 }
+
+/** Every event frame any client in this file received, checked against the protocol at the end. */
+const wire: WireMsg[] = [];
 
 class Client {
   private ws: WebSocket;
@@ -44,6 +48,7 @@ class Client {
         this.pending.delete(m.id);
       } else if (m.type) {
         this.events.push(m);
+        wire.push(m);
       }
     });
   }
@@ -384,5 +389,12 @@ describe("daemon WS server", () => {
     } finally {
       await d.close();
     }
+  });
+});
+
+describe("wire", () => {
+  it("every event the daemon pushed in this file is one the protocol parses", () => {
+    expect(wire.length).toBeGreaterThan(0);
+    expect(rejectedEvents(wire)).toEqual([]);
   });
 });

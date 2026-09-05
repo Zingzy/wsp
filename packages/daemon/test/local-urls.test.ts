@@ -13,6 +13,7 @@ import { localhostPortOf, localhostPortsIn, settledLocalPorts } from "../src/loc
 import { startDaemon, type DaemonHandle } from "../src/main.js";
 import type { ListeningPort } from "../src/ports.js";
 import { TerminalUrlScanner } from "../src/relay.js";
+import { rejectedEvents } from "./wire-events.js";
 
 const execFileAsync = promisify(execFile);
 const TOKEN = "local-token";
@@ -186,6 +187,9 @@ interface WireMsg {
   [k: string]: unknown;
 }
 
+/** Every event frame any client in this file received, checked against the protocol at the end. */
+const wire: WireMsg[] = [];
+
 async function client(port: number): Promise<{ request(op: string, p?: Record<string, unknown>): Promise<WireMsg>; events: WireMsg[]; close(): void }> {
   const ws = new WebSocket(`ws://127.0.0.1:${port}/`);
   await new Promise<void>((resolve, reject) => {
@@ -200,7 +204,10 @@ async function client(port: number): Promise<{ request(op: string, p?: Record<st
     if (typeof m.id === "number" && pending.has(m.id)) {
       pending.get(m.id)!(m);
       pending.delete(m.id);
-    } else if (m.type) events.push(m);
+    } else if (m.type) {
+      events.push(m);
+      wire.push(m);
+    }
   });
   const request = (op: string, p: Record<string, unknown> = {}): Promise<WireMsg> => {
     const id = nextId++;
@@ -291,5 +298,12 @@ describe("daemon: localhost.url on the wire", () => {
     await new Promise(r => setTimeout(r, 100));
     expect(c.events.some(e => e.type === "callback.port")).toBe(false);
     c.close();
+  });
+});
+
+describe("wire", () => {
+  it("every event the daemon pushed in this file is one the protocol parses", () => {
+    expect(wire.length).toBeGreaterThan(0);
+    expect(rejectedEvents(wire)).toEqual([]);
   });
 });

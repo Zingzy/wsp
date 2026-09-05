@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFile } from "node:child_process";
 import { readFile, readlink } from "node:fs/promises";
+import type { DaemonEvent } from "@wsp/protocol";
 
 export interface ModeProbeResult {
   icanon: boolean;
@@ -12,13 +13,7 @@ export interface ModeProbeResult {
  * Injectable so unit tests run on macOS with fakes; the real probe is Linux-only. */
 export type ModeProbe = (pid: number) => Promise<ModeProbeResult>;
 
-export interface PtyModeEvent {
-  type: "pty.mode";
-  ptyId: string;
-  mode: "line" | "raw";
-  echo: boolean;
-  foreground: string;
-}
+export type PtyModeEvent = Extract<DaemonEvent, { type: "pty.mode" }>;
 
 export type ModeListener = (e: PtyModeEvent) => void;
 

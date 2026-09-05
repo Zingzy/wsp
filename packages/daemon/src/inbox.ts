@@ -2,12 +2,9 @@ import { EventEmitter } from "node:events";
 import { readdirSync, watch, type FSWatcher } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
+import type { DaemonEvent } from "@wsp/protocol";
 
-export interface InboxFileEvent {
-  type: "inbox.file";
-  path: string;
-  bytes: number;
-}
+export type InboxFileEvent = Extract<DaemonEvent, { type: "inbox.file" }>;
 
 export interface InboxOptions {
   dir: string;
