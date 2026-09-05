@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { SessionEvent } from "@wsp/protocol";
 import { CHAT_STREAM, CHAT_WS } from "../../../test/fixtures/chat-stream";
-import { deriveChatThread, reduceEvent, reloadTranscript, stabilizeEntries, type StaleTurn, type ThreadState } from "./useChatThread";
+import { deriveChatThread, dropEvent, reduceEvent, reloadTranscript, stabilizeEntries, type StaleTurn, type ThreadState } from "./useChatThread";
 
 const T0 = "2026-09-01T02:00:00.000Z";
 const state = (events: ReadonlyArray<SessionEvent>, extra: Partial<ThreadState> = {}): ThreadState => ({
@@ -16,6 +16,7 @@ const state = (events: ReadonlyArray<SessionEvent>, extra: Partial<ThreadState> 
   left: undefined,
   known: [],
   named: null,
+  stray: null,
   ...extra,
 });
 
@@ -192,7 +193,7 @@ describe("reloadTranscript", () => {
     const a2 = { workspaceId: CHAT_WS, sessionId: "sess_0001", turnId: "turn_0002", threadId: "thr_a" };
     const started = reloadTranscript(sending, [...A, { type: "session.start", ...a2, prompt: "again" }], T0);
     expect(started.sending).toBeNull();
-    expect(started.named).toBe("thr_a");
+    expect(started.named).toEqual({ key: "thr_a", thread: "thr_a" });
     expect(started.events).toHaveLength(A.length + 1);
     const quiet = reloadTranscript(sending, A, T0);
     expect(quiet.sending).toEqual({ after: "turn_0001" });
@@ -209,10 +210,36 @@ describe("reloadTranscript", () => {
     const own = reloadTranscript(fresh, [...A, ...B_RUNNING], T0);
     expect(own.events).toEqual(B_RUNNING);
     expect(own.sending).toBeNull();
-    expect(own.named).toBe(CHAT_WS);
+    expect(own.named).toEqual({ key: CHAT_WS, thread: "thr_b" });
     const waiting = reloadTranscript(fresh, A, T0);
     expect(waiting.sending).toEqual({ after: undefined });
     expect(waiting.named).toBeNull();
+  });
+
+  it("while a send is pending on a view with a start, a reply that ends in another thread folds to the held one and keeps the send for its own start", () => {
+    const sending = state(A, { known: ["thr_a"], sending: { after: "turn_0001" } });
+    const c = { workspaceId: CHAT_WS, sessionId: "sess_c", turnId: "turn_c1", threadId: "thr_c" };
+    const elsewhere: SessionEvent[] = [
+      { type: "session.start", ...c, prompt: "from another tab" },
+      { type: "session.delta", ...c, kind: "text", text: "Elsewhere." },
+    ];
+    const next = reloadTranscript(sending, [...A, ...elsewhere], T0);
+    expect(next.events).toEqual(A);
+    expect(next.sending).toEqual({ after: "turn_0001" });
+    expect(next.named).toBeNull();
+    expect(next.known).toEqual(["thr_a", "thr_c"]);
+    const a2 = { workspaceId: CHAT_WS, sessionId: "sess_0001", turnId: "turn_0002", threadId: "thr_a" };
+    const own = reduceEvent(next, { type: "session.start", ...a2, prompt: "one" }, T0);
+    expect(own.sending).toBeNull();
+    expect(own.named).toEqual({ key: "thr_a", thread: "thr_a" });
+    expect(reloadTranscript(state(A), [...A, ...elsewhere], T0).events).toEqual(elsewhere);
+  });
+
+  it("while fresh, a known older thread running last in the reply is not the stale turn: only the left thread can be", () => {
+    const fresh = state([], { fresh: true, left: "thr_b", known: ["thr_a", "thr_b"] });
+    expect(reloadTranscript(fresh, [...B_DONE, ...A_RUNNING], T0).stale).toBeNull();
+    const leftA = state([], { fresh: true, left: "thr_a", known: ["thr_a", "thr_b"] });
+    expect(reloadTranscript(leftA, [...B_DONE, ...A_RUNNING], T0).stale).toEqual(A_TURN);
   });
 });
 
@@ -263,11 +290,11 @@ describe("reduceEvent", () => {
 
   it("named is the key a send's rows waited under when its start lands: the thread id the view held, or the workspace id before it had one", () => {
     const sending = state([], { sending: { after: undefined } });
-    expect(reduceEvent(sending, B_START, T0).named).toBe(CHAT_WS);
-    expect(reduceEvent(sending, CHAT_STREAM[0]!, T0).named).toBe(CHAT_WS);
+    expect(reduceEvent(sending, B_START, T0).named).toEqual({ key: CHAT_WS, thread: "thr_b" });
+    expect(reduceEvent(sending, CHAT_STREAM[0]!, T0).named).toEqual({ key: CHAT_WS, thread: CHAT_WS });
     expect(reduceEvent(state([]), B_START, T0).named).toBeNull();
     const stamped = state(A, { sending: { after: "turn_0001" } });
-    expect(reduceEvent(stamped, { type: "session.start", ...b, threadId: "thr_a" }, T0).named).toBe("thr_a");
+    expect(reduceEvent(stamped, { type: "session.start", ...b, threadId: "thr_a" }, T0).named).toEqual({ key: "thr_a", thread: "thr_a" });
     const x = { workspaceId: CHAT_WS, sessionId: "sess_x", turnId: "turn_x1", threadId: "thr_a" };
     expect(reduceEvent(stamped, { type: "session.end", ...x, exitCode: 127, sawResult: true }, T0).named).toBeNull();
   });
@@ -279,7 +306,7 @@ describe("reduceEvent", () => {
     expect(died.sending).toBeNull();
     const started = reduceEvent({ ...died, sending: { after: "turn_x1" } }, B_START, T0);
     expect(started.events).toHaveLength(2);
-    expect(started.named).toBe(CHAT_WS);
+    expect(started.named).toEqual({ key: CHAT_WS, thread: "thr_b" });
     expect(reduceEvent(started, A[1]!, T0).events).toEqual(started.events);
   });
 
@@ -344,7 +371,7 @@ describe("reduceEvent", () => {
     const started = reduceEvent(sending, { type: "session.start", ...z, prompt: "retry" }, T0);
     expect(started.events).toHaveLength(3);
     expect(started.sending).toBeNull();
-    expect(started.named).toBe(CHAT_WS);
+    expect(started.named).toEqual({ key: CHAT_WS, thread: "thr_z" });
     expect(reduceEvent(started, deadEvents[0]!, T0)).toBe(started);
     const diedAgain = reduceEvent(sending, { type: "session.end", ...z, exitCode: 127, sawResult: true }, T0);
     expect(diedAgain.events).toHaveLength(3);
@@ -365,5 +392,84 @@ describe("reduceEvent", () => {
     const sending = { ...knew, sending: { after: undefined } };
     expect(reduceEvent(sending, { type: "session.delta", ...c, kind: "text", text: "C LEAKED" }, T0)).toBe(sending);
     expect(reduceEvent(sending, { type: "session.end", ...c, exitCode: 0, sawResult: true }, T0)).toBe(sending);
+  });
+
+  it("a pending send left behind remembers the thread of a start or a delta it sees, so that thread's end cannot clear it; a done alone is not remembered", () => {
+    const pending = state([], { fresh: true, left: "thr_a", known: ["thr_a"], stale: { kind: "pending-send", after: "turn_0001" } });
+    const c = { workspaceId: CHAT_WS, sessionId: "sess_c", turnId: "turn_c1", threadId: "thr_c" };
+    const saw = reduceEvent(pending, { type: "session.delta", ...c, kind: "text", text: "elsewhere" }, T0);
+    expect(saw.known).toEqual(["thr_a", "thr_c"]);
+    expect(saw.stale).toEqual(pending.stale);
+    expect(saw.events).toEqual([]);
+    expect(reduceEvent(saw, { type: "session.end", ...c, exitCode: 0, sawResult: true }, T0)).toBe(saw);
+    const x = { workspaceId: CHAT_WS, sessionId: "sess_x", turnId: "turn_x1", threadId: "thr_x" };
+    const started = reduceEvent(pending, { type: "session.start", ...x, prompt: "hello" }, T0);
+    expect(started.known).toEqual(["thr_a", "thr_x"]);
+    expect(started.stale).toEqual({ kind: "turn", turnId: "turn_x1", sessionId: "sess_x" });
+    expect(reduceEvent(pending, { type: "session.done", ...x, result: { status: "failed", error: "gone" } }, T0)).toBe(pending);
+  });
+});
+
+describe("a send a view change left in flight", () => {
+  const A = CHAT_STREAM.map(e => ({ ...e, threadId: "thr_a" }));
+  const stray = { prompt: "first" };
+  const pinned = state(A, { known: ["thr_a"], stray });
+  const n = { workspaceId: CHAT_WS, sessionId: "sess_n", turnId: "turn_n1", threadId: "thr_n" };
+  const c = { workspaceId: CHAT_WS, sessionId: "sess_c", turnId: "turn_c1", threadId: "thr_c" };
+  const x = { workspaceId: CHAT_WS, sessionId: "sess_x", turnId: "turn_x1", threadId: "thr_x" };
+  const N_START: SessionEvent = { type: "session.start", ...n, prompt: "first" };
+
+  it("its start, told by the prompt it carries, names the rows under the workspace id on whichever view drops it", () => {
+    const landed = dropEvent(pinned, N_START);
+    expect(landed.stray).toBeNull();
+    expect(landed.named).toEqual({ key: CHAT_WS, thread: "thr_n" });
+    expect(landed.events).toEqual(A);
+    expect(dropEvent(landed, { type: "session.delta", ...n, kind: "text", text: "On first." })).toEqual({ ...landed, known: ["thr_a", "thr_n"] });
+  });
+
+  it("another client's start is remembered, not taken, and that thread's end does not settle it", () => {
+    const other = dropEvent(pinned, { type: "session.start", ...c, prompt: "from another tab" });
+    expect(other.stray).toEqual(stray);
+    expect(other.named).toBeNull();
+    expect(other.known).toEqual(["thr_a", "thr_c"]);
+    expect(dropEvent(other, { type: "session.end", ...c, exitCode: 0, sawResult: true })).toBe(other);
+    expect(dropEvent(pinned, { type: "session.start", ...c, prompt: "first" }).stray).toBeNull();
+  });
+
+  it("a harness that dies before its start settles it without a name; its done alone keeps waiting for the end", () => {
+    const died = dropEvent(pinned, { type: "session.done", ...x, result: { status: "failed", error: "claude: command not found" } });
+    expect(died).toBe(pinned);
+    const ended = dropEvent(died, { type: "session.end", ...x, exitCode: 127, sawResult: true });
+    expect(ended.stray).toBeNull();
+    expect(ended.named).toBeNull();
+    expect(dropEvent(state(A, { known: ["thr_a"] }), N_START)).toEqual(state(A, { known: ["thr_a", "thr_n"] }));
+  });
+
+  it("a fresh view that holds the start takes the rows with it", () => {
+    const fresh = state([], { fresh: true, left: "thr_a", known: ["thr_a"], stray });
+    const opened = reduceEvent(fresh, N_START, T0);
+    expect(opened.events).toEqual([N_START]);
+    expect(opened.stray).toBeNull();
+    expect(opened.named).toEqual({ key: CHAT_WS, thread: "thr_n" });
+    const known = reduceEvent(fresh, { type: "session.start", ...c, prompt: "from another tab" }, T0);
+    expect(known.events).toHaveLength(1);
+    expect(known.stray).toEqual(stray);
+    expect(known.named).toBeNull();
+  });
+
+  it("a reply read on the next view settles it the way dropped live events would", () => {
+    const next = reloadTranscript(state([], { known: ["thr_a"], stray }), [...A, N_START, { type: "session.delta", ...n, kind: "text", text: "On first." }], T0, "thr_a");
+    expect(next.events).toEqual(A);
+    expect(next.stray).toBeNull();
+    expect(next.named).toEqual({ key: CHAT_WS, thread: "thr_n" });
+    const quiet = reloadTranscript(state([], { known: ["thr_a"], stray }), A, T0, "thr_a");
+    expect(quiet.stray).toEqual(stray);
+    expect(quiet.named).toBeNull();
+    const died = reloadTranscript(state([], { known: ["thr_a"], stray }), [...A, { type: "session.done", ...x, result: { status: "failed", error: "gone" } }, { type: "session.end", ...x, exitCode: 127, sawResult: true }], T0, "thr_a");
+    expect(died.stray).toBeNull();
+    expect(died.named).toBeNull();
+    const latest = reloadTranscript(state([], { known: ["thr_a"], stray }), [...A, N_START], T0);
+    expect(latest.events).toEqual([N_START]);
+    expect(latest.named).toEqual({ key: CHAT_WS, thread: "thr_n" });
   });
 });

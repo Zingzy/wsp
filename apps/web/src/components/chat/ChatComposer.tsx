@@ -13,7 +13,8 @@
 // then queues the message under the thread's key in the draft store, the rows
 // stack above the box, and when the turn ends the head row starts the next
 // turn; a fresh thread's rows wait under the workspace id until its own first
-// start names it, then move under that id. Every send holds the thread's rows
+// start names it, then move under that id, whichever thread is on screen when
+// that start lands. Every send holds the thread's rows
 // until its start lands, so a start the runtime refuses or a harness that
 // dies before init drains nothing behind it. Rows read back from storage are
 // held too. Held rows go only after the person's next Enter or send-now here,
@@ -105,9 +106,9 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const rekeyQueue = useComposerDraftStore(s => s.rekeyQueue);
   useEffect(() => {
     if (named === null) return;
-    if (named !== threadKey) rekeyQueue(named, threadKey);
-    release(threadKey);
-  }, [named, rekeyQueue, release, threadKey]);
+    if (named.key !== named.thread) rekeyQueue(named.key, named.thread);
+    release(named.thread);
+  }, [named, rekeyQueue, release]);
   const editorRef = useRef<ComposerPromptEditorHandle | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
