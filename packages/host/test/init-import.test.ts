@@ -697,6 +697,39 @@ describe("importFor", () => {
     expect(imp.recipe?.files.map(f => f.dest)).toContain(".vscode-server/data/Machine/settings.json");
   });
 
+  it("with every row of the manifest, the MCP plan names each agent's config on the guest, keeps the ticked servers and drops the rest; MCP rows are never agents to install", () => {
+    const home = laptop();
+    const all: ManifestEntry[] = [
+      row({ rung: "agents", id: "agents/claude", paths: ["~/.claude.json"] }),
+      row({ rung: "agents", id: "agents/mcp/claude/github" }),
+      row({ rung: "agents", id: "agents/mcp/claude/notes", bring: false, default: "skip", reason: "command ~/Library/x is macOS-only, will not run" }),
+      row({ rung: "agents", id: "agents/mcp/claude/home/zomato" }),
+      row({ rung: "agents", id: "agents/codex", bring: false }),
+      row({ rung: "agents", id: "agents/mcp/codex/grafana" }),
+    ];
+    const picked = all.filter(e => e.bring);
+    const imp = importFor(picked, { home, secrets: new Map(), platform: "darwin", rows: all });
+    expect(imp.mcp).toEqual({
+      agents: [
+        {
+          id: "claude", label: "Claude Code",
+          scopes: [
+            { files: ["/root/.claude-cfg/.claude.json"], format: "claude", keep: ["github"], drop: [{ name: "notes", reason: "command ~/Library/x is macOS-only, will not run" }] },
+            { files: ["/root/.claude-cfg/.claude.json"], format: "claude", project: { from: home, to: "/root" }, keep: ["zomato"], drop: [] },
+          ],
+          aside: [],
+        },
+        { id: "codex", label: "Codex", scopes: [], aside: [{ id: "agents/mcp/codex/grafana", name: "grafana", reason: "Codex is not ticked, so its config did not travel" }] },
+      ],
+      guestHome: "/root",
+      rewrites: [[`${home}/`, "/root/"], ["/opt/homebrew/", "/home/linuxbrew/.linuxbrew/"]],
+      binDirs: [`${home}/.local/bin/`, "~/.local/bin/", "/opt/homebrew/bin/", "/opt/homebrew/sbin/", "/usr/local/bin/", "/usr/bin/", "/bin/"],
+    });
+    expect(imp.agents.map(a => a.id)).toEqual(["agents/claude"]);
+    expect(imp.skippedAgents).toEqual([]);
+    expect(importFor(picked, { home, secrets: new Map(), platform: "darwin" }).mcp).toBeUndefined();
+  });
+
   it("maps the ticks to files (Claude's dir under the guest config dir), tools, the Node the agents need, and agents with Claude on the sanctioned line", () => {
     const home = laptop();
     const imp = ticks(home);

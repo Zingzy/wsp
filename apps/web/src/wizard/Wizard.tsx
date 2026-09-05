@@ -38,6 +38,7 @@ const STAGE_WORD: Record<GoldenStage, string> = {
   "applying-setup": "applying your setup",
   "uploading-files": "uploading your files",
   "installing-tools": "installing tools",
+  "installing-mcp": "installing MCP servers",
   "installing-harness": "running the setup",
   ready: "ready for you",
   snapshotting: "taking the snapshot",

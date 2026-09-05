@@ -1743,9 +1743,10 @@ describe("runtime golden import", () => {
       "installing-harness:Codex installed",
       "installing-tools:jq (1/1)",
       "installing-tools:1 installed",
+      "installing-mcp:none configured",
       "ready",
     ]);
-    expect(await store.get("builders", b.id)).toMatchObject({ import: { recipeHash: "h1", applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools"], smoke: "codex --version" } });
+    expect(await store.get("builders", b.id)).toMatchObject({ import: { recipeHash: "h1", applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools", "installing-mcp"], smoke: "codex --version" } });
     const { version } = await rt.golden.seal(b.id);
     expect(version.smoke).toEqual({ cmd: "codex --version", exitCode: 0 });
     expect(backend.machines[1]!.execLog).toEqual(["codex --version", "test -x /usr/local/bin/wsp-open"]);
@@ -1769,13 +1770,14 @@ describe("runtime golden import", () => {
       "uploading-files:already applied",
       "installing-harness:already applied",
       "installing-tools:already applied",
+      "installing-mcp:already applied",
       "ready:",
     ]);
     expect(await rt.golden.builders()).toHaveLength(1);
   });
 
   const recipeWith = (imp: GoldenImport) => ({ setup: "true", smoke: "true", import: imp });
-  const SKIPPED = ["creating:already applied", "deploying-daemon:already applied", "applying-setup:already applied", "uploading-files:already applied", "installing-harness:already applied", "installing-tools:already applied", "ready:"];
+  const SKIPPED = ["creating:already applied", "deploying-daemon:already applied", "applying-setup:already applied", "uploading-files:already applied", "installing-harness:already applied", "installing-tools:already applied", "installing-mcp:already applied", "ready:"];
 
   it("a first-life builder from an earlier process with the same recipe is attached to: every stage skipped, one machine, and it seals", async () => {
     const backend = stubBackend();
@@ -1851,7 +1853,7 @@ describe("runtime golden import", () => {
     expect(backend.machines[0]!.killed).toBe(false);
     expect(frames).toContain("uploading-files:~/.claude.json not re-imported: upload refused");
     expect(frames.at(-1)).toBe("ready:");
-    expect(await store.get("builders", b.id)).toMatchObject({ import: { recipeHash: "h1", applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools"] } });
+    expect(await store.get("builders", b.id)).toMatchObject({ import: { recipeHash: "h1", applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools", "installing-mcp"] } });
   });
 
   it("kill stops a builder of this setup by its recorded id and drops the record, from this process or the next", async () => {
@@ -1969,7 +1971,7 @@ describe("runtime golden import", () => {
     const frames: string[] = [];
     dead.events.on("golden.stage", e => { if (e.type === "golden.stage") frames.push(`${e.stage}:${e.detail ?? ""}`); });
     await expect(dead.golden.prepare()).rejects.toThrow("gone");
-    expect(frames.slice(-2)).toEqual(["installing-tools:already applied", "failed:gone"]);
+    expect(frames.slice(-2)).toEqual(["installing-mcp:already applied", "failed:gone"]);
     expect(frames).not.toContain("ready:");
     expect(await dead.golden.builders()).toEqual([]);
     expect(await store.list("builders")).toEqual([]);
@@ -2235,7 +2237,7 @@ describe("runtime golden import", () => {
     expect(done.building).toBeUndefined();
     expect(done.heldBy).toBeUndefined();
     expect(done.setupSha).not.toBe("");
-    expect(done.import?.applied).toHaveLength(4);
+    expect(done.import?.applied).toHaveLength(5);
 
     const next = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()) });
     expect((await next.golden.prepare()).id).toBe("m1");
@@ -2346,7 +2348,7 @@ describe("runtime golden import", () => {
     const done = (await store.get("builders", m.id)) as Stored;
     expect(done.building).toBeUndefined();
     expect(done.setupSha).not.toBe("");
-    expect(done.import?.applied).toEqual(["applying-setup", "uploading-files", "installing-harness", "installing-tools"]);
+    expect(done.import?.applied).toEqual(["applying-setup", "uploading-files", "installing-harness", "installing-tools", "installing-mcp"]);
     expect(done.heldBy).toMatchObject({ pid: process.pid });
   });
 
@@ -2562,6 +2564,7 @@ describe("runtime golden update and the post-seal grace", () => {
       "installing-harness:no agent ticked",
       "installing-tools:cowsay (1/1)",
       "installing-tools:1 installed",
+      "installing-mcp:none configured",
       "ready:",
       "snapshotting:golden-v2",
       "smoke-forking:codex --version",

@@ -2,7 +2,7 @@
 // The recipe diff: what a golden was built from (the digest its seal wrote)
 // against the recipe now, as rows to apply on top and rows to take off. Pure;
 // golden.ts runs the result on a fork or on the kept builder.
-import type { RecipeDigest } from "@wsp/protocol";
+import { MCP_ID_PREFIX, type RecipeDigest } from "@wsp/protocol";
 import { AGENT_INSTALLERS, agentUninstall, toolUninstall, type AgentInstaller, type RecipeEntry } from "./golden-import.js";
 
 type Tick = RecipeDigest["ticks"][number];
@@ -159,6 +159,10 @@ export function removalsFor(d: RecipeDiff, from: RecipeDigest, installers: Recor
   const table = { ...AGENT_INSTALLERS, ...installers };
   for (const a of d.agents) {
     if (a.change !== "removed") continue;
+    if (a.id.startsWith(MCP_ID_PREFIX)) {
+      out.push({ what: "agent", id: a.id, label: a.label, note: "an MCP server; the MCP stage takes it out of the agent's config" });
+      continue;
+    }
     const installer = table[nameOf(a.id)];
     const r = installer === undefined ? { note: "no installer known, so nothing to uninstall" } : agentUninstall(installer);
     out.push({ what: "agent", id: a.id, label: a.label, ...r, ...(installer !== undefined ? { smoke: installer.smoke } : {}) });
@@ -178,7 +182,11 @@ export function describeDiff(d: RecipeDiff): string[] {
     group(change, d.files.filter(f => f.change === change).map(f => `~/${f.dest}`), "file");
     if (change === "changed") for (const f of d.files.filter(x => x.change === "missing")) lines.push(`kept on the golden, no longer on this computer: ~/${f.dest}`);
     group(change, d.tools.filter(t => t.change === change).map(t => (change === "changed" ? `${t.label} (${t.from ?? "unpinned"} to ${t.to ?? "unpinned"})` : t.label)), "tool");
-    if (change !== "changed") group(change, d.agents.filter(a => a.change === change).map(a => a.label), "agent");
+    if (change !== "changed") {
+      const agents = d.agents.filter(a => a.change === change);
+      group(change, agents.filter(a => !a.id.startsWith(MCP_ID_PREFIX)).map(a => a.label), "agent");
+      group(change, agents.filter(a => a.id.startsWith(MCP_ID_PREFIX)).map(a => a.label), "MCP server");
+    }
   }
   for (const l of d.logins) {
     if (l.to === "copy") lines.push(`copy the ${l.label}`);

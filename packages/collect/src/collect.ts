@@ -4,6 +4,7 @@ import type { Detector } from "./detect/common.js";
 import { detectEditors } from "./detect/editors.js";
 import { detectIdentity } from "./detect/identity.js";
 import { detectLogins } from "./detect/logins.js";
+import { detectMcp } from "./detect/mcp.js";
 import { detectShell } from "./detect/shell.js";
 import { detectToolchains } from "./detect/toolchains.js";
 import { detectTools } from "./detect/tools.js";
@@ -20,7 +21,7 @@ export const DETECTORS: Record<Exclude<Rung, "everything">, Detector> = {
   editors: detectEditors,
   toolchains: detectToolchains,
   tools: detectTools,
-  agents: detectAgents,
+  agents: async host => [...(await detectAgents(host)), ...(await detectMcp(host))],
   logins: detectLogins,
 };
 
