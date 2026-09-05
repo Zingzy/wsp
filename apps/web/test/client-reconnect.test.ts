@@ -137,7 +137,7 @@ describe("runtime socket reconnect", () => {
     useStore.getState().bind(makeApi(client));
     await until(() => useStore.getState().ready);
     await rtA.workspaces.create({ golden: "snap_g", name: "before" });
-    await until(() => events.length === 1);
+    await until(() => events.some(e => e.type === "workspace.created"));
 
     await srv.close();
     await until(() => useStore.getState().conn === "reconnecting");

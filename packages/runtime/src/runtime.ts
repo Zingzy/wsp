@@ -52,6 +52,7 @@ import type {
   SessionEvent,
   SessionInterruptResult,
   SessionView,
+  WorkspaceCreateStage,
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
@@ -183,7 +184,12 @@ interface LiveWorkspace {
   waking?: Promise<WorkspaceView>;
   /** The nap in flight: a second nap joins it, a wake waits for it. */
   napping?: Promise<WorkspaceView>;
+  /** Set from the fork until the create is ready: the sweep knows the machine, nothing else can reach it yet. */
+  creating?: true;
 }
+
+/** Reports one create stage as it is reached; the runtime stamps id, name and elapsed time. */
+type StageReport = (stage: WorkspaceCreateStage, message: string, notice?: string) => void;
 
 export interface SessionHandle {
   readonly id: string;
@@ -302,13 +308,17 @@ function hostnameFor(name: string): string {
   return label === "" ? "wsp" : label;
 }
 
-/** A fresh fork boots as "localhost"; naming it is cosmetic, so a guest that refuses is only logged. */
-async function setHostname(machine: Machine, name: string): Promise<void> {
+/** A fresh fork boots as "localhost"; naming it is cosmetic, so a guest that refuses is only logged. Hands back the
+ * name set, or the refusal. */
+async function setHostname(machine: Machine, name: string): Promise<{ host: string; refused?: string }> {
   const host = hostnameFor(name);
   const res = await machine
     .exec(`hostname ${host} && echo ${host} > /etc/hostname`)
     .catch((e: unknown) => ({ exitCode: -1, stdout: "", stderr: e instanceof Error ? e.message : String(e) }));
-  if (res.exitCode !== 0) console.warn(`hostname ${host} on ${machine.id} failed: ${res.stderr.trim()}`);
+  if (res.exitCode === 0) return { host };
+  const refused = `hostname ${host} on ${machine.id} failed: ${res.stderr.trim()}`;
+  console.warn(refused);
+  return { host, refused };
 }
 
 export interface GoldenBuildRequest extends Omit<BuildGoldenOptions, "backend" | "manifest"> {
@@ -790,13 +800,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** Boots a golden fork for the record and writes back what the provider says it built.
    * A snapshot restores as the kind it was taken from, so the spec names that kind;
    * versions sealed before it was recorded were all sandbox. */
-  const fork = (record: WorkspaceRecord, bind: (machine: Machine) => void, override?: WorkspaceSpec): Promise<Machine> =>
+  const fork = (record: WorkspaceRecord, bind: (machine: Machine) => void, override?: WorkspaceSpec, report?: StageReport): Promise<Machine> =>
     claiming(async b => {
       const spec = forkSpec(record, (await goldenVersionOf(record.golden))?.kind ?? "sandbox", override);
       const machine = await b.create(spec);
       // Named by its record before the claim is released, so no sweep sees it unclaimed.
       bind(machine);
-      await setHostname(machine, record.name);
+      report?.("machine-booting", `Machine ${machine.id} is booting.`);
+      const named = await setHostname(machine, record.name);
+      report?.("hostname-set", named.refused === undefined ? `Hostname set to ${named.host}.` : "Hostname left as the guest booted it.", named.refused);
       const shape = await shapeOf(machine);
       if (shape !== undefined) record.shape = shape;
       else delete record.shape;
@@ -1047,70 +1059,110 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const entryOf = async (id: string): Promise<LiveWorkspace> => {
     await ready();
     const entry = live.get(id);
-    if (!entry) throw new Error(`no such workspace: ${id}`);
+    if (!entry || entry.creating) throw new Error(`no such workspace: ${id}`);
     return entry;
+  };
+
+  /** The create itself, one stage report per awaited step. The hostname is set inside the fork, before the daemon
+   * is asked and before the workspace is listed or reachable, so no shell can open under the guest's boot name. */
+  const createStaged = async (o: CreateWorkspaceOptions, id: string, report: StageReport): Promise<CreatedWorkspace> => {
+    const inherited = (await goldenVersionOf(o.golden))?.size;
+    const record: WorkspaceRecord = {
+      id,
+      name: o.name,
+      machineId: "",
+      phase: "running",
+      golden: o.golden,
+      createdAt: new Date().toISOString(),
+      spec: {
+        ...(o.envs !== undefined ? { envs: o.envs } : {}),
+        ...(o.labels !== undefined ? { labels: o.labels } : {}),
+      },
+      ...(o.idleWindowMs !== undefined ? { idleWindowMs: o.idleWindowMs } : {}),
+      size: {
+        cpu: o.cpu ?? inherited?.cpu ?? backend.pricing.defaultSize.cpu,
+        memMb: o.memMb ?? inherited?.memMb ?? backend.pricing.defaultSize.memMb,
+      },
+      firstLife: true,
+    };
+    const bind = (m: Machine): void => {
+      record.machineId = m.id;
+      attach(record, m).creating = true;
+    };
+    const notices: string[] = [];
+    report("fork-requested", "Fork of the golden image requested.");
+    try {
+      await fork(record, bind, undefined, report);
+    } catch (e) {
+      // A slot for work beats a builder kept for one more change: at the cap one kept builder of this setup is
+      // stopped and the fork tried again, the next one only on the next refusal; a refusal with none left to
+      // stop is the caller's to show. A held or foreign builder is never touched.
+      if (!isCapRefusal(e)) throw e;
+      let refusal: unknown = e;
+      let made = false;
+      await refreshBuilders();
+      for (const x of [...builders.values()].filter(x => (x.life === "own" || x.life === "reusable") && x.record.sealed !== undefined)) {
+        const stopped = `Stopped the builder kept from golden v${x.record.sealed!.version} (${x.record.id}) to make room at the machine cap.`;
+        graceTimers.get(x.record.id)?.();
+        graceTimers.delete(x.record.id);
+        await killUntilGone(backend, x.builder.machine, opts.killConfirm);
+        await forgetBuilder(x.record.id);
+        notices.push(stopped);
+        console.warn(`workspace ${record.id}: ${stopped.charAt(0).toLowerCase()}${stopped.slice(1, -1)}`);
+        report("fork-requested", "Fork of the golden image requested again.", stopped);
+        try {
+          await fork(record, bind, undefined, report);
+          made = true;
+          break;
+        } catch (again) {
+          if (!isCapRefusal(again)) throw again;
+          refusal = again;
+        }
+      }
+      if (!made) throw refusal;
+    }
+    const entry = live.get(id)!;
+    if (entry.machine.previewUrl) {
+      // A daemon that does not answer is reported, not fatal: the workspace exists either way, and the status check
+      // keeps asking and names a zombie. The route minted here is the one the ping and the first client reuse.
+      let fault: string | undefined;
+      try {
+        await until(entry.ws.daemonReach(), Date.now() + pingTimeoutMs, "preview route");
+        report("preview-route", "Preview route to the daemon minted.");
+        fault = await pingDaemon(entry);
+      } catch (e) {
+        fault = `preview route for ${entry.machine.id} not minted (${e instanceof Error ? e.message : String(e)})`;
+      }
+      report("daemon-answering", fault === undefined ? "Daemon answered through the edge." : "Daemon did not answer through the edge.", fault);
+    }
+    await persist(record);
+    delete entry.creating;
+    report("ready", "Ready.");
+    const v = view(record);
+    bus.emit({ type: "workspace.created", workspace: v });
+    return notices.length > 0 ? { ...v, notice: notices.join(" ") } : v;
   };
 
   const workspaces: Runtime["workspaces"] = {
     async create(o) {
       await ready();
-      const inherited = (await goldenVersionOf(o.golden))?.size;
-      const record: WorkspaceRecord = {
-        id: `ws_${randomBytes(4).toString("hex")}`,
-        name: o.name,
-        machineId: "",
-        phase: "running",
-        golden: o.golden,
-        createdAt: new Date().toISOString(),
-        spec: {
-          ...(o.envs !== undefined ? { envs: o.envs } : {}),
-          ...(o.labels !== undefined ? { labels: o.labels } : {}),
-        },
-        ...(o.idleWindowMs !== undefined ? { idleWindowMs: o.idleWindowMs } : {}),
-        size: {
-          cpu: o.cpu ?? inherited?.cpu ?? backend.pricing.defaultSize.cpu,
-          memMb: o.memMb ?? inherited?.memMb ?? backend.pricing.defaultSize.memMb,
-        },
-        firstLife: true,
+      const id = `ws_${randomBytes(4).toString("hex")}`;
+      const began = clock.now();
+      const report: StageReport = (stage, message, notice) => {
+        bus.emit({ type: "workspace.creating", workspaceId: id, name: o.name, stage, message, elapsedMs: clock.now() - began, ...(notice !== undefined ? { notice } : {}) });
       };
-      const bind = (m: Machine): void => {
-        record.machineId = m.id;
-        attach(record, m);
-      };
-      const notices: string[] = [];
       try {
-        await fork(record, bind);
+        return await createStaged(o, id, report);
       } catch (e) {
-        // A slot for work beats a builder kept for one more change: at the cap one kept builder of this setup is
-        // stopped and the fork tried again, the next one only on the next refusal; a refusal with none left to
-        // stop is the caller's to show. A held or foreign builder is never touched.
-        if (!isCapRefusal(e)) throw e;
-        let refusal: unknown = e;
-        let made = false;
-        await refreshBuilders();
-        for (const x of [...builders.values()].filter(x => (x.life === "own" || x.life === "reusable") && x.record.sealed !== undefined)) {
-          const stopped = `Stopped the builder kept from golden v${x.record.sealed!.version} (${x.record.id}) to make room at the machine cap.`;
-          graceTimers.get(x.record.id)?.();
-          graceTimers.delete(x.record.id);
-          await killUntilGone(backend, x.builder.machine, opts.killConfirm);
-          await forgetBuilder(x.record.id);
-          notices.push(stopped);
-          console.warn(`workspace ${record.id}: ${stopped.charAt(0).toLowerCase()}${stopped.slice(1, -1)}`);
-          try {
-            await fork(record, bind);
-            made = true;
-            break;
-          } catch (again) {
-            if (!isCapRefusal(again)) throw again;
-            refusal = again;
-          }
+        // A machine already forked goes with the failed create; the retry forks a fresh one.
+        const entry = live.get(id);
+        if (entry !== undefined) {
+          live.delete(id);
+          await entry.machine.kill().catch(() => {});
         }
-        if (!made) throw refusal;
+        report("failed", e instanceof Error ? e.message : String(e));
+        throw e;
       }
-      await persist(record);
-      const v = view(record);
-      bus.emit({ type: "workspace.created", workspace: v });
-      return notices.length > 0 ? { ...v, notice: notices.join(" ") } : v;
     },
 
     async get(id) {
@@ -1119,7 +1171,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async list() {
       await ready();
-      return [...live.values()].map(e => view(e.record));
+      return [...live.values()].filter(e => !e.creating).map(e => view(e.record));
     },
 
     async nap(id) {
@@ -1921,7 +1973,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     rateUsdPerHour: size => backend.pricing.rateUsdPerHour(size),
     records: async () => {
       await ready();
-      return [...live.values()].map(e => ({
+      return [...live.values()].filter(e => !e.creating).map(e => ({
         ...view(e.record),
         size: e.record.size,
         ...(e.record.phase === "running" && idle.idleAt(e.record.id) !== undefined ? { idleAt: idle.idleAt(e.record.id)! } : {}),

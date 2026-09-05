@@ -152,6 +152,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --animate-status-pulse: status-pulse 2s infinite;
   --animate-ghost-pulse: ghost-pulse 2.4s infinite;
   --animate-status-ping: status-ping 2s infinite;
+  --animate-squiggle: squiggle 0.9s linear infinite;
   --color-warning-foreground: var(--warning-foreground);
   --color-warning: var(--warning);
   --color-warning-surface: var(--warning-surface);
@@ -249,6 +250,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
     }
     100% {
       opacity: 1;
+    }
+  }
+  @keyframes squiggle {
+    /* One wave period, so the loop is seamless and stays on the compositor. */
+    to {
+      transform: translateX(-24px);
     }
   }
   @keyframes status-ping {

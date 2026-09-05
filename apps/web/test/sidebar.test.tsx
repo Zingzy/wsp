@@ -8,6 +8,7 @@ import type { SessionView, WorkspaceStatus, WorkspaceView } from "@wsp/protocol"
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
+import { onNewThreadRequest } from "../src/shell/shellRequests.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 
 const NOW = Date.now();
@@ -74,7 +75,7 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
 
 beforeEach(() => {
   window.localStorage.clear();
-  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, sessions: {}, ready: false });
+  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, creations: [], sessions: {}, ready: false });
 });
 
 async function mount(api: FakeApi, firstName: string) {
@@ -199,6 +200,44 @@ describe("rows from the fixture wire", () => {
   });
 });
 
+describe("new thread", () => {
+  it("the plus on a workspace row raises a new-thread request for that workspace and selects it", async () => {
+    await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_a", { prompt: "hello" })]), "api");
+    const seen: string[] = [];
+    const off = onNewThreadRequest(d => seen.push(d.workspaceId));
+    fireEvent.click(rowOf("api"));
+    expect(useStore.getState().selectedId).toBe("ws_a");
+    fireEvent.click(screen.getByRole("button", { name: "New thread in web" }));
+    expect(seen).toEqual(["ws_b"]);
+    expect(useStore.getState().selectedId).toBe("ws_b");
+    // The collapse chevron keeps its slot beside the plus on a row with threads.
+    expect(screen.getByRole("button", { name: "New thread in api" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Collapse api" })).toBeDefined();
+    off();
+  });
+
+  it("a workspace with no threads says so under its row, and the line starts a thread too", async () => {
+    await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_a", { prompt: "hello" })]), "api");
+    const seen: string[] = [];
+    const off = onNewThreadRequest(d => seen.push(d.workspaceId));
+    const item = (row: HTMLElement) => row.closest<HTMLElement>('[data-sidebar="menu-item"]')!;
+    const line = screen.getByText(/No threads yet/);
+    // Flowing text, not a truncating row: the sentence wraps rather than cuts at a narrow sidebar.
+    expect(line.className).not.toMatch(/truncate|whitespace-nowrap/);
+    expect(item(line)).toBe(item(rowOf("web")));
+    expect(within(item(rowOf("api"))).queryByText(/No threads yet/)).toBeNull();
+    fireEvent.click(within(line).getByRole("button", { name: /New thread/ }));
+    expect(seen).toEqual(["ws_b"]);
+    off();
+  });
+
+  it("a zombie row offers the rebuild and no new thread", async () => {
+    await mount(fakeApi([API], [status(API, { reach: { state: "zombie" } })]), "api");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Rebuild api" })).toBeDefined());
+    expect(screen.queryByRole("button", { name: "New thread in api" })).toBeNull();
+  });
+});
+
 describe("search", () => {
   it("narrows threads by title and keeps workspaces whose name matches", async () => {
     await mount(
@@ -266,7 +305,7 @@ describe("new workspace dialog", () => {
     expect(useStore.getState().toast).toBe("Stopped the builder kept from golden v1 (m1) to make room at the machine cap.");
   });
 
-  it("offers a default name, creates on Enter, shows a pending row until workspace.created, then selects it", async () => {
+  it("offers a default name, creates on Enter, selects the creating row, shows its current stage whole, and swaps to the workspace on workspace.created", async () => {
     let finish!: (w: WorkspaceView) => void;
     const api = fakeApi([API], [status(API)]);
     api.createFromGoldenHead = vi.fn(() => new Promise<WorkspaceView>(resolve => { finish = resolve; }));
@@ -278,29 +317,47 @@ describe("new workspace dialog", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(api.createFromGoldenHead).toHaveBeenCalledWith("beta");
     const pending = await screen.findByText("beta");
-    expect(pending.closest("[data-sidebar-row]")!.getAttribute("aria-busy")).toBe("true");
+    const row = pending.closest<HTMLElement>("[data-sidebar-row]")!;
+    expect(row.getAttribute("aria-busy")).toBe("true");
+    expect(row.getAttribute("data-active")).toBe("true");
+    expect(useStore.getState().selectedId).toMatch(/^creating:/);
+    const stage = { type: "workspace.creating" as const, workspaceId: "ws_beta", name: "beta", elapsedMs: 0 };
+    act(() => useStore.getState().applyEvent({ ...stage, stage: "fork-requested", message: "Fork of the golden image requested." }));
+    act(() => useStore.getState().applyEvent({ ...stage, stage: "machine-booting", message: "Machine m7 is booting.", elapsedMs: 4_200 }));
+    const line = within(rowOf("beta")).getByText("Machine m7 is booting.");
+    expect(line.className).toContain("whitespace-normal");
+    expect(line.className).not.toContain("truncate");
+    expect(within(rowOf("beta")).queryByText("Fork of the golden image requested.")).toBeNull();
     const created = view("ws_beta", "beta");
-    await act(async () => { finish(created); });
-    expect(screen.getByText("beta").closest("[data-sidebar-row]")!.getAttribute("aria-busy")).toBe("true");
     act(() => useStore.getState().applyEvent({ type: "workspace.created", workspace: created }));
     await waitFor(() => expect(rowOf("beta").getAttribute("aria-busy")).toBeNull());
-    expect(screen.getAllByText("beta").length).toBe(1);
+    expect(rowOf("beta").getAttribute("data-active")).toBe("true");
     expect(useStore.getState().selectedId).toBe("ws_beta");
+    expect(useStore.getState().creations).toEqual([]);
+    await act(async () => { finish(created); });
+    expect(screen.getAllByText("beta").length).toBe(1);
+    expect(useStore.getState().workspaces.filter(w => w.id === "ws_beta")).toHaveLength(1);
   });
 
-  it("a refusal reopens the dialog with the name kept and the provider cap explained inline", async () => {
+  it("a refusal keeps the row, names the refusal on it, and reopens no dialog", async () => {
     const api = fakeApi([API], [status(API)]);
     api.createFromGoldenHead = vi.fn(async () => { throw new RequestError("Sandbox limit reached", "concurrency"); });
     await mount(api, "api");
     const { input } = await openDialog();
     fireEvent.change(input, { target: { value: "gamma" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toMatch(/machine cap/i);
-    expect(alert.textContent).toContain("Sandbox limit reached");
-    expect((within(screen.getByRole("dialog")).getByLabelText("Name") as HTMLInputElement).value).toBe("gamma");
-    expect(screen.queryByText("gamma", { selector: "[data-sidebar-row] *" })).toBeNull();
+    await waitFor(() => expect(rowOf("gamma").textContent).toMatch(/machine cap/i));
+    expect(rowOf("gamma").getAttribute("aria-busy")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(useStore.getState().toast).toBeNull();
+    // The next default name skips the row that is still there.
+    fireEvent.click(screen.getByRole("button", { name: "New workspace" }));
+    const again = within(await screen.findByRole("dialog")).getByLabelText("Name") as HTMLInputElement;
+    expect(again.value).toBe("workspace-1");
+    fireEvent.change(again, { target: { value: "gamma" } });
+    fireEvent.keyDown(again, { key: "Enter" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(useStore.getState().creations.map(c => c.name)).toEqual(["gamma", "gamma"]);
   });
 
   it("Escape cancels without creating; a blank name cannot be submitted", async () => {

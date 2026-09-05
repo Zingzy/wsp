@@ -3,13 +3,53 @@
 // contract components code against.
 import { useEffect } from "react";
 import { create } from "zustand";
-import type { Capabilities, PortForward, SessionView, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
-import { DisconnectedError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
+import type { Capabilities, PortForward, SessionView, WorkspaceCreateStage, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
 
 export interface CostTick {
   rateUsdPerHour: number;
   accruedUsd: number;
   at: string;
+}
+
+/** One line of a create's stage log, stamped with the wall clock when it arrived here. */
+export interface CreationLine {
+  readonly stage: WorkspaceCreateStage;
+  readonly message: string;
+  readonly at: string;
+  readonly elapsedMs: number;
+  readonly notice?: string;
+}
+
+/** A workspace being created: the sidebar row and the center view read it until workspace.created replaces it. */
+export interface Creation {
+  /** What select() takes for it; stable from the click through the runtime's first stage event. */
+  readonly key: string;
+  readonly name: string;
+  /** The id the runtime minted, known from its first stage event. */
+  readonly workspaceId: string | null;
+  readonly lines: ReadonlyArray<CreationLine>;
+  /** Set once the create was refused; the lines keep the failing one. */
+  readonly failed: CreateRefusal | null;
+}
+
+export interface CreateRefusal {
+  readonly title: string;
+  readonly detail: string;
+}
+
+export function explainCreateRefusal(error: unknown): CreateRefusal {
+  const message = error instanceof Error ? error.message : String(error);
+  if (error instanceof RequestError && error.kind === "concurrency") {
+    return {
+      title: "The provider refused: machine cap reached",
+      detail: "Your machine provider runs a fixed number of machines at once and every slot is taken. A builder kept after a save and not in use is stopped first to make room; pause or delete a workspace to free one, then try again.",
+    };
+  }
+  if (error instanceof DisconnectedError) {
+    return { title: "Not connected to the runtime", detail: message };
+  }
+  return { title: "Could not create the workspace", detail: message };
 }
 
 interface State {
@@ -26,7 +66,9 @@ interface State {
   /** Guest ports the host forwards to localhost here, from the host's list and its forward events. */
   forwards: PortForward[];
   toast: string | null;
+  /** A workspace id, or a creation's key while that create runs. */
   selectedId: string | null;
+  creations: Creation[];
   sessions: Record<string, SessionView[]>;
   ready: boolean;
   /** How many reconnects the runtime could not replay events for; anything built from sessions.history reloads when it moves. */
@@ -36,6 +78,11 @@ interface State {
   /** Mirrors the client's status; live with an api bound pulls list and statuses again so a reconnect converges. */
   setConn(conn: ConnStatus): void;
   select(id: string | null): void;
+  /** Starts a create from the golden head, selects its row, and follows it through the stage events. */
+  createWorkspace(name: string): Promise<void>;
+  /** Runs a failed creation again under the same row. */
+  retryCreation(key: string): Promise<void>;
+  dismissCreation(key: string): void;
   refresh(): Promise<void>;
   /** Optimistic nap/wake: paint now, reconcile on the event, revert + toast on failure. */
   toggle(id: string): Promise<void>;
@@ -57,7 +104,39 @@ function groupSessions(rows: SessionView[]): Record<string, SessionView[]> {
   return out;
 }
 
+const NO_LINES: CreationLine[] = [];
+let creationSeq = 0;
+
 export const useStore = create<State>((set, get) => {
+  const patchCreation = (key: string, patch: (c: Creation) => Creation): void => {
+    set(s => ({ creations: s.creations.map(c => (c.key === key ? patch(c) : c)) }));
+  };
+  /** The row leaves with its workspace in place of it; the selection follows. */
+  const finishCreation = (key: string, workspaceId: string): void => {
+    set(s => ({
+      creations: s.creations.filter(c => c.key !== key),
+      selectedId: s.selectedId === key ? workspaceId : s.selectedId,
+    }));
+  };
+  const runCreation = async (key: string, name: string): Promise<void> => {
+    const api = get().api;
+    if (!api) return;
+    try {
+      const { notice, ...workspace } = await api.createFromGoldenHead(name);
+      if (notice !== undefined) set({ toast: notice });
+      // The created event normally lands first; when the reply beats it, the row still has a workspace to become.
+      set(s => (s.workspaces.some(w => w.id === workspace.id) ? {} : { workspaces: [...s.workspaces, workspace].sort((a, b) => a.id.localeCompare(b.id)) }));
+      finishCreation(key, workspace.id);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      patchCreation(key, c => ({
+        ...c,
+        failed: explainCreateRefusal(e),
+        lines: c.lines.at(-1)?.stage === "failed" ? c.lines : [...c.lines, { stage: "failed", message, at: new Date().toISOString(), elapsedMs: c.lines.at(-1)?.elapsedMs ?? 0 }],
+      }));
+    }
+  };
+
   // wake-via-resurrect and upgrade replace the machine, so those events carry a new machineId
   const setPhase = (id: string, phase: WorkspacePhase, machineId?: string): void => {
     const patch = { phase, ...(machineId !== undefined ? { machineId } : {}) };
@@ -106,6 +185,7 @@ export const useStore = create<State>((set, get) => {
     forwards: [],
     toast: null,
     selectedId: null,
+    creations: [],
     sessions: {},
     ready: false,
     gaps: 0,
@@ -125,6 +205,24 @@ export const useStore = create<State>((set, get) => {
       if (conn === "live" && api) pull(api);
     },
     select(id) { set({ selectedId: id }); },
+    async createWorkspace(name) {
+      if (!get().api) return;
+      const key = `creating:${++creationSeq}`;
+      set(s => ({ creations: [...s.creations, { key, name, workspaceId: null, lines: NO_LINES, failed: null }], selectedId: key }));
+      await runCreation(key, name);
+    },
+    async retryCreation(key) {
+      const creation = get().creations.find(c => c.key === key);
+      if (!creation) return;
+      patchCreation(key, c => ({ ...c, workspaceId: null, lines: NO_LINES, failed: null }));
+      await runCreation(key, creation.name);
+    },
+    dismissCreation(key) {
+      set(s => ({
+        creations: s.creations.filter(c => c.key !== key),
+        selectedId: s.selectedId === key ? s.workspaces[0]?.id ?? null : s.selectedId,
+      }));
+    },
     async refresh() {
       const api = get().api;
       if (!api) return;
@@ -186,10 +284,30 @@ export const useStore = create<State>((set, get) => {
         case "forward.close":
           set(s => ({ forwards: s.forwards.filter(f => !(f.workspaceId === e.workspaceId && f.port === e.port)) }));
           return;
+        case "workspace.creating": {
+          const line: CreationLine = { stage: e.stage, message: e.message, at: new Date().toISOString(), elapsedMs: e.elapsedMs, ...(e.notice !== undefined ? { notice: e.notice } : {}) };
+          set(s => {
+            // Ours is matched by the id once known, before that by the name it was asked for; another client's create shows up
+            // too. Two clients creating the same name at once can swap logs until the reply lands, and workspace.created
+            // settles which row is whose; the runtime's id is not known here any earlier than its first stage.
+            const own = s.creations.find(c => c.workspaceId === e.workspaceId) ?? s.creations.find(c => c.workspaceId === null && c.name === e.name && c.failed === null);
+            const failed = e.stage === "failed" ? { title: "Could not create the workspace", detail: e.message } : null;
+            if (own === undefined) {
+              return { creations: [...s.creations, { key: `creating:${e.workspaceId}`, name: e.name, workspaceId: e.workspaceId, lines: [line], failed }] };
+            }
+            return { creations: s.creations.map(c => (c === own ? { ...c, workspaceId: e.workspaceId, lines: [...c.lines, line], failed: c.failed ?? failed } : c)) };
+          });
+          return;
+        }
         case "workspace.created":
           set(s => {
             const rest = s.workspaces.filter(x => x.id !== e.workspace.id);
-            return { workspaces: [...rest, e.workspace].sort((a, b) => a.id.localeCompare(b.id)) };
+            const creation = s.creations.find(c => c.workspaceId === e.workspace.id);
+            return {
+              workspaces: [...rest, e.workspace].sort((a, b) => a.id.localeCompare(b.id)),
+              creations: s.creations.filter(c => c !== creation),
+              selectedId: creation !== undefined && s.selectedId === creation.key ? e.workspace.id : s.selectedId,
+            };
           });
           return;
         // napped/woken carry only ids; they are also the optimistic toggle's reconcile.
@@ -241,6 +359,13 @@ export const useStore = create<State>((set, get) => {
 });
 
 export function useSelectedId(): string | null { return useStore(s => s.selectedId); }
+/** The selected workspace's id, or null while a creation row is selected: no command may act on a creation's key. */
+export function useSelectedWorkspaceId(): string | null {
+  return useStore(s => (s.selectedId !== null && s.creations.some(c => c.key === s.selectedId) ? null : s.selectedId));
+}
+export function useCreation(key: string | null): Creation | null {
+  return useStore(s => (key ? s.creations.find(c => c.key === key) ?? null : null));
+}
 export function useWorkspace(id: string | null): WorkspaceView | null {
   return useStore(s => (id ? s.workspaces.find(w => w.id === id) ?? null : null));
 }

@@ -9,6 +9,7 @@ import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { RIGHT_PANEL_WIDTH_STORAGE_KEY, useRightPanelStore } from "../src/rightPanelStore.js";
 import { AppShell } from "../src/shell/AppShell.js";
+import { onNewThreadRequest } from "../src/shell/shellRequests.js";
 
 const view = (id: string, name: string): WorkspaceView => ({
   id,
@@ -82,6 +83,17 @@ describe("app shell", () => {
     expect(screen.getByText("center content")).toBeTruthy();
     expect(tabbar()).not.toBeNull();
     expect(screen.getByText("Open a surface")).toBeTruthy();
+  });
+
+  it("the header's new-thread button raises the request for the selected workspace", async () => {
+    await mountShell();
+    const seen: string[] = [];
+    const off = onNewThreadRequest(d => seen.push(d.workspaceId));
+    fireEvent.click(screen.getByRole("button", { name: "New thread" }));
+    expect(seen).toEqual(["ws_a"]);
+    off();
+    act(() => useStore.getState().select(null));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "New thread" })).toBeNull());
   });
 
   it("toggles the right panel from the layout control", async () => {

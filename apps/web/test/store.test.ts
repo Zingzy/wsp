@@ -3,7 +3,7 @@
 // session.* events decide when to refetch and what to patch in between.
 import { beforeEach, describe, expect, it } from "vitest";
 import type { SessionView, WorkspaceView } from "@wsp/protocol";
-import { DisconnectedError, type Api, type ProtocolEvent } from "../src/protocol/client.js";
+import { DisconnectedError, RequestError, type Api, type ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 
 const view = (id: string): WorkspaceView => ({
@@ -65,7 +65,116 @@ function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
 const flush = () => new Promise(r => setTimeout(r, 0));
 
 beforeEach(() => {
-  useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, sessions: {}, ready: false, gaps: 0 });
+  useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, creations: [], sessions: {}, ready: false, gaps: 0 });
+});
+
+describe("store creations", () => {
+  const stage = (over: Partial<Extract<ProtocolEvent, { type: "workspace.creating" }>> = {}): ProtocolEvent => ({
+    type: "workspace.creating",
+    workspaceId: "ws_new",
+    name: "beta",
+    stage: "fork-requested",
+    message: "Fork of the golden image requested.",
+    elapsedMs: 0,
+    ...over,
+  });
+
+  it("createWorkspace adds a selected row, adopts the runtime's id from the first stage by name, logs each stage, and swaps to the workspace when created", async () => {
+    const workspaces = [view("ws_a")];
+    const { api, emit } = fakeApi(workspaces, []);
+    let finish!: (w: WorkspaceView) => void;
+    api.createFromGoldenHead = () => new Promise<WorkspaceView>(resolve => { finish = resolve; });
+    useStore.getState().bind(api);
+    await flush();
+    const done = useStore.getState().createWorkspace("beta");
+    const [creation] = useStore.getState().creations;
+    expect(creation).toMatchObject({ name: "beta", workspaceId: null, lines: [], failed: null });
+    expect(useStore.getState().selectedId).toBe(creation!.key);
+
+    emit(stage());
+    emit(stage({ stage: "machine-booting", message: "Machine m1 is booting.", elapsedMs: 1_500, notice: "Stopped the builder kept from golden v1 (m0) to make room at the machine cap." }));
+    const logged = useStore.getState().creations[0]!;
+    expect(logged.workspaceId).toBe("ws_new");
+    expect(logged.lines.map(l => [l.stage, l.message, l.elapsedMs, l.notice])).toEqual([
+      ["fork-requested", "Fork of the golden image requested.", 0, undefined],
+      ["machine-booting", "Machine m1 is booting.", 1_500, "Stopped the builder kept from golden v1 (m0) to make room at the machine cap."],
+    ]);
+    expect(logged.lines.every(l => !Number.isNaN(Date.parse(l.at)))).toBe(true);
+
+    emit({ type: "workspace.created", workspace: view("ws_new") });
+    expect(useStore.getState().creations).toEqual([]);
+    expect(useStore.getState().selectedId).toBe("ws_new");
+    expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_a", "ws_new"]);
+    finish(view("ws_new"));
+    await done;
+    expect(useStore.getState().creations).toEqual([]);
+  });
+
+  it("a reply that lands before the created event finishes the row from the reply, and carries its notice as the toast", async () => {
+    const { api, emit } = fakeApi([view("ws_a")], []);
+    api.createFromGoldenHead = async () => ({ ...view("ws_new"), notice: "Stopped the builder kept from golden v1 (m0) to make room at the machine cap." });
+    useStore.getState().bind(api);
+    await flush();
+    await useStore.getState().createWorkspace("beta");
+    expect(useStore.getState().creations).toEqual([]);
+    expect(useStore.getState().selectedId).toBe("ws_new");
+    expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_a", "ws_new"]);
+    expect(useStore.getState().toast).toBe("Stopped the builder kept from golden v1 (m0) to make room at the machine cap.");
+    emit({ type: "workspace.created", workspace: view("ws_new") });
+    expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_a", "ws_new"]);
+  });
+
+  it("a refusal keeps the row with the failing line and the explanation; retry starts the same name over under the same key; dismiss drops it", async () => {
+    const { api, emit } = fakeApi([view("ws_a")], []);
+    const calls: string[] = [];
+    api.createFromGoldenHead = async name => {
+      calls.push(name);
+      if (calls.length === 1) {
+        emit(stage());
+        emit(stage({ stage: "failed", message: "Sandbox limit reached (2)", elapsedMs: 900 }));
+        throw new RequestError("Sandbox limit reached (2)", "concurrency");
+      }
+      return view("ws_new");
+    };
+    useStore.getState().bind(api);
+    await flush();
+    await useStore.getState().createWorkspace("beta");
+    const failed = useStore.getState().creations[0]!;
+    expect(failed.failed?.title).toBe("The provider refused: machine cap reached");
+    expect(failed.lines.map(l => l.stage)).toEqual(["fork-requested", "failed"]);
+    expect(useStore.getState().selectedId).toBe(failed.key);
+
+    await useStore.getState().retryCreation(failed.key);
+    expect(calls).toEqual(["beta", "beta"]);
+    expect(useStore.getState().creations).toEqual([]);
+    expect(useStore.getState().selectedId).toBe("ws_new");
+
+    api.createFromGoldenHead = async () => { throw new Error("no golden image yet"); };
+    await useStore.getState().createWorkspace("gamma");
+    const again = useStore.getState().creations[0]!;
+    expect(again.failed).toEqual({ title: "Could not create the workspace", detail: "no golden image yet" });
+    // No failed stage arrived, so the refusal is the failing line.
+    expect(again.lines.map(l => [l.stage, l.message])).toEqual([["failed", "no golden image yet"]]);
+    useStore.getState().dismissCreation(again.key);
+    expect(useStore.getState().creations).toEqual([]);
+    expect(useStore.getState().selectedId).toBe("ws_a");
+  });
+
+  it("a create another client started shows up from its stage events and leaves on created without moving the selection", async () => {
+    const { api, emit } = fakeApi([view("ws_a")], []);
+    useStore.getState().bind(api);
+    await flush();
+    expect(useStore.getState().selectedId).toBe("ws_a");
+    emit(stage({ workspaceId: "ws_far", name: "far" }));
+    emit(stage({ workspaceId: "ws_far", name: "far", stage: "machine-booting", message: "Machine m9 is booting." }));
+    expect(useStore.getState().creations).toEqual([expect.objectContaining({ key: "creating:ws_far", name: "far", workspaceId: "ws_far", failed: null })]);
+    expect(useStore.getState().creations[0]!.lines).toHaveLength(2);
+    emit(stage({ workspaceId: "ws_far", name: "far", stage: "failed", message: "boom" }));
+    expect(useStore.getState().creations[0]!.failed).toEqual({ title: "Could not create the workspace", detail: "boom" });
+    emit({ type: "workspace.created", workspace: view("ws_far") });
+    expect(useStore.getState().creations).toEqual([]);
+    expect(useStore.getState().selectedId).toBe("ws_a");
+  });
 });
 
 describe("store sessions", () => {

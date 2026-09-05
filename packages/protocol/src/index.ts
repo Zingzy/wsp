@@ -238,6 +238,22 @@ export type SessionEvent = z.infer<typeof SessionEvent>;
 // --- workspace / port / inbox events ----------------------------------------
 
 export const WorkspaceCreatedEvent = z.object({ type: z.literal("workspace.created"), workspace: WorkspaceView });
+/** The awaited steps of a create in the order the runtime reaches them; `failed` ends a create that threw. */
+export const WorkspaceCreateStage = z.enum(["fork-requested", "machine-booting", "hostname-set", "preview-route", "daemon-answering", "ready", "failed"]);
+export type WorkspaceCreateStage = z.infer<typeof WorkspaceCreateStage>;
+/** Progress of one create, from the first request to ready or failed: the id the workspace will carry, its name, one
+ * plain sentence per stage, the time since the create began, and a notice when a step did something worth reading
+ * (a kept builder was stopped to make room at the machine cap). */
+export const WorkspaceCreatingEvent = z.object({
+  type: z.literal("workspace.creating"),
+  workspaceId: z.string(),
+  name: z.string(),
+  stage: WorkspaceCreateStage,
+  message: z.string(),
+  elapsedMs: z.number(),
+  notice: z.string().optional(),
+});
+export type WorkspaceCreatingEvent = z.infer<typeof WorkspaceCreatingEvent>;
 export const WorkspaceNappedEvent = z.object({ type: z.literal("workspace.napped"), workspaceId: z.string() });
 export const WorkspaceWokenEvent = z.object({
   type: z.literal("workspace.woken"),
@@ -406,6 +422,7 @@ export const ForwardCloseEvent = z.object({ type: z.literal("forward.close"), wo
 export type ForwardEvent = z.infer<typeof ForwardOpenEvent> | z.infer<typeof ForwardCloseEvent>;
 
 export const EventUnion = z.discriminatedUnion("type", [
+  WorkspaceCreatingEvent.extend(sequenced),
   WorkspaceCreatedEvent.extend(sequenced),
   WorkspaceNappedEvent.extend(sequenced),
   WorkspaceWokenEvent.extend(sequenced),

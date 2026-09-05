@@ -10,12 +10,12 @@ import { resolveShortcutCommand } from "../keybindings.js";
 import type { ResolvedKeybindingsConfig } from "../keybindingTypes.js";
 import { isPreviewFocused } from "../lib/previewFocus.js";
 import { isTerminalFocused } from "../lib/terminalFocus.js";
-import { useSelectedId } from "../protocol/store.js";
+import { useSelectedWorkspaceId } from "../protocol/store.js";
 import { runShellCommand, type ShellCommandTarget } from "./shellCommands.js";
 
 export function KeybindingDispatcher({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: { keybindings?: ResolvedKeybindingsConfig }) {
   const { toggleSidebar } = useSidebar();
-  const workspaceId = useSelectedId();
+  const workspaceId = useSelectedWorkspaceId();
   const target = useRef<ShellCommandTarget>({ workspaceId, toggleSidebar });
   target.current = { workspaceId, toggleSidebar };
 

@@ -24,11 +24,14 @@ import {
   SidebarMenuSubItem,
 } from "../components/ui/sidebar.js";
 import { Spinner } from "../components/ui/spinner.js";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { useLocalStorage, type Codec } from "../hooks/useLocalStorage.js";
 import { useNowMinute } from "../hooks/useNowMinute.js";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
+import { shortcutLabelForCommand } from "../keybindings.js";
 import { cn } from "../lib/utils.js";
-import { useSelectedId, useStore } from "../protocol/store.js";
-import { onNewWorkspaceRequest } from "../shell/shellRequests.js";
+import { useSelectedId, useStore, type Creation } from "../protocol/store.js";
+import { onNewWorkspaceRequest, requestNewThread } from "../shell/shellRequests.js";
 import { ForwardsList } from "./ForwardsList.js";
 import { NewWorkspaceDialog } from "./NewWorkspaceDialog.js";
 import { ProjectFavicon } from "./ProjectFavicon.js";
@@ -47,15 +50,15 @@ import {
   costLabel,
   defaultWorkspaceName,
   dotClassForTone,
-  explainCreateRefusal,
   idleCountdownLabel,
   threadPill,
   reachNote,
   textClassForTone,
-  type CreateRefusal,
 } from "./workspaceRows.js";
 
 const SETTLED_EXPANDED_KEY = "wsp:sidebar-settled-expanded";
+const NEW_THREAD_SHORTCUT = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "chat.new");
+const NEW_THREAD_TITLE = NEW_THREAD_SHORTCUT ? `New thread (${NEW_THREAD_SHORTCUT})` : "New thread";
 const booleanCodec: Codec<boolean> = {
   decode: raw => JSON.parse(raw) === true,
   encode: value => JSON.stringify(value),
@@ -82,16 +85,9 @@ function visibleProjects(projects: ReadonlyArray<SidebarProjectSnapshot>, query:
   return out;
 }
 
-interface PendingCreate {
-  readonly name: string;
-  /** Set once the runtime answered; the row clears when that id shows up in the list. */
-  readonly id: string | null;
-}
-
 interface DialogState {
   readonly key: number;
   readonly name: string;
-  readonly error: CreateRefusal | null;
 }
 
 export function WorkspaceSidebar() {
@@ -103,6 +99,8 @@ export function WorkspaceSidebar() {
   const toast = useStore(s => s.toast);
   const clearToast = useStore(s => s.clearToast);
   const select = useStore(s => s.select);
+  const creations = useStore(s => s.creations);
+  const createWorkspace = useStore(s => s.createWorkspace);
   const selectedId = useSelectedId();
   const nowMinute = useNowMinute();
   // One clock sample per minute tick so every idle countdown reads the same now.
@@ -111,7 +109,6 @@ export function WorkspaceSidebar() {
   const [query, setQuery] = useState("");
   const [settledExpanded, setSettledExpanded] = useLocalStorage(SETTLED_EXPANDED_KEY, true, booleanCodec);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
-  const [pending, setPending] = useState<PendingCreate | null>(null);
   const [dialog, setDialog] = useState<DialogState | null>(null);
   /** Workspace id to the machine id a rebuild was asked for; the action stays disabled while that machine is still the one reported. */
   const [rebuilding, setRebuilding] = useState<Readonly<Record<string, string>>>({});
@@ -121,32 +118,16 @@ export function WorkspaceSidebar() {
   const searching = query.trim().length > 0;
   const visible = useMemo(() => visibleProjects(projects, query), [projects, query]);
 
-  useEffect(() => {
-    if (pending?.id && workspaces.some(w => w.id === pending.id)) {
-      setPending(null);
-      select(pending.id);
-    }
-  }, [pending, workspaces, select]);
-
   const openDialog = (): void => {
-    setDialog({ key: Date.now(), name: defaultWorkspaceName(workspaces.map(w => w.name)), error: null });
+    setDialog({ key: Date.now(), name: defaultWorkspaceName([...workspaces.map(w => w.name), ...creations.map(c => c.name)]) });
   };
   const openDialogRef = useRef(openDialog);
   openDialogRef.current = openDialog;
   useEffect(() => onNewWorkspaceRequest(() => openDialogRef.current()), []);
 
-  const create = async (name: string): Promise<void> => {
-    if (!api) return;
+  const create = (name: string): void => {
     setDialog(null);
-    setPending({ name, id: null });
-    try {
-      const created = await api.createFromGoldenHead(name);
-      setPending(p => (p && p.name === name ? { ...p, id: created.id } : p));
-      if (created.notice !== undefined) useStore.setState({ toast: created.notice });
-    } catch (e) {
-      setPending(null);
-      setDialog({ key: Date.now(), name, error: explainCreateRefusal(e) });
-    }
+    void createWorkspace(name);
   };
 
   const rebuild = async (project: SidebarProjectSnapshot): Promise<void> => {
@@ -159,6 +140,11 @@ export function WorkspaceSidebar() {
       setRebuilding(({ [project.id]: _dropped, ...rest }) => rest);
       useStore.setState({ toast: `${project.displayName}: ${e instanceof Error ? e.message : String(e)}` });
     }
+  };
+
+  const newThread = (id: string): void => {
+    requestNewThread({ workspaceId: id });
+    select(id);
   };
 
   const toggleCollapsed = (id: string): void => {
@@ -245,6 +231,7 @@ export function WorkspaceSidebar() {
                     .filter((part): part is string => part !== null)
                     .join(" · ");
                   const showThreads = !isCollapsed && active.length + settled.length > 0;
+                  const collapsible = project.threads.length > 0 && !searching;
                   return (
                     <SidebarMenuItem key={project.id}>
                       <SidebarMenuButton
@@ -252,6 +239,7 @@ export function WorkspaceSidebar() {
                         isActive={selectedId === project.id}
                         data-sidebar-row
                         data-row-id={`ws:${project.id}`}
+                        className={cn(!zombie && collapsible && "group-has-data-[sidebar=menu-action]/menu-item:pe-14")}
                         onClick={() => select(project.id)}
                       >
                         <span
@@ -277,14 +265,43 @@ export function WorkspaceSidebar() {
                         >
                           <RefreshCwIcon className={cn(rebuildAsked && "animate-spin")} />
                         </SidebarMenuAction>
-                      ) : project.threads.length > 0 && !searching ? (
-                        <SidebarMenuAction
-                          showOnHover
-                          aria-label={isCollapsed ? `Expand ${project.displayName}` : `Collapse ${project.displayName}`}
-                          onClick={() => toggleCollapsed(project.id)}
-                        >
-                          <ChevronDownIcon className={cn("transition-transform", isCollapsed && "-rotate-90")} />
-                        </SidebarMenuAction>
+                      ) : (
+                        <>
+                          {collapsible ? (
+                            <SidebarMenuAction
+                              showOnHover
+                              className="right-6"
+                              aria-label={isCollapsed ? `Expand ${project.displayName}` : `Collapse ${project.displayName}`}
+                              onClick={() => toggleCollapsed(project.id)}
+                            >
+                              <ChevronDownIcon className={cn("transition-transform", isCollapsed && "-rotate-90")} />
+                            </SidebarMenuAction>
+                          ) : null}
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={<SidebarMenuAction showOnHover aria-label={`New thread in ${project.displayName}`} onClick={() => newThread(project.id)} />}
+                            >
+                              <PlusIcon />
+                            </TooltipTrigger>
+                            <TooltipPopup side="bottom">{NEW_THREAD_TITLE}</TooltipPopup>
+                          </Tooltip>
+                        </>
+                      )}
+                      {!zombie && project.threads.length === 0 && !searching ? (
+                        <SidebarMenuSub>
+                          <SidebarMenuSubItem data-thread-selection-safe>
+                            <span className="block min-h-8 px-2 py-2 text-[11px] leading-4 text-muted-foreground">
+                              No threads yet.{" "}
+                              <button
+                                type="button"
+                                onClick={() => newThread(project.id)}
+                                className="cursor-pointer rounded-sm outline-hidden ring-ring hover:text-sidebar-foreground focus-visible:ring-2"
+                              >
+                                New thread {NEW_THREAD_SHORTCUT}
+                              </button>
+                            </span>
+                          </SidebarMenuSubItem>
+                        </SidebarMenuSub>
                       ) : null}
                       {showThreads ? (
                         <SidebarMenuSub>
@@ -324,19 +341,11 @@ export function WorkspaceSidebar() {
                     </SidebarMenuItem>
                   );
                 })}
-                {pending ? (
-                  <SidebarMenuItem>
-                    <SidebarMenuButton size="lg" disabled aria-busy="true" data-sidebar-row data-row-id="pending">
-                      <Spinner className="size-3.5" />
-                      <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
-                        <span className="truncate text-sidebar-foreground">{pending.name}</span>
-                        <span className="truncate text-[11px] font-normal text-sidebar-muted-foreground">Creating a machine from the golden image</span>
-                      </span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ) : null}
+                {creations.map(creation => (
+                  <CreationRow key={creation.key} creation={creation} active={selectedId === creation.key} onSelect={() => select(creation.key)} />
+                ))}
               </SidebarMenu>
-              {visible.length === 0 && !pending ? (
+              {visible.length === 0 && creations.length === 0 ? (
                 <Empty className="py-8">
                   <EmptyHeader>
                     <EmptyTitle>{searching ? "No matches" : "No workspaces yet"}</EmptyTitle>
@@ -367,12 +376,40 @@ export function WorkspaceSidebar() {
         <NewWorkspaceDialog
           key={dialog.key}
           initialName={dialog.name}
-          error={dialog.error}
-          onCreate={name => void create(name)}
+          onCreate={create}
           onCancel={() => setDialog(null)}
         />
       ) : null}
     </>
+  );
+}
+
+/** A workspace still being created: the spinner and the runtime's latest stage, wrapped rather than cut at the sidebar's width. */
+function CreationRow({ creation, active, onSelect }: { creation: Creation; active: boolean; onSelect: () => void }) {
+  const failed = creation.failed !== null;
+  const line = failed ? creation.failed.title : creation.lines.at(-1)?.message ?? "Asking the runtime for a fork.";
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        size="lg"
+        isActive={active}
+        aria-busy={failed ? undefined : "true"}
+        data-sidebar-row
+        data-row-id={creation.key}
+        className="h-auto min-h-12 items-start"
+        onClick={onSelect}
+      >
+        {failed ? (
+          <span aria-hidden className="mt-1.5 size-2 shrink-0 rounded-full bg-destructive" />
+        ) : (
+          <Spinner className="mt-1 size-3.5" />
+        )}
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
+          <span className="truncate text-sidebar-foreground">{creation.name}</span>
+          <span className={cn("whitespace-normal break-words text-[11px] font-normal", failed ? "text-destructive-foreground" : "text-sidebar-muted-foreground")}>{line}</span>
+        </span>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
   );
 }
 
