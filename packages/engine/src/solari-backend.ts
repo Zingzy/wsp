@@ -71,20 +71,32 @@ export class SolariBackend implements MachineBackend {
   }
 
   async request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const headers: Record<string, string> = { Authorization: `Bearer ${this.apiKey}` };
-    if (body !== undefined) {
-      headers["Content-Type"] = "application/json";
-      headers["Idempotency-Key"] = crypto.randomUUID(); // stable across retry attempts below
-    }
+    return (await this.call<T>(method, path, body)).value;
+  }
+
+  /** keyed: the request carries an idempotency key the provider honours, so a fetch that throws (no answer at all) is
+   * sent once more under it and a replay is the expected reply; without a key a lost answer is the caller's. */
+  private async call<T>(method: string, path: string, body?: unknown, keyed?: { "Idempotency-Key": string }): Promise<{ value: T; reply: Response }> {
+    const headers: Record<string, string> = { Authorization: `Bearer ${this.apiKey}`, ...keyed };
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+    let resent = false;
     for (let attempt = 1; ; attempt++) {
-      const res = await this.fetch(this.baseUrl + path, {
-        method,
-        headers,
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-      });
+      let res: Response;
+      try {
+        res = await this.fetch(this.baseUrl + path, {
+          method,
+          headers,
+          body: body !== undefined ? JSON.stringify(body) : undefined,
+        });
+      } catch (e) {
+        if (keyed === undefined || resent) throw e;
+        resent = true;
+        await new Promise(r => setTimeout(r, backoffMs(attempt)));
+        continue;
+      }
       if (res.ok) {
         const text = await res.text();
-        return (text ? JSON.parse(text) : {}) as T;
+        return { value: (text ? JSON.parse(text) : {}) as T, reply: res };
       }
       let errBody: { code?: string; error?: string } = {};
       try { errBody = await res.json() as typeof errBody; } catch { /* non-JSON error body */ }
@@ -95,7 +107,9 @@ export class SolariBackend implements MachineBackend {
   }
 
   async create(spec: MachineSpec): Promise<Machine> {
-    const res = await this.request<{ sandboxId: string; kind: MachineKind; streamUrl?: string; state?: SandboxView["state"]; createdAt?: string }>(
+    // Only /sandboxes and /desktops honour the key (measured 2026-09-04); one key rides every retry of this call, so a
+    // retried 5xx replays the machine the first try booted instead of booting a second.
+    const { value: res, reply } = await this.call<{ sandboxId: string; kind: MachineKind; streamUrl?: string; state?: SandboxView["state"]; createdAt?: string }>(
       "POST", "/sandboxes", {
         kind: spec.kind,
         ...(spec.template ? { template: spec.template } : {}),
@@ -110,10 +124,11 @@ export class SolariBackend implements MachineBackend {
         ...(spec.onIdle ? { lifecycle: { onTimeout: spec.onIdle } } : {}),
         ...(spec.idleTimeoutMs ? { timeoutMs: spec.idleTimeoutMs } : {}),
       },
+      { "Idempotency-Key": spec.idempotencyKey ?? crypto.randomUUID() },
     );
     // The create response has carried no createdAt (measured 2026-09-04); when it does, it rides on seen for information and nothing reads it.
     const seen = res.createdAt !== undefined ? { state: STATE_MAP[res.state ?? "running"] ?? "running", createdAt: res.createdAt } : undefined;
-    return new SolariMachine(this, res.sandboxId, res.kind ?? spec.kind, res.streamUrl, spec.labels, seen);
+    return new SolariMachine(this, res.sandboxId, res.kind ?? spec.kind, res.streamUrl, spec.labels, seen, reply.headers.get("Idempotent-Replayed") === "true");
   }
 
   async get(id: string): Promise<Machine> {
@@ -161,6 +176,7 @@ class SolariMachine implements Machine {
     readonly streamUrl?: string,
     readonly labels?: Record<string, string>,
     readonly seen?: { state: MachineState; createdAt?: string },
+    readonly replayed?: boolean,
   ) {}
 
   private path(suffix = ""): string {

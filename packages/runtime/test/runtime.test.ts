@@ -9,7 +9,7 @@ import { GRACE_MS, TRANSCRIPT_FLUSH_MS, createRuntime, type HarnessAdapterFactor
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { wsRequest } from "./ws-client.js";
-import { stubBackend } from "./stub-backend.js";
+import { stubBackend, type StubMachine } from "./stub-backend.js";
 import { fakeClock } from "./fake-clock.js";
 
 describe("runtime", () => {
@@ -3021,5 +3021,169 @@ describe("runtime golden update and the post-seal grace", () => {
     const { backend, rt } = started();
     await expect(rt.golden.upgrade({ delta: deltaOf() })).rejects.toThrow(/no golden named "default" to update/);
     expect(backend.machines).toEqual([]);
+  });
+});
+
+describe("create idempotency keys", () => {
+  type Spec = Parameters<ReturnType<typeof stubBackend>["create"]>[0];
+  type Made = Promise<StubMachine>;
+  /** Routes every create through `plan` first, so a test can lose an answer or hand back a replay. */
+  const intercept = (backend: ReturnType<typeof stubBackend>, plan: (spec: Spec, real: (s: Spec) => Made) => Made): Spec[] => {
+    const original = backend.create.bind(backend);
+    const real = (spec: Spec): Made => original(spec) as Made;
+    const specs: Spec[] = [];
+    backend.create = async spec => {
+      specs.push(spec);
+      return plan(spec, real);
+    };
+    return specs;
+  };
+  const lostAnswer = () => new TypeError("fetch failed");
+
+  it("a workspace create carries a key made of the workspace id and a nonce, gone from the store once the machine exists", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    expect(backend.machines[0]!.spec.idempotencyKey).toMatch(new RegExp(`^workspace/${ws.id}:[0-9a-f]{16}$`));
+    expect(await store.list("creates")).toEqual([]);
+  });
+
+  it("a retry of an attempt the provider never answered sends the same key and the same body", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    await rt.workspaces.nap(ws.id);
+    backend.machines[0]!.killed = true;
+    let lose = true;
+    const specs = intercept(backend, (spec, real) => {
+      if (lose) {
+        lose = false;
+        throw lostAnswer();
+      }
+      return real(spec);
+    });
+    await expect(rt.workspaces.wake(ws.id)).rejects.toThrow("fetch failed");
+    expect(await store.list("creates")).toHaveLength(1);
+    const woken = await rt.workspaces.wake(ws.id);
+    expect(woken.machineId).toBe("m2");
+    expect(specs).toHaveLength(2);
+    expect(specs[1]!.idempotencyKey).toBe(specs[0]!.idempotencyKey);
+    expect(specs[1]!.labels?.["createdAt"]).toBe(specs[0]!.labels?.["createdAt"]);
+    expect(specs[1]!.idempotencyKey).not.toBe(backend.machines[0]!.spec.idempotencyKey);
+    expect(await store.list("creates")).toEqual([]);
+  });
+
+  it("a new attempt after a kill, a refusal or a changed request mints a new key", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    await rt.workspaces.upgrade(ws.id, { cpu: 4 });
+    const [first, second] = backend.machines.map(m => m.spec.idempotencyKey);
+    expect(backend.machines[0]!.killed).toBe(true);
+    expect(second).not.toBe(first);
+
+    let refuse = true;
+    const specs = intercept(backend, (spec, real) => {
+      if (refuse) {
+        refuse = false;
+        throw Object.assign(new Error("at cap"), { kind: "concurrency", status: 429 });
+      }
+      return real(spec);
+    });
+    await expect(rt.workspaces.rebuild(ws.id)).rejects.toThrow("at cap");
+    expect(await store.list("creates")).toEqual([]);
+    await rt.workspaces.rebuild(ws.id);
+    expect(specs[1]!.idempotencyKey).not.toBe(specs[0]!.idempotencyKey);
+
+    let lose = true;
+    specs.length = 0;
+    backend.create = async spec => {
+      specs.push(spec);
+      if (lose) {
+        lose = false;
+        throw lostAnswer();
+      }
+      return stubBackend().create(spec);
+    };
+    await expect(rt.golden.build({ setup: "true", smoke: "true", cpu: 2 })).rejects.toThrow("fetch failed");
+    expect(await store.list("creates")).toHaveLength(1);
+    await rt.golden.build({ setup: "true", smoke: "true", cpu: 4 });
+    expect(specs.slice(0, 2).map(s => s.cpu)).toEqual([2, 4]);
+    expect(specs[1]!.idempotencyKey).not.toBe(specs[0]!.idempotencyKey);
+    expect(await store.list("creates")).toEqual([]);
+  });
+
+  it("a replayed create is logged, and a replay naming a dead machine is created anew under a fresh key", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: {} });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+      await rt.workspaces.nap(ws.id);
+      backend.machines[0]!.killed = true;
+      const specs = intercept(backend, async (spec, real) => {
+        const m = await real(spec);
+        if (specs.length === 1) m.killed = true;
+        return Object.assign(Object.create(m) as typeof m, { replayed: specs.length <= 2 });
+      });
+      const woken = await rt.workspaces.wake(ws.id);
+      expect(woken.machineId).toBe("m3");
+      expect(specs.map(s => s.idempotencyKey)).toHaveLength(2);
+      expect(specs[1]!.idempotencyKey).not.toBe(specs[0]!.idempotencyKey);
+      const notes = warn.mock.calls.map(c => String(c[0]));
+      expect(notes.some(n => n.includes("m2") && n.includes("gone"))).toBe(true);
+      expect(notes.some(n => n.includes("m3") && n.includes("replayed"))).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("adopting a dead process's attempt takes the key and rewrites the entry to the adopter", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    await rt.workspaces.nap(ws.id);
+    backend.machines[0]!.killed = true;
+    let losses = 2;
+    const specs = intercept(backend, (spec, real) => {
+      if (losses-- > 0) throw lostAnswer();
+      return real(spec);
+    });
+    await expect(rt.workspaces.wake(ws.id)).rejects.toThrow("fetch failed");
+    const purpose = `workspace/${ws.id}`;
+    const left = (await store.get("creates", purpose)) as { key: string; pid: number };
+    expect(left.pid).toBe(process.pid);
+    const deadPid = 99_999_999;
+    await store.put("creates", purpose, { ...left, pid: deadPid });
+    await expect(rt.workspaces.wake(ws.id)).rejects.toThrow("fetch failed");
+    expect(await store.get("creates", purpose)).toMatchObject({ key: left.key, pid: process.pid });
+    await rt.workspaces.wake(ws.id);
+    expect(specs.map(s => s.idempotencyKey)).toEqual([left.key, left.key, left.key]);
+    expect(await store.list("creates")).toEqual([]);
+  });
+
+  it("a purpose too long for the provider's 255-character key cap is hashed, the nonce kept", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    await rt.golden.build({ name: "g".repeat(300), setup: "true", smoke: "true" });
+    const key = backend.machines[0]!.spec.idempotencyKey!;
+    expect(key.length).toBeLessThanOrEqual(255);
+    expect(key).toMatch(/^[0-9a-f]{64}:[0-9a-f]{16}$/);
+  });
+
+  it("a builder and its smoke fork carry keys for the golden they build", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    await rt.golden.build({ setup: "true", smoke: "true" });
+    expect(backend.machines.map(m => m.spec.idempotencyKey)).toEqual([
+      expect.stringMatching(/^golden\/default:[0-9a-f]{16}$/),
+      expect.stringMatching(/^golden\/default:[0-9a-f]{16}$/),
+    ]);
+    expect(backend.machines[0]!.spec.idempotencyKey).not.toBe(backend.machines[1]!.spec.idempotencyKey);
   });
 });

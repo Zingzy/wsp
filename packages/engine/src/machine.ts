@@ -18,6 +18,9 @@ export interface MachineSpec {
   onIdle?: "pause" | "kill";
   /** Rolling idle window before onIdle fires; the provider default (Solari: 30 min documented) applies when absent. */
   idleTimeoutMs?: number;
+  /** One per create attempt: the provider answers a repeat of the same request under it with the machine it already
+   * booted. Minted fresh after a kill, since a replay names the dead machine (measured 2026-09-04). */
+  idempotencyKey?: string;
 }
 
 export interface ExecResult { exitCode: number; stdout: string; stderr: string }
@@ -53,6 +56,8 @@ export interface Machine {
    * create(). Its createdAt moves on a running machine nobody touched (+306 s at ten minutes, canary 2026-09-04 UTC)
    * with no lifecycle event behind it, so nothing decides on it; state is the field worth reading. */
   readonly seen?: { state: MachineState; createdAt?: string };
+  /** On a handle from create(): the provider answered from an earlier create under the same key instead of booting. */
+  readonly replayed?: boolean;
   exec(cmd: string, opts?: { timeoutMs?: number }): Promise<ExecResult>; // always REST path
   snapshot(name: string): Promise<string>;
   pause(): Promise<void>;

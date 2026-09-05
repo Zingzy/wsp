@@ -11,6 +11,7 @@
 // the 201, and kills what it made by recorded id. The listing case pins the
 // row fields the sweep's cost and owner lines read.
 
+import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
 import type { WspError } from "../src/errors.js";
 import { BUILDER_DISK_GB, BUILDER_IDLE_MS, forkGolden, killUntilGone, prepareBuilder, sealGolden, type GoldenManifest } from "../src/golden.js";
@@ -41,6 +42,8 @@ interface Create {
   status: number;
   body: Record<string, unknown>;
   reply: Record<string, unknown>;
+  key: string | null;
+  replayed: boolean;
 }
 
 /** The provider's answer word for word, minus the fields that double as credentials on a
@@ -68,7 +71,13 @@ describe.runIf(LIVE)("create canary, live", () => {
             } catch {
               reply = { error: text };
             }
-            creates.push({ status: res.status, body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>, reply });
+            creates.push({
+              status: res.status,
+              body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+              reply,
+              key: new Headers(init?.headers).get("Idempotency-Key"),
+              replayed: res.headers.get("Idempotent-Replayed") === "true",
+            });
             if (res.status === 201 && typeof reply.sandboxId === "string") created.push(reply.sandboxId);
           }
           return res;
@@ -168,6 +177,26 @@ describe.runIf(LIVE)("create canary, live", () => {
     expect(disk, "GET /sandboxes/:id did not grant the disk the fork asked for").toBe(BUILDER_DISK_GB);
     await killUntilGone(backend, fork);
     expect(await stateOf(fork.id)).toBe("gone");
+  });
+
+  it("the same body twice under one key replays the first machine instead of booting a second", { timeout: 180_000 }, async () => {
+    const labels = labelsFor({});
+    const spec = { kind: "sandbox" as const, template: "base", cpu: 1, memMb: 2048, labels, idempotencyKey: `${TEST}/${randomUUID()}` };
+    const { result: first, create: booted } = await posted(() => backend.create(spec));
+    try {
+      const { result: second, create: again } = await posted(() => backend.create(spec));
+      console.log(`[create-canary] key ${spec.idempotencyKey}: first ${short(first.id)} replayed ${booted.replayed}, second ${short(second.id)} replayed ${again.replayed}`);
+      expect(booted.key).toBe(spec.idempotencyKey);
+      expect(again.key).toBe(spec.idempotencyKey);
+      expect(booted.replayed).toBe(false);
+      expect(again.replayed, "the second POST under the same key did not answer Idempotent-Replayed: true").toBe(true);
+      expect(second.replayed).toBe(true);
+      expect(second.id).toBe(first.id);
+      expect(again.reply).toEqual(booted.reply);
+    } finally {
+      await killUntilGone(backend, first);
+    }
+    expect(await stateOf(first.id)).toBe("gone");
   });
 
   it("listing rows carry metadata, cpu and memMb for a machine just created", { timeout: 180_000 }, async () => {

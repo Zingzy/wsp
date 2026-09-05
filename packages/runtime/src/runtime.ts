@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
 import {
@@ -38,6 +38,7 @@ import {
   type ReapFailure,
   type ReapResult,
   type ReapedMachine,
+  type WspError,
   rollback as rollbackGolden,
 } from "@wsp/engine";
 import type {
@@ -438,6 +439,27 @@ interface TranscriptRecord {
 const BUILDERS = "builders";
 /** One id per state file, stamped on every machine it creates so another host's sweep can tell them apart from its own. */
 const OWNER = "owner";
+/** The create attempt in flight for a record, written before the provider hears of it. */
+const CREATES = "creates";
+/** The provider caps a key at 255 characters (measured 2026-09-04); the purpose is hashed past what a 16-hex nonce leaves. */
+const KEY_PURPOSE_MAX = 255 - 17;
+interface PendingCreate {
+  key: string;
+  createdAt: string;
+  /** The request's fingerprint: a changed request is a new attempt, never a replay of the old one. */
+  body: string;
+  host: string;
+  pid: number;
+}
+
+/** The spec minus what is minted per attempt, so the same request from two attempts reads the same. */
+function fingerprint(spec: MachineSpec): string {
+  const { idempotencyKey, labels, ...rest } = spec;
+  const { createdAt, ...stamped } = labels ?? {};
+  void idempotencyKey;
+  void createdAt;
+  return createHash("sha256").update(JSON.stringify({ ...rest, labels: stamped })).digest("hex");
+}
 /** A holder's heartbeat older than this, or a holder whose pid is gone, no longer keeps a builder from another process. */
 const HELD_TTL_MS = 15 * 60_000;
 /** Own builders beat this often on their own timer, so a sweep stuck on a slow listing cannot starve the hold. */
@@ -743,9 +765,48 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   });
 
   let owner = "";
+
+  /** The store holds the attempt's key and stamp before the provider hears of it: a retry the provider never answered
+   * (the connection dropped, the process died) sends the same body under the same key and gets back the machine the
+   * first try booted. An answer of any kind ends the attempt and a changed request starts one, so the key after a kill
+   * or a refusal is always fresh. A replay naming a dead machine is dropped and the create made anew (measured
+   * 2026-09-04: the provider replays a killed machine's id). Another live process's attempt is never joined. */
+  const keyedCreate = async (purpose: string, spec: MachineSpec, afterCorpse = false): Promise<Machine> => {
+    const body = fingerprint(spec);
+    const held = (await store.get(CREATES, purpose)) as PendingCreate | undefined;
+    const theirs = held !== undefined && (held.host !== hostId || (held.pid !== process.pid && pidAlive(held.pid)));
+    const name = purpose.length <= KEY_PURPOSE_MAX ? purpose : createHash("sha256").update(purpose).digest("hex");
+    const attempt: PendingCreate = held?.body === body && !theirs
+      ? { ...held, host: hostId, pid: process.pid }
+      : { key: `${name}:${randomBytes(8).toString("hex")}`, createdAt: new Date().toISOString(), body, host: hostId, pid: process.pid };
+    await store.put(CREATES, purpose, attempt);
+    let machine: Machine;
+    try {
+      machine = await backend.create({
+        ...spec,
+        idempotencyKey: attempt.key,
+        ...(spec.labels?.["createdAt"] !== undefined ? { labels: { ...spec.labels, createdAt: attempt.createdAt } } : {}),
+      });
+    } catch (e) {
+      if (typeof (e as WspError).status === "number") await store.delete(CREATES, purpose);
+      throw e;
+    }
+    await store.delete(CREATES, purpose);
+    if (machine.replayed === true) {
+      if ((await machine.state()) === "gone") {
+        if (afterCorpse) throw new Error(`create for ${purpose}: the provider replayed ${machine.id}, which is gone, under a key it had never seen (${attempt.key})`);
+        console.warn(`create for ${purpose}: the replay under ${attempt.key} named ${machine.id}, which is gone; creating anew`);
+        return keyedCreate(purpose, spec, true);
+      }
+      console.warn(`create for ${purpose}: ${machine.id} replayed from an earlier attempt under ${attempt.key}`);
+    }
+    return machine;
+  };
+
   /** Ids this process has created and not yet recorded; the sweep must not read them as lost. */
   const inflight = new Set<string>();
-  const claiming = <T>(run: (b: MachineBackend) => Promise<T>): Promise<T> => {
+  /** purpose names the record every create inside run is for; its attempts are keyed under it. */
+  const claiming = <T>(purpose: string, run: (b: MachineBackend) => Promise<T>): Promise<T> => {
     const mine: string[] = [];
     const b: MachineBackend = {
       capabilities: backend.capabilities,
@@ -754,7 +815,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       list: labels => backend.list(labels),
       deleteSnapshot: id => backend.deleteSnapshot(id),
       create: async spec => {
-        const m = await backend.create(spec);
+        const m = await keyedCreate(purpose, spec);
         inflight.add(m.id);
         mine.push(m.id);
         return m;
@@ -801,7 +862,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * A snapshot restores as the kind it was taken from, so the spec names that kind;
    * versions sealed before it was recorded were all sandbox. */
   const fork = (record: WorkspaceRecord, bind: (machine: Machine) => void, override?: WorkspaceSpec, report?: StageReport): Promise<Machine> =>
-    claiming(async b => {
+    claiming(`workspace/${record.id}`, async b => {
       const spec = forkSpec(record, (await goldenVersionOf(record.golden))?.kind ?? "sandbox", override);
       const machine = await b.create(spec);
       // Named by its record before the claim is released, so no sweep sees it unclaimed.
@@ -1160,6 +1221,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           live.delete(id);
           await entry.machine.kill().catch(() => {});
         }
+        // The id dies with a failed create, so nothing could ever retry under its key.
+        await store.delete(CREATES, `workspace/${id}`);
         report("failed", e instanceof Error ? e.message : String(e));
         throw e;
       }
@@ -1257,6 +1320,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       transcriptFlushes.delete(id);
       await store.delete(WORKSPACES, id);
       await store.delete(TRANSCRIPTS, id);
+      await store.delete(CREATES, `workspace/${id}`);
       await store.deleteBlob(VAULTS, id);
       bus.emit({ type: "workspace.deleted", workspaceId: id });
     },
@@ -1620,7 +1684,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const name = entry.record.name;
     const prior = (await store.get(GOLDENS, name)) as GoldenManifest | undefined;
     try {
-      const result = await claiming(b =>
+      const result = await claiming(`smoke/${entry.record.id}`, b =>
         sealGolden(entry.builder, {
           backend: observing(b),
           smoke: recipe.smoke,
@@ -1662,7 +1726,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const { name, ...build } = o;
       const key = name ?? "default";
       const prior = (await store.get(GOLDENS, key)) as GoldenManifest | undefined;
-      const result = await claiming(b =>
+      const result = await claiming(`golden/${key}`, b =>
         buildGolden({
           ...build,
           backend: b,
@@ -1690,7 +1754,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         throw new Error(`a builder named ${name} is still being prepared for a different recipe; wait for it to finish, then run again`);
       }
       const stage = stageOf(name);
-      const run = claiming(async b => {
+      const run = claiming(`builder/${name}`, async b => {
         await refreshBuilders();
         // A first-life builder carrying the same ticks is attached to instead of
         // booting a second one, whichever process made it; the stages skip on its
@@ -1877,7 +1941,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         }
       }
       const road = entry !== undefined ? "builder" : "fork";
-      entry ??= await claiming(async b => {
+      entry ??= await claiming(`builder/${name}`, async b => {
         let placeholder: LiveBuilder | undefined;
         let builder: Builder;
         try {
