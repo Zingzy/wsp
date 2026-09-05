@@ -37,8 +37,9 @@ const has = (re: RegExp) => (output: string): boolean => re.test(output);
 const ok = (re?: RegExp) => (output: string, exitCode: number): boolean => exitCode === 0 && (re === undefined || re.test(output));
 
 export const SIGN_INS: Readonly<Record<string, SignIn>> = {
-  // Device flow by default; the shim opens the device page and the person types the code there.
-  gh: { kind: "command", login: "gh auth login", status: { command: "gh auth status", signedIn: has(/Logged in to/) }, toolTimeoutMs: 15 * MIN },
+  // Device flow by default; the shim opens the device page and the person types the code there. The status lists
+  // every account of the host, so one is signed in only when none of them failed.
+  gh: { kind: "command", login: "gh auth login", status: { command: "gh auth status", signedIn: o => /Logged in to/.test(o) && !/Failed to log in/.test(o) }, toolTimeoutMs: 15 * MIN },
   // Under the daemon pty DISPLAY is unset, so gcloud, gemini and railway take their paste or device flow by themselves.
   gcloud: {
     kind: "command",

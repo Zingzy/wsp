@@ -29,6 +29,8 @@ export interface LoginOutcome {
   /** How the last command's pty ended; -1 when it never did. */
   exit?: number;
   note?: string;
+  /** What a copied login's files went to the machine without, named by the account. */
+  left?: string;
 }
 
 /** What the sign-in stage shares with the host's callback relay: whether one
@@ -78,6 +80,8 @@ export async function builderLink(rt: Runtime, builder: GoldenBuilderView, conne
 export interface SignInStageOptions {
   /** The logins the stage owns: a choice of copy is checked on the builder, any other is signed in there. */
   logins: readonly ManifestEntry[];
+  /** By login id, what its copy went to the machine without; shown beside the row's note throughout. */
+  left?: ReadonlyMap<string, string>;
   /** A fresh link to the builder's daemon, dialled before each command so a dropped one costs that command alone. */
   dial(): Promise<BuilderLink>;
   terminal: RelayTerminal;
@@ -108,25 +112,34 @@ function minutes(ms: number): string {
   return `${Math.round(ms / 60_000)} min`;
 }
 
+/** The row's note and what its copy left behind, as one detail. */
+function detailOf(o: LoginOutcome): string {
+  return [o.note, o.left].filter(x => x !== undefined).join("; ");
+}
+
 function stateLine(o: LoginOutcome): string {
   const word = STATE_WORDS[o.state];
   const colored = o.state === "signed-in" ? styleText("green", word) : o.state === "not-signed-in" ? styleText("yellow", word) : dim(word);
-  return `${o.label}: ${colored}${o.note !== undefined ? dim(` (${o.note})`) : ""}`;
+  const detail = detailOf(o);
+  return `${o.label}: ${colored}${detail !== "" ? dim(` (${detail})`) : ""}`;
 }
 
-/** Label, state, note per login; the note is cut so the note frame (6 columns) never wraps a row. */
+/** Label, state, detail per login; the detail is cut so the note frame (6 columns) never wraps a row. */
 function summaryRows(outcomes: readonly LoginOutcome[], width: number): string[] {
   const labelW = Math.max(...outcomes.map(r => r.label.length));
   const stateW = Math.max(...outcomes.map(r => STATE_WORDS[r.state].length));
   const room = Math.max(12, width - 6 - labelW - stateW - 2 * GUTTER.length);
-  return table(outcomes.map(r => [r.label, STATE_WORDS[r.state], r.note === undefined ? "" : ellipsize(r.note, room)]));
+  return table(outcomes.map(r => [r.label, STATE_WORDS[r.state], ellipsize(detailOf(r), room)]));
 }
 
 export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]> {
   const out = { output: o.terminal.output };
   const capMs = o.capMs ?? CAP_MS;
   const statusMs = o.statusTimeoutMs ?? STATUS_MS;
-  const outcomes: LoginOutcome[] = o.logins.map(e => ({ id: e.id, label: e.label, state: "skipped" }));
+  const outcomes: LoginOutcome[] = o.logins.map(e => {
+    const left = o.left?.get(e.id);
+    return { id: e.id, label: e.label, state: "skipped", ...(left !== undefined ? { left } : {}) };
+  });
   if (outcomes.length === 0) return outcomes;
   const isCopied = (e: ManifestEntry): boolean => e.choice === "copy";
   const rows = (copied: boolean) => o.logins.map((e, i) => [e, outcomes[i]!] as const).filter(([e]) => isCopied(e) === copied);

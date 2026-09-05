@@ -32,7 +32,7 @@ function laptop(): string {
   writeFileSync(join(home, ".oh-my-zsh", "custom", "plugins", "x", "x.zsh"), "echo x\n");
   chmodSync(join(home, ".oh-my-zsh", "custom", "plugins", "x", "x.zsh"), 0o755);
   mkdirSync(join(home, ".config", "gh"), { recursive: true });
-  writeFileSync(join(home, ".config", "gh", "hosts.yml"), "github.com:\n    git_protocol: ssh\n    users:\n        Zingzy:\n    user: Zingzy\n");
+  writeFileSync(join(home, ".config", "gh", "hosts.yml"), "github.com:\n    git_protocol: ssh\n    users:\n        other:\n        Zingzy:\n    user: Zingzy\n");
   return home;
 }
 
@@ -45,13 +45,14 @@ const row = (over: Partial<ManifestEntry> & Pick<ManifestEntry, "rung" | "id">):
   ...over,
 });
 
-function reader(values: Record<string, string>): SecretReader & { reads: string[] } {
-  const reads: string[] = [];
+/** A Keychain with the given items, keyed as the secrets map is (see secretKey); every read is recorded as [service, account]. */
+function reader(values: Record<string, string>): SecretReader & { reads: (string | undefined)[][] } {
+  const reads: (string | undefined)[][] = [];
   return {
     reads,
-    read: async service => {
-      reads.push(service);
-      const v = values[service];
+    read: async (service, account) => {
+      reads.push([service, account]);
+      const v = values[account === undefined ? service : `${service} (${account})`];
       if (v === undefined) throw new Error(`Command failed: security find-generic-password -s ${service} -w\nsecurity: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.\n`);
       return v;
     },
@@ -232,40 +233,90 @@ describe("packPlan", () => {
     }
   });
 
-  it("readSecrets asks the reader once per Keychain login and turns a failed read into a refusal that carries security's reason", async () => {
+  it("readSecrets asks the reader once per Keychain item, one per gh account this computer's hosts.yml lists, and turns a failed read into a refusal that carries security's reason", async () => {
+    const home = laptop();
     const rows = [
       row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"], choice: "copy" }),
       row({ rung: "logins", id: "logins/claude", paths: ["Keychain: Claude Code-credentials"], choice: "copy" }),
       row({ rung: "logins", id: "logins/codex", paths: ["~/.codex/auth.json"], choice: "machine" }),
       row({ rung: "logins", id: "logins/gh2", paths: ["~/.config/gh/hosts.yml"], choice: "copy" }),
     ];
-    const wanted = keychainLogins(rows, "darwin");
+    const wanted = keychainLogins(rows, "darwin", home);
     // gh2 carries hosts.yml alone, so nothing is read from the Keychain for it.
-    expect(wanted.map(s => [s.id, s.service])).toEqual([["logins/gh", "gh:github.com"], ["logins/claude", "Claude Code-credentials"]]);
-    expect(keychainLogins(rows, "linux")).toEqual([]);
-    const secrets = reader({ "gh:github.com": "gho_fake_token" });
+    expect(wanted.map(s => [s.id, s.service, s.account])).toEqual([
+      ["logins/gh", "gh:github.com", "other"],
+      ["logins/gh", "gh:github.com", "Zingzy"],
+      ["logins/claude", "Claude Code-credentials", undefined],
+    ]);
+    expect(keychainLogins(rows, "linux", home)).toEqual([]);
+    const secrets = reader({ "gh:github.com (other)": "gho_fake_other", "gh:github.com (Zingzy)": "gho_fake_token" });
     const read = await readSecrets(wanted, secrets);
-    expect(secrets.reads).toEqual(["gh:github.com", "Claude Code-credentials"]);
-    expect([...read.values]).toEqual([["gh:github.com", "gho_fake_token"]]);
+    expect(secrets.reads).toEqual([["gh:github.com", "other"], ["gh:github.com", "Zingzy"], ["Claude Code-credentials", undefined]]);
+    expect([...read.values]).toEqual([["gh:github.com (other)", "gho_fake_other"], ["gh:github.com (Zingzy)", "gho_fake_token"]]);
     expect(read.refused).toEqual([{ id: "logins/claude", service: "Claude Code-credentials", reason: "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain." }]);
+    // An account with no item of its own is dropped from a row another account of which was read; the row is not refused.
+    const partial = await readSecrets(wanted.slice(0, 2), reader({ "gh:github.com (Zingzy)": "gho_fake_token" }));
+    expect([...partial.values.keys()]).toEqual(["gh:github.com (Zingzy)"]);
+    expect(partial.refused).toEqual([]);
+    expect(partial.dropped).toEqual([{ id: "logins/gh", service: "gh:github.com", account: "other", reason: "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain." }]);
+    // With no account read the row is refused once, the reason naming every account.
+    const none = await readSecrets(wanted.slice(0, 2), reader({}));
+    expect(none.dropped).toEqual([]);
+    expect(none.refused).toEqual([
+      {
+        id: "logins/gh",
+        service: "gh:github.com",
+        reason: "other: security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.; Zingzy: security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.",
+      },
+    ]);
   });
 
-  it("places each secret it was given, and notes a planned secret it was not given instead of failing", async () => {
+  it("places each secret it was given, gh's per account with the active one under the host, and notes a planned secret it was not given instead of failing", async () => {
     const home = laptop();
     const plan = planFiles(
       [
         row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"], choice: "copy" }),
         row({ rung: "logins", id: "logins/claude", paths: ["Keychain: Claude Code-credentials"], choice: "copy" }),
       ],
-      { home, stat: statOf, platform: "darwin", rewrites: [[".claude/", ".claude-cfg/"]] },
+      { home, stat: statOf, read: abs => readFileSync(abs, "utf8"), platform: "darwin", rewrites: [[".claude/", ".claude-cfg/"]] },
     );
-    const packed = await packPlan(plan, { secrets: new Map([["gh:github.com", "gho_fake_token"]]), home });
+    const secrets = new Map([
+      ["gh:github.com (other)", "gho_fake_other"],
+      ["gh:github.com (Zingzy)", "gho_fake_token"],
+    ]);
+    const packed = await packPlan(plan, { secrets, home });
     expect(packed.skipped).toEqual([{ id: "logins/claude", path: "Keychain: Claude Code-credentials", note: "not read from the Keychain; sign in on the machine" }]);
     const dir = extract(packed.tar);
     const hosts = readFileSync(join(dir, ".config/gh/hosts.yml"), "utf8");
-    expect(hosts).toBe("github.com:\n    oauth_token: gho_fake_token\n    git_protocol: ssh\n    users:\n        Zingzy:\n            oauth_token: gho_fake_token\n    user: Zingzy\n");
+    expect(hosts).toBe(
+      ["github.com:", "    oauth_token: gho_fake_token", "    git_protocol: ssh", "    users:", "        other:", "            oauth_token: gho_fake_other", "        Zingzy:", "            oauth_token: gho_fake_token", "    user: Zingzy", ""].join("\n"),
+    );
     expect(statSync(join(dir, ".config/gh/hosts.yml")).mode & 0o777).toBe(0o600);
     expect(listTar(packed.tar).some(e => e.path.includes(".credentials.json"))).toBe(false);
+    // One account's token missing drops that account: its line leaves the users block, the file travels with the
+    // rest, and the note names the account left behind.
+    const partial = await packPlan(plan, { secrets: new Map([["gh:github.com (Zingzy)", "gho_fake_token"]]), home });
+    expect(partial.skipped.map(s => [s.path, s.note])).toEqual([
+      ["Keychain: gh:github.com (other)", "other left behind: no token in the Keychain"],
+      ["Keychain: Claude Code-credentials", "not read from the Keychain; sign in on the machine"],
+    ]);
+    expect(readFileSync(join(extract(partial.tar), ".config/gh/hosts.yml"), "utf8")).toBe(["github.com:", "    oauth_token: gho_fake_token", "    git_protocol: ssh", "    users:", "        Zingzy:", "            oauth_token: gho_fake_token", "    user: Zingzy", ""].join("\n"));
+    // The active account dropped: the one left becomes active and the host token is its.
+    const active = await packPlan(plan, { secrets: new Map([["gh:github.com (other)", "gho_fake_other"]]), home });
+    expect(active.skipped.map(s => [s.path, s.note])).toEqual([
+      ["Keychain: gh:github.com (Zingzy)", "Zingzy left behind: no token in the Keychain"],
+      ["Keychain: Claude Code-credentials", "not read from the Keychain; sign in on the machine"],
+    ]);
+    expect(readFileSync(join(extract(active.tar), ".config/gh/hosts.yml"), "utf8")).toBe(["github.com:", "    oauth_token: gho_fake_other", "    git_protocol: ssh", "    users:", "        other:", "            oauth_token: gho_fake_other", "    user: other", ""].join("\n"));
+    // No account read keeps the whole row home: hosts.yml and both items are noted, the file does not travel.
+    const none = await packPlan(plan, { secrets: new Map(), home });
+    expect(none.skipped.map(s => [s.path, s.note])).toEqual([
+      ["~/.config/gh/hosts.yml", "not read from the Keychain; sign in on the machine"],
+      ["Keychain: gh:github.com (other)", "not read from the Keychain; sign in on the machine"],
+      ["Keychain: gh:github.com (Zingzy)", "not read from the Keychain; sign in on the machine"],
+      ["Keychain: Claude Code-credentials", "not read from the Keychain; sign in on the machine"],
+    ]);
+    expect(listTar(none.tar).some(e => e.path.includes("hosts.yml"))).toBe(false);
   });
 
   it("writes the archive, which holds the secrets, as 0600 from the first byte", async () => {
@@ -556,9 +607,10 @@ describe("statOf", () => {
 });
 
 describe("keychainReader", () => {
-  it("is the security command with the service and -w, built but never run in tests", () => {
+  it("is the security command with the service and -w, the account before -w when the item is filed per user, built but never run in tests", () => {
     const r = keychainReader();
     expect(r.command("Claude Code-credentials")).toEqual({ file: "security", args: ["find-generic-password", "-s", "Claude Code-credentials", "-w"] });
+    expect(r.command("gh:github.com", "Zingzy")).toEqual({ file: "security", args: ["find-generic-password", "-s", "gh:github.com", "-a", "Zingzy", "-w"] });
   });
 
   it("unwraps the go-keyring form gh stores its token in (74 characters for a 40-character token) and passes any other value through as read", async () => {
@@ -572,10 +624,10 @@ describe("keychainReader", () => {
       ran.push([file, ...args]);
       return { stdout: `${args[2] === "gh:github.com" ? wrapped : claude}\n` };
     });
-    await expect(r.read("gh:github.com")).resolves.toBe(token);
+    await expect(r.read("gh:github.com", "Zingzy")).resolves.toBe(token);
     await expect(r.read("Claude Code-credentials")).resolves.toBe(claude);
     expect(ran).toEqual([
-      ["security", "find-generic-password", "-s", "gh:github.com", "-w"],
+      ["security", "find-generic-password", "-s", "gh:github.com", "-a", "Zingzy", "-w"],
       ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
     ]);
   });
@@ -840,18 +892,25 @@ describe("importFor", () => {
     const unread = imp();
     // Before the Keychain is read the file is already volatile and the value has no entry yet.
     expect(unread.recipe?.files).toEqual([{ id: "logins/gh", path: "~/.config/gh/hosts.yml", dest: ".config/gh/hosts.yml", digest: expect.stringMatching(/^[0-9a-f]{64}$/), volatile: true }]);
-    secrets.set("gh:github.com", "gho_one");
+    // One entry per account this computer's hosts.yml lists, each under its own key.
+    secrets.set("gh:github.com (other)", "gho_o1");
+    secrets.set("gh:github.com (Zingzy)", "gho_one");
     const one = imp();
-    expect(one.recipe?.files.find(f => f.path === "Keychain: gh:github.com")).toEqual({ id: "logins/gh", path: "Keychain: gh:github.com", dest: ".config/gh/hosts.yml", digest: createHash("sha256").update("gho_one").digest("hex"), volatile: true });
+    expect(one.recipe?.files.filter(f => f.path.startsWith("Keychain:"))).toEqual([
+      { id: "logins/gh", path: "Keychain: gh:github.com (Zingzy)", dest: ".config/gh/hosts.yml", digest: createHash("sha256").update("gho_one").digest("hex"), volatile: true },
+      { id: "logins/gh", path: "Keychain: gh:github.com (other)", dest: ".config/gh/hosts.yml", digest: createHash("sha256").update("gho_o1").digest("hex"), volatile: true },
+    ]);
     expect(one.recipeHash).toBe(unread.recipeHash);
     // The same import read after the Keychain: the getter sees the value the Map holds now.
-    secrets.set("gh:github.com", "gho_two");
-    expect(unread.recipe?.files.find(f => f.path === "Keychain: gh:github.com")?.digest).toBe(createHash("sha256").update("gho_two").digest("hex"));
+    secrets.set("gh:github.com (Zingzy)", "gho_two");
+    expect(unread.recipe?.files.find(f => f.path === "Keychain: gh:github.com (Zingzy)")?.digest).toBe(createHash("sha256").update("gho_two").digest("hex"));
     expect(imp().recipeHash).toBe(unread.recipeHash);
-    expect(one.files?.volatile?.paths).toEqual(["~/.config/gh/hosts.yml", "Keychain: gh:github.com"]);
+    expect(one.files?.volatile?.paths).toEqual(["~/.config/gh/hosts.yml", "Keychain: gh:github.com (other)", "Keychain: gh:github.com (Zingzy)"]);
     const packed = await one.files!.volatile!.pack();
     expect(listTar(packed.tar).map(e => e.path).filter(p => p !== "" && !p.endsWith("/"))).toEqual([".config/gh/hosts.yml"]);
-    expect(gunzipSync(packed.tar).toString("utf8")).toContain("oauth_token: gho_two");
+    const hosts = gunzipSync(packed.tar).toString("utf8");
+    expect(hosts).toContain("github.com:\n    oauth_token: gho_two\n");
+    expect(hosts).toContain("        other:\n            oauth_token: gho_o1\n        Zingzy:\n            oauth_token: gho_two\n");
   });
 
   it("the results it reports carry the planned skips too, and go next to the recipe", async () => {

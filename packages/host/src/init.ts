@@ -17,7 +17,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BREW_TOOLCHAIN_BYTES, BUILDER_DISK_GB, MEASURED_ON, PACK_BUDGET_BYTES, TOOLCHAIN_MEASURED_ON, TOOLS_DISK_FLOOR, agentInstallsFor, agentSize, brewfileFor, editorInstallsFor, estimateDisk, extensionsFile, pinState, remoteEditorFor, remoteSettingsPath, toolInstallsFor, toolSize, type BrewTable, type DiskEstimate, type ImportResult } from "@wsp/engine";
 import { ALREADY_APPLIED } from "@wsp/protocol";
-import { CLAUDE_INSTALLER, importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
+import { CLAUDE_INSTALLER, importFor, importResultPath, keychainLogins, leftBehind, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
   CONSENT_CHOICES,
   LOGIN_CHOICES,
@@ -897,7 +897,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     // Nobody is here to click macOS's consent dialog: a login the Keychain holds signs in on the machine
     // unless a saved answer says copy, which is the person's own and keeps the recipe hash it was saved with.
     const defaulted = manifest.entries.filter(e => e.rung === "logins" && e.choice === undefined && answers.choices.get(e.id) === "copy").map(e => ({ ...e, choice: "copy" as const }));
-    for (const s of keychainLogins(defaulted, opts.platform)) {
+    for (const s of keychainLogins(defaulted, opts.platform, opts.home)) {
       answers.choices.set(s.id, "machine");
       answers.ticks.delete(s.id);
     }
@@ -1017,18 +1017,20 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   // Keychain consent is asked here, before anything boots and after every road that cancels the
   // run, so a refusal costs no machine: the row turns into a sign-in on the machine and the pack
   // finds no value for it.
-  const wanted = keychainLogins(bring, opts.platform);
+  const wanted = keychainLogins(bring, opts.platform, opts.home);
   // Off a terminal the spinner draws nothing, and only a saved copy answer gets here; a scripted run would otherwise sit on macOS's dialog with no word why.
-  if (!io.isTTY && wanted.length > 0) log.step(`Reading ${wanted.map(s => s.service).join(", ")} from your Keychain, as the saved recipe answered copy; macOS may ask you to allow it.`, out);
+  if (!io.isTTY && wanted.length > 0) log.step(`Reading ${[...new Set(wanted.map(s => s.service))].join(", ")} from your Keychain, as the saved recipe answered copy; macOS may ask you to allow it.`, out);
   const reading = spin(io.output, "Reading your Keychain logins", io.isTTY && wanted.length > 0);
   const read = await readSecrets(wanted, opts.secrets);
   reading.stop();
-  for (const [service, value] of read.values) {
-    secrets.set(service, value);
+  for (const [key, value] of read.values) {
+    secrets.set(key, value);
     runLog.hide(value);
   }
+  const label = (id: string) => manifest.entries.find(e => e.id === id)?.label ?? id;
+  if (read.dropped.length > 0) log.warn(read.dropped.map(d => `${label(d.id)}: ${leftBehind(d.account)} (${d.reason}).`).join("\n"), out);
+  const left = new Map(read.dropped.map(d => [d.id, read.dropped.filter(x => x.id === d.id).map(x => leftBehind(x.account)).join("; ")]));
   if (read.refused.length > 0) {
-    const label = (id: string) => manifest.entries.find(e => e.id === id)?.label ?? id;
     for (const r of read.refused) choices.set(r.id, "machine");
     log.warn(read.refused.map(r => `${label(r.id)}: Keychain read failed (${r.reason}); changed to sign in on the machine.`).join("\n"), out);
     saveRecipe(path, manifest, ticks, choices);
@@ -1212,6 +1214,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const skipWhy = interactive ? undefined : io.isTTY ? "--yes asks nothing; sign in from the app's terminal" : "no terminal to sign in from; use the app's terminal";
   const outcomes = await signInStage({
     logins: stageLogins(offered, choices, ticks),
+    left,
     dial,
     terminal: { input: io.input, output: io.output },
     ...(skipWhy !== undefined ? { skipWhy } : {}),

@@ -69,7 +69,7 @@ describe("sign-in table", () => {
     for (const name of ["op", "kube", "pi", "hermes"]) expect(signInFor(name).kind, name).toBe("none");
   });
 
-  it("reads gh auth status: a logged-in host counts even beside a stale one, and the no-hosts answer does not", () => {
+  it("reads gh auth status: every account listed must be logged in, so a stale one beside a good one fails, as does the no-hosts answer", () => {
     const twoAccounts = [
       "github.com",
       "  ✓ Logged in to github.com account someone (keyring)",
@@ -80,7 +80,8 @@ describe("sign-in table", () => {
       "  X Failed to log in to github.com account other (default)",
       "  - The token in default is invalid.",
     ].join("\n");
-    expect(check("gh", twoAccounts, 1)).toBe(true);
+    expect(check("gh", twoAccounts, 1)).toBe(false);
+    expect(check("gh", twoAccounts.replace(/  X Failed to log in to github.com account other \(default\)\n  - The token in default is invalid\./, "  ✓ Logged in to github.com account other (default)\n  - Active account: false"), 0)).toBe(true);
     expect(check("gh", "You are not logged into any GitHub hosts. To log in, run: gh auth login", 1)).toBe(false);
     expect(check("gh", "  X Failed to log in to github.com account other (default)\n  - The token in default is invalid.", 1)).toBe(false);
   });
