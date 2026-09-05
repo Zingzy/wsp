@@ -38,8 +38,11 @@ import {
   type ReapFailure,
   type ReapResult,
   type ReapedMachine,
+  type RetentionPlan,
   type WspError,
+  retentionPlan,
   rollback as rollbackGolden,
+  snapshotStorage,
 } from "@wsp/engine";
 import type {
   DaemonReachView,
@@ -53,6 +56,7 @@ import type {
   SessionEvent,
   SessionInterruptResult,
   SessionView,
+  SnapshotStorage,
   WorkspaceCreateStage,
   WorkspaceSize,
   WorkspaceView,
@@ -399,6 +403,16 @@ export interface Runtime {
     kill(builderId: string): Promise<void>;
     /** Moves the golden's head; new forks follow it, workspaces already forked keep their image. */
     rollback(version: number, name?: string): Promise<GoldenManifest>;
+    /** Every snapshot on the account by count, size and monthly cost past the free GB, sized from the provider's
+     * listing; undefined on a backend that cannot list snapshots. */
+    storage(): Promise<SnapshotStorage | undefined>;
+    /** The golden's ancestors older than its head and the head's parent, with what deleting them frees, minus every
+     * version a workspace of this runtime was forked from; undefined with no golden or no snapshot listing. */
+    retention(name?: string): Promise<RetentionPlan | undefined>;
+    /** Deletes the snapshots retention offers and drops those versions and their recipes from the manifest. The plan
+     * is read again first, so a workspace forked since the offer keeps its version; a delete the provider refuses
+     * keeps the version and is reported by version. */
+    prune(name?: string): Promise<{ dropped: GoldenVersion[]; failed: { version: number; message: string }[] }>;
   };
   /** Enriched status (machine state, daemon reach, size, rate) + cost ticker. */
   readonly status: StatusApi;
@@ -693,6 +707,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     cpu: shape?.cpu ?? asked.cpu,
     memMb: shape?.memMb ?? asked.memMb,
   });
+
+  /** The workspaces forked from this snapshot, whatever their phase: the lineage retention must not cut. */
+  const forkedFrom = (snapshotId: string): string[] => [...live.values()].filter(e => e.record.golden === snapshotId).map(e => e.record.name);
 
   /** The sealed version behind this snapshot, if any manifest knows it. */
   const goldenVersionOf = async (snapshotId: string): Promise<GoldenVersion | undefined> => {
@@ -1923,7 +1940,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             kept.record.import = applied.ledger;
             kept.record.setupSha = setupSha;
             delete kept.record.building;
-            kept.builder = { ...kept.builder, import: applied.ledger, setupSha };
+            // The builder was sealed as the head, so the version it seals next descends from the head's snapshot.
+            kept.builder = { ...kept.builder, import: applied.ledger, setupSha, parentSnapshotId: head.snapshotId };
             kept.life = "own";
             await hold(kept);
           } catch (e) {
@@ -2017,6 +2035,43 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (entry.life === "foreign" || entry.life === "held") refuseUntouchable(entry);
       await killUntilGone(backend, entry.builder.machine, opts.killConfirm);
       await forgetBuilder(builderId);
+    },
+
+    async storage() {
+      if (!backend.capabilities.snapshotListing || backend.listSnapshots === undefined) return undefined;
+      return snapshotStorage(await backend.listSnapshots(), backend.pricing.snapshotStorage);
+    },
+
+    async retention(name) {
+      await ready();
+      if (!backend.capabilities.snapshotListing || backend.listSnapshots === undefined) return undefined;
+      const manifest = (await store.get(GOLDENS, name ?? "default")) as GoldenManifest | undefined;
+      if (manifest === undefined) return undefined;
+      return retentionPlan(manifest, await backend.listSnapshots(), forkedFrom, backend.pricing.snapshotStorage);
+    },
+
+    async prune(name) {
+      const key = name ?? "default";
+      const plan = await golden.retention(key);
+      const dropped: GoldenVersion[] = [];
+      const failed: { version: number; message: string }[] = [];
+      if (plan === undefined) return { dropped, failed };
+      for (const v of plan.drop) {
+        try {
+          await backend.deleteSnapshot(v.snapshotId);
+        } catch (e) {
+          // A snapshot the provider already lost is gone either way; its version goes with it.
+          if ((e as { kind?: string }).kind !== "missing") {
+            failed.push({ version: v.version, message: e instanceof Error ? e.message : String(e) });
+            continue;
+          }
+        }
+        const manifest = (await store.get(GOLDENS, key)) as GoldenManifest;
+        await store.put(GOLDENS, key, { ...manifest, versions: manifest.versions.filter(x => x.version !== v.version) });
+        await store.delete(GOLDEN_RECIPES, recipeKey(key, v.version));
+        dropped.push(v);
+      }
+      return { dropped, failed };
     },
 
     async rollback(version, name) {

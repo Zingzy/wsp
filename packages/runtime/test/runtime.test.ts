@@ -2546,7 +2546,8 @@ describe("runtime golden update and the post-seal grace", () => {
     const result = await rt.golden.upgrade({ delta: deltaOf() });
     expect(result.road).toBe("builder");
     expect(result.previousDropped).toBe(false);
-    expect(result.version).toMatchObject({ version: 2, snapshotId: "snap_golden-v2", smoke: { cmd: "codex --version", exitCode: 0 } });
+    // The kept builder was sealed as v1, so v2 records v1's snapshot as its parent.
+    expect(result.version).toMatchObject({ version: 2, snapshotId: "snap_golden-v2", parentSnapshotId: "snap_golden-v1", smoke: { cmd: "codex --version", exitCode: 0 } });
     expect(result.manifest).toMatchObject({ head: 2, versions: [{ version: 1 }, { version: 2 }] });
     expect(await rt.golden.get()).toEqual(result.manifest);
     expect(frames).toEqual([
@@ -2617,7 +2618,8 @@ describe("runtime golden update and the post-seal grace", () => {
     rt.events.on("golden.stage", e => { if (e.type === "golden.stage") frames.push(`${e.stage}:${e.detail ?? ""}`); });
     const result = await rt.golden.upgrade({ delta: deltaOf() });
     expect(result.road).toBe("fork");
-    expect(result.manifest).toMatchObject({ head: 2, versions: [{ version: 1, snapshotId: "snap_golden-v1" }, { version: 2, snapshotId: "snap_golden-v2" }] });
+    expect(result.manifest).toMatchObject({ head: 2, versions: [{ version: 1, snapshotId: "snap_golden-v1" }, { version: 2, snapshotId: "snap_golden-v2", parentSnapshotId: "snap_golden-v1" }] });
+    expect(result.manifest.versions[0]).not.toHaveProperty("parentSnapshotId");
     expect(frames[0]).toBe("creating:fork of golden v1");
     const fork = backend.machines[2]!;
     expect(fork.spec).toMatchObject({ kind: "sandbox", fromSnapshot: "snap_golden-v1", cpu: 2, memMb: 4096, onIdle: "kill", labels: { wsp: "1", "wsp-builder": "1", "wsp-owner": expect.stringMatching(/^h_/) } });

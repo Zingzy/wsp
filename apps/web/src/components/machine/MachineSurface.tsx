@@ -21,6 +21,7 @@ import { Button } from "../ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty.js";
 import { ScrollArea } from "../ui/scroll-area.js";
 import { clockLabel, divergentMachineState, durationLabel, idleLabel, money, phaseLabel, reachLabel, sizeLabel } from "./format.js";
+import { SnapshotStorageLine } from "./SnapshotStorageLine.js";
 
 const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -270,6 +271,7 @@ function Usage({ workspace, status, series }: { workspace: WorkspaceView; status
           {money(cost?.accruedUsd ?? 0)}
         </Row>
       </div>
+      <SnapshotStorageLine />
     </Section>
   );
 }

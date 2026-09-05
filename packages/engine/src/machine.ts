@@ -72,11 +72,29 @@ export interface Machine {
   describe?(): Promise<MachineShape>;
 }
 
+/** One snapshot as the provider lists it; sizeBytes is what storage is billed on. */
+export interface SnapshotRow {
+  id: string;
+  sizeBytes: number;
+  createdAt?: string;
+  /** The snapshot this one was taken under, as the provider chains them; null at a root. */
+  parent?: string | null;
+}
+
+/** How the provider bills snapshot storage: the free GB shared by every snapshot on the account, the price of
+ * each GB-month past them, and the day billing starts. */
+export interface SnapshotStoragePricing {
+  freeGb: number;
+  usdPerGbMonth: number;
+  billedFrom: string;
+}
+
 /** What a size costs on this provider, and the shape a spec gets when it
  * names none. Local arithmetic until provider billing APIs are integrated. */
 export interface BackendPricing {
   rateUsdPerHour(size: { cpu: number; memMb: number }): number;
   defaultSize: { cpu: number; memMb: number };
+  snapshotStorage: SnapshotStoragePricing;
 }
 
 export interface MachineBackend {
@@ -87,4 +105,6 @@ export interface MachineBackend {
   /** size comes off the listing itself; a per-machine GET would reset that machine's idle timer. */
   list(labels?: Record<string, string>): Promise<{ id: string; state: MachineState; labels: Record<string, string>; size?: { cpu: number; memMb: number } }[]>;
   deleteSnapshot(id: string): Promise<void>;
+  /** Optional: only backends whose capabilities include snapshotListing have it. Every snapshot on the account, with its size. */
+  listSnapshots?(): Promise<SnapshotRow[]>;
 }

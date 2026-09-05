@@ -40,6 +40,7 @@ import {
 import { CARD_FRAME, GUTTER, card, colourDepth, confirmPrompt, ellipsize, fmtDuration, helpLine, rowsOf, table, widthOf, wrap } from "./init-layout.js";
 import { openRunLog, runLogPath } from "./init-log.js";
 import { stopKeptBuilder, updateRoad } from "./init-upgrade.js";
+import { retentionOffer } from "./storage.js";
 import { readKey, rungSelect, type SelectItem } from "./init-select.js";
 import { OPEN_LINE, builderLink, noteLogins, openLogins, signInStage, stageLogins, type BuilderLink, type LoginOutcome, type SignInFlow } from "./init-signin.js";
 import type { HostHandle } from "./server.js";
@@ -928,7 +929,10 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const current = attach === undefined ? await rt.golden.recipe(GOLDEN_NAME) : undefined;
   if (current !== undefined) {
     const road = await updateRoad({ rt, current, imp, bring, rows: manifest.entries, importOf, interactive, yes: opts.yes, input: io.input, output: io.output, stream: (words, run) => streamStages(rt, io, words, run, runLog.note) });
-    if (road !== "rebuild") return { code: road };
+    if (road !== "rebuild") {
+      if (road === 0) await retentionOffer({ rt, interactive, yes: opts.yes, input: io.input, output: io.output });
+      return { code: road };
+    }
   }
   if (stop.length > 0) {
     listEarlier(stop, attach);

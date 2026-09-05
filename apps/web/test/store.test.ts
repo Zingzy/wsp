@@ -15,7 +15,7 @@ const view = (id: string): WorkspaceView => ({
   createdAt: "2026-09-01T00:00:00Z",
 });
 
-const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true };
+const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true };
 
 function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
@@ -43,6 +43,7 @@ function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
     builderReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
     sessionHistory: async () => [],
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
+    snapshotStorage: async () => null,
     rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
     listSessions: async id => {
       listCalls.push(id);

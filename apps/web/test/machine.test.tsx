@@ -42,7 +42,7 @@ const costEvent = (workspaceId: string, rate: number, awakeMs: number, at: strin
   at,
 });
 
-const CAPS: Capabilities = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true };
+const CAPS: Capabilities = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true };
 const EMPTY_LINEAGE: SnapshotLineage = { name: "default", head: null, versions: [] };
 
 // The surface's cost series listens through api.subscribe like the store does,
@@ -66,6 +66,7 @@ function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS,
     startSession: vi.fn(async (o: { workspaceId: string }) => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" as const })),
     sessionHistory: vi.fn(async () => []),
     listSnapshots: vi.fn<() => Promise<SnapshotLineage>>(async () => current),
+    snapshotStorage: async () => null,
     rollbackSnapshot: vi.fn(async (version: number) => {
       current = { ...current, head: version };
       return { lineage: current, existingWorkspaces: "untouched" as const };

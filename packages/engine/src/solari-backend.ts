@@ -1,6 +1,6 @@
 import type { Capabilities } from "@wsp/protocol";
 import { backoffMs, classify, shouldRetry, type WspError } from "./errors.js";
-import type { ExecResult, Machine, MachineBackend, MachineKind, MachineShape, MachineSpec, MachineState, PreviewReach } from "./machine.js";
+import type { ExecResult, Machine, MachineBackend, MachineKind, MachineShape, MachineSpec, MachineState, PreviewReach, SnapshotRow, SnapshotStoragePricing } from "./machine.js";
 import { previewTokenExpiry } from "./preview.js";
 
 type Fetch = typeof globalThis.fetch;
@@ -33,6 +33,9 @@ const STATE_MAP: Record<SandboxView["state"], MachineState> = {
   gone: "gone",
 };
 
+/** Solari changelog 2026-09-04: snapshot storage is billed from 2026-10-01, 10 GB free per organization, then $0.05 per GB-month pro-rated daily. */
+export const SNAPSHOT_STORAGE: SnapshotStoragePricing = { freeGb: 10, usdPerGbMonth: 0.05, billedFrom: "2026-10-01" };
+
 /** Prefixed to every exec: the guest runs as root and the exec API hands it no environment beyond PATH. */
 export const EXEC_ENV = "export HOME=/root USER=root";
 
@@ -49,6 +52,7 @@ export class SolariBackend implements MachineBackend {
     signedUrls: true,
     containers: false, // guest kernel 6.6.30 lacks overlayfs and netfilter: dockerd falls back to vfs with no bridge and runc fails (measured)
     callbackRelay: true, // the daemon link rides previewUrls
+    snapshotListing: true,
   };
 
   // Solari's published Starter pricing: per vCPU-hour + per GB-hour
@@ -58,6 +62,7 @@ export class SolariBackend implements MachineBackend {
     rateUsdPerHour: (size: { cpu: number; memMb: number }): number =>
       size.cpu * 0.035 + (size.memMb / 1024) * 0.01,
     defaultSize: { cpu: 2, memMb: 4096 },
+    snapshotStorage: SNAPSHOT_STORAGE,
   };
 
   private readonly apiKey: string;
@@ -165,6 +170,17 @@ export class SolariBackend implements MachineBackend {
 
   async deleteSnapshot(id: string): Promise<void> {
     await this.request("DELETE", `/snapshots/${encodeURIComponent(id)}`);
+  }
+
+  async listSnapshots(): Promise<SnapshotRow[]> {
+    const page = await this.request<{ snapshots?: unknown }>("GET", "/snapshots");
+    if (!Array.isArray(page.snapshots)) throw new Error("GET /snapshots answered without a snapshots array");
+    return (page.snapshots as { id: string; sizeBytes: number; createdAt?: string; parent?: string | null }[]).map(s => ({
+      id: s.id,
+      sizeBytes: s.sizeBytes,
+      ...(s.createdAt !== undefined ? { createdAt: s.createdAt } : {}),
+      ...(s.parent !== undefined ? { parent: s.parent } : {}),
+    }));
   }
 }
 
