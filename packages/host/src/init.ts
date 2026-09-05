@@ -17,7 +17,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BREW_TOOLCHAIN_BYTES, BUILDER_DISK_GB, MEASURED_ON, PACK_BUDGET_BYTES, TOOLCHAIN_MEASURED_ON, TOOLS_DISK_FLOOR, agentInstallsFor, agentSize, brewfileFor, editorInstallsFor, estimateDisk, extensionsFile, pinState, remoteEditorFor, remoteSettingsPath, toolInstallsFor, toolSize, type BrewTable, type DiskEstimate, type ImportResult } from "@wsp/engine";
 import { ALREADY_APPLIED } from "@wsp/protocol";
-import { CLAUDE_INSTALLER, importFor, importResultPath, keychainLogins, leftBehind, readSecrets, statOf, type SecretReader } from "./init-import.js";
+import { CLAUDE_INSTALLER, importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
   CONSENT_CHOICES,
   LOGIN_CHOICES,
@@ -452,8 +452,8 @@ function spin(output: Writable, label: string, animate: boolean): Spinner {
 
 // --- screens ---------------------------------------------------------------
 
-/** Anthropic forbids a host to collect or pass along this credential, which is why its login is signed in on the machine unless the person opts in. */
-const CLAUDE_LOGIN_WHY = "Anthropic's terms forbid passing this credential along, so the default is to sign in on the machine.";
+/** Anthropic forbids a host to collect or pass along the OAuth credential, which is why that login is signed in on the machine unless the person opts in; an API key is the person's own to set. */
+const CLAUDE_LOGIN_WHY = "Anthropic's terms forbid passing the OAuth credential along, so with it alone the default is to sign in on the machine.";
 /** What the answers on a login row do, and on a credential-shaped row. */
 const LOGIN_WHY = "copy brings it along; sign in does it in this terminal after the build";
 const CONSENT_WHY = "copy brings it along; skip leaves it here";
@@ -504,7 +504,7 @@ function sizeWhy(e: ManifestEntry, brew: BrewTable): string {
 function detailWhy(e: ManifestEntry, lock: "on" | "off" | undefined, brew: BrewTable): string {
   if (lock === "off") return e.reason ?? "";
   if (lock === "on") return "always comes along";
-  if (e.rung === "logins") return agentName(e) === "claude" ? CLAUDE_LOGIN_WHY : LOGIN_WHY;
+  if (e.rung === "logins") return agentName(e) === "claude" ? [e.detail, CLAUDE_LOGIN_WHY].filter(x => x !== undefined).join("; ") : LOGIN_WHY;
   if (e.rung === "everything" || isMcpRow(e)) return e.detail ?? "";
   if (e.font !== undefined) return "the app's terminal draws with it when this computer has it installed; unticked, the app uses its own font";
   if (e.rung === "agents") {
@@ -529,6 +529,7 @@ function whereNothing(e: ManifestEntry): string {
   if (remote !== undefined) return `listed in ~/${extensionsFile(remote.dir)} on the machine; nothing installs until you connect`;
   if (isMcpRow(e)) return "defined in the agent's config, which travels with the agent's row";
   if (e.font !== undefined) return "read from your terminal's config; nothing to copy";
+  if (e.rung === "logins") return "nothing to copy; copy checks the login on the machine";
   return e.rung === "everything" || e.rung === "editors" ? "nothing to copy" : "reinstalled on the machine";
 }
 
@@ -1036,7 +1037,10 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   // finds no value for it.
   const wanted = keychainLogins(bring, opts.platform, opts.home);
   // Off a terminal the spinner draws nothing, and only a saved copy answer gets here; a scripted run would otherwise sit on macOS's dialog with no word why.
-  if (!io.isTTY && wanted.length > 0) log.step(`Reading ${[...new Set(wanted.map(s => s.service))].join(", ")} from your Keychain, as the saved recipe answered copy; macOS may ask you to allow it.`, out);
+  const keychainItems = [...new Set(wanted.filter(s => s.command === undefined).map(s => s.service))];
+  const helpers = [...new Set(wanted.filter(s => s.command !== undefined).map(s => s.service))];
+  const consentLine = [...(keychainItems.length > 0 ? [`reading ${keychainItems.join(", ")} from your Keychain`] : []), ...(helpers.length > 0 ? [`running the ${helpers.join(", ")} helper`] : [])].join(" and ");
+  if (!io.isTTY && wanted.length > 0) log.step(`${consentLine[0]!.toUpperCase()}${consentLine.slice(1)}, as the saved recipe answered copy; macOS may ask you to allow it.`, out);
   const reading = spin(io.output, "Reading your Keychain logins", io.isTTY && wanted.length > 0);
   const read = await readSecrets(wanted, opts.secrets);
   reading.stop();
@@ -1045,11 +1049,11 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     runLog.hide(value);
   }
   const label = (id: string) => manifest.entries.find(e => e.id === id)?.label ?? id;
-  if (read.dropped.length > 0) log.warn(read.dropped.map(d => `${label(d.id)}: ${leftBehind(d.account)} (${d.reason}).`).join("\n"), out);
-  const left = new Map(read.dropped.map(d => [d.id, read.dropped.filter(x => x.id === d.id).map(x => leftBehind(x.account)).join("; ")]));
+  if (read.dropped.length > 0) log.warn(read.dropped.map(d => `${label(d.id)}: ${d.left} (${d.reason}).`).join("\n"), out);
+  const left = new Map(read.dropped.map(d => [d.id, read.dropped.filter(x => x.id === d.id).map(x => x.left).join("; ")]));
   if (read.refused.length > 0) {
     for (const r of read.refused) choices.set(r.id, "machine");
-    log.warn(read.refused.map(r => `${label(r.id)}: Keychain read failed (${r.reason}); changed to sign in on the machine.`).join("\n"), out);
+    log.warn(read.refused.map(r => `${label(r.id)}: ${r.command !== undefined ? `the ${r.service} helper failed` : "Keychain read failed"} (${r.reason}); changed to sign in on the machine.`).join("\n"), out);
     saveRecipe(path, manifest, ticks, choices);
     // The flipped rows change the recipe hash; the builder must carry the hash the saved recipe now has,
     // so wsp init --manifest on that file attaches to it later.
@@ -1228,16 +1232,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     },
   });
   const dial = (): Promise<BuilderLink> => (opts.daemon ?? builderLink)(rt, builder);
-  const skipWhy = interactive ? undefined : io.isTTY ? "--yes asks nothing; sign in from the app's terminal" : "no terminal to sign in from; use the app's terminal";
-  const outcomes = await signInStage({
-    logins: stageLogins(offered, choices, ticks),
-    left,
-    dial,
-    terminal: { input: io.input, output: io.output },
-    ...(skipWhy !== undefined ? { skipWhy } : {}),
-    open: url => io.open(url),
-    flow,
-  });
+  // Secrets first: a key cut from an rc file is on the machine before any status check looks for it.
   const skipSecretsWhy = interactive ? undefined : io.isTTY ? "--yes asks nothing; set them from the app's terminal" : "no terminal to paste into; set them from the app's terminal";
   const secretOutcomes = await secretsStage({
     cut: landed?.files?.cut ?? [],
@@ -1246,6 +1241,17 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     output: io.output,
     ...(skipSecretsWhy !== undefined ? { skipWhy: skipSecretsWhy } : {}),
     hide: value => runLog.hide(value),
+  });
+  const skipWhy = interactive ? undefined : io.isTTY ? "--yes asks nothing; sign in from the app's terminal" : "no terminal to sign in from; use the app's terminal";
+  const outcomes = await signInStage({
+    logins: stageLogins(offered, choices, ticks),
+    left,
+    secrets: new Map(secretOutcomes.filter(r => r.state === "set").map(r => [r.name, r.path])),
+    dial,
+    terminal: { input: io.input, output: io.output },
+    ...(skipWhy !== undefined ? { skipWhy } : {}),
+    open: url => io.open(url),
+    flow,
   });
   if (noteOutcomes(resultsPath, { logins: outcomes, secrets: secretOutcomes }).replaced) log.warn(`${resultsPath} could not be read; it was rewritten with the logins and secrets alone.`, out);
 

@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Logins are presence only: a path is stat'ed, a Keychain item is looked up
-// by service name without -w, and no file under this rung is ever read.
-import type { Host, Platform } from "../host.js";
+// by service name without -w, and no login file is ever read. The rc files
+// and Claude Code's settings.json are read for names alone: which variable is
+// exported, whether a helper command is set.
+import { type Host, type Platform, expand } from "../host.js";
+import { RC_PATHS, stripExports } from "../everything/shell-rc.js";
 import type { Default, ManifestEntry } from "../manifest.js";
 import { entry, found, item, present } from "./common.js";
 
@@ -41,17 +44,57 @@ async function ghRow(host: Host): Promise<ManifestEntry | undefined> {
   return entry({ rung: "logins", id: "logins/gh", label: "GitHub CLI login", group: "CLI logins", paths, bytes: f.bytes });
 }
 
-// Claude defaults to signing in on the machine: the vendor's terms forbid a
-// host to collect or intermediate the credential, and a copy would transit
-// the wsp process. The row stays tickable so the person can still choose.
-async function claudeRow(host: Host): Promise<ManifestEntry | undefined> {
-  if (host.platform === "darwin") {
-    if (!(await keychainHas(host, "Claude Code-credentials"))) return undefined;
-    return entry({ rung: "logins", id: "logins/claude", label: "Claude Code login", group: "Agent logins", paths: ["Keychain: Claude Code-credentials"], bytes: 0, default: "skip" });
+/** The settings file whose apiKeyHelper prints the key; the plan reads the command from it at pack time. */
+export const CLAUDE_SETTINGS = "~/.claude/settings.json";
+export const CLAUDE_KEY_ENV = "ANTHROPIC_API_KEY";
+
+/** The apiKeyHelper command a settings.json names, when it parses and has one. */
+export function apiKeyHelperOf(text: string | undefined): string | undefined {
+  if (text === undefined) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    const helper = typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>)["apiKeyHelper"] : undefined;
+    return typeof helper === "string" && helper.trim() !== "" ? helper : undefined;
+  } catch {
+    return undefined;
   }
-  const f = await found(host, ["~/.claude/.credentials.json"]);
-  if (f.paths.length === 0) return undefined;
-  return entry({ rung: "logins", id: "logins/claude", label: "Claude Code login", group: "Agent logins", ...f, default: "skip" });
+}
+
+/** The first rc file that exports the name; the pack cuts that line and the secrets step sets it on the machine. */
+async function exportedIn(host: Host, name: string): Promise<string | undefined> {
+  for (const rel of RC_PATHS) {
+    const text = await host.fs.readText(`${host.home}/${rel}`);
+    if (text !== undefined && stripExports(text).names.includes(name)) return `~/${rel}`;
+  }
+  return undefined;
+}
+
+// Claude Code takes its key from ANTHROPIC_API_KEY first, then the apiKeyHelper, then the OAuth
+// credentials (measured on 2.1.257). An API key travels: the exported one is cut from the rc file
+// and set on the machine in the secrets step, the helper's is read here with the Keychain logins.
+// The OAuth credential defaults to a sign-in on the machine: the vendor's terms forbid a host
+// to collect or intermediate it, and a copy would transit the wsp process.
+async function claudeRow(host: Host): Promise<ManifestEntry | undefined> {
+  const oauth = host.platform === "darwin" ? { paths: (await keychainHas(host, "Claude Code-credentials")) ? ["Keychain: Claude Code-credentials"] : [], bytes: 0 } : await found(host, ["~/.claude/.credentials.json"]);
+  const helper = apiKeyHelperOf(await host.fs.readText(expand(host, CLAUDE_SETTINGS)));
+  const exported = await exportedIn(host, CLAUDE_KEY_ENV);
+  const sources = [
+    ...(exported !== undefined ? [`the API key exported in ${exported} (set on the machine in the secrets step)`] : []),
+    ...(helper !== undefined ? [`the apiKeyHelper in ${CLAUDE_SETTINGS}`] : []),
+    ...(oauth.paths.length > 0 ? ["OAuth credentials"] : []),
+  ];
+  if (sources.length === 0) return undefined;
+  const [used, ...rest] = sources;
+  return entry({
+    rung: "logins",
+    id: "logins/claude",
+    label: "Claude Code login",
+    group: "Agent logins",
+    paths: [...oauth.paths, ...(helper !== undefined ? [`Helper: ${CLAUDE_SETTINGS}`] : [])],
+    bytes: oauth.bytes,
+    default: exported !== undefined || helper !== undefined ? "bring" : "skip",
+    detail: `Claude Code uses ${used}${rest.length > 0 ? `; also found: ${rest.join(", ")}` : ""}`,
+  });
 }
 
 export async function detectLogins(host: Host): Promise<ManifestEntry[]> {

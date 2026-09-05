@@ -9,6 +9,9 @@ export interface StatusCheck {
   command: string;
   /** Reads the status command's exit code and output; never anything the login printed. */
   signedIn(output: string, exitCode: number): boolean;
+  /** Which of a tool's login sources the status says is in use, for the row; `secrets` maps a name the
+   * secrets step set on the machine to the file it was cut from. Absent or undefined: the row names none. */
+  detail?(output: string, secrets: ReadonlyMap<string, string>): string | undefined;
 }
 
 export type SignIn =
@@ -35,6 +38,26 @@ export const AWS_STATUS = `sh -c 'for p in $(aws configure list-profiles 2>/dev/
 
 const has = (re: RegExp) => (output: string): boolean => re.test(output);
 const ok = (re?: RegExp) => (output: string, exitCode: number): boolean => exitCode === 0 && (re === undefined || re.test(output));
+
+/** What claude auth status says the key comes from (measured on 2.1.257): apiKeySource names ANTHROPIC_API_KEY or
+ * apiKeyHelper when an API key is in use, authMethod is claude.ai on OAuth credentials alone. */
+export function claudeSource(output: string, secrets: ReadonlyMap<string, string>): string | undefined {
+  const json = /\{[\s\S]*\}/.exec(output)?.[0];
+  if (json === undefined) return undefined;
+  let status: Record<string, unknown>;
+  try {
+    status = JSON.parse(json) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+  if (status["apiKeySource"] === "ANTHROPIC_API_KEY") {
+    const from = secrets.get("ANTHROPIC_API_KEY");
+    return from === undefined ? "API key from ANTHROPIC_API_KEY on the machine" : `API key from ${from}, set on the machine as a secret`;
+  }
+  if (status["apiKeySource"] === "apiKeyHelper") return "API key from the settings.json helper";
+  if (status["loggedIn"] === true && status["authMethod"] === "claude.ai") return "OAuth credentials";
+  return undefined;
+}
 
 export const SIGN_INS: Readonly<Record<string, SignIn>> = {
   // Device flow by default; the shim opens the device page and the person types the code there. The status lists
@@ -71,7 +94,7 @@ export const SIGN_INS: Readonly<Record<string, SignIn>> = {
   railway: { kind: "command", login: "railway login", status: { command: "railway whoami", signedIn: ok(/Logged in as/) }, toolTimeoutMs: 5 * MIN },
   doppler: { kind: "command", login: "doppler login", status: { command: "doppler me", signedIn: ok() }, toolTimeoutMs: 5 * MIN },
   // The shim gets the localhost-callback URL and the terminal the hosted paste-code one; either finishes the login.
-  claude: { kind: "command", login: "claude auth login", status: { command: "claude auth status", signedIn: has(/"loggedIn":\s*true/) } },
+  claude: { kind: "command", login: "claude auth login", status: { command: "claude auth status", signedIn: has(/"loggedIn":\s*true/), detail: claudeSource } },
   codex: { kind: "command", login: "codex login", fallback: "codex login --device-auth", status: { command: "codex login status", signedIn: ok(/Logged in using/) } },
   gemini: { kind: "command", login: "gemini", toolTimeoutMs: 5 * MIN },
   opencode: { kind: "command", login: "opencode auth login", note: "OpenCode dropped its Anthropic sign-in in 1.3.0; it takes an API key there", toolTimeoutMs: 5 * MIN },

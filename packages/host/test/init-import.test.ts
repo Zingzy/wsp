@@ -45,7 +45,8 @@ const row = (over: Partial<ManifestEntry> & Pick<ManifestEntry, "rung" | "id">):
   ...over,
 });
 
-/** A Keychain with the given items, keyed as the secrets map is (see secretKey); every read is recorded as [service, account]. */
+/** A Keychain with the given items, keyed as the secrets map is (see secretKey), and helper commands keyed by their
+ * line; every read is recorded as [service, account], every helper run as [command]. */
 function reader(values: Record<string, string>): SecretReader & { reads: (string | undefined)[][] } {
   const reads: (string | undefined)[][] = [];
   return {
@@ -56,8 +57,17 @@ function reader(values: Record<string, string>): SecretReader & { reads: (string
       if (v === undefined) throw new Error(`Command failed: security find-generic-password -s ${service} -w\nsecurity: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.\n`);
       return v;
     },
+    run: async command => {
+      reads.push([command]);
+      const v = values[command];
+      if (v === undefined) throw new Error(`Command failed: ${command}\nsecurity: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.\n`);
+      return v;
+    },
   };
 }
+
+const HELPER = "security find-generic-password -s anthropic-api-key -w";
+const CLAUDE_SETTINGS = `{\n  "apiKeyHelper": "${HELPER}",\n  "model": "opus"\n}\n`;
 
 function listTar(tar: Buffer): { path: string; mode: string }[] {
   const dir = mkdtempSync(join(tmpdir(), "wsp-import-tar-"));
@@ -258,7 +268,7 @@ describe("packPlan", () => {
     const partial = await readSecrets(wanted.slice(0, 2), reader({ "gh:github.com (Zingzy)": "gho_fake_token" }));
     expect([...partial.values.keys()]).toEqual(["gh:github.com (Zingzy)"]);
     expect(partial.refused).toEqual([]);
-    expect(partial.dropped).toEqual([{ id: "logins/gh", service: "gh:github.com", account: "other", reason: "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain." }]);
+    expect(partial.dropped).toEqual([{ id: "logins/gh", service: "gh:github.com", account: "other", left: "other left behind: no token in the Keychain", reason: "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain." }]);
     // With no account read the row is refused once, the reason naming every account.
     const none = await readSecrets(wanted.slice(0, 2), reader({}));
     expect(none.dropped).toEqual([]);
@@ -269,6 +279,82 @@ describe("packPlan", () => {
         reason: "other: security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.; Zingzy: security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.",
       },
     ]);
+  });
+
+  it("the Claude helper is run once on this computer with the Keychain reads, its value lands as a 0600 key file and the copied settings.json's helper reads that file; a failed run refuses the login with the command's reason", async () => {
+    const home = laptop();
+    mkdirSync(join(home, ".claude"), { recursive: true });
+    writeFileSync(join(home, ".claude", "settings.json"), CLAUDE_SETTINGS);
+    const rows = [
+      row({ rung: "agents", id: "agents/claude", paths: ["~/.claude/settings.json"] }),
+      row({ rung: "logins", id: "logins/claude", paths: ["Keychain: Claude Code-credentials", "Helper: ~/.claude/settings.json"], choice: "copy" }),
+    ];
+    const wanted = keychainLogins(rows, "darwin", home);
+    expect(wanted.map(s => [s.id, s.service, s.command])).toEqual([
+      ["logins/claude", "Claude Code-credentials", undefined],
+      ["logins/claude", "~/.claude/settings.json", HELPER],
+    ]);
+    // On Linux the Keychain item is a note; the helper still runs.
+    expect(keychainLogins(rows, "linux", home).map(s => s.command)).toEqual([HELPER]);
+    const secrets = reader({ [HELPER]: "sk-ant-x-helper" });
+    const read = await readSecrets(wanted, secrets);
+    expect(secrets.reads).toEqual([["Claude Code-credentials", undefined], [HELPER]]);
+    expect([...read.values]).toEqual([["~/.claude/settings.json", "sk-ant-x-helper"]]);
+    // The Keychain item was not read while the helper was: the login copies without the OAuth credentials, the row detail saying so.
+    expect(read.refused).toEqual([]);
+    expect(read.dropped).toEqual([{ id: "logins/claude", service: "Claude Code-credentials", left: "Claude Code-credentials left behind: no token in the Keychain", reason: "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain." }]);
+    const plan = planFiles(rows, { home, stat: statOf, read: abs => readFileSync(abs, "utf8"), platform: "darwin", rewrites: [[".claude/", ".claude-cfg/"]] });
+    const packed = await packPlan(plan, { secrets: read.values, home });
+    expect(packed.skipped).toEqual([{ id: "logins/claude", path: "Keychain: Claude Code-credentials", note: "Claude Code-credentials left behind: no token in the Keychain" }]);
+    const dir = extract(packed.tar);
+    expect(readFileSync(join(dir, ".claude-cfg", "anthropic-api-key"), "utf8")).toBe("sk-ant-x-helper\n");
+    expect(statSync(join(dir, ".claude-cfg", "anthropic-api-key")).mode & 0o777).toBe(0o600);
+    expect(readFileSync(join(dir, ".claude-cfg", "settings.json"), "utf8")).toBe('{\n  "apiKeyHelper": "cat /root/.claude-cfg/anthropic-api-key",\n  "model": "opus"\n}\n');
+    expect(listTar(packed.tar).some(e => e.path.includes(".credentials.json"))).toBe(false);
+    // The helper failing on this computer refuses the login with the last line the command printed; beside a read
+    // Keychain item it is left behind instead, and the copied settings.json loses the helper line.
+    const failed = await readSecrets(wanted.slice(1), reader({}));
+    expect(failed.refused).toEqual([{ id: "logins/claude", service: "~/.claude/settings.json", command: HELPER, reason: "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain." }]);
+    const oauthOnly = await readSecrets(wanted, reader({ "Claude Code-credentials": '{"claudeAiOauth":{"accessToken":"sk-ant-x"}}' }));
+    expect(oauthOnly.refused).toEqual([]);
+    expect(oauthOnly.dropped.map(d => d.left)).toEqual(["the helper's key left behind: the helper did not run here"]);
+    const without = await packPlan(plan, { secrets: oauthOnly.values, home });
+    expect(without.skipped).toEqual([
+      { id: "logins/claude", path: "Helper: ~/.claude/settings.json", note: "the helper's key left behind: the helper did not run here" },
+      { id: "agents/claude", path: "~/.claude/settings.json", note: "apiKeyHelper left out of the copy: the command runs on this computer only" },
+    ]);
+    expect(readFileSync(join(extract(without.tar), ".claude-cfg", "settings.json"), "utf8")).toBe('{\n  "model": "opus"\n}\n');
+    expect(readFileSync(join(extract(without.tar), ".claude-cfg", ".credentials.json"), "utf8")).toBe('{"claudeAiOauth":{"accessToken":"sk-ant-x"}}');
+  });
+
+  it("a copied settings.json whose helper did not travel loses the helper line, with a note, since a helper that fails on the machine is what every request would use", async () => {
+    const home = laptop();
+    mkdirSync(join(home, ".claude"), { recursive: true });
+    writeFileSync(join(home, ".claude", "settings.json"), CLAUDE_SETTINGS);
+    // The whole directory copied, the login signing in on the machine.
+    const plan = planFiles(
+      [row({ rung: "agents", id: "agents/claude", paths: ["~/.claude"] }), row({ rung: "logins", id: "logins/claude", paths: ["Helper: ~/.claude/settings.json"], choice: "machine" })],
+      { home, stat: statOf, read: abs => readFileSync(abs, "utf8"), platform: "darwin", rewrites: [[".claude/", ".claude-cfg/"]] },
+    );
+    const packed = await packPlan(plan, { secrets: new Map(), home });
+    expect(packed.skipped).toEqual([{ id: "agents/claude", path: "~/.claude/settings.json", note: "apiKeyHelper left out of the copy: the command runs on this computer only" }]);
+    expect(readFileSync(join(extract(packed.tar), ".claude-cfg", "settings.json"), "utf8")).toBe('{\n  "model": "opus"\n}\n');
+    // Refused on this computer: the same drop, and the login's own note.
+    const copy = planFiles(
+      [row({ rung: "agents", id: "agents/claude", paths: ["~/.claude/settings.json"] }), row({ rung: "logins", id: "logins/claude", paths: ["Helper: ~/.claude/settings.json"], choice: "copy" })],
+      { home, stat: statOf, read: abs => readFileSync(abs, "utf8"), platform: "darwin", rewrites: [[".claude/", ".claude-cfg/"]] },
+    );
+    const refused = await packPlan(copy, { secrets: new Map(), home });
+    expect(refused.skipped).toEqual([
+      { id: "logins/claude", path: "Helper: ~/.claude/settings.json", note: "the helper did not run here; sign in on the machine" },
+      { id: "agents/claude", path: "~/.claude/settings.json", note: "apiKeyHelper left out of the copy: the command runs on this computer only" },
+    ]);
+    expect(readFileSync(join(extract(refused.tar), ".claude-cfg", "settings.json"), "utf8")).toBe('{\n  "model": "opus"\n}\n');
+    // A settings.json with no helper is copied as it is.
+    writeFileSync(join(home, ".claude", "settings.json"), '{"model": "opus"}');
+    const plain = await packPlan(planFiles([row({ rung: "agents", id: "agents/claude", paths: ["~/.claude/settings.json"] })], { home, stat: statOf, platform: "darwin", rewrites: [[".claude/", ".claude-cfg/"]] }), { secrets: new Map(), home });
+    expect(plain.skipped).toEqual([]);
+    expect(readFileSync(join(extract(plain.tar), ".claude-cfg", "settings.json"), "utf8")).toBe('{"model": "opus"}');
   });
 
   it("places each secret it was given, gh's per account with the active one under the host, and notes a planned secret it was not given instead of failing", async () => {
@@ -626,9 +712,12 @@ describe("keychainReader", () => {
     });
     await expect(r.read("gh:github.com", "Zingzy")).resolves.toBe(token);
     await expect(r.read("Claude Code-credentials")).resolves.toBe(claude);
+    // A helper line runs under sh the way Claude Code runs it, its trailing newline dropped.
+    await expect(r.run(HELPER)).resolves.toBe(claude);
     expect(ran).toEqual([
       ["security", "find-generic-password", "-s", "gh:github.com", "-a", "Zingzy", "-w"],
       ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
+      ["/bin/sh", "-c", HELPER],
     ]);
   });
 });

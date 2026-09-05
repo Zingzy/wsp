@@ -23,6 +23,8 @@ import {
   recipeHash,
   refusedPath,
   secretKey,
+  secretPath,
+  withApiKeyHelper,
   SHELL_FRAMEWORKS,
   shellInstallFor,
   toolInstallsFor,
@@ -261,6 +263,35 @@ describe("planFiles: which laptop files travel and where they land", () => {
     const p = plan([row({ rung: "logins", id: "logins/glab", paths: ["Keychain: glab:gitlab.com"], choice: "copy" })]);
     expect(p.secrets).toEqual([]);
     expect(p.skipped).toEqual([{ id: "logins/glab", path: "Keychain: glab:gitlab.com", note: "no Keychain reader for this login yet; sign in on the machine" }]);
+  });
+
+  it("a Helper: path plans the key the settings file's apiKeyHelper prints as a secret to run at pack time, on either platform, with a note when the file names no helper", () => {
+    const settings = '{"apiKeyHelper": "security find-generic-password -s anthropic-api-key -w", "model": "opus"}';
+    const claude = row({ rung: "logins", id: "logins/claude", paths: ["Keychain: Claude Code-credentials", "Helper: ~/.claude/settings.json"], choice: "copy" });
+    for (const platform of ["darwin", "linux"] as const) {
+      const p = planFiles([claude], { home: HOME, stat, platform, read: abs => (abs === `${HOME}/.claude/settings.json` ? settings : undefined), rewrites: [[".claude/", ".claude-cfg/"]] });
+      const helper = p.secrets.find(s => s.command !== undefined)!;
+      expect(helper).toMatchObject({ id: "logins/claude", service: "~/.claude/settings.json", command: "security find-generic-password -s anthropic-api-key -w", dest: ".claude-cfg/anthropic-api-key" });
+      expect(helper.place("sk-ant-x", undefined)).toBe("sk-ant-x\n");
+      expect(secretPath(helper)).toBe("Helper: ~/.claude/settings.json");
+      expect(secretKey(helper)).toBe("~/.claude/settings.json");
+      expect(p.rungs).toEqual({ logins: platform === "darwin" ? 2 : 1 });
+    }
+    expect(secretPath({ service: "gh:github.com", account: "Zingzy" })).toBe("Keychain: gh:github.com (Zingzy)");
+    const none = planFiles([row({ rung: "logins", id: "logins/claude", paths: ["Helper: ~/.claude/settings.json"], choice: "copy" })], { home: HOME, stat, platform: "darwin", read: () => '{"model": "opus"}' });
+    expect(none.secrets).toEqual([]);
+    expect(none.skipped).toEqual([{ id: "logins/claude", path: "Helper: ~/.claude/settings.json", note: "no apiKeyHelper in ~/.claude/settings.json any more; sign in on the machine" }]);
+    const unknown = planFiles([row({ rung: "logins", id: "logins/x", paths: ["Helper: ~/.x/settings.json"], choice: "copy" })], { home: HOME, stat, platform: "darwin", read: () => "{}" });
+    expect(unknown.skipped).toEqual([{ id: "logins/x", path: "Helper: ~/.x/settings.json", note: "no helper reader for this login yet; sign in on the machine" }]);
+  });
+
+  it("withApiKeyHelper points a copied settings.json at the key file on the machine, drops the helper when no key travels, and leaves a file without one alone", () => {
+    const settings = '{\n  "apiKeyHelper": "security find-generic-password -s anthropic-api-key -w",\n  "model": "opus"\n}\n';
+    expect(withApiKeyHelper(settings, "cat /root/.claude-cfg/anthropic-api-key")).toBe('{\n  "apiKeyHelper": "cat /root/.claude-cfg/anthropic-api-key",\n  "model": "opus"\n}\n');
+    expect(withApiKeyHelper(settings, undefined)).toBe('{\n  "model": "opus"\n}\n');
+    expect(withApiKeyHelper(undefined, "cat /root/.claude-cfg/anthropic-api-key")).toBe('{\n  "apiKeyHelper": "cat /root/.claude-cfg/anthropic-api-key"\n}\n');
+    for (const text of ['{"model": "opus"}', "{ not json", ""]) expect(withApiKeyHelper(text, undefined)).toBe(text);
+    expect(withApiKeyHelper("{ not json", "cat x")).toBe("{ not json");
   });
 
   it("a Keychain login not chosen as copy is neither read nor noted", () => {
