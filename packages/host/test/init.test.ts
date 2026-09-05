@@ -2703,7 +2703,7 @@ describe("disk estimate before the boot", () => {
     expect(again.text()).toContain("checksum checked against the first install");
     const checked = again.backends[0]!.machines[0]!.execLog.find(c => c.includes("releases/tags/v0.1.0"))!;
     expect(checked).toContain(sha);
-    expect(checked).toContain("does not match the checksum recorded on the first install of v0.1.0");
+    expect(checked).toContain("does not match the checksum recorded on the first install of");
   });
 
   it("a Homebrew that cannot be read is a note, not a stop; the summary falls back to the measured table", async () => {

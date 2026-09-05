@@ -211,11 +211,22 @@ describe("tap formulae without a Linux bottle", () => {
     expect(road.cmd).toContain("go install 'github.com/Zingzy/diskbloom@v0.1.0'");
     // The asset's checksum rides on the WSP_ROAD line so the first install records it; nothing is checked yet.
     expect(road.cmd).toContain(`sum="$(sha256sum "$tmp/$asset" | cut -d' ' -f1)"`);
-    expect(road.cmd).toContain('echo "WSP_ROAD release ${asset:-$url} $sum v0.1.0"');
+    expect(road.cmd).toContain(`echo "WSP_ROAD release \${asset:-$url} $sum "'v0.1.0'`);
     expect(road.cmd).not.toContain("checksum recorded");
     expect(road.cmd).toMatch(/WSP_ROAD go/);
-    // Nothing is piped into a shell.
+    // Nothing is piped into a shell, and the tag and repository from the Mac's formula only ever reach the shell single-quoted.
     expect(road.cmd).not.toMatch(/\|\s*(ba)?sh\b/);
+    const odd = { repo: "Zingzy/diskbloom", tag: "v0.1.0'; echo pwned; '" };
+    const table: BrewTable = new Map([["zingzy/tap/diskbloom", { ...TABLE.get("zingzy/tap/diskbloom")!, source: odd }]]);
+    const quoted = toolInstallsFor([{ ...brew("zingzy/tap/diskbloom", "unknown"), pin: { tag: odd.tag, sha256: "e".repeat(64) } }], table).installs.at(-1)!.cmd;
+    const tagQ = `'v0.1.0'\\''; echo pwned; '\\'''`;
+    expect(quoted).toContain(`releases/tags/v0.1.0'\\''; echo pwned; '\\'''`);
+    expect(quoted).toContain(`first install of "${tagQ}`);
+    expect(quoted).toContain(`$sum "${tagQ}`);
+    expect(quoted).toContain(`go install 'github.com/Zingzy/diskbloom@v0.1.0'\\''; echo pwned; '\\'''`);
+    expect(quoted).toContain(`echo "WSP_ROAD go "'github.com/Zingzy/diskbloom@v0.1.0'\\''; echo pwned; '\\'''`);
+    expect(quoted).toContain(`echo "Error: release "${tagQ}" of "'Zingzy/diskbloom'" has no Linux build`);
+    expect(quoted).not.toMatch(/[^']v0\.1\.0'; echo pwned/);
     expect(road.cmd).toContain("grep -viE '\\.(sha256|");
     expect(plan.installs.filter(t => t.manager === "brew").map(t => t.id)).toContain("tools/brew/gh");
     expect(plan.skipped.map(s => s.id)).not.toContain("tools/brew/zingzy/tap/diskbloom");
@@ -227,11 +238,11 @@ describe("tap formulae without a Linux bottle", () => {
     expect(b.roads).toEqual([{ id: "tools/brew/zingzy/tap/diskbloom", name: "diskbloom", source: { repo: "Zingzy/diskbloom", tag: "v0.1.0" }, pin }]);
     expect(pinState(pin, b.roads[0]!.source)).toBe("same");
     const road = toolInstallsFor([{ ...brew("zingzy/tap/diskbloom", "unknown"), pin }], TABLE).installs.at(-1)!;
-    expect(road.cmd).toContain(`[ "$sum" = '${pin.sha256}' ] || { echo "Error: $asset does not match the checksum recorded on the first install of v0.1.0" >&2; exit 1; }`);
+    expect(road.cmd).toContain(`[ "$sum" = '${pin.sha256}' ] || { echo "Error: $asset does not match the checksum recorded on the first install of "'v0.1.0' >&2; exit 1; }`);
     // The check sits between the download and the unpack; the line the stage reads carries the checksum and the tag.
     expect(road.cmd.indexOf("curl -fsSL -o")).toBeLessThan(road.cmd.indexOf('[ "$sum" ='));
     expect(road.cmd.indexOf('[ "$sum" =')).toBeLessThan(road.cmd.indexOf('case "$asset" in'));
-    expect(road.cmd).toContain('echo "WSP_ROAD release ${asset:-$url} $sum v0.1.0"');
+    expect(road.cmd).toContain(`echo "WSP_ROAD release \${asset:-$url} $sum "'v0.1.0'`);
   });
 
   it("a pin from an older tag is not checked against the new release: the tag moved, so it is a first install again", () => {
@@ -242,6 +253,6 @@ describe("tap formulae without a Linux bottle", () => {
     const road = toolInstallsFor([{ ...brew("zingzy/tap/diskbloom", "unknown"), pin }], TABLE).installs.at(-1)!;
     expect(road.cmd).not.toContain('[ "$sum" =');
     expect(road.cmd).not.toContain("e".repeat(64));
-    expect(road.cmd).toContain('echo "WSP_ROAD release ${asset:-$url} $sum v0.1.0"');
+    expect(road.cmd).toContain(`echo "WSP_ROAD release \${asset:-$url} $sum "'v0.1.0'`);
   });
 });
