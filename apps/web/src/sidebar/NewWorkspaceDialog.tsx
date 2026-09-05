@@ -38,6 +38,7 @@ export function NewWorkspaceDialog({
     <Dialog open onOpenChange={open => { if (!open) onCancel(); }}>
       <DialogPopup className="sm:max-w-sm">
         <form
+          className="flex min-h-0 flex-col"
           onSubmit={e => {
             e.preventDefault();
             submit();
