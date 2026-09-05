@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { getDaemonRoot } from "../src/files/wire.js";
+import { getLive, resetLive } from "../src/machine/live.js";
 import { getTerminals } from "../src/terminal/link.js";
 import { wireTerminals } from "../src/terminal/wiring.js";
 
@@ -78,8 +79,17 @@ let unwire: (() => void) | undefined;
 
 beforeEach(async () => {
   useStore.setState({ api: null, capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, sessions: {}, ready: false });
+  resetLive();
   inboxDir = mkdtempSync(join(tmpdir(), "wsp-wiring-inbox-"));
-  daemon = await startDaemon({ port: 0, token: TOKEN, inboxDir, portsSource: async () => [], portsIntervalMs: 1000 });
+  daemon = await startDaemon({
+    port: 0,
+    token: TOKEN,
+    inboxDir,
+    portsSource: async () => [],
+    portsIntervalMs: 1000,
+    sysSource: async () => ({ cpu: { idle: 0, total: 0 }, load1: 0.1, mem: { used: 1, total: 2 }, disk: { used: 3, total: 4 } }),
+    sysIntervalMs: 20,
+  });
 });
 afterEach(async () => {
   unwire?.();
@@ -98,6 +108,11 @@ describe("wireTerminals", () => {
 
     await until(() => getTerminals("ws_run")?.status() === "live");
     expect(getDaemonRoot("ws_run")).toBe(process.env["HOME"] ?? homedir());
+    // The live link asked for sys.watch: samples land in the workspace's live store, none for the napping one.
+    await until(() => getLive("ws_run").snapshot().samples.length > 0);
+    expect(getLive("ws_run").snapshot().reach).toBe("live");
+    expect(getLive("ws_run").snapshot().samples[0]).toMatchObject({ type: "sys.sample", load1: 0.1, mem: { used: 1, total: 2 }, disk: { used: 3, total: 4 } });
+    expect(getLive("ws_nap").snapshot()).toEqual({ samples: [], reach: "unreachable" });
     expect(getDaemonRoot("ws_nap")).toBeNull();
     const napping = getTerminals("ws_nap");
     expect(napping).not.toBeNull();
@@ -110,6 +125,8 @@ describe("wireTerminals", () => {
     emit({ type: "workspace.napped", workspaceId: "ws_run" });
     await until(() => getTerminals("ws_run")!.status() === "connecting");
     expect(getTerminals("ws_run")!.tabs()).toHaveLength(1);
+    expect(getLive("ws_run").snapshot().reach).toBe("unreachable");
+    expect(getLive("ws_run").snapshot().samples.length).toBeGreaterThan(0);
 
     emit({ type: "workspace.woken", workspaceId: "ws_run", machineId: "m_ws_run", resurrected: false });
     await until(() => getTerminals("ws_run")!.status() === "live");
