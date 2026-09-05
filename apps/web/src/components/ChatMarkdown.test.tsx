@@ -55,6 +55,36 @@ describe("ChatMarkdown", () => {
     );
   }, 30_000);
 
+  it("colours a cold line fully even when the tokenizer runs slowly", async () => {
+    await act(async () => {
+      await getSyntaxHighlighterPromise("tsx");
+    });
+    // vscode-textmate reads Date.now to cut a line at shiki's 500 ms limit; a clock that jumps a second per read is a starved main thread.
+    let now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => (now += 1000));
+    try {
+      let container!: HTMLElement;
+      await act(async () => {
+        ({ container } = render(
+          <ChatMarkdown
+            text={'```tsx\nconst el = <div className="x">{count}</div>;\n```'}
+            cwd="/tmp/project"
+            resolvedTheme="dark"
+          />,
+        ));
+      });
+      await waitFor(
+        () => expect(container.querySelector(".chat-markdown-shiki")).not.toBeNull(),
+        { timeout: 20_000 },
+      );
+      const line = container.querySelector(".chat-markdown-shiki .line");
+      expect(line?.textContent).toBe('const el = <div className="x">{count}</div>;');
+      expect(line?.querySelectorAll("span[style]").length).toBeGreaterThan(3);
+    } finally {
+      clock.mockRestore();
+    }
+  }, 30_000);
+
   it("opens external links in a new tab", () => {
     const { container } = render(
       <ChatMarkdown text="See [link](https://example.com)" cwd="/tmp/project" resolvedTheme="light" />,
