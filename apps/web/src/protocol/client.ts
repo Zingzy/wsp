@@ -271,8 +271,8 @@ export interface Api {
   builderReach(builderId: string): Promise<DaemonReachView>;
   /** Every sealed version of a golden and the head new forks use. */
   listSnapshots(name?: string): Promise<SnapshotLineage>;
-  /** Every snapshot on the account by count, size and monthly cost; null when the provider cannot list them. Optional so fixtures without a storage line need not fake it. */
-  snapshotStorage?(): Promise<SnapshotStorage | null>;
+  /** Every snapshot on the account by count, size and monthly cost; null when the provider cannot list them. */
+  snapshotStorage(): Promise<SnapshotStorage | null>;
   /** Moves head to a version in the manifest; workspaces already forked keep their image. */
   rollbackSnapshot(version: number, name?: string): Promise<SnapshotRollbackResult>;
 }

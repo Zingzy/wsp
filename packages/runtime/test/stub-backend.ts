@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { gzipSync } from "node:zlib";
+import { SNAPSHOT_STORAGE } from "@wsp/engine";
 import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec, MachineState, SnapshotRow } from "@wsp/engine";
 
 export interface StubMachine extends Machine {
@@ -49,7 +50,7 @@ export function stubBackend(): StubBackend {
 
   const backend: StubBackend = {
     capabilities: { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true },
-    pricing: { rateUsdPerHour: (s: { cpu: number; memMb: number }) => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: { freeGb: 10, usdPerGbMonth: 0.05, billedFrom: "2026-10-01" } },
+    pricing: { rateUsdPerHour: (s: { cpu: number; memMb: number }) => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: SNAPSHOT_STORAGE },
     machines,
     snapshots,
     snapshotBytes: 8_000_000_000,

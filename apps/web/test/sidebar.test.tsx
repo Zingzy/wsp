@@ -64,6 +64,7 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
     builderReach: vi.fn(async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 })),
     sessionHistory: vi.fn(async () => []),
     listSnapshots: vi.fn(async () => ({ name: "default", head: null, versions: [] })),
+    snapshotStorage: async () => null,
     rollbackSnapshot: vi.fn(async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" as const })),
     listSessions: vi.fn(async () => sessions),
     subscribe: vi.fn(() => () => {}),

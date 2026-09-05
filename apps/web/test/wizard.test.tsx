@@ -68,6 +68,7 @@ function fixture(opts: { golden?: GoldenManifest; workspaces?: WorkspaceView[]; 
     prepareGolden: vi.fn(async () => builder),
     sealGolden: vi.fn(async () => ({ manifest, version })),
     listSnapshots: vi.fn(async () => ({ name: "default", head: null, versions: [] })),
+    snapshotStorage: async () => null,
     rollbackSnapshot: vi.fn(async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" as const })),
   } satisfies Api;
   // `listener` is the last subscriber, the wizard's; the store subscribes first on bind.

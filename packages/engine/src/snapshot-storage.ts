@@ -13,7 +13,14 @@ export function snapshotMonthlyUsd(totalBytes: number, pricing: SnapshotStorageP
 
 export function snapshotStorage(rows: readonly SnapshotRow[], pricing: SnapshotStoragePricing): SnapshotStorage {
   const totalBytes = rows.reduce((n, r) => n + r.sizeBytes, 0);
-  return { count: rows.length, totalBytes, ...pricing, monthlyUsd: snapshotMonthlyUsd(totalBytes, pricing) };
+  return {
+    count: rows.length,
+    totalBytes,
+    freeGb: pricing.freeGb,
+    usdPerGbMonth: pricing.usdPerGbMonth,
+    billedFrom: pricing.billedFrom,
+    monthlyUsd: snapshotMonthlyUsd(totalBytes, pricing),
+  };
 }
 
 /** Versions the head and its parent, so a rollback has one step back. */
@@ -26,14 +33,17 @@ export interface RetentionPlan {
   drop: GoldenVersion[];
   /** Older ancestors a workspace was forked from; each stays while that workspace exists. */
   guarded: { version: GoldenVersion; workspaces: string[] }[];
+  /** The kept parent was taken as the next version down: the head was sealed before parents were recorded. */
+  parentAssumed: boolean;
   /** What the listing says the dropped snapshots hold; a snapshot the listing lacks counts as nothing. */
   freedBytes: number;
   /** The monthly cost now minus the cost once they are gone, so a drop inside the free GB saves nothing. */
   savesUsdPerMonth: number;
 }
 
-/** Ancestors are the versions at or below the head; versions above it (a rolled-back head) are neither kept nor
- * offered, since nothing was built from the head through them. */
+/** The chain of ancestors from the head: each version's recorded parent, or for a version sealed before parents
+ * were recorded the next version down. Versions off the chain (a rolled-back head's descendants) are neither kept
+ * nor offered, since nothing was built from the head through them. */
 export function retentionPlan(
   manifest: GoldenManifest,
   rows: readonly SnapshotRow[],
@@ -41,9 +51,24 @@ export function retentionPlan(
   pricing: SnapshotStoragePricing,
   keepCount = RETENTION_KEEP,
 ): RetentionPlan {
-  const ancestors = manifest.versions.filter(v => v.version <= manifest.head).sort((a, b) => b.version - a.version);
-  const keep = ancestors.slice(0, keepCount);
-  const older = ancestors.slice(keepCount).reverse();
+  const head = manifest.versions.find(v => v.version === manifest.head);
+  const bySnapshot = new Map(manifest.versions.map(v => [v.snapshotId, v]));
+  const parentOf = (v: GoldenVersion): { parent: GoldenVersion | undefined; assumed: boolean } => {
+    if (v.parentSnapshotId !== undefined) return { parent: bySnapshot.get(v.parentSnapshotId), assumed: false };
+    const below = manifest.versions.filter(x => x.version < v.version).sort((a, b) => b.version - a.version);
+    return { parent: below[0], assumed: below.length > 0 };
+  };
+  const chain: GoldenVersion[] = head === undefined ? [] : [head];
+  let parentAssumed = false;
+  for (let cur = head; cur !== undefined; ) {
+    const { parent, assumed } = parentOf(cur);
+    if (parent === undefined || chain.includes(parent)) break;
+    if (chain.length === 1) parentAssumed = assumed;
+    chain.push(parent);
+    cur = parent;
+  }
+  const keep = chain.slice(0, keepCount);
+  const older = chain.slice(keepCount).reverse();
   const drop: GoldenVersion[] = [];
   const guarded: RetentionPlan["guarded"] = [];
   for (const version of older) {
@@ -54,5 +79,5 @@ export function retentionPlan(
   const sizeOf = (id: string): number => rows.find(r => r.id === id)?.sizeBytes ?? 0;
   const totalBytes = rows.reduce((n, r) => n + r.sizeBytes, 0);
   const freedBytes = drop.reduce((n, v) => n + sizeOf(v.snapshotId), 0);
-  return { keep, drop, guarded, freedBytes, savesUsdPerMonth: snapshotMonthlyUsd(totalBytes, pricing) - snapshotMonthlyUsd(totalBytes - freedBytes, pricing) };
+  return { keep, drop, guarded, parentAssumed, freedBytes, savesUsdPerMonth: snapshotMonthlyUsd(totalBytes, pricing) - snapshotMonthlyUsd(totalBytes - freedBytes, pricing) };
 }

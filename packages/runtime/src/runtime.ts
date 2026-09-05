@@ -1940,7 +1940,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             kept.record.import = applied.ledger;
             kept.record.setupSha = setupSha;
             delete kept.record.building;
-            kept.builder = { ...kept.builder, import: applied.ledger, setupSha };
+            // The builder was sealed as the head, so the version it seals next descends from the head's snapshot.
+            kept.builder = { ...kept.builder, import: applied.ledger, setupSha, parentSnapshotId: head.snapshotId };
             kept.life = "own";
             await hold(kept);
           } catch (e) {

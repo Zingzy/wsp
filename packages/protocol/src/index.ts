@@ -341,6 +341,9 @@ export const GoldenVersion = z.object({
   browserShim: z.boolean().optional(),
   /** The sign-ins the builder was asked for and how each ended, so the app can say what a fork carries. */
   logins: z.array(GoldenLogin).optional(),
+  /** The snapshot the builder that sealed this version descends from: an update's head. Absent on a version built
+   * from a fresh machine, and on versions sealed before this was recorded. */
+  parentSnapshotId: z.string().optional(),
 });
 export type GoldenVersion = z.infer<typeof GoldenVersion>;
 

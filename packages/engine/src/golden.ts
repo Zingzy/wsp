@@ -120,6 +120,8 @@ export interface Builder {
   readonly size: { cpu: number; memMb: number };
   /** What of the recipe is on this machine; absent when it was built without an import. */
   readonly import?: ImportLedger;
+  /** The golden snapshot this builder descends from, so the version it seals records its parent; absent on a fresh machine. */
+  readonly parentSnapshotId?: string;
 }
 
 // --- golden import: the person's files, tools and agents on the builder ------
@@ -584,6 +586,7 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
       baseTemplate: builder.baseTemplate,
       kind: builder.kind,
       setupSha: builder.setupSha,
+      ...(builder.parentSnapshotId !== undefined ? { parentSnapshotId: builder.parentSnapshotId } : {}),
       createdAt: new Date().toISOString(),
       smoke: { cmd: smoke, exitCode: smokeRes.exitCode },
       size: builder.size,
@@ -713,6 +716,7 @@ export async function upgradeBuilder(opts: UpgradeBuilderOptions): Promise<Build
       firstLife: true,
       size,
       import: applied.ledger,
+      parentSnapshotId: opts.head.snapshotId,
     };
   } catch (e) {
     let detail = messageOf(e);

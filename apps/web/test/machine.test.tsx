@@ -66,6 +66,7 @@ function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS,
     startSession: vi.fn(async (o: { workspaceId: string }) => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" as const })),
     sessionHistory: vi.fn(async () => []),
     listSnapshots: vi.fn<() => Promise<SnapshotLineage>>(async () => current),
+    snapshotStorage: async () => null,
     rollbackSnapshot: vi.fn(async (version: number) => {
       current = { ...current, head: version };
       return { lineage: current, existingWorkspaces: "untouched" as const };

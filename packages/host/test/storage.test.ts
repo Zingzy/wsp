@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
+import { SNAPSHOT_STORAGE } from "@wsp/engine";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { describe, expect, it } from "vitest";
 import { describeRetention, describeStorage, retentionOffer } from "../src/storage.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 
 const GB = 1e9;
-const PRICING = { freeGb: 10, usdPerGbMonth: 0.05, billedFrom: "2026-10-01" };
-const version = (n: number) => ({ version: n, snapshotId: `snap_golden-v${n}`, baseTemplate: "base", setupSha: `sha${n}`, createdAt: `2026-08-${10 + n}T00:00:00.000Z`, smoke: { cmd: "true", exitCode: 0 } });
+const PRICING = SNAPSHOT_STORAGE;
+const version = (n: number, parent?: number) => ({ version: n, snapshotId: `snap_golden-v${n}`, baseTemplate: "base", setupSha: `sha${n}`, createdAt: `2026-08-${10 + n}T00:00:00.000Z`, smoke: { cmd: "true", exitCode: 0 }, ...(parent !== undefined ? { parentSnapshotId: `snap_golden-v${parent}` } : {}) });
 
 describe("the storage line", () => {
   it("says the count, the size the listing reports and the monthly cost above the free GB at the published rate", () => {
@@ -22,12 +23,17 @@ describe("the storage line", () => {
 
 describe("the retention line", () => {
   it("names what goes, what it holds, what it saves and what stays, in one line", () => {
-    const plan = { keep: [version(4), version(3)], drop: [version(1), version(2)], guarded: [], freedBytes: 15.8 * GB, savesUsdPerMonth: 15.8 * 0.05 };
+    const plan = { keep: [version(4, 3), version(3, 2)], drop: [version(1), version(2, 1)], guarded: [], parentAssumed: false, freedBytes: 15.8 * GB, savesUsdPerMonth: 15.8 * 0.05 };
     expect(describeRetention(plan, PRICING)).toBe("Delete golden v1 and v2, 15.8 GB, saving about $0.79/month from 2026-10-01? v4 and v3 stay.");
   });
 
+  it("says when the kept parent was taken by version order, since the head was sealed before parents were recorded", () => {
+    const plan = { keep: [version(4), version(3)], drop: [version(1), version(2)], guarded: [], parentAssumed: true, freedBytes: 15.8 * GB, savesUsdPerMonth: 15.8 * 0.05 };
+    expect(describeRetention(plan, PRICING)).toBe("Delete golden v1 and v2, 15.8 GB, saving about $0.79/month from 2026-10-01? v4 and v3 stay. v3 is taken as the parent by version order: v4 was sealed before parents were recorded.");
+  });
+
   it("a drop inside the free GB says nothing is saved yet; three versions read as a list", () => {
-    const plan = { keep: [version(5), version(4)], drop: [version(1), version(2), version(3)], guarded: [], freedBytes: 3 * GB, savesUsdPerMonth: 0 };
+    const plan = { keep: [version(5, 4), version(4, 3)], drop: [version(1), version(2, 1), version(3, 2)], guarded: [], parentAssumed: false, freedBytes: 3 * GB, savesUsdPerMonth: 0 };
     expect(describeRetention(plan, PRICING)).toBe("Delete golden v1, v2 and v3, 3.0 GB, inside the free 10 GB, so nothing saved yet? v5 and v4 stay.");
   });
 });
@@ -37,7 +43,7 @@ describe("the retention offer over the stub backend", () => {
   async function golden(): Promise<{ rt: Runtime; backend: StubBackend; input: PassThrough; output: PassThrough; text: () => string; press: (k: string) => Promise<void> }> {
     const store = memoryStore();
     const backend = stubBackend();
-    await store.put("goldens", "default", { head: 4, versions: [1, 2, 3, 4].map(version) });
+    await store.put("goldens", "default", { head: 4, versions: [1, 2, 3, 4].map(n => version(n, n > 1 ? n - 1 : undefined)) });
     for (const n of [1, 2, 3, 4]) backend.snapshots.push({ id: `snap_golden-v${n}`, sizeBytes: (7 + n) * GB });
     const rt = createRuntime({ backend, store, adapters: {} });
     const input = new PassThrough();

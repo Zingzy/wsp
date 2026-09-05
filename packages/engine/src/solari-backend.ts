@@ -173,8 +173,14 @@ export class SolariBackend implements MachineBackend {
   }
 
   async listSnapshots(): Promise<SnapshotRow[]> {
-    const page = await this.request<{ snapshots?: { id: string; sizeBytes: number; createdAt?: string }[] }>("GET", "/snapshots");
-    return (page.snapshots ?? []).map(s => ({ id: s.id, sizeBytes: s.sizeBytes, ...(s.createdAt !== undefined ? { createdAt: s.createdAt } : {}) }));
+    const page = await this.request<{ snapshots?: unknown }>("GET", "/snapshots");
+    if (!Array.isArray(page.snapshots)) throw new Error("GET /snapshots answered without a snapshots array");
+    return (page.snapshots as { id: string; sizeBytes: number; createdAt?: string; parent?: string | null }[]).map(s => ({
+      id: s.id,
+      sizeBytes: s.sizeBytes,
+      ...(s.createdAt !== undefined ? { createdAt: s.createdAt } : {}),
+      ...(s.parent !== undefined ? { parent: s.parent } : {}),
+    }));
   }
 }
 

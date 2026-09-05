@@ -25,7 +25,9 @@ export function describeStorage(s: SnapshotStorage): string {
 /** The one line the offer asks with: what goes, what it holds, what it saves, what stays. */
 export function describeRetention(plan: RetentionPlan, pricing: { freeGb: number; billedFrom: string }): string {
   const saving = plan.savesUsdPerMonth > 0 ? `saving ${perMonth(plan.savesUsdPerMonth)} from ${pricing.billedFrom}` : `inside the free ${pricing.freeGb} GB, so nothing saved yet`;
-  return `Delete golden ${versionList(plan.drop)}, ${gb(plan.freedBytes)}, ${saving}? ${versionList(plan.keep)} stay.`;
+  const parent = plan.keep[1];
+  const assumed = plan.parentAssumed && parent !== undefined ? ` v${parent.version} is taken as the parent by version order: v${plan.keep[0]!.version} was sealed before parents were recorded.` : "";
+  return `Delete golden ${versionList(plan.drop)}, ${gb(plan.freedBytes)}, ${saving}? ${versionList(plan.keep)} stay.${assumed}`;
 }
 
 export function describeGuarded(g: RetentionPlan["guarded"][number]): string {

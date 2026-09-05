@@ -77,6 +77,8 @@ export interface SnapshotRow {
   id: string;
   sizeBytes: number;
   createdAt?: string;
+  /** The snapshot this one was taken under, as the provider chains them; null at a root. */
+  parent?: string | null;
 }
 
 /** How the provider bills snapshot storage: the free GB shared by every snapshot on the account, the price of

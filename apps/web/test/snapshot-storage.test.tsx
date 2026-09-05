@@ -13,9 +13,9 @@ const PRICING = { freeGb: 10, usdPerGbMonth: 0.05, billedFrom: "2026-10-01" };
 const WS: WorkspaceView = { id: "ws1", name: "alpha", machineId: "m1", phase: "running", golden: "snap_golden-v1", createdAt: "2026-08-30T09:00:00Z" };
 const STATUS: WorkspaceStatus = { ...WS, machineState: "running", reach: { state: "reachable" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 };
 
-function fakeApi(storage: SnapshotStorage | null | undefined) {
+function fakeApi(storage: SnapshotStorage | null) {
   const listeners = new Set<(e: EventUnion) => void>();
-  const api: Api & { emit(e: EventUnion): void; snapshotStorage?: ReturnType<typeof vi.fn<() => Promise<SnapshotStorage | null>>> } = {
+  const api: Api & { emit(e: EventUnion): void; snapshotStorage: ReturnType<typeof vi.fn<() => Promise<SnapshotStorage | null>>> } = {
     listWorkspaces: async () => [WS],
     getWorkspace: async () => WS,
     createWorkspace: async () => WS,
@@ -40,11 +40,11 @@ function fakeApi(storage: SnapshotStorage | null | undefined) {
     builderReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" as const }),
+    snapshotStorage: vi.fn(async () => storage),
     emit: e => {
       for (const fn of listeners) fn(e);
     },
   };
-  if (storage !== undefined) api.snapshotStorage = vi.fn(async () => storage);
   return api;
 }
 
@@ -60,14 +60,13 @@ describe("the storage line", () => {
     expect(storageLine({ count: 1, totalBytes: 7.8 * GB, ...PRICING, monthlyUsd: 0 })).toBe("1 snapshot · 7.8 GB · inside the free 10 GB");
   });
 
-  it("renders the account's storage as text, no bars, and asks again when a golden seals", async () => {
+  it("renders the account's storage as text and asks again when a golden seals", async () => {
     const api = fakeApi({ count: 2, totalBytes: 16.3 * GB, ...PRICING, monthlyUsd: 6.3 * 0.05 });
     useStore.getState().bind(api);
     render(<SnapshotStorageLine />);
     await waitFor(() => expect(line()).toBe("2 snapshots · 16.3 GB · about $0.32/month above the free 10 GB from 2026-10-01"));
-    expect(document.querySelector("[data-usage-bar]")).toBeNull();
 
-    api.snapshotStorage!.mockResolvedValue({ count: 3, totalBytes: 24.8 * GB, ...PRICING, monthlyUsd: 14.8 * 0.05 });
+    api.snapshotStorage.mockResolvedValue({ count: 3, totalBytes: 24.8 * GB, ...PRICING, monthlyUsd: 14.8 * 0.05 });
     act(() => api.emit({ type: "golden.stage", name: "default", stage: "snapshotting" }));
     expect(api.snapshotStorage).toHaveBeenCalledTimes(1);
     act(() => api.emit({ type: "golden.stage", name: "default", stage: "sealed" }));
@@ -75,25 +74,22 @@ describe("the storage line", () => {
     expect(api.snapshotStorage).toHaveBeenCalledTimes(2);
   });
 
-  it("sits in the machine panel's usage section as text, under the counters", async () => {
+  it("sits in the machine panel's usage section as one line of text under the counters, with no bar for it", async () => {
     useStore.getState().bind(fakeApi({ count: 2, totalBytes: 16.3 * GB, ...PRICING, monthlyUsd: 6.3 * 0.05 }));
     render(<MachineSurface workspaceId="ws1" />);
     await waitFor(() => expect(line()).toBe("2 snapshots · 16.3 GB · about $0.32/month above the free 10 GB from 2026-10-01"));
     const usage = document.querySelector('[data-k="storage"]')!.closest("section")!;
     expect(usage.textContent).toContain("Usage");
     expect(usage.textContent).toContain("Accrued");
-    expect(usage.querySelector('[data-k="storage"]')).not.toBeNull();
+    expect(usage.querySelector('[data-k="storage"]')!.tagName).toBe("P");
+    expect(usage.querySelectorAll("[data-usage-bar]")).toHaveLength(0);
   });
 
-  it("renders nothing when the provider cannot list snapshots, or the client has no storage call", async () => {
-    useStore.getState().bind(fakeApi(null));
+  it("renders nothing when the provider cannot list snapshots", async () => {
+    const api = fakeApi(null);
+    useStore.getState().bind(api);
     render(<SnapshotStorageLine />);
-    await waitFor(() => expect(useStore.getState().api).not.toBeNull());
-    await new Promise(r => setTimeout(r, 10));
-    expect(line()).toBeNull();
-
-    useStore.getState().bind(fakeApi(undefined));
-    render(<SnapshotStorageLine />);
+    await waitFor(() => expect(api.snapshotStorage).toHaveBeenCalledTimes(1));
     await new Promise(r => setTimeout(r, 10));
     expect(line()).toBeNull();
   });

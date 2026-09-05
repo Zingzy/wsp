@@ -17,7 +17,7 @@ export function SnapshotStorageLine() {
   const [storage, setStorage] = useState<SnapshotStorage | null>(null);
 
   const load = useCallback(() => {
-    if (!api?.snapshotStorage) return () => {};
+    if (!api) return () => {};
     let current = true;
     api.snapshotStorage().then(
       s => {

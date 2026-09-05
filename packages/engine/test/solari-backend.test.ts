@@ -33,10 +33,15 @@ describe("SolariBackend", () => {
     });
     const b = new SolariBackend({ apiKey: "k", fetch: f });
     expect(await b.listSnapshots()).toEqual([
-      { id: "snap_a", sizeBytes: 3839352763, createdAt: "2026-08-31T22:39:02.170Z" },
-      { id: "snap_b", sizeBytes: 8_500_000_000, createdAt: "2026-09-04T10:00:00Z" },
+      { id: "snap_a", sizeBytes: 3839352763, createdAt: "2026-08-31T22:39:02.170Z", parent: null },
+      { id: "snap_b", sizeBytes: 8_500_000_000, createdAt: "2026-09-04T10:00:00Z", parent: null },
     ]);
     expect(f.mock.calls.map(c => `${c[1]?.method} ${new URL(String(c[0])).pathname}`)).toEqual(["GET /snapshots"]);
+  });
+
+  it("a listing reply of another shape is a failure, never an empty account", async () => {
+    const b = new SolariBackend({ apiKey: "k", fetch: fakeFetch({ "GET /snapshots": { status: 200, body: { items: [] } } }) });
+    await expect(b.listSnapshots()).rejects.toThrow("GET /snapshots answered without a snapshots array");
   });
 
   it("prices snapshot storage from the one published constant", () => {

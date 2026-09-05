@@ -46,6 +46,7 @@ function fakeApi(workspaces: WorkspaceView[], portReach: Api["portReach"] = mint
     startSession: async o => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
     sessionHistory: async () => [],
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
+    snapshotStorage: async () => null,
     rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
     listSessions: async () => [],
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },

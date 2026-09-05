@@ -44,6 +44,7 @@ function fixtureApi(history: SessionEvent[]) {
     builderReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
     sessionHistory: async () => history,
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
+    snapshotStorage: async () => null,
     rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
     listWorkspaces: async () => [workspace],
     getWorkspace: async () => workspace,
