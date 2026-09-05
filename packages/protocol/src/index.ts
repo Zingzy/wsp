@@ -153,6 +153,8 @@ export const SessionView = z.object({
   /** Ms epoch, runtime clock; endedAt is unset while the session runs. */
   startedAt: z.number().optional(),
   endedAt: z.number().optional(),
+  /** The folder the harness runs in: the start request's, then what the harness itself announced. */
+  cwd: z.string().optional(),
 });
 export type SessionView = z.infer<typeof SessionView>;
 
@@ -469,11 +471,13 @@ const reqId = z.union([z.string(), z.number()]);
 
 export const FsEntryType = z.enum(["file", "dir", "symlink"]);
 export type FsEntryType = z.infer<typeof FsEntryType>;
-/** name is the path relative to the listed directory ("src/a.ts" at depth 2);
- * size is 0 for anything but a file; mtime is epoch milliseconds. */
+/** name is the entry's own name in the listed directory; size is 0 for
+ * anything but a file; mtime is epoch milliseconds. */
 export const FsEntry = z.object({ name: z.string(), type: FsEntryType, size: z.number(), mtime: z.number() });
 export type FsEntry = z.infer<typeof FsEntry>;
-export const FsListReply = z.object({ entries: z.array(FsEntry), truncated: z.boolean() });
+/** total counts the directory's entries after filtering; truncated means
+ * entries holds only the first cap of them. */
+export const FsListReply = z.object({ entries: z.array(FsEntry), truncated: z.boolean(), total: z.number() });
 export type FsListReply = z.infer<typeof FsListReply>;
 
 export const FsReadEncoding = z.enum(["utf8", "base64"]);
@@ -496,7 +500,8 @@ export type GitBranch = z.infer<typeof GitBranch>;
  * an unchanged side); origPath is set for renames and copies. */
 export const GitStatusEntry = z.object({ xy: z.string(), path: z.string(), origPath: z.string().optional() });
 export type GitStatusEntry = z.infer<typeof GitStatusEntry>;
-export const GitStatusReply = z.object({ branch: GitBranch, entries: z.array(GitStatusEntry) });
+/** root is the working tree's top-level directory, absolute on the guest. */
+export const GitStatusReply = z.object({ branch: GitBranch, entries: z.array(GitStatusEntry), root: z.string() });
 export type GitStatusReply = z.infer<typeof GitStatusReply>;
 
 /** branch: working tree against the merge-base with the default branch;
@@ -544,15 +549,15 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("inbox.watch") }),
   z.object({ id: reqId, op: z.literal("inbox.rescan") }),
   z.object({ id: reqId, op: z.literal("ping") }),
-  /** Paths are relative to the daemon's workspace root (HOME unless started
-   * with --root) or absolute inside it; anything resolving outside, through
-   * .. or a symlink, is refused with code outside-root. gitignore hides
-   * entries git would ignore and stops descent into ignored directories. */
+  /** Lists one directory's direct children, each request under its own entry
+   * cap. Paths are relative to the daemon's workspace root (HOME unless
+   * started with --root) or absolute inside it; anything resolving outside,
+   * through .. or a symlink, is refused with code outside-root. gitignore
+   * hides .git and the entries git would ignore. */
   z.object({
     id: reqId,
     op: z.literal("fs.list"),
     path: z.string(),
-    depth: z.number().int().min(1).optional(),
     gitignore: z.boolean().optional(),
   }),
   z.object({ id: reqId, op: z.literal("fs.read"), path: z.string(), encoding: FsReadEncoding.optional() }),

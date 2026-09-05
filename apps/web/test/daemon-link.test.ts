@@ -78,10 +78,10 @@ describe("connectDaemonLink", () => {
       onEvent: () => {},
     });
     await until(() => link!.status() === "live");
-    const coded = await link.request("fs.list", { path: ".", depth: 0 }).catch((e: unknown) => e);
+    const coded = await link.request("fs.list", { path: 7 }).catch((e: unknown) => e);
     expect(coded).toBeInstanceOf(DaemonRequestError);
     expect((coded as DaemonRequestError).code).toBe("bad-request");
-    expect((coded as DaemonRequestError).message).toBe("depth must be a positive integer");
+    expect((coded as DaemonRequestError).message).toBe("path must be a string");
     const plain = await link.request("pty.write", { ptyId: "nope", data: "x" }).catch((e: unknown) => e);
     expect(plain).toBeInstanceOf(DaemonRequestError);
     expect((plain as DaemonRequestError).code).toBeUndefined();

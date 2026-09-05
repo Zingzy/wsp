@@ -1,8 +1,10 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/files/FileBreadcrumbs.tsx at 57a66608 (MIT).
+// Differs from upstream: the directory menus browse the daemon's per-folder listings, asking for a folder the first time it is shown.
 import { ArrowLeftIcon, ChevronRightIcon, LoaderCircleIcon, RotateCwIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import type { ProjectEntry } from "../../files/entries";
+import { parentPath, ROOT } from "../../files/entries";
+import type { Levels } from "../../files/listing";
 import { cn } from "../../lib/utils";
 import { PierreEntryIcon } from "../chat/PierreEntryIcon";
 import {
@@ -18,25 +20,23 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   type FileBreadcrumb,
   fileBreadcrumbChildren,
-  fileBreadcrumbParent,
   fileBreadcrumbs,
 } from "./filePath";
 
 interface FileBreadcrumbsProps {
   readonly projectName: string;
-  readonly relativePath: string;
-  /** The workspace listing the directory menus browse; null until it arrives. */
-  readonly entries: readonly ProjectEntry[] | null;
-  readonly entriesTruncated: boolean;
-  readonly entriesPending: boolean;
-  readonly entriesError: string | null;
-  readonly onRefreshEntries: () => void;
-  readonly onOpenFile: (relativePath: string) => void;
+  /** The open file, as the daemon names it. */
+  readonly path: string;
+  readonly levels: Levels;
+  /** A menu is showing a folder; its listing is fetched the first time. */
+  readonly onBrowseDirectory: (dir: string) => void;
+  readonly onRefreshDirectory: (dir: string) => void;
+  readonly onOpenFile: (path: string) => void;
   readonly theme: "light" | "dark";
 }
 
 function pathLabel(path: string, projectName: string): string {
-  return path.slice(path.lastIndexOf("/") + 1) || projectName;
+  return path === ROOT ? projectName : path.slice(path.lastIndexOf("/") + 1) || path;
 }
 
 function BreadcrumbLabel(props: {
@@ -67,29 +67,20 @@ function BreadcrumbLabel(props: {
 
 function BreadcrumbMenuContent(props: {
   readonly crumbs: FileBreadcrumbsProps;
-  readonly currentFilePath: string;
   readonly directoryPath: string;
   readonly onDirectoryChange: (path: string) => void;
   readonly onOpenChange: (open: boolean) => void;
   readonly rootPath: string;
 }) {
-  const { crumbs } = props;
-  const entries = crumbs.entries ?? [];
-  const entriesTruncated = crumbs.entriesTruncated;
-  const children = useMemo(
-    () => fileBreadcrumbChildren(entries, props.directoryPath),
-    [entries, props.directoryPath],
-  );
-  const directoryAvailable =
-    props.directoryPath === "" ||
-    entries.some((entry) => entry.kind === "directory" && entry.path === props.directoryPath);
-  const parentPath = fileBreadcrumbParent(props.directoryPath);
-  const canGoBack =
-    props.directoryPath !== props.rootPath &&
-    parentPath !== null &&
-    (props.rootPath === "" ||
-      parentPath === props.rootPath ||
-      parentPath.startsWith(`${props.rootPath}/`));
+  const { crumbs, directoryPath } = props;
+  const level = crumbs.levels.get(directoryPath);
+  const children = useMemo(() => fileBreadcrumbChildren(crumbs.levels, directoryPath), [crumbs.levels, directoryPath]);
+  const parent = parentPath(directoryPath);
+  const canGoBack = directoryPath !== props.rootPath && parent !== null;
+
+  useEffect(() => {
+    crumbs.onBrowseDirectory(directoryPath);
+  }, [crumbs.onBrowseDirectory, directoryPath]);
 
   return (
     <MenuPopup
@@ -97,43 +88,37 @@ function BreadcrumbMenuContent(props: {
       side="bottom"
       className="w-max min-w-32 max-w-[min(19rem,var(--available-width))]"
       onKeyDown={(event) => {
-        if (event.key !== "ArrowLeft" || !canGoBack || parentPath === null) return;
+        if (event.key !== "ArrowLeft" || !canGoBack || parent === null) return;
         event.preventDefault();
         event.stopPropagation();
-        props.onDirectoryChange(parentPath);
+        props.onDirectoryChange(parent);
       }}
     >
-      {canGoBack && parentPath !== null ? (
+      {canGoBack && parent !== null ? (
         <>
-          <MenuItem closeOnClick={false} onClick={() => props.onDirectoryChange(parentPath)}>
+          <MenuItem closeOnClick={false} onClick={() => props.onDirectoryChange(parent)}>
             <ArrowLeftIcon />
-            <span className="truncate">Back to {pathLabel(parentPath, crumbs.projectName)}</span>
+            <span className="truncate">Back to {pathLabel(parent, crumbs.projectName)}</span>
           </MenuItem>
           <MenuSeparator />
         </>
       ) : null}
-      <MenuGroup key={props.directoryPath}>
-        {crumbs.entriesPending && crumbs.entries === null ? (
+      <MenuGroup key={directoryPath}>
+        {children === null && level?.error ? (
+          <MenuItem closeOnClick={false} onClick={() => crumbs.onRefreshDirectory(directoryPath)}>
+            <RotateCwIcon />
+            <span className="min-w-0 flex-1 truncate">Retry loading folder</span>
+          </MenuItem>
+        ) : children === null ? (
           <MenuItem disabled>
             <LoaderCircleIcon className="animate-spin" />
             Loading folder…
           </MenuItem>
-        ) : crumbs.entriesError && crumbs.entries === null ? (
-          <MenuItem closeOnClick={false} onClick={crumbs.onRefreshEntries}>
-            <RotateCwIcon />
-            <span className="min-w-0 flex-1 truncate">Retry loading folder</span>
-          </MenuItem>
-        ) : !directoryAvailable && !entriesTruncated ? (
-          <MenuItem disabled>This folder is no longer available.</MenuItem>
         ) : children.length === 0 ? (
-          <MenuItem disabled>
-            {entriesTruncated
-              ? "No entries from this folder are available in the partial workspace index."
-              : "This folder is empty."}
-          </MenuItem>
+          <MenuItem disabled>This folder is empty.</MenuItem>
         ) : (
           children.map((entry) => {
-            const isCurrentFile = entry.kind === "file" && entry.path === props.currentFilePath;
+            const isCurrentFile = entry.kind === "file" && entry.path === crumbs.path;
             return (
               <MenuItem
                 key={entry.path}
@@ -164,19 +149,19 @@ function BreadcrumbMenuContent(props: {
           })
         )}
       </MenuGroup>
-      {crumbs.entriesError && crumbs.entries !== null ? (
+      {level?.error && children !== null ? (
         <>
           <MenuSeparator />
-          <MenuItem closeOnClick={false} onClick={crumbs.onRefreshEntries}>
+          <MenuItem closeOnClick={false} onClick={() => crumbs.onRefreshDirectory(directoryPath)}>
             <RotateCwIcon />
             Refresh failed, retry
           </MenuItem>
         </>
       ) : null}
-      {entriesTruncated ? (
+      {level?.truncated ? (
         <>
           <MenuSeparator />
-          <MenuItem disabled>Some workspace entries are not shown.</MenuItem>
+          <MenuItem disabled>{(level.total - (level.entries?.length ?? 0)).toLocaleString("en-US")} more entries not shown.</MenuItem>
         </>
       ) : null}
     </MenuPopup>
@@ -190,7 +175,7 @@ function DirectoryBreadcrumb(props: FileBreadcrumbsProps & { readonly crumb: Fil
   useEffect(() => {
     setOpen(false);
     setDirectoryPath(props.crumb.path);
-  }, [props.crumb.path, props.relativePath]);
+  }, [props.crumb.path, props.path]);
 
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen);
@@ -216,13 +201,12 @@ function DirectoryBreadcrumb(props: FileBreadcrumbsProps & { readonly crumb: Fil
           <span className="block truncate">{props.crumb.label}</span>
         </TooltipTrigger>
         <TooltipPopup side="top" className="max-w-80">
-          {props.crumb.path || props.projectName}
+          {props.crumb.path === ROOT ? props.projectName : props.crumb.path}
         </TooltipPopup>
       </Tooltip>
       {open ? (
         <BreadcrumbMenuContent
           crumbs={props}
-          currentFilePath={props.relativePath}
           directoryPath={directoryPath}
           onDirectoryChange={setDirectoryPath}
           onOpenChange={handleOpenChange}
@@ -235,13 +219,13 @@ function DirectoryBreadcrumb(props: FileBreadcrumbsProps & { readonly crumb: Fil
 
 export function FileBreadcrumbs(props: FileBreadcrumbsProps) {
   const breadcrumbs = useMemo(
-    () => fileBreadcrumbs(props.projectName, props.relativePath),
-    [props.projectName, props.relativePath],
+    () => fileBreadcrumbs(props.projectName, props.path),
+    [props.projectName, props.path],
   );
 
   return breadcrumbs.map((crumb, index) => (
     <div
-      key={crumb.path || "project"}
+      key={crumb.path}
       className="flex min-w-0 shrink-0 items-center"
       data-current-file-crumb={crumb.kind === "file"}
     >

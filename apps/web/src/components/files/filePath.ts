@@ -1,5 +1,7 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/files/filePath.ts at 57a66608 (MIT).
-import type { ProjectEntry } from "../../files/entries";
+// Differs from upstream: crumbs are daemon paths, so an absolute file keeps absolute directory crumbs.
+import { baseName, ROOT, type ProjectEntry } from "../../files/entries";
+import type { Levels } from "../../files/listing";
 
 export interface FileBreadcrumb {
   label: string;
@@ -11,42 +13,28 @@ export interface FileBreadcrumbChild extends ProjectEntry {
   label: string;
 }
 
-/** Crumbs for a workspace-relative path start at the project. */
-export function fileBreadcrumbs(projectName: string, relativePath: string): FileBreadcrumb[] {
-  const parts = relativePath.split("/").filter(Boolean);
+/** Crumbs start at the project, which stands for the daemon root; an absolute path's directories stay absolute. */
+export function fileBreadcrumbs(projectName: string, path: string): FileBreadcrumb[] {
+  const absolute = path.startsWith("/");
+  const parts = path.split("/").filter(Boolean);
   return [
-    { label: projectName, path: "", kind: "project" as const },
+    { label: projectName, path: ROOT, kind: "project" as const },
     ...parts.map((part, index) => ({
       label: part,
-      path: parts.slice(0, index + 1).join("/"),
+      path: (absolute ? "/" : "") + parts.slice(0, index + 1).join("/"),
       kind: index === parts.length - 1 ? ("file" as const) : ("directory" as const),
     })),
   ];
 }
 
-export function fileBreadcrumbChildren(
-  entries: readonly ProjectEntry[],
-  directoryPath: string,
-): FileBreadcrumbChild[] {
-  const prefix = directoryPath ? `${directoryPath}/` : "";
+/** The listed children of one folder, folders first, in natural order; null until that folder was listed. */
+export function fileBreadcrumbChildren(levels: Levels, directoryPath: string): FileBreadcrumbChild[] | null {
+  const entries = levels.get(directoryPath)?.entries;
+  if (!entries) return null;
   return entries
-    .flatMap((entry) => {
-      if (!entry.path.startsWith(prefix)) return [];
-      const label = entry.path.slice(prefix.length);
-      if (!label || label.includes("/")) return [];
-      return [{ ...entry, label }];
-    })
+    .map(entry => ({ ...entry, label: baseName(entry.path) }))
     .toSorted((left, right) => {
       if (left.kind !== right.kind) return left.kind === "directory" ? -1 : 1;
-      return left.label.localeCompare(right.label, undefined, {
-        numeric: true,
-        sensitivity: "base",
-      });
+      return left.label.localeCompare(right.label, undefined, { numeric: true, sensitivity: "base" });
     });
-}
-
-export function fileBreadcrumbParent(directoryPath: string): string | null {
-  if (!directoryPath) return null;
-  const separatorIndex = directoryPath.lastIndexOf("/");
-  return separatorIndex === -1 ? "" : directoryPath.slice(0, separatorIndex);
 }

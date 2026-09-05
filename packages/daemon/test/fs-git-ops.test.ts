@@ -3,7 +3,7 @@
 // so the tests cover confinement, git parsing and the byte caps as a client
 // sees them. Nothing here reaches the network or a cloud machine.
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -17,6 +17,7 @@ const root = mkdtempSync(join(tmpdir(), "wsp-fsgit-root-"));
 const outside = mkdtempSync(join(tmpdir(), "wsp-fsgit-outside-"));
 const repo = join(root, "repo");
 const bigRepo = join(root, "bigrepo");
+const deep = join(root, "deep");
 
 interface WireMsg {
   id?: string | number | null;
@@ -58,6 +59,11 @@ function buildRepo(): void {
   writeFileSync(join(outside, "secret.txt"), "secret\n");
   symlinkSync(outside, join(repo, "escape"));
   symlinkSync(join(repo, "docs.md"), join(repo, "docs-link.md"));
+  mkdirSync(join(deep, "wide"), { recursive: true });
+  mkdirSync(join(deep, "src"));
+  writeFileSync(join(deep, "package.json"), "{}\n");
+  writeFileSync(join(deep, "src", "index.ts"), "export {};\n");
+  for (let i = 0; i < 12; i++) writeFileSync(join(deep, "wide", `f${String(i).padStart(2, "0")}.txt`), "x\n");
   writeFileSync(join(root, "big.bin"), Buffer.alloc(FS_READ_CAP_BYTES + 10, 7));
   writeFileSync(join(root, "multibyte.txt"), "héllo wörld\n");
 
@@ -148,29 +154,32 @@ describe("fs.list", () => {
     expect(order.slice(firstFile).some(x => x.startsWith("dir:"))).toBe(false);
   });
 
-  it("walks to the requested depth with slash-joined names and never through symlinks", async () => {
-    const res = await c.request("fs.list", { path: "repo", depth: 2, gitignore: true });
-    expect(names(res)).toContain("src/index.ts");
-    expect(names(res)).toContain(".git/HEAD");
-    expect(names(res).some(n => n.startsWith("escape/"))).toBe(false);
+  it("lists one level only, with the count, and never through symlinks", async () => {
+    const res = await c.request("fs.list", { path: "repo", gitignore: true });
+    expect(res["total"]).toBe((res["entries"] as unknown[]).length);
+    expect(names(res).some(n => n.includes("/"))).toBe(false);
+    const inside = await c.request("fs.list", { path: "repo/src" });
+    expect(names(inside)).toEqual(["index.ts"]);
+    expect(await c.request("fs.list", { path: "repo/escape" })).toMatchObject({ ok: false, code: "outside-root" });
   });
 
-  it("hides gitignored entries and does not descend into ignored directories when asked", async () => {
-    const plain = await c.request("fs.list", { path: "repo", depth: 2 });
+  it("hides .git and gitignored entries when asked; an ignored directory still lists on request", async () => {
+    const plain = await c.request("fs.list", { path: "repo" });
     expect(names(plain)).toContain("ignored.log");
-    expect(names(plain)).toContain("build/out.js");
-    const filtered = await c.request("fs.list", { path: "repo", depth: 2, gitignore: true });
+    expect(names(plain)).toContain(".git");
+    const filtered = await c.request("fs.list", { path: "repo", gitignore: true });
     expect(names(filtered)).not.toContain("ignored.log");
     expect(names(filtered)).not.toContain("build");
-    expect(names(filtered)).not.toContain("build/out.js");
+    expect(names(filtered)).not.toContain(".git");
     expect(names(filtered)).toContain("untracked.txt");
     expect(names(filtered)).toContain(".gitignore");
+    expect(names(await c.request("fs.list", { path: "repo/build" }))).toEqual(["out.js"]);
   });
 
   it("treats the gitignore flag as a no-op outside a git repo", async () => {
     const res = await c.request("fs.list", { path: ".", gitignore: true });
     expect(res.ok).toBe(true);
-    expect(names(res)).toEqual(["big.bin", "bigrepo", "multibyte.txt", "repo"]);
+    expect(names(res)).toEqual(["big.bin", "bigrepo", "deep", "multibyte.txt", "repo"]);
   });
 
   it("accepts an absolute path inside the root and refuses one outside", async () => {
@@ -194,13 +203,23 @@ describe("fs.list", () => {
 });
 
 describe("listDir entry cap", () => {
-  it("stops at the cap and flags the listing as truncated", async () => {
-    const res = await listDir(join(root, "repo"), { depth: 2, maxEntries: 3 });
-    expect(res.entries).toHaveLength(3);
+  it("is spent per directory: a wide sibling never cuts the top level", async () => {
+    const top = await listDir(deep, { maxEntries: 5 });
+    expect(top.entries.map(e => e.name)).toEqual(["src", "wide", "package.json"]);
+    expect(top).toMatchObject({ truncated: false, total: 3 });
+    const wide = await listDir(join(deep, "wide"), { maxEntries: 5 });
+    expect(wide.entries.map(e => e.name)).toEqual(["f00.txt", "f01.txt", "f02.txt", "f03.txt", "f04.txt"]);
+    expect(wide).toMatchObject({ truncated: true, total: 12 });
+    const full = await listDir(join(deep, "wide"));
+    expect(full).toMatchObject({ truncated: false, total: 12 });
+    expect(full.entries).toHaveLength(12);
+  });
+
+  it("counts entries after the gitignore filter", async () => {
+    const res = await listDir(repo, { gitignore: true, maxEntries: 2 });
+    expect(res.entries).toHaveLength(2);
+    expect(res.total).toBe(8);
     expect(res.truncated).toBe(true);
-    const full = await listDir(join(root, "repo"), { depth: 2 });
-    expect(full.truncated).toBe(false);
-    expect(full.entries.length).toBeGreaterThan(3);
   });
 });
 
@@ -263,10 +282,11 @@ describe("git.status", () => {
     git(repo, "branch", "--unset-upstream", "feature");
   });
 
-  it("works from a subdirectory and reports repo-relative paths", async () => {
+  it("works from a subdirectory, reports repo-relative paths and names the top level", async () => {
     const res = await c.request("git.status", { cwd: "repo/src" });
     const entries = res["entries"] as Record<string, unknown>[];
     expect(entries).toContainEqual({ xy: ".M", path: "src/index.ts" });
+    expect(res["root"]).toBe(realpathSync(repo));
   });
 
   it("types a non-repo and a confined cwd", async () => {
