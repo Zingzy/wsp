@@ -72,8 +72,9 @@ describe("sign-in table", () => {
     expect(withStatus.sort()).toEqual(["aws", "claude", "codex", "doppler", "fly", "gcloud", "gemini", "gh", "hermes", "kube", "netlify", "opencode", "pi", "railway", "supabase", "vercel", "wrangler"]);
     expect(command("cloudflared").status).toBeUndefined();
     for (const name of ["op", "kube"]) expect(signInFor(name).kind, name).toBe("none");
-    // kubectl has no sign-in, so its row stays a "none" row whose status still proves a copied kubeconfig.
-    expect(statusOf(signInFor("kube"))?.command).toBe("kubectl config current-context");
+    // kubectl has no sign-in, so its row stays a "none" row whose status still proves a copied kubeconfig. Its stderr is
+    // dropped: v1.36.1 prints a kuberc warning there with no newline, so on the merged pty it glues onto the context name.
+    expect(statusOf(signInFor("kube"))?.command).toBe("kubectl config current-context 2>/dev/null");
     expect(statusOf(signInFor("op"))).toBeUndefined();
     expect(statusOf({ kind: "shell" })).toBeUndefined();
     expect(statusOf(signInFor("gh"))).toBe(command("gh").status);
@@ -133,9 +134,9 @@ describe("sign-in table", () => {
   });
 
   it("reads kubectl, pi, hermes, opencode and the gemini shell check from their printed shapes", () => {
-    // kubectl v1.36.1 on this Mac: the context name on exit 0, an error on exit 1 (also with no kubeconfig at all).
+    // kubectl v1.36.1 on this Mac: the context name on exit 0, nothing (its error went to stderr) on exit 1.
     expect(check("kube", "connectgateway_someorg-default_us-central1_someorg-default-cluster-internal", 0)).toBe(true);
-    expect(check("kube", "error: current-context is not set", 1)).toBe(false);
+    expect(check("kube", "", 1)).toBe(false);
     expect(check("kube", "", 0)).toBe(false);
     expect(statusOf(signInFor("kube"))?.detail?.("minikube\n", new Map())).toBe("context minikube");
     // pi 0.84.1 on this Mac: a model table when some provider has credentials, a /login hint on exit 0 when none has.

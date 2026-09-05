@@ -10,14 +10,15 @@ import { stripVTControlCharacters } from "node:util";
 import type { ManifestEntry } from "@wsp/collect";
 import { describe, expect, it } from "vitest";
 import { flowHooks, signInStage, statusLine, type SignInFlow, type SignInStageOptions } from "../src/init-signin.js";
+import { GEMINI_STATUS } from "../src/signin-table.js";
 import { fakePtyLink, type FakePty, type FakePtyLink } from "./fake-pty-link.js";
 
 const CLAUDE: ManifestEntry = { rung: "logins", id: "logins/claude", label: "Claude Code login", group: "Agent logins", paths: [], bytes: 0, default: "bring", choice: "copy" };
 const STATUS = "claude auth status";
 const KUBE: ManifestEntry = { rung: "logins", id: "logins/kube", label: "kubectl config", group: "CLI logins", paths: [], bytes: 0, default: "bring", choice: "copy" };
 
-/** claude on the fake builder answers its status the way 2.1.257 prints it for each key source. */
-function claudeAnswering(status: string, exitCode = 0): FakePtyLink {
+/** The fake builder answers the status command with this output and exit code, the way the tool prints it. */
+function answering(status: string, exitCode = 0): FakePtyLink {
   const link = fakePtyLink();
   link.script = (pty, line) => {
     if (!line.includes("WSP_STATUS")) return;
@@ -93,7 +94,7 @@ function claudeOnTheMachine(order: "before" | "after" | "never") {
 
 describe("the sign-in stage and the key sources", () => {
   it("runs a copied login's status check with the secrets file sourced first, in the promptless sh, so a key the secrets step exported counts", async () => {
-    const link = claudeAnswering('{\n  "loggedIn": true,\n  "authMethod": "api_key",\n  "apiKeySource": "ANTHROPIC_API_KEY"\n}');
+    const link = answering('{\n  "loggedIn": true,\n  "authMethod": "api_key",\n  "apiKeySource": "ANTHROPIC_API_KEY"\n}');
     const { run } = stage(link, { secrets: new Map([["ANTHROPIC_API_KEY", "~/.zshrc"]]) });
     const [r] = await run;
     expect(statusLine(STATUS)).toBe(". /etc/profile.d/wsp-secrets.sh 2>/dev/null; claude auth status");
@@ -103,32 +104,117 @@ describe("the sign-in stage and the key sources", () => {
   });
 
   it("names the key source the status reports: the helper, the OAuth credentials, or an exported key the secrets step did not set", async () => {
-    const helper = stage(claudeAnswering('{\n  "loggedIn": true,\n  "authMethod": "api_key_helper",\n  "apiKeySource": "apiKeyHelper"\n}'));
+    const helper = stage(answering('{\n  "loggedIn": true,\n  "authMethod": "api_key_helper",\n  "apiKeySource": "apiKeyHelper"\n}'));
     expect((await helper.run)[0]!.note).toBe("copied; API key from the settings.json helper; claude auth status");
-    const oauth = stage(claudeAnswering('{\n  "loggedIn": true,\n  "authMethod": "claude.ai",\n  "subscriptionType": "max"\n}'));
+    const oauth = stage(answering('{\n  "loggedIn": true,\n  "authMethod": "claude.ai",\n  "subscriptionType": "max"\n}'));
     expect((await oauth.run)[0]!.note).toBe("copied; OAuth credentials; claude auth status");
-    const machineEnv = stage(claudeAnswering('{\n  "loggedIn": true,\n  "authMethod": "api_key",\n  "apiKeySource": "ANTHROPIC_API_KEY"\n}'));
+    const machineEnv = stage(answering('{\n  "loggedIn": true,\n  "authMethod": "api_key",\n  "apiKeySource": "ANTHROPIC_API_KEY"\n}'));
     expect((await machineEnv.run)[0]!.note).toBe("copied; API key from ANTHROPIC_API_KEY on the machine; claude auth status");
     expect(oauth.text()).toContain("Claude Code login: signed in (copied; OAuth credentials; claude auth status)");
   });
 
   it("a status that says not signed in, or a shell that cannot find the tool, reads as before with the file sourced", async () => {
-    const none = stage(claudeAnswering('{\n  "loggedIn": false,\n  "authMethod": "none"\n}', 1), { skipWhy: "nobody here" });
+    const none = stage(answering('{\n  "loggedIn": false,\n  "authMethod": "none"\n}', 1), { skipWhy: "nobody here" });
     expect((await none.run)[0]).toMatchObject({ state: "not-signed-in", note: "copied, but claude auth status says not signed in" });
-    const missing = stage(claudeAnswering("sh: claude: not found", 127), { skipWhy: "nobody here" });
+    const missing = stage(answering("sh: claude: not found", 127), { skipWhy: "nobody here" });
     expect((await missing.run)[0]).toMatchObject({ state: "copied", exit: 127, note: "not verified: claude is not on the machine" });
   });
 
-  it("a copied kubeconfig is checked by kubectl config current-context and names the context; with none set the row stays not signed in and nothing is offered, since kubectl has no sign-in", async () => {
-    const link = claudeAnswering("connectgateway_someorg-default_us-central1_someorg-default-cluster-internal");
-    const { run, text } = stage(link, { logins: [KUBE] });
-    const [r] = await run;
-    expect(link.ptys[0]!.writes).toEqual([`${statusLine("kubectl config current-context")}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`]);
-    expect(r).toEqual({ id: "logins/kube", label: "kubectl config", state: "signed-in", note: "copied; context connectgateway_someorg-default_us-central1_someorg-default-cluster-internal; kubectl config current-context" });
-    expect(text()).toContain("kubectl config: signed in (copied; context connectgateway_someorg-default_us-central1_someorg-default-cluster-internal; kubectl config current-context)");
-    const unset = stage(claudeAnswering("error: current-context is not set", 1), { logins: [KUBE] });
-    expect((await unset.run)[0]).toMatchObject({ state: "not-signed-in", note: "copied, but kubectl config current-context says not signed in" });
+  it("a copied kubeconfig with no context set stays not signed in and nothing is offered, since kubectl has no sign-in", async () => {
+    const unset = stage(answering("", 1), { logins: [KUBE] });
+    expect((await unset.run)[0]).toMatchObject({ state: "not-signed-in", note: "copied, but kubectl config current-context 2>/dev/null says not signed in" });
     expect(unset.text()).not.toMatch(/sign in on the machine|r retry/);
+  });
+
+  interface Answer {
+    output: string;
+    exitCode: number;
+  }
+
+  interface ToolCase {
+    id: string;
+    command: string;
+    /** The signed-in answer, and what the row names from it. */
+    in: Answer;
+    detail?: string;
+    out: Answer;
+    /** The shell's answer with the tool not on the machine; absent for a check made of shell builtins alone. */
+    missing?: Answer;
+  }
+
+  const SECRETS = new Map([["ANTHROPIC_API_KEY", "~/.zshrc"]]);
+  // opencode 1.18.18 paints the path and the key name grey even into a pipe, with a reset up front and none after.
+  const OPENCODE_NONE = "\x1b[0m\n┌  Credentials \x1b[90m~/.local/share/opencode/auth.json\n│\n└  0 credentials\n";
+
+  // Every output below is what the tool printed on this Mac (kubectl v1.36.1, wrangler 4.106.0, pi 0.84.1, Hermes
+  // Agent v0.20.0, opencode 1.18.18) with fake names; a missing tool is the shell's own 127.
+  const TOOLS: ToolCase[] = [
+    {
+      id: "kube",
+      command: "kubectl config current-context 2>/dev/null",
+      in: { output: "connectgateway_someorg-default_us-central1_someorg-default-cluster-internal", exitCode: 0 },
+      detail: "context connectgateway_someorg-default_us-central1_someorg-default-cluster-internal",
+      out: { output: "", exitCode: 1 },
+      missing: { output: "", exitCode: 127 },
+    },
+    {
+      id: "wrangler",
+      command: "wrangler whoami",
+      in: { output: "Getting User settings...\n👋 You are logged in with an OAuth Token, associated with the email someone@example.com.", exitCode: 0 },
+      out: { output: "Getting User settings...\nYou are not authenticated. Please run `wrangler login`.\nTo deploy without logging in, run a command like `wrangler deploy --temporary` to use a temporary preview account.", exitCode: 0 },
+      missing: { output: "sh: 1: wrangler: not found", exitCode: 127 },
+    },
+    {
+      id: "pi",
+      command: "pi --list-models",
+      in: { output: "provider   model                       context  max-out  thinking  images\nanthropic  claude-haiku-4-5            200K     64K      yes       yes   ", exitCode: 0 },
+      out: { output: "No models available. Use /login to log into a provider via OAuth or API key. See:\n  /usr/lib/node_modules/@earendil-works/pi-coding-agent/docs/providers.md", exitCode: 0 },
+      missing: { output: "sh: 1: pi: not found", exitCode: 127 },
+    },
+    {
+      id: "hermes",
+      command: "hermes auth list",
+      in: { output: "anthropic (1 credentials):\n  #1  ANTHROPIC_API_KEY    api_key env:ANTHROPIC_API_KEY ←\n", exitCode: 0 },
+      detail: "API key from ~/.zshrc, set on the machine as a secret",
+      out: { output: "", exitCode: 0 },
+      missing: { output: "sh: 1: hermes: not found", exitCode: 127 },
+    },
+    {
+      id: "gemini",
+      command: GEMINI_STATUS,
+      in: { output: "oauth_creds.json", exitCode: 0 },
+      detail: "OAuth credentials",
+      out: { output: "", exitCode: 1 },
+    },
+    {
+      id: "opencode",
+      command: "opencode auth list",
+      in: { output: `${OPENCODE_NONE}\n┌  Environment\n│\n●  Anthropic \x1b[90mANTHROPIC_API_KEY\n│\n└  1 environment variable\n`, exitCode: 0 },
+      detail: "API key from ~/.zshrc, set on the machine as a secret",
+      out: { output: OPENCODE_NONE, exitCode: 0 },
+      missing: { output: "sh: 1: opencode: not found", exitCode: 127 },
+    },
+  ];
+
+  it.each(TOOLS)("$id: the copied login is proved by its status command, refused on its signed-out answer, and not verified when the shell cannot find the tool", async t => {
+    const entry: ManifestEntry = { ...KUBE, id: `logins/${t.id}`, label: t.id };
+    const over = { logins: [entry], secrets: SECRETS, skipWhy: "nobody here" };
+    const signedIn = answering(t.in.output, t.in.exitCode);
+    const [r] = await stage(signedIn, over).run;
+    expect(signedIn.ptys[0]!.writes).toEqual([`${statusLine(t.command)}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`]);
+    expect(r).toEqual({ id: entry.id, label: t.id, state: "signed-in", note: ["copied", t.detail, t.command].filter(x => x !== undefined).join("; ") });
+    expect(r!.note).not.toMatch(/\x1b/);
+    expect((await stage(answering(t.out.output, t.out.exitCode), over).run)[0]).toEqual({ id: entry.id, label: t.id, state: "not-signed-in", note: `copied, but ${t.command} says not signed in` });
+    if (t.missing === undefined) return;
+    const tool = t.command.split(" ")[0]!;
+    expect((await stage(answering(t.missing.output, t.missing.exitCode), over).run)[0]).toEqual({ id: entry.id, label: t.id, state: "copied", command: t.command, exit: 127, note: `not verified: ${tool} is not on the machine` });
+  });
+
+  it("opencode's stored credential is a login with no key to name, and hermes names only a key the secrets step set", async () => {
+    const stored = answering("\x1b[0m\n┌  Credentials \x1b[90m~/.local/share/opencode/auth.json\n│\n●  Anthropic \x1b[90mapi\n│\n└  1 credentials\n");
+    expect((await stage(stored, { logins: [{ ...KUBE, id: "logins/opencode", label: "opencode" }], secrets: SECRETS }).run)[0]!.note).toBe("copied; opencode auth list");
+    const machineKey = answering("anthropic (1 credentials):\n  #1  ANTHROPIC_API_KEY    api_key env:ANTHROPIC_API_KEY ←\n");
+    expect((await stage(machineKey, { logins: [{ ...KUBE, id: "logins/hermes", label: "hermes" }] }).run)[0]!.note).toBe("copied; hermes auth list");
   });
 
   it("a sign-in on the machine is proved by the same check, its source named", async () => {

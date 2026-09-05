@@ -129,7 +129,8 @@ export const SIGN_INS: Readonly<Record<string, SignIn>> = {
   },
   cloudflared: { kind: "command", login: "cloudflared tunnel login" },
   op: { kind: "none", note: "needs the 1Password desktop app; set OP_SERVICE_ACCOUNT_TOKEN on the machine instead" },
-  kube: { kind: "none", note: "kubectl has no sign-in; copy the kubeconfig instead", status: { command: "kubectl config current-context", signedIn: ok(/\S/), detail: o => `context ${o.trim()}` } },
+  // kubectl v1.36.1 puts a kuberc warning on stderr with no newline, so on the merged pty it would glue onto the context.
+  kube: { kind: "none", note: "kubectl has no sign-in; copy the kubeconfig instead", status: { command: "kubectl config current-context 2>/dev/null", signedIn: ok(/\S/), detail: o => `context ${o.trim()}` } },
   // pi lists a model only for a provider it holds credentials for, and prints a /login hint on exit 0 when it holds none.
   pi: { kind: "command", login: "pi", status: { command: "pi --list-models", signedIn: ok(/^provider\s+model\b/m) }, note: "type /login inside pi and pick a provider, then /exit; a key on the machine counts" },
   // The pool lists keys from ~/.hermes/.env and the environment beside stored logins; with none it prints nothing on exit 0.

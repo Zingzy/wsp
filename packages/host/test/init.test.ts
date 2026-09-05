@@ -1284,7 +1284,7 @@ describe("wsp init, logins copied to the machine", () => {
     ],
   };
   const STATUS_LINE = `${statusLine("gh auth status")}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`;
-  const KUBE_LINE = `${statusLine("kubectl config current-context")}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`;
+  const KUBE_LINE = `${statusLine("kubectl config current-context 2>/dev/null")}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`;
 
   /** gh on the fake builder: its status names the copied token invalid (with `stale`, the second account's beside a
    * good first one) until gh auth login has run there. */
@@ -1345,7 +1345,7 @@ describe("wsp init, logins copied to the machine", () => {
     ghOnBuilder(f);
     const { run } = await toTheBuilder(f);
     await f.until("GitHub CLI login: not signed in (copied, but gh auth status says not signed in)");
-    await f.until("kubectl config: signed in (copied; context minikube; kubectl config current-context)");
+    await f.until("kubectl config: signed in (copied; context minikube; kubectl config current-context 2>/dev/null)");
     await f.until("GitHub CLI login  r sign in on the machine   s skip");
     expect(f.text()).not.toContain("Signing in on the machine");
     await f.press("r");
@@ -1359,7 +1359,7 @@ describe("wsp init, logins copied to the machine", () => {
     expect(f.link.ptys.map(p => p.writes[0])).toEqual([STATUS_LINE, KUBE_LINE, "exec gh auth login || exit\r", STATUS_LINE]);
     expect(result.logins).toEqual([
       { id: "logins/gh", label: "GitHub CLI login", state: "signed-in", command: "gh auth login", exit: 0, note: "gh auth status" },
-      { id: "logins/kube", label: "kubectl config", state: "signed-in", note: "copied; context minikube; kubectl config current-context" },
+      { id: "logins/kube", label: "kubectl config", state: "signed-in", note: "copied; context minikube; kubectl config current-context 2>/dev/null" },
     ]);
     expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({
       logins: [
@@ -1571,7 +1571,7 @@ describe("wsp init, logins copied to the machine", () => {
     expect(f.link.ptys.map(p => p.writes[0])).toEqual([STATUS_LINE, KUBE_LINE]);
     expect(result.logins).toEqual([
       { id: "logins/gh", label: "GitHub CLI login", state: "not-signed-in", note: "copied, but gh auth status says not signed in" },
-      { id: "logins/kube", label: "kubectl config", state: "signed-in", note: "copied; context minikube; kubectl config current-context" },
+      { id: "logins/kube", label: "kubectl config", state: "signed-in", note: "copied; context minikube; kubectl config current-context 2>/dev/null" },
     ]);
   });
 
