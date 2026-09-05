@@ -40,6 +40,7 @@ export type Entry =
   | { type: "bullet"; item: SelectItem }
   | { type: "more"; count: number }
   | { type: "group"; group: string; items: SelectItem[]; folded: boolean }
+  | { type: "note"; text: string }
   | { type: "item"; item: SelectItem };
 
 export interface RungSelectOptions {
@@ -60,6 +61,8 @@ export interface RungSelectOptions {
   folded?: readonly string[];
   /** A second cell after a group header's count: its size, on a screen whose rows carry one. */
   groupHint?: (group: string, items: readonly SelectItem[]) => string | undefined;
+  /** One dim line under a group, after its rows whether folded or not: what the list leaves out. */
+  groupNote?: (group: string) => string | undefined;
   input?: Readable;
   output?: Writable;
 }
@@ -94,7 +97,7 @@ export function matches(item: SelectItem, query: string): boolean {
 
 export const focusable = (e: Entry): boolean => e.type === "all" || e.type === "group" || e.type === "item";
 
-export function buildEntries(items: readonly SelectItem[], query: string, folded: ReadonlySet<string>): Entry[] {
+export function buildEntries(items: readonly SelectItem[], query: string, folded: ReadonlySet<string>, noteOf?: (group: string) => string | undefined): Entry[] {
   const shown = items.filter(i => matches(i, query));
   const locked = shown.filter(i => i.lock === "on");
   const rest = shown.filter(i => i.lock !== "on");
@@ -120,6 +123,8 @@ export function buildEntries(items: readonly SelectItem[], query: string, folded
     const isFolded = folded.has(group);
     out.push({ type: "group", group, items: members, folded: isFolded });
     if (!isFolded) for (const m of members) out.push({ type: "item", item: m });
+    const note = noteOf?.(group);
+    if (note !== undefined && note !== "") out.push({ type: "note", text: note });
   }
   return out;
 }
@@ -170,6 +175,7 @@ export function toggleEntry(ticks: Set<string>, entry: Entry, items: readonly Se
     case "locked":
     case "bullet":
     case "more":
+    case "note":
       return;
     default: {
       const _exhaustive: never = entry;
@@ -287,7 +293,7 @@ class RungPrompt extends Prompt<Set<string>> {
   }
 
   private entries(): Entry[] {
-    return buildEntries(this.o.items, this.userInput, this.folded);
+    return buildEntries(this.o.items, this.userInput, this.folded, this.o.groupNote);
   }
 
   private ticks(): Set<string> {
@@ -416,6 +422,8 @@ class RungPrompt extends Prompt<Set<string>> {
         return this.line(dim("•"), label(entry.item), entry.item.hint ?? "", 2, cols, false, false);
       case "more":
         return `      ${dim(`…and ${entry.count} more`)}`;
+      case "note":
+        return `      ${dim(ellipsize(entry.text, width - EDGE - 4))}`;
       case "group":
         return this.line(entry.folded ? "▸" : "▾", entry.group, this.groupSecond(entry.group, entry.items), 0, cols, current, true);
       case "item": {
