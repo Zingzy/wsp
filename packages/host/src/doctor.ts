@@ -200,6 +200,9 @@ export interface DaemonSocket {
   readonly open: boolean;
 }
 
+/** The dial, the auth frame and the op that proves it, before a connect is given up. */
+export const DAEMON_CONNECT_TIMEOUT_MS = 15_000;
+
 export interface ConnectOptions {
   /** Preview URL (pt_token in the query) or a plain local daemon URL. */
   url: string;
@@ -234,9 +237,9 @@ export function connectDaemonSocket(opts: ConnectOptions): Promise<DaemonSocket>
       if (!settled) {
         settled = true;
         ws.terminate();
-        reject(new Error(`daemon connect timed out after ${opts.connectTimeoutMs ?? 15_000}ms`));
+        reject(new Error(`daemon connect timed out after ${opts.connectTimeoutMs ?? DAEMON_CONNECT_TIMEOUT_MS}ms`));
       }
-    }, opts.connectTimeoutMs ?? 15_000);
+    }, opts.connectTimeoutMs ?? DAEMON_CONNECT_TIMEOUT_MS);
 
     const op = (name: string, extra: Record<string, unknown> = {}): Promise<Record<string, unknown>> => {
       // ws neither throws nor calls back for a send on a closed socket, and the close handler already emptied pending.
