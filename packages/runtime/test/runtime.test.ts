@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
@@ -7,11 +8,12 @@ import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
 import { SessionEvent, type EventUnion, type RecipeDigest } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
-import { GRACE_MS, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, createRuntime, type GoldenExec, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
+import { TABLE_PIN } from "../src/harness-catalog.js";
+import { CATALOG_TTL_MS, GRACE_MS, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, createRuntime, type GoldenExec, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { wsRequest } from "./ws-client.js";
-import { stubBackend, type StubMachine } from "./stub-backend.js";
+import { stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
 import { fakeClock } from "./fake-clock.js";
 
 describe("runtime", () => {
@@ -450,11 +452,97 @@ describe("runtime session history", () => {
     await rt.close();
   });
 
-  it("lists a catalog per harness it knows", () => {
-    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
-    const catalogs = rt.harnesses.list();
-    expect(catalogs.map(c => c.harness)).toContain("claude");
-    expect(catalogs.find(c => c.harness === "claude")!.efforts.length).toBeGreaterThan(0);
+  it("lists a catalog per harness with an adapter, from the table when no workspace is named", async () => {
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: manual().adapter } });
+    const catalogs = await rt.harnesses.list();
+    // Codex and the rest sit in the table for the day an adapter lands; without one they cannot run a turn and are not listed.
+    expect(catalogs.map(c => c.harness)).toEqual(["claude"]);
+    const claude = catalogs[0]!;
+    expect(claude.efforts.length).toBeGreaterThan(0);
+    expect(claude).toMatchObject({ source: "table", version: TABLE_PIN });
+    expect((await createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} }).harnesses.list()).length).toBe(0);
+  });
+
+  describe("harnesses.list on a workspace", () => {
+    const PROBE_OUTPUT = readFileSync(new URL("../../adapter-claude/test/fixtures/catalog-probe.txt", import.meta.url), "utf8");
+    const probes = (backend: StubBackend) => backend.machines.flatMap(m => m.execLog.filter(cmd => cmd.includes("claude --help")));
+
+    it("asks the machine's binary and serves its models, efforts and modes as the catalog", async () => {
+      const backend = stubBackend();
+      backend.execImpl = (_m, cmd) => (cmd.includes("claude --help") ? { exitCode: 0, stdout: PROBE_OUTPUT, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: manual().adapter } });
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const catalogs = await rt.harnesses.list(ws.id);
+      const claude = catalogs.find(c => c.harness === "claude")!;
+      expect(claude).toMatchObject({ source: "harness", version: "2.1.257" });
+      expect(claude.models.map(m => m.value)).toEqual(["claude-opus-5", "claude-fable-5-1", "claude-sonnet-5", "claude-haiku-4-5-20251001"]);
+      expect(claude.models[0]).toMatchObject({ label: "Opus 5", isDefault: true, contextWindows: ["200k", "1m"] });
+      expect(claude.permissionModes.map(o => o.value)).toEqual(["default", "acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan"]);
+      expect(probes(backend)).toHaveLength(1);
+      await rt.close();
+    });
+
+    it("a session start re-asks the binary, within the same TTL, so an upgrade on the machine shows within minutes", async () => {
+      const backend = stubBackend();
+      backend.execImpl = (_m, cmd) => (cmd.includes("claude --help") ? { exitCode: 0, stdout: PROBE_OUTPUT, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+      const fc = fakeClock();
+      const m = manual();
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: m.adapter }, clock: fc.clock });
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const handle = await rt.sessions.start(ws.id, { prompt: "go" });
+      await new Promise(r => setImmediate(r));
+      expect(probes(backend)).toHaveLength(1);
+      await rt.harnesses.list(ws.id);
+      expect(probes(backend)).toHaveLength(1);
+      m.done("ok");
+      m.end();
+      await handle.finished;
+      fc.advance(CATALOG_TTL_MS);
+      await (await rt.sessions.start(ws.id, { prompt: "again" })).finished.catch(() => {});
+      await new Promise(r => setImmediate(r));
+      expect(probes(backend)).toHaveLength(2);
+      await rt.close();
+    });
+
+    it("answers from the table, marked so, when the binary gives nothing or the exec fails, and does not ask again within the TTL", async () => {
+      const backend = stubBackend();
+      backend.execImpl = (_m, cmd) => {
+        if (cmd.includes("claude --help")) throw new Error("exec timed out");
+        return { exitCode: 0, stdout: "", stderr: "" };
+      };
+      const fc = fakeClock();
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: manual().adapter }, clock: fc.clock });
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const first = (await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")!;
+      expect(first).toMatchObject({ source: "table", version: TABLE_PIN });
+      expect(first.models.map(m => m.value)).toEqual(["claude-fable-5-1", "claude-opus-5", "claude-sonnet-5"]);
+      backend.execImpl = (_m, cmd) => ({ exitCode: 0, stdout: cmd.includes("claude --help") ? "garbage\n" : "", stderr: "" });
+      await rt.harnesses.list(ws.id);
+      expect(probes(backend)).toHaveLength(1);
+      fc.advance(CATALOG_TTL_MS);
+      const later = (await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")!;
+      expect(probes(backend)).toHaveLength(2);
+      expect(later.source).toBe("table");
+      await rt.close();
+    });
+
+    it("keeps one answer per machine and leaves a napping workspace's binary alone", async () => {
+      const backend = stubBackend();
+      backend.execImpl = (_m, cmd) => (cmd.includes("claude --help") ? { exitCode: 0, stdout: PROBE_OUTPUT, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: manual().adapter } });
+      const a = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const b = await rt.workspaces.create({ golden: "snap_g", name: "b" });
+      await rt.harnesses.list(a.id);
+      await rt.harnesses.list(a.id);
+      await rt.harnesses.list(b.id);
+      expect(probes(backend)).toHaveLength(2);
+      await rt.workspaces.nap(b.id);
+      const napping = (await rt.harnesses.list(b.id)).find(c => c.harness === "claude")!;
+      expect(napping.source).toBe("table");
+      expect(probes(backend)).toHaveLength(2);
+      await expect(rt.harnesses.list("ws_nope")).rejects.toThrow(/no such workspace/);
+      await rt.close();
+    });
   });
 
   it("SessionView carries the folder: the start request's until the harness announces its own", async () => {

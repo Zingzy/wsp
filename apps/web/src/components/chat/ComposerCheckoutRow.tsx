@@ -4,8 +4,7 @@
 // daemon's listings, one level at a time; the pick is what sessions.start
 // runs the harness in and where the panes root. Once a turn exists the row is
 // a label, and the harness's own cwd on each turn keeps it current. The
-// branch is read, not switched: the daemon has no checkout op. The model,
-// effort and permission pickers share the strip after the branch.
+// branch is read, not switched: the daemon has no checkout op.
 import { ArrowLeftIcon, ChevronDownIcon, CheckIcon, FolderGitIcon, FolderIcon, GitBranchIcon, LoaderCircleIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { baseName, parentPath } from "../../files/entries";
@@ -17,7 +16,6 @@ import { DaemonOpError, gitStatus } from "../../terminal/daemon-fs";
 import type { TerminalWire } from "../../terminal/link";
 import { Button } from "../ui/button";
 import { Menu, MenuGroup, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
-import { ComposerOptionPickers } from "./ComposerOptionPickers";
 import { ComposerSurface } from "./ComposerSurface";
 import type { ChatThreadHandle } from "./useChatThread";
 
@@ -145,7 +143,6 @@ export function ComposerCheckoutRow({ workspaceId, thread }: { workspaceId: stri
         <GitBranchIcon className={cn("size-3 shrink-0", branch.kind !== "repo" && "opacity-50")} />
         <span className="truncate">{branch.kind === "repo" ? branch.head : branch.kind === "none" ? "no repository" : ""}</span>
       </span>
-      <ComposerOptionPickers workspaceId={workspaceId} thread={thread} />
     </ComposerSurface.ContextStrip>
   );
 }

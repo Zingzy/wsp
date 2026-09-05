@@ -59,8 +59,10 @@ interface State {
   conn: ConnStatus;
   /** Backend feature flags; null until the first reply. Gate upgrade/resize on these. */
   capabilities: Capabilities | null;
-  /** What each harness's CLI takes at launch; empty until the runtime answers, and the composer shows no pickers. */
+  /** What each harness's CLI takes at launch, from the runtime's table; empty until it answers, and the composer shows no pickers. */
   harnesses: HarnessCatalog[];
+  /** The same, as the binaries on a workspace's machine reported them; set once loadHarnesses got an answer for it. */
+  harnessesByWorkspace: Record<string, HarnessCatalog[]>;
   workspaces: WorkspaceView[];
   statuses: Record<string, WorkspaceStatus>;
   costs: Record<string, CostTick>;
@@ -99,6 +101,8 @@ interface State {
   applyEvent(e: ProtocolEvent): void;
   /** Rows come from the runtime (only it knows harness and final status); events say when to ask. */
   reloadSessions(workspaceId: string): Promise<void>;
+  /** Asks the runtime for the catalogs as the workspace's machine reports them; a refusal leaves the table's in place. */
+  loadHarnesses(workspaceId: string): Promise<void>;
 }
 
 const NO_SESSIONS: SessionView[] = [];
@@ -184,6 +188,7 @@ export const useStore = create<State>((set, get) => {
     conn: "connecting",
     capabilities: null,
     harnesses: [],
+    harnessesByWorkspace: {},
     workspaces: [],
     statuses: {},
     costs: {},
@@ -248,6 +253,16 @@ export const useStore = create<State>((set, get) => {
         set(s => ({ sessions: { ...s.sessions, [workspaceId]: rows } }));
       } catch {
         // the next session event asks again
+      }
+    },
+    async loadHarnesses(workspaceId) {
+      const api = get().api;
+      if (!api?.listHarnesses) return;
+      try {
+        const harnesses = await api.listHarnesses(workspaceId);
+        set(s => ({ harnessesByWorkspace: { ...s.harnessesByWorkspace, [workspaceId]: harnesses } }));
+      } catch {
+        // the table's catalogs stand
       }
     },
     async toggle(id) {
@@ -347,6 +362,8 @@ export const useStore = create<State>((set, get) => {
             statuses: s.statuses[e.workspaceId] ? { ...s.statuses, [e.workspaceId]: remember(s.statuses[e.workspaceId]!) } : s.statuses,
           }));
           void get().reloadSessions(e.workspaceId);
+          // The runtime re-asks the binary at a start, so a Claude Code upgrade on the machine shows within its TTL.
+          void get().loadHarnesses(e.workspaceId);
           return;
         }
         case "session.done":
@@ -398,8 +415,12 @@ export function useForwarded(workspaceId: string | null, port: number | null): b
   return useStore(s => workspaceId !== null && port !== null && s.forwards.some(f => f.workspaceId === workspaceId && f.port === port && f.kind === "url"));
 }
 export function useCapabilities(): Capabilities | null { return useStore(s => s.capabilities); }
-export function useHarnessCatalog(harness: string): HarnessCatalog | null {
-  return useStore(s => s.harnesses.find(c => c.harness === harness) ?? null);
+/** The catalogs a composer reads: the workspace's machine's once it answered, else the runtime's table. */
+export function useHarnessCatalogs(workspaceId: string | null): HarnessCatalog[] {
+  return useStore(s => (workspaceId !== null ? s.harnessesByWorkspace[workspaceId] : undefined) ?? s.harnesses);
+}
+export function useHarnessCatalog(harness: string, workspaceId: string | null = null): HarnessCatalog | null {
+  return useStore(s => ((workspaceId !== null ? s.harnessesByWorkspace[workspaceId] : undefined) ?? s.harnesses).find(c => c.harness === harness) ?? null);
 }
 /** The workspace's most recent session row, running or not; null before its first session this runtime remembers. */
 export function useLatestSession(id: string | null): SessionView | null {

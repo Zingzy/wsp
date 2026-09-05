@@ -68,6 +68,7 @@ export interface StartOptions {
   model?: string;
   effort?: string;
   permissionMode?: string;
+  contextWindow?: string;
   onEvent: (event: AdapterEvent) => void;
 }
 
@@ -266,6 +267,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       model: options.model,
       effort: options.effort,
       permissionMode: options.permissionMode,
+      contextWindow: options.contextWindow,
     });
     const env = buildEnv({ base: deps.baseEnv, configDir: deps.configDir, apiKey: deps.apiKey });
     const stream = deps.exec(command, { env });

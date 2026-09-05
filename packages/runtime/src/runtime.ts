@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { hostname } from "node:os";
-import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
+import { catalogProbeCommand, parseCatalogProbe, type AdapterEvent, type TurnResult } from "@wsp/adapter-claude";
 import {
   BUILDER_IDLE_MS,
   DAEMON_PORT,
@@ -71,7 +71,7 @@ import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy, idleReason } from
 import { connectDaemon, type DaemonReach } from "./reach.js";
 import { createStatusTracker, machineStateOf, type StatusApi, type StatusWatchOptions } from "./status.js";
 import type { Store } from "./store.js";
-import { HARNESS_CATALOGS } from "./harness-catalog.js";
+import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog } from "./harness-catalog.js";
 
 // --- adapter port -------------------------------------------------------------
 
@@ -88,6 +88,7 @@ export interface HarnessStartOptions {
   model?: string;
   effort?: string;
   permissionMode?: string;
+  contextWindow?: string;
   onEvent: (event: AdapterEvent) => void;
 }
 
@@ -123,6 +124,11 @@ export interface EventBus {
  * that no transcript keeps. 5000 bounds it at one transcript's worth of memory (TRANSCRIPT_CAP); a cursor that fell
  * off it gets a gap, and the client refetches the list, the statuses and sessions.history and converges from those. */
 const EVENT_RING_CAP = 5000;
+
+/** How long a machine's catalog answer stands before the binary is asked again; t3code's provider health cadence. */
+export const CATALOG_TTL_MS = 5 * 60_000;
+/** The probe measured 1 to 3 s on a Mac; a guest that takes longer than this is answered from the table. */
+const CATALOG_PROBE_TIMEOUT_MS = 30_000;
 
 function eventBus(): EventBus & { emit(event: EventUnion): void } {
   const listeners = new Map<string, Set<EventListener>>();
@@ -390,7 +396,7 @@ export interface Runtime {
   readonly sessions: {
     start(
       workspaceId: string,
-      opts: { prompt: string; harness?: string; resume?: string; cwd?: string; model?: string; effort?: string; permissionMode?: string },
+      opts: { prompt: string; harness?: string; resume?: string; cwd?: string; model?: string; effort?: string; permissionMode?: string; contextWindow?: string },
     ): Promise<SessionHandle>;
     list(workspaceId?: string): SessionView[];
     /** The workspace's persisted session events, oldest first; a chat replays these on mount. */
@@ -399,8 +405,11 @@ export interface Runtime {
     interrupt(sessionId: string): Promise<SessionInterruptResult>;
   };
   readonly harnesses: {
-    /** What each harness's CLI takes at launch; the composer's pickers render from this. */
-    list(): HarnessCatalog[];
+    /** What each harness with an adapter takes at launch; the composer's pickers render from this. With a running
+     * workspace the binaries on its machine are asked, at a session start too, and their answer, or the table when they
+     * give none, is kept per machine for CATALOG_TTL_MS; without one, or on a workspace that is not running, the table
+     * answers. */
+    list(workspaceId?: string): Promise<HarnessCatalog[]>;
   };
   readonly golden: {
     build(opts: GoldenBuildRequest): Promise<{ manifest: GoldenManifest; version: GoldenVersion }>;
@@ -1428,6 +1437,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
   };
 
+  /** One probe per machine per TTL, a failed one included and one in flight shared: a binary that does not answer
+   * costs one exec, not one per composer mount. */
+  const catalogs = new Map<string, { at: number; catalog: Promise<HarnessCatalog> }>();
+  const claudeCatalogOn = (machine: Machine): Promise<HarnessCatalog> => {
+    const hit = catalogs.get(machine.id);
+    const now = clock.now();
+    if (hit !== undefined && now - hit.at < CATALOG_TTL_MS) return hit.catalog;
+    const catalog = machine
+      .exec(catalogProbeCommand(), { timeoutMs: CATALOG_PROBE_TIMEOUT_MS })
+      .then(res => parseCatalogProbe(res.stdout), () => null)
+      .then(probe => (probe === null ? { ...harnessCatalog("claude")! } : catalogFromProbe(probe)));
+    catalogs.set(machine.id, { at: now, catalog });
+    return catalog;
+  };
+
   const sessionsApi: Runtime["sessions"] = {
     async start(workspaceId, o) {
       const entry = await entryOf(workspaceId);
@@ -1437,6 +1461,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const factory = adapters[harness];
       if (!factory) throw new Error(`no adapter registered for harness "${harness}"`);
       const adapter = factory({ machine: entry.machine, workspaceId });
+      // A start is when the binary may have changed under us, so the catalog is refreshed here too, within its TTL.
+      if (harness === "claude") void claudeCatalogOn(entry.machine);
 
       const turnId = randomUUID();
       const threadId = threadOf(workspaceId, o.resume);
@@ -1454,6 +1480,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(o.model !== undefined ? { model: o.model } : {}),
         ...(o.effort !== undefined ? { effort: o.effort } : {}),
         ...(o.permissionMode !== undefined ? { permissionMode: o.permissionMode } : {}),
+        ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}),
       };
       let ended = false;
 
@@ -1524,6 +1551,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...(o.model !== undefined ? { model: o.model } : {}),
           ...(o.effort !== undefined ? { effort: o.effort } : {}),
           ...(o.permissionMode !== undefined ? { permissionMode: o.permissionMode } : {}),
+          ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}),
           onEvent: forward,
         });
       } catch (e) {
@@ -2185,7 +2213,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     backend,
     workspaces,
     sessions: sessionsApi,
-    harnesses: { list: () => HARNESS_CATALOGS.map(c => ({ ...c })) },
+    harnesses: {
+      list: async workspaceId => {
+        // Only a harness with an adapter can run a turn; the rest of the table waits for one.
+        const table = HARNESS_CATALOGS.filter(c => c.harness in adapters).map(c => ({ ...c }));
+        if (workspaceId === undefined) return table;
+        const entry = await entryOf(workspaceId);
+        if (entry.record.phase !== "running") return table;
+        return Promise.all(table.map(c => (c.harness === "claude" ? claudeCatalogOn(entry.machine) : c)));
+      },
+    },
     golden,
     status,
     reap: async olderThanMs => {

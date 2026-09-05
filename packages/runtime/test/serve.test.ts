@@ -180,13 +180,19 @@ describe("serveRuntime harness catalog", () => {
     srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
     const listed = await c.request("harnesses.list");
-    const catalogs = listed["harnesses"] as { harness: string; efforts: { value: string }[] }[];
+    const catalogs = listed["harnesses"] as { harness: string; source: string; efforts: { value: string }[] }[];
     expect(catalogs.find(x => x.harness === "claude")?.efforts.map(o => o.value)).toContain("high");
+    expect(catalogs.find(x => x.harness === "claude")?.source).toBe("table");
     const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
     const workspaceId = (created["workspace"] as { id: string }).id;
-    const started = await c.request("sessions.start", { workspaceId, prompt: "go", model: "claude-opus-5", effort: "high", permissionMode: "plan" });
-    expect(started["session"]).toMatchObject({ model: "claude-sonnet-4-5", effort: "high", permissionMode: "plan" });
-    expect(h.lastStart).toMatchObject({ model: "claude-opus-5", effort: "high", permissionMode: "plan" });
+    // On a workspace the machine is asked; the stub's binary says nothing, so the table answers, marked as such.
+    const scoped = await c.request("harnesses.list", { workspaceId });
+    expect((scoped["harnesses"] as { harness: string; source: string }[]).find(x => x.harness === "claude")?.source).toBe("table");
+    const missing = await c.request("harnesses.list", { workspaceId: "ws_nope" });
+    expect(missing.ok).toBe(false);
+    const started = await c.request("sessions.start", { workspaceId, prompt: "go", model: "claude-opus-5", effort: "high", permissionMode: "plan", contextWindow: "1m" });
+    expect(started["session"]).toMatchObject({ model: "claude-sonnet-4-5", effort: "high", permissionMode: "plan", contextWindow: "1m" });
+    expect(h.lastStart).toMatchObject({ model: "claude-opus-5", effort: "high", permissionMode: "plan", contextWindow: "1m" });
     h.complete();
     c.close();
   });

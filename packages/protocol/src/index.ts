@@ -172,6 +172,7 @@ export const SessionView = z.object({
   model: z.string().optional(),
   effort: z.string().optional(),
   permissionMode: z.string().optional(),
+  contextWindow: z.string().optional(),
 });
 export type SessionView = z.infer<typeof SessionView>;
 
@@ -186,13 +187,29 @@ export const HarnessOption = z.object({
 });
 export type HarnessOption = z.infer<typeof HarnessOption>;
 
+/** A model, with the subset of the catalog's efforts and context windows it takes; a list absent means all of them,
+ * empty means the model takes none and the composer hides that section for it. */
+export const HarnessModel = HarnessOption.extend({
+  efforts: z.array(z.string()).optional(),
+  contextWindows: z.array(z.string()).optional(),
+});
+export type HarnessModel = z.infer<typeof HarnessModel>;
+
+export const HarnessCatalogSource = z.enum(["harness", "table"]);
+export type HarnessCatalogSource = z.infer<typeof HarnessCatalogSource>;
+
 /** What one harness's CLI takes at launch. A list is empty when the CLI has no such flag or its values are open,
- * and the composer hides that picker; sessions.start passes a picked value through unchanged. */
+ * and the composer hides that picker; sessions.start passes a picked value through unchanged. source says whether the
+ * binary on the workspace's machine answered or the runtime's table stood in, and version is the binary's, else the
+ * table's pin. */
 export const HarnessCatalog = z.object({
   harness: z.string(),
   label: z.string(),
-  models: z.array(HarnessOption),
+  source: HarnessCatalogSource,
+  version: z.string().nullable(),
+  models: z.array(HarnessModel),
   efforts: z.array(HarnessOption),
+  contextWindows: z.array(HarnessOption),
   permissionModes: z.array(HarnessOption),
 });
 export type HarnessCatalog = z.infer<typeof HarnessCatalog>;
@@ -809,9 +826,11 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     model: z.string().optional(),
     effort: z.string().optional(),
     permissionMode: z.string().optional(),
+    contextWindow: z.string().optional(),
   }),
-  /** Replies with { harnesses: HarnessCatalog[] }, one per harness the runtime knows. */
-  z.object({ id: reqId, op: z.literal("harnesses.list") }),
+  /** Replies with { harnesses: HarnessCatalog[] }, one per harness the runtime knows. With a workspace, the lists come
+   * from the binaries on its machine where they answer; without one, from the runtime's table. */
+  z.object({ id: reqId, op: z.literal("harnesses.list"), workspaceId: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("sessions.list"), workspaceId: z.string().optional() }),
   /** Replies with the workspace's persisted SessionEvent[] (oldest first, capped by the runtime). */
   z.object({ id: reqId, op: z.literal("sessions.history"), workspaceId: z.string() }),

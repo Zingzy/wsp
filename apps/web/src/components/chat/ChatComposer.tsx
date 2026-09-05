@@ -14,8 +14,8 @@
 // reaches only the visible turn, so a second session must not start until
 // that one ends. The checkout row under the composer picks the folder a fresh
 // thread starts in; a resumed one is started where its harness last said it
-// was. The model, effort and permission picks in that row ride every start,
-// so a change mid-thread applies at the next turn.
+// was. The model, effort, context window and access picks in the box's
+// footer ride every start, so a change mid-thread applies at the next turn.
 import { CircleAlertIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sendRefusal, workspaceState, type MachineState, type ReachState, type WorkspacePhase } from "@wsp/protocol";
@@ -30,7 +30,7 @@ import { ComposerCheckoutRow } from "./ComposerCheckoutRow";
 import { ComposerCommandMenu, type ComposerCommandItem } from "./ComposerCommandMenu";
 import { ComposerCommandMenuLayer } from "./ComposerCommandMenuLayer";
 import { EMPTY_DRAFT, useComposerDraft, useComposerDraftStore } from "./composerDraftStore";
-import { useComposerOptions } from "./composerOptionsStore";
+import { ComposerOptionPickers, useComposerPicks } from "./ComposerOptionPickers";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { searchSlashCommandItems, slashCommandItemsForPromptPosition } from "./composerSlashCommandSearch";
@@ -77,7 +77,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const [stop, setStop] = useState<StopAttempt | null>(null);
   const draft = useComposerDraft(workspaceId);
   const cwd = useThreadFolder(workspaceId);
-  const picked = useComposerOptions(workspaceId);
+  const { startOptions } = useComposerPicks(workspaceId, thread);
   const setDraft = useComposerDraftStore(s => s.setDraft);
   const editorRef = useRef<ComposerPromptEditorHandle | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
@@ -156,13 +156,13 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     thread.setSending(true);
     thread.appendUserTurn(prompt);
     const resume = thread.resume;
-    void api.startSession({ workspaceId, prompt, ...(resume ? { resume } : {}), ...(cwd !== null ? { cwd } : {}), ...picked }).catch((err: unknown) => {
+    void api.startSession({ workspaceId, prompt, ...(resume ? { resume } : {}), ...(cwd !== null ? { cwd } : {}), ...startOptions }).catch((err: unknown) => {
       thread.setSending(false);
       const current = useComposerDraftStore.getState().drafts[workspaceId];
       if (current === undefined || current.prompt === "") setDraft(workspaceId, { prompt, cursor: prompt.length });
       thread.appendLocalError(err instanceof Error ? err.message : String(err));
     });
-  }, [api, cwd, draft, picked, sendDisabledReason, setDraft, thread, workspaceId]);
+  }, [api, cwd, draft, sendDisabledReason, setDraft, startOptions, thread, workspaceId]);
 
   const interrupt = useCallback(() => {
     const method = api?.interruptSession;
@@ -289,7 +289,9 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
                     data-chat-composer-footer="true"
                     className="flex min-w-0 flex-nowrap items-center justify-between gap-2 overflow-visible px-3 pb-3 sm:gap-0 sm:px-4 sm:pb-4"
                   >
-                    <div className="-m-1 -ms-3.5 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 ps-3.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" />
+                    <div className="-m-1 -ms-3.5 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 ps-3.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                      <ComposerOptionPickers workspaceId={workspaceId} thread={thread} />
+                    </div>
                     <div data-chat-composer-actions="right" className="flex shrink-0 flex-nowrap items-center justify-end gap-2">
                       <ComposerPrimaryActions
                         compact={false}
