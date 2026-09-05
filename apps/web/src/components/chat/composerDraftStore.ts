@@ -42,7 +42,7 @@ interface DraftState {
   requeue(threadKey: string, row: QueuedMessage): void;
   /** The person acted on this thread: its rows may go again. */
   release(threadKey: string): void;
-  /** Moves every row from one key behind the rows at another: a thread's first start gives it the id its rows were waiting under. */
+  /** Moves every row from one key behind the rows at another, and drops the hold on the key left: a thread's first start gives it the id its rows were waiting under. */
   rekeyQueue(from: string, to: string): void;
 }
 
@@ -132,9 +132,11 @@ export const useComposerDraftStore = create<DraftState>()(
         },
         rekeyQueue(from, to) {
           set(s => {
+            if (from === to) return s;
             const moving = s.queues[from];
-            if (moving === undefined || from === to) return s;
-            return { queues: { ...without(s.queues, from), [to]: [...(s.queues[to] ?? NO_QUEUE), ...moving] }, held: without(s.held, from) };
+            const held = without(s.held, from);
+            if (moving === undefined) return held === s.held ? s : { held };
+            return { queues: { ...without(s.queues, from), [to]: [...(s.queues[to] ?? NO_QUEUE), ...moving] }, held };
           });
         },
       };

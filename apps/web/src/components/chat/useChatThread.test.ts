@@ -186,6 +186,34 @@ describe("reloadTranscript", () => {
     expect(own.events).toEqual(B_RUNNING);
     expect(own.fresh).toBe(false);
   });
+
+  it("a rebuild during a send settles it from the reply the way a live event would: a start names the key the rows waited under, an end alone settles it unnamed, nothing new keeps it", () => {
+    const sending = state(A, { sending: { after: "turn_0001" } });
+    const a2 = { workspaceId: CHAT_WS, sessionId: "sess_0001", turnId: "turn_0002", threadId: "thr_a" };
+    const started = reloadTranscript(sending, [...A, { type: "session.start", ...a2, prompt: "again" }], T0);
+    expect(started.sending).toBeNull();
+    expect(started.named).toBe("thr_a");
+    expect(started.events).toHaveLength(A.length + 1);
+    const quiet = reloadTranscript(sending, A, T0);
+    expect(quiet.sending).toEqual({ after: "turn_0001" });
+    expect(quiet.named).toBeNull();
+    const x = { workspaceId: CHAT_WS, sessionId: "sess_x", turnId: "turn_x1", threadId: "thr_a" };
+    const died = reloadTranscript(sending, [...A, { type: "session.done", ...x, result: { status: "failed", error: "gone" } }, { type: "session.end", ...x, exitCode: 127, sawResult: true }], T0);
+    expect(died.sending).toBeNull();
+    expect(died.named).toBeNull();
+    expect(reloadTranscript(state(A), [...A, { type: "session.start", ...a2, prompt: "again" }], T0).named).toBeNull();
+  });
+
+  it("while fresh with a send in flight, a reply that holds the person's thread settles the send and names the workspace key its rows waited under", () => {
+    const fresh = state([], { fresh: true, left: "thr_a", known: ["thr_a"], sending: { after: undefined } });
+    const own = reloadTranscript(fresh, [...A, ...B_RUNNING], T0);
+    expect(own.events).toEqual(B_RUNNING);
+    expect(own.sending).toBeNull();
+    expect(own.named).toBe(CHAT_WS);
+    const waiting = reloadTranscript(fresh, A, T0);
+    expect(waiting.sending).toEqual({ after: undefined });
+    expect(waiting.named).toBeNull();
+  });
 });
 
 describe("reduceEvent", () => {
@@ -198,7 +226,7 @@ describe("reduceEvent", () => {
 
   it("drops an event from another thread once the held events carry a thread id; an empty or unstamped state takes any", () => {
     const held = state(A_RUNNING);
-    expect(reduceEvent(held, B_DELTA, T0)).toBe(held);
+    expect(reduceEvent(held, B_DELTA, T0).events).toEqual(A_RUNNING);
     expect(reduceEvent(held, A[3]!, T0).events).toEqual([...A_RUNNING, A[3]]);
     expect(reduceEvent(state([]), B_START, T0).events).toEqual([B_START]);
     expect(reduceEvent(state(CHAT_STREAM.slice(0, 3)), B_DELTA, T0).events).toHaveLength(4);
@@ -206,7 +234,7 @@ describe("reduceEvent", () => {
 
   it("while fresh, a delta from any thread is dropped: only a session.start can open the person's own thread", () => {
     const fresh = state([], { fresh: true, left: "thr_a" });
-    expect(reduceEvent(fresh, B_DELTA, T0)).toBe(fresh);
+    expect(reduceEvent(fresh, B_DELTA, T0).events).toEqual([]);
     expect(reduceEvent(fresh, CHAT_STREAM[1]!, T0)).toBe(fresh);
     expect(reduceEvent(fresh, B_START, T0).events).toEqual([B_START]);
   });
@@ -252,7 +280,7 @@ describe("reduceEvent", () => {
     const started = reduceEvent({ ...died, sending: { after: "turn_x1" } }, B_START, T0);
     expect(started.events).toHaveLength(2);
     expect(started.named).toBe(CHAT_WS);
-    expect(reduceEvent(started, A[1]!, T0)).toBe(started);
+    expect(reduceEvent(started, A[1]!, T0).events).toEqual(started.events);
   });
 
   it("while fresh with a send in flight, a known thread waking is dropped and does not settle the send; a thread the view never knew is the send's own", () => {
@@ -296,6 +324,46 @@ describe("reduceEvent", () => {
     expect(ended.named).toBeNull();
     expect(deriveChatThread(ended).settled?.state).toBe("error");
     const idle = state([], { fresh: true, left: "thr_a", known: ["thr_a"] });
-    expect(reduceEvent(idle, died, T0)).toBe(idle);
+    expect(reduceEvent(idle, died, T0).events).toEqual([]);
+  });
+
+  it("a view whose last thread has no start admits only that thread's events, and while a send is in flight a thread it does not know", () => {
+    const x = { workspaceId: CHAT_WS, sessionId: "sess_x", turnId: "turn_x1", threadId: "thr_x" };
+    const deadEvents: SessionEvent[] = [
+      { type: "session.done", ...x, result: { status: "failed", error: "claude: command not found" } },
+      { type: "session.end", ...x, exitCode: 127, sawResult: true },
+    ];
+    const dead = state(deadEvents, { known: ["thr_a", "thr_b", "thr_x"] });
+    expect(reduceEvent(dead, A[1]!, T0)).toBe(dead);
+    expect(reduceEvent(dead, A.at(-1)!, T0)).toBe(dead);
+    expect(reduceEvent(dead, B_START, T0)).toBe(dead);
+    expect(reduceEvent(dead, { type: "session.delta", ...x, kind: "text", text: "late" }, T0).events).toHaveLength(3);
+    const sending = { ...dead, sending: { after: "turn_x1" } };
+    expect(reduceEvent(sending, { type: "session.start", ...b, threadId: "thr_a" }, T0)).toBe(sending);
+    const z = { workspaceId: CHAT_WS, sessionId: "sess_z", turnId: "turn_z1", threadId: "thr_z" };
+    const started = reduceEvent(sending, { type: "session.start", ...z, prompt: "retry" }, T0);
+    expect(started.events).toHaveLength(3);
+    expect(started.sending).toBeNull();
+    expect(started.named).toBe(CHAT_WS);
+    expect(reduceEvent(started, deadEvents[0]!, T0)).toBe(started);
+    const diedAgain = reduceEvent(sending, { type: "session.end", ...z, exitCode: 127, sawResult: true }, T0);
+    expect(diedAgain.events).toHaveLength(3);
+    expect(diedAgain.sending).toBeNull();
+  });
+
+  it("the thread of a dropped event becomes known, once, so it cannot pass for the person's own send later", () => {
+    const held = state(A_RUNNING);
+    const saw = reduceEvent(held, B_DELTA, T0);
+    expect(saw.events).toEqual(A_RUNNING);
+    expect(saw.known).toEqual(["thr_b"]);
+    expect(reduceEvent(saw, B_DELTA, T0)).toBe(saw);
+    const fresh = state([], { fresh: true, left: "thr_a", known: ["thr_a"] });
+    const c = { workspaceId: CHAT_WS, sessionId: "sess_c", turnId: "turn_c1", threadId: "thr_c" };
+    const knew = reduceEvent(fresh, { type: "session.delta", ...c, kind: "text", text: "elsewhere" }, T0);
+    expect(knew.events).toEqual([]);
+    expect(knew.known).toEqual(["thr_a", "thr_c"]);
+    const sending = { ...knew, sending: { after: undefined } };
+    expect(reduceEvent(sending, { type: "session.delta", ...c, kind: "text", text: "C LEAKED" }, T0)).toBe(sending);
+    expect(reduceEvent(sending, { type: "session.end", ...c, exitCode: 0, sawResult: true }, T0)).toBe(sending);
   });
 });

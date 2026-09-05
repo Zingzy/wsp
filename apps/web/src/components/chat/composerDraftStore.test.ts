@@ -83,6 +83,16 @@ describe("composer queue", () => {
     expect(store.getState().held["thr_new"]).toBeUndefined();
   });
 
+  it("rekeying a key with nothing waiting still drops its hold: a send with no rows behind it leaves no flag on the key it left", () => {
+    store.getState().hold(WS);
+    store.getState().rekeyQueue(WS, "thr_new");
+    expect(store.getState().held).toEqual({});
+    expect(store.getState().queues).toEqual({});
+    const before = store.getState();
+    store.getState().rekeyQueue(WS, "thr_new");
+    expect(store.getState()).toBe(before);
+  });
+
   it("keeps other workspaces' queues untouched and returns the same state for a no-op", () => {
     store.getState().enqueue("ws_2", "elsewhere");
     const before = store.getState();

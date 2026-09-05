@@ -138,13 +138,23 @@ export function reloadTranscript(s: ThreadState, events: ReadonlyArray<SessionEv
   const thread = threadId === null ? lastThread(events) : events.filter(e => e.threadId === threadId);
   const arrivals = thread.map(() => at);
   const known = knowing(s.known, events);
-  if (!s.fresh) return { ...EMPTY, events: thread, arrivals, known };
+  if (!s.fresh) return { ...EMPTY, events: thread, arrivals, known, ...replaySend(s, thread) };
   if (s.stale?.kind === "pending-send") return { ...s, stale: runningTurn(events) ?? s.stale, known };
   const id = thread[0]?.threadId;
   if (id !== undefined && !s.known.includes(id)) {
-    return { ...EMPTY, events: thread, arrivals, stale: runningTurn(events.filter(e => e.threadId === s.left)), known };
+    return { ...EMPTY, events: thread, arrivals, stale: runningTurn(events.filter(e => e.threadId === s.left)), known, ...replaySend(s, thread) };
   }
   return { ...s, stale: runningTurn(events), known };
+}
+
+/** What a replayed thread did with the send in flight, read the way live events would settle it: the events past the turn that had settled when it began. */
+function replaySend(s: ThreadState, thread: ReadonlyArray<SessionEvent>): Pick<ThreadState, "sending" | "named"> {
+  if (s.sending === null) return { sending: null, named: null };
+  const { after } = s.sending;
+  const since = thread.slice(thread.findLastIndex(e => e.turnId === after) + 1);
+  const start = since.find(e => e.type === "session.start");
+  if (start !== undefined) return { sending: null, named: heldThreadId(s) ?? start.workspaceId };
+  return since.some(e => e.type === "session.end") ? { sending: null, named: null } : { sending: s.sending, named: null };
 }
 
 function belongsToStale(stale: Extract<StaleTurn, { kind: "turn" }>, e: SessionEvent): boolean {
@@ -165,19 +175,25 @@ function unknownThread(state: ThreadState, e: SessionEvent): boolean {
  * A view holds one thread: once its events carry a thread id, another thread's events are not its own. Fresh, a
  * session.start is its own, and so is any event from a thread it does not know while a send is in flight: that is
  * the send's own harness dying before its start, while a known thread waking is not, whether it was left or older.
+ * A view whose thread never started (a harness that died before init, read back from history) holds that thread
+ * and, while a send is in flight, the unknown one the runtime mints for the send, since nothing resumes a dead one.
  */
 function inHeldThread(state: ThreadState, e: SessionEvent): boolean {
   if (state.fresh) return e.type === "session.start" || (state.sending !== null && unknownThread(state, e));
   const held = heldThreadId(state);
-  return held === undefined || e.threadId === held;
+  if (held !== undefined) return e.threadId === held;
+  const last = state.events.at(-1)?.threadId;
+  return last === undefined || e.threadId === last || (state.sending !== null && unknownThread(state, e));
 }
 
 /**
  * Applies one live event; returns the same state object when the event belongs to the turn a new thread left
- * or to another thread. A send ends at its session.start, or at a session.end of some other turn than the one
- * that had settled when it began: that turn's own end still trails its done, which already opened the composer,
- * while a harness that dies before init produces only a done and an end under a new turn id. A pending send
- * left behind ends the same way, from a thread the view never knew or from the left one it resumed.
+ * or to a thread already known, and only remembers the thread of one it drops otherwise: a thread another
+ * client opened after this view's history is then known before any send of this view could take it for its
+ * own. A send ends at its session.start, or at a session.end of some other turn than the one that had settled
+ * when it began: that turn's own end still trails its done, which already opened the composer, while a harness
+ * that dies before init produces only a done and an end under a new turn id. A pending send left behind ends
+ * the same way, from a thread the view never knew or from the left one it resumed.
  */
 export function reduceEvent(state: ThreadState, e: SessionEvent, at: string): ThreadState {
   const { stale } = state;
@@ -189,7 +205,10 @@ export function reduceEvent(state: ThreadState, e: SessionEvent, at: string): Th
     }
     if (belongsToStale(stale, e)) return e.type === "session.end" ? { ...state, stale: null } : state;
   }
-  if (!inHeldThread(state, e)) return state;
+  if (!inHeldThread(state, e)) {
+    const known = knowing(state.known, [e]);
+    return known === state.known ? state : { ...state, known };
+  }
   const next = append(state, e, at);
   if (state.sending === null) return next;
   const starts = e.type === "session.start";

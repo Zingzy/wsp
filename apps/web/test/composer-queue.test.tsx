@@ -587,4 +587,138 @@ describe("composer queue", () => {
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["what model are you?", "and the context window?", "and the cost?"]));
     expect(queued()).toEqual([]);
   });
+
+  it("after a reload that follows a dead fresh send, the start-less view keeps its restored row, stays quiet on another thread's events, and the next send lands and takes the row", async () => {
+    useComposerDraftStore.getState().enqueue(WS, "retry later");
+    await reloadStore();
+    const A = { workspaceId: WS, sessionId: "sess_a", turnId: "turn_a1", threadId: "thr_a" };
+    const X = { workspaceId: WS, sessionId: "sess_x", turnId: "turn_x1", threadId: "thr_x" };
+    const history: Record<string, SessionEvent[]> = {
+      [WS]: [
+        { type: "session.start", ...A, prompt: "long job" },
+        { type: "session.delta", ...A, kind: "text", text: "Working on it." },
+        { type: "session.done", ...X, result: { status: "failed", error: "claude: command not found" } },
+        { type: "session.end", ...X, exitCode: 127, sawResult: true },
+      ],
+    };
+    const { api, started, emit } = fixtureApi(history);
+    await setup(api);
+    await screen.findByText(/claude: command not found/i);
+    expect(queued()).toEqual(["retry later"]);
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDefined();
+    emit({ type: "session.delta", ...A, kind: "text", text: "A LEAKED INTO DEAD VIEW" });
+    expect(screen.queryByText(/A LEAKED INTO DEAD VIEW/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Stop generation" })).toBeNull();
+    emit({ type: "session.done", ...A, result: { status: "completed", durationMs: 9_000 } });
+    emit({ type: "session.end", ...A, exitCode: 0, sawResult: true });
+    expect(screen.getByTestId("settled-footer").textContent).not.toContain("completed");
+    expect(started).toHaveLength(0);
+    expect(queued()).toEqual(["retry later"]);
+    await enter("retry");
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["retry"]));
+    const Z = { workspaceId: WS, sessionId: "sess_z", turnId: "turn_z1", threadId: "thr_z" };
+    emit({ type: "session.start", ...Z, prompt: "retry" });
+    expect(screen.getByRole("button", { name: "Stop generation" })).toBeDefined();
+    expect(useComposerDraftStore.getState().queues["thr_z"]?.map(r => r.prompt)).toEqual(["retry later"]);
+    expect(useComposerDraftStore.getState().held).toEqual({});
+    emit({ type: "session.done", ...Z, result: { status: "completed", durationMs: 500 } });
+    emit({ type: "session.end", ...Z, exitCode: 0, sawResult: true });
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["retry", "retry later"]));
+    expect(started[1]?.resume).toBe("sess_z");
+    expect(queued()).toEqual([]);
+  });
+
+  it("a replay gap while a send is pending keeps the row behind it going: the reply's start releases the hold once and the row goes at the turn's end", async () => {
+    const A = CHAT_STREAM.map(e => ({ ...e, sessionId: "sess_a", threadId: "thr_a" }));
+    const history: Record<string, SessionEvent[]> = { [WS]: A };
+    const { api, started, emit } = fixtureApi(history);
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    await enter("one");
+    await waitFor(() => expect(started).toHaveLength(1));
+    await enter("two");
+    expect(queued()).toEqual(["two"]);
+    expect(useComposerDraftStore.getState().held["thr_a"]).toBe(true);
+    const A2 = { workspaceId: WS, sessionId: "sess_a", turnId: "turn_a2", threadId: "thr_a" };
+    history[WS] = [...A, { type: "session.start", ...A2, prompt: "one" }, { type: "session.delta", ...A2, kind: "text", text: "On one." }];
+    act(() => useStore.getState().noteGap());
+    await screen.findByText("On one.");
+    expect(screen.getByRole("button", { name: "Stop generation" })).toBeDefined();
+    expect(useComposerDraftStore.getState().held).toEqual({});
+    expect(queued()).toEqual(["two"]);
+    emit({ type: "session.done", ...A2, result: { status: "completed", durationMs: 500 } });
+    emit({ type: "session.end", ...A2, exitCode: 0, sawResult: true });
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["one", "two"]));
+    expect(started[1]?.resume).toBe("sess_a");
+    expect(queued()).toEqual([]);
+  });
+
+  it("a replay gap while a fresh send is pending: the reply's start names the thread, the rows move under it once, and they go at its end", async () => {
+    const A = CHAT_STREAM.map(e => ({ ...e, sessionId: "sess_a", threadId: "thr_a" }));
+    const history: Record<string, SessionEvent[]> = { [WS]: A };
+    const { api, started, emit } = fixtureApi(history);
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    act(() => requestNewThread({ workspaceId: WS }));
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toBeDefined());
+    await enter("one");
+    await waitFor(() => expect(started).toHaveLength(1));
+    await enter("two");
+    expect(useComposerDraftStore.getState().queues[WS]?.map(r => r.prompt)).toEqual(["two"]);
+    const N = { workspaceId: WS, sessionId: "sess_n", turnId: "turn_n1", threadId: "thr_n" };
+    history[WS] = [...A, { type: "session.start", ...N, prompt: "one" }, { type: "session.delta", ...N, kind: "text", text: "On one." }];
+    act(() => useStore.getState().noteGap());
+    await screen.findByText("On one.");
+    expect(screen.getByRole("button", { name: "Stop generation" })).toBeDefined();
+    expect(useComposerDraftStore.getState().queues["thr_n"]?.map(r => r.prompt)).toEqual(["two"]);
+    expect(useComposerDraftStore.getState().queues[WS]).toBeUndefined();
+    expect(useComposerDraftStore.getState().held).toEqual({});
+    emit({ type: "session.done", ...N, result: { status: "completed", durationMs: 500 } });
+    emit({ type: "session.end", ...N, exitCode: 0, sawResult: true });
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["one", "two"]));
+    expect(started[1]?.resume).toBe("sess_n");
+    expect(queued()).toEqual([]);
+  });
+
+  it("a thread another client minted after this page's history stays out of a fresh send: its dropped events made it known", async () => {
+    const A = CHAT_STREAM.map(e => ({ ...e, sessionId: "sess_a", threadId: "thr_a" }));
+    const { api, started, emit } = fixtureApi({ [WS]: A });
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    const C = { workspaceId: WS, sessionId: "sess_c", turnId: "turn_c1", threadId: "thr_c" };
+    emit({ type: "session.start", ...C, prompt: "from another tab" });
+    emit({ type: "session.delta", ...C, kind: "text", text: "C STARTED" });
+    expect(screen.queryByText(/C STARTED/)).toBeNull();
+    act(() => requestNewThread({ workspaceId: WS }));
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toBeDefined());
+    await enter("first");
+    await waitFor(() => expect(started).toHaveLength(1));
+    await enter("second");
+    expect(queued()).toEqual(["second"]);
+    emit({ type: "session.delta", ...C, kind: "text", text: "C LEAKED" });
+    emit({ type: "session.done", ...C, result: { status: "completed", durationMs: 9_000 } });
+    emit({ type: "session.end", ...C, exitCode: 0, sawResult: true });
+    expect(screen.queryByText(/C LEAKED/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Turn in flight" })).toBeDefined();
+    expect(started).toHaveLength(1);
+    const N = { workspaceId: WS, sessionId: "sess_n", turnId: "turn_n1", threadId: "thr_n" };
+    emit({ type: "session.start", ...N, prompt: "first" });
+    expect(useComposerDraftStore.getState().queues["thr_n"]?.map(r => r.prompt)).toEqual(["second"]);
+    emit({ type: "session.done", ...N, result: { status: "completed", durationMs: 500 } });
+    emit({ type: "session.end", ...N, exitCode: 0, sawResult: true });
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "second"]));
+    expect(started[1]?.resume).toBe("sess_n");
+    expect(queued()).toEqual([]);
+  });
+
+  it("a fresh send with nothing waiting behind it leaves no hold on the workspace key once its start names the thread", async () => {
+    const { api, started, emit } = fixtureApi();
+    await setup(api);
+    await enter("first");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(useComposerDraftStore.getState().held).toEqual({ [WS]: true });
+    const N = { workspaceId: WS, sessionId: "sess_n", turnId: "turn_n1", threadId: "thr_n" };
+    emit({ type: "session.start", ...N, prompt: "first" });
+    expect(useComposerDraftStore.getState().held).toEqual({});
+  });
 });
