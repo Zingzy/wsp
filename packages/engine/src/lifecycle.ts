@@ -109,6 +109,11 @@ export class Workspace {
     this.phase = "napping";
   }
 
+  /** The provider paused this machine outside a nap (its own idle timer, a console click): the phase follows the fact, so the next wake resumes. No vault was stashed. */
+  notePaused(): void {
+    this.phase = "napping";
+  }
+
   /** Done when the resumed machine passes the wake check, not when resume()
    * returns: Solari has handed back a machine reporting running whose guest
    * never served again (resume fell back to a fresh host at default size).

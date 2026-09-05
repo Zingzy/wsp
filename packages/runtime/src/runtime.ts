@@ -829,7 +829,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         entry.record.phase = "pausing";
         await persist(entry.record);
         await emitStatus(entry, "napping");
-        endSessions(id, PAUSED_REASON);
         try {
           await entry.ws.nap();
         } catch (e) {
@@ -838,6 +837,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           await emitStatus(entry, entry.machine.previewUrl ? "reachable" : "unsupported", e instanceof Error ? e.message : String(e));
           throw e;
         }
+        // The reason says the machine paused, so it is written once the provider has confirmed that.
+        endSessions(id, PAUSED_REASON);
         entry.record.phase = "napping";
         await persist(entry.record);
         bus.emit({ type: "workspace.napped", workspaceId: id });
@@ -849,8 +850,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     })();
     return entry.napping;
   };
+
+  /** The provider paused the machine outside a nap (its idle timer, a console click): the record follows the fact, so a wake resumes it the normal way. */
+  const adoptPause = async (entry: LiveWorkspace): Promise<void> => {
+    if (entry.record.phase !== "running" || entry.napping || entry.waking) return;
+    entry.ws.notePaused();
+    entry.record.phase = "napping";
+    await persist(entry.record);
+    endSessions(entry.record.id, PAUSED_REASON);
+    bus.emit({ type: "workspace.napped", workspaceId: entry.record.id });
+    await emitStatus(entry, "napping", "paused outside wsp");
+  };
   bus.on("workspace.status", e => {
-    if (e.type === "workspace.status" && e.status.reach.state === "zombie") endSessions(e.status.id, UNANSWERING_REASON);
+    if (e.type !== "workspace.status") return;
+    if (e.status.reach.state === "zombie") endSessions(e.status.id, UNANSWERING_REASON);
+    const entry = live.get(e.status.id);
+    if (entry !== undefined && e.status.phase === "running" && e.status.machineState === "paused") void adoptPause(entry);
   });
 
   const idle = createIdlePolicy({
@@ -1066,6 +1081,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const entry = await entryOf(id);
       if (entry.waking) return entry.waking;
       if (entry.napping) await entry.napping.catch(() => {});
+      // A wake nobody should need is the one sign the provider paused the machine on its own: one read settles it.
+      if (entry.record.phase === "running" && (await entry.machine.state().catch(() => "running")) === "paused") await adoptPause(entry);
       if (entry.record.phase === "running") return view(entry.record);
       entry.waking = (async () => {
         entry.record.phase = "waking";

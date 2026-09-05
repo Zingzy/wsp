@@ -78,18 +78,22 @@ describe("nap phase order", () => {
     expect((await store.get("workspaces", ws.id) as { phase: string }).phase).toBe("napping");
   });
 
-  it("a pause the provider refuses goes back to running with the error on the pushed status", async () => {
+  it("a pause the provider refuses goes back to running with the error on the pushed status, its sessions untouched", async () => {
     const backend = stubBackend();
-    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const { factory } = hangingAdapter();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: factory } });
     const pushed: EventUnion[] = [];
-    rt.events.on("workspace.status", e => pushed.push(e));
+    rt.events.on("*", e => pushed.push(e));
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "hi" });
     backend.machines[0]!.pause = async () => {
       throw new Error("provider down");
     };
     await expect(rt.workspaces.nap(ws.id)).rejects.toThrow("provider down");
     expect((await rt.workspaces.get(ws.id)).phase).toBe("running");
-    expect(pushed.map(e => e.type === "workspace.status" && [e.status.phase, e.status.reason])).toEqual([["pausing", undefined], ["running", "provider down"]]);
+    expect(pushed.some(e => e.type === "session.end")).toBe(false);
+    expect(handle.view().status).toBe("running");
+    expect(pushed.filter(e => e.type === "workspace.status").map(e => e.type === "workspace.status" && [e.status.phase, e.status.reason])).toEqual([["pausing", undefined], ["running", "provider down"]]);
   });
 
   it("a wake asked during the pause waits for it and then wakes; a second nap joins the first", async () => {
@@ -162,7 +166,7 @@ describe("the start guard", () => {
 });
 
 describe("sessions end with the machine", () => {
-  it("nap ends every live session of that workspace with the reason before the pause, once, and drops what the harness says after", async () => {
+  it("nap ends every live session of that workspace with the reason once the provider has paused, once, and drops what the harness says after", async () => {
     const backend = stubBackend();
     const { factory, interrupts, emit } = hangingAdapter();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: factory } });
@@ -183,7 +187,8 @@ describe("sessions end with the machine", () => {
 
     await rt.workspaces.nap(a.id);
 
-    expect(sessionsAtPause).toEqual(["failed", "failed"]);
+    // The reason says the machine paused, so it is written once the provider has confirmed the pause, not before.
+    expect(sessionsAtPause).toEqual(["running", "running"]);
     const ended = ends(events).filter(e => e.workspaceId === a.id);
     expect(ended).toHaveLength(2);
     for (const e of ended) expect(e).toMatchObject({ exitCode: null, sawResult: false, reason: PAUSED });
@@ -284,5 +289,78 @@ describe("a record left at pausing", () => {
     const woken = await second.workspaces.wake(ws.id);
     expect(woken.phase).toBe("running");
     expect(backend.machines[0]!.resumes).toBe(1);
+  });
+});
+
+describe("a pause the runtime did not start", () => {
+  const openServers: Server[] = [];
+  afterEach(async () => {
+    await Promise.all(openServers.map(s => { s.closeAllConnections(); return new Promise<void>(r => s.close(() => r())); }));
+    openServers.length = 0;
+  });
+
+  /** The edge answers nothing for a paused machine (measured: the reach goes dark only while paused). */
+  async function darkReach(backend: StubBackend): Promise<void> {
+    const server = createServer(() => {});
+    await new Promise<void>(r => server.listen(0, "127.0.0.1", r));
+    openServers.push(server);
+    const port = (server.address() as { port: number }).port;
+    backend.machines[0]!.previewUrl = async p => ({ url: `http://127.0.0.1:${port}/?port=${p}`, token: "t", expiresAt: Date.now() + 3_600_000 });
+  }
+
+  it("the poll sees the provider's machine paused under a running record: the phase follows, the sessions end, the status is pushed, and wake resumes it", async () => {
+    const backend = stubBackend();
+    const { factory } = hangingAdapter();
+    const rt = createRuntime({
+      backend,
+      store: memoryStore(),
+      adapters: { claude: factory },
+      status: { costIntervalMs: 60_000, pollIntervalMs: 5, promptMs: 10, probeTimeoutMs: 50, reconcileMinMs: 0 },
+    });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "one" });
+    await darkReach(backend);
+    const m = backend.machines[0]!;
+    m.paused = true;
+    const stop = rt.status.watch();
+    try {
+      await until(() => events.some(e => e.type === "workspace.napped"), 5_000);
+    } finally {
+      stop();
+    }
+    expect((await rt.workspaces.get(ws.id)).phase).toBe("napping");
+    expect(ends(events)).toHaveLength(1);
+    expect(ends(events)[0]).toMatchObject({ workspaceId: ws.id, reason: PAUSED });
+    expect(handle.view().status).toBe("failed");
+    const pushed = events.filter(e => e.type === "workspace.status").map(e => e.type === "workspace.status" && e.status);
+    expect(pushed.some(s => s !== false && s.phase === "napping" && s.machineState === "paused" && s.reason === "paused outside wsp")).toBe(true);
+    await expect(rt.sessions.start(ws.id, { prompt: "again" })).rejects.toThrow("Workspace is paused; wake it to send");
+    const woken = await rt.workspaces.wake(ws.id);
+    expect(woken.phase).toBe("running");
+    expect(m.resumes).toBe(1);
+    expect(m.paused).toBe(false);
+  });
+
+  it("a wake asked while the record still says running asks the provider once and resumes a machine it finds paused", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const m = backend.machines[0]!;
+    let asked = 0;
+    const state = m.state.bind(m);
+    m.state = async () => { asked++; return state(); };
+    expect((await rt.workspaces.wake(ws.id)).phase).toBe("running");
+    expect(asked).toBe(1);
+    expect(m.resumes).toBe(0);
+    m.paused = true;
+    const woken = await rt.workspaces.wake(ws.id);
+    expect(woken.phase).toBe("running");
+    expect(m.resumes).toBe(1);
+    expect(events.map(e => e.type)).toContain("workspace.napped");
+    expect(events.map(e => e.type)).toContain("workspace.woken");
   });
 });

@@ -444,6 +444,36 @@ describe("panes on a workspace that is not running", () => {
     await waitFor(() => expect(writes()).toEqual(["a"]));
   }, 20_000);
 
+  it("the overlay takes focus only from the pane itself, and Enter on its Wake button is left to the button", async () => {
+    const { wt } = fakeLink();
+    const wakes: string[] = [];
+    setPane("running", {}, wakes);
+    useTerminalDrawerStore.getState().setOpen(WS, true);
+    const elsewhere = document.createElement("textarea");
+    document.body.appendChild(elsewhere);
+    render(<WorkspaceTerminalDrawer workspaceId={WS} />);
+    await waitFor(() => expect(inputs("drawer")).toHaveLength(1), { timeout: 15_000 });
+    elsewhere.focus();
+    act(() => {
+      setPane("napping", { machineState: "paused", reach: { state: "napping" } }, wakes);
+      wt.feedStatus("connecting");
+    });
+    await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("paused"));
+    expect(document.activeElement).toBe(elsewhere);
+    // Enter on the Wake button is the button's own activation; only a key on the overlay itself is refused.
+    const wake = within(overlay()!).getByRole("button", { name: "Wake" });
+    expect(fireEvent.keyDown(wake, { key: "Enter", code: "Enter" })).toBe(true);
+    expect(document.querySelector("[data-terminal-refused]")).toBeNull();
+    expect(fireEvent.keyDown(overlay()!, { key: "a", code: "KeyA" })).toBe(false);
+    expect(document.querySelector("[data-terminal-refused]")?.textContent).toBe("Typing is refused: the workspace is paused");
+    // With the pane holding focus, the next state takes it so keys keep landing on the refusal.
+    (inputs("drawer")[0] as HTMLElement).focus();
+    act(() => setPane("waking", { machineState: "starting", reach: { state: "napping" } }, wakes));
+    await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("waking"));
+    expect(document.activeElement).toBe(overlay());
+    elsewhere.remove();
+  }, 20_000);
+
   it("a running machine whose daemon stopped answering reconnects with elapsed time, then says it is not answering once the runtime calls it a zombie", async () => {
     const { wt } = fakeLink();
     setPane("running", {});

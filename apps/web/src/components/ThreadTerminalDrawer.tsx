@@ -411,14 +411,16 @@ function Elapsed() {
 }
 
 /**
- * Dims the frozen frame and says why it is frozen. It takes focus when it appears so keys land here, and a key
- * pressed anywhere in the pane shows the refusal instead of vanishing into a socket that is down.
+ * Dims the frozen frame and says why it is frozen. It takes focus only when the pane already held it (the surface
+ * or the overlay itself), so a person typing elsewhere keeps their place; a key pressed on it shows the refusal
+ * instead of vanishing into a socket that is down. Keys on its own button are the button's.
  */
 function TerminalPaneOverlay({ pane, refused, onWake }: { pane: TerminalPaneState; refused: string | null; onWake?: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [keyRefused, setKeyRefused] = useState<string | null>(null);
   useEffect(() => {
-    ref.current?.focus({ preventScroll: true });
+    const el = ref.current;
+    if (el && el.parentElement?.contains(document.activeElement)) el.focus({ preventScroll: true });
   }, [pane.kind]);
   const line = refused ?? keyRefused;
   return (
@@ -429,7 +431,7 @@ function TerminalPaneOverlay({ pane, refused, onWake }: { pane: TerminalPaneStat
       data-terminal-overlay={pane.kind}
       className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-background/70 px-4 text-center text-sm text-foreground outline-hidden backdrop-blur-[1px]"
       onKeyDown={event => {
-        if (event.key === "Tab" || event.key === "Escape") return;
+        if (event.target !== event.currentTarget || event.key === "Tab" || event.key === "Escape") return;
         event.preventDefault();
         setKeyRefused(terminalInputRefusal(pane));
       }}

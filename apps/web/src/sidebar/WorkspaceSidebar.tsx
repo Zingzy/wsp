@@ -49,7 +49,7 @@ import {
   dotClassForTone,
   explainCreateRefusal,
   idleCountdownLabel,
-  pillFromIndicator,
+  threadPill,
   reachNote,
   textClassForTone,
   type CreateRefusal,
@@ -387,7 +387,7 @@ function ThreadRow({ thread, time, onSelect }: { thread: SidebarThreadSnapshot; 
         className="h-8 w-full"
       >
         <ProjectFavicon src={null} className="size-3.5 opacity-60" fallbackIcon={MessageSquareIcon} />
-        <ThreadRowLeadingStatus status={pillFromIndicator(thread.indicator)} />
+        <ThreadRowLeadingStatus status={threadPill(thread)} />
         <span className="min-w-0 flex-1 truncate">{thread.title}</span>
         <span className="ml-auto shrink-0 text-xs text-muted-foreground/55 tabular-nums">{time}</span>
       </SidebarMenuSubButton>

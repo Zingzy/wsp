@@ -3,7 +3,7 @@
 // adapter names the state; this file turns it into the words and classes a
 // row shows.
 import type { ReachState, WorkspacePhase, WorkspaceStatus } from "@wsp/protocol";
-import type { StatusIndicator, StatusIndicatorTone } from "../adapt/index.js";
+import type { SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
 import { formatRelativeTimeLabel } from "../lib/timestampFormat.js";
 import { DisconnectedError, RequestError } from "../protocol/client.js";
 import { formatWorkingDurationLabel, type ThreadStatusPill } from "./Sidebar.logic.js";
@@ -33,29 +33,34 @@ export function costLabel(input: {
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
-const ZINC = { colorClass: "text-muted-foreground/70", dotClass: "bg-zinc-400 dark:bg-zinc-500" };
+const PLAIN = { colorClass: "text-muted-foreground/70", dotClass: "bg-muted-foreground/60" };
 
-/** Idle is the unlabeled resting state; Working and Ended carry a pill, zinc like everything that is not running. */
-export function pillFromIndicator(indicator: StatusIndicator | null): ThreadStatusPill | null {
-  if (!indicator) return null;
-  switch (indicator.label) {
-    case "Working":
-      return { label: "Working", ...ZINC, pulse: indicator.pulse };
-    case "Ended":
-      return { label: "Ended", ...ZINC, pulse: false };
-    default:
+/** The pill keys on the session's status and wears the adapter's word: a running thread and one that did not settle carry one, the resting states none. */
+export function threadPill(thread: Pick<SidebarThreadSnapshot, "status" | "indicator">): ThreadStatusPill | null {
+  if (!thread.indicator) return null;
+  switch (thread.status) {
+    case "running":
+      return { label: thread.indicator.label, ...PLAIN, pulse: thread.indicator.pulse };
+    case "failed":
+      return { label: thread.indicator.label, ...PLAIN, pulse: false };
+    case "completed":
+    case "interrupted":
       return null;
+    default: {
+      const _exhaustive: never = thread.status;
+      return null;
+    }
   }
 }
 
 export function dotClassForTone(tone: StatusIndicatorTone): string {
   switch (tone) {
     case "running":
-      return "bg-emerald-500 dark:bg-emerald-300/90";
+      return "bg-success";
     case "paused":
-      return "border border-zinc-400 bg-transparent dark:border-zinc-500";
+      return "border border-muted-foreground/60 bg-transparent";
     case "neutral":
-      return "bg-zinc-400 dark:bg-zinc-500";
+      return "bg-muted-foreground/60";
     default: {
       const _exhaustive: never = tone;
       return "";
@@ -66,7 +71,7 @@ export function dotClassForTone(tone: StatusIndicatorTone): string {
 export function textClassForTone(tone: StatusIndicatorTone): string {
   switch (tone) {
     case "running":
-      return "text-emerald-600 dark:text-emerald-300/90";
+      return "text-success-foreground";
     case "paused":
     case "neutral":
       return "text-muted-foreground/70";

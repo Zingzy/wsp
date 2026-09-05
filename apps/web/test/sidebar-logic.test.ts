@@ -7,11 +7,9 @@ import type { WorkspaceStatus } from "@wsp/protocol";
 import { RequestError } from "../src/protocol/client.js";
 import {
   resolveAdjacentThreadId,
-  resolveProjectStatusIndicator,
   searchSidebarThreadsByTitle,
   sortSettledThreadsForSidebar,
   sortThreadsForSidebar,
-  type ThreadStatusPill,
 } from "../src/sidebar/Sidebar.logic.js";
 import {
   compactTimeLabel,
@@ -20,7 +18,7 @@ import {
   explainCreateRefusal,
   idleCountdownLabel,
   dotClassForTone,
-  pillFromIndicator,
+  threadPill,
   textClassForTone,
   reachNote,
 } from "../src/sidebar/workspaceRows.js";
@@ -65,13 +63,6 @@ describe("copied traversal and rollup", () => {
     expect(resolveAdjacentThreadId({ threadIds: ids, currentThreadId: "zz", direction: "next" })).toBeNull();
   });
 
-  it("the rollup puts work in motion above a thread that ended", () => {
-    const working: ThreadStatusPill = { label: "Working", colorClass: "", dotClass: "", pulse: true };
-    const ended: ThreadStatusPill = { label: "Ended", colorClass: "", dotClass: "", pulse: false };
-    expect(resolveProjectStatusIndicator([null, ended, working])?.label).toBe("Working");
-    expect(resolveProjectStatusIndicator([null, ended])?.label).toBe("Ended");
-    expect(resolveProjectStatusIndicator([null])).toBeNull();
-  });
 });
 
 const status = (over: Partial<WorkspaceStatus>): WorkspaceStatus => ({
@@ -110,16 +101,18 @@ describe("workspace row labels", () => {
     expect(costLabel({ phase: "napping", rateUsdPerHour: null, accruedUsd: null })).toBeNull();
   });
 
-  it("thread pills: working pulses, ended is plain, idle rows carry no pill; nothing but running is green", () => {
-    expect(pillFromIndicator({ label: "Working", tone: "neutral", pulse: true })).toMatchObject({ label: "Working", pulse: true, dotClass: expect.stringContaining("zinc") });
-    expect(pillFromIndicator({ label: "Ended", tone: "neutral", pulse: false })).toMatchObject({ label: "Ended", dotClass: expect.stringContaining("zinc") });
-    expect(pillFromIndicator({ label: "Idle", tone: "neutral", pulse: false })).toBeNull();
-    expect(pillFromIndicator(null)).toBeNull();
-    expect(dotClassForTone("running")).toContain("emerald");
-    expect(dotClassForTone("paused")).toContain("zinc");
-    expect(dotClassForTone("neutral")).toContain("zinc");
-    expect(textClassForTone("running")).toContain("emerald");
-    expect(textClassForTone("neutral")).toBe("text-muted-foreground/70");
+  it("thread pills key on the session status, wear the adapter's word, and use tokens: only running is the success colour", () => {
+    expect(threadPill({ status: "running", indicator: { label: "Working", tone: "neutral", pulse: true } })).toMatchObject({ label: "Working", pulse: true, dotClass: expect.stringContaining("muted-foreground") });
+    expect(threadPill({ status: "failed", indicator: { label: "Ended", tone: "neutral", pulse: false } })).toMatchObject({ label: "Ended", dotClass: expect.stringContaining("muted-foreground") });
+    expect(threadPill({ status: "failed", indicator: { label: "Stopped short", tone: "neutral", pulse: false } })).toMatchObject({ label: "Stopped short" });
+    expect(threadPill({ status: "completed", indicator: { label: "Idle", tone: "neutral", pulse: false } })).toBeNull();
+    expect(threadPill({ status: "interrupted", indicator: { label: "Idle", tone: "neutral", pulse: false } })).toBeNull();
+    expect(threadPill({ status: "running", indicator: null })).toBeNull();
+    for (const cls of [dotClassForTone("running"), textClassForTone("running")]) expect(cls).toContain("success");
+    for (const cls of [dotClassForTone("paused"), dotClassForTone("neutral"), textClassForTone("paused"), textClassForTone("neutral")]) expect(cls).toContain("muted-foreground");
+    for (const cls of [dotClassForTone("running"), dotClassForTone("paused"), dotClassForTone("neutral"), textClassForTone("running"), textClassForTone("neutral")]) {
+      expect(cls).not.toMatch(/emerald|zinc|sky|red/);
+    }
   });
 
   it("relative time: t3code's label, compacted for the row", () => {
