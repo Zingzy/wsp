@@ -258,7 +258,8 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
     } else if (free.kind === "free" && free.bytes < TOOLS_DISK_FLOOR) {
       const after = await cleanupAtFloor(free.bytes);
       if (after === undefined || after.kind === "unknown" || after.bytes < TOOLS_DISK_FLOOR) {
-        floor = floorNote(after?.kind === "free" ? `${fmtBytes(after.bytes)} free after cleanup` : `${fmtBytes(free.bytes)} free`);
+        const reading = after === undefined ? `${fmtBytes(free.bytes)} free` : after.kind === "free" ? `${fmtBytes(after.bytes)} free after cleanup` : `${fmtBytes(free.bytes)} free before cleanup, df failed after`;
+        floor = floorNote(reading);
         out.tools.push({ id: tool.id, label: tool.label, outcome: "skipped", note: floor });
         continue;
       }

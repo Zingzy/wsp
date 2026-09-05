@@ -1075,6 +1075,52 @@ describe("golden import stages", () => {
     expect(sweeps).toBe(3);
   });
 
+  it("when df cannot be read after the cleanup the tools left are skipped, and the row says the rescue ran and what was unknown", async () => {
+    let bootstrapped = false;
+    let cleanups = 0;
+    const broken = { exitCode: 1, stdout: "", stderr: "df: /root: Input/output error" };
+    const { backend, cmds, fetch } = backendFor([
+      ["brew-bootstrap", () => ((bootstrapped = true), ok)],
+      ["brew cleanup -s --prune=all", () => (cleanups++, ok)],
+      [FREE_KB_CMD, () => (cleanups === 0 ? { exitCode: 0, stdout: `${mb(bootstrapped ? 1800 : 3000)}\n`, stderr: "" } : broken)],
+    ]);
+    const { stages, onStage } = stageRecorder();
+    const results: ImportResult[] = [];
+    await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ onResult: r => void results.push(r) }) });
+    expect(cmds.some(c => c.includes("brew install gh"))).toBe(false);
+    expect(stages.filter(s => s.startsWith("installing-tools"))).toEqual([
+      "installing-tools:Homebrew (1/3)",
+      "installing-tools:1800 MB free, under the 2048 MB floor; cleaning up before skipping",
+      "installing-tools:caches swept; df failed: df: /root: Input/output error",
+      "installing-tools:1 installed, 2 skipped: gh, bun@1.4.0 (1800 MB free before cleanup, df failed after, keeping 2048 MB free); caches swept",
+    ]);
+    expect(results[0]!.tools.map(t => [t.id, t.outcome, t.note])).toEqual([
+      ["tools/homebrew", "installed", undefined],
+      ["tools/brew/gh", "skipped", "1800 MB free before cleanup, df failed after, keeping 2048 MB free"],
+      ["tools/npm/bun", "skipped", "1800 MB free before cleanup, df failed after, keeping 2048 MB free"],
+    ]);
+  });
+
+  it("a Homebrew cleanup that fails at the floor is named in the rescue's line, and the skip still carries the reading after it", async () => {
+    let bootstrapped = false;
+    const failing = { exitCode: 1, stdout: "", stderr: "Error: Permission denied @ apply2files" };
+    const { backend, cmds, fetch } = backendFor(
+      [["brew-bootstrap", () => ((bootstrapped = true), ok)], ["brew cleanup -s --prune=all", failing]],
+      () => mb(bootstrapped ? 1800 : 3000),
+    );
+    const { stages, onStage } = stageRecorder();
+    const results: ImportResult[] = [];
+    await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ onResult: r => void results.push(r) }) });
+    expect(cmds.some(c => c.includes("brew install gh"))).toBe(false);
+    expect(stages.filter(s => s.startsWith("installing-tools"))).toEqual([
+      "installing-tools:Homebrew (1/3)",
+      "installing-tools:1800 MB free, under the 2048 MB floor; cleaning up before skipping",
+      "installing-tools:Homebrew cleanup failed (Error: Permission denied @ apply2files); caches swept; 1800 MB free",
+      "installing-tools:1 installed, 2 skipped: gh, bun@1.4.0 (1800 MB free after cleanup, keeping 2048 MB free); Homebrew cleanup failed (Error: Permission denied @ apply2files); caches swept; 1800 MB free",
+    ]);
+    expect(results[0]!.tools.map(t => [t.id, t.outcome])).toEqual([["tools/homebrew", "installed"], ["tools/brew/gh", "skipped"], ["tools/npm/bun", "skipped"]]);
+  });
+
   it("refuses to upload when the archive and its contents would not fit, kills the builder, and says why", async () => {
     const { backend, killed, puts, fetch } = backendFor([], mb(100));
     const { stages, onStage } = stageRecorder();
