@@ -333,6 +333,11 @@ function secretNamed(name: string): boolean {
   return isSecretName(name) || name.toUpperCase().split("_").some(w => ["CREDENTIAL", "CREDENTIALS", "AUTH", "CERT", "PASSWD"].includes(w));
 }
 
+/** Flags whose next argument is a secret whatever its name says: a header line, mcp-remote's OAuth client record with its client_secret. */
+const HIDDEN_FLAGS = new Set(["--header", "-H", "--static-oauth-client-info"]);
+/** A flag takes the next argument as its value unless that argument is itself a flag. */
+const takesValue = (next: string | undefined): next is string => next !== undefined && !next.startsWith("-");
+
 /** `--api-key`, `--token=`: a flag whose name is secret-shaped; its value is a secret. */
 const secretFlag = (arg: string): string | undefined => {
   const m = /^(--?[A-Za-z][\w-]*)(=|$)/.exec(arg);
@@ -364,9 +369,12 @@ function transportLine(t: McpTransport, home: string): string {
     if (a === "-y" || a === "--yes") continue;
     const flag = secretFlag(a);
     const assign = secretAssign(a);
-    if (a === "--header" || a === "-H" || (flag !== undefined && !a.includes("="))) {
-      shown.push(a, "…");
-      i++;
+    if (HIDDEN_FLAGS.has(a) || (flag !== undefined && !a.includes("="))) {
+      shown.push(a);
+      if (takesValue(t.args[i + 1])) {
+        shown.push("…");
+        i++;
+      }
       continue;
     }
     if (flag !== undefined || assign !== undefined) {
@@ -400,16 +408,25 @@ export function homePaths(server: McpServer, home: string): string[] {
   return [...out];
 }
 
-/** Whether each home path a definition runs against is here: one that is gone locks the row, one that is here and
- * travels on no row of this server is named as a dependency. */
-async function homeDeps(host: Host, server: McpServer, carriedPaths: readonly string[]): Promise<{ notes: string[]; gone?: string }> {
-  const notes: string[] = [];
+interface HomeDeps {
+  notes: string[];
+  /** A path the definition runs against is not here: the row starts unticked, and the person decides. */
+  gone: boolean;
+}
+
+/** Whether each home path a definition runs against is here: one that is here and travels on no row of this
+ * server is named as a dependency; one that is not here unticks the row but never locks it, since a server that
+ * makes its own file (a memory store, a sqlite db) runs fine without it. */
+async function homeDeps(host: Host, server: McpServer, carriedPaths: readonly string[]): Promise<HomeDeps> {
+  const out: HomeDeps = { notes: [], gone: false };
   for (const p of homePaths(server, host.home)) {
     if (carriedPaths.includes(p)) continue;
-    if ((await host.fs.stat(expand(host, p))) === undefined) return { notes, gone: `path ${p} is not on this computer, will not run` };
-    notes.push(`depends on ${p}, which comes along only if a row carries it`);
+    if ((await host.fs.stat(expand(host, p))) === undefined) {
+      out.gone = true;
+      out.notes.push(`${p} is not on this computer; unticked, tick it if the server creates it on first start`);
+    } else out.notes.push(`depends on ${p}, which comes along only if a row carries it`);
   }
-  return { notes };
+  return out;
 }
 
 /** What a definition carries: secret-named env values by size, the file such a value points at (which travels on
@@ -442,9 +459,11 @@ async function carried(host: Host, server: McpServer, format: McpFormat, remoteT
     const a = t.args[i]!;
     const flag = secretFlag(a);
     const assign = secretAssign(a);
-    if (flag !== undefined && !a.includes("=")) {
+    const hidden = HIDDEN_FLAGS.has(a) ? a : flag;
+    if (hidden !== undefined && !a.includes("=")) {
       const value = t.args[i + 1];
-      if (value !== undefined) out.secrets.push(`flag ${flag} (${Buffer.byteLength(value)} B)`);
+      if (!takesValue(value)) continue;
+      out.secrets.push(`flag ${hidden} (${Buffer.byteLength(value)} B)`);
       i++;
     } else if (flag !== undefined || assign !== undefined) {
       out.secrets.push(`${flag !== undefined ? "flag" : "arg"} ${flag ?? assign} (${Buffer.byteLength(a.slice(a.indexOf("=") + 1))} B)`);
@@ -458,13 +477,13 @@ async function carried(host: Host, server: McpServer, format: McpFormat, remoteT
   return out;
 }
 
-function serverRow(config: McpConfig, server: McpServer, fit: LinuxFit, deps: { notes: string[]; gone?: string }, c: Carried, home: string): ManifestEntry {
+function serverRow(config: McpConfig, server: McpServer, fit: LinuxFit, deps: HomeDeps, c: Carried, home: string): ManifestEntry {
   const id = `${MCP_ID_PREFIX}${config.agent}/${server.scope === "home" ? "home/" : ""}${server.name}`;
-  const reason = fit.ok ? deps.gone : fit.reason;
+  const reason = fit.ok ? undefined : fit.reason;
   const words = [
     ...(server.scope === "home" ? ["local to ~"] : []),
     transportLine(server.transport, home),
-    ...(reason === undefined && fit.ok ? [fit.needs, ...deps.notes] : []),
+    ...(fit.ok ? [fit.needs, ...deps.notes] : []),
     ...server.envRefs.map(n => `reads ${n} from the environment, set it on the machine`),
     ...(c.secrets.length > 0 ? [`carries ${c.secrets.length === 1 ? "a secret" : "secrets"}: ${c.secrets.join(", ")}`] : c.notes.length === 0 ? ["carries no secret"] : []),
     ...c.notes,
@@ -476,7 +495,7 @@ function serverRow(config: McpConfig, server: McpServer, fit: LinuxFit, deps: { 
     group: `${config.label} MCP servers`,
     paths: c.paths,
     bytes: c.bytes,
-    default: reason === undefined ? "bring" : "skip",
+    default: reason === undefined && !deps.gone ? "bring" : "skip",
     ...(reason !== undefined ? { reason } : {}),
     detail: words.join("; "),
   };

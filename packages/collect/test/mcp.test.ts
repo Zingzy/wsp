@@ -148,21 +148,38 @@ describe("mcp servers", () => {
     expect(JSON.stringify(rows)).not.toMatch(/sk-123|abcdef|zzz/);
   });
 
-  it("a secret-named env value pointing outside home is named without its value; a home path the server runs against is a dependency, or locks the row when it is gone", async () => {
+  it("a secret-named env value pointing outside home is named without its value; a home path the server runs against is a dependency, or unticks the row without locking it when it is not here yet", async () => {
     const config = JSON.stringify({
       mcpServers: {
         outside: { command: "npx", args: ["x"], env: { CREDENTIALS_PATH: "/etc/creds.json" } },
         whatsapp: { command: `${HOME}/.local/bin/uv`, args: ["--directory", `${HOME}/whatsapp-mcp/server`, "run", "main.py"] },
-        gone: { command: "node", args: [`${HOME}/code/gone/server.js`] },
+        memory: { command: "npx", args: ["-y", "@modelcontextprotocol/server-memory"], env: { MEMORY_FILE_PATH: `${HOME}/.claude/memory.json` } },
+        sqlite: { command: "uvx", args: ["mcp-server-sqlite", "--db-path", "~/notes.db"] },
       },
     });
     const rows = await detectMcp(fakeHost({ files: { "~/.claude.json": config, "/etc/creds.json": 10, "~/whatsapp-mcp/server/main.py": 20 } }));
     expect(rows.map(r => [r.default, r.reason, r.detail])).toEqual([
       ["bring", undefined, "stdio: npx x; runs via npx; the file CREDENTIALS_PATH points at is outside your home and is not copied"],
       ["bring", undefined, "stdio: ~/.local/bin/uv --directory ~/whatsapp-mcp/server run main.py; needs uv, installed on the machine when missing; depends on ~/whatsapp-mcp/server, which comes along only if a row carries it; carries no secret"],
-      ["skip", "path ~/code/gone/server.js is not on this computer, will not run", "stdio: node ~/code/gone/server.js; carries no secret"],
+      ["skip", undefined, "stdio: npx @modelcontextprotocol/server-memory; runs via npx; ~/.claude/memory.json is not on this computer; unticked, tick it if the server creates it on first start; carries no secret"],
+      ["skip", undefined, "stdio: uvx mcp-server-sqlite --db-path ~/notes.db; needs uv, installed on the machine when missing; ~/notes.db is not on this computer; unticked, tick it if the server creates it on first start; carries no secret"],
     ]);
     expect(JSON.stringify(rows)).not.toContain("/etc/creds.json");
+  });
+
+  it("mcp-remote's --static-oauth-client-info blob is a secret whatever its name says; a secret-shaped switch with no value hides nothing", async () => {
+    const config = JSON.stringify({
+      mcpServers: {
+        remote: { command: "npx", args: ["mcp-remote", NOTION, "--static-oauth-client-info", '{"client_id":"abc","client_secret":"shh-secret"}'] },
+        sw: { command: "npx", args: ["some-server", "--auth", "--transport", "http-only"] },
+      },
+    });
+    const rows = await detectMcp(fakeHost({ files: { "~/.claude.json": config } }));
+    expect(rows.map(r => r.detail)).toEqual([
+      "stdio: npx mcp-remote (mcp.notion.com/mcp) --static-oauth-client-info …; runs via npx; carries a secret: flag --static-oauth-client-info (48 B); no saved sign-in; the browser sign-in runs again on the machine",
+      "stdio: npx some-server --auth --transport http-only; runs via npx; carries no secret",
+    ]);
+    expect(JSON.stringify(rows)).not.toContain("shh-secret");
   });
 
   it("a config that does not parse, or has no servers, adds no row", async () => {
