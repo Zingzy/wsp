@@ -36,7 +36,7 @@ import {
   recipePath,
   saveRecipe,
 } from "./init-recipe.js";
-import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, fmtDuration, rowsOf, table, widthOf, wrap } from "./init-layout.js";
+import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, fmtDuration, plainLine, rowsOf, table, widthOf, wrap } from "./init-layout.js";
 import { openRunLog, runLogPath } from "./init-log.js";
 import { secretsStage, type SecretOutcome } from "./init-secrets.js";
 import { keptBuilder, stopKeptBuilder, updateRoad } from "./init-upgrade.js";
@@ -226,7 +226,7 @@ export function reduceStages(frames: readonly StageFrame[], words: readonly Stag
       step = { ...word, state: "current", tail: [] };
       steps.push(step);
     }
-    if (f.detail !== undefined) step.tail.push(f.detail);
+    if (f.detail !== undefined) step.tail.push(plainLine(f.detail));
     // A stage the builder already holds is over the moment it is named, and the last stage has nothing after it to end it; neither gets a clock.
     if (f.detail === ALREADY_APPLIED || LAST_STAGE.has(f.stage)) {
       step.state = "done";

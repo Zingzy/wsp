@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The few rules every wsp init screen shares: cut to a width with an
-// ellipsis, pad cells into aligned columns, print a duration, the bar down the
-// left of the screen being answered, the help line, a card in the frame, and
-// the confirm and password prompts drawn with those same rules.
+// ellipsis, flatten a program's output line to one row, pad cells into
+// aligned columns, print a duration, the bar down the left of the screen being
+// answered, the help line, a card in the frame, and the confirm and password
+// prompts drawn with those same rules.
 import type { Readable, Writable } from "node:stream";
 import { WriteStream } from "node:tty";
-import { styleText } from "node:util";
+import { stripVTControlCharacters, styleText } from "node:util";
 import { ConfirmPrompt, PasswordPrompt, type State as PromptState } from "@clack/core";
 import { S_BAR, S_RADIO_ACTIVE, S_RADIO_INACTIVE, S_STEP_ACTIVE, S_STEP_CANCEL, S_STEP_SUBMIT, log, unicode } from "@clack/prompts";
 
@@ -19,6 +20,14 @@ export function ellipsize(text: string, width: number): string {
   if (width <= 0) return "";
   if (text.length <= width) return text;
   return width === 1 ? "…" : `${text.slice(0, width - 1)}…`;
+}
+
+/** A line of program output as one terminal row would leave it: each carriage-return segment overprints the one before
+ * from the first cell, escape sequences and other control characters take no cell, a tab or a newline is one space. */
+export function plainLine(text: string): string {
+  let row = "";
+  for (const seg of stripVTControlCharacters(text).replace(/[\t\n\v\f]/g, " ").replace(/[\x00-\x08\x0e-\x1f\x7f]/g, "").split("\r")) row = seg + row.slice(seg.length);
+  return row;
 }
 
 export type Align = "left" | "right";

@@ -4,9 +4,18 @@ import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it } from "vitest";
 import { isCancel } from "@clack/core";
 import { unicode } from "@clack/prompts";
-import { S_BAR_FOCUS, S_BAR_FOCUS_END, card, colourDepth, confirmPrompt, ellipsize, fmtDuration, helpLine, passwordPrompt, rowsOf, summarize, table, viewport, widthOf, wrap } from "../src/init-layout.js";
+import { S_BAR_FOCUS, S_BAR_FOCUS_END, card, colourDepth, confirmPrompt, ellipsize, fmtDuration, helpLine, passwordPrompt, plainLine, rowsOf, summarize, table, viewport, widthOf, wrap } from "../src/init-layout.js";
 
 describe("init layout", () => {
+  it("plainLine leaves what a terminal would: later carriage-return segments overprint earlier ones, escapes and controls go, a tab is a space", () => {
+    expect(plainLine("(Reading database ... \r(Reading database ... 5%\r(Reading database ... 100%")).toBe("(Reading database ... 100%");
+    expect(plainLine("hello world\rHELLO")).toBe("HELLO world");
+    expect(plainLine("Created symlink a \u2192 b.\r\r")).toBe("Created symlink a \u2192 b.");
+    expect(plainLine("\x1b[32m> Checking prebuilds...\x1b[0m\x07")).toBe("> Checking prebuilds...");
+    expect(plainLine("name:\tvalue\x08")).toBe("name: value");
+    expect(plainLine("plain")).toBe("plain");
+  });
+
   it("ellipsize keeps text that fits and ends cut text with one ellipsis inside the width", () => {
     expect(ellipsize("abc", 3)).toBe("abc");
     expect(ellipsize("abcdef", 4)).toBe("abc…");
