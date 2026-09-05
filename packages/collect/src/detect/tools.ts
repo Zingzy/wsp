@@ -3,6 +3,7 @@ import { linuxSupport } from "../brew-bottles.js";
 import type { Host } from "../host.js";
 import type { ManifestEntry } from "../manifest.js";
 import { exists, firstLine, found, entry, item, present } from "./common.js";
+import { brought, handRows } from "./hand-bins.js";
 
 export interface BrewLine {
   kind: "tap" | "brew" | "cask" | "mas";
@@ -325,5 +326,6 @@ export async function detectTools(host: Host): Promise<ManifestEntry[]> {
     }
   }
   rows.push(...(await goRows(host)));
+  rows.push(...(await handRows(host, brought(present(rows)))));
   return groupCli(present(rows));
 }

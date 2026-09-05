@@ -5,7 +5,7 @@
 // of every ticked agent. Nothing here touches a disk or a machine; golden.ts
 // runs the plan on the builder.
 import { createHash } from "node:crypto";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { MCP_ID_PREFIX, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
 import { caskVersion, linuxCaskFor } from "./linux-casks.js";
@@ -34,6 +34,8 @@ export interface RecipeEntry {
   version?: string;
   /** Only on a tools row installed from a release: the tag installed and its asset's sha256, recorded on the first install of that tag and checked while the tag stands. */
   pin?: ToolPin;
+  /** Only on a hand-installed tools row that is a Linux binary: the arch its ELF header names. */
+  arch?: string;
   /** Credential-shaped: copied only when `choice` is copy, never on the tick alone. */
   consent?: boolean;
   /** Exported names cut from the carried copy of this file, for the checklist; the pack strips every rc file it stages on its own. */
@@ -62,6 +64,27 @@ export interface PlannedFile {
   excludes: string[];
   /** The tool rewrites this path while it runs: it ships, and an attach ships it again, but it never enters the recipe hash. */
   volatile: boolean;
+  /** A copied Linux binary's arch; the pack sets the file aside on a machine of another one. */
+  arch?: string;
+}
+
+/** What the engine reads off the machine before the files are packed. */
+export interface GuestFacts {
+  /** `uname -m`; absent when the read failed. */
+  arch?: string;
+}
+
+/** The planned files a machine can run and the ones set aside: a Linux binary built for another arch than the
+ * machine's, or for any arch when the machine's could not be read, never lands. */
+export function forGuest(plan: FilesPlan, guest: GuestFacts, home: string): { files: PlannedFile[]; skipped: SkippedPath[] } {
+  const skipped: SkippedPath[] = [];
+  const files = plan.files.filter(f => {
+    if (f.arch === undefined || f.arch === guest.arch) return true;
+    const machine = guest.arch === undefined ? "the machine's architecture could not be read" : `the machine is ${guest.arch}`;
+    skipped.push({ id: f.id, path: `~/${relative(home, f.source)}`, note: `built for ${f.arch}; ${machine}` });
+    return false;
+  });
+  return { files, skipped };
 }
 
 /** A credential read on this computer at pack time, from the macOS Keychain or
@@ -329,7 +352,7 @@ export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOption
   };
   const plan: FilesPlan = { files: [], secrets: [], skipped: [], bytes: 0, rungs: {} };
   for (const e of entries) {
-    if (!ticked(e) || e.rung === "tools") continue;
+    if (!ticked(e) || (e.rung === "tools" && !handCopy(e))) continue;
     if (e.rung === "logins" && e.choice !== "copy") continue;
     let brought = 0;
     for (const p of e.paths) {
@@ -405,7 +428,7 @@ export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOption
         }
       }
       const excludes = (e.excludes ?? []).filter(x => x.startsWith(`${p}/`)).map(x => join(opts.home, x.slice(2)));
-      plan.files.push({ id: e.id, source, dest: rewrite(rel), mode: st.mode & 0o7777, dir: st.kind === "dir", excludes, volatile: (e.volatile ?? []).includes(p) });
+      plan.files.push({ id: e.id, source, dest: rewrite(rel), mode: st.mode & 0o7777, dir: st.kind === "dir", excludes, volatile: (e.volatile ?? []).includes(p), ...(e.arch !== undefined ? { arch: e.arch } : {}) });
       brought++;
     }
     if (brought > 0) {
@@ -494,6 +517,10 @@ export interface PlannedRoad {
 }
 
 const CLI_PREFIX = "tools/cli/";
+const HAND_PREFIX = "tools/hand/";
+
+/** A hand-installed script or Linux binary is the one tools row that travels as a file, into the same bin directory. */
+const handCopy = (e: RecipeEntry): boolean => e.id.startsWith(HAND_PREFIX) && e.linux !== "no";
 
 /** A command cask's road, from its paths as the collector wrote them: the release's `github.com/owner/repo@tag`
  * first, a Go binary's `module@version` last when one folded into the row. */
@@ -637,6 +664,8 @@ export function brewfileFor(entries: readonly RecipeEntry[], brew: BrewTable = n
       if (linuxCaskFor(e.id) === undefined) out.skipped.push({ id: e.id, note: "macOS app, no Linux build" });
     } else if (e.id.startsWith("tools/mas/")) {
       out.skipped.push({ id: e.id, note: "Mac App Store, macOS only" });
+    } else if (e.id.startsWith(HAND_PREFIX) && !handCopy(e)) {
+      out.skipped.push({ id: e.id, note: e.reason ?? "no Linux build" });
     }
   }
   const lines = [...out.taps.map(t => `tap "${t}"`), ...out.formulae.map(f => `brew "${f}"`)];
@@ -752,6 +781,7 @@ export function toolUninstall(e: RecipeEntry): { cmd: string } | { note: string 
   if (cask !== undefined) return { cmd: withPath(cask.uninstall) };
   if (e.id.startsWith("tools/brew-cask/") || e.id.startsWith("tools/mas/")) return { note: "never installed on Linux" };
   if (e.id.startsWith(CLI_PREFIX)) return { cmd: withPath(`rm -f /usr/local/bin/${squote(e.id.slice(CLI_PREFIX.length))}`) };
+  if (e.id.startsWith(HAND_PREFIX)) return { note: "a copied file; it comes off with the files" };
   const manager = (["brew", ...MANAGER_ORDER] as const).find(m => e.id.startsWith(`tools/${m}/`));
   if (manager === undefined) return { note: "no manager known for this row" };
   const pkg = e.id.slice(`tools/${manager}/`.length);

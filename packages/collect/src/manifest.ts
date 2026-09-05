@@ -64,6 +64,8 @@ const Fields = z.object({
   version: z.string().min(1).optional(),
   /** Only on a tools row installed from a release: the tag installed and its asset's sha256, recorded on the first install of that tag and checked while the tag stands. */
   pin: z.object({ tag: z.string().min(1), sha256: z.string().min(1) }).optional(),
+  /** Only on a hand-installed tools row that is a Linux binary: the architecture its ELF header names; the copy is set aside on a machine of another one. */
+  arch: z.string().min(1).optional(),
   /** Credential-shaped: travels only when the person answers copy on this row, never on a bare tick. */
   consent: z.boolean().optional(),
   /** Only on an everything row: the role the passes guessed. */

@@ -9,6 +9,8 @@ import { MCP_ID_PREFIX } from "@wsp/protocol";
 import { type Host, expand } from "../host.js";
 import type { GroupNote, ManifestEntry } from "../manifest.js";
 import { isSecretName } from "../everything/shell-rc.js";
+import { fmt } from "./common.js";
+import { BASE_INTERPRETERS, HAND_DIRS, HAND_GROUP, type HandBin, brought, carries, handBins } from "./hand-bins.js";
 
 /** The row that carries mcp-remote's saved browser sign-ins for every agent. */
 export const MCP_REMOTE_ID = `${MCP_ID_PREFIX}mcp-remote`;
@@ -269,14 +271,36 @@ function binaryOf(command: string, home: string): string {
   return tilde(home, abs);
 }
 
+/** The hand-installed binary a command names, when the command sits in one of the hand bin directories. */
+function handOf(command: string, home: string, hands: ReadonlyMap<string, HandBin>): HandBin | undefined {
+  const abs = command.startsWith("~/") ? `${home}${command.slice(1)}` : command;
+  const slash = abs.lastIndexOf("/");
+  if (slash === -1) return undefined;
+  return HAND_DIRS.some(d => `${home}${d.slice(1)}` === abs.slice(0, slash)) ? hands.get(abs.slice(slash + 1)) : undefined;
+}
+
 /** Whether a definition can run on the machine and what it needs there. A path under ~/Library or a macOS
- * install location has no Linux equivalent; home paths and Homebrew's prefix are rewritten on the machine. */
-export function linuxFit(server: McpServer, home: string): LinuxFit {
+ * install location has no Linux equivalent; home paths and Homebrew's prefix are rewritten on the machine.
+ * A command installed by hand travels only as a copy of a script or a Linux binary, with its own row; brings
+ * is what the machine has for its interpreter (see brought). */
+export function linuxFit(server: McpServer, home: string, hands: ReadonlyMap<string, HandBin> = new Map(), brings: ReadonlySet<string> = BASE_INTERPRETERS): LinuxFit {
   const t = server.transport;
   if (t.kind === "http") return { ok: true, needs: "nothing to install" };
   if (isMacOnly(t.command, home)) return { ok: false, reason: `command ${tilde(home, t.command)} is macOS-only, will not run` };
   for (const s of [...t.args.map(pathOf), ...(t.cwd !== undefined ? [t.cwd] : []), ...Object.values(t.env)]) {
     if (isMacOnly(s, home)) return { ok: false, reason: `path ${tilde(home, s)} is macOS-only, will not run` };
+  }
+  const hand = handOf(t.command, home, hands);
+  if (hand !== undefined && !carries(hand.format)) {
+    return { ok: false, reason: hand.format.kind === "mach-o" ? `command ${hand.name} is a macOS binary installed by hand, will not run` : `command ${hand.name} is installed by hand and has no build the machine can run, will not run` };
+  }
+  if (hand !== undefined) {
+    const need = hand.format.kind === "script" && hand.format.at !== undefined && !BASE_INTERPRETERS.has(hand.format.interpreter) ? hand.format.interpreter : undefined;
+    if (need !== undefined && !brings.has(need)) {
+      return { ok: false, reason: `command ${hand.name} is a ${need} script installed by hand, and neither the machine nor a tools row brings ${need}; its row under ${HAND_GROUP} is locked, will not run` };
+    }
+    const via = need !== undefined ? `, and runs with ${need}, so the ${need} row has to be ticked too` : "";
+    return { ok: true, needs: `needs ${hand.name} on the machine; it travels as a copy when its row under ${HAND_GROUP} is ticked${via}` };
   }
   const bin = binaryOf(t.command, home);
   if (bin === "npx") return { ok: true, needs: "runs via npx" };
@@ -323,12 +347,6 @@ export function mcpRemoteHash(args: readonly string[]): string | undefined {
 }
 
 // --- rows ----------------------------------------------------------------------------
-
-function fmt(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${Math.round(n / (1024 * 1024))} MB`;
-}
 
 /** isSecretName's words plus the ones a file-valued variable tends to carry. */
 function secretNamed(name: string): boolean {
@@ -557,17 +575,21 @@ async function configText(host: Host, config: McpConfig): Promise<string | undef
   return undefined;
 }
 
-/** One row per MCP server under its agent, then the mcp-remote sign-in store when there is one. */
-export async function detectMcp(host: Host): Promise<ManifestEntry[]> {
+/** One row per MCP server under its agent, then the mcp-remote sign-in store when there is one; prior is the
+ * rows detected before this rung, whose tools rows say which interpreters reach the machine. */
+export async function detectMcp(host: Host, prior: readonly ManifestEntry[] = []): Promise<ManifestEntry[]> {
+  const brings = brought(prior);
   const store = await remoteStore(host);
   const tokens = store?.tokens ?? new Map<string, number>();
   const rows: ManifestEntry[] = [];
   const matched: string[] = [];
+  let hands: Map<string, HandBin> | undefined;
   for (const config of MCP_CONFIGS) {
     const text = await configText(host, config);
     if (text === undefined) continue;
+    hands ??= new Map((await handBins(host)).map(b => [b.name, b]));
     for (const server of parseMcp(config.format, text, host.home)) {
-      const fit = linuxFit(server, host.home);
+      const fit = linuxFit(server, host.home, hands, brings);
       const c = await carried(host, server, config.format, tokens);
       const deps = await homeDeps(host, server, c.paths);
       const hash = server.transport.kind === "stdio" ? mcpRemoteHash(server.transport.args) : undefined;

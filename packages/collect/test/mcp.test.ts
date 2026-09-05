@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { detectMcp, linuxFit, mcpGroups, mcpRemoteHash, parseCodexMcp, parseMcp, type McpServer } from "../src/index.js";
+import { type ManifestEntry, detectMcp, linuxFit, mcpGroups, mcpRemoteHash, parseCodexMcp, parseMcp, type McpServer } from "../src/index.js";
 import { fakeHost } from "./fake-host.js";
 
 const HOME = "/Users/dev";
@@ -139,6 +139,27 @@ describe("mcp servers", () => {
       ["agents/mcp/gemini/docs", "Gemini CLI MCP servers", "http: docs.example/mcp; nothing to install; carries a secret: header Authorization (13 B)"],
       ["agents/mcp/opencode/memory", "OpenCode MCP servers", "stdio: ~/.local/bin/codebase-memory-mcp --v; needs codebase-memory-mcp on the machine; carries a secret: env MEM_KEY (1 B)"],
       ["agents/mcp/opencode/ctx", "OpenCode MCP servers", "http: ctx.example/mcp; nothing to install; carries no secret"],
+    ]);
+  });
+
+  it("a command in ~/.local/bin that is installed by hand: a macOS binary locks the row off, a script travels with its Installed by hand row, and a script whose interpreter nothing brings is locked like its row", async () => {
+    const gemini = JSON.stringify({ mcpServers: { memory: { command: "~/.local/bin/codebase-memory-mcp" }, notes: { command: "/Users/dev/.local/bin/notes-mcp", args: ["--v"] }, lint: { command: "~/.local/bin/lint-mcp" }, tsx: { command: "~/.local/bin/tsx-mcp" }, rb: { command: "~/.local/bin/rb-mcp" }, gone: { command: "~/.local/bin/gone-mcp" } } });
+    const bins = {
+      "~/.local/bin/codebase-memory-mcp": { head: "mach-o", bytes: 30_000_000 },
+      "~/.local/bin/notes-mcp": { head: "#!/usr/bin/env node\n" },
+      "~/.local/bin/lint-mcp": { head: "#!/opt/homebrew/bin/python3\n" },
+      "~/.local/bin/tsx-mcp": { head: "#!/opt/homebrew/bin/tsx\n" },
+      "~/.local/bin/rb-mcp": { head: "#!/opt/homebrew/bin/ruby\n" },
+    };
+    const tsx: ManifestEntry = { rung: "tools", id: "tools/npm/tsx", label: "tsx", paths: [], bytes: 0, default: "bring", linux: "yes" };
+    const rows = await detectMcp(fakeHost({ files: { "~/.gemini/settings.json": gemini }, bins }), [tsx]);
+    expect(rows.map(r => [r.id, r.default, r.reason, r.detail])).toEqual([
+      ["agents/mcp/gemini/memory", "skip", "command codebase-memory-mcp is a macOS binary installed by hand, will not run", "stdio: ~/.local/bin/codebase-memory-mcp; carries no secret"],
+      ["agents/mcp/gemini/notes", "bring", undefined, "stdio: ~/.local/bin/notes-mcp --v; needs notes-mcp on the machine; it travels as a copy when its row under Installed by hand is ticked; carries no secret"],
+      ["agents/mcp/gemini/lint", "bring", undefined, "stdio: ~/.local/bin/lint-mcp; needs lint-mcp on the machine; it travels as a copy when its row under Installed by hand is ticked; carries no secret"],
+      ["agents/mcp/gemini/tsx", "bring", undefined, "stdio: ~/.local/bin/tsx-mcp; needs tsx-mcp on the machine; it travels as a copy when its row under Installed by hand is ticked, and runs with tsx, so the tsx row has to be ticked too; carries no secret"],
+      ["agents/mcp/gemini/rb", "skip", "command rb-mcp is a ruby script installed by hand, and neither the machine nor a tools row brings ruby; its row under Installed by hand is locked, will not run", "stdio: ~/.local/bin/rb-mcp; carries no secret"],
+      ["agents/mcp/gemini/gone", "bring", undefined, "stdio: ~/.local/bin/gone-mcp; needs gone-mcp on the machine; carries no secret"],
     ]);
   });
 

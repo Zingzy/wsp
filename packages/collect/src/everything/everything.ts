@@ -259,7 +259,9 @@ export async function everything(m: Machine, opts: EverythingOptions = {}): Prom
 
   const leftover = (l: { name: string; path: string; mtime: number }): Draft => ({ row: row(`bin:${l.name}`, l.name, "unknown", [], { bytes: 0, files: 0, mtime: l.mtime }, "exact", { binary: tilde(m.home, l.path) }), named: true, dirs: [] });
   const paired = new Set(pairs.map(p => p.binary?.name));
-  for (const l of prov.leftovers) if (!paired.has(l.name)) drafts.push(leftover(l));
+  // A binary whose file a hand-installed tools row carries is that row's; a second, locked row here would only repeat it.
+  const carriedFile = (abs: string): boolean => claimed.paths.includes(abs);
+  for (const l of prov.leftovers) if (!paired.has(l.name) && !carriedFile(l.path)) drafts.push(leftover(l));
 
   const mark = (r: Row, c: Credential): void => {
     flag(r, "credential");
@@ -309,7 +311,7 @@ export async function everything(m: Machine, opts: EverythingOptions = {}): Prom
   const kept = drafts.flatMap(d => {
     const r = d.row;
     if (carries(r) || r.kind === "device-bound-login") return [d];
-    if (r.binary === undefined) return [];
+    if (r.binary === undefined || carriedFile(`${m.home}/${r.binary.slice(2)}`)) return [];
     const l = leftover({ name: r.tool ?? r.name, path: `${m.home}/${r.binary.slice(2)}`, mtime: r.mtime });
     if (l.row.id !== r.id && ids.has(l.row.id)) return [];
     ids.add(l.row.id);

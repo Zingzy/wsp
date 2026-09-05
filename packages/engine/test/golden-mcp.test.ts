@@ -41,6 +41,7 @@ describe("mcpPlanFor", () => {
       row("tools/go/codebase-memory-mcp", { rung: "tools" }),
       row("tools/brew/jq", { rung: "tools", bring: false, default: "skip", reason: "no Linux bottle" }),
       row("tools/brew-cask/iterm2", { rung: "tools", bring: false }),
+      row("tools/hand/omp", { rung: "tools", bring: false, default: "skip", reason: "installed by hand; no Linux build known" }),
     ];
     expect(mcpPlanFor(rows, { home: HOME, agents: AGENTS })).toEqual<McpPlan>({
       agents: [
@@ -57,7 +58,7 @@ describe("mcpPlanFor", () => {
       guestHome: "/root",
       rewrites: [[`${HOME}/`, "/root/"], ["/opt/homebrew/", "/home/linuxbrew/.linuxbrew/"]],
       binDirs: [`${HOME}/.local/bin/`, "~/.local/bin/", "/opt/homebrew/bin/", "/opt/homebrew/sbin/"],
-      tools: [{ id: "tools/go/codebase-memory-mcp", ticked: true }, { id: "tools/brew/jq", ticked: false, reason: "no Linux bottle" }],
+      tools: [{ id: "tools/go/codebase-memory-mcp", ticked: true }, { id: "tools/brew/jq", ticked: false, reason: "no Linux bottle" }, { id: "tools/hand/omp", ticked: false, reason: "installed by hand; no Linux build known" }],
     });
   });
 

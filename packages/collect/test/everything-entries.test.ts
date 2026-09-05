@@ -197,16 +197,18 @@ describe("entriesFor: one manifest row per found row", () => {
 });
 
 describe("claimedPaths", () => {
-  it("takes the ~ paths and Keychain items of every rung but tools and everything", () => {
+  it("takes the ~ paths and Keychain items of every rung but tools and everything, and the file of a hand-installed tools row", () => {
     const claimed = claimedPaths([
-      { rung: "identity", paths: ["~/.gitconfig"] },
-      { rung: "shell", paths: ["~/.zshrc", "~/.zshenv"] },
-      { rung: "tools", paths: ["Brewfile"] },
-      { rung: "tools", paths: ["golang.org/x/tools/gopls@v0.16.2"] },
-      { rung: "logins", paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"] },
-      { rung: "everything", paths: ["~/.hermes"] },
+      { rung: "identity", id: "identity/gitconfig", paths: ["~/.gitconfig"] },
+      { rung: "shell", id: "shell/zsh", paths: ["~/.zshrc", "~/.zshenv"] },
+      { rung: "tools", id: "tools/brewfile", paths: ["Brewfile"] },
+      { rung: "tools", id: "tools/go/gopls", paths: ["golang.org/x/tools/gopls@v0.16.2"] },
+      { rung: "tools", id: "tools/nix-home-manager", paths: ["~/.config/home-manager"] },
+      { rung: "tools", id: "tools/hand/omp", paths: ["~/.local/bin/omp"] },
+      { rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"] },
+      { rung: "everything", id: "everything/.hermes", paths: ["~/.hermes"] },
     ]);
-    expect([...claimed].sort()).toEqual(["Keychain: gh:github.com", "~/.config/gh/hosts.yml", "~/.gitconfig", "~/.zshenv", "~/.zshrc"]);
+    expect([...claimed].sort()).toEqual(["Keychain: gh:github.com", "~/.config/gh/hosts.yml", "~/.gitconfig", "~/.local/bin/omp", "~/.zshenv", "~/.zshrc"]);
   });
 });
 

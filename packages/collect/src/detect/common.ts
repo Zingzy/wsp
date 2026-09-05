@@ -2,7 +2,8 @@
 import { type Host, expand } from "../host.js";
 import type { Default, Linux, ManifestEntry, Rung } from "../manifest.js";
 
-export type Detector = (host: Host) => Promise<ManifestEntry[]>;
+/** prior is every row the rungs before this one produced. */
+export type Detector = (host: Host, prior: readonly ManifestEntry[]) => Promise<ManifestEntry[]>;
 
 export interface RowSpec {
   rung: Rung;
@@ -16,6 +17,7 @@ export interface RowSpec {
   required?: boolean;
   linux?: Linux;
   version?: string;
+  arch?: string;
   /** Candidates the tool rewrites while it runs; those found land on the row as volatile. */
   volatile?: readonly string[];
   /** Emit the row even when none of the candidate paths exist. */
@@ -72,6 +74,7 @@ export function entry(spec: EntrySpec): ManifestEntry {
     ...(spec.required !== undefined ? { required: spec.required } : {}),
     ...(spec.linux !== undefined ? { linux: spec.linux } : {}),
     ...(spec.version !== undefined ? { version: spec.version } : {}),
+    ...(spec.arch !== undefined ? { arch: spec.arch } : {}),
     ...(volatile.length > 0 ? { volatile } : {}),
     ...(spec.detail !== undefined ? { detail: spec.detail } : {}),
   };
@@ -84,6 +87,12 @@ export function item(spec: Omit<EntrySpec, "paths" | "bytes">): ManifestEntry {
 
 export function present(rows: (ManifestEntry | undefined)[]): ManifestEntry[] {
   return rows.filter((r): r is ManifestEntry => r !== undefined);
+}
+
+export function fmt(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${Math.round(n / (1024 * 1024))} MB`;
 }
 
 export function firstLine(out: string | undefined): string | undefined {

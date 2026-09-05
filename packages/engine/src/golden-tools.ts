@@ -8,7 +8,7 @@
 // cellar lock into the next tool's turn.
 import type { GoldenStage } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
-import { BREW_HOUSEKEEPING, HOMEBREW, TOOLS_PATH, type ToolInstall } from "./golden-import.js";
+import { BREW_HOUSEKEEPING, HOMEBREW, TOOLS_PATH, type GuestFacts, type ToolInstall } from "./golden-import.js";
 import type { ExecResult, Machine } from "./machine.js";
 
 export interface ToolResult {
@@ -89,6 +89,13 @@ export async function freeBytes(machine: Machine): Promise<FreeDisk> {
   const kb = Number(res.stdout.trim());
   if (res.exitCode === 0 && Number.isFinite(kb) && kb > 0) return { kind: "free", bytes: kb * 1024 };
   return { kind: "unknown", reason: `df failed: ${reasonOf(res, INLINE_EXEC_MS / 1000)}` };
+}
+
+/** The machine's arch by uname -m; nothing when the read fails, so a copy that depends on it is set aside rather than landed. */
+export async function guestArch(machine: Machine): Promise<GuestFacts> {
+  const res = await machine.exec("uname -m", { timeoutMs: INLINE_EXEC_MS });
+  const arch = res.stdout.trim();
+  return res.exitCode === 0 && arch !== "" ? { arch } : {};
 }
 
 /** The df reading that closes a stage's last line, so the run's log says what each stage left on the disk. */
