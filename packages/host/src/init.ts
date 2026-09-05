@@ -10,7 +10,7 @@ import { LARGE_GROUP, RUNGS, type Manifest, type ManifestEntry, type Rung } from
 import { describeAge, type BackendPricing } from "@wsp/engine";
 import type { ChecklistItem } from "@wsp/protocol";
 import { PrepareStoppedError, type GoldenBuilderView, type GoldenRecipe, type GoldenStage, type Runtime } from "@wsp/runtime";
-import { S_BAR, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, cancel, isCancel, log, outro } from "@clack/prompts";
+import { S_BAR, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, S_WARN, cancel, isCancel, log, outro } from "@clack/prompts";
 import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -37,7 +37,7 @@ import {
   saveRecipe,
   secretLinesFor,
 } from "./init-recipe.js";
-import { CARD_FRAME, GUTTER, card, colourDepth, confirmPrompt, ellipsize, fmtDuration, helpLine, table, widthOf, wrap } from "./init-layout.js";
+import { CARD_FRAME, GUTTER, card, colourDepth, confirmPrompt, ellipsize, fmtDuration, helpLine, rowsOf, table, widthOf, wrap } from "./init-layout.js";
 import { openRunLog, runLogPath } from "./init-log.js";
 import { stopKeptBuilder, updateRoad } from "./init-upgrade.js";
 import { readKey, rungSelect, type SelectItem } from "./init-select.js";
@@ -141,7 +141,7 @@ export interface StageStep {
   start: string;
   end: string;
   fail: string;
-  state: "pending" | "current" | "done" | "failed";
+  state: "current" | "done" | "failed";
   tail: string[];
   /** How long the stage ran, known once a later frame ends it. */
   ms?: number;
@@ -161,9 +161,11 @@ export interface StageFrame {
   at?: number;
 }
 
-/** The prepare stages in order, with the words the terminal shows while each
- * runs and once it is over. The stage names are the protocol's; the harness
- * stage installs whatever agents were ticked, and names none of them. */
+/** The words the terminal shows for each prepare stage while it runs and once
+ * it is over. The stage names are the protocol's; the harness stage installs
+ * whatever agents were ticked, and names none of them. The engine decides the
+ * order the stages run in; this list only settles which one a failure with no
+ * stage running is charged to. */
 export const PREPARE_STEPS: readonly StageWords[] = [
   { stage: "creating", start: "Creating the machine", end: "Machine created", fail: "Creating the machine failed" },
   { stage: "deploying-daemon", start: "Installing the base (Node, the daemon)", end: "Base installed", fail: "Installing the base failed" },
@@ -183,41 +185,59 @@ export const SEAL_STEPS: readonly StageWords[] = [
 
 const LAST_STAGE = new Set<string>(["ready", "sealed"]);
 
+/** The steps as the frames built them: a step appears on its first frame, runs until a frame names another
+ * stage, and is closed by nothing else. The engine runs one stage at a time, so one step is current at most. */
 export function reduceStages(frames: readonly StageFrame[], words: readonly StageWords[] = PREPARE_STEPS): StageView {
-  const steps: StageStep[] = words.map(s => ({ ...s, state: "pending", tail: [] }));
+  const steps: StageStep[] = [];
   let failure: string | undefined;
-  let at = -1;
+  let current: StageStep | undefined;
   let since: number | undefined;
+  const close = (at: number | undefined): void => {
+    if (current === undefined) return;
+    if (since !== undefined && at !== undefined) current.ms = at - since;
+    current.state = "done";
+    current = undefined;
+    since = undefined;
+  };
   for (const f of frames) {
     if (f.name !== GOLDEN_NAME) continue;
     if (f.stage === "failed") {
       failure = f.detail ?? "no detail given";
-      // After a skipped stage the step named last is already done, so the failure lands on the one about to run.
-      const running = at >= 0 && steps[at]!.state !== "done" ? at : steps.findIndex(s => s.state === "pending");
-      const failing = running >= 0 ? running : at;
-      if (failing >= 0) steps[failing]!.state = "failed";
+      // With nothing running the failure lands on the stage about to run: the first the frames never named.
+      let failing = current;
+      if (failing === undefined) {
+        const next = words.find(w => !steps.some(s => s.stage === w.stage));
+        if (next !== undefined) {
+          failing = { ...next, state: "failed", tail: [] };
+          steps.push(failing);
+        }
+      }
+      if (failing !== undefined) failing.state = "failed";
+      current = undefined;
       continue;
     }
-    const i = steps.findIndex(s => s.stage === f.stage);
-    if (i < 0) continue;
-    for (let j = 0; j < i; j++) {
-      if (steps[j]!.state === "done") continue;
-      if (steps[j]!.state === "current" && since !== undefined && f.at !== undefined) steps[j]!.ms = f.at - since;
-      steps[j]!.state = "done";
+    const word = words.find(w => w.stage === f.stage);
+    if (word === undefined) continue;
+    let step = steps.find(s => s.stage === f.stage);
+    if (step !== current) close(f.at);
+    if (step === undefined) {
+      step = { ...word, state: "current", tail: [] };
+      steps.push(step);
     }
-    // A stage the builder already holds is over the moment it is named: no clock, so whatever runs next is not charged to it.
-    if (f.detail === ALREADY_APPLIED) {
-      steps[i]!.state = "done";
-      steps[i]!.tail.push(f.detail);
-      at = i;
+    if (f.detail !== undefined) step.tail.push(f.detail);
+    // A stage the builder already holds is over the moment it is named, and the last stage has nothing after it to end it; neither gets a clock.
+    if (f.detail === ALREADY_APPLIED || LAST_STAGE.has(f.stage)) {
+      step.state = "done";
+      current = undefined;
       since = undefined;
       continue;
     }
-    // A stage reports twice when it ends with a detail; its clock starts at the first frame.
-    if (at !== i) since = f.at;
-    at = i;
-    steps[i]!.state = LAST_STAGE.has(f.stage) ? "done" : "current";
-    if (f.detail !== undefined) steps[i]!.tail.push(f.detail);
+    // A stage reports again when it has a detail to add; its clock starts at the first frame.
+    if (step !== current) {
+      current = step;
+      since = f.at;
+    }
+    step.state = "current";
   }
   return failure !== undefined ? { steps, failure } : { steps };
 }
@@ -236,8 +256,10 @@ export function stageLine(glyph: string, label: string, detail: string | undefin
 
 /** One line per step, redrawn as frames arrive: a spinner glyph on the current
  * step with its latest detail, the end label once it is done, the tail of
- * details kept under a failed step. Animation only on a terminal. */
-class StageStream {
+ * details kept under a failed step. Animation only on a terminal, where the
+ * block is the stream's alone: every redraw rewinds to its first row and no
+ * line is ever wider than the terminal, so the rows it counts are the rows it holds. */
+export class StageStream {
   private frames: StageFrame[] = [];
   private view: StageView;
   private printed = 0;
@@ -258,7 +280,7 @@ class StageStream {
   }
 
   get finished(): boolean {
-    return this.view.failure !== undefined || this.view.steps.every(s => s.state === "done");
+    return this.view.failure !== undefined || this.view.steps.some(s => LAST_STAGE.has(s.stage) && s.state === "done");
   }
 
   start(): void {
@@ -279,6 +301,19 @@ class StageStream {
     else this.announce(prev);
   }
 
+  /** A settled line while the stream runs: it lands above the block, which is drawn again under it. */
+  note(text: string): void {
+    const lines = this.width === undefined ? [text] : wrap(text, this.width - 3, "");
+    const styled = lines.map((l, i) => (i === 0 ? `${styleText("yellow", S_WARN)}  ${l}` : `${dim(S_BAR)}  ${l}`));
+    if (!this.animate) {
+      this.output.write(`${styled.join("\n")}\n`);
+      return;
+    }
+    const block = this.lines(false, false);
+    this.output.write(`${this.rewind()}${[...styled, ...block].join("\n")}\n`);
+    this.printed = block.length;
+  }
+
   /** Draws the last frame; `stopped` marks the stage in flight as cut off rather than spinning. */
   stop(stopped = false): StageView {
     if (this.timer) clearInterval(this.timer);
@@ -291,9 +326,14 @@ class StageStream {
     return Math.max(...this.words.flatMap(w => [w.start.length, w.end.length]));
   }
 
-  /** The edge lines are laid out to; a log off a terminal has none. */
+  /** The edge lines are laid out to, one cell inside the terminal's so no line can reach the wrap; a log off a terminal has none. */
   private get width(): number | undefined {
-    return this.animate ? widthOf(this.output) : undefined;
+    return this.animate ? widthOf(this.output) - 1 : undefined;
+  }
+
+  private cut(text: string): string {
+    const width = this.width;
+    return width === undefined ? text : ellipsize(text, width - 3);
   }
 
   private doneLine(s: StageStep): string {
@@ -303,11 +343,11 @@ class StageStream {
   private lines(final: boolean, stopped: boolean): string[] {
     const out: string[] = [];
     const width = this.width;
+    const failure = final && this.view.failure !== undefined ? this.view.failure.split("\n") : [];
+    // The block must fit the screen it redraws over, so a failed step's tail gives up its oldest lines first.
+    const budget = this.animate ? Math.max(0, rowsOf(this.output) - 1 - this.view.steps.length - failure.length) : Infinity;
     for (const s of this.view.steps) {
       switch (s.state) {
-        case "pending":
-          out.push(`${dim(S_BAR)}  ${dim(s.start)}`);
-          break;
         case "current":
           out.push(stageLine(stopped ? styleText("red", S_STEP_CANCEL) : styleText("cyan", StageStream.SPIN[this.tick % StageStream.SPIN.length]!), s.start, s.tail.at(-1), undefined, width, this.labelWidth));
           break;
@@ -315,8 +355,8 @@ class StageStream {
           out.push(this.doneLine(s));
           break;
         case "failed":
-          out.push(`${styleText("red", S_STEP_ERROR)}  ${s.fail}`);
-          for (const t of s.tail) out.push(`${dim(S_BAR)}  ${dim(t)}`);
+          out.push(`${styleText("red", S_STEP_ERROR)}  ${this.cut(s.fail)}`);
+          for (const t of budget === 0 ? [] : s.tail.slice(-budget)) out.push(`${dim(S_BAR)}  ${dim(this.cut(t))}`);
           break;
         default: {
           const _exhaustive: never = s.state;
@@ -324,15 +364,20 @@ class StageStream {
         }
       }
     }
-    if (final && this.view.failure !== undefined) for (const l of this.view.failure.split("\n")) out.push(`${dim(S_BAR)}  ${l}`);
+    for (const l of failure) out.push(`${dim(S_BAR)}  ${this.cut(l)}`);
     return out;
+  }
+
+  /** Back to the block's first row and column, with everything from there cleared. */
+  private rewind(): string {
+    return this.printed > 0 ? `\x1b[${this.printed}A\x1b[G\x1b[J` : "";
   }
 
   private draw(final = false, stopped = false): void {
     if (this.animate) {
       const lines = this.lines(final, stopped);
-      const up = this.printed > 0 ? `\x1b[${this.printed}A\x1b[J` : "";
-      this.output.write(`${up}${lines.join("\n")}\n`);
+      // Before the first frame there is no block: a bare newline here would be a row the rewind never counts.
+      if (lines.length > 0) this.output.write(`${this.rewind()}${lines.join("\n")}\n`);
       this.printed = lines.length;
       return;
     }
@@ -346,14 +391,12 @@ class StageStream {
 
   /** Off a terminal, one line per step as it starts and as it ends, so a log reads in order. */
   private announce(prev: StageView): void {
-    for (let i = 0; i < this.view.steps.length; i++) {
-      const s = this.view.steps[i]!;
-      const was = prev.steps[i]!.state;
+    for (const s of this.view.steps) {
+      const was = prev.steps.find(p => p.stage === s.stage)?.state;
       if (s.state === "current" && was !== "current") this.output.write(`${dim(S_BAR)}  ${s.start}\n`);
       if (s.state === "done" && was !== "done") this.output.write(`${this.doneLine(s)}\n`);
     }
   }
-
 }
 
 interface Spinner {
@@ -937,7 +980,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
         break;
       } catch (e) {
         if (halt.signal.aborted || !isCapRefusal(e) || attempt + 1 >= retry.attempts) throw e;
-        log.warn(`Solari account at its machine cap; waiting ${Math.round(retry.waitMs / 1000)}s for a slot (${attempt + 1}/${retry.attempts}). Nothing is killed.`, out);
+        stream.note(`Solari account at its machine cap; waiting ${Math.round(retry.waitMs / 1000)}s for a slot (${attempt + 1}/${retry.attempts}). Nothing is killed.`);
         waiting = true;
         await sleep(retry.waitMs, halt.signal);
         if (halt.signal.aborted) throw e;
