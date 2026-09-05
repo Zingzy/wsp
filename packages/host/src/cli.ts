@@ -418,7 +418,7 @@ async function hostFor(
     webDir?: string;
     builder?: GoldenBuilderView;
     openUrl?: UrlOpener;
-    autoOpen?: (targetId: string, url: string) => boolean;
+    autoOpen?: (targetId: string, url: string, port?: number) => boolean;
     openLine?: (workspace: string, hostname: string, url: string) => string;
     onLine?: (line: string) => boolean;
   },

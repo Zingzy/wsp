@@ -251,8 +251,8 @@ describe("callback relay over a fake daemon link", () => {
     expect(urls).toEqual([DEVICE]);
   });
 
-  it("autoOpen is asked with the target and the page's URL, so a caller can decline one it already opened", async () => {
-    const asked: [string, string][] = [];
+  it("autoOpen is asked with the target, the page's URL and its callback port, so a caller can decline one it already opened or keep one for a later o", async () => {
+    const asked: [string, string, number | undefined][] = [];
     const { rt } = relayRuntime("http://guest.test");
     const fake = fakeConnect();
     const opened: string[] = [];
@@ -263,17 +263,19 @@ describe("callback relay over a fake daemon link", () => {
       log: () => {},
       clock: fakeClock(),
       connect: fake.connect,
-      autoOpen: (id, url) => (asked.push([id, url]), url !== DEVICE),
+      autoOpen: (id, url, port) => (asked.push([id, url, port]), url !== DEVICE),
       jitter: () => 0,
     });
     await until(() => fake.links.length >= 1);
     const link = fake.links[0]!;
     await until(() => link.ops.some(x => x.op === "ports.watch"));
+    const port = await freePort();
     link.emit({ type: "browser.open", url: DEVICE });
     link.emit({ type: "browser.open", url: "https://auth.example.com/device" });
-    await until(() => opened.length === 1);
-    expect(asked).toEqual([[ws.id, DEVICE], [ws.id, "https://auth.example.com/device"]]);
-    expect(opened).toEqual(["https://auth.example.com/device"]);
+    link.emit({ type: "browser.open", url: AUTH(port), port });
+    await until(() => opened.length === 2);
+    expect(asked).toEqual([[ws.id, DEVICE, undefined], [ws.id, "https://auth.example.com/device", undefined], [ws.id, AUTH(port), port]]);
+    expect(opened).toEqual(["https://auth.example.com/device", AUTH(port)]);
   });
 
   it("with autoOpen on, browser.open opens the URL on this computer and logs the workspace, never the URL", async () => {
@@ -293,6 +295,8 @@ describe("callback relay over a fake daemon link", () => {
     link.emit({ type: "browser.open", url: AUTH(port), port });
     await until(() => relay!.forwards().length === 1);
     expect(opened).toEqual([AUTH(port)]);
+    await until(() => lines.some(l => l.includes("opened a sign-in page")));
+    expect(lines).toContain("task-1: opened a sign-in page in your browser; it returns to the machine on its own");
     expect(relay!.forwards()).toMatchObject([{ targetId: ws.id, port }]);
     expect(lines.find(l => l.includes("forwarding"))).toBe(
       `task-1: forwarding localhost:${port} on this computer to the workspace for the sign-in callback (while the workspace listens, 15 min at most)`,

@@ -35,8 +35,10 @@ export interface RelayOptions {
    * default: the app shows the page and the person opens it. A flow started
    * from the TUI is the case that turns it on (the caller decides). Asked once
    * per event, right before openUrl runs, so a caller that clears its arm
-   * inside openUrl is one-shot without a race. */
-  autoOpen?: (targetId: string, url: string) => boolean;
+   * inside openUrl is one-shot without a race. Given the callback port when
+   * the page names one, so a caller that declines can keep that page for a
+   * later click. */
+  autoOpen?: (targetId: string, url: string, port?: number) => boolean;
   /** The one line logged when a page arrives and nothing opens, given the workspace name and the URL's hostname; the TUI supplies its own. */
   openLine?: (workspace: string, hostname: string, url: string) => string;
   /** One line per open, forward, refusal and close; never the URL. */
@@ -398,9 +400,10 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
         if (f?.port === e.port && f.listener) closeForward(f, "the workspace stopped listening");
         return;
       case "browser.open":
-        if (autoOpen(link.target.id, e.url)) {
+        if (autoOpen(link.target.id, e.url, e.port)) {
+          const returns = e.port !== undefined ? "; it returns to the machine on its own" : "";
           void o.openUrl(e.url).then(ok =>
-            o.log(ok ? `${link.target.name}: opened a sign-in page in your browser` : `${link.target.name}: could not open your browser for a sign-in page`),
+            o.log(ok ? `${link.target.name}: opened a sign-in page in your browser${returns}` : `${link.target.name}: could not open your browser for a sign-in page`),
           );
         } else {
           // isHttpUrl parsed the URL already; the second wall for a guest that skipped the socket.
