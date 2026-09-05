@@ -293,8 +293,9 @@ export type MachineKind = z.infer<typeof MachineKind>;
 export const ChecklistItem = z.object({ label: z.string(), command: z.string() });
 export type ChecklistItem = z.infer<typeof ChecklistItem>;
 
-/** What a login chosen as "sign in on the machine" came to by the time the golden sealed; `copied` is a login an
- * update re-imported from this computer, its choice having moved to copy since the version it came from. */
+/** What each login came to by the time the golden sealed: a sign-in on the machine, or a copy from this computer
+ * checked there with the tool's status command. `copied` is a copy nothing checked: an update re-imported it, or the
+ * tool has no status command or is not on the machine. */
 export const LoginState = z.enum(["signed-in", "not-signed-in", "not-verified", "skipped", "copied"]);
 export type LoginState = z.infer<typeof LoginState>;
 export const GoldenLogin = z.object({ name: z.string(), state: LoginState });

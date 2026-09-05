@@ -1076,6 +1076,170 @@ describe("wsp init, the sign-in stage", () => {
   });
 });
 
+describe("wsp init, logins copied to the machine", () => {
+  const COPIED_MANIFEST: Manifest = {
+    entries: [
+      FIXTURE.entries[0]!,
+      { rung: "logins", id: "logins/gh", label: "GitHub CLI login", group: "CLI logins", paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"], bytes: 200, default: "bring" },
+      { rung: "logins", id: "logins/kube", label: "kubectl config", group: "CLI logins", paths: ["~/.kube/config"], bytes: 900, default: "bring" },
+    ],
+  };
+  const STATUS_LINE = "gh auth status; printf '\\nWSP_STATUS %s\\n' $?; exit\r";
+
+  /** gh on the fake builder: its status names the copied token invalid until gh auth login has run there. */
+  function ghOnBuilder(f: Fake, o: { missing?: boolean } = {}): void {
+    let loggedIn = false;
+    f.link.script = (pty, line) => {
+      if (line.includes("WSP_STATUS")) {
+        if (o.missing) {
+          f.link.data(pty, "sh: gh: not found\r\nWSP_STATUS 127\r\n");
+          f.link.exit(pty, 127);
+          return;
+        }
+        f.link.data(pty, loggedIn ? "✓ Logged in to github.com account someone (keyring)\r\nWSP_STATUS 0\r\n" : "X Failed to log in to github.com account someone (keyring)\r\n- The token in /root/.config/gh/hosts.yml is invalid.\r\nWSP_STATUS 1\r\n");
+        f.link.exit(pty, loggedIn ? 0 : 1);
+        return;
+      }
+      if (line.startsWith("exec gh auth login")) {
+        loggedIn = true;
+        f.link.data(pty, `Press Enter to open ${DEVICE_URL} in your browser...\r\n`);
+        f.link.exit(pty, 0);
+      }
+    };
+  }
+
+  /** Through the screens and the boot question; the run itself is handed back unawaited. */
+  async function toTheBuilder(f: Fake): Promise<{ run: ReturnType<typeof runInit> }> {
+    const run = runInit(f.opts, f.io);
+    await f.until("Identity");
+    await f.press(KEY.enter);
+    await f.until("Sign-ins");
+    expect(f.text()).toMatch(/GitHub CLI login\s+copy/);
+    await f.press(KEY.enter);
+    await f.until(BOOT);
+    await f.press("y");
+    return { run };
+  }
+
+  /** The same laptop saved as a recipe with both logins answered copy: under --yes a fresh collection would sign a Keychain login in on the machine instead. */
+  function savedAsCopy(f: Fake): void {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
+    dirs.push(dir);
+    f.opts.manifestPath = join(dir, "recipe.json");
+    writeFileSync(f.opts.manifestPath, JSON.stringify({ entries: COPIED_MANIFEST.entries.map(e => (e.rung === "logins" ? { ...e, bring: true, choice: "copy" } : { ...e, bring: true })) }));
+  }
+
+  it("a copied login whose status check fails is offered the machine sign-in, which lands it as signed in; a login nothing can check stays copied", async () => {
+    const f = fake({ collect: async () => COPIED_MANIFEST });
+    ghOnBuilder(f);
+    const { run } = await toTheBuilder(f);
+    await f.until("GitHub CLI login: not signed in (copied, but gh auth status says not signed in)");
+    await f.until("kubectl config: copied (not verified: no status command known for kube)");
+    await f.until("GitHub CLI login  r sign in on the machine   s skip");
+    expect(f.text()).not.toContain("Signing in on the machine");
+    await f.press("r");
+    await f.until(/GitHub CLI login\s+gh auth login\n/);
+    await f.until("GitHub CLI login: signed in (gh auth status)");
+    await f.until(URL_RE);
+    await f.press(KEY.enter);
+    const result = await run;
+    expect(result.code).toBe(0);
+    expect(f.reads).toEqual(["gh:github.com"]);
+    // The quiet check, the sign-in pty, then the check again.
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual([STATUS_LINE, "exec gh auth login || exit\r", STATUS_LINE]);
+    expect(result.logins).toEqual([
+      { id: "logins/gh", label: "GitHub CLI login", state: "signed-in", command: "gh auth login", exit: 0, note: "gh auth status" },
+      { id: "logins/kube", label: "kubectl config", state: "copied", note: "not verified: no status command known for kube" },
+    ]);
+    expect(f.hooks[0]!.checklist()).toEqual([]);
+    expect(f.text()).toContain("Save the golden there once the machine is the way you want it.");
+    expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({
+      logins: [
+        { id: "logins/gh", state: "signed-in", note: "gh auth status" },
+        { id: "logins/kube", state: "copied" },
+      ],
+    });
+    const sealed = await f.served[0]!.golden.seal(f.backends[0]!.machines[0]!.id);
+    expect(sealed.version.logins).toEqual([
+      { name: "GitHub CLI login", state: "signed-in" },
+      { name: "kubectl config", state: "copied" },
+    ]);
+  });
+
+  it("a copied login whose status check fails can be skipped instead; the skip keeps its sign-in on the page's checklist", async () => {
+    const f = fake({ collect: async () => COPIED_MANIFEST });
+    ghOnBuilder(f);
+    const { run } = await toTheBuilder(f);
+    await f.until("GitHub CLI login  r sign in on the machine   s skip");
+    await f.press("s");
+    await f.until(URL_RE);
+    await f.press(KEY.enter);
+    const result = await run;
+    expect(result.code).toBe(0);
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual([STATUS_LINE]);
+    expect(result.logins?.[0]).toEqual({ id: "logins/gh", label: "GitHub CLI login", state: "skipped", note: "skipped by you" });
+    expect(f.hooks[0]!.checklist()).toEqual([{ label: "GitHub CLI login", command: "gh auth login" }]);
+    expect(f.text()).toContain("Sign in where the checklist says, then save the golden.");
+  });
+
+  it("under --yes a copied login is still checked and nothing is asked: a failed check is not signed in and the page carries its sign-in", async () => {
+    const f = fake({ yes: true });
+    savedAsCopy(f);
+    ghOnBuilder(f);
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(0);
+    expect(f.text()).toContain("GitHub CLI login: not signed in (copied, but gh auth status says not signed in)");
+    expect(f.text()).not.toContain("r sign in on the machine");
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual([STATUS_LINE]);
+    expect(result.logins).toEqual([
+      { id: "logins/gh", label: "GitHub CLI login", state: "not-signed-in", note: "copied, but gh auth status says not signed in" },
+      { id: "logins/kube", label: "kubectl config", state: "copied", note: "not verified: no status command known for kube" },
+    ]);
+    expect(f.hooks[0]!.checklist()).toEqual([{ label: "GitHub CLI login", command: "gh auth login" }]);
+  });
+
+  it("a copied login whose tool is not on the machine stays copied with that reason; the page says to install the tool; no sign-in is offered", async () => {
+    const f = fake({ yes: true });
+    savedAsCopy(f);
+    ghOnBuilder(f, { missing: true });
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(0);
+    expect(f.text()).toContain("GitHub CLI login: copied (not verified: gh is not on the machine)");
+    expect(f.text()).not.toContain("r sign in on the machine");
+    expect(result.logins?.[0]).toEqual({ id: "logins/gh", label: "GitHub CLI login", state: "copied", command: "gh auth status", exit: 127, note: "not verified: gh is not on the machine" });
+    // The files are there; the page says to install the tool, as it does for a sign-in whose tool is missing.
+    expect(f.hooks[0]!.checklist()).toEqual([{ label: "GitHub CLI login", command: "install gh, then gh auth login" }]);
+    expect(f.text()).toContain("Sign in where the checklist says, then save the golden.");
+  });
+
+  it("a login with no table row runs a bare shell on the machine; after it ends unclean the offer is a retry, since a pty has run", async () => {
+    const SHELL_MANIFEST: Manifest = { entries: [FIXTURE.entries[0]!, { rung: "logins", id: "logins/foo", label: "foo login", group: "CLI logins", paths: ["~/.foo/auth.json"], bytes: 100, default: "skip" }] };
+    const f = fake({ collect: async () => SHELL_MANIFEST });
+    const run = runInit(f.opts, f.io);
+    await f.until("Identity");
+    await f.press(KEY.enter);
+    await f.until("Sign-ins");
+    expect(f.text()).toMatch(/foo login\s+sign in/);
+    await f.press(KEY.enter);
+    await f.until(BOOT);
+    await f.press("y");
+    await f.until(/foo login\s+a shell on the machine; type the tool's sign-in command, then exit\n/);
+    // No command line is typed for a shell, so the fake exits it by hand, unclean.
+    for (let i = 0; i < 200 && f.link.ptys.length === 0; i++) await new Promise(r => setTimeout(r, 5));
+    expect(f.link.ptys.at(-1)!.writes).toEqual([]);
+    f.link.exit(f.link.ptys.at(-1)!, 1);
+    await f.until("foo login: not verified (no status command known for foo; exit 1)");
+    await f.until("foo login  r retry   s skip");
+    await f.press("s");
+    await f.until(URL_RE);
+    await f.press(KEY.enter);
+    const result = await run;
+    expect(result.code).toBe(0);
+    expect(result.logins).toEqual([{ id: "logins/foo", label: "foo login", state: "skipped", exit: 1, note: "skipped by you" }]);
+    expect(f.hooks[0]!.checklist()).toEqual([{ label: "foo login", command: "sign in as the tool asks" }]);
+  });
+});
+
 describe("wsp init, flags and no terminal", () => {
   it("without a terminal it behaves as --yes: defaults taken, nothing asked, the address printed", async () => {
     const f = fake({ tty: false });
@@ -1105,12 +1269,16 @@ describe("wsp init, flags and no terminal", () => {
     const said = out.indexOf("Reading gh:github.com from your Keychain, as the saved recipe answered copy; macOS may ask you to allow it.");
     expect(said).toBeGreaterThan(-1);
     expect(said).toBeLessThan(out.search(BOOT));
-    // Nobody can type here, so the one sign-in chosen for the machine is skipped and said so; no pty was opened.
+    // The copied gh login is checked on the builder with nobody here; the one sign-in chosen for the machine is skipped and said so.
+    expect(f.text()).toContain("GitHub CLI login: signed in (copied; gh auth status)");
     expect(f.text()).toContain("Sign-ins on the machine skipped: Claude Code login. No terminal to sign in from; use the app's terminal.");
-    expect(f.link.ptys).toEqual([]);
-    expect(f.link.dials).toBe(0);
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual(["gh auth status; printf '\\nWSP_STATUS %s\\n' $?; exit\r"]);
+    expect(f.link.dials).toBe(1);
     expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({
-      logins: [{ id: "logins/claude", state: "skipped", note: "no terminal to sign in from; use the app's terminal" }],
+      logins: [
+        { id: "logins/gh", state: "signed-in", note: "copied; gh auth status" },
+        { id: "logins/claude", state: "skipped", note: "no terminal to sign in from; use the app's terminal" },
+      ],
     });
     // The page still gets the login as its checklist: nothing ran here.
     expect(f.hooks[0]!.checklist()).toEqual([{ label: "Claude Code login", command: "claude auth login" }]);
