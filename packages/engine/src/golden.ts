@@ -383,7 +383,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
     let edited = false;
     if (imp.mcp !== undefined) {
       edited = true;
-      result.mcp = await applyMcp(machine, imp.mcp, stage);
+      result.mcp = await applyMcp(machine, imp.mcp, stage, result.tools);
       mark("installing-mcp");
     } else if (done("installing-mcp")) {
       stage("installing-mcp", ALREADY_APPLIED);

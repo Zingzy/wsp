@@ -776,6 +776,7 @@ describe("importFor", () => {
       guestHome: "/root",
       rewrites: [[`${home}/`, "/root/"], ["/opt/homebrew/", "/home/linuxbrew/.linuxbrew/"]],
       binDirs: [`${home}/.local/bin/`, "~/.local/bin/", "/opt/homebrew/bin/", "/opt/homebrew/sbin/", "/usr/local/bin/", "/usr/bin/", "/bin/"],
+      tools: [],
     });
     expect(imp.agents.map(a => a.id)).toEqual(["agents/claude"]);
     expect(imp.skippedAgents).toEqual([]);

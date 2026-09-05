@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { applyMcp, mcpPlanFor, type McpPlan, type McpResult } from "../src/golden-mcp.js";
 import { MCP_ID_PREFIX } from "@wsp/protocol";
 import type { RecipeEntry } from "../src/golden-import.js";
+import type { ToolResult } from "../src/golden-tools.js";
 import type { ExecResult, Machine } from "../src/machine.js";
 
 const execFileAsync = promisify(execFile);
@@ -37,6 +38,9 @@ describe("mcpPlanFor", () => {
       row(`${MCP_ID_PREFIX}codex/grafana`),
       row(`${MCP_ID_PREFIX}mcp-remote`, { paths: ["~/.mcp-auth"] }),
       row("agents/gemini"),
+      row("tools/go/codebase-memory-mcp", { rung: "tools" }),
+      row("tools/brew/jq", { rung: "tools", bring: false, default: "skip", reason: "no Linux bottle" }),
+      row("tools/brew-cask/iterm2", { rung: "tools", bring: false }),
     ];
     expect(mcpPlanFor(rows, { home: HOME, agents: AGENTS })).toEqual<McpPlan>({
       agents: [
@@ -53,6 +57,7 @@ describe("mcpPlanFor", () => {
       guestHome: "/root",
       rewrites: [[`${HOME}/`, "/root/"], ["/opt/homebrew/", "/home/linuxbrew/.linuxbrew/"]],
       binDirs: [`${HOME}/.local/bin/`, "~/.local/bin/", "/opt/homebrew/bin/", "/opt/homebrew/sbin/"],
+      tools: [{ id: "tools/go/codebase-memory-mcp", ticked: true }, { id: "tools/brew/jq", ticked: false, reason: "no Linux bottle" }],
     });
   });
 
@@ -154,6 +159,7 @@ function planOn(root: string, over: Partial<McpPlan> = {}): McpPlan {
     guestHome: root,
     rewrites: [[`${HOME}/`, `${root}/`], ["/opt/homebrew/", "/home/linuxbrew/.linuxbrew/"]],
     binDirs: [`${HOME}/.local/bin/`, "~/.local/bin/", "/opt/homebrew/bin/", "/opt/homebrew/sbin/"],
+    tools: [],
     ...over,
   };
 }
@@ -173,11 +179,12 @@ describe("applyMcp", () => {
     seed(root);
     const stages: string[] = [];
     const results = await applyMcp(machine, planOn(root), (s, d) => void stages.push(`${s}:${d ?? ""}`));
-    // The config edit and the uv install run detached; the PATH check is one short exec.
-    expect(runs).toHaveLength(2);
+    // The script runs twice detached, once to read the commands and once to write; the PATH check between them is one short exec.
+    expect(runs).toHaveLength(3);
     expect(runs[0]).toContain("\nnode -e ");
-    expect(runs[1]).toContain("astral-sh/uv/releases");
-    expect(runs[1]).toContain("\nsetsid bash -c '");
+    expect(runs[1]).toContain("\nnode -e ");
+    expect(runs[2]).toContain("astral-sh/uv/releases");
+    expect(runs[2]).toContain("\nsetsid bash -c '");
     const check = cmds.find(c => c.split("\n")[1]?.startsWith("if command -v"))!;
     expect(check).toBeDefined();
     expect(runs).not.toContain(check);
@@ -245,17 +252,57 @@ describe("applyMcp", () => {
     expect(cmds.some(c => c.includes("ghp_secret"))).toBe(false);
   });
 
-  it("names a command the machine does not have, and a kept server the config on the machine no longer holds", async () => {
+  const geminiOnly = (root: string, over: Partial<McpPlan> = {}): McpPlan =>
+    planOn(root, { agents: [{ id: "gemini", label: "Gemini CLI", scopes: [{ files: [join(root, ".gemini/settings.json")], format: "gemini", keep: ["memory", "vanished"], drop: [] }], aside: [] }], ...over });
+  const geminiServers = (root: string): string[] => Object.keys(JSON.parse(readFileSync(join(root, ".gemini/settings.json"), "utf8")).mcpServers);
+
+  it("a server whose command is not on the machine is taken out of the config and skipped with the reason; a kept server the config no longer holds is named", async () => {
     const { root, machine } = guest(["npx"]);
     seed(root);
-    const plan = planOn(root, { agents: [{ id: "gemini", label: "Gemini CLI", scopes: [{ files: [join(root, ".gemini/settings.json")], format: "gemini", keep: ["memory", "vanished"], drop: [] }], aside: [] }] });
     const stages: string[] = [];
-    const results = await applyMcp(machine, plan, (s, d) => void stages.push(d ?? s));
+    const results = await applyMcp(machine, geminiOnly(root), (s, d) => void stages.push(d ?? s));
     expect(results).toEqual<McpResult[]>([
-      { id: `${MCP_ID_PREFIX}gemini/memory`, agent: "Gemini CLI", name: "memory", outcome: "installed", note: "codebase-memory-mcp is not on the machine; the server starts once it is installed there" },
       { id: `${MCP_ID_PREFIX}gemini/vanished`, agent: "Gemini CLI", name: "vanished", outcome: "skipped", note: "not in the config that travelled" },
+      { id: `${MCP_ID_PREFIX}gemini/memory`, agent: "Gemini CLI", name: "memory", outcome: "skipped", note: "command not on the machine" },
     ]);
-    expect(stages.at(-1)).toBe("memory: codebase-memory-mcp is not on the machine; vanished skipped (not in the config that travelled)");
+    expect(geminiServers(root)).toEqual(["gone"]);
+    expect(stages.at(-1)).toBe("vanished skipped (not in the config that travelled); memory skipped (command not on the machine)");
+  });
+
+  it("a server whose command is on the machine is written and installed", async () => {
+    const { root, machine } = guest(["codebase-memory-mcp"]);
+    seed(root);
+    const results = await applyMcp(machine, geminiOnly(root), () => {});
+    expect(results[0]).toEqual({ id: `${MCP_ID_PREFIX}gemini/memory`, agent: "Gemini CLI", name: "memory", outcome: "installed" });
+    expect(geminiServers(root)).toEqual(["memory", "gone"]);
+  });
+
+  it("a server that runs through npx is written even when npx is not on the machine yet", async () => {
+    const { root, machine } = guest([]);
+    seed(root);
+    const plan = planOn(root, { agents: [{ id: "claude", label: "Claude Code", scopes: [{ files: [join(root, ".claude-cfg/.claude.json")], format: "claude", keep: ["github"], drop: [] }], aside: [] }] });
+    const results = await applyMcp(machine, plan, () => {});
+    expect(results).toEqual<McpResult[]>([
+      { id: `${MCP_ID_PREFIX}claude/github`, agent: "Claude Code", name: "github", outcome: "fetched-on-first-use", note: "npx fetches the package on first use; npx is not on the machine; the server starts once it is installed there" },
+    ]);
+    expect(Object.keys(JSON.parse(readFileSync(join(root, ".claude-cfg/.claude.json"), "utf8")).mcpServers)).toContain("github");
+  });
+
+  it("the reason names the recipe's tool row that would have brought the command, and what became of it", async () => {
+    const cases: { row: McpPlan["tools"][number]; result?: ToolResult; note: string }[] = [
+      { row: { id: "tools/go/codebase-memory-mcp", ticked: true }, result: { id: "tools/go/codebase-memory-mcp", label: "codebase-memory-mcp", outcome: "skipped", note: "1803 MB free, keeping 2048 MB free" }, note: "command not on the machine; tools/go/codebase-memory-mcp was skipped (1803 MB free, keeping 2048 MB free)" },
+      { row: { id: "tools/go/codebase-memory-mcp", ticked: true }, result: { id: "tools/go/codebase-memory-mcp", label: "codebase-memory-mcp", outcome: "failed", note: "exit 1: go: module not found" }, note: "command not on the machine; tools/go/codebase-memory-mcp failed (exit 1: go: module not found)" },
+      { row: { id: "tools/brew/codebase-memory-mcp", ticked: false, reason: "no Linux bottle" }, note: "command not on the machine; tools/brew/codebase-memory-mcp was not ticked (no Linux bottle)" },
+      { row: { id: "tools/cargo/codebase-memory-mcp", ticked: false }, note: "command not on the machine; tools/cargo/codebase-memory-mcp was not ticked" },
+      { row: { id: "tools/npm/codebase-memory-mcp", ticked: true }, note: "command not on the machine; tools/npm/codebase-memory-mcp was ticked, but nothing by that name is on PATH" },
+      { row: { id: "tools/go/other-bin", ticked: true }, result: { id: "tools/go/other-bin", label: "other-bin", outcome: "skipped", note: "1803 MB free, keeping 2048 MB free" }, note: "command not on the machine" },
+    ];
+    for (const c of cases) {
+      const { root, machine } = guest(["npx"]);
+      seed(root);
+      const results = await applyMcp(machine, geminiOnly(root, { tools: [c.row] }), () => {}, c.result !== undefined ? [c.result] : []);
+      expect(results.find(r => r.name === "memory")?.note).toBe(c.note);
+    }
   });
 
   it("running twice leaves the files as they were after the first run and reports the same, the moved home servers included", async () => {

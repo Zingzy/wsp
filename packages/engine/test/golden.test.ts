@@ -984,7 +984,7 @@ describe("golden import stages", () => {
     const before = cmds.length;
     const { stages, onStage } = stageRecorder();
     const results: ImportResult[] = [];
-    const mcp = { agents: [{ id: "claude", label: "Claude Code", scopes: [{ files: ["/root/.claude-cfg/.claude.json"], format: "claude" as const, keep: ["github"], drop: [] }], aside: [] }], guestHome: "/root", rewrites: [], binDirs: [] };
+    const mcp = { agents: [{ id: "claude", label: "Claude Code", scopes: [{ files: ["/root/.claude-cfg/.claude.json"], format: "claude" as const, keep: ["github"], drop: [] }], aside: [] }], guestHome: "/root", rewrites: [], binDirs: [], tools: [] };
     await applyGoldenImport(builder.machine, { import: importOf({ mcp, onResult: r => void results.push(r) }), setup: "true", ledger: builder.import, fetch, onStage });
     expect(results).toEqual([]);
     expect(stages.slice(0, 5)).toEqual(["applying-setup:already applied", "uploading-files:already applied", "installing-harness:already applied", "installing-tools:already applied", "installing-mcp:Claude Code 1"]);
