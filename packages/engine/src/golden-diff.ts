@@ -2,8 +2,8 @@
 // The recipe diff: what a golden was built from (the digest its seal wrote)
 // against the recipe now, as rows to apply on top and rows to take off. Pure;
 // golden.ts runs the result on a fork or on the kept builder.
-import type { RecipeDigest } from "@wsp/protocol";
-import { AGENT_INSTALLERS, MCP_ID_PREFIX, agentUninstall, toolUninstall, type AgentInstaller, type RecipeEntry } from "./golden-import.js";
+import { MCP_ID_PREFIX, type RecipeDigest } from "@wsp/protocol";
+import { AGENT_INSTALLERS, agentUninstall, toolUninstall, type AgentInstaller, type RecipeEntry } from "./golden-import.js";
 
 type Tick = RecipeDigest["ticks"][number];
 type DigestFile = RecipeDigest["files"][number];

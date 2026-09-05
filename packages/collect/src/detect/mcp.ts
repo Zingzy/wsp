@@ -5,11 +5,11 @@
 // say what each server is, what it needs on Linux and which secret it carries.
 // Token files are only stat'ed, never read.
 import { createHash } from "node:crypto";
+import { MCP_ID_PREFIX } from "@wsp/protocol";
 import { type Host, expand } from "../host.js";
 import type { ManifestEntry } from "../manifest.js";
 import { isSecretName } from "../everything/shell-rc.js";
 
-export const MCP_ID_PREFIX = "agents/mcp/";
 /** The row that carries mcp-remote's saved browser sign-ins for every agent. */
 export const MCP_REMOTE_ID = `${MCP_ID_PREFIX}mcp-remote`;
 export const MCP_REMOTE_LABEL = "mcp-remote sign-ins";

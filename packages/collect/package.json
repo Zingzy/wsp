@@ -9,6 +9,7 @@
     "bottles": "tsup src/index.ts src/live.ts --format esm --dts --silent && node scripts/fetch-linux-bottles.mjs"
   },
   "dependencies": {
+    "@wsp/protocol": "workspace:*",
     "zod": "^3.25.76"
   },
   "devDependencies": {

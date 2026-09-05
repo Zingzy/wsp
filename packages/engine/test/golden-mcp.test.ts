@@ -9,7 +9,8 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { applyMcp, mcpPlanFor, type McpPlan, type McpResult } from "../src/golden-mcp.js";
-import { MCP_ID_PREFIX, type RecipeEntry } from "../src/golden-import.js";
+import { MCP_ID_PREFIX } from "@wsp/protocol";
+import type { RecipeEntry } from "../src/golden-import.js";
 import type { ExecResult, Machine } from "../src/machine.js";
 
 const execFileAsync = promisify(execFile);

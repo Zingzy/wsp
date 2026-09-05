@@ -4,7 +4,8 @@
 // carries a definition: the plan names which servers stay, which come out and
 // why, and the prefixes that read differently on the machine. A script on the
 // guest edits the files in place and touches no server it was not told about.
-import { MCP_ID_PREFIX, TOOLS_PATH, UV_INSTALL, type RecipeEntry } from "./golden-import.js";
+import { MCP_ID_PREFIX } from "@wsp/protocol";
+import { TOOLS_PATH, UV_INSTALL, type RecipeEntry } from "./golden-import.js";
 import { GUARD_SLACK_S, TOOL_TIMEOUT_S, guarded, reasonOf } from "./golden-tools.js";
 import type { Machine } from "./machine.js";
 import type { StageListener } from "./golden.js";

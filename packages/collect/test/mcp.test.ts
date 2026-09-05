@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { MCP_ID_PREFIX, detectMcp, linuxFit, mcpRemoteHash, parseCodexMcp, parseMcp, type McpServer } from "../src/index.js";
+import { detectMcp, linuxFit, mcpRemoteHash, parseCodexMcp, parseMcp, type McpServer } from "../src/index.js";
 import { fakeHost } from "./fake-host.js";
 
 const HOME = "/Users/dev";
@@ -197,6 +197,5 @@ describe("mcp servers", () => {
       createHash("md5").update(`${NOTION}|https://r.example|${JSON.stringify({ a: "1", b: "2" })}|${JSON.stringify({ K: "v" })}|https://m.example/c.json`).digest("hex"),
     );
     expect(mcpRemoteHash(["-y", "@scope/other", NOTION])).toBeUndefined();
-    expect(MCP_ID_PREFIX).toBe("agents/mcp/");
   });
 });

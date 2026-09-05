@@ -6,13 +6,10 @@
 // runs the plan on the builder.
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import type { RecipeDigest } from "@wsp/protocol";
+import { MCP_ID_PREFIX, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
 
 export type { RecipeDigest };
-
-/** Rows under the agents rung that are MCP servers, not agents: `agents/mcp/<agent>/<name>`. */
-export const MCP_ID_PREFIX = "agents/mcp/";
 
 /** The recipe row as this module reads it: a structural subset of the
  * collector's manifest entry, so a recipe file parses straight into it. */

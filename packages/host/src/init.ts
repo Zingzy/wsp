@@ -6,9 +6,9 @@
 // and no question is ever asked on the remote machine.
 import type { Readable, Writable } from "node:stream";
 import { format, styleText } from "node:util";
-import { LARGE_GROUP, MCP_ID_PREFIX, MCP_REMOTE_ID, RUNGS, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
+import { LARGE_GROUP, MCP_REMOTE_ID, RUNGS, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
 import { describeAge, type BackendPricing } from "@wsp/engine";
-import type { ChecklistItem } from "@wsp/protocol";
+import { type ChecklistItem, MCP_ID_PREFIX } from "@wsp/protocol";
 import { PrepareStoppedError, type GoldenBuilderView, type GoldenRecipe, type GoldenStage, type Runtime } from "@wsp/runtime";
 import { S_BAR, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, cancel, isCancel, log, outro } from "@clack/prompts";
 import type { Keys } from "./cli.js";
