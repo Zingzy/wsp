@@ -139,6 +139,27 @@ describe("machine facts", () => {
     expect(fact("size")).toBe("2 vCPU · 4 GB");
   });
 
+  it("every fact value carries its full text as a title, so a value the row cuts is still readable", async () => {
+    const w = view("ws_a", "api");
+    const api = await mount([w]);
+    act(() => api.emit({ type: "workspace.status", status: { ...status(w), machineState: "starting", idleAt: Date.now() + 90_000 } }));
+    await waitFor(() => expect(fact("state")).toBe("Running · machine starting"));
+    for (const k of ["state", "reach", "size", "awake", "idle"]) {
+      const el = document.querySelector(`[data-k="${k}"]`)!;
+      expect(el.getAttribute("title")).toBe(el.textContent);
+      expect(el.className).toContain("truncate");
+    }
+  });
+
+  it("a machine id hundreds of characters long is cut inside its cell and rides its title in full", async () => {
+    const id = "ZGVza3Rvc".repeat(25);
+    await mount([{ ...view("ws_a", "api"), machineId: id }]);
+    const cell = document.querySelector('[data-k="machine-id"]')!;
+    expect(cell.getAttribute("title")).toBe(id);
+    expect(cell.className).toContain("truncate");
+    expect(cell.className).toContain("max-w-28");
+  });
+
   it("copies the full machine id", async () => {
     const writeText = vi.fn(async () => {});
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
@@ -228,15 +249,47 @@ describe("usage", () => {
     expect(fact("accrued")).toBe("$0.0018");
   });
 
-  it("draws one bar per cost tick and drops the empty state on the first tick", async () => {
+  it("draws one line through the cost ticks, never bars, and drops the empty state on the first tick", async () => {
     const api = await mount([view("ws_a", "api")]);
     expect(screen.getByText("No cost ticks yet.")).toBeDefined();
     act(() => api.emit(costEvent("ws_a", 0.11, 60_000, "2026-09-01T00:01:00Z")));
-    await waitFor(() => expect(document.querySelectorAll("[data-usage-bar]")).toHaveLength(1));
+    await waitFor(() => expect(document.querySelector("[data-usage-line]")).not.toBeNull());
     expect(screen.queryByText("No cost ticks yet.")).toBeNull();
     act(() => api.emit(costEvent("ws_a", 0.22, 120_000, "2026-09-01T00:02:00Z")));
-    await waitFor(() => expect(document.querySelectorAll("[data-usage-bar]")).toHaveLength(2));
-    expect(screen.getByText("peak $0.22")).toBeDefined();
+    act(() => api.emit(costEvent("ws_a", 0.11, 180_000, "2026-09-01T00:03:00Z")));
+    await waitFor(() => expect(screen.getByText("peak $0.22")).toBeDefined());
+    const chart = document.querySelector("[data-usage-chart]")!;
+    expect(chart.querySelectorAll("rect")).toHaveLength(0);
+    expect(chart.querySelectorAll("[data-usage-bar]")).toHaveLength(0);
+    const line = chart.querySelector("[data-usage-line]")!;
+    expect(line.tagName.toLowerCase()).toBe("path");
+    // One move then one segment per tick after the first: the path is the series, nothing else.
+    expect(line.getAttribute("d")).toMatch(/^M[^ML]+(L[^ML]+){2}$/);
+    // The peak is marked on its point with its value beside it.
+    expect(chart.querySelector("[data-usage-peak]")).not.toBeNull();
+    expect(fact("usage-peak")).toBe("$0.220/hr");
+  });
+
+  it("hovering the chart reads out the tick under the pointer; leaving returns to the window", async () => {
+    const api = await mount([view("ws_a", "api")]);
+    act(() => {
+      api.emit(costEvent("ws_a", 0.11, 60_000, "2026-09-01T00:01:00Z"));
+      api.emit(costEvent("ws_a", 0.22, 120_000, "2026-09-01T00:02:00Z"));
+      api.emit(costEvent("ws_a", 0.11, 180_000, "2026-09-01T00:03:00Z"));
+    });
+    await waitFor(() => expect(screen.getByText("peak $0.22")).toBeDefined());
+    const clock = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    expect(fact("usage-readout")).toBe(`${clock("2026-09-01T00:01:00Z")} to ${clock("2026-09-01T00:03:00Z")}`);
+    const svg = document.querySelector<SVGSVGElement>("[data-usage-chart] svg")!;
+    svg.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: 300, bottom: 64, width: 300, height: 64, toJSON: () => ({}) });
+    fireEvent.mouseMove(svg, { clientX: 150, clientY: 30 });
+    expect(fact("usage-readout")).toBe(`$0.220/hr at ${clock("2026-09-01T00:02:00Z")}`);
+    expect(svg.querySelector("[data-usage-hover]")).not.toBeNull();
+    fireEvent.mouseMove(svg, { clientX: 299, clientY: 30 });
+    expect(fact("usage-readout")).toBe(`$0.110/hr at ${clock("2026-09-01T00:03:00Z")}`);
+    fireEvent.mouseLeave(svg);
+    expect(fact("usage-readout")).toBe(`${clock("2026-09-01T00:01:00Z")} to ${clock("2026-09-01T00:03:00Z")}`);
+    expect(svg.querySelector("[data-usage-hover]")).toBeNull();
   });
 
   it("never says no spend while the counters show spend the chart missed", async () => {
@@ -256,7 +309,7 @@ describe("usage", () => {
       api.emit(costEvent("ws_b", 0.44, 60_000, "2026-09-01T00:01:00Z"));
       api.emit(costEvent("ws_b", 0.44, 120_000, "2026-09-01T00:02:00Z"));
     });
-    expect(document.querySelectorAll("[data-usage-bar]")).toHaveLength(0);
+    expect(document.querySelector("[data-usage-line]")).toBeNull();
     expect(screen.getByText("No cost ticks yet.")).toBeDefined();
   });
 });

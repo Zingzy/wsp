@@ -8,6 +8,9 @@ export const money = (n: number, digits = 4): string => `$${n.toFixed(digits)}`;
 
 export const sizeLabel = (size: WorkspaceSize): string => `${size.cpu} vCPU · ${size.memMb / 1024} GB`;
 
+/** A tick's wall-clock time in the person's zone, hours and minutes. */
+export const clockLabel = (iso: string): string => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
 export function durationLabel(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000));
   if (s < 60) return `${s}s`;
