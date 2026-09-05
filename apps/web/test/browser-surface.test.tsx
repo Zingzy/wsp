@@ -28,9 +28,10 @@ const PUBLIC = (port: number, token = "e") => `https://m1-${port}.preview.exampl
 const SHOWN = (port: number) => `https://m1-${port}.preview.example/`;
 const mint: Api["portReach"] = async (_id, port) => ({ url: PUBLIC(port), expiresAt: Date.now() + 3_600_000 });
 
-function fakeApi(workspaces: WorkspaceView[], portReach: Api["portReach"] = mint) {
+function fakeApi(workspaces: WorkspaceView[], portReach: Api["portReach"] = mint, portProbe?: Api["portProbe"]) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
   const api: Api = {
+    ...(portProbe !== undefined ? { portProbe } : {}),
     listWorkspaces: async () => workspaces,
     getWorkspace: async id => workspaces.find(w => w.id === id)!,
     createWorkspace: async () => workspaces[0]!,
@@ -64,8 +65,8 @@ function Harness({ workspaceId }: { workspaceId: string }) {
   return <RightPanel workspaceId={workspaceId} state={state} mode="inline" />;
 }
 
-async function setup(opts: { portReach?: Api["portReach"]; workspaces?: WorkspaceView[]; openBrowser?: boolean } = {}) {
-  const { api, emit } = fakeApi(opts.workspaces ?? [workspace(WS)], opts.portReach);
+async function setup(opts: { portReach?: Api["portReach"]; portProbe?: Api["portProbe"]; workspaces?: WorkspaceView[]; openBrowser?: boolean } = {}) {
+  const { api, emit } = fakeApi(opts.workspaces ?? [workspace(WS)], opts.portReach, opts.portProbe);
   await act(async () => { useStore.getState().bind(api); });
   if (opts.openBrowser !== false) act(() => useRightPanelStore.getState().open(WS, "preview"));
   const view = render(<Harness workspaceId={WS} />);
@@ -234,6 +235,54 @@ describe("framing a port", () => {
     emit(close(WS, 5173));
     expect(screen.getByText(":5173 stopped listening")).toBeDefined();
     expect(frame(5173).getAttribute("src")).toBe(PUBLIC(5173));
+  });
+
+  it("when the port listens again after a close, the banner goes, the frame remounts and the route is probed anew", async () => {
+    const probed: number[] = [];
+    const { emit } = await setup({
+      portProbe: async (_id, port) => {
+        probed.push(port);
+        return { status: 200, body: "<!doctype html>" };
+      },
+    });
+    emit(open(WS, 8412, 100, "node"));
+    fireEvent.click(serverCard(8412));
+    const first = await screen.findByTitle(":8412");
+    await waitFor(() => expect(probed).toEqual([8412]));
+
+    emit(close(WS, 8412));
+    expect(screen.getByText(":8412 stopped listening")).toBeDefined();
+    expect(frame(8412)).toBe(first);
+
+    emit(open(WS, 8412, 200, "node"));
+    expect(screen.queryByText(":8412 stopped listening")).toBeNull();
+    await waitFor(() => expect(frame(8412)).not.toBe(first));
+    expect(frame(8412).getAttribute("src")).toBe(PUBLIC(8412));
+    await waitFor(() => expect(probed).toEqual([8412, 8412]));
+  });
+
+  it("says nothing about listening until the daemon has answered; the first word without the port shows the banner", async () => {
+    const { emit } = await setup();
+    act(() => address().focus());
+    fireEvent.change(address(), { target: { value: "3000" } });
+    fireEvent.keyDown(address(), { key: "Enter" });
+    await screen.findByTitle(":3000");
+    expect(screen.queryByText(":3000 stopped listening")).toBeNull();
+    emit(open(WS, 4000));
+    expect(screen.getByText(":3000 stopped listening")).toBeDefined();
+  });
+
+  it("a new tab typed onto a port that is listening frames it with no banner", async () => {
+    const { emit } = await setup();
+    emit(open(WS, 8412, 200, "node"));
+    fireEvent.click(serverCard(8412));
+    await screen.findByTitle(":8412");
+    act(() => useRightPanelStore.getState().openBrowser(WS, null));
+    act(() => address().focus());
+    fireEvent.change(address(), { target: { value: "8412" } });
+    fireEvent.keyDown(address(), { key: "Enter" });
+    await screen.findByTitle(":8412");
+    expect(screen.queryByText(":8412 stopped listening")).toBeNull();
   });
 
   it("a route that cannot be minted is said plainly instead of a blank frame", async () => {

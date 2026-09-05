@@ -29,6 +29,34 @@ describe("WorkspacePorts", () => {
   });
 });
 
+describe("WorkspacePorts across a restart", () => {
+  it("open, close, open for one port leaves it listed with the new pid", () => {
+    const d = new WorkspacePorts();
+    d.feedEvent({ type: "port.open", workspaceId: WS, port: 8412, pid: 100, process: "node" });
+    d.feedEvent({ type: "port.close", workspaceId: WS, port: 8412 });
+    expect(d.ports()).toEqual([]);
+    d.feedEvent({ type: "port.open", workspaceId: WS, port: 8412, pid: 200, process: "node" });
+    expect(d.ports()).toEqual([{ port: 8412, pid: 200, process: "node" }]);
+    d.feedEvent({ type: "port.close", workspaceId: WS, port: 8412 });
+    d.feedEvent({ type: "port.open", workspaceId: WS, port: 8412 });
+    expect(d.ports()).toEqual([{ port: 8412, pid: null, process: null }]);
+  });
+});
+
+describe("WorkspacePorts.seeded", () => {
+  it("is false until the daemon has said anything, then true even for an empty snapshot, with one notify", () => {
+    let notified = 0;
+    const d = new WorkspacePorts();
+    d.onChange(() => notified++);
+    expect(d.seeded()).toBe(false);
+    d.syncPorts([]);
+    expect(d.seeded()).toBe(true);
+    expect(notified).toBe(1);
+    d.syncPorts([]);
+    expect(notified).toBe(1);
+  });
+});
+
 describe("WorkspacePorts.syncPorts", () => {
   it("adopts the daemon's snapshot: adds missing, drops absent, sorted by port, notifies once", () => {
     let notified = 0;

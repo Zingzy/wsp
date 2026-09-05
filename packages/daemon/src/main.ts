@@ -132,7 +132,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
       portWatcher = new PortWatcher(opts.portsSource ?? procNetTcpSource(), {
         intervalMs: opts.portsIntervalMs ?? 1000,
       });
-      portWatcher.on("port.open", (e: PortOpenEvent) => spotter.noteOpen(e.port, e.loopback));
+      portWatcher.on("port.open", (e: PortOpenEvent) => spotter.noteOpen(e.port, e.loopback === true));
       portWatcher.start();
     }
     return portWatcher;

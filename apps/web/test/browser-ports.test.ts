@@ -125,6 +125,21 @@ describe("port directory over the daemon link", () => {
     expect(portsOf("ws_b")).toEqual([8080]);
   }, 15_000);
 
+  it("a listener killed and started again is listed again, even when the daemon cannot name its pid", async () => {
+    guests.set("ws_a", await guest([listening(8412, 100)]));
+    const { api } = fakeApi([view("ws_a")], id => guests.get(id)!.daemon.port);
+    unwire = wireTerminals(useStore, { backoffMs: () => 30 });
+    useStore.getState().bind(api);
+    await until(() => portsOf("ws_a").includes(8412));
+
+    guests.get("ws_a")!.ports = [];
+    await until(() => !portsOf("ws_a").includes(8412));
+
+    guests.get("ws_a")!.ports = [listening(8412)];
+    await until(() => portsOf("ws_a").includes(8412), 2000);
+    expect(getBrowser("ws_a").ports()).toEqual([{ port: 8412, pid: null, process: null }]);
+  }, 15_000);
+
   it("a redial re-subscribes: ports that changed while the socket was down are reconciled", async () => {
     guests.set("ws_a", await guest([listening(3000)]));
     const { api, emit } = fakeApi([view("ws_a")], id => guests.get(id)!.daemon.port);

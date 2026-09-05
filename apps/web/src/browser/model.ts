@@ -11,11 +11,17 @@ import { useStore } from "../protocol/store.js";
 
 export class WorkspacePorts {
   #ports: KnownPort[] = [];
+  #seeded = false;
   #fns = new Set<() => void>();
 
   feedEvent(e: ProtocolEvent): void {
     if (e.type !== "port.open" && e.type !== "port.close") return;
     this.#adopt(applyPortEvent(this.#ports, e));
+  }
+
+  /** False until the daemon has said anything about ports: an empty directory then means unknown, not silent. */
+  seeded(): boolean {
+    return this.#seeded;
   }
 
   /**
@@ -40,7 +46,9 @@ export class WorkspacePorts {
   }
 
   #adopt(next: KnownPort[]): void {
-    if (sameDirectory(this.#ports, next)) return;
+    const first = !this.#seeded;
+    this.#seeded = true;
+    if (!first && sameDirectory(this.#ports, next)) return;
     this.#ports = next;
     for (const fn of this.#fns) fn();
   }
@@ -88,6 +96,13 @@ export function useWorkspacePorts(workspaceId: string): KnownPort[] {
   return useSyncExternalStore(
     fn => getBrowser(workspaceId).onChange(fn),
     () => getBrowser(workspaceId).ports(),
+  );
+}
+
+export function useWorkspacePortsSeeded(workspaceId: string): boolean {
+  return useSyncExternalStore(
+    fn => getBrowser(workspaceId).onChange(fn),
+    () => getBrowser(workspaceId).seeded(),
   );
 }
 
