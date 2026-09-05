@@ -7,9 +7,8 @@ import { Check, Copy, Laptop } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toPreviewableServers } from "../../adapt/ports.js";
 import { useWorkspacePorts } from "../../browser/model.js";
-import { usePortReach } from "../../browser/reach.js";
 import { recordVisit, removeVisit, useRecents } from "../../browser/recents.js";
-import { useRouteRefusal } from "../../browser/refusal.js";
+import { useProbedRoute } from "../../browser/refusal.js";
 import { currentPort, useBrowserTab, useBrowserTabs, ZOOM_STEP } from "../../browser/tabs.js";
 import { elideToken, loopbackUrl, parsePortInput } from "../../browser/url.js";
 import { useForwarded } from "../../protocol/store.js";
@@ -38,17 +37,17 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
   const [loading, setLoading] = useState(false);
 
   const port = currentPort(tab);
-  const reach = usePortReach(workspaceId, port);
+  const { reach, refusal } = useProbedRoute(workspaceId, port, tab?.reloadNonce ?? 0);
   const realUrl = reach.state === "ready" ? reach.reach.url : null;
   const shownUrl = realUrl !== null ? elideToken(realUrl) : port !== null ? loopbackUrl(port) : "";
   const listening = port === null || ports.some(p => p.port === port);
   const forwarded = useForwarded(workspaceId, port);
   const zoom = tab?.zoom ?? 1;
-  const refusal = useRouteRefusal(workspaceId, port, realUrl, tab?.reloadNonce ?? 0);
+  const framed = realUrl !== null && (refusal === null || refusal.keepsFrame);
 
   useEffect(() => {
-    setLoading(realUrl !== null && refusal === null);
-  }, [realUrl, refusal, tab?.reloadNonce]);
+    setLoading(framed);
+  }, [framed, realUrl, tab?.reloadNonce]);
 
   const framePort = (next: number): void => {
     setHint(null);
@@ -135,14 +134,19 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
                 :{port} stopped listening
               </div>
             ) : null}
-            {refusal !== null ? (
+            {refusal !== null && refusal.keepsFrame ? (
+              <div role="status" className="shrink-0 border-b border-border/60 bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">{refusal.title}</span> {refusal.detail}
+              </div>
+            ) : null}
+            {refusal !== null && !refusal.keepsFrame ? (
               <Empty className="flex-1">
                 <EmptyHeader>
                   <EmptyTitle>{refusal.title}</EmptyTitle>
                   <EmptyDescription>{refusal.detail}</EmptyDescription>
                 </EmptyHeader>
               </Empty>
-            ) : realUrl !== null ? (
+            ) : framed ? (
               <iframe
                 key={`${port}:${tab?.reloadNonce ?? 0}`}
                 title={`:${port}`}

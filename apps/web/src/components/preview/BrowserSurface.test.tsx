@@ -12,28 +12,36 @@ const HOST = "m1-5173.preview.example";
 const ROUTE = `https://${HOST}/?pt_token=edge`;
 const VITE_BLOCKED = `Blocked request. This host (${HOST}) is not allowed. To allow this host, add it to server.allowedHosts`;
 
-function fakeApi(answers: PortProbeView[]): { api: Api; probes: () => number } {
+/** The route is minted with a rotating token, as the edge does: the n-th mint carries pt_token=t<n>. */
+function fakeApi(answers: PortProbeView[]): { api: Api; probes: () => number; mints: () => number } {
   let probes = 0;
+  let mints = 0;
   const api = {
     subscribe: () => () => {},
-    portReach: async () => ({ url: ROUTE, expiresAt: Date.now() + 3_600_000 }),
+    portReach: async () => {
+      mints++;
+      return { url: mints === 1 ? ROUTE : `https://${HOST}/?pt_token=t${mints}`, expiresAt: Date.now() + 3_600_000 };
+    },
     portProbe: async () => {
       const answer = answers[Math.min(probes, answers.length - 1)]!;
       probes++;
       return answer;
     },
   } as unknown as Api;
-  return { api, probes: () => probes };
+  return { api, probes: () => probes, mints: () => mints };
+}
+
+async function settle() {
+  await act(async () => {
+    for (let i = 0; i < 4; i++) await new Promise(r => setTimeout(r, 0));
+  });
 }
 
 async function mountOn(port: number, api: Api) {
   useStore.setState({ api });
   const tabId = useBrowserTabs.getState().createTab(WS, port);
   const view = render(<BrowserSurface workspaceId={WS} surface={{ id: `browser:${tabId}`, kind: "preview", resourceId: tabId }} />);
-  await act(async () => {
-    await Promise.resolve();
-    await Promise.resolve();
-  });
+  await settle();
   return { ...view, tabId };
 }
 
@@ -67,13 +75,36 @@ describe("BrowserSurface host-check refusal", () => {
     const { container } = await mountOn(5173, api);
     expect(container.querySelector("iframe")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /refresh/i }));
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    await settle();
     expect(probes()).toBe(2);
     expect(screen.queryByText(":5173 refused the preview host")).toBeNull();
     expect(container.querySelector("iframe")?.getAttribute("src")).toBe(ROUTE);
+  });
+
+  it("keeps the frame on an unrecognised 403 and shows the sentence as a hint above it", async () => {
+    const { api } = fakeApi([{ status: 403, body: "<html>Signed out</html>" }]);
+    const { container } = await mountOn(5173, api);
+    expect(container.querySelector("iframe")?.getAttribute("src")).toBe(ROUTE);
+    expect(screen.getByRole("status").textContent).toContain(":5173 answered 403 through the preview route");
+    expect(screen.getByRole("status").textContent).toContain(HOST);
+  });
+
+  it("on a 401 asks for the route again and reloads the frame once on the fresh token, without a sentence", async () => {
+    const { api, probes, mints } = fakeApi([{ status: 401, body: "" }, { status: 200, body: "<!doctype html>" }]);
+    const { container } = await mountOn(5173, api);
+    expect(mints()).toBe(2);
+    expect(probes()).toBe(2);
+    expect(container.querySelector("iframe")?.getAttribute("src")).toBe(`https://${HOST}/?pt_token=t2`);
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("a second 401 on the fresh token shows the sentence above the frame and stops reloading", async () => {
+    const { api, probes, mints } = fakeApi([{ status: 401, body: "" }]);
+    const { container } = await mountOn(5173, api);
+    expect(mints()).toBe(2);
+    expect(probes()).toBe(2);
+    expect(container.querySelector("iframe")?.getAttribute("src")).toBe(`https://${HOST}/?pt_token=t2`);
+    expect(screen.getByRole("status").textContent).toContain(":5173 answered 401 through the preview route");
   });
 
   it("keeps the frame when the probe itself fails: the frame is the truth then", async () => {

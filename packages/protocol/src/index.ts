@@ -761,8 +761,10 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     port: z.number().int().min(1).max(65535),
   }),
   /** Replies with { probe: PortProbeView }: one fetch of the port's minted route
-   * from the host, the body cut short. Refused when the route cannot be fetched
-   * at all; the frame is the only truth then. */
+   * from the host, redirects unfollowed, the body read up to a cap. A 401 remints
+   * the port's route before the reply, so the next portReach carries a fresh
+   * token. Refused when the route cannot be fetched at all; the frame is the
+   * only truth then. */
   z.object({
     id: reqId,
     op: z.literal("workspaces.portProbe"),

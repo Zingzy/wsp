@@ -251,7 +251,7 @@ export interface Api {
   /** The public route to one guest port, for an iframe; the runtime remints near the hourly expiry, so ask again before expiresAt. */
   portReach(id: string, port: number): Promise<PortReachView>;
   /** What the host saw fetching that route once; the pane explains a refusal from it, since the frame cannot read its own
-   * status. Optional so fixtures that never frame a port need not fake it; without it the frame is the only truth. */
+   * status. Without it the frame is the only truth. */
   portProbe?(id: string, port: number): Promise<PortProbeView>;
   /** One turn on the workspace; events arrive on the subscription, this resolves with the row. */
   startSession(opts: StartSessionOptions): Promise<SessionView>;

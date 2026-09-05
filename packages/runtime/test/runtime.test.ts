@@ -669,7 +669,12 @@ async function guestPort(statusCode: number, body: string): Promise<{ server: Se
 describe("runtime port probe", () => {
   const closing: Server[] = [];
   afterEach(async () => {
-    await Promise.all(closing.map(s => new Promise<void>(r => s.close(() => r()))));
+    await Promise.all(
+      closing.map(s => {
+        s.closeAllConnections();
+        return new Promise<void>(r => s.close(() => r()));
+      }),
+    );
     closing.length = 0;
   });
 
@@ -702,6 +707,76 @@ describe("runtime port probe", () => {
     const probe = await rt.workspaces.portProbe(ws.id, 3000);
     expect(probe.status).toBe(200);
     expect(probe.body).toHaveLength(PORT_PROBE_BODY_CAP);
+  });
+
+  it("never follows a redirect: a 302 on the route is the frame's business, not a refetch without the token", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const seen: string[] = [];
+    const server = createServer((req, res) => {
+      seen.push(req.url ?? "");
+      if (req.url?.startsWith("/app")) res.writeHead(401).end("edge: no token");
+      else res.writeHead(302, { location: "/app" }).end();
+    });
+    await new Promise<void>(r => server.listen(0, "127.0.0.1", r));
+    closing.push(server);
+    const addr = server.address();
+    const guestPort = typeof addr === "object" && addr !== null ? addr.port : 0;
+    backend.machines[0]!.previewUrl = async () => ({ url: `http://127.0.0.1:${guestPort}/?pt_token=edge`, token: "edge", expiresAt: Date.now() + 3_600_000 });
+
+    expect((await rt.workspaces.portProbe(ws.id, 3000)).status).toBe(302);
+    expect(seen).toEqual(["/?pt_token=edge"]);
+  });
+
+  it("reads the body only up to the cap: a response that never ends still answers with its first bytes", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "text/html" });
+      res.write("<html>".padEnd(PORT_PROBE_BODY_CAP + 500, "x"));
+    });
+    await new Promise<void>(r => server.listen(0, "127.0.0.1", r));
+    closing.push(server);
+    const addr = server.address();
+    const guestPort = typeof addr === "object" && addr !== null ? addr.port : 0;
+    backend.machines[0]!.previewUrl = async () => ({ url: `http://127.0.0.1:${guestPort}/?pt_token=edge`, token: "edge", expiresAt: Date.now() + 3_600_000 });
+
+    const probe = await rt.workspaces.portProbe(ws.id, 3000);
+    expect(probe.status).toBe(200);
+    expect(probe.body).toHaveLength(PORT_PROBE_BODY_CAP);
+    expect(probe.body.startsWith("<html>")).toBe(true);
+  });
+
+  it("a 401 drops the port's cached route and mints a fresh one, so the next portReach carries the new token", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const server = createServer((req, res) => {
+      if (req.url?.endsWith("pt_token=t1")) res.writeHead(401).end("token expired");
+      else res.writeHead(200).end("<!doctype html>");
+    });
+    await new Promise<void>(r => server.listen(0, "127.0.0.1", r));
+    closing.push(server);
+    const addr = server.address();
+    const guestPort = typeof addr === "object" && addr !== null ? addr.port : 0;
+    let mints = 0;
+    backend.machines[0]!.previewUrl = async () => {
+      mints++;
+      return { url: `http://127.0.0.1:${guestPort}/?pt_token=t${mints}`, token: `t${mints}`, expiresAt: Date.now() + 3_600_000 };
+    };
+
+    expect((await rt.workspaces.portReach(ws.id, 3000)).url).toContain("pt_token=t1");
+    expect((await rt.workspaces.portProbe(ws.id, 3000)).status).toBe(401);
+    expect(mints).toBe(2);
+    expect((await rt.workspaces.portReach(ws.id, 3000)).url).toContain("pt_token=t2");
+    expect(mints).toBe(2);
+    expect((await rt.workspaces.portProbe(ws.id, 3000)).status).toBe(200);
+    expect(mints).toBe(2);
   });
 
   it("rejects when the route cannot be fetched at all, and rejects an unknown workspace", async () => {

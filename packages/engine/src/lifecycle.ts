@@ -102,6 +102,13 @@ export class Workspace {
     return reach;
   }
 
+  /** Drops one port's cached route and mints it again, for a token the edge
+   * refused before its hour was up; the other ports keep theirs. */
+  async remintPortReach(port: number): Promise<PreviewReach> {
+    if (this.preview.machineId === this.machine.id) this.preview.byPort.delete(port);
+    return this.portReach(port);
+  }
+
   async nap(): Promise<void> {
     if (this.phase === "napping") return;
     await this.hooks.stashVault?.(this.machine);
