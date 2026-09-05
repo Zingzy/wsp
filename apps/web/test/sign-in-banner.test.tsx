@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// One bar per workspace with a sign-in page waiting: the store takes only
-// http(s) URLs, the bar names the workspace, Open goes through window.open
-// (the desktop shell turns that into the default browser), Dismiss drops it.
+// One bar per sign-in: the store takes only http(s) URLs, keys a page to the
+// callback port the daemon named, and drops it when that port stops
+// listening, when the host closes its forward, or on Dismiss. The bar names
+// the workspace and Open goes through window.open (the desktop shell turns
+// that into the default browser).
 import { execFile } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { startDaemon, type DaemonHandle } from "@wsp/daemon";
+import { startDaemon, type DaemonHandle, type ListeningPort } from "@wsp/daemon";
 import type { WorkspaceView } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Api } from "../src/protocol/client.js";
@@ -20,12 +22,16 @@ import { wireTerminals } from "../src/terminal/wiring.js";
 const execFileAsync = promisify(execFile);
 const TOKEN = "banner-token";
 const URL_A = "https://dash.example.com/oauth2/auth?redirect_uri=http%3A%2F%2Flocalhost%3A8976%2Fcb&state=S";
+const URL_B = "https://mcp-server.zomato.com/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A15384%2Fcallback&state=T";
+const DEVICE = "https://github.com/login/device";
 
 const view = (id: string, name: string): WorkspaceView => ({ id, name, machineId: `m_${id}`, phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" });
 
+const pages = () => useSignInStore.getState().pages;
+
 beforeEach(() => {
-  useSignInStore.setState({ byWorkspaceId: {} });
-  useStore.setState({ workspaces: [view("ws1", "task-1"), view("ws2", "task-2")] });
+  useSignInStore.setState({ pages: {} });
+  useStore.setState({ workspaces: [view("ws1", "task-1"), view("ws2", "task-2")], forwards: [] });
 });
 
 afterEach(() => {
@@ -34,22 +40,66 @@ afterEach(() => {
 });
 
 describe("sign-in store", () => {
-  it("keeps one page per workspace, http(s) only", () => {
+  it("keeps http(s) pages only, one per callback port and one portless per workspace", () => {
     const { announce } = useSignInStore.getState();
-    announce("ws1", URL_A);
-    announce("ws1", "https://github.com/login/device");
-    for (const url of ["file:///etc/passwd", "javascript:alert(1)", "smb://host/share", "\\\\host\\share"]) announce("ws2", url);
-    expect(useSignInStore.getState().byWorkspaceId).toEqual({ ws1: { url: "https://github.com/login/device" } });
-    announce("ws2", "HTTPS://EXAMPLE.COM/A");
-    expect(useSignInStore.getState().byWorkspaceId["ws2"]).toEqual({ url: "HTTPS://EXAMPLE.COM/A" });
-    for (const url of ["https://%", "https://[::1", "https://exa%mple.com/x"]) announce("ws1", url);
-    expect(useSignInStore.getState().byWorkspaceId["ws1"]).toEqual({ url: "https://github.com/login/device" });
+    announce("ws1", URL_A, 8976);
+    announce("ws1", URL_B, 15384);
+    announce("ws1", DEVICE);
+    for (const url of ["file:///etc/passwd", "javascript:alert(1)", "smb://host/share", "\\\\host\\share"]) announce("ws2", url, 9000);
+    expect(pages()).toEqual({
+      "ws1:8976": { workspaceId: "ws1", url: URL_A, port: 8976 },
+      "ws1:15384": { workspaceId: "ws1", url: URL_B, port: 15384 },
+      ws1: { workspaceId: "ws1", url: DEVICE },
+    });
+    // A retried flow on the same port replaces its page instead of stacking a second bar.
+    announce("ws1", "HTTPS://EXAMPLE.COM/A", 8976);
+    expect(pages()["ws1:8976"]).toEqual({ workspaceId: "ws1", url: "HTTPS://EXAMPLE.COM/A", port: 8976 });
+    for (const url of ["https://%", "https://[::1", "https://exa%mple.com/x"]) announce("ws1", url, 8976);
+    expect(pages()["ws1:8976"]!.url).toBe("HTTPS://EXAMPLE.COM/A");
+  });
+
+  it("a page leaves when its own port stops listening and stays when another port does", () => {
+    const { announce, portClosed } = useSignInStore.getState();
+    announce("ws1", URL_A, 8976);
+    announce("ws1", DEVICE);
+    portClosed("ws1", 3000);
+    portClosed("ws2", 8976);
+    expect(Object.keys(pages())).toEqual(["ws1:8976", "ws1"]);
+    portClosed("ws1", 8976);
+    expect(Object.keys(pages())).toEqual(["ws1"]);
+  });
+
+  it("two sign-ins at once on one workspace clear independently", () => {
+    const { announce, portClosed, dismiss } = useSignInStore.getState();
+    announce("ws1", URL_A, 8976);
+    announce("ws1", URL_B, 15384);
+    portClosed("ws1", 15384);
+    expect(Object.keys(pages())).toEqual(["ws1:8976"]);
+    announce("ws1", URL_B, 15384);
+    dismiss("ws1:8976");
+    expect(Object.keys(pages())).toEqual(["ws1:15384"]);
+  });
+
+  it("the host closing the forward for that port clears the page too", () => {
+    useSignInStore.getState().announce("ws1", URL_A, 8976);
+    useSignInStore.getState().announce("ws2", URL_A, 8976);
+    useStore.getState().applyEvent({ type: "forward.close", workspaceId: "ws1", port: 8976 });
+    expect(Object.keys(pages())).toEqual(["ws2:8976"]);
+  });
+
+  it("forgetting a workspace drops every page it had", () => {
+    const { announce, forget } = useSignInStore.getState();
+    announce("ws1", URL_A, 8976);
+    announce("ws1", DEVICE);
+    announce("ws2", URL_B, 15384);
+    forget("ws1");
+    expect(Object.keys(pages())).toEqual(["ws2:15384"]);
   });
 });
 
 describe("SignInBanner", () => {
   it("a bar for a URL that does not parse renders without throwing and names no host", () => {
-    useSignInStore.setState({ byWorkspaceId: { ws1: { url: "https://%" } } });
+    useSignInStore.setState({ pages: { ws1: { workspaceId: "ws1", url: "https://%" } } });
     render(<SignInBanner />);
     expect(screen.getByRole("alert").textContent).toContain("A sign-in page is ready on task-1");
   });
@@ -62,8 +112,8 @@ describe("SignInBanner", () => {
   it("names the workspace, opens the page on click through window.open, and dismisses", () => {
     const open = vi.fn(() => null);
     vi.stubGlobal("open", open);
-    useSignInStore.getState().announce("ws1", URL_A);
-    useSignInStore.getState().announce("ws2", "https://github.com/login/device");
+    useSignInStore.getState().announce("ws1", URL_A, 8976);
+    useSignInStore.getState().announce("ws2", DEVICE);
     render(<SignInBanner />);
     const bars = screen.getAllByRole("alert");
     expect(bars).toHaveLength(2);
@@ -81,11 +131,25 @@ describe("SignInBanner", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Dismiss" })[0]!);
     expect(screen.getAllByRole("alert")).toHaveLength(1);
     expect(screen.getByRole("alert").textContent).toContain("task-2");
-    expect(useSignInStore.getState().byWorkspaceId).toEqual({ ws2: { url: "https://github.com/login/device" } });
+    expect(pages()).toEqual({ ws2: { workspaceId: "ws2", url: DEVICE } });
+  });
+
+  it("two sign-ins on one workspace are two bars, and Dismiss takes only its own", () => {
+    useSignInStore.getState().announce("ws1", URL_A, 8976);
+    useSignInStore.getState().announce("ws1", URL_B, 15384);
+    render(<SignInBanner />);
+    const bars = screen.getAllByRole("alert");
+    expect(bars).toHaveLength(2);
+    expect(bars[0]!.textContent).toContain("dash.example.com");
+    expect(bars[1]!.textContent).toContain("mcp-server.zomato.com");
+    fireEvent.click(screen.getAllByRole("button", { name: "Dismiss" })[1]!);
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(screen.getByRole("alert").textContent).toContain("dash.example.com");
+    expect(Object.keys(pages())).toEqual(["ws1:8976"]);
   });
 });
 
-describe("wiring feeds browser.open from the daemon link into the store", () => {
+describe("wiring ties a bar to the daemon link that announced it", () => {
   let daemon: DaemonHandle | undefined;
   let dir: string | undefined;
   let unwire: (() => void) | undefined;
@@ -96,10 +160,13 @@ describe("wiring feeds browser.open from the daemon link into the store", () => 
     unwire = daemon = dir = undefined;
   });
 
-  it("a shim post on the guest becomes a bar for that workspace", async () => {
+  const listening = (port: number): ListeningPort => ({ port, pid: null, inode: port, uid: 0, loopback: true });
+
+  it("a shim post becomes a bar keyed to its callback port, gone when that port stops listening", async () => {
     dir = mkdtempSync(join(tmpdir(), "wsp-banner-"));
     const sockPath = join(dir, "open.sock");
-    daemon = await startDaemon({ port: 0, token: TOKEN, openSocketPath: sockPath, portsSource: async () => [] });
+    let ports: ListeningPort[] = [listening(8976), listening(3000)];
+    daemon = await startDaemon({ port: 0, token: TOKEN, openSocketPath: sockPath, portsSource: async () => ports, portsIntervalMs: 50 });
     const workspaces = [view("ws1", "task-1")];
     const api = {
       listWorkspaces: async () => workspaces,
@@ -109,15 +176,30 @@ describe("wiring feeds browser.open from the daemon link into the store", () => 
     useStore.setState({ api, workspaces });
     unwire = wireTerminals(useStore, { heartbeatMs: 60_000 });
     const deadline = Date.now() + 5000;
-    while (useSignInStore.getState().byWorkspaceId["ws1"] === undefined) {
+    while (pages()["ws1:8976"] === undefined) {
       if (Date.now() > deadline) throw new Error("no bar within 5 s");
       await execFileAsync("curl", ["-s", "-o", "/dev/null", "--unix-socket", sockPath, "-X", "POST", "--data-binary", URL_A, "http://wsp/open"]);
       await new Promise(r => setTimeout(r, 100));
     }
-    expect(useSignInStore.getState().byWorkspaceId).toEqual({ ws1: { url: URL_A } });
+    expect(pages()).toEqual({ "ws1:8976": { workspaceId: "ws1", url: URL_A, port: 8976 } });
 
-    // The workspace is deleted: its bar goes with it instead of outliving it under an id.
+    // Another listener going away is not this sign-in ending.
+    ports = [listening(8976)];
+    await new Promise(r => setTimeout(r, 250));
+    expect(Object.keys(pages())).toEqual(["ws1:8976"]);
+
+    // The callback fired and its listener closed: the daemon's port.close ends the bar with it.
+    ports = [];
+    const gone = Date.now() + 5000;
+    while (pages()["ws1:8976"] !== undefined) {
+      if (Date.now() > gone) throw new Error("bar outlived its port");
+      await new Promise(r => setTimeout(r, 25));
+    }
+    expect(pages()).toEqual({});
+
+    // A workspace that is gone takes its bars with it instead of leaving one under an id.
+    useSignInStore.getState().announce("ws1", DEVICE);
     useStore.setState({ workspaces: [] });
-    expect(useSignInStore.getState().byWorkspaceId).toEqual({});
-  });
+    expect(pages()).toEqual({});
+  }, 15_000);
 });

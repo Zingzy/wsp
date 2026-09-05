@@ -5,6 +5,7 @@ import { useEffect } from "react";
 import { create } from "zustand";
 import type { Capabilities, HarnessCatalog, PortForward, SessionView, WorkspaceCreateStage, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
+import { useSignInStore } from "../shell/signInStore.js";
 
 export interface CostTick {
   rateUsdPerHour: number;
@@ -290,6 +291,7 @@ export const useStore = create<State>((set, get) => {
           return;
         case "forward.close":
           set(s => ({ forwards: s.forwards.filter(f => !(f.workspaceId === e.workspaceId && f.port === e.port)) }));
+          useSignInStore.getState().portClosed(e.workspaceId, e.port);
           return;
         case "workspace.creating": {
           const line: CreationLine = { stage: e.stage, message: e.message, at: new Date().toISOString(), elapsedMs: e.elapsedMs, ...(e.notice !== undefined ? { notice: e.notice } : {}) };

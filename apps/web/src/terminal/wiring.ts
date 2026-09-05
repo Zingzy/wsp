@@ -66,8 +66,10 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
           ...linkOpts,
           reach: () => api.daemonReach(w.id),
           onEvent: e => {
-            if (e.type === "port.open" || e.type === "port.close") browser.feedEvent({ ...e, workspaceId: w.id });
-            else if (e.type === "browser.open") useSignInStore.getState().announce(w.id, e.url);
+            if (e.type === "port.open" || e.type === "port.close") {
+              browser.feedEvent({ ...e, workspaceId: w.id });
+              if (e.type === "port.close") useSignInStore.getState().portClosed(w.id, e.port);
+            } else if (e.type === "browser.open") useSignInStore.getState().announce(w.id, e.url, e.port);
             else if (e.type === "daemon.hello") provideDaemonRoot(w.id, e.root);
             else if (e.type === "sys.sample") getLive(w.id).feedSample(e);
             else wt.feedEvent(e);
@@ -98,8 +100,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
       provideTerminals(id, null);
       provideDaemonWire(id, null);
       provideDaemonRoot(id, null);
-      // A bar for a workspace that is gone would name it by id.
-      useSignInStore.getState().dismiss(id);
+      useSignInStore.getState().forget(id);
     }
   };
 
