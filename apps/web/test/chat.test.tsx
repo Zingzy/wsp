@@ -17,7 +17,7 @@ import { CHAT_STREAM, CHAT_T0, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream
 let restoreLayout: () => void = () => {};
 beforeAll(() => { restoreLayout = installFakeLayout(); });
 afterAll(() => restoreLayout());
-beforeEach(() => useComposerDraftStore.setState({ drafts: {} }));
+beforeEach(() => useComposerDraftStore.setState({ drafts: {}, queues: {} }));
 
 const WS = CHAT_WS;
 const CLAUDE_SID = "e16ed170-8257-4668-879e-fe836341633c";
@@ -222,12 +222,12 @@ describe("chat tab hydration", () => {
     // The editor stays open for the next prompt; only sending waits for the turn.
     expect(isEditable(composerEditor())).toBe(true);
     expect(stopButton()).toBeDefined();
-    expect(screen.getByRole("status").textContent).toContain("Turn in flight");
+    expect(screen.queryByRole("status")).toBeNull();
   });
 });
 
 describe("chat tab composer", () => {
-  it("enter sends exactly one turn with resume, blocks sending while in flight, re-enables on done", async () => {
+  it("enter sends exactly one turn with resume, queues the next while in flight, and sends it on done", async () => {
     const { api, started, emit } = fixtureApi([workspace]);
     await setup(api);
     const editor = composerEditor();
@@ -245,15 +245,17 @@ describe("chat tab composer", () => {
     await typeInto(editor, "again");
     await press(editor, "Enter");
     expect(started.length).toBe(1);
-    expect(editor.textContent).toBe("again");
+    expect(editor.textContent).toBe("");
+    expect((screen.getByRole("textbox", { name: "Queued message" }) as HTMLTextAreaElement).value).toBe("again");
 
     emit({ type: "session.start", ...scope });
     expect(stopButton()).toBeDefined();
     emit({ type: "session.done", ...scope, result: { status: "completed", durationMs: 900, costUsd: 0.001 } });
     emit({ type: "session.end", ...scope, exitCode: 0, sawResult: true });
-    expect(sendButton().getAttribute("aria-label")).toBe("Send message");
-    expect(sendButton().disabled).toBe(false);
-    expect(started.length).toBe(1);
+    await waitFor(() => expect(started.length).toBe(2));
+    expect(started[1]).toEqual({ workspaceId: WS, prompt: "again", resume: "sess_0001", cwd: "/root" });
+    expect(screen.queryByRole("textbox", { name: "Queued message" })).toBeNull();
+    expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
   });
 
   it("restores the draft and re-enables when startSession rejects", async () => {
@@ -469,6 +471,44 @@ describe("chat tab threads", () => {
     expect(sendButton().getAttribute("aria-label")).toBe("Send message");
   });
 
+  it("a send whose start never lands frees the new thread waiting on it when its harness dies, and nothing of it lands there", async () => {
+    const { api, started, emit } = fixtureApi([workspace]);
+    await setup(api);
+    const editor = composerEditor();
+    await typeInto(editor, "hello");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started.length).toBe(1));
+    act(() => requestNewThread({ workspaceId: WS }));
+    expect(status()).toBe("Finishing the previous turn");
+    const X = { workspaceId: WS, sessionId: "sess_x", turnId: "turn_x1", threadId: "thr_x" };
+    emit({ type: "session.done", ...X, at: T0 + 900, result: { status: "failed", error: "claude: command not found" } });
+    expect(isEditable(editor)).toBe(false);
+    emit({ type: "session.end", ...X, at: T0 + 950, exitCode: 127, sawResult: true });
+    expect(isEditable(editor)).toBe(true);
+    expect(status()).toBeNull();
+    expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
+    expect(screen.queryByText(/claude: command not found/)).toBeNull();
+    expect(screen.queryByTestId("settled-footer")).toBeNull();
+  });
+
+  it("a new thread asked for after a send died before its start waits on nothing", async () => {
+    const { api, started, emit } = fixtureApi([workspace]);
+    await setup(api);
+    const editor = composerEditor();
+    await typeInto(editor, "hello");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started.length).toBe(1));
+    const X = { workspaceId: WS, sessionId: "sess_x", turnId: "turn_x1", threadId: "thr_x" };
+    emit({ type: "session.done", ...X, at: T0 + 900, result: { status: "failed", error: "claude: command not found" } });
+    emit({ type: "session.end", ...X, at: T0 + 950, exitCode: 127, sawResult: true });
+    await waitFor(() => expect(sendButton().getAttribute("aria-label")).toBe("Send message"));
+    expect(screen.getByText("hello")).toBeDefined();
+    act(() => requestNewThread({ workspaceId: WS }));
+    expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
+    expect(isEditable(editor)).toBe(true);
+    expect(status()).toBeNull();
+  });
+
   it("a replay gap while a new thread waits over a stamped history keeps the left thread out, its running turn included", async () => {
     const history: Record<string, SessionEvent[]> = { [WS]: [...FIRST] };
     const { api, started, emit } = fixtureApi([workspace], history);
@@ -509,7 +549,7 @@ describe("chat tab threads", () => {
     await waitFor(() => expect(started.length).toBe(1));
     expect(started[0]).toEqual({ workspaceId: WS, prompt: "start over", cwd: "/root" });
     expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
-    expect(status()).toContain("Turn in flight");
+    expect(status()).toBeNull();
 
     // The socket dropped before the fresh session.start reached the tab; the runtime ran the turn to its end.
     history[WS] = [...FIRST, ...turn({ sessionId: "sess_0002", turnId: "turn_0002", threadId: "thr_b" }, "start over", "Fresh start.")];
@@ -537,7 +577,7 @@ describe("chat tab threads", () => {
     act(() => useStore.getState().noteGap());
     await screen.findByText("Fresh start.");
     expect(screen.getByText("start over")).toBeDefined();
-    expect(status()).toBe("Turn in flight");
+    expect(status()).toBeNull();
     expect(stopButton()).toBeDefined();
     expect(isEditable(composerEditor())).toBe(true);
     // The rest of the turn lands live and opens the composer.
