@@ -32,15 +32,12 @@ function fakeApi(workspaces: WorkspaceView[], forwards: PortForward[], opts: { l
     startSession: async o => ({ id: "s_new", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
     daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
-    builderReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
     sessionHistory: async () => [],
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     snapshotStorage: async () => null,
     rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
     listSessions: async () => [],
     getGolden: async () => undefined,
-    prepareGolden: async () => { throw new Error("no wizard in this fixture"); },
-    sealGolden: async () => { throw new Error("no wizard in this fixture"); },
     listForwards: async () => {
       if (opts.listFails !== undefined) throw new RequestError(opts.listFails);
       return forwards;

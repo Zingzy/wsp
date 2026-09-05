@@ -122,31 +122,6 @@ describe("makeApi golden wrappers", () => {
     expect(await api.getGolden()).toEqual(manifest);
   });
 
-  it("prepareGolden sends golden.prepare and unwraps the builder view", async () => {
-    const { api, lastSent } = await connect();
-    const builder = { id: "m1", name: "default", kind: "desktop", createdAt: "t", screen: { streamUrl: "wss://s/m1" } };
-    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, builder });
-    expect(await api.prepareGolden()).toEqual(builder);
-    expect(lastSent()).toMatchObject({ op: "golden.prepare", name: "default" });
-  });
-
-  it("builderReach sends golden.builderReach and unwraps the reach view", async () => {
-    const { api, lastSent } = await connect();
-    const reach = { url: "https://m1-7070.preview.example/?pt_token=e", expiresAt: 1, daemonToken: "d" };
-    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, reach });
-    expect(await api.builderReach("m1")).toEqual(reach);
-    expect(lastSent()).toMatchObject({ op: "golden.builderReach", builderId: "m1" });
-  });
-
-  it("sealGolden sends golden.seal with the builder id and returns manifest plus version", async () => {
-    const { api, lastSent } = await connect();
-    const version = { version: 1, snapshotId: "snap_1", baseTemplate: "default", kind: "desktop", setupSha: "x", createdAt: "t", smoke: { cmd: "true", exitCode: 0 } };
-    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, manifest: { head: 1, versions: [version] }, version });
-    const got = await api.sealGolden("m1");
-    expect(lastSent()).toMatchObject({ op: "golden.seal", builderId: "m1" });
-    expect(got.version).toEqual(version);
-    expect(got.manifest.head).toBe(1);
-  });
 });
 
 describe("ProtocolClient reconnect", () => {

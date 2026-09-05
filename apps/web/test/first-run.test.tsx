@@ -30,7 +30,6 @@ function fakeApi(opts: { golden?: GoldenManifest; workspaces?: WorkspaceView[] }
     capabilities: vi.fn(async () => CAPS),
     portReach: vi.fn(async (_id: string, port: number) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 })),
     daemonReach: vi.fn(async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 })),
-    builderReach: vi.fn(async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 })),
     startSession: vi.fn(async () => ({ id: "s1", workspaceId: "ws_first", harness: "claude", status: "running" as const })),
     listSessions: vi.fn(async () => []),
     sessionHistory: vi.fn(async () => []),
@@ -40,8 +39,6 @@ function fakeApi(opts: { golden?: GoldenManifest; workspaces?: WorkspaceView[] }
     touch: vi.fn(async () => {}),
     subscribe: vi.fn(() => () => {}),
     getGolden: vi.fn(async () => opts.golden),
-    prepareGolden: vi.fn(async () => { throw new Error("no builder in this fixture"); }),
-    sealGolden: vi.fn(async () => { throw new Error("no seal in this fixture"); }),
     listSnapshots: vi.fn(async () => ({ name: "default", head: null, versions: [] })),
     snapshotStorage: vi.fn(async () => null),
     rollbackSnapshot: vi.fn(async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" as const })),
@@ -63,7 +60,7 @@ async function mount(opts: Parameters<typeof fakeApi>[0]) {
 
 describe("the window before a golden exists", () => {
   it("shows one line pointing at wsp init: no sidebar, no button, no builder, nothing to seal", async () => {
-    const api = await mount({});
+    await mount({});
     const line = await screen.findByText("No golden image yet. Run wsp init in a terminal; it opens this app when the machine is ready.");
     expect(line.tagName).toBe("P");
     expect(document.body.textContent).toBe(line.textContent);
@@ -71,9 +68,6 @@ describe("the window before a golden exists", () => {
     expect(screen.queryByRole("button")).toBeNull();
     expect(screen.queryByRole("checkbox")).toBeNull();
     expect(document.body.textContent).not.toMatch(/Save|seal|sign in|checklist|sk-ant|slr_live/i);
-    expect(api.prepareGolden).not.toHaveBeenCalled();
-    expect(api.sealGolden).not.toHaveBeenCalled();
-    expect(api.builderReach).not.toHaveBeenCalled();
   });
 
   it("renders the shell with its sidebar the moment a golden exists, and the first workspace is selected", async () => {

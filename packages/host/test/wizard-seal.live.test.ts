@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The wizard's seal exactly as the browser drives it: a daemon link with a pty
-// attached stays open on the builder while golden.seal runs. The builder must
+// The seal as wsp init runs it: a daemon link with a pty attached stays open
+// on the builder while golden.seal runs. The builder must
 // read gone from the provider once seal returns; a builder that outlives its
 // seal bills and eats the second Starter slot. Nothing but poc-labelled
 // machines may be left on the account afterwards.

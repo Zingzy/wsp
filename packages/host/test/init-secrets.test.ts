@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The secrets step over a fake terminal and a scripted daemon link: a pasted
-// value reaches the builder in the pty's environment and lands as one line at
-// the end of the file it was cut from; an empty answer or an escape skips the
-// name; off a terminal every name is skipped with the reason.
+// The secrets step over a fake terminal and a scripted daemon link: the
+// machine's secrets file is read first so a name already there is not asked
+// again; a pasted value reaches the builder in the pty's environment and lands
+// in the profile.d file, and in fish's conf.d too when fish is installed; an
+// empty answer or an escape skips the name; off a terminal every name is
+// skipped with the reason.
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it } from "vitest";
-import { appendCommand, exportLine, secretsStage, type SecretOutcome } from "../src/init-secrets.js";
-import { fakePtyLink, type FakePtyLink } from "./fake-pty-link.js";
+import { FISH_FILE, SH_FILE, appendCommand, exportLine, fishLine, readCommand, secretsStage, type SecretOutcome } from "../src/init-secrets.js";
+import { fakePtyLink, type FakePtyLink, type FakePty } from "./fake-pty-link.js";
 
 const KEY = { enter: "\r", esc: "\x1b" };
 const SECRET = "pa'ss word";
@@ -36,17 +38,28 @@ function terminal() {
   return { input, output, raw, text, press, until };
 }
 
-/** Every appended line answers as the shell would: the status marker with the exit the test picked. */
-function scripted(exit = 0): FakePtyLink {
+/** The machine as the step reads it: the secrets file's lines and whether fish is installed; every append answers with the exit picked. */
+function scripted(machine: { present?: string[]; fish?: boolean; exit?: number; unreadable?: boolean } = {}): FakePtyLink {
   const link = fakePtyLink();
   link.script = (pty, line) => {
-    if (line.includes("WSP_STATUS")) {
-      link.data(pty, `WSP_STATUS ${exit}\r\n`);
-      link.exit(pty, exit);
+    if (!line.includes("WSP_STATUS")) return;
+    if (line.startsWith(readCommand())) {
+      if (machine.unreadable) {
+        link.data(pty, "WSP_STATUS 1\r\n");
+        link.exit(pty, 1);
+        return;
+      }
+      link.data(pty, `${(machine.present ?? []).map(n => `export ${n}='x'\r\n`).join("")}${machine.fish ? "WSP_FISH\r\n" : ""}WSP_STATUS 0\r\n`);
+      link.exit(pty, 0);
+      return;
     }
+    link.data(pty, `WSP_STATUS ${machine.exit ?? 0}\r\n`);
+    link.exit(pty, machine.exit ?? 0);
   };
   return link;
 }
+
+const writes = (link: FakePtyLink): FakePty[] => link.ptys.filter(p => !p.writes[0]!.startsWith(readCommand()));
 
 function stage(link: FakePtyLink, t: ReturnType<typeof terminal>, over: { cut?: { path: string; names: string[] }[]; skipWhy?: string } = {}) {
   const hidden: string[] = [];
@@ -61,27 +74,28 @@ function stage(link: FakePtyLink, t: ReturnType<typeof terminal>, over: { cut?: 
   return { run, hidden };
 }
 
-describe("the export line and the append command", () => {
-  it("quotes the value for sh so it lands byte for byte, and writes fish's set for a fish file", () => {
-    expect(exportLine("~/.zshrc", "A_KEY", SECRET)).toBe(`export A_KEY='pa'\\''ss word'`);
-    expect(exportLine("~/.config/fish/conf.d/keys.fish", "A_KEY", `it's \\ here`)).toBe(`set -gx A_KEY 'it\\'s \\\\ here'`);
+describe("the lines and the commands", () => {
+  it("quotes the value for sh and for fish so it lands byte for byte", () => {
+    expect(exportLine("A_KEY", SECRET)).toBe(`export A_KEY='pa'\\''ss word'`);
+    expect(fishLine("A_KEY", `it's \\ here`)).toBe(`set -gx A_KEY 'it\\'s \\\\ here'`);
   });
 
-  it("appends the line the pty's environment holds to the file under the machine's home, the path quoted", () => {
-    expect(appendCommand("~/.zshrc")).toBe(`printf '%s\\n' "$WSP_SECRET_LINE" >> "$HOME"/'.zshrc'`);
-    expect(appendCommand("~/.config/fish/conf.d/it's.fish")).toBe(`printf '%s\\n' "$WSP_SECRET_LINE" >> "$HOME"/'.config/fish/conf.d/it'\\''s.fish'`);
+  it("reads the secrets file and whether fish is there in one command; the append names the environment, never a value, and writes both files only with fish", () => {
+    expect(readCommand()).toBe(`cat ${SH_FILE} 2>/dev/null; command -v fish >/dev/null 2>&1 && echo WSP_FISH`);
+    expect(appendCommand(false)).toBe(`umask 077; printf '%s\\n' "$WSP_SECRET_LINE" >> ${SH_FILE} && chmod 600 ${SH_FILE}`);
+    expect(appendCommand(true)).toBe(`umask 077; printf '%s\\n' "$WSP_SECRET_LINE" >> ${SH_FILE} && chmod 600 ${SH_FILE} && mkdir -p /etc/fish/conf.d && printf '%s\\n' "$WSP_FISH_LINE" >> ${FISH_FILE} && chmod 600 ${FISH_FILE}`);
   });
 });
 
 describe("the secrets step", () => {
-  it("a pasted value travels in the pty's environment, never on the command line or the screen, and is set; an empty answer skips", async () => {
+  it("a pasted value travels in the pty's environment, never on the command line or the screen, and lands in profile.d; an empty answer skips", async () => {
     const link = scripted();
     const t = terminal();
     const { run, hidden } = stage(link, t);
     await t.until("A_KEY");
     expect(t.text()).toContain("cut from ~/.zshrc");
     await t.press(...SECRET.split(""), KEY.enter);
-    await t.until("A_KEY: set in ~/.zshrc on the machine");
+    await t.until(`A_KEY: set in ${SH_FILE} on the machine`);
     await t.until("B_TOKEN");
     await t.press(KEY.enter);
     const outcomes = await run;
@@ -89,12 +103,15 @@ describe("the secrets step", () => {
       { name: "A_KEY", path: "~/.zshrc", state: "set" },
       { name: "B_TOKEN", path: "~/.zshrc", state: "skipped", note: "skipped by you" },
     ]);
-    expect(link.ptys).toHaveLength(1);
-    const pty = link.ptys[0]!;
+    // One read of the machine, then one write.
+    expect(link.ptys).toHaveLength(2);
+    expect(link.ptys[0]!.writes).toEqual([`${readCommand()}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`]);
+    expect(link.ptys[0]!.created["env"]).toEqual({ PS1: "" });
+    const pty = writes(link)[0]!;
     expect(pty.created["env"]).toEqual({ PS1: "", WSP_SECRET_LINE: `export A_KEY='pa'\\''ss word'` });
-    expect(pty.writes).toEqual([`printf '%s\\n' "$WSP_SECRET_LINE" >> "$HOME"/'.zshrc'; printf '\\nWSP_STATUS %s\\n' $?; exit\r`]);
-    expect(pty.killed).toBe(true);
-    expect(link.dials).toBe(1);
+    expect(pty.writes).toEqual([`${appendCommand(false)}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`]);
+    expect(link.ptys.every(p => p.killed)).toBe(true);
+    expect(link.dials).toBe(2);
     expect(t.raw()).not.toContain(SECRET);
     expect(t.raw()).not.toContain("ss word");
     expect(hidden).toEqual([SECRET]);
@@ -102,8 +119,50 @@ describe("the secrets step", () => {
     expect(t.text()).not.toMatch(/—/);
   });
 
+  it("with fish on the machine the value is written to profile.d and fish's conf.d, each in its own syntax", async () => {
+    const link = scripted({ fish: true });
+    const t = terminal();
+    const { run } = stage(link, t, { cut: [{ path: "~/.config/fish/config.fish", names: ["A_KEY"] }] });
+    await t.until("A_KEY");
+    await t.press(...SECRET.split(""), KEY.enter);
+    await t.until(`A_KEY: set in ${SH_FILE} and ${FISH_FILE} on the machine`);
+    expect(await run).toEqual<SecretOutcome[]>([{ name: "A_KEY", path: "~/.config/fish/config.fish", state: "set" }]);
+    const pty = writes(link)[0]!;
+    expect(pty.created["env"]).toEqual({ PS1: "", WSP_SECRET_LINE: `export A_KEY='pa'\\''ss word'`, WSP_FISH_LINE: `set -gx A_KEY 'pa\\'ss word'` });
+    expect(pty.writes).toEqual([`${appendCommand(true)}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`]);
+  });
+
+  it("a name already in the machine's secrets file is not asked again and reads as set from an earlier run", async () => {
+    const link = scripted({ present: ["A_KEY"] });
+    const t = terminal();
+    const { run, hidden } = stage(link, t);
+    await t.until("A_KEY: set on the machine from an earlier run");
+    await t.until("B_TOKEN");
+    await t.press("x", KEY.enter);
+    const outcomes = await run;
+    expect(outcomes).toEqual<SecretOutcome[]>([
+      { name: "A_KEY", path: "~/.zshrc", state: "set", note: "on the machine from an earlier run" },
+      { name: "B_TOKEN", path: "~/.zshrc", state: "set" },
+    ]);
+    expect(hidden).toEqual(["x"]);
+    expect(writes(link)).toHaveLength(1);
+    expect(writes(link)[0]!.created["env"]).toEqual({ PS1: "", WSP_SECRET_LINE: "export B_TOKEN='x'" });
+  });
+
+  it("a secrets file that cannot be read asks for every name and says so once", async () => {
+    const link = scripted({ unreadable: true });
+    const t = terminal();
+    const { run } = stage(link, t);
+    await t.until("The machine's secrets file was not read (the shell answered exit 1); every name is asked.");
+    await t.until("A_KEY");
+    await t.press("x", KEY.enter);
+    await t.until("B_TOKEN");
+    await t.press(KEY.enter);
+    expect((await run).map(o => o.state)).toEqual(["set", "skipped"]);
+  });
+
   it("an escape skips the name it was pressed on, and a shell that fails the append is not set with the exit", async () => {
-    const link = scripted(1);
+    const link = scripted({ exit: 1 });
     const t = terminal();
     const { run } = stage(link, t);
     await t.until("A_KEY");
@@ -117,13 +176,14 @@ describe("the secrets step", () => {
       { name: "A_KEY", path: "~/.zshrc", state: "skipped", note: "skipped by you" },
       { name: "B_TOKEN", path: "~/.zshrc", state: "failed", note: "the shell answered exit 1" },
     ]);
-    expect(link.ptys).toHaveLength(1);
+    expect(writes(link)).toHaveLength(1);
     expect(t.raw()).not.toContain("ab");
   });
 
   it("a link that drops under the append is not set with that reason, and the run goes on to the next name", async () => {
-    const link = fakePtyLink();
-    link.script = () => link.drop();
+    const link = scripted();
+    const read = link.script!;
+    link.script = (pty, line) => (line.startsWith(readCommand()) ? read(pty, line) : link.drop());
     const t = terminal();
     const { run } = stage(link, t);
     await t.until("A_KEY");

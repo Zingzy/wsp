@@ -1266,14 +1266,22 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     out,
   );
 
-  const forking = spin(io.output, `Forking your first workspace, ${FIRST_WORKSPACE}`, io.isTTY);
-  try {
-    const first = await handle.createWorkspace(FIRST_WORKSPACE);
-    forking.stop();
-    log.step(`Workspace ${first.name} (${first.id}) forked from golden v${version}.${first.notice !== undefined ? ` ${first.notice}` : ""}`, out);
-  } catch (e) {
-    forking.stop();
-    log.warn(`The first workspace could not be forked: ${e instanceof Error ? e.message : String(e)}. Create one from the app.`, out);
+  if (version > 1) await retentionOffer({ rt, interactive, yes: opts.yes, input: io.input, output: io.output });
+
+  // Only the first seal ever forks a workspace; a rebuild leaves the existing ones on the version they came from.
+  const existing = await rt.workspaces.list();
+  if (existing.length > 0) {
+    log.step(`Your ${existing.length} workspace${existing.length === 1 ? " stays" : "s stay"} on the golden version ${existing.length === 1 ? "it was" : "they were"} forked from; upgrade ${existing.length === 1 ? "it" : "them"} from the app. New workspaces fork v${version}.`, out);
+  } else {
+    const forking = spin(io.output, `Forking your first workspace, ${FIRST_WORKSPACE}`, io.isTTY);
+    try {
+      const first = await handle.createWorkspace(FIRST_WORKSPACE);
+      forking.stop();
+      log.step(`Workspace ${first.name} (${first.id}) forked from golden v${version}.${first.notice !== undefined ? ` ${first.notice}` : ""}`, out);
+    } catch (e) {
+      forking.stop();
+      log.warn(`The first workspace could not be forked: ${e instanceof Error ? e.message : String(e)}. Create one from the app.`, out);
+    }
   }
   const url = `http://127.0.0.1:${handle.port}/`;
   runLog.note(`app ${url}`);
@@ -1322,7 +1330,7 @@ function sealSummary(landed: ImportResult | undefined, logins: readonly LoginOut
   };
   const states = (rows: readonly string[][]): string[] => (rows.length === 0 ? ["none"] : table(rows));
   const loginRows = logins.map(r => [r.label, r.state.replace(/-/g, " ")]);
-  const secretRows = secrets.map(r => [r.name, r.state === "set" ? `set in ${r.path}` : r.state === "failed" ? `not set${r.note !== undefined ? ` (${r.note})` : ""}` : `skipped${r.note !== undefined ? ` (${r.note})` : ""}`]);
+  const secretRows = secrets.map(r => [r.name, r.state === "set" ? `set on the machine${r.note !== undefined ? ` (${r.note})` : ""}` : r.state === "failed" ? `not set${r.note !== undefined ? ` (${r.note})` : ""}` : `skipped${r.note !== undefined ? ` (${r.note})` : ""}`]);
   const section = (title: string, lines: readonly string[]): string[] => [title, ...lines.flatMap(l => wrap(`  ${l}`, inner, "    "))];
   const installed = agents.filter(a => a.outcome === "installed").map(a => a.name);
   return [

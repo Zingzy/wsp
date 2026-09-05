@@ -11,7 +11,6 @@ import {
   type Capabilities,
   type DaemonReachView,
   type EventUnion,
-  type GoldenBuilderView,
   type GoldenManifest,
   type GoldenVersion,
   type PortReachView,
@@ -263,12 +262,6 @@ export interface Api {
   subscribe(fn: (e: ProtocolEvent) => void): () => void;
   /** The named golden manifest, undefined on a fresh install: that absence is what points the page at wsp init. */
   getGolden(name?: string): Promise<GoldenManifest | undefined>;
-  /** Boots a golden builder; progress arrives as golden.stage events on the subscription. */
-  prepareGolden(name?: string): Promise<GoldenBuilderView>;
-  /** Snapshots the builder, smoke-tests a fork, seals a version. The builder is consumed on every outcome. */
-  sealGolden(builderId: string): Promise<{ manifest: GoldenManifest; version: GoldenVersion }>;
-  /** How to dial the builder's daemon right now; asked per dial like daemonReach. */
-  builderReach(builderId: string): Promise<DaemonReachView>;
   /** Every sealed version of a golden and the head new forks use. */
   listSnapshots(name?: string): Promise<SnapshotLineage>;
   /** Every snapshot on the account by count, size and monthly cost; null when the provider cannot list them. */
@@ -332,12 +325,6 @@ export function makeApi(c: ProtocolClient): Api {
       SessionInterruptOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.interrupt", { sessionId })).outcome),
     subscribe: fn => c.subscribe(fn),
     getGolden: async (name = "default") => (await c.request<{ manifest?: GoldenManifest }>("golden.get", { name })).manifest,
-    prepareGolden: async (name = "default") => (await c.request<{ builder: GoldenBuilderView }>("golden.prepare", { name })).builder,
-    sealGolden: async builderId => {
-      const { manifest, version } = await c.request<{ manifest: GoldenManifest; version: GoldenVersion }>("golden.seal", { builderId });
-      return { manifest, version };
-    },
-    builderReach: async builderId => (await c.request<{ reach: DaemonReachView }>("golden.builderReach", { builderId })).reach,
     listSnapshots: async name =>
       (await c.request<{ lineage: SnapshotLineage }>("snapshots.list", name !== undefined ? { name } : {})).lineage,
     snapshotStorage: async () => (await c.request<{ storage: SnapshotStorage | null }>("snapshots.storage")).storage,

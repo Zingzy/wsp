@@ -23,6 +23,7 @@ import { editorsIntro, everythingItems, fmtBytes, reduceStages, runInit, selectI
 import type { HostHandle } from "../src/server.js";
 import { startCallbackRelay } from "../src/relay.js";
 import type { ConnectOptions, DaemonSocket } from "../src/doctor.js";
+import { appendCommand, readCommand } from "../src/init-secrets.js";
 import { noteOutcomes } from "../src/init-signin.js";
 import { fakePtyLink, type FakePtyLink } from "./fake-pty-link.js";
 import { EVERYTHING, FIXTURE } from "./init-fixture.js";
@@ -835,7 +836,7 @@ describe("wsp init, everything else", () => {
     expect(f.link.ptys.filter(p => p.created["env"] !== undefined && "WSP_SECRET_LINE" in (p.created["env"] as object))).toEqual([]);
   });
 
-  it("on a terminal each cut secret is asked for hidden; the pasted value rides the pty's environment onto the file it was cut from, out of the screen and the run log", async () => {
+  it("on a terminal each cut secret is asked for hidden; the pasted value rides the pty's environment into the machine's secrets file, out of the screen and the run log", async () => {
     const f = fake();
     writeFileSync(join(f.opts.home, ".zshrc"), "export A=1\nexport A_KEY=fake\n");
     const run = runInit(f.opts, f.io);
@@ -847,9 +848,9 @@ describe("wsp init, everything else", () => {
     await f.press("y");
     await f.until("Claude Code login: signed in (claude auth status)");
     await f.until("Secrets were cut from your files. Paste each to set it on the machine, or leave it empty to skip.");
-    await f.until("cut from ~/.zshrc; the value is set there on the machine and never shown here");
+    await f.until("cut from ~/.zshrc; the value is set on the machine and never shown here");
     await f.press(..."s3cret-value".split(""), KEY.enter);
-    await f.until("A_KEY: set in ~/.zshrc on the machine");
+    await f.until("A_KEY: set in /etc/profile.d/wsp-secrets.sh on the machine");
     await sealIt(f);
     const result = await run;
     expect(result.code).toBe(0);
@@ -857,14 +858,17 @@ describe("wsp init, everything else", () => {
     const out = f.text();
     expect(out.indexOf("Secrets were cut")).toBeGreaterThan(out.indexOf("Claude Code login: signed in"));
     expect(out.indexOf("Secrets were cut")).toBeLessThan(out.indexOf("Ready to seal golden v1"));
-    expect(out).toMatch(/Secrets\n│\s+A_KEY\s+set in ~\/.zshrc\n/);
+    expect(out).toMatch(/Secrets\n│\s+A_KEY\s+set on the machine\n/);
     expect(out).not.toContain("s3cret");
+    // The machine's secrets file is read first (nothing there on a fresh builder, no fish), then the one write.
+    const read = f.link.ptys.find(p => p.writes[0]!.startsWith(readCommand()))!;
+    expect(read.created["env"]).toEqual({ PS1: "" });
     const pty = f.link.ptys.find(p => p.created["env"] !== undefined && "WSP_SECRET_LINE" in (p.created["env"] as object))!;
     expect(pty.created).toEqual({ cols: 200, rows: 50, shell: "/bin/sh", env: { PS1: "", WSP_SECRET_LINE: "export A_KEY='s3cret-value'" } });
-    expect(pty.writes).toEqual([`printf '%s\\n' "$WSP_SECRET_LINE" >> "$HOME"/'.zshrc'; printf '\\nWSP_STATUS %s\\n' $?; exit\r`]);
+    expect(pty.writes).toEqual([`${appendCommand(false)}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`]);
     expect(pty.killed).toBe(true);
-    // gh's copy check, claude's sign-in with its check on the same link, then the one write.
-    expect(f.link.dials).toBe(3);
+    // gh's copy check, claude's sign-in with its check on the same link, the read, the write.
+    expect(f.link.dials).toBe(4);
     expect(JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8"))).toMatchObject({
       logins: [{ id: "logins/gh" }, { id: "logins/claude", state: "signed-in" }],
       secrets: [{ name: "A_KEY", path: "~/.zshrc", state: "set" }],
@@ -3025,6 +3029,28 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(shared.machines).toHaveLength(2);
   });
 
+  it("a rebuild's seal offers the oldest version for deletion the way an update's does, before the app opens", async () => {
+    const { shared, first, next } = await sealed();
+    writeFileSync(join(first.opts.home, ".zshrc"), "export A=1\nexport B=2\n");
+    const second = next({ tty: false });
+    expect((await runInit(second.opts, second.io)).code).toBe(0);
+    expect(second.text()).toMatch(/Golden v2 sealed in \d+s/);
+    // A big change takes the rebuild road; its seal is v3, so v1 is the one to offer.
+    const manifestPath = join(first.opts.home, "manifest.json");
+    writeFileSync(manifestPath, JSON.stringify({ entries: FIXTURE.entries.map(e => (e.id === "agents/codex" ? { ...e, bring: true } : e)) }));
+    const third = next({ manifestPath, tty: false });
+    third.opts.host = quietHost();
+    expect((await runInit(third.opts, third.io)).code).toBe(0);
+    const out = third.text();
+    expect(out).toContain("Rebuilding from scratch. Taken as the default (--yes).");
+    expect(out).toContain("Golden v3 sealed.");
+    expect(out).toMatch(/Delete golden v1, [\d.]+ GB, .*\? v3 and v2 stay\..* Taken as yes \(--yes\)\./);
+    expect(out).toContain("Deleted golden v1.");
+    expect(out.indexOf("Golden v3 sealed.")).toBeLessThan(out.indexOf("Delete golden v1"));
+    expect(out.indexOf("Deleted golden v1.")).toBeLessThan(out.indexOf("Open http://"));
+    expect(shared.snapshots.map(r => r.id)).toEqual(["snap_golden-v2", "snap_golden-v3"]);
+  });
+
   it("once a third version seals, wsp init offers the oldest for deletion in one line and --yes takes it, keeping the head and its parent", async () => {
     const { store, shared, first, next } = await sealed();
     writeFileSync(join(first.opts.home, ".zshrc"), "export A=1\nexport B=2\n");
@@ -3047,16 +3073,17 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(await store.get("golden-recipes", "default@v3")).toBeDefined();
   });
 
-  it("--yes with a big change (an agent added) takes the rebuild: the boot question follows, the kept builder is no blocker, and a fresh builder boots beside it", async () => {
-    const { shared, first, next } = await sealed();
+  it("--yes with a big change (an agent added) takes the rebuild: the boot question follows, the kept builder is no blocker, a fresh builder boots beside it, and its seal forks nothing beside the existing workspace", async () => {
+    const { store, shared, first, next } = await sealed();
+    // The person's one workspace, forked from v1 before the rebuild.
+    const alpha = await createRuntime({ backend: shared, store, adapters: {} }).workspaces.create({ golden: "snap_golden-v1", name: "alpha" });
     const manifestPath = join(first.opts.home, "manifest.json");
     writeFileSync(manifestPath, JSON.stringify({ entries: FIXTURE.entries.map(e => (e.id === "agents/codex" ? { ...e, bring: true } : e)) }));
     const f = next({ manifestPath });
-    // The fresh builder is the third machine, not the first the fake's default host expects.
     const hosted: string[] = [];
-    f.opts.host = async (_rt, builder) => {
+    f.opts.host = async (rt, builder) => {
       hosted.push(builder.id);
-      return quietHost()();
+      return { port: 4400, wsPort: 4410, authToken: "tok", createWorkspace: name => forkHead(rt, name), close: async () => {} };
     };
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     const out = f.text();
@@ -3070,10 +3097,16 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(out).toMatch(BOOT);
     expect(out).not.toContain("A builder from an earlier wsp init is still running");
     expect(out).not.toContain("Nothing was booted");
-    expect(hosted).toEqual(["m3"]);
-    // The rebuilt builder seals v2 and is kept; its smoke fork is gone.
+    expect(hosted).toEqual(["m4"]);
+    // The rebuilt builder seals v2 and is kept; its smoke fork is gone. v1 stays for the workspace forked from it,
+    // which stays where it is: no second workspace is forked, and the app opens on the one there.
     expect(out).toContain("Golden v2 sealed.");
-    expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_golden-v1", true], [undefined, false], ["snap_golden-v2", true]]);
+    expect(out).toContain("Your 1 workspace stays on the golden version it was forked from; upgrade it from the app. New workspaces fork v2.");
+    expect(out).not.toContain("Workspace first");
+    expect(out).not.toContain("Forking your first workspace");
+    expect(out).toMatch(/^◇\s+Open http:\/\/127\.0\.0\.1:4400\/$/m);
+    expect((await f.runtimes.at(-1)!.workspaces.list()).map(w => [w.id, w.golden])).toEqual([[alpha.id, "snap_golden-v1"]]);
+    expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_golden-v1", true], ["snap_golden-v1", false], [undefined, false], ["snap_golden-v2", true]]);
   });
 
   it("interactive: the offer is a choice with the update first when the change is small; enter takes it", async () => {

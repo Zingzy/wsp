@@ -90,7 +90,6 @@ function fixtureApi(history: SessionEvent[] = []) {
   const api: Api = {
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
     daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
-    builderReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
     sessionHistory: async () => history,
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     snapshotStorage: async () => null,
@@ -107,8 +106,6 @@ function fixtureApi(history: SessionEvent[] = []) {
     createFromGoldenHead: async () => workspace,
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
     getGolden: async () => undefined,
-    prepareGolden: async () => { throw new Error("no wizard in this fixture"); },
-    sealGolden: async () => { throw new Error("no wizard in this fixture"); },
     startSession: async opts => {
       started.push(opts);
       return { id: "s1", workspaceId: opts.workspaceId, harness: "claude", status: "running", prompt: opts.prompt, startedAt: 0 };
