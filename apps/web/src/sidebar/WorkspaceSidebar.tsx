@@ -24,11 +24,14 @@ import {
   SidebarMenuSubItem,
 } from "../components/ui/sidebar.js";
 import { Spinner } from "../components/ui/spinner.js";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { useLocalStorage, type Codec } from "../hooks/useLocalStorage.js";
 import { useNowMinute } from "../hooks/useNowMinute.js";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
+import { shortcutLabelForCommand } from "../keybindings.js";
 import { cn } from "../lib/utils.js";
 import { useSelectedId, useStore } from "../protocol/store.js";
-import { onNewWorkspaceRequest } from "../shell/shellRequests.js";
+import { onNewWorkspaceRequest, requestNewThread } from "../shell/shellRequests.js";
 import { ForwardsList } from "./ForwardsList.js";
 import { NewWorkspaceDialog } from "./NewWorkspaceDialog.js";
 import { ProjectFavicon } from "./ProjectFavicon.js";
@@ -56,6 +59,8 @@ import {
 } from "./workspaceRows.js";
 
 const SETTLED_EXPANDED_KEY = "wsp:sidebar-settled-expanded";
+const NEW_THREAD_SHORTCUT = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "chat.new");
+const NEW_THREAD_TITLE = NEW_THREAD_SHORTCUT ? `New thread (${NEW_THREAD_SHORTCUT})` : "New thread";
 const booleanCodec: Codec<boolean> = {
   decode: raw => JSON.parse(raw) === true,
   encode: value => JSON.stringify(value),
@@ -161,6 +166,11 @@ export function WorkspaceSidebar() {
     }
   };
 
+  const newThread = (id: string): void => {
+    requestNewThread({ workspaceId: id });
+    select(id);
+  };
+
   const toggleCollapsed = (id: string): void => {
     setCollapsed(prev => {
       const next = new Set(prev);
@@ -245,6 +255,7 @@ export function WorkspaceSidebar() {
                     .filter((part): part is string => part !== null)
                     .join(" · ");
                   const showThreads = !isCollapsed && active.length + settled.length > 0;
+                  const collapsible = project.threads.length > 0 && !searching;
                   return (
                     <SidebarMenuItem key={project.id}>
                       <SidebarMenuButton
@@ -252,6 +263,7 @@ export function WorkspaceSidebar() {
                         isActive={selectedId === project.id}
                         data-sidebar-row
                         data-row-id={`ws:${project.id}`}
+                        className={cn(!zombie && collapsible && "group-has-data-[sidebar=menu-action]/menu-item:pe-14")}
                         onClick={() => select(project.id)}
                       >
                         <span
@@ -277,14 +289,43 @@ export function WorkspaceSidebar() {
                         >
                           <RefreshCwIcon className={cn(rebuildAsked && "animate-spin")} />
                         </SidebarMenuAction>
-                      ) : project.threads.length > 0 && !searching ? (
-                        <SidebarMenuAction
-                          showOnHover
-                          aria-label={isCollapsed ? `Expand ${project.displayName}` : `Collapse ${project.displayName}`}
-                          onClick={() => toggleCollapsed(project.id)}
-                        >
-                          <ChevronDownIcon className={cn("transition-transform", isCollapsed && "-rotate-90")} />
-                        </SidebarMenuAction>
+                      ) : (
+                        <>
+                          {collapsible ? (
+                            <SidebarMenuAction
+                              showOnHover
+                              className="right-6"
+                              aria-label={isCollapsed ? `Expand ${project.displayName}` : `Collapse ${project.displayName}`}
+                              onClick={() => toggleCollapsed(project.id)}
+                            >
+                              <ChevronDownIcon className={cn("transition-transform", isCollapsed && "-rotate-90")} />
+                            </SidebarMenuAction>
+                          ) : null}
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={<SidebarMenuAction showOnHover aria-label={`New thread in ${project.displayName}`} onClick={() => newThread(project.id)} />}
+                            >
+                              <PlusIcon />
+                            </TooltipTrigger>
+                            <TooltipPopup side="bottom">{NEW_THREAD_TITLE}</TooltipPopup>
+                          </Tooltip>
+                        </>
+                      )}
+                      {!zombie && project.threads.length === 0 && !searching ? (
+                        <SidebarMenuSub>
+                          <SidebarMenuSubItem data-thread-selection-safe>
+                            <span className="flex h-8 min-w-0 items-center gap-1 whitespace-nowrap px-2 text-[11px] text-muted-foreground/50">
+                              <span className="truncate">No threads yet.</span>
+                              <button
+                                type="button"
+                                onClick={() => newThread(project.id)}
+                                className="shrink-0 cursor-pointer rounded-sm outline-hidden ring-ring hover:text-sidebar-foreground focus-visible:ring-2"
+                              >
+                                New thread {NEW_THREAD_SHORTCUT}
+                              </button>
+                            </span>
+                          </SidebarMenuSubItem>
+                        </SidebarMenuSub>
                       ) : null}
                       {showThreads ? (
                         <SidebarMenuSub>

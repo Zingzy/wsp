@@ -8,6 +8,7 @@ import type { SessionView, WorkspaceStatus, WorkspaceView } from "@wsp/protocol"
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
+import { onNewThreadRequest } from "../src/shell/shellRequests.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 
 const NOW = Date.now();
@@ -196,6 +197,42 @@ describe("rows from the fixture wire", () => {
     const toast = await screen.findByRole("status", { name: /runtime unreachable/ });
     fireEvent.click(toast);
     expect(useStore.getState().toast).toBeNull();
+  });
+});
+
+describe("new thread", () => {
+  it("the plus on a workspace row raises a new-thread request for that workspace and selects it", async () => {
+    await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_a", { prompt: "hello" })]), "api");
+    const seen: string[] = [];
+    const off = onNewThreadRequest(d => seen.push(d.workspaceId));
+    fireEvent.click(rowOf("api"));
+    expect(useStore.getState().selectedId).toBe("ws_a");
+    fireEvent.click(screen.getByRole("button", { name: "New thread in web" }));
+    expect(seen).toEqual(["ws_b"]);
+    expect(useStore.getState().selectedId).toBe("ws_b");
+    // The collapse chevron keeps its slot beside the plus on a row with threads.
+    expect(screen.getByRole("button", { name: "New thread in api" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Collapse api" })).toBeDefined();
+    off();
+  });
+
+  it("a workspace with no threads says so under its row, and the line starts a thread too", async () => {
+    await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_a", { prompt: "hello" })]), "api");
+    const seen: string[] = [];
+    const off = onNewThreadRequest(d => seen.push(d.workspaceId));
+    const item = (row: HTMLElement) => row.closest<HTMLElement>('[data-sidebar="menu-item"]')!;
+    const line = screen.getByText(/No threads yet/).parentElement!;
+    expect(item(line)).toBe(item(rowOf("web")));
+    expect(within(item(rowOf("api"))).queryByText(/No threads yet/)).toBeNull();
+    fireEvent.click(within(line).getByRole("button", { name: /New thread/ }));
+    expect(seen).toEqual(["ws_b"]);
+    off();
+  });
+
+  it("a zombie row offers the rebuild and no new thread", async () => {
+    await mount(fakeApi([API], [status(API, { reach: { state: "zombie" } })]), "api");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Rebuild api" })).toBeDefined());
+    expect(screen.queryByRole("button", { name: "New thread in api" })).toBeNull();
   });
 });
 
