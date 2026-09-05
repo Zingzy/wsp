@@ -4,9 +4,9 @@
 // workspace's port directory; recents live in local storage per workspace.
 // The bar shows the route without its token; copy and the frame keep it.
 import { Check, Copy, Laptop } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toPreviewableServers } from "../../adapt/ports.js";
-import { useWorkspacePorts } from "../../browser/model.js";
+import { useWorkspacePorts, useWorkspacePortsSeeded } from "../../browser/model.js";
 import { recordVisit, removeVisit, useRecents } from "../../browser/recents.js";
 import { useProbedRoute } from "../../browser/refusal.js";
 import { currentPort, useBrowserTab, useBrowserTabs, ZOOM_STEP } from "../../browser/tabs.js";
@@ -31,6 +31,7 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
   const tabs = useBrowserTabs.getState();
   const openBrowser = useRightPanelStore(s => s.openBrowser);
   const ports = useWorkspacePorts(workspaceId);
+  const portsSeeded = useWorkspacePortsSeeded(workspaceId);
   const servers = useMemo(() => toPreviewableServers({ ports }), [ports]);
   const [recents, setRecents] = useRecents(workspaceId);
   const [hint, setHint] = useState<string | null>(null);
@@ -40,7 +41,7 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
   const { reach, refusal } = useProbedRoute(workspaceId, port, tab?.reloadNonce ?? 0);
   const realUrl = reach.state === "ready" ? reach.reach.url : null;
   const shownUrl = realUrl !== null ? elideToken(realUrl) : port !== null ? loopbackUrl(port) : "";
-  const listening = port === null || ports.some(p => p.port === port);
+  const listening = port === null || !portsSeeded || ports.some(p => p.port === port);
   const forwarded = useForwarded(workspaceId, port);
   const zoom = tab?.zoom ?? 1;
   const framed = realUrl !== null && (refusal === null || refusal.keepsFrame);
@@ -48,6 +49,14 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
   useEffect(() => {
     setLoading(framed);
   }, [framed, realUrl, tab?.reloadNonce]);
+
+  // The port listening again is the cue to probe its route anew, whether the last answer was framed or a refusal card.
+  const wasListening = useRef({ port, listening });
+  useEffect(() => {
+    const prev = wasListening.current;
+    wasListening.current = { port, listening };
+    if (tabId !== null && realUrl !== null && listening && !prev.listening && prev.port === port) tabs.reload(workspaceId, tabId);
+  }, [port, listening, realUrl, tabId, workspaceId, tabs]);
 
   const framePort = (next: number): void => {
     setHint(null);

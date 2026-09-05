@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { DaemonEvent } from "@wsp/protocol";
 import { parseProcNetTcp, PortWatcher, procNetTcpSource, type ListeningPort } from "../src/ports.js";
 
 // Fixture provenance: hand-written from the documented /proc/net/tcp format
@@ -110,5 +111,35 @@ describe("procNetTcpSource against a fake proc root", () => {
       { type: "port.open", port: 8080, pid: 123, process: "node", loopback: false },
       { type: "port.open", port: 3000, pid: 456, loopback: true },
     ]);
+  });
+});
+
+/** The fixture with its 0.0.0.0:8080 row swapped for one whose socket inode no /proc/<pid>/fd names. */
+const RESTARTED_ROW = fixture.split("\n").find(l => l.includes("45678"))!;
+const withoutListener = fixture.replace(RESTARTED_ROW + "\n", "");
+const restartedUnowned = fixture.replace(RESTARTED_ROW, RESTARTED_ROW.replace("45678", "45999"));
+
+describe("PortWatcher across a listener restart on one port", () => {
+  const root = fakeProcRoot();
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+  it("emits close then open, and the open is a wire event whether or not the new owner's pid can be read", async () => {
+    const w = new PortWatcher(procNetTcpSource(root));
+    const events: unknown[] = [];
+    w.on("port.open", e => events.push(e));
+    w.on("port.close", e => events.push(e));
+    await w.poll();
+    expect(events).toEqual([]);
+
+    writeFileSync(join(root, "net", "tcp"), withoutListener);
+    rmSync(join(root, "123"), { recursive: true, force: true });
+    await w.poll();
+    expect(events).toEqual([{ type: "port.close", port: 8080 }]);
+
+    writeFileSync(join(root, "net", "tcp"), restartedUnowned);
+    await w.poll();
+    expect(events).toHaveLength(2);
+    expect(events[1]).toEqual({ type: "port.open", port: 8080, loopback: false });
+    expect(DaemonEvent.safeParse(events[1]).success).toBe(true);
   });
 });

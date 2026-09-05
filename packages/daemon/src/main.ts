@@ -4,7 +4,7 @@ import type { IncomingMessage } from "node:http";
 import { connect as connectTcp, type Socket } from "node:net";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import { DaemonAuthRequest } from "@wsp/protocol";
+import { DaemonAuthRequest, type DaemonEvent } from "@wsp/protocol";
 import { WebSocketServer, type WebSocket } from "ws";
 import { listDir, readFileBounded, type FsReadEncoding } from "./fs-ops.js";
 import { gitDiff, gitStatus, type GitDiffScope } from "./git-ops.js";
@@ -132,7 +132,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
       portWatcher = new PortWatcher(opts.portsSource ?? procNetTcpSource(), {
         intervalMs: opts.portsIntervalMs ?? 1000,
       });
-      portWatcher.on("port.open", (e: PortOpenEvent) => spotter.noteOpen(e.port, e.loopback));
+      portWatcher.on("port.open", (e: PortOpenEvent) => spotter.noteOpen(e.port, e.loopback === true));
       portWatcher.start();
     }
     return portWatcher;
@@ -173,7 +173,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
   const authed = new Set<WebSocket>();
   // Pushed to every authed socket, not to subscribers: the host's link
   // reconnects through the edge and would lose a subscription with it.
-  const broadcast = (event: Record<string, unknown>): void => {
+  const broadcast = (event: DaemonEvent): void => {
     for (const client of authed) push(client, event);
   };
   const relay = {
@@ -304,7 +304,7 @@ interface Ctx {
   getInboxWatcher(): InboxWatcher;
   getSysSampler(): SysSampler;
   spotter: CallbackSpotter;
-  broadcast(event: Record<string, unknown>): void;
+  broadcast(event: DaemonEvent): void;
 }
 
 /** 127.0.0.1 first, then ::1: a Node 22 tool listening on "localhost" binds [::1] only (measured, wrangler). */
@@ -333,7 +333,7 @@ function fail(ws: WebSocket, id: Request["id"], error: string): void {
   ws.send(JSON.stringify({ id: id ?? null, ok: false, error }));
 }
 
-function push(ws: WebSocket, event: Record<string, unknown>): void {
+function push(ws: WebSocket, event: DaemonEvent): void {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(event));
 }
 
@@ -359,9 +359,9 @@ function optionalEnum<T extends string>(msg: Request, key: string, allowed: read
   return v as T;
 }
 
-function subscribe(state: ConnState, ws: WebSocket, emitter: NodeJS.EventEmitter, events: string[]): void {
+function subscribe(state: ConnState, ws: WebSocket, emitter: NodeJS.EventEmitter, events: DaemonEvent["type"][]): void {
   for (const name of events) {
-    const forward = (e: Record<string, unknown>) => push(ws, e);
+    const forward = (e: DaemonEvent) => push(ws, e);
     emitter.on(name, forward);
     state.detaches.push(() => emitter.off(name, forward));
   }
@@ -411,7 +411,7 @@ async function handle(ws: WebSocket, state: ConnState, ctx: Ctx, msg: Request): 
         push(ws, { type: "pty.exit", ptyId: s.id, exitCode: e.exitCode, signal: e.signal });
       });
       // onExit fires synchronously for an already-dead pty; never start polling one.
-      const unMode = s.exited ? () => {} : ctx.modes.attach(s.id, s.pid, e => push(ws, { ...e }));
+      const unMode = s.exited ? () => {} : ctx.modes.attach(s.id, s.pid, e => push(ws, e));
       state.detaches.push(unData, unExit, unMode);
       reply(ws, msg.id, { ptyId: s.id });
       return;
@@ -468,7 +468,7 @@ async function handle(ws: WebSocket, state: ConnState, ctx: Ctx, msg: Request): 
     }
     case "inbox.rescan": {
       const files = await ctx.getInboxWatcher().rescan();
-      for (const e of files) push(ws, { ...e });
+      for (const e of files) push(ws, e);
       reply(ws, msg.id, { count: files.length });
       return;
     }

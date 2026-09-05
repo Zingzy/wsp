@@ -25,6 +25,7 @@ import {
   stripOsc8,
   type OpenSocket,
 } from "../src/relay.js";
+import { rejectedEvents } from "./wire-events.js";
 
 const execFileAsync = promisify(execFile);
 const TOKEN = "relay-token";
@@ -307,6 +308,9 @@ interface WireMsg {
   [k: string]: unknown;
 }
 
+/** Every event frame any client in this file received, checked against the protocol at the end. */
+const wire: WireMsg[] = [];
+
 async function client(port: number): Promise<{ request(op: string, p?: Record<string, unknown>): Promise<WireMsg>; events: WireMsg[]; close(): void }> {
   const ws = new WebSocket(`ws://127.0.0.1:${port}/`);
   await new Promise<void>((resolve, reject) => {
@@ -321,7 +325,10 @@ async function client(port: number): Promise<{ request(op: string, p?: Record<st
     if (typeof m.id === "number" && pending.has(m.id)) {
       pending.get(m.id)!(m);
       pending.delete(m.id);
-    } else if (m.type && m.type !== "daemon.hello") events.push(m);
+    } else if (m.type) {
+      wire.push(m);
+      if (m.type !== "daemon.hello") events.push(m);
+    }
   });
   const request = (op: string, p: Record<string, unknown> = {}): Promise<WireMsg> => {
     const id = nextId++;
@@ -495,5 +502,12 @@ describe("daemon: browser.open, callback.port and tunnels", () => {
     expect((await c.request("tunnel.open", { tunnelId: "dup", port })).ok).toBe(true);
     await until(() => c.events.some(e => e.type === "tunnel.end" && e["tunnelId"] === "dup"));
     c.close();
+  });
+});
+
+describe("wire", () => {
+  it("every event the daemon pushed in this file is one the protocol parses", () => {
+    expect(wire.length).toBeGreaterThan(0);
+    expect(rejectedEvents(wire)).toEqual([]);
   });
 });

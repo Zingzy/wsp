@@ -5,6 +5,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { startDaemon, type DaemonHandle } from "../src/main.js";
 import type { ListeningPort } from "../src/ports.js";
+import { rejectedEvents } from "./wire-events.js";
 
 const TOKEN = "ops-token";
 const tmp = mkdtempSync(join(tmpdir(), "wsp-ops-"));
@@ -16,6 +17,9 @@ interface WireMsg {
   type?: string;
   [k: string]: unknown;
 }
+
+/** Every event frame any client in this file received, checked against the protocol at the end. */
+const wire: WireMsg[] = [];
 
 async function connect(port: number): Promise<{
   request: (op: string, params?: Record<string, unknown>) => Promise<WireMsg>;
@@ -38,6 +42,7 @@ async function connect(port: number): Promise<{
       pending.delete(m.id);
     } else if (m.type) {
       events.push(m);
+      wire.push(m);
     }
   });
   return {
@@ -173,5 +178,12 @@ describe("daemon ops: ports, manifest, inbox", () => {
       await d.close();
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("wire", () => {
+  it("every event the daemon pushed in this file is one the protocol parses", () => {
+    expect(wire.length).toBeGreaterThan(0);
+    expect(rejectedEvents(wire)).toEqual([]);
   });
 });

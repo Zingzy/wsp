@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { readdir, readFile, readlink } from "node:fs/promises";
+import type { DaemonEvent } from "@wsp/protocol";
 
 export interface ListeningPort {
   port: number;
@@ -89,17 +90,8 @@ async function scanSocketInodes(procRoot: string): Promise<Map<number, number>> 
   return map;
 }
 
-export interface PortOpenEvent {
-  type: "port.open";
-  port: number;
-  pid: number | null;
-  process?: string;
-  loopback: boolean;
-}
-export interface PortCloseEvent {
-  type: "port.close";
-  port: number;
-}
+export type PortOpenEvent = Extract<DaemonEvent, { type: "port.open" }>;
+export type PortCloseEvent = Extract<DaemonEvent, { type: "port.close" }>;
 
 export class PortWatcher extends EventEmitter {
   private source: PortSnapshotSource;
@@ -136,10 +128,11 @@ export class PortWatcher extends EventEmitter {
     }
     for (const [port, row] of next) {
       if (!this.known.has(port)) {
+        // The wire has no null pid: an owner the fd scan could not name is left out, like its comm.
         this.emit("port.open", {
           type: "port.open",
           port,
-          pid: row.pid,
+          ...(row.pid !== null ? { pid: row.pid } : {}),
           ...(row.process !== undefined ? { process: row.process } : {}),
           loopback: row.loopback,
         } satisfies PortOpenEvent);
