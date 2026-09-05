@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { spawn } from "node:child_process";
 import { expect, it } from "vitest";
-import { stopVite } from "./vite-child";
+import { stopRender, stopVite } from "./vite-child";
 
 // The child prints once its script has run, so a signal never races its handler.
 const started = (script: string) => {
@@ -28,4 +28,24 @@ it("an already exited child is left alone", async () => {
   await new Promise(done => c.once("exit", done));
   await stopVite(c);
   expect(c.exitCode).toBe(0);
+});
+
+it("stopRender stops vite when the browser throws on close, and rethrows", async () => {
+  const c = await started("setInterval(() => {}, 1000)");
+  const browser = { close: () => Promise.reject(new Error("browser gone")) };
+  await expect(stopRender(browser, c)).rejects.toThrow("browser gone");
+  expect(c.signalCode).toBe("SIGTERM");
+});
+
+it("stopRender stops vite when the browser never finishes closing", async () => {
+  const c = await started("setInterval(() => {}, 1000)");
+  const browser = { close: () => new Promise<void>(() => {}) };
+  await stopRender(browser, c, 100);
+  expect(c.signalCode).toBe("SIGTERM");
+});
+
+it("stopRender with no browser still stops vite", async () => {
+  const c = await started("setInterval(() => {}, 1000)");
+  await stopRender(undefined, c);
+  expect(c.signalCode).toBe("SIGTERM");
 });

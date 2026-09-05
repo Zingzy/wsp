@@ -4,14 +4,12 @@
 // long reason wraps inside the row, in both themes, and the machine tab is
 // photographed for review. Like the creation layout test it runs only when
 // asked for (WSP_RENDER=1) and skips without Playwright's Chromium.
-import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
-import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { stopVite } from "./vite-child";
+import { startVite, stopRender, type ViteChild } from "./vite-child";
 
 const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SHOTS = join(WEB_DIR, "artifacts", "render");
@@ -25,51 +23,23 @@ const browserPath = ((): string | undefined => {
 const hasBrowser = browserPath !== undefined && existsSync(browserPath);
 const skipped = process.env["WSP_RENDER"] !== "1" ? "WSP_RENDER is not 1" : !hasBrowser ? "Playwright's Chromium is not installed" : undefined;
 
-const freePort = (): Promise<number> =>
-  new Promise((resolve, reject) => {
-    const server = createServer();
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      server.close(() => (typeof address === "object" && address !== null ? resolve(address.port) : reject(new Error("no port"))));
-    });
-  });
-
-async function waitFor(url: string, child: ChildProcess): Promise<void> {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`vite exited with ${child.exitCode}`);
-    try {
-      if ((await fetch(url)).ok) return;
-    } catch {
-      // Not listening yet.
-    }
-    await new Promise(r => setTimeout(r, 200));
-  }
-  throw new Error(`vite did not serve ${url} in time`);
-}
-
 if (skipped !== undefined) console.info(`lineage missing-tools render test skipped: ${skipped}`);
 
 describe.skipIf(skipped !== undefined)("the lineage's missing tools laid out in Chromium", () => {
-  let vite: ChildProcess | undefined;
+  let vite: ViteChild | undefined;
   let browser: Browser | undefined;
   let page: Page | undefined;
   let base = "";
 
   beforeAll(async () => {
-    const port = await freePort();
-    vite = spawn(join(WEB_DIR, "node_modules", ".bin", "vite"), ["--host", "127.0.0.1", "--port", String(port), "--strictPort", "--logLevel", "silent"], { cwd: WEB_DIR, stdio: "ignore" });
-    base = `http://127.0.0.1:${port}/test/lineage/index.html`;
-    await waitFor(base, vite);
+    vite = await startVite(WEB_DIR, "/test/lineage/index.html");
+    base = `${vite.base}/test/lineage/index.html`;
     browser = await chromium.launch();
     page = await browser.newPage({ viewport: { width: 1200, height: 960 } });
     mkdirSync(SHOTS, { recursive: true });
   }, 60_000);
 
-  afterAll(async () => {
-    await browser?.close();
-    await stopVite(vite);
-  });
+  afterAll(() => stopRender(browser, vite?.child));
 
   it.each(["dark", "light"] as const)("in the %s theme every missing tool is a visible row under the forked version's label, a long reason wraps inside the tab, and nothing sits under the others", async theme => {
     await page!.goto(`${base}?theme=${theme}`);
