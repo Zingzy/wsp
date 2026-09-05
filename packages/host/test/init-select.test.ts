@@ -245,6 +245,61 @@ describe("rungSelect", () => {
     }
   });
 
+  it("footer hierarchy: the detail reads in normal text, Selected and a bare footer line are dim, a loud footer line is plain or in its tone right above the dim keys, and the slots hold", async () => {
+    const was = process.env["FORCE_COLOR"];
+    process.env["FORCE_COLOR"] = "3";
+    try {
+      const { input, output, raw, text } = streams();
+      Object.assign(output, { rows: 40 });
+      const items: SelectItem[] = [...ITEMS, { id: "bare", label: "bare", detail: [] }, { id: "one", label: "one line", detail: ["only line"] }];
+      const footer = (ticks: ReadonlySet<string>) => ["parts", { text: "Disk: 1.0 GB", ...(ticks.has("jq") ? { tone: "yellow" as const } : {}) }];
+      const p = rungSelect({ title: "Tools", counter: "5/7", items, initial: new Set(["gh"]), footer, input, output });
+      await settle();
+      const bar = "\x1b[2m┃\x1b[22m";
+      expect(raw()).toContain(`${bar}  every row on this screen that can be ticked\n${bar}\n${bar}  \x1b[2mSelected: git name and email, gh\x1b[22m\n${bar}  \x1b[2mparts\x1b[22m\n${bar}  Disk: 1.0 GB\n\x1b[2m┗\x1b[22m  \x1b[38;5;247mspace`);
+      // Ticking everything brings jq along and the Disk line takes its tone; nothing else in the footer changes.
+      await press(input, KEY.space);
+      expect(raw()).toContain(`${bar}  \x1b[2mparts\x1b[22m\n${bar}  \x1b[33mDisk: 1.0 GB\x1b[39m\n\x1b[2m┗\x1b[22m`);
+      // The detail keeps its two slots on a row with none and on a row with one, so the lines under it never move.
+      await press(input, KEY.down);
+      expect(text().slice(text().lastIndexOf("◆  Tools"))).toContain("┃  2 in Homebrew\n┃  space ticks or clears the group\n┃  Selected:");
+      for (let i = 0; i < 8; i += 1) await press(input, KEY.down);
+      expect(text().slice(text().lastIndexOf("◆  Tools"))).toMatch(/❯ ● bare\n┃ {3}● one line\s*\n┃\n┃\n┃\n┃  Selected:/);
+      await press(input, KEY.down);
+      expect(text().slice(text().lastIndexOf("◆  Tools"))).toMatch(/❯ ● one line\n┃\n┃  only line\n┃\n┃  Selected:/);
+      await press(input, KEY.enter);
+      await p;
+    } finally {
+      if (was === undefined) delete process.env["FORCE_COLOR"];
+      else process.env["FORCE_COLOR"] = was;
+    }
+  });
+
+  it("a hold keeps Enter from advancing while it says so and lets it through once the ticks change; Esc still goes back", async () => {
+    const { input, output, text } = streams();
+    let resolved = false;
+    const p = rungSelect({ title: "Tools", counter: "5/7", items: ITEMS, initial: new Set(["gh", "jq"]), hold: ticks => ticks.has("jq"), footer: ticks => [ticks.has("jq") ? { text: "Too full" } : "fine", { text: "Disk" }], input, output }).then(r => {
+      resolved = true;
+      return r;
+    });
+    await press(input, KEY.enter);
+    expect(resolved).toBe(false);
+    expect(text().slice(text().lastIndexOf("◆  Tools"))).toContain("┃  Too full\n┃  Disk\n┗");
+    // Untick jq: the hold lifts and Enter answers.
+    await press(input, "j", "q", KEY.down, KEY.space);
+    expect(text().slice(text().lastIndexOf("◆  Tools"))).toContain("┃  fine\n┃  Disk\n┗");
+    await press(input, KEY.enter);
+    const result = await p;
+    expect(result.kind).toBe("next");
+    expect(result.kind === "next" ? [...result.ticks].sort() : []).toEqual(["gh", "git"]);
+    // Held or not, Esc goes back.
+    const back = streams();
+    const q = rungSelect({ title: "Tools", counter: "5/7", items: ITEMS, initial: new Set(["jq"]), hold: () => true, input: back.input, output: back.output });
+    await press(back.input, KEY.enter);
+    await press(back.input, KEY.esc);
+    expect((await q).kind).toBe("back");
+  });
+
   it("a locked row shows why only in the detail pane, once it is highlighted", async () => {
     const { input, output, text, clear } = streams();
     const p = rungSelect({ title: "Tools", counter: "5/7", items: ITEMS, initial: new Set(), input, output });

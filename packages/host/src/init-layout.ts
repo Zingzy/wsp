@@ -5,7 +5,7 @@
 // the confirm and password prompts drawn with those same rules.
 import type { Readable, Writable } from "node:stream";
 import { WriteStream } from "node:tty";
-import { styleText } from "node:util";
+import { stripVTControlCharacters, styleText } from "node:util";
 import { ConfirmPrompt, PasswordPrompt, type State as PromptState } from "@clack/core";
 import { S_BAR, S_RADIO_ACTIVE, S_RADIO_INACTIVE, S_STEP_ACTIVE, S_STEP_CANCEL, S_STEP_SUBMIT, log, unicode } from "@clack/prompts";
 
@@ -111,10 +111,11 @@ export function helpLine(keys: readonly HelpKey[], depth: number): string {
  * (its note is what wraps, at the columns minus 6), so a line kept inside widthOf minus this is never wrapped again. */
 export const CARD_FRAME = 3;
 
-/** A block in the frame: a bold title on the step glyph, then its lines down the bar, wrapped to the width. */
+/** A block in the frame: a bold title on the step glyph, then its lines down the bar, wrapped to the width. A line
+ * within the width once its escape codes are set aside passes as it is, so a coloured line keeps its colour whole. */
 export function card(title: string, lines: readonly string[], output: Writable): void {
   const width = widthOf(output) - CARD_FRAME;
-  log.message([styleText("bold", title), ...lines.flatMap(l => wrap(l, width))], { output, symbol: styleText("green", S_STEP_SUBMIT) });
+  log.message([styleText("bold", title), ...lines.flatMap(l => (stripVTControlCharacters(l).length <= width ? [l] : wrap(l, width)))], { output, symbol: styleText("green", S_STEP_SUBMIT) });
 }
 
 const dim = (s: string): string => styleText("dim", s);

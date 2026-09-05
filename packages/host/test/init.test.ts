@@ -12,7 +12,7 @@ import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
 import { APP_DATA_GROUP, RUNGS, claimedPaths, entriesFor, everything, nodeMachineFs, type Machine, type Manifest, type ManifestEntry } from "@wsp/collect";
-import { SNAPSHOT_STORAGE, type BackendPricing } from "@wsp/engine";
+import { SNAPSHOT_STORAGE, type BackendPricing, type BrewFormula, type BrewTable } from "@wsp/engine";
 import { ALREADY_APPLIED } from "@wsp/protocol";
 import { DAEMON_TOKEN_SET, createRuntime, memoryStore, type GoldenRecipe, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
@@ -2637,6 +2637,18 @@ describe("summaryNote", () => {
     const huge = new Map([["gh", { name: "gh", fullName: "gh", deps: [], bytes: 30 * 1024 * 1024 * 1024, macosOnly: false }]]);
     const over = summaryNote(FIXTURE, new Set(["tools/brew/gh"]), new Map(), 200, 0, huge).find(l => l.startsWith("Disk"));
     expect(over).toBe("Disk      31.6 GB, 15.4 GB over the 16.1 GB the 20 GB builder leaves (Homebrew's toolchain 1.6 GB, tools 30.0 GB)");
+    // With colour on, the Disk line takes its tier's colour, every wrapped line of it; a total under 50 percent stays plain.
+    const was = process.env["FORCE_COLOR"];
+    process.env["FORCE_COLOR"] = "3";
+    try {
+      const wrapped = summaryNote(FIXTURE, new Set(["tools/brew/gh"]), new Map(), 90, 0, huge).filter(l => stripVTControlCharacters(l).startsWith("Disk") || stripVTControlCharacters(l).startsWith("          "));
+      expect(wrapped.length).toBeGreaterThan(1);
+      for (const l of wrapped) expect(l).toMatch(/^\x1b\[31m.*\x1b\[39m$/);
+      expect(summaryNote(FIXTURE, ticks, new Map(), 200, 300 * 1024 * 1024, brew).find(l => l.startsWith("Disk"))).not.toContain("\x1b[");
+    } finally {
+      if (was === undefined) delete process.env["FORCE_COLOR"];
+      else process.env["FORCE_COLOR"] = was;
+    }
   });
 
   it("a tap formula that takes the road counts as a tool in the Installs line, with the checksum note the ruling asks for", () => {
@@ -2917,20 +2929,84 @@ describe("pack size before the boot", () => {
 });
 
 describe("disk estimate before the boot", () => {
-  it("a recipe that does not fit the builder's disk is refused after the summary with the shortfall, before anything boots", async () => {
-    const huge = new Map([["gh", { name: "gh", fullName: "gh", deps: [], bytes: 30 * 1024 * 1024 * 1024, macosOnly: false }]]);
-    const f = fake({ yes: true, brew: async () => huge });
+  const HUGE_GH = new Map([["gh", { name: "gh", fullName: "gh", deps: [], bytes: 30 * 1024 * 1024 * 1024, macosOnly: false }]]);
+
+  /** The fixture as a saved recipe with every default tick written in: a formula this heavy starts unticked, so only a saved tick puts it in the plan. */
+  const savedFixture = (): string => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
+    dirs.push(dir);
+    const path = join(dir, "recipe.json");
+    writeFileSync(path, JSON.stringify({ entries: FIXTURE.entries.map(e => ({ ...e, bring: e.bring ?? (e.default === "bring" && e.reason === undefined) })) }));
+    return path;
+  };
+  const TOO_FULL = "Too full to build. Untick tools you do not need on the machine until the estimate leaves the red; keep headroom for what the build installs.";
+
+  it("under --yes a recipe past the builder's disk is refused after the summary with the screens' sentence, before anything boots", async () => {
+    const f = fake({ yes: true, manifestPath: savedFixture(), brew: async () => HUGE_GH });
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(1);
     const out = f.text();
     expect(out).toContain("Reading Homebrew for sizes");
     expect(out.replace(/\n\s*│?\s+/g, " ")).toMatch(/Disk\s+31\.8 GB, 15\.6 GB over the 16\.1 GB the 20 GB builder leaves/);
-    expect(out).toContain("This recipe needs about 31.8 GB on the machine; the 20 GB disk leaves 16.1 GB after the base image and 2.0 GB of headroom.");
+    expect(out).toContain(`${TOO_FULL} This recipe needs about 31.8 GB on the machine, 197 percent of the 16.1 GB the 20 GB builder leaves.`);
     expect(out).toContain("Recipe saved to");
-    expect(out).toContain(`Nothing was booted. Set bring to false on rows worth about 15.6 GB in ${recipePath(f.opts.statePath)}, then run wsp init --yes --manifest ${recipePath(f.opts.statePath)}; the recipe is kept.`);
+    expect(out).toContain(`Nothing was booted. Set bring to false on rows in ${recipePath(f.opts.statePath)} until the estimate is under 12.1 GB, then run wsp init --yes --manifest ${recipePath(f.opts.statePath)}; the recipe is kept.`);
     expect(out).not.toMatch(BOOT);
     expect(f.backends[0]?.machines ?? []).toHaveLength(0);
     expect(f.hosts).toBe(0);
+  });
+
+  it("under --yes the line is the screens' own: a saved recipe at exactly 75.0 percent is refused, one byte under it proceeds to the boot", async () => {
+    const MB = 1024 * 1024;
+    // The room is 16,528 MB and the toolchain 1,600, so 10,796 MB more lands on 75 percent exactly; nothing else travels.
+    const brew: BrewTable = new Map([
+      ["over", { name: "over", fullName: "over", deps: [], bytes: 10_796 * MB, macosOnly: false }],
+      ["edge", { name: "edge", fullName: "edge", deps: [], bytes: 10_796 * MB - 1, macosOnly: false }],
+    ]);
+    const saved = (ticked: string): string => {
+      const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
+      dirs.push(dir);
+      const path = join(dir, "recipe.json");
+      const rows = ["over", "edge"].map(name => ({ rung: "tools", id: `tools/brew/${name}`, label: name, group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "yes", bring: name === ticked }));
+      writeFileSync(path, JSON.stringify({ entries: rows }));
+      return path;
+    };
+    const refused = fake({ yes: true, manifestPath: saved("over"), brew: async () => brew });
+    expect((await runInit(refused.opts, refused.io)).code).toBe(1);
+    expect(refused.text()).toContain(`${TOO_FULL} This recipe needs about 12.1 GB on the machine, 75 percent of the 16.1 GB the 20 GB builder leaves.`);
+    expect(refused.text()).not.toMatch(BOOT);
+    const under = fake({ yes: true, manifestPath: saved("edge"), brew: async () => brew });
+    const run = runInit(under.opts, under.io);
+    await under.until(BOOT);
+    expect(under.text()).not.toContain("Too full to build");
+    await under.press(KEY.ctrlC);
+    await run;
+  });
+
+  it("under --yes the refusal sits on the screens' 75 percent line, not at the room: a recipe at 85 percent is refused with a non-zero exit", async () => {
+    const brew = new Map([["gh", { name: "gh", fullName: "gh", deps: [], bytes: 12 * 1024 * 1024 * 1024, macosOnly: false }]]);
+    const f = fake({ yes: true, manifestPath: savedFixture(), brew: async () => brew });
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(1);
+    const out = f.text();
+    // The toolchain, gh and Claude Code: 14,099 MB of 16,528, under the room and past the line.
+    expect(out.replace(/\n\s*│?\s+/g, " ")).toMatch(/Disk\s+13\.8 GB of 16\.1 GB on the 20 GB builder/);
+    expect(out).toContain(`${TOO_FULL} This recipe needs about 13.8 GB on the machine, 85 percent of the 16.1 GB the 20 GB builder leaves.`);
+    expect(out).toContain("Nothing was booted. Set bring to false on rows in");
+    expect(out).not.toMatch(BOOT);
+    expect(f.backends[0]?.machines ?? []).toHaveLength(0);
+  });
+
+  it("under --yes a formula of 500 MB and over is left out by the weight policy, so the same Homebrew fits the builder", async () => {
+    const f = fake({ yes: true, brew: async () => HUGE_GH });
+    const run = runInit(f.opts, f.io);
+    await f.until(BOOT);
+    const out = f.text();
+    expect(out).toMatch(/Tools\s+2 of 4/);
+    expect(out).not.toContain("over the 16.1 GB");
+    expect(out).not.toContain("This recipe needs about");
+    await f.press(KEY.ctrlC);
+    await run;
   });
 
   it("the first install of a release tag records the tag and the asset's checksum into the recipe file; a pin from an older tag is replaced, not enforced", async () => {
@@ -3011,7 +3087,7 @@ describe("disk estimate before the boot", () => {
     expect(screen).toMatch(/● pnpm\s+not measured/);
     expect(screen).toMatch(/○ rectangle\s+stays here/);
     // Files from the earlier screens, the toolchain and the two formulae so far; pnpm has no size.
-    expect(screen).toMatch(/Disk: 1\.6 GB of 16\.1 GB on the 20 GB builder\n┃  files 1[\d.]+ KB, Homebrew's toolchain 1\.6 GB, tools 53\.0 MB; 1 not measured\n/);
+    expect(screen).toMatch(/files 1[\d.]+ KB, Homebrew's toolchain 1\.6 GB, tools 53\.0 MB; 1 not measured\n┃\n┃  Disk: 1\.6 GB of 16\.1 GB on the 20 GB builder\n┗/);
     // Past the group header, the toolchain row and gh onto jq; its detail names the closure and where the number came from.
     await f.press(KEY.down, KEY.down, KEY.down, KEY.down);
     expect(f.text()).toContain("about 3.0 MB with 1 dependency, from this Mac's Homebrew; brought by default");
@@ -3036,9 +3112,106 @@ describe("disk estimate before the boot", () => {
     expect(font.hint).toBeUndefined();
     expect(font.detail).toEqual(["read from your terminal's config; nothing to copy", "the app's terminal draws with it when this computer has it installed; unticked, the app uses its own font"]);
     expect(agents).toContain("installs about 211.0 MB on the machine (measured 2026-09-05); its config (39.1 KB) comes along");
-    expect(agents).toMatch(/Disk: 1\.8 GB of 16\.1 GB on the 20 GB builder\n┃  files [\d.]+ KB, Homebrew's toolchain 1\.6 GB, tools 50\.0 MB, agents 211\.0 MB; 1 not measured\n/);
+    expect(agents).toMatch(/files [\d.]+ KB, Homebrew's toolchain 1\.6 GB, tools 50\.0 MB, agents 211\.0 MB; 1 not measured\n┃\n┃  Disk: 1\.8 GB of 16\.1 GB on the 20 GB builder\n┗/);
     await f.press(KEY.ctrlC);
     await run;
+  });
+
+  it("the Tools screen colours sizes by weight, starts a heavy formula and an unknown Linux build unticked with the reason in the detail pane, and turns the Disk line as the total nears the room", async () => {
+    const MB = 1024 * 1024;
+    const formula = (name: string, mib: number): [string, BrewFormula] => [name, { name, fullName: name, deps: [], bytes: mib * MB, macosOnly: false }];
+    const brew: BrewTable = new Map([formula("gh", 250), formula("big", 600), formula("huge", 8_500), formula("mas", 300)]);
+    const tools: ManifestEntry[] = [
+      { rung: "tools", id: "tools/brew/gh", label: "gh", group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "yes" },
+      { rung: "tools", id: "tools/brew/big", label: "big", group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "yes" },
+      { rung: "tools", id: "tools/brew/huge", label: "huge", group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "yes" },
+      { rung: "tools", id: "tools/brew/zingzy/tap/diskbloom", label: "zingzy/tap/diskbloom", group: "Homebrew", paths: [], bytes: 0, default: "skip", linux: "unknown" },
+      { rung: "tools", id: "tools/brew/mas", label: "mas", group: "Homebrew", paths: [], bytes: 0, default: "skip", reason: "no Linux bottle", linux: "no" },
+    ];
+    const was = process.env["FORCE_COLOR"];
+    process.env["FORCE_COLOR"] = "3";
+    try {
+      const f = fake({ brew: async () => brew, collect: async () => ({ entries: tools }), columns: 120 });
+      const run = runInit(f.opts, f.io);
+      await f.until("Tools");
+      const frame = () => f.raw().slice(f.raw().lastIndexOf("\x1b[36m◆\x1b[39m  \x1b[36mTools"));
+      // The size column alone takes the colour, right-aligned as before; the labels stay dim like every other row.
+      expect(frame()).toMatch(/\x1b\[31m\s*1\.6 GB\x1b\[39m/);
+      expect(frame()).toMatch(/\x1b\[2mgh\s*\x1b\[22m  \x1b\[33m\s*250\.0 MB\x1b\[39m/);
+      expect(frame()).toMatch(/\x1b\[2mbig\s*\x1b\[22m  \x1b\[93m\s*600\.0 MB\x1b\[39m/);
+      expect(frame()).toMatch(/\x1b\[2mhuge\s*\x1b\[22m  \x1b\[31m\s*8\.3 GB\x1b\[39m/);
+      // No weight on a row nothing measured, nor on a row locked out, whatever its Mac size.
+      expect(frame()).toMatch(/diskbloom\s*\x1b\[22m  \x1b\[2m\s*not measured\x1b\[22m/);
+      expect(frame()).toMatch(/\x1b\[2mmas\s*\x1b\[22m  \x1b\[2m\s*stays here\x1b\[22m/);
+      const screen = () => f.text().slice(f.text().lastIndexOf("◆  Tools"));
+      expect(screen()).toMatch(/● gh\s+250\.0 MB/);
+      expect(screen()).toMatch(/○ big\s+600\.0 MB/);
+      expect(screen()).toMatch(/○ huge\s+8\.3 GB/);
+      expect(screen()).toMatch(/○ zingzy\/tap\/diskbloom\s+not measured/);
+      expect(screen()).toMatch(/▾ Homebrew\s+1 of 4/);
+      // Under 50 percent the Disk line is loud but plain, with the dim parts line above it and the keys right under.
+      expect(frame()).toMatch(/\x1b\[2mHomebrew's toolchain 1\.6 GB, tools 250\.0 MB\x1b\[22m\n\x1b\[2m┃\x1b\[22m\n\x1b\[2m┃\x1b\[22m  Disk: 1\.8 GB of 16\.1 GB on the 20 GB builder\n\x1b\[2m┗/);
+      // Onto big: its detail line reads in normal text and names the weight as the reason it starts unticked.
+      await f.press(KEY.down, KEY.down, KEY.down, KEY.down);
+      expect(frame()).toContain("\x1b[22m  600.0 MB, tick to bring; from this Mac's Homebrew\n");
+      await f.press(KEY.space);
+      await f.press(KEY.down);
+      expect(frame()).toContain("\x1b[22m  8.3 GB, tick to bring; from this Mac's Homebrew\n");
+      await f.press(KEY.space);
+      // The toolchain, gh, big and huge: 10,950 MB of 16,528, past 65 percent.
+      expect(frame()).toMatch(/\x1b\[93mDisk: 10\.7 GB of 16\.1 GB on the 20 GB builder\x1b\[39m\n\x1b\[2m┗/);
+      // Without big the total sits between 50 and 65 percent.
+      await f.press(KEY.up, KEY.space);
+      expect(frame()).toMatch(/\x1b\[33mDisk: 10\.1 GB of 16\.1 GB on the 20 GB builder\x1b\[39m\n\x1b\[2m┗/);
+      // The unknown build says why it waits for a tick and that nothing sized it.
+      await f.press(KEY.down, KEY.down);
+      expect(frame()).toContain("\x1b[22m  Linux build unknown, tick to try; size not measured\n");
+      await f.press(KEY.ctrlC);
+      await run;
+    } finally {
+      if (was === undefined) delete process.env["FORCE_COLOR"];
+      else process.env["FORCE_COLOR"] = was;
+    }
+  });
+
+  it("at 75 percent of the room the Tools screen holds Enter, the two footer slots say what to do and the Disk line is red; one byte under, Enter advances", async () => {
+    const MB = 1024 * 1024;
+    // The room is 16,528 MB and the toolchain 1,600, so 10,796 MB more lands on 75 percent exactly.
+    const brew: BrewTable = new Map([
+      ["over", { name: "over", fullName: "over", deps: [], bytes: 10_796 * MB, macosOnly: false }],
+      ["edge", { name: "edge", fullName: "edge", deps: [], bytes: 10_796 * MB - 1, macosOnly: false }],
+    ]);
+    const tools: ManifestEntry[] = [
+      { rung: "tools", id: "tools/brew/over", label: "over", group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "yes" },
+      { rung: "tools", id: "tools/brew/edge", label: "edge", group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "yes" },
+    ];
+    const was = process.env["FORCE_COLOR"];
+    process.env["FORCE_COLOR"] = "3";
+    try {
+      const f = fake({ brew: async () => brew, collect: async () => ({ entries: tools }), columns: 120 });
+      const run = runInit(f.opts, f.io);
+      await f.until("Tools");
+      const frame = () => f.raw().slice(f.raw().lastIndexOf("\x1b[36m◆\x1b[39m  \x1b[36mTools"));
+      const bar = "\x1b[2m┃\x1b[22m";
+      // Down past the header and the toolchain onto over; ticking it lands on the line.
+      await f.press(KEY.down, KEY.down, KEY.down, KEY.space);
+      // At 100 columns the message wraps over the two slots that hold the parts and an empty line otherwise.
+      expect(frame()).toContain(`${bar}  \x1b[2mSelected: over\x1b[22m\n${bar}  Too full to build. Untick tools you do not need on the machine until the estimate leaves the\n${bar}  red; keep headroom for what the build installs.\n${bar}  \x1b[31mDisk: 12.1 GB of 16.1 GB on the 20 GB builder\x1b[39m\n\x1b[2m┗`);
+      await f.press(KEY.enter);
+      expect(f.text()).not.toContain("◆  Agents");
+      expect(frame()).toContain("Too full to build.");
+      // Off the line by a byte: the slot shows the parts again, the line is bright yellow, and Enter goes on.
+      await f.press(KEY.space, KEY.down, KEY.space);
+      expect(frame()).toContain(`${bar}  \x1b[2mSelected: edge\x1b[22m\n${bar}  \x1b[2mHomebrew's toolchain 1.6 GB, tools 10.5 GB\x1b[22m\n${bar}\n${bar}  \x1b[93mDisk: 12.1 GB of 16.1 GB on the 20 GB builder\x1b[39m\n\x1b[2m┗`);
+      await f.press(KEY.enter);
+      // Nothing else on this laptop, so the run goes straight to the boot question.
+      await f.until(BOOT);
+      await f.press(KEY.ctrlC);
+      await run;
+    } finally {
+      if (was === undefined) delete process.env["FORCE_COLOR"];
+      else process.env["FORCE_COLOR"] = was;
+    }
   });
 });
 

@@ -144,11 +144,13 @@ const GLOBALS: readonly GlobalManager[] = [
   { id: "cargo", bin: "cargo", group: "cargo installs", args: ["install", "--list"], parse: parseCargoInstalls, sep: " " },
 ];
 
-// A formula the laptop already runs on Linux needs no snapshot to vouch for it.
+// A formula the laptop already runs on Linux needs no snapshot to vouch for it. A formula nothing vouches
+// for starts unticked without a reason, so the row stays open to a tick that tries it.
 function formulaRow(host: Host, name: string): ManifestEntry {
   const linux = host.platform === "linux" ? "yes" : linuxSupport(name);
   const base = { rung: "tools" as const, id: `tools/brew/${name}`, label: name, group: "Homebrew", linux };
-  return linux === "no" ? item({ ...base, default: "skip", reason: "no Linux bottle" }) : item(base);
+  if (linux === "no") return item({ ...base, default: "skip", reason: "no Linux bottle" });
+  return linux === "unknown" ? item({ ...base, default: "skip" }) : item(base);
 }
 
 async function brewRows(host: Host): Promise<ManifestEntry[]> {

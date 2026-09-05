@@ -12,6 +12,11 @@ import { Prompt, isCancel } from "@clack/core";
 import { S_BAR, S_STEP_ACTIVE, S_STEP_CANCEL, S_STEP_SUBMIT } from "@clack/prompts";
 import { GUTTER, S_BAR_FOCUS, S_BAR_FOCUS_END, colourDepth, ellipsize, helpLine, isTTY, rowsOf, summarize, viewport, widthOf, wrap, type HelpKey } from "./init-layout.js";
 
+/** The 16-colour names a screen may put on a size or its Disk line, in order of weight. */
+export type Tone = "yellow" | "yellowBright" | "red";
+/** A footer line: dim as a bare string; an object is loud, in normal text or its tone's colour. */
+export type FooterLine = string | { text: string; tone?: Tone };
+
 export interface SelectItem {
   id: string;
   label: string;
@@ -21,6 +26,8 @@ export interface SelectItem {
   hint?: string;
   /** The second column as a function of the terminal width, read every frame; wins over hint. */
   hintFor?: (width: number) => string;
+  /** The second column drawn in this colour instead of dim, on a screen where hue means weight. */
+  tone?: Tone;
   group?: string;
   /** Lines for the detail pane while this item is highlighted; the reason a row is locked belongs here. */
   detail: string[];
@@ -53,8 +60,11 @@ export interface RungSelectOptions {
   initialChoices?: ReadonlyMap<string, string>;
   /** Plain lines under the title, before the search: what the screen is for, when the rows alone do not say. */
   intro?: string[];
-  /** Lines under the Selected line, rebuilt from the current ticks. */
-  footer?: (ticks: ReadonlySet<string>) => string[];
+  /** Lines under the Selected line, rebuilt from the current ticks and given the columns a line may take; the same
+   * count every frame, so nothing moves. */
+  footer?: (ticks: ReadonlySet<string>, width: number) => FooterLine[];
+  /** Enter does not advance while this says so for the current ticks; the footer says why. Esc still goes back. */
+  hold?: (ticks: ReadonlySet<string>) => boolean;
   /** Rows the detail pane keeps for the highlighted item; two unless a screen has more to say. */
   detailLines?: number;
   /** Groups that start folded. */
@@ -292,6 +302,10 @@ class RungPrompt extends Prompt<Set<string>> {
     return key.name === "space";
   }
 
+  protected override _shouldSubmit(): boolean {
+    return this.o.hold?.(this.ticks()) !== true;
+  }
+
   private entries(): Entry[] {
     return buildEntries(this.o.items, this.userInput, this.folded, this.o.groupNote);
   }
@@ -398,11 +412,12 @@ class RungPrompt extends Prompt<Set<string>> {
     return `${hint}${GUTTER}${(answer ?? "").padEnd(this.answerWidth)}`;
   }
 
-  private line(glyph: string, label: string, second: string, indent: number, cols: { label: number; second: number }, current: boolean, heading: boolean, prefix = ""): string {
+  private line(glyph: string, label: string, second: string, indent: number, cols: { label: number; second: number }, current: boolean, heading: boolean, prefix = "", tone?: Tone): string {
     const field = ellipsize(label, cols.label - indent).padEnd(cols.label - indent);
     const lit = prefix !== "" && field.startsWith(prefix) ? `${dim(prefix)}${field.slice(prefix.length)}` : field;
     const text = heading ? styleText("bold", field) : current ? lit : dim(field);
-    return `${current ? styleText("cyan", "❯") : " "} ${" ".repeat(indent)}${glyph} ${text}${second !== "" ? `${GUTTER}${dim(second.padStart(cols.second))}` : ""}`.trimEnd();
+    const cell = second.padStart(cols.second);
+    return `${current ? styleText("cyan", "❯") : " "} ${" ".repeat(indent)}${glyph} ${text}${second !== "" ? `${GUTTER}${tone === undefined ? dim(cell) : styleText(tone, cell)}` : ""}`.trimEnd();
   }
 
   private row(entry: Entry, current: boolean, cols: { label: number; second: number }, width: number, cuts: Map<SelectItem, string>): string {
@@ -428,7 +443,8 @@ class RungPrompt extends Prompt<Set<string>> {
         return this.line(entry.folded ? "▸" : "▾", entry.group, this.groupSecond(entry.group, entry.items), 0, cols, current, true);
       case "item": {
         const i = entry.item;
-        return this.line(box(i.follows !== undefined ? i.follows(ticks) : ticks.has(i.id)), label(i), this.second(i, width), RungPrompt.indent(i), cols, current, false, i.prefix);
+        // A row locked out shows its lock word in the column, never a weight.
+        return this.line(box(i.follows !== undefined ? i.follows(ticks) : ticks.has(i.id)), label(i), this.second(i, width), RungPrompt.indent(i), cols, current, false, i.prefix, i.lock === "off" ? undefined : i.tone);
       }
       default: {
         const _exhaustive: never = entry;
@@ -478,7 +494,7 @@ class RungPrompt extends Prompt<Set<string>> {
     this.cursor = settle(entries, this.cursor);
     const at = entries[this.cursor];
     const detail = this.detail(at);
-    const footer = this.o.footer?.(this.ticks()) ?? [];
+    const footer = this.o.footer?.(this.ticks(), width - EDGE) ?? [];
     const intro = (this.o.intro ?? []).flatMap(line => wrap(line, width - EDGE));
     // One row is left for the terminal's cursor line; a list that does not fit gives two more rows to the arrows.
     const room = rowsOf(this.o.output) - 1 - FIXED_LINES - intro.length - detail.length - footer.length;
@@ -497,13 +513,17 @@ class RungPrompt extends Prompt<Set<string>> {
     for (let i = start; i < end; i++) lines.push(`${bar} ${this.row(entries[i]!, i === this.cursor, cols, width, cuts)}`);
     if (end < entries.length) lines.push(`${bar}  ${dim(`↓ ${entries.length - end} more`)}`);
     lines.push(bar);
-    for (const d of detail) lines.push(`${bar}  ${dim(ellipsize(d, width - EDGE))}`.trimEnd());
+    // The highlighted row's own lines read in normal text; everything under them is dim but the one loud footer line.
+    for (const d of detail) lines.push(`${bar}  ${ellipsize(d, width - EDGE)}`.trimEnd());
     // The line names the ticked rows; where it would say none on a screen of answered rows it counts what was chosen instead,
     // as the header does, since a sign-in is chosen though nothing is ticked.
     const named = this.selected(width - EDGE - SELECTED.length);
     const picked = named !== "none" || !spread ? named : spreadOf(withChoices, this.choices, true) || "none";
     lines.push(`${bar}  ${dim(`${SELECTED}${picked}`)}`);
-    for (const f of footer) lines.push(`${bar}  ${dim(ellipsize(f, width - EDGE))}`.trimEnd());
+    for (const f of footer) {
+      const text = ellipsize(typeof f === "string" ? f : f.text, width - EDGE);
+      lines.push(text === "" ? bar : `${bar}  ${typeof f === "string" ? dim(text) : f.tone === undefined ? text : styleText(f.tone, text)}`);
+    }
     const keys: HelpKey[] = this.mixed
       ? [{ key: "space", does: "tick or change" }, KEY_FOLD, KEY_NEXT, KEY_BACK]
       : withChoices.length > 0

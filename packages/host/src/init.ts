@@ -15,7 +15,7 @@ import { S_BAR, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, cancel, isCancel, lo
 import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { BREW_TOOLCHAIN_BYTES, BUILDER_DISK_GB, MEASURED_ON, PACK_BUDGET_BYTES, TOOLCHAIN_MEASURED_ON, TOOLS_DISK_FLOOR, agentInstallsFor, agentSize, brewfileFor, editorInstallsFor, estimateDisk, extensionsFile, pinState, remoteEditorFor, remoteSettingsPath, toolInstallsFor, toolSize, type BrewTable, type DiskEstimate, type ImportResult } from "@wsp/engine";
+import { BREW_TOOLCHAIN_BYTES, BUILDER_DISK_GB, MEASURED_ON, PACK_BUDGET_BYTES, TOOLCHAIN_MEASURED_ON, TOOLS_DISK_FLOOR, agentInstallsFor, agentSize, brewfileFor, editorInstallsFor, estimateDisk, extensionsFile, pinState, remoteEditorFor, remoteSettingsPath, toolInstallsFor, toolSize, type BrewTable, type DiskEstimate, type ImportResult, type ToolSize } from "@wsp/engine";
 import { ALREADY_APPLIED } from "@wsp/protocol";
 import { CLAUDE_INSTALLER, importFor, importResultPath, keychainLogins, leftBehind, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
@@ -41,7 +41,8 @@ import { openRunLog, runLogPath } from "./init-log.js";
 import { secretsStage, type SecretOutcome } from "./init-secrets.js";
 import { keptBuilder, stopKeptBuilder, updateRoad } from "./init-upgrade.js";
 import { retentionOffer } from "./storage.js";
-import { rungSelect, type SelectItem } from "./init-select.js";
+import { rungSelect, type FooterLine, type RungSelectOptions, type SelectItem, type Tone } from "./init-select.js";
+import { DISK_HOLD_SHARE, HEAVY_BYTES, diskTone, weighed, weightTone } from "./init-weight.js";
 import { OPEN_LINE, builderLink, noteOutcomes, signInStage, stageLogins, type BuilderLink, type LoginOutcome, type SignInFlow } from "./init-signin.js";
 import type { HostHandle } from "./server.js";
 
@@ -491,13 +492,21 @@ function editorWhy(e: ManifestEntry): string | undefined {
 }
 
 const isMcpRow = (e: ManifestEntry): boolean => e.rung === "agents" && e.id.startsWith(MCP_ID_PREFIX);
+const roadWords = (size: ToolSize): string => (size.road === "measured" ? `measured on Linux ${MEASURED_ON}` : "from this Mac's Homebrew");
+const depsWords = (size: ToolSize): string => (size.deps === 0 ? "" : ` with ${size.deps} dependenc${size.deps === 1 ? "y" : "ies"}`);
+
 /** Where a tool's number came from, for the detail pane. */
 function sizeWhy(e: ManifestEntry, brew: BrewTable): string {
   const size = toolSize(e, brew);
-  if (size === undefined) return "size not measured";
-  const road = size.road === "measured" ? `measured on Linux ${MEASURED_ON}` : "from this Mac's Homebrew";
-  const deps = size.deps === 0 ? "" : ` with ${size.deps} dependenc${size.deps === 1 ? "y" : "ies"}`;
-  return `about ${fmtBytes(size.bytes)}${deps}, ${road}`;
+  return size === undefined ? "size not measured" : `about ${fmtBytes(size.bytes)}${depsWords(size)}, ${roadWords(size)}`;
+}
+
+/** A formula's second detail line: why it starts unticked when it does, then its size and where the number came from. */
+function toolWhy(e: ManifestEntry, brew: BrewTable): string {
+  if (e.linux === "unknown") return `Linux build unknown, tick to try; ${sizeWhy(e, brew)}`;
+  const size = toolSize(e, brew);
+  if (size !== undefined && size.bytes >= HEAVY_BYTES) return `${fmtBytes(size.bytes)}${depsWords(size)}, tick to bring; ${roadWords(size)}`;
+  return `${sizeWhy(e, brew)}; ${e.default === "bring" ? "brought by default" : "left out by default"}`;
 }
 
 /** The second detail line: why a row is locked, else what ticking it means. */
@@ -514,10 +523,7 @@ function detailWhy(e: ManifestEntry, lock: "on" | "off" | undefined, brew: BrewT
     return `installs ${size === undefined ? "on the machine (size not measured)" : `about ${fmtBytes(size)} on the machine (measured ${MEASURED_ON})`}; ${config}`;
   }
   const byDefault = e.default === "bring" ? "brought by default" : "left out by default";
-  if (e.rung === "tools") {
-    if (e.id.startsWith("tools/brew-tap/")) return `its formula list, a few MB; the formulae carry the size; ${byDefault}`;
-    return `${sizeWhy(e, brew)}; ${byDefault}`;
-  }
+  if (e.rung === "tools") return e.id.startsWith("tools/brew-tap/") ? `its formula list, a few MB; the formulae carry the size; ${byDefault}` : toolWhy(e, brew);
   const size = e.bytes > 0 ? `${fmtBytes(e.bytes)}, ` : "";
   const editor = e.rung === "editors" ? editorWhy(e) : undefined;
   return `${size}${editor ?? byDefault}`;
@@ -534,30 +540,33 @@ function whereNothing(e: ManifestEntry): string {
 
 const hasInstaller = (e: ManifestEntry): boolean => agentInstallsFor([{ ...e, bring: true }], { claude: CLAUDE_INSTALLER }).installs.length > 0;
 
-/** The second column of a tools or agents row: what it puts on the machine; an agent nothing installs shows
- * what travels; nothing for a tap. */
+/** What a tools or agents row puts on the machine, when something measured it; an agent nothing installs weighs what travels. */
+function installBytes(e: ManifestEntry, brew: BrewTable): number | undefined {
+  if (e.rung === "agents") return hasInstaller(e) ? agentSize(e) : e.bytes > 0 ? e.bytes : undefined;
+  return e.id.startsWith("tools/brew-tap/") ? undefined : toolSize(e, brew)?.bytes;
+}
+
+/** The second column of a tools or agents row: its weight on the machine; nothing for a tap or an agent that only travels. */
 function installHint(e: ManifestEntry, brew: BrewTable): string | undefined {
-  if (e.rung === "agents") {
-    if (!hasInstaller(e)) return e.bytes > 0 ? fmtBytes(e.bytes) : undefined;
-    const size = agentSize(e);
-    return size === undefined ? "not measured" : fmtBytes(size);
-  }
-  if (e.id.startsWith("tools/brew-tap/")) return undefined;
-  const size = toolSize(e, brew);
-  return size === undefined ? "not measured" : fmtBytes(size.bytes);
+  const bytes = installBytes(e, brew);
+  if (bytes !== undefined) return fmtBytes(bytes);
+  return e.id.startsWith("tools/brew-tap/") || (e.rung === "agents" && !hasInstaller(e)) ? undefined : "not measured";
 }
 
 export function selectItem(e: ManifestEntry, hintFor?: (width: number) => string, brew: BrewTable = new Map()): SelectItem {
   const minus = e.excludes !== undefined && e.excludes.length > 0 ? ` minus ${e.excludes.join(", ")}` : "";
   const where = e.paths.length > 0 ? `${e.paths.join(", ")}${minus}` : whereNothing(e);
   const lock = e.required ? "on" : !isTickable(e) ? "off" : undefined;
-  const hint = e.rung === "tools" || e.rung === "agents" ? installHint(e, brew) : e.bytes > 0 && e.rung !== "logins" ? fmtBytes(e.bytes) : undefined;
+  const installs = e.rung === "tools" || e.rung === "agents";
+  const hint = installs ? installHint(e, brew) : e.bytes > 0 && e.rung !== "logins" ? fmtBytes(e.bytes) : undefined;
+  const tone = installs ? weightTone(installBytes(e, brew) ?? 0) : undefined;
   // A path-shaped app data label is the row's ~/Library parent, a slash, then its name; the parent goes dim. A carve's worded label stays whole.
   const parent = e.group === APP_DATA_GROUP && e.paths[0] === `~/Library/${e.label}` ? e.label.slice(0, e.label.indexOf("/") + 1) : "";
   return {
     id: e.id,
     label: e.label,
     ...(hintFor !== undefined ? { hintFor } : hint !== undefined ? { hint } : {}),
+    ...(tone !== undefined ? { tone } : {}),
     ...(e.group !== undefined ? { group: e.group } : {}),
     detail: [where, detailWhy(e, lock, brew), ...(e.consent === true && lock === undefined ? [CONSENT_WHY] : [])],
     ...(lock !== undefined ? { lock } : {}),
@@ -577,11 +586,13 @@ export function toolsItems(entries: readonly ManifestEntry[], brew: BrewTable): 
   const canBrew = entries.some(e => e.id.startsWith("tools/brew/") || e.id.startsWith("tools/brew-tap/") || /^tools\/(pnpm|bun|cargo|go|pipx)\//.test(e.id));
   if (!canBrew) return items;
   const group = entries.find(e => e.id.startsWith("tools/brew/") && e.group !== undefined)?.group;
+  const tone = weightTone(BREW_TOOLCHAIN_BYTES);
   const toolchain: SelectItem = {
     id: TOOLCHAIN_ROW,
     label: "Homebrew's toolchain (glibc, gcc)",
     hint: fmtBytes(BREW_TOOLCHAIN_BYTES),
     ...(group !== undefined ? { group } : {}),
+    ...(tone !== undefined ? { tone } : {}),
     detail: ["pulled in by the first Homebrew formula; Linux bottles are built against Homebrew's own glibc", `about ${fmtBytes(BREW_TOOLCHAIN_BYTES)}, measured on Linux ${TOOLCHAIN_MEASURED_ON}`],
     follows: ticks => toolInstallsFor(asBring(entries.filter(e => ticks.has(e.id))), brew).installs.some(t => t.id === "tools/homebrew"),
   };
@@ -608,14 +619,35 @@ export function diskLine(est: DiskEstimate): string {
   return parts === "" ? diskHead(est) : `${diskHead(est)} (${parts})`;
 }
 
-/** The running total under a screen, then its parts: the rows ticked on earlier screens plus this one's ticks. */
-function diskFooter(earlier: readonly ManifestEntry[], entries: readonly ManifestEntry[], brew: BrewTable): (ticks: ReadonlySet<string>) => string[] {
+/** The running total under a screen: the rows ticked on earlier screens plus this one's ticks. */
+function diskUnder(earlier: readonly ManifestEntry[], entries: readonly ManifestEntry[], brew: BrewTable): (ticks: ReadonlySet<string>) => DiskEstimate {
   return ticks => {
     const rows = asBring([...earlier, ...entries.filter(e => ticks.has(e.id))]);
-    const est = estimateDisk(rows, rows.reduce((n, e) => n + e.bytes, 0), brew);
-    const parts = diskParts(est);
-    return parts === "" ? [`Disk: ${diskHead(est)}`] : [`Disk: ${diskHead(est)}`, parts];
+    return estimateDisk(rows, rows.reduce((n, e) => n + e.bytes, 0), brew);
   };
+}
+
+/** In the red tier the screen holds Enter, and the footer says what to do instead of the parts. */
+const heldDisk = (est: DiskEstimate): boolean => diskTone(est.total, est.room) === "red";
+const tooFull = (rung: Rung): string => `Too full to build. Untick ${rung} you do not need on the machine until the estimate leaves the red; keep headroom for what the build installs.`;
+
+/** Under a screen: the parts of the running total, dim, then the Disk line loud in its weight's colour, directly above the
+ * keys. Three lines every frame, so the screen does not move under a tick: the parts and an empty line, or, in the red tier,
+ * the way out over the two. */
+function diskFooter(estimate: (ticks: ReadonlySet<string>) => DiskEstimate, rung: Rung): (ticks: ReadonlySet<string>, width: number) => FooterLine[] {
+  return (ticks, width) => {
+    const est = estimate(ticks);
+    const tone = diskTone(est.total, est.room);
+    const [first = "", second = ""] = heldDisk(est) ? wrap(tooFull(rung), width, "") : [];
+    const head: FooterLine[] = heldDisk(est) ? [{ text: first }, { text: second }] : [diskParts(est), ""];
+    return [...head, { text: `Disk: ${diskHead(est)}`, ...(tone !== undefined ? { tone } : {}) }];
+  };
+}
+
+/** The Tools and Agents screens' footer and hold, over one estimate of the ticks. */
+function diskScreen(earlier: readonly ManifestEntry[], entries: readonly ManifestEntry[], brew: BrewTable, rung: Rung): Pick<RungSelectOptions, "footer" | "hold"> {
+  const estimate = diskUnder(earlier, entries, brew);
+  return { footer: diskFooter(estimate, rung), hold: ticks => heldDisk(estimate(ticks)) };
 }
 
 /** The day a file last changed, in this computer's own calendar. */
@@ -740,13 +772,15 @@ export function summaryNote(
   const pinWords = [...new Set(roads.map(r => PIN_WORDS[pinState(r.pin, r.source)]))].join("; ");
   const fromReleases = roads.length === 0 ? "" : `, ${roads.length} from ${roads.length === 1 ? "its" : "their"} GitHub release${roads.length === 1 ? "" : "s"} (${pinWords})`;
   const installs = [...agents, ...editors, ...(tools > 0 ? [`${tools} tool${tools === 1 ? "" : "s"}${toolchain}${fromReleases}`] : []), ...(servers > 0 ? [`${servers} MCP server${servers === 1 ? "" : "s"}`] : [])];
-  const closing: [string, string][] = [
-    ["Upload", upload > PACK_BUDGET_BYTES ? `${fmtBytes(upload)}, over the ${fmtBytes(PACK_BUDGET_BYTES)} the machine's disk allows` : `${fmtBytes(upload)}, nothing has left this computer yet`],
-    ["Installs", installs.length > 0 ? installs.join(", ") : "nothing; the machine boots bare"],
-    ["Disk", diskLine(estimateDisk(bring, upload, brew))],
+  const est = estimateDisk(bring, upload, brew);
+  // The Disk line takes its weight's colour here too: the card is the last thing read before the confirm.
+  const closing: [string, string, Tone | undefined][] = [
+    ["Upload", upload > PACK_BUDGET_BYTES ? `${fmtBytes(upload)}, over the ${fmtBytes(PACK_BUDGET_BYTES)} the machine's disk allows` : `${fmtBytes(upload)}, nothing has left this computer yet`, undefined],
+    ["Installs", installs.length > 0 ? installs.join(", ") : "nothing; the machine boots bare", undefined],
+    ["Disk", diskLine(est), diskTone(est.total, est.room)],
   ];
   const column = Math.max(...closing.map(([label]) => label.length)) + GUTTER.length;
-  return [...lines, "", ...closing.flatMap(([label, text]) => wrap(`${label.padEnd(column)}${text}`, inner, " ".repeat(column)))];
+  return [...lines, "", ...closing.flatMap(([label, text, tone]) => wrap(`${label.padEnd(column)}${text}`, inner, " ".repeat(column)).map(l => (tone === undefined ? l : styleText(tone, l))))];
 }
 
 interface Answers {
@@ -798,7 +832,7 @@ async function tickRungs(manifest: Manifest, io: InitIO, brew: BrewTable): Promi
       initialChoices: prior?.choices ?? fresh.choices,
       groupHint: rung === "everything" ? everythingGroupHint(entries) : g => groups.get(g)?.hint,
       groupNote: g => groups.get(g)?.note,
-      ...(rung === "everything" ? { footer: everythingFooter(entries), detailLines: 3, folded: [APP_DATA_GROUP] } : rung === "tools" || rung === "agents" ? { footer: diskFooter(earlier, entries, brew) } : {}),
+      ...(rung === "everything" ? { footer: everythingFooter(entries), detailLines: 3, folded: [APP_DATA_GROUP] } : rung === "tools" || rung === "agents" ? diskScreen(earlier, entries, brew, rung) : {}),
       ...(rung === "editors" ? { intro: editorsIntro(entries) } : {}),
       input: io.input,
       output: io.output,
@@ -898,6 +932,8 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     }
     sizes.stop();
   }
+  // A heavy formula starts unticked, judged on the sizes just read.
+  manifest = { ...manifest, entries: weighed(manifest.entries, brew) };
   if (notes.length > 0) log.warn(notes.join("\n"), out);
   card("Found on this computer", detectionNote(manifest, source), io.output);
 
@@ -960,10 +996,15 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   // The whole recipe against the disk, before the account is read or anything boots: the tools stage would
   // otherwise fill the disk after the machine billed.
   const disk = estimateDisk(asBring(bring), uploadBytes, brew);
+  // A headless run stops where the screens hold: in the red tier, with the screens' own sentence.
+  if (!interactive && heldDisk(disk)) {
+    log.error(`${tooFull("tools")} This recipe needs about ${fmtBytes(disk.total)} on the machine, ${Math.round((disk.total / disk.room) * 100)} percent of the ${fmtBytes(disk.room)} the ${BUILDER_DISK_GB} GB builder leaves.`, out);
+    cancel(`Nothing was booted. Set bring to false on rows in ${path} until the estimate is under ${fmtBytes(disk.room * DISK_HOLD_SHARE)}, then run wsp init --yes --manifest ${path}; the recipe is kept.`, out);
+    return { code: 1 };
+  }
   if (disk.over > 0) {
     log.error(`This recipe needs about ${fmtBytes(disk.total)} on the machine; the ${BUILDER_DISK_GB} GB disk leaves ${fmtBytes(disk.room)} after the base image and ${fmtBytes(TOOLS_DISK_FLOOR)} of headroom.`, out);
-    const fix = interactive ? `Untick about ${fmtBytes(disk.over)} of tools, agents or files (each screen shows sizes and the total) and run wsp init again` : `Set bring to false on rows worth about ${fmtBytes(disk.over)} in ${path}, then run wsp init --yes --manifest ${path}`;
-    cancel(`Nothing was booted. ${fix}; the recipe is kept.`, out);
+    cancel(`Nothing was booted. Untick about ${fmtBytes(disk.over)} of tools, agents or files (each screen shows sizes and the total) and run wsp init again; the recipe is kept.`, out);
     return { code: 1 };
   }
   // Judged on the recipe's own sizes, before the account is read or anything boots: the builder's disk

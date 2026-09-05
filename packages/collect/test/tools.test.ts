@@ -33,10 +33,20 @@ describe("tools", () => {
       { rung: "tools", id: "tools/brew-tap/homebrew/bundle", label: "homebrew/bundle", group: "Homebrew taps", paths: [], bytes: 0, default: "bring", linux: "yes" },
       { rung: "tools", id: "tools/brew/gh", label: "gh", group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "yes" },
       { rung: "tools", id: "tools/brew/jq", label: "jq", group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "yes" },
-      { rung: "tools", id: "tools/brew/oven-sh/bun/bun", label: "oven-sh/bun/bun", group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "unknown" },
+      { rung: "tools", id: "tools/brew/oven-sh/bun/bun", label: "oven-sh/bun/bun", group: "Homebrew", paths: [], bytes: 0, default: "skip", linux: "unknown" },
       { rung: "tools", id: "tools/brew/mas", label: "mas", group: "Homebrew", paths: [], bytes: 0, default: "skip", reason: "no Linux bottle", linux: "no" },
       { rung: "tools", id: "tools/brew-cask/rectangle", label: "rectangle", group: "Homebrew casks", paths: [], bytes: 0, default: "skip", reason: "macOS app, no Linux build", linux: "no" },
       { rung: "tools", id: "tools/mas/Xcode", label: "Xcode", group: "Mac App Store", paths: [], bytes: 0, default: "skip", reason: "Mac App Store, macOS only", linux: "no" },
+    ]);
+  });
+
+  it("default ticks: no Linux bottle locks the row off with its reason, an unknown Linux build starts unticked but stays tickable, a bottled formula starts ticked", async () => {
+    const host = fakeHost({ which: ["brew"], exec: { "brew bundle dump --file=-": 'brew "mas"\nbrew "zingzy/tap/diskbloom"\nbrew "gh"\n' } });
+    const rows = await detectTools(host);
+    expect(rows.map(r => [r.id, r.default, r.reason, r.linux])).toEqual([
+      ["tools/brew/mas", "skip", "no Linux bottle", "no"],
+      ["tools/brew/zingzy/tap/diskbloom", "skip", undefined, "unknown"],
+      ["tools/brew/gh", "bring", undefined, "yes"],
     ]);
   });
 
