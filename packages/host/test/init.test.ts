@@ -74,6 +74,11 @@ function scriptedLink(state: { signedIn: boolean; hold: boolean; missing: boolea
       link.exit(pty, 127);
       return;
     }
+    if (line.includes("kubectl config current-context")) {
+      link.data(pty, "minikube\r\nWSP_STATUS 0\r\n");
+      link.exit(pty, 0);
+      return;
+    }
     if (line.includes("WSP_STATUS")) {
       link.data(pty, state.signedIn ? "Logged in using ChatGPT\r\nLogged in to github.com account someone (keyring)\r\n{\"loggedIn\": true}\r\nWSP_STATUS 0\r\n" : "Not logged in\r\nWSP_STATUS 1\r\n");
       link.exit(pty, state.signedIn ? 0 : 1);
@@ -1143,31 +1148,40 @@ describe("wsp init, the sign-in stage", () => {
   });
 
   it("a login with no status command that ended with a non-zero exit is offered a retry or a skip; a clean exit stays not verified", async () => {
-    const GEMINI_MANIFEST: Manifest = { entries: [FIXTURE.entries[0]!, { rung: "logins", id: "logins/gemini", label: "Gemini CLI login", group: "Agent logins", paths: ["~/.gemini/oauth_creds.json"], bytes: 300, default: "skip" }] };
-    const f = fake({ hold: true, collect: async () => GEMINI_MANIFEST });
+    // A login whose command is not coming starts at skip and is never staged, so the tools row that brings cloudflared is here.
+    const CLOUDFLARED_MANIFEST: Manifest = {
+      entries: [
+        FIXTURE.entries[0]!,
+        { rung: "tools", id: "tools/brew/cloudflared", label: "cloudflared", group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "yes" },
+        { rung: "logins", id: "logins/cloudflared", label: "cloudflared login", group: "CLI logins", paths: ["~/.cloudflared/cert.pem"], bytes: 300, default: "skip" },
+      ],
+    };
+    const f = fake({ hold: true, collect: async () => CLOUDFLARED_MANIFEST });
     const run = runInit(f.opts, f.io);
     await f.until("Identity");
+    await f.press(KEY.enter);
+    await f.until("Tools");
     await f.press(KEY.enter);
     await f.until("Sign-ins");
     await f.press(KEY.enter);
     await f.until(BOOT);
     await f.press("y");
-    await f.until(/Gemini CLI login\s+gemini\n/);
+    await f.until(/cloudflared login\s+cloudflared tunnel login\n/);
     await f.until("Press Enter to open");
     await f.press("\x03");
-    await f.until("Gemini CLI login: not verified (no status command known for gemini; exit 130)");
-    await f.until("Gemini CLI login  r retry   s skip");
+    await f.until("cloudflared login: not verified (no status command known for cloudflared; exit 130)");
+    await f.until("cloudflared login  r retry   s skip");
     await f.press("r");
     await f.until(/Press Enter to open[\s\S]*Press Enter to open/);
     // A clean exit with no status command is not verified but nothing to retry.
     f.link.exit(f.link.ptys.at(-1)!, 0);
-    await f.until(/not verified \(no status command known for gemini\)\n/);
+    await f.until(/not verified \(no status command known for cloudflared\)\n/);
     await f.until(SEAL_Q(1));
     expect(f.text().split("r retry")).toHaveLength(2);
     await f.press(KEY.enter);
     const result = await run;
     expect(result.logins?.map(l => [l.state, l.exit])).toEqual([["not-verified", 0]]);
-    expect(f.text()).toMatch(/Sign-ins\n│\s+Gemini CLI login\s+not verified\n/);
+    expect(f.text()).toMatch(/Sign-ins\n│\s+cloudflared login\s+not verified\n/);
   });
 
   it("an unreadable golden-import.json is said so when the logins and secrets are written into a fresh one", () => {
@@ -1279,12 +1293,18 @@ describe("wsp init, logins copied to the machine", () => {
     ],
   };
   const STATUS_LINE = `${statusLine("gh auth status")}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`;
+  const KUBE_LINE = `${statusLine("kubectl config current-context 2>/dev/null")}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`;
 
   /** gh on the fake builder: its status names the copied token invalid (with `stale`, the second account's beside a
    * good first one) until gh auth login has run there. */
   function ghOnBuilder(f: Fake, o: { missing?: boolean; stale?: boolean } = {}): void {
     let loggedIn = false;
     f.link.script = (pty, line) => {
+      if (line.includes("kubectl config current-context")) {
+        f.link.data(pty, "minikube\r\nWSP_STATUS 0\r\n");
+        f.link.exit(pty, 0);
+        return;
+      }
       if (line.includes("WSP_STATUS")) {
         if (o.missing) {
           f.link.data(pty, "sh: gh: not found\r\nWSP_STATUS 127\r\n");
@@ -1329,12 +1349,12 @@ describe("wsp init, logins copied to the machine", () => {
     writeFileSync(f.opts.manifestPath, JSON.stringify({ entries: COPIED_MANIFEST.entries.map(e => (e.rung === "logins" ? { ...e, bring: true, choice: "copy" } : { ...e, bring: true })) }));
   }
 
-  it("a copied login whose status check fails is offered the machine sign-in, which lands it as signed in; a login nothing can check stays copied", async () => {
+  it("a copied login whose status check fails is offered the machine sign-in, which lands it as signed in; a copied kubeconfig is proved by its context", async () => {
     const f = fake({ collect: async () => COPIED_MANIFEST });
     ghOnBuilder(f);
     const { run } = await toTheBuilder(f);
     await f.until("GitHub CLI login: not signed in (copied, but gh auth status says not signed in)");
-    await f.until("kubectl config: copied (not verified: no status command known for kube)");
+    await f.until("kubectl config: signed in (copied; context minikube; kubectl config current-context 2>/dev/null)");
     await f.until("GitHub CLI login  r sign in on the machine   s skip");
     expect(f.text()).not.toContain("Signing in on the machine");
     await f.press("r");
@@ -1344,21 +1364,21 @@ describe("wsp init, logins copied to the machine", () => {
     const result = await run;
     expect(result.code).toBe(0);
     expect(f.reads).toEqual(["gh:github.com"]);
-    // The quiet check, the sign-in pty, then the check again.
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual([STATUS_LINE, "exec gh auth login || exit\r", STATUS_LINE]);
+    // The quiet checks, the sign-in pty, then the gh check again.
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual([STATUS_LINE, KUBE_LINE, "exec gh auth login || exit\r", STATUS_LINE]);
     expect(result.logins).toEqual([
       { id: "logins/gh", label: "GitHub CLI login", state: "signed-in", command: "gh auth login", exit: 0, note: "gh auth status" },
-      { id: "logins/kube", label: "kubectl config", state: "copied", note: "not verified: no status command known for kube" },
+      { id: "logins/kube", label: "kubectl config", state: "signed-in", note: "copied; context minikube; kubectl config current-context 2>/dev/null" },
     ]);
     expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({
       logins: [
         { id: "logins/gh", state: "signed-in", note: "gh auth status" },
-        { id: "logins/kube", state: "copied" },
+        { id: "logins/kube", state: "signed-in" },
       ],
     });
     expect((await f.runtimes.at(-1)!.golden.get())?.versions[0]?.logins).toEqual([
       { name: "GitHub CLI login", state: "signed-in" },
-      { name: "kubectl config", state: "copied" },
+      { name: "kubectl config", state: "signed-in" },
     ]);
   });
 
@@ -1376,7 +1396,7 @@ describe("wsp init, logins copied to the machine", () => {
     const result = await run;
     expect(result.code).toBe(0);
     expect(f.reads).toEqual(["gh:github.com (other)", "gh:github.com (Zingzy)"]);
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual([STATUS_LINE, "exec gh auth login || exit\r", STATUS_LINE]);
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual([STATUS_LINE, KUBE_LINE, "exec gh auth login || exit\r", STATUS_LINE]);
     expect(result.logins?.[0]).toEqual({ id: "logins/gh", label: "GitHub CLI login", state: "signed-in", command: "gh auth login", exit: 0, note: "gh auth status" });
   });
 
@@ -1408,7 +1428,7 @@ describe("wsp init, logins copied to the machine", () => {
     // The row stays a copy, so the recipe is not replanned and the check ran once.
     expect(f.recipes).toHaveLength(1);
     expect(loadManifest(join(dirname(f.opts.statePath), "golden-recipe.json")).entries.find(e => e.id === "logins/gh")?.choice).toBe("copy");
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual([STATUS_LINE]);
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual([STATUS_LINE, KUBE_LINE]);
     expect(result.logins?.[0]).toEqual({ id: "logins/gh", label: "GitHub CLI login", state: "signed-in", note: "copied; gh auth status", left: "other left behind: no token in the Keychain" });
     const landed = JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"));
     expect((landed.files.skipped as { id: string }[]).filter(s => s.id === "logins/gh")).toEqual([{ id: "logins/gh", path: "Keychain: gh:github.com (other)", note: "other left behind: no token in the Keychain" }]);
@@ -1544,7 +1564,7 @@ describe("wsp init, logins copied to the machine", () => {
     await sealIt(f);
     const result = await run;
     expect(result.code).toBe(0);
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual([STATUS_LINE]);
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual([STATUS_LINE, KUBE_LINE]);
     expect(result.logins?.[0]).toEqual({ id: "logins/gh", label: "GitHub CLI login", state: "skipped", note: "skipped by you" });
     expect((await f.runtimes.at(-1)!.golden.get())?.versions[0]?.logins?.[0]).toEqual({ name: "GitHub CLI login", state: "skipped" });
   });
@@ -1557,10 +1577,10 @@ describe("wsp init, logins copied to the machine", () => {
     expect(result.code).toBe(0);
     expect(f.text()).toContain("GitHub CLI login: not signed in (copied, but gh auth status says not signed in)");
     expect(f.text()).not.toContain("r sign in on the machine");
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual([STATUS_LINE]);
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual([STATUS_LINE, KUBE_LINE]);
     expect(result.logins).toEqual([
       { id: "logins/gh", label: "GitHub CLI login", state: "not-signed-in", note: "copied, but gh auth status says not signed in" },
-      { id: "logins/kube", label: "kubectl config", state: "copied", note: "not verified: no status command known for kube" },
+      { id: "logins/kube", label: "kubectl config", state: "signed-in", note: "copied; context minikube; kubectl config current-context 2>/dev/null" },
     ]);
   });
 

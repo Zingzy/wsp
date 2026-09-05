@@ -19,7 +19,7 @@ import { agentName } from "./init-recipe.js";
 import { SH_FILE } from "./init-secrets.js";
 import { readKey } from "./init-select.js";
 import { relayPty, runQuiet, type PtyLink, type RelayTerminal } from "./signin-relay.js";
-import { signInFor, type SignIn, type StatusCheck } from "./signin-table.js";
+import { signInFor, statusOf, type SignIn, type StatusCheck } from "./signin-table.js";
 
 export interface LoginOutcome {
   id: string;
@@ -198,13 +198,13 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
 
   /** The status command alone, for a login whose files were copied: a refusal hands the login to the machine sign-in below. */
   const verify = async (entry: ManifestEntry, r: LoginOutcome): Promise<void> => {
-    const s = signInFor(agentName(entry));
+    const check = statusOf(signInFor(agentName(entry)));
     r.state = "copied";
-    if (s.kind !== "command" || s.status === undefined) {
+    if (check === undefined) {
       r.note = `not verified: no status command known for ${agentName(entry)}`;
       return;
     }
-    const command = s.status.command;
+    const command = check.command;
     try {
       const daemon = await o.dial();
       try {
@@ -226,9 +226,9 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
           r.note = `not verified: ${toolOf(command)} is not on the machine`;
           return;
         }
-        const signedIn = s.status.signedIn(status.output, status.exitCode);
+        const signedIn = check.signedIn(status.output, status.exitCode);
         r.state = signedIn ? "signed-in" : "not-signed-in";
-        r.note = signedIn ? provedBy(s.status, status.output, "copied") : `copied, but ${command} says not signed in`;
+        r.note = signedIn ? provedBy(check, status.output, "copied") : `copied, but ${command} says not signed in`;
       } finally {
         daemon.close();
       }
@@ -370,8 +370,10 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
   for (;;) {
     note(summaryRows(outcomes, widthOf(o.terminal.output)).join("\n"), "Sign-ins", out);
     // Not signed in (a copied login the check refused among them), or not verifiable after a command that did not
-    // end clean: both get the machine sign-in, or its retry, or a skip.
-    const pending = outcomes.map((r, i) => [r, i] as const).filter(([r]) => r.state === "not-signed-in" || (r.state === "not-verified" && r.exit !== undefined && r.exit !== 0));
+    // end clean: both get the machine sign-in, or its retry, or a skip. A tool with no sign-in has nothing to offer.
+    const pending = outcomes
+      .map((r, i) => [r, i] as const)
+      .filter(([r, i]) => (r.state === "not-signed-in" || (r.state === "not-verified" && r.exit !== undefined && r.exit !== 0)) && signInFor(agentName(o.logins[i]!)).kind !== "none");
     if (pending.length === 0) break;
     for (const [r, i] of pending) {
       const entry = o.logins[i]!;

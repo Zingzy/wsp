@@ -356,6 +356,18 @@ describe("runQuiet", () => {
     expect(link.ptys[0]!.killed).toBe(true);
   });
 
+  it("hands back the output as plain text: a tool that colours into the pty (opencode 1.18.18 paints key names) reads as words", async () => {
+    const link = fakePtyLink();
+    link.script = (pty, line) => {
+      if (line.startsWith("opencode auth list")) {
+        link.data(pty, "\x1b[0m\r\n●  Anthropic \x1b[90mANTHROPIC_API_KEY\r\n│\r\n└  1 environment variable\r\n\r\nWSP_STATUS 0\r\n");
+        link.exit(pty, 0);
+      }
+    };
+    const res = await runQuiet(link, "opencode auth list", 5_000);
+    expect(res.output).toBe("●  Anthropic ANTHROPIC_API_KEY\n│\n└  1 environment variable");
+  });
+
   it("times out a status command that never answers", async () => {
     const link = fakePtyLink();
     const res = await runQuiet(link, "codex login status", 20);

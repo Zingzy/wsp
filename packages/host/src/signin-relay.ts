@@ -6,7 +6,7 @@
 // on this computer, unless the tool asked for a page that returns through a
 // forwarded port, which o opens instead; codes and tokens are never looked at.
 import type { Readable, Writable } from "node:stream";
-import { styleText } from "node:util";
+import { stripVTControlCharacters, styleText } from "node:util";
 
 export interface PtyLink {
   op(op: string, extra?: Record<string, unknown>): Promise<Record<string, unknown>>;
@@ -277,5 +277,6 @@ export async function runQuiet(link: PtyLink, command: string, timeoutMs: number
   const exitCode = markAt >= 0 ? Number(/(\d+)$/.exec(lines[markAt]!)![1]) : -1;
   // The first line is the shell echoing what was typed.
   const body = lines.slice(1, markAt >= 0 ? markAt : undefined);
-  return { output: body.join("\n").trim(), exitCode, timedOut, dropped };
+  // Tools colour into the pty (opencode 1.18.18 paints key names even piped); the readers want the words.
+  return { output: stripVTControlCharacters(body.join("\n")).trim(), exitCode, timedOut, dropped };
 }
