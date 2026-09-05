@@ -124,10 +124,11 @@ export function helpLine(keys: readonly HelpKey[], depth: number): string {
  * (its note is what wraps, at the columns minus 6), so a line kept inside widthOf minus this is never wrapped again. */
 export const CARD_FRAME = 3;
 
-/** A block in the frame: a bold title on the step glyph, then its lines down the bar, wrapped to the width. */
+/** A block in the frame: a bold title on the step glyph, then its lines down the bar, wrapped to the width. A line
+ * within the width once its escape codes are set aside passes as it is, so a coloured line keeps its colour whole. */
 export function card(title: string, lines: readonly string[], output: Writable): void {
   const width = widthOf(output) - CARD_FRAME;
-  log.message([styleText("bold", title), ...lines.flatMap(l => wrap(l, width))], { output, symbol: styleText("green", S_STEP_SUBMIT) });
+  log.message([styleText("bold", title), ...lines.flatMap(l => (stripVTControlCharacters(l).length <= width ? [l] : wrap(l, width)))], { output, symbol: styleText("green", S_STEP_SUBMIT) });
 }
 
 const dim = (s: string): string => styleText("dim", s);

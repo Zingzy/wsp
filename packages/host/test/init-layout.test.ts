@@ -109,10 +109,13 @@ describe("init layout", () => {
     const output = Object.assign(new PassThrough(), { columns: 40 });
     const chunks: string[] = [];
     output.on("data", (c: Buffer) => chunks.push(c.toString()));
-    card("Summary", ["Identity  2 of 3  1.7 KB", "  GitHub CLI login  copy", "", "Installs  Claude Code, Codex, 89 tools plus Homebrew's toolchain"], output);
+    // The coloured line is 45 characters with its codes and 35 without: it fits the width and passes through whole.
+    const red = "\x1b[31mDisk  12.5 GB of 16.1 GB, red line\x1b[39m";
+    card("Summary", ["Identity  2 of 3  1.7 KB", "  GitHub CLI login  copy", "", "Installs  Claude Code, Codex, 89 tools plus Homebrew's toolchain", red], output);
     const raw = chunks.join("");
     const lines = stripVTControlCharacters(raw).split("\n");
-    expect(lines).toEqual(["│", "◇  Summary", "│  Identity  2 of 3  1.7 KB", "│    GitHub CLI login  copy", "│", "│  Installs  Claude Code, Codex, 89", "│    tools plus Homebrew's toolchain", ""]);
+    expect(lines).toEqual(["│", "◇  Summary", "│  Identity  2 of 3  1.7 KB", "│    GitHub CLI login  copy", "│", "│  Installs  Claude Code, Codex, 89", "│    tools plus Homebrew's toolchain", "│  Disk  12.5 GB of 16.1 GB, red line", ""]);
+    expect(raw).toContain(`│  ${red}\n`);
     // The help line is not wrapped, as on the rung screens.
     expect(lines.slice(0, -1).map(l => l.length).filter(n => n > 40)).toEqual([]);
     expect(raw).not.toMatch(/[╮╯─├]/);
