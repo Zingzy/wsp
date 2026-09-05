@@ -12,6 +12,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { guarded } from "../src/golden-tools.js";
 
 const run = promisify(execFile);
+/** Seconds a timed-out tool gets to reach its markers: the guard checks once a second from launch, and under load the sh, perl and bash chain took over a second to start. */
+const STARTUP_S = 5;
 const dirs: string[] = [];
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
@@ -29,7 +31,7 @@ function shimDir(): string {
 
 async function bash(script: string, dir: string): Promise<{ code: number; stdout: string; stderr: string }> {
   try {
-    const r = await run("bash", ["-c", script], { env: { ...process.env, PATH: `${dir}:${process.env["PATH"] ?? ""}` }, timeout: 30_000 });
+    const r = await run("bash", ["-c", script], { env: { ...process.env, PATH: `${dir}:${process.env["PATH"] ?? ""}` }, timeout: 60_000 });
     return { code: 0, ...r };
   } catch (e) {
     const err = e as { code?: number; stdout?: string; stderr?: string };
@@ -59,7 +61,7 @@ describe("guarded", () => {
     const signal = join(dir, "signal");
     // The tool records itself and a child it waits on, as brew waits on curl or tar, and says which signal ended it.
     const tool = `trap 'echo term > ${signal}; exit 143' TERM; echo "$$" > ${pids}; sleep 30 & echo "$!" >> ${pids}; echo started; wait`;
-    const r = await bash(guarded(tool, 1), dir);
+    const r = await bash(guarded(tool, STARTUP_S), dir);
     expect(r.code).toBe(124);
     expect(r.stdout).toBe("started\n");
     expect(r.stderr).toBe("");
@@ -68,16 +70,16 @@ describe("guarded", () => {
     const [self, child] = readFileSync(pids, "utf8").trim().split("\n").map(Number);
     expect(alive(self!)).toBe(false);
     expect(alive(child!)).toBe(false);
-  });
+  }, 30_000);
 
   it("a child that ignores TERM meets the KILL, and the guard still returns only once it is gone", async () => {
     const dir = shimDir();
     const pids = join(dir, "pids");
     const tool = `trap '' TERM; echo "$$" > ${pids}; sleep 30 & echo "$!" >> ${pids}; wait`;
-    const r = await bash(guarded(tool, 1), dir);
+    const r = await bash(guarded(tool, STARTUP_S), dir);
     expect(r.code).toBe(124);
     const [self, child] = readFileSync(pids, "utf8").trim().split("\n").map(Number);
     expect(alive(self!)).toBe(false);
     expect(alive(child!)).toBe(false);
-  }, 30_000);
+  }, 60_000);
 });
