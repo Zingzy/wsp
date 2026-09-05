@@ -30,7 +30,7 @@ import { EVERYTHING, FIXTURE } from "./init-fixture.js";
 import { guestAnswer, stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
 
 const SOLARI = "slr_live_fake_solari_key";
-const KEY = { up: "\x1b[A", down: "\x1b[B", space: " ", enter: "\r", esc: "\x1b", ctrlC: "\x03" };
+const KEY = { up: "\x1b[A", down: "\x1b[B", right: "\x1b[C", space: " ", enter: "\r", esc: "\x1b", ctrlC: "\x03" };
 const URL_RE = /http:\/\/127\.0\.0\.1:\d+\//;
 const SEAL_Q = (v: number) => `Seal this machine as golden v${v}?`;
 const BOOT = /Boot a \d+ vCPU/;
@@ -2632,8 +2632,8 @@ describe("wsp init, everything else over a HOME on disk", () => {
     const screen = () => f.text().slice(f.text().lastIndexOf("Everything else ("));
     expect(screen()).toMatch(/▾ \.hermes\s+0 of 2 {2}509 B\n/);
     expect(screen()).toMatch(/○ \.hermes\s+9 B\s+unknown\n/);
-    // The carve's label is cut in the middle: the directory stays at the front, what it holds at the end.
-    expect(screen()).toMatch(/○ state files in ~\/\.…e-history, sessions\s+500 B\s+state\n/);
+    // The carve's label names its directory; the subtrees it holds are on the detail line, so no cut can lose the directory.
+    expect(screen()).toMatch(/○ state files in ~\/\.hermes\s+500 B\s+state\n/);
     expect(screen()).toMatch(/▾ \.mcp-auth\s+2 {2}96 B\n/);
     expect(screen()).toMatch(/▾ ~\/\.config\s+0 of 1\s+6 B\n/);
     expect(screen()).toMatch(/○ mystery\s+6 B\s+unknown\n/);
@@ -2652,6 +2652,11 @@ describe("wsp init, everything else over a HOME on disk", () => {
     expect(screen()).toMatch(/Selected: \.hermes, state files/);
     expect(screen()).toContain("4 ticked");
     expect(screen()).not.toMatch(/Selected: .*Arc/);
+    // Unfolded, every app data row carries its ~/Library parent, so Arc never stands alone.
+    for (let i = 0; i < 20 && !/❯ ▸ macOS app data/.test(screen()); i += 1) await f.press(KEY.down);
+    await f.press(KEY.right);
+    expect(screen()).toMatch(/○ Application Support\/Arc\s+3\.9 KB\s+app-data\n/);
+    expect(screen()).toMatch(/○ Application Support\/com\.docker\.install\s+2\.0 KB\s+app-data\n/);
     await f.press(KEY.esc);
     await f.until("Sign-ins");
     await f.press(KEY.ctrlC);

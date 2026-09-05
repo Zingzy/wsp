@@ -559,6 +559,8 @@ export function selectItem(e: ManifestEntry, hintFor?: (width: number) => string
     ...(lock !== undefined ? { lock } : {}),
     ...(hasChoices(e) ? { choices: e.rung === "logins" ? LOGIN_CHOICES : CONSENT_CHOICES } : {}),
     ...(e.group === LARGE_GROUP || e.group === APP_DATA_GROUP ? { own: true } : {}),
+    // An app data label is the row's ~/Library parent, a slash, then its name; the parent is what goes dim.
+    ...(e.group === APP_DATA_GROUP && e.label.includes("/") ? { prefix: e.label.slice(0, e.label.indexOf("/") + 1) } : {}),
   };
 }
 

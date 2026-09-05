@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Pass 2b. An entry directly under a config location is named for the program
-// that owns it. One named for a command line tool is that tool's config. One
-// under ~/Library named for a macOS app, or for nothing at all, is that app's
-// data, which no Linux machine reads. One under ~/.config named for nothing
-// stays unknown.
+// that owns it. One named for a command line tool, or for a macOS app under
+// ~/.config or ~/.local/share, is that program's config. One under ~/Library
+// named for a macOS app, or for nothing at all, is app data, which no Linux
+// machine reads. One under ~/.config named for nothing stays unknown.
 import { type Machine, basename, dirname } from "./host.js";
 import type { Owner, Provenance } from "./provenance.js";
 
@@ -28,7 +28,7 @@ export interface Programs {
 export const key = (name: string): string => name.toLowerCase().replace(/[^a-z0-9]/g, "");
 
 /** A reverse-DNS name: com.docker.install, org.mozilla.firefox. */
-const BUNDLE_ID = /^[a-z0-9-]+\.[a-z0-9-]+\.[a-z0-9.-]+$/i;
+export const isBundleId = (name: string): boolean => /^[a-z0-9-]+\.[a-z0-9-]+\.[a-z0-9.-]+$/i.test(name);
 
 export function configRoots(home: string): string[] {
   return [`${home}/.config`, `${home}/.local/share`, `${home}/Library/Application Support`, `${home}/Library/Preferences`];
@@ -60,15 +60,15 @@ export function place(home: string, path: string, kind: "file" | "dir", p: Progr
   const name = basename(path);
   // GUI apps never use dot names; a dot-directory under ~/Library is a command line tool's.
   const library = parent.startsWith(`${home}/Library/`) && !name.startsWith(".");
-  if (library && BUNDLE_ID.test(name)) return { kind: "app-data" };
+  if (library && isBundleId(name)) return { kind: "app-data" };
   const id = key(kind === "file" ? name.replace(/\.[^.]+$/, "") : name);
   const bin = id === "" ? undefined : p.bins.get(id);
   if (bin !== undefined) {
-    if (bin.owner === "app") return { kind: "app-data", tool: bin.package ?? bin.name };
+    if (bin.owner === "app") return library ? { kind: "app-data", tool: bin.package ?? bin.name } : { kind: "config", tool: bin.package ?? bin.name, owner: "app" };
     return { kind: "config", tool: bin.name, ...(bin.owner === undefined ? {} : { owner: bin.owner }), ...(bin.path === undefined ? {} : { binary: bin.path }) };
   }
   const app = id === "" ? undefined : p.apps.get(id);
-  if (app !== undefined) return { kind: "app-data", tool: app };
+  if (app !== undefined) return library ? { kind: "app-data", tool: app } : { kind: "config", tool: app };
   const tool = id === "" ? undefined : p.tools.get(id);
   if (tool !== undefined) return { kind: "config", tool };
   return library ? { kind: "app-data" } : undefined;

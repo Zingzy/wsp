@@ -427,6 +427,8 @@ describe("rungSelect", () => {
     expect(cut.map(l => l.slice(-9))).toEqual(["kens.json", "info.json", ".json.bak"]);
     expect(cutDistinct(same, () => 12)).toEqual(["…one/deep/pa", "…two/deep/pa"]);
     expect(cutDistinct(same, () => 60)).toEqual(same);
+    // One label's tail is the other's whole tail: the cut moves to a window around where they first differ instead.
+    expect(cutDistinct(["a/bar/bar", "a/bar/bar/bar"], () => 8)).toEqual(["…bar", "…bar/bar"]);
     const items: SelectItem[] = [
       { id: "a", label: a, group: "~", detail: [] },
       { id: "b", label: b, group: "~", detail: [] },
@@ -442,6 +444,30 @@ describe("rungSelect", () => {
     expect(rows.every(r => r.endsWith("json") || r.endsWith("bak"))).toBe(true);
     await press(input, KEY.enter);
     await p;
+  });
+
+  it("a row's parent prefix renders dim while the row is highlighted, and the cut leaves it whole", async () => {
+    const was = process.env["FORCE_COLOR"];
+    process.env["FORCE_COLOR"] = "3";
+    try {
+      const items: SelectItem[] = [
+        { id: "arc", label: "Application Support/Arc", prefix: "Application Support/", group: "macOS app data", detail: [] },
+        { id: "ray", label: "Preferences/com.raycast.macos", prefix: "Preferences/", group: "macOS app data", detail: [] },
+      ];
+      const { input, output, raw, text } = streams();
+      Object.assign(output, { columns: 80 });
+      const p = rungSelect({ title: "Everything else", counter: "8/8", items, initial: new Set(), input, output });
+      await settle();
+      await press(input, KEY.down, KEY.down);
+      expect(raw()).toContain("\x1b[2mApplication Support/\x1b[22mArc");
+      expect(text()).toMatch(/❯ {3}○ Application Support\/Arc\n/);
+      expect(text()).toMatch(/┃ {5}○ Preferences\/com\.raycast\.macos\n/);
+      await press(input, KEY.enter);
+      await p;
+    } finally {
+      if (was === undefined) delete process.env["FORCE_COLOR"];
+      else process.env["FORCE_COLOR"] = was;
+    }
   });
 
   it("a group named in folded starts folded, and a group hint follows the count on its header", async () => {

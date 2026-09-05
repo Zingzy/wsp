@@ -163,9 +163,9 @@ function inside(home: string, dirs: readonly Dir[], path: string): string {
   return app === home || app === "" || app === path ? basename(path) : `${basename(app)}/${path.slice(app.length + 1)}`;
 }
 
-/** A carve of several subtrees is named for what it holds, never for a path that is not on the disk. */
+/** A carve of several subtrees is named for its directory, never for a path that is not on the disk; the subtrees it holds are its paths, listed on the detail line. */
 function carveName(home: string, d: Dir): string {
-  return `${d.role} files in ${tilde(home, d.path)}: ${d.paths.map(p => p.slice(d.path.length + 1)).join(", ")}`;
+  return `${d.role} files in ${tilde(home, d.path)}`;
 }
 
 /** Rows sharing a name climb their parents, one level per round, until no name is shared; a row named for its own path keeps it when it is the only such row in its group. */

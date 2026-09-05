@@ -65,7 +65,7 @@ describe("everything: the seven passes folded into rows", () => {
       ["Raycast", "device-bound-login", "", "", ""],
       ["raycast/extensions", "state", "large", "", "~/.config/raycast/extensions"],
       ["state", "state", "", "", "~/.local/state"],
-      ["state files in ~/.hermes: node/bin, node_modules", "state", "large", "", "~/.hermes/node/bin ~/.hermes/node_modules"],
+      ["state files in ~/.hermes", "state", "large", "", "~/.hermes/node/bin ~/.hermes/node_modules"],
       ["uv/tools/ty/bin", "state", "large", "", "~/.local/share/uv/tools/ty/bin"],
     ]);
   });
@@ -76,19 +76,19 @@ describe("everything: the seven passes folded into rows", () => {
     const hermes = rows.find(r => r.name === ".hermes");
     expect(hermes).toMatchObject({ id: ".hermes", paths: ["~/.hermes"], binary: "~/.local/bin/hermes", tool: "hermes", files: 2, bytes: Buffer.byteLength("HERMES_TOKEN=put-yours-here\n") + Buffer.byteLength("model: default\n"), flags: ["credential"] });
     expect(hermes?.excludes).toEqual(["~/.hermes/.env", "~/.hermes/auth.json", "~/.hermes/node/bin", "~/.hermes/node_modules"]);
-    expect(rows.find(r => r.name === "state files in ~/.hermes: node/bin, node_modules")).toMatchObject({ kind: "state", paths: ["~/.hermes/node/bin", "~/.hermes/node_modules"], bytes: 90_002_000, flags: ["large"], excludes: [] });
+    expect(rows.find(r => r.name === "state files in ~/.hermes")).toMatchObject({ kind: "state", paths: ["~/.hermes/node/bin", "~/.hermes/node_modules"], bytes: 90_002_000, flags: ["large"], excludes: [] });
     expect(rows.find(r => r.name === ".cargo/bin")).toMatchObject({ kind: "state", paths: ["~/.cargo/bin"], bytes: 6_000_000 });
     expect(rows.find(r => r.name === ".cargo")).toMatchObject({ kind: "unknown", files: 1, excludes: ["~/.cargo/bin"] });
     expect(rows.find(r => r.name === "uv/tools/ty/bin")).toMatchObject({ kind: "state", paths: ["~/.local/share/uv/tools/ty/bin"] });
     expect(rows.every(r => r.excludes.every(x => r.paths.some(p => x.startsWith(`${p}/`))))).toBe(true);
   });
 
-  it("a binary directly in its app directory is not config, and a split record with several paths is named for what it holds", async () => {
+  it("a binary directly in its app directory is not config, and a split record with several paths is named for its directory", async () => {
     const m = laptop({ path: ["~/.local/bin", "~/.cargo/bin"], links: { "~/.local/bin/x": "/Users/dev/.x/x" }, files: { "~/.x/x": { bytes: 5_000_000, mode: 0o755 }, "~/.x/config.toml": "a = 1\n", "~/.cargo/bin/bat": 6_000_000, "~/.cargo/registry/index/a": 10, "~/.cargo/config.toml": "b = 2\n", "~/.cargo/bin/rg": 1 } });
     const { rows } = await everything(m, { now: NOW });
     expect(rows.find(r => r.name === ".x")).toMatchObject({ kind: "config", paths: ["~/.x"], bytes: 6, files: 1, excludes: ["~/.x/x"], binary: "~/.local/bin/x", tool: "x" });
     expect(rows.find(r => r.name === ".x/x")).toMatchObject({ kind: "state", paths: ["~/.x/x"], bytes: 5_000_000 });
-    expect(rows.find(r => r.name === "state files in ~/.cargo: bin, registry")).toMatchObject({ kind: "state", paths: ["~/.cargo/bin", "~/.cargo/registry"] });
+    expect(rows.find(r => r.name === "state files in ~/.cargo")).toMatchObject({ kind: "state", paths: ["~/.cargo/bin", "~/.cargo/registry"] });
     expect(rows.find(r => r.name === ".cargo")).toMatchObject({ kind: "unknown", files: 1 });
     expect(rows.every(r => r.paths.every(p => !p.endsWith("/bin/bat")))).toBe(true);
   });

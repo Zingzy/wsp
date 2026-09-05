@@ -85,15 +85,35 @@ describe("the location pass", () => {
     expect(rows.find(r => r.paths[0] === "~/.config/mystery/cache")).toMatchObject({ name: "mystery/cache", kind: "cache" });
   });
 
+  it("an app-named entry under ~/.config or ~/.local/share is that app's config, never app data", async () => {
+    const m = laptop({
+      path: ["/Applications/Visual Studio Code.app/Contents/Resources/app/bin"],
+      files: {
+        "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code": { bytes: 1_000, mode: 0o755 },
+        "/Applications/Ghostty.app/Contents/Info.plist": 100,
+        "~/.config/ghostty/config": "font-size = 14\n",
+        "~/.config/Code/User/settings.json": "{}",
+        "~/.local/share/zed/db/0-stable/db.sqlite": 2_000,
+      },
+    });
+    const { rows } = await everything(m, { tools: [], apps: ["zed"] });
+    const by = (path: string) => rows.find(r => r.paths[0] === path);
+    expect(by("~/.config/ghostty")).toMatchObject({ name: "ghostty", kind: "config", tool: "Ghostty" });
+    expect(by("~/.config/ghostty")).not.toHaveProperty("owner");
+    expect(by("~/.config/Code")).toMatchObject({ name: "Code", kind: "config", tool: "Visual Studio Code", owner: "app" });
+    expect(by("~/.local/share/zed")).toMatchObject({ name: "zed", kind: "config", tool: "zed" });
+    expect(rows.filter(r => r.kind === "app-data")).toEqual([]);
+  });
+
   it("a dot-directory under ~/Library is a tool's, not an app's", async () => {
     const { rows } = await everything(laptop({ files: { "~/Library/Preferences/.wrangler/config/default.toml": "x = 1\n", "~/Library/Preferences/.wrangler/notes": "n\n" } }));
     expect(rows.find(r => r.paths[0] === "~/Library/Preferences/.wrangler")).toMatchObject({ name: ".wrangler", kind: "unknown" });
   });
 
-  it("a carve over several subtrees says what it holds; a carve of one subtree is that subtree's real path", async () => {
+  it("a carve over several subtrees is named for its directory, the subtrees stay on the detail line; a carve of one subtree is that subtree's real path", async () => {
     const { rows } = await everything(laptop(located()), rung);
     expect(rows.find(r => r.kind === "state" && r.paths[0]?.startsWith("~/.claude"))).toMatchObject({
-      name: "state files in ~/.claude: file-history, projects",
+      name: "state files in ~/.claude",
       paths: ["~/.claude/file-history", "~/.claude/projects"],
     });
     expect(rows.find(r => r.paths[0] === "~/.claude")).toMatchObject({ name: ".claude", kind: "unknown", excludes: ["~/.claude/file-history", "~/.claude/projects"] });

@@ -3,6 +3,7 @@
 // that no rung claimed, one entry per row, none ticked. The screen groups
 // them by where they sit, the pack copies paths minus excludes, and a
 // credential-shaped row travels only on the person's own answer.
+import { isBundleId } from "./everything/location.js";
 import type { Kind, Manager, Row } from "./everything/row.js";
 import type { ManifestEntry } from "./manifest.js";
 
@@ -69,12 +70,16 @@ const MANAGER_WORDS: Record<Manager, string> = {
   dotfiles: "a dotfiles directory",
 };
 
-/** The first words of a row's detail: what the passes made of it. */
+/** The first words of a row's detail: what the passes made of it. App data that matched no app and is no bundle id is so by its place alone, and the words claim no more. */
 function whatItIs(r: Row): string {
   if (r.manager !== undefined) return `${MANAGER_WORDS[r.manager]}${(r.rcCopies?.length ?? 0) > 0 ? " holding rc copies" : ""}`;
   if (r.kind === "app-data" && r.tool !== undefined) return `data of the macOS app ${r.tool}; ${APP_DATA_WHY}`;
-  const location = r.paths[0] === undefined ? undefined : locationOf(r.paths[0]);
-  if (r.kind === "unknown" && location !== undefined) return `in ${location}; no installed tool has its name`;
+  const primary = r.paths[0];
+  const location = primary === undefined ? undefined : locationOf(primary);
+  if (primary === undefined || location === undefined) return ROLE_WORDS[r.kind];
+  const entry = primary.slice(location.length + 1).split("/")[0] ?? "";
+  if (r.kind === "app-data" && !isBundleId(entry)) return `in ${location}; no installed tool has its name; macOS apps keep their data here`;
+  if (r.kind === "unknown") return `in ${location}; no installed tool has its name`;
   return ROLE_WORDS[r.kind];
 }
 
@@ -143,10 +148,13 @@ export function entriesFor(rows: readonly Row[]): ManifestEntry[] {
     const dir = appDir(primary);
     return (perDir.get(dir) ?? 0) > 1 ? dir : undefined;
   };
-  // Out of its location group a path-named row shows the whole path from HOME, so its parent is never lost.
+  // Out of its location group a path-named row shows its parent: the whole path from HOME in the large group, the path from ~/Library in the app data group.
   const labelOf = (r: Row, group: string | undefined): string => {
     const primary = r.paths[0];
-    return group === LARGE_GROUP && primary !== undefined && primary.endsWith(`/${r.name}`) ? primary.slice(2) : r.name;
+    if (primary === undefined || !primary.endsWith(`/${r.name}`)) return r.name;
+    if (group === LARGE_GROUP) return primary.slice(2);
+    if (group === APP_DATA_GROUP && primary.startsWith("~/Library/")) return primary.slice("~/Library/".length);
+    return r.name;
   };
   const drafts = rows.map((r, i) => {
     const group = groupOf(r);

@@ -15,6 +15,8 @@ import { GUTTER, S_BAR_FOCUS, S_BAR_FOCUS_END, colourDepth, ellipsize, helpLine,
 export interface SelectItem {
   id: string;
   label: string;
+  /** The label's leading part that names the row's parent, drawn dim on the highlighted row. */
+  prefix?: string;
   /** The dim second column: a size, a state word, or a screen's own aligned columns (every row then padded to one width). */
   hint?: string;
   /** The second column as a function of the terminal width, read every frame; wins over hint. */
@@ -215,16 +217,16 @@ export function cutDistinct(labels: readonly string[], widthOf: (i: number) => n
     for (const group of groups.values()) {
       if (group.length < 2) continue;
       const at = commonPrefix(group.map(i => labels[i]!));
-      for (const i of group) {
-        const w = widthOf(i);
-        const l = labels[i]!;
-        const start = Math.min(at, Math.max(0, l.length - (w - 1)));
-        const next = `…${l.slice(start, start + w - 1)}`;
-        if (next !== out[i]) {
-          out[i] = next;
+      const from = (i: number, start: number): string => `…${labels[i]!.slice(start, start + widthOf(i) - 1)}`;
+      const tails = group.map(i => from(i, Math.min(at, Math.max(0, labels[i]!.length - (widthOf(i) - 1)))));
+      // Tails that still read alike (one label's tail is the other's whole tail) give way to a window around the first differing character.
+      const next = new Set(tails).size === group.length ? tails : group.map(i => from(i, Math.max(0, at - Math.floor((widthOf(i) - 1) / 2))));
+      group.forEach((i, k) => {
+        if (next[k] !== out[i]) {
+          out[i] = next[k]!;
           changed = true;
         }
-      }
+      });
     }
     if (!changed) break;
   }
@@ -390,9 +392,10 @@ class RungPrompt extends Prompt<Set<string>> {
     return `${hint}${GUTTER}${(answer ?? "").padEnd(this.answerWidth)}`;
   }
 
-  private line(glyph: string, label: string, second: string, indent: number, cols: { label: number; second: number }, current: boolean, heading: boolean): string {
+  private line(glyph: string, label: string, second: string, indent: number, cols: { label: number; second: number }, current: boolean, heading: boolean, prefix = ""): string {
     const field = ellipsize(label, cols.label - indent).padEnd(cols.label - indent);
-    const text = heading ? styleText("bold", field) : current ? field : dim(field);
+    const lit = prefix !== "" && field.startsWith(prefix) ? `${dim(prefix)}${field.slice(prefix.length)}` : field;
+    const text = heading ? styleText("bold", field) : current ? lit : dim(field);
     return `${current ? styleText("cyan", "❯") : " "} ${" ".repeat(indent)}${glyph} ${text}${second !== "" ? `${GUTTER}${dim(second.padStart(cols.second))}` : ""}`.trimEnd();
   }
 
@@ -417,7 +420,7 @@ class RungPrompt extends Prompt<Set<string>> {
         return this.line(entry.folded ? "▸" : "▾", entry.group, this.groupSecond(entry.group, entry.items), 0, cols, current, true);
       case "item": {
         const i = entry.item;
-        return this.line(box(i.follows !== undefined ? i.follows(ticks) : ticks.has(i.id)), label(i), this.second(i, width), RungPrompt.indent(i), cols, current, false);
+        return this.line(box(i.follows !== undefined ? i.follows(ticks) : ticks.has(i.id)), label(i), this.second(i, width), RungPrompt.indent(i), cols, current, false, i.prefix);
       }
       default: {
         const _exhaustive: never = entry;
