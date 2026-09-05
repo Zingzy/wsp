@@ -120,9 +120,14 @@ function secretFailure(e: unknown): string {
 export interface ReadSecrets {
   /** Secret by its key (see secretKey), for the pack. */
   values: Map<string, string>;
-  /** Logins whose read failed or was refused, with the reason security gave, after the account when the item is per user. */
+  /** Logins none of whose items were read, with the reason security gave for each, after the account when the item is per user. */
   refused: { id: string; service: string; reason: string }[];
+  /** Accounts with no item of their own on a login another of whose items was read: the login copies without them. */
+  dropped: { id: string; service: string; account: string; reason: string }[];
 }
+
+/** The row detail for an account whose Keychain item the copy went without. */
+export const leftBehind = (account: string): string => `${account} left behind: no token in the Keychain`;
 
 /** The Keychain items the ticked rows would copy, in plan order, one per account where the tool files them so.
  * Runs before anything boots so a refused consent dialog never costs a machine. */
@@ -131,13 +136,25 @@ export function keychainLogins(picked: readonly ManifestEntry[], platform: "darw
 }
 
 export async function readSecrets(wanted: readonly PlannedSecret[], reader: SecretReader): Promise<ReadSecrets> {
-  const out: ReadSecrets = { values: new Map(), refused: [] };
+  const out: ReadSecrets = { values: new Map(), refused: [], dropped: [] };
+  const failed: { s: PlannedSecret; reason: string }[] = [];
   for (const s of wanted) {
     try {
       out.values.set(secretKey(s), await reader.read(s.service, s.account));
     } catch (e) {
-      out.refused.push({ id: s.id, service: s.service, reason: s.account === undefined ? secretFailure(e) : `${s.account}: ${secretFailure(e)}` });
+      failed.push({ s, reason: secretFailure(e) });
     }
+  }
+  const read = new Set(wanted.filter(s => out.values.has(secretKey(s))).map(s => s.id));
+  for (const { s, reason } of failed) {
+    if (s.account !== undefined && read.has(s.id)) {
+      out.dropped.push({ id: s.id, service: s.service, account: s.account, reason });
+      continue;
+    }
+    const named = s.account === undefined ? reason : `${s.account}: ${reason}`;
+    const row = out.refused.find(r => r.id === s.id);
+    if (row === undefined) out.refused.push({ id: s.id, service: s.service, reason: named });
+    else row.reason = `${row.reason}; ${named}`;
   }
   return out;
 }
@@ -199,8 +216,10 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
   const tgz = join(out, "files.tgz");
   const skipped: SkippedPath[] = [];
   try {
-    // A login whose Keychain item was not read was changed to a sign-in on the machine: none of its files travel.
-    const refused = new Set(plan.secrets.filter(s => !opts.secrets.has(secretKey(s))).map(s => s.id));
+    // A login none of whose Keychain items was read was changed to a sign-in on the machine: none of its files
+    // travel. One with an item read copies without the accounts whose items were not.
+    const readIds = new Set(plan.secrets.filter(s => opts.secrets.has(secretKey(s))).map(s => s.id));
+    const refused = new Set(plan.secrets.filter(s => !readIds.has(s.id)).map(s => s.id));
     const files = plan.files.filter(f => {
       if (!refused.has(f.id)) return true;
       skipped.push({ id: f.id, path: `~/${relative(opts.home, f.source)}`, note: "not read from the Keychain; sign in on the machine" });
@@ -265,10 +284,21 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
     };
     walk(stage);
     cut.sort((a, b) => (a.path < b.path ? -1 : 1));
+    // A dropped account leaves the staged file before any token lands, so the active mark has moved by the time
+    // the account it moved to is placed and the host token follows it.
+    for (const s of plan.secrets) {
+      if (opts.secrets.has(secretKey(s))) continue;
+      if (s.account === undefined || s.drop === undefined || refused.has(s.id)) {
+        skipped.push({ id: s.id, path: `Keychain: ${secretKey(s)}`, note: "not read from the Keychain; sign in on the machine" });
+        continue;
+      }
+      skipped.push({ id: s.id, path: `Keychain: ${secretKey(s)}`, note: leftBehind(s.account) });
+      const target = join(stage, s.dest);
+      if (existsSync(target)) writeFileSync(target, s.drop(readFileSync(target, "utf8")));
+    }
     for (const s of plan.secrets) {
       const secret = opts.secrets.get(secretKey(s));
-      if (secret === undefined) skipped.push({ id: s.id, path: `Keychain: ${secretKey(s)}`, note: "not read from the Keychain; sign in on the machine" });
-      if (secret === undefined || refused.has(s.id)) continue;
+      if (secret === undefined) continue;
       const target = join(stage, s.dest);
       mkdirSync(dirname(target), { recursive: true });
       const existing = existsSync(target) ? readFileSync(target, "utf8") : undefined;

@@ -8,6 +8,7 @@ import {
   agentInstallsFor,
   brewfileFor,
   editorInstallsFor,
+  dropGhAccount,
   ghAccounts,
   extensionsFile,
   HOMEBREW,
@@ -298,8 +299,29 @@ describe("planFiles: which laptop files travel and where they land", () => {
     );
     // Placed again with fresher tokens, the old lines go and nothing doubles.
     expect(p.secrets[1]!.place("gho_z2", p.secrets[0]!.place("gho_o2", placed))).toBe(placed.replace(/gho_zingzy/g, "gho_z2").replace("gho_other", "gho_o2"));
-    // A file without the host gets a block for the account, marked active.
-    expect(p.secrets[1]!.place("gho_zingzy", undefined)).toBe(["github.com:", "    oauth_token: gho_zingzy", "    git_protocol: https", "    users:", "        Zingzy:", "            oauth_token: gho_zingzy", "    user: Zingzy", ""].join("\n"));
+    // A file without the host gets a block with the account's token under its user alone: nothing marked it active.
+    expect(p.secrets[1]!.place("gho_zingzy", undefined)).toBe(["github.com:", "    git_protocol: https", "    users:", "        Zingzy:", "            oauth_token: gho_zingzy", ""].join("\n"));
+    expect(placeGhToken("github.com", "gho_zingzy", "ghe.corp.example:\n    user: me\n", "Zingzy")).toBe(["ghe.corp.example:", "    user: me", "github.com:", "    git_protocol: https", "    users:", "        Zingzy:", "            oauth_token: gho_zingzy", ""].join("\n"));
+  });
+
+  it("drops an account from hosts.yml: its lines leave the users block, the active mark moves to the first account left, another host is untouched", () => {
+    const mac = ["ghe.corp.example:", "    users:", "        other:", "    user: other", "github.com:", "    git_protocol: ssh", "    users:", "        other:", "            git_protocol: https", "        Zingzy:", "    user: Zingzy", ""].join("\n");
+    const read = (abs: string) => (abs === `${HOME}/.config/gh/hosts.yml` ? mac : undefined);
+    const gh = row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"], choice: "copy" });
+    const p = planFiles([gh], { home: HOME, stat, platform: "darwin", read });
+    expect(p.secrets.map(s => s.account)).toEqual(["other", "Zingzy"]);
+    // The inactive account goes with its nested lines; the active one keeps the host.
+    const withoutOther = p.secrets[0]!.drop!(mac);
+    expect(withoutOther).toBe(["ghe.corp.example:", "    users:", "        other:", "    user: other", "github.com:", "    git_protocol: ssh", "    users:", "        Zingzy:", "    user: Zingzy", ""].join("\n"));
+    expect(ghAccounts(withoutOther, "github.com")).toEqual({ users: ["Zingzy"], active: "Zingzy" });
+    // The active account goes and the one left becomes active, so its token lands under the host too.
+    const withoutZingzy = p.secrets[1]!.drop!(mac);
+    expect(withoutZingzy).toBe(["ghe.corp.example:", "    users:", "        other:", "    user: other", "github.com:", "    git_protocol: ssh", "    users:", "        other:", "            git_protocol: https", "    user: other", ""].join("\n"));
+    expect(p.secrets[0]!.place("gho_other", withoutZingzy)).toBe(["ghe.corp.example:", "    users:", "        other:", "    user: other", "github.com:", "    oauth_token: gho_other", "    git_protocol: ssh", "    users:", "        other:", "            oauth_token: gho_other", "            git_protocol: https", "    user: other", ""].join("\n"));
+    // The last account out takes the users block and the active mark with it.
+    expect(dropGhAccount("github.com", withoutOther, "Zingzy")).toBe(["ghe.corp.example:", "    users:", "        other:", "    user: other", "github.com:", "    git_protocol: ssh", ""].join("\n"));
+    // An account the file does not list changes nothing.
+    expect(dropGhAccount("github.com", mac, "nobody")).toBe(mac);
   });
 
   it("with no account list (no reader, or a hosts.yml naming none) the gh item is one and its token goes under the host alone", () => {

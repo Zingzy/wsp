@@ -70,6 +70,8 @@ export interface PlannedSecret {
   account?: string;
   dest: string;
   place: (secret: string, existing: string | undefined) => string;
+  /** The file with this account taken out, for an account whose item was not read while another of the login's was. */
+  drop?: (existing: string) => string;
 }
 
 /** The name a Keychain value is kept and reported under: the service, with the account when the item is per user. */
@@ -169,13 +171,49 @@ export function ghAccounts(hostsYml: string, host: string): { users: string[]; a
   return { users, ...(active !== undefined ? { active } : {}) };
 }
 
+/** The account's lines leave the host's users block; when it was the active one,
+ * `user:` moves to the first account left, and goes with the block when none is.
+ * Other hosts and other users keep their lines. */
+export function dropGhAccount(host: string, existing: string, account: string): string {
+  const left = ghAccounts(existing, host).users.filter(u => u !== account);
+  const out: string[] = [];
+  let inHost = false;
+  let inUsers = false;
+  let inAccount = false;
+  for (const line of existing.split("\n")) {
+    const indent = line.length - line.trimStart().length;
+    const t = line.trim();
+    if (indent === 0 && t !== "") {
+      inHost = t === `${host}:`;
+      inUsers = false;
+      inAccount = false;
+    }
+    if (!inHost) {
+      out.push(line);
+      continue;
+    }
+    if (indent === 4) {
+      inUsers = t === "users:";
+      inAccount = false;
+    }
+    if (indent === 8 && inUsers) inAccount = t === `${account}:`;
+    if (inAccount && t !== "") continue;
+    if (indent === 4 && t === "users:" && left.length === 0) continue;
+    if (indent === 4 && /^user:\s*(\S+)$/.exec(t)?.[1] === account) {
+      if (left.length > 0) out.push(`    user: ${left[0]}`);
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join("\n");
+}
+
 /** An account's token goes under its own users block, and under the host too when
  * the file marks that account active; with no account the host line alone is
  * written. Other hosts and other users keep their lines. A file without the host
- * gets the block appended. */
+ * gets the block appended, with no account marked active. */
 export function placeGhToken(host: string, token: string, existing: string | undefined, account?: string): string {
-  const own = account === undefined ? "" : `    users:\n        ${account}:\n            oauth_token: ${token}\n    user: ${account}\n`;
-  const block = `${host}:\n    oauth_token: ${token}\n    git_protocol: https\n${own}`;
+  const block = account === undefined ? `${host}:\n    oauth_token: ${token}\n    git_protocol: https\n` : `${host}:\n    git_protocol: https\n    users:\n        ${account}:\n            oauth_token: ${token}\n`;
   if (existing === undefined) return block;
   const atHost = account === undefined || ghAccounts(existing, host).active === account;
   const out: string[] = [];
@@ -214,8 +252,8 @@ export function placeGhToken(host: string, token: string, existing: string | und
 interface KeychainItem {
   dest: string;
   place: (secret: string, existing: string | undefined, account?: string) => string;
-  /** The laptop file, home-relative, that names the accounts the tool keeps one item each for. */
-  accounts?: { file: string; list(text: string): string[] };
+  /** The laptop file, home-relative, that names the accounts the tool keeps one item each for, and how one leaves it. */
+  accounts?: { file: string; list(text: string): string[]; drop(text: string, account: string): string };
 }
 
 /** Where a Keychain item the recipe lists as `Keychain: <service>` lands on the
@@ -225,7 +263,7 @@ const KEYCHAIN: Record<string, KeychainItem> = {
   "gh:github.com": {
     dest: ".config/gh/hosts.yml",
     place: (secret, existing, account) => placeGhToken("github.com", secret, existing, account),
-    accounts: { file: ".config/gh/hosts.yml", list: text => ghAccounts(text, "github.com").users },
+    accounts: { file: ".config/gh/hosts.yml", list: text => ghAccounts(text, "github.com").users, drop: (text, account) => dropGhAccount("github.com", text, account) },
   },
 };
 
@@ -258,9 +296,10 @@ export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOption
         else if (keychain === undefined) skip("no Keychain reader for this login yet; sign in on the machine");
         else {
           const dest = rewrite(keychain.dest);
-          const accounts = keychain.accounts !== undefined && opts.read !== undefined ? keychain.accounts.list(opts.read(join(opts.home, keychain.accounts.file)) ?? "") : [];
-          if (accounts.length === 0) plan.secrets.push({ id: e.id, service, dest, place: keychain.place });
-          for (const account of accounts) plan.secrets.push({ id: e.id, service, account, dest, place: (secret, existing) => keychain.place(secret, existing, account) });
+          const perAccount = keychain.accounts;
+          const accounts = perAccount !== undefined && opts.read !== undefined ? perAccount.list(opts.read(join(opts.home, perAccount.file)) ?? "") : [];
+          if (perAccount === undefined || accounts.length === 0) plan.secrets.push({ id: e.id, service, dest, place: keychain.place });
+          else for (const account of accounts) plan.secrets.push({ id: e.id, service, account, dest, place: (secret, existing) => keychain.place(secret, existing, account), drop: existing => perAccount.drop(existing, account) });
           brought++;
         }
         continue;

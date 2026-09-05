@@ -254,10 +254,21 @@ describe("packPlan", () => {
     expect(secrets.reads).toEqual([["gh:github.com", "other"], ["gh:github.com", "Zingzy"], ["Claude Code-credentials", undefined]]);
     expect([...read.values]).toEqual([["gh:github.com (other)", "gho_fake_other"], ["gh:github.com (Zingzy)", "gho_fake_token"]]);
     expect(read.refused).toEqual([{ id: "logins/claude", service: "Claude Code-credentials", reason: "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain." }]);
-    // An account with no item of its own refuses the row, and the reason names the account.
+    // An account with no item of its own is dropped from a row another account of which was read; the row is not refused.
     const partial = await readSecrets(wanted.slice(0, 2), reader({ "gh:github.com (Zingzy)": "gho_fake_token" }));
     expect([...partial.values.keys()]).toEqual(["gh:github.com (Zingzy)"]);
-    expect(partial.refused).toEqual([{ id: "logins/gh", service: "gh:github.com", reason: "other: security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain." }]);
+    expect(partial.refused).toEqual([]);
+    expect(partial.dropped).toEqual([{ id: "logins/gh", service: "gh:github.com", account: "other", reason: "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain." }]);
+    // With no account read the row is refused once, the reason naming every account.
+    const none = await readSecrets(wanted.slice(0, 2), reader({}));
+    expect(none.dropped).toEqual([]);
+    expect(none.refused).toEqual([
+      {
+        id: "logins/gh",
+        service: "gh:github.com",
+        reason: "other: security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.; Zingzy: security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.",
+      },
+    ]);
   });
 
   it("places each secret it was given, gh's per account with the active one under the host, and notes a planned secret it was not given instead of failing", async () => {
@@ -282,14 +293,30 @@ describe("packPlan", () => {
     );
     expect(statSync(join(dir, ".config/gh/hosts.yml")).mode & 0o777).toBe(0o600);
     expect(listTar(packed.tar).some(e => e.path.includes(".credentials.json"))).toBe(false);
-    // One account's token missing keeps the whole row home: hosts.yml and both items are noted, the file does not travel.
+    // One account's token missing drops that account: its line leaves the users block, the file travels with the
+    // rest, and the note names the account left behind.
     const partial = await packPlan(plan, { secrets: new Map([["gh:github.com (Zingzy)", "gho_fake_token"]]), home });
     expect(partial.skipped.map(s => [s.path, s.note])).toEqual([
-      ["~/.config/gh/hosts.yml", "not read from the Keychain; sign in on the machine"],
-      ["Keychain: gh:github.com (other)", "not read from the Keychain; sign in on the machine"],
+      ["Keychain: gh:github.com (other)", "other left behind: no token in the Keychain"],
       ["Keychain: Claude Code-credentials", "not read from the Keychain; sign in on the machine"],
     ]);
-    expect(listTar(partial.tar).some(e => e.path.includes("hosts.yml"))).toBe(false);
+    expect(readFileSync(join(extract(partial.tar), ".config/gh/hosts.yml"), "utf8")).toBe(["github.com:", "    oauth_token: gho_fake_token", "    git_protocol: ssh", "    users:", "        Zingzy:", "            oauth_token: gho_fake_token", "    user: Zingzy", ""].join("\n"));
+    // The active account dropped: the one left becomes active and the host token is its.
+    const active = await packPlan(plan, { secrets: new Map([["gh:github.com (other)", "gho_fake_other"]]), home });
+    expect(active.skipped.map(s => [s.path, s.note])).toEqual([
+      ["Keychain: gh:github.com (Zingzy)", "Zingzy left behind: no token in the Keychain"],
+      ["Keychain: Claude Code-credentials", "not read from the Keychain; sign in on the machine"],
+    ]);
+    expect(readFileSync(join(extract(active.tar), ".config/gh/hosts.yml"), "utf8")).toBe(["github.com:", "    oauth_token: gho_fake_other", "    git_protocol: ssh", "    users:", "        other:", "            oauth_token: gho_fake_other", "    user: other", ""].join("\n"));
+    // No account read keeps the whole row home: hosts.yml and both items are noted, the file does not travel.
+    const none = await packPlan(plan, { secrets: new Map(), home });
+    expect(none.skipped.map(s => [s.path, s.note])).toEqual([
+      ["~/.config/gh/hosts.yml", "not read from the Keychain; sign in on the machine"],
+      ["Keychain: gh:github.com (other)", "not read from the Keychain; sign in on the machine"],
+      ["Keychain: gh:github.com (Zingzy)", "not read from the Keychain; sign in on the machine"],
+      ["Keychain: Claude Code-credentials", "not read from the Keychain; sign in on the machine"],
+    ]);
+    expect(listTar(none.tar).some(e => e.path.includes("hosts.yml"))).toBe(false);
   });
 
   it("writes the archive, which holds the secrets, as 0600 from the first byte", async () => {

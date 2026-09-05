@@ -17,7 +17,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BREW_TOOLCHAIN_BYTES, BUILDER_DISK_GB, MEASURED_ON, PACK_BUDGET_BYTES, TOOLCHAIN_MEASURED_ON, TOOLS_DISK_FLOOR, agentInstallsFor, agentSize, brewfileFor, editorInstallsFor, estimateDisk, extensionsFile, pinState, remoteEditorFor, remoteSettingsPath, toolInstallsFor, toolSize, type BrewTable, type DiskEstimate, type ImportResult } from "@wsp/engine";
 import { ALREADY_APPLIED } from "@wsp/protocol";
-import { CLAUDE_INSTALLER, importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
+import { CLAUDE_INSTALLER, importFor, importResultPath, keychainLogins, leftBehind, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
   CONSENT_CHOICES,
   LOGIN_CHOICES,
@@ -1027,8 +1027,10 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     secrets.set(key, value);
     runLog.hide(value);
   }
+  const label = (id: string) => manifest.entries.find(e => e.id === id)?.label ?? id;
+  if (read.dropped.length > 0) log.warn(read.dropped.map(d => `${label(d.id)}: ${leftBehind(d.account)} (${d.reason}).`).join("\n"), out);
+  const left = new Map(read.dropped.map(d => [d.id, read.dropped.filter(x => x.id === d.id).map(x => leftBehind(x.account)).join("; ")]));
   if (read.refused.length > 0) {
-    const label = (id: string) => manifest.entries.find(e => e.id === id)?.label ?? id;
     for (const r of read.refused) choices.set(r.id, "machine");
     log.warn(read.refused.map(r => `${label(r.id)}: Keychain read failed (${r.reason}); changed to sign in on the machine.`).join("\n"), out);
     saveRecipe(path, manifest, ticks, choices);
@@ -1212,6 +1214,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const skipWhy = interactive ? undefined : io.isTTY ? "--yes asks nothing; sign in from the app's terminal" : "no terminal to sign in from; use the app's terminal";
   const outcomes = await signInStage({
     logins: stageLogins(offered, choices, ticks),
+    left,
     dial,
     terminal: { input: io.input, output: io.output },
     ...(skipWhy !== undefined ? { skipWhy } : {}),
