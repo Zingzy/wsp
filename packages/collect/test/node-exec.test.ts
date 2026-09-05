@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -113,7 +114,9 @@ describe("the interactive listing over a real shell", () => {
   it("is run with stdin closed, WSP_COLLECT=1 and a ten second budget ended by SIGKILL; a shell that never exits is killed and the rc files answer", async () => {
     const d = scratch();
     const shell = join(d, "zsh");
-    writeFileSync(shell, `#!/bin/sh\ntrap '' TERM\necho $$ > ${join(d, "pid")}\nread x\nwhile :; do sleep 1; done\n`, { mode: 0o755 });
+    writeFileSync(shell, `#!/bin/sh\n[ "$1" = --warm ] && exit 0\ntrap '' TERM\necho $$ > ${join(d, "pid")}\nread x\nwhile :; do sleep 1; done\n`, { mode: 0o755 });
+    /** The first exec of a freshly written script takes 440 ms median here, up to 1.6 s, the next 6 ms; paid before the 500 ms budget below. */
+    execFileSync(shell, ["--warm"]);
     let seen: RunOptions | undefined;
     const exec: HostExec = {
       which: nodeExec.which,
