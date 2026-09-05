@@ -3,7 +3,8 @@
 // first: each is a textarea edited in place, a remove button, and a send-now
 // button that stops the running turn first, since the harness takes no
 // message mid-turn. The head row goes when the turn ends; the row a send-now
-// promoted says so while the stop is in flight.
+// promoted says so while the stop is in flight. Every row keeps the same
+// three controls in every state, so nothing shifts as the turn starts or ends.
 import { ArrowUpIcon, XIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import type { QueuedMessage } from "./composerDraftStore";
@@ -13,7 +14,7 @@ export const STEER_NOTICE = "Stopping the turn, then this message sends.";
 export function ComposerQueue({
   rows,
   steering,
-  canSteer,
+  steer,
   onEdit,
   onRemove,
   onSteer,
@@ -21,7 +22,8 @@ export function ComposerQueue({
   rows: ReadonlyArray<QueuedMessage>;
   /** The row a send-now put at the head while the turn stops; null when none. */
   steering: string | null;
-  canSteer: boolean;
+  /** What send-now does: starts the row at once, stops the turn first, or nothing can go yet. */
+  steer: "now" | "stop" | null;
   onEdit: (id: string, prompt: string) => void;
   onRemove: (id: string) => void;
   onSteer: (id: string) => void;
@@ -44,12 +46,17 @@ export function ComposerQueue({
                 }}
                 className="field-sizing-content min-h-6 w-full min-w-0 flex-1 resize-none bg-transparent py-0.5 text-sm leading-5 text-foreground outline-none"
               />
-              <span className="shrink-0 select-none py-0.5 font-mono text-[11px] leading-5 text-muted-foreground">{next ? "next" : "queued"}</span>
-              {canSteer ? (
-                <Button size="icon-xs" variant="ghost-muted" aria-label="Stop the turn and send now" title="Stop the turn and send now" onClick={() => onSteer(row.id)} disabled={next}>
-                  <ArrowUpIcon />
-                </Button>
-              ) : null}
+              <span className="w-[6ch] shrink-0 select-none py-0.5 text-end font-mono text-[11px] leading-5 text-muted-foreground">{next ? "next" : "queued"}</span>
+              <Button
+                size="icon-xs"
+                variant="ghost-muted"
+                aria-label={steer === "stop" ? "Stop the turn and send now" : "Send now"}
+                title={steer === "stop" ? "Stop the turn and send now" : "Send now"}
+                onClick={() => onSteer(row.id)}
+                disabled={steer === null || next}
+              >
+                <ArrowUpIcon />
+              </Button>
               <Button size="icon-xs" variant="ghost-muted" aria-label="Remove queued message" title="Remove queued message" onClick={() => onRemove(row.id)}>
                 <XIcon />
               </Button>

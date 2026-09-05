@@ -3,7 +3,10 @@
 // outside the composer and in local storage so a glance at another tab or a
 // reload does not lose what was typed. The prompt editor is controlled from
 // here; a queue holds what was entered while its thread's turn ran, oldest
-// first, until the composer sends its head at the turn's end.
+// first, until the composer sends its head at the turn's end. A queue read
+// back from storage, one whose head the runtime refused, or one riding a
+// fresh send that has not yet named its thread is held: its rows stay put
+// until the person's next Enter or send-now on this thread.
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
@@ -25,19 +28,33 @@ interface DraftState {
   drafts: Record<string, ComposerDraft>;
   /** Keyed by the composer's thread key: the thread's runtime id, or the workspace id before it has one. */
   queues: Record<string, ReadonlyArray<QueuedMessage>>;
+  /** Queues whose rows must not go by themselves; not persisted, so every reload holds what it restores. */
+  held: Record<string, true>;
   setDraft(workspaceId: string, draft: ComposerDraft): void;
-  enqueue(threadKey: string, prompt: string): void;
+  /** Behind the rows already waiting, or ahead of them when the person's new row must go before held ones. */
+  enqueue(threadKey: string, prompt: string, at?: "head" | "tail"): void;
   editQueued(threadKey: string, id: string, prompt: string): void;
   removeQueued(threadKey: string, id: string): void;
   /** Moves one row to the head, so it is the next to send. */
   promoteQueued(threadKey: string, id: string): void;
+  hold(threadKey: string): void;
+  /** Puts a row the runtime refused back at the head and holds the queue. */
+  requeue(threadKey: string, row: QueuedMessage): void;
+  /** The person acted on this thread: its rows may go again. */
+  release(threadKey: string): void;
   /** Moves every row from one key behind the rows at another: a thread's first start gives it the id its rows were waiting under. */
   rekeyQueue(from: string, to: string): void;
 }
 
 const newId = (): string => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-function normalizePersisted(persisted: unknown): Pick<DraftState, "drafts" | "queues"> {
+function without<T>(record: Record<string, T>, key: string): Record<string, T> {
+  if (!(key in record)) return record;
+  const { [key]: _gone, ...rest } = record;
+  return rest;
+}
+
+function normalizePersisted(persisted: unknown): Pick<DraftState, "drafts" | "queues" | "held"> {
   const raw = persisted && typeof persisted === "object" ? (persisted as { drafts?: unknown; queues?: unknown }) : {};
   const drafts: Record<string, ComposerDraft> = {};
   if (raw.drafts && typeof raw.drafts === "object") {
@@ -57,7 +74,9 @@ function normalizePersisted(persisted: unknown): Pick<DraftState, "drafts" | "qu
       if (clean.length > 0) queues[workspaceId] = clean;
     }
   }
-  return { drafts, queues };
+  const held: Record<string, true> = {};
+  for (const key of Object.keys(queues)) held[key] = true;
+  return { drafts, queues, held };
 }
 
 export const useComposerDraftStore = create<DraftState>()(
@@ -68,15 +87,13 @@ export const useComposerDraftStore = create<DraftState>()(
           const rows = s.queues[threadKey] ?? NO_QUEUE;
           const next = fn(rows);
           if (next === rows) return s;
-          if (next.length === 0) {
-            const { [threadKey]: _gone, ...queues } = s.queues;
-            return { queues };
-          }
+          if (next.length === 0) return { queues: without(s.queues, threadKey), held: without(s.held, threadKey) };
           return { queues: { ...s.queues, [threadKey]: next } };
         });
       return {
         drafts: {},
         queues: {},
+        held: {},
         setDraft(workspaceId, draft) {
           set(s => {
             const current = s.drafts[workspaceId];
@@ -84,8 +101,8 @@ export const useComposerDraftStore = create<DraftState>()(
             return { drafts: { ...s.drafts, [workspaceId]: draft } };
           });
         },
-        enqueue(threadKey, prompt) {
-          patchQueue(threadKey, rows => [...rows, { id: newId(), prompt }]);
+        enqueue(threadKey, prompt, at = "tail") {
+          patchQueue(threadKey, rows => (at === "head" ? [{ id: newId(), prompt }, ...rows] : [...rows, { id: newId(), prompt }]));
         },
         editQueued(threadKey, id, prompt) {
           patchQueue(threadKey, rows => {
@@ -104,12 +121,20 @@ export const useComposerDraftStore = create<DraftState>()(
             return [row, ...rows.filter(r => r !== row)];
           });
         },
+        hold(threadKey) {
+          set(s => (threadKey in s.held ? s : { held: { ...s.held, [threadKey]: true } }));
+        },
+        requeue(threadKey, row) {
+          set(s => ({ queues: { ...s.queues, [threadKey]: [row, ...(s.queues[threadKey] ?? NO_QUEUE)] }, held: { ...s.held, [threadKey]: true } }));
+        },
+        release(threadKey) {
+          set(s => (threadKey in s.held ? { held: without(s.held, threadKey) } : s));
+        },
         rekeyQueue(from, to) {
           set(s => {
             const moving = s.queues[from];
             if (moving === undefined || from === to) return s;
-            const { [from]: _gone, ...queues } = s.queues;
-            return { queues: { ...queues, [to]: [...(s.queues[to] ?? NO_QUEUE), ...moving] } };
+            return { queues: { ...without(s.queues, from), [to]: [...(s.queues[to] ?? NO_QUEUE), ...moving] }, held: without(s.held, from) };
           });
         },
       };
@@ -132,4 +157,8 @@ export function useComposerDraft(workspaceId: string): ComposerDraft {
 
 export function useComposerQueue(threadKey: string): ReadonlyArray<QueuedMessage> {
   return useComposerDraftStore(s => s.queues[threadKey] ?? NO_QUEUE);
+}
+
+export function useComposerQueueHeld(threadKey: string): boolean {
+  return useComposerDraftStore(s => s.held[threadKey] === true);
 }

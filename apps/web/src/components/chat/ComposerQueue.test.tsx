@@ -10,13 +10,13 @@ const rows = [
 
 function mount(over: Partial<Parameters<typeof ComposerQueue>[0]> = {}) {
   const handlers = { onEdit: vi.fn(), onRemove: vi.fn(), onSteer: vi.fn() };
-  const view = render(<ComposerQueue rows={rows} steering={null} canSteer {...handlers} {...over} />);
+  const view = render(<ComposerQueue rows={rows} steering={null} steer="stop" {...handlers} {...over} />);
   return { ...handlers, view };
 }
 
 describe("ComposerQueue", () => {
   it("renders nothing for an empty queue", () => {
-    const { container } = render(<ComposerQueue rows={[]} steering={null} canSteer onEdit={() => {}} onRemove={() => {}} onSteer={() => {}} />);
+    const { container } = render(<ComposerQueue rows={[]} steering={null} steer="stop" onEdit={() => {}} onRemove={() => {}} onSteer={() => {}} />);
     expect(container.innerHTML).toBe("");
   });
 
@@ -43,10 +43,23 @@ describe("ComposerQueue", () => {
     expect(onRemove).toHaveBeenCalledWith("a");
   });
 
-  it("offers no send-now without a stoppable turn", () => {
-    mount({ canSteer: false });
-    expect(screen.queryByRole("button", { name: "Stop the turn and send now" })).toBeNull();
-    expect(screen.getAllByRole("button", { name: "Remove queued message" })).toHaveLength(2);
+  it("keeps the send-now button in place while nothing can go, disabled, so the row does not shift", () => {
+    const { onSteer, view } = mount({ steer: null });
+    const buttons = screen.getAllByRole("button", { name: "Send now" }) as HTMLButtonElement[];
+    expect(buttons).toHaveLength(2);
+    expect(buttons.every(b => b.disabled)).toBe(true);
+    fireEvent.click(buttons[0]!);
+    expect(onSteer).not.toHaveBeenCalled();
+    const shape = [...view.container.querySelectorAll("li")].map(li => li.children.length);
+    view.rerender(<ComposerQueue rows={rows} steering={null} steer="now" onEdit={() => {}} onRemove={() => {}} onSteer={onSteer} />);
+    const now = screen.getAllByRole("button", { name: "Send now" }) as HTMLButtonElement[];
+    expect(now.every(b => !b.disabled)).toBe(true);
+    fireEvent.click(now[1]!);
+    expect(onSteer).toHaveBeenCalledWith("b");
+    expect([...view.container.querySelectorAll("li")].map(li => li.children.length)).toEqual(shape);
+    view.rerender(<ComposerQueue rows={rows} steering={null} steer="stop" onEdit={() => {}} onRemove={() => {}} onSteer={onSteer} />);
+    expect(screen.getAllByRole("button", { name: "Stop the turn and send now" })).toHaveLength(2);
+    expect([...view.container.querySelectorAll("li")].map(li => li.children.length)).toEqual(shape);
   });
 
   it("marks the promoted row as next, disables its send-now and shows the one-line notice while the stop is in flight", () => {

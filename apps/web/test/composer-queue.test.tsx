@@ -2,8 +2,8 @@
 // Messages entered while a turn runs: Enter queues instead of failing, the
 // rows stack above the composer and go one per turn end in order, each is
 // edited in place or removed, send-now stops the turn and puts its row first,
-// and the queue lives in local storage so a reload while the runtime keeps
-// the turn still holds it. Same fixture api shape as chat.test.tsx; no live daemon.
+// and the queue lives in local storage so a reload still holds it: restored
+// rows wait for the person's next send. Same fixture api shape as chat.test.tsx; no live daemon.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { EventUnion, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
@@ -22,7 +22,7 @@ beforeAll(() => { restoreLayout = installFakeLayout(); });
 afterAll(() => restoreLayout());
 beforeEach(() => {
   window.localStorage.clear();
-  useComposerDraftStore.setState({ drafts: {}, queues: {} });
+  useComposerDraftStore.setState({ drafts: {}, queues: {}, held: {} });
 });
 
 const WS = CHAT_WS;
@@ -90,6 +90,14 @@ const rowFor = (text: string) => (screen.getAllByRole("textbox", { name: "Queued
 const within = (li: HTMLElement, name: string) => li.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`);
 const done = (status: "completed" | "interrupted", turnId = CHAT_TURN): EventUnion => ({ type: "session.done", ...scope, turnId, result: { status, durationMs: 900, costUsd: 0.001 } });
 const end = (turnId = CHAT_TURN): EventUnion => ({ type: "session.end", ...scope, turnId, exitCode: 0, sawResult: true });
+
+/** A fresh page: the in-memory store is empty until it reads storage back. */
+async function reloadStore() {
+  const stored = window.localStorage.getItem(STORAGE_KEY)!;
+  useComposerDraftStore.setState({ drafts: {}, queues: {}, held: {} });
+  window.localStorage.setItem(STORAGE_KEY, stored);
+  await useComposerDraftStore.persist.rehydrate();
+}
 
 async function enter(text: string) {
   await typeInto(composerEditor(), text);
@@ -204,7 +212,7 @@ describe("composer queue", () => {
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["two"]));
   });
 
-  it("offers no send-now before the turn's start arrives, since nothing can be stopped yet", async () => {
+  it("send-now is disabled before the turn's start arrives, since nothing can be stopped yet, and the row does not shift when it can", async () => {
     const { api, started, emit } = fixtureApi();
     await setup(api);
     await enter("first");
@@ -212,29 +220,85 @@ describe("composer queue", () => {
     await enter("second");
     expect(started).toHaveLength(1);
     expect(queued()).toEqual(["second"]);
-    expect(screen.queryByRole("button", { name: "Stop the turn and send now" })).toBeNull();
+    const li = rowFor("second");
+    const before = li.querySelectorAll("button").length;
+    expect(within(li, "Send now")!.disabled).toBe(true);
     expect(screen.getByRole("button", { name: "Remove queued message" })).toBeDefined();
     emit({ type: "session.start", ...scope, prompt: "first" });
-    expect(screen.getByRole("button", { name: "Stop the turn and send now" })).toBeDefined();
+    expect(within(rowFor("second"), "Stop the turn and send now")!.disabled).toBe(false);
+    expect(rowFor("second").querySelectorAll("button").length).toBe(before);
   });
 
-  it("a reload while the runtime keeps the turn still holds the queued row, which goes when that turn ends", async () => {
+  it("a send whose harness dies before its start frees the composer at that turn's end and holds the rows that rode it; the next Enter goes first", async () => {
+    const { api, started, emit } = fixtureApi();
+    await setup(api);
+    await enter("first");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(screen.getByRole("button", { name: "Turn in flight" })).toBeDefined();
+    await enter("second");
+    expect(queued()).toEqual(["second"]);
+    const X = { workspaceId: WS, sessionId: "sess_x", turnId: "turn_x1" };
+    emit({ type: "session.done", ...X, result: { status: "failed", error: "claude: command not found" } });
+    emit({ type: "session.end", ...X, exitCode: 127, sawResult: true });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send message" })).toBeDefined());
+    expect(started).toHaveLength(1);
+    expect(queued()).toEqual(["second"]);
+    await enter("third");
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "third"]));
+    expect(queued()).toEqual(["second"]);
+    emit({ type: "session.start", ...scope, prompt: "third" });
+    emit(done("completed"));
+    emit(end());
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "third", "second"]));
+    expect(queued()).toEqual([]);
+  });
+
+  it("a refused start puts the row back at the head and holds the queue until the person acts", async () => {
+    const { api, started, emit } = fixtureApi();
+    const accept = api.startSession;
+    let refuse = true;
+    api.startSession = async opts => {
+      if (!refuse) return accept(opts);
+      started.push(opts);
+      throw new Error("machine is napping");
+    };
+    await setup(api);
+    emit({ type: "session.start", ...scope, prompt: "go" });
+    await enter("one");
+    await enter("two");
+    await enter("three");
+    emit(done("completed"));
+    emit(end());
+    await waitFor(() => expect(screen.getByText(/machine is napping/i)).toBeDefined());
+    expect(started.map(s => s.prompt)).toEqual(["one"]);
+    expect(queued()).toEqual(["one", "two", "three"]);
+    expect(draft()).toBe("");
+    refuse = false;
+    fireEvent.click(within(rowFor("one"), "Send now")!);
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["one", "one"]));
+    expect(queued()).toEqual(["two", "three"]);
+  });
+
+  it("a reload while the runtime keeps the turn restores the row held; Enter during the turn goes first at its end and the restored row follows", async () => {
     useComposerDraftStore.getState().enqueue(WS, "what model are you?");
     expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}").state.queues[WS]).toHaveLength(1);
-    // A fresh page: the in-memory store is empty until it reads storage back.
-    const stored = window.localStorage.getItem(STORAGE_KEY)!;
-    useComposerDraftStore.setState({ drafts: {}, queues: {} });
-    window.localStorage.setItem(STORAGE_KEY, stored);
-    await useComposerDraftStore.persist.rehydrate();
+    await reloadStore();
     const { api, started, emit } = fixtureApi({ [WS]: CHAT_STREAM.slice(0, 3) as SessionEvent[] });
     await setup(api);
     await screen.findByText(/Creating the server file/);
     expect(screen.getByRole("button", { name: "Stop generation" })).toBeDefined();
     expect(queued()).toEqual(["what model are you?"]);
     expect(started).toHaveLength(0);
+    await enter("and now?");
+    expect(queued()).toEqual(["and now?", "what model are you?"]);
     for (const e of CHAT_STREAM.slice(7)) emit(e);
-    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["what model are you?"]));
-    expect(started[0]?.resume).toBe("sess_0001");
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["and now?"]));
+    expect(queued()).toEqual(["what model are you?"]);
+    emit({ type: "session.start", ...scope, turnId: "turn_0002", prompt: "and now?" });
+    emit(done("completed", "turn_0002"));
+    emit(end("turn_0002"));
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["and now?", "what model are you?"]));
+    expect(started[1]?.resume).toBe("sess_0001");
     expect(queued()).toEqual([]);
   });
 
@@ -299,12 +363,63 @@ describe("composer queue", () => {
     expect(started[1]?.resume).toBe("sess_n");
   });
 
-  it("a reload after the turn ended sends the queued row once the transcript is in", async () => {
-    useComposerDraftStore.getState().enqueue(WS, "and the context window?");
-    const { api, started } = fixtureApi({ [WS]: CHAT_STREAM.slice() });
-    await setup(api);
-    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["and the context window?"]));
+  it("rows typed before a fresh thread's start are held when another thread is pinned: nothing goes into it, and the next new thread shows them waiting", async () => {
+    const history: Record<string, SessionEvent[]> = {};
+    const { api, started, emit } = fixtureApi(history);
+    const view = await setup(api);
+    await enter("first");
+    await waitFor(() => expect(started).toHaveLength(1));
+    await enter("second");
+    await enter("third");
+    expect(useComposerDraftStore.getState().queues[WS]?.map(r => r.prompt)).toEqual(["second", "third"]);
+    history[WS] = CHAT_STREAM.map(e => ({ ...e, sessionId: "sess_a", threadId: "thr_a" }));
+    view.rerender(<WorkspaceThread workspaceId={WS} threadId="thr_a" />);
+    await screen.findByText(/Server is live at :3000\./);
+    await waitFor(() => expect(screen.getByTestId("settled-footer").textContent).toContain("completed"));
+    expect(started).toHaveLength(1);
     expect(queued()).toEqual([]);
-    expect(screen.getByText("and the context window?")).toBeDefined();
+    expect(useComposerDraftStore.getState().queues["thr_a"]).toBeUndefined();
+
+    view.rerender(<WorkspaceThread workspaceId={WS} />);
+    act(() => requestNewThread({ workspaceId: WS }));
+    await waitFor(() => expect(queued()).toEqual(["second", "third"]));
+    await waitFor(() => expect(isEditable(composerEditor())).toBe(true));
+    expect(started).toHaveLength(1);
+    fireEvent.click(within(rowFor("second"), "Send now")!);
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "second"]));
+    expect(started[1]?.resume).toBeUndefined();
+    expect(queued()).toEqual(["third"]);
+    const N = { workspaceId: WS, sessionId: "sess_n", turnId: "turn_n1", threadId: "thr_n" };
+    emit({ type: "session.start", ...N, prompt: "second" });
+    expect(useComposerDraftStore.getState().queues["thr_n"]?.map(r => r.prompt)).toEqual(["third"]);
+    emit({ type: "session.done", ...N, result: { status: "completed", durationMs: 500 } });
+    emit({ type: "session.end", ...N, exitCode: 0, sawResult: true });
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "second", "third"]));
+    expect(started[2]?.resume).toBe("sess_n");
+  });
+
+  it("a reload after the turn ended restores the rows and sends nothing; the next message the person sends goes first and they follow in order", async () => {
+    useComposerDraftStore.getState().enqueue(WS, "and the context window?");
+    useComposerDraftStore.getState().enqueue(WS, "and the cost?");
+    await reloadStore();
+    const { api, started, emit } = fixtureApi({ [WS]: CHAT_STREAM.slice() });
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    await waitFor(() => expect(screen.getByTestId("settled-footer").textContent).toContain("completed"));
+    expect(started).toHaveLength(0);
+    expect(queued()).toEqual(["and the context window?", "and the cost?"]);
+    await enter("what model are you?");
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["what model are you?"]));
+    expect(queued()).toEqual(["and the context window?", "and the cost?"]);
+    emit({ type: "session.start", ...scope, turnId: "turn_0002", prompt: "what model are you?" });
+    emit(done("completed", "turn_0002"));
+    emit(end("turn_0002"));
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["what model are you?", "and the context window?"]));
+    expect(queued()).toEqual(["and the cost?"]);
+    emit({ type: "session.start", ...scope, turnId: "turn_0003", prompt: "and the context window?" });
+    emit(done("completed", "turn_0003"));
+    emit(end("turn_0003"));
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["what model are you?", "and the context window?", "and the cost?"]));
+    expect(queued()).toEqual([]);
   });
 });

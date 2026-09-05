@@ -12,8 +12,9 @@ const state = (events: ReadonlyArray<SessionEvent>, extra: Partial<ThreadState> 
   localErrors: [],
   fresh: false,
   stale: null,
-  sending: false,
+  sending: null,
   left: undefined,
+  named: null,
   ...extra,
 });
 

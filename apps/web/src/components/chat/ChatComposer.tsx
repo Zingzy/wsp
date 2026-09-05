@@ -12,10 +12,14 @@
 // a send, so Enter never fails silently. A running turn blocks nothing: Enter
 // then queues the message under the thread's key in the draft store, the rows
 // stack above the box, and when the turn ends the head row starts the next
-// turn; a fresh thread's rows wait under the workspace id until its first
-// start names it, then move under that id. Send-now on a row
-// puts it at the head and stops the turn, since the harness runs one process
-// per turn with stdin closed and takes no message mid-turn. The editor is also
+// turn; a fresh thread's rows wait under the workspace id until its own first
+// start names it, then move under that id. Rows read back from storage, a
+// row the runtime refused, and rows riding a fresh send that has not named
+// its thread are held: they go only after the person's next Enter or send-now
+// here, never on their own, and a row typed during a turn goes ahead of the
+// held ones it releases. Send-now on a row puts it at
+// the head and stops the turn, since the harness runs one process per turn
+// with stdin closed and takes no message mid-turn. The editor is also
 // disabled while the turn a new thread left behind is still finishing: stop
 // reaches only the visible turn, so a second session must not start until
 // that one ends. The checkout row under the composer picks the folder a fresh
@@ -35,7 +39,7 @@ import { ComposerBanner } from "./ComposerBanner";
 import { ComposerCheckoutRow } from "./ComposerCheckoutRow";
 import { ComposerCommandMenu, type ComposerCommandItem } from "./ComposerCommandMenu";
 import { ComposerCommandMenuLayer } from "./ComposerCommandMenuLayer";
-import { EMPTY_DRAFT, useComposerDraft, useComposerDraftStore, useComposerQueue } from "./composerDraftStore";
+import { EMPTY_DRAFT, useComposerDraft, useComposerDraftStore, useComposerQueue, useComposerQueueHeld } from "./composerDraftStore";
 import { ComposerOptionPickers, useComposerPicks } from "./ComposerOptionPickers";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
@@ -84,8 +88,9 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const [stop, setStop] = useState<StopAttempt | null>(null);
   const [steering, setSteering] = useState<string | null>(null);
   const draft = useComposerDraft(workspaceId);
-  const { threadKey } = thread;
+  const { threadKey, named } = thread;
   const queue = useComposerQueue(threadKey);
+  const held = useComposerQueueHeld(threadKey);
   const cwd = useThreadFolder(workspaceId);
   const { startOptions } = useComposerPicks(workspaceId, thread);
   const setDraft = useComposerDraftStore(s => s.setDraft);
@@ -93,13 +98,15 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const editQueued = useComposerDraftStore(s => s.editQueued);
   const removeQueued = useComposerDraftStore(s => s.removeQueued);
   const promoteQueued = useComposerDraftStore(s => s.promoteQueued);
+  const hold = useComposerDraftStore(s => s.hold);
+  const requeue = useComposerDraftStore(s => s.requeue);
+  const release = useComposerDraftStore(s => s.release);
   const rekeyQueue = useComposerDraftStore(s => s.rekeyQueue);
-  const previousKey = useRef(threadKey);
   useEffect(() => {
-    const from = previousKey.current;
-    previousKey.current = threadKey;
-    if (from !== threadKey && from === workspaceId) rekeyQueue(from, threadKey);
-  }, [rekeyQueue, threadKey, workspaceId]);
+    if (named === null) return;
+    if (named === workspaceId) release(workspaceId);
+    else rekeyQueue(workspaceId, named);
+  }, [named, rekeyQueue, release, workspaceId]);
   const editorRef = useRef<ComposerPromptEditorHandle | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
@@ -168,20 +175,19 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     [searchKey],
   );
 
-  const { setSending, appendUserTurn, appendLocalError, resume, busy } = thread;
+  const { setSending, appendUserTurn, appendLocalError, resume, busy, sending } = thread;
   const start = useCallback(
-    (prompt: string) => {
+    (prompt: string, onRefused: () => void) => {
       if (!api) return;
       setSending(true);
       appendUserTurn(prompt);
       void api.startSession({ workspaceId, prompt, ...(resume ? { resume } : {}), ...(cwd !== null ? { cwd } : {}), ...startOptions }).catch((err: unknown) => {
         setSending(false);
-        const current = useComposerDraftStore.getState().drafts[workspaceId];
-        if (current === undefined || current.prompt === "") setDraft(workspaceId, { prompt, cursor: prompt.length });
+        onRefused();
         appendLocalError(err instanceof Error ? err.message : String(err));
       });
     },
-    [api, appendLocalError, appendUserTurn, cwd, resume, setDraft, setSending, startOptions, workspaceId],
+    [api, appendLocalError, appendUserTurn, cwd, resume, setSending, startOptions, workspaceId],
   );
 
   const send = useCallback(() => {
@@ -190,18 +196,32 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     const prompt = snapshot.value.trim();
     if (prompt === "") return;
     setDraft(workspaceId, EMPTY_DRAFT);
-    if (busy) enqueue(threadKey, prompt);
-    else start(prompt);
-  }, [busy, draft, enqueue, setDraft, start, threadKey, unavailable, workspaceId]);
+    if (!busy) {
+      release(threadKey);
+      start(prompt, () => {
+        const current = useComposerDraftStore.getState().drafts[workspaceId];
+        if (current === undefined || current.prompt === "") setDraft(workspaceId, { prompt, cursor: prompt.length });
+      });
+      return;
+    }
+    // Rows riding a fresh send stay held until its start names the thread, so a pin or a dead harness leaves them waiting.
+    if (sending && threadKey === workspaceId) {
+      enqueue(threadKey, prompt);
+      hold(threadKey);
+      return;
+    }
+    enqueue(threadKey, prompt, held ? "head" : "tail");
+    release(threadKey);
+  }, [busy, draft, enqueue, held, hold, release, sending, setDraft, start, threadKey, unavailable, workspaceId]);
 
   // The head row goes as soon as nothing blocks a send; starting flips busy, so the rest wait for the next end.
   const head = queue[0];
   useEffect(() => {
-    if (head === undefined || unavailable !== null || busy) return;
+    if (head === undefined || held || unavailable !== null || busy) return;
     removeQueued(threadKey, head.id);
     const prompt = head.prompt.trim();
-    if (prompt !== "") start(prompt);
-  }, [busy, head, removeQueued, start, threadKey, unavailable]);
+    if (prompt !== "") start(prompt, () => requeue(threadKey, head));
+  }, [busy, head, held, removeQueued, requeue, start, threadKey, unavailable]);
 
   const interrupt = useCallback(() => {
     const method = api?.interruptSession;
@@ -216,11 +236,13 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
 
   const steer = useCallback(
     (id: string) => {
-      setSteering(id);
+      release(threadKey);
       promoteQueued(threadKey, id);
+      if (!canStop) return;
+      setSteering(id);
       interrupt();
     },
-    [interrupt, promoteQueued, threadKey],
+    [canStop, interrupt, promoteQueued, release, threadKey],
   );
 
   const selectItem = useCallback(
@@ -283,7 +305,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
       <ComposerQueue
         rows={queue}
         steering={stopAttempt?.error ? null : steering}
-        canSteer={canStop}
+        steer={unavailable !== null ? null : canStop ? "stop" : busy ? null : "now"}
         onEdit={(id, prompt) => editQueued(threadKey, id, prompt)}
         onRemove={id => removeQueued(threadKey, id)}
         onSteer={steer}

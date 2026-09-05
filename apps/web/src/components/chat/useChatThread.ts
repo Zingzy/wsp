@@ -40,6 +40,8 @@ export interface ChatThreadHandle {
   readonly hydrated: boolean;
   /** True while a turn is running, a send is in flight, or a left turn is still finishing. */
   readonly busy: boolean;
+  /** True from a send until its session.start lands (or its turn ends without one). */
+  readonly sending: boolean;
   /** True from a new-thread request until its first session.start: the next send must not resume the old session. */
   readonly fresh: boolean;
   /** The harness session the next send resumes: the shown thread's latest turn, else the workspace's remembered one; none while fresh. */
@@ -48,6 +50,8 @@ export interface ChatThreadHandle {
   readonly finishing: boolean;
   /** The held thread's runtime id, or the workspace id before it has one; keys what belongs to this thread outside the transcript. */
   readonly threadKey: string;
+  /** The key the held thread's own first session.start landed under: its thread id, or the workspace id when the start carried none; null before, or when the thread came with its id. */
+  readonly named: string | null;
   /** Optimistic user message for a send; the next session.start replaces it. */
   readonly appendUserTurn: (prompt: string) => void;
   /** A send that failed before the runtime emitted anything. */
@@ -69,13 +73,15 @@ export interface ThreadState {
   readonly localErrors: ReadonlyArray<{ message: string; at: string }>;
   readonly fresh: boolean;
   readonly stale: StaleTurn | null;
-  /** A send in flight, until the session.start it produces lands here or a reload rebuilds this. */
-  readonly sending: boolean;
+  /** A send in flight, with the turn that had settled when it began, until its session.start lands or a reload rebuilds this. */
+  readonly sending: { readonly after: string | undefined } | null;
   /** Thread id of the transcript a new-thread request left; read while fresh to tell the person's own thread from it. */
   readonly left: string | undefined;
+  /** The key a send from here landed under at its first session.start while the thread had no id: the thread id, or the workspace id without one. */
+  readonly named: string | null;
 }
 
-const EMPTY: ThreadState = { events: [], arrivals: [], pendingPrompt: null, localErrors: [], fresh: false, stale: null, sending: false, left: undefined };
+const EMPTY: ThreadState = { events: [], arrivals: [], pendingPrompt: null, localErrors: [], fresh: false, stale: null, sending: null, left: undefined, named: null };
 const SESSION_TYPES: ReadonlySet<string> = new Set(["session.start", "session.delta", "session.done", "session.end"]);
 const now = () => new Date().toISOString();
 
@@ -139,7 +145,12 @@ function inHeldThread(state: ThreadState, e: SessionEvent): boolean {
   return held === undefined || e.threadId === held;
 }
 
-/** Applies one live event; returns the same state object when the event belongs to the turn a new thread left or to another thread. */
+/**
+ * Applies one live event; returns the same state object when the event belongs to the turn a new thread left
+ * or to another thread. A send ends at its session.start, or at a session.end of some other turn than the one
+ * that had settled when it began: that turn's own end still trails its done, which already opened the composer,
+ * while a harness that dies before init produces only a done and an end under a new turn id.
+ */
 export function reduceEvent(state: ThreadState, e: SessionEvent, at: string): ThreadState {
   const { stale } = state;
   if (stale !== null) {
@@ -148,7 +159,13 @@ export function reduceEvent(state: ThreadState, e: SessionEvent, at: string): Th
     }
     if (belongsToStale(stale, e)) return e.type === "session.end" ? { ...state, stale: null } : state;
   }
-  return inHeldThread(state, e) ? append(state, e, at) : state;
+  if (!inHeldThread(state, e)) return state;
+  const next = append(state, e, at);
+  if (state.sending === null) return next;
+  const starts = e.type === "session.start";
+  const settles = starts || (e.type === "session.end" && e.turnId !== state.sending.after);
+  const named = starts && state.events.at(-1)?.threadId === undefined ? (e.threadId ?? e.workspaceId) : state.named;
+  return settles ? { ...next, sending: null, named } : next;
 }
 
 function shallowEqual(a: object, b: object): boolean {
@@ -273,11 +290,7 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
       if (hydratedRef.current !== viewKey) return;
       if (!isSessionEvent(e) || e.workspaceId !== workspaceId) return;
       if (threadId !== null && e.threadId !== threadId) return;
-      // Only a start ends a send: the previous turn's end still arrives after its done, which already opened the composer.
-      setState(s => {
-        const next = reduceEvent(s, e, now());
-        return next !== s && next.sending && e.type === "session.start" ? { ...next, sending: false } : next;
-      });
+      setState(s => reduceEvent(s, e, now()));
     },
     [workspaceId, threadId, viewKey],
   );
@@ -288,7 +301,14 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
     previousEntries.current = next.entries;
     return next;
   }, [state]);
-  const setSending = useCallback((sending: boolean) => setState(s => (s.sending === sending ? s : { ...s, sending })), []);
+  const setSending = useCallback(
+    (sending: boolean) =>
+      setState(s => {
+        if ((s.sending !== null) === sending) return s;
+        return { ...s, sending: sending ? { after: s.events.at(-1)?.turnId } : null };
+      }),
+    [],
+  );
   const appendUserTurn = useCallback((text: string) => setState(s => ({ ...s, pendingPrompt: { text, at: now() } })), []);
   const appendLocalError = useCallback(
     (message: string) =>
@@ -314,11 +334,13 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
   return {
     view,
     hydrated: hydratedFor === viewKey,
-    busy: state.sending || view.running || finishing,
+    busy: state.sending !== null || view.running || finishing,
+    sending: state.sending !== null,
     fresh: state.fresh,
     resume: state.fresh ? undefined : (view.latestTurn?.sessionId ?? (threadId === null ? remembered : undefined)),
     finishing,
     threadKey: threadId ?? state.events.at(-1)?.threadId ?? workspaceId,
+    named: threadId === null ? state.named : null,
     appendUserTurn,
     appendLocalError,
     setSending,

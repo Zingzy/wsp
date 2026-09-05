@@ -9,7 +9,7 @@ const prompts = () => queue().map(r => r.prompt);
 
 beforeEach(() => {
   window.localStorage.clear();
-  store.setState({ drafts: {}, queues: {} });
+  store.setState({ drafts: {}, queues: {}, held: {} });
 });
 
 describe("composer queue", () => {
@@ -49,6 +49,40 @@ describe("composer queue", () => {
     expect(store.getState().queues["thr_new"]?.map(r => r.prompt)).toEqual(["already here", "typed while sending"]);
   });
 
+  it("enqueue goes to the tail, or to the head when asked; hold marks a key and is a no-op when already held", () => {
+    store.getState().enqueue(WS, "a");
+    store.getState().enqueue(WS, "b");
+    store.getState().enqueue(WS, "new", "head");
+    expect(prompts()).toEqual(["new", "a", "b"]);
+    store.getState().hold(WS);
+    expect(store.getState().held[WS]).toBe(true);
+    const before = store.getState();
+    store.getState().hold(WS);
+    expect(store.getState()).toBe(before);
+  });
+
+  it("requeue puts a row back at the head and holds the key; release lets it go again and is a no-op when nothing is held", () => {
+    store.getState().enqueue(WS, "two");
+    store.getState().requeue(WS, { id: "one", prompt: "one" });
+    expect(prompts()).toEqual(["one", "two"]);
+    expect(store.getState().held[WS]).toBe(true);
+    store.getState().release(WS);
+    expect(store.getState().held[WS]).toBeUndefined();
+    const before = store.getState();
+    store.getState().release(WS);
+    expect(store.getState()).toBe(before);
+  });
+
+  it("a hold ends with its queue: removing the last row or rekeying the rows away drops it", () => {
+    store.getState().requeue(WS, { id: "one", prompt: "one" });
+    store.getState().removeQueued(WS, "one");
+    expect(store.getState().held[WS]).toBeUndefined();
+    store.getState().requeue(WS, { id: "two", prompt: "two" });
+    store.getState().rekeyQueue(WS, "thr_new");
+    expect(store.getState().held[WS]).toBeUndefined();
+    expect(store.getState().held["thr_new"]).toBeUndefined();
+  });
+
   it("keeps other workspaces' queues untouched and returns the same state for a no-op", () => {
     store.getState().enqueue("ws_2", "elsewhere");
     const before = store.getState();
@@ -68,11 +102,14 @@ describe("composer queue", () => {
     stored.state.queues["ws_empty"] = [];
     stored.state.drafts["ws_blank"] = { prompt: "", cursor: 0 };
     // Clearing the store writes through to storage, so the doctored copy goes in after it.
-    store.setState({ drafts: {}, queues: {} });
+    store.setState({ drafts: {}, queues: {}, held: {} });
     window.localStorage.setItem("wsp:composer-drafts:v1", JSON.stringify(stored));
     await store.persist.rehydrate();
     expect(prompts()).toEqual(["what model are you?"]);
     expect(Object.keys(store.getState().queues)).toEqual([WS]);
     expect(store.getState().drafts).toEqual({ [WS]: { prompt: "half a", cursor: 6 } });
+    // Restored rows are held: the hold is not written back, so a reload holds them again.
+    expect(store.getState().held).toEqual({ [WS]: true });
+    expect(JSON.parse(window.localStorage.getItem("wsp:composer-drafts:v1") ?? "{}").state.held).toBeUndefined();
   });
 });
