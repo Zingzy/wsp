@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
+import type { BootPayload } from "@wsp/protocol";
 import { describeAge, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
 import { describeStorage } from "./storage.js";
@@ -35,7 +36,7 @@ export interface HostOptions {
   autoOpen?: (workspaceId: string, url: string) => boolean;
   /** The line logged when a sign-in page arrives and nothing opens, given the workspace name and the page's hostname. */
   openLine?: (workspace: string, hostname: string, url: string) => string;
-  /** The saved recipe file, named as the way to reuse a kept builder. */
+  /** The saved recipe file, named as the way to reuse a kept builder and read for the terminal font its ticks name. */
   recipePath?: string;
 }
 
@@ -68,17 +69,30 @@ const CONTENT_TYPES: Record<string, string> = {
   ".wasm": "application/wasm",
 };
 
-interface Boot {
-  wsPort: number;
-  token: string;
+/** The ticked shell row's font from the saved recipe; nothing when the file is missing, unreadable or names none. */
+function terminalFontOf(recipePath: string | undefined): string | undefined {
+  if (recipePath === undefined) return undefined;
+  try {
+    const data = JSON.parse(readFileSync(recipePath, "utf8")) as { entries?: { rung?: unknown; bring?: unknown; font?: unknown }[] };
+    const row = data.entries?.find(e => e.rung === "shell" && e.bring === true && typeof e.font === "string" && e.font !== "");
+    return row?.font as string | undefined;
+  } catch {
+    return undefined;
+  }
 }
 
-function loadPage(webDir: string, boot: Boot): string {
+/** JSON fit for an inline script: the font family comes from a config file, so `<` and the line terminators JSON allows
+ * but a script does not are written as escapes, and no value can end the script or the page. */
+function inlineJson(value: unknown): string {
+  return JSON.stringify(value).replace(/[<>&\u2028\u2029]/g, c => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
+}
+
+function loadPage(webDir: string, boot: BootPayload): string {
   const path = join(webDir, "index.html");
   if (!existsSync(path)) throw new Error(`web app not built: ${path} is missing (pnpm --filter @wsp/web build)`);
   const html = readFileSync(path, "utf8");
   if (!BOOT_SCRIPT.test(html)) throw new Error(`${path} has no window.__WSP__ boot line to replace`);
-  return html.replace(BOOT_SCRIPT, `<script>window.__WSP__ = ${JSON.stringify(boot)};</script>`);
+  return html.replace(BOOT_SCRIPT, `<script>window.__WSP__ = ${inlineJson(boot)};</script>`);
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -201,9 +215,13 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     await relay.close();
     throw e;
   }
-  let page: string;
+  // Rendered per request: wsp init saves the recipe while a host may already be serving.
+  const page = (): string => {
+    const terminalFont = terminalFontOf(opts.recipePath);
+    return loadPage(webDir, { wsPort: rtServer.port, token: authToken, ...(terminalFont !== undefined ? { terminalFont } : {}) });
+  };
   try {
-    page = loadPage(webDir, { wsPort: rtServer.port, token: authToken });
+    page();
   } catch (e) {
     await relay.close();
     await rtServer.close();
@@ -227,7 +245,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       const path = new URL(req.url ?? "/", "http://localhost").pathname;
       if (req.method === "GET" && path === "/") {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-        res.end(page);
+        res.end(page());
         return;
       }
       if (req.method === "GET" && path === "/api/workspaces") {

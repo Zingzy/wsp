@@ -162,6 +162,41 @@ describe("host serves the app", () => {
     await expect(handle.createWorkspace("first")).rejects.toThrow("no golden image yet; run wsp init first");
   });
 
+  it("carries the terminal font the saved recipe ticks, read on every page load; an unticked or absent row carries none", async () => {
+    const { rt } = testRuntime(false);
+    const dir = mkdtempSync(join(tmpdir(), "wsp-host-recipe-"));
+    dirs.push(dir);
+    const recipePath = join(dir, "golden-recipe.json");
+    const font = (bring: boolean) => ({ rung: "shell", id: "shell/terminal-font", label: "terminal font: Hack (Ghostty)", paths: [], bytes: 0, default: "bring", bring, font: "Hack" });
+    writeFileSync(recipePath, JSON.stringify({ entries: [{ rung: "shell", id: "shell/zshrc", label: "~/.zshrc", paths: ["~/.zshrc"], bytes: 10, default: "bring", bring: true }, font(true)] }));
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), recipePath });
+    const boot = async () => inlineScripts(await (await fetch(`http://127.0.0.1:${handle!.port}/`)).text())[0];
+    expect(await boot()).toBe(`window.__WSP__ = {"wsPort":${handle.wsPort},"token":"${handle.authToken}","terminalFont":"Hack"};`);
+    writeFileSync(recipePath, JSON.stringify({ entries: [font(false)] }));
+    expect(await boot()).not.toContain("terminalFont");
+    writeFileSync(recipePath, "not json");
+    expect(await boot()).not.toContain("terminalFont");
+    rmSync(recipePath);
+    expect(await boot()).not.toContain("terminalFont");
+  });
+
+  it("a font family from a config file cannot end the page's inline script", async () => {
+    const { rt } = testRuntime(false);
+    const dir = mkdtempSync(join(tmpdir(), "wsp-host-recipe-"));
+    dirs.push(dir);
+    const recipePath = join(dir, "golden-recipe.json");
+    const family = "Hack</script><script>alert(1)</script>&\u2028";
+    writeFileSync(recipePath, JSON.stringify({ entries: [{ rung: "shell", id: "shell/terminal-font", label: "terminal font", paths: [], bytes: 0, default: "bring", bring: true, font: family }] }));
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), recipePath });
+    const html = await (await fetch(`http://127.0.0.1:${handle.port}/`)).text();
+    expect(html).not.toContain("<script>alert");
+    expect(html).not.toContain("\u2028");
+    const scripts = inlineScripts(html);
+    expect(scripts).toHaveLength(1);
+    const boot = JSON.parse(scripts[0]!.replace(/^window\.__WSP__ = /, "").replace(/;$/, "")) as { terminalFont?: string };
+    expect(boot.terminalFont).toBe(family);
+  });
+
   it("through the cli, the page never carries a key value", async () => {
     const SOLARI = "slr_live_fake_solari_key";
     const ANTHROPIC = "sk-ant-x-fake-anthropic-key";

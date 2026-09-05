@@ -6,6 +6,7 @@ export { nodeHost } from "./live-host.js";
 export type { Detector } from "./detect/common.js";
 export { detectIdentity } from "./detect/identity.js";
 export { detectShell } from "./detect/shell.js";
+export { TERMINAL_FONT_ID, alacrittyFont, detectTerminalFont, ghosttyFont, itermFont, kittyFont, weztermFont } from "./detect/terminal.js";
 export { detectEditors, parseExtensionList } from "./detect/editors.js";
 export { detectToolchains } from "./detect/toolchains.js";
 export {

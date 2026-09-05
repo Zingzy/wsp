@@ -462,13 +462,31 @@ describe("terminal font resolution", () => {
     expect(resolve).toHaveBeenCalledWith("Proportional Test");
   });
 
-  it("keeps the glyph fallbacks behind a custom text face", () => {
+  it("keeps the bundled symbols face behind a custom text face and names no other Nerd Font", () => {
     expect(terminalFontFamily()).toBe(DEFAULT_TERMINAL_FONT_FAMILY);
     expect(terminalFontFamily("  ")).toBe(DEFAULT_TERMINAL_FONT_FAMILY);
     const custom = terminalFontFamily('"Fira Code"');
-    expect(custom.startsWith('"Fira Code", ')).toBe(true);
-    expect(custom).toContain('"Symbols Nerd Font Mono"');
-    expect(custom.endsWith("monospace")).toBe(true);
+    expect(custom).toBe('"Fira Code", "Symbols Nerd Font Mono", monospace');
+    expect(DEFAULT_TERMINAL_FONT_FAMILY).not.toMatch(/JetBrains|Hack|Meslo|Caskaydia|Powerline/);
+  });
+
+  it("in the desktop shell the faces the computer has for the family sit between it and the symbols face", async () => {
+    const localFonts = vi.fn(async () => [
+      { family: "Hack Nerd Font Mono", weight: 400 as const, style: "normal" as const, data: new ArrayBuffer(4) },
+      { family: "Hack Nerd Font Mono", weight: 700 as const, style: "normal" as const, data: new ArrayBuffer(4) },
+    ]);
+    vi.stubGlobal("FontFace", class { async load() { return this; } });
+    window.wsp = { localFonts };
+    try {
+      await expect(loadTerminalFontFamily("Hack", 12, { load: async () => [], resolve: terminalFontFamily })).resolves.toBe(
+        'Hack, "Hack Nerd Font Mono", "Symbols Nerd Font Mono", monospace',
+      );
+      expect(localFonts).toHaveBeenCalledWith("Hack");
+      expect(terminalFontFamily("Hack")).toBe('Hack, "Hack Nerd Font Mono", "Symbols Nerd Font Mono", monospace');
+    } finally {
+      delete window.wsp;
+      vi.unstubAllGlobals();
+    }
   });
 
   it("ignores proportional families the cell grid cannot lay out", () => {

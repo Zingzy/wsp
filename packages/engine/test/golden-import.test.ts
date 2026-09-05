@@ -443,6 +443,17 @@ describe("recipeDigest and recipeHash", () => {
     expect(hashOf(withLogin("zsh", false))).toBe(hashOf(withLogin("fish", false)));
   });
 
+  it("a terminal font row changes nothing on the machine, so its tick stays out of the digest and the hash", () => {
+    const zsh = row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"], bytes: 10 });
+    const font = (bring: boolean, family: string) => row({ rung: "shell", id: "shell/terminal-font", label: `terminal font: ${family} (Ghostty)`, bring, font: family });
+    const zshAlone = "097e8d1cc07133686c458c3dfd579fe46f30dabc418bdb578af6be6616dfeafd";
+    expect(hashOf([zsh])).toBe(zshAlone);
+    expect(hashOf([zsh, font(true, "Hack")])).toBe(zshAlone);
+    expect(hashOf([zsh, font(true, "Menlo")])).toBe(zshAlone);
+    expect(hashOf([zsh, font(false, "Hack")])).toBe(zshAlone);
+    expect(recipeDigest([zsh, font(true, "Hack")]).ticks).toEqual([{ id: "shell/zshrc" }]);
+  });
+
   it("a volatile file is in the digest, marked, and never in the hash, whatever its bytes; the same file not volatile is", () => {
     const rows = [row({ rung: "agents", id: "agents/claude", paths: ["~/.claude/settings.json", "~/.claude.json"], volatile: ["~/.claude.json"] })];
     const settings = { id: "agents/claude", path: "~/.claude/settings.json", dest: ".claude-cfg/settings.json", digest: "s1" };

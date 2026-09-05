@@ -28,6 +28,8 @@ export interface Host {
   home: string;
   /** SHELL of the process running the collector: the login shell of whoever started it. */
   shell?: string;
+  /** TERM_PROGRAM of the process running the collector: the terminal whoever started it types in. */
+  terminal?: string;
   fs: HostFs;
   exec: HostExec;
 }

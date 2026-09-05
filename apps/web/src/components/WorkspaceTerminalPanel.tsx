@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { useRightPanelStore, type RightPanelSurface } from "../rightPanelStore.js";
 import { openPanelTerminal, splitPanelTerminal, type SplitDirection } from "../shell/shellCommands.js";
+import { useTerminalViewportConfig } from "../terminal/fontSetting.js";
 import { getTerminals, onTerminals, type WorkspaceTerminals } from "../terminal/link.js";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty.js";
@@ -68,6 +69,7 @@ function LinkedPanel({
   const lost = useMemo(() => lostTerminals(tabs), [tabs]);
   const { pane, onWake } = useTerminalPane(workspaceId, status);
   const terminalIo = useCallback((id: string) => terms.io(id), [terms]);
+  const terminalConfig = useTerminalViewportConfig();
   const activateTerminal = useRightPanelStore(s => s.activateTerminal);
   const closeTerminal = useRightPanelStore(s => s.closeTerminal);
   // Only ptys the link knows get a viewport; a surface persisted across a reload waits for the link to adopt its ptys.
@@ -109,6 +111,7 @@ function LinkedPanel({
       onHeightChange={() => {}}
       terminalLabelsById={labels}
       terminalIo={terminalIo}
+      terminalConfig={terminalConfig}
     />
   );
 }

@@ -3023,6 +3023,10 @@ describe("disk estimate before the boot", () => {
     expect(aider.detail[1]).toBe("installs on the machine (size not measured); its config (900 B) comes along");
     const zed = selectItem({ rung: "agents", id: "agents/zed", label: "Zed", paths: ["~/.config/zed"], bytes: 900, default: "skip" });
     expect(zed.hint).toBe("900 B");
+    // The terminal font row copies nothing and installs nothing: its detail says what the tick does instead.
+    const font = selectItem({ rung: "shell", id: "shell/terminal-font", label: "terminal font: Hack (Ghostty)", paths: [], bytes: 0, default: "bring", font: "Hack" });
+    expect(font.hint).toBeUndefined();
+    expect(font.detail).toEqual(["read from your terminal's config; nothing to copy", "the app's terminal draws with it when this computer has it installed; unticked, the app uses its own font"]);
     expect(agents).toContain("installs about 211.0 MB on the machine (measured 2026-09-05); its config (39.1 KB) comes along");
     expect(agents).toMatch(/Disk: 1\.8 GB of 16\.1 GB on the 20 GB builder\n┃  files [\d.]+ KB, Homebrew's toolchain 1\.6 GB, tools 50\.0 MB, agents 211\.0 MB; 1 not measured\n/);
     await f.press(KEY.ctrlC);

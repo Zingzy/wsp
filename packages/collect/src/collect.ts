@@ -6,6 +6,7 @@ import { detectIdentity } from "./detect/identity.js";
 import { detectLogins } from "./detect/logins.js";
 import { detectMcp } from "./detect/mcp.js";
 import { detectShell } from "./detect/shell.js";
+import { detectTerminalFont } from "./detect/terminal.js";
 import { detectToolchains } from "./detect/toolchains.js";
 import { detectTools } from "./detect/tools.js";
 import { type Lookup, lookup as catalogLookup } from "./catalog.js";
@@ -17,7 +18,7 @@ import { type Manifest, type ManifestEntry, RUNGS, type Rung, parseManifest } fr
 
 export const DETECTORS: Record<Exclude<Rung, "everything">, Detector> = {
   identity: detectIdentity,
-  shell: detectShell,
+  shell: async host => [...(await detectShell(host)), ...(await detectTerminalFont(host))],
   editors: detectEditors,
   toolchains: detectToolchains,
   tools: detectTools,

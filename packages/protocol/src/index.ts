@@ -342,6 +342,30 @@ export const InboxFileEvent = z.object({
   bytes: z.number(),
 });
 
+// --- desktop shell bridge (preload to page) -----------------------------------
+
+/** One installed font file the desktop shell hands the page for its terminal, registered under the family the file names. */
+export interface LocalFontFace {
+  family: string;
+  weight: 400 | 700;
+  style: "normal" | "italic";
+  data: ArrayBuffer;
+}
+
+/** What the host writes into the page's one inline script as window.__WSP__ before serving it. */
+export interface BootPayload {
+  wsPort: number;
+  token: string;
+  /** The family the person's terminal draws with, when the saved recipe ticks its row; the terminal pane defaults to it. */
+  terminalFont?: string;
+}
+
+/** What the desktop shell's preload puts on window.wsp; a browser tab has none of it. */
+export interface DesktopBridge {
+  /** The installed faces for a family and its Nerd Font variants, from this computer's font directories. */
+  localFonts(family: string): Promise<LocalFontFace[]>;
+}
+
 // --- golden image (manifest, interactive builder, build stages) ---------------
 
 export const MachineKind = z.enum(["sandbox", "desktop"]);

@@ -36,6 +36,9 @@ importers:
       '@wsp/host':
         specifier: workspace:*
         version: link:../../packages/host
+      '@wsp/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
       '@wsp/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
@@ -139,6 +142,9 @@ importers:
       jsdom:
         specifier: ^25.0.1
         version: 25.0.1
+      playwright:
+        specifier: 1.62.1
+        version: 1.62.1
       tailwindcss:
         specifier: ^4.0.0
         version: 4.3.3

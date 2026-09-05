@@ -26,6 +26,7 @@ import {
 } from "react";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { Button } from "./ui/button";
+import { TerminalFontButton, TerminalFontCard } from "./TerminalFontButton";
 import { PanelTabCloseButton } from "./ui/panel-tab-close-button";
 import { isTerminalAppShortcut } from "../keybindings";
 import { cn } from "../lib/utils";
@@ -507,14 +508,21 @@ export default function ThreadTerminalDrawer({
   terminalConfig = EMPTY_CONFIG,
 }: ThreadTerminalDrawerProps) {
   const isPanel = mode === "panel";
+  const [fontOpen, setFontOpen] = useState(false);
+  const toggleFont = useCallback(() => setFontOpen(open => !open), []);
   const refusalRef = useRef<string | null>(null);
   refusalRef.current = terminalInputRefusal(pane);
   const [refused, setRefused] = useState<string | null>(null);
   const inputRefusal = useCallback(() => refusalRef.current, []);
   const onInputRefused = useCallback((reason: string) => setRefused(reason), []);
-  // Bumped when the overlay lifts with focus, so the active surface asks for it back the way a focus request does.
+  // Bumped when the overlay lifts with focus or the font card closes on Escape, so the active surface asks for
+  // focus back the way a focus request does.
   const [lifted, setLifted] = useState(0);
   const onOverlayLift = useCallback(() => setLifted(n => n + 1), []);
+  const closeFont = useCallback(() => {
+    setFontOpen(false);
+    setLifted(n => n + 1);
+  }, []);
   useEffect(() => {
     if (pane.kind === "live") setRefused(null);
   }, [pane.kind]);
@@ -881,7 +889,7 @@ export default function ThreadTerminalDrawer({
       ) : null}
 
       {!hasTerminalSidebar && (
-        <div className="pointer-events-none absolute right-2 top-2 z-20">
+        <div className="pointer-events-none absolute right-2 top-2 z-20 flex flex-col items-end gap-1.5">
           <div className="pointer-events-auto inline-flex items-center overflow-hidden rounded-md border border-border/80 bg-background shadow-xs">
             <TerminalActionButton
               className={`p-1 text-foreground/90 transition-colors ${
@@ -915,6 +923,8 @@ export default function ThreadTerminalDrawer({
               <Plus className="size-3.25" />
             </TerminalActionButton>
             <div className="h-4 w-px bg-border/80" />
+            <TerminalFontButton className="p-1 text-foreground/90 transition-colors hover:bg-accent" open={fontOpen} onToggle={toggleFont} />
+            <div className="h-4 w-px bg-border/80" />
             <TerminalActionButton
               className="p-1 text-foreground/90 transition-colors hover:bg-accent"
               onClick={() => onCloseTerminal(resolvedActiveTerminalId)}
@@ -923,6 +933,7 @@ export default function ThreadTerminalDrawer({
               <Trash2 className="size-3.25" />
             </TerminalActionButton>
           </div>
+          {fontOpen ? <TerminalFontCard className="pointer-events-auto" onClose={closeFont} /> : null}
         </div>
       )}
 
@@ -982,7 +993,8 @@ export default function ThreadTerminalDrawer({
           </div>
 
           {hasTerminalSidebar && (
-            <aside className="flex w-36 min-w-36 flex-col border border-border/70 bg-muted/10">
+            <aside className="relative flex w-36 min-w-36 flex-col border border-border/70 bg-muted/10">
+              {fontOpen ? <TerminalFontCard className="absolute right-0 top-[22px] z-30" onClose={closeFont} /> : null}
               <div className="flex h-[22px] items-stretch justify-end border-b border-border/70">
                 <div className="inline-flex h-full items-stretch">
                   <TerminalActionButton
@@ -1014,6 +1026,7 @@ export default function ThreadTerminalDrawer({
                   >
                     <Plus className="size-3.25" />
                   </TerminalActionButton>
+                  <TerminalFontButton className="inline-flex h-full items-center border-l border-border/70 px-1 text-foreground/90 transition-colors hover:bg-accent/70" open={fontOpen} onToggle={toggleFont} />
                   <TerminalActionButton
                     className="inline-flex h-full items-center border-l border-border/70 px-1 text-foreground/90 transition-colors hover:bg-accent/70"
                     onClick={() => onCloseTerminal(resolvedActiveTerminalId)}

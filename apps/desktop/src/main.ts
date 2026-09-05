@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { currentHome, type CliIO } from "@wsp/host";
 import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
+import { fontDirs, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
 import { locateHost, openHost, statePathIn, type HostSession, type Located } from "./host-lifecycle.js";
+import { fromAppPage } from "./origin.js";
 import type { Retry } from "./preload.js";
 import { checkSetup } from "./setup.js";
 
@@ -36,6 +39,15 @@ function newWindow(preload?: string): BrowserWindow {
 
 let session: HostSession | undefined;
 
+// Read once per run: a font installed while the app is open is seen after a restart.
+let fontIndex: Promise<FontFile[]> | undefined;
+const fonts = (): Promise<FontFile[]> => (fontIndex ??= indexFonts(fontDirs(process.platform, homedir(), process.env)));
+// Only the host's own page may read the computer's fonts: the setup page and anything else the window shows are refused.
+ipcMain.handle("fonts:local", (event, family: unknown) => {
+  if (session === undefined || !fromAppPage(event.senderFrame?.url, session.url)) throw new Error("fonts:local: not the app's page");
+  return localFontFaces(typeof family === "string" ? family : "", fonts);
+});
+
 function locate(): Promise<Located> {
   const env = process.env["WSP_HOME"];
   const pointer = currentHome();
@@ -68,18 +80,25 @@ async function showApp(located: Located): Promise<boolean> {
     session = located.session;
   }
   io.log(`${session.owned ? "serving" : "attached"} ${session.url} (home ${located.home})`);
-  const win = newWindow();
+  const win = newWindow(PRELOAD);
   // A link the page opens (a workspace's sign-in page, a preview in a new tab) belongs in the default browser, not a second window.
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//.test(url)) void shell.openExternal(url);
     return { action: "deny" };
   });
+  // The window stays on the host's page, the only one the preload's bridge answers; a link away from it opens in the default browser.
+  const appUrl = session.url;
+  win.webContents.on("will-navigate", (event, url) => {
+    if (fromAppPage(url, appUrl)) return;
+    event.preventDefault();
+    if (/^https?:\/\//.test(url)) void shell.openExternal(url);
+  });
   await win.loadURL(session.url);
   return true;
 }
 
-/** The setup screen carries the only preload; the app window gets none. The
- * host starts before the setup window closes so the window count never hits zero. */
+/** The setup screen and the app window share the one preload. The host
+ * starts before the setup window closes so the window count never hits zero. */
 async function showSetup(located: Located): Promise<void> {
   const setup = newWindow(PRELOAD);
   let checking: Promise<Retry> | undefined;
