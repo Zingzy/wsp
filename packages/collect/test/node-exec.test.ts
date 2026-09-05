@@ -68,6 +68,16 @@ describe("nodeExec.run", () => {
     expect(await nodeExec.run("/bin/sh", ["-c", 'echo "[$WSP_COLLECT]"'])).toBe("[]\n");
   });
 
+  it("an empty home is a new directory HOME and ZDOTDIR point at, over anything env says, gone when the run ends", async () => {
+    const out = await nodeExec.run("/bin/sh", ["-c", 'echo "$HOME"; echo "$ZDOTDIR"; ls -A "$HOME" | wc -l; touch "$HOME/left"'], { emptyHome: true, env: { ZDOTDIR: "/nowhere" } });
+    const [home, zdotdir, count] = out?.split("\n") ?? [];
+    expect(home).toMatch(/wsp-home-/);
+    expect(home).not.toBe(process.env["HOME"]);
+    expect(zdotdir).toBe(home);
+    expect(count?.trim()).toBe("0");
+    expect(existsSync(home ?? "")).toBe(false);
+  });
+
   it("ends a child that ignores TERM at the budget with the kill signal asked for", async () => {
     const d = scratch();
     const out = nodeExec.run("/bin/sh", ["-c", `trap '' TERM; echo $$ > ${join(d, "pid")}; while :; do sleep 1; done`], { timeoutMs: 300, killSignal: "SIGKILL" });
@@ -123,4 +133,24 @@ describe("the interactive listing over a real shell", () => {
     expect(alive(pid)).toBe(false);
     expect(row).toMatchObject({ aliasesFrom: "files", aliases: [{ name: "ls", kind: "alias", runs: "eza" }] });
   }, 15_000);
+});
+
+describe("the listing over real zsh with a scratch ZDOTDIR", () => {
+  const terminals: { terminal: string; env: Record<string, string> }[] = [
+    { terminal: "ghostty", env: { TERM_PROGRAM: "ghostty" } },
+    { terminal: "Apple_Terminal", env: { TERM_PROGRAM: "Apple_Terminal", TERM_SESSION_ID: "wsp-test" } },
+  ];
+  it.each(terminals)("under $terminal an rc that returns on WSP_COLLECT is read from the files, one that defines an alias is listed by the shell", async ({ env }) => {
+    const row = async (zshrc: string) => {
+      const d = scratch();
+      writeFileSync(join(d, ".zshrc"), zshrc);
+      const exec: HostExec = { which: nodeExec.which, run: (cmd, args, opts) => nodeExec.run(cmd, args, { ...opts, env: { ...env, ZDOTDIR: d, ...opts?.env } }) };
+      const fake = fakeHost({ shell: "/bin/zsh", files: { "/etc/shells": "/bin/zsh\n", "~/.zshrc": zshrc } });
+      const r = { rung: "shell" as const, id: "shell/zshrc", label: "~/.zshrc", paths: ["~/.zshrc"], bytes: 10, default: "bring" as const };
+      await shellAliases({ ...fake, exec }, [r]);
+      return r;
+    };
+    expect(await row('[ "$WSP_COLLECT" = 1 ] && return\nalias v=nvim\n')).toMatchObject({ aliasesFrom: "files", aliases: [{ name: "v", kind: "alias", runs: "nvim" }] });
+    expect(await row("alias v=nvim\n")).toMatchObject({ aliasesFrom: "shell", aliases: [{ name: "v", kind: "alias", runs: "nvim" }] });
+  }, 30_000);
 });

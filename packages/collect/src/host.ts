@@ -24,6 +24,8 @@ export interface RunOptions {
   timeoutMs?: number;
   /** SIGTERM when unset; an interactive shell ignores TERM, so its listing asks for SIGKILL. */
   killSignal?: "SIGTERM" | "SIGKILL";
+  /** HOME and ZDOTDIR point at a new empty directory, over anything env says, removed when the run ends. */
+  emptyHome?: boolean;
 }
 
 export interface HostExec {

@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { LIST_SCRIPTS, collect, parseShell, programOf, shellAliases } from "../src/index.js";
 import type { ManifestEntry } from "../src/index.js";
-import { fakeHost } from "./fake-host.js";
+import { EMPTY_HOME, fakeHost } from "./fake-host.js";
 
 const SHELLS = "/bin/bash\n/bin/zsh\n/opt/homebrew/bin/fish\n";
 
@@ -151,13 +151,52 @@ describe("programOf", () => {
   });
 });
 
+/** What zsh prints from the system rc files alone in a terminal that adds nothing: its own two aliases. */
+const ZSH_OWN = "alias run-help=man\nalias which-command=whence\n";
+
+/** What zsh prints from the system rc files alone under Terminal.app: its two aliases and functions /etc/zshrc_Apple_Terminal defines. */
+const APPLE_TERMINAL_OWN = [
+  "alias run-help=man",
+  "alias which-command=whence",
+  "update_terminal_cwd () {",
+  "\tlocal url_path='' ",
+  "\t{",
+  "\t\tlocal i ch hexch LC_CTYPE=C LC_COLLATE=C LC_ALL= LANG= ",
+  "\t\tfor ((i = 1; i <= ${#PWD}; ++i)) do",
+  "\t\t\tch=\"$PWD[i]\" ",
+  "\t\t\tif [[ \"$ch\" =~ [/._~A-Za-z0-9-] ]]",
+  "\t\t\tthen",
+  "\t\t\t\turl_path+=\"$ch\" ",
+  "\t\t\telse",
+  "\t\t\t\tprintf -v hexch \"%02X\" \"'$ch\"",
+  "\t\t\t\turl_path+=\"%$hexch\" ",
+  "\t\t\tfi",
+  "\t\tdone",
+  "\t}",
+  "\tprintf '\\e]7;%s\\a' \"file://$HOST$url_path\"",
+  "}",
+  "shell_session_history_enable () {",
+  "\t(",
+  "\t\tumask 077",
+  "\t\t/usr/bin/touch \"$SHELL_SESSION_HISTFILE_NEW\"",
+  "\t)",
+  "\tHISTFILE=\"$SHELL_SESSION_HISTFILE_NEW\" ",
+  "\tSHELL_SESSION_HISTORY=1 ",
+  "}",
+  "",
+].join("\n");
+
+const LISTING = (shell: "zsh" | "bash"): string => `WSP_COLLECT=1 /bin/${shell} -ic ${LIST_SCRIPTS[shell]}`;
+const BASELINE = (shell: "zsh" | "bash"): string => `WSP_COLLECT=1 HOME=${EMPTY_HOME} ZDOTDIR=${EMPTY_HOME} /bin/${shell} -ic ${LIST_SCRIPTS[shell]}`;
+
 describe("shellAliases", () => {
   const laptop = (over: Parameters<typeof fakeHost>[0] = {}) =>
     fakeHost({
       shell: "/bin/zsh",
+      terminal: "ghostty",
       ...over,
       files: { "/etc/shells": SHELLS, "~/.zshrc": "plugins=(git eza)\n", "/opt/homebrew/opt/bat/bin/bat": 1, "/opt/homebrew/opt/python@3.13/bin/pip3": 1, "/opt/homebrew/opt/python@3.13/bin/python3": 1, ...over.files },
-      exec: { [`WSP_COLLECT=1 /bin/zsh -ic ${LIST_SCRIPTS["zsh"]}`]: ZSH_LISTING, ...over.exec },
+      exec: { [LISTING("zsh")]: ZSH_LISTING, [BASELINE("zsh")]: ZSH_OWN, ...over.exec },
     });
   const tools = [tool("tools/brew/eza"), tool("tools/brew/bat"), tool("tools/brew/python@3.13"), tool("tools/cli/kubectl", { default: "skip" }), tool("tools/brew/glow", { default: "skip", reason: "no Linux bottle" })];
 
@@ -165,7 +204,7 @@ describe("shellAliases", () => {
     const entries = [rc("shell/zshrc", "~/.zshrc"), rc("shell/zshenv", "~/.zshenv"), ...tools];
     const host = laptop();
     await shellAliases(host, entries);
-    expect(host.calls.filter(c => c.startsWith("run "))).toEqual([`run WSP_COLLECT=1 /bin/zsh -ic ${LIST_SCRIPTS["zsh"]} (10000 ms, SIGKILL)`]);
+    expect(host.calls.filter(c => c.startsWith("run "))).toEqual([`run ${LISTING("zsh")} (10000 ms, SIGKILL)`, `run ${BASELINE("zsh")} (10000 ms, SIGKILL)`]);
     expect(entries[1]).not.toHaveProperty("aliases");
     expect(entries[1]).not.toHaveProperty("aliasesFrom");
     expect(entries[0]!.aliasesFrom).toBe("shell");
@@ -218,7 +257,7 @@ describe("shellAliases", () => {
   });
 
   it("a formula whose command has another name is found through Homebrew's opt links, on either prefix", async () => {
-    const host = laptop({ files: { "/usr/local/opt/ripgrep/bin/rg": 1, "/opt/homebrew/opt/neovim/bin/nvim": 1 }, exec: { [`WSP_COLLECT=1 /bin/zsh -ic ${LIST_SCRIPTS["zsh"]}`]: "alias rg='rg --smart-case'\nalias v=nvim\n" } });
+    const host = laptop({ files: { "/usr/local/opt/ripgrep/bin/rg": 1, "/opt/homebrew/opt/neovim/bin/nvim": 1 }, exec: { [LISTING("zsh")]: "alias rg='rg --smart-case'\nalias v=nvim\n" } });
     const entries = [rc("shell/zshrc", "~/.zshrc"), tool("tools/brew/ripgrep"), tool("tools/brew/neovim")];
     await shellAliases(host, entries);
     expect(entries[0]!.aliases).toEqual([
@@ -228,7 +267,7 @@ describe("shellAliases", () => {
   });
 
   it("bash is listed through bash, on its rc row", async () => {
-    const host = fakeHost({ shell: "/bin/bash", files: { "/etc/shells": SHELLS }, exec: { [`WSP_COLLECT=1 /bin/bash -ic ${LIST_SCRIPTS["bash"]}`]: "alias ls='eza'\nserve () \n{ \n    python3 -m http.server\n}\n" } });
+    const host = fakeHost({ shell: "/bin/bash", files: { "/etc/shells": SHELLS }, exec: { [LISTING("bash")]: "alias ls='eza'\nserve () \n{ \n    python3 -m http.server\n}\n", [BASELINE("bash")]: "" } });
     const entries = [rc("shell/zshrc", "~/.zshrc"), rc("shell/bashrc", "~/.bashrc"), tool("tools/brew/eza")];
     await shellAliases(host, entries);
     expect(entries[0]).not.toHaveProperty("aliases");
@@ -239,20 +278,40 @@ describe("shellAliases", () => {
     ]);
   });
 
-  it("a listing of only what zsh defines by itself, as an rc file that returns on WSP_COLLECT leaves it, is read from the files; a row with no definitions still says where it looked", async () => {
-    const host = laptop({ files: { "~/.zshrc": "[ \"$WSP_COLLECT\" = 1 ] && return\nalias v=nvim\n" }, exec: { [`WSP_COLLECT=1 /bin/zsh -ic ${LIST_SCRIPTS["zsh"]}`]: "alias run-help=man\nalias which-command=whence\n" } });
+  it("in a terminal that adds nothing, a listing of only zsh's own two aliases, as an rc file that returns on WSP_COLLECT leaves it, matches the baseline from an empty home and is read from the files; a row with no definitions still says where it looked", async () => {
+    const host = laptop({ files: { "~/.zshrc": "[ \"$WSP_COLLECT\" = 1 ] && return\nalias v=nvim\n" }, exec: { [LISTING("zsh")]: ZSH_OWN } });
     const entries = [rc("shell/zshrc", "~/.zshrc"), tool("tools/brew/neovim")];
     await shellAliases(host, entries);
+    expect(host.calls.filter(c => c.startsWith("run "))).toHaveLength(2);
     expect(entries[0]).toMatchObject({ aliasesFrom: "files", aliases: [{ name: "v", kind: "alias", runs: "nvim" }] });
     const bare = [rc("shell/zshrc", "~/.zshrc")];
-    await shellAliases(laptop({ exec: { [`WSP_COLLECT=1 /bin/zsh -ic ${LIST_SCRIPTS["zsh"]}`]: "alias g=git\n" } }), bare);
+    await shellAliases(laptop({ exec: { [LISTING("zsh")]: "alias g=git\n" } }), bare);
     expect(bare[0]).toEqual({ ...rc("shell/zshrc", "~/.zshrc"), aliasesFrom: "shell" });
   });
 
-  it("bash with nothing defined prints an empty listing, which is read from the files too", async () => {
-    const host = fakeHost({ shell: "/bin/bash", files: { "/etc/shells": SHELLS, "~/.bashrc": "alias ls=eza\n" }, exec: { [`WSP_COLLECT=1 /bin/bash -ic ${LIST_SCRIPTS["bash"]}`]: "" } });
+  it("under Terminal.app the system rc files define functions too: a listing of exactly the baseline is read from the files, one line beyond it is the shell's own", async () => {
+    const apple = (listing: string) => laptop({ terminal: "Apple_Terminal", files: { "~/.zshrc": "[ \"$WSP_COLLECT\" = 1 ] && return\nalias v=nvim\n" }, exec: { [LISTING("zsh")]: listing, [BASELINE("zsh")]: APPLE_TERMINAL_OWN } });
+    const returned = [rc("shell/zshrc", "~/.zshrc"), tool("tools/brew/neovim")];
+    await shellAliases(apple(APPLE_TERMINAL_OWN), returned);
+    expect(returned[0]).toMatchObject({ aliasesFrom: "files", aliases: [{ name: "v", kind: "alias", runs: "nvim" }] });
+    const listed = [rc("shell/zshrc", "~/.zshrc"), tool("tools/brew/neovim")];
+    await shellAliases(apple(`${APPLE_TERMINAL_OWN}alias v=nvim\n`), listed);
+    expect(listed[0]).toMatchObject({ aliasesFrom: "shell", aliases: [{ name: "v", kind: "alias", runs: "nvim" }] });
+  });
+
+  it("a baseline the shell did not give leaves nothing to take away: the listing stands as the person's own", async () => {
+    const host = fakeHost({ shell: "/bin/zsh", files: { "/etc/shells": SHELLS, "~/.zshrc": "alias v=nvim\n" }, exec: { [LISTING("zsh")]: ZSH_OWN } });
+    const entries = [rc("shell/zshrc", "~/.zshrc")];
+    await shellAliases(host, entries);
+    expect(host.calls.filter(c => c.startsWith("run "))).toHaveLength(2);
+    expect(entries[0]).toEqual({ ...rc("shell/zshrc", "~/.zshrc"), aliasesFrom: "shell" });
+  });
+
+  it("bash with nothing defined prints an empty listing, which is read from the files with no baseline asked for", async () => {
+    const host = fakeHost({ shell: "/bin/bash", files: { "/etc/shells": SHELLS, "~/.bashrc": "alias ls=eza\n" }, exec: { [LISTING("bash")]: "" } });
     const entries = [rc("shell/bashrc", "~/.bashrc"), tool("tools/brew/eza")];
     await shellAliases(host, entries);
+    expect(host.calls.filter(c => c.startsWith("run "))).toHaveLength(1);
     expect(entries[0]).toMatchObject({ aliasesFrom: "files", aliases: [{ name: "ls", kind: "alias", runs: "eza", tool: "tools/brew/eza" }] });
   });
 

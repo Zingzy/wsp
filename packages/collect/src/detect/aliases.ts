@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The aliases and functions the login shell defines that run a program. The
 // interactive shell lists them itself, so an alias a plugin builds at startup
-// (oh-my-zsh's eza plugin writes alias ls=eza from a helper) is seen; when the
-// shell does not answer inside its budget, or lists nothing of the person's own,
-// the rc files are read instead and the row says so. An rc file may skip its
-// slow parts when WSP_COLLECT is set; a return there still lets the listing run,
-// only an exit empties it. Each program is matched to the tools row that installs
-// it, so the screens and the machine can tell which aliases point at a tool that
-// is not coming.
+// (oh-my-zsh's eza plugin writes alias ls=eza from a helper) is seen. The same
+// listing from an empty home is what the system rc files alone define on this
+// machine (Terminal.app's /etc/zshrc_Apple_Terminal adds functions); when the
+// shell does not answer inside its budget, or lists nothing beyond that, the rc
+// files are read instead and the row says so. An rc file may skip its slow parts
+// when WSP_COLLECT is set; a return there still lets the listing run, only an
+// exit empties it. Each program is matched to the tools row that installs it, so
+// the screens and the machine can tell which aliases point at a tool that is not
+// coming.
 import { simpleCommands, sourcedPaths } from "../everything/shell-rc.js";
 import { type Host, expand } from "../host.js";
 import type { ManifestEntry, ShellAlias } from "../manifest.js";
@@ -29,12 +31,13 @@ export const LIST_SCRIPTS: Record<"zsh" | "bash", string> = {
 /** Opening a terminal takes a moment, not minutes; past this the shell is killed, since an interactive shell ignores TERM. */
 export const LIST_BUDGET_MS = 10_000;
 
-/** What zsh prints with nothing of the person's defined: a listing of only these answered nothing. */
-const SHELL_OWN = new Set(["alias run-help=man", "alias which-command=whence"]);
+const LIST_OPTIONS = { env: { WSP_COLLECT: "1" }, timeoutMs: LIST_BUDGET_MS, killSignal: "SIGKILL" } as const;
 
-/** Whether the shell's listing holds anything beyond what the shell defines by itself; a killed shell has none. */
-function listingAnswered(listed: string | undefined): listed is string {
-  return listed !== undefined && listed.split("\n").some(l => l.trim() !== "" && !SHELL_OWN.has(l.trim()));
+/** Whether a listing has a line the baseline lacks; a killed shell or an empty listing has none, and a missing baseline takes nothing away. */
+function beyondBaseline(listed: string | undefined, baseline: string | undefined): listed is string {
+  if (listed === undefined) return false;
+  const base = new Set((baseline ?? "").split("\n").map(l => l.trim()));
+  return listed.split("\n").some(l => l.trim() !== "" && !base.has(l.trim()));
 }
 
 /** The rc files each shell reads, in the order it reads them, for the fallback. */
@@ -303,8 +306,10 @@ export async function shellAliases(host: Host, entries: readonly ManifestEntry[]
   if ((login !== "zsh" && login !== "bash") || host.shell === undefined) return;
   const row = rcRow(entries, login);
   if (row === undefined) return;
-  const listed = await host.exec.run(host.shell, ["-ic", LIST_SCRIPTS[login]], { env: { WSP_COLLECT: "1" }, timeoutMs: LIST_BUDGET_MS, killSignal: "SIGKILL" });
-  const answered = listingAnswered(listed);
+  const args = ["-ic", LIST_SCRIPTS[login]];
+  const listed = await host.exec.run(host.shell, args, LIST_OPTIONS);
+  const baseline = listed === undefined || listed.trim() === "" ? undefined : await host.exec.run(host.shell, args, { ...LIST_OPTIONS, emptyHome: true });
+  const answered = beyondBaseline(listed, baseline);
   row.aliasesFrom = answered ? "shell" : "files";
   const defs = parseShell(answered ? listed : await rcText(host, login));
   const names = new Set(defs.map(d => d.name));
