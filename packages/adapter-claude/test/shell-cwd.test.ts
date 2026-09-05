@@ -29,6 +29,22 @@ describe("shellCwdAfter", () => {
     expect(shellCwdAfter("Bash", null, ROOT, ROOT)).toBeUndefined();
   });
 
+  it("ignores a cd whose path the shell would still expand", () => {
+    expect(shellCwdAfter("Bash", { command: "cd /root/$PROJ && ls" }, ROOT, ROOT)).toBeUndefined();
+    expect(shellCwdAfter("Bash", { command: "cd /root/${PROJ}/src" }, ROOT, ROOT)).toBeUndefined();
+    expect(shellCwdAfter("Bash", { command: "cd /root/*/src" }, ROOT, ROOT)).toBeUndefined();
+    expect(shellCwdAfter("Bash", { command: "cd /root/204?" }, ROOT, ROOT)).toBeUndefined();
+    expect(shellCwdAfter("Bash", { command: "cd /root/[ab]/src" }, ROOT, ROOT)).toBeUndefined();
+    expect(shellCwdAfter("Bash", { command: "cd /root/{a,b}" }, ROOT, ROOT)).toBeUndefined();
+    expect(shellCwdAfter("Bash", { command: "cd /root/`basename x`" }, ROOT, ROOT)).toBeUndefined();
+    expect(shellCwdAfter("Bash", { command: "cd /root/$(ls | head -1)" }, ROOT, ROOT)).toBeUndefined();
+    expect(shellCwdAfter("Bash", { command: "cd /root/~x" }, ROOT, ROOT)).toBeUndefined();
+    expect(shellCwdAfter("Bash", { command: 'cd "$(pwd)/x"' }, ROOT, ROOT)).toBeUndefined();
+    expect(shellCwdAfter("Bash", { command: 'cd "/root/$PROJ" && ls' }, ROOT, ROOT)).toBeUndefined();
+    expect(shellCwdAfter("Bash", { command: 'cd "/root/`id -un`"' }, ROOT, ROOT)).toBeUndefined();
+    expect(shellCwdAfter("Bash", { command: "cd '/root/$literal'" }, ROOT, ROOT)).toBe("/root/$literal");
+  });
+
   it("takes the parent of a Write or Edit path under the harness folder while the shell is still there", () => {
     expect(shellCwdAfter("Write", { file_path: "/root/2048/index.html", content: "" }, ROOT, ROOT)).toBe("/root/2048");
     expect(shellCwdAfter("Edit", { file_path: "/root/2048/src/game.js" }, ROOT, ROOT)).toBe("/root/2048/src");

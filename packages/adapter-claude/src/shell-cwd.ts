@@ -4,9 +4,11 @@
 // later call. A Write or Edit to an absolute path is a weaker hint: its folder
 // is taken only under the harness's own folder, and never deeper inside the
 // folder already followed, so a project's files do not walk the panes around.
+// A path the shell would still expand is skipped. A cd that fails is stamped
+// anyway: the tool result's error flag cannot tell it from a later failure.
 import { posix } from "node:path";
 
-const CD_HEAD = /^\s*cd\s+(?:"([^"]*)"|'([^']*)'|([^\s;&|]+))\s*(?:$|&&|;|\|\||\n)/;
+const CD_HEAD = /^\s*cd\s+(?:"([^"$`]*)"|'([^']*)'|([^\s;&|$`*?[{~]+))\s*(?:$|&&|;|\|\||\n)/;
 const PATH_TOOLS: ReadonlySet<string> = new Set(["Write", "Edit"]);
 
 function rec(value: unknown): Record<string, unknown> | undefined {
