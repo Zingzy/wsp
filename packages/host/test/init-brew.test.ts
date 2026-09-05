@@ -11,7 +11,7 @@ const INFO = JSON.stringify({
   casks: [],
 });
 
-function fakeHost(over: { brew?: boolean; info?: string | null; cellar?: string[]; du?: null } = {}): Pick<Host, "exec" | "fs"> & { calls: string[] } {
+function fakeHost(over: { brew?: boolean; info?: string | null; cellar?: string[] | null; du?: null } = {}): Pick<Host, "exec" | "fs"> & { calls: string[] } {
   const calls: string[] = [];
   const cellar = over.cellar ?? ["gh", "diskbloom"];
   return {
@@ -21,14 +21,14 @@ function fakeHost(over: { brew?: boolean; info?: string | null; cellar?: string[
       run: async (cmd, args) => {
         calls.push([cmd, ...args].join(" "));
         if (cmd === "brew" && args[0] === "info") return over.info === null ? undefined : (over.info ?? INFO);
-        if (cmd === "brew" && args[0] === "--cellar") return "/opt/homebrew/Cellar\n";
+        if (cmd === "brew" && args[0] === "--cellar") return over.cellar === null ? undefined : "/opt/homebrew/Cellar\n";
         if (cmd === "du") return over.du === null ? undefined : args.slice(1).map((p, i) => `${(i + 1) * 1000}\t${p}`).join("\n");
         return undefined;
       },
     },
     fs: {
       stat: async () => undefined,
-      list: async dir => (dir === "/opt/homebrew/Cellar" ? cellar : []),
+      list: async dir => (dir === "/opt/homebrew/Cellar" ? (cellar ?? []) : []),
       readText: async () => undefined,
     },
   };
@@ -56,8 +56,9 @@ describe("readBrewTable", () => {
     await expect(readBrewTable(fakeHost({ info: "Error: nope" }))).rejects.toThrow();
   });
 
-  it("a brew that exits non-zero or times out, or a du that fails, is an error the caller reports, never a silent empty table", async () => {
+  it("a brew that exits non-zero or times out, a missing Cellar path, or a du that fails, is an error the caller reports, never a silent empty table", async () => {
     await expect(readBrewTable(fakeHost({ info: null }))).rejects.toThrow("brew info failed or timed out");
+    await expect(readBrewTable(fakeHost({ cellar: null }))).rejects.toThrow("brew --cellar failed");
     await expect(readBrewTable(fakeHost({ du: null }))).rejects.toThrow("du over the Cellar failed");
   });
 });

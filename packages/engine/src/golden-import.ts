@@ -31,8 +31,8 @@ export interface RecipeEntry {
   linux?: string;
   /** The version the laptop runs (tools rows); the install pins it. */
   version?: string;
-  /** Only on a tools row installed from a release: the asset's sha256, recorded on the first install and checked on every later one. */
-  pin?: string;
+  /** Only on a tools row installed from a release: the tag installed and its asset's sha256, recorded on the first install of that tag and checked while the tag stands. */
+  pin?: ToolPin;
   /** Credential-shaped: copied only when `choice` is copy, never on the tick alone. */
   consent?: boolean;
   /** Exported names cut from the carried copy of this file, for the checklist; the pack strips every rc file it stages on its own. */
@@ -317,13 +317,26 @@ export interface Brewfile {
   formulae: string[];
   skipped: SkippedItem[];
   /** Tap formulae with no Linux bottle whose source repository is known; each installs from it instead. */
-  roads: { id: string; name: string; source: ToolSource; pin?: string }[];
+  roads: { id: string; name: string; source: ToolSource; pin?: ToolPin }[];
 }
 
 /** The GitHub repository a formula builds from and the tag of the version the Mac has. */
 export interface ToolSource {
   repo: string;
   tag: string;
+}
+
+/** What the first install of a release recorded: the tag it fetched and the asset's sha256. */
+export interface ToolPin {
+  tag: string;
+  sha256: string;
+}
+
+/** How a road install stands against the recipe's pin: nothing recorded yet, the same tag (checked), or a
+ * tag the Mac's Homebrew has since moved to (a first install again, re-recorded). */
+export function pinState(pin: ToolPin | undefined, source: ToolSource): "none" | "same" | "moved" {
+  if (pin === undefined) return "none";
+  return pin.tag === source.tag ? "same" : "moved";
 }
 
 /** What this Mac's Homebrew says about one installed formula. */
@@ -491,8 +504,8 @@ function managerCommand(e: RecipeEntry, manager: Exclude<ToolManager, "github">)
 
 /** A tap formula with no Linux bottle, from its repository: the release asset built for this arch, unpacked
  * and its binary put in /usr/local/bin; with no Linux asset and go on the machine, `go install` of the tag.
- * The asset's sha256 is checked against the pin when the recipe has one, and printed on the WSP_ROAD line
- * the stage reads either way, so the first install records it. */
+ * The asset's sha256 is checked against the pin when the recipe has one for this tag, and printed with the
+ * tag on the WSP_ROAD line the stage reads either way, so the first install of a tag records it. */
 function roadInstall(name: string, source: ToolSource, pin?: string): string {
   const api = `https://api.github.com/repos/${source.repo}/releases/tags/${source.tag}`;
   return [
@@ -508,7 +521,7 @@ function roadInstall(name: string, source: ToolSource, pin?: string): string {
     '  asset="${url##*/}"',
     '  curl -fsSL -o "$tmp/$asset" "$url"',
     `  sum="$(sha256sum "$tmp/$asset" | cut -d' ' -f1)"`,
-    ...(pin !== undefined ? [`  [ "$sum" = ${squote(pin)} ] || { echo "Error: $asset does not match the checksum recorded on first install" >&2; exit 1; }`] : []),
+    ...(pin !== undefined ? [`  [ "$sum" = ${squote(pin)} ] || { echo "Error: $asset does not match the checksum recorded on the first install of ${source.tag}" >&2; exit 1; }`] : []),
     '  case "$asset" in',
     '    *.tar.gz|*.tgz) tar -xzf "$tmp/$asset" -C "$tmp" ;;',
     '    *.tar.xz) tar -xJf "$tmp/$asset" -C "$tmp" ;;',
@@ -519,7 +532,7 @@ function roadInstall(name: string, source: ToolSource, pin?: string): string {
     `  [ -n "$bin" ] || bin="$(find "$tmp" -type f -perm -u+x ! -name "\${asset:-.}" ! -name '*.md' ! -name '*.txt' -printf '%s %p\\n' | sort -rn | head -1 | cut -d' ' -f2-)"`,
     '  [ -n "$bin" ] || { echo "Error: no binary in ${asset:-the release}" >&2; exit 1; }',
     '  install -m 0755 "$bin" "/usr/local/bin/$name"',
-    '  echo "WSP_ROAD release ${asset:-$url} $sum"',
+    `  echo "WSP_ROAD release \${asset:-$url} $sum ${source.tag}"`,
     "elif command -v go >/dev/null 2>&1; then",
     `  GOBIN=/usr/local/bin go install ${squote(`github.com/${source.repo}@${source.tag}`)}`,
     `  echo "WSP_ROAD go github.com/${source.repo}@${source.tag}"`,
@@ -622,7 +635,7 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
   // Last, after any go the plan brings: a road install needs no brew and waits on nothing.
   for (const r of brew.roads) {
     const label = entries.find(e => e.id === r.id)?.label ?? r.name;
-    installs.push({ id: r.id, label, manager: "github", cmd: withPath(roadInstall(r.name, r.source, r.pin)) });
+    installs.push({ id: r.id, label, manager: "github", cmd: withPath(roadInstall(r.name, r.source, pinState(r.pin, r.source) === "same" ? r.pin!.sha256 : undefined)) });
   }
   return { installs, skipped, brewfile: brew.text };
 }

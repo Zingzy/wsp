@@ -14,7 +14,7 @@ import { S_BAR, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, cancel, isCancel, lo
 import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { BREW_TOOLCHAIN_BYTES, BUILDER_DISK_GB, MEASURED_ON, PACK_BUDGET_BYTES, TOOLCHAIN_MEASURED_ON, TOOLS_DISK_FLOOR, agentInstallsFor, agentSize, editorInstallsFor, estimateDisk, extensionsFile, remoteEditorFor, remoteSettingsPath, toolInstallsFor, toolSize, type BrewTable, type DiskEstimate } from "@wsp/engine";
+import { BREW_TOOLCHAIN_BYTES, BUILDER_DISK_GB, MEASURED_ON, PACK_BUDGET_BYTES, TOOLCHAIN_MEASURED_ON, TOOLS_DISK_FLOOR, agentInstallsFor, agentSize, brewfileFor, editorInstallsFor, estimateDisk, extensionsFile, pinState, remoteEditorFor, remoteSettingsPath, toolInstallsFor, toolSize, type BrewTable, type DiskEstimate } from "@wsp/engine";
 import { ALREADY_APPLIED } from "@wsp/protocol";
 import { CLAUDE_INSTALLER, importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
@@ -719,10 +719,11 @@ export function summaryNote(
   const steps = toolInstallsFor(bring, brew).installs;
   const tools = steps.filter(t => ticks.has(t.id)).length;
   const toolchain = steps.some(t => t.id.startsWith("tools/brew-toolchain/")) ? " plus Homebrew's toolchain" : "";
-  // A tool installed from its release is pinned by the checksum the first install records; until then the summary says so.
-  const roads = steps.filter(t => t.manager === "github");
-  const pinned = roads.every(t => bring.find(e => e.id === t.id)?.pin !== undefined);
-  const fromReleases = roads.length === 0 ? "" : `, ${roads.length} from ${roads.length === 1 ? "its" : "their"} GitHub release${roads.length === 1 ? "" : "s"} (${pinned ? "checksum checked against the first install" : "checksum recorded on first install"})`;
+  // A tool installed from its release is pinned per tag: recorded on the first install of a tag, checked while the tag stands.
+  const roads = brewfileFor(bring, brew).roads;
+  const PIN_WORDS = { none: "checksum recorded on first install", same: "checksum checked against the first install", moved: "new release, checksum recorded" } as const;
+  const pinWords = [...new Set(roads.map(r => PIN_WORDS[pinState(r.pin, r.source)]))].join("; ");
+  const fromReleases = roads.length === 0 ? "" : `, ${roads.length} from ${roads.length === 1 ? "its" : "their"} GitHub release${roads.length === 1 ? "" : "s"} (${pinWords})`;
   const installs = [...agents, ...editors, ...(tools > 0 ? [`${tools} tool${tools === 1 ? "" : "s"}${toolchain}${fromReleases}`] : [])];
   const closing: [string, string][] = [
     ["Upload", upload > PACK_BUDGET_BYTES ? `${fmtBytes(upload)}, over the ${fmtBytes(PACK_BUDGET_BYTES)} the machine's disk allows` : `${fmtBytes(upload)}, nothing has left this computer yet`],
@@ -924,10 +925,11 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       onResult: r => {
         writeFileSync(resultsPath, `${JSON.stringify(r, null, 2)}\n`);
         cut = r.files?.cut;
-        // The first install from a release pins its asset: the checksum the guest read goes into the recipe for every later install.
-        const pins = new Map(r.tools.filter(t => t.outcome === "installed" && t.road?.sha256 !== undefined).map(t => [t.id, t.road!.sha256!]));
-        if (manifest.entries.some(e => pins.has(e.id) && e.pin === undefined)) {
-          manifest = { entries: manifest.entries.map(e => (pins.has(e.id) && e.pin === undefined ? { ...e, pin: pins.get(e.id)! } : e)) };
+        // The first install of a release tag pins its asset: the tag and the checksum the guest read go into the recipe for later installs of that tag.
+        const pins = new Map(r.tools.filter(t => t.outcome === "installed" && t.road?.sha256 !== undefined && t.road.tag !== undefined).map(t => [t.id, { tag: t.road!.tag!, sha256: t.road!.sha256! }]));
+        const stale = (e: ManifestEntry): boolean => pins.has(e.id) && e.pin?.tag !== pins.get(e.id)!.tag;
+        if (manifest.entries.some(stale)) {
+          manifest = { entries: manifest.entries.map(e => (stale(e) ? { ...e, pin: pins.get(e.id)! } : e)) };
           saveRecipe(path, manifest, ticks, choices);
         }
         const all = [...r.tools.map(t => ({ ...t, name: t.label })), ...r.agents];

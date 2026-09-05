@@ -557,7 +557,7 @@ describe("golden import stages", () => {
 
   it("a road install names the road it took: the result carries it and the stage summary says so", async () => {
     const { backend, fetch } = backendFor([
-      ["releases/tags/v0.1.0", { exitCode: 0, stdout: `WSP_ROAD release diskbloom_0.1.0_linux_amd64.tar.gz ${"a".repeat(64)}\n`, stderr: "" }],
+      ["releases/tags/v0.1.0", { exitCode: 0, stdout: `WSP_ROAD release diskbloom_0.1.0_linux_amd64.tar.gz ${"a".repeat(64)} v0.1.0\n`, stderr: "" }],
       ["releases/tags/v1.13.1", { exitCode: 0, stdout: "go: downloading\nWSP_ROAD go github.com/TheZoraiz/ascii-image-converter@v1.13.1\n", stderr: "" }],
     ]);
     const { stages, onStage } = stageRecorder();
@@ -569,7 +569,7 @@ describe("golden import stages", () => {
     await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ tools: [...importOf().tools, ...roads], onResult: r => void results.push(r) }) });
     expect(stages).toContain("installing-tools:5 installed (diskbloom from the GitHub release, ascii-image-converter with go install)");
     expect(results[0]!.tools.slice(3)).toEqual([
-      { id: roads[0]!.id, label: "diskbloom", outcome: "installed", road: { kind: "release", from: "diskbloom_0.1.0_linux_amd64.tar.gz", sha256: "a".repeat(64) }, ms: expect.any(Number) },
+      { id: roads[0]!.id, label: "diskbloom", outcome: "installed", road: { kind: "release", from: "diskbloom_0.1.0_linux_amd64.tar.gz", sha256: "a".repeat(64), tag: "v0.1.0" }, ms: expect.any(Number) },
       { id: roads[1]!.id, label: "ascii-image-converter", outcome: "installed", road: { kind: "go", from: "github.com/TheZoraiz/ascii-image-converter@v1.13.1" }, ms: expect.any(Number) },
     ]);
     // A brew install carries no road: it took the one its plan named.

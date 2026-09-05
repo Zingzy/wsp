@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import { MIB, TOOLS_DISK_FLOOR } from "../src/golden-tools.js";
-import { brewfileFor, toolInstallsFor, type BrewTable, type RecipeEntry } from "../src/golden-import.js";
+import { brewfileFor, pinState, toolInstallsFor, type BrewTable, type RecipeEntry } from "../src/golden-import.js";
 import {
   BASE_IMAGE_BYTES,
   BREW_TOOLCHAIN_BYTES,
@@ -211,8 +211,8 @@ describe("tap formulae without a Linux bottle", () => {
     expect(road.cmd).toContain("go install 'github.com/Zingzy/diskbloom@v0.1.0'");
     // The asset's checksum rides on the WSP_ROAD line so the first install records it; nothing is checked yet.
     expect(road.cmd).toContain(`sum="$(sha256sum "$tmp/$asset" | cut -d' ' -f1)"`);
-    expect(road.cmd).toContain('echo "WSP_ROAD release ${asset:-$url} $sum"');
-    expect(road.cmd).not.toContain("recorded on first install");
+    expect(road.cmd).toContain('echo "WSP_ROAD release ${asset:-$url} $sum v0.1.0"');
+    expect(road.cmd).not.toContain("checksum recorded");
     expect(road.cmd).toMatch(/WSP_ROAD go/);
     // Nothing is piped into a shell.
     expect(road.cmd).not.toMatch(/\|\s*(ba)?sh\b/);
@@ -221,14 +221,27 @@ describe("tap formulae without a Linux bottle", () => {
     expect(plan.skipped.map(s => s.id)).not.toContain("tools/brew/zingzy/tap/diskbloom");
   });
 
-  it("a recipe that recorded the asset's checksum has the install check it before unpacking, and a mismatch fails the tool", () => {
-    const pin = "e".repeat(64);
-    const b = brewfileFor([brew("zingzy/tap/diskbloom", "unknown"), { ...brew("zingzy/tap/diskbloom", "unknown"), id: "tools/brew/zingzy/tap/diskbloom", pin }].slice(1), TABLE);
+  it("a recipe that recorded the checksum for this tag has the install check it before unpacking; a mismatch fails the tool", () => {
+    const pin = { tag: "v0.1.0", sha256: "e".repeat(64) };
+    const b = brewfileFor([{ ...brew("zingzy/tap/diskbloom", "unknown"), pin }], TABLE);
     expect(b.roads).toEqual([{ id: "tools/brew/zingzy/tap/diskbloom", name: "diskbloom", source: { repo: "Zingzy/diskbloom", tag: "v0.1.0" }, pin }]);
+    expect(pinState(pin, b.roads[0]!.source)).toBe("same");
     const road = toolInstallsFor([{ ...brew("zingzy/tap/diskbloom", "unknown"), pin }], TABLE).installs.at(-1)!;
-    expect(road.cmd).toContain(`[ "$sum" = '${pin}' ] || { echo "Error: $asset does not match the checksum recorded on first install" >&2; exit 1; }`);
-    // The check sits between the download and the unpack.
+    expect(road.cmd).toContain(`[ "$sum" = '${pin.sha256}' ] || { echo "Error: $asset does not match the checksum recorded on the first install of v0.1.0" >&2; exit 1; }`);
+    // The check sits between the download and the unpack; the line the stage reads carries the checksum and the tag.
     expect(road.cmd.indexOf("curl -fsSL -o")).toBeLessThan(road.cmd.indexOf('[ "$sum" ='));
     expect(road.cmd.indexOf('[ "$sum" =')).toBeLessThan(road.cmd.indexOf('case "$asset" in'));
+    expect(road.cmd).toContain('echo "WSP_ROAD release ${asset:-$url} $sum v0.1.0"');
+  });
+
+  it("a pin from an older tag is not checked against the new release: the tag moved, so it is a first install again", () => {
+    const pin = { tag: "v0.0.9", sha256: "e".repeat(64) };
+    const b = brewfileFor([{ ...brew("zingzy/tap/diskbloom", "unknown"), pin }], TABLE);
+    expect(pinState(pin, b.roads[0]!.source)).toBe("moved");
+    expect(pinState(undefined, b.roads[0]!.source)).toBe("none");
+    const road = toolInstallsFor([{ ...brew("zingzy/tap/diskbloom", "unknown"), pin }], TABLE).installs.at(-1)!;
+    expect(road.cmd).not.toContain('[ "$sum" =');
+    expect(road.cmd).not.toContain("e".repeat(64));
+    expect(road.cmd).toContain('echo "WSP_ROAD release ${asset:-$url} $sum v0.1.0"');
   });
 });

@@ -2472,8 +2472,11 @@ describe("summaryNote", () => {
     expect(fresh).toContain("Installs  Claude Code, 2 tools plus Homebrew's toolchain, 1 from its GitHub release (checksum recorded on first install)");
     // Without the table the tap is a skip, as init-import would plan it without the table too.
     expect(summaryNote(manifest, ticks, new Map(), 200, 0)).toContain("Installs  Claude Code, 1 tool plus Homebrew's toolchain");
-    const pinned = summaryNote({ entries: [...FIXTURE.entries, { ...tap, pin: "f".repeat(64) }] }, ticks, new Map(), 200, 0, brew);
+    const pinned = summaryNote({ entries: [...FIXTURE.entries, { ...tap, pin: { tag: "v0.1.0", sha256: "f".repeat(64) } }] }, ticks, new Map(), 200, 0, brew);
     expect(pinned).toContain("Installs  Claude Code, 2 tools plus Homebrew's toolchain, 1 from its GitHub release (checksum checked against the first install)");
+    // The Mac's tap moved on to a newer tag since the pin: an ordinary upgrade, recorded again, not a mismatch.
+    const moved = summaryNote({ entries: [...FIXTURE.entries, { ...tap, pin: { tag: "v0.0.9", sha256: "f".repeat(64) } }] }, ticks, new Map(), 200, 0, brew);
+    expect(moved).toContain("Installs  Claude Code, 2 tools plus Homebrew's toolchain, 1 from its GitHub release (new release, checksum recorded)");
   });
 
   it("wraps a long Installs line under its own column instead of letting the frame break it with a stray indent", () => {
@@ -2662,35 +2665,45 @@ describe("disk estimate before the boot", () => {
     expect(f.hosts).toBe(0);
   });
 
-  it("the first install from a release records the asset's checksum into the recipe file, so the next install checks it", async () => {
+  it("the first install of a release tag records the tag and the asset's checksum into the recipe file; a pin from an older tag is replaced, not enforced", async () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
     dirs.push(dir);
     const path = join(dir, "recipe.json");
-    const tap: ManifestEntry = { rung: "tools", id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "unknown" };
+    const tap: ManifestEntry = { rung: "tools", id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "unknown", pin: { tag: "v0.0.9", sha256: "9".repeat(64) } };
     writeFileSync(path, JSON.stringify({ entries: [...FIXTURE.entries, tap].map(e => ({ ...e, bring: e.bring ?? (e.default === "bring" && e.reason === undefined) })) }));
     const brew = new Map([["zingzy/tap/diskbloom", { name: "diskbloom", fullName: "zingzy/tap/diskbloom", deps: [], bytes: 4 * 1024 * 1024, macosOnly: false, source: { repo: "Zingzy/diskbloom", tag: "v0.1.0" } }]]);
     const sha = "b".repeat(64);
     const f = fake({ yes: true, manifestPath: path, brew: async () => brew });
-    f.opts.runtime = recipe => {
+    // A guest whose road install answers with the asset's checksum and the tag it fetched.
+    const roadRuntime = (g: Fake) => (recipe: GoldenRecipe) => {
       const backend = stubBackend();
-      backend.execImpl = (_m, cmd) => (cmd.includes("releases/tags/v0.1.0") ? { exitCode: 0, stdout: `WSP_ROAD release diskbloom_0.1.0_linux_amd64.tar.gz ${sha}\n`, stderr: "" } : guestAnswer(cmd));
-      f.backends.push(backend);
+      backend.execImpl = (_m, cmd) => (cmd.includes("releases/tags/v0.1.0") ? { exitCode: 0, stdout: `WSP_ROAD release diskbloom_0.1.0_linux_amd64.tar.gz ${sha} v0.1.0\n`, stderr: "" } : guestAnswer(cmd));
+      g.backends.push(backend);
       const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
-      f.runtimes.push(rt);
+      g.runtimes.push(rt);
       return rt;
     };
+    f.opts.runtime = roadRuntime(f);
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(0);
-    expect(f.text()).toContain("checksum recorded on first install");
-    // The road command ran without a check, since nothing was recorded yet.
+    expect(f.text()).toContain("new release, checksum recorded");
+    // The road command ran without a check: the recorded pin was for v0.0.9 and the tap now names v0.1.0.
     const road = f.backends[0]!.machines[0]!.execLog.find(c => c.includes("releases/tags/v0.1.0"))!;
-    expect(road).not.toContain("recorded on first install");
+    expect(road).not.toContain('[ "$sum" =');
     const saved = loadManifest(recipePath(f.opts.statePath));
-    expect(saved.entries.find(e => e.id === "tools/brew/zingzy/tap/diskbloom")?.pin).toBe(sha);
+    expect(saved.entries.find(e => e.id === "tools/brew/zingzy/tap/diskbloom")?.pin).toEqual({ tag: "v0.1.0", sha256: sha });
     expect(saved.entries.filter(e => e.pin !== undefined)).toHaveLength(1);
-    // The results file carries the same checksum beside the road.
+    // The results file carries the same checksum and tag beside the road.
     const results = JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8")) as { tools: { id: string; road?: { kind: string; sha256?: string } }[] };
-    expect(results.tools.find(t => t.id === "tools/brew/zingzy/tap/diskbloom")?.road).toEqual({ kind: "release", from: "diskbloom_0.1.0_linux_amd64.tar.gz", sha256: sha });
+    expect(results.tools.find(t => t.id === "tools/brew/zingzy/tap/diskbloom")?.road).toEqual({ kind: "release", from: "diskbloom_0.1.0_linux_amd64.tar.gz", sha256: sha, tag: "v0.1.0" });
+    // The same recipe again: the pin now matches the tag, so the road checks it and the summary says so.
+    const again = fake({ yes: true, manifestPath: recipePath(f.opts.statePath), brew: async () => brew });
+    again.opts.runtime = roadRuntime(again);
+    expect((await runInit(again.opts, again.io)).code).toBe(0);
+    expect(again.text()).toContain("checksum checked against the first install");
+    const checked = again.backends[0]!.machines[0]!.execLog.find(c => c.includes("releases/tags/v0.1.0"))!;
+    expect(checked).toContain(sha);
+    expect(checked).toContain("does not match the checksum recorded on the first install of v0.1.0");
   });
 
   it("a Homebrew that cannot be read is a note, not a stop; the summary falls back to the measured table", async () => {
