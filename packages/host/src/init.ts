@@ -632,14 +632,14 @@ const heldDisk = (est: DiskEstimate): boolean => diskTone(est.total, est.room) =
 const tooFull = (rung: Rung): string => `Too full to build. Untick ${rung} you do not need on the machine until the estimate leaves the red; keep headroom for what the build installs.`;
 
 /** Under a screen: the parts of the running total, dim, then the Disk line loud in its weight's colour, directly above the
- * keys. Three lines every frame, so the screen does not move under a tick: the parts and an empty line, or, in the red tier,
- * the way out over the two. */
+ * keys. As many slots as the way out takes wrapped at this width, every frame, so the screen does not move under a tick:
+ * the parts and empty lines, or, in the red tier, the whole sentence. */
 function diskFooter(estimate: (ticks: ReadonlySet<string>) => DiskEstimate, rung: Rung): (ticks: ReadonlySet<string>, width: number) => FooterLine[] {
   return (ticks, width) => {
     const est = estimate(ticks);
     const tone = diskTone(est.total, est.room);
-    const [first = "", second = ""] = heldDisk(est) ? wrap(tooFull(rung), width, "") : [];
-    const head: FooterLine[] = heldDisk(est) ? [{ text: first }, { text: second }] : [diskParts(est), ""];
+    const slots = wrap(tooFull(rung), width, "");
+    const head: FooterLine[] = heldDisk(est) ? slots.map(text => ({ text })) : [diskParts(est), ...slots.slice(1).map(() => "")];
     return [...head, { text: `Disk: ${diskHead(est)}`, ...(tone !== undefined ? { tone } : {}) }];
   };
 }

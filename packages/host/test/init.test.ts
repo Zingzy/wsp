@@ -3213,6 +3213,43 @@ describe("disk estimate before the boot", () => {
       else process.env["FORCE_COLOR"] = was;
     }
   });
+
+  it("at 60, 76 and 80 columns the held sentence lands whole over as many slots as it wraps to, and the slots stay put when the hold lifts", async () => {
+    const MB = 1024 * 1024;
+    const brew: BrewTable = new Map([
+      ["over", { name: "over", fullName: "over", deps: [], bytes: 10_796 * MB, macosOnly: false }],
+      ["edge", { name: "edge", fullName: "edge", deps: [], bytes: 10_796 * MB - 1, macosOnly: false }],
+    ]);
+    const tools: ManifestEntry[] = [
+      { rung: "tools", id: "tools/brew/over", label: "over", group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "yes" },
+      { rung: "tools", id: "tools/brew/edge", label: "edge", group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "yes" },
+    ];
+    // The sentence takes three lines under 76 columns and two from there up to the 100 column cap.
+    for (const [columns, slots] of [[60, 3], [76, 2], [80, 2]] as const) {
+      const f = fake({ brew: async () => brew, collect: async () => ({ entries: tools }), columns });
+      const run = runInit(f.opts, f.io);
+      await f.until("Tools");
+      // The last redraw's footer: the lines from its Selected line to its Disk line, the bar taken off.
+      const between = (): string[] => {
+        const lines = f.text().slice(f.text().lastIndexOf("┃  Selected:")).split("\n");
+        return lines.slice(1, lines.findIndex(l => l.startsWith("┃  Disk:"))).map(l => l.replace(/^┃ {0,2}/, ""));
+      };
+      // Down past the header and the toolchain onto over; ticking it lands on the line.
+      await f.press(KEY.down, KEY.down, KEY.down, KEY.space);
+      const held = between();
+      expect(held, `${columns} columns`).toHaveLength(slots);
+      expect(held.join(" "), `${columns} columns`).toBe(TOO_FULL);
+      expect(held.every(l => l.length <= columns - 4), `${columns} columns`).toBe(true);
+      // Off the line by a byte: the parts take the first slot and the rest stay empty, the same count.
+      await f.press(KEY.space, KEY.down, KEY.space);
+      const free = between();
+      expect(free, `${columns} columns`).toHaveLength(slots);
+      expect(free[0], `${columns} columns`).toBe("Homebrew's toolchain 1.6 GB, tools 10.5 GB");
+      expect(free.slice(1), `${columns} columns`).toEqual(Array<string>(slots - 1).fill(""));
+      await f.press(KEY.ctrlC);
+      await run;
+    }
+  });
 });
 
 describe("wsp init with a golden already built from a recipe", () => {
