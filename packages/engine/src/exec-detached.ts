@@ -32,6 +32,8 @@ function launchCommand(runDir: string, base: string, script: string): string {
   return [
     `mkdir -p ${runDir}`,
     `b=${base}`,
+    // exec honours no idempotency key and a launch whose answer was lost is retried; the claim makes the second a no-op.
+    `mkdir "$b.d" 2>/dev/null || { echo WSP_LAUNCHED; exit 0; }`,
     `printf %s '${b64}' | base64 -d > "$b.sh" || exit 1`,
     `setsid nohup bash -c 'bash "$0.sh" > "$0.out" 2> "$0.err" < /dev/null; echo $? > "$0.exit"' "$b" > /dev/null 2>&1 &`,
     'echo $! > "$b.pid"',
@@ -57,7 +59,7 @@ function killCommand(base: string): string {
 }
 
 function cleanCommand(base: string): string {
-  return `rm -f ${base}.sh ${base}.out ${base}.err ${base}.exit ${base}.pid`;
+  return `rm -rf ${base}.sh ${base}.out ${base}.err ${base}.exit ${base}.pid ${base}.d`;
 }
 
 interface Poll {

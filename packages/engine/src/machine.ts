@@ -67,8 +67,7 @@ export interface Machine {
   readonly seen?: { state: MachineState; createdAt?: string };
   /** On a handle from create(): the provider answered from an earlier create under the same key instead of booting. */
   readonly replayed?: boolean;
-  /** One short command; a backend's exec has a hard ceiling (Solari cuts at about 29 s), so anything that can run
-   * longer goes through run(). */
+  /** One short command; a backend's exec has a hard ceiling, so anything that can run longer goes through run(). */
   exec(cmd: string, opts?: { timeoutMs?: number }): Promise<ExecResult>; // always REST path
   /** A command that may run for minutes: started detached on the guest and read until it exits or the deadline
    * kills it; the result is shaped like exec's. */

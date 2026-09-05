@@ -4,7 +4,7 @@
 // naps mid-run. The last block runs the real guest commands under this
 // machine's bash with setsid shimmed, since macOS has none.
 import { execFile } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -50,7 +50,7 @@ function guest(steps: Step[]) {
         alive = false;
         return { exitCode: 0, stdout: "", stderr: "" };
       }
-      if (cmd.startsWith("rm -f")) {
+      if (cmd.startsWith("rm -")) {
         cleaned++;
         return { exitCode: 0, stdout: "", stderr: "" };
       }
@@ -189,9 +189,27 @@ describe("execDetached over this machine's bash", () => {
     const lines: string[] = [];
     const res = await execDetached(machine, "echo one; sleep 0.3; echo two; echo warn >&2; exit 3", { deadlineMs: 20_000, pollMs: 50, onLine: l => lines.push(l) }, runDir);
     expect(res).toEqual({ exitCode: 3, stdout: "one\ntwo\n", stderr: "warn\n" });
-    expect(lines).toEqual(["one", "two", "warn"]);
+    // A poll reads stdout then stderr, so where warn lands among the lines is timing; each stream keeps its order.
+    expect(lines.filter(l => l !== "warn")).toEqual(["one", "two"]);
+    expect(lines).toContain("warn");
     const left = await machine.exec(`ls ${runDir}`);
     expect(left.stdout).toBe("");
+  });
+
+  it("a launch posted twice under one base, as a retried exec does, starts the script once", async () => {
+    const { machine, runDir } = localGuest();
+    const marks = join(runDir, "..", "marks");
+    const retrying = {
+      id: "local",
+      exec: async (cmd: string, o?: { timeoutMs?: number }) => {
+        const first = await machine.exec(cmd, o);
+        return cmd.includes("echo WSP_LAUNCHED") ? machine.exec(cmd, o) : first;
+      },
+    } as unknown as Machine;
+    const res = await execDetached(retrying, `echo ran >> ${marks}; echo hi`, { deadlineMs: 20_000, pollMs: 50 }, runDir);
+    expect(res).toEqual({ exitCode: 0, stdout: "hi\n", stderr: "" });
+    expect(readFileSync(marks, "utf8")).toBe("ran\n");
+    expect((await machine.exec(`ls ${runDir}`)).stdout).toBe("");
   });
 
   it("the deadline kill ends the launched session for real", async () => {
