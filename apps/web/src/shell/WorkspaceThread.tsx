@@ -5,6 +5,10 @@
 import { ChatComposer } from "../components/chat/ChatComposer.js";
 import { ChatView } from "../components/chat/ChatView.js";
 
-export function WorkspaceThread({ workspaceId }: { workspaceId: string }) {
-  return <ChatView workspaceId={workspaceId}>{thread => <ChatComposer key={workspaceId} workspaceId={workspaceId} thread={thread} />}</ChatView>;
+export function WorkspaceThread({ workspaceId, threadId = null }: { workspaceId: string; threadId?: string | null }) {
+  return (
+    <ChatView workspaceId={workspaceId} threadId={threadId}>
+      {thread => <ChatComposer key={workspaceId} workspaceId={workspaceId} thread={thread} />}
+    </ChatView>
+  );
 }

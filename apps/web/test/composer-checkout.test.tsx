@@ -80,7 +80,7 @@ const workspace: WorkspaceView = {
   phase: "running",
   golden: "snap_g",
   createdAt: "2026-09-01T00:00:00Z",
-  claudeSessionId: "e16ed170-8257-4668-879e-fe836341633c",
+  claudeSessionId: "sess_0001",
 };
 const STATUS = { branch: { oid: "abc", head: "feature/panes", ahead: 0, behind: 0 }, entries: [], root: "/root/app" };
 

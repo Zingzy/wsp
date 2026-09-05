@@ -155,14 +155,14 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     setDraft(workspaceId, EMPTY_DRAFT);
     thread.setSending(true);
     thread.appendUserTurn(prompt);
-    const resume = thread.fresh ? undefined : workspace?.claudeSessionId;
+    const resume = thread.resume;
     void api.startSession({ workspaceId, prompt, ...(resume ? { resume } : {}), ...(cwd !== null ? { cwd } : {}), ...picked }).catch((err: unknown) => {
       thread.setSending(false);
       const current = useComposerDraftStore.getState().drafts[workspaceId];
       if (current === undefined || current.prompt === "") setDraft(workspaceId, { prompt, cursor: prompt.length });
       thread.appendLocalError(err instanceof Error ? err.message : String(err));
     });
-  }, [api, cwd, draft, picked, sendDisabledReason, setDraft, thread, workspace?.claudeSessionId, workspaceId]);
+  }, [api, cwd, draft, picked, sendDisabledReason, setDraft, thread, workspaceId]);
 
   const interrupt = useCallback(() => {
     const method = api?.interruptSession;

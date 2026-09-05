@@ -1438,6 +1438,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (!factory) throw new Error(`no adapter registered for harness "${harness}"`);
       const adapter = factory({ machine: entry.machine, workspaceId });
 
+      const turnId = randomUUID();
+      const threadId = threadOf(workspaceId, o.resume);
       // Created before adapter.start so events that fire synchronously during
       // start() still land on the view.
       const sessionView: SessionView = {
@@ -1445,6 +1447,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         workspaceId,
         harness,
         status: "running",
+        threadId,
         prompt: o.prompt,
         startedAt: Date.now(),
         ...(o.cwd !== undefined ? { cwd: o.cwd } : {}),
@@ -1452,8 +1455,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(o.effort !== undefined ? { effort: o.effort } : {}),
         ...(o.permissionMode !== undefined ? { permissionMode: o.permissionMode } : {}),
       };
-      const turnId = randomUUID();
-      const threadId = threadOf(workspaceId, o.resume);
       let ended = false;
 
       const forward = (event: AdapterEvent): void => {

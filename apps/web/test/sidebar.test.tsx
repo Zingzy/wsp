@@ -73,7 +73,7 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
 
 beforeEach(() => {
   window.localStorage.clear();
-  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, creations: [], sessions: {}, ready: false });
+  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false });
 });
 
 async function mount(api: FakeApi, firstName: string) {
@@ -190,14 +190,26 @@ describe("rows from the fixture wire", () => {
     expect(rowOf("api").textContent).not.toContain("edge slow");
   });
 
-  it("clicking a workspace or one of its threads selects that workspace", async () => {
-    await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_b", { prompt: "hello" })]), "api");
+  it("clicking a thread selects it under its workspace; clicking a workspace selects it with no thread pinned", async () => {
+    await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_b", { prompt: "hello", threadId: "thr_1" })]), "api");
     await waitFor(() => expect(screen.getByText("hello")).toBeDefined());
     fireEvent.click(rowOf("hello"));
-    expect(useStore.getState().selectedId).toBe("ws_b");
+    expect(useStore.getState()).toMatchObject({ selectedId: "ws_b", selectedThreadId: "thr_1" });
+    expect(rowOf("hello").getAttribute("data-active")).toBe("true");
+    expect(rowOf("web").getAttribute("data-active")).toBe("false");
     fireEvent.click(rowOf("api"));
-    expect(useStore.getState().selectedId).toBe("ws_a");
+    expect(useStore.getState()).toMatchObject({ selectedId: "ws_a", selectedThreadId: null });
     expect(rowOf("api").getAttribute("data-active")).toBe("true");
+    expect(rowOf("hello").getAttribute("data-active")).toBe("false");
+  });
+
+  it("clicking a thread row without a thread id selects its workspace with no thread pinned", async () => {
+    await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_b", { prompt: "before threads" })]), "api");
+    await waitFor(() => expect(screen.getByText("before threads")).toBeDefined());
+    fireEvent.click(rowOf("before threads"));
+    expect(useStore.getState()).toMatchObject({ selectedId: "ws_b", selectedThreadId: null });
+    expect(rowOf("web").getAttribute("data-active")).toBe("true");
+    expect(rowOf("before threads").getAttribute("data-active")).toBe("false");
   });
 
   it("an empty fleet says so; a store toast shows and can be dismissed", async () => {

@@ -158,6 +158,8 @@ export const SessionView = z.object({
   harness: z.string(),
   status: SessionStatus,
   claudeSessionId: z.string().optional(),
+  /** The thread this turn belongs to, as the runtime stamps its events; rows sharing one are one sidebar thread. */
+  threadId: z.string().optional(),
   /** The user's turn that started this session. */
   prompt: z.string().optional(),
   /** Ms epoch, runtime clock; endedAt is unset while the session runs. */

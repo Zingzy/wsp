@@ -74,8 +74,27 @@ describe("deriveSidebarProjects", () => {
     ]);
     expect(projects[0]).toMatchObject({ projectKey: LIVE_WS, environmentPresence: "remote-only", groupedProjectCount: 1, allRemoteMembersAreDesktopLocal: false, machineState: "running", reach: "reachable" });
     expect(projects[0]?.threads).toEqual([
-      { id: "s1", workspaceId: LIVE_WS, title: "hello", status: "completed", startedAt: "2026-09-02T17:19:35.668Z", endedAt: "2026-09-02T17:19:37.768Z", indicator: { label: "Idle", tone: "neutral", pulse: false } },
-      { id: "s0", workspaceId: LIVE_WS, title: "59094224", status: "running", startedAt: null, endedAt: null, indicator: { label: "Working", tone: "neutral", pulse: true } },
+      { id: "s1", threadId: null, workspaceId: LIVE_WS, title: "hello", status: "completed", startedAt: "2026-09-02T17:19:35.668Z", endedAt: "2026-09-02T17:19:37.768Z", indicator: { label: "Idle", tone: "neutral", pulse: false } },
+      { id: "s0", threadId: null, workspaceId: LIVE_WS, title: "59094224", status: "running", startedAt: null, endedAt: null, indicator: { label: "Working", tone: "neutral", pulse: true } },
+    ]);
+  });
+
+  it("turns sharing a threadId fold into one thread titled by the opening prompt, in the state of the latest turn", () => {
+    const [p] = deriveSidebarProjects({
+      workspaces: [LIVE_WORKSPACE_1],
+      sessions: {
+        [LIVE_WS]: [
+          { id: "s1", workspaceId: LIVE_WS, harness: "claude", status: "completed", threadId: "thr_a", prompt: "make me a simple server", startedAt: 1_000, endedAt: 2_000 },
+          { id: "s2", workspaceId: LIVE_WS, harness: "claude", status: "completed", threadId: "thr_b", prompt: "unrelated", startedAt: 3_000, endedAt: 4_000 },
+          { id: "s3", workspaceId: LIVE_WS, harness: "claude", status: "running", threadId: "thr_a", prompt: "do you have access", startedAt: 5_000 },
+          { id: "s4", workspaceId: LIVE_WS, harness: "claude", status: "failed", prompt: "before threads", startedAt: 6_000, endedAt: 7_000 },
+        ],
+      },
+    });
+    expect(p!.threads.map(t => [t.id, t.threadId, t.title, t.status, t.startedAt, t.endedAt, t.indicator?.label])).toEqual([
+      ["thr_a", "thr_a", "make me a simple server", "running", new Date(5_000).toISOString(), null, "Working"],
+      ["thr_b", "thr_b", "unrelated", "completed", new Date(3_000).toISOString(), new Date(4_000).toISOString(), "Idle"],
+      ["s4", null, "before threads", "failed", new Date(6_000).toISOString(), new Date(7_000).toISOString(), "Ended"],
     ]);
   });
 

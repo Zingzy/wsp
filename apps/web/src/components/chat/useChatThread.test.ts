@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { SessionEvent } from "@wsp/protocol";
 import { CHAT_STREAM, CHAT_WS } from "../../../test/fixtures/chat-stream";
-import { deriveChatThread, reloadTranscript, stabilizeEntries, type StaleTurn, type ThreadState } from "./useChatThread";
+import { deriveChatThread, reduceEvent, reloadTranscript, stabilizeEntries, type StaleTurn, type ThreadState } from "./useChatThread";
 
 const T0 = "2026-09-01T02:00:00.000Z";
 const state = (events: ReadonlyArray<SessionEvent>, extra: Partial<ThreadState> = {}): ThreadState => ({
@@ -105,6 +105,15 @@ describe("reloadTranscript", () => {
     expect(next.stale).toBeNull();
   });
 
+  it("a selected thread keeps that thread's events wherever they sit, and none of the others", () => {
+    const events = [A[0]!, A[1]!, B_RUNNING[0]!, A[2]!, B_RUNNING[1]!, ...B_DONE.slice(2)];
+    const next = reloadTranscript(state([]), events, T0, "thr_a");
+    expect(next.events).toEqual(A_RUNNING);
+    expect(next.arrivals).toEqual(A_RUNNING.map(() => T0));
+    expect(reloadTranscript(state([]), events, T0, "thr_b").events).toEqual(B_DONE);
+    expect(reloadTranscript(state([]), events, T0, "thr_none").events).toEqual([]);
+  });
+
   it("a transcript without thread ids is one thread", () => {
     const second = unstamped.map(e => ({ ...e, sessionId: "sess_0009", turnId: "turn_0009" }));
     const next = reloadTranscript(state([]), [...unstamped, ...second], T0);
@@ -156,5 +165,40 @@ describe("reloadTranscript", () => {
     const pending = state([], { fresh: true, left: undefined, stale: { kind: "pending-send" } });
     expect(reloadTranscript(pending, B_RUNNING, T0)).toEqual({ ...pending, stale: B_TURN });
     expect(reloadTranscript(pending, B_DONE, T0)).toEqual(pending);
+  });
+});
+
+describe("reduceEvent", () => {
+  const A = CHAT_STREAM.map(e => ({ ...e, threadId: "thr_a" }));
+  const A_RUNNING = A.slice(0, 3);
+  const A_TURN: StaleTurn = { kind: "turn", turnId: "turn_0001", sessionId: "sess_0001" };
+  const b = { workspaceId: CHAT_WS, sessionId: "sess_0002", turnId: "turn_0002", threadId: "thr_b" };
+  const B_START: SessionEvent = { type: "session.start", ...b, prompt: "start over" };
+  const B_DELTA: SessionEvent = { type: "session.delta", ...b, kind: "text", text: "Fresh start." };
+
+  it("drops an event from another thread once the held events carry a thread id; an empty or unstamped state takes any", () => {
+    const held = state(A_RUNNING);
+    expect(reduceEvent(held, B_DELTA, T0)).toBe(held);
+    expect(reduceEvent(held, A[3]!, T0).events).toEqual([...A_RUNNING, A[3]]);
+    expect(reduceEvent(state([]), B_START, T0).events).toEqual([B_START]);
+    expect(reduceEvent(state(CHAT_STREAM.slice(0, 3)), B_DELTA, T0).events).toHaveLength(4);
+  });
+
+  it("while fresh, a delta from any thread is dropped: only a session.start can open the person's own thread", () => {
+    const fresh = state([], { fresh: true, left: "thr_a" });
+    expect(reduceEvent(fresh, B_DELTA, T0)).toBe(fresh);
+    expect(reduceEvent(fresh, CHAT_STREAM[1]!, T0)).toBe(fresh);
+    expect(reduceEvent(fresh, B_START, T0).events).toEqual([B_START]);
+  });
+
+  it("while fresh, the next session.start opens the thread and the left turn's end still clears the stale record", () => {
+    const fresh = state([], { fresh: true, left: "thr_a", stale: A_TURN });
+    const opened = reduceEvent(fresh, B_START, T0);
+    expect(opened.events).toEqual([B_START]);
+    expect(opened.fresh).toBe(false);
+    expect(reduceEvent(opened, A[2]!, T0)).toBe(opened);
+    const ended = reduceEvent(opened, A.at(-1)!, T0);
+    expect(ended.stale).toBeNull();
+    expect(ended.events).toEqual([B_START]);
   });
 });
