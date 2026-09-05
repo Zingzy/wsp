@@ -29,9 +29,11 @@ export const RETENTION_KEEP = 2;
 export interface RetentionPlan {
   /** The head and the ancestors under it that stay, newest first. */
   keep: GoldenVersion[];
-  /** Older ancestors nothing was forked from: what the offer deletes, oldest first. */
+  /** What the offer deletes: older ancestors oldest first, then the abandoned branches by version. */
   drop: GoldenVersion[];
-  /** Older ancestors a workspace was forked from; each stays while that workspace exists. */
+  /** The members of drop that sit off the head's chain and behind it: nothing kept was built through them. */
+  abandoned: GoldenVersion[];
+  /** Versions a workspace was forked from; each stays while that workspace exists. */
   guarded: { version: GoldenVersion; workspaces: string[] }[];
   /** The kept parent was taken as the next version down: the head was sealed before parents were recorded. */
   parentAssumed: boolean;
@@ -42,8 +44,9 @@ export interface RetentionPlan {
 }
 
 /** The chain of ancestors from the head: each version's recorded parent, or for a version sealed before parents
- * were recorded the next version down. Versions off the chain (a rolled-back head's descendants) are neither kept
- * nor offered, since nothing was built from the head through them. */
+ * were recorded the next version down. Versions off the chain and behind the head are abandoned branches: nothing
+ * kept was built through them, so they are offered too, behind the same lineage guard. Versions ahead of the head
+ * (right after a rollback, before an update seals past them) may still be rolled forward to and are left alone. */
 export function retentionPlan(
   manifest: GoldenManifest,
   rows: readonly SnapshotRow[],
@@ -69,15 +72,21 @@ export function retentionPlan(
   }
   const keep = chain.slice(0, keepCount);
   const older = chain.slice(keepCount).reverse();
+  const offChain = head === undefined ? [] : manifest.versions.filter(v => v.version < head.version && !chain.includes(v)).sort((a, b) => a.version - b.version);
   const drop: GoldenVersion[] = [];
+  const abandoned: GoldenVersion[] = [];
   const guarded: RetentionPlan["guarded"] = [];
-  for (const version of older) {
+  for (const version of [...older, ...offChain]) {
     const workspaces = forkedFrom(version.snapshotId);
-    if (workspaces.length > 0) guarded.push({ version, workspaces });
-    else drop.push(version);
+    if (workspaces.length > 0) {
+      guarded.push({ version, workspaces });
+      continue;
+    }
+    drop.push(version);
+    if (offChain.includes(version)) abandoned.push(version);
   }
   const sizeOf = (id: string): number => rows.find(r => r.id === id)?.sizeBytes ?? 0;
   const totalBytes = rows.reduce((n, r) => n + r.sizeBytes, 0);
   const freedBytes = drop.reduce((n, v) => n + sizeOf(v.snapshotId), 0);
-  return { keep, drop, guarded, parentAssumed, freedBytes, savesUsdPerMonth: snapshotMonthlyUsd(totalBytes, pricing) - snapshotMonthlyUsd(totalBytes - freedBytes, pricing) };
+  return { keep, drop, abandoned, guarded, parentAssumed, freedBytes, savesUsdPerMonth: snapshotMonthlyUsd(totalBytes, pricing) - snapshotMonthlyUsd(totalBytes - freedBytes, pricing) };
 }

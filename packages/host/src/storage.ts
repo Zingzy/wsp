@@ -27,7 +27,8 @@ export function describeRetention(plan: RetentionPlan, pricing: { freeGb: number
   const saving = plan.savesUsdPerMonth > 0 ? `saving ${perMonth(plan.savesUsdPerMonth)} from ${pricing.billedFrom}` : `inside the free ${pricing.freeGb} GB, so nothing saved yet`;
   const parent = plan.keep[1];
   const assumed = plan.parentAssumed && parent !== undefined ? ` v${parent.version} is taken as the parent by version order: v${plan.keep[0]!.version} was sealed before parents were recorded.` : "";
-  return `Delete golden ${versionList(plan.drop)}, ${gb(plan.freedBytes)}, ${saving}? ${versionList(plan.keep)} stay.${assumed}`;
+  const abandoned = plan.abandoned.length > 0 ? ` ${versionList(plan.abandoned)} ${plan.abandoned.length === 1 ? "is an abandoned branch" : "are abandoned branches"}: v${plan.keep[0]!.version} was not built through ${plan.abandoned.length === 1 ? "it" : "them"}.` : "";
+  return `Delete golden ${versionList(plan.drop)}, ${gb(plan.freedBytes)}, ${saving}? ${versionList(plan.keep)} stay.${assumed}${abandoned}`;
 }
 
 export function describeGuarded(g: RetentionPlan["guarded"][number]): string {
@@ -43,8 +44,8 @@ export interface RetentionOfferOptions {
   output: Writable;
 }
 
-/** After a golden has three or more versions: the older ancestors are offered for deletion, kept on a No, deleted
- * on a Yes or when nobody is asked. A listing the provider refuses keeps every version and says so. */
+/** The older ancestors and the abandoned branches are offered for deletion, kept on a No, deleted on a Yes or when
+ * nobody is asked. A listing the provider refuses keeps every version and says so. */
 export async function retentionOffer(o: RetentionOfferOptions): Promise<void> {
   const out = { output: o.output };
   let plan: RetentionPlan | undefined;
