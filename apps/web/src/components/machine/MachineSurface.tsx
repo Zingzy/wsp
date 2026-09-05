@@ -331,9 +331,6 @@ function UsageChart({ series, sawSpend }: { series: CostPoint[]; sawSpend: boole
               onMouseMove={track}
               onMouseLeave={() => setHover(null)}
             >
-              {[1 / 3, 2 / 3].map(f => (
-                <line key={f} x1={0} x2={CHART_W} y1={CHART_PAD + f * (CHART_H - 2 * CHART_PAD)} y2={CHART_PAD + f * (CHART_H - 2 * CHART_PAD)} className="stroke-border/60" strokeWidth={1} vectorEffect="non-scaling-stroke" />
-              ))}
               <path d={points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join("")} fill="none" className="stroke-foreground/80" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" data-usage-line />
               {hover !== null && points[hover] !== undefined && (
                 <line x1={points[hover].x} x2={points[hover].x} y1={0} y2={CHART_H} className="stroke-muted-foreground/50" strokeWidth={1} vectorEffect="non-scaling-stroke" data-usage-hover />
