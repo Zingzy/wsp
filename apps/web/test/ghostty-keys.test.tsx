@@ -7,6 +7,7 @@
 // control bytes; Control chords are the terminal's.
 import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { onOpenCommandPalette } from "../src/commandPaletteBus.js";
 import { TerminalViewport } from "../src/components/ThreadTerminalDrawer.js";
 import { SidebarProvider, useSidebar } from "../src/components/ui/sidebar.js";
 import { isTerminalAppShortcut } from "../src/keybindings.js";
@@ -82,14 +83,15 @@ describe("isTerminalAppShortcut", () => {
 
   it("claims the Command chords the defaults bind while a terminal has focus", () => {
     expect(isTerminalAppShortcut(event("j", { metaKey: true }), undefined, MAC)).toBe(true);
+    expect(isTerminalAppShortcut(event("k", { metaKey: true }), undefined, MAC)).toBe(true);
     expect(isTerminalAppShortcut(event("b", { metaKey: true }), undefined, MAC)).toBe(true);
     expect(isTerminalAppShortcut(event("d", { metaKey: true }), undefined, MAC)).toBe(true);
     expect(isTerminalAppShortcut(event("n", { metaKey: true }), undefined, MAC)).toBe(true);
   });
 
-  it("leaves the palette chord, unbound Command chords and every Control chord to the terminal", () => {
-    expect(isTerminalAppShortcut(event("k", { metaKey: true }), undefined, MAC)).toBe(false);
+  it("leaves unbound Command chords and every Control chord to the terminal", () => {
     expect(isTerminalAppShortcut(event("x", { metaKey: true }), undefined, MAC)).toBe(false);
+    expect(isTerminalAppShortcut(event("k", { ctrlKey: true }), undefined, LINUX)).toBe(false);
     expect(isTerminalAppShortcut(event("c", { ctrlKey: true }), undefined, MAC)).toBe(false);
     expect(isTerminalAppShortcut(event("j", { ctrlKey: true }), undefined, LINUX)).toBe(false);
     expect(isTerminalAppShortcut(event("b", { ctrlKey: true }), undefined, LINUX)).toBe(false);
@@ -162,13 +164,24 @@ describe("the drawer's viewport under the keybinding dispatcher", () => {
     program("\x1b[>1u");
     press({ key: "b", code: "KeyB", metaKey: true });
     await vi.waitFor(() => expect(sidebarOpen()).toBe("false"));
-    press({ key: "k", code: "KeyK", metaKey: true });
-    await vi.waitFor(() => expect(data).toEqual(["\x1b[107;9u"]));
+    press({ key: "x", code: "KeyX", metaKey: true });
+    await vi.waitFor(() => expect(data).toEqual(["\x1b[120;9u"]));
+  });
+
+  it("opens the palette on Cmd+K and keeps the chord out of the pty", async () => {
+    const { data, press } = await mountViewport(MAC);
+    const toggles: boolean[] = [];
+    const off = onOpenCommandPalette(detail => toggles.push(detail.toggle === true));
+    const event = press({ key: "k", code: "KeyK", metaKey: true });
+    await vi.waitFor(() => expect(toggles).toEqual([true]));
+    off();
+    expect(event.defaultPrevented).toBe(true);
+    expect(data).toEqual([]);
   });
 
   it("drops an unbound Command chord that would type its letter", async () => {
     const { data, press, sidebarOpen } = await mountViewport(MAC);
-    const event = press({ key: "k", code: "KeyK", metaKey: true });
+    const event = press({ key: "x", code: "KeyX", metaKey: true });
     press({ key: "c", code: "KeyC", metaKey: true });
     press({ key: "a", code: "KeyA" });
     await vi.waitFor(() => expect(data).toEqual(["a"]));
@@ -196,9 +209,9 @@ describe("the drawer's viewport under the keybinding dispatcher", () => {
 
   it("keeps typing Super chords elsewhere, where mod is Control", async () => {
     const { data, press, sidebarOpen } = await mountViewport(LINUX);
-    press({ key: "k", code: "KeyK", metaKey: true });
+    press({ key: "x", code: "KeyX", metaKey: true });
     press({ key: "Backspace", code: "Backspace", metaKey: true });
-    await vi.waitFor(() => expect(data).toEqual(["k", "\x7f"]));
+    await vi.waitFor(() => expect(data).toEqual(["x", "\x7f"]));
     expect(sidebarOpen()).toBe("true");
   });
 });

@@ -34,6 +34,12 @@ export interface ShortcutMatchContext {
   terminalOpen: boolean;
   previewFocus: boolean;
   previewOpen: boolean;
+  /**
+   * Derived, never passed: a focused terminal owns mod chords where mod is
+   * Control, which the shell reads. On macOS mod is Command, which no shell
+   * reads, so a Command chord the app binds fires whatever has focus.
+   */
+  terminalOwnsMod: boolean;
   [key: string]: boolean;
 }
 
@@ -117,13 +123,18 @@ function resolvePlatform(options: ShortcutMatchOptions | undefined): string {
   return options?.platform ?? navigator.platform;
 }
 
-function resolveContext(options: ShortcutMatchOptions | undefined): ShortcutMatchContext {
+function resolveContext(
+  options: ShortcutMatchOptions | undefined,
+  platform: string,
+): ShortcutMatchContext {
+  const terminalFocus = options?.context?.terminalFocus ?? false;
   return {
-    terminalFocus: false,
     terminalOpen: false,
     previewFocus: false,
     previewOpen: false,
     ...options?.context,
+    terminalFocus,
+    terminalOwnsMod: terminalFocus && !isMacPlatform(platform),
   };
 }
 
@@ -170,7 +181,7 @@ function findEffectiveShortcutForCommand(
   options?: ShortcutMatchOptions,
 ): KeybindingShortcut | null {
   const platform = resolvePlatform(options);
-  const context = resolveContext(options);
+  const context = resolveContext(options, platform);
   const claimedShortcuts = new Set<string>();
 
   for (let index = keybindings.length - 1; index >= 0; index -= 1) {
@@ -198,7 +209,7 @@ export function resolveShortcutCommand(
   options?: ShortcutMatchOptions,
 ): KeybindingCommand | null {
   const platform = resolvePlatform(options);
-  const context = resolveContext(options);
+  const context = resolveContext(options, platform);
 
   for (let index = keybindings.length - 1; index >= 0; index -= 1) {
     const binding = keybindings[index];
