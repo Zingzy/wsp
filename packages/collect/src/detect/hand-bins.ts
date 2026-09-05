@@ -152,10 +152,11 @@ function locked(f: BinFormat, brings: ReadonlySet<string>): string | undefined {
 /** Whether the file's format can run on a Linux machine when copied there; a script may still want its interpreter brought. */
 export const carries = (f: BinFormat): boolean => f.kind === "script" || (f.kind === "elf" && f.arch !== undefined);
 
-/** The commands the machine has without a hand row: the base image's interpreters and each installable tools row's command, the last id segment minus a formula's version suffix (python@3.12). */
+/** The commands the machine has without a hand row: the base image's interpreters and each installable tools row's command, the last id segment; a versioned formula (python@3.12, node@22) brings none until a guest measures what it puts on PATH. */
 export function brought(rows: readonly ManifestEntry[]): Set<string> {
   const installable = rows.filter(r => r.rung === "tools" && !r.id.startsWith(HAND_PREFIX) && r.reason === undefined);
-  return new Set([...BASE_INTERPRETERS, ...installable.map(r => r.id.slice(r.id.lastIndexOf("/") + 1).replace(/@.*$/, ""))]);
+  const commands = installable.map(r => r.id.slice(r.id.lastIndexOf("/") + 1)).filter(c => !c.includes("@"));
+  return new Set([...BASE_INTERPRETERS, ...commands]);
 }
 
 export function handRow(bin: HandBin, brings: ReadonlySet<string>): ManifestEntry {

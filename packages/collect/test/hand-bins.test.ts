@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { BASE_INTERPRETERS, HAND_GROUP, type ManifestEntry, brought, detectTools, formatOf, handBins, portableShebang } from "../src/index.js";
+import { BASE_INTERPRETERS, HAND_GROUP, type HandBin, type ManifestEntry, brought, detectTools, formatOf, handBins, handRow, portableShebang } from "../src/index.js";
 import { fakeHost } from "./fake-host.js";
 
 const bytes = (...b: number[]): Uint8Array => new Uint8Array(b);
@@ -111,7 +111,7 @@ describe("hand-installed binaries", () => {
     ]);
   });
 
-  it("brought names the commands the machine has without a hand row: the base image's interpreters and each installable tools row by its unversioned command", () => {
+  it("brought names the commands the machine has without a hand row: the base image's interpreters and each installable tools row's command; a versioned formula brings nothing until a guest measures what it puts on PATH", () => {
     const tool = (id: string, over: Partial<ManifestEntry> = {}): ManifestEntry => ({ rung: "tools", id, label: id, paths: [], bytes: 0, default: "bring", linux: "yes", ...over });
     expect([...BASE_INTERPRETERS].sort()).toEqual(["bash", "perl", "python3", "sh"]);
     const rows = [
@@ -122,7 +122,9 @@ describe("hand-installed binaries", () => {
       tool("tools/hand/notes", { group: HAND_GROUP, linux: "unknown", default: "skip" }),
       { rung: "shell", id: "shell/zshrc", label: "zshrc", paths: ["~/.zshrc"], bytes: 1, default: "bring" } as ManifestEntry,
     ];
-    expect([...brought(rows)].sort()).toEqual(["bash", "node", "perl", "python", "python3", "sh", "tsx"]);
+    expect([...brought(rows)].sort()).toEqual(["bash", "perl", "python3", "sh", "tsx"]);
+    const lint: HandBin = { name: "lint", path: "~/.local/bin/lint", format: { kind: "script", interpreter: "python", at: UV_PYTHON }, bytes: 3_000 };
+    expect(handRow(lint, brought(rows))).toMatchObject({ reason: "installed by hand; needs python, which the machine lacks and no tools row brings", linux: "no" });
   });
 
   it("an empty or missing bin directory adds no rows and asks nothing else", async () => {
