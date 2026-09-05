@@ -304,11 +304,16 @@ export async function everything(m: Machine, opts: EverythingOptions = {}): Prom
   for (const it of items) drafts.push({ row: row(`keychain:${it.service}`, it.service, "device-bound-login", [], EMPTY, "exact", { owner: serviceOwner(it.service, names) }), named: true, dirs: [] });
 
   const carries = (r: Row): boolean => r.paths.length > 0 && (r.files > 0 || r.measured !== "exact" || r.kind === "credential");
+  // The manifest parser rejects a repeated id, so a second fold onto an existing bin row is dropped.
+  const ids = new Set(drafts.map(d => d.row.id));
   const kept = drafts.flatMap(d => {
     const r = d.row;
     if (carries(r) || r.kind === "device-bound-login") return [d];
     if (r.binary === undefined) return [];
-    return [leftover({ name: r.tool ?? r.name, path: `${m.home}/${r.binary.slice(2)}`, mtime: r.mtime })];
+    const l = leftover({ name: r.tool ?? r.name, path: `${m.home}/${r.binary.slice(2)}`, mtime: r.mtime });
+    if (l.row.id !== r.id && ids.has(l.row.id)) return [];
+    ids.add(l.row.id);
+    return [l];
   });
   for (const d of kept) {
     const home = homes.find(h => d.row.paths.length === 1 && d.row.paths[0] === h.path);
