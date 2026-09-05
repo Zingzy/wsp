@@ -14,6 +14,7 @@
     "@clack/core": "1.4.3",
     "@clack/prompts": "1.7.0",
     "@wsp/adapter-claude": "workspace:*",
+    "@wsp/catalog": "workspace:*",
     "@wsp/collect": "workspace:*",
     "@wsp/daemon": "workspace:*",
     "@wsp/engine": "workspace:*",

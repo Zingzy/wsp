@@ -3,13 +3,13 @@
 // are the measured ones, and each status check reads fixture output the way
 // the tool prints it (fake names, masked tokens; nothing real).
 import { describe, expect, it } from "vitest";
-import { CONFIG_DIR } from "../src/doctor.js";
-import { AWS_STATUS, CLAUDE_KEY_PATH, CLAUDE_STATUS, GEMINI_STATUS, SIGN_INS, claudeSource, claudeWhy, geminiSource, secretNamed, signInFor, signInWords, statusOf, type SignIn } from "../src/signin-table.js";
+import { CLAUDE_CONFIG_DIR } from "@wsp/catalog";
+import { AWS_STATUS, CLAUDE_KEY_PATH, CLAUDE_STATUS, CLOUDFLARED_STATUS, GEMINI_STATUS, SIGN_INS, claudeSource, claudeWhy, geminiSource, hasLogin, secretNamed, signInFor, signInWords, statusOf, type SignIn } from "../src/signin-table.js";
 import { collectorLogins } from "./collector-logins.js";
 
-function command(name: string): Extract<SignIn, { kind: "command" }> {
+function command(name: string): Extract<SignIn, { login: string }> {
   const s = signInFor(name);
-  if (s.kind !== "command") throw new Error(`${name} is not a command row`);
+  if (!hasLogin(s)) throw new Error(`${name} is not a login row`);
   return s;
 }
 
@@ -63,8 +63,10 @@ describe("sign-in table", () => {
 
   it("has a status command for each tool that offers one, and says so for the rest", () => {
     const withStatus = Object.entries(SIGN_INS).filter(([, s]) => statusOf(s) !== undefined).map(([k]) => k);
-    expect(withStatus.sort()).toEqual(["aws", "claude", "codex", "doppler", "fly", "gcloud", "gemini", "gh", "hermes", "kube", "netlify", "opencode", "pi", "railway", "supabase", "vercel", "wrangler"]);
-    expect(command("cloudflared").status).toBeUndefined();
+    expect(withStatus.sort()).toEqual(["aws", "claude", "cloudflared", "codex", "doppler", "fly", "gcloud", "gemini", "gh", "hermes", "kube", "netlify", "opencode", "pi", "railway", "supabase", "vercel", "wrangler"]);
+    // cloudflared has no status command; its login writes the origin certificate, so the check proves that file.
+    expect(command("cloudflared").status?.command).toBe(CLOUDFLARED_STATUS);
+    expect(CLOUDFLARED_STATUS).toBe(`if test -s "$HOME/.cloudflared/cert.pem"; then echo cert.pem; else false; fi`);
     for (const name of ["op", "kube"]) expect(signInFor(name).kind, name).toBe("none");
     // kubectl has no sign-in, so its row stays a "none" row whose status still proves a copied kubeconfig. What runs drops
     // stderr (v1.36.1 prints a kuberc warning there with no newline, so on the merged pty it glues onto the context name);
@@ -74,7 +76,7 @@ describe("sign-in table", () => {
     // Claude Code's typed line also proves the helper's key file, keeping claude's own exit for the marker; the row shows the status command alone.
     expect(command("claude").status?.command).toBe("claude auth status");
     expect(command("claude").status?.typed).toBe(CLAUDE_STATUS);
-    expect(CLAUDE_KEY_PATH).toBe(`${CONFIG_DIR}/anthropic-api-key`);
+    expect(CLAUDE_KEY_PATH).toBe(`${CLAUDE_CONFIG_DIR}/anthropic-api-key`);
     expect(CLAUDE_STATUS).toBe(`claude auth status; s=$?; test -s ${CLAUDE_KEY_PATH} && echo WSP_KEY_FILE; (exit $s)`);
     for (const [name, s] of Object.entries(SIGN_INS)) if (name !== "kube" && name !== "claude") expect(statusOf(s)?.typed, name).toBeUndefined();
     expect(statusOf(signInFor("op"))).toBeUndefined();
@@ -166,6 +168,8 @@ describe("sign-in table", () => {
     expect(check("gemini", "oauth_creds.json", 0)).toBe(true);
     expect(check("gemini", "GEMINI_API_KEY", 0)).toBe(true);
     expect(check("gemini", "", 1)).toBe(false);
+    expect(check("cloudflared", "cert.pem", 0)).toBe(true);
+    expect(check("cloudflared", "", 1)).toBe(false);
   });
 
   it("names the key the secrets step set when a status lists it, and what the gemini check found", () => {
@@ -204,6 +208,13 @@ describe("sign-in table", () => {
     expect(claudeSource("not json at all", secrets)).toBeUndefined();
     expect(command("claude").status?.detail).toBe(claudeSource);
     expect(command("gh").status?.detail).toBeUndefined();
+  });
+
+  it("names the flow each login takes: a browser callback, a code typed on a page, or a key", () => {
+    expect(command("gh").kind).toBe("device");
+    expect(command("hermes").kind).toBe("device");
+    expect(command("opencode").kind).toBe("key");
+    for (const name of ["claude", "codex", "gemini", "gcloud", "aws", "wrangler", "vercel", "pi", "cloudflared"]) expect(command(name).kind, name).toBe("oauth");
   });
 
   it("words a row for a checklist: the command, what to do instead, or a plain ask", () => {

@@ -16,7 +16,7 @@ import { SNAPSHOT_STORAGE, type BackendPricing, type BrewFormula, type BrewTable
 import { ALREADY_APPLIED } from "@wsp/protocol";
 import { DAEMON_TOKEN_SET, createRuntime, memoryStore, type GoldenRecipe, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
-import { GOLDEN_SETUP } from "../src/doctor.js";
+import { GOLDEN_SETUP } from "@wsp/catalog";
 import { loadManifest, recipePath } from "../src/init-recipe.js";
 import { CARD_FRAME, card, widthOf } from "../src/init-layout.js";
 import { editorsIntro, everythingItems, fmtBytes, reduceStages, runInit, selectItem, shellItems, stageLine, summaryNote, toolsItems, type HostHooks, type InitIO, type InitOptions } from "../src/init.js";
@@ -1136,7 +1136,7 @@ describe("wsp init, the sign-in stage", () => {
     expect(result.logins?.[0]).toEqual({ id: "logins/codex", label: "Codex login", state: "skipped", command: "codex login", exit: 127, note: "codex is not on the machine" });
   });
 
-  it("a login with no status command that ended with a non-zero exit is not signed in and offered a retry or a skip; a clean exit signs it in", async () => {
+  it("a machine sign-in that ended with a non-zero exit is not signed in and offered a retry or a skip; a clean exit signs it in", async () => {
     // A login whose command is not coming starts at skip and is never staged, so the tools row that brings cloudflared is here.
     const CLOUDFLARED_MANIFEST: Manifest = {
       entries: [
@@ -1145,7 +1145,7 @@ describe("wsp init, the sign-in stage", () => {
         { rung: "logins", id: "logins/cloudflared", label: "cloudflared login", group: "CLI logins", paths: ["~/.cloudflared/cert.pem"], bytes: 300, default: "skip" },
       ],
     };
-    const f = fake({ hold: true, collect: async () => CLOUDFLARED_MANIFEST });
+    const f = fake({ signedIn: false, hold: true, collect: async () => CLOUDFLARED_MANIFEST });
     const run = runInit(f.opts, f.io);
     await f.until("Identity");
     await f.press(KEY.enter);
@@ -1166,7 +1166,6 @@ describe("wsp init, the sign-in stage", () => {
     f.link.exit(f.link.ptys.at(-1)!, 0);
     await f.until(/signed in \(cloudflared tunnel login exited 0\)\n/);
     await f.until(SEAL_Q(1));
-    expect(f.text().split("r retry")).toHaveLength(2);
     await f.press(KEY.enter);
     const result = await run;
     expect(result.logins?.map(l => [l.state, l.exit])).toEqual([["signed-in", 0]]);

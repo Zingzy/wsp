@@ -12,7 +12,7 @@ import { join } from "node:path";
 import type { ManifestEntry } from "@wsp/collect";
 import { NODE_RELEASES, planFiles } from "@wsp/engine";
 import { afterEach, describe, expect, it } from "vitest";
-import { GOLDEN_SETUP, GOLDEN_SMOKE } from "../src/doctor.js";
+import { GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
 import { digestOf, importFor, importResultPath, keychainLogins, keychainReader, packPlan, readSecrets, statOf, type SecretReader } from "../src/init-import.js";
 import { GUARD_SOURCE_COMMENT, GUARD_SOURCE_LINE } from "../src/init-aliases.js";
 

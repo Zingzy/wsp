@@ -38,7 +38,7 @@ import {
   type RecipeDigest,
   type RecipeEntry,
 } from "../src/golden-import.js";
-import { LINUX_CASKS, caskPinState, linuxCaskByBin, linuxCaskFor } from "../src/linux-casks.js";
+import { LINUX_CASKS, caskPinState, linuxCaskByBin, linuxCaskFor } from "@wsp/catalog";
 
 const row = (over: Partial<RecipeEntry> & Pick<RecipeEntry, "rung" | "id">): RecipeEntry => ({
   label: over.id,

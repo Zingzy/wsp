@@ -173,6 +173,7 @@ The app and the WebSocket API bind 127.0.0.1 only.
 
 | package | what it is |
 |---|---|
+| `@wsp/catalog` | the agents and tools wsp can put on a machine: roads, sign-ins, config paths, defaults |
 | `@wsp/engine` | machine backends, workspace lifecycle, golden images, vault |
 | `@wsp/daemon` | in-guest daemon: ptys, port watch, inbox, process manifest |
 | `@wsp/adapter-claude` | drives claude headless inside a workspace |

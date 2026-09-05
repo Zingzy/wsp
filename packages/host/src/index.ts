@@ -38,11 +38,10 @@ export {
   type ForwardView,
   type UrlOpener,
 } from "./relay.js";
+export { GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
 export {
   doctor,
   deployDaemon,
-  GOLDEN_SETUP,
-  GOLDEN_SMOKE,
   stageDaemonBundle,
   connectDaemonSocket,
   type DaemonSocket,

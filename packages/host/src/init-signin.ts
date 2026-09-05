@@ -21,7 +21,7 @@ import { agentName } from "./init-recipe.js";
 import { SH_FILE } from "./init-secrets.js";
 import { readKey } from "./init-select.js";
 import { relayPty, runChecks, type CheckAnswer, type PtyLink, type RelayTerminal } from "./signin-relay.js";
-import { signInFor, statusOf, type SignIn, type StatusCheck } from "./signin-table.js";
+import { hasLogin, signInFor, statusOf, type SignIn, type StatusCheck } from "./signin-table.js";
 
 export interface LoginOutcome {
   id: string;
@@ -308,7 +308,7 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
 
   /** The command's pty over one fresh link, its exit code the row's state; every failure is this login's note, never the run's end. */
   const attempt = async (entry: ManifestEntry, r: LoginOutcome, s: SignIn, command: string | undefined): Promise<void> => {
-    const timeoutMs = s.kind === "command" && s.toolTimeoutMs !== undefined ? s.toolTimeoutMs + 60_000 : capMs;
+    const timeoutMs = hasLogin(s) && s.toolTimeoutMs !== undefined ? s.toolTimeoutMs + 60_000 : capMs;
     const daemon = await o.dial();
     try {
       const show = (line: string): void => void o.terminal.output.write(`\r\n  ${dim(line)}\r\n`);
@@ -349,13 +349,13 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
         return;
       }
       // The shell's own "not found": the tool is not on the machine, and no retry or status check can change that.
-      if (s.kind === "command" && relayed.exitCode === 127) {
+      if (hasLogin(s) && relayed.exitCode === 127) {
         r.state = "skipped";
         r.note = `${toolOf(command ?? "")} is not on the machine`;
         return;
       }
       // A bare shell proves nothing by its exit; a tool's sign-in command does, the way the person just watched it end.
-      if (s.kind !== "command") {
+      if (!hasLogin(s)) {
         r.state = "not-verified";
         r.note = [`no status command known for ${agentName(entry)}`, ...(relayed.exitCode !== 0 ? [`exit ${relayed.exitCode}`] : [])].join("; ");
         return;
@@ -385,21 +385,11 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
 
   const pass = async (entry: ManifestEntry, r: LoginOutcome, useFallback: boolean): Promise<void> => {
     const s = signInFor(agentName(entry));
-    switch (s.kind) {
-      case "none":
-        r.state = "skipped";
-        r.note = s.note;
-        return;
-      case "shell":
-        await run(entry, r, s, undefined);
-        return;
-      case "command":
-        await run(entry, r, s, useFallback && s.fallback !== undefined ? s.fallback : s.login);
-        return;
-      default: {
-        const _exhaustive: never = s;
-        return _exhaustive;
-      }
+    if (hasLogin(s)) await run(entry, r, s, useFallback && s.fallback !== undefined ? s.fallback : s.login);
+    else if (s.kind === "shell") await run(entry, r, s, undefined);
+    else {
+      r.state = "skipped";
+      r.note = s.note;
     }
   };
 
@@ -419,7 +409,7 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
     for (const [r, i] of pending) {
       const entry = o.logins[i]!;
       const s = signInFor(agentName(entry));
-      const fallback = s.kind === "command" ? s.fallback : undefined;
+      const fallback = hasLogin(s) ? s.fallback : undefined;
       const keys = ["r", ...(fallback !== undefined ? ["f"] : []), "s"];
       const again = attempted.has(r);
       const hint = [again ? "r retry" : "r sign in on the machine", ...(fallback !== undefined ? [`f ${again ? "retry" : "sign in"} with ${fallback}`] : []), `s skip`].join("   ");

@@ -6,7 +6,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type LoginChoice, type Manifest, type ManifestEntry, type Rung, parseManifest } from "@wsp/collect";
-import { agentOwning, linuxCaskByBin, linuxCaskFor, neverCopied, type RecipeDigest } from "@wsp/engine";
+import { linuxCaskByBin, linuxCaskFor } from "@wsp/catalog";
+import { agentOwning, neverCopied, type RecipeDigest } from "@wsp/engine";
 import type { GoldenImport, GoldenRecipe, Machine } from "@wsp/runtime";
 import type { Keys } from "./cli.js";
 import { GUEST_ENVS, claudeEnvs } from "./doctor.js";

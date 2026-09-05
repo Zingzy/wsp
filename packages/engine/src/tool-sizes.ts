@@ -2,11 +2,14 @@
 // What a recipe costs on the builder's disk, judged before anything boots: a
 // Homebrew formula is its dependency closure, sized from a table measured on
 // Linux where one exists and from this Mac's own Homebrew otherwise; Homebrew's
-// toolchain is one line; agents have measured install sizes; a row nothing
-// measured counts at a stated default for its kind. Nothing here runs a
+// toolchain is one line; agents carry measured sizes in the catalog; a row
+// nothing measured counts at a stated default for its kind. Nothing here runs a
 // command: the host reads the Mac's Homebrew and hands the table in.
 import { AGENT_INSTALLERS, BREW_TOOLCHAIN, MANAGER_FORMULA, MACOS_ONLY_FORMULAE, agentInstallsFor, cliRoad, toolInstallsFor, type BrewFormula, type BrewTable, type RecipeEntry, type ToolSource } from "./golden-import.js";
-import { MIB, TOOLS_DISK_FLOOR } from "./golden-tools.js";
+import { LINUX_FORMULA_MIB, MIB, NODE_BYTES, catalogEntry } from "@wsp/catalog";
+import { TOOLS_DISK_FLOOR } from "./golden-tools.js";
+
+export { NODE_BYTES } from "@wsp/catalog";
 
 /** Root disk asked for every builder and fork, Solari's cap: a 4 GB root filled during the tools stage and
  * five agents failed to install on it (measured 2026-09-05). */
@@ -28,42 +31,6 @@ export const MEASURED_ON = "2026-09-05";
 /** Homebrew's checkout with its own glibc and gcc, pulled in by the first formula: df moved 1006 MB across the three installs. */
 export const BREW_TOOLCHAIN_BYTES = 1024 * MIB;
 
-/** Cellar sizes on the Linux builder, as brew printed them after each pour on MEASURED_ON; the Mac's Cellar
- * stands in for the rest, and for these two llvm builds it was a gigabyte short. */
-const LINUX_FORMULA_MIB: Record<string, number> = {
-  "llvm@21": 2560,
-  "llvm@20": 2458,
-  openjdk: 412,
-  "openjdk@21": 343,
-  "openjdk@17": 316,
-  go: 251,
-  "firebase-cli": 262,
-  gradle: 220,
-  zig: 214,
-  "zig@0.15": 200,
-  swiftlint: 169,
-  mongosh: 156,
-  binutils: 135,
-  beads: 138,
-  logcli: 121,
-  node: 113,
-  rclone: 110,
-  "node@24": 106,
-  "icu4c@78": 94,
-  goreleaser: 85,
-  "python@3.14": 82,
-  "python@3.12": 77,
-  helm: 65,
-  uv: 60,
-  "helm@3": 60,
-};
-
-/** What df moved across each agent's install on the same builder: the global, its caches and whatever the
- * installer put under /root; the cache sweep after the stage gives some of it back. */
-const AGENT_MIB: Record<string, number> = { opencode: 673, codex: 455, pi: 165, gemini: 189, hermes: 484, claude: 208 };
-
-/** The Node release the agents stage puts under /usr/local when the base's major is under their floor. */
-export const NODE_BYTES = 250 * MIB;
 /** The Node major the base image ships: the builder's log read `node v18.20.4` before the Node step (2026-09-05);
  * a floor at or under it keeps the base's Node and installs nothing. */
 const BASE_NODE_MAJOR = 18;
@@ -211,8 +178,7 @@ const installable = (e: RecipeEntry): boolean => {
 
 /** An agent's measured install size, by the row's name. */
 export function agentSize(e: RecipeEntry): number | undefined {
-  const mib = AGENT_MIB[e.id.slice(e.id.indexOf("/") + 1)];
-  return mib === undefined ? undefined : mib * MIB;
+  return catalogEntry(e.id.slice(e.id.indexOf("/") + 1))?.size;
 }
 
 export interface DiskEstimate {

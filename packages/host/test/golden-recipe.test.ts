@@ -2,7 +2,7 @@
 import { createRuntime, memoryStore } from "@wsp/runtime";
 import { describe, expect, it } from "vitest";
 import { goldenRecipe } from "../src/cli.js";
-import { GOLDEN_SETUP, GOLDEN_SMOKE } from "../src/doctor.js";
+import { GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
 import { stubBackend } from "./stub-backend.js";
 
 const ANTHROPIC = "sk-ant-x-fake-anthropic-key";

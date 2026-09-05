@@ -11,7 +11,6 @@ export * from "./dotfiles-presets.js";
 export * from "./vault.js";
 export * from "./orphans.js";
 export * from "./golden-import.js";
-export * from "./linux-casks.js";
 export * from "./golden-diff.js";
 export * from "./golden-mcp.js";
 export * from "./machine-context.js";
