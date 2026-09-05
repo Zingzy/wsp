@@ -35,7 +35,7 @@ claude sessions.
 ```sh
 pnpm install && pnpm build
 printf 'SOLARI_API_KEY=%s\n' "$YOUR_KEY" > .env
-pnpm wsp init       # first run: tick what comes along, build your golden, finish in the browser
+pnpm wsp init       # first run: tick what comes along, build and seal your golden, land in the app
 pnpm wsp            # the app on http://127.0.0.1:4400
 pnpm wsp doctor     # prove the reach path against one live machine
 ```
@@ -43,8 +43,9 @@ pnpm wsp doctor     # prove the reach path against one live machine
 `wsp init` reads what this machine has, shows it, and walks eight screens
 (identity, shell, editors, toolchains, tools, agents, sign-ins, everything
 else) where you tick what comes along. One summary, one confirm, then it
-boots the machine and opens the browser on its terminal for the sign-ins
-and the save. Every prompt has a flag: `--yes` takes the defaults,
+boots the machine, runs the sign-ins in your terminal, asks for each secret
+it cut from your rc files, seals the golden on Enter, forks your first
+workspace and opens the app on it. Every prompt has a flag: `--yes` takes the defaults,
 `--manifest <path>` ticks from a file, and the ticks are saved as
 `golden-recipe.json` next to the state so a second golden is a re-run.
 

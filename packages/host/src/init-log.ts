@@ -2,7 +2,7 @@
 // The run log of wsp init: one file beside the state, appended per run, that
 // keeps what the terminal showed for a moment and the result files never held:
 // every stage frame, every exec on the builder with its exit and trimmed
-// output, the seal's decision and the hand-off. The last five runs stay.
+// output, the seal's decision and the app's address. The last five runs stay.
 // Secrets never enter it: credential-shaped assignments lose their value, and
 // every value read from the Keychain is blanked wherever it appears.
 import { randomBytes } from "node:crypto";

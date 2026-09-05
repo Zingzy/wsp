@@ -1,20 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // wsp init: read this machine, let the person tick what comes along one rung
 // at a time, confirm once, build the golden's first machine through the
-// runtime, run the sign-ins chosen for the machine in this terminal, then hand
-// off to the browser for the save. Nothing leaves the disk before the confirm,
-// and no question is ever asked on the remote machine.
+// runtime, run the sign-ins chosen for the machine in this terminal, set the
+// secrets the pack cut, seal on Enter, fork the first workspace and open the
+// app on it. Nothing leaves the disk before the confirm, and no question is
+// ever asked on the remote machine.
 import type { Readable, Writable } from "node:stream";
 import { format, styleText } from "node:util";
 import { LARGE_GROUP, MCP_REMOTE_ID, RUNGS, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
 import { describeAge, type BackendPricing } from "@wsp/engine";
-import { type ChecklistItem, MCP_ID_PREFIX } from "@wsp/protocol";
+import { MCP_ID_PREFIX } from "@wsp/protocol";
 import { PrepareStoppedError, type GoldenBuilderView, type GoldenRecipe, type GoldenStage, type Runtime } from "@wsp/runtime";
 import { S_BAR, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, cancel, isCancel, log, outro } from "@clack/prompts";
 import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { BREW_TOOLCHAIN_BYTES, BUILDER_DISK_GB, MEASURED_ON, PACK_BUDGET_BYTES, TOOLCHAIN_MEASURED_ON, TOOLS_DISK_FLOOR, agentInstallsFor, agentSize, brewfileFor, editorInstallsFor, estimateDisk, extensionsFile, pinState, remoteEditorFor, remoteSettingsPath, toolInstallsFor, toolSize, type BrewTable, type DiskEstimate } from "@wsp/engine";
+import { BREW_TOOLCHAIN_BYTES, BUILDER_DISK_GB, MEASURED_ON, PACK_BUDGET_BYTES, TOOLCHAIN_MEASURED_ON, TOOLS_DISK_FLOOR, agentInstallsFor, agentSize, brewfileFor, editorInstallsFor, estimateDisk, extensionsFile, pinState, remoteEditorFor, remoteSettingsPath, toolInstallsFor, toolSize, type BrewTable, type DiskEstimate, type ImportResult } from "@wsp/engine";
 import { ALREADY_APPLIED } from "@wsp/protocol";
 import { CLAUDE_INSTALLER, importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
@@ -22,7 +23,6 @@ import {
   LOGIN_CHOICES,
   RUNG_TITLE,
   agentName,
-  checklistFor,
   goldenRecipeFor,
   hasChoices,
   initialChoice,
@@ -35,14 +35,14 @@ import {
   recipeChanges,
   recipePath,
   saveRecipe,
-  secretLinesFor,
 } from "./init-recipe.js";
-import { CARD_FRAME, GUTTER, card, colourDepth, confirmPrompt, ellipsize, fmtDuration, helpLine, rowsOf, table, widthOf, wrap } from "./init-layout.js";
+import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, fmtDuration, rowsOf, table, widthOf, wrap } from "./init-layout.js";
 import { openRunLog, runLogPath } from "./init-log.js";
-import { stopKeptBuilder, updateRoad } from "./init-upgrade.js";
+import { secretsStage, type SecretOutcome } from "./init-secrets.js";
+import { keptBuilder, stopKeptBuilder, updateRoad } from "./init-upgrade.js";
 import { retentionOffer } from "./storage.js";
-import { readKey, rungSelect, type SelectItem } from "./init-select.js";
-import { OPEN_LINE, builderLink, noteLogins, openLogins, signInStage, stageLogins, type BuilderLink, type LoginOutcome, type SignInFlow } from "./init-signin.js";
+import { rungSelect, type SelectItem } from "./init-select.js";
+import { OPEN_LINE, builderLink, noteOutcomes, signInStage, stageLogins, type BuilderLink, type LoginOutcome, type SignInFlow } from "./init-signin.js";
 import type { HostHandle } from "./server.js";
 
 export interface InitIO {
@@ -52,8 +52,6 @@ export interface InitIO {
   env: Record<string, string | undefined>;
   /** Try to open the URL in a browser; false when nothing could be launched. */
   open(url: string): Promise<boolean>;
-  /** Put text on the clipboard; false when no clipboard tool exists. */
-  copy(text: string): Promise<boolean>;
   /** Where Ctrl-C and a service stop arrive while the builder is prepared; the real one is process. */
   signals: { on(event: "SIGINT" | "SIGTERM", listener: () => void): unknown; off(event: "SIGINT" | "SIGTERM", listener: () => void): unknown };
   /** Ends the process; the real one is process.exit. */
@@ -81,19 +79,16 @@ export interface InitOptions {
   brew?: () => Promise<BrewTable>;
   /** Builds the runtime around the recipe the ticks produced. */
   runtime(recipe: GoldenRecipe): Runtime;
-  /** Starts the app server over that runtime once the builder is ready; the page lands on that
-   * builder. The hooks wire the sign-in stage into the host's callback relay. */
+  /** Starts the app server over that runtime once the builder is ready; its callback relay links to the builder
+   * for the sign-ins, and the browser opens on it once the golden is sealed. The hooks wire the sign-in stage in. */
   host(rt: Runtime, builder: GoldenBuilderView, hooks: HostHooks): Promise<HostHandle>;
-  /** A pty link to the builder's daemon for the sign-in stage, dialled before each command; the real one dials its reach. */
+  /** A pty link to the builder's daemon for the sign-in and secrets steps, dialled before each command; the real one dials its reach. */
   daemon?(rt: Runtime, builder: GoldenBuilderView): Promise<BuilderLink>;
   /** How long to wait when the account is at its machine cap, and how often. */
   retry?: { waitMs: number; attempts: number };
 }
 
 export interface HostHooks {
-  /** The sign-ins still to do on the machine, read on every page load: all of them for a desktop builder,
-   * what the terminal stage left open for a sandbox one. */
-  checklist(): ChecklistItem[];
   /** Whether a sign-in page the machine asks for may open here without a click: one open per o the person pressed,
    * and never the page o itself opened. */
   autoOpen(targetId: string, url: string): boolean;
@@ -108,6 +103,7 @@ export interface InitResult {
   code: number;
   handle?: HostHandle;
   logins?: LoginOutcome[];
+  secrets?: SecretOutcome[];
 }
 
 /** What an earlier run left on the account for this recipe. */
@@ -119,6 +115,7 @@ interface Earlier {
 }
 
 const GOLDEN_NAME = "default";
+const FIRST_WORKSPACE = "first";
 const DEFAULT_RETRY = { waitMs: 30_000, attempts: 20 };
 /** What ends a builder this run could not: a record its dead holder left is stale to the next start, which stops it. */
 const SWEEP = "the next wsp or wsp init on this computer stops it, or stop it from the Solari console.";
@@ -181,7 +178,7 @@ export const PREPARE_STEPS: readonly StageWords[] = [
   { stage: "ready", start: "Waiting for the machine", end: "Ready", fail: "The machine never became ready" },
 ];
 
-/** The seal, driven from the browser; the terminal only reports it. */
+/** The seal, run from this terminal once the person says so. */
 export const SEAL_STEPS: readonly StageWords[] = [
   { stage: "snapshotting", start: "Taking the snapshot", end: "Snapshot taken", fail: "Snapshot failed" },
   { stage: "smoke-forking", start: "Booting a fork to prove it", end: "Fork booted and checked", fail: "The fork failed its check" },
@@ -458,7 +455,7 @@ function spin(output: Writable, label: string, animate: boolean): Spinner {
 /** Anthropic forbids a host to collect or pass along this credential, which is why its login is signed in on the machine unless the person opts in. */
 const CLAUDE_LOGIN_WHY = "Anthropic's terms forbid passing this credential along, so the default is to sign in on the machine.";
 /** What the answers on a login row do, and on a credential-shaped row. */
-const LOGIN_WHY = "copy brings it along; sign in does it in the browser after the build";
+const LOGIN_WHY = "copy brings it along; sign in does it in this terminal after the build";
 const CONSENT_WHY = "copy brings it along; skip leaves it here";
 const EVERYTHING_FOOTER = ["large items are listed but never copied without a tick", "know what one of these is? add it to the catalog"];
 /** Names as a list: "a", "a and b", "a, b and c". */
@@ -918,8 +915,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const secrets = new Map<string, string>();
   const resultsPath = importResultPath(opts.statePath);
   const path = recipePath(opts.statePath);
-  let installs: string[] | undefined;
-  let cut: Parameters<typeof checklistFor>[3];
+  let landed: ImportResult | undefined;
   const importOf = (rows: readonly ManifestEntry[]) =>
     importFor(rows, {
       home: opts.home,
@@ -929,7 +925,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       brew,
       onResult: r => {
         writeFileSync(resultsPath, `${JSON.stringify(r, null, 2)}\n`);
-        cut = r.files?.cut;
+        landed = r;
         // The first install of a release tag pins its asset: the tag and the checksum the guest read go into the recipe for later installs of that tag.
         const pins = new Map(r.tools.filter(t => t.outcome === "installed" && t.road?.sha256 !== undefined && t.road.tag !== undefined).map(t => [t.id, { tag: t.road!.tag!, sha256: t.road!.sha256! }]));
         const stale = (e: ManifestEntry): boolean => pins.has(e.id) && e.pin?.tag !== pins.get(e.id)!.tag;
@@ -937,12 +933,6 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
           manifest = { entries: manifest.entries.map(e => (stale(e) ? { ...e, pin: pins.get(e.id)! } : e)) };
           saveRecipe(path, manifest, ticks, choices);
         }
-        const all = [...r.tools.map(t => ({ ...t, name: t.label })), ...r.agents];
-        const n = (o: string) => all.filter(x => x.outcome === o).length;
-        installs = [
-          `Tools and agents: ${n("installed")} installed, ${n("failed")} failed, ${n("skipped")} skipped; the list is in ${resultsPath}`,
-          ...all.filter(x => x.outcome === "failed").map(x => dim(`${x.name} failed: ${x.note ?? "no reason given"}`)),
-        ];
       },
     });
   let imp = importOf(bring);
@@ -970,7 +960,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   let recipe = goldenRecipeFor(bring, opts.keys, { import: imp });
   const runLog = openRunLog(runLogPath(opts.statePath));
   runLog.note(`recipe ${imp.recipeHash} from ${path}`);
-  // Every frame the golden reports, this run's or the seal's after the hand-off, lands in the log for the process's life.
+  // Every frame the golden reports, the build's and the seal's, lands in the log for the process's life.
   const logged = (rt: Runtime): Runtime => {
     rt.events.on("golden.stage", e => {
       if (e.type === "golden.stage" && e.name === GOLDEN_NAME) runLog.stage(e.stage, e.detail);
@@ -1108,7 +1098,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const retry = opts.retry ?? DEFAULT_RETRY;
   stream.start();
   // From here a machine may be billing. The first signal ends the stage in flight and the builder with it; the
-  // handler comes off with the builder, and after the hand-off the host's own handler has the signals.
+  // handler comes off with the builder, and once init returns the host's own handler has the signals.
   const halt = new AbortController();
   let signalled: "SIGINT" | "SIGTERM" | undefined;
   let frozen: StageView | undefined;
@@ -1196,18 +1186,12 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   }
   stream.stop();
   off();
-  if (installs !== undefined) log.info(installs.join("\n"), out);
+  if (landed !== undefined) log.info(installsTally(landed, resultsPath).join("\n"), out);
 
   const flow: SignInFlow = { armed: false };
   // The relay names the builder's link this way; the line hook only gets the name.
   const builderTarget = `${builder.name} (builder)`;
-  const staged = stageLogins(offered, choices, ticks);
-  let outcomes: LoginOutcome[] | undefined;
-  let checklist = checklistFor(manifest, choices, ticks, cut);
-  // The page's seal stamps what each sign-in came to on the version; the served runtime carries that in.
-  const served: Runtime = { ...rt, golden: { ...rt.golden, seal: (id, o) => rt.golden.seal(id, { ...o, ...(outcomes !== undefined ? { logins: outcomes.map(r => ({ name: r.label, state: r.state })) } : {}) }) } };
-  const handle = await opts.host(served, builder, {
-    checklist: () => checklist,
+  const handle = await opts.host(rt, builder, {
     autoOpen: (id, url) => {
       if (id !== builder.id || !flow.armed || url === flow.openedUrl) return false;
       flow.armed = false;
@@ -1223,27 +1207,87 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       return true;
     },
   });
-  // A desktop builder keeps the checklist beside its live screen; a sandbox builder signs in here and hands the page what is left.
-  if (builder.screen === undefined) {
-    const skipWhy = interactive ? undefined : io.isTTY ? "--yes asks nothing; sign in from the app's terminal" : "no terminal to sign in from; use the app's terminal";
-    outcomes = await signInStage({
-      logins: staged,
-      dial: () => (opts.daemon ?? builderLink)(rt, builder),
-      terminal: { input: io.input, output: io.output },
-      ...(skipWhy !== undefined ? { skipWhy } : {}),
-      open: url => io.open(url),
-      flow,
-    });
-    const notes = importResultPath(opts.statePath);
-    if (noteLogins(notes, outcomes).replaced) log.warn(`${notes} could not be read; it was rewritten with the logins alone.`, out);
-    checklist = [...openLogins(staged, outcomes), ...secretLinesFor(manifest, ticks, cut)];
+  const dial = (): Promise<BuilderLink> => (opts.daemon ?? builderLink)(rt, builder);
+  const skipWhy = interactive ? undefined : io.isTTY ? "--yes asks nothing; sign in from the app's terminal" : "no terminal to sign in from; use the app's terminal";
+  const outcomes = await signInStage({
+    logins: stageLogins(offered, choices, ticks),
+    dial,
+    terminal: { input: io.input, output: io.output },
+    ...(skipWhy !== undefined ? { skipWhy } : {}),
+    open: url => io.open(url),
+    flow,
+  });
+  const skipSecretsWhy = interactive ? undefined : io.isTTY ? "--yes asks nothing; set them from the app's terminal" : "no terminal to paste into; set them from the app's terminal";
+  const secretOutcomes = await secretsStage({
+    cut: landed?.files?.cut ?? [],
+    dial,
+    input: io.input,
+    output: io.output,
+    ...(skipSecretsWhy !== undefined ? { skipWhy: skipSecretsWhy } : {}),
+    hide: value => runLog.hide(value),
+  });
+  if (noteOutcomes(resultsPath, { logins: outcomes, secrets: secretOutcomes }).replaced) log.warn(`${resultsPath} could not be read; it was rewritten with the logins and secrets alone.`, out);
+
+  const next = ((await rt.golden.get())?.head ?? 0) + 1;
+  card(`Ready to seal golden v${next}`, sealSummary(landed, outcomes, secretOutcomes, widthOf(io.output)), io.output);
+  const result: InitResult = { code: 0, handle, logins: outcomes, secrets: secretOutcomes };
+  const leave = async (code: number): Promise<InitResult> => {
+    await handle.close().catch((e: unknown) => log.error(`host close failed: ${e instanceof Error ? e.message : String(e)}`, out));
+    return { ...result, code, handle: undefined };
+  };
+  if (interactive) {
+    const go = await confirmPrompt({ message: `Seal this machine as golden v${next}?`, hint: "Enter seals: a snapshot, then a fork to prove it. No leaves the machine up.", initialValue: true, input: io.input, output: io.output });
+    if (isCancel(go) || !go) {
+      cancel(`Nothing was sealed. Builder ${builder.id} stays up at about $${opts.pricing.rateUsdPerHour(builder.size).toFixed(2)}/hr; wsp init --manifest ${path} attaches to it again, and the sweep stops it once it is six hours old.`, out);
+      return leave(1);
+    }
+  } else {
+    log.step(`Sealing golden v${next}. Taken as yes (${opts.yes ? "--yes" : "no terminal"}).`, out);
+  }
+  let sealed: Awaited<ReturnType<Runtime["golden"]["seal"]>> | undefined;
+  let error: unknown;
+  const logins = outcomes.map(r => ({ name: r.label, state: r.state }));
+  const view = await streamStages(rt, io, SEAL_STEPS, () => rt.golden.seal(builder.id, { logins }).then(r => (sealed = r), e => (error = e)), runLog.note);
+  if (sealed === undefined) {
+    const message = error instanceof Error ? error.message : String(error);
+    runLog.note(`failed: ${message}`);
+    if (view.failure === undefined) log.error(message, out);
+    log.step(logLine(), out);
+    outro("Seal failed and the builder is gone. Run wsp init again; the recipe is kept.", out);
+    return leave(1);
+  }
+  const version = sealed.version.version;
+  const kept = keptBuilder(await rt.golden.builders(), version);
+  log.success(
+    [
+      `Golden v${version} sealed.`,
+      ...(kept !== undefined ? [dim(`The builder stays up ten minutes (about $${opts.pricing.rateUsdPerHour(kept.size).toFixed(2)}/h, one of the account's machine slots) for one more change: stop wsp, run wsp init, and the golden updates on it.`)] : []),
+    ].join("\n"),
+    out,
+  );
+
+  if (version > 1) await retentionOffer({ rt, interactive, yes: opts.yes, input: io.input, output: io.output });
+
+  // Only the first seal ever forks a workspace; a rebuild leaves the existing ones on the version they came from.
+  const existing = await rt.workspaces.list();
+  if (existing.length > 0) {
+    log.step(`Your ${existing.length} workspace${existing.length === 1 ? " stays" : "s stay"} on the golden version ${existing.length === 1 ? "it was" : "they were"} forked from; upgrade ${existing.length === 1 ? "it" : "them"} from the app. New workspaces fork v${version}.`, out);
+  } else {
+    const forking = spin(io.output, `Forking your first workspace, ${FIRST_WORKSPACE}`, io.isTTY);
+    try {
+      const first = await handle.createWorkspace(FIRST_WORKSPACE);
+      forking.stop();
+      log.step(`Workspace ${first.name} (${first.id}) forked from golden v${version}.${first.notice !== undefined ? ` ${first.notice}` : ""}`, out);
+    } catch (e) {
+      forking.stop();
+      log.warn(`The first workspace could not be forked: ${e instanceof Error ? e.message : String(e)}. Create one from the app.`, out);
+    }
   }
   const url = `http://127.0.0.1:${handle.port}/`;
-  runLog.note(`handoff ${url}`);
-  await handoff(url, handle, io, interactive, checklist.length > 0, logLine(), out);
-  outro("This terminal reports the save.", out);
-  reportSeal(rt, io, opts.pricing.rateUsdPerHour(builder.size), logLine, runLog.note);
-  return { code: 0, handle, ...(outcomes !== undefined ? { logins: outcomes } : {}) };
+  runLog.note(`app ${url}`);
+  await openApp(url, handle, io, interactive, logLine(), out);
+  outro("wsp keeps serving the app from this terminal; Ctrl-C stops it.", out);
+  return result;
 }
 
 /** One stage stream around one runtime call; the frames it draws are the golden's, whatever the call. */
@@ -1264,59 +1308,49 @@ export async function streamStages(rt: Pick<Runtime, "events">, io: Pick<InitIO,
   return view;
 }
 
-/** After the hand-off the browser drives the seal; the terminal shows it as it happens. */
-function reportSeal(rt: Runtime, io: InitIO, rateUsdPerHour: number, logLine: () => string, sink: (line: string) => void): void {
-  let stream: StageStream | undefined;
-  const off = rt.events.on("golden.stage", e => {
-    if (e.type !== "golden.stage" || e.name !== GOLDEN_NAME) return;
-    if (!stream) {
-      stream = new StageStream(io.output, io.isTTY, SEAL_STEPS, sink);
-      stream.start();
-    }
-    stream.push({ type: "golden.stage", name: e.name, stage: e.stage, ...(e.detail !== undefined ? { detail: e.detail } : {}) });
-    if (!stream.finished) return;
-    const view = stream.stop();
-    off();
-    const out = { output: io.output };
-    if (stream.failed) {
-      log.error(`Seal failed and the builder is gone. Run wsp init again; the recipe is kept.\n${logLine()}`, out);
-    } else {
-      // The sealed frame's detail is the version, then a note after each semicolon: a leak, or that the builder is
-      // kept; under the account cap the seal kills it first and says nothing about keeping it.
-      const tail = view.steps.find(s => s.stage === "sealed")?.tail.at(-1);
-      const version = tail?.split(";")[0]?.trim();
-      const kept = tail?.includes("builder kept") === true;
-      log.success(
-        [
-          `Golden${version !== undefined && version !== "" ? ` ${version}` : ""} sealed. The app forks your first workspace; wsp keeps serving it here.`,
-          ...(kept ? [dim(`The builder stays up ten minutes (about $${rateUsdPerHour.toFixed(2)}/h, one of the account's machine slots) for one more change: stop wsp, run wsp init, and the golden updates on it.`)] : []),
-        ].join("\n"),
-        out,
-      );
-    }
-  });
+/** The tally after the build: how the tools and agents came out, each failure named with its reason, and where the list is. */
+function installsTally(landed: ImportResult, resultsPath: string): string[] {
+  const all = [...landed.tools.map(t => ({ ...t, name: t.label })), ...landed.agents];
+  const n = (o: string) => all.filter(x => x.outcome === o).length;
+  return [
+    `Tools and agents: ${n("installed")} installed, ${n("failed")} failed, ${n("skipped")} skipped; the list is in ${resultsPath}`,
+    ...all.filter(x => x.outcome === "failed").map(x => dim(`${x.name} failed: ${x.note ?? "no reason given"}`)),
+  ];
 }
 
-/** Three lines: the address, what to do there, and the keys (or the ssh forward when the address is remote). */
-async function handoff(url: string, handle: HostHandle, io: InitIO, interactive: boolean, checklist: boolean, logLine: string, out: { output: Writable }): Promise<void> {
-  const finish = checklist ? "Sign in where the checklist says, then save the golden." : "Save the golden there once the machine is the way you want it.";
-  if (!io.isTTY || overSsh(io.env)) {
-    const lines = [`Open ${url}`, finish];
+/** What the machine holds before the seal: the tools and agents as the import counted them, each sign-in
+ * with its state, each cut secret with its state. */
+function sealSummary(landed: ImportResult | undefined, logins: readonly LoginOutcome[], secrets: readonly SecretOutcome[], width: number): string[] {
+  const inner = width - CARD_FRAME;
+  const tools = landed?.tools ?? [];
+  const agents = landed?.agents ?? [];
+  const count = (rows: readonly { outcome: string }[]): string => {
+    const n = (o: string) => rows.filter(x => x.outcome === o).length;
+    return rows.length === 0 ? "none" : [`${n("installed")} installed`, ...(n("failed") > 0 ? [`${n("failed")} failed`] : []), ...(n("skipped") > 0 ? [`${n("skipped")} skipped`] : [])].join(", ");
+  };
+  const states = (rows: readonly string[][]): string[] => (rows.length === 0 ? ["none"] : table(rows));
+  const loginRows = logins.map(r => [r.label, r.state.replace(/-/g, " ")]);
+  const secretRows = secrets.map(r => [r.name, r.state === "set" ? `set on the machine${r.note !== undefined ? ` (${r.note})` : ""}` : r.state === "failed" ? `not set${r.note !== undefined ? ` (${r.note})` : ""}` : `skipped${r.note !== undefined ? ` (${r.note})` : ""}`]);
+  const section = (title: string, lines: readonly string[]): string[] => [title, ...lines.flatMap(l => wrap(`  ${l}`, inner, "    "))];
+  const installed = agents.filter(a => a.outcome === "installed").map(a => a.name);
+  return [
+    ...section("Tools", [count(tools)]),
+    ...section("Agents", [agents.length === 0 ? "none" : `${count(agents)}${installed.length > 0 ? `: ${installed.join(", ")}` : ""}`]),
+    ...section("Sign-ins", states(loginRows)),
+    ...section("Secrets", states(secretRows)),
+  ];
+}
+
+/** The app's address once the golden is sealed: opened here on a terminal the person is at, printed (with the ssh
+ * forward when the address is remote) under --yes, off a terminal or over ssh. */
+async function openApp(url: string, handle: HostHandle, io: InitIO, interactive: boolean, logLine: string, out: { output: Writable }): Promise<void> {
+  if (!interactive || overSsh(io.env)) {
+    const lines = [`Open ${url}`];
     if (overSsh(io.env)) lines.push(dim(`loopback address; forward it first: ssh -L ${handle.port}:127.0.0.1:${handle.port} <this host>`));
     lines.push(logLine);
     log.step(lines.join("\n"), out);
     return;
   }
   const opened = await io.open(url);
-  log.step([`${opened ? "Opened" : "Open"} ${url}`, finish, ...(interactive ? [helpLine([{ key: "c", does: "copy the address" }, { key: "enter", does: "continue" }], colourDepth(io.isTTY, io.env))] : []), logLine].join("\n"), out);
-  if (!interactive) return;
-  for (;;) {
-    const key = await readKey(io.input, io.output, ["c", "return"]);
-    if (key === "c") {
-      const ok = await io.copy(url);
-      io.output.write(`${dim(S_BAR)}  ${dim(ok ? "copied" : "no clipboard tool; copy it from the line above")}\n`);
-      continue;
-    }
-    return;
-  }
+  log.step([`${opened ? "Opened" : "Open"} ${url}`, logLine].join("\n"), out);
 }

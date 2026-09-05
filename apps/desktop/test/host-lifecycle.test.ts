@@ -95,7 +95,7 @@ describe("probeHost", () => {
   });
 
   it("recognises a running wsp host by its boot line", async () => {
-    const handle = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), keys: { anthropic: false }, port: 0, wsPort: 0 });
+    const handle = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
     try {
       expect(await probeHost(handle.port)).toBe("wsp");
     } finally {
@@ -154,7 +154,7 @@ describe("openHost", () => {
   });
 
   it("attaches to a wsp host already on the port and leaves it running when closed", async () => {
-    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), keys: { anthropic: false }, port: 0, wsPort: 0 });
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
     session = await open(existing.port, 0);
     expect(session.owned).toBe(false);
     expect(session.url).toBe(`http://127.0.0.1:${existing.port}`);
@@ -195,7 +195,7 @@ describe("openHost", () => {
   });
 
   it("attaches to the host named in host.lock when its pid is alive, whatever port it was asked for", async () => {
-    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), keys: { anthropic: false }, port: 0, wsPort: 0 });
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
     const lock = { pid: process.pid, port: existing.port, wsPort: existing.wsPort, startedAt: new Date().toISOString() };
     writeFileSync(join(home, "host.lock"), JSON.stringify(lock));
 
@@ -209,7 +209,7 @@ describe("openHost", () => {
   });
 
   it("ignores a host.lock whose pid is gone and starts its own host", async () => {
-    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), keys: { anthropic: false }, port: 0, wsPort: 0 });
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
     const stale = { pid: deadPid(), port: existing.port, wsPort: existing.wsPort, startedAt: "2026-09-01T00:00:00.000Z" };
     writeFileSync(join(home, "host.lock"), JSON.stringify(stale));
 
@@ -242,7 +242,7 @@ describe("locateHost", () => {
   });
 
   function fixture(): Promise<HostHandle> {
-    return startHost({ runtime: testRuntime(), webDir: fakeWebDir(), keys: { anthropic: false }, port: 0, wsPort: 0 });
+    return startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
   }
 
   /** A home with a lock naming the fixture, the way a host serving it leaves things. */

@@ -3,7 +3,6 @@
 // on loopback. There is no control plane; the Solari key is read here
 // and used only for direct calls from this process to the machine API.
 
-import { spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir, platform } from "node:os";
@@ -32,7 +31,6 @@ import { runInit, type InitIO } from "./init.js";
 import { recipePath } from "./init-recipe.js";
 import { confirmPrompt, passwordPrompt, type PromptOptions } from "./init-layout.js";
 import { TAGLINE, opening } from "./init-opening.js";
-import type { ChecklistItem } from "@wsp/protocol";
 import { systemOpener, type UrlOpener } from "./relay.js";
 import { startHost, type HostHandle } from "./server.js";
 
@@ -201,7 +199,7 @@ export function saveQuestion(home: string, keys: number): string {
   return home === DEFAULT_HOME ? `Save the ${what} so wsp stops asking?` : `Save the ${what} to ${join(home, ".env")} so wsp stops asking?`;
 }
 
-/** What every golden the wizard seals is made of: the harness install and its
+/** What every golden wsp init seals is made of: the harness install and its
  * smoke from the doctor, the daemon bundle deploy, and the loaded keys as envs. */
 export function goldenRecipe(
   keys: Pick<Keys, "anthropic">,
@@ -331,16 +329,6 @@ function takeLock(lockPath: string, statePath: string, ports: { port: number; ws
   return lock;
 }
 
-/** Runs a short-lived helper and reports whether it exited clean. */
-function runQuiet(cmd: string, args: string[], stdin?: string): Promise<boolean> {
-  return new Promise(resolve => {
-    const child = spawn(cmd, args, { stdio: [stdin === undefined ? "ignore" : "pipe", "ignore", "ignore"] });
-    child.on("error", () => resolve(false));
-    child.on("exit", code => resolve(code === 0));
-    if (stdin !== undefined) child.stdin?.end(stdin);
-  });
-}
-
 export function terminalInitIO(): InitIO {
   const os = platform();
   return {
@@ -349,11 +337,6 @@ export function terminalInitIO(): InitIO {
     isTTY: process.stdin.isTTY === true && process.stdout.isTTY === true,
     env: process.env,
     open: systemOpener(os),
-    copy: async text => {
-      if (os === "darwin") return runQuiet("pbcopy", [], text);
-      if (os === "win32") return runQuiet("clip", [], text);
-      return (await runQuiet("wl-copy", [], text)) || runQuiet("xclip", ["-selection", "clipboard"], text);
-    },
     signals: process,
     exit: code => process.exit(code),
   };
@@ -434,7 +417,6 @@ async function hostFor(
     statePath: string;
     webDir?: string;
     builder?: GoldenBuilderView;
-    checklist?: ChecklistItem[] | (() => ChecklistItem[]);
     openUrl?: UrlOpener;
     autoOpen?: (targetId: string, url: string) => boolean;
     openLine?: (workspace: string, hostname: string, url: string) => string;
@@ -450,9 +432,7 @@ async function hostFor(
       port: opts.port,
       wsPort: opts.wsPort,
       webDir: opts.webDir ?? defaultWebDir(),
-      keys: { anthropic: keys.anthropic !== undefined },
       ...(opts.builder !== undefined ? { builder: opts.builder } : {}),
-      ...(opts.checklist !== undefined ? { checklist: opts.checklist } : {}),
       ...(keys.anthropic !== undefined ? { workspaceEnvs: (golden: GoldenVersion) => claudeEnvs(keys.anthropic, golden) } : {}),
       ...(opts.openUrl !== undefined ? { openUrl: opts.openUrl } : {}),
       ...(opts.autoOpen !== undefined ? { autoOpen: opts.autoOpen } : {}),

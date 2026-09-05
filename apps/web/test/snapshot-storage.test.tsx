@@ -35,9 +35,6 @@ function fakeApi(storage: SnapshotStorage | null) {
       return () => listeners.delete(fn);
     },
     getGolden: async () => undefined,
-    prepareGolden: async () => { throw new Error("no wizard in this fixture"); },
-    sealGolden: async () => { throw new Error("no wizard in this fixture"); },
-    builderReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" as const }),
     snapshotStorage: vi.fn(async () => storage),

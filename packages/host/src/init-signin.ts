@@ -2,7 +2,7 @@
 // The signing-in stage of wsp init: a login copied to the builder is checked
 // there with the tool's own status command; each login chosen as "sign in on
 // the machine" runs in this terminal over a pty on the builder, and the same
-// status command then says whether it landed. The summary before the hand-off
+// status command then says whether it landed. The summary before the seal
 // offers the machine sign-in for a copied login the check refused, and a retry
 // (with the no-browser variant when the table has one) or a skip for a sign-in
 // that failed. What each login came to is written next to the import result so
@@ -18,7 +18,7 @@ import { GUTTER, ellipsize, table, widthOf } from "./init-layout.js";
 import { agentName } from "./init-recipe.js";
 import { readKey } from "./init-select.js";
 import { relayPty, runQuiet, type PtyLink, type RelayTerminal } from "./signin-relay.js";
-import { signInFor, signInWords, type SignIn } from "./signin-table.js";
+import { signInFor, type SignIn } from "./signin-table.js";
 
 export interface LoginOutcome {
   id: string;
@@ -154,8 +154,7 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
           r.note = `copied, but ${command} did not answer within ${minutes(statusMs)}`;
           return;
         }
-        // The shell's own "not found": the files are there and nothing on the machine can read them yet; the page's
-        // checklist says to install the tool, as it does for a sign-in whose tool is missing.
+        // The shell's own "not found": the files are there and nothing on the machine can read them yet.
         if (status.exitCode === 127) {
           r.command = command;
           r.exit = 127;
@@ -332,23 +331,9 @@ function toolOf(command: string): string {
   return command.split(" ").find(w => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w)) ?? command;
 }
 
-/** The logins still open after the stage, for the page's checklist: everything not proven signed in, each with what to
- * run there. A copied login nothing could check is left as it stands, unless its tool is missing: then the install is
- * what is left to do. */
-export function openLogins(logins: readonly ManifestEntry[], outcomes: readonly LoginOutcome[]): { label: string; command: string }[] {
-  return outcomes
-    .filter(r => r.state !== "signed-in" && (r.state !== "copied" || r.exit === 127))
-    .map(r => {
-      const entry = logins.find(l => l.id === r.id);
-      const words = entry === undefined ? "sign in as the tool asks" : signInWords(signInFor(agentName(entry)));
-      // The shell's 127: the page says to install the tool before running it.
-      return { label: r.label, command: r.exit === 127 && r.command !== undefined ? `install ${toolOf(r.command)}, then ${words}` : words };
-    });
-}
-
-/** Adds the logins' states to the import result file, the golden's notes; creates it when nothing was imported.
- * replaced says the file was there but could not be read, so the caller can say so. */
-export function noteLogins(path: string, outcomes: readonly LoginOutcome[]): { replaced: boolean } {
+/** Adds what the sign-in and secrets steps came to to the import result file, the golden's notes; creates it when
+ * nothing was imported. replaced says the file was there but could not be read, so the caller can say so. */
+export function noteOutcomes(path: string, outcomes: Record<string, unknown>): { replaced: boolean } {
   let existing: Record<string, unknown> = {};
   let replaced = false;
   if (existsSync(path)) {
@@ -360,7 +345,7 @@ export function noteLogins(path: string, outcomes: readonly LoginOutcome[]): { r
       replaced = true;
     }
   }
-  writeFileSync(path, `${JSON.stringify({ ...existing, logins: outcomes }, null, 2)}\n`);
+  writeFileSync(path, `${JSON.stringify({ ...existing, ...outcomes }, null, 2)}\n`);
   return { replaced };
 }
 

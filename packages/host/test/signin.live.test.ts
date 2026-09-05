@@ -122,7 +122,7 @@ describe.runIf(LIVE)("sign-in stage (live)", () => {
       openedHere.push(url);
       return real(url);
     };
-    const io: InitIO = { input, output, isTTY: true, env: {}, open: gatedOpen, copy: async () => true, signals: new EventEmitter(), exit: () => {} };
+    const io: InitIO = { input, output, isTTY: true, env: {}, open: gatedOpen, signals: new EventEmitter(), exit: () => {} };
 
     const hostLines: string[] = [];
     const notes: string[] = [];
@@ -164,7 +164,7 @@ describe.runIf(LIVE)("sign-in stage (live)", () => {
             if (!hooks.onLine(line)) hostLines.push(line);
           },
         });
-        return { port: 0, wsPort: 0, authToken: "", close: async () => relay?.close() };
+        return { port: 0, wsPort: 0, authToken: "", createWorkspace: async () => { throw new Error("no workspace in this live run"); }, close: async () => relay?.close() };
       },
     };
 

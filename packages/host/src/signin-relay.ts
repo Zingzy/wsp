@@ -227,9 +227,10 @@ export interface QuietRun {
 const STATUS_MARK = "WSP_STATUS";
 
 /** Runs one command on the builder with nothing shown: the output between the
- * echoed line and the exit marker, for the table's status check and nothing else. */
-export async function runQuiet(link: PtyLink, command: string, timeoutMs: number): Promise<QuietRun> {
-  const ptyId = ptyIdOf(await link.op("pty.create", { cols: 200, rows: 50, shell: "/bin/sh", env: { PS1: "" } }));
+ * echoed line and the exit marker, for the table's status check and the secrets
+ * step. `env` rides the pty's environment, where a value never reaches the echoed line. */
+export async function runQuiet(link: PtyLink, command: string, timeoutMs: number, env: Record<string, string> = {}): Promise<QuietRun> {
+  const ptyId = ptyIdOf(await link.op("pty.create", { cols: 200, rows: 50, shell: "/bin/sh", env: { PS1: "", ...env } }));
   let text = "";
   /** Index of the exit marker line in what arrived so far, -1 before it. */
   const markAtEnd = (): number => {

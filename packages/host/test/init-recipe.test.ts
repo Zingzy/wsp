@@ -6,7 +6,6 @@ import { type ManifestEntry, parseManifest } from "@wsp/collect";
 import { afterEach, describe, expect, it } from "vitest";
 import type { GoldenImport } from "@wsp/runtime";
 import {
-  checklistFor,
   goldenRecipeFor,
   hasChoices,
   initialChoice,
@@ -17,7 +16,6 @@ import {
   loadManifest,
   recipePath,
   saveRecipe,
-  signInCommand,
 } from "../src/init-recipe.js";
 import { FIXTURE, byId } from "./init-fixture.js";
 
@@ -50,18 +48,6 @@ describe("login choices", () => {
     expect(initialChoice({ ...byId("logins/claude"), choice: "copy" })).toBe("copy");
   });
 
-  it("words each login from the sign-in table: the command, what to do instead, or a plain ask", () => {
-    expect(signInCommand(byId("logins/gh"))).toBe("gh auth login");
-    expect(signInCommand(byId("logins/claude"))).toBe("claude auth login");
-    expect(signInCommand({ ...byId("logins/gh"), id: "logins/kube" })).toBe("kubectl has no sign-in; copy the kubeconfig instead");
-    expect(signInCommand({ ...byId("logins/gh"), id: "logins/brand-new" })).toBe("sign in as the tool asks");
-  });
-
-  it("the checklist is exactly the logins chosen as sign in on the machine", () => {
-    const choices = new Map([["logins/gh", "machine"], ["logins/claude", "skip"]] as const);
-    expect(checklistFor(FIXTURE, choices, new Set())).toEqual([{ label: "GitHub CLI login", command: "gh auth login" }]);
-    expect(checklistFor(FIXTURE, new Map([["logins/claude", "machine"]]), new Set())).toEqual([{ label: "Claude Code login", command: "claude auth login" }]);
-  });
 });
 
 describe("rows the plan refuses by name", () => {
@@ -111,36 +97,6 @@ describe("consent rows", () => {
     expect(initialChoice({ ...token, bring: true, choice: "machine" })).toBe("skip");
     expect(initialTicks(plain)).toBe(false);
     expect(initialTicks({ ...plain, bring: true })).toBe(true);
-  });
-
-  it("a credential-shaped row never joins the sign-in checklist, whatever its answer", () => {
-    const manifest = { entries: [...FIXTURE.entries, token] };
-    expect(checklistFor(manifest, new Map([["everything/.demo-token", "machine"]]), new Set())).toEqual([]);
-    expect(checklistFor(manifest, new Map([["everything/.demo-token", "copy"]]), new Set(["everything/.demo-token"]))).toEqual([]);
-  });
-
-  it("a ticked rc file whose secret exports were cut adds one set-on-the-machine line naming them; unticked it adds none", () => {
-    const zshrc = { ...byId("shell/zshrc"), secrets: ["A_KEY", "B_TOKEN"] };
-    const manifest = { entries: [...FIXTURE.entries.filter(e => e.id !== "shell/zshrc"), zshrc] };
-    expect(checklistFor(manifest, new Map([["logins/gh", "machine"]]), new Set(["shell/zshrc"]))).toEqual([
-      { label: "GitHub CLI login", command: "gh auth login" },
-      { label: "~/.zshrc", command: "set A_KEY, B_TOKEN on the machine" },
-    ]);
-    expect(checklistFor(manifest, new Map(), new Set())).toEqual([]);
-    expect(parseManifest({ entries: [zshrc] }).entries[0]).toMatchObject({ secrets: ["A_KEY", "B_TOKEN"] });
-  });
-
-  it("when the pack reports what it cut, the checklist names come from there, not from the recipe", () => {
-    const bare = { ...byId("shell/zshrc") };
-    const manifest = { entries: [...FIXTURE.entries.filter(e => e.id !== "shell/zshrc"), bare] };
-    const cut = [{ path: "~/.zshrc", names: ["NEW_TOKEN"] }, { path: "~/.config/fish/config.fish", names: ["FISH_KEY"] }];
-    expect(checklistFor(manifest, new Map(), new Set(["shell/zshrc"]), cut)).toEqual([
-      { label: "~/.zshrc", command: "set NEW_TOKEN on the machine" },
-      { label: "~/.config/fish/config.fish", command: "set FISH_KEY on the machine" },
-    ]);
-    const stale = { ...byId("shell/zshrc"), secrets: ["OLD_KEY"] };
-    expect(checklistFor({ entries: [stale] }, new Map(), new Set(["shell/zshrc"]), [])).toEqual([]);
-    expect(checklistFor({ entries: [stale] }, new Map(), new Set(["shell/zshrc"]))).toEqual([{ label: "~/.zshrc", command: "set OLD_KEY on the machine" }]);
   });
 
   it("the schema takes a choice on a consent row and refuses one on a plain row, and keeps role, files and mtime to the everything rung", () => {

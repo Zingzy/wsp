@@ -33,7 +33,6 @@ function fakeApi(workspaces: WorkspaceView[]): Api {
     startSession: async o => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
     daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
-    builderReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
     sessionHistory: async () => [],
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     snapshotStorage: async () => null,
@@ -41,8 +40,6 @@ function fakeApi(workspaces: WorkspaceView[]): Api {
     listSessions: async () => [],
     subscribe: () => () => {},
     getGolden: async () => manifest,
-    prepareGolden: async () => { throw new Error("no wizard in this fixture"); },
-    sealGolden: async () => { throw new Error("no wizard in this fixture"); },
   };
 }
 

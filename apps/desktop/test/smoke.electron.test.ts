@@ -53,7 +53,7 @@ function testRuntime(): Runtime {
 }
 
 function fixtureHost(): Promise<HostHandle> {
-  return startHost({ runtime: testRuntime(), webDir: fakeWebDir(), keys: { anthropic: false }, port: 0, wsPort: 0 });
+  return startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
 }
 
 /** A pid that was real a moment ago and is not alive now. */

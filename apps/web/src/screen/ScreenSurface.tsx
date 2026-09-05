@@ -12,7 +12,7 @@ import { Spinner } from "../components/ui/spinner.js";
 import { cn } from "../lib/utils.js";
 import { useStatus } from "../protocol/store.js";
 
-// The wizard injects the builder's stream; a workspace's rides its status.
+// A workspace's stream rides its status; a caller with the URL in hand passes it.
 function resolveStreamUrl(status: WorkspaceStatus | null, injected: string | undefined): string | null {
   return injected || status?.screen?.streamUrl || null;
 }

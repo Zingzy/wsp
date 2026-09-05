@@ -7,11 +7,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type LoginChoice, type Manifest, type ManifestEntry, type Rung, parseManifest } from "@wsp/collect";
 import { neverCopied, type RecipeDigest } from "@wsp/engine";
-import type { ChecklistItem } from "@wsp/protocol";
 import type { GoldenImport, GoldenRecipe, Machine } from "@wsp/runtime";
 import type { Keys } from "./cli.js";
 import { GUEST_ENVS, claudeEnvs } from "./doctor.js";
-import { signInFor, signInWords } from "./signin-table.js";
 
 export const RUNG_TITLE: Record<Rung, string> = {
   identity: "Identity",
@@ -79,35 +77,6 @@ export function initialChoice(e: ManifestEntry): LoginChoice {
   if (!isTickable(e)) return "machine";
   if (e.bring !== undefined) return e.bring ? "copy" : "machine";
   return e.default === "bring" ? "copy" : "machine";
-}
-
-/** The words the desktop builder's checklist shows for a login: the table's command, or what to do instead. */
-export function signInCommand(e: ManifestEntry): string {
-  return signInWords(signInFor(agentName(e)));
-}
-
-
-/** The browser's checklist: the sign-ins the person chose to do on the machine, then one line per rc
- * file that lost its secret exports, naming what to set there. The names come from what the pack cut
- * when it ran; the recipe's own list stands in only when nothing was packed this run. */
-export function checklistFor(
-  manifest: Manifest,
-  choices: ReadonlyMap<string, string>,
-  ticks: ReadonlySet<string>,
-  cut?: readonly { path: string; names: readonly string[] }[],
-): ChecklistItem[] {
-  const signIns = manifest.entries
-    .filter(e => e.rung === "logins" && choices.get(e.id) === "machine")
-    .map(e => ({ label: e.label, command: signInCommand(e) }));
-  return [...signIns, ...secretLinesFor(manifest, ticks, cut)];
-}
-
-/** The set-on-the-machine lines alone: they stay on the page after the sign-in stage has run its logins. */
-export function secretLinesFor(manifest: Manifest, ticks: ReadonlySet<string>, cut?: readonly { path: string; names: readonly string[] }[]): ChecklistItem[] {
-  const line = (label: string, names: readonly string[]): ChecklistItem => ({ label, command: `set ${names.join(", ")} on the machine` });
-  return cut !== undefined
-    ? cut.filter(c => c.names.length > 0).map(c => line(c.path, c.names))
-    : manifest.entries.filter(e => ticks.has(e.id) && e.secrets !== undefined && e.secrets.length > 0).map(e => line(e.label, e.secrets!));
 }
 
 /** A login that belongs to an agent is only offered when that agent comes along. */

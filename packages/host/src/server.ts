@@ -3,8 +3,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
-import type { ChecklistItem } from "@wsp/protocol";
-import { describeAge, serveRuntime, type GoldenBuilderView, type GoldenVersion, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
+import { describeAge, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
 import { describeStorage } from "./storage.js";
 
@@ -12,20 +11,12 @@ import { describeStorage } from "./storage.js";
 // implementation); re-exported so host consumers keep their imports.
 export type { ReachState, ReachStatus, WorkspaceStatus } from "@wsp/runtime";
 
-/** Which keys the host loaded. Flags only: the page never sees a value. */
-export interface KeyFlags {
-  anthropic: boolean;
-}
-
 export interface HostOptions {
   runtime: Runtime;
   /** The built web app: index.html plus its assets. */
   webDir: string;
-  keys: KeyFlags;
-  /** The builder wsp init prepared; the page opens on its terminal for the sign-ins and the save. */
+  /** The builder wsp init prepared; the callback relay links to it for the sign-ins run there. */
   builder?: GoldenBuilderView;
-  /** The sign-ins still to do on that machine, each with its command; a function is read on every page load. */
-  checklist?: ChecklistItem[] | (() => ChecklistItem[]);
   /** HTTP port for the app (0 picks a free one). Default 4400. */
   port?: number;
   /** Port for serveRuntime's WS (0 picks a free one). Default 4410. */
@@ -52,6 +43,8 @@ export interface HostHandle {
   port: number;
   wsPort: number;
   authToken: string;
+  /** Forks the golden's head into a new workspace, with the envs and labels the app's own create gives it. */
+  createWorkspace(name: string): Promise<CreatedWorkspace>;
   close(): Promise<void>;
 }
 
@@ -78,9 +71,6 @@ const CONTENT_TYPES: Record<string, string> = {
 interface Boot {
   wsPort: number;
   token: string;
-  keys: KeyFlags;
-  builder?: GoldenBuilderView;
-  checklist?: ChecklistItem[];
 }
 
 function loadPage(webDir: string, boot: Boot): string {
@@ -171,6 +161,12 @@ async function sweepOrphans(rt: Runtime, log: (line: string) => void, listSpared
   }
 }
 
+class NoGoldenError extends Error {
+  constructor() {
+    super("no golden image yet; run wsp init first");
+  }
+}
+
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
@@ -205,31 +201,33 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     await relay.close();
     throw e;
   }
-  // Rendered per request: the checklist can change while the host runs (wsp init's sign-in stage).
-  const page = (): string => {
-    const checklist = typeof opts.checklist === "function" ? opts.checklist() : opts.checklist;
-    return loadPage(webDir, {
-      wsPort: rtServer.port,
-      token: authToken,
-      keys: opts.keys,
-      ...(opts.builder !== undefined ? { builder: opts.builder } : {}),
-      ...(checklist !== undefined ? { checklist } : {}),
-    });
-  };
+  let page: string;
   try {
-    page();
+    page = loadPage(webDir, { wsPort: rtServer.port, token: authToken });
   } catch (e) {
     await relay.close();
     await rtServer.close();
     throw e;
   }
 
+  const createWorkspace = async (name: string): Promise<CreatedWorkspace> => {
+    const manifest = await rt.golden.get();
+    const head = manifest?.versions.find(v => v.version === manifest.head);
+    if (!head) throw new NoGoldenError();
+    return rt.workspaces.create({
+      golden: head.snapshotId,
+      name,
+      ...(opts.workspaceEnvs !== undefined ? { envs: opts.workspaceEnvs(head) } : {}),
+      labels: { wsp: "1", "wsp-host": "1", createdAt: new Date().toISOString() },
+    });
+  };
+
   const server = createServer((req, res) => {
     void (async () => {
       const path = new URL(req.url ?? "/", "http://localhost").pathname;
       if (req.method === "GET" && path === "/") {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-        res.end(page());
+        res.end(page);
         return;
       }
       if (req.method === "GET" && path === "/api/workspaces") {
@@ -243,18 +241,15 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
           sendJson(res, 400, { error: "a workspace needs a name" });
           return;
         }
-        const manifest = await rt.golden.get();
-        const head = manifest?.versions.find(v => v.version === manifest.head);
-        if (!head) {
-          sendJson(res, 409, { error: "no golden image yet; build one first (wspx golden build)" });
+        let created: CreatedWorkspace;
+        try {
+          created = await createWorkspace(name);
+        } catch (e) {
+          if (!(e instanceof NoGoldenError)) throw e;
+          sendJson(res, 409, { error: e.message });
           return;
         }
-        const { notice, ...workspace } = await rt.workspaces.create({
-          golden: head.snapshotId,
-          name,
-          ...(opts.workspaceEnvs !== undefined ? { envs: opts.workspaceEnvs(head) } : {}),
-          labels: { wsp: "1", "wsp-host": "1", createdAt: new Date().toISOString() },
-        });
+        const { notice, ...workspace } = created;
         sendJson(res, 200, { workspace, ...(notice !== undefined ? { notice } : {}) });
         return;
       }
@@ -305,6 +300,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     port,
     wsPort: rtServer.port,
     authToken,
+    createWorkspace,
     close: async () => {
       clearInterval(reapTimer);
       await relay.close();

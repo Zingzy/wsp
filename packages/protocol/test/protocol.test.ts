@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   Capabilities,
-  ChecklistItem,
   GoldenVersion,
   DaemonErrorResponse,
   DaemonEvent,
@@ -449,12 +448,5 @@ describe("golden version logins", () => {
     expect(GoldenVersion.parse({ ...base, logins })).toEqual({ ...base, logins });
     expect(GoldenVersion.parse(base).logins).toBeUndefined();
     expect(() => GoldenVersion.parse({ ...base, logins: [{ name: "x", state: "done" }] })).toThrow();
-  });
-});
-
-describe("checklist item", () => {
-  it("is the one shape the host's boot payload and the page share: a label and a command", () => {
-    expect(ChecklistItem.parse({ label: "GitHub CLI login", command: "gh auth login" })).toEqual({ label: "GitHub CLI login", command: "gh auth login" });
-    expect(() => ChecklistItem.parse({ label: "x" })).toThrow();
   });
 });

@@ -42,7 +42,6 @@ function fakeApi(workspaces: WorkspaceView[], portReach: Api["portReach"] = mint
     capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true }),
     portReach,
     daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
-    builderReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
     startSession: async o => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
     sessionHistory: async () => [],
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
@@ -51,8 +50,6 @@ function fakeApi(workspaces: WorkspaceView[], portReach: Api["portReach"] = mint
     listSessions: async () => [],
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
     getGolden: async () => undefined,
-    prepareGolden: async () => { throw new Error("no wizard in this fixture"); },
-    sealGolden: async () => { throw new Error("no wizard in this fixture"); },
   };
   const emit = (e: EventUnion) => act(() => { for (const fn of [...listeners]) fn(e); });
   return { api, emit };
