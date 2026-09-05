@@ -5,19 +5,30 @@ import { fakeHost } from "./fake-host.js";
 
 describe("editors", () => {
   it.each([
-    ["~/.config/nvim/init.lua", "editors/nvim", ["~/.config/nvim"]],
-    ["~/.config/helix/config.toml", "editors/helix", ["~/.config/helix"]],
-    ["~/.vimrc", "editors/vim", ["~/.vimrc"]],
-    ["~/.vim/vimrc", "editors/vim", ["~/.vim/vimrc"]],
-    ["~/.config/emacs/init.el", "editors/emacs", ["~/.config/emacs"]],
-    ["~/.emacs.d/init.el", "editors/emacs", ["~/.emacs.d/init.el"]],
-    ["~/.config/zed/settings.json", "editors/zed", ["~/.config/zed"]],
-  ])("%s is offered as %s", async (file, id, paths) => {
+    ["~/.config/nvim/init.lua", "editors/nvim", "neovim, installed with your config", ["~/.config/nvim"]],
+    ["~/.config/helix/config.toml", "editors/helix", "helix, installed with your config", ["~/.config/helix"]],
+    ["~/.vimrc", "editors/vim", "vim, installed with your config", ["~/.vimrc"]],
+    ["~/.vim/vimrc", "editors/vim", "vim, installed with your config", ["~/.vim/vimrc"]],
+    ["~/.config/emacs/init.el", "editors/emacs", "emacs, installed with your config", ["~/.config/emacs"]],
+    ["~/.emacs.d/init.el", "editors/emacs", "emacs, installed with your config", ["~/.emacs.d/init.el"]],
+  ])("%s is offered as %s, ticked, and the label says the editor is installed", async (file, id, label, paths) => {
     const rows = await detectEditors(fakeHost({ files: { [file]: 10 } }));
-    expect(rows).toEqual([{ rung: "editors", id, label: expect.any(String), paths, bytes: 10, default: "bring" }]);
+    expect(rows).toEqual([{ rung: "editors", id, label, paths, bytes: 10, default: "bring" }]);
   });
 
-  it("VS Code on macOS: user settings from Library, extensions one row each, code tunnel and Remote SSH unticked", async () => {
+  it("a terminal editor on PATH with no config is offered as an install alone", async () => {
+    const rows = await detectEditors(fakeHost({ which: ["nvim", "hx"] }));
+    expect(rows).toEqual([
+      { rung: "editors", id: "editors/nvim", label: "neovim, installed", paths: [], bytes: 0, default: "bring" },
+      { rung: "editors", id: "editors/helix", label: "helix, installed", paths: [], bytes: 0, default: "bring" },
+    ]);
+  });
+
+  it("zed config is not offered: nothing on the machine reads it", async () => {
+    expect(await detectEditors(fakeHost({ files: { "~/.config/zed/settings.json": 10 }, which: ["zed"] }))).toEqual([]);
+  });
+
+  it("VS Code on macOS: settings.json alone from Library, unticked; extensions one row each, unticked, under a group that says what they are for", async () => {
     const host = fakeHost({
       files: {
         "~/Library/Application Support/Code/User/settings.json": 2000,
@@ -30,15 +41,9 @@ describe("editors", () => {
     });
     const rows = await detectEditors(host);
     expect(rows).toEqual([
-      {
-        rung: "editors", id: "editors/vscode", label: "VS Code settings, keybindings, snippets",
-        paths: ["~/Library/Application Support/Code/User/settings.json", "~/Library/Application Support/Code/User/keybindings.json", "~/Library/Application Support/Code/User/snippets"],
-        bytes: 2400, default: "bring",
-      },
-      { rung: "editors", id: "editors/vscode-ext/ms-python.python", label: "ms-python.python", group: "VS Code extensions", paths: [], bytes: 0, default: "bring" },
-      { rung: "editors", id: "editors/vscode-ext/esbenp.prettier-vscode", label: "esbenp.prettier-vscode", group: "VS Code extensions", paths: [], bytes: 0, default: "bring" },
-      { rung: "editors", id: "editors/code-tunnel", label: "VS Code remote access (code tunnel)", paths: [], bytes: 0, default: "skip" },
-      { rung: "editors", id: "editors/remote-ssh", label: "Remote SSH (open the machine from VS Code or Cursor)", paths: [], bytes: 0, default: "skip" },
+      { rung: "editors", id: "editors/vscode", label: "VS Code settings, for VS Code over SSH", paths: ["~/Library/Application Support/Code/User/settings.json"], bytes: 2000, default: "skip" },
+      { rung: "editors", id: "editors/vscode-ext/ms-python.python", label: "ms-python.python", group: "VS Code extensions, for VS Code over SSH", paths: [], bytes: 0, default: "skip" },
+      { rung: "editors", id: "editors/vscode-ext/esbenp.prettier-vscode", label: "esbenp.prettier-vscode", group: "VS Code extensions, for VS Code over SSH", paths: [], bytes: 0, default: "skip" },
     ]);
   });
 
@@ -50,30 +55,16 @@ describe("editors", () => {
       exec: { "cursor --list-extensions": "anysphere.cursorpyright\n" },
     });
     const rows = await detectEditors(host);
-    expect(rows.map(r => [r.id, r.paths, r.group])).toEqual([
-      ["editors/vscode", ["~/.config/Code/User/settings.json"], undefined],
-      ["editors/cursor", ["~/.config/Cursor/User/settings.json"], undefined],
-      ["editors/cursor-ext/anysphere.cursorpyright", [], "Cursor extensions"],
-      ["editors/remote-ssh", [], undefined],
+    expect(rows.map(r => [r.id, r.label, r.paths, r.group])).toEqual([
+      ["editors/vscode", "VS Code settings, for VS Code over SSH", ["~/.config/Code/User/settings.json"], undefined],
+      ["editors/cursor", "Cursor settings, for Cursor over SSH", ["~/.config/Cursor/User/settings.json"], undefined],
+      ["editors/cursor-ext/anysphere.cursorpyright", "anysphere.cursorpyright", [], "Cursor extensions, for Cursor over SSH"],
     ]);
   });
 
-  it.each([
-    ["cursor on PATH", { which: ["cursor"] }],
-    ["Cursor settings without the binary", { files: { "~/Library/Application Support/Cursor/User/settings.json": 10 } }],
-  ])("Remote SSH is offered unticked with %s", async (_name, laptop) => {
-    const rows = await detectEditors(fakeHost(laptop));
-    expect(rows.at(-1)).toEqual({ rung: "editors", id: "editors/remote-ssh", label: "Remote SSH (open the machine from VS Code or Cursor)", paths: [], bytes: 0, default: "skip" });
-  });
-
-  it("Remote SSH needs VS Code or Cursor; neovim alone does not get it", async () => {
-    const rows = await detectEditors(fakeHost({ files: { "~/.config/nvim/init.lua": 10 }, which: ["tailscale"] }));
-    expect(rows.map(r => r.id)).toEqual(["editors/nvim", "editors/tailscale"]);
-  });
-
-  it("tailscale on the laptop offers the tailnet as an unticked option", async () => {
-    const rows = await detectEditors(fakeHost({ which: ["tailscale"] }));
-    expect(rows).toEqual([{ rung: "editors", id: "editors/tailscale", label: "Tailscale (join the machine to your tailnet)", paths: [], bytes: 0, default: "skip" }]);
+  it("code tunnel, Tailscale and Remote SSH are not offered: nothing on the machine acts on them", async () => {
+    const rows = await detectEditors(fakeHost({ files: { "~/Library/Application Support/Cursor/User/settings.json": 10 }, which: ["code", "cursor", "tailscale"] }));
+    expect(rows.map(r => r.id)).toEqual(["editors/cursor"]);
   });
 
   it("parses an extension listing, dropping blank and warning lines", () => {

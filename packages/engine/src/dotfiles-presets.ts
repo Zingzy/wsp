@@ -62,7 +62,7 @@ const STARSHIP: PinnedBinary = {
   },
 };
 
-const APT = (pkg: string, cmd = pkg): string =>
+export const APT = (pkg: string, cmd = pkg): string =>
   `command -v ${cmd} >/dev/null 2>&1 || { apt-get update -qq; apt-get install -y -qq ${pkg}; }`;
 
 export const DOTFILES_PRESETS = {

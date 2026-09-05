@@ -10,7 +10,7 @@ import type { Readable, Writable } from "node:stream";
 import { styleText } from "node:util";
 import { Prompt, isCancel } from "@clack/core";
 import { S_BAR, S_STEP_ACTIVE, S_STEP_CANCEL, S_STEP_SUBMIT } from "@clack/prompts";
-import { GUTTER, S_BAR_FOCUS, S_BAR_FOCUS_END, colourDepth, ellipsize, helpLine, isTTY, rowsOf, summarize, viewport, widthOf, type HelpKey } from "./init-layout.js";
+import { GUTTER, S_BAR_FOCUS, S_BAR_FOCUS_END, colourDepth, ellipsize, helpLine, isTTY, rowsOf, summarize, viewport, widthOf, wrap, type HelpKey } from "./init-layout.js";
 
 export interface SelectItem {
   id: string;
@@ -46,6 +46,8 @@ export interface RungSelectOptions {
   initial: ReadonlySet<string>;
   /** Current answer per row that has choices. */
   initialChoices?: ReadonlyMap<string, string>;
+  /** Plain lines under the title, before the search: what the screen is for, when the rows alone do not say. */
+  intro?: string[];
   /** Lines under the Selected line, rebuilt from the current ticks. */
   footer?: (ticks: ReadonlySet<string>) => string[];
   /** Rows the detail pane keeps for the highlighted item; two unless a screen has more to say. */
@@ -395,14 +397,16 @@ class RungPrompt extends Prompt<Set<string>> {
     const at = entries[this.cursor];
     const detail = this.detail(at);
     const footer = this.o.footer?.(this.ticks()) ?? [];
+    const intro = (this.o.intro ?? []).flatMap(line => wrap(line, width - EDGE));
     // One row is left for the terminal's cursor line; a list that does not fit gives two more rows to the arrows.
-    const room = rowsOf(this.o.output) - 1 - FIXED_LINES - detail.length - footer.length;
+    const room = rowsOf(this.o.output) - 1 - FIXED_LINES - intro.length - detail.length - footer.length;
     const { start, end } = viewport(entries.length, this.cursor, entries.length <= room ? entries.length : room - 2);
     const cols = this.columns(width);
     const bar = dim(S_BAR_FOCUS);
 
     const lines: string[] = [];
     lines.push(`${styleText("cyan", S_STEP_ACTIVE)}  ${styleText("cyan", this.o.title)}${counter}${spread ? `${GUTTER}${dim(answer)}` : ""}`);
+    for (const line of intro) lines.push(`${bar}  ${dim(line)}`);
     lines.push(`${bar}  ${dim("search")}  ${this.userInput}${styleText("inverse", " ")}`);
     if (this.o.items.length === 0) lines.push(`${bar}  ${dim("nothing found")}`);
     else if (entries.length === 0) lines.push(`${bar}  ${dim("no match")}`);

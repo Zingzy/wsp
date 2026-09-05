@@ -10,7 +10,7 @@ export const FIXTURE: Manifest = {
     { rung: "identity", id: "identity/ssh-key", label: "~/.ssh/id_ed25519", paths: ["~/.ssh/id_ed25519"], bytes: 400, default: "skip", reason: "private key, never copied" },
     { rung: "shell", id: "shell/zshrc", label: "~/.zshrc", paths: ["~/.zshrc"], bytes: 3000, default: "bring" },
     { rung: "shell", id: "shell/starship", label: "starship prompt", paths: ["~/.config/starship.toml"], bytes: 900, default: "bring" },
-    { rung: "editors", id: "editors/nvim", label: "neovim config", paths: ["~/.config/nvim"], bytes: 120_000, default: "bring" },
+    { rung: "editors", id: "editors/nvim", label: "neovim, installed with your config", paths: ["~/.config/nvim"], bytes: 120_000, default: "bring" },
     { rung: "toolchains", id: "toolchains/mise", label: "mise pins", paths: ["~/.config/mise/config.toml"], bytes: 300, default: "bring" },
     { rung: "tools", id: "tools/brew/gh", label: "gh", group: "Homebrew", paths: ["Brewfile"], bytes: 0, default: "bring" },
     { rung: "tools", id: "tools/brew/jq", label: "jq", group: "Homebrew", paths: ["Brewfile"], bytes: 0, default: "bring" },

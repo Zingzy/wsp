@@ -7,6 +7,7 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { RecipeDigest } from "@wsp/protocol";
+import { APT, PRELUDE } from "./dotfiles-presets.js";
 
 export type { RecipeDigest };
 
@@ -182,7 +183,7 @@ const KEYCHAIN: Record<string, Omit<PlannedSecret, "id" | "service">> = {
 };
 
 export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOptions): FilesPlan {
-  const rewrites = [...(opts.rewrites ?? []), ...(opts.platform === "darwin" ? MAC_REWRITES : [])];
+  const rewrites = [...(opts.rewrites ?? []), ...remoteEditorRewrites(opts.platform), ...(opts.platform === "darwin" ? MAC_REWRITES : [])];
   // A prefix rewrite also moves the directory itself when a row names it bare.
   const rewrite = (rel: string): string => {
     for (const [from, to] of rewrites) {
@@ -299,7 +300,7 @@ export type ToolManager = "brew" | "npm" | "pnpm" | "bun" | "uv" | "pipx" | "car
 export interface ToolInstall {
   id: string;
   label: string;
-  manager: ToolManager;
+  manager: ToolManager | EditorSource;
   /** One bash -c script; exits non-zero on failure. */
   cmd: string;
   /** The install this one needs on the machine first; when that one did not install, this is skipped. */
@@ -548,6 +549,119 @@ export function toolInstallsFor(entries: readonly RecipeEntry[]): ToolsPlan {
     }
   }
   return { installs, skipped, brewfile: brew.text };
+}
+
+// --- editors -----------------------------------------------------------------
+
+/** How an editors row gets onto the machine: a distro package, a pinned release tarball, or a list file for the person. */
+export type EditorSource = "apt" | "release" | "list";
+
+/** Helix by its release tarball (https://github.com/helix-editor/helix/releases), hashed at pin time; the
+ * release publishes no sums file. The tarball carries the runtime directory beside the binary. */
+export const HELIX = {
+  version: "25.07.1",
+  sha256: {
+    x86_64: "3f08e63ecd388fff657ad39722f88bb03dcf326f1f2da2700d99e1dc40ab2e8b",
+    aarch64: "ce23fa8d395e633e3e54c052012f11965d91d8d5c2bfa659685f50430b4f8175",
+  },
+} as const;
+
+const HELIX_INSTALL = [
+  "if ! command -v hx >/dev/null 2>&1; then",
+  "  command -v xz >/dev/null 2>&1 || { apt-get update -qq; apt-get install -y -qq xz-utils; }",
+  '  arch="$(uname -m)"',
+  '  case "$arch" in',
+  `    x86_64) pkg=helix-${HELIX.version}-x86_64-linux.tar.xz sha=${HELIX.sha256.x86_64} ;;`,
+  `    aarch64) pkg=helix-${HELIX.version}-aarch64-linux.tar.xz sha=${HELIX.sha256.aarch64} ;;`,
+  '    *) echo "unsupported arch: $arch" >&2; exit 1 ;;',
+  "  esac",
+  `  curl -fsSL -o "/tmp/$pkg" "https://github.com/helix-editor/helix/releases/download/${HELIX.version}/$pkg"`,
+  '  echo "$sha  /tmp/$pkg" | sha256sum -c - >/dev/null',
+  "  rm -rf /opt/helix && mkdir -p /opt/helix",
+  '  tar -xJf "/tmp/$pkg" -C /opt/helix --strip-components=1',
+  "  ln -sfn /opt/helix/hx /usr/local/bin/hx",
+  '  rm -f "/tmp/$pkg"',
+  "fi",
+].join("\n");
+
+const APT_EDITORS: Record<string, { name: string; pkg: string; bin: string }> = {
+  nvim: { name: "neovim", pkg: "neovim", bin: "nvim" },
+  vim: { name: "vim", pkg: "vim", bin: "vim" },
+  emacs: { name: "emacs", pkg: "emacs-nox", bin: "emacs" },
+};
+
+export interface RemoteEditor {
+  name: string;
+  /** The remote server's data directory under the guest home. */
+  dir: string;
+  /** The command the editor's own terminal has, which installs onto the remote. */
+  cli: string;
+}
+
+/** The editors that open a machine over SSH through a server of their own on it; their rows carry what that server reads. */
+const REMOTE_EDITORS: Record<string, RemoteEditor & { userDir: { darwin: string; linux: string } }> = {
+  vscode: { name: "VS Code", dir: ".vscode-server", cli: "code", userDir: { darwin: "Library/Application Support/Code/User", linux: ".config/Code/User" } },
+  cursor: { name: "Cursor", dir: ".cursor-server", cli: "cursor", userDir: { darwin: "Library/Application Support/Cursor/User", linux: ".config/Cursor/User" } },
+};
+
+/** The remote editor an editors row belongs to (its settings row or one of its extension rows), or nothing. */
+export function remoteEditorFor(id: string): RemoteEditor | undefined {
+  const key = /^editors\/([a-z]+)(?:-ext(?:\/|$)|$)/.exec(id)?.[1];
+  const ed = key === undefined ? undefined : REMOTE_EDITORS[key];
+  return ed === undefined ? undefined : { name: ed.name, dir: ed.dir, cli: ed.cli };
+}
+
+/** Machine-scope settings the server reads on connect: the server's data dir is `--server-data-dir` (~/.vscode-server by
+ * default) and its user data lives at data/ under it, so the Machine settings file sits at data/Machine/settings.json. */
+export function remoteSettingsPath(dir: string): string {
+  return `${dir}/data/Machine/settings.json`;
+}
+
+/** The ticked extension ids, one per line, for the person to install from the editor's own terminal on the machine. */
+export function extensionsFile(dir: string): string {
+  return `${dir}/extensions.txt`;
+}
+
+function remoteEditorRewrites(platform: "darwin" | "linux"): [string, string][] {
+  return Object.values(REMOTE_EDITORS).map(ed => [`${ed.userDir[platform]}/settings.json`, remoteSettingsPath(ed.dir)]);
+}
+
+const EXTENSION_ID = /^[\w-]+\.[\w-]+$/;
+
+export interface EditorsPlan {
+  installs: ToolInstall[];
+  skipped: SkippedItem[];
+}
+
+/** What the ticked editors rows do on the machine: each terminal editor installed (its config travels with the files),
+ * and per remote editor one file listing the ticked extensions. The rows run with the tools, before them. */
+export function editorInstallsFor(entries: readonly RecipeEntry[]): EditorsPlan {
+  const out: EditorsPlan = { installs: [], skipped: [] };
+  const rows = entries.filter(e => ticked(e) && e.rung === "editors");
+  for (const e of rows) {
+    const key = name(e);
+    const apt = APT_EDITORS[key];
+    if (apt !== undefined) out.installs.push({ id: e.id, label: apt.name, manager: "apt", cmd: `${PRELUDE}\nexport DEBIAN_FRONTEND=noninteractive\n${APT(apt.pkg, apt.bin)}` });
+    else if (key === "helix") out.installs.push({ id: e.id, label: "helix", manager: "release", cmd: `${PRELUDE}\nexport DEBIAN_FRONTEND=noninteractive\n${HELIX_INSTALL}` });
+  }
+  for (const [key, ed] of Object.entries(REMOTE_EDITORS)) {
+    const prefix = `editors/${key}-ext/`;
+    const ids: string[] = [];
+    for (const e of rows.filter(e => e.id.startsWith(prefix))) {
+      const ext = e.id.slice(prefix.length);
+      if (EXTENSION_ID.test(ext)) ids.push(ext);
+      else out.skipped.push({ id: e.id, note: "not an extension id" });
+    }
+    if (ids.length === 0) continue;
+    const list = ids.map(squote).join(" ");
+    out.installs.push({
+      id: `editors/${key}-ext`,
+      label: `${ed.name} extension list`,
+      manager: "list",
+      cmd: `${PRELUDE}\nmkdir -p "$HOME/${ed.dir}"\nprintf '%s\\n' ${list} > "$HOME/${extensionsFile(ed.dir)}"`,
+    });
+  }
+  return out;
 }
 
 // --- agents ------------------------------------------------------------------
