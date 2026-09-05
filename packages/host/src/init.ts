@@ -505,7 +505,9 @@ function sizeWhy(e: ManifestEntry, brew: BrewTable): string {
 
 /** A formula's second detail line: why it starts unticked when it does, then its size and where the number came from. */
 function toolWhy(e: ManifestEntry, brew: BrewTable): string {
-  if (e.linux === "unknown") return `Linux build unknown, tick to try; ${sizeWhy(e, brew)}`;
+  const unknown = e.linux === "unknown" ? "Linux build unknown, tick to try; " : "";
+  if (e.id.startsWith("tools/cli/")) return `${unknown}its Linux release binary${e.paths.length > 1 ? ", else go install of the module" : ""}; checksum recorded on first install; ${e.default === "bring" ? "brought by default" : "left out by default"}`;
+  if (e.linux === "unknown") return `${unknown}${sizeWhy(e, brew)}`;
   const size = toolSize(e, brew);
   if (size !== undefined && size.bytes >= HEAVY_BYTES) return `${fmtBytes(size.bytes)}${depsWords(size)}, tick to bring; ${roadWords(size)}`;
   return `${sizeWhy(e, brew)}; ${e.default === "bring" ? "brought by default" : "left out by default"}`;
@@ -1382,6 +1384,7 @@ function installsTally(landed: ImportResult, resultsPath: string): string[] {
   return [
     `Tools and agents: ${n("installed")} installed, ${landed.removed !== undefined ? `${removed.length - notRemoved.length} removed, ` : ""}${n("failed")} failed${notRemoved.length > 0 ? `, ${notRemoved.length} not removed` : ""}, ${n("skipped")} skipped; the list is in ${resultsPath}`,
     ...all.filter(x => x.outcome === "failed").map(x => dim(`${x.name} failed: ${x.note ?? "no reason given"}`)),
+    ...all.filter(x => x.outcome === "skipped").map(x => dim(`${x.name} skipped: ${x.note ?? "no reason given"}`)),
     ...notRemoved.map(x => dim(`${x.label} not removed: ${x.note ?? "no reason given"}`)),
   ];
 }

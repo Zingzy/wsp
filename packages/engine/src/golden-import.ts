@@ -389,7 +389,7 @@ export function recipeHash(digest: RecipeDigest): string {
 
 // --- tools -------------------------------------------------------------------
 
-/** `github` is the road for a tap formula with no Linux bottle: its release asset, else `go install` from its repository. */
+/** `github` is the road for a tap formula with no Linux bottle and for a cask that is a command: its release asset, else `go install` from its repository. */
 export type ToolManager = "brew" | "npm" | "pnpm" | "bun" | "uv" | "pipx" | "cargo" | "go" | "github";
 
 export interface ToolInstall {
@@ -400,6 +400,8 @@ export interface ToolInstall {
   cmd: string;
   /** The install this one needs on the machine first; when that one did not install, this is skipped. */
   after?: string;
+  /** The command the install puts on PATH, when the row names it; checked with command -v after the stage. */
+  bin?: string;
 }
 
 export interface SkippedItem {
@@ -412,8 +414,29 @@ export interface Brewfile {
   taps: string[];
   formulae: string[];
   skipped: SkippedItem[];
-  /** Tap formulae with no Linux bottle whose source repository is known; each installs from it instead. */
-  roads: { id: string; name: string; source: ToolSource; pin?: ToolPin }[];
+  /** Tap formulae with no Linux bottle whose source repository is known, and command casks; each installs from its release. */
+  roads: PlannedRoad[];
+}
+
+export interface PlannedRoad {
+  id: string;
+  /** The command the road puts in /usr/local/bin. */
+  name: string;
+  source: ToolSource;
+  pin?: ToolPin;
+  /** The `module@version` go install falls back to; the repository at the tag when the row names none. */
+  go?: string;
+}
+
+const CLI_PREFIX = "tools/cli/";
+
+/** A command cask's road, from its paths as the collector wrote them: the release's `github.com/owner/repo@tag`
+ * first, a Go binary's `module@version` last when one folded into the row. */
+export function cliRoad(e: RecipeEntry): Pick<PlannedRoad, "source" | "go"> | undefined {
+  const m = /^github\.com\/([^/@]+\/[^/@]+)@(.+)$/.exec(e.paths[0] ?? "");
+  if (m === null) return undefined;
+  const go = e.paths.length > 1 ? e.paths[e.paths.length - 1] : undefined;
+  return { source: { repo: m[1]!, tag: m[2]! }, ...(go !== undefined ? { go } : {}) };
 }
 
 /** The GitHub repository a formula builds from and the tag of the version the Mac has. */
@@ -539,6 +562,10 @@ export function brewfileFor(entries: readonly RecipeEntry[], brew: BrewTable = n
       else if (e.linux === "unknown" && formula.includes("/") && info?.source !== undefined) out.roads.push({ id: e.id, name: info.name, source: info.source, ...(e.pin !== undefined ? { pin: e.pin } : {}) });
       else if (e.linux === "unknown") out.skipped.push({ id: e.id, note: "no Linux bottle known" });
       else out.formulae.push(formula);
+    } else if (e.id.startsWith(CLI_PREFIX)) {
+      const road = cliRoad(e);
+      if (road === undefined) out.skipped.push({ id: e.id, note: "no GitHub release to install from" });
+      else out.roads.push({ id: e.id, name: e.id.slice(CLI_PREFIX.length), ...road, ...(e.pin !== undefined ? { pin: e.pin } : {}) });
     } else if (e.id.startsWith("tools/brew-cask/")) {
       out.skipped.push({ id: e.id, note: "macOS app, no Linux build" });
     } else if (e.id.startsWith("tools/mas/")) {
@@ -598,11 +625,11 @@ function managerCommand(e: RecipeEntry, manager: Exclude<ToolManager, "github">)
   }
 }
 
-/** A tap formula with no Linux bottle, from its repository: the release asset built for this arch, unpacked
- * and its binary put in /usr/local/bin; with no Linux asset and go on the machine, `go install` of the tag.
+/** A tool from its repository: the release asset built for this arch, unpacked and its binary put in
+ * /usr/local/bin; with no Linux asset and go on the machine, `go install` of the module at the tag.
  * The asset's sha256 is checked against the pin when the recipe has one for this tag, and printed with the
  * tag on the WSP_ROAD line the stage reads either way, so the first install of a tag records it. */
-function roadInstall(name: string, source: ToolSource, pin?: string): string {
+function roadInstall(name: string, source: ToolSource, pin?: string, go = `github.com/${source.repo}@${source.tag}`): string {
   const api = `https://api.github.com/repos/${source.repo}/releases/tags/${source.tag}`;
   return [
     "set -euo pipefail",
@@ -630,8 +657,8 @@ function roadInstall(name: string, source: ToolSource, pin?: string): string {
     '  install -m 0755 "$bin" "/usr/local/bin/$name"',
     `  echo "WSP_ROAD release \${asset:-$url} $sum "${squote(source.tag)}`,
     "elif command -v go >/dev/null 2>&1; then",
-    `  GOBIN=/usr/local/bin go install ${squote(`github.com/${source.repo}@${source.tag}`)}`,
-    `  echo "WSP_ROAD go "${squote(`github.com/${source.repo}@${source.tag}`)}`,
+    `  GOBIN=/usr/local/bin go install ${squote(go)}`,
+    `  echo "WSP_ROAD go "${squote(go)}`,
     "else",
     `  echo "Error: release "${squote(source.tag)}" of "${squote(source.repo)}" has no Linux build, and go is not on the machine" >&2`,
     "  exit 1",
@@ -644,6 +671,7 @@ export function toolUninstall(e: RecipeEntry): { cmd: string } | { note: string 
   const withPath = (cmd: string): string => `${PATH_LINE}\n${cmd}`;
   if (e.id.startsWith("tools/brew-tap/")) return { cmd: withPath(asLinuxbrew(`untap ${e.id.slice("tools/brew-tap/".length)}`)) };
   if (e.id.startsWith("tools/brew-cask/") || e.id.startsWith("tools/mas/")) return { note: "never installed on Linux" };
+  if (e.id.startsWith(CLI_PREFIX)) return { cmd: withPath(`rm -f /usr/local/bin/${squote(e.id.slice(CLI_PREFIX.length))}`) };
   const manager = (["brew", ...MANAGER_ORDER] as const).find(m => e.id.startsWith(`tools/${m}/`));
   if (manager === undefined) return { note: "no manager known for this row" };
   const pkg = e.id.slice(`tools/${manager}/`.length);
@@ -729,13 +757,13 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
     for (const e of rows) {
       const r = managerCommand(e, manager);
       if ("note" in r) skipped.push({ id: e.id, note: r.note });
-      else installs.push({ id: e.id, label: e.label, manager, cmd: withPath(r.cmd), ...(m !== undefined ? { after: m.after } : {}) });
+      else installs.push({ id: e.id, label: e.label, manager, cmd: withPath(r.cmd), ...(m !== undefined ? { after: m.after } : {}), ...(manager === "go" ? { bin: e.id.slice("tools/go/".length) } : {}) });
     }
   }
   // Last, after any go the plan brings: a road install needs no brew and waits on nothing.
   for (const r of brew.roads) {
     const label = entries.find(e => e.id === r.id)?.label ?? r.name;
-    installs.push({ id: r.id, label, manager: "github", cmd: withPath(roadInstall(r.name, r.source, pinState(r.pin, r.source) === "same" ? r.pin!.sha256 : undefined)) });
+    installs.push({ id: r.id, label, manager: "github", cmd: withPath(roadInstall(r.name, r.source, pinState(r.pin, r.source) === "same" ? r.pin!.sha256 : undefined, r.go)), bin: r.name });
   }
   return { installs, skipped, brewfile: brew.text };
 }
