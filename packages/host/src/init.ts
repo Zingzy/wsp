@@ -36,7 +36,7 @@ import {
   recipePath,
   saveRecipe,
 } from "./init-recipe.js";
-import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, fmtDuration, rowsOf, table, widthOf, wrap } from "./init-layout.js";
+import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, fmtDuration, plainLine, rowsOf, table, widthOf, wrap } from "./init-layout.js";
 import { openRunLog, runLogPath } from "./init-log.js";
 import { secretsStage, type SecretOutcome } from "./init-secrets.js";
 import { keptBuilder, stopKeptBuilder, updateRoad } from "./init-upgrade.js";
@@ -304,9 +304,11 @@ export class StageStream {
     this.draw();
   }
 
+  /** The detail is flattened once, here, to the row it is drawn as; a failure is drawn one row per line, so it keeps its newlines. */
   push(frame: StageFrame): void {
     const prev = this.view;
-    this.frames.push({ ...frame, at: frame.at ?? Date.now() });
+    const detail = frame.detail === undefined ? undefined : frame.stage === "failed" ? frame.detail.split("\n").map(plainLine).join("\n") : plainLine(frame.detail);
+    this.frames.push({ ...frame, ...(detail !== undefined ? { detail } : {}), at: frame.at ?? Date.now() });
     this.view = reduceStages(this.frames, this.words);
     if (this.animate) this.draw();
     else this.announce(prev);

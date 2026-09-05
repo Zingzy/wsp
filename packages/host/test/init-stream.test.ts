@@ -144,6 +144,67 @@ describe("stage stream on a terminal", () => {
     }
   });
 
+  for (const cols of [80, 120]) {
+    it(`a detail carrying carriage returns or escape sequences lands on its row as a terminal would leave it, at ${cols} columns`, () => {
+      vi.useFakeTimers();
+      try {
+        const { output, screen } = terminal(cols, 30);
+        const written: string[] = [];
+        output.on("data", (c: Buffer) => written.push(c.toString()));
+        const stream = new StageStream(output, true);
+        stream.start();
+        stream.push(ev("creating", 0, "sandbox from base"));
+        stream.push(ev("deploying-daemon", 1_000, "node v18.20.4"));
+        stream.push(ev("applying-setup", 2_000, "zsh: installing, with shell/oh-my-zsh"));
+        const progress = ["(Reading database ... ", ...[5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100].map(n => `(Reading database ... ${n}%`), "(Reading database ... 12345 files and directories currently installed.)"];
+        stream.push(ev("applying-setup", 3_000, `zsh: ${progress.join("\r")}`));
+        vi.advanceTimersByTime(100);
+        let lines = screen.lines();
+        expect(lines).toHaveLength(3);
+        expect(lines[2]).toMatch(/^[◒◐◓◑]  Applying your setup\s+\(Reading database \.\.\. 12345 files/);
+        expect(lines[2]).not.toContain("%");
+        stream.push(ev("applying-setup", 4_000, "zsh: Unpacking zsh (5.9-4+b15) ...\r"));
+        vi.advanceTimersByTime(100);
+        lines = screen.lines();
+        expect(lines).toHaveLength(3);
+        expect(lines[2]).toMatch(/^[◒◐◓◑]  Applying your setup\s+zsh: Unpacking zsh \(5\.9-4\+b15\) \.\.\.$/);
+        stream.push(ev("applying-setup", 5_000, `zsh: Created symlink /etc/systemd/system/timers.target.wants/man-db.timer \u2192 /lib/systemd/system/man-db.timer.\r\r`));
+        stream.push(ev("uploading-files", 6_000, "38 MB"));
+        stream.push(ev("installing-harness", 7_000, "\x07\x1b[2K\x1b[1AClaude Code: \x1b[32m\u2714\x1b[0m Claude Code successfully installed!"));
+        vi.advanceTimersByTime(100);
+        lines = screen.lines();
+        expect(lines).toHaveLength(5);
+        expect(lines[2]).toMatch(/^◇  Setup applied\s+zsh: Created symlink \/etc\/sys.*\s+4\.0s$/);
+        expect(lines[3]).toMatch(/^◇  Files uploaded\s+38 MB\s+1\.0s$/);
+        expect(lines[4]).toMatch(/^[◒◐◓◑]  Installing agents\s+Claude Code: \u2714 Claude Code/);
+        expect(written.join("")).not.toMatch(/\x07|\x1b\[2K|\x1b\[0m/);
+        expect(count(lines, "Machine created")).toBe(1);
+        expect(lines.every(l => l.length < cols)).toBe(true);
+        expect(screen.scrolled).toBe(0);
+        stream.stop();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  }
+
+  it("a failed frame's detail is flattened line by line, so the guest's carriage returns and colours never reach the rows", () => {
+    const { output, screen } = terminal(80, 30);
+    const written: string[] = [];
+    output.on("data", (c: Buffer) => written.push(c.toString()));
+    const stream = new StageStream(output, true);
+    stream.start();
+    stream.push(ev("creating", 0, "sandbox from base"));
+    stream.push(ev("installing-tools", 1_000, "jq: Setting up jq ... \rSetting up jq ... 100%"));
+    stream.push(ev("failed", 2_000, "E: Unable to locate package htop\r\x1b[31mE: Unable to locate package htop\x1b[0m\r\napt-get exited 100\r"));
+    stream.stop();
+    const lines = screen.lines();
+    expect(lines).toHaveLength(5);
+    expect(lines[0]).toMatch(/^◇  Machine created\s+sandbox from base\s+1\.0s$/);
+    expect(lines.slice(1)).toEqual(["▲  Installing tools failed", "│  Setting up jq ... 100%", "│  E: Unable to locate package htop", "│  apt-get exited 100"]);
+    expect(written.join("")).not.toMatch(/\x1b\[31m|\r/);
+  });
+
   it("a failed step's tail is trimmed to the terminal's height, so the block stays inside the screen it redraws", () => {
     const { output, screen } = terminal(80, 12);
     const stream = new StageStream(output, true);
