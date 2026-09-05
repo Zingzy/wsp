@@ -54,6 +54,10 @@ export interface RungSelectOptions {
   footer?: (ticks: ReadonlySet<string>) => string[];
   /** Rows the detail pane keeps for the highlighted item; two unless a screen has more to say. */
   detailLines?: number;
+  /** Groups that start folded. */
+  folded?: readonly string[];
+  /** A second cell after a group header's count: its size, on a screen whose rows carry one. */
+  groupHint?: (group: string, items: readonly SelectItem[]) => string | undefined;
   input?: Readable;
   output?: Writable;
 }
@@ -183,6 +187,50 @@ function groupCount(items: readonly SelectItem[], ticks: ReadonlySet<string>, ch
   return fmtCount(free.filter(i => chosen(i, ticks, choices)).length, free.length);
 }
 
+/** Cuts a label to width from the middle, keeping its tail: the part of a path that differs. */
+function middle(text: string, width: number): string {
+  if (width <= 0) return "";
+  if (text.length <= width) return text;
+  if (width === 1) return "…";
+  const head = Math.floor((width - 1) / 2);
+  return `${text.slice(0, head)}…${text.slice(text.length - (width - 1 - head))}`;
+}
+
+function commonPrefix(texts: readonly string[]): number {
+  const first = texts[0] ?? "";
+  let n = 0;
+  while (n < first.length && texts.every(t => t[n] === first[n])) n += 1;
+  return n;
+}
+
+/** Every label cut to its width, no two alike: labels that would read the same once cut show the part where they first differ instead. */
+export function cutDistinct(labels: readonly string[], widthOf: (i: number) => number): string[] {
+  const out = labels.map((l, i) => middle(l, widthOf(i)));
+  for (let round = 0; round < 8; round += 1) {
+    const groups = new Map<string, number[]>();
+    out.forEach((t, i) => {
+      if (t !== labels[i]) groups.set(t, [...(groups.get(t) ?? []), i]);
+    });
+    let changed = false;
+    for (const group of groups.values()) {
+      if (group.length < 2) continue;
+      const at = commonPrefix(group.map(i => labels[i]!));
+      for (const i of group) {
+        const w = widthOf(i);
+        const l = labels[i]!;
+        const start = Math.min(at, Math.max(0, l.length - (w - 1)));
+        const next = `…${l.slice(start, start + w - 1)}`;
+        if (next !== out[i]) {
+          out[i] = next;
+          changed = true;
+        }
+      }
+    }
+    if (!changed) break;
+  }
+  return out;
+}
+
 /** How the choice rows answered, the answers with none left out: "6 copy, 2 sign in"; with chosenOnly the last choice, the one that brings nothing, is left out too. */
 export function spreadOf(items: readonly SelectItem[], choices: ReadonlyMap<string, string>, chosenOnly = false): string {
   const first = items.find(i => i.choices !== undefined)?.choices ?? [];
@@ -196,12 +244,13 @@ export function spreadOf(items: readonly SelectItem[], choices: ReadonlyMap<stri
 class RungPrompt extends Prompt<Set<string>> {
   cursor = 0;
   back = false;
-  readonly folded = new Set<string>();
+  readonly folded: Set<string>;
   readonly choices = new Map<string, string>();
   private lastQuery = "";
 
   constructor(private readonly o: RungSelectOptions) {
     super({ render: () => this.frame(), ...(o.input ? { input: o.input } : {}), ...(o.output ? { output: o.output } : {}) }, true);
+    this.folded = new Set(o.folded ?? []);
     const ticks = new Set([...o.initial].filter(id => o.items.some(i => i.id === id)));
     for (const i of o.items) {
       if (i.lock === "on") ticks.add(i.id);
@@ -292,10 +341,29 @@ class RungPrompt extends Prompt<Set<string>> {
       fmtCount(items.length, items.length).length,
       hasLocked ? LOCKED_WORD.length : 0,
       ...items.map(i => this.second(i, width).length),
-      ...[...new Set(items.map(i => i.group))].map(g => (g === undefined ? 0 : groupCount(items.filter(i => i.group === g), this.ticks(), this.choices).length)),
+      ...[...new Set(items.map(i => i.group))].map(g => (g === undefined ? 0 : this.groupSecond(g, items.filter(i => i.group === g)).length)),
     );
     const room = width - EDGE - 2 - GUTTER.length - second;
     return { label: Math.max(8, Math.min(Math.max(...labels), room, LABEL_CAP)), second };
+  }
+
+  /** A group header's second column: what was chosen over its rows, then the screen's own cell for the group. */
+  private groupSecond(group: string, items: readonly SelectItem[]): string {
+    const count = groupCount(items, this.ticks(), this.choices);
+    const hint = this.o.groupHint?.(group, items);
+    return hint === undefined || hint === "" ? count : `${count}${GUTTER}${hint}`;
+  }
+
+  /** The indent of an item's row: grouped rows and bullets sit two columns in. */
+  private static indent(i: SelectItem): number {
+    return i.group !== undefined || i.lock === "on" ? 2 : 0;
+  }
+
+  /** Every item's label cut to the label column, no two alike. */
+  private cuts(cols: { label: number }): Map<SelectItem, string> {
+    const items = this.o.items;
+    const cut = cutDistinct(items.map(i => i.label), i => cols.label - RungPrompt.indent(items[i]!));
+    return new Map(items.map((i, k) => [i, cut[k]!]));
   }
 
   private hint(i: SelectItem, width: number): string | undefined {
@@ -328,9 +396,10 @@ class RungPrompt extends Prompt<Set<string>> {
     return `${current ? styleText("cyan", "❯") : " "} ${" ".repeat(indent)}${glyph} ${text}${second !== "" ? `${GUTTER}${dim(second.padStart(cols.second))}` : ""}`.trimEnd();
   }
 
-  private row(entry: Entry, current: boolean, cols: { label: number; second: number }, width: number): string {
+  private row(entry: Entry, current: boolean, cols: { label: number; second: number }, width: number, cuts: Map<SelectItem, string>): string {
     const ticks = this.ticks();
     const box = (on: boolean): string => (on ? styleText("cyan", "●") : dim("○"));
+    const label = (i: SelectItem): string => cuts.get(i) ?? i.label;
     switch (entry.type) {
       case "all": {
         // The box says what space does next (the rows it flips are all on); the count runs over every row that can come.
@@ -341,14 +410,14 @@ class RungPrompt extends Prompt<Set<string>> {
       case "locked":
         return this.line(dim("▾"), this.o.title, LOCKED_WORD, 0, cols, false, false);
       case "bullet":
-        return this.line(dim("•"), entry.item.label, entry.item.hint ?? "", 2, cols, false, false);
+        return this.line(dim("•"), label(entry.item), entry.item.hint ?? "", 2, cols, false, false);
       case "more":
         return `      ${dim(`…and ${entry.count} more`)}`;
       case "group":
-        return this.line(entry.folded ? "▸" : "▾", entry.group, groupCount(entry.items, ticks, this.choices), 0, cols, current, true);
+        return this.line(entry.folded ? "▸" : "▾", entry.group, this.groupSecond(entry.group, entry.items), 0, cols, current, true);
       case "item": {
         const i = entry.item;
-        return this.line(box(i.follows !== undefined ? i.follows(ticks) : ticks.has(i.id)), i.label, this.second(i, width), i.group !== undefined ? 2 : 0, cols, current, false);
+        return this.line(box(i.follows !== undefined ? i.follows(ticks) : ticks.has(i.id)), label(i), this.second(i, width), RungPrompt.indent(i), cols, current, false);
       }
       default: {
         const _exhaustive: never = entry;
@@ -404,6 +473,7 @@ class RungPrompt extends Prompt<Set<string>> {
     const room = rowsOf(this.o.output) - 1 - FIXED_LINES - intro.length - detail.length - footer.length;
     const { start, end } = viewport(entries.length, this.cursor, entries.length <= room ? entries.length : room - 2);
     const cols = this.columns(width);
+    const cuts = this.cuts(cols);
     const bar = dim(S_BAR_FOCUS);
 
     const lines: string[] = [];
@@ -413,7 +483,7 @@ class RungPrompt extends Prompt<Set<string>> {
     if (this.o.items.length === 0) lines.push(`${bar}  ${dim("nothing found")}`);
     else if (entries.length === 0) lines.push(`${bar}  ${dim("no match")}`);
     if (start > 0) lines.push(`${bar}  ${dim(`↑ ${start} more`)}`);
-    for (let i = start; i < end; i++) lines.push(`${bar} ${this.row(entries[i]!, i === this.cursor, cols, width)}`);
+    for (let i = start; i < end; i++) lines.push(`${bar} ${this.row(entries[i]!, i === this.cursor, cols, width, cuts)}`);
     if (end < entries.length) lines.push(`${bar}  ${dim(`↓ ${entries.length - end} more`)}`);
     lines.push(bar);
     for (const d of detail) lines.push(`${bar}  ${dim(ellipsize(d, width - EDGE))}`.trimEnd());

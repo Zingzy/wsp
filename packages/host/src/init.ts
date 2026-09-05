@@ -7,7 +7,7 @@
 // ever asked on the remote machine.
 import type { Readable, Writable } from "node:stream";
 import { format, styleText } from "node:util";
-import { LARGE_GROUP, MCP_REMOTE_ID, RUNGS, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
+import { APP_DATA_GROUP, LARGE_GROUP, MCP_REMOTE_ID, RUNGS, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
 import { describeAge, type BackendPricing } from "@wsp/engine";
 import { MCP_ID_PREFIX } from "@wsp/protocol";
 import { PrepareStoppedError, type GoldenBuilderView, type GoldenRecipe, type GoldenStage, type Runtime } from "@wsp/runtime";
@@ -558,7 +558,7 @@ export function selectItem(e: ManifestEntry, hintFor?: (width: number) => string
     detail: [where, detailWhy(e, lock, brew), ...(e.consent === true && lock === undefined ? [CONSENT_WHY] : [])],
     ...(lock !== undefined ? { lock } : {}),
     ...(hasChoices(e) ? { choices: e.rung === "logins" ? LOGIN_CHOICES : CONSENT_CHOICES } : {}),
-    ...(e.group === LARGE_GROUP ? { own: true } : {}),
+    ...(e.group === LARGE_GROUP || e.group === APP_DATA_GROUP ? { own: true } : {}),
   };
 }
 
@@ -648,6 +648,15 @@ export function everythingItems(entries: readonly ManifestEntry[]): SelectItem[]
 /** The size alone: the screen's one count is the all row's, over the rows that can come, as the found table put it. */
 export function everythingTitle(entries: readonly ManifestEntry[]): string {
   return `${RUNG_TITLE.everything} (${fmtBytes(entries.reduce((n, e) => n + e.bytes, 0))})`;
+}
+
+/** Each group's size beside its count, so a folded group still says what it weighs. */
+function everythingGroupHint(entries: readonly ManifestEntry[]): (group: string, items: readonly SelectItem[]) => string | undefined {
+  const bytes = new Map(entries.map(e => [e.id, e.bytes]));
+  return (_group, items) => {
+    const n = items.reduce((sum, i) => sum + (bytes.get(i.id) ?? 0), 0);
+    return n > 0 ? fmtBytes(n) : undefined;
+  };
 }
 
 function everythingFooter(entries: readonly ManifestEntry[]): (ticks: ReadonlySet<string>) => string[] {
@@ -781,7 +790,7 @@ async function tickRungs(manifest: Manifest, io: InitIO, brew: BrewTable): Promi
       items: rung === "everything" ? everythingItems(entries) : rung === "tools" ? toolsItems(entries, brew) : entries.map(e => selectItem(e, undefined, brew)),
       initial: prior?.ticks ?? fresh.ticks,
       initialChoices: prior?.choices ?? fresh.choices,
-      ...(rung === "everything" ? { footer: everythingFooter(entries), detailLines: 3 } : rung === "tools" || rung === "agents" ? { footer: diskFooter(earlier, entries, brew) } : {}),
+      ...(rung === "everything" ? { footer: everythingFooter(entries), detailLines: 3, folded: [APP_DATA_GROUP], groupHint: everythingGroupHint(entries) } : rung === "tools" || rung === "agents" ? { footer: diskFooter(earlier, entries, brew) } : {}),
       ...(rung === "editors" ? { intro: editorsIntro(entries) } : {}),
       input: io.input,
       output: io.output,

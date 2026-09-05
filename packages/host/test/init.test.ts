@@ -11,7 +11,7 @@ import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
-import { RUNGS, type Manifest, type ManifestEntry } from "@wsp/collect";
+import { APP_DATA_GROUP, RUNGS, claimedPaths, entriesFor, everything, nodeMachineFs, type Machine, type Manifest, type ManifestEntry } from "@wsp/collect";
 import { SNAPSHOT_STORAGE, type BackendPricing } from "@wsp/engine";
 import { ALREADY_APPLIED } from "@wsp/protocol";
 import { DAEMON_TOKEN_SET, createRuntime, memoryStore, type GoldenRecipe, type Runtime } from "@wsp/runtime";
@@ -748,7 +748,7 @@ describe("wsp init, everything else", () => {
     expect(bigRow.indexOf("unknown")).toBe(demoRow.indexOf("config"));
     expect(demoRow.indexOf("300 B") + "300 B".length).toBe(tokenRow.indexOf("40 B") + "40 B".length);
     expect(bigRow.indexOf("1.2 MB") + "1.2 MB".length).toBe(demoRow.indexOf("300 B") + "300 B".length);
-    expect(screen).toMatch(/▾ large, review\s+0 of 1\n/);
+    expect(screen).toMatch(/▾ large, review\s+0 of 1 {2}1\.2 MB\n/);
     expect(screen).toMatch(/○ \.big\s+1\.2 MB\s+900 files\s+2026-01-05\s+unknown\n/);
     expect(screen).toMatch(/▾ Keychain, device-bound\s+1\n/);
     expect(screen).toMatch(/○ Raycast\s+stays here\n/);
@@ -2594,6 +2594,68 @@ describe("summaryNote", () => {
       // At 50 the Installs line had to wrap, so the one-to-one check above saw a continuation line go through.
       if (columns === 50) expect(lines.some(l => l.startsWith(" ".repeat(10)) && l.trim() !== "")).toBe(true);
     }
+  });
+});
+
+describe("wsp init, everything else over a HOME on disk", () => {
+  /** The collector over a HOME written to disk: the rows the screen shows are the real adapter's, not a fixture's. */
+  async function found(home: string): Promise<Manifest> {
+    const write = (rel: string, text: string): void => {
+      const p = join(home, rel);
+      mkdirSync(dirname(p), { recursive: true });
+      writeFileSync(p, text);
+    };
+    const token = "e209b33186e466c19f1e7a229ab12345";
+    write(`.mcp-auth/mcp-remote-0.1/${token}_tokens.json`, '{"access_token":"fake-token-value-long-enough"}');
+    write(`.mcp-auth/mcp-remote-0.1/${token}_client_info.json`, '{"client_secret":"fake-secret-value-long-enough"}');
+    write("Library/Application Support/Arc/StorableSidebar.json", "x".repeat(4_000));
+    write("Library/Application Support/com.docker.install/data.bin", "y".repeat(2_000));
+    write("Library/Application Support/lazydocker/config.yml", "gui: {}\n");
+    write(".config/mystery/thing.toml", "z = 1\n");
+    write(".hermes/config.yaml", "model: x\n");
+    write(".hermes/sessions/a/s.jsonl", "p".repeat(300));
+    write(".hermes/file-history/x", "f".repeat(200));
+    const machine: Machine = { platform: "darwin", home, path: [], env: {}, fs: nodeMachineFs, exec: { which: async () => false, run: async () => undefined } };
+    const rows = (await everything(machine, { lookup: () => [], tools: ["lazydocker"], claimed: claimedPaths(FIXTURE.entries), now: Date.UTC(2026, 8, 5) })).rows;
+    return { entries: [...FIXTURE.entries, ...entriesFor(rows)] };
+  }
+
+  it("rows sit under their parent, macOS app data is one folded group with its size, and no two rows read alike", async () => {
+    const f = fake({ collect: async () => found(f.opts.home), columns: 80 });
+    Object.assign(f.io.output, { rows: 60 });
+    const run = runInit(f.opts, f.io);
+    for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
+      await f.until(rung);
+      await f.press(KEY.enter);
+    }
+    await f.until("Everything else (");
+    const screen = () => f.text().slice(f.text().lastIndexOf("Everything else ("));
+    expect(screen()).toMatch(/▾ \.hermes\s+0 of 2 {2}509 B\n/);
+    expect(screen()).toMatch(/○ \.hermes\s+9 B\s+unknown\n/);
+    // The carve's label is cut in the middle: the directory stays at the front, what it holds at the end.
+    expect(screen()).toMatch(/○ state files in ~\/\.…e-history, sessions\s+500 B\s+state\n/);
+    expect(screen()).toMatch(/▾ \.mcp-auth\s+2 {2}96 B\n/);
+    expect(screen()).toMatch(/▾ ~\/\.config\s+0 of 1\s+6 B\n/);
+    expect(screen()).toMatch(/○ mystery\s+6 B\s+unknown\n/);
+    expect(screen()).toMatch(/▾ ~\/Library\/Application Support\s+0 of 1\s+8 B\n/);
+    expect(screen()).toMatch(/○ lazydocker\s+8 B\s+config\n/);
+    expect(screen()).toMatch(new RegExp(`▸ ${APP_DATA_GROUP.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+0 of 2 {2}5\\.9 KB\n`));
+    expect(screen()).not.toContain("Arc");
+    expect(screen()).not.toContain("com.docker.install");
+    const labels = screen().split("\n").filter(l => /[●○]/.test(l)).map(l => l.replace(/^.*[●○] /, "").replace(/ {2}.*$/, ""));
+    expect(new Set(labels).size).toBe(labels.length);
+    const mcp = labels.filter(l => l.startsWith(".mcp-auth/"));
+    expect(mcp).toHaveLength(2);
+    expect(mcp.every(l => l.includes("…") && l.endsWith(".json"))).toBe(true);
+    // The all row leaves app data alone: the four plain rows tick, Arc and the Docker data do not.
+    await f.press(KEY.space);
+    expect(screen()).toMatch(/Selected: \.hermes, state files/);
+    expect(screen()).toContain("4 ticked");
+    expect(screen()).not.toMatch(/Selected: .*Arc/);
+    await f.press(KEY.esc);
+    await f.until("Sign-ins");
+    await f.press(KEY.ctrlC);
+    await run;
   });
 });
 

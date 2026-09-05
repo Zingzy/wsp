@@ -213,7 +213,7 @@ describe("pass 8: dotfiles managers", () => {
       flags: ["credential"],
       files: 5,
     });
-    expect(rows.find(r => r.name === ".dotfiles/work.zsh")).toMatchObject({ kind: "credential", flags: ["credential", "exports"], paths: ["~/.dotfiles/zsh/.zsh/work.zsh"] });
+    expect(rows.find(r => r.name === ".dotfiles/zsh/.zsh/work.zsh")).toMatchObject({ kind: "credential", flags: ["credential", "exports"], paths: ["~/.dotfiles/zsh/.zsh/work.zsh"] });
     expect(rows.find(r => r.name === ".zshrc")).toMatchObject({ paths: ["~/.zshrc"], linkTarget: "~/.dotfiles/zsh/.zshrc" });
     expect(shell.map(s => [s.path, s.names])).toEqual([
       ["~/.zshrc", ["GH_TOKEN"]],
@@ -263,7 +263,7 @@ describe("pass 8: dotfiles managers", () => {
     const history = rows.filter(r => r.flags.includes("history")).map(r => [r.name, r.kind, r.paths[0], r.files, r.flags.join("+")]).sort();
     expect(history).toEqual([
       [".dotfiles/.git", "credential", "~/.dotfiles/.git", 1, "credential+history"],
-      ["zsh/.git", "credential", "~/.dotfiles/zsh/.git", 2, "credential+history"],
+      [".dotfiles/zsh/.git", "credential", "~/.dotfiles/zsh/.git", 2, "credential+history"],
     ]);
     expect(rows.find(r => r.paths[0] === "~/.dotfiles")).toMatchObject({ manager: "dotfiles", excludes: ["~/.dotfiles/.git", "~/.dotfiles/zsh/.git"], rcCopies: ["zsh/.zshrc"], files: 1 });
     expect(rows.some(r => r.kind === "state")).toBe(false);
