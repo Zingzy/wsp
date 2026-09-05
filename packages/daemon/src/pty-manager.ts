@@ -109,9 +109,16 @@ export function ptyEnv(extra?: Record<string, string>): Record<string, string> {
   delete env["DISPLAY"];
   env["BROWSER"] ??= OPEN_SHIM_PATH;
   if (!env["HOME"] || !env["USER"]) {
-    const me = userInfo();
-    if (!env["HOME"]) env["HOME"] = me.homedir;
-    if (!env["USER"]) env["USER"] = me.username;
+    // A uid with no passwd row (an arbitrary uid in a container) has no home to give;
+    // the shell still opens.
+    try {
+      const me = userInfo();
+      if (!env["HOME"]) env["HOME"] = me.homedir;
+      if (!env["USER"]) env["USER"] = me.username;
+    } catch {
+      delete env["HOME"];
+      delete env["USER"];
+    }
   }
   return env;
 }

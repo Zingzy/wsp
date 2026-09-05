@@ -99,7 +99,8 @@ export function deployScript(token: string, previewHostSuffix?: string): string 
   return [
     "set -e",
     'export PATH="/usr/local/bin:$PATH"',
-    // The daemon started below hands its environment to every pty and harness launch, and the exec running this carries PATH and nothing else (measured 2026-09-05).
+    // The daemon started below hands its environment to every pty and harness launch, and the exec running
+    // this carries PATH and nothing else (measured 2026-09-05).
     "export HOME=/root USER=root",
     "mkdir -p /root/wsp-daemon /root/inbox",
     "tar -xzf /root/wsp-daemon.tgz -C /root/wsp-daemon",

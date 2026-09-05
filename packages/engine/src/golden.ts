@@ -77,7 +77,8 @@ export const BROWSER_SHIM_PATH = "/usr/local/bin/wsp-open";
  * Starter rates over this window. */
 export const BUILDER_IDLE_MS = 6 * 60 * 60_000;
 
-/** Root disk asked for every builder and fork, Solari's cap: a 4 GB root filled during the tools stage and five agents failed to install on it (measured 2026-09-05). */
+/** Root disk asked for every builder and fork, Solari's cap: a 4 GB root filled during the tools stage and
+ * five agents failed to install on it (measured 2026-09-05). */
 export const BUILDER_DISK_GB = 20;
 
 export interface MachineSize {

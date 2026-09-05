@@ -4,14 +4,17 @@
 // On the morning of 2026-09-04 the host pool refused diskGb, a field it had
 // accepted and ignored two days earlier, and every init booted nothing until a
 // person read the error off a live run; by 17:22Z the same day it honoured it
-// (a 20 GB root on the guest), so every body here now carries diskGb 20. Each
-// case builds its body with the code the runtime calls, asserts the 201, and
-// kills what it made by recorded id. The listing case pins the row fields the
-// sweep's cost and owner lines read.
+// (a 20 GB root on the guest), so every body here carries diskGb 20 and the
+// cases that can still reach their machine read the granted size back off GET,
+// since a dropped or misspelled disk field boots the 4 GB default and says
+// nothing. Each case builds its body with the code the runtime calls, asserts
+// the 201, and kills what it made by recorded id. The listing case pins the
+// row fields the sweep's cost and owner lines read.
 
 import { afterAll, describe, expect, it } from "vitest";
 import type { WspError } from "../src/errors.js";
-import { BUILDER_IDLE_MS, forkGolden, killUntilGone, prepareBuilder, sealGolden, type GoldenManifest } from "../src/golden.js";
+import { BUILDER_DISK_GB, BUILDER_IDLE_MS, forkGolden, killUntilGone, prepareBuilder, sealGolden, type GoldenManifest } from "../src/golden.js";
+import type { Machine } from "../src/machine.js";
 import { SolariBackend } from "../src/solari-backend.js";
 import { LIVE, sleep, solariKey } from "./live.js";
 
@@ -80,6 +83,9 @@ describe.runIf(LIVE)("create canary, live", () => {
       (e: unknown) => ((e as WspError).kind === "missing" ? "gone" : Promise.reject(e)),
     );
 
+  /** The disk the provider granted, read off GET by id: the one place that says whether the asked-for size took. */
+  const grantedDiskGb = async (m: Machine): Promise<number | undefined> => (await m.describe?.())?.diskGb;
+
   /** Runs one create through the real code and judges the POST it sent, not the exception it raised. */
   async function posted<T>(run: () => Promise<T>): Promise<{ result: T; create: Create }> {
     const mark = creates.length;
@@ -120,8 +126,10 @@ describe.runIf(LIVE)("create canary, live", () => {
     const { result: builder, create } = await posted(() =>
       prepareBuilder({ backend, ...SIZE, envs: ENVS, labels: labelsFor({ "wsp-builder": "1" }), setup: "true" }),
     );
-    expect(create.body).toMatchObject({ kind: "sandbox", template: "base", ...SIZE, lifecycle: { onTimeout: "kill" }, timeoutMs: BUILDER_IDLE_MS });
-    console.log(`[create-canary] builder ${short(builder.machine.id)}: 201 for ${Object.keys(create.body).join(", ")}; built as cpu ${builder.size.cpu} memMb ${builder.size.memMb}`);
+    expect(create.body).toMatchObject({ kind: "sandbox", template: "base", ...SIZE, diskGb: BUILDER_DISK_GB, lifecycle: { onTimeout: "kill" }, timeoutMs: BUILDER_IDLE_MS });
+    const disk = await grantedDiskGb(builder.machine);
+    console.log(`[create-canary] builder ${short(builder.machine.id)}: 201 for ${Object.keys(create.body).join(", ")}; built as cpu ${builder.size.cpu} memMb ${builder.size.memMb} diskGb ${disk}`);
+    expect(disk, "GET /sandboxes/:id did not grant the disk the body asked for").toBe(BUILDER_DISK_GB);
     await killUntilGone(backend, builder.machine);
     expect(await stateOf(builder.machine.id)).toBe("gone");
   });
@@ -142,7 +150,8 @@ describe.runIf(LIVE)("create canary, live", () => {
       }),
     );
     manifest = result.manifest;
-    expect(create.body).toMatchObject({ kind: "sandbox", fromSnapshot: result.version.snapshotId, ...SIZE });
+    // The seal kills the smoke fork before this returns, so its disk cannot be read back; the body is what this case pins.
+    expect(create.body).toMatchObject({ kind: "sandbox", fromSnapshot: result.version.snapshotId, ...SIZE, diskGb: BUILDER_DISK_GB });
     const forkId = String(create.reply.sandboxId);
     console.log(`[create-canary] smoke fork ${short(forkId)}: 201 for ${Object.keys(create.body).join(", ")}; stages ${stages.join(" > ")}`);
     expect(await stateOf(builder.machine.id)).toBe("gone");
@@ -153,8 +162,10 @@ describe.runIf(LIVE)("create canary, live", () => {
     if (manifest === undefined) throw new Error("nothing to fork: the smoke fork case sealed no snapshot");
     const sealed = manifest;
     const { result: fork, create } = await posted(() => forkGolden(backend, sealed, { ...SIZE, envs: ENVS, labels: labelsFor({}) }));
-    expect(create.body).toMatchObject({ kind: "sandbox", fromSnapshot: sealed.versions[0]?.snapshotId, ...SIZE });
-    console.log(`[create-canary] fork ${short(fork.id)}: 201 for ${Object.keys(create.body).join(", ")}`);
+    expect(create.body).toMatchObject({ kind: "sandbox", fromSnapshot: sealed.versions[0]?.snapshotId, ...SIZE, diskGb: BUILDER_DISK_GB });
+    const disk = await grantedDiskGb(fork);
+    console.log(`[create-canary] fork ${short(fork.id)}: 201 for ${Object.keys(create.body).join(", ")}; diskGb ${disk}`);
+    expect(disk, "GET /sandboxes/:id did not grant the disk the fork asked for").toBe(BUILDER_DISK_GB);
     await killUntilGone(backend, fork);
     expect(await stateOf(fork.id)).toBe("gone");
   });

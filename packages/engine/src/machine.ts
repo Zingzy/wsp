@@ -37,6 +37,9 @@ export interface PreviewReach {
 export interface MachineShape {
   cpu?: number;
   memMb?: number;
+  /** The root disk the provider granted, in GiB; a dropped or misspelled disk field boots the
+   * default and says nothing else. */
+  diskGb?: number;
   createdAt?: string;
 }
 

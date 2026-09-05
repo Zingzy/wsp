@@ -1,0 +1,73 @@
+$ WSP_LIVE=1 vitest run packages/engine/test/create-canary.live.test.ts packages/runtime/test/create-canary.live.test.ts packages/engine/test/solari-quirks.live.test.ts packages/engine/test/createdat-drift.live.test.ts
+
+ RUN  v2.1.9 /Users/zingzy/wsp/.claude/worktrees/wsp-t131
+
+stderr | packages/engine/test/solari-quirks.live.test.ts > solari platform-bug canaries > canary 1: snapshot after pause+resume (502 boundary is fuzzy: same-host naps snapshot fine)
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!! CANARY 1: snapshot after pause+resume SUCCEEDED (same-host resume path). This is the known-fuzzy boundary, NOT proof the aged/cross-host 502 is fixed. The snapshot-fresh rule stays until an aged restore snapshots clean.
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
+stderr | packages/engine/test/solari-quirks.live.test.ts > solari platform-bug canaries > canary 2: desktop control WS first command works (1006 bug FIXED 2026-09-01; was: REST /exec only)
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!! CANARY 2: desktop control-WS first command still works (exit 0). The 1006 bug stays fixed; desktops may be driven over the control channel as well as REST /exec.
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
+stderr | packages/engine/test/solari-quirks.live.test.ts > solari platform-bug canaries > canary 3: docker cannot run containers in sandboxes (kernel 6.6.30: no overlayfs, broken netfilter)
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!! CANARY 3: docker still cannot run containers (daemon: DAEMON_UP driver=vfs; run: NO_RUN
+8bee597e0d/start returned error: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: error duri). Platform gap persists.
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
+stderr | packages/engine/test/solari-quirks.live.test.ts > solari platform-bug canaries > canary 4: previewUrl survives pause+wake (same url routes after resume)
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!! CANARY 4: previewUrl survived pause+wake (same url+token routed post-resume, status 200). daemonReach may keep reusing across naps.
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
+ ✓ |node| packages/engine/test/solari-quirks.live.test.ts (4 tests) 73748ms
+   ✓ solari platform-bug canaries > canary 1: snapshot after pause+resume (502 boundary is fuzzy: same-host naps snapshot fine) 28599ms
+   ✓ solari platform-bug canaries > canary 2: desktop control WS first command works (1006 bug FIXED 2026-09-01; was: REST /exec only) 1957ms
+   ✓ solari platform-bug canaries > canary 3: docker cannot run containers in sandboxes (kernel 6.6.30: no overlayfs, broken netfilter) 22288ms
+   ✓ solari platform-bug canaries > canary 4: previewUrl survives pause+wake (same url routes after resume) 20640ms
+stdout | packages/engine/test/create-canary.live.test.ts > create canary, live > builder: the body prepareBuilder posts is accepted
+[create-canary] builder ZGVza3RvcC1wb29sLWkt...: 201 for kind, template, cpu, memMb, diskGb, envs, metadata, lifecycle, timeoutMs; built as cpu 2 memMb 4096
+
+stdout | packages/engine/test/create-canary.live.test.ts > create canary, live > smoke fork: the body sealGolden posts from a fresh snapshot is accepted
+[create-canary] smoke fork ZGVza3RvcC1wb29sLWkt...: 201 for kind, fromSnapshot, cpu, memMb, diskGb, envs, metadata; stages snapshotting:golden-v1 > smoke-forking:true > sealed:v1
+
+stdout | packages/engine/test/create-canary.live.test.ts > create canary, live > workspace fork: the body forkGolden posts is accepted
+[create-canary] fork ZGVza3RvcC1wb29sLWkt...: 201 for kind, fromSnapshot, cpu, memMb, diskGb, envs, metadata
+
+stdout | packages/engine/test/create-canary.live.test.ts > create canary, live > listing rows carry metadata, cpu and memMb for a machine just created
+[create-canary] listing row for ZGVza3RvcC1wb29sLWkt...: state running, cpu 1, memMb 2048, metadata keys wsp, wsp-owner, wsp-test, createdAt
+
+ ✓ |node| packages/engine/test/create-canary.live.test.ts (4 tests) 66263ms
+   ✓ create canary, live > builder: the body prepareBuilder posts is accepted 5963ms
+   ✓ create canary, live > smoke fork: the body sealGolden posts from a fresh snapshot is accepted 41492ms
+   ✓ create canary, live > workspace fork: the body forkGolden posts is accepted 15656ms
+   ✓ create canary, live > listing rows carry metadata, cpu and memMb for a machine just created 1347ms
+stdout | packages/engine/test/create-canary.live.test.ts > create canary, live
+[create-canary] 5 machines created, all gone; snapshot deleted
+
+stdout | packages/runtime/test/create-canary.live.test.ts > workspace create canary, live > workspace fork: the body workspaces.create posts is accepted, and delete leaves it gone
+[create-canary-runtime] workspace fork ZGVza3RvcC1wb29sLWkt...: 201 for kind, fromSnapshot, cpu, memMb, metadata, lifecycle, timeoutMs; timeoutMs 2400000
+
+ ✓ |node| packages/runtime/test/create-canary.live.test.ts (1 test) 25818ms
+   ✓ workspace create canary, live > workspace fork: the body workspaces.create posts is accepted, and delete leaves it gone 24741ms
+stdout | packages/runtime/test/create-canary.live.test.ts > workspace create canary, live
+[create-canary-runtime] 2 machines created, all gone; snapshot deleted
+
+ ↓ |node| packages/engine/test/createdat-drift.live.test.ts (1 test | 1 skipped)
+
+ Test Files  3 passed | 1 skipped (4)
+      Tests  9 passed | 1 skipped (10)
+   Start at  06:00:57
+   Duration  166.90s (transform 170ms, setup 0ms, collect 330ms, tests 165.83s, environment 0ms, prepare 168ms)
+

@@ -130,7 +130,7 @@ describe.runIf(LIVE)("builder reuse across processes (live: wsp init twice on on
     print(`run 1 output:\n${scrub(out1)}`);
     expect(recorded).toHaveLength(1);
     const builderId = recorded[0]!.id;
-    expect(recorded[0]).toMatchObject({ firstLife: true, import: { applied: ["applying-setup", "uploading-files", "installing-tools", "installing-harness"] } });
+    expect(recorded[0]).toMatchObject({ firstLife: true, import: { applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools"] } });
     expect(out1).toMatch(/Boot a \d+ vCPU/);
     expect(out1).not.toContain("Attaching to your earlier builder");
 

@@ -18,6 +18,9 @@ interface SandboxView {
   metadata?: Record<string, string>;
   cpu?: number;
   memMb?: number;
+  /** The provisioned root in GiB; on GET and the listing only, never on the create reply
+   * (measured 2026-09-04). */
+  diskGb?: number;
   createdAt?: string;
 }
 
@@ -99,7 +102,8 @@ export class SolariBackend implements MachineBackend {
         ...(spec.fromSnapshot ? { fromSnapshot: spec.fromSnapshot } : {}),
         ...(spec.cpu ? { cpu: spec.cpu } : {}),
         ...(spec.memMb ? { memMb: spec.memMb } : {}),
-        // camelCase: Solari honours diskGb 1 to 20 and drops disk_gb like any unknown field (measured 2026-09-04).
+        // camelCase: Solari honours diskGb 1 to 20 and drops disk_gb like any unknown field
+        // (measured 2026-09-04).
         ...(spec.diskGb ? { diskGb: spec.diskGb } : {}),
         ...(spec.envs ? { envs: spec.envs } : {}),
         ...(spec.labels ? { metadata: spec.labels } : {}),
@@ -165,7 +169,8 @@ class SolariMachine implements Machine {
 
   async exec(cmd: string, opts?: { timeoutMs?: number }): Promise<ExecResult> {
     // bash -c, never -lc: login shells reset PATH and lose /root/.local/bin.
-    // The exec environment carries PATH and nothing else (measured 2026-09-05): HOME and USER go ahead of every command, SHELL stays unset so a pty reads it off passwd.
+    // The exec environment carries PATH and nothing else (measured 2026-09-05): HOME and USER go ahead of
+    // every command, SHELL stays unset so a pty reads it off passwd.
     return this.backend.request<ExecResult>("POST", this.path("/exec"), {
       cmd: "bash",
       args: ["-c", `${EXEC_ENV}\n${cmd}`],
@@ -205,6 +210,7 @@ class SolariMachine implements Machine {
     return {
       ...(view.cpu !== undefined ? { cpu: view.cpu } : {}),
       ...(view.memMb !== undefined ? { memMb: view.memMb } : {}),
+      ...(view.diskGb !== undefined ? { diskGb: view.diskGb } : {}),
       ...(view.createdAt !== undefined ? { createdAt: view.createdAt } : {}),
     };
   }
