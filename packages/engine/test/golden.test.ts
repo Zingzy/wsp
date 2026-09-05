@@ -464,6 +464,7 @@ describe("golden import stages", () => {
       "installing-harness:Claude Code, Codex installed",
       "installing-tools:Homebrew (1/3)", "installing-tools:gh (2/3)", "installing-tools:bun@1.4.0 (3/3)",
       "installing-tools:3 installed",
+      "installing-mcp:none configured",
       "ready",
     ]);
     expect(puts).toEqual([Buffer.from("tgz-bytes")]);
@@ -485,7 +486,7 @@ describe("golden import stages", () => {
     expect(cmds.indexOf(agent)).toBeLessThan(cmds.indexOf(tool));
     // The reach check is the last thing on the machine before the hand-off.
     expect(cmds.at(-1)).toBe("echo ok");
-    expect(builder.import).toEqual({ recipeHash: "h1", applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools"], smoke: "claude --version && codex --version" });
+    expect(builder.import).toEqual({ recipeHash: "h1", applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools", "installing-mcp"], smoke: "claude --version && codex --version" });
     expect(builder.setupSha).toBe(createHash("sha256").update("true\nclaude-install\ncodex-install").digest("hex"));
     expect(results).toEqual([{
       recipeHash: "h1",
@@ -630,7 +631,7 @@ describe("golden import stages", () => {
     expect(k.stages.slice(k.stages.indexOf("installing-harness"))).toEqual([
       "installing-harness", "installing-harness:Node for Pi", "installing-harness:Node v22.1.0 kept; Pi run on it",
       "installing-harness:Codex (1/2)", "installing-harness:Pi (2/2)", "installing-harness:Codex, Pi installed",
-      "installing-tools:Homebrew (1/3)", "installing-tools:gh (2/3)", "installing-tools:bun@1.4.0 (3/3)", "installing-tools:3 installed", "ready",
+      "installing-tools:Homebrew (1/3)", "installing-tools:gh (2/3)", "installing-tools:bun@1.4.0 (3/3)", "installing-tools:3 installed", "installing-mcp:none configured", "ready",
     ]);
     expect(kept.cmds.indexOf(kept.cmds.find(c => c.includes("node-step"))!)).toBeLessThan(kept.cmds.indexOf(kept.cmds.find(c => c.includes("codex-install"))!));
     expect(b1.setupSha).toBe(createHash("sha256").update("true\nnode-step\ncodex-install\npi-install").digest("hex"));
@@ -860,6 +861,7 @@ describe("golden import stages", () => {
       "installing-harness",
       "installing-harness:no agent ticked",
       "installing-tools:nothing ticked",
+      "installing-mcp:none configured",
       "ready",
     ]);
     expect(puts).toEqual([]);
@@ -888,6 +890,7 @@ describe("golden import stages", () => {
       "uploading-files:already applied",
       "installing-harness:already applied",
       "installing-tools:already applied",
+      "installing-mcp:already applied",
     ]);
     expect(again.ledger).toEqual(builder.import);
     // Nothing ran, so there is no result to report; the saved list from the first run stands.
@@ -919,6 +922,7 @@ describe("golden import stages", () => {
       expect.stringMatching(/^uploading-files:~\/\.claude\.json, ~\/\.claude\/plugins\/installed_plugins\.json re-imported, 300 B in \d+\.\ds$/),
       "installing-harness:already applied",
       "installing-tools:already applied",
+      "installing-mcp:already applied",
     ]);
     expect(again.ledger).toEqual(builder.import);
     // The saved result from the first run stands: a re-import of state files changes no cut and no install.
@@ -942,6 +946,7 @@ describe("golden import stages", () => {
       expect.stringMatching(/^uploading-files:~\/\.claude\.json not re-imported: your files need 300 B packed and 2\.0 KB unpacked, plus 256 MB of headroom, but the machine has 200 MB free$/),
       "installing-harness:already applied",
       "installing-tools:already applied",
+      "installing-mcp:already applied",
     ]);
     expect(again.ledger).toEqual(builder.import);
     // A pack that throws takes the same road.
@@ -1047,6 +1052,7 @@ describe("golden import stages", () => {
         "installing-harness:Codex installed",
         "installing-tools:jq (1/1)",
         "installing-tools:1 installed",
+        "installing-mcp:none configured",
       ]);
       const removals = cmds.slice(0, 3);
       expect(removals.every(c => /\nsetsid bash -c '.*' &\np=\$!\n/s.test(c) && c.includes("while [ $t -lt 600 ]"))).toBe(true);
@@ -1054,7 +1060,7 @@ describe("golden import stages", () => {
       expect(removals[2]).toContain("npm uninstall -g @google/gemini-cli");
       expect(cmds.indexOf(FREE_KB_CMD)).toBeGreaterThan(2);
       // Claude Code was removed from the recipe even though nothing could uninstall it, so its check leaves the smoke.
-      expect(ledger).toEqual({ recipeHash: "h2", applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools"], smoke: "codex --version", recipe: SNAPSHOT });
+      expect(ledger).toEqual({ recipeHash: "h2", applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools", "installing-mcp"], smoke: "codex --version", recipe: SNAPSHOT });
     });
 
     it("a delta with nothing to remove goes straight to the stages", async () => {
@@ -1088,7 +1094,7 @@ describe("golden import stages", () => {
       expect(cmds.filter(c => c.includes("brew install jq"))).toHaveLength(1);
       expect(cmds.some(c => c.includes("brew-bootstrap"))).toBe(false);
       expect(builder).toMatchObject({ kind: "desktop", baseTemplate: "base", firstLife: true, size: { cpu: 2, memMb: 8192 } });
-      expect(builder.import).toEqual({ recipeHash: "h2", applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools"], smoke: "claude --version && gemini --version && codex --version", recipe: SNAPSHOT });
+      expect(builder.import).toEqual({ recipeHash: "h2", applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools", "installing-mcp"], smoke: "claude --version && gemini --version && codex --version", recipe: SNAPSHOT });
       // The version's sha chains the previous version's with what this delta ran, so v(n+1)'s sha says both.
       expect(builder.setupSha).toBe(nextSetupSha("s1", "true", deltaOf({ removals: [] }).import));
       expect(builder.setupSha).toBe(createHash("sha256").update(`s1\n${createHash("sha256").update("true\ncodex-install").digest("hex")}`).digest("hex"));

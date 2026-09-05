@@ -21,6 +21,7 @@ export const UPGRADE_STEPS: readonly StageWords[] = [
   { stage: "uploading-files", start: "Uploading your files", end: "Files uploaded", fail: "Uploading your files failed" },
   { stage: "installing-harness", start: "Installing agents", end: "Agents installed", fail: "Installing agents failed" },
   { stage: "installing-tools", start: "Installing tools", end: "Tools installed", fail: "Installing tools failed" },
+  { stage: "installing-mcp", start: "Installing MCP servers", end: "MCP servers installed", fail: "Installing MCP servers failed" },
   { stage: "ready", start: "Waiting for the machine", end: "Ready", fail: "The machine never became ready" },
   { stage: "snapshotting", start: "Taking the snapshot", end: "Snapshot taken", fail: "Snapshot failed" },
   { stage: "smoke-forking", start: "Booting a fork to prove it", end: "Fork booted and checked", fail: "The fork failed its check" },

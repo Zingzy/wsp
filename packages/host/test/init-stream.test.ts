@@ -286,7 +286,7 @@ describe("stage stream on a terminal", () => {
     const { output, screen } = terminal(80, 30);
     const stream = new StageStream(output, true);
     stream.start();
-    for (const stage of ["creating", "deploying-daemon", "applying-setup", "uploading-files", "installing-harness", "installing-tools"]) stream.push(ev(stage, 1_000, ALREADY_APPLIED));
+    for (const stage of ["creating", "deploying-daemon", "applying-setup", "uploading-files", "installing-harness", "installing-tools", "installing-mcp"]) stream.push(ev(stage, 1_000, ALREADY_APPLIED));
     stream.push(ev("failed", 2_000, "the builder answered exit 1 to a no-op; it is not serving"));
     const view = stream.stop();
     expect(view.steps.map(s => [s.stage, s.state])).toEqual([
@@ -296,10 +296,11 @@ describe("stage stream on a terminal", () => {
       ["uploading-files", "done"],
       ["installing-harness", "done"],
       ["installing-tools", "done"],
+      ["installing-mcp", "done"],
       ["ready", "failed"],
     ]);
     const lines = screen.lines();
-    expect(count(lines, "already applied")).toBe(6);
+    expect(count(lines, "already applied")).toBe(7);
     expect(lines.at(-2)).toContain("The machine never became ready");
     expect(lines.at(-1)).toContain("the builder answered exit 1");
   });

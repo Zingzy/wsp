@@ -11,6 +11,9 @@ import { APT, PRELUDE } from "./dotfiles-presets.js";
 
 export type { RecipeDigest };
 
+/** Rows under the agents rung that are MCP servers, not agents: `agents/mcp/<agent>/<name>`. */
+export const MCP_ID_PREFIX = "agents/mcp/";
+
 /** The recipe row as this module reads it: a structural subset of the
  * collector's manifest entry, so a recipe file parses straight into it. */
 export interface RecipeEntry {
@@ -853,7 +856,7 @@ export const UV = {
   },
 } as const;
 
-const UV_INSTALL = [
+export const UV_INSTALL = [
   "if ! command -v uv >/dev/null 2>&1; then",
   '  arch="$(uname -m)"',
   '  case "$arch" in',
@@ -1005,7 +1008,7 @@ export function agentInstallsFor(entries: readonly RecipeEntry[], extra: Record<
   const table = { ...AGENT_INSTALLERS, ...extra };
   const out: AgentsPlan = { installs: [], skipped: [] };
   for (const e of entries) {
-    if (!ticked(e) || e.rung !== "agents") continue;
+    if (!ticked(e) || e.rung !== "agents" || e.id.startsWith(MCP_ID_PREFIX)) continue;
     const installer = table[name(e)];
     if (installer) out.installs.push({ id: e.id, ...installer });
     else out.skipped.push({ id: e.id, note: "no installer known" });

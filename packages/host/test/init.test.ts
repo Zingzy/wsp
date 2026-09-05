@@ -328,7 +328,7 @@ describe("wsp init, interactive", () => {
     expect(result.handle?.port).toBe(4400);
 
     const out = f.text();
-    const order = ["Machine created", "Base installed", "Setup applied", "Files uploaded", "Agents installed", "Tools installed", "Ready"].map(s => out.indexOf(s));
+    const order = ["Machine created", "Base installed", "Setup applied", "Files uploaded", "Agents installed", "Tools installed", "MCP servers installed", "Ready"].map(s => out.indexOf(s));
     expect(order.every(i => i >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(out).toContain("node v22.12.0");
@@ -525,6 +525,38 @@ describe("wsp init, interactive", () => {
     const saved = loadManifest(join(dirs[0]!, "golden-recipe.json"));
     expect(saved.entries.find(e => e.id === "logins/codex")).toMatchObject({ bring: false });
     expect(saved.entries.find(e => e.id === "logins/codex")?.choice).toBeUndefined();
+  });
+
+  it("MCP servers sit under their agent on the Agents screen, say what each carries, and the summary counts them", async () => {
+    const github: ManifestEntry = { rung: "agents", id: "agents/mcp/claude/github", label: "github", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "bring", detail: "stdio: npx @modelcontextprotocol/server-github; runs via npx; carries a secret: env GITHUB_TOKEN (40 B)" };
+    const notes: ManifestEntry = { rung: "agents", id: "agents/mcp/claude/notes", label: "notes", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "skip", reason: "command ~/Library/Notes/mcp is macOS-only, will not run", detail: "stdio: ~/Library/Notes/mcp; carries no secret" };
+    const f = fake({ collect: async () => ({ entries: [...FIXTURE.entries, github, notes] }), columns: 140 });
+    const run = runInit(f.opts, f.io);
+    for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools"]) {
+      await f.until(rung);
+      await f.press(KEY.enter);
+    }
+    await f.until("Agents");
+    // all row, Claude Code, Codex, the group header, then github: its detail pane names the transport, what it needs and the secret.
+    await f.press(KEY.down, KEY.down, KEY.down, KEY.down);
+    await f.until("carries a secret");
+    const t = f.text();
+    expect(t).toContain("Claude Code MCP servers");
+    expect(t).toContain("defined in the agent's config, which travels with the agent's row");
+    expect(t).toContain("stdio: npx @modelcontextprotocol/server-github; runs via npx; carries a secret");
+    // The macOS-only server is locked off and says why.
+    await f.press(KEY.down);
+    await f.until("is macOS-only, will not run");
+    await f.press(KEY.enter);
+    await f.until("Sign-ins");
+    await f.press(KEY.enter);
+    await f.until(BOOT);
+    expect(f.text()).toMatch(/Installs\s+Claude Code, neovim, 3 tools plus Homebrew's toolchain, 1 MCP server\n/);
+    await f.press(KEY.enter);
+    expect((await run).code).toBe(1);
+    const saved = loadManifest(join(dirs[0]!, "golden-recipe.json"));
+    expect(saved.entries.find(e => e.id === github.id)).toMatchObject({ bring: true });
+    expect(saved.entries.find(e => e.id === notes.id)).toMatchObject({ bring: false });
   });
 
   it("a prepare that fails after the hand-off never happened is reported once, and a failed seal after it is reported too", async () => {
@@ -2583,18 +2615,18 @@ describe("stage stream", () => {
   });
 
   it("a stage already applied is done the moment its frame arrives and is charged no time, whatever follows it", () => {
-    const skipped = ["creating", "deploying-daemon", "applying-setup", "uploading-files", "installing-harness", "installing-tools"].map((stage, i) => ({ ...ev(stage, ALREADY_APPLIED), at: 1_000 + i }));
+    const skipped = ["creating", "deploying-daemon", "applying-setup", "uploading-files", "installing-harness", "installing-tools", "installing-mcp"].map((stage, i) => ({ ...ev(stage, ALREADY_APPLIED), at: 1_000 + i }));
     const view = reduceStages([...skipped, { ...ev("ready"), at: 2_200 }]);
-    expect(view.steps.map(s => s.state)).toEqual(Array<string>(7).fill("done"));
-    expect(view.steps.map(s => s.ms)).toEqual(Array<undefined>(7).fill(undefined));
-    expect(view.steps.slice(0, 6).map(s => s.tail)).toEqual(Array<string[]>(6).fill(["already applied"]));
+    expect(view.steps.map(s => s.state)).toEqual(Array<string>(8).fill("done"));
+    expect(view.steps.map(s => s.ms)).toEqual(Array<undefined>(8).fill(undefined));
+    expect(view.steps.slice(0, 7).map(s => s.tail)).toEqual(Array<string[]>(7).fill(["already applied"]));
   });
 
   it("a failure with nothing running lands on the stage about to run, not on the last stage the builder already held", () => {
-    const skipped = ["creating", "deploying-daemon", "applying-setup", "uploading-files", "installing-tools", "installing-harness"].map(stage => ev(stage, ALREADY_APPLIED));
+    const skipped = ["creating", "deploying-daemon", "applying-setup", "uploading-files", "installing-tools", "installing-harness", "installing-mcp"].map(stage => ev(stage, ALREADY_APPLIED));
     const view = reduceStages([...skipped, ev("failed", "the builder answered exit 1 to a no-op; it is not serving")]);
-    expect(view.steps.map(s => s.state)).toEqual([...Array<string>(6).fill("done"), "failed"]);
-    expect(view.steps[6]!.fail).toBe("The machine never became ready");
+    expect(view.steps.map(s => s.state)).toEqual([...Array<string>(7).fill("done"), "failed"]);
+    expect(view.steps[7]!.fail).toBe("The machine never became ready");
     expect(view.failure).toBe("the builder answered exit 1 to a no-op; it is not serving");
     // A failure while a stage runs still lands on that stage.
     const running = reduceStages([ev("creating"), ev("uploading-files", "4 MB"), ev("failed", "HTTP 413")]);
@@ -2817,7 +2849,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(out.match(/Updating the golden to v2: files, tools, agents and logins on it are kept and only the changes above are applied; workspaces on v1 stay there until you upgrade them\./g)).toHaveLength(1);
     expect(out).not.toMatch(BOOT);
     expect(out).not.toContain("A builder from an earlier wsp init is still running");
-    for (const step of ["Machine ready", "Changes applied", "Files uploaded", "Tools installed", "Agents installed", "Ready", "Snapshot taken", "Fork booted and checked", "Sealed"]) expect(out).toContain(step);
+    for (const step of ["Machine ready", "Changes applied", "Files uploaded", "Tools installed", "Agents installed", "MCP servers installed", "Ready", "Snapshot taken", "Fork booted and checked", "Sealed"]) expect(out).toContain(step);
     expect(out).toContain("your builder from v1, kept since the save");
     expect(out).toMatch(/Golden v2 sealed in \d+s on the builder kept since the save; new workspaces fork it\./);
     expect(out).toContain("The builder stays up (about $0.11/h, one of the account's machine slots) until wsp init updates on it again, a wsp sweep stops it ten minutes after the save, or the provider's six-hour idle kill fires.");

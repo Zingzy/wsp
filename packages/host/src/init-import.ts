@@ -8,10 +8,11 @@ import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readF
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { AGENTS, FISH_CONF_D, MANAGER_HOMES, type ManifestEntry, RC_NAMES, READ_LIMIT, isRcPath, managedRc, rcFiles, sourcedPaths, stripExports } from "@wsp/collect";
+import { AGENTS, FISH_CONF_D, MANAGER_HOMES, MCP_CONFIGS, type ManifestEntry, RC_NAMES, READ_LIMIT, isRcPath, managedRc, rcFiles, sourcedPaths, stripExports } from "@wsp/collect";
 import {
   agentInstallsFor,
   editorInstallsFor,
+  mcpPlanFor,
   planFiles,
   recipeDigest,
   recipeHash,
@@ -295,6 +296,8 @@ export interface ImportOptions {
   /** Keychain secrets already read, by service (see readSecrets). */
   secrets: ReadonlyMap<string, string>;
   platform: "darwin" | "linux";
+  /** Every row of the manifest with its tick, so the MCP stage knows which servers stay and which come out; without it no MCP plan is made. */
+  rows?: readonly ManifestEntry[];
   /** This Mac's Homebrew, for the tap formulae with no Linux bottle: their source repositories. */
   brew?: BrewTable;
   onResult?: (result: ImportResult) => void;
@@ -366,6 +369,16 @@ export function digestOf(source: string, excludes: readonly string[], home: stri
 
 /** The guest's Claude config dir, relative to its home; the laptop's ~/.claude lands there. */
 const CLAUDE_REL = CONFIG_DIR.replace(/^\/root\//, "");
+const GUEST_HOME = "/root";
+
+/** Where a laptop config lands on the guest, by the same rewrite the files plan applies. */
+function guestPath(tildePath: string): string {
+  const rel = tildePath.slice(2);
+  const moved = rel === ".claude.json" ? `${CLAUDE_REL}/.claude.json` : rel.startsWith(".claude/") ? `${CLAUDE_REL}/${rel.slice(".claude/".length)}` : rel;
+  return `${GUEST_HOME}/${moved}`;
+}
+
+const MCP_AGENTS = Object.fromEntries(MCP_CONFIGS.map(c => [c.agent, { label: c.label, format: c.format, files: c.files.map(guestPath) }]));
 
 /** Which of a row's paths its tool rewrites while it runs. Volatility is the tool's property, not a saved choice:
  * the catalog decides for every row it knows, so a recipe file saved before the list existed, or with a list the
@@ -399,6 +412,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
   const tools = toolInstallsFor(bring, opts.brew);
   const editors = editorInstallsFor(bring);
   const agents = agentInstallsFor(bring, { claude: CLAUDE_INSTALLER });
+  const mcp = opts.rows !== undefined ? mcpPlanFor(opts.rows, { home, guestHome: GUEST_HOME, agents: MCP_AGENTS }) : undefined;
   const label = (id: string) => bring.find(e => e.id === id)?.label ?? id;
   const anyFiles = bring.some(e => e.bring && e.rung !== "tools" && e.paths.length > 0 && (e.rung !== "logins" || e.choice === "copy"));
   const count = plan.files.length + plan.secrets.length;
@@ -434,6 +448,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
     ...(agents.node !== undefined ? { node: agents.node } : {}),
     agents: agents.installs,
     skippedAgents: agents.skipped.map(s => ({ id: s.id, name: label(s.id), note: s.note })),
+    ...(mcp !== undefined ? { mcp } : {}),
     ...(opts.onResult !== undefined
       ? {
           onResult: (r: ImportResult) =>

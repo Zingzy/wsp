@@ -400,6 +400,7 @@ export const GoldenStage = z.enum([
   "uploading-files",
   "installing-harness",
   "installing-tools",
+  "installing-mcp",
   "ready",
   "snapshotting",
   "smoke-forking",

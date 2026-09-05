@@ -6,7 +6,7 @@
 // and no question is ever asked on the remote machine.
 import type { Readable, Writable } from "node:stream";
 import { format, styleText } from "node:util";
-import { LARGE_GROUP, RUNGS, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
+import { LARGE_GROUP, MCP_ID_PREFIX, MCP_REMOTE_ID, RUNGS, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
 import { describeAge, type BackendPricing } from "@wsp/engine";
 import type { ChecklistItem } from "@wsp/protocol";
 import { PrepareStoppedError, type GoldenBuilderView, type GoldenRecipe, type GoldenStage, type Runtime } from "@wsp/runtime";
@@ -177,6 +177,7 @@ export const PREPARE_STEPS: readonly StageWords[] = [
   { stage: "uploading-files", start: "Uploading your files", end: "Files uploaded", fail: "Uploading your files failed" },
   { stage: "installing-harness", start: "Installing agents", end: "Agents installed", fail: "Installing agents failed" },
   { stage: "installing-tools", start: "Installing tools", end: "Tools installed", fail: "Installing tools failed" },
+  { stage: "installing-mcp", start: "Installing MCP servers", end: "MCP servers installed", fail: "Installing MCP servers failed" },
   { stage: "ready", start: "Waiting for the machine", end: "Ready", fail: "The machine never became ready" },
 ];
 
@@ -492,6 +493,7 @@ function editorWhy(e: ManifestEntry): string | undefined {
   return `installed on the machine ${how}${e.paths.length > 0 ? "; your config comes along" : ""}`;
 }
 
+const isMcpRow = (e: ManifestEntry): boolean => e.rung === "agents" && e.id.startsWith(MCP_ID_PREFIX);
 /** Where a tool's number came from, for the detail pane. */
 function sizeWhy(e: ManifestEntry, brew: BrewTable): string {
   const size = toolSize(e, brew);
@@ -506,7 +508,7 @@ function detailWhy(e: ManifestEntry, lock: "on" | "off" | undefined, brew: BrewT
   if (lock === "off") return e.reason ?? "";
   if (lock === "on") return "always comes along";
   if (e.rung === "logins") return agentName(e) === "claude" ? CLAUDE_LOGIN_WHY : LOGIN_WHY;
-  if (e.rung === "everything") return e.detail ?? "";
+  if (e.rung === "everything" || isMcpRow(e)) return e.detail ?? "";
   if (e.rung === "agents") {
     if (!hasInstaller(e)) return "its config comes along; no installer yet, install it there yourself";
     const size = agentSize(e);
@@ -527,6 +529,7 @@ function detailWhy(e: ManifestEntry, lock: "on" | "off" | undefined, brew: BrewT
 function whereNothing(e: ManifestEntry): string {
   const remote = e.rung === "editors" ? remoteEditorFor(e.id) : undefined;
   if (remote !== undefined) return `listed in ~/${extensionsFile(remote.dir)} on the machine; nothing installs until you connect`;
+  if (isMcpRow(e)) return "defined in the agent's config, which travels with the agent's row";
   return e.rung === "everything" || e.rung === "editors" ? "nothing to copy" : "reinstalled on the machine";
 }
 
@@ -719,12 +722,13 @@ export function summaryNote(
   const steps = toolInstallsFor(bring, brew).installs;
   const tools = steps.filter(t => ticks.has(t.id)).length;
   const toolchain = steps.some(t => t.id.startsWith("tools/brew-toolchain/")) ? " plus Homebrew's toolchain" : "";
+  const servers = bring.filter(e => isMcpRow(e) && e.id !== MCP_REMOTE_ID).length;
   // A tool installed from its release is pinned per tag: recorded on the first install of a tag, checked while the tag stands.
   const roads = brewfileFor(bring, brew).roads;
   const PIN_WORDS = { none: "checksum recorded on first install", same: "checksum checked against the first install", moved: "new release, checksum recorded" } as const;
   const pinWords = [...new Set(roads.map(r => PIN_WORDS[pinState(r.pin, r.source)]))].join("; ");
   const fromReleases = roads.length === 0 ? "" : `, ${roads.length} from ${roads.length === 1 ? "its" : "their"} GitHub release${roads.length === 1 ? "" : "s"} (${pinWords})`;
-  const installs = [...agents, ...editors, ...(tools > 0 ? [`${tools} tool${tools === 1 ? "" : "s"}${toolchain}${fromReleases}`] : [])];
+  const installs = [...agents, ...editors, ...(tools > 0 ? [`${tools} tool${tools === 1 ? "" : "s"}${toolchain}${fromReleases}`] : []), ...(servers > 0 ? [`${servers} MCP server${servers === 1 ? "" : "s"}`] : [])];
   const closing: [string, string][] = [
     ["Upload", upload > PACK_BUDGET_BYTES ? `${fmtBytes(upload)}, over the ${fmtBytes(PACK_BUDGET_BYTES)} the machine's disk allows` : `${fmtBytes(upload)}, nothing has left this computer yet`],
     ["Installs", installs.length > 0 ? installs.join(", ") : "nothing; the machine boots bare"],
@@ -921,6 +925,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       home: opts.home,
       secrets,
       platform: opts.platform,
+      rows: manifest.entries.map(e => ({ ...e, bring: ticks.has(e.id) })),
       brew,
       onResult: r => {
         writeFileSync(resultsPath, `${JSON.stringify(r, null, 2)}\n`);

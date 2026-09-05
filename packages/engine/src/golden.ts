@@ -13,6 +13,7 @@ import { NODE_PATH_LINE, type AgentInstall, type NodeInstall, type ShellInstall,
 import { GUARD_SLACK_S, MIB, TOOL_TIMEOUT_S, fmtBytes, freeBytes, guarded, installTools, reasonOf, type ToolResult } from "./golden-tools.js";
 import { BUILDER_DISK_GB } from "./tool-sizes.js";
 import { assertFirstLife } from "./lifecycle.js";
+import { applyMcp, type McpPlan, type McpResult } from "./golden-mcp.js";
 import type { Machine, MachineBackend, MachineKind, MachineState } from "./machine.js";
 import { importInto } from "./vault.js";
 
@@ -166,11 +167,13 @@ export interface GoldenImport {
   agents: AgentInstall[];
   /** Ticked agents the plan set aside (no installer, no pinned Node); they count as ticked and land in the result. */
   skippedAgents?: { id: string; name: string; note: string }[];
+  /** The MCP servers to keep in or take out of each agent's config once it is on the machine; absent when no row is one. */
+  mcp?: McpPlan;
   /** Called once per prepare that ran anything; a re-run that skipped every stage has nothing to report. */
   onResult?: (result: ImportResult) => void;
 }
 
-export type ImportStage = "applying-setup" | "uploading-files" | "installing-tools" | "installing-harness";
+export type ImportStage = "applying-setup" | "uploading-files" | "installing-tools" | "installing-harness" | "installing-mcp";
 
 export interface ImportLedger {
   recipeHash: string;
@@ -195,6 +198,7 @@ export interface ImportResult {
   homebrew?: { tag: string; commit: string };
   tools: ToolResult[];
   agents: AgentResult[];
+  mcp?: McpResult[];
 }
 
 export interface ApplyImportOptions {
@@ -360,6 +364,18 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
       result.tools.push(...tools.tools);
       if (tools.homebrew !== undefined) result.homebrew = tools.homebrew;
       mark("installing-tools");
+    }
+    // The edit runs on every pass that has a plan: an attach re-uploads the volatile ~/.claude.json, which brings every
+    // laptop definition back as it was. It is idempotent and touches only the servers the plan names.
+    if (imp.mcp !== undefined) {
+      ran = true;
+      result.mcp = await applyMcp(machine, imp.mcp, stage);
+      mark("installing-mcp");
+    } else if (done("installing-mcp")) {
+      stage("installing-mcp", ALREADY_APPLIED);
+    } else {
+      stage("installing-mcp", "none configured");
+      mark("installing-mcp");
     }
     if (ran) {
       // A builder whose exec died (a full disk did it once) would be sealed and handed off answering nothing.
