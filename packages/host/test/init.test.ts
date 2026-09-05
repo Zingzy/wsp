@@ -2927,6 +2927,52 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(shared.machines).toHaveLength(3);
   });
 
+  it("a binary row unticked after the seal comes off on the update, and the tally names what was removed", async () => {
+    const { store, shared, first, next } = await sealed();
+    const saved = JSON.parse(readFileSync(recipePath(first.opts.statePath), "utf8")) as { entries: ManifestEntry[] };
+    const path = join(dirname(first.opts.statePath), "recipe-without-nvim.json");
+    writeFileSync(path, JSON.stringify({ entries: saved.entries.map(e => (e.id === "editors/nvim" ? { ...e, bring: false } : e)) }));
+    const f = next({ tty: false, manifestPath: path });
+    const builder = shared.machines[0]!;
+    const before = builder.execLog.length;
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    const out = f.text();
+    expect(out).toContain("remove 1 editor: neovim");
+    expect(out).toContain("Small change: update on the builder kept since the save");
+    const ran = builder.execLog.slice(before);
+    expect(ran.filter(c => c.includes("apt-get purge -y -qq neovim && apt-get autoremove -y -qq --purge"))).toHaveLength(1);
+    expect(ran.some(c => c.includes("apt-get install"))).toBe(false);
+    expect(out).toMatch(/Golden v2 sealed in \d+s on the builder kept since the save/);
+    // The fixture home has no nvim config, so the binary is the one thing that comes off.
+    expect(out).toMatch(/Tools and agents: 0 installed, 1 removed, 0 failed, 0 skipped; the list is in .*golden-import\.json/);
+    expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({ tools: [], removed: [{ what: "editor", id: "editors/nvim", label: "neovim", outcome: "removed" }] });
+    expect(await store.get("goldens", "default")).toMatchObject({ head: 2 });
+  });
+
+  it("the tally counts tools, editors and agents removed, says how many were not, and leaves an update's file removals to the saved list", async () => {
+    const { shared, first, next } = await sealed();
+    const saved = JSON.parse(readFileSync(recipePath(first.opts.statePath), "utf8")) as { entries: ManifestEntry[] };
+    const path = join(dirname(first.opts.statePath), "recipe-less.json");
+    writeFileSync(path, JSON.stringify({ entries: saved.entries.map(e => (e.id === "editors/nvim" || e.id === "shell/zshrc" ? { ...e, bring: false } : e)) }));
+    shared.execImpl = (_m, cmd) => (cmd.includes("apt-get purge -y -qq neovim") ? { exitCode: 100, stdout: "", stderr: "E: Could not get lock /var/lib/dpkg/lock-frontend" } : guestAnswer(cmd));
+    const f = next({ tty: false, manifestPath: path });
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    const out = f.text();
+    expect(out).toContain("remove 1 file: ~/.zshrc");
+    expect(out).toContain("remove 1 editor: neovim");
+    const tally = out.slice(out.indexOf("Tools and agents:"));
+    expect(tally.split("\n").slice(0, 2).map(l => l.replace(/^[│◇●]\s+/, ""))).toEqual([
+      expect.stringMatching(/^Tools and agents: 0 installed, 0 removed, 0 failed, 1 not removed, 0 skipped; the list is in .*golden-import\.json$/),
+      "neovim not removed: E: Could not get lock /var/lib/dpkg/lock-frontend",
+    ]);
+    expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({
+      removed: [
+        { what: "file", id: "shell/zshrc", outcome: "removed" },
+        { what: "editor", id: "editors/nvim", outcome: "failed", note: "E: Could not get lock /var/lib/dpkg/lock-frontend" },
+      ],
+    });
+  });
+
   it("when the cap refuses the smoke fork the update falls back and the line about the builder staying up is not printed", async () => {
     const { shared, first, next } = await sealed();
     writeFileSync(join(first.opts.home, ".zshrc"), "export A=1\nexport B=2\n");

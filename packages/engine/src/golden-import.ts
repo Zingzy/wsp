@@ -552,8 +552,12 @@ export function toolUninstall(e: RecipeEntry): { cmd: string } | { note: string 
   if (manager === undefined) return { note: "no manager known for this row" };
   const pkg = e.id.slice(`tools/${manager}/`.length);
   switch (manager) {
-    case "brew":
-      return { cmd: withPath(asLinuxbrew(`uninstall ${pkg}`)) };
+    case "brew": {
+      if (!pkg.includes("/")) return { cmd: withPath(asLinuxbrew(`uninstall ${pkg}`)) };
+      // A tap formula with no Linux bottle took the road to /usr/local/bin under the formula's name, not to the cellar.
+      const bin = pkg.slice(pkg.lastIndexOf("/") + 1);
+      return { cmd: withPath(`if [ -x ${BREW} ] && ${asLinuxbrew(`list --formula ${pkg}`)} >/dev/null 2>&1; then ${asLinuxbrew(`uninstall ${pkg}`)}; else rm -f /usr/local/bin/${squote(bin)}; fi`) };
+    }
     case "npm":
       return { cmd: withPath(`npm uninstall -g ${pkg}`) };
     case "pnpm":
@@ -678,6 +682,17 @@ const APT_EDITORS: Record<string, { name: string; pkg: string; bin: string }> = 
   vim: { name: "vim", pkg: "vim", bin: "vim" },
   emacs: { name: "emacs", pkg: "emacs-nox", bin: "emacs" },
 };
+
+/** An editors row that puts a binary on the machine: its name as the stage says it, and how it comes off (the apt
+ * package purged with what it alone pulled in; helix's tree and link). Undefined for a row that is only its files. */
+export function terminalEditor(id: string): { name: string; uninstall: string } | undefined {
+  if (!id.startsWith("editors/")) return undefined;
+  const key = id.slice("editors/".length);
+  const apt = APT_EDITORS[key];
+  if (apt !== undefined) return { name: apt.name, uninstall: `export DEBIAN_FRONTEND=noninteractive\napt-get purge -y -qq ${apt.pkg} && apt-get autoremove -y -qq --purge` };
+  if (key === "helix") return { name: "helix", uninstall: "rm -rf /opt/helix /usr/local/bin/hx" };
+  return undefined;
+}
 
 export interface RemoteEditor {
   name: string;

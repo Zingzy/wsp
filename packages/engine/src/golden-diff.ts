@@ -3,7 +3,7 @@
 // against the recipe now, as rows to apply on top and rows to take off. Pure;
 // golden.ts runs the result on a fork or on the kept builder.
 import { MCP_ID_PREFIX, type RecipeDigest } from "@wsp/protocol";
-import { AGENT_INSTALLERS, agentUninstall, toolUninstall, type AgentInstaller, type RecipeEntry } from "./golden-import.js";
+import { AGENT_INSTALLERS, agentUninstall, extensionsFile, remoteEditorFor, terminalEditor, toolUninstall, type AgentInstaller, type RecipeEntry } from "./golden-import.js";
 
 type Tick = RecipeDigest["ticks"][number];
 type DigestFile = RecipeDigest["files"][number];
@@ -17,6 +17,8 @@ export interface FileChange {
   change: Change | "missing";
 }
 
+/** A row installed as a step of the tools stage: a tools row, an editors row that puts a binary on the machine, or a
+ * remote editor's extension list. */
 export interface ToolChange {
   id: string;
   label: string;
@@ -24,6 +26,8 @@ export interface ToolChange {
   /** Pins, when the row carries one; a changed pin is a reinstall. */
   from?: string;
   to?: string;
+  /** The rows the step is written from when it is more than the row itself: an extension list from every ticked extension row. */
+  rows?: string[];
 }
 
 export interface AgentChange {
@@ -49,7 +53,7 @@ export interface RecipeDiff {
 
 /** One thing taken off the machine, or noted when nothing can take it off. */
 export interface Removal {
-  what: "file" | "tool" | "agent";
+  what: "file" | "tool" | "editor" | "agent";
   id: string;
   label: string;
   /** Runs on the guest; absent when the manager has no uninstall, and `note` says so. */
@@ -64,6 +68,16 @@ const rungOf = (id: string): string => id.slice(0, id.indexOf("/"));
 export const nameOf = (id: string): string => id.slice(id.lastIndexOf("/") + 1);
 const byRung = (ticks: readonly Tick[], rung: string): Map<string, Tick> => new Map(ticks.filter(t => rungOf(t.id) === rung).map(t => [t.id, t]));
 const fileKey = (f: DigestFile): string => `${f.id}\0${f.dest}`;
+/** A remote editor's extension row, captured to the list it belongs in. */
+const EXTENSION_ROW = /^(editors\/[a-z]+-ext)\//;
+const extensionLists = (ticks: readonly Tick[]): Map<string, string[]> => {
+  const out = new Map<string, string[]>();
+  for (const t of ticks) {
+    const list = EXTENSION_ROW.exec(t.id)?.[1];
+    if (list !== undefined) (out.get(list) ?? out.set(list, []).get(list)!).push(t.id);
+  }
+  return out;
+};
 
 /** `labelOf` gives the person's words for a row; the id's last segment when the caller has none. */
 export function diffRecipes(from: RecipeDigest, to: RecipeDigest, labelOf: (id: string) => string = nameOf): RecipeDiff {
@@ -96,6 +110,29 @@ export function diffRecipes(from: RecipeDigest, to: RecipeDigest, labelOf: (id: 
   }
   for (const [id, t] of toolsBefore) if (!toolsAfter.has(id)) diff.tools.push({ id, label: labelOf(id), change: "removed", ...(t.version !== undefined ? { from: t.version } : {}) });
 
+  // An editor's config, when it has one, is in the files above; the binary is an install of its own, named as the stage names it.
+  const editorsBefore = byRung(from.ticks, "editors");
+  const editorsAfter = byRung(to.ticks, "editors");
+  for (const id of editorsAfter.keys()) {
+    const ed = terminalEditor(id);
+    if (ed !== undefined && !editorsBefore.has(id)) diff.tools.push({ id, label: ed.name, change: "added" });
+  }
+  for (const id of editorsBefore.keys()) {
+    const ed = terminalEditor(id);
+    if (ed !== undefined && !editorsAfter.has(id)) diff.tools.push({ id, label: ed.name, change: "removed" });
+  }
+  // The list file is written whole from every ticked extension row, so any change to them is one change of the list.
+  const listsBefore = extensionLists(from.ticks);
+  const listsAfter = extensionLists(to.ticks);
+  for (const id of new Set([...listsBefore.keys(), ...listsAfter.keys()])) {
+    const was = [...(listsBefore.get(id) ?? [])].sort();
+    const now = [...(listsAfter.get(id) ?? [])].sort();
+    if (was.join("\0") === now.join("\0")) continue;
+    const label = `${remoteEditorFor(id)?.name ?? id} extension list`;
+    const change: Change = was.length === 0 ? "added" : now.length === 0 ? "removed" : "changed";
+    diff.tools.push({ id, label, change, ...(now.length > 0 ? { rows: now } : {}) });
+  }
+
   const agentsBefore = byRung(from.ticks, "agents");
   const agentsAfter = byRung(to.ticks, "agents");
   for (const id of agentsAfter.keys()) if (!agentsBefore.has(id)) diff.agents.push({ id, label: labelOf(id), change: "added" });
@@ -122,7 +159,7 @@ export function isEmptyDiff(d: RecipeDiff): boolean {
 export function rowsToApply(d: RecipeDiff): Set<string> {
   const ids = new Set<string>();
   for (const f of d.files) if (f.change === "added" || f.change === "changed") ids.add(f.id);
-  for (const t of d.tools) if (t.change !== "removed") ids.add(t.id);
+  for (const t of d.tools) if (t.change !== "removed") for (const id of t.rows ?? [t.id]) ids.add(id);
   for (const a of d.agents) if (a.change === "added") ids.add(a.id);
   for (const l of d.logins) if (l.to === "copy") ids.add(l.id);
   return ids;
@@ -151,6 +188,16 @@ export function removalsFor(d: RecipeDiff, from: RecipeDigest, installers: Recor
   for (const f of d.files) if (f.change === "removed") out.push(fileRemoval(f));
   for (const t of d.tools) {
     if (t.change !== "removed") continue;
+    const editor = terminalEditor(t.id);
+    if (editor !== undefined) {
+      out.push({ what: "editor", id: t.id, label: t.label, cmd: editor.uninstall });
+      continue;
+    }
+    const remote = t.id.endsWith("-ext") ? remoteEditorFor(t.id) : undefined;
+    if (remote !== undefined) {
+      out.push({ what: "editor", id: t.id, label: t.label, cmd: `rm -f -- ${squote(`${GUEST_HOME}/${extensionsFile(remote.dir)}`)}` });
+      continue;
+    }
     const tick = from.ticks.find(x => x.id === t.id);
     const row: RecipeEntry | undefined = tick === undefined ? undefined : { rung: "tools", id: tick.id, label: t.label, paths: [], bytes: 0, default: "bring", bring: true, ...(tick.version !== undefined ? { version: tick.version } : {}) };
     const r = row === undefined ? { note: "row not in the recipe the golden was built from" } : toolUninstall(row);
@@ -181,7 +228,8 @@ export function describeDiff(d: RecipeDiff): string[] {
   for (const change of ["added", "changed", "removed"] as const) {
     group(change, d.files.filter(f => f.change === change).map(f => `~/${f.dest}`), "file");
     if (change === "changed") for (const f of d.files.filter(x => x.change === "missing")) lines.push(`kept on the golden, no longer on this computer: ~/${f.dest}`);
-    group(change, d.tools.filter(t => t.change === change).map(t => (change === "changed" ? `${t.label} (${t.from ?? "unpinned"} to ${t.to ?? "unpinned"})` : t.label)), "tool");
+    group(change, d.tools.filter(t => t.change === change && rungOf(t.id) === "tools").map(t => (change === "changed" ? `${t.label} (${t.from ?? "unpinned"} to ${t.to ?? "unpinned"})` : t.label)), "tool");
+    group(change, d.tools.filter(t => t.change === change && rungOf(t.id) === "editors").map(t => t.label), "editor");
     if (change !== "changed") {
       const agents = d.agents.filter(a => a.change === change);
       group(change, agents.filter(a => !a.id.startsWith(MCP_ID_PREFIX)).map(a => a.label), "agent");

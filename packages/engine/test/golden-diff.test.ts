@@ -76,6 +76,55 @@ describe("recipe diff", () => {
       apply: [],
     },
     {
+      name: "a terminal editor ticked later, with or without a config, is an install named as the machine will name it",
+      from: snap([row("editors", "editors/nvim")], [file("editors/nvim", ".config/nvim")]),
+      to: snap([row("editors", "editors/nvim"), row("editors", "editors/vim"), row("editors", "editors/helix")], [file("editors/nvim", ".config/nvim"), file("editors/helix", ".config/helix")]),
+      diff: { ...EMPTY, files: [{ id: "editors/helix", dest: ".config/helix", change: "added" }], tools: [{ id: "editors/vim", label: "vim", change: "added" }, { id: "editors/helix", label: "helix", change: "added" }] },
+      apply: ["editors/vim", "editors/helix"],
+    },
+    {
+      name: "a terminal editor unticked comes off with its config",
+      from: snap([row("editors", "editors/nvim"), row("editors", "editors/vim")], [file("editors/nvim", ".config/nvim")]),
+      to: snap([row("editors", "editors/vim")]),
+      diff: { ...EMPTY, files: [{ id: "editors/nvim", dest: ".config/nvim", change: "removed" }], tools: [{ id: "editors/nvim", label: "neovim", change: "removed" }] },
+      apply: [],
+    },
+    {
+      name: "a remote editor's settings row is its file alone",
+      from: snap([]),
+      to: snap([row("editors", "editors/vscode")], [file("editors/vscode", ".vscode-server/data/Machine/settings.json")]),
+      diff: { ...EMPTY, files: [{ id: "editors/vscode", dest: ".vscode-server/data/Machine/settings.json", change: "added" }] },
+      apply: ["editors/vscode"],
+    },
+    {
+      name: "the first extension ticked adds its editor's list, written from every ticked extension row",
+      from: snap([]),
+      to: snap([row("editors", "editors/vscode-ext/ms-python.python")]),
+      diff: { ...EMPTY, tools: [{ id: "editors/vscode-ext", label: "VS Code extension list", change: "added", rows: ["editors/vscode-ext/ms-python.python"] }] },
+      apply: ["editors/vscode-ext/ms-python.python"],
+    },
+    {
+      name: "one more extension ticked is a change of the list, planned from every ticked row and never the one row alone",
+      from: snap([row("editors", "editors/vscode-ext/ms-python.python")]),
+      to: snap([row("editors", "editors/vscode-ext/ms-python.python"), row("editors", "editors/vscode-ext/esbenp.prettier-vscode")]),
+      diff: { ...EMPTY, tools: [{ id: "editors/vscode-ext", label: "VS Code extension list", change: "changed", rows: ["editors/vscode-ext/esbenp.prettier-vscode", "editors/vscode-ext/ms-python.python"] }] },
+      apply: ["editors/vscode-ext/ms-python.python", "editors/vscode-ext/esbenp.prettier-vscode"],
+    },
+    {
+      name: "one extension unticked is a change of the list from the rows still ticked",
+      from: snap([row("editors", "editors/vscode-ext/ms-python.python"), row("editors", "editors/vscode-ext/esbenp.prettier-vscode")]),
+      to: snap([row("editors", "editors/vscode-ext/ms-python.python")]),
+      diff: { ...EMPTY, tools: [{ id: "editors/vscode-ext", label: "VS Code extension list", change: "changed", rows: ["editors/vscode-ext/ms-python.python"] }] },
+      apply: ["editors/vscode-ext/ms-python.python"],
+    },
+    {
+      name: "the last extension unticked removes the list; another editor's list is untouched",
+      from: snap([row("editors", "editors/vscode-ext/ms-python.python"), row("editors", "editors/cursor-ext/anysphere.cursorpyright")]),
+      to: snap([row("editors", "editors/cursor-ext/anysphere.cursorpyright")]),
+      diff: { ...EMPTY, tools: [{ id: "editors/vscode-ext", label: "VS Code extension list", change: "removed" }] },
+      apply: [],
+    },
+    {
       name: "an agent added",
       from: snap([row("agents", "agents/claude")]),
       to: snap([row("agents", "agents/claude"), row("agents", "agents/codex")]),
@@ -192,6 +241,28 @@ describe("removals", () => {
     expect(removed([row("tools", id)])).toEqual([{ what: "tool", id, label: expect.any(String), note }]);
   });
 
+  it.each([
+    ["editors/nvim", "neovim", "apt-get purge -y -qq neovim && apt-get autoremove -y -qq --purge"],
+    ["editors/vim", "vim", "apt-get purge -y -qq vim && apt-get autoremove -y -qq --purge"],
+    ["editors/emacs", "emacs", "apt-get purge -y -qq emacs-nox && apt-get autoremove -y -qq --purge"],
+    ["editors/helix", "helix", "rm -rf /opt/helix /usr/local/bin/hx"],
+  ])("a removed %s is taken off by the road that put it on: apt purged with what it alone pulled in, helix's tree and link", (id, label, cmd) => {
+    const got = removed([row("editors", id, { label: `${label}, installed with your config` })]);
+    expect(got).toEqual([{ what: "editor", id, label, cmd: expect.stringContaining(cmd) }]);
+    if (id !== "editors/helix") expect(got[0]!.cmd).toContain("export DEBIAN_FRONTEND=noninteractive\n");
+  });
+
+  it("a removed extension list is its file taken off the machine", () => {
+    expect(removed([row("editors", "editors/cursor-ext/anysphere.cursorpyright")])).toEqual([{ what: "editor", id: "editors/cursor-ext", label: "Cursor extension list", cmd: "rm -f -- '/root/.cursor-server/extensions.txt'" }]);
+  });
+
+  it("a removed tap formula comes off through brew when brew put it there, else its road binary leaves /usr/local/bin", () => {
+    const [r] = removed([row("tools", "tools/brew/zingzy/tap/diskbloom")]);
+    expect(r).toMatchObject({ what: "tool", id: "tools/brew/zingzy/tap/diskbloom" });
+    expect(r!.cmd).toMatch(/^export PATH=/);
+    expect(r!.cmd).toMatch(/if \[ -x \/home\/linuxbrew\/.linuxbrew\/bin\/brew \] && su .*brew list --formula zingzy\/tap\/diskbloom.* >\/dev\/null 2>&1; then su .*brew uninstall zingzy\/tap\/diskbloom.*; else rm -f \/usr\/local\/bin\/'diskbloom'; fi$/);
+  });
+
   it("a removed agent comes off through the inverse of its installer, with its smoke; one without an inverse is noted", () => {
     const got = removed([row("agents", "agents/codex"), row("agents", "agents/aider"), row("agents", "agents/hermes"), row("agents", "agents/claude"), row("agents", "agents/zed")]);
     expect(got).toEqual([
@@ -210,21 +281,23 @@ describe("removals", () => {
 
 describe("describing and sizing the delta", () => {
   it("one line per kind of change, in plain words", () => {
-    const from = snap([row("shell", "shell/zshrc"), row("tools", "tools/npm/bun", { version: "1.4.0" }), row("agents", "agents/codex"), row("logins", "logins/gh", { choice: "copy" }), row("logins", "logins/codex", { choice: "machine" })], [
+    const from = snap([row("shell", "shell/zshrc"), row("tools", "tools/npm/bun", { version: "1.4.0" }), row("editors", "editors/helix"), row("agents", "agents/codex"), row("logins", "logins/gh", { choice: "copy" }), row("logins", "logins/codex", { choice: "machine" })], [
       file("shell/zshrc", ".zshrc"),
       file("logins/gh", ".config/gh/hosts.yml"),
     ]);
     const to = snap(
-      [row("shell", "shell/zshrc"), row("shell", "shell/starship"), row("tools", "tools/npm/bun", { version: "1.5.0" }), row("tools", "tools/brew/jq"), row("agents", "agents/aider"), row("logins", "logins/gh", { choice: "machine" }), row("logins", "logins/codex", { choice: "copy" })],
+      [row("shell", "shell/zshrc"), row("shell", "shell/starship"), row("tools", "tools/npm/bun", { version: "1.5.0" }), row("tools", "tools/brew/jq"), row("editors", "editors/vim"), row("editors", "editors/vscode-ext/ms-python.python"), row("agents", "agents/aider"), row("logins", "logins/gh", { choice: "machine" }), row("logins", "logins/codex", { choice: "copy" })],
       [file("shell/zshrc", ".zshrc", 99), file("shell/starship", ".config/starship.toml"), file("logins/codex", ".codex/auth.json")],
     );
     expect(describeDiff(diffRecipes(from, to))).toEqual([
       "add 2 files: ~/.config/starship.toml, ~/.codex/auth.json",
       "add 1 tool: jq",
+      "add 2 editors: vim, VS Code extension list",
       "add 1 agent: aider",
       "update 1 file: ~/.zshrc",
       "update 1 tool: bun (1.4.0 to 1.5.0)",
       "remove 1 file: ~/.config/gh/hosts.yml",
+      "remove 1 editor: helix",
       "remove 1 agent: codex",
       "gh: sign in on the machine is not done by an update, so it would not be in the golden; pick the rebuild for it",
       "copy the codex",
@@ -236,6 +309,9 @@ describe("describing and sizing the delta", () => {
     const tools = (n: number) => Array.from({ length: n }, (_, i) => row("tools", `tools/brew/t${i}`));
     expect(isSmallDelta(diffRecipes(base, snap(tools(SMALL_TOOLS))), bytesIn(snap(tools(SMALL_TOOLS))))).toBe(true);
     expect(isSmallDelta(diffRecipes(base, snap(tools(SMALL_TOOLS + 1))), bytesIn(snap(tools(SMALL_TOOLS + 1))))).toBe(false);
+    // A terminal editor is one install like any tool.
+    const withEditor = snap([...tools(SMALL_TOOLS), row("editors", "editors/vim")]);
+    expect(isSmallDelta(diffRecipes(base, withEditor), bytesIn(withEditor))).toBe(false);
     const agent = snap([row("agents", "agents/codex")]);
     expect(isSmallDelta(diffRecipes(base, agent), bytesIn(agent))).toBe(false);
     const gone = snap([row("agents", "agents/codex")]);
