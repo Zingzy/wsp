@@ -163,6 +163,41 @@ describe("connectDaemonLink", () => {
     }
   }, 15_000);
 
+  it("a request in the window between socket open and the auth reply is refused, not put on the wire", async () => {
+    // The daemon caps unauthenticated bytes, so a keystroke or paste that
+    // reaches the wire before the auth reply would close the socket 4401.
+    daemon = await startTestDaemon();
+    const wire: string[] = [];
+    let inWindow: Promise<unknown> | undefined;
+    class Spy extends WebSocket {
+      constructor(url: string | URL) {
+        super(url);
+        // The link's open handler has sent auth by the time this microtask runs; no reply can have arrived yet.
+        this.addEventListener("open", () => queueMicrotask(() => {
+          inWindow ??= link!.request("pty.write", { ptyId: "nope", data: "x".repeat(8 * 1024) }).catch((e: unknown) => e);
+        }));
+        this.addEventListener("message", () => wire.push("reply"));
+      }
+      override send(data: string): void {
+        wire.push(`send:${String((JSON.parse(data) as Record<string, unknown>)["op"])}`);
+        super.send(data);
+      }
+    }
+    const statuses: DaemonLinkStatus[] = [];
+    link = connectDaemonLink({
+      reach: async () => ({ url: `ws://127.0.0.1:${daemon!.port}`, daemonToken: TOKEN }),
+      onEvent: () => {},
+      onStatus: s => statuses.push(s),
+      WebSocketCtor: Spy,
+    });
+    await until(() => link!.status() === "live");
+    expect(inWindow).toBeDefined();
+    expect(await inWindow).toEqual(new Error("daemon unreachable"));
+    expect(wire.slice(0, 2)).toEqual(["send:auth", "reply"]);
+    expect(statuses).toEqual(["connecting", "live"]);
+    expect((await link.request("ping"))["ok"]).toBe(true);
+  });
+
   it("without a daemon token it keeps waiting and dials once the runtime reports one", async () => {
     daemon = await startTestDaemon();
     let token: string | undefined;

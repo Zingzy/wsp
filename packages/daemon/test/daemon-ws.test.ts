@@ -122,6 +122,7 @@ describe("daemon WS server", () => {
       raw.once("connect", resolve);
       raw.once("error", reject);
     });
+    raw.on("error", () => {}); // the daemon may reset the connection while the close frame is still being read
     raw.write(["GET / HTTP/1.1", `Host: 127.0.0.1:${daemon.port}`, "Upgrade: websocket", "Connection: Upgrade", "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==", "Sec-WebSocket-Version: 13", "", ""].join("\r\n"));
     await new Promise<void>(resolve => raw.once("data", () => resolve()));
     raw.write(Buffer.from([0xc1, 0x80, 0, 0, 0, 0]));
@@ -154,6 +155,7 @@ describe("daemon WS server", () => {
       raw.once("connect", resolve);
       raw.once("error", reject);
     });
+    raw.on("error", () => {}); // the daemon may reset the connection while the close frame is still being read
     raw.write(["GET / HTTP/1.1", `Host: 127.0.0.1:${daemon.port}`, "Upgrade: websocket", "Connection: Upgrade", "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==", "Sec-WebSocket-Version: 13", "", ""].join("\r\n"));
     await new Promise<void>(resolve => raw.once("data", () => resolve()));
     // One masked text frame announcing 50 MiB, then only 8 KiB of it: under ws's own cap, so ws would sit and buffer.

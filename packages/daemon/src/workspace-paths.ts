@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { realpath } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import type { DaemonErrorCode } from "@wsp/protocol";
 
-export type OpErrorCode = "outside-root" | "not-found" | "not-a-directory" | "not-a-file" | "not-a-git-repo" | "bad-request" | "forbidden";
+export type OpErrorCode = DaemonErrorCode;
 
 /** A refusal the client can branch on; main.ts copies code onto the wire error. */
 export class OpError extends Error {
