@@ -499,7 +499,9 @@ export class GhosttyTerminalCore {
       ghosttyUnshiftedCodepoint(event, this.keyboardLayoutMap),
     );
 
-    const text = event.key.length === 1 ? event.key : "";
+    // The macOS apprt hands the encoder U+007F for Backspace; without it a
+    // Backspace whose code the browser left blank encodes nothing.
+    const text = event.key.length === 1 ? event.key : event.key === "Backspace" ? "\x7f" : "";
     const textBytes = encoder.encode(text);
     const textPointer = textBytes.length === 0 ? 0 : this.runtime.alloc(textBytes.length);
     if (textPointer !== 0) this.runtime.bytes(textPointer, textBytes.length).set(textBytes);

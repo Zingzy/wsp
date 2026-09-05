@@ -1,8 +1,9 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/ThreadTerminalDrawer.tsx at 57a66608 (MIT).
 // The viewport's six runtime hook sites (attach stream, write, resize, server
 // config, preview open, local api) are props here: a TerminalIo per terminal
-// and a TerminalViewportConfig. Selection actions, the context menu and the
-// keybinding checks left with them; the surface keeps its own copy and paste.
+// and a TerminalViewportConfig. Selection actions and the context menu left
+// with them; the surface keeps its own copy and paste and lets the Command
+// chords the app binds bubble to the window dispatcher.
 import {
   Plus,
   Square,
@@ -25,6 +26,7 @@ import {
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { Button } from "./ui/button";
 import { PanelTabCloseButton } from "./ui/panel-tab-close-button";
+import { isTerminalAppShortcut } from "../keybindings";
 import { cn } from "../lib/utils";
 import { getTerminalLabel } from "../lib/terminalLabels";
 import { GhosttyTerminalSurface, type GhosttyTerminalFont, type GhosttyTerminalSurfaceOptions } from "../terminal/ghostty/surface";
@@ -196,7 +198,7 @@ export function TerminalViewport({
         onData: (data) => io.write(data),
         onResize: (cols, rows) => io.resize(cols, rows),
         onSelectionChange: () => {},
-        beforeKey: () => true,
+        beforeKey: event => !isTerminalAppShortcut(event),
         onLinkActivate: (text, event) => {
           if (isTerminalLinkActivation(event)) activateLink(text);
         },

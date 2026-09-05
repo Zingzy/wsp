@@ -3,6 +3,7 @@
 // lookup and the platform labels. Left out: the thread-jump and model-picker
 // hint helpers and the raw terminal key sequences, which belong to features
 // this shell does not have. Contract types come from keybindingTypes.ts.
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "./keybindingDefaults.js";
 import {
   type KeybindingCommand,
   type KeybindingShortcut,
@@ -207,6 +208,21 @@ export function resolveShortcutCommand(
     return binding.command;
   }
   return null;
+}
+
+/**
+ * A Command chord the rules bind while a terminal has focus. The surface lets
+ * it bubble to the dispatcher instead of encoding it. Control and Option
+ * chords are the terminal's on every platform, so a Control-based mod never
+ * claims one.
+ */
+export function isTerminalAppShortcut(
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig = DEFAULT_RESOLVED_KEYBINDINGS,
+  platform = navigator.platform,
+): boolean {
+  if (!event.metaKey) return false;
+  return resolveShortcutCommand(event, keybindings, { platform, context: { terminalFocus: true } }) !== null;
 }
 
 function formatShortcutKeyLabel(key: string): string {

@@ -391,6 +391,38 @@ export function isTerminalPasteShortcut(
   return isMacPlatform(platform) ? event.metaKey : event.ctrlKey && event.shiftKey;
 }
 
+const MAC_COMMAND_KEY_DATA: Readonly<Record<string, string>> = {
+  Backspace: "\x15",
+  ArrowLeft: "\x01",
+  ArrowRight: "\x05",
+};
+
+/**
+ * Terminal.app's Command editing chords: kill line, line start, line end.
+ * What the shell does with the bytes is the shell's.
+ */
+export function terminalMacCommandKeyData(
+  event: Pick<KeyboardEvent, "altKey" | "ctrlKey" | "key" | "metaKey" | "shiftKey">,
+  platform = navigator.platform,
+): string | null {
+  if (!isMacPlatform(platform) || !event.metaKey) return null;
+  if (event.ctrlKey || event.altKey || event.shiftKey) return null;
+  return MAC_COMMAND_KEY_DATA[event.key] ?? null;
+}
+
+/**
+ * libghostty's macOS build never types text for a Command chord (Terminal.app
+ * and iTerm2 do not either); the wasm build is not a macOS build, so the rule
+ * lives here. Escape sequences and control bytes still pass.
+ */
+export function isTerminalMacCommandText(
+  event: Pick<KeyboardEvent, "key" | "metaKey">,
+  encoded: string,
+  platform = navigator.platform,
+): boolean {
+  return isMacPlatform(platform) && event.metaKey && encoded === event.key;
+}
+
 export function isTerminalCompositionCommitInput(event: Pick<InputEvent, "inputType">): boolean {
   return (
     event.inputType === "" ||
@@ -1096,8 +1128,12 @@ export class GhosttyTerminalSurface {
       return;
     }
     this.clearPrimedCopy();
-    const data = this.core.encodeKey(event);
+    const data = terminalMacCommandKeyData(event) ?? this.core.encodeKey(event);
     if (data.length === 0) return;
+    if (isTerminalMacCommandText(event, data)) {
+      this.suppressedKeyCodes.add(event.code);
+      return;
+    }
     this.suppressedKeyCodes.delete(event.code);
     event.preventDefault();
     event.stopPropagation();
