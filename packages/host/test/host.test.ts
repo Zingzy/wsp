@@ -120,9 +120,9 @@ describe("host serves the app", () => {
     vi.unstubAllEnvs();
   });
 
-  it("the page's one inline script is the boot object: runtime port, token, and key flags", async () => {
+  it("the page's one inline script is the boot object: runtime port and token, nothing else", async () => {
     const { rt } = testRuntime();
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: true } });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir() });
     expect(handle.wsPort).toBeGreaterThan(0);
 
     const page = await fetch(`http://127.0.0.1:${handle.port}/`);
@@ -131,36 +131,38 @@ describe("host serves the app", () => {
     const html = await page.text();
     expect(html).toContain('<script type="module" crossorigin src="/assets/app.js">');
     expect(inlineScripts(html)).toEqual([
-      `window.__WSP__ = {"wsPort":${handle.wsPort},"token":"${handle.authToken}","keys":{"anthropic":true}};`,
+      `window.__WSP__ = {"wsPort":${handle.wsPort},"token":"${handle.authToken}"};`,
     ]);
     expect(html).not.toContain("window.__WSP__ ||");
   });
 
-  it("carries the builder wsp init prepared so the page lands on it", async () => {
+  it("the builder wsp init prepared is the relay's, never the page's", async () => {
     const { rt } = testRuntime(false);
     const builder = { id: "m_b", name: "default", kind: "sandbox" as const, createdAt: "2026-09-03T00:00:00Z", size: { cpu: 2, memMb: 4096 } };
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, builder });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), builder });
     const html = await (await fetch(`http://127.0.0.1:${handle.port}/`)).text();
-    expect(inlineScripts(html)[0]).toContain(`"builder":${JSON.stringify(builder)}`);
+    expect(html).not.toContain("m_b");
+    expect(inlineScripts(html)[0]).toBe(`window.__WSP__ = {"wsPort":${handle.wsPort},"token":"${handle.authToken}"};`);
   });
 
-  it("a checklist given as a function is read on every page load, so the page shows what is still open", async () => {
-    const { rt } = testRuntime(false);
-    let items = [{ label: "GitHub CLI login", command: "gh auth login" }, { label: "Codex login", command: "codex login" }];
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, checklist: () => items });
-    expect(inlineScripts(await (await fetch(`http://127.0.0.1:${handle.port}/`)).text())[0]).toContain(`"checklist":${JSON.stringify(items)}`);
-    items = [items[1]!];
-    expect(inlineScripts(await (await fetch(`http://127.0.0.1:${handle.port}/`)).text())[0]).toContain(`"checklist":${JSON.stringify(items)}`);
+  it("the handle's createWorkspace forks the golden's head the way the app's own create does, and refuses without a golden", async () => {
+    const { rt, backend } = testRuntime();
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), workspaceEnvs: g => claudeEnvs("sk-ant-x", g) });
+    const first = await handle.createWorkspace("first");
+    expect(first.name).toBe("first");
+    expect(first.golden).toBe("snap_gold");
+    const machine = backend.machines.find(m => m.id === first.machineId)!;
+    expect(machine.spec.envs?.["CLAUDE_CONFIG_DIR"]).toBe("/root/.claude-cfg");
+    expect(machine.spec.labels).toMatchObject({ wsp: "1", "wsp-host": "1" });
+    const list = (await (await fetch(`http://127.0.0.1:${handle.port}/api/workspaces`)).json()) as { workspaces: { id: string }[] };
+    expect(list.workspaces.map(w => w.id)).toEqual([first.id]);
+    await handle.close();
+    const bare = testRuntime(false);
+    handle = await startHost({ runtime: bare.rt, port: 0, wsPort: 0, webDir: webDir() });
+    await expect(handle.createWorkspace("first")).rejects.toThrow("no golden image yet; run wsp init first");
   });
 
-  it("says anthropic false when the host loaded no anthropic key", async () => {
-    const { rt } = testRuntime();
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false } });
-    const html = await (await fetch(`http://127.0.0.1:${handle.port}/`)).text();
-    expect(html).toContain('"keys":{"anthropic":false}');
-  });
-
-  it("through the cli, the page carries the flag and never the key value", async () => {
+  it("through the cli, the page never carries a key value", async () => {
     const SOLARI = "slr_live_fake_solari_key";
     const ANTHROPIC = "sk-ant-x-fake-anthropic-key";
     const home = mkdtempSync(join(tmpdir(), "wsp-home-"));
@@ -173,7 +175,7 @@ describe("host serves the app", () => {
     const { rt } = testRuntime();
     handle = await serve(quietIO(), { port: 0, wsPort: 0, statePath: join(home, "state.json"), webDir: webDir(), runtime: rt });
     const html = await (await fetch(`http://127.0.0.1:${handle.port}/`)).text();
-    expect(html).toContain('"keys":{"anthropic":true}');
+    expect(html).not.toContain("anthropic");
     expect(html).not.toContain(ANTHROPIC);
     expect(html).not.toContain(SOLARI);
     expect(html).not.toMatch(/sk-ant|slr_live/);
@@ -184,7 +186,7 @@ describe("host serves the app", () => {
   it("serves the bundle's assets and refuses paths outside the web dir", async () => {
     const { rt } = testRuntime();
     const dir = webDir();
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: dir, keys: { anthropic: false } });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: dir });
     const base = `http://127.0.0.1:${handle.port}`;
 
     const js = await fetch(`${base}/assets/app.js`);
@@ -202,11 +204,11 @@ describe("host serves the app", () => {
 
   it("refuses to start without a built page or without the boot line to replace", async () => {
     const { rt } = testRuntime();
-    await expect(startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(null), keys: { anthropic: false } })).rejects.toThrow(
+    await expect(startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(null) })).rejects.toThrow(
       /web app not built/,
     );
     await expect(
-      startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir("<!doctype html><html><body></body></html>"), keys: { anthropic: false } }),
+      startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir("<!doctype html><html><body></body></html>") }),
     ).rejects.toThrow(/__WSP__/);
   });
 
@@ -217,7 +219,7 @@ describe("host serves the app", () => {
     const held = (probeTarget.address() as { port: number }).port;
     const wsPort = await freePort();
 
-    await expect(startHost({ runtime: rt, port: held, wsPort, webDir: webDir(), keys: { anthropic: false } })).rejects.toThrow(/EADDRINUSE/);
+    await expect(startHost({ runtime: rt, port: held, wsPort, webDir: webDir() })).rejects.toThrow(/EADDRINUSE/);
     await new Promise<void>(r => probeTarget!.close(() => r()));
     probeTarget = undefined;
 
@@ -228,7 +230,7 @@ describe("host serves the app", () => {
   it("lists workspaces as JSON", async () => {
     const { rt } = testRuntime();
     await rt.workspaces.create({ golden: "snap_gold", name: "alpha" });
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false } });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir() });
     const { status, body } = await getJson(`http://127.0.0.1:${handle.port}/api/workspaces`);
     expect(status).toBe(200);
     expect(body.workspaces).toHaveLength(1);
@@ -242,7 +244,7 @@ describe("host serves the app", () => {
 
   it("creates a workspace from the golden head via POST", async () => {
     const { rt, backend } = testRuntime();
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false } });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir() });
     const res = await fetch(`http://127.0.0.1:${handle.port}/api/workspaces`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -265,7 +267,7 @@ describe("host serves the app", () => {
       const head = { ...GOLDEN.versions[0]!, ...(browserShim ? { browserShim } : {}) };
       void store.put("goldens", "default", { head: 1, versions: [head] });
       const rt = createRuntime({ backend, store, adapters: {} });
-      const h = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: true }, workspaceEnvs: g => claudeEnvs("sk-ant-x", g) });
+      const h = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), workspaceEnvs: g => claudeEnvs("sk-ant-x", g) });
       try {
         const res = await fetch(`http://127.0.0.1:${h.port}/api/workspaces`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "beta" }) });
         expect(res.status).toBe(200);
@@ -280,7 +282,7 @@ describe("host serves the app", () => {
 
   it("refuses workspace creation without a golden image", async () => {
     const { rt } = testRuntime(false);
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false } });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir() });
     const res = await fetch(`http://127.0.0.1:${handle.port}/api/workspaces`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -315,7 +317,7 @@ describe("host serves the app", () => {
       };
     };
 
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false } });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir() });
     const first = await getJson(`http://127.0.0.1:${handle.port}/api/workspaces`);
     expect(first.body.workspaces[0].reach).toMatchObject({ state: "reachable" });
     expect(first.body.workspaces[0].reach.url).toContain("pt_token=");
@@ -365,7 +367,7 @@ describe("host close flushes transcripts", () => {
     const rt = createRuntime({ backend, store, adapters: { claude: m.adapter } });
     const dir = fakeWebDir();
     dirs.push(dir);
-    const handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: dir, keys: { anthropic: false } });
+    const handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: dir });
 
     const ws = await rt.workspaces.create({ golden: "snap_gold", name: "alpha" });
     await rt.sessions.start(ws.id, { prompt: "go" });
@@ -415,7 +417,7 @@ describe("host sweeps orphaned machines", () => {
     const foreignSmoke = await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-smoke": "1", "wsp-owner": "h_other", createdAt: ago(20 * 60_000) } });
     const lines: string[] = [];
 
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), log: l => lines.push(l) });
 
     const killed = (m: { id: string }): boolean => backend.machines.find(x => x.id === m.id)!.killed;
     expect([owned, foreign, orphan, young, ageless, experiment, foreignWs, strayWs, garbage, foreignSmoke].map(killed)).toEqual([true, false, true, false, false, false, false, true, false, false]);
@@ -442,7 +444,7 @@ describe("host sweeps orphaned machines", () => {
     backend.list = async () => { throw new Error("list 502"); };
     const lines: string[] = [];
 
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), log: l => lines.push(l) });
 
     expect(backend.machines.map(m => m.killed)).toEqual([true, false]);
     expect(lines).toEqual([
@@ -465,7 +467,7 @@ describe("host sweeps orphaned machines", () => {
     const foreign = await backend.create({ kind: "sandbox", labels: { ...BUILDER, "wsp-owner": "h_other", createdAt: ago(53_000) } });
     const lines: string[] = [];
 
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), log: l => lines.push(l) });
 
     expect(backend.machines.map(m => m.killed)).toEqual([true, false, true, false]);
     expect(lines).toEqual([
@@ -488,7 +490,7 @@ describe("host sweeps orphaned machines", () => {
     const freshOwn = await backend.create({ kind: "sandbox", labels: { ...BUILDER, "wsp-owner": owner, createdAt: ago(30_000) } });
     const lines: string[] = [];
 
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), log: l => lines.push(l) });
 
     expect(backend.machines.some(m => m.killed)).toBe(false);
     expect(lines).toEqual([
@@ -510,7 +512,7 @@ describe("host sweeps orphaned machines", () => {
     backend.machines[0]!.kill = async () => { throw new Error("502 exec failed"); };
     const lines: string[] = [];
 
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), log: l => lines.push(l) });
 
     expect(backend.machines.map(m => m.killed)).toEqual([false, true]);
     expect(lines).toEqual([
@@ -525,7 +527,7 @@ describe("host sweeps orphaned machines", () => {
     const kept = await crashed.golden.prepare();
     const lines: string[] = [];
 
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l), recipePath: "/home/me/.wsp/state/golden-recipe.json" });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), log: l => lines.push(l), recipePath: "/home/me/.wsp/state/golden-recipe.json" });
 
     expect(backend.machines[0]!.killed).toBe(false);
     expect(lines).toEqual([
@@ -543,7 +545,7 @@ describe("host sweeps orphaned machines", () => {
     await crashed.close();
     expect(backend.machines.map(m => m.killed)).toEqual([false, true]);
     const lines: string[] = [];
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), log: l => lines.push(l) });
     expect(backend.machines[0]!.killed).toBe(false);
     expect(lines).toHaveLength(2);
     expect(lines[0]).toMatch(new RegExp(`^reap: left alone ${b.id}: your builder saved as golden v1, kept \\d+ s since the save and holding one of the account's machine slots, \\$0\\.11/h \\(about \\$0\\.00 so far\\); wsp init updates the golden on it, or it is stopped ten minutes after the save$`));
@@ -555,7 +557,7 @@ describe("host sweeps orphaned machines", () => {
     const record = (await store.get("builders", b.id)) as { sealed: { at: string; version: number } };
     await store.put("builders", b.id, { ...record, sealed: { ...record.sealed, at: ago(11 * 60_000) } });
     const later: string[] = [];
-    handle = await startHost({ runtime: createRuntime({ backend, store, adapters: {} }), port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => later.push(l) });
+    handle = await startHost({ runtime: createRuntime({ backend, store, adapters: {} }), port: 0, wsPort: 0, webDir: webDir(), log: l => later.push(l) });
     expect(later).toEqual([`reap: stopped ${b.id}: the builder kept after the save for one more change; its ten-minute window is over`, "storage: 1 snapshot, 8.0 GB; inside the free 10 GB, nothing to pay from 2026-10-01"]);
     expect(backend.machines[0]!.killed).toBe(true);
     expect(await store.list("builders")).toEqual([]);
@@ -568,7 +570,7 @@ describe("host sweeps orphaned machines", () => {
     backend.machines[0]!.spec.labels!["wsp-owner"] = "h_other";
     const lines: string[] = [];
 
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l), recipePath: "/home/me/.wsp/state/golden-recipe.json" });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), log: l => lines.push(l), recipePath: "/home/me/.wsp/state/golden-recipe.json" });
 
     expect(backend.machines[0]!.killed).toBe(false);
     expect(lines).toEqual([`reap: left alone ${foreign.id}: recorded builder wearing another setup's owner label (h_other); never touched by this host`]);
@@ -582,7 +584,7 @@ describe("host sweeps orphaned machines", () => {
     await store.put("builders", held.id, { ...record, heldBy: { ...record.heldBy, pid: process.ppid } });
     const lines: string[] = [];
 
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l), recipePath: "/home/me/.wsp/state/golden-recipe.json" });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), log: l => lines.push(l), recipePath: "/home/me/.wsp/state/golden-recipe.json" });
 
     expect(backend.machines[0]!.killed).toBe(false);
     expect(lines).toEqual([`reap: left alone ${held.id}: your earlier builder from this setup, in use by another wsp process (pid ${process.ppid}); never touched by this host`]);
@@ -598,7 +600,7 @@ describe("host sweeps orphaned machines", () => {
     await store.put("builders", "m1", { ...record, heldBy: { ...record.heldBy, pid: 999_999_999 } });
     const lines: string[] = [];
 
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l), recipePath: "/home/me/.wsp/state/golden-recipe.json" });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), log: l => lines.push(l), recipePath: "/home/me/.wsp/state/golden-recipe.json" });
 
     expect(backend.machines[0]!.killed).toBe(true);
     expect(lines).toEqual(["reap: stopped m1: your earlier builder from this setup; its setup never finished"]);
@@ -616,7 +618,7 @@ describe("host sweeps orphaned machines", () => {
     backend.machines[0]!.kill = async () => { throw new Error("Bad Gateway"); };
     const lines: string[] = [];
 
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l), recipePath: "/home/me/.wsp/state/golden-recipe.json" });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), log: l => lines.push(l), recipePath: "/home/me/.wsp/state/golden-recipe.json" });
 
     expect(lines).toEqual([
       "reap: could not stop m1 (Bad Gateway; stays recorded, retried next sweep)",
@@ -633,7 +635,7 @@ describe("host sweeps orphaned machines", () => {
     await store.put("builders", ageless.id, { ...((await store.get("builders", ageless.id)) as object), createdAt: "yesterday" });
     const lines: string[] = [];
 
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), log: l => lines.push(l) });
 
     expect(backend.machines[0]!.killed).toBe(true);
     expect(lines).toEqual([`reap: stopped ${ageless.id}: your earlier builder from this setup, age unknown; a kept builder with no readable age is stopped at once`]);
@@ -647,7 +649,7 @@ describe("host sweeps orphaned machines", () => {
     backend.machines[0]!.spec.labels!["createdAt"] = ago(BUILDER_IDLE_MS + 60_000);
     const lines: string[] = [];
 
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), log: l => lines.push(l) });
 
     expect(backend.machines[0]!.killed).toBe(true);
     expect(lines).toEqual([`reap: stopped ${old.id}: your earlier builder from this setup, 6.0 h old; a kept builder is stopped at six hours`]);
@@ -657,7 +659,7 @@ describe("host sweeps orphaned machines", () => {
   it("lists once per sweep", async () => {
     const { rt, backend } = testRuntime();
     const list = vi.spyOn(backend, "list");
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: () => {} });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), log: () => {} });
     expect(list).toHaveBeenCalledTimes(1);
   });
 
@@ -665,7 +667,7 @@ describe("host sweeps orphaned machines", () => {
     vi.useFakeTimers({ toFake: [...TIMERS] });
     const { rt, backend } = testRuntime();
     const lines: string[] = [];
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), log: l => lines.push(l) });
     const reap = vi.spyOn(rt, "reap");
 
     await backend.create({ kind: "sandbox", labels: { ...BUILDER, createdAt: ago(BUILDER_IDLE_MS + 60_000) } });
@@ -693,7 +695,7 @@ describe("host sweeps orphaned machines", () => {
   it("starts no sweep while one is still in flight", async () => {
     vi.useFakeTimers({ toFake: [...TIMERS] });
     const { rt } = testRuntime();
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: () => {} });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), log: () => {} });
     let finish!: (result: ReapResult) => void;
     const reap = vi.spyOn(rt, "reap").mockImplementationOnce(() => new Promise<ReapResult>(r => (finish = r)));
 
@@ -724,21 +726,21 @@ describe("host names snapshot storage at start", () => {
     const { rt, backend } = testRuntime();
     backend.snapshots.push({ id: "snap_gold", sizeBytes: 8_500_000_000 }, { id: "snap_old-golden", sizeBytes: 20_000_000_000 }, { id: "snap_other", sizeBytes: 7_700_000_000 });
     const lines: string[] = [];
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), log: l => lines.push(l) });
     expect(lines).toEqual(["storage: 3 snapshots, 36.2 GB; about $1.31/month above the free 10 GB from 2026-10-01"]);
   });
 
   it("says nothing with no snapshots on the account, and names a listing the provider refused", async () => {
     const quiet = testRuntime();
     const lines: string[] = [];
-    handle = await startHost({ runtime: quiet.rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
+    handle = await startHost({ runtime: quiet.rt, port: 0, wsPort: 0, webDir: webDir(), log: l => lines.push(l) });
     expect(lines).toEqual([]);
     await handle.close();
     const { rt, backend } = testRuntime();
     backend.listSnapshots = async () => {
       throw new Error("502 Bad Gateway");
     };
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), keys: { anthropic: false }, log: l => lines.push(l) });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), log: l => lines.push(l) });
     expect(lines).toEqual(["storage: snapshot listing failed (502 Bad Gateway)"]);
   });
 });

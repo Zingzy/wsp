@@ -3,7 +3,6 @@ export {
   startHost,
   type HostOptions,
   type HostHandle,
-  type KeyFlags,
   type ReachState,
   type ReachStatus,
   type WorkspaceStatus,

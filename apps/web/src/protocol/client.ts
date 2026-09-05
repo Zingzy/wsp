@@ -261,9 +261,9 @@ export interface Api {
    * fixtures that never stop a turn need not fake it; the composer offers no stop without it. */
   interruptSession?(sessionId: string): Promise<SessionInterruptOutcome>;
   subscribe(fn: (e: ProtocolEvent) => void): () => void;
-  /** The named golden manifest, undefined on a fresh install: that absence is what opens the first-run wizard. */
+  /** The named golden manifest, undefined on a fresh install: that absence is what points the page at wsp init. */
   getGolden(name?: string): Promise<GoldenManifest | undefined>;
-  /** Boots the wizard's builder; progress arrives as golden.stage events on the subscription. */
+  /** Boots a golden builder; progress arrives as golden.stage events on the subscription. */
   prepareGolden(name?: string): Promise<GoldenBuilderView>;
   /** Snapshots the builder, smoke-tests a fork, seals a version. The builder is consumed on every outcome. */
   sealGolden(builderId: string): Promise<{ manifest: GoldenManifest; version: GoldenVersion }>;

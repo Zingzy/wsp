@@ -360,7 +360,7 @@ class Timings {
 export function isReserved(labels: Record<string, string>): boolean {
   return "poc" in labels;
 }
-/** Harness install and its proof; the scripted doctor build and the wizard recipe share them. */
+/** Harness install and its proof; the scripted doctor build and the init recipe share them. */
 export const GOLDEN_SETUP = "curl -fsSL https://claude.ai/install.sh | bash";
 export const GOLDEN_SMOKE = "claude --version";
 

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // wsp init end to end against the stub backend: keys in, the seven screens,
-// the summary and confirm, prepare with its stage stream, the hand-off. The
-// runtime and host are the real ones over fakes; only the terminal is faked.
+// the summary and confirm, prepare with its stage stream, the sign-ins and
+// secrets, the seal, the first workspace and the app's address. The runtime
+// and host are the real ones over fakes; only the terminal is faked.
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
@@ -22,7 +23,7 @@ import { editorsIntro, everythingItems, fmtBytes, reduceStages, runInit, selectI
 import type { HostHandle } from "../src/server.js";
 import { startCallbackRelay } from "../src/relay.js";
 import type { ConnectOptions, DaemonSocket } from "../src/doctor.js";
-import { noteLogins } from "../src/init-signin.js";
+import { noteOutcomes } from "../src/init-signin.js";
 import { fakePtyLink, type FakePtyLink } from "./fake-pty-link.js";
 import { EVERYTHING, FIXTURE } from "./init-fixture.js";
 import { guestAnswer, stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
@@ -30,6 +31,7 @@ import { guestAnswer, stubBackend, type StubBackend, type StubMachine } from "./
 const SOLARI = "slr_live_fake_solari_key";
 const KEY = { up: "\x1b[A", down: "\x1b[B", space: " ", enter: "\r", esc: "\x1b", ctrlC: "\x03" };
 const URL_RE = /http:\/\/127\.0\.0\.1:\d+\//;
+const SEAL_Q = (v: number) => `Seal this machine as golden v${v}?`;
 const BOOT = /Boot a \d+ vCPU/;
 const PRICING: BackendPricing = { rateUsdPerHour: s => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: SNAPSHOT_STORAGE };
 
@@ -41,16 +43,15 @@ interface Fake {
   press(...keys: string[]): Promise<void>;
   until(needle: string | RegExp, ms?: number): Promise<void>;
   opened: string[];
-  copied: string[];
   backends: StubBackend[];
   recipes: GoldenRecipe[];
   runtimes: Runtime[];
   hooks: HostHooks[];
-  /** The runtime each host hook was given: the one the page's seal goes through. */
-  served: Runtime[];
   /** The scripted daemon link the sign-in stage talks to. */
   link: FakePtyLink;
   hosts: number;
+  /** How many host handles were closed by the run. */
+  hostsClosed: number;
   /** Keychain services the fake reader was asked for. */
   reads: string[];
   /** Where a test delivers Ctrl-C; the real one is process. */
@@ -98,14 +99,12 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
   const text = () => stripVTControlCharacters(chunks.join(""));
   const clear = () => void chunks.splice(0);
   const opened: string[] = [];
-  const copied: string[] = [];
   const backends: StubBackend[] = [];
   const recipes: GoldenRecipe[] = [];
   const runtimes: Runtime[] = [];
   const hooks: HostHooks[] = [];
-  const served: Runtime[] = [];
   const link = scriptedLink({ signedIn: over.signedIn ?? true, hold: over.hold ?? false, missing: over.missing ?? false });
-  const counters = { hosts: 0 };
+  const counters = { hosts: 0, closed: 0 };
   const signals = new EventEmitter();
   const exits: number[] = [];
   const io: InitIO = {
@@ -115,10 +114,6 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
     env: over.env ?? {},
     open: async url => {
       opened.push(url);
-      return true;
-    },
-    copy: async t => {
-      copied.push(t);
       return true;
     },
     signals,
@@ -162,10 +157,9 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
     },
     host: async (rt: Runtime, builder, h) => {
       counters.hosts += 1;
-      expect(builder.id).toBe(backends.at(-1)?.machines.find(m => !m.killed)?.id);
+      expect(builder.id).toBe(backends.at(-1)?.machines.find(m => !m.killed && m.spec.labels?.["wsp-builder"] === "1")?.id);
       hooks.push(h);
-      served.push(rt);
-      const handle: HostHandle = { port: 4400, wsPort: 4410, authToken: "tok", close: async () => {} };
+      const handle: HostHandle = { port: 4400, wsPort: 4410, authToken: "tok", createWorkspace: name => forkHead(rt, name), close: async () => void (counters.closed += 1) };
       return handle;
     },
     daemon: async () => ({ link: link.dial(), close: () => {} }),
@@ -195,21 +189,50 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
     press,
     until,
     opened,
-    copied,
     backends,
     recipes,
     runtimes,
     hooks,
-    served,
     link,
     get hosts() {
       return counters.hosts;
+    },
+    get hostsClosed() {
+      return counters.closed;
     },
     reads,
     signals,
     exits,
   };
 }
+
+/** What the host's own create does: a fork of the golden's head under the given name. */
+async function forkHead(rt: Runtime, name: string) {
+  const manifest = await rt.golden.get();
+  const head = manifest?.versions.find(v => v.version === manifest.head);
+  if (!head) throw new Error("no golden image yet");
+  return rt.workspaces.create({ golden: head.snapshotId, name });
+}
+
+/** Enter at the seal question: the default answer is yes. */
+async function sealIt(f: Fake, version = 1): Promise<void> {
+  await f.until(SEAL_Q(version));
+  await f.press(KEY.enter);
+}
+
+/** A run that ends the way a crash after the boot does: the host never comes up, so the builder stays
+ * unsealed and first-life for the next run to find. */
+async function bootedOnly(f: Fake): Promise<void> {
+  const host = f.opts.host;
+  f.opts.host = async (rt, builder, hooks) => {
+    await host(rt, builder, hooks);
+    throw new Error("host down in this fixture");
+  };
+  await expect(runInit(f.opts, f.io)).rejects.toThrow("host down in this fixture");
+}
+
+/** A host whose first-workspace fork is refused, for runs that test the roads before it. */
+const quietHost = () => async (): Promise<HostHandle> => ({ port: 4400, wsPort: 4410, authToken: "tok", createWorkspace: async () => { throw new Error("no workspace in this fixture"); }, close: async () => {} });
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -254,7 +277,7 @@ describe("wsp init, interactive", () => {
     expect((await run).code).toBe(1);
   });
 
-  it("detects first, walks the seven rungs, confirms once, prepares through the runtime, hands off", async () => {
+  it("detects first, walks the seven rungs, confirms once, prepares through the runtime, signs in, seals on enter, forks the first workspace and opens the app", async () => {
     const f = fake();
     const run = runInit(f.opts, f.io);
 
@@ -321,8 +344,7 @@ describe("wsp init, interactive", () => {
     expect(f.backends.flatMap(b => b.machines)).toHaveLength(0);
     await f.press("y");
 
-    await f.until(URL_RE);
-    await f.press(KEY.enter);
+    await sealIt(f);
     const result = await run;
     expect(result.code).toBe(0);
     expect(result.handle?.port).toBe(4400);
@@ -340,7 +362,7 @@ describe("wsp init, interactive", () => {
     const base = out.split("\n").filter(l => /Base installed/.test(l)).at(-1)!;
     expect(base).toMatch(/Base installed\s+node v22\.12\.0\s+\d+\.\ds$/);
     expect(base.length).toBe(79);
-    // The sign-ins chosen for the machine ran here, each proved by the tool's status command, before the hand-off.
+    // The sign-ins chosen for the machine ran here, each proved by the tool's status command, before the seal.
     const signing = out.indexOf("Signing in on the machine");
     expect(signing).toBeGreaterThan(out.indexOf("Ready"));
     expect(out).toMatch(/GitHub CLI login\s+gh auth login/);
@@ -357,21 +379,35 @@ describe("wsp init, interactive", () => {
     ]);
     expect(f.link.ptys.every(p => p.killed)).toBe(true);
     expect(f.hooks[0]!.autoOpen(f.backends[0]!.machines[0]!.id, DEVICE_URL)).toBe(false);
-    // The hand-off is three lines: the address, what to do there, the keys.
-    const at = out.indexOf("Opened http://");
-    expect(at).toBeGreaterThan(signing);
-    expect(out.slice(at).split("\n").slice(0, 3).map(l => l.replace(/^│\s+/, ""))).toEqual([
-      expect.stringMatching(/^Opened http:\/\/127\.0\.0\.1:\d+\/$/),
-      "Save the golden there once the machine is the way you want it.",
-      "c copy the address • enter continue",
-    ]);
+    // After the sign-ins the seal summary: what landed, one section each, then the question with enter as yes.
+    const ready = out.indexOf("Ready to seal golden v1");
+    expect(ready).toBeGreaterThan(signing);
+    const summaryCard = out.slice(ready, out.indexOf(SEAL_Q(1)));
+    // Homebrew, its two toolchain formulae, the shared step, gh, jq, pnpm and neovim.
+    expect(summaryCard).toMatch(/Tools\n│\s+8 installed\n/);
+    expect(summaryCard).toMatch(/Agents\n│\s+1 installed: Claude Code\n/);
+    expect(summaryCard).toMatch(/Sign-ins\n│\s+GitHub CLI login\s+signed in\n│\s+Claude Code login\s+signed in\n/);
+    expect(summaryCard).toMatch(/Secrets\n│\s+none\n/);
+    expect(summaryCard).not.toMatch(/[╮╯─├]/);
+    // The seal streams in the same frame, then the fork, then the app opens once, into it.
+    const sealing = out.indexOf(SEAL_Q(1));
+    for (const step of ["Snapshot taken", "Fork booted and checked", "Sealed"]) expect(out.indexOf(step)).toBeGreaterThan(sealing);
+    expect(out.indexOf("Snapshot taken")).toBeLessThan(out.indexOf("Fork booted and checked"));
+    expect(out).toContain("Golden v1 sealed.");
+    expect(out).toMatch(/Workspace first \(ws_[0-9a-f]+\) forked from golden v1\./);
+    const opened = out.indexOf("Opened http://");
+    expect(opened).toBeGreaterThan(out.indexOf("forked from golden v1"));
+    expect(out.slice(opened).split("\n")[0]!.replace(/^│\s+/, "")).toMatch(/^Opened http:\/\/127\.0\.0\.1:\d+\/$/);
+    expect(out).toContain("wsp keeps serving the app from this terminal; Ctrl-C stops it.");
+    expect(out).not.toMatch(/checklist|Save the golden there/);
     expect(out).not.toMatch(/—|\p{Emoji_Presentation}/u);
     expect(out).not.toContain(SOLARI);
     // gh was switched to sign in on the machine, so its Keychain token was never asked for.
     expect(f.reads).toEqual([]);
 
     const backend = f.backends[0]!;
-    expect(backend.machines).toHaveLength(1);
+    // The builder, the seal's smoke fork, the first workspace.
+    expect(backend.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_golden-v1", true], ["snap_golden-v1", false]]);
     const log = backend.machines[0]!.execLog;
     expect(log.some(c => c.includes("tar xzf") && c.includes("--no-same-owner"))).toBe(true);
     expect(log.filter(c => c.includes("brew install") || c.includes("npm install -g pnpm"))).toHaveLength(6);
@@ -404,25 +440,20 @@ describe("wsp init, interactive", () => {
     ]);
     expect(saved.entries.filter(e => e.rung === "logins").map(e => e.choice)).toEqual(["machine", "machine", undefined]);
     expect(out).toContain("golden-recipe.json");
-    // Both signed in, so the page has nothing left to ask for; one link per command pair.
-    expect(f.hooks[0]!.checklist()).toEqual([]);
+    // One link per command pair; nothing was cut, so the secrets step dialled nothing.
     expect(f.link.dials).toBe(2);
     expect(result.logins?.map(l => l.state)).toEqual(["signed-in", "signed-in"]);
+    expect(result.secrets).toEqual([]);
 
-    // The terminal keeps reporting after the hand-off: the seal stages arrive as the browser drives them,
-    // through the runtime the host serves, which stamps the logins onto the version.
-    const rt = f.served[0]!;
-    const sealed = await rt.golden.seal(f.backends[0]!.machines[0]!.id);
-    expect(sealed.version.logins).toEqual([
+    // The seal stamped the logins onto the version, and the first workspace is a fork of it.
+    const rt = f.runtimes.at(-1)!;
+    expect((await rt.golden.get())?.versions[0]?.logins).toEqual([
       { name: "GitHub CLI login", state: "signed-in" },
       { name: "Claude Code login", state: "signed-in" },
     ]);
-    await f.until("Sealed");
-    const after = f.text().slice(out.length);
-    expect(after.indexOf("Snapshot taken")).toBeLessThan(after.indexOf("Fork booted and checked"));
-    expect(after).toContain("Golden v1 sealed");
+    expect((await rt.workspaces.list()).map(w => [w.name, w.golden])).toEqual([["first", "snap_golden-v1"]]);
 
-    // The run log beside the state holds every frame and every exec of the run, the seal's included, and the hand-off names it.
+    // The run log beside the state holds every frame and every exec of the run, the seal's included, and the address.
     const logPath = join(dirs[0]!, "init.log");
     expect(out).toContain(`The run log is ${logPath}`);
     const runLog = readFileSync(logPath, "utf8").split("\n");
@@ -431,7 +462,7 @@ describe("wsp init, interactive", () => {
     expect(heads[0]).toMatch(/^run [0-9a-f]{6} wsp init \(pid \d+\)$/);
     expect(heads.filter(h => h.startsWith("exec m1 "))).toHaveLength(backend.machines[0]!.execLog.length);
     expect(heads.filter(h => h.startsWith("exec m2 "))).toHaveLength(backend.machines[1]!.execLog.length);
-    expect(heads).toEqual(expect.arrayContaining(["stage creating: sandbox from base", "stage ready", "note handoff http://127.0.0.1:4400/", expect.stringMatching(/^stage sealed: v1/)]));
+    expect(heads).toEqual(expect.arrayContaining(["stage creating: sandbox from base", "stage ready", "note app http://127.0.0.1:4400/", expect.stringMatching(/^stage sealed: v1/)]));
     expect(heads.filter(h => h.startsWith("stage installing-tools: ")).length).toBeGreaterThan(6);
     // The free-disk reads are execs like any other, command and answer.
     expect(runLog).toContain("  $ df -Pk /root | awk 'NR==2{print $4}'");
@@ -439,7 +470,7 @@ describe("wsp init, interactive", () => {
     expect(readFileSync(logPath, "utf8")).not.toContain(SOLARI);
   });
 
-  it("escape on a later rung replays the earlier answer; c copies the address at the hand-off", async () => {
+  it("escape on a later rung replays the earlier answer", async () => {
     const f = fake();
     const run = runInit(f.opts, f.io);
     await f.until("Identity");
@@ -459,11 +490,7 @@ describe("wsp init, interactive", () => {
     await f.until(BOOT);
     expect(f.text().slice(f.text().lastIndexOf("Summary"))).toMatch(/Identity\s+1 of 3/);
     await f.press("y");
-    await f.until(URL_RE);
-    await f.press("c");
-    await f.until("copied");
-    expect(f.copied).toEqual([expect.stringMatching(URL_RE)]);
-    await f.press(KEY.enter);
+    await sealIt(f);
     expect((await run).code).toBe(0);
     const saved = loadManifest(join(dirs[0]!, "golden-recipe.json"));
     expect(saved.entries.find(e => e.id === "identity/ssh-config")?.bring).toBe(false);
@@ -559,22 +586,51 @@ describe("wsp init, interactive", () => {
     expect(saved.entries.find(e => e.id === notes.id)).toMatchObject({ bring: false });
   });
 
-  it("a prepare that fails after the hand-off never happened is reported once, and a failed seal after it is reported too", async () => {
+  it("a seal whose fork fails its check is reported with the run log, exits 1 with the host closed, and the builder is gone", async () => {
     const f = fake({ yes: true });
     f.opts.runtime = recipe => {
       const backend = stubBackend();
+      // The smoke command fails on the fork alone; the builder's own stages answer as a bare guest does.
+      backend.execImpl = (m, cmd) => (m.spec.fromSnapshot !== undefined ? { exitCode: 3, stdout: "", stderr: "claude: not found" } : guestAnswer(cmd));
       f.backends.push(backend);
       const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
       f.runtimes.push(rt);
       return rt;
     };
     const result = await runInit(f.opts, f.io);
-    expect(result.code).toBe(0);
-    const rt = f.runtimes[0]!;
-    f.backends[0]!.execImpl = () => ({ exitCode: 3, stdout: "", stderr: "claude: not found" });
-    await rt.golden.seal(f.backends[0]!.machines[0]!.id).catch(() => {});
-    await f.until("Seal failed");
-    expect(f.text()).toContain("Run wsp init again");
+    expect(result.code).toBe(1);
+    expect(result.handle).toBeUndefined();
+    expect(f.hosts).toBe(1);
+    expect(f.hostsClosed).toBe(1);
+    const out = f.text();
+    expect(out).toContain("Sealing golden v1. Taken as yes (--yes).");
+    expect(out).toContain("The fork failed its check");
+    expect(out).toContain("Seal failed and the builder is gone. Run wsp init again; the recipe is kept.");
+    expect(out).toContain(`The run log is ${join(dirname(f.opts.statePath), "init.log")}`);
+    expect(out).not.toMatch(URL_RE);
+    expect(f.backends[0]!.machines.every(m => m.killed)).toBe(true);
+  });
+
+  it("no at the seal question leaves the builder running for a later attach, closes the host and exits 1", async () => {
+    const f = fake();
+    const run = runInit(f.opts, f.io);
+    for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
+      await f.until(rung);
+      await f.press(KEY.enter);
+    }
+    await f.until(BOOT);
+    await f.press("y");
+    await f.until(SEAL_Q(1));
+    expect(f.text()).toContain("Enter seals: a snapshot, then a fork to prove it. No leaves the machine up.");
+    await f.press("n");
+    const result = await run;
+    expect(result.code).toBe(1);
+    expect(result.handle).toBeUndefined();
+    expect(f.hostsClosed).toBe(1);
+    expect(f.text()).toContain(`Nothing was sealed. Builder m1 stays up at about $0.11/hr; wsp init --manifest ${recipePath(f.opts.statePath)} attaches to it again, and the sweep stops it once it is six hours old.`);
+    expect(f.backends[0]!.machines.map(m => m.killed)).toEqual([false]);
+    expect(await f.runtimes.at(-1)!.golden.get()).toBeUndefined();
+    expect(f.opened).toEqual([]);
   });
 
   it("the detect spinner counts each rung as the collector finishes it, before the found note", async () => {
@@ -746,14 +802,17 @@ describe("wsp init, everything else", () => {
     writeFileSync(join(again.opts.home, ".demo-token"), "fake-token\n", { mode: 0o600 });
     expect((await runInit(again.opts, again.io)).code).toBe(0);
     expect(again.text()).toMatch(/\d files: identity \d, shell 1, logins 1, everything 2/);
-    // The credential row is not a sign-in; the checklist carries only the login chosen for the machine.
-    expect(again.hooks[0]!.checklist()).toEqual([{ label: "Claude Code login", command: "claude auth login" }]);
+    // The credential row is not a sign-in: the seal summary lists the two logins and never the token file.
+    const signIns = again.text().slice(again.text().lastIndexOf("Sign-ins\n"), again.text().lastIndexOf("Secrets\n"));
+    expect(signIns).toMatch(/GitHub CLI login\s+signed in/);
+    expect(signIns).toMatch(/Claude Code login\s+skipped/);
+    expect(signIns).not.toContain(".demo-token");
     const result = JSON.parse(readFileSync(join(dirname(again.opts.statePath), "golden-import.json"), "utf8")) as { files: { bytes: number; skipped: { id: string }[] } };
     expect(result.files.skipped.filter(s => s.id.startsWith("everything/"))).toEqual([]);
     expect(result.files.bytes).toBeGreaterThan(0);
   });
 
-  it("an rc file with a cut secret export adds its set-on-the-machine line to the checklist from what the pack cut, and a failed eighth rung is one warning", async () => {
+  it("an rc file with a cut secret export is named in the secrets step, skipped under --yes with the reason and recorded, and a failed eighth rung is one warning", async () => {
     // The recipe row carries no secrets field: the names come from the pack, which strips the file as it stands at build time.
     const f = fake({
       yes: true,
@@ -767,7 +826,50 @@ describe("wsp init, everything else", () => {
     const out = f.text();
     expect(out.split("Everything else could not be read and is left out: EIO").length).toBe(2);
     expect(out.indexOf("could not be read")).toBeLessThan(out.indexOf("Found on this computer"));
-    expect(f.hooks[0]!.checklist()).toEqual(expect.arrayContaining([{ label: "~/.zshrc", command: "set A_KEY on the machine" }]));
+    expect(out).toContain("Secrets skipped: A_KEY (~/.zshrc). --yes asks nothing; set them from the app's terminal.");
+    expect(out).toMatch(/Secrets\n│\s+A_KEY\s+skipped \(--yes asks nothing; set them from the app's terminal\)\n/);
+    expect(JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8"))).toMatchObject({
+      secrets: [{ name: "A_KEY", path: "~/.zshrc", state: "skipped", note: "--yes asks nothing; set them from the app's terminal" }],
+    });
+    // The value never went anywhere: no pty was opened for it.
+    expect(f.link.ptys.filter(p => p.created["env"] !== undefined && "WSP_SECRET_LINE" in (p.created["env"] as object))).toEqual([]);
+  });
+
+  it("on a terminal each cut secret is asked for hidden; the pasted value rides the pty's environment onto the file it was cut from, out of the screen and the run log", async () => {
+    const f = fake();
+    writeFileSync(join(f.opts.home, ".zshrc"), "export A=1\nexport A_KEY=fake\n");
+    const run = runInit(f.opts, f.io);
+    for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
+      await f.until(rung);
+      await f.press(KEY.enter);
+    }
+    await f.until(BOOT);
+    await f.press("y");
+    await f.until("Claude Code login: signed in (claude auth status)");
+    await f.until("Secrets were cut from your files. Paste each to set it on the machine, or leave it empty to skip.");
+    await f.until("cut from ~/.zshrc; the value is set there on the machine and never shown here");
+    await f.press(..."s3cret-value".split(""), KEY.enter);
+    await f.until("A_KEY: set in ~/.zshrc on the machine");
+    await sealIt(f);
+    const result = await run;
+    expect(result.code).toBe(0);
+    expect(result.secrets).toEqual([{ name: "A_KEY", path: "~/.zshrc", state: "set" }]);
+    const out = f.text();
+    expect(out.indexOf("Secrets were cut")).toBeGreaterThan(out.indexOf("Claude Code login: signed in"));
+    expect(out.indexOf("Secrets were cut")).toBeLessThan(out.indexOf("Ready to seal golden v1"));
+    expect(out).toMatch(/Secrets\n│\s+A_KEY\s+set in ~\/.zshrc\n/);
+    expect(out).not.toContain("s3cret");
+    const pty = f.link.ptys.find(p => p.created["env"] !== undefined && "WSP_SECRET_LINE" in (p.created["env"] as object))!;
+    expect(pty.created).toEqual({ cols: 200, rows: 50, shell: "/bin/sh", env: { PS1: "", WSP_SECRET_LINE: "export A_KEY='s3cret-value'" } });
+    expect(pty.writes).toEqual([`printf '%s\\n' "$WSP_SECRET_LINE" >> "$HOME"/'.zshrc'; printf '\\nWSP_STATUS %s\\n' $?; exit\r`]);
+    expect(pty.killed).toBe(true);
+    // gh's copy check, claude's sign-in with its check on the same link, then the one write.
+    expect(f.link.dials).toBe(3);
+    expect(JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8"))).toMatchObject({
+      logins: [{ id: "logins/gh" }, { id: "logins/claude", state: "signed-in" }],
+      secrets: [{ name: "A_KEY", path: "~/.zshrc", state: "set" }],
+    });
+    expect(readFileSync(join(dirname(f.opts.statePath), "init.log"), "utf8")).not.toContain("s3cret");
   });
 
   it("a consent row saved as sign in before this round replays as skip: nothing uploads, the summary says skip, the resaved recipe says skip", async () => {
@@ -783,7 +885,9 @@ describe("wsp init, everything else", () => {
     expect(out).toMatch(/Everything else\s+0 of 4/);
     expect(out).not.toMatch(/\.demo-token\s+sign in/);
     // Only the unticked gh login is a sign-in here; the credential row never is.
-    expect(f.hooks[0]!.checklist()).toEqual([{ label: "GitHub CLI login", command: "gh auth login" }]);
+    const signIns = out.slice(out.lastIndexOf("Sign-ins\n"), out.lastIndexOf("Secrets\n"));
+    expect(signIns).toMatch(/GitHub CLI login\s+skipped/);
+    expect(signIns).not.toContain(".demo-token");
     const saved = loadManifest(join(dirname(f.opts.statePath), "golden-recipe.json"));
     expect(saved.entries.find(e => e.id === "everything/.demo-token")).toMatchObject({ bring: false, choice: "skip" });
     expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8")).files.skipped).toEqual([]);
@@ -951,15 +1055,11 @@ describe("wsp init, the sign-in stage", () => {
     await f.until(/not signed in[\s\S]*not signed in[\s\S]*not signed in[\s\S]*r retry/);
     await f.press("s");
 
-    await f.until(URL_RE);
-    await f.press(KEY.enter);
+    await sealIt(f);
     const result = await run;
     expect(result.code).toBe(0);
     const out = f.text();
     expect(out).toMatch(/Codex login\s+skipped\s+skipped by you/);
-    // Two logins are still open, so the terminal says what the page says.
-    expect(out).toContain("Sign in where the checklist says, then save the golden.");
-    expect(out).not.toContain("Save the golden there once the machine is the way you want it.");
     // Three login ptys (default, retry, fallback), each followed by a status run; o never reached the machine.
     expect(f.link.ptys.filter(p => !p.writes[0]!.includes("WSP_STATUS")).map(p => p.writes[0])).toEqual([
       "exec codex login || exit\r",
@@ -976,15 +1076,10 @@ describe("wsp init, the sign-in stage", () => {
     });
     expect(result.logins?.map(l => l.state)).toEqual(["skipped", "skipped"]);
     expect(out).not.toMatch(/—/);
-    // The open logins are the page's checklist, each with its command; the seal stamps their states on the version.
-    expect(f.hooks[0]!.checklist()).toEqual([
-      { label: "Codex login", command: "codex login" },
-      { label: "kubectl config", command: "kubectl has no sign-in; copy the kubeconfig instead" },
-    ]);
-    // o opened the page twice; the device URL, the second o, then the app at the hand-off.
+    // o opened the page twice; the device URL, the second o, then the app after the seal.
     expect(f.opened).toEqual([DEVICE_URL, DEVICE_URL, expect.stringMatching(URL_RE)]);
-    const sealed = await f.served[0]!.golden.seal(builderId);
-    expect(sealed.version.logins).toEqual([
+    // The seal stamps their states on the version.
+    expect((await f.runtimes.at(-1)!.golden.get())?.versions[0]?.logins).toEqual([
       { name: "Codex login", state: "skipped" },
       { name: "kubectl config", state: "skipped" },
     ]);
@@ -1000,20 +1095,15 @@ describe("wsp init, the sign-in stage", () => {
     await f.until(BOOT);
     await f.press("y");
     await f.until("Codex login: skipped (codex is not on the machine)");
-    await f.until(URL_RE);
-    await f.press(KEY.enter);
+    await sealIt(f);
     const result = await run;
     expect(result.code).toBe(0);
     expect(f.link.ptys.map(p => p.writes[0])).toEqual(["exec codex login || exit\r"]);
     expect(f.text()).not.toContain("r retry");
     expect(result.logins?.[0]).toEqual({ id: "logins/codex", label: "Codex login", state: "skipped", command: "codex login", exit: 127, note: "codex is not on the machine" });
-    expect(f.hooks[0]!.checklist()).toEqual([
-      { label: "Codex login", command: "install codex, then codex login" },
-      { label: "kubectl config", command: "kubectl has no sign-in; copy the kubeconfig instead" },
-    ]);
   });
 
-  it("a login with no status command that ended with a non-zero exit is offered a retry or a skip and stays on the page's checklist", async () => {
+  it("a login with no status command that ended with a non-zero exit is offered a retry or a skip; a clean exit stays not verified", async () => {
     const GEMINI_MANIFEST: Manifest = { entries: [FIXTURE.entries[0]!, { rung: "logins", id: "logins/gemini", label: "Gemini CLI login", group: "Agent logins", paths: ["~/.gemini/oauth_creds.json"], bytes: 300, default: "skip" }] };
     const f = fake({ hold: true, collect: async () => GEMINI_MANIFEST });
     const run = runInit(f.opts, f.io);
@@ -1030,26 +1120,26 @@ describe("wsp init, the sign-in stage", () => {
     await f.until("Gemini CLI login  r retry   s skip");
     await f.press("r");
     await f.until(/Press Enter to open[\s\S]*Press Enter to open/);
-    // A clean exit with no status command is not verified but nothing to retry; it still stays on the page.
+    // A clean exit with no status command is not verified but nothing to retry.
     f.link.exit(f.link.ptys.at(-1)!, 0);
     await f.until(/not verified \(no status command known for gemini\)\n/);
-    await f.until(URL_RE);
+    await f.until(SEAL_Q(1));
     expect(f.text().split("r retry")).toHaveLength(2);
     await f.press(KEY.enter);
     const result = await run;
     expect(result.logins?.map(l => [l.state, l.exit])).toEqual([["not-verified", 0]]);
-    expect(f.hooks[0]!.checklist()).toEqual([{ label: "Gemini CLI login", command: "gemini" }]);
-    expect(f.text()).toContain("Sign in where the checklist says, then save the golden.");
+    expect(f.text()).toMatch(/Sign-ins\n│\s+Gemini CLI login\s+not verified\n/);
   });
 
-  it("an unreadable golden-import.json is said so when the logins are written into a fresh one", () => {
+  it("an unreadable golden-import.json is said so when the logins and secrets are written into a fresh one", () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-notes-"));
     dirs.push(dir);
     const path = join(dir, "golden-import.json");
     writeFileSync(path, "{ not json");
-    expect(noteLogins(path, [{ id: "logins/gh", label: "GitHub CLI login", state: "skipped" }])).toEqual({ replaced: true });
-    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ logins: [{ id: "logins/gh", label: "GitHub CLI login", state: "skipped" }] });
-    expect(noteLogins(path, [])).toEqual({ replaced: false });
+    expect(noteOutcomes(path, { logins: [{ id: "logins/gh", label: "GitHub CLI login", state: "skipped" }], secrets: [] })).toEqual({ replaced: true });
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ logins: [{ id: "logins/gh", label: "GitHub CLI login", state: "skipped" }], secrets: [] });
+    expect(noteOutcomes(path, { logins: [] })).toEqual({ replaced: false });
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ logins: [], secrets: [] });
   });
 
   it("a daemon link that drops under a login ends that command as not signed in, and the retry dials a fresh link", async () => {
@@ -1073,8 +1163,7 @@ describe("wsp init, the sign-in stage", () => {
     await f.until(/not signed in \(codex login status says not signed in\)/);
     await f.until(/says not signed in[\s\S]*r retry   f retry/);
     await f.press("s");
-    await f.until(URL_RE);
-    await f.press(KEY.enter);
+    await sealIt(f);
     const result = await run;
     expect(result.code).toBe(0);
     expect(result.logins?.map(l => [l.state, l.note])).toEqual([["skipped", "skipped by you"], ["skipped", "kubectl has no sign-in; copy the kubeconfig instead"]]);
@@ -1112,31 +1201,7 @@ describe("wsp init, the sign-in stage", () => {
     expect(f.hooks[0]!.openLine("task-1", "github.com", "https://github.com/login/device")).toBe(lines[0]);
   });
 
-  it("a desktop builder keeps the checklist beside its live screen and signs in nothing here", async () => {
-    const f = fake({ yes: true, collect: async () => CODEX_MANIFEST });
-    f.opts.runtime = recipe => {
-      const backend = stubBackend();
-      const create = backend.create.bind(backend);
-      backend.create = async spec => Object.assign(await create(spec), { streamUrl: "wss://stream.example/vm" });
-      f.backends.push(backend);
-      const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
-      f.runtimes.push(rt);
-      return rt;
-    };
-    const result = await runInit(f.opts, f.io);
-    expect(result.code).toBe(0);
-    expect(result.logins).toBeUndefined();
-    expect(f.hooks[0]!.checklist()).toEqual([
-      { label: "Codex login", command: "codex login" },
-      { label: "kubectl config", command: "kubectl has no sign-in; copy the kubeconfig instead" },
-    ]);
-    expect(f.link.ptys).toEqual([]);
-    expect(f.text()).toContain("Sign in where the checklist says, then save the golden.");
-    expect(f.text()).not.toContain("Signing in on the machine");
-    expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).not.toHaveProperty("logins");
-  });
-
-  it("when the machine's terminal cannot be reached the login is not signed in with the reason, can be skipped, and the hand-off still comes", async () => {
+  it("when the machine's terminal cannot be reached the login is not signed in with the reason, can be skipped, and the seal still comes", async () => {
     const f = fake({ collect: async () => CODEX_MANIFEST, daemon: async () => { throw new Error("no daemon token"); } });
     const run = runInit(f.opts, f.io);
     await f.until("Identity");
@@ -1148,8 +1213,7 @@ describe("wsp init, the sign-in stage", () => {
     await f.until("Codex login: not signed in (no daemon token)");
     await f.until("r retry   f retry with codex login --device-auth   s skip");
     await f.press("s");
-    await f.until(URL_RE);
-    await f.press(KEY.enter);
+    await sealIt(f);
     const result = await run;
     expect(result.code).toBe(0);
     expect(result.logins).toEqual([
@@ -1225,8 +1289,7 @@ describe("wsp init, logins copied to the machine", () => {
     await f.press("r");
     await f.until(/GitHub CLI login\s+gh auth login\n/);
     await f.until("GitHub CLI login: signed in (gh auth status)");
-    await f.until(URL_RE);
-    await f.press(KEY.enter);
+    await sealIt(f);
     const result = await run;
     expect(result.code).toBe(0);
     expect(f.reads).toEqual(["gh:github.com"]);
@@ -1236,38 +1299,33 @@ describe("wsp init, logins copied to the machine", () => {
       { id: "logins/gh", label: "GitHub CLI login", state: "signed-in", command: "gh auth login", exit: 0, note: "gh auth status" },
       { id: "logins/kube", label: "kubectl config", state: "copied", note: "not verified: no status command known for kube" },
     ]);
-    expect(f.hooks[0]!.checklist()).toEqual([]);
-    expect(f.text()).toContain("Save the golden there once the machine is the way you want it.");
     expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({
       logins: [
         { id: "logins/gh", state: "signed-in", note: "gh auth status" },
         { id: "logins/kube", state: "copied" },
       ],
     });
-    const sealed = await f.served[0]!.golden.seal(f.backends[0]!.machines[0]!.id);
-    expect(sealed.version.logins).toEqual([
+    expect((await f.runtimes.at(-1)!.golden.get())?.versions[0]?.logins).toEqual([
       { name: "GitHub CLI login", state: "signed-in" },
       { name: "kubectl config", state: "copied" },
     ]);
   });
 
-  it("a copied login whose status check fails can be skipped instead; the skip keeps its sign-in on the page's checklist", async () => {
+  it("a copied login whose status check fails can be skipped instead; the skip is what the seal records", async () => {
     const f = fake({ collect: async () => COPIED_MANIFEST });
     ghOnBuilder(f);
     const { run } = await toTheBuilder(f);
     await f.until("GitHub CLI login  r sign in on the machine   s skip");
     await f.press("s");
-    await f.until(URL_RE);
-    await f.press(KEY.enter);
+    await sealIt(f);
     const result = await run;
     expect(result.code).toBe(0);
     expect(f.link.ptys.map(p => p.writes[0])).toEqual([STATUS_LINE]);
     expect(result.logins?.[0]).toEqual({ id: "logins/gh", label: "GitHub CLI login", state: "skipped", note: "skipped by you" });
-    expect(f.hooks[0]!.checklist()).toEqual([{ label: "GitHub CLI login", command: "gh auth login" }]);
-    expect(f.text()).toContain("Sign in where the checklist says, then save the golden.");
+    expect((await f.runtimes.at(-1)!.golden.get())?.versions[0]?.logins?.[0]).toEqual({ name: "GitHub CLI login", state: "skipped" });
   });
 
-  it("under --yes a copied login is still checked and nothing is asked: a failed check is not signed in and the page carries its sign-in", async () => {
+  it("under --yes a copied login is still checked and nothing is asked: a failed check is not signed in", async () => {
     const f = fake({ yes: true });
     savedAsCopy(f);
     ghOnBuilder(f);
@@ -1280,10 +1338,9 @@ describe("wsp init, logins copied to the machine", () => {
       { id: "logins/gh", label: "GitHub CLI login", state: "not-signed-in", note: "copied, but gh auth status says not signed in" },
       { id: "logins/kube", label: "kubectl config", state: "copied", note: "not verified: no status command known for kube" },
     ]);
-    expect(f.hooks[0]!.checklist()).toEqual([{ label: "GitHub CLI login", command: "gh auth login" }]);
   });
 
-  it("a copied login whose tool is not on the machine stays copied with that reason; the page says to install the tool; no sign-in is offered", async () => {
+  it("a copied login whose tool is not on the machine stays copied with that reason; no sign-in is offered", async () => {
     const f = fake({ yes: true });
     savedAsCopy(f);
     ghOnBuilder(f, { missing: true });
@@ -1292,9 +1349,6 @@ describe("wsp init, logins copied to the machine", () => {
     expect(f.text()).toContain("GitHub CLI login: copied (not verified: gh is not on the machine)");
     expect(f.text()).not.toContain("r sign in on the machine");
     expect(result.logins?.[0]).toEqual({ id: "logins/gh", label: "GitHub CLI login", state: "copied", command: "gh auth status", exit: 127, note: "not verified: gh is not on the machine" });
-    // The files are there; the page says to install the tool, as it does for a sign-in whose tool is missing.
-    expect(f.hooks[0]!.checklist()).toEqual([{ label: "GitHub CLI login", command: "install gh, then gh auth login" }]);
-    expect(f.text()).toContain("Sign in where the checklist says, then save the golden.");
   });
 
   it("a login with no table row runs a bare shell on the machine; after it ends unclean the offer is a retry, since a pty has run", async () => {
@@ -1316,31 +1370,36 @@ describe("wsp init, logins copied to the machine", () => {
     await f.until("foo login: not verified (no status command known for foo; exit 1)");
     await f.until("foo login  r retry   s skip");
     await f.press("s");
-    await f.until(URL_RE);
-    await f.press(KEY.enter);
+    await sealIt(f);
     const result = await run;
     expect(result.code).toBe(0);
     expect(result.logins).toEqual([{ id: "logins/foo", label: "foo login", state: "skipped", exit: 1, note: "skipped by you" }]);
-    expect(f.hooks[0]!.checklist()).toEqual([{ label: "foo login", command: "sign in as the tool asks" }]);
   });
 });
 
 describe("wsp init, flags and no terminal", () => {
-  it("without a terminal it behaves as --yes: defaults taken, nothing asked, the address printed", async () => {
+  it("without a terminal it behaves as --yes: defaults taken, nothing asked, the golden sealed, the first workspace forked, the address printed", async () => {
     const f = fake({ tty: false });
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(0);
-    expect(f.text()).toContain("Taken as yes (no terminal)");
-    expect(f.text()).toMatch(URL_RE);
-    expect(f.backends[0]!.machines).toHaveLength(1);
+    const out = f.text();
+    expect(out).toContain("Taken as yes (no terminal)");
+    expect(out).toContain("Sealing golden v1. Taken as yes (no terminal).");
+    expect(out).toContain("Golden v1 sealed.");
+    expect(out).toMatch(/Workspace first \(ws_[0-9a-f]+\) forked from golden v1\./);
+    expect(out).toMatch(/^◇\s+Open http:\/\/127\.0\.0\.1:4400\/$/m);
+    expect(out).not.toContain("Opened http");
+    // The builder, its smoke fork, the first workspace.
+    expect(f.backends[0]!.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_golden-v1", true], ["snap_golden-v1", false]]);
+    expect((await f.runtimes.at(-1)!.workspaces.list()).map(w => w.name)).toEqual(["first"]);
     expect(f.opened).toEqual([]);
     // Nobody is here to click macOS's consent dialog: the gh login, held in the Keychain, defaults to sign in on the
-    // machine instead of copy, so the Keychain is never asked and the row lands on the checklist.
+    // machine instead of copy, so the Keychain is never asked and the sign-in is skipped.
     expect(f.reads).toEqual([]);
-    expect(f.text()).toMatch(/GitHub CLI login\s+sign in/);
-    expect(f.hooks[0]!.checklist()).toEqual(expect.arrayContaining([{ label: "GitHub CLI login", command: "gh auth login" }]));
+    expect(out).toMatch(/GitHub CLI login\s+sign in/);
+    expect(result.logins?.find(l => l.id === "logins/gh")?.state).toBe("skipped");
     expect(loadManifest(join(dirs[0]!, "golden-recipe.json")).entries.find(e => e.id === "logins/gh")?.choice).toBe("machine");
-    expect(f.text()).not.toContain("from your Keychain");
+    expect(out).not.toContain("from your Keychain");
   });
 
   it("off a terminal a saved copy answer still reads the Keychain, and says what is read before macOS can ask", async () => {
@@ -1365,8 +1424,6 @@ describe("wsp init, flags and no terminal", () => {
         { id: "logins/claude", state: "skipped", note: "no terminal to sign in from; use the app's terminal" },
       ],
     });
-    // The page still gets the login as its checklist: nothing ran here.
-    expect(f.hooks[0]!.checklist()).toEqual([{ label: "Claude Code login", command: "claude auth login" }]);
   });
 
   it("a Keychain login the reader refuses is read before anything boots, turns into a sign-in on the machine, and says so before the confirm", async () => {
@@ -1390,7 +1447,6 @@ describe("wsp init, flags and no terminal", () => {
     // The refusal happened with no machine on the account; the pack later asks the Keychain for nothing and notes the row.
     const saved = loadManifest(join(dirs[0]!, "golden-recipe.json"));
     expect(saved.entries.find(e => e.id === "logins/gh")?.choice).toBe("machine");
-    expect(f.hooks[0]!.checklist()).toEqual(expect.arrayContaining([{ label: "GitHub CLI login", command: "gh auth login" }]));
     const log = f.backends[0]!.machines[0]!.execLog;
     expect(log.some(c => c.includes("tar xzf"))).toBe(true);
     // The refused row travels with none of its files: the recipe is replanned with gh as a sign-in, so the builder
@@ -1476,8 +1532,8 @@ describe("wsp init, flags and no terminal", () => {
     const out = f.text();
     expect(out).toMatch(URL_RE);
     expect(out).toContain("Ready");
+    expect(out).toContain("Golden v1 sealed.");
     expect(f.opened).toEqual([]);
-    expect(f.copied).toEqual([]);
     // No agent ticked: the harness installs nothing and names nothing; the two files still travel.
     const log = f.backends[0]!.machines[0]!.execLog;
     expect(log).toContain("true");
@@ -1521,8 +1577,8 @@ describe("wsp init, flags and no terminal", () => {
     expect(result.code).toBe(0);
     expect(refusals).toBe(2);
     expect(f.text()).toContain("at its machine cap");
-    expect(f.backends[0]!.machines).toHaveLength(1);
-    expect(f.backends[0]!.machines[0]!.killed).toBe(false);
+    // The builder, then the seal's smoke fork and the first workspace.
+    expect(f.backends[0]!.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_golden-v1", true], ["snap_golden-v1", false]]);
   });
 
   it("a failed upload reports the stage and the detail and exits 1 with no host", async () => {
@@ -1626,7 +1682,7 @@ describe("wsp init, flags and no terminal", () => {
     expect(runLog).toMatch(/ stage failed: an agent did not install/);
   });
 
-  it("a run log that cannot be written stops nothing: the hand-off says so instead of naming it", async () => {
+  it("a run log that cannot be written stops nothing: the address line says so instead of naming it", async () => {
     const f = fake({ yes: true, tty: false });
     mkdirSync(join(dirname(f.opts.statePath), "init.log"));
     const result = await runInit(f.opts, f.io);
@@ -1666,8 +1722,7 @@ describe("wsp init, flags and no terminal", () => {
       f.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
     };
-    const result = await runInit(f.opts, f.io);
-    expect(result.code).toBe(0);
+    await bootedOnly(f);
     expect(f.hosts).toBe(1);
     const out = f.text();
     expect(out).toContain("A builder from an earlier wsp init is still running on the account:");
@@ -1693,7 +1748,7 @@ describe("wsp init, flags and no terminal", () => {
       first.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
     };
-    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    await bootedOnly(first);
     writeFileSync(join(first.opts.home, ".zshrc"), "export A=2\n");
 
     const f = fake({ yes: true, home: first.opts.home });
@@ -1701,7 +1756,7 @@ describe("wsp init, flags and no terminal", () => {
       f.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
     };
-    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    await bootedOnly(f);
     const out = f.text();
     expect(out).toMatch(/default \(m1\), \d+ s old, about \$\d+\.\d\d so far; built from a different recipe: ~\/\.zshrc changed$/m);
     expect(out).toContain("Stopped default (m1).");
@@ -1717,7 +1772,7 @@ describe("wsp init, flags and no terminal", () => {
       first.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
     };
-    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    await bootedOnly(first);
     const zshrc = join(first.opts.home, ".zshrc");
     writeFileSync(zshrc, readFileSync(zshrc));
     const later = new Date(Date.now() + 90_000);
@@ -1728,7 +1783,7 @@ describe("wsp init, flags and no terminal", () => {
       f.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
     };
-    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    await bootedOnly(f);
     const out = f.text();
     expect(out).toContain("Attaching to your earlier builder: default (m1)");
     expect(out).not.toContain("still running on the account");
@@ -1757,7 +1812,7 @@ describe("wsp init, flags and no terminal", () => {
       first.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
     };
-    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    await bootedOnly(first);
     const uploads = () => shared.machines[0]!.execLog.filter(c => c.includes("tar xzf")).length;
     expect(uploads()).toBe(1);
 
@@ -1767,7 +1822,7 @@ describe("wsp init, flags and no terminal", () => {
       f.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
     };
-    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    await bootedOnly(f);
     const out = f.text();
     expect(out).toContain("Attaching to your earlier builder: default (m1)");
     // Off a terminal the detail is cut at 80 columns, so the size and time may not survive; the path and the word do.
@@ -1782,7 +1837,7 @@ describe("wsp init, flags and no terminal", () => {
       g.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
     };
-    expect((await runInit(g.opts, g.io)).code).toBe(0);
+    await bootedOnly(g);
     expect(g.text()).toMatch(/built from a different recipe: ~\/\.gitconfig changed$/m);
     expect(g.text()).toContain("Stopped default (m1).");
     expect(shared.machines.map(m => [m.id, m.killed])).toEqual([["m1", true], ["m2", false]]);
@@ -1808,7 +1863,7 @@ describe("wsp init, flags and no terminal", () => {
       first.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
     };
-    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    await bootedOnly(first);
     const [recorded] = (await store.list("builders")) as { import: { recipe: { files: { path: string; volatile?: boolean }[] } } }[];
     expect(recorded!.import.recipe.files.map(f => [f.path, f.volatile])).toEqual([["~/.claude.json", true], ["~/.claude/settings.json", undefined], ["~/.gitconfig", undefined]]);
 
@@ -1818,7 +1873,7 @@ describe("wsp init, flags and no terminal", () => {
       f.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
     };
-    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    await bootedOnly(f);
     const out = f.text();
     expect(out).toContain("Attaching to your earlier builder: default (m1)");
     expect(out).toMatch(/Files uploaded\s+~\/\.claude\.json re-imported/);
@@ -1836,7 +1891,7 @@ describe("wsp init, flags and no terminal", () => {
       first.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
     };
-    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    await bootedOnly(first);
     const sha = (v: string) => createHash("sha256").update(v).digest("hex");
     const keychainOf = async () => ((await store.list("builders")) as { import: { recipe: { files: { path: string; digest: string; volatile?: boolean }[] } } }[])[0]!.import.recipe.files.find(f => f.path === "Keychain: gh:github.com");
     expect(await keychainOf()).toMatchObject({ digest: sha("gho_fake"), volatile: true });
@@ -1849,7 +1904,7 @@ describe("wsp init, flags and no terminal", () => {
       f.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
     };
-    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    await bootedOnly(f);
     const out = f.text();
     expect(out).toContain("Attaching to your earlier builder: default (m1)");
     // The fake home has no hosts.yml, so the login file is rendered from the Keychain value alone.
@@ -1893,7 +1948,7 @@ describe("wsp init, flags and no terminal", () => {
       first.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
     };
-    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    await bootedOnly(first);
     const path = recipePath(first.opts.statePath);
     const saved = JSON.parse(readFileSync(path, "utf8")) as { entries: { id: string; bring?: boolean }[] };
     for (const e of saved.entries) if (e.id === "agents/codex") e.bring = true;
@@ -1904,7 +1959,7 @@ describe("wsp init, flags and no terminal", () => {
       f.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
     };
-    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    await bootedOnly(f);
     const out = f.text();
     expect(out).toMatch(/default \(m1\), \d+ s old, about \$\d+\.\d\d so far; built from a different recipe: Codex ticked$/m);
     expect(out).toContain("Stopped default (m1).");
@@ -1920,7 +1975,7 @@ describe("wsp init, flags and no terminal", () => {
       first.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
     };
-    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    await bootedOnly(first);
     writeFileSync(join(first.opts.home, ".zshrc"), "export A=2\n");
 
     const f = fake({ home: first.opts.home });
@@ -1953,7 +2008,7 @@ describe("wsp init, flags and no terminal", () => {
       first.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
     };
-    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    await bootedOnly(first);
     shared.machines[0]!.paused = true;
 
     const f = fake({ yes: true, home: first.opts.home });
@@ -1961,8 +2016,7 @@ describe("wsp init, flags and no terminal", () => {
       f.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: recipe });
     };
-    const result = await runInit(f.opts, f.io);
-    expect(result.code).toBe(0);
+    await bootedOnly(f);
     expect(f.hosts).toBe(1);
     const out = f.text();
     expect(out).toMatch(/default \(m1\), \d+ s old, about \$\d+\.\d\d so far; cannot be sealed after a restart$/m);
@@ -1979,7 +2033,7 @@ describe("wsp init, flags and no terminal", () => {
       first.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
     };
-    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    await bootedOnly(first);
     shared.machines[0]!.spec.labels!["wsp-owner"] = "h_other";
 
     const f = fake({ yes: true, home: first.opts.home });
@@ -2007,7 +2061,7 @@ describe("wsp init, flags and no terminal", () => {
       first.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
     };
-    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    await bootedOnly(first);
     const record = (await store.get("builders", "m1")) as { heldBy: { host: string; pid: number; heartbeat: string } };
     await store.put("builders", "m1", { ...record, heldBy: { ...record.heldBy, pid: process.ppid } });
 
@@ -2046,7 +2100,7 @@ describe("wsp init, flags and no terminal", () => {
       f.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: recipe });
     };
-    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    await bootedOnly(f);
     expect(f.hosts).toBe(1);
     const out = f.text();
     expect(out).toMatch(/default \(m1\), \d+ s old, about \$\d+\.\d\d so far; its setup never finished$/m);
@@ -2064,7 +2118,7 @@ describe("wsp init, flags and no terminal", () => {
       first.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
     };
-    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    await bootedOnly(first);
     const other = createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true", cpu: 2, memMb: 4096 } });
     await other.golden.prepare();
 
@@ -2073,7 +2127,7 @@ describe("wsp init, flags and no terminal", () => {
       f.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: recipe });
     };
-    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    await bootedOnly(f);
     expect(f.hosts).toBe(1);
     const out = f.text();
     expect(out).toMatch(/default \(m2\), \d+ s old, about \$\d+\.\d\d so far; built from a different recipe$/m);
@@ -2102,7 +2156,7 @@ describe("wsp init, flags and no terminal", () => {
       first.runtimes.push(rt);
       return rt;
     };
-    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    await bootedOnly(first);
     expect(first.text()).toContain("changed to sign in on the machine");
     const saved = JSON.parse(readFileSync(recipePath(first.opts.statePath), "utf8")) as { entries: { id: string; choice?: string }[] };
     expect(saved.entries.find(e => e.id === "logins/gh")).toMatchObject({ choice: "machine" });
@@ -2116,7 +2170,7 @@ describe("wsp init, flags and no terminal", () => {
       f.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
     };
-    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    await bootedOnly(f);
     expect(f.reads).toEqual([]);
     expect(f.text()).toContain("Attaching to your earlier builder: default (m1)");
     expect(shared.machines).toHaveLength(1);
@@ -2131,7 +2185,7 @@ describe("wsp init, flags and no terminal", () => {
       first.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
     };
-    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    await bootedOnly(first);
     expect(shared.machines).toHaveLength(1);
 
     // The same home, so the file rows hash the same; a second process is a second runtime over the same
@@ -2142,8 +2196,7 @@ describe("wsp init, flags and no terminal", () => {
       f.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
     };
-    const result = await runInit(f.opts, f.io);
-    expect(result.code).toBe(0);
+    await bootedOnly(f);
     expect(f.hosts).toBe(1);
     const out = f.text();
     expect(out).toMatch(/Attaching to your earlier builder: default \(m1\), \d+ s old, about \$\d+\.\d\d so far\. Nothing new boots; stages already applied are skipped\./);
@@ -2175,8 +2228,7 @@ describe("wsp init, flags and no terminal", () => {
     const first = fake({ yes: true, tty: false });
     first.opts.runtime = runtimeOver(first);
     expect((await runInit(first.opts, first.io)).code).toBe(0);
-    await first.runtimes[0]!.golden.seal(shared.machines[0]!.id);
-    await first.until("Golden v1 sealed");
+    expect(first.text()).toContain("Golden v1 sealed.");
 
     // The seal kept that builder for its window; a changed recipe updates the golden on it and seals v2 there.
     writeFileSync(join(first.opts.home, ".zshrc"), "export A=1\nexport B=2\n");
@@ -2186,7 +2238,8 @@ describe("wsp init, flags and no terminal", () => {
     await second.until("Sealed");
     expect(second.text()).toMatch(/Golden v2 sealed in \d+s on the builder kept since the save/);
     expect(second.text()).not.toContain("Golden v1 sealed");
-    expect(shared.machines.filter(m => !m.killed)).toHaveLength(1);
+    // The kept builder and the first run's workspace.
+    expect(shared.machines.filter(m => !m.killed).map(m => m.spec.fromSnapshot)).toEqual([undefined, "snap_golden-v1"]);
   });
 });
 
@@ -2425,7 +2478,7 @@ describe("wsp init, a signal during prepare", () => {
       first.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
     };
-    expect((await runInit(first.opts, first.io)).code).toBe(0);
+    await bootedOnly(first);
     expect(shared.machines).toHaveLength(1);
 
     const f = fake({ yes: true, home: first.opts.home });
@@ -2454,7 +2507,7 @@ describe("wsp init, a signal during prepare", () => {
     expect(out).not.toContain("nothing is billing");
   });
 
-  it("after the hand-off no handler of init's is left: a signal then is the host's to handle", async () => {
+  it("once init returns no handler of init's is left: a signal then is the host's to handle", async () => {
     const f = fake({ yes: true });
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(0);
@@ -2803,7 +2856,8 @@ describe("disk estimate before the boot", () => {
 });
 
 describe("wsp init with a golden already built from a recipe", () => {
-  /** A first init that prepared and, as the browser would, sealed golden v1; the builder stays for its window. */
+  /** A first init under --yes that prepared and sealed golden v1; the builder stays for its window. Its first
+   * workspace is refused by the host fake so the machines here are the builder and the forks the seals boot. */
   async function sealed(over: Partial<InitOptions> = {}) {
     const store = memoryStore();
     const shared = stubBackend();
@@ -2814,9 +2868,11 @@ describe("wsp init with a golden already built from a recipe", () => {
       first.runtimes.push(rt);
       return rt;
     };
+    first.opts.host = quietHost();
     expect((await runInit(first.opts, first.io)).code).toBe(0);
+    expect(first.text()).toContain("Golden v1 sealed.");
+    expect(first.text()).toContain("The first workspace could not be forked: no workspace in this fixture. Create one from the app.");
     const builder = shared.machines[0]!;
-    await first.runtimes.at(-1)!.golden.seal(builder.id, { logins: [{ name: "GitHub CLI login", state: "signed-in" }] });
     await first.runtimes.at(-1)!.close();
     expect(builder.killed).toBe(false);
     expect(await store.get("golden-recipes", "default@v1")).toBeDefined();
@@ -2856,8 +2912,9 @@ describe("wsp init with a golden already built from a recipe", () => {
     // The builder, v1's smoke fork, v2's smoke fork: nothing else booted.
     expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_golden-v1", true], ["snap_golden-v2", true]]);
     expect(await store.get("goldens", "default")).toMatchObject({ head: 2 });
-    // The update kept the golden's disk, so what was signed in on v1 is stamped on v2 as it was.
-    expect(((await store.get("goldens", "default")) as { versions: { logins?: unknown }[] }).versions.map(v => v.logins)).toEqual([[{ name: "GitHub CLI login", state: "signed-in" }], [{ name: "GitHub CLI login", state: "signed-in" }]]);
+    // The update kept the golden's disk, so what v1's sign-in stage recorded (both skipped under --yes) is stamped on v2 as it was.
+    const skipped = [{ name: "GitHub CLI login", state: "skipped" }, { name: "Claude Code login", state: "skipped" }];
+    expect(((await store.get("goldens", "default")) as { versions: { logins?: unknown }[] }).versions.map(v => v.logins)).toEqual([skipped, skipped]);
     expect(await store.get("golden-recipes", "default@v2")).toBeDefined();
     // The saved recipe is the new one, and a run on it finds nothing to update.
     const again = next({ tty: false, manifestPath: recipePath(f.opts.statePath) });
@@ -2891,8 +2948,9 @@ describe("wsp init with a golden already built from a recipe", () => {
     const store = memoryStore();
     const shared = stubBackend();
     const create = shared.create.bind(shared);
+    // The account has one slot: a fork beside a running machine is refused, so the seal gives the builder up first.
     shared.create = async spec => {
-      if (spec.fromSnapshot !== undefined) throw Object.assign(new Error("Too many concurrent sessions"), { kind: "concurrency" });
+      if (spec.fromSnapshot !== undefined && shared.machines.filter(m => !m.killed).length >= 1) throw Object.assign(new Error("Too many concurrent sessions"), { kind: "concurrency" });
       return create(spec);
     };
     const f = fake({ yes: true, tty: false });
@@ -2903,37 +2961,47 @@ describe("wsp init with a golden already built from a recipe", () => {
       return rt;
     };
     expect((await runInit(f.opts, f.io)).code).toBe(0);
-    shared.create = async spec => {
-      if (spec.fromSnapshot !== undefined && shared.machines.filter(m => !m.killed).length >= 1) throw Object.assign(new Error("Too many concurrent sessions"), { kind: "concurrency" });
-      return create(spec);
-    };
-    await f.runtimes.at(-1)!.golden.seal(shared.machines[0]!.id);
-    await vi.waitFor(() => expect(f.text()).toContain("Golden v1 sealed"));
+    expect(f.text()).toContain("Golden v1 sealed.");
     expect(f.text()).not.toContain("The builder stays up ten minutes");
     expect(shared.machines[0]!.killed).toBe(true);
+    // With the builder gone the first workspace fits the slot.
+    expect(f.text()).toMatch(/Workspace first \(ws_[0-9a-f]+\) forked from golden v1\./);
   });
 
   it("a reusable builder already carrying the new recipe is attached to; the update road does not run beside it", async () => {
     const { shared, first, next } = await sealed();
     const manifestPath = join(first.opts.home, "manifest.json");
-    writeFileSync(manifestPath, JSON.stringify({ entries: FIXTURE.entries.map(e => (e.id === "agents/codex" ? { ...e, bring: true } : e)) }));
-    const quiet = () => async () => ({ port: 4400, wsPort: 4410, authToken: "tok", close: async () => {} });
-    // A rebuild with the new recipe that was never sealed: its builder stays, first-life, carrying the new hash.
-    const rebuilt = next({ manifestPath });
-    rebuilt.opts.host = quiet();
-    expect((await runInit(rebuilt.opts, rebuilt.io)).code).toBe(0);
+    // gh answered as a sign-in in the file, so the terminal run and the --yes run below read the same recipe.
+    writeFileSync(manifestPath, JSON.stringify({ entries: FIXTURE.entries.map(e => (e.id === "agents/codex" ? { ...e, bring: true } : e.id === "logins/gh" ? { ...e, choice: "machine" } : e)) }));
+    // A rebuild with the new recipe whose seal was answered no: its builder stays, first-life, carrying the new hash.
+    const rebuilt = next({ manifestPath, yes: false, tty: true });
+    rebuilt.opts.host = quietHost();
+    const run = runInit(rebuilt.opts, rebuilt.io);
+    for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
+      await rebuilt.until(rung);
+      await rebuilt.press(KEY.enter);
+    }
+    await rebuilt.until("How do you want to apply them?");
+    await rebuilt.press(KEY.enter);
+    await rebuilt.until(BOOT);
+    await rebuilt.press("y");
+    await rebuilt.until(SEAL_Q(2));
+    await rebuilt.press("n");
+    expect((await run).code).toBe(1);
+    expect(rebuilt.text()).toContain("Nothing was sealed. Builder m3 stays up");
     expect(shared.machines.map(m => m.killed)).toEqual([true, true, false]);
     await rebuilt.runtimes.at(-1)!.close();
 
     const again = next({ manifestPath, tty: false });
-    again.opts.host = quiet();
+    again.opts.host = quietHost();
     expect((await runInit(again.opts, again.io)).code).toBe(0);
     const out = again.text();
     expect(out).toContain("Attaching to your earlier builder: default (m3)");
     expect(out).not.toContain("Changes since golden v1");
     expect(out).not.toMatch(BOOT);
-    expect(shared.machines).toHaveLength(3);
-    expect(shared.machines[2]!.killed).toBe(false);
+    expect(out).toContain("Golden v2 sealed.");
+    // The attached builder, kept by its seal, and v2's smoke fork.
+    expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_golden-v1", true], [undefined, false], ["snap_golden-v2", true]]);
   });
 
   it("a failed update on the kept builder says that builder is gone and what a retry costs", async () => {
@@ -2986,10 +3054,9 @@ describe("wsp init with a golden already built from a recipe", () => {
     const f = next({ manifestPath });
     // The fresh builder is the third machine, not the first the fake's default host expects.
     const hosted: string[] = [];
-    f.opts.host = async (rt, builder) => {
+    f.opts.host = async (_rt, builder) => {
       hosted.push(builder.id);
-      void rt;
-      return { port: 4400, wsPort: 4410, authToken: "tok", close: async () => {} };
+      return quietHost()();
     };
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     const out = f.text();
@@ -3004,7 +3071,9 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(out).not.toContain("A builder from an earlier wsp init is still running");
     expect(out).not.toContain("Nothing was booted");
     expect(hosted).toEqual(["m3"]);
-    expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_golden-v1", true], [undefined, false]]);
+    // The rebuilt builder seals v2 and is kept; its smoke fork is gone.
+    expect(out).toContain("Golden v2 sealed.");
+    expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_golden-v1", true], [undefined, false], ["snap_golden-v2", true]]);
   });
 
   it("interactive: the offer is a choice with the update first when the change is small; enter takes it", async () => {
@@ -3046,10 +3115,9 @@ describe("wsp init with a golden already built from a recipe", () => {
     writeFileSync(manifestPath, JSON.stringify({ entries: FIXTURE.entries.map(e => (e.id === "logins/gh" ? { ...e, bring: true, choice: "machine" } : e)) }));
     const f = next({ manifestPath });
     const hosted: string[] = [];
-    f.opts.host = async (rt, builder) => {
+    f.opts.host = async (_rt, builder) => {
       hosted.push(builder.id);
-      void rt;
-      return { port: 4400, wsPort: 4410, authToken: "tok", close: async () => {} };
+      return quietHost()();
     };
     const flipped = await runInit(f.opts, f.io);
     expect(flipped.code).toBe(0);

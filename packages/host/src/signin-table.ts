@@ -86,7 +86,7 @@ export function signInFor(name: string): SignIn {
   return SIGN_INS[name] ?? { kind: "shell" };
 }
 
-/** The words a checklist or a step header shows for the row. */
+/** The words a step header shows for the row. */
 export function signInWords(s: SignIn): string {
   switch (s.kind) {
     case "command":

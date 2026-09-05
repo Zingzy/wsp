@@ -1,17 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Renderer-wide providers around the app; the page mounts this once.
 import { StrictMode } from "react";
-import type { GoldenBuilderView } from "@wsp/protocol";
 import { Root } from "./App.js";
 import { TooltipProvider } from "./components/ui/tooltip.js";
-import type { ChecklistItem, KeyFlags } from "./wizard/Wizard.js";
 
 export interface AppRootProps {
   wsUrl: string;
   token: string;
-  keys?: KeyFlags;
-  builder?: GoldenBuilderView;
-  checklist?: ChecklistItem[];
 }
 
 export function AppRoot(props: AppRootProps) {

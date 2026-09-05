@@ -308,14 +308,10 @@ export const InboxFileEvent = z.object({
   bytes: z.number(),
 });
 
-// --- golden image (manifest, interactive builder, wizard stages) --------------
+// --- golden image (manifest, interactive builder, build stages) ---------------
 
 export const MachineKind = z.enum(["sandbox", "desktop"]);
 export type MachineKind = z.infer<typeof MachineKind>;
-
-/** One line of the builder page's checklist, in the host's boot payload: what to sign into or set, and how. */
-export const ChecklistItem = z.object({ label: z.string(), command: z.string() });
-export type ChecklistItem = z.infer<typeof ChecklistItem>;
 
 /** What each login came to by the time the golden sealed: a sign-in on the machine, or a copy from this computer
  * checked there with the tool's status command. `copied` is a copy nothing checked: an update re-imported it, or the
@@ -744,8 +740,8 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
   /** Moves the golden's head to a version already in its manifest; replies with a
    * SnapshotRollbackResult. A version outside the manifest fails with kind "missing". */
   z.object({ id: reqId, op: z.literal("snapshots.rollback"), version: z.number(), name: z.string().optional() }),
-  /** Replies with a DaemonReachView for a live builder (the wizard's terminal
-   * dials it). Asked per dial like workspaces.daemonReach: the edge token
+  /** Replies with a DaemonReachView for a live builder (wsp init's sign-in
+   * terminal dials it). Asked per dial like workspaces.daemonReach: the edge token
    * expires hourly and a builder may sit for hours before it is sealed. */
   z.object({ id: reqId, op: z.literal("golden.builderReach"), builderId: z.string() }),
   /** Replies with { reach: PortReachView } for one guest port, cached per port
