@@ -93,6 +93,10 @@ export const RELAY_CAP_MS = 15 * 60_000;
 export const FORWARD_IDLE_MS = 10 * 60_000;
 /** url forwards per workspace: the machine names the ports, so its say over this computer's loopback is bounded. */
 export const FORWARD_MAX_PER_TARGET = 16;
+/** The longest pause between redials of a dropped daemon link, before jitter. */
+export const REDIAL_CEILING_MS = 30_000;
+/** A callback that lands while the link is down waits this long for it: the longest jittered redial pause, so one redial always falls inside the hold. */
+export const CALLBACK_HOLD_MS = REDIAL_CEILING_MS * 1.5;
 
 interface Target {
   id: string;
@@ -110,6 +114,14 @@ interface Link {
   done: Promise<void>;
 }
 
+interface Held {
+  /** Ends the wait clock. */
+  cancel: () => void;
+  /** What the browser sent so far; put back on the socket when it is plumbed. */
+  chunks: Buffer[];
+  onData: (d: Buffer) => void;
+}
+
 interface Forward {
   target: Target;
   port: number;
@@ -124,18 +136,35 @@ interface Forward {
   unansweredLogged?: boolean;
   servers: Server[];
   conns: Map<string, Socket>;
+  /** Callback connections that arrived while the link was down, kept until the redial lands or their wait ends. */
+  held: Map<Socket, Held>;
   startedAt: number;
   expiresAt: number;
   cancel: () => void;
 }
 
+function badGateway(sentence: string): string {
+  const body = `${sentence}\n`;
+  return `HTTP/1.1 502 Bad Gateway\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`;
+}
+
 /** What a laptop connection hears when the guest side refused the tunnel. */
 function refusedResponse(f: Forward): string {
-  const body =
+  return badGateway(
     f.kind === "url"
-      ? `localhost:${f.port} on this computer is forwarded to workspace ${f.target.name}, but nothing there answered on port ${f.port}.\n`
-      : `The sign-in callback reached this computer, but nothing on workspace ${f.target.name} answered on port ${f.port}.\n`;
-  return `HTTP/1.1 502 Bad Gateway\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`;
+      ? `localhost:${f.port} on this computer is forwarded to workspace ${f.target.name}, but nothing there answered on port ${f.port}.`
+      : `The sign-in callback reached this computer, but nothing on workspace ${f.target.name} answered on port ${f.port}.`,
+  );
+}
+
+/** What a held callback hears when its wait ends without a link, or its forward closes first. */
+function heldResponse(f: Forward, why: string | undefined): string {
+  const what = why === undefined ? `and the daemon link did not come back within ${seconds(CALLBACK_HOLD_MS)}` : `but its forward on port ${f.port} closed (${why})`;
+  return badGateway(`The sign-in callback reached this computer while workspace ${f.target.name} was reconnecting, ${what}. Start the sign-in again.`);
+}
+
+function seconds(ms: number): string {
+  return `${Math.round(ms / 1_000)} s`;
 }
 
 function minutes(ms: number): string {
@@ -214,6 +243,11 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
     f.cancel();
     for (const c of f.conns.values()) c.destroy();
     f.conns.clear();
+    for (const [c, h] of f.held) {
+      h.cancel();
+      c.end(heldResponse(f, why));
+    }
+    f.held.clear();
     for (const s of f.servers) s.close();
     o.log(`${f.target.name}: stopped forwarding localhost:${f.port} (${why})`);
     emit({ type: "forward.close", workspaceId: f.target.id, port: f.port });
@@ -293,6 +327,31 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
     );
   };
 
+  /** A redirect that lands inside the redial wait would otherwise die with a 502; it waits for the link or the hold's end.
+   * The socket keeps reading meanwhile (a paused one never sees the browser leave), so its bytes are kept here. */
+  const hold = (f: Forward, c: Socket): void => {
+    const h: Held = { chunks: [], onData: d => h.chunks.push(d), cancel: () => {} };
+    h.cancel = clock.schedule(
+      () => {
+        f.held.delete(c);
+        c.end(heldResponse(f, undefined));
+        o.log(`${f.target.name}: a sign-in callback held on localhost:${f.port} for ${seconds(CALLBACK_HOLD_MS)} found no daemon link; start the sign-in again`);
+      },
+      CALLBACK_HOLD_MS,
+      { unref: true },
+    );
+    f.held.set(c, h);
+    c.on("data", h.onData);
+    const gone = (): void => {
+      if (f.held.delete(c)) h.cancel();
+    };
+    c.on("end", gone);
+    c.on("close", gone);
+    if (f.unreachableLogged) return;
+    f.unreachableLogged = true;
+    o.log(`${f.target.name}: a sign-in callback reached localhost:${f.port} here while the daemon link is down; holding it until the link is back`);
+  };
+
   /** Never throws: an event from the machine must not end the host process. */
   const forward = async (link: Link, port: number, kind: ForwardKind): Promise<void> => {
     const { target } = link;
@@ -318,13 +377,17 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
     }
     binding.add(key);
     const startedAt = clock.now();
-    const f: Forward = { target, port, kind, listener: false, servers: [], conns: new Map(), startedAt, expiresAt: startedAt + (kind === "url" ? idleMs : windowMs), cancel: () => {} };
+    const f: Forward = { target, port, kind, listener: false, servers: [], conns: new Map(), held: new Map(), startedAt, expiresAt: startedAt + (kind === "url" ? idleMs : windowMs), cancel: () => {} };
     // The link at connection time, not at bind time: a forward outlives a redial, and a url forward a nap too.
     const onConn = (c: Socket): void => {
       // A browser that resets the socket with the reply unread must not become an uncaught error here.
       c.on("error", () => {});
       const live = links.get(target.id)?.sock;
       if (live === undefined) {
+        if (kind === "callback") {
+          hold(f, c);
+          return;
+        }
         c.end(refusedResponse(f));
         if (!f.unreachableLogged) {
           f.unreachableLogged = true;
@@ -462,7 +525,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
         const watched = await sock.op("ports.watch");
         link.ports = new Set(portsOf(watched["ports"]));
         attempt = 0;
-        resume(link);
+        resume(link, sock);
         await sock.closed;
         // Every forward stays bound here across the redial; only its tunnels died with the socket.
         for (const f of allForwards(link.target.id)) {
@@ -475,16 +538,16 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
       link.sock = undefined;
       attempt++;
       if (!link.stopped) {
-        const base = Math.min(30_000, retryMs * 2 ** (attempt - 1));
+        const base = Math.min(REDIAL_CEILING_MS, retryMs * 2 ** (attempt - 1));
         await sleep(Math.round(base * (1 + jitter() / 2)), link);
       }
     }
   };
 
   /** After ports.watch on a fresh socket. A redial keeps every forward with its clocks as they ran; a callback forward
-   * closes only when the listener it was keyed on is gone. url forwards paused by a nap pick their idle clock back up,
-   * or close when the workspace no longer listens on the port. One line per link. */
-  const resume = (link: Link): void => {
+   * closes only when the listener it was keyed on is gone, and the callbacks it held ride the new link. url forwards
+   * paused by a nap pick their idle clock back up, or close when the workspace no longer listens on the port. One line per link. */
+  const resume = (link: Link, sock: DaemonSocket): void => {
     const all = allForwards(link.target.id);
     if (all.length === 0) return;
     const kept: number[] = [];
@@ -497,6 +560,14 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
           continue;
         }
         if (link.ports.has(f.port)) sawListener(f);
+        for (const [c, h] of f.held) {
+          h.cancel();
+          c.off("data", h.onData);
+          c.pause();
+          for (const d of h.chunks.reverse()) c.unshift(d);
+          plumb(f, sock, c);
+        }
+        f.held.clear();
       } else if (f.paused !== undefined) {
         back = f.pausedBack;
         if (!link.ports.has(f.port)) {
