@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { makeApi, ProtocolClient } from "./protocol/client.js";
-import { useCreation, useReady, useSelectedId, useStore } from "./protocol/store.js";
+import { useCreation, useReady, useSelectedId, useSelectedThreadId, useStore } from "./protocol/store.js";
 import { Mark } from "./brand/Brand.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./components/ui/empty.js";
 import { WorkspaceTerminalDrawer } from "./components/WorkspaceTerminalDrawer.js";
@@ -42,6 +42,7 @@ type Golden = "unknown" | "none" | "present";
 /** The center slot: the selected workspace's thread with the terminal drawer under it, or the creation in progress. */
 function WorkspaceCenter() {
   const workspaceId = useSelectedId();
+  const threadId = useSelectedThreadId();
   const creation = useCreation(workspaceId);
   if (creation) return <WorkspaceCreation creation={creation} />;
   if (!workspaceId) {
@@ -57,7 +58,7 @@ function WorkspaceCenter() {
   return (
     <>
       <div className="flex min-h-0 flex-1 flex-col">
-        <WorkspaceThread workspaceId={workspaceId} />
+        <WorkspaceThread workspaceId={workspaceId} threadId={threadId} />
       </div>
       <WorkspaceTerminalDrawer workspaceId={workspaceId} />
     </>

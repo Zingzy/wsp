@@ -79,6 +79,25 @@ describe("deriveSidebarProjects", () => {
     ]);
   });
 
+  it("turns sharing a threadId fold into one thread titled by the opening prompt, in the state of the latest turn", () => {
+    const [p] = deriveSidebarProjects({
+      workspaces: [LIVE_WORKSPACE_1],
+      sessions: {
+        [LIVE_WS]: [
+          { id: "s1", workspaceId: LIVE_WS, harness: "claude", status: "completed", threadId: "thr_a", prompt: "make me a simple server", startedAt: 1_000, endedAt: 2_000 },
+          { id: "s2", workspaceId: LIVE_WS, harness: "claude", status: "completed", threadId: "thr_b", prompt: "unrelated", startedAt: 3_000, endedAt: 4_000 },
+          { id: "s3", workspaceId: LIVE_WS, harness: "claude", status: "running", threadId: "thr_a", prompt: "do you have access", startedAt: 5_000 },
+          { id: "s4", workspaceId: LIVE_WS, harness: "claude", status: "failed", prompt: "before threads", startedAt: 6_000, endedAt: 7_000 },
+        ],
+      },
+    });
+    expect(p!.threads.map(t => [t.id, t.title, t.status, t.startedAt, t.endedAt, t.indicator?.label])).toEqual([
+      ["thr_a", "make me a simple server", "running", new Date(5_000).toISOString(), null, "Working"],
+      ["thr_b", "unrelated", "completed", new Date(3_000).toISOString(), new Date(4_000).toISOString(), "Idle"],
+      ["s4", "before threads", "failed", new Date(6_000).toISOString(), new Date(7_000).toISOString(), "Ended"],
+    ]);
+  });
+
   it("the restart log: a napping status wins over the stale view phase", () => {
     const [p] = deriveSidebarProjects({ workspaces: [LIVE_WORKSPACE_1], statuses: statusesFrom(LIVE_RUN_1_RESTART) });
     expect(p).toMatchObject({ phase: "napping", indicator: { label: "Paused", tone: "paused" } });

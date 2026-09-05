@@ -105,6 +105,15 @@ describe("reloadTranscript", () => {
     expect(next.stale).toBeNull();
   });
 
+  it("a selected thread keeps that thread's events wherever they sit, and none of the others", () => {
+    const events = [A[0]!, A[1]!, B_RUNNING[0]!, A[2]!, B_RUNNING[1]!, ...B_DONE.slice(2)];
+    const next = reloadTranscript(state([]), events, T0, "thr_a");
+    expect(next.events).toEqual(A_RUNNING);
+    expect(next.arrivals).toEqual(A_RUNNING.map(() => T0));
+    expect(reloadTranscript(state([]), events, T0, "thr_b").events).toEqual(B_DONE);
+    expect(reloadTranscript(state([]), events, T0, "thr_none").events).toEqual([]);
+  });
+
   it("a transcript without thread ids is one thread", () => {
     const second = unstamped.map(e => ({ ...e, sessionId: "sess_0009", turnId: "turn_0009" }));
     const next = reloadTranscript(state([]), [...unstamped, ...second], T0);

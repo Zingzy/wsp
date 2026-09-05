@@ -30,7 +30,7 @@ import { useNowMinute } from "../hooks/useNowMinute.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
 import { cn } from "../lib/utils.js";
-import { useSelectedId, useStore, type Creation } from "../protocol/store.js";
+import { useSelectedId, useSelectedThreadId, useStore, type Creation } from "../protocol/store.js";
 import { onNewWorkspaceRequest, requestNewThread } from "../shell/shellRequests.js";
 import { ForwardsList } from "./ForwardsList.js";
 import { NewWorkspaceDialog } from "./NewWorkspaceDialog.js";
@@ -102,6 +102,7 @@ export function WorkspaceSidebar() {
   const creations = useStore(s => s.creations);
   const createWorkspace = useStore(s => s.createWorkspace);
   const selectedId = useSelectedId();
+  const selectedThreadId = useSelectedThreadId();
   const nowMinute = useNowMinute();
   // One clock sample per minute tick so every idle countdown reads the same now.
   const nowMs = useMemo(() => Date.now(), [nowMinute]);
@@ -236,7 +237,7 @@ export function WorkspaceSidebar() {
                     <SidebarMenuItem key={project.id}>
                       <SidebarMenuButton
                         size="lg"
-                        isActive={selectedId === project.id}
+                        isActive={selectedId === project.id && selectedThreadId === null}
                         data-sidebar-row
                         data-row-id={`ws:${project.id}`}
                         className={cn(!zombie && collapsible && "group-has-data-[sidebar=menu-action]/menu-item:pe-14")}
@@ -306,7 +307,13 @@ export function WorkspaceSidebar() {
                       {showThreads ? (
                         <SidebarMenuSub>
                           {active.map(thread => (
-                            <ThreadRow key={thread.id} thread={thread} time={compactTimeLabel(thread.startedAt)} onSelect={() => select(thread.workspaceId)} />
+                            <ThreadRow
+                              key={thread.id}
+                              thread={thread}
+                              time={compactTimeLabel(thread.startedAt)}
+                              active={selectedId === thread.workspaceId && selectedThreadId === thread.id}
+                              onSelect={() => select(thread.workspaceId, thread.id)}
+                            />
                           ))}
                           {settled.length > 0 && active.length > 0 && !searching ? (
                             <SidebarMenuSubItem data-thread-selection-safe>
@@ -332,7 +339,8 @@ export function WorkspaceSidebar() {
                                   key={thread.id}
                                   thread={thread}
                                   time={compactTimeLabel(resolveSettledTimestamp(thread))}
-                                  onSelect={() => select(thread.workspaceId)}
+                                  active={selectedId === thread.workspaceId && selectedThreadId === thread.id}
+                                  onSelect={() => select(thread.workspaceId, thread.id)}
                                 />
                               ))
                             : null}
@@ -413,11 +421,12 @@ function CreationRow({ creation, active, onSelect }: { creation: Creation; activ
   );
 }
 
-function ThreadRow({ thread, time, onSelect }: { thread: SidebarThreadSnapshot; time: string; onSelect: () => void }) {
+function ThreadRow({ thread, time, active, onSelect }: { thread: SidebarThreadSnapshot; time: string; active: boolean; onSelect: () => void }) {
   return (
     <SidebarMenuSubItem data-thread-item>
       <SidebarMenuSubButton
         render={<button type="button" />}
+        isActive={active}
         data-sidebar-row
         data-row-id={`thread:${thread.id}`}
         onClick={onSelect}

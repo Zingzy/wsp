@@ -4,7 +4,8 @@
 // settled footer with the last turn's duration and cost. The composer is a
 // render-prop slot filled by whoever mounts the view. A new-thread request
 // for this workspace clears the thread, whether it arrived before or after
-// the view mounted.
+// the view mounted; a view pinned to an older thread unpins first, since the
+// new thread opens as the workspace's latest.
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import type { LegendListRef } from "@legendapp/list/react";
 import { workspaceState } from "@wsp/protocol";
@@ -24,17 +25,20 @@ function resolveDocumentTheme(): "light" | "dark" {
 
 export function ChatView({
   workspaceId,
+  threadId = null,
   timestampFormat = DEFAULT_TIMESTAMP_FORMAT,
   children,
 }: {
   workspaceId: string;
+  threadId?: string | null;
   timestampFormat?: TimestampFormat;
   children?: ((thread: ChatThreadHandle) => ReactNode) | undefined;
 }) {
   const workspace = useWorkspace(workspaceId);
   const status = useStatus(workspaceId);
   const wake = useStore(s => s.wake);
-  const thread = useChatThread(workspaceId);
+  const select = useStore(s => s.select);
+  const thread = useChatThread(workspaceId, threadId);
   const openFile = useRightPanelStore(s => s.openFile);
   const listRef = useRef<LegendListRef | null>(null);
   const { view } = thread;
@@ -51,12 +55,18 @@ export function ChatView({
     if (wait === null) return null;
     return { label: wait.label, onWake: wait.wake ? () => void wake(workspaceId) : null };
   }, [phase, machineState, reach, view.running, wake, workspaceId]);
-  const { startNewThread } = thread;
+  const { startNewThread, hydrated } = thread;
   useEffect(() => {
-    const consume = () => { if (useNewThreadRequests.getState().take(workspaceId)) startNewThread(); };
+    // The latest view takes the request once its transcript is in, so it knows which thread it leaves behind.
+    const consume = () => {
+      const requests = useNewThreadRequests.getState();
+      if (!requests.pending.has(workspaceId)) return;
+      if (threadId !== null) select(workspaceId);
+      else if (hydrated && requests.take(workspaceId)) startNewThread();
+    };
     consume();
     return useNewThreadRequests.subscribe(consume);
-  }, [startNewThread, workspaceId]);
+  }, [hydrated, select, startNewThread, threadId, workspaceId]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
@@ -73,7 +83,7 @@ export function ChatView({
             listRef={listRef}
             timelineEntries={view.entries}
             turns={view.turns}
-            threadKey={workspaceId}
+            threadKey={threadId === null ? workspaceId : `${workspaceId}/${threadId}`}
             onImageExpand={noopImageExpand}
             onOpenFile={onOpenFile}
             markdownCwd={cwd}

@@ -39,6 +39,8 @@ export interface ChatThreadHandle {
   readonly busy: boolean;
   /** True from a new-thread request until its first session.start: the next send must not resume the old session. */
   readonly fresh: boolean;
+  /** The harness session the next send resumes: a pinned thread's latest turn, else the workspace's latest; none while fresh. */
+  readonly resume: string | undefined;
   /** True while the turn a new thread left behind is still running on the machine. */
   readonly finishing: boolean;
   /** Optimistic user message for a send; the next session.start replaces it. */
@@ -102,15 +104,15 @@ function lastThread(events: ReadonlyArray<SessionEvent>): SessionEvent[] {
 }
 
 /**
- * The history reply, folded to its last thread. A new-thread request that landed while history was
- * in flight wins over the transcript it asked to leave, unless the transcript already holds the
- * thread that request opened: the runtime minted it an id the left thread did not have, so it is
- * the person's own and loads as such, and only the left thread can hold a stale turn. Otherwise
- * the transcript decides whether the left turn is still running, except for a send whose
- * session.start it cannot hold yet.
+ * The history reply, folded to the selected thread, or to its last thread when none is. A new-thread
+ * request that landed while history was in flight wins over the transcript it asked to leave, unless
+ * the transcript already holds the thread that request opened: the runtime minted it an id the left
+ * thread did not have, so it is the person's own and loads as such, and only the left thread can
+ * hold a stale turn. Otherwise the transcript decides whether the left turn is still running, except
+ * for a send whose session.start it cannot hold yet.
  */
-export function reloadTranscript(s: ThreadState, events: ReadonlyArray<SessionEvent>, at: string): ThreadState {
-  const thread = lastThread(events);
+export function reloadTranscript(s: ThreadState, events: ReadonlyArray<SessionEvent>, at: string, threadId: string | null = null): ThreadState {
+  const thread = threadId === null ? lastThread(events) : events.filter(e => e.threadId === threadId);
   const arrivals = thread.map(() => at);
   if (!s.fresh) return { ...EMPTY, events: thread, arrivals };
   if (s.stale?.kind === "pending-send") return { ...s, stale: runningTurn(events) ?? s.stale };
@@ -206,18 +208,21 @@ export function deriveChatThread(state: ThreadState, previous: ReadonlyArray<Tim
   };
 }
 
-export function useChatThread(workspaceId: string): ChatThreadHandle {
+/** A thread pinned from the sidebar, or the workspace's latest when none is. */
+export function useChatThread(workspaceId: string, threadId: string | null = null): ChatThreadHandle {
   const api = useStore(s => s.api);
   // Moves when a reconnect could not replay what the socket missed: the thread below is rebuilt from history.
   const gaps = useStore(s => s.gaps);
+  const remembered = useStore(s => s.workspaces.find(w => w.id === workspaceId)?.claudeSessionId);
+  const viewKey = threadId === null ? workspaceId : `${workspaceId}/${threadId}`;
   const [state, setState] = useState<ThreadState>(EMPTY);
-  const [viewedWs, setViewedWs] = useState(workspaceId);
+  const [viewed, setViewed] = useState(viewKey);
   const [hydratedFor, setHydratedFor] = useState<string | null>(null);
   const hydratedRef = useRef<string | null>(null);
   const previousEntries = useRef<ReadonlyArray<TimelineEntry>>([]);
 
-  if (viewedWs !== workspaceId) {
-    setViewedWs(workspaceId);
+  if (viewed !== viewKey) {
+    setViewed(viewKey);
     setState(EMPTY);
   }
 
@@ -228,34 +233,35 @@ export function useChatThread(workspaceId: string): ChatThreadHandle {
       events => {
         if (!current) return;
         const at = now();
-        setState(s => reloadTranscript(s, events, at));
-        hydratedRef.current = workspaceId;
-        setHydratedFor(workspaceId);
+        setState(s => reloadTranscript(s, events, at, threadId));
+        hydratedRef.current = viewKey;
+        setHydratedFor(viewKey);
       },
       (err: unknown) => {
         if (!current) return;
         const message = `history unavailable: ${err instanceof Error ? err.message : String(err)}`;
         setState(s => ({ ...s, localErrors: [...s.localErrors, { message, at: now() }] }));
-        hydratedRef.current = workspaceId;
-        setHydratedFor(workspaceId);
+        hydratedRef.current = viewKey;
+        setHydratedFor(viewKey);
       },
     );
     return () => {
       current = false;
       hydratedRef.current = null;
     };
-  }, [api, workspaceId, gaps]);
+  }, [api, workspaceId, threadId, viewKey, gaps]);
 
   const onEvent = useCallback(
     (e: ProtocolEvent) => {
-      if (hydratedRef.current !== workspaceId) return;
+      if (hydratedRef.current !== viewKey) return;
       if (!isSessionEvent(e) || e.workspaceId !== workspaceId) return;
+      if (threadId !== null && e.threadId !== threadId) return;
       setState(s => {
         const next = reduceEvent(s, e, now());
         return next !== s && next.sending ? { ...next, sending: false } : next;
       });
     },
-    [workspaceId],
+    [workspaceId, threadId, viewKey],
   );
   useProtocolEvents(onEvent);
 
@@ -289,9 +295,10 @@ export function useChatThread(workspaceId: string): ChatThreadHandle {
   const finishing = state.stale !== null;
   return {
     view,
-    hydrated: hydratedFor === workspaceId,
+    hydrated: hydratedFor === viewKey,
     busy: state.sending || view.running || finishing,
     fresh: state.fresh,
+    resume: state.fresh ? undefined : threadId === null ? remembered : view.latestTurn?.sessionId,
     finishing,
     appendUserTurn,
     appendLocalError,

@@ -66,6 +66,18 @@ beforeEach(() => {
   useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, creations: [], sessions: {}, ready: false, gaps: 0 });
 });
 
+describe("store selection", () => {
+  it("select takes a thread of the workspace; selecting without one shows the latest thread again", () => {
+    useStore.getState().select("ws_a", "thr_1");
+    expect(useStore.getState()).toMatchObject({ selectedId: "ws_a", selectedThreadId: "thr_1" });
+    useStore.getState().select("ws_a");
+    expect(useStore.getState()).toMatchObject({ selectedId: "ws_a", selectedThreadId: null });
+    useStore.getState().select("ws_b", "thr_2");
+    useStore.getState().select(null);
+    expect(useStore.getState()).toMatchObject({ selectedId: null, selectedThreadId: null });
+  });
+});
+
 describe("store creations", () => {
   const stage = (over: Partial<Extract<ProtocolEvent, { type: "workspace.creating" }>> = {}): ProtocolEvent => ({
     type: "workspace.creating",

@@ -267,6 +267,9 @@ describe("runtime session history", () => {
     expect(history[8]!.threadId).not.toBe(history[0]!.threadId);
     expect(threads(history)).toBe(2);
     expect(live.flatMap(e => ("threadId" in e ? [e.threadId] : []))).toEqual(history.map(e => e.threadId));
+    // The session rows carry the same ids, so a sidebar can fold rows into the threads the transcript folds into;
+    // the resumed turn shares the first one's local id and so its row.
+    expect(rt.sessions.list(ws.id).map(s => s.threadId)).toEqual([history[0]!.threadId, history[8]!.threadId]);
     await rt.close();
   });
 

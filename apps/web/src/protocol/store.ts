@@ -70,6 +70,8 @@ interface State {
   toast: string | null;
   /** A workspace id, or a creation's key while that create runs. */
   selectedId: string | null;
+  /** A thread of the selected workspace the person picked in the sidebar; null shows the workspace's latest thread. */
+  selectedThreadId: string | null;
   creations: Creation[];
   sessions: Record<string, SessionView[]>;
   ready: boolean;
@@ -79,7 +81,7 @@ interface State {
   noteGap(): void;
   /** Mirrors the client's status; live with an api bound pulls list and statuses again so a reconnect converges. */
   setConn(conn: ConnStatus): void;
-  select(id: string | null): void;
+  select(id: string | null, threadId?: string | null): void;
   /** Starts a create from the golden head, selects its row, and follows it through the stage events. */
   createWorkspace(name: string): Promise<void>;
   /** Runs a failed creation again under the same row. */
@@ -188,6 +190,7 @@ export const useStore = create<State>((set, get) => {
     forwards: [],
     toast: null,
     selectedId: null,
+    selectedThreadId: null,
     creations: [],
     sessions: {},
     ready: false,
@@ -211,11 +214,11 @@ export const useStore = create<State>((set, get) => {
       const api = get().api;
       if (conn === "live" && api) pull(api);
     },
-    select(id) { set({ selectedId: id }); },
+    select(id, threadId = null) { set({ selectedId: id, selectedThreadId: threadId }); },
     async createWorkspace(name) {
       if (!get().api) return;
       const key = `creating:${++creationSeq}`;
-      set(s => ({ creations: [...s.creations, { key, name, workspaceId: null, lines: NO_LINES, failed: null }], selectedId: key }));
+      set(s => ({ creations: [...s.creations, { key, name, workspaceId: null, lines: NO_LINES, failed: null }], selectedId: key, selectedThreadId: null }));
       await runCreation(key, name);
     },
     async retryCreation(key) {
@@ -366,6 +369,7 @@ export const useStore = create<State>((set, get) => {
 });
 
 export function useSelectedId(): string | null { return useStore(s => s.selectedId); }
+export function useSelectedThreadId(): string | null { return useStore(s => s.selectedThreadId); }
 /** The selected workspace's id, or null while a creation row is selected: no command may act on a creation's key. */
 export function useSelectedWorkspaceId(): string | null {
   return useStore(s => (s.selectedId !== null && s.creations.some(c => c.key === s.selectedId) ? null : s.selectedId));
