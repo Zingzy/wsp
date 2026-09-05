@@ -4,24 +4,46 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { PtyManager, ptyEnv, ptyLaunch } from "../src/pty-manager.js";
 
+/** Above the 10 s wait budget, so the helper's error with the transcript is what a red run shows. */
+const PTY_CASE_TIMEOUT_MS = 15_000;
+
+const managers: PtyManager[] = [];
+afterEach(() => {
+  for (const m of managers.splice(0)) m.destroyAll();
+});
+function manager(): PtyManager {
+  const m = new PtyManager();
+  managers.push(m);
+  return m;
+}
+
+/** The budget is a ceiling: under a full gate bash has taken over a second to start and echo. */
+async function until(read: () => string, marker: string, budgetMs = 10_000): Promise<void> {
+  const deadline = Date.now() + budgetMs;
+  while (!read().includes(marker)) {
+    if (Date.now() >= deadline) throw new Error(`no ${JSON.stringify(marker)} within ${budgetMs} ms; output so far: ${JSON.stringify(read())}`);
+    await new Promise(r => setTimeout(r, 25));
+  }
+}
+
 describe("PtyManager", () => {
   it("keeps a session alive across client detach and replays scrollback", async () => {
-    const mgr = new PtyManager();
-    const s = mgr.create({ cols: 80, rows: 24, shell: "bash" });
+    const s = manager().create({ cols: 80, rows: 24, shell: "bash" });
     const got: string[] = [];
     const un1 = s.attach(d => got.push(d));
     s.write("echo HELLO-$((1+1))\n");
-    await new Promise(r => setTimeout(r, 300));
-    un1(); // client goes away
+    await until(() => got.join(""), "HELLO-2");
+    un1();
     s.write("echo AFTER-DETACH\n");
-    await new Promise(r => setTimeout(r, 300));
+    const landed: string[] = [];
+    const unLanded = s.attach(d => landed.push(d));
+    await until(() => landed.join(""), "AFTER-DETACH");
+    unLanded();
     const replay: string[] = [];
-    s.attach(d => replay.push(d)); // new client gets buffered scrollback first
-    await new Promise(r => setTimeout(r, 50));
+    s.attach(d => replay.push(d));
     expect(replay.join("")).toContain("HELLO-2");
     expect(replay.join("")).toContain("AFTER-DETACH");
-    mgr.destroyAll();
-  });
+  }, PTY_CASE_TIMEOUT_MS);
 });
 
 describe("ptyEnv", () => {
@@ -56,15 +78,13 @@ describe("ptyEnv", () => {
 
   it("a shell it spawns sees HOME even when the daemon has none", async () => {
     delete process.env["HOME"];
-    const mgr = new PtyManager();
-    const s = mgr.create({ cols: 80, rows: 24, shell: "bash", cwd: tmpdir() });
+    const s = manager().create({ cols: 80, rows: 24, shell: "bash", cwd: tmpdir() });
     const got: string[] = [];
     s.attach(d => got.push(d));
     s.write("echo HOME=$HOME USER=$USER\n");
-    await new Promise(r => setTimeout(r, 300));
-    mgr.destroyAll();
+    await until(() => got.join(""), `HOME=${userInfo().homedir} USER=${userInfo().username}\r`);
     expect(got.join("")).toContain(`HOME=${userInfo().homedir} USER=${userInfo().username}\r`);
-  });
+  }, PTY_CASE_TIMEOUT_MS);
 });
 
 describe("ptyLaunch", () => {
@@ -105,35 +125,30 @@ describe("ptyLaunch", () => {
     for (const rc of [".profile", ".bash_profile", ".zprofile"]) writeFileSync(join(home, rc), "echo WSP-LOGIN-PROFILE\n");
     mkdirSync(join(home, ".config", "fish"), { recursive: true });
     writeFileSync(join(home, ".config", "fish", "config.fish"), "status is-login; and echo WSP-LOGIN-PROFILE\n");
-    const mgr = new PtyManager();
-    const s = mgr.create({ cols: 80, rows: 24, cwd: home, env: { HOME: home, ZDOTDIR: home, XDG_CONFIG_HOME: join(home, ".config") } });
+    const s = manager().create({ cols: 80, rows: 24, cwd: home, env: { HOME: home, ZDOTDIR: home, XDG_CONFIG_HOME: join(home, ".config") } });
     const got: string[] = [];
     s.attach(d => got.push(d));
-    const deadline = Date.now() + 5_000;
-    while (!got.join("").includes("WSP-LOGIN-PROFILE") && Date.now() < deadline) await new Promise(r => setTimeout(r, 25));
-    mgr.destroyAll();
+    await until(() => got.join(""), "WSP-LOGIN-PROFILE");
     expect(got.join("")).toContain("WSP-LOGIN-PROFILE");
-  });
+  }, PTY_CASE_TIMEOUT_MS);
 });
 
 describe("PtySession cwd", () => {
-  async function pwdOf(opts: { cwd?: string }): Promise<string> {
-    const mgr = new PtyManager();
-    const s = mgr.create({ cols: 80, rows: 24, shell: "bash", ...opts });
+  async function pwdOf(opts: { cwd?: string }, expected: string): Promise<string> {
+    const s = manager().create({ cols: 80, rows: 24, shell: "bash", ...opts });
     const got: string[] = [];
     s.attach(d => got.push(d));
     s.write("echo CWD=$PWD\n");
-    await new Promise(r => setTimeout(r, 300));
-    mgr.destroyAll();
+    await until(() => got.join(""), expected);
     return got.join("");
   }
 
   it("starts in the home directory, not wherever the daemon runs", async () => {
-    expect(await pwdOf({})).toContain(`CWD=${homedir()}\r`);
-  });
+    expect(await pwdOf({}, `CWD=${homedir()}\r`)).toContain(`CWD=${homedir()}\r`);
+  }, PTY_CASE_TIMEOUT_MS);
 
   it("starts in the requested cwd when one is named", async () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "wsp-pty-")));
-    expect(await pwdOf({ cwd: dir })).toContain(`CWD=${dir}\r`);
-  });
+    expect(await pwdOf({ cwd: dir }, `CWD=${dir}\r`)).toContain(`CWD=${dir}\r`);
+  }, PTY_CASE_TIMEOUT_MS);
 });

@@ -37,6 +37,7 @@ import {
   withApiKeyHelper,
 } from "@wsp/engine";
 import { CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, tarPackCommand } from "./doctor.js";
+import { type AliasGuard, GUARD_PATH, GUARD_SOURCE_COMMENT, GUARD_SOURCE_LINE, aliasGuardFor } from "./init-aliases.js";
 
 const execFileAsync = promisify(execFile);
 const GUEST_HOME = "/root";
@@ -227,6 +228,23 @@ export interface PackOptions {
   managerHomes?: readonly string[];
   /** Whether ~/.claude/settings.json is among the plan's files, in this pack or an earlier one this pack lands over; left out, this pack's files decide. */
   settingsPlanned?: boolean;
+  /** The alias guard the ticks call for; it ships when its rc file is in this pack, which then reads it last. */
+  guard?: AliasGuard;
+}
+
+/** Ships the guard under the staged home and has the rc file that carried the aliases read it last, once, at the rc file's own mode; nothing when that rc file is not in this pack. */
+function placeGuard(stage: string, guard: AliasGuard): void {
+  const rc = join(stage, guard.rc);
+  if (!existsSync(rc) || !statSync(rc).isFile()) return;
+  const file = join(stage, GUARD_PATH);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, guard.text, { mode: 0o644 });
+  const text = readFileSync(rc, "utf8");
+  if (text.includes(GUARD_SOURCE_LINE)) return;
+  const mode = statSync(rc).mode & 0o7777;
+  chmodSync(rc, 0o600);
+  writeFileSync(rc, `${text}${text === "" || text.endsWith("\n") ? "" : "\n"}\n${GUARD_SOURCE_COMMENT}\n${GUARD_SOURCE_LINE}\n`);
+  chmodSync(rc, mode);
 }
 
 /** A staged hand-installed script whose first line names an interpreter only this laptop has is rewritten to find it by name on the machine's PATH; the bytes after the first line are written back untouched. */
@@ -329,6 +347,7 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
     };
     walk(stage);
     cut.sort((a, b) => (a.path < b.path ? -1 : 1));
+    if (opts.guard !== undefined) placeGuard(stage, opts.guard);
     // A dropped account leaves the staged file before any token lands, so the active mark has moved by the time
     // the account it moved to is placed and the host token follows it.
     for (const s of plan.secrets) {
@@ -535,7 +554,8 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
     });
   const hash = recipeHash(recipeDigest(bring, digested));
   const settingsSource = join(home, CLAUDE_SETTINGS.slice(2));
-  const packOpts: PackOptions = { secrets: opts.secrets, home, managerHomes, settingsPlanned: plan.files.some(f => f.source === settingsSource || f.source === dirname(settingsSource)) };
+  const guard = aliasGuardFor(opts.rows ?? bring, opts.brew);
+  const packOpts: PackOptions = { secrets: opts.secrets, home, managerHomes, settingsPlanned: plan.files.some(f => f.source === settingsSource || f.source === dirname(settingsSource)), ...(guard !== undefined ? { guard } : {}) };
   const pack = async (guest: GuestFacts): Promise<PackedFiles> => {
     const fit = forGuest(plan, guest, home);
     const packed = await packPlan({ ...plan, files: fit.files }, packOpts);

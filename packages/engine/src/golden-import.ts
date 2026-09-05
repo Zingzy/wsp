@@ -332,9 +332,12 @@ export function withApiKeyHelper(text: string | undefined, helper: string | unde
   return `${JSON.stringify(settings, null, 2)}\n`;
 }
 
+/** The file under Claude Code's config dir that the apiKeyHelper's key is placed in and the copied settings read. */
+export const CLAUDE_KEY_FILE = "anthropic-api-key";
+
 /** Where the key a settings file's helper prints lands on the guest, and how the command is read from the file. */
 const HELPERS: Record<string, { dest: string; command: (text: string | undefined) => string | undefined }> = {
-  "~/.claude/settings.json": { dest: ".claude/anthropic-api-key", command: apiKeyHelperOf },
+  "~/.claude/settings.json": { dest: `.claude/${CLAUDE_KEY_FILE}`, command: apiKeyHelperOf },
 };
 
 export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOptions): FilesPlan {

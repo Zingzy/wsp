@@ -7,8 +7,10 @@ import { defineConfig } from "vitest/config";
 
 const pkg = (path: string) => fileURLToPath(new URL(`../../packages/${path}`, import.meta.url));
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [react(), tailwindcss()],
+  // The browser cannot follow protocol's package.json main into a dist a fresh worktree may not have.
+  resolve: command === "serve" ? { alias: { "@wsp/protocol": pkg("protocol/src/index.ts") } } : {},
   // noVNC's H.264 decoder module uses top-level await, which vite's default
   // es2020 target rejects. build.target covers only the production bundle;
   // the dev dependency prescan has its own esbuild target and needs the same.
@@ -31,4 +33,4 @@ export default defineConfig({
       "@wsp/runtime": pkg("runtime/src/index.ts"),
     },
   },
-});
+}));

@@ -2,16 +2,10 @@
 // The per-CLI table: every login the collector can emit has a row, the flags
 // are the measured ones, and each status check reads fixture output the way
 // the tool prints it (fake names, masked tokens; nothing real).
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { AWS_STATUS, GEMINI_STATUS, SIGN_INS, claudeSource, geminiSource, secretNamed, signInFor, signInWords, statusOf, type SignIn } from "../src/signin-table.js";
-
-const collectorLogins = (): string[] => {
-  const src = readFileSync(join(import.meta.dirname, "../../collect/src/detect/logins.ts"), "utf8");
-  const ids = [...src.matchAll(/\bid: "(?:logins\/)?([a-z]+)"/g)].map(m => m[1]!);
-  return [...new Set(ids)];
-};
+import { CONFIG_DIR } from "../src/doctor.js";
+import { AWS_STATUS, CLAUDE_KEY_PATH, CLAUDE_STATUS, GEMINI_STATUS, SIGN_INS, claudeSource, claudeWhy, geminiSource, secretNamed, signInFor, signInWords, statusOf, type SignIn } from "../src/signin-table.js";
+import { collectorLogins } from "./collector-logins.js";
 
 function command(name: string): Extract<SignIn, { kind: "command" }> {
   const s = signInFor(name);
@@ -72,9 +66,17 @@ describe("sign-in table", () => {
     expect(withStatus.sort()).toEqual(["aws", "claude", "codex", "doppler", "fly", "gcloud", "gemini", "gh", "hermes", "kube", "netlify", "opencode", "pi", "railway", "supabase", "vercel", "wrangler"]);
     expect(command("cloudflared").status).toBeUndefined();
     for (const name of ["op", "kube"]) expect(signInFor(name).kind, name).toBe("none");
-    // kubectl has no sign-in, so its row stays a "none" row whose status still proves a copied kubeconfig. Its stderr is
-    // dropped: v1.36.1 prints a kuberc warning there with no newline, so on the merged pty it glues onto the context name.
-    expect(statusOf(signInFor("kube"))?.command).toBe("kubectl config current-context 2>/dev/null");
+    // kubectl has no sign-in, so its row stays a "none" row whose status still proves a copied kubeconfig. What runs drops
+    // stderr (v1.36.1 prints a kuberc warning there with no newline, so on the merged pty it glues onto the context name);
+    // what the row shows is the command alone.
+    expect(statusOf(signInFor("kube"))?.command).toBe("kubectl config current-context");
+    expect(statusOf(signInFor("kube"))?.typed).toBe("kubectl config current-context 2>/dev/null");
+    // Claude Code's typed line also proves the helper's key file, keeping claude's own exit for the marker; the row shows the status command alone.
+    expect(command("claude").status?.command).toBe("claude auth status");
+    expect(command("claude").status?.typed).toBe(CLAUDE_STATUS);
+    expect(CLAUDE_KEY_PATH).toBe(`${CONFIG_DIR}/anthropic-api-key`);
+    expect(CLAUDE_STATUS).toBe(`claude auth status; s=$?; test -s ${CLAUDE_KEY_PATH} && echo WSP_KEY_FILE; (exit $s)`);
+    for (const [name, s] of Object.entries(SIGN_INS)) if (name !== "kube" && name !== "claude") expect(statusOf(s)?.typed, name).toBeUndefined();
     expect(statusOf(signInFor("op"))).toBeUndefined();
     expect(statusOf({ kind: "shell" })).toBeUndefined();
     expect(statusOf(signInFor("gh"))).toBe(command("gh").status);
@@ -129,6 +131,10 @@ describe("sign-in table", () => {
     expect(check("doppler", "Doppler Error: you must provide a token", 1)).toBe(false);
     expect(check("claude", '{\n  "loggedIn": true,\n  "authMethod": "claude.ai",\n  "apiProvider": "firstParty"\n}', 0)).toBe(true);
     expect(check("claude", '{\n  "loggedIn": false\n}', 1)).toBe(false);
+    // A status that names the helper counts only with the key file marker: the status says logged in without running the helper.
+    expect(check("claude", '{\n  "loggedIn": true,\n  "authMethod": "api_key_helper",\n  "apiKeySource": "apiKeyHelper"\n}', 0)).toBe(false);
+    expect(check("claude", '{\n  "loggedIn": true,\n  "authMethod": "api_key_helper",\n  "apiKeySource": "apiKeyHelper"\n}\nWSP_KEY_FILE', 0)).toBe(true);
+    expect(check("claude", '{\n  "loggedIn": false,\n  "authMethod": "none"\n}\nWSP_KEY_FILE', 1)).toBe(false);
     expect(check("codex", "Logged in using ChatGPT", 0)).toBe(true);
     expect(check("codex", "Not logged in", 1)).toBe(false);
   });
@@ -186,6 +192,13 @@ describe("sign-in table", () => {
     // With a helper configured too, apiKeySource still names the environment: the exported key wins.
     expect(claudeSource(envKey.replace('"api_key"', '"api_key_helper"'), secrets)).toBe("API key from ~/.zshrc, set on the machine as a secret");
     expect(claudeSource('{\n  "loggedIn": true,\n  "authMethod": "api_key_helper",\n  "apiKeySource": "apiKeyHelper"\n}', secrets)).toBe("API key from the settings.json helper");
+    expect(claudeSource('{\n  "loggedIn": true,\n  "authMethod": "api_key_helper",\n  "apiKeySource": "apiKeyHelper"\n}\nWSP_KEY_FILE', secrets)).toBe("API key from the settings.json helper, key file present");
+    expect(claudeWhy('{\n  "loggedIn": true,\n  "authMethod": "api_key_helper",\n  "apiKeySource": "apiKeyHelper"\n}')).toBe("claude auth status names the settings.json helper while its key file is missing or empty on the machine");
+    expect(claudeWhy('{\n  "loggedIn": true,\n  "authMethod": "api_key_helper",\n  "apiKeySource": "apiKeyHelper"\n}\nWSP_KEY_FILE')).toBeUndefined();
+    expect(claudeWhy(envKey)).toBeUndefined();
+    expect(claudeWhy("not json at all")).toBeUndefined();
+    expect(command("claude").status?.why).toBe(claudeWhy);
+    expect(command("gh").status?.why).toBeUndefined();
     expect(claudeSource('{\n  "loggedIn": true,\n  "authMethod": "claude.ai",\n  "subscriptionType": "max"\n}', secrets)).toBe("OAuth credentials");
     expect(claudeSource('{\n  "loggedIn": false,\n  "authMethod": "none"\n}', secrets)).toBeUndefined();
     expect(claudeSource("not json at all", secrets)).toBeUndefined();

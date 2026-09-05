@@ -7,7 +7,7 @@
 // long as they like, as long as nobody pauses it (snapshot-fresh rule).
 
 import { createHash } from "node:crypto";
-import { ALREADY_APPLIED, type GoldenLogin, type GoldenManifest, type GoldenStage, type GoldenVersion, type RecipeDigest } from "@wsp/protocol";
+import { ALREADY_APPLIED, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenStage, type GoldenVersion, type RecipeDigest } from "@wsp/protocol";
 import type { Removal } from "./golden-diff.js";
 import { NODE_PATH_LINE, type AgentInstall, type GuestFacts, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
@@ -19,7 +19,7 @@ import { BROWSER_SHIM_PATH, applyMachineContext, type ContextResult } from "./ma
 import type { Machine, MachineBackend, MachineKind, MachineState } from "./machine.js";
 import { importInto } from "./vault.js";
 
-export type { GoldenLogin, GoldenManifest, GoldenStage, GoldenVersion };
+export type { GoldenLogin, GoldenManifest, GoldenMissingTool, GoldenStage, GoldenVersion };
 
 export type StageListener = (stage: GoldenStage, detail?: string) => void;
 
@@ -183,6 +183,9 @@ export interface ImportLedger {
   applied: ImportStage[];
   /** The version checks of the agents that installed, joined; the seal runs this on the fork. */
   smoke: string;
+  /** The tools the tools stage did not put on the image, skipped or failed, and why; absent when every tool installed.
+   * The seal stamps it on the version. */
+  missingTools?: GoldenMissingTool[];
 }
 
 export interface AgentResult {
@@ -241,7 +244,13 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
   const imp = opts.import ?? { recipeHash: "", tools: [], agents: [] };
   const prior = opts.ledger?.recipeHash === imp.recipeHash ? opts.ledger : undefined;
   const recipe = imp.recipe ?? prior?.recipe;
-  const ledger: ImportLedger = { recipeHash: imp.recipeHash, applied: [...(prior?.applied ?? [])], smoke: prior?.smoke ?? "true", ...(recipe !== undefined ? { recipe } : {}) };
+  const ledger: ImportLedger = {
+    recipeHash: imp.recipeHash,
+    applied: [...(prior?.applied ?? [])],
+    smoke: prior?.smoke ?? "true",
+    ...(recipe !== undefined ? { recipe } : {}),
+    ...(prior?.missingTools !== undefined ? { missingTools: prior.missingTools } : {}),
+  };
   const result: ImportResult = { recipeHash: imp.recipeHash, tools: [], agents: [] };
   const done = (s: ImportStage): boolean => ledger.applied.includes(s);
   const mark = (s: ImportStage): void => {
@@ -370,17 +379,21 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
   }
 
   if (!only) {
-    if (!done("installing-tools")) for (const t of imp.skippedTools ?? []) result.tools.push({ id: t.id, label: t.label, outcome: "skipped", note: t.note });
     if (done("installing-tools")) {
       stage("installing-tools", ALREADY_APPLIED);
-    } else if (imp.tools.length === 0) {
-      stage("installing-tools", "nothing ticked");
-      mark("installing-tools");
     } else {
-      ran = true;
-      const tools = await installTools(machine, imp.tools, stage);
-      result.tools.push(...tools.tools);
-      if (tools.homebrew !== undefined) result.homebrew = tools.homebrew;
+      for (const t of imp.skippedTools ?? []) result.tools.push({ id: t.id, label: t.label, outcome: "skipped", note: t.note });
+      if (imp.tools.length === 0) {
+        stage("installing-tools", "nothing ticked");
+      } else {
+        ran = true;
+        const tools = await installTools(machine, imp.tools, stage);
+        result.tools.push(...tools.tools);
+        if (tools.homebrew !== undefined) result.homebrew = tools.homebrew;
+      }
+      const missing = missingToolsOf(result.tools);
+      if (missing.length > 0) ledger.missingTools = missing;
+      else delete ledger.missingTools;
       mark("installing-tools");
     }
     // The edit runs on every pass that has a plan: an attach re-uploads the volatile ~/.claude.json, which brings every
@@ -437,6 +450,10 @@ async function installNode(machine: Machine, node: NodeInstall, stage: StageList
   const failed = `Node ${node.version} did not install: ${reasonOf({ ...res, stdout: res.stdout.split("\n").filter(l => !l.startsWith("NODE_")).join("\n") }, AGENT_TIMEOUT_S)}`;
   stage("installing-harness", failed);
   return { haveMajor, failed };
+}
+
+function missingToolsOf(tools: readonly ToolResult[]): GoldenMissingTool[] {
+  return tools.flatMap(t => (t.outcome === "installed" ? [] : [{ name: t.label, outcome: t.outcome, note: t.note ?? "no reason recorded" }]));
 }
 
 function summarizeAgents(agents: AgentResult[]): string {
@@ -644,6 +661,7 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
       size: builder.size,
       browserShim,
       ...(opts.logins !== undefined ? { logins: opts.logins } : {}),
+      ...(builder.import?.missingTools !== undefined ? { missingTools: builder.import.missingTools } : {}),
     };
     const kept = builderAlive ? "; builder kept for one more change" : "";
     stage("sealed", leak === undefined ? `v${versionNum}${kept}` : `v${versionNum}${kept}; ${leak}`);
@@ -676,6 +694,8 @@ export interface ApplyDeltaOptions {
   setupTimeoutMs?: number;
   /** The smoke of the version being updated; removed agents leave it, added ones join it. */
   previousSmoke: string;
+  /** The tools missing from the version being updated; those the delta neither removes nor plans again stay missing. */
+  previousMissing?: readonly GoldenMissingTool[];
   fetch?: typeof globalThis.fetch;
   onStage?: StageListener;
 }
@@ -686,6 +706,13 @@ export function nextSmoke(previous: string, removed: readonly string[], added: s
   const parts = previous.split(" && ").filter(p => p !== "true" && !removed.includes(p));
   for (const p of added.split(" && ")) if (p !== "true" && !parts.includes(p)) parts.push(p);
   return parts.length === 0 ? "true" : parts.join(" && ");
+}
+
+/** What an updated image is missing: the previous version's missing tools the delta neither removed nor planned again,
+ * then what this delta's tools stage skipped or failed. */
+export function nextMissing(previous: readonly GoldenMissingTool[], delta: GoldenDelta, fresh: readonly GoldenMissingTool[]): GoldenMissingTool[] {
+  const touched = new Set([...delta.removals.map(r => r.label), ...delta.import.tools.map(t => t.label), ...(delta.import.skippedTools ?? []).map(t => t.label)]);
+  return [...previous.filter(p => !touched.has(p.name)), ...fresh];
 }
 
 /** Takes the removals off the machine, then runs the delta through the import
@@ -726,6 +753,9 @@ export async function applyDelta(machine: Machine, delta: GoldenDelta, opts: App
   if (!reported && removed.length > 0) report?.(result);
   const gone = delta.removals.flatMap(r => (r.smoke !== undefined ? [r.smoke] : []));
   applied.ledger.smoke = nextSmoke(opts.previousSmoke, gone, applied.ledger.smoke);
+  const missing = nextMissing(opts.previousMissing ?? [], delta, applied.ledger.missingTools ?? []);
+  if (missing.length > 0) applied.ledger.missingTools = missing;
+  else delete applied.ledger.missingTools;
   return { ledger: applied.ledger, result };
 }
 
@@ -763,6 +793,7 @@ export async function upgradeBuilder(opts: UpgradeBuilderOptions): Promise<Build
     const applied = await applyDelta(machine, opts.delta, {
       setup: opts.setup,
       previousSmoke: opts.head.smoke.cmd,
+      ...(opts.head.missingTools !== undefined ? { previousMissing: opts.head.missingTools } : {}),
       onStage: stage,
       ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}),
       ...(opts.setupTimeoutMs !== undefined ? { setupTimeoutMs: opts.setupTimeoutMs } : {}),

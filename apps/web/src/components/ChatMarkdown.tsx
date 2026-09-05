@@ -770,7 +770,8 @@ function UncachedShikiCodeBlock({
   const highlighter = use(getSyntaxHighlighterPromise(language));
   const highlightedHtml = useMemo(() => {
     try {
-      return highlighter.codeToHtml(code, { lang: language, theme: themeName });
+      // shiki cuts a line at 500 ms with no signal, and a cold grammar compiling its regexes on a busy main thread takes longer than that.
+      return highlighter.codeToHtml(code, { lang: language, theme: themeName, tokenizeTimeLimit: 0 });
     } catch (error) {
       // Log highlighting failures for debugging while falling back to plain text
       console.warn(

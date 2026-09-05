@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { detectAgents } from "./detect/agents.js";
+import { shellAliases } from "./detect/aliases.js";
 import type { Detector } from "./detect/common.js";
 import { detectEditors } from "./detect/editors.js";
 import { detectIdentity } from "./detect/identity.js";
@@ -52,6 +53,8 @@ export async function collect(host: Host, opts: CollectOptions = {}): Promise<Ma
     entries.push(...rows);
     groups.push(...(await (GROUP_NOTES[rung]?.(host, rows) ?? [])));
   }
+  // The shell's aliases are matched against the tools rows, so they are read once every rung is in.
+  await shellAliases(host, entries);
   if (opts.machine !== undefined) {
     let rows: ManifestEntry[] = [];
     try {

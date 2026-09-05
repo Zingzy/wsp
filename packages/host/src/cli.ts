@@ -334,6 +334,7 @@ export function terminalInitIO(): InitIO {
   return {
     input: process.stdin,
     output: process.stdout,
+    stderr: process.stderr,
     isTTY: process.stdin.isTTY === true && process.stdout.isTTY === true,
     env: process.env,
     open: systemOpener(os),

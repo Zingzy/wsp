@@ -6,7 +6,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ManifestEntry } from "@wsp/collect";
@@ -14,6 +14,7 @@ import { NODE_RELEASES, planFiles } from "@wsp/engine";
 import { afterEach, describe, expect, it } from "vitest";
 import { GOLDEN_SETUP, GOLDEN_SMOKE } from "../src/doctor.js";
 import { digestOf, importFor, importResultPath, keychainLogins, keychainReader, packPlan, readSecrets, statOf, type SecretReader } from "../src/init-import.js";
+import { GUARD_SOURCE_COMMENT, GUARD_SOURCE_LINE } from "../src/init-aliases.js";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -757,6 +758,57 @@ describe("packPlan: rc files with secret exports", () => {
     expect(readFileSync(join(dir, ".bashrc"), "utf8")).toBe("alias g=git\n");
     expect(packed.cut).toEqual([{ path: "~/.zshrc", names: ["RO_KEY"] }]);
     expect(packed.skipped).toEqual([]);
+  });
+});
+
+describe("packPlan: alias guard", () => {
+  const guard = { text: "# ls points at eza: not coming (unticked, tick to bring)\n_wsp_on_path 'eza' || unalias -- 'ls' 2>/dev/null\n", rc: ".zshrc" };
+
+  it("ships the guard under .config/wsp and the rc file reads it after its own lines, once, at the rc file's own mode", async () => {
+    const home = laptop();
+    writeFileSync(join(home, ".zshrc"), "export RO_KEY=fake-ro-value\nsource $ZSH/oh-my-zsh.sh", { mode: 0o444 });
+    const plan = planFiles([row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"] })], { home, stat: statOf, platform: "darwin" });
+    const packed = await packPlan(plan, { secrets: new Map(), home, guard });
+    const entries = listTar(packed.tar);
+    expect(entries.find(e => e.path === ".zshrc")?.mode).toMatch(/^-r--r--r--/);
+    expect(entries.find(e => e.path === ".config/wsp/aliases.sh")?.mode).toMatch(/^-rw-r--r--/);
+    const dir = extract(packed.tar);
+    expect(readFileSync(join(dir, ".config", "wsp", "aliases.sh"), "utf8")).toBe(guard.text);
+    const rc = readFileSync(join(dir, ".zshrc"), "utf8");
+    expect(rc).toBe(`source $ZSH/oh-my-zsh.sh\n\n${GUARD_SOURCE_COMMENT}\n${GUARD_SOURCE_LINE}\n`);
+    chmodSync(join(home, ".zshrc"), 0o644);
+    writeFileSync(join(home, ".zshrc"), rc);
+    const again = await packPlan(planFiles([row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"] })], { home, stat: statOf, platform: "darwin" }), { secrets: new Map(), home, guard });
+    expect(readFileSync(join(extract(again.tar), ".zshrc"), "utf8")).toBe(rc);
+  });
+
+  it("no guard when the rc file that would read it is not in this pack", async () => {
+    const home = laptop();
+    const plan = planFiles([row({ rung: "identity", id: "identity/git-user", paths: ["~/.gitconfig"] })], { home, stat: statOf, platform: "darwin" });
+    const packed = await packPlan(plan, { secrets: new Map(), home, guard });
+    expect(listTar(packed.tar).map(e => e.path).filter(p => p !== "")).toEqual([".gitconfig"]);
+  });
+
+  it("importFor builds the guard from every row's tick: an unticked eza puts one in the pack, a ticked one leaves the pack alone", async () => {
+    const home = laptop();
+    writeFileSync(join(home, ".zshrc"), "plugins=(eza)\n");
+    const zshrc = row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"], bytes: 14, aliases: [{ name: "ls", runs: "eza", kind: "alias" as const, tool: "tools/brew/eza" }, { name: "o", runs: "open", kind: "alias" as const }] });
+    const eza = row({ rung: "tools", id: "tools/brew/eza", linux: "yes" });
+    const packOf = async (rows: ManifestEntry[]) => {
+      const imp = importFor(rows.filter(r => r.bring), { home, secrets: new Map(), platform: "darwin", rows });
+      const dir = extract((await imp.files!.pack({ arch: "x86_64" })).tar);
+      return { rc: readFileSync(join(dir, ".zshrc"), "utf8"), guard: existsSync(join(dir, ".config", "wsp", "aliases.sh")) ? readFileSync(join(dir, ".config", "wsp", "aliases.sh"), "utf8") : undefined };
+    };
+    const unticked = await packOf([zshrc, { ...eza, bring: false }]);
+    expect(unticked.guard).toContain("# ls points at eza: not coming (unticked, tick to bring)\n_wsp_on_path 'eza' || unalias -- 'ls' 2>/dev/null");
+    expect(unticked.guard).toContain("# o points at open: nothing here installs it\n_wsp_on_path 'open' || unalias -- 'o' 2>/dev/null");
+    expect(unticked.rc).toContain(GUARD_SOURCE_LINE);
+    const ticked = await packOf([zshrc, eza]);
+    expect(ticked.guard).toContain("unalias -- 'o'");
+    expect(ticked.guard).not.toContain("eza");
+    const plain = await packOf([{ ...zshrc, aliases: [zshrc.aliases![0]!] }, eza]);
+    expect(plain.guard).toBeUndefined();
+    expect(plain.rc).toBe("plugins=(eza)\n");
   });
 });
 

@@ -19,12 +19,13 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { GOLDEN_SETUP } from "../src/doctor.js";
 import { loadManifest, recipePath } from "../src/init-recipe.js";
 import { CARD_FRAME, card, widthOf } from "../src/init-layout.js";
-import { editorsIntro, everythingItems, fmtBytes, reduceStages, runInit, selectItem, stageLine, summaryNote, toolsItems, type HostHooks, type InitIO, type InitOptions } from "../src/init.js";
+import { editorsIntro, everythingItems, fmtBytes, reduceStages, runInit, selectItem, shellItems, stageLine, summaryNote, toolsItems, type HostHooks, type InitIO, type InitOptions } from "../src/init.js";
 import type { HostHandle } from "../src/server.js";
 import { startCallbackRelay } from "../src/relay.js";
 import type { ConnectOptions, DaemonSocket } from "../src/doctor.js";
 import { appendCommand, readCommand } from "../src/init-secrets.js";
 import { noteOutcomes, statusLine } from "../src/init-signin.js";
+import { CLAUDE_STATUS } from "../src/signin-table.js";
 import { fakePtyLink, type FakePtyLink } from "./fake-pty-link.js";
 import { EVERYTHING, FIXTURE } from "./init-fixture.js";
 import { guestAnswer, stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
@@ -100,9 +101,11 @@ function scriptedLink(state: { signedIn: boolean; hold: boolean; missing: boolea
 function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string, string>; columns?: number; signedIn?: boolean; hold?: boolean; missing?: boolean } = {}): Fake {
   const input = new PassThrough();
   const output = new PassThrough();
+  const stderr = Object.assign(new PassThrough(), { isTTY: over.tty ?? true });
   if (over.columns !== undefined) Object.assign(output, { columns: over.columns });
   const chunks: string[] = [];
   output.on("data", (c: Buffer) => chunks.push(c.toString()));
+  stderr.on("data", (c: Buffer) => chunks.push(c.toString()));
   const text = () => stripVTControlCharacters(chunks.join(""));
   const raw = () => chunks.join("");
   const clear = () => void chunks.splice(0);
@@ -118,6 +121,7 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
   const io: InitIO = {
     input,
     output,
+    stderr,
     isTTY: over.tty ?? true,
     env: over.env ?? {},
     open: async url => {
@@ -388,7 +392,7 @@ describe("wsp init, interactive", () => {
       "exec gh auth login || exit\r",
       `${statusLine("gh auth status")}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`,
       "exec claude auth login || exit\r",
-      `${statusLine("claude auth status")}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`,
+      `${statusLine(CLAUDE_STATUS)}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`,
     ]);
     expect(f.link.ptys.every(p => p.killed)).toBe(true);
     expect(f.hooks[0]!.autoOpen(f.backends[0]!.machines[0]!.id, DEVICE_URL)).toBe(false);
@@ -1354,7 +1358,7 @@ describe("wsp init, logins copied to the machine", () => {
     ghOnBuilder(f);
     const { run } = await toTheBuilder(f);
     await f.until("GitHub CLI login: not signed in (copied, but gh auth status says not signed in)");
-    await f.until("kubectl config: signed in (copied; context minikube; kubectl config current-context 2>/dev/null)");
+    await f.until("kubectl config: signed in (copied; context minikube; kubectl config current-context)");
     await f.until("GitHub CLI login  r sign in on the machine   s skip");
     expect(f.text()).not.toContain("Signing in on the machine");
     await f.press("r");
@@ -1368,7 +1372,7 @@ describe("wsp init, logins copied to the machine", () => {
     expect(f.link.ptys.map(p => p.writes[0])).toEqual([STATUS_LINE, KUBE_LINE, "exec gh auth login || exit\r", STATUS_LINE]);
     expect(result.logins).toEqual([
       { id: "logins/gh", label: "GitHub CLI login", state: "signed-in", command: "gh auth login", exit: 0, note: "gh auth status" },
-      { id: "logins/kube", label: "kubectl config", state: "signed-in", note: "copied; context minikube; kubectl config current-context 2>/dev/null" },
+      { id: "logins/kube", label: "kubectl config", state: "signed-in", note: "copied; context minikube; kubectl config current-context" },
     ]);
     expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({
       logins: [
@@ -1580,7 +1584,7 @@ describe("wsp init, logins copied to the machine", () => {
     expect(f.link.ptys.map(p => p.writes[0])).toEqual([STATUS_LINE, KUBE_LINE]);
     expect(result.logins).toEqual([
       { id: "logins/gh", label: "GitHub CLI login", state: "not-signed-in", note: "copied, but gh auth status says not signed in" },
-      { id: "logins/kube", label: "kubectl config", state: "signed-in", note: "copied; context minikube; kubectl config current-context 2>/dev/null" },
+      { id: "logins/kube", label: "kubectl config", state: "signed-in", note: "copied; context minikube; kubectl config current-context" },
     ]);
   });
 
@@ -1876,17 +1880,16 @@ describe("wsp init, flags and no terminal", () => {
     expect(f.recipes[0]!.import?.node).toMatchObject({ floor: 16, agents: ["Codex"] });
   });
 
-  it("a console warning while the stages animate is drawn by the stream, and a build that fails hands the console back", async () => {
-    const warn = console.warn;
-    const error = console.error;
-    let duringPrepare: { warn: typeof console.warn; error: typeof console.error } | undefined;
+  it("a line on stderr while the stages animate is drawn by the stream, and a build that fails hands the streams back", async () => {
     const f = fake({ yes: true });
+    const write = { out: f.io.output.write, err: f.io.stderr.write };
+    let duringPrepare: { out: typeof f.io.output.write; err: typeof f.io.stderr.write } | undefined;
     f.opts.runtime = recipe => {
       const backend = stubBackend();
       backend.execImpl = (_m, cmd) => {
         if (!cmd.includes(GOLDEN_SETUP)) return guestAnswer(cmd);
-        duringPrepare = { warn: console.warn, error: console.error };
-        console.warn("heartbeat for builder m1 not written: ETIMEDOUT");
+        duringPrepare = { out: f.io.output.write, err: f.io.stderr.write };
+        f.io.stderr.write("heartbeat for builder m1 not written: ETIMEDOUT\n");
         return { exitCode: 1, stdout: "", stderr: "curl: (6) Could not resolve host" };
       };
       f.backends.push(backend);
@@ -1894,10 +1897,10 @@ describe("wsp init, flags and no terminal", () => {
     };
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(1);
-    expect(duringPrepare?.warn).not.toBe(warn);
-    expect(duringPrepare?.error).not.toBe(error);
-    expect(console.warn).toBe(warn);
-    expect(console.error).toBe(error);
+    expect(duringPrepare?.out).not.toBe(write.out);
+    expect(duringPrepare?.err).not.toBe(write.err);
+    expect(f.io.output.write).toBe(write.out);
+    expect(f.io.stderr.write).toBe(write.err);
     const out = f.text();
     expect(out).toContain("│  heartbeat for builder m1 not written: ETIMEDOUT");
     expect(out.indexOf("heartbeat for builder m1")).toBeLessThan(out.indexOf("Installing agents failed"));
@@ -2543,17 +2546,16 @@ describe("wsp init, a signal during prepare", () => {
     expect(f.signals.listenerCount("SIGINT") + f.signals.listenerCount("SIGTERM")).toBe(0);
   });
 
-  it("a signal during the stages hands the console back with the stream it stops", async () => {
-    const warn = console.warn;
-    const error = console.error;
-    let duringPrepare: typeof console.warn | undefined;
+  it("a signal during the stages hands the streams back with the stream it stops", async () => {
     const f = fake({ yes: true });
+    const write = { out: f.io.output.write, err: f.io.stderr.write };
+    let duringPrepare: typeof f.io.stderr.write | undefined;
     f.opts.runtime = recipe => {
       const backend = stubBackend();
       backend.execImpl = (m, cmd) => {
         if (!cmd.includes("brew install jq")) return guestAnswer(cmd);
-        // The stream is animating here; the signal that follows stops it and must hand the console back.
-        duringPrepare = console.warn;
+        // The stream is animating here; the signal that follows stops it and must hand the streams back.
+        duringPrepare = f.io.stderr.write;
         return new Promise((_, reject) => {
           const kill = m.kill.bind(m);
           m.kill = async () => {
@@ -2569,9 +2571,9 @@ describe("wsp init, a signal during prepare", () => {
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(130);
     expect(duringPrepare).toBeDefined();
-    expect(duringPrepare).not.toBe(warn);
-    expect(console.warn).toBe(warn);
-    expect(console.error).toBe(error);
+    expect(duringPrepare).not.toBe(write.err);
+    expect(f.io.output.write).toBe(write.out);
+    expect(f.io.stderr.write).toBe(write.err);
   });
 
   it("a second signal while the kill is still running exits at once with the builder id and the sweep line; the record stays for the sweep", async () => {
@@ -3924,5 +3926,20 @@ describe("wsp init, a login whose command is not coming", () => {
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     const summary = f.text().slice(f.text().indexOf("Summary"), f.text().indexOf("Recipe saved"));
     expect(unwrapped(summary)).toContain("docker-desktop from Kubernetes release (checksum checked against the first install)");
+  });
+});
+
+describe("shellItems", () => {
+  const zshrc: ManifestEntry = { rung: "shell", id: "shell/zshrc", label: "~/.zshrc", paths: ["~/.zshrc"], bytes: 3000, default: "bring", aliases: [{ name: "ls", runs: "eza", kind: "alias", tool: "tools/brew/eza" }, { name: "cat", runs: "bat", kind: "alias", tool: "tools/brew/bat" }] };
+  const starship: ManifestEntry = { rung: "shell", id: "shell/starship", label: "starship prompt", paths: ["~/.config/starship.toml"], bytes: 900, default: "bring" };
+  const eza: ManifestEntry = { rung: "tools", id: "tools/brew/eza", label: "eza", group: "Homebrew", paths: [], bytes: 0, default: "skip", linux: "yes" };
+  const bat: ManifestEntry = { rung: "tools", id: "tools/brew/bat", label: "bat", group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "yes" };
+
+  it("a shell row's detail names the aliases whose tool starts unticked, after its own two lines; the tools screen's own ticks win once it was visited", () => {
+    const fresh = shellItems([zshrc, starship], [zshrc, starship, eza, bat], undefined, new Map());
+    expect(fresh[0]!.detail).toEqual(["~/.zshrc", "2.9 KB, brought by default", "alias ls points at eza, which is not coming (unticked, tick to bring)"]);
+    expect(fresh[1]!.detail).toEqual(["~/.config/starship.toml", "900 B, brought by default"]);
+    const visited = shellItems([zshrc], [zshrc, starship, eza, bat], new Set(["tools/brew/eza"]), new Map());
+    expect(visited[0]!.detail).toEqual(["~/.zshrc", "2.9 KB, brought by default", "alias cat points at bat, which is not coming (unticked, tick to bring)"]);
   });
 });

@@ -208,7 +208,7 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
     try {
       const daemon = await o.dial();
       try {
-        const status = await runQuiet(daemon.link, statusLine(command), statusMs);
+        const status = await runQuiet(daemon.link, statusLine(check.typed ?? command), statusMs);
         if (status.dropped) {
           r.state = "not-signed-in";
           r.note = "copied, but the machine's terminal link dropped during the status check";
@@ -228,7 +228,7 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
         }
         const signedIn = check.signedIn(status.output, status.exitCode);
         r.state = signedIn ? "signed-in" : "not-signed-in";
-        r.note = signedIn ? provedBy(check, status.output, "copied") : `copied, but ${command} says not signed in`;
+        r.note = signedIn ? provedBy(check, status.output, "copied") : `copied, but ${check.why?.(status.output) ?? `${command} says not signed in`}`;
       } finally {
         daemon.close();
       }
@@ -307,7 +307,7 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
         r.note = [`no status command known for ${agentName(entry)}`, ...(relayed.exitCode !== 0 ? [`exit ${relayed.exitCode}`] : []), ...(s.kind === "command" && s.note !== undefined ? [s.note] : [])].join("; ");
         return;
       }
-      const status = await runQuiet(daemon.link, statusLine(s.status.command), statusMs);
+      const status = await runQuiet(daemon.link, statusLine(s.status.typed ?? s.status.command), statusMs);
       if (status.dropped) {
         r.state = "not-signed-in";
         r.note = "the machine's terminal link dropped during the status check";
@@ -320,7 +320,7 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
       }
       const signedIn = s.status.signedIn(status.output, status.exitCode);
       r.state = signedIn ? "signed-in" : "not-signed-in";
-      r.note = signedIn ? provedBy(s.status, status.output) : `${s.status.command} says not signed in`;
+      r.note = signedIn ? provedBy(s.status, status.output) : (s.status.why?.(status.output) ?? `${s.status.command} says not signed in`);
     } finally {
       daemon.close();
     }

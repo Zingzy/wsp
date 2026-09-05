@@ -509,4 +509,12 @@ describe("golden version logins", () => {
     expect(GoldenVersion.parse(base).logins).toBeUndefined();
     expect(() => GoldenVersion.parse({ ...base, logins: [{ name: "x", state: "done" }] })).toThrow();
   });
+
+  it("carries the tools missing from the image with the cause and reason, and stays optional for versions sealed before", () => {
+    const missingTools = [{ name: "gopls", outcome: "skipped", note: "no Linux bottle" }, { name: "Homebrew", outcome: "failed", note: "git: not found" }];
+    expect(GoldenVersion.parse({ ...base, missingTools })).toEqual({ ...base, missingTools });
+    expect(GoldenVersion.parse(base).missingTools).toBeUndefined();
+    expect(() => GoldenVersion.parse({ ...base, missingTools: [{ name: "gopls", note: "no Linux bottle" }] })).toThrow();
+    expect(() => GoldenVersion.parse({ ...base, missingTools: [{ name: "gopls", outcome: "installed", note: "" }] })).toThrow();
+  });
 });
