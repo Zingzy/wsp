@@ -165,8 +165,35 @@ export const SessionView = z.object({
   endedAt: z.number().optional(),
   /** The folder the harness runs in: the start request's, then what the harness itself announced. */
   cwd: z.string().optional(),
+  /** What the session runs with, as the harness's own slugs: the start request's model until the harness announces
+   * its own; effort and permission mode as requested, since the CLI never echoes them. */
+  model: z.string().optional(),
+  effort: z.string().optional(),
+  permissionMode: z.string().optional(),
 });
 export type SessionView = z.infer<typeof SessionView>;
+
+// --- harness catalog (what the composer's pickers may offer) -------------------
+
+/** One value a harness's CLI accepts for a picker, as the CLI spells it; the label is what the picker shows. */
+export const HarnessOption = z.object({
+  value: z.string(),
+  label: z.string(),
+  description: z.string().optional(),
+  isDefault: z.boolean().optional(),
+});
+export type HarnessOption = z.infer<typeof HarnessOption>;
+
+/** What one harness's CLI takes at launch. A list is empty when the CLI has no such flag or its values are open,
+ * and the composer hides that picker; sessions.start passes a picked value through unchanged. */
+export const HarnessCatalog = z.object({
+  harness: z.string(),
+  label: z.string(),
+  models: z.array(HarnessOption),
+  efforts: z.array(HarnessOption),
+  permissionModes: z.array(HarnessOption),
+});
+export type HarnessCatalog = z.infer<typeof HarnessCatalog>;
 
 // --- session events (mirroring @wsp/adapter-claude's AdapterEvent) ----------
 
@@ -733,7 +760,13 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     harness: z.string().optional(),
     resume: z.string().optional(),
     cwd: z.string().optional(),
+    /** Values from the harness's catalog; absent means the CLI's own default for that flag. */
+    model: z.string().optional(),
+    effort: z.string().optional(),
+    permissionMode: z.string().optional(),
   }),
+  /** Replies with { harnesses: HarnessCatalog[] }, one per harness the runtime knows. */
+  z.object({ id: reqId, op: z.literal("harnesses.list") }),
   z.object({ id: reqId, op: z.literal("sessions.list"), workspaceId: z.string().optional() }),
   /** Replies with the workspace's persisted SessionEvent[] (oldest first, capped by the runtime). */
   z.object({ id: reqId, op: z.literal("sessions.history"), workspaceId: z.string() }),

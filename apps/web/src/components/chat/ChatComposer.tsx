@@ -12,9 +12,10 @@
 // a send, a running turn included, so Enter never fails silently. It is also
 // disabled while the turn a new thread left behind is still finishing: stop
 // reaches only the visible turn, so a second session must not start until
-// that one ends. Model and permission-mode controls wait for start options.
-// The checkout row under the composer picks the folder a fresh thread starts
-// in; a resumed one is started where its harness last said it was.
+// that one ends. The checkout row under the composer picks the folder a fresh
+// thread starts in; a resumed one is started where its harness last said it
+// was. The model, effort and permission picks in that row ride every start,
+// so a change mid-thread applies at the next turn.
 import { CircleAlertIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sendRefusal, workspaceState, type MachineState, type ReachState, type WorkspacePhase } from "@wsp/protocol";
@@ -29,6 +30,7 @@ import { ComposerCheckoutRow } from "./ComposerCheckoutRow";
 import { ComposerCommandMenu, type ComposerCommandItem } from "./ComposerCommandMenu";
 import { ComposerCommandMenuLayer } from "./ComposerCommandMenuLayer";
 import { EMPTY_DRAFT, useComposerDraft, useComposerDraftStore } from "./composerDraftStore";
+import { useComposerOptions } from "./composerOptionsStore";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { searchSlashCommandItems, slashCommandItemsForPromptPosition } from "./composerSlashCommandSearch";
@@ -75,6 +77,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const [stop, setStop] = useState<StopAttempt | null>(null);
   const draft = useComposerDraft(workspaceId);
   const cwd = useThreadFolder(workspaceId);
+  const picked = useComposerOptions(workspaceId);
   const setDraft = useComposerDraftStore(s => s.setDraft);
   const editorRef = useRef<ComposerPromptEditorHandle | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
@@ -114,8 +117,8 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const trigger = useMemo(() => detectComposerTrigger(draft.prompt, draft.cursor), [draft]);
   const searchKey = trigger ? `${trigger.kind}:${trigger.query.trim().toLowerCase()}` : null;
   const menuOpen = trigger !== null && trigger.rangeStart === 0 && dismissedSearchKey !== searchKey && unavailable === null;
-  const { harness, model } = thread.view;
-  const catalog = useMemo(() => catalogFromHarness({ harness, model }), [harness, model]);
+  const { harness } = thread.view;
+  const catalog = useMemo(() => catalogFromHarness({ harness }), [harness]);
   const items = useMemo<ComposerCommandItem[]>(() => {
     if (!menuOpen || trigger === null) return [];
     const all = catalog.slashCommands.map(command => ({
@@ -153,13 +156,13 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     thread.setSending(true);
     thread.appendUserTurn(prompt);
     const resume = thread.fresh ? undefined : workspace?.claudeSessionId;
-    void api.startSession({ workspaceId, prompt, ...(resume ? { resume } : {}), ...(cwd !== null ? { cwd } : {}) }).catch((err: unknown) => {
+    void api.startSession({ workspaceId, prompt, ...(resume ? { resume } : {}), ...(cwd !== null ? { cwd } : {}), ...picked }).catch((err: unknown) => {
       thread.setSending(false);
       const current = useComposerDraftStore.getState().drafts[workspaceId];
       if (current === undefined || current.prompt === "") setDraft(workspaceId, { prompt, cursor: prompt.length });
       thread.appendLocalError(err instanceof Error ? err.message : String(err));
     });
-  }, [api, cwd, draft, sendDisabledReason, setDraft, thread, workspace?.claudeSessionId, workspaceId]);
+  }, [api, cwd, draft, picked, sendDisabledReason, setDraft, thread, workspace?.claudeSessionId, workspaceId]);
 
   const interrupt = useCallback(() => {
     const method = api?.interruptSession;

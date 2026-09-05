@@ -55,6 +55,16 @@ function collect(): { events: AdapterEvent[]; onEvent: (e: AdapterEvent) => void
 }
 
 describe("ClaudeAdapter over the recorded fixture", () => {
+  it("launches with the picked model, effort and permission mode", async () => {
+    const exec = scriptedExec(fixtureLines());
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const session = adapter.start({ prompt: "go", model: "claude-opus-5", effort: "low", permissionMode: "plan", onEvent: () => {} });
+    await session.finished;
+    expect(exec.calls[0]?.command).toContain("--model 'claude-opus-5'");
+    expect(exec.calls[0]?.command).toContain("--effort 'low'");
+    expect(exec.calls[0]?.command).toContain("--permission-mode 'plan'");
+  });
+
   it("normalizes the stream into session.start / turn.delta / turn.done / session.end", async () => {
     const exec = scriptedExec(fixtureLines());
     const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });

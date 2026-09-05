@@ -76,10 +76,30 @@ export interface BuildCommandOptions {
   /** Existing session: passed as --resume instead. */
   resume?: string;
   cwd?: string;
+  /** The CLI's own slugs, from the harness catalog; absent leaves the CLI's default in place. */
+  model?: string;
+  effort?: string;
+  /** "default" sends no permission flag; absent keeps skipping permissions, what every session did before there was a picker. */
+  permissionMode?: string;
 }
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", String.raw`'\''`)}'`;
+}
+
+// Model names carry a context suffix like "claude-opus-5[1m]"; nothing else a catalog value needs is outside this set.
+const SLUG_RE = /^[A-Za-z0-9][A-Za-z0-9._:\[\]-]*$/;
+
+function slugFlag(flag: string, name: string, value: string | undefined): string[] {
+  if (value === undefined) return [];
+  if (!SLUG_RE.test(value)) throw new Error(`${name} must be a plain slug, got "${value}"`);
+  return [`${flag} ${shellQuote(value)}`];
+}
+
+function permissionFlags(mode: string | undefined): string[] {
+  if (mode === undefined || mode === "bypassPermissions") return ["--dangerously-skip-permissions"];
+  if (mode === "default") return [];
+  return slugFlag("--permission-mode", "permissionMode", mode);
 }
 
 /**
@@ -90,7 +110,7 @@ function shellQuote(value: string): string {
  * would expand to nothing.
  */
 export function buildCommand(options: BuildCommandOptions): string {
-  const { prompt, sessionId, resume, cwd } = options;
+  const { prompt, sessionId, resume, cwd, model, effort, permissionMode } = options;
   if ((sessionId === undefined) === (resume === undefined)) {
     throw new Error("buildCommand needs exactly one of sessionId or resume");
   }
@@ -103,7 +123,9 @@ export function buildCommand(options: BuildCommandOptions): string {
     `claude -p ${shellQuote(prompt)}`,
     "--output-format stream-json",
     "--verbose",
-    "--dangerously-skip-permissions",
+    ...permissionFlags(permissionMode),
+    ...slugFlag("--model", "model", model),
+    ...slugFlag("--effort", "effort", effort),
     idFlag,
     "</dev/null",
   ].join(" ");

@@ -17,6 +17,7 @@ import {
   GitStatusReply,
   GoldenManifest,
   GoldenStageEvent,
+  HarnessCatalog,
   PortReachView,
   RuntimeErrorResponse,
   RuntimeRequest,
@@ -325,6 +326,36 @@ describe("runtime wire types", () => {
     expect(() => RuntimeRequest.parse({ id: 1, op: "golden.builderReach" })).toThrow();
     expect(RuntimeResponse.parse({ id: 4, ok: true, workspace: { id: "w" } })).toBeTruthy();
     expect(RuntimeResponse.parse({ id: 4, ok: false, error: "nope" })).toBeTruthy();
+  });
+
+  it("sessions.start carries the composer's model, effort and permission mode as the harness's own slugs", () => {
+    const picked = { id: 22, op: "sessions.start", workspaceId: "ws_1", prompt: "go", model: "claude-opus-5", effort: "high", permissionMode: "acceptEdits" };
+    expect(RuntimeRequest.parse(picked)).toEqual(picked);
+    const { model: _m, effort: _e, permissionMode: _p, ...bare } = picked;
+    expect(RuntimeRequest.parse(bare)).toEqual(bare);
+    expect(() => RuntimeRequest.parse({ ...picked, effort: 3 })).toThrow();
+    expect(RuntimeRequest.parse({ id: 23, op: "harnesses.list" })).toEqual({ id: 23, op: "harnesses.list" });
+  });
+
+  it("a harness catalog lists what each picker may offer; an empty list hides that picker", () => {
+    const catalog = {
+      harness: "claude",
+      label: "Claude Code",
+      models: [{ value: "claude-opus-5", label: "Opus 5" }],
+      efforts: [{ value: "high", label: "High", isDefault: true }],
+      permissionModes: [{ value: "plan", label: "Plan", description: "Read and plan only" }],
+    };
+    expect(HarnessCatalog.parse(catalog)).toEqual(catalog);
+    const bare = { harness: "pi", label: "Pi", models: [], efforts: [], permissionModes: [] };
+    expect(HarnessCatalog.parse(bare)).toEqual(bare);
+    expect(() => HarnessCatalog.parse({ ...catalog, models: [{ value: "x" }] })).toThrow();
+    expect(() => HarnessCatalog.parse({ ...catalog, efforts: undefined })).toThrow();
+  });
+
+  it("SessionView records the model, effort and permission mode the session runs with", () => {
+    const view = { id: "s1", workspaceId: "ws_1", harness: "claude", status: "running", model: "claude-opus-5", effort: "high", permissionMode: "bypassPermissions" };
+    expect(SessionView.parse(view)).toEqual(view);
+    expect(() => SessionView.parse({ ...view, model: 5 })).toThrow();
   });
 
   it("sessions.interrupt answers one of three outcomes, none of them an error reply", () => {

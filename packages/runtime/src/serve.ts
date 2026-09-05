@@ -178,10 +178,16 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 ...(msg.harness !== undefined ? { harness: msg.harness } : {}),
                 ...(msg.resume !== undefined ? { resume: msg.resume } : {}),
                 ...(msg.cwd !== undefined ? { cwd: msg.cwd } : {}),
+                ...(msg.model !== undefined ? { model: msg.model } : {}),
+                ...(msg.effort !== undefined ? { effort: msg.effort } : {}),
+                ...(msg.permissionMode !== undefined ? { permissionMode: msg.permissionMode } : {}),
               });
               send({ id: msg.id, ok: true, session: handle.view() });
               return;
             }
+            case "harnesses.list":
+              send({ id: msg.id, ok: true, harnesses: rt.harnesses.list() });
+              return;
             case "sessions.list":
               send({ id: msg.id, ok: true, sessions: rt.sessions.list(msg.workspaceId) });
               return;

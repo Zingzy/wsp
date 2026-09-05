@@ -64,6 +64,10 @@ export interface StartOptions {
   /** Session id of an earlier run; the CLI reloads its transcript. */
   resume?: string;
   cwd?: string;
+  /** Catalog slugs for --model, --effort and the permission flags; each absent one leaves the CLI's default. */
+  model?: string;
+  effort?: string;
+  permissionMode?: string;
   onEvent: (event: AdapterEvent) => void;
 }
 
@@ -259,6 +263,9 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       prompt: options.prompt,
       ...(options.resume === undefined ? { sessionId: localId } : { resume: options.resume }),
       cwd: options.cwd,
+      model: options.model,
+      effort: options.effort,
+      permissionMode: options.permissionMode,
     });
     const env = buildEnv({ base: deps.baseEnv, configDir: deps.configDir, apiKey: deps.apiKey });
     const stream = deps.exec(command, { env });

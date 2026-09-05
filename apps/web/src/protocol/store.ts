@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect } from "react";
 import { create } from "zustand";
-import type { Capabilities, PortForward, SessionView, WorkspaceCreateStage, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import type { Capabilities, HarnessCatalog, PortForward, SessionView, WorkspaceCreateStage, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
 
 export interface CostTick {
@@ -58,6 +58,8 @@ interface State {
   conn: ConnStatus;
   /** Backend feature flags; null until the first reply. Gate upgrade/resize on these. */
   capabilities: Capabilities | null;
+  /** What each harness's CLI takes at launch; empty until the runtime answers, and the composer shows no pickers. */
+  harnesses: HarnessCatalog[];
   workspaces: WorkspaceView[];
   statuses: Record<string, WorkspaceStatus>;
   costs: Record<string, CostTick>;
@@ -178,6 +180,7 @@ export const useStore = create<State>((set, get) => {
     api: null,
     conn: "connecting",
     capabilities: null,
+    harnesses: [],
     workspaces: [],
     statuses: {},
     costs: {},
@@ -196,6 +199,10 @@ export const useStore = create<State>((set, get) => {
       void api
         .capabilities()
         .then(capabilities => set({ capabilities }))
+        .catch(() => {});
+      void api
+        .listHarnesses?.()
+        .then(harnesses => set({ harnesses }))
         .catch(() => {});
       pull(api);
     },
@@ -385,6 +392,13 @@ export function useForwarded(workspaceId: string | null, port: number | null): b
   return useStore(s => workspaceId !== null && port !== null && s.forwards.some(f => f.workspaceId === workspaceId && f.port === port && f.kind === "url"));
 }
 export function useCapabilities(): Capabilities | null { return useStore(s => s.capabilities); }
+export function useHarnessCatalog(harness: string): HarnessCatalog | null {
+  return useStore(s => s.harnesses.find(c => c.harness === harness) ?? null);
+}
+/** The workspace's most recent session row, running or not; null before its first session this runtime remembers. */
+export function useLatestSession(id: string | null): SessionView | null {
+  return useStore(s => (id ? s.sessions[id]?.at(-1) ?? null : null));
+}
 
 /** Subscribe a component to raw protocol events (the thread, terminal and browser surfaces use this). */
 export function useProtocolEvents(fn: (e: ProtocolEvent) => void): void {

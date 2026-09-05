@@ -7,7 +7,7 @@ import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
 import { SessionEvent, type EventUnion, type RecipeDigest } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
-import { GRACE_MS, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
+import { GRACE_MS, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, createRuntime, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { wsRequest } from "./ws-client.js";
@@ -166,16 +166,19 @@ describe("runtime session history", () => {
   const manual = () => {
     const sessionId = "33333333-3333-4333-8333-333333333333";
     let onEvent: ((e: AdapterEvent) => void) | undefined;
+    let lastStart: HarnessStartOptions | undefined;
     let finish!: (r: TurnResult) => void;
     const finished = new Promise<TurnResult>(r => (finish = r));
     const adapter: HarnessAdapterFactory = () => ({
       start: o => {
         onEvent = o.onEvent;
+        lastStart = o;
         return { localId: sessionId, claudeSessionId: sessionId, finished, interrupt: async () => {} };
       },
     });
     return {
       adapter,
+      lastStart: () => lastStart,
       start: (cwd?: string) => onEvent!({ type: "session.start", sessionId, model: "claude-sonnet-4-5", ...(cwd !== undefined ? { cwd } : {}) }),
       done: (text: string) => onEvent!({ type: "turn.done", sessionId, result: { status: "completed", text } }),
       end: () => {
@@ -410,6 +413,45 @@ describe("runtime session history", () => {
     expect(ended.endedAt).toBeLessThanOrEqual(Date.now());
     expect(ended.prompt).toBe("go");
     await rt.close();
+  });
+
+  it("passes the picked model, effort and permission mode to the harness and records them on the SessionView", async () => {
+    const m = manual();
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: m.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "go", model: "claude-opus-5", effort: "high", permissionMode: "plan" });
+    expect(m.lastStart()).toMatchObject({ model: "claude-opus-5", effort: "high", permissionMode: "plan" });
+    expect(handle.view()).toMatchObject({ model: "claude-opus-5", effort: "high", permissionMode: "plan" });
+    // The CLI announces the model it resolved; that name replaces the request's on the view.
+    m.start();
+    expect(rt.sessions.list(ws.id)[0]!.model).toBe("claude-sonnet-4-5");
+    m.done("done");
+    m.end();
+    await handle.finished;
+    await rt.close();
+  });
+
+  it("a start without picks hands the harness none, so the CLI's own defaults apply", async () => {
+    const m = manual();
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: m.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "go" });
+    expect(Object.keys(m.lastStart()!)).toEqual(["prompt", "onEvent"]);
+    const view = handle.view();
+    expect(view.model).toBeUndefined();
+    expect(view.effort).toBeUndefined();
+    expect(view.permissionMode).toBeUndefined();
+    m.done("done");
+    m.end();
+    await handle.finished;
+    await rt.close();
+  });
+
+  it("lists a catalog per harness it knows", () => {
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
+    const catalogs = rt.harnesses.list();
+    expect(catalogs.map(c => c.harness)).toContain("claude");
+    expect(catalogs.find(c => c.harness === "claude")!.efforts.length).toBeGreaterThan(0);
   });
 
   it("SessionView carries the folder: the start request's until the harness announces its own", async () => {
