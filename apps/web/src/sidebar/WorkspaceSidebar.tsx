@@ -207,7 +207,7 @@ export function WorkspaceSidebar() {
 
   return (
     <>
-      <SidebarChromeHeader title="wsp" />
+      <SidebarChromeHeader />
       <div ref={rootRef} onKeyDown={onKeyDown} className="flex min-h-0 flex-1 flex-col">
         <SidebarContent fixedHeader={search}>
           <SidebarGroup>

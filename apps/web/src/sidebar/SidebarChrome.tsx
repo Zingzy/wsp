@@ -1,10 +1,11 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/sidebar/SidebarChrome.tsx at 57a66608 (MIT).
 // The router, settings and update-pill hooks are replaced by props: the
-// header takes its title, the footer the actions it lists. The stage
-// backdrop and the wordmark are left out.
+// header shows the brand lockup, the footer the actions it lists. The stage
+// backdrop is left out.
 import type { ComponentProps, ReactNode } from "react";
 import { memo } from "react";
 
+import { Lockup } from "../brand/Brand";
 import { cn } from "../lib/utils";
 import {
   SidebarFooter,
@@ -17,11 +18,9 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
-  title,
   isElectron = false,
   children,
 }: {
-  title: string;
   isElectron?: boolean;
   children?: ReactNode;
 }) {
@@ -34,9 +33,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
     >
       <SidebarTrigger className="relative z-10 md:hidden" />
       <span className="relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink-0 items-center gap-1 overflow-hidden rounded-md text-foreground md:flex">
-        <span className="-translate-y-px truncate text-sm font-medium tracking-tight text-muted-foreground">
-          {title}
-        </span>
+        <Lockup className="h-3.5 -translate-y-px text-muted-foreground" />
       </span>
       {children}
     </SidebarHeader>
