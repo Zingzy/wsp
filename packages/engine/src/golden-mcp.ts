@@ -7,7 +7,7 @@
 import { MCP_ID_PREFIX } from "@wsp/protocol";
 import { TOOLS_PATH, UV_INSTALL, type RecipeEntry } from "./golden-import.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
-import { TOOL_TIMEOUT_S, guardDeadlineMs, guarded, reasonOf } from "./golden-tools.js";
+import { TOOL_TIMEOUT_S, type ToolResult, guardDeadlineMs, guarded, reasonOf } from "./golden-tools.js";
 import type { Machine } from "./machine.js";
 import type { StageListener } from "./golden.js";
 
@@ -46,6 +46,14 @@ export interface McpPlan {
   rewrites: [string, string][];
   /** Directories whose binaries the machine finds on PATH by name; a command right under one becomes its name. */
   binDirs: string[];
+  /** The recipe's tool rows that install one binary each, with their tick: a server whose command is not on the machine names the row that would have brought it. */
+  tools: McpToolRow[];
+}
+
+export interface McpToolRow {
+  id: string;
+  ticked: boolean;
+  reason?: string;
 }
 
 export interface McpPlanOptions {
@@ -67,6 +75,8 @@ export interface McpResult {
 
 const GUEST_HOME = "/root";
 const LINUXBREW = "/home/linuxbrew/.linuxbrew/";
+/** Rows whose last id segment is the binary they put on PATH; taps, casks and the toolchain install none. */
+const BINARY_ROW = /^tools\/(brew|go|cargo|npm|pnpm|bun|pipx|uv)\//;
 
 /** A row's agent, scope and server name from its id: `agents/mcp/<agent>/<name>`, or `agents/mcp/<agent>/home/<name>`. */
 function parseId(id: string): { agent: string; home: boolean; name: string } | undefined {
@@ -114,6 +124,7 @@ export function mcpPlanFor(rows: readonly RecipeEntry[], opts: McpPlanOptions): 
     guestHome,
     rewrites: [[`${opts.home}/`, `${guestHome}/`], ["/opt/homebrew/", LINUXBREW]],
     binDirs: [`${opts.home}/.local/bin/`, "~/.local/bin/", ...(opts.binDirs ?? ["/opt/homebrew/bin/", "/opt/homebrew/sbin/"])],
+    tools: rows.filter(e => e.rung === "tools" && BINARY_ROW.test(e.id)).map(e => ({ id: e.id, ticked: e.bring === true, ...(e.reason !== undefined ? { reason: e.reason } : {}) })),
   };
 }
 
@@ -121,8 +132,10 @@ export function mcpPlanFor(rows: readonly RecipeEntry[], opts: McpPlanOptions): 
 
 /** Runs under the guest's node with the plan as its one argument. Edits each config in place: kept servers get
  * their strings rewritten (the command to a bare name when it sits in a bin directory), dropped ones come out,
- * every other key and server stays. Codex's TOML is edited by line so its comments and order survive. Prints one
- * JSON object: a result per scope in plan order, naming each server's outcome and command and never its values. */
+ * every other key and server stays. Codex's TOML is edited by line so its comments and order survive. With
+ * `write` off nothing is written, so the same pass reads each kept server's command as the machine would run it.
+ * Prints one JSON object: a result per scope in plan order, naming each server's outcome and command and never
+ * its values. */
 const GUEST_SCRIPT = String.raw`
 const fs = require("fs");
 const plan = JSON.parse(process.argv[1]);
@@ -190,7 +203,7 @@ function jsonScope(scope, file) {
   }
   for (const d of scope.drop) { delete servers[d.name]; results.push({ name: d.name, outcome: "dropped" }); }
   const after = JSON.stringify(root, null, 2) + "\n";
-  if (JSON.stringify(JSON.parse(stripComments(before))) !== JSON.stringify(root)) fs.writeFileSync(file, after);
+  if (plan.write && JSON.stringify(JSON.parse(stripComments(before))) !== JSON.stringify(root)) fs.writeFileSync(file, after);
   return results;
 }
 function uncomment(line) {
@@ -260,7 +273,7 @@ function codexScope(scope, file) {
   }
   for (const d of scope.drop) results.push({ name: d.name, outcome: "dropped" });
   const after = out.join("\n");
-  if (after !== before) fs.writeFileSync(file, after);
+  if (plan.write && after !== before) fs.writeFileSync(file, after);
   return results;
 }
 const scopes = [];
@@ -329,20 +342,81 @@ function summarize(rows: readonly Pending[]): string {
 
 const strip = (r: Pending): McpResult => ({ id: r.id, agent: r.agent, name: r.name, outcome: r.outcome, ...(r.notes.length > 0 ? { note: r.notes.join("; ") } : {}) });
 
-/** Runs the plan on the builder: the guest script edits the configs, then every kept command is looked for on
- * the machine's PATH, uv is installed by its checksummed release when a server runs through it and it is missing,
- * and each server is named on the stage as installed or skipped with its reason. Nothing here fails the build. */
-export async function applyMcp(machine: Machine, plan: McpPlan, stage: StageListener): Promise<McpResult[]> {
-  const count = (a: McpAgentPlan): number => a.scopes.reduce((n, s) => n + s.keep.length + s.drop.length, 0) + a.aside.length;
-  stage("installing-mcp", plan.agents.map(a => `${a.label} ${count(a)}`).join(", "));
+/** The plan as the guest script takes it: `write` off reads, on edits; the tool rows stay on the host. */
+interface GuestPlan extends Omit<McpPlan, "tools"> {
+  write: boolean;
+}
+
+const guestPlan = (plan: McpPlan, agents: McpAgentPlan[], write: boolean): GuestPlan => ({ agents, guestHome: plan.guestHome, rewrites: plan.rewrites, binDirs: plan.binDirs, write });
+
+async function runScript(machine: Machine, plan: GuestPlan): Promise<{ scopes: ScopeOutcome[] } | { failure: string }> {
   const res = await machine.run(`export PATH="/usr/local/bin:$PATH"\nnode -e ${squote(GUEST_SCRIPT)} ${squote(JSON.stringify(plan))}`, { deadlineMs: 120_000 });
   const report = res.exitCode === 0 ? parseReport(res.stdout) : undefined;
-  const failure = report === undefined ? `the config edit did not run (${reasonOf(res, 120)})` : undefined;
+  return report ?? { failure: `the config edit did not run (${reasonOf(res, 120)})` };
+}
+
+const tail = (id: string): string => id.slice(id.lastIndexOf("/") + 1);
+
+/** Why a server whose command the machine does not have is skipped: when the recipe has a tool row for that
+ * binary, what became of the row. */
+function absentReason(command: string, plan: McpPlan, tools: readonly ToolResult[]): string {
+  const base = "command not on the machine";
+  const row = plan.tools.find(t => tail(t.id) === basename(command));
+  if (row === undefined) return base;
+  if (!row.ticked) return `${base}; ${row.id} was not ticked${row.reason !== undefined ? ` (${row.reason})` : ""}`;
+  const result = tools.find(t => t.id === row.id);
+  if (result?.outcome === "skipped" || result?.outcome === "failed") return `${base}; ${row.id} ${result.outcome === "failed" ? "failed" : "was skipped"}${result.note !== undefined ? ` (${result.note})` : ""}`;
+  return `${base}; ${row.id} was ticked, but nothing by that name is on PATH`;
+}
+
+/** The agents with every kept server whose command is neither on the machine nor fetched on first use moved to
+ * the drops, with its reason. */
+function withoutAbsent(plan: McpPlan, read: readonly ScopeOutcome[], missing: ReadonlySet<string>, asRun: (c: string) => string, tools: readonly ToolResult[]): McpAgentPlan[] {
+  let at = 0;
+  return plan.agents.map(agent => ({
+    ...agent,
+    scopes: agent.scopes.map(scope => {
+      const results = read[at++]?.results ?? [];
+      const commandOf = (name: string): string | undefined => results.find(r => r.name === name)?.command;
+      const absent = scope.keep.filter(name => {
+        const command = commandOf(name);
+        return command !== undefined && FETCHERS[basename(command)] === undefined && missing.has(asRun(command));
+      });
+      if (absent.length === 0) return scope;
+      return { ...scope, keep: scope.keep.filter(name => !absent.includes(name)), drop: [...scope.drop, ...absent.map(name => ({ name, reason: absentReason(commandOf(name)!, plan, tools) }))] };
+    }),
+  }));
+}
+
+/** Runs the plan on the builder in two passes of the guest script: the first reads each kept server's command as
+ * the machine will run it, every command is looked for on the machine's PATH, and the second writes the configs
+ * with the servers whose command is neither there nor fetched on first use taken out. uv is installed by its
+ * checksummed release when a server runs through it and it is missing. Each server is named on the stage as
+ * installed or skipped with its reason; `tools` is what the tools stage did, so a skipped server can name the row
+ * that would have brought its command. Nothing here fails the build. */
+export async function applyMcp(machine: Machine, plan: McpPlan, stage: StageListener, tools: readonly ToolResult[] = []): Promise<McpResult[]> {
+  const count = (a: McpAgentPlan): number => a.scopes.reduce((n, s) => n + s.keep.length + s.drop.length, 0) + a.aside.length;
+  stage("installing-mcp", plan.agents.map(a => `${a.label} ${count(a)}`).join(", "));
+  const asRun = (command: string): string => (command.startsWith("~/") ? `${plan.guestHome}${command.slice(1)}` : command);
+  const missing = new Set<string>();
+  let agents = plan.agents;
+  let run = await runScript(machine, guestPlan(plan, agents, false));
+  if ("scopes" in run) {
+    const commands = [...new Set(run.scopes.flatMap(s => s.results.flatMap(r => (r.command !== undefined ? [asRun(r.command)] : []))))];
+    if (commands.length > 0) {
+      const check = await machine.exec(`export PATH=${TOOLS_PATH}\n${commands.map(c => `if command -v ${squote(c)} >/dev/null 2>&1; then echo ${squote(`ok ${c}`)}; else echo ${squote(`no ${c}`)}; fi`).join("\n")}`, { timeoutMs: INLINE_EXEC_MS });
+      for (const line of check.stdout.split("\n")) if (line.startsWith("no ")) missing.add(line.slice(3));
+    }
+    agents = withoutAbsent(plan, run.scopes, missing, asRun, tools);
+    run = await runScript(machine, guestPlan(plan, agents, true));
+  }
+  const report = "scopes" in run ? run.scopes : undefined;
+  const failure = "failure" in run ? run.failure : undefined;
   const rows: Pending[] = [];
   let at = 0;
-  for (const agent of plan.agents) {
+  for (const agent of agents) {
     for (const scope of agent.scopes) {
-      const outcome = report?.scopes[at++];
+      const outcome = report?.[at++];
       const id = (name: string): string => `${MCP_ID_PREFIX}${agent.id}/${scope.project !== undefined ? "home/" : ""}${name}`;
       const skippedKeep =
         failure ?? (outcome === undefined || outcome.file === null ? `${agent.label}'s config is not on the machine` : outcome.error !== undefined ? `${agent.label}'s config on the machine did not parse (${outcome.error})` : undefined);
@@ -366,13 +440,6 @@ export async function applyMcp(machine: Machine, plan: McpPlan, stage: StageList
     for (const a of agent.aside) rows.push(skipped(a.id, agent.label, a.name, a.reason));
   }
 
-  const asRun = (command: string): string => (command.startsWith("~/") ? `${plan.guestHome}${command.slice(1)}` : command);
-  const commands = [...new Set(rows.flatMap(r => (r.command !== undefined ? [asRun(r.command)] : [])))];
-  const missing = new Set<string>();
-  if (commands.length > 0) {
-    const check = await machine.exec(`export PATH=${TOOLS_PATH}\n${commands.map(c => `if command -v ${squote(c)} >/dev/null 2>&1; then echo ${squote(`ok ${c}`)}; else echo ${squote(`no ${c}`)}; fi`).join("\n")}`, { timeoutMs: INLINE_EXEC_MS });
-    for (const line of check.stdout.split("\n")) if (line.startsWith("no ")) missing.add(line.slice(3));
-  }
   const viaUv = rows.filter(r => r.command !== undefined && ["uv", "uvx"].includes(basename(r.command)) && missing.has(asRun(r.command)));
   if (viaUv.length > 0) {
     stage("installing-mcp", `uv for ${viaUv.map(r => r.name).join(", ")}`);
