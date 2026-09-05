@@ -550,6 +550,8 @@ export function selectItem(e: ManifestEntry, hintFor?: (width: number) => string
   const where = e.paths.length > 0 ? `${e.paths.join(", ")}${minus}` : whereNothing(e);
   const lock = e.required ? "on" : !isTickable(e) ? "off" : undefined;
   const hint = e.rung === "tools" || e.rung === "agents" ? installHint(e, brew) : e.bytes > 0 && e.rung !== "logins" ? fmtBytes(e.bytes) : undefined;
+  // A path-shaped app data label is the row's ~/Library parent, a slash, then its name; the parent goes dim. A carve's worded label stays whole.
+  const parent = e.group === APP_DATA_GROUP && e.paths[0] === `~/Library/${e.label}` ? e.label.slice(0, e.label.indexOf("/") + 1) : "";
   return {
     id: e.id,
     label: e.label,
@@ -559,8 +561,7 @@ export function selectItem(e: ManifestEntry, hintFor?: (width: number) => string
     ...(lock !== undefined ? { lock } : {}),
     ...(hasChoices(e) ? { choices: e.rung === "logins" ? LOGIN_CHOICES : CONSENT_CHOICES } : {}),
     ...(e.group === LARGE_GROUP || e.group === APP_DATA_GROUP ? { own: true } : {}),
-    // An app data label is the row's ~/Library parent, a slash, then its name; the parent is what goes dim.
-    ...(e.group === APP_DATA_GROUP && e.label.includes("/") ? { prefix: e.label.slice(0, e.label.indexOf("/") + 1) } : {}),
+    ...(parent !== "" ? { prefix: parent } : {}),
   };
 }
 

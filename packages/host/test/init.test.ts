@@ -15,7 +15,7 @@ import { APP_DATA_GROUP, RUNGS, claimedPaths, entriesFor, everything, nodeMachin
 import { SNAPSHOT_STORAGE, type BackendPricing } from "@wsp/engine";
 import { ALREADY_APPLIED } from "@wsp/protocol";
 import { DAEMON_TOKEN_SET, createRuntime, memoryStore, type GoldenRecipe, type Runtime } from "@wsp/runtime";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { GOLDEN_SETUP } from "../src/doctor.js";
 import { loadManifest, recipePath } from "../src/init-recipe.js";
 import { CARD_FRAME, card, widthOf } from "../src/init-layout.js";
@@ -40,6 +40,7 @@ interface Fake {
   io: InitIO;
   opts: InitOptions;
   text(): string;
+  raw(): string;
   clear(): void;
   press(...keys: string[]): Promise<void>;
   until(needle: string | RegExp, ms?: number): Promise<void>;
@@ -98,6 +99,7 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
   const chunks: string[] = [];
   output.on("data", (c: Buffer) => chunks.push(c.toString()));
   const text = () => stripVTControlCharacters(chunks.join(""));
+  const raw = () => chunks.join("");
   const clear = () => void chunks.splice(0);
   const opened: string[] = [];
   const backends: StubBackend[] = [];
@@ -186,6 +188,7 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
     io,
     opts,
     text,
+    raw,
     clear,
     press,
     until,
@@ -2609,6 +2612,7 @@ describe("wsp init, everything else over a HOME on disk", () => {
     write(`.mcp-auth/mcp-remote-0.1/${token}_tokens.json`, '{"access_token":"fake-token-value-long-enough"}');
     write(`.mcp-auth/mcp-remote-0.1/${token}_client_info.json`, '{"client_secret":"fake-secret-value-long-enough"}');
     write("Library/Application Support/Arc/StorableSidebar.json", "x".repeat(4_000));
+    for (const cache of ["Cache", "Code Cache", "GPUCache"]) write(`Library/Application Support/Arc/User Data/Default/${cache}/data_0`, "c".repeat(100));
     write("Library/Application Support/com.docker.install/data.bin", "y".repeat(2_000));
     write("Library/Application Support/lazydocker/config.yml", "gui: {}\n");
     write(".config/mystery/thing.toml", "z = 1\n");
@@ -2639,7 +2643,7 @@ describe("wsp init, everything else over a HOME on disk", () => {
     expect(screen()).toMatch(/○ mystery\s+6 B\s+unknown\n/);
     expect(screen()).toMatch(/▾ ~\/Library\/Application Support\s+0 of 1\s+8 B\n/);
     expect(screen()).toMatch(/○ lazydocker\s+8 B\s+config\n/);
-    expect(screen()).toMatch(new RegExp(`▸ ${APP_DATA_GROUP.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+0 of 2 {2}5\\.9 KB\n`));
+    expect(screen()).toMatch(new RegExp(`▸ ${APP_DATA_GROUP.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+0 of 3 {2}6\\.2 KB\n`));
     expect(screen()).not.toContain("Arc");
     expect(screen()).not.toContain("com.docker.install");
     const labels = screen().split("\n").filter(l => /[●○]/.test(l)).map(l => l.replace(/^.*[●○] /, "").replace(/ {2}.*$/, ""));
@@ -2657,6 +2661,21 @@ describe("wsp init, everything else over a HOME on disk", () => {
     await f.press(KEY.right);
     expect(screen()).toMatch(/○ Application Support\/Arc\s+3\.9 KB\s+app-data\n/);
     expect(screen()).toMatch(/○ Application Support\/com\.docker\.install\s+2\.0 KB\s+app-data\n/);
+    // Arc's cache subtrees are one carve named for its directory, under the same group; the label is not a path, so no part of it goes dim.
+    expect(screen()).toMatch(/○ cache files in ~\/L.*Support\/Arc\s+300 B\s+app-data\n/);
+    const was = process.env["FORCE_COLOR"];
+    process.env["FORCE_COLOR"] = "3";
+    onTestFinished(() => {
+      if (was === undefined) delete process.env["FORCE_COLOR"];
+      else process.env["FORCE_COLOR"] = was;
+    });
+    f.clear();
+    await f.press(KEY.down);
+    expect(f.raw()).toContain("\x1b[2mApplication Support/\x1b[22mArc");
+    f.clear();
+    await f.press(KEY.down, KEY.down);
+    expect(f.raw()).toMatch(/❯\x1b\[39m {3}\x1b\[2m○\x1b\[22m cache files in ~\/L/);
+    expect(f.raw()).not.toContain("\x1b[2mcache files in ~/\x1b[22m");
     await f.press(KEY.esc);
     await f.until("Sign-ins");
     await f.press(KEY.ctrlC);
@@ -2674,6 +2693,15 @@ describe("everythingItems", () => {
       expect(d!.hintFor!(width)).toMatch(/^\s*300 B/);
       expect(c!.hintFor!(width).length).toBe(d!.hintFor!(width).length);
     }
+  });
+
+  it("only a path-shaped app data label carries its ~/Library parent as the dim prefix", () => {
+    const arc = { rung: "everything" as const, id: "everything/Library/Application Support/Arc", label: "Application Support/Arc", group: APP_DATA_GROUP, paths: ["~/Library/Application Support/Arc"], bytes: 4_000, default: "skip" as const, role: "app-data" as const, files: 1, mtime: 0 };
+    const caches = ["Cache", "Code Cache", "GPUCache"].map(c => `~/Library/Application Support/Arc/User Data/Default/${c}`);
+    const carve = { ...arc, id: "everything/Library/Application Support/Arc/User Data/Default/Cache", label: "cache files in ~/Library/Application Support/Arc", paths: caches, bytes: 300, files: 3 };
+    const [a, c] = everythingItems([arc, carve]);
+    expect(a!.prefix).toBe("Application Support/");
+    expect(c!.prefix).toBeUndefined();
   });
 });
 
