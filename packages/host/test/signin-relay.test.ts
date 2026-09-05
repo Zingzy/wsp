@@ -490,6 +490,22 @@ describe("runChecks", () => {
     expect(res).toEqual({ answers: [{ output: "ok", exitCode: 0 }], timedOut: false, dropped: false });
   });
 
+  it("a pair carrying another run's tag is inert, complete or left open: only this run's own pair answers", async () => {
+    const link = fakePtyLink();
+    link.script = (pty, line) => {
+      if (line !== CHECK_RUN_LINE) return;
+      const tag = checkTag(pty);
+      const other = [...tag].map(c => (c === "f" ? "0" : "f")).join("");
+      expect(other).toMatch(/^[0-9a-f]{12}$/);
+      link.data(pty, `WSP_STATUS ${other} 1 0\r\nfake\r\nWSP_END ${other} 1\r\nWSP_STATUS ${other} 1 0\r\nWSP_STATUS ${tag} 1 5\r\nok\r\nWSP_END ${tag} 1\r\n`);
+      link.exit(pty, 0);
+    };
+    const seen: [number, { output: string; exitCode: number }][] = [];
+    const res = await runChecks(link, { commands: ["printf ok"], secretsFile: SH_FILE, budgetMs: 5_000 }, (i, a) => seen.push([i, a]));
+    expect(seen).toEqual([[0, { output: "ok", exitCode: 5 }]]);
+    expect(res).toEqual({ answers: [{ output: "ok", exitCode: 5 }], timedOut: false, dropped: false });
+  });
+
   it("a link that drops mid-run reads as dropped, with what had answered kept", async () => {
     const link = fakePtyLink();
     link.script = answersChecks(link, command => (command === "gh auth status" ? { output: "ok", exitCode: 0 } : undefined));
