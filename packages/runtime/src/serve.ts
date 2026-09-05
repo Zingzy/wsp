@@ -190,7 +190,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, harnesses: await rt.harnesses.list(msg.workspaceId) });
               return;
             case "sessions.list":
-              send({ id: msg.id, ok: true, sessions: rt.sessions.list(msg.workspaceId) });
+              send({ id: msg.id, ok: true, sessions: await rt.sessions.list(msg.workspaceId) });
               return;
             case "sessions.history":
               send({ id: msg.id, ok: true, events: await rt.sessions.history(msg.workspaceId) });
