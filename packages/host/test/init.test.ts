@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
-import { RUNGS, type Manifest } from "@wsp/collect";
+import { RUNGS, type Manifest, type ManifestEntry } from "@wsp/collect";
 import type { BackendPricing } from "@wsp/engine";
 import { ALREADY_APPLIED } from "@wsp/protocol";
 import { createRuntime, memoryStore, type GoldenRecipe, type Runtime } from "@wsp/runtime";
@@ -18,7 +18,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GOLDEN_SETUP } from "../src/doctor.js";
 import { loadManifest, recipePath } from "../src/init-recipe.js";
 import { CARD_FRAME, card, widthOf } from "../src/init-layout.js";
-import { EDITORS_INTRO, everythingItems, fmtBytes, reduceStages, runInit, stageLine, summaryNote, type HostHooks, type InitIO, type InitOptions } from "../src/init.js";
+import { editorsIntro, everythingItems, fmtBytes, reduceStages, runInit, stageLine, summaryNote, type HostHooks, type InitIO, type InitOptions } from "../src/init.js";
 import type { HostHandle } from "../src/server.js";
 import { startCallbackRelay } from "../src/relay.js";
 import type { ConnectOptions, DaemonSocket } from "../src/doctor.js";
@@ -236,8 +236,9 @@ describe("wsp init, interactive", () => {
     const screen = f.text().slice(f.text().lastIndexOf("◆  Editors"));
     // The two lines sit right under the title, wrapped to the terminal, before the search.
     const head = screen.split("\n").slice(1, screen.split("\n").findIndex(l => l.startsWith("┃  search")));
-    expect(head.join(" ").replace(/┃\s+/g, "").replace(/\s+/g, " ")).toBe(EDITORS_INTRO.join(" "));
-    expect(head[0]).toMatch(/^┃  vim, neovim, helix and emacs/);
+    // The fixture holds neovim with its config and no VS Code or Cursor row, so the intro is the one line about it.
+    expect(head.map(l => l.replace(/^┃\s+/, ""))).toEqual(["neovim is installed on the machine with your config; it runs in the workspace's terminal."]);
+    expect(editorsIntro(FIXTURE.entries.filter(e => e.rung === "editors"))).toEqual(head.map(l => l.replace(/^┃\s+/, "")));
     // Down from the all row onto neovim: its detail names the install and the config copy.
     await f.press(KEY.down);
     await f.until(/neovim, installed with your config\n/);
@@ -2362,6 +2363,19 @@ describe("wsp init, a signal during prepare", () => {
     f.signals.emit("SIGINT");
     expect(f.exits).toEqual([]);
     expect(f.backends[0]!.machines[0]!.killed).toBe(false);
+  });
+});
+
+describe("editorsIntro", () => {
+  const ed = (id: string, paths: string[] = []): ManifestEntry => ({ rung: "editors", id, label: id, paths, bytes: 0, default: "bring" });
+  it("names the terminal editors on the screen, says whether their config comes, and adds the remote editors' line only when their rows are there", () => {
+    expect(editorsIntro([ed("editors/nvim", ["~/.config/nvim"]), ed("editors/helix"), ed("editors/vim", ["~/.vimrc"]), ed("editors/vscode", ["~/.config/Code/User/settings.json"]), ed("editors/cursor-ext/a.b")])).toEqual([
+      "neovim, helix and vim are installed on the machine with the config found here; they run in the workspace's terminal.",
+      "VS Code and Cursor rows are settings and extension names, used only if you open this machine from your editor over SSH; nothing runs here.",
+    ]);
+    expect(editorsIntro([ed("editors/helix"), ed("editors/emacs")])).toEqual(["helix and emacs are installed on the machine; they run in the workspace's terminal."]);
+    expect(editorsIntro([ed("editors/vscode-ext/a.b")])).toEqual(["VS Code rows are settings and extension names, used only if you open this machine from your editor over SSH; nothing runs here."]);
+    expect(editorsIntro([])).toEqual([]);
   });
 });
 

@@ -7,7 +7,7 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { RecipeDigest } from "@wsp/protocol";
-import { PRELUDE } from "./dotfiles-presets.js";
+import { APT, PRELUDE } from "./dotfiles-presets.js";
 
 export type { RecipeDigest };
 
@@ -590,10 +590,6 @@ const APT_EDITORS: Record<string, { name: string; pkg: string; bin: string }> = 
   emacs: { name: "emacs", pkg: "emacs-nox", bin: "emacs" },
 };
 
-function aptInstall(pkg: string, bin: string): string {
-  return `command -v ${bin} >/dev/null 2>&1 || { apt-get update -qq; apt-get install -y -qq ${pkg}; }`;
-}
-
 export interface RemoteEditor {
   name: string;
   /** The remote server's data directory under the guest home. */
@@ -645,7 +641,7 @@ export function editorInstallsFor(entries: readonly RecipeEntry[]): EditorsPlan 
   for (const e of rows) {
     const key = name(e);
     const apt = APT_EDITORS[key];
-    if (apt !== undefined) out.installs.push({ id: e.id, label: apt.name, manager: "apt", cmd: `${PRELUDE}\nexport DEBIAN_FRONTEND=noninteractive\n${aptInstall(apt.pkg, apt.bin)}` });
+    if (apt !== undefined) out.installs.push({ id: e.id, label: apt.name, manager: "apt", cmd: `${PRELUDE}\nexport DEBIAN_FRONTEND=noninteractive\n${APT(apt.pkg, apt.bin)}` });
     else if (key === "helix") out.installs.push({ id: e.id, label: "helix", manager: "release", cmd: `${PRELUDE}\nexport DEBIAN_FRONTEND=noninteractive\n${HELIX_INSTALL}` });
   }
   for (const [key, ed] of Object.entries(REMOTE_EDITORS)) {

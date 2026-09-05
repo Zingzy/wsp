@@ -397,11 +397,24 @@ const CLAUDE_LOGIN_WHY = "Anthropic's terms forbid passing this credential along
 const LOGIN_WHY = "copy brings it along; sign in does it in the browser after the build";
 const CONSENT_WHY = "copy brings it along; skip leaves it here";
 const EVERYTHING_FOOTER = ["large items are listed but never copied without a tick", "know what one of these is? add it to the catalog"];
-/** What the Editors screen is for, in two lines under its title. */
-export const EDITORS_INTRO = [
-  "vim, neovim, helix and emacs are installed on the machine with your config; they run in the workspace's terminal.",
-  "VS Code and Cursor rows are settings and extension names, used only if you open this machine from your editor over SSH; nothing runs here.",
-];
+/** Names as a list: "a", "a and b", "a, b and c". */
+function listed(names: readonly string[]): string {
+  return names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+}
+
+/** What the Editors screen is for, under its title: one line for the terminal editors it holds, one for the remote
+ * editors' rows; a line whose rows are not on the screen is left out. */
+export function editorsIntro(entries: readonly ManifestEntry[]): string[] {
+  const terminal = entries.filter(e => remoteEditorFor(e.id) === undefined && editorInstallsFor([{ ...e, bring: true }]).installs.length > 0);
+  const names = terminal.map(e => editorInstallsFor([{ ...e, bring: true }]).installs[0]!.label);
+  const remote = [...new Set(entries.map(e => remoteEditorFor(e.id)?.name).filter((n): n is string => n !== undefined))];
+  const config = terminal.every(e => e.paths.length > 0) ? " with your config" : terminal.some(e => e.paths.length > 0) ? " with the config found here" : "";
+  const one = names.length === 1;
+  return [
+    ...(names.length > 0 ? [`${listed(names)} ${one ? "is" : "are"} installed on the machine${config}; ${one ? "it runs" : "they run"} in the workspace's terminal.`] : []),
+    ...(remote.length > 0 ? [`${listed(remote)} rows are settings and extension names, used only if you open this machine from your editor over SSH; nothing runs here.`] : []),
+  ];
+}
 
 /** How a ticked editors row reaches the machine, for its detail line; nothing for a row the import has no step for. */
 function editorWhy(e: ManifestEntry): string | undefined {
@@ -611,7 +624,7 @@ async function tickRungs(manifest: Manifest, io: InitIO): Promise<Answers | "can
       initial: prior?.ticks ?? fresh.ticks,
       initialChoices: prior?.choices ?? fresh.choices,
       ...(rung === "everything" ? { footer: everythingFooter(entries), detailLines: 3 } : {}),
-      ...(rung === "editors" ? { intro: EDITORS_INTRO } : {}),
+      ...(rung === "editors" ? { intro: editorsIntro(entries) } : {}),
       input: io.input,
       output: io.output,
     });
