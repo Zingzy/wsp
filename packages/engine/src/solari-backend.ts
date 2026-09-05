@@ -1,6 +1,7 @@
 import type { Capabilities } from "@wsp/protocol";
 import { backoffMs, classify, shouldRetry, type WspError } from "./errors.js";
-import type { ExecResult, Machine, MachineBackend, MachineKind, MachineShape, MachineSpec, MachineState, PreviewReach, SnapshotRow, SnapshotStoragePricing } from "./machine.js";
+import { INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
+import type { ExecResult, Machine, MachineBackend, MachineKind, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing } from "./machine.js";
 import { previewTokenExpiry } from "./preview.js";
 
 type Fetch = typeof globalThis.fetch;
@@ -206,8 +207,12 @@ class SolariMachine implements Machine {
     return this.backend.request<ExecResult>("POST", this.path("/exec"), {
       cmd: "bash",
       args: ["-c", `${EXEC_ENV}\n${cmd}`],
-      timeoutMs: opts?.timeoutMs ?? 120_000,
+      timeoutMs: opts?.timeoutMs ?? INLINE_EXEC_MS,
     });
+  }
+
+  run(script: string, opts: RunOptions): Promise<ExecResult> {
+    return execDetached(this, script, opts);
   }
 
   async snapshot(name: string): Promise<string> {

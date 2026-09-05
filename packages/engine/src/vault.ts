@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { backoffMs, classify, shouldRetry } from "./errors.js";
+import { INLINE_EXEC_MS } from "./exec-detached.js";
 import type { Machine } from "./machine.js";
 
 type Fetch = typeof globalThis.fetch;
@@ -32,13 +33,13 @@ export async function exportPaths(machine: Machine, paths: string[], opts: Vault
   const doFetch = opts.fetch ?? globalThis.fetch;
   const tmp = `/tmp/wsp-vault-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tgz`;
   const rel = paths.map(p => quote(p.replace(/^\//, "")));
-  const tar = await machine.exec(`tar czf ${quote(tmp)} -C / ${rel.join(" ")}`, { timeoutMs: opts.timeoutMs ?? 120_000 });
+  const tar = await machine.run(`tar czf ${quote(tmp)} -C / ${rel.join(" ")}`, { deadlineMs: opts.timeoutMs ?? 120_000 });
   if (tar.exitCode !== 0) {
     throw new Error(`vault export tar failed (exit ${tar.exitCode}): ${tar.stderr.slice(-500)}`);
   }
   try {
     if (opts.maxBytes !== undefined) {
-      const stat = await machine.exec(`stat -c %s ${quote(tmp)}`);
+      const stat = await machine.exec(`stat -c %s ${quote(tmp)}`, { timeoutMs: INLINE_EXEC_MS });
       const bytes = Number(stat.stdout.trim());
       if (stat.exitCode !== 0 || !Number.isFinite(bytes)) throw new Error(`vault export size unknown: ${stat.stderr.slice(-200)}`);
       if (bytes > opts.maxBytes) {
@@ -50,7 +51,7 @@ export async function exportPaths(machine: Machine, paths: string[], opts: Vault
     if (!res.ok) throw new Error(`vault export download failed: HTTP ${res.status}`);
     return Buffer.from(await res.arrayBuffer());
   } finally {
-    await machine.exec(`rm -f ${quote(tmp)}`).catch(() => {});
+    await machine.exec(`rm -f ${quote(tmp)}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => {});
   }
 }
 
@@ -117,7 +118,7 @@ export async function importInto(machine: Machine, tar: Buffer, destDir: string,
     }
   } catch (e) {
     // Every part path, not only those that answered ok: a body can land before the response fails.
-    await machine.exec(`rm -f ${partPaths.map(quote).join(" ")}`).catch(() => {});
+    await machine.exec(`rm -f ${partPaths.map(quote).join(" ")}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => {});
     throw e;
   }
   const digest = createHash("sha256").update(tar).digest("hex");
@@ -136,7 +137,7 @@ export async function importInto(machine: Machine, tar: Buffer, destDir: string,
     `test "$sum" = ${digest} || exit ${HASH_MISMATCH_EXIT}`,
     `${joined} | tar xzf - -C ${quote(destDir)} ${flags}`,
   ].join("\n");
-  const untar = await machine.exec(script, { timeoutMs: opts.timeoutMs ?? 120_000 });
+  const untar = await machine.run(script, { deadlineMs: opts.timeoutMs ?? 120_000 });
   if (untar.exitCode === HASH_MISMATCH_EXIT) {
     throw new Error(`vault import: the uploaded archive (${tar.length} bytes in ${parts} part${parts === 1 ? "" : "s"}) did not match its hash on the machine`);
   }

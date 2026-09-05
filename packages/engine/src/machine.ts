@@ -25,6 +25,15 @@ export interface MachineSpec {
 
 export interface ExecResult { exitCode: number; stdout: string; stderr: string }
 
+export interface RunOptions {
+  /** Past it the command's session is killed, pid and group, and the result is exit 124 with the output so far. */
+  deadlineMs: number;
+  /** Each complete line the command writes, stdout and stderr alike, as it is read. */
+  onLine?: (line: string) => void;
+  /** Between reads of the command's output; the backend's own pace unless a test shortens it. */
+  pollMs?: number;
+}
+
 /** A minted public route to one guest port: URL with the pt_token embedded,
  * the same token standalone, and its expiry in epoch ms (60-min TTL). */
 export interface PreviewReach {
@@ -58,7 +67,12 @@ export interface Machine {
   readonly seen?: { state: MachineState; createdAt?: string };
   /** On a handle from create(): the provider answered from an earlier create under the same key instead of booting. */
   readonly replayed?: boolean;
+  /** One short command; a backend's exec has a hard ceiling (Solari cuts at about 29 s), so anything that can run
+   * longer goes through run(). */
   exec(cmd: string, opts?: { timeoutMs?: number }): Promise<ExecResult>; // always REST path
+  /** A command that may run for minutes: started detached on the guest and read until it exits or the deadline
+   * kills it; the result is shaped like exec's. */
+  run(script: string, opts: RunOptions): Promise<ExecResult>;
   snapshot(name: string): Promise<string>;
   pause(): Promise<void>;
   resume(): Promise<void>;

@@ -14,6 +14,7 @@ const TAR_BYTES = Buffer.from("fake-tgz-bytes-" + "x".repeat(64));
 
 function vaultStub() {
   const execCmds: string[] = [];
+  const runs: string[] = [];
   const guestFiles = new Map<string, Buffer>();
   const machine: Machine = {
     id: "mv", kind: "sandbox", streamUrl: undefined,
@@ -22,6 +23,10 @@ function vaultStub() {
       const tarCreate = cmd.match(/^tar czf '([^']+)'/);
       if (tarCreate) guestFiles.set(tarCreate[1]!, TAR_BYTES);
       return { exitCode: 0, stdout: "", stderr: "" };
+    },
+    run: script => {
+      runs.push(script);
+      return machine.exec(script);
     },
     snapshot: async () => "snap", pause: async () => {}, resume: async () => {},
     kill: async () => {}, state: async () => "running" as const,
@@ -40,7 +45,7 @@ function vaultStub() {
     if (!bytes) return new Response("no such guest file", { status: 404 });
     return new Response(new Uint8Array(bytes), { status: 200 });
   });
-  return { machine, execCmds, puts, fetchStub };
+  return { machine, execCmds, runs, puts, fetchStub };
 }
 
 describe("vault", () => {
@@ -51,6 +56,16 @@ describe("vault", () => {
     const tarCmd = execCmds.find(c => c.startsWith("tar czf"));
     expect(tarCmd).toMatch(/-C \/ 'root\/.claude-cfg'/);
     expect(execCmds.some(c => c.startsWith("rm -f"))).toBe(true); // guest temp cleaned
+  });
+
+  it("the tar and the untar run detached; the size read and the cleanup stay inline", async () => {
+    const { machine, execCmds, runs, fetchStub } = vaultStub();
+    await exportPaths(machine, ["/root/.zshrc"], { fetch: fetchStub, maxBytes: 1_000_000 });
+    await importInto(machine, TAR_BYTES, "/root", { fetch: fetchStub });
+    expect(runs.map(r => r.split("\n")[0]!.split(" ").slice(0, 2).join(" "))).toEqual(["tar czf", "set -eo"]);
+    expect(runs[1]).toContain("tar xzf");
+    const inline = execCmds.filter(c => !runs.includes(c));
+    expect(inline.map(c => c.split(" ").slice(0, 2).join(" "))).toEqual(["stat -c", "rm -f"]);
   });
 
   it("importInto uploads via uploadUrl and untars at the destination", async () => {
@@ -147,6 +162,7 @@ describe("vault import in parts", () => {
           });
         });
       },
+      run: script => machine.exec(script),
       snapshot: async () => "snap", pause: async () => {}, resume: async () => {},
       kill: async () => {}, state: async () => "running" as const,
       downloadUrl: async p => `http://127.0.0.1:${port}/download?path=${encodeURIComponent(p)}`,

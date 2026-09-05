@@ -7,13 +7,14 @@ import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import type { RecipeDigest } from "@wsp/protocol";
 import { NotFirstLifeError } from "../src/lifecycle.js";
 import { HOMEBREW, type ToolInstall } from "../src/golden-import.js";
+import { INLINE_EXEC_MS } from "../src/exec-detached.js";
 import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec } from "../src/machine.js";
 
 /** A fake whose kill() resolves like the provider's DELETE does: a call for
  * which `ignoreKill` answers true is accepted and changes nothing. */
 function recordingBackend(
   execResults: Record<string, ExecResult> = {},
-  opts: { ignoreKill?: (id: string, nth: number) => boolean; built?: (spec: MachineSpec) => MachineShape; exec?: (cmd: string) => ExecResult } = {},
+  opts: { ignoreKill?: (id: string, nth: number) => boolean; built?: (spec: MachineSpec) => MachineShape; exec?: (cmd: string) => ExecResult; stream?: boolean } = {},
 ) {
   const created: MachineSpec[] = [];
   const snapshots: string[] = [];
@@ -25,6 +26,10 @@ function recordingBackend(
   const gone = new Set<string>();
   let nextId = 0;
   const killCount = new Map<string, number>();
+  /** The scripts that went through run(), per machine, and every inline exec with its bound. */
+  const ran: { id: string; script: string }[] = [];
+  const inline: { id: string; cmd: string; timeoutMs: number | undefined }[] = [];
+  const answer = (cmd: string): ExecResult => opts.exec?.(cmd) ?? execResults[cmd] ?? (cmd === "echo ok" ? REACH_OK : { exitCode: 0, stdout: "", stderr: "" });
   const backend: MachineBackend = {
     capabilities: { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: false },
     pricing: { rateUsdPerHour: (s: { cpu: number; memMb: number }) => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: { freeGb: 10, usdPerGbMonth: 0.05, billedFrom: "2026-10-01" } },
@@ -34,7 +39,16 @@ function recordingBackend(
       timeline.push(`create ${id}`);
       const machine: Machine = {
         id, kind: spec.kind, streamUrl: spec.kind === "desktop" ? `wss://fake/stream/${id}` : undefined,
-        exec: async (cmd) => opts.exec?.(cmd) ?? execResults[cmd] ?? (cmd === "echo ok" ? REACH_OK : { exitCode: 0, stdout: "", stderr: "" }),
+        exec: async (cmd, o) => {
+          inline.push({ id, cmd, timeoutMs: o?.timeoutMs });
+          return answer(cmd);
+        },
+        run: async (script, o) => {
+          ran.push({ id, script });
+          const res = answer(script);
+          if (opts.stream) for (const line of res.stdout.split("\n")) if (line !== "") o.onLine?.(line);
+          return res;
+        },
         snapshot: async (name) => { snapshots.push(name); timeline.push(`snapshot ${id}`); return `snap_${name}`; },
         pause: async () => {}, resume: async () => {},
         kill: async () => {
@@ -59,7 +73,7 @@ function recordingBackend(
     async list() { return []; },
     async deleteSnapshot(id) { deletedSnapshots.push(id); },
   };
-  return { backend, created, snapshots, killed, deletedSnapshots, timeline };
+  return { backend, created, snapshots, killed, deletedSnapshots, timeline, ran, inline };
 }
 
 const FAST_KILL = { graceMs: 20, pollMs: 1 };
@@ -503,6 +517,66 @@ describe("golden import stages", () => {
         { id: "agents/codex", name: "Codex", outcome: "installed", ms: expect.any(Number) },
       ],
     }]);
+  });
+
+  it("every command that can outlive one exec goes through run, and every inline exec is bounded at the measured cap", async () => {
+    let lockedOnce = false;
+    const { backend, ran, inline, fetch } = backendFor([
+      ["brew install gh", () => {
+        if (lockedOnce) return ok;
+        lockedOnce = true;
+        return { exitCode: 1, stdout: "", stderr: "Error: A `brew install glibc` process has already locked /home/linuxbrew/.linuxbrew/Cellar/x.\n" };
+      }],
+      ["NODE_HAVE", { exitCode: 0, stdout: "NODE_HAVE v18\nNODE_INSTALLED v22.0.0\n", stderr: "" }],
+    ]);
+    const shell = { shell: "zsh" as const, frameworks: [], cmd: "install-zsh" };
+    const node = { floor: 22, version: "v22.0.0", agents: ["Codex"], cmd: "echo NODE_HAVE v$(node -v); node-install" };
+    const builder = await prepareBuilder({ backend, setup: "the-setup", deployDaemon: async () => "node v22", fetch, import: importOf({ shell, node }) });
+    await sealGolden(builder, { backend, smoke: "unused" });
+    const scripts = ran.filter(r => r.id === "m1").map(r => r.script);
+    const oneOf = (needle: string) => {
+      const hits = scripts.filter(s => s.includes(needle));
+      expect(hits, needle).toHaveLength(1);
+      return hits[0]!;
+    };
+    expect(scripts).toContain("the-setup");
+    for (const guardedBody of ["install-zsh", "node-install", "claude-install", "codex-install", "brew-bootstrap", "bun@1.4.0", "autoremove", "cleanup -s --prune=all"]) {
+      expect(oneOf(guardedBody)).toMatch(/\nsetsid bash -c '/);
+    }
+    expect(scripts.filter(s => s.includes("brew install gh"))).toHaveLength(2);
+    expect(oneOf("flock -w 600")).toContain("/home/linuxbrew/.linuxbrew/var/homebrew/locks/*.lock");
+    oneOf("tar xzf");
+    expect(scripts).toContain('export PATH="/usr/local/bin:$PATH"\nclaude --version');
+    expect(ran.filter(r => r.id === "m2").map(r => r.script)).toEqual(["claude --version && codex --version"]);
+    const inlineCmds = inline.map(i => i.cmd);
+    expect(inlineCmds).toContain(FREE_KB_CMD);
+    expect(inlineCmds).toContain("rm -f /tmp/wsp-vault-*.tgz");
+    expect(inlineCmds).toContain("echo ok");
+    expect(inlineCmds).toContain("test -x /usr/local/bin/wsp-open");
+    for (const i of inline) {
+      expect(i.timeoutMs, i.cmd).toBeLessThanOrEqual(INLINE_EXEC_MS);
+      expect(i.cmd, "a long command ran inline").not.toMatch(/setsid bash -c|tar |the-setup|--version/);
+    }
+  });
+
+  it("the lines a run writes stream into its stage frames, named for the tool or agent", async () => {
+    const rb = recordingBackend({}, {
+      stream: true,
+      exec: cmd => {
+        if (cmd.includes("brew install gh")) return { exitCode: 0, stdout: "==> Fetching gh\n==> Pouring gh\n", stderr: "" };
+        if (cmd.includes("claude-install")) return { exitCode: 0, stdout: "claude 1.2.3 installed\n", stderr: "" };
+        if (cmd === FREE_KB_CMD) return { exitCode: 0, stdout: `${mb(3000)}\n`, stderr: "" };
+        if (cmd === "echo ok") return REACH_OK;
+        return ok;
+      },
+    });
+    const fetch: typeof globalThis.fetch = async () => new Response(null, { status: 200 });
+    const { stages, onStage } = stageRecorder();
+    await prepareBuilder({ backend: rb.backend, setup: "true", fetch, onStage, import: importOf() });
+    expect(stages.slice(stages.indexOf("installing-tools:gh (2/3)"), stages.indexOf("installing-tools:gh (2/3)") + 3)).toEqual([
+      "installing-tools:gh (2/3)", "installing-tools:gh: ==> Fetching gh", "installing-tools:gh: ==> Pouring gh",
+    ]);
+    expect(stages).toContain("installing-harness:Claude Code: claude 1.2.3 installed");
   });
 
   it("the shell step runs after the pack and before the files land, guarded on the guest, and names what it did on the setup frame", async () => {
@@ -1050,10 +1124,11 @@ describe("golden import stages", () => {
     });
 
     it("applyDelta takes the removals off first, one guarded command each with failures and notes in the detail, then runs the delta's stages and folds the smoke", async () => {
-      const { backend, cmds, fetch } = backendFor([["npm uninstall -g bun", { exitCode: 1, stdout: "", stderr: "npm ERR! not installed" }]]);
+      const { backend, cmds, ran, fetch } = backendFor([["npm uninstall -g bun", { exitCode: 1, stdout: "", stderr: "npm ERR! not installed" }]]);
       const machine = await backend.create({ kind: "sandbox", template: "base" });
       const { stages, onStage } = stageRecorder();
       const { ledger } = await applyDelta(machine, deltaOf(), { setup: "true", previousSmoke: head.smoke.cmd, fetch, onStage });
+      expect(ran.filter(r => r.script.includes("npm uninstall -g bun"))).toHaveLength(1);
       expect(stages.slice(0, 2)).toEqual([
         "applying-setup:removing 4 items",
         "applying-setup:removed ~/.zshrc, Gemini CLI; bun not removed (npm ERR! not installed); Claude Code: Claude Code has no uninstaller; left on the machine",

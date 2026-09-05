@@ -2,13 +2,16 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { gzipSync } from "node:zlib";
 import { SNAPSHOT_STORAGE } from "@wsp/engine";
-import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec, MachineState, SnapshotRow } from "@wsp/engine";
+import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec, MachineState, RunOptions, SnapshotRow } from "@wsp/engine";
 
 export interface StubMachine extends Machine {
   spec: MachineSpec;
   paused: boolean;
   killed: boolean;
+  /** Every command the guest was given, exec and run alike, in order. */
   execLog: string[];
+  /** The scripts that went through run(), the road for anything that may outlive one exec. */
+  runLog: string[];
   resumes: number;
   /** What describe() reports; tests mutate it to play a resume that rebuilt the VM. */
   shape: MachineShape;
@@ -65,12 +68,19 @@ export function stubBackend(): StubBackend {
         paused: false,
         killed: false,
         execLog: [],
+        runLog: [],
         resumes: 0,
         shape: { cpu: spec.cpu ?? 2, memMb: spec.memMb ?? 4096, createdAt: new Date().toISOString() },
         async exec(cmd: string): Promise<ExecResult> {
           if (m.killed) throw Object.assign(new Error("gone"), { kind: "missing", status: 404 });
           m.execLog.push(cmd);
           return backend.execImpl(m, cmd);
+        },
+        async run(script: string, _opts: RunOptions): Promise<ExecResult> {
+          if (m.killed) throw Object.assign(new Error("gone"), { kind: "missing", status: 404 });
+          m.execLog.push(script);
+          m.runLog.push(script);
+          return backend.execImpl(m, script);
         },
         async snapshot(name: string): Promise<string> {
           const id = `snap_${name}`;

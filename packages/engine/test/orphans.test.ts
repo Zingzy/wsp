@@ -27,6 +27,7 @@ function stubBackend(rows: Row[] | (() => Row[])) {
       return {
         id, kind: "sandbox", streamUrl: undefined,
         exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+        run: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
         snapshot: async () => "s", pause: async () => {}, resume: async () => {},
         kill: async () => { killed.push(id); },
         state: async () => "running" as const,

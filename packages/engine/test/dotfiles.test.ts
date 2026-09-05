@@ -193,6 +193,8 @@ describe("applyDotfiles exec sequence", () => {
       { name: "preset:tmux", exitCode: 0 },
       { name: "preset:neovim", exitCode: 0 },
     ]);
+    // A clone or an apply can run for minutes, so every step is a run.
+    expect(m.runLog).toEqual(m.execLog);
     expect(m.execLog).toEqual([
       cloneScript("https://github.com/someone/dotfiles"),
       LIST_SCRIPT,

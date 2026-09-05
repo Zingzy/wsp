@@ -71,25 +71,30 @@ function guest(present: string[], canned: Record<string, ExecResult> = {}) {
   const root = mkdtempSync(join(tmpdir(), "wsp-mcp-guest-"));
   dirs.push(root);
   const cmds: string[] = [];
+  const runs: string[] = [];
+  const exec = async (cmd: string): Promise<ExecResult> => {
+    cmds.push(cmd);
+    if (cmd.includes("astral-sh/uv/releases")) return canned.uv ?? { exitCode: 0, stdout: "", stderr: "" };
+    if (cmd.includes("command -v")) {
+      const asked = [...cmd.matchAll(/command -v '([^']*)'/g)].map(m => m[1]!);
+      return { exitCode: 0, stdout: asked.map(c => `${present.includes(c) ? "ok" : "no"} ${c}`).join("\n"), stderr: "" };
+    }
+    try {
+      const { stdout, stderr } = await execFileAsync("bash", ["-c", cmd], { env: { ...process.env, PATH: `${join(process.execPath, "..")}:${process.env.PATH ?? ""}` } });
+      return { exitCode: 0, stdout, stderr };
+    } catch (e) {
+      const err = e as { code?: number; stdout?: string; stderr?: string };
+      return { exitCode: typeof err.code === "number" ? err.code : 1, stdout: err.stdout ?? "", stderr: err.stderr ?? "" };
+    }
+  };
   const machine = {
-    id: "m1", kind: "sandbox",
-    async exec(cmd: string): Promise<ExecResult> {
-      cmds.push(cmd);
-      if (cmd.includes("astral-sh/uv/releases")) return canned.uv ?? { exitCode: 0, stdout: "", stderr: "" };
-      if (cmd.includes("command -v")) {
-        const asked = [...cmd.matchAll(/command -v '([^']*)'/g)].map(m => m[1]!);
-        return { exitCode: 0, stdout: asked.map(c => `${present.includes(c) ? "ok" : "no"} ${c}`).join("\n"), stderr: "" };
-      }
-      try {
-        const { stdout, stderr } = await execFileAsync("bash", ["-c", cmd], { env: { ...process.env, PATH: `${join(process.execPath, "..")}:${process.env.PATH ?? ""}` } });
-        return { exitCode: 0, stdout, stderr };
-      } catch (e) {
-        const err = e as { code?: number; stdout?: string; stderr?: string };
-        return { exitCode: typeof err.code === "number" ? err.code : 1, stdout: err.stdout ?? "", stderr: err.stderr ?? "" };
-      }
+    id: "m1", kind: "sandbox", exec,
+    run: (script: string) => {
+      runs.push(script);
+      return exec(script);
     },
   } as unknown as Machine;
-  return { root, cmds, machine };
+  return { root, cmds, runs, machine };
 }
 
 const CLAUDE = {
@@ -164,10 +169,18 @@ function seed(root: string): void {
 
 describe("applyMcp", () => {
   it("writes the kept definitions with their paths rewritten, drops the unticked, leaves a server it never heard of alone, and names each on the stage", async () => {
-    const { root, cmds, machine } = guest(["npx", "codebase-memory-mcp"]);
+    const { root, cmds, runs, machine } = guest(["npx", "codebase-memory-mcp"]);
     seed(root);
     const stages: string[] = [];
     const results = await applyMcp(machine, planOn(root), (s, d) => void stages.push(`${s}:${d ?? ""}`));
+    // The config edit and the uv install run detached; the PATH check is one short exec.
+    expect(runs).toHaveLength(2);
+    expect(runs[0]).toContain("\nnode -e ");
+    expect(runs[1]).toContain("astral-sh/uv/releases");
+    expect(runs[1]).toContain("\nsetsid bash -c '");
+    const check = cmds.find(c => c.split("\n")[1]?.startsWith("if command -v"))!;
+    expect(check).toBeDefined();
+    expect(runs).not.toContain(check);
 
     const claude = JSON.parse(readFileSync(join(root, ".claude-cfg", ".claude.json"), "utf8"));
     expect(claude.numStartups).toBe(3);

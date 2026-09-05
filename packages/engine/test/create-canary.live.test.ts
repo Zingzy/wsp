@@ -9,7 +9,8 @@
 // since a dropped or misspelled disk field boots the 4 GB default and says
 // nothing. Each case builds its body with the code the runtime calls, asserts
 // the 201, and kills what it made by recorded id. The listing case pins the
-// row fields the sweep's cost and owner lines read.
+// row fields the sweep's cost and owner lines read; the exec case pins the
+// 29 s cut every inline timeout and detached run rests on.
 
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
@@ -198,6 +199,35 @@ describe.runIf(LIVE)("create canary, live", () => {
       await killUntilGone(backend, first);
     }
     expect(await stateOf(first.id)).toBe("gone");
+  });
+
+  it("the raw exec cuts a 40 s command with a 502, and run carries the same command to its end", { timeout: 600_000 }, async () => {
+    const { result: m } = await posted(() => backend.create({ kind: "sandbox", template: "base", cpu: 1, memMb: 2048, labels: labelsFor({}) }));
+    try {
+      // Every inline timeout in wsp assumes the exec endpoint answers 502 at about 29 s for a command still running
+      // (measured 2026-09-05); request() retries a 502 twice, so the raw call takes about three cuts to fail.
+      const t0 = Date.now();
+      const raw = await m.exec("sleep 40; echo done", { timeoutMs: 300_000 }).then(
+        r => ({ answered: r }),
+        (e: unknown) => ({ refused: e as WspError }),
+      );
+      const rawS = ((Date.now() - t0) / 1000).toFixed(1);
+      if ("answered" in raw) {
+        throw new Error(`the exec cap moved: sleep 40 answered exit ${raw.answered.exitCode} with ${JSON.stringify(raw.answered.stdout)} after ${rawS} s; INLINE_EXEC_MS and every run() deadline rest on the 29 s cut`);
+      }
+      console.log(`[create-canary] raw exec of sleep 40 on ${short(m.id)}: ${raw.refused.kind} ${raw.refused.status} ${JSON.stringify(raw.refused.message)} after ${rawS} s`);
+      expect(raw.refused.status, "the exec endpoint no longer answers 502 for a command still running").toBe(502);
+
+      const t1 = Date.now();
+      const lines: string[] = [];
+      const run = await m.run("sleep 40; echo done", { deadlineMs: 180_000, onLine: l => lines.push(l) });
+      console.log(`[create-canary] run of sleep 40 on ${short(m.id)}: exit ${run.exitCode} ${JSON.stringify(run.stdout)} after ${((Date.now() - t1) / 1000).toFixed(1)} s`);
+      expect(run).toEqual({ exitCode: 0, stdout: "done\n", stderr: "" });
+      expect(lines).toEqual(["done"]);
+    } finally {
+      await killUntilGone(backend, m);
+    }
+    expect(await stateOf(m.id)).toBe("gone");
   });
 
   it("listing rows carry metadata, cpu and memMb for a machine just created", { timeout: 180_000 }, async () => {
