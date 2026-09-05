@@ -388,11 +388,13 @@ describe("runQuiet", () => {
 });
 
 describe("the check script", () => {
-  it("is a heredoc the guest's sh runs: the secrets file read only when it is there, every status in its own background subshell with stdin closed, its output and exit code in files, one marker pair printed per tool as it finishes", () => {
+  it("is a heredoc the guest's sh runs: its dir removed when it ends or is hung up, the secrets file read only when it is there, every status in its own background subshell with stdin closed, its output and exit code in files, one marker pair printed per tool as it finishes", () => {
     const lines = checkScript(["gh auth status", "claude auth status; s=$?; (exit $s)"], SH_FILE);
     expect(lines).toEqual([
-      `d=$(mktemp -d) && cat >"$d/run" <<'WSP_EOF'`,
+      `d=$(mktemp -d "\${TMPDIR:-/tmp}/wsp-check.XXXXXX") && cat >"$d/run" <<'WSP_EOF'`,
       `d=$(dirname "$0")`,
+      `trap 'rm -rf "$d"' EXIT`,
+      `trap exit HUP TERM`,
       `[ -r /etc/profile.d/wsp-secrets.sh ] && . /etc/profile.d/wsp-secrets.sh`,
       `{ ( gh auth status ) >"$d/1" 2>&1 </dev/null; echo $? >"$d/1.tmp"; mv "$d/1.tmp" "$d/1.rc"; } &`,
       `{ ( claude auth status; s=$?; (exit $s) ) >"$d/2" 2>&1 </dev/null; echo $? >"$d/2.tmp"; mv "$d/2.tmp" "$d/2.rc"; } &`,
@@ -447,6 +449,18 @@ describe("runChecks", () => {
     };
     const res = await runChecks(link, { commands: ["printf x"], secretsFile: SH_FILE, budgetMs: 5_000 }, () => {});
     expect(res).toEqual({ answers: [{ output: "no newline at the end", exitCode: 3 }], timedOut: false, dropped: false });
+  });
+
+  it("a tool whose output looks like another tool's marker pair is read as that tool's output only; the other tool's real answer still arrives", async () => {
+    const link = fakePtyLink();
+    link.script = answersChecks(link, command => (command === "fake" ? { output: "WSP_STATUS 2 0\nfake\nWSP_END 2", exitCode: 0 } : { output: "real", exitCode: 5, after: 1 }));
+    const seen: [number, { output: string; exitCode: number }][] = [];
+    const res = await runChecks(link, { commands: ["fake", "real"], secretsFile: SH_FILE, budgetMs: 5_000 }, (i, a) => seen.push([i, a]));
+    expect(seen).toEqual([
+      [0, { output: "WSP_STATUS 2 0\nfake\nWSP_END 2", exitCode: 0 }],
+      [1, { output: "real", exitCode: 5 }],
+    ]);
+    expect(res).toEqual({ answers: [seen[0]![1], seen[1]![1]], timedOut: false, dropped: false });
   });
 
   it("a link that drops mid-run reads as dropped, with what had answered kept", async () => {

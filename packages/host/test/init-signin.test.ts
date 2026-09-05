@@ -97,7 +97,7 @@ describe("the sign-in stage and the key sources", () => {
     const [r] = await run;
     expect(link.ptys.map(p => p.created)).toEqual([{ cols: 200, rows: 50, shell: "/bin/sh", env: { PS1: "", PS2: "" } }]);
     expect(link.ptys[0]!.writes.join("")).toBe(typed(CLAUDE_STATUS));
-    expect(checkScript([CLAUDE_STATUS], SH_FILE)[2]).toBe("[ -r /etc/profile.d/wsp-secrets.sh ] && . /etc/profile.d/wsp-secrets.sh");
+    expect(checkScript([CLAUDE_STATUS], SH_FILE)[4]).toBe("[ -r /etc/profile.d/wsp-secrets.sh ] && . /etc/profile.d/wsp-secrets.sh");
     expect(r).toEqual({ id: "logins/claude", label: "Claude Code login", state: "signed-in", note: "copied; API key from ~/.zshrc, set on the machine as a secret; claude auth status" });
   });
 

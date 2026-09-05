@@ -295,7 +295,7 @@ export interface ChecksRun {
 }
 
 const HEREDOC_END = "WSP_EOF";
-export const CHECK_RUN_LINE = 'sh "$d/run"; rm -rf "$d"; exit';
+export const CHECK_RUN_LINE = 'sh "$d/run"; exit';
 /** One pty.write carries at most this much: the line discipline's input buffer is 4096 bytes. */
 const WRITE_BYTES = 2000;
 const STATUS_LINE = /^WSP_STATUS (\d+) (\d+)$/;
@@ -304,12 +304,16 @@ const STATUS_LINE = /^WSP_STATUS (\d+) (\d+)$/;
  * secrets file only when it is there, since a `.` of a missing file is fatal in a POSIX sh (dash drops the
  * rest of the line, a non-interactive sh exits); starts every command at once, each in a background subshell
  * with stdin closed so none can wait on the terminal or stop the rest with an exit; and prints one marker
- * pair per command as it finishes. The exit code lands by rename, so a marker never reads a half-written file. */
+ * pair per command as it finishes. The exit code lands by rename, so a marker never reads a half-written file.
+ * The script removes its own dir when it ends, including on the hangup a killed pty sends, so a run the budget
+ * cut short leaves nothing on the machine. */
 export function checkScript(commands: readonly string[], secretsFile: string): string[] {
   const ids = commands.map((_, i) => String(i + 1));
   return [
-    `d=$(mktemp -d) && cat >"$d/run" <<'${HEREDOC_END}'`,
+    `d=$(mktemp -d "\${TMPDIR:-/tmp}/wsp-check.XXXXXX") && cat >"$d/run" <<'${HEREDOC_END}'`,
     `d=$(dirname "$0")`,
+    `trap 'rm -rf "$d"' EXIT`,
+    `trap exit HUP TERM`,
     `[ -r ${secretsFile} ] && . ${secretsFile}`,
     ...commands.map((c, i) => `{ ( ${c} ) >"$d/${ids[i]}" 2>&1 </dev/null; echo $? >"$d/${ids[i]}.tmp"; mv "$d/${ids[i]}.tmp" "$d/${ids[i]}.rc"; } &`),
     `n=0; while [ $n -lt ${ids.length} ]; do for i in ${ids.join(" ")}; do if [ -f "$d/$i.rc" ]; then printf 'WSP_STATUS %s %s\\n' "$i" "$(cat "$d/$i.rc")"; cat "$d/$i"; printf '\\nWSP_END %s\\n' "$i"; rm "$d/$i.rc"; n=$((n+1)); fi; done; sleep 0.2; done`,
@@ -338,19 +342,23 @@ export async function runChecks(link: PtyLink, o: ChecksOptions, onAnswer: (inde
   let done: (() => void) | undefined;
   const ended = new Promise<void>(r => (done = r));
   const settled = (): boolean => answers.every(a => a !== undefined);
-  /** Every complete marker pair in what arrived so far, each handed over once. */
+  /** Every complete marker pair in what arrived so far, each handed over once. The script prints the pairs one
+   * after another, so everything between a start marker and its end marker is that tool's output, whatever it
+   * looks like, and an open pair is the tail of the stream. */
   const read = (): void => {
     const lines = text.replace(/\r/g, "").split("\n");
     for (let i = 0; i < lines.length; i++) {
       const m = STATUS_LINE.exec(lines[i]!);
       if (!m) continue;
-      const index = Number(m[1]) - 1;
-      if (answers[index] !== undefined || index >= commands.length) continue;
       const end = lines.indexOf(`WSP_END ${m[1]}`, i + 1);
-      if (end < 0) continue;
-      const answer = { output: stripVTControlCharacters(lines.slice(i + 1, end).join("\n")).trim(), exitCode: Number(m[2]) };
-      answers[index] = answer;
-      onAnswer(index, answer);
+      if (end < 0) break;
+      const index = Number(m[1]) - 1;
+      if (index < commands.length && answers[index] === undefined) {
+        const answer = { output: stripVTControlCharacters(lines.slice(i + 1, end).join("\n")).trim(), exitCode: Number(m[2]) };
+        answers[index] = answer;
+        onAnswer(index, answer);
+      }
+      i = end;
     }
     if (settled()) done?.();
   };
