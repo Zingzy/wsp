@@ -1659,7 +1659,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           kind: spec.kind,
           baseTemplate: spec.template ?? "",
           setupSha: "",
-          createdAt: spec.labels?.["createdAt"] ?? new Date().toISOString(),
+          // The keyed create restamps the label after this spec was built; the machine carries the stamp the provider got.
+          createdAt: machine.labels?.["createdAt"] ?? spec.labels?.["createdAt"] ?? new Date().toISOString(),
           size: asked,
           firstLife: true,
           building: true,
@@ -1685,7 +1686,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       kind: builder.kind,
       baseTemplate: builder.baseTemplate,
       setupSha: builder.setupSha,
-      createdAt: builder.createdAt,
+      createdAt: placeholder?.record.createdAt ?? builder.createdAt,
       size: builder.size,
       firstLife: true,
       ...(builder.machine.streamUrl !== undefined ? { streamUrl: builder.machine.streamUrl } : {}),

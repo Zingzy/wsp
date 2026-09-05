@@ -2376,6 +2376,30 @@ describe("runtime golden import", () => {
     expect(done.heldBy).toMatchObject({ pid: process.pid });
   });
 
+  it("the record's createdAt is the label the provider got, as placeholder and as finished, even when the clock ticks between the stamp and the keyed create", async () => {
+    const backend = stubBackend();
+    backend.execImpl = dfOk;
+    const store = memoryStore();
+    // The attempt is keyed after this read, so the stamp the provider gets is later than the one in the spec.
+    const ticking: Store = {
+      ...store,
+      get: async (collection, id) => {
+        if (collection === "creates") vi.setSystemTime(Date.now() + 1);
+        return store.get(collection, id);
+      },
+    };
+    const rt = createRuntime({ backend, store: ticking, adapters: {}, goldenRecipe: recipeWith(importOf()) });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const b = await rt.golden.prepare();
+      const m = backend.machines[0]!;
+      const stored = (await store.get("builders", b.id)) as { createdAt: string };
+      expect(stored.createdAt).toBe(m.spec.labels!["createdAt"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("a placeholder whose holder died mid-setup is stale: never reused, stopped as recorded; a prepare that fails takes its placeholder with it", async () => {
     const backend = stubBackend();
     backend.execImpl = dfOk;
