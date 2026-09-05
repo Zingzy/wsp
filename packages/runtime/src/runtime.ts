@@ -836,6 +836,76 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     bus.on(type, e => idle.forget((e as { workspaceId: string }).workspaceId));
   }
 
+  type StoredBuilder = Omit<BuilderRecord, "size" | "firstLife"> & { size?: WorkspaceSize; firstLife?: boolean };
+  const lifeOf = (stored: StoredBuilder, machine: Machine, firstLife: boolean): LiveBuilder["life"] => {
+    // Only a label that names another state file makes it foreign; a view with no labels is ours.
+    const label = machine.labels?.[OWNER_LABEL];
+    // A hold from this host is checked against its pid; one from another host is trusted while its heartbeat
+    // is fresh, and a heartbeat that cannot be read counts as fresh: when unsure, the builder is held.
+    const holder = stored.heldBy;
+    const mine = holder !== undefined && holder.host === hostId && holder.pid === process.pid;
+    const beatAge = holder !== undefined ? Date.now() - Date.parse(holder.heartbeat) : Number.NaN;
+    const fresh = Number.isNaN(beatAge) || beatAge < HELD_TTL_MS;
+    const held = holder !== undefined && !mine && fresh && (holder.host !== hostId || pidAlive(holder.pid));
+    // A placeholder its dead holder left mid-setup never finished its stages: stale, whatever the marker says.
+    return label !== undefined && label !== owner ? "foreign" : held ? "held" : !firstLife || stored.building === true ? "stale" : "reusable";
+  };
+  const liveOf = (record: BuilderRecord, machine: Machine): LiveBuilder => ({
+    record,
+    builder: {
+      machine, kind: record.kind, baseTemplate: record.baseTemplate, setupSha: record.setupSha, createdAt: record.createdAt, firstLife: record.firstLife, size: record.size,
+      ...(record.import !== undefined ? { import: record.import } : {}),
+    },
+    life: lifeOf(record, machine, record.firstLife),
+  });
+  /** A stored record this process has no entry for yet; its machine is fetched once, here. */
+  const admit = async (stored: StoredBuilder): Promise<void> => {
+    const machine = await backend.get(stored.id).catch((e: unknown) => {
+      if ((e as { kind?: string }).kind === "missing") return undefined;
+      throw e;
+    });
+    if (!machine) {
+      await store.delete(BUILDERS, stored.id);
+      return;
+    }
+    // The view get() fetched is read once: a second read would reset the provider's idle timer again.
+    const seen = machine.seen;
+    const state = seen?.state ?? (await machine.state());
+    // A machine found paused was paused: that alone clears the marker for good. Nothing is read from the
+    // provider's createdAt: on a running machine never paused, resumed or exec'd it read +6.4 s at two minutes
+    // and +306 s at ten (canary, 2026-09-04 UTC), so it moves with no lifecycle event and decides nothing.
+    const firstLife = stored.firstLife === true && state === "running";
+    const record: BuilderRecord = { ...stored, firstLife, size: stored.size ?? sizeBuilt(await shapeOf(machine), backend.pricing.defaultSize) };
+    if (stored.firstLife === true && !firstLife) await store.put(BUILDERS, record.id, record);
+    builders.set(record.id, liveOf(record, machine));
+    if (stored.sealed !== undefined) armGrace(record.id, stored.sealed.at);
+  };
+  /** The store is the truth across processes, and another wsp (an init beside this host, a second host) writes it
+   * after this one hydrated: every decision that kills or reuses a builder reads it first. A row this process has
+   * no entry for is admitted, a changed hold or marker re-derives the life, a row another process dropped goes with
+   * it. Own records are this process's and are not re-read; no machine is re-read either, so the first-life marker
+   * only ever drops here. Passes overlap (a sweep beside a prepare): the newest listing wins, so a pass that finds
+   * a newer one started after its own listing applies nothing, drops nothing, and hands its caller the newer pass. */
+  let passes = 0;
+  let latest: Promise<void> = Promise.resolve();
+  const refreshBuilders = (): Promise<void> => (latest = refreshNow(++passes));
+  const refreshNow = async (pass: number): Promise<void> => {
+    const rows = (await store.list(BUILDERS)) as StoredBuilder[];
+    const seen = new Set<string>();
+    for (const stored of rows) {
+      if (pass !== passes) return latest;
+      seen.add(stored.id);
+      const current = builders.get(stored.id);
+      if (current === undefined) await admit(stored);
+      else if (current.life !== "own") {
+        const record: BuilderRecord = { ...stored, firstLife: stored.firstLife === true && current.builder.firstLife, size: stored.size ?? current.record.size };
+        Object.assign(current, liveOf(record, current.builder.machine));
+      }
+    }
+    if (pass !== passes) return latest;
+    for (const [id, b] of [...builders]) if (!seen.has(id) && b.life !== "own") builders.delete(id);
+  };
+
   let hydrated: Promise<void> | undefined;
   const ready = (): Promise<void> => {
     hydrated ??= (async () => {
@@ -865,45 +935,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const t = raw as TranscriptRecord;
         transcripts.set(t.workspaceId, t.events);
       }
-      for (const raw of await store.list(BUILDERS)) {
-        const stored = raw as Omit<BuilderRecord, "size" | "firstLife"> & { size?: WorkspaceSize; firstLife?: boolean };
-        const machine = await backend.get(stored.id).catch((e: unknown) => {
-          if ((e as { kind?: string }).kind === "missing") return undefined;
-          throw e;
-        });
-        if (!machine) {
-          await store.delete(BUILDERS, stored.id);
-          continue;
-        }
-        // The view get() fetched is read once: a second read would reset the provider's idle timer again.
-        const seen = machine.seen;
-        const state = seen?.state ?? (await machine.state());
-        // A machine found paused was paused: that alone clears the marker for good. Nothing is read from the
-        // provider's createdAt: on a running machine never paused, resumed or exec'd it read +6.4 s at two minutes
-        // and +306 s at ten (canary, 2026-09-04 UTC), so it moves with no lifecycle event and decides nothing.
-        const firstLife = stored.firstLife === true && state === "running";
-        const record: BuilderRecord = { ...stored, firstLife, size: stored.size ?? sizeBuilt(await shapeOf(machine), backend.pricing.defaultSize) };
-        if (stored.firstLife === true && !firstLife) await store.put(BUILDERS, record.id, record);
-        // Only a label that names another state file makes it foreign; a view with no labels is ours.
-        const label = machine.labels?.[OWNER_LABEL];
-        // A hold from this host is checked against its pid; one from another host is trusted while its heartbeat
-        // is fresh, and a heartbeat that cannot be read counts as fresh: when unsure, the builder is held.
-        const holder = stored.heldBy;
-        const mine = holder !== undefined && holder.host === hostId && holder.pid === process.pid;
-        const beatAge = holder !== undefined ? Date.now() - Date.parse(holder.heartbeat) : Number.NaN;
-        const fresh = Number.isNaN(beatAge) || beatAge < HELD_TTL_MS;
-        const held = holder !== undefined && !mine && fresh && (holder.host !== hostId || pidAlive(holder.pid));
-        builders.set(record.id, {
-          record,
-          builder: {
-            machine, kind: record.kind, baseTemplate: record.baseTemplate, setupSha: record.setupSha, createdAt: record.createdAt, firstLife, size: record.size,
-            ...(record.import !== undefined ? { import: record.import } : {}),
-          },
-          // A placeholder its dead holder left mid-setup never finished its stages: stale, whatever the marker says.
-          life: label !== undefined && label !== owner ? "foreign" : held ? "held" : !firstLife || stored.building === true ? "stale" : "reusable",
-        });
-        if (stored.sealed !== undefined) armGrace(record.id, stored.sealed.at);
-      }
+      for (const raw of await store.list(BUILDERS)) await admit(raw as StoredBuilder);
     })();
     return hydrated;
   };
@@ -951,6 +983,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (!isCapRefusal(e)) throw e;
         let refusal: unknown = e;
         let made = false;
+        await refreshBuilders();
         for (const x of [...builders.values()].filter(x => (x.life === "own" || x.life === "reusable") && x.record.sealed !== undefined)) {
           const stopped = `Stopped the builder kept from golden v${x.record.sealed!.version} (${x.record.id}) to make room at the machine cap.`;
           graceTimers.get(x.record.id)?.();
@@ -1266,6 +1299,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * timers falling due together, or a timer beside a sweep, must not both kill and forget the same builder. */
   const expireGrace = (): Promise<{ reaped: ReapedMachine[]; failed: ReapFailure[] }> => (expiring ??= expireGraceNow().finally(() => (expiring = undefined)));
   const expireGraceNow = async (): Promise<{ reaped: ReapedMachine[]; failed: ReapFailure[] }> => {
+    await refreshBuilders();
     const reaped: ReapedMachine[] = [];
     const failed: ReapFailure[] = [];
     for (const b of [...builders.values()]) {
@@ -1483,6 +1517,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
       const stage = stageOf(name);
       const run = claiming(async b => {
+        await refreshBuilders();
         // A first-life builder carrying the same ticks is attached to instead of
         // booting a second one, whichever process made it; the stages skip on its
         // ledger. A stale, foreign or held record is never reused, and a recipe with no
@@ -1628,6 +1663,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // stops as unfinished; the seal re-arms the window.
       const swept = await expireGrace();
       for (const f of swept.failed) stage("creating", `an earlier kept builder ${f.id} was not stopped (${f.message})`);
+      await refreshBuilders();
       const kept = [...builders.values()].find(x => (x.life === "own" || x.life === "reusable") && x.record.name === name && x.record.sealed?.version === head.version && inWindow(x.record.sealed.at));
       let entry: LiveBuilder | undefined;
       if (kept !== undefined) {
@@ -1736,6 +1772,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async kill(builderId) {
       await ready();
+      await refreshBuilders();
       const entry = builders.get(builderId);
       if (!entry) throw new Error(`no such builder: ${builderId}`);
       // A record its dead holder left mid-setup is stopped here as the sweep would stop it; only seal and reach need finished stages.
@@ -1788,6 +1825,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     status,
     reap: async olderThanMs => {
       await ready();
+      await refreshBuilders();
       // A stale record can never seal; stopping it is the only thing that ends its bill. A reusable one no
       // process is using dies at six hours by our createdAt label, or at once when no age can be read: every
       // get(id) on it resets the provider's rolling idle timer (measured), so the kill it was created with

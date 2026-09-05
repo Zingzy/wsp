@@ -380,8 +380,17 @@ function stopOnSignals(handle: HostHandle, io: CliIO): void {
   process.once("SIGTERM", stop);
 }
 
+/** Init ends by starting a host on this state, which the lock would refuse only after the builder is booted and billed. */
+function initRefusal(lock: HostLock, statePath: string): string {
+  return `wsp init: a wsp host (pid ${lock.pid}) is already serving ${statePath}. Stop it first (Ctrl-C in its terminal, or kill ${lock.pid}), then run wsp init again, or point --state at a different file.`;
+}
+
 async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: string }, flags: { yes: boolean; manifest?: string }): Promise<number> {
-  refuseIfServed(lockPathFor(opts.statePath), opts.statePath);
+  const held = servingHost(opts.statePath);
+  if (held !== undefined) {
+    io.error(initRefusal(held, opts.statePath));
+    return 1;
+  }
   const screen = terminalInitIO();
   opening(screen, { command: "init", version: VERSION, yes: flags.yes });
   const keys = await loadKeys(io, undefined, { anthropic: false });
