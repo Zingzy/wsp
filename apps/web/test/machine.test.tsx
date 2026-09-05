@@ -6,12 +6,14 @@ import type {
   EventUnion,
   SnapshotLineage,
   SnapshotRollbackResult,
+  SysSample,
   WorkspacePhase,
   WorkspaceSize,
   WorkspaceStatus,
   WorkspaceView,
 } from "@wsp/protocol";
 import { MachineSurface } from "../src/components/machine/MachineSurface.js";
+import { getLive, resetLive } from "../src/machine/live.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 
@@ -91,6 +93,7 @@ function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS,
 }
 
 beforeEach(() => {
+  resetLive();
   useStore.setState({
     api: null,
     capabilities: null,
@@ -517,5 +520,135 @@ describe("zombie", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(rebuild).not.toHaveBeenCalled();
+  });
+});
+
+const GiB = 1024 ** 3;
+const sysSample = (i: number, over: Partial<Pick<SysSample, "cpu" | "disk">> = {}): SysSample => ({
+  type: "sys.sample",
+  cpu: 33.3,
+  load1: 0.42,
+  mem: { used: 1 * GiB, total: 4 * GiB },
+  disk: { used: 20 * GiB, total: 100 * GiB },
+  at: 1_757_000_000_000 + i * 2_000,
+  ...over,
+});
+const feed = (id: string, samples: SysSample[], reach: "live" | "connecting" = "live"): void => {
+  act(() => {
+    getLive(id).feedStatus(reach);
+    for (const s of samples) getLive(id).feedSample(s);
+  });
+};
+const liveRow = (k: string): HTMLElement => document.querySelector<HTMLElement>(`[data-live-row="${k}"]`)!;
+const valueSlot = (k: string): HTMLElement => document.querySelector<HTMLElement>(`[data-k="${k}"]`)!;
+
+describe("live", () => {
+  it("renders cpu, memory and disk rows from the sample stream as lines with the current value at the right edge", async () => {
+    await mount([view("ws_a", "api")]);
+    feed("ws_a", [0, 1, 2, 3, 4].map(i => sysSample(i)));
+    await waitFor(() => expect(fact("cpu")).toBe("33%"));
+    expect(fact("mem")).toBe("1.0 of 4.0 GB");
+    expect(fact("disk")).toBe("20.0 of 100.0 GB");
+    expect(screen.getByText("load 0.42")).toBeDefined();
+    for (const k of ["cpu", "mem", "disk"]) {
+      const row = liveRow(k);
+      expect(row.querySelectorAll("rect")).toHaveLength(0);
+      const line = row.querySelector("[data-live-line]")!;
+      expect(line.tagName.toLowerCase()).toBe("path");
+      expect(line.getAttribute("d")).toMatch(/^M[^ML]+(L[^ML]+){4}$/);
+      expect(row.hasAttribute("data-stale")).toBe(false);
+    }
+    expect(valueSlot("cpu").className).toMatch(/tabular-nums/);
+    expect(valueSlot("cpu").className).toMatch(/font-mono/);
+  });
+
+  it("keeps the last sixty samples: the newest sits at the right edge and the oldest is dropped", async () => {
+    await mount([view("ws_a", "api")]);
+    feed("ws_a", Array.from({ length: 70 }, (_, i) => sysSample(i, { cpu: i })));
+    await waitFor(() => expect(fact("cpu")).toBe("69%"));
+    const d = liveRow("cpu").querySelector("[data-live-line]")!.getAttribute("d")!;
+    expect(d.split("L")).toHaveLength(60);
+    expect(d).toMatch(/L100\.00 [\d.]+$/);
+  });
+
+  it("a napping workspace keeps its last values dim under the word napping, and nothing changes height", async () => {
+    await mount([view("ws_a", "api", "napping")]);
+    feed("ws_a", [0, 1, 2].map(i => sysSample(i)), "connecting");
+    await waitFor(() => expect(fact("cpu")).toBe("napping"));
+    expect(fact("mem")).toBe("napping");
+    expect(fact("disk")).toBe("napping");
+    expect(screen.queryByText("load 0.42")).toBeNull();
+    for (const k of ["cpu", "mem", "disk"]) {
+      const row = liveRow(k);
+      expect(row.getAttribute("data-stale")).toBe("napping");
+      expect(row.className).toMatch(/\bh-7\b/);
+      expect(row.querySelector("[data-live-line]")!.getAttribute("d")).toMatch(/^M[^ML]+(L[^ML]+){2}$/);
+      expect(row.querySelector("[data-live-line]")!.getAttribute("class")).toMatch(/muted-foreground/);
+      expect(valueSlot(k).className).toMatch(/muted-foreground/);
+    }
+  });
+
+  it("a running workspace whose daemon link is down says unreachable; before the first sample it says pending", async () => {
+    await mount([view("ws_a", "api")]);
+    expect(fact("cpu")).toBe("unreachable");
+    expect(liveRow("cpu").getAttribute("data-stale")).toBe("unreachable");
+    feed("ws_a", []);
+    await waitFor(() => expect(fact("cpu")).toBe("pending"));
+    expect(liveRow("cpu").hasAttribute("data-stale")).toBe(false);
+    feed("ws_a", [sysSample(0)]);
+    await waitFor(() => expect(fact("cpu")).toBe("33%"));
+    feed("ws_a", [], "connecting");
+    await waitFor(() => expect(fact("cpu")).toBe("unreachable"));
+    expect(liveRow("cpu").querySelector("[data-live-line]")).not.toBeNull();
+  });
+
+  it("the disk number takes the tier colour at 50, 65 and 75 percent; cpu and memory stay neutral", async () => {
+    await mount([view("ws_a", "api")]);
+    const tone = (k: string): string => valueSlot(k).className;
+    const disk = (pct: number): SysSample => sysSample(0, { cpu: 95, disk: { used: pct * GiB, total: 100 * GiB } });
+    feed("ws_a", [disk(49.9)]);
+    await waitFor(() => expect(fact("disk")).toBe("49.9 of 100.0 GB"));
+    expect(tone("disk")).not.toMatch(/warning|caution|destructive/);
+    feed("ws_a", [disk(50)]);
+    await waitFor(() => expect(fact("disk")).toBe("50.0 of 100.0 GB"));
+    expect(tone("disk")).toMatch(/text-warning-foreground/);
+    feed("ws_a", [disk(65)]);
+    await waitFor(() => expect(fact("disk")).toBe("65.0 of 100.0 GB"));
+    expect(tone("disk")).toMatch(/text-caution-foreground/);
+    feed("ws_a", [disk(75)]);
+    await waitFor(() => expect(fact("disk")).toBe("75.0 of 100.0 GB"));
+    expect(tone("disk")).toMatch(/text-destructive-foreground/);
+    expect(fact("cpu")).toBe("95%");
+    expect(tone("cpu")).not.toMatch(/warning|caution|destructive/);
+    expect(tone("mem")).not.toMatch(/warning|caution|destructive/);
+  });
+
+  it("every row is the same fixed height in every state", async () => {
+    await mount([view("ws_a", "api")]);
+    const heights = (): string[] => ["cpu", "mem", "disk"].map(k => liveRow(k).className.match(/\bh-\S+/)![0]);
+    expect(heights()).toEqual(["h-7", "h-7", "h-7"]);
+    feed("ws_a", [sysSample(0), sysSample(1)]);
+    await waitFor(() => expect(fact("cpu")).toBe("33%"));
+    expect(heights()).toEqual(["h-7", "h-7", "h-7"]);
+    feed("ws_a", [], "connecting");
+    await waitFor(() => expect(fact("cpu")).toBe("unreachable"));
+    expect(heights()).toEqual(["h-7", "h-7", "h-7"]);
+  });
+
+  it("hovering a sparkline reads that sample into the value slot; leaving restores the current one", async () => {
+    await mount([view("ws_a", "api")]);
+    feed("ws_a", [sysSample(0, { cpu: 10 }), sysSample(1, { cpu: 50 }), sysSample(2, { cpu: 90 })]);
+    await waitFor(() => expect(fact("cpu")).toBe("90%"));
+    const svg = liveRow("cpu").querySelector<SVGSVGElement>("svg")!;
+    svg.getBoundingClientRect = () => ({ left: 0, width: 600, top: 0, height: 16, right: 600, bottom: 16, x: 0, y: 0, toJSON: () => ({}) });
+    // Three of sixty slots: the last three percent of the width, hovering the middle one.
+    fireEvent.mouseMove(svg, { clientX: 600 * (58 / 59) });
+    expect(fact("cpu")).toBe("50%");
+    expect(svg.querySelector("[data-live-hover]")).not.toBeNull();
+    fireEvent.mouseMove(svg, { clientX: 10 });
+    expect(fact("cpu")).toBe("90%");
+    fireEvent.mouseLeave(svg);
+    expect(fact("cpu")).toBe("90%");
+    expect(svg.querySelector("[data-live-hover]")).toBeNull();
   });
 });

@@ -72,3 +72,14 @@ export {
   type GitDiffScope,
 } from "./git-ops.js";
 export { localhostPortOf, localhostPortsIn, settledLocalPorts } from "./local-urls.js";
+export {
+  SysSampler,
+  procSysSource,
+  parseProcStat,
+  parseMeminfo,
+  parseLoadavg,
+  cpuPercent,
+  type CpuTimes,
+  type SysReadings,
+  type SysSource,
+} from "./sys.js";

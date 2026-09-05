@@ -13,6 +13,7 @@ import { ProcessManifest, type ManifestOptions } from "./manifest.js";
 import { linuxModeProbe, ModeWatcher, type ModeProbe } from "./mode.js";
 import { PortWatcher, procNetTcpSource, type PortOpenEvent, type PortSnapshotSource } from "./ports.js";
 import { PtyManager } from "./pty-manager.js";
+import { procSysSource, SysSampler, type SysSource } from "./sys.js";
 import { localhostPortOf, settledLocalPorts } from "./local-urls.js";
 import { CallbackSpotter, TerminalUrlScanner, callbackPortOf, listenOpenSocket, type OpenSocket } from "./relay.js";
 import { OpError, resolveInside } from "./workspace-paths.js";
@@ -40,6 +41,8 @@ export interface DaemonOptions {
   manifest?: ManifestOptions;
   modeProbe?: ModeProbe;
   modeIntervalMs?: number;
+  sysSource?: SysSource;
+  sysIntervalMs?: number;
   /** Every fs.* and git.* path must resolve inside this directory; HOME by default. */
   root?: string;
   /** Unix socket the browser shim posts URLs to; absent means no shim socket (local and test daemons). */
@@ -122,6 +125,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
   // Watchers are created on first watch op so darwin tests never touch /proc.
   let portWatcher: PortWatcher | null = null;
   let inboxWatcher: InboxWatcher | null = null;
+  let sysSampler: SysSampler | null = null;
 
   const getPortWatcher = () => {
     if (!portWatcher) {
@@ -145,13 +149,20 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
     return inboxWatcher;
   };
 
+  const root = resolve(opts.root ?? process.env["HOME"] ?? homedir());
+  const getSysSampler = () => {
+    sysSampler ??= new SysSampler(opts.sysSource ?? procSysSource(root), {
+      ...(opts.sysIntervalMs !== undefined ? { intervalMs: opts.sysIntervalMs } : {}),
+    });
+    return sysSampler;
+  };
+
   // Inert until a pty.attach; the Linux-only default probe fails silently on
   // darwin, so attach tests without a fake probe still pass.
   const modes = new ModeWatcher(opts.modeProbe ?? linuxModeProbe(), {
     ...(opts.modeIntervalMs !== undefined ? { intervalMs: opts.modeIntervalMs } : {}),
   });
 
-  const root = resolve(opts.root ?? process.env["HOME"] ?? homedir());
   const wss = new WebSocketServer({ host: opts.host ?? DEFAULT_HOST, port: opts.port ?? DEFAULT_PORT });
   // Armed before any await: the listening event fires as soon as the loop turns.
   const listening = new Promise<void>((resolve, reject) => {
@@ -177,7 +188,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
       else if (port === undefined) spotter.spot(p => broadcast({ type: "callback.port", port: p }));
     },
   };
-  const ctx: Ctx = { ptys, manifest, modes, root, getPortWatcher, getInboxWatcher, spotter, broadcast };
+  const ctx: Ctx = { ptys, manifest, modes, root, getPortWatcher, getInboxWatcher, getSysSampler, spotter, broadcast };
   let openSocket: OpenSocket | undefined;
   if (opts.openSocketPath !== undefined) {
     try {
@@ -274,6 +285,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
     close: async () => {
       portWatcher?.stop();
       inboxWatcher?.stop();
+      sysSampler?.stop();
       modes.stop();
       await openSocket?.close();
       for (const ws of wss.clients) ws.terminate();
@@ -290,6 +302,7 @@ interface Ctx {
   root: string;
   getPortWatcher(): PortWatcher;
   getInboxWatcher(): InboxWatcher;
+  getSysSampler(): SysSampler;
   spotter: CallbackSpotter;
   broadcast(event: Record<string, unknown>): void;
 }
@@ -457,6 +470,11 @@ async function handle(ws: WebSocket, state: ConnState, ctx: Ctx, msg: Request): 
       const files = await ctx.getInboxWatcher().rescan();
       for (const e of files) push(ws, { ...e });
       reply(ws, msg.id, { count: files.length });
+      return;
+    }
+    case "sys.watch": {
+      state.detaches.push(ctx.getSysSampler().subscribe(s => push(ws, s)));
+      reply(ws, msg.id, {});
       return;
     }
     case "fs.list": {

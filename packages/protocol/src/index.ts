@@ -627,6 +627,10 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("manifest.restartScript") }),
   z.object({ id: reqId, op: z.literal("inbox.watch") }),
   z.object({ id: reqId, op: z.literal("inbox.rescan") }),
+  /** Streams sys.sample events to this socket every two seconds until it
+   * closes. One sampler serves every subscriber and stops with the last one;
+   * the first sample lands one interval after the reply, since cpu is a delta. */
+  z.object({ id: reqId, op: z.literal("sys.watch") }),
   z.object({ id: reqId, op: z.literal("ping") }),
   /** Lists one directory's direct children, each request under its own entry
    * cap. Paths are relative to the daemon's workspace root (HOME unless
@@ -674,6 +678,20 @@ export const DaemonErrorResponse = z.object({
 });
 export const DaemonResponse = z.union([DaemonOkResponse, DaemonErrorResponse]);
 export type DaemonResponse = z.infer<typeof DaemonResponse>;
+
+/** One reading of the guest: cpu is busy time over the interval across all
+ * cores (0 to 100), load1 the one-minute load average, mem and disk in bytes
+ * (mem used is total minus available; disk is the filesystem under the
+ * daemon's root), at epoch milliseconds. */
+export const SysSample = z.object({
+  type: z.literal("sys.sample"),
+  cpu: z.number(),
+  load1: z.number(),
+  mem: z.object({ used: z.number(), total: z.number() }),
+  disk: z.object({ used: z.number(), total: z.number() }),
+  at: z.number(),
+});
+export type SysSample = z.infer<typeof SysSample>;
 
 export const DaemonEvent = z.discriminatedUnion("type", [
   /** The first frame after the auth reply: root is the
@@ -723,6 +741,7 @@ export const DaemonEvent = z.discriminatedUnion("type", [
    * with an explicit port (http://localhost:8123/, 127.0.0.1:8123): the port a
    * person would click. Only the port travels; the host forwards it here. */
   z.object({ type: z.literal("localhost.url"), port: RelayPort }),
+  SysSample,
 ]);
 export type DaemonEvent = z.infer<typeof DaemonEvent>;
 

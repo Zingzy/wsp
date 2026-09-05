@@ -197,6 +197,7 @@ describe("daemon WS server", () => {
       await forbidden("fs.list", { path: "." });
       await forbidden("git.status", { cwd: "." });
       await forbidden("ports.watch");
+      await forbidden("sys.watch");
       await forbidden("manifest.get");
       await forbidden("tunnel.open", { tunnelId: "other", port: guestPort + 1 });
       expect(daemon.ptys.list().length).toBe(before);

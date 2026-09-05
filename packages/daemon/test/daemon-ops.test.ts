@@ -55,6 +55,7 @@ async function connect(port: number): Promise<{
 
 let daemon: DaemonHandle;
 let snapshot: ListeningPort[] = [];
+let sysReads = 0;
 
 afterAll(async () => {
   await daemon?.close();
@@ -69,6 +70,11 @@ describe("daemon ops: ports, manifest, inbox", () => {
       token: TOKEN,
       portsSource: async () => snapshot,
       portsIntervalMs: 25,
+      sysSource: async () => {
+        sysReads++;
+        return { cpu: { idle: sysReads * 30, total: sysReads * 40 }, load1: 1.25, mem: { used: 2_000, total: 8_000 }, disk: { used: 30_000, total: 100_000 } };
+      },
+      sysIntervalMs: 20,
       inboxDir,
       inboxQuietMs: 150,
       inboxPollMs: 30,
@@ -87,6 +93,33 @@ describe("daemon ops: ports, manifest, inbox", () => {
     expect(c.events).toContainEqual({ type: "port.open", port: 8080, pid: 123, process: "node", loopback: false });
     expect(c.events).toContainEqual({ type: "port.close", port: 8080 });
     c.close();
+  });
+
+  it("sys.watch streams one sampler's samples to every subscriber and stops it when the last socket closes", async () => {
+    expect(sysReads).toBe(0);
+    const a = await connect(daemon.port);
+    const b = await connect(daemon.port);
+    expect((await a.request("sys.watch")).ok).toBe(true);
+    expect((await b.request("sys.watch")).ok).toBe(true);
+    const deadline = Date.now() + 2000;
+    while ((a.events.filter(e => e.type === "sys.sample").length < 2 || b.events.filter(e => e.type === "sys.sample").length < 2) && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 10));
+    }
+    const sample = a.events.find(e => e.type === "sys.sample")!;
+    expect(sample).toMatchObject({ type: "sys.sample", cpu: 25, load1: 1.25, mem: { used: 2_000, total: 8_000 }, disk: { used: 30_000, total: 100_000 } });
+    expect(typeof sample["at"]).toBe("number");
+    // Both sockets saw the same stream, so the daemon ran one sampler, not one per socket.
+    expect(b.events).toContainEqual(sample);
+    a.close();
+    await new Promise(r => setTimeout(r, 60));
+    const readsWithOneLeft = sysReads;
+    await new Promise(r => setTimeout(r, 60));
+    expect(sysReads).toBeGreaterThan(readsWithOneLeft);
+    b.close();
+    await new Promise(r => setTimeout(r, 60));
+    const readsAfterLast = sysReads;
+    await new Promise(r => setTimeout(r, 80));
+    expect(sysReads).toBe(readsAfterLast);
   });
 
   it("manifest.record/get/restartScript round-trip over the wire", async () => {

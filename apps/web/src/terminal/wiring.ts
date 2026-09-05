@@ -8,6 +8,7 @@
 // socket, so every live transition asks again.
 import { getBrowser } from "../browser/model.js";
 import { provideDaemonRoot, provideDaemonWire } from "../files/wire.js";
+import { getLive } from "../machine/live.js";
 import type { useStore } from "../protocol/store.js";
 import { useSignInStore } from "../shell/signInStore.js";
 import { connectDaemonLink, type DaemonLink, type DaemonLinkOptions } from "./daemon-link.js";
@@ -68,20 +69,26 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
             if (e.type === "port.open" || e.type === "port.close") browser.feedEvent({ ...e, workspaceId: w.id });
             else if (e.type === "browser.open") useSignInStore.getState().announce(w.id, e.url);
             else if (e.type === "daemon.hello") provideDaemonRoot(w.id, e.root);
+            else if (e.type === "sys.sample") getLive(w.id).feedSample(e);
             else wt.feedEvent(e);
           },
           // "dead" is the link we closed on purpose; the model hears "connecting" instead.
           onStatus: s => {
             if (s === "live") {
               link.request("ports.watch").then(r => browser.syncPorts(r["ports"]), () => {});
+              link.request("sys.watch").catch(() => {});
             }
-            if (s !== "dead") wt.feedStatus(s);
+            if (s !== "dead") {
+              wt.feedStatus(s);
+              getLive(w.id).feedStatus(s);
+            }
           },
         });
         entry.link = link;
       } else if (w.phase !== "running" && entry.link) {
         unlink(entry);
         wt.feedStatus("connecting");
+        getLive(w.id).feedStatus("connecting");
       }
     }
     for (const [id, entry] of wired) {
