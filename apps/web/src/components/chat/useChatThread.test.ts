@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { SessionEvent } from "@wsp/protocol";
 import { CHAT_STREAM, CHAT_WS } from "../../../test/fixtures/chat-stream";
-import { deriveChatThread, reloadTranscript, stabilizeEntries, type StaleTurn, type ThreadState } from "./useChatThread";
+import { deriveChatThread, reduceEvent, reloadTranscript, stabilizeEntries, type StaleTurn, type ThreadState } from "./useChatThread";
 
 const T0 = "2026-09-01T02:00:00.000Z";
 const state = (events: ReadonlyArray<SessionEvent>, extra: Partial<ThreadState> = {}): ThreadState => ({
@@ -165,5 +165,33 @@ describe("reloadTranscript", () => {
     const pending = state([], { fresh: true, left: undefined, stale: { kind: "pending-send" } });
     expect(reloadTranscript(pending, B_RUNNING, T0)).toEqual({ ...pending, stale: B_TURN });
     expect(reloadTranscript(pending, B_DONE, T0)).toEqual(pending);
+  });
+});
+
+describe("reduceEvent", () => {
+  const A = CHAT_STREAM.map(e => ({ ...e, threadId: "thr_a" }));
+  const A_RUNNING = A.slice(0, 3);
+  const A_TURN: StaleTurn = { kind: "turn", turnId: "turn_0001", sessionId: "sess_0001" };
+  const b = { workspaceId: CHAT_WS, sessionId: "sess_0002", turnId: "turn_0002", threadId: "thr_b" };
+  const B_START: SessionEvent = { type: "session.start", ...b, prompt: "start over" };
+  const B_DELTA: SessionEvent = { type: "session.delta", ...b, kind: "text", text: "Fresh start." };
+
+  it("drops an event from another thread once the held events carry a thread id; an empty or unstamped state takes any", () => {
+    const held = state(A_RUNNING);
+    expect(reduceEvent(held, B_DELTA, T0)).toBe(held);
+    expect(reduceEvent(held, A[3]!, T0).events).toEqual([...A_RUNNING, A[3]]);
+    expect(reduceEvent(state([]), B_START, T0).events).toEqual([B_START]);
+    expect(reduceEvent(state(CHAT_STREAM.slice(0, 3)), B_DELTA, T0).events).toHaveLength(4);
+  });
+
+  it("while fresh, the next session.start opens the thread and the left turn's end still clears the stale record", () => {
+    const fresh = state([], { fresh: true, left: "thr_a", stale: A_TURN });
+    const opened = reduceEvent(fresh, B_START, T0);
+    expect(opened.events).toEqual([B_START]);
+    expect(opened.fresh).toBe(false);
+    expect(reduceEvent(opened, A[2]!, T0)).toBe(opened);
+    const ended = reduceEvent(opened, A.at(-1)!, T0);
+    expect(ended.stale).toBeNull();
+    expect(ended.events).toEqual([B_START]);
   });
 });

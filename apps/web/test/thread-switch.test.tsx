@@ -169,6 +169,44 @@ describe("switching threads while a turn runs", () => {
     expect(center().getByRole("button", { name: "Turn in flight" })).toBeDefined();
   });
 
+  it("a send from an older thread makes it the latest; the latest view then keeps the still running thread's deltas out", async () => {
+    const { emit, started } = await mount();
+    fireEvent.click(threadRow("make me a simple server"));
+    await center().findByText("Added GET /health.");
+    await typeInto(composerEditor(), "add a readiness route too");
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    const A2 = { ...A, turnId: "turn_a2" };
+    emit({ type: "session.start", ...A2, at: T0 + 90_000, prompt: "add a readiness route too" });
+    emit({ type: "session.delta", ...A2, at: T0 + 90_300, kind: "text", text: "Adding GET /ready." });
+    await center().findByText("Adding GET /ready.");
+    fireEvent.click(sidebar().getByText("api").closest<HTMLElement>("[data-sidebar-row]")!);
+    expect(useStore.getState()).toMatchObject({ selectedId: WS, selectedThreadId: null });
+    expect(threadRow("make me a simple server").getAttribute("data-active")).toBe("false");
+    await center().findByText("Adding GET /ready.");
+    expect(center().queryByText("Checking the keychain.")).toBeNull();
+    emit({ type: "session.delta", ...B, at: T0 + 91_000, kind: "text", text: " Found it in the keychain." });
+    expect(center().queryByText(/Found it in the keychain/)).toBeNull();
+    emit({ type: "session.delta", ...A2, at: T0 + 91_300, kind: "text", text: " Wiring it in." });
+    await center().findByText(/Adding GET \/ready\. Wiring it in\./);
+    expect(within(threadRow("do you have access")).getByLabelText("Working")).toBeDefined();
+  });
+
+  it("after a reload with two threads running, the latest view shows the last started one and drops the other's deltas", async () => {
+    const A2 = { ...A, turnId: "turn_a2" };
+    const RUNNING_A2: SessionEvent[] = [
+      { type: "session.start", ...A2, at: T0 + 90_000, prompt: "add a readiness route too" },
+      { type: "session.delta", ...A2, at: T0 + 90_300, kind: "text", text: "Adding GET /ready." },
+    ];
+    const rows: SessionView[] = [ROWS[0]!, ROWS[1]!, { id: "s_a2", workspaceId: WS, harness: "claude", status: "running", prompt: "add a readiness route too", startedAt: T0 + 90_000, threadId: "thr_a" }];
+    const { emit } = await mount(fixtureApi([...SETTLED_A, ...RUNNING_B, ...RUNNING_A2], rows), "Adding GET /ready.");
+    expect(center().queryByText("Checking the keychain.")).toBeNull();
+    emit({ type: "session.delta", ...B, at: T0 + 91_000, kind: "text", text: " Found it in the keychain." });
+    expect(center().queryByText(/Found it in the keychain/)).toBeNull();
+    emit({ type: "session.delta", ...A2, at: T0 + 91_300, kind: "text", text: " Wiring it in." });
+    await center().findByText(/Adding GET \/ready\. Wiring it in\./);
+  });
+
   it("a new thread asked for from an older thread's view unpins it and opens as the workspace's latest", async () => {
     const { emit } = await mount();
     fireEvent.click(threadRow("make me a simple server"));

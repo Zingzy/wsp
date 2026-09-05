@@ -203,6 +203,15 @@ describe("rows from the fixture wire", () => {
     expect(rowOf("hello").getAttribute("data-active")).toBe("false");
   });
 
+  it("clicking a thread row without a thread id selects its workspace with no thread pinned", async () => {
+    await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_b", { prompt: "before threads" })]), "api");
+    await waitFor(() => expect(screen.getByText("before threads")).toBeDefined());
+    fireEvent.click(rowOf("before threads"));
+    expect(useStore.getState()).toMatchObject({ selectedId: "ws_b", selectedThreadId: null });
+    expect(rowOf("web").getAttribute("data-active")).toBe("true");
+    expect(rowOf("before threads").getAttribute("data-active")).toBe("false");
+  });
+
   it("an empty fleet says so; a store toast shows and can be dismissed", async () => {
     const api = fakeApi([], []);
     api.watchStatuses = vi.fn(async () => { throw new Error("runtime unreachable"); });

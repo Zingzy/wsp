@@ -101,6 +101,7 @@ function deriveThread(id: string, turns: ReadonlyArray<SessionView>): SidebarThr
   const latest = turns[turns.length - 1]!;
   return {
     id,
+    threadId: first.threadId ?? null,
     workspaceId: first.workspaceId,
     title: first.prompt ?? first.claudeSessionId ?? first.id,
     status: latest.status,

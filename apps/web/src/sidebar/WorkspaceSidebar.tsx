@@ -312,7 +312,7 @@ export function WorkspaceSidebar() {
                               thread={thread}
                               time={compactTimeLabel(thread.startedAt)}
                               active={selectedId === thread.workspaceId && selectedThreadId === thread.id}
-                              onSelect={() => select(thread.workspaceId, thread.id)}
+                              onSelect={() => select(thread.workspaceId, thread.threadId)}
                             />
                           ))}
                           {settled.length > 0 && active.length > 0 && !searching ? (
@@ -340,7 +340,7 @@ export function WorkspaceSidebar() {
                                   thread={thread}
                                   time={compactTimeLabel(resolveSettledTimestamp(thread))}
                                   active={selectedId === thread.workspaceId && selectedThreadId === thread.id}
-                                  onSelect={() => select(thread.workspaceId, thread.id)}
+                                  onSelect={() => select(thread.workspaceId, thread.threadId)}
                                 />
                               ))
                             : null}

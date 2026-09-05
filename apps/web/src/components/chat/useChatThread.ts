@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// One workspace's chat thread: the last thread of the persisted transcript
-// replayed from sessions.history on mount, then live session.* events
-// appended. Live events are ignored until the history reply lands, because
-// the socket is FIFO: anything pushed before the reply is already in it,
-// anything after is not.
+// One workspace's chat thread: the thread pinned from the sidebar, or the
+// last one of the persisted transcript, replayed from sessions.history on
+// mount, then that thread's live session.* events appended. Live events are
+// ignored until the history reply lands, because the socket is FIFO:
+// anything pushed before the reply is already in it, anything after is not.
 // The adapter derives the view; this hook only keeps the event list, the
 // arrival clock for unstamped events, and the things the wire cannot know
 // yet: a prompt the user just sent, a send that failed locally, and a new
@@ -127,7 +127,14 @@ function belongsToStale(stale: Extract<StaleTurn, { kind: "turn" }>, e: SessionE
   return e.turnId !== undefined && stale.turnId !== undefined ? e.turnId === stale.turnId : e.sessionId === stale.sessionId;
 }
 
-/** Applies one live event; returns the same state object when the event belongs to the turn a new thread left. */
+/** A view holds one thread: once its events carry a thread id, another thread's events are not its own. Fresh, it holds none yet. */
+function inHeldThread(state: ThreadState, e: SessionEvent): boolean {
+  if (state.fresh) return true;
+  const held = state.events.at(-1)?.threadId;
+  return held === undefined || e.threadId === held;
+}
+
+/** Applies one live event; returns the same state object when the event belongs to the turn a new thread left or to another thread. */
 export function reduceEvent(state: ThreadState, e: SessionEvent, at: string): ThreadState {
   const { stale } = state;
   if (stale !== null) {
@@ -136,7 +143,7 @@ export function reduceEvent(state: ThreadState, e: SessionEvent, at: string): Th
     }
     if (belongsToStale(stale, e)) return e.type === "session.end" ? { ...state, stale: null } : state;
   }
-  return append(state, e, at);
+  return inHeldThread(state, e) ? append(state, e, at) : state;
 }
 
 function shallowEqual(a: object, b: object): boolean {
