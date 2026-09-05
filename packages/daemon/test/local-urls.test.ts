@@ -192,10 +192,9 @@ async function client(port: number): Promise<{ request(op: string, p?: Record<st
     ws.once("open", resolve);
     ws.once("error", reject);
   });
-  ws.send(JSON.stringify({ id: 0, op: "auth", token: TOKEN }));
   const events: WireMsg[] = [];
   const pending = new Map<number, (m: WireMsg) => void>();
-  let nextId = 1;
+  let nextId = 0;
   ws.on("message", raw => {
     const m = JSON.parse(String(raw)) as WireMsg;
     if (typeof m.id === "number" && pending.has(m.id)) {
@@ -203,17 +202,16 @@ async function client(port: number): Promise<{ request(op: string, p?: Record<st
       pending.delete(m.id);
     } else if (m.type) events.push(m);
   });
-  return {
-    events,
-    request: (op, p = {}) => {
-      const id = nextId++;
-      return new Promise(resolve => {
-        pending.set(id, resolve);
-        ws.send(JSON.stringify({ id, op, ...p }));
-      });
-    },
-    close: () => ws.close(),
+  const request = (op: string, p: Record<string, unknown> = {}): Promise<WireMsg> => {
+    const id = nextId++;
+    return new Promise(resolve => {
+      pending.set(id, resolve);
+      ws.send(JSON.stringify({ id, op, ...p }));
+    });
   };
+  // A broadcast reaches only sockets whose auth frame the daemon has handled; the reply is the proof it has.
+  await request("auth", { token: TOKEN });
+  return { events, request, close: () => ws.close() };
 }
 
 async function until(cond: () => boolean, ms = 3000): Promise<void> {
