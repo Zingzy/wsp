@@ -2,7 +2,7 @@
 // The machine surface of the right panel: facts, spend, lineage with rollback,
 // pause, wake, upgrade and rebuild for one workspace's machine.
 import { CopyIcon } from "lucide-react";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import type { GoldenVersion, SnapshotLineage, WorkspaceSize, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 import { cn } from "../../lib/utils.js";
 import { upgradeOptions, useCostSeries, useUpgrade, type CostPoint, type Upgrade } from "../../protocol/machine.js";
@@ -20,7 +20,7 @@ import { Badge } from "../ui/badge.js";
 import { Button } from "../ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty.js";
 import { ScrollArea } from "../ui/scroll-area.js";
-import { divergentMachineState, durationLabel, idleLabel, money, phaseLabel, reachLabel, sizeLabel } from "./format.js";
+import { clockLabel, divergentMachineState, durationLabel, idleLabel, money, phaseLabel, reachLabel, sizeLabel } from "./format.js";
 
 const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -110,11 +110,12 @@ function Section({ label, aside, children }: { label: string; aside?: ReactNode;
   );
 }
 
-function Row({ label, k, children }: { label: string; k: string; children: ReactNode }) {
+/** A fact with its value flush right; a value the row cannot hold is cut with an ellipsis and the full text rides its title. */
+function Row({ label, k, title, children }: { label: string; k: string; title?: string; children: ReactNode }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 py-1.5 text-xs">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="min-w-0 truncate text-right font-mono tabular-nums text-foreground" data-k={k}>
+    <div className="flex min-w-0 items-baseline justify-between gap-3 py-1.5 text-xs">
+      <span className="shrink-0 text-muted-foreground">{label}</span>
+      <span className="min-w-0 truncate text-right font-mono tabular-nums text-foreground" title={title ?? (typeof children === "string" ? children : undefined)} data-k={k}>
         {children}
       </span>
     </div>
@@ -137,11 +138,11 @@ function Facts({ workspace, status, awakeMs, pendingSize }: FactsProps) {
   return (
     <Section label="Machine">
       <div className="mt-1 divide-y divide-border/40">
-        <Row label="State" k="state">
+        <Row label="State" k="state" title={diverged ? `${phaseLabel(workspace.phase)} · machine ${diverged}` : phaseLabel(workspace.phase)}>
           {phaseLabel(workspace.phase)}
           {diverged && <span className="text-muted-foreground"> · machine {diverged}</span>}
         </Row>
-        <Row label="Reach" k="reach">
+        <Row label="Reach" k="reach" title={status ? reachLabel(status.reach.state) : "pending"}>
           {status ? (
             <span className={cn(zombie && "text-destructive-foreground")} data-reach={status.reach.state}>
               {reachLabel(status.reach.state)}
@@ -150,7 +151,7 @@ function Facts({ workspace, status, awakeMs, pendingSize }: FactsProps) {
             "pending"
           )}
         </Row>
-        <Row label="Size" k="size">
+        <Row label="Size" k="size" title={pendingSize ? `${sizeLabel(pendingSize)} · resizing` : status ? sizeLabel(status.size) : "pending"}>
           {pendingSize ? (
             <>
               {sizeLabel(pendingSize)}
@@ -257,11 +258,10 @@ function Rebuild({ workspace }: { workspace: WorkspaceView }) {
 function Usage({ workspace, status, series }: { workspace: WorkspaceView; status: WorkspaceStatus | null; series: CostPoint[] }) {
   const cost = useCost(workspace.id);
   const rate = cost?.rateUsdPerHour ?? (workspace.phase === "running" ? status?.rateUsdPerHour ?? 0 : 0);
-  const rates = series.map(p => p.rateUsdPerHour);
-  const peak = rates.length > 0 ? Math.max(...rates) : null;
+  const peak = series.length > 0 ? Math.max(...series.map(p => p.rateUsdPerHour)) : null;
   return (
     <Section label="Usage" aside={peak !== null ? `peak ${money(peak, 2)}` : undefined}>
-      <UsageChart rates={rates} sawSpend={cost !== null} />
+      <UsageChart series={series} sawSpend={cost !== null} />
       <div className="divide-y divide-border/40">
         <Row label="Rate now" k="rate">
           {`${money(rate, 3)}/hr`}
@@ -274,34 +274,99 @@ function Usage({ workspace, status, series }: { workspace: WorkspaceView; status
   );
 }
 
-/** One bar per cost tick. The series lives in this surface, so a tick that
- * landed before it mounted shows in the counters but not here; the empty text
- * has to say that rather than claim there was no spend. */
-function UsageChart({ rates, sawSpend }: { rates: number[]; sawSpend: boolean }) {
-  const max = Math.max(...rates, 0.001);
+/** The drawing box the line is laid out in; the svg stretches it to the panel, and the stroke keeps its width. */
+const CHART_W = 100;
+const CHART_H = 40;
+/** Room around the line so a dot on the peak, on zero or on the newest tick sits inside the box. */
+const CHART_PAD = 4;
+const CHART_PAD_X = 1.5;
+
+/** Where each tick lands in the box: newest at the right edge, the peak at the top. */
+function chartPoints(series: CostPoint[]): { x: number; y: number }[] {
+  const max = Math.max(...series.map(p => p.rateUsdPerHour), 0.001);
+  const span = CHART_H - 2 * CHART_PAD;
+  const width = CHART_W - 2 * CHART_PAD_X;
+  return series.map((p, i) => ({
+    x: CHART_PAD_X + (series.length === 1 ? width : (i / (series.length - 1)) * width),
+    y: CHART_PAD + (1 - p.rateUsdPerHour / max) * span,
+  }));
+}
+
+/** One line through the cost ticks, the peak marked, the tick under the pointer read out under the box. The series lives
+ * in this surface, so a tick that landed before it mounted shows in the counters but not here; the empty text has to
+ * say that rather than claim there was no spend. */
+function UsageChart({ series, sawSpend }: { series: CostPoint[]; sawSpend: boolean }) {
+  const [hover, setHover] = useState<number | null>(null);
+  const points = chartPoints(series);
+  const peakAt = series.reduce((best, p, i) => (p.rateUsdPerHour > series[best]!.rateUsdPerHour ? i : best), 0);
+  const over = hover !== null ? series[hover] : undefined;
+  const first = series[0];
+  const last = series[series.length - 1];
+  const readout = over !== undefined ? `${money(over.rateUsdPerHour, 3)}/hr at ${clockLabel(over.at)}` : first === undefined || last === undefined ? "" : first === last ? clockLabel(first.at) : `${clockLabel(first.at)} to ${clockLabel(last.at)}`;
+
+  const track = (e: ReactMouseEvent<SVGSVGElement>): void => {
+    const box = e.currentTarget.getBoundingClientRect();
+    if (box.width <= 0 || series.length === 0) return;
+    const at = Math.round(((e.clientX - box.left) / box.width) * (series.length - 1));
+    setHover(Math.min(series.length - 1, Math.max(0, at)));
+  };
+
   return (
-    <div
-      className="mt-2 mb-1 flex h-16 items-end gap-px overflow-hidden rounded-md border border-border/40 bg-muted/8 px-1.5 pt-2 pb-1.5"
-      role="img"
-      aria-label="spend per hour, one bar per cost tick"
-      data-usage-chart
-    >
-      {rates.length === 0 ? (
-        <span className="w-full self-center text-center text-[11px] text-muted-foreground/60">
-          {sawSpend ? "Chart starts with the next cost tick." : "No cost ticks yet."}
-        </span>
-      ) : (
-        rates.map((rate, i) => (
-          <span
-            key={i}
-            className="block min-h-px flex-1 rounded-t-sm bg-foreground/65"
-            style={{ height: `${(rate / max) * 100}%` }}
-            title={`${money(rate, 3)}/hr`}
-            data-usage-bar
-          />
-        ))
-      )}
+    <div className="mt-2 mb-1" data-usage-chart>
+      <div className="relative h-16 overflow-hidden rounded-md border border-border/40 bg-muted/8">
+        {series.length === 0 ? (
+          <span className="absolute inset-0 flex items-center justify-center text-[11px] text-muted-foreground/60">
+            {sawSpend ? "Chart starts with the next cost tick." : "No cost ticks yet."}
+          </span>
+        ) : (
+          <>
+            <svg
+              className="block size-full"
+              viewBox={`0 0 ${CHART_W} ${CHART_H}`}
+              preserveAspectRatio="none"
+              role="img"
+              aria-label="spend per hour over the ticks recorded, one line"
+              onMouseMove={track}
+              onMouseLeave={() => setHover(null)}
+            >
+              {[1 / 3, 2 / 3].map(f => (
+                <line key={f} x1={0} x2={CHART_W} y1={CHART_PAD + f * (CHART_H - 2 * CHART_PAD)} y2={CHART_PAD + f * (CHART_H - 2 * CHART_PAD)} className="stroke-border/60" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+              ))}
+              <path d={points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join("")} fill="none" className="stroke-foreground/80" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" data-usage-line />
+              {hover !== null && points[hover] !== undefined && (
+                <line x1={points[hover].x} x2={points[hover].x} y1={0} y2={CHART_H} className="stroke-muted-foreground/50" strokeWidth={1} vectorEffect="non-scaling-stroke" data-usage-hover />
+              )}
+            </svg>
+            <ChartDot point={points[hover ?? peakAt]!} label={hover === null ? `${money(series[peakAt]!.rateUsdPerHour, 3)}/hr` : undefined} />
+          </>
+        )}
+      </div>
+      <p className="mt-1 min-h-4 text-right font-mono text-[11px] tabular-nums text-muted-foreground" data-k="usage-readout">
+        {readout}
+      </p>
     </div>
+  );
+}
+
+/** A dot on one point of the box, drawn outside the svg so the stretch does not squash it. The label hangs under the
+ * dot, where nothing of the line is higher than the peak, and leans away from the nearer edge. */
+function ChartDot({ point, label }: { point: { x: number; y: number }; label: string | undefined }) {
+  const left = (point.x / CHART_W) * 100;
+  const top = (point.y / CHART_H) * 100;
+  const flip = left > 60;
+  return (
+    <>
+      <span aria-hidden className="pointer-events-none absolute size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground" style={{ left: `${left}%`, top: `${top}%` }} data-usage-peak />
+      {label !== undefined && (
+        <span
+          className={cn("pointer-events-none absolute mt-1.5 font-mono text-[10px] leading-none tabular-nums text-muted-foreground", flip ? "-translate-x-full pr-1.5" : "pl-1.5")}
+          style={{ left: `${left}%`, top: `${top}%` }}
+          data-k="usage-peak"
+        >
+          {label}
+        </span>
+      )}
+    </>
   );
 }
 

@@ -14,8 +14,8 @@ export interface CostPoint {
   at: string;
 }
 
-/** ~4 minutes of 5s cost ticks; one bar each in the usage chart. */
-const MAX_POINTS = 48;
+/** Four hours of 5s cost ticks: the window the usage line shows. */
+const MAX_POINTS = 2880;
 
 export function useCostSeries(id: string | null): CostPoint[] {
   const [series, setSeries] = useState<Record<string, CostPoint[]>>({});
