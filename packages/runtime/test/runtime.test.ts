@@ -1,12 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
+import { createServer, type Server } from "node:http";
 import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
 import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
 import { SessionEvent, type EventUnion, type RecipeDigest } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
-import { GRACE_MS, TRANSCRIPT_FLUSH_MS, createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
+import { GRACE_MS, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { wsRequest } from "./ws-client.js";
@@ -651,6 +652,69 @@ describe("runtime port reach", () => {
   it("rejects an unknown workspace", async () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
     await expect(rt.workspaces.portReach("ws_nobody", 3000)).rejects.toThrow(/no such workspace/);
+  });
+});
+
+const VITE_BLOCKED = "Blocked request. This host (m1-5173.preview.example) is not allowed. To allow this host, add it to server.allowedHosts";
+
+/** A guest port as the preview edge would relay it: one answer for every request, closed by the test. */
+async function guestPort(statusCode: number, body: string): Promise<{ server: Server; url: string }> {
+  const server = createServer((_req, res) => res.writeHead(statusCode, { "content-type": "text/plain" }).end(body));
+  await new Promise<void>(r => server.listen(0, "127.0.0.1", r));
+  const addr = server.address();
+  const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+  return { server, url: `http://127.0.0.1:${port}/?pt_token=edge` };
+}
+
+describe("runtime port probe", () => {
+  const closing: Server[] = [];
+  afterEach(async () => {
+    await Promise.all(closing.map(s => new Promise<void>(r => s.close(() => r()))));
+    closing.length = 0;
+  });
+
+  it("fetches the port's minted route once and reports the status and body a frame cannot read", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const guest = await guestPort(403, VITE_BLOCKED);
+    closing.push(guest.server);
+    const minted: number[] = [];
+    backend.machines[0]!.previewUrl = async port => {
+      minted.push(port);
+      return { url: guest.url, token: "edge", expiresAt: Date.now() + 3_600_000 };
+    };
+
+    expect(await rt.workspaces.portProbe(ws.id, 5173)).toEqual({ status: 403, body: VITE_BLOCKED });
+    expect(minted).toEqual([5173]);
+  });
+
+  it("cuts the body at the cap so a page never rides the reply whole", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const guest = await guestPort(200, "<html>".padEnd(PORT_PROBE_BODY_CAP + 500, "x"));
+    closing.push(guest.server);
+    backend.machines[0]!.previewUrl = async () => ({ url: guest.url, token: "edge", expiresAt: Date.now() + 3_600_000 });
+
+    const probe = await rt.workspaces.portProbe(ws.id, 3000);
+    expect(probe.status).toBe(200);
+    expect(probe.body).toHaveLength(PORT_PROBE_BODY_CAP);
+  });
+
+  it("rejects when the route cannot be fetched at all, and rejects an unknown workspace", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const guest = await guestPort(200, "");
+    await new Promise<void>(r => guest.server.close(() => r()));
+    backend.machines[0]!.previewUrl = async () => ({ url: guest.url, token: "edge", expiresAt: Date.now() + 3_600_000 });
+
+    await expect(rt.workspaces.portProbe(ws.id, 3000)).rejects.toThrow();
+    await expect(rt.workspaces.portProbe("ws_nobody", 3000)).rejects.toThrow(/no such workspace/);
   });
 });
 

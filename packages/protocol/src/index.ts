@@ -110,6 +110,13 @@ export type DaemonReachView = z.infer<typeof DaemonReachView>;
 export const PortReachView = DaemonReachView.omit({ daemonToken: true });
 export type PortReachView = z.infer<typeof PortReachView>;
 
+/** What the host saw fetching a guest port's route once, as a browser's frame
+ * does: the status and the start of the body. A frame on another origin can
+ * read neither, so the pane asks for this to explain a refusal (a dev server's
+ * host check, the edge) instead of showing a white page. */
+export const PortProbeView = z.object({ status: z.number().int(), body: z.string() });
+export type PortProbeView = z.infer<typeof PortProbeView>;
+
 export const WorkspaceSize = z.object({ cpu: z.number(), memMb: z.number() });
 export type WorkspaceSize = z.infer<typeof WorkspaceSize>;
 
@@ -750,6 +757,15 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
   z.object({
     id: reqId,
     op: z.literal("workspaces.portReach"),
+    workspaceId: z.string(),
+    port: z.number().int().min(1).max(65535),
+  }),
+  /** Replies with { probe: PortProbeView }: one fetch of the port's minted route
+   * from the host, the body cut short. Refused when the route cannot be fetched
+   * at all; the frame is the only truth then. */
+  z.object({
+    id: reqId,
+    op: z.literal("workspaces.portProbe"),
     workspaceId: z.string(),
     port: z.number().int().min(1).max(65535),
   }),

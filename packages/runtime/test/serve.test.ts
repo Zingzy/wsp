@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { createServer } from "node:http";
 import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
 import type { ForwardEvent, PortForward } from "@wsp/protocol";
 import { DAEMON_TOKEN_SET } from "../src/daemon-token.js";
@@ -261,6 +262,31 @@ describe("serveRuntime port reach", () => {
     expect(missing.ok).toBe(false);
     expect(missing["error"]).toMatch(/no such workspace/);
     c.close();
+  });
+
+  it("workspaces.portProbe replies with what the host saw on the port's route; an unknown workspace is refused", async () => {
+    const guest = createServer((_req, res) => res.writeHead(403, { "content-type": "text/plain" }).end("Blocked request. This host (m1-5173.preview.example) is not allowed. To allow this host, add it to server.allowedHosts"));
+    await new Promise<void>(r => guest.listen(0, "127.0.0.1", r));
+    const addr = guest.address();
+    const guestPort = typeof addr === "object" && addr !== null ? addr.port : 0;
+    try {
+      const backend = stubBackend();
+      backend.execImpl = tokenGuest;
+      srv = await serveRuntime(createRuntime({ backend, store: memoryStore(), adapters: {} }), { port: 0, authToken: "secret" });
+      const c = await WsClient.connect(srv.port, { token: "secret" });
+      const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+      const id = (created["workspace"] as { id: string }).id;
+      backend.machines[0]!.previewUrl = async () => ({ url: `http://127.0.0.1:${guestPort}/?pt_token=e`, token: "e", expiresAt: 1_800_000_000_000 });
+      const res = await c.request("workspaces.portProbe", { workspaceId: id, port: 5173 });
+      expect(res.ok).toBe(true);
+      expect(res["probe"]).toEqual({ status: 403, body: expect.stringContaining("server.allowedHosts") });
+      const missing = await c.request("workspaces.portProbe", { workspaceId: "ws_nobody", port: 5173 });
+      expect(missing.ok).toBe(false);
+      expect(missing["error"]).toMatch(/no such workspace/);
+      c.close();
+    } finally {
+      await new Promise<void>(r => guest.close(() => r()));
+    }
   });
 
   it("workspaces.rebuild replies with the workspace on a fresh golden fork and the old machine is dead", async () => {

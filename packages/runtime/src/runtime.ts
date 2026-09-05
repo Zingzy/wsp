@@ -51,6 +51,7 @@ import type {
   GoldenLogin,
   GoldenStage,
   RecipeDigest,
+  PortProbeView,
   PortReachView,
   ReachState,
   SessionEvent,
@@ -270,6 +271,10 @@ export interface WakeOptions {
 }
 
 const WAKE_PING_TIMEOUT_MS = 30_000;
+/** The probe's fetch bound; the frame keeps loading meanwhile, so silence costs nothing but the sentence. */
+const PORT_PROBE_TIMEOUT_MS = 10_000;
+/** Vite's and Next's refusals fit in a few hundred bytes; a page that loaded fine is not carried back whole. */
+export const PORT_PROBE_BODY_CAP = 2048;
 const VAULT_CAP_BYTES = 200 * 1024 * 1024;
 /** Blob collection: the latest nap-time vault per workspace id. */
 const VAULTS = "vaults";
@@ -370,6 +375,8 @@ export interface Runtime {
     daemonReach(id: string): Promise<DaemonReachView>;
     /** The public route to one guest port, for a browser to frame; same caching and refusal as daemonReach. */
     portReach(id: string, port: number): Promise<PortReachView>;
+    /** One fetch of that route from here, as the frame would see it; rejects when nothing answers at all. */
+    portProbe(id: string, port: number): Promise<PortProbeView>;
   };
   readonly sessions: {
     start(
@@ -1368,6 +1375,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const entry = await entryOf(id);
       const reach = await entry.ws.portReach(port);
       return { url: reach.url, expiresAt: reach.expiresAt };
+    },
+
+    async portProbe(id, port) {
+      const entry = await entryOf(id);
+      const reach = await entry.ws.portReach(port);
+      const res = await fetch(reach.url, { signal: AbortSignal.timeout(PORT_PROBE_TIMEOUT_MS) });
+      const body = await res.text().catch(() => "");
+      return { status: res.status, body: body.slice(0, PORT_PROBE_BODY_CAP) };
     },
   };
 

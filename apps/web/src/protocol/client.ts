@@ -13,6 +13,7 @@ import {
   type EventUnion,
   type GoldenManifest,
   type GoldenVersion,
+  type PortProbeView,
   type PortReachView,
   type SessionEvent,
   type SessionView,
@@ -249,6 +250,9 @@ export interface Api {
   daemonReach(id: string): Promise<DaemonReachView>;
   /** The public route to one guest port, for an iframe; the runtime remints near the hourly expiry, so ask again before expiresAt. */
   portReach(id: string, port: number): Promise<PortReachView>;
+  /** What the host saw fetching that route once; the pane explains a refusal from it, since the frame cannot read its own
+   * status. Optional so fixtures that never frame a port need not fake it; without it the frame is the only truth. */
+  portProbe?(id: string, port: number): Promise<PortProbeView>;
   /** One turn on the workspace; events arrive on the subscription, this resolves with the row. */
   startSession(opts: StartSessionOptions): Promise<SessionView>;
   /** All sessions the runtime knows, or one workspace's. */
@@ -316,6 +320,7 @@ export function makeApi(c: ProtocolClient): Api {
     capabilities: async () => (await c.request<{ capabilities: Capabilities }>("capabilities.get")).capabilities,
     daemonReach: async id => (await c.request<{ reach: DaemonReachView }>("workspaces.daemonReach", { workspaceId: id })).reach,
     portReach: async (id, port) => (await c.request<{ reach: PortReachView }>("workspaces.portReach", { workspaceId: id, port })).reach,
+    portProbe: async (id, port) => (await c.request<{ probe: PortProbeView }>("workspaces.portProbe", { workspaceId: id, port })).probe,
     startSession: async opts => (await c.request<{ session: SessionView }>("sessions.start", { ...opts })).session,
     sessionHistory: async id => (await c.request<{ events: SessionEvent[] }>("sessions.history", { workspaceId: id })).events,
     listSessions: async id =>
