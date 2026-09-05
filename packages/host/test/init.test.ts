@@ -3182,6 +3182,29 @@ describe("disk estimate before the boot", () => {
     expect(checked).toContain("does not match the checksum recorded on the first install of");
   });
 
+  it("the tally after the build names every skipped tool with its reason, under the counts, and the results file carries the same rows", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
+    dirs.push(dir);
+    const path = join(dir, "recipe.json");
+    const unknown: ManifestEntry = { rung: "tools", id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "unknown" };
+    const cli: ManifestEntry = { rung: "tools", id: "tools/cli/ngrok", label: "ngrok", group: "Command-line tools", paths: [], bytes: 0, default: "bring", linux: "unknown" };
+    writeFileSync(path, JSON.stringify({ entries: [...FIXTURE.entries, unknown, cli].map(e => ({ ...e, bring: e.bring ?? (e.default === "bring" && e.reason === undefined) })) }));
+    const f = fake({ yes: true, manifestPath: path, brew: async () => new Map() });
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(0);
+    const tally = f.text().slice(f.text().indexOf("Tools and agents:"));
+    expect(tally.split("\n").slice(0, 3).map(l => l.replace(/^[│◇]\s+/, ""))).toEqual([
+      expect.stringMatching(/^Tools and agents: 9 installed, 0 failed, 2 skipped; the list is in .*golden-import\.json$/),
+      "diskbloom skipped: no Linux bottle known",
+      "ngrok skipped: no GitHub release to install from",
+    ]);
+    const results = JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8")) as { tools: { id: string; label: string; outcome: string; note?: string }[] };
+    expect(results.tools.filter(t => t.outcome === "skipped")).toEqual([
+      { id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", outcome: "skipped", note: "no Linux bottle known" },
+      { id: "tools/cli/ngrok", label: "ngrok", outcome: "skipped", note: "no GitHub release to install from" },
+    ]);
+  });
+
   it("a Homebrew that cannot be read is a note, not a stop; the summary falls back to the measured table", async () => {
     const f = fake({ yes: true, brew: async () => { throw new Error("brew: command timed out"); } });
     const run = runInit(f.opts, f.io);
@@ -3239,6 +3262,12 @@ describe("disk estimate before the boot", () => {
     expect(aider.detail[1]).toBe("installs on the machine (size not measured); its config (900 B) comes along");
     const zed = selectItem({ rung: "agents", id: "agents/zed", label: "Zed", paths: ["~/.config/zed"], bytes: 900, default: "skip" });
     expect(zed.hint).toBe("900 B");
+    // A command cask's row names its release and the go fallback it carries; one whose stanza had no Linux block waits for a tick.
+    const spoo = selectItem({ rung: "tools", id: "tools/cli/spoo", label: "spoo", paths: ["github.com/spoo-me/spoo-cli@v0.4.1", "github.com/spoo-me/spoo-cli/cmd/spoo@v0.3.0"], bytes: 0, default: "bring", linux: "yes", version: "0.4.1" });
+    expect(spoo.hint).toBe("not measured");
+    expect(spoo.detail).toEqual(["github.com/spoo-me/spoo-cli@v0.4.1, github.com/spoo-me/spoo-cli/cmd/spoo@v0.3.0", "its Linux release binary, else go install of the module; checksum recorded on first install; brought by default"]);
+    const maybe = selectItem({ rung: "tools", id: "tools/cli/ngrok", label: "ngrok", paths: ["github.com/ngrok/ngrok@v3"], bytes: 0, default: "skip", linux: "unknown", version: "3" });
+    expect(maybe.detail[1]).toBe("Linux build unknown, tick to try; its Linux release binary; checksum recorded on first install; left out by default");
     // The terminal font row copies nothing and installs nothing: its detail says what the tick does instead.
     const font = selectItem({ rung: "shell", id: "shell/terminal-font", label: "terminal font: Hack (Ghostty)", paths: [], bytes: 0, default: "bring", font: "Hack" });
     expect(font.hint).toBeUndefined();

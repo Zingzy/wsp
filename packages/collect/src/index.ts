@@ -10,8 +10,8 @@ export { TERMINAL_FONT_ID, alacrittyFont, detectTerminalFont, ghosttyFont, iterm
 export { detectEditors, parseExtensionList } from "./detect/editors.js";
 export { detectToolchains } from "./detect/toolchains.js";
 export {
-  detectTools, parseBrewfile, parseBunGlobals, parseCargoInstalls, parseGoVersionM, parseNpmGlobals, parsePipxList, parsePnpmGlobals, parseUvToolList,
-  type BrewLine, type GoModule, type Pkg,
+  CLI_GROUP, detectTools, parseBrewfile, parseBunGlobals, parseCargoInstalls, parseCaskInfo, parseGoVersionM, parseNpmGlobals, parsePipxList, parsePnpmGlobals, parseUvToolList,
+  type BrewLine, type CaskInfo, type GoModule, type Pkg,
 } from "./detect/tools.js";
 export { classifyFormulae, linuxSupport, renderSnapshot, type BottleSnapshot } from "./brew-bottles.js";
 export { LINUX_BOTTLES } from "./data/linux-bottles.js";

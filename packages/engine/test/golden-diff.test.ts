@@ -224,6 +224,7 @@ describe("removals", () => {
     ["tools/uv/ruff", /uv tool uninstall ruff$/],
     ["tools/pipx/httpie", /pipx uninstall httpie$/],
     ["tools/cargo/ripgrep", /cargo uninstall ripgrep$/],
+    ["tools/cli/spoo", /rm -f \/usr\/local\/bin\/'spoo'$/],
   ])("a removed %s is uninstalled through its manager, on the tools PATH", (id, cmd) => {
     const [r] = removed([row("tools", id)]);
     expect(r).toMatchObject({ what: "tool", id });

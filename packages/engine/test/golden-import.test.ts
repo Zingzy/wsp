@@ -29,6 +29,7 @@ import {
   shellInstallFor,
   toolInstallsFor,
   BREW_HOUSEKEEPING,
+  type BrewTable,
   type DigestedFile,
   type PathInfo,
   type RecipeDigest,
@@ -690,6 +691,62 @@ describe("toolInstallsFor", () => {
       row({ rung: "tools", id: "tools/pnpm/x", label: "x" }),
     ]);
     for (const i of t.installs) expect(i.cmd).not.toMatch(/\|\s*(ba)?sh\b/);
+  });
+});
+
+describe("command-line tool rows", () => {
+  const spoo = row({ rung: "tools", id: "tools/cli/spoo", label: "spoo", paths: ["github.com/spoo-me/spoo-cli@v0.4.1", "github.com/spoo-me/spoo-cli/cmd/spoo@v0.3.0"], version: "0.4.1" });
+
+  it("a CLI row takes the road: the release named by its first path, the module in its last path as the go fallback; one with no release is skipped", () => {
+    const b = brewfileFor([spoo, row({ rung: "tools", id: "tools/cli/ngrok", label: "ngrok" })]);
+    expect(b.roads).toEqual([{ id: "tools/cli/spoo", name: "spoo", source: { repo: "spoo-me/spoo-cli", tag: "v0.4.1" }, go: "github.com/spoo-me/spoo-cli/cmd/spoo@v0.3.0" }]);
+    expect(b.skipped).toEqual([{ id: "tools/cli/ngrok", note: "no GitHub release to install from" }]);
+    expect(b.text).toBe("");
+  });
+
+  it("the install fetches the release's Linux asset first and falls back to go install of the module; the command's name is on the step for the check after the stage", () => {
+    const t = toolInstallsFor([spoo, row({ rung: "tools", id: "tools/go/gopls", label: "gopls", paths: ["golang.org/x/tools/gopls@v0.16.2"], version: "v0.16.2" })]);
+    const step = t.installs.at(-1)!;
+    expect(step).toMatchObject({ id: "tools/cli/spoo", label: "spoo", manager: "github", bin: "spoo" });
+    expect(step.after).toBeUndefined();
+    expect(step.cmd).toContain("https://api.github.com/repos/spoo-me/spoo-cli/releases/tags/v0.4.1");
+    expect(step.cmd).toContain('install -m 0755 "$bin" "/usr/local/bin/$name"');
+    expect(step.cmd).toContain("GOBIN=/usr/local/bin go install 'github.com/spoo-me/spoo-cli/cmd/spoo@v0.3.0'");
+    expect(step.cmd).not.toContain('[ "$sum" =');
+    // A Go row names its binary too; a formula does not, its command rarely being its name.
+    expect(t.installs.find(i => i.id === "tools/go/gopls")).toMatchObject({ bin: "gopls" });
+    expect(t.installs.find(i => i.id === "tools/manager/go")).not.toHaveProperty("bin");
+    expect(t.installs.map(i => i.id).indexOf("tools/cli/spoo")).toBeGreaterThan(t.installs.map(i => i.id).indexOf("tools/go/gopls"));
+  });
+
+  it("a pin for the same tag is checked; one for another tag is not; a row with one path installs the repository itself with go", () => {
+    const pinned = toolInstallsFor([{ ...spoo, pin: { tag: "v0.4.1", sha256: "c".repeat(64) } }]).installs.at(-1)!;
+    expect(pinned.cmd).toContain(`[ "$sum" = '${"c".repeat(64)}' ]`);
+    const moved = toolInstallsFor([{ ...spoo, pin: { tag: "v0.4.0", sha256: "c".repeat(64) } }]).installs.at(-1)!;
+    expect(moved.cmd).not.toContain('[ "$sum" =');
+    const alone = toolInstallsFor([{ ...spoo, paths: ["github.com/spoo-me/spoo-cli@v0.4.1"] }]).installs.at(-1)!;
+    expect(alone.cmd).toContain("go install 'github.com/spoo-me/spoo-cli@v0.4.1'");
+  });
+
+  it("a tap formula on the road names its binary too", () => {
+    const table: BrewTable = new Map([["zingzy/tap/diskbloom", { name: "diskbloom", fullName: "zingzy/tap/diskbloom", deps: [], macosOnly: false, source: { repo: "Zingzy/diskbloom", tag: "v0.1.0" } }]]);
+    const t = toolInstallsFor([row({ rung: "tools", id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", linux: "unknown" })], table);
+    expect(t.installs.at(-1)).toMatchObject({ id: "tools/brew/zingzy/tap/diskbloom", manager: "github", bin: "diskbloom" });
+    expect(t.installs.at(-1)!.cmd).not.toContain("mv '/usr/local/bin/");
+  });
+
+  it("the go fallback lands under the row's command: a module whose last element is another name is moved there, on a CLI row and a tap road alike; a /vN module suffix is not the name", () => {
+    const alone = toolInstallsFor([{ ...spoo, paths: ["github.com/spoo-me/spoo-cli@v0.4.1"] }]).installs.at(-1)!;
+    expect(alone.cmd).toContain(`GOBIN=/usr/local/bin go install 'github.com/spoo-me/spoo-cli@v0.4.1'\n  mv '/usr/local/bin/spoo-cli' "/usr/local/bin/$name"\n  echo "WSP_ROAD go "`);
+    const folded = toolInstallsFor([spoo]).installs.at(-1)!;
+    expect(folded.cmd).toContain(`go install 'github.com/spoo-me/spoo-cli/cmd/spoo@v0.3.0'\n  echo "WSP_ROAD go "`);
+    expect(folded.cmd).not.toContain("mv '/usr/local/bin/");
+    const v2 = toolInstallsFor([{ ...spoo, paths: ["github.com/spoo-me/spoo-cli@v2.0.0", "github.com/spoo-me/spoo/v2@v2.0.0"] }]).installs.at(-1)!;
+    expect(v2.cmd).not.toContain("mv '/usr/local/bin/");
+    const table: BrewTable = new Map([["spoo-me/tap/spoo", { name: "spoo", fullName: "spoo-me/tap/spoo", deps: [], macosOnly: false, source: { repo: "spoo-me/spoo-cli", tag: "v0.4.1" } }]]);
+    const tap = toolInstallsFor([row({ rung: "tools", id: "tools/brew/spoo-me/tap/spoo", label: "spoo", linux: "unknown" })], table).installs.at(-1)!;
+    expect(tap).toMatchObject({ manager: "github", bin: "spoo" });
+    expect(tap.cmd).toContain(`mv '/usr/local/bin/spoo-cli' "/usr/local/bin/$name"`);
   });
 });
 

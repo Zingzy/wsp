@@ -652,6 +652,77 @@ describe("golden import stages", () => {
     expect(results[0]!.tools[1]).not.toHaveProperty("road");
   });
 
+  it("after the loop every install that names its command is checked with command -v on the tools PATH: one not there is failed with the reason, in the result and the summary", async () => {
+    const { backend, fetch, inline } = backendFor([
+      ["releases/tags/v0.4.1", { exitCode: 0, stdout: `WSP_ROAD release spoo_0.4.1_linux_amd64.tar.gz ${"a".repeat(64)} v0.4.1\n`, stderr: "" }],
+      ["command -v", { exitCode: 0, stdout: "missing spoo\n", stderr: "" }],
+    ]);
+    const { stages, onStage } = stageRecorder();
+    const results: ImportResult[] = [];
+    const tools: ToolInstall[] = [
+      ...importOf().tools,
+      { id: "tools/go/gopls", label: "gopls", manager: "go", cmd: "go install gopls", bin: "gopls" },
+      { id: "tools/cli/spoo", label: "spoo", manager: "github", cmd: "curl https://api.github.com/repos/spoo-me/spoo-cli/releases/tags/v0.4.1", bin: "spoo" },
+    ];
+    await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ tools, onResult: r => void results.push(r) }) });
+    const check = inline.find(c => c.cmd.includes("command -v"))!;
+    expect(check.cmd).toMatch(/^export PATH=\/root\/\.local\/bin:.*\/usr\/local\/bin.*\n/);
+    expect(check.cmd).toContain(`for b in 'gopls' 'spoo'; do command -v "$b" >/dev/null 2>&1 || echo "missing $b"; done`);
+    expect(check.timeoutMs).toBe(INLINE_EXEC_MS);
+    expect(results[0]!.tools.find(t => t.id === "tools/cli/spoo")).toEqual({ id: "tools/cli/spoo", label: "spoo", outcome: "failed", note: "spoo is not on PATH after the install", ms: expect.any(Number) });
+    expect(results[0]!.tools.find(t => t.id === "tools/go/gopls")).toMatchObject({ outcome: "installed" });
+    expect(stages).toContain("installing-tools:4 installed, 1 failed: spoo (spoo is not on PATH after the install)");
+    // Nothing named its command: no check runs.
+    const plain = backendFor();
+    await prepareBuilder({ backend: plain.backend, setup: "true", fetch: plain.fetch, onStage: stageRecorder().onStage, import: importOf() });
+    expect(plain.inline.some(c => c.cmd.includes("command -v"))).toBe(false);
+  });
+
+  it("a tap road and a CLI row whose go module is named otherwise land under the row's command and pass the check: the road is kept, on the fake guest end to end", async () => {
+    const { backend, cmds, fetch, inline } = backendFor([
+      ["releases/tags/v0.4.1", { exitCode: 0, stdout: "go: downloading\nWSP_ROAD go github.com/spoo-me/spoo-cli@v0.4.1\n", stderr: "" }],
+      ["releases/tags/v0.2.0", { exitCode: 0, stdout: "WSP_ROAD go github.com/Zingzy/bloom-cli@v0.2.0\n", stderr: "" }],
+    ]);
+    const table: BrewTable = new Map([["zingzy/tap/bloom", { name: "bloom", fullName: "zingzy/tap/bloom", deps: [], macosOnly: false, source: { repo: "Zingzy/bloom-cli", tag: "v0.2.0" } }]]);
+    const plan = toolInstallsFor([
+      { rung: "tools", id: "tools/brew/zingzy/tap/bloom", label: "bloom", paths: [], bytes: 0, default: "bring", bring: true, linux: "unknown" },
+      { rung: "tools", id: "tools/cli/spoo", label: "spoo", paths: ["github.com/spoo-me/spoo-cli@v0.4.1"], bytes: 0, default: "bring", bring: true, linux: "yes" },
+    ], table);
+    expect(plan.installs.map(i => [i.id, i.bin])).toEqual([["tools/brew/zingzy/tap/bloom", "bloom"], ["tools/cli/spoo", "spoo"]]);
+    const { stages, onStage } = stageRecorder();
+    const results: ImportResult[] = [];
+    await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ tools: plan.installs, onResult: r => void results.push(r) }) });
+    expect(cmds.find(c => c.includes("releases/tags/v0.2.0"))).toContain(`mv '\\''/usr/local/bin/bloom-cli'\\'' "/usr/local/bin/$name"`);
+    expect(cmds.find(c => c.includes("releases/tags/v0.4.1"))).toContain(`mv '\\''/usr/local/bin/spoo-cli'\\'' "/usr/local/bin/$name"`);
+    expect(inline.find(c => c.cmd.includes("command -v"))!.cmd).toContain(`for b in 'bloom' 'spoo'; do`);
+    expect(results[0]!.tools).toEqual([
+      { id: "tools/brew/zingzy/tap/bloom", label: "bloom", outcome: "installed", road: { kind: "go", from: "github.com/Zingzy/bloom-cli@v0.2.0" }, ms: expect.any(Number) },
+      { id: "tools/cli/spoo", label: "spoo", outcome: "installed", road: { kind: "go", from: "github.com/spoo-me/spoo-cli@v0.4.1" }, ms: expect.any(Number) },
+    ]);
+    expect(stages).toContain("installing-tools:2 installed (bloom with go install, spoo with go install)");
+  });
+
+  it("a check that itself fails counts every named tool as failed, with the check's reason, and says so in a stage line: an unverified tool is not installed", async () => {
+    const { backend, fetch } = backendFor([
+      ["releases/tags/v0.4.1", { exitCode: 0, stdout: `WSP_ROAD release spoo_0.4.1_linux_amd64.tar.gz ${"a".repeat(64)} v0.4.1\n`, stderr: "" }],
+      ["command -v", { exitCode: 124, stdout: "", stderr: "" }],
+    ]);
+    const { stages, onStage } = stageRecorder();
+    const results: ImportResult[] = [];
+    const tools: ToolInstall[] = [
+      ...importOf().tools,
+      { id: "tools/go/gopls", label: "gopls", manager: "go", cmd: "go install gopls", bin: "gopls" },
+      { id: "tools/cli/spoo", label: "spoo", manager: "github", cmd: "curl https://api.github.com/repos/spoo-me/spoo-cli/releases/tags/v0.4.1", bin: "spoo" },
+    ];
+    await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ tools, onResult: r => void results.push(r) }) });
+    expect(results[0]!.tools.slice(3)).toEqual([
+      { id: "tools/go/gopls", label: "gopls", outcome: "failed", note: "gopls could not be checked on PATH: timed out after 20s", ms: expect.any(Number) },
+      { id: "tools/cli/spoo", label: "spoo", outcome: "failed", note: "spoo could not be checked on PATH: timed out after 20s", ms: expect.any(Number) },
+    ]);
+    expect(stages).toContain("installing-tools:the PATH check failed (timed out after 20s): gopls, spoo count as failed");
+    expect(stages).toContain("installing-tools:3 installed, 2 failed: gopls (gopls could not be checked on PATH: timed out after 20s), spoo (spoo could not be checked on PATH: timed out after 20s)");
+  });
+
   it("an agent that fails refuses the seal with the installer's reason, kills the builder, reports the result, and never starts the tools", async () => {
     const { backend, cmds, killed, fetch } = backendFor([["codex-install", { exitCode: 124, stdout: "", stderr: "" }]]);
     const { stages, onStage } = stageRecorder();
@@ -776,7 +847,7 @@ describe("golden import stages", () => {
     const { stages, onStage } = stageRecorder();
     await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf() });
     expect(cmds.some(c => c.includes("brew install gh"))).toBe(false);
-    expect(stages).toContain("installing-tools:1 installed, 1 failed: Homebrew (git: not found), 1 skipped");
+    expect(stages).toContain("installing-tools:1 installed, 1 failed: Homebrew (git: not found), 1 skipped: gh (Homebrew did not install)");
     // No Homebrew, nothing of its to clean.
     expect(cmds.some(c => c.includes("brew autoremove") || c.includes("brew cleanup"))).toBe(false);
   });
@@ -865,7 +936,7 @@ describe("golden import stages", () => {
     await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf() });
     expect(cmds.some(c => c.includes("brew-bootstrap"))).toBe(true);
     expect(cmds.some(c => c.includes("brew install gh"))).toBe(false);
-    expect(stages).toContain("installing-tools:1 installed, 2 skipped (500 MB free, keeping 2048 MB free)");
+    expect(stages).toContain("installing-tools:1 installed, 2 skipped: gh, bun@1.4.0 (500 MB free, keeping 2048 MB free)");
     // The floor stops installs, not the housekeeping that gives the disk back.
     expect(cmds.some(c => c.includes("brew cleanup -s --prune=all"))).toBe(true);
   });

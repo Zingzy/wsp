@@ -7,7 +7,7 @@
 // into the next tool's turn.
 import type { GoldenStage } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
-import { BREW_HOUSEKEEPING, HOMEBREW, type ToolInstall } from "./golden-import.js";
+import { BREW_HOUSEKEEPING, HOMEBREW, TOOLS_PATH, type ToolInstall } from "./golden-import.js";
 import type { ExecResult, Machine } from "./machine.js";
 
 export interface ToolResult {
@@ -133,7 +133,14 @@ export function guarded(script: string, timeoutS: number): string {
   ].join("\n");
 }
 
-function summarize(tools: ToolResult[], floor: string | undefined, housekeeping: string | undefined): string {
+/** Every skipped tool by name, those sharing a reason together: the reason is one line, the names are what the person ticked. */
+function skippedByReason(skipped: readonly ToolResult[]): string {
+  const byNote = new Map<string, string[]>();
+  for (const t of skipped) byNote.set(t.note ?? "no reason given", [...(byNote.get(t.note ?? "no reason given") ?? []), t.label]);
+  return [...byNote].map(([note, names]) => `${names.join(", ")} (${note})`).join("; ");
+}
+
+function summarize(tools: ToolResult[], housekeeping: string | undefined): string {
   const parts: string[] = [];
   const n = (o: ToolResult["outcome"]) => tools.filter(t => t.outcome === o);
   const roads = n("installed").filter(t => t.road !== undefined).map(t => `${t.label} ${t.road!.kind === "release" ? "from the GitHub release" : "with go install"}`);
@@ -141,8 +148,26 @@ function summarize(tools: ToolResult[], floor: string | undefined, housekeeping:
   const failed = n("failed");
   if (failed.length > 0) parts.push(`${failed.length} failed: ${failed.map(t => `${t.label} (${t.note})`).join(", ")}`);
   const skipped = n("skipped");
-  if (skipped.length > 0) parts.push(`${skipped.length} skipped${floor !== undefined ? ` (${floor})` : ""}`);
+  if (skipped.length > 0) parts.push(`${skipped.length} skipped: ${skippedByReason(skipped)}`);
   return housekeeping !== undefined ? `${parts.join(", ")}; ${housekeeping}` : parts.join(", ");
+}
+
+/** The installs that name their command, checked by name on the tools PATH: an install that exited 0 without
+ * putting the command there is a failure, not an install, and so is one the check could not reach. */
+async function verifyCommands(machine: Machine, tools: readonly ToolInstall[], results: ToolResult[], stage: Stage): Promise<void> {
+  const named = results.filter(r => r.outcome === "installed").map(r => ({ result: r, bin: tools.find(t => t.id === r.id)?.bin })).filter((x): x is { result: ToolResult; bin: string } => x.bin !== undefined);
+  if (named.length === 0) return;
+  const cmd = `export PATH=${TOOLS_PATH}\nfor b in ${named.map(x => squote(x.bin)).join(" ")}; do command -v "$b" >/dev/null 2>&1 || echo "missing $b"; done`;
+  const res = await machine.exec(cmd, { timeoutMs: INLINE_EXEC_MS });
+  const failed = res.exitCode === 0 ? undefined : reasonOf(res, INLINE_EXEC_MS / 1000);
+  if (failed !== undefined) stage("installing-tools", `the PATH check failed (${failed}): ${named.map(x => x.bin).join(", ")} count as failed`);
+  const missing = new Set(res.stdout.split("\n").flatMap(l => (l.startsWith("missing ") ? [l.slice("missing ".length).trim()] : [])));
+  for (const x of named) {
+    if (failed === undefined && !missing.has(x.bin)) continue;
+    x.result.outcome = "failed";
+    x.result.note = failed === undefined ? `${x.bin} is not on PATH after the install` : `${x.bin} could not be checked on PATH: ${failed}`;
+    delete x.result.road;
+  }
 }
 
 /** Runs the plan's installs one at a time. Each tool fails alone and is named in the stage detail;
@@ -193,6 +218,7 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
       out.tools.push({ id: tool.id, label: tool.label, outcome: "failed", note: reasonOf(res, TOOL_TIMEOUT_S), ms });
     }
   }
+  await verifyCommands(machine, tools, out.tools, stage);
   let housekeeping: string | undefined;
   if (installed.has("tools/homebrew")) {
     const before = await freeBytes(machine);
@@ -205,6 +231,6 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
     if (failed.length > 0) housekeeping = `Homebrew cleanup failed (${failed.join("; ")})`;
     else if (before.kind === "free" && after.kind === "free" && after.bytes > before.bytes) housekeeping = `Homebrew cleanup freed ${fmtBytes(after.bytes - before.bytes)}`;
   }
-  stage("installing-tools", summarize(out.tools, floor, housekeeping));
+  stage("installing-tools", summarize(out.tools, housekeeping));
   return out;
 }
