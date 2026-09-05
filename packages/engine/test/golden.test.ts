@@ -1184,9 +1184,9 @@ describe("golden import stages", () => {
         tools: [],
         agents: [],
         removed: [
-          { id: "tools/brew/jq", label: "jq", outcome: "removed" },
-          { id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", outcome: "removed" },
-          { id: "editors/vim", label: "vim", outcome: "removed" },
+          { what: "tool", id: "tools/brew/jq", label: "jq", outcome: "removed" },
+          { what: "tool", id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", outcome: "removed" },
+          { what: "editor", id: "editors/vim", label: "vim", outcome: "removed" },
         ],
       });
       const v3 = await sealGolden(b3, { backend, smoke: "true", manifest: v2.manifest });
@@ -1239,10 +1239,10 @@ describe("golden import stages", () => {
       expect(results).toHaveLength(1);
       expect(results[0]!.tools.map(t => [t.id, t.outcome])).toEqual([["tools/brew/jq", "installed"]]);
       expect(results[0]!.removed).toEqual([
-        { id: "shell/zshrc", label: "~/.zshrc", outcome: "removed" },
-        { id: "tools/npm/bun", label: "bun", outcome: "failed", note: "npm ERR! not installed" },
-        { id: "agents/gemini", label: "Gemini CLI", outcome: "removed" },
-        { id: "agents/claude", label: "Claude Code", outcome: "kept", note: "Claude Code has no uninstaller; left on the machine" },
+        { what: "file", id: "shell/zshrc", label: "~/.zshrc", outcome: "removed" },
+        { what: "tool", id: "tools/npm/bun", label: "bun", outcome: "failed", note: "npm ERR! not installed" },
+        { what: "agent", id: "agents/gemini", label: "Gemini CLI", outcome: "removed" },
+        { what: "agent", id: "agents/claude", label: "Claude Code", outcome: "kept", note: "Claude Code has no uninstaller; left on the machine" },
       ]);
     });
   });

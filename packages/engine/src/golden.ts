@@ -193,6 +193,7 @@ export interface AgentResult {
 
 /** What an update took off the machine, or left there and why. */
 export interface RemovalResult {
+  what: Removal["what"];
   id: string;
   label: string;
   outcome: "removed" | "failed" | "kept";
@@ -684,12 +685,12 @@ export async function applyDelta(machine: Machine, delta: GoldenDelta, opts: App
     stage("applying-setup", `removing ${delta.removals.length} item${delta.removals.length === 1 ? "" : "s"}`);
     for (const r of delta.removals) {
       if (r.cmd === undefined) {
-        removed.push({ id: r.id, label: r.label, outcome: "kept", note: r.note ?? "left on the machine" });
+        removed.push({ what: r.what, id: r.id, label: r.label, outcome: "kept", note: r.note ?? "left on the machine" });
         continue;
       }
       const res = await machine.exec(guarded(r.cmd, TOOL_TIMEOUT_S), { timeoutMs: (TOOL_TIMEOUT_S + GUARD_SLACK_S) * 1000 });
-      if (res.exitCode === 0) removed.push({ id: r.id, label: r.label, outcome: "removed" });
-      else removed.push({ id: r.id, label: r.label, outcome: "failed", note: reasonOf(res, TOOL_TIMEOUT_S) });
+      if (res.exitCode === 0) removed.push({ what: r.what, id: r.id, label: r.label, outcome: "removed" });
+      else removed.push({ what: r.what, id: r.id, label: r.label, outcome: "failed", note: reasonOf(res, TOOL_TIMEOUT_S) });
     }
     const done = removed.filter(r => r.outcome === "removed").map(r => r.label);
     const notes = removed.filter(r => r.outcome !== "removed").map(r => (r.outcome === "failed" ? `${r.label} not removed (${r.note})` : `${r.label}: ${r.note}`));
