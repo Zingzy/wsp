@@ -177,11 +177,11 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
 
   const { setSending, appendUserTurn, appendLocalError, resume, busy, sending } = thread;
   const start = useCallback(
-    (prompt: string, onRefused: () => void) => {
+    (prompt: string, onRefused: () => void, onAccepted: () => void = noop) => {
       if (!api) return;
       setSending(true);
       appendUserTurn(prompt);
-      void api.startSession({ workspaceId, prompt, ...(resume ? { resume } : {}), ...(cwd !== null ? { cwd } : {}), ...startOptions }).catch((err: unknown) => {
+      void api.startSession({ workspaceId, prompt, ...(resume ? { resume } : {}), ...(cwd !== null ? { cwd } : {}), ...startOptions }).then(onAccepted, (err: unknown) => {
         setSending(false);
         onRefused();
         appendLocalError(err instanceof Error ? err.message : String(err));
@@ -197,11 +197,15 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     if (prompt === "") return;
     setDraft(workspaceId, EMPTY_DRAFT);
     if (!busy) {
-      release(threadKey);
-      start(prompt, () => {
-        const current = useComposerDraftStore.getState().drafts[workspaceId];
-        if (current === undefined || current.prompt === "") setDraft(workspaceId, { prompt, cursor: prompt.length });
-      });
+      // Held rows are released once the runtime takes this send, so a refusal does not try the head row too.
+      start(
+        prompt,
+        () => {
+          const current = useComposerDraftStore.getState().drafts[workspaceId];
+          if (current === undefined || current.prompt === "") setDraft(workspaceId, { prompt, cursor: prompt.length });
+        },
+        () => release(threadKey),
+      );
       return;
     }
     // Rows riding a fresh send stay held until its start names the thread, so a pin or a dead harness leaves them waiting.

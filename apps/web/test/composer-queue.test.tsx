@@ -253,6 +253,68 @@ describe("composer queue", () => {
     expect(queued()).toEqual([]);
   });
 
+  it("a fresh thread whose harness dies before its start settles the send and shows the failure; the rows that rode it stay visible and editable and follow the next Enter", async () => {
+    const history: Record<string, SessionEvent[]> = { [WS]: CHAT_STREAM.map(e => ({ ...e, sessionId: "sess_a", threadId: "thr_a" })) };
+    const { api, started, emit } = fixtureApi(history);
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    act(() => requestNewThread({ workspaceId: WS }));
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toBeDefined());
+    await enter("first");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]?.resume).toBeUndefined();
+    await enter("second");
+    expect(queued()).toEqual(["second"]);
+    const X = { workspaceId: WS, sessionId: "sess_x", turnId: "turn_x1", threadId: "thr_x" };
+    emit({ type: "session.done", ...X, result: { status: "failed", error: "claude: command not found" } });
+    emit({ type: "session.end", ...X, exitCode: 127, sawResult: true });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send message" })).toBeDefined());
+    expect(screen.getByText(/claude: command not found/i)).toBeDefined();
+    expect(screen.getByTestId("settled-footer").textContent).toContain("failed");
+    expect(started).toHaveLength(1);
+    expect(queued()).toEqual(["second"]);
+    fireEvent.change(rowFor("second").querySelector("textarea")!, { target: { value: "second, edited" } });
+    expect(queued()).toEqual(["second, edited"]);
+    await enter("third");
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "third"]));
+    expect(started[1]?.resume).toBeUndefined();
+    expect(queued()).toEqual(["second, edited"]);
+    const Y = { workspaceId: WS, sessionId: "sess_y", turnId: "turn_y1", threadId: "thr_y" };
+    emit({ type: "session.start", ...Y, prompt: "third" });
+    expect(useComposerDraftStore.getState().queues["thr_y"]?.map(r => r.prompt)).toEqual(["second, edited"]);
+    emit({ type: "session.done", ...Y, result: { status: "completed", durationMs: 500 } });
+    emit({ type: "session.end", ...Y, exitCode: 0, sawResult: true });
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "third", "second, edited"]));
+    expect(started[2]?.resume).toBe("sess_y");
+    expect(queued()).toEqual([]);
+  });
+
+  it("a refused send from the box leaves the held rows held: none is tried, the draft comes back", async () => {
+    useComposerDraftStore.getState().enqueue(WS, "one");
+    useComposerDraftStore.getState().enqueue(WS, "two");
+    await reloadStore();
+    const { api, started } = fixtureApi({ [WS]: CHAT_STREAM.slice() });
+    const accept = api.startSession;
+    let refuse = true;
+    api.startSession = async opts => {
+      if (!refuse) return accept(opts);
+      started.push(opts);
+      throw new Error("machine is napping");
+    };
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    expect(queued()).toEqual(["one", "two"]);
+    await enter("four");
+    await waitFor(() => expect(screen.getByText(/machine is napping/i)).toBeDefined());
+    await waitFor(() => expect(draft()).toBe("four"));
+    expect(started.map(s => s.prompt)).toEqual(["four"]);
+    expect(queued()).toEqual(["one", "two"]);
+    refuse = false;
+    fireEvent.click(within(rowFor("one"), "Send now")!);
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["four", "one"]));
+    expect(queued()).toEqual(["two"]);
+  });
+
   it("a refused start puts the row back at the head and holds the queue until the person acts", async () => {
     const { api, started, emit } = fixtureApi();
     const accept = api.startSession;

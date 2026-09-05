@@ -202,4 +202,41 @@ describe("reduceEvent", () => {
     expect(ended.stale).toBeNull();
     expect(ended.events).toEqual([B_START]);
   });
+
+  it("a send settles at its start or at the end of a turn other than the one settled when it began; that turn's trailing end keeps it", () => {
+    const sending = state(A.slice(0, -1), { sending: { after: "turn_0001" } });
+    const trailing = reduceEvent(sending, A.at(-1)!, T0);
+    expect(trailing.events).toEqual(A);
+    expect(trailing.sending).toEqual({ after: "turn_0001" });
+    const x = { workspaceId: CHAT_WS, sessionId: "sess_x", turnId: "turn_x1", threadId: "thr_a" };
+    expect(reduceEvent(trailing, { type: "session.end", ...x, exitCode: 127, sawResult: true }, T0).sending).toBeNull();
+    expect(reduceEvent(trailing, { type: "session.start", ...x, prompt: "next" }, T0).sending).toBeNull();
+    expect(reduceEvent(trailing, { type: "session.done", ...x, result: { status: "failed", error: "gone" } }, T0).sending).toEqual({ after: "turn_0001" });
+  });
+
+  it("named is the key a send's start lands under while the thread has no id: its thread id, or the workspace id without one", () => {
+    const sending = state([], { sending: { after: undefined } });
+    expect(reduceEvent(sending, B_START, T0).named).toBe("thr_b");
+    expect(reduceEvent(sending, CHAT_STREAM[0]!, T0).named).toBe(CHAT_WS);
+    expect(reduceEvent(state([]), B_START, T0).named).toBeNull();
+    const stamped = state(A, { sending: { after: "turn_0001" } });
+    expect(reduceEvent(stamped, { type: "session.start", ...b, threadId: "thr_a" }, T0).named).toBeNull();
+  });
+
+  it("while fresh with a send in flight, a harness that dies before its start lands and settles the send; the left thread's trailing end is still dropped", () => {
+    const fresh = state([], { fresh: true, left: "thr_a", sending: { after: undefined } });
+    expect(reduceEvent(fresh, A.at(-1)!, T0)).toBe(fresh);
+    const x = { workspaceId: CHAT_WS, sessionId: "sess_x", turnId: "turn_x1", threadId: "thr_x" };
+    const died: SessionEvent = { type: "session.done", ...x, result: { status: "failed", error: "claude: command not found" } };
+    const failed = reduceEvent(fresh, died, T0);
+    expect(failed.events).toEqual([died]);
+    expect(failed.sending).toEqual({ after: undefined });
+    const ended = reduceEvent(failed, { type: "session.end", ...x, exitCode: 127, sawResult: true }, T0);
+    expect(ended.sending).toBeNull();
+    expect(ended.fresh).toBe(true);
+    expect(ended.named).toBeNull();
+    expect(deriveChatThread(ended).settled?.state).toBe("error");
+    const idle = state([], { fresh: true, left: "thr_a" });
+    expect(reduceEvent(idle, died, T0)).toBe(idle);
+  });
 });

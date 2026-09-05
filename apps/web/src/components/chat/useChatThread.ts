@@ -138,10 +138,19 @@ function belongsToStale(stale: Extract<StaleTurn, { kind: "turn" }>, e: SessionE
   return e.turnId !== undefined && stale.turnId !== undefined ? e.turnId === stale.turnId : e.sessionId === stale.sessionId;
 }
 
-/** A view holds one thread: once its events carry a thread id, another thread's events are not its own. Fresh, only a session.start can be its own. */
+/** The thread id the held events carry; none while fresh, since a failed fresh send leaves events under an id the person never saw start. */
+function heldThreadId(state: ThreadState): string | undefined {
+  return state.fresh ? undefined : state.events.at(-1)?.threadId;
+}
+
+/**
+ * A view holds one thread: once its events carry a thread id, another thread's events are not its own. Fresh, a
+ * session.start is its own, and so is any event from a thread other than the one left while a send is in flight:
+ * that is the send's own harness dying before its start, and the left thread's trailing end is not it.
+ */
 function inHeldThread(state: ThreadState, e: SessionEvent): boolean {
-  if (state.fresh) return e.type === "session.start";
-  const held = state.events.at(-1)?.threadId;
+  if (state.fresh) return e.type === "session.start" || (state.sending !== null && e.threadId !== state.left);
+  const held = heldThreadId(state);
   return held === undefined || e.threadId === held;
 }
 
@@ -164,7 +173,7 @@ export function reduceEvent(state: ThreadState, e: SessionEvent, at: string): Th
   if (state.sending === null) return next;
   const starts = e.type === "session.start";
   const settles = starts || (e.type === "session.end" && e.turnId !== state.sending.after);
-  const named = starts && state.events.at(-1)?.threadId === undefined ? (e.threadId ?? e.workspaceId) : state.named;
+  const named = starts && heldThreadId(state) === undefined ? (e.threadId ?? e.workspaceId) : state.named;
   return settles ? { ...next, sending: null, named } : next;
 }
 
@@ -339,7 +348,7 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
     fresh: state.fresh,
     resume: state.fresh ? undefined : (view.latestTurn?.sessionId ?? (threadId === null ? remembered : undefined)),
     finishing,
-    threadKey: threadId ?? state.events.at(-1)?.threadId ?? workspaceId,
+    threadKey: threadId ?? heldThreadId(state) ?? workspaceId,
     named: threadId === null ? state.named : null,
     appendUserTurn,
     appendLocalError,
