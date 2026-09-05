@@ -180,6 +180,8 @@ describe("runtime session history", () => {
       adapter,
       lastStart: () => lastStart,
       start: (cwd?: string) => onEvent!({ type: "session.start", sessionId, model: "claude-sonnet-4-5", ...(cwd !== undefined ? { cwd } : {}) }),
+      tool: (command: string, cwd?: string) =>
+        onEvent!({ type: "turn.delta", sessionId, kind: "tool_use", text: JSON.stringify({ command }), toolName: "Bash", toolUseId: "t1", ...(cwd !== undefined ? { cwd } : {}) }),
       done: (text: string) => onEvent!({ type: "turn.done", sessionId, result: { status: "completed", text } }),
       end: () => {
         onEvent!({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
@@ -468,6 +470,26 @@ describe("runtime session history", () => {
     m.done("done");
     m.end();
     await handle.finished;
+    await rt.close();
+  });
+
+  it("SessionView follows the agent's shell when a tool call moves it, and the delta event carries the folder", async () => {
+    const m = manual();
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: m.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const deltas: Array<string | undefined> = [];
+    rt.events.on("session.delta", e => { if (e.type === "session.delta") deltas.push(e.cwd); });
+    const handle = await rt.sessions.start(ws.id, { prompt: "go", cwd: "/root" });
+    m.start("/root");
+    m.tool("ls");
+    m.tool("cd /root/2048 && ls", "/root/2048");
+    expect(rt.sessions.list(ws.id)[0]!.cwd).toBe("/root/2048");
+    expect(deltas).toEqual([undefined, "/root/2048"]);
+    m.done("done");
+    m.end();
+    await handle.finished;
+    const history = await rt.sessions.history(ws.id);
+    expect(history.filter(e => e.type === "session.delta").map(e => (e.type === "session.delta" ? e.cwd : null))).toEqual([undefined, "/root/2048"]);
     await rt.close();
   });
 

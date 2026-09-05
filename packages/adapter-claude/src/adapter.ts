@@ -4,6 +4,7 @@
 // recorded in solari-poc/RESULTS.md.
 
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv, newSessionId } from "./landmines.js";
+import { shellCwdAfter } from "./shell-cwd.js";
 
 export type DeltaKind = "text" | "thinking" | "tool_use" | "tool_result";
 export type TurnStatus = "completed" | "interrupted" | "failed";
@@ -41,6 +42,8 @@ export type AdapterEvent =
       toolName?: string;
       toolUseId?: string;
       isError?: boolean;
+      /** The agent's tool shell folder after this tool_use, present only when the call moved it. */
+      cwd?: string;
     }
   | { type: "turn.done"; sessionId: string; result: TurnResult }
   | { type: "session.end"; sessionId: string; exitCode: number | null; sawResult: boolean };
@@ -135,6 +138,14 @@ function parseLine(raw: string): Record<string, unknown> | undefined {
   }
   const event = rec(value);
   return event !== undefined && typeof event.type === "string" ? event : undefined;
+}
+
+function parseInput(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
 }
 
 function flattenContent(value: unknown): string {
@@ -274,6 +285,8 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     let sawResult = false;
     let interruptRequested = false;
     let turnResult: TurnResult | undefined;
+    let harnessCwd: string | undefined;
+    let shellCwd: string | undefined;
 
     const finished = (async (): Promise<TurnResult> => {
       let streamError: string | undefined;
@@ -282,7 +295,18 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           const event = parseLine(raw);
           if (event === undefined) continue;
           for (const normalized of normalizeEvent(event, claudeSessionId)) {
-            if (normalized.type === "session.start") claudeSessionId = normalized.sessionId;
+            if (normalized.type === "session.start") {
+              claudeSessionId = normalized.sessionId;
+              harnessCwd = normalized.cwd;
+              shellCwd = normalized.cwd;
+            }
+            if (normalized.type === "turn.delta" && normalized.kind === "tool_use" && shellCwd !== undefined && harnessCwd !== undefined) {
+              const moved = shellCwdAfter(normalized.toolName, parseInput(normalized.text), shellCwd, harnessCwd);
+              if (moved !== undefined) {
+                shellCwd = moved;
+                normalized.cwd = moved;
+              }
+            }
             if (normalized.type === "turn.done") {
               sawResult = true;
               turnResult = normalized.result;

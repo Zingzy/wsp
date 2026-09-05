@@ -311,3 +311,64 @@ describe("result classification", () => {
     expect(events.map((e) => e.type)).toEqual(["turn.done", "session.end"]);
   });
 });
+
+describe("ClaudeAdapter follows the agent's tool shell", () => {
+  const SID = "e16ed170-8257-4668-879e-fe836341633c";
+  const init = JSON.stringify({ type: "system", subtype: "init", cwd: "/root", session_id: SID, tools: ["Bash", "Write"], model: "claude-sonnet-4-5" });
+  const toolUse = (id: string, name: string, input: Record<string, unknown>) =>
+    JSON.stringify({ type: "assistant", session_id: SID, message: { role: "assistant", content: [{ type: "tool_use", id, name, input }] } });
+  const toolResult = (id: string) =>
+    JSON.stringify({ type: "user", session_id: SID, message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: "ok", is_error: false }] } });
+  const result = JSON.stringify({ type: "result", subtype: "success", is_error: false, duration_ms: 1, result: "done", session_id: SID });
+
+  async function run(lines: string[]) {
+    const exec = scriptedExec(lines);
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { events, onEvent } = collect();
+    await adapter.start({ prompt: "go", onEvent }).finished;
+    return events.filter((e) => e.type === "turn.delta").map((e) => (e.type === "turn.delta" ? [e.kind, e.toolName, e.cwd] : []));
+  }
+
+  it("stamps the shell's folder on the tool_use that moves it, and nothing else", async () => {
+    const deltas = await run([
+      init,
+      toolUse("t1", "Bash", { command: "ls" }),
+      toolResult("t1"),
+      toolUse("t2", "Bash", { command: "cd /root/2048 && npm test" }),
+      toolResult("t2"),
+      toolUse("t3", "Write", { file_path: "/root/2048/src/game.js", content: "" }),
+      toolResult("t3"),
+      toolUse("t4", "Bash", { command: "cd /root/2048" }),
+      toolResult("t4"),
+      result,
+    ]);
+    expect(deltas).toEqual([
+      ["tool_use", "Bash", undefined],
+      ["tool_result", undefined, undefined],
+      ["tool_use", "Bash", "/root/2048"],
+      ["tool_result", undefined, undefined],
+      ["tool_use", "Write", undefined],
+      ["tool_result", undefined, undefined],
+      ["tool_use", "Bash", undefined],
+      ["tool_result", undefined, undefined],
+    ]);
+  });
+
+  it("takes a Write under the harness folder as the shell's folder when no cd came first", async () => {
+    const deltas = await run([
+      init,
+      toolUse("t1", "Write", { file_path: "/root/2048/index.html", content: "" }),
+      toolResult("t1"),
+      toolUse("t2", "Edit", { file_path: "/root/2048/style.css", old_string: "a", new_string: "b" }),
+      toolResult("t2"),
+      toolUse("t3", "Write", { file_path: "/etc/motd", content: "" }),
+      toolResult("t3"),
+      result,
+    ]);
+    expect(deltas.filter(([kind]) => kind === "tool_use")).toEqual([
+      ["tool_use", "Write", "/root/2048"],
+      ["tool_use", "Edit", undefined],
+      ["tool_use", "Write", undefined],
+    ]);
+  });
+});

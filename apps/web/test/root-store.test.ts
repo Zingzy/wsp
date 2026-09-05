@@ -37,3 +37,33 @@ describe("pane root", () => {
     expect(useRootStore.getState().byWorkspaceId).toBe(before);
   });
 });
+
+describe("the agent's shell folder", () => {
+  it("roots the panes over the thread's folder, and clears when the thread does", () => {
+    useRootStore.getState().follow(WS, "/root");
+    useRootStore.getState().shell(WS, "/root/2048");
+    expect(root()).toBe("/root/2048");
+    expect(useRootStore.getState().byWorkspaceId[WS]!.followed).toBe("/root");
+    useRootStore.getState().shell(WS, null);
+    expect(root()).toBe("/root");
+  });
+
+  it("loses to the pin, and is ignored outside the daemon's root", () => {
+    useRootStore.getState().follow(WS, "/root");
+    useRootStore.getState().pin(WS, "/root/docs");
+    useRootStore.getState().shell(WS, "/root/2048");
+    expect(root()).toBe("/root/docs");
+    useRootStore.getState().unpin(WS);
+    expect(root()).toBe("/root/2048");
+    useRootStore.getState().shell(WS, "/tmp/scratch");
+    expect(root()).toBe("/root");
+    expect(selectRoot(useRootStore.getState().byWorkspaceId, WS, "/")).toBe("/tmp/scratch");
+  });
+
+  it("does not produce a new state for a shell folder already held", () => {
+    useRootStore.getState().shell(WS, "/root/2048");
+    const before = useRootStore.getState().byWorkspaceId;
+    useRootStore.getState().shell(WS, "/root/2048");
+    expect(useRootStore.getState().byWorkspaceId).toBe(before);
+  });
+});

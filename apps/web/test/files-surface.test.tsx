@@ -136,7 +136,7 @@ describe("files surface", () => {
     expect(up().disabled).toBe(false);
     fireEvent.click(up());
     await waitFor(() => expect(rootLabel(container)).toBe("/root"));
-    expect(useRootStore.getState().byWorkspaceId[WS]).toEqual({ followed: "/root/app", pinned: "/root" });
+    expect(useRootStore.getState().byWorkspaceId[WS]).toEqual({ followed: "/root/app", pinned: "/root", shell: null });
     expect(up().disabled).toBe(true);
 
     const requests: string[] = [];

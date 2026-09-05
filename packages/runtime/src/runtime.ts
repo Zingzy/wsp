@@ -1482,6 +1482,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             return;
           }
           case "turn.delta":
+            if (event.cwd !== undefined) sessionView.cwd = event.cwd;
             record({
               type: "session.delta",
               workspaceId,
@@ -1493,6 +1494,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               ...(event.toolName !== undefined ? { toolName: event.toolName } : {}),
               ...(event.toolUseId !== undefined ? { toolUseId: event.toolUseId } : {}),
               ...(event.isError !== undefined ? { isError: event.isError } : {}),
+              ...(event.cwd !== undefined ? { cwd: event.cwd } : {}),
             });
             return;
           case "turn.done":

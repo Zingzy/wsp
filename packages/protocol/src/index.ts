@@ -165,7 +165,8 @@ export const SessionView = z.object({
   /** Ms epoch, runtime clock; endedAt is unset while the session runs. */
   startedAt: z.number().optional(),
   endedAt: z.number().optional(),
-  /** The folder the harness runs in: the start request's, then what the harness itself announced. */
+  /** The folder the agent works in: the start request's, then what the harness announced, then where its tool
+   * calls moved its shell. */
   cwd: z.string().optional(),
   /** What the session runs with, as the harness's own slugs: the start request's model until the harness announces
    * its own; effort and permission mode as requested, since the CLI never echoes them. */
@@ -255,6 +256,9 @@ export const SessionDeltaEvent = z.object({
   toolName: z.string().optional(),
   toolUseId: z.string().optional(),
   isError: z.boolean().optional(),
+  /** The agent's tool shell folder after this tool_use, present only when the call moved it (a cd, or a file written
+   * in a folder beside the one followed so far); the panes follow it while the harness folder stays put. */
+  cwd: z.string().optional(),
 });
 
 export const SessionDoneEvent = z.object({
