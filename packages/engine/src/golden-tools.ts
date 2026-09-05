@@ -143,7 +143,7 @@ function skippedByReason(skipped: readonly ToolResult[]): string {
 function summarize(tools: ToolResult[], housekeeping: string | undefined): string {
   const parts: string[] = [];
   const n = (o: ToolResult["outcome"]) => tools.filter(t => t.outcome === o);
-  const roads = n("installed").filter(t => t.road !== undefined).map(t => `${t.label} ${t.road!.kind === "release" ? "from the GitHub release" : "with go install"}`);
+  const roads = n("installed").filter(t => t.road !== undefined).map(t => `${t.label} ${t.road!.kind === "release" ? "from its release" : "with go install"}`);
   parts.push(`${n("installed").length} installed${roads.length > 0 ? ` (${roads.join(", ")})` : ""}`);
   const failed = n("failed");
   if (failed.length > 0) parts.push(`${failed.length} failed: ${failed.map(t => `${t.label} (${t.note})`).join(", ")}`);

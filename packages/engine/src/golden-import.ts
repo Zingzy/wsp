@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { MCP_ID_PREFIX, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
+import { linuxCaskFor } from "./linux-casks.js";
 
 export type { RecipeDigest };
 
@@ -625,10 +626,12 @@ export function brewfileFor(entries: readonly RecipeEntry[], brew: BrewTable = n
       else out.formulae.push(formula);
     } else if (e.id.startsWith(CLI_PREFIX)) {
       const road = cliRoad(e);
-      if (road === undefined) out.skipped.push({ id: e.id, note: "no GitHub release to install from" });
+      if (road === undefined) {
+        if (linuxCaskFor(e.id) === undefined) out.skipped.push({ id: e.id, note: "no GitHub release to install from" });
+      }
       else out.roads.push({ id: e.id, name: e.id.slice(CLI_PREFIX.length), ...road, ...(e.pin !== undefined ? { pin: e.pin } : {}) });
     } else if (e.id.startsWith("tools/brew-cask/")) {
-      out.skipped.push({ id: e.id, note: "macOS app, no Linux build" });
+      if (linuxCaskFor(e.id) === undefined) out.skipped.push({ id: e.id, note: "macOS app, no Linux build" });
     } else if (e.id.startsWith("tools/mas/")) {
       out.skipped.push({ id: e.id, note: "Mac App Store, macOS only" });
     }
@@ -742,6 +745,8 @@ function roadInstall(name: string, source: ToolSource, pin?: string, go = `githu
 export function toolUninstall(e: RecipeEntry): { cmd: string } | { note: string } {
   const withPath = (cmd: string): string => `${PATH_LINE}\n${cmd}`;
   if (e.id.startsWith("tools/brew-tap/")) return { cmd: withPath(asLinuxbrew(`untap ${e.id.slice("tools/brew-tap/".length)}`)) };
+  const cask = linuxCaskFor(e.id);
+  if (cask !== undefined) return { cmd: withPath(cask.uninstall) };
   if (e.id.startsWith("tools/brew-cask/") || e.id.startsWith("tools/mas/")) return { note: "never installed on Linux" };
   if (e.id.startsWith(CLI_PREFIX)) return { cmd: withPath(`rm -f /usr/local/bin/${squote(e.id.slice(CLI_PREFIX.length))}`) };
   const manager = (["brew", ...MANAGER_ORDER] as const).find(m => e.id.startsWith(`tools/${m}/`));
@@ -836,6 +841,11 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
   for (const r of brew.roads) {
     const label = entries.find(e => e.id === r.id)?.label ?? r.name;
     installs.push({ id: r.id, label, manager: "github", cmd: withPath(roadInstall(r.name, r.source, pinState(r.pin, r.source) === "same" ? r.pin!.sha256 : undefined, r.go)), bin: r.name });
+  }
+  // A cask that is a command installs from its vendor's Linux release, hashed on the guest as a road is.
+  for (const e of entries) {
+    const cask = ticked(e) && e.rung === "tools" ? linuxCaskFor(e.id) : undefined;
+    if (cask !== undefined) installs.push({ id: e.id, label: e.label, manager: "release", cmd: withPath(cask.install(e.version, e.pin)), bin: cask.bin });
   }
   return { installs, skipped, brewfile: brew.text };
 }
@@ -1203,6 +1213,20 @@ export interface NodeInstall {
   /** The agents whose engines asked for it, in recipe order. */
   agents: string[];
   cmd: string;
+}
+
+/** The package each agent installer puts on the machine through a manager the tools rung also lists, as that rung's row id. */
+const AGENT_TOOL_ROWS: ReadonlyMap<string, string> = new Map(
+  Object.entries(AGENT_INSTALLERS).flatMap(([agent, a]) => {
+    const npm = /^npm install -g .*?(\S+)@\S+$/m.exec(a.install)?.[1];
+    const uv = /^uv tool install .*?(\S+)==\S+$/m.exec(a.install)?.[1];
+    return [...(npm !== undefined ? [[`tools/npm/${npm}`, agent] as const] : []), ...(uv !== undefined ? [[`tools/uv/${uv}`, agent] as const] : [])];
+  }),
+);
+
+/** The agent whose installer would put this tools row's package on the machine a second time, by id. */
+export function agentOwning(toolId: string): string | undefined {
+  return AGENT_TOOL_ROWS.get(toolId);
 }
 
 export interface AgentsPlan {

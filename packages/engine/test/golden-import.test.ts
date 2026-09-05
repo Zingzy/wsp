@@ -6,6 +6,7 @@ import {
   HELIX,
   NODE_RELEASES,
   agentInstallsFor,
+  agentOwning,
   brewfileFor,
   editorInstallsFor,
   dropGhAccount,
@@ -28,6 +29,7 @@ import {
   SHELL_FRAMEWORKS,
   shellInstallFor,
   toolInstallsFor,
+  toolUninstall,
   BREW_HOUSEKEEPING,
   type BrewTable,
   type DigestedFile,
@@ -35,6 +37,7 @@ import {
   type RecipeDigest,
   type RecipeEntry,
 } from "../src/golden-import.js";
+import { LINUX_CASKS, caskPinState, linuxCaskByBin, linuxCaskFor } from "../src/linux-casks.js";
 
 const row = (over: Partial<RecipeEntry> & Pick<RecipeEntry, "rung" | "id">): RecipeEntry => ({
   label: over.id,
@@ -833,6 +836,19 @@ describe("editorInstallsFor", () => {
   });
 });
 
+describe("agentOwning", () => {
+  it("names the agent whose installer brings an npm or uv package the tools rung would list again; other rows and the git or curl installers own nothing", () => {
+    expect(agentOwning("tools/npm/@earendil-works/pi-coding-agent")).toBe("pi");
+    expect(agentOwning("tools/npm/@openai/codex")).toBe("codex");
+    expect(agentOwning("tools/npm/@google/gemini-cli")).toBe("gemini");
+    expect(agentOwning("tools/npm/opencode-ai")).toBe("opencode");
+    expect(agentOwning("tools/uv/aider-chat")).toBe("aider");
+    expect(agentOwning("tools/npm/wrangler")).toBeUndefined();
+    expect(agentOwning("tools/pnpm/@openai/codex")).toBeUndefined();
+    expect(agentOwning("tools/npm/hermes")).toBeUndefined();
+  });
+});
+
 describe("agentInstallsFor", () => {
   it("every known agent has a pinned installer, its version check, and the documentation it was read from", () => {
     for (const [name, a] of Object.entries(AGENT_INSTALLERS)) {
@@ -991,5 +1007,105 @@ describe("shellInstallFor", () => {
       expect(repo.branch).toMatch(/^(main|master)$/);
       expect(repo.home).not.toMatch(/^[~/]/);
     }
+  });
+});
+
+describe("casks that are commands with a Linux release of their own", () => {
+  const gcloud = (over: Partial<RecipeEntry> = {}) => row({ rung: "tools", id: "tools/brew-cask/gcloud-cli", label: "gcloud-cli", ...over });
+  const docker = (over: Partial<RecipeEntry> = {}) => row({ rung: "tools", id: "tools/brew-cask/docker-desktop", label: "docker-desktop", ...over });
+  const PIN = { tag: "575.0.0", sha256: "b".repeat(64) };
+
+  it("the table knows gcloud-cli by its cask tokens or its command row, and docker-desktop for the kubectl it ships; an app cask is not in it", () => {
+    expect(linuxCaskFor("tools/brew-cask/gcloud-cli")?.bin).toBe("gcloud");
+    expect(linuxCaskFor("tools/cli/gcloud")?.bin).toBe("gcloud");
+    expect(linuxCaskFor("tools/cli/ngrok")).toBeUndefined();
+    expect(linuxCaskFor("tools/brew-cask/google-cloud-sdk")?.bin).toBe("gcloud");
+    expect(linuxCaskFor("tools/brew-cask/docker-desktop")?.bin).toBe("kubectl");
+    expect(linuxCaskFor("tools/brew-cask/rectangle")).toBeUndefined();
+    expect(linuxCaskFor("tools/brew/gcloud-cli")).toBeUndefined();
+    expect(linuxCaskByBin("kubectl")?.casks).toEqual(["docker-desktop", "docker"]);
+    for (const c of LINUX_CASKS) {
+      expect(c.from).not.toMatch(/[()]/);
+      expect(c.detail.length).toBeLessThanOrEqual(76);
+    }
+  });
+
+  it("brewfileFor sets a known cask aside for the install step instead of skipping it, as a cask row or as the command row the collector makes of it; an app cask and a command cask without a release are still skipped", () => {
+    const b = brewfileFor([gcloud(), row({ rung: "tools", id: "tools/cli/gcloud", label: "gcloud (gcloud-cli)", version: "575.0.0" }), row({ rung: "tools", id: "tools/brew-cask/rectangle" }), row({ rung: "tools", id: "tools/cli/ngrok" })]);
+    expect(b.roads).toEqual([]);
+    expect(b.skipped).toEqual([{ id: "tools/brew-cask/rectangle", note: "macOS app, no Linux build" }, { id: "tools/cli/ngrok", note: "no GitHub release to install from" }]);
+  });
+
+  it("the command row of gcloud-cli installs from Google's release at the Mac's version, named for its command so the PATH check covers it", () => {
+    const t = toolInstallsFor([row({ rung: "tools", id: "tools/cli/gcloud", label: "gcloud (gcloud-cli)", version: "575.0.0" })]);
+    expect(t.installs.map(i => [i.id, i.manager, i.bin])).toEqual([["tools/cli/gcloud", "release", "gcloud"]]);
+    expect(t.installs[0]!.cmd).toContain("ver='575.0.0'");
+    expect(toolUninstall(row({ rung: "tools", id: "tools/cli/gcloud" }))).toEqual({ cmd: expect.stringContaining("rm -rf /opt/google-cloud-sdk") });
+  });
+
+  it("gcloud installs Google's tarball for the Mac's version, links its commands into /usr/local/bin and prints the WSP_ROAD line with the sum and the version", () => {
+    const t = toolInstallsFor([gcloud({ version: "575.0.0" })]);
+    expect(t.installs.map(i => [i.id, i.manager, i.after, i.bin])).toEqual([["tools/brew-cask/gcloud-cli", "release", undefined, "gcloud"]]);
+    const cmd = t.installs[0]!.cmd;
+    expect(cmd).toContain("set -euo pipefail");
+    expect(cmd).toContain("ver='575.0.0'");
+    expect(cmd).toContain('pkg="google-cloud-cli-$ver-linux-$a.tar.gz"');
+    expect(cmd).toContain('"https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/$pkg"');
+    expect(cmd).toMatch(/x86_64\) a=x86_64 ;; aarch64\) a=arm ;;/);
+    expect(cmd).toContain("ln -sf /opt/google-cloud-sdk/bin/gcloud /usr/local/bin/gcloud");
+    expect(cmd).toContain('echo "WSP_ROAD release $pkg $sum $ver"');
+    expect(cmd).not.toContain("does not match");
+    expect(cmd).not.toContain("components-2.json");
+  });
+
+  it("without a Mac version and without a pin the current version is read from Google's component list; a pin alone fixes the version to the pinned one", () => {
+    const fresh = toolInstallsFor([gcloud()]).installs[0]!.cmd;
+    expect(fresh).toContain("https://dl.google.com/dl/cloudsdk/channels/rapid/components-2.json");
+    expect(fresh).toContain('[ -n "$ver" ] ||');
+    const pinned = toolInstallsFor([gcloud({ pin: PIN })]).installs[0]!.cmd;
+    expect(pinned).toContain("ver='575.0.0'");
+    expect(pinned).toContain(`[ "$sum" = '${PIN.sha256}' ] ||`);
+    expect(pinned).not.toContain("components-2.json");
+  });
+
+  it("the pin is checked while the Mac's version is the recorded one and dropped once it moved, as caskPinState says", () => {
+    expect(caskPinState({})).toBe("none");
+    expect(caskPinState({ version: "575.0.0" })).toBe("none");
+    expect(caskPinState({ pin: PIN })).toBe("same");
+    expect(caskPinState({ version: "575.0.0", pin: PIN })).toBe("same");
+    expect(caskPinState({ version: "583.0.0", pin: PIN })).toBe("moved");
+    const same = toolInstallsFor([gcloud({ version: "575.0.0", pin: PIN })]).installs[0]!.cmd;
+    expect(same).toContain(`[ "$sum" = '${PIN.sha256}' ] || { echo "Error: $pkg does not match the checksum recorded on the first install of $ver" >&2; exit 1; }`);
+    const moved = toolInstallsFor([gcloud({ version: "583.0.0", pin: PIN })]).installs[0]!.cmd;
+    expect(moved).toContain("ver='583.0.0'");
+    expect(moved).not.toContain("does not match");
+  });
+
+  it("docker-desktop brings kubectl alone: the static binary at the stable version, checked against the published sum; a pin fixes the version and adds its own check", () => {
+    const fresh = toolInstallsFor([docker({ version: "4.80.0,232116" })]).installs[0]!;
+    expect(fresh.manager).toBe("release");
+    expect(fresh.cmd).toContain('ver="$(curl -fsSL https://dl.k8s.io/release/stable.txt)"');
+    expect(fresh.cmd).not.toContain("4.80.0");
+    expect(fresh.cmd).toContain('url="https://dl.k8s.io/release/$ver/bin/linux/$a/kubectl"');
+    expect(fresh.cmd).toMatch(/x86_64\) a=amd64 ;; aarch64\) a=arm64 ;;/);
+    expect(fresh.cmd).toContain('echo "$(cat "$tmp/kubectl.sha256")  $tmp/kubectl" | sha256sum -c - >/dev/null');
+    expect(fresh.cmd).toContain('install -m 0755 "$tmp/kubectl" /usr/local/bin/kubectl');
+    expect(fresh.cmd).toContain('echo "WSP_ROAD release kubectl-$ver-linux-$a $sum $ver"');
+    const pinned = toolInstallsFor([docker({ version: "4.80.0,232116", pin: { tag: "v1.37.0", sha256: "c".repeat(64) } })]).installs[0]!.cmd;
+    expect(pinned).toContain("ver='v1.37.0'");
+    expect(pinned).not.toContain("stable.txt");
+    expect(pinned).toContain(`[ "$sum" = '${"c".repeat(64)}' ] || { echo "Error: kubectl $ver does not match`);
+  });
+
+  it("an unticked known cask installs nothing; a ticked one comes last, after every manager", () => {
+    expect(toolInstallsFor([gcloud({ bring: false })]).installs).toEqual([]);
+    const t = toolInstallsFor([gcloud({ version: "575.0.0" }), row({ rung: "tools", id: "tools/npm/wrangler", label: "wrangler@4.106.0", version: "4.106.0" })]);
+    expect(t.installs.map(i => i.id)).toEqual(["tools/npm/wrangler", "tools/brew-cask/gcloud-cli"]);
+  });
+
+  it("a known cask comes off the machine by the table's command; an app cask was never there", () => {
+    expect(toolUninstall(gcloud())).toEqual({ cmd: expect.stringContaining("rm -rf /opt/google-cloud-sdk /usr/local/bin/gcloud /usr/local/bin/gsutil /usr/local/bin/bq") });
+    expect(toolUninstall(docker())).toEqual({ cmd: expect.stringContaining("rm -f /usr/local/bin/kubectl") });
+    expect(toolUninstall(row({ rung: "tools", id: "tools/brew-cask/rectangle" }))).toEqual({ note: "never installed on Linux" });
   });
 });

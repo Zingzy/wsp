@@ -241,6 +241,32 @@ describe("tools", () => {
     ]);
   });
 
+  it("npm globals under a node prefix npm no longer uses are listed too; a name under both is the current prefix's", async () => {
+    const host = fakeHost({
+      files: { "/opt/homebrew/lib/node_modules/wrangler/package.json": 1 },
+      which: ["npm"],
+      exec: {
+        "npm prefix -g": "/Users/dev/.local\n",
+        "npm ls -g --depth=0 --json": JSON.stringify({ dependencies: { bun: { version: "1.4.0" } } }),
+        "npm ls -g --depth=0 --json --prefix /opt/homebrew": JSON.stringify({ dependencies: { npm: { version: "11.17.0" }, wrangler: { version: "4.106.0" }, bun: { version: "1.3.0" } } }),
+      },
+    });
+    const rows = await detectTools(host);
+    expect(rows.map(r => [r.id, r.label])).toEqual([["tools/npm/bun", "bun@1.4.0"], ["tools/npm/wrangler", "wrangler@4.106.0"]]);
+    expect(host.calls).toContain("run npm ls -g --depth=0 --json --prefix /opt/homebrew");
+  });
+
+  it("the prefix npm itself uses is listed once, and a prefix with no globals is not asked", async () => {
+    const host = fakeHost({
+      files: { "/opt/homebrew/lib/node_modules/wrangler/package.json": 1 },
+      which: ["npm"],
+      exec: { "npm prefix -g": "/opt/homebrew\n", "npm ls -g --depth=0 --json": JSON.stringify({ dependencies: { wrangler: { version: "4.106.0" } } }) },
+    });
+    const rows = await detectTools(host);
+    expect(rows.map(r => r.id)).toEqual(["tools/npm/wrangler"]);
+    expect(host.calls.filter(c => c.includes("--prefix"))).toEqual([]);
+  });
+
   it("bun with an empty global dir lists nothing (bun pm ls -g exits non-zero there)", async () => {
     const host = fakeHost({ which: ["bun"] });
     expect(await detectTools(host)).toEqual([]);
