@@ -307,7 +307,9 @@ function UsageChart({ series, sawSpend }: { series: CostPoint[]; sawSpend: boole
   const track = (e: ReactMouseEvent<SVGSVGElement>): void => {
     const box = e.currentTarget.getBoundingClientRect();
     if (box.width <= 0 || series.length === 0) return;
-    const at = Math.round(((e.clientX - box.left) / box.width) * (series.length - 1));
+    // The inverse of chartPoints, so the hairline lands on the mark under the pointer and not a pad's width beside it.
+    const x = ((e.clientX - box.left) / box.width) * CHART_W;
+    const at = Math.round(((x - CHART_PAD_X) / (CHART_W - 2 * CHART_PAD_X)) * (series.length - 1));
     setHover(Math.min(series.length - 1, Math.max(0, at)));
   };
 
