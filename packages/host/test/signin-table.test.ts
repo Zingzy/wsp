@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { AWS_STATUS, SIGN_INS, claudeSource, signInFor, signInWords, type SignIn } from "../src/signin-table.js";
+import { AWS_STATUS, GEMINI_STATUS, SIGN_INS, claudeSource, geminiSource, secretNamed, signInFor, signInWords, statusOf, type SignIn } from "../src/signin-table.js";
 
 const collectorLogins = (): string[] => {
   const src = readFileSync(join(import.meta.dirname, "../../collect/src/detect/logins.ts"), "utf8");
@@ -20,9 +20,9 @@ function command(name: string): Extract<SignIn, { kind: "command" }> {
 }
 
 const check = (name: string, output: string, exitCode: number): boolean => {
-  const s = command(name);
-  if (s.status === undefined) throw new Error(`${name} has no status command`);
-  return s.status.signedIn(output, exitCode);
+  const status = statusOf(signInFor(name));
+  if (status === undefined) throw new Error(`${name} has no status command`);
+  return status.signedIn(output, exitCode);
 };
 
 describe("sign-in table", () => {
@@ -53,6 +53,11 @@ describe("sign-in table", () => {
     expect(command("supabase").fallback).toBe("supabase login --no-browser");
     expect(command("claude").login).toBe("claude auth login");
     expect(command("opencode").note).toMatch(/1\.3\.0/);
+    // pi signs in only through /login inside its TUI and hermes through its auth menu; both run in the machine's pty.
+    expect(command("pi").login).toBe("pi");
+    expect(command("pi").note).toMatch(/\/login/);
+    expect(command("hermes").login).toBe("hermes auth");
+    expect(command("hermes").fallback).toBeUndefined();
   });
 
   it("names the tool's own wait where it has one and leaves it out where the tool never gives up", () => {
@@ -63,10 +68,22 @@ describe("sign-in table", () => {
   });
 
   it("has a status command for each tool that offers one, and says so for the rest", () => {
-    const withStatus = Object.entries(SIGN_INS).filter(([, s]) => s.kind === "command" && s.status !== undefined).map(([k]) => k);
-    expect(withStatus.sort()).toEqual(["aws", "claude", "codex", "doppler", "fly", "gcloud", "gh", "netlify", "railway", "supabase", "vercel", "wrangler"]);
-    for (const name of ["gemini", "opencode", "cloudflared"]) expect(command(name).status, name).toBeUndefined();
-    for (const name of ["op", "kube", "pi", "hermes"]) expect(signInFor(name).kind, name).toBe("none");
+    const withStatus = Object.entries(SIGN_INS).filter(([, s]) => statusOf(s) !== undefined).map(([k]) => k);
+    expect(withStatus.sort()).toEqual(["aws", "claude", "codex", "doppler", "fly", "gcloud", "gemini", "gh", "hermes", "kube", "netlify", "opencode", "pi", "railway", "supabase", "vercel", "wrangler"]);
+    expect(command("cloudflared").status).toBeUndefined();
+    for (const name of ["op", "kube"]) expect(signInFor(name).kind, name).toBe("none");
+    // kubectl has no sign-in, so its row stays a "none" row whose status still proves a copied kubeconfig.
+    expect(statusOf(signInFor("kube"))?.command).toBe("kubectl config current-context");
+    expect(statusOf(signInFor("op"))).toBeUndefined();
+    expect(statusOf({ kind: "shell" })).toBeUndefined();
+    expect(statusOf(signInFor("gh"))).toBe(command("gh").status);
+    expect(command("opencode").status?.command).toBe("opencode auth list");
+    expect(command("pi").status?.command).toBe("pi --list-models");
+    expect(command("hermes").status?.command).toBe("hermes auth list");
+    // Gemini CLI has no status command of its own, so the check is a shell line over the login file and the two key names its docs name.
+    expect(command("gemini").status?.command).toBe(GEMINI_STATUS);
+    expect(GEMINI_STATUS).toMatch(/^if test -s "\$HOME\/.gemini\/oauth_creds.json"; then echo oauth_creds.json; elif test -n "\$GEMINI_API_KEY"; then echo GEMINI_API_KEY; elif test -n "\$GOOGLE_API_KEY"; then echo GOOGLE_API_KEY; else false; fi$/);
+    expect(GEMINI_STATUS).not.toMatch(/exit/);
   });
 
   it("reads gh auth status: every account listed must be logged in, so a stale one beside a good one fails, as does the no-hosts answer", () => {
@@ -94,6 +111,9 @@ describe("sign-in table", () => {
     expect(check("aws", "Error loading SSO Token: Token for https://example.awsapps.com/start does not exist", 255)).toBe(false);
     expect(check("wrangler", "Getting User settings...\n👋 You are logged in with an OAuth Token, associated with the email someone@example.com.", 0)).toBe(true);
     expect(check("wrangler", "You are not authenticated. Please run `wrangler login`.", 0)).toBe(false);
+    // wrangler 4.106.0 (src/user/whoami.ts) exits 0 either way and words an API token login differently.
+    expect(check("wrangler", "Getting User settings...\n👋 You are logged in with an API Token. Unset the CLOUDFLARE_API_TOKEN in the environment to log in via OAuth.", 0)).toBe(true);
+    expect(check("wrangler", "Getting User settings...\nYou are not authenticated. Please run `wrangler login`.\nTo deploy without logging in, run a command like `wrangler deploy --temporary` to use a temporary preview account.", 0)).toBe(false);
     expect(check("vercel", "someone", 0)).toBe(true);
     expect(check("vercel", "Error: No existing credentials found. Please run `vercel login` or pass \"--token\"", 1)).toBe(false);
     expect(check("netlify", "──────────────────────┐\n Current Netlify User │\n──────────────────────┘\nEmail: someone@example.com", 0)).toBe(true);
@@ -110,6 +130,51 @@ describe("sign-in table", () => {
     expect(check("claude", '{\n  "loggedIn": false\n}', 1)).toBe(false);
     expect(check("codex", "Logged in using ChatGPT", 0)).toBe(true);
     expect(check("codex", "Not logged in", 1)).toBe(false);
+  });
+
+  it("reads kubectl, pi, hermes, opencode and the gemini shell check from their printed shapes", () => {
+    // kubectl v1.36.1 on this Mac: the context name on exit 0, an error on exit 1 (also with no kubeconfig at all).
+    expect(check("kube", "connectgateway_someorg-default_us-central1_someorg-default-cluster-internal", 0)).toBe(true);
+    expect(check("kube", "error: current-context is not set", 1)).toBe(false);
+    expect(check("kube", "", 0)).toBe(false);
+    expect(statusOf(signInFor("kube"))?.detail?.("minikube\n", new Map())).toBe("context minikube");
+    // pi 0.84.1 on this Mac: a model table when some provider has credentials, a /login hint on exit 0 when none has.
+    const models = ["provider   model                       context  max-out  thinking  images", "anthropic  claude-haiku-4-5            200K     64K      yes       yes   "].join("\n");
+    expect(check("pi", models, 0)).toBe(true);
+    expect(check("pi", "No models available. Use /login to log into a provider via OAuth or API key. See:\n  /usr/lib/node_modules/@earendil-works/pi-coding-agent/docs/providers.md", 0)).toBe(false);
+    expect(check("pi", models, 1)).toBe(false);
+    // Hermes Agent v0.20.0 on this Mac: one block per provider with credentials, nothing at all when none has (exit 0 both).
+    const pool = ["anthropic (1 credentials):", "  #1  ANTHROPIC_API_KEY    api_key env:ANTHROPIC_API_KEY ←", "", "nous (1 credentials):", "  #1  device_code          oauth   device_code ←", ""].join("\n");
+    expect(check("hermes", pool, 0)).toBe(true);
+    expect(check("hermes", "", 0)).toBe(false);
+    expect(check("hermes", "Traceback (most recent call last):\n  ModuleNotFoundError: No module named 'yaml'", 1)).toBe(false);
+    // opencode 1.18.18 on this Mac: a credentials count, then an environment count only when a provider key is exported (exit 0 both).
+    const none = "┌  Credentials ~/.local/share/opencode/auth.json\n│\n└  0 credentials\n";
+    expect(check("opencode", none, 0)).toBe(false);
+    expect(check("opencode", "┌  Credentials ~/.local/share/opencode/auth.json\n│\n●  Anthropic api\n│\n└  1 credentials\n", 0)).toBe(true);
+    expect(check("opencode", `${none}\n┌  Environment\n│\n●  Anthropic ANTHROPIC_API_KEY\n│\n└  1 environment variable\n`, 0)).toBe(true);
+    expect(check("opencode", `${none}\n┌  Environment\n│\n●  Anthropic ANTHROPIC_API_KEY\n│\n●  OpenAI OPENAI_API_KEY\n│\n└  2 environment variables\n`, 0)).toBe(true);
+    expect(check("opencode", "┌  Credentials ~/.local/share/opencode/auth.json\n│\n└  10 credentials\n", 0)).toBe(true);
+    // The gemini shell line prints what it found and fails when nothing is there.
+    expect(check("gemini", "oauth_creds.json", 0)).toBe(true);
+    expect(check("gemini", "GEMINI_API_KEY", 0)).toBe(true);
+    expect(check("gemini", "", 1)).toBe(false);
+  });
+
+  it("names the key the secrets step set when a status lists it, and what the gemini check found", () => {
+    const secrets = new Map([["ANTHROPIC_API_KEY", "~/.zshrc"], ["OPENAI_API_KEY", "~/.env"]]);
+    expect(secretNamed("  #1  ANTHROPIC_API_KEY    api_key env:ANTHROPIC_API_KEY ←", secrets)).toBe("API key from ~/.zshrc, set on the machine as a secret");
+    expect(secretNamed("●  OpenAI OPENAI_API_KEY", secrets)).toBe("API key from ~/.env, set on the machine as a secret");
+    expect(secretNamed("●  Anthropic api\n└  1 credentials", secrets)).toBeUndefined();
+    expect(secretNamed("OPENAI_API_KEY_OLD", secrets)).toBeUndefined();
+    expect(secretNamed("anything", new Map())).toBeUndefined();
+    expect(command("opencode").status?.detail).toBe(secretNamed);
+    expect(command("hermes").status?.detail).toBe(secretNamed);
+    expect(geminiSource("oauth_creds.json", secrets)).toBe("OAuth credentials");
+    expect(geminiSource("GEMINI_API_KEY", new Map([["GEMINI_API_KEY", "~/.zshrc"]]))).toBe("API key from ~/.zshrc, set on the machine as a secret");
+    expect(geminiSource("GOOGLE_API_KEY\n", new Map())).toBe("API key from GOOGLE_API_KEY on the machine");
+    expect(geminiSource("", new Map())).toBeUndefined();
+    expect(command("gemini").status?.detail).toBe(geminiSource);
   });
 
   it("reads which key source claude auth status names: the exported key by the file it was cut from, the helper, or the OAuth credentials", () => {

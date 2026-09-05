@@ -28,16 +28,41 @@ export type SignIn =
     }
   /** No table row: a shell where the person types the tool's own command. */
   | { kind: "shell" }
-  /** Nothing to run on a headless machine; the note says what to do instead. */
-  | { kind: "none"; note: string };
+  /** Nothing to run on a headless machine; the note says what to do instead. A status still proves copied files. */
+  | { kind: "none"; note: string; status?: StatusCheck };
 
 const MIN = 60_000;
 
 /** In a subshell so its exits never cut the quiet run's own exit marker. */
 export const AWS_STATUS = `sh -c 'for p in $(aws configure list-profiles 2>/dev/null); do aws sts get-caller-identity --profile "$p" 2>/dev/null && exit 0; done; exit 1'`;
 
+/** Gemini CLI has no status command: its Google sign-in caches oauth_creds.json under ~/.gemini and its other two
+ * sign-ins are these keys, so the line echoes what it finds. No exit, so a miss never cuts the quiet run's marker. */
+export const GEMINI_STATUS = `if test -s "$HOME/.gemini/oauth_creds.json"; then echo oauth_creds.json; elif test -n "$GEMINI_API_KEY"; then echo GEMINI_API_KEY; elif test -n "$GOOGLE_API_KEY"; then echo GOOGLE_API_KEY; else false; fi`;
+
 const has = (re: RegExp) => (output: string): boolean => re.test(output);
 const ok = (re?: RegExp) => (output: string, exitCode: number): boolean => exitCode === 0 && (re === undefined || re.test(output));
+
+/** A key named by the status, by the file the secrets step cut it from, or as the machine's own when that step did not set it. */
+function keyFrom(name: string, secrets: ReadonlyMap<string, string>): string {
+  const from = secrets.get(name);
+  return from === undefined ? `API key from ${name} on the machine` : `API key from ${from}, set on the machine as a secret`;
+}
+
+/** The first key the secrets step set that the status output names as a word: that key is the login's source. */
+export function secretNamed(output: string, secrets: ReadonlyMap<string, string>): string | undefined {
+  const words = new Set(output.split(/[^A-Za-z0-9_]+/));
+  for (const [name, from] of secrets) if (words.has(name)) return `API key from ${from}, set on the machine as a secret`;
+  return undefined;
+}
+
+/** What the gemini line echoed: the cached Google sign-in, or the key it found. */
+export function geminiSource(output: string, secrets: ReadonlyMap<string, string>): string | undefined {
+  const found = output.trim().split(/\s+/).at(-1);
+  if (found === "oauth_creds.json") return "OAuth credentials";
+  if (found === "GEMINI_API_KEY" || found === "GOOGLE_API_KEY") return keyFrom(found, secrets);
+  return undefined;
+}
 
 /** What claude auth status says the key comes from (measured on 2.1.257): apiKeySource names ANTHROPIC_API_KEY or
  * apiKeyHelper when an API key is in use, authMethod is claude.ai on OAuth credentials alone. */
@@ -50,10 +75,7 @@ export function claudeSource(output: string, secrets: ReadonlyMap<string, string
   } catch {
     return undefined;
   }
-  if (status["apiKeySource"] === "ANTHROPIC_API_KEY") {
-    const from = secrets.get("ANTHROPIC_API_KEY");
-    return from === undefined ? "API key from ANTHROPIC_API_KEY on the machine" : `API key from ${from}, set on the machine as a secret`;
-  }
+  if (status["apiKeySource"] === "ANTHROPIC_API_KEY") return keyFrom("ANTHROPIC_API_KEY", secrets);
   if (status["apiKeySource"] === "apiKeyHelper") return "API key from the settings.json helper";
   if (status["loggedIn"] === true && status["authMethod"] === "claude.ai") return "OAuth credentials";
   return undefined;
@@ -96,14 +118,28 @@ export const SIGN_INS: Readonly<Record<string, SignIn>> = {
   // The shim gets the localhost-callback URL and the terminal the hosted paste-code one; either finishes the login.
   claude: { kind: "command", login: "claude auth login", status: { command: "claude auth status", signedIn: has(/"loggedIn":\s*true/), detail: claudeSource } },
   codex: { kind: "command", login: "codex login", fallback: "codex login --device-auth", status: { command: "codex login status", signedIn: ok(/Logged in using/) } },
-  gemini: { kind: "command", login: "gemini", toolTimeoutMs: 5 * MIN },
-  opencode: { kind: "command", login: "opencode auth login", note: "OpenCode dropped its Anthropic sign-in in 1.3.0; it takes an API key there", toolTimeoutMs: 5 * MIN },
+  gemini: { kind: "command", login: "gemini", status: { command: GEMINI_STATUS, signedIn: ok(), detail: geminiSource }, toolTimeoutMs: 5 * MIN },
+  // Both counts print on exit 0; a provider key exported on the machine is listed under Environment and counts as a login.
+  opencode: {
+    kind: "command",
+    login: "opencode auth login",
+    status: { command: "opencode auth list", signedIn: ok(/[1-9]\d* (credentials|environment variable)/), detail: secretNamed },
+    note: "OpenCode dropped its Anthropic sign-in in 1.3.0; it takes an API key there",
+    toolTimeoutMs: 5 * MIN,
+  },
   cloudflared: { kind: "command", login: "cloudflared tunnel login" },
   op: { kind: "none", note: "needs the 1Password desktop app; set OP_SERVICE_ACCOUNT_TOKEN on the machine instead" },
-  kube: { kind: "none", note: "kubectl has no sign-in; copy the kubeconfig instead" },
-  pi: { kind: "none", note: "takes API keys; set them on the machine" },
-  hermes: { kind: "none", note: "takes API keys; set them on the machine" },
+  kube: { kind: "none", note: "kubectl has no sign-in; copy the kubeconfig instead", status: { command: "kubectl config current-context", signedIn: ok(/\S/), detail: o => `context ${o.trim()}` } },
+  // pi lists a model only for a provider it holds credentials for, and prints a /login hint on exit 0 when it holds none.
+  pi: { kind: "command", login: "pi", status: { command: "pi --list-models", signedIn: ok(/^provider\s+model\b/m) }, note: "type /login inside pi and pick a provider, then /exit; a key on the machine counts" },
+  // The pool lists keys from ~/.hermes/.env and the environment beside stored logins; with none it prints nothing on exit 0.
+  hermes: { kind: "command", login: "hermes auth", status: { command: "hermes auth list", signedIn: ok(/\(\d+ credentials\):/), detail: secretNamed }, note: "pick Add a credential in the menu; keys in ~/.hermes/.env count" },
 };
+
+/** The status check a row carries, whichever kind it is. */
+export function statusOf(s: SignIn): StatusCheck | undefined {
+  return s.kind === "shell" ? undefined : s.status;
+}
 
 /** The row for a tool by its name (the last segment of a manifest id). */
 export function signInFor(name: string): SignIn {

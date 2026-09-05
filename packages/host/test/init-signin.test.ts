@@ -14,6 +14,7 @@ import { fakePtyLink, type FakePty, type FakePtyLink } from "./fake-pty-link.js"
 
 const CLAUDE: ManifestEntry = { rung: "logins", id: "logins/claude", label: "Claude Code login", group: "Agent logins", paths: [], bytes: 0, default: "bring", choice: "copy" };
 const STATUS = "claude auth status";
+const KUBE: ManifestEntry = { rung: "logins", id: "logins/kube", label: "kubectl config", group: "CLI logins", paths: [], bytes: 0, default: "bring", choice: "copy" };
 
 /** claude on the fake builder answers its status the way 2.1.257 prints it for each key source. */
 function claudeAnswering(status: string, exitCode = 0): FakePtyLink {
@@ -116,6 +117,18 @@ describe("the sign-in stage and the key sources", () => {
     expect((await none.run)[0]).toMatchObject({ state: "not-signed-in", note: "copied, but claude auth status says not signed in" });
     const missing = stage(claudeAnswering("sh: claude: not found", 127), { skipWhy: "nobody here" });
     expect((await missing.run)[0]).toMatchObject({ state: "copied", exit: 127, note: "not verified: claude is not on the machine" });
+  });
+
+  it("a copied kubeconfig is checked by kubectl config current-context and names the context; with none set the row stays not signed in and nothing is offered, since kubectl has no sign-in", async () => {
+    const link = claudeAnswering("connectgateway_someorg-default_us-central1_someorg-default-cluster-internal");
+    const { run, text } = stage(link, { logins: [KUBE] });
+    const [r] = await run;
+    expect(link.ptys[0]!.writes).toEqual([`${statusLine("kubectl config current-context")}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`]);
+    expect(r).toEqual({ id: "logins/kube", label: "kubectl config", state: "signed-in", note: "copied; context connectgateway_someorg-default_us-central1_someorg-default-cluster-internal; kubectl config current-context" });
+    expect(text()).toContain("kubectl config: signed in (copied; context connectgateway_someorg-default_us-central1_someorg-default-cluster-internal; kubectl config current-context)");
+    const unset = stage(claudeAnswering("error: current-context is not set", 1), { logins: [KUBE] });
+    expect((await unset.run)[0]).toMatchObject({ state: "not-signed-in", note: "copied, but kubectl config current-context says not signed in" });
+    expect(unset.text()).not.toMatch(/sign in on the machine|r retry/);
   });
 
   it("a sign-in on the machine is proved by the same check, its source named", async () => {
