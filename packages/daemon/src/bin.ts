@@ -9,10 +9,8 @@ try {
   process.exit(2);
 }
 
-// Local runs have no /root token file; WSP_DAEMON_TOKEN or --token-path covers them.
-const envToken = process.env["WSP_DAEMON_TOKEN"];
-
-startDaemon({ ...args, ...(envToken ? { token: envToken } : {}) })
+// The token file is the only source, read at every auth frame so the host can rotate it; local runs name theirs with --token-path.
+startDaemon(args)
   .then(d => console.log(`wsp-daemon listening on ${args.host ?? DEFAULT_HOST}:${d.port}`))
   .catch((e: unknown) => {
     console.error("wsp-daemon failed to start:", e instanceof Error ? e.message : e);

@@ -185,8 +185,11 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
   }
 
   wss.on("connection", (ws: WebSocket) => {
+    // A malformed frame from any peer, authed or not, ends that socket and nothing else: without a listener ws throws.
+    ws.on("error", () => {});
     // With the server on 0.0.0.0 the first frame is the only gate: no handler exists until it passes.
     const deadline = setTimeout(() => ws.close(4401, "no auth frame arrived in time"), authDeadlineMs);
+    ws.once("close", () => clearTimeout(deadline));
     ws.once("message", raw => {
       clearTimeout(deadline);
       let frame: unknown;

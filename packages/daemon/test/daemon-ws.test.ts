@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { connect } from "node:net";
 import { homedir, networkInterfaces, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -111,6 +112,44 @@ describe("daemon WS server", () => {
     await new Promise(r => setTimeout(r, 100));
     expect(daemon.ptys.list().length).toBe(before);
     expect(replies).toEqual([]);
+  });
+
+  it("a malformed frame from a peer that never authed ends that socket and nothing else", async () => {
+    // Upgrade by hand, then one frame with RSV1 set (no extension negotiated it): ws rejects the frame as an error.
+    const raw = connect({ host: "127.0.0.1", port: daemon.port });
+    await new Promise<void>((resolve, reject) => {
+      raw.once("connect", resolve);
+      raw.once("error", reject);
+    });
+    raw.write(["GET / HTTP/1.1", `Host: 127.0.0.1:${daemon.port}`, "Upgrade: websocket", "Connection: Upgrade", "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==", "Sec-WebSocket-Version: 13", "", ""].join("\r\n"));
+    await new Promise<void>(resolve => raw.once("data", () => resolve()));
+    raw.write(Buffer.from([0xc1, 0x80, 0, 0, 0, 0]));
+    await new Promise<void>(resolve => raw.once("close", () => resolve()));
+
+    const c = await Client.connect(daemon.port, TOKEN);
+    expect((await c.request("ping")).ok).toBe(true);
+    c.close();
+  });
+
+  it("ignores an exported WSP_DAEMON_TOKEN: the file is the only source, so an export cannot pin a token past a rotation", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-daemon-env-"));
+    const tokenPath = join(dir, "token");
+    writeFileSync(tokenPath, "fromfile\n");
+    const previous = process.env["WSP_DAEMON_TOKEN"];
+    process.env["WSP_DAEMON_TOKEN"] = "fromenv";
+    const d = await startDaemon({ port: 0, tokenPath });
+    try {
+      const env = await Client.connect(d.port, "fromenv");
+      expect((await env.closed).code).toBe(4401);
+      const file = await Client.connect(d.port, "fromfile");
+      expect((await file.request("ping")).ok).toBe(true);
+      file.close();
+    } finally {
+      if (previous === undefined) delete process.env["WSP_DAEMON_TOKEN"];
+      else process.env["WSP_DAEMON_TOKEN"] = previous;
+      await d.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("closes a socket that sends nothing before the auth deadline", async () => {
