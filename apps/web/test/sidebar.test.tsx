@@ -93,6 +93,20 @@ const rowIds = () => Array.from(document.querySelectorAll<HTMLElement>("[data-si
 const API = view("ws_a", "api");
 const WEB = view("ws_b", "web", "napping");
 
+describe("header", () => {
+  it("carries the brand lockup named wsp", async () => {
+    useStore.getState().bind(fakeApi([], []));
+    await act(async () => {
+      render(
+        <SidebarProvider defaultOpen>
+          <WorkspaceSidebar />
+        </SidebarProvider>,
+      );
+    });
+    expect(screen.getByRole("img", { name: "wsp" })).toBeTruthy();
+  });
+});
+
 describe("rows from the fixture wire", () => {
   it("first level is the workspaces, second level their sessions titled by prompt with a relative time", async () => {
     await mount(

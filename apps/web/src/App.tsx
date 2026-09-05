@@ -2,6 +2,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { makeApi, ProtocolClient } from "./protocol/client.js";
 import { useCreation, useReady, useSelectedId, useStore } from "./protocol/store.js";
+import { Mark } from "./brand/Brand.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./components/ui/empty.js";
 import { WorkspaceTerminalDrawer } from "./components/WorkspaceTerminalDrawer.js";
 import { AppShell } from "./shell/AppShell.js";
@@ -80,7 +81,12 @@ export function Shell() {
     return () => { live = false; };
   }, [api]);
   if (golden === "none") {
-    return <p className="flex h-full items-center justify-center p-6 font-mono text-sm text-muted-foreground">No golden image yet. Run wsp init in a terminal; it opens this app when the machine is ready.</p>;
+    return (
+      <p className="flex h-full items-center justify-center gap-2 p-6 font-mono text-sm text-muted-foreground">
+        <Mark className="h-[1em] shrink-0" />
+        No golden image yet. Run wsp init in a terminal; it opens this app when the machine is ready.
+      </p>
+    );
   }
   return (
     <AppShell>
