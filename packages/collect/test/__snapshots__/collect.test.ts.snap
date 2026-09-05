@@ -137,7 +137,7 @@ exports[`collect > matches the fixture laptop snapshot 1`] = `
     },
     {
       "bytes": 0,
-      "default": "skip",
+      "default": "bring",
       "group": "VS Code extensions, for VS Code over SSH",
       "id": "editors/vscode-ext/ms-python.python",
       "label": "ms-python.python",

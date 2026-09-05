@@ -2611,6 +2611,9 @@ describe("editorsIntro", () => {
     ]);
     expect(editorsIntro([ed("editors/helix"), ed("editors/emacs")])).toEqual(["helix and emacs are installed on the machine; they run in the workspace's terminal."]);
     expect(editorsIntro([ed("editors/vscode-ext/a.b")])).toEqual(["VS Code rows are settings and extension names, used only if you open this machine from your editor over SSH; nothing runs here."]);
+    expect(editorsIntro([ed("editors/vscode-insiders", ["~/Library/Application Support/Code - Insiders/User/settings.json"]), ed("editors/vscode-insiders-ext/a.b")])).toEqual([
+      "VS Code Insiders rows are settings and extension names, used only if you open this machine from your editor over SSH; nothing runs here.",
+    ]);
     expect(editorsIntro([])).toEqual([]);
   });
 });

@@ -105,6 +105,32 @@ describe("the location pass", () => {
     expect(rows.filter(r => r.kind === "app-data")).toEqual([]);
   });
 
+  it("Zed, VS Code Insiders and Cursor linked onto PATH from their bundles: ~/.config/zed is Zed's config, the two Library directories are app data named for the app", async () => {
+    const m = laptop({
+      path: ["/opt/homebrew/bin"],
+      links: {
+        "/opt/homebrew/bin/zed": "/Applications/Zed.app/Contents/MacOS/cli",
+        "/opt/homebrew/bin/code-insiders": "/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code",
+        "/opt/homebrew/bin/cursor": "/Applications/Cursor.app/Contents/Resources/app/bin/code",
+      },
+      files: {
+        "/Applications/Zed.app/Contents/MacOS/cli": { bytes: 1_000, mode: 0o755 },
+        "/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code": { bytes: 1_000, mode: 0o755 },
+        "/Applications/Cursor.app/Contents/Resources/app/bin/code": { bytes: 1_000, mode: 0o755 },
+        "~/.config/zed/settings.json": "{}",
+        "~/.config/zed/prompts/p.md": "hi\n",
+        "~/Library/Application Support/Code - Insiders/User/settings.json": "{}",
+        "~/Library/Application Support/Code - Insiders/logs/main.log": 5_000,
+        "~/Library/Application Support/Cursor/User/settings.json": "{}",
+      },
+    });
+    const { rows } = await everything(m);
+    const by = (path: string) => rows.find(r => r.paths[0] === path);
+    expect(by("~/.config/zed")).toMatchObject({ name: "zed", kind: "config", tool: "zed", owner: "app" });
+    expect(by("~/Library/Application Support/Code - Insiders")).toMatchObject({ name: "Code - Insiders", kind: "app-data", tool: "Visual Studio Code - Insiders" });
+    expect(by("~/Library/Application Support/Cursor")).toMatchObject({ name: "Cursor", kind: "app-data", tool: "Cursor" });
+  });
+
   it("a dot-directory under ~/Library is a tool's, not an app's", async () => {
     const { rows } = await everything(laptop({ files: { "~/Library/Preferences/.wrangler/config/default.toml": "x = 1\n", "~/Library/Preferences/.wrangler/notes": "n\n" } }));
     expect(rows.find(r => r.paths[0] === "~/Library/Preferences/.wrangler")).toMatchObject({ name: ".wrangler", kind: "unknown" });

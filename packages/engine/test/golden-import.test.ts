@@ -58,6 +58,8 @@ const present = new Set([
   `${HOME}/Library/Application Support/Code/User/settings.json`,
   `${HOME}/.config/Code/User/settings.json`,
   `${HOME}/.config/Cursor/User/settings.json`,
+  `${HOME}/Library/Application Support/Code - Insiders/User/settings.json`,
+  `${HOME}/.config/zed`,
   `${HOME}/Library/Preferences/.wrangler/config/default.toml`,
   `${HOME}/.claude`,
   `${HOME}/.claude/settings.json`,
@@ -82,7 +84,7 @@ const links: Record<string, string | undefined> = {
   [`${HOME}/.key-linked`]: `${HOME}/.ssh/id_ed25519`,
   [`${HOME}/.gone-linked`]: undefined,
 };
-const isDir = (abs: string) => abs.endsWith("custom") || abs.endsWith("/.ssh") || abs.endsWith("/.ssh/keys") || abs.endsWith("/.claude") || abs.endsWith("/.config/demo") || abs.endsWith("/demo/cache") || abs.endsWith("/proj/.env");
+const isDir = (abs: string) => abs.endsWith("custom") || abs.endsWith("/.ssh") || abs.endsWith("/.ssh/keys") || abs.endsWith("/.claude") || abs.endsWith("/.config/demo") || abs.endsWith("/.config/zed") || abs.endsWith("/demo/cache") || abs.endsWith("/proj/.env");
 const stat = (abs: string): PathInfo | undefined => {
   if (abs in links) {
     const target = links[abs];
@@ -212,6 +214,11 @@ describe("planFiles: which laptop files travel and where they land", () => {
       { platform: "linux" },
     );
     expect(linux.files.map(f => f.dest)).toEqual([".vscode-server/data/Machine/settings.json", ".cursor-server/data/Machine/settings.json"]);
+    const insiders = plan([
+      row({ rung: "editors", id: "editors/vscode-insiders", paths: ["~/Library/Application Support/Code - Insiders/User/settings.json"] }),
+      row({ rung: "editors", id: "editors/zed", paths: ["~/.config/zed"] }),
+    ]);
+    expect(insiders.files.map(f => [f.dest, f.dir])).toEqual([[".vscode-server-insiders/data/Machine/settings.json", false], [".config/zed", true]]);
     // The path is the remote server's: `--server-data-dir` defaults to ~/.vscode-server, its user data to data/ under it.
     expect(remoteSettingsPath(".vscode-server")).toBe(".vscode-server/data/Machine/settings.json");
   });
@@ -704,6 +711,25 @@ describe("editorInstallsFor", () => {
     expect(remoteEditorFor("editors/cursor-ext/anysphere.cursorpyright")).toEqual({ name: "Cursor", dir: ".cursor-server", cli: "cursor" });
     expect(remoteEditorFor("editors/vscode")).toEqual({ name: "VS Code", dir: ".vscode-server", cli: "code" });
     expect(remoteEditorFor("editors/nvim")).toBeUndefined();
+  });
+
+  it("VS Code Insiders has its own server directory; Zed's row is its files alone, no server writes anything for it", () => {
+    const insiders = { name: "VS Code Insiders", dir: ".vscode-server-insiders", cli: "code-insiders" };
+    expect(remoteEditorFor("editors/vscode-insiders")).toEqual(insiders);
+    expect(remoteEditorFor("editors/vscode-insiders-ext")).toEqual(insiders);
+    expect(remoteEditorFor("editors/vscode-insiders-ext/ms-python.python")).toEqual(insiders);
+    expect(remoteEditorFor("editors/zed")).toBeUndefined();
+    const t = editorInstallsFor([
+      row({ rung: "editors", id: "editors/vscode-insiders-ext/ms-python.python", label: "ms-python.python" }),
+      row({ rung: "editors", id: "editors/vscode-ext/esbenp.prettier-vscode", label: "esbenp.prettier-vscode" }),
+      row({ rung: "editors", id: "editors/zed", label: "Zed settings, for Zed over SSH", paths: ["~/.config/zed"] }),
+    ]);
+    expect(t.installs.map(i => [i.id, i.label])).toEqual([
+      ["editors/vscode-ext", "VS Code extension list"],
+      ["editors/vscode-insiders-ext", "VS Code Insiders extension list"],
+    ]);
+    expect(t.installs[1]!.cmd).toContain(`printf '%s\\n' 'ms-python.python' > "$HOME/.vscode-server-insiders/extensions.txt"`);
+    expect(t.installs[0]!.cmd).not.toContain("ms-python.python");
   });
 
   it("an extension id that is not publisher.name is left out of the list rather than run", () => {

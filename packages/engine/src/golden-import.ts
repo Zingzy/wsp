@@ -801,12 +801,13 @@ export interface RemoteEditor {
 /** The editors that open a machine over SSH through a server of their own on it; their rows carry what that server reads. */
 const REMOTE_EDITORS: Record<string, RemoteEditor & { userDir: { darwin: string; linux: string } }> = {
   vscode: { name: "VS Code", dir: ".vscode-server", cli: "code", userDir: { darwin: "Library/Application Support/Code/User", linux: ".config/Code/User" } },
+  "vscode-insiders": { name: "VS Code Insiders", dir: ".vscode-server-insiders", cli: "code-insiders", userDir: { darwin: "Library/Application Support/Code - Insiders/User", linux: ".config/Code - Insiders/User" } },
   cursor: { name: "Cursor", dir: ".cursor-server", cli: "cursor", userDir: { darwin: "Library/Application Support/Cursor/User", linux: ".config/Cursor/User" } },
 };
 
 /** The remote editor an editors row belongs to (its settings row or one of its extension rows), or nothing. */
 export function remoteEditorFor(id: string): RemoteEditor | undefined {
-  const key = /^editors\/([a-z]+)(?:-ext(?:\/|$)|$)/.exec(id)?.[1];
+  const key = /^editors\/([a-z-]+?)(?:-ext(?:\/|$)|$)/.exec(id)?.[1];
   const ed = key === undefined ? undefined : REMOTE_EDITORS[key];
   return ed === undefined ? undefined : { name: ed.name, dir: ed.dir, cli: ed.cli };
 }
