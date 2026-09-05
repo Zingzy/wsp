@@ -6,7 +6,8 @@
 // guest edits the files in place and touches no server it was not told about.
 import { MCP_ID_PREFIX } from "@wsp/protocol";
 import { TOOLS_PATH, UV_INSTALL, type RecipeEntry } from "./golden-import.js";
-import { GUARD_SLACK_S, TOOL_TIMEOUT_S, guarded, reasonOf } from "./golden-tools.js";
+import { INLINE_EXEC_MS } from "./exec-detached.js";
+import { TOOL_TIMEOUT_S, guardDeadlineMs, guarded, reasonOf } from "./golden-tools.js";
 import type { Machine } from "./machine.js";
 import type { StageListener } from "./golden.js";
 
@@ -334,7 +335,7 @@ const strip = (r: Pending): McpResult => ({ id: r.id, agent: r.agent, name: r.na
 export async function applyMcp(machine: Machine, plan: McpPlan, stage: StageListener): Promise<McpResult[]> {
   const count = (a: McpAgentPlan): number => a.scopes.reduce((n, s) => n + s.keep.length + s.drop.length, 0) + a.aside.length;
   stage("installing-mcp", plan.agents.map(a => `${a.label} ${count(a)}`).join(", "));
-  const res = await machine.exec(`export PATH="/usr/local/bin:$PATH"\nnode -e ${squote(GUEST_SCRIPT)} ${squote(JSON.stringify(plan))}`, { timeoutMs: 120_000 });
+  const res = await machine.run(`export PATH="/usr/local/bin:$PATH"\nnode -e ${squote(GUEST_SCRIPT)} ${squote(JSON.stringify(plan))}`, { deadlineMs: 120_000 });
   const report = res.exitCode === 0 ? parseReport(res.stdout) : undefined;
   const failure = report === undefined ? `the config edit did not run (${reasonOf(res, 120)})` : undefined;
   const rows: Pending[] = [];
@@ -369,13 +370,13 @@ export async function applyMcp(machine: Machine, plan: McpPlan, stage: StageList
   const commands = [...new Set(rows.flatMap(r => (r.command !== undefined ? [asRun(r.command)] : [])))];
   const missing = new Set<string>();
   if (commands.length > 0) {
-    const check = await machine.exec(`export PATH=${TOOLS_PATH}\n${commands.map(c => `if command -v ${squote(c)} >/dev/null 2>&1; then echo ${squote(`ok ${c}`)}; else echo ${squote(`no ${c}`)}; fi`).join("\n")}`, { timeoutMs: 30_000 });
+    const check = await machine.exec(`export PATH=${TOOLS_PATH}\n${commands.map(c => `if command -v ${squote(c)} >/dev/null 2>&1; then echo ${squote(`ok ${c}`)}; else echo ${squote(`no ${c}`)}; fi`).join("\n")}`, { timeoutMs: INLINE_EXEC_MS });
     for (const line of check.stdout.split("\n")) if (line.startsWith("no ")) missing.add(line.slice(3));
   }
   const viaUv = rows.filter(r => r.command !== undefined && ["uv", "uvx"].includes(basename(r.command)) && missing.has(asRun(r.command)));
   if (viaUv.length > 0) {
     stage("installing-mcp", `uv for ${viaUv.map(r => r.name).join(", ")}`);
-    const install = await machine.exec(guarded(`set -euo pipefail\n${UV_INSTALL}`, TOOL_TIMEOUT_S), { timeoutMs: (TOOL_TIMEOUT_S + GUARD_SLACK_S) * 1000 });
+    const install = await machine.run(guarded(`set -euo pipefail\n${UV_INSTALL}`, TOOL_TIMEOUT_S), { deadlineMs: guardDeadlineMs(TOOL_TIMEOUT_S), onLine: line => stage("installing-mcp", `uv: ${line}`) });
     for (const r of viaUv) {
       if (install.exitCode === 0) {
         r.notes.unshift("uv installed for it");

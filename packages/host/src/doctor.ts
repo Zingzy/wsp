@@ -177,7 +177,7 @@ export async function deployDaemon(
     if (!put.ok) throw new Error(`bundle upload failed: HTTP ${put.status}`);
 
     const suffix = await previewHostSuffix(machine);
-    const res = await machine.exec(deployScript(token, suffix), { timeoutMs: 180_000 });
+    const res = await machine.run(deployScript(token, suffix), { deadlineMs: 180_000 });
     if (res.exitCode !== 0 || !res.stdout.includes("DAEMON_UP")) {
       throw new Error(`daemon deploy failed: ${res.stdout.slice(-300)} ${res.stderr.slice(-200)}`);
     }

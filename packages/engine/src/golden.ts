@@ -10,7 +10,8 @@ import { createHash } from "node:crypto";
 import { ALREADY_APPLIED, type GoldenLogin, type GoldenManifest, type GoldenStage, type GoldenVersion, type RecipeDigest } from "@wsp/protocol";
 import type { Removal } from "./golden-diff.js";
 import { NODE_PATH_LINE, type AgentInstall, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
-import { GUARD_SLACK_S, MIB, TOOL_TIMEOUT_S, fmtBytes, freeBytes, guarded, installTools, reasonOf, type ToolResult } from "./golden-tools.js";
+import { INLINE_EXEC_MS } from "./exec-detached.js";
+import { MIB, TOOL_TIMEOUT_S, fmtBytes, freeBytes, guardDeadlineMs, guarded, installTools, reasonOf, type ToolResult } from "./golden-tools.js";
 import { BUILDER_DISK_GB } from "./tool-sizes.js";
 import { assertFirstLife } from "./lifecycle.js";
 import { applyMcp, type McpPlan, type McpResult } from "./golden-mcp.js";
@@ -305,7 +306,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
         const { shell, frameworks, cmd } = imp.shell;
         const named = frameworks.join(", ");
         stage("applying-setup", `${shell}: installing${named !== "" ? `, with ${named}` : ""}`);
-        const res = await machine.exec(guarded(cmd, SHELL_TIMEOUT_S), { timeoutMs: (SHELL_TIMEOUT_S + GUARD_SLACK_S) * 1000 });
+        const res = await machine.run(guarded(cmd, SHELL_TIMEOUT_S), { deadlineMs: guardDeadlineMs(SHELL_TIMEOUT_S), onLine: line => stage("applying-setup", `${shell}: ${line}`) });
         if (res.exitCode === 0) stage("applying-setup", `${shell} installed as the login shell${named !== "" ? `; ${named} reinstalled` : ""}`);
         else stage("applying-setup", `${shell} step failed, chsh skipped: ${reasonOf(res, SHELL_TIMEOUT_S)}`);
       }
@@ -322,7 +323,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
     stage("installing-harness", ALREADY_APPLIED);
   } else {
     stage("installing-harness");
-    const res = await machine.exec(opts.setup, { timeoutMs: opts.setupTimeoutMs ?? 300_000 });
+    const res = await machine.run(opts.setup, { deadlineMs: opts.setupTimeoutMs ?? 300_000, onLine: line => stage("installing-harness", line) });
     if (res.exitCode !== 0) {
       throw new Error(`golden setup failed (exit ${res.exitCode}): ${res.stderr.slice(-500)}`);
     }
@@ -342,8 +343,8 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
           continue;
         }
         stage("installing-harness", `${agent.name} (${i + 1}/${imp.agents.length})`);
-        const install = await machine.exec(guarded(`set -euo pipefail\n${NODE_PATH_LINE}\n${agent.install}`, AGENT_TIMEOUT_S), { timeoutMs: (AGENT_TIMEOUT_S + GUARD_SLACK_S) * 1000 });
-        const check = install.exitCode === 0 ? await machine.exec(`${NODE_PATH_LINE}\n${agent.smoke}`, { timeoutMs: 60_000 }) : install;
+        const install = await machine.run(guarded(`set -euo pipefail\n${NODE_PATH_LINE}\n${agent.install}`, AGENT_TIMEOUT_S), { deadlineMs: guardDeadlineMs(AGENT_TIMEOUT_S), onLine: line => stage("installing-harness", `${agent.name}: ${line}`) });
+        const check = install.exitCode === 0 ? await machine.run(`${NODE_PATH_LINE}\n${agent.smoke}`, { deadlineMs: 60_000 }) : install;
         const ms = Date.now() - t0;
         if (check.exitCode === 0) result.agents.push({ id: agent.id, name: agent.name, outcome: "installed", ms });
         else result.agents.push({ id: agent.id, name: agent.name, outcome: "failed", note: reasonOf(check, AGENT_TIMEOUT_S), ms });
@@ -392,7 +393,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
     }
     if (ran || edited) {
       // A builder whose exec died (a full disk did it once) would be sealed and handed off answering nothing.
-      const answer = await machine.exec("echo ok", { timeoutMs: 30_000 });
+      const answer = await machine.exec("echo ok", { timeoutMs: INLINE_EXEC_MS });
       if (answer.exitCode !== 0 || answer.stdout.trim() !== "ok") {
         imp.onResult?.(result);
         throw new Error(`the machine stopped answering commands after the installs (exit ${answer.exitCode}); nothing is sealed`);
@@ -408,7 +409,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
  * agents whose floor the guest's Node does not meet. */
 async function installNode(machine: Machine, node: NodeInstall, stage: StageListener): Promise<{ haveMajor: number; failed?: string }> {
   stage("installing-harness", `Node for ${node.agents.join(", ")}`);
-  const res = await machine.exec(guarded(`set -euo pipefail\n${node.cmd}`, AGENT_TIMEOUT_S), { timeoutMs: (AGENT_TIMEOUT_S + GUARD_SLACK_S) * 1000 });
+  const res = await machine.run(guarded(`set -euo pipefail\n${node.cmd}`, AGENT_TIMEOUT_S), { deadlineMs: guardDeadlineMs(AGENT_TIMEOUT_S), onLine: line => stage("installing-harness", `Node: ${line}`) });
   const have = /NODE_HAVE v(\d+)/.exec(res.stdout)?.[1];
   const haveMajor = have === undefined ? 0 : Number(have);
   const kept = /NODE_KEPT (v\S+)/.exec(res.stdout)?.[1];
@@ -603,14 +604,14 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
       builderAlive = false;
       fork = await opts.backend.create(forkSpec());
     }
-    const smokeRes = await fork.exec(smoke, { timeoutMs: opts.smokeTimeoutMs ?? 120_000 });
+    const smokeRes = await fork.run(smoke, { deadlineMs: opts.smokeTimeoutMs ?? 120_000, onLine: line => stage("smoke-forking", line) });
     if (smokeRes.exitCode !== 0) {
       throw new Error(
         `golden smoke failed (exit ${smokeRes.exitCode}) for ${JSON.stringify(smoke)}: ${smokeRes.stderr.slice(-500)}`,
       );
     }
     // Read on the fork, which is the image: forks of this version get BROWSER only when the shim is there.
-    const browserShim = (await fork.exec(`test -x ${BROWSER_SHIM_PATH}`)).exitCode === 0;
+    const browserShim = (await fork.exec(`test -x ${BROWSER_SHIM_PATH}`, { timeoutMs: INLINE_EXEC_MS })).exitCode === 0;
     // The image is proven by now; a fork that outlives its kills is a leak to
     // name, not a reason to throw the person's setup away.
     let leak: string | undefined;
@@ -688,7 +689,7 @@ export async function applyDelta(machine: Machine, delta: GoldenDelta, opts: App
         removed.push({ what: r.what, id: r.id, label: r.label, outcome: "kept", note: r.note ?? "left on the machine" });
         continue;
       }
-      const res = await machine.exec(guarded(r.cmd, TOOL_TIMEOUT_S), { timeoutMs: (TOOL_TIMEOUT_S + GUARD_SLACK_S) * 1000 });
+      const res = await machine.run(guarded(r.cmd, TOOL_TIMEOUT_S), { deadlineMs: guardDeadlineMs(TOOL_TIMEOUT_S), onLine: line => stage("applying-setup", `${r.label}: ${line}`) });
       if (res.exitCode === 0) removed.push({ what: r.what, id: r.id, label: r.label, outcome: "removed" });
       else removed.push({ what: r.what, id: r.id, label: r.label, outcome: "failed", note: reasonOf(res, TOOL_TIMEOUT_S) });
     }

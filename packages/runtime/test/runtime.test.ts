@@ -7,7 +7,7 @@ import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
 import { SessionEvent, type EventUnion, type RecipeDigest } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
-import { GRACE_MS, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, createRuntime, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
+import { GRACE_MS, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, createRuntime, type GoldenExec, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { wsRequest } from "./ws-client.js";
@@ -864,6 +864,16 @@ describe("runtime golden builders", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  it("a run reaches the exec listener as one command with its result, whatever carried it", async () => {
+    const backend = stubBackend();
+    backend.execImpl = (_m, cmd) => (cmd === "install" ? { exitCode: 0, stdout: "harness on\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+    const seen: GoldenExec[] = [];
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: { ...recipe, onExec: e => void seen.push(e) } });
+    await rt.golden.prepare({ name: "default" });
+    expect(backend.machines[0]!.runLog).toEqual(["install"]);
+    expect(seen.filter(e => e.cmd === "install")).toEqual([expect.objectContaining({ machineId: "m1", exitCode: 0, stdout: "harness on\n" })]);
   });
 
   it("reap keeps a first-life builder left behind by an earlier process, kills one found paused, and keeps this process's own", async () => {

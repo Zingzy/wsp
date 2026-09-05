@@ -4,10 +4,12 @@
 // pause/resume while control-channel children get reaped (PoC P10/P4b). The
 // stream then polls the log, so a mid-turn nap only stalls polling: polls fail
 // while the machine is paused, recover after wake, and the turn's own output
-// picks up where it left off.
+// picks up where it left off. The engine's execDetached runs the same launch
+// and poll contract for a command that ends on its own; this one streams and
+// can be signalled while it runs, which is what a harness turn needs.
 
 import { randomBytes } from "node:crypto";
-import type { ExecResult, Machine } from "@wsp/engine";
+import { INLINE_EXEC_MS, type ExecResult, type Machine } from "@wsp/engine";
 import type { ExecStream, ExecStreamFactory } from "@wsp/adapter-claude";
 
 export interface MachineExecOptions {
@@ -35,7 +37,7 @@ function sleep(ms: number): Promise<void> {
 export function machineExecStream(machine: Machine, opts: MachineExecOptions = {}): ExecStreamFactory {
   const pollMs = opts.pollMs ?? 1500;
   const deadlineMs = opts.deadlineMs ?? 900_000;
-  const execTimeoutMs = opts.execTimeoutMs ?? 30_000;
+  const execTimeoutMs = opts.execTimeoutMs ?? INLINE_EXEC_MS;
   const runDir = opts.runDir ?? "/tmp/wsp-run";
 
   return (command, { env }) => {

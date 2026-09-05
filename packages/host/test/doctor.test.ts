@@ -254,6 +254,8 @@ describe("deployDaemon", () => {
       const out = await deployDaemon(machine, { token: "abc123", daemonDir });
       expect(out).toEqual({ token: "abc123", node: "v22.23.2" });
       expect(stub.execLog).toEqual([deployScript("abc123")]);
+      // npm install on the guest can run past what one exec is allowed, so the deploy is a run.
+      expect(stub.runLog).toEqual([deployScript("abc123")]);
       expect(uploads).toHaveLength(1);
       expect(gunzipSync(uploads[0]!).toString("latin1")).toContain("start.mjs");
 

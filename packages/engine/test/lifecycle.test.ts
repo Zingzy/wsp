@@ -6,6 +6,7 @@ function stubMachine(overrides: Partial<Machine> = {}): Machine {
   return {
     id: "m1", kind: "sandbox",
     exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+    run: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
     snapshot: async () => "snap_x", pause: async () => {}, resume: async () => {},
     kill: async () => {}, state: async () => "running" as const,
     downloadUrl: async () => "https://x", uploadUrl: async () => "https://x",

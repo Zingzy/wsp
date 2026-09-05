@@ -166,7 +166,7 @@ export async function applyDotfiles(
 
   const steps: DotfilesStep[] = [];
   const run = async (name: string, script: string) => {
-    const res = await machine.exec(script, { timeoutMs: opts.timeoutMs ?? 300_000 });
+    const res = await machine.run(script, { deadlineMs: opts.timeoutMs ?? 300_000 });
     steps.push({ name, exitCode: res.exitCode });
     if (res.exitCode !== 0) {
       const hint =

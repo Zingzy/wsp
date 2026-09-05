@@ -3,13 +3,16 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { gzipSync } from "node:zlib";
 import { SNAPSHOT_STORAGE } from "@wsp/engine";
-import type { ExecResult, Machine, MachineBackend, MachineSpec, MachineState, SnapshotRow } from "@wsp/engine";
+import type { ExecResult, Machine, MachineBackend, MachineSpec, MachineState, RunOptions, SnapshotRow } from "@wsp/engine";
 
 export interface StubMachine extends Machine {
   spec: MachineSpec;
   paused: boolean;
   killed: boolean;
+  /** Every command the guest was given, exec and run alike, in order. */
   execLog: string[];
+  /** The scripts that went through run(), the road for anything that may outlive one exec. */
+  runLog: string[];
   /** What the provider's view says it was created at; tests move it to play a resume. */
   createdAt: string;
 }
@@ -72,11 +75,18 @@ export function stubBackend(): StubBackend {
         paused: false,
         killed: false,
         execLog: [],
+        runLog: [],
         createdAt: new Date().toISOString(),
         async exec(cmd: string): Promise<ExecResult> {
           if (m.killed) throw Object.assign(new Error("gone"), { kind: "missing", status: 404 });
           m.execLog.push(cmd);
           return backend.execImpl(m, cmd);
+        },
+        async run(script: string, _opts: RunOptions): Promise<ExecResult> {
+          if (m.killed) throw Object.assign(new Error("gone"), { kind: "missing", status: 404 });
+          m.execLog.push(script);
+          m.runLog.push(script);
+          return backend.execImpl(m, script);
         },
         async snapshot(name: string): Promise<string> {
           const id = `snap_${name}`;

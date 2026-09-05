@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The tools stage on the builder: every ticked install as one guarded exec in
+// The tools stage on the builder: every ticked install as one guarded run in
 // plan order, the disk read before each against the floor kept for the agents,
 // and Homebrew's housekeeping once the loop is over. The guard runs the install
 // in its own session and, at the timeout, kills that session and every process
 // descended from it before returning, so a slow brew never holds a cellar lock
 // into the next tool's turn.
 import type { GoldenStage } from "@wsp/protocol";
+import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { BREW_HOUSEKEEPING, HOMEBREW, type ToolInstall } from "./golden-import.js";
 import type { ExecResult, Machine } from "./machine.js";
 
@@ -42,8 +43,10 @@ export const TOOLS_DISK_FLOOR = 2048 * MIB;
 export const TOOL_TIMEOUT_S = 600;
 /** How long the guard gives the TERM, then the KILL, to land. */
 const KILL_GRACE_S = 10;
-/** The exec's own limit sits past the timeout, both graces and the one-second polls between them. */
+/** The run's deadline sits past the timeout, both graces and the one-second polls between them. */
 export const GUARD_SLACK_S = 2 * KILL_GRACE_S + 40;
+/** How long a guarded run has before the engine kills what the guard did not. */
+export const guardDeadlineMs = (timeoutS: number): number => (timeoutS + GUARD_SLACK_S) * 1000;
 /** A failed export or upload leaves its archive in /tmp, on the root disk the tools share. */
 const SWEEP_TMP_CMD = "rm -f /tmp/wsp-vault-*.tgz";
 /** Homebrew's message when another brew holds the cellar it wants. */
@@ -81,10 +84,10 @@ export type FreeDisk = { kind: "free"; bytes: number } | { kind: "unknown"; reas
 
 /** What df says is free under /root; a df that fails or prints nothing is reported, never assumed. */
 export async function freeBytes(machine: Machine): Promise<FreeDisk> {
-  const res = await machine.exec(FREE_KB_CMD, { timeoutMs: 30_000 });
+  const res = await machine.exec(FREE_KB_CMD, { timeoutMs: INLINE_EXEC_MS });
   const kb = Number(res.stdout.trim());
   if (res.exitCode === 0 && Number.isFinite(kb) && kb > 0) return { kind: "free", bytes: kb * 1024 };
-  return { kind: "unknown", reason: `df failed: ${reasonOf(res, 30)}` };
+  return { kind: "unknown", reason: `df failed: ${reasonOf(res, INLINE_EXEC_MS / 1000)}` };
 }
 
 // Descendants of $1 by parent pid from /proc, widened until no new pid turns up: su -c
@@ -146,11 +149,12 @@ function summarize(tools: ToolResult[], floor: string | undefined, housekeeping:
  * one that waits on an install that failed is skipped with that install's name; the loop stops
  * once the disk is under the floor, and the tools left are skipped with the reading. */
 export async function installTools(machine: Machine, tools: readonly ToolInstall[], stage: Stage): Promise<ToolsOutcome> {
-  await machine.exec(SWEEP_TMP_CMD, { timeoutMs: 30_000 });
+  await machine.exec(SWEEP_TMP_CMD, { timeoutMs: INLINE_EXEC_MS });
   const out: ToolsOutcome = { tools: [] };
   const installed = new Set<string>();
   const labelOf = (id: string): string => tools.find(t => t.id === id)?.label ?? id;
-  const run = (cmd: string): Promise<ExecResult> => machine.exec(guarded(cmd, TOOL_TIMEOUT_S), { timeoutMs: (TOOL_TIMEOUT_S + GUARD_SLACK_S) * 1000 });
+  const run = (cmd: string, label: string): Promise<ExecResult> =>
+    machine.run(guarded(cmd, TOOL_TIMEOUT_S), { deadlineMs: guardDeadlineMs(TOOL_TIMEOUT_S), onLine: line => stage("installing-tools", `${label}: ${line}`) });
   let floor: string | undefined;
   let dfWarned = false;
   for (const [i, tool] of tools.entries()) {
@@ -173,11 +177,11 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
     }
     stage("installing-tools", `${tool.label} (${i + 1}/${tools.length})`);
     const t0 = Date.now();
-    let res = await run(tool.cmd);
+    let res = await run(tool.cmd, tool.label);
     if (res.exitCode !== 0 && CELLAR_LOCKED.test(res.stderr)) {
       stage("installing-tools", `${tool.label}: another brew holds its cellar; waiting for it, then once more`);
-      await machine.exec(BREW_LOCK_WAIT_CMD, { timeoutMs: (BREW_LOCK_WAIT_S + 60) * 1000 });
-      res = await run(tool.cmd);
+      await machine.run(BREW_LOCK_WAIT_CMD, { deadlineMs: (BREW_LOCK_WAIT_S + 60) * 1000 });
+      res = await run(tool.cmd, tool.label);
     }
     const ms = Date.now() - t0;
     if (res.exitCode === 0) {
@@ -194,7 +198,7 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
     const before = await freeBytes(machine);
     const failed: string[] = [];
     for (const cmd of BREW_HOUSEKEEPING) {
-      const res = await run(cmd);
+      const res = await run(cmd, "Homebrew cleanup");
       if (res.exitCode !== 0) failed.push(reasonOf(res, TOOL_TIMEOUT_S));
     }
     const after = await freeBytes(machine);
