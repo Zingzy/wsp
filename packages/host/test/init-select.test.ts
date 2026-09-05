@@ -509,6 +509,19 @@ describe("rungSelect", () => {
     await p;
   });
 
+  it("a note as long as the widest one the collector writes fits whole at the 100-column cap", async () => {
+    const long = "99 more in 99 project folders stay on this computer (a repo's .mcp.json travels with it)";
+    const { input, output, text } = streams();
+    Object.assign(output, { columns: 100 });
+    const p = rungSelect({ title: "Tools", counter: "5/7", items: ITEMS, initial: new Set(), input, output, groupNote: g => (g === "Homebrew" ? long : undefined) });
+    await settle();
+    const line = text().split("\n").find(l => l.includes("99 more"));
+    expect(line).toBe(`┃       ${long}`);
+    expect(line!.length).toBeLessThanOrEqual(100);
+    await press(input, KEY.enter);
+    await p;
+  });
+
   it("left folds the group under the cursor and right unfolds it", async () => {
     const { input, output, text, clear } = streams();
     const p = rungSelect({ title: "Tools", counter: "5/7", items: ITEMS, initial: new Set(), input, output });

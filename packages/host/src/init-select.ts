@@ -423,9 +423,7 @@ class RungPrompt extends Prompt<Set<string>> {
       case "more":
         return `      ${dim(`…and ${entry.count} more`)}`;
       case "note":
-        return wrap(entry.text, width - EDGE - 4, "")
-          .map(l => `      ${dim(l)}`)
-          .join("\n");
+        return `      ${dim(ellipsize(entry.text, width - EDGE - 4))}`;
       case "group":
         return this.line(entry.folded ? "▸" : "▾", entry.group, this.groupSecond(entry.group, entry.items), 0, cols, current, true);
       case "item": {
@@ -483,8 +481,7 @@ class RungPrompt extends Prompt<Set<string>> {
     const footer = this.o.footer?.(this.ticks()) ?? [];
     const intro = (this.o.intro ?? []).flatMap(line => wrap(line, width - EDGE));
     // One row is left for the terminal's cursor line; a list that does not fit gives two more rows to the arrows.
-    const wrapped = entries.reduce((n, e) => n + (e.type === "note" ? wrap(e.text, width - EDGE - 4, "").length - 1 : 0), 0);
-    const room = rowsOf(this.o.output) - 1 - FIXED_LINES - intro.length - detail.length - footer.length - wrapped;
+    const room = rowsOf(this.o.output) - 1 - FIXED_LINES - intro.length - detail.length - footer.length;
     const { start, end } = viewport(entries.length, this.cursor, entries.length <= room ? entries.length : room - 2);
     const cols = this.columns(width);
     const cuts = this.cuts(cols);
@@ -497,7 +494,7 @@ class RungPrompt extends Prompt<Set<string>> {
     if (this.o.items.length === 0) lines.push(`${bar}  ${dim("nothing found")}`);
     else if (entries.length === 0) lines.push(`${bar}  ${dim("no match")}`);
     if (start > 0) lines.push(`${bar}  ${dim(`↑ ${start} more`)}`);
-    for (let i = start; i < end; i++) for (const l of this.row(entries[i]!, i === this.cursor, cols, width, cuts).split("\n")) lines.push(`${bar} ${l}`);
+    for (let i = start; i < end; i++) lines.push(`${bar} ${this.row(entries[i]!, i === this.cursor, cols, width, cuts)}`);
     if (end < entries.length) lines.push(`${bar}  ${dim(`↓ ${entries.length - end} more`)}`);
     lines.push(bar);
     for (const d of detail) lines.push(`${bar}  ${dim(ellipsize(d, width - EDGE))}`.trimEnd());

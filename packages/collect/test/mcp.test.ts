@@ -238,7 +238,7 @@ describe("mcp groups", () => {
   it("another project entry's servers are counted as left out, with the folder", async () => {
     const host = fakeHost({ files: { "~/.claude.json": claudeJson() } });
     expect(await mcpGroups(host, await detectMcp(host))).toEqual([
-      { rung: "agents", group: CLAUDE_GROUP, hint: CLAUDE_SCOPE, note: "1 more in 1 project folder, not listed: a repo's .mcp.json travels with the repo; ~/.claude.json project entries stay on this computer" },
+      { rung: "agents", group: CLAUDE_GROUP, hint: CLAUDE_SCOPE, note: "1 more in 1 project folder stay on this computer (a repo's .mcp.json travels with it)" },
     ]);
   });
 
@@ -254,10 +254,19 @@ describe("mcp groups", () => {
     });
     const rows = await detectMcp(host);
     expect(await mcpGroups(host, rows)).toEqual([
-      { rung: "agents", group: CLAUDE_GROUP, hint: CLAUDE_SCOPE, note: "6 more in 3 project folders, not listed: a repo's .mcp.json travels with the repo; ~/.claude.json project entries stay on this computer" },
+      { rung: "agents", group: CLAUDE_GROUP, hint: CLAUDE_SCOPE, note: "6 more in 3 project folders stay on this computer (a repo's .mcp.json travels with it)" },
     ]);
     // Nothing outside the named folders is opened, and no whole-disk walk happens.
     expect(host.calls.filter(c => c.startsWith("read ")).slice(1)).toEqual([`read ${HOME}/.claude.json`, `read ${HOME}/.mcp.json`, `read ${HOME}/code/mono/.mcp.json`, `read ${HOME}/spoo/.mcp.json`]);
+  });
+
+  it("the left-out line fits the screen's 100-column cap with two-digit counts", async () => {
+    const projects = Object.fromEntries(Array.from({ length: 99 }, (_, i) => [`${HOME}/p${i}`, { mcpServers: { s: { url: `https://s${i}.example` } } }]));
+    const host = fakeHost({ files: { "~/.claude.json": claudeJson({ projects }) } });
+    const [claude] = await mcpGroups(host, await detectMcp(host));
+    expect(claude?.note).toBe("99 more in 99 project folders stay on this computer (a repo's .mcp.json travels with it)");
+    // The line sits eight columns in: the bar, a space and the row's six-column indent.
+    expect(claude!.note!.length).toBeLessThanOrEqual(100 - 8);
   });
 
   it("no group, no note: nothing configured, only project-scoped servers, or a user-wide agent's config alone", async () => {

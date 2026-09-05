@@ -621,7 +621,7 @@ export async function mcpGroups(host: Host, rows: readonly ManifestEntry[]): Pro
       const root = text === undefined ? undefined : parseJson(text);
       const left = root === undefined ? undefined : await claudeLeftOut(host, root);
       if (left !== undefined && left.servers > 0) {
-        note.note = `${left.servers} more in ${left.folders} project folder${left.folders === 1 ? "" : "s"}, not listed: a repo's .mcp.json travels with the repo; ~/.claude.json project entries stay on this computer`;
+        note.note = `${left.servers} more in ${left.folders} project folder${left.folders === 1 ? "" : "s"} stay on this computer (a repo's .mcp.json travels with it)`;
       }
     }
     out.push(note);

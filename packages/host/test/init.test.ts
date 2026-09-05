@@ -561,7 +561,7 @@ describe("wsp init, interactive", () => {
   it("MCP servers sit under their agent on the Agents screen, say what each carries, and the summary counts them", async () => {
     const github: ManifestEntry = { rung: "agents", id: "agents/mcp/claude/github", label: "github", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "bring", detail: "stdio: npx @modelcontextprotocol/server-github; runs via npx; carries a secret: env GITHUB_TOKEN (40 B)" };
     const notes: ManifestEntry = { rung: "agents", id: "agents/mcp/claude/notes", label: "notes", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "skip", reason: "command ~/Library/Notes/mcp is macOS-only, will not run", detail: "stdio: ~/Library/Notes/mcp; carries no secret" };
-    const scope = { rung: "agents" as const, group: "Claude Code MCP servers", hint: "user scope and your home folder", note: "12 more in 2 project folders, not listed: a repo's .mcp.json travels with the repo; ~/.claude.json project entries stay on this computer" };
+    const scope = { rung: "agents" as const, group: "Claude Code MCP servers", hint: "user scope and your home folder", note: "12 more in 2 project folders stay on this computer (a repo's .mcp.json travels with it)" };
     const f = fake({ collect: async () => ({ entries: [...FIXTURE.entries, github, notes], groups: [scope] }), columns: 140 });
     const run = runInit(f.opts, f.io);
     for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools"]) {
@@ -571,7 +571,7 @@ describe("wsp init, interactive", () => {
     await f.until("Agents");
     // The heading says which scope the list reads; the dim line under the group counts what it leaves out.
     expect(f.text()).toMatch(/▾ Claude Code MCP servers\s+1 of 1 {2}user scope and your home folder\n/);
-    expect(f.text()).toMatch(/notes\s+stays here\n┃ {7}12 more in 2 project folders, not listed: a repo's \.mcp\.json travels with the repo;\n┃ {7}~\/\.claude\.json project entries stay on this computer\n/);
+    expect(f.text()).toMatch(/notes\s+stays here\n┃ {7}12 more in 2 project folders stay on this computer \(a repo's \.mcp\.json travels with it\)\n/);
     // all row, Claude Code, Codex, the group header, then github: its detail pane names the transport, what it needs and the secret.
     await f.press(KEY.down, KEY.down, KEY.down, KEY.down);
     await f.until("carries a secret");

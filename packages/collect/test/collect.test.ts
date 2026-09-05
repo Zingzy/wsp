@@ -77,7 +77,7 @@ describe("collect", () => {
     const claude = JSON.stringify({ mcpServers: { notion: { url: "https://mcp.notion.com/mcp" } }, projects: { "/Users/dev/code/mono": { mcpServers: { linear: { url: "https://mcp.linear.app/sse" } } } } });
     const manifest = await collect(fakeHost({ files: { "~/.claude.json": claude } }));
     expect(manifest.groups).toEqual([
-      { rung: "agents", group: "Claude Code MCP servers", hint: "user scope and your home folder", note: "1 more in 1 project folder, not listed: a repo's .mcp.json travels with the repo; ~/.claude.json project entries stay on this computer" },
+      { rung: "agents", group: "Claude Code MCP servers", hint: "user scope and your home folder", note: "1 more in 1 project folder stay on this computer (a repo's .mcp.json travels with it)" },
     ]);
     expect(parseManifest(manifest)).toEqual(manifest);
   });
