@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { BUILDER_IDLE_MS, MachineAliveError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextSetupSha, nextSmoke, prepareBuilder, rollback, sealGolden, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
+import { BUILDER_DISK_GB, BUILDER_IDLE_MS, MachineAliveError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextSetupSha, nextSmoke, prepareBuilder, rollback, sealGolden, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
 import type { RecipeDigest } from "@wsp/protocol";
 import { NotFirstLifeError } from "../src/lifecycle.js";
 import { HOMEBREW, type ToolInstall } from "../src/golden-import.js";
@@ -31,7 +31,7 @@ function recordingBackend(
       timeline.push(`create ${id}`);
       const machine: Machine = {
         id, kind: spec.kind, streamUrl: spec.kind === "desktop" ? `wss://fake/stream/${id}` : undefined,
-        exec: async (cmd) => opts.exec?.(cmd) ?? execResults[cmd] ?? { exitCode: 0, stdout: "", stderr: "" },
+        exec: async (cmd) => opts.exec?.(cmd) ?? execResults[cmd] ?? (cmd === "echo ok" ? REACH_OK : { exitCode: 0, stdout: "", stderr: "" }),
         snapshot: async (name) => { snapshots.push(name); timeline.push(`snapshot ${id}`); return `snap_${name}`; },
         pause: async () => {}, resume: async () => {},
         kill: async () => {
@@ -60,6 +60,8 @@ function recordingBackend(
 }
 
 const FAST_KILL = { graceMs: 20, pollMs: 1 };
+/** What a machine that still serves answers the reach check with. */
+const REACH_OK: ExecResult = { exitCode: 0, stdout: "ok\n", stderr: "" };
 
 function stageRecorder() {
   const stages: string[] = [];
@@ -150,8 +152,7 @@ describe("interactive golden: prepare then seal", () => {
       onStage,
     });
     // An idle-paused builder resumes not first-life and the seal would 502; kill fails loud instead.
-    expect(created[0]).toMatchObject({ kind: "sandbox", template: "base", onIdle: "kill" });
-    expect(created[0]).not.toHaveProperty("diskGb");
+    expect(created[0]).toMatchObject({ kind: "sandbox", template: "base", onIdle: "kill", diskGb: 20 });
     expect(builder.kind).toBe("sandbox");
     expect(builder.firstLife).toBe(true);
     expect(builder.machine.streamUrl).toBeUndefined();
@@ -303,6 +304,18 @@ describe("interactive golden: prepare then seal", () => {
   });
 });
 
+describe("golden disk", () => {
+  it("every create asks for the 20 GB disk: the builder, the smoke fork, a workspace fork and an upgrade fork", async () => {
+    const { backend, created } = recordingBackend();
+    const builder = await prepareBuilder({ backend, setup: "true" });
+    const { manifest, version } = await sealGolden(builder, { backend, smoke: "true" });
+    await forkGolden(backend, manifest);
+    await upgradeBuilder({ backend, head: version, delta: { import: { recipeHash: "h2", tools: [], agents: [] }, removals: [] }, setup: "true" });
+    expect(created.map(c => c.diskGb)).toEqual([BUILDER_DISK_GB, BUILDER_DISK_GB, BUILDER_DISK_GB, BUILDER_DISK_GB]);
+    expect(BUILDER_DISK_GB).toBe(20);
+  });
+});
+
 describe("golden size", () => {
   /** A provider that clamps memory to 2048 MB whatever is asked. */
   const clamped = (spec: MachineSpec): MachineShape => ({ cpu: spec.cpu ?? 2, memMb: 2048, createdAt: "2026-09-02T00:00:00.000Z" });
@@ -378,6 +391,7 @@ describe("golden import stages", () => {
         const hit = answers.find(([needle]) => cmd.includes(needle));
         if (hit) return hit[1];
         if (cmd === FREE_KB_CMD) return { exitCode: 0, stdout: `${typeof free === "function" ? free() : free}\n`, stderr: "" };
+        if (cmd === "echo ok") return REACH_OK;
         return ok;
       },
     });
@@ -399,7 +413,7 @@ describe("golden import stages", () => {
     expect(stages).toContainEqual(expect.stringMatching(/^uploading-files:33 MB in 2 parts in \d+(\.\d)?s$/));
   });
 
-  it("runs setup, upload, tools and agents in order after the daemon, with a detail on every frame", async () => {
+  it("runs setup, upload, agents and then tools in order after the daemon, with a detail on every frame, and checks the machine still answers", async () => {
     const { backend, cmds, puts, fetch } = backendFor();
     const { stages, onStage } = stageRecorder();
     const results: ImportResult[] = [];
@@ -414,11 +428,11 @@ describe("golden import stages", () => {
       "applying-setup:1.2 KB packed; skipped ~/.bashrc (no longer on this computer)",
       "uploading-files:1.2 KB",
       expect.stringMatching(/^uploading-files:1\.2 KB in \d+(\.\d)?s$/),
-      "installing-tools:Homebrew (1/3)", "installing-tools:gh (2/3)", "installing-tools:bun@1.4.0 (3/3)",
-      "installing-tools:3 installed",
       "installing-harness",
       "installing-harness:Claude Code (1/2)", "installing-harness:Codex (2/2)",
       "installing-harness:Claude Code, Codex installed",
+      "installing-tools:Homebrew (1/3)", "installing-tools:gh (2/3)", "installing-tools:bun@1.4.0 (3/3)",
+      "installing-tools:3 installed",
       "ready",
     ]);
     expect(puts).toEqual([Buffer.from("tgz-bytes")]);
@@ -434,8 +448,11 @@ describe("golden import stages", () => {
     expect(cmds).toContain('export PATH="/usr/local/bin:$PATH"\nclaude --version');
     expect(cmds).toContain('export PATH="/usr/local/bin:$PATH"\ncodex --version');
     expect(cmds.indexOf("true")).toBeLessThan(cmds.indexOf(agent));
-    expect(cmds.indexOf(tool)).toBeLessThan(cmds.indexOf("true"));
-    expect(builder.import).toEqual({ recipeHash: "h1", applied: ["applying-setup", "uploading-files", "installing-tools", "installing-harness"], smoke: "claude --version && codex --version" });
+    // Agents are the point and tools the long tail: the agents go on first, so a tools stage that fills the disk cannot starve them.
+    expect(cmds.indexOf(agent)).toBeLessThan(cmds.indexOf(tool));
+    // The reach check is the last thing on the machine before the hand-off.
+    expect(cmds.at(-1)).toBe("echo ok");
+    expect(builder.import).toEqual({ recipeHash: "h1", applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools"], smoke: "claude --version && codex --version" });
     expect(builder.setupSha).toBe(createHash("sha256").update("true\nclaude-install\ncodex-install").digest("hex"));
     expect(results).toEqual([{
       recipeHash: "h1",
@@ -453,22 +470,32 @@ describe("golden import stages", () => {
     }]);
   });
 
-  it("a tool that fails is a warning in the detail and the next one still runs; the seal smoke names only agents that installed", async () => {
+  it("a tool that fails is a warning in the detail and the next one still runs; the build and the seal go on", async () => {
     const { backend, fetch } = backendFor([
       // stdout ends on a progress line; the reason is the last stderr line, not that.
       ["brew install gh", { exitCode: 1, stdout: "==> Installing gh dependency: oniguruma\n", stderr: "Error: gh: no bottle available!\n" }],
-      ["codex-install", { exitCode: 124, stdout: "", stderr: "" }],
     ]);
     const { stages, onStage } = stageRecorder();
     const results: ImportResult[] = [];
     const builder = await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ onResult: r => void results.push(r) }) });
     expect(stages).toContain("installing-tools:2 installed, 1 failed: gh (Error: gh: no bottle available!)");
-    expect(stages).toContain("installing-harness:Claude Code installed; Codex failed (timed out after 900s)");
-    expect(builder.import?.smoke).toBe("claude --version");
     expect(results[0]!.tools[1]).toEqual({ id: "tools/brew/gh", label: "gh", outcome: "failed", note: "Error: gh: no bottle available!", ms: expect.any(Number) });
-    expect(results[0]!.agents[1]).toEqual({ id: "agents/codex", name: "Codex", outcome: "failed", note: "timed out after 900s", ms: expect.any(Number) });
     const { version } = await sealGolden(builder, { backend, smoke: "should-not-run" });
-    expect(version.smoke.cmd).toBe("claude --version");
+    expect(version.smoke.cmd).toBe("claude --version && codex --version");
+  });
+
+  it("an agent that fails refuses the seal with the installer's reason, kills the builder, reports the result, and never starts the tools", async () => {
+    const { backend, cmds, killed, fetch } = backendFor([["codex-install", { exitCode: 124, stdout: "", stderr: "" }]]);
+    const { stages, onStage } = stageRecorder();
+    const results: ImportResult[] = [];
+    await expect(prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ onResult: r => void results.push(r) }) })).rejects.toThrow(/an agent did not install/);
+    expect(stages.at(-1)).toBe("failed:an agent did not install, so nothing is sealed:\nCodex: timed out after 900s");
+    expect(killed).toEqual(["m1"]);
+    expect(results[0]!.agents).toEqual([
+      { id: "agents/claude", name: "Claude Code", outcome: "installed", ms: expect.any(Number) },
+      { id: "agents/codex", name: "Codex", outcome: "failed", note: "timed out after 900s", ms: expect.any(Number) },
+    ]);
+    expect(cmds.some(c => c.includes("brew-bootstrap") || c.includes("brew install gh") || c.includes("bun@1.4.0"))).toBe(false);
   });
 
   it("when every ticked agent fails the build stops, names each agent and its reason, kills the builder, and still reports the result", async () => {
@@ -478,13 +505,28 @@ describe("golden import stages", () => {
     ]);
     const { stages, onStage } = stageRecorder();
     const results: ImportResult[] = [];
-    await expect(prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ onResult: r => void results.push(r) }) })).rejects.toThrow(/no agent installed/);
-    expect(stages.at(-1)).toBe(["failed:no agent installed, so there is nothing to seal:", "Claude Code: curl: (6) Could not resolve host", "Codex: timed out after 900s"].join("\n"));
+    await expect(prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ onResult: r => void results.push(r) }) })).rejects.toThrow(/2 agents did not install/);
+    expect(stages.at(-1)).toBe(["failed:2 agents did not install, so nothing is sealed:", "Claude Code: curl: (6) Could not resolve host", "Codex: timed out after 900s"].join("\n"));
     expect(killed).toEqual(["m1"]);
     expect(results[0]!.agents.map(a => a.outcome)).toEqual(["failed", "failed"]);
   });
 
-  it("the Node step runs once before the agents: kept when the guest meets the floor, installed and said so when not, and a failure fails only the agents above the guest's major", async () => {
+  it("a machine that stops answering after the installs is not sealed: the builder is killed and the result still reported", async () => {
+    const { backend, cmds, killed, fetch } = backendFor([["echo ok", { exitCode: 1, stdout: "", stderr: "" }]]);
+    const { stages, onStage } = stageRecorder();
+    const results: ImportResult[] = [];
+    await expect(prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ onResult: r => void results.push(r) }) })).rejects.toThrow(/stopped answering commands after the installs \(exit 1\)/);
+    expect(stages.at(-1)).toBe("failed:the machine stopped answering commands after the installs (exit 1); nothing is sealed");
+    expect(killed).toEqual(["m1"]);
+    expect(results[0]!.tools.map(t => t.outcome)).toEqual(["installed", "installed", "installed"]);
+    // Every install ran before the check; the check is what the hand-off would have trusted.
+    expect(cmds.indexOf("echo ok")).toBeGreaterThan(cmds.findIndex(c => c.includes("bun@1.4.0")));
+    // A machine that answers with exit 0 and the wrong words is not serving either.
+    const mute = backendFor([["echo ok", { exitCode: 0, stdout: "", stderr: "" }]]);
+    await expect(prepareBuilder({ backend: mute.backend, setup: "true", fetch: mute.fetch, import: importOf() })).rejects.toThrow(/stopped answering commands after the installs \(exit 0\)/);
+  });
+
+  it("the Node step runs once before the agents: kept when the guest meets the floor, installed and said so when not, and a failure fails the agents above the guest's major and with them the seal", async () => {
     const node = { floor: 22, version: "22.23.2", agents: ["Pi"], cmd: "node-step" };
     const agents = [
       { id: "agents/codex", name: "Codex", install: "codex-install", smoke: "codex --version", node: 16 },
@@ -495,7 +537,8 @@ describe("golden import stages", () => {
     const b1 = await prepareBuilder({ backend: kept.backend, setup: "true", fetch: kept.fetch, onStage: k.onStage, import: importOf({ node, agents }) });
     expect(k.stages.slice(k.stages.indexOf("installing-harness"))).toEqual([
       "installing-harness", "installing-harness:Node for Pi", "installing-harness:Node v22.1.0 kept; Pi run on it",
-      "installing-harness:Codex (1/2)", "installing-harness:Pi (2/2)", "installing-harness:Codex, Pi installed", "ready",
+      "installing-harness:Codex (1/2)", "installing-harness:Pi (2/2)", "installing-harness:Codex, Pi installed",
+      "installing-tools:Homebrew (1/3)", "installing-tools:gh (2/3)", "installing-tools:bun@1.4.0 (3/3)", "installing-tools:3 installed", "ready",
     ]);
     expect(kept.cmds.indexOf(kept.cmds.find(c => c.includes("node-step"))!)).toBeLessThan(kept.cmds.indexOf(kept.cmds.find(c => c.includes("codex-install"))!));
     expect(b1.setupSha).toBe(createHash("sha256").update("true\nnode-step\ncodex-install\npi-install").digest("hex"));
@@ -508,15 +551,15 @@ describe("golden import stages", () => {
     const failed = backendFor([["node-step", { exitCode: 22, stdout: "NODE_HAVE v18.20.4\n", stderr: "curl: (22) The requested URL returned error: 404" }]]);
     const f = stageRecorder();
     const results: ImportResult[] = [];
-    const b3 = await prepareBuilder({ backend: failed.backend, setup: "true", fetch: failed.fetch, onStage: f.onStage, import: importOf({ node, agents, onResult: r => void results.push(r) }) });
+    await expect(prepareBuilder({ backend: failed.backend, setup: "true", fetch: failed.fetch, onStage: f.onStage, import: importOf({ node, agents, onResult: r => void results.push(r) }) })).rejects.toThrow(/an agent did not install/);
     expect(f.stages).toContain("installing-harness:Node 22.23.2 did not install: curl: (22) The requested URL returned error: 404");
+    expect(f.stages.at(-1)).toBe("failed:an agent did not install, so nothing is sealed:\nPi: Node 22.23.2 did not install: curl: (22) The requested URL returned error: 404");
     expect(failed.cmds.some(c => c.includes("pi-install"))).toBe(false);
     expect(failed.cmds.some(c => c.includes("codex-install"))).toBe(true);
     expect(results[0]!.agents).toEqual([
       { id: "agents/codex", name: "Codex", outcome: "installed", ms: expect.any(Number) },
       { id: "agents/pi", name: "Pi", outcome: "failed", note: "Node 22.23.2 did not install: curl: (22) The requested URL returned error: 404", ms: 0 },
     ]);
-    expect(b3.import?.smoke).toBe("codex --version");
   });
 
   it("a failure's reason is Homebrew's Error: line, not the advice line that follows it", async () => {
@@ -535,7 +578,7 @@ describe("golden import stages", () => {
     const results: ImportResult[] = [];
     const b = await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ skippedAgents: aside, onResult: r => void results.push(r) }) });
     expect(results[0]!.agents[0]).toEqual({ id: "agents/zed", name: "Zed", outcome: "skipped", note: "no installer known" });
-    expect(stages.at(-2)).toBe("installing-harness:Claude Code, Codex installed; Zed skipped (no installer known)");
+    expect(stages).toContain("installing-harness:Claude Code, Codex installed; Zed skipped (no installer known)");
     expect(b.import?.smoke).toBe("claude --version && codex --version");
 
     const only = backendFor();
@@ -553,14 +596,14 @@ describe("golden import stages", () => {
     expect(stages).toContain("installing-tools:1 installed, 1 failed: Homebrew (git: not found), 1 skipped");
   });
 
-  it("stops installing tools when the disk drops under the floor kept for the agents", async () => {
+  it("stops installing tools when the disk drops under the floor that keeps the machine serving", async () => {
     let dfCalls = 0;
     const { backend, cmds, fetch } = backendFor([], () => mb(++dfCalls <= 2 ? 2000 : 500));
     const { stages, onStage } = stageRecorder();
     await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf() });
     expect(cmds.some(c => c.includes("brew-bootstrap"))).toBe(true);
     expect(cmds.some(c => c.includes("brew install gh"))).toBe(false);
-    expect(stages).toContain("installing-tools:1 installed, 2 skipped (500 MB free, keeping 800 MB for the agents)");
+    expect(stages).toContain("installing-tools:1 installed, 2 skipped (500 MB free, keeping 800 MB free)");
   });
 
   it("refuses to upload when the archive and its contents would not fit, kills the builder, and says why", async () => {
@@ -626,13 +669,14 @@ describe("golden import stages", () => {
       "creating:sandbox from base",
       "applying-setup:nothing ticked",
       "uploading-files:nothing to upload",
-      "installing-tools:nothing ticked",
       "installing-harness",
       "installing-harness:no agent ticked",
+      "installing-tools:nothing ticked",
       "ready",
     ]);
     expect(puts).toEqual([]);
-    expect(cmds).toEqual(["true"]);
+    // The harness ran, so the machine is asked whether it still answers before the hand-off.
+    expect(cmds).toEqual(["true", "echo ok"]);
     expect(builder.import?.smoke).toBe("true");
 
     let result: ImportResult | undefined;
@@ -654,8 +698,8 @@ describe("golden import stages", () => {
     expect(stages).toEqual([
       "applying-setup:already applied",
       "uploading-files:already applied",
-      "installing-tools:already applied",
       "installing-harness:already applied",
+      "installing-tools:already applied",
     ]);
     expect(again.ledger).toEqual(builder.import);
     // Nothing ran, so there is no result to report; the saved list from the first run stands.
@@ -685,8 +729,8 @@ describe("golden import stages", () => {
       "applying-setup:already applied",
       "uploading-files:2 volatile files, 300 B",
       expect.stringMatching(/^uploading-files:~\/\.claude\.json, ~\/\.claude\/plugins\/installed_plugins\.json re-imported, 300 B in \d+\.\ds$/),
-      "installing-tools:already applied",
       "installing-harness:already applied",
+      "installing-tools:already applied",
     ]);
     expect(again.ledger).toEqual(builder.import);
     // The saved result from the first run stands: a re-import of state files changes no cut and no install.
@@ -708,8 +752,8 @@ describe("golden import stages", () => {
       "applying-setup:already applied",
       "uploading-files:1 volatile file, 300 B",
       expect.stringMatching(/^uploading-files:~\/\.claude\.json not re-imported: your files need 300 B packed and 2\.0 KB unpacked, plus 256 MB of headroom, but the machine has 200 MB free$/),
-      "installing-tools:already applied",
       "installing-harness:already applied",
+      "installing-tools:already applied",
     ]);
     expect(again.ledger).toEqual(builder.import);
     // A pack that throws takes the same road.
@@ -810,11 +854,11 @@ describe("golden import stages", () => {
         "applying-setup:1.2 KB packed; skipped ~/.bashrc (no longer on this computer)",
         "uploading-files:1.2 KB",
         expect.stringMatching(/^uploading-files:1\.2 KB in /),
-        "installing-tools:jq (1/1)",
-        "installing-tools:1 installed",
         "installing-harness",
         "installing-harness:Codex (1/1)",
         "installing-harness:Codex installed",
+        "installing-tools:jq (1/1)",
+        "installing-tools:1 installed",
       ]);
       const removals = cmds.slice(0, 3);
       expect(removals.every(c => c.startsWith("timeout -k 10 600 bash -c '"))).toBe(true);
@@ -822,7 +866,7 @@ describe("golden import stages", () => {
       expect(removals[2]).toContain("npm uninstall -g @google/gemini-cli");
       expect(cmds.indexOf(FREE_KB_CMD)).toBeGreaterThan(2);
       // Claude Code was removed from the recipe even though nothing could uninstall it, so its check leaves the smoke.
-      expect(ledger).toEqual({ recipeHash: "h2", applied: ["applying-setup", "uploading-files", "installing-tools", "installing-harness"], smoke: "codex --version", recipe: SNAPSHOT });
+      expect(ledger).toEqual({ recipeHash: "h2", applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools"], smoke: "codex --version", recipe: SNAPSHOT });
     });
 
     it("a delta with nothing to remove goes straight to the stages", async () => {
@@ -856,7 +900,7 @@ describe("golden import stages", () => {
       expect(cmds.filter(c => c.includes("brew install jq"))).toHaveLength(1);
       expect(cmds.some(c => c.includes("brew-bootstrap"))).toBe(false);
       expect(builder).toMatchObject({ kind: "desktop", baseTemplate: "base", firstLife: true, size: { cpu: 2, memMb: 8192 } });
-      expect(builder.import).toEqual({ recipeHash: "h2", applied: ["applying-setup", "uploading-files", "installing-tools", "installing-harness"], smoke: "claude --version && gemini --version && codex --version", recipe: SNAPSHOT });
+      expect(builder.import).toEqual({ recipeHash: "h2", applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools"], smoke: "claude --version && gemini --version && codex --version", recipe: SNAPSHOT });
       // The version's sha chains the previous version's with what this delta ran, so v(n+1)'s sha says both.
       expect(builder.setupSha).toBe(nextSetupSha("s1", "true", deltaOf({ removals: [] }).import));
       expect(builder.setupSha).toBe(createHash("sha256").update(`s1\n${createHash("sha256").update("true\ncodex-install").digest("hex")}`).digest("hex"));

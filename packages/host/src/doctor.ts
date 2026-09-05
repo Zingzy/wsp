@@ -86,13 +86,22 @@ function nodeBootstrap(): string {
   ].join("\n");
 }
 
+/** Vite reads this list of extra allowed hosts from the environment (8.2.2, measured 2026-09-05); without it every
+ * dev server answers 403 through the preview edge. Next.js and webpack-dev-server have no env equivalent. */
+export const VITE_ALLOWED_HOSTS_ENV = "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS";
+
 /** The in-guest install+start sequence. The setsid line ends in a bare `&`
  * with the sleep on the same statement: `&` already terminates a command, so
- * joining it with `;` would be a bash syntax error (a live run died on it). */
-export function deployScript(token: string): string {
+ * joining it with `;` would be a bash syntax error (a live run died on it).
+ * `previewHostSuffix` (".preview.example.com") is what dev servers must accept
+ * to answer through the edge; absent on a backend without preview URLs. */
+export function deployScript(token: string, previewHostSuffix?: string): string {
   return [
     "set -e",
     'export PATH="/usr/local/bin:$PATH"',
+    // The daemon started below hands its environment to every pty and harness launch, and the exec running
+    // this carries PATH and nothing else (measured 2026-09-05).
+    "export HOME=/root USER=root",
     "mkdir -p /root/wsp-daemon /root/inbox",
     "tar -xzf /root/wsp-daemon.tgz -C /root/wsp-daemon",
     nodeBootstrap(),
@@ -106,11 +115,28 @@ export function deployScript(token: string): string {
     `install -m 0755 /root/wsp-daemon/wsp-open ${OPEN_SHIM_PATH}`,
     `ln -sfn ${OPEN_SHIM_PATH} /usr/local/bin/xdg-open`,
     `mkdir -p /etc/profile.d && printf 'export BROWSER=%s\\nunset DISPLAY\\n' ${OPEN_SHIM_PATH} > /etc/profile.d/wsp-open.sh`,
+    // Login shells read it from profile.d; the daemon's ptys inherit it from the daemon, exported before it starts.
+    ...(previewHostSuffix !== undefined
+      ? [
+          `printf 'export ${VITE_ALLOWED_HOSTS_ENV}=%s\\n' '${previewHostSuffix}' > /etc/profile.d/wsp-preview.sh`,
+          `export ${VITE_ALLOWED_HOSTS_ENV}='${previewHostSuffix}'`,
+        ]
+      : []),
     "umask 077",
     `printf '%s' '${token}' > /root/.wsp-daemon-token`,
     "setsid nohup node /root/wsp-daemon/start.mjs > /root/daemon.log 2>&1 < /dev/null & sleep 1.5",
     "ss -ltn | grep -q 7070 && echo DAEMON_UP || { cat /root/daemon.log; echo DAEMON_DOWN; }",
   ].join("\n");
+}
+
+/** The preview host with its machine-and-port label cut off ("<id>-7070.preview.example.com" gives
+ * ".preview.example.com"): the suffix every port on this machine is served under, read off the backend
+ * rather than assumed. Undefined on a backend without preview URLs or a host with no dot to cut at. */
+export async function previewHostSuffix(machine: Machine): Promise<string | undefined> {
+  if (machine.previewUrl === undefined) return undefined;
+  const { hostname } = new URL((await machine.previewUrl(DAEMON_PORT)).url);
+  const dot = hostname.indexOf(".");
+  return dot > 0 ? hostname.slice(dot) : undefined;
 }
 
 /** macOS tar writes com.apple.provenance as pax xattr headers; GNU tar in the
@@ -150,7 +176,8 @@ export async function deployDaemon(
     const put = await fetch(putUrl, { method: "PUT", body: readFileSync(tgz) });
     if (!put.ok) throw new Error(`bundle upload failed: HTTP ${put.status}`);
 
-    const res = await machine.exec(deployScript(token), { timeoutMs: 180_000 });
+    const suffix = await previewHostSuffix(machine);
+    const res = await machine.exec(deployScript(token, suffix), { timeoutMs: 180_000 });
     if (res.exitCode !== 0 || !res.stdout.includes("DAEMON_UP")) {
       throw new Error(`daemon deploy failed: ${res.stdout.slice(-300)} ${res.stderr.slice(-200)}`);
     }

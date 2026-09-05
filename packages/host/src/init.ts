@@ -168,8 +168,8 @@ export const PREPARE_STEPS: readonly StageWords[] = [
   { stage: "deploying-daemon", start: "Installing the base (Node, the daemon)", end: "Base installed", fail: "Installing the base failed" },
   { stage: "applying-setup", start: "Applying your setup", end: "Setup applied", fail: "Applying your setup failed" },
   { stage: "uploading-files", start: "Uploading your files", end: "Files uploaded", fail: "Uploading your files failed" },
-  { stage: "installing-tools", start: "Installing tools", end: "Tools installed", fail: "Installing tools failed" },
   { stage: "installing-harness", start: "Installing agents", end: "Agents installed", fail: "Installing agents failed" },
+  { stage: "installing-tools", start: "Installing tools", end: "Tools installed", fail: "Installing tools failed" },
   { stage: "ready", start: "Waiting for the machine", end: "Ready", fail: "The machine never became ready" },
 ];
 

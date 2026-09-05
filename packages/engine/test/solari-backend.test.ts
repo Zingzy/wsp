@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { SolariBackend } from "../src/solari-backend.js";
+import { EXEC_ENV, SolariBackend } from "../src/solari-backend.js";
 
 function fakeFetch(routes: Record<string, { status: number; body: unknown }>) {
   return vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -44,15 +44,29 @@ describe("SolariBackend", () => {
     expect(bodies[1]).not.toHaveProperty("lifecycle");
     expect(bodies[1]).not.toHaveProperty("timeoutMs");
   });
-  it("never sends a disk size, since the provider refuses the field", async () => {
+  it("sends the disk as camelCase diskGb when asked for and leaves it to the provider otherwise", async () => {
     const f = fakeFetch({ "POST /sandboxes": { status: 201, body: { sandboxId: "x", kind: "sandbox" } } });
     const b = new SolariBackend({ apiKey: "k", fetch: f });
-    await b.create({ kind: "sandbox", template: "base" });
+    await b.create({ kind: "sandbox", template: "base", diskGb: 20 });
     await b.create({ kind: "sandbox", fromSnapshot: "snap_1" });
     const bodies = f.mock.calls.map(c => JSON.parse(String(c[1]?.body)) as Record<string, unknown>);
-    expect(bodies[0]).toMatchObject({ kind: "sandbox", template: "base" });
-    expect(bodies[0]).not.toHaveProperty("diskGb");
+    expect(bodies[0]).toMatchObject({ kind: "sandbox", template: "base", diskGb: 20 });
+    expect(bodies[0]).not.toHaveProperty("disk_gb");
     expect(bodies[1]).not.toHaveProperty("diskGb");
+  });
+  it("every exec runs under bash -c with HOME and USER exported ahead of the command, and no SHELL", async () => {
+    const f = fakeFetch({
+      "POST /sandboxes": { status: 201, body: { sandboxId: "x", kind: "sandbox" } },
+      "POST /sandboxes/x/exec": { status: 200, body: { exitCode: 0, stdout: "", stderr: "" } },
+    });
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    const m = await b.create({ kind: "sandbox" });
+    await m.exec("go env GOPATH", { timeoutMs: 5_000 });
+    const body = JSON.parse(String(f.mock.calls[1]![1]?.body)) as { cmd: string; args: string[]; timeoutMs: number };
+    expect(body).toEqual({ cmd: "bash", args: ["-c", `${EXEC_ENV}\ngo env GOPATH`], timeoutMs: 5_000 });
+    expect(EXEC_ENV).toBe("export HOME=/root USER=root");
+    expect(body.args[1]).not.toContain("SHELL");
+    expect(body.args[0]).toBe("-c");
   });
   it("surfaces snapshotUnavailable without retrying", async () => {
     const id = "x";
@@ -71,11 +85,11 @@ describe("SolariBackend describe", () => {
   it("reads the provider's size and creation time off GET /sandboxes/:id", async () => {
     const f = fakeFetch({
       "POST /sandboxes": { status: 201, body: { sandboxId: "x", kind: "sandbox" } },
-      "GET /sandboxes/x": { status: 200, body: { sandboxId: "x", kind: "sandbox", state: "running", cpu: 2, memMb: 2048, createdAt: "2026-09-02T19:03:35Z" } },
+      "GET /sandboxes/x": { status: 200, body: { sandboxId: "x", kind: "sandbox", state: "running", cpu: 2, memMb: 2048, diskGb: 20, createdAt: "2026-09-02T19:03:35Z" } },
     });
     const b = new SolariBackend({ apiKey: "k", fetch: f });
-    const m = await b.create({ kind: "sandbox", memMb: 4096 });
-    await expect(m.describe!()).resolves.toEqual({ cpu: 2, memMb: 2048, createdAt: "2026-09-02T19:03:35Z" });
+    const m = await b.create({ kind: "sandbox", memMb: 4096, diskGb: 20 });
+    await expect(m.describe!()).resolves.toEqual({ cpu: 2, memMb: 2048, diskGb: 20, createdAt: "2026-09-02T19:03:35Z" });
   });
 });
 

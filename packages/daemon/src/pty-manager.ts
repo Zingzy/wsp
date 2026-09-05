@@ -1,4 +1,4 @@
-import { homedir } from "node:os";
+import { homedir, userInfo } from "node:os";
 import { spawn, type IPty } from "node-pty";
 import { OPEN_SHIM_PATH } from "./relay.js";
 
@@ -100,11 +100,29 @@ export class PtySession {
 
 /** The image ships DISPLAY=:0 with no X server behind it, which gcloud, gemini
  * and railway read as "a browser exists" and skip their paste-code paths; the
- * shim as BROWSER is what makes a sign-in land in the laptop's browser. */
+ * shim as BROWSER is what makes a sign-in land in the laptop's browser.
+ * HOME and USER come off the passwd row of the daemon's own uid when the
+ * daemon was started without them (a guest daemon inherited PATH and nothing
+ * else, measured 2026-09-05): git, Go and every rc file read them. */
 export function ptyEnv(extra?: Record<string, string>): Record<string, string> {
   const env: Record<string, string> = { ...(process.env as Record<string, string>), ...extra };
   delete env["DISPLAY"];
   env["BROWSER"] ??= OPEN_SHIM_PATH;
+  if (!env["HOME"] || !env["USER"]) {
+    // A uid with no passwd row (an arbitrary uid in a container) has no home to give;
+    // the shell still opens, without the blank ones and with whatever was inherited.
+    let me: { homedir: string; username: string } | undefined;
+    try {
+      me = userInfo();
+    } catch {
+      me = undefined;
+    }
+    for (const [name, value] of [["HOME", me?.homedir], ["USER", me?.username]] as const) {
+      if (env[name]) continue;
+      if (value !== undefined) env[name] = value;
+      else delete env[name];
+    }
+  }
   return env;
 }
 

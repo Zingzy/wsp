@@ -72,10 +72,10 @@ describe.runIf(LIVE)("golden import (live: apply a trimmed recipe, seal, fork, p
       expect(stages.map(s => s.stage)).toEqual([
         "creating", "deploying-daemon", "deploying-daemon",
         "applying-setup", "applying-setup", "uploading-files", "uploading-files",
-        // Homebrew, its glibc and gcc, jq, summary
-        "installing-tools", "installing-tools", "installing-tools", "installing-tools", "installing-tools",
         // bare harness line, the Node step (asked for and kept or installed), Claude, Codex, summary
         "installing-harness", "installing-harness", "installing-harness", "installing-harness", "installing-harness", "installing-harness",
+        // Homebrew, its glibc and gcc, jq, summary
+        "installing-tools", "installing-tools", "installing-tools", "installing-tools", "installing-tools",
         "ready",
       ]);
       const uploadFrame = stages.find(s => s.stage === "uploading-files" && /in [\d.]+s$/.test(s.detail ?? ""));

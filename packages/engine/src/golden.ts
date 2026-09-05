@@ -77,10 +77,10 @@ export const BROWSER_SHIM_PATH = "/usr/local/bin/wsp-open";
  * Starter rates over this window. */
 export const BUILDER_IDLE_MS = 6 * 60 * 60_000;
 
-/** Every desktop template boots with ~570 MB free, which the harness install
- * (~410 MB peak) plus the daemon (~280 MB) cannot fit; the base sandbox boots
- * with ~2.2 GB free and does. Builders default to sandbox and ask for this
- * disk, which Solari ignores today (both kinds stay at 4 GB) but may honor. */
+/** Root disk asked for every builder and fork, Solari's cap: a 4 GB root filled during the tools stage and
+ * five agents failed to install on it (measured 2026-09-05). */
+export const BUILDER_DISK_GB = 20;
+
 export interface MachineSize {
   cpu?: number;
   memMb?: number;
@@ -99,7 +99,7 @@ export interface PrepareBuilderOptions extends MachineSize {
   /** Harness install; its sha is recorded in the manifest. */
   setup: string;
   setupTimeoutMs?: number;
-  /** The person's files, tools and agents, applied between the daemon and the harness. */
+  /** The person's files, agents and tools: files after the daemon, agents with the harness, tools last. */
   import?: GoldenImport;
   /** The upload's transport; tests inject one. */
   fetch?: typeof globalThis.fetch;
@@ -217,7 +217,8 @@ const FREE_KB_CMD = "df -Pk /root | awk 'NR==2{print $4}'";
 const MIB = 1024 * 1024;
 /** Extraction needs the archive and its contents at once, plus what the agents install after. */
 const UPLOAD_HEADROOM = 256 * MIB;
-/** The Claude installer peaks near 410 MB and every other agent adds to it; tools stop before eating into it. */
+/** Agents install before tools, so this keeps the disk from filling under the harness once it runs (a full disk
+ * killed exec itself, measured 2026-09-05); tools stop before eating into it. */
 const TOOLS_DISK_FLOOR = 800 * MIB;
 const TOOL_TIMEOUT_S = 600;
 const AGENT_TIMEOUT_S = 900;
@@ -335,51 +336,6 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
       result.files = { bytes: packed.bytes, skipped: packed.skipped, cut: packed.cut };
       mark("uploading-files");
     }
-
-    if (done("installing-tools")) {
-      stage("installing-tools", ALREADY_APPLIED);
-    } else if (imp.tools.length === 0) {
-      stage("installing-tools", "nothing ticked");
-      mark("installing-tools");
-    } else {
-      ran = true;
-      const installed = new Set<string>();
-      const labelOf = (id: string): string => imp.tools.find(t => t.id === id)?.label ?? id;
-      let floor: string | undefined;
-      let dfWarned = false;
-      for (const [i, tool] of imp.tools.entries()) {
-        if (tool.after !== undefined && !installed.has(tool.after)) {
-          result.tools.push({ id: tool.id, label: tool.label, outcome: "skipped", note: `${labelOf(tool.after)} did not install` });
-          continue;
-        }
-        if (floor !== undefined) {
-          result.tools.push({ id: tool.id, label: tool.label, outcome: "skipped", note: floor });
-          continue;
-        }
-        const free = await freeBytes(machine);
-        if (free.kind === "unknown" && !dfWarned) {
-          dfWarned = true;
-          stage("installing-tools", `free disk unknown (${free.reason}); installing without the ${fmtBytes(TOOLS_DISK_FLOOR)} floor`);
-        } else if (free.kind === "free" && free.bytes < TOOLS_DISK_FLOOR) {
-          floor = `${fmtBytes(free.bytes)} free, keeping ${fmtBytes(TOOLS_DISK_FLOOR)} for the agents`;
-          result.tools.push({ id: tool.id, label: tool.label, outcome: "skipped", note: floor });
-          continue;
-        }
-        stage("installing-tools", `${tool.label} (${i + 1}/${imp.tools.length})`);
-        const t0 = Date.now();
-        const res = await machine.exec(guarded(tool.cmd, TOOL_TIMEOUT_S), { timeoutMs: (TOOL_TIMEOUT_S + 30) * 1000 });
-        const ms = Date.now() - t0;
-        if (res.exitCode === 0) {
-          installed.add(tool.id);
-          if (tool.id === "tools/homebrew") result.homebrew = { ...HOMEBREW };
-          result.tools.push({ id: tool.id, label: tool.label, outcome: "installed", ms });
-        } else {
-          result.tools.push({ id: tool.id, label: tool.label, outcome: "failed", note: reasonOf(res, TOOL_TIMEOUT_S), ms });
-        }
-      }
-      stage("installing-tools", summarize(result.tools, floor));
-      mark("installing-tools");
-    }
   }
 
   if (done("installing-harness")) {
@@ -408,14 +364,73 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
         else result.agents.push({ id: agent.id, name: agent.name, outcome: "failed", note: reasonOf(check, AGENT_TIMEOUT_S), ms });
       }
       const installed = imp.agents.filter(a => result.agents.some(r => r.id === a.id && r.outcome === "installed"));
-      if (result.agents.length > 0 && installed.length === 0) {
+      const failed = result.agents.filter(r => r.outcome === "failed");
+      // A golden with an agent missing is not sealed: the person ticked it, and the hand-off would open a terminal
+      // on a machine without it. All-skipped is the same refusal with the plan's reasons.
+      if (failed.length > 0 || (result.agents.length > 0 && installed.length === 0)) {
         imp.onResult?.(result);
-        throw new Error(["no agent installed, so there is nothing to seal:", ...result.agents.map(a => `${a.name}: ${a.note ?? "unknown reason"}`)].join("\n"));
+        const header = failed.length > 0 ? `${failed.length === 1 ? "an agent" : `${failed.length} agents`} did not install, so nothing is sealed:` : "no agent installed, so there is nothing to seal:";
+        throw new Error([header, ...result.agents.filter(r => r.outcome !== "installed").map(a => `${a.name}: ${a.note ?? "unknown reason"}`)].join("\n"));
       }
       ledger.smoke = installed.length > 0 ? installed.map(a => a.smoke).join(" && ") : "true";
       stage("installing-harness", result.agents.length === 0 ? "no agent ticked" : summarizeAgents(result.agents));
     }
     mark("installing-harness");
+  }
+
+  if (!only) {
+    if (done("installing-tools")) {
+      stage("installing-tools", ALREADY_APPLIED);
+    } else if (imp.tools.length === 0) {
+      stage("installing-tools", "nothing ticked");
+      mark("installing-tools");
+    } else {
+      ran = true;
+      const installed = new Set<string>();
+      const labelOf = (id: string): string => imp.tools.find(t => t.id === id)?.label ?? id;
+      let floor: string | undefined;
+      let dfWarned = false;
+      for (const [i, tool] of imp.tools.entries()) {
+        if (tool.after !== undefined && !installed.has(tool.after)) {
+          result.tools.push({ id: tool.id, label: tool.label, outcome: "skipped", note: `${labelOf(tool.after)} did not install` });
+          continue;
+        }
+        if (floor !== undefined) {
+          result.tools.push({ id: tool.id, label: tool.label, outcome: "skipped", note: floor });
+          continue;
+        }
+        const free = await freeBytes(machine);
+        if (free.kind === "unknown" && !dfWarned) {
+          dfWarned = true;
+          stage("installing-tools", `free disk unknown (${free.reason}); installing without the ${fmtBytes(TOOLS_DISK_FLOOR)} floor`);
+        } else if (free.kind === "free" && free.bytes < TOOLS_DISK_FLOOR) {
+          floor = `${fmtBytes(free.bytes)} free, keeping ${fmtBytes(TOOLS_DISK_FLOOR)} free`;
+          result.tools.push({ id: tool.id, label: tool.label, outcome: "skipped", note: floor });
+          continue;
+        }
+        stage("installing-tools", `${tool.label} (${i + 1}/${imp.tools.length})`);
+        const t0 = Date.now();
+        const res = await machine.exec(guarded(tool.cmd, TOOL_TIMEOUT_S), { timeoutMs: (TOOL_TIMEOUT_S + 30) * 1000 });
+        const ms = Date.now() - t0;
+        if (res.exitCode === 0) {
+          installed.add(tool.id);
+          if (tool.id === "tools/homebrew") result.homebrew = { ...HOMEBREW };
+          result.tools.push({ id: tool.id, label: tool.label, outcome: "installed", ms });
+        } else {
+          result.tools.push({ id: tool.id, label: tool.label, outcome: "failed", note: reasonOf(res, TOOL_TIMEOUT_S), ms });
+        }
+      }
+      stage("installing-tools", summarize(result.tools, floor));
+      mark("installing-tools");
+    }
+    if (ran) {
+      // A builder whose exec died (a full disk did it once) would be sealed and handed off answering nothing.
+      const answer = await machine.exec("echo ok", { timeoutMs: 30_000 });
+      if (answer.exitCode !== 0 || answer.stdout.trim() !== "ok") {
+        imp.onResult?.(result);
+        throw new Error(`the machine stopped answering commands after the installs (exit ${answer.exitCode}); nothing is sealed`);
+      }
+    }
   }
   if (!only && ran && imp.onResult) imp.onResult(result);
   return { ledger, result };
@@ -552,6 +567,7 @@ export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Build
     template: baseTemplate,
     onIdle: "kill",
     idleTimeoutMs: BUILDER_IDLE_MS,
+    diskGb: BUILDER_DISK_GB,
     ...asked,
     ...envSpec(opts),
   });
@@ -609,6 +625,7 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
   const forkSpec = () => ({
     kind: builder.kind,
     fromSnapshot: snapshotId!,
+    diskGb: BUILDER_DISK_GB,
     ...sizeAsked(opts.backend, opts, builder.size),
     ...envSpec(opts),
   });
@@ -757,6 +774,7 @@ export async function upgradeBuilder(opts: UpgradeBuilderOptions): Promise<Build
     fromSnapshot: opts.head.snapshotId,
     onIdle: "kill",
     idleTimeoutMs: BUILDER_IDLE_MS,
+    diskGb: BUILDER_DISK_GB,
     ...asked,
     ...envSpec(opts),
   });
@@ -826,6 +844,7 @@ export async function forkGolden(
   return backend.create({
     kind: overrides.kind ?? head.kind ?? "sandbox",
     fromSnapshot: head.snapshotId,
+    diskGb: BUILDER_DISK_GB,
     ...sizeAsked(backend, overrides, head.size),
     ...envSpec(overrides),
   });
