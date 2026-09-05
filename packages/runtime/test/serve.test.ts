@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
 import type { ForwardEvent, PortForward } from "@wsp/protocol";
+import { DAEMON_TOKEN_SET } from "../src/daemon-token.js";
 import { createRuntime, type HarnessAdapterFactory, type HarnessSession } from "../src/runtime.js";
 import { serveRuntime, type ForwardsSource, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
@@ -18,6 +19,10 @@ afterEach(async () => {
 function rt() {
   return createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
 }
+
+const DAEMON_TOKEN = "cafef00d".repeat(3);
+/** A guest with a daemon: the runtime's token write lands, everything else is silently fine. */
+const tokenGuest = (_m: unknown, cmd: string) => (cmd.includes("/root/.wsp-daemon-token") ? { exitCode: 0, stdout: `${DAEMON_TOKEN_SET}\n`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
 
 describe("serveRuntime auth", () => {
   it("closes 4401 on a wrong auth token", async () => {
@@ -226,8 +231,8 @@ describe("serveRuntime session interrupt", () => {
 describe("serveRuntime daemon reach", () => {
   it("workspaces.daemonReach returns the view a browser dials the daemon with", async () => {
     const backend = stubBackend();
-    backend.execImpl = (_m, cmd) => (cmd.includes(".wsp-daemon-token") ? { exitCode: 0, stdout: "guest-token", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
-    const runtime = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    backend.execImpl = tokenGuest;
+    const runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: DAEMON_TOKEN });
     srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
     const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
@@ -235,7 +240,7 @@ describe("serveRuntime daemon reach", () => {
     backend.machines[0]!.previewUrl = async port => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, token: "e", expiresAt: 1_800_000_000_000 });
     const res = await c.request("workspaces.daemonReach", { workspaceId: id });
     expect(res.ok).toBe(true);
-    expect(res["reach"]).toEqual({ url: "https://m1-7070.preview.example/?pt_token=e", expiresAt: 1_800_000_000_000, daemonToken: "guest-token" });
+    expect(res["reach"]).toEqual({ url: "https://m1-7070.preview.example/?pt_token=e", expiresAt: 1_800_000_000_000, daemonToken: DAEMON_TOKEN });
     c.close();
   });
 });
@@ -243,7 +248,7 @@ describe("serveRuntime daemon reach", () => {
 describe("serveRuntime port reach", () => {
   it("workspaces.portReach returns the route a browser frames, without the daemon token; an unknown workspace is refused", async () => {
     const backend = stubBackend();
-    backend.execImpl = (_m, cmd) => (cmd.includes(".wsp-daemon-token") ? { exitCode: 0, stdout: "guest-token", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+    backend.execImpl = tokenGuest;
     srv = await serveRuntime(createRuntime({ backend, store: memoryStore(), adapters: {} }), { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
     const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
@@ -315,9 +320,8 @@ describe("serveRuntime golden wizard ops", () => {
 
   it("golden.prepare defaults to a sandbox with no screen, and golden.builderReach hands back its daemon route", async () => {
     const backend = stubBackend();
-    backend.execImpl = (_m, cmd) =>
-      cmd === "cat /root/.wsp-daemon-token" ? { exitCode: 0, stdout: "builder-token", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" };
-    const runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
+    backend.execImpl = tokenGuest;
+    const runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe, daemonToken: DAEMON_TOKEN });
     srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
 
@@ -329,7 +333,7 @@ describe("serveRuntime golden wizard ops", () => {
     backend.machines[0]!.previewUrl = async port => ({ url: `https://m1-${port}.preview.example/?pt_token=edge`, token: "edge", expiresAt: Date.now() + 3_600_000 });
     const reach = await c.request("golden.builderReach", { builderId: "m1" });
     expect(reach.ok).toBe(true);
-    expect(reach["reach"]).toEqual({ url: "https://m1-7070.preview.example/?pt_token=edge", expiresAt: expect.any(Number), daemonToken: "builder-token" });
+    expect(reach["reach"]).toEqual({ url: "https://m1-7070.preview.example/?pt_token=edge", expiresAt: expect.any(Number), daemonToken: DAEMON_TOKEN });
     const missing = await c.request("golden.builderReach", { builderId: "m9" });
     expect(missing).toMatchObject({ ok: false, error: expect.stringMatching(/no such builder/) });
     c.close();

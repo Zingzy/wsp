@@ -4,8 +4,9 @@
 // import because it is built on the ws package. Same measured rules: the edge
 // idle-sweeps quiet sockets (~30s) and browsers cannot protocol-ping, so
 // liveness is an app-level ping op; every redial asks the runtime for a fresh
-// reach because the edge token expires hourly; 4401 is terminal, retrying
-// cannot fix a wrong token.
+// reach because the edge token expires hourly. The daemon token rides in the
+// first frame, never the URL; a 4401 means the host has rotated it, so the
+// link says reauth-needed and redials with what the host hands out next.
 import { DaemonErrorCode, DaemonEvent, type DaemonLinkStatus } from "@wsp/protocol";
 import type { TerminalWire } from "./link.js";
 
@@ -21,14 +22,14 @@ export class DaemonRequestError extends Error {
 
 export interface DaemonReachTarget {
   url: string;
-  /** Missing while the guest has no daemon token file; the link waits and asks again. */
+  /** Missing while the guest has no daemon; the link waits and asks again. */
   daemonToken?: string;
 }
 
 export interface DaemonLinkOptions {
   reach(): Promise<DaemonReachTarget>;
   onEvent(e: DaemonEvent): void;
-  /** Fires on every transition; reauth-needed and dead are terminal. */
+  /** Fires on every transition; reauth-needed lasts until the next dial, dead is terminal. */
   onStatus?(s: DaemonLinkStatus): void;
   WebSocketCtor?: typeof WebSocket;
   heartbeatMs?: number;
@@ -47,12 +48,11 @@ export interface DaemonLink extends TerminalWire {
   close(): void;
 }
 
-/** previewUrl → dialable ws(s) url carrying both the edge token and the daemon's. */
-export function daemonSocketUrl(previewUrl: string, daemonToken: string): string {
+/** previewUrl → dialable ws(s) url; the edge's own token rides along, the daemon's never does. */
+export function daemonSocketUrl(previewUrl: string): string {
   const url = new URL(previewUrl);
   if (url.protocol === "https:") url.protocol = "wss:";
   else if (url.protocol === "http:") url.protocol = "ws:";
-  url.searchParams.set("token", daemonToken);
   return url.toString();
 }
 
@@ -181,12 +181,15 @@ export function connectDaemonLink(opts: DaemonLinkOptions): DaemonLink {
       scheduleReconnect();
       return;
     }
-    const sock = new Ctor(daemonSocketUrl(target.url, target.daemonToken));
+    const token = target.daemonToken;
+    const sock = new Ctor(daemonSocketUrl(target.url));
     ws = sock;
     sock.onopen = () => {
-      // Live only once the daemon answers: a 4401 close follows the open
-      // event, and that must not flap through live first.
-      send("ping").then(
+      // Auth first, then live only once the daemon answers a ping: a 4401
+      // close follows the open event, and that must not flap through live.
+      send("auth", { token })
+        .then(() => send("ping"))
+        .then(
         () => {
           if (ws !== sock || closed) return;
           attempt = 0;
@@ -207,7 +210,10 @@ export function connectDaemonLink(opts: DaemonLinkOptions): DaemonLink {
       flushPending("connection lost");
       if (closed) return;
       if (ev.code === 4401) {
+        // The host rotates the token on every start; the next reach() carries what it holds now.
         setStatus("reauth-needed");
+        attempt++;
+        retryTimer = setTimeout(() => void dial(), backoff(attempt));
         return;
       }
       scheduleReconnect();

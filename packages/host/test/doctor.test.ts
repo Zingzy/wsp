@@ -9,6 +9,7 @@ import { gunzipSync } from "node:zlib";
 import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { WebSocketServer } from "ws";
 import { TOOLS_PATH } from "@wsp/engine";
+import { rotateDaemonTokenScript, writeDaemonTokenScript } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   connectDaemonSocket,
@@ -26,6 +27,7 @@ import {
   tarPackCommand,
   type DaemonSocket,
 } from "../src/doctor.js";
+import { redact } from "../src/init-log.js";
 import { stubBackend } from "./stub-backend.js";
 
 function tmp(prefix: string): string {
@@ -143,6 +145,15 @@ describe("deployScript", () => {
     }
   });
 
+  it("writes the token the way the rotation does, owner-only, in the one shape the run log redacts", () => {
+    const token = "aabbccddeeff00112233445566778899";
+    const script = deployScript(token);
+    expect(script).toContain(writeDaemonTokenScript(token));
+    expect(script.indexOf("umask 077")).toBeLessThan(script.indexOf("setsid nohup node"));
+    expect(redact(script)).not.toContain(token);
+    expect(redact(rotateDaemonTokenScript(token))).not.toContain(token);
+  });
+
   it("bootstraps a pinned, sha256-checked Node into /usr/local only when the guest has none", () => {
     const script = deployScript("aabbcc");
     const bootstrap = script.indexOf("if ! command -v node");
@@ -240,9 +251,9 @@ describe("deployDaemon", () => {
       const port = (server.address() as { port: number }).port;
       stub.uploadUrl = async () => `http://127.0.0.1:${port}/put`;
 
-      const out = await deployDaemon(machine, { token: "tok", daemonDir });
-      expect(out).toEqual({ token: "tok", node: "v22.23.2" });
-      expect(stub.execLog).toEqual([deployScript("tok")]);
+      const out = await deployDaemon(machine, { token: "abc123", daemonDir });
+      expect(out).toEqual({ token: "abc123", node: "v22.23.2" });
+      expect(stub.execLog).toEqual([deployScript("abc123")]);
       expect(uploads).toHaveLength(1);
       expect(gunzipSync(uploads[0]!).toString("latin1")).toContain("start.mjs");
 
@@ -251,8 +262,8 @@ describe("deployDaemon", () => {
       const edgedStub = backend.machines[1]!;
       edgedStub.uploadUrl = async () => `http://127.0.0.1:${port}/put`;
       edgedStub.previewUrl = async p => ({ url: `https://${edgedStub.id}-${p}.preview.example.com/?pt_token=x`, token: "x", expiresAt: 0 });
-      await deployDaemon(edged, { token: "tok", daemonDir });
-      expect(edgedStub.execLog).toEqual([deployScript("tok", ".preview.example.com")]);
+      await deployDaemon(edged, { token: "abc123", daemonDir });
+      expect(edgedStub.execLog).toEqual([deployScript("abc123", ".preview.example.com")]);
       expect(edgedStub.execLog[0]).toContain("export __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS='.preview.example.com'");
     } finally {
       server.close();
@@ -366,6 +377,31 @@ describe("connectDaemonSocket", () => {
 
   it("rejects on a bad daemon token (4401 through the socket close)", async () => {
     const { url } = await startLocalDaemon();
-    await expect(connectDaemonSocket({ url, token: "wrong" })).rejects.toThrow(/4401/);
+    await expect(connectDaemonSocket({ url, token: "wrong" })).rejects.toThrow(/4401.*daemon token refused/);
+  });
+
+  it("dials with the edge token alone and sends ours as the first frame", async () => {
+    const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    await new Promise<void>(r => server.once("listening", r));
+    const seen: { url: string; frames: Record<string, unknown>[] }[] = [];
+    server.on("connection", (ws, req) => {
+      const conn = { url: req.url ?? "", frames: [] as Record<string, unknown>[] };
+      seen.push(conn);
+      ws.on("message", raw => {
+        const m = JSON.parse(String(raw)) as { id: number };
+        conn.frames.push(m);
+        ws.send(JSON.stringify({ id: m.id, ok: true }));
+      });
+    });
+    const port = (server.address() as { port: number }).port;
+    try {
+      socket = await connectDaemonSocket({ url: `http://127.0.0.1:${port}/?pt_token=edge`, token: "ours", heartbeatMs: 60_000 });
+      expect(seen[0]!.url).toBe("/?pt_token=edge");
+      expect(seen[0]!.frames.map(f => f["op"])).toEqual(["auth", "manifest.get"]);
+      expect(seen[0]!.frames[0]).toMatchObject({ op: "auth", token: "ours" });
+    } finally {
+      for (const client of server.clients) client.terminate();
+      await new Promise<void>(r => server.close(() => r()));
+    }
   });
 });

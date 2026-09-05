@@ -1,5 +1,6 @@
-import { homedir, networkInterfaces } from "node:os";
-import { resolve } from "node:path";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, networkInterfaces, tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import { startDaemon, type DaemonHandle } from "../src/main.js";
@@ -27,11 +28,16 @@ class Client {
   private nextId = 1;
   private pending = new Map<number, (m: WireMsg) => void>();
   readonly events: WireMsg[] = [];
+  /** Every frame in arrival order, replies and events alike. */
+  readonly frames: WireMsg[] = [];
+  readonly closed: Promise<{ code: number; reason: string }>;
 
   private constructor(ws: WebSocket) {
     this.ws = ws;
+    this.closed = new Promise(resolve => ws.once("close", (code, reason) => resolve({ code, reason: String(reason) })));
     ws.on("message", raw => {
       const m = JSON.parse(String(raw)) as WireMsg;
+      this.frames.push(m);
       if (typeof m.id === "number" && this.pending.has(m.id)) {
         this.pending.get(m.id)!(m);
         this.pending.delete(m.id);
@@ -41,14 +47,15 @@ class Client {
     });
   }
 
-  static async connect(port: number, token: string): Promise<Client> {
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/?token=${token}`);
-    // Listening before open: the hello frame can ride in with the handshake.
+  /** Opens the socket and sends the auth frame first, as every real client does; the reply is not awaited. */
+  static async connect(port: number, token: string, host = "127.0.0.1"): Promise<Client> {
+    const ws = new WebSocket(`ws://${host}:${port}/`);
     const client = new Client(ws);
     await new Promise<void>((resolve, reject) => {
       ws.once("open", resolve);
       ws.once("error", reject);
     });
+    void client.request("auth", { token });
     return client;
   }
 
@@ -72,39 +79,91 @@ afterAll(async () => {
 });
 
 describe("daemon WS server", () => {
-  it("rejects clients without the token", async () => {
+  it("closes 4401 with one sentence when the auth frame carries the wrong token", async () => {
     daemon = await startDaemon({ port: 0, token: TOKEN });
-    const ws = new WebSocket(`ws://127.0.0.1:${daemon.port}/?token=wrong`);
+    const c = await Client.connect(daemon.port, "wrong");
+    const { code, reason } = await c.closed;
+    expect(code).toBe(4401);
+    expect(reason).toBe("daemon token refused; the host holds the current one");
+    expect(c.frames).toEqual([]);
+  });
+
+  it("the query token no longer authenticates: a socket dialled with ?token= still needs the frame", async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${daemon.port}/?token=${TOKEN}`);
+    ws.on("open", () => ws.send(JSON.stringify({ id: 1, op: "ping" })));
     const code = await new Promise<number>(resolve => ws.once("close", c => resolve(c)));
     expect(code).toBe(4401);
   });
 
-  it("closes a tokenless connection 4401 before processing any op", async () => {
+  it("closes a socket whose first frame is not auth 4401 before any handler runs", async () => {
     const before = daemon.ptys.list().length;
     const ws = new WebSocket(`ws://127.0.0.1:${daemon.port}/`);
-    ws.on("open", () => ws.send(JSON.stringify({ id: 1, op: "pty.create", shell: "bash" })));
-    const code = await new Promise<number>(resolve => ws.once("close", c => resolve(c)));
+    ws.on("open", () => {
+      ws.send(JSON.stringify({ id: 1, op: "pty.create", shell: "bash" }));
+      ws.send(JSON.stringify({ id: 2, op: "auth", token: TOKEN }));
+      ws.send(JSON.stringify({ id: 3, op: "pty.create", shell: "bash" }));
+    });
+    const replies: WireMsg[] = [];
+    ws.on("message", raw => replies.push(JSON.parse(String(raw)) as WireMsg));
+    const [code, reason] = await new Promise<[number, string]>(resolve => ws.once("close", (c, r) => resolve([c, String(r)])));
     expect(code).toBe(4401);
+    expect(reason).toBe("the first frame must be auth");
     await new Promise(r => setTimeout(r, 100));
     expect(daemon.ptys.list().length).toBe(before);
+    expect(replies).toEqual([]);
   });
 
-  it("greets an authed socket with its root before anything else", async () => {
+  it("closes a socket that sends nothing before the auth deadline", async () => {
+    const d = await startDaemon({ port: 0, token: TOKEN, authDeadlineMs: 60 });
+    try {
+      const ws = new WebSocket(`ws://127.0.0.1:${d.port}/`);
+      const [code, reason] = await new Promise<[number, string]>(resolve => ws.once("close", (c, r) => resolve([c, String(r)])));
+      expect(code).toBe(4401);
+      expect(reason).toBe("no auth frame arrived in time");
+    } finally {
+      await d.close();
+    }
+  });
+
+  it("checks each auth frame against the token file as it is now: a rotated file refuses the old token", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-daemon-token-"));
+    const tokenPath = join(dir, "token");
+    writeFileSync(tokenPath, "first\n");
+    const d = await startDaemon({ port: 0, tokenPath });
+    try {
+      const c1 = await Client.connect(d.port, "first");
+      expect((await c1.request("ping")).ok).toBe(true);
+
+      writeFileSync(tokenPath, "second\n");
+      const stale = await Client.connect(d.port, "first");
+      expect((await stale.closed).code).toBe(4401);
+      const fresh = await Client.connect(d.port, "second");
+      expect((await fresh.request("ping")).ok).toBe(true);
+      // An authed socket stays authed through the rotation; only new dials are checked.
+      expect((await c1.request("ping")).ok).toBe(true);
+      c1.close();
+      fresh.close();
+    } finally {
+      await d.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("answers the auth frame, then greets with its root before anything else", async () => {
     const c = await Client.connect(daemon.port, TOKEN);
     const pong = await c.request("ping");
     expect(pong.ok).toBe(true);
-    expect(c.events[0]).toEqual({ type: "daemon.hello", root: resolve(process.env["HOME"] ?? homedir()) });
+    expect(c.frames.slice(0, 2)).toEqual([
+      { id: 1, ok: true },
+      { type: "daemon.hello", root: resolve(process.env["HOME"] ?? homedir()) },
+    ]);
     c.close();
   });
 
   it("accepts connections on non-loopback interfaces (previewUrl edge dials eth0)", async () => {
-    const addr = lanIPv4() ?? "127.0.0.1";
-    const ws = new WebSocket(`ws://${addr}:${daemon.port}/?token=${TOKEN}`);
-    await new Promise<void>((resolve, reject) => {
-      ws.once("open", resolve);
-      ws.once("error", reject);
-    });
-    ws.close();
+    const c = await Client.connect(daemon.port, TOKEN, lanIPv4() ?? "127.0.0.1");
+    expect((await c.request("ping")).ok).toBe(true);
+    c.close();
   });
 
   it("serves ptys that survive a client disconnect, replaying to the next client", async () => {

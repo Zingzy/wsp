@@ -5,6 +5,7 @@ import { gunzipSync } from "node:zlib";
 import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
 import { SessionEvent, type EventUnion, type RecipeDigest } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, type GoldenDelta, type GoldenImport } from "@wsp/engine";
+import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { GRACE_MS, TRANSCRIPT_FLUSH_MS, createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -555,12 +556,11 @@ describe("runtime session history", () => {
 });
 
 describe("runtime daemon reach", () => {
-  it("hands back the preview route plus the daemon token read once off the guest", async () => {
+  it("hands back the preview route plus the token it minted, written to the guest once and never in the url", async () => {
     const backend = stubBackend();
     let minted = 0;
-    backend.execImpl = (_m, cmd) =>
-      cmd === TOKEN_CMD ? { exitCode: 0, stdout: "guest-token\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" };
-    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    backend.execImpl = tokenGuest;
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     backend.machines[0]!.previewUrl = async port => {
       minted++;
@@ -568,15 +568,37 @@ describe("runtime daemon reach", () => {
     };
 
     const reach = await rt.workspaces.daemonReach(ws.id);
-    expect(reach).toEqual({ url: "https://m1-7070.preview.example/?pt_token=edge", expiresAt: expect.any(Number), daemonToken: "guest-token" });
+    expect(reach).toEqual({ url: "https://m1-7070.preview.example/?pt_token=edge", expiresAt: expect.any(Number), daemonToken: TOKEN });
     await rt.workspaces.daemonReach(ws.id);
     expect(minted).toBe(1);
-    expect(backend.machines[0]!.execLog.filter(c => c === TOKEN_CMD)).toHaveLength(1);
+    expect(backend.machines[0]!.execLog.filter(c => c.includes(TOKEN_PATH))).toEqual([rotateDaemonTokenScript(TOKEN)]);
+  });
+
+  it("mints a token per process, hex so the write needs no quoting, unless one is given", async () => {
+    const written: string[] = [];
+    const tokens: string[] = [];
+    for (let i = 0; i < 2; i++) {
+      const backend = stubBackend();
+      backend.execImpl = (_m, cmd) => {
+        const m = /^WSP_DAEMON_TOKEN='([^']*)'$/m.exec(cmd);
+        if (m) written.push(m[1]!);
+        return { exitCode: 0, stdout: DAEMON_TOKEN_SET, stderr: "" };
+      };
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      backend.machines[0]!.previewUrl = async port => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, token: "e", expiresAt: Date.now() + 3_600_000 });
+      tokens.push((await rt.workspaces.daemonReach(ws.id)).daemonToken!);
+    }
+    expect(tokens[0]).toMatch(/^[0-9a-f]{48}$/);
+    expect(tokens[1]).toMatch(/^[0-9a-f]{48}$/);
+    expect(tokens[0]).not.toBe(tokens[1]);
+    expect(written).toEqual(tokens);
+    expect(() => createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, daemonToken: "it's not hex" })).toThrow(/hex/);
   });
 
   it("omits the daemon token when the guest has none and refuses backends without preview urls", async () => {
     const backend = stubBackend();
-    backend.execImpl = (_m, cmd) => (cmd === TOKEN_CMD ? { exitCode: 1, stdout: "", stderr: "No such file" } : { exitCode: 0, stdout: "", stderr: "" });
+    backend.execImpl = (_m, cmd) => (cmd.includes(TOKEN_PATH) ? { exitCode: 0, stdout: `${DAEMON_TOKEN_NONE}\n`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     await expect(rt.workspaces.daemonReach(ws.id)).rejects.toThrow("without preview URLs");
@@ -587,28 +609,28 @@ describe("runtime daemon reach", () => {
     expect("daemonToken" in reach).toBe(false);
   });
 
-  it("re-reads the token after a resurrect replaces the machine", async () => {
+  it("writes the token again after a resurrect replaces the machine", async () => {
     const backend = stubBackend();
-    backend.execImpl = (m, cmd) => (cmd === TOKEN_CMD ? { exitCode: 0, stdout: `tok-${m.id}`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
-    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    backend.execImpl = tokenGuest;
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     const mint = async (port: number) => ({ url: `https://x-${port}.preview.example/?pt_token=e`, token: "e", expiresAt: Date.now() + 3_600_000 });
     backend.machines[0]!.previewUrl = mint;
-    expect((await rt.workspaces.daemonReach(ws.id)).daemonToken).toBe("tok-m1");
+    expect((await rt.workspaces.daemonReach(ws.id)).daemonToken).toBe(TOKEN);
 
     await rt.workspaces.nap(ws.id);
     backend.machines[0]!.killed = true;
     await rt.workspaces.wake(ws.id);
     backend.machines[1]!.previewUrl = mint;
-    expect((await rt.workspaces.daemonReach(ws.id)).daemonToken).toBe("tok-m2");
+    expect((await rt.workspaces.daemonReach(ws.id)).daemonToken).toBe(TOKEN);
+    expect(backend.machines[1]!.execLog.filter(c => c.includes(TOKEN_PATH))).toEqual([rotateDaemonTokenScript(TOKEN)]);
   });
 });
 
 describe("runtime port reach", () => {
   it("mints a guest port's route once while fresh, caches per port, and never reads or carries the daemon token", async () => {
     const backend = stubBackend();
-    backend.execImpl = (_m, cmd) =>
-      cmd === "cat /root/.wsp-daemon-token" ? { exitCode: 0, stdout: "guest-token", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" };
+    backend.execImpl = tokenGuest;
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     const minted: number[] = [];
@@ -623,7 +645,7 @@ describe("runtime port reach", () => {
     await rt.workspaces.portReach(ws.id, 3000);
     await rt.workspaces.portReach(ws.id, 5173);
     expect(minted).toEqual([3000, 5173]);
-    expect(backend.machines[0]!.execLog.filter(c => c.includes(".wsp-daemon-token"))).toHaveLength(0);
+    expect(backend.machines[0]!.execLog.filter(c => c.includes(TOKEN_PATH))).toHaveLength(0);
   });
 
   it("rejects an unknown workspace", async () => {
@@ -695,12 +717,11 @@ describe("runtime golden builders", () => {
     expect(await store.get("builders", b.id)).toBeUndefined();
   });
 
-  it("builderReach mints the builder's daemon route once while fresh and reads its token off the guest", async () => {
+  it("builderReach mints the builder's daemon route once while fresh and writes the token to the guest", async () => {
     const backend = stubBackend();
     let minted = 0;
-    backend.execImpl = (_m, cmd) =>
-      cmd === "cat /root/.wsp-daemon-token" ? { exitCode: 0, stdout: "builder-token\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" };
-    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
+    backend.execImpl = tokenGuest;
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe, daemonToken: TOKEN });
     const b = await rt.golden.prepare();
     expect(b.screen).toBeUndefined();
     backend.machines[0]!.previewUrl = async port => {
@@ -709,9 +730,10 @@ describe("runtime golden builders", () => {
     };
 
     const reach = await rt.golden.builderReach(b.id);
-    expect(reach).toEqual({ url: "https://m1-7070.preview.example/?pt_token=edge", expiresAt: expect.any(Number), daemonToken: "builder-token" });
+    expect(reach).toEqual({ url: "https://m1-7070.preview.example/?pt_token=edge", expiresAt: expect.any(Number), daemonToken: TOKEN });
     await rt.golden.builderReach(b.id);
     expect(minted).toBe(1);
+    expect(backend.machines[0]!.execLog.filter(c => c.includes(TOKEN_PATH))).toEqual([rotateDaemonTokenScript(TOKEN)]);
     await expect(rt.golden.builderReach("m_nobody")).rejects.toThrow(/no such builder/);
   });
 
@@ -1155,8 +1177,10 @@ describe("runtime guest hostname", () => {
   });
 });
 
-const TOKEN_CMD = "cat /root/.wsp-daemon-token";
-const TOKEN = "guest-token";
+const TOKEN_PATH = "/root/.wsp-daemon-token";
+const TOKEN = "deadbeef".repeat(3);
+/** A guest with a daemon: the token write lands, everything else is silently fine. */
+const tokenGuest = (_m: unknown, cmd: string) => (cmd.includes(TOKEN_PATH) ? { exitCode: 0, stdout: `${DAEMON_TOKEN_SET}\n`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
 
 /** A real daemon on a loopback port for the runtime to ping, torn down with its inbox. */
 async function withDaemon<T>(fn: (port: number) => Promise<T>): Promise<T> {
@@ -1191,7 +1215,7 @@ describe("runtime create stages", () => {
   /** A stub whose forks carry an edge route to the given port and whose guest hands out the daemon token. */
   function edgeBackend(port: number) {
     const backend = stubBackend();
-    backend.execImpl = (_m, cmd) => (cmd === TOKEN_CMD ? { exitCode: 0, stdout: `${TOKEN}\n`, stderr: "" } : ok);
+    backend.execImpl = tokenGuest;
     const create = backend.create.bind(backend);
     backend.create = async spec => {
       const m = await create(spec);
@@ -1205,7 +1229,7 @@ describe("runtime create stages", () => {
   it("a plain create reports every awaited step in order, names the hostname before the daemon is asked, and announces created last", async () => {
     await withDaemon(async port => {
       const backend = edgeBackend(port);
-      const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN });
       const events: EventUnion[] = [];
       rt.events.on("*", e => events.push(e));
       const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
@@ -1222,7 +1246,7 @@ describe("runtime create stages", () => {
       for (const e of stages) expect(e).toMatchObject({ workspaceId: ws.id, name: "task-1", elapsedMs: expect.any(Number) });
       expect(stages.some(e => "notice" in e)).toBe(false);
       const log = backend.machines[0]!.execLog;
-      expect(log.indexOf("hostname task-1 && echo task-1 > /etc/hostname")).toBeLessThan(log.indexOf(TOKEN_CMD));
+      expect(log.indexOf("hostname task-1 && echo task-1 > /etc/hostname")).toBeLessThan(log.findIndex(c => c.includes(TOKEN_PATH)));
       const ready = events.findIndex(e => e.type === "workspace.creating" && e.stage === "ready");
       expect(events.findIndex(e => e.type === "workspace.created")).toBe(ready + 1);
     });
@@ -1231,7 +1255,7 @@ describe("runtime create stages", () => {
   it("a fork whose daemon never answers still becomes a workspace: the stage says so, with the fault as its notice", async () => {
     const port = await deadPort();
     const backend = edgeBackend(port);
-    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, wake: { pingTimeoutMs: 300 } });
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, wake: { pingTimeoutMs: 300 }, daemonToken: TOKEN });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
@@ -1294,7 +1318,7 @@ describe("runtime verified wake", () => {
     const untars: string[] = [];
     let tgzBytes = 1_000;
     backend.execImpl = (m, cmd) => {
-      if (cmd === TOKEN_CMD) return { exitCode: 0, stdout: `${TOKEN}\n`, stderr: "" };
+      if (cmd.includes(TOKEN_PATH)) return tokenGuest(m, cmd);
       if (cmd.includes("ls -A /root")) return { exitCode: 0, stdout: "notes.md\n.local\n", stderr: "" };
       if (cmd.startsWith("stat -c %s")) return { exitCode: 0, stdout: `${tgzBytes}\n`, stderr: "" };
       if (cmd.includes("tar czf")) tars.push(m.id);
@@ -1376,7 +1400,7 @@ describe("runtime verified wake", () => {
     const { backend, untars } = guestBackend();
     try {
       await withDaemon(async port => {
-        const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+        const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN });
         const events: EventUnion[] = [];
         rt.events.on("*", e => events.push(e));
         const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
@@ -1930,7 +1954,7 @@ describe("runtime golden import", () => {
     await expect(second.golden.seal(b.id)).rejects.toThrow(refusal);
     await expect(second.golden.builderReach(b.id)).rejects.toThrow(refusal);
     expect(backend.machines[0]!.killed).toBe(false);
-    expect(backend.machines[0]!.execLog.filter(c => c.includes("wsp-daemon-token"))).toEqual([]);
+    expect(backend.machines[0]!.execLog.filter(c => c.includes(TOKEN_PATH))).toEqual([]);
     expect(await store.get("builders", b.id)).toBeDefined();
     expect(await second.golden.get()).toBeUndefined();
   });

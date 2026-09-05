@@ -13,7 +13,7 @@ import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
 import { RUNGS, type Manifest, type ManifestEntry } from "@wsp/collect";
 import { SNAPSHOT_STORAGE, type BackendPricing } from "@wsp/engine";
 import { ALREADY_APPLIED } from "@wsp/protocol";
-import { createRuntime, memoryStore, type GoldenRecipe, type Runtime } from "@wsp/runtime";
+import { DAEMON_TOKEN_SET, createRuntime, memoryStore, type GoldenRecipe, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GOLDEN_SETUP } from "../src/doctor.js";
 import { loadManifest, recipePath } from "../src/init-recipe.js";
@@ -1051,7 +1051,7 @@ describe("wsp init, the sign-in stage", () => {
   it("outside a pty the openLine hook says exactly what the relay says by itself, hostname and all", async () => {
     // The relay's default line, read off a real relay over a fake link and a workspace named task-1.
     const backend = stubBackend();
-    backend.execImpl = (_m, cmd) => (cmd.startsWith("cat ") ? { exitCode: 0, stdout: "tok\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+    backend.execImpl = (_m, cmd) => (cmd.includes("/root/.wsp-daemon-token") ? { exitCode: 0, stdout: `${DAEMON_TOKEN_SET}\n`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
     const create = backend.create.bind(backend);
     backend.create = async spec => Object.assign(await create(spec), { previewUrl: async () => ({ url: "http://guest.test", token: "pt", expiresAt: Date.now() + 3_600_000 }) });
     const store = memoryStore();
