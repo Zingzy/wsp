@@ -87,3 +87,17 @@ export function bytesOfLabel(used: number, total: number): string {
   const MiB = 1024 ** 2;
   return `${Math.round(used / MiB)} of ${Math.round(total / MiB)} MB`;
 }
+
+const UNITS = ["", "K", "M", "G", "T"];
+
+/** rss in one unit with at most three digits, as a process table column: 900, 12K, 1.5M, 123M, 2.3G. */
+export function compactBytes(n: number): string {
+  let v = Math.max(0, n);
+  let i = 0;
+  while (v >= 1000 && i < UNITS.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  const text = i === 0 ? String(Math.round(v)) : v < 10 ? v.toFixed(1) : String(Math.round(v));
+  return `${text}${UNITS[i]}`;
+}

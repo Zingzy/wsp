@@ -6,7 +6,7 @@
  * descriptors and the active surface, while each feature continues to own
  * its durable resource state. Browser surfaces point at preview tab ids,
  * terminal surfaces point at terminal session ids, file surfaces point at
- * workspace paths, and diff/files/machine/screen remain singleton surfaces.
+ * workspace paths, and diff/files/machine/processes/screen remain singleton surfaces.
  *
  * Keyed by workspace id: a wsp workspace is one machine, and every surface
  * here (terminal, browser, machine, screen) belongs to the machine, not to
@@ -15,7 +15,7 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-export const RIGHT_PANEL_KINDS = ["diff", "files", "file", "preview", "terminal", "machine", "screen"] as const;
+export const RIGHT_PANEL_KINDS = ["diff", "files", "file", "preview", "terminal", "machine", "processes", "screen"] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
 export type RightPanelSurface =
@@ -40,6 +40,7 @@ export type RightPanelSurface =
       revealRequestId: number;
     }
   | { id: "machine"; kind: "machine" }
+  | { id: "processes"; kind: "processes" }
   | { id: "screen"; kind: "screen" };
 
 const RIGHT_PANEL_STORAGE_KEY = "wsp:right-panel-state:v1";
@@ -101,6 +102,8 @@ const singletonSurface = (kind: SingletonKind): RightPanelSurface => {
       return { id: "files", kind };
     case "machine":
       return { id: "machine", kind };
+    case "processes":
+      return { id: "processes", kind };
     case "screen":
       return { id: "screen", kind };
   }
@@ -189,6 +192,7 @@ function usableSurface(raw: unknown): RightPanelSurface | null {
     case "diff":
     case "files":
     case "machine":
+    case "processes":
     case "screen":
       return singletonSurface(kind);
     case "preview": {

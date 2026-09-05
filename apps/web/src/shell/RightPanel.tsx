@@ -10,6 +10,7 @@ import { useWorkspacePorts } from "../browser/model.js";
 import { previewTabSnapshots, useBrowserTabs, useWorkspaceBrowserTabs } from "../browser/tabs.js";
 import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider.js";
 import { MachineSurface } from "../components/machine/MachineSurface.js";
+import { ProcessesSurface } from "../components/procs/ProcessesSurface.js";
 import { RightPanelSheet } from "../components/RightPanelSheet.js";
 import { RightPanelTabs } from "../components/RightPanelTabs.js";
 import { BrowserSurface } from "../components/preview/BrowserSurface.js";
@@ -75,12 +76,14 @@ export function RightPanel({
       onAddDiff={() => open(workspaceId, "diff")}
       onAddFiles={() => open(workspaceId, "files")}
       onAddMachine={() => open(workspaceId, "machine")}
+      onAddProcesses={() => open(workspaceId, "processes")}
       onAddScreen={() => open(workspaceId, "screen")}
       browserAvailable={workspace?.phase === "running"}
       terminalAvailable={workspace?.phase === "running"}
       diffAvailable={workspace?.phase === "running"}
       filesAvailable={workspace?.phase === "running"}
       machineAvailable={workspace !== null}
+      processesAvailable={workspace?.phase === "running"}
       screenAvailable={status?.screen !== undefined}
     >
       {active?.kind === "terminal" ? (
@@ -89,6 +92,8 @@ export function RightPanel({
         <BrowserSurface key={active.id} workspaceId={workspaceId} surface={active} />
       ) : active?.kind === "machine" ? (
         <MachineSurface workspaceId={workspaceId} />
+      ) : active?.kind === "processes" ? (
+        <ProcessesSurface workspaceId={workspaceId} />
       ) : active?.kind === "screen" ? (
         <ScreenSurface workspaceId={workspaceId} />
       ) : active?.kind === "files" || active?.kind === "file" || active?.kind === "diff" ? (

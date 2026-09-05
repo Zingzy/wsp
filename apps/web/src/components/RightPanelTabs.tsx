@@ -1,5 +1,6 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/RightPanelTabs.tsx at 57a66608 (MIT).
 import {
+  Activity,
   Cpu,
   FileDiff,
   FileIcon,
@@ -59,19 +60,21 @@ interface RightPanelTabsProps {
   onAddDiff: () => void;
   onAddFiles: () => void;
   onAddMachine: () => void;
+  onAddProcesses: () => void;
   onAddScreen: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
   filesAvailable: boolean;
   machineAvailable: boolean;
+  processesAvailable: boolean;
   screenAvailable: boolean;
   /** Why each unavailable surface is greyed out; shown on its card and menu item. */
   unavailableReasons?: Partial<Record<SurfaceKey, string>>;
   children: ReactNode;
 }
 
-type SurfaceKey = "browser" | "terminal" | "files" | "diff" | "machine" | "screen";
+type SurfaceKey = "browser" | "terminal" | "files" | "diff" | "machine" | "processes" | "screen";
 
 /** One-line unavailability hints for the empty-state cards and the add menu. */
 const SURFACE_UNAVAILABLE_HINTS: Record<SurfaceKey, string> = {
@@ -80,6 +83,7 @@ const SURFACE_UNAVAILABLE_HINTS: Record<SurfaceKey, string> = {
   files: "Browse files once the workspace is running.",
   diff: "Review changes once the workspace is running.",
   machine: "Available when a workspace is selected.",
+  processes: "Available while the workspace is running.",
   screen: "Available when the machine has a display.",
 };
 
@@ -179,12 +183,14 @@ function surfaceActions(
     | "onAddFiles"
     | "onAddDiff"
     | "onAddMachine"
+    | "onAddProcesses"
     | "onAddScreen"
     | "browserAvailable"
     | "terminalAvailable"
     | "filesAvailable"
     | "diffAvailable"
     | "machineAvailable"
+    | "processesAvailable"
     | "screenAvailable"
     | "unavailableReasons"
   >,
@@ -240,6 +246,16 @@ function surfaceActions(
       available: props.machineAvailable,
       disabledReason: reason("machine"),
       onClick: props.onAddMachine,
+    },
+    {
+      key: "processes",
+      label: "Processes",
+      description: "What runs on the machine; inspect and kill.",
+      icon: Activity,
+      shortcut: "P",
+      available: props.processesAvailable,
+      disabledReason: reason("processes"),
+      onClick: props.onAddProcesses,
     },
     {
       key: "screen",
@@ -435,6 +451,8 @@ function surfaceTitle(
       return terminalLabelsById.get(surface.activeTerminalId) ?? "Terminal";
     case "machine":
       return "Machine";
+    case "processes":
+      return "Processes";
     case "screen":
       return "Screen";
     case "preview": {
@@ -464,6 +482,8 @@ function SurfaceIcon({ surface }: { surface: RightPanelSurface }) {
       return <TerminalSquare className="size-3 shrink-0" />;
     case "machine":
       return <Cpu className="size-3 shrink-0" />;
+    case "processes":
+      return <Activity className="size-3 shrink-0" />;
     case "screen":
       return <MonitorPlay className="size-3 shrink-0" />;
   }

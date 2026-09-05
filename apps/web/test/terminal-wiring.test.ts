@@ -5,12 +5,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { startDaemon, type DaemonHandle } from "@wsp/daemon";
+import { fakeProcTree } from "../../../packages/daemon/test/fake-proc.js";
 import type { WorkspaceView } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { getDaemonRoot } from "../src/files/wire.js";
 import { getLive, resetLive } from "../src/machine/live.js";
+import { getProcs, resetProcs } from "../src/machine/procs.js";
 import { getTerminals } from "../src/terminal/link.js";
 import { wireTerminals } from "../src/terminal/wiring.js";
 
@@ -75,11 +77,13 @@ function fakeApi(workspaces: WorkspaceView[], daemonPort: () => number) {
 
 let daemon: DaemonHandle | undefined;
 let inboxDir: string | undefined;
+let procRoot: string | undefined;
 let unwire: (() => void) | undefined;
 
 beforeEach(async () => {
   useStore.setState({ api: null, capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, sessions: {}, ready: false });
   resetLive();
+  resetProcs();
   inboxDir = mkdtempSync(join(tmpdir(), "wsp-wiring-inbox-"));
   daemon = await startDaemon({
     port: 0,
@@ -89,6 +93,8 @@ beforeEach(async () => {
     portsIntervalMs: 1000,
     sysSource: async () => ({ cpu: { idle: 0, total: 0 }, load1: 0.1, mem: { used: 1, total: 2 }, disk: { used: 3, total: 4 } }),
     sysIntervalMs: 20,
+    procRoot: (procRoot = fakeProcTree([{ pid: 1, comm: "init" }, { pid: 2, ppid: 1, comm: "node" }])),
+    procIntervalMs: 20,
   });
 });
 afterEach(async () => {
@@ -98,6 +104,8 @@ afterEach(async () => {
   daemon = undefined;
   if (inboxDir) rmSync(inboxDir, { recursive: true, force: true });
   inboxDir = undefined;
+  if (procRoot) rmSync(procRoot, { recursive: true, force: true });
+  procRoot = undefined;
 });
 
 describe("wireTerminals", () => {
@@ -113,6 +121,11 @@ describe("wireTerminals", () => {
     expect(getLive("ws_run").snapshot().reach).toBe("live");
     expect(getLive("ws_run").snapshot().samples[0]).toMatchObject({ type: "sys.sample", load1: 0.1, mem: { used: 1, total: 2 }, disk: { used: 3, total: 4 } });
     expect(getLive("ws_nap").snapshot()).toEqual({ samples: [], reach: "unreachable" });
+    // Processes stream only while a pane holds a watch; the hold outlives the socket and asks again when it is back.
+    expect(getProcs("ws_run").snapshot()).toEqual({ snapshot: null, reach: "live" });
+    const release = getProcs("ws_run").watch();
+    await until(() => getProcs("ws_run").snapshot().snapshot !== null);
+    expect(getProcs("ws_run").snapshot().snapshot!.procs.map(p => p.pid)).toEqual([1, 2]);
     expect(getDaemonRoot("ws_nap")).toBeNull();
     const napping = getTerminals("ws_nap");
     expect(napping).not.toBeNull();
@@ -127,9 +140,14 @@ describe("wireTerminals", () => {
     expect(getTerminals("ws_run")!.tabs()).toHaveLength(1);
     expect(getLive("ws_run").snapshot().reach).toBe("unreachable");
     expect(getLive("ws_run").snapshot().samples.length).toBeGreaterThan(0);
+    expect(getProcs("ws_run").snapshot().reach).toBe("unreachable");
 
     emit({ type: "workspace.woken", workspaceId: "ws_run", machineId: "m_ws_run", resurrected: false });
     await until(() => getTerminals("ws_run")!.status() === "live");
+    // The new socket was asked to watch again: a snapshot newer than the last one before the nap arrives.
+    const beforeWake = getProcs("ws_run").snapshot().snapshot!.at;
+    await until(() => getProcs("ws_run").snapshot().snapshot!.at > beforeWake);
+    release();
 
     emit({ type: "workspace.deleted", workspaceId: "ws_run" });
     await until(() => getTerminals("ws_run") === null);

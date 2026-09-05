@@ -5,11 +5,13 @@ import { afterAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { startDaemon, type DaemonHandle } from "../src/main.js";
 import type { ListeningPort } from "../src/ports.js";
+import { fakePasswd, fakeProcTree, writeProc } from "./fake-proc.js";
 import { rejectedEvents } from "./wire-events.js";
 
 const TOKEN = "ops-token";
 const tmp = mkdtempSync(join(tmpdir(), "wsp-ops-"));
 const inboxDir = mkdtempSync(join(tmpdir(), "wsp-ops-inbox-"));
+const procRoot = fakeProcTree([{ pid: 1, comm: "init" }, { pid: 50, ppid: 1, comm: "node", ticks: [0, 0], cwd: "/root/app" }, { pid: 51, ppid: 50, comm: "sh" }]);
 
 interface WireMsg {
   id?: string | number | null;
@@ -66,6 +68,7 @@ afterAll(async () => {
   await daemon?.close();
   rmSync(tmp, { recursive: true, force: true });
   rmSync(inboxDir, { recursive: true, force: true });
+  rmSync(procRoot, { recursive: true, force: true });
 });
 
 describe("daemon ops: ports, manifest, inbox", () => {
@@ -80,6 +83,9 @@ describe("daemon ops: ports, manifest, inbox", () => {
         return { cpu: { idle: sysReads * 30, total: sysReads * 40 }, load1: 1.25, mem: { used: 2_000, total: 8_000 }, disk: { used: 30_000, total: 100_000 } };
       },
       sysIntervalMs: 20,
+      procRoot,
+      procPasswdPath: fakePasswd(),
+      procIntervalMs: 20,
       inboxDir,
       inboxQuietMs: 150,
       inboxPollMs: 30,
@@ -125,6 +131,38 @@ describe("daemon ops: ports, manifest, inbox", () => {
     const readsAfterLast = sysReads;
     await new Promise(r => setTimeout(r, 80));
     expect(sysReads).toBe(readsAfterLast);
+  });
+
+  it("proc.watch streams snapshots until proc.unwatch, proc.inspect reads one pid, proc.kill refuses the protected ones", async () => {
+    const a = await connect(daemon.port);
+    expect((await a.request("proc.watch")).ok).toBe(true);
+    // A second watch on the same socket is not a second subscription.
+    expect((await a.request("proc.watch")).ok).toBe(true);
+    writeProc(procRoot, { pid: 50, ppid: 1, comm: "node", ticks: [4, 0], cwd: "/root/app" });
+    const deadline = Date.now() + 2000;
+    while (a.events.filter(e => e.type === "proc.snapshot").length < 2 && Date.now() < deadline) await new Promise(r => setTimeout(r, 10));
+    const snaps = a.events.filter(e => e.type === "proc.snapshot") as { procs: { pid: number; ppid: number; cpu: number; cmdline: string }[]; daemon: number; total: number }[];
+    expect(snaps.length).toBeGreaterThanOrEqual(2);
+    expect(snaps[0]).toMatchObject({ daemon: process.pid, total: 3 });
+    expect(snaps[0]!.procs.map(p => p.pid)).toEqual([1, 50, 51]);
+    expect(snaps[0]!.procs[2]).toMatchObject({ ppid: 50, cmdline: "sh" });
+
+    expect(await a.request("proc.inspect", { pid: 50 })).toMatchObject({ ok: true, pid: 50, cwd: "/root/app", ports: [], threads: 1, children: [51] });
+    expect(await a.request("proc.inspect", { pid: "x" })).toMatchObject({ ok: false, code: "bad-request" });
+    expect(await a.request("proc.inspect", { pid: 999_999 })).toMatchObject({ ok: false, code: "not-found" });
+
+    for (const pid of [1, process.pid, process.ppid]) {
+      expect(await a.request("proc.kill", { pid, signal: "TERM" })).toMatchObject({ ok: false, code: "forbidden" });
+    }
+    expect(await a.request("proc.kill", { pid: 4_194_303, signal: "HUP" })).toMatchObject({ ok: false, code: "bad-request" });
+    expect(await a.request("proc.kill", { pid: 4_194_303, signal: "KILL" })).toMatchObject({ ok: false, code: "not-found" });
+
+    expect((await a.request("proc.unwatch")).ok).toBe(true);
+    await new Promise(r => setTimeout(r, 60));
+    const after = a.events.filter(e => e.type === "proc.snapshot").length;
+    await new Promise(r => setTimeout(r, 80));
+    expect(a.events.filter(e => e.type === "proc.snapshot").length).toBe(after);
+    a.close();
   });
 
   it("manifest.record/get/restartScript round-trip over the wire", async () => {
