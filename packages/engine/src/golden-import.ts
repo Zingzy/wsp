@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { MCP_ID_PREFIX, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
-import { linuxCaskFor } from "./linux-casks.js";
+import { caskVersion, linuxCaskFor } from "./linux-casks.js";
 
 export type { RecipeDigest };
 
@@ -842,10 +842,11 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
     const label = entries.find(e => e.id === r.id)?.label ?? r.name;
     installs.push({ id: r.id, label, manager: "github", cmd: withPath(roadInstall(r.name, r.source, pinState(r.pin, r.source) === "same" ? r.pin!.sha256 : undefined, r.go)), bin: r.name });
   }
-  // A cask that is a command installs from its vendor's Linux release, hashed on the guest as a road is.
+  // A cask that is a command installs from its vendor's Linux release, hashed on the guest as a road is; a command row
+  // with a GitHub release already went out as a road above.
   for (const e of entries) {
-    const cask = ticked(e) && e.rung === "tools" ? linuxCaskFor(e.id) : undefined;
-    if (cask !== undefined) installs.push({ id: e.id, label: e.label, manager: "release", cmd: withPath(cask.install(e.version, e.pin)), bin: cask.bin });
+    const cask = ticked(e) && e.rung === "tools" && cliRoad(e) === undefined ? linuxCaskFor(e.id) : undefined;
+    if (cask !== undefined) installs.push({ id: e.id, label: e.label, manager: "release", cmd: withPath(cask.install(caskVersion(cask, e), e.pin)), bin: cask.bin });
   }
   return { installs, skipped, brewfile: brew.text };
 }
@@ -1193,13 +1194,17 @@ export const AGENT_INSTALLERS: Record<string, AgentInstaller> = {
   },
 };
 
+/** The package an installer's npm or uv line puts on the machine, read off the line's pinned spec. */
+const NPM_INSTALL_LINE = /^npm install -g (?:--ignore-scripts )?(\S+?)@\S+$/m;
+const UV_INSTALL_LINE = /^uv tool install .*?([\w.-]+)==[\w.-]+$/m;
+
 /** The inverse of an installer, read off its install line: an npm global is
  * uninstalled, a uv tool uninstalled, Hermes's checkout and venv removed;
  * anything else (Claude Code's own installer) has no inverse and is noted. */
 export function agentUninstall(installer: AgentInstaller): { cmd: string } | { note: string } {
-  const npm = /npm install -g (?:--ignore-scripts )?(\S+?)@\S+/.exec(installer.install);
+  const npm = NPM_INSTALL_LINE.exec(installer.install);
   if (npm !== null) return { cmd: `${NODE_PATH_LINE}\nnpm uninstall -g ${npm[1]}` };
-  const uv = /uv tool install .*?([\w.-]+)==[\w.-]+\s*$/m.exec(installer.install);
+  const uv = UV_INSTALL_LINE.exec(installer.install);
   if (uv !== null) return { cmd: `uv tool uninstall ${uv[1]}` };
   if (installer.install.includes("/root/.hermes/")) return { cmd: "rm -rf /root/.hermes/venvs/hermes /root/.hermes/hermes-agent /usr/local/bin/hermes" };
   return { note: `${installer.name} has no uninstaller; left on the machine` };
@@ -1218,8 +1223,8 @@ export interface NodeInstall {
 /** The package each agent installer puts on the machine through a manager the tools rung also lists, as that rung's row id. */
 const AGENT_TOOL_ROWS: ReadonlyMap<string, string> = new Map(
   Object.entries(AGENT_INSTALLERS).flatMap(([agent, a]) => {
-    const npm = /^npm install -g .*?(\S+)@\S+$/m.exec(a.install)?.[1];
-    const uv = /^uv tool install .*?(\S+)==\S+$/m.exec(a.install)?.[1];
+    const npm = NPM_INSTALL_LINE.exec(a.install)?.[1];
+    const uv = UV_INSTALL_LINE.exec(a.install)?.[1];
     return [...(npm !== undefined ? [[`tools/npm/${npm}`, agent] as const] : []), ...(uv !== undefined ? [[`tools/uv/${uv}`, agent] as const] : [])];
   }),
 );

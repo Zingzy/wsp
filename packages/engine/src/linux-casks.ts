@@ -3,8 +3,8 @@
 // Each installs from its vendor's release, hashed on the guest and printed on
 // the WSP_ROAD line the tools stage reads, so the first install of a version
 // records the checksum and the next install of that version checks it. The
-// version is the Mac's when the row carries one; otherwise the vendor's
-// current one is fetched once and the pin holds it from then on.
+// version is the Mac's when the cask's version names the Linux build; else the
+// vendor's current one is fetched once and the pin holds it from then on.
 import type { ToolPin } from "./golden-import.js";
 
 export interface LinuxCask {
@@ -16,7 +16,9 @@ export interface LinuxCask {
   from: string;
   /** The row's detail line, under 76 columns: what lands on the machine. */
   detail: string;
-  /** One bash script; version is the Mac's when the row carries one, pin what a first install recorded. */
+  /** Whether the Mac's cask version names the Linux build; false when the Linux build has its own release line. */
+  macVersion: boolean;
+  /** One bash script; version is what caskVersion picked, pin what a first install recorded. */
   install(version: string | undefined, pin: ToolPin | undefined): string;
   uninstall: string;
 }
@@ -25,11 +27,20 @@ function squote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
+/** The version a row's install is fixed to by the Mac: its version when the cask's names the Linux build, else none. */
+export function caskVersion(cask: LinuxCask, e: { version?: string }): string | undefined {
+  return cask.macVersion ? e.version : undefined;
+}
+
 /** How a cask install stands against the recipe's pin: nothing recorded, the same version (checked), or a
  * version the Mac has since moved to (a first install again, re-recorded). Without a Mac version the pin's own stands. */
-export function caskPinState(e: { version?: string; pin?: ToolPin }): "none" | "same" | "moved" {
-  if (e.pin === undefined) return "none";
-  return e.version === undefined || e.version === e.pin.tag ? "same" : "moved";
+export function caskPinState(cask: LinuxCask, e: { version?: string; pin?: ToolPin }): "none" | "same" | "moved" {
+  return pinStateOf(caskVersion(cask, e), e.pin);
+}
+
+function pinStateOf(version: string | undefined, pin: ToolPin | undefined): "none" | "same" | "moved" {
+  if (pin === undefined) return "none";
+  return version === undefined || version === pin.tag ? "same" : "moved";
 }
 
 /** The version the script installs: the Mac's, else the pinned one, else the vendor's current one by `latest`. */
@@ -40,7 +51,7 @@ function versionLines(version: string | undefined, pin: ToolPin | undefined, lat
 
 /** The checksum check, only when the version installed is the one the pin recorded. */
 function pinLines(version: string | undefined, pin: ToolPin | undefined, what: string): string[] {
-  if (caskPinState({ version, pin }) !== "same") return [];
+  if (pinStateOf(version, pin) !== "same") return [];
   return [`[ "$sum" = ${squote(pin!.sha256)} ] || { echo "Error: ${what} does not match the checksum recorded on the first install of $ver" >&2; exit 1; }`];
 }
 
@@ -50,16 +61,19 @@ const ARCH = (x86: string, arm: string): string => `case "$arch" in x86_64) a=${
 const GCLOUD_HOME = "/opt/google-cloud-sdk";
 const GCLOUD_BINS = ["gcloud", "gsutil", "bq"];
 
-/** Google publishes the tarball per version and arch; the rapid channel's component list names the current version. */
+/** Google publishes the tarball per version and arch; the rapid channel's component list names the current version.
+ * The x86_64 tarball bundles a Python; the arm one runs on the machine's python3. */
 const GCLOUD: LinuxCask = {
   casks: ["gcloud-cli", "google-cloud-sdk"],
   bin: "gcloud",
   from: "Google's Linux release",
   detail: "from Google's Linux release, checksum recorded on first install",
+  macVersion: true,
   install: (version, pin) =>
     [
       ...PRELUDE,
       ARCH("x86_64", "arm"),
+      `[ "$a" != arm ] || command -v python3 >/dev/null || { echo "Error: gcloud on arm needs python3 on the machine; Google's arm tarball bundles none" >&2; exit 1; }`,
       ...versionLines(version, pin, `curl -fsSL https://dl.google.com/dl/cloudsdk/channels/rapid/components-2.json | grep -o '"version": *"[0-9.]*"' | head -1 | grep -o '[0-9][0-9.]*[0-9]'`),
       'pkg="google-cloud-cli-$ver-linux-$a.tar.gz"',
       'curl -fsSL -o "$tmp/$pkg" "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/$pkg"',
@@ -74,23 +88,24 @@ const GCLOUD: LinuxCask = {
 };
 
 /** Docker Desktop ships kubectl on the Mac; on Linux the static binary comes from the Kubernetes release, checked
- * against the sum published beside it. The cask's version is Docker's, so the Mac's version is never used here. */
+ * against the sum published beside it. The cask's version is Docker's, which says nothing about kubectl's. */
 const KUBECTL: LinuxCask = {
   casks: ["docker-desktop", "docker"],
   bin: "kubectl",
   from: "Kubernetes release",
   detail: "kubectl only, from the Kubernetes release; Docker itself has no Linux build",
-  install: (_version, pin) =>
+  macVersion: false,
+  install: (version, pin) =>
     [
       ...PRELUDE,
       ARCH("amd64", "arm64"),
-      ...versionLines(undefined, pin, "curl -fsSL https://dl.k8s.io/release/stable.txt"),
+      ...versionLines(version, pin, "curl -fsSL https://dl.k8s.io/release/stable.txt"),
       'url="https://dl.k8s.io/release/$ver/bin/linux/$a/kubectl"',
       'curl -fsSL -o "$tmp/kubectl" "$url"',
       'curl -fsSL -o "$tmp/kubectl.sha256" "$url.sha256"',
       'echo "$(cat "$tmp/kubectl.sha256")  $tmp/kubectl" | sha256sum -c - >/dev/null',
       `sum="$(sha256sum "$tmp/kubectl" | cut -d' ' -f1)"`,
-      ...pinLines(undefined, pin, "kubectl $ver"),
+      ...pinLines(version, pin, "kubectl $ver"),
       'install -m 0755 "$tmp/kubectl" /usr/local/bin/kubectl',
       'echo "WSP_ROAD release kubectl-$ver-linux-$a $sum $ver"',
     ].join("\n"),

@@ -15,7 +15,7 @@ import { S_BAR, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, cancel, isCancel, lo
 import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { BREW_TOOLCHAIN_BYTES, BUILDER_DISK_GB, MEASURED_ON, PACK_BUDGET_BYTES, TOOLCHAIN_MEASURED_ON, TOOLS_DISK_FLOOR, agentInstallsFor, agentSize, brewfileFor, caskPinState, editorInstallsFor, estimateDisk, extensionsFile, linuxCaskFor, pinState, remoteEditorFor, remoteSettingsPath, toolInstallsFor, toolSize, type BrewTable, type DiskEstimate, type ImportResult, type ToolSize } from "@wsp/engine";
+import { BREW_TOOLCHAIN_BYTES, BUILDER_DISK_GB, MEASURED_ON, PACK_BUDGET_BYTES, TOOLCHAIN_MEASURED_ON, TOOLS_DISK_FLOOR, agentInstallsFor, agentSize, brewfileFor, caskPinState, cliRoad, editorInstallsFor, estimateDisk, extensionsFile, linuxCaskFor, pinState, remoteEditorFor, remoteSettingsPath, toolInstallsFor, toolSize, type BrewTable, type DiskEstimate, type ImportResult, type ToolSize } from "@wsp/engine";
 import { ALREADY_APPLIED } from "@wsp/protocol";
 import { CLAUDE_INSTALLER, importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
@@ -800,7 +800,10 @@ export function summaryNote(
   const PIN_WORDS = { none: "checksum recorded on first install", same: "checksum checked against the first install", moved: "new release, checksum recorded" } as const;
   const pinWords = [...new Set(roads.map(r => PIN_WORDS[pinState(r.pin, r.source)]))].join("; ");
   const fromReleases = roads.length === 0 ? "" : `, ${roads.length} from ${roads.length === 1 ? "its" : "their"} GitHub release${roads.length === 1 ? "" : "s"} (${pinWords})`;
-  const fromCasks = bring.filter(e => e.rung === "tools" && linuxCaskFor(e.id) !== undefined).map(e => `, ${e.label} from ${linuxCaskFor(e.id)!.from} (${PIN_WORDS[caskPinState(e)]})`);
+  const fromCasks = bring.flatMap(e => {
+    const cask = e.rung === "tools" && cliRoad(e) === undefined ? linuxCaskFor(e.id) : undefined;
+    return cask === undefined ? [] : [`, ${e.label} from ${cask.from} (${PIN_WORDS[caskPinState(cask, e)]})`];
+  });
   const installs = [...agents, ...editors, ...(tools > 0 ? [`${tools} tool${tools === 1 ? "" : "s"}${toolchain}${fromReleases}${fromCasks.join("")}`] : []), ...(servers > 0 ? [`${servers} MCP server${servers === 1 ? "" : "s"}`] : [])];
   const est = estimateDisk(bring, upload, brew);
   // The Disk line takes its weight's colour here too: the card is the last thing read before the confirm.

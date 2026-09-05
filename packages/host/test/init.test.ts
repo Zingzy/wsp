@@ -3889,4 +3889,16 @@ describe("wsp init, a login whose command is not coming", () => {
     const tools = JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8")).tools as { id: string; outcome: string }[];
     expect(tools.find(t => t.id === "tools/cli/gcloud")).toMatchObject({ outcome: "installed" });
   });
+
+  it("the card says a pinned kubectl is checked against the first install on the second run, whatever version Docker Desktop moved to", async () => {
+    const f = fake({ yes: true });
+    const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
+    dirs.push(dir);
+    f.opts.manifestPath = join(dir, "recipe.json");
+    const docker: ManifestEntry = { rung: "tools", id: "tools/brew-cask/docker-desktop", label: "docker-desktop", group: "Homebrew casks", paths: [], bytes: 0, default: "skip", linux: "yes", version: "4.81.0,240001", pin: { tag: "v1.37.0", sha256: "c".repeat(64) }, bring: true };
+    writeFileSync(f.opts.manifestPath, JSON.stringify({ entries: [...LAPTOP.entries.map(e => ({ ...e, bring: e.default === "bring" })), docker] }));
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    const summary = f.text().slice(f.text().indexOf("Summary"), f.text().indexOf("Recipe saved"));
+    expect(unwrapped(summary)).toContain("docker-desktop from Kubernetes release (checksum checked against the first install)");
+  });
 });

@@ -1052,6 +1052,7 @@ describe("casks that are commands with a Linux release of their own", () => {
     expect(cmd).toContain('pkg="google-cloud-cli-$ver-linux-$a.tar.gz"');
     expect(cmd).toContain('"https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/$pkg"');
     expect(cmd).toMatch(/x86_64\) a=x86_64 ;; aarch64\) a=arm ;;/);
+    expect(cmd).toContain(`[ "$a" != arm ] || command -v python3 >/dev/null || { echo "Error: gcloud on arm needs python3 on the machine; Google's arm tarball bundles none" >&2; exit 1; }`);
     expect(cmd).toContain("ln -sf /opt/google-cloud-sdk/bin/gcloud /usr/local/bin/gcloud");
     expect(cmd).toContain('echo "WSP_ROAD release $pkg $sum $ver"');
     expect(cmd).not.toContain("does not match");
@@ -1068,17 +1069,34 @@ describe("casks that are commands with a Linux release of their own", () => {
     expect(pinned).not.toContain("components-2.json");
   });
 
-  it("the pin is checked while the Mac's version is the recorded one and dropped once it moved, as caskPinState says", () => {
-    expect(caskPinState({})).toBe("none");
-    expect(caskPinState({ version: "575.0.0" })).toBe("none");
-    expect(caskPinState({ pin: PIN })).toBe("same");
-    expect(caskPinState({ version: "575.0.0", pin: PIN })).toBe("same");
-    expect(caskPinState({ version: "583.0.0", pin: PIN })).toBe("moved");
+  it("gcloud across two runs: the first records, the second checks while the Mac's version is the recorded one, and re-records once it moved", () => {
+    const cask = linuxCaskFor("tools/brew-cask/gcloud-cli")!;
+    expect(caskPinState(cask, gcloud({ version: "575.0.0" }))).toBe("none");
+    expect(caskPinState(cask, gcloud({ pin: PIN }))).toBe("same");
+    expect(caskPinState(cask, gcloud({ version: "575.0.0", pin: PIN }))).toBe("same");
     const same = toolInstallsFor([gcloud({ version: "575.0.0", pin: PIN })]).installs[0]!.cmd;
     expect(same).toContain(`[ "$sum" = '${PIN.sha256}' ] || { echo "Error: $pkg does not match the checksum recorded on the first install of $ver" >&2; exit 1; }`);
+    expect(caskPinState(cask, gcloud({ version: "583.0.0", pin: PIN }))).toBe("moved");
     const moved = toolInstallsFor([gcloud({ version: "583.0.0", pin: PIN })]).installs[0]!.cmd;
     expect(moved).toContain("ver='583.0.0'");
     expect(moved).not.toContain("does not match");
+  });
+
+  it("kubectl across two runs: Docker's version never names the release, so the second run checks the recorded sum whatever Docker moved to", () => {
+    const cask = linuxCaskFor("tools/brew-cask/docker-desktop")!;
+    const pin = { tag: "v1.37.0", sha256: "c".repeat(64) };
+    expect(caskPinState(cask, docker({ version: "4.80.0,232116" }))).toBe("none");
+    expect(caskPinState(cask, docker({ version: "4.80.0,232116", pin }))).toBe("same");
+    expect(caskPinState(cask, docker({ version: "4.81.0,240001", pin }))).toBe("same");
+    const cmd = toolInstallsFor([docker({ version: "4.81.0,240001", pin })]).installs[0]!.cmd;
+    expect(cmd).toContain("ver='v1.37.0'");
+    expect(cmd).toContain(`[ "$sum" = '${pin.sha256}' ] ||`);
+    expect(cmd).not.toContain("4.81.0");
+  });
+
+  it("a command row that already goes out as a GitHub road installs once, as the road, not again from the cask table", () => {
+    const t = toolInstallsFor([row({ rung: "tools", id: "tools/cli/kubectl", label: "kubectl", paths: ["github.com/kubernetes/kubernetes@v1.37.0"] })]);
+    expect(t.installs.map(i => [i.id, i.manager])).toEqual([["tools/cli/kubectl", "github"]]);
   });
 
   it("docker-desktop brings kubectl alone: the static binary at the stable version, checked against the published sum; a pin fixes the version and adds its own check", () => {
