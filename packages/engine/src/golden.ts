@@ -191,6 +191,14 @@ export interface AgentResult {
   ms?: number;
 }
 
+/** What an update took off the machine, or left there and why. */
+export interface RemovalResult {
+  id: string;
+  label: string;
+  outcome: "removed" | "failed" | "kept";
+  note?: string;
+}
+
 export interface ImportResult {
   recipeHash: string;
   files?: { bytes: number; skipped: SkippedPath[]; cut?: CutNames[] };
@@ -199,6 +207,8 @@ export interface ImportResult {
   tools: ToolResult[];
   agents: AgentResult[];
   mcp?: McpResult[];
+  /** Only on an update: the removals it ran before the stages. */
+  removed?: RemovalResult[];
 }
 
 export interface ApplyImportOptions {
@@ -665,34 +675,43 @@ export function nextSmoke(previous: string, removed: readonly string[], added: s
 
 /** Takes the removals off the machine, then runs the delta through the import
  * stages. A removal that fails is a warning named in the stage detail; the
- * files and upload fail the update as they fail a build. */
+ * files and upload fail the update as they fail a build. The result reported
+ * carries the removals beside what the stages installed. */
 export async function applyDelta(machine: Machine, delta: GoldenDelta, opts: ApplyDeltaOptions): Promise<{ ledger: ImportLedger; result: ImportResult }> {
   const stage = opts.onStage ?? (() => {});
+  const removed: RemovalResult[] = [];
   if (delta.removals.length > 0) {
     stage("applying-setup", `removing ${delta.removals.length} item${delta.removals.length === 1 ? "" : "s"}`);
-    const removed: string[] = [];
-    const notes: string[] = [];
     for (const r of delta.removals) {
       if (r.cmd === undefined) {
-        notes.push(`${r.label}: ${r.note ?? "left on the machine"}`);
+        removed.push({ id: r.id, label: r.label, outcome: "kept", note: r.note ?? "left on the machine" });
         continue;
       }
       const res = await machine.exec(guarded(r.cmd, TOOL_TIMEOUT_S), { timeoutMs: (TOOL_TIMEOUT_S + GUARD_SLACK_S) * 1000 });
-      if (res.exitCode === 0) removed.push(r.label);
-      else notes.push(`${r.label} not removed (${reasonOf(res, TOOL_TIMEOUT_S)})`);
+      if (res.exitCode === 0) removed.push({ id: r.id, label: r.label, outcome: "removed" });
+      else removed.push({ id: r.id, label: r.label, outcome: "failed", note: reasonOf(res, TOOL_TIMEOUT_S) });
     }
-    stage("applying-setup", [removed.length > 0 ? `removed ${removed.join(", ")}` : "", ...notes].filter(s => s !== "").join("; "));
+    const done = removed.filter(r => r.outcome === "removed").map(r => r.label);
+    const notes = removed.filter(r => r.outcome !== "removed").map(r => (r.outcome === "failed" ? `${r.label} not removed (${r.note})` : `${r.label}: ${r.note}`));
+    stage("applying-setup", [done.length > 0 ? `removed ${done.join(", ")}` : "", ...notes].filter(s => s !== "").join("; "));
   }
+  // The stages report only when one of them ran; a delta that only removes still has its removals to report.
+  const withRemoved = (r: ImportResult): ImportResult => ({ ...r, ...(removed.length > 0 ? { removed } : {}) });
+  const report = delta.import.onResult;
+  let reported = false;
+  const imp: GoldenImport = { ...delta.import, ...(report !== undefined ? { onResult: (r: ImportResult) => { reported = true; report(withRemoved(r)); } } : {}) };
   const applied = await applyGoldenImport(machine, {
-    import: delta.import,
+    import: imp,
     setup: opts.setup,
     onStage: stage,
     ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}),
     ...(opts.setupTimeoutMs !== undefined ? { setupTimeoutMs: opts.setupTimeoutMs } : {}),
   });
+  const result = withRemoved(applied.result);
+  if (!reported && removed.length > 0) report?.(result);
   const gone = delta.removals.flatMap(r => (r.smoke !== undefined ? [r.smoke] : []));
   applied.ledger.smoke = nextSmoke(opts.previousSmoke, gone, applied.ledger.smoke);
-  return applied;
+  return { ledger: applied.ledger, result };
 }
 
 export interface UpgradeBuilderOptions extends MachineSize {

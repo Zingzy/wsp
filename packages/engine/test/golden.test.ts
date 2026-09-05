@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { editorInstallsFor } from "../src/golden-import.js";
+import { editorInstallsFor, recipeDigest, toolInstallsFor, type BrewTable, type RecipeEntry } from "../src/golden-import.js";
+import { diffRecipes, removalsFor, rowsToApply } from "../src/golden-diff.js";
 import { BUILDER_IDLE_MS, MachineAliveError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextSetupSha, nextSmoke, prepareBuilder, rollback, sealGolden, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import type { RecipeDigest } from "@wsp/protocol";
@@ -1121,6 +1122,128 @@ describe("golden import stages", () => {
       await expect(upgradeBuilder({ backend, head, delta: deltaOf(), setup: "true", fetch, onStage })).rejects.toThrow(/your files need/);
       expect(killed).toEqual(["m1"]);
       expect(stages.at(-1)).toMatch(/^failed:your files need/);
+    });
+
+    const ROAD_TABLE: BrewTable = new Map([["zingzy/tap/diskbloom", { name: "diskbloom", fullName: "zingzy/tap/diskbloom", deps: [], macosOnly: false, source: { repo: "zingzy/diskbloom", tag: "v1.2.0" } }]]);
+    const entry = (rung: string, id: string, over: Partial<RecipeEntry> = {}): RecipeEntry => ({ rung, id, label: id.slice(id.lastIndexOf("/") + 1), paths: [], bytes: 0, default: "bring", bring: true, ...over });
+    const planOf = (rows: RecipeEntry[], recipeHash: string, results: ImportResult[]): GoldenImport => ({
+      recipeHash,
+      recipe: recipeDigest(rows),
+      tools: [...editorInstallsFor(rows).installs, ...toolInstallsFor(rows, ROAD_TABLE).installs],
+      agents: [],
+      onResult: r => void results.push(r),
+    });
+    /** As wsp init plans an update: the rows the diff names, planned like a first build, hashed as the whole recipe. */
+    const deltaBetween = (from: RecipeEntry[], to: RecipeEntry[], recipeHash: string, results: ImportResult[] = []): GoldenDelta => {
+      const diff = diffRecipes(recipeDigest(from), recipeDigest(to));
+      const rows = rowsToApply(diff);
+      return { import: { ...planOf(to.filter(e => rows.has(e.id)), recipeHash, results), recipe: recipeDigest(to) }, removals: removalsFor(diff, recipeDigest(from)) };
+    };
+
+    it("a binary row toggled after the seal: ticked, the next version installs it; unticked, the version after takes it off; an editor, a Homebrew formula and a road tool each way", async () => {
+      const { backend, cmds, fetch } = backendFor();
+      const { stages, onStage } = stageRecorder();
+      const results: ImportResult[] = [];
+      const base = [entry("shell", "shell/zshrc", { paths: ["~/.zshrc"], bytes: 10 })];
+      const binaries = [entry("editors", "editors/vim", { label: "vim, installed" }), entry("tools", "tools/brew/jq", { linux: "yes" }), entry("tools", "tools/brew/zingzy/tap/diskbloom", { linux: "unknown" })];
+      const guardedCmds = (from: number) => cmds.slice(from).filter(c => c.includes("setsid bash -c"));
+
+      const v1 = await sealGolden(await prepareBuilder({ backend, setup: "true", fetch, import: planOf(base, "h1", results) }), { backend, smoke: "true" });
+      const n1 = cmds.length;
+      expect(cmds.some(c => c.includes("apt-get install -y -qq vim"))).toBe(false);
+
+      const up = deltaBetween(base, [...base, ...binaries], "h2", results);
+      expect(up.removals).toEqual([]);
+      const b2 = await upgradeBuilder({ backend, head: v1.version, delta: up, setup: "true", fetch, onStage });
+      const installs = guardedCmds(n1);
+      expect(installs.some(c => c.includes("apt-get install -y -qq vim"))).toBe(true);
+      expect(installs.some(c => c.includes("brew install jq"))).toBe(true);
+      expect(installs.some(c => c.includes("name='\\''diskbloom'\\''") && c.includes('install -m 0755 "$bin" "/usr/local/bin/$name"'))).toBe(true);
+      expect(installs.some(c => c.includes("uninstall") || c.includes("apt-get purge"))).toBe(false);
+      expect(results.at(-1)!.tools.filter(t => binaries.some(b => b.id === t.id)).map(t => [t.id, t.outcome])).toEqual([["editors/vim", "installed"], ["tools/brew/jq", "installed"], ["tools/brew/zingzy/tap/diskbloom", "installed"]]);
+      expect(results.at(-1)!.removed).toBeUndefined();
+      const v2 = await sealGolden(b2, { backend, smoke: "true", manifest: v1.manifest });
+      expect(v2.version.version).toBe(2);
+
+      const n2 = cmds.length;
+      stages.length = 0;
+      const down = deltaBetween([...base, ...binaries], base, "h3", results);
+      expect(down.import.tools).toEqual([]);
+      expect(down.import.files).toBeUndefined();
+      const b3 = await upgradeBuilder({ backend, head: v2.version, delta: down, setup: "true", fetch, onStage });
+      const removals = guardedCmds(n2);
+      expect(removals).toHaveLength(3);
+      expect(removals[0]).toContain("brew uninstall jq");
+      expect(removals[1]).toContain("rm -f /usr/local/bin/'\\''diskbloom'\\''");
+      expect(removals[2]).toContain("apt-get purge -y -qq vim");
+      expect(cmds.slice(n2).some(c => c.includes("apt-get install") || c.includes("brew install"))).toBe(false);
+      expect(stages).toContain("applying-setup:removed jq, diskbloom, vim");
+      expect(results.at(-1)).toEqual({
+        recipeHash: "h3",
+        files: { bytes: 0, skipped: [] },
+        tools: [],
+        agents: [],
+        removed: [
+          { id: "tools/brew/jq", label: "jq", outcome: "removed" },
+          { id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", outcome: "removed" },
+          { id: "editors/vim", label: "vim", outcome: "removed" },
+        ],
+      });
+      const v3 = await sealGolden(b3, { backend, smoke: "true", manifest: v2.manifest });
+      expect(v3.version.version).toBe(3);
+      expect(b3.import).toEqual({ recipeHash: "h3", applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools", "installing-mcp"], smoke: "true", recipe: recipeDigest(base) });
+    });
+
+    it("an extension ticked or unticked after the seal rewrites the whole list from every ticked sibling; the last one unticked takes the list file off", async () => {
+      const { backend, cmds, fetch } = backendFor();
+      const { stages, onStage } = stageRecorder();
+      const machine = await backend.create({ kind: "sandbox", template: "base" });
+      const ext = (id: string) => entry("editors", `editors/vscode-ext/${id}`);
+      const one = [ext("ms-python.python")];
+      const two = [...one, ext("esbenp.prettier-vscode")];
+      const listWrites = (from: number) => cmds.slice(from).filter(c => c.includes("setsid bash -c") && c.includes('> "$HOME/.vscode-server/extensions.txt"'));
+      const apply = (delta: GoldenDelta) => applyDelta(machine, delta, { setup: "true", previousSmoke: "true", fetch, onStage });
+
+      const n0 = cmds.length;
+      const more = deltaBetween(one, two, "h2");
+      expect(more.removals).toEqual([]);
+      await apply(more);
+      expect(listWrites(n0)).toHaveLength(1);
+      expect(listWrites(n0)[0]).toContain(`'\\''ms-python.python'\\'' '\\''esbenp.prettier-vscode'\\'' > "$HOME/.vscode-server/extensions.txt"`);
+
+      const n1 = cmds.length;
+      const fewer = deltaBetween(two, one, "h3");
+      expect(fewer.removals).toEqual([]);
+      await apply(fewer);
+      expect(listWrites(n1)).toHaveLength(1);
+      expect(listWrites(n1)[0]).toContain(`'\\''ms-python.python'\\'' > "$HOME/.vscode-server/extensions.txt"`);
+      expect(listWrites(n1)[0]).not.toContain("prettier");
+
+      const n2 = cmds.length;
+      const none = deltaBetween(one, [], "h4");
+      expect(none.import.tools).toEqual([]);
+      expect(none.removals).toEqual([{ what: "editor", id: "editors/vscode-ext", label: "VS Code extension list", cmd: "rm -f -- '/root/.vscode-server/extensions.txt'" }]);
+      await apply(none);
+      expect(listWrites(n2)).toHaveLength(0);
+      expect(cmds.slice(n2).filter(c => c.includes("rm -f -- '\\''/root/.vscode-server/extensions.txt'\\''"))).toHaveLength(1);
+      expect(stages).toContain("applying-setup:removed VS Code extension list");
+    });
+
+    it("a removal that fails or has no road is in the result as such, beside what the delta installed", async () => {
+      const { backend, fetch } = backendFor([["npm uninstall -g bun", { exitCode: 1, stdout: "", stderr: "npm ERR! not installed" }]]);
+      const machine = await backend.create({ kind: "sandbox", template: "base" });
+      const results: ImportResult[] = [];
+      const delta = deltaOf();
+      delta.import.onResult = r => void results.push(r);
+      await applyDelta(machine, delta, { setup: "true", previousSmoke: head.smoke.cmd, fetch });
+      expect(results).toHaveLength(1);
+      expect(results[0]!.tools.map(t => [t.id, t.outcome])).toEqual([["tools/brew/jq", "installed"]]);
+      expect(results[0]!.removed).toEqual([
+        { id: "shell/zshrc", label: "~/.zshrc", outcome: "removed" },
+        { id: "tools/npm/bun", label: "bun", outcome: "failed", note: "npm ERR! not installed" },
+        { id: "agents/gemini", label: "Gemini CLI", outcome: "removed" },
+        { id: "agents/claude", label: "Claude Code", outcome: "kept", note: "Claude Code has no uninstaller; left on the machine" },
+      ]);
     });
   });
 });

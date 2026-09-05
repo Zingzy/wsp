@@ -1050,6 +1050,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   if (current !== undefined) {
     const road = await updateRoad({ rt, current, imp, bring, rows: manifest.entries, importOf, interactive, yes: opts.yes, input: io.input, output: io.output, stream: (words, run) => streamStages(rt, io, words, run, runLog.note) });
     if (road !== "rebuild") {
+      if (road === 0 && landed !== undefined) log.info(installsTally(landed, resultsPath).join("\n"), out);
       if (road === 0) await retentionOffer({ rt, interactive, yes: opts.yes, input: io.input, output: io.output });
       return { code: road };
     }
@@ -1312,9 +1313,11 @@ export async function streamStages(rt: Pick<Runtime, "events">, io: Pick<InitIO,
 function installsTally(landed: ImportResult, resultsPath: string): string[] {
   const all = [...landed.tools.map(t => ({ ...t, name: t.label })), ...landed.agents];
   const n = (o: string) => all.filter(x => x.outcome === o).length;
+  const removed = landed.removed ?? [];
   return [
-    `Tools and agents: ${n("installed")} installed, ${n("failed")} failed, ${n("skipped")} skipped; the list is in ${resultsPath}`,
+    `Tools and agents: ${n("installed")} installed, ${landed.removed !== undefined ? `${removed.filter(x => x.outcome === "removed").length} removed, ` : ""}${n("failed")} failed, ${n("skipped")} skipped; the list is in ${resultsPath}`,
     ...all.filter(x => x.outcome === "failed").map(x => dim(`${x.name} failed: ${x.note ?? "no reason given"}`)),
+    ...removed.filter(x => x.outcome !== "removed").map(x => dim(`${x.label} not removed: ${x.note ?? "no reason given"}`)),
   ];
 }
 
