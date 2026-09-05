@@ -31,6 +31,8 @@ export interface RecipeEntry {
   linux?: string;
   /** The version the laptop runs (tools rows); the install pins it. */
   version?: string;
+  /** Only on a tools row installed from a release: the asset's sha256, recorded on the first install and checked on every later one. */
+  pin?: string;
   /** Credential-shaped: copied only when `choice` is copy, never on the tick alone. */
   consent?: boolean;
   /** Exported names cut from the carried copy of this file, for the checklist; the pack strips every rc file it stages on its own. */
@@ -315,7 +317,7 @@ export interface Brewfile {
   formulae: string[];
   skipped: SkippedItem[];
   /** Tap formulae with no Linux bottle whose source repository is known; each installs from it instead. */
-  roads: { id: string; name: string; source: ToolSource }[];
+  roads: { id: string; name: string; source: ToolSource; pin?: string }[];
 }
 
 /** The GitHub repository a formula builds from and the tag of the version the Mac has. */
@@ -425,7 +427,7 @@ export function brewfileFor(entries: readonly RecipeEntry[], brew: BrewTable = n
       if (e.linux === "no") out.skipped.push({ id: e.id, note: "no Linux bottle" });
       else if (e.linux === "unknown" && (MACOS_ONLY_FORMULAE.has(formula) || info?.macosOnly === true)) out.skipped.push({ id: e.id, note: "macOS only" });
       // Only a tap formula takes the road: a core formula unknown to the snapshot may well have a Linux bottle by now.
-      else if (e.linux === "unknown" && formula.includes("/") && info?.source !== undefined) out.roads.push({ id: e.id, name: info.name, source: info.source });
+      else if (e.linux === "unknown" && formula.includes("/") && info?.source !== undefined) out.roads.push({ id: e.id, name: info.name, source: info.source, ...(e.pin !== undefined ? { pin: e.pin } : {}) });
       else if (e.linux === "unknown") out.skipped.push({ id: e.id, note: "no Linux bottle known" });
       else out.formulae.push(formula);
     } else if (e.id.startsWith("tools/brew-cask/")) {
@@ -489,8 +491,9 @@ function managerCommand(e: RecipeEntry, manager: Exclude<ToolManager, "github">)
 
 /** A tap formula with no Linux bottle, from its repository: the release asset built for this arch, unpacked
  * and its binary put in /usr/local/bin; with no Linux asset and go on the machine, `go install` of the tag.
- * The road taken is printed as a WSP_ROAD line for the stage to read. */
-function roadInstall(name: string, source: ToolSource): string {
+ * The asset's sha256 is checked against the pin when the recipe has one, and printed on the WSP_ROAD line
+ * the stage reads either way, so the first install records it. */
+function roadInstall(name: string, source: ToolSource, pin?: string): string {
   const api = `https://api.github.com/repos/${source.repo}/releases/tags/${source.tag}`;
   return [
     "set -euo pipefail",
@@ -504,6 +507,8 @@ function roadInstall(name: string, source: ToolSource): string {
     'if [ -n "$url" ]; then',
     '  asset="${url##*/}"',
     '  curl -fsSL -o "$tmp/$asset" "$url"',
+    `  sum="$(sha256sum "$tmp/$asset" | cut -d' ' -f1)"`,
+    ...(pin !== undefined ? [`  [ "$sum" = ${squote(pin)} ] || { echo "Error: $asset does not match the checksum recorded on first install" >&2; exit 1; }`] : []),
     '  case "$asset" in',
     '    *.tar.gz|*.tgz) tar -xzf "$tmp/$asset" -C "$tmp" ;;',
     '    *.tar.xz) tar -xJf "$tmp/$asset" -C "$tmp" ;;',
@@ -514,7 +519,7 @@ function roadInstall(name: string, source: ToolSource): string {
     `  [ -n "$bin" ] || bin="$(find "$tmp" -type f -perm -u+x ! -name "\${asset:-.}" ! -name '*.md' ! -name '*.txt' -printf '%s %p\\n' | sort -rn | head -1 | cut -d' ' -f2-)"`,
     '  [ -n "$bin" ] || { echo "Error: no binary in ${asset:-the release}" >&2; exit 1; }',
     '  install -m 0755 "$bin" "/usr/local/bin/$name"',
-    '  echo "WSP_ROAD release ${asset:-$url}"',
+    '  echo "WSP_ROAD release ${asset:-$url} $sum"',
     "elif command -v go >/dev/null 2>&1; then",
     `  GOBIN=/usr/local/bin go install ${squote(`github.com/${source.repo}@${source.tag}`)}`,
     `  echo "WSP_ROAD go github.com/${source.repo}@${source.tag}"`,
@@ -617,7 +622,7 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
   // Last, after any go the plan brings: a road install needs no brew and waits on nothing.
   for (const r of brew.roads) {
     const label = entries.find(e => e.id === r.id)?.label ?? r.name;
-    installs.push({ id: r.id, label, manager: "github", cmd: withPath(roadInstall(r.name, r.source)) });
+    installs.push({ id: r.id, label, manager: "github", cmd: withPath(roadInstall(r.name, r.source, r.pin)) });
   }
   return { installs, skipped, brewfile: brew.text };
 }

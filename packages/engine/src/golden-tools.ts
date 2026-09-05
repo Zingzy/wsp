@@ -22,6 +22,8 @@ export interface ToolResult {
 export interface ToolRoad {
   kind: "release" | "go";
   from: string;
+  /** The release asset's sha256 as the guest read it; the recipe records it on the first install. */
+  sha256?: string;
 }
 
 export interface ToolsOutcome {
@@ -70,8 +72,8 @@ export function reasonOf(res: ExecResult, timeoutS: number): string {
 
 /** The last WSP_ROAD line a road install printed, when it printed one. */
 export function roadOf(stdout: string): ToolRoad | undefined {
-  const m = [...stdout.matchAll(/^WSP_ROAD (release|go) (\S+)/gm)].at(-1);
-  return m === undefined ? undefined : { kind: m[1] as ToolRoad["kind"], from: m[2]! };
+  const m = [...stdout.matchAll(/^WSP_ROAD (release|go) (\S+)(?: ([0-9a-f]{64}))?/gm)].at(-1);
+  return m === undefined ? undefined : { kind: m[1] as ToolRoad["kind"], from: m[2]!, ...(m[3] !== undefined ? { sha256: m[3] } : {}) };
 }
 
 export type FreeDisk = { kind: "free"; bytes: number } | { kind: "unknown"; reason: string };

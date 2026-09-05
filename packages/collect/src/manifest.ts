@@ -50,6 +50,8 @@ const Fields = z.object({
   linux: Linux.optional(),
   /** Only on a tools row: the version the laptop runs, which the machine installs by pin. */
   version: z.string().min(1).optional(),
+  /** Only on a tools row installed from a release: the asset's sha256, recorded on the first install and checked on every later one. */
+  pin: z.string().min(1).optional(),
   /** Credential-shaped: travels only when the person answers copy on this row, never on a bare tick. */
   consent: z.boolean().optional(),
   /** Only on an everything row: the role the passes guessed. */

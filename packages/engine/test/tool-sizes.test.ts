@@ -209,12 +209,26 @@ describe("tap formulae without a Linux bottle", () => {
     expect(road.cmd).toContain("name='diskbloom'");
     expect(road.cmd).toContain('"/usr/local/bin/$name"');
     expect(road.cmd).toContain("go install 'github.com/Zingzy/diskbloom@v0.1.0'");
-    expect(road.cmd).toMatch(/WSP_ROAD release/);
+    // The asset's checksum rides on the WSP_ROAD line so the first install records it; nothing is checked yet.
+    expect(road.cmd).toContain(`sum="$(sha256sum "$tmp/$asset" | cut -d' ' -f1)"`);
+    expect(road.cmd).toContain('echo "WSP_ROAD release ${asset:-$url} $sum"');
+    expect(road.cmd).not.toContain("recorded on first install");
     expect(road.cmd).toMatch(/WSP_ROAD go/);
     // Nothing is piped into a shell.
     expect(road.cmd).not.toMatch(/\|\s*(ba)?sh\b/);
     expect(road.cmd).toContain("grep -viE '\\.(sha256|");
     expect(plan.installs.filter(t => t.manager === "brew").map(t => t.id)).toContain("tools/brew/gh");
     expect(plan.skipped.map(s => s.id)).not.toContain("tools/brew/zingzy/tap/diskbloom");
+  });
+
+  it("a recipe that recorded the asset's checksum has the install check it before unpacking, and a mismatch fails the tool", () => {
+    const pin = "e".repeat(64);
+    const b = brewfileFor([brew("zingzy/tap/diskbloom", "unknown"), { ...brew("zingzy/tap/diskbloom", "unknown"), id: "tools/brew/zingzy/tap/diskbloom", pin }].slice(1), TABLE);
+    expect(b.roads).toEqual([{ id: "tools/brew/zingzy/tap/diskbloom", name: "diskbloom", source: { repo: "Zingzy/diskbloom", tag: "v0.1.0" }, pin }]);
+    const road = toolInstallsFor([{ ...brew("zingzy/tap/diskbloom", "unknown"), pin }], TABLE).installs.at(-1)!;
+    expect(road.cmd).toContain(`[ "$sum" = '${pin}' ] || { echo "Error: $asset does not match the checksum recorded on first install" >&2; exit 1; }`);
+    // The check sits between the download and the unpack.
+    expect(road.cmd.indexOf("curl -fsSL -o")).toBeLessThan(road.cmd.indexOf('[ "$sum" ='));
+    expect(road.cmd.indexOf('[ "$sum" =')).toBeLessThan(road.cmd.indexOf('case "$asset" in'));
   });
 });

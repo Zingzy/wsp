@@ -18,7 +18,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GOLDEN_SETUP } from "../src/doctor.js";
 import { loadManifest, recipePath } from "../src/init-recipe.js";
 import { CARD_FRAME, card, widthOf } from "../src/init-layout.js";
-import { editorsIntro, everythingItems, fmtBytes, reduceStages, runInit, selectItem, stageLine, summaryNote, type HostHooks, type InitIO, type InitOptions } from "../src/init.js";
+import { editorsIntro, everythingItems, fmtBytes, reduceStages, runInit, selectItem, stageLine, summaryNote, toolsItems, type HostHooks, type InitIO, type InitOptions } from "../src/init.js";
 import type { HostHandle } from "../src/server.js";
 import { startCallbackRelay } from "../src/relay.js";
 import type { ConnectOptions, DaemonSocket } from "../src/doctor.js";
@@ -2463,6 +2463,19 @@ describe("summaryNote", () => {
     expect(over).toBe("Disk      31.6 GB, 15.4 GB over the 16.1 GB the 20 GB builder leaves (Homebrew's toolchain 1.6 GB, tools 30.0 GB)");
   });
 
+  it("a tap formula that takes the road counts as a tool in the Installs line, with the checksum note the ruling asks for", () => {
+    const tap = { rung: "tools" as const, id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", group: "Homebrew", paths: [], bytes: 0, default: "bring" as const, linux: "unknown" as const };
+    const brew = new Map([["zingzy/tap/diskbloom", { name: "diskbloom", fullName: "zingzy/tap/diskbloom", deps: [], bytes: 4 * 1024 * 1024, macosOnly: false, source: { repo: "Zingzy/diskbloom", tag: "v0.1.0" } }]]);
+    const manifest = { entries: [...FIXTURE.entries, tap] };
+    const ticks = new Set(["tools/brew/gh", "tools/brew/zingzy/tap/diskbloom", "agents/claude"]);
+    const fresh = summaryNote(manifest, ticks, new Map(), 200, 0, brew);
+    expect(fresh).toContain("Installs  Claude Code, 2 tools plus Homebrew's toolchain, 1 from its GitHub release (checksum recorded on first install)");
+    // Without the table the tap is a skip, as init-import would plan it without the table too.
+    expect(summaryNote(manifest, ticks, new Map(), 200, 0)).toContain("Installs  Claude Code, 1 tool plus Homebrew's toolchain");
+    const pinned = summaryNote({ entries: [...FIXTURE.entries, { ...tap, pin: "f".repeat(64) }] }, ticks, new Map(), 200, 0, brew);
+    expect(pinned).toContain("Installs  Claude Code, 2 tools plus Homebrew's toolchain, 1 from its GitHub release (checksum checked against the first install)");
+  });
+
   it("wraps a long Installs line under its own column instead of letting the frame break it with a stray indent", () => {
     const ticks = new Set(["tools/brew/gh", "tools/brew/jq", "tools/npm/pnpm", "agents/claude"]);
     const narrow = summaryNote(FIXTURE, ticks, new Map(), 48);
@@ -2649,6 +2662,37 @@ describe("disk estimate before the boot", () => {
     expect(f.hosts).toBe(0);
   });
 
+  it("the first install from a release records the asset's checksum into the recipe file, so the next install checks it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
+    dirs.push(dir);
+    const path = join(dir, "recipe.json");
+    const tap: ManifestEntry = { rung: "tools", id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "unknown" };
+    writeFileSync(path, JSON.stringify({ entries: [...FIXTURE.entries, tap].map(e => ({ ...e, bring: e.bring ?? (e.default === "bring" && e.reason === undefined) })) }));
+    const brew = new Map([["zingzy/tap/diskbloom", { name: "diskbloom", fullName: "zingzy/tap/diskbloom", deps: [], bytes: 4 * 1024 * 1024, macosOnly: false, source: { repo: "Zingzy/diskbloom", tag: "v0.1.0" } }]]);
+    const sha = "b".repeat(64);
+    const f = fake({ yes: true, manifestPath: path, brew: async () => brew });
+    f.opts.runtime = recipe => {
+      const backend = stubBackend();
+      backend.execImpl = (_m, cmd) => (cmd.includes("releases/tags/v0.1.0") ? { exitCode: 0, stdout: `WSP_ROAD release diskbloom_0.1.0_linux_amd64.tar.gz ${sha}\n`, stderr: "" } : guestAnswer(cmd));
+      f.backends.push(backend);
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+      f.runtimes.push(rt);
+      return rt;
+    };
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(0);
+    expect(f.text()).toContain("checksum recorded on first install");
+    // The road command ran without a check, since nothing was recorded yet.
+    const road = f.backends[0]!.machines[0]!.execLog.find(c => c.includes("releases/tags/v0.1.0"))!;
+    expect(road).not.toContain("recorded on first install");
+    const saved = loadManifest(recipePath(f.opts.statePath));
+    expect(saved.entries.find(e => e.id === "tools/brew/zingzy/tap/diskbloom")?.pin).toBe(sha);
+    expect(saved.entries.filter(e => e.pin !== undefined)).toHaveLength(1);
+    // The results file carries the same checksum beside the road.
+    const results = JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8")) as { tools: { id: string; road?: { kind: string; sha256?: string } }[] };
+    expect(results.tools.find(t => t.id === "tools/brew/zingzy/tap/diskbloom")?.road).toEqual({ kind: "release", from: "diskbloom_0.1.0_linux_amd64.tar.gz", sha256: sha });
+  });
+
   it("a Homebrew that cannot be read is a note, not a stop; the summary falls back to the measured table", async () => {
     const f = fake({ yes: true, brew: async () => { throw new Error("brew: command timed out"); } });
     const run = runInit(f.opts, f.io);
@@ -2676,6 +2720,11 @@ describe("disk estimate before the boot", () => {
     const at = (needle: RegExp) => rows.findIndex(l => needle.test(l));
     expect(at(/▾ Homebrew\s+2 of 2/)).toBeGreaterThan(-1);
     expect(at(/● Homebrew's toolchain \(glibc, gcc\)\s+1\.6 GB/)).toBe(at(/▾ Homebrew\s/) + 1);
+    // The toolchain row also stands on a screen of taps alone, since a tap brings Homebrew.
+    const tapsOnly = toolsItems([{ rung: "tools", id: "tools/brew-tap/zingzy/tap", label: "zingzy/tap", group: "Homebrew taps", paths: [], bytes: 0, default: "bring" }], new Map());
+    expect(tapsOnly[0]!.id).toBe("tools/homebrew-toolchain");
+    expect(tapsOnly[0]!.follows!(new Set(["tools/brew-tap/zingzy/tap"]))).toBe(true);
+    expect(tapsOnly[0]!.follows!(new Set())).toBe(false);
     expect(screen).toMatch(/● gh\s+50\.0 MB/);
     expect(screen).toMatch(/● jq\s+3\.0 MB/);
     expect(screen).toMatch(/● pnpm\s+not measured/);
@@ -2701,7 +2750,7 @@ describe("disk estimate before the boot", () => {
     expect(aider.detail[1]).toBe("installs on the machine (size not measured); its config (900 B) comes along");
     const zed = selectItem({ rung: "agents", id: "agents/zed", label: "Zed", paths: ["~/.config/zed"], bytes: 900, default: "skip" });
     expect(zed.hint).toBe("900 B");
-    expect(agents).toContain("installs about 211.0 MB on the machine (measured); its config (39.1 KB) comes along");
+    expect(agents).toContain("installs about 211.0 MB on the machine (measured 2026-09-05); its config (39.1 KB) comes along");
     expect(agents).toMatch(/Disk: 1\.8 GB of 16\.1 GB on the 20 GB builder\n┃  files [\d.]+ KB, Homebrew's toolchain 1\.6 GB, tools 50\.0 MB, agents 211\.0 MB; 1 not measured\n/);
     await f.press(KEY.ctrlC);
     await run;

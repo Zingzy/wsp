@@ -14,7 +14,7 @@ import { S_BAR, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, cancel, isCancel, lo
 import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { BREW_TOOLCHAIN_BYTES, BUILDER_DISK_GB, PACK_BUDGET_BYTES, TOOLS_DISK_FLOOR, agentInstallsFor, agentSize, editorInstallsFor, estimateDisk, extensionsFile, remoteEditorFor, remoteSettingsPath, toolInstallsFor, toolSize, type BrewTable, type DiskEstimate } from "@wsp/engine";
+import { BREW_TOOLCHAIN_BYTES, BUILDER_DISK_GB, MEASURED_ON, PACK_BUDGET_BYTES, TOOLCHAIN_MEASURED_ON, TOOLS_DISK_FLOOR, agentInstallsFor, agentSize, editorInstallsFor, estimateDisk, extensionsFile, remoteEditorFor, remoteSettingsPath, toolInstallsFor, toolSize, type BrewTable, type DiskEstimate } from "@wsp/engine";
 import { ALREADY_APPLIED } from "@wsp/protocol";
 import { CLAUDE_INSTALLER, importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
@@ -496,7 +496,7 @@ function editorWhy(e: ManifestEntry): string | undefined {
 function sizeWhy(e: ManifestEntry, brew: BrewTable): string {
   const size = toolSize(e, brew);
   if (size === undefined) return "size not measured";
-  const road = size.road === "measured" ? "measured on Linux" : "from this Mac's Homebrew";
+  const road = size.road === "measured" ? `measured on Linux ${MEASURED_ON}` : "from this Mac's Homebrew";
   const deps = size.deps === 0 ? "" : ` with ${size.deps} dependenc${size.deps === 1 ? "y" : "ies"}`;
   return `about ${fmtBytes(size.bytes)}${deps}, ${road}`;
 }
@@ -511,7 +511,7 @@ function detailWhy(e: ManifestEntry, lock: "on" | "off" | undefined, brew: BrewT
     if (!hasInstaller(e)) return "its config comes along; no installer yet, install it there yourself";
     const size = agentSize(e);
     const config = e.bytes > 0 ? `its config (${fmtBytes(e.bytes)}) comes along` : "its config comes along";
-    return `installs ${size === undefined ? "on the machine (size not measured)" : `about ${fmtBytes(size)} on the machine (measured)`}; ${config}`;
+    return `installs ${size === undefined ? "on the machine (size not measured)" : `about ${fmtBytes(size)} on the machine (measured ${MEASURED_ON})`}; ${config}`;
   }
   const byDefault = e.default === "bring" ? "brought by default" : "left out by default";
   if (e.rung === "tools") {
@@ -569,7 +569,7 @@ const asBring = (entries: readonly ManifestEntry[]): ManifestEntry[] => entries.
  * Homebrew group, ticked whenever the ticks would put Homebrew on the machine. */
 export function toolsItems(entries: readonly ManifestEntry[], brew: BrewTable): SelectItem[] {
   const items = entries.map(e => selectItem(e, undefined, brew));
-  const canBrew = entries.some(e => e.id.startsWith("tools/brew/") || /^tools\/(pnpm|bun|cargo|go|pipx)\//.test(e.id));
+  const canBrew = entries.some(e => e.id.startsWith("tools/brew/") || e.id.startsWith("tools/brew-tap/") || /^tools\/(pnpm|bun|cargo|go|pipx)\//.test(e.id));
   if (!canBrew) return items;
   const group = entries.find(e => e.id.startsWith("tools/brew/") && e.group !== undefined)?.group;
   const toolchain: SelectItem = {
@@ -577,7 +577,7 @@ export function toolsItems(entries: readonly ManifestEntry[], brew: BrewTable): 
     label: "Homebrew's toolchain (glibc, gcc)",
     hint: fmtBytes(BREW_TOOLCHAIN_BYTES),
     ...(group !== undefined ? { group } : {}),
-    detail: ["pulled in by the first Homebrew formula; Linux bottles are built against Homebrew's own glibc", `about ${fmtBytes(BREW_TOOLCHAIN_BYTES)}, measured on Linux`],
+    detail: ["pulled in by the first Homebrew formula; Linux bottles are built against Homebrew's own glibc", `about ${fmtBytes(BREW_TOOLCHAIN_BYTES)}, measured on Linux ${TOOLCHAIN_MEASURED_ON}`],
     follows: ticks => toolInstallsFor(asBring(entries.filter(e => ticks.has(e.id))), brew).installs.some(t => t.id === "tools/homebrew"),
   };
   const at = group === undefined ? 0 : items.findIndex(i => i.group === group);
@@ -592,11 +592,15 @@ function diskParts(est: DiskEstimate): string {
   return [parts.join(", "), unknown].filter(p => p !== "").join("; ");
 }
 
-/** The total against the room the builder's disk leaves, and the parts in brackets. */
+/** The total against the room the builder's disk leaves. */
+function diskHead(est: DiskEstimate): string {
+  return est.over > 0 ? `${fmtBytes(est.total)}, ${fmtBytes(est.over)} over the ${fmtBytes(est.room)} the ${BUILDER_DISK_GB} GB builder leaves` : `${fmtBytes(est.total)} of ${fmtBytes(est.room)} on the ${BUILDER_DISK_GB} GB builder`;
+}
+
+/** The summary's line: the total, then the parts in brackets. */
 export function diskLine(est: DiskEstimate): string {
-  const head = est.over > 0 ? `${fmtBytes(est.total)}, ${fmtBytes(est.over)} over the ${fmtBytes(est.room)} the ${BUILDER_DISK_GB} GB builder leaves` : `${fmtBytes(est.total)} of ${fmtBytes(est.room)} on the ${BUILDER_DISK_GB} GB builder`;
   const parts = diskParts(est);
-  return parts === "" ? head : `${head} (${parts})`;
+  return parts === "" ? diskHead(est) : `${diskHead(est)} (${parts})`;
 }
 
 /** The running total under a screen, then its parts: the rows ticked on earlier screens plus this one's ticks. */
@@ -604,9 +608,8 @@ function diskFooter(earlier: readonly ManifestEntry[], entries: readonly Manifes
   return ticks => {
     const rows = asBring([...earlier, ...entries.filter(e => ticks.has(e.id))]);
     const est = estimateDisk(rows, rows.reduce((n, e) => n + e.bytes, 0), brew);
-    const head = est.over > 0 ? `Disk: ${fmtBytes(est.total)}, ${fmtBytes(est.over)} over the ${fmtBytes(est.room)} the ${BUILDER_DISK_GB} GB builder leaves` : `Disk: ${fmtBytes(est.total)} of ${fmtBytes(est.room)} on the ${BUILDER_DISK_GB} GB builder`;
     const parts = diskParts(est);
-    return parts === "" ? [head] : [head, parts];
+    return parts === "" ? [`Disk: ${diskHead(est)}`] : [`Disk: ${diskHead(est)}`, parts];
   };
 }
 
@@ -713,10 +716,14 @@ export function summaryNote(
   // The terminal editors by name; an extension list is a file, not an install.
   const editors = editorInstallsFor(bring).installs.filter(s => s.manager !== "list").map(s => s.label);
   // Only what the person ticked counts as their tools; Homebrew and its toolchain are named apart.
-  const steps = toolInstallsFor(bring).installs;
+  const steps = toolInstallsFor(bring, brew).installs;
   const tools = steps.filter(t => ticks.has(t.id)).length;
   const toolchain = steps.some(t => t.id.startsWith("tools/brew-toolchain/")) ? " plus Homebrew's toolchain" : "";
-  const installs = [...agents, ...editors, ...(tools > 0 ? [`${tools} tool${tools === 1 ? "" : "s"}${toolchain}`] : [])];
+  // A tool installed from its release is pinned by the checksum the first install records; until then the summary says so.
+  const roads = steps.filter(t => t.manager === "github");
+  const pinned = roads.every(t => bring.find(e => e.id === t.id)?.pin !== undefined);
+  const fromReleases = roads.length === 0 ? "" : `, ${roads.length} from ${roads.length === 1 ? "its" : "their"} GitHub release${roads.length === 1 ? "" : "s"} (${pinned ? "checksum checked against the first install" : "checksum recorded on first install"})`;
+  const installs = [...agents, ...editors, ...(tools > 0 ? [`${tools} tool${tools === 1 ? "" : "s"}${toolchain}${fromReleases}`] : [])];
   const closing: [string, string][] = [
     ["Upload", upload > PACK_BUDGET_BYTES ? `${fmtBytes(upload)}, over the ${fmtBytes(PACK_BUDGET_BYTES)} the machine's disk allows` : `${fmtBytes(upload)}, nothing has left this computer yet`],
     ["Installs", installs.length > 0 ? installs.join(", ") : "nothing; the machine boots bare"],
@@ -765,7 +772,6 @@ async function tickRungs(manifest: Manifest, io: InitIO, brew: BrewTable): Promi
     }
     const prior = answers.get(rung);
     const fresh = defaultAnswers({ entries });
-    // The total under the Tools and Agents screens counts what the earlier screens ticked.
     const earlier = [...answers].filter(([r]) => r !== rung).flatMap(([, a]) => manifest.entries.filter(e => a.ticks.has(e.id)));
     const result = await rungSelect({
       title: rung === "everything" ? everythingTitle(entries) : RUNG_TITLE[rung],
@@ -906,6 +912,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   // Filled by the Keychain reads below, after the earlier-builder check; the pack reads it only at build time.
   const secrets = new Map<string, string>();
   const resultsPath = importResultPath(opts.statePath);
+  const path = recipePath(opts.statePath);
   let installs: string[] | undefined;
   let cut: Parameters<typeof checklistFor>[3];
   const importOf = (rows: readonly ManifestEntry[]) =>
@@ -917,6 +924,12 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       onResult: r => {
         writeFileSync(resultsPath, `${JSON.stringify(r, null, 2)}\n`);
         cut = r.files?.cut;
+        // The first install from a release pins its asset: the checksum the guest read goes into the recipe for every later install.
+        const pins = new Map(r.tools.filter(t => t.outcome === "installed" && t.road?.sha256 !== undefined).map(t => [t.id, t.road!.sha256!]));
+        if (manifest.entries.some(e => pins.has(e.id) && e.pin === undefined)) {
+          manifest = { entries: manifest.entries.map(e => (pins.has(e.id) && e.pin === undefined ? { ...e, pin: pins.get(e.id)! } : e)) };
+          saveRecipe(path, manifest, ticks, choices);
+        }
         const all = [...r.tools.map(t => ({ ...t, name: t.label })), ...r.agents];
         const n = (o: string) => all.filter(x => x.outcome === o).length;
         installs = [
@@ -928,7 +941,6 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   let imp = importOf(bring);
   const uploadBytes = imp.files?.bytes ?? 0;
   card("Summary", summaryNote(offered, ticks, choices, widthOf(io.output), uploadBytes, brew), io.output);
-  const path = recipePath(opts.statePath);
   saveRecipe(path, manifest, ticks, choices);
   log.step(`Recipe saved to ${path}`, out);
   // The whole recipe against the disk, before the account is read or anything boots: the tools stage would

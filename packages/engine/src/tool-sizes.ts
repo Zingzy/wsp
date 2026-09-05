@@ -22,10 +22,16 @@ export const PACK_BUDGET_BYTES = Math.floor((DISK_BYTES - BASE_IMAGE_BYTES - UPL
 /** What the recipe may take: the disk less the base image and the floor the tools stage keeps free for unpack peaks. */
 export const DISK_ROOM_BYTES = DISK_BYTES - BASE_IMAGE_BYTES - TOOLS_DISK_FLOOR;
 
-/** Homebrew's checkout with its own glibc and gcc, pulled in by the first formula (measured 2026-09-04, about 1.6 GB). */
+/** The day the formula and agent tables below were read off a Linux builder with du; the screens name it so
+ * the numbers read as a measurement, not as catalog truth. */
+export const MEASURED_ON = "2026-09-05";
+/** The day Homebrew's toolchain was measured, on the 4 GB root of live run 2. */
+export const TOOLCHAIN_MEASURED_ON = "2026-09-04";
+
+/** Homebrew's checkout with its own glibc and gcc, pulled in by the first formula (about 1.6 GB). */
 export const BREW_TOOLCHAIN_BYTES = 1600 * MIB;
 
-/** Cellar sizes on a Linux builder after this recipe's tools stage (du, measured 2026-09-05). */
+/** Cellar sizes on a Linux builder after this recipe's tools stage, on MEASURED_ON. */
 const LINUX_FORMULA_MIB: Record<string, number> = {
   "llvm@21": 2400,
   "openjdk@21": 343,
@@ -41,7 +47,7 @@ const LINUX_FORMULA_MIB: Record<string, number> = {
 };
 
 /** Install sizes on the same builder: the npm globals under /usr/local, Hermes's clone and venv under /root/.hermes,
- * Claude Code's installer output under /root/.local (du, measured 2026-09-05). */
+ * Claude Code's installer output under /root/.local. */
 const AGENT_MIB: Record<string, number> = { opencode: 353, codex: 320, pi: 136, gemini: 100, hermes: 344, claude: 211 };
 
 const OTHER_TOOL_MIB: Record<string, number> = { "tools/npm/bun": 78 };
