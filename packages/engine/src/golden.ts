@@ -11,6 +11,7 @@ import { ALREADY_APPLIED, type GoldenLogin, type GoldenManifest, type GoldenStag
 import type { Removal } from "./golden-diff.js";
 import { NODE_PATH_LINE, type AgentInstall, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { GUARD_SLACK_S, MIB, TOOL_TIMEOUT_S, fmtBytes, freeBytes, guarded, installTools, reasonOf, type ToolResult } from "./golden-tools.js";
+import { BUILDER_DISK_GB } from "./tool-sizes.js";
 import { assertFirstLife } from "./lifecycle.js";
 import type { Machine, MachineBackend, MachineKind, MachineState } from "./machine.js";
 import { importInto } from "./vault.js";
@@ -77,10 +78,6 @@ export const BROWSER_SHIM_PATH = "/usr/local/bin/wsp-open";
  * reading docs on the builder screen; a forgotten builder costs under $1 at
  * Starter rates over this window. */
 export const BUILDER_IDLE_MS = 6 * 60 * 60_000;
-
-/** Root disk asked for every builder and fork, Solari's cap: a 4 GB root filled during the tools stage and
- * five agents failed to install on it (measured 2026-09-05). */
-export const BUILDER_DISK_GB = 20;
 
 export interface MachineSize {
   cpu?: number;

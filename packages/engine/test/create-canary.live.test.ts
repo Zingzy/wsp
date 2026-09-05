@@ -14,7 +14,8 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
 import type { WspError } from "../src/errors.js";
-import { BUILDER_DISK_GB, BUILDER_IDLE_MS, forkGolden, killUntilGone, prepareBuilder, sealGolden, type GoldenManifest } from "../src/golden.js";
+import { BUILDER_IDLE_MS, forkGolden, killUntilGone, prepareBuilder, sealGolden, type GoldenManifest } from "../src/golden.js";
+import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import type { Machine } from "../src/machine.js";
 import { SolariBackend } from "../src/solari-backend.js";
 import { LIVE, sleep, solariKey } from "./live.js";

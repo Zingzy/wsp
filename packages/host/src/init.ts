@@ -14,7 +14,7 @@ import { S_BAR, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, cancel, isCancel, lo
 import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { PACK_BUDGET_BYTES, agentInstallsFor, editorInstallsFor, extensionsFile, remoteEditorFor, remoteSettingsPath, toolInstallsFor } from "@wsp/engine";
+import { BREW_TOOLCHAIN_BYTES, BUILDER_DISK_GB, MEASURED_ON, PACK_BUDGET_BYTES, TOOLCHAIN_MEASURED_ON, TOOLS_DISK_FLOOR, agentInstallsFor, agentSize, brewfileFor, editorInstallsFor, estimateDisk, extensionsFile, pinState, remoteEditorFor, remoteSettingsPath, toolInstallsFor, toolSize, type BrewTable, type DiskEstimate } from "@wsp/engine";
 import { ALREADY_APPLIED } from "@wsp/protocol";
 import { CLAUDE_INSTALLER, importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
@@ -76,6 +76,9 @@ export interface InitOptions {
   /** Reads Keychain-held logins chosen as copy; the real one raises macOS's consent dialog. */
   secrets: SecretReader;
   platform: "darwin" | "linux";
+  /** What this computer's Homebrew knows about its installed formulae: sizes, dependencies, source repositories.
+   * The real one runs brew; absent or failing, formula sizes come from the measured table alone. */
+  brew?: () => Promise<BrewTable>;
   /** Builds the runtime around the recipe the ticks produced. */
   runtime(recipe: GoldenRecipe): Runtime;
   /** Starts the app server over that runtime once the builder is ready; the page lands on that
@@ -489,16 +492,35 @@ function editorWhy(e: ManifestEntry): string | undefined {
   return `installed on the machine ${how}${e.paths.length > 0 ? "; your config comes along" : ""}`;
 }
 
+/** Where a tool's number came from, for the detail pane. */
+function sizeWhy(e: ManifestEntry, brew: BrewTable): string {
+  const size = toolSize(e, brew);
+  if (size === undefined) return "size not measured";
+  const road = size.road === "measured" ? `measured on Linux ${MEASURED_ON}` : "from this Mac's Homebrew";
+  const deps = size.deps === 0 ? "" : ` with ${size.deps} dependenc${size.deps === 1 ? "y" : "ies"}`;
+  return `about ${fmtBytes(size.bytes)}${deps}, ${road}`;
+}
+
 /** The second detail line: why a row is locked, else what ticking it means. */
-function detailWhy(e: ManifestEntry, lock: "on" | "off" | undefined): string {
+function detailWhy(e: ManifestEntry, lock: "on" | "off" | undefined, brew: BrewTable): string {
   if (lock === "off") return e.reason ?? "";
   if (lock === "on") return "always comes along";
   if (e.rung === "logins") return agentName(e) === "claude" ? CLAUDE_LOGIN_WHY : LOGIN_WHY;
   if (e.rung === "everything") return e.detail ?? "";
-  if (e.rung === "agents") return agentInstallsFor([{ ...e, bring: true }], { claude: CLAUDE_INSTALLER }).installs.length > 0 ? "installed on the machine; its config comes along" : "its config comes along; no installer yet, install it there yourself";
+  if (e.rung === "agents") {
+    if (!hasInstaller(e)) return "its config comes along; no installer yet, install it there yourself";
+    const size = agentSize(e);
+    const config = e.bytes > 0 ? `its config (${fmtBytes(e.bytes)}) comes along` : "its config comes along";
+    return `installs ${size === undefined ? "on the machine (size not measured)" : `about ${fmtBytes(size)} on the machine (measured ${MEASURED_ON})`}; ${config}`;
+  }
+  const byDefault = e.default === "bring" ? "brought by default" : "left out by default";
+  if (e.rung === "tools") {
+    if (e.id.startsWith("tools/brew-tap/")) return `its formula list, a few MB; the formulae carry the size; ${byDefault}`;
+    return `${sizeWhy(e, brew)}; ${byDefault}`;
+  }
   const size = e.bytes > 0 ? `${fmtBytes(e.bytes)}, ` : "";
   const editor = e.rung === "editors" ? editorWhy(e) : undefined;
-  return `${size}${editor ?? (e.default === "bring" ? "brought by default" : "left out by default")}`;
+  return `${size}${editor ?? byDefault}`;
 }
 
 /** The first detail line of a row without a path: what stands in for the copy. */
@@ -508,19 +530,86 @@ function whereNothing(e: ManifestEntry): string {
   return e.rung === "everything" || e.rung === "editors" ? "nothing to copy" : "reinstalled on the machine";
 }
 
-function selectItem(e: ManifestEntry, hintFor?: (width: number) => string): SelectItem {
+const hasInstaller = (e: ManifestEntry): boolean => agentInstallsFor([{ ...e, bring: true }], { claude: CLAUDE_INSTALLER }).installs.length > 0;
+
+/** The second column of a tools or agents row: what it puts on the machine; an agent nothing installs shows
+ * what travels; nothing for a tap. */
+function installHint(e: ManifestEntry, brew: BrewTable): string | undefined {
+  if (e.rung === "agents") {
+    if (!hasInstaller(e)) return e.bytes > 0 ? fmtBytes(e.bytes) : undefined;
+    const size = agentSize(e);
+    return size === undefined ? "not measured" : fmtBytes(size);
+  }
+  if (e.id.startsWith("tools/brew-tap/")) return undefined;
+  const size = toolSize(e, brew);
+  return size === undefined ? "not measured" : fmtBytes(size.bytes);
+}
+
+export function selectItem(e: ManifestEntry, hintFor?: (width: number) => string, brew: BrewTable = new Map()): SelectItem {
   const minus = e.excludes !== undefined && e.excludes.length > 0 ? ` minus ${e.excludes.join(", ")}` : "";
   const where = e.paths.length > 0 ? `${e.paths.join(", ")}${minus}` : whereNothing(e);
   const lock = e.required ? "on" : !isTickable(e) ? "off" : undefined;
+  const hint = e.rung === "tools" || e.rung === "agents" ? installHint(e, brew) : e.bytes > 0 && e.rung !== "logins" ? fmtBytes(e.bytes) : undefined;
   return {
     id: e.id,
     label: e.label,
-    ...(hintFor !== undefined ? { hintFor } : e.bytes > 0 && e.rung !== "logins" ? { hint: fmtBytes(e.bytes) } : {}),
+    ...(hintFor !== undefined ? { hintFor } : hint !== undefined ? { hint } : {}),
     ...(e.group !== undefined ? { group: e.group } : {}),
-    detail: [where, detailWhy(e, lock), ...(e.consent === true && lock === undefined ? [CONSENT_WHY] : [])],
+    detail: [where, detailWhy(e, lock, brew), ...(e.consent === true && lock === undefined ? [CONSENT_WHY] : [])],
     ...(lock !== undefined ? { lock } : {}),
     ...(hasChoices(e) ? { choices: e.rung === "logins" ? LOGIN_CHOICES : CONSENT_CHOICES } : {}),
     ...(e.group === LARGE_GROUP ? { own: true } : {}),
+  };
+}
+
+const TOOLCHAIN_ROW = "tools/homebrew-toolchain";
+const asBring = (entries: readonly ManifestEntry[]): ManifestEntry[] => entries.map(e => ({ ...e, bring: true }));
+
+/** The Tools screen's rows: a size beside each, and Homebrew's own toolchain as one line at the top of the
+ * Homebrew group, ticked whenever the ticks would put Homebrew on the machine. */
+export function toolsItems(entries: readonly ManifestEntry[], brew: BrewTable): SelectItem[] {
+  const items = entries.map(e => selectItem(e, undefined, brew));
+  const canBrew = entries.some(e => e.id.startsWith("tools/brew/") || e.id.startsWith("tools/brew-tap/") || /^tools\/(pnpm|bun|cargo|go|pipx)\//.test(e.id));
+  if (!canBrew) return items;
+  const group = entries.find(e => e.id.startsWith("tools/brew/") && e.group !== undefined)?.group;
+  const toolchain: SelectItem = {
+    id: TOOLCHAIN_ROW,
+    label: "Homebrew's toolchain (glibc, gcc)",
+    hint: fmtBytes(BREW_TOOLCHAIN_BYTES),
+    ...(group !== undefined ? { group } : {}),
+    detail: ["pulled in by the first Homebrew formula; Linux bottles are built against Homebrew's own glibc", `about ${fmtBytes(BREW_TOOLCHAIN_BYTES)}, measured on Linux ${TOOLCHAIN_MEASURED_ON}`],
+    follows: ticks => toolInstallsFor(asBring(entries.filter(e => ticks.has(e.id))), brew).installs.some(t => t.id === "tools/homebrew"),
+  };
+  const at = group === undefined ? 0 : items.findIndex(i => i.group === group);
+  items.splice(at < 0 ? 0 : at, 0, toolchain);
+  return items;
+}
+
+/** The estimate's parts that are not zero, and how many rows have no size. */
+function diskParts(est: DiskEstimate): string {
+  const parts = ([["files", est.files], ["Homebrew's toolchain", est.toolchain], ["tools", est.tools], ["agents", est.agents]] as const).filter(([, n]) => n > 0).map(([label, n]) => `${label} ${fmtBytes(n)}`);
+  const unknown = est.unknown.length > 0 ? `${est.unknown.length} not measured` : "";
+  return [parts.join(", "), unknown].filter(p => p !== "").join("; ");
+}
+
+/** The total against the room the builder's disk leaves. */
+function diskHead(est: DiskEstimate): string {
+  return est.over > 0 ? `${fmtBytes(est.total)}, ${fmtBytes(est.over)} over the ${fmtBytes(est.room)} the ${BUILDER_DISK_GB} GB builder leaves` : `${fmtBytes(est.total)} of ${fmtBytes(est.room)} on the ${BUILDER_DISK_GB} GB builder`;
+}
+
+/** The summary's line: the total, then the parts in brackets. */
+export function diskLine(est: DiskEstimate): string {
+  const parts = diskParts(est);
+  return parts === "" ? diskHead(est) : `${diskHead(est)} (${parts})`;
+}
+
+/** The running total under a screen, then its parts: the rows ticked on earlier screens plus this one's ticks. */
+function diskFooter(earlier: readonly ManifestEntry[], entries: readonly ManifestEntry[], brew: BrewTable): (ticks: ReadonlySet<string>) => string[] {
+  return ticks => {
+    const rows = asBring([...earlier, ...entries.filter(e => ticks.has(e.id))]);
+    const est = estimateDisk(rows, rows.reduce((n, e) => n + e.bytes, 0), brew);
+    const parts = diskParts(est);
+    return parts === "" ? [`Disk: ${diskHead(est)}`] : [`Disk: ${diskHead(est)}`, parts];
   };
 }
 
@@ -597,6 +686,7 @@ export function summaryNote(
   choices: ReadonlyMap<string, string>,
   width: number,
   upload: number = manifest.entries.filter(e => ticks.has(e.id)).reduce((n, e) => n + e.bytes, 0),
+  brew: BrewTable = new Map(),
 ): string[] {
   const perRung = RUNGS.map(rung => manifest.entries.filter(e => e.rung === rung)).filter(entries => entries.length > 0);
   const answer = (e: ManifestEntry): string => LOGIN_CHOICES.find(c => c.value === choices.get(e.id))?.label ?? "skip";
@@ -626,13 +716,19 @@ export function summaryNote(
   // The terminal editors by name; an extension list is a file, not an install.
   const editors = editorInstallsFor(bring).installs.filter(s => s.manager !== "list").map(s => s.label);
   // Only what the person ticked counts as their tools; Homebrew and its toolchain are named apart.
-  const steps = toolInstallsFor(bring).installs;
+  const steps = toolInstallsFor(bring, brew).installs;
   const tools = steps.filter(t => ticks.has(t.id)).length;
   const toolchain = steps.some(t => t.id.startsWith("tools/brew-toolchain/")) ? " plus Homebrew's toolchain" : "";
-  const installs = [...agents, ...editors, ...(tools > 0 ? [`${tools} tool${tools === 1 ? "" : "s"}${toolchain}`] : [])];
+  // A tool installed from its release is pinned per tag: recorded on the first install of a tag, checked while the tag stands.
+  const roads = brewfileFor(bring, brew).roads;
+  const PIN_WORDS = { none: "checksum recorded on first install", same: "checksum checked against the first install", moved: "new release, checksum recorded" } as const;
+  const pinWords = [...new Set(roads.map(r => PIN_WORDS[pinState(r.pin, r.source)]))].join("; ");
+  const fromReleases = roads.length === 0 ? "" : `, ${roads.length} from ${roads.length === 1 ? "its" : "their"} GitHub release${roads.length === 1 ? "" : "s"} (${pinWords})`;
+  const installs = [...agents, ...editors, ...(tools > 0 ? [`${tools} tool${tools === 1 ? "" : "s"}${toolchain}${fromReleases}`] : [])];
   const closing: [string, string][] = [
     ["Upload", upload > PACK_BUDGET_BYTES ? `${fmtBytes(upload)}, over the ${fmtBytes(PACK_BUDGET_BYTES)} the machine's disk allows` : `${fmtBytes(upload)}, nothing has left this computer yet`],
     ["Installs", installs.length > 0 ? installs.join(", ") : "nothing; the machine boots bare"],
+    ["Disk", diskLine(estimateDisk(bring, upload, brew))],
   ];
   const column = Math.max(...closing.map(([label]) => label.length)) + GUTTER.length;
   return [...lines, "", ...closing.flatMap(([label, text]) => wrap(`${label.padEnd(column)}${text}`, inner, " ".repeat(column)))];
@@ -661,7 +757,7 @@ function bootQuestion(recipe: GoldenRecipe, pricing: BackendPricing): string {
   return `Boot a ${size.cpu} vCPU, ${Math.round(size.memMb / 1024)} GB builder on Solari and build this? About $${rate.toFixed(2)}/hr while it runs.`;
 }
 
-async function tickRungs(manifest: Manifest, io: InitIO): Promise<Answers | "cancel"> {
+async function tickRungs(manifest: Manifest, io: InitIO, brew: BrewTable): Promise<Answers | "cancel"> {
   const answers = new Map<Rung, Answers>();
   const rungsWithItems = RUNGS.filter(r => manifest.entries.some(e => e.rung === r));
   let i = 0;
@@ -677,13 +773,14 @@ async function tickRungs(manifest: Manifest, io: InitIO): Promise<Answers | "can
     }
     const prior = answers.get(rung);
     const fresh = defaultAnswers({ entries });
+    const earlier = [...answers].filter(([r]) => r !== rung).flatMap(([, a]) => manifest.entries.filter(e => a.ticks.has(e.id)));
     const result = await rungSelect({
       title: rung === "everything" ? everythingTitle(entries) : RUNG_TITLE[rung],
       counter,
-      items: rung === "everything" ? everythingItems(entries) : entries.map(e => selectItem(e)),
+      items: rung === "everything" ? everythingItems(entries) : rung === "tools" ? toolsItems(entries, brew) : entries.map(e => selectItem(e, undefined, brew)),
       initial: prior?.ticks ?? fresh.ticks,
       initialChoices: prior?.choices ?? fresh.choices,
-      ...(rung === "everything" ? { footer: everythingFooter(entries), detailLines: 3 } : {}),
+      ...(rung === "everything" ? { footer: everythingFooter(entries), detailLines: 3 } : rung === "tools" || rung === "agents" ? { footer: diskFooter(earlier, entries, brew) } : {}),
       ...(rung === "editors" ? { intro: editorsIntro(entries) } : {}),
       input: io.input,
       output: io.output,
@@ -772,12 +869,23 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     const st = statOf(join(opts.home, rel));
     return st === undefined || st.kind === "dangling" ? undefined : st.kind === "dir";
   });
+  // The Mac's Homebrew sizes the formulae on the Tools screen; a brew that fails leaves the measured table.
+  let brew: BrewTable = new Map();
+  if (opts.brew !== undefined && manifest.entries.some(e => e.id.startsWith("tools/brew/"))) {
+    const sizes = spin(io.output, "Reading Homebrew for sizes", io.isTTY);
+    try {
+      brew = await opts.brew();
+    } catch (e) {
+      notes.push(`Homebrew could not be read for sizes (${e instanceof Error ? e.message : String(e)}); formula sizes come from the measured table alone.`);
+    }
+    sizes.stop();
+  }
   if (notes.length > 0) log.warn(notes.join("\n"), out);
   card("Found on this computer", detectionNote(manifest, source), io.output);
 
   let answers: Answers;
   if (interactive) {
-    const picked = await tickRungs(manifest, io);
+    const picked = await tickRungs(manifest, io, brew);
     if (picked === "cancel") {
       cancel("Nothing was changed.", out);
       return { code: 1 };
@@ -805,6 +913,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   // Filled by the Keychain reads below, after the earlier-builder check; the pack reads it only at build time.
   const secrets = new Map<string, string>();
   const resultsPath = importResultPath(opts.statePath);
+  const path = recipePath(opts.statePath);
   let installs: string[] | undefined;
   let cut: Parameters<typeof checklistFor>[3];
   const importOf = (rows: readonly ManifestEntry[]) =>
@@ -812,9 +921,17 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       home: opts.home,
       secrets,
       platform: opts.platform,
+      brew,
       onResult: r => {
         writeFileSync(resultsPath, `${JSON.stringify(r, null, 2)}\n`);
         cut = r.files?.cut;
+        // The first install of a release tag pins its asset: the tag and the checksum the guest read go into the recipe for later installs of that tag.
+        const pins = new Map(r.tools.filter(t => t.outcome === "installed" && t.road?.sha256 !== undefined && t.road.tag !== undefined).map(t => [t.id, { tag: t.road!.tag!, sha256: t.road!.sha256! }]));
+        const stale = (e: ManifestEntry): boolean => pins.has(e.id) && e.pin?.tag !== pins.get(e.id)!.tag;
+        if (manifest.entries.some(stale)) {
+          manifest = { entries: manifest.entries.map(e => (stale(e) ? { ...e, pin: pins.get(e.id)! } : e)) };
+          saveRecipe(path, manifest, ticks, choices);
+        }
         const all = [...r.tools.map(t => ({ ...t, name: t.label })), ...r.agents];
         const n = (o: string) => all.filter(x => x.outcome === o).length;
         installs = [
@@ -825,10 +942,18 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     });
   let imp = importOf(bring);
   const uploadBytes = imp.files?.bytes ?? 0;
-  card("Summary", summaryNote(offered, ticks, choices, widthOf(io.output), uploadBytes), io.output);
-  const path = recipePath(opts.statePath);
+  card("Summary", summaryNote(offered, ticks, choices, widthOf(io.output), uploadBytes, brew), io.output);
   saveRecipe(path, manifest, ticks, choices);
   log.step(`Recipe saved to ${path}`, out);
+  // The whole recipe against the disk, before the account is read or anything boots: the tools stage would
+  // otherwise fill the disk after the machine billed.
+  const disk = estimateDisk(asBring(bring), uploadBytes, brew);
+  if (disk.over > 0) {
+    log.error(`This recipe needs about ${fmtBytes(disk.total)} on the machine; the ${BUILDER_DISK_GB} GB disk leaves ${fmtBytes(disk.room)} after the base image and ${fmtBytes(TOOLS_DISK_FLOOR)} of headroom.`, out);
+    const fix = interactive ? `Untick about ${fmtBytes(disk.over)} of tools, agents or files (each screen shows sizes and the total) and run wsp init again` : `Set bring to false on rows worth about ${fmtBytes(disk.over)} in ${path}, then run wsp init --yes --manifest ${path}`;
+    cancel(`Nothing was booted. ${fix}; the recipe is kept.`, out);
+    return { code: 1 };
+  }
   // Judged on the recipe's own sizes, before the account is read or anything boots: the builder's disk
   // check would refuse the same files after the machine billed.
   if (uploadBytes > PACK_BUDGET_BYTES) {

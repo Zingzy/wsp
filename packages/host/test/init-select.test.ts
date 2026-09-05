@@ -579,6 +579,42 @@ describe("rungSelect", () => {
     await p;
   });
 
+  it("a row that follows other ticks shows their state, takes no tick of its own, and is left out of every count", async () => {
+    const items: SelectItem[] = [
+      { id: "toolchain", label: "Homebrew's toolchain", hint: "1.6 GB", group: "Homebrew", detail: ["pulled in by the first formula"], follows: ticks => ticks.has("gh") || ticks.has("jq") },
+      { id: "gh", label: "gh", hint: "50.0 MB", group: "Homebrew", detail: [] },
+      { id: "jq", label: "jq", hint: "2.0 MB", group: "Homebrew", detail: [] },
+      { id: "pnpm", label: "pnpm", group: "npm globals", detail: [] },
+    ];
+    const { input, output, text, clear } = streams();
+    const p = rungSelect({ title: "Tools", counter: "5/8", items, initial: new Set(["gh"]), input, output });
+    await settle();
+    expect(text()).toMatch(/● Homebrew's toolchain\s+1\.6 GB/);
+    // Three rows can come; the toolchain is not one of them.
+    expect(text()).toMatch(/all\s+1 of 3/);
+    expect(text()).toMatch(/▾ Homebrew\s+1 of 2/);
+    expect(text()).toMatch(/Selected: gh$/m);
+    // Space on the toolchain row leaves it as it is.
+    clear();
+    await press(input, KEY.down, KEY.down, KEY.space);
+    expect(text()).toMatch(/pulled in by the first formula/);
+    expect(text()).toMatch(/● Homebrew's toolchain/);
+    expect(text()).toMatch(/all\s+1 of 3/);
+    // Unticking gh empties the group and the toolchain follows.
+    clear();
+    await press(input, KEY.down, KEY.space);
+    expect(text()).toMatch(/○ Homebrew's toolchain/);
+    expect(text()).toMatch(/○ gh/);
+    // The all row ticks the three plain rows and the toolchain comes back with them.
+    clear();
+    await press(input, KEY.up, KEY.up, KEY.up, KEY.space);
+    expect(text()).toMatch(/● Homebrew's toolchain/);
+    expect(text()).toMatch(/all\s+3 of 3/);
+    await press(input, KEY.enter);
+    const result = await p;
+    expect(result).toMatchObject({ kind: "next", ticks: new Set(["gh", "jq", "pnpm"]) });
+  });
+
   it("without a footer the same list fits, so the footer is what costs the rows", async () => {
     const items: SelectItem[] = Array.from({ length: 11 }, (_, i) => ({ id: `r${i}`, label: `row ${i}`, detail: [] }));
     const { input, output, text } = streams();

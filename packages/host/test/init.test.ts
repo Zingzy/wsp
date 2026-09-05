@@ -18,7 +18,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GOLDEN_SETUP } from "../src/doctor.js";
 import { loadManifest, recipePath } from "../src/init-recipe.js";
 import { CARD_FRAME, card, widthOf } from "../src/init-layout.js";
-import { editorsIntro, everythingItems, fmtBytes, reduceStages, runInit, stageLine, summaryNote, type HostHooks, type InitIO, type InitOptions } from "../src/init.js";
+import { editorsIntro, everythingItems, fmtBytes, reduceStages, runInit, selectItem, stageLine, summaryNote, toolsItems, type HostHooks, type InitIO, type InitOptions } from "../src/init.js";
 import type { HostHandle } from "../src/server.js";
 import { startCallbackRelay } from "../src/relay.js";
 import type { ConnectOptions, DaemonSocket } from "../src/doctor.js";
@@ -28,7 +28,7 @@ import { EVERYTHING, FIXTURE } from "./init-fixture.js";
 import { guestAnswer, stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
 
 const SOLARI = "slr_live_fake_solari_key";
-const KEY = { down: "\x1b[B", space: " ", enter: "\r", esc: "\x1b" };
+const KEY = { up: "\x1b[A", down: "\x1b[B", space: " ", enter: "\r", esc: "\x1b", ctrlC: "\x03" };
 const URL_RE = /http:\/\/127\.0\.0\.1:\d+\//;
 const BOOT = /Boot a \d+ vCPU/;
 const PRICING: BackendPricing = { rateUsdPerHour: s => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: SNAPSHOT_STORAGE };
@@ -300,9 +300,10 @@ describe("wsp init, interactive", () => {
     await f.until(BOOT);
     const summary = f.text().slice(f.text().lastIndexOf("Summary"), f.text().lastIndexOf("Recipe saved"));
     // One line per rung, the sign-ins under theirs with the answer each got, then the three closing lines.
-    const body = summary.split("\n").map(l => l.replace(/^│\s{2}|\s*│$/g, "").trimEnd()).filter(l => l !== "" && !/^[─├╯╮◇ ]*$/.test(l) && !l.startsWith("Summary"));
+    // A closing line wrapped under its column continues on indented lines, which are not rows.
+    const body = summary.split("\n").map(l => l.replace(/^│\s{2}|\s*│$/g, "").trimEnd()).filter(l => l !== "" && !/^[─├╯╮◇ ]*$/.test(l) && !l.startsWith("Summary") && !/^\s{4}/.test(l));
     expect(body.map(l => l.trim().split(/\s{2,}/)[0])).toEqual([
-      "Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins", "GitHub CLI login", "Claude Code login", "Upload", "Installs",
+      "Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins", "GitHub CLI login", "Claude Code login", "Upload", "Installs", "Disk",
     ]);
     expect(summary).not.toMatch(/[╮╯─├]/);
     expect(summary).toMatch(/Identity\s+2 of 3\s+1\.7 KB/);
@@ -315,6 +316,8 @@ describe("wsp init, interactive", () => {
     expect(summary).toMatch(/Upload\s+\d[\d.]* [KM]B, nothing has left this computer yet/);
     // Their three ticked tools; Homebrew's own glibc and gcc are named apart, not counted as theirs.
     expect(summary).toMatch(/Installs\s+Claude Code, neovim, 3 tools plus Homebrew's toolchain/);
+    // Without a Homebrew table the two formulae have no size; the toolchain and Claude Code are measured.
+    expect(summary.replace(/\n\s*│?\s+/g, " ")).toMatch(/Disk\s+1\.8 GB of 16\.1 GB on the 20 GB builder \(files [\d.]+ KB, Homebrew's toolchain 1\.6 GB, agents 211\.0 MB; 3 not measured\)/);
     expect(f.backends.flatMap(b => b.machines)).toHaveLength(0);
     await f.press("y");
 
@@ -2445,6 +2448,37 @@ describe("editorsIntro", () => {
 });
 
 describe("summaryNote", () => {
+  it("the Machine disk line adds files, Homebrew's toolchain, the formulae's closures and the agents against the room, and names what has no size", () => {
+    const ticks = new Set(["tools/brew/gh", "tools/brew/jq", "tools/npm/pnpm", "agents/claude", "agents/codex"]);
+    const brew = new Map([
+      ["gh", { name: "gh", fullName: "gh", deps: [], bytes: 50 * 1024 * 1024, macosOnly: false }],
+      ["jq", { name: "jq", fullName: "jq", deps: ["oniguruma"], bytes: 2 * 1024 * 1024, macosOnly: false }],
+      ["oniguruma", { name: "oniguruma", fullName: "oniguruma", deps: [], bytes: 1024 * 1024, macosOnly: false }],
+    ]);
+    const lines = summaryNote(FIXTURE, ticks, new Map(), 200, 300 * 1024 * 1024, brew);
+    // 300 MB files + 1600 toolchain + 53 tools + 531 agents = 2484 MiB.
+    expect(lines).toContain("Disk      2.4 GB of 16.1 GB on the 20 GB builder (files 300.0 MB, Homebrew's toolchain 1.6 GB, tools 53.0 MB, agents 531.0 MB; 1 not measured)");
+    const huge = new Map([["gh", { name: "gh", fullName: "gh", deps: [], bytes: 30 * 1024 * 1024 * 1024, macosOnly: false }]]);
+    const over = summaryNote(FIXTURE, new Set(["tools/brew/gh"]), new Map(), 200, 0, huge).find(l => l.startsWith("Disk"));
+    expect(over).toBe("Disk      31.6 GB, 15.4 GB over the 16.1 GB the 20 GB builder leaves (Homebrew's toolchain 1.6 GB, tools 30.0 GB)");
+  });
+
+  it("a tap formula that takes the road counts as a tool in the Installs line, with the checksum note the ruling asks for", () => {
+    const tap = { rung: "tools" as const, id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", group: "Homebrew", paths: [], bytes: 0, default: "bring" as const, linux: "unknown" as const };
+    const brew = new Map([["zingzy/tap/diskbloom", { name: "diskbloom", fullName: "zingzy/tap/diskbloom", deps: [], bytes: 4 * 1024 * 1024, macosOnly: false, source: { repo: "Zingzy/diskbloom", tag: "v0.1.0" } }]]);
+    const manifest = { entries: [...FIXTURE.entries, tap] };
+    const ticks = new Set(["tools/brew/gh", "tools/brew/zingzy/tap/diskbloom", "agents/claude"]);
+    const fresh = summaryNote(manifest, ticks, new Map(), 200, 0, brew);
+    expect(fresh).toContain("Installs  Claude Code, 2 tools plus Homebrew's toolchain, 1 from its GitHub release (checksum recorded on first install)");
+    // Without the table the tap is a skip, as init-import would plan it without the table too.
+    expect(summaryNote(manifest, ticks, new Map(), 200, 0)).toContain("Installs  Claude Code, 1 tool plus Homebrew's toolchain");
+    const pinned = summaryNote({ entries: [...FIXTURE.entries, { ...tap, pin: { tag: "v0.1.0", sha256: "f".repeat(64) } }] }, ticks, new Map(), 200, 0, brew);
+    expect(pinned).toContain("Installs  Claude Code, 2 tools plus Homebrew's toolchain, 1 from its GitHub release (checksum checked against the first install)");
+    // The Mac's tap moved on to a newer tag since the pin: an ordinary upgrade, recorded again, not a mismatch.
+    const moved = summaryNote({ entries: [...FIXTURE.entries, { ...tap, pin: { tag: "v0.0.9", sha256: "f".repeat(64) } }] }, ticks, new Map(), 200, 0, brew);
+    expect(moved).toContain("Installs  Claude Code, 2 tools plus Homebrew's toolchain, 1 from its GitHub release (new release, checksum recorded)");
+  });
+
   it("wraps a long Installs line under its own column instead of letting the frame break it with a stray indent", () => {
     const ticks = new Set(["tools/brew/gh", "tools/brew/jq", "tools/npm/pnpm", "agents/claude"]);
     const narrow = summaryNote(FIXTURE, ticks, new Map(), 48);
@@ -2593,13 +2627,15 @@ describe("pack size before the boot", () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
     dirs.push(dir);
     const path = join(dir, "recipe.json");
-    const big = 1200 * 1024 * 1024;
+    // Under the disk estimate's room, over what the upload stage can hold twice (the archive and its files).
+    const big = 10 * 1024 * 1024 * 1024;
     writeFileSync(path, JSON.stringify({ entries: FIXTURE.entries.map(e => ({ ...e, ...(e.id === "shell/zshrc" ? { bytes: big } : {}), bring: e.bring ?? (e.default === "bring" && e.reason === undefined) })) }));
     const f = fake({ yes: true, manifestPath: path });
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(1);
     const out = f.text();
-    expect(out).toMatch(/Upload\s+1\.2 GB, over the 960\.0 MB the machine's disk allows/);
+    expect(out).toMatch(/Upload\s+10\.0 GB, over the 8\.9 GB the machine's disk allows/);
+    expect(out).not.toContain("This recipe needs about");
     expect(out).toContain("Recipe saved to");
     expect(out).toContain("Nothing was booted.");
     // Off a terminal there are no screens to untick on; the fix is the recipe file, named.
@@ -2609,6 +2645,128 @@ describe("pack size before the boot", () => {
     expect(out).not.toMatch(BOOT);
     expect(f.backends[0]?.machines ?? []).toHaveLength(0);
     expect(f.hosts).toBe(0);
+  });
+});
+
+describe("disk estimate before the boot", () => {
+  it("a recipe that does not fit the builder's disk is refused after the summary with the shortfall, before anything boots", async () => {
+    const huge = new Map([["gh", { name: "gh", fullName: "gh", deps: [], bytes: 30 * 1024 * 1024 * 1024, macosOnly: false }]]);
+    const f = fake({ yes: true, brew: async () => huge });
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(1);
+    const out = f.text();
+    expect(out).toContain("Reading Homebrew for sizes");
+    expect(out.replace(/\n\s*│?\s+/g, " ")).toMatch(/Disk\s+31\.8 GB, 15\.6 GB over the 16\.1 GB the 20 GB builder leaves/);
+    expect(out).toContain("This recipe needs about 31.8 GB on the machine; the 20 GB disk leaves 16.1 GB after the base image and 2.0 GB of headroom.");
+    expect(out).toContain("Recipe saved to");
+    expect(out).toContain(`Nothing was booted. Set bring to false on rows worth about 15.6 GB in ${recipePath(f.opts.statePath)}, then run wsp init --yes --manifest ${recipePath(f.opts.statePath)}; the recipe is kept.`);
+    expect(out).not.toMatch(BOOT);
+    expect(f.backends[0]?.machines ?? []).toHaveLength(0);
+    expect(f.hosts).toBe(0);
+  });
+
+  it("the first install of a release tag records the tag and the asset's checksum into the recipe file; a pin from an older tag is replaced, not enforced", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
+    dirs.push(dir);
+    const path = join(dir, "recipe.json");
+    const tap: ManifestEntry = { rung: "tools", id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "unknown", pin: { tag: "v0.0.9", sha256: "9".repeat(64) } };
+    writeFileSync(path, JSON.stringify({ entries: [...FIXTURE.entries, tap].map(e => ({ ...e, bring: e.bring ?? (e.default === "bring" && e.reason === undefined) })) }));
+    const brew = new Map([["zingzy/tap/diskbloom", { name: "diskbloom", fullName: "zingzy/tap/diskbloom", deps: [], bytes: 4 * 1024 * 1024, macosOnly: false, source: { repo: "Zingzy/diskbloom", tag: "v0.1.0" } }]]);
+    const sha = "b".repeat(64);
+    const f = fake({ yes: true, manifestPath: path, brew: async () => brew });
+    // A guest whose road install answers with the asset's checksum and the tag it fetched.
+    const roadRuntime = (g: Fake) => (recipe: GoldenRecipe) => {
+      const backend = stubBackend();
+      backend.execImpl = (_m, cmd) => (cmd.includes("releases/tags/v0.1.0") ? { exitCode: 0, stdout: `WSP_ROAD release diskbloom_0.1.0_linux_amd64.tar.gz ${sha} v0.1.0\n`, stderr: "" } : guestAnswer(cmd));
+      g.backends.push(backend);
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+      g.runtimes.push(rt);
+      return rt;
+    };
+    f.opts.runtime = roadRuntime(f);
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(0);
+    expect(f.text()).toContain("new release, checksum recorded");
+    // The road command ran without a check: the recorded pin was for v0.0.9 and the tap now names v0.1.0.
+    const road = f.backends[0]!.machines[0]!.execLog.find(c => c.includes("releases/tags/v0.1.0"))!;
+    expect(road).not.toContain('[ "$sum" =');
+    const saved = loadManifest(recipePath(f.opts.statePath));
+    expect(saved.entries.find(e => e.id === "tools/brew/zingzy/tap/diskbloom")?.pin).toEqual({ tag: "v0.1.0", sha256: sha });
+    expect(saved.entries.filter(e => e.pin !== undefined)).toHaveLength(1);
+    // The results file carries the same checksum and tag beside the road.
+    const results = JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8")) as { tools: { id: string; road?: { kind: string; sha256?: string } }[] };
+    expect(results.tools.find(t => t.id === "tools/brew/zingzy/tap/diskbloom")?.road).toEqual({ kind: "release", from: "diskbloom_0.1.0_linux_amd64.tar.gz", sha256: sha, tag: "v0.1.0" });
+    // The same recipe again: the pin now matches the tag, so the road checks it and the summary says so.
+    const again = fake({ yes: true, manifestPath: recipePath(f.opts.statePath), brew: async () => brew });
+    again.opts.runtime = roadRuntime(again);
+    expect((await runInit(again.opts, again.io)).code).toBe(0);
+    expect(again.text()).toContain("checksum checked against the first install");
+    const checked = again.backends[0]!.machines[0]!.execLog.find(c => c.includes("releases/tags/v0.1.0"))!;
+    expect(checked).toContain(sha);
+    expect(checked).toContain("does not match the checksum recorded on the first install of");
+  });
+
+  it("a Homebrew that cannot be read is a note, not a stop; the summary falls back to the measured table", async () => {
+    const f = fake({ yes: true, brew: async () => { throw new Error("brew: command timed out"); } });
+    const run = runInit(f.opts, f.io);
+    await f.until(BOOT);
+    expect(f.text()).toContain("Homebrew could not be read for sizes (brew: command timed out); formula sizes come from the measured table alone.");
+    expect(f.text()).toMatch(/Disk\s+1\.8 GB of 16\.1 GB/);
+    await run;
+  });
+
+  it("the Tools screen puts a size beside every tick, Homebrew's toolchain at the top of its group, and the running total at the bottom; the Agents screen shows install sizes", async () => {
+    const brew = new Map([
+      ["gh", { name: "gh", fullName: "gh", deps: [], bytes: 50 * 1024 * 1024, macosOnly: false }],
+      ["jq", { name: "jq", fullName: "jq", deps: ["oniguruma"], bytes: 2 * 1024 * 1024, macosOnly: false }],
+      ["oniguruma", { name: "oniguruma", fullName: "oniguruma", deps: [], bytes: 1024 * 1024, macosOnly: false }],
+    ]);
+    const f = fake({ brew: async () => brew, columns: 120 });
+    const run = runInit(f.opts, f.io);
+    await f.until("Identity");
+    for (const rung of ["Shell", "Editors", "Toolchains", "Tools"]) {
+      await f.press(KEY.enter);
+      await f.until(rung);
+    }
+    const screen = f.text().slice(f.text().lastIndexOf("Tools"));
+    const rows = screen.split("\n");
+    const at = (needle: RegExp) => rows.findIndex(l => needle.test(l));
+    expect(at(/▾ Homebrew\s+2 of 2/)).toBeGreaterThan(-1);
+    expect(at(/● Homebrew's toolchain \(glibc, gcc\)\s+1\.6 GB/)).toBe(at(/▾ Homebrew\s/) + 1);
+    // The toolchain row also stands on a screen of taps alone, since a tap brings Homebrew.
+    const tapsOnly = toolsItems([{ rung: "tools", id: "tools/brew-tap/zingzy/tap", label: "zingzy/tap", group: "Homebrew taps", paths: [], bytes: 0, default: "bring" }], new Map());
+    expect(tapsOnly[0]!.id).toBe("tools/homebrew-toolchain");
+    expect(tapsOnly[0]!.follows!(new Set(["tools/brew-tap/zingzy/tap"]))).toBe(true);
+    expect(tapsOnly[0]!.follows!(new Set())).toBe(false);
+    expect(screen).toMatch(/● gh\s+50\.0 MB/);
+    expect(screen).toMatch(/● jq\s+3\.0 MB/);
+    expect(screen).toMatch(/● pnpm\s+not measured/);
+    expect(screen).toMatch(/○ rectangle\s+stays here/);
+    // Files from the earlier screens, the toolchain and the two formulae so far; pnpm has no size.
+    expect(screen).toMatch(/Disk: 1\.6 GB of 16\.1 GB on the 20 GB builder\n┃  files 1[\d.]+ KB, Homebrew's toolchain 1\.6 GB, tools 53\.0 MB; 1 not measured\n/);
+    // Past the group header, the toolchain row and gh onto jq; its detail names the closure and where the number came from.
+    await f.press(KEY.down, KEY.down, KEY.down, KEY.down);
+    expect(f.text()).toContain("about 3.0 MB with 1 dependency, from this Mac's Homebrew; brought by default");
+    // Unticking jq drops its closure from the total.
+    await f.press(KEY.space);
+    expect(f.text().split("\n").filter(l => l.includes("Homebrew's toolchain 1.6 GB, tools")).at(-1)).toMatch(/tools 50\.0 MB/);
+    await f.press(KEY.enter);
+    await f.until("Agents");
+    // Onto Claude Code, whose detail names what installs and what travels.
+    await f.press(KEY.down);
+    const agents = f.text().slice(f.text().lastIndexOf("Agents"));
+    expect(agents).toMatch(/● Claude Code\s+211\.0 MB/);
+    expect(agents).toMatch(/○ Codex\s+320\.0 MB/);
+    // An agent nobody measured says so rather than showing its config size in the install column.
+    const aider = selectItem({ rung: "agents", id: "agents/aider", label: "Aider", paths: ["~/.aider.conf.yml"], bytes: 900, default: "skip" });
+    expect(aider.hint).toBe("not measured");
+    expect(aider.detail[1]).toBe("installs on the machine (size not measured); its config (900 B) comes along");
+    const zed = selectItem({ rung: "agents", id: "agents/zed", label: "Zed", paths: ["~/.config/zed"], bytes: 900, default: "skip" });
+    expect(zed.hint).toBe("900 B");
+    expect(agents).toContain("installs about 211.0 MB on the machine (measured 2026-09-05); its config (39.1 KB) comes along");
+    expect(agents).toMatch(/Disk: 1\.8 GB of 16\.1 GB on the 20 GB builder\n┃  files [\d.]+ KB, Homebrew's toolchain 1\.6 GB, tools 50\.0 MB, agents 211\.0 MB; 1 not measured\n/);
+    await f.press(KEY.ctrlC);
+    await run;
   });
 });
 
