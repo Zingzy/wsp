@@ -15,7 +15,7 @@ import { S_BAR, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, cancel, isCancel, lo
 import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { BREW_TOOLCHAIN_BYTES, BUILDER_DISK_GB, MEASURED_ON, PACK_BUDGET_BYTES, TOOLCHAIN_MEASURED_ON, TOOLS_DISK_FLOOR, agentInstallsFor, agentSize, brewfileFor, editorInstallsFor, estimateDisk, extensionsFile, pinState, remoteEditorFor, remoteSettingsPath, toolInstallsFor, toolSize, type BrewTable, type DiskEstimate, type ImportResult, type ToolSize } from "@wsp/engine";
+import { BREW_TOOLCHAIN_BYTES, BUILDER_DISK_GB, MEASURED_ON, PACK_BUDGET_BYTES, TOOLS_DISK_FLOOR, agentInstallsFor, agentSize, assumedSize, brewfileFor, editorInstallsFor, estimateDisk, extensionsFile, pinState, remoteEditorFor, remoteSettingsPath, toolInstallsFor, toolSize, type BrewTable, type DiskEstimate, type ImportResult, type ToolSize } from "@wsp/engine";
 import { ALREADY_APPLIED } from "@wsp/protocol";
 import { CLAUDE_INSTALLER, importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
@@ -497,10 +497,16 @@ const isMcpRow = (e: ManifestEntry): boolean => e.rung === "agents" && e.id.star
 const roadWords = (size: ToolSize): string => (size.road === "measured" ? `measured on Linux ${MEASURED_ON}` : "from this Mac's Homebrew");
 const depsWords = (size: ToolSize): string => (size.deps === 0 ? "" : ` with ${size.deps} dependenc${size.deps === 1 ? "y" : "ies"}`);
 
+/** A row nothing measured counts at its kind's default, and the detail says so. */
+function assumedWords(e: ManifestEntry): string {
+  const assumed = assumedSize(e);
+  return `not measured, ~${fmtBytes(assumed.bytes)} assumed for ${assumed.kind}`;
+}
+
 /** Where a tool's number came from, for the detail pane. */
 function sizeWhy(e: ManifestEntry, brew: BrewTable): string {
   const size = toolSize(e, brew);
-  return size === undefined ? "size not measured" : `about ${fmtBytes(size.bytes)}${depsWords(size)}, ${roadWords(size)}`;
+  return size === undefined ? assumedWords(e) : `about ${fmtBytes(size.bytes)}${depsWords(size)}, ${roadWords(size)}`;
 }
 
 /** A formula's second detail line: why it starts unticked when it does, then its size and where the number came from. */
@@ -529,7 +535,7 @@ function detailWhy(e: ManifestEntry, lock: "on" | "off" | undefined, brew: BrewT
     if (!hasInstaller(e)) return "its config comes along; no installer yet, install it there yourself";
     const size = agentSize(e);
     const config = e.bytes > 0 ? `its config (${fmtBytes(e.bytes)}) comes along` : "its config comes along";
-    return `installs ${size === undefined ? "on the machine (size not measured)" : `about ${fmtBytes(size)} on the machine (measured ${MEASURED_ON})`}; ${config}`;
+    return `installs ${size === undefined ? `on the machine (${assumedWords(e)})` : `about ${fmtBytes(size)} on the machine (measured ${MEASURED_ON})`}; ${config}`;
   }
   const byDefault = e.default === "bring" ? "brought by default" : "left out by default";
   if (e.rung === "tools") return e.id.startsWith("tools/brew-tap/") ? `its formula list, a few MB; the formulae carry the size; ${byDefault}` : toolWhy(e, brew);
@@ -556,11 +562,14 @@ function installBytes(e: ManifestEntry, brew: BrewTable): number | undefined {
   return e.id.startsWith("tools/brew-tap/") ? undefined : toolSize(e, brew)?.bytes;
 }
 
-/** The second column of a tools or agents row: its weight on the machine; nothing for a tap or an agent that only travels. */
+/** A row nothing measured counts at its kind's default; the tilde marks the number as assumed. */
+const assumedHint = (e: ManifestEntry): string => `~${fmtBytes(assumedSize(e).bytes)}`;
+
+/** The second column of a tools or agents row: its weight on the machine, marked when assumed; nothing for a tap or an agent that only travels. */
 function installHint(e: ManifestEntry, brew: BrewTable): string | undefined {
   const bytes = installBytes(e, brew);
   if (bytes !== undefined) return fmtBytes(bytes);
-  return e.id.startsWith("tools/brew-tap/") || (e.rung === "agents" && !hasInstaller(e)) ? undefined : "not measured";
+  return e.id.startsWith("tools/brew-tap/") || (e.rung === "agents" && !hasInstaller(e)) ? undefined : assumedHint(e);
 }
 
 export function selectItem(e: ManifestEntry, hintFor?: (width: number) => string, brew: BrewTable = new Map()): SelectItem {
@@ -569,7 +578,7 @@ export function selectItem(e: ManifestEntry, hintFor?: (width: number) => string
   const lock = e.required ? "on" : !isTickable(e) ? "off" : undefined;
   const installs = e.rung === "tools" || e.rung === "agents";
   const hint = installs ? installHint(e, brew) : e.bytes > 0 && e.rung !== "logins" ? fmtBytes(e.bytes) : undefined;
-  const tone = installs ? weightTone(installBytes(e, brew) ?? 0) : undefined;
+  const tone = installs ? weightTone(installBytes(e, brew) ?? (hint === undefined ? 0 : assumedSize(e).bytes)) : undefined;
   // A path-shaped app data label is the row's ~/Library parent, a slash, then its name; the parent goes dim. A carve's worded label stays whole.
   const parent = e.group === APP_DATA_GROUP && e.paths[0] === `~/Library/${e.label}` ? e.label.slice(0, e.label.indexOf("/") + 1) : "";
   return {
@@ -603,7 +612,7 @@ export function toolsItems(entries: readonly ManifestEntry[], brew: BrewTable): 
     hint: fmtBytes(BREW_TOOLCHAIN_BYTES),
     ...(group !== undefined ? { group } : {}),
     ...(tone !== undefined ? { tone } : {}),
-    detail: ["pulled in by the first Homebrew formula; Linux bottles are built against Homebrew's own glibc", `about ${fmtBytes(BREW_TOOLCHAIN_BYTES)}, measured on Linux ${TOOLCHAIN_MEASURED_ON}`],
+    detail: ["pulled in by the first Homebrew formula; Linux bottles are built against Homebrew's own glibc", `about ${fmtBytes(BREW_TOOLCHAIN_BYTES)}, measured on Linux ${MEASURED_ON}`],
     follows: ticks => toolInstallsFor(asBring(entries.filter(e => ticks.has(e.id))), brew).installs.some(t => t.id === "tools/homebrew"),
   };
   const at = group === undefined ? 0 : items.findIndex(i => i.group === group);
@@ -614,7 +623,7 @@ export function toolsItems(entries: readonly ManifestEntry[], brew: BrewTable): 
 /** The estimate's parts that are not zero, and how many rows have no size. */
 function diskParts(est: DiskEstimate): string {
   const parts = ([["files", est.files], ["Homebrew's toolchain", est.toolchain], ["tools", est.tools], ["agents", est.agents]] as const).filter(([, n]) => n > 0).map(([label, n]) => `${label} ${fmtBytes(n)}`);
-  const unknown = est.unknown.length > 0 ? `${est.unknown.length} not measured` : "";
+  const unknown = est.unknown.length > 0 ? `${est.unknown.length} unmeasured, ~${fmtBytes(est.assumed)}` : "";
   return [parts.join(", "), unknown].filter(p => p !== "").join("; ");
 }
 
@@ -643,13 +652,14 @@ const tooFull = (rung: Rung): string => `Too full to build. Untick ${rung} you d
 
 /** Under a screen: the parts of the running total, dim, then the Disk line loud in its weight's colour, directly above the
  * keys. As many slots as the way out takes wrapped at this width, every frame, so the screen does not move under a tick:
- * the parts and empty lines, or, in the red tier, the whole sentence. */
+ * the parts wrapped over them and empty lines after, or, in the red tier, the whole sentence. */
 function diskFooter(estimate: (ticks: ReadonlySet<string>) => DiskEstimate, rung: Rung): (ticks: ReadonlySet<string>, width: number) => FooterLine[] {
   return (ticks, width) => {
     const est = estimate(ticks);
     const tone = diskTone(est.total, est.room);
     const slots = wrap(tooFull(rung), width, "");
-    const head: FooterLine[] = heldDisk(est) ? slots.map(text => ({ text })) : [diskParts(est), ...slots.slice(1).map(() => "")];
+    const parts = wrap(diskParts(est), width, "").slice(0, slots.length);
+    const head: FooterLine[] = heldDisk(est) ? slots.map(text => ({ text })) : [...parts, ...slots.slice(parts.length).map(() => "")];
     return [...head, { text: `Disk: ${diskHead(est)}`, ...(tone !== undefined ? { tone } : {}) }];
   };
 }

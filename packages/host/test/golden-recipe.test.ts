@@ -33,7 +33,8 @@ describe("host golden recipe", () => {
     const builder = backend.machines[0]!;
     expect(view.id).toBe(builder.id);
     expect(deployed).toEqual([builder.id]);
-    expect(builder.execLog).toEqual([GOLDEN_SETUP]);
+    // The base stage closes with a df reading, then the setup runs.
+    expect(builder.execLog).toEqual(["df -Pk /root | awk 'NR==2{print $4}'", GOLDEN_SETUP]);
     expect(builder.spec).toMatchObject({ kind: "sandbox", onIdle: "kill", envs: { ANTHROPIC_API_KEY: ANTHROPIC } });
     expect(builder.spec.idleTimeoutMs).toBeGreaterThan(0);
 

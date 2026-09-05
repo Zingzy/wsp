@@ -3,12 +3,14 @@ import { describe, expect, it } from "vitest";
 import { MIB, TOOLS_DISK_FLOOR } from "../src/golden-tools.js";
 import { brewfileFor, pinState, toolInstallsFor, type BrewTable, type RecipeEntry } from "../src/golden-import.js";
 import {
-  BASE_IMAGE_BYTES,
   BREW_TOOLCHAIN_BYTES,
   BUILDER_DISK_GB,
+  BUILDER_FREE_BYTES,
   DISK_ROOM_BYTES,
+  NODE_BYTES,
   PACK_BUDGET_BYTES,
   agentSize,
+  assumedSize,
   brewTable,
   estimateDisk,
   parseBrewInfo,
@@ -90,10 +92,10 @@ describe("toolSize", () => {
 
   it("a formula measured on Linux takes the measured number over the Mac's, and its dependencies still count", () => {
     const s = toolSize(brew("llvm@21"), TABLE)!;
-    expect(s.bytes).toBe(2400 * MIB + 5120 * 1024);
+    expect(s.bytes).toBe(2560 * MIB + 5120 * 1024);
     expect(s.road).toBe("measured");
     // Without a Mac table the measured formula still has a number, its dependencies unknown.
-    expect(toolSize(brew("llvm@21"), new Map())).toEqual({ bytes: 2400 * MIB, road: "measured", deps: 0 });
+    expect(toolSize(brew("llvm@21"), new Map())).toEqual({ bytes: 2560 * MIB, road: "measured", deps: 0 });
   });
 
   it("a formula nothing measured or read has no size; taps, casks and a measured npm global are handled", () => {
@@ -112,19 +114,33 @@ describe("toolSize", () => {
 
 describe("agentSize", () => {
   it("measured install sizes by agent; an agent nobody measured has none", () => {
-    expect(agentSize({ ...row({ id: "agents/opencode" }), rung: "agents" })).toBe(353 * MIB);
-    expect(agentSize({ ...row({ id: "agents/claude" }), rung: "agents" })).toBe(211 * MIB);
+    expect(agentSize({ ...row({ id: "agents/opencode" }), rung: "agents" })).toBe(673 * MIB);
+    expect(agentSize({ ...row({ id: "agents/claude" }), rung: "agents" })).toBe(208 * MIB);
     expect(agentSize({ ...row({ id: "agents/aider" }), rung: "agents" })).toBeUndefined();
   });
 });
 
 describe("the disk", () => {
-  it("room is the 20 GB disk less the base image and the tools floor; the pack budget is half of what the upload stage has", () => {
+  it("room is what the 20 GB builder had free less the tools floor; the pack budget is half of what the upload stage has", () => {
     expect(BUILDER_DISK_GB).toBe(20);
-    expect(BASE_IMAGE_BYTES).toBe(1904 * MIB);
-    expect(DISK_ROOM_BYTES).toBe(20 * GIB - BASE_IMAGE_BYTES - TOOLS_DISK_FLOOR);
-    expect(PACK_BUDGET_BYTES).toBe(Math.floor((20 * GIB - BASE_IMAGE_BYTES - 256 * MIB) / 2));
+    // df -Pk on the real builder before the upload: 17,992,136 KiB, the base image and the reserved blocks already gone.
+    expect(BUILDER_FREE_BYTES).toBe(17570 * MIB);
+    expect(DISK_ROOM_BYTES).toBe(BUILDER_FREE_BYTES - TOOLS_DISK_FLOOR);
+    expect(DISK_ROOM_BYTES).toBeLessThan(15.2 * GIB);
+    expect(PACK_BUDGET_BYTES).toBe(Math.floor((BUILDER_FREE_BYTES - 256 * MIB) / 2));
     expect(PACK_BUDGET_BYTES).toBeGreaterThan(8 * GIB);
+  });
+});
+
+describe("assumedSize", () => {
+  it("a row nothing measured counts at the default for its kind, and says which kind", () => {
+    expect(assumedSize(row({ id: "tools/go/gopls" }))).toEqual({ bytes: 500 * MIB, kind: "a go install" });
+    expect(assumedSize(row({ id: "tools/uv/ty" }))).toEqual({ bytes: 100 * MIB, kind: "a uv tool" });
+    expect(assumedSize(row({ id: "tools/npm/left-pad" }))).toEqual({ bytes: 50 * MIB, kind: "an npm global" });
+    expect(assumedSize(row({ id: "tools/pnpm/left-pad" }))).toEqual({ bytes: 50 * MIB, kind: "an npm global" });
+    expect(assumedSize(row({ id: "tools/cargo/ripgrep" }))).toEqual({ bytes: 100 * MIB, kind: "an install" });
+    expect(assumedSize(row({ id: "tools/brew/nobody/tap/mystery" }))).toEqual({ bytes: 100 * MIB, kind: "an install" });
+    expect(assumedSize({ ...row({ id: "agents/aider" }), rung: "agents" })).toEqual({ bytes: 350 * MIB, kind: "an agent" });
   });
 });
 
@@ -137,9 +153,11 @@ describe("estimateDisk", () => {
     expect(est.files).toBe(files);
     expect(est.toolchain).toBe(BREW_TOOLCHAIN_BYTES);
     // ffmpeg + x264 + openssl@3 + ca-certificates (openssl@3's own row adds nothing new) + llvm@21 measured + zstd.
-    expect(est.tools).toBe((102400 + 20480 + 30720 + 1024 + 5120) * 1024 + 2400 * MIB);
-    expect(est.agents).toBe((353 + 100) * MIB);
+    expect(est.tools).toBe((102400 + 20480 + 30720 + 1024 + 5120) * 1024 + 2560 * MIB);
+    // Gemini CLI's engines floor (20) is above the base's Node 18, so the stage installs a Node and it counts with the agents.
+    expect(est.agents).toBe((673 + 189) * MIB + NODE_BYTES);
     expect(est.unknown).toEqual([]);
+    expect(est.assumed).toBe(0);
     expect(est.total).toBe(est.files + est.toolchain + est.tools + est.agents);
     expect(est.room).toBe(DISK_ROOM_BYTES);
     expect(est.over).toBe(0);
@@ -151,6 +169,17 @@ describe("estimateDisk", () => {
     expect(est.tools).toBe(78 * MIB);
     // Zed has no installer, so nothing of it lands on the machine and nothing is unknown about it.
     expect(est.unknown).toEqual(["left-pad", "Aider"]);
+    // The unknown rows still count, each at its kind's default, and the total carries them.
+    expect(est.assumed).toBe((50 + 350) * MIB);
+    expect(est.agents).toBe(0);
+    expect(est.total).toBe(est.tools + est.assumed);
+  });
+
+  it("an agent whose floor the base's Node already meets brings no Node", () => {
+    const codex = { ...row({ id: "agents/codex" }), rung: "agents" as const };
+    expect(estimateDisk([codex], 0, TABLE).agents).toBe(455 * MIB);
+    const pi = { ...row({ id: "agents/pi" }), rung: "agents" as const };
+    expect(estimateDisk([codex, pi], 0, TABLE).agents).toBe((455 + 165) * MIB + NODE_BYTES);
   });
 
   it("a manager the plan pulls in as a formula counts, and so does the toolchain it needs", () => {
@@ -158,6 +187,8 @@ describe("estimateDisk", () => {
     expect(est.toolchain).toBe(BREW_TOOLCHAIN_BYTES);
     expect(est.tools).toBe(400 * MIB);
     expect(est.unknown).toEqual(["ripgrep"]);
+    expect(est.assumed).toBe(100 * MIB);
+    expect(est.total).toBe(BREW_TOOLCHAIN_BYTES + 400 * MIB + 100 * MIB);
   });
 
   it("says by how much a recipe overshoots the room", () => {
