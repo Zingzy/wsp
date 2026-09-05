@@ -392,7 +392,8 @@ export interface Runtime {
       workspaceId: string,
       opts: { prompt: string; harness?: string; resume?: string; cwd?: string; model?: string; effort?: string; permissionMode?: string },
     ): Promise<SessionHandle>;
-    /** Every turn this state file knows, the ones before a restart with the state they were last written in. */
+    /** Every turn this state file knows, the ones before a restart as they were last written; one that was still
+     * running then reads as failed. */
     list(workspaceId?: string): Promise<SessionView[]>;
     /** The workspace's persisted session events, oldest first; a chat replays these on mount. */
     history(workspaceId: string): Promise<SessionEvent[]>;
@@ -464,6 +465,8 @@ const RESTARTED_REASON = "host restarted while the agent was working";
 const DAEMON_TOKEN_MISS_TTL_MS = 60_000;
 /** Events kept per workspace; the oldest fall off so one chatty workspace cannot grow the store forever. */
 const TRANSCRIPT_CAP = 5000;
+/** Index rows kept per workspace; the oldest finished rows fall off, a running one never does. */
+const SESSION_INDEX_CAP = 200;
 /** A turn boundary waits this long for more before the transcript is written; measured at one put per
  * event, 5000 events cost 4 s of memory-store clones and 6.6 s of file rewrites after the last turn. */
 export const TRANSCRIPT_FLUSH_MS = 250;
@@ -702,8 +705,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return queued;
   };
 
-  // Rows are copied at queue time, like the transcript: the store may serialise after it returns.
+  const capSessions = (workspaceId: string): void => {
+    const rows = [...sessions].filter(([, s]) => s.view.workspaceId === workspaceId);
+    const excess = rows.length - SESSION_INDEX_CAP;
+    if (excess <= 0) return;
+    const finished = rows.filter(([, s]) => s.view.status !== "running").sort(([, a], [, b]) => (a.view.startedAt ?? 0) - (b.view.startedAt ?? 0));
+    for (const [id] of finished.slice(0, excess)) sessions.delete(id);
+  };
+
+  // Rows are copied at queue time, like the transcript: the store may serialise after it returns. A harness that
+  // settles after its workspace was deleted must not write the document back.
   const persistSessions = (workspaceId: string): Promise<void> => {
+    if (!live.has(workspaceId)) return Promise.resolve();
+    capSessions(workspaceId);
     const rows = [...sessions.values()].filter(s => s.view.workspaceId === workspaceId).map(s => ({ ...s.view, turnId: s.turnId }));
     const snapshot: SessionIndexRecord = { workspaceId, sessions: rows };
     const queued = (indexFlushes.get(workspaceId) ?? Promise.resolve())
@@ -1210,6 +1224,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       for (const raw of await store.list(SESSIONS)) {
         const index = raw as SessionIndexRecord;
         if (!live.has(index.workspaceId)) continue;
+        if (!Array.isArray(index.sessions)) {
+          console.warn(`sessions document for ${index.workspaceId} has no rows array, read as empty`);
+          continue;
+        }
         let cut = false;
         for (const { turnId, ...view } of index.sessions) {
           // The harness process died with the runtime that started it, so a turn still running never settles.
@@ -1632,6 +1650,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
 
     async interrupt(sessionId) {
+      await ready();
       const s = sessions.get(sessionId);
       if (!s) return { outcome: "not-found" };
       if (s.view.status !== "running" || s.handle === undefined) return { outcome: "not-running" };

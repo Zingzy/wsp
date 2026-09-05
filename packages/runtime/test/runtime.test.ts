@@ -728,6 +728,63 @@ describe("runtime session index", () => {
     expect(await store.get("sessions", b.id)).toBeUndefined();
     await rt2.close();
   });
+
+  it("a workspace deleted while a turn runs gets no document written back when the harness settles", async () => {
+    const store = memoryStore();
+    let settle!: (result: TurnResult) => void;
+    const pending: HarnessAdapterFactory = () => ({
+      start: o => {
+        o.onEvent({ type: "session.start", sessionId: HUNG_ID, model: "claude-sonnet-4-5", cwd: "/root/work" });
+        return { localId: HUNG_ID, claudeSessionId: HUNG_ID, finished: new Promise<TurnResult>(r => (settle = r)), interrupt: async () => {} };
+      },
+    });
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: pending } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await rt.sessions.start(ws.id, { prompt: "slow" });
+    await rt.workspaces.delete(ws.id);
+    expect(await store.get("sessions", ws.id)).toBeUndefined();
+    // the real adapter settles when its exec stream dies, which can be after kill() returned
+    settle({ status: "failed", text: "" });
+    await new Promise(r => setImmediate(r));
+    await rt.close();
+    expect(await store.list("sessions")).toEqual([]);
+  });
+
+  it("a sessions document without a rows array is logged and read as empty; the runtime still boots", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt1 = createRuntime({ backend, store, adapters: {} });
+    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
+    await rt1.close();
+    await store.put("sessions", ws.id, { workspaceId: ws.id });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const rt2 = createRuntime({ backend, store, adapters: {} });
+      expect((await rt2.workspaces.list()).map(w => w.id)).toEqual([ws.id]);
+      expect(await rt2.sessions.list(ws.id)).toEqual([]);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(ws.id));
+      await rt2.close();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("keeps at most 200 rows per workspace: the oldest finished row falls off first, a running row never does", { timeout: 20_000 }, async () => {
+    const store = memoryStore();
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: turns().adapter, hung } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await rt.sessions.start(ws.id, { prompt: "stuck", harness: "hung" });
+    for (let i = 0; i < 199; i++) await (await rt.sessions.start(ws.id, { prompt: `t${i}` })).finished;
+    const full = await rt.sessions.list(ws.id);
+    expect(full).toHaveLength(200);
+    expect(full.slice(0, 2).map(s => s.prompt)).toEqual(["stuck", "t0"]);
+    await (await rt.sessions.start(ws.id, { prompt: "t199" })).finished;
+    const rows = await rt.sessions.list(ws.id);
+    expect(rows.map(s => s.prompt)).toEqual(["stuck", ...Array.from({ length: 199 }, (_, i) => `t${i + 1}`)]);
+    await rt.close();
+    const stored = (await store.get("sessions", ws.id)) as { sessions: { prompt: string }[] };
+    expect(stored.sessions.map(s => s.prompt)).toEqual(rows.map(s => s.prompt));
+  });
 });
 
 describe("runtime daemon reach", () => {
