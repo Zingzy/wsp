@@ -16,6 +16,16 @@ describe("init layout", () => {
     expect(plainLine("plain")).toBe("plain");
   });
 
+  it("plainLine ends a row at a CRLF, overprints by code point so no glyph is torn, and drops C1 controls", () => {
+    expect(plainLine("line\r\n")).toBe("line");
+    expect(plainLine("first\r\nsecond")).toBe("second");
+    expect(plainLine("a\nb")).toBe("a b");
+    expect(plainLine("\u{1f600}\u{1f600}\rabc")).toBe("abc");
+    expect(plainLine("\u{1f600}\u{1f600}\u{1f600}\rab")).toBe("ab\u{1f600}");
+    expect(plainLine("\u65e5\u672c\u8a9e\rab")).toBe("ab\u8a9e");
+    expect(plainLine("a\x85b\u009fc")).toBe("abc");
+  });
+
   it("ellipsize keeps text that fits and ends cut text with one ellipsis inside the width", () => {
     expect(ellipsize("abc", 3)).toBe("abc");
     expect(ellipsize("abcdef", 4)).toBe("abc…");

@@ -226,7 +226,7 @@ export function reduceStages(frames: readonly StageFrame[], words: readonly Stag
       step = { ...word, state: "current", tail: [] };
       steps.push(step);
     }
-    if (f.detail !== undefined) step.tail.push(plainLine(f.detail));
+    if (f.detail !== undefined) step.tail.push(f.detail);
     // A stage the builder already holds is over the moment it is named, and the last stage has nothing after it to end it; neither gets a clock.
     if (f.detail === ALREADY_APPLIED || LAST_STAGE.has(f.stage)) {
       step.state = "done";
@@ -304,9 +304,11 @@ export class StageStream {
     this.draw();
   }
 
+  /** The detail is flattened once, here, to the row it is drawn as; a failure is drawn one row per line, so it keeps its newlines. */
   push(frame: StageFrame): void {
     const prev = this.view;
-    this.frames.push({ ...frame, at: frame.at ?? Date.now() });
+    const detail = frame.detail === undefined ? undefined : frame.stage === "failed" ? frame.detail.split("\n").map(plainLine).join("\n") : plainLine(frame.detail);
+    this.frames.push({ ...frame, ...(detail !== undefined ? { detail } : {}), at: frame.at ?? Date.now() });
     this.view = reduceStages(this.frames, this.words);
     if (this.animate) this.draw();
     else this.announce(prev);

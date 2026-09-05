@@ -23,11 +23,15 @@ export function ellipsize(text: string, width: number): string {
 }
 
 /** A line of program output as one terminal row would leave it: each carriage-return segment overprints the one before
- * from the first cell, escape sequences and other control characters take no cell, a tab or a newline is one space. */
+ * from the first cell, a CRLF ends the row the same way, escape sequences and other control characters take no cell,
+ * a tab or a lone newline is one space. Cells are code points, so a glyph is kept or replaced whole, never torn. */
 export function plainLine(text: string): string {
-  let row = "";
-  for (const seg of stripVTControlCharacters(text).replace(/[\t\n\v\f]/g, " ").replace(/[\x00-\x08\x0e-\x1f\x7f]/g, "").split("\r")) row = seg + row.slice(seg.length);
-  return row;
+  let row: string[] = [];
+  for (const seg of stripVTControlCharacters(text).replace(/\r\n/g, "\r").replace(/[\t\n\v\f]/g, " ").replace(/[\x00-\x08\x0e-\x1f\x7f-\x9f]/g, "").split("\r")) {
+    const cells = Array.from(seg);
+    row = [...cells, ...row.slice(cells.length)];
+  }
+  return row.join("");
 }
 
 export type Align = "left" | "right";
