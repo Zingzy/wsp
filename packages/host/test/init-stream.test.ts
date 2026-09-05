@@ -3,7 +3,7 @@
 // a screen that honours the cursor moves the stream writes, and the rows left
 // on it are what the person sees. No row may hold two lines, no line may wrap,
 // and a step only ever shows once.
-import { PassThrough } from "node:stream";
+import { PassThrough, Writable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { ALREADY_APPLIED } from "@wsp/protocol";
 import type { Runtime } from "@wsp/runtime";
@@ -12,18 +12,61 @@ import { SEAL_STEPS, StageStream, streamStages, type StageFrame } from "../src/i
 const SPINNERS = /[◒◐◓◑]/;
 const ev = (stage: string, at: number, detail?: string): StageFrame => ({ type: "golden.stage", name: "default", stage, at, ...(detail !== undefined ? { detail } : {}) });
 
-/** A terminal of `cols` by `rows` cells: printable text, CR, LF, cursor up, cursor to column, erase below and erase line. Styling is dropped. */
+/** A terminal of `cols` by `rows` cells: printable text, CR, LF, cursor up, cursor to column, erase below and erase line. Styling is dropped.
+ * A resize reflows it the way Ghostty does: a row that overflowed continues on the next, and a narrower screen wraps every row wider than it. */
 class Screen {
-  private readonly cells: string[][];
+  private cells: string[][];
+  /** Whether a row is the continuation of the one above, wrapped there because the text ran past the edge. */
+  private wrapped: boolean[];
   private row = 0;
   private col = 0;
   private dropped = 0;
 
   constructor(
-    readonly cols: number,
+    public cols: number,
     readonly rows: number,
   ) {
     this.cells = Array.from({ length: rows }, () => Array<string>(cols).fill(" "));
+    this.wrapped = Array<boolean>(rows).fill(false);
+  }
+
+  resize(cols: number): void {
+    const logical: string[] = [];
+    let at = { line: 0, offset: 0 };
+    for (let r = 0; r < this.rows; r++) {
+      const text = r + 1 < this.rows && this.wrapped[r + 1] ? this.cells[r]!.join("") : this.cells[r]!.join("").trimEnd();
+      if (this.wrapped[r]) logical[logical.length - 1] += text;
+      else logical.push(text);
+      if (r === this.row) at = { line: logical.length - 1, offset: logical[logical.length - 1]!.length - text.length + this.col };
+    }
+    while (logical.length > 0 && logical.at(-1) === "" && logical.length - 1 > at.line) logical.pop();
+    const rows: string[][] = [];
+    const wrapped: boolean[] = [];
+    let cursor = { row: 0, col: 0 };
+    logical.forEach((text, i) => {
+      const glyphs = Array.from(text);
+      const chunks = glyphs.length === 0 ? [[]] : Array.from({ length: Math.ceil(glyphs.length / cols) }, (_, k) => glyphs.slice(k * cols, (k + 1) * cols));
+      if (i === at.line) cursor = { row: rows.length + Math.floor(at.offset / cols), col: at.offset % cols };
+      chunks.forEach((chunk, k) => {
+        rows.push([...chunk, ...Array<string>(cols - chunk.length).fill(" ")]);
+        wrapped.push(k > 0);
+      });
+    });
+    while (rows.length > this.rows) {
+      rows.shift();
+      wrapped.shift();
+      cursor.row -= 1;
+      this.dropped += 1;
+    }
+    while (rows.length < this.rows) {
+      rows.push(Array<string>(cols).fill(" "));
+      wrapped.push(false);
+    }
+    this.cols = cols;
+    this.cells = rows;
+    this.wrapped = wrapped;
+    this.row = cursor.row;
+    this.col = cursor.col;
   }
 
   feed(text: string): void {
@@ -47,7 +90,10 @@ class Screen {
           case "J":
             if (arg === undefined || arg === 0) {
               this.cells[this.row]!.fill(" ", this.col);
-              for (let r = this.row + 1; r < this.rows; r++) this.cells[r]!.fill(" ");
+              for (let r = this.row + 1; r < this.rows; r++) {
+                this.cells[r]!.fill(" ");
+                this.wrapped[r] = false;
+              }
             }
             break;
           case "K":
@@ -64,6 +110,7 @@ class Screen {
         this.row += 1;
         this.col = 0;
         this.scroll();
+        this.wrapped[this.row] = false;
         i += 1;
         continue;
       }
@@ -77,6 +124,7 @@ class Screen {
         this.col = 0;
         this.row += 1;
         this.scroll();
+        this.wrapped[this.row] = true;
       }
       this.cells[this.row]![this.col] = glyph;
       this.col += 1;
@@ -88,6 +136,8 @@ class Screen {
     while (this.row >= this.rows) {
       this.cells.shift();
       this.cells.push(Array<string>(this.cols).fill(" "));
+      this.wrapped.shift();
+      this.wrapped.push(false);
       this.row -= 1;
       this.dropped += 1;
     }
@@ -106,12 +156,22 @@ class Screen {
   }
 }
 
+/** One terminal with both of a process's streams on it, as stdout and stderr share a screen; `resize` is the pane changing width under a running stream. */
 function terminal(cols: number, rows: number) {
   const output = Object.assign(new PassThrough(), { isTTY: true, columns: cols, rows });
+  const stderr = Object.assign(new PassThrough(), { isTTY: true, columns: cols, rows });
   const screen = new Screen(cols, rows);
   output.on("data", (c: Buffer) => screen.feed(c.toString()));
-  return { output, screen };
+  stderr.on("data", (c: Buffer) => screen.feed(c.toString()));
+  const resize = (to: number): void => {
+    output.columns = to;
+    stderr.columns = to;
+    screen.resize(to);
+  };
+  return { output, stderr, screen, resize };
 }
+
+const NODE_WARNING = "(node:72935) MaxListenersExceededWarning: Possible EventTarget memory leak detected. 11 abort listeners added to [AbortSignal]. MaxListeners is 10. Use events.setMaxListeners() to increase limit\n(Use `node --trace-warnings ...` to show where the warning was created)\n";
 
 const count = (lines: string[], text: string): number => lines.filter(l => l.includes(text)).length;
 
@@ -250,22 +310,23 @@ describe("stage stream on a terminal", () => {
     }
   });
 
-  it("console.warn and console.error mid-frame settle above the block, reach the sink, and the console comes back on stop", () => {
+  it("a line written to stdout or stderr from outside the stream settles above the block, reaches the sink, and the streams come back on stop", () => {
     vi.useFakeTimers();
-    const warn = console.warn;
-    const error = console.error;
     try {
-      const { output, screen } = terminal(80, 30);
+      const { output, stderr, screen } = terminal(80, 30);
+      const outWrite = output.write;
+      const errWrite = stderr.write;
       const sunk: string[] = [];
-      const stream = new StageStream(output, true, undefined, line => sunk.push(line));
+      const stream = new StageStream(output, true, undefined, line => sunk.push(line), stderr);
       stream.start();
-      expect(console.warn).not.toBe(warn);
+      expect(output.write).not.toBe(outWrite);
+      expect(stderr.write).not.toBe(errWrite);
       stream.push(ev("creating", 0, "sandbox from default"));
       vi.advanceTimersByTime(100);
-      console.warn("heartbeat for builder %s not written: %s", "b1", "ETIMEDOUT");
+      stderr.write("heartbeat for builder b1 not written: ETIMEDOUT\n");
       vi.advanceTimersByTime(100);
       stream.push(ev("deploying-daemon", 1_000));
-      console.error("hostname first on m1 failed: no route");
+      output.write(Buffer.from("hostname first on m1 failed: \x1b[31mno route\x1b[0m\r\n"));
       vi.advanceTimersByTime(100);
       const lines = screen.lines();
       expect(lines[0]).toBe("│  heartbeat for builder b1 not written: ETIMEDOUT");
@@ -275,32 +336,181 @@ describe("stage stream on a terminal", () => {
       expect(lines).toHaveLength(4);
       expect(sunk).toEqual(["heartbeat for builder b1 not written: ETIMEDOUT", "hostname first on m1 failed: no route"]);
       stream.stop();
-      expect(console.warn).toBe(warn);
-      expect(console.error).toBe(error);
+      expect(output.write).toBe(outWrite);
+      expect(stderr.write).toBe(errWrite);
       expect(count(screen.lines(), "heartbeat for builder b1")).toBe(1);
     } finally {
-      console.warn = warn;
-      console.error = error;
       vi.useRealTimers();
     }
   });
 
-  it("a stream around a call that rejects still stops: the console comes back and the spinner timer ends", async () => {
+  it("one stream given as both output and aside is taken once, and stop hands back the write it started with", () => {
     vi.useFakeTimers();
-    const warn = console.warn;
     try {
       const { output, screen } = terminal(80, 30);
+      const original = output.write;
+      // Every assignment to write is recorded, so a second take shows up as a count before stop can draw through it.
+      const assigned: unknown[] = [];
+      let current = original;
+      Object.defineProperty(output, "write", {
+        configurable: true,
+        get: () => current,
+        set: (w: typeof original) => {
+          assigned.push(w);
+          current = w;
+        },
+      });
+      const sunk: string[] = [];
+      const stream = new StageStream(output, true, undefined, line => sunk.push(line), output);
+      stream.start();
+      expect(assigned).toHaveLength(1);
+      expect(output.write).not.toBe(original);
+      stream.push(ev("creating", 0, "sandbox from base"));
+      vi.advanceTimersByTime(100);
+      output.write("a line from outside\n");
+      vi.advanceTimersByTime(100);
+      stream.push(ev("deploying-daemon", 1_000));
+      stream.stop();
+      expect(assigned).toHaveLength(2);
+      expect(output.write).toBe(original);
+      const lines = screen.lines();
+      expect(lines[0]).toBe("│  a line from outside");
+      expect(count(lines, "Machine created")).toBe(1);
+      expect(lines).toHaveLength(3);
+      expect(sunk).toEqual(["a line from outside"]);
+      output.write("after stop\n");
+      expect(screen.lines().at(-1)).toBe("after stop");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  for (const [where, aside] of [
+    ["/dev/null", () => ({ stderr: new Writable({ write: (_c, _e, cb) => cb() }), sent: undefined })],
+    ["a pipe", () => {
+      const stderr = new PassThrough();
+      const sent: string[] = [];
+      stderr.on("data", (c: Buffer) => sent.push(c.toString()));
+      return { stderr, sent };
+    }],
+  ] as const) {
+    it(`a stderr sent to ${where} is not a terminal, so its bytes stay where the shell sent them and never reach the block`, () => {
+      vi.useFakeTimers();
+      try {
+        const { output, screen } = terminal(80, 30);
+        const { stderr, sent } = aside();
+        const errWrite = stderr.write;
+        const sunk: string[] = [];
+        const stream = new StageStream(output, true, undefined, line => sunk.push(line), stderr);
+        stream.start();
+        expect(stderr.write).toBe(errWrite);
+        stream.push(ev("creating", 0, "sandbox from base"));
+        vi.advanceTimersByTime(100);
+        const raw = "heartbeat for builder b1 not written: \x1b[31mETIMEDOUT\x1b[0m\r\n";
+        stderr.write(raw);
+        vi.advanceTimersByTime(100);
+        stream.push(ev("deploying-daemon", 1_000));
+        vi.advanceTimersByTime(100);
+        const lines = screen.lines();
+        expect(lines).toHaveLength(2);
+        expect(lines[0]).toMatch(/^◇  Machine created\s+sandbox from base\s+1\.0s$/);
+        expect(count(lines, "heartbeat")).toBe(0);
+        expect(sunk).toEqual([]);
+        if (sent !== undefined) expect(sent.join("")).toBe(raw);
+        stream.stop();
+        expect(stderr.write).toBe(errWrite);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  }
+
+  it("a stream around a call that rejects still stops: the output comes back and the spinner timer ends", async () => {
+    vi.useFakeTimers();
+    try {
+      const { output, stderr, screen } = terminal(80, 30);
+      const write = output.write;
       const rt = { events: { on: () => () => {} } } as unknown as Pick<Runtime, "events">;
       const sunk: string[] = [];
-      const failing = streamStages(rt, { output, isTTY: true }, SEAL_STEPS, () => Promise.reject(new Error("the seal call died")), l => sunk.push(l));
+      const failing = streamStages(rt, { output, stderr, isTTY: true }, SEAL_STEPS, () => Promise.reject(new Error("the seal call died")), l => sunk.push(l));
       await expect(failing).rejects.toThrow("the seal call died");
-      expect(console.warn).toBe(warn);
+      expect(output.write).toBe(write);
       const rows = screen.lines().length;
       vi.advanceTimersByTime(500);
       expect(screen.lines().length).toBe(rows);
       expect(sunk).toEqual([]);
     } finally {
-      console.warn = warn;
+      vi.useRealTimers();
+    }
+  });
+
+  for (const cols of [80, 120]) {
+    it(`a warning Node prints to stderr past the stream settles above the block and no step is drawn twice, at ${cols} columns`, () => {
+      vi.useFakeTimers();
+      try {
+        const { output, stderr, screen } = terminal(cols, 40);
+        const sunk: string[] = [];
+        const stream = new StageStream(output, true, undefined, line => sunk.push(line), stderr);
+        stream.start();
+        stream.push(ev("creating", 0, "sandbox from base"));
+        stream.push(ev("deploying-daemon", 5_200, "node v18.20.4"));
+        stream.push(ev("applying-setup", 14_100, "zsh installed as the login shell; shell/oh-my-zsh reinstalled"));
+        stream.push(ev("uploading-files", 30_200, "38 MB"));
+        vi.advanceTimersByTime(100);
+        stderr.write(NODE_WARNING);
+        vi.advanceTimersByTime(100);
+        stream.push(ev("uploading-files", 47_500, "38 MB in 2 parts in 17.3s"));
+        stream.push(ev("installing-harness", 47_500));
+        vi.advanceTimersByTime(100);
+        const lines = screen.lines();
+        expect(count(lines, "Machine created")).toBe(1);
+        expect(count(lines, "Base installed")).toBe(1);
+        expect(count(lines, "Setup applied")).toBe(1);
+        expect(lines[0]).toMatch(/^│  \(node:72935\) MaxListenersExceededWarning: Possible EventTarget memory leak/);
+        expect(lines.findIndex(l => l.startsWith("◇  Machine created"))).toBeGreaterThan(1);
+        expect(count(lines, "Files uploaded")).toBe(1);
+        expect(lines.filter(l => SPINNERS.test(l))).toHaveLength(1);
+        expect(lines.every(l => l.length < cols)).toBe(true);
+        expect(screen.scrolled).toBe(0);
+        expect(sunk).toEqual(NODE_WARNING.trimEnd().split("\n"));
+        stream.stop();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  }
+
+  it("a pane narrowed under the block wraps its rows, and the next redraw still starts at the block's first row", () => {
+    vi.useFakeTimers();
+    try {
+      const { output, screen, resize } = terminal(120, 40);
+      const stream = new StageStream(output, true);
+      stream.start();
+      stream.push(ev("creating", 0, "sandbox from base"));
+      stream.push(ev("deploying-daemon", 5_200, "node v18.20.4"));
+      stream.push(ev("applying-setup", 14_100, "zsh installed as the login shell; shell/oh-my-zsh reinstalled"));
+      stream.push(ev("uploading-files", 30_200, "38 MB"));
+      vi.advanceTimersByTime(100);
+      expect(screen.lines()).toHaveLength(4);
+      resize(70);
+      expect(screen.lines()).toHaveLength(7);
+      vi.advanceTimersByTime(100);
+      let lines = screen.lines();
+      expect(lines).toHaveLength(4);
+      expect(count(lines, "Machine created")).toBe(1);
+      expect(count(lines, "Setup applied")).toBe(1);
+      expect(lines.every(l => l.length < 70)).toBe(true);
+      resize(120);
+      stream.push(ev("installing-harness", 47_500));
+      vi.advanceTimersByTime(100);
+      lines = screen.lines();
+      expect(lines).toHaveLength(5);
+      expect(count(lines, "Machine created")).toBe(1);
+      expect(count(lines, "Files uploaded")).toBe(1);
+      expect(lines.filter(l => SPINNERS.test(l))).toHaveLength(1);
+      expect(screen.scrolled).toBe(0);
+      stream.stop();
+    } finally {
       vi.useRealTimers();
     }
   });

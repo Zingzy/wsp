@@ -122,7 +122,7 @@ describe.runIf(LIVE)("sign-in stage (live)", () => {
       openedHere.push(url);
       return real(url);
     };
-    const io: InitIO = { input, output, isTTY: true, env: {}, open: gatedOpen, signals: new EventEmitter(), exit: () => {} };
+    const io: InitIO = { input, output, stderr: new PassThrough(), isTTY: true, env: {}, open: gatedOpen, signals: new EventEmitter(), exit: () => {} };
 
     const hostLines: string[] = [];
     const notes: string[] = [];

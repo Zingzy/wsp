@@ -6,7 +6,7 @@
 // app on it. Nothing leaves the disk before the confirm, and no question is
 // ever asked on the remote machine.
 import type { Readable, Writable } from "node:stream";
-import { format, styleText } from "node:util";
+import { stripVTControlCharacters, styleText } from "node:util";
 import { APP_DATA_GROUP, LARGE_GROUP, MCP_REMOTE_ID, RUNGS, type LoginChoice, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
 import { describeAge, type BackendPricing } from "@wsp/engine";
 import { MCP_ID_PREFIX } from "@wsp/protocol";
@@ -40,7 +40,7 @@ import {
   tickLoginTools,
   withoutAgentTools,
 } from "./init-recipe.js";
-import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, fmtDuration, plainLine, rowsOf, table, widthOf, wrap } from "./init-layout.js";
+import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, fmtDuration, isTTY, plainLine, rowsOf, table, widthOf, wrap } from "./init-layout.js";
 import { openRunLog, runLogPath } from "./init-log.js";
 import { secretsStage, type SecretOutcome } from "./init-secrets.js";
 import { keptBuilder, stopKeptBuilder, updateRoad } from "./init-upgrade.js";
@@ -53,6 +53,8 @@ import type { HostHandle } from "./server.js";
 export interface InitIO {
   input: Readable;
   output: Writable;
+  /** The other stream on the same screen; while the stages animate its lines settle above the block. */
+  stderr: Writable;
   isTTY: boolean;
   env: Record<string, string | undefined>;
   /** Try to open the URL in a browser; false when nothing could be launched. */
@@ -252,21 +254,26 @@ export function stageLine(glyph: string, label: string, detail: string | undefin
   return `${glyph}  ${head}${text === "" ? "" : `${GUTTER}${dim(text)}`}${gap}${dim(duration)}`.trimEnd();
 }
 
+/** The cells a drawn row takes on screen: its text without the colour codes. */
+const cells = (row: string): number => stripVTControlCharacters(row).length;
+
 /** One line per step, redrawn as frames arrive: a spinner glyph on the current
  * step with its latest detail, the end label once it is done, the tail of
  * details kept under a failed step. Animation only on a terminal, where the
  * block is the stream's alone: every redraw rewinds to its first row and no
- * line is ever wider than the terminal, so the rows it counts are the rows it
- * holds. While it animates it owns console.warn and console.error too, since a
- * line written under the block would push it down a row; those lines settle
- * above the block and go to the sink when there is one. */
+ * line is ever wider than the terminal, so the rows it holds are the rows it
+ * wrote, counted at the width the terminal has now. While it animates it owns
+ * every write to the output and to the stream beside it, since a line written
+ * under the block would push it down a row; those lines settle above the block
+ * and go to the sink when there is one. */
 export class StageStream {
   private frames: StageFrame[] = [];
   private view: StageView;
-  private printed = 0;
+  /** The cell width of each row the block holds on screen, in order. */
+  private drawn: number[] = [];
   private timer: NodeJS.Timeout | undefined;
   private tick = 0;
-  private taken: { warn: typeof console.warn; error: typeof console.error } | undefined;
+  private taken: { stream: Writable; write: Writable["write"] }[] = [];
   private static readonly SPIN = ["◒", "◐", "◓", "◑"];
 
   constructor(
@@ -275,6 +282,8 @@ export class StageStream {
     private readonly words: readonly StageWords[] = PREPARE_STEPS,
     /** Where every line said while the stream ran also goes, the run log once there is one. */
     private readonly sink?: (line: string) => void,
+    /** The other stream on the same screen, whose lines would land under the block: stderr when the block is on stdout. Off a terminal it cannot move the cursor and is left alone. */
+    private readonly aside?: Writable,
   ) {
     this.view = reduceStages([], words);
   }
@@ -289,9 +298,8 @@ export class StageStream {
 
   start(): void {
     if (this.animate) {
-      this.taken = { warn: console.warn, error: console.error };
-      console.warn = (...args: unknown[]) => this.note(format(...args));
-      console.error = (...args: unknown[]) => this.note(format(...args));
+      this.take(this.output);
+      if (this.aside !== undefined && isTTY(this.aside)) this.take(this.aside);
       this.timer = setInterval(() => {
         this.tick += 1;
         this.draw();
@@ -312,7 +320,7 @@ export class StageStream {
 
   /** A line said while the stream runs: it settles above the block, which is drawn again under it. */
   note(text: string): void {
-    const lines = text.split("\n");
+    const lines = text.split("\n").map(plainLine);
     for (const line of lines) this.sink?.(line);
     const width = this.width;
     const said = lines.flatMap(l => (width === undefined ? [l] : wrap(l, width - 3, ""))).map(l => `${dim(S_BAR)}  ${dim(l)}`);
@@ -321,21 +329,39 @@ export class StageStream {
       return;
     }
     const block = this.lines(false, false);
-    this.output.write(`${this.rewind()}${[...said, ...block].join("\n")}\n`);
-    this.printed = block.length;
+    this.emit(`${this.rewind()}${[...said, ...block].join("\n")}\n`);
+    this.drawn = block.map(cells);
   }
 
-  /** Draws the last frame and hands the console back; `stopped` marks the stage in flight as cut off rather than spinning. */
+  /** Draws the last frame and hands the streams back; `stopped` marks the stage in flight as cut off rather than spinning. */
   stop(stopped = false): StageView {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
-    if (this.taken !== undefined) {
-      console.warn = this.taken.warn;
-      console.error = this.taken.error;
-      this.taken = undefined;
-    }
+    for (const t of [...this.taken].reverse()) t.stream.write = t.write;
+    this.taken = [];
     this.draw(true, stopped);
     return this.view;
+  }
+
+  /** Every write to the stream while the block animates becomes a note; a write's own callback still runs. */
+  private take(stream: Writable): void {
+    if (this.taken.some(t => t.stream === stream)) return;
+    const write = stream.write;
+    this.taken.push({ stream, write });
+    stream.write = ((chunk: unknown, encoding?: unknown, callback?: unknown): boolean => {
+      const text = typeof chunk === "string" ? chunk : chunk instanceof Uint8Array ? Buffer.from(chunk).toString() : String(chunk);
+      this.note(text.replace(/\n$/, ""));
+      const done = typeof encoding === "function" ? encoding : callback;
+      if (typeof done === "function") done();
+      return true;
+    }) as Writable["write"];
+  }
+
+  /** The stream's own bytes reach the terminal past the write it took over. */
+  private emit(text: string): void {
+    const own = this.taken.find(t => t.stream === this.output)?.write;
+    if (own === undefined) this.output.write(text);
+    else own.call(this.output, text, "utf8");
   }
 
   private get labelWidth(): number {
@@ -386,15 +412,18 @@ export class StageStream {
 
   /** Back to the block's first row and column, with everything from there cleared. */
   private rewind(): string {
-    return this.printed > 0 ? `\x1b[${this.printed}A\x1b[G\x1b[J` : "";
+    // A terminal narrowed under the block reflows every row wider than it now is onto more rows.
+    const columns = widthOf(this.output, Infinity);
+    const rows = this.drawn.reduce((n, w) => n + Math.max(1, Math.ceil(w / columns)), 0);
+    return rows > 0 ? `\x1b[${rows}A\x1b[G\x1b[J` : "";
   }
 
   private draw(final = false, stopped = false): void {
     if (this.animate) {
       const lines = this.lines(final, stopped);
       // Before the first frame there is no block: a bare newline here would be a row the rewind never counts.
-      if (lines.length > 0) this.output.write(`${this.rewind()}${lines.join("\n")}\n`);
-      this.printed = lines.length;
+      if (lines.length > 0) this.emit(`${this.rewind()}${lines.join("\n")}\n`);
+      this.drawn = lines.map(cells);
       return;
     }
     // Off a terminal every step was announced as it happened; only a failure is left to print.
@@ -1205,7 +1234,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   }
   if (attach === undefined) await stopKeptBuilder(rt, io.output);
 
-  const stream = new StageStream(io.output, io.isTTY, PREPARE_STEPS, runLog.note);
+  const stream = new StageStream(io.output, io.isTTY, PREPARE_STEPS, runLog.note, io.stderr);
   const off = rt.events.on("golden.stage", e => {
     if (e.type === "golden.stage") stream.push({ type: "golden.stage", name: e.name, stage: e.stage, ...(e.detail !== undefined ? { detail: e.detail } : {}) });
   });
@@ -1399,8 +1428,8 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
 }
 
 /** One stage stream around one runtime call; the frames it draws are the golden's, whatever the call. */
-export async function streamStages(rt: Pick<Runtime, "events">, io: Pick<InitIO, "output" | "isTTY">, words: readonly StageWords[], run: () => Promise<unknown>, sink: (line: string) => void): Promise<StageView> {
-  const stream = new StageStream(io.output, io.isTTY, words, sink);
+export async function streamStages(rt: Pick<Runtime, "events">, io: Pick<InitIO, "output" | "stderr" | "isTTY">, words: readonly StageWords[], run: () => Promise<unknown>, sink: (line: string) => void): Promise<StageView> {
+  const stream = new StageStream(io.output, io.isTTY, words, sink, io.stderr);
   const off = rt.events.on("golden.stage", e => {
     if (e.type === "golden.stage") stream.push({ type: "golden.stage", name: e.name, stage: e.stage, ...(e.detail !== undefined ? { detail: e.detail } : {}) });
   });
