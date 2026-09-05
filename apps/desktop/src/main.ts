@@ -5,6 +5,7 @@ import { currentHome, type CliIO } from "@wsp/host";
 import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
 import { fontDirs, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
 import { locateHost, openHost, statePathIn, type HostSession, type Located } from "./host-lifecycle.js";
+import { fromAppPage } from "./origin.js";
 import type { Retry } from "./preload.js";
 import { checkSetup } from "./setup.js";
 
@@ -41,7 +42,11 @@ let session: HostSession | undefined;
 // Read once per run: a font installed while the app is open is seen after a restart.
 let fontIndex: Promise<FontFile[]> | undefined;
 const fonts = (): Promise<FontFile[]> => (fontIndex ??= indexFonts(fontDirs(process.platform, homedir(), process.env)));
-ipcMain.handle("fonts:local", (_event, family: unknown) => localFontFaces(typeof family === "string" ? family : "", fonts));
+// Only the host's own page may read the computer's fonts: the setup page and anything else the window shows are refused.
+ipcMain.handle("fonts:local", (event, family: unknown) => {
+  if (session === undefined || !fromAppPage(event.senderFrame?.url, session.url)) throw new Error("fonts:local: not the app's page");
+  return localFontFaces(typeof family === "string" ? family : "", fonts);
+});
 
 function locate(): Promise<Located> {
   const env = process.env["WSP_HOME"];
@@ -80,6 +85,13 @@ async function showApp(located: Located): Promise<boolean> {
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//.test(url)) void shell.openExternal(url);
     return { action: "deny" };
+  });
+  // The window stays on the host's page, the only one the preload's bridge answers; a link away from it opens in the default browser.
+  const appUrl = session.url;
+  win.webContents.on("will-navigate", (event, url) => {
+    if (fromAppPage(url, appUrl)) return;
+    event.preventDefault();
+    if (/^https?:\/\//.test(url)) void shell.openExternal(url);
   });
   await win.loadURL(session.url);
   return true;

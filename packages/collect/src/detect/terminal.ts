@@ -42,9 +42,10 @@ export function itermFont(xml: string): string | undefined {
   return usable(font?.replace(/\s+[\d.]+$/, ""));
 }
 
-/** WezTerm: the family handed to wezterm.font or first in font_with_fallback; unset, WezTerm draws with its bundled JetBrains Mono. */
+/** WezTerm: the family handed to wezterm.font or first in font_with_fallback, Lua comments skipped; unset, WezTerm draws with its bundled JetBrains Mono. */
 export function weztermFont(lua: string): string | undefined {
-  const m = /\bfont(?:_with_fallback)?\s*\(?\s*\{?\s*(?:\{\s*)?(?:family\s*=\s*)?(["'])([^"']+)\1/.exec(lua);
+  const live = lua.replace(/--\[\[[\s\S]*?\]\]/g, "").replace(/--.*$/gm, "");
+  const m = /\bfont(?:_with_fallback)?\s*\(?\s*\{?\s*(?:\{\s*)?(?:family\s*=\s*)?(["'])([^"']+)\1/.exec(live);
   return usable(m?.[2]) ?? BUILT_IN;
 }
 
@@ -73,8 +74,12 @@ interface Terminal {
   name: string;
   /** TERM_PROGRAM values that name this terminal. */
   program: RegExp;
-  /** The family this terminal draws with; `own` when TERM_PROGRAM names it, so one with no config still answers with its default. */
-  font(host: Host, own: boolean): Promise<string | undefined>;
+  /** The family the terminal ships with and draws with until a config says otherwise. */
+  builtIn?: string;
+  /** The family the terminal's config names; a config naming none answers the built-in default; no config answers nothing. */
+  configured(host: Host): Promise<string | undefined>;
+  /** Whether the terminal is on this computer, for a terminal with no config to answer its built-in default. */
+  installed?(host: Host): Promise<boolean>;
 }
 
 async function firstText(host: Host, paths: readonly string[]): Promise<string | undefined> {
@@ -94,17 +99,18 @@ const TERMINALS: readonly Terminal[] = [
     key: "ghostty",
     name: "Ghostty",
     program: /ghostty/i,
-    async font(host, own) {
+    builtIn: BUILT_IN,
+    async configured(host) {
       const text = await firstText(host, GHOSTTY_CONFIGS);
-      if (text !== undefined) return ghosttyFont(text) ?? BUILT_IN;
-      return own || (host.platform === "darwin" && (await exists(host, "/Applications/Ghostty.app"))) ? BUILT_IN : undefined;
+      return text === undefined ? undefined : (ghosttyFont(text) ?? BUILT_IN);
     },
+    installed: host => (host.platform === "darwin" ? exists(host, "/Applications/Ghostty.app") : Promise.resolve(false)),
   },
   {
     key: "iterm2",
     name: "iTerm2",
     program: /iterm/i,
-    async font(host) {
+    async configured(host) {
       // The plist is binary on disk; defaults renders the live preferences as XML.
       if (host.platform !== "darwin" || !(await exists(host, "~/Library/Preferences/com.googlecode.iterm2.plist"))) return undefined;
       const xml = await host.exec.run("defaults", ["export", "com.googlecode.iterm2", "-"]);
@@ -115,17 +121,17 @@ const TERMINALS: readonly Terminal[] = [
     key: "wezterm",
     name: "WezTerm",
     program: /wezterm/i,
-    async font(host, own) {
+    builtIn: BUILT_IN,
+    async configured(host) {
       const lua = await firstText(host, ["~/.wezterm.lua", "~/.config/wezterm/wezterm.lua"]);
-      if (lua !== undefined) return weztermFont(lua);
-      return own ? BUILT_IN : undefined;
+      return lua === undefined ? undefined : weztermFont(lua);
     },
   },
   {
     key: "kitty",
     name: "kitty",
     program: /kitty/i,
-    async font(host) {
+    async configured(host) {
       const conf = await firstText(host, ["~/.config/kitty/kitty.conf"]);
       return conf === undefined ? undefined : kittyFont(conf);
     },
@@ -134,7 +140,7 @@ const TERMINALS: readonly Terminal[] = [
     key: "alacritty",
     name: "Alacritty",
     program: /alacritty/i,
-    async font(host) {
+    async configured(host) {
       const text = await firstText(host, ["~/.config/alacritty/alacritty.toml", "~/.alacritty.toml", "~/.config/alacritty/alacritty.yml", "~/.alacritty.yml"]);
       return text === undefined ? undefined : alacrittyFont(text);
     },
@@ -143,15 +149,24 @@ const TERMINALS: readonly Terminal[] = [
 
 export const TERMINAL_FONT_ID = "shell/terminal-font";
 
+const fontRow = (terminal: Terminal, font: string): ManifestEntry => ({ rung: "shell", id: TERMINAL_FONT_ID, label: `terminal font: ${font} (${terminal.name})`, paths: [], bytes: 0, default: "bring", font });
+
 /** One row naming the family the person's terminal draws with: the terminal the collector runs in first (its
- * default when it has no config), else the first terminal whose config names a usable font. No row when none does. */
+ * built-in default when it has no config), else the first terminal whose config names a usable font, else an
+ * installed terminal's built-in default. No row when none answers. */
 export async function detectTerminalFont(host: Host): Promise<ManifestEntry[]> {
   const own = TERMINALS.filter(t => host.terminal !== undefined && t.program.test(host.terminal));
-  const order = [...own, ...TERMINALS.filter(t => !own.includes(t))];
-  for (const terminal of order) {
-    const font = await terminal.font(host, own.includes(terminal));
-    if (font === undefined) continue;
-    return [{ rung: "shell", id: TERMINAL_FONT_ID, label: `terminal font: ${font} (${terminal.name})`, paths: [], bytes: 0, default: "bring", font }];
+  const others = TERMINALS.filter(t => !own.includes(t));
+  for (const terminal of own) {
+    const font = (await terminal.configured(host)) ?? terminal.builtIn;
+    if (font !== undefined) return [fontRow(terminal, font)];
+  }
+  for (const terminal of others) {
+    const font = await terminal.configured(host);
+    if (font !== undefined) return [fontRow(terminal, font)];
+  }
+  for (const terminal of others) {
+    if (terminal.builtIn !== undefined && (await terminal.installed?.(host)) === true) return [fontRow(terminal, terminal.builtIn)];
   }
   return [];
 }

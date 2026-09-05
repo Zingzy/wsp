@@ -24,7 +24,7 @@ const browserPath = ((): string | undefined => {
   }
 })();
 const hasBrowser = browserPath !== undefined && existsSync(browserPath);
-const RENDER = process.env["WSP_RENDER"] === "1";
+const skipped = process.env["WSP_RENDER"] !== "1" ? "WSP_RENDER is not 1" : !hasBrowser ? "Playwright's Chromium is not installed" : undefined;
 
 const freePort = (): Promise<number> =>
   new Promise((resolve, reject) => {
@@ -54,7 +54,10 @@ const NOTDEF = "\u{10FFFD}";
 // (Menlo and SF Mono carry the powerline arrows themselves, so those would prove nothing here).
 const ICONS = ["\uF07B", "\uE5FF", "\u{F0219}", "\uF418"];
 
-describe.skipIf(!RENDER || !hasBrowser)("Nerd Font glyphs through the pane in Chromium", () => {
+// The default reporter prints nothing for a skipped suite but its arrow; this line is what a gate log shows.
+if (skipped !== undefined) console.info(`glyph render test skipped: ${skipped}`);
+
+describe.skipIf(skipped !== undefined)("Nerd Font glyphs through the pane in Chromium", () => {
   let vite: ChildProcess | undefined;
   let browser: Browser | undefined;
   let page: Page | undefined;

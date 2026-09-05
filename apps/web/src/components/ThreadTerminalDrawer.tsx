@@ -510,15 +510,19 @@ export default function ThreadTerminalDrawer({
   const isPanel = mode === "panel";
   const [fontOpen, setFontOpen] = useState(false);
   const toggleFont = useCallback(() => setFontOpen(open => !open), []);
-  const closeFont = useCallback(() => setFontOpen(false), []);
   const refusalRef = useRef<string | null>(null);
   refusalRef.current = terminalInputRefusal(pane);
   const [refused, setRefused] = useState<string | null>(null);
   const inputRefusal = useCallback(() => refusalRef.current, []);
   const onInputRefused = useCallback((reason: string) => setRefused(reason), []);
-  // Bumped when the overlay lifts with focus, so the active surface asks for it back the way a focus request does.
+  // Bumped when the overlay lifts with focus or the font card closes on Escape, so the active surface asks for
+  // focus back the way a focus request does.
   const [lifted, setLifted] = useState(0);
   const onOverlayLift = useCallback(() => setLifted(n => n + 1), []);
+  const closeFont = useCallback(() => {
+    setFontOpen(false);
+    setLifted(n => n + 1);
+  }, []);
   useEffect(() => {
     if (pane.kind === "live") setRefused(null);
   }, [pane.kind]);

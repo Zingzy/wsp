@@ -46,6 +46,26 @@ describe("registerLocalFonts", () => {
     expect(localFonts).toHaveBeenCalledTimes(1);
   });
 
+  it("a face the browser refuses loses only itself; the Nerd Font variant after it still lands", async () => {
+    class RefusingFontFace extends FakeFontFace {
+      readonly family: string;
+      constructor(family: string, source: BufferSource | string, descriptors?: FontFaceDescriptors) {
+        super(family, source, descriptors);
+        this.family = family;
+      }
+      override async load(): Promise<this> {
+        if (this.family === "Iosevka") throw new DOMException("refused by the sanitizer", "NetworkError");
+        return this;
+      }
+    }
+    vi.stubGlobal("FontFace", RefusingFontFace);
+    const localFonts = vi.fn(async () => [face("Iosevka", 400), face("Iosevka", 700), face("Iosevka Nerd Font Mono", 400), face("Iosevka Nerd Font Mono", 700)]);
+    await expect(registerLocalFonts("Iosevka", { localFonts })).resolves.toEqual(["Iosevka Nerd Font Mono"]);
+    expect(made).toHaveLength(4);
+    expect(added).toHaveLength(2);
+    expect(localFontFamilies("Iosevka")).toEqual(["Iosevka Nerd Font Mono"]);
+  });
+
   it("a browser tab, an empty family or a shell that fails all register nothing and answer with no families", async () => {
     await expect(registerLocalFonts("Menlo", undefined)).resolves.toEqual([]);
     await expect(registerLocalFonts(undefined, { localFonts: async () => [face("X", 400)] })).resolves.toEqual([]);

@@ -3,7 +3,7 @@
 // per cell, how many pixels the text painted and a hash of where, so a test can
 // tell a drawn icon from the notdef box, from nothing, and from another face's.
 import type { GhosttyTheme } from "../../src/terminal/ghostty/core";
-import { GhosttyTerminalSurface } from "../../src/terminal/ghostty/surface";
+import { CONTENT_PADDING, GhosttyTerminalSurface } from "../../src/terminal/ghostty/surface";
 
 export interface CellSignature {
   lit: number;
@@ -37,7 +37,7 @@ async function drawGlyph(text: string, family?: string): Promise<CellSignature> 
   const { width, height } = s.canvas;
   const data = context.getImageData(0, 0, width, height).data;
   const dpr = window.devicePixelRatio;
-  const padding = 4 * dpr;
+  const padding = CONTENT_PADDING * dpr;
   const cellWidth = (width - 2 * padding) / s.cols;
   const cellHeight = (height - 2 * padding) / s.rows;
   const cell: CellSignature = { lit: 0, hash: 0 };

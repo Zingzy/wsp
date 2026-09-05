@@ -39,6 +39,8 @@ export interface RecipeEntry {
   secrets?: readonly string[];
   /** Shell rows: the name of the login shell the computer runs, when the collector could read it. */
   login?: string;
+  /** Shell rows: the family the person's terminal draws with; the app's pane reads it and nothing on the machine does. */
+  font?: string;
 }
 
 /** What the planner's injected stat says about one laptop path. A link reports
@@ -272,12 +274,13 @@ const sorted = <T extends object>(rows: T[]): T[] => rows.sort((a, b) => (JSON.s
 
 /** What a golden is built from: the ticked ids with their login answers and
  * tool pins, the computer's login shell once when a shell row is ticked, and
- * every planned path with its digest, volatile ones marked. Labels, row order
- * and disk stats do not enter, so a file rewritten with the same bytes reads the same. */
+ * every planned path with its digest, volatile ones marked. Labels, row order,
+ * disk stats and the terminal font row do not enter, so a file rewritten with
+ * the same bytes reads the same and a font tick changes no golden. */
 export function recipeDigest(entries: readonly RecipeEntry[], files: readonly DigestedFile[] = []): RecipeDigest {
   const login = entries.find(e => ticked(e) && e.rung === "shell" && e.login !== undefined)?.login;
   return {
-    ticks: sorted(entries.filter(ticked).map(e => ({ id: e.id, ...(e.choice !== undefined ? { choice: e.choice } : {}), ...(e.version !== undefined ? { version: e.version } : {}) }))),
+    ticks: sorted(entries.filter(e => ticked(e) && e.font === undefined).map(e => ({ id: e.id, ...(e.choice !== undefined ? { choice: e.choice } : {}), ...(e.version !== undefined ? { version: e.version } : {}) }))),
     ...(login !== undefined ? { login } : {}),
     files: sorted(files.map(f => ({ id: f.id, path: f.path, dest: f.dest, digest: f.digest, ...(f.volatile === true ? { volatile: true } : {}) }))),
   };

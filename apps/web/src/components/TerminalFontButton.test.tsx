@@ -51,6 +51,7 @@ describe("terminal font button and card", () => {
     await open();
     const input = screen.getByRole("textbox", { name: "Terminal font" }) as HTMLInputElement;
     expect(input.value).toBe("Iosevka");
+    expect(input.placeholder).toBe("SF Mono");
     expect(screen.getByText(/Empty draws with the default font\./)).toBeTruthy();
     await act(async () => {
       fireEvent.focus(input);

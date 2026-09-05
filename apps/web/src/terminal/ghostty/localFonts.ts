@@ -30,14 +30,15 @@ export function registerLocalFonts(
   const localFonts = bridge.localFonts;
   const load = (async (): Promise<string[]> => {
     const families: string[] = [];
-    try {
-      for (const face of await localFonts(family)) {
+    const faces = await localFonts(family).catch(() => []);
+    for (const face of faces) {
+      try {
         const fontFace = new FontFace(face.family, face.data, { weight: String(face.weight), style: face.style });
         document.fonts.add(await fontFace.load());
         if (!families.includes(face.family)) families.push(face.family);
+      } catch {
+        // A face the browser refuses (its sanitizer, a restricted system face) loses only itself.
       }
-    } catch {
-      // Whatever registered before the failure still serves; the chain's own names cover the rest.
     }
     registered.set(family, families);
     return families;

@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
+import type { BootPayload } from "@wsp/protocol";
 import { describeAge, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
 import { describeStorage } from "./storage.js";
@@ -68,13 +69,6 @@ const CONTENT_TYPES: Record<string, string> = {
   ".wasm": "application/wasm",
 };
 
-interface Boot {
-  wsPort: number;
-  token: string;
-  /** The family the person's terminal draws with, when the saved recipe ticks its row; the app's terminal pane defaults to it. */
-  terminalFont?: string;
-}
-
 /** The ticked shell row's font from the saved recipe; nothing when the file is missing, unreadable or names none. */
 function terminalFontOf(recipePath: string | undefined): string | undefined {
   if (recipePath === undefined) return undefined;
@@ -87,12 +81,18 @@ function terminalFontOf(recipePath: string | undefined): string | undefined {
   }
 }
 
-function loadPage(webDir: string, boot: Boot): string {
+/** JSON fit for an inline script: the font family comes from a config file, so `<` and the line terminators JSON allows
+ * but a script does not are written as escapes, and no value can end the script or the page. */
+function inlineJson(value: unknown): string {
+  return JSON.stringify(value).replace(/[<>&\u2028\u2029]/g, c => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
+}
+
+function loadPage(webDir: string, boot: BootPayload): string {
   const path = join(webDir, "index.html");
   if (!existsSync(path)) throw new Error(`web app not built: ${path} is missing (pnpm --filter @wsp/web build)`);
   const html = readFileSync(path, "utf8");
   if (!BOOT_SCRIPT.test(html)) throw new Error(`${path} has no window.__WSP__ boot line to replace`);
-  return html.replace(BOOT_SCRIPT, `<script>window.__WSP__ = ${JSON.stringify(boot)};</script>`);
+  return html.replace(BOOT_SCRIPT, `<script>window.__WSP__ = ${inlineJson(boot)};</script>`);
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {

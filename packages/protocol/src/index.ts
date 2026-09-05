@@ -318,6 +318,14 @@ export interface LocalFontFace {
   data: ArrayBuffer;
 }
 
+/** What the host writes into the page's one inline script as window.__WSP__ before serving it. */
+export interface BootPayload {
+  wsPort: number;
+  token: string;
+  /** The family the person's terminal draws with, when the saved recipe ticks its row; the terminal pane defaults to it. */
+  terminalFont?: string;
+}
+
 /** What the desktop shell's preload puts on window.wsp; a browser tab has none of it. */
 export interface DesktopBridge {
   /** The installed faces for a family and its Nerd Font variants, from this computer's font directories. */

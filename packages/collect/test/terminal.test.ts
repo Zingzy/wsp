@@ -62,6 +62,9 @@ describe("terminal font parsers", () => {
     ['config.font = wezterm.font_with_fallback({ "Victor Mono", "Symbols Nerd Font Mono" })\n', "Victor Mono"],
     ['config.font = wezterm.font_with_fallback { { family = "Recursive Mono", weight = "Medium" }, "Noto Color Emoji" }\n', "Recursive Mono"],
     ["config.font_size = 14\n", "JetBrains Mono"],
+    ['-- config.font = wezterm.font("Old")\nconfig.font = wezterm.font("Fira Code")\n', "Fira Code"],
+    ['--[[\nconfig.font = wezterm.font("Old")\n]]\nconfig.font = wezterm.font("Fira Code") -- was wezterm.font("Older")\n', "Fira Code"],
+    ['-- config.font = wezterm.font("Old")\n', "JetBrains Mono"],
   ])("wezterm: %j", (text, family) => {
     expect(weztermFont(text)).toBe(family);
   });
@@ -102,6 +105,17 @@ describe("terminal font row", () => {
     const iterm = { files: { "~/Library/Preferences/com.googlecode.iterm2.plist": 4000 }, exec: { "defaults export com.googlecode.iterm2 -": ITERM_PLIST } };
     expect(await detectTerminalFont(fakeHost({ ...iterm, terminal: "ghostty" }))).toEqual(jetbrains);
     expect(await detectTerminalFont(fakeHost({ ...iterm, terminal: "WezTerm" }))).toEqual([row("JetBrains Mono", "terminal font: JetBrains Mono (WezTerm)")]);
+  });
+
+  it("with no running terminal known, a config that names a font beats an installed terminal's default", async () => {
+    const ghosttyApp = { "/Applications/Ghostty.app/": 5000 };
+    const iterm = { files: { ...ghosttyApp, "~/Library/Preferences/com.googlecode.iterm2.plist": 4000 }, exec: { "defaults export com.googlecode.iterm2 -": ITERM_PLIST } };
+    expect(await detectTerminalFont(fakeHost(iterm))).toEqual([row("JetBrainsMonoNF-Regular", "terminal font: JetBrainsMonoNF-Regular (iTerm2)")]);
+    const kitty = fakeHost({ files: { ...ghosttyApp, "~/.config/kitty/kitty.conf": "font_family Fira Code\n" } });
+    expect(await detectTerminalFont(kitty)).toEqual([row("Fira Code", "terminal font: Fira Code (kitty)")]);
+    // A Ghostty config, even one naming no font, says Ghostty is in use.
+    const configured = fakeHost({ files: { ...ghosttyApp, "~/.config/ghostty/config": "font-size = 16\n", "~/.config/kitty/kitty.conf": "font_family Fira Code\n" } });
+    expect(await detectTerminalFont(configured)).toEqual([row("JetBrains Mono", "terminal font: JetBrains Mono (Ghostty)")]);
   });
 
   it("reads Ghostty's macOS config location and prefers the one under ~/.config", async () => {

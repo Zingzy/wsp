@@ -7,11 +7,14 @@ import { Type } from "lucide-react";
 import { useId } from "react";
 import { useCommitOnBlur } from "../hooks/useCommitOnBlur";
 import { useTerminalFont } from "../terminal/fontSetting";
+import { DEFAULT_TERMINAL_TEXT_FACES } from "../terminal/ghostty/fontChain";
 import { cn } from "../lib/utils";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 
 export const TERMINAL_FONT_LABEL = "Terminal font";
+/** The first face the pane asks for when nothing is chosen or detected, unquoted. */
+const DEFAULT_FACE = DEFAULT_TERMINAL_TEXT_FACES.split(",")[0]!.trim().replace(/^"(.*)"$/, "$1");
 
 export function TerminalFontButton({ className, open, onToggle }: { className: string; open: boolean; onToggle: () => void }) {
   return (
@@ -34,7 +37,7 @@ export function TerminalFontCard({ className, onClose }: { className?: string; o
       }}
     >
       <Label htmlFor={id}>{TERMINAL_FONT_LABEL}</Label>
-      <Input id={id} nativeInput size="compact" placeholder={detected ?? "SF Mono"} autoComplete="off" spellCheck={false} autoFocus {...field} />
+      <Input id={id} nativeInput size="compact" placeholder={detected ?? DEFAULT_FACE} autoComplete="off" spellCheck={false} autoFocus {...field} />
       <p className="text-xs text-muted-foreground">A font installed on this computer. {whenEmpty} Icons a face lacks come from a bundled symbols font.</p>
     </div>
   );
