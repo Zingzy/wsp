@@ -81,6 +81,7 @@ describe("stoppedSentence", () => {
     ["holder that exited", base, ":8412 stopped listening at 12:04, held by python3 -m http.server 8412 (pid 53479), which exited"],
     ["holder still running", { ...base, exited: false }, ":8412 stopped listening at 12:04, held by python3 -m http.server 8412 (pid 53479), which is still running"],
     ["comm when the argv is unknown", { ...base, command: null }, ":8412 stopped listening at 12:04, held by python3 (pid 53479), which exited"],
+    ["pid when neither comm nor argv is known", { ...base, process: null, command: null }, ":8412 stopped listening at 12:04, held by pid 53479, which exited"],
     ["moved to another port", { ...base, movedTo: 8413 }, ":8412 stopped listening at 12:04, held by python3 -m http.server 8412 (pid 53479), which exited, now on :8413"],
   ])("%s", (_name, stopped, sentence) => {
     expect(stoppedSentence(8412, stopped, clock)).toBe(sentence);

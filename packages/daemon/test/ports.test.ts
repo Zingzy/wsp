@@ -99,6 +99,18 @@ describe("procNetTcpSource against a fake proc root", () => {
     ]);
   });
 
+  it("reads at most 512 bytes of cmdline and ends a cut argv with an ellipsis, so a long argv stays off the wire", async () => {
+    const long = fakeProcRoot();
+    writeFileSync(join(long, "456", "cmdline"), ["node", "-e", "x".repeat(4096), ""].join("\0"));
+    try {
+      const rows = await procNetTcpSource(long)();
+      expect(rows[1]).toEqual({ port: 3000, pid: 456, inode: 45700, uid: 1000, command: `node -e ${"x".repeat(504)}…`, loopback: true });
+      expect(rows[1]!.command).toHaveLength(513);
+    } finally {
+      rmSync(long, { recursive: true, force: true });
+    }
+  });
+
   it("port.open carries process when the row has one", async () => {
     // Seed with nothing listening so the fixture's rows are changes, not the first poll's baseline.
     let source = async (): Promise<ListeningPort[]> => [];

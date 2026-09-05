@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EventUnion, WorkspaceView } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
+import { MOVED_WINDOW_MS } from "../src/adapt/ports.js";
 import { resetBrowsers } from "../src/browser/model.js";
 import { REACH_REASK_FLOOR_MS, REACH_REFRESH_WITH_MS_LEFT } from "../src/browser/reach.js";
 import { resetBrowserTabs, useBrowserTabs } from "../src/browser/tabs.js";
@@ -251,9 +252,25 @@ describe("framing a port", () => {
     expect(frame(8412)).toBe(first);
   });
 
-  it("adds where the same process came back when it opens another port within a minute", async () => {
+  it("a long argv is cut to one line in the slot, the full sentence in its title, and the frame stays put", async () => {
+    const { emit } = await setup();
+    emit(open(WS, 8412, 53479, "node"));
+    fireEvent.click(serverCard(8412));
+    const first = await screen.findByTitle(":8412");
+    const command = `node -e ${"x".repeat(4096)}`;
+    emit(close(WS, 8412, { pid: 53479, process: "node", command, exited: true, at: "2026-09-05T12:04:00.000Z" }));
+    const slot = screen.getByText(/^:8412 stopped listening/);
+    expect(slot.classList.contains("truncate")).toBe(true);
+    expect(slot.title).toBe(slot.textContent);
+    expect(slot.title).toContain(command);
+    expect(slot.nextElementSibling).toBe(first);
+    expect(frame(8412)).toBe(first);
+  });
+
+  it("adds where the same process came back when it opens another port within a minute, and not after it", async () => {
     const { emit } = await setup();
     emit(open(WS, 8412, 53479, "python3"));
+    emit(open(WS, 9000, 700, "ruby"));
     fireEvent.click(serverCard(8412));
     await screen.findByTitle(":8412");
     vi.useFakeTimers();
@@ -262,6 +279,16 @@ describe("framing a port", () => {
     emit(open(WS, 8413, 60000, "python3"));
     expect(screen.getByText(/^:8412 stopped listening/).textContent).toMatch(/, which exited, now on :8413$/);
     expect(frame(8412).getAttribute("src")).toBe(PUBLIC(8412));
+
+    // The window is measured on the model's clock, which the fake timers drive.
+    emit(close(WS, 9000, { pid: 700, process: "ruby", exited: true, at: "2026-09-05T12:05:00.000Z" }));
+    vi.advanceTimersByTime(MOVED_WINDOW_MS + 1);
+    emit(open(WS, 9001, 701, "ruby"));
+    act(() => useRightPanelStore.getState().openBrowser(WS, null));
+    act(() => address().focus());
+    fireEvent.change(address(), { target: { value: "9000" } });
+    fireEvent.keyDown(address(), { key: "Enter" });
+    expect(screen.getByText(/^:9000 stopped listening/).textContent).toMatch(/, which exited$/);
   });
 
   it("when the port listens again after a close, the banner goes, the frame remounts and the route is probed anew", async () => {

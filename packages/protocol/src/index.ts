@@ -344,7 +344,7 @@ export const PortOpenEvent = z.object({
 const portCloseDetail = {
   pid: z.number().optional(),
   process: z.string().optional(),
-  /** The holder's argv joined by spaces, from /proc/<pid>/cmdline. */
+  /** The holder's argv joined by spaces, from /proc/<pid>/cmdline; the daemon reads at most 512 bytes of it and a cut argv ends with an ellipsis. */
   command: z.string().optional(),
   /** Whether the holder's pid was gone when the close was seen; absent without a pid. */
   exited: z.boolean().optional(),

@@ -101,9 +101,10 @@ export function stoppedSentence(port: number, stopped: StoppedPort | undefined, 
   if (stopped === undefined) return out;
   if (stopped.at !== null) out += ` at ${clock(stopped.at)}`;
   const holder = stopped.command ?? stopped.process;
-  if (holder !== null) {
-    out += `, held by ${holder}`;
-    if (stopped.pid !== null) out += ` (pid ${stopped.pid})`;
+  const pid = stopped.pid !== null ? `pid ${stopped.pid}` : null;
+  const who = holder !== null ? (pid !== null ? `${holder} (${pid})` : holder) : pid;
+  if (who !== null) {
+    out += `, held by ${who}`;
     if (stopped.exited === true) out += ", which exited";
     else if (stopped.exited === false) out += ", which is still running";
   }

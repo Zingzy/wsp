@@ -44,6 +44,7 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
   const shownUrl = realUrl !== null ? elideToken(realUrl) : port !== null ? loopbackUrl(port) : "";
   const listening = port === null || !portsSeeded || ports.some(p => p.port === port);
   const stopped = useStoppedPort(workspaceId, port);
+  const sentence = listening ? "" : stoppedSentence(port, stopped, clockLabel);
   const forwarded = useForwarded(workspaceId, port);
   const zoom = tab?.zoom ?? 1;
   const framed = realUrl !== null && (refusal === null || refusal.keepsFrame);
@@ -141,8 +142,8 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
         ) : (
           <>
             {!listening ? (
-              <div className="shrink-0 border-b border-border/60 bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
-                {stoppedSentence(port, stopped, clockLabel)}
+              <div title={sentence} className="shrink-0 truncate border-b border-border/60 bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
+                {sentence}
               </div>
             ) : null}
             {refusal !== null && refusal.keepsFrame ? (

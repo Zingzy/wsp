@@ -16,7 +16,8 @@ export class WorkspacePorts {
   #fns = new Set<() => void>();
   #now: () => number;
 
-  constructor(now: () => number = Date.now) {
+  /** The clock is read on each event, not captured, so a test's fake timers reach the moved window. */
+  constructor(now: () => number = () => Date.now()) {
     this.#now = now;
   }
 
