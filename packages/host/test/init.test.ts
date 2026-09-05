@@ -95,7 +95,7 @@ function scriptedLink(state: { signedIn: boolean; hold: boolean; missing: boolea
 function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string, string>; columns?: number; signedIn?: boolean; hold?: boolean; missing?: boolean } = {}): Fake {
   const input = new PassThrough();
   const output = new PassThrough();
-  const stderr = new PassThrough();
+  const stderr = Object.assign(new PassThrough(), { isTTY: over.tty ?? true });
   if (over.columns !== undefined) Object.assign(output, { columns: over.columns });
   const chunks: string[] = [];
   output.on("data", (c: Buffer) => chunks.push(c.toString()));

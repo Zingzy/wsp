@@ -3,7 +3,7 @@
 // a screen that honours the cursor moves the stream writes, and the rows left
 // on it are what the person sees. No row may hold two lines, no line may wrap,
 // and a step only ever shows once.
-import { PassThrough } from "node:stream";
+import { PassThrough, Writable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { ALREADY_APPLIED } from "@wsp/protocol";
 import type { Runtime } from "@wsp/runtime";
@@ -343,6 +343,87 @@ describe("stage stream on a terminal", () => {
       vi.useRealTimers();
     }
   });
+
+  it("one stream given as both output and aside is taken once, and stop hands back the write it started with", () => {
+    vi.useFakeTimers();
+    try {
+      const { output, screen } = terminal(80, 30);
+      const original = output.write;
+      // Every assignment to write is recorded, so a second take shows up as a count before stop can draw through it.
+      const assigned: unknown[] = [];
+      let current = original;
+      Object.defineProperty(output, "write", {
+        configurable: true,
+        get: () => current,
+        set: (w: typeof original) => {
+          assigned.push(w);
+          current = w;
+        },
+      });
+      const sunk: string[] = [];
+      const stream = new StageStream(output, true, undefined, line => sunk.push(line), output);
+      stream.start();
+      expect(assigned).toHaveLength(1);
+      expect(output.write).not.toBe(original);
+      stream.push(ev("creating", 0, "sandbox from base"));
+      vi.advanceTimersByTime(100);
+      output.write("a line from outside\n");
+      vi.advanceTimersByTime(100);
+      stream.push(ev("deploying-daemon", 1_000));
+      stream.stop();
+      expect(assigned).toHaveLength(2);
+      expect(output.write).toBe(original);
+      const lines = screen.lines();
+      expect(lines[0]).toBe("│  a line from outside");
+      expect(count(lines, "Machine created")).toBe(1);
+      expect(lines).toHaveLength(3);
+      expect(sunk).toEqual(["a line from outside"]);
+      output.write("after stop\n");
+      expect(screen.lines().at(-1)).toBe("after stop");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  for (const [where, aside] of [
+    ["/dev/null", () => ({ stderr: new Writable({ write: (_c, _e, cb) => cb() }), sent: undefined })],
+    ["a pipe", () => {
+      const stderr = new PassThrough();
+      const sent: string[] = [];
+      stderr.on("data", (c: Buffer) => sent.push(c.toString()));
+      return { stderr, sent };
+    }],
+  ] as const) {
+    it(`a stderr sent to ${where} is not a terminal, so its bytes stay where the shell sent them and never reach the block`, () => {
+      vi.useFakeTimers();
+      try {
+        const { output, screen } = terminal(80, 30);
+        const { stderr, sent } = aside();
+        const errWrite = stderr.write;
+        const sunk: string[] = [];
+        const stream = new StageStream(output, true, undefined, line => sunk.push(line), stderr);
+        stream.start();
+        expect(stderr.write).toBe(errWrite);
+        stream.push(ev("creating", 0, "sandbox from base"));
+        vi.advanceTimersByTime(100);
+        const raw = "heartbeat for builder b1 not written: \x1b[31mETIMEDOUT\x1b[0m\r\n";
+        stderr.write(raw);
+        vi.advanceTimersByTime(100);
+        stream.push(ev("deploying-daemon", 1_000));
+        vi.advanceTimersByTime(100);
+        const lines = screen.lines();
+        expect(lines).toHaveLength(2);
+        expect(lines[0]).toMatch(/^◇  Machine created\s+sandbox from base\s+1\.0s$/);
+        expect(count(lines, "heartbeat")).toBe(0);
+        expect(sunk).toEqual([]);
+        if (sent !== undefined) expect(sent.join("")).toBe(raw);
+        stream.stop();
+        expect(stderr.write).toBe(errWrite);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  }
 
   it("a stream around a call that rejects still stops: the output comes back and the spinner timer ends", async () => {
     vi.useFakeTimers();

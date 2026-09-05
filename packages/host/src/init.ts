@@ -40,7 +40,7 @@ import {
   tickLoginTools,
   withoutAgentTools,
 } from "./init-recipe.js";
-import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, fmtDuration, plainLine, rowsOf, table, widthOf, wrap } from "./init-layout.js";
+import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, fmtDuration, isTTY, plainLine, rowsOf, table, widthOf, wrap } from "./init-layout.js";
 import { openRunLog, runLogPath } from "./init-log.js";
 import { secretsStage, type SecretOutcome } from "./init-secrets.js";
 import { keptBuilder, stopKeptBuilder, updateRoad } from "./init-upgrade.js";
@@ -282,7 +282,7 @@ export class StageStream {
     private readonly words: readonly StageWords[] = PREPARE_STEPS,
     /** Where every line said while the stream ran also goes, the run log once there is one. */
     private readonly sink?: (line: string) => void,
-    /** The other stream on the same screen, whose lines would land under the block: stderr when the block is on stdout. */
+    /** The other stream on the same screen, whose lines would land under the block: stderr when the block is on stdout. Off a terminal it cannot move the cursor and is left alone. */
     private readonly aside?: Writable,
   ) {
     this.view = reduceStages([], words);
@@ -298,7 +298,8 @@ export class StageStream {
 
   start(): void {
     if (this.animate) {
-      for (const stream of this.aside === undefined ? [this.output] : [this.output, this.aside]) this.take(stream);
+      this.take(this.output);
+      if (this.aside !== undefined && isTTY(this.aside)) this.take(this.aside);
       this.timer = setInterval(() => {
         this.tick += 1;
         this.draw();
@@ -336,7 +337,7 @@ export class StageStream {
   stop(stopped = false): StageView {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
-    for (const t of this.taken) t.stream.write = t.write;
+    for (const t of [...this.taken].reverse()) t.stream.write = t.write;
     this.taken = [];
     this.draw(true, stopped);
     return this.view;
@@ -344,6 +345,7 @@ export class StageStream {
 
   /** Every write to the stream while the block animates becomes a note; a write's own callback still runs. */
   private take(stream: Writable): void {
+    if (this.taken.some(t => t.stream === stream)) return;
     const write = stream.write;
     this.taken.push({ stream, write });
     stream.write = ((chunk: unknown, encoding?: unknown, callback?: unknown): boolean => {
