@@ -10,7 +10,8 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
-import { DAEMON_PORT, NODE_RELEASES, TOOLS_PATH, type Machine } from "@wsp/engine";
+import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, NODE_RELEASES } from "@wsp/catalog";
+import { DAEMON_PORT, TOOLS_PATH, type Machine } from "@wsp/engine";
 import { writeDaemonTokenScript, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
 import type { CliIO } from "./cli.js";
@@ -363,12 +364,6 @@ class Timings {
 export function isReserved(labels: Record<string, string>): boolean {
   return "poc" in labels;
 }
-/** Harness install and its proof; the scripted doctor build and the init recipe share them. */
-export const GOLDEN_SETUP = "curl -fsSL https://claude.ai/install.sh | bash";
-export const GOLDEN_SMOKE = "claude --version";
-
-export const CONFIG_DIR = "/root/.claude-cfg";
-
 /** Envs every guest needs: a PATH that reaches the daemon's node, the harness
  * install, and what the golden import's tools stage puts on the machine. */
 export const GUEST_ENVS: Record<string, string> = {
@@ -385,7 +380,7 @@ export const GUEST_ENVS: Record<string, string> = {
 export function claudeEnvs(anthropicKey?: string, golden?: Pick<GoldenVersion, "browserShim">): Record<string, string> {
   return {
     ...(anthropicKey !== undefined ? { ANTHROPIC_API_KEY: anthropicKey } : {}),
-    CLAUDE_CONFIG_DIR: CONFIG_DIR,
+    CLAUDE_CONFIG_DIR,
     ...GUEST_ENVS,
     ...(golden?.browserShim === true ? { BROWSER: OPEN_SHIM_PATH } : {}),
   };

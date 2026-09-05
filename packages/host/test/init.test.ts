@@ -16,7 +16,7 @@ import { SNAPSHOT_STORAGE, type BackendPricing, type BrewFormula, type BrewTable
 import { ALREADY_APPLIED } from "@wsp/protocol";
 import { DAEMON_TOKEN_SET, createRuntime, memoryStore, type GoldenRecipe, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
-import { GOLDEN_SETUP } from "../src/doctor.js";
+import { GOLDEN_SETUP } from "@wsp/catalog";
 import { loadManifest, recipePath } from "../src/init-recipe.js";
 import { CARD_FRAME, card, widthOf } from "../src/init-layout.js";
 import { editorsIntro, everythingItems, fmtBytes, reduceStages, runInit, selectItem, shellItems, stageLine, summaryNote, toolsItems, type HostHooks, type InitIO, type InitOptions } from "../src/init.js";
@@ -25,7 +25,7 @@ import { startCallbackRelay } from "../src/relay.js";
 import type { ConnectOptions, DaemonSocket } from "../src/doctor.js";
 import { appendCommand, readCommand } from "../src/init-secrets.js";
 import { noteOutcomes, statusLine } from "../src/init-signin.js";
-import { CLAUDE_STATUS } from "../src/signin-table.js";
+import { CLAUDE_STATUS, CLOUDFLARED_STATUS } from "../src/signin-table.js";
 import { fakePtyLink, type FakePtyLink } from "./fake-pty-link.js";
 import { EVERYTHING, FIXTURE } from "./init-fixture.js";
 import { guestAnswer, stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
@@ -1151,7 +1151,7 @@ describe("wsp init, the sign-in stage", () => {
     expect(result.logins?.[0]).toEqual({ id: "logins/codex", label: "Codex login", state: "skipped", command: "codex login", exit: 127, note: "codex is not on the machine" });
   });
 
-  it("a login with no status command that ended with a non-zero exit is offered a retry or a skip; a clean exit stays not verified", async () => {
+  it("a login whose status is a shell check over its file is proved or refused by that line, and refused gets the retry offer", async () => {
     // A login whose command is not coming starts at skip and is never staged, so the tools row that brings cloudflared is here.
     const CLOUDFLARED_MANIFEST: Manifest = {
       entries: [
@@ -1160,7 +1160,7 @@ describe("wsp init, the sign-in stage", () => {
         { rung: "logins", id: "logins/cloudflared", label: "cloudflared login", group: "CLI logins", paths: ["~/.cloudflared/cert.pem"], bytes: 300, default: "skip" },
       ],
     };
-    const f = fake({ hold: true, collect: async () => CLOUDFLARED_MANIFEST });
+    const f = fake({ signedIn: false, hold: true, collect: async () => CLOUDFLARED_MANIFEST });
     const run = runInit(f.opts, f.io);
     await f.until("Identity");
     await f.press(KEY.enter);
@@ -1173,19 +1173,14 @@ describe("wsp init, the sign-in stage", () => {
     await f.until(/cloudflared login\s+cloudflared tunnel login\n/);
     await f.until("Press Enter to open");
     await f.press("\x03");
-    await f.until("cloudflared login: not verified (no status command known for cloudflared; exit 130)");
+    await f.until(`cloudflared login: not signed in (${CLOUDFLARED_STATUS} says not signed in)`);
+    expect(f.link.ptys.at(-1)!.writes[0]).toBe(`${statusLine(CLOUDFLARED_STATUS)}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`);
     await f.until("cloudflared login  r retry   s skip");
-    await f.press("r");
-    await f.until(/Press Enter to open[\s\S]*Press Enter to open/);
-    // A clean exit with no status command is not verified but nothing to retry.
-    f.link.exit(f.link.ptys.at(-1)!, 0);
-    await f.until(/not verified \(no status command known for cloudflared\)\n/);
+    await f.press("s");
     await f.until(SEAL_Q(1));
-    expect(f.text().split("r retry")).toHaveLength(2);
     await f.press(KEY.enter);
     const result = await run;
-    expect(result.logins?.map(l => [l.state, l.exit])).toEqual([["not-verified", 0]]);
-    expect(f.text()).toMatch(/Sign-ins\n│\s+cloudflared login\s+not verified\n/);
+    expect(result.logins?.map(l => [l.state, l.exit, l.note])).toEqual([["skipped", 130, "skipped by you"]]);
   });
 
   it("an unreadable golden-import.json is said so when the logins and secrets are written into a fresh one", () => {

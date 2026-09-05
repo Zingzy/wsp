@@ -36,7 +36,8 @@ import {
   secretPath,
   withApiKeyHelper,
 } from "@wsp/engine";
-import { CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, tarPackCommand } from "./doctor.js";
+import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
+import { tarPackCommand } from "./doctor.js";
 import { type AliasGuard, GUARD_PATH, GUARD_SOURCE_COMMENT, GUARD_SOURCE_LINE, aliasGuardFor } from "./init-aliases.js";
 
 const execFileAsync = promisify(execFile);
@@ -490,7 +491,7 @@ export function digestOf(source: string, excludes: readonly string[], home: stri
 }
 
 /** The guest's Claude config dir, relative to its home; the laptop's ~/.claude lands there. */
-const CLAUDE_REL = CONFIG_DIR.replace(/^\/root\//, "");
+const CLAUDE_REL = CLAUDE_CONFIG_DIR.replace(/^\/root\//, "");
 
 /** Where a laptop config lands on the guest, by the same rewrite the files plan applies. */
 function guestPath(tildePath: string): string {
