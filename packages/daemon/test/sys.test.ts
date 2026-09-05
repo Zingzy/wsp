@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SysSample } from "@wsp/protocol";
 import { cpuPercent, parseLoadavg, parseMeminfo, parseProcStat, SysSampler, type SysReadings } from "../src/sys.js";
 
@@ -43,6 +43,8 @@ const readings = (cpu: { idle: number; total: number }): SysReadings => ({
 });
 
 describe("SysSampler", () => {
+  afterEach(() => vi.useRealTimers());
+
   it("emits nothing on the first poll and a sample with the cpu delta on the next", async () => {
     const seq = [readings(parseProcStat(statA)), readings(parseProcStat(statB))];
     let i = 0;
@@ -60,6 +62,8 @@ describe("SysSampler", () => {
   });
 
   it("one sampler serves every subscriber: it runs from the first and stops with the last, and a stale unsubscribe is a no-op", async () => {
+    // Fake timers: under load a real 5 ms sleep can be armed after the 10 ms tick it has to beat.
+    vi.useFakeTimers();
     let reads = 0;
     const sampler = new SysSampler(
       async () => {
@@ -74,7 +78,7 @@ describe("SysSampler", () => {
     const unA = sampler.subscribe(s => a.push(s));
     expect(sampler.running).toBe(true);
     const unB = sampler.subscribe(s => b.push(s));
-    await new Promise(r => setTimeout(r, 80));
+    await vi.advanceTimersByTimeAsync(80);
     expect(a.length).toBeGreaterThan(1);
     expect(b.length).toBeGreaterThan(1);
     // Two subscribers, one stream: each sample reached both.
@@ -85,13 +89,15 @@ describe("SysSampler", () => {
     unB();
     expect(sampler.running).toBe(false);
     const readsAtStop = reads;
-    await new Promise(r => setTimeout(r, 40));
+    await vi.advanceTimersByTimeAsync(40);
     expect(reads).toBe(readsAtStop);
     // A restart begins with a fresh baseline: the first sample after it is not measured against the old counters.
     const c: SysSample[] = [];
     const unC = sampler.subscribe(s => c.push(s));
-    await new Promise(r => setTimeout(r, 5));
+    await vi.advanceTimersByTimeAsync(5);
     expect(c).toEqual([]);
+    await vi.advanceTimersByTimeAsync(5);
+    expect(c).toHaveLength(1);
     unC();
   });
 
