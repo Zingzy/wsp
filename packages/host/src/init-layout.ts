@@ -15,6 +15,13 @@ export const GUTTER = "  ";
 export const S_BAR_FOCUS = unicode ? "┃" : "|";
 export const S_BAR_FOCUS_END = unicode ? "┗" : "+";
 
+export function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
 /** The text cut to fit width, ending in an ellipsis when anything was dropped. */
 export function ellipsize(text: string, width: number): string {
   if (width <= 0) return "";

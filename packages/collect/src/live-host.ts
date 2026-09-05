@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { execFile } from "node:child_process";
-import { access, constants, readdir, readFile, stat } from "node:fs/promises";
-import { homedir } from "node:os";
+import { spawn } from "node:child_process";
+import { access, constants, mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
-import type { Host, HostExec, HostFs, Platform, Stat } from "./host.js";
-
-const execFileP = promisify(execFile);
+import type { Host, HostExec, HostFs, Platform, RunOptions, Stat } from "./host.js";
 
 // Plugin checkouts and dependency trees live under config dirs (nvim's lazy
 // lock is fine, its .git clones are not); their size would swamp the summary
@@ -78,17 +75,79 @@ async function onPath(bin: string): Promise<boolean> {
   return false;
 }
 
+const MAX_OUTPUT = 64 * 1024 * 1024;
+/** A background job the child left holding its stdout would otherwise keep the run open after the child exited. */
+const CLOSE_GRACE_MS = 1000;
+
 export const nodeExec: HostExec = {
   which: onPath,
-  async run(cmd, args) {
+  async run(cmd, args, opts = {}) {
+    let home: string | undefined;
+    if (opts.emptyHome === true) {
+      try {
+        home = await mkdtemp(join(tmpdir(), "wsp-home-"));
+      } catch {
+        return undefined;
+      }
+    }
+    const env = { ...process.env, ...opts.env, ...(home === undefined ? {} : { HOME: home, ZDOTDIR: home }) };
     try {
-      const { stdout } = await execFileP(cmd, [...args], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 120_000 });
-      return stdout;
-    } catch {
-      return undefined;
+      return await spawnRun(cmd, args, env, opts);
+    } finally {
+      if (home !== undefined) await rm(home, { recursive: true, force: true }).catch(() => undefined);
     }
   },
 };
+
+function spawnRun(cmd: string, args: readonly string[], env: NodeJS.ProcessEnv, opts: RunOptions): Promise<string | undefined> {
+  return new Promise(resolve => {
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    let failed = false;
+    let settled = false;
+    let grace: NodeJS.Timeout | undefined;
+    // The child leads its own process group so a job an rc file left behind dies with it, not just the shell.
+    const child = spawn(cmd, [...args], { stdio: ["ignore", "pipe", "pipe"], env, detached: true });
+    const killGroup = (signal: NodeJS.Signals): void => {
+      if (child.pid === undefined) return;
+      try {
+        process.kill(-child.pid, signal);
+      } catch {
+        return;
+      }
+    };
+    const budget = setTimeout(() => {
+      failed = true;
+      killGroup(opts.killSignal ?? "SIGTERM");
+    }, opts.timeoutMs ?? 120_000);
+    const settle = (code: number | null, signal: NodeJS.Signals | null): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(budget);
+      if (grace !== undefined) clearTimeout(grace);
+      killGroup("SIGKILL");
+      child.stdout.destroy();
+      child.stderr.destroy();
+      resolve(!failed && code === 0 && signal === null ? Buffer.concat(chunks).toString("utf8") : undefined);
+    };
+    child.stdout.on("data", (b: Buffer) => {
+      bytes += b.length;
+      if (bytes > MAX_OUTPUT) {
+        failed = true;
+        killGroup("SIGKILL");
+      } else chunks.push(b);
+    });
+    child.stderr.resume();
+    child.on("error", () => {
+      failed = true;
+      settle(null, null);
+    });
+    child.on("exit", (code, signal) => {
+      grace = setTimeout(() => settle(code, signal), CLOSE_GRACE_MS);
+    });
+    child.on("close", settle);
+  });
+}
 
 export function platformOf(p: NodeJS.Platform): Platform | undefined {
   return p === "darwin" || p === "linux" ? p : undefined;

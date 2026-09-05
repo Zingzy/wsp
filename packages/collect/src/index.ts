@@ -6,6 +6,7 @@ export { nodeHost } from "./live-host.js";
 export type { Detector } from "./detect/common.js";
 export { detectIdentity } from "./detect/identity.js";
 export { detectShell } from "./detect/shell.js";
+export { LIST_BUDGET_MS, LIST_SCRIPTS, type ShellDef, parseShell, programOf, shellAliases, words } from "./detect/aliases.js";
 export { TERMINAL_FONT_ID, alacrittyFont, detectTerminalFont, ghosttyFont, itermFont, kittyFont, weztermFont } from "./detect/terminal.js";
 export { detectEditors, parseExtensionList } from "./detect/editors.js";
 export { detectToolchains } from "./detect/toolchains.js";
@@ -27,7 +28,7 @@ export { type Dir, type Role, type RolesOptions, roleByName, roles } from "./eve
 export { type Pair, type Pairing, candidates, pair } from "./everything/pairing.js";
 export { type Credential, type CredentialScan, type CredentialsOptions, type Signal, GITLEAKS_MAX_ROOTS, MAX_BYTES, credentials, keysSignal, modeSignal, nameSignal, parseGitleaks, pemSignal, topLevelKeys } from "./everything/credentials.js";
 export { type KeychainItem, type KeychainOptions, keychain, parseKeychainDump, serviceOwner } from "./everything/keychain.js";
-export { FISH_CONF_D, RC_NAMES, RC_PATHS, type RcScan, type ShellRcOptions, isRcPath, isSecretName, rcFiles, shellRc, sourcedPaths, stripExports } from "./everything/shell-rc.js";
+export { FISH_CONF_D, RC_NAMES, RC_PATHS, type RcScan, type ShellRcOptions, isRcPath, isSecretName, rcFiles, shellRc, simpleCommands, sourcedPaths, stripExports } from "./everything/shell-rc.js";
 export { MANAGER_HOMES, type ManagerHome, type ManagerScan, type ScanOptions, managedName, managedRc, managerHomes, scanManagers } from "./everything/managers.js";
 export { LARGE_BYTES, LARGE_FILES, isLarge, sizeGate } from "./everything/gate.js";
 export { SPLIT_ENTRIES, SPLIT_MS, type Tree, WALK_ENTRIES, WALK_MS } from "./everything/walk.js";

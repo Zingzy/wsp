@@ -19,7 +19,7 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { GOLDEN_SETUP } from "../src/doctor.js";
 import { loadManifest, recipePath } from "../src/init-recipe.js";
 import { CARD_FRAME, card, widthOf } from "../src/init-layout.js";
-import { editorsIntro, everythingItems, fmtBytes, reduceStages, runInit, selectItem, stageLine, summaryNote, toolsItems, type HostHooks, type InitIO, type InitOptions } from "../src/init.js";
+import { editorsIntro, everythingItems, fmtBytes, reduceStages, runInit, selectItem, shellItems, stageLine, summaryNote, toolsItems, type HostHooks, type InitIO, type InitOptions } from "../src/init.js";
 import type { HostHandle } from "../src/server.js";
 import { startCallbackRelay } from "../src/relay.js";
 import type { ConnectOptions, DaemonSocket } from "../src/doctor.js";
@@ -3926,5 +3926,20 @@ describe("wsp init, a login whose command is not coming", () => {
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     const summary = f.text().slice(f.text().indexOf("Summary"), f.text().indexOf("Recipe saved"));
     expect(unwrapped(summary)).toContain("docker-desktop from Kubernetes release (checksum checked against the first install)");
+  });
+});
+
+describe("shellItems", () => {
+  const zshrc: ManifestEntry = { rung: "shell", id: "shell/zshrc", label: "~/.zshrc", paths: ["~/.zshrc"], bytes: 3000, default: "bring", aliases: [{ name: "ls", runs: "eza", kind: "alias", tool: "tools/brew/eza" }, { name: "cat", runs: "bat", kind: "alias", tool: "tools/brew/bat" }] };
+  const starship: ManifestEntry = { rung: "shell", id: "shell/starship", label: "starship prompt", paths: ["~/.config/starship.toml"], bytes: 900, default: "bring" };
+  const eza: ManifestEntry = { rung: "tools", id: "tools/brew/eza", label: "eza", group: "Homebrew", paths: [], bytes: 0, default: "skip", linux: "yes" };
+  const bat: ManifestEntry = { rung: "tools", id: "tools/brew/bat", label: "bat", group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "yes" };
+
+  it("a shell row's detail names the aliases whose tool starts unticked, after its own two lines; the tools screen's own ticks win once it was visited", () => {
+    const fresh = shellItems([zshrc, starship], [zshrc, starship, eza, bat], undefined, new Map());
+    expect(fresh[0]!.detail).toEqual(["~/.zshrc", "2.9 KB, brought by default", "alias ls points at eza, which is not coming (unticked, tick to bring)"]);
+    expect(fresh[1]!.detail).toEqual(["~/.config/starship.toml", "900 B, brought by default"]);
+    const visited = shellItems([zshrc], [zshrc, starship, eza, bat], new Set(["tools/brew/eza"]), new Map());
+    expect(visited[0]!.detail).toEqual(["~/.zshrc", "2.9 KB, brought by default", "alias cat points at bat, which is not coming (unticked, tick to bring)"]);
   });
 });

@@ -40,7 +40,8 @@ import {
   tickLoginTools,
   withoutAgentTools,
 } from "./init-recipe.js";
-import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, fmtDuration, isTTY, plainLine, rowsOf, table, widthOf, wrap } from "./init-layout.js";
+import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, fmtBytes, fmtDuration, isTTY, plainLine, rowsOf, table, widthOf, wrap } from "./init-layout.js";
+import { aliasLines } from "./init-aliases.js";
 import { openRunLog, runLogPath } from "./init-log.js";
 import { secretsStage, type SecretOutcome } from "./init-secrets.js";
 import { keptBuilder, stopKeptBuilder, updateRoad } from "./init-upgrade.js";
@@ -119,12 +120,7 @@ const DEFAULT_RETRY = { waitMs: 30_000, attempts: 20 };
 const SWEEP = "the next wsp or wsp init on this computer stops it, or stop it from the Solari console.";
 const dim = (s: string): string => styleText("dim", s);
 
-export function fmtBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(n / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}
+export { fmtBytes };
 
 // --- stage stream ----------------------------------------------------------
 
@@ -604,7 +600,7 @@ function installHint(e: ManifestEntry, brew: BrewTable): string | undefined {
   return e.id.startsWith("tools/brew-tap/") || (e.rung === "agents" && !hasInstaller(e)) ? undefined : assumedHint(e);
 }
 
-export function selectItem(e: ManifestEntry, hintFor?: (width: number) => string, brew: BrewTable = new Map()): SelectItem {
+export function selectItem(e: ManifestEntry, hintFor?: (width: number) => string, brew: BrewTable = new Map(), more: readonly string[] = []): SelectItem {
   const minus = e.excludes !== undefined && e.excludes.length > 0 ? ` minus ${e.excludes.join(", ")}` : "";
   const where = e.paths.length > 0 ? `${e.paths.join(", ")}${minus}` : whereNothing(e);
   const lock = e.required ? "on" : !isTickable(e) ? "off" : undefined;
@@ -619,12 +615,21 @@ export function selectItem(e: ManifestEntry, hintFor?: (width: number) => string
     ...(hintFor !== undefined ? { hintFor } : hint !== undefined ? { hint } : {}),
     ...(tone !== undefined ? { tone } : {}),
     ...(e.group !== undefined ? { group: e.group } : {}),
-    detail: [where, detailWhy(e, lock, brew), ...(e.consent === true && lock === undefined ? [CONSENT_WHY] : [])],
+    detail: [where, detailWhy(e, lock, brew), ...(e.consent === true && lock === undefined ? [CONSENT_WHY] : []), ...more],
     ...(lock !== undefined ? { lock } : {}),
     ...(hasChoices(e) ? { choices: e.rung === "logins" ? LOGIN_CHOICES : CONSENT_CHOICES } : {}),
     ...(e.group === LARGE_GROUP || e.group === APP_DATA_GROUP ? { own: true } : {}),
     ...(parent !== "" ? { prefix: parent } : {}),
   };
+}
+
+/** Lines the shell row's detail pane gives to aliases before folding the rest into one. */
+const ALIAS_LINES = 3;
+
+/** The Shell screen's rows: each with the aliases whose tool is not coming under it, judged on the tools screen's own ticks when the person has been there, else on the defaults. */
+export function shellItems(entries: readonly ManifestEntry[], all: readonly ManifestEntry[], toolTicks: ReadonlySet<string> | undefined, brew: BrewTable): SelectItem[] {
+  const ticks = toolTicks ?? new Set(all.filter(e => e.rung === "tools" && initialTicks(e)).map(e => e.id));
+  return entries.map(e => selectItem(e, undefined, brew, aliasLines(e, all, ticks, brew, ALIAS_LINES)));
 }
 
 const TOOLCHAIN_ROW = "tools/homebrew-toolchain";
@@ -894,16 +899,18 @@ async function tickRungs(manifest: Manifest, io: InitIO, brew: BrewTable): Promi
     const coming = new Set(earlier.map(e => e.id));
     const fresh = defaultAnswers(manifest, coming);
     const groups = new Map((manifest.groups ?? []).filter(g => g.rung === rung).map(g => [g.group, g]));
+    const items = rung === "everything" ? everythingItems(entries) : rung === "tools" ? toolsItems(entries, brew) : rung === "shell" ? shellItems(entries, manifest.entries, answers.get("tools")?.ticks, brew) : rung === "logins" ? loginItems(entries, manifest, coming, brew) : entries.map(e => selectItem(e, undefined, brew));
     const result = await rungSelect({
       title: rung === "everything" ? everythingTitle(entries) : RUNG_TITLE[rung],
       counter,
-      items: rung === "everything" ? everythingItems(entries) : rung === "tools" ? toolsItems(entries, brew) : rung === "logins" ? loginItems(entries, manifest, coming, brew) : entries.map(e => selectItem(e, undefined, brew)),
+      items,
       initial: prior?.ticks ?? fresh.ticks,
       initialChoices: prior?.choices ?? fresh.choices,
       groupHint: rung === "everything" ? everythingGroupHint(entries) : g => groups.get(g)?.hint,
       groupNote: g => groups.get(g)?.note,
       ...(rung === "everything" ? { footer: everythingFooter(entries), detailLines: 3, folded: [APP_DATA_GROUP] } : rung === "tools" || rung === "agents" ? diskScreen(earlier, entries, brew, rung) : {}),
       ...(rung === "editors" ? { intro: editorsIntro(entries) } : {}),
+      ...(rung === "shell" ? { detailLines: Math.max(...items.map(i => i.detail.length)) } : {}),
       input: io.input,
       output: io.output,
     });

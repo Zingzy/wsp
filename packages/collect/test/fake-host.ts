@@ -8,7 +8,7 @@ export interface FakeLaptop {
   /** `~/.zshrc: 3000` is a file of 3000 bytes; a string is its text; `~/.config/nvim/: 120000` is a dir. */
   files?: Record<string, number | string>;
   which?: string[];
-  /** Keyed by `cmd arg arg`; a value is stdout of a successful run. */
+  /** Keyed by `cmd arg arg`, led by `NAME=value` for each variable the run adds, an empty home as HOME and ZDOTDIR at EMPTY_HOME; a value is stdout of a successful run. */
   exec?: Record<string, string>;
   /** SHELL of the process running the collector. */
   shell?: string;
@@ -17,6 +17,7 @@ export interface FakeLaptop {
 }
 
 const HOME = "/Users/dev";
+export const EMPTY_HOME = "/tmp/wsp-home-empty";
 
 export function fakeHost(laptop: FakeLaptop = {}): Host & { calls: string[] } {
   const files = new Map<string, number | string>();
@@ -63,9 +64,10 @@ export function fakeHost(laptop: FakeLaptop = {}): Host & { calls: string[] } {
     async which(bin) {
       return which.has(bin);
     },
-    async run(cmd, args) {
-      const key = [cmd, ...args].join(" ");
-      calls.push(`run ${key}`);
+    async run(cmd, args, opts = {}) {
+      const env = { ...opts.env, ...(opts.emptyHome === true ? { HOME: EMPTY_HOME, ZDOTDIR: EMPTY_HOME } : {}) };
+      const key = [...Object.entries(env).map(([k, v]) => `${k}=${v}`), cmd, ...args].join(" ");
+      calls.push(`run ${key}${opts.timeoutMs === undefined ? "" : ` (${opts.timeoutMs} ms, ${opts.killSignal ?? "SIGTERM"})`}`);
       return laptop.exec?.[key];
     },
   };
