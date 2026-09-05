@@ -409,6 +409,7 @@ describe("golden import stages", () => {
         if (hit) return typeof hit[1] === "function" ? hit[1]() : hit[1];
         if (cmd === FREE_KB_CMD) return { exitCode: 0, stdout: `${typeof free === "function" ? free() : free}\n`, stderr: "" };
         if (cmd === "echo ok") return REACH_OK;
+        if (cmd.includes("echo WSP_CTX")) return { exitCode: 0, stdout: "WSP_CTX\nWSP_CTX_END\n", stderr: "" };
         return ok;
       },
     });
@@ -448,6 +449,31 @@ describe("golden import stages", () => {
     ]);
   });
 
+  it("writes the machine context after the stages: the plan's own skips in its facts, one hook per installed agent, a claimed hook named in the result", async () => {
+    const probe = "WSP_CTX\nKERNEL 6.6.30\nDISK 20466256 11720704\nOVERLAY no\nAGENT claude\nAGENT codex\nAGENT pi\nCONFLICT pi\nSHELL zsh\nWSP_CTX_END\n";
+    const { backend, cmds, fetch } = backendFor([["echo WSP_CTX", { exitCode: 0, stdout: probe, stderr: "" }]]);
+    const { stages, onStage } = stageRecorder();
+    const results: ImportResult[] = [];
+    const skippedTools = [{ id: "tools/brew-cask/raycast", label: "Raycast", note: "macOS app, no Linux build" }];
+    await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ skippedTools, onResult: r => void results.push(r) }) });
+    expect(results[0]!.tools[0]).toEqual({ id: "tools/brew-cask/raycast", label: "Raycast", outcome: "skipped", note: "macOS app, no Linux build" });
+    expect(results[0]!.context).toEqual([
+      { agent: "claude", outcome: "written", path: "/etc/claude-code/CLAUDE.md", skill: "/etc/claude-code/.claude/skills/wsp-machine/SKILL.md" },
+      { agent: "codex", outcome: "written", path: "/etc/codex/requirements.toml", skill: "/etc/codex/skills/wsp-machine/SKILL.md" },
+      { agent: "pi", outcome: "fallback", path: "/root/.pi/agent/extensions/wsp-machine.ts", note: "~/.pi/agent/APPEND_SYSTEM.md already exists", skill: "/root/.pi/agent/skills/wsp-machine/SKILL.md" },
+    ]);
+    expect(stages.at(-2)).toBe("installing-mcp:machine context: written for Claude Code, Codex; Pi by its fallback (~/.pi/agent/APPEND_SYSTEM.md already exists)");
+    const write = cmds.findIndex(c => c.includes("'/etc/wsp/machine-context.md'"));
+    expect(write).toBeGreaterThan(cmds.findIndex(c => c.includes("echo WSP_CTX")));
+    expect(cmds.indexOf("echo ok")).toBeGreaterThan(write);
+    const skill = Buffer.from(/printf '%s' '([A-Za-z0-9+/=]+)' \| base64 --decode > '\/etc\/wsp\/skills\/wsp-machine\/SKILL\.md'/.exec(cmds[write]!)![1]!, "base64").toString("utf8");
+    expect(skill).toContain("- This machine is a golden builder, not a workspace yet.");
+    expect(skill).toContain("- Golden: not sealed yet.");
+    expect(skill).toContain("- Tools that did not install: Raycast (macOS app, no Linux build).");
+    expect(cmds[write]).toContain("'/etc/wsp/machine-context.json'");
+    expect(cmds[write]).not.toContain("APPEND_SYSTEM.md");
+  });
+
   it("an archive over one upload part says how many parts it went up in", async () => {
     const { backend, puts, fetch } = backendFor();
     const stages: string[] = [];
@@ -480,6 +506,7 @@ describe("golden import stages", () => {
       "installing-tools:Homebrew (1/3)", "installing-tools:gh (2/3)", "installing-tools:bun@1.4.0 (3/3)",
       "installing-tools:3 installed",
       "installing-mcp:none configured",
+      "installing-mcp:machine context: written; no agent on the machine",
       "ready",
     ]);
     expect(puts).toEqual([Buffer.from("tgz-bytes")]);
@@ -516,6 +543,7 @@ describe("golden import stages", () => {
         { id: "agents/claude", name: "Claude Code", outcome: "installed", ms: expect.any(Number) },
         { id: "agents/codex", name: "Codex", outcome: "installed", ms: expect.any(Number) },
       ],
+      context: [],
     }]);
   });
 
@@ -777,7 +805,7 @@ describe("golden import stages", () => {
     expect(k.stages.slice(k.stages.indexOf("installing-harness"))).toEqual([
       "installing-harness", "installing-harness:Node for Pi", "installing-harness:Node v22.1.0 kept; Pi run on it",
       "installing-harness:Codex (1/2)", "installing-harness:Pi (2/2)", "installing-harness:Codex, Pi installed",
-      "installing-tools:Homebrew (1/3)", "installing-tools:gh (2/3)", "installing-tools:bun@1.4.0 (3/3)", "installing-tools:3 installed", "installing-mcp:none configured", "ready",
+      "installing-tools:Homebrew (1/3)", "installing-tools:gh (2/3)", "installing-tools:bun@1.4.0 (3/3)", "installing-tools:3 installed", "installing-mcp:none configured", "installing-mcp:machine context: written; no agent on the machine", "ready",
     ]);
     expect(kept.cmds.indexOf(kept.cmds.find(c => c.includes("node-step"))!)).toBeLessThan(kept.cmds.indexOf(kept.cmds.find(c => c.includes("codex-install"))!));
     expect(b1.setupSha).toBe(createHash("sha256").update("true\nnode-step\ncodex-install\npi-install").digest("hex"));
@@ -1008,11 +1036,12 @@ describe("golden import stages", () => {
       "installing-harness:no agent ticked",
       "installing-tools:nothing ticked",
       "installing-mcp:none configured",
+      "installing-mcp:machine context: written; no agent on the machine",
       "ready",
     ]);
     expect(puts).toEqual([]);
-    // The harness ran, so the machine is asked whether it still answers before the hand-off.
-    expect(cmds).toEqual(["true", "echo ok"]);
+    // The harness ran, so the context is written and the machine is asked whether it still answers before the hand-off.
+    expect(cmds.map(c => (c.includes("echo WSP_CTX") ? "probe" : c.includes("'/etc/wsp/machine-context.md'") ? "write" : c))).toEqual(["true", "probe", "write", "echo ok"]);
     expect(builder.import?.smoke).toBe("true");
 
     let result: ImportResult | undefined;
@@ -1059,7 +1088,8 @@ describe("golden import stages", () => {
     await applyGoldenImport(builder.machine, { import: importOf({ mcp, onResult: r => void results.push(r) }), setup: "true", ledger: builder.import, fetch, onStage });
     expect(results).toEqual([]);
     expect(stages.slice(0, 5)).toEqual(["applying-setup:already applied", "uploading-files:already applied", "installing-harness:already applied", "installing-tools:already applied", "installing-mcp:Claude Code 1"]);
-    expect(stages.at(-1)).toBe("installing-mcp:github skipped (the config edit did not run (exit 0))");
+    expect(stages.at(-2)).toBe("installing-mcp:github skipped (the config edit did not run (exit 0))");
+    expect(stages.at(-1)).toBe("installing-mcp:machine context: written; no agent on the machine");
     expect(cmds.length).toBeGreaterThan(before);
     expect(cmds.at(-1)).toBe("echo ok");
   });
@@ -1215,6 +1245,7 @@ describe("golden import stages", () => {
         "installing-tools:jq (1/1)",
         "installing-tools:1 installed",
         "installing-mcp:none configured",
+        "installing-mcp:machine context: written; no agent on the machine",
       ]);
       const removals = cmds.slice(0, 3);
       expect(removals.every(c => /\nsetsid bash -c '.*' &\np=\$!\n/s.test(c) && c.includes("while [ $t -lt 600 ]"))).toBe(true);
@@ -1334,6 +1365,7 @@ describe("golden import stages", () => {
           { what: "tool", id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", outcome: "removed" },
           { what: "editor", id: "editors/vim", label: "vim", outcome: "removed" },
         ],
+        context: [],
       });
       const v3 = await sealGolden(b3, { backend, smoke: "true", manifest: v2.manifest });
       expect(v3.version.version).toBe(3);

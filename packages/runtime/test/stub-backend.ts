@@ -57,7 +57,8 @@ export function stubBackend(): StubBackend {
     machines,
     snapshots,
     snapshotBytes: 8_000_000_000,
-    execImpl: () => ({ exitCode: 0, stdout: "", stderr: "" }),
+    // The machine context probe answers with its markers and nothing found, as a bare guest would.
+    execImpl: (_m, cmd) => ({ exitCode: 0, stdout: cmd.includes("echo WSP_CTX") ? "WSP_CTX\nWSP_CTX_END\n" : "", stderr: "" }),
     async create(spec: MachineSpec): Promise<Machine> {
       const m: StubMachine = {
         id: `m${++seq}`,

@@ -1587,6 +1587,60 @@ describe("runtime golden rollback", () => {
   });
 });
 
+describe("runtime machine context", () => {
+  const probe = "WSP_CTX\nKERNEL 6.6.30\nDISK 20466256 11720704\nAGENT claude\nSHELL zsh\nWSP_CTX_END\n";
+  const writes = (m: { execLog: string[] }) => m.execLog.filter(c => c.includes("'/etc/wsp/machine-context.md'"));
+  const docOf = (write: string) => Buffer.from(/printf '%s' '([A-Za-z0-9+/=]+)' \| base64 --decode > '\/etc\/wsp\/skills\/wsp-machine\/SKILL\.md'/.exec(write)![1]!, "base64").toString("utf8");
+  const version = { version: 4, snapshotId: "snap_g", baseTemplate: "base", setupSha: "abcdef0123456789", createdAt: "2026-09-05T10:00:00.000Z", smoke: { cmd: "true", exitCode: 0 } };
+
+  it("refreshes the document on the fresh fork with the workspace's name and its golden version", async () => {
+    const backend = stubBackend();
+    backend.execImpl = (_m, cmd) => (cmd.includes("echo WSP_CTX") ? { exitCode: 0, stdout: probe, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+    const store = memoryStore();
+    await store.put("goldens", "default", { head: 4, versions: [version] });
+    const rt = createRuntime({ backend, store, adapters: {} });
+    await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const m = backend.machines[0]!;
+    expect(writes(m)).toHaveLength(1);
+    expect(m.execLog.indexOf(writes(m)[0]!)).toBeGreaterThan(m.execLog.findIndex(c => c.startsWith("hostname ")));
+    const doc = docOf(writes(m)[0]!);
+    expect(doc).toContain("- Workspace: task-1.");
+    expect(doc).toContain("- Golden: v4, sealed 2026-09-05, setup abcdef012345.");
+    expect(doc).toContain("- Disk: 19.5 GB root disk, 11.2 GB free when this file was written.");
+    expect(writes(m)[0]).toContain("'/etc/claude-code/CLAUDE.md'");
+    expect(writes(m)[0]).toContain("'/etc/claude-code/.claude/skills/wsp-machine/SKILL.md'");
+  });
+
+  it("refreshes again on the fork an upgrade boots, and a guest that does not answer is only logged", async () => {
+    const backend = stubBackend();
+    backend.execImpl = (_m, cmd) => (cmd.includes("ls -A /root") ? { exitCode: 0, stdout: "notes.md\n", stderr: "" } : cmd.includes("echo WSP_CTX") ? { exitCode: 0, stdout: probe, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: { method?: string }) =>
+        init?.method === "PUT" ? new Response(null, { status: 200 }) : new Response(Buffer.from("tarbytes")),
+      ),
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+      expect(docOf(writes(backend.machines[0]!)[0]!)).toContain("- Golden: version not recorded.");
+      await rt.workspaces.upgrade(ws.id, { cpu: 4 });
+      expect(writes(backend.machines[1]!)).toHaveLength(1);
+      expect(docOf(writes(backend.machines[1]!)[0]!)).toContain("- Workspace: task-1.");
+
+      backend.execImpl = () => ({ exitCode: 0, stdout: "", stderr: "" });
+      const silent = await rt.workspaces.create({ golden: "snap_g", name: "task-2" });
+      expect(silent.name).toBe("task-2");
+      expect(writes(backend.machines[2]!)).toHaveLength(0);
+      expect(warn.mock.calls.some(c => String(c[0]).includes("machine context for") && String(c[0]).includes("without its markers"))).toBe(true);
+    } finally {
+      warn.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe("runtime guest hostname", () => {
   const ok = { exitCode: 0, stdout: "", stderr: "" };
   const hostnameCmds = (m: { execLog: string[] }) => m.execLog.filter(c => c.startsWith("hostname "));
@@ -2230,7 +2284,7 @@ describe("runtime golden import", () => {
     tools: [{ id: "tools/brew/jq", label: "jq", manager: "brew", cmd: "brew install jq" }],
     agents: [{ id: "agents/codex", name: "Codex", install: "codex-install", smoke: "codex --version" }],
   });
-  const dfOk = (m: unknown, cmd: string) => (cmd.startsWith("df -Pk") ? { exitCode: 0, stdout: `${3000 * 1024}\n`, stderr: "" } : cmd === "echo ok" ? { exitCode: 0, stdout: "ok\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+  const dfOk = (m: unknown, cmd: string) => (cmd.startsWith("df -Pk") ? { exitCode: 0, stdout: `${3000 * 1024}\n`, stderr: "" } : cmd === "echo ok" ? { exitCode: 0, stdout: "ok\n", stderr: "" } : cmd.includes("echo WSP_CTX") ? { exitCode: 0, stdout: "WSP_CTX\nWSP_CTX_END\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
 
   it("prepare runs the import stages on the wire, records the ledger on the builder, and seals with the builder's own smoke", async () => {
     const backend = stubBackend();
@@ -2250,6 +2304,7 @@ describe("runtime golden import", () => {
       "installing-tools:jq (1/1)",
       "installing-tools:1 installed",
       "installing-mcp:none configured",
+      "installing-mcp:machine context: written; no agent on the machine",
       "ready",
     ]);
     expect(await store.get("builders", b.id)).toMatchObject({ import: { recipeHash: "h1", applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools", "installing-mcp"], smoke: "codex --version" } });
@@ -3008,7 +3063,7 @@ describe("runtime golden import", () => {
 });
 
 describe("runtime golden update and the post-seal grace", () => {
-  const dfOk = (m: unknown, cmd: string) => (cmd.startsWith("df -Pk") ? { exitCode: 0, stdout: `${3000 * 1024}\n`, stderr: "" } : cmd === "echo ok" ? { exitCode: 0, stdout: "ok\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+  const dfOk = (m: unknown, cmd: string) => (cmd.startsWith("df -Pk") ? { exitCode: 0, stdout: `${3000 * 1024}\n`, stderr: "" } : cmd === "echo ok" ? { exitCode: 0, stdout: "ok\n", stderr: "" } : cmd.includes("echo WSP_CTX") ? { exitCode: 0, stdout: "WSP_CTX\nWSP_CTX_END\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
   const snapshot = (recipeHash: string, dests: string[]): RecipeDigest => ({ ticks: dests.map(d => ({ id: `shell/${d}` })), files: dests.map(d => ({ id: `shell/${d}`, dest: d, path: `~/${d}`, digest: `d-${recipeHash}` })) });
   const importOf = (recipeHash = "h1", agents: GoldenImport["agents"] = [{ id: "agents/codex", name: "Codex", install: "codex-install", smoke: "codex --version" }]): GoldenImport => ({
     recipeHash,
@@ -3095,6 +3150,7 @@ describe("runtime golden update and the post-seal grace", () => {
       "installing-tools:cowsay (1/1)",
       "installing-tools:1 installed",
       "installing-mcp:none configured",
+      "installing-mcp:machine context: written; no agent on the machine",
       "ready:",
       "snapshotting:golden-v2",
       "smoke-forking:codex --version",

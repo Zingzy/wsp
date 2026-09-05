@@ -44,6 +44,7 @@ import {
   retentionPlan,
   rollback as rollbackGolden,
   snapshotStorage,
+  applyMachineContext,
 } from "@wsp/engine";
 import type {
   DaemonReachView,
@@ -983,13 +984,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * versions sealed before it was recorded were all sandbox. */
   const fork = (record: WorkspaceRecord, bind: (machine: Machine) => void, override?: WorkspaceSpec, report?: StageReport): Promise<Machine> =>
     claiming(`workspace/${record.id}`, async b => {
-      const spec = forkSpec(record, (await goldenVersionOf(record.golden))?.kind ?? "sandbox", override);
+      const golden = await goldenVersionOf(record.golden);
+      const spec = forkSpec(record, golden?.kind ?? "sandbox", override);
       const machine = await b.create(spec);
       // Named by its record before the claim is released, so no sweep sees it unclaimed.
       bind(machine);
       report?.("machine-booting", `Machine ${machine.id} is booting.`);
       const named = await setHostname(machine, record.name);
       report?.("hostname-set", named.refused === undefined ? `Hostname set to ${named.host}.` : "Hostname left as the guest booted it.", named.refused);
+      // The fork carries the golden's copy; this one names the workspace and reads the disk and secrets as they are now.
+      const context = await applyMachineContext(machine, { workspace: { name: record.name }, ...(golden !== undefined ? { golden } : {}) });
+      if (context.failure !== undefined) console.warn(`machine context for ${record.id} on ${machine.id} ${context.summary}`);
       const shape = await shapeOf(machine);
       if (shape !== undefined) record.shape = shape;
       else delete record.shape;

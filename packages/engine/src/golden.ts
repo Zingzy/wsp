@@ -15,6 +15,7 @@ import { MIB, TOOL_TIMEOUT_S, fmtBytes, freeBytes, guardDeadlineMs, guarded, ins
 import { BUILDER_DISK_GB } from "./tool-sizes.js";
 import { assertFirstLife } from "./lifecycle.js";
 import { applyMcp, type McpPlan, type McpResult } from "./golden-mcp.js";
+import { applyMachineContext, type ContextResult } from "./machine-context.js";
 import type { Machine, MachineBackend, MachineKind, MachineState } from "./machine.js";
 import { importInto } from "./vault.js";
 
@@ -168,6 +169,8 @@ export interface GoldenImport {
   agents: AgentInstall[];
   /** Ticked agents the plan set aside (no installer, no pinned Node); they count as ticked and land in the result. */
   skippedAgents?: { id: string; name: string; note: string }[];
+  /** Ticked tools the plan set aside (no Linux bottle, a macOS app); they land in the result with the installs. */
+  skippedTools?: { id: string; label: string; note: string }[];
   /** The MCP servers to keep in or take out of each agent's config once it is on the machine; absent when no row is one. */
   mcp?: McpPlan;
   /** Called once per prepare that ran anything; a re-run that skipped every stage has nothing to report. */
@@ -211,6 +214,8 @@ export interface ImportResult {
   mcp?: McpResult[];
   /** Only on an update: the removals it ran before the stages. */
   removed?: RemovalResult[];
+  /** The machine context each installed agent got, or why it did not; absent when no stage ran. */
+  context?: ContextResult[];
 }
 
 export interface ApplyImportOptions {
@@ -319,7 +324,8 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
     }
   }
 
-  if (done("installing-harness")) {
+  const harnessRan = !done("installing-harness");
+  if (!harnessRan) {
     stage("installing-harness", ALREADY_APPLIED);
   } else {
     stage("installing-harness");
@@ -365,6 +371,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
   }
 
   if (!only) {
+    if (!done("installing-tools")) for (const t of imp.skippedTools ?? []) result.tools.push({ id: t.id, label: t.label, outcome: "skipped", note: t.note });
     if (done("installing-tools")) {
       stage("installing-tools", ALREADY_APPLIED);
     } else if (imp.tools.length === 0) {
@@ -390,6 +397,12 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
     } else {
       stage("installing-mcp", "none configured");
       mark("installing-mcp");
+    }
+    if (harnessRan || ran || edited) {
+      // After the tools, so the document can name what did not install.
+      const context = await applyMachineContext(machine, { result });
+      result.context = context.context;
+      stage("installing-mcp", `machine context: ${context.summary}`);
     }
     if (ran || edited) {
       // A builder whose exec died (a full disk did it once) would be sealed and handed off answering nothing.
