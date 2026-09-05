@@ -22,7 +22,8 @@ export type PortReach =
 
 type Minted = { workspaceId: string; port: number } & ({ reach: PortReachView } | { error: string });
 
-export function usePortReach(workspaceId: string, port: number | null): PortReach {
+/** `remints` counts the fresh routes the pane asked for after the edge refused a token; each step asks again at once. */
+export function usePortReach(workspaceId: string, port: number | null, remints = 0): PortReach {
   const api = useStore(s => s.api);
   const [minted, setMinted] = useState<Minted | null>(null);
 
@@ -47,7 +48,7 @@ export function usePortReach(workspaceId: string, port: number | null): PortReac
       gone = true;
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [api, workspaceId, port]);
+  }, [api, workspaceId, port, remints]);
 
   if (port === null || minted === null || minted.workspaceId !== workspaceId || minted.port !== port) return { state: "minting" };
   return "reach" in minted ? { state: "ready", reach: minted.reach } : { state: "failed", error: minted.error };

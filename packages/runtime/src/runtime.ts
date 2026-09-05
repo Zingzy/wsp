@@ -51,6 +51,7 @@ import type {
   GoldenLogin,
   GoldenStage,
   RecipeDigest,
+  PortProbeView,
   PortReachView,
   ReachState,
   SessionEvent,
@@ -270,6 +271,10 @@ export interface WakeOptions {
 }
 
 const WAKE_PING_TIMEOUT_MS = 30_000;
+/** The probe's fetch bound; the frame keeps loading meanwhile, so silence costs nothing but the sentence. */
+const PORT_PROBE_TIMEOUT_MS = 10_000;
+/** Vite's and Next's refusals fit in a few hundred bytes; a page that loaded fine is not carried back whole. */
+export const PORT_PROBE_BODY_CAP = 2048;
 const VAULT_CAP_BYTES = 200 * 1024 * 1024;
 /** Blob collection: the latest nap-time vault per workspace id. */
 const VAULTS = "vaults";
@@ -370,6 +375,10 @@ export interface Runtime {
     daemonReach(id: string): Promise<DaemonReachView>;
     /** The public route to one guest port, for a browser to frame; same caching and refusal as daemonReach. */
     portReach(id: string, port: number): Promise<PortReachView>;
+    /** One fetch of that route from here, as the frame would see it, redirects unfollowed; rejects when nothing answers at
+     * all. A 401 is the edge refusing the token, so the port's route is reminted before the reply and the next portReach
+     * carries the fresh one. */
+    portProbe(id: string, port: number): Promise<PortProbeView>;
   };
   readonly sessions: {
     start(
@@ -581,6 +590,26 @@ function deadMachine(id: string): Machine {
       throw gone();
     },
   };
+}
+
+/** Reads at most `cap` bytes of the body and cancels the rest; a body that dies mid-read still leaves the status to report. */
+async function readBodyUpTo(res: Response, cap: number): Promise<string> {
+  const reader = res.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (size < cap) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      size += value.byteLength;
+    }
+  } catch {
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  return Buffer.concat(chunks, Math.min(size, cap)).toString("utf8");
 }
 
 export function createRuntime(opts: RuntimeOptions): Runtime {
@@ -1368,6 +1397,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const entry = await entryOf(id);
       const reach = await entry.ws.portReach(port);
       return { url: reach.url, expiresAt: reach.expiresAt };
+    },
+
+    async portProbe(id, port) {
+      const entry = await entryOf(id);
+      const reach = await entry.ws.portReach(port);
+      // A followed redirect would refetch without the token or the edge's cookies and report the edge's 401 for a page the frame loads fine.
+      const res = await fetch(reach.url, { redirect: "manual", signal: AbortSignal.timeout(PORT_PROBE_TIMEOUT_MS) });
+      const body = await readBodyUpTo(res, PORT_PROBE_BODY_CAP);
+      if (res.status === 401) await entry.ws.remintPortReach(port);
+      return { status: res.status, body };
     },
   };
 

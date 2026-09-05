@@ -166,4 +166,17 @@ describe("Workspace.portReach", () => {
     expect((await ws.portReach(3000)).url).toContain("m2-3000");
     expect(b.previewUrl).toHaveBeenCalledTimes(1);
   });
+
+  it("remintPortReach drops one port's fresh route and mints it again; the other ports keep theirs", async () => {
+    const { machine, previewUrl } = machineWithPreview("m1", PREVIEW_TTL_MS);
+    const ws = new Workspace(machine, { goldenSnapshot: "snap_g" });
+    const a = await ws.portReach(3000);
+    const b = await ws.portReach(5173);
+    const fresh = await ws.remintPortReach(3000);
+    expect(fresh).not.toBe(a);
+    expect(fresh.url).toContain("m1-3000");
+    expect(await ws.portReach(3000)).toBe(fresh);
+    expect(await ws.portReach(5173)).toBe(b);
+    expect(previewUrl).toHaveBeenCalledTimes(3);
+  });
 });
