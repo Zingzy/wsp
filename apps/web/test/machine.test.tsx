@@ -333,8 +333,11 @@ describe("pause and wake", () => {
   it("pause paints the phase immediately and calls the api once", async () => {
     const api = await mount([view("ws_a", "api")]);
     fireEvent.click(screen.getByRole("button", { name: "pause api" }));
-    expect(useStore.getState().workspaces[0]!.phase).toBe("napping");
-    expect(screen.getByRole("button", { name: "wake api" })).toBeDefined();
+    expect(useStore.getState().workspaces[0]!.phase).toBe("pausing");
+    expect(fact("state")).toBe("Pausing");
+    const held = screen.getByRole("button", { name: "wake api" }) as HTMLButtonElement;
+    expect(held.textContent).toBe("Pausing…");
+    expect(held.disabled).toBe(true);
     await waitFor(() => expect(api.nap).toHaveBeenCalledTimes(1));
     expect(api.nap).toHaveBeenCalledWith("ws_a");
   });

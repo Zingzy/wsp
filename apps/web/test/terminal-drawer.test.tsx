@@ -6,10 +6,11 @@
 // drawer mounts in panel mode as the right panel's terminal surface, and each
 // pty has one owner: the panel keeps what it opened, the drawer the rest.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import type { WorkspaceView } from "@wsp/protocol";
+import type { WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceTerminalDrawer } from "../src/components/WorkspaceTerminalDrawer.js";
+import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../src/rightPanelStore.js";
 import { RightPanel } from "../src/shell/RightPanel.js";
@@ -305,7 +306,7 @@ describe("reload adopts the daemon's ptys", () => {
     drawer.split(WS, "p2", "vertical");
     render(<WorkspaceTerminalDrawer workspaceId={WS} />);
     // Until the daemon has answered, the stored ptys are not shown as terminals: no surface binds to a pty the link does not know.
-    await screen.findByText(/Not connected to this workspace/);
+    await screen.findByText(/The daemon link is reconnecting/);
     expect(canvases("drawer")).toHaveLength(0);
     releaseList();
     await waitFor(() => expect(canvases("drawer")).toHaveLength(2));
@@ -335,7 +336,7 @@ describe("reload adopts the daemon's ptys", () => {
       </>,
     );
     // Before the daemon answers, neither side shows a terminal or drops the panel's surface.
-    await waitFor(() => expect(screen.getAllByText(/Not connected to this workspace/)).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByText(/The daemon link is reconnecting/)).toHaveLength(2));
     expect(selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, WS).surfaces.map(s => s.id)).toEqual(["terminal:p2"]);
     releaseList();
     await waitFor(() => expect(useTerminalDrawerStore.getState().byWorkspaceId[WS]?.terminalIds).toEqual(["p1", "p3"]));
@@ -364,7 +365,7 @@ describe("drawer resilience", () => {
     wt.feedStatus("connecting");
     useTerminalDrawerStore.getState().setOpen(WS, true);
     render(<WorkspaceTerminalDrawer workspaceId={WS} />);
-    await screen.findByText(/Not connected to this workspace/);
+    await screen.findByText(/The daemon link is reconnecting; terminals open when it is back/);
     expect(screen.queryByRole("button", { name: /^New Terminal/ })).toBeNull();
     expect(count("pty.create")).toBe(0);
     act(() => wt.feedStatus("live"));
@@ -389,4 +390,135 @@ describe("drawer resilience", () => {
     expect(useStore.getState().toast).toBe("terminal: daemon unreachable");
     expect(selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, WS).surfaces).toEqual([]);
   });
+});
+
+// The pane reads the workspace's state from the store; these set it by hand, the way a status push would.
+const PANE_WS: WorkspaceView = { id: WS, name: "api", machineId: "m1", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" };
+function paneStatus(over: Partial<WorkspaceStatus>): WorkspaceStatus {
+  return { ...PANE_WS, machineState: "running", reach: { state: "reachable" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11, ...over };
+}
+function setPane(phase: WorkspaceView["phase"], status: Partial<WorkspaceStatus>, wakes: string[] = []): void {
+  const api = { subscribe: () => () => {}, wake: async (id: string) => { wakes.push(id); return { ...PANE_WS, phase: "running" as const }; } } as unknown as Api;
+  useStore.setState({ api, workspaces: [{ ...PANE_WS, phase }], statuses: { [WS]: paneStatus({ ...status, phase }) } });
+}
+const overlay = () => document.querySelector<HTMLElement>("[data-terminal-overlay]");
+
+describe("panes on a workspace that is not running", () => {
+  afterEach(() => useStore.setState({ api: null, workspaces: [], statuses: {} }));
+
+  it("a paused workspace dims the frozen frame, refuses keys with the reason, and its Wake calls the wake op; on wake the same pty continues", async () => {
+    const { wt, writes, count } = fakeLink();
+    const wakes: string[] = [];
+    setPane("running", {}, wakes);
+    useTerminalDrawerStore.getState().setOpen(WS, true);
+    render(<WorkspaceTerminalDrawer workspaceId={WS} />);
+    await waitFor(() => expect(inputs("drawer")).toHaveLength(1), { timeout: 15_000 });
+    expect(overlay()).toBeNull();
+
+    act(() => setPane("pausing", { machineState: "running", reach: { state: "napping" } }, wakes));
+    await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("paused"));
+    expect(overlay()!.textContent).toContain("Pausing. The shell is kept; wake the workspace to continue");
+    act(() => {
+      setPane("napping", { machineState: "paused", reach: { state: "napping" } }, wakes);
+      wt.feedStatus("connecting");
+    });
+    await waitFor(() => expect(overlay()!.textContent).toContain("Paused. The shell is kept; wake the workspace to continue"));
+    // The frame stays: the surface is still mounted under the overlay, and a key pressed into it is refused, not sent.
+    expect(inputs("drawer")).toHaveLength(1);
+    fireEvent.keyDown(inputs("drawer")[0]!, { key: "a", code: "KeyA" });
+    await waitFor(() => expect(document.querySelector("[data-terminal-refused]")?.textContent).toBe("Typing is refused: the workspace is paused"));
+    expect(writes()).toEqual([]);
+
+    fireEvent.click(within(overlay()!).getByRole("button", { name: "Wake" }));
+    await waitFor(() => expect(wakes).toEqual([WS]));
+    expect(useStore.getState().workspaces[0]!.phase).toBe("waking");
+    await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("waking"));
+    act(() => {
+      setPane("running", {}, wakes);
+      wt.feedStatus("live");
+    });
+    await waitFor(() => expect(overlay()).toBeNull());
+    expect(count("pty.create")).toBe(1);
+    expect(wt.tabs().map(t => t.ptyId)).toEqual(["p1"]);
+    fireEvent.keyDown(inputs("drawer")[0]!, { key: "a", code: "KeyA" });
+    await waitFor(() => expect(writes()).toEqual(["a"]));
+  }, 20_000);
+
+  it("a running machine whose daemon stopped answering reconnects with elapsed time, then says it is not answering once the runtime calls it a zombie", async () => {
+    const { wt } = fakeLink();
+    setPane("running", {});
+    useTerminalDrawerStore.getState().setOpen(WS, true);
+    render(<WorkspaceTerminalDrawer workspaceId={WS} />);
+    await waitFor(() => expect(inputs("drawer")).toHaveLength(1), { timeout: 15_000 });
+    act(() => wt.feedStatus("connecting"));
+    await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("reconnecting"));
+    expect(overlay()!.textContent).toMatch(/Reconnecting to the machine\s*for \d+s/);
+    expect(within(overlay()!).queryByRole("button", { name: "Wake" })).toBeNull();
+    act(() => setPane("running", { reach: { state: "unreachable" } }));
+    expect(overlay()?.dataset["terminalOverlay"]).toBe("reconnecting");
+    act(() => setPane("running", { reach: { state: "zombie" }, reason: "silent for 3 min; exec probe failed" }));
+    await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("not-answering"));
+    expect(overlay()!.textContent).toContain("The machine is not answering");
+    expect(overlay()!.textContent).toContain("Rebuild it from the Machine panel");
+    act(() => {
+      setPane("running", {});
+      wt.feedStatus("live");
+    });
+    await waitFor(() => expect(overlay()).toBeNull());
+  }, 20_000);
+
+  it("with no terminal open a paused workspace says so and offers the wake; the panel says the same", async () => {
+    const { wt } = fakeLink();
+    const wakes: string[] = [];
+    wt.feedStatus("connecting");
+    setPane("napping", { machineState: "paused", reach: { state: "napping" } }, wakes);
+    useTerminalDrawerStore.getState().setOpen(WS, true);
+    useRightPanelStore.getState().openTerminal(WS, "p9");
+    render(
+      <>
+        <WorkspaceTerminalDrawer workspaceId={WS} />
+        <Panel />
+      </>,
+    );
+    await waitFor(() => expect(screen.getAllByText("Workspace is paused; wake it to open a terminal")).toHaveLength(2));
+    expect(document.querySelectorAll("[data-terminal-empty='paused']")).toHaveLength(2);
+    fireEvent.click(screen.getAllByRole("button", { name: "Wake" })[0]!);
+    await waitFor(() => expect(wakes).toEqual([WS]));
+  });
+
+  it("a pty the daemon no longer holds says the shell ended when the machine was replaced and offers a new one", async () => {
+    let replaced = false;
+    const held = new Set(["p1"]);
+    let next = 2;
+    const ops: string[] = [];
+    const wire: TerminalWire = {
+      request: async (op, params = {}) => {
+        ops.push(op);
+        if (op === "pty.create") {
+          const ptyId = `p${next++}`;
+          held.add(ptyId);
+          return { ok: true, ptyId };
+        }
+        if (op === "pty.attach" && replaced && params["ptyId"] === "p1") throw new Error("no such pty: p1");
+        if (op === "pty.list") return { ok: true, ptys: [...held].filter(id => !(replaced && id === "p1")).map(id => ({ id, pid: 1, cols: 80, rows: 24, exited: false })) };
+        return { ok: true };
+      },
+    };
+    const wt = new WorkspaceTerminals(wire);
+    wt.feedStatus("live");
+    provideTerminals(WS, wt);
+    setPane("running", {});
+    useTerminalDrawerStore.getState().setOpen(WS, true);
+    render(<WorkspaceTerminalDrawer workspaceId={WS} />);
+    await waitFor(() => expect(inputs("drawer")).toHaveLength(1), { timeout: 15_000 });
+    expect(wt.tabs().map(t => t.ptyId)).toEqual(["p1"]);
+    replaced = true;
+    act(() => wt.feedStatus("connecting"));
+    act(() => wt.feedStatus("live"));
+    await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("shell-gone"));
+    expect(overlay()!.textContent).toContain("This shell ended when the machine was replaced");
+    fireEvent.click(within(overlay()!).getByRole("button", { name: /^New Terminal/ }));
+    await waitFor(() => expect(wt.tabs().map(t => t.ptyId)).toEqual(["p1", "p2"]));
+    await waitFor(() => expect(overlay()).toBeNull());
+  }, 20_000);
 });

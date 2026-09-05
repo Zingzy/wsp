@@ -165,7 +165,7 @@ describe("store connection", () => {
     useStore.getState().bind(api);
     await flush();
     const toggling = useStore.getState().toggle("ws_a");
-    expect(useStore.getState().workspaces[0]!.phase).toBe("napping");
+    expect(useStore.getState().workspaces[0]!.phase).toBe("pausing");
     await toggling;
     expect(useStore.getState().workspaces[0]!.phase).toBe("running");
     expect(useStore.getState().toast).toBeNull();
@@ -181,10 +181,27 @@ describe("store workspaces", () => {
     useStore.getState().bind(api);
     await flush();
     const toggling = useStore.getState().toggle("ws_a");
-    expect(useStore.getState().workspaces[0]!.phase).toBe("napping");
+    expect(useStore.getState().workspaces[0]!.phase).toBe("pausing");
     await toggling;
     expect(useStore.getState().workspaces[0]!.phase).toBe("running");
     expect(useStore.getState().toast).toContain("backend said no");
+  });
+
+  it("wake paints waking and calls the api; on a running workspace it does nothing; toggle wakes a pausing one after the nap", async () => {
+    const { api } = fakeApi([view("ws_a"), { ...view("ws_b"), phase: "napping" }], []);
+    const calls: string[] = [];
+    api.wake = async id => { calls.push(`wake:${id}`); return view(id); };
+    api.nap = async id => { calls.push(`nap:${id}`); return { ...view(id), phase: "napping" }; };
+    useStore.getState().bind(api);
+    await flush();
+    await useStore.getState().wake("ws_a");
+    expect(calls).toEqual([]);
+    const waking = useStore.getState().wake("ws_b");
+    expect(useStore.getState().workspaces[1]!.phase).toBe("waking");
+    await waking;
+    expect(calls).toEqual(["wake:ws_b"]);
+    await useStore.getState().toggle("ws_a");
+    expect(calls).toEqual(["wake:ws_b", "nap:ws_a"]);
   });
 
   it("napped carries the phase; woken and upgraded carry the phase and the new machine", async () => {

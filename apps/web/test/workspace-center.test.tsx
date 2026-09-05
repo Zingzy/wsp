@@ -85,7 +85,7 @@ describe("workspace center", () => {
     act(() => useTerminalDrawerStore.getState().toggle(WS));
     const drawer = document.querySelector('[data-terminal-owner="drawer"]');
     expect(drawer).not.toBeNull();
-    expect(drawer!.textContent).toContain("Not connected to this workspace");
+    expect(drawer!.textContent).toContain("The daemon link is reconnecting; terminals open when it is back");
     expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
   });
 

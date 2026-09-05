@@ -121,11 +121,18 @@ interface TimelineRowSharedState {
   workGroupViewState: WorkGroupViewState;
 }
 
+/** The machine cannot run the turn right now: what the working row says instead, and the wake to offer, if one applies. */
+export interface MachineWait {
+  readonly label: string;
+  readonly onWake: (() => void) | null;
+}
+
 interface TimelineRowActivityState {
   isWorking: boolean;
   isPreparingWorktree: boolean;
   isRevertingCheckpoint: boolean;
   latestTurnId: TurnId | null;
+  machineWait: MachineWait | null;
 }
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
@@ -162,6 +169,8 @@ const TIMELINE_MAINTAIN_SCROLL_AT_END = {
 
 export interface MessagesTimelineProps {
   isWorking: boolean;
+  /** Set while the workspace is paused, waking or unreachable under a running turn. */
+  machineWait?: MachineWait | null;
   isPreparingWorktree?: boolean;
   activeTurnStartedAt: string | null;
   listRef: React.RefObject<LegendListRef | null>;
@@ -202,6 +211,7 @@ export interface MessagesTimelineProps {
 
 export const MessagesTimeline = memo(function MessagesTimeline({
   isWorking,
+  machineWait = null,
   isPreparingWorktree = false,
   activeTurnStartedAt,
   listRef,
@@ -504,8 +514,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       isPreparingWorktree,
       isRevertingCheckpoint,
       latestTurnId: latestTurn?.turnId ?? null,
+      machineWait,
     }),
-    [isRevertingCheckpoint, isWorking, isPreparingWorktree, latestTurn?.turnId],
+    [isRevertingCheckpoint, isWorking, isPreparingWorktree, latestTurn?.turnId, machineWait],
   );
 
   // Stable renderItem — no closure deps. Row components read shared state
@@ -1082,7 +1093,21 @@ function ProposedPlanTimelineRow({
 }
 
 function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "working" }> }) {
-  const { isPreparingWorktree } = use(TimelineRowActivityCtx);
+  const { isPreparingWorktree, machineWait } = use(TimelineRowActivityCtx);
+  if (machineWait !== null) {
+    return (
+      <div className="border-b border-border/60 pb-2 pt-1" data-machine-wait>
+        <div className="flex h-6 min-w-0 items-center gap-3 px-1 text-sm leading-relaxed text-muted-foreground">
+          <span className="shrink-0 whitespace-nowrap">{machineWait.label}</span>
+          {machineWait.onWake !== null ? (
+            <Button size="xs" variant="outline" onClick={machineWait.onWake}>
+              Wake
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="border-b border-border/60 pb-2 pt-1">
       <div className="flex h-6 min-w-0 items-baseline px-1 text-sm leading-relaxed text-muted-foreground tabular-nums">
@@ -1109,11 +1134,11 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
 }
 
 function ThinkingTimelineRow() {
-  const { isPreparingWorktree } = use(TimelineRowActivityCtx);
-  // Reserve the activity row during setup so the handoff keeps the same height.
+  const { isPreparingWorktree, machineWait } = use(TimelineRowActivityCtx);
+  // Reserve the activity row during setup so the handoff keeps the same height; nothing thinks on a machine that is not running.
   return (
     <div className="min-h-7">
-      {isPreparingWorktree ? null : <LiveActivityRow label="Thinking" iconName="brain" />}
+      {isPreparingWorktree || machineWait !== null ? null : <LiveActivityRow label="Thinking" iconName="brain" />}
     </div>
   );
 }

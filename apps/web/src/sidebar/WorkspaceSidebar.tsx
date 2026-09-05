@@ -291,7 +291,7 @@ export function WorkspaceSidebar() {
                           {active.map(thread => (
                             <ThreadRow key={thread.id} thread={thread} time={compactTimeLabel(thread.startedAt)} onSelect={() => select(thread.workspaceId)} />
                           ))}
-                          {settled.length > 0 && !searching ? (
+                          {settled.length > 0 && active.length > 0 && !searching ? (
                             <SidebarMenuSubItem data-thread-selection-safe>
                               <button
                                 type="button"
@@ -302,14 +302,14 @@ export function WorkspaceSidebar() {
                                 className="my-1 flex w-full cursor-pointer items-center gap-2 px-2 text-left outline-hidden ring-ring focus-visible:ring-2 rounded-md"
                               >
                                 <span className="text-xs font-medium text-muted-foreground/50">
-                                  {settledExpanded ? "Settled" : `Settled (${settled.length})`}
+                                  {settledExpanded ? "Idle" : `Idle (${settled.length})`}
                                 </span>
                                 <span className="h-px flex-1 bg-sidebar-border/60" />
                                 <ChevronDownIcon aria-hidden className={cn("size-3 text-muted-foreground/50 transition-transform", settledExpanded && "rotate-180")} />
                               </button>
                             </SidebarMenuSubItem>
                           ) : null}
-                          {settledExpanded || searching
+                          {settledExpanded || searching || active.length === 0
                             ? settled.map(thread => (
                                 <ThreadRow
                                   key={thread.id}

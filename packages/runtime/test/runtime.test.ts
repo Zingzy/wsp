@@ -1185,7 +1185,7 @@ describe("runtime verified wake", () => {
 
       const woken = await rt.workspaces.wake(ws.id);
       const phases = events.filter(e => e.type === "workspace.status").map(e => (e as { status: { phase: string } }).status.phase);
-      expect(phases[0]).toBe("waking");
+      expect(phases.slice(0, 3)).toEqual(["pausing", "napping", "waking"]);
       expect(m1.resumes).toBe(2);
       expect(m1.killed).toBe(true);
       expect(woken.machineId).toBe("m2");

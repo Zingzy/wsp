@@ -27,6 +27,7 @@ export {
   type PromptRespondFailedEvent,
 } from "./prompts.js";
 export { applyPortsSnapshot, applyPortEvent, toPreviewableServers, type KnownPort, type PortsSnapshot, type PreviewableServersInput } from "./ports.js";
-export { deriveSidebarProjects, deriveThread, workspaceIndicator, threadIndicator, type SidebarInput } from "./workspaces.js";
+export { deriveSidebarProjects, deriveThread, workspaceIndicator, threadIndicator, turnWait, type SidebarInput } from "./workspaces.js";
+export { terminalPaneState, terminalPaneTitle, terminalEmptyLine, terminalInputRefusal, type TerminalPaneState, type TerminalPaneInput } from "./terminal-pane.js";
 export { toTerminalAttachEvent, isPtyEvent } from "./terminal.js";
 export { CLAUDE_CODE_CATALOG, catalogFor, catalogFromHarness, permissionMode } from "./catalog.js";

@@ -14,33 +14,18 @@ export const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-
 
 export type ThreadTraversalDirection = "previous" | "next";
 
+/** The thread words wsp shows as a pill; Idle is the resting state and carries none. */
 export interface ThreadStatusPill {
-  label:
-    | "Working"
-    | "Monitoring"
-    | "Connecting"
-    | "Completed"
-    | "Failed"
-    | "Pending Approval"
-    | "Awaiting Input"
-    | "Plan Ready";
+  label: "Working" | "Ended";
   colorClass: string;
   dotClass: string;
   pulse: boolean;
 }
 
-// Rollup order mirrors the per-thread resolver exactly: attention states,
-// then active work, then the actionable plan prompt, then passive
-// monitoring. A Monitoring sibling must never hide a Plan Ready thread.
+// Rollup order: a thread still working outranks one that ended.
 const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
-  "Pending Approval": 6,
-  "Awaiting Input": 5,
-  Failed: 5,
-  Working: 4,
-  Connecting: 4,
-  "Plan Ready": 3,
-  Monitoring: 2,
-  Completed: 1,
+  Working: 2,
+  Ended: 1,
 };
 
 export function getVisibleSidebarThreadIds<TThreadId>(

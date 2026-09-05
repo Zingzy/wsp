@@ -32,6 +32,7 @@ import { getTerminalLabel } from "../lib/terminalLabels";
 import { GhosttyTerminalSurface, type GhosttyTerminalFont, type GhosttyTerminalSurfaceOptions } from "../terminal/ghostty/surface";
 import { type GhosttyColor, type GhosttyTheme } from "../terminal/ghostty/core";
 import type { TerminalIo } from "../terminal/pty-io";
+import { terminalEmptyLine, terminalInputRefusal, terminalPaneTitle, type TerminalPaneState } from "../adapt/index";
 import { isTerminalLinkActivation, isTerminalUrl } from "../terminal-links";
 import {
   DEFAULT_THREAD_TERMINAL_HEIGHT,
@@ -159,7 +160,13 @@ interface TerminalViewportProps {
   autoFocus: boolean;
   resizeEpoch: number;
   drawerHeight: number;
+  /** Why a keystroke must not reach the pty right now, or null; read per key so the surface never rebuilds over it. */
+  inputRefusal?: () => string | null;
+  onInputRefused?: (reason: string) => void;
 }
+
+const NO_REFUSAL = (): string | null => null;
+const IGNORE_REFUSED = (): void => {};
 
 export function TerminalViewport({
   terminalId,
@@ -169,6 +176,8 @@ export function TerminalViewport({
   autoFocus,
   resizeEpoch,
   drawerHeight,
+  inputRefusal = NO_REFUSAL,
+  onInputRefused = IGNORE_REFUSED,
 }: TerminalViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<GhosttyTerminalSurface | null>(null);
@@ -195,7 +204,11 @@ export function TerminalViewport({
       const terminalOptions: GhosttyTerminalSurfaceOptions = {
         theme: terminalThemeFromApp(mount),
         ...(setupFont ? { font: setupFont } : {}),
-        onData: (data) => io.write(data),
+        onData: (data) => {
+          const refusal = inputRefusal();
+          if (refusal !== null) onInputRefused(refusal);
+          else io.write(data);
+        },
         onResize: (cols, rows) => io.resize(cols, rows),
         onSelectionChange: () => {},
         beforeKey: event => !isTerminalAppShortcut(event),
@@ -282,7 +295,7 @@ export function TerminalViewport({
     };
     // autoFocus is intentionally omitted;
     // it is only read at mount time and must not trigger terminal teardown/recreation.
-  }, [io, terminalId]);
+  }, [io, terminalId, inputRefusal, onInputRefused]);
 
   useEffect(() => {
     if (!autoFocus) return;
@@ -343,8 +356,12 @@ export interface ThreadTerminalDrawerProps {
   onHeightChange: (height: number) => void;
   /** Prefer link-provided tab titles when present (the shell name, the foreground process). */
   terminalLabelsById?: ReadonlyMap<string, string>;
-  /** False while the workspace's link is down: the empty state then says so instead of offering a terminal. */
-  terminalsReachable?: boolean;
+  /** The workspace's state as the pane shows it; anything but live dims the frame, refuses keys and says why. */
+  pane?: TerminalPaneState;
+  /** The wake every Wake button calls: the same op the Machine panel uses. */
+  onWake?: () => void;
+  /** Ptys the daemon no longer holds: their pane says the shell ended and offers a new one. */
+  lostTerminalIds?: ReadonlySet<string>;
   /** Bytes in, keys out and resize for one terminal; the drawer itself never talks to the daemon. */
   terminalIo: (terminalId: string) => TerminalIo;
   terminalConfig?: TerminalViewportConfig;
@@ -379,6 +396,80 @@ function TerminalActionButton({ label, className, onClick, children }: TerminalA
   );
 }
 
+const LIVE_PANE: TerminalPaneState = { kind: "live" };
+const NO_LOST: ReadonlySet<string> = new Set();
+
+/** Seconds since it mounted, ticking on its own clock so the overlay re-renders once a second at most. */
+function Elapsed() {
+  const [since] = useState(() => Date.now());
+  const [now, setNow] = useState(since);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return <span className="tabular-nums">for {Math.max(0, Math.floor((now - since) / 1000))}s</span>;
+}
+
+/**
+ * Dims the frozen frame and says why it is frozen. It takes focus when it appears so keys land here, and a key
+ * pressed anywhere in the pane shows the refusal instead of vanishing into a socket that is down.
+ */
+function TerminalPaneOverlay({ pane, refused, onWake }: { pane: TerminalPaneState; refused: string | null; onWake?: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [keyRefused, setKeyRefused] = useState<string | null>(null);
+  useEffect(() => {
+    ref.current?.focus({ preventScroll: true });
+  }, [pane.kind]);
+  const line = refused ?? keyRefused;
+  return (
+    <div
+      ref={ref}
+      tabIndex={-1}
+      role="status"
+      data-terminal-overlay={pane.kind}
+      className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-background/70 px-4 text-center text-sm text-foreground outline-hidden backdrop-blur-[1px]"
+      onKeyDown={event => {
+        if (event.key === "Tab" || event.key === "Escape") return;
+        event.preventDefault();
+        setKeyRefused(terminalInputRefusal(pane));
+      }}
+    >
+      <p className="flex items-baseline gap-1.5">
+        <span>{terminalPaneTitle(pane)}</span>
+        {pane.kind === "reconnecting" ? <Elapsed key={pane.kind} /> : null}
+      </p>
+      {pane.kind === "not-answering" || pane.kind === "gone" ? (
+        <p className="text-xs text-muted-foreground">Rebuild it from the Machine panel</p>
+      ) : null}
+      {pane.kind === "paused" && onWake ? (
+        <Button size="xs" variant="outline" onClick={onWake}>
+          Wake
+        </Button>
+      ) : null}
+      {line !== null ? (
+        <p className="text-xs text-muted-foreground" data-terminal-refused>
+          {line}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function ShellGoneOverlay({ onNewTerminal, label }: { onNewTerminal: () => void; label: string }) {
+  return (
+    <div
+      role="status"
+      data-terminal-overlay="shell-gone"
+      className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-background/70 px-4 text-center text-sm text-foreground"
+    >
+      <p>This shell ended when the machine was replaced</p>
+      <Button size="xs" variant="outline" onClick={onNewTerminal}>
+        {label}
+      </Button>
+    </div>
+  );
+}
+
 export default function ThreadTerminalDrawer({
   mode = "drawer",
   workspaceId,
@@ -400,11 +491,21 @@ export default function ThreadTerminalDrawer({
   onCloseTerminal,
   onHeightChange,
   terminalLabelsById,
-  terminalsReachable = true,
+  pane = LIVE_PANE,
+  onWake,
+  lostTerminalIds = NO_LOST,
   terminalIo,
   terminalConfig = EMPTY_CONFIG,
 }: ThreadTerminalDrawerProps) {
   const isPanel = mode === "panel";
+  const refusalRef = useRef<string | null>(null);
+  refusalRef.current = terminalInputRefusal(pane);
+  const [refused, setRefused] = useState<string | null>(null);
+  const inputRefusal = useCallback(() => refusalRef.current, []);
+  const onInputRefused = useCallback((reason: string) => setRefused(reason), []);
+  useEffect(() => {
+    if (pane.kind === "live") setRefused(null);
+  }, [pane.kind]);
   const controlledDrawerHeight = clampDrawerHeight(height);
   const [drawerHeightState, setDrawerHeightState] = useState(() => ({
     workspaceId,
@@ -710,8 +811,8 @@ export default function ThreadTerminalDrawer({
             onPointerCancel={handleResizePointerEnd}
           />
         ) : null}
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-4 py-6 text-center text-sm text-muted-foreground">
-          {terminalsReachable ? (
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-4 py-6 text-center text-sm text-muted-foreground" data-terminal-empty={pane.kind}>
+          {pane.kind === "live" ? (
             <>
               <p>No terminals for this workspace yet.</p>
               <Button size="xs" variant="outline" onClick={onNewTerminalAction}>
@@ -719,7 +820,14 @@ export default function ThreadTerminalDrawer({
               </Button>
             </>
           ) : (
-            <p>Not connected to this workspace. Terminals open once it is running.</p>
+            <>
+              <p>{terminalEmptyLine(pane)}</p>
+              {pane.kind === "paused" && onWake ? (
+                <Button size="xs" variant="outline" onClick={onWake}>
+                  Wake
+                </Button>
+              ) : null}
+            </>
           )}
         </div>
       </aside>
@@ -735,8 +843,11 @@ export default function ThreadTerminalDrawer({
       autoFocus={autoFocus}
       resizeEpoch={resizeEpoch}
       drawerHeight={drawerHeight}
+      inputRefusal={inputRefusal}
+      onInputRefused={onInputRefused}
     />
   );
+  const activeLost = lostTerminalIds.has(resolvedActiveTerminalId);
 
   return (
     <aside
@@ -803,7 +914,12 @@ export default function ThreadTerminalDrawer({
         </div>
       )}
 
-      <div className="min-h-0 w-full flex-1">
+      <div className="relative min-h-0 w-full flex-1">
+        {pane.kind !== "live" ? (
+          <TerminalPaneOverlay pane={pane} refused={refused} {...(onWake !== undefined ? { onWake } : {})} />
+        ) : activeLost ? (
+          <ShellGoneOverlay onNewTerminal={onNewTerminalAction} label={newTerminalActionLabel} />
+        ) : null}
         <div
           className={cn(
             "flex h-full min-h-0 bg-[var(--terminal-background)]",

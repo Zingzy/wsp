@@ -450,6 +450,7 @@ function Actions({ workspace, status, upgrade }: { workspace: WorkspaceView; sta
   const [picked, setPicked] = useState<WorkspaceSize | null>(null);
   const running = workspace.phase === "running";
   const waking = workspace.phase === "waking";
+  const pausing = workspace.phase === "pausing";
   // Backend fact, not a probe: a provider that cannot resize gets no picker at all.
   const canResize = capabilities?.resize === true;
   const options = status && canResize ? upgradeOptions(status.size) : [];
@@ -473,12 +474,12 @@ function Actions({ workspace, status, upgrade }: { workspace: WorkspaceView; sta
           variant="outline"
           size="sm"
           className="flex-1"
-          disabled={waking}
+          disabled={waking || pausing}
           aria-label={`${running ? "pause" : "wake"} ${workspace.name}`}
           title={running ? "Suspend the VM and keep the disk" : "Boot the VM from its disk"}
           onClick={() => void toggle(workspace.id)}
         >
-          {running ? "Pause" : waking ? "Waking…" : "Wake"}
+          {running ? "Pause" : waking ? "Waking…" : pausing ? "Pausing…" : "Wake"}
         </Button>
         <Button
           size="sm"

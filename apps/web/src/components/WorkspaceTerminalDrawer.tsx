@@ -7,6 +7,9 @@
 // closing the last never respawns.
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { useShallow } from "zustand/react/shallow";
+import { workspaceState, type DaemonLinkStatus } from "@wsp/protocol";
+import { terminalPaneState, type TerminalPaneState } from "../adapt/index.js";
+import { useStatus, useStore, useWorkspace } from "../protocol/store.js";
 import { selectPanelTerminalIds, useRightPanelStore } from "../rightPanelStore.js";
 import { openDrawerTerminal, reportTerminalFailure, splitDrawerTerminal, type SplitDirection } from "../shell/shellCommands.js";
 import { selectTerminalUiState, useTerminalDrawerStore } from "../terminal/drawerStore.js";
@@ -34,6 +37,26 @@ export function terminalLabels(tabs: readonly PtyTabView[]): ReadonlyMap<string,
   return new Map(tabs.map(t => [t.ptyId, t.exited ? `${t.title} (exited)` : t.title]));
 }
 
+export function lostTerminals(tabs: readonly PtyTabView[]): ReadonlySet<string> {
+  return new Set(tabs.filter(t => t.lost).map(t => t.ptyId));
+}
+
+/** The pane's state from the workspace's one vocabulary plus this link's socket, and the wake every pane offers. */
+export function useTerminalPane(workspaceId: string, socket: DaemonLinkStatus): { pane: TerminalPaneState; onWake: () => void } {
+  const workspace = useWorkspace(workspaceId);
+  const status = useStatus(workspaceId);
+  const wake = useStore(s => s.wake);
+  const phase = status?.phase ?? workspace?.phase ?? "running";
+  const machineState = status?.machineState ?? null;
+  const reach = status?.reach.state ?? null;
+  const pane = useMemo(
+    () => terminalPaneState({ state: workspaceState({ phase, machineState, reach }), reach, socket }),
+    [phase, machineState, reach, socket],
+  );
+  const onWake = useCallback(() => void wake(workspaceId), [wake, workspaceId]);
+  return { pane, onWake };
+}
+
 export function WorkspaceTerminalDrawer({ workspaceId }: { workspaceId: string }) {
   const terms = useSyncExternalStore(onTerminals, () => getTerminals(workspaceId));
   const ui = useTerminalDrawerStore(s => selectTerminalUiState(s.byWorkspaceId, workspaceId));
@@ -47,6 +70,8 @@ function LinkedDrawer({ terms, workspaceId, ui }: { terms: WorkspaceTerminals; w
   const panelIds = useRightPanelStore(useShallow(s => selectPanelTerminalIds(s.byWorkspaceId, workspaceId)));
   const ids = useMemo(() => tabs.map(t => t.ptyId).filter(id => !panelIds.includes(id)), [tabs, panelIds]);
   const labels = useMemo(() => terminalLabels(tabs), [tabs]);
+  const lost = useMemo(() => lostTerminals(tabs), [tabs]);
+  const { pane, onWake } = useTerminalPane(workspaceId, status);
   const terminalIo = useCallback((id: string) => terms.io(id), [terms]);
   const store = useTerminalDrawerStore;
 
@@ -73,7 +98,9 @@ function LinkedDrawer({ terms, workspaceId, ui }: { terms: WorkspaceTerminals; w
       terminalGroups={shown.terminalGroups}
       activeTerminalGroupId={shown.activeTerminalGroupId}
       focusRequestId={0}
-      terminalsReachable={status === "live"}
+      pane={pane}
+      onWake={onWake}
+      lostTerminalIds={lost}
       onSplitTerminal={() => split("horizontal")}
       onSplitTerminalVertical={() => split("vertical")}
       onNewTerminal={() => void openDrawerTerminal(workspaceId)}

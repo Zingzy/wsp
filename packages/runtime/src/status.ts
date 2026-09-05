@@ -13,9 +13,21 @@ import type { ExecResult, MachineState, PreviewReach } from "@wsp/engine";
 import type { EventUnion, ReachState, ReachStatus, WorkspacePhase, WorkspaceSize, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 import { realClock, type Clock } from "./clock.js";
 
-/** The provider word the runtime's own phase implies: a wake in flight is a machine starting. */
+/** The provider word the runtime's own phase implies: a wake in flight is a machine starting, a pause in flight still runs. */
 export function machineStateOf(phase: WorkspacePhase): MachineState {
-  return phase === "running" ? "running" : phase === "napping" ? "paused" : "starting";
+  switch (phase) {
+    case "running":
+    case "pausing":
+      return "running";
+    case "napping":
+      return "paused";
+    case "waking":
+      return "starting";
+    default: {
+      const _exhaustive: never = phase;
+      return "running";
+    }
+  }
 }
 
 export interface ProbeOptions {

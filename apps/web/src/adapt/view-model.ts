@@ -198,7 +198,8 @@ export interface PreviewableServer {
 
 export type EnvironmentPresence = "local-only" | "remote-only" | "mixed";
 
-export type StatusIndicatorTone = "running" | "connecting" | "paused" | "error" | "neutral";
+/** Green is running only; paused draws hollow; everything else is zinc (the colour law). */
+export type StatusIndicatorTone = "running" | "paused" | "neutral";
 
 /** Colour is the component's job (tokens); the adapter names the state and whether it pulses. */
 export interface StatusIndicator {

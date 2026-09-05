@@ -162,6 +162,46 @@ describe("ChatView", () => {
     expect(screen.getByText(/session exited without a result \(exit code 137\)/i)).toBeDefined();
   });
 
+  it("a session the runtime ended for a nap shows its reason as the last row and settles the thread", async () => {
+    const { api, emit } = fixtureApi([workspace]);
+    await setup(api);
+    emit({ type: "session.start", ...scope, prompt: "hi" });
+    emit({ type: "session.delta", ...scope, kind: "text", text: "Starting on it." });
+    expect(screen.getByText(/Working/)).toBeDefined();
+    emit({ type: "session.end", ...scope, exitCode: null, sawResult: false, reason: "machine paused while the agent was working" });
+    expect(screen.queryByText(/Working for/)).toBeNull();
+    const rows = [...document.querySelectorAll<HTMLElement>("[data-timeline-row-id]")];
+    expect(rows.at(-1)?.textContent).toMatch(/machine paused while the agent was working/i);
+    expect(screen.getByTestId("settled-footer").textContent).toContain("failed");
+  });
+
+  it("a turn in flight on a paused workspace waits for the machine with a Wake that calls the wake op; unreachable waits without one", async () => {
+    const wakes: string[] = [];
+    const { api, emit } = fixtureApi([workspace]);
+    api.wake = async id => { wakes.push(id); return workspace; };
+    await setup(api);
+    emit({ type: "session.start", ...scope, prompt: "hi" });
+    expect(screen.getByText(/Working/)).toBeDefined();
+    const status = { ...workspace, machineState: "paused" as const, reach: { state: "napping" as const }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 };
+    emit({ type: "workspace.status", status: { ...status, phase: "pausing" } });
+    await screen.findByText("Waiting for the machine to wake");
+    expect(screen.queryByText(/Working for/)).toBeNull();
+    expect(screen.queryByText("Thinking")).toBeNull();
+    emit({ type: "workspace.napped", workspaceId: WS });
+    fireEvent.click(screen.getByRole("button", { name: "Wake" }));
+    await waitFor(() => expect(wakes).toEqual([WS]));
+    expect(useStore.getState().workspaces[0]!.phase).toBe("waking");
+    await screen.findByText("Waking the machine");
+    expect(screen.queryByRole("button", { name: "Wake" })).toBeNull();
+    emit({ type: "workspace.woken", workspaceId: WS, machineId: "m1", resurrected: false });
+    emit({ type: "workspace.status", status: { ...status, phase: "running", machineState: "running", reach: { state: "unreachable" } } });
+    await screen.findByText("Waiting for the machine to answer");
+    expect(screen.queryByRole("button", { name: "Wake" })).toBeNull();
+    emit({ type: "workspace.status", status: { ...status, phase: "running", machineState: "running", reach: { state: "reachable" } } });
+    await screen.findByText(/Working/);
+    expect(screen.queryByText(/Waiting for/)).toBeNull();
+  });
+
   it("clears to the empty headline on a new-thread request and shows the fresh turn that follows", async () => {
     const { api, emit } = fixtureApi([workspace], { [WS]: settledTurn(WS, "add a health route", "Added GET /health.") });
     await setup(api);

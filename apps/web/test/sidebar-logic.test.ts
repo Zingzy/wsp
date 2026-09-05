@@ -19,7 +19,9 @@ import {
   defaultWorkspaceName,
   explainCreateRefusal,
   idleCountdownLabel,
+  dotClassForTone,
   pillFromIndicator,
+  textClassForTone,
   reachNote,
 } from "../src/sidebar/workspaceRows.js";
 import { formatRelativeTimeLabel } from "../src/lib/timestampFormat.js";
@@ -63,12 +65,11 @@ describe("copied traversal and rollup", () => {
     expect(resolveAdjacentThreadId({ threadIds: ids, currentThreadId: "zz", direction: "next" })).toBeNull();
   });
 
-  it("the rollup puts a failure above work in motion and both above a completion", () => {
+  it("the rollup puts work in motion above a thread that ended", () => {
     const working: ThreadStatusPill = { label: "Working", colorClass: "", dotClass: "", pulse: true };
-    const failed: ThreadStatusPill = { label: "Failed", colorClass: "", dotClass: "", pulse: false };
-    const completed: ThreadStatusPill = { label: "Completed", colorClass: "", dotClass: "", pulse: false };
-    expect(resolveProjectStatusIndicator([null, completed, working])?.label).toBe("Working");
-    expect(resolveProjectStatusIndicator([null, working, failed])?.label).toBe("Failed");
+    const ended: ThreadStatusPill = { label: "Ended", colorClass: "", dotClass: "", pulse: false };
+    expect(resolveProjectStatusIndicator([null, ended, working])?.label).toBe("Working");
+    expect(resolveProjectStatusIndicator([null, ended])?.label).toBe("Ended");
     expect(resolveProjectStatusIndicator([null])).toBeNull();
   });
 });
@@ -109,11 +110,16 @@ describe("workspace row labels", () => {
     expect(costLabel({ phase: "napping", rateUsdPerHour: null, accruedUsd: null })).toBeNull();
   });
 
-  it("thread pills: working pulses, failed is red, settled rows carry no pill", () => {
-    expect(pillFromIndicator({ label: "Working", tone: "running", pulse: true })).toMatchObject({ label: "Working", pulse: true });
-    expect(pillFromIndicator({ label: "Failed", tone: "error", pulse: false })).toMatchObject({ label: "Failed" });
-    expect(pillFromIndicator({ label: "Completed", tone: "neutral", pulse: false })).toBeNull();
+  it("thread pills: working pulses, ended is plain, idle rows carry no pill; nothing but running is green", () => {
+    expect(pillFromIndicator({ label: "Working", tone: "neutral", pulse: true })).toMatchObject({ label: "Working", pulse: true, dotClass: expect.stringContaining("zinc") });
+    expect(pillFromIndicator({ label: "Ended", tone: "neutral", pulse: false })).toMatchObject({ label: "Ended", dotClass: expect.stringContaining("zinc") });
+    expect(pillFromIndicator({ label: "Idle", tone: "neutral", pulse: false })).toBeNull();
     expect(pillFromIndicator(null)).toBeNull();
+    expect(dotClassForTone("running")).toContain("emerald");
+    expect(dotClassForTone("paused")).toContain("zinc");
+    expect(dotClassForTone("neutral")).toContain("zinc");
+    expect(textClassForTone("running")).toContain("emerald");
+    expect(textClassForTone("neutral")).toBe("text-muted-foreground/70");
   });
 
   it("relative time: t3code's label, compacted for the row", () => {

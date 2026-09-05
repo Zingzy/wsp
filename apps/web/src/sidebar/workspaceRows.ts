@@ -33,26 +33,18 @@ export function costLabel(input: {
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
-const SKY = { colorClass: "text-sky-600 dark:text-sky-300/80", dotClass: "bg-sky-500 dark:bg-sky-300/80" };
-const RED = { colorClass: "text-red-600 dark:text-red-300/90", dotClass: "bg-red-500 dark:bg-red-300/90" };
+const ZINC = { colorClass: "text-muted-foreground/70", dotClass: "bg-zinc-400 dark:bg-zinc-500" };
 
-/** Ready is the unlabeled resting state, so settled and paused rows get no pill. */
+/** Idle is the unlabeled resting state; Working and Ended carry a pill, zinc like everything that is not running. */
 export function pillFromIndicator(indicator: StatusIndicator | null): ThreadStatusPill | null {
   if (!indicator) return null;
-  switch (indicator.tone) {
-    case "running":
-      return { label: "Working", ...SKY, pulse: indicator.pulse };
-    case "connecting":
-      return { label: "Connecting", ...SKY, pulse: indicator.pulse };
-    case "error":
-      return { label: "Failed", ...RED, pulse: false };
-    case "neutral":
-    case "paused":
+  switch (indicator.label) {
+    case "Working":
+      return { label: "Working", ...ZINC, pulse: indicator.pulse };
+    case "Ended":
+      return { label: "Ended", ...ZINC, pulse: false };
+    default:
       return null;
-    default: {
-      const _exhaustive: never = indicator.tone;
-      return null;
-    }
   }
 }
 
@@ -60,12 +52,8 @@ export function dotClassForTone(tone: StatusIndicatorTone): string {
   switch (tone) {
     case "running":
       return "bg-emerald-500 dark:bg-emerald-300/90";
-    case "connecting":
-      return "bg-sky-500 dark:bg-sky-300/80";
     case "paused":
       return "border border-zinc-400 bg-transparent dark:border-zinc-500";
-    case "error":
-      return "bg-red-500 dark:bg-red-300/90";
     case "neutral":
       return "bg-zinc-400 dark:bg-zinc-500";
     default: {
@@ -79,10 +67,6 @@ export function textClassForTone(tone: StatusIndicatorTone): string {
   switch (tone) {
     case "running":
       return "text-emerald-600 dark:text-emerald-300/90";
-    case "connecting":
-      return "text-sky-600 dark:text-sky-300/80";
-    case "error":
-      return "text-red-600 dark:text-red-300/90";
     case "paused":
     case "neutral":
       return "text-muted-foreground/70";

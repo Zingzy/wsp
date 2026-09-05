@@ -230,9 +230,18 @@ describe("composer while the workspace is not live", () => {
     const { api } = fixtureApi([{ ...workspace, phase: "napping" }]);
     await setup(api);
     expect(isEditable(composerEditor())).toBe(false);
-    expect(screen.getByRole("status").textContent).toContain("Workspace is napping; wake it to send");
-    expect(sendButton().getAttribute("aria-label")).toBe("Workspace is napping; wake it to send");
+    expect(screen.getByRole("status").textContent).toContain("Workspace is paused; wake it to send");
+    expect(sendButton().getAttribute("aria-label")).toBe("Workspace is paused; wake it to send");
     expect(sendButton().disabled).toBe(true);
+  });
+
+  it("a pushed pausing status disables the send while the view still says running", async () => {
+    const { api, emit } = fixtureApi([workspace]);
+    await setup(api);
+    await waitFor(() => expect(isEditable(composerEditor())).toBe(true));
+    emit({ type: "workspace.status", status: { ...workspace, phase: "pausing", machineState: "running", reach: { state: "napping" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 } });
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Workspace is pausing; wake it to send"));
+    expect(isEditable(composerEditor())).toBe(false);
   });
 
   it("disables the editor while the runtime socket is down and comes back with it", async () => {
@@ -266,7 +275,7 @@ describe("composer while the workspace is not live", () => {
 });
 
 describe("composerUnavailableReason", () => {
-  const live = { conn: "live" as const, hasApi: true, phase: "running" as const, machineState: "running" as const, hydrated: true, finishing: false };
+  const live = { conn: "live" as const, hasApi: true, phase: "running" as const, machineState: "running" as const, reach: "reachable" as const, hydrated: true, finishing: false };
   it("names the first thing in the way, socket first", () => {
     expect(composerUnavailableReason(live)).toBeNull();
     expect(composerUnavailableReason({ ...live, hasApi: false })).toBe("Connecting to wsp");
@@ -274,12 +283,16 @@ describe("composerUnavailableReason", () => {
     expect(composerUnavailableReason({ ...live, conn: "reconnecting", phase: "napping" })).toBe("wsp is not running, reconnecting");
     expect(composerUnavailableReason({ ...live, conn: "closed" })).toBe("wsp is not running");
     expect(composerUnavailableReason({ ...live, phase: null })).toBe("Workspace not found");
-    expect(composerUnavailableReason({ ...live, machineState: "gone" })).toBe("Workspace machine is gone");
-    expect(composerUnavailableReason({ ...live, phase: "napping" })).toBe("Workspace is napping; wake it to send");
-    expect(composerUnavailableReason({ ...live, phase: "waking" })).toBe("Workspace is waking");
+    expect(composerUnavailableReason({ ...live, machineState: "gone" })).toBe("Workspace machine is gone; rebuild it to send");
+    expect(composerUnavailableReason({ ...live, phase: "napping" })).toBe("Workspace is paused; wake it to send");
+    expect(composerUnavailableReason({ ...live, phase: "pausing" })).toBe("Workspace is pausing; wake it to send");
+    expect(composerUnavailableReason({ ...live, machineState: "paused" })).toBe("Workspace is paused; wake it to send");
+    expect(composerUnavailableReason({ ...live, phase: "waking" })).toBe("Workspace is waking; sends open when it is running");
+    expect(composerUnavailableReason({ ...live, reach: "unreachable" })).toBe("Workspace is unreachable; sends open when the machine answers");
+    expect(composerUnavailableReason({ ...live, reach: "slow" })).toBeNull();
     expect(composerUnavailableReason({ ...live, hydrated: false })).toBe("Loading transcript");
     expect(composerUnavailableReason({ ...live, finishing: true })).toBe("Finishing the previous turn");
     expect(composerUnavailableReason({ ...live, hydrated: false, finishing: true })).toBe("Loading transcript");
-    expect(composerUnavailableReason({ ...live, machineState: null })).toBeNull();
+    expect(composerUnavailableReason({ ...live, machineState: null, reach: null })).toBeNull();
   });
 });
