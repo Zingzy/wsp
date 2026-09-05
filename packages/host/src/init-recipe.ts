@@ -6,7 +6,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type LoginChoice, type Manifest, type ManifestEntry, type Rung, parseManifest } from "@wsp/collect";
-import { neverCopied, type RecipeDigest } from "@wsp/engine";
+import { agentOwning, linuxCaskByBin, linuxCaskFor, neverCopied, type RecipeDigest } from "@wsp/engine";
 import type { GoldenImport, GoldenRecipe, Machine } from "@wsp/runtime";
 import type { Keys } from "./cli.js";
 import { GUEST_ENVS, claudeEnvs } from "./doctor.js";
@@ -53,6 +53,83 @@ export function lockRefused(manifest: Manifest, isDir: (rel: string) => boolean 
       return note === undefined ? e : { ...e, default: "skip", reason: note };
     }),
   };
+}
+
+/** The tools rows for casks that are commands with a Linux release of their own: open to a tick, unticked unless saved so. */
+export function linuxCaskRows(entries: readonly ManifestEntry[]): ManifestEntry[] {
+  return entries.map(e => {
+    if (e.rung !== "tools" || linuxCaskFor(e.id) === undefined) return e;
+    const { reason: _reason, ...rest } = e;
+    return { ...rest, default: "skip", linux: "yes" };
+  });
+}
+
+/** The tools rows without a package an agent on the Agents screen installs itself: one tool, one row, one install. */
+export function withoutAgentTools(entries: readonly ManifestEntry[]): ManifestEntry[] {
+  const agents = new Set(entries.filter(e => e.rung === "agents").map(e => e.id));
+  return entries.filter(e => {
+    const agent = e.rung === "tools" ? agentOwning(e.id) : undefined;
+    return agent === undefined || !agents.has(`agents/${agent}`);
+  });
+}
+
+/** The command a CLI login is for; an agent's login follows its agent row instead (see loginShown). */
+const LOGIN_BIN: Readonly<Record<string, string>> = { gh: "gh", gcloud: "gcloud", wrangler: "wrangler", cloudflared: "cloudflared", vercel: "vercel", aws: "aws", kube: "kubectl" };
+/** Packages not named for the command they put on PATH. */
+const ROW_BIN: Readonly<Record<string, string>> = { awscli: "aws", "kubernetes-cli": "kubectl", "cloudflare-wrangler": "wrangler" };
+/** What would bring a command no tools row lists, when the Linux cask table does not say; the detail pane has 76 columns. */
+const BRINGS: Readonly<Record<string, string>> = { gh: "brew install gh", cloudflared: "brew install cloudflared", aws: "brew install awscli", wrangler: "npm install -g wrangler", vercel: "npm install -g vercel" };
+
+/** The command a tools row puts on PATH, when the row is a package or a cask that is a command. */
+function rowBin(t: ManifestEntry): string | undefined {
+  const cask = linuxCaskFor(t.id);
+  if (cask !== undefined) return cask.bin;
+  const m = /^tools\/(?:brew|cli|npm|pnpm|bun|uv|pipx|cargo|go)\/(.+)$/.exec(t.id);
+  if (m === null) return undefined;
+  const pkg = m[1]!;
+  return ROW_BIN[pkg] ?? pkg.slice(pkg.lastIndexOf("/") + 1);
+}
+
+function brings(bin: string): string {
+  const cask = linuxCaskByBin(bin);
+  return cask !== undefined ? `a ${cask.casks[0]} cask would bring it` : `${BRINGS[bin] ?? `installing ${bin}`} brings it`;
+}
+
+export interface LoginTool {
+  /** The command the login is for. */
+  bin: string;
+  /** The tools row that puts it on the machine, when this computer has one. */
+  row?: ManifestEntry;
+  /** Whether the command lands on the machine with the ticks as they stand. */
+  coming: boolean;
+  /** When it is not coming: why, and what brings it. */
+  why?: string;
+}
+
+/** Whether the command a CLI login needs is coming with the ticks so far; undefined for a login that follows an agent. */
+export function loginTool(e: ManifestEntry, manifest: Manifest, coming: ReadonlySet<string>): LoginTool | undefined {
+  const bin = e.rung === "logins" ? LOGIN_BIN[agentName(e)] : undefined;
+  if (bin === undefined) return undefined;
+  const rows = manifest.entries.filter(t => t.rung === "tools" && rowBin(t) === bin);
+  const row = rows.find(r => coming.has(r.id)) ?? rows.find(isTickable) ?? rows[0];
+  if (row === undefined) return { bin, coming: false, why: `${bin} is not coming: no row lists it; ${brings(bin)}` };
+  if (!isTickable(row)) return { bin, row, coming: false, why: `${bin} is not coming: its tool row cannot come (${row.reason})` };
+  if (!coming.has(row.id)) return { bin, row, coming: false, why: `${bin} is not coming: its tool row is unticked; copy or sign in ticks it` };
+  return { bin, row, coming: true };
+}
+
+/** Every login answered copy or sign in ticks the row of the command it needs, when that row can come; the rows ticked, by label. */
+export function tickLoginTools(manifest: Manifest, choices: ReadonlyMap<string, string>, ticks: Set<string>): string[] {
+  const added: string[] = [];
+  for (const e of manifest.entries) {
+    const choice = e.rung === "logins" ? choices.get(e.id) : undefined;
+    if (choice === undefined || choice === "skip") continue;
+    const tool = loginTool(e, manifest, ticks);
+    if (tool?.row === undefined || tool.coming || !isTickable(tool.row)) continue;
+    ticks.add(tool.row.id);
+    added.push(tool.row.label);
+  }
+  return added;
 }
 
 export function isTickable(e: ManifestEntry): boolean {

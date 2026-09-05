@@ -2,7 +2,7 @@
 import { linuxSupport } from "../brew-bottles.js";
 import type { Host } from "../host.js";
 import type { ManifestEntry } from "../manifest.js";
-import { exists, found, entry, item, present } from "./common.js";
+import { exists, firstLine, found, entry, item, present } from "./common.js";
 
 export interface BrewLine {
   kind: "tap" | "brew" | "cask" | "mas";
@@ -130,13 +130,34 @@ interface GlobalManager {
   id: string;
   bin: string;
   group: string;
+  /** The packages, when one listing is not the whole story; args and parse otherwise. */
+  list?: (host: Host) => Promise<Pkg[]>;
   args: string[];
   parse: (out: string) => Pkg[];
   sep: string;
 }
 
+const NPM_LS = ["ls", "-g", "--depth=0", "--json"];
+/** Where another node once kept its globals; a laptop that moved to a new node still runs them from PATH. */
+const NPM_PREFIXES = ["/opt/homebrew", "/usr/local"];
+
+/** npm's own prefix, then every other prefix on this laptop that holds globals; a name in both is the own prefix's. */
+async function npmGlobals(host: Host): Promise<Pkg[]> {
+  const own = firstLine(await host.exec.run("npm", ["prefix", "-g"]));
+  const out = new Map<string, Pkg>();
+  const add = (pkgs: Pkg[]): void => {
+    for (const p of pkgs) if (!out.has(p.name)) out.set(p.name, p);
+  };
+  add(parseNpmGlobals((await host.exec.run("npm", NPM_LS)) ?? ""));
+  for (const prefix of NPM_PREFIXES) {
+    if (prefix === own || !(await exists(host, `${prefix}/lib/node_modules`))) continue;
+    add(parseNpmGlobals((await host.exec.run("npm", [...NPM_LS, "--prefix", prefix])) ?? ""));
+  }
+  return [...out.values()];
+}
+
 const GLOBALS: readonly GlobalManager[] = [
-  { id: "npm", bin: "npm", group: "npm globals", args: ["ls", "-g", "--depth=0", "--json"], parse: parseNpmGlobals, sep: "@" },
+  { id: "npm", bin: "npm", group: "npm globals", list: npmGlobals, args: NPM_LS, parse: parseNpmGlobals, sep: "@" },
   { id: "pnpm", bin: "pnpm", group: "pnpm globals", args: ["ls", "-g", "--depth=0", "--json"], parse: parsePnpmGlobals, sep: "@" },
   { id: "bun", bin: "bun", group: "bun globals", args: ["pm", "ls", "-g"], parse: parseBunGlobals, sep: "@" },
   { id: "pipx", bin: "pipx", group: "pipx", args: ["list", "--json"], parse: parsePipxList, sep: " " },
@@ -298,8 +319,8 @@ export async function detectTools(host: Host): Promise<ManifestEntry[]> {
   // Language package managers run on Linux and fetch each package's own Linux build.
   for (const g of GLOBALS) {
     if (!(await host.exec.which(g.bin))) continue;
-    const out = await host.exec.run(g.bin, g.args);
-    for (const p of g.parse(out ?? "")) {
+    const pkgs = g.list !== undefined ? await g.list(host) : g.parse((await host.exec.run(g.bin, g.args)) ?? "");
+    for (const p of pkgs) {
       rows.push(item({ rung: "tools", id: `tools/${g.id}/${p.name}`, label: versioned(p, g.sep), group: g.group, linux: "yes", ...(p.version !== undefined ? { version: p.version } : {}) }));
     }
   }

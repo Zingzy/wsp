@@ -1028,6 +1028,7 @@ describe("wsp init, the sign-in stage", () => {
   const CODEX_MANIFEST: Manifest = {
     entries: [
       FIXTURE.entries[0]!,
+      { rung: "tools", id: "tools/brew/kubernetes-cli", label: "kubernetes-cli", group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "yes" },
       { rung: "logins", id: "logins/codex", label: "Codex login", group: "Agent logins", paths: ["~/.codex/auth.json"], bytes: 300, default: "skip" },
       { rung: "logins", id: "logins/kube", label: "kubectl config", group: "CLI logins", paths: ["~/.kube/config"], bytes: 900, default: "skip" },
     ],
@@ -1037,6 +1038,8 @@ describe("wsp init, the sign-in stage", () => {
     const f = fake({ signedIn: false, hold: true, collect: async () => CODEX_MANIFEST });
     const run = runInit(f.opts, f.io);
     await f.until("Identity");
+    await f.press(KEY.enter);
+    await f.until("Tools");
     await f.press(KEY.enter);
     await f.until("Sign-ins");
     expect(f.text()).toMatch(/Codex login\s+sign in/);
@@ -1124,6 +1127,8 @@ describe("wsp init, the sign-in stage", () => {
     const run = runInit(f.opts, f.io);
     await f.until("Identity");
     await f.press(KEY.enter);
+    await f.until("Tools");
+    await f.press(KEY.enter);
     await f.until("Sign-ins");
     await f.press(KEY.enter);
     await f.until(BOOT);
@@ -1180,6 +1185,8 @@ describe("wsp init, the sign-in stage", () => {
     const f = fake({ signedIn: false, hold: true, collect: async () => CODEX_MANIFEST });
     const run = runInit(f.opts, f.io);
     await f.until("Identity");
+    await f.press(KEY.enter);
+    await f.until("Tools");
     await f.press(KEY.enter);
     await f.until("Sign-ins");
     await f.press(KEY.enter);
@@ -1240,6 +1247,8 @@ describe("wsp init, the sign-in stage", () => {
     const run = runInit(f.opts, f.io);
     await f.until("Identity");
     await f.press(KEY.enter);
+    await f.until("Tools");
+    await f.press(KEY.enter);
     await f.until("Sign-ins");
     await f.press(KEY.enter);
     await f.until(BOOT);
@@ -1263,6 +1272,8 @@ describe("wsp init, logins copied to the machine", () => {
   const COPIED_MANIFEST: Manifest = {
     entries: [
       FIXTURE.entries[0]!,
+      { rung: "tools", id: "tools/brew/gh", label: "gh", group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "yes" },
+      { rung: "tools", id: "tools/brew/kubernetes-cli", label: "kubernetes-cli", group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "yes" },
       { rung: "logins", id: "logins/gh", label: "GitHub CLI login", group: "CLI logins", paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"], bytes: 200, default: "bring" },
       { rung: "logins", id: "logins/kube", label: "kubectl config", group: "CLI logins", paths: ["~/.kube/config"], bytes: 900, default: "bring" },
     ],
@@ -1299,6 +1310,8 @@ describe("wsp init, logins copied to the machine", () => {
   async function toTheBuilder(f: Fake): Promise<{ run: ReturnType<typeof runInit> }> {
     const run = runInit(f.opts, f.io);
     await f.until("Identity");
+    await f.press(KEY.enter);
+    await f.until("Tools");
     await f.press(KEY.enter);
     await f.until("Sign-ins");
     expect(f.text()).toMatch(/GitHub CLI login\s+copy/);
@@ -1741,7 +1754,8 @@ describe("wsp init, flags and no terminal", () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
     dirs.push(dir);
     const path = join(dir, "recipe.json");
-    const saved = { entries: FIXTURE.entries.map(e => ({ ...e, bring: e.id === "identity/git-user" || e.id === "shell/zshrc" })) };
+    // The logins are answered skip outright: a sign-in answer would tick the row of the command it needs.
+    const saved = { entries: FIXTURE.entries.map(e => ({ ...e, bring: e.id === "identity/git-user" || e.id === "shell/zshrc", ...(e.rung === "logins" ? { choice: "skip" } : {}) })) };
     writeFileSync(path, JSON.stringify(saved));
     const f = fake({ tty: false, yes: true, manifestPath: path, collect: async () => { throw new Error("collect must not run with --manifest"); } });
     const result = await runInit(f.opts, f.io);
@@ -3795,5 +3809,100 @@ describe("wsp init with a golden already built from a recipe", () => {
     const f = next({ tty: false });
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     expect(f.text()).toContain("Small change: update on a fork of the golden, about two minutes");
+  });
+});
+
+describe("wsp init, a login whose command is not coming", () => {
+  /** gcloud-cli as the collector reads it: a command row, locked since Google's release is not on GitHub, with the Mac's version. */
+  const GCLOUD_CASK: ManifestEntry = { rung: "tools", id: "tools/cli/gcloud", label: "gcloud (gcloud-cli)", group: "Command-line tools", paths: [], bytes: 0, default: "skip", reason: "command-line tool, but not from a GitHub release; no Linux install path", linux: "no", version: "575.0.0" };
+  const GCLOUD_LOGIN: ManifestEntry = { rung: "logins", id: "logins/gcloud", label: "Google Cloud login", group: "CLI logins", paths: ["~/.config/gcloud/credentials.db"], bytes: 4000, default: "bring" };
+  const WRANGLER_LOGIN: ManifestEntry = { rung: "logins", id: "logins/wrangler", label: "Cloudflare Wrangler login", group: "CLI logins", paths: ["~/Library/Preferences/.wrangler/config/default.toml"], bytes: 300, default: "bring" };
+  const LAPTOP: Manifest = { entries: [...FIXTURE.entries.filter(e => e.rung !== "logins" || e.id === "logins/gh"), GCLOUD_CASK, GCLOUD_LOGIN, WRANGLER_LOGIN] };
+  const savedRow = (id: string) => loadManifest(join(dirs[0]!, "golden-recipe.json")).entries.find(e => e.id === id)!;
+  /** A card's wrapped closing lines as one line each. */
+  const unwrapped = (card: string): string => card.replace(/\n│ {12}/g, " ");
+
+  it("the Tools screen offers the cask from Google's release; the Sign-ins screen says which commands are not coming, starts them at skip, and a copy answer ticks the cask", async () => {
+    const f = fake({ collect: async () => LAPTOP });
+    const run = runInit(f.opts, f.io);
+    for (const rung of ["Identity", "Shell", "Editors", "Toolchains"]) {
+      await f.until(rung);
+      await f.press(KEY.enter);
+    }
+    await f.until("Tools");
+    // Down to the casks: open to a tick, unticked, from Google's release, where an app cask is locked with "stays here".
+    await f.press(...Array.from({ length: 10 }, () => KEY.down));
+    await f.until(/○ gcloud \(gcloud-cli\)\s+Google's Linux release\n/);
+    await f.until(/○ rectangle\s+stays here\n/);
+    await f.until("from Google's Linux release, checksum recorded on first install");
+    await f.press(KEY.enter);
+    await f.until("Agents");
+    await f.press(KEY.enter);
+    await f.until("Sign-ins");
+    expect(f.text()).toMatch(/GitHub CLI login\s+copy\n/);
+    expect(f.text()).toMatch(/Google Cloud login\s+gcloud not coming\s+skip\n/);
+    expect(f.text()).toMatch(/Cloudflare Wrangler login\s+wrangler not coming\s+skip\n/);
+    // Down past the heading and gh onto gcloud: the detail says why and what a copy does; space answers copy.
+    await f.press(KEY.down, KEY.down);
+    await f.until("gcloud is not coming: its tool row is unticked; copy or sign in ticks it");
+    await f.press(KEY.space);
+    await f.until(/Google Cloud login\s+gcloud not coming\s+copy/);
+    await f.press(KEY.down);
+    await f.until("wrangler is not coming: no row lists it; npm install -g wrangler brings it");
+    await f.press(KEY.enter);
+    await f.until(BOOT);
+    expect(f.text()).toContain("ticked under Tools for the sign-ins: gcloud (gcloud-cli)");
+    const summary = f.text().slice(f.text().lastIndexOf("Summary"), f.text().lastIndexOf("Recipe saved"));
+    expect(summary).toMatch(/Tools\s+4 of 5\n/);
+    expect(summary).toMatch(/Google Cloud login\s+copy\n/);
+    expect(summary).toMatch(/Cloudflare Wrangler login\s+skip\n/);
+    expect(unwrapped(summary)).toContain("4 tools plus Homebrew's toolchain, gcloud (gcloud-cli) from Google's Linux release (checksum recorded on first install)");
+    await f.press(KEY.enter);
+    expect((await run).code).toBe(1);
+    expect(savedRow("tools/cli/gcloud")).toMatchObject({ bring: true, default: "skip", linux: "yes", version: "575.0.0" });
+    expect(savedRow("tools/cli/gcloud").reason).toBeUndefined();
+    expect(savedRow("logins/gcloud")).toMatchObject({ bring: true, choice: "copy" });
+    expect(savedRow("logins/wrangler")).toMatchObject({ bring: false, choice: "skip" });
+  });
+
+  it("under --yes a fresh collection skips the logins whose commands are not coming and installs no cask for them", async () => {
+    const f = fake({ yes: true, collect: async () => LAPTOP });
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    const summary = f.text().slice(f.text().indexOf("Summary"), f.text().indexOf("Recipe saved"));
+    expect(summary).toMatch(/Google Cloud login\s+skip\n/);
+    expect(summary).toMatch(/Cloudflare Wrangler login\s+skip\n/);
+    expect(summary).not.toContain("gcloud (gcloud-cli) from");
+    expect(savedRow("tools/cli/gcloud")).toMatchObject({ bring: false });
+    expect(savedRow("logins/gcloud")).toMatchObject({ bring: false, choice: "skip" });
+    // Neither login reached the sign-in stage, so neither is in the notes.
+    expect(JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8")).logins.map((l: { id: string }) => l.id)).not.toContain("logins/gcloud");
+  });
+
+  it("a saved recipe that copies the Google Cloud login with its cask unticked, as one run of his did, brings the cask with it under --yes", async () => {
+    const f = fake({ yes: true });
+    const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
+    dirs.push(dir);
+    f.opts.manifestPath = join(dir, "recipe.json");
+    writeFileSync(f.opts.manifestPath, JSON.stringify({ entries: LAPTOP.entries.map(e => (e.id === "logins/gcloud" ? { ...e, bring: true, choice: "copy" } : e.id === "logins/wrangler" ? { ...e, bring: false, choice: "skip" } : { ...e, bring: e.default === "bring" })) }));
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    expect(f.text()).toContain("ticked under Tools for the sign-ins: gcloud (gcloud-cli)");
+    const summary = f.text().slice(f.text().indexOf("Summary"), f.text().indexOf("Recipe saved"));
+    expect(summary).toMatch(/Google Cloud login\s+copy\n/);
+    expect(unwrapped(summary)).toContain("gcloud (gcloud-cli) from Google's Linux release (checksum recorded on first install)");
+    expect(savedRow("tools/cli/gcloud")).toMatchObject({ bring: true });
+    const tools = JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8")).tools as { id: string; outcome: string }[];
+    expect(tools.find(t => t.id === "tools/cli/gcloud")).toMatchObject({ outcome: "installed" });
+  });
+
+  it("the card says a pinned kubectl is checked against the first install on the second run, whatever version Docker Desktop moved to", async () => {
+    const f = fake({ yes: true });
+    const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
+    dirs.push(dir);
+    f.opts.manifestPath = join(dir, "recipe.json");
+    const docker: ManifestEntry = { rung: "tools", id: "tools/brew-cask/docker-desktop", label: "docker-desktop", group: "Homebrew casks", paths: [], bytes: 0, default: "skip", linux: "yes", version: "4.81.0,240001", pin: { tag: "v1.37.0", sha256: "c".repeat(64) }, bring: true };
+    writeFileSync(f.opts.manifestPath, JSON.stringify({ entries: [...LAPTOP.entries.map(e => ({ ...e, bring: e.default === "bring" })), docker] }));
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    const summary = f.text().slice(f.text().indexOf("Summary"), f.text().indexOf("Recipe saved"));
+    expect(unwrapped(summary)).toContain("docker-desktop from Kubernetes release (checksum checked against the first install)");
   });
 });

@@ -13,9 +13,13 @@ import {
   refusedNote,
   initialTicks,
   isTickable,
+  linuxCaskRows,
   loadManifest,
+  loginTool,
   recipePath,
   saveRecipe,
+  tickLoginTools,
+  withoutAgentTools,
 } from "../src/init-recipe.js";
 import { FIXTURE, byId } from "./init-fixture.js";
 
@@ -48,6 +52,88 @@ describe("login choices", () => {
     expect(initialChoice({ ...byId("logins/claude"), choice: "copy" })).toBe("copy");
   });
 
+});
+
+describe("the command a login needs", () => {
+  const GCLOUD_CASK: ManifestEntry = { rung: "tools", id: "tools/brew-cask/gcloud-cli", label: "gcloud-cli", group: "Homebrew casks", paths: [], bytes: 0, default: "skip", reason: "macOS app, no Linux build", linux: "no" };
+  const DOCKER_CASK: ManifestEntry = { ...GCLOUD_CASK, id: "tools/brew-cask/docker-desktop", label: "docker-desktop" };
+  const RECTANGLE: ManifestEntry = { ...GCLOUD_CASK, id: "tools/brew-cask/rectangle", label: "rectangle" };
+  const AWSCLI: ManifestEntry = { rung: "tools", id: "tools/brew/awscli", label: "awscli", group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "yes" };
+  /** gcloud-cli as the collector reads it when brew info answers: a command row, locked since Google's release is not on GitHub. */
+  const GCLOUD_CLI: ManifestEntry = { rung: "tools", id: "tools/cli/gcloud", label: "gcloud (gcloud-cli)", group: "Command-line tools", paths: [], bytes: 0, default: "skip", reason: "command-line tool, but not from a GitHub release; no Linux install path", linux: "no", version: "575.0.0" };
+  const login = (id: string, label: string): ManifestEntry => ({ rung: "logins", id: `logins/${id}`, label, group: "CLI logins", paths: [`~/.${id}`], bytes: 10, default: "bring" });
+  const GCLOUD = login("gcloud", "Google Cloud login");
+  const WRANGLER = login("wrangler", "Cloudflare Wrangler login");
+  const KUBE = login("kube", "kubectl config");
+  const AWS = login("aws", "AWS keys and profiles");
+  const opened = linuxCaskRows([GCLOUD_CASK, DOCKER_CASK, RECTANGLE, AWSCLI]);
+
+  it("linuxCaskRows opens a cask the table knows to a tick, unticked and Linux yes, and leaves every other row as it was", () => {
+    expect(opened[0]).toEqual({ rung: "tools", id: "tools/brew-cask/gcloud-cli", label: "gcloud-cli", group: "Homebrew casks", paths: [], bytes: 0, default: "skip", linux: "yes" });
+    expect(isTickable(opened[0]!)).toBe(true);
+    expect(opened[1]).toMatchObject({ id: "tools/brew-cask/docker-desktop", linux: "yes" });
+    expect(opened[1]!.reason).toBeUndefined();
+    expect(opened[2]).toEqual(RECTANGLE);
+    expect(opened[3]).toEqual(AWSCLI);
+    // A saved tick stands: the row keeps its bring flag.
+    expect(linuxCaskRows([{ ...GCLOUD_CASK, bring: true }])[0]).toMatchObject({ bring: true, default: "skip" });
+    // The command row the collector makes of gcloud-cli opens the same way, its version kept for the install.
+    expect(linuxCaskRows([GCLOUD_CLI])[0]).toEqual({ rung: "tools", id: "tools/cli/gcloud", label: "gcloud (gcloud-cli)", group: "Command-line tools", paths: [], bytes: 0, default: "skip", linux: "yes", version: "575.0.0" });
+  });
+
+  it("a login's command is coming when its tools row is ticked, else the row is named as unticked, locked, or missing with what would bring it", () => {
+    const manifest = { entries: [...opened, ...FIXTURE.entries, GCLOUD, WRANGLER, KUBE, AWS] };
+    const none = new Set<string>();
+    expect(loginTool(GCLOUD, manifest, none)).toEqual({ bin: "gcloud", row: opened[0], coming: false, why: "gcloud is not coming: its tool row is unticked; copy or sign in ticks it" });
+    expect(loginTool(GCLOUD, manifest, new Set(["tools/brew-cask/gcloud-cli"]))).toEqual({ bin: "gcloud", row: opened[0], coming: true });
+    expect(loginTool(WRANGLER, manifest, none)).toEqual({ bin: "wrangler", coming: false, why: "wrangler is not coming: no row lists it; npm install -g wrangler brings it" });
+    // kubectl comes with Docker Desktop on this computer; the table names the cask that brings the Linux build.
+    expect(loginTool(KUBE, manifest, none)).toMatchObject({ bin: "kubectl", row: opened[1], coming: false, why: "kubectl is not coming: its tool row is unticked; copy or sign in ticks it" });
+    expect(loginTool(KUBE, { entries: [KUBE] }, none)?.why).toBe("kubectl is not coming: no row lists it; a docker-desktop cask would bring it");
+    // The command row of the same cask counts by its command.
+    const cli = linuxCaskRows([GCLOUD_CLI])[0]!;
+    expect(loginTool(GCLOUD, { entries: [cli, GCLOUD] }, new Set(["tools/cli/gcloud"]))).toEqual({ bin: "gcloud", row: cli, coming: true });
+    expect(loginTool(GCLOUD, { entries: [GCLOUD_CLI, GCLOUD] }, none)?.why).toBe("gcloud is not coming: its tool row cannot come (command-line tool, but not from a GitHub release; no Linux install path)");
+    // A formula not named for its command still counts.
+    expect(loginTool(AWS, manifest, new Set(["tools/brew/awscli"]))).toEqual({ bin: "aws", row: AWSCLI, coming: true });
+    // A cask the table does not know stays locked, and the login says so.
+    expect(loginTool(GCLOUD, { entries: [RECTANGLE, { ...GCLOUD_CASK }, GCLOUD] }, none)).toMatchObject({ coming: false, why: "gcloud is not coming: its tool row cannot come (macOS app, no Linux build)" });
+    // gh's row is ticked in the fixture's defaults; an agent's login follows its agent, not a tools row.
+    expect(loginTool(byId("logins/gh"), manifest, new Set(["tools/brew/gh"]))).toEqual({ bin: "gh", row: byId("tools/brew/gh"), coming: true });
+    expect(loginTool(byId("logins/claude"), manifest, none)).toBeUndefined();
+    expect(loginTool(byId("tools/brew/gh"), manifest, none)).toBeUndefined();
+  });
+
+  it("a wrangler row under any node package manager or Homebrew's own formula counts as the command", () => {
+    for (const id of ["tools/npm/wrangler", "tools/pnpm/wrangler", "tools/bun/wrangler", "tools/brew/cloudflare-wrangler"]) {
+      const row: ManifestEntry = { rung: "tools", id, label: "wrangler", paths: [], bytes: 0, default: "bring", linux: "yes" };
+      expect(loginTool(WRANGLER, { entries: [row, WRANGLER] }, new Set([id]))).toEqual({ bin: "wrangler", row, coming: true });
+    }
+  });
+
+  it("tickLoginTools ticks the row of every login answered copy or sign in; a skip, a coming row and a locked row leave the ticks alone", () => {
+    const manifest = { entries: [...opened, GCLOUD, KUBE, WRANGLER, AWS, AWSCLI] };
+    const ticks = new Set<string>(["tools/brew/awscli"]);
+    const added = tickLoginTools(manifest, new Map([["logins/gcloud", "copy"], ["logins/kube", "machine"], ["logins/wrangler", "copy"], ["logins/aws", "copy"]]), ticks);
+    expect(added).toEqual(["gcloud-cli", "docker-desktop"]);
+    expect([...ticks]).toEqual(["tools/brew/awscli", "tools/brew-cask/gcloud-cli", "tools/brew-cask/docker-desktop"]);
+    const untouched = new Set<string>();
+    expect(tickLoginTools({ entries: [RECTANGLE, GCLOUD_CASK, GCLOUD] }, new Map([["logins/gcloud", "copy"]]), untouched)).toEqual([]);
+    expect(tickLoginTools(manifest, new Map([["logins/gcloud", "skip"]]), untouched)).toEqual([]);
+    expect(untouched.size).toBe(0);
+  });
+});
+
+describe("npm globals an agent installs itself", () => {
+  const PI_NPM: ManifestEntry = { rung: "tools", id: "tools/npm/@earendil-works/pi-coding-agent", label: "@earendil-works/pi-coding-agent@0.84.1", group: "npm globals", paths: [], bytes: 0, default: "bring", linux: "yes", version: "0.84.1" };
+  const WRANGLER_NPM: ManifestEntry = { ...PI_NPM, id: "tools/npm/wrangler", label: "wrangler@4.106.0", version: "4.106.0" };
+  const PI_AGENT: ManifestEntry = { rung: "agents", id: "agents/pi", label: "Pi", paths: ["~/.pi/agent/settings.json"], bytes: 80, default: "bring" };
+
+  it("the package's row goes when its agent is on the Agents screen, whatever the agent's tick; without the agent row it stays, as do other globals", () => {
+    expect(withoutAgentTools([PI_NPM, WRANGLER_NPM, PI_AGENT, ...FIXTURE.entries])).toEqual([WRANGLER_NPM, PI_AGENT, ...FIXTURE.entries]);
+    expect(withoutAgentTools([PI_NPM, WRANGLER_NPM])).toEqual([PI_NPM, WRANGLER_NPM]);
+    expect(withoutAgentTools([{ ...PI_NPM, bring: true }, { ...PI_AGENT, bring: false }])).toEqual([{ ...PI_AGENT, bring: false }]);
+  });
 });
 
 describe("rows the plan refuses by name", () => {
