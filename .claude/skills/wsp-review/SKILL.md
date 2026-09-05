@@ -88,3 +88,7 @@ A builder's gate skips the Electron packaging unless the diff touches apps/deskt
 ## Live runs stay out of builders' worktrees, and builders add by path
 
 The coordinator ran a live canary inside a builder's worktree (PR 39, 2026-09-05) and the builder's next `git add -A` committed the canary script, log, pid and output; the second-pass review caught it as a blocker and cost a round. Coordinator live runs happen in a coordinator worktree (`gate-*` or a `live-*` tree), never a builder's. Builders stage by path (`git add <files>`), never `-A` or `.`, and their self-review reads `git show --stat` of every commit in the round so a stray file is seen before the report exists.
+
+## Red-proofs never use git stash, and kill only a pid you recorded
+
+Two builders' red-proof runs did `git stash push` on already-committed paths (which stashes nothing) followed by `git stash pop`, which popped the repository's shared stash into their worktree (2026-09-05, twice). The stash is one list for every worktree; nobody touches it. A red-proof runs the new tests against the base in a throwaway worktree (`git worktree add --detach <tmp> <base>`, copy the test files in, run, remove), or reverts a committed source file with `git checkout <base> -- <file>` and restores it with `git checkout HEAD -- <file>` only after everything is committed. A builder also killed another builder's dev server after finding its pid by port: kill only a pid you started and recorded, never one found by port, name or pattern, and pick your ports per worktree.
