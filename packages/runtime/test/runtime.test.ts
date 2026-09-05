@@ -3128,6 +3128,40 @@ describe("create idempotency keys", () => {
     }
   });
 
+  it("adopting a dead process's attempt takes the key and rewrites the entry to the adopter", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    await rt.workspaces.nap(ws.id);
+    backend.machines[0]!.killed = true;
+    let losses = 2;
+    const specs = intercept(backend, (spec, real) => {
+      if (losses-- > 0) throw lostAnswer();
+      return real(spec);
+    });
+    await expect(rt.workspaces.wake(ws.id)).rejects.toThrow("fetch failed");
+    const purpose = `workspace/${ws.id}`;
+    const left = (await store.get("creates", purpose)) as { key: string; pid: number };
+    expect(left.pid).toBe(process.pid);
+    const deadPid = 99_999_999;
+    await store.put("creates", purpose, { ...left, pid: deadPid });
+    await expect(rt.workspaces.wake(ws.id)).rejects.toThrow("fetch failed");
+    expect(await store.get("creates", purpose)).toMatchObject({ key: left.key, pid: process.pid });
+    await rt.workspaces.wake(ws.id);
+    expect(specs.map(s => s.idempotencyKey)).toEqual([left.key, left.key, left.key]);
+    expect(await store.list("creates")).toEqual([]);
+  });
+
+  it("a purpose too long for the provider's 255-character key cap is hashed, the nonce kept", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    await rt.golden.build({ name: "g".repeat(300), setup: "true", smoke: "true" });
+    const key = backend.machines[0]!.spec.idempotencyKey!;
+    expect(key.length).toBeLessThanOrEqual(255);
+    expect(key).toMatch(/^[0-9a-f]{64}:[0-9a-f]{16}$/);
+  });
+
   it("a builder and its smoke fork carry keys for the golden they build", async () => {
     const backend = stubBackend();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });

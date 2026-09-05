@@ -441,6 +441,8 @@ const BUILDERS = "builders";
 const OWNER = "owner";
 /** The create attempt in flight for a record, written before the provider hears of it. */
 const CREATES = "creates";
+/** The provider caps a key at 255 characters (measured 2026-09-04); the purpose is hashed past what a 16-hex nonce leaves. */
+const KEY_PURPOSE_MAX = 255 - 17;
 interface PendingCreate {
   key: string;
   createdAt: string;
@@ -773,10 +775,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const body = fingerprint(spec);
     const held = (await store.get(CREATES, purpose)) as PendingCreate | undefined;
     const theirs = held !== undefined && (held.host !== hostId || (held.pid !== process.pid && pidAlive(held.pid)));
+    const name = purpose.length <= KEY_PURPOSE_MAX ? purpose : createHash("sha256").update(purpose).digest("hex");
     const attempt: PendingCreate = held?.body === body && !theirs
-      ? held
-      : { key: `${purpose}:${randomBytes(8).toString("hex")}`, createdAt: new Date().toISOString(), body, host: hostId, pid: process.pid };
-    if (attempt !== held) await store.put(CREATES, purpose, attempt);
+      ? { ...held, host: hostId, pid: process.pid }
+      : { key: `${name}:${randomBytes(8).toString("hex")}`, createdAt: new Date().toISOString(), body, host: hostId, pid: process.pid };
+    await store.put(CREATES, purpose, attempt);
     let machine: Machine;
     try {
       machine = await backend.create({

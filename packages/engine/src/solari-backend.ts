@@ -74,15 +74,26 @@ export class SolariBackend implements MachineBackend {
     return (await this.call<T>(method, path, body)).value;
   }
 
-  private async call<T>(method: string, path: string, body?: unknown, extra?: Record<string, string>): Promise<{ value: T; reply: Response }> {
-    const headers: Record<string, string> = { Authorization: `Bearer ${this.apiKey}`, ...extra };
+  /** keyed: the request carries an idempotency key the provider honours, so a fetch that throws (no answer at all) is
+   * sent once more under it and a replay is the expected reply; without a key a lost answer is the caller's. */
+  private async call<T>(method: string, path: string, body?: unknown, keyed?: { "Idempotency-Key": string }): Promise<{ value: T; reply: Response }> {
+    const headers: Record<string, string> = { Authorization: `Bearer ${this.apiKey}`, ...keyed };
     if (body !== undefined) headers["Content-Type"] = "application/json";
+    let resent = false;
     for (let attempt = 1; ; attempt++) {
-      const res = await this.fetch(this.baseUrl + path, {
-        method,
-        headers,
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-      });
+      let res: Response;
+      try {
+        res = await this.fetch(this.baseUrl + path, {
+          method,
+          headers,
+          body: body !== undefined ? JSON.stringify(body) : undefined,
+        });
+      } catch (e) {
+        if (keyed === undefined || resent) throw e;
+        resent = true;
+        await new Promise(r => setTimeout(r, backoffMs(attempt)));
+        continue;
+      }
       if (res.ok) {
         const text = await res.text();
         return { value: (text ? JSON.parse(text) : {}) as T, reply: res };

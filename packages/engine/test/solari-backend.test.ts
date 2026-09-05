@@ -156,6 +156,31 @@ describe("SolariBackend idempotency", () => {
     expect(minted[0]).not.toBe(minted[1]);
   }, 15_000);
 
+  it("retries a create once under the same key when the fetch itself throws, so a lost answer replays", async () => {
+    let calls = 0;
+    const f = vi.fn(async () => {
+      if (++calls === 1) throw new TypeError("fetch failed");
+      return new Response(JSON.stringify({ sandboxId: "x", kind: "sandbox" }), { status: 201, headers: { "Idempotent-Replayed": "true" } });
+    });
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    const m = await b.create({ kind: "sandbox", template: "base", idempotencyKey: "workspace/ws_1:a1" });
+    expect(f.mock.calls.map(headerOf)).toEqual(["workspace/ws_1:a1", "workspace/ws_1:a1"]);
+    expect(m.replayed).toBe(true);
+    expect(m.id).toBe("x");
+  }, 15_000);
+
+  it("lets a second thrown fetch propagate, and never retries a thrown exec", async () => {
+    const f = vi.fn(async () => {
+      throw new TypeError("fetch failed");
+    });
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    await expect(b.create({ kind: "sandbox", template: "base", idempotencyKey: "workspace/ws_1:a1" })).rejects.toThrow("fetch failed");
+    expect(f).toHaveBeenCalledTimes(2);
+    f.mockClear();
+    await expect(b.request("POST", "/sandboxes/x/exec", { cmd: "true" })).rejects.toThrow("fetch failed");
+    expect(f).toHaveBeenCalledTimes(1);
+  }, 15_000);
+
   it("reads Idempotent-Replayed off the create reply onto the handle", async () => {
     let replays = 0;
     const f = vi.fn(async () => new Response(JSON.stringify({ sandboxId: "x", kind: "sandbox" }), {
