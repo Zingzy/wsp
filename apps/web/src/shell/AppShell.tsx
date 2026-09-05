@@ -23,7 +23,6 @@ import { KeybindingDispatcher } from "./KeybindingDispatcher.js";
 import { RightPanel } from "./RightPanel.js";
 import { requestNewThread } from "./shellRequests.js";
 import { SignInBanner } from "./SignInBanner.js";
-import { ThreadModelLabel } from "./ThreadModelLabel.js";
 
 const SIDEBAR_WIDTH_STORAGE_KEY = "wsp:sidebar-width";
 const SIDEBAR_MIN_WIDTH = 220;
@@ -87,7 +86,6 @@ export function AppShell({ children }: { children: ReactNode }) {
               <span className="min-w-0 truncate text-sm font-medium text-foreground">
                 {workspace?.name ?? creation?.name ?? "No workspace selected"}
               </span>
-              {workspace ? <ThreadModelLabel workspaceId={workspace.id} /> : null}
               {workspace ? (
                 <Tooltip>
                   <TooltipTrigger render={<span className="flex shrink-0" />}>

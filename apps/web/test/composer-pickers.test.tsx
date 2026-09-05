@@ -5,7 +5,7 @@
 // has no such picker, and the header names what the running session uses.
 // Base UI's menu never settles under jsdom (see composer-checkout.test), so
 // the menu primitives are stood in by a plain open/closed context.
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HarnessCatalog, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
@@ -59,7 +59,6 @@ import { composerEditor, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent, StartSessionOptions } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
-import { ThreadModelLabel } from "../src/shell/ThreadModelLabel.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { useComposerOptionsStore } from "../src/components/chat/composerOptionsStore.js";
 import { provideDaemonRoot, provideDaemonWire } from "../src/files/wire.js";
@@ -220,19 +219,5 @@ describe("composer pickers", () => {
     await setup(api);
     await waitFor(() => expect(screen.getByRole("button", { name: /Working folder/ })).toBeTruthy());
     expect(document.querySelector("[data-composer-picker]")).toBeNull();
-  });
-});
-
-describe("thread model label", () => {
-  it("names the model and effort of the workspace's latest session, effort omitted when none was asked", async () => {
-    useStore.setState({ sessions: { [WS]: [{ id: "s1", workspaceId: WS, harness: "claude", status: "completed", model: "claude-sonnet-5" }, { id: "s2", workspaceId: WS, harness: "claude", status: "running", model: "claude-opus-5", effort: "high" }] } });
-    render(<ThreadModelLabel workspaceId={WS} />);
-    expect(screen.getByText("claude-opus-5")).toBeTruthy();
-    expect(screen.getByText("high")).toBeTruthy();
-    act(() => useStore.setState({ sessions: { [WS]: [{ id: "s3", workspaceId: WS, harness: "claude", status: "running", model: "claude-sonnet-5" }] } }));
-    expect(screen.getByText("claude-sonnet-5")).toBeTruthy();
-    expect(screen.queryByText("high")).toBeNull();
-    act(() => useStore.setState({ sessions: {} }));
-    expect(document.querySelector("[data-thread-model]")).toBeNull();
   });
 });
