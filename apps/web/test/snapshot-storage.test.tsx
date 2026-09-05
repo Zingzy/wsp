@@ -81,8 +81,12 @@ describe("the storage line", () => {
     const usage = document.querySelector('[data-k="storage"]')!.closest("section")!;
     expect(usage.textContent).toContain("Usage");
     expect(usage.textContent).toContain("Accrued");
-    expect(usage.querySelector('[data-k="storage"]')!.tagName).toBe("P");
-    expect(usage.querySelectorAll("[data-usage-bar]")).toHaveLength(0);
+    const storage = usage.querySelector('[data-k="storage"]')!;
+    expect(storage.tagName).toBe("P");
+    // The line sits beside the usage chart, never inside it: no mark of its own on the line chart.
+    expect(usage.querySelector("[data-usage-chart]")).not.toBeNull();
+    expect(usage.querySelector('[data-usage-chart] [data-k="storage"]')).toBeNull();
+    expect(storage.querySelector("svg, path")).toBeNull();
   });
 
   it("renders nothing when the provider cannot list snapshots", async () => {
