@@ -17,7 +17,7 @@ import { CHAT_STREAM, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
 let restoreLayout: () => void = () => {};
 beforeAll(() => { restoreLayout = installFakeLayout(); });
 afterAll(() => restoreLayout());
-beforeEach(() => useComposerDraftStore.setState({ drafts: {} }));
+beforeEach(() => useComposerDraftStore.setState({ drafts: {}, queues: {} }));
 
 const WS = CHAT_WS;
 const scope = { workspaceId: WS, sessionId: "sess_0001", turnId: CHAT_TURN };
@@ -252,23 +252,25 @@ describe("composer while the workspace is not live", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
-  it("offers stop while a turn streams and names the running turn as what blocks a send", async () => {
-    const { api, emit, interrupted } = fixtureApi([workspace]);
+  it("offers stop while a turn streams, with no banner; Enter then queues the message above the box", async () => {
+    const { api, emit, interrupted, started } = fixtureApi([workspace]);
     await setup(api);
     emit({ type: "session.start", ...scope, prompt: "go" });
     emit({ type: "session.delta", ...scope, kind: "text", text: "on it" });
     expect(screen.getByRole("button", { name: "Stop generation" })).toBeDefined();
     expect(interrupted).toEqual([]);
     expect(screen.queryByRole("button", { name: /Send message|Turn in flight/ })).toBeNull();
-    expect(screen.getByRole("status").textContent).toContain("Turn in flight");
+    expect(screen.queryByRole("status")).toBeNull();
     expect(isEditable(composerEditor())).toBe(true);
     await typeInto(composerEditor(), "follow up");
     await press(composerEditor(), "Enter");
-    expect(draft()).toBe("follow up");
+    expect(draft()).toBe("");
+    expect((screen.getByRole("textbox", { name: "Queued message" }) as HTMLTextAreaElement).value).toBe("follow up");
+    expect(started).toHaveLength(0);
     emit({ type: "session.done", ...scope, result: { status: "completed", durationMs: 900, costUsd: 0.001 } });
     emit({ type: "session.end", ...scope, exitCode: 0, sawResult: true });
-    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
-    expect(sendButton().getAttribute("aria-label")).toBe("Send message");
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["follow up"]));
+    expect(screen.queryByRole("textbox", { name: "Queued message" })).toBeNull();
   });
 });
 

@@ -46,6 +46,8 @@ export interface ChatThreadHandle {
   readonly resume: string | undefined;
   /** True while the turn a new thread left behind is still running on the machine. */
   readonly finishing: boolean;
+  /** The held thread's runtime id, or the workspace id before it has one; keys what belongs to this thread outside the transcript. */
+  readonly threadKey: string;
   /** Optimistic user message for a send; the next session.start replaces it. */
   readonly appendUserTurn: (prompt: string) => void;
   /** A send that failed before the runtime emitted anything. */
@@ -67,7 +69,7 @@ export interface ThreadState {
   readonly localErrors: ReadonlyArray<{ message: string; at: string }>;
   readonly fresh: boolean;
   readonly stale: StaleTurn | null;
-  /** A send in flight, until the first live event that changes this state or a reload rebuilds it. */
+  /** A send in flight, until the session.start it produces lands here or a reload rebuilds this. */
   readonly sending: boolean;
   /** Thread id of the transcript a new-thread request left; read while fresh to tell the person's own thread from it. */
   readonly left: string | undefined;
@@ -271,9 +273,10 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
       if (hydratedRef.current !== viewKey) return;
       if (!isSessionEvent(e) || e.workspaceId !== workspaceId) return;
       if (threadId !== null && e.threadId !== threadId) return;
+      // Only a start ends a send: the previous turn's end still arrives after its done, which already opened the composer.
       setState(s => {
         const next = reduceEvent(s, e, now());
-        return next !== s && next.sending ? { ...next, sending: false } : next;
+        return next !== s && next.sending && e.type === "session.start" ? { ...next, sending: false } : next;
       });
     },
     [workspaceId, threadId, viewKey],
@@ -315,6 +318,7 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
     fresh: state.fresh,
     resume: state.fresh ? undefined : (view.latestTurn?.sessionId ?? (threadId === null ? remembered : undefined)),
     finishing,
+    threadKey: threadId ?? state.events.at(-1)?.threadId ?? workspaceId,
     appendUserTurn,
     appendLocalError,
     setSending,

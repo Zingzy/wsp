@@ -63,7 +63,7 @@ beforeEach(() => {
   ScriptedSocket.authOk = true;
   ScriptedSocket.serverUp = true;
   ScriptedSocket.reply = route;
-  useComposerDraftStore.setState({ drafts: {} });
+  useComposerDraftStore.setState({ drafts: {}, queues: {} });
 });
 afterEach(() => { client?.close(); client = null; });
 
@@ -104,7 +104,7 @@ describe("composer stop", () => {
     rows = [runningRow];
     const { sock, deliver, push } = await setup();
     await streamTurn(push);
-    expect(screen.getByRole("status").textContent).toContain("Turn in flight");
+    expect(screen.queryByRole("status")).toBeNull();
     // The runtime answers accepted only after the turn's done and end are on the wire.
     onInterrupt = f => {
       deliver(done("interrupted"));
