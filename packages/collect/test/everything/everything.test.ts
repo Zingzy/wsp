@@ -109,6 +109,13 @@ describe("everything: the seven passes folded into rows", () => {
     expect(new Set(rows.map(r => r.id)).size).toBe(rows.length);
   });
 
+  it("two empty directories named for one binary, one paired and one found by location, are one bin row", async () => {
+    const m = laptop({ path: ["~/.local/bin"], files: { "~/.local/bin/foo": 1_000, "~/.config/foo/": 0, "~/Library/Application Support/foo/": 0 } });
+    const { rows } = await everything(m, { now: NOW });
+    expect(rows.filter(r => r.id === "bin:foo")).toEqual([expect.objectContaining({ name: "foo", binary: "~/.local/bin/foo", paths: [] })]);
+    expect(new Set(rows.map(r => r.id)).size).toBe(rows.length);
+  });
+
   it("credential and split rows are named by their real path under their app directory; climbing happens only on a remaining collision", async () => {
     const { rows } = await everything(laptop(home()), { lookup, now: NOW });
     const names = rows.map(r => r.name);
