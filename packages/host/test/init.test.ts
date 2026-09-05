@@ -1872,12 +1872,36 @@ describe("wsp init, flags and no terminal", () => {
     expect(out).toMatch(/Agents installed\s+Claude Code, Codex installed/);
     expect(out).toContain("Ready");
     // The stage line is cut to the width; the names come back in full under the tally.
-    const tally = out.slice(out.indexOf("Tools and agents:"));
+    const tally = out.slice(out.indexOf("Tools, agents and machine context:"));
     expect(tally.split("\n").slice(0, 2).map(l => l.replace(/^[│◇]\s+/, ""))).toEqual([
-      expect.stringMatching(/^Tools and agents: 9 installed, 1 failed, 0 skipped; the list is in .*golden-import\.json$/),
+      expect.stringMatching(/^Tools, agents and machine context: 9 installed, 1 failed, 0 skipped; the list is in .*golden-import\.json$/),
       "jq failed: curl: no route",
     ]);
     expect(f.recipes[0]!.import?.node).toMatchObject({ floor: 16, agents: ["Codex"] });
+  });
+
+  it("a machine context that did not land is counted and named in the tally, not the end of the build", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
+    dirs.push(dir);
+    const path = join(dir, "recipe.json");
+    writeFileSync(path, JSON.stringify({ entries: FIXTURE.entries.map(e => ({ ...e, bring: e.id === "agents/codex" ? true : e.bring ?? (e.default === "bring" && e.reason === undefined) })) }));
+    const f = fake({ yes: true, manifestPath: path });
+    f.opts.runtime = recipe => {
+      const backend = stubBackend();
+      // The person's files untar under /root; the context archive is the one untarred at the root. Only the builder refuses it.
+      backend.execImpl = (m, cmd) => (m.spec.fromSnapshot === undefined && cmd.includes("tar xzf - -C '/' ") ? { exitCode: 2, stdout: "", stderr: "tar: etc/wsp: Cannot mkdir: Read-only file system\n" } : guestAnswer(cmd));
+      f.backends.push(backend);
+      return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
+    };
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(0);
+    const out = f.text();
+    const tally = out.slice(out.indexOf("Tools, agents and machine context:"));
+    expect(tally.split("\n").slice(0, 2).map(l => l.replace(/^[│◇]\s+/, ""))).toEqual([
+      expect.stringMatching(/^Tools, agents and machine context: 10 installed, 1 failed, 0 skipped; the list is in .*golden-import\.json$/),
+      "machine context failed: write failed: vault import untar failed (exit 2): tar: etc/wsp: Cannot mkdir: Read-only file system",
+    ]);
+    expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({ context: [], contextFailure: expect.stringMatching(/^write failed: vault import untar failed/) });
   });
 
   it("a line on stderr while the stages animate is drawn by the stream, and a build that fails hands the streams back", async () => {
@@ -2067,7 +2091,8 @@ describe("wsp init, flags and no terminal", () => {
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
     };
     await bootedOnly(first);
-    const uploads = () => shared.machines[0]!.execLog.filter(c => c.includes("tar xzf")).length;
+    // The person's files untar under /root; the machine context archive untars at the root and is not counted here.
+    const uploads = () => shared.machines[0]!.execLog.filter(c => c.includes("tar xzf - -C '/root'")).length;
     expect(uploads()).toBe(1);
 
     writeFileSync(join(home, ".claude.json"), JSON.stringify({ projects: { one: {}, two: {} } }));
@@ -2149,7 +2174,8 @@ describe("wsp init, flags and no terminal", () => {
     const sha = (v: string) => createHash("sha256").update(v).digest("hex");
     const keychainOf = async () => ((await store.list("builders")) as { import: { recipe: { files: { path: string; digest: string; volatile?: boolean }[] } } }[])[0]!.import.recipe.files.find(f => f.path === "Keychain: gh:github.com");
     expect(await keychainOf()).toMatchObject({ digest: sha("gho_fake"), volatile: true });
-    const uploads = () => shared.machines[0]!.execLog.filter(c => c.includes("tar xzf")).length;
+    // The person's files untar under /root; the machine context archive untars at the root and is not counted here.
+    const uploads = () => shared.machines[0]!.execLog.filter(c => c.includes("tar xzf - -C '/root'")).length;
     expect(uploads()).toBe(1);
 
     const f = fake({ yes: true, tty: false, home: first.opts.home, manifestPath: recipePath(first.opts.statePath) });
@@ -3228,9 +3254,9 @@ describe("disk estimate before the boot", () => {
     const f = fake({ yes: true, manifestPath: path, brew: async () => new Map() });
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(0);
-    const tally = f.text().slice(f.text().indexOf("Tools and agents:"));
+    const tally = f.text().slice(f.text().indexOf("Tools, agents and machine context:"));
     expect(tally.split("\n").slice(0, 3).map(l => l.replace(/^[│◇]\s+/, ""))).toEqual([
-      expect.stringMatching(/^Tools and agents: 9 installed, 0 failed, 2 skipped; the list is in .*golden-import\.json$/),
+      expect.stringMatching(/^Tools, agents and machine context: 9 installed, 0 failed, 2 skipped; the list is in .*golden-import\.json$/),
       "diskbloom skipped: no Linux bottle known",
       "ngrok skipped: no GitHub release to install from",
     ]);
@@ -3538,7 +3564,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(ran.some(c => c.includes("apt-get install"))).toBe(false);
     expect(out).toMatch(/Golden v2 sealed in \d+s on the builder kept since the save/);
     // The fixture home has no nvim config, so the binary is the one thing that comes off.
-    expect(out).toMatch(/Tools and agents: 0 installed, 1 removed, 0 failed, 0 skipped; the list is in .*golden-import\.json/);
+    expect(out).toMatch(/Tools, agents and machine context: 0 installed, 1 removed, 0 failed, 0 skipped; the list is in .*golden-import\.json/);
     expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({ tools: [], removed: [{ what: "editor", id: "editors/nvim", label: "neovim", outcome: "removed" }] });
     expect(await store.get("goldens", "default")).toMatchObject({ head: 2 });
   });
@@ -3554,9 +3580,9 @@ describe("wsp init with a golden already built from a recipe", () => {
     const out = f.text();
     expect(out).toContain("remove 1 file: ~/.zshrc");
     expect(out).toContain("remove 1 editor: neovim");
-    const tally = out.slice(out.indexOf("Tools and agents:"));
+    const tally = out.slice(out.indexOf("Tools, agents and machine context:"));
     expect(tally.split("\n").slice(0, 2).map(l => l.replace(/^[│◇●]\s+/, ""))).toEqual([
-      expect.stringMatching(/^Tools and agents: 0 installed, 0 removed, 0 failed, 1 not removed, 0 skipped; the list is in .*golden-import\.json$/),
+      expect.stringMatching(/^Tools, agents and machine context: 0 installed, 0 removed, 0 failed, 1 not removed, 0 skipped; the list is in .*golden-import\.json$/),
       "neovim not removed: E: Could not get lock /var/lib/dpkg/lock-frontend",
     ]);
     expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({

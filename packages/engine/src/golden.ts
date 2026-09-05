@@ -217,6 +217,8 @@ export interface ImportResult {
   removed?: RemovalResult[];
   /** The machine context each installed agent got, or why it did not; absent when no stage ran. */
   context?: ContextResult[];
+  /** Why no machine context was written, when the probe or the upload failed; context is empty then. */
+  contextFailure?: string;
 }
 
 export interface ApplyImportOptions {
@@ -412,8 +414,9 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
     }
     if (harnessRan || ran || edited) {
       // After the tools, so the document can name what did not install.
-      const context = await applyMachineContext(machine, { result });
+      const context = await applyMachineContext(machine, { result, ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}) });
       result.context = context.context;
+      if (context.failure !== undefined) result.contextFailure = context.failure;
       stage("installing-mcp", `machine context: ${context.summary}`);
     }
     if (ran || edited) {

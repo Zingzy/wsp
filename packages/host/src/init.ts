@@ -1452,16 +1452,20 @@ export async function streamStages(rt: Pick<Runtime, "events">, io: Pick<InitIO,
   return view;
 }
 
-/** The tally after the build: how the tools and agents came out, each failure named with its reason, and where the list is. */
+/** The tally after the build: how the tools, agents and the machine context came out, each failure named with its
+ * reason, and where the list is. */
 function installsTally(landed: ImportResult, resultsPath: string): string[] {
   const all = [...landed.tools.map(t => ({ ...t, name: t.label })), ...landed.agents];
   const n = (o: string) => all.filter(x => x.outcome === o).length;
-  // The header counts tools, editors and agents; an update's file removals are in the stream and the saved list.
+  // The header counts tools, editors, agents and a machine context that was not written; an update's file removals
+  // are in the stream and the saved list.
   const removed = (landed.removed ?? []).filter(x => x.what !== "file");
   const notRemoved = removed.filter(x => x.outcome !== "removed");
+  const failed = n("failed") + (landed.contextFailure === undefined ? 0 : 1);
   return [
-    `Tools and agents: ${n("installed")} installed, ${landed.removed !== undefined ? `${removed.length - notRemoved.length} removed, ` : ""}${n("failed")} failed${notRemoved.length > 0 ? `, ${notRemoved.length} not removed` : ""}, ${n("skipped")} skipped; the list is in ${resultsPath}`,
+    `Tools, agents and machine context: ${n("installed")} installed, ${landed.removed !== undefined ? `${removed.length - notRemoved.length} removed, ` : ""}${failed} failed${notRemoved.length > 0 ? `, ${notRemoved.length} not removed` : ""}, ${n("skipped")} skipped; the list is in ${resultsPath}`,
     ...all.filter(x => x.outcome === "failed").map(x => dim(`${x.name} failed: ${x.note ?? "no reason given"}`)),
+    ...(landed.contextFailure === undefined ? [] : [dim(`machine context failed: ${landed.contextFailure}`)]),
     ...all.filter(x => x.outcome === "skipped").map(x => dim(`${x.name} skipped: ${x.note ?? "no reason given"}`)),
     ...notRemoved.map(x => dim(`${x.label} not removed: ${x.note ?? "no reason given"}`)),
   ];

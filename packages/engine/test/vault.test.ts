@@ -1,13 +1,13 @@
 import { execFile, execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { gzipSync } from "node:zlib";
-import { UPLOAD_PART_BYTES, exportPaths, importInto } from "../src/vault.js";
+import { UPLOAD_PART_BYTES, exportPaths, importInto, tarOf } from "../src/vault.js";
 import type { ExecResult, Machine } from "../src/machine.js";
 
 const TAR_BYTES = Buffer.from("fake-tgz-bytes-" + "x".repeat(64));
@@ -351,5 +351,40 @@ describe("vault import in parts", () => {
     } finally {
       g.close();
     }
+  });
+});
+
+describe("tarOf", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+  const extract = (tgz: Buffer): string => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-tarof-"));
+    dirs.push(dir);
+    execFileSync("tar", ["-xzf", "-", "-C", dir], { input: tgz });
+    return dir;
+  };
+
+  it("packs each text at its path with its mode, so a plain tar lands them where the upload road extracts", () => {
+    const deep = `etc/${"a".repeat(60)}/${"b".repeat(60)}/${"c".repeat(40)}.md`;
+    const tgz = tarOf([
+      { path: "/etc/wsp/machine-context.md", mode: 0o644, content: "short text\n" },
+      { path: "/root/.hermes/skills/wsp-machine/SKILL.md", mode: 0o600, content: "skill\n" },
+      { path: `/${deep}`, mode: 0o644, content: "deep\n" },
+      { path: "/etc/wsp/empty", mode: 0o644, content: "" },
+    ]);
+    const dir = extract(tgz);
+    expect(execFileSync("tar", ["-tzf", "-"], { input: tgz }).toString().trim().split("\n")).toEqual(["etc/wsp/machine-context.md", "root/.hermes/skills/wsp-machine/SKILL.md", deep, "etc/wsp/empty"]);
+    expect(readFileSync(join(dir, "etc/wsp/machine-context.md"), "utf8")).toBe("short text\n");
+    expect(readFileSync(join(dir, "root/.hermes/skills/wsp-machine/SKILL.md"), "utf8")).toBe("skill\n");
+    expect(readFileSync(join(dir, deep), "utf8")).toBe("deep\n");
+    expect(readFileSync(join(dir, "etc/wsp/empty"), "utf8")).toBe("");
+    expect(statSync(join(dir, "etc/wsp/machine-context.md")).mode & 0o777).toBe(0o644);
+    expect(statSync(join(dir, "root/.hermes/skills/wsp-machine/SKILL.md")).mode & 0o777).toBe(0o600);
+  });
+
+  it("refuses a path a ustar header cannot hold", () => {
+    expect(() => tarOf([{ path: `/${"x".repeat(120)}`, mode: 0o644, content: "" }])).toThrow(/ustar/);
   });
 });
