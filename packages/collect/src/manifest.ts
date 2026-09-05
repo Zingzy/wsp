@@ -64,6 +64,8 @@ const Fields = z.object({
   detail: z.string().optional(),
   /** Exported variable names cut from the carried copy of this file, for the person to set on the machine. Names only, never values. */
   secrets: z.array(z.string()).optional(),
+  /** Only on a shell row: the name of the login shell this computer runs, when /etc/shells lists it; it decides which ticked shell the machine logs into. */
+  login: z.string().min(1).optional(),
 });
 
 export const ManifestEntry = Fields.superRefine((e, ctx) => {
@@ -83,6 +85,9 @@ export const ManifestEntry = Fields.superRefine((e, ctx) => {
   }
   if (e.version !== undefined && e.rung !== "tools") {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["version"], message: "only a tools row carries a version" });
+  }
+  if (e.login !== undefined && e.rung !== "shell") {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["login"], message: "only a shell row carries a login shell" });
   }
   if (e.required === true && e.default === "skip") {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["required"], message: "a required row cannot default to skip" });

@@ -1,8 +1,8 @@
-import { mkdtempSync, realpathSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { PtyManager, ptyEnv } from "../src/pty-manager.js";
+import { PtyManager, ptyEnv, ptyLaunch } from "../src/pty-manager.js";
 
 describe("PtyManager", () => {
   it("keeps a session alive across client detach and replays scrollback", async () => {
@@ -64,6 +64,55 @@ describe("ptyEnv", () => {
     await new Promise(r => setTimeout(r, 300));
     mgr.destroyAll();
     expect(got.join("")).toContain(`HOME=${userInfo().homedir} USER=${userInfo().username}\r`);
+  });
+});
+
+describe("ptyLaunch", () => {
+  const me = { homedir: "/root", username: "root", shell: "/usr/bin/zsh" };
+  const saved = process.env["SHELL"];
+  afterEach(() => {
+    if (saved === undefined) delete process.env["SHELL"];
+    else process.env["SHELL"] = saved;
+  });
+
+  it("with no shell named, runs the passwd row's shell as a login shell, and SHELL names it for what that shell spawns", () => {
+    process.env["SHELL"] = "/bin/bash";
+    const launch = ptyLaunch({}, me);
+    expect(launch).toMatchObject({ file: "/usr/bin/zsh", args: ["-l"] });
+    expect(launch.env["SHELL"]).toBe("/usr/bin/zsh");
+  });
+
+  it("a row that names no shell falls back to bash as a login shell and leaves SHELL alone", () => {
+    delete process.env["SHELL"];
+    const launch = ptyLaunch({}, { ...me, shell: "" });
+    expect(launch).toMatchObject({ file: "bash", args: ["-l"] });
+    expect(launch.env).not.toHaveProperty("SHELL");
+  });
+
+  it("a shell the request names runs as asked, not as a login shell, with SHELL as inherited", () => {
+    process.env["SHELL"] = "/inherited/sh";
+    const launch = ptyLaunch({ shell: "/bin/sh", env: { PS1: "" } }, me);
+    expect(launch).toMatchObject({ file: "/bin/sh", args: [] });
+    expect(launch.env).toMatchObject({ SHELL: "/inherited/sh", PS1: "" });
+  });
+
+  it("a SHELL the request's own env names wins over the passwd row", () => {
+    expect(ptyLaunch({ env: { SHELL: "/opt/fish" } }, me).env["SHELL"]).toBe("/opt/fish");
+  });
+
+  it("the shell it spawns is a login shell: it reads the profile of the home it is given", async () => {
+    const home = realpathSync(mkdtempSync(join(tmpdir(), "wsp-pty-home-")));
+    for (const rc of [".profile", ".bash_profile", ".zprofile"]) writeFileSync(join(home, rc), "echo WSP-LOGIN-PROFILE\n");
+    mkdirSync(join(home, ".config", "fish"), { recursive: true });
+    writeFileSync(join(home, ".config", "fish", "config.fish"), "status is-login; and echo WSP-LOGIN-PROFILE\n");
+    const mgr = new PtyManager();
+    const s = mgr.create({ cols: 80, rows: 24, cwd: home, env: { HOME: home, ZDOTDIR: home, XDG_CONFIG_HOME: join(home, ".config") } });
+    const got: string[] = [];
+    s.attach(d => got.push(d));
+    const deadline = Date.now() + 5_000;
+    while (!got.join("").includes("WSP-LOGIN-PROFILE") && Date.now() < deadline) await new Promise(r => setTimeout(r, 25));
+    mgr.destroyAll();
+    expect(got.join("")).toContain("WSP-LOGIN-PROFILE");
   });
 });
 

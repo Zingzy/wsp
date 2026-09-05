@@ -32,12 +32,13 @@ export class PtySession {
     this.id = id;
     this.cols = opts.cols ?? 80;
     this.rows = opts.rows ?? 24;
-    this.pty = spawn(opts.shell ?? process.env["SHELL"] ?? "bash", [], {
+    const launch = ptyLaunch(opts);
+    this.pty = spawn(launch.file, launch.args, {
       name: "xterm-256color",
       cols: this.cols,
       rows: this.rows,
       cwd: opts.cwd ?? homedir(),
-      env: ptyEnv(opts.env),
+      env: launch.env,
     });
     this.pid = this.pty.pid;
     this.pty.onData(d => {
@@ -98,32 +99,57 @@ export class PtySession {
   }
 }
 
+export interface PasswdRow {
+  homedir: string;
+  username: string;
+  shell: string | null;
+}
+
+/** The passwd row of the daemon's own uid; nothing for a uid without one (an arbitrary uid in a container). */
+function passwdRow(): PasswdRow | undefined {
+  try {
+    return userInfo();
+  } catch {
+    return undefined;
+  }
+}
+
 /** The image ships DISPLAY=:0 with no X server behind it, which gcloud, gemini
  * and railway read as "a browser exists" and skip their paste-code paths; the
  * shim as BROWSER is what makes a sign-in land in the laptop's browser.
  * HOME and USER come off the passwd row of the daemon's own uid when the
  * daemon was started without them (a guest daemon inherited PATH and nothing
  * else, measured 2026-09-05): git, Go and every rc file read them. */
-export function ptyEnv(extra?: Record<string, string>): Record<string, string> {
+export function ptyEnv(extra?: Record<string, string>, me: PasswdRow | undefined = passwdRow()): Record<string, string> {
   const env: Record<string, string> = { ...(process.env as Record<string, string>), ...extra };
   delete env["DISPLAY"];
   env["BROWSER"] ??= OPEN_SHIM_PATH;
-  if (!env["HOME"] || !env["USER"]) {
-    // A uid with no passwd row (an arbitrary uid in a container) has no home to give;
-    // the shell still opens, without the blank ones and with whatever was inherited.
-    let me: { homedir: string; username: string } | undefined;
-    try {
-      me = userInfo();
-    } catch {
-      me = undefined;
-    }
-    for (const [name, value] of [["HOME", me?.homedir], ["USER", me?.username]] as const) {
-      if (env[name]) continue;
-      if (value !== undefined) env[name] = value;
-      else delete env[name];
-    }
+  // A uid with no passwd row has no home to give; the shell still opens, without the blank ones and with whatever was inherited.
+  for (const [name, value] of [["HOME", me?.homedir], ["USER", me?.username]] as const) {
+    if (env[name]) continue;
+    if (value !== undefined) env[name] = value;
+    else delete env[name];
   }
   return env;
+}
+
+export interface PtyLaunch {
+  file: string;
+  args: string[];
+  env: Record<string, string>;
+}
+
+/** A shell the request names runs as asked. With none named, the pty is the person's
+ * terminal: it runs the passwd row's shell as a login shell, so profile.d applies, and
+ * SHELL names that shell for what it spawns, as login(1) would set it. The daemon's own
+ * SHELL never decides: a guest daemon is started without one so a chsh on the machine
+ * is what the next terminal runs. A row without a shell, or no row, gets bash. */
+export function ptyLaunch(opts: PtyCreateOpts, me: PasswdRow | undefined = passwdRow()): PtyLaunch {
+  const env = ptyEnv(opts.env, me);
+  if (opts.shell !== undefined) return { file: opts.shell, args: [], env };
+  const shell = me?.shell ? me.shell : undefined;
+  if (shell !== undefined && opts.env?.["SHELL"] === undefined) env["SHELL"] = shell;
+  return { file: shell ?? "bash", args: ["-l"], env };
 }
 
 export class PtyManager {

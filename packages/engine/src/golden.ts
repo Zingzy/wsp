@@ -9,7 +9,7 @@
 import { createHash } from "node:crypto";
 import { ALREADY_APPLIED, type GoldenLogin, type GoldenManifest, type GoldenStage, type GoldenVersion, type RecipeDigest } from "@wsp/protocol";
 import type { Removal } from "./golden-diff.js";
-import { NODE_PATH_LINE, type AgentInstall, type NodeInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
+import { NODE_PATH_LINE, type AgentInstall, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { GUARD_SLACK_S, MIB, TOOL_TIMEOUT_S, fmtBytes, freeBytes, guarded, installTools, reasonOf, type ToolResult } from "./golden-tools.js";
 import { assertFirstLife } from "./lifecycle.js";
 import type { Machine, MachineBackend, MachineKind, MachineState } from "./machine.js";
@@ -161,6 +161,8 @@ export interface GoldenImport {
      * attach uploads the latest copy again. Absent when none was ticked. */
     volatile?: { paths: string[]; pack: () => Promise<PackedFiles> };
   };
+  /** The person's login shell and its frameworks, put on the machine before the files land. */
+  shell?: ShellInstall;
   tools: ToolInstall[];
   /** Runs once before the agents when a ticked agent's engines floor may be above the base image's Node. */
   node?: NodeInstall;
@@ -213,6 +215,7 @@ const UPLOAD_HEADROOM = 256 * MIB;
 /** The Claude installer peaks near 410 MB (measured 2026-09-02); an agent does not start under this. */
 const AGENTS_DISK_FLOOR = 800 * MIB;
 const AGENT_TIMEOUT_S = 900;
+const SHELL_TIMEOUT_S = 300;
 
 /** Runs the import stages and the harness on a builder, skipping what the
  * ledger says is already there for the same recipe. Files and upload fail the
@@ -285,6 +288,15 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
       const notes = packed.skipped.map(s => `${s.path} (${s.note})`);
       stage("applying-setup", `${fmtBytes(packed.bytes)} packed${notes.length > 0 ? `; skipped ${notes.join(", ")}` : ""}`);
       mark("applying-setup");
+      // The frameworks clone into empty homes, so the shell goes on before the files land; the upload's mark covers it.
+      if (imp.shell !== undefined) {
+        const { shell, frameworks, cmd } = imp.shell;
+        const named = frameworks.join(", ");
+        stage("applying-setup", `${shell}: installing${named !== "" ? `, with ${named}` : ""}`);
+        const res = await machine.exec(guarded(cmd, SHELL_TIMEOUT_S), { timeoutMs: (SHELL_TIMEOUT_S + GUARD_SLACK_S) * 1000 });
+        if (res.exitCode === 0) stage("applying-setup", `${shell} installed as the login shell${named !== "" ? `; ${named} reinstalled` : ""}`);
+        else stage("applying-setup", `${shell} step failed, chsh skipped: ${reasonOf(res, SHELL_TIMEOUT_S)}`);
+      }
 
       stage("uploading-files", fmtBytes(packed.bytes));
       ran = true;

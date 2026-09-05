@@ -26,6 +26,14 @@ const MANAGERS: readonly { id: string; label: string; markers: string[]; list?: 
 
 const HISTORY = ["~/.zsh_history", "~/.bash_history", "~/.local/share/fish/fish_history", "~/.local/share/atuin"];
 
+/** The name of the login shell, when SHELL names one /etc/shells lists; a SHELL set by hand to
+ * something else, or none at all, leaves the choice to the machine's default. */
+export async function loginShell(host: Host): Promise<string | undefined> {
+  if (host.shell === undefined) return undefined;
+  const listed = ((await host.fs.readText("/etc/shells")) ?? "").split("\n").map(l => l.trim());
+  return listed.includes(host.shell) ? host.shell.slice(host.shell.lastIndexOf("/") + 1) : undefined;
+}
+
 export async function detectShell(host: Host): Promise<ManifestEntry[]> {
   const rows: (ManifestEntry | undefined)[] = [];
   for (const name of RC_FILES) {
@@ -46,5 +54,6 @@ export async function detectShell(host: Host): Promise<ManifestEntry[]> {
   }
 
   rows.push(await row(host, { rung: "shell", id: "shell/history", label: "shell history", paths: HISTORY, default: "skip" }));
-  return present(rows);
+  const login = await loginShell(host);
+  return present(rows).map(r => (login === undefined ? r : { ...r, login }));
 }

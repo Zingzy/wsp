@@ -10,6 +10,8 @@ export interface FakeLaptop {
   which?: string[];
   /** Keyed by `cmd arg arg`; a value is stdout of a successful run. */
   exec?: Record<string, string>;
+  /** SHELL of the process running the collector. */
+  shell?: string;
 }
 
 const HOME = "/Users/dev";
@@ -66,5 +68,5 @@ export function fakeHost(laptop: FakeLaptop = {}): Host & { calls: string[] } {
     },
   };
 
-  return { platform: laptop.platform ?? "darwin", home: HOME, fs, exec, calls };
+  return { platform: laptop.platform ?? "darwin", home: HOME, ...(laptop.shell !== undefined ? { shell: laptop.shell } : {}), fs, exec, calls };
 }

@@ -357,6 +357,8 @@ export type GoldenManifest = z.infer<typeof GoldenManifest>;
  * changed instead of only that something did. */
 export const RecipeDigest = z.object({
   ticks: z.array(z.object({ id: z.string(), choice: z.string().optional(), version: z.string().optional() })),
+  /** The computer's login shell by name, when a shell row is ticked: it decides which shell the machine logs into. */
+  login: z.string().optional(),
   /** A volatile entry (its tool rewrites it, or it is a Keychain value the machine gets rendered) is recorded but never hashed. */
   files: z.array(z.object({ id: z.string(), path: z.string(), dest: z.string(), digest: z.string(), volatile: z.boolean().optional() })),
 });

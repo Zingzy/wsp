@@ -35,6 +35,8 @@ export interface RecipeEntry {
   consent?: boolean;
   /** Exported names cut from the carried copy of this file, for the checklist; the pack strips every rc file it stages on its own. */
   secrets?: readonly string[];
+  /** Shell rows: the name of the login shell the computer runs, when the collector could read it. */
+  login?: string;
 }
 
 /** What the planner's injected stat says about one laptop path. A link reports
@@ -275,12 +277,14 @@ export interface DigestedFile {
 const sorted = <T extends object>(rows: T[]): T[] => rows.sort((a, b) => (JSON.stringify(a) < JSON.stringify(b) ? -1 : 1));
 
 /** What a golden is built from: the ticked ids with their login answers and
- * tool pins, and every planned path with its digest, volatile ones marked.
- * Labels, row order and disk stats do not enter, so a file rewritten with the
- * same bytes reads the same. */
+ * tool pins, the computer's login shell once when a shell row is ticked, and
+ * every planned path with its digest, volatile ones marked. Labels, row order
+ * and disk stats do not enter, so a file rewritten with the same bytes reads the same. */
 export function recipeDigest(entries: readonly RecipeEntry[], files: readonly DigestedFile[] = []): RecipeDigest {
+  const login = entries.find(e => ticked(e) && e.rung === "shell" && e.login !== undefined)?.login;
   return {
     ticks: sorted(entries.filter(ticked).map(e => ({ id: e.id, ...(e.choice !== undefined ? { choice: e.choice } : {}), ...(e.version !== undefined ? { version: e.version } : {}) }))),
+    ...(login !== undefined ? { login } : {}),
     files: sorted(files.map(f => ({ id: f.id, path: f.path, dest: f.dest, digest: f.digest, ...(f.volatile === true ? { volatile: true } : {}) }))),
   };
 }
@@ -290,7 +294,7 @@ export function recipeDigest(entries: readonly RecipeEntry[], files: readonly Di
 export function recipeHash(digest: RecipeDigest): string {
   const ticks = sorted(digest.ticks.map(t => [t.id, t.choice ?? null, t.version ?? null]));
   const files = sorted(digest.files.filter(f => f.volatile !== true).map(f => [f.id, f.path, f.dest, f.digest]));
-  return createHash("sha256").update(JSON.stringify({ ticks, files })).digest("hex");
+  return createHash("sha256").update(JSON.stringify({ ticks, login: digest.login ?? null, files })).digest("hex");
 }
 
 // --- tools -------------------------------------------------------------------
@@ -662,6 +666,80 @@ export function editorInstallsFor(entries: readonly RecipeEntry[]): EditorsPlan 
     });
   }
   return out;
+}
+
+// --- shell -------------------------------------------------------------------
+
+export type LoginShell = "zsh" | "fish";
+
+export interface ShellInstall {
+  /** The login shell the ticked rows belong to; chsh sets it for the guest's uid. */
+  shell: LoginShell;
+  /** The ticked framework rows reinstalled into their homes, in recipe order. */
+  frameworks: string[];
+  /** One bash -c script under set -e. */
+  cmd: string;
+}
+
+/** A shell framework as a git checkout at a pinned commit under the home its rc
+ * file expects; fetched by the commit itself, since none of them tags releases. */
+export interface PinnedRepo {
+  url: string;
+  branch: string;
+  commit: string;
+  /** Relative to the guest's home. */
+  home: string;
+}
+
+export const SHELL_FRAMEWORKS: Record<string, PinnedRepo> = {
+  // https://github.com/ohmyzsh/ohmyzsh#manual-installation
+  "shell/oh-my-zsh": { url: "https://github.com/ohmyzsh/ohmyzsh.git", branch: "master", commit: "421d95782d369f266b8087a0eae11eac2f6a6041", home: ".oh-my-zsh" },
+  // https://github.com/zdharma-continuum/zinit#manual (the XDG home; the rc file's own installer keeps any other)
+  "shell/zinit": { url: "https://github.com/zdharma-continuum/zinit.git", branch: "main", commit: "db9e267184c85a26056c2646222f48df609cecd5", home: ".local/share/zinit/zinit.git" },
+  // https://github.com/zplug/zplug#manually
+  "shell/zplug": { url: "https://github.com/zplug/zplug.git", branch: "main", commit: "cc6906ea7ea18a5058e8b4862d4086148434ddde", home: ".zplug" },
+  // https://github.com/mattmc3/antidote#install
+  "shell/antidote": { url: "https://github.com/mattmc3/antidote.git", branch: "main", commit: "db19ea3aa9ad83dbe6ac465ecce0a0afc5a752a5", home: ".antidote" },
+};
+
+/** Rows only zsh can read: its rc files, its prompt, and the frameworks above. */
+const ZSH_ROWS = new Set(["shell/zshrc", "shell/zshenv", "shell/zprofile", "shell/zlogin", "shell/p10k", ...Object.keys(SHELL_FRAMEWORKS)]);
+
+function pinnedClone(repo: PinnedRepo): string {
+  const dir = `"$HOME/${repo.home}"`;
+  return [
+    `if [ ! -d ${dir}/.git ]; then`,
+    `  git init -q ${dir}`,
+    `  git -C ${dir} remote add origin ${repo.url}`,
+    `  git -C ${dir} fetch -q --depth 1 origin ${repo.commit}`,
+    // A kept builder may already hold the person's custom directory; the upload that follows puts it back.
+    `  git -C ${dir} checkout -q -f -B ${repo.branch} FETCH_HEAD`,
+    "fi",
+    `test "$(git -C ${dir} rev-parse HEAD)" = "${repo.commit}"`,
+  ].join("\n");
+}
+
+/** The shell the ticked rows are for and how the builder gets it: each ticked shell by apt,
+ * each ticked framework at its pin, then chsh for the uid. With zsh and fish rows both ticked,
+ * the computer's own login shell decides which one chsh sets, zsh when the collector could
+ * not read it. Runs before the files land, so a framework's home is empty when its clone
+ * arrives and the copied custom directory lands on top of it. */
+export function shellInstallFor(entries: readonly RecipeEntry[]): ShellInstall | undefined {
+  const shellRows = entries.filter(e => ticked(e) && e.rung === "shell");
+  const zsh = shellRows.some(e => ZSH_ROWS.has(e.id));
+  const fish = shellRows.some(e => e.id === "shell/fish");
+  if (!zsh && !fish) return undefined;
+  const login = entries.find(e => e.rung === "shell" && e.login !== undefined)?.login;
+  const shell: LoginShell = fish && (!zsh || login === "fish") ? "fish" : "zsh";
+  const frameworks = shellRows.map(e => e.id).filter(id => id in SHELL_FRAMEWORKS);
+  const lines = [PRELUDE, "export DEBIAN_FRONTEND=noninteractive"];
+  if (zsh) lines.push(APT("zsh"));
+  if (fish) lines.push(APT("fish"));
+  if (frameworks.length > 0) lines.push(APT("git"), ...frameworks.map(id => pinnedClone(SHELL_FRAMEWORKS[id]!)));
+  // Debian's zprofile is empty, so a zsh login shell would skip the PATH and BROWSER lines the golden puts in profile.d.
+  if (zsh) lines.push(`grep -qs 'source /etc/profile' /etc/zsh/zprofile || printf '%s\\n' "emulate sh -c 'source /etc/profile'" >> /etc/zsh/zprofile`);
+  lines.push(`chsh -s "$(command -v ${shell})" "$(id -un)"`);
+  return { shell, frameworks, cmd: lines.join("\n") };
 }
 
 // --- agents ------------------------------------------------------------------

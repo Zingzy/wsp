@@ -11,10 +11,10 @@ vi.mock("node:os", async importOriginal => {
   };
 });
 
-const { ptyEnv } = await import("../src/pty-manager.js");
+const { ptyEnv, ptyLaunch } = await import("../src/pty-manager.js");
 
 describe("ptyEnv on a uid without a passwd row", () => {
-  const saved = { HOME: process.env["HOME"], USER: process.env["USER"] };
+  const saved = { HOME: process.env["HOME"], USER: process.env["USER"], SHELL: process.env["SHELL"] };
   afterEach(() => {
     for (const [k, v] of Object.entries(saved)) {
       if (v === undefined) delete process.env[k];
@@ -35,6 +35,12 @@ describe("ptyEnv on a uid without a passwd row", () => {
     process.env["HOME"] = "/srv/elsewhere";
     process.env["USER"] = "someone";
     expect(ptyEnv()).toMatchObject({ HOME: "/srv/elsewhere", USER: "someone" });
+  });
+
+  it("the pty falls back to bash, still a login shell, when there is no passwd row to read a shell from", () => {
+    delete process.env["SHELL"];
+    expect(ptyLaunch({})).toMatchObject({ file: "bash", args: ["-l"] });
+    expect(ptyLaunch({}).env).not.toHaveProperty("SHELL");
   });
 
   it("with HOME inherited and USER blank, the failed lookup drops only USER", () => {

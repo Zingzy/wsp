@@ -502,6 +502,44 @@ describe("golden import stages", () => {
     }]);
   });
 
+  it("the shell step runs after the pack and before the files land, guarded on the guest, and names what it did on the setup frame", async () => {
+    const { backend, cmds, fetch } = backendFor();
+    const { stages, onStage } = stageRecorder();
+    const shell = { shell: "zsh" as const, frameworks: ["shell/oh-my-zsh", "shell/antidote"], cmd: "set -euo pipefail\ninstall-zsh-and-frameworks" };
+    await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ shell }) });
+    const step = cmds.find(c => c.includes("install-zsh-and-frameworks"))!;
+    expect(step).toMatch(/\nsetsid bash -c 'set -euo pipefail\ninstall-zsh-and-frameworks' &\np=\$!\n/);
+    expect(step).toContain("while [ $t -lt 300 ]");
+    const untar = cmds.find(c => c.includes("tar xzf"))!;
+    expect(cmds.indexOf(step)).toBeLessThan(cmds.indexOf(untar));
+    expect(cmds.indexOf(step)).toBeLessThan(cmds.indexOf(cmds.find(c => c.includes("claude-install"))!));
+    expect(stages.slice(stages.indexOf("applying-setup:1.2 KB packed; skipped ~/.bashrc (no longer on this computer)"), stages.indexOf("uploading-files:1.2 KB") + 1)).toEqual([
+      "applying-setup:1.2 KB packed; skipped ~/.bashrc (no longer on this computer)",
+      "applying-setup:zsh: installing, with shell/oh-my-zsh, shell/antidote",
+      "applying-setup:zsh installed as the login shell; shell/oh-my-zsh, shell/antidote reinstalled",
+      "uploading-files:1.2 KB",
+    ]);
+  });
+
+  it("a shell step that fails is a warning on the setup frame with its reason; the files still land and the build goes on", async () => {
+    const { backend, cmds, fetch } = backendFor([["install-zsh", { exitCode: 100, stdout: "", stderr: "E: Unable to locate package zsh\n" }]]);
+    const { stages, onStage } = stageRecorder();
+    const builder = await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ shell: { shell: "zsh", frameworks: [], cmd: "install-zsh" } }) });
+    expect(stages).toContain("applying-setup:zsh step failed, chsh skipped: E: Unable to locate package zsh");
+    expect(cmds.some(c => c.includes("tar xzf"))).toBe(true);
+    expect(stages.at(-1)).toBe("ready");
+    expect(builder.import?.applied).toContain("uploading-files");
+  });
+
+  it("a builder that already carries the files does not run the shell step again", async () => {
+    const { backend, cmds, fetch } = backendFor();
+    const imp = importOf({ shell: { shell: "zsh", frameworks: [], cmd: "install-zsh" } });
+    const builder = await prepareBuilder({ backend, setup: "true", fetch, import: imp });
+    expect(cmds.filter(c => c.includes("install-zsh"))).toHaveLength(1);
+    await applyGoldenImport(builder.machine, { import: imp, setup: "true", ledger: builder.import, fetch });
+    expect(cmds.filter(c => c.includes("install-zsh"))).toHaveLength(1);
+  });
+
   it("a tool that fails is a warning in the detail and the next one still runs; the build and the seal go on", async () => {
     const { backend, fetch } = backendFor([
       // stdout ends on a progress line; the reason is the last stderr line, not that.

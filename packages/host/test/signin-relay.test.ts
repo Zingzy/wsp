@@ -107,7 +107,7 @@ describe("relayPty", () => {
     const opened: string[] = [];
     const run = relayPty({ link, command: "gh auth login", terminal: term, open: async u => (opened.push(u), true), timeoutMs: 60_000 });
     const pty = await firstPty(link);
-    expect(pty.created).toEqual({ cols: 120, rows: 40 });
+    expect(pty.created).toEqual({ cols: 120, rows: 40, shell: "bash" });
     await tick();
     expect(pty.attached).toBe(true);
     expect(pty.writes[0]).toBe("exec gh auth login || exit\r");

@@ -27,6 +27,23 @@ describe("shell", () => {
     expect(rows).toEqual([{ rung: "shell", id, label: expect.any(String), paths: [path], bytes: 10, default: "bring" }]);
   });
 
+  it("records the login shell on every shell row when SHELL names one /etc/shells lists, by name", async () => {
+    const shells = "# List of acceptable login shells\n/bin/bash\n/bin/zsh\n/opt/homebrew/bin/fish\n";
+    const zsh = await detectShell(fakeHost({ shell: "/bin/zsh", files: { "~/.zshrc": 10, "~/.config/fish/config.fish": 5, "/etc/shells": shells } }));
+    expect(zsh.map(r => [r.id, r.login])).toEqual([["shell/zshrc", "zsh"], ["shell/fish", "zsh"]]);
+    const fish = await detectShell(fakeHost({ shell: "/opt/homebrew/bin/fish", files: { "~/.zshrc": 10, "/etc/shells": shells } }));
+    expect(fish[0]).toMatchObject({ id: "shell/zshrc", login: "fish" });
+  });
+
+  it("a SHELL that /etc/shells does not list, or no SHELL at all, leaves the rows without a login shell", async () => {
+    const unlisted = await detectShell(fakeHost({ shell: "/usr/local/bin/nu", files: { "~/.zshrc": 10, "/etc/shells": "/bin/bash\n/bin/zsh\n" } }));
+    expect(unlisted[0]).not.toHaveProperty("login");
+    const missing = await detectShell(fakeHost({ shell: "/bin/zsh", files: { "~/.zshrc": 10 } }));
+    expect(missing[0]).not.toHaveProperty("login");
+    const none = await detectShell(fakeHost({ files: { "~/.zshrc": 10, "/etc/shells": "/bin/zsh\n" } }));
+    expect(none[0]).not.toHaveProperty("login");
+  });
+
   it("oh-my-zsh brings only the custom dir; the framework reinstalls", async () => {
     const rows = await detectShell(fakeHost({ files: { "~/.oh-my-zsh/oh-my-zsh.sh": 9000, "~/.oh-my-zsh/custom/aliases.zsh": 200 } }));
     expect(rows).toEqual([
