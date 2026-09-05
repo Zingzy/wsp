@@ -129,7 +129,8 @@ export async function relayPty(o: RelayOptions): Promise<RelayOutcome> {
   const now = o.now ?? Date.now;
   const cols = output.columns ?? 80;
   const rows = output.rows ?? 24;
-  const ptyId = ptyIdOf(await o.link.op("pty.create", { cols, rows }));
+  // bash by name: the person's login shell may read interactive rc files that would sit under the typed line.
+  const ptyId = ptyIdOf(await o.link.op("pty.create", { cols, rows, shell: "bash" }));
   const scanner = new UrlScanner();
   const outcome: RelayOutcome = { exitCode: -1, timedOut: false, dropped: false, urls: 0, opened: 0 };
   let offer: { url: string; at: number; typed: boolean } | undefined;

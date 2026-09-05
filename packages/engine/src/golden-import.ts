@@ -35,6 +35,8 @@ export interface RecipeEntry {
   consent?: boolean;
   /** Exported names cut from the carried copy of this file, for the checklist; the pack strips every rc file it stages on its own. */
   secrets?: readonly string[];
+  /** Shell rows: the name of the login shell the computer runs, when the collector could read it. */
+  login?: string;
 }
 
 /** What the planner's injected stat says about one laptop path. A link reports
@@ -715,17 +717,18 @@ function pinnedClone(repo: PinnedRepo): string {
   ].join("\n");
 }
 
-/** The shell the ticked rows are for and how the builder gets it: the shell by apt, each
- * ticked framework at its pin, then chsh for the uid. A fish config beside a zshrc means
- * fish: every Mac has a zshrc, only a fish user has that directory. Runs before the files
- * land, so a framework's home is empty when its clone arrives and the copied custom
- * directory lands on top of it. */
+/** The shell the ticked rows are for and how the builder gets it: each ticked shell by apt,
+ * each ticked framework at its pin, then chsh for the uid. With zsh and fish rows both ticked,
+ * the computer's own login shell decides which one chsh sets, zsh when the collector could
+ * not read it. Runs before the files land, so a framework's home is empty when its clone
+ * arrives and the copied custom directory lands on top of it. */
 export function shellInstallFor(entries: readonly RecipeEntry[]): ShellInstall | undefined {
   const shellRows = entries.filter(e => ticked(e) && e.rung === "shell");
   const zsh = shellRows.some(e => ZSH_ROWS.has(e.id));
   const fish = shellRows.some(e => e.id === "shell/fish");
   if (!zsh && !fish) return undefined;
-  const shell: LoginShell = fish ? "fish" : "zsh";
+  const login = entries.find(e => e.rung === "shell" && e.login !== undefined)?.login;
+  const shell: LoginShell = fish && (!zsh || login === "fish") ? "fish" : "zsh";
   const frameworks = shellRows.map(e => e.id).filter(id => id in SHELL_FRAMEWORKS);
   const lines = [PRELUDE, "export DEBIAN_FRONTEND=noninteractive"];
   if (zsh) lines.push(APT("zsh"));

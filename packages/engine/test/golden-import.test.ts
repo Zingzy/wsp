@@ -789,13 +789,28 @@ describe("shellInstallFor", () => {
     expect(shellInstallFor([shell("zplug", { paths: [] })])).toMatchObject({ shell: "zsh", frameworks: ["shell/zplug"] });
   });
 
-  it("fish's config ticked: fish, with no framework, and fish wins over a zshrc ticked beside it", () => {
-    const plan = shellInstallFor([shell("fish", { paths: ["~/.config/fish"] }), shell("zshrc")]);
+  it("fish's config ticked alone: fish, with no framework", () => {
+    const plan = shellInstallFor([shell("fish", { paths: ["~/.config/fish"] }), shell("zshrc", { bring: false })]);
     expect(plan).toMatchObject({ shell: "fish", frameworks: [] });
     expect(plan!.cmd).toContain("apt-get install -y -qq fish");
-    expect(plan!.cmd).toContain("apt-get install -y -qq zsh");
+    expect(plan!.cmd).not.toContain("apt-get install -y -qq zsh");
     expect(plan!.cmd).toContain('chsh -s "$(command -v fish)" "$(id -un)"');
-    expect(plan!.cmd).not.toContain('chsh -s "$(command -v zsh)"');
+  });
+
+  it("zsh and fish rows both ticked: both install, and the computer's login shell picks the one chsh sets, zsh when unknown", () => {
+    const both = (login?: string) => shellInstallFor([shell("fish", { paths: ["~/.config/fish"], ...(login !== undefined ? { login } : {}) }), shell("zshrc", login !== undefined ? { login } : {})]);
+    for (const plan of [both("zsh"), both("fish"), both()]) {
+      expect(plan!.cmd).toContain("apt-get install -y -qq fish");
+      expect(plan!.cmd).toContain("apt-get install -y -qq zsh");
+    }
+    expect(both("zsh")!.shell).toBe("zsh");
+    expect(both("zsh")!.cmd).toContain('chsh -s "$(command -v zsh)" "$(id -un)"');
+    expect(both("fish")!.shell).toBe("fish");
+    expect(both("fish")!.cmd).toContain('chsh -s "$(command -v fish)" "$(id -un)"');
+    expect(both()!.shell).toBe("zsh");
+    expect(both("bash")!.shell).toBe("zsh");
+    // The login shell is read off the recipe whatever is ticked, but a shell with no ticked row is never set.
+    expect(shellInstallFor([shell("zshrc"), shell("fish", { paths: ["~/.config/fish"], bring: false, login: "fish" })])!.shell).toBe("zsh");
   });
 
   it("every framework pin is a full commit on a named branch, cloned over https", () => {

@@ -293,7 +293,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
         stage("applying-setup", `${shell}: installing${named !== "" ? `, with ${named}` : ""}`);
         const res = await machine.exec(guarded(cmd, SHELL_TIMEOUT_S), { timeoutMs: (SHELL_TIMEOUT_S + GUARD_SLACK_S) * 1000 });
         if (res.exitCode === 0) stage("applying-setup", `${shell} installed as the login shell${named !== "" ? `; ${named} reinstalled` : ""}`);
-        else stage("applying-setup", `${shell} not installed, the shell stays bash: ${reasonOf(res, SHELL_TIMEOUT_S)}`);
+        else stage("applying-setup", `${shell} step failed, chsh skipped: ${reasonOf(res, SHELL_TIMEOUT_S)}`);
       }
 
       stage("uploading-files", fmtBytes(packed.bytes));

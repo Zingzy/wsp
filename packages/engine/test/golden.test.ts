@@ -525,7 +525,7 @@ describe("golden import stages", () => {
     const { backend, cmds, fetch } = backendFor([["install-zsh", { exitCode: 100, stdout: "", stderr: "E: Unable to locate package zsh\n" }]]);
     const { stages, onStage } = stageRecorder();
     const builder = await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ shell: { shell: "zsh", frameworks: [], cmd: "install-zsh" } }) });
-    expect(stages).toContain("applying-setup:zsh not installed, the shell stays bash: E: Unable to locate package zsh");
+    expect(stages).toContain("applying-setup:zsh step failed, chsh skipped: E: Unable to locate package zsh");
     expect(cmds.some(c => c.includes("tar xzf"))).toBe(true);
     expect(stages.at(-1)).toBe("ready");
     expect(builder.import?.applied).toContain("uploading-files");

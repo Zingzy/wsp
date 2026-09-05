@@ -26,6 +26,8 @@ export interface HostExec {
 export interface Host {
   platform: Platform;
   home: string;
+  /** SHELL of the process running the collector: the login shell of whoever started it. */
+  shell?: string;
   fs: HostFs;
   exec: HostExec;
 }

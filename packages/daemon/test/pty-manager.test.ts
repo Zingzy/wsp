@@ -109,7 +109,8 @@ describe("ptyLaunch", () => {
     const s = mgr.create({ cols: 80, rows: 24, cwd: home, env: { HOME: home, ZDOTDIR: home, XDG_CONFIG_HOME: join(home, ".config") } });
     const got: string[] = [];
     s.attach(d => got.push(d));
-    await new Promise(r => setTimeout(r, 600));
+    const deadline = Date.now() + 5_000;
+    while (!got.join("").includes("WSP-LOGIN-PROFILE") && Date.now() < deadline) await new Promise(r => setTimeout(r, 25));
     mgr.destroyAll();
     expect(got.join("")).toContain("WSP-LOGIN-PROFILE");
   });
