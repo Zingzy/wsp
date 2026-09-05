@@ -153,17 +153,19 @@ function summarize(tools: ToolResult[], housekeeping: string | undefined): strin
 }
 
 /** The installs that name their command, checked by name on the tools PATH: an install that exited 0 without
- * putting the command there is a failure, not an install. */
-async function verifyCommands(machine: Machine, tools: readonly ToolInstall[], results: ToolResult[]): Promise<void> {
+ * putting the command there is a failure, not an install, and so is one the check could not reach. */
+async function verifyCommands(machine: Machine, tools: readonly ToolInstall[], results: ToolResult[], stage: Stage): Promise<void> {
   const named = results.filter(r => r.outcome === "installed").map(r => ({ result: r, bin: tools.find(t => t.id === r.id)?.bin })).filter((x): x is { result: ToolResult; bin: string } => x.bin !== undefined);
   if (named.length === 0) return;
   const cmd = `export PATH=${TOOLS_PATH}\nfor b in ${named.map(x => squote(x.bin)).join(" ")}; do command -v "$b" >/dev/null 2>&1 || echo "missing $b"; done`;
   const res = await machine.exec(cmd, { timeoutMs: INLINE_EXEC_MS });
+  const failed = res.exitCode === 0 ? undefined : reasonOf(res, INLINE_EXEC_MS / 1000);
+  if (failed !== undefined) stage("installing-tools", `the PATH check failed (${failed}): ${named.map(x => x.bin).join(", ")} count as failed`);
   const missing = new Set(res.stdout.split("\n").flatMap(l => (l.startsWith("missing ") ? [l.slice("missing ".length).trim()] : [])));
   for (const x of named) {
-    if (!missing.has(x.bin)) continue;
+    if (failed === undefined && !missing.has(x.bin)) continue;
     x.result.outcome = "failed";
-    x.result.note = `${x.bin} is not on PATH after the install`;
+    x.result.note = failed === undefined ? `${x.bin} is not on PATH after the install` : `${x.bin} could not be checked on PATH: ${failed}`;
     delete x.result.road;
   }
 }
@@ -216,7 +218,7 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
       out.tools.push({ id: tool.id, label: tool.label, outcome: "failed", note: reasonOf(res, TOOL_TIMEOUT_S), ms });
     }
   }
-  await verifyCommands(machine, tools, out.tools);
+  await verifyCommands(machine, tools, out.tools, stage);
   let housekeeping: string | undefined;
   if (installed.has("tools/homebrew")) {
     const before = await freeBytes(machine);

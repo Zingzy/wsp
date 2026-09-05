@@ -162,7 +162,7 @@ export interface CaskInfo {
   tap: string;
   version: string;
   url: string;
-  /** Basenames of the binary artifacts, in stanza order. */
+  /** The commands the binary artifacts put on PATH, in stanza order: the target when the stanza names one, else the file's basename. */
   binaries: string[];
   /** Whether an .app artifact is among them: an app that also ships a CLI is an app. */
   app: boolean;
@@ -177,7 +177,11 @@ export function parseCaskInfo(json: unknown): Map<string, CaskInfo> {
   for (const c of json["casks"]) {
     if (!isRecord(c) || typeof c["token"] !== "string") continue;
     const artifacts = Array.isArray(c["artifacts"]) ? c["artifacts"].filter(isRecord) : [];
-    const binaries = artifacts.flatMap(a => (Array.isArray(a["binary"]) && typeof a["binary"][0] === "string" ? [basename(a["binary"][0])] : []));
+    const binaries = artifacts.flatMap(a => {
+      if (!Array.isArray(a["binary"]) || typeof a["binary"][0] !== "string") return [];
+      const opts = a["binary"][1];
+      return [isRecord(opts) && typeof opts["target"] === "string" ? basename(opts["target"]) : basename(a["binary"][0])];
+    });
     const fullToken = typeof c["full_token"] === "string" ? c["full_token"] : c["token"];
     const info: CaskInfo = {
       token: c["token"],
@@ -205,7 +209,7 @@ async function caskRow(host: Host, name: string, info: CaskInfo | undefined): Pr
   if (info === undefined || info.app || info.binaries.length === 0) return appRow(name);
   const bin = info.binaries.find(b => b === info.token) ?? info.binaries.find(b => info.token.includes(b)) ?? info.binaries[0]!;
   const label = bin === info.token ? bin : `${bin} (${info.token})`;
-  const base = { rung: "tools" as const, id: `tools/cli/${bin}`, label, group: CLI_GROUP, version: info.version };
+  const base = { rung: "tools" as const, id: `tools/cli/${bin}`, label, group: CLI_GROUP, ...(info.version === "" ? {} : { version: info.version }) };
   const m = GITHUB_RELEASE.exec(info.url);
   if (m === null) return item({ ...base, default: "skip", reason: "command-line tool, but not from a GitHub release; no Linux install path", linux: "no" });
   const stanza = (await host.exec.run("brew", ["cat", info.fullToken])) ?? "";
@@ -213,11 +217,22 @@ async function caskRow(host: Host, name: string, info: CaskInfo | undefined): Pr
   return entry({ ...base, paths: [`github.com/${m[1]}@${m[2]}`], bytes: 0, linux, ...(linux === "yes" ? {} : { default: "skip" }) });
 }
 
+/** One brew info for every cask; a token brew cannot resolve fails the whole call with no JSON, so then each token is asked alone. */
+async function caskInfos(host: Host, casks: string[]): Promise<Map<string, CaskInfo>> {
+  if (casks.length === 0) return new Map();
+  const ask = async (tokens: string[]): Promise<unknown> => tryJson((await host.exec.run("brew", ["info", "--json=v2", "--cask", ...tokens])) ?? "");
+  const batch = await ask(casks);
+  if (batch !== undefined) return parseCaskInfo(batch);
+  const out = new Map<string, CaskInfo>();
+  for (const c of casks) for (const [k, v] of parseCaskInfo(await ask([c]))) out.set(k, v);
+  return out;
+}
+
 async function brewRows(host: Host): Promise<ManifestEntry[]> {
   if (!(await host.exec.which("brew"))) return [];
   const lines = parseBrewfile((await host.exec.run("brew", ["bundle", "dump", "--file=-"])) ?? "");
   const casks = lines.filter(l => l.kind === "cask").map(l => l.name);
-  const info = casks.length > 0 ? parseCaskInfo(tryJson((await host.exec.run("brew", ["info", "--json=v2", "--cask", ...casks])) ?? "")) : new Map<string, CaskInfo>();
+  const info = await caskInfos(host, casks);
   const rows: ManifestEntry[] = [];
   for (const l of lines) {
     switch (l.kind) {
@@ -260,9 +275,9 @@ async function goRows(host: Host): Promise<ManifestEntry[]> {
 }
 
 /** A Go binary named for a command's cask is the same tool: its module joins the command's row as the
- * fallback road, after the release, and its own row goes. */
+ * fallback road, after the release, and its own row goes. A locked-off row takes nothing: the Go row stays installable. */
 function groupCli(rows: ManifestEntry[]): ManifestEntry[] {
-  const cli = new Map(rows.filter(r => r.id.startsWith("tools/cli/")).map(r => [r.id.slice("tools/cli/".length), r]));
+  const cli = new Map(rows.filter(r => r.id.startsWith("tools/cli/") && r.reason === undefined).map(r => [r.id.slice("tools/cli/".length), r]));
   return rows.flatMap(r => {
     if (!r.id.startsWith("tools/go/")) return [r];
     const tool = cli.get(r.id.slice("tools/go/".length));

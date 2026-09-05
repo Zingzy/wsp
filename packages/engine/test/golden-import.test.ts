@@ -701,6 +701,21 @@ describe("command-line tool rows", () => {
     const table: BrewTable = new Map([["zingzy/tap/diskbloom", { name: "diskbloom", fullName: "zingzy/tap/diskbloom", deps: [], macosOnly: false, source: { repo: "Zingzy/diskbloom", tag: "v0.1.0" } }]]);
     const t = toolInstallsFor([row({ rung: "tools", id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", linux: "unknown" })], table);
     expect(t.installs.at(-1)).toMatchObject({ id: "tools/brew/zingzy/tap/diskbloom", manager: "github", bin: "diskbloom" });
+    expect(t.installs.at(-1)!.cmd).not.toContain("mv '/usr/local/bin/");
+  });
+
+  it("the go fallback lands under the row's command: a module whose last element is another name is moved there, on a CLI row and a tap road alike; a /vN module suffix is not the name", () => {
+    const alone = toolInstallsFor([{ ...spoo, paths: ["github.com/spoo-me/spoo-cli@v0.4.1"] }]).installs.at(-1)!;
+    expect(alone.cmd).toContain(`GOBIN=/usr/local/bin go install 'github.com/spoo-me/spoo-cli@v0.4.1'\n  mv '/usr/local/bin/spoo-cli' "/usr/local/bin/$name"\n  echo "WSP_ROAD go "`);
+    const folded = toolInstallsFor([spoo]).installs.at(-1)!;
+    expect(folded.cmd).toContain(`go install 'github.com/spoo-me/spoo-cli/cmd/spoo@v0.3.0'\n  echo "WSP_ROAD go "`);
+    expect(folded.cmd).not.toContain("mv '/usr/local/bin/");
+    const v2 = toolInstallsFor([{ ...spoo, paths: ["github.com/spoo-me/spoo-cli@v2.0.0", "github.com/spoo-me/spoo/v2@v2.0.0"] }]).installs.at(-1)!;
+    expect(v2.cmd).not.toContain("mv '/usr/local/bin/");
+    const table: BrewTable = new Map([["spoo-me/tap/spoo", { name: "spoo", fullName: "spoo-me/tap/spoo", deps: [], macosOnly: false, source: { repo: "spoo-me/spoo-cli", tag: "v0.4.1" } }]]);
+    const tap = toolInstallsFor([row({ rung: "tools", id: "tools/brew/spoo-me/tap/spoo", label: "spoo", linux: "unknown" })], table).installs.at(-1)!;
+    expect(tap).toMatchObject({ manager: "github", bin: "spoo" });
+    expect(tap.cmd).toContain(`mv '/usr/local/bin/spoo-cli' "/usr/local/bin/$name"`);
   });
 });
 

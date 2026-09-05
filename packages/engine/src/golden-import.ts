@@ -625,12 +625,22 @@ function managerCommand(e: RecipeEntry, manager: Exclude<ToolManager, "github">)
   }
 }
 
+/** The file `go install` writes for a module: its last path element, skipping a major-version suffix. */
+function goBinary(module: string): string {
+  const at = module.lastIndexOf("@");
+  const parts = (at > 0 ? module.slice(0, at) : module).split("/");
+  const last = parts.at(-1)!;
+  return /^v[1-9]\d*$/.test(last) && parts.length > 1 ? parts.at(-2)! : last;
+}
+
 /** A tool from its repository: the release asset built for this arch, unpacked and its binary put in
- * /usr/local/bin; with no Linux asset and go on the machine, `go install` of the module at the tag.
- * The asset's sha256 is checked against the pin when the recipe has one for this tag, and printed with the
- * tag on the WSP_ROAD line the stage reads either way, so the first install of a tag records it. */
+ * /usr/local/bin; with no Linux asset and go on the machine, `go install` of the module at the tag, moved to
+ * the row's command when the module is named otherwise. The asset's sha256 is checked against the pin when
+ * the recipe has one for this tag, and printed with the tag on the WSP_ROAD line the stage reads either way,
+ * so the first install of a tag records it. */
 function roadInstall(name: string, source: ToolSource, pin?: string, go = `github.com/${source.repo}@${source.tag}`): string {
   const api = `https://api.github.com/repos/${source.repo}/releases/tags/${source.tag}`;
+  const goBin = goBinary(go);
   return [
     "set -euo pipefail",
     `name=${squote(name)}`,
@@ -658,6 +668,7 @@ function roadInstall(name: string, source: ToolSource, pin?: string, go = `githu
     `  echo "WSP_ROAD release \${asset:-$url} $sum "${squote(source.tag)}`,
     "elif command -v go >/dev/null 2>&1; then",
     `  GOBIN=/usr/local/bin go install ${squote(go)}`,
+    ...(goBin === name ? [] : [`  mv ${squote(`/usr/local/bin/${goBin}`)} "/usr/local/bin/$name"`]),
     `  echo "WSP_ROAD go "${squote(go)}`,
     "else",
     `  echo "Error: release "${squote(source.tag)}" of "${squote(source.repo)}" has no Linux build, and go is not on the machine" >&2`,

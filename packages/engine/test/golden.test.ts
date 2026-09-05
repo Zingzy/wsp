@@ -678,6 +678,51 @@ describe("golden import stages", () => {
     expect(plain.inline.some(c => c.cmd.includes("command -v"))).toBe(false);
   });
 
+  it("a tap road and a CLI row whose go module is named otherwise land under the row's command and pass the check: the road is kept, on the fake guest end to end", async () => {
+    const { backend, cmds, fetch, inline } = backendFor([
+      ["releases/tags/v0.4.1", { exitCode: 0, stdout: "go: downloading\nWSP_ROAD go github.com/spoo-me/spoo-cli@v0.4.1\n", stderr: "" }],
+      ["releases/tags/v0.2.0", { exitCode: 0, stdout: "WSP_ROAD go github.com/Zingzy/bloom-cli@v0.2.0\n", stderr: "" }],
+    ]);
+    const table: BrewTable = new Map([["zingzy/tap/bloom", { name: "bloom", fullName: "zingzy/tap/bloom", deps: [], macosOnly: false, source: { repo: "Zingzy/bloom-cli", tag: "v0.2.0" } }]]);
+    const plan = toolInstallsFor([
+      { rung: "tools", id: "tools/brew/zingzy/tap/bloom", label: "bloom", paths: [], bytes: 0, default: "bring", bring: true, linux: "unknown" },
+      { rung: "tools", id: "tools/cli/spoo", label: "spoo", paths: ["github.com/spoo-me/spoo-cli@v0.4.1"], bytes: 0, default: "bring", bring: true, linux: "yes" },
+    ], table);
+    expect(plan.installs.map(i => [i.id, i.bin])).toEqual([["tools/brew/zingzy/tap/bloom", "bloom"], ["tools/cli/spoo", "spoo"]]);
+    const { stages, onStage } = stageRecorder();
+    const results: ImportResult[] = [];
+    await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ tools: plan.installs, onResult: r => void results.push(r) }) });
+    expect(cmds.find(c => c.includes("releases/tags/v0.2.0"))).toContain(`mv '\\''/usr/local/bin/bloom-cli'\\'' "/usr/local/bin/$name"`);
+    expect(cmds.find(c => c.includes("releases/tags/v0.4.1"))).toContain(`mv '\\''/usr/local/bin/spoo-cli'\\'' "/usr/local/bin/$name"`);
+    expect(inline.find(c => c.cmd.includes("command -v"))!.cmd).toContain(`for b in 'bloom' 'spoo'; do`);
+    expect(results[0]!.tools).toEqual([
+      { id: "tools/brew/zingzy/tap/bloom", label: "bloom", outcome: "installed", road: { kind: "go", from: "github.com/Zingzy/bloom-cli@v0.2.0" }, ms: expect.any(Number) },
+      { id: "tools/cli/spoo", label: "spoo", outcome: "installed", road: { kind: "go", from: "github.com/spoo-me/spoo-cli@v0.4.1" }, ms: expect.any(Number) },
+    ]);
+    expect(stages).toContain("installing-tools:2 installed (bloom with go install, spoo with go install)");
+  });
+
+  it("a check that itself fails counts every named tool as failed, with the check's reason, and says so in a stage line: an unverified tool is not installed", async () => {
+    const { backend, fetch } = backendFor([
+      ["releases/tags/v0.4.1", { exitCode: 0, stdout: `WSP_ROAD release spoo_0.4.1_linux_amd64.tar.gz ${"a".repeat(64)} v0.4.1\n`, stderr: "" }],
+      ["command -v", { exitCode: 124, stdout: "", stderr: "" }],
+    ]);
+    const { stages, onStage } = stageRecorder();
+    const results: ImportResult[] = [];
+    const tools: ToolInstall[] = [
+      ...importOf().tools,
+      { id: "tools/go/gopls", label: "gopls", manager: "go", cmd: "go install gopls", bin: "gopls" },
+      { id: "tools/cli/spoo", label: "spoo", manager: "github", cmd: "curl https://api.github.com/repos/spoo-me/spoo-cli/releases/tags/v0.4.1", bin: "spoo" },
+    ];
+    await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ tools, onResult: r => void results.push(r) }) });
+    expect(results[0]!.tools.slice(3)).toEqual([
+      { id: "tools/go/gopls", label: "gopls", outcome: "failed", note: "gopls could not be checked on PATH: timed out after 20s", ms: expect.any(Number) },
+      { id: "tools/cli/spoo", label: "spoo", outcome: "failed", note: "spoo could not be checked on PATH: timed out after 20s", ms: expect.any(Number) },
+    ]);
+    expect(stages).toContain("installing-tools:the PATH check failed (timed out after 20s): gopls, spoo count as failed");
+    expect(stages).toContain("installing-tools:3 installed, 2 failed: gopls (gopls could not be checked on PATH: timed out after 20s), spoo (spoo could not be checked on PATH: timed out after 20s)");
+  });
+
   it("an agent that fails refuses the seal with the installer's reason, kills the builder, reports the result, and never starts the tools", async () => {
     const { backend, cmds, killed, fetch } = backendFor([["codex-install", { exitCode: 124, stdout: "", stderr: "" }]]);
     const { stages, onStage } = stageRecorder();

@@ -102,6 +102,57 @@ describe("tools", () => {
     expect((await detectTools(failing)).map(r => [r.id, r.reason])).toEqual([["tools/brew-cask/gcloud-cli", "macOS app, no Linux build"]]);
   });
 
+  it("a binary artifact's target is the command on PATH: it names the row, not the downloaded file; a cask with no version string carries none", async () => {
+    const tool = cask("tool", { url: "https://github.com/o/tool/releases/download/v2.0/tool_2.0_darwin_arm64", version: "", artifacts: [{ binary: ["tool_2.0_darwin_arm64", { target: "tool" }] }] });
+    expect(parseCaskInfo({ casks: [tool] }).get("tool")!.binaries).toEqual(["tool"]);
+    const host = fakeHost({ which: ["brew"], exec: { "brew bundle dump --file=-": 'cask "tool"\n', "brew info --json=v2 --cask tool": JSON.stringify({ casks: [tool] }), "brew cat tool": "" } });
+    const rows = await detectTools(host);
+    expect(rows.map(r => [r.id, r.label])).toEqual([["tools/cli/tool", "tool"]]);
+    expect(rows[0]).not.toHaveProperty("version");
+  });
+
+  it("one token brew info cannot resolve does not empty the map: the batch is retried per token and the rest still classify", async () => {
+    const dump = 'cask "spoo-me/tap/spoo"\ncask "gone"\ncask "rectangle"\n';
+    const exec = {
+      "brew bundle dump --file=-": dump,
+      "brew info --json=v2 --cask spoo-me/tap/spoo": JSON.stringify({ casks: [SPOO] }),
+      "brew info --json=v2 --cask rectangle": JSON.stringify({ casks: [cask("rectangle")] }),
+      "brew cat spoo-me/tap/spoo": SPOO_STANZA,
+    };
+    const host = fakeHost({ which: ["brew"], exec });
+    const rows = await detectTools(host);
+    expect(rows.map(r => [r.id, r.reason])).toEqual([
+      ["tools/cli/spoo", undefined],
+      ["tools/brew-cask/gone", "macOS app, no Linux build"],
+      ["tools/brew-cask/rectangle", "macOS app, no Linux build"],
+    ]);
+    expect(host.calls.filter(c => c.startsWith("run brew info"))).toEqual([
+      "run brew info --json=v2 --cask spoo-me/tap/spoo gone rectangle",
+      "run brew info --json=v2 --cask spoo-me/tap/spoo",
+      "run brew info --json=v2 --cask gone",
+      "run brew info --json=v2 --cask rectangle",
+    ]);
+    // A batch that resolves is one call.
+    const whole = fakeHost({ which: ["brew"], exec: { ...exec, "brew info --json=v2 --cask spoo-me/tap/spoo gone rectangle": JSON.stringify({ casks: [SPOO, cask("rectangle")] }) } });
+    await detectTools(whole);
+    expect(whole.calls.filter(c => c.startsWith("run brew info"))).toHaveLength(1);
+  });
+
+  it("a Go binary named like a locked-off CLI cask keeps its own row: nothing folds into a row nobody can tick", async () => {
+    const goOut = (path: string, v: string) => `x\n\tpath\t${path}\n\tmod\t${path}\t${v}\th1:abc=\n`;
+    const ngrok = cask("ngrok", { url: "https://bin.ngrok.com/a/x/ngrok-v3-3.39.11-darwin-arm64.zip", artifacts: [{ binary: ["ngrok"] }] });
+    const exec = {
+      "brew bundle dump --file=-": 'cask "ngrok"\n',
+      "brew info --json=v2 --cask ngrok": JSON.stringify({ casks: [ngrok] }),
+      "go version -m /Users/dev/go/bin/ngrok": goOut("github.com/ngrok/ngrok-cli", "v1.0.0"),
+    };
+    const rows = await detectTools(fakeHost({ which: ["brew", "go"], files: { "~/go/bin/ngrok": 1 }, exec }));
+    expect(rows.map(r => [r.id, r.reason, r.paths])).toEqual([
+      ["tools/cli/ngrok", "command-line tool, but not from a GitHub release; no Linux install path", []],
+      ["tools/go/ngrok", undefined, ["github.com/ngrok/ngrok-cli@v1.0.0"]],
+    ]);
+  });
+
   it("a go binary named for a CLI cask's command folds into its row: one tick, the release first and the module as the fallback; the cask's tap folds in when no formula uses it, and stays when one does", async () => {
     const goOut = (path: string, v: string) => `x\n\tpath\t${path}\n\tmod\t${path}\t${v}\th1:abc=\n`;
     const exec = {
