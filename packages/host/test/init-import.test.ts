@@ -683,6 +683,20 @@ describe("importFor", () => {
       { home, secrets: new Map(), platform: "darwin" },
     );
 
+  it("ticked editors rows become installs ahead of the tools, and their settings.json lands in the remote server's data dir", () => {
+    const home = laptop();
+    mkdirSync(join(home, "Library", "Application Support", "Code", "User"), { recursive: true });
+    writeFileSync(join(home, "Library", "Application Support", "Code", "User", "settings.json"), "{}\n");
+    const imp = ticks(
+      home,
+      row({ rung: "editors", id: "editors/nvim", label: "neovim, installed with your config", paths: ["~/.config/nvim"], bytes: 10 }),
+      row({ rung: "editors", id: "editors/vscode", label: "VS Code settings, for VS Code over SSH", paths: ["~/Library/Application Support/Code/User/settings.json"], bytes: 3 }),
+      row({ rung: "editors", id: "editors/vscode-ext/ms-python.python", label: "ms-python.python" }),
+    );
+    expect(imp.tools.map(t => t.id)).toEqual(["editors/nvim", "editors/vscode-ext", "tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/brew/jq", "tools/npm/bun"]);
+    expect(imp.recipe?.files.map(f => f.dest)).toContain(".vscode-server/data/Machine/settings.json");
+  });
+
   it("maps the ticks to files (Claude's dir under the guest config dir), tools, the Node the agents need, and agents with Claude on the sanctioned line", () => {
     const home = laptop();
     const imp = ticks(home);

@@ -14,7 +14,7 @@ import { S_BAR, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, cancel, isCancel, lo
 import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { PACK_BUDGET_BYTES, agentInstallsFor, toolInstallsFor } from "@wsp/engine";
+import { PACK_BUDGET_BYTES, agentInstallsFor, editorInstallsFor, extensionsFile, remoteEditorFor, remoteSettingsPath, toolInstallsFor } from "@wsp/engine";
 import { ALREADY_APPLIED } from "@wsp/protocol";
 import { CLAUDE_INSTALLER, importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
@@ -397,6 +397,24 @@ const CLAUDE_LOGIN_WHY = "Anthropic's terms forbid passing this credential along
 const LOGIN_WHY = "copy brings it along; sign in does it in the browser after the build";
 const CONSENT_WHY = "copy brings it along; skip leaves it here";
 const EVERYTHING_FOOTER = ["large items are listed but never copied without a tick", "know what one of these is? add it to the catalog"];
+/** What the Editors screen is for, in two lines under its title. */
+export const EDITORS_INTRO = [
+  "vim, neovim, helix and emacs are installed on the machine with your config; they run in the workspace's terminal.",
+  "VS Code and Cursor rows are settings and extension names, used only if you open this machine from your editor over SSH; nothing runs here.",
+];
+
+/** How a ticked editors row reaches the machine, for its detail line; nothing for a row the import has no step for. */
+function editorWhy(e: ManifestEntry): string | undefined {
+  const remote = remoteEditorFor(e.id);
+  if (remote !== undefined) {
+    if (e.paths.length > 0) return `lands at ~/${remoteSettingsPath(remote.dir)}, read only when ${remote.name} opens this machine over SSH; nothing runs here`;
+    return `then, in ${remote.name}'s terminal on the machine: xargs -n1 ${remote.cli} --install-extension < ~/${extensionsFile(remote.dir)}`;
+  }
+  const step = editorInstallsFor([{ ...e, bring: true }]).installs[0];
+  if (step === undefined) return undefined;
+  const how = step.manager === "release" ? "from its pinned release" : "by apt";
+  return `installed on the machine ${how}${e.paths.length > 0 ? "; your config comes along" : ""}`;
+}
 
 /** The second detail line: why a row is locked, else what ticking it means. */
 function detailWhy(e: ManifestEntry, lock: "on" | "off" | undefined): string {
@@ -406,13 +424,20 @@ function detailWhy(e: ManifestEntry, lock: "on" | "off" | undefined): string {
   if (e.rung === "everything") return e.detail ?? "";
   if (e.rung === "agents") return agentInstallsFor([{ ...e, bring: true }], { claude: CLAUDE_INSTALLER }).installs.length > 0 ? "installed on the machine; its config comes along" : "its config comes along; no installer yet, install it there yourself";
   const size = e.bytes > 0 ? `${fmtBytes(e.bytes)}, ` : "";
-  return `${size}${e.default === "bring" ? "brought by default" : "left out by default"}`;
+  const editor = e.rung === "editors" ? editorWhy(e) : undefined;
+  return `${size}${editor ?? (e.default === "bring" ? "brought by default" : "left out by default")}`;
+}
+
+/** The first detail line of a row without a path: what stands in for the copy. */
+function whereNothing(e: ManifestEntry): string {
+  const remote = e.rung === "editors" ? remoteEditorFor(e.id) : undefined;
+  if (remote !== undefined) return `listed in ~/${extensionsFile(remote.dir)} on the machine; nothing installs until you connect`;
+  return e.rung === "everything" || e.rung === "editors" ? "nothing to copy" : "reinstalled on the machine";
 }
 
 function selectItem(e: ManifestEntry, hintFor?: (width: number) => string): SelectItem {
-  const nothing = e.rung === "everything" ? "nothing to copy" : "reinstalled on the machine";
   const minus = e.excludes !== undefined && e.excludes.length > 0 ? ` minus ${e.excludes.join(", ")}` : "";
-  const where = e.paths.length > 0 ? `${e.paths.join(", ")}${minus}` : nothing;
+  const where = e.paths.length > 0 ? `${e.paths.join(", ")}${minus}` : whereNothing(e);
   const lock = e.required ? "on" : !isTickable(e) ? "off" : undefined;
   return {
     id: e.id,
@@ -525,11 +550,13 @@ export function summaryNote(
   const lines = perRung.flatMap((entries, i) => [rows[i]!, ...entries.flatMap(e => answered.get(e.id) ?? [])]);
   const bring = manifest.entries.filter(e => ticks.has(e.id)).map(e => ({ ...e, bring: true }));
   const agents = agentInstallsFor(bring, { claude: CLAUDE_INSTALLER }).installs.map(a => a.name);
+  // The terminal editors by name; an extension list is a file, not an install.
+  const editors = editorInstallsFor(bring).installs.filter(s => s.manager !== "list").map(s => s.label);
   // Only what the person ticked counts as their tools; Homebrew and its toolchain are named apart.
   const steps = toolInstallsFor(bring).installs;
   const tools = steps.filter(t => ticks.has(t.id)).length;
   const toolchain = steps.some(t => t.id.startsWith("tools/brew-toolchain/")) ? " plus Homebrew's toolchain" : "";
-  const installs = [...agents, ...(tools > 0 ? [`${tools} tool${tools === 1 ? "" : "s"}${toolchain}`] : [])];
+  const installs = [...agents, ...editors, ...(tools > 0 ? [`${tools} tool${tools === 1 ? "" : "s"}${toolchain}`] : [])];
   const closing: [string, string][] = [
     ["Upload", upload > PACK_BUDGET_BYTES ? `${fmtBytes(upload)}, over the ${fmtBytes(PACK_BUDGET_BYTES)} the machine's disk allows` : `${fmtBytes(upload)}, nothing has left this computer yet`],
     ["Installs", installs.length > 0 ? installs.join(", ") : "nothing; the machine boots bare"],
@@ -584,6 +611,7 @@ async function tickRungs(manifest: Manifest, io: InitIO): Promise<Answers | "can
       initial: prior?.ticks ?? fresh.ticks,
       initialChoices: prior?.choices ?? fresh.choices,
       ...(rung === "everything" ? { footer: everythingFooter(entries), detailLines: 3 } : {}),
+      ...(rung === "editors" ? { intro: EDITORS_INTRO } : {}),
       input: io.input,
       output: io.output,
     });

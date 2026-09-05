@@ -1,35 +1,34 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Host, Platform } from "../host.js";
 import type { ManifestEntry } from "../manifest.js";
-import { type RowSpec, item, present, row } from "./common.js";
+import { item, present, row } from "./common.js";
 
-const ROWS: readonly RowSpec[] = [
-  { rung: "editors", id: "editors/nvim", label: "neovim config", paths: ["~/.config/nvim"] },
-  { rung: "editors", id: "editors/helix", label: "helix config", paths: ["~/.config/helix"] },
-  { rung: "editors", id: "editors/vim", label: "vim config", paths: ["~/.vimrc", "~/.vim/vimrc"] },
-  { rung: "editors", id: "editors/emacs", label: "emacs config", paths: ["~/.config/emacs", "~/.emacs.d/init.el", "~/.emacs"] },
-  { rung: "editors", id: "editors/zed", label: "zed config", paths: ["~/.config/zed"] },
+interface TerminalEditor {
+  id: string;
+  name: string;
+  bin: string;
+  paths: readonly string[];
+}
+
+/** Editors that run in the workspace's terminal: the import installs each ticked one and copies its config. */
+const TERMINAL: readonly TerminalEditor[] = [
+  { id: "nvim", name: "neovim", bin: "nvim", paths: ["~/.config/nvim"] },
+  { id: "helix", name: "helix", bin: "hx", paths: ["~/.config/helix"] },
+  { id: "vim", name: "vim", bin: "vim", paths: ["~/.vimrc", "~/.vim/vimrc"] },
+  { id: "emacs", name: "emacs", bin: "emacs", paths: ["~/.config/emacs", "~/.emacs.d/init.el", "~/.emacs"] },
 ];
 
 interface CodeLike {
   id: string;
   label: string;
   bin: string;
-  group: string;
   userDir: Record<Platform, string>;
 }
 
-// User-scope settings only: globalStorage and workspaceStorage are machine
-// state the extension host rebuilds.
+// Only settings.json has a home on the remote server; keybindings and snippets stay with the client.
 const CODE_LIKE: readonly CodeLike[] = [
-  {
-    id: "vscode", label: "VS Code", bin: "code", group: "VS Code extensions",
-    userDir: { darwin: "~/Library/Application Support/Code/User", linux: "~/.config/Code/User" },
-  },
-  {
-    id: "cursor", label: "Cursor", bin: "cursor", group: "Cursor extensions",
-    userDir: { darwin: "~/Library/Application Support/Cursor/User", linux: "~/.config/Cursor/User" },
-  },
+  { id: "vscode", label: "VS Code", bin: "code", userDir: { darwin: "~/Library/Application Support/Code/User", linux: "~/.config/Code/User" } },
+  { id: "cursor", label: "Cursor", bin: "cursor", userDir: { darwin: "~/Library/Application Support/Cursor/User", linux: "~/.config/Cursor/User" } },
 ];
 
 export function parseExtensionList(out: string): string[] {
@@ -38,34 +37,20 @@ export function parseExtensionList(out: string): string[] {
 
 export async function detectEditors(host: Host): Promise<ManifestEntry[]> {
   const rows: (ManifestEntry | undefined)[] = [];
-  for (const spec of ROWS) rows.push(await row(host, spec));
+  for (const ed of TERMINAL) {
+    const found = await row(host, { rung: "editors", id: `editors/${ed.id}`, label: `${ed.name}, installed with your config`, paths: ed.paths });
+    if (found !== undefined) rows.push(found);
+    else if (await host.exec.which(ed.bin)) rows.push(item({ rung: "editors", id: `editors/${ed.id}`, label: `${ed.name}, installed` }));
+  }
 
-  let codeLike = false;
   for (const ed of CODE_LIKE) {
-    const dir = ed.userDir[host.platform];
-    const settings = await row(host, {
-      rung: "editors", id: `editors/${ed.id}`, label: `${ed.label} settings, keybindings, snippets`,
-      paths: [`${dir}/settings.json`, `${dir}/keybindings.json`, `${dir}/snippets`],
-    });
-    rows.push(settings);
-    if (settings !== undefined) codeLike = true;
-    if (await host.exec.which(ed.bin)) {
-      codeLike = true;
-      const out = await host.exec.run(ed.bin, ["--list-extensions"]);
-      for (const ext of parseExtensionList(out ?? "")) {
-        rows.push(item({ rung: "editors", id: `editors/${ed.id}-ext/${ext}`, label: ext, group: ed.group }));
-      }
+    const over = `for ${ed.label} over SSH`;
+    rows.push(await row(host, { rung: "editors", id: `editors/${ed.id}`, label: `${ed.label} settings, ${over}`, paths: [`${ed.userDir[host.platform]}/settings.json`], default: "skip" }));
+    if (!(await host.exec.which(ed.bin))) continue;
+    const out = await host.exec.run(ed.bin, ["--list-extensions"]);
+    for (const ext of parseExtensionList(out ?? "")) {
+      rows.push(item({ rung: "editors", id: `editors/${ed.id}-ext/${ext}`, label: ext, group: `${ed.label} extensions, ${over}`, default: "skip" }));
     }
-  }
-
-  if (await host.exec.which("code")) {
-    rows.push(item({ rung: "editors", id: "editors/code-tunnel", label: "VS Code remote access (code tunnel)", default: "skip" }));
-  }
-  if (await host.exec.which("tailscale")) {
-    rows.push(item({ rung: "editors", id: "editors/tailscale", label: "Tailscale (join the machine to your tailnet)", default: "skip" }));
-  }
-  if (codeLike) {
-    rows.push(item({ rung: "editors", id: "editors/remote-ssh", label: "Remote SSH (open the machine from VS Code or Cursor)", default: "skip" }));
   }
   return present(rows);
 }

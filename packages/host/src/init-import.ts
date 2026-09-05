@@ -11,6 +11,7 @@ import { promisify } from "node:util";
 import { AGENTS, FISH_CONF_D, MANAGER_HOMES, type ManifestEntry, RC_NAMES, READ_LIMIT, isRcPath, managedRc, rcFiles, sourcedPaths, stripExports } from "@wsp/collect";
 import {
   agentInstallsFor,
+  editorInstallsFor,
   planFiles,
   recipeDigest,
   recipeHash,
@@ -391,6 +392,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
     rewrites: [[".claude/", `${CLAUDE_REL}/`], [".claude.json", `${CLAUDE_REL}/.claude.json`]],
   });
   const tools = toolInstallsFor(bring);
+  const editors = editorInstallsFor(bring);
   const agents = agentInstallsFor(bring, { claude: CLAUDE_INSTALLER });
   const label = (id: string) => bring.find(e => e.id === id)?.label ?? id;
   const anyFiles = bring.some(e => e.bring && e.rung !== "tools" && e.paths.length > 0 && (e.rung !== "logins" || e.choice === "copy"));
@@ -422,14 +424,14 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
     ...(anyFiles
       ? { files: { count, rungs: plan.rungs, bytes: plan.bytes, skipped: plan.skipped, pack: () => packPlan(plan, { secrets: opts.secrets, home, managerHomes }), ...(volatile !== undefined ? { volatile } : {}) } }
       : {}),
-    tools: tools.installs,
+    tools: [...editors.installs, ...tools.installs],
     ...(agents.node !== undefined ? { node: agents.node } : {}),
     agents: agents.installs,
     skippedAgents: agents.skipped.map(s => ({ id: s.id, name: label(s.id), note: s.note })),
     ...(opts.onResult !== undefined
       ? {
           onResult: (r: ImportResult) =>
-            opts.onResult!({ ...r, tools: [...tools.skipped.map(s => ({ id: s.id, label: label(s.id), outcome: "skipped" as const, note: s.note })), ...r.tools] }),
+            opts.onResult!({ ...r, tools: [...[...editors.skipped, ...tools.skipped].map(s => ({ id: s.id, label: label(s.id), outcome: "skipped" as const, note: s.note })), ...r.tools] }),
         }
       : {}),
   };

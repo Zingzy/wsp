@@ -3,10 +3,15 @@ import { describe, expect, it } from "vitest";
 import {
   AGENT_INSTALLERS,
   CURRENT_LTS,
+  HELIX,
   NODE_RELEASES,
   agentInstallsFor,
   brewfileFor,
+  editorInstallsFor,
+  extensionsFile,
   HOMEBREW,
+  remoteEditorFor,
+  remoteSettingsPath,
   nodeInstallScript,
   neverCopied,
   nodeMajorFor,
@@ -45,6 +50,9 @@ const present = new Set([
   `${HOME}/.config/starship.toml`,
   `${HOME}/.oh-my-zsh/custom`,
   `${HOME}/Library/Application Support/Cursor/User/settings.json`,
+  `${HOME}/Library/Application Support/Code/User/settings.json`,
+  `${HOME}/.config/Code/User/settings.json`,
+  `${HOME}/.config/Cursor/User/settings.json`,
   `${HOME}/Library/Preferences/.wrangler/config/default.toml`,
   `${HOME}/.claude`,
   `${HOME}/.claude/settings.json`,
@@ -181,7 +189,7 @@ describe("planFiles: which laptop files travel and where they land", () => {
       { rewrites: [[".claude/", ".claude-cfg/"], [".claude.json", ".claude-cfg/.claude.json"]] },
     );
     expect(p.files.map(f => f.dest)).toEqual([
-      ".config/Cursor/User/settings.json",
+      ".cursor-server/data/Machine/settings.json",
       ".config/.wrangler/config/default.toml",
       ".claude-cfg/settings.json",
       ".claude-cfg/.claude.json",
@@ -189,6 +197,18 @@ describe("planFiles: which laptop files travel and where they land", () => {
     // A row that names the directory itself moves with it; the guest's config dir is what CLAUDE_CONFIG_DIR reads.
     const bare = plan([row({ rung: "agents", id: "agents/claude", paths: ["~/.claude"] })], { rewrites: [[".claude/", ".claude-cfg/"]] });
     expect(bare.files.map(f => [f.dest, f.dir])).toEqual([[".claude-cfg", true]]);
+  });
+
+  it("an editor's settings.json lands where its remote server reads machine settings, from either laptop", () => {
+    const mac = plan([row({ rung: "editors", id: "editors/vscode", paths: ["~/Library/Application Support/Code/User/settings.json"] })]);
+    expect(mac.files.map(f => f.dest)).toEqual([".vscode-server/data/Machine/settings.json"]);
+    const linux = plan(
+      [row({ rung: "editors", id: "editors/vscode", paths: ["~/.config/Code/User/settings.json"] }), row({ rung: "editors", id: "editors/cursor", paths: ["~/.config/Cursor/User/settings.json"] })],
+      { platform: "linux" },
+    );
+    expect(linux.files.map(f => f.dest)).toEqual([".vscode-server/data/Machine/settings.json", ".cursor-server/data/Machine/settings.json"]);
+    // The path is the remote server's: `--server-data-dir` defaults to ~/.vscode-server, its user data to data/ under it.
+    expect(remoteSettingsPath(".vscode-server")).toBe(".vscode-server/data/Machine/settings.json");
   });
 
   it("a Keychain item becomes a secret to read at pack time on macOS, and a skip note elsewhere", () => {
@@ -573,6 +593,70 @@ describe("toolInstallsFor", () => {
       row({ rung: "tools", id: "tools/pnpm/x", label: "x" }),
     ]);
     for (const i of t.installs) expect(i.cmd).not.toMatch(/\|\s*(ba)?sh\b/);
+  });
+});
+
+describe("editorInstallsFor", () => {
+  it("installs each ticked terminal editor: apt for neovim, vim and emacs, helix from its pinned release; unticked rows and config-only rows add nothing", () => {
+    const t = editorInstallsFor([
+      row({ rung: "editors", id: "editors/nvim", label: "neovim, installed with your config", paths: ["~/.config/nvim"] }),
+      row({ rung: "editors", id: "editors/helix", label: "helix, installed" }),
+      row({ rung: "editors", id: "editors/vim", label: "vim, installed with your config", paths: ["~/.vimrc"], bring: false }),
+      row({ rung: "editors", id: "editors/emacs", label: "emacs, installed with your config", paths: ["~/.emacs.d/init.el"] }),
+      row({ rung: "editors", id: "editors/vscode", label: "VS Code settings, for VS Code over SSH", paths: ["~/.config/Code/User/settings.json"] }),
+    ]);
+    expect(t.installs.map(i => [i.id, i.label, i.manager])).toEqual([
+      ["editors/nvim", "neovim", "apt"],
+      ["editors/helix", "helix", "release"],
+      ["editors/emacs", "emacs", "apt"],
+    ]);
+    const cmd = (id: string) => t.installs.find(i => i.id === id)!.cmd;
+    expect(cmd("editors/nvim")).toContain("command -v nvim >/dev/null 2>&1 ||");
+    expect(cmd("editors/nvim")).toContain("apt-get install -y -qq neovim");
+    expect(cmd("editors/emacs")).toContain("apt-get install -y -qq emacs-nox");
+    // Helix ships as a tarball with its runtime beside the binary, so it is unpacked whole and linked onto PATH.
+    expect(cmd("editors/helix")).toContain(`https://github.com/helix-editor/helix/releases/download/${HELIX.version}/$pkg`);
+    expect(cmd("editors/helix")).toContain(`x86_64) pkg=helix-${HELIX.version}-x86_64-linux.tar.xz sha=${HELIX.sha256.x86_64}`);
+    expect(cmd("editors/helix")).toContain(`aarch64) pkg=helix-${HELIX.version}-aarch64-linux.tar.xz sha=${HELIX.sha256.aarch64}`);
+    expect(cmd("editors/helix")).toContain("sha256sum -c -");
+    expect(cmd("editors/helix")).toContain("ln -sfn /opt/helix/hx /usr/local/bin/hx");
+    for (const i of t.installs) {
+      expect(i.cmd).toContain("set -euo pipefail");
+      expect(i.cmd).not.toMatch(/curl[^\n]*\|\s*(ba)?sh/);
+    }
+  });
+
+  it("the ticked extensions of each remote editor are written as one list file for the person to apply from the editor's terminal", () => {
+    const t = editorInstallsFor([
+      row({ rung: "editors", id: "editors/vscode-ext/ms-python.python", label: "ms-python.python" }),
+      row({ rung: "editors", id: "editors/vscode-ext/esbenp.prettier-vscode", label: "esbenp.prettier-vscode" }),
+      row({ rung: "editors", id: "editors/vscode-ext/left.out", label: "left.out", bring: false }),
+      row({ rung: "editors", id: "editors/cursor-ext/anysphere.cursorpyright", label: "anysphere.cursorpyright" }),
+    ]);
+    expect(t.installs.map(i => [i.id, i.label, i.manager])).toEqual([
+      ["editors/vscode-ext", "VS Code extension list", "list"],
+      ["editors/cursor-ext", "Cursor extension list", "list"],
+    ]);
+    const vscode = t.installs[0]!.cmd;
+    expect(vscode).toContain(`mkdir -p "$HOME/.vscode-server"`);
+    expect(vscode).toContain(`printf '%s\\n' 'ms-python.python' 'esbenp.prettier-vscode' > "$HOME/${extensionsFile(".vscode-server")}"`);
+    expect(vscode).not.toContain("left.out");
+    expect(t.installs[1]!.cmd).toContain(`'anysphere.cursorpyright' > "$HOME/.cursor-server/extensions.txt"`);
+    expect(remoteEditorFor("editors/cursor-ext/anysphere.cursorpyright")).toEqual({ name: "Cursor", dir: ".cursor-server", cli: "cursor" });
+    expect(remoteEditorFor("editors/vscode")).toEqual({ name: "VS Code", dir: ".vscode-server", cli: "code" });
+    expect(remoteEditorFor("editors/nvim")).toBeUndefined();
+  });
+
+  it("an extension id that is not publisher.name is left out of the list rather than run", () => {
+    const t = editorInstallsFor([row({ rung: "editors", id: "editors/vscode-ext/$(rm -rf /)", label: "odd" }), row({ rung: "editors", id: "editors/vscode-ext/ok.ext", label: "ok.ext" })]);
+    expect(t.installs).toHaveLength(1);
+    expect(t.installs[0]!.cmd).toContain("'ok.ext'");
+    expect(t.installs[0]!.cmd).not.toContain("rm -rf");
+    expect(t.skipped).toEqual([{ id: "editors/vscode-ext/$(rm -rf /)", note: "not an extension id" }]);
+  });
+
+  it("with nothing ticked there is nothing to install", () => {
+    expect(editorInstallsFor([row({ rung: "tools", id: "tools/brew/gh", linux: "yes" })])).toEqual({ installs: [], skipped: [] });
   });
 });
 

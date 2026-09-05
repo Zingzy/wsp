@@ -157,6 +157,24 @@ describe("rungSelect", () => {
     expect(done.slice(1).some(l => l.includes("┃") || l.includes("┗"))).toBe(false);
   });
 
+  it("intro lines sit under the title, before the search, wrapped to the width and dim", async () => {
+    const { input, output, text } = streams();
+    Object.assign(output, { columns: 60 });
+    const p = rungSelect({ title: "Editors", counter: "3/8", items: ITEMS.slice(1, 3), initial: new Set(), intro: ["First line about the screen.", "A second line long enough that it has to wrap onto the next row at this width."], input, output });
+    await settle();
+    const lines = text().split("\n");
+    expect(lines[0]).toMatch(/^◆  Editors\s+3\/8$/);
+    expect(lines[1]).toBe("┃  First line about the screen.");
+    expect(lines[2]).toBe("┃  A second line long enough that it has to wrap onto the");
+    expect(lines[3]).toBe("┃    next row at this width.");
+    expect(lines[4]).toMatch(/^┃  search/);
+    await press(input, KEY.enter);
+    const result = await p;
+    expect(result.kind).toBe("next");
+    // Once answered the intro is gone with the rest of the screen.
+    expect(text().slice(text().lastIndexOf("◇  Editors"))).not.toContain("First line");
+  });
+
   it("with colour on, the title is cyan, a group name is bold, and the frame uses no other colour", async () => {
     // styleText reads FORCE_COLOR at each call, so colour can be turned on for this test alone and turned back off after it.
     const was = process.env["FORCE_COLOR"];

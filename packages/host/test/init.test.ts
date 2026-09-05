@@ -18,7 +18,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GOLDEN_SETUP } from "../src/doctor.js";
 import { loadManifest, recipePath } from "../src/init-recipe.js";
 import { CARD_FRAME, card, widthOf } from "../src/init-layout.js";
-import { everythingItems, fmtBytes, reduceStages, runInit, stageLine, summaryNote, type HostHooks, type InitIO, type InitOptions } from "../src/init.js";
+import { EDITORS_INTRO, everythingItems, fmtBytes, reduceStages, runInit, stageLine, summaryNote, type HostHooks, type InitIO, type InitOptions } from "../src/init.js";
 import type { HostHandle } from "../src/server.js";
 import { startCallbackRelay } from "../src/relay.js";
 import type { ConnectOptions, DaemonSocket } from "../src/doctor.js";
@@ -225,6 +225,34 @@ function withGhCopy(f: Fake): void {
 }
 
 describe("wsp init, interactive", () => {
+  it("the Editors screen says what the rung is for and what each row does on the machine", async () => {
+    const f = fake({ columns: 140 });
+    const run = runInit(f.opts, f.io);
+    await f.until("Identity");
+    await f.press(KEY.enter);
+    await f.until("Shell");
+    await f.press(KEY.enter);
+    await f.until("Editors");
+    const screen = f.text().slice(f.text().lastIndexOf("◆  Editors"));
+    // The two lines sit right under the title, wrapped to the terminal, before the search.
+    const head = screen.split("\n").slice(1, screen.split("\n").findIndex(l => l.startsWith("┃  search")));
+    expect(head.join(" ").replace(/┃\s+/g, "").replace(/\s+/g, " ")).toBe(EDITORS_INTRO.join(" "));
+    expect(head[0]).toMatch(/^┃  vim, neovim, helix and emacs/);
+    // Down from the all row onto neovim: its detail names the install and the config copy.
+    await f.press(KEY.down);
+    await f.until(/neovim, installed with your config\n/);
+    expect(f.text().slice(f.text().lastIndexOf("◆  Editors"))).toContain("~/.config/nvim\n┃  117.2 KB, installed on the machine by apt; your config comes along");
+    await f.press(KEY.enter);
+    for (const rung of ["Toolchains", "Tools", "Agents", "Sign-ins"]) {
+      await f.until(rung);
+      await f.press(KEY.enter);
+    }
+    await f.until(BOOT);
+    expect(f.text().slice(f.text().lastIndexOf("Summary"))).toMatch(/Installs\s+Claude Code, neovim, 3 tools plus Homebrew's toolchain/);
+    await f.press(KEY.enter);
+    expect((await run).code).toBe(1);
+  });
+
   it("detects first, walks the seven rungs, confirms once, prepares through the runtime, hands off", async () => {
     const f = fake();
     const run = runInit(f.opts, f.io);
@@ -285,7 +313,7 @@ describe("wsp init, interactive", () => {
     expect(summary).not.toContain("id_ed25519");
     expect(summary).toMatch(/Upload\s+\d[\d.]* [KM]B, nothing has left this computer yet/);
     // Their three ticked tools; Homebrew's own glibc and gcc are named apart, not counted as theirs.
-    expect(summary).toMatch(/Installs\s+Claude Code, 3 tools plus Homebrew's toolchain/);
+    expect(summary).toMatch(/Installs\s+Claude Code, neovim, 3 tools plus Homebrew's toolchain/);
     expect(f.backends.flatMap(b => b.machines)).toHaveLength(0);
     await f.press("y");
 
@@ -351,7 +379,7 @@ describe("wsp init, interactive", () => {
     expect(JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8"))).toMatchObject({
       files: { bytes: expect.any(Number) },
       homebrew: { tag: expect.stringMatching(/^6\./), commit: expect.stringMatching(/^[0-9a-f]{40}$/) },
-      tools: [{ id: "tools/homebrew", outcome: "installed" }, { id: "tools/brew-toolchain/glibc", outcome: "installed" }, { id: "tools/brew-toolchain/gcc", outcome: "installed" }, { id: "tools/brew-shared", outcome: "installed" }, { id: "tools/brew/gh", outcome: "installed" }, { id: "tools/brew/jq", outcome: "installed" }, { id: "tools/npm/pnpm", outcome: "installed" }],
+      tools: [{ id: "editors/nvim", outcome: "installed" }, { id: "tools/homebrew", outcome: "installed" }, { id: "tools/brew-toolchain/glibc", outcome: "installed" }, { id: "tools/brew-toolchain/gcc", outcome: "installed" }, { id: "tools/brew-shared", outcome: "installed" }, { id: "tools/brew/gh", outcome: "installed" }, { id: "tools/brew/jq", outcome: "installed" }, { id: "tools/npm/pnpm", outcome: "installed" }],
       agents: [{ id: "agents/claude", outcome: "installed" }],
       logins: [
         { id: "logins/gh", label: "GitHub CLI login", state: "signed-in", command: "gh auth login", note: "gh auth status" },
@@ -1489,13 +1517,14 @@ describe("wsp init, flags and no terminal", () => {
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(0);
     const out = f.text();
-    expect(out).toMatch(/Tools installed\s+6 installed, 1 failed/);
+    // The tools, their shared deps and neovim from the Editors rung; the failed formula is named alone.
+    expect(out).toMatch(/Tools installed\s+7 installed, 1 failed/);
     expect(out).toMatch(/Agents installed\s+Claude Code, Codex installed/);
     expect(out).toContain("Ready");
     // The stage line is cut to the width; the names come back in full under the tally.
     const tally = out.slice(out.indexOf("Tools and agents:"));
     expect(tally.split("\n").slice(0, 2).map(l => l.replace(/^[│◇]\s+/, ""))).toEqual([
-      expect.stringMatching(/^Tools and agents: 8 installed, 1 failed, 0 skipped; the list is in .*golden-import\.json$/),
+      expect.stringMatching(/^Tools and agents: 9 installed, 1 failed, 0 skipped; the list is in .*golden-import\.json$/),
       "jq failed: curl: no route",
     ]);
     expect(f.recipes[0]!.import?.node).toMatchObject({ floor: 16, agents: ["Codex"] });

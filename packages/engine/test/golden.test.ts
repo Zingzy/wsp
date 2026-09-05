@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { editorInstallsFor } from "../src/golden-import.js";
 import { BUILDER_DISK_GB, BUILDER_IDLE_MS, MachineAliveError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextSetupSha, nextSmoke, prepareBuilder, rollback, sealGolden, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
 import type { RecipeDigest } from "@wsp/protocol";
 import { NotFirstLifeError } from "../src/lifecycle.js";
@@ -401,6 +402,35 @@ describe("golden import stages", () => {
     };
     return { ...rb, cmds, puts, fetch: fetchStub };
   }
+
+  it("editor steps run in the tools stage under the guard: apt for neovim, the pinned helix tarball, and the extension list written as a file", async () => {
+    const { backend, cmds, fetch } = backendFor();
+    const { stages, onStage } = stageRecorder();
+    const results: ImportResult[] = [];
+    const editors = editorInstallsFor([
+      { rung: "editors", id: "editors/nvim", label: "neovim, installed with your config", paths: ["~/.config/nvim"], bytes: 10, default: "bring", bring: true },
+      { rung: "editors", id: "editors/helix", label: "helix, installed", paths: [], bytes: 0, default: "bring", bring: true },
+      { rung: "editors", id: "editors/vscode-ext/ms-python.python", label: "ms-python.python", paths: [], bytes: 0, default: "skip", bring: true },
+    ]);
+    await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ tools: [...editors.installs, ...importOf().tools], onResult: r => void results.push(r) }) });
+    expect(stages.filter(s => s.startsWith("installing-tools"))).toEqual([
+      "installing-tools:neovim (1/6)", "installing-tools:helix (2/6)", "installing-tools:VS Code extension list (3/6)",
+      "installing-tools:Homebrew (4/6)", "installing-tools:gh (5/6)", "installing-tools:bun@1.4.0 (6/6)",
+      "installing-tools:6 installed",
+    ]);
+    const nvim = cmds.find(c => c.includes("apt-get install -y -qq neovim"))!;
+    expect(nvim).toMatch(/\nsetsid bash -c 'set -euo pipefail\n/);
+    expect(nvim).toMatch(/while \[ \$t -lt 600 \]/);
+    const helix = cmds.find(c => c.includes("helix-editor/helix/releases/download"))!;
+    expect(helix).toContain("sha256sum -c -");
+    expect(helix).not.toMatch(/curl[^\n]*\|\s*(ba)?sh/);
+    const list = cmds.find(c => c.includes(".vscode-server/extensions.txt"))!;
+    expect(list).toContain(`'\\''ms-python.python'\\'' > "$HOME/.vscode-server/extensions.txt"`);
+    expect(results[0]!.tools.map(t => [t.id, t.outcome])).toEqual([
+      ["editors/nvim", "installed"], ["editors/helix", "installed"], ["editors/vscode-ext", "installed"],
+      ["tools/homebrew", "installed"], ["tools/brew/gh", "installed"], ["tools/npm/bun", "installed"],
+    ]);
+  });
 
   it("an archive over one upload part says how many parts it went up in", async () => {
     const { backend, puts, fetch } = backendFor();
