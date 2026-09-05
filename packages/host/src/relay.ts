@@ -319,7 +319,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
     binding.add(key);
     const startedAt = clock.now();
     const f: Forward = { target, port, kind, listener: false, servers: [], conns: new Map(), startedAt, expiresAt: startedAt + (kind === "url" ? idleMs : windowMs), cancel: () => {} };
-    // The link at connection time, not at bind time: a url forward outlives a redial and a nap.
+    // The link at connection time, not at bind time: a forward outlives a redial, and a url forward a nap too.
     const onConn = (c: Socket): void => {
       // A browser that resets the socket with the reply unread must not become an uncaught error here.
       c.on("error", () => {});
@@ -464,12 +464,10 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
         attempt = 0;
         resume(link);
         await sock.closed;
+        // Every forward stays bound here across the redial; only its tunnels died with the socket.
         for (const f of allForwards(link.target.id)) {
-          // A url forward stays bound here across the redial; only its tunnels died with the socket.
-          if (f.kind === "url") {
-            for (const c of f.conns.values()) c.destroy();
-            f.conns.clear();
-          } else closeForward(f, "the daemon link dropped");
+          for (const c of f.conns.values()) c.destroy();
+          f.conns.clear();
         }
       } catch {
         sock?.close();
@@ -483,16 +481,23 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
     }
   };
 
-  /** After ports.watch on a fresh socket: url forwards paused by a nap pick their idle clock back up, or close
-   * when the workspace no longer listens on the port; a redial keeps its clocks as they ran. One line per link. */
+  /** After ports.watch on a fresh socket. A redial keeps every forward with its clocks as they ran; a callback forward
+   * closes only when the listener it was keyed on is gone. url forwards paused by a nap pick their idle clock back up,
+   * or close when the workspace no longer listens on the port. One line per link. */
   const resume = (link: Link): void => {
-    const urls = allForwards(link.target.id).filter(f => f.kind === "url");
-    if (urls.length === 0) return;
+    const all = allForwards(link.target.id);
+    if (all.length === 0) return;
     const kept: number[] = [];
     let back: string | undefined;
-    for (const f of urls) {
+    for (const f of all) {
       f.unreachableLogged = false;
-      if (f.paused !== undefined) {
+      if (f.kind === "callback") {
+        if (f.listener && !link.ports.has(f.port)) {
+          closeForward(f, "the workspace stopped listening while the daemon link was down");
+          continue;
+        }
+        if (link.ports.has(f.port)) sawListener(f);
+      } else if (f.paused !== undefined) {
         back = f.pausedBack;
         if (!link.ports.has(f.port)) {
           closeForward(f, `not listening on the workspace after ${f.pausedBack}`);
