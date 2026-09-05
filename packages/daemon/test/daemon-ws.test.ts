@@ -1,5 +1,5 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { connect } from "node:net";
+import { connect, createServer, type Server } from "node:net";
 import { homedir, networkInterfaces, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -48,15 +48,16 @@ class Client {
     });
   }
 
-  /** Opens the socket and sends the auth frame first, as every real client does; the reply is not awaited. */
-  static async connect(port: number, token: string, host = "127.0.0.1"): Promise<Client> {
+  /** Opens the socket and sends the auth frame first, as every real client does, and like them sends nothing more
+   * until it is answered (or the socket closes). scopePort names the one guest port this socket is for. */
+  static async connect(port: number, token: string, host = "127.0.0.1", scopePort?: number): Promise<Client> {
     const ws = new WebSocket(`ws://${host}:${port}/`);
     const client = new Client(ws);
     await new Promise<void>((resolve, reject) => {
       ws.once("open", resolve);
       ws.once("error", reject);
     });
-    void client.request("auth", { token });
+    await Promise.race([client.request("auth", { token, ...(scopePort !== undefined ? { port: scopePort } : {}) }), client.closed]);
     return client;
   }
 
@@ -129,6 +130,98 @@ describe("daemon WS server", () => {
     const c = await Client.connect(daemon.port, TOKEN);
     expect((await c.request("ping")).ok).toBe(true);
     c.close();
+  });
+
+  it("closes 4401 a socket that sends more than a few KiB before its auth frame, and keeps serving", async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${daemon.port}/`);
+    ws.on("open", () => ws.send(JSON.stringify({ id: 1, op: "auth", token: TOKEN, pad: "x".repeat(16 * 1024) })));
+    const replies: WireMsg[] = [];
+    ws.on("message", raw => replies.push(JSON.parse(String(raw)) as WireMsg));
+    const [code, reason] = await new Promise<[number, string]>(resolve => ws.once("close", (c, r) => resolve([c, String(r)])));
+    expect(code).toBe(4401);
+    expect(reason).toBe("too many bytes before the auth frame");
+    expect(replies).toEqual([]);
+
+    // The cap is for the pre-auth window only: an authed socket sends the same bytes and is answered.
+    const c = await Client.connect(daemon.port, TOKEN);
+    expect((await c.request("ping", { pad: "x".repeat(16 * 1024) })).ok).toBe(true);
+    c.close();
+  });
+
+  it("counts wire bytes, not assembled messages: a peer that never finishes a huge frame is cut at the cap", async () => {
+    const raw = connect({ host: "127.0.0.1", port: daemon.port });
+    await new Promise<void>((resolve, reject) => {
+      raw.once("connect", resolve);
+      raw.once("error", reject);
+    });
+    raw.write(["GET / HTTP/1.1", `Host: 127.0.0.1:${daemon.port}`, "Upgrade: websocket", "Connection: Upgrade", "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==", "Sec-WebSocket-Version: 13", "", ""].join("\r\n"));
+    await new Promise<void>(resolve => raw.once("data", () => resolve()));
+    // One masked text frame announcing 50 MiB, then only 8 KiB of it: under ws's own cap, so ws would sit and buffer.
+    const header = Buffer.alloc(14);
+    header[0] = 0x81;
+    header[1] = 0x80 | 127;
+    header.writeBigUInt64BE(BigInt(50 * 1024 * 1024), 2);
+    raw.write(Buffer.concat([header, Buffer.alloc(8 * 1024, 0x20)]));
+    const closeFrame = await new Promise<Buffer>(resolve => raw.once("data", d => resolve(Buffer.from(d))));
+    expect(closeFrame[0]).toBe(0x88);
+    expect(closeFrame.readUInt16BE(2)).toBe(4401);
+    // Anything more from that peer ends the connection outright.
+    raw.write(Buffer.alloc(8 * 1024, 0x20));
+    await new Promise<void>(resolve => raw.once("close", () => resolve()));
+
+    const c = await Client.connect(daemon.port, TOKEN);
+    expect((await c.request("ping")).ok).toBe(true);
+    c.close();
+  });
+
+  it("a socket authed for one port may tunnel to that port and nothing else", async () => {
+    // Answers only once asked, so the tunnel is still open when the write arrives.
+    const guest: Server = createServer(sock => sock.once("data", () => sock.end("hello from the guest")));
+    await new Promise<void>(resolve => guest.listen(0, "127.0.0.1", () => resolve()));
+    const guestPort = (guest.address() as { port: number }).port;
+    try {
+      const before = daemon.ptys.list().length;
+      const c = await Client.connect(daemon.port, TOKEN, "127.0.0.1", guestPort);
+      expect((await c.request("ping")).ok).toBe(true);
+
+      const forbidden = async (op: string, params: Record<string, unknown> = {}) => {
+        const r = await c.request(op, params);
+        expect(r.ok).toBe(false);
+        expect(r["code"]).toBe("forbidden");
+        expect(r["error"]).toBe(`this socket is scoped to port ${guestPort}: only tunnel ops on it and ping are allowed`);
+      };
+      await forbidden("pty.create", { shell: "bash" });
+      await forbidden("pty.list");
+      await forbidden("fs.list", { path: "." });
+      await forbidden("git.status", { cwd: "." });
+      await forbidden("ports.watch");
+      await forbidden("manifest.get");
+      await forbidden("tunnel.open", { tunnelId: "other", port: guestPort + 1 });
+      expect(daemon.ptys.list().length).toBe(before);
+
+      expect((await c.request("tunnel.open", { tunnelId: "t1", port: guestPort })).ok).toBe(true);
+      expect((await c.request("tunnel.write", { tunnelId: "t1", data: Buffer.from("GET").toString("base64") })).ok).toBe(true);
+      const deadline = Date.now() + 2000;
+      while (!c.events.some(e => e.type === "tunnel.end") && Date.now() < deadline) await new Promise(r => setTimeout(r, 20));
+      const data = c.events.filter(e => e.type === "tunnel.data").map(e => Buffer.from(String(e["data"]), "base64").toString()).join("");
+      expect(data).toBe("hello from the guest");
+      expect((await c.request("tunnel.close", { tunnelId: "t1" })).ok).toBe(true);
+      c.close();
+
+      // An unscoped socket on the same token still has every op.
+      const full = await Client.connect(daemon.port, TOKEN);
+      expect((await full.request("pty.list")).ok).toBe(true);
+      full.close();
+    } finally {
+      await new Promise<void>(resolve => guest.close(() => resolve()));
+    }
+  });
+
+  it("refuses an auth frame whose port is not a port", async () => {
+    const c = await Client.connect(daemon.port, TOKEN, "127.0.0.1", 70000);
+    const { code, reason } = await c.closed;
+    expect(code).toBe(4401);
+    expect(reason).toBe("the first frame must be auth");
   });
 
   it("ignores an exported WSP_DAEMON_TOKEN: the file is the only source, so an export cannot pin a token past a rotation", async () => {

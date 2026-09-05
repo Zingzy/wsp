@@ -2,7 +2,7 @@
 import { realpath } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
-export type OpErrorCode = "outside-root" | "not-found" | "not-a-directory" | "not-a-file" | "not-a-git-repo" | "bad-request";
+export type OpErrorCode = "outside-root" | "not-found" | "not-a-directory" | "not-a-file" | "not-a-git-repo" | "bad-request" | "forbidden";
 
 /** A refusal the client can branch on; main.ts copies code onto the wire error. */
 export class OpError extends Error {

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   Capabilities,
   GoldenVersion,
+  DaemonAuthRequest,
+  DaemonErrorCode,
   DaemonErrorResponse,
   DaemonEvent,
   DaemonReachView,
@@ -394,6 +396,17 @@ describe("golden wire schemas", () => {
 
   it("error replies may carry a typed kind", () => {
     expect(RuntimeErrorResponse.parse({ id: 1, ok: false, error: "refused", kind: "notFirstLife" }).kind).toBe("notFirstLife");
+  });
+});
+
+describe("daemon auth frame", () => {
+  it("carries the token and, for a socket meant for one guest port, that port", () => {
+    expect(DaemonAuthRequest.parse({ id: 1, op: "auth", token: "t" })).toEqual({ id: 1, op: "auth", token: "t" });
+    expect(DaemonAuthRequest.parse({ id: 1, op: "auth", token: "t", port: 3000 })).toEqual({ id: 1, op: "auth", token: "t", port: 3000 });
+    expect(() => DaemonAuthRequest.parse({ id: 1, op: "auth", token: "t", port: 0 })).toThrow();
+    expect(() => DaemonAuthRequest.parse({ id: 1, op: "auth", token: "t", port: 65536 })).toThrow();
+    expect(() => DaemonAuthRequest.parse({ id: 1, op: "auth", token: "t", port: "3000" })).toThrow();
+    expect(DaemonErrorCode.parse("forbidden")).toBe("forbidden");
   });
 });
 

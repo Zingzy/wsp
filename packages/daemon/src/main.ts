@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
+import type { IncomingMessage } from "node:http";
 import { connect as connectTcp, type Socket } from "node:net";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
@@ -93,11 +94,15 @@ interface Request {
 interface ConnState {
   detaches: (() => void)[];
   tunnels: Map<string, Socket>;
+  /** Set when the auth frame named a port: only tunnel ops on it and ping are answered. */
+  port?: number;
 }
 
 /** Laptop connections one socket may hold open through the forward at once. */
 const TUNNEL_CAP = 64;
 const AUTH_DEADLINE_MS = 5_000;
+/** Wire bytes a peer may send before its auth frame passes; an auth frame is under 200. */
+const PRE_AUTH_MAX_BYTES = 4096;
 
 function safeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a);
@@ -184,14 +189,26 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
     openSocket.on("url", url => relay.open(url));
   }
 
-  wss.on("connection", (ws: WebSocket) => {
+  wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     // A malformed frame from any peer, authed or not, ends that socket and nothing else: without a listener ws throws.
     ws.on("error", () => {});
+    // ws assembles a whole message (up to its 100 MiB cap) before it emits one, so the pre-auth cap counts the bytes
+    // on the wire instead; it stays armed through the close handshake, where a refused peer could still stream.
+    const wire = req.socket;
+    let preAuthBytes = 0;
+    const countPreAuth = (chunk: Buffer): void => {
+      preAuthBytes += chunk.length;
+      if (preAuthBytes <= PRE_AUTH_MAX_BYTES) return;
+      if (ws.readyState === ws.OPEN) ws.close(4401, "too many bytes before the auth frame");
+      else wire.destroy();
+    };
+    wire.prependListener("data", countPreAuth);
     // With the server on 0.0.0.0 the first frame is the only gate: no handler exists until it passes.
     const deadline = setTimeout(() => ws.close(4401, "no auth frame arrived in time"), authDeadlineMs);
     ws.once("close", () => clearTimeout(deadline));
     ws.once("message", raw => {
       clearTimeout(deadline);
+      if (preAuthBytes > PRE_AUTH_MAX_BYTES) return;
       let frame: unknown;
       try {
         frame = JSON.parse(String(raw));
@@ -213,15 +230,17 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
         ws.close(4401, "daemon token refused; the host holds the current one");
         return;
       }
+      wire.off("data", countPreAuth);
       reply(ws, auth.data.id, {});
-      serve(ws);
+      serve(ws, auth.data.port);
     });
   });
 
-  const serve = (ws: WebSocket): void => {
-    authed.add(ws);
+  const serve = (ws: WebSocket, port: number | undefined): void => {
+    // A port-scoped socket is there to tunnel one port; the guest's pages and callback ports are not its business.
+    if (port === undefined) authed.add(ws);
     push(ws, { type: "daemon.hello", root });
-    const state: ConnState = { detaches: [], tunnels: new Map() };
+    const state: ConnState = { detaches: [], tunnels: new Map(), ...(port !== undefined ? { port } : {}) };
     ws.on("close", () => {
       // Client is gone; ptys keep running. Only this socket's subscriptions and tunnels die.
       authed.delete(ws);
@@ -335,7 +354,23 @@ function subscribe(state: ConnState, ws: WebSocket, emitter: NodeJS.EventEmitter
   }
 }
 
+function inPortScope(port: number, msg: Request): boolean {
+  switch (msg.op) {
+    case "ping":
+    case "tunnel.write":
+    case "tunnel.close":
+      return true;
+    case "tunnel.open":
+      return msg["port"] === port;
+    default:
+      return false;
+  }
+}
+
 async function handle(ws: WebSocket, state: ConnState, ctx: Ctx, msg: Request): Promise<void> {
+  if (state.port !== undefined && !inPortScope(state.port, msg)) {
+    throw new OpError("forbidden", `this socket is scoped to port ${state.port}: only tunnel ops on it and ping are allowed`);
+  }
   switch (msg.op) {
     case "pty.create": {
       const s = ctx.ptys.create({

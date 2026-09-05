@@ -475,8 +475,16 @@ export type DaemonLinkStatus = z.infer<typeof DaemonLinkStatus>;
 const reqId = z.union([z.string(), z.number()]);
 
 /** The first frame on every daemon socket, the URL carries no token: answered {id, ok} then daemon.hello, or
- * the socket closes 4401 with one sentence of reason. Anything else first, or nothing, closes the same way. */
-export const DaemonAuthRequest = z.object({ id: reqId, op: z.literal("auth"), token: z.string() });
+ * the socket closes 4401 with one sentence of reason. Anything else first, or nothing, closes the same way.
+ * A peer that sends more than a few KiB before this frame passes is closed 4401 too, so a client sends nothing
+ * more until it is answered. port scopes the socket to one guest port: only tunnel ops on that port and ping are
+ * answered, everything else is refused with code forbidden. */
+export const DaemonAuthRequest = z.object({
+  id: reqId,
+  op: z.literal("auth"),
+  token: z.string(),
+  port: z.number().int().min(1).max(65535).optional(),
+});
 export type DaemonAuthRequest = z.infer<typeof DaemonAuthRequest>;
 
 // Replies carry no op, so each files/diff op has its own reply schema here
@@ -593,6 +601,7 @@ export const DaemonErrorCode = z.enum([
   "not-a-file",
   "not-a-git-repo",
   "bad-request",
+  "forbidden",
 ]);
 export type DaemonErrorCode = z.infer<typeof DaemonErrorCode>;
 
