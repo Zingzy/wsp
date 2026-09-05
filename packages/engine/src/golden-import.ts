@@ -277,12 +277,14 @@ export interface DigestedFile {
 const sorted = <T extends object>(rows: T[]): T[] => rows.sort((a, b) => (JSON.stringify(a) < JSON.stringify(b) ? -1 : 1));
 
 /** What a golden is built from: the ticked ids with their login answers and
- * tool pins, and every planned path with its digest, volatile ones marked.
- * Labels, row order and disk stats do not enter, so a file rewritten with the
- * same bytes reads the same. */
+ * tool pins, the computer's login shell once when a shell row is ticked, and
+ * every planned path with its digest, volatile ones marked. Labels, row order
+ * and disk stats do not enter, so a file rewritten with the same bytes reads the same. */
 export function recipeDigest(entries: readonly RecipeEntry[], files: readonly DigestedFile[] = []): RecipeDigest {
+  const login = entries.find(e => ticked(e) && e.rung === "shell" && e.login !== undefined)?.login;
   return {
     ticks: sorted(entries.filter(ticked).map(e => ({ id: e.id, ...(e.choice !== undefined ? { choice: e.choice } : {}), ...(e.version !== undefined ? { version: e.version } : {}) }))),
+    ...(login !== undefined ? { login } : {}),
     files: sorted(files.map(f => ({ id: f.id, path: f.path, dest: f.dest, digest: f.digest, ...(f.volatile === true ? { volatile: true } : {}) }))),
   };
 }
@@ -292,7 +294,7 @@ export function recipeDigest(entries: readonly RecipeEntry[], files: readonly Di
 export function recipeHash(digest: RecipeDigest): string {
   const ticks = sorted(digest.ticks.map(t => [t.id, t.choice ?? null, t.version ?? null]));
   const files = sorted(digest.files.filter(f => f.volatile !== true).map(f => [f.id, f.path, f.dest, f.digest]));
-  return createHash("sha256").update(JSON.stringify({ ticks, files })).digest("hex");
+  return createHash("sha256").update(JSON.stringify({ ticks, login: digest.login ?? null, files })).digest("hex");
 }
 
 // --- tools -------------------------------------------------------------------

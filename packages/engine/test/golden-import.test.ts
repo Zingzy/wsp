@@ -397,6 +397,17 @@ describe("recipeDigest and recipeHash", () => {
     expect(hashOf(bun("1.4.0"))).not.toBe(hashOf(bun("1.5.0")));
   });
 
+  it("the login shell enters the digest once, off the ticked shell rows, and a change of it alone changes the hash", () => {
+    const withLogin = (login?: string, bring = true) => [row({ rung: "identity", id: "identity/git-user" }), row({ rung: "shell", id: "shell/zshrc", bring, ...(login !== undefined ? { login } : {}) }), row({ rung: "shell", id: "shell/tmux", bring, ...(login !== undefined ? { login } : {}) })];
+    expect(recipeDigest(withLogin("zsh"))).toMatchObject({ login: "zsh", ticks: [{ id: "identity/git-user" }, { id: "shell/tmux" }, { id: "shell/zshrc" }] });
+    expect(recipeDigest(withLogin())).not.toHaveProperty("login");
+    expect(hashOf(withLogin("zsh"))).not.toBe(hashOf(withLogin("fish")));
+    expect(hashOf(withLogin("zsh"))).not.toBe(hashOf(withLogin()));
+    // With no shell row ticked the login shell decides nothing on the machine, so it stays out.
+    expect(recipeDigest(withLogin("zsh", false))).not.toHaveProperty("login");
+    expect(hashOf(withLogin("zsh", false))).toBe(hashOf(withLogin("fish", false)));
+  });
+
   it("a volatile file is in the digest, marked, and never in the hash, whatever its bytes; the same file not volatile is", () => {
     const rows = [row({ rung: "agents", id: "agents/claude", paths: ["~/.claude/settings.json", "~/.claude.json"], volatile: ["~/.claude.json"] })];
     const settings = { id: "agents/claude", path: "~/.claude/settings.json", dest: ".claude-cfg/settings.json", digest: "s1" };
