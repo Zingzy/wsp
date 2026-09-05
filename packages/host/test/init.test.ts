@@ -1448,8 +1448,10 @@ describe("wsp init, flags and no terminal", () => {
     expect(log).toContain("true");
     expect(log.some(c => c.includes(GOLDEN_SETUP))).toBe(false);
     expect(log.some(c => c.includes("tar xzf"))).toBe(true);
+    // The zshrc tick brings zsh: the setup step ends on the shell line, after the files were packed.
+    expect(log.some(c => c.includes('chsh -s "$(command -v zsh)" "$(id -un)"'))).toBe(true);
     // Off a terminal a step prints once, done, with its whole detail and how long it took two spaces after it: no edge to cut at or pad to.
-    expect(out).toMatch(/Setup applied\s+[\d.]+ (B|KB) packed  \d+\.\ds$/m);
+    expect(out).toMatch(/Setup applied\s+zsh installed as the login shell  \d+\.\ds$/m);
     expect(out).toMatch(/Files uploaded\s+[\d.]+ (B|KB) in [\d.]+s  \d+\.\ds$/m);
     expect(f.recipes[0]!.envs).not.toHaveProperty("CLAUDE_CONFIG_DIR");
     const written = loadManifest(join(dirname(f.opts.statePath), "golden-recipe.json"));

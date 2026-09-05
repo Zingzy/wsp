@@ -717,6 +717,14 @@ describe("importFor", () => {
     expect(ticks(home, row({ rung: "agents", id: "agents/zed", label: "Zed" })).skippedAgents).toEqual([{ id: "agents/zed", name: "Zed", note: "no installer known" }]);
   });
 
+  it("carries the person's shell when zsh's rows are ticked, with the frameworks among them, and none when only bash's are", () => {
+    const home = laptop();
+    const zsh = ticks(home, row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"] }), row({ rung: "shell", id: "shell/oh-my-zsh", paths: ["~/.oh-my-zsh/custom"] }));
+    expect(zsh.shell).toMatchObject({ shell: "zsh", frameworks: ["shell/oh-my-zsh"] });
+    expect(zsh.shell?.cmd).toContain('chsh -s "$(command -v zsh)"');
+    expect(ticks(home, row({ rung: "shell", id: "shell/bashrc", paths: ["~/.bashrc"] }))).not.toHaveProperty("shell");
+  });
+
   it("the recipe hash follows the shipped file's bytes, not its stat times: a rewrite with the same bytes keeps it, a changed byte moves it", () => {
     const home = laptop();
     const before = ticks(home).recipeHash;

@@ -664,6 +664,79 @@ export function editorInstallsFor(entries: readonly RecipeEntry[]): EditorsPlan 
   return out;
 }
 
+// --- shell -------------------------------------------------------------------
+
+export type LoginShell = "zsh" | "fish";
+
+export interface ShellInstall {
+  /** The login shell the ticked rows belong to; chsh sets it for the guest's uid. */
+  shell: LoginShell;
+  /** The ticked framework rows reinstalled into their homes, in recipe order. */
+  frameworks: string[];
+  /** One bash -c script under set -e. */
+  cmd: string;
+}
+
+/** A shell framework as a git checkout at a pinned commit under the home its rc
+ * file expects; fetched by the commit itself, since none of them tags releases. */
+export interface PinnedRepo {
+  url: string;
+  branch: string;
+  commit: string;
+  /** Relative to the guest's home. */
+  home: string;
+}
+
+export const SHELL_FRAMEWORKS: Record<string, PinnedRepo> = {
+  // https://github.com/ohmyzsh/ohmyzsh#manual-installation
+  "shell/oh-my-zsh": { url: "https://github.com/ohmyzsh/ohmyzsh.git", branch: "master", commit: "421d95782d369f266b8087a0eae11eac2f6a6041", home: ".oh-my-zsh" },
+  // https://github.com/zdharma-continuum/zinit#manual (the XDG home; the rc file's own installer keeps any other)
+  "shell/zinit": { url: "https://github.com/zdharma-continuum/zinit.git", branch: "main", commit: "db9e267184c85a26056c2646222f48df609cecd5", home: ".local/share/zinit/zinit.git" },
+  // https://github.com/zplug/zplug#manually
+  "shell/zplug": { url: "https://github.com/zplug/zplug.git", branch: "main", commit: "cc6906ea7ea18a5058e8b4862d4086148434ddde", home: ".zplug" },
+  // https://github.com/mattmc3/antidote#install
+  "shell/antidote": { url: "https://github.com/mattmc3/antidote.git", branch: "main", commit: "db19ea3aa9ad83dbe6ac465ecce0a0afc5a752a5", home: ".antidote" },
+};
+
+/** Rows only zsh can read: its rc files, its prompt, and the frameworks above. */
+const ZSH_ROWS = new Set(["shell/zshrc", "shell/zshenv", "shell/zprofile", "shell/zlogin", "shell/p10k", ...Object.keys(SHELL_FRAMEWORKS)]);
+
+function pinnedClone(repo: PinnedRepo): string {
+  const dir = `"$HOME/${repo.home}"`;
+  return [
+    `if [ ! -d ${dir}/.git ]; then`,
+    `  git init -q ${dir}`,
+    `  git -C ${dir} remote add origin ${repo.url}`,
+    `  git -C ${dir} fetch -q --depth 1 origin ${repo.commit}`,
+    // A kept builder may already hold the person's custom directory; the upload that follows puts it back.
+    `  git -C ${dir} checkout -q -f -B ${repo.branch} FETCH_HEAD`,
+    "fi",
+    `test "$(git -C ${dir} rev-parse HEAD)" = "${repo.commit}"`,
+  ].join("\n");
+}
+
+/** The shell the ticked rows are for and how the builder gets it: the shell by apt, each
+ * ticked framework at its pin, then chsh for the uid. A fish config beside a zshrc means
+ * fish: every Mac has a zshrc, only a fish user has that directory. Runs before the files
+ * land, so a framework's home is empty when its clone arrives and the copied custom
+ * directory lands on top of it. */
+export function shellInstallFor(entries: readonly RecipeEntry[]): ShellInstall | undefined {
+  const shellRows = entries.filter(e => ticked(e) && e.rung === "shell");
+  const zsh = shellRows.some(e => ZSH_ROWS.has(e.id));
+  const fish = shellRows.some(e => e.id === "shell/fish");
+  if (!zsh && !fish) return undefined;
+  const shell: LoginShell = fish ? "fish" : "zsh";
+  const frameworks = shellRows.map(e => e.id).filter(id => id in SHELL_FRAMEWORKS);
+  const lines = [PRELUDE, "export DEBIAN_FRONTEND=noninteractive"];
+  if (zsh) lines.push(APT("zsh"));
+  if (fish) lines.push(APT("fish"));
+  if (frameworks.length > 0) lines.push(APT("git"), ...frameworks.map(id => pinnedClone(SHELL_FRAMEWORKS[id]!)));
+  // Debian's zprofile is empty, so a zsh login shell would skip the PATH and BROWSER lines the golden puts in profile.d.
+  if (zsh) lines.push(`grep -qs 'source /etc/profile' /etc/zsh/zprofile || printf '%s\\n' "emulate sh -c 'source /etc/profile'" >> /etc/zsh/zprofile`);
+  lines.push(`chsh -s "$(command -v ${shell})" "$(id -un)"`);
+  return { shell, frameworks, cmd: lines.join("\n") };
+}
+
 // --- agents ------------------------------------------------------------------
 
 export interface AgentInstaller {

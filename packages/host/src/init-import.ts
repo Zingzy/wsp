@@ -16,6 +16,7 @@ import {
   recipeDigest,
   recipeHash,
   refusedPath,
+  shellInstallFor,
   toolInstallsFor,
   type AgentInstaller,
   type FilesPlan,
@@ -391,6 +392,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
     platform: opts.platform,
     rewrites: [[".claude/", `${CLAUDE_REL}/`], [".claude.json", `${CLAUDE_REL}/.claude.json`]],
   });
+  const shell = shellInstallFor(bring);
   const tools = toolInstallsFor(bring);
   const editors = editorInstallsFor(bring);
   const agents = agentInstallsFor(bring, { claude: CLAUDE_INSTALLER });
@@ -424,6 +426,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
     ...(anyFiles
       ? { files: { count, rungs: plan.rungs, bytes: plan.bytes, skipped: plan.skipped, pack: () => packPlan(plan, { secrets: opts.secrets, home, managerHomes }), ...(volatile !== undefined ? { volatile } : {}) } }
       : {}),
+    ...(shell !== undefined ? { shell } : {}),
     tools: [...editors.installs, ...tools.installs],
     ...(agents.node !== undefined ? { node: agents.node } : {}),
     agents: agents.installs,

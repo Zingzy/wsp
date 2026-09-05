@@ -20,6 +20,8 @@ import {
   recipeDigest,
   recipeHash,
   refusedPath,
+  SHELL_FRAMEWORKS,
+  shellInstallFor,
   toolInstallsFor,
   BREW_HOUSEKEEPING,
   type DigestedFile,
@@ -753,5 +755,55 @@ describe("agentInstallsFor", () => {
     expect(hermes).toMatch(/rev-parse HEAD\)" = "[0-9a-f]{40}"/);
     expect(hermes).toContain("uv venv --python 3.11 /root/.hermes/venvs/hermes");
     expect(AGENT_INSTALLERS["aider"]!.install).toMatch(/uv tool install --force --python 3\.12 --with pip aider-chat==\d/);
+  });
+});
+
+describe("shellInstallFor", () => {
+  const shell = (id: string, over: Partial<RecipeEntry> = {}) => row({ rung: "shell", id: `shell/${id}`, paths: [`~/.${id}`], ...over });
+
+  it("zsh's rc files ticked: one apt line for zsh, the ticked frameworks fetched at their pinned commits, then chsh for the uid, all under set -e", () => {
+    const plan = shellInstallFor([shell("zshrc"), shell("oh-my-zsh", { paths: ["~/.oh-my-zsh/custom"] }), shell("antidote", { paths: ["~/.zsh_plugins.txt"] }), shell("zinit", { bring: false }), row({ rung: "tools", id: "tools/brew/zsh" })]);
+    expect(plan).toMatchObject({ shell: "zsh", frameworks: ["shell/oh-my-zsh", "shell/antidote"] });
+    const s = plan!.cmd;
+    expect(s.startsWith("set -euo pipefail")).toBe(true);
+    expect(s).toContain('export HOME="${HOME:-');
+    expect(s).toContain("command -v zsh >/dev/null 2>&1 || { apt-get update -qq; apt-get install -y -qq zsh; }");
+    const omz = SHELL_FRAMEWORKS["shell/oh-my-zsh"]!;
+    expect(s).toContain(`git -C "$HOME/.oh-my-zsh" fetch -q --depth 1 origin ${omz.commit}`);
+    expect(s).toContain(`test "$(git -C "$HOME/.oh-my-zsh" rev-parse HEAD)" = "${omz.commit}"`);
+    expect(s).toContain('git -C "$HOME/.antidote" fetch -q --depth 1 origin ');
+    expect(s).not.toContain("zinit");
+    expect(s).not.toContain("zplug");
+    expect(s).toContain('chsh -s "$(command -v zsh)" "$(id -un)"');
+    expect(s.indexOf("chsh")).toBeGreaterThan(s.indexOf("rev-parse HEAD"));
+    expect(s).not.toMatch(/bash -lc/);
+    expect(s).not.toMatch(/\|\s*(bash|sh|zsh)\b/);
+    expect(s).not.toMatch(/\bcurl\b/);
+  });
+
+  it("only bash's rc files ticked: nothing to install, the guest's bash is the shell", () => {
+    expect(shellInstallFor([shell("bashrc"), shell("bash_profile"), shell("zshrc", { bring: false }), shell("starship", { paths: ["~/.config/starship.toml"] })])).toBeUndefined();
+  });
+
+  it("a zsh framework ticked on its own still brings zsh, since nothing else can run it", () => {
+    expect(shellInstallFor([shell("zplug", { paths: [] })])).toMatchObject({ shell: "zsh", frameworks: ["shell/zplug"] });
+  });
+
+  it("fish's config ticked: fish, with no framework, and fish wins over a zshrc ticked beside it", () => {
+    const plan = shellInstallFor([shell("fish", { paths: ["~/.config/fish"] }), shell("zshrc")]);
+    expect(plan).toMatchObject({ shell: "fish", frameworks: [] });
+    expect(plan!.cmd).toContain("apt-get install -y -qq fish");
+    expect(plan!.cmd).toContain("apt-get install -y -qq zsh");
+    expect(plan!.cmd).toContain('chsh -s "$(command -v fish)" "$(id -un)"');
+    expect(plan!.cmd).not.toContain('chsh -s "$(command -v zsh)"');
+  });
+
+  it("every framework pin is a full commit on a named branch, cloned over https", () => {
+    for (const repo of Object.values(SHELL_FRAMEWORKS)) {
+      expect(repo.commit).toMatch(/^[0-9a-f]{40}$/);
+      expect(repo.url).toMatch(/^https:\/\/github\.com\/[\w-]+\/[\w-]+\.git$/);
+      expect(repo.branch).toMatch(/^(main|master)$/);
+      expect(repo.home).not.toMatch(/^[~/]/);
+    }
   });
 });
