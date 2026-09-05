@@ -30,6 +30,9 @@ const STATE_MAP: Record<SandboxView["state"], MachineState> = {
   gone: "gone",
 };
 
+/** Prefixed to every exec: the guest runs as root and the exec API hands it no environment beyond PATH. */
+export const EXEC_ENV = "export HOME=/root USER=root";
+
 function fail(e: WspError): never {
   throw Object.assign(new Error(e.message || `${e.kind} (${e.status})`), e);
 }
@@ -96,6 +99,8 @@ export class SolariBackend implements MachineBackend {
         ...(spec.fromSnapshot ? { fromSnapshot: spec.fromSnapshot } : {}),
         ...(spec.cpu ? { cpu: spec.cpu } : {}),
         ...(spec.memMb ? { memMb: spec.memMb } : {}),
+        // camelCase: Solari honours diskGb 1 to 20 and drops disk_gb like any unknown field (measured 2026-09-04).
+        ...(spec.diskGb ? { diskGb: spec.diskGb } : {}),
         ...(spec.envs ? { envs: spec.envs } : {}),
         ...(spec.labels ? { metadata: spec.labels } : {}),
         ...(spec.onIdle ? { lifecycle: { onTimeout: spec.onIdle } } : {}),
@@ -160,9 +165,10 @@ class SolariMachine implements Machine {
 
   async exec(cmd: string, opts?: { timeoutMs?: number }): Promise<ExecResult> {
     // bash -c, never -lc: login shells reset PATH and lose /root/.local/bin.
+    // The exec environment carries PATH and nothing else (measured 2026-09-05): HOME and USER go ahead of every command, SHELL stays unset so a pty reads it off passwd.
     return this.backend.request<ExecResult>("POST", this.path("/exec"), {
       cmd: "bash",
-      args: ["-c", cmd],
+      args: ["-c", `${EXEC_ENV}\n${cmd}`],
       timeoutMs: opts?.timeoutMs ?? 120_000,
     });
   }

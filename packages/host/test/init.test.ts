@@ -283,7 +283,7 @@ describe("wsp init, interactive", () => {
     expect(result.handle?.port).toBe(4400);
 
     const out = f.text();
-    const order = ["Machine created", "Base installed", "Setup applied", "Files uploaded", "Tools installed", "Agents installed", "Ready"].map(s => out.indexOf(s));
+    const order = ["Machine created", "Base installed", "Setup applied", "Files uploaded", "Agents installed", "Tools installed", "Ready"].map(s => out.indexOf(s));
     expect(order.every(i => i >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(out).toContain("node v22.12.0");
@@ -1272,7 +1272,7 @@ describe("wsp init, flags and no terminal", () => {
     expect(f.text()).toContain("not in gzip format");
   });
 
-  it("a tool or one of several agents that fails is a warning in the stream, named on its own line, not the end of the build", async () => {
+  it("a tool that fails is a warning in the stream, named on its own line, not the end of the build", async () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
     dirs.push(dir);
     const path = join(dir, "recipe.json");
@@ -1280,7 +1280,7 @@ describe("wsp init, flags and no terminal", () => {
     const f = fake({ yes: true, manifestPath: path });
     f.opts.runtime = recipe => {
       const backend = stubBackend();
-      backend.execImpl = (_m, cmd) => (cmd.includes("brew install jq") || cmd.includes(GOLDEN_SETUP) ? { exitCode: 1, stdout: "", stderr: "curl: no route" } : guestAnswer(cmd));
+      backend.execImpl = (_m, cmd) => (cmd.includes("brew install jq") ? { exitCode: 1, stdout: "", stderr: "curl: no route" } : guestAnswer(cmd));
       f.backends.push(backend);
       f.recipes.push(recipe);
       return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
@@ -1289,19 +1289,18 @@ describe("wsp init, flags and no terminal", () => {
     expect(result.code).toBe(0);
     const out = f.text();
     expect(out).toMatch(/Tools installed\s+5 installed, 1 failed/);
-    expect(out).toMatch(/Agents installed\s+Codex installed; Claude/);
+    expect(out).toMatch(/Agents installed\s+Claude Code, Codex installed/);
     expect(out).toContain("Ready");
     // The stage line is cut to the width; the names come back in full under the tally.
     const tally = out.slice(out.indexOf("Tools and agents:"));
-    expect(tally.split("\n").slice(0, 3).map(l => l.replace(/^[│◇]\s+/, ""))).toEqual([
-      expect.stringMatching(/^Tools and agents: 6 installed, 2 failed, 0 skipped; the list is in .*golden-import\.json$/),
+    expect(tally.split("\n").slice(0, 2).map(l => l.replace(/^[│◇]\s+/, ""))).toEqual([
+      expect.stringMatching(/^Tools and agents: 7 installed, 1 failed, 0 skipped; the list is in .*golden-import\.json$/),
       "jq failed: curl: no route",
-      "Claude Code failed: curl: no route",
     ]);
     expect(f.recipes[0]!.import?.node).toMatchObject({ floor: 16, agents: ["Codex"] });
   });
 
-  it("every ticked agent failing ends the build: one line per agent with its reason, the builder killed, and an offer to start over", async () => {
+  it("an agent failing ends the build: one line per agent with its reason, the builder killed, and an offer to start over", async () => {
     const f = fake({ yes: true });
     f.opts.runtime = recipe => {
       const backend = stubBackend();
@@ -1314,7 +1313,7 @@ describe("wsp init, flags and no terminal", () => {
     expect(f.hosts).toBe(0);
     const out = f.text();
     expect(out).toContain("Installing agents failed");
-    expect(out.split("\n").map(l => l.replace(/^│\s+/, ""))).toEqual(expect.arrayContaining(["no agent installed, so there is nothing to seal:", "Claude Code: curl: (6) Could not resolve host"]));
+    expect(out.split("\n").map(l => l.replace(/^│\s+/, ""))).toEqual(expect.arrayContaining(["an agent did not install, so nothing is sealed:", "Claude Code: curl: (6) Could not resolve host"]));
     expect(out).toContain("Run wsp init again to start over; the recipe is kept.");
     expect(f.backends[0]!.machines[0]!.killed).toBe(true);
     expect(JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8"))).toMatchObject({ agents: [{ id: "agents/claude", outcome: "failed" }] });
@@ -1908,19 +1907,21 @@ describe("stage stream", () => {
   const ev = (stage: string, detail?: string) => ({ type: "golden.stage" as const, name: "default", stage, ...(detail !== undefined ? { detail } : {}) });
 
   it("renders one step per stage with start and end labels and a tail of details", () => {
-    const view = reduceStages([ev("creating", "sandbox from default"), ev("deploying-daemon", "node v22"), ev("installing-harness")]);
+    const view = reduceStages([ev("creating", "sandbox from default"), ev("deploying-daemon", "node v22"), ev("installing-tools")]);
+    // Agents go on before tools, so the terminal lists them in that order too.
     expect(view.steps.map(s => [s.stage, s.state])).toEqual([
       ["creating", "done"],
       ["deploying-daemon", "done"],
       ["applying-setup", "done"],
       ["uploading-files", "done"],
-      ["installing-tools", "done"],
-      ["installing-harness", "current"],
+      ["installing-harness", "done"],
+      ["installing-tools", "current"],
       ["ready", "pending"],
     ]);
-    expect(view.steps.slice(2, 5).map(s => [s.start, s.end])).toEqual([
+    expect(view.steps.slice(2, 6).map(s => [s.start, s.end])).toEqual([
       ["Applying your setup", "Setup applied"],
       ["Uploading your files", "Files uploaded"],
+      ["Installing agents", "Agents installed"],
       ["Installing tools", "Tools installed"],
     ]);
     expect(view.steps[0]).toMatchObject({ start: "Creating the machine", end: "Machine created", tail: ["sandbox from default"] });
@@ -1929,7 +1930,7 @@ describe("stage stream", () => {
   });
 
   it("a stage not reported counts as done once a later one arrives; ready finishes; failed carries the detail", () => {
-    const done = reduceStages([ev("creating"), ev("installing-harness"), ev("ready")]);
+    const done = reduceStages([ev("creating"), ev("installing-tools"), ev("ready")]);
     expect(done.steps.map(s => s.state)).toEqual(["done", "done", "done", "done", "done", "done", "done"]);
     const failed = reduceStages([ev("creating"), ev("failed", "golden setup failed (exit 1): curl: no route")]);
     expect(failed.steps[0]!.state).toBe("failed");
@@ -1941,7 +1942,7 @@ describe("stage stream", () => {
       { ...ev("creating"), at: 1_000 },
       { ...ev("deploying-daemon"), at: 4_200 },
       { ...ev("deploying-daemon", "node v22"), at: 4_900 },
-      { ...ev("installing-harness"), at: 5_000 },
+      { ...ev("installing-tools"), at: 5_000 },
       { ...ev("ready"), at: 65_500 },
     ]);
     // The second deploying-daemon frame carries the detail; it does not restart that stage's clock.
@@ -1949,7 +1950,7 @@ describe("stage stream", () => {
   });
 
   it("a stage already applied is done the moment its frame arrives and is charged no time, whatever follows it", () => {
-    const skipped = ["creating", "deploying-daemon", "applying-setup", "uploading-files", "installing-tools", "installing-harness"].map((stage, i) => ({ ...ev(stage, ALREADY_APPLIED), at: 1_000 + i }));
+    const skipped = ["creating", "deploying-daemon", "applying-setup", "uploading-files", "installing-harness", "installing-tools"].map((stage, i) => ({ ...ev(stage, ALREADY_APPLIED), at: 1_000 + i }));
     const view = reduceStages([...skipped, { ...ev("ready"), at: 2_200 }]);
     expect(view.steps.map(s => s.state)).toEqual(Array<string>(7).fill("done"));
     expect(view.steps.map(s => s.ms)).toEqual(Array<undefined>(7).fill(undefined));
@@ -1957,7 +1958,7 @@ describe("stage stream", () => {
   });
 
   it("a failure after skipped stages lands on the stage about to run, not on the last stage the builder already held", () => {
-    const skipped = ["creating", "deploying-daemon", "applying-setup", "uploading-files", "installing-tools", "installing-harness"].map(stage => ev(stage, ALREADY_APPLIED));
+    const skipped = ["creating", "deploying-daemon", "applying-setup", "uploading-files", "installing-harness", "installing-tools"].map(stage => ev(stage, ALREADY_APPLIED));
     const view = reduceStages([...skipped, ev("failed", "the builder answered exit 1 to a no-op; it is not serving")]);
     expect(view.steps.map(s => s.state)).toEqual([...Array<string>(6).fill("done"), "failed"]);
     expect(view.steps[6]!.fail).toBe("The machine never became ready");

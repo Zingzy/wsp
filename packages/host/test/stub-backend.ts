@@ -36,9 +36,10 @@ function vaultServer(): () => Promise<string> {
     }));
 }
 
-/** What a bare guest answers: nothing, except the Node step, which finds the base Node and keeps it. */
+/** What a bare guest answers: nothing, except the Node step, which finds the base Node and keeps it, and the reach check. */
 export function guestAnswer(cmd: string): ExecResult {
   if (cmd.includes("NODE_HAVE")) return { exitCode: 0, stdout: "NODE_HAVE v18.20.4\nNODE_KEPT v18.20.4\n", stderr: "" };
+  if (cmd === "echo ok") return { exitCode: 0, stdout: "ok\n", stderr: "" };
   return { exitCode: 0, stdout: "", stderr: "" };
 }
 

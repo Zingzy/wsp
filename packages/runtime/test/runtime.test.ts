@@ -1583,7 +1583,7 @@ describe("runtime golden import", () => {
     tools: [{ id: "tools/brew/jq", label: "jq", manager: "brew", cmd: "brew install jq" }],
     agents: [{ id: "agents/codex", name: "Codex", install: "codex-install", smoke: "codex --version" }],
   });
-  const dfOk = (m: unknown, cmd: string) => (cmd.startsWith("df -Pk") ? { exitCode: 0, stdout: `${2000 * 1024}\n`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+  const dfOk = (m: unknown, cmd: string) => (cmd.startsWith("df -Pk") ? { exitCode: 0, stdout: `${2000 * 1024}\n`, stderr: "" } : cmd === "echo ok" ? { exitCode: 0, stdout: "ok\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
 
   it("prepare runs the import stages on the wire, records the ledger on the builder, and seals with the builder's own smoke", async () => {
     const backend = stubBackend();
@@ -1597,14 +1597,14 @@ describe("runtime golden import", () => {
       "creating:sandbox from base",
       "applying-setup:1 file: shell 1",
       "applying-setup:10 B packed",
-      "installing-tools:jq (1/1)",
-      "installing-tools:1 installed",
       "installing-harness",
       "installing-harness:Codex (1/1)",
       "installing-harness:Codex installed",
+      "installing-tools:jq (1/1)",
+      "installing-tools:1 installed",
       "ready",
     ]);
-    expect(await store.get("builders", b.id)).toMatchObject({ import: { recipeHash: "h1", applied: ["applying-setup", "uploading-files", "installing-tools", "installing-harness"], smoke: "codex --version" } });
+    expect(await store.get("builders", b.id)).toMatchObject({ import: { recipeHash: "h1", applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools"], smoke: "codex --version" } });
     const { version } = await rt.golden.seal(b.id);
     expect(version.smoke).toEqual({ cmd: "codex --version", exitCode: 0 });
     expect(backend.machines[1]!.execLog).toEqual(["codex --version", "test -x /usr/local/bin/wsp-open"]);
@@ -1626,15 +1626,15 @@ describe("runtime golden import", () => {
       "deploying-daemon:already applied",
       "applying-setup:already applied",
       "uploading-files:already applied",
-      "installing-tools:already applied",
       "installing-harness:already applied",
+      "installing-tools:already applied",
       "ready:",
     ]);
     expect(await rt.golden.builders()).toHaveLength(1);
   });
 
   const recipeWith = (imp: GoldenImport) => ({ setup: "true", smoke: "true", import: imp });
-  const SKIPPED = ["creating:already applied", "deploying-daemon:already applied", "applying-setup:already applied", "uploading-files:already applied", "installing-tools:already applied", "installing-harness:already applied", "ready:"];
+  const SKIPPED = ["creating:already applied", "deploying-daemon:already applied", "applying-setup:already applied", "uploading-files:already applied", "installing-harness:already applied", "installing-tools:already applied", "ready:"];
 
   it("a first-life builder from an earlier process with the same recipe is attached to: every stage skipped, one machine, and it seals", async () => {
     const backend = stubBackend();
@@ -1710,7 +1710,7 @@ describe("runtime golden import", () => {
     expect(backend.machines[0]!.killed).toBe(false);
     expect(frames).toContain("uploading-files:~/.claude.json not re-imported: upload refused");
     expect(frames.at(-1)).toBe("ready:");
-    expect(await store.get("builders", b.id)).toMatchObject({ import: { recipeHash: "h1", applied: ["applying-setup", "uploading-files", "installing-tools", "installing-harness"] } });
+    expect(await store.get("builders", b.id)).toMatchObject({ import: { recipeHash: "h1", applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools"] } });
   });
 
   it("kill stops a builder of this setup by its recorded id and drops the record, from this process or the next", async () => {
@@ -1828,7 +1828,7 @@ describe("runtime golden import", () => {
     const frames: string[] = [];
     dead.events.on("golden.stage", e => { if (e.type === "golden.stage") frames.push(`${e.stage}:${e.detail ?? ""}`); });
     await expect(dead.golden.prepare()).rejects.toThrow("gone");
-    expect(frames.slice(-2)).toEqual(["installing-harness:already applied", "failed:gone"]);
+    expect(frames.slice(-2)).toEqual(["installing-tools:already applied", "failed:gone"]);
     expect(frames).not.toContain("ready:");
     expect(await dead.golden.builders()).toEqual([]);
     expect(await store.list("builders")).toEqual([]);
@@ -2093,7 +2093,7 @@ describe("runtime golden import", () => {
     const done = (await store.get("builders", m.id)) as Stored;
     expect(done.building).toBeUndefined();
     expect(done.setupSha).not.toBe("");
-    expect(done.import?.applied).toEqual(["applying-setup", "uploading-files", "installing-tools", "installing-harness"]);
+    expect(done.import?.applied).toEqual(["applying-setup", "uploading-files", "installing-harness", "installing-tools"]);
     expect(done.heldBy).toMatchObject({ pid: process.pid });
   });
 
@@ -2223,7 +2223,7 @@ describe("runtime golden import", () => {
 });
 
 describe("runtime golden update and the post-seal grace", () => {
-  const dfOk = (m: unknown, cmd: string) => (cmd.startsWith("df -Pk") ? { exitCode: 0, stdout: `${2000 * 1024}\n`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+  const dfOk = (m: unknown, cmd: string) => (cmd.startsWith("df -Pk") ? { exitCode: 0, stdout: `${2000 * 1024}\n`, stderr: "" } : cmd === "echo ok" ? { exitCode: 0, stdout: "ok\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
   const snapshot = (recipeHash: string, dests: string[]): RecipeDigest => ({ ticks: dests.map(d => ({ id: `shell/${d}` })), files: dests.map(d => ({ id: `shell/${d}`, dest: d, path: `~/${d}`, digest: `d-${recipeHash}` })) });
   const importOf = (recipeHash = "h1", agents: GoldenImport["agents"] = [{ id: "agents/codex", name: "Codex", install: "codex-install", smoke: "codex --version" }]): GoldenImport => ({
     recipeHash,
@@ -2304,10 +2304,10 @@ describe("runtime golden update and the post-seal grace", () => {
       "applying-setup:5 B packed",
       "uploading-files:5 B",
       expect.stringMatching(/^uploading-files:5 B in /),
-      "installing-tools:cowsay (1/1)",
-      "installing-tools:1 installed",
       "installing-harness:",
       "installing-harness:no agent ticked",
+      "installing-tools:cowsay (1/1)",
+      "installing-tools:1 installed",
       "ready:",
       "snapshotting:golden-v2",
       "smoke-forking:codex --version",

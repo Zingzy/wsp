@@ -14,6 +14,8 @@ import {
   connectDaemonSocket,
   deployDaemon,
   deployScript,
+  previewHostSuffix,
+  VITE_ALLOWED_HOSTS_ENV,
   GUEST_ENVS,
   GUEST_NODE,
   claudeEnvs,
@@ -92,6 +94,40 @@ describe("browser shim in the guest", () => {
     expect(TOOLS_PATH.split(":").indexOf("/usr/local/bin")).toBeLessThan(TOOLS_PATH.split(":").indexOf("/usr/bin"));
     // The shim runs before umask 077 so the file it installs stays world-executable.
     expect(script.indexOf("install -m 0755")).toBeLessThan(script.indexOf("umask 077"));
+  });
+});
+
+describe("guest environment", () => {
+  it("exports HOME and USER before anything runs, so the daemon started here hands them on, and never pins SHELL", () => {
+    const script = deployScript("aabbcc");
+    const lines = script.split("\n");
+    expect(lines.indexOf("export HOME=/root USER=root")).toBeGreaterThan(-1);
+    expect(lines.indexOf("export HOME=/root USER=root")).toBeLessThan(lines.findIndex(l => l.startsWith("mkdir")));
+    expect(script).not.toContain("SHELL");
+  });
+
+  it("with a preview host suffix, login shells and the daemon's ptys both learn the hosts Vite may answer for", () => {
+    const script = deployScript("aabbcc", ".preview.example.com");
+    expect(VITE_ALLOWED_HOSTS_ENV).toBe("__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS");
+    expect(script).toContain("printf 'export __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=%s\\n' '.preview.example.com' > /etc/profile.d/wsp-preview.sh");
+    const lines = script.split("\n");
+    const exported = lines.indexOf("export __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS='.preview.example.com'");
+    expect(exported).toBeGreaterThan(-1);
+    expect(exported).toBeLessThan(lines.findIndex(l => l.startsWith("setsid nohup node")));
+    // Without a suffix nothing is written: a backend with no preview edge has no host to allow.
+    expect(deployScript("aabbcc")).not.toContain("VITE");
+  });
+
+  it("the suffix is the preview host with the machine-and-port label cut off, and nothing on a backend without preview URLs", async () => {
+    const backend = stubBackend();
+    const bare = await backend.create({ kind: "sandbox" });
+    await expect(previewHostSuffix(bare)).resolves.toBeUndefined();
+    const ports: number[] = [];
+    const withEdge = { ...bare, previewUrl: async (port: number) => { ports.push(port); return { url: `https://m1-${port}.preview.example.com/?pt_token=x`, token: "x", expiresAt: 0 }; } };
+    await expect(previewHostSuffix(withEdge)).resolves.toBe(".preview.example.com");
+    expect(ports).toEqual([7070]);
+    const flat = { ...bare, previewUrl: async () => ({ url: "https://localhost/", token: "x", expiresAt: 0 }) };
+    await expect(previewHostSuffix(flat)).resolves.toBeUndefined();
   });
 });
 
@@ -209,6 +245,15 @@ describe("deployDaemon", () => {
       expect(stub.execLog).toEqual([deployScript("tok")]);
       expect(uploads).toHaveLength(1);
       expect(gunzipSync(uploads[0]!).toString("latin1")).toContain("start.mjs");
+
+      // On a backend with a preview edge the script carries the edge's host suffix, read off this machine's URL.
+      const edged = await backend.create({ kind: "sandbox" });
+      const edgedStub = backend.machines[1]!;
+      edgedStub.uploadUrl = async () => `http://127.0.0.1:${port}/put`;
+      edgedStub.previewUrl = async p => ({ url: `https://${edgedStub.id}-${p}.preview.example.com/?pt_token=x`, token: "x", expiresAt: 0 });
+      await deployDaemon(edged, { token: "tok", daemonDir });
+      expect(edgedStub.execLog).toEqual([deployScript("tok", ".preview.example.com")]);
+      expect(edgedStub.execLog[0]).toContain("export __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS='.preview.example.com'");
     } finally {
       server.close();
       rmSync(dir, { recursive: true, force: true });

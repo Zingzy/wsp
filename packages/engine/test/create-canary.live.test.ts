@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Live canary: post every create body wsp sends to the real provider and, on a
 // refusal, quote the provider's answer word for word next to the body sent.
-// On 2026-09-04 the host pool began refusing diskGb, a field it had accepted
-// and ignored two days earlier, and every init booted nothing until a person
-// read the error off a live run. Each case builds its body with the code the
-// runtime calls, asserts the 201, and kills what it made by recorded id. The
-// listing case pins the row fields the sweep's cost and owner lines read.
+// On the morning of 2026-09-04 the host pool refused diskGb, a field it had
+// accepted and ignored two days earlier, and every init booted nothing until a
+// person read the error off a live run; by 17:22Z the same day it honoured it
+// (a 20 GB root on the guest), so every body here now carries diskGb 20. Each
+// case builds its body with the code the runtime calls, asserts the 201, and
+// kills what it made by recorded id. The listing case pins the row fields the
+// sweep's cost and owner lines read.
 
 import { afterAll, describe, expect, it } from "vitest";
 import type { WspError } from "../src/errors.js";
