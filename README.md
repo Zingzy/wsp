@@ -123,6 +123,13 @@ the signal to change a create body on purpose, not a flake to rerun. Under
 `WSP_LIVE=1` the root vitest config runs test files one at a time, so
 nothing else live should run beside it.
 
+One more test stays out of the default run for a different reason: the
+terminal pane's glyph test (`apps/web/src/terminal/ghostty/glyphs.browser.test.ts`)
+starts a Vite dev server and Playwright's Chromium to draw Nerd Font
+codepoints through the real pane and read the pixels back. It runs only under
+`WSP_RENDER=1 pnpm test`, needs `pnpm exec playwright install chromium` once,
+and skips, saying so, when that browser is missing.
+
 What it covers:
 
 - `packages/engine/test/create-canary.live.test.ts`: the builder body from

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The pane in a real Chromium: Nerd Font codepoints draw as glyphs from the
 // bundled symbols face when the chosen text face has none, never as the
-// notdef box. Vite serves the surface to Playwright's browser; without that
-// browser on the machine the file skips and says so.
+// notdef box. Vite serves the surface to Playwright's browser, so like the
+// live tests it runs only when asked for (WSP_RENDER=1) and skips without
+// Playwright's Chromium on the machine.
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createServer } from "node:net";
@@ -23,6 +24,7 @@ const browserPath = ((): string | undefined => {
   }
 })();
 const hasBrowser = browserPath !== undefined && existsSync(browserPath);
+const RENDER = process.env["WSP_RENDER"] === "1";
 
 const freePort = (): Promise<number> =>
   new Promise((resolve, reject) => {
@@ -52,7 +54,7 @@ const NOTDEF = "\u{10FFFD}";
 // (Menlo and SF Mono carry the powerline arrows themselves, so those would prove nothing here).
 const ICONS = ["\uF07B", "\uE5FF", "\u{F0219}", "\uF418"];
 
-describe.skipIf(!hasBrowser)("Nerd Font glyphs through the pane in Chromium", () => {
+describe.skipIf(!RENDER || !hasBrowser)("Nerd Font glyphs through the pane in Chromium", () => {
   let vite: ChildProcess | undefined;
   let browser: Browser | undefined;
   let page: Page | undefined;
