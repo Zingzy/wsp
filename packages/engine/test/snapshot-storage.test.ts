@@ -42,12 +42,33 @@ describe("retention plan", () => {
     expect(plan.savesUsdPerMonth).toBeCloseTo(15.8 * 0.05, 6);
   });
 
-  it("after a rollback and an update the head keeps the version it was built from, not the one rolled back from, and the rest of that branch is left alone", () => {
+  it("once an update seals a new head from the rolled-back version, the branch rolled back from is behind the head and offered as abandoned", () => {
     // v1 to v4, head rolled back to v2, then an update seals v5 from v2.
     const plan = retentionPlan(chained(5, [1, undefined], [2, 1], [3, 2], [4, 3], [5, 2]), [...rows, row("snap_v5", 9)], nobody, SNAPSHOT_STORAGE);
     expect(plan.keep.map(v => v.version)).toEqual([5, 2]);
-    expect(plan.drop.map(v => v.version)).toEqual([1]);
+    expect(plan.drop.map(v => v.version)).toEqual([1, 3, 4]);
+    expect(plan.abandoned.map(v => v.version)).toEqual([3, 4]);
+    expect(plan.guarded).toEqual([]);
     expect(plan.parentAssumed).toBe(false);
+    expect(plan.freedBytes).toBe((7.8 + 8.2 + 8.5) * GB);
+    expect(plan.savesUsdPerMonth).toBeCloseTo((7.8 + 8.2 + 8.5) * 0.05, 6);
+  });
+
+  it("an abandoned branch a workspace was forked from is guarded like an ancestor and stays out of the offer", () => {
+    const forkedFrom = (id: string): string[] => (id === "snap_v4" ? ["alpha"] : []);
+    const plan = retentionPlan(chained(5, [1, undefined], [2, 1], [3, 2], [4, 3], [5, 2]), [...rows, row("snap_v5", 9)], forkedFrom, SNAPSHOT_STORAGE);
+    expect(plan.keep.map(v => v.version)).toEqual([5, 2]);
+    expect(plan.drop.map(v => v.version)).toEqual([1, 3]);
+    expect(plan.abandoned.map(v => v.version)).toEqual([3]);
+    expect(plan.guarded.map(g => [g.version.version, g.workspaces])).toEqual([[4, ["alpha"]]]);
+    expect(plan.freedBytes).toBe((7.8 + 8.2) * GB);
+  });
+
+  it("a manifest whose head is not among its versions keeps nothing and offers nothing", () => {
+    const plan = retentionPlan(chained(9, [1, undefined], [2, 1]), rows, nobody, SNAPSHOT_STORAGE);
+    expect(plan.keep).toEqual([]);
+    expect(plan.drop).toEqual([]);
+    expect(plan.abandoned).toEqual([]);
   });
 
   it("versions sealed before parents were recorded chain by number, and the offer knows the kept parent was assumed", () => {
@@ -58,14 +79,16 @@ describe("retention plan", () => {
     // A recorded parent on the head alone settles the kept pair; the older hops still chain by number.
     const mixed = retentionPlan(chained(5, [1, undefined], [2, undefined], [3, undefined], [4, undefined], [5, 2]), rows, nobody, SNAPSHOT_STORAGE);
     expect(mixed.keep.map(v => v.version)).toEqual([5, 2]);
-    expect(mixed.drop.map(v => v.version)).toEqual([1]);
+    expect(mixed.drop.map(v => v.version)).toEqual([1, 3, 4]);
+    expect(mixed.abandoned.map(v => v.version)).toEqual([3, 4]);
     expect(mixed.parentAssumed).toBe(false);
   });
 
-  it("a recorded parent no longer in the manifest ends the chain: the head alone is kept and nothing is offered", () => {
+  it("a recorded parent no longer in the manifest ends the chain: the head alone is kept and the rest is abandoned", () => {
     const plan = retentionPlan(chained(3, [1, undefined], [3, 9]), rows, nobody, SNAPSHOT_STORAGE);
     expect(plan.keep.map(v => v.version)).toEqual([3]);
-    expect(plan.drop).toEqual([]);
+    expect(plan.drop.map(v => v.version)).toEqual([1]);
+    expect(plan.abandoned.map(v => v.version)).toEqual([1]);
     expect(plan.parentAssumed).toBe(false);
   });
 
@@ -92,10 +115,13 @@ describe("retention plan", () => {
     expect(plan.savesUsdPerMonth).toBe(0);
   });
 
-  it("after a rollback alone the versions above the head are neither kept nor offered", () => {
-    const plan = retentionPlan(manifest(2, 1, 2, 3, 4), rows, nobody, SNAPSHOT_STORAGE);
+  it("after a rollback alone the versions ahead of the head may still be rolled forward to: neither kept nor offered", () => {
+    const plan = retentionPlan(chained(2, [1, undefined], [2, 1], [3, 2], [4, 3]), rows, nobody, SNAPSHOT_STORAGE);
     expect(plan.keep.map(v => v.version)).toEqual([2, 1]);
     expect(plan.drop).toEqual([]);
+    expect(plan.abandoned).toEqual([]);
+    // The same over a manifest sealed before parents were recorded.
+    expect(retentionPlan(manifest(2, 1, 2, 3, 4), rows, nobody, SNAPSHOT_STORAGE).drop).toEqual([]);
   });
 
   it("a snapshot the listing does not carry counts as holding nothing", () => {
