@@ -58,6 +58,8 @@ const present = new Set([
   `${HOME}/.ssh/known_hosts`,
   `${HOME}/.ssh/keys`,
   `${HOME}/.zshrc`,
+  `${HOME}/.local/bin/deploy`,
+  `${HOME}/.local/bin/omp`,
   `${HOME}/.config/starship.toml`,
   `${HOME}/.oh-my-zsh/custom`,
   `${HOME}/Library/Application Support/Cursor/User/settings.json`,
@@ -98,7 +100,7 @@ const stat = (abs: string): PathInfo | undefined => {
     return { kind: "file", mode: 0o644, size: 7, mtimeMs: 7_000, realpath: target };
   }
   if (!present.has(abs)) return undefined;
-  const mode = isDir(abs) ? 0o755 : abs.includes("/.ssh/") || abs.endsWith("auth.json") || abs.endsWith("-token") || abs.endsWith("/.netrc") ? 0o600 : 0o644;
+  const mode = isDir(abs) || abs.includes("/.local/bin/") ? 0o755 : abs.includes("/.ssh/") || abs.endsWith("auth.json") || abs.endsWith("-token") || abs.endsWith("/.netrc") ? 0o600 : 0o644;
   return { kind: isDir(abs) ? "dir" : "file", mode, size: abs.length, mtimeMs: 1_000, realpath: abs };
 };
 const plan = (entries: RecipeEntry[], over: { platform?: "darwin" | "linux"; rewrites?: readonly [string, string][] } = {}) =>
@@ -133,6 +135,16 @@ describe("planFiles: which laptop files travel and where they land", () => {
       row({ rung: "logins", id: "logins/codex2", paths: ["~/.codex/auth.json"] }),
     ]);
     expect(p.files).toEqual([]);
+    expect(p.skipped).toEqual([]);
+  });
+
+  it("a hand-installed script or ELF is the one tools row that travels: as a copy with its execute bit; a macOS binary's row does not", () => {
+    const p = plan([
+      row({ rung: "tools", id: "tools/hand/deploy", paths: ["~/.local/bin/deploy"], bytes: 18, linux: "unknown" }),
+      row({ rung: "tools", id: "tools/hand/omp", paths: ["~/.local/bin/omp"], bytes: 122_000_000, linux: "no", default: "skip", reason: "installed by hand; no Linux build known" }),
+    ]);
+    expect(p.files).toEqual([{ id: "tools/hand/deploy", source: `${HOME}/.local/bin/deploy`, dest: ".local/bin/deploy", mode: 0o755, dir: false, excludes: [], volatile: false }]);
+    expect(p.rungs).toEqual({ tools: 1 });
     expect(p.skipped).toEqual([]);
   });
 
@@ -541,6 +553,16 @@ describe("brewfileFor", () => {
       { id: "tools/brew/mas", note: "no Linux bottle" },
       { id: "tools/brew-cask/rectangle", note: "macOS app, no Linux build" },
     ]);
+  });
+
+  it("a hand-installed row is no install: a macOS binary is noted as skipped, a copied script is neither installed nor skipped here", () => {
+    const t = toolInstallsFor([
+      row({ rung: "tools", id: "tools/hand/omp", linux: "no" }),
+      row({ rung: "tools", id: "tools/hand/deploy", paths: ["~/.local/bin/deploy"], bytes: 18, linux: "unknown" }),
+    ]);
+    expect(t.installs).toEqual([]);
+    expect(t.skipped).toEqual([{ id: "tools/hand/omp", note: "macOS binary, no Linux build" }]);
+    expect(toolUninstall(row({ rung: "tools", id: "tools/hand/deploy" }))).toEqual({ note: "a copied file; it comes off with the files" });
   });
 
   it("is empty when nothing Homebrew is ticked", () => {

@@ -102,6 +102,13 @@ describe("everything: the seven passes folded into rows", () => {
     expect(rows.find(r => r.name === ".qux/node_modules")).toMatchObject({ kind: "state" });
   });
 
+  it("a leftover binary the tools rung already lists is no row here", async () => {
+    const m = laptop({ path: ["~/.local/bin"], files: { "~/.local/bin/foo": 1_000, "~/.local/bin/bar": 1_000, "~/.config/foo/": 0 } });
+    const { rows } = await everything(m, { now: NOW, tools: ["foo"] });
+    expect(rows.map(r => r.id)).toContain("bin:bar");
+    expect(rows.map(r => r.id)).not.toContain("bin:foo");
+  });
+
   it("a binary on two PATH entries with an empty directory named for it is one bin row, resolved from the first entry", async () => {
     const m = laptop({ path: ["~/proj/node_modules/.bin", "~/proj/pkg/node_modules/.bin"], files: { "~/proj/node_modules/.bin/vitest": { bytes: 2_000, mode: 0o755 }, "~/proj/pkg/node_modules/.bin/vitest": { bytes: 2_000, mode: 0o755 }, "~/Library/Application Support/vitest/": 0 } });
     const { rows } = await everything(m, { now: NOW });

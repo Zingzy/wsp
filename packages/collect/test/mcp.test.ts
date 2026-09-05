@@ -142,6 +142,16 @@ describe("mcp servers", () => {
     ]);
   });
 
+  it("a command in ~/.local/bin that is installed by hand: a macOS binary locks the row off, a script travels with its Installed by hand row", async () => {
+    const gemini = JSON.stringify({ mcpServers: { memory: { command: "~/.local/bin/codebase-memory-mcp" }, notes: { command: "/Users/dev/.local/bin/notes-mcp", args: ["--v"] }, gone: { command: "~/.local/bin/gone-mcp" } } });
+    const rows = await detectMcp(fakeHost({ files: { "~/.gemini/settings.json": gemini }, bins: { "~/.local/bin/codebase-memory-mcp": { head: "mach-o", bytes: 30_000_000 }, "~/.local/bin/notes-mcp": { head: "#!/usr/bin/env node\n" } } }));
+    expect(rows.map(r => [r.id, r.default, r.reason, r.detail])).toEqual([
+      ["agents/mcp/gemini/memory", "skip", "command codebase-memory-mcp is a macOS binary installed by hand, will not run", "stdio: ~/.local/bin/codebase-memory-mcp; carries no secret"],
+      ["agents/mcp/gemini/notes", "bring", undefined, "stdio: ~/.local/bin/notes-mcp --v; needs notes-mcp on the machine; it travels as a copy when its row under Installed by hand is ticked; carries no secret"],
+      ["agents/mcp/gemini/gone", "bring", undefined, "stdio: ~/.local/bin/gone-mcp; needs gone-mcp on the machine; carries no secret"],
+    ]);
+  });
+
   it("a value after a secret-named flag, or inside a secret-named assignment, is a secret: hidden on the row and counted by size", async () => {
     const rows = await detectMcp(fakeHost({ files: { "~/.claude.json": JSON.stringify({ mcpServers: { s: { command: "npx", args: ["-y", "some-server", "--api-key", "sk-123", "--token=abcdef", "API_KEY=zzz"] } } }) } }));
     expect(rows.map(r => r.detail)).toEqual(["stdio: npx some-server --api-key … --token=… API_KEY=…; runs via npx; carries secrets: flag --api-key (6 B), flag --token (6 B), arg API_KEY (3 B)"]);

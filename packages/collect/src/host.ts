@@ -9,8 +9,18 @@ export interface Stat {
   bytes: number;
 }
 
+/** A bin directory entry as a file: where a link resolves, whether it runs, and its first bytes. */
+export interface Probe {
+  /** Absolute path the entry resolves to when it is a symlink. */
+  target?: string;
+  executable: boolean;
+  head: Uint8Array;
+}
+
 export interface HostFs {
   stat(path: string): Promise<Stat | undefined>;
+  /** The entry as a regular file, links followed; undefined for a directory, a dangling link or nothing. */
+  probe(path: string): Promise<Probe | undefined>;
   /** Names directly under dir; empty when dir is missing. */
   list(dir: string): Promise<string[]>;
   /** Only for files whose content is configuration, never a credential. */

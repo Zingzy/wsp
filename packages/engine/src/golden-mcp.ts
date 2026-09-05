@@ -76,7 +76,7 @@ export interface McpResult {
 const GUEST_HOME = "/root";
 const LINUXBREW = "/home/linuxbrew/.linuxbrew/";
 /** Rows whose last id segment is the binary they put on PATH; taps, casks and the toolchain install none. */
-const BINARY_ROW = /^tools\/(brew|go|cargo|npm|pnpm|bun|pipx|uv)\//;
+const BINARY_ROW = /^tools\/(brew|go|cargo|npm|pnpm|bun|pipx|uv|hand)\//;
 
 /** A row's agent, scope and server name from its id: `agents/mcp/<agent>/<name>`, or `agents/mcp/<agent>/home/<name>`. */
 function parseId(id: string): { agent: string; home: boolean; name: string } | undefined {

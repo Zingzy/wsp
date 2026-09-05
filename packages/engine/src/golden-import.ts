@@ -326,7 +326,7 @@ export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOption
   };
   const plan: FilesPlan = { files: [], secrets: [], skipped: [], bytes: 0, rungs: {} };
   for (const e of entries) {
-    if (!ticked(e) || e.rung === "tools") continue;
+    if (!ticked(e) || (e.rung === "tools" && !handCopy(e))) continue;
     if (e.rung === "logins" && e.choice !== "copy") continue;
     let brought = 0;
     for (const p of e.paths) {
@@ -491,6 +491,10 @@ export interface PlannedRoad {
 }
 
 const CLI_PREFIX = "tools/cli/";
+const HAND_PREFIX = "tools/hand/";
+
+/** A hand-installed script or Linux binary is the one tools row that travels as a file, into the same bin directory. */
+const handCopy = (e: RecipeEntry): boolean => e.id.startsWith(HAND_PREFIX) && e.linux !== "no";
 
 /** A command cask's road, from its paths as the collector wrote them: the release's `github.com/owner/repo@tag`
  * first, a Go binary's `module@version` last when one folded into the row. */
@@ -634,6 +638,8 @@ export function brewfileFor(entries: readonly RecipeEntry[], brew: BrewTable = n
       if (linuxCaskFor(e.id) === undefined) out.skipped.push({ id: e.id, note: "macOS app, no Linux build" });
     } else if (e.id.startsWith("tools/mas/")) {
       out.skipped.push({ id: e.id, note: "Mac App Store, macOS only" });
+    } else if (e.id.startsWith(HAND_PREFIX) && !handCopy(e)) {
+      out.skipped.push({ id: e.id, note: "macOS binary, no Linux build" });
     }
   }
   const lines = [...out.taps.map(t => `tap "${t}"`), ...out.formulae.map(f => `brew "${f}"`)];
@@ -749,6 +755,7 @@ export function toolUninstall(e: RecipeEntry): { cmd: string } | { note: string 
   if (cask !== undefined) return { cmd: withPath(cask.uninstall) };
   if (e.id.startsWith("tools/brew-cask/") || e.id.startsWith("tools/mas/")) return { note: "never installed on Linux" };
   if (e.id.startsWith(CLI_PREFIX)) return { cmd: withPath(`rm -f /usr/local/bin/${squote(e.id.slice(CLI_PREFIX.length))}`) };
+  if (e.id.startsWith(HAND_PREFIX)) return { note: "a copied file; it comes off with the files" };
   const manager = (["brew", ...MANAGER_ORDER] as const).find(m => e.id.startsWith(`tools/${m}/`));
   if (manager === undefined) return { note: "no manager known for this row" };
   const pkg = e.id.slice(`tools/${manager}/`.length);

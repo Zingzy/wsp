@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFile } from "node:child_process";
-import { access, constants, readdir, readFile, stat } from "node:fs/promises";
+import { access, constants, lstat, open, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import type { Host, HostExec, HostFs, Platform, Stat } from "./host.js";
+import type { Host, HostExec, HostFs, Platform, Probe, Stat } from "./host.js";
 
 const execFileP = promisify(execFile);
 
@@ -12,6 +12,8 @@ const execFileP = promisify(execFile);
 // lock is fine, its .git clones are not); their size would swamp the summary
 // and they are never uploaded.
 const SKIP_DIRS = new Set([".git", "node_modules"]);
+/** Enough for any magic number and a shebang line. */
+const PROBE_BYTES = 128;
 
 async function treeBytes(dir: string): Promise<number> {
   let total = 0;
@@ -48,6 +50,38 @@ export const nodeFs: HostFs = {
     if (s.isDirectory()) return { kind: "dir", bytes: await treeBytes(path) };
     if (s.isFile()) return { kind: "file", bytes: s.size };
     return undefined;
+  },
+  async probe(path): Promise<Probe | undefined> {
+    let s;
+    let target: string | undefined;
+    try {
+      if ((await lstat(path)).isSymbolicLink()) target = await realpath(path);
+      s = await stat(path);
+    } catch {
+      return undefined;
+    }
+    if (!s.isFile()) return undefined;
+    let executable = true;
+    try {
+      await access(path, constants.X_OK);
+    } catch {
+      executable = false;
+    }
+    const probe: Probe = { ...(target !== undefined ? { target } : {}), executable, head: new Uint8Array() };
+    let fh;
+    try {
+      fh = await open(path, "r");
+    } catch {
+      return probe;
+    }
+    try {
+      const buf = new Uint8Array(PROBE_BYTES);
+      const { bytesRead } = await fh.read(buf, 0, PROBE_BYTES, 0);
+      probe.head = buf.subarray(0, bytesRead);
+    } finally {
+      await fh.close();
+    }
+    return probe;
   },
   async list(dir) {
     try {
