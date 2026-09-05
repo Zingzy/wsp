@@ -460,7 +460,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": undefined,
     "source": {
       "images": 1,
-      "road": "measured",
+      "road": "unmeasured",
       "sessions": 1,
     },
     "status": "kubectl config current-context",

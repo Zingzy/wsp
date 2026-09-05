@@ -80,7 +80,7 @@ describe("catalog", () => {
     const unmeasured = CATALOG.filter(e => e.source.road === "unmeasured").map(e => e.id);
     expect(unmeasured).toEqual([
       "git", "gh", "curl", "jq", "ripgrep", "pnpm", "python", "uv", "docker", "agent-browser",
-      "rust", "maven", "wrangler", "cloudflared", "aws", "vercel", "netlify", "fly", "supabase", "railway", "doppler", "op", "ffmpeg", "yq", "git-lfs", "tmux",
+      "rust", "maven", "wrangler", "cloudflared", "kubectl", "aws", "vercel", "netlify", "fly", "supabase", "railway", "doppler", "op", "ffmpeg", "yq", "git-lfs", "tmux",
     ]);
     for (const e of CATALOG_AGENTS) expect(e.source.road, e.id).toBe("measured");
   });
