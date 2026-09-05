@@ -5,7 +5,7 @@
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it } from "vitest";
-import { LABEL_CAP, LOCKED_CAP, buildEntries, focusable, matches, readKey, rungSelect, settle as settleCursor, toggleEntry, type Entry, type SelectItem } from "../src/init-select.js";
+import { LABEL_CAP, LOCKED_CAP, buildEntries, cutDistinct, focusable, matches, readKey, rungSelect, settle as settleCursor, toggleEntry, type Entry, type SelectItem } from "../src/init-select.js";
 
 const KEY = { up: "\x1b[A", down: "\x1b[B", left: "\x1b[D", right: "\x1b[C", space: " ", enter: "\r", esc: "\x1b", ctrlC: "\x03" };
 
@@ -382,7 +382,7 @@ describe("rungSelect", () => {
     const rows = text().split("\n").filter(l => l.includes("●") || l.includes("○") || l.includes("▾"));
     expect(rows.length).toBe(5);
     expect(rows.map(l => l.length).filter(n => n > 60)).toEqual([]);
-    expect(rows.find(l => l.includes("aaaa"))).toMatch(/a…\s+1\.2 MB$/);
+    expect(rows.find(l => l.includes("aaaa"))).toMatch(/a…a+\s+1\.2 MB$/);
     // The second column is flush right: every filled second cell ends at the same column.
     const ends = rows.filter(l => /(MB|B|of \d+)$/.test(l)).map(l => l.length);
     expect(new Set(ends).size).toBe(1);
@@ -390,7 +390,7 @@ describe("rungSelect", () => {
     await p;
   });
 
-  it("one long label does not push the second column out: the label column stops at the cap and the label ends in an ellipsis", async () => {
+  it("one long label does not push the second column out: the label column stops at the cap and the label is cut in the middle", async () => {
     const items: SelectItem[] = [
       { id: "long", label: "g".repeat(78), group: "Go binaries", detail: [], hint: "1.2 MB" },
       { id: "short", label: "gopls", group: "Go binaries", detail: [], hint: "12 B" },
@@ -404,11 +404,87 @@ describe("rungSelect", () => {
     // Bar, space, marker, space, glyph, space, then the label column; the second column follows the gutter.
     const secondAt = 4 + 2 + LABEL_CAP + 2;
     const long = rows.find(l => l.includes("ggg"))!;
-    expect(long).toMatch(/^┃ {5}● g+…\s+1\.2 MB$/);
-    expect(long.indexOf("…")).toBe(secondAt - 3);
+    expect(long).toMatch(/^┃ {5}● g+…g+\s+1\.2 MB$/);
+    expect(long.indexOf("…")).toBe(8 + Math.floor((LABEL_CAP - 2 - 1) / 2));
+    expect(long.indexOf("1.2 MB") - long.lastIndexOf("g")).toBe(3);
     expect(long.indexOf("1.2 MB")).toBe(secondAt);
     expect(rows.find(l => l.includes("bat"))!.indexOf("3 KB")).toBe(secondAt + 2);
     expect(rows.map(l => l.length).filter(n => n > secondAt + 6)).toEqual([]);
+    await press(input, KEY.enter);
+    await p;
+  });
+
+  it("two labels that would read the same once cut keep the part where they differ, so no two rows on a screen render alike", async () => {
+    const a = ".mcp-auth/mcp-remote-0.1/e209b33186e466c19f1e7a229ab12345_tokens.json";
+    const b = ".mcp-auth/mcp-remote-0.1/e209b33186e466c19f1e7a229ab12345_client_info.json";
+    const c = ".mcp-auth/mcp-remote-0.1/e209b33186e466c19f1e7a229ab12345_tokens.json.bak";
+    // Ten characters: the tail alone would read the same for the two that end alike.
+    const same = ["alpha/one/deep/path/x/settings.json", "alpha/two/deep/path/x/settings.json"];
+    expect(cutDistinct(["short", a], () => 40)).toEqual(["short", ".mcp-auth/mcp-remot…9ab12345_tokens.json"]);
+    const cut = cutDistinct([a, b, c], () => 24);
+    expect(new Set(cut).size).toBe(3);
+    expect(cut.map(l => l.length)).toEqual([24, 24, 24]);
+    expect(cut.map(l => l.slice(-9))).toEqual(["kens.json", "info.json", ".json.bak"]);
+    expect(cutDistinct(same, () => 12)).toEqual(["…one/deep/pa", "…two/deep/pa"]);
+    expect(cutDistinct(same, () => 60)).toEqual(same);
+    // One label's tail is the other's whole tail: the cut moves to a window around where they first differ instead.
+    expect(cutDistinct(["a/bar/bar", "a/bar/bar/bar"], () => 8)).toEqual(["…bar", "…bar/bar"]);
+    const items: SelectItem[] = [
+      { id: "a", label: a, group: "~", detail: [] },
+      { id: "b", label: b, group: "~", detail: [] },
+      { id: "c", label: c, group: "~", detail: [] },
+    ];
+    const { input, output, text } = streams();
+    Object.assign(output, { columns: 60 });
+    const p = rungSelect({ title: "Everything else", counter: "8/8", items, initial: new Set(), input, output });
+    await settle();
+    const rows = text().split("\n").filter(l => /[●○] (?!all\b)/.test(l)).map(l => l.replace(/^.*[●○] /, "").trimEnd());
+    expect(rows).toHaveLength(3);
+    expect(new Set(rows).size).toBe(3);
+    expect(rows.every(r => r.endsWith("json") || r.endsWith("bak"))).toBe(true);
+    await press(input, KEY.enter);
+    await p;
+  });
+
+  it("a row's parent prefix renders dim while the row is highlighted, and the cut leaves it whole", async () => {
+    const was = process.env["FORCE_COLOR"];
+    process.env["FORCE_COLOR"] = "3";
+    try {
+      const items: SelectItem[] = [
+        { id: "arc", label: "Application Support/Arc", prefix: "Application Support/", group: "macOS app data", detail: [] },
+        { id: "ray", label: "Preferences/com.raycast.macos", prefix: "Preferences/", group: "macOS app data", detail: [] },
+      ];
+      const { input, output, raw, text } = streams();
+      Object.assign(output, { columns: 80 });
+      const p = rungSelect({ title: "Everything else", counter: "8/8", items, initial: new Set(), input, output });
+      await settle();
+      await press(input, KEY.down, KEY.down);
+      expect(raw()).toContain("\x1b[2mApplication Support/\x1b[22mArc");
+      expect(text()).toMatch(/❯ {3}○ Application Support\/Arc\n/);
+      expect(text()).toMatch(/┃ {5}○ Preferences\/com\.raycast\.macos\n/);
+      await press(input, KEY.enter);
+      await p;
+    } finally {
+      if (was === undefined) delete process.env["FORCE_COLOR"];
+      else process.env["FORCE_COLOR"] = was;
+    }
+  });
+
+  it("a group named in folded starts folded, and a group hint follows the count on its header", async () => {
+    const items: SelectItem[] = [
+      { id: "arc", label: "Arc", group: "macOS app data", detail: [], hint: "391 MB" },
+      { id: "clicky", label: "Clicky", group: "macOS app data", detail: [], hint: "2 KB" },
+      { id: "gh", label: "gh", group: "~/.config", detail: [], hint: "1 KB" },
+    ];
+    const { input, output, text, clear } = streams();
+    const p = rungSelect({ title: "Everything else", counter: "8/8", items, initial: new Set(), input, output, folded: ["macOS app data"], groupHint: g => (g === "macOS app data" ? "393 MB" : undefined) });
+    await settle();
+    expect(text()).toMatch(/▸ macOS app data\s+0 of 2 {2}393 MB\n/);
+    expect(text()).not.toContain("Arc");
+    expect(text()).toMatch(/▾ ~\/\.config\s+0 of 1\n/);
+    clear();
+    await press(input, KEY.down, KEY.right);
+    expect(text()).toContain("Arc");
     await press(input, KEY.enter);
     await p;
   });

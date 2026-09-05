@@ -11,7 +11,7 @@ import { detectTools } from "./detect/tools.js";
 import { type Lookup, lookup as catalogLookup } from "./catalog.js";
 import { everything } from "./everything/everything.js";
 import type { Machine } from "./everything/host.js";
-import { claimedPaths, entriesFor } from "./everything-entries.js";
+import { claimedPaths, entriesFor, rungPrograms } from "./everything-entries.js";
 import type { Host } from "./host.js";
 import { type Manifest, type ManifestEntry, RUNGS, type Rung, parseManifest } from "./manifest.js";
 
@@ -49,7 +49,7 @@ export async function collect(host: Host, opts: CollectOptions = {}): Promise<Ma
   if (opts.machine !== undefined) {
     let rows: ManifestEntry[] = [];
     try {
-      const found = await everything(opts.machine, { lookup: opts.lookup ?? catalogLookup, claimed: claimedPaths(entries) });
+      const found = await everything(opts.machine, { lookup: opts.lookup ?? catalogLookup, claimed: claimedPaths(entries), ...rungPrograms(entries) });
       rows = entriesFor(found.rows);
       // The row carrying an rc file, itself or the directory around it, learns which exported names its copy drops; values stay on the laptop.
       const under = (p: string, root: string): boolean => p === root || p.startsWith(`${root}/`);

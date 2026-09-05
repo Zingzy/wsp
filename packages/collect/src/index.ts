@@ -32,4 +32,5 @@ export { LARGE_BYTES, LARGE_FILES, isLarge, sizeGate } from "./everything/gate.j
 export { SPLIT_ENTRIES, SPLIT_MS, type Tree, WALK_ENTRIES, WALK_MS } from "./everything/walk.js";
 export { type Everything, type EverythingOptions, everything, noLookup } from "./everything/everything.js";
 export { nodeMachine, nodeMachineFs } from "./everything/node-machine.js";
-export { BY_HAND_GROUP, KEYCHAIN_GROUP, LARGE_GROUP, appDir, claimedPaths, entriesFor } from "./everything-entries.js";
+export { APP_DATA_GROUP, BY_HAND_GROUP, KEYCHAIN_GROUP, LARGE_GROUP, appDir, claimedPaths, entriesFor, locationOf, rungPrograms } from "./everything-entries.js";
+export { type Place, type Programs, configRoots, place, programs } from "./everything/location.js";

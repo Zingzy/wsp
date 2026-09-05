@@ -2,7 +2,7 @@
 // The Row to manifest-entry adapter, one case per kind and per flag, then the
 // grouping and the composition with the seven rungs over the fixture laptop.
 import { describe, expect, it } from "vitest";
-import { BY_HAND_GROUP, KEYCHAIN_GROUP, LARGE_GROUP, appDir, claimedPaths, entriesFor } from "../src/everything-entries.js";
+import { APP_DATA_GROUP, BY_HAND_GROUP, KEYCHAIN_GROUP, LARGE_GROUP, appDir, claimedPaths, entriesFor, locationOf, rungPrograms } from "../src/everything-entries.js";
 import type { Row } from "../src/everything/row.js";
 import { collect, parseManifest } from "../src/index.js";
 import { home, laptop } from "./everything/fixture.js";
@@ -23,12 +23,44 @@ const row = (over: Partial<Row> & Pick<Row, "id" | "name" | "kind">): Row => ({
 describe("entriesFor: one manifest row per found row", () => {
   const cases: { row: Row; want: Record<string, unknown> }[] = [
     {
-      row: row({ id: ".config/atuin", name: "atuin", kind: "config", owner: "homebrew", binary: "~/.local/bin/atuin", bytes: 2_048, files: 3 }),
-      want: { id: "everything/.config/atuin", label: "atuin", paths: ["~/.config/atuin"], bytes: 2_048, role: "config", files: 3, detail: "looks like config; installed by homebrew; config for ~/.local/bin/atuin" },
+      row: row({ id: ".config/atuin", name: "atuin", kind: "config", owner: "homebrew", tool: "atuin", bytes: 2_048, files: 3 }),
+      want: { id: "everything/.config/atuin", label: "atuin", group: "~/.config", paths: ["~/.config/atuin"], bytes: 2_048, role: "config", files: 3, detail: "looks like config; config for atuin; installed by homebrew" },
     },
     {
-      row: row({ id: ".docker", name: "docker", kind: "config", owner: "app", binary: "/usr/local/bin/docker" }),
-      want: { detail: "looks like config; installed as a macOS app; config for docker" },
+      row: row({ id: ".docker", name: ".docker", kind: "config", owner: "app", tool: "docker" }),
+      want: { detail: "looks like config; config for docker; installed as a macOS app" },
+    },
+    {
+      row: row({ id: ".claude", name: ".claude", kind: "config", tool: "claude", binary: "~/.local/bin/claude" }),
+      want: { detail: "looks like config; config for claude; its program ~/.local/bin/claude was installed by hand" },
+    },
+    {
+      row: row({ id: "Library/Application Support/GitKrakenCLI", name: "GitKrakenCLI", kind: "config", tool: "gk", owner: "homebrew" }),
+      want: { detail: "looks like config; config for gk; installed by homebrew" },
+    },
+    {
+      row: row({ id: ".config/mystery", name: "mystery", kind: "unknown" }),
+      want: { detail: "in ~/.config; no installed tool has its name" },
+    },
+    {
+      row: row({ id: "Library/Application Support/Arc", name: "Arc", kind: "app-data", tool: "Arc", bytes: 400_000 }),
+      want: { group: APP_DATA_GROUP, label: "Application Support/Arc", role: "app-data", detail: "data of the macOS app Arc; nothing on a Linux machine reads it" },
+    },
+    {
+      row: row({ id: "Library/Application Support/com.docker.install", name: "com.docker.install", kind: "app-data", bytes: 2_000_000_000, files: 3000, flags: ["large"] }),
+      want: { group: APP_DATA_GROUP, label: "Application Support/com.docker.install", detail: "data of a macOS app; nothing on a Linux machine reads it; large; never copied without a tick" },
+    },
+    {
+      row: row({ id: "Library/Application Support/com.docker.install/Cache", name: "com.docker.install/Cache", kind: "app-data" }),
+      want: { group: APP_DATA_GROUP, label: "Application Support/com.docker.install/Cache", detail: "data of a macOS app; nothing on a Linux machine reads it" },
+    },
+    {
+      row: row({ id: "Library/Application Support/gh-dash", name: "gh-dash", kind: "app-data" }),
+      want: { group: APP_DATA_GROUP, label: "Application Support/gh-dash", detail: "in ~/Library/Application Support; no installed tool has its name; macOS apps keep their data here" },
+    },
+    {
+      row: row({ id: "Library/Preferences/com.raycast.macos", name: "com.raycast.macos", kind: "app-data" }),
+      want: { group: APP_DATA_GROUP, label: "Preferences/com.raycast.macos", detail: "data of a macOS app; nothing on a Linux machine reads it" },
     },
     {
       row: row({ id: ".hermes", name: ".hermes", kind: "unknown", flags: ["credential"], excludes: ["~/.hermes/auth.json"] }),
@@ -110,15 +142,23 @@ describe("entriesFor: one manifest row per found row", () => {
     expect(parseManifest({ entries: [e] }).entries[0]).toEqual(e);
   });
 
-  it("groups by app directory when two or more rows share one, keeps single rows bare, and puts the large and never-copied groups last", () => {
+  it("groups by location, then by app directory in HOME when two or more rows share one, then app data, large and what never copies", () => {
     const entries = entriesFor([
       row({ id: ".aside", name: ".aside", kind: "unknown", flags: ["credential"] }),
       row({ id: ".aside/cache", name: ".aside/cache", kind: "cache" }),
       row({ id: ".aside/credentials.json", name: ".aside/credentials.json", kind: "credential", flags: ["credential"] }),
-      row({ id: ".aside/state", name: ".aside/state", kind: "state", flags: ["large"] }),
+      row({ id: ".aside/state", name: "state files in ~/.aside", kind: "state", paths: ["~/.aside/logs", "~/.aside/sessions"], flags: ["large"] }),
       row({ id: ".config/gh/config.yml", name: "gh/config.yml", kind: "config" }),
       row({ id: ".config/gh/hosts.yml", name: "gh/hosts.yml", kind: "credential", flags: ["credential"] }),
+      row({ id: ".config/raycast/extensions", name: "raycast/extensions", kind: "state", flags: ["large"] }),
       row({ id: ".local/share/nvim/site", name: "nvim/site", kind: "state" }),
+      row({ id: ".local/state", name: "state", kind: "state" }),
+      row({ id: "Library/Application Support/lazydocker", name: "lazydocker", kind: "config", tool: "lazydocker" }),
+      row({ id: "Library/Application Support/Arc", name: "Arc", kind: "app-data", tool: "Arc" }),
+      row({ id: "Library/Application Support/Arc/Cache", name: "Arc/Cache", kind: "app-data", flags: ["large"] }),
+      row({ id: "Library/Preferences/com.raycast.macos", name: "com.raycast.macos", kind: "app-data" }),
+      row({ id: "Library/Preferences/.wrangler/config/default.toml", name: ".wrangler/config/default.toml", kind: "credential", flags: ["credential"] }),
+      row({ id: "Library/Caches", name: "Caches", kind: "cache", measured: "none" }),
       row({ id: ".bashrc", name: ".bashrc", kind: "unknown" }),
       row({ id: "bin:omp", name: "omp", kind: "unknown", paths: [], binary: "~/.local/bin/omp" }),
       row({ id: "keychain:Raycast", name: "Raycast", kind: "device-bound-login", paths: [] }),
@@ -130,12 +170,20 @@ describe("entriesFor: one manifest row per found row", () => {
       [".aside/cache", ".aside"],
       [".aside/credentials.json", ".aside"],
       [".bashrc", undefined],
-      ["gh/config.yml", ".config/gh"],
-      ["gh/hosts.yml", ".config/gh"],
-      ["nvim/site", undefined],
+      ["gh/config.yml", "~/.config"],
+      ["gh/hosts.yml", "~/.config"],
+      ["nvim/site", "~/.local/share"],
+      ["state", "~/.local"],
+      ["lazydocker", "~/Library/Application Support"],
+      [".wrangler/config/default.toml", "~/Library/Preferences"],
+      ["Caches", "~/Library"],
+      ["Application Support/Arc", APP_DATA_GROUP],
+      ["Application Support/Arc/Cache", APP_DATA_GROUP],
+      ["Preferences/com.raycast.macos", APP_DATA_GROUP],
       [".aaa-big", LARGE_GROUP],
-      [".aside/state", LARGE_GROUP],
+      [".config/raycast/extensions", LARGE_GROUP],
       [".zz-big", LARGE_GROUP],
+      ["state files in ~/.aside", LARGE_GROUP],
       ["Raycast", KEYCHAIN_GROUP],
       ["omp", BY_HAND_GROUP],
     ]);
@@ -144,6 +192,7 @@ describe("entriesFor: one manifest row per found row", () => {
     expect(appDir("~/.zshrc")).toBe(".zshrc");
     expect(appDir("~/Library/Application Support/Code/User/settings.json")).toBe("Library/Application Support/Code");
     expect(appDir("~/Library/Preferences/.wrangler/config")).toBe("Library/Preferences/.wrangler");
+    expect(["~/.config/gh", "~/.local/share/nvim", "~/.local/state", "~/Library/Application Support/Arc/x", "~/Library/Preferences/.w", "~/Library/Caches", "~/.zshrc", "~/.hermes/auth.json"].map(locationOf)).toEqual(["~/.config", "~/.local/share", "~/.local", "~/Library/Application Support", "~/Library/Preferences", "~/Library", undefined, undefined]);
   });
 });
 
@@ -158,6 +207,20 @@ describe("claimedPaths", () => {
       { rung: "everything", paths: ["~/.hermes"] },
     ]);
     expect([...claimed].sort()).toEqual(["Keychain: gh:github.com", "~/.config/gh/hosts.yml", "~/.gitconfig", "~/.zshenv", "~/.zshrc"]);
+  });
+});
+
+describe("rungPrograms", () => {
+  it("splits the tools rung into command line tools and macOS apps by the id's kind", () => {
+    expect(rungPrograms([
+      { rung: "tools", id: "tools/brew/gh-dash" },
+      { rung: "tools", id: "tools/brew-tap/homebrew/cask" },
+      { rung: "tools", id: "tools/brew-cask/iterm2" },
+      { rung: "tools", id: "tools/mas/Xcode" },
+      { rung: "tools", id: "tools/npm/@anthropic-ai/claude-code" },
+      { rung: "tools", id: "tools/nix-home-manager" },
+      { rung: "shell", id: "shell/zshrc" },
+    ])).toEqual({ tools: ["gh-dash", "homebrew/cask", "@anthropic-ai/claude-code"], apps: ["iterm2", "Xcode"] });
   });
 });
 

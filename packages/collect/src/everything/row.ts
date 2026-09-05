@@ -3,7 +3,8 @@
 // screen lists these unticked; the catalog and the person decide.
 import { z } from "zod";
 
-export const KINDS = ["config", "state", "cache", "credential", "device-bound-login", "unknown"] as const;
+/** app-data: a macOS app's files under ~/Library, which nothing on a Linux machine reads. */
+export const KINDS = ["config", "state", "cache", "credential", "device-bound-login", "app-data", "unknown"] as const;
 export const Kind = z.enum(KINDS);
 export type Kind = z.infer<typeof Kind>;
 
@@ -43,6 +44,8 @@ export const Row = z.object({
   measured: Measured,
   /** Who installed the binary this row belongs to, from the provenance pass. */
   owner: z.string().optional(),
+  /** The program the row is named for: a PATH binary, a tools rung row, a catalog app or a macOS app. */
+  tool: z.string().optional(),
   flags: z.array(Flag),
   ticked: z.boolean(),
   /** Set on the row that is a dotfiles manager's home. */
