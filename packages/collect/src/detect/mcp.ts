@@ -7,7 +7,7 @@
 import { createHash } from "node:crypto";
 import { MCP_ID_PREFIX } from "@wsp/protocol";
 import { type Host, expand } from "../host.js";
-import type { ManifestEntry } from "../manifest.js";
+import type { GroupNote, ManifestEntry } from "../manifest.js";
 import { isSecretName } from "../everything/shell-rc.js";
 
 /** The row that carries mcp-remote's saved browser sign-ins for every agent. */
@@ -22,18 +22,20 @@ export interface McpConfig {
   format: McpFormat;
   /** `~/`-relative; the first that exists is read. */
   files: readonly string[];
+  /** The scopes the read covers, shown on the group's heading; every agent's docs also give a project scope this file does not read. */
+  scope: string;
 }
 
 /** Where each agent keeps its user-wide MCP definitions, per its own docs. */
 export const MCP_CONFIGS: readonly McpConfig[] = [
   // https://docs.claude.com/en/docs/claude-code/mcp (user scope; project scope lives in each repo's .mcp.json)
-  { agent: "claude", label: "Claude Code", format: "claude", files: ["~/.claude.json"] },
-  // https://github.com/openai/codex/blob/main/docs/config.md#mcp_servers
-  { agent: "codex", label: "Codex", format: "codex", files: ["~/.codex/config.toml"] },
-  // https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md
-  { agent: "gemini", label: "Gemini CLI", format: "gemini", files: ["~/.gemini/settings.json"] },
-  // https://opencode.ai/docs/mcp-servers/
-  { agent: "opencode", label: "OpenCode", format: "opencode", files: ["~/.config/opencode/opencode.json", "~/.config/opencode/opencode.jsonc"] },
+  { agent: "claude", label: "Claude Code", format: "claude", files: ["~/.claude.json"], scope: "user scope and your home folder" },
+  // https://developers.openai.com/codex/config-basic (project scope is a trusted repo's .codex/config.toml)
+  { agent: "codex", label: "Codex", format: "codex", files: ["~/.codex/config.toml"], scope: "user scope" },
+  // https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md (project scope is a repo's .gemini/settings.json)
+  { agent: "gemini", label: "Gemini CLI", format: "gemini", files: ["~/.gemini/settings.json"], scope: "user scope" },
+  // https://opencode.ai/docs/mcp-servers/ (project scope is a repo's opencode.json)
+  { agent: "opencode", label: "OpenCode", format: "opencode", files: ["~/.config/opencode/opencode.json", "~/.config/opencode/opencode.jsonc"], scope: "user scope" },
 ];
 
 export type McpTransport =
@@ -477,6 +479,8 @@ async function carried(host: Host, server: McpServer, format: McpFormat, remoteT
   return out;
 }
 
+const mcpGroup = (config: McpConfig): string => `${config.label} MCP servers`;
+
 function serverRow(config: McpConfig, server: McpServer, fit: LinuxFit, deps: HomeDeps, c: Carried, home: string): ManifestEntry {
   const id = `${MCP_ID_PREFIX}${config.agent}/${server.scope === "home" ? "home/" : ""}${server.name}`;
   const reason = fit.ok ? undefined : fit.reason;
@@ -492,7 +496,7 @@ function serverRow(config: McpConfig, server: McpServer, fit: LinuxFit, deps: Ho
     rung: "agents",
     id,
     label: server.name,
-    group: `${config.label} MCP servers`,
+    group: mcpGroup(config),
     paths: c.paths,
     bytes: c.bytes,
     default: reason === undefined && !deps.gone ? "bring" : "skip",
@@ -543,6 +547,16 @@ function remoteRow(store: RemoteStore, matched: readonly string[]): ManifestEntr
   };
 }
 
+/** The text of the first of an agent's config files that is here. */
+async function configText(host: Host, config: McpConfig): Promise<string | undefined> {
+  for (const file of config.files) {
+    if ((await host.fs.stat(expand(host, file)))?.kind !== "file") continue;
+    const text = await host.fs.readText(expand(host, file));
+    if (text !== undefined) return text;
+  }
+  return undefined;
+}
+
 /** One row per MCP server under its agent, then the mcp-remote sign-in store when there is one. */
 export async function detectMcp(host: Host): Promise<ManifestEntry[]> {
   const store = await remoteStore(host);
@@ -550,12 +564,7 @@ export async function detectMcp(host: Host): Promise<ManifestEntry[]> {
   const rows: ManifestEntry[] = [];
   const matched: string[] = [];
   for (const config of MCP_CONFIGS) {
-    let text: string | undefined;
-    for (const file of config.files) {
-      if ((await host.fs.stat(expand(host, file)))?.kind !== "file") continue;
-      text = await host.fs.readText(expand(host, file));
-      if (text !== undefined) break;
-    }
+    const text = await configText(host, config);
     if (text === undefined) continue;
     for (const server of parseMcp(config.format, text, host.home)) {
       const fit = linuxFit(server, host.home);
@@ -568,4 +577,54 @@ export async function detectMcp(host: Host): Promise<ManifestEntry[]> {
   }
   if (store !== undefined) rows.push(remoteRow(store, matched));
   return rows;
+}
+
+// --- what the list leaves out ------------------------------------------------------
+
+interface LeftOut {
+  servers: number;
+  folders: number;
+}
+
+const claudeNames = (raw: unknown): string[] => (isObject(raw) ? Object.entries(raw).filter(([name, def]) => fromClaudeLike(name, def, "user") !== undefined).map(([name]) => name) : []);
+
+/** Servers Claude Code reads only inside a project folder: a project entry's own list (the home folder's is on
+ * the rows) and the .mcp.json in that folder. Only the folders ~/.claude.json names are looked at. */
+async function claudeLeftOut(host: Host, root: Record<string, unknown>): Promise<LeftOut> {
+  const out: LeftOut = { servers: 0, folders: 0 };
+  if (!isObject(root.projects)) return out;
+  for (const [folder, project] of Object.entries(root.projects)) {
+    if (!folder.startsWith("/")) continue;
+    const names = new Set(folder === host.home || !isObject(project) ? [] : claudeNames(project.mcpServers));
+    const file = `${folder}/.mcp.json`;
+    if ((await host.fs.stat(file))?.kind === "file") {
+      const text = await host.fs.readText(file);
+      for (const name of claudeNames((text === undefined ? undefined : parseJson(text))?.mcpServers)) names.add(name);
+    }
+    if (names.size === 0) continue;
+    out.servers += names.size;
+    out.folders += 1;
+  }
+  return out;
+}
+
+/** What each agent's group covers, for the groups that have rows; Claude Code's also counts the project-scoped
+ * servers it leaves out. */
+export async function mcpGroups(host: Host, rows: readonly ManifestEntry[]): Promise<GroupNote[]> {
+  const out: GroupNote[] = [];
+  for (const config of MCP_CONFIGS) {
+    const group = mcpGroup(config);
+    if (!rows.some(r => r.group === group)) continue;
+    const note: GroupNote = { rung: "agents", group, hint: config.scope };
+    if (config.format === "claude") {
+      const text = await configText(host, config);
+      const root = text === undefined ? undefined : parseJson(text);
+      const left = root === undefined ? undefined : await claudeLeftOut(host, root);
+      if (left !== undefined && left.servers > 0) {
+        note.note = `${left.servers} more in ${left.folders} project folder${left.folders === 1 ? "" : "s"}, not listed: a repo's .mcp.json travels with the repo; ~/.claude.json project entries stay on this computer`;
+      }
+    }
+    out.push(note);
+  }
+  return out;
 }

@@ -40,6 +40,7 @@ export type Entry =
   | { type: "bullet"; item: SelectItem }
   | { type: "more"; count: number }
   | { type: "group"; group: string; items: SelectItem[]; folded: boolean }
+  | { type: "note"; text: string }
   | { type: "item"; item: SelectItem };
 
 export interface RungSelectOptions {
@@ -60,6 +61,8 @@ export interface RungSelectOptions {
   folded?: readonly string[];
   /** A second cell after a group header's count: its size, on a screen whose rows carry one. */
   groupHint?: (group: string, items: readonly SelectItem[]) => string | undefined;
+  /** One dim line under a group, after its rows whether folded or not: what the list leaves out. */
+  groupNote?: (group: string) => string | undefined;
   input?: Readable;
   output?: Writable;
 }
@@ -94,7 +97,7 @@ export function matches(item: SelectItem, query: string): boolean {
 
 export const focusable = (e: Entry): boolean => e.type === "all" || e.type === "group" || e.type === "item";
 
-export function buildEntries(items: readonly SelectItem[], query: string, folded: ReadonlySet<string>): Entry[] {
+export function buildEntries(items: readonly SelectItem[], query: string, folded: ReadonlySet<string>, noteOf?: (group: string) => string | undefined): Entry[] {
   const shown = items.filter(i => matches(i, query));
   const locked = shown.filter(i => i.lock === "on");
   const rest = shown.filter(i => i.lock !== "on");
@@ -120,6 +123,8 @@ export function buildEntries(items: readonly SelectItem[], query: string, folded
     const isFolded = folded.has(group);
     out.push({ type: "group", group, items: members, folded: isFolded });
     if (!isFolded) for (const m of members) out.push({ type: "item", item: m });
+    const note = noteOf?.(group);
+    if (note !== undefined && note !== "") out.push({ type: "note", text: note });
   }
   return out;
 }
@@ -170,6 +175,7 @@ export function toggleEntry(ticks: Set<string>, entry: Entry, items: readonly Se
     case "locked":
     case "bullet":
     case "more":
+    case "note":
       return;
     default: {
       const _exhaustive: never = entry;
@@ -287,7 +293,7 @@ class RungPrompt extends Prompt<Set<string>> {
   }
 
   private entries(): Entry[] {
-    return buildEntries(this.o.items, this.userInput, this.folded);
+    return buildEntries(this.o.items, this.userInput, this.folded, this.o.groupNote);
   }
 
   private ticks(): Set<string> {
@@ -416,6 +422,10 @@ class RungPrompt extends Prompt<Set<string>> {
         return this.line(dim("•"), label(entry.item), entry.item.hint ?? "", 2, cols, false, false);
       case "more":
         return `      ${dim(`…and ${entry.count} more`)}`;
+      case "note":
+        return wrap(entry.text, width - EDGE - 4, "")
+          .map(l => `      ${dim(l)}`)
+          .join("\n");
       case "group":
         return this.line(entry.folded ? "▸" : "▾", entry.group, this.groupSecond(entry.group, entry.items), 0, cols, current, true);
       case "item": {
@@ -473,7 +483,8 @@ class RungPrompt extends Prompt<Set<string>> {
     const footer = this.o.footer?.(this.ticks()) ?? [];
     const intro = (this.o.intro ?? []).flatMap(line => wrap(line, width - EDGE));
     // One row is left for the terminal's cursor line; a list that does not fit gives two more rows to the arrows.
-    const room = rowsOf(this.o.output) - 1 - FIXED_LINES - intro.length - detail.length - footer.length;
+    const wrapped = entries.reduce((n, e) => n + (e.type === "note" ? wrap(e.text, width - EDGE - 4, "").length - 1 : 0), 0);
+    const room = rowsOf(this.o.output) - 1 - FIXED_LINES - intro.length - detail.length - footer.length - wrapped;
     const { start, end } = viewport(entries.length, this.cursor, entries.length <= room ? entries.length : room - 2);
     const cols = this.columns(width);
     const cuts = this.cuts(cols);
@@ -486,7 +497,7 @@ class RungPrompt extends Prompt<Set<string>> {
     if (this.o.items.length === 0) lines.push(`${bar}  ${dim("nothing found")}`);
     else if (entries.length === 0) lines.push(`${bar}  ${dim("no match")}`);
     if (start > 0) lines.push(`${bar}  ${dim(`↑ ${start} more`)}`);
-    for (let i = start; i < end; i++) lines.push(`${bar} ${this.row(entries[i]!, i === this.cursor, cols, width, cuts)}`);
+    for (let i = start; i < end; i++) for (const l of this.row(entries[i]!, i === this.cursor, cols, width, cuts).split("\n")) lines.push(`${bar} ${l}`);
     if (end < entries.length) lines.push(`${bar}  ${dim(`↓ ${entries.length - end} more`)}`);
     lines.push(bar);
     for (const d of detail) lines.push(`${bar}  ${dim(ellipsize(d, width - EDGE))}`.trimEnd());

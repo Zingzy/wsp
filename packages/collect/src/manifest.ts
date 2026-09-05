@@ -102,7 +102,18 @@ export const ManifestEntry = Fields.superRefine((e, ctx) => {
 });
 export type ManifestEntry = z.infer<typeof ManifestEntry>;
 
-export const Manifest = z.object({ entries: z.array(ManifestEntry) }).superRefine((m, ctx) => {
+/** A fact about a group of rows that no one row carries: what the list covers and what it leaves out. */
+export const GroupNote = z.object({
+  rung: Rung,
+  group: z.string().min(1),
+  /** Beside the header's count: which scope the rows come from. */
+  hint: z.string().min(1).optional(),
+  /** One dim line under the group's rows: what the list leaves out and why. */
+  note: z.string().min(1).optional(),
+});
+export type GroupNote = z.infer<typeof GroupNote>;
+
+export const Manifest = z.object({ entries: z.array(ManifestEntry), groups: z.array(GroupNote).optional() }).superRefine((m, ctx) => {
   const seen = new Set<string>();
   m.entries.forEach((e, i) => {
     if (seen.has(e.id)) {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { detectMcp, linuxFit, mcpRemoteHash, parseCodexMcp, parseMcp, type McpServer } from "../src/index.js";
+import { detectMcp, linuxFit, mcpGroups, mcpRemoteHash, parseCodexMcp, parseMcp, type McpServer } from "../src/index.js";
 import { fakeHost } from "./fake-host.js";
 
 const HOME = "/Users/dev";
@@ -214,5 +214,57 @@ describe("mcp servers", () => {
       createHash("md5").update(`${NOTION}|https://r.example|${JSON.stringify({ a: "1", b: "2" })}|${JSON.stringify({ K: "v" })}|https://m.example/c.json`).digest("hex"),
     );
     expect(mcpRemoteHash(["-y", "@scope/other", NOTION])).toBeUndefined();
+  });
+});
+
+const CLAUDE_GROUP = "Claude Code MCP servers";
+const CLAUDE_SCOPE = "user scope and your home folder";
+const mcpJson = (...names: string[]): string => JSON.stringify({ mcpServers: Object.fromEntries(names.map(n => [n, { type: "http", url: `https://${n}.example/mcp` }])) });
+
+describe("mcp groups", () => {
+  it("user scope only: the group says what it covers and leaves nothing out", async () => {
+    const host = fakeHost({ files: { "~/.claude.json": claudeJson({ projects: {} }) } });
+    expect(await mcpGroups(host, await detectMcp(host))).toEqual([{ rung: "agents", group: CLAUDE_GROUP, hint: CLAUDE_SCOPE }]);
+  });
+
+  it("home scope only: the same words, since the home folder's project entry is what the list reads", async () => {
+    const home = { [HOME]: { mcpServers: { zomato: { command: "npx", args: ["mcp-remote", "https://mcp.zomato.com/mcp"] } } } };
+    const host = fakeHost({ files: { "~/.claude.json": claudeJson({ mcpServers: {}, projects: home }) } });
+    const rows = await detectMcp(host);
+    expect(rows.map(r => r.id)).toEqual(["agents/mcp/claude/home/zomato"]);
+    expect(await mcpGroups(host, rows)).toEqual([{ rung: "agents", group: CLAUDE_GROUP, hint: CLAUDE_SCOPE }]);
+  });
+
+  it("another project entry's servers are counted as left out, with the folder", async () => {
+    const host = fakeHost({ files: { "~/.claude.json": claudeJson() } });
+    expect(await mcpGroups(host, await detectMcp(host))).toEqual([
+      { rung: "agents", group: CLAUDE_GROUP, hint: CLAUDE_SCOPE, note: "1 more in 1 project folder, not listed: a repo's .mcp.json travels with the repo; ~/.claude.json project entries stay on this computer" },
+    ]);
+  });
+
+  it("a repo .mcp.json is looked for only in the folders the project entries name, its names joined with the entry's", async () => {
+    const host = fakeHost({
+      files: {
+        "~/.claude.json": claudeJson({ projects: { ...JSON.parse(claudeJson()).projects, [`${HOME}/spoo`]: { allowedTools: [] }, [`${HOME}/gone`]: { mcpServers: { d: {} } } } }),
+        "~/code/mono/.mcp.json": mcpJson("linear", "sentry"),
+        "~/spoo/.mcp.json": mcpJson("axiom", "clarity", "gmail"),
+        "~/.mcp.json": mcpJson("athome"),
+        "~/elsewhere/.mcp.json": mcpJson("never", "read"),
+      },
+    });
+    const rows = await detectMcp(host);
+    expect(await mcpGroups(host, rows)).toEqual([
+      { rung: "agents", group: CLAUDE_GROUP, hint: CLAUDE_SCOPE, note: "6 more in 3 project folders, not listed: a repo's .mcp.json travels with the repo; ~/.claude.json project entries stay on this computer" },
+    ]);
+    // Nothing outside the named folders is opened, and no whole-disk walk happens.
+    expect(host.calls.filter(c => c.startsWith("read ")).slice(1)).toEqual([`read ${HOME}/.claude.json`, `read ${HOME}/.mcp.json`, `read ${HOME}/code/mono/.mcp.json`, `read ${HOME}/spoo/.mcp.json`]);
+  });
+
+  it("no group, no note: nothing configured, only project-scoped servers, or a user-wide agent's config alone", async () => {
+    expect(await mcpGroups(fakeHost(), [])).toEqual([]);
+    const projectsOnly = fakeHost({ files: { "~/.claude.json": claudeJson({ mcpServers: {}, projects: { [`${HOME}/code/mono`]: { mcpServers: { linear: { url: "https://l" } } } } }) } });
+    expect(await mcpGroups(projectsOnly, await detectMcp(projectsOnly))).toEqual([]);
+    const codex = fakeHost({ files: { "~/.codex/config.toml": '[mcp_servers.linear]\nurl = "https://mcp.linear.app/sse"\n' } });
+    expect(await mcpGroups(codex, await detectMcp(codex))).toEqual([{ rung: "agents", group: "Codex MCP servers", hint: "user scope" }]);
   });
 });

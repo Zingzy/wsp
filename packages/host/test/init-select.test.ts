@@ -59,6 +59,8 @@ const shape = (entries: Entry[]): string[] =>
         return `#${e.group}`;
       case "item":
         return e.item.id;
+      case "note":
+        return `~${e.text}`;
     }
   });
 
@@ -485,6 +487,24 @@ describe("rungSelect", () => {
     clear();
     await press(input, KEY.down, KEY.right);
     expect(text()).toContain("Arc");
+    await press(input, KEY.enter);
+    await p;
+  });
+
+  it("a group note is one dim line under the group's rows, folded or not, and takes no focus", async () => {
+    const noteOf = (g: string): string | undefined => (g === "Homebrew" ? "2 more elsewhere, not listed" : undefined);
+    expect(shape(buildEntries(ITEMS, "", new Set(), noteOf))).toEqual([
+      "!", "•git", "*", "#Homebrew", "gh", "jq", "~2 more elsewhere, not listed", "#npm globals", "pnpm", "#Homebrew casks", "rectangle", "zshrc",
+    ]);
+    expect(shape(buildEntries(ITEMS, "", new Set(["Homebrew"]), noteOf))).toEqual([
+      "!", "•git", "*", "#Homebrew", "~2 more elsewhere, not listed", "#npm globals", "pnpm", "#Homebrew casks", "rectangle", "zshrc",
+    ]);
+    expect(shape(buildEntries(ITEMS, "pnpm", new Set(), noteOf))).toEqual(["#npm globals", "pnpm"]);
+    expect(buildEntries(ITEMS, "", new Set(), noteOf).map(focusable)).toEqual([false, false, true, true, true, true, false, true, true, true, true, true]);
+    const { input, output, text } = streams();
+    const p = rungSelect({ title: "Tools", counter: "5/7", items: ITEMS, initial: new Set(), input, output, groupHint: g => (g === "Homebrew" ? "user scope" : undefined), groupNote: noteOf });
+    await settle();
+    expect(text()).toMatch(/▾ Homebrew\s+0 of 2 {2}user scope\n┃ {5}○ gh\n┃ {5}○ jq\n┃ {7}2 more elsewhere, not listed\n┃ {3}▾ npm globals/);
     await press(input, KEY.enter);
     await p;
   });

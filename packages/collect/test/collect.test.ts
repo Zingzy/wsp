@@ -72,4 +72,13 @@ describe("collect", () => {
   it("an empty laptop is an empty manifest", async () => {
     expect(await collect(fakeHost())).toEqual({ entries: [] });
   });
+
+  it("a group's scope and what it leaves out ride on the manifest beside the rows", async () => {
+    const claude = JSON.stringify({ mcpServers: { notion: { url: "https://mcp.notion.com/mcp" } }, projects: { "/Users/dev/code/mono": { mcpServers: { linear: { url: "https://mcp.linear.app/sse" } } } } });
+    const manifest = await collect(fakeHost({ files: { "~/.claude.json": claude } }));
+    expect(manifest.groups).toEqual([
+      { rung: "agents", group: "Claude Code MCP servers", hint: "user scope and your home folder", note: "1 more in 1 project folder, not listed: a repo's .mcp.json travels with the repo; ~/.claude.json project entries stay on this computer" },
+    ]);
+    expect(parseManifest(manifest)).toEqual(manifest);
+  });
 });

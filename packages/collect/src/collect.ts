@@ -4,7 +4,7 @@ import type { Detector } from "./detect/common.js";
 import { detectEditors } from "./detect/editors.js";
 import { detectIdentity } from "./detect/identity.js";
 import { detectLogins } from "./detect/logins.js";
-import { detectMcp } from "./detect/mcp.js";
+import { detectMcp, mcpGroups } from "./detect/mcp.js";
 import { detectShell } from "./detect/shell.js";
 import { detectTerminalFont } from "./detect/terminal.js";
 import { detectToolchains } from "./detect/toolchains.js";
@@ -14,7 +14,7 @@ import { everything } from "./everything/everything.js";
 import type { Machine } from "./everything/host.js";
 import { claimedPaths, entriesFor, rungPrograms } from "./everything-entries.js";
 import type { Host } from "./host.js";
-import { type Manifest, type ManifestEntry, RUNGS, type Rung, parseManifest } from "./manifest.js";
+import { type GroupNote, type Manifest, type ManifestEntry, RUNGS, type Rung, parseManifest } from "./manifest.js";
 
 export const DETECTORS: Record<Exclude<Rung, "everything">, Detector> = {
   identity: detectIdentity,
@@ -25,6 +25,9 @@ export const DETECTORS: Record<Exclude<Rung, "everything">, Detector> = {
   agents: async host => [...(await detectAgents(host)), ...(await detectMcp(host))],
   logins: detectLogins,
 };
+
+/** What a rung's groups cover and leave out, read after the rung's rows. */
+const GROUP_NOTES: Partial<Record<Rung, (host: Host, rows: readonly ManifestEntry[]) => Promise<GroupNote[]>>> = { agents: mcpGroups };
 
 export interface CollectOptions {
   /** Called after each rung's detector with its row count, so a spinner can count rows as they land. */
@@ -41,11 +44,13 @@ export interface CollectOptions {
  * unclaimed, and validates the result against the schema. */
 export async function collect(host: Host, opts: CollectOptions = {}): Promise<Manifest> {
   const entries: ManifestEntry[] = [];
+  const groups: GroupNote[] = [];
   for (const rung of RUNGS) {
     if (rung === "everything") continue;
     const rows = await DETECTORS[rung](host);
     opts.onRung?.(rung, rows.length);
     entries.push(...rows);
+    groups.push(...(await (GROUP_NOTES[rung]?.(host, rows) ?? [])));
   }
   if (opts.machine !== undefined) {
     let rows: ManifestEntry[] = [];
@@ -66,5 +71,5 @@ export async function collect(host: Host, opts: CollectOptions = {}): Promise<Ma
     opts.onRung?.("everything", rows.length);
     entries.push(...rows);
   }
-  return parseManifest({ entries });
+  return parseManifest({ entries, ...(groups.length > 0 ? { groups } : {}) });
 }

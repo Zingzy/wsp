@@ -789,13 +789,16 @@ async function tickRungs(manifest: Manifest, io: InitIO, brew: BrewTable): Promi
     const prior = answers.get(rung);
     const fresh = defaultAnswers({ entries });
     const earlier = [...answers].filter(([r]) => r !== rung).flatMap(([, a]) => manifest.entries.filter(e => a.ticks.has(e.id)));
+    const groups = new Map((manifest.groups ?? []).filter(g => g.rung === rung).map(g => [g.group, g]));
     const result = await rungSelect({
       title: rung === "everything" ? everythingTitle(entries) : RUNG_TITLE[rung],
       counter,
       items: rung === "everything" ? everythingItems(entries) : rung === "tools" ? toolsItems(entries, brew) : entries.map(e => selectItem(e, undefined, brew)),
       initial: prior?.ticks ?? fresh.ticks,
       initialChoices: prior?.choices ?? fresh.choices,
-      ...(rung === "everything" ? { footer: everythingFooter(entries), detailLines: 3, folded: [APP_DATA_GROUP], groupHint: everythingGroupHint(entries) } : rung === "tools" || rung === "agents" ? { footer: diskFooter(earlier, entries, brew) } : {}),
+      groupHint: rung === "everything" ? everythingGroupHint(entries) : g => groups.get(g)?.hint,
+      groupNote: g => groups.get(g)?.note,
+      ...(rung === "everything" ? { footer: everythingFooter(entries), detailLines: 3, folded: [APP_DATA_GROUP] } : rung === "tools" || rung === "agents" ? { footer: diskFooter(earlier, entries, brew) } : {}),
       ...(rung === "editors" ? { intro: editorsIntro(entries) } : {}),
       input: io.input,
       output: io.output,
@@ -944,7 +947,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
         const pins = new Map(r.tools.filter(t => t.outcome === "installed" && t.road?.sha256 !== undefined && t.road.tag !== undefined).map(t => [t.id, { tag: t.road!.tag!, sha256: t.road!.sha256! }]));
         const stale = (e: ManifestEntry): boolean => pins.has(e.id) && e.pin?.tag !== pins.get(e.id)!.tag;
         if (manifest.entries.some(stale)) {
-          manifest = { entries: manifest.entries.map(e => (stale(e) ? { ...e, pin: pins.get(e.id)! } : e)) };
+          manifest = { ...manifest, entries: manifest.entries.map(e => (stale(e) ? { ...e, pin: pins.get(e.id)! } : e)) };
           saveRecipe(path, manifest, ticks, choices);
         }
       },

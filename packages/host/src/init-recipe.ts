@@ -47,6 +47,7 @@ export function refusedNote(e: ManifestEntry, isDir: (rel: string) => boolean | 
  * locks it up front instead of taking a tick the pack throws away; every other row is left as it was. */
 export function lockRefused(manifest: Manifest, isDir: (rel: string) => boolean | undefined): Manifest {
   return {
+    ...manifest,
     entries: manifest.entries.map(e => {
       const note = e.reason === undefined ? refusedNote(e, isDir) : undefined;
       return note === undefined ? e : { ...e, default: "skip", reason: note };
@@ -115,7 +116,7 @@ export function saveRecipe(path: string, manifest: Manifest, ticks: ReadonlySet<
     return { ...e, bring: ticks.has(e.id), ...(isLoginChoice(choice) ? { choice } : {}) };
   });
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify({ entries }, null, 2)}\n`);
+  writeFileSync(path, `${JSON.stringify({ entries, ...(manifest.groups !== undefined ? { groups: manifest.groups } : {}) }, null, 2)}\n`);
 }
 
 export function agentName(e: ManifestEntry): string {
