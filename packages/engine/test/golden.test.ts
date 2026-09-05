@@ -374,6 +374,7 @@ describe("golden import stages", () => {
   const ok = { exitCode: 0, stdout: "", stderr: "" };
   const FREE_KB_CMD = "df -Pk /root | awk 'NR==2{print $4}'";
   const mb = (n: number) => String(n * 1024);
+  const SWEEP_NEEDLE = "rm -rf /root/.npm /root/.cache/uv /root/.cache/go-build";
 
   function importOf(over: Partial<GoldenImport> = {}): GoldenImport {
     return {
@@ -990,17 +991,88 @@ describe("golden import stages", () => {
     expect(builder.import?.applied).toContain("installing-tools");
   });
 
-  it("stops installing tools when the disk drops under the tools floor", async () => {
-    let booted = false;
-    // Everything up to Homebrew reads a roomy disk; the first formula reads it low.
-    const { backend, cmds, fetch } = backendFor([["brew-bootstrap", () => ((booted = true), ok)]], () => mb(booted ? 500 : 3000));
+  it("stops installing tools when the disk drops under the tools floor and stays there after the cleanup", async () => {
+    let bootstrapped = false;
+    let cleanups = 0;
+    let sweeps = 0;
+    // The upload, the two agents (with their sweep) and Homebrew read a roomy disk; the first formula reads it low, and the cleanup gives little back.
+    const { backend, cmds, fetch } = backendFor(
+      [["brew-bootstrap", () => ((bootstrapped = true), ok)], ["brew cleanup -s --prune=all", () => (cleanups++, ok)], [SWEEP_NEEDLE, () => (sweeps++, ok)]],
+      () => mb(!bootstrapped ? 3000 : cleanups === 0 ? 1800 : sweeps === 1 ? 1900 : 1950),
+    );
     const { stages, onStage } = stageRecorder();
-    await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf() });
-    expect(cmds.some(c => c.includes("brew-bootstrap"))).toBe(true);
+    const results: ImportResult[] = [];
+    await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ onResult: r => void results.push(r) }) });
+    const at = (needle: string) => cmds.findIndex(c => c.includes(needle));
     expect(cmds.some(c => c.includes("brew install gh"))).toBe(false);
-    expect(stages).toContain("installing-tools:1 installed, 2 skipped: gh, bun@1.4.0 (500 MB free, keeping 2048 MB free); caches swept; 500 MB free");
-    // The floor stops installs, not the housekeeping that gives the disk back.
-    expect(cmds.some(c => c.includes("brew cleanup -s --prune=all"))).toBe(true);
+    expect(stages).toContain("installing-tools:1800 MB free, under the 2048 MB floor; cleaning up before skipping");
+    expect(stages).toContain("installing-tools:Homebrew cleanup freed 100 MB; caches swept, 50 MB back; 1950 MB free");
+    expect(stages).toContain("installing-tools:1 installed, 2 skipped: gh, bun@1.4.0 (1950 MB free after cleanup, keeping 2048 MB free); caches swept; 1950 MB free");
+    expect(results[0]!.tools.map(t => [t.id, t.outcome, t.note])).toEqual([
+      ["tools/homebrew", "installed", undefined],
+      ["tools/brew/gh", "skipped", "1950 MB free after cleanup, keeping 2048 MB free"],
+      ["tools/npm/bun", "skipped", "1950 MB free after cleanup, keeping 2048 MB free"],
+    ]);
+    // The cleanup at the floor is guarded, autoremove first, the sweep after Homebrew, and runs once in the loop; the housekeeping after the loop still runs.
+    expect(cmds[at("brew cleanup -s --prune=all")]!).toMatch(/^tree\(\) \{\n/);
+    expect(at("brew autoremove")).toBeGreaterThan(at("brew-bootstrap"));
+    expect(at("brew autoremove")).toBeLessThan(at("brew cleanup -s --prune=all"));
+    const sweepsAt = cmds.flatMap((c, i) => (c.includes(SWEEP_NEEDLE) ? [i] : []));
+    expect(sweepsAt[1]).toBeGreaterThan(at("brew cleanup -s --prune=all"));
+    expect(sweepsAt[1]).toBeLessThan(cmds.length - 1 - [...cmds].reverse().findIndex(c => c.includes("brew cleanup -s --prune=all")));
+    expect(cleanups).toBe(2);
+    expect(sweeps).toBe(3);
+  });
+
+  it("at the first reading under the floor the cleanup runs and df is read again: the install goes on when the floor clears, and a later dip skips without another cleanup", async () => {
+    let bootstrapped = false;
+    let cleanups = 0;
+    let ghDone = false;
+    const { backend, cmds, fetch } = backendFor(
+      [["brew-bootstrap", () => ((bootstrapped = true), ok)], ["brew cleanup -s --prune=all", () => (cleanups++, ok)], ["brew install gh", () => ((ghDone = true), ok)]],
+      () => mb(!bootstrapped ? 3000 : ghDone ? 500 : cleanups === 0 ? 1800 : 4200),
+    );
+    const { stages, onStage } = stageRecorder();
+    const results: ImportResult[] = [];
+    await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ onResult: r => void results.push(r) }) });
+    const at = (needle: string) => cmds.findIndex(c => c.includes(needle));
+    expect(at("brew cleanup -s --prune=all")).toBeGreaterThan(at("brew-bootstrap"));
+    expect(at("brew cleanup -s --prune=all")).toBeLessThan(at("brew install gh"));
+    expect(stages.filter(s => s.startsWith("installing-tools"))).toEqual([
+      "installing-tools:Homebrew (1/3)",
+      "installing-tools:1800 MB free, under the 2048 MB floor; cleaning up before skipping",
+      "installing-tools:Homebrew cleanup freed 2400 MB; caches swept; 4200 MB free",
+      "installing-tools:gh (2/3)",
+      "installing-tools:2 installed, 1 skipped: bun@1.4.0 (500 MB free, keeping 2048 MB free); caches swept; 500 MB free",
+    ]);
+    expect(results[0]!.tools.map(t => [t.id, t.outcome])).toEqual([["tools/homebrew", "installed"], ["tools/brew/gh", "installed"], ["tools/npm/bun", "skipped"]]);
+    // One rescue in the loop, one housekeeping after it.
+    expect(cleanups).toBe(2);
+    expect(cmds.filter(c => c.includes(SWEEP_NEEDLE))).toHaveLength(3);
+  });
+
+  it("under the floor with no Homebrew on the machine the cache sweep alone runs, and the install goes on when it clears the floor", async () => {
+    let bootstrapped = false;
+    let sweeps = 0;
+    const failing = { exitCode: 1, stdout: "", stderr: "Error: bootstrap failed" };
+    const { backend, cmds, fetch } = backendFor(
+      [["brew-bootstrap", () => ((bootstrapped = true), failing)], [SWEEP_NEEDLE, () => (sweeps++, ok)]],
+      () => mb(!bootstrapped ? 3000 : sweeps === 1 ? 1800 : 2500),
+    );
+    const { stages, onStage } = stageRecorder();
+    const results: ImportResult[] = [];
+    await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ onResult: r => void results.push(r) }) });
+    expect(cmds.some(c => c.includes("brew cleanup -s --prune=all"))).toBe(false);
+    expect(stages.filter(s => s.startsWith("installing-tools"))).toEqual([
+      "installing-tools:Homebrew (1/3)",
+      "installing-tools:1800 MB free, under the 2048 MB floor; cleaning up before skipping",
+      "installing-tools:caches swept, 700 MB back; 2500 MB free",
+      "installing-tools:bun@1.4.0 (3/3)",
+      "installing-tools:1 installed, 1 failed: Homebrew (Error: bootstrap failed), 1 skipped: gh (Homebrew did not install); caches swept; 2500 MB free",
+    ]);
+    expect(results[0]!.tools.map(t => [t.id, t.outcome])).toEqual([["tools/homebrew", "failed"], ["tools/brew/gh", "skipped"], ["tools/npm/bun", "installed"]]);
+    // The agents' sweep, the rescue in the loop, the housekeeping after it.
+    expect(sweeps).toBe(3);
   });
 
   it("refuses to upload when the archive and its contents would not fit, kills the builder, and says why", async () => {

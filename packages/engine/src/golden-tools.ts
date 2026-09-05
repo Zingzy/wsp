@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The tools stage on the builder: every ticked install as one guarded run in
 // plan order, the disk read before each against the floor kept for the agents,
-// and Homebrew's housekeeping once the loop is over. The guard runs the install
-// in its own session and, at the timeout, kills that session and every process
-// descended from it before returning, so a slow brew never holds a cellar lock
-// into the next tool's turn.
+// and the cleanup (Homebrew's housekeeping, then the cache sweep) at the first
+// reading under the floor and again once the loop is over. The guard runs the
+// install in its own session and, at the timeout, kills that session and every
+// process descended from it before returning, so a slow brew never holds a
+// cellar lock into the next tool's turn.
 import type { GoldenStage } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { BREW_HOUSEKEEPING, HOMEBREW, TOOLS_PATH, type ToolInstall } from "./golden-import.js";
@@ -169,6 +170,22 @@ function skippedByReason(skipped: readonly ToolResult[]): string {
   return [...byNote].map(([note, names]) => `${names.join(", ")} (${note})`).join("; ");
 }
 
+type Run = (cmd: string, label: string) => Promise<ExecResult>;
+
+/** Homebrew's autoremove then cleanup, each under the guard; the phrase says what came back or what failed, nothing when neither. */
+async function brewHousekeeping(machine: Machine, run: Run): Promise<string | undefined> {
+  const before = await freeBytes(machine);
+  const failed: string[] = [];
+  for (const cmd of BREW_HOUSEKEEPING) {
+    const res = await run(cmd, "Homebrew cleanup");
+    if (res.exitCode !== 0) failed.push(reasonOf(res, TOOL_TIMEOUT_S));
+  }
+  const after = await freeBytes(machine);
+  if (failed.length > 0) return `Homebrew cleanup failed (${failed.join("; ")})`;
+  if (before.kind === "free" && after.kind === "free" && after.bytes > before.bytes) return `Homebrew cleanup freed ${fmtBytes(after.bytes - before.bytes)}`;
+  return undefined;
+}
+
 function summarize(tools: ToolResult[], housekeeping: string | undefined): string {
   const parts: string[] = [];
   const n = (o: ToolResult["outcome"]) => tools.filter(t => t.outcome === o);
@@ -200,17 +217,31 @@ async function verifyCommands(machine: Machine, tools: readonly ToolInstall[], r
 }
 
 /** Runs the plan's installs one at a time. Each tool fails alone and is named in the stage detail;
- * one that waits on an install that failed is skipped with that install's name; the loop stops
- * once the disk is under the floor, and the tools left are skipped with the reading. */
+ * one that waits on an install that failed is skipped with that install's name. At the first reading
+ * under the floor the cleanup runs once and df is read again, since the bottle cache alone held 2.4 GB
+ * at that point on one run; the loop stops only if the disk is still under the floor, and the tools
+ * left are skipped with the reading. */
 export async function installTools(machine: Machine, tools: readonly ToolInstall[], stage: Stage): Promise<ToolsOutcome> {
   await machine.exec(SWEEP_TMP_CMD, { timeoutMs: INLINE_EXEC_MS });
   const out: ToolsOutcome = { tools: [] };
   const installed = new Set<string>();
   const labelOf = (id: string): string => tools.find(t => t.id === id)?.label ?? id;
-  const run = (cmd: string, label: string): Promise<ExecResult> =>
+  const run: Run = (cmd, label) =>
     machine.run(guarded(cmd, TOOL_TIMEOUT_S), { deadlineMs: guardDeadlineMs(TOOL_TIMEOUT_S), onLine: line => stage("installing-tools", `${label}: ${line}`) });
   let floor: string | undefined;
   let dfWarned = false;
+  let cleanedAtFloor = false;
+  const floorNote = (reading: string): string => `${reading}, keeping ${fmtBytes(TOOLS_DISK_FLOOR)} free`;
+  const cleanupAtFloor = async (low: number): Promise<FreeDisk | undefined> => {
+    if (cleanedAtFloor) return undefined;
+    cleanedAtFloor = true;
+    stage("installing-tools", `${fmtBytes(low)} free, under the ${fmtBytes(TOOLS_DISK_FLOOR)} floor; cleaning up before skipping`);
+    const brew = installed.has("tools/homebrew") ? await brewHousekeeping(machine, run) : undefined;
+    const swept = await sweepCaches(machine);
+    const after = await freeBytes(machine);
+    stage("installing-tools", closing(brew, swept, after.kind === "free" ? `${fmtBytes(after.bytes)} free` : after.reason));
+    return after;
+  };
   for (const [i, tool] of tools.entries()) {
     if (tool.after !== undefined && !installed.has(tool.after)) {
       out.tools.push({ id: tool.id, label: tool.label, outcome: "skipped", note: `${labelOf(tool.after)} did not install` });
@@ -225,9 +256,12 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
       dfWarned = true;
       stage("installing-tools", `free disk unknown (${free.reason}); installing without the ${fmtBytes(TOOLS_DISK_FLOOR)} floor`);
     } else if (free.kind === "free" && free.bytes < TOOLS_DISK_FLOOR) {
-      floor = `${fmtBytes(free.bytes)} free, keeping ${fmtBytes(TOOLS_DISK_FLOOR)} free`;
-      out.tools.push({ id: tool.id, label: tool.label, outcome: "skipped", note: floor });
-      continue;
+      const after = await cleanupAtFloor(free.bytes);
+      if (after === undefined || after.kind === "unknown" || after.bytes < TOOLS_DISK_FLOOR) {
+        floor = floorNote(after?.kind === "free" ? `${fmtBytes(after.bytes)} free after cleanup` : `${fmtBytes(free.bytes)} free`);
+        out.tools.push({ id: tool.id, label: tool.label, outcome: "skipped", note: floor });
+        continue;
+      }
     }
     stage("installing-tools", `${tool.label} (${i + 1}/${tools.length})`);
     const t0 = Date.now();
@@ -248,18 +282,7 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
     }
   }
   await verifyCommands(machine, tools, out.tools, stage);
-  let housekeeping: string | undefined;
-  if (installed.has("tools/homebrew")) {
-    const before = await freeBytes(machine);
-    const failed: string[] = [];
-    for (const cmd of BREW_HOUSEKEEPING) {
-      const res = await run(cmd, "Homebrew cleanup");
-      if (res.exitCode !== 0) failed.push(reasonOf(res, TOOL_TIMEOUT_S));
-    }
-    const after = await freeBytes(machine);
-    if (failed.length > 0) housekeeping = `Homebrew cleanup failed (${failed.join("; ")})`;
-    else if (before.kind === "free" && after.kind === "free" && after.bytes > before.bytes) housekeeping = `Homebrew cleanup freed ${fmtBytes(after.bytes - before.bytes)}`;
-  }
+  const housekeeping = installed.has("tools/homebrew") ? await brewHousekeeping(machine, run) : undefined;
   stage("installing-tools", closing(summarize(out.tools, housekeeping), await sweepCaches(machine), await freeNote(machine)));
   return out;
 }
