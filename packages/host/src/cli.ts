@@ -24,7 +24,8 @@ import {
   type Machine,
   type Runtime,
 } from "@wsp/runtime";
-import { CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, claudeEnvs, deployDaemon, doctor } from "./doctor.js";
+import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
+import { claudeEnvs, deployDaemon, doctor } from "./doctor.js";
 import { keychainReader } from "./init-import.js";
 import { readBrewTable } from "./init-brew.js";
 import { runInit, type InitIO } from "./init.js";
@@ -234,7 +235,7 @@ export function makeRuntime(keys: Keys, statePath: string, recipe: GoldenRecipe 
       claude: ctx =>
         createClaudeAdapter({
           exec: machineExecStream(ctx.machine),
-          configDir: CONFIG_DIR,
+          configDir: CLAUDE_CONFIG_DIR,
         }),
     },
     goldenRecipe: recipe,

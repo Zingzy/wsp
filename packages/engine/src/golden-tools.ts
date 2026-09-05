@@ -6,6 +6,7 @@
 // install in its own session and, at the timeout, kills that session and every
 // process descended from it before returning, so a slow brew never holds a
 // cellar lock into the next tool's turn.
+import { MIB } from "@wsp/catalog";
 import type { GoldenStage } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { BREW_HOUSEKEEPING, HOMEBREW, TOOLS_PATH, type GuestFacts, type ToolInstall } from "./golden-import.js";
@@ -38,7 +39,7 @@ export interface ToolsOutcome {
 type Stage = (stage: GoldenStage, detail?: string) => void;
 
 export const FREE_KB_CMD = "df -Pk /root | awk 'NR==2{print $4}'";
-export const MIB = 1024 * 1024;
+export { MIB };
 /** One unpack peak filled the disk from 1.6 GB free (measured 2026-09-05), so the loop stops above that. */
 export const TOOLS_DISK_FLOOR = 2048 * MIB;
 export const TOOL_TIMEOUT_S = 600;

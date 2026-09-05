@@ -31,6 +31,7 @@ export default defineConfig(({ command }) => ({
       "@wsp/daemon": pkg("daemon/src/index.ts"),
       "@wsp/protocol": pkg("protocol/src/index.ts"),
       "@wsp/runtime": pkg("runtime/src/index.ts"),
+      "@wsp/catalog": pkg("catalog/src/index.ts"),
     },
   },
 }));

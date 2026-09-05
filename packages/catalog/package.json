@@ -1,0 +1,10 @@
+{
+  "name": "@wsp/catalog",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts",
+    "test": "vitest run"
+  },
+  "license": "AGPL-3.0-only"
+}

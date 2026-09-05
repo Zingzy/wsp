@@ -8,7 +8,9 @@ import { createHash } from "node:crypto";
 import { join, relative } from "node:path";
 import { MCP_ID_PREFIX, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
-import { caskVersion, linuxCaskFor } from "./linux-casks.js";
+import { CATALOG_AGENTS, CLAUDE_KEY_FILE, NODE_PATH_LINE, NODE_RELEASES, UV_INSTALL, agentInstallLine, caskVersion, linuxCaskFor, nodeInstallScript, smokeOf, type NodeMajor, type ToolPin } from "@wsp/catalog";
+
+export { CLAUDE_KEY_FILE, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
 
 export type { RecipeDigest };
 
@@ -332,9 +334,6 @@ export function withApiKeyHelper(text: string | undefined, helper: string | unde
   return `${JSON.stringify(settings, null, 2)}\n`;
 }
 
-/** The file under Claude Code's config dir that the apiKeyHelper's key is placed in and the copied settings read. */
-export const CLAUDE_KEY_FILE = "anthropic-api-key";
-
 /** Where the key a settings file's helper prints lands on the guest, and how the command is read from the file. */
 const HELPERS: Record<string, { dest: string; command: (text: string | undefined) => string | undefined }> = {
   "~/.claude/settings.json": { dest: `.claude/${CLAUDE_KEY_FILE}`, command: apiKeyHelperOf },
@@ -535,12 +534,6 @@ export function cliRoad(e: RecipeEntry): Pick<PlannedRoad, "source" | "go"> | un
 export interface ToolSource {
   repo: string;
   tag: string;
-}
-
-/** What the first install of a release recorded: the tag it fetched and the asset's sha256. */
-export interface ToolPin {
-  tag: string;
-  sha256: string;
 }
 
 /** How a road install stands against the recipe's pin: nothing recorded yet, the same tag (checked), or a
@@ -1099,60 +1092,8 @@ export interface AgentInstall extends AgentInstaller {
   id: string;
 }
 
-/** uv by its release tarball, checksummed against the sums astral publishes
- * next to it (https://github.com/astral-sh/uv/releases). */
-export const UV = {
-  version: "0.12.9",
-  sha256: {
-    x86_64: "ec7a99cd05e0cd7f80243f135ce1361c76835cb0ee60055d14d20eba8eba1460",
-    aarch64: "c36fe17937ff6bd16dc42fc13854b5465999fcab2efe0af559381e945e3c6001",
-  },
-} as const;
-
-export const UV_INSTALL = [
-  "if ! command -v uv >/dev/null 2>&1; then",
-  '  arch="$(uname -m)"',
-  '  case "$arch" in',
-  `    x86_64) sha=${UV.sha256.x86_64} ;;`,
-  `    aarch64) sha=${UV.sha256.aarch64} ;;`,
-  '    *) echo "unsupported arch: $arch" >&2; exit 1 ;;',
-  "  esac",
-  '  pkg="uv-$arch-unknown-linux-gnu.tar.gz"',
-  `  curl -fsSL -o "/tmp/$pkg" "https://github.com/astral-sh/uv/releases/download/${UV.version}/$pkg"`,
-  '  echo "$sha  /tmp/$pkg" | sha256sum -c - >/dev/null',
-  '  tar -xzf "/tmp/$pkg" -C /tmp',
-  '  install -m 0755 "/tmp/uv-$arch-unknown-linux-gnu/uv" /usr/local/bin/uv',
-  '  install -m 0755 "/tmp/uv-$arch-unknown-linux-gnu/uvx" /usr/local/bin/uvx',
-  '  rm -rf "/tmp/$pkg" "/tmp/uv-$arch-unknown-linux-gnu"',
-  "fi",
-].join("\n");
-
-/** Node releases the guest may get, one per major, pinned to nodejs.org's
- * SHASUMS256.txt entries (https://nodejs.org/dist/); `eol` is the day the
- * release schedule ends maintenance (https://github.com/nodejs/Release). */
-export const NODE_RELEASES = {
-  20: {
-    version: "20.20.2",
-    sha256: { x86_64: "19e56f0825510207dd904f087fe52faa0a4eb6b2aab5f0ea7a33830d04888b8b", aarch64: "47ef73d543ecf6eb19435f6c03a0ac4809b3bf0dd6b26c7c571efc2a6572a74d" },
-    eol: "2026-04-30",
-  },
-  22: {
-    version: "22.23.2",
-    sha256: { x86_64: "b294a556e639d64338823920e5866c21c02741742d2e1529ee1a225c1ec9252a", aarch64: "013b59cfd2819703a6f4a14ab891fc46fc2a4e3f5bcd92de3fb4929b43e35b30" },
-    eol: "2027-04-30",
-  },
-} as const;
-
-export type NodeMajor = keyof typeof NODE_RELEASES;
-
 /** The line a guest gets when no supported pinned major meets an agent's floor. */
 export const CURRENT_LTS: NodeMajor = 22;
-
-export interface NodeRelease {
-  version: string;
-  sha256: { x86_64: string; aarch64: string };
-  eol: string;
-}
 
 /** The major a set of engines floors gets: the lowest pinned major at or above the
  * floor that is still in active or maintenance support on `now`, else the current
@@ -1164,67 +1105,13 @@ export function nodeMajorFor(floor: number, now: Date): NodeMajor | undefined {
   return majors.find(m => m >= floor && supported(m)) ?? CURRENT_LTS;
 }
 
-/** Puts the Node the golden installed ahead of any the image shipped, so the
- * agents and their version checks run on it. */
-export const NODE_PATH_LINE = 'export PATH="/usr/local/bin:$PATH"';
-
-/** Installs the release into /usr/local when the guest's Node major is under
- * `floor`, and reports what it had and what it did on stdout. */
-export function nodeInstallScript(floor: number, release: NodeRelease): string {
-  const v = release.version;
-  return [
-    "node_have=\"$(node --version 2>/dev/null || echo v0)\"",
-    "node_major=\"$(printf '%s' \"$node_have\" | sed 's/^v//; s/\\..*//')\"",
-    'echo "NODE_HAVE $node_have"',
-    `if [ "\${node_major:-0}" -ge ${floor} ]; then echo "NODE_KEPT $node_have"; exit 0; fi`,
-    'arch="$(uname -m)"',
-    'case "$arch" in',
-    `  x86_64) pkg=node-v${v}-linux-x64.tar.gz sha=${release.sha256.x86_64} ;;`,
-    `  aarch64) pkg=node-v${v}-linux-arm64.tar.gz sha=${release.sha256.aarch64} ;;`,
-    '  *) echo "unsupported arch: $arch" >&2; exit 1 ;;',
-    "esac",
-    `curl -fsSL -o "/tmp/$pkg" "https://nodejs.org/dist/v${v}/$pkg"`,
-    'echo "$sha  /tmp/$pkg" | sha256sum -c - >/dev/null',
-    'tar -xzf "/tmp/$pkg" -C /usr/local --strip-components=1',
-    'rm -f "/tmp/$pkg"',
-    // The install is only real once the node the agents will run is this one.
-    NODE_PATH_LINE,
-    `test "$(node --version)" = "v${v}"`,
-    `echo "NODE_INSTALLED v${v}"`,
-  ].join("\n");
-}
-
-const HERMES = { tag: "v2026.8.31", commit: "29112bef099274229cadff79cdff7bf7b99c4b77" } as const;
-
-/** Every installer pins a version; npm checks the registry's integrity hash
- * for each tarball, uv is checksummed above, git checkouts compare the commit.
- * `node` is the package's engines floor, read from the registry at pin time. */
+/** Every installer pins a version; npm checks the registry's integrity hash for each tarball, uv is checksummed
+ * by its release, git checkouts compare the commit. The catalog's agents install by their roads; the host owns
+ * Claude Code's installer. Aider is not a catalog agent (its project state has no measured resolver, so wsp does
+ * not ship it); its line stays for recipes that tick it: https://aider.chat/docs/install.html, the uv tool line. */
 export const AGENT_INSTALLERS: Record<string, AgentInstaller> = {
-  // https://github.com/openai/codex#quickstart
-  codex: { name: "Codex", install: "npm install -g @openai/codex@0.153.0", smoke: "codex --version", node: 16 },
-  // https://github.com/google-gemini/gemini-cli#quickstart
-  gemini: { name: "Gemini CLI", install: "npm install -g @google/gemini-cli@0.58.0", smoke: "gemini --version", node: 20 },
-  // https://opencode.ai/docs/#install
-  opencode: { name: "OpenCode", install: "npm install -g opencode-ai@1.18.27", smoke: "opencode --version" },
-  // https://aider.chat/docs/install.html (the uv tool line, with the version pinned)
+  ...Object.fromEntries(CATALOG_AGENTS.filter(a => a.id !== "claude").map(a => [a.id, { name: a.name, install: agentInstallLine(a), smoke: smokeOf(a), ...(a.node !== undefined ? { node: a.node } : {}) }])),
   aider: { name: "Aider", install: `${UV_INSTALL}\nuv tool install --force --python 3.12 --with pip aider-chat==0.86.2`, smoke: "aider --version" },
-  // https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/README.md
-  pi: { name: "Pi", install: "npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.84.4", smoke: "pi --version", node: 22 },
-  // https://hermes-agent.nousresearch.com/docs/developer-guide/contributing#manual-clone-fallback
-  hermes: {
-    name: "Hermes Agent",
-    install: [
-      UV_INSTALL,
-      "if [ ! -d /root/.hermes/hermes-agent/.git ]; then",
-      `  git clone -q --depth 1 --branch ${HERMES.tag} https://github.com/NousResearch/hermes-agent.git /root/.hermes/hermes-agent`,
-      "fi",
-      `test "$(git -C /root/.hermes/hermes-agent rev-parse HEAD)" = "${HERMES.commit}"`,
-      "uv venv --python 3.11 /root/.hermes/venvs/hermes",
-      "uv pip install --python /root/.hermes/venvs/hermes/bin/python -e /root/.hermes/hermes-agent",
-      "ln -sfn /root/.hermes/venvs/hermes/bin/hermes /usr/local/bin/hermes",
-    ].join("\n"),
-    smoke: "hermes --version",
-  },
 };
 
 /** The package an installer's npm or uv line puts on the machine, read off the line's pinned spec. */

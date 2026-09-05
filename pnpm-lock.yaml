@@ -174,8 +174,13 @@ importers:
         specifier: ^22.20.1
         version: 22.20.1
 
+  packages/catalog: {}
+
   packages/collect:
     dependencies:
+      '@wsp/catalog':
+        specifier: workspace:*
+        version: link:../catalog
       '@wsp/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -208,6 +213,9 @@ importers:
 
   packages/engine:
     dependencies:
+      '@wsp/catalog':
+        specifier: workspace:*
+        version: link:../catalog
       '@wsp/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -230,6 +238,9 @@ importers:
       '@wsp/adapter-claude':
         specifier: workspace:*
         version: link:../adapter-claude
+      '@wsp/catalog':
+        specifier: workspace:*
+        version: link:../catalog
       '@wsp/collect':
         specifier: workspace:*
         version: link:../collect

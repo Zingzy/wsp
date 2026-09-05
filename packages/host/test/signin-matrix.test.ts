@@ -14,7 +14,7 @@ import type { LoginState } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
 import { fakeHost, type FakeLaptop } from "../../collect/test/fake-host.js";
 import { signInStage, statusLine } from "../src/init-signin.js";
-import { AWS_STATUS, GEMINI_STATUS, SIGN_INS, statusOf, type LoginSource } from "../src/signin-table.js";
+import { AWS_STATUS, CLOUDFLARED_STATUS, GEMINI_STATUS, SIGN_INS, statusOf, type LoginSource } from "../src/signin-table.js";
 import { collectorLogins } from "./collector-logins.js";
 import { fakePtyLink } from "./fake-pty-link.js";
 
@@ -134,9 +134,9 @@ const MATRIX: readonly Cell[] = [
     note: "copied, but wrangler whoami says not signed in",
   },
 
-  { tool: "cloudflared", source: "file", laptop: { files: { "~/.cloudflared/cert.pem": 800 } }, row: { paths: ["~/.cloudflared/cert.pem"], default: "bring" }, state: "copied", note: "not verified: no status command known for cloudflared" },
+  { tool: "cloudflared", source: "file", laptop: { files: { "~/.cloudflared/cert.pem": 800 } }, row: { paths: ["~/.cloudflared/cert.pem"], default: "bring" }, answer: { output: "cert.pem", exitCode: 0 }, state: "signed-in", note: `copied; ${CLOUDFLARED_STATUS}` },
   ...filesOnly("cloudflared"),
-  { tool: "cloudflared", source: "none", laptop: {}, state: "copied", note: "not verified: no status command known for cloudflared" },
+  { tool: "cloudflared", source: "none", laptop: {}, answer: { output: "", exitCode: 1 }, state: "not-signed-in", note: `copied, but ${CLOUDFLARED_STATUS} says not signed in` },
 
   {
     tool: "vercel",
@@ -351,7 +351,7 @@ describe("the sign-in matrix covers every tool and source", () => {
 
   it("a source the table lists for a tool has a full cell: the laptop makes the row, the guest proves it; a table row nobody collects lists no source", () => {
     for (const [tool, s] of Object.entries(SIGN_INS)) {
-      const sources = s.kind === "shell" ? [] : s.sources;
+      const sources = s.sources;
       if (!tools.includes(tool)) {
         expect(sources, tool).toEqual([]);
         continue;
@@ -365,7 +365,7 @@ describe("the sign-in matrix covers every tool and source", () => {
     for (const c of MATRIX) {
       if (!reachable(c) || c.row === undefined || c.source === "none") continue;
       const s = SIGN_INS[c.tool]!;
-      expect(s.kind !== "shell" && s.sources.includes(c.source), cellName(c.tool, c.source)).toBe(true);
+      expect(s.sources.includes(c.source), cellName(c.tool, c.source)).toBe(true);
     }
   });
 
