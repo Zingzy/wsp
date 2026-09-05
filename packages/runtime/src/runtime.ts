@@ -351,8 +351,11 @@ export interface Runtime {
   readonly golden: {
     build(opts: GoldenBuildRequest): Promise<{ manifest: GoldenManifest; version: GoldenVersion }>;
     get(name?: string): Promise<GoldenManifest | undefined>;
-    /** Boots a first-life builder from the recipe; a person sets it up on its live screen, then seals it. */
-    prepare(opts?: { name?: string; kind?: MachineKind }): Promise<GoldenBuilderView>;
+    /** Boots a first-life builder from the recipe; a person sets it up on its live screen, then seals it.
+     * Once `signal` aborts the call rejects with PrepareStoppedError: a machine this prepare made is killed by its
+     * recorded id and its record dropped (a create still in flight is killed as it lands); a builder it attached to
+     * keeps its first life, its hold is released and its record stays reusable. */
+    prepare(opts?: { name?: string; kind?: MachineKind; signal?: AbortSignal }): Promise<GoldenBuilderView>;
     /** Snapshot, smoke-fork, append a version. A builder built from a recipe is kept running for GRACE_MS after a
      * successful seal so one more change re-snapshots it; any other builder, and every failed or refused seal, consumes it.
      * logins: what each sign-in asked of the builder came to, stamped on the version. */
@@ -453,6 +456,32 @@ interface LiveBuilder {
    * host that runs on keeps what it read, and host.lock keeps a second init from starting beside it. */
   life: "own" | "reusable" | "stale" | "foreign" | "held";
   reach?: PreviewReach;
+}
+
+/** What prepare rejects with once its signal aborted. `builderId` is the machine it had, when one existed: killed
+ * by its recorded id and its record dropped, unless `kept` (attached to, first life worth keeping, hold released,
+ * record left reusable) or `left` (the kill failed for this reason and the record stays for the sweep). */
+export class PrepareStoppedError extends Error {
+  readonly builderId?: string;
+  readonly kept: boolean;
+  readonly left?: string;
+  constructor(builderId?: string, outcome?: { kept: true } | { left: string }) {
+    const kept = outcome !== undefined && "kept" in outcome;
+    const left = outcome !== undefined && "left" in outcome ? outcome.left : undefined;
+    super(
+      builderId === undefined
+        ? "prepare stopped before a machine existed"
+        : kept
+          ? `prepare stopped; builder ${builderId} left running with its first life`
+          : left === undefined
+            ? `prepare stopped; builder ${builderId} killed`
+            : `prepare stopped; builder ${builderId} did not stop: ${left}`,
+    );
+    this.name = "PrepareStoppedError";
+    if (builderId !== undefined) this.builderId = builderId;
+    this.kept = kept;
+    if (left !== undefined) this.left = left;
+  }
 }
 
 /** Stand-in for a machine that vanished while we were away; resume() failing with
@@ -1316,29 +1345,41 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** The hold begins the moment the machine exists: a held placeholder is on the store before any stage runs, so
    * another process over it (a second host, wspx) never reads this machine as lost. */
-  const recordingCreates = (b: MachineBackend, name: string, imp: Pick<GoldenImport, "recipeHash" | "recipe"> | undefined, made: (placeholder: LiveBuilder) => void): MachineBackend => ({
+  const recordingCreates = (
+    b: MachineBackend,
+    name: string,
+    imp: Pick<GoldenImport, "recipeHash" | "recipe"> | undefined,
+    made: (placeholder: LiveBuilder) => void,
+    stop?: { signal: AbortSignal | undefined; began: (creating: Promise<Machine>) => void },
+  ): MachineBackend => ({
     ...b,
-    create: async spec => {
-      const machine = await b.create(spec);
-      const asked = { cpu: spec.cpu ?? backend.pricing.defaultSize.cpu, memMb: spec.memMb ?? backend.pricing.defaultSize.memMb };
-      const record: BuilderRecord = {
-        id: machine.id,
-        name,
-        kind: spec.kind,
-        baseTemplate: spec.template ?? "",
-        setupSha: "",
-        createdAt: spec.labels?.["createdAt"] ?? new Date().toISOString(),
-        size: asked,
-        firstLife: true,
-        building: true,
-        ...(machine.streamUrl !== undefined ? { streamUrl: machine.streamUrl } : {}),
-        ...(imp !== undefined ? { import: { recipeHash: imp.recipeHash, ...(imp.recipe !== undefined ? { recipe: imp.recipe } : {}), applied: [], smoke: "true" } } : {}),
-      };
-      const placeholder: LiveBuilder = { record, builder: { machine, kind: spec.kind, baseTemplate: record.baseTemplate, setupSha: "", createdAt: record.createdAt, firstLife: true, size: asked }, life: "own" };
-      builders.set(machine.id, placeholder);
-      made(placeholder);
-      await hold(placeholder);
-      return machine;
+    create: spec => {
+      if (stop?.signal?.aborted) return Promise.reject(new PrepareStoppedError());
+      // Handed out before the provider is called, so a stop that lands inside the call waits for the machine it returns.
+      const creating = Promise.resolve().then(async () => {
+        const machine = await b.create(spec);
+        const asked = { cpu: spec.cpu ?? backend.pricing.defaultSize.cpu, memMb: spec.memMb ?? backend.pricing.defaultSize.memMb };
+        const record: BuilderRecord = {
+          id: machine.id,
+          name,
+          kind: spec.kind,
+          baseTemplate: spec.template ?? "",
+          setupSha: "",
+          createdAt: spec.labels?.["createdAt"] ?? new Date().toISOString(),
+          size: asked,
+          firstLife: true,
+          building: true,
+          ...(machine.streamUrl !== undefined ? { streamUrl: machine.streamUrl } : {}),
+          ...(imp !== undefined ? { import: { recipeHash: imp.recipeHash, ...(imp.recipe !== undefined ? { recipe: imp.recipe } : {}), applied: [], smoke: "true" } } : {}),
+        };
+        const placeholder: LiveBuilder = { record, builder: { machine, kind: spec.kind, baseTemplate: record.baseTemplate, setupSha: "", createdAt: record.createdAt, firstLife: true, size: asked }, life: "own" };
+        builders.set(machine.id, placeholder);
+        made(placeholder);
+        await hold(placeholder);
+        return machine;
+      });
+      stop?.began(creating);
+      return creating;
     },
   });
 
@@ -1432,6 +1473,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await ready();
       const recipe = recipeOrThrow();
       const name = o?.name ?? "default";
+      const signal = o?.signal;
       const { deployDaemon, smoke, import: imp, ...size } = recipe;
       void smoke;
       const active = preparing.get(name);
@@ -1448,19 +1490,64 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // building check is a second wall: the join above holds it in this process,
         // life does across processes.
         const same = imp === undefined ? undefined : [...builders.values()].find(x => (x.life === "own" || x.life === "reusable") && x.record.building !== true && x.record.sealed === undefined && x.record.name === name && x.record.import?.recipeHash === imp.recipeHash);
-        if (same && imp) {
+        // The machine this prepare has, attached to or made. A stop kills a made one by its recorded id and drops the
+        // record; an attached one has a first life and maybe an earlier run's sign-ins, so its hold is released and
+        // its record stays reusable.
+        let mine: LiveBuilder | undefined;
+        let creating: Promise<Machine> | undefined;
+        let stopping: Promise<PrepareStoppedError> | undefined;
+        const warn = (what: string) => (e: unknown) => console.warn(`${what}: ${e instanceof Error ? e.message : String(e)}`);
+        const stop = async (): Promise<PrepareStoppedError> => {
+          // A create still in flight lands first: a stop that gave up sooner would leak the machine it returns.
+          await creating?.catch(() => {});
+          if (mine === undefined) return new PrepareStoppedError();
+          const id = mine.record.id;
+          if (mine === same) {
+            delete mine.record.heldBy;
+            mine.life = "reusable";
+            await store.put(BUILDERS, id, mine.record).catch(warn(`hold on builder ${id} not released; it ages out in ${HELD_TTL_MS / 60_000} minutes`));
+            return new PrepareStoppedError(id, { kept: true });
+          }
+          try {
+            await killUntilGone(backend, mine.builder.machine, opts.killConfirm);
+          } catch (e) {
+            return new PrepareStoppedError(id, { left: e instanceof Error ? e.message : String(e) });
+          }
+          await forgetBuilder(id).catch(warn(`record of builder ${id} not dropped; the machine is gone and the next load drops it`));
+          return new PrepareStoppedError(id);
+        };
+        let wake: () => void = () => {};
+        const stopped = new Promise<void>(r => {
+          wake = r;
+        });
+        const onAbort = (): void => {
+          stopping ??= stop().finally(wake);
+        };
+        if (signal?.aborted) onAbort();
+        else signal?.addEventListener("abort", onAbort, { once: true });
+        // Once a stop has begun its word is the answer, whatever the work did meanwhile: the work runs on against a
+        // machine that is going or released, and neither its result nor its rejection reaches the caller.
+        const raced = async <T>(work: Promise<T>): Promise<T> => {
+          await Promise.race([work.then(() => {}, () => {}), stopped]);
+          if (stopping !== undefined) throw await stopping;
+          return work;
+        };
+        const attach = async (same: LiveBuilder, ledger: GoldenImport): Promise<GoldenBuilderView> => {
           try {
             stage("creating", ALREADY_APPLIED);
             stage("deploying-daemon", ALREADY_APPLIED);
-            const applied = await applyGoldenImport(same.builder.machine, { import: imp, setup: recipe.setup, ...(same.record.import !== undefined ? { ledger: same.record.import } : {}), onStage: stage });
+            const applied = await applyGoldenImport(same.builder.machine, { import: ledger, setup: recipe.setup, ...(same.record.import !== undefined ? { ledger: same.record.import } : {}), onStage: stage });
             // A complete ledger only re-imports the volatile files, and that never fails the apply, so this no-op is what
             // proves the machine outlived the earlier process.
             const alive = await same.builder.machine.exec("true");
             if (alive.exitCode !== 0) throw new Error(`the builder answered exit ${alive.exitCode} to a no-op; it is not serving`);
+            // A stop that came while the apply ran released the hold; nothing here takes it back.
+            if (stopping !== undefined) throw await stopping;
             same.record.import = applied.ledger;
             same.life = "own";
             await hold(same);
           } catch (e) {
+            if (stopping !== undefined) throw e;
             // Same road as a fresh builder that fails its stages: the machine goes, the person starts over.
             let detail = e instanceof Error ? e.message : String(e);
             await killUntilGone(backend, same.builder.machine, opts.killConfirm).catch((k: unknown) => {
@@ -1472,26 +1559,38 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           }
           stage("ready");
           return builderView(same.record, same);
-        }
-        let placeholder: LiveBuilder | undefined;
-        let builder: Builder;
+        };
+        const fresh = async (): Promise<GoldenBuilderView> => {
+          let builder: Builder;
+          try {
+            builder = await prepareBuilder({
+              backend: recordingCreates(b, name, imp, p => (mine = p), { signal, began: c => (creating = c) }),
+              ...size,
+              ...(o?.kind !== undefined ? { kind: o.kind } : {}),
+              ...(deployDaemon !== undefined ? { deployDaemon } : {}),
+              ...(imp !== undefined ? { import: imp } : {}),
+              labels: builderLabels(recipe.labels),
+              onStage: stage,
+            });
+          } catch (e) {
+            // prepareBuilder killed the machine on its way out; the placeholder goes with it. After a stop the record is the stop's.
+            if (mine !== undefined && stopping === undefined) await forgetBuilder(mine.record.id);
+            throw e;
+          }
+          // A last exec that outran the kill must not leave a finished record for a machine the stop is killing.
+          if (stopping !== undefined) throw await stopping;
+          const entry = await settleBuilder(name, builder, mine);
+          return builderView(entry.record, entry);
+        };
         try {
-          builder = await prepareBuilder({
-            backend: recordingCreates(b, name, imp, p => (placeholder = p)),
-            ...size,
-            ...(o?.kind !== undefined ? { kind: o.kind } : {}),
-            ...(deployDaemon !== undefined ? { deployDaemon } : {}),
-            ...(imp !== undefined ? { import: imp } : {}),
-            labels: builderLabels(recipe.labels),
-            onStage: stage,
-          });
-        } catch (e) {
-          // prepareBuilder killed the machine on its way out; the placeholder goes with it.
-          if (placeholder !== undefined) await forgetBuilder(placeholder.record.id);
-          throw e;
+          if (same && imp) {
+            mine = same;
+            return await raced(attach(same, imp));
+          }
+          return await raced(fresh());
+        } finally {
+          signal?.removeEventListener("abort", onAbort);
         }
-        const entry = await settleBuilder(name, builder, placeholder);
-        return builderView(entry.record, entry);
       }).finally(() => preparing.delete(name));
       preparing.set(name, { hash: imp?.recipeHash, promise: run });
       return run;

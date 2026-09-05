@@ -7,6 +7,7 @@
 // in the notes, and the run reaches the hand-off. The host's start-up sweep is
 // not run here (it lists the whole account); the callback relay is wired the
 // way startHost wires it, openLine included.
+import { EventEmitter } from "node:events";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -121,7 +122,7 @@ describe.runIf(LIVE)("sign-in stage (live)", () => {
       openedHere.push(url);
       return real(url);
     };
-    const io: InitIO = { input, output, isTTY: true, env: {}, open: gatedOpen, copy: async () => true };
+    const io: InitIO = { input, output, isTTY: true, env: {}, open: gatedOpen, copy: async () => true, signals: new EventEmitter(), exit: () => {} };
 
     const hostLines: string[] = [];
     const notes: string[] = [];

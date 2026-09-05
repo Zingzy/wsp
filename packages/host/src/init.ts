@@ -9,8 +9,8 @@ import { styleText } from "node:util";
 import { LARGE_GROUP, RUNGS, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
 import { describeAge, type BackendPricing } from "@wsp/engine";
 import type { ChecklistItem } from "@wsp/protocol";
-import type { GoldenBuilderView, GoldenRecipe, GoldenStage, Runtime } from "@wsp/runtime";
-import { S_BAR, S_STEP_ERROR, S_STEP_SUBMIT, cancel, isCancel, log, outro } from "@clack/prompts";
+import { PrepareStoppedError, type GoldenBuilderView, type GoldenRecipe, type GoldenStage, type Runtime } from "@wsp/runtime";
+import { S_BAR, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, cancel, isCancel, log, outro } from "@clack/prompts";
 import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -52,6 +52,10 @@ export interface InitIO {
   open(url: string): Promise<boolean>;
   /** Put text on the clipboard; false when no clipboard tool exists. */
   copy(text: string): Promise<boolean>;
+  /** Where Ctrl-C and a service stop arrive while the builder is prepared; the real one is process. */
+  signals: { on(event: "SIGINT" | "SIGTERM", listener: () => void): unknown; off(event: "SIGINT" | "SIGTERM", listener: () => void): unknown };
+  /** Ends the process; the real one is process.exit. */
+  exit(code: number): void;
 }
 
 export interface InitOptions {
@@ -111,6 +115,8 @@ interface Earlier {
 
 const GOLDEN_NAME = "default";
 const DEFAULT_RETRY = { waitMs: 30_000, attempts: 20 };
+/** What ends a builder this run could not: a record its dead holder left is stale to the next start, which stops it. */
+const SWEEP = "the next wsp or wsp init on this computer stops it, or stop it from the Solari console.";
 const dim = (s: string): string => styleText("dim", s);
 
 export function fmtBytes(n: number): string {
@@ -272,10 +278,11 @@ class StageStream {
     else this.announce(prev);
   }
 
-  stop(): StageView {
+  /** Draws the last frame; `stopped` marks the stage in flight as cut off rather than spinning. */
+  stop(stopped = false): StageView {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
-    this.draw(true);
+    this.draw(true, stopped);
     return this.view;
   }
 
@@ -292,7 +299,7 @@ class StageStream {
     return stageLine(styleText("green", S_STEP_SUBMIT), s.end, s.tail.at(-1), s.ms, this.width, this.labelWidth);
   }
 
-  private lines(final: boolean): string[] {
+  private lines(final: boolean, stopped: boolean): string[] {
     const out: string[] = [];
     const width = this.width;
     for (const s of this.view.steps) {
@@ -301,7 +308,7 @@ class StageStream {
           out.push(`${dim(S_BAR)}  ${dim(s.start)}`);
           break;
         case "current":
-          out.push(stageLine(styleText("cyan", StageStream.SPIN[this.tick % StageStream.SPIN.length]!), s.start, s.tail.at(-1), undefined, width, this.labelWidth));
+          out.push(stageLine(stopped ? styleText("red", S_STEP_CANCEL) : styleText("cyan", StageStream.SPIN[this.tick % StageStream.SPIN.length]!), s.start, s.tail.at(-1), undefined, width, this.labelWidth));
           break;
         case "done":
           out.push(this.doneLine(s));
@@ -320,9 +327,9 @@ class StageStream {
     return out;
   }
 
-  private draw(final = false): void {
+  private draw(final = false, stopped = false): void {
     if (this.animate) {
-      const lines = this.lines(final);
+      const lines = this.lines(final, stopped);
       const up = this.printed > 0 ? `\x1b[${this.printed}A\x1b[J` : "";
       this.output.write(`${up}${lines.join("\n")}\n`);
       this.printed = lines.length;
@@ -604,6 +611,28 @@ function overSsh(env: Record<string, string | undefined>): boolean {
   return env["SSH_CONNECTION"] !== undefined || env["SSH_TTY"] !== undefined || env["SSH_CLIENT"] !== undefined;
 }
 
+/** The shell's own code for a death by that signal. */
+function exitCodeOf(sig: "SIGINT" | "SIGTERM"): number {
+  return sig === "SIGINT" ? 130 : 143;
+}
+
+/** Resolves after ms, or at once when the signal aborts. */
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise(resolve => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    const done = (): void => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal.addEventListener("abort", done, { once: true });
+  });
+}
+
 // --- the command -------------------------------------------------------------
 
 export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult> {
@@ -830,25 +859,89 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   });
   const retry = opts.retry ?? DEFAULT_RETRY;
   stream.start();
+  // From here a machine may be billing. The first signal ends the stage in flight and the builder with it; the
+  // handler comes off with the builder, and after the hand-off the host's own handler has the signals.
+  const halt = new AbortController();
+  let signalled: "SIGINT" | "SIGTERM" | undefined;
+  let frozen: StageView | undefined;
+  let waiting = false;
+  // The stop's own line, once it has one; a signal after that repeats the truth instead of guessing at the record.
+  let finalLine: string | undefined;
+  const cutShort = async (code: number): Promise<void> => {
+    // Every other builder of this name was stopped or refused before the boot, so the one left is this run's.
+    // The exit is the point here; a record that cannot be read gets the no-record line rather than no exit.
+    const known = await rt.golden.builders().catch((): GoldenBuilderView[] => []);
+    const id = known.find(b => b.name === GOLDEN_NAME && b.foreignOwner === undefined && b.heldBy === undefined)?.id;
+    cancel(id !== undefined ? `Stopping was cut short. Builder ${id} may still be running; ${SWEEP}` : "Stopping was cut short. No machine is recorded yet; one the create still returns wears this setup's label, and the next wsp start sweeps it.", out);
+    io.exit(code);
+  };
+  const onSignal = (sig: "SIGINT" | "SIGTERM"): void => {
+    if (signalled !== undefined) {
+      if (finalLine !== undefined) {
+        cancel(finalLine, out);
+        io.exit(exitCodeOf(sig));
+        return;
+      }
+      // Out before the kill lands: the record keeps this pid, which the next start reads as dead and sweeps.
+      void cutShort(exitCodeOf(sig));
+      return;
+    }
+    signalled = sig;
+    frozen = stream.stop(true);
+    off();
+    halt.abort();
+  };
+  const onInt = (): void => onSignal("SIGINT");
+  const onTerm = (): void => onSignal("SIGTERM");
+  const stopped = async (e: unknown, sig: "SIGINT" | "SIGTERM"): Promise<InitResult> => {
+    const at = frozen?.steps.find(s => s.state === "current")?.start;
+    // Once the signal is in, prepare answers with the stop; anything else here is a refusal from before a machine existed.
+    const had = e instanceof PrepareStoppedError && e.builderId !== undefined;
+    const where = waiting ? "while waiting for a machine slot" : at !== undefined ? `while ${at.charAt(0).toLowerCase()}${at.slice(1)}` : had ? "between stages" : "before anything booted";
+    const line =
+      e instanceof PrepareStoppedError && e.builderId !== undefined
+        ? e.kept
+          ? `Stopped ${where}. Your earlier builder ${attach?.name ?? GOLDEN_NAME} (${e.builderId}) was not stopped: it has a first life worth keeping and stays up at about $${opts.pricing.rateUsdPerHour(attach?.size ?? opts.pricing.defaultSize).toFixed(2)}/hr. wsp init --manifest ${path} attaches to it again; the sweep stops it once it is six hours old.`
+          : e.left === undefined
+            ? `Stopped ${where}. Builder ${e.builderId} is gone; nothing is billing.`
+            : `Stopped ${where}. Builder ${e.builderId} did not stop (${e.left}); ${SWEEP}`
+        : `Stopped ${where}. Nothing was booted; nothing is billing.`;
+    finalLine = line;
+    cancel(line, out);
+    await rt.close().catch((e: unknown) => log.error(`runtime close failed: ${e instanceof Error ? e.message : String(e)}`, out));
+    const code = exitCodeOf(sig);
+    io.exit(code);
+    return { code };
+  };
+  io.signals.on("SIGINT", onInt);
+  io.signals.on("SIGTERM", onTerm);
   let builder: GoldenBuilderView;
   try {
     for (let attempt = 0; ; attempt++) {
       try {
-        builder = await rt.golden.prepare({ name: GOLDEN_NAME });
+        builder = await rt.golden.prepare({ name: GOLDEN_NAME, signal: halt.signal });
         break;
       } catch (e) {
-        if (!isCapRefusal(e) || attempt + 1 >= retry.attempts) throw e;
+        if (halt.signal.aborted || !isCapRefusal(e) || attempt + 1 >= retry.attempts) throw e;
         log.warn(`Solari account at its machine cap; waiting ${Math.round(retry.waitMs / 1000)}s for a slot (${attempt + 1}/${retry.attempts}). Nothing is killed.`, out);
-        await new Promise(r => setTimeout(r, retry.waitMs));
+        waiting = true;
+        await sleep(retry.waitMs, halt.signal);
+        if (halt.signal.aborted) throw e;
+        waiting = false;
       }
     }
   } catch (e) {
+    // Awaited so the listeners stay on through the line, the close and the exit: a second signal there still answers.
+    if (signalled !== undefined) return await stopped(e, signalled);
     const view = stream.stop();
     off();
     if (view.failure === undefined) log.error(e instanceof Error ? e.message : String(e), out);
     // A failed frame means a machine existed and prepare killed it; without one the create itself refused.
     outro(`${view.failure !== undefined ? "That machine is gone." : "Nothing was booted."} Run wsp init again to start over; the recipe is kept.`, out);
     return { code: 1 };
+  } finally {
+    io.signals.off("SIGINT", onInt);
+    io.signals.off("SIGTERM", onTerm);
   }
   stream.stop();
   off();
