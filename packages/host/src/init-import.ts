@@ -85,15 +85,20 @@ export interface SecretReader {
   read(service: string): Promise<string>;
 }
 
+/** go-keyring, the library gh stores through, writes every macOS Keychain value as this prefix plus the base64 of
+ * the bytes and undoes it on read; gh on Linux reads hosts.yml as written, so the value is unwrapped before it lands. */
+const GO_KEYRING_PREFIX = "go-keyring-base64:";
+
 /** macOS's own consent dialog stands between this call and the secret; nothing is cached or logged. */
-export function keychainReader(): SecretReader & { command(service: string): { file: string; args: string[] } } {
+export function keychainReader(run: (file: string, args: string[]) => Promise<{ stdout: string }> = execFileAsync): SecretReader & { command(service: string): { file: string; args: string[] } } {
   const command = (service: string) => ({ file: "security", args: ["find-generic-password", "-s", service, "-w"] });
   return {
     command,
     async read(service) {
       const { file, args } = command(service);
-      const { stdout } = await execFileAsync(file, args);
-      return stdout.replace(/\n$/, "");
+      const { stdout } = await run(file, args);
+      const value = stdout.replace(/\n$/, "");
+      return value.startsWith(GO_KEYRING_PREFIX) ? Buffer.from(value.slice(GO_KEYRING_PREFIX.length), "base64").toString("utf8") : value;
     },
   };
 }

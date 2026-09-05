@@ -560,6 +560,25 @@ describe("keychainReader", () => {
     const r = keychainReader();
     expect(r.command("Claude Code-credentials")).toEqual({ file: "security", args: ["find-generic-password", "-s", "Claude Code-credentials", "-w"] });
   });
+
+  it("unwraps the go-keyring form gh stores its token in (74 characters for a 40-character token) and passes any other value through as read", async () => {
+    const token = "gho_xfakefakefakefakefakefakefakefakefak";
+    expect(token).toHaveLength(40);
+    const wrapped = `go-keyring-base64:${Buffer.from(token).toString("base64")}`;
+    expect(wrapped).toHaveLength(74);
+    const claude = '{"claudeAiOauth":{"accessToken":"sk-ant-x"}}';
+    const ran: string[][] = [];
+    const r = keychainReader(async (file, args) => {
+      ran.push([file, ...args]);
+      return { stdout: `${args[2] === "gh:github.com" ? wrapped : claude}\n` };
+    });
+    await expect(r.read("gh:github.com")).resolves.toBe(token);
+    await expect(r.read("Claude Code-credentials")).resolves.toBe(claude);
+    expect(ran).toEqual([
+      ["security", "find-generic-password", "-s", "gh:github.com", "-w"],
+      ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
+    ]);
+  });
 });
 
 describe("digestOf", () => {

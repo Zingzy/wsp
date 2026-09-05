@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The signing-in stage of wsp init: each login chosen as "sign in on the
-// machine" runs in this terminal over a pty on the builder, the tool's own
-// status command then says whether it landed, and the summary before the
-// hand-off offers a retry (with the no-browser variant when the table has one)
-// or a skip. What each login came to is written next to the import result so
+// The signing-in stage of wsp init: a login copied to the builder is checked
+// there with the tool's own status command; each login chosen as "sign in on
+// the machine" runs in this terminal over a pty on the builder, and the same
+// status command then says whether it landed. The summary before the hand-off
+// offers the machine sign-in for a copied login the check refused, and a retry
+// (with the no-browser variant when the table has one) or a skip for a sign-in
+// that failed. What each login came to is written next to the import result so
 // the golden's notes carry it.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { styleText } from "node:util";
@@ -74,6 +76,7 @@ export async function builderLink(rt: Runtime, builder: GoldenBuilderView, conne
 }
 
 export interface SignInStageOptions {
+  /** The logins the stage owns: a choice of copy is checked on the builder, any other is signed in there. */
   logins: readonly ManifestEntry[];
   /** A fresh link to the builder's daemon, dialled before each command so a dropped one costs that command alone. */
   dial(): Promise<BuilderLink>;
@@ -125,14 +128,67 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
   const statusMs = o.statusTimeoutMs ?? STATUS_MS;
   const outcomes: LoginOutcome[] = o.logins.map(e => ({ id: e.id, label: e.label, state: "skipped" }));
   if (outcomes.length === 0) return outcomes;
+  const isCopied = (e: ManifestEntry): boolean => e.choice === "copy";
+  const rows = (copied: boolean) => o.logins.map((e, i) => [e, outcomes[i]!] as const).filter(([e]) => isCopied(e) === copied);
 
+  /** The status command alone, for a login whose files were copied: a refusal hands the login to the machine sign-in below. */
+  const verify = async (entry: ManifestEntry, r: LoginOutcome): Promise<void> => {
+    const s = signInFor(agentName(entry));
+    r.state = "copied";
+    if (s.kind !== "command" || s.status === undefined) {
+      r.note = `not verified: no status command known for ${agentName(entry)}`;
+      return;
+    }
+    const command = s.status.command;
+    try {
+      const daemon = await o.dial();
+      try {
+        const status = await runQuiet(daemon.link, command, statusMs);
+        if (status.dropped) {
+          r.state = "not-signed-in";
+          r.note = "copied, but the machine's terminal link dropped during the status check";
+          return;
+        }
+        if (status.timedOut) {
+          r.state = "not-signed-in";
+          r.note = `copied, but ${command} did not answer within ${minutes(statusMs)}`;
+          return;
+        }
+        // The shell's own "not found": the files are there and nothing on the machine can read them yet; the page's
+        // checklist says to install the tool, as it does for a sign-in whose tool is missing.
+        if (status.exitCode === 127) {
+          r.command = command;
+          r.exit = 127;
+          r.note = `not verified: ${toolOf(command)} is not on the machine`;
+          return;
+        }
+        const signedIn = s.status.signedIn(status.output, status.exitCode);
+        r.state = signedIn ? "signed-in" : "not-signed-in";
+        r.note = signedIn ? `copied; ${command}` : `copied, but ${command} says not signed in`;
+      } finally {
+        daemon.close();
+      }
+    } catch (e) {
+      r.state = "not-signed-in";
+      r.note = `copied, but the check failed: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  };
+
+  const copied = rows(true);
+  if (copied.length > 0) log.step("Checking the logins copied to the machine", out);
+  for (const [entry, r] of copied) {
+    await verify(entry, r);
+    log.message(stateLine(r), { output: o.terminal.output, symbol: dim(S_BAR) });
+  }
+
+  const machine = rows(false);
   if (o.skipWhy !== undefined) {
-    for (const r of outcomes) r.note = o.skipWhy;
-    log.step(`Sign-ins on the machine skipped: ${outcomes.map(r => r.label).join(", ")}. ${o.skipWhy[0]!.toUpperCase()}${o.skipWhy.slice(1)}.`, out);
+    for (const [, r] of machine) r.note = o.skipWhy;
+    if (machine.length > 0) log.step(`Sign-ins on the machine skipped: ${machine.map(([, r]) => r.label).join(", ")}. ${o.skipWhy[0]!.toUpperCase()}${o.skipWhy.slice(1)}.`, out);
     return outcomes;
   }
 
-  log.step("Signing in on the machine", out);
+  if (machine.length > 0) log.step("Signing in on the machine", out);
 
   /** The command's pty and its status check over one fresh link; every failure is this login's note, never the run's end. */
   const attempt = async (entry: ManifestEntry, r: LoginOutcome, s: SignIn, command: string | undefined): Promise<void> => {
@@ -203,7 +259,10 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
     }
   };
 
+  /** Logins a sign-in was tried for here, pty or not: the offer after a failure is a retry for these, the sign-in itself for a copied login the check refused. */
+  const attempted = new Set<LoginOutcome>();
   const run = async (entry: ManifestEntry, r: LoginOutcome, s: SignIn, command: string | undefined): Promise<void> => {
+    attempted.add(r);
     const shown = command ?? "a shell on the machine; type the tool's sign-in command, then exit";
     o.terminal.output.write(`${styleText("cyan", "◇")}  ${r.label}${GUTTER}${dim(shown)}\n${dim(S_BAR)}  ${dim("the terminal below is the machine's; Ctrl-C ends the command")}\n`);
     r.command = command;
@@ -236,14 +295,15 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
     }
   };
 
-  for (const [i, entry] of o.logins.entries()) {
-    await pass(entry, outcomes[i]!, false);
-    log.message(stateLine(outcomes[i]!), { output: o.terminal.output, symbol: dim(S_BAR) });
+  for (const [entry, r] of machine) {
+    await pass(entry, r, false);
+    log.message(stateLine(r), { output: o.terminal.output, symbol: dim(S_BAR) });
   }
 
   for (;;) {
     note(summaryRows(outcomes, widthOf(o.terminal.output)).join("\n"), "Sign-ins", out);
-    // Not signed in, or not verifiable after a command that did not end clean: both get a retry or a skip.
+    // Not signed in (a copied login the check refused among them), or not verifiable after a command that did not
+    // end clean: both get the machine sign-in, or its retry, or a skip.
     const pending = outcomes.map((r, i) => [r, i] as const).filter(([r]) => r.state === "not-signed-in" || (r.state === "not-verified" && r.exit !== undefined && r.exit !== 0));
     if (pending.length === 0) break;
     for (const [r, i] of pending) {
@@ -251,7 +311,8 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
       const s = signInFor(agentName(entry));
       const fallback = s.kind === "command" ? s.fallback : undefined;
       const keys = ["r", ...(fallback !== undefined ? ["f"] : []), "s"];
-      const hint = [`r retry`, ...(fallback !== undefined ? [`f retry with ${fallback}`] : []), `s skip`].join("   ");
+      const again = attempted.has(r);
+      const hint = [again ? "r retry" : "r sign in on the machine", ...(fallback !== undefined ? [`f ${again ? "retry" : "sign in"} with ${fallback}`] : []), `s skip`].join("   ");
       log.message(`${r.label}${GUTTER}${dim(hint)}`, { output: o.terminal.output, symbol: styleText("yellow", "▲") });
       const key = await readKey(o.terminal.input, o.terminal.output, keys);
       if (key === "s" || key === "cancel") {
@@ -271,10 +332,12 @@ function toolOf(command: string): string {
   return command.split(" ").find(w => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w)) ?? command;
 }
 
-/** The logins still open after the stage, for the page's checklist: everything not proven signed in, each with what to run there. */
+/** The logins still open after the stage, for the page's checklist: everything not proven signed in, each with what to
+ * run there. A copied login nothing could check is left as it stands, unless its tool is missing: then the install is
+ * what is left to do. */
 export function openLogins(logins: readonly ManifestEntry[], outcomes: readonly LoginOutcome[]): { label: string; command: string }[] {
   return outcomes
-    .filter(r => r.state !== "signed-in")
+    .filter(r => r.state !== "signed-in" && (r.state !== "copied" || r.exit === 127))
     .map(r => {
       const entry = logins.find(l => l.id === r.id);
       const words = entry === undefined ? "sign in as the tool asks" : signInWords(signInFor(agentName(entry)));
@@ -301,6 +364,13 @@ export function noteLogins(path: string, outcomes: readonly LoginOutcome[]): { r
   return { replaced };
 }
 
-export function machineLogins(manifest: { entries: readonly ManifestEntry[] }, choices: ReadonlyMap<string, string>): ManifestEntry[] {
-  return manifest.entries.filter(e => e.rung === "logins" && choices.get(e.id) === "machine");
+/** The logins the stage owns, each carrying its answer: those to sign in on the machine, and those whose files
+ * went along (a copy answer on a ticked row) for the check. */
+export function stageLogins(manifest: { entries: readonly ManifestEntry[] }, choices: ReadonlyMap<string, string>, ticks: ReadonlySet<string>): ManifestEntry[] {
+  return manifest.entries.flatMap((e): ManifestEntry[] => {
+    if (e.rung !== "logins") return [];
+    const choice = choices.get(e.id);
+    if (choice === "machine") return [{ ...e, choice }];
+    return choice === "copy" && ticks.has(e.id) ? [{ ...e, choice }] : [];
+  });
 }

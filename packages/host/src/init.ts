@@ -40,7 +40,7 @@ import {
 import { CARD_FRAME, GUTTER, card, colourDepth, confirmPrompt, ellipsize, fmtDuration, helpLine, table, widthOf, wrap } from "./init-layout.js";
 import { stopKeptBuilder, updateRoad } from "./init-upgrade.js";
 import { readKey, rungSelect, type SelectItem } from "./init-select.js";
-import { OPEN_LINE, builderLink, machineLogins, noteLogins, openLogins, signInStage, type BuilderLink, type LoginOutcome, type SignInFlow } from "./init-signin.js";
+import { OPEN_LINE, builderLink, noteLogins, openLogins, signInStage, stageLogins, type BuilderLink, type LoginOutcome, type SignInFlow } from "./init-signin.js";
 import type { HostHandle } from "./server.js";
 
 export interface InitIO {
@@ -950,7 +950,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const flow: SignInFlow = { armed: false };
   // The relay names the builder's link this way; the line hook only gets the name.
   const builderTarget = `${builder.name} (builder)`;
-  const machine = machineLogins(offered, choices);
+  const staged = stageLogins(offered, choices, ticks);
   let outcomes: LoginOutcome[] | undefined;
   let checklist = checklistFor(manifest, choices, ticks, cut);
   // The page's seal stamps what each sign-in came to on the version; the served runtime carries that in.
@@ -976,7 +976,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   if (builder.screen === undefined) {
     const skipWhy = interactive ? undefined : io.isTTY ? "--yes asks nothing; sign in from the app's terminal" : "no terminal to sign in from; use the app's terminal";
     outcomes = await signInStage({
-      logins: machine,
+      logins: staged,
       dial: () => (opts.daemon ?? builderLink)(rt, builder),
       terminal: { input: io.input, output: io.output },
       ...(skipWhy !== undefined ? { skipWhy } : {}),
@@ -985,7 +985,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     });
     const notes = importResultPath(opts.statePath);
     if (noteLogins(notes, outcomes).replaced) log.warn(`${notes} could not be read; it was rewritten with the logins alone.`, out);
-    checklist = [...openLogins(machine, outcomes), ...secretLinesFor(manifest, ticks, cut)];
+    checklist = [...openLogins(staged, outcomes), ...secretLinesFor(manifest, ticks, cut)];
   }
   const url = `http://127.0.0.1:${handle.port}/`;
   await handoff(url, handle, io, interactive, checklist.length > 0, out);
