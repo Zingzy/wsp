@@ -38,15 +38,15 @@ const ROWS: SessionView[] = [
 ];
 
 /** The runtime records an event before it pushes it, so a later history reply holds everything emitted so far. */
-function fixtureApi(transcript: SessionEvent[] = [...SETTLED_A, ...RUNNING_B], rows: SessionView[] = ROWS) {
+function fixtureApi(transcript: SessionEvent[] = [...SETTLED_A, ...RUNNING_B], rows: SessionView[] = ROWS, ws: WorkspaceView = workspace) {
   const history: SessionEvent[] = [...transcript];
   const started: StartSessionOptions[] = [];
   const listeners = new Set<(e: ProtocolEvent) => void>();
   const api: Api = {
-    listWorkspaces: async () => [workspace],
-    getWorkspace: async () => workspace,
-    createWorkspace: async () => workspace,
-    createFromGoldenHead: async () => workspace,
+    listWorkspaces: async () => [ws],
+    getWorkspace: async () => ws,
+    createWorkspace: async () => ws,
+    createFromGoldenHead: async () => ws,
     watchStatuses: async () => [],
     nap: async () => workspace,
     wake: async () => workspace,
@@ -205,6 +205,65 @@ describe("switching threads while a turn runs", () => {
     expect(center().queryByText(/Found it in the keychain/)).toBeNull();
     emit({ type: "session.delta", ...A2, at: T0 + 91_300, kind: "text", text: " Wiring it in." });
     await center().findByText(/Adding GET \/ready\. Wiring it in\./);
+  });
+
+  it("with two threads running, a send from the latest view resumes the thread it shows, not the one started last", async () => {
+    const A2 = { ...A, turnId: "turn_a2" };
+    const transcript: SessionEvent[] = [
+      ...SETTLED_A,
+      ...RUNNING_B,
+      { type: "session.start", ...A2, at: T0 + 90_000, prompt: "add a readiness route too" },
+      { type: "session.delta", ...A2, at: T0 + 90_300, kind: "text", text: "Adding GET /ready." },
+      { type: "session.done", ...B, at: T0 + 91_000, result: { status: "completed", durationMs: 31_000, costUsd: 0.002 } },
+      { type: "session.end", ...B, at: T0 + 91_100, exitCode: 0, sawResult: true },
+    ];
+    const rows: SessionView[] = [
+      ROWS[0]!,
+      { ...ROWS[1]!, status: "completed", endedAt: T0 + 91_100 },
+      { id: "s_a2", workspaceId: WS, harness: "claude", status: "running", prompt: "add a readiness route too", startedAt: T0 + 90_000, threadId: "thr_a" },
+    ];
+    const { emit, started } = await mount(fixtureApi(transcript, rows, { ...workspace, claudeSessionId: "sess_a" }));
+    expect(center().queryByText("Adding GET /ready.")).toBeNull();
+    expect(center().getByTestId("settled-footer").textContent).toContain("completed");
+    await typeInto(composerEditor(), "check the login keychain too");
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]).toMatchObject({ prompt: "check the login keychain too", resume: "sess_b" });
+    const B2 = { ...B, turnId: "turn_b2" };
+    emit({ type: "session.start", ...B2, at: T0 + 120_000, prompt: "check the login keychain too" });
+    emit({ type: "session.delta", ...B2, at: T0 + 120_300, kind: "text", text: "Login keychain is unlocked." });
+    await center().findByText("Login keychain is unlocked.");
+    expect(center().getAllByText("check the login keychain too")).toHaveLength(1);
+    expect(center().getByText(/Working for/)).toBeDefined();
+    emit({ type: "session.done", ...B2, at: T0 + 121_000, result: { status: "completed", durationMs: 1_000, costUsd: 0.001 } });
+    emit({ type: "session.end", ...B2, at: T0 + 121_100, exitCode: 0, sawResult: true });
+    await waitFor(() => expect(center().queryByRole("button", { name: "Turn in flight" })).toBeNull());
+    expect(center().getByTestId("composer-editor")).toBeDefined();
+  });
+
+  it("a new thread asked for while two threads run shows nothing of either until its own session.start", async () => {
+    const A2 = { ...A, turnId: "turn_a2" };
+    const RUNNING_A2: SessionEvent[] = [
+      { type: "session.start", ...A2, at: T0 + 90_000, prompt: "add a readiness route too" },
+      { type: "session.delta", ...A2, at: T0 + 90_300, kind: "text", text: "Adding GET /ready." },
+    ];
+    const rows: SessionView[] = [ROWS[0]!, ROWS[1]!, { id: "s_a2", workspaceId: WS, harness: "claude", status: "running", prompt: "add a readiness route too", startedAt: T0 + 90_000, threadId: "thr_a" }];
+    const { emit } = await mount(fixtureApi([...SETTLED_A, ...RUNNING_B, ...RUNNING_A2], rows), "Adding GET /ready.");
+    fireEvent.click(screen.getByRole("button", { name: "New thread" }));
+    await waitFor(() => expect(center().getByRole("heading", { level: 1 }).textContent).toBe("What should we build in api?"));
+    emit({ type: "session.delta", ...B, at: T0 + 91_000, kind: "text", text: " Found it in the keychain." });
+    expect(center().queryByText(/Found it in the keychain/)).toBeNull();
+    emit({ type: "session.delta", ...A2, at: T0 + 91_300, kind: "text", text: " Wiring it in." });
+    expect(center().queryByText(/Wiring it in/)).toBeNull();
+    expect(center().getByRole("heading", { level: 1 }).textContent).toBe("What should we build in api?");
+    const C = { workspaceId: WS, sessionId: "sess_c", turnId: "turn_c", threadId: "thr_c" };
+    emit({ type: "session.start", ...C, at: T0 + 120_000, prompt: "third thread" });
+    emit({ type: "session.delta", ...C, at: T0 + 120_300, kind: "text", text: "Third answer." });
+    await center().findByText("Third answer.");
+    expect(center().queryByText(/Found it in the keychain/)).toBeNull();
+    expect(center().queryByText(/Adding GET \/ready/)).toBeNull();
+    emit({ type: "session.delta", ...B, at: T0 + 121_000, kind: "text", text: " Reading it now." });
+    expect(center().queryByText(/Reading it now/)).toBeNull();
   });
 
   it("a new thread asked for from an older thread's view unpins it and opens as the workspace's latest", async () => {

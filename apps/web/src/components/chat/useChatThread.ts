@@ -39,7 +39,7 @@ export interface ChatThreadHandle {
   readonly busy: boolean;
   /** True from a new-thread request until its first session.start: the next send must not resume the old session. */
   readonly fresh: boolean;
-  /** The harness session the next send resumes: a pinned thread's latest turn, else the workspace's latest; none while fresh. */
+  /** The harness session the next send resumes: the shown thread's latest turn, else the workspace's remembered one; none while fresh. */
   readonly resume: string | undefined;
   /** True while the turn a new thread left behind is still running on the machine. */
   readonly finishing: boolean;
@@ -127,9 +127,9 @@ function belongsToStale(stale: Extract<StaleTurn, { kind: "turn" }>, e: SessionE
   return e.turnId !== undefined && stale.turnId !== undefined ? e.turnId === stale.turnId : e.sessionId === stale.sessionId;
 }
 
-/** A view holds one thread: once its events carry a thread id, another thread's events are not its own. Fresh, it holds none yet. */
+/** A view holds one thread: once its events carry a thread id, another thread's events are not its own. Fresh, only a session.start can be its own. */
 function inHeldThread(state: ThreadState, e: SessionEvent): boolean {
-  if (state.fresh) return true;
+  if (state.fresh) return e.type === "session.start";
   const held = state.events.at(-1)?.threadId;
   return held === undefined || e.threadId === held;
 }
@@ -305,7 +305,7 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
     hydrated: hydratedFor === viewKey,
     busy: state.sending || view.running || finishing,
     fresh: state.fresh,
-    resume: state.fresh ? undefined : threadId === null ? remembered : view.latestTurn?.sessionId,
+    resume: state.fresh ? undefined : (view.latestTurn?.sessionId ?? (threadId === null ? remembered : undefined)),
     finishing,
     appendUserTurn,
     appendLocalError,

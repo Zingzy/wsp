@@ -184,6 +184,13 @@ describe("reduceEvent", () => {
     expect(reduceEvent(state(CHAT_STREAM.slice(0, 3)), B_DELTA, T0).events).toHaveLength(4);
   });
 
+  it("while fresh, a delta from any thread is dropped: only a session.start can open the person's own thread", () => {
+    const fresh = state([], { fresh: true, left: "thr_a" });
+    expect(reduceEvent(fresh, B_DELTA, T0)).toBe(fresh);
+    expect(reduceEvent(fresh, CHAT_STREAM[1]!, T0)).toBe(fresh);
+    expect(reduceEvent(fresh, B_START, T0).events).toEqual([B_START]);
+  });
+
   it("while fresh, the next session.start opens the thread and the left turn's end still clears the stale record", () => {
     const fresh = state([], { fresh: true, left: "thr_a", stale: A_TURN });
     const opened = reduceEvent(fresh, B_START, T0);
