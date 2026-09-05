@@ -5,7 +5,7 @@
 // and host are the real ones over fakes; only the terminal is faked.
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -24,7 +24,7 @@ import type { HostHandle } from "../src/server.js";
 import { startCallbackRelay } from "../src/relay.js";
 import type { ConnectOptions, DaemonSocket } from "../src/doctor.js";
 import { appendCommand, readCommand } from "../src/init-secrets.js";
-import { noteOutcomes } from "../src/init-signin.js";
+import { noteOutcomes, statusLine } from "../src/init-signin.js";
 import { fakePtyLink, type FakePtyLink } from "./fake-pty-link.js";
 import { EVERYTHING, FIXTURE } from "./init-fixture.js";
 import { guestAnswer, stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
@@ -147,6 +147,10 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
       read: async (service, account) => {
         reads.push(account === undefined ? service : `${service} (${account})`);
         return "gho_fake";
+      },
+      run: async command => {
+        reads.push(command);
+        return "sk-ant-x-helper\n";
       },
     },
     // One account and one state file per fake, as the cli has: a runtime rebuilt after a Keychain refusal sees the same machines.
@@ -377,9 +381,9 @@ describe("wsp init, interactive", () => {
     expect(out.slice(signing)).toContain("o opens it on this computer");
     expect(f.link.ptys.map(p => p.writes[0])).toEqual([
       "exec gh auth login || exit\r",
-      "gh auth status; printf '\\nWSP_STATUS %s\\n' $?; exit\r",
+      `${statusLine("gh auth status")}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`,
       "exec claude auth login || exit\r",
-      "claude auth status; printf '\\nWSP_STATUS %s\\n' $?; exit\r",
+      `${statusLine("claude auth status")}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`,
     ]);
     expect(f.link.ptys.every(p => p.killed)).toBe(true);
     expect(f.hooks[0]!.autoOpen(f.backends[0]!.machines[0]!.id, DEVICE_URL)).toBe(false);
@@ -844,9 +848,21 @@ describe("wsp init, everything else", () => {
     expect(f.link.ptys.filter(p => p.created["env"] !== undefined && "WSP_SECRET_LINE" in (p.created["env"] as object))).toEqual([]);
   });
 
-  it("on a terminal each cut secret is asked for hidden; the pasted value rides the pty's environment into the machine's secrets file, out of the screen and the run log", async () => {
+  it("on a terminal each cut secret is asked for hidden and set before any login is checked; the pasted value rides the pty's environment into the machine's secrets file, out of the screen and the run log, and the check that then names it says which file it came from", async () => {
     const f = fake();
-    writeFileSync(join(f.opts.home, ".zshrc"), "export A=1\nexport A_KEY=fake\n");
+    writeFileSync(join(f.opts.home, ".zshrc"), "export A=1\nexport ANTHROPIC_API_KEY=fake\n");
+    // claude on the builder sees the key once the secrets file holds it, and says so the way 2.1.257 does.
+    let keySet = false;
+    const script = f.link.script!;
+    f.link.script = (pty, line) => {
+      if (line.startsWith(appendCommand(false))) keySet = true;
+      if (line.includes("claude auth status") && line.includes("WSP_STATUS")) {
+        f.link.data(pty, keySet ? '{"loggedIn": true, "authMethod": "api_key", "apiKeySource": "ANTHROPIC_API_KEY"}\r\nWSP_STATUS 0\r\n' : '{"loggedIn": false, "authMethod": "none"}\r\nWSP_STATUS 1\r\n');
+        f.link.exit(pty, keySet ? 0 : 1);
+        return;
+      }
+      script(pty, line);
+    };
     const run = runInit(f.opts, f.io);
     for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
       await f.until(rung);
@@ -854,32 +870,38 @@ describe("wsp init, everything else", () => {
     }
     await f.until(BOOT);
     await f.press("y");
-    await f.until("Claude Code login: signed in (claude auth status)");
     await f.until("Secrets were cut from your files. Paste each to set it on the machine, or leave it empty to skip.");
+    expect(f.text()).not.toContain("Checking the logins copied to the machine");
     await f.until("cut from ~/.zshrc; the value is set on the machine and never shown here");
     await f.press(..."s3cret-value".split(""), KEY.enter);
-    await f.until("A_KEY: set in /etc/profile.d/wsp-secrets.sh on the machine");
+    await f.until("ANTHROPIC_API_KEY: set in /etc/profile.d/wsp-secrets.sh on the machine");
+    await f.until("Claude Code login: signed in (API key from ~/.zshrc, set on the machine as a secret; claude auth status)");
     await sealIt(f);
     const result = await run;
     expect(result.code).toBe(0);
-    expect(result.secrets).toEqual([{ name: "A_KEY", path: "~/.zshrc", state: "set" }]);
+    expect(result.secrets).toEqual([{ name: "ANTHROPIC_API_KEY", path: "~/.zshrc", state: "set" }]);
     const out = f.text();
-    expect(out.indexOf("Secrets were cut")).toBeGreaterThan(out.indexOf("Claude Code login: signed in"));
-    expect(out.indexOf("Secrets were cut")).toBeLessThan(out.indexOf("Ready to seal golden v1"));
-    expect(out).toMatch(/Secrets\n│\s+A_KEY\s+set on the machine\n/);
+    expect(out.indexOf("Secrets were cut")).toBeGreaterThan(out.indexOf("Ready"));
+    expect(out.indexOf("Secrets were cut")).toBeLessThan(out.indexOf("Checking the logins copied to the machine"));
+    expect(out.indexOf("Checking the logins copied to the machine")).toBeLessThan(out.indexOf("Ready to seal golden v1"));
+    expect(out).toMatch(/Secrets\n│\s+ANTHROPIC_API_KEY\s+set on the machine\n/);
     expect(out).not.toContain("s3cret");
-    // The machine's secrets file is read first (nothing there on a fresh builder, no fish), then the one write.
+    // The machine's secrets file is read first (nothing there on a fresh builder, no fish), then the one write, and
+    // only then the status checks, each with that file sourced.
     const read = f.link.ptys.find(p => p.writes[0]!.startsWith(readCommand()))!;
     expect(read.created["env"]).toEqual({ PS1: "" });
     const pty = f.link.ptys.find(p => p.created["env"] !== undefined && "WSP_SECRET_LINE" in (p.created["env"] as object))!;
-    expect(pty.created).toEqual({ cols: 200, rows: 50, shell: "/bin/sh", env: { PS1: "", WSP_SECRET_LINE: "export A_KEY='s3cret-value'" } });
+    expect(pty.created).toEqual({ cols: 200, rows: 50, shell: "/bin/sh", env: { PS1: "", WSP_SECRET_LINE: "export ANTHROPIC_API_KEY='s3cret-value'" } });
     expect(pty.writes).toEqual([`${appendCommand(false)}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`]);
     expect(pty.killed).toBe(true);
-    // gh's copy check, claude's sign-in with its check on the same link, the read, the write.
+    const lines = f.link.ptys.map(p => p.writes[0]!);
+    expect(lines.indexOf(pty.writes[0]!)).toBeLessThan(lines.findIndex(l => l.includes("auth status")));
+    expect(lines.filter(l => l.includes("auth status")).every(l => l.startsWith(". /etc/profile.d/wsp-secrets.sh 2>/dev/null; "))).toBe(true);
+    // The read, the write, gh's copy check, claude's sign-in with its check on the same link.
     expect(f.link.dials).toBe(4);
     expect(JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8"))).toMatchObject({
-      logins: [{ id: "logins/gh" }, { id: "logins/claude", state: "signed-in" }],
-      secrets: [{ name: "A_KEY", path: "~/.zshrc", state: "set" }],
+      logins: [{ id: "logins/gh" }, { id: "logins/claude", state: "signed-in", note: "API key from ~/.zshrc, set on the machine as a secret; claude auth status" }],
+      secrets: [{ name: "ANTHROPIC_API_KEY", path: "~/.zshrc", state: "set" }],
     });
     expect(readFileSync(join(dirname(f.opts.statePath), "init.log"), "utf8")).not.toContain("s3cret");
   });
@@ -1245,7 +1267,7 @@ describe("wsp init, logins copied to the machine", () => {
       { rung: "logins", id: "logins/kube", label: "kubectl config", group: "CLI logins", paths: ["~/.kube/config"], bytes: 900, default: "bring" },
     ],
   };
-  const STATUS_LINE = "gh auth status; printf '\\nWSP_STATUS %s\\n' $?; exit\r";
+  const STATUS_LINE = `${statusLine("gh auth status")}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`;
 
   /** gh on the fake builder: its status names the copied token invalid (with `stale`, the second account's beside a
    * good first one) until gh auth login has run there. */
@@ -1353,6 +1375,9 @@ describe("wsp init, logins copied to the machine", () => {
         if (account === "other") throw new Error(`Command failed: security find-generic-password -s ${service} -a other -w\nsecurity: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.\n`);
         return "gho_fake";
       },
+      run: async () => {
+        throw new Error("no helper in this fixture");
+      },
     };
     mkdirSync(join(f.opts.home, ".config", "gh"), { recursive: true });
     writeFileSync(join(f.opts.home, ".config", "gh", "hosts.yml"), "github.com:\n    git_protocol: ssh\n    users:\n        other:\n        Zingzy:\n    user: Zingzy\n");
@@ -1377,6 +1402,101 @@ describe("wsp init, logins copied to the machine", () => {
     expect(landed.logins[0]).toMatchObject({ id: "logins/gh", state: "signed-in", left: "other left behind: no token in the Keychain" });
   });
 
+  it("a Claude login with an apiKeyHelper runs the helper once, before the boot and with the Keychain reads; a helper that fails there flips the row to a sign-in on the machine with the reason", async () => {
+    const withHelper: Manifest = {
+      entries: [
+        FIXTURE.entries[0]!,
+        { rung: "agents", id: "agents/claude", label: "Claude Code", paths: ["~/.claude/settings.json"], bytes: 60, default: "bring" },
+        { rung: "logins", id: "logins/claude", label: "Claude Code login", group: "Agent logins", paths: ["Helper: ~/.claude/settings.json"], bytes: 0, default: "bring", detail: "Claude Code uses the apiKeyHelper in ~/.claude/settings.json" },
+      ],
+    };
+    const helper = "security find-generic-password -s anthropic-api-key -w";
+    const settings = (f: Fake, line = helper): void => {
+      mkdirSync(join(f.opts.home, ".claude"), { recursive: true });
+      writeFileSync(join(f.opts.home, ".claude", "settings.json"), `{"apiKeyHelper": "${line}"}`);
+    };
+    const saved = (f: Fake): void => {
+      const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
+      dirs.push(dir);
+      f.opts.manifestPath = join(dir, "recipe.json");
+      writeFileSync(f.opts.manifestPath, JSON.stringify({ entries: withHelper.entries.map(e => ({ ...e, bring: true, ...(e.rung === "logins" ? { choice: "copy" } : {}) })) }));
+    };
+    const f = fake({ tty: false });
+    settings(f);
+    saved(f);
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    expect(f.reads).toEqual([helper]);
+    const out = f.text();
+    const said = out.indexOf("Running the ~/.claude/settings.json helper, as the saved recipe answered copy; macOS may ask you to allow it.");
+    expect(said).toBeGreaterThan(-1);
+    expect(said).toBeLessThan(out.search(BOOT));
+    expect(out).toContain("Claude Code login: signed in (copied; claude auth status)");
+    // The key travelled as the pack's secret and the copied settings.json reads it on the machine.
+    const landed = JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8")) as { files: { skipped: unknown[] } };
+    expect(landed.files.skipped).toEqual([]);
+    expect(readFileSync(join(dirname(f.opts.statePath), "init.log"), "utf8")).not.toContain("sk-ant-x-helper");
+
+    // A settings.json the pack leaves out (here a link into a dotfiles checkout outside home) still gets its key read on
+    // the machine: the pack writes a settings.json naming only the key file, and the row says so.
+    const bare = fake({ tty: false });
+    settings(bare);
+    const outside = mkdtempSync(join(tmpdir(), "wsp-init-dotfiles-"));
+    dirs.push(outside);
+    renameSync(join(bare.opts.home, ".claude", "settings.json"), join(outside, "settings.json"));
+    symlinkSync(join(outside, "settings.json"), join(bare.opts.home, ".claude", "settings.json"));
+    saved(bare);
+    const bareResult = await runInit(bare.opts, bare.io);
+    expect(bareResult.code).toBe(0);
+    expect(bare.reads).toEqual([helper]);
+    const bareNote = "the machine's settings.json names only the key file; your Claude Code config stayed here";
+    expect(bare.text()).toContain(`Claude Code login: signed in (copied; claude auth status; ${bareNote})`);
+    expect(bareResult.logins?.[0]).toEqual({ id: "logins/claude", label: "Claude Code login", state: "signed-in", note: "copied; claude auth status", left: bareNote });
+    const landedBare = JSON.parse(readFileSync(join(dirname(bare.opts.statePath), "golden-import.json"), "utf8")) as { files: { skipped: unknown[] } };
+    expect(landedBare.files.skipped).toEqual([
+      { id: "agents/claude", path: "~/.claude/settings.json", note: `a link to ${realpathSync(outside)}/settings.json, outside your home directory` },
+      { id: "logins/claude", path: "Helper: ~/.claude/settings.json", note: bareNote },
+    ]);
+
+    // A helper written with its key inline fails without stderr: the command line is what the shell's error carries, and it never reaches the terminal or the log.
+    const inline = "printf sk-ant-x-inline; exit 1";
+    const refused = fake({ yes: true });
+    settings(refused, inline);
+    saved(refused);
+    refused.opts.secrets = {
+      read: async () => {
+        throw new Error("no Keychain item in this fixture");
+      },
+      run: async command => {
+        refused.reads.push(command);
+        throw Object.assign(new Error(`Command failed: /bin/sh -c ${command}\n`), { code: 1 });
+      },
+    };
+    expect((await runInit(refused.opts, refused.io)).code).toBe(0);
+    expect(refused.reads).toEqual([inline]);
+    // On a terminal the spinner names what runs: the helper alone here, no Keychain item being read.
+    expect(refused.text()).toContain("Running the ~/.claude/settings.json helper");
+    expect(refused.text()).not.toContain("Reading your Keychain");
+    expect(refused.text()).toContain("Claude Code login: the ~/.claude/settings.json helper failed (exit status 1); changed to sign in on the machine.");
+    expect(refused.text()).not.toContain("sk-ant-x-inline");
+    expect(readFileSync(join(dirname(refused.opts.statePath), "init.log"), "utf8")).not.toContain("sk-ant-x-inline");
+    expect(loadManifest(join(dirname(refused.opts.statePath), "golden-recipe.json")).entries.find(e => e.id === "logins/claude")?.choice).toBe("machine");
+    // The copied settings.json lost its helper line, since the command runs on this computer only.
+    const landedRefused = JSON.parse(readFileSync(join(dirname(refused.opts.statePath), "golden-import.json"), "utf8")) as { files: { skipped: unknown[] } };
+    expect(landedRefused.files.skipped).toEqual([{ id: "agents/claude", path: "~/.claude/settings.json", note: "apiKeyHelper left out of the copy: the command runs on this computer only" }]);
+  });
+
+  it("the Claude Code login row explains the OAuth rule only when the OAuth credential is on it; a row of API key sources gets the plain login line", () => {
+    const claude = (paths: string[], detail: string) => selectItem({ rung: "logins", id: "logins/claude", label: "Claude Code login", group: "Agent logins", paths, bytes: 0, default: "bring", detail }).detail[1];
+    expect(claude(["Keychain: Claude Code-credentials", "Helper: ~/.claude/settings.json"], "Claude Code uses the apiKeyHelper in ~/.claude/settings.json; also found: OAuth credentials")).toBe(
+      "Claude Code uses the apiKeyHelper in ~/.claude/settings.json; also found: OAuth credentials; Anthropic's terms forbid passing the OAuth credential along, so with it alone the default is to sign in on the machine.",
+    );
+    expect(claude(["~/.claude/.credentials.json"], "Claude Code uses OAuth credentials")).toContain("Anthropic's terms forbid passing the OAuth credential along");
+    expect(claude(["Helper: ~/.claude/settings.json"], "Claude Code uses the apiKeyHelper in ~/.claude/settings.json")).toBe("Claude Code uses the apiKeyHelper in ~/.claude/settings.json; copy brings it along; sign in does it in this terminal after the build");
+    expect(claude([], "Claude Code uses the API key exported in ~/.zshrc (set on the machine in the secrets step if ~/.zshrc comes along)")).toBe(
+      "Claude Code uses the API key exported in ~/.zshrc (set on the machine in the secrets step if ~/.zshrc comes along); copy brings it along; sign in does it in this terminal after the build",
+    );
+  });
+
   it("a gh login none of whose accounts has a Keychain item is refused with every account named and signs in on the machine", async () => {
     const f = fake({ yes: true });
     withGhCopy(f);
@@ -1384,6 +1504,9 @@ describe("wsp init, logins copied to the machine", () => {
       read: async (service, account) => {
         f.reads.push(`${service} (${account})`);
         throw new Error(`Command failed: security find-generic-password -s ${service} -a ${account} -w\nsecurity: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.\n`);
+      },
+      run: async () => {
+        throw new Error("no helper in this fixture");
       },
     };
     mkdirSync(join(f.opts.home, ".config", "gh"), { recursive: true });
@@ -1504,7 +1627,7 @@ describe("wsp init, flags and no terminal", () => {
     // The copied gh login is checked on the builder with nobody here; the one sign-in chosen for the machine is skipped and said so.
     expect(f.text()).toContain("GitHub CLI login: signed in (copied; gh auth status)");
     expect(f.text()).toContain("Sign-ins on the machine skipped: Claude Code login. No terminal to sign in from; use the app's terminal.");
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual(["gh auth status; printf '\\nWSP_STATUS %s\\n' $?; exit\r"]);
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual([`${statusLine("gh auth status")}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`]);
     expect(f.link.dials).toBe(1);
     expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({
       logins: [
@@ -1521,6 +1644,9 @@ describe("wsp init, flags and no terminal", () => {
       read: async service => {
         f.reads.push(service);
         throw new Error(`Command failed: security find-generic-password -s ${service} -w\nsecurity: SecKeychainSearchCopyNext: User canceled the operation.\n`);
+      },
+      run: async () => {
+        throw new Error("no helper in this fixture");
       },
     };
     mkdirSync(join(f.opts.home, ".config", "gh"), { recursive: true });
@@ -1574,6 +1700,9 @@ describe("wsp init, flags and no terminal", () => {
       read: async service => {
         f.reads.push(service);
         throw new Error("security: User canceled the operation.");
+      },
+      run: async () => {
+        throw new Error("no helper in this fixture");
       },
     };
     const result = await runInit(f.opts, f.io);
@@ -1987,7 +2116,7 @@ describe("wsp init, flags and no terminal", () => {
     expect(uploads()).toBe(1);
 
     const f = fake({ yes: true, tty: false, home: first.opts.home, manifestPath: recipePath(first.opts.statePath) });
-    f.opts.secrets = { read: async () => "gho_new" };
+    f.opts.secrets = { read: async () => "gho_new", run: async () => { throw new Error("no helper in this fixture"); } };
     f.opts.runtime = recipe => {
       f.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
@@ -2236,6 +2365,9 @@ describe("wsp init, flags and no terminal", () => {
       read: async service => {
         if (service.includes("gh")) throw new Error("User canceled");
         return "tok";
+      },
+      run: async () => {
+        throw new Error("no helper in this fixture");
       },
     };
     first.opts.runtime = recipe => {

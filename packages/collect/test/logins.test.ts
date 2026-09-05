@@ -14,7 +14,6 @@ describe("logins", () => {
     ["vercel on Linux", "linux", { "~/.config/com.vercel.cli/auth.json": 100 }, {}, "logins/vercel", ["~/.config/com.vercel.cli/auth.json"], "bring"],
     ["aws", "darwin", { "~/.aws/credentials": 120, "~/.aws/config": 300, "~/.aws/sso/cache/x.json": 900 }, {}, "logins/aws", ["~/.aws/credentials", "~/.aws/config"], "bring"],
     ["kubectl", "darwin", { "~/.kube/config": 6000 }, {}, "logins/kube", ["~/.kube/config"], "bring"],
-    ["Claude Code on Linux", "linux", { "~/.claude/.credentials.json": 800 }, {}, "logins/claude", ["~/.claude/.credentials.json"], "skip"],
     ["Codex", "darwin", { "~/.codex/auth.json": 900 }, {}, "logins/codex", ["~/.codex/auth.json"], "bring"],
     ["Gemini CLI", "darwin", { "~/.gemini/oauth_creds.json": 500 }, {}, "logins/gemini", ["~/.gemini/oauth_creds.json"], "bring"],
     ["OpenCode", "darwin", { "~/.local/share/opencode/auth.json": 200 }, {}, "logins/opencode", ["~/.local/share/opencode/auth.json"], "bring"],
@@ -29,8 +28,49 @@ describe("logins", () => {
     const host = fakeHost({ exec: { 'security find-generic-password -s Claude Code-credentials': "keychain: ...\n" } });
     const rows = await detectLogins(host);
     expect(rows).toEqual([
-      { rung: "logins", id: "logins/claude", label: "Claude Code login", group: "Agent logins", paths: ["Keychain: Claude Code-credentials"], bytes: 0, default: "skip" },
+      { rung: "logins", id: "logins/claude", label: "Claude Code login", group: "Agent logins", paths: ["Keychain: Claude Code-credentials"], bytes: 0, default: "skip", detail: "Claude Code uses OAuth credentials" },
     ]);
+  });
+
+  it("Claude Code on Linux keeps its credentials file: presence only, sign in on the machine by default", async () => {
+    const rows = await detectLogins(fakeHost({ platform: "linux", files: { "~/.claude/.credentials.json": 800 } }));
+    expect(rows).toEqual([
+      { rung: "logins", id: "logins/claude", label: "Claude Code login", group: "Agent logins", paths: ["~/.claude/.credentials.json"], bytes: 800, default: "skip", detail: "Claude Code uses OAuth credentials" },
+    ]);
+  });
+
+  it("Claude Code with all three key sources names the one in use, the API key exported in the rc file, and lists the rest; an API key source makes the row a copy", async () => {
+    const host = fakeHost({
+      files: { "~/.zshrc": "export A=1\nexport ANTHROPIC_API_KEY=sk-ant-x\n", "~/.claude/settings.json": '{"apiKeyHelper": "security find-generic-password -s anthropic-api-key -w", "model": "opus"}' },
+      exec: { 'security find-generic-password -s Claude Code-credentials': "keychain: ...\n" },
+    });
+    const rows = await detectLogins(host);
+    expect(rows).toEqual([
+      {
+        rung: "logins",
+        id: "logins/claude",
+        label: "Claude Code login",
+        group: "Agent logins",
+        paths: ["Keychain: Claude Code-credentials", "Helper: ~/.claude/settings.json"],
+        bytes: 0,
+        default: "bring",
+        detail: "Claude Code uses the API key exported in ~/.zshrc (set on the machine in the secrets step if ~/.zshrc comes along); also found: the apiKeyHelper in ~/.claude/settings.json, OAuth credentials",
+      },
+    ]);
+  });
+
+  it("Claude Code with only an apiKeyHelper is a copy of the key the helper prints; with only an exported key the row carries no path and checks the secret", async () => {
+    const helper = await detectLogins(fakeHost({ files: { "~/.claude/settings.json": '{"apiKeyHelper": "security find-generic-password -s anthropic-api-key -w"}' } }));
+    expect(helper).toEqual([
+      { rung: "logins", id: "logins/claude", label: "Claude Code login", group: "Agent logins", paths: ["Helper: ~/.claude/settings.json"], bytes: 0, default: "bring", detail: "Claude Code uses the apiKeyHelper in ~/.claude/settings.json" },
+    ]);
+    const exported = await detectLogins(fakeHost({ platform: "linux", files: { "~/.bashrc": "ANTHROPIC_API_KEY=sk-ant-x; export ANTHROPIC_API_KEY\n" } }));
+    expect(exported).toEqual([
+      { rung: "logins", id: "logins/claude", label: "Claude Code login", group: "Agent logins", paths: [], bytes: 0, default: "bring", detail: "Claude Code uses the API key exported in ~/.bashrc (set on the machine in the secrets step if ~/.bashrc comes along)" },
+    ]);
+    // A settings.json without a helper, or one that is not JSON, is no source.
+    expect(await detectLogins(fakeHost({ files: { "~/.claude/settings.json": '{"model": "opus"}' } }))).toEqual([]);
+    expect(await detectLogins(fakeHost({ files: { "~/.claude/settings.json": "{ not json" } }))).toEqual([]);
   });
 
   it("gh with its token in the macOS Keychain carries that item as a second path and still defaults to copy", async () => {
@@ -59,13 +99,15 @@ describe("logins", () => {
     ]);
   });
 
-  it("never reads a login file and never asks the Keychain for a secret", async () => {
+  it("never reads a login file and never asks the Keychain for a secret; only the rc files and Claude's settings are read, for names", async () => {
     const host = fakeHost({
-      files: { "~/.config/gh/hosts.yml": "oauth_token: x", "~/.codex/auth.json": "{}", "~/.aws/credentials": "k", "~/.hermes/.env": "ANTHROPIC_API_KEY=sk-ant-x", "~/.pi/agent/auth.json": "{}" },
+      files: { "~/.config/gh/hosts.yml": "oauth_token: x", "~/.codex/auth.json": "{}", "~/.aws/credentials": "k", "~/.hermes/.env": "ANTHROPIC_API_KEY=sk-ant-x", "~/.pi/agent/auth.json": "{}", "~/.zshrc": "export A=1\n" },
       exec: { 'security find-generic-password -s Claude Code-credentials': "x" },
     });
     await detectLogins(host);
-    expect(host.calls.filter(c => c.startsWith("read"))).toEqual([]);
+    const reads = host.calls.filter(c => c.startsWith("read")).map(c => c.slice("read /Users/dev/".length));
+    expect(reads).toContain(".zshrc");
+    expect(reads.every(r => r === ".claude/settings.json" || r.startsWith(".config/fish/") || /^\.[a-z_]+$/.test(r))).toBe(true);
     expect(host.calls.filter(c => c.includes(" -w"))).toEqual([]);
   });
 

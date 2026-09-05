@@ -284,6 +284,7 @@ exports[`collect > matches the fixture laptop snapshot 1`] = `
     {
       "bytes": 0,
       "default": "skip",
+      "detail": "Claude Code uses OAuth credentials",
       "group": "Agent logins",
       "id": "logins/claude",
       "label": "Claude Code login",

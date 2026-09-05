@@ -8,7 +8,7 @@ import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readF
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { AGENTS, FISH_CONF_D, MANAGER_HOMES, MCP_BIN_DIRS, MCP_CONFIGS, type ManifestEntry, RC_NAMES, READ_LIMIT, isRcPath, managedRc, rcFiles, sourcedPaths, stripExports } from "@wsp/collect";
+import { AGENTS, CLAUDE_SETTINGS, FISH_CONF_D, MANAGER_HOMES, MCP_BIN_DIRS, MCP_CONFIGS, type ManifestEntry, RC_NAMES, READ_LIMIT, isRcPath, managedRc, rcFiles, sourcedPaths, stripExports } from "@wsp/collect";
 import {
   agentInstallsFor,
   editorInstallsFor,
@@ -31,10 +31,13 @@ import {
   type PlannedSecret,
   type SkippedPath,
   secretKey,
+  secretPath,
+  withApiKeyHelper,
 } from "@wsp/engine";
 import { CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, tarPackCommand } from "./doctor.js";
 
 const execFileAsync = promisify(execFile);
+const GUEST_HOME = "/root";
 
 /** An rc file by name at HOME or one directory deep (a dotfiles directory keeps dotted copies), plus fish's own config
  * and conf.d; a same-named file deeper down belongs to some program and is left as found. Inside a dotfiles manager's
@@ -88,13 +91,16 @@ function rcIdentities(home: string): Set<string> {
 export interface SecretReader {
   /** The secret stored under a Keychain service, filed under the account when one is given; rejects when the item is missing or the person refuses the consent dialog. */
   read(service: string, account?: string): Promise<string>;
+  /** What a helper command prints on this computer, run under sh as the tool would run it; rejects when it fails. */
+  run(command: string): Promise<string>;
 }
 
 /** go-keyring, the library gh stores through, writes every macOS Keychain value as this prefix plus the base64 of
  * the bytes and undoes it on read; gh on Linux reads hosts.yml as written, so the value is unwrapped before it lands. */
 const GO_KEYRING_PREFIX = "go-keyring-base64:";
 
-/** macOS's own consent dialog stands between this call and the secret; nothing is cached or logged. */
+/** macOS's own consent dialog stands between this call and the secret; nothing is cached or logged. A helper
+ * command that reads the Keychain raises the same dialog, under the same read. */
 export function keychainReader(run: (file: string, args: string[]) => Promise<{ stdout: string }> = execFileAsync): SecretReader & { command(service: string, account?: string): { file: string; args: string[] } } {
   const command = (service: string, account?: string) => ({ file: "security", args: ["find-generic-password", "-s", service, ...(account === undefined ? [] : ["-a", account]), "-w"] });
   return {
@@ -105,14 +111,23 @@ export function keychainReader(run: (file: string, args: string[]) => Promise<{ 
       const value = stdout.replace(/\n$/, "");
       return value.startsWith(GO_KEYRING_PREFIX) ? Buffer.from(value.slice(GO_KEYRING_PREFIX.length), "base64").toString("utf8") : value;
     },
+    async run(line) {
+      const { stdout } = await run("/bin/sh", ["-c", line]);
+      return stdout.replace(/\n$/, "");
+    },
   };
 }
 
 /** Claude Code's installer is the one curl into a shell the rules allow. */
 export const CLAUDE_INSTALLER: AgentInstaller = { name: "Claude Code", install: GOLDEN_SETUP, smoke: GOLDEN_SMOKE };
 
-/** The last line `security` printed; its stderr names the cause and never the secret. */
-function secretFailure(e: unknown): string {
+/** The last line `security` printed, since its stderr names the cause and never the secret. A helper's failure is its
+ * exit status alone: the command line and whatever it printed may carry the key. */
+function secretFailure(e: unknown, helper: boolean): string {
+  if (helper) {
+    const code = e instanceof Error ? (e as { code?: unknown }).code : undefined;
+    return typeof code === "number" ? `exit status ${code}` : typeof code === "string" ? code : "no exit status";
+  }
   const lines = (e instanceof Error ? e.message : String(e)).split("\n").map(l => l.trim()).filter(l => l !== "");
   return lines.at(-1) ?? "unknown error";
 }
@@ -120,14 +135,16 @@ function secretFailure(e: unknown): string {
 export interface ReadSecrets {
   /** Secret by its key (see secretKey), for the pack. */
   values: Map<string, string>;
-  /** Logins none of whose items were read, with the reason security gave for each, after the account when the item is per user. */
-  refused: { id: string; service: string; reason: string }[];
-  /** Accounts with no item of their own on a login another of whose items was read: the login copies without them. */
-  dropped: { id: string; service: string; account: string; reason: string }[];
+  /** Logins none of whose items were read, with the reason security gave for each, after the account when the item is per user; `command` names a helper that failed. */
+  refused: { id: string; service: string; command?: string; reason: string }[];
+  /** Items not read on a login another of whose items was read: the login copies without them; `left` is the row detail. */
+  dropped: { id: string; service: string; account?: string; left: string; reason: string }[];
 }
 
-/** The row detail for an account whose Keychain item the copy went without. */
-export const leftBehind = (account: string): string => `${account} left behind: no token in the Keychain`;
+/** The row detail for an item the copy went without: an account's Keychain token, or another of a login's items. */
+export const leftBehind = (what: string, why = "no token in the Keychain"): string => `${what} left behind: ${why}`;
+
+const leftBehindItem = (s: PlannedSecret): string => (s.command === undefined ? leftBehind(s.service) : leftBehind("the helper's key", "the helper did not run here"));
 
 /** The Keychain items the ticked rows would copy, in plan order, one per account where the tool files them so.
  * Runs before anything boots so a refused consent dialog never costs a machine. */
@@ -139,21 +156,23 @@ export async function readSecrets(wanted: readonly PlannedSecret[], reader: Secr
   const out: ReadSecrets = { values: new Map(), refused: [], dropped: [] };
   const failed: { s: PlannedSecret; reason: string }[] = [];
   for (const s of wanted) {
+    // One value per key: a helper two guest files render from runs once, so the consent dialog shows once.
+    if (out.values.has(secretKey(s)) || failed.some(f => secretKey(f.s) === secretKey(s))) continue;
     try {
-      out.values.set(secretKey(s), await reader.read(s.service, s.account));
+      out.values.set(secretKey(s), s.command === undefined ? await reader.read(s.service, s.account) : await reader.run(s.command));
     } catch (e) {
-      failed.push({ s, reason: secretFailure(e) });
+      failed.push({ s, reason: secretFailure(e, s.command !== undefined) });
     }
   }
   const read = new Set(wanted.filter(s => out.values.has(secretKey(s))).map(s => s.id));
   for (const { s, reason } of failed) {
-    if (s.account !== undefined && read.has(s.id)) {
-      out.dropped.push({ id: s.id, service: s.service, account: s.account, reason });
+    if (read.has(s.id)) {
+      out.dropped.push({ id: s.id, service: s.service, ...(s.account !== undefined ? { account: s.account } : {}), left: s.account !== undefined ? leftBehind(s.account) : leftBehindItem(s), reason });
       continue;
     }
     const named = s.account === undefined ? reason : `${s.account}: ${reason}`;
     const row = out.refused.find(r => r.id === s.id);
-    if (row === undefined) out.refused.push({ id: s.id, service: s.service, reason: named });
+    if (row === undefined) out.refused.push({ id: s.id, service: s.service, ...(s.command !== undefined ? { command: s.command } : {}), reason: named });
     else row.reason = `${row.reason}; ${named}`;
   }
   return out;
@@ -204,6 +223,8 @@ export interface PackOptions {
   home: string;
   /** `~`-relative directories the recipe marks as a dotfiles manager's home, besides the usual ones. */
   managerHomes?: readonly string[];
+  /** Whether ~/.claude/settings.json is among the plan's files, in this pack or an earlier one this pack lands over; left out, this pack's files decide. */
+  settingsPlanned?: boolean;
 }
 
 /** Copies the planned files into a staging tree, renders each secret into it,
@@ -288,11 +309,15 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
     // the account it moved to is placed and the host token follows it.
     for (const s of plan.secrets) {
       if (opts.secrets.has(secretKey(s))) continue;
-      if (s.account === undefined || s.drop === undefined || refused.has(s.id)) {
-        skipped.push({ id: s.id, path: `Keychain: ${secretKey(s)}`, note: "not read from the Keychain; sign in on the machine" });
+      if (refused.has(s.id)) {
+        skipped.push({ id: s.id, path: secretPath(s), note: s.command === undefined ? "not read from the Keychain; sign in on the machine" : "the helper did not run here; sign in on the machine" });
         continue;
       }
-      skipped.push({ id: s.id, path: `Keychain: ${secretKey(s)}`, note: leftBehind(s.account) });
+      if (s.account === undefined || s.drop === undefined) {
+        skipped.push({ id: s.id, path: secretPath(s), note: leftBehindItem(s) });
+        continue;
+      }
+      skipped.push({ id: s.id, path: secretPath(s), note: leftBehind(s.account) });
       const target = join(stage, s.dest);
       if (existsSync(target)) writeFileSync(target, s.drop(readFileSync(target, "utf8")));
     }
@@ -304,6 +329,31 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
       const existing = existsSync(target) ? readFileSync(target, "utf8") : undefined;
       writeFileSync(target, s.place(secret, existing), { mode: 0o600 });
       chmodSync(target, 0o600);
+    }
+    // The copied Claude settings name a helper that runs on this computer. On the machine it reads the key file the
+    // login row placed, or goes when no key travelled: Claude Code runs a configured helper for every request, so
+    // one that fails there would shadow any other login (measured on 2.1.257).
+    const settingsSource = join(opts.home, CLAUDE_SETTINGS.slice(2));
+    const claude = files.find(f => f.source === settingsSource || f.source === dirname(settingsSource));
+    const settingsStaged = claude === undefined ? undefined : join(stage, claude.dir ? `${claude.dest}/settings.json` : claude.dest);
+    const key = plan.secrets.find(s => s.command !== undefined && opts.secrets.has(secretKey(s)));
+    const reads = (k: PlannedSecret): string => `cat ${GUEST_HOME}/${k.dest}`;
+    if (claude !== undefined && settingsStaged !== undefined && existsSync(settingsStaged)) {
+      const text = readFileSync(settingsStaged, "utf8");
+      const rewritten = withApiKeyHelper(text, key === undefined ? undefined : reads(key));
+      if (rewritten !== undefined && rewritten !== text) {
+        writeFileSync(settingsStaged, rewritten);
+        if (key === undefined) skipped.push({ id: claude.id, path: CLAUDE_SETTINGS, note: "apiKeyHelper left out of the copy: the command runs on this computer only" });
+      }
+    } else if (key !== undefined && (claude !== undefined || !opts.settingsPlanned)) {
+      // A settings.json that did not travel stays here whole, by the person's tick; the one written names the key file and nothing else.
+      const minimal = withApiKeyHelper(undefined, reads(key));
+      if (minimal !== undefined) {
+        const target = join(stage, dirname(key.dest), "settings.json");
+        mkdirSync(dirname(target), { recursive: true });
+        writeFileSync(target, minimal);
+        skipped.push({ id: key.id, path: secretPath(key), note: "the machine's settings.json names only the key file; your Claude Code config stayed here" });
+      }
     }
     for (const [g, mode] of modes) if (existsSync(join(stage, g))) chmodSync(join(stage, g), mode);
     if (existsSync(join(stage, ".ssh"))) chmodSync(join(stage, ".ssh"), 0o700);
@@ -398,7 +448,6 @@ export function digestOf(source: string, excludes: readonly string[], home: stri
 
 /** The guest's Claude config dir, relative to its home; the laptop's ~/.claude lands there. */
 const CLAUDE_REL = CONFIG_DIR.replace(/^\/root\//, "");
-const GUEST_HOME = "/root";
 
 /** Where a laptop config lands on the guest, by the same rewrite the files plan applies. */
 function guestPath(tildePath: string): string {
@@ -458,13 +507,15 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
   const secretDigests = () =>
     plan.secrets.flatMap(s => {
       const value = opts.secrets.get(secretKey(s));
-      return value === undefined ? [] : [{ id: s.id, path: `Keychain: ${secretKey(s)}`, dest: s.dest, digest: createHash("sha256").update(value).digest("hex"), volatile: true }];
+      return value === undefined ? [] : [{ id: s.id, path: secretPath(s), dest: s.dest, digest: createHash("sha256").update(value).digest("hex"), volatile: true }];
     });
   const hash = recipeHash(recipeDigest(bring, digested));
+  const settingsSource = join(home, CLAUDE_SETTINGS.slice(2));
+  const packOpts: PackOptions = { secrets: opts.secrets, home, managerHomes, settingsPlanned: plan.files.some(f => f.source === settingsSource || f.source === dirname(settingsSource)) };
   const volatileFiles = files.filter(f => f.volatile);
   const volatile =
     volatileFiles.length > 0 || plan.secrets.length > 0
-      ? { paths: [...volatileFiles.map(tilde), ...plan.secrets.map(s => `Keychain: ${secretKey(s)}`)], pack: () => packPlan({ ...plan, files: volatileFiles }, { secrets: opts.secrets, home, managerHomes }) }
+      ? { paths: [...volatileFiles.map(tilde), ...plan.secrets.map(secretPath)], pack: () => packPlan({ ...plan, files: volatileFiles }, packOpts) }
       : undefined;
   return {
     recipeHash: hash,
@@ -472,7 +523,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
       return recipeDigest(bring, [...digested, ...secretDigests()]);
     },
     ...(anyFiles
-      ? { files: { count, rungs: plan.rungs, bytes: plan.bytes, skipped: plan.skipped, pack: () => packPlan(plan, { secrets: opts.secrets, home, managerHomes }), ...(volatile !== undefined ? { volatile } : {}) } }
+      ? { files: { count, rungs: plan.rungs, bytes: plan.bytes, skipped: plan.skipped, pack: () => packPlan(plan, packOpts), ...(volatile !== undefined ? { volatile } : {}) } }
       : {}),
     ...(shell !== undefined ? { shell } : {}),
     tools: [...editors.installs, ...tools.installs],

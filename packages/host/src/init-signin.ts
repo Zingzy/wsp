@@ -16,9 +16,10 @@ import { S_BAR, log, note } from "@clack/prompts";
 import { connectDaemonSocket, type ConnectOptions, type DaemonSocket } from "./doctor.js";
 import { GUTTER, ellipsize, table, widthOf } from "./init-layout.js";
 import { agentName } from "./init-recipe.js";
+import { SH_FILE } from "./init-secrets.js";
 import { readKey } from "./init-select.js";
 import { relayPty, runQuiet, type PtyLink, type RelayTerminal } from "./signin-relay.js";
-import { signInFor, type SignIn } from "./signin-table.js";
+import { signInFor, type SignIn, type StatusCheck } from "./signin-table.js";
 
 export interface LoginOutcome {
   id: string;
@@ -82,6 +83,9 @@ export interface SignInStageOptions {
   logins: readonly ManifestEntry[];
   /** By login id, what its copy went to the machine without; shown beside the row's note throughout. */
   left?: ReadonlyMap<string, string>;
+  /** The names the secrets step set on the machine before this stage, by the file each was cut from; a status
+   * check that names one as the login's source says so on the row. */
+  secrets?: ReadonlyMap<string, string>;
   /** A fresh link to the builder's daemon, dialled before each command so a dropped one costs that command alone. */
   dial(): Promise<BuilderLink>;
   terminal: RelayTerminal;
@@ -110,6 +114,12 @@ const STATE_WORDS: Record<LoginState, string> = {
 
 function minutes(ms: number): string {
   return `${Math.round(ms / 60_000)} min`;
+}
+
+/** The status command as the machine's login shell would run it: the secrets step's file sourced first, so a key
+ * exported there counts, in the promptless sh the quiet run uses instead of a login shell (which resets PATH). */
+export function statusLine(command: string): string {
+  return `. ${SH_FILE} 2>/dev/null; ${command}`;
 }
 
 /** The row's note and what its copy left behind, as one detail. */
@@ -143,6 +153,8 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
   if (outcomes.length === 0) return outcomes;
   const isCopied = (e: ManifestEntry): boolean => e.choice === "copy";
   const rows = (copied: boolean) => o.logins.map((e, i) => [e, outcomes[i]!] as const).filter(([e]) => isCopied(e) === copied);
+  /** The signed-in note: the source the status names, then the command that proved it. */
+  const provedBy = (status: StatusCheck, output: string, lead?: string): string => [lead, status.detail?.(output, o.secrets ?? new Map()), status.command].filter((x): x is string => x !== undefined).join("; ");
 
   /** The status command alone, for a login whose files were copied: a refusal hands the login to the machine sign-in below. */
   const verify = async (entry: ManifestEntry, r: LoginOutcome): Promise<void> => {
@@ -156,7 +168,7 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
     try {
       const daemon = await o.dial();
       try {
-        const status = await runQuiet(daemon.link, command, statusMs);
+        const status = await runQuiet(daemon.link, statusLine(command), statusMs);
         if (status.dropped) {
           r.state = "not-signed-in";
           r.note = "copied, but the machine's terminal link dropped during the status check";
@@ -176,7 +188,7 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
         }
         const signedIn = s.status.signedIn(status.output, status.exitCode);
         r.state = signedIn ? "signed-in" : "not-signed-in";
-        r.note = signedIn ? `copied; ${command}` : `copied, but ${command} says not signed in`;
+        r.note = signedIn ? provedBy(s.status, status.output, "copied") : `copied, but ${command} says not signed in`;
       } finally {
         daemon.close();
       }
@@ -252,7 +264,7 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
         r.note = [`no status command known for ${agentName(entry)}`, ...(relayed.exitCode !== 0 ? [`exit ${relayed.exitCode}`] : []), ...(s.kind === "command" && s.note !== undefined ? [s.note] : [])].join("; ");
         return;
       }
-      const status = await runQuiet(daemon.link, s.status.command, statusMs);
+      const status = await runQuiet(daemon.link, statusLine(s.status.command), statusMs);
       if (status.dropped) {
         r.state = "not-signed-in";
         r.note = "the machine's terminal link dropped during the status check";
@@ -265,7 +277,7 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
       }
       const signedIn = s.status.signedIn(status.output, status.exitCode);
       r.state = signedIn ? "signed-in" : "not-signed-in";
-      r.note = signedIn ? `${s.status.command}` : `${s.status.command} says not signed in`;
+      r.note = signedIn ? provedBy(s.status, status.output) : `${s.status.command} says not signed in`;
     } finally {
       daemon.close();
     }

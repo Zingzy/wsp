@@ -136,7 +136,7 @@ describe.runIf(LIVE)("sign-in stage (live)", () => {
       statePath,
       home,
       platform: "darwin",
-      secrets: { read: async () => { throw new Error("no Keychain in the live test"); } },
+      secrets: { read: async () => { throw new Error("no Keychain in the live test"); }, run: async () => { throw new Error("no helper in the live test"); } },
       runtime: recipe =>
         createRuntime({
           backend,

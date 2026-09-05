@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { AWS_STATUS, SIGN_INS, signInFor, signInWords, type SignIn } from "../src/signin-table.js";
+import { AWS_STATUS, SIGN_INS, claudeSource, signInFor, signInWords, type SignIn } from "../src/signin-table.js";
 
 const collectorLogins = (): string[] => {
   const src = readFileSync(join(import.meta.dirname, "../../collect/src/detect/logins.ts"), "utf8");
@@ -110,6 +110,21 @@ describe("sign-in table", () => {
     expect(check("claude", '{\n  "loggedIn": false\n}', 1)).toBe(false);
     expect(check("codex", "Logged in using ChatGPT", 0)).toBe(true);
     expect(check("codex", "Not logged in", 1)).toBe(false);
+  });
+
+  it("reads which key source claude auth status names: the exported key by the file it was cut from, the helper, or the OAuth credentials", () => {
+    const envKey = '{\n  "loggedIn": true,\n  "authMethod": "api_key",\n  "apiProvider": "firstParty",\n  "apiKeySource": "ANTHROPIC_API_KEY"\n}';
+    const secrets = new Map([["ANTHROPIC_API_KEY", "~/.zshrc"]]);
+    expect(claudeSource(envKey, secrets)).toBe("API key from ~/.zshrc, set on the machine as a secret");
+    expect(claudeSource(envKey, new Map())).toBe("API key from ANTHROPIC_API_KEY on the machine");
+    // With a helper configured too, apiKeySource still names the environment: the exported key wins.
+    expect(claudeSource(envKey.replace('"api_key"', '"api_key_helper"'), secrets)).toBe("API key from ~/.zshrc, set on the machine as a secret");
+    expect(claudeSource('{\n  "loggedIn": true,\n  "authMethod": "api_key_helper",\n  "apiKeySource": "apiKeyHelper"\n}', secrets)).toBe("API key from the settings.json helper");
+    expect(claudeSource('{\n  "loggedIn": true,\n  "authMethod": "claude.ai",\n  "subscriptionType": "max"\n}', secrets)).toBe("OAuth credentials");
+    expect(claudeSource('{\n  "loggedIn": false,\n  "authMethod": "none"\n}', secrets)).toBeUndefined();
+    expect(claudeSource("not json at all", secrets)).toBeUndefined();
+    expect(command("claude").status?.detail).toBe(claudeSource);
+    expect(command("gh").status?.detail).toBeUndefined();
   });
 
   it("words a row for a checklist: the command, what to do instead, or a plain ask", () => {

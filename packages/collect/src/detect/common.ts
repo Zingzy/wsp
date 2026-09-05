@@ -20,6 +20,8 @@ export interface RowSpec {
   volatile?: readonly string[];
   /** Emit the row even when none of the candidate paths exist. */
   always?: boolean;
+  /** One line for the detail pane. */
+  detail?: string;
 }
 
 export interface Found {
@@ -71,6 +73,7 @@ export function entry(spec: EntrySpec): ManifestEntry {
     ...(spec.linux !== undefined ? { linux: spec.linux } : {}),
     ...(spec.version !== undefined ? { version: spec.version } : {}),
     ...(volatile.length > 0 ? { volatile } : {}),
+    ...(spec.detail !== undefined ? { detail: spec.detail } : {}),
   };
 }
 

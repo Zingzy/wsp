@@ -63,22 +63,31 @@ export interface PlannedFile {
   volatile: boolean;
 }
 
-/** A credential read from the macOS Keychain at pack time; `place` renders the
- * guest file from the secret and whatever the plan already copied to `dest`. */
+/** A credential read on this computer at pack time, from the macOS Keychain or
+ * by running a helper command; `place` renders the guest file from the secret
+ * and whatever the plan already copied to `dest`. */
 export interface PlannedSecret {
   id: string;
+  /** The Keychain service, or with `command` the `~`-relative settings file the command was read from. */
   service: string;
   /** The account the item is filed under, for a tool that keeps one Keychain item per signed-in user. */
   account?: string;
+  /** A shell line that prints the value on this computer, run in place of the Keychain lookup. */
+  command?: string;
   dest: string;
   place: (secret: string, existing: string | undefined) => string;
   /** The file with this account taken out, for an account whose item was not read while another of the login's was. */
   drop?: (existing: string) => string;
 }
 
-/** The name a Keychain value is kept and reported under: the service, with the account when the item is per user. */
+/** The name a secret's value is kept and reported under: the service, with the account when the item is per user. */
 export function secretKey(s: { service: string; account?: string }): string {
   return s.account === undefined ? s.service : `${s.service} (${s.account})`;
+}
+
+/** The path a secret is listed by, the way the collector's row names it. */
+export function secretPath(s: { service: string; account?: string; command?: string }): string {
+  return s.command === undefined ? `Keychain: ${secretKey(s)}` : `Helper: ${s.service}`;
 }
 
 export interface SkippedPath {
@@ -269,6 +278,41 @@ const KEYCHAIN: Record<string, KeychainItem> = {
   },
 };
 
+/** The apiKeyHelper command a Claude Code settings file names, when the file parses and has one. */
+function apiKeyHelperOf(text: string | undefined): string | undefined {
+  if (text === undefined) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    const helper = typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>)["apiKeyHelper"] : undefined;
+    return typeof helper === "string" && helper.trim() !== "" ? helper : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The settings file with its apiKeyHelper set to the line given, or taken out with none; a file that is not
+ * JSON or names no helper is returned as it is. Absent, a file is made for the helper alone. */
+export function withApiKeyHelper(text: string | undefined, helper: string | undefined): string | undefined {
+  if (text === undefined) return helper === undefined ? undefined : `${JSON.stringify({ apiKeyHelper: helper }, null, 2)}\n`;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return text;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return text;
+  const settings = parsed as Record<string, unknown>;
+  if (!("apiKeyHelper" in settings) && helper === undefined) return text;
+  if (helper === undefined) delete settings["apiKeyHelper"];
+  else settings["apiKeyHelper"] = helper;
+  return `${JSON.stringify(settings, null, 2)}\n`;
+}
+
+/** Where the key a settings file's helper prints lands on the guest, and how the command is read from the file. */
+const HELPERS: Record<string, { dest: string; command: (text: string | undefined) => string | undefined }> = {
+  "~/.claude/settings.json": { dest: ".claude/anthropic-api-key", command: apiKeyHelperOf },
+};
+
 export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOptions): FilesPlan {
   const rewrites = [...(opts.rewrites ?? []), ...remoteEditorRewrites(opts.platform), ...(opts.platform === "darwin" ? MAC_REWRITES : [])];
   // A prefix rewrite also moves the directory itself when a row names it bare.
@@ -304,6 +348,23 @@ export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOption
           else for (const account of accounts) plan.secrets.push({ id: e.id, service, account, dest, place: (secret, existing) => keychain.place(secret, existing, account), drop: existing => perAccount.drop(existing, account) });
           brought++;
         }
+        continue;
+      }
+      const helperPath = /^helper:\s*(.+)$/i.exec(p);
+      if (helperPath !== null) {
+        const file = helperPath[1]!.trim();
+        const helper = HELPERS[file];
+        if (helper === undefined) {
+          skip("no helper reader for this login yet; sign in on the machine");
+          continue;
+        }
+        const command = helper.command(opts.read?.(join(opts.home, file.slice(2))));
+        if (command === undefined) {
+          skip(`no apiKeyHelper in ${file} any more; sign in on the machine`);
+          continue;
+        }
+        plan.secrets.push({ id: e.id, service: file, command, dest: rewrite(helper.dest), place: secret => `${secret}\n` });
+        brought++;
         continue;
       }
       if (!p.startsWith("~/")) {
