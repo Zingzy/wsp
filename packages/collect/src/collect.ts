@@ -22,7 +22,7 @@ export const DETECTORS: Record<Exclude<Rung, "everything">, Detector> = {
   editors: detectEditors,
   toolchains: detectToolchains,
   tools: detectTools,
-  agents: async host => [...(await detectAgents(host)), ...(await detectMcp(host))],
+  agents: async (host, prior) => [...(await detectAgents(host)), ...(await detectMcp(host, prior))],
   logins: detectLogins,
 };
 
@@ -47,7 +47,7 @@ export async function collect(host: Host, opts: CollectOptions = {}): Promise<Ma
   const groups: GroupNote[] = [];
   for (const rung of RUNGS) {
     if (rung === "everything") continue;
-    const rows = await DETECTORS[rung](host);
+    const rows = await DETECTORS[rung](host, entries);
     opts.onRung?.(rung, rows.length);
     entries.push(...rows);
     groups.push(...(await (GROUP_NOTES[rung]?.(host, rows) ?? [])));

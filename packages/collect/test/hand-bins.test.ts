@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { HAND_GROUP, detectTools, formatOf, handBins, portableShebang } from "../src/index.js";
+import { BASE_INTERPRETERS, HAND_GROUP, type ManifestEntry, brought, detectTools, formatOf, handBins, portableShebang } from "../src/index.js";
 import { fakeHost } from "./fake-host.js";
 
 const bytes = (...b: number[]): Uint8Array => new Uint8Array(b);
@@ -93,20 +93,36 @@ describe("hand-installed binaries", () => {
     ]);
   });
 
-  it("a script whose shebang names an interpreter outside the system dirs travels only when a tools row brings that interpreter; otherwise its row is locked off saying so", async () => {
+  it("a script whose shebang names an interpreter outside the system dirs travels when the base image or a tools row brings that interpreter; otherwise its row is locked off saying so", async () => {
     const host = fakeHost({
       which: ["npm"],
       exec: { "npm prefix -g": "/opt/homebrew\n", "npm ls -g --depth=0 --json": JSON.stringify({ dependencies: { tsx: { version: "4.19.0" } } }) },
       bins: {
         "~/.local/bin/notes": { head: NOTES },
         "~/.local/bin/lint": { head: `#!${UV_PYTHON}\nimport lint\n`, bytes: 3_000 },
+        "~/.local/bin/backup": { head: "#!/opt/homebrew/bin/bash\nrsync .\n" },
       },
     });
     const rows = (await detectTools(host)).filter(r => r.group === HAND_GROUP);
     expect(rows).toEqual([
-      { rung: "tools", id: "tools/hand/lint", label: "lint", group: HAND_GROUP, paths: ["~/.local/bin/lint"], bytes: 3_000, default: "skip", reason: "installed by hand; needs python, which no tools row brings to the machine", linux: "no", detail: "a python script of 2.9 KB in ~/.local/bin, installed by hand; runs with ~/.local/share/uv/tools/lint/bin/python here, and nothing here brings python to the machine" },
+      { rung: "tools", id: "tools/hand/backup", label: "backup", group: HAND_GROUP, paths: ["~/.local/bin/backup"], bytes: 33, default: "skip", linux: "unknown", detail: "a bash script of 33 B in ~/.local/bin, installed by hand; runs with /opt/homebrew/bin/bash here and with the machine's own bash there; travels as a copy into ~/.local/bin on the machine if ticked" },
+      { rung: "tools", id: "tools/hand/lint", label: "lint", group: HAND_GROUP, paths: ["~/.local/bin/lint"], bytes: 3_000, default: "skip", reason: "installed by hand; needs python, which the machine lacks and no tools row brings", linux: "no", detail: "a python script of 2.9 KB in ~/.local/bin, installed by hand; runs with ~/.local/share/uv/tools/lint/bin/python here, and neither the machine nor a tools row brings python" },
       { rung: "tools", id: "tools/hand/notes", label: "notes", group: HAND_GROUP, paths: ["~/.local/bin/notes"], bytes: NOTES.length, default: "skip", linux: "unknown", detail: `a tsx script of ${NOTES.length} B in ~/.local/bin, installed by hand; runs with /opt/homebrew/bin/tsx here; the copy finds tsx on the machine's PATH instead, so the tsx row has to be ticked too; travels as a copy into ~/.local/bin on the machine if ticked` },
     ]);
+  });
+
+  it("brought names the commands the machine has without a hand row: the base image's interpreters and each installable tools row by its unversioned command", () => {
+    const tool = (id: string, over: Partial<ManifestEntry> = {}): ManifestEntry => ({ rung: "tools", id, label: id, paths: [], bytes: 0, default: "bring", linux: "yes", ...over });
+    expect([...BASE_INTERPRETERS].sort()).toEqual(["bash", "perl", "python3", "sh"]);
+    const rows = [
+      tool("tools/brew/python@3.12"),
+      tool("tools/brew/node@22"),
+      tool("tools/npm/tsx"),
+      tool("tools/cli/kubectl", { reason: "locked", default: "skip", linux: "no" }),
+      tool("tools/hand/notes", { group: HAND_GROUP, linux: "unknown", default: "skip" }),
+      { rung: "shell", id: "shell/zshrc", label: "zshrc", paths: ["~/.zshrc"], bytes: 1, default: "bring" } as ManifestEntry,
+    ];
+    expect([...brought(rows)].sort()).toEqual(["bash", "node", "perl", "python", "python3", "sh", "tsx"]);
   });
 
   it("an empty or missing bin directory adds no rows and asks nothing else", async () => {

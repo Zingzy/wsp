@@ -1127,4 +1127,14 @@ describe("hand-installed copies", () => {
     expect(statSync(join(dir, ".local", "bin", "notes")).mode & 0o777).toBe(0o755);
     expect((await imp.files!.pack({ arch: "aarch64" })).skipped).toEqual([]);
   });
+
+  it("the shebang rewrite changes the first line's bytes only: a script carrying a binary tail keeps every byte after the newline", async () => {
+    const home = laptop();
+    mkdirSync(join(home, ".local", "bin"), { recursive: true });
+    const tail = Buffer.from([0x0a, 0xff, 0xfe, 0x00, 0x80, 0xc3, 0x28, 0xf0, 0x90, 0x0a, 0xed, 0xa0, 0x80]);
+    writeFileSync(join(home, ".local", "bin", "setup"), Buffer.concat([Buffer.from("#!/opt/homebrew/bin/bash -e", "utf8"), tail]), { mode: 0o755 });
+    const imp = importFor([row({ rung: "tools", id: "tools/hand/setup", paths: ["~/.local/bin/setup"], bytes: 40, linux: "unknown" })], { home, secrets: new Map(), platform: "darwin" });
+    const dir = extract((await imp.files!.pack({ arch: "x86_64" })).tar);
+    expect(readFileSync(join(dir, ".local", "bin", "setup"))).toEqual(Buffer.concat([Buffer.from("#!/usr/bin/env -S bash -e", "utf8"), tail]));
+  });
 });

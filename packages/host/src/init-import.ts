@@ -229,11 +229,7 @@ export interface PackOptions {
   settingsPlanned?: boolean;
 }
 
-/** Copies the planned files into a staging tree, renders each secret into it,
- * and tars the tree. Links are followed so the target's bytes land at the
- * link's path; one that leaves home, points at a refused path, or points back
- * into its own directory is left out with a note. */
-/** A staged hand-installed script whose first line names an interpreter only this laptop has is rewritten to find it by name on the machine's PATH. */
+/** A staged hand-installed script whose first line names an interpreter only this laptop has is rewritten to find it by name on the machine's PATH; the bytes after the first line are written back untouched. */
 function portable(staged: string): void {
   const magic = Buffer.alloc(2);
   const fd = openSync(staged, "r");
@@ -243,16 +239,21 @@ function portable(staged: string): void {
     closeSync(fd);
   }
   if (magic.toString("latin1") !== "#!") return;
-  const text = readFileSync(staged, "utf8");
-  const first = text.split("\n")[0] ?? "";
-  const line = portableShebang(first);
+  const bytes = readFileSync(staged);
+  const newline = bytes.indexOf(0x0a);
+  const end = newline === -1 ? bytes.length : newline;
+  const line = portableShebang(bytes.subarray(0, end).toString("utf8"));
   if (line === undefined) return;
   const mode = statSync(staged).mode & 0o7777;
   chmodSync(staged, 0o600);
-  writeFileSync(staged, `${line}${text.slice(first.length)}`);
+  writeFileSync(staged, Buffer.concat([Buffer.from(line, "utf8"), bytes.subarray(end)]));
   chmodSync(staged, mode);
 }
 
+/** Copies the planned files into a staging tree, renders each secret into it,
+ * and tars the tree. Links are followed so the target's bytes land at the
+ * link's path; one that leaves home, points at a refused path, or points back
+ * into its own directory is left out with a note. */
 export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<PackedFiles> {
   const stage = mkdtempSync(join(tmpdir(), "wsp-golden-import-"));
   const out = mkdtempSync(join(tmpdir(), "wsp-golden-import-tar-"));

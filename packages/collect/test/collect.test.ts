@@ -73,6 +73,19 @@ describe("collect", () => {
     expect(await collect(fakeHost())).toEqual({ entries: [] });
   });
 
+  it("the agents rung sees the tools rows before it: an MCP command that is a hand-installed script names the tools row bringing its interpreter", async () => {
+    const gemini = JSON.stringify({ mcpServers: { notes: { command: "~/.local/bin/notes-mcp" } } });
+    const host = fakeHost({
+      files: { "~/.gemini/settings.json": gemini },
+      which: ["npm"],
+      exec: { "npm prefix -g": "/opt/homebrew\n", "npm ls -g --depth=0 --json": JSON.stringify({ dependencies: { tsx: { version: "4.19.0" } } }) },
+      bins: { "~/.local/bin/notes-mcp": { head: "#!/opt/homebrew/bin/tsx\nconsole.log(1)\n" } },
+    });
+    const manifest = await collect(host);
+    expect(manifest.entries.find(e => e.id === "tools/hand/notes-mcp")).toMatchObject({ default: "skip", linux: "unknown" });
+    expect(manifest.entries.find(e => e.id === "agents/mcp/gemini/notes")?.detail).toBe("stdio: ~/.local/bin/notes-mcp; needs notes-mcp on the machine; it travels as a copy when its row under Installed by hand is ticked, and runs with tsx, so the tsx row has to be ticked too; carries no secret");
+  });
+
   it("a group's scope and what it leaves out ride on the manifest beside the rows", async () => {
     const claude = JSON.stringify({ mcpServers: { notion: { url: "https://mcp.notion.com/mcp" } }, projects: { "/Users/dev/code/mono": { mcpServers: { linear: { url: "https://mcp.linear.app/sse" } } } } });
     const manifest = await collect(fakeHost({ files: { "~/.claude.json": claude } }));

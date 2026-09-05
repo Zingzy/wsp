@@ -40,6 +40,8 @@ const startsWith = (head: Uint8Array, magic: readonly number[]): boolean => magi
 
 /** Interpreter directories every Linux machine has; a shebang naming one elsewhere points at a laptop install. */
 const SYSTEM_BIN = ["/bin/", "/usr/bin/"];
+/** Interpreters the base image has at /usr/bin with no tools row: Debian's essential set (bash, sh, perl) and python3, seen at /usr/bin/python3 on 2026-09-04. */
+export const BASE_INTERPRETERS: ReadonlySet<string> = new Set(["bash", "sh", "perl", "python3"]);
 
 /** The interpreter a shebang names: the command after `env` and its flags, else the interpreter's basename, with its path when the machine will not have it. */
 function shebang(line: string): { interpreter: string; at?: string } {
@@ -124,8 +126,9 @@ function words(bin: HandBin, brings: ReadonlySet<string>): string {
     case "script": {
       const lead = `a ${f.interpreter} script of ${size} in ${dir}, installed by hand`;
       if (f.at === undefined) return `${lead}; ${copy}`;
+      if (BASE_INTERPRETERS.has(f.interpreter)) return `${lead}; runs with ${f.at} here and with the machine's own ${f.interpreter} there; ${copy}`;
       if (brings.has(f.interpreter)) return `${lead}; runs with ${f.at} here; the copy finds ${f.interpreter} on the machine's PATH instead, so the ${f.interpreter} row has to be ticked too; ${copy}`;
-      return `${lead}; runs with ${f.at} here, and nothing here brings ${f.interpreter} to the machine`;
+      return `${lead}; runs with ${f.at} here, and neither the machine nor a tools row brings ${f.interpreter}`;
     }
     case "unknown":
       return `a file of ${size} in ${dir} of no recognised format, installed by hand; nothing can install it on the machine`;
@@ -140,7 +143,7 @@ function locked(f: BinFormat, brings: ReadonlySet<string>): string | undefined {
     case "elf":
       return f.arch === undefined ? `installed by hand; a Linux binary ${NO_ARCH}` : undefined;
     case "script":
-      return f.at !== undefined && !brings.has(f.interpreter) ? `installed by hand; needs ${f.interpreter}, which no tools row brings to the machine` : undefined;
+      return f.at !== undefined && !brings.has(f.interpreter) ? `installed by hand; needs ${f.interpreter}, which the machine lacks and no tools row brings` : undefined;
     case "unknown":
       return "installed by hand; no recognised format";
   }
@@ -149,8 +152,11 @@ function locked(f: BinFormat, brings: ReadonlySet<string>): string | undefined {
 /** Whether the file's format can run on a Linux machine when copied there; a script may still want its interpreter brought. */
 export const carries = (f: BinFormat): boolean => f.kind === "script" || (f.kind === "elf" && f.arch !== undefined);
 
-/** The commands the other tools rows put on the machine, by the last segment of each installable row's id. */
-export const brought = (rows: readonly ManifestEntry[]): Set<string> => new Set(rows.filter(r => r.reason === undefined).map(r => r.id.slice(r.id.lastIndexOf("/") + 1)));
+/** The commands the machine has without a hand row: the base image's interpreters and each installable tools row's command, the last id segment minus a formula's version suffix (python@3.12). */
+export function brought(rows: readonly ManifestEntry[]): Set<string> {
+  const installable = rows.filter(r => r.rung === "tools" && !r.id.startsWith(HAND_PREFIX) && r.reason === undefined);
+  return new Set([...BASE_INTERPRETERS, ...installable.map(r => r.id.slice(r.id.lastIndexOf("/") + 1).replace(/@.*$/, ""))]);
+}
 
 export function handRow(bin: HandBin, brings: ReadonlySet<string>): ManifestEntry {
   const detail = bin.target === undefined ? words(bin, brings) : `${words(bin, brings)}; a link to ${bin.target}`;

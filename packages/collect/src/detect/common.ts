@@ -2,7 +2,8 @@
 import { type Host, expand } from "../host.js";
 import type { Default, Linux, ManifestEntry, Rung } from "../manifest.js";
 
-export type Detector = (host: Host) => Promise<ManifestEntry[]>;
+/** prior is every row the rungs before this one produced. */
+export type Detector = (host: Host, prior: readonly ManifestEntry[]) => Promise<ManifestEntry[]>;
 
 export interface RowSpec {
   rung: Rung;
