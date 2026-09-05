@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import type { ExecResult } from "@wsp/engine";
+import { execFile } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import type { ExecResult, Machine } from "@wsp/engine";
 import { machineExecStream } from "../src/machine-exec.js";
 import { stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
 
@@ -106,6 +110,17 @@ describe("machineExecStream", () => {
     expect(await stream.exited).toBeNull();
   });
 
+  it("waits one more poll when the leader is gone before its exit file is there", async () => {
+    const { backend, machine } = await makeMachine();
+    scriptGuest(backend, [{ append: "almost\n" }, { dead: true }, { append: "done\n", exit: 0 }, {}]);
+    const factory = machineExecStream(machine, { pollMs: 5 });
+    const stream = factory("claude -p 'hi'", { env: {} });
+    const lines: string[] = [];
+    for await (const l of stream.lines) lines.push(l);
+    expect(lines).toEqual(["almost", "done"]);
+    expect(await stream.exited).toBe(0);
+  });
+
   it("kill() SIGKILLs the process group and unblocks exited", async () => {
     const { backend, machine } = await makeMachine();
     // never exits on its own: every poll just says "up" with no new output
@@ -137,5 +152,72 @@ describe("machineExecStream", () => {
     for await (const l of stream.lines) lines.push(l);
     expect(lines).toEqual(["before nap", "after wake"]);
     expect(await stream.exited).toBe(0);
+  });
+});
+
+const dirs: string[] = [];
+afterEach(() => {
+  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+});
+
+/** This machine's bash as the guest; setsid is perl's setpgrp where the OS has none and base64 loses -w0. */
+function localGuest(): { machine: Machine; runDir: string } {
+  const dir = mkdtempSync(join(tmpdir(), "wsp-machine-exec-"));
+  dirs.push(dir);
+  const shimDir = join(dir, "shims");
+  mkdirSync(shimDir);
+  if (!existsSync("/proc/1/stat")) {
+    const shims = {
+      setsid: "#!/bin/sh\nexec perl -e 'setpgrp(0, 0); exec @ARGV or die $!' -- \"$@\"\n",
+      base64: '#!/bin/sh\nargs=""\nfor a in "$@"; do [ "$a" = "-w0" ] || args="$args $a"; done\nexec /usr/bin/base64 $args\n',
+    };
+    for (const [name, body] of Object.entries(shims)) {
+      writeFileSync(join(shimDir, name), body);
+      chmodSync(join(shimDir, name), 0o755);
+    }
+  }
+  const machine = {
+    id: "local",
+    exec: (cmd: string) =>
+      new Promise<ExecResult>(resolve => {
+        execFile("bash", ["-c", cmd], { env: { ...process.env, PATH: `${shimDir}:${process.env["PATH"] ?? ""}` }, maxBuffer: 16 * 1024 * 1024 }, (e, stdout, stderr) => {
+          resolve({ exitCode: e === null ? 0 : ((e as { code?: number }).code ?? 1), stdout, stderr });
+        });
+      }),
+  } as unknown as Machine;
+  return { machine, runDir: join(dir, "run") };
+}
+
+describe("machineExecStream over this machine's bash", () => {
+  it("a launch posted twice under one base, as a retried exec does, starts the script once", async () => {
+    const { machine, runDir } = localGuest();
+    const marks = join(runDir, "..", "marks");
+    const retrying = {
+      id: "local",
+      exec: async (cmd: string, o?: { timeoutMs?: number }) => {
+        const first = await machine.exec(cmd, o);
+        return cmd.includes("echo WSP_LAUNCHED") ? machine.exec(cmd, o) : first;
+      },
+    } as unknown as Machine;
+    const stream = machineExecStream(retrying, { pollMs: 50, runDir })(`echo ran >> ${marks}; echo hi`, { env: { WSP_MARK: "x" } });
+    const lines: string[] = [];
+    for await (const l of stream.lines) lines.push(l);
+    expect(await stream.exited).toBe(0);
+    expect(lines).toEqual(["hi"]);
+    expect(readFileSync(marks, "utf8")).toBe("ran\n");
+  });
+});
+
+describe("machineExecStream polling a script that ends at once", () => {
+  it("keeps the last line and the exit code when the poll lands as the script ends", async () => {
+    const { machine, runDir } = localGuest();
+    const results: { lines: string[]; exited: number | null }[] = [];
+    for (let i = 0; i < 20; i++) {
+      const stream = machineExecStream(machine, { pollMs: 1, runDir })("echo hi", { env: {} });
+      const lines: string[] = [];
+      for await (const l of stream.lines) lines.push(l);
+      results.push({ lines, exited: await stream.exited });
+    }
+    expect(results).toEqual(Array.from({ length: 20 }, () => ({ lines: ["hi"], exited: 0 })));
   });
 });
