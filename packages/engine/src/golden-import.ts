@@ -330,7 +330,9 @@ const GO_BIN = "/root/go/bin";
 export const TOOLS_PATH = `/root/.local/bin:/usr/local/sbin:/usr/local/bin:${BREW_PREFIX}/bin:${BREW_PREFIX}/sbin:/root/go/bin:/root/.cargo/bin:${PNPM_HOME}:/root/.bun/bin:/usr/sbin:/usr/bin:/sbin:/bin`;
 const PATH_LINE = `export PATH=${TOOLS_PATH} PNPM_HOME=${PNPM_HOME}`;
 
-const BREW_ENV = "HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 HOMEBREW_NO_ENV_HINTS=1 HOMEBREW_NO_INSTALL_CLEANUP=1 NONINTERACTIVE=1";
+// Install-time cleanup stays on: with it off, one recipe left 2.6 GB of bottles in the download cache on a 20 GB disk.
+const BREW_ENV = "HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 HOMEBREW_NO_ENV_HINTS=1 NONINTERACTIVE=1";
+const BREW = `${BREW_PREFIX}/bin/brew`;
 
 function squote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
@@ -338,8 +340,34 @@ function squote(s: string): string {
 
 // Homebrew refuses to run as root, so it lives under its own user at the
 // prefix its Linux bottles are built for; anything else compiles from source.
+function asLinuxbrewScript(script: string): string {
+  return `su -s /bin/bash linuxbrew -c ${squote(`export ${BREW_ENV}\n${script}`)}`;
+}
+
 function asLinuxbrew(cmd: string): string {
-  return `su -s /bin/bash linuxbrew -c ${squote(`${BREW_ENV} ${BREW_PREFIX}/bin/brew ${cmd}`)}`;
+  return `su -s /bin/bash linuxbrew -c ${squote(`${BREW_ENV} ${BREW} ${cmd}`)}`;
+}
+
+/** After the tools loop: dependencies no formula needs any more (a failed formula
+ * left a 2.4 GB llvm@21 behind), then the bottle cache and old kegs (5.5 GB measured). */
+export const BREW_HOUSEKEEPING: readonly string[] = [`${PATH_LINE}\n${asLinuxbrew("autoremove")}`, `${PATH_LINE}\n${asLinuxbrew("cleanup -s --prune=all")}`];
+
+/** Dependencies two or more of the formulae share install in one brew process before any
+ * of them, marked as dependencies so autoremove still owns them; each formula then finds
+ * its shared dependencies present and installs only its own. */
+function brewSharedDeps(formulae: readonly string[]): string {
+  const keep = BREW_TOOLCHAIN.map(f => `-e ${f}`).join(" ");
+  return asLinuxbrewScript(
+    [
+      "set -uo pipefail",
+      `shared=$(${BREW} deps --for-each ${formulae.map(squote).join(" ")} | sed 's/^[^:]*: *//' | tr ' ' '\\n' | grep -vx -e '' ${keep} | sort | uniq -d || true)`,
+      'if [ -z "$shared" ]; then echo "no shared dependencies"; exit 0; fi',
+      'echo "shared: $(echo $shared)"',
+      `${BREW} install $shared; rc=$?`,
+      `${BREW} tab --no-installed-on-request $shared || true`,
+      "exit $rc",
+    ].join("\n"),
+  );
 }
 
 function homebrewBootstrap(): string {
@@ -483,6 +511,7 @@ export function toolInstallsFor(entries: readonly RecipeEntry[]): ToolsPlan {
 
   // One step per manager that has rows, unless it already comes along as a formula or an npm global.
   const managers = new Map<ToolManager, { after: string; step?: ToolInstall }>();
+  const managerFormulae: string[] = [];
   for (const manager of MANAGER_ORDER) {
     if (manager === "npm" || rowsOf(manager).length === 0) continue;
     const own = `tools/manager/${manager}`;
@@ -493,13 +522,18 @@ export function toolInstallsFor(entries: readonly RecipeEntry[]): ToolsPlan {
     const formula = MANAGER_FORMULA[manager];
     if (brew.formulae.includes(formula)) managers.set(manager, { after: `tools/brew/${formula}` });
     else if (npmTicked.has(manager)) managers.set(manager, { after: `tools/npm/${manager}` });
-    else managers.set(manager, { after: own, step: { id: own, label: manager, manager: "brew", cmd: withPath(asLinuxbrew(`install ${formula}`)), after: toolchain.last } });
+    else {
+      managers.set(manager, { after: own, step: { id: own, label: manager, manager: "brew", cmd: withPath(asLinuxbrew(`install ${formula}`)), after: toolchain.last } });
+      managerFormulae.push(formula);
+    }
   }
 
-  if (brew.taps.length + brew.formulae.length > 0 || [...managers.values()].some(m => m.step?.manager === "brew")) {
+  if (brew.taps.length + brew.formulae.length > 0 || managerFormulae.length > 0) {
     installs.push({ id: "tools/homebrew", label: "Homebrew", manager: "brew", cmd: withPath(homebrewBootstrap()) });
     installs.push(...toolchain.steps);
     for (const t of brew.taps) installs.push({ id: `tools/brew-tap/${t}`, label: t, manager: "brew", cmd: withPath(asLinuxbrew(`tap ${t}`)), after: toolchain.last });
+    const formulae = [...brew.formulae, ...managerFormulae];
+    if (formulae.length > 1) installs.push({ id: "tools/brew-shared", label: "shared Homebrew dependencies", manager: "brew", cmd: withPath(brewSharedDeps(formulae)), after: toolchain.last });
     for (const f of brew.formulae) installs.push({ id: `tools/brew/${f}`, label: f, manager: "brew", cmd: withPath(asLinuxbrew(`install ${f}`)), after: toolchain.last });
   }
   for (const manager of MANAGER_ORDER) {

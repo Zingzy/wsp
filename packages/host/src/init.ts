@@ -38,6 +38,7 @@ import {
   secretLinesFor,
 } from "./init-recipe.js";
 import { CARD_FRAME, GUTTER, card, colourDepth, confirmPrompt, ellipsize, fmtDuration, helpLine, table, widthOf, wrap } from "./init-layout.js";
+import { openRunLog, runLogPath } from "./init-log.js";
 import { stopKeptBuilder, updateRoad } from "./init-upgrade.js";
 import { readKey, rungSelect, type SelectItem } from "./init-select.js";
 import { OPEN_LINE, builderLink, noteLogins, openLogins, signInStage, stageLogins, type BuilderLink, type LoginOutcome, type SignInFlow } from "./init-signin.js";
@@ -736,7 +737,17 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     return { code: 1 };
   }
   let recipe = goldenRecipeFor(bring, opts.keys, { import: imp });
-  let rt = opts.runtime(recipe);
+  const runLog = openRunLog(runLogPath(opts.statePath));
+  runLog.note(`recipe ${imp.recipeHash} from ${path}`);
+  // Every frame the golden reports, this run's or the seal's after the hand-off, lands in the log for the process's life.
+  const logged = (rt: Runtime): Runtime => {
+    rt.events.on("golden.stage", e => {
+      if (e.type === "golden.stage" && e.name === GOLDEN_NAME) runLog.stage(e.stage, e.detail);
+    });
+    return rt;
+  };
+  let rt = logged(opts.runtime({ ...recipe, onExec: runLog.exec }));
+  const logLine = (): string => dim(runLog.failed === undefined ? `The run log is ${runLog.path}` : `The run log ${runLog.path} could not be written (${runLog.failed})`);
   const describeBuilder = (b: GoldenBuilderView): string => {
     const ageMs = Math.max(0, Date.now() - Date.parse(b.createdAt));
     return `${b.name} (${b.id}), ${describeAge(ageMs)}, about $${((ageMs / 3_600_000) * opts.pricing.rateUsdPerHour(b.size)).toFixed(2)} so far`;
@@ -791,7 +802,10 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const reading = spin(io.output, "Reading your Keychain logins", io.isTTY && wanted.length > 0);
   const read = await readSecrets(wanted, opts.secrets);
   reading.stop();
-  for (const [service, value] of read.values) secrets.set(service, value);
+  for (const [service, value] of read.values) {
+    secrets.set(service, value);
+    runLog.hide(value);
+  }
   if (read.refused.length > 0) {
     const label = (id: string) => manifest.entries.find(e => e.id === id)?.label ?? id;
     for (const r of read.refused) choices.set(r.id, "machine");
@@ -803,7 +817,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     imp = importOf(bring);
     recipe = goldenRecipeFor(bring, opts.keys, { import: imp });
     await rt.close();
-    rt = opts.runtime(recipe);
+    rt = logged(opts.runtime({ ...recipe, onExec: runLog.exec }));
     earlier = await earlierBuilder();
     if (earlier === "blocked") return { code: 1 };
   }
@@ -935,8 +949,11 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     if (signalled !== undefined) return await stopped(e, signalled);
     const view = stream.stop();
     off();
-    if (view.failure === undefined) log.error(e instanceof Error ? e.message : String(e), out);
+    const message = e instanceof Error ? e.message : String(e);
+    runLog.note(`failed: ${message}`);
+    if (view.failure === undefined) log.error(message, out);
     // A failed frame means a machine existed and prepare killed it; without one the create itself refused.
+    log.step(logLine(), out);
     outro(`${view.failure !== undefined ? "That machine is gone." : "Nothing was booted."} Run wsp init again to start over; the recipe is kept.`, out);
     return { code: 1 };
   } finally {
@@ -988,9 +1005,10 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     checklist = [...openLogins(staged, outcomes), ...secretLinesFor(manifest, ticks, cut)];
   }
   const url = `http://127.0.0.1:${handle.port}/`;
-  await handoff(url, handle, io, interactive, checklist.length > 0, out);
+  runLog.note(`handoff ${url}`);
+  await handoff(url, handle, io, interactive, checklist.length > 0, logLine(), out);
   outro("This terminal reports the save.", out);
-  reportSeal(rt, io, opts.pricing.rateUsdPerHour(builder.size));
+  reportSeal(rt, io, opts.pricing.rateUsdPerHour(builder.size), logLine);
   return { code: 0, handle, ...(outcomes !== undefined ? { logins: outcomes } : {}) };
 }
 
@@ -1010,7 +1028,7 @@ async function streamStages(rt: Runtime, io: InitIO, words: readonly StageWords[
 }
 
 /** After the hand-off the browser drives the seal; the terminal shows it as it happens. */
-function reportSeal(rt: Runtime, io: InitIO, rateUsdPerHour: number): void {
+function reportSeal(rt: Runtime, io: InitIO, rateUsdPerHour: number, logLine: () => string): void {
   let stream: StageStream | undefined;
   const off = rt.events.on("golden.stage", e => {
     if (e.type !== "golden.stage" || e.name !== GOLDEN_NAME) return;
@@ -1024,7 +1042,7 @@ function reportSeal(rt: Runtime, io: InitIO, rateUsdPerHour: number): void {
     off();
     const out = { output: io.output };
     if (stream.failed) {
-      log.error("Seal failed and the builder is gone. Run wsp init again; the recipe is kept.", out);
+      log.error(`Seal failed and the builder is gone. Run wsp init again; the recipe is kept.\n${logLine()}`, out);
     } else {
       // The sealed frame's detail is the version, then a note after each semicolon: a leak, or that the builder is
       // kept; under the account cap the seal kills it first and says nothing about keeping it.
@@ -1043,16 +1061,17 @@ function reportSeal(rt: Runtime, io: InitIO, rateUsdPerHour: number): void {
 }
 
 /** Three lines: the address, what to do there, and the keys (or the ssh forward when the address is remote). */
-async function handoff(url: string, handle: HostHandle, io: InitIO, interactive: boolean, checklist: boolean, out: { output: Writable }): Promise<void> {
+async function handoff(url: string, handle: HostHandle, io: InitIO, interactive: boolean, checklist: boolean, logLine: string, out: { output: Writable }): Promise<void> {
   const finish = checklist ? "Sign in where the checklist says, then save the golden." : "Save the golden there once the machine is the way you want it.";
   if (!io.isTTY || overSsh(io.env)) {
     const lines = [`Open ${url}`, finish];
     if (overSsh(io.env)) lines.push(dim(`loopback address; forward it first: ssh -L ${handle.port}:127.0.0.1:${handle.port} <this host>`));
+    lines.push(logLine);
     log.step(lines.join("\n"), out);
     return;
   }
   const opened = await io.open(url);
-  log.step([`${opened ? "Opened" : "Open"} ${url}`, finish, ...(interactive ? [helpLine([{ key: "c", does: "copy the address" }, { key: "enter", does: "continue" }], colourDepth(io.isTTY, io.env))] : [])].join("\n"), out);
+  log.step([`${opened ? "Opened" : "Open"} ${url}`, finish, ...(interactive ? [helpLine([{ key: "c", does: "copy the address" }, { key: "enter", does: "continue" }], colourDepth(io.isTTY, io.env))] : []), logLine].join("\n"), out);
   if (!interactive) return;
   for (;;) {
     const key = await readKey(io.input, io.output, ["c", "return"]);

@@ -382,14 +382,14 @@ describe("golden import stages", () => {
   }
 
   /** The fake answers exec by substring match, first hit wins; `free` is what df reports. */
-  function backendFor(answers: [string, ExecResult][] = [], free: string | (() => string) = mb(2000)) {
+  function backendFor(answers: [string, ExecResult | (() => ExecResult)][] = [], free: string | (() => string) = mb(3000)) {
     const cmds: string[] = [];
     const puts: Buffer[] = [];
     const rb = recordingBackend({}, {
       exec: cmd => {
         cmds.push(cmd);
         const hit = answers.find(([needle]) => cmd.includes(needle));
-        if (hit) return hit[1];
+        if (hit) return typeof hit[1] === "function" ? hit[1]() : hit[1];
         if (cmd === FREE_KB_CMD) return { exitCode: 0, stdout: `${typeof free === "function" ? free() : free}\n`, stderr: "" };
         if (cmd === "echo ok") return REACH_OK;
         return ok;
@@ -440,10 +440,12 @@ describe("golden import stages", () => {
     expect(untar).toMatch(/-C '\/root' --no-same-owner/);
     expect(cmds.indexOf(FREE_KB_CMD)).toBeLessThan(cmds.indexOf(untar));
     const tool = cmds.find(c => c.includes("brew install gh"))!;
-    expect(tool).toMatch(/^timeout -k 10 600 bash -c '/);
+    expect(tool).toMatch(/\nsetsid bash -c 'brew install gh' &\np=\$!\n/);
+    expect(tool).toMatch(/while \[ \$t -lt 600 \]/);
     expect(cmds.filter(c => c.includes("brew install gh") || c.includes("brew-bootstrap") || c.includes("bun@1.4.0"))).toHaveLength(3);
     const agent = cmds.find(c => c.includes("codex-install"))!;
-    expect(agent).toMatch(/^timeout -k 10 900 bash -c 'set -euo pipefail\nexport PATH="\/usr\/local\/bin:\$PATH"\n/);
+    expect(agent).toMatch(/\nsetsid bash -c 'set -euo pipefail\nexport PATH="\/usr\/local\/bin:\$PATH"\n/);
+    expect(agent).toMatch(/while \[ \$t -lt 900 \]/);
     // Agents and their checks run with the Node the golden installed ahead of any the image shipped.
     expect(cmds).toContain('export PATH="/usr/local/bin:$PATH"\nclaude --version');
     expect(cmds).toContain('export PATH="/usr/local/bin:$PATH"\ncodex --version');
@@ -588,22 +590,118 @@ describe("golden import stages", () => {
     expect(only.killed).toEqual(["m1"]);
   });
 
+  it("an agent does not start under the agents' floor: it is recorded failed with the reading, which ends the build as any missing agent does", async () => {
+    let agentsStarted = false;
+    const { backend, cmds, killed, fetch } = backendFor([["claude-install", () => ((agentsStarted = true), ok)]], () => mb(agentsStarted ? 500 : 3000));
+    const results: ImportResult[] = [];
+    const { stages, onStage } = stageRecorder();
+    await expect(prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ onResult: r => void results.push(r) }) })).rejects.toThrow("an agent did not install, so nothing is sealed:\nCodex: 500 MB free, keeping 800 MB free");
+    expect(results[0]!.agents.map(a => [a.id, a.outcome, a.note])).toEqual([
+      ["agents/claude", "installed", undefined],
+      ["agents/codex", "failed", "500 MB free, keeping 800 MB free"],
+    ]);
+    expect(cmds.some(c => c.includes("codex-install"))).toBe(false);
+    expect(killed).toEqual(["m1"]);
+    expect(stages.at(-1)).toBe("failed:an agent did not install, so nothing is sealed:\nCodex: 500 MB free, keeping 800 MB free");
+  });
+
   it("when Homebrew itself fails, every brew formula is skipped rather than tried", async () => {
     const { backend, cmds, fetch } = backendFor([["brew-bootstrap", { exitCode: 1, stdout: "", stderr: "git: not found" }]]);
     const { stages, onStage } = stageRecorder();
     await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf() });
     expect(cmds.some(c => c.includes("brew install gh"))).toBe(false);
     expect(stages).toContain("installing-tools:1 installed, 1 failed: Homebrew (git: not found), 1 skipped");
+    // No Homebrew, nothing of its to clean.
+    expect(cmds.some(c => c.includes("brew autoremove") || c.includes("brew cleanup"))).toBe(false);
   });
 
-  it("stops installing tools when the disk drops under the floor that keeps the machine serving", async () => {
+  it("a tool that hits its timeout is recorded failed with the seconds, the guard kills its session and every descendant before the next tool, and the next tool runs", async () => {
+    const { backend, cmds, fetch } = backendFor([["brew install gh", { exitCode: 124, stdout: "==> Downloading gh\n", stderr: "" }]]);
+    const results: ImportResult[] = [];
+    const { stages, onStage } = stageRecorder();
+    await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ onResult: r => void results.push(r) }) });
+    expect(results[0]!.tools.map(t => [t.id, t.outcome, t.note])).toEqual([
+      ["tools/homebrew", "installed", undefined],
+      ["tools/brew/gh", "failed", "timed out after 600s"],
+      ["tools/npm/bun", "installed", undefined],
+    ]);
+    expect(stages).toContain("installing-tools:2 installed, 1 failed: gh (timed out after 600s)");
+    const guard = cmds.find(c => c.includes("brew install gh"))!;
+    // The install runs in its own session; at the timeout that session's group and everything descended from it
+    // (found through /proc by parent pid, since su starts its command in a session of its own) get TERM, then KILL.
+    expect(guard).toMatch(/^tree\(\) \{\n/);
+    expect(guard).toContain("for f in /proc/[0-9]*/stat");
+    expect(guard).toMatch(/\nsetsid bash -c '.*' &\np=\$!\n/s);
+    expect(guard).toContain('v="$p $(tree $p)"\n  kill -TERM -- -$p $v');
+    expect(guard).toContain("kill -KILL -- -$p $v");
+    // The guard returns 124 only once the tree is gone, so the next brew never meets a lock the last one still holds.
+    expect(guard).toMatch(/kill -KILL[^\n]*\n\s+t=0; while \[ \$t -lt 10 \] && kill -0 \$v[^\n]*\n\s+exit 124\n/);
+    expect(guard).not.toMatch(/pkill|killall/);
+  });
+
+  it("a cellar lock error waits once for every Homebrew lock to clear, then tries the tool once more", async () => {
+    let tries = 0;
+    const locked = { exitCode: 1, stdout: "", stderr: "Error: A `brew install glibc` process has already locked /home/linuxbrew/.linuxbrew/Cellar/linux-headers@6.8.\nPlease wait for it to finish or terminate it to continue." };
+    const { backend, cmds, fetch } = backendFor([["brew install gh", () => (++tries === 1 ? locked : ok)]]);
+    const results: ImportResult[] = [];
+    const { stages, onStage } = stageRecorder();
+    await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ onResult: r => void results.push(r) }) });
+    expect(tries).toBe(2);
+    const at = (needle: string) => cmds.findIndex(c => c.includes(needle));
+    const wait = cmds.find(c => c.includes("flock -w"))!;
+    expect(wait).toBe('for l in /home/linuxbrew/.linuxbrew/var/homebrew/locks/*.lock; do [ -e "$l" ] && flock -w 600 "$l" true; done; true');
+    expect(cmds.filter(c => c.includes("flock -w"))).toHaveLength(1);
+    expect(at("brew install gh")).toBeLessThan(at("flock -w"));
+    expect(cmds.lastIndexOf(cmds.find(c => c.includes("brew install gh"))!)).toBeGreaterThan(at("flock -w"));
+    expect(stages).toContain("installing-tools:gh: another brew holds its cellar; waiting for it, then once more");
+    expect(results[0]!.tools.find(t => t.id === "tools/brew/gh")).toMatchObject({ outcome: "installed" });
+    // A second lock error is the tool's failure, with Homebrew's line as the reason.
+    const again = backendFor([["brew install gh", locked]]);
+    const more: ImportResult[] = [];
+    await prepareBuilder({ backend: again.backend, setup: "true", fetch: again.fetch, import: importOf({ onResult: r => void more.push(r) }) });
+    expect(again.cmds.filter(c => c.includes("flock -w"))).toHaveLength(1);
+    expect(again.cmds.filter(c => c.includes("brew install gh"))).toHaveLength(2);
+    expect(more[0]!.tools.find(t => t.id === "tools/brew/gh")).toMatchObject({ outcome: "failed", note: "Error: A `brew install glibc` process has already locked /home/linuxbrew/.linuxbrew/Cellar/linux-headers@6.8." });
+  });
+
+  it("after the loop Homebrew autoremoves then cleans up, both guarded, and the detail says what that freed; archives a failed export left in /tmp go before the first tool", async () => {
+    let cleaned = false;
+    const { backend, cmds, fetch } = backendFor(
+      [["brew cleanup -s --prune=all", () => ((cleaned = true), ok)]],
+      () => mb(cleaned ? 4000 : 3000),
+    );
+    const { stages, onStage } = stageRecorder();
+    await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf() });
+    const at = (needle: string) => cmds.findIndex(c => c.includes(needle));
+    const autoremove = cmds[at("brew autoremove")]!;
+    expect(autoremove).toMatch(/^tree\(\) \{\n/);
+    expect(autoremove).toMatch(/\nsetsid bash -c 'export PATH=.*su -s \/bin\/bash linuxbrew -c .*brew autoremove.* &\np=\$!\n/s);
+    expect(autoremove).not.toContain("HOMEBREW_NO_INSTALL_CLEANUP");
+    expect(at("bun@1.4.0")).toBeLessThan(at("brew autoremove"));
+    expect(at("brew autoremove")).toBeLessThan(at("brew cleanup -s --prune=all"));
+    expect(at("brew cleanup -s --prune=all")).toBeLessThan(cmds.indexOf("echo ok"));
+    expect(stages).toContain("installing-tools:3 installed; Homebrew cleanup freed 1000 MB");
+    const sweep = cmds.indexOf("rm -f /tmp/wsp-vault-*.tgz");
+    expect(sweep).toBeGreaterThan(at("tar xzf"));
+    expect(sweep).toBeLessThan(at("brew-bootstrap"));
+    // A cleanup that fails is named, and the tools it followed still count.
+    const failing = backendFor([["brew cleanup -s --prune=all", { exitCode: 1, stdout: "", stderr: "Error: Permission denied @ apply2files" }]]);
+    const rec = stageRecorder();
+    await prepareBuilder({ backend: failing.backend, setup: "true", fetch: failing.fetch, onStage: rec.onStage, import: importOf() });
+    expect(rec.stages).toContain("installing-tools:3 installed; Homebrew cleanup failed (Error: Permission denied @ apply2files)");
+  });
+
+  it("stops installing tools when the disk drops under the tools floor", async () => {
     let dfCalls = 0;
-    const { backend, cmds, fetch } = backendFor([], () => mb(++dfCalls <= 2 ? 2000 : 500));
+    // The upload, the two agents and Homebrew read a roomy disk; the first formula reads it low.
+    const { backend, cmds, fetch } = backendFor([], () => mb(++dfCalls <= 4 ? 3000 : 500));
     const { stages, onStage } = stageRecorder();
     await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf() });
     expect(cmds.some(c => c.includes("brew-bootstrap"))).toBe(true);
     expect(cmds.some(c => c.includes("brew install gh"))).toBe(false);
-    expect(stages).toContain("installing-tools:1 installed, 2 skipped (500 MB free, keeping 800 MB free)");
+    expect(stages).toContain("installing-tools:1 installed, 2 skipped (500 MB free, keeping 2048 MB free)");
+    // The floor stops installs, not the housekeeping that gives the disk back.
+    expect(cmds.some(c => c.includes("brew cleanup -s --prune=all"))).toBe(true);
   });
 
   it("refuses to upload when the archive and its contents would not fit, kills the builder, and says why", async () => {
@@ -614,7 +712,7 @@ describe("golden import stages", () => {
     expect(killed).toEqual(["m1"]);
     expect(stages.at(-1)).toMatch(/^failed:your files need 1\.2 KB packed and 4\.0 KB unpacked, plus 256 MB of headroom, but the machine has 100 MB free/);
     // The check reads the archive, not the recipe's estimate: a small tar of a large estimate still fits.
-    const roomy = backendFor([], mb(2000));
+    const roomy = backendFor([], mb(3000));
     await expect(prepareBuilder({ backend: roomy.backend, setup: "true", fetch: roomy.fetch, import: importOf({ files: { ...importOf().files!, bytes: 10 * 1024 * 1024 * 1024 } }) })).resolves.toBeDefined();
   });
 
@@ -623,7 +721,7 @@ describe("golden import stages", () => {
     const { stages, onStage } = stageRecorder();
     const builder = await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf() });
     expect(stages).toContain("uploading-files:free disk unknown (df failed: df: /root: No such file or directory); uploading 1.2 KB anyway");
-    expect(stages.filter(s => s.startsWith("installing-tools:free disk unknown"))).toEqual(["installing-tools:free disk unknown (df failed: df: /root: No such file or directory); installing without the 800 MB floor"]);
+    expect(stages.filter(s => s.startsWith("installing-tools:free disk unknown"))).toEqual(["installing-tools:free disk unknown (df failed: df: /root: No such file or directory); installing without the 2048 MB floor"]);
     expect(puts).toHaveLength(1);
     expect(cmds.filter(c => c.includes("brew install gh") || c.includes("brew-bootstrap") || c.includes("bun@1.4.0"))).toHaveLength(3);
     expect(builder.import?.applied).toContain("installing-harness");
@@ -738,7 +836,7 @@ describe("golden import stages", () => {
   });
 
   it("a volatile re-import that fails on attach is reported on the stage and never fails the attach: the ledger stands and nothing else runs", async () => {
-    let free = mb(2000);
+    let free = mb(3000);
     const { backend, cmds, puts, fetch } = backendFor([], () => free);
     const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf() });
     const before = { cmds: cmds.length, puts: puts.length };
@@ -861,7 +959,7 @@ describe("golden import stages", () => {
         "installing-tools:1 installed",
       ]);
       const removals = cmds.slice(0, 3);
-      expect(removals.every(c => c.startsWith("timeout -k 10 600 bash -c '"))).toBe(true);
+      expect(removals.every(c => /\nsetsid bash -c '.*' &\np=\$!\n/s.test(c) && c.includes("while [ $t -lt 600 ]"))).toBe(true);
       expect(removals[0]).toContain("rm -rf -- '\\''/root/.zshrc'\\''");
       expect(removals[2]).toContain("npm uninstall -g @google/gemini-cli");
       expect(cmds.indexOf(FREE_KB_CMD)).toBeGreaterThan(2);

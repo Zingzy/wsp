@@ -9,9 +9,10 @@
 import { createHash } from "node:crypto";
 import { ALREADY_APPLIED, type GoldenLogin, type GoldenManifest, type GoldenStage, type GoldenVersion, type RecipeDigest } from "@wsp/protocol";
 import type { Removal } from "./golden-diff.js";
-import { HOMEBREW, NODE_PATH_LINE, type AgentInstall, type NodeInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
+import { NODE_PATH_LINE, type AgentInstall, type NodeInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
+import { GUARD_SLACK_S, MIB, TOOL_TIMEOUT_S, fmtBytes, freeBytes, guarded, installTools, reasonOf, type ToolResult } from "./golden-tools.js";
 import { assertFirstLife } from "./lifecycle.js";
-import type { ExecResult, Machine, MachineBackend, MachineKind, MachineState } from "./machine.js";
+import type { Machine, MachineBackend, MachineKind, MachineState } from "./machine.js";
 import { importInto } from "./vault.js";
 
 export type { GoldenLogin, GoldenManifest, GoldenStage, GoldenVersion };
@@ -178,14 +179,6 @@ export interface ImportLedger {
   smoke: string;
 }
 
-export interface ToolResult {
-  id: string;
-  label: string;
-  outcome: "installed" | "failed" | "skipped";
-  note?: string;
-  ms?: number;
-}
-
 export interface AgentResult {
   id: string;
   name: string;
@@ -213,50 +206,11 @@ export interface ApplyImportOptions {
   onStage?: StageListener;
 }
 
-const FREE_KB_CMD = "df -Pk /root | awk 'NR==2{print $4}'";
-const MIB = 1024 * 1024;
 /** Extraction needs the archive and its contents at once, plus what the agents install after. */
 const UPLOAD_HEADROOM = 256 * MIB;
-/** Agents install before tools, so this keeps the disk from filling under the harness once it runs (a full disk
- * killed exec itself, measured 2026-09-05); tools stop before eating into it. */
-const TOOLS_DISK_FLOOR = 800 * MIB;
-const TOOL_TIMEOUT_S = 600;
+/** The Claude installer peaks near 410 MB (measured 2026-09-02); an agent does not start under this. */
+const AGENTS_DISK_FLOOR = 800 * MIB;
 const AGENT_TIMEOUT_S = 900;
-
-function fmtBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < MIB) return `${(n / 1024).toFixed(1)} KB`;
-  return `${Math.round(n / MIB)} MB`;
-}
-
-function squote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
-}
-
-/** The line that names the failure, for a warning: the last `Error:` line on stderr (Homebrew
- * follows its error with advice), else the last stderr line, else stdout's; 124 is the guest-side timeout. */
-function reasonOf(res: ExecResult, timeoutS: number): string {
-  if (res.exitCode === 124) return `timed out after ${timeoutS}s`;
-  const lines = (text: string): string[] => text.split("\n").map(l => l.trim()).filter(l => l !== "");
-  const err = lines(res.stderr);
-  return (err.filter(l => l.startsWith("Error:")).at(-1) ?? err.at(-1) ?? lines(res.stdout).at(-1) ?? `exit ${res.exitCode}`).slice(0, 160);
-}
-
-type FreeDisk = { kind: "free"; bytes: number } | { kind: "unknown"; reason: string };
-
-/** What df says is free under /root; a df that fails or prints nothing is reported, never assumed. */
-async function freeBytes(machine: Machine): Promise<FreeDisk> {
-  const res = await machine.exec(FREE_KB_CMD, { timeoutMs: 30_000 });
-  const kb = Number(res.stdout.trim());
-  if (res.exitCode === 0 && Number.isFinite(kb) && kb > 0) return { kind: "free", bytes: kb * 1024 };
-  return { kind: "unknown", reason: `df failed: ${reasonOf(res, 30)}` };
-}
-
-// The guest kills a runaway install itself (timeout), so a tool that hangs
-// never leaves a second one racing it for the same lock.
-function guarded(script: string, timeoutS: number): string {
-  return `timeout -k 10 ${timeoutS} bash -c ${squote(script)}`;
-}
 
 /** Runs the import stages and the harness on a builder, skipping what the
  * ledger says is already there for the same recipe. Files and upload fail the
@@ -356,8 +310,13 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
           result.agents.push({ id: agent.id, name: agent.name, outcome: "failed", note: node.failed, ms: 0 });
           continue;
         }
+        const free = await freeBytes(machine);
+        if (free.kind === "free" && free.bytes < AGENTS_DISK_FLOOR) {
+          result.agents.push({ id: agent.id, name: agent.name, outcome: "failed", note: `${fmtBytes(free.bytes)} free, keeping ${fmtBytes(AGENTS_DISK_FLOOR)} free`, ms: 0 });
+          continue;
+        }
         stage("installing-harness", `${agent.name} (${i + 1}/${imp.agents.length})`);
-        const install = await machine.exec(guarded(`set -euo pipefail\n${NODE_PATH_LINE}\n${agent.install}`, AGENT_TIMEOUT_S), { timeoutMs: (AGENT_TIMEOUT_S + 30) * 1000 });
+        const install = await machine.exec(guarded(`set -euo pipefail\n${NODE_PATH_LINE}\n${agent.install}`, AGENT_TIMEOUT_S), { timeoutMs: (AGENT_TIMEOUT_S + GUARD_SLACK_S) * 1000 });
         const check = install.exitCode === 0 ? await machine.exec(`${NODE_PATH_LINE}\n${agent.smoke}`, { timeoutMs: 60_000 }) : install;
         const ms = Date.now() - t0;
         if (check.exitCode === 0) result.agents.push({ id: agent.id, name: agent.name, outcome: "installed", ms });
@@ -386,41 +345,9 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
       mark("installing-tools");
     } else {
       ran = true;
-      const installed = new Set<string>();
-      const labelOf = (id: string): string => imp.tools.find(t => t.id === id)?.label ?? id;
-      let floor: string | undefined;
-      let dfWarned = false;
-      for (const [i, tool] of imp.tools.entries()) {
-        if (tool.after !== undefined && !installed.has(tool.after)) {
-          result.tools.push({ id: tool.id, label: tool.label, outcome: "skipped", note: `${labelOf(tool.after)} did not install` });
-          continue;
-        }
-        if (floor !== undefined) {
-          result.tools.push({ id: tool.id, label: tool.label, outcome: "skipped", note: floor });
-          continue;
-        }
-        const free = await freeBytes(machine);
-        if (free.kind === "unknown" && !dfWarned) {
-          dfWarned = true;
-          stage("installing-tools", `free disk unknown (${free.reason}); installing without the ${fmtBytes(TOOLS_DISK_FLOOR)} floor`);
-        } else if (free.kind === "free" && free.bytes < TOOLS_DISK_FLOOR) {
-          floor = `${fmtBytes(free.bytes)} free, keeping ${fmtBytes(TOOLS_DISK_FLOOR)} free`;
-          result.tools.push({ id: tool.id, label: tool.label, outcome: "skipped", note: floor });
-          continue;
-        }
-        stage("installing-tools", `${tool.label} (${i + 1}/${imp.tools.length})`);
-        const t0 = Date.now();
-        const res = await machine.exec(guarded(tool.cmd, TOOL_TIMEOUT_S), { timeoutMs: (TOOL_TIMEOUT_S + 30) * 1000 });
-        const ms = Date.now() - t0;
-        if (res.exitCode === 0) {
-          installed.add(tool.id);
-          if (tool.id === "tools/homebrew") result.homebrew = { ...HOMEBREW };
-          result.tools.push({ id: tool.id, label: tool.label, outcome: "installed", ms });
-        } else {
-          result.tools.push({ id: tool.id, label: tool.label, outcome: "failed", note: reasonOf(res, TOOL_TIMEOUT_S), ms });
-        }
-      }
-      stage("installing-tools", summarize(result.tools, floor));
+      const tools = await installTools(machine, imp.tools, stage);
+      result.tools.push(...tools.tools);
+      if (tools.homebrew !== undefined) result.homebrew = tools.homebrew;
       mark("installing-tools");
     }
     if (ran) {
@@ -441,7 +368,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
  * agents whose floor the guest's Node does not meet. */
 async function installNode(machine: Machine, node: NodeInstall, stage: StageListener): Promise<{ haveMajor: number; failed?: string }> {
   stage("installing-harness", `Node for ${node.agents.join(", ")}`);
-  const res = await machine.exec(guarded(`set -euo pipefail\n${node.cmd}`, AGENT_TIMEOUT_S), { timeoutMs: (AGENT_TIMEOUT_S + 30) * 1000 });
+  const res = await machine.exec(guarded(`set -euo pipefail\n${node.cmd}`, AGENT_TIMEOUT_S), { timeoutMs: (AGENT_TIMEOUT_S + GUARD_SLACK_S) * 1000 });
   const have = /NODE_HAVE v(\d+)/.exec(res.stdout)?.[1];
   const haveMajor = have === undefined ? 0 : Number(have);
   const kept = /NODE_KEPT (v\S+)/.exec(res.stdout)?.[1];
@@ -457,17 +384,6 @@ async function installNode(machine: Machine, node: NodeInstall, stage: StageList
   const failed = `Node ${node.version} did not install: ${reasonOf({ ...res, stdout: res.stdout.split("\n").filter(l => !l.startsWith("NODE_")).join("\n") }, AGENT_TIMEOUT_S)}`;
   stage("installing-harness", failed);
   return { haveMajor, failed };
-}
-
-function summarize(tools: ToolResult[], floor: string | undefined): string {
-  const parts: string[] = [];
-  const n = (o: ToolResult["outcome"]) => tools.filter(t => t.outcome === o);
-  parts.push(`${n("installed").length} installed`);
-  const failed = n("failed");
-  if (failed.length > 0) parts.push(`${failed.length} failed: ${failed.map(t => `${t.label} (${t.note})`).join(", ")}`);
-  const skipped = n("skipped");
-  if (skipped.length > 0) parts.push(`${skipped.length} skipped${floor !== undefined ? ` (${floor})` : ""}`);
-  return parts.join(", ");
 }
 
 function summarizeAgents(agents: AgentResult[]): string {
@@ -731,7 +647,7 @@ export async function applyDelta(machine: Machine, delta: GoldenDelta, opts: App
         notes.push(`${r.label}: ${r.note ?? "left on the machine"}`);
         continue;
       }
-      const res = await machine.exec(guarded(r.cmd, TOOL_TIMEOUT_S), { timeoutMs: (TOOL_TIMEOUT_S + 30) * 1000 });
+      const res = await machine.exec(guarded(r.cmd, TOOL_TIMEOUT_S), { timeoutMs: (TOOL_TIMEOUT_S + GUARD_SLACK_S) * 1000 });
       if (res.exitCode === 0) removed.push(r.label);
       else notes.push(`${r.label} not removed (${reasonOf(res, TOOL_TIMEOUT_S)})`);
     }
