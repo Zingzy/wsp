@@ -142,6 +142,14 @@ describe("assumedSize", () => {
     expect(assumedSize(row({ id: "tools/brew/nobody/tap/mystery" }))).toEqual({ bytes: 100 * MIB, kind: "an install" });
     expect(assumedSize({ ...row({ id: "agents/aider" }), rung: "agents" })).toEqual({ bytes: 350 * MIB, kind: "an agent" });
   });
+
+  it("a command cask's row counts at the go default when it carries a go fallback, at the install default when it does not", () => {
+    const spoo = row({ id: "tools/cli/spoo", paths: ["github.com/spoo-me/spoo-cli@v0.4.1", "github.com/spoo-me/spoo-cli/cmd/spoo@v0.3.0"] });
+    expect(assumedSize(spoo)).toEqual({ bytes: 500 * MIB, kind: "a go install" });
+    const ngrok = row({ id: "tools/cli/ngrok", paths: ["github.com/ngrok/ngrok@v3"] });
+    expect(assumedSize(ngrok)).toEqual({ bytes: 100 * MIB, kind: "an install" });
+    expect(assumedSize(row({ id: "tools/cargo/spoo", paths: spoo.paths }))).toEqual({ bytes: 100 * MIB, kind: "an install" });
+  });
 });
 
 describe("estimateDisk", () => {

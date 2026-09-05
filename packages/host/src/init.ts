@@ -512,7 +512,10 @@ function sizeWhy(e: ManifestEntry, brew: BrewTable): string {
 /** A formula's second detail line: why it starts unticked when it does, then its size and where the number came from. */
 function toolWhy(e: ManifestEntry, brew: BrewTable): string {
   const unknown = e.linux === "unknown" ? "Linux build unknown, tick to try; " : "";
-  if (e.id.startsWith("tools/cli/")) return `${unknown}its Linux release binary${e.paths.length > 1 ? ", else go install of the module" : ""}; checksum recorded on first install; ${e.default === "bring" ? "brought by default" : "left out by default"}`;
+  if (e.id.startsWith("tools/cli/")) {
+    const go = e.paths.length > 1;
+    return `${unknown}its Linux release binary${go ? ", else go install of the module" : ""}; ${assumedWords(e)}${go ? " since the fallback fills go's caches" : ""}; checksum recorded on first install; ${e.default === "bring" ? "brought by default" : "left out by default"}`;
+  }
   if (e.linux === "unknown") return `${unknown}${sizeWhy(e, brew)}`;
   const size = toolSize(e, brew);
   if (size !== undefined && size.bytes >= HEAVY_BYTES) return `${fmtBytes(size.bytes)}${depsWords(size)}, tick to bring; ${roadWords(size)}`;

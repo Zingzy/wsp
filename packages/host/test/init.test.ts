@@ -3263,12 +3263,14 @@ describe("disk estimate before the boot", () => {
     expect(aider.detail[1]).toBe("installs on the machine (not measured, ~350.0 MB assumed for an agent); its config (900 B) comes along");
     const zed = selectItem({ rung: "agents", id: "agents/zed", label: "Zed", paths: ["~/.config/zed"], bytes: 900, default: "skip" });
     expect(zed.hint).toBe("900 B");
-    // A command cask's row names its release and the go fallback it carries; one whose stanza had no Linux block waits for a tick.
+    // A command cask's row names its release and the go fallback it carries, and counts at the go default for that fallback's
+    // caches; one without a fallback counts at the install default, and one whose stanza had no Linux block waits for a tick.
     const spoo = selectItem({ rung: "tools", id: "tools/cli/spoo", label: "spoo", paths: ["github.com/spoo-me/spoo-cli@v0.4.1", "github.com/spoo-me/spoo-cli/cmd/spoo@v0.3.0"], bytes: 0, default: "bring", linux: "yes", version: "0.4.1" });
-    expect(spoo.hint).toBe("~100.0 MB");
-    expect(spoo.detail).toEqual(["github.com/spoo-me/spoo-cli@v0.4.1, github.com/spoo-me/spoo-cli/cmd/spoo@v0.3.0", "its Linux release binary, else go install of the module; checksum recorded on first install; brought by default"]);
+    expect(spoo.hint).toBe("~500.0 MB");
+    expect(spoo.detail).toEqual(["github.com/spoo-me/spoo-cli@v0.4.1, github.com/spoo-me/spoo-cli/cmd/spoo@v0.3.0", "its Linux release binary, else go install of the module; not measured, ~500.0 MB assumed for a go install since the fallback fills go's caches; checksum recorded on first install; brought by default"]);
     const maybe = selectItem({ rung: "tools", id: "tools/cli/ngrok", label: "ngrok", paths: ["github.com/ngrok/ngrok@v3"], bytes: 0, default: "skip", linux: "unknown", version: "3" });
-    expect(maybe.detail[1]).toBe("Linux build unknown, tick to try; its Linux release binary; checksum recorded on first install; left out by default");
+    expect(maybe.hint).toBe("~100.0 MB");
+    expect(maybe.detail[1]).toBe("Linux build unknown, tick to try; its Linux release binary; not measured, ~100.0 MB assumed for an install; checksum recorded on first install; left out by default");
     // The terminal font row copies nothing and installs nothing: its detail says what the tick does instead.
     const font = selectItem({ rung: "shell", id: "shell/terminal-font", label: "terminal font: Hack (Ghostty)", paths: [], bytes: 0, default: "bring", font: "Hack" });
     expect(font.hint).toBeUndefined();

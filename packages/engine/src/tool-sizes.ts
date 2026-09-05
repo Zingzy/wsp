@@ -5,7 +5,7 @@
 // toolchain is one line; agents have measured install sizes; a row nothing
 // measured counts at a stated default for its kind. Nothing here runs a
 // command: the host reads the Mac's Homebrew and hands the table in.
-import { AGENT_INSTALLERS, BREW_TOOLCHAIN, MANAGER_FORMULA, MACOS_ONLY_FORMULAE, agentInstallsFor, toolInstallsFor, type BrewFormula, type BrewTable, type RecipeEntry, type ToolSource } from "./golden-import.js";
+import { AGENT_INSTALLERS, BREW_TOOLCHAIN, MANAGER_FORMULA, MACOS_ONLY_FORMULAE, agentInstallsFor, cliRoad, toolInstallsFor, type BrewFormula, type BrewTable, type RecipeEntry, type ToolSource } from "./golden-import.js";
 import { MIB, TOOLS_DISK_FLOOR } from "./golden-tools.js";
 
 /** Root disk asked for every builder and fork, Solari's cap: a 4 GB root filled during the tools stage and
@@ -64,7 +64,8 @@ const AGENT_MIB: Record<string, number> = { opencode: 673, codex: 455, pi: 165, 
 
 /** The Node release the agents stage puts under /usr/local when the base's major is under their floor. */
 export const NODE_BYTES = 250 * MIB;
-/** The Node major the base image ships; a floor at or under it keeps the base's Node and installs nothing. */
+/** The Node major the base image ships: the builder's log read `node v18.20.4` before the Node step (2026-09-05);
+ * a floor at or under it keeps the base's Node and installs nothing. */
 const BASE_NODE_MAJOR = 18;
 
 const OTHER_TOOL_MIB: Record<string, number> = { "tools/npm/bun": 78 };
@@ -80,10 +81,11 @@ export interface AssumedSize {
   kind: "a go install" | "a uv tool" | "an npm global" | "an agent" | "an install";
 }
 
-/** The stated default for a tools or agents row nothing measured. */
+/** The stated default for a tools or agents row nothing measured. A command cask's row that falls back to
+ * `go install` counts as a go install: the fallback fills the same module and build caches. */
 export function assumedSize(e: RecipeEntry): AssumedSize {
   if (e.rung === "agents") return { bytes: ASSUMED_MIB.agent * MIB, kind: "an agent" };
-  if (e.id.startsWith("tools/go/")) return { bytes: ASSUMED_MIB.go * MIB, kind: "a go install" };
+  if (e.id.startsWith("tools/go/") || (e.id.startsWith("tools/cli/") && cliRoad(e)?.go !== undefined)) return { bytes: ASSUMED_MIB.go * MIB, kind: "a go install" };
   if (e.id.startsWith("tools/uv/")) return { bytes: ASSUMED_MIB.uv * MIB, kind: "a uv tool" };
   if (/^tools\/(npm|pnpm|bun)\//.test(e.id)) return { bytes: ASSUMED_MIB.npm * MIB, kind: "an npm global" };
   return { bytes: ASSUMED_MIB.other * MIB, kind: "an install" };
