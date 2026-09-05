@@ -121,8 +121,13 @@ export function keychainReader(run: (file: string, args: string[]) => Promise<{ 
 /** Claude Code's installer is the one curl into a shell the rules allow. */
 export const CLAUDE_INSTALLER: AgentInstaller = { name: "Claude Code", install: GOLDEN_SETUP, smoke: GOLDEN_SMOKE };
 
-/** The last line `security` printed; its stderr names the cause and never the secret. */
-function secretFailure(e: unknown): string {
+/** The last line `security` printed, since its stderr names the cause and never the secret. A helper's failure is its
+ * exit status alone: the command line and whatever it printed may carry the key. */
+function secretFailure(e: unknown, helper: boolean): string {
+  if (helper) {
+    const code = e instanceof Error ? (e as { code?: unknown }).code : undefined;
+    return typeof code === "number" ? `exit status ${code}` : typeof code === "string" ? code : "no exit status";
+  }
   const lines = (e instanceof Error ? e.message : String(e)).split("\n").map(l => l.trim()).filter(l => l !== "");
   return lines.at(-1) ?? "unknown error";
 }
@@ -156,7 +161,7 @@ export async function readSecrets(wanted: readonly PlannedSecret[], reader: Secr
     try {
       out.values.set(secretKey(s), s.command === undefined ? await reader.read(s.service, s.account) : await reader.run(s.command));
     } catch (e) {
-      failed.push({ s, reason: secretFailure(e) });
+      failed.push({ s, reason: secretFailure(e, s.command !== undefined) });
     }
   }
   const read = new Set(wanted.filter(s => out.values.has(secretKey(s))).map(s => s.id));
@@ -329,13 +334,23 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
     const settingsSource = join(opts.home, CLAUDE_SETTINGS.slice(2));
     const claude = files.find(f => f.source === settingsSource || f.source === dirname(settingsSource));
     const settingsStaged = claude === undefined ? undefined : join(stage, claude.dir ? `${claude.dest}/settings.json` : claude.dest);
+    const key = plan.secrets.find(s => s.command !== undefined && opts.secrets.has(secretKey(s)));
+    const reads = (k: PlannedSecret): string => `cat ${GUEST_HOME}/${k.dest}`;
     if (claude !== undefined && settingsStaged !== undefined && existsSync(settingsStaged)) {
-      const key = plan.secrets.find(s => s.command !== undefined && opts.secrets.has(secretKey(s)));
       const text = readFileSync(settingsStaged, "utf8");
-      const rewritten = withApiKeyHelper(text, key === undefined ? undefined : `cat ${GUEST_HOME}/${key.dest}`);
+      const rewritten = withApiKeyHelper(text, key === undefined ? undefined : reads(key));
       if (rewritten !== undefined && rewritten !== text) {
         writeFileSync(settingsStaged, rewritten);
         if (key === undefined) skipped.push({ id: claude.id, path: CLAUDE_SETTINGS, note: "apiKeyHelper left out of the copy: the command runs on this computer only" });
+      }
+    } else if (key !== undefined) {
+      // A settings.json that did not travel stays here whole, by the person's tick; the one written names the key file and nothing else.
+      const minimal = withApiKeyHelper(undefined, reads(key));
+      if (minimal !== undefined) {
+        const target = join(stage, dirname(key.dest), "settings.json");
+        mkdirSync(dirname(target), { recursive: true });
+        writeFileSync(target, minimal);
+        skipped.push({ id: key.id, path: secretPath(key), note: "the machine's settings.json names only the key file; your Claude Code config stayed here" });
       }
     }
     for (const [g, mode] of modes) if (existsSync(join(stage, g))) chmodSync(join(stage, g), mode);

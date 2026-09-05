@@ -79,7 +79,7 @@ async function claudeRow(host: Host): Promise<ManifestEntry | undefined> {
   const helper = apiKeyHelperOf(await host.fs.readText(expand(host, CLAUDE_SETTINGS)));
   const exported = await exportedIn(host, CLAUDE_KEY_ENV);
   const sources = [
-    ...(exported !== undefined ? [`the API key exported in ${exported} (set on the machine in the secrets step)`] : []),
+    ...(exported !== undefined ? [`the API key exported in ${exported} (set on the machine in the secrets step if ${exported} comes along)`] : []),
     ...(helper !== undefined ? [`the apiKeyHelper in ${CLAUDE_SETTINGS}`] : []),
     ...(oauth.paths.length > 0 ? ["OAuth credentials"] : []),
   ];

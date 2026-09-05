@@ -60,7 +60,7 @@ function reader(values: Record<string, string>): SecretReader & { reads: (string
     run: async command => {
       reads.push([command]);
       const v = values[command];
-      if (v === undefined) throw new Error(`Command failed: ${command}\nsecurity: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.\n`);
+      if (v === undefined) throw Object.assign(new Error(`Command failed: /bin/sh -c ${command}\nsecurity: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.\n`), { code: 44 });
       return v;
     },
   };
@@ -311,10 +311,10 @@ describe("packPlan", () => {
     expect(statSync(join(dir, ".claude-cfg", "anthropic-api-key")).mode & 0o777).toBe(0o600);
     expect(readFileSync(join(dir, ".claude-cfg", "settings.json"), "utf8")).toBe('{\n  "apiKeyHelper": "cat /root/.claude-cfg/anthropic-api-key",\n  "model": "opus"\n}\n');
     expect(listTar(packed.tar).some(e => e.path.includes(".credentials.json"))).toBe(false);
-    // The helper failing on this computer refuses the login with the last line the command printed; beside a read
+    // The helper failing on this computer refuses the login with its exit status, never its output; beside a read
     // Keychain item it is left behind instead, and the copied settings.json loses the helper line.
     const failed = await readSecrets(wanted.slice(1), reader({}));
-    expect(failed.refused).toEqual([{ id: "logins/claude", service: "~/.claude/settings.json", command: HELPER, reason: "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain." }]);
+    expect(failed.refused).toEqual([{ id: "logins/claude", service: "~/.claude/settings.json", command: HELPER, reason: "exit status 44" }]);
     const oauthOnly = await readSecrets(wanted, reader({ "Claude Code-credentials": '{"claudeAiOauth":{"accessToken":"sk-ant-x"}}' }));
     expect(oauthOnly.refused).toEqual([]);
     expect(oauthOnly.dropped.map(d => d.left)).toEqual(["the helper's key left behind: the helper did not run here"]);
@@ -355,6 +355,63 @@ describe("packPlan", () => {
     const plain = await packPlan(planFiles([row({ rung: "agents", id: "agents/claude", paths: ["~/.claude/settings.json"] })], { home, stat: statOf, platform: "darwin", rewrites: [[".claude/", ".claude-cfg/"]] }), { secrets: new Map(), home });
     expect(plain.skipped).toEqual([]);
     expect(readFileSync(join(extract(plain.tar), ".claude-cfg", "settings.json"), "utf8")).toBe('{"model": "opus"}');
+  });
+
+  it("a helper key that travels without the Claude Code config lands beside a settings.json holding only the line that reads it, with a note on the login", async () => {
+    const home = laptop();
+    mkdirSync(join(home, ".claude"), { recursive: true });
+    writeFileSync(join(home, ".claude", "settings.json"), CLAUDE_SETTINGS);
+    const rows = [
+      row({ rung: "agents", id: "agents/claude", paths: ["~/.claude/settings.json"], bring: false }),
+      row({ rung: "logins", id: "logins/claude", paths: ["Helper: ~/.claude/settings.json"], choice: "copy" }),
+    ];
+    const read = await readSecrets(keychainLogins(rows, "darwin", home), reader({ [HELPER]: "sk-ant-x-helper" }));
+    const plan = planFiles(rows, { home, stat: statOf, read: abs => readFileSync(abs, "utf8"), platform: "darwin", rewrites: [[".claude/", ".claude-cfg/"]] });
+    expect(plan.files).toEqual([]);
+    const packed = await packPlan(plan, { secrets: read.values, home });
+    expect(packed.skipped).toEqual([{ id: "logins/claude", path: "Helper: ~/.claude/settings.json", note: "the machine's settings.json names only the key file; your Claude Code config stayed here" }]);
+    const dir = extract(packed.tar);
+    expect(readFileSync(join(dir, ".claude-cfg", "anthropic-api-key"), "utf8")).toBe("sk-ant-x-helper\n");
+    expect(statSync(join(dir, ".claude-cfg", "anthropic-api-key")).mode & 0o777).toBe(0o600);
+    expect(readFileSync(join(dir, ".claude-cfg", "settings.json"), "utf8")).toBe('{\n  "apiKeyHelper": "cat /root/.claude-cfg/anthropic-api-key"\n}\n');
+    expect(listTar(packed.tar).map(e => e.path).filter(p => p.includes("settings.json"))).toEqual([".claude-cfg/settings.json"]);
+    // The config directory ticked without a settings.json in it gets the same file, so the key is read there too.
+    rmSync(join(home, ".claude", "settings.json"));
+    writeFileSync(join(home, ".claude", "CLAUDE.md"), "be brief\n");
+    const helperOnly = [row({ rung: "agents", id: "agents/claude", paths: ["~/.claude"] }), row({ rung: "logins", id: "logins/claude", paths: ["Helper: ~/.claude/settings.json"], choice: "copy" })];
+    const dirPlan = planFiles(helperOnly, { home, stat: statOf, read: () => CLAUDE_SETTINGS, platform: "darwin", rewrites: [[".claude/", ".claude-cfg/"]] });
+    const dirPacked = await packPlan(dirPlan, { secrets: read.values, home });
+    expect(readFileSync(join(extract(dirPacked.tar), ".claude-cfg", "settings.json"), "utf8")).toBe('{\n  "apiKeyHelper": "cat /root/.claude-cfg/anthropic-api-key"\n}\n');
+    // No key, no file: a settings.json nobody asked for never travels.
+    const none = await packPlan(plan, { secrets: new Map(), home });
+    expect(listTar(none.tar).some(e => e.path.includes("settings.json"))).toBe(false);
+  });
+
+  it("a failed helper is reported by its exit status alone: the command line, which may carry the key, never reaches the reason", async () => {
+    const home = laptop();
+    const inline = "printf sk-ant-x-inline; exit 3";
+    mkdirSync(join(home, ".claude"), { recursive: true });
+    writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ apiKeyHelper: inline }));
+    const wanted = keychainLogins([row({ rung: "logins", id: "logins/claude", paths: ["Keychain: Claude Code-credentials", "Helper: ~/.claude/settings.json"], choice: "copy" })], "darwin", home);
+    expect(wanted.map(s => s.command)).toEqual([undefined, inline]);
+    // execFile's error names the command in its first line and carries the exit status as code; with no stderr that line is the last one.
+    const shell: SecretReader = {
+      read: async () => {
+        throw new Error("Command failed: security find-generic-password -s Claude Code-credentials -w\nsecurity: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.\n");
+      },
+      run: async command => {
+        throw Object.assign(new Error(`Command failed: /bin/sh -c ${command}\n`), { code: 3 });
+      },
+    };
+    const refused = await readSecrets(wanted, shell);
+    expect(refused.refused).toEqual([{ id: "logins/claude", service: "Claude Code-credentials", reason: "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.; exit status 3" }]);
+    expect(JSON.stringify(refused.refused.map(r => r.reason))).not.toContain("sk-ant-x-inline");
+    // Beside a read Keychain item the same failure is a drop, with the same reason.
+    const dropped = await readSecrets(wanted, { ...shell, read: async () => '{"claudeAiOauth":{}}' });
+    expect(dropped.dropped.map(d => d.reason)).toEqual(["exit status 3"]);
+    // A spawn failure names its code; a signal or an unknown throw says only that there is no status.
+    expect((await readSecrets(wanted.slice(1), { ...shell, run: async () => { throw Object.assign(new Error("spawn /bin/sh ENOENT"), { code: "ENOENT" }); } })).refused[0]?.reason).toBe("ENOENT");
+    expect((await readSecrets(wanted.slice(1), { ...shell, run: async () => { throw new Error(`Command failed: /bin/sh -c ${inline}`); } })).refused[0]?.reason).toBe("no exit status");
   });
 
   it("places each secret it was given, gh's per account with the active one under the host, and notes a planned secret it was not given instead of failing", async () => {

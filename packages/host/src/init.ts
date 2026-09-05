@@ -504,7 +504,12 @@ function sizeWhy(e: ManifestEntry, brew: BrewTable): string {
 function detailWhy(e: ManifestEntry, lock: "on" | "off" | undefined, brew: BrewTable): string {
   if (lock === "off") return e.reason ?? "";
   if (lock === "on") return "always comes along";
-  if (e.rung === "logins") return agentName(e) === "claude" ? [e.detail, CLAUDE_LOGIN_WHY].filter(x => x !== undefined).join("; ") : LOGIN_WHY;
+  if (e.rung === "logins") {
+    if (agentName(e) !== "claude") return LOGIN_WHY;
+    // The OAuth credential is the row's one path that is not a helper; a row of API key sources has no such rule to explain.
+    const oauth = e.paths.some(p => !/^helper:/i.test(p));
+    return [e.detail, oauth ? CLAUDE_LOGIN_WHY : LOGIN_WHY].filter(x => x !== undefined).join("; ");
+  }
   if (e.rung === "everything" || isMcpRow(e)) return e.detail ?? "";
   if (e.font !== undefined) return "the app's terminal draws with it when this computer has it installed; unticked, the app uses its own font";
   if (e.rung === "agents") {
@@ -1039,9 +1044,10 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   // Off a terminal the spinner draws nothing, and only a saved copy answer gets here; a scripted run would otherwise sit on macOS's dialog with no word why.
   const keychainItems = [...new Set(wanted.filter(s => s.command === undefined).map(s => s.service))];
   const helpers = [...new Set(wanted.filter(s => s.command !== undefined).map(s => s.service))];
-  const consentLine = [...(keychainItems.length > 0 ? [`reading ${keychainItems.join(", ")} from your Keychain`] : []), ...(helpers.length > 0 ? [`running the ${helpers.join(", ")} helper`] : [])].join(" and ");
-  if (!io.isTTY && wanted.length > 0) log.step(`${consentLine[0]!.toUpperCase()}${consentLine.slice(1)}, as the saved recipe answered copy; macOS may ask you to allow it.`, out);
-  const reading = spin(io.output, "Reading your Keychain logins", io.isTTY && wanted.length > 0);
+  const helperWords = helpers.length > 0 ? [`running the ${helpers.join(", ")} helper`] : [];
+  const sentence = (words: string[]): string => words.join(" and ").replace(/^./, c => c.toUpperCase());
+  if (!io.isTTY && wanted.length > 0) log.step(`${sentence([...(keychainItems.length > 0 ? [`reading ${keychainItems.join(", ")} from your Keychain`] : []), ...helperWords])}, as the saved recipe answered copy; macOS may ask you to allow it.`, out);
+  const reading = spin(io.output, sentence([...(keychainItems.length > 0 ? ["reading your Keychain logins"] : []), ...helperWords]), io.isTTY && wanted.length > 0);
   const read = await readSecrets(wanted, opts.secrets);
   reading.stop();
   for (const [key, value] of read.values) {
@@ -1243,8 +1249,16 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     hide: value => runLog.hide(value),
   });
   const skipWhy = interactive ? undefined : io.isTTY ? "--yes asks nothing; sign in from the app's terminal" : "no terminal to sign in from; use the app's terminal";
+  const staged = stageLogins(offered, choices, ticks);
+  // The pack's notes on a copied login's Keychain and helper items join what its reads left behind, once each.
+  for (const s of landed?.files?.skipped ?? []) {
+    if (!/^(keychain|helper):/i.test(s.path) || !staged.some(e => e.id === s.id && e.choice === "copy")) continue;
+    const have = left.get(s.id);
+    if (have === undefined) left.set(s.id, s.note);
+    else if (!have.includes(s.note)) left.set(s.id, `${have}; ${s.note}`);
+  }
   const outcomes = await signInStage({
-    logins: stageLogins(offered, choices, ticks),
+    logins: staged,
     left,
     secrets: new Map(secretOutcomes.filter(r => r.state === "set").map(r => [r.name, r.path])),
     dial,

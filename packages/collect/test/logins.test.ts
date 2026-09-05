@@ -54,7 +54,7 @@ describe("logins", () => {
         paths: ["Keychain: Claude Code-credentials", "Helper: ~/.claude/settings.json"],
         bytes: 0,
         default: "bring",
-        detail: "Claude Code uses the API key exported in ~/.zshrc (set on the machine in the secrets step); also found: the apiKeyHelper in ~/.claude/settings.json, OAuth credentials",
+        detail: "Claude Code uses the API key exported in ~/.zshrc (set on the machine in the secrets step if ~/.zshrc comes along); also found: the apiKeyHelper in ~/.claude/settings.json, OAuth credentials",
       },
     ]);
   });
@@ -66,7 +66,7 @@ describe("logins", () => {
     ]);
     const exported = await detectLogins(fakeHost({ platform: "linux", files: { "~/.bashrc": "ANTHROPIC_API_KEY=sk-ant-x; export ANTHROPIC_API_KEY\n" } }));
     expect(exported).toEqual([
-      { rung: "logins", id: "logins/claude", label: "Claude Code login", group: "Agent logins", paths: [], bytes: 0, default: "bring", detail: "Claude Code uses the API key exported in ~/.bashrc (set on the machine in the secrets step)" },
+      { rung: "logins", id: "logins/claude", label: "Claude Code login", group: "Agent logins", paths: [], bytes: 0, default: "bring", detail: "Claude Code uses the API key exported in ~/.bashrc (set on the machine in the secrets step if ~/.bashrc comes along)" },
     ]);
     // A settings.json without a helper, or one that is not JSON, is no source.
     expect(await detectLogins(fakeHost({ files: { "~/.claude/settings.json": '{"model": "opus"}' } }))).toEqual([]);

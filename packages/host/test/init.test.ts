@@ -5,7 +5,7 @@
 // and host are the real ones over fakes; only the terminal is faked.
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -1411,9 +1411,9 @@ describe("wsp init, logins copied to the machine", () => {
       ],
     };
     const helper = "security find-generic-password -s anthropic-api-key -w";
-    const settings = (f: Fake): void => {
+    const settings = (f: Fake, line = helper): void => {
       mkdirSync(join(f.opts.home, ".claude"), { recursive: true });
-      writeFileSync(join(f.opts.home, ".claude", "settings.json"), `{"apiKeyHelper": "${helper}"}`);
+      writeFileSync(join(f.opts.home, ".claude", "settings.json"), `{"apiKeyHelper": "${line}"}`);
     };
     const saved = (f: Fake): void => {
       const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
@@ -1436,8 +1436,31 @@ describe("wsp init, logins copied to the machine", () => {
     expect(landed.files.skipped).toEqual([]);
     expect(readFileSync(join(dirname(f.opts.statePath), "init.log"), "utf8")).not.toContain("sk-ant-x-helper");
 
+    // A settings.json the pack leaves out (here a link into a dotfiles checkout outside home) still gets its key read on
+    // the machine: the pack writes a settings.json naming only the key file, and the row says so.
+    const bare = fake({ tty: false });
+    settings(bare);
+    const outside = mkdtempSync(join(tmpdir(), "wsp-init-dotfiles-"));
+    dirs.push(outside);
+    renameSync(join(bare.opts.home, ".claude", "settings.json"), join(outside, "settings.json"));
+    symlinkSync(join(outside, "settings.json"), join(bare.opts.home, ".claude", "settings.json"));
+    saved(bare);
+    const bareResult = await runInit(bare.opts, bare.io);
+    expect(bareResult.code).toBe(0);
+    expect(bare.reads).toEqual([helper]);
+    const bareNote = "the machine's settings.json names only the key file; your Claude Code config stayed here";
+    expect(bare.text()).toContain(`Claude Code login: signed in (copied; claude auth status; ${bareNote})`);
+    expect(bareResult.logins?.[0]).toEqual({ id: "logins/claude", label: "Claude Code login", state: "signed-in", note: "copied; claude auth status", left: bareNote });
+    const landedBare = JSON.parse(readFileSync(join(dirname(bare.opts.statePath), "golden-import.json"), "utf8")) as { files: { skipped: unknown[] } };
+    expect(landedBare.files.skipped).toEqual([
+      { id: "agents/claude", path: "~/.claude/settings.json", note: `a link to ${realpathSync(outside)}/settings.json, outside your home directory` },
+      { id: "logins/claude", path: "Helper: ~/.claude/settings.json", note: bareNote },
+    ]);
+
+    // A helper written with its key inline fails without stderr: the command line is what the shell's error carries, and it never reaches the terminal or the log.
+    const inline = "printf sk-ant-x-inline; exit 1";
     const refused = fake({ yes: true });
-    settings(refused);
+    settings(refused, inline);
     saved(refused);
     refused.opts.secrets = {
       read: async () => {
@@ -1445,16 +1468,33 @@ describe("wsp init, logins copied to the machine", () => {
       },
       run: async command => {
         refused.reads.push(command);
-        throw new Error(`Command failed: ${command}\nsecurity: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.\n`);
+        throw Object.assign(new Error(`Command failed: /bin/sh -c ${command}\n`), { code: 1 });
       },
     };
     expect((await runInit(refused.opts, refused.io)).code).toBe(0);
-    expect(refused.reads).toEqual([helper]);
-    expect(refused.text()).toContain("Claude Code login: the ~/.claude/settings.json helper failed (security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.); changed to sign in on the machine.");
+    expect(refused.reads).toEqual([inline]);
+    // On a terminal the spinner names what runs: the helper alone here, no Keychain item being read.
+    expect(refused.text()).toContain("Running the ~/.claude/settings.json helper");
+    expect(refused.text()).not.toContain("Reading your Keychain");
+    expect(refused.text()).toContain("Claude Code login: the ~/.claude/settings.json helper failed (exit status 1); changed to sign in on the machine.");
+    expect(refused.text()).not.toContain("sk-ant-x-inline");
+    expect(readFileSync(join(dirname(refused.opts.statePath), "init.log"), "utf8")).not.toContain("sk-ant-x-inline");
     expect(loadManifest(join(dirname(refused.opts.statePath), "golden-recipe.json")).entries.find(e => e.id === "logins/claude")?.choice).toBe("machine");
     // The copied settings.json lost its helper line, since the command runs on this computer only.
     const landedRefused = JSON.parse(readFileSync(join(dirname(refused.opts.statePath), "golden-import.json"), "utf8")) as { files: { skipped: unknown[] } };
     expect(landedRefused.files.skipped).toEqual([{ id: "agents/claude", path: "~/.claude/settings.json", note: "apiKeyHelper left out of the copy: the command runs on this computer only" }]);
+  });
+
+  it("the Claude Code login row explains the OAuth rule only when the OAuth credential is on it; a row of API key sources gets the plain login line", () => {
+    const claude = (paths: string[], detail: string) => selectItem({ rung: "logins", id: "logins/claude", label: "Claude Code login", group: "Agent logins", paths, bytes: 0, default: "bring", detail }).detail[1];
+    expect(claude(["Keychain: Claude Code-credentials", "Helper: ~/.claude/settings.json"], "Claude Code uses the apiKeyHelper in ~/.claude/settings.json; also found: OAuth credentials")).toBe(
+      "Claude Code uses the apiKeyHelper in ~/.claude/settings.json; also found: OAuth credentials; Anthropic's terms forbid passing the OAuth credential along, so with it alone the default is to sign in on the machine.",
+    );
+    expect(claude(["~/.claude/.credentials.json"], "Claude Code uses OAuth credentials")).toContain("Anthropic's terms forbid passing the OAuth credential along");
+    expect(claude(["Helper: ~/.claude/settings.json"], "Claude Code uses the apiKeyHelper in ~/.claude/settings.json")).toBe("Claude Code uses the apiKeyHelper in ~/.claude/settings.json; copy brings it along; sign in does it in this terminal after the build");
+    expect(claude([], "Claude Code uses the API key exported in ~/.zshrc (set on the machine in the secrets step if ~/.zshrc comes along)")).toBe(
+      "Claude Code uses the API key exported in ~/.zshrc (set on the machine in the secrets step if ~/.zshrc comes along); copy brings it along; sign in does it in this terminal after the build",
+    );
   });
 
   it("a gh login none of whose accounts has a Keychain item is refused with every account named and signs in on the machine", async () => {
