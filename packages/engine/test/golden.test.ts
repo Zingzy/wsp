@@ -683,7 +683,7 @@ describe("golden import stages", () => {
   it("after the loop every install that names its command is checked with command -v on the tools PATH: one not there is failed with the reason, in the result and the summary", async () => {
     const { backend, fetch, inline } = backendFor([
       ["releases/tags/v0.4.1", { exitCode: 0, stdout: `WSP_ROAD release spoo_0.4.1_linux_amd64.tar.gz ${"a".repeat(64)} v0.4.1\n`, stderr: "" }],
-      ["command -v", { exitCode: 0, stdout: "missing spoo\n", stderr: "" }],
+      ['echo "missing', { exitCode: 0, stdout: "missing spoo\n", stderr: "" }],
     ]);
     const { stages, onStage } = stageRecorder();
     const results: ImportResult[] = [];
@@ -693,7 +693,7 @@ describe("golden import stages", () => {
       { id: "tools/cli/spoo", label: "spoo", manager: "github", cmd: "curl https://api.github.com/repos/spoo-me/spoo-cli/releases/tags/v0.4.1", bin: "spoo" },
     ];
     await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ tools, onResult: r => void results.push(r) }) });
-    const check = inline.find(c => c.cmd.includes("command -v"))!;
+    const check = inline.find(c => c.cmd.includes('echo "missing'))!;
     expect(check.cmd).toMatch(/^export PATH=\/root\/\.local\/bin:.*\/usr\/local\/bin.*\n/);
     expect(check.cmd).toContain(`for b in 'gopls' 'spoo'; do command -v "$b" >/dev/null 2>&1 || echo "missing $b"; done`);
     expect(check.timeoutMs).toBe(INLINE_EXEC_MS);
@@ -703,7 +703,7 @@ describe("golden import stages", () => {
     // Nothing named its command: no check runs.
     const plain = backendFor();
     await prepareBuilder({ backend: plain.backend, setup: "true", fetch: plain.fetch, onStage: stageRecorder().onStage, import: importOf() });
-    expect(plain.inline.some(c => c.cmd.includes("command -v"))).toBe(false);
+    expect(plain.inline.some(c => c.cmd.includes('echo "missing'))).toBe(false);
   });
 
   it("a tap road and a CLI row whose go module is named otherwise land under the row's command and pass the check: the road is kept, on the fake guest end to end", async () => {
@@ -722,7 +722,7 @@ describe("golden import stages", () => {
     await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ tools: plan.installs, onResult: r => void results.push(r) }) });
     expect(cmds.find(c => c.includes("releases/tags/v0.2.0"))).toContain(`mv '\\''/usr/local/bin/bloom-cli'\\'' "/usr/local/bin/$name"`);
     expect(cmds.find(c => c.includes("releases/tags/v0.4.1"))).toContain(`mv '\\''/usr/local/bin/spoo-cli'\\'' "/usr/local/bin/$name"`);
-    expect(inline.find(c => c.cmd.includes("command -v"))!.cmd).toContain(`for b in 'bloom' 'spoo'; do`);
+    expect(inline.find(c => c.cmd.includes('echo "missing'))!.cmd).toContain(`for b in 'bloom' 'spoo'; do`);
     expect(results[0]!.tools).toEqual([
       { id: "tools/brew/zingzy/tap/bloom", label: "bloom", outcome: "installed", road: { kind: "go", from: "github.com/Zingzy/bloom-cli@v0.2.0" }, ms: expect.any(Number) },
       { id: "tools/cli/spoo", label: "spoo", outcome: "installed", road: { kind: "go", from: "github.com/spoo-me/spoo-cli@v0.4.1" }, ms: expect.any(Number) },
