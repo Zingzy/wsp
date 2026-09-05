@@ -13,5 +13,6 @@ export * from "./orphans.js";
 export * from "./golden-import.js";
 export * from "./golden-diff.js";
 export * from "./golden-mcp.js";
+export * from "./machine-context.js";
 export * from "./snapshot-storage.js";
 export * from "./tool-sizes.js";

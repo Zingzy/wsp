@@ -468,9 +468,9 @@ function volatileOf(e: ManifestEntry): string[] | undefined {
   return list !== undefined && list.length > 0 ? [...list] : undefined;
 }
 
-/** What the ticked rows add up to for the builder. Results reported back carry
- * the rows the plan itself set aside (a formula with no Linux bottle) so the
- * saved list is complete. */
+/** What the ticked rows add up to for the builder, the rows the plan itself set
+ * aside (a formula with no Linux bottle) beside the installs so the saved result
+ * is complete. */
 export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions): GoldenImport {
   // Rows arrive as the person's selection; a fresh collection carries no bring flag yet.
   const bring = picked.map(e => {
@@ -530,13 +530,9 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
     ...(agents.node !== undefined ? { node: agents.node } : {}),
     agents: agents.installs,
     skippedAgents: agents.skipped.map(s => ({ id: s.id, name: label(s.id), note: s.note })),
+    skippedTools: [...editors.skipped, ...tools.skipped].map(s => ({ id: s.id, label: label(s.id), note: s.note })),
     ...(mcp !== undefined ? { mcp } : {}),
-    ...(opts.onResult !== undefined
-      ? {
-          onResult: (r: ImportResult) =>
-            opts.onResult!({ ...r, tools: [...[...editors.skipped, ...tools.skipped].map(s => ({ id: s.id, label: label(s.id), outcome: "skipped" as const, note: s.note })), ...r.tools] }),
-        }
-      : {}),
+    ...(opts.onResult !== undefined ? { onResult: opts.onResult } : {}),
   };
 }
 

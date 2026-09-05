@@ -1084,19 +1084,20 @@ describe("importFor", () => {
     expect(hosts).toContain("        other:\n            oauth_token: gho_o1\n        Zingzy:\n            oauth_token: gho_two\n");
   });
 
-  it("the results it reports carry the planned skips too, and go next to the recipe", async () => {
+  it("the plan carries the skips it made itself, and the results go next to the recipe", async () => {
     const home = laptop();
     const results: unknown[] = [];
+    const onResult = (r: unknown) => void results.push(r);
     const imp = importFor([row({ rung: "tools", id: "tools/brew/zingzy/tap/diskbloom", label: "zingzy/tap/diskbloom", linux: "unknown" })], {
       home,
       secrets: new Map(),
       platform: "darwin",
-      onResult: r => void results.push(r),
+      onResult,
     });
     expect(imp.files).toBeUndefined();
     expect(imp.node).toBeUndefined();
-    imp.onResult!({ recipeHash: imp.recipeHash, tools: [], agents: [] });
-    expect(results).toEqual([{ recipeHash: imp.recipeHash, tools: [{ id: "tools/brew/zingzy/tap/diskbloom", label: "zingzy/tap/diskbloom", outcome: "skipped", note: "no Linux bottle known" }], agents: [] }]);
+    expect(imp.skippedTools).toEqual([{ id: "tools/brew/zingzy/tap/diskbloom", label: "zingzy/tap/diskbloom", note: "no Linux bottle known" }]);
+    expect(imp.onResult).toBe(onResult);
     expect(importResultPath("/x/state.json")).toBe("/x/golden-import.json");
   });
 });
