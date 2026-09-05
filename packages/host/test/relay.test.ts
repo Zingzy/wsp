@@ -556,15 +556,76 @@ describe("callback relay over a fake daemon link", () => {
     await until(() => fake.links.length === 2);
   });
 
-  it("a dropped link closes the forward and redials; a napped workspace loses its link, a deleted one for good", async () => {
-    const { rt, fake, clock, lines, link, ws } = await setup();
+  it("a dropped link keeps the callback forward: no close, the row stays, and the next callback rides the new link", async () => {
     const port = await freePort();
+    const { fake, clock, lines, link } = await setup({ guestPorts: [port] });
+    const events: ForwardEvent[] = [];
+    relay!.on(e => events.push(e));
     link.emit({ type: "callback.port", port });
     await until(() => relay!.forwards().length === 1);
+    const before = relay!.forwards()[0]!;
+    expect(before.listener).toBe(true);
+    clock.advance(3_000);
     link.drop();
+    await new Promise(r => setTimeout(r, 50));
+    expect(relay!.forwards()).toEqual([before]);
+    expect(lines.some(l => l.includes("stopped forwarding"))).toBe(false);
+
+    clock.advance(2_000);
+    await until(() => fake.links.length === 2);
+    const second = fake.links[1]!;
+    await until(() => lines.some(l => l.includes("the daemon link is back")));
+    expect(lines.filter(l => l.includes("the daemon link is back"))).toEqual([`task-1: the daemon link is back; localhost:${port} still forwarded`]);
+    expect(relay!.forwards()).toEqual([before]);
+    expect(events.filter(e => e.type === "forward.close")).toEqual([]);
+    expect(events.filter(e => e.type === "forward.open")).toHaveLength(1);
+    const c = await dial(port);
+    await until(() => second.ops.some(x => x.op === "tunnel.open" && x.extra["port"] === port));
+    expect(link.ops.filter(x => x.op === "tunnel.open")).toEqual([]);
+    c.destroy();
+  });
+
+  it("a redial that finds the callback port no longer listening closes the forward saying so, and the row leaves", async () => {
+    const port = await freePort();
+    const guestPorts = [port];
+    const { fake, clock, lines, link } = await setup({ guestPorts });
+    const events: ForwardEvent[] = [];
+    relay!.on(e => events.push(e));
+    link.emit({ type: "callback.port", port });
+    await until(() => relay!.forwards()[0]?.listener === true);
+    guestPorts.splice(0);
+    link.drop();
+    await new Promise(r => setTimeout(r, 50));
+    clock.advance(2_000);
+    await until(() => fake.links.length === 2);
     await until(() => relay!.forwards().length === 0);
-    expect(lines).toContain(`task-1: stopped forwarding localhost:${port} (the daemon link dropped)`);
+    expect(lines).toContain(`task-1: stopped forwarding localhost:${port} (the workspace stopped listening while the daemon link was down)`);
+    expect(events.filter(e => e.type === "forward.close").map(e => e.port)).toEqual([port]);
+    expect(lines.some(l => l.includes("the daemon link is back"))).toBe(false);
     expect(await refused(port)).toBe(true);
+  });
+
+  it("a listener that appears while the link is down is spotted at the redial and keys the window on itself", async () => {
+    const port = await freePort();
+    const guestPorts: number[] = [];
+    const { fake, clock, link } = await setup({ guestPorts, window: 60_000, cap: 600_000 });
+    link.emit({ type: "callback.port", port });
+    await until(() => relay!.forwards().length === 1);
+    const before = relay!.forwards()[0]!;
+    expect(before.listener).toBe(false);
+    guestPorts.push(port);
+    link.drop();
+    await new Promise(r => setTimeout(r, 50));
+    clock.advance(2_000);
+    await until(() => fake.links.length === 2);
+    await until(() => relay!.forwards()[0]?.listener === true);
+    expect(relay!.forwards()[0]!.expiresAt).toBe(before.expiresAt - 60_000 + 600_000);
+  });
+
+  it("a napped workspace loses its link and the redial stops; a deleted one for good", async () => {
+    const { rt, fake, clock, link, ws } = await setup();
+    link.drop();
+    await new Promise(r => setTimeout(r, 50));
     clock.advance(2_000);
     await until(() => fake.links.length === 2);
 
@@ -870,8 +931,8 @@ describe("localhost forwards over a fake daemon link", () => {
     expect(relay!.stop("nobody", port)).toBe(false);
   });
 
-  it("a port the callback forward already holds is not forwarded twice; a link drop closes the callback forward and keeps the url forward", async () => {
-    const { lines, events, link } = await setup();
+  it("a port the callback forward already holds is not forwarded twice; a link drop keeps both kinds in their order and one line names them", async () => {
+    const { fake, clock, lines, events, link } = await setup();
     const p = await freePort();
     const q = await freePort();
     link.emit({ type: "callback.port", port: p });
@@ -885,12 +946,18 @@ describe("localhost forwards over a fake daemon link", () => {
 
     link.emit({ type: "localhost.url", port: q });
     await until(() => relay!.forwards().length === 2);
+    const before = relay!.forwards();
+    expect(before.map(f => f.port)).toEqual([p, q]);
     link.drop();
-    await until(() => relay!.forwards().length === 1);
-    expect(relay!.forwards()).toMatchObject([{ port: q, kind: "url" }]);
-    expect(lines.filter(l => l.includes("(the daemon link dropped)"))).toEqual([`task-1: stopped forwarding localhost:${p} (the daemon link dropped)`]);
-    expect(events.filter(e => e.type === "forward.close").map(e => e.port)).toEqual([p]);
-    expect(await refused(p)).toBe(true);
+    await new Promise(r => setTimeout(r, 50));
+    expect(relay!.forwards()).toEqual(before);
+    clock.advance(2_000);
+    await until(() => fake.links.length === 2 && lines.some(l => l.includes("the daemon link is back")));
+    expect(relay!.forwards()).toEqual(before);
+    expect(lines.filter(l => l.includes("the daemon link is back"))).toEqual([`task-1: the daemon link is back; localhost:${p}, localhost:${q} still forwarded`]);
+    expect(lines.some(l => l.includes("stopped forwarding"))).toBe(false);
+    expect(events.filter(e => e.type === "forward.close")).toEqual([]);
+    expect(await refused(p)).toBe(false);
     expect(await refused(q)).toBe(false);
   });
 
