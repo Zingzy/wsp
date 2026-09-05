@@ -95,9 +95,11 @@ function scriptedLink(state: { signedIn: boolean; hold: boolean; missing: boolea
 function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string, string>; columns?: number; signedIn?: boolean; hold?: boolean; missing?: boolean } = {}): Fake {
   const input = new PassThrough();
   const output = new PassThrough();
+  const stderr = new PassThrough();
   if (over.columns !== undefined) Object.assign(output, { columns: over.columns });
   const chunks: string[] = [];
   output.on("data", (c: Buffer) => chunks.push(c.toString()));
+  stderr.on("data", (c: Buffer) => chunks.push(c.toString()));
   const text = () => stripVTControlCharacters(chunks.join(""));
   const raw = () => chunks.join("");
   const clear = () => void chunks.splice(0);
@@ -113,6 +115,7 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
   const io: InitIO = {
     input,
     output,
+    stderr,
     isTTY: over.tty ?? true,
     env: over.env ?? {},
     open: async url => {
@@ -1856,17 +1859,16 @@ describe("wsp init, flags and no terminal", () => {
     expect(f.recipes[0]!.import?.node).toMatchObject({ floor: 16, agents: ["Codex"] });
   });
 
-  it("a console warning while the stages animate is drawn by the stream, and a build that fails hands the console back", async () => {
-    const warn = console.warn;
-    const error = console.error;
-    let duringPrepare: { warn: typeof console.warn; error: typeof console.error } | undefined;
+  it("a line on stderr while the stages animate is drawn by the stream, and a build that fails hands the streams back", async () => {
     const f = fake({ yes: true });
+    const write = { out: f.io.output.write, err: f.io.stderr.write };
+    let duringPrepare: { out: typeof f.io.output.write; err: typeof f.io.stderr.write } | undefined;
     f.opts.runtime = recipe => {
       const backend = stubBackend();
       backend.execImpl = (_m, cmd) => {
         if (!cmd.includes(GOLDEN_SETUP)) return guestAnswer(cmd);
-        duringPrepare = { warn: console.warn, error: console.error };
-        console.warn("heartbeat for builder m1 not written: ETIMEDOUT");
+        duringPrepare = { out: f.io.output.write, err: f.io.stderr.write };
+        f.io.stderr.write("heartbeat for builder m1 not written: ETIMEDOUT\n");
         return { exitCode: 1, stdout: "", stderr: "curl: (6) Could not resolve host" };
       };
       f.backends.push(backend);
@@ -1874,10 +1876,10 @@ describe("wsp init, flags and no terminal", () => {
     };
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(1);
-    expect(duringPrepare?.warn).not.toBe(warn);
-    expect(duringPrepare?.error).not.toBe(error);
-    expect(console.warn).toBe(warn);
-    expect(console.error).toBe(error);
+    expect(duringPrepare?.out).not.toBe(write.out);
+    expect(duringPrepare?.err).not.toBe(write.err);
+    expect(f.io.output.write).toBe(write.out);
+    expect(f.io.stderr.write).toBe(write.err);
     const out = f.text();
     expect(out).toContain("│  heartbeat for builder m1 not written: ETIMEDOUT");
     expect(out.indexOf("heartbeat for builder m1")).toBeLessThan(out.indexOf("Installing agents failed"));
@@ -2523,17 +2525,16 @@ describe("wsp init, a signal during prepare", () => {
     expect(f.signals.listenerCount("SIGINT") + f.signals.listenerCount("SIGTERM")).toBe(0);
   });
 
-  it("a signal during the stages hands the console back with the stream it stops", async () => {
-    const warn = console.warn;
-    const error = console.error;
-    let duringPrepare: typeof console.warn | undefined;
+  it("a signal during the stages hands the streams back with the stream it stops", async () => {
     const f = fake({ yes: true });
+    const write = { out: f.io.output.write, err: f.io.stderr.write };
+    let duringPrepare: typeof f.io.stderr.write | undefined;
     f.opts.runtime = recipe => {
       const backend = stubBackend();
       backend.execImpl = (m, cmd) => {
         if (!cmd.includes("brew install jq")) return guestAnswer(cmd);
-        // The stream is animating here; the signal that follows stops it and must hand the console back.
-        duringPrepare = console.warn;
+        // The stream is animating here; the signal that follows stops it and must hand the streams back.
+        duringPrepare = f.io.stderr.write;
         return new Promise((_, reject) => {
           const kill = m.kill.bind(m);
           m.kill = async () => {
@@ -2549,9 +2550,9 @@ describe("wsp init, a signal during prepare", () => {
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(130);
     expect(duringPrepare).toBeDefined();
-    expect(duringPrepare).not.toBe(warn);
-    expect(console.warn).toBe(warn);
-    expect(console.error).toBe(error);
+    expect(duringPrepare).not.toBe(write.err);
+    expect(f.io.output.write).toBe(write.out);
+    expect(f.io.stderr.write).toBe(write.err);
   });
 
   it("a second signal while the kill is still running exits at once with the builder id and the sweep line; the record stays for the sweep", async () => {
