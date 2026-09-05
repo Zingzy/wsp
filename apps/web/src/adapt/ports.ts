@@ -44,6 +44,73 @@ export function applyPortEvent(ports: ReadonlyArray<KnownPort>, event: PortEvent
   }
 }
 
+/** What is known about a port that stopped listening, from the close event that said so. */
+export interface StoppedPort {
+  readonly port: number;
+  readonly pid: number | null;
+  readonly process: string | null;
+  readonly command: string | null;
+  readonly exited: boolean | null;
+  /** The daemon's clock at the close, for the sentence. */
+  readonly at: string | null;
+  /** This computer's clock when the close arrived; the moved window is measured on it, not the guest's. */
+  readonly seenAt: number;
+  /** Another port the same process opened within the window after this one stopped. */
+  readonly movedTo: number | null;
+}
+
+export const MOVED_WINDOW_MS = 60_000;
+
+/** Folds one port event into the stopped ports; hands the same map back when nothing changed. */
+export function applyStoppedEvent(stopped: ReadonlyMap<number, StoppedPort>, event: PortEvent, nowMs: number): ReadonlyMap<number, StoppedPort> {
+  switch (event.type) {
+    case "port.close": {
+      const next = new Map(stopped);
+      next.set(event.port, {
+        port: event.port,
+        pid: event.pid ?? null,
+        process: event.process ?? null,
+        command: event.command ?? null,
+        exited: event.exited ?? null,
+        at: event.at ?? null,
+        seenAt: nowMs,
+        movedTo: null,
+      });
+      return next;
+    }
+    case "port.open": {
+      let next: Map<number, StoppedPort> | null = null;
+      for (const s of stopped.values()) {
+        if (s.port === event.port) (next ??= new Map(stopped)).delete(s.port);
+        else if (event.process !== undefined && s.process === event.process && nowMs - s.seenAt <= MOVED_WINDOW_MS) {
+          (next ??= new Map(stopped)).set(s.port, { ...s, movedTo: event.port });
+        }
+      }
+      return next ?? stopped;
+    }
+    default: {
+      const _exhaustive: never = event;
+      return stopped;
+    }
+  }
+}
+
+/** The line above a frame whose port stopped listening; clock renders the daemon's timestamp in the person's zone. */
+export function stoppedSentence(port: number, stopped: StoppedPort | undefined, clock: (iso: string) => string): string {
+  let out = `:${port} stopped listening`;
+  if (stopped === undefined) return out;
+  if (stopped.at !== null) out += ` at ${clock(stopped.at)}`;
+  const holder = stopped.command ?? stopped.process;
+  if (holder !== null) {
+    out += `, held by ${holder}`;
+    if (stopped.pid !== null) out += ` (pid ${stopped.pid})`;
+    if (stopped.exited === true) out += ", which exited";
+    else if (stopped.exited === false) out += ", which is still running";
+  }
+  if (stopped.movedTo !== null) out += `, now on :${stopped.movedTo}`;
+  return out;
+}
+
 export interface PreviewableServersInput {
   readonly ports: ReadonlyArray<KnownPort>;
   /** The minted preview route for a port, when the browser has one; else the loopback url is the target. */

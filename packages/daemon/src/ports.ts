@@ -9,6 +9,8 @@ export interface ListeningPort {
   uid: number;
   /** /proc/<pid>/comm of the owner; unset when there is no pid or the read fails. */
   process?: string;
+  /** /proc/<pid>/cmdline of the owner joined by spaces; unset like process. */
+  command?: string;
   /** Bound to 127.0.0.1 or ::1 (or ::ffff:127.0.0.1) only: a sign-in callback listener; unreachable through the preview edge. */
   loopback: boolean;
 }
@@ -63,8 +65,9 @@ export function procNetTcpSource(procRoot = "/proc"): PortSnapshotSource {
       }
     }
     return Promise.all([...byPort.values()].map(async row => {
-      const process = row.pid === null ? undefined : await readComm(procRoot, row.pid);
-      return process === undefined ? row : { ...row, process };
+      if (row.pid === null) return row;
+      const [process, command] = await Promise.all([readComm(procRoot, row.pid), readCmdline(procRoot, row.pid)]);
+      return { ...row, ...(process !== undefined ? { process } : {}), ...(command !== undefined ? { command } : {}) };
     }));
   };
 }
@@ -72,6 +75,23 @@ export function procNetTcpSource(procRoot = "/proc"): PortSnapshotSource {
 async function readComm(procRoot: string, pid: number): Promise<string | undefined> {
   const comm = (await readFile(`${procRoot}/${pid}/comm`, "utf8").catch(() => "")).trim();
   return comm.length > 0 ? comm : undefined;
+}
+
+// cmdline separates argv with NUL bytes and ends with one.
+async function readCmdline(procRoot: string, pid: number): Promise<string | undefined> {
+  const raw = await readFile(`${procRoot}/${pid}/cmdline`, "utf8").catch(() => "");
+  const command = raw.split("\0").filter(a => a.length > 0).join(" ");
+  return command.length > 0 ? command : undefined;
+}
+
+/** Signal 0 delivers nothing and reports whether the pid exists; EPERM means it does, under another user. */
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "EPERM";
+  }
 }
 
 // pgrep does not exist in the guests; walking /proc/[pid]/fd is the portable way.
@@ -96,6 +116,8 @@ export type PortCloseEvent = Extract<DaemonEvent, { type: "port.close" }>;
 export class PortWatcher extends EventEmitter {
   private source: PortSnapshotSource;
   private intervalMs: number;
+  private alive: (pid: number) => boolean;
+  private now: () => number;
   private timer: NodeJS.Timeout | null = null;
   private known = new Map<number, ListeningPort>();
   /** A poll awaited while one is in flight joins it: the first ports.watch reply must carry the seed, not race it. */
@@ -103,10 +125,12 @@ export class PortWatcher extends EventEmitter {
   /** The first poll seeds what is already listening without events: a listener that predates the watcher is not a change. */
   private primed = false;
 
-  constructor(source: PortSnapshotSource, opts: { intervalMs?: number } = {}) {
+  constructor(source: PortSnapshotSource, opts: { intervalMs?: number; alive?: (pid: number) => boolean; now?: () => number } = {}) {
     super();
     this.source = source;
     this.intervalMs = opts.intervalMs ?? 1000;
+    this.alive = opts.alive ?? pidAlive;
+    this.now = opts.now ?? Date.now;
   }
 
   current(): ListeningPort[] {
@@ -138,10 +162,25 @@ export class PortWatcher extends EventEmitter {
         } satisfies PortOpenEvent);
       }
     }
-    for (const port of this.known.keys()) {
-      if (!next.has(port)) this.emit("port.close", { type: "port.close", port } satisfies PortCloseEvent);
+    for (const [port, row] of this.known) {
+      if (!next.has(port)) this.emit("port.close", this.closeEvent(port, row));
     }
     this.known = next;
+  }
+
+  /** The close names the last row's holder, since /proc no longer has the socket to ask. */
+  private closeEvent(port: number, row: ListeningPort): PortCloseEvent {
+    const at = new Date(this.now()).toISOString();
+    if (row.pid === null) return { type: "port.close", port, at };
+    return {
+      type: "port.close",
+      port,
+      pid: row.pid,
+      ...(row.process !== undefined ? { process: row.process } : {}),
+      ...(row.command !== undefined ? { command: row.command } : {}),
+      exited: !this.alive(row.pid),
+      at,
+    };
   }
 
   start(): void {

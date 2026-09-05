@@ -26,7 +26,18 @@ export {
   type UserInputResolvedEvent,
   type PromptRespondFailedEvent,
 } from "./prompts.js";
-export { applyPortsSnapshot, applyPortEvent, toPreviewableServers, type KnownPort, type PortsSnapshot, type PreviewableServersInput } from "./ports.js";
+export {
+  applyPortsSnapshot,
+  applyPortEvent,
+  applyStoppedEvent,
+  MOVED_WINDOW_MS,
+  stoppedSentence,
+  toPreviewableServers,
+  type KnownPort,
+  type PortsSnapshot,
+  type PreviewableServersInput,
+  type StoppedPort,
+} from "./ports.js";
 export { deriveSidebarProjects, deriveThreads, workspaceIndicator, threadIndicator, turnWait, type SidebarInput } from "./workspaces.js";
 export { terminalPaneState, terminalPaneTitle, terminalEmptyLine, terminalInputRefusal, type TerminalPaneState, type TerminalPaneInput } from "./terminal-pane.js";
 export { toTerminalAttachEvent, isPtyEvent } from "./terminal.js";

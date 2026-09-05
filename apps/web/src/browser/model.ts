@@ -5,18 +5,29 @@
 // keep it current; the runtime stream's port events fold the same way. The
 // fold itself is adapt/ports.ts; this holds the result and tells React.
 import { useSyncExternalStore } from "react";
-import { applyPortEvent, applyPortsSnapshot, type KnownPort, type PortsSnapshot } from "../adapt/ports.js";
+import { applyPortEvent, applyPortsSnapshot, applyStoppedEvent, type KnownPort, type PortsSnapshot, type StoppedPort } from "../adapt/ports.js";
 import type { ProtocolEvent } from "../protocol/client.js";
 import { useStore } from "../protocol/store.js";
 
 export class WorkspacePorts {
   #ports: KnownPort[] = [];
+  #stopped: ReadonlyMap<number, StoppedPort> = new Map();
   #seeded = false;
   #fns = new Set<() => void>();
+  #now: () => number;
+
+  constructor(now: () => number = Date.now) {
+    this.#now = now;
+  }
 
   feedEvent(e: ProtocolEvent): void {
     if (e.type !== "port.open" && e.type !== "port.close") return;
-    this.#adopt(applyPortEvent(this.#ports, e));
+    this.#adopt(applyPortEvent(this.#ports, e), applyStoppedEvent(this.#stopped, e, this.#now()));
+  }
+
+  /** What the last close said about a port that is not listening; unset once it listens again. */
+  stopped(port: number): StoppedPort | undefined {
+    return this.#stopped.get(port);
   }
 
   /** False until the daemon has said anything about ports: an empty directory then means unknown, not silent. */
@@ -45,11 +56,13 @@ export class WorkspacePorts {
     return this.#ports;
   }
 
-  #adopt(next: KnownPort[]): void {
+  #adopt(next: KnownPort[], stopped: ReadonlyMap<number, StoppedPort> = this.#stopped): void {
     const first = !this.#seeded;
     this.#seeded = true;
-    if (!first && sameDirectory(this.#ports, next)) return;
-    this.#ports = next;
+    const same = sameDirectory(this.#ports, next);
+    if (!first && same && stopped === this.#stopped) return;
+    if (!same) this.#ports = next;
+    this.#stopped = stopped;
     for (const fn of this.#fns) fn();
   }
 }
@@ -96,6 +109,13 @@ export function useWorkspacePorts(workspaceId: string): KnownPort[] {
   return useSyncExternalStore(
     fn => getBrowser(workspaceId).onChange(fn),
     () => getBrowser(workspaceId).ports(),
+  );
+}
+
+export function useStoppedPort(workspaceId: string, port: number | null): StoppedPort | undefined {
+  return useSyncExternalStore(
+    fn => getBrowser(workspaceId).onChange(fn),
+    () => (port === null ? undefined : getBrowser(workspaceId).stopped(port)),
   );
 }
 

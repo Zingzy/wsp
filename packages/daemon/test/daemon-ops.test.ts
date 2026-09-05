@@ -96,7 +96,7 @@ describe("daemon ops: ports, manifest, inbox", () => {
     await new Promise(r => setTimeout(r, 120));
 
     expect(c.events).toContainEqual({ type: "port.open", port: 8080, pid: 123, process: "node", loopback: false });
-    expect(c.events).toContainEqual({ type: "port.close", port: 8080 });
+    expect(c.events).toContainEqual(expect.objectContaining({ type: "port.close", port: 8080, pid: 123, process: "node", at: expect.any(String) }));
     c.close();
   });
 

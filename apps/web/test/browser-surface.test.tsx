@@ -58,7 +58,8 @@ function fakeApi(workspaces: WorkspaceView[], portReach: Api["portReach"] = mint
 
 const open = (workspaceId: string, port: number, pid?: number, process?: string): EventUnion =>
   ({ type: "port.open", workspaceId, port, ...(pid !== undefined ? { pid } : {}), ...(process !== undefined ? { process } : {}) });
-const close = (workspaceId: string, port: number): EventUnion => ({ type: "port.close", workspaceId, port });
+const close = (workspaceId: string, port: number, detail: Partial<Extract<EventUnion, { type: "port.close" }>> = {}): EventUnion => ({ type: "port.close", workspaceId, port, ...detail });
+const clock = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 function Harness({ workspaceId }: { workspaceId: string }) {
   const state = useRightPanelStore(s => selectWorkspaceRightPanelState(s.byWorkspaceId, workspaceId));
@@ -235,6 +236,32 @@ describe("framing a port", () => {
     emit(close(WS, 5173));
     expect(screen.getByText(":5173 stopped listening")).toBeDefined();
     expect(frame(5173).getAttribute("src")).toBe(PUBLIC(5173));
+  });
+
+  it("says when the port stopped and who held it, in the slot above a frame that does not move", async () => {
+    const { emit } = await setup();
+    emit(open(WS, 8412, 53479, "python3"));
+    fireEvent.click(serverCard(8412));
+    const first = await screen.findByTitle(":8412");
+    const at = "2026-09-05T12:04:00.000Z";
+    emit(close(WS, 8412, { pid: 53479, process: "python3", command: "python3 -m http.server 8412", exited: true, at }));
+    const slot = screen.getByText(/^:8412 stopped listening/);
+    expect(slot.textContent).toBe(`:8412 stopped listening at ${clock(at)}, held by python3 -m http.server 8412 (pid 53479), which exited`);
+    expect(slot.nextElementSibling).toBe(first);
+    expect(frame(8412)).toBe(first);
+  });
+
+  it("adds where the same process came back when it opens another port within a minute", async () => {
+    const { emit } = await setup();
+    emit(open(WS, 8412, 53479, "python3"));
+    fireEvent.click(serverCard(8412));
+    await screen.findByTitle(":8412");
+    vi.useFakeTimers();
+    emit(close(WS, 8412, { pid: 53479, process: "python3", command: "python3 -m http.server 8412", exited: true, at: "2026-09-05T12:04:00.000Z" }));
+    vi.advanceTimersByTime(30_000);
+    emit(open(WS, 8413, 60000, "python3"));
+    expect(screen.getByText(/^:8412 stopped listening/).textContent).toMatch(/, which exited, now on :8413$/);
+    expect(frame(8412).getAttribute("src")).toBe(PUBLIC(8412));
   });
 
   it("when the port listens again after a close, the banner goes, the frame remounts and the route is probed anew", async () => {
