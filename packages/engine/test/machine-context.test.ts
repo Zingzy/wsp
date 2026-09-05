@@ -4,7 +4,9 @@
 // the fallbacks per agent, and the guest scripts run under this machine's
 // shells against a temp root and a fake home.
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -26,16 +28,17 @@ import {
   renderShortContext,
   renderSkill,
   skillPath,
-  writeCommand,
   SKILL_DESCRIPTION,
   SKILL_NAME,
   type BuildFacts,
   type ContextAgent,
   type ContextProbe,
   type GuestFile,
+  type GuestRoots,
 } from "../src/machine-context.js";
 import type { ImportResult } from "../src/golden.js";
 import type { ExecResult, Machine } from "../src/machine.js";
+import { EXEC_ENV } from "../src/solari-backend.js";
 
 const bash = promisify(execFile);
 
@@ -365,26 +368,6 @@ describe("the guest scripts on a local bash", () => {
     }
   };
 
-  it("lands every file with its mode, each text once and copied to the hooks that share it", async () => {
-    const roots = fakeGuest();
-    const input = { workspace: { name: "task-1" }, golden: GOLDEN, probe: probeOf(), facts: FACTS };
-    const short = renderShortContext(input);
-    const skill = renderSkill(renderMachineContext(input));
-    const files: GuestFile[] = [{ path: contextPath(roots), mode: 0o644, content: short }, { path: skillPath(roots), mode: 0o644, content: skill }];
-    for (const a of CONTEXT_AGENTS) files.push(...agentFiles(a, short, skill, probeOf(), roots).files);
-    const cmd = writeCommand(files);
-    expect(cmd.match(/base64 --decode/g)).toHaveLength(7);
-    expect(cmd.match(/^install -m 644 /gm)).toHaveLength(9);
-    const res = await run(cmd);
-    expect(res.exitCode, res.stderr).toBe(0);
-    for (const f of files) {
-      expect(readFileSync(f.path, "utf8")).toBe(f.content);
-      expect(statSync(f.path).mode & 0o777).toBe(0o644);
-    }
-    expect(readFileSync(join(roots.etc, "claude-code/CLAUDE.md"), "utf8")).toBe(short);
-    expect(readFileSync(join(roots.home, ".hermes/skills/wsp-machine/SKILL.md"), "utf8")).toBe(skill);
-  }, 30_000);
-
   it("the probe prints its markers, the kernel and the disk, and names each hook the person's file claims", async () => {
     const roots = fakeGuest();
     let probe = parseProbe((await run(probeCommand(roots))).stdout)!;
@@ -478,77 +461,145 @@ describe("the guest scripts on a local bash", () => {
   }, 30_000);
 });
 
-describe("applyMachineContext on a fake guest", () => {
-  function machine(answer: (cmd: string) => ExecResult | Promise<ExecResult>) {
+describe("applyMachineContext on a local guest", () => {
+  /** The fake exec refuses a request body over this many bytes, as the provider did on a six-agent golden. */
+  const EXEC_BODY_CAP = 16 * 1024;
+  const bodyBytes = (cmd: string): number => Buffer.byteLength(JSON.stringify({ cmd: "bash", args: ["-c", `${EXEC_ENV}\n${cmd}`], timeoutMs: 20_000 }));
+  const ok: ExecResult = { exitCode: 0, stdout: "", stderr: "" };
+  const tmps: string[] = [];
+  const servers: Server[] = [];
+  afterEach(() => {
+    for (const s of servers.splice(0)) s.close();
+    for (const t of tmps.splice(0)) rmSync(t, { recursive: true, force: true });
+  });
+
+  /** This computer stands in for the guest: the probe answers from a fixture, every other exec runs under bash and
+   * is refused over the body cap, uploads land at the path the URL names (or are refused over `putCap`), and
+   * run() is the same bash, so the untar is the real command against a temp root. */
+  async function guest(probe: string | null = PROBE_OUT, putCap = Infinity) {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "wsp-ctx-")));
+    tmps.push(root);
+    const roots: GuestRoots = { etc: join(root, "etc"), home: join(root, "home") };
+    const puts: { path: string; bytes: number }[] = [];
+    const server = createServer((req, res) => {
+      const path = new URL(req.url!, "http://x").searchParams.get("path")!;
+      const chunks: Buffer[] = [];
+      req.on("data", c => chunks.push(c as Buffer));
+      req.on("end", () => {
+        const body = Buffer.concat(chunks);
+        puts.push({ path, bytes: body.length });
+        if (body.length > putCap) {
+          res.writeHead(413, { "content-type": "application/json" }).end(JSON.stringify({ error: "Payload Too Large", limit: putCap }));
+          return;
+        }
+        tmps.push(path);
+        writeFileSync(path, body);
+        res.writeHead(200).end();
+      });
+    });
+    servers.push(server);
+    await new Promise<void>(r => server.listen(0, "127.0.0.1", r));
+    const port = (server.address() as AddressInfo).port;
     const execs: string[] = [];
     const m = {
       id: "m1",
       kind: "sandbox",
       async exec(cmd: string) {
         execs.push(cmd);
-        return answer(cmd);
+        if (bodyBytes(cmd) > EXEC_BODY_CAP) throw Object.assign(new Error("Payload Too Large"), { kind: "unknown", status: 413 });
+        if (cmd.includes("echo WSP_CTX")) return probe === null ? ok : { exitCode: 0, stdout: probe, stderr: "" };
+        return run(cmd);
       },
-    } as unknown as Machine;
-    return { m, execs };
+      run: (script: string) => m.exec(script),
+      uploadUrl: async (p: string) => `http://127.0.0.1:${port}/upload?path=${encodeURIComponent(p)}`,
+    } as unknown as Machine & { exec(cmd: string): Promise<ExecResult> };
+    return { m, roots, execs, puts };
   }
-  const ok: ExecResult = { exitCode: 0, stdout: "", stderr: "" };
-  const decoded = (write: string, path: string): string => {
-    const m = new RegExp(`printf '%s' '([A-Za-z0-9+/=]+)' \\| base64 --decode > '${path.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}'`).exec(write);
-    return Buffer.from(m?.[1] ?? "", "base64").toString("utf8");
+  const run = async (script: string): Promise<ExecResult> => {
+    try {
+      const { stdout, stderr } = await bash("bash", ["-c", script], { maxBuffer: 4 * 1024 * 1024 });
+      return { exitCode: 0, stdout, stderr };
+    } catch (e) {
+      const err = e as { code?: number; stdout?: string; stderr?: string };
+      return { exitCode: err.code ?? 1, stdout: err.stdout ?? "", stderr: err.stderr ?? "" };
+    }
   };
+  const read = (path: string): string => readFileSync(path, "utf8");
 
-  it("probes, renders with the facts folded in, writes every hook and skill, and records each agent", async () => {
-    const { m, execs } = machine(cmd => (cmd.includes("echo WSP_CTX") ? { exitCode: 0, stdout: PROBE_OUT, stderr: "" } : ok));
+  it("probes, renders with the facts folded in, lands every hook and skill through the upload road, and records each agent", async () => {
+    const { m, roots, execs, puts } = await guest();
     const result: ImportResult = { recipeHash: "h", tools: [{ id: "tools/brew/x", label: "x", outcome: "failed", note: "boom" }], agents: [] };
-    const out = await applyMachineContext(m, { workspace: { name: "task-1" }, golden: GOLDEN, result });
+    const out = await applyMachineContext(m, { workspace: { name: "task-1" }, golden: GOLDEN, result, roots });
     expect(out.failure).toBeUndefined();
     expect(out.context).toEqual(CONTEXT_AGENTS.map(agent => ({ agent, outcome: "written", path: expect.any(String), skill: expect.stringMatching(/\/wsp-machine\/SKILL\.md$/) })));
-    expect(out.summary).toBe("written for Claude Code, Codex, Gemini CLI, OpenCode, Pi, Hermes Agent");
+    expect(puts).toHaveLength(1);
+    expect(out.summary).toBe(`${(puts[0]!.bytes / 1024).toFixed(1)} KB written for Claude Code, Codex, Gemini CLI, OpenCode, Pi, Hermes Agent`);
+    // The texts travel as the archive, never inside a command: the probe and the untar are the only execs.
     expect(execs).toHaveLength(2);
-    const short = decoded(execs[1]!, "/etc/wsp/machine-context.md");
+    expect(execs.some(c => c.includes("base64 --decode"))).toBe(false);
+    const short = read(contextPath(roots));
     expect(short).toContain("The wsp-machine skill has the full picture");
     expect(short).toContain("terminal panes open in the home folder.\n");
     expect(short).not.toContain("persists across");
-    const skill = decoded(execs[1]!, "/etc/wsp/skills/wsp-machine/SKILL.md");
+    const skill = read(skillPath(roots));
     expect(skill).toContain("- Workspace: task-1.");
     expect(skill).not.toContain("persists across");
-    expect(decoded(execs[1]!, "/etc/claude-code/CLAUDE.md")).toContain("persists across your tool calls");
-    expect(decoded(execs[1]!, "/etc/claude-code/.claude/skills/wsp-machine/SKILL.md")).toContain("persists across your tool calls");
-    expect(execs[1]).toContain("install -m 644 '/etc/wsp/machine-context.md' '/root/.gemini/WSP-MACHINE.md'");
-    expect(execs[1]).toContain("install -m 644 '/etc/wsp/skills/wsp-machine/SKILL.md' '/etc/codex/skills/wsp-machine/SKILL.md'");
+    expect(read(join(roots.etc, "claude-code/CLAUDE.md"))).toContain("persists across your tool calls");
+    expect(read(join(roots.etc, "claude-code/.claude/skills/wsp-machine/SKILL.md"))).toContain("persists across your tool calls");
+    expect(read(join(roots.home, ".gemini/WSP-MACHINE.md"))).toBe(short);
+    expect(read(join(roots.etc, "codex/skills/wsp-machine/SKILL.md"))).toBe(skill);
     expect(skill).toContain("- Tools that did not install: raycast (macOS app, no Linux build); x (boom).");
-    for (const path of ["/etc/wsp/machine-context.json", "/etc/claude-code/CLAUDE.md", "/etc/claude-code/.claude/skills/wsp-machine/SKILL.md", "/etc/codex/requirements.toml", "/etc/codex/skills/wsp-machine/SKILL.md", "/root/.gemini/WSP-MACHINE.md", "/root/.gemini/skills/wsp-machine/SKILL.md", "/etc/opencode/opencode.json", "/root/.config/opencode/skills/wsp-machine/SKILL.md", "/root/.pi/agent/APPEND_SYSTEM.md", "/root/.pi/agent/skills/wsp-machine/SKILL.md", "/etc/profile.d/wsp-machine.sh", "/root/.hermes/skills/wsp-machine/SKILL.md"]) {
-      expect(execs[1]).toContain(`'${path}'`);
+    for (const path of ["etc/wsp/machine-context.json", "etc/claude-code/CLAUDE.md", "etc/claude-code/.claude/skills/wsp-machine/SKILL.md", "etc/codex/requirements.toml", "etc/codex/skills/wsp-machine/SKILL.md", "home/.gemini/WSP-MACHINE.md", "home/.gemini/skills/wsp-machine/SKILL.md", "etc/opencode/opencode.json", "home/.config/opencode/skills/wsp-machine/SKILL.md", "home/.pi/agent/APPEND_SYSTEM.md", "home/.pi/agent/skills/wsp-machine/SKILL.md", "etc/profile.d/wsp-machine.sh", "home/.hermes/skills/wsp-machine/SKILL.md"]) {
+      const at = join(roots.etc, "..", path);
+      expect(existsSync(at), path).toBe(true);
+      expect(statSync(at).mode & 0o777, path).toBe(0o644);
     }
-  });
+  }, 30_000);
 
   it("takes the fallback for a claimed hook, the skill alone for Hermes, and skips agents that are not installed", async () => {
     const stdout = "WSP_CTX\nAGENT claude\nAGENT gemini\nAGENT hermes\nCONFLICT gemini\nCONFLICT hermes\nWSP_CTX_END\n";
-    const { m, execs } = machine(cmd => (cmd.includes("echo WSP_CTX") ? { exitCode: 0, stdout, stderr: "" } : ok));
-    const out = await applyMachineContext(m);
+    const { m, roots } = await guest(stdout);
+    const out = await applyMachineContext(m, { roots });
     expect(out.context).toEqual([
-      { agent: "claude", outcome: "written", path: "/etc/claude-code/CLAUDE.md", skill: "/etc/claude-code/.claude/skills/wsp-machine/SKILL.md" },
-      { agent: "gemini", outcome: "fallback", path: "/root/.gemini/extensions/wsp-machine", note: "~/.gemini/settings.json sets context.fileName", skill: "/root/.gemini/skills/wsp-machine/SKILL.md" },
-      { agent: "hermes", outcome: "not-loaded", note: "~/.hermes/config.yaml sets agent.environment_hint", skill: "/root/.hermes/skills/wsp-machine/SKILL.md" },
+      { agent: "claude", outcome: "written", path: join(roots.etc, "claude-code/CLAUDE.md"), skill: join(roots.etc, "claude-code/.claude/skills/wsp-machine/SKILL.md") },
+      { agent: "gemini", outcome: "fallback", path: join(roots.home, ".gemini/extensions/wsp-machine"), note: "~/.gemini/settings.json sets context.fileName", skill: join(roots.home, ".gemini/skills/wsp-machine/SKILL.md") },
+      { agent: "hermes", outcome: "not-loaded", note: "~/.hermes/config.yaml sets agent.environment_hint", skill: join(roots.home, ".hermes/skills/wsp-machine/SKILL.md") },
     ]);
-    expect(out.summary).toBe("written for Claude Code; Gemini CLI by its fallback (~/.gemini/settings.json sets context.fileName); Hermes Agent not loaded (~/.hermes/config.yaml sets agent.environment_hint), skill only");
-    expect(execs[1]).not.toContain("/etc/gemini-cli/system-defaults.json");
-    expect(execs[1]).toContain("'/root/.gemini/extensions/wsp-machine/gemini-extension.json'");
-    expect(execs[1]).not.toContain("/etc/profile.d/wsp-machine.sh");
-    expect(execs[1]).toContain("'/root/.hermes/skills/wsp-machine/SKILL.md'");
-    expect(execs[1]).not.toContain("/etc/opencode/");
-    expect(decoded(execs[1]!, "/etc/wsp/skills/wsp-machine/SKILL.md")).toContain("- This machine is a golden builder, not a workspace yet.");
-  });
+    expect(out.summary).toMatch(/^\d+(\.\d+)? KB written for Claude Code; Gemini CLI by its fallback \(~\/\.gemini\/settings\.json sets context\.fileName\); Hermes Agent not loaded \(~\/\.hermes\/config\.yaml sets agent\.environment_hint\), skill only$/);
+    expect(existsSync(join(roots.etc, "gemini-cli/system-defaults.json"))).toBe(false);
+    expect(existsSync(join(roots.home, ".gemini/extensions/wsp-machine/gemini-extension.json"))).toBe(true);
+    expect(existsSync(join(roots.etc, "profile.d/wsp-machine.sh"))).toBe(false);
+    expect(existsSync(join(roots.home, ".hermes/skills/wsp-machine/SKILL.md"))).toBe(true);
+    expect(existsSync(join(roots.etc, "opencode"))).toBe(false);
+    expect(read(skillPath(roots))).toContain("- This machine is a golden builder, not a workspace yet.");
+  }, 30_000);
 
   it("reports a guest that does not answer and writes nothing", async () => {
-    const silent = machine(() => ok);
-    expect(await applyMachineContext(silent.m)).toEqual({ context: [], summary: "not written (probe answered exit 0 without its markers)", failure: "probe answered exit 0 without its markers" });
+    const silent = await guest(null);
+    expect(await applyMachineContext(silent.m, { roots: silent.roots })).toEqual({ context: [], summary: "not written (probe answered exit 0 without its markers)", failure: "probe answered exit 0 without its markers" });
     expect(silent.execs).toHaveLength(1);
-    const gone = machine(() => Promise.reject(new Error("machine paused")));
-    expect((await applyMachineContext(gone.m)).failure).toBe("probe failed: machine paused");
-    const refused = machine(cmd => (cmd.includes("echo WSP_CTX") ? { exitCode: 0, stdout: "WSP_CTX\nWSP_CTX_END\n", stderr: "" } : { exitCode: 1, stdout: "", stderr: "bash: line 3: /etc/wsp: Read-only file system\n" }));
-    const out = await applyMachineContext(refused.m);
-    expect(out.failure).toBe("write exited 1: bash: line 3: /etc/wsp: Read-only file system");
+    const gone = await guest();
+    gone.m.exec = () => Promise.reject(new Error("machine paused"));
+    expect((await applyMachineContext(gone.m, { roots: gone.roots })).failure).toBe("probe failed: machine paused");
+  });
+
+  it("a refused upload is a failure that names the cap, and nothing lands", async () => {
+    const { m, roots, puts } = await guest("WSP_CTX\nAGENT claude\nWSP_CTX_END\n", 1024);
+    const out = await applyMachineContext(m, { roots });
+    expect(out.context).toEqual([]);
+    expect(out.failure).toBe("write failed: vault import upload failed: HTTP 413 Payload Too Large; the upload takes at most 1024 bytes per PUT");
+    expect(out.summary).toBe(`not written (${out.failure})`);
+    expect(puts).toHaveLength(1);
+    expect(existsSync(contextPath(roots))).toBe(false);
+    expect(existsSync(join(roots.etc, "claude-code/CLAUDE.md"))).toBe(false);
+  });
+
+  it("an untar that fails is a failure with the guest's last line", async () => {
+    const { m, roots } = await guest("WSP_CTX\nAGENT claude\nWSP_CTX_END\n");
+    const exec = m.exec.bind(m);
+    m.exec = (cmd: string) => (cmd.includes("tar xzf") ? Promise.resolve({ exitCode: 2, stdout: "", stderr: "tar: etc/wsp: Cannot mkdir: Read-only file system\n" }) : exec(cmd));
+    const out = await applyMachineContext(m, { roots });
+    expect(out.failure).toBe("write failed: vault import untar failed (exit 2): tar: etc/wsp: Cannot mkdir: Read-only file system");
     expect(out.context).toEqual([]);
   });
 });

@@ -49,6 +49,8 @@ function vaultServer(): () => Promise<string> {
 export function guestAnswer(cmd: string): ExecResult {
   if (cmd.includes("NODE_HAVE")) return { exitCode: 0, stdout: "NODE_HAVE v18.20.4\nNODE_KEPT v18.20.4\n", stderr: "" };
   if (cmd === "echo ok") return { exitCode: 0, stdout: "ok\n", stderr: "" };
+  // The machine context probe answers with its markers and nothing found, as a bare guest would.
+  if (cmd.includes("echo WSP_CTX")) return { exitCode: 0, stdout: "WSP_CTX\nWSP_CTX_END\n", stderr: "" };
   return { exitCode: 0, stdout: "", stderr: "" };
 }
 

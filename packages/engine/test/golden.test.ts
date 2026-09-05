@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { editorInstallsFor, recipeDigest, toolInstallsFor, type BrewTable, type GuestFacts, type RecipeEntry } from "../src/golden-import.js";
@@ -79,6 +80,11 @@ function recordingBackend(
 const FAST_KILL = { graceMs: 20, pollMs: 1 };
 /** What a machine that still serves answers the reach check with. */
 const REACH_OK: ExecResult = { exitCode: 0, stdout: "ok\n", stderr: "" };
+/** The stage detail the machine context leaves when no agent is on the guest, whatever its archive weighs. */
+const CONTEXT_WRITTEN = expect.stringMatching(/^installing-mcp:machine context: \d+(\.\d+)? KB written; no agent on the machine$/);
+/** What a gzipped archive holds and one file out of it, read with this computer's tar. */
+const namesIn = (tgz: Buffer): string[] => execFileSync("tar", ["-tzf", "-"], { input: tgz }).toString("utf8").trim().split("\n");
+const fileIn = (tgz: Buffer, path: string): string => execFileSync("tar", ["-xzOf", "-", path], { input: tgz }).toString("utf8");
 
 function stageRecorder() {
   const stages: string[] = [];
@@ -452,7 +458,7 @@ describe("golden import stages", () => {
 
   it("writes the machine context after the stages: the plan's own skips in its facts, one hook per installed agent, a claimed hook named in the result", async () => {
     const probe = "WSP_CTX\nKERNEL 6.6.30\nDISK 20466256 11720704\nOVERLAY no\nAGENT claude\nAGENT codex\nAGENT pi\nCONFLICT pi\nSHELL zsh\nWSP_CTX_END\n";
-    const { backend, cmds, fetch } = backendFor([["echo WSP_CTX", { exitCode: 0, stdout: probe, stderr: "" }]]);
+    const { backend, cmds, puts, fetch } = backendFor([["echo WSP_CTX", { exitCode: 0, stdout: probe, stderr: "" }]]);
     const { stages, onStage } = stageRecorder();
     const results: ImportResult[] = [];
     const skippedTools = [{ id: "tools/brew-cask/raycast", label: "Raycast", note: "macOS app, no Linux build" }];
@@ -463,16 +469,40 @@ describe("golden import stages", () => {
       { agent: "codex", outcome: "written", path: "/etc/codex/requirements.toml", skill: "/etc/codex/skills/wsp-machine/SKILL.md" },
       { agent: "pi", outcome: "fallback", path: "/root/.pi/agent/extensions/wsp-machine.ts", note: "~/.pi/agent/APPEND_SYSTEM.md already exists", skill: "/root/.pi/agent/skills/wsp-machine/SKILL.md" },
     ]);
-    expect(stages.at(-2)).toBe("installing-mcp:machine context: written for Claude Code, Codex; Pi by its fallback (~/.pi/agent/APPEND_SYSTEM.md already exists)");
-    const write = cmds.findIndex(c => c.includes("'/etc/wsp/machine-context.md'"));
+    expect(results[0]!.contextFailure).toBeUndefined();
+    expect(stages.at(-2)).toMatch(/^installing-mcp:machine context: \d+(\.\d+)? KB written for Claude Code, Codex; Pi by its fallback \(~\/\.pi\/agent\/APPEND_SYSTEM\.md already exists\)$/);
+    // The texts go up as one archive after the person's files and are untarred at the root before the reach check.
+    const write = cmds.findIndex(c => c.includes("tar xzf - -C '/' "));
     expect(write).toBeGreaterThan(cmds.findIndex(c => c.includes("echo WSP_CTX")));
     expect(cmds.indexOf("echo ok")).toBeGreaterThan(write);
-    const skill = Buffer.from(/printf '%s' '([A-Za-z0-9+/=]+)' \| base64 --decode > '\/etc\/wsp\/skills\/wsp-machine\/SKILL\.md'/.exec(cmds[write]!)![1]!, "base64").toString("utf8");
+    expect(cmds.some(c => c.includes("base64 --decode"))).toBe(false);
+    expect(puts).toHaveLength(2);
+    const tgz = puts[1]!;
+    const skill = fileIn(tgz, "etc/wsp/skills/wsp-machine/SKILL.md");
     expect(skill).toContain("- This machine is a golden builder, not a workspace yet.");
     expect(skill).toContain("- Golden: not sealed yet.");
     expect(skill).toContain("- Tools that did not install: Raycast (macOS app, no Linux build).");
-    expect(cmds[write]).toContain("'/etc/wsp/machine-context.json'");
-    expect(cmds[write]).not.toContain("APPEND_SYSTEM.md");
+    expect(namesIn(tgz)).toContain("etc/wsp/machine-context.json");
+    expect(namesIn(tgz).some(n => n.endsWith("APPEND_SYSTEM.md"))).toBe(false);
+  });
+
+  it("a refused context upload is a failure the result counts, not the end of the build", async () => {
+    const { backend, cmds } = backendFor();
+    const puts: Buffer[] = [];
+    // The person's files go up first and land; the context archive is the second PUT.
+    const fetch: typeof globalThis.fetch = async (_url, init) => {
+      puts.push(Buffer.from(init?.body as Uint8Array));
+      return puts.length === 2 ? new Response(JSON.stringify({ error: "Payload Too Large", limit: 1024 }), { status: 413 }) : new Response(null, { status: 200 });
+    };
+    const { stages, onStage } = stageRecorder();
+    const results: ImportResult[] = [];
+    const builder = await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ onResult: r => void results.push(r) }) });
+    const failure = "write failed: vault import upload failed: HTTP 413 Payload Too Large; the upload takes at most 1024 bytes per PUT";
+    expect(stages).toContain(`installing-mcp:machine context: not written (${failure})`);
+    expect(results[0]!.context).toEqual([]);
+    expect(results[0]!.contextFailure).toBe(failure);
+    expect(builder.import?.applied).toContain("installing-mcp");
+    expect(cmds.at(-1)).toBe("echo ok");
   });
 
   it("an archive over one upload part says how many parts it went up in", async () => {
@@ -480,7 +510,7 @@ describe("golden import stages", () => {
     const stages: string[] = [];
     const big = importOf({ files: { ...importOf().files!, pack: async () => ({ tar: Buffer.alloc(33 * 1024 * 1024), bytes: 33 * 1024 * 1024, unpacked: 4096, skipped: [], cut: [] }) } });
     await prepareBuilder({ backend, setup: "true", fetch, onStage: (s, d) => void stages.push(`${s}:${d ?? ""}`), import: big });
-    expect(puts).toHaveLength(2);
+    expect(puts).toHaveLength(3);
     expect(stages).toContainEqual("uploading-files:part 1 of 2, 32 MB of 33 MB");
     expect(stages).toContainEqual("uploading-files:part 2 of 2, 33 MB of 33 MB");
     expect(stages).toContainEqual(expect.stringMatching(/^uploading-files:33 MB in 2 parts in \d+(\.\d)?s; 3000 MB free$/));
@@ -517,12 +547,14 @@ describe("golden import stages", () => {
       "installing-tools:Homebrew (1/3)", "installing-tools:gh (2/3)", "installing-tools:bun@1.4.0 (3/3)",
       "installing-tools:3 installed; caches swept; 3000 MB free",
       "installing-mcp:none configured",
-      "installing-mcp:machine context: written; no agent on the machine",
+      CONTEXT_WRITTEN,
       "ready",
     ]);
-    expect(puts).toEqual([Buffer.from("tgz-bytes")]);
+    expect(puts[0]).toEqual(Buffer.from("tgz-bytes"));
+    expect(puts).toHaveLength(2);
     const untar = cmds.find(c => c.includes("tar xzf"))!;
     expect(untar).toMatch(/-C '\/root' --no-same-owner/);
+    expect(cmds.filter(c => c.includes("tar xzf")).at(-1)).toMatch(/-C '\/' --no-same-owner/);
     expect(cmds.indexOf(FREE_KB_CMD)).toBeLessThan(cmds.indexOf(untar));
     const tool = cmds.find(c => c.includes("brew install gh"))!;
     expect(tool).toMatch(/\nsetsid bash -c 'brew install gh' &\np=\$!\n/);
@@ -584,7 +616,7 @@ describe("golden import stages", () => {
     }
     expect(scripts.filter(s => s.includes("brew install gh"))).toHaveLength(2);
     expect(oneOf("flock -w 600")).toContain("/home/linuxbrew/.linuxbrew/var/homebrew/locks/*.lock");
-    oneOf("tar xzf");
+    expect(scripts.filter(s => s.includes("tar xzf"))).toHaveLength(2);
     expect(scripts).toContain('export PATH="/usr/local/bin:$PATH"\nclaude --version');
     expect(ran.filter(r => r.id === "m2").map(r => r.script)).toEqual(["claude --version && codex --version"]);
     const inlineCmds = inline.map(i => i.cmd);
@@ -816,7 +848,7 @@ describe("golden import stages", () => {
     expect(k.stages.slice(k.stages.indexOf("installing-harness"))).toEqual([
       "installing-harness", "installing-harness:Node for Pi", "installing-harness:Node v22.1.0 kept; Pi run on it",
       "installing-harness:Codex (1/2)", "installing-harness:Pi (2/2)", "installing-harness:Codex, Pi installed; caches swept; 3000 MB free",
-      "installing-tools:Homebrew (1/3)", "installing-tools:gh (2/3)", "installing-tools:bun@1.4.0 (3/3)", "installing-tools:3 installed; caches swept; 3000 MB free", "installing-mcp:none configured", "installing-mcp:machine context: written; no agent on the machine", "ready",
+      "installing-tools:Homebrew (1/3)", "installing-tools:gh (2/3)", "installing-tools:bun@1.4.0 (3/3)", "installing-tools:3 installed; caches swept; 3000 MB free", "installing-mcp:none configured", CONTEXT_WRITTEN, "ready",
     ]);
     expect(kept.cmds.indexOf(kept.cmds.find(c => c.includes("node-step"))!)).toBeLessThan(kept.cmds.indexOf(kept.cmds.find(c => c.includes("codex-install"))!));
     expect(b1.setupSha).toBe(createHash("sha256").update("true\nnode-step\ncodex-install\npi-install").digest("hex"));
@@ -1149,7 +1181,7 @@ describe("golden import stages", () => {
     const builder = await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf() });
     expect(stages).toContain("uploading-files:free disk unknown (df failed: df: /root: No such file or directory); uploading 1.2 KB anyway");
     expect(stages.filter(s => s.startsWith("installing-tools:free disk unknown"))).toEqual(["installing-tools:free disk unknown (df failed: df: /root: No such file or directory); installing without the 2048 MB floor"]);
-    expect(puts).toHaveLength(1);
+    expect(puts).toHaveLength(2);
     expect(cmds.filter(c => c.includes("brew install gh") || c.includes("brew-bootstrap") || c.includes("bun@1.4.0"))).toHaveLength(3);
     expect(builder.import?.applied).toContain("installing-harness");
   });
@@ -1198,12 +1230,12 @@ describe("golden import stages", () => {
       "installing-harness:no agent ticked",
       "installing-tools:nothing ticked",
       "installing-mcp:none configured",
-      "installing-mcp:machine context: written; no agent on the machine",
+      CONTEXT_WRITTEN,
       "ready",
     ]);
-    expect(puts).toEqual([]);
+    expect(puts).toHaveLength(1);
     // The harness ran, so the context is written and the machine is asked whether it still answers before the hand-off.
-    expect(cmds.map(c => (c.includes("echo WSP_CTX") ? "probe" : c.includes("'/etc/wsp/machine-context.md'") ? "write" : c))).toEqual(["true", "probe", "write", "echo ok"]);
+    expect(cmds.map(c => (c.includes("echo WSP_CTX") ? "probe" : c.includes("tar xzf - -C '/' ") ? "write" : c))).toEqual(["true", "probe", "write", "echo ok"]);
     expect(builder.import?.smoke).toBe("true");
 
     let result: ImportResult | undefined;
@@ -1251,7 +1283,7 @@ describe("golden import stages", () => {
     expect(results).toEqual([]);
     expect(stages.slice(0, 5)).toEqual(["applying-setup:already applied", "uploading-files:already applied", "installing-harness:already applied", "installing-tools:already applied", "installing-mcp:Claude Code 1"]);
     expect(stages.at(-2)).toBe("installing-mcp:github skipped (the config edit did not run (exit 0)); 3000 MB free");
-    expect(stages.at(-1)).toBe("installing-mcp:machine context: written; no agent on the machine");
+    expect(stages.at(-1)).toEqual(CONTEXT_WRITTEN);
     expect(cmds.length).toBeGreaterThan(before);
     expect(cmds.at(-1)).toBe("echo ok");
   });
@@ -1435,7 +1467,7 @@ describe("golden import stages", () => {
         "installing-tools:jq (1/1)",
         "installing-tools:1 installed; caches swept; 3000 MB free",
         "installing-mcp:none configured",
-        "installing-mcp:machine context: written; no agent on the machine",
+        CONTEXT_WRITTEN,
       ]);
       const removals = cmds.slice(0, 3);
       expect(removals.every(c => /\nsetsid bash -c '.*' &\np=\$!\n/s.test(c) && c.includes("while [ $t -lt 600 ]"))).toBe(true);
