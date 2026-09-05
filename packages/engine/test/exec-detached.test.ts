@@ -4,7 +4,7 @@
 // naps mid-run. The last block runs the real guest commands under this
 // machine's bash with setsid shimmed, since macOS has none.
 import { execFile } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -214,11 +214,21 @@ describe("execDetached over this machine's bash", () => {
 
   it("the deadline kill ends the launched session for real", async () => {
     const { machine, runDir } = localGuest();
-    const res = await execDetached(machine, "echo pid $$; sleep 30", { deadlineMs: 800, pollMs: 50 }, runDir);
+    // The deadline counts from before the launch, so under load the kill can land before the script's first line: the launch answers once it is on disk.
+    const started = () => existsSync(runDir) && readdirSync(runDir).some(f => f.endsWith(".out") && statSync(join(runDir, f)).size > 0);
+    const settled = {
+      id: "local",
+      exec: async (cmd: string, o?: { timeoutMs?: number }) => {
+        const res = await machine.exec(cmd, o);
+        if (cmd.includes("echo WSP_LAUNCHED")) while (!started()) await new Promise(r => setTimeout(r, 20));
+        return res;
+      },
+    } as unknown as Machine;
+    const res = await execDetached(settled, "echo pid $$; sleep 30", { deadlineMs: 800, pollMs: 50 }, runDir);
     expect(res.exitCode).toBe(DEADLINE_EXIT);
     const pid = Number(/pid (\d+)/.exec(res.stdout)?.[1]);
     expect(pid).toBeGreaterThan(0);
     await new Promise(r => setTimeout(r, 200));
     expect(await machine.exec(`kill -0 ${pid} 2>/dev/null && echo alive || echo gone`)).toMatchObject({ stdout: "gone\n" });
-  });
+  }, 15_000);
 });
