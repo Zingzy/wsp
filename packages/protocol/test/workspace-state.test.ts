@@ -1,0 +1,44 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+import { describe, expect, it } from "vitest";
+import { sendRefusal, workspaceState, workspaceWord, type WorkspaceState } from "../src/index.js";
+
+describe("workspaceState", () => {
+  it("phase alone: running, pausing, napping and waking each have one word", () => {
+    expect(workspaceState({ phase: "running" })).toBe("running");
+    expect(workspaceState({ phase: "pausing" })).toBe("pausing");
+    expect(workspaceState({ phase: "napping" })).toBe("paused");
+    expect(workspaceState({ phase: "waking" })).toBe("waking");
+  });
+
+  it("the provider's word overrides the phase only where it contradicts it", () => {
+    expect(workspaceState({ phase: "running", machineState: "gone", reach: "gone" })).toBe("gone");
+    expect(workspaceState({ phase: "napping", machineState: "gone", reach: "gone" })).toBe("gone");
+    expect(workspaceState({ phase: "running", machineState: "paused", reach: "napping" })).toBe("paused");
+    expect(workspaceState({ phase: "running", machineState: "starting", reach: "unreachable" })).toBe("waking");
+    expect(workspaceState({ phase: "waking", machineState: "starting", reach: "unreachable" })).toBe("waking");
+    expect(workspaceState({ phase: "pausing", machineState: "paused", reach: "napping" })).toBe("pausing");
+  });
+
+  it("a running machine whose daemon does not answer is unreachable; a slow edge is still running", () => {
+    expect(workspaceState({ phase: "running", machineState: "running", reach: "unreachable" })).toBe("unreachable");
+    expect(workspaceState({ phase: "running", machineState: "running", reach: "no-daemon" })).toBe("unreachable");
+    expect(workspaceState({ phase: "running", machineState: "running", reach: "zombie" })).toBe("unreachable");
+    expect(workspaceState({ phase: "running", machineState: "running", reach: "slow" })).toBe("running");
+    expect(workspaceState({ phase: "running", machineState: "running", reach: "unsupported" })).toBe("running");
+    expect(workspaceState({ phase: "running", machineState: null, reach: null })).toBe("running");
+  });
+
+  it("every state has a capitalised word", () => {
+    const words: Record<WorkspaceState, string> = { running: "Running", pausing: "Pausing", paused: "Paused", waking: "Waking", unreachable: "Unreachable", gone: "Gone" };
+    for (const [state, word] of Object.entries(words)) expect(workspaceWord(state as WorkspaceState)).toBe(word);
+  });
+
+  it("sendRefusal names the state in the sentence the composer and the host both use, and is null while running", () => {
+    expect(sendRefusal("running")).toBeNull();
+    expect(sendRefusal("pausing")).toBe("Workspace is pausing; wake it to send");
+    expect(sendRefusal("paused")).toBe("Workspace is paused; wake it to send");
+    expect(sendRefusal("waking")).toBe("Workspace is waking; sends open when it is running");
+    expect(sendRefusal("unreachable")).toBe("Workspace is unreachable; sends open when the machine answers");
+    expect(sendRefusal("gone")).toBe("Workspace machine is gone; rebuild it to send");
+  });
+});

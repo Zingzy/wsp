@@ -2,7 +2,7 @@
 // Words the machine surface puts next to wire values. Phase is the product
 // word (Running, Paused, Waking); machine state is the provider word and only
 // shows when it diverges from what the phase implies.
-import type { MachineState, ReachState, WorkspacePhase, WorkspaceSize } from "@wsp/protocol";
+import { workspaceState, workspaceWord, type MachineState, type ReachState, type WorkspacePhase, type WorkspaceSize } from "@wsp/protocol";
 
 export const money = (n: number, digits = 4): string => `$${n.toFixed(digits)}`;
 
@@ -17,28 +17,18 @@ export function durationLabel(ms: number): string {
 }
 
 export function phaseLabel(phase: WorkspacePhase): string {
-  switch (phase) {
-    case "running":
-      return "Running";
-    case "napping":
-      return "Paused";
-    case "waking":
-      return "Waking";
-    default: {
-      const _exhaustive: never = phase;
-      return phase;
-    }
-  }
+  return workspaceWord(workspaceState({ phase }));
 }
 
-/** The provider word only when it contradicts the phase. A waking machine passes
- * through paused, starting and running, so only gone counts against it. */
+/** The provider word only when it contradicts the phase. A waking machine passes through paused,
+ * starting and running, and a pausing one through running and paused, so only gone counts against those. */
 export function divergentMachineState(phase: WorkspacePhase, state: MachineState): MachineState | null {
   switch (phase) {
     case "running":
       return state === "running" ? null : state;
     case "napping":
       return state === "paused" ? null : state;
+    case "pausing":
     case "waking":
       return state === "gone" ? state : null;
     default: {

@@ -39,6 +39,8 @@ interface State {
   refresh(): Promise<void>;
   /** Optimistic nap/wake: paint now, reconcile on the event, revert + toast on failure. */
   toggle(id: string): Promise<void>;
+  /** The wake alone: what every Wake button calls, whatever the row says. A running workspace is left as it is. */
+  wake(id: string): Promise<void>;
   /** The row leaves on the host's forward.close; a refusal is a toast. */
   stopForward(workspaceId: string, port: number): Promise<void>;
   clearToast(): void;
@@ -63,6 +65,20 @@ export const useStore = create<State>((set, get) => {
       workspaces: s.workspaces.map(w => (w.id === id ? { ...w, ...patch } : w)),
       statuses: s.statuses[id] ? { ...s.statuses, [id]: { ...s.statuses[id]!, ...patch } } : s.statuses,
     }));
+  };
+
+  // The optimistic phase paints at once; the runtime's own pushes (pausing, napping, waking, running) reconcile it.
+  const move = async (id: string, to: "pausing" | "waking"): Promise<void> => {
+    const api = get().api;
+    const w = get().workspaces.find(x => x.id === id);
+    if (!api || !w) return;
+    setPhase(id, to);
+    try {
+      await (to === "pausing" ? api.nap(id) : api.wake(id));
+    } catch (e) {
+      setPhase(id, w.phase);
+      if (!(e instanceof DisconnectedError)) set({ toast: `${w.name}: ${e instanceof Error ? e.message : String(e)}` });
+    }
   };
 
   // What bind fetches and a reconnect fetches again: the list plus the status snapshot that also arms status.subscribe.
@@ -126,17 +142,15 @@ export const useStore = create<State>((set, get) => {
       }
     },
     async toggle(id) {
-      const api = get().api;
       const w = get().workspaces.find(x => x.id === id);
-      if (!api || !w) return;
-      const to: WorkspacePhase = w.phase === "running" ? "napping" : "waking";
-      setPhase(id, to);
-      try {
-        await (to === "napping" ? api.nap(id) : api.wake(id));
-      } catch (e) {
-        setPhase(id, w.phase);
-        if (!(e instanceof DisconnectedError)) set({ toast: `${w.name}: ${e instanceof Error ? e.message : String(e)}` });
-      }
+      if (!w) return;
+      if (w.phase === "running") await move(id, "pausing");
+      else await get().wake(id);
+    },
+    async wake(id) {
+      const w = get().workspaces.find(x => x.id === id);
+      if (!w || w.phase === "running") return;
+      await move(id, "waking");
     },
     async stopForward(workspaceId, port) {
       const api = get().api;

@@ -121,7 +121,7 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
       icon: <PauseIcon className={ITEM_ICON_CLASS} />,
       ...scoped("Pause workspace", handlers.togglePhase),
     });
-  } else if (selected?.phase === "napping") {
+  } else if (selected?.phase === "napping" || selected?.phase === "pausing") {
     items.push({
       kind: "action",
       value: "action:wake",

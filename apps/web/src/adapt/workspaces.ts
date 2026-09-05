@@ -4,7 +4,7 @@
 // sidebarProjectGrouping.ts SidebarProjectSnapshot and Sidebar.logic.ts
 // resolveThreadStatusPill (commit 57a66608). Phase is the product word and
 // leads; machine state and reach only add when they diverge from it.
-import type { SessionView, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import { workspaceState, workspaceWord, type SessionView, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicator } from "./view-model.js";
 
 export interface SidebarInput {
@@ -40,25 +40,45 @@ export function deriveSidebarProjects(input: SidebarInput): SidebarProjectSnapsh
 }
 
 export function workspaceIndicator(workspace: Pick<WorkspaceView, "phase">, status: WorkspaceStatus | null): StatusIndicator {
-  const machine = status?.machineState ?? null;
-  const reach = status?.reach.state ?? null;
-  if (machine === "gone") return { label: "Gone", tone: "error", pulse: false };
-  // The provider says running and the guest answers nothing: not Running, not Unreachable.
-  if (reach === "zombie") return { label: "Zombie", tone: "error", pulse: false };
-  switch (workspace.phase) {
+  const state = workspaceState({ phase: workspace.phase, machineState: status?.machineState, reach: status?.reach.state });
+  return { label: workspaceWord(state), tone: indicatorTone(state), pulse: state === "pausing" || state === "waking" };
+}
+
+function indicatorTone(state: WorkspaceState): StatusIndicator["tone"] {
+  switch (state) {
+    case "running":
+      return "running";
+    case "pausing":
+    case "paused":
+      return "paused";
     case "waking":
-      return { label: "Waking", tone: "connecting", pulse: true };
-    case "napping":
-      return { label: "Paused", tone: "paused", pulse: false };
-    case "running": {
-      if (machine === "starting") return { label: "Starting", tone: "connecting", pulse: true };
-      if (machine === "paused") return { label: "Paused", tone: "paused", pulse: false };
-      if (reach === "unreachable" || reach === "no-daemon") return { label: "Unreachable", tone: "error", pulse: false };
-      return { label: "Running", tone: "running", pulse: false };
-    }
+    case "unreachable":
+    case "gone":
+      return "neutral";
     default: {
-      const _exhaustive: never = workspace.phase;
-      return { label: "Unknown", tone: "neutral", pulse: false };
+      const _exhaustive: never = state;
+      return "neutral";
+    }
+  }
+}
+
+/** What the thread shows in place of "Working" while its workspace cannot run the turn; null while the machine runs. */
+export function turnWait(state: WorkspaceState): { readonly label: string; readonly wake: boolean } | null {
+  switch (state) {
+    case "running":
+      return null;
+    case "pausing":
+    case "paused":
+      return { label: "Waiting for the machine to wake", wake: true };
+    case "waking":
+      return { label: "Waking the machine", wake: false };
+    case "unreachable":
+      return { label: "Waiting for the machine to answer", wake: false };
+    case "gone":
+      return { label: "The machine is gone", wake: false };
+    default: {
+      const _exhaustive: never = state;
+      return null;
     }
   }
 }
@@ -75,20 +95,19 @@ export function deriveThread(session: SessionView): SidebarThreadSnapshot {
   };
 }
 
-/** t3code's pill vocabulary: Working while a session runs, Completed when it settled, nothing for the rest. */
-export function threadIndicator(session: Pick<SessionView, "status">): StatusIndicator | null {
+/** The thread words: Working while a turn runs, Idle once it settled or was stopped, Ended when it did not get to settle. */
+export function threadIndicator(session: Pick<SessionView, "status">): StatusIndicator {
   switch (session.status) {
     case "running":
-      return { label: "Working", tone: "running", pulse: true };
+      return { label: "Working", tone: "neutral", pulse: true };
     case "completed":
-      return { label: "Completed", tone: "neutral", pulse: false };
-    case "failed":
-      return { label: "Failed", tone: "error", pulse: false };
     case "interrupted":
-      return null;
+      return { label: "Idle", tone: "neutral", pulse: false };
+    case "failed":
+      return { label: "Ended", tone: "neutral", pulse: false };
     default: {
       const _exhaustive: never = session.status;
-      return null;
+      return { label: "Idle", tone: "neutral", pulse: false };
     }
   }
 }

@@ -15,7 +15,7 @@
 // that one ends. Model and permission-mode controls wait for start options.
 import { CircleAlertIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { MachineState, WorkspacePhase } from "@wsp/protocol";
+import { sendRefusal, workspaceState, type MachineState, type ReachState, type WorkspacePhase } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
 import { useStatus, useStore, useWorkspace } from "../../protocol/store";
 import { composerSubmissionIntentForEnter, detectComposerTrigger, replaceTextRange } from "../../composer-logic";
@@ -40,6 +40,7 @@ export function composerUnavailableReason(input: {
   hasApi: boolean;
   phase: WorkspacePhase | null;
   machineState: MachineState | null;
+  reach: ReachState | null;
   hydrated: boolean;
   finishing: boolean;
 }): string | null {
@@ -47,9 +48,8 @@ export function composerUnavailableReason(input: {
   if (input.conn === "reconnecting") return "wsp is not running, reconnecting";
   if (input.conn === "closed") return "wsp is not running";
   if (input.phase === null) return "Workspace not found";
-  if (input.machineState === "gone") return "Workspace machine is gone";
-  if (input.phase === "napping") return "Workspace is napping; wake it to send";
-  if (input.phase === "waking") return "Workspace is waking";
+  const refusal = sendRefusal(workspaceState({ phase: input.phase, machineState: input.machineState, reach: input.reach }));
+  if (refusal !== null) return refusal;
   if (!input.hydrated) return "Loading transcript";
   if (input.finishing) return "Finishing the previous turn";
   return null;
@@ -80,8 +80,9 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const unavailable = composerUnavailableReason({
     conn,
     hasApi: api !== null,
-    phase: workspace?.phase ?? null,
+    phase: status?.phase ?? workspace?.phase ?? null,
     machineState: status?.machineState ?? null,
+    reach: status?.reach.state ?? null,
     hydrated: thread.hydrated,
     finishing: thread.finishing,
   });

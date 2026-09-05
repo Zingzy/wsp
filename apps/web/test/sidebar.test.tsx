@@ -109,28 +109,49 @@ describe("rows from the fixture wire", () => {
       "api",
     );
     await waitFor(() => expect(screen.getByText("fix the port list")).toBeDefined());
-    expect(rowIds()).toEqual(["ws:ws_a", "thread:s1", "settled:ws_a", "thread:s2", "ws:ws_b", "settled:ws_b", "thread:s3"]);
+    // The Idle header shows only where a workspace has both working and idle threads; ws_b's single group has none.
+    expect(rowIds()).toEqual(["ws:ws_a", "thread:s1", "settled:ws_a", "thread:s2", "ws:ws_b", "thread:s3"]);
     expect(rowOf("fix the port list").textContent).toContain("3m");
     expect(rowOf("upgrade node").textContent).toContain("50m");
     // a session without a prompt falls back to the harness session id
     expect(rowOf("59094224-bb3d").textContent).toContain("2d");
-    // status pills: the running one works, the failed one says so, the completed one is plain
+    // status pills: the running one works, the one that never settled ended, the idle one is plain
     expect(within(rowOf("fix the port list")).getByLabelText("Working")).toBeDefined();
-    expect(within(rowOf("59094224-bb3d")).getByLabelText("Failed")).toBeDefined();
-    expect(within(rowOf("upgrade node")).queryByLabelText("Completed")).toBeNull();
+    expect(within(rowOf("59094224-bb3d")).getByLabelText("Ended")).toBeDefined();
+    expect(within(rowOf("upgrade node")).queryByLabelText(/Idle|Completed/)).toBeNull();
+    expect(screen.getByRole("button", { name: /^Idle/ })).toBeDefined();
+    expect(screen.queryByText(/Settled/)).toBeNull();
   });
 
-  it("the settled shelf collapses per workspace and remembers it", async () => {
+  it("the idle shelf collapses per workspace and remembers it", async () => {
+    await mount(
+      fakeApi(
+        [API],
+        [status(API)],
+        [
+          session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000) }),
+          session("s2", "ws_a", { status: "completed", prompt: "upgrade node", startedAt: iso(-60_000), endedAt: iso(-1_000) }),
+        ],
+      ),
+      "api",
+    );
+    const toggle = await screen.findByRole("button", { name: /Idle/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(toggle);
+    expect(screen.queryByText("upgrade node")).toBeNull();
+    expect(screen.getByRole("button", { name: "Idle (1)" })).toBeDefined();
+    expect(window.localStorage.getItem("wsp:sidebar-settled-expanded")).toBe("false");
+  });
+
+  it("a workspace whose threads are all idle lists them under no header, even with the shelf remembered collapsed", async () => {
+    window.localStorage.setItem("wsp:sidebar-settled-expanded", "false");
     await mount(
       fakeApi([API], [status(API)], [session("s2", "ws_a", { status: "completed", prompt: "upgrade node", startedAt: iso(-60_000), endedAt: iso(-1_000) })]),
       "api",
     );
-    const toggle = await screen.findByRole("button", { name: /Settled/ });
-    expect(toggle.getAttribute("aria-expanded")).toBe("true");
-    fireEvent.click(toggle);
-    expect(screen.queryByText("upgrade node")).toBeNull();
-    expect(screen.getByRole("button", { name: "Settled (1)" })).toBeDefined();
-    expect(window.localStorage.getItem("wsp:sidebar-settled-expanded")).toBe("false");
+    await waitFor(() => expect(screen.getByText("upgrade node")).toBeDefined());
+    expect(screen.queryByRole("button", { name: /Idle|Settled/ })).toBeNull();
+    expect(rowIds()).toEqual(["ws:ws_a", "thread:s2"]);
   });
 
   it("a workspace row carries phase, rate, accrued, idle countdown and the edge-slow note", async () => {
@@ -299,7 +320,7 @@ describe("zombie machines", () => {
   it("reads as its own state with the reason on hover and a one-shot rebuild", async () => {
     const zombie = status(API, { reach: { state: "zombie" }, reason: "exec probe failed after 3 tries; slow since 12:01" });
     const api = await mount(fakeApi([API], [zombie]), "api");
-    await waitFor(() => expect(rowOf("api").textContent).toContain("Zombie"));
+    await waitFor(() => expect(rowOf("api").textContent).toContain("Unreachable"));
     expect(rowOf("api").textContent).not.toContain("Running");
     const rebuild = screen.getByRole("button", { name: "Rebuild api" });
     expect(rebuild.getAttribute("title")).toContain("exec probe failed");

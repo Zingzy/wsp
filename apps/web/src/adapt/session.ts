@@ -170,9 +170,9 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
       case "session.end": {
         const t = turnFor(event, at);
         if (t.summary.state === "running") {
-          const error = event.sawResult
+          const error = event.reason ?? (event.sawResult
             ? "session exited without a result"
-            : `session exited without a result (exit code ${event.exitCode ?? "unknown"})`;
+            : `session exited without a result (exit code ${event.exitCode ?? "unknown"})`);
           finishTurn(t, { status: "failed", error }, at);
         }
         continue;

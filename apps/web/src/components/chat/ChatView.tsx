@@ -5,13 +5,14 @@
 // render-prop slot filled by whoever mounts the view. A new-thread request
 // for this workspace clears the thread, whether it arrived before or after
 // the view mounted.
-import { useCallback, useEffect, useRef, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import type { LegendListRef } from "@legendapp/list/react";
-import { useWorkspace } from "../../protocol/store";
+import { workspaceState } from "@wsp/protocol";
+import { useStatus, useStore, useWorkspace } from "../../protocol/store";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { cn } from "../../lib/utils";
-import { DEFAULT_TIMESTAMP_FORMAT, formatDuration, type TimestampFormat, type TurnSummary } from "./adapt";
-import { MessagesTimeline } from "./MessagesTimeline";
+import { DEFAULT_TIMESTAMP_FORMAT, formatDuration, turnWait, type TimestampFormat, type TurnSummary } from "./adapt";
+import { MessagesTimeline, type MachineWait } from "./MessagesTimeline";
 import { useNewThreadRequests } from "./newThreadRequests";
 import { useChatThread, type ChatThreadHandle } from "./useChatThread";
 
@@ -31,6 +32,8 @@ export function ChatView({
   children?: ((thread: ChatThreadHandle) => ReactNode) | undefined;
 }) {
   const workspace = useWorkspace(workspaceId);
+  const status = useStatus(workspaceId);
+  const wake = useStore(s => s.wake);
   const thread = useChatThread(workspaceId);
   const openFile = useRightPanelStore(s => s.openFile);
   const listRef = useRef<LegendListRef | null>(null);
@@ -38,6 +41,16 @@ export function ChatView({
   const empty = view.entries.length === 0 && !view.running;
   const cwd = view.cwd ?? undefined;
   const onOpenFile = useCallback((path: string, line?: number) => openFile(workspaceId, path, line), [openFile, workspaceId]);
+  // A Working thread on a machine that is not running is a contradiction: the row says what it waits for instead.
+  const phase = status?.phase ?? workspace?.phase ?? null;
+  const machineState = status?.machineState ?? null;
+  const reach = status?.reach.state ?? null;
+  const machineWait = useMemo<MachineWait | null>(() => {
+    if (phase === null || !view.running) return null;
+    const wait = turnWait(workspaceState({ phase, machineState, reach }));
+    if (wait === null) return null;
+    return { label: wait.label, onWake: wait.wake ? () => void wake(workspaceId) : null };
+  }, [phase, machineState, reach, view.running, wake, workspaceId]);
   const { startNewThread } = thread;
   useEffect(() => {
     const consume = () => { if (useNewThreadRequests.getState().take(workspaceId)) startNewThread(); };
@@ -55,6 +68,7 @@ export function ChatView({
         ) : (
           <MessagesTimeline
             isWorking={view.running}
+            machineWait={machineWait}
             activeTurnStartedAt={view.activeTurnStartedAt}
             listRef={listRef}
             timelineEntries={view.entries}

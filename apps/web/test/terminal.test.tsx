@@ -90,8 +90,11 @@ describe("WorkspaceTerminals", () => {
     wt.feedStatus("connecting");
     wt.feedStatus("live");
     await waitFor(() => expect(attaches).toEqual(["p2"])); // p1 failed, p2 still re-attached
-    expect(wt.tabs().find(t => t.ptyId === "p1")).toMatchObject({ exited: true });
-    expect(wt.tabs().find(t => t.ptyId === "p2")).toMatchObject({ exited: false });
+    expect(wt.tabs().find(t => t.ptyId === "p1")).toMatchObject({ exited: true, lost: true });
+    expect(wt.tabs().find(t => t.ptyId === "p2")).toMatchObject({ exited: false, lost: false });
+    const seen: string[] = [];
+    wt.bind("p1", { data: d => seen.push(d), reset: () => {} })();
+    expect(seen.join("")).toContain("[This shell ended when the machine was replaced]");
   });
 
   it("a connection dying mid-reattach does not mark ptys lost", async () => {
@@ -159,8 +162,8 @@ describe("WorkspaceTerminals", () => {
     expect(statusChanges).toBe(1);
     expect(ops.map(o => o.op)).toEqual(["pty.list", "pty.attach", "pty.attach"]);
     expect(wt.tabs()).toEqual([
-      { ptyId: "p1", title: "shell", exited: false },
-      { ptyId: "p2", title: "shell", exited: true },
+      { ptyId: "p1", title: "shell", exited: false, lost: false },
+      { ptyId: "p2", title: "shell", exited: true, lost: false },
     ]);
     expect(wt.activeId()).toBe("p1");
     const replayed: string[] = [];
@@ -184,7 +187,7 @@ describe("WorkspaceTerminals", () => {
     const wt = new WorkspaceTerminals(wire);
     wt.feedStatus("live");
     await waitFor(() => expect(wt.status()).toBe("live"));
-    expect(wt.tabs()).toEqual([{ ptyId: "p1", title: "shell", exited: true }]);
+    expect(wt.tabs()).toEqual([{ ptyId: "p1", title: "shell", exited: true, lost: false }]);
     const seen: string[] = [];
     wt.bind("p1", { data: d => seen.push(d), reset: () => {} })();
     expect(seen.join("")).toBe("\r\n[process exited]\r\n");

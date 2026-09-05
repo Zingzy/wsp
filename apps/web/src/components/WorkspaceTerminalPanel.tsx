@@ -9,7 +9,7 @@ import { openPanelTerminal, splitPanelTerminal, type SplitDirection } from "../s
 import { getTerminals, onTerminals, type WorkspaceTerminals } from "../terminal/link.js";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty.js";
-import { terminalLabels } from "./WorkspaceTerminalDrawer.js";
+import { lostTerminals, terminalLabels, useTerminalPane } from "./WorkspaceTerminalDrawer.js";
 
 const NO_TABS: readonly never[] = [];
 
@@ -65,6 +65,8 @@ function LinkedPanel({
   const tabs = useSyncExternalStore(fn => terms.onTabs(fn), () => terms.tabs());
   const status = useSyncExternalStore(fn => terms.onStatus(fn), () => terms.status());
   const labels = useMemo(() => terminalLabels(tabs), [tabs]);
+  const lost = useMemo(() => lostTerminals(tabs), [tabs]);
+  const { pane, onWake } = useTerminalPane(workspaceId, status);
   const terminalIo = useCallback((id: string) => terms.io(id), [terms]);
   const activateTerminal = useRightPanelStore(s => s.activateTerminal);
   const closeTerminal = useRightPanelStore(s => s.closeTerminal);
@@ -93,7 +95,9 @@ function LinkedPanel({
       terminalGroups={groups}
       activeTerminalGroupId={surface.id}
       focusRequestId={0}
-      terminalsReachable={status === "live"}
+      pane={pane}
+      onWake={onWake}
+      lostTerminalIds={lost}
       onSplitTerminal={() => split("horizontal")}
       onSplitTerminalVertical={() => split("vertical")}
       onNewTerminal={() => void openPanelTerminal(workspaceId)}

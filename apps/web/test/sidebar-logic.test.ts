@@ -7,11 +7,9 @@ import type { WorkspaceStatus } from "@wsp/protocol";
 import { RequestError } from "../src/protocol/client.js";
 import {
   resolveAdjacentThreadId,
-  resolveProjectStatusIndicator,
   searchSidebarThreadsByTitle,
   sortSettledThreadsForSidebar,
   sortThreadsForSidebar,
-  type ThreadStatusPill,
 } from "../src/sidebar/Sidebar.logic.js";
 import {
   compactTimeLabel,
@@ -19,7 +17,9 @@ import {
   defaultWorkspaceName,
   explainCreateRefusal,
   idleCountdownLabel,
-  pillFromIndicator,
+  dotClassForTone,
+  threadPill,
+  textClassForTone,
   reachNote,
 } from "../src/sidebar/workspaceRows.js";
 import { formatRelativeTimeLabel } from "../src/lib/timestampFormat.js";
@@ -63,14 +63,6 @@ describe("copied traversal and rollup", () => {
     expect(resolveAdjacentThreadId({ threadIds: ids, currentThreadId: "zz", direction: "next" })).toBeNull();
   });
 
-  it("the rollup puts a failure above work in motion and both above a completion", () => {
-    const working: ThreadStatusPill = { label: "Working", colorClass: "", dotClass: "", pulse: true };
-    const failed: ThreadStatusPill = { label: "Failed", colorClass: "", dotClass: "", pulse: false };
-    const completed: ThreadStatusPill = { label: "Completed", colorClass: "", dotClass: "", pulse: false };
-    expect(resolveProjectStatusIndicator([null, completed, working])?.label).toBe("Working");
-    expect(resolveProjectStatusIndicator([null, working, failed])?.label).toBe("Failed");
-    expect(resolveProjectStatusIndicator([null])).toBeNull();
-  });
 });
 
 const status = (over: Partial<WorkspaceStatus>): WorkspaceStatus => ({
@@ -109,11 +101,18 @@ describe("workspace row labels", () => {
     expect(costLabel({ phase: "napping", rateUsdPerHour: null, accruedUsd: null })).toBeNull();
   });
 
-  it("thread pills: working pulses, failed is red, settled rows carry no pill", () => {
-    expect(pillFromIndicator({ label: "Working", tone: "running", pulse: true })).toMatchObject({ label: "Working", pulse: true });
-    expect(pillFromIndicator({ label: "Failed", tone: "error", pulse: false })).toMatchObject({ label: "Failed" });
-    expect(pillFromIndicator({ label: "Completed", tone: "neutral", pulse: false })).toBeNull();
-    expect(pillFromIndicator(null)).toBeNull();
+  it("thread pills key on the session status, wear the adapter's word, and use tokens: only running is the success colour", () => {
+    expect(threadPill({ status: "running", indicator: { label: "Working", tone: "neutral", pulse: true } })).toMatchObject({ label: "Working", pulse: true, dotClass: expect.stringContaining("muted-foreground") });
+    expect(threadPill({ status: "failed", indicator: { label: "Ended", tone: "neutral", pulse: false } })).toMatchObject({ label: "Ended", dotClass: expect.stringContaining("muted-foreground") });
+    expect(threadPill({ status: "failed", indicator: { label: "Stopped short", tone: "neutral", pulse: false } })).toMatchObject({ label: "Stopped short" });
+    expect(threadPill({ status: "completed", indicator: { label: "Idle", tone: "neutral", pulse: false } })).toBeNull();
+    expect(threadPill({ status: "interrupted", indicator: { label: "Idle", tone: "neutral", pulse: false } })).toBeNull();
+    expect(threadPill({ status: "running", indicator: null })).toBeNull();
+    for (const cls of [dotClassForTone("running"), textClassForTone("running")]) expect(cls).toContain("success");
+    for (const cls of [dotClassForTone("paused"), dotClassForTone("neutral"), textClassForTone("paused"), textClassForTone("neutral")]) expect(cls).toContain("muted-foreground");
+    for (const cls of [dotClassForTone("running"), dotClassForTone("paused"), dotClassForTone("neutral"), textClassForTone("running"), textClassForTone("neutral")]) {
+      expect(cls).not.toMatch(/emerald|zinc|sky|red/);
+    }
   });
 
   it("relative time: t3code's label, compacted for the row", () => {

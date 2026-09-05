@@ -55,7 +55,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED } from "@wsp/protocol";
+import { ALREADY_APPLIED, sendRefusal, workspaceState } from "@wsp/protocol";
 import { realClock, type Clock } from "./clock.js";
 import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy, idleReason } from "./idle.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
@@ -181,6 +181,8 @@ interface LiveWorkspace {
   machine: Machine;
   /** The wake in flight, so a second caller joins it instead of resuming twice. */
   waking?: Promise<WorkspaceView>;
+  /** The nap in flight: a second nap joins it, a wake waits for it. */
+  napping?: Promise<WorkspaceView>;
 }
 
 export interface SessionHandle {
@@ -387,6 +389,11 @@ const GOLDENS = "goldens";
 const GOLDEN_RECIPES = "golden-recipes";
 const recipeKey = (name: string, version: number): string => `${name}@v${version}`;
 const TRANSCRIPTS = "transcripts";
+
+/** What the timeline shows as the last row of a turn the runtime ended, not the harness. */
+const PAUSED_REASON = "machine paused while the agent was working";
+const DELETED_REASON = "machine deleted while the agent was working";
+const UNANSWERING_REASON = "machine stopped answering while the agent was working";
 /** Mirrors @wsp/daemon's DEFAULT_TOKEN_PATH; the runtime cannot import the daemon package (it only runs inside guests). */
 const DAEMON_TOKEN_PATH = "/root/.wsp-daemon-token";
 /** A guest with no token file is asked again after this long (a daemon may be deployed later). */
@@ -540,7 +547,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const builders = new Map<string, LiveBuilder>();
   /** The prepare in flight per golden name; a second call for the same recipe joins it instead of running the stages twice on one machine. */
   const preparing = new Map<string, { hash: string | undefined; promise: Promise<GoldenBuilderView> }>();
-  const sessions = new Map<string, { view: SessionView; handle: SessionHandle }>();
+  const sessions = new Map<string, { view: SessionView; handle: SessionHandle; end: (reason: string) => void }>();
   const transcripts = new Map<string, SessionEvent[]>();
   // Puts are chained per workspace so the later snapshot always lands last,
   // whatever order the store finishes in.
@@ -797,7 +804,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           return fault === undefined || both === "" ? fault : `${fault} (${both})`;
         },
       },
-      { phase: record.phase, firstLife: record.firstLife },
+      { phase: record.phase === "pausing" ? "napping" : record.phase, firstLife: record.firstLife },
     );
     live.set(record.id, entry);
     return entry;
@@ -805,16 +812,61 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   const idleWindowOf = (r: WorkspaceRecord): number | null => (r.idleWindowMs === undefined ? defaultIdleWindowMs : r.idleWindowMs);
 
+  /** Every live session of a workspace ends here when its machine goes away under it; the harness's own end, if it ever comes, is dropped. */
+  const endSessions = (workspaceId: string, reason: string): void => {
+    for (const s of sessions.values()) if (s.view.workspaceId === workspaceId) s.end(reason);
+  };
+
+  // Pausing is persisted and pushed before the provider is asked, so a list
+  // fetched mid-pause never says running, and the sessions end while the
+  // machine can still be told to stop them.
   const napWith = async (id: string, reason?: string): Promise<WorkspaceView> => {
     const entry = await entryOf(id);
+    if (entry.napping) return entry.napping;
     if (entry.record.phase !== "running") return view(entry.record);
-    await entry.ws.nap();
+    entry.napping = (async () => {
+      try {
+        entry.record.phase = "pausing";
+        await persist(entry.record);
+        await emitStatus(entry, "napping");
+        try {
+          await entry.ws.nap();
+        } catch (e) {
+          entry.record.phase = entry.ws.currentPhase;
+          await persist(entry.record);
+          await emitStatus(entry, entry.machine.previewUrl ? "reachable" : "unsupported", e instanceof Error ? e.message : String(e));
+          throw e;
+        }
+        // The reason says the machine paused, so it is written once the provider has confirmed that.
+        endSessions(id, PAUSED_REASON);
+        entry.record.phase = "napping";
+        await persist(entry.record);
+        bus.emit({ type: "workspace.napped", workspaceId: id });
+        await emitStatus(entry, "napping", reason);
+        return view(entry.record);
+      } finally {
+        delete entry.napping;
+      }
+    })();
+    return entry.napping;
+  };
+
+  /** The provider paused the machine outside a nap (its idle timer, a console click): the record follows the fact, so a wake resumes it the normal way. */
+  const adoptPause = async (entry: LiveWorkspace): Promise<void> => {
+    if (entry.record.phase !== "running" || entry.napping || entry.waking) return;
+    entry.ws.notePaused();
     entry.record.phase = "napping";
     await persist(entry.record);
-    bus.emit({ type: "workspace.napped", workspaceId: id });
-    if (reason !== undefined) await emitStatus(entry, "napping", reason);
-    return view(entry.record);
+    endSessions(entry.record.id, PAUSED_REASON);
+    bus.emit({ type: "workspace.napped", workspaceId: entry.record.id });
+    await emitStatus(entry, "napping", "paused outside wsp");
   };
+  bus.on("workspace.status", e => {
+    if (e.type !== "workspace.status") return;
+    if (e.status.reach.state === "zombie") endSessions(e.status.id, UNANSWERING_REASON);
+    const entry = live.get(e.status.id);
+    if (entry !== undefined && e.status.phase === "running" && e.status.machineState === "paused") void adoptPause(entry);
+  });
 
   const idle = createIdlePolicy({
     windowOf: id => {
@@ -921,15 +973,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           if ((e as { kind?: string }).kind === "missing") return deadMachine(stored.machineId);
           throw e;
         });
+        // A record left at pausing died mid-pause: whether or not the provider got the call, a wake resumes it either way.
+        const phase = stored.phase === "pausing" ? "napping" : stored.phase;
         attach(
           {
             ...stored,
+            phase,
             size: stored.size ?? sizeBuilt(await shapeOf(machine), backend.pricing.defaultSize),
             ...(machine.streamUrl !== undefined ? { screen: { streamUrl: machine.streamUrl } } : {}),
           },
           machine,
         );
-        if (stored.phase === "running") idle.touch(stored.id);
+        if (phase === "running") idle.touch(stored.id);
       }
       for (const raw of await store.list(TRANSCRIPTS)) {
         const t = raw as TranscriptRecord;
@@ -1025,6 +1080,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async wake(id) {
       const entry = await entryOf(id);
       if (entry.waking) return entry.waking;
+      if (entry.napping) await entry.napping.catch(() => {});
+      // A wake nobody should need is the one sign the provider paused the machine on its own: one read settles it.
+      if (entry.record.phase === "running" && (await entry.machine.state().catch(() => "running")) === "paused") await adoptPause(entry);
       if (entry.record.phase === "running") return view(entry.record);
       entry.waking = (async () => {
         entry.record.phase = "waking";
@@ -1087,6 +1145,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async delete(id) {
       const entry = await entryOf(id);
+      endSessions(id, DELETED_REASON);
       await entry.machine.kill().catch((e: unknown) => {
         if ((e as { kind?: string }).kind !== "missing") throw e;
       });
@@ -1128,6 +1187,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const sessionsApi: Runtime["sessions"] = {
     async start(workspaceId, o) {
       const entry = await entryOf(workspaceId);
+      const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }));
+      if (refusal !== null) throw new Error(refusal);
       const harness = o.harness ?? "claude";
       const factory = adapters[harness];
       if (!factory) throw new Error(`no adapter registered for harness "${harness}"`);
@@ -1145,8 +1206,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       };
       const turnId = randomUUID();
       const threadId = threadOf(workspaceId, o.resume);
+      let ended = false;
 
       const forward = (event: AdapterEvent): void => {
+        if (ended) return;
         const sessionId = event.sessionId;
         switch (event.type) {
           case "session.start": {
@@ -1228,14 +1291,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         view: () => ({ ...sessionView }),
         interrupt: () => started.interrupt(),
       };
-      sessions.set(handleId, { view: sessionView, handle });
+      const end = (reason: string): void => {
+        if (ended || sessionView.status !== "running") return;
+        ended = true;
+        sessionView.status = "failed";
+        sessionView.endedAt = Date.now();
+        record({ type: "session.end", workspaceId, sessionId: sessionView.claudeSessionId ?? handleId, turnId, threadId, exitCode: null, sawResult: false, reason });
+        void started.interrupt().catch(() => {});
+      };
+      sessions.set(handleId, { view: sessionView, handle, end });
       started.finished
         .then(result => {
-          sessionView.status = result.status;
+          if (!ended) sessionView.status = result.status;
           sessionView.endedAt ??= Date.now();
         })
         .catch(() => {
-          sessionView.status = "failed";
+          if (!ended) sessionView.status = "failed";
           sessionView.endedAt ??= Date.now();
         });
       return handle;

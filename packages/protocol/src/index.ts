@@ -65,7 +65,8 @@ export type Capabilities = z.infer<typeof Capabilities>;
 
 // --- views -----------------------------------------------------------------
 
-export const WorkspacePhase = z.enum(["running", "napping", "waking"]);
+/** pausing: the runtime is stashing the vault and asking the provider to pause; a send is refused from here on. */
+export const WorkspacePhase = z.enum(["running", "pausing", "napping", "waking"]);
 export type WorkspacePhase = z.infer<typeof WorkspacePhase>;
 
 /** Backend vocabulary: a napping workspace's machine reads "paused" here.
@@ -226,6 +227,8 @@ export const SessionEndEvent = z.object({
   ...sessionScope,
   exitCode: z.number().nullable(),
   sawResult: z.boolean(),
+  /** Set when the runtime ended the session itself (a nap, a delete, a machine that stopped answering) rather than the harness exiting. */
+  reason: z.string().optional(),
 });
 
 /** The events sessions.history replays: what a chat transcript folds. */
@@ -767,3 +770,5 @@ export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;
  * after a save, stopped at the machine cap), so the person who asked reads why. Absent when nothing was stopped. */
 export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
+
+export { sendRefusal, workspaceState, workspaceWord, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";

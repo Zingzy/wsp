@@ -2,7 +2,7 @@
 // Workspaces and statuses into sidebar projects with status indicators.
 import { describe, expect, it } from "vitest";
 import type { MachineState, ReachState, SessionView, WorkspacePhase, WorkspaceStatus } from "@wsp/protocol";
-import { deriveSidebarProjects, threadIndicator, workspaceIndicator } from "../src/adapt/index.js";
+import { deriveSidebarProjects, threadIndicator, turnWait, workspaceIndicator } from "../src/adapt/index.js";
 import { LIVE_RUN_1, LIVE_RUN_1_RESTART, LIVE_WORKSPACE_1, LIVE_WORKSPACE_2, LIVE_WS } from "./fixtures/live-run-1.js";
 
 const status = (phase: WorkspacePhase, machineState: MachineState, reach: ReachState, id = "ws_a"): WorkspaceStatus => ({
@@ -14,15 +14,16 @@ describe("workspaceIndicator", () => {
   it.each<[WorkspacePhase, MachineState | null, ReachState | null, string, string, boolean]>([
     ["running", "running", "reachable", "Running", "running", false],
     ["running", null, null, "Running", "running", false],
-    ["waking", "starting", "unreachable", "Waking", "connecting", true],
+    ["pausing", "running", "napping", "Pausing", "paused", true],
+    ["waking", "starting", "unreachable", "Waking", "neutral", true],
     ["napping", "paused", "napping", "Paused", "paused", false],
-    ["running", "starting", "unreachable", "Starting", "connecting", true],
+    ["running", "starting", "unreachable", "Waking", "neutral", true],
     ["running", "paused", "napping", "Paused", "paused", false],
-    ["running", "running", "unreachable", "Unreachable", "error", false],
-    ["running", "running", "no-daemon", "Unreachable", "error", false],
-    ["running", "gone", "gone", "Gone", "error", false],
-    ["napping", "gone", "gone", "Gone", "error", false],
-    ["running", "running", "zombie", "Zombie", "error", false],
+    ["running", "running", "unreachable", "Unreachable", "neutral", false],
+    ["running", "running", "no-daemon", "Unreachable", "neutral", false],
+    ["running", "gone", "gone", "Gone", "neutral", false],
+    ["napping", "gone", "gone", "Gone", "neutral", false],
+    ["running", "running", "zombie", "Unreachable", "neutral", false],
     ["running", "running", "slow", "Running", "running", false],
   ])("phase %s, machine %s, reach %s -> %s", (phase, machineState, reach, label, tone, pulse) => {
     const s = machineState !== null && reach !== null ? status(phase, machineState, reach) : null;
@@ -31,10 +32,21 @@ describe("workspaceIndicator", () => {
 });
 
 describe("threadIndicator", () => {
-  it.each<[SessionView["status"], string | null]>([
-    ["running", "Working"], ["completed", "Completed"], ["failed", "Failed"], ["interrupted", null],
-  ])("%s -> %s", (st, label) => {
-    expect(threadIndicator({ status: st })?.label ?? null).toBe(label);
+  it.each<[SessionView["status"], string, boolean]>([
+    ["running", "Working", true], ["completed", "Idle", false], ["interrupted", "Idle", false], ["failed", "Ended", false],
+  ])("%s -> %s", (st, label, pulse) => {
+    expect(threadIndicator({ status: st })).toEqual({ label, tone: "neutral", pulse });
+  });
+});
+
+describe("turnWait", () => {
+  it("names what a running turn waits for on a machine that is not running, and offers the wake only where one applies", () => {
+    expect(turnWait("running")).toBeNull();
+    expect(turnWait("pausing")).toEqual({ label: "Waiting for the machine to wake", wake: true });
+    expect(turnWait("paused")).toEqual({ label: "Waiting for the machine to wake", wake: true });
+    expect(turnWait("waking")).toEqual({ label: "Waking the machine", wake: false });
+    expect(turnWait("unreachable")).toEqual({ label: "Waiting for the machine to answer", wake: false });
+    expect(turnWait("gone")).toEqual({ label: "The machine is gone", wake: false });
   });
 });
 
@@ -62,8 +74,8 @@ describe("deriveSidebarProjects", () => {
     ]);
     expect(projects[0]).toMatchObject({ projectKey: LIVE_WS, environmentPresence: "remote-only", groupedProjectCount: 1, allRemoteMembersAreDesktopLocal: false, machineState: "running", reach: "reachable" });
     expect(projects[0]?.threads).toEqual([
-      { id: "s1", workspaceId: LIVE_WS, title: "hello", status: "completed", startedAt: "2026-09-02T17:19:35.668Z", endedAt: "2026-09-02T17:19:37.768Z", indicator: { label: "Completed", tone: "neutral", pulse: false } },
-      { id: "s0", workspaceId: LIVE_WS, title: "59094224", status: "running", startedAt: null, endedAt: null, indicator: { label: "Working", tone: "running", pulse: true } },
+      { id: "s1", workspaceId: LIVE_WS, title: "hello", status: "completed", startedAt: "2026-09-02T17:19:35.668Z", endedAt: "2026-09-02T17:19:37.768Z", indicator: { label: "Idle", tone: "neutral", pulse: false } },
+      { id: "s0", workspaceId: LIVE_WS, title: "59094224", status: "running", startedAt: null, endedAt: null, indicator: { label: "Working", tone: "neutral", pulse: true } },
     ]);
   });
 

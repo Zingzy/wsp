@@ -238,9 +238,14 @@ describe("status.watch cost events", () => {
     await until(() => seen.length >= 1); // first poll baselines every workspace once
     expect(seen.length).toBe(1);
     await rt.workspaces.nap(ws.id);
-    await until(() => seen.length >= 2);
+    // The nap pushes pausing and napping itself; the poller re-emits napping once in its own shape, then stays quiet.
+    await until(() => seen.filter(s => s.phase === "napping").length >= 2);
+    const settled = seen.length;
+    await new Promise(r => setTimeout(r, 60));
     stop();
-    expect(seen.length).toBe(2);
+    expect(seen.length).toBe(settled);
+    const phases = seen.map(s => s.phase).filter((p, i, all) => i === 0 || all[i - 1] !== p);
+    expect(phases).toEqual(["running", "pausing", "napping"]);
     expect(seen.at(-1)).toMatchObject({ id: ws.id, phase: "napping", machineState: "paused" });
   });
 });

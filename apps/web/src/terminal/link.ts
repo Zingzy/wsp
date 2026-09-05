@@ -30,6 +30,8 @@ export interface PtyTabView {
   readonly ptyId: string;
   readonly title: string;
   readonly exited: boolean;
+  /** The daemon no longer holds this pty (the machine was replaced); exited is set with it. */
+  readonly lost: boolean;
 }
 
 export interface OpenOpts {
@@ -41,6 +43,7 @@ interface PtyState {
   ptyId: string;
   title: string;
   exited: boolean;
+  lost: boolean;
   chunks: string[];
   length: number;
   sinks: Set<TerminalSink>;
@@ -147,6 +150,7 @@ export class WorkspaceTerminals {
       ptyId,
       title: (opts.shell ?? "shell").split("/").pop() ?? "shell",
       exited: false,
+      lost: false,
       chunks: [],
       length: 0,
       sinks: new Set(),
@@ -157,7 +161,7 @@ export class WorkspaceTerminals {
     this.#activeId = ptyId;
     await this.#wire.request("pty.attach", { ptyId });
     this.#notifyTabs();
-    return { ptyId: p.ptyId, title: p.title, exited: p.exited };
+    return { ptyId: p.ptyId, title: p.title, exited: p.exited, lost: p.lost };
   }
 
   /** True once any pty was ever created; the tab auto-opens only before this. */
@@ -170,7 +174,7 @@ export class WorkspaceTerminals {
     const first = this.#order[0];
     if (first !== undefined) {
       const p = this.#ptys.get(first)!;
-      return Promise.resolve({ ptyId: p.ptyId, title: p.title, exited: p.exited });
+      return Promise.resolve({ ptyId: p.ptyId, title: p.title, exited: p.exited, lost: p.lost });
     }
     this.#opening ??= this.open().finally(() => {
       this.#opening = null;
@@ -276,6 +280,7 @@ export class WorkspaceTerminals {
         ptyId: entry.id,
         title: "shell",
         exited: false,
+        lost: false,
         chunks: [],
         length: 0,
         sinks: new Set(),
@@ -328,7 +333,8 @@ export class WorkspaceTerminals {
         if (gen !== this.#liveGen) return;
         if (!p.exited) {
           p.exited = true;
-          const note = "\r\n[terminal lost: could not re-attach]\r\n";
+          p.lost = true;
+          const note = "\r\n[This shell ended when the machine was replaced]\r\n";
           this.#mirror(p, note);
           for (const s of p.sinks) s.data(note);
           this.#notifyTabs();
@@ -341,7 +347,7 @@ export class WorkspaceTerminals {
   #notifyTabs(): void {
     this.#tabsView = this.#order.map(id => {
       const p = this.#ptys.get(id)!;
-      return { ptyId: p.ptyId, title: p.title, exited: p.exited };
+      return { ptyId: p.ptyId, title: p.title, exited: p.exited, lost: p.lost };
     });
     for (const fn of this.#tabsFns) fn();
   }
