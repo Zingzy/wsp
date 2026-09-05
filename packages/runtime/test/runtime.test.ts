@@ -623,6 +623,34 @@ describe("runtime port reach", () => {
 describe("runtime golden builders", () => {
   const recipe = { setup: "install", smoke: "true" };
 
+  it("an exec listener that throws is warned about once and never changes an exec's result: the prepare still completes", async () => {
+    const backend = stubBackend();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      let seen = 0;
+      const rt = createRuntime({
+        backend,
+        store: memoryStore(),
+        adapters: {},
+        goldenRecipe: {
+          ...recipe,
+          onExec: () => {
+            seen += 1;
+            throw new Error("ENOSPC: no space left on device, write");
+          },
+        },
+      });
+      const builder = await rt.golden.prepare({ name: "default" });
+      expect(builder.id).toBe(backend.machines[0]!.id);
+      expect(backend.machines[0]!.execLog.length).toBeGreaterThan(0);
+      expect(seen).toBe(backend.machines[0]!.execLog.length);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]![0]).toBe(`exec log for ${builder.id} failed, its execs go on unlogged: ENOSPC: no space left on device, write`);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("reap keeps a first-life builder left behind by an earlier process, kills one found paused, and keeps this process's own", async () => {
     const backend = stubBackend();
     const store = memoryStore();
@@ -1583,7 +1611,7 @@ describe("runtime golden import", () => {
     tools: [{ id: "tools/brew/jq", label: "jq", manager: "brew", cmd: "brew install jq" }],
     agents: [{ id: "agents/codex", name: "Codex", install: "codex-install", smoke: "codex --version" }],
   });
-  const dfOk = (m: unknown, cmd: string) => (cmd.startsWith("df -Pk") ? { exitCode: 0, stdout: `${2000 * 1024}\n`, stderr: "" } : cmd === "echo ok" ? { exitCode: 0, stdout: "ok\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+  const dfOk = (m: unknown, cmd: string) => (cmd.startsWith("df -Pk") ? { exitCode: 0, stdout: `${3000 * 1024}\n`, stderr: "" } : cmd === "echo ok" ? { exitCode: 0, stdout: "ok\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
 
   it("prepare runs the import stages on the wire, records the ledger on the builder, and seals with the builder's own smoke", async () => {
     const backend = stubBackend();
@@ -2335,7 +2363,7 @@ describe("runtime golden import", () => {
 });
 
 describe("runtime golden update and the post-seal grace", () => {
-  const dfOk = (m: unknown, cmd: string) => (cmd.startsWith("df -Pk") ? { exitCode: 0, stdout: `${2000 * 1024}\n`, stderr: "" } : cmd === "echo ok" ? { exitCode: 0, stdout: "ok\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+  const dfOk = (m: unknown, cmd: string) => (cmd.startsWith("df -Pk") ? { exitCode: 0, stdout: `${3000 * 1024}\n`, stderr: "" } : cmd === "echo ok" ? { exitCode: 0, stdout: "ok\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
   const snapshot = (recipeHash: string, dests: string[]): RecipeDigest => ({ ticks: dests.map(d => ({ id: `shell/${d}` })), files: dests.map(d => ({ id: `shell/${d}`, dest: d, path: `~/${d}`, digest: `d-${recipeHash}` })) });
   const importOf = (recipeHash = "h1", agents: GoldenImport["agents"] = [{ id: "agents/codex", name: "Codex", install: "codex-install", smoke: "codex --version" }]): GoldenImport => ({
     recipeHash,

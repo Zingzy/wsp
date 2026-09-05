@@ -208,6 +208,8 @@ export interface ApplyImportOptions {
 
 /** Extraction needs the archive and its contents at once, plus what the agents install after. */
 const UPLOAD_HEADROOM = 256 * MIB;
+/** The Claude installer peaks near 410 MB (measured 2026-09-02); an agent does not start under this. */
+const AGENTS_DISK_FLOOR = 800 * MIB;
 const AGENT_TIMEOUT_S = 900;
 
 /** Runs the import stages and the harness on a builder, skipping what the
@@ -306,6 +308,11 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
         const t0 = Date.now();
         if (node?.failed !== undefined && agent.node !== undefined && agent.node > node.haveMajor) {
           result.agents.push({ id: agent.id, name: agent.name, outcome: "failed", note: node.failed, ms: 0 });
+          continue;
+        }
+        const free = await freeBytes(machine);
+        if (free.kind === "free" && free.bytes < AGENTS_DISK_FLOOR) {
+          result.agents.push({ id: agent.id, name: agent.name, outcome: "failed", note: `${fmtBytes(free.bytes)} free, keeping ${fmtBytes(AGENTS_DISK_FLOOR)} free`, ms: 0 });
           continue;
         }
         stage("installing-harness", `${agent.name} (${i + 1}/${imp.agents.length})`);

@@ -114,6 +114,15 @@ describe("run log", () => {
     expect(text.split("\n")[0]).toMatch(new RegExp(`^\\S+ run ${ids[2]} wsp init`));
   });
 
+  it("a path that cannot be written never throws: the first failure is kept and later writes are skipped", () => {
+    const path = join(dir(), "missing", "init.log");
+    const log = openRunLog(path);
+    expect(log.failed).toMatch(/ENOENT/);
+    expect(() => log.stage("creating")).not.toThrow();
+    expect(() => log.exec({ machineId: "m1", cmd: "true", exitCode: 0, stdout: "", stderr: "", ms: 1 })).not.toThrow();
+    expect(log.failed).toMatch(/ENOENT/);
+  });
+
   it("a file already there from an older run is appended to, never truncated under five runs", () => {
     const path = join(dir(), "init.log");
     writeFileSync(path, "2026-09-01T00:00:00.000Z run aaaaaa wsp init (pid 1)\n2026-09-01T00:00:01.000Z stage creating\n");

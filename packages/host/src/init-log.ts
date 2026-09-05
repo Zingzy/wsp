@@ -20,6 +20,8 @@ const SECRET_ASSIGN = /\b([A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)[A-Za-z0-9_]
 export interface RunLog {
   readonly path: string;
   readonly id: string;
+  /** Why the file could not be written, once a write failed; nothing is written after that. */
+  readonly failed: string | undefined;
   /** A value that must never appear in the log, wherever it turns up. */
   hide(value: string): void;
   note(text: string): void;
@@ -57,14 +59,27 @@ function rotate(path: string): void {
 export function openRunLog(path: string, now: () => Date = () => new Date()): RunLog {
   const id = randomBytes(3).toString("hex");
   const hidden: string[] = [];
+  let failed: string | undefined;
   const write = (head: string, body: readonly string[] = []): void => {
-    appendFileSync(path, `${[`${now().toISOString()} ${redact(head, hidden)}`, ...body.map(l => `  ${redact(l, hidden)}`)].join("\n")}\n`);
+    if (failed !== undefined) return;
+    try {
+      appendFileSync(path, `${[`${now().toISOString()} ${redact(head, hidden)}`, ...body.map(l => `  ${redact(l, hidden)}`)].join("\n")}\n`);
+    } catch (e) {
+      failed = e instanceof Error ? e.message : String(e);
+    }
   };
-  rotate(path);
+  try {
+    rotate(path);
+  } catch (e) {
+    failed = e instanceof Error ? e.message : String(e);
+  }
   write(`run ${id} wsp init (pid ${process.pid})`);
   return {
     path,
     id,
+    get failed() {
+      return failed;
+    },
     hide: value => void hidden.push(value),
     note: text => write(`note ${text}`),
     stage: (stage, detail) => write(detail !== undefined ? `stage ${stage}: ${detail}` : `stage ${stage}`),

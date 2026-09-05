@@ -382,7 +382,7 @@ describe("golden import stages", () => {
   }
 
   /** The fake answers exec by substring match, first hit wins; `free` is what df reports. */
-  function backendFor(answers: [string, ExecResult | (() => ExecResult)][] = [], free: string | (() => string) = mb(2000)) {
+  function backendFor(answers: [string, ExecResult | (() => ExecResult)][] = [], free: string | (() => string) = mb(3000)) {
     const cmds: string[] = [];
     const puts: Buffer[] = [];
     const rb = recordingBackend({}, {
@@ -590,6 +590,21 @@ describe("golden import stages", () => {
     expect(only.killed).toEqual(["m1"]);
   });
 
+  it("an agent does not start under the agents' floor: it is recorded failed with the reading, which ends the build as any missing agent does", async () => {
+    let agentsStarted = false;
+    const { backend, cmds, killed, fetch } = backendFor([["claude-install", () => ((agentsStarted = true), ok)]], () => mb(agentsStarted ? 500 : 3000));
+    const results: ImportResult[] = [];
+    const { stages, onStage } = stageRecorder();
+    await expect(prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ onResult: r => void results.push(r) }) })).rejects.toThrow("an agent did not install, so nothing is sealed:\nCodex: 500 MB free, keeping 800 MB free");
+    expect(results[0]!.agents.map(a => [a.id, a.outcome, a.note])).toEqual([
+      ["agents/claude", "installed", undefined],
+      ["agents/codex", "failed", "500 MB free, keeping 800 MB free"],
+    ]);
+    expect(cmds.some(c => c.includes("codex-install"))).toBe(false);
+    expect(killed).toEqual(["m1"]);
+    expect(stages.at(-1)).toBe("failed:an agent did not install, so nothing is sealed:\nCodex: 500 MB free, keeping 800 MB free");
+  });
+
   it("when Homebrew itself fails, every brew formula is skipped rather than tried", async () => {
     const { backend, cmds, fetch } = backendFor([["brew-bootstrap", { exitCode: 1, stdout: "", stderr: "git: not found" }]]);
     const { stages, onStage } = stageRecorder();
@@ -653,7 +668,7 @@ describe("golden import stages", () => {
     let cleaned = false;
     const { backend, cmds, fetch } = backendFor(
       [["brew cleanup -s --prune=all", () => ((cleaned = true), ok)]],
-      () => mb(cleaned ? 3000 : 2000),
+      () => mb(cleaned ? 4000 : 3000),
     );
     const { stages, onStage } = stageRecorder();
     await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf() });
@@ -664,7 +679,7 @@ describe("golden import stages", () => {
     expect(autoremove).not.toContain("HOMEBREW_NO_INSTALL_CLEANUP");
     expect(at("bun@1.4.0")).toBeLessThan(at("brew autoremove"));
     expect(at("brew autoremove")).toBeLessThan(at("brew cleanup -s --prune=all"));
-    expect(at("brew cleanup -s --prune=all")).toBeLessThan(cmds.indexOf("true"));
+    expect(at("brew cleanup -s --prune=all")).toBeLessThan(cmds.indexOf("echo ok"));
     expect(stages).toContain("installing-tools:3 installed; Homebrew cleanup freed 1000 MB");
     const sweep = cmds.indexOf("rm -f /tmp/wsp-vault-*.tgz");
     expect(sweep).toBeGreaterThan(at("tar xzf"));
@@ -676,14 +691,15 @@ describe("golden import stages", () => {
     expect(rec.stages).toContain("installing-tools:3 installed; Homebrew cleanup failed (Error: Permission denied @ apply2files)");
   });
 
-  it("stops installing tools when the disk drops under the floor that keeps the machine serving", async () => {
+  it("stops installing tools when the disk drops under the tools floor", async () => {
     let dfCalls = 0;
-    const { backend, cmds, fetch } = backendFor([], () => mb(++dfCalls <= 2 ? 2000 : 500));
+    // The upload, the two agents and Homebrew read a roomy disk; the first formula reads it low.
+    const { backend, cmds, fetch } = backendFor([], () => mb(++dfCalls <= 4 ? 3000 : 500));
     const { stages, onStage } = stageRecorder();
     await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf() });
     expect(cmds.some(c => c.includes("brew-bootstrap"))).toBe(true);
     expect(cmds.some(c => c.includes("brew install gh"))).toBe(false);
-    expect(stages).toContain("installing-tools:1 installed, 2 skipped (500 MB free, keeping 800 MB free)");
+    expect(stages).toContain("installing-tools:1 installed, 2 skipped (500 MB free, keeping 2048 MB free)");
     // The floor stops installs, not the housekeeping that gives the disk back.
     expect(cmds.some(c => c.includes("brew cleanup -s --prune=all"))).toBe(true);
   });
@@ -696,7 +712,7 @@ describe("golden import stages", () => {
     expect(killed).toEqual(["m1"]);
     expect(stages.at(-1)).toMatch(/^failed:your files need 1\.2 KB packed and 4\.0 KB unpacked, plus 256 MB of headroom, but the machine has 100 MB free/);
     // The check reads the archive, not the recipe's estimate: a small tar of a large estimate still fits.
-    const roomy = backendFor([], mb(2000));
+    const roomy = backendFor([], mb(3000));
     await expect(prepareBuilder({ backend: roomy.backend, setup: "true", fetch: roomy.fetch, import: importOf({ files: { ...importOf().files!, bytes: 10 * 1024 * 1024 * 1024 } }) })).resolves.toBeDefined();
   });
 
@@ -705,7 +721,7 @@ describe("golden import stages", () => {
     const { stages, onStage } = stageRecorder();
     const builder = await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf() });
     expect(stages).toContain("uploading-files:free disk unknown (df failed: df: /root: No such file or directory); uploading 1.2 KB anyway");
-    expect(stages.filter(s => s.startsWith("installing-tools:free disk unknown"))).toEqual(["installing-tools:free disk unknown (df failed: df: /root: No such file or directory); installing without the 800 MB floor"]);
+    expect(stages.filter(s => s.startsWith("installing-tools:free disk unknown"))).toEqual(["installing-tools:free disk unknown (df failed: df: /root: No such file or directory); installing without the 2048 MB floor"]);
     expect(puts).toHaveLength(1);
     expect(cmds.filter(c => c.includes("brew install gh") || c.includes("brew-bootstrap") || c.includes("bun@1.4.0"))).toHaveLength(3);
     expect(builder.import?.applied).toContain("installing-harness");
@@ -820,7 +836,7 @@ describe("golden import stages", () => {
   });
 
   it("a volatile re-import that fails on attach is reported on the stage and never fails the attach: the ledger stands and nothing else runs", async () => {
-    let free = mb(2000);
+    let free = mb(3000);
     const { backend, cmds, puts, fetch } = backendFor([], () => free);
     const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf() });
     const before = { cmds: cmds.length, puts: puts.length };

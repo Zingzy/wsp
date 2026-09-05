@@ -1522,8 +1522,18 @@ describe("wsp init, flags and no terminal", () => {
     expect(out).toContain(`The run log is ${logPath}`);
     const runLog = readFileSync(logPath, "utf8");
     expect(runLog).toContain("  ! curl: (6) Could not resolve host");
-    expect(runLog).toMatch(/ note failed: no agent installed, so there is nothing to seal:\n/);
-    expect(runLog).toMatch(/ stage failed: no agent installed/);
+    expect(runLog).toMatch(/ note failed: an agent did not install, so nothing is sealed:\n/);
+    expect(runLog).toMatch(/ stage failed: an agent did not install/);
+  });
+
+  it("a run log that cannot be written stops nothing: the hand-off says so instead of naming it", async () => {
+    const f = fake({ yes: true, tty: false });
+    mkdirSync(join(dirname(f.opts.statePath), "init.log"));
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(0);
+    expect(f.hosts).toBe(1);
+    expect(f.text()).toMatch(/The run log .*init\.log could not be written \(EISDIR/);
+    expect(f.text()).not.toContain("The run log is");
   });
 
   it("a Keychain value never reaches the run log, whatever the machine prints it in", async () => {

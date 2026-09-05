@@ -27,8 +27,8 @@ type Stage = (stage: GoldenStage, detail?: string) => void;
 
 export const FREE_KB_CMD = "df -Pk /root | awk 'NR==2{print $4}'";
 export const MIB = 1024 * 1024;
-/** The Claude installer peaks near 410 MB and every other agent adds to it; tools stop before eating into it. */
-export const TOOLS_DISK_FLOOR = 800 * MIB;
+/** One unpack peak filled the disk from 1.6 GB free (measured 2026-09-05), so the loop stops above that. */
+export const TOOLS_DISK_FLOOR = 2048 * MIB;
 export const TOOL_TIMEOUT_S = 600;
 /** How long the guard gives the TERM, then the KILL, to land. */
 const KILL_GRACE_S = 10;
@@ -150,7 +150,7 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
       dfWarned = true;
       stage("installing-tools", `free disk unknown (${free.reason}); installing without the ${fmtBytes(TOOLS_DISK_FLOOR)} floor`);
     } else if (free.kind === "free" && free.bytes < TOOLS_DISK_FLOOR) {
-      floor = `${fmtBytes(free.bytes)} free, keeping ${fmtBytes(TOOLS_DISK_FLOOR)} for the agents`;
+      floor = `${fmtBytes(free.bytes)} free, keeping ${fmtBytes(TOOLS_DISK_FLOOR)} free`;
       out.tools.push({ id: tool.id, label: tool.label, outcome: "skipped", note: floor });
       continue;
     }

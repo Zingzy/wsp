@@ -752,18 +752,29 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     };
     return run(b).finally(() => mine.forEach(id => inflight.delete(id)));
   };
-  /** The machine with its exec reported to the recipe's listener; every other member is the provider's own, bound to it. */
+  /** The machine with its exec reported to the recipe's listener; every other member is the provider's own, bound to it.
+   * A listener that throws is warned about once and never changes an exec's result: the log records the run, it cannot fail it. */
   const observed = (machine: Machine): Machine => {
     const onExec = opts.goldenRecipe?.onExec;
     if (onExec === undefined) return machine;
+    let unheard = false;
+    const report = (exec: GoldenExec): void => {
+      try {
+        onExec(exec);
+      } catch (e) {
+        if (unheard) return;
+        unheard = true;
+        console.warn(`exec log for ${machine.id} failed, its execs go on unlogged: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    };
     const exec = async (cmd: string, o?: { timeoutMs?: number }): Promise<ExecResult> => {
       const t0 = Date.now();
       try {
         const res = await machine.exec(cmd, o);
-        onExec({ machineId: machine.id, cmd, ms: Date.now() - t0, ...res });
+        report({ machineId: machine.id, cmd, ms: Date.now() - t0, ...res });
         return res;
       } catch (e) {
-        onExec({ machineId: machine.id, cmd, ms: Date.now() - t0, error: e instanceof Error ? e.message : String(e) });
+        report({ machineId: machine.id, cmd, ms: Date.now() - t0, error: e instanceof Error ? e.message : String(e) });
         throw e;
       }
     };

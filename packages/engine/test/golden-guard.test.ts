@@ -53,19 +53,18 @@ describe("guarded", () => {
     expect(r).toEqual({ code: 3, stdout: "out\n", stderr: "err\n" });
   });
 
-  it("a script that outlives its timeout is killed with its children, the output so far is kept, and the exit is 124", async () => {
+  it("a script that outlives its timeout is ended by the TERM with its children, the output so far is kept, and the exit is 124", async () => {
     const dir = shimDir();
     const pids = join(dir, "pids");
-    // The tool records itself and a child it waits on, as brew waits on curl or tar.
-    const tool = `echo "$$" > ${pids}; sleep 30 & echo "$!" >> ${pids}; echo started; wait`;
-    const t0 = Date.now();
+    const signal = join(dir, "signal");
+    // The tool records itself and a child it waits on, as brew waits on curl or tar, and says which signal ended it.
+    const tool = `trap 'echo term > ${signal}; exit 143' TERM; echo "$$" > ${pids}; sleep 30 & echo "$!" >> ${pids}; echo started; wait`;
     const r = await bash(guarded(tool, 1), dir);
-    const took = Date.now() - t0;
     expect(r.code).toBe(124);
     expect(r.stdout).toBe("started\n");
     expect(r.stderr).toBe("");
-    // The timeout, one poll, and the TERM's grace at most: never the KILL grace on a tool that dies on TERM.
-    expect(took).toBeLessThan(8_000);
+    // The TERM was enough: the trap ran, so the KILL never had to.
+    expect(readFileSync(signal, "utf8")).toBe("term\n");
     const [self, child] = readFileSync(pids, "utf8").trim().split("\n").map(Number);
     expect(alive(self!)).toBe(false);
     expect(alive(child!)).toBe(false);
