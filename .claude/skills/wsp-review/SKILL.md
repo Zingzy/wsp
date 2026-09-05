@@ -42,7 +42,7 @@ Review wsp changes against the laws this project has already paid for. Generic c
 ## Design laws (web)
 
 - The approved mock is law for layout/feel (prototype/design-direction branch of the tracker). Where the mock is silent, the ticket wins; conflicts get a coordinator ruling, not silent invention.
-- Color law: green = running, ONLY; orange = spend/confirm, ONLY; everything else zinc. Terminal pane darker than chrome (content-well inversion) stays.
+- Color law: green = running, ONLY; orange = spend/confirm, and the middle weight tier (disk 65 to 75 percent in the app and the wizard, sizes 500 MB to 1 GB in the wizard), ONLY; yellow and red exist only as the tiers beside it; everything else zinc. Terminal pane darker than chrome (content-well inversion) stays.
 - Tokens come from tokens.css; no literal colors in components.
 - Phase vocab: code says `napping` (protocol), UI may render it as paused/hollow.
 
