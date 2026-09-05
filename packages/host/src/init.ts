@@ -897,7 +897,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     // Nobody is here to click macOS's consent dialog: a login the Keychain holds signs in on the machine
     // unless a saved answer says copy, which is the person's own and keeps the recipe hash it was saved with.
     const defaulted = manifest.entries.filter(e => e.rung === "logins" && e.choice === undefined && answers.choices.get(e.id) === "copy").map(e => ({ ...e, choice: "copy" as const }));
-    for (const s of keychainLogins(defaulted, opts.platform)) {
+    for (const s of keychainLogins(defaulted, opts.platform, opts.home)) {
       answers.choices.set(s.id, "machine");
       answers.ticks.delete(s.id);
     }
@@ -1017,14 +1017,14 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   // Keychain consent is asked here, before anything boots and after every road that cancels the
   // run, so a refusal costs no machine: the row turns into a sign-in on the machine and the pack
   // finds no value for it.
-  const wanted = keychainLogins(bring, opts.platform);
+  const wanted = keychainLogins(bring, opts.platform, opts.home);
   // Off a terminal the spinner draws nothing, and only a saved copy answer gets here; a scripted run would otherwise sit on macOS's dialog with no word why.
-  if (!io.isTTY && wanted.length > 0) log.step(`Reading ${wanted.map(s => s.service).join(", ")} from your Keychain, as the saved recipe answered copy; macOS may ask you to allow it.`, out);
+  if (!io.isTTY && wanted.length > 0) log.step(`Reading ${[...new Set(wanted.map(s => s.service))].join(", ")} from your Keychain, as the saved recipe answered copy; macOS may ask you to allow it.`, out);
   const reading = spin(io.output, "Reading your Keychain logins", io.isTTY && wanted.length > 0);
   const read = await readSecrets(wanted, opts.secrets);
   reading.stop();
-  for (const [service, value] of read.values) {
-    secrets.set(service, value);
+  for (const [key, value] of read.values) {
+    secrets.set(key, value);
     runLog.hide(value);
   }
   if (read.refused.length > 0) {

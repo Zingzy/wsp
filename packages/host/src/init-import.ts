@@ -30,6 +30,7 @@ import {
   type PlannedFile,
   type PlannedSecret,
   type SkippedPath,
+  secretKey,
 } from "@wsp/engine";
 import { CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, tarPackCommand } from "./doctor.js";
 
@@ -85,8 +86,8 @@ function rcIdentities(home: string): Set<string> {
 }
 
 export interface SecretReader {
-  /** The secret stored under a Keychain service; rejects when the item is missing or the person refuses the consent dialog. */
-  read(service: string): Promise<string>;
+  /** The secret stored under a Keychain service, filed under the account when one is given; rejects when the item is missing or the person refuses the consent dialog. */
+  read(service: string, account?: string): Promise<string>;
 }
 
 /** go-keyring, the library gh stores through, writes every macOS Keychain value as this prefix plus the base64 of
@@ -94,12 +95,12 @@ export interface SecretReader {
 const GO_KEYRING_PREFIX = "go-keyring-base64:";
 
 /** macOS's own consent dialog stands between this call and the secret; nothing is cached or logged. */
-export function keychainReader(run: (file: string, args: string[]) => Promise<{ stdout: string }> = execFileAsync): SecretReader & { command(service: string): { file: string; args: string[] } } {
-  const command = (service: string) => ({ file: "security", args: ["find-generic-password", "-s", service, "-w"] });
+export function keychainReader(run: (file: string, args: string[]) => Promise<{ stdout: string }> = execFileAsync): SecretReader & { command(service: string, account?: string): { file: string; args: string[] } } {
+  const command = (service: string, account?: string) => ({ file: "security", args: ["find-generic-password", "-s", service, ...(account === undefined ? [] : ["-a", account]), "-w"] });
   return {
     command,
-    async read(service) {
-      const { file, args } = command(service);
+    async read(service, account) {
+      const { file, args } = command(service, account);
       const { stdout } = await run(file, args);
       const value = stdout.replace(/\n$/, "");
       return value.startsWith(GO_KEYRING_PREFIX) ? Buffer.from(value.slice(GO_KEYRING_PREFIX.length), "base64").toString("utf8") : value;
@@ -117,25 +118,25 @@ function secretFailure(e: unknown): string {
 }
 
 export interface ReadSecrets {
-  /** Secret by Keychain service, for the pack. */
+  /** Secret by its key (see secretKey), for the pack. */
   values: Map<string, string>;
-  /** Logins whose read failed or was refused, with the reason security gave. */
+  /** Logins whose read failed or was refused, with the reason security gave, after the account when the item is per user. */
   refused: { id: string; service: string; reason: string }[];
 }
 
-/** The Keychain logins the ticked rows would copy, in plan order. Runs before
- * anything boots so a refused consent dialog never costs a machine. */
-export function keychainLogins(picked: readonly ManifestEntry[], platform: "darwin" | "linux"): PlannedSecret[] {
-  return planFiles(picked.map(e => ({ ...e, bring: true })), { home: "/", stat: () => undefined, platform }).secrets;
+/** The Keychain items the ticked rows would copy, in plan order, one per account where the tool files them so.
+ * Runs before anything boots so a refused consent dialog never costs a machine. */
+export function keychainLogins(picked: readonly ManifestEntry[], platform: "darwin" | "linux", home: string): PlannedSecret[] {
+  return planFiles(picked.map(e => ({ ...e, bring: true })), { home, stat: () => undefined, read: readSmall, platform }).secrets;
 }
 
 export async function readSecrets(wanted: readonly PlannedSecret[], reader: SecretReader): Promise<ReadSecrets> {
   const out: ReadSecrets = { values: new Map(), refused: [] };
   for (const s of wanted) {
     try {
-      out.values.set(s.service, await reader.read(s.service));
+      out.values.set(secretKey(s), await reader.read(s.service, s.account));
     } catch (e) {
-      out.refused.push({ id: s.id, service: s.service, reason: secretFailure(e) });
+      out.refused.push({ id: s.id, service: s.service, reason: s.account === undefined ? secretFailure(e) : `${s.account}: ${secretFailure(e)}` });
     }
   }
   return out;
@@ -180,7 +181,7 @@ function parentModes(files: readonly PlannedFile[], home: string): Map<string, n
 }
 
 export interface PackOptions {
-  /** Secrets already read from the Keychain, by service; a planned secret with no value is left out with a note. */
+  /** Secrets already read from the Keychain, by key (see secretKey); a planned secret with no value is left out with a note. */
   secrets: ReadonlyMap<string, string>;
   /** This computer's home, links resolved; a link inside a copied directory must resolve under it. */
   home: string;
@@ -199,7 +200,7 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
   const skipped: SkippedPath[] = [];
   try {
     // A login whose Keychain item was not read was changed to a sign-in on the machine: none of its files travel.
-    const refused = new Set(plan.secrets.filter(s => !opts.secrets.has(s.service)).map(s => s.id));
+    const refused = new Set(plan.secrets.filter(s => !opts.secrets.has(secretKey(s))).map(s => s.id));
     const files = plan.files.filter(f => {
       if (!refused.has(f.id)) return true;
       skipped.push({ id: f.id, path: `~/${relative(opts.home, f.source)}`, note: "not read from the Keychain; sign in on the machine" });
@@ -265,11 +266,9 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
     walk(stage);
     cut.sort((a, b) => (a.path < b.path ? -1 : 1));
     for (const s of plan.secrets) {
-      const secret = opts.secrets.get(s.service);
-      if (secret === undefined) {
-        skipped.push({ id: s.id, path: `Keychain: ${s.service}`, note: "not read from the Keychain; sign in on the machine" });
-        continue;
-      }
+      const secret = opts.secrets.get(secretKey(s));
+      if (secret === undefined) skipped.push({ id: s.id, path: `Keychain: ${secretKey(s)}`, note: "not read from the Keychain; sign in on the machine" });
+      if (secret === undefined || refused.has(s.id)) continue;
       const target = join(stage, s.dest);
       mkdirSync(dirname(target), { recursive: true });
       const existing = existsSync(target) ? readFileSync(target, "utf8") : undefined;
@@ -293,7 +292,7 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
 
 export interface ImportOptions {
   home: string;
-  /** Keychain secrets already read, by service (see readSecrets). */
+  /** Keychain secrets already read, by key (see readSecrets). */
   secrets: ReadonlyMap<string, string>;
   platform: "darwin" | "linux";
   /** Every row of the manifest with its tick, so the MCP stage knows which servers stay and which come out; without it no MCP plan is made. */
@@ -405,6 +404,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
   const plan = planFiles(bring, {
     home,
     stat: statOf,
+    read: readSmall,
     platform: opts.platform,
     rewrites: [[".claude/", `${CLAUDE_REL}/`], [".claude.json", `${CLAUDE_REL}/.claude.json`]],
   });
@@ -415,7 +415,8 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
   const mcp = opts.rows !== undefined ? mcpPlanFor(opts.rows, { home, guestHome: GUEST_HOME, agents: MCP_AGENTS, binDirs: MCP_BIN_DIRS }) : undefined;
   const label = (id: string) => bring.find(e => e.id === id)?.label ?? id;
   const anyFiles = bring.some(e => e.bring && e.rung !== "tools" && e.paths.length > 0 && (e.rung !== "logins" || e.choice === "copy"));
-  const count = plan.files.length + plan.secrets.length;
+  // A login's Keychain items count once, however many accounts they are read for.
+  const count = plan.files.length + new Set(plan.secrets.map(s => `${s.id} ${s.service}`)).size;
   const managerHomes = bring.filter(e => e.manager !== undefined).flatMap(e => e.paths).filter(p => p.startsWith("~/")).map(p => p.slice(2));
   const tilde = (f: PlannedFile): string => `~/${relative(home, f.source)}`;
   // A login whose value comes from the Keychain is one unit with its file: a re-login is the same golden with a
@@ -426,14 +427,14 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
   // The values are read after the earlier-builder check, so they are digested when the recipe is read, not here.
   const secretDigests = () =>
     plan.secrets.flatMap(s => {
-      const value = opts.secrets.get(s.service);
-      return value === undefined ? [] : [{ id: s.id, path: `Keychain: ${s.service}`, dest: s.dest, digest: createHash("sha256").update(value).digest("hex"), volatile: true }];
+      const value = opts.secrets.get(secretKey(s));
+      return value === undefined ? [] : [{ id: s.id, path: `Keychain: ${secretKey(s)}`, dest: s.dest, digest: createHash("sha256").update(value).digest("hex"), volatile: true }];
     });
   const hash = recipeHash(recipeDigest(bring, digested));
   const volatileFiles = files.filter(f => f.volatile);
   const volatile =
     volatileFiles.length > 0 || plan.secrets.length > 0
-      ? { paths: [...volatileFiles.map(tilde), ...plan.secrets.map(s => `Keychain: ${s.service}`)], pack: () => packPlan({ ...plan, files: volatileFiles }, { secrets: opts.secrets, home, managerHomes }) }
+      ? { paths: [...volatileFiles.map(tilde), ...plan.secrets.map(s => `Keychain: ${secretKey(s)}`)], pack: () => packPlan({ ...plan, files: volatileFiles }, { secrets: opts.secrets, home, managerHomes }) }
       : undefined;
   return {
     recipeHash: hash,

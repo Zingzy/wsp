@@ -66,8 +66,15 @@ export interface PlannedFile {
 export interface PlannedSecret {
   id: string;
   service: string;
+  /** The account the item is filed under, for a tool that keeps one Keychain item per signed-in user. */
+  account?: string;
   dest: string;
   place: (secret: string, existing: string | undefined) => string;
+}
+
+/** The name a Keychain value is kept and reported under: the service, with the account when the item is per user. */
+export function secretKey(s: { service: string; account?: string }): string {
+  return s.account === undefined ? s.service : `${s.service} (${s.account})`;
 }
 
 export interface SkippedPath {
@@ -93,6 +100,8 @@ export interface PlanFilesOptions {
   platform: "darwin" | "linux";
   /** Guest-side prefix rewrites tried before the built-in macOS ones (a config dir the guest keeps elsewhere). */
   rewrites?: readonly [string, string][];
+  /** A small laptop file's text, for a login whose Keychain items are filed per account: the tool's own file names them. */
+  read?: (abs: string) => string | undefined;
 }
 
 const ticked = (e: RecipeEntry): boolean => e.bring === true;
@@ -135,47 +144,89 @@ export function neverCopied(e: RecipeEntry, rel: string, dir: boolean | undefine
 
 const under = (home: string, abs: string): boolean => abs === home || abs.startsWith(`${home}/`);
 
-/** The token goes under one host block and its users, and nowhere else; other
- * hosts in the file keep their own lines. A file without the host gets the block appended. */
-export function placeGhToken(host: string, token: string, existing: string | undefined): string {
-  const block = `${host}:\n    oauth_token: ${token}\n    git_protocol: https\n`;
+/** The accounts gh's hosts.yml lists under a host, in file order, and the one it marks active. */
+export function ghAccounts(hostsYml: string, host: string): { users: string[]; active?: string } {
+  const users: string[] = [];
+  let active: string | undefined;
+  let inHost = false;
+  let inUsers = false;
+  for (const line of hostsYml.split("\n")) {
+    const indent = line.length - line.trimStart().length;
+    const t = line.trim();
+    if (indent === 0 && t !== "") {
+      inHost = t === `${host}:`;
+      inUsers = false;
+    } else if (!inHost) {
+      continue;
+    } else if (indent === 4) {
+      inUsers = t === "users:";
+      const user = /^user:\s*(\S+)$/.exec(t);
+      if (user !== null) active = user[1]!;
+    } else if (indent === 8 && inUsers && t.endsWith(":")) {
+      users.push(t.slice(0, -1));
+    }
+  }
+  return { users, ...(active !== undefined ? { active } : {}) };
+}
+
+/** An account's token goes under its own users block, and under the host too when
+ * the file marks that account active; with no account the host line alone is
+ * written. Other hosts and other users keep their lines. A file without the host
+ * gets the block appended. */
+export function placeGhToken(host: string, token: string, existing: string | undefined, account?: string): string {
+  const own = account === undefined ? "" : `    users:\n        ${account}:\n            oauth_token: ${token}\n    user: ${account}\n`;
+  const block = `${host}:\n    oauth_token: ${token}\n    git_protocol: https\n${own}`;
   if (existing === undefined) return block;
+  const atHost = account === undefined || ghAccounts(existing, host).active === account;
   const out: string[] = [];
   let inHost = false;
   let inUsers = false;
+  let inAccount = false;
   let seen = false;
   for (const line of existing.split("\n")) {
     const indent = line.length - line.trimStart().length;
-    const key = line.trim().endsWith(":");
-    if (indent === 0 && line.trim() !== "") {
-      inHost = line.trim() === `${host}:`;
+    const t = line.trim();
+    if (indent === 0 && t !== "") {
+      inHost = t === `${host}:`;
       inUsers = false;
+      inAccount = false;
       if (inHost) seen = true;
     }
     if (!inHost) {
       out.push(line);
       continue;
     }
-    if (/^\s*oauth_token:/.test(line)) continue;
-    if (indent === 4) inUsers = line.trim() === "users:";
-    if (indent === 0 && key) {
-      out.push(line, `    oauth_token: ${token}`);
-    } else if (indent === 8 && inUsers && key) {
-      out.push(line, `            oauth_token: ${token}`);
-    } else {
-      out.push(line);
+    if (indent === 4) {
+      inUsers = t === "users:";
+      inAccount = false;
     }
+    if (indent === 8 && inUsers) inAccount = t === `${account}:`;
+    if (t.startsWith("oauth_token:") && ((indent === 4 && atHost) || (indent === 12 && inAccount))) continue;
+    if (indent === 0 && t.endsWith(":")) out.push(line, ...(atHost ? [`    oauth_token: ${token}`] : []));
+    else if (indent === 8 && inAccount && t.endsWith(":")) out.push(line, `            oauth_token: ${token}`);
+    else out.push(line);
   }
   if (seen) return out.join("\n");
   const body = out.join("\n");
   return `${body.endsWith("\n") ? body : `${body}\n`}${block}`;
 }
 
+interface KeychainItem {
+  dest: string;
+  place: (secret: string, existing: string | undefined, account?: string) => string;
+  /** The laptop file, home-relative, that names the accounts the tool keeps one item each for. */
+  accounts?: { file: string; list(text: string): string[] };
+}
+
 /** Where a Keychain item the recipe lists as `Keychain: <service>` lands on the
  * guest and how; on Linux the same tools keep the token in the file itself. */
-const KEYCHAIN: Record<string, Omit<PlannedSecret, "id" | "service">> = {
+const KEYCHAIN: Record<string, KeychainItem> = {
   "Claude Code-credentials": { dest: ".claude/.credentials.json", place: secret => secret },
-  "gh:github.com": { dest: ".config/gh/hosts.yml", place: (secret, existing) => placeGhToken("github.com", secret, existing) },
+  "gh:github.com": {
+    dest: ".config/gh/hosts.yml",
+    place: (secret, existing, account) => placeGhToken("github.com", secret, existing, account),
+    accounts: { file: ".config/gh/hosts.yml", list: text => ghAccounts(text, "github.com").users },
+  },
 };
 
 export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOptions): FilesPlan {
@@ -206,7 +257,10 @@ export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOption
         if (opts.platform !== "darwin") skip("a macOS Keychain item; sign in on the machine");
         else if (keychain === undefined) skip("no Keychain reader for this login yet; sign in on the machine");
         else {
-          plan.secrets.push({ id: e.id, service, dest: rewrite(keychain.dest), place: keychain.place });
+          const dest = rewrite(keychain.dest);
+          const accounts = keychain.accounts !== undefined && opts.read !== undefined ? keychain.accounts.list(opts.read(join(opts.home, keychain.accounts.file)) ?? "") : [];
+          if (accounts.length === 0) plan.secrets.push({ id: e.id, service, dest, place: keychain.place });
+          for (const account of accounts) plan.secrets.push({ id: e.id, service, account, dest, place: (secret, existing) => keychain.place(secret, existing, account) });
           brought++;
         }
         continue;

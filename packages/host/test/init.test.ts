@@ -142,8 +142,8 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
     home,
     platform: "darwin",
     secrets: {
-      read: async service => {
-        reads.push(service);
+      read: async (service, account) => {
+        reads.push(account === undefined ? service : `${service} (${account})`);
         return "gho_fake";
       },
     },
@@ -1239,8 +1239,9 @@ describe("wsp init, logins copied to the machine", () => {
   };
   const STATUS_LINE = "gh auth status; printf '\\nWSP_STATUS %s\\n' $?; exit\r";
 
-  /** gh on the fake builder: its status names the copied token invalid until gh auth login has run there. */
-  function ghOnBuilder(f: Fake, o: { missing?: boolean } = {}): void {
+  /** gh on the fake builder: its status names the copied token invalid (with `stale`, the second account's beside a
+   * good first one) until gh auth login has run there. */
+  function ghOnBuilder(f: Fake, o: { missing?: boolean; stale?: boolean } = {}): void {
     let loggedIn = false;
     f.link.script = (pty, line) => {
       if (line.includes("WSP_STATUS")) {
@@ -1249,7 +1250,10 @@ describe("wsp init, logins copied to the machine", () => {
           f.link.exit(pty, 127);
           return;
         }
-        f.link.data(pty, loggedIn ? "✓ Logged in to github.com account someone (keyring)\r\nWSP_STATUS 0\r\n" : "X Failed to log in to github.com account someone (keyring)\r\n- The token in /root/.config/gh/hosts.yml is invalid.\r\nWSP_STATUS 1\r\n");
+        const good = (user: string) => `✓ Logged in to github.com account ${user} (default)\r\n`;
+        const bad = (user: string) => `X Failed to log in to github.com account ${user} (default)\r\n- The token in default is invalid.\r\n`;
+        if (o.stale) f.link.data(pty, `${good("Zingzy")}\r\n${loggedIn ? good("other") : bad("other")}WSP_STATUS ${loggedIn ? 0 : 1}\r\n`);
+        else f.link.data(pty, loggedIn ? "✓ Logged in to github.com account someone (keyring)\r\nWSP_STATUS 0\r\n" : "X Failed to log in to github.com account someone (keyring)\r\n- The token in /root/.config/gh/hosts.yml is invalid.\r\nWSP_STATUS 1\r\n");
         f.link.exit(pty, loggedIn ? 0 : 1);
         return;
       }
@@ -1313,6 +1317,24 @@ describe("wsp init, logins copied to the machine", () => {
       { name: "GitHub CLI login", state: "signed-in" },
       { name: "kubectl config", state: "copied" },
     ]);
+  });
+
+  it("two gh accounts on this computer are read from the Keychain one each; a copy whose status lists one of them as failed is not signed in until the machine sign-in mends it", async () => {
+    const f = fake({ collect: async () => COPIED_MANIFEST });
+    mkdirSync(join(f.opts.home, ".config", "gh"), { recursive: true });
+    writeFileSync(join(f.opts.home, ".config", "gh", "hosts.yml"), "github.com:\n    git_protocol: ssh\n    users:\n        other:\n        Zingzy:\n    user: Zingzy\n");
+    ghOnBuilder(f, { stale: true });
+    const { run } = await toTheBuilder(f);
+    await f.until("GitHub CLI login: not signed in (copied, but gh auth status says not signed in)");
+    await f.until("GitHub CLI login  r sign in on the machine   s skip");
+    await f.press("r");
+    await f.until("GitHub CLI login: signed in (gh auth status)");
+    await sealIt(f);
+    const result = await run;
+    expect(result.code).toBe(0);
+    expect(f.reads).toEqual(["gh:github.com (other)", "gh:github.com (Zingzy)"]);
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual([STATUS_LINE, "exec gh auth login || exit\r", STATUS_LINE]);
+    expect(result.logins?.[0]).toEqual({ id: "logins/gh", label: "GitHub CLI login", state: "signed-in", command: "gh auth login", exit: 0, note: "gh auth status" });
   });
 
   it("a copied login whose status check fails can be skipped instead; the skip is what the seal records", async () => {
