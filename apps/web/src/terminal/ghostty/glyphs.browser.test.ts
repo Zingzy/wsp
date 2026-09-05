@@ -4,13 +4,12 @@
 // notdef box. Vite serves the surface to Playwright's browser, so like the
 // live tests it runs only when asked for (WSP_RENDER=1) and skips without
 // Playwright's Chromium on the machine.
-import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { createServer } from "node:net";
-import { dirname, join, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { startVite, stopRender, type ViteChild } from "../../../test/vite-child";
 import type { CellSignature } from "../../../test/glyphs/probe";
 import { DEFAULT_TERMINAL_TEXT_FACES, TERMINAL_SYMBOLS_FACE } from "./fontChain";
 
@@ -26,29 +25,6 @@ const browserPath = ((): string | undefined => {
 const hasBrowser = browserPath !== undefined && existsSync(browserPath);
 const skipped = process.env["WSP_RENDER"] !== "1" ? "WSP_RENDER is not 1" : !hasBrowser ? "Playwright's Chromium is not installed" : undefined;
 
-const freePort = (): Promise<number> =>
-  new Promise((resolve, reject) => {
-    const server = createServer();
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      server.close(() => (typeof address === "object" && address !== null ? resolve(address.port) : reject(new Error("no port"))));
-    });
-  });
-
-async function waitFor(url: string, child: ChildProcess): Promise<void> {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`vite exited with ${child.exitCode}`);
-    try {
-      if ((await fetch(url)).ok) return;
-    } catch {
-      // Not listening yet.
-    }
-    await new Promise((r) => setTimeout(r, 200));
-  }
-  throw new Error(`vite did not serve ${url} in time`);
-}
-
 const NOTDEF = "\u{10FFFD}";
 // nf-fa folder, nf-custom folder, nf-md file, nf-oct git-branch: none of them in any platform text face
 // (Menlo and SF Mono carry the powerline arrows themselves, so those would prove nothing here).
@@ -58,25 +34,19 @@ const ICONS = ["\uF07B", "\uE5FF", "\u{F0219}", "\uF418"];
 if (skipped !== undefined) console.info(`glyph render test skipped: ${skipped}`);
 
 describe.skipIf(skipped !== undefined)("Nerd Font glyphs through the pane in Chromium", () => {
-  let vite: ChildProcess | undefined;
+  let vite: ViteChild | undefined;
   let browser: Browser | undefined;
   let page: Page | undefined;
 
   beforeAll(async () => {
-    const port = await freePort();
-    vite = spawn(join(WEB_DIR, "node_modules", ".bin", "vite"), ["--host", "127.0.0.1", "--port", String(port), "--strictPort", "--logLevel", "silent"], { cwd: WEB_DIR, stdio: "ignore" });
-    const url = `http://127.0.0.1:${port}/test/glyphs/index.html`;
-    await waitFor(url, vite);
+    vite = await startVite(WEB_DIR, "/test/glyphs/index.html");
+    const url = `${vite.base}/test/glyphs/index.html`;
     browser = await chromium.launch();
     page = await browser.newPage();
     await page.goto(url);
   }, 60_000);
 
-  afterAll(async () => {
-    await browser?.close();
-    // Only the process this file spawned, by the handle it kept.
-    vite?.kill();
-  });
+  afterAll(() => stopRender(browser, vite?.child));
 
   /** Each glyph drawn alone on the one surface, in the given family's chain. */
   async function glyphs(texts: readonly string[], family?: string): Promise<CellSignature[]> {
