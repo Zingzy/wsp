@@ -2,7 +2,7 @@
 // A daemon link whose ptys are scripted: every op is recorded, typed bytes are
 // kept per pty, a complete line (ending in \r) is echoed back the way a tty
 // would and handed to the script, and the test pushes output and exits.
-import type { PtyLink } from "../src/signin-relay.js";
+import { CHECK_RUN_LINE, type PtyLink } from "../src/signin-relay.js";
 
 export interface FakePty {
   id: string;
@@ -118,4 +118,37 @@ export function fakePtyLink(): FakePtyLink {
     },
   };
   return link;
+}
+
+export interface CheckAnswer {
+  output: string;
+  exitCode: number;
+}
+
+const TOOL_LINE = /^\{ \( (.*) \) >"\$d\/(\d+)" 2>&1 <\/dev\/null; /;
+
+/** The fake guest runs the check script: from the heredoc's first line to the run line every typed line is
+ * the script's, the tool lines are remembered, and the run line answers each through `answer` as the script
+ * would, one marker pair per tool in the order they finish (the answer's `after` gives a later place); a tool
+ * answered undefined stays silent. The pty exits once every tool answered. Returns true for a line of the
+ * script, so a script hook can pass the rest on. */
+export function answersChecks(link: FakePtyLink, answer: (command: string) => (CheckAnswer & { after?: number }) | undefined): (pty: FakePty, line: string) => boolean {
+  const scripts = new Map<string, { index: number; command: string }[]>();
+  return (pty, line) => {
+    if (line.endsWith("<<'WSP_EOF'")) {
+      scripts.set(pty.id, []);
+      return true;
+    }
+    const tools = scripts.get(pty.id);
+    if (tools === undefined) return false;
+    const tool = TOOL_LINE.exec(line);
+    if (tool) tools.push({ index: Number(tool[2]), command: tool[1]! });
+    if (line !== CHECK_RUN_LINE) return true;
+    scripts.delete(pty.id);
+    const answers = tools.map(t => ({ ...t, answer: answer(t.command) })).filter(t => t.answer !== undefined);
+    answers.sort((a, b) => (a.answer!.after ?? 0) - (b.answer!.after ?? 0));
+    for (const t of answers) link.data(pty, `WSP_STATUS ${t.index} ${t.answer!.exitCode}\r\n${t.answer!.output.replace(/\n/g, "\r\n")}\r\nWSP_END ${t.index}\r\n`);
+    if (answers.length === tools.length) link.exit(pty, 0);
+    return true;
+  };
 }

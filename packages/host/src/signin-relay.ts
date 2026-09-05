@@ -234,8 +234,8 @@ export interface QuietRun {
 const STATUS_MARK = "WSP_STATUS";
 
 /** Runs one command on the builder with nothing shown: the output between the
- * echoed line and the exit marker, for the table's status check and the secrets
- * step. `env` rides the pty's environment, where a value never reaches the echoed line. */
+ * echoed line and the exit marker, for the secrets step. `env` rides the pty's
+ * environment, where a value never reaches the echoed line. */
 export async function runQuiet(link: PtyLink, command: string, timeoutMs: number, env: Record<string, string> = {}): Promise<QuietRun> {
   const ptyId = ptyIdOf(await link.op("pty.create", { cols: 200, rows: 50, shell: "/bin/sh", env: { PS1: "", ...env } }));
   let text = "";
@@ -279,4 +279,123 @@ export async function runQuiet(link: PtyLink, command: string, timeoutMs: number
   const body = lines.slice(1, markAt >= 0 ? markAt : undefined);
   // Tools colour into the pty (opencode 1.18.18 paints key names even piped); the readers want the words.
   return { output: stripVTControlCharacters(body.join("\n")).trim(), exitCode, timedOut, dropped };
+}
+
+export interface CheckAnswer {
+  output: string;
+  exitCode: number;
+}
+
+export interface ChecksRun {
+  /** By command, what the guest answered; undefined for one still silent when the run ended. */
+  answers: (CheckAnswer | undefined)[];
+  timedOut: boolean;
+  /** The daemon link went away before every command answered. */
+  dropped: boolean;
+}
+
+const HEREDOC_END = "WSP_EOF";
+export const CHECK_RUN_LINE = 'sh "$d/run"; rm -rf "$d"; exit';
+/** One pty.write carries at most this much: the line discipline's input buffer is 4096 bytes. */
+const WRITE_BYTES = 2000;
+const STATUS_LINE = /^WSP_STATUS (\d+) (\d+)$/;
+
+/** The lines typed into the guest's sh: a heredoc that writes a script, then runs it. The script reads the
+ * secrets file only when it is there, since a `.` of a missing file is fatal in a POSIX sh (dash drops the
+ * rest of the line, a non-interactive sh exits); starts every command at once, each in a background subshell
+ * with stdin closed so none can wait on the terminal or stop the rest with an exit; and prints one marker
+ * pair per command as it finishes. The exit code lands by rename, so a marker never reads a half-written file. */
+export function checkScript(commands: readonly string[], secretsFile: string): string[] {
+  const ids = commands.map((_, i) => String(i + 1));
+  return [
+    `d=$(mktemp -d) && cat >"$d/run" <<'${HEREDOC_END}'`,
+    `d=$(dirname "$0")`,
+    `[ -r ${secretsFile} ] && . ${secretsFile}`,
+    ...commands.map((c, i) => `{ ( ${c} ) >"$d/${ids[i]}" 2>&1 </dev/null; echo $? >"$d/${ids[i]}.tmp"; mv "$d/${ids[i]}.tmp" "$d/${ids[i]}.rc"; } &`),
+    `n=0; while [ $n -lt ${ids.length} ]; do for i in ${ids.join(" ")}; do if [ -f "$d/$i.rc" ]; then printf 'WSP_STATUS %s %s\\n' "$i" "$(cat "$d/$i.rc")"; cat "$d/$i"; printf '\\nWSP_END %s\\n' "$i"; rm "$d/$i.rc"; n=$((n+1)); fi; done; sleep 0.2; done`,
+    HEREDOC_END,
+    CHECK_RUN_LINE,
+  ];
+}
+
+export interface ChecksOptions {
+  commands: readonly string[];
+  /** The secrets step's file, read by the script first when it is there. */
+  secretsFile: string;
+  /** Shared by every command; one still silent then is left unanswered. */
+  budgetMs: number;
+  /** The guest's sh; a test names another. */
+  shell?: string;
+}
+
+/** Runs every status command on the builder at once through one quiet pty and hands each answer over as
+ * its marker pair arrives; ends when all answered, the shared budget ran out, or the link dropped. */
+export async function runChecks(link: PtyLink, o: ChecksOptions, onAnswer: (index: number, answer: CheckAnswer) => void): Promise<ChecksRun> {
+  const { commands } = o;
+  const ptyId = ptyIdOf(await link.op("pty.create", { cols: 200, rows: 50, shell: o.shell ?? "/bin/sh", env: { PS1: "", PS2: "" } }));
+  const answers: (CheckAnswer | undefined)[] = commands.map(() => undefined);
+  let text = "";
+  let done: (() => void) | undefined;
+  const ended = new Promise<void>(r => (done = r));
+  const settled = (): boolean => answers.every(a => a !== undefined);
+  /** Every complete marker pair in what arrived so far, each handed over once. */
+  const read = (): void => {
+    const lines = text.replace(/\r/g, "").split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const m = STATUS_LINE.exec(lines[i]!);
+      if (!m) continue;
+      const index = Number(m[1]) - 1;
+      if (answers[index] !== undefined || index >= commands.length) continue;
+      const end = lines.indexOf(`WSP_END ${m[1]}`, i + 1);
+      if (end < 0) continue;
+      const answer = { output: stripVTControlCharacters(lines.slice(i + 1, end).join("\n")).trim(), exitCode: Number(m[2]) };
+      answers[index] = answer;
+      onAnswer(index, answer);
+    }
+    if (settled()) done?.();
+  };
+  const detach = link.onEvent(e => {
+    if (e["ptyId"] !== ptyId) return;
+    if (e["type"] === "pty.data") {
+      text += String(e["data"]);
+      read();
+    }
+    if (e["type"] === "pty.exit") done?.();
+  });
+  let timedOut = false;
+  let dropped = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    done?.();
+  }, o.budgetMs);
+  timer.unref();
+  void link.closed?.then(() => {
+    if (done !== undefined && !settled()) dropped = true;
+    done?.();
+  });
+  try {
+    okOrThrow("pty.attach", await link.op("pty.attach", { ptyId }));
+    for (const data of batched(checkScript(commands, o.secretsFile).map(l => `${l}\r`))) await link.op("pty.write", { ptyId, data });
+    await ended;
+  } finally {
+    clearTimeout(timer);
+    detach();
+    await link.op("pty.kill", { ptyId }).catch(() => {});
+  }
+  return { answers, timedOut: timedOut && !settled(), dropped };
+}
+
+/** Whole lines packed into writes under WRITE_BYTES; a line longer than that goes alone. */
+function batched(lines: readonly string[]): string[] {
+  const out: string[] = [];
+  let cur = "";
+  for (const l of lines) {
+    if (cur !== "" && cur.length + l.length > WRITE_BYTES) {
+      out.push(cur);
+      cur = "";
+    }
+    cur += l;
+  }
+  if (cur !== "") out.push(cur);
+  return out;
 }
