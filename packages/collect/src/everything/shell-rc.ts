@@ -54,7 +54,7 @@ const KEYWORDS = /^\s*(?:then|do|else|elif|if|while|until|exec|command|builtin|!
 const EVAL = /^\s*eval\s+(?:'([^']*)'|"((?:[^"\\]|\\.)*)"|(\S.*))$/;
 
 /** The simple commands of a line: split outside quotes on `;`, `&&`, `||`, `|`, `&` and braces or parentheses, comment dropped. */
-function simpleCommands(line: string): string[] {
+export function simpleCommands(line: string): string[] {
   const out: string[] = [];
   let quote: "" | "'" | '"' = "";
   let cur = "";

@@ -35,6 +35,7 @@ import {
   withApiKeyHelper,
 } from "@wsp/engine";
 import { CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, tarPackCommand } from "./doctor.js";
+import { type AliasGuard, GUARD_PATH, GUARD_SOURCE_COMMENT, GUARD_SOURCE_LINE, aliasGuardFor } from "./init-aliases.js";
 
 const execFileAsync = promisify(execFile);
 const GUEST_HOME = "/root";
@@ -225,6 +226,8 @@ export interface PackOptions {
   managerHomes?: readonly string[];
   /** Whether ~/.claude/settings.json is among the plan's files, in this pack or an earlier one this pack lands over; left out, this pack's files decide. */
   settingsPlanned?: boolean;
+  /** The alias guard the ticks call for; it ships when its rc file is in this pack, which then reads it last. */
+  guard?: AliasGuard;
 }
 
 /** Copies the planned files into a staging tree, renders each secret into it,
@@ -305,6 +308,19 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
     };
     walk(stage);
     cut.sort((a, b) => (a.path < b.path ? -1 : 1));
+    const rc = opts.guard === undefined ? undefined : join(stage, opts.guard.rc);
+    if (opts.guard !== undefined && rc !== undefined && existsSync(rc) && statSync(rc).isFile()) {
+      const guard = join(stage, GUARD_PATH);
+      mkdirSync(dirname(guard), { recursive: true });
+      writeFileSync(guard, opts.guard.text, { mode: 0o644 });
+      const text = readFileSync(rc, "utf8");
+      if (!text.includes(GUARD_SOURCE_LINE)) {
+        const mode = statSync(rc).mode & 0o7777;
+        chmodSync(rc, 0o600);
+        writeFileSync(rc, `${text}${text === "" || text.endsWith("\n") ? "" : "\n"}\n${GUARD_SOURCE_COMMENT}\n${GUARD_SOURCE_LINE}\n`);
+        chmodSync(rc, mode);
+      }
+    }
     // A dropped account leaves the staged file before any token lands, so the active mark has moved by the time
     // the account it moved to is placed and the host token follows it.
     for (const s of plan.secrets) {
@@ -511,7 +527,8 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
     });
   const hash = recipeHash(recipeDigest(bring, digested));
   const settingsSource = join(home, CLAUDE_SETTINGS.slice(2));
-  const packOpts: PackOptions = { secrets: opts.secrets, home, managerHomes, settingsPlanned: plan.files.some(f => f.source === settingsSource || f.source === dirname(settingsSource)) };
+  const guard = aliasGuardFor(opts.rows ?? bring, opts.brew);
+  const packOpts: PackOptions = { secrets: opts.secrets, home, managerHomes, settingsPlanned: plan.files.some(f => f.source === settingsSource || f.source === dirname(settingsSource)), ...(guard !== undefined ? { guard } : {}) };
   const volatileFiles = files.filter(f => f.volatile);
   const volatile =
     volatileFiles.length > 0 || plan.secrets.length > 0

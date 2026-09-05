@@ -15,6 +15,18 @@ export const LOGIN_CHOICES = ["copy", "machine", "skip"] as const;
 export const LoginChoice = z.enum(LOGIN_CHOICES);
 export type LoginChoice = z.infer<typeof LoginChoice>;
 
+/** An alias or function the login shell defines that runs a program the machine does not have by itself. */
+export const ShellAlias = z.object({
+  name: z.string().min(1),
+  /** The program the body runs, by the first command word that is not a builtin, a prefix word or another function. */
+  runs: z.string().min(1),
+  /** A suffix alias is undone with unalias -s; a function is listed but never undone. */
+  kind: z.enum(["alias", "suffix", "function"]),
+  /** The tools row that installs the program, when one does. */
+  tool: z.string().min(1).optional(),
+});
+export type ShellAlias = z.infer<typeof ShellAlias>;
+
 export const Default = z.enum(["bring", "skip"]);
 export type Default = z.infer<typeof Default>;
 
@@ -70,6 +82,8 @@ const Fields = z.object({
   login: z.string().min(1).optional(),
   /** Only on a shell row: the family the person's terminal draws with, read from its config; the app's terminal pane defaults to it. */
   font: z.string().min(1).optional(),
+  /** Only on the login shell's rc row: what the shell defines that runs a program, so the screens can say which point at a tool that is not coming and the machine can drop those. */
+  aliases: z.array(ShellAlias).optional(),
 });
 
 export const ManifestEntry = Fields.superRefine((e, ctx) => {
@@ -95,6 +109,9 @@ export const ManifestEntry = Fields.superRefine((e, ctx) => {
   }
   if (e.font !== undefined && e.rung !== "shell") {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["font"], message: "only a shell row carries a terminal font" });
+  }
+  if (e.aliases !== undefined && e.rung !== "shell") {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["aliases"], message: "only a shell row carries aliases" });
   }
   if (e.required === true && e.default === "skip") {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["required"], message: "a required row cannot default to skip" });
