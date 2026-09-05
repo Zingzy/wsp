@@ -32,7 +32,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
       )}
     >
       <SidebarTrigger className="relative z-10 md:hidden" />
-      <span className="relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink-0 items-center gap-1 overflow-hidden rounded-md text-foreground md:flex">
+      <span className="relative z-10 ml-[var(--sidebar-content-inset)] hidden h-7 w-fit min-w-0 shrink-0 items-center gap-1 overflow-hidden rounded-md text-foreground md:flex">
         <Lockup className="h-3.5 -translate-y-px text-muted-foreground" />
       </span>
       {children}

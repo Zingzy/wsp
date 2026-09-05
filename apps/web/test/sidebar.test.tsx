@@ -105,6 +105,21 @@ describe("header", () => {
     });
     expect(screen.getByRole("img", { name: "wsp" })).toBeTruthy();
   });
+
+  it("the lockup starts at the sidebar content inset, where the search box does", async () => {
+    useStore.getState().bind(fakeApi([], []));
+    await act(async () => {
+      render(
+        <SidebarProvider defaultOpen>
+          <WorkspaceSidebar />
+        </SidebarProvider>,
+      );
+    });
+    const lockup = screen.getByRole("img", { name: "wsp" }).parentElement!;
+    expect(lockup.className).toContain("ml-[var(--sidebar-content-inset)]");
+    expect(lockup.className).not.toContain("titlebar");
+    expect(screen.getByLabelText("Search threads").closest("[data-slot=input-control]")!.parentElement!.className).toContain("px-[var(--sidebar-content-inset)]");
+  });
 });
 
 describe("rows from the fixture wire", () => {

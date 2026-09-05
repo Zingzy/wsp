@@ -1,0 +1,64 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Served by Vite to a real browser: the app shell over a fake api with two
+// workspaces and one thread, in either theme (?theme=light), so a test can
+// measure the chrome's geometry, which jsdom cannot lay out.
+import { createRoot } from "react-dom/client";
+import type { SessionView, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import { TooltipProvider } from "../../src/components/ui/tooltip";
+import type { Api } from "../../src/protocol/client";
+import { useStore } from "../../src/protocol/store";
+import { AppShell } from "../../src/shell/AppShell";
+import "../../src/index.css";
+
+const params = new URLSearchParams(window.location.search);
+document.documentElement.classList.toggle("dark", params.get("theme") !== "light");
+
+const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running"): WorkspaceView => ({
+  id,
+  name,
+  machineId: `m_${id}`,
+  phase,
+  golden: "snap_g",
+  createdAt: "2026-09-05T11:00:00Z",
+});
+const status = (w: WorkspaceView): WorkspaceStatus => ({
+  ...w,
+  machineState: w.phase === "napping" ? "paused" : "running",
+  reach: { state: w.phase === "napping" ? "napping" : "reachable" },
+  size: { cpu: 2, memMb: 4096 },
+  rateUsdPerHour: 0.11,
+});
+const workspaces = [view("ws_a", "api"), view("ws_b", "web", "napping")];
+const sessions: SessionView[] = [{ id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", prompt: "fix the port list", startedAt: Date.now() - 3 * 60_000 }];
+
+const api: Api = {
+  listWorkspaces: async () => workspaces,
+  getWorkspace: async id => workspaces.find(w => w.id === id)!,
+  createWorkspace: async () => workspaces[0]!,
+  createFromGoldenHead: async () => workspaces[0]!,
+  watchStatuses: async () => workspaces.map(status),
+  nap: async id => workspaces.find(w => w.id === id)!,
+  wake: async id => workspaces.find(w => w.id === id)!,
+  upgrade: async id => workspaces.find(w => w.id === id)!,
+  capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true }),
+  startSession: async o => ({ id: "s2", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
+  portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
+  daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
+  sessionHistory: async () => [],
+  listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
+  snapshotStorage: async () => null,
+  rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
+  listSessions: async () => sessions,
+  subscribe: () => () => {},
+  getGolden: async () => undefined,
+};
+
+useStore.setState({ conn: "live" });
+useStore.getState().bind(api);
+createRoot(document.getElementById("root")!).render(
+  <TooltipProvider>
+    <AppShell>
+      <div />
+    </AppShell>
+  </TooltipProvider>,
+);
