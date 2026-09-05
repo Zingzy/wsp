@@ -46,7 +46,7 @@ const COMMAND_MS = 60_000;
 const SH_ENV = "WSP_SECRET_LINE";
 const FISH_ENV = "WSP_FISH_LINE";
 const FISH_MARK = "WSP_FISH";
-const EXPORTED = /^export ([A-Za-z_][A-Za-z0-9_]*)=/;
+const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const dim = (s: string): string => styleText("dim", s);
 
 /** The line profile.d gets: single quotes keep the value byte for byte. */
@@ -59,9 +59,10 @@ export function fishLine(name: string, value: string): string {
   return `set -gx ${name} '${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
 }
 
-/** What is on the machine already: the secrets file's lines, and a mark when fish is installed. */
+/** What is on the machine already: the names the secrets file exports (the values stay there), then a mark when
+ * fish is installed. The probe is an if so the command ends 0 on a machine without fish. */
 export function readCommand(): string {
-  return `cat ${SH_FILE} 2>/dev/null; command -v fish >/dev/null 2>&1 && echo ${FISH_MARK}`;
+  return `sed -n 's/^export \\([A-Za-z_][A-Za-z0-9_]*\\)=.*/\\1/p' ${SH_FILE} 2>/dev/null; if command -v fish >/dev/null 2>&1; then echo ${FISH_MARK}; fi`;
 }
 
 /** Appends the lines the pty's environment holds, the file created mode 600 and kept there. */
@@ -122,7 +123,7 @@ export async function secretsStage(o: SecretsStageOptions): Promise<SecretOutcom
   const machine = await quietly(o, readCommand(), {}, timeoutMs);
   if (typeof machine === "string") log.warn(`The machine's secrets file was not read (${machine}); every name is asked.`, out);
   const lines = typeof machine === "string" ? [] : machine.output.split("\n");
-  const present = new Set(lines.map(l => EXPORTED.exec(l)?.[1]).filter((n): n is string => n !== undefined));
+  const present = new Set(lines.filter(l => l !== FISH_MARK && NAME.test(l)));
   const fish = lines.includes(FISH_MARK);
   for (const r of outcomes) {
     if (present.has(r.name)) {

@@ -38,19 +38,24 @@ function terminal() {
   return { input, output, raw, text, press, until };
 }
 
-/** The machine as the step reads it: the secrets file's lines and whether fish is installed; every append answers with the exit picked. */
+/** The machine as the step reads it: the names in its secrets file and whether fish is installed. The read answers
+ * the way a shell would: the names one per line, the fish mark only when fish is there, and the status of the
+ * command's last word (an `if` ends 0 either way; a bare `&& echo` ends 1 without fish). Every append answers
+ * with the exit picked; an unreadable machine answers the read with exit 2 and nothing else. */
 function scripted(machine: { present?: string[]; fish?: boolean; exit?: number; unreadable?: boolean } = {}): FakePtyLink {
   const link = fakePtyLink();
   link.script = (pty, line) => {
     if (!line.includes("WSP_STATUS")) return;
     if (line.startsWith(readCommand())) {
       if (machine.unreadable) {
-        link.data(pty, "WSP_STATUS 1\r\n");
-        link.exit(pty, 1);
+        link.data(pty, "WSP_STATUS 2\r\n");
+        link.exit(pty, 2);
         return;
       }
-      link.data(pty, `${(machine.present ?? []).map(n => `export ${n}='x'\r\n`).join("")}${machine.fish ? "WSP_FISH\r\n" : ""}WSP_STATUS 0\r\n`);
-      link.exit(pty, 0);
+      const probe = readCommand().slice(readCommand().indexOf("command -v fish"));
+      const status = probe.startsWith("command -v fish") && !probe.includes("; fi") && !probe.endsWith("true") ? (machine.fish ? 0 : 1) : 0;
+      link.data(pty, `${(machine.present ?? []).map(n => `${n}\r\n`).join("")}${machine.fish ? "WSP_FISH\r\n" : ""}WSP_STATUS ${status}\r\n`);
+      link.exit(pty, status);
       return;
     }
     link.data(pty, `WSP_STATUS ${machine.exit ?? 0}\r\n`);
@@ -80,8 +85,8 @@ describe("the lines and the commands", () => {
     expect(fishLine("A_KEY", `it's \\ here`)).toBe(`set -gx A_KEY 'it\\'s \\\\ here'`);
   });
 
-  it("reads the secrets file and whether fish is there in one command; the append names the environment, never a value, and writes both files only with fish", () => {
-    expect(readCommand()).toBe(`cat ${SH_FILE} 2>/dev/null; command -v fish >/dev/null 2>&1 && echo WSP_FISH`);
+  it("reads the names in the secrets file, never the values, and whether fish is there, ending 0 either way; the append names the environment, never a value, and writes both files only with fish", () => {
+    expect(readCommand()).toBe(`sed -n 's/^export \\([A-Za-z_][A-Za-z0-9_]*\\)=.*/\\1/p' ${SH_FILE} 2>/dev/null; if command -v fish >/dev/null 2>&1; then echo WSP_FISH; fi`);
     expect(appendCommand(false)).toBe(`umask 077; printf '%s\\n' "$WSP_SECRET_LINE" >> ${SH_FILE} && chmod 600 ${SH_FILE}`);
     expect(appendCommand(true)).toBe(`umask 077; printf '%s\\n' "$WSP_SECRET_LINE" >> ${SH_FILE} && chmod 600 ${SH_FILE} && mkdir -p /etc/fish/conf.d && printf '%s\\n' "$WSP_FISH_LINE" >> ${FISH_FILE} && chmod 600 ${FISH_FILE}`);
   });
@@ -132,7 +137,7 @@ describe("the secrets step", () => {
     expect(pty.writes).toEqual([`${appendCommand(true)}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`]);
   });
 
-  it("a name already in the machine's secrets file is not asked again and reads as set from an earlier run", async () => {
+  it("on a machine without fish, a name already in the secrets file is not asked again and reads as set from an earlier run; nothing warns and nothing is appended twice", async () => {
     const link = scripted({ present: ["A_KEY"] });
     const t = terminal();
     const { run, hidden } = stage(link, t);
@@ -140,6 +145,8 @@ describe("the secrets step", () => {
     await t.until("B_TOKEN");
     await t.press("x", KEY.enter);
     const outcomes = await run;
+    expect(t.text()).not.toContain("was not read");
+    expect(t.text()).not.toMatch(/A_KEY\s*$/m);
     expect(outcomes).toEqual<SecretOutcome[]>([
       { name: "A_KEY", path: "~/.zshrc", state: "set", note: "on the machine from an earlier run" },
       { name: "B_TOKEN", path: "~/.zshrc", state: "set" },
@@ -153,7 +160,7 @@ describe("the secrets step", () => {
     const link = scripted({ unreadable: true });
     const t = terminal();
     const { run } = stage(link, t);
-    await t.until("The machine's secrets file was not read (the shell answered exit 1); every name is asked.");
+    await t.until("The machine's secrets file was not read (the shell answered exit 2); every name is asked.");
     await t.until("A_KEY");
     await t.press("x", KEY.enter);
     await t.until("B_TOKEN");
