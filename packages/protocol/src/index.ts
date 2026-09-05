@@ -357,7 +357,17 @@ export const PortOpenEvent = z.object({
   /** The listener's /proc/<pid>/comm; absent when the pid or its comm is unreadable. */
   process: z.string().optional(),
 });
-export const PortCloseEvent = z.object({ type: z.literal("port.close"), workspaceId: z.string(), port: z.number() });
+/** Who held the port when it closed, from the watcher's last row for it; at is the daemon's clock. */
+const portCloseDetail = {
+  pid: z.number().optional(),
+  process: z.string().optional(),
+  /** The holder's argv joined by spaces, from /proc/<pid>/cmdline; the daemon reads at most 512 bytes of it and a cut argv ends with an ellipsis. */
+  command: z.string().optional(),
+  /** Whether the holder's pid was gone when the close was seen; absent without a pid. */
+  exited: z.boolean().optional(),
+  at: z.string().optional(),
+};
+export const PortCloseEvent = z.object({ type: z.literal("port.close"), workspaceId: z.string(), port: z.number(), ...portCloseDetail });
 export const InboxFileEvent = z.object({
   type: z.literal("inbox.file"),
   workspaceId: z.string(),
@@ -736,7 +746,7 @@ export const DaemonEvent = z.discriminatedUnion("type", [
     process: z.string().optional(),
     loopback: z.boolean().optional(),
   }),
-  z.object({ type: z.literal("port.close"), port: z.number() }),
+  z.object({ type: z.literal("port.close"), port: z.number(), ...portCloseDetail }),
   z.object({ type: z.literal("inbox.file"), path: z.string(), bytes: z.number() }),
   /** Broadcast on pty.attach (current state) and afterwards only on change.
    * mode mirrors the slave termios ICANON bit ("line" when set), echo mirrors

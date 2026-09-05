@@ -201,6 +201,15 @@ describe("session wire fields the face reads", () => {
     expect(EventUnion.parse(runtimeSide)).toEqual(runtimeSide);
     expect(() => DaemonEvent.parse({ ...daemonSide, process: 1 })).toThrow();
   });
+
+  it("port.close may say who held the port, whether it exited and when, on both wires", () => {
+    const daemonSide = { type: "port.close", port: 8412, pid: 53479, process: "python3", command: "python3 -m http.server 8412", exited: true, at: "2026-09-05T12:04:00.000Z" };
+    expect(DaemonEvent.parse(daemonSide)).toEqual(daemonSide);
+    const runtimeSide = { ...daemonSide, workspaceId: "ws_1" };
+    expect(EventUnion.parse(runtimeSide)).toEqual(runtimeSide);
+    expect(DaemonEvent.parse({ type: "port.close", port: 8412 })).toEqual({ type: "port.close", port: 8412 });
+    expect(() => DaemonEvent.parse({ ...daemonSide, exited: "yes" })).toThrow();
+  });
 });
 
 describe("event replay wire fields", () => {

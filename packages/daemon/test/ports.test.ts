@@ -73,7 +73,7 @@ describe("PortWatcher first poll and its subscriber", () => {
 });
 
 /** A /proc lookalike: net/tcp from the fixture, pid 123 owning inode 45678 with
- * comm "node", pid 456 owning inode 45700 with no comm file at all. */
+ * comm "node" and a cmdline, pid 456 owning inode 45700 with no comm file at all. */
 function fakeProcRoot(): string {
   const root = mkdtempSync(join(tmpdir(), "wsp-proc-"));
   mkdirSync(join(root, "net"));
@@ -81,6 +81,7 @@ function fakeProcRoot(): string {
   mkdirSync(join(root, "123", "fd"), { recursive: true });
   symlinkSync("socket:[45678]", join(root, "123", "fd", "3"));
   writeFileSync(join(root, "123", "comm"), "node\n");
+  writeFileSync(join(root, "123", "cmdline"), ["node", "server.js", "--port", "8080", ""].join("\0"));
   mkdirSync(join(root, "456", "fd"), { recursive: true });
   symlinkSync("socket:[45700]", join(root, "456", "fd", "5"));
   return root;
@@ -90,12 +91,24 @@ describe("procNetTcpSource against a fake proc root", () => {
   const root = fakeProcRoot();
   afterAll(() => rmSync(root, { recursive: true, force: true }));
 
-  it("names the listening process from /proc/<pid>/comm and leaves it unset when comm is unreadable", async () => {
+  it("names the listening process from /proc/<pid>/comm and its argv from cmdline, leaving both unset when unreadable", async () => {
     const rows = await procNetTcpSource(root)();
     expect(rows).toEqual([
-      { port: 8080, pid: 123, inode: 45678, uid: 0, process: "node", loopback: false },
+      { port: 8080, pid: 123, inode: 45678, uid: 0, process: "node", command: "node server.js --port 8080", loopback: false },
       { port: 3000, pid: 456, inode: 45700, uid: 1000, loopback: true },
     ]);
+  });
+
+  it("reads at most 512 bytes of cmdline and ends a cut argv with an ellipsis, so a long argv stays off the wire", async () => {
+    const long = fakeProcRoot();
+    writeFileSync(join(long, "456", "cmdline"), ["node", "-e", "x".repeat(4096), ""].join("\0"));
+    try {
+      const rows = await procNetTcpSource(long)();
+      expect(rows[1]).toEqual({ port: 3000, pid: 456, inode: 45700, uid: 1000, command: `node -e ${"x".repeat(504)}…`, loopback: true });
+      expect(rows[1]!.command).toHaveLength(513);
+    } finally {
+      rmSync(long, { recursive: true, force: true });
+    }
   });
 
   it("port.open carries process when the row has one", async () => {
@@ -124,7 +137,7 @@ describe("PortWatcher across a listener restart on one port", () => {
   afterAll(() => rmSync(root, { recursive: true, force: true }));
 
   it("emits close then open, and the open is a wire event whether or not the new owner's pid can be read", async () => {
-    const w = new PortWatcher(procNetTcpSource(root));
+    const w = new PortWatcher(procNetTcpSource(root), { alive: () => false, now: () => Date.parse("2026-09-05T12:04:00.000Z") });
     const events: unknown[] = [];
     w.on("port.open", e => events.push(e));
     w.on("port.close", e => events.push(e));
@@ -134,12 +147,54 @@ describe("PortWatcher across a listener restart on one port", () => {
     writeFileSync(join(root, "net", "tcp"), withoutListener);
     rmSync(join(root, "123"), { recursive: true, force: true });
     await w.poll();
-    expect(events).toEqual([{ type: "port.close", port: 8080 }]);
+    expect(events).toEqual([{ type: "port.close", port: 8080, pid: 123, process: "node", command: "node server.js --port 8080", exited: true, at: "2026-09-05T12:04:00.000Z" }]);
+    expect(DaemonEvent.safeParse(events[0]).success).toBe(true);
 
     writeFileSync(join(root, "net", "tcp"), restartedUnowned);
     await w.poll();
     expect(events).toHaveLength(2);
     expect(events[1]).toEqual({ type: "port.open", port: 8080, loopback: false });
     expect(DaemonEvent.safeParse(events[1]).success).toBe(true);
+  });
+});
+
+describe("PortWatcher port.close detail", () => {
+  const at = "2026-09-05T12:04:00.000Z";
+  const held: ListeningPort = { port: 8412, pid: 53479, inode: 9, uid: 0, process: "python3", command: "python3 -m http.server 8412", loopback: false };
+  const unowned: ListeningPort = { port: 3000, pid: null, inode: 10, uid: 0, loopback: false };
+
+  async function closeAfter(rows: ListeningPort[], alive: (pid: number) => boolean): Promise<unknown[]> {
+    let snapshot = rows;
+    const w = new PortWatcher(async () => snapshot, { alive, now: () => Date.parse(at) });
+    const closed: unknown[] = [];
+    w.on("port.close", e => closed.push(e));
+    await w.poll();
+    snapshot = [];
+    await w.poll();
+    return closed;
+  }
+
+  it("a port seen with a pid closes with its holder, whether the pid exited, and the time", async () => {
+    const asked: number[] = [];
+    const closed = await closeAfter([held], pid => {
+      asked.push(pid);
+      return false;
+    });
+    expect(closed).toEqual([{ type: "port.close", port: 8412, pid: 53479, process: "python3", command: "python3 -m http.server 8412", exited: true, at }]);
+    expect(asked).toEqual([53479]);
+    expect(DaemonEvent.safeParse(closed[0]).success).toBe(true);
+  });
+
+  it("a holder still alive when its port closes is said to be running", async () => {
+    const closed = await closeAfter([held], () => true);
+    expect(closed[0]).toMatchObject({ pid: 53479, exited: false });
+  });
+
+  it("a port whose owner was never resolved closes plain, with only the time", async () => {
+    const closed = await closeAfter([unowned], () => {
+      throw new Error("never asked without a pid");
+    });
+    expect(closed).toEqual([{ type: "port.close", port: 3000, at }]);
+    expect(DaemonEvent.safeParse(closed[0]).success).toBe(true);
   });
 });

@@ -5,14 +5,15 @@
 // The bar shows the route without its token; copy and the frame keep it.
 import { Check, Copy, Laptop } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { toPreviewableServers } from "../../adapt/ports.js";
-import { useWorkspacePorts, useWorkspacePortsSeeded } from "../../browser/model.js";
+import { stoppedSentence, toPreviewableServers } from "../../adapt/ports.js";
+import { useStoppedPort, useWorkspacePorts, useWorkspacePortsSeeded } from "../../browser/model.js";
 import { recordVisit, removeVisit, useRecents } from "../../browser/recents.js";
 import { useProbedRoute } from "../../browser/refusal.js";
 import { currentPort, useBrowserTab, useBrowserTabs, ZOOM_STEP } from "../../browser/tabs.js";
 import { elideToken, loopbackUrl, parsePortInput } from "../../browser/url.js";
 import { useForwarded } from "../../protocol/store.js";
 import { useRightPanelStore, type RightPanelSurface } from "../../rightPanelStore.js";
+import { clockLabel } from "../machine/format.js";
 import { Button } from "../ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip.js";
@@ -42,6 +43,8 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
   const realUrl = reach.state === "ready" ? reach.reach.url : null;
   const shownUrl = realUrl !== null ? elideToken(realUrl) : port !== null ? loopbackUrl(port) : "";
   const listening = port === null || !portsSeeded || ports.some(p => p.port === port);
+  const stopped = useStoppedPort(workspaceId, port);
+  const sentence = listening ? "" : stoppedSentence(port, stopped, clockLabel);
   const forwarded = useForwarded(workspaceId, port);
   const zoom = tab?.zoom ?? 1;
   const framed = realUrl !== null && (refusal === null || refusal.keepsFrame);
@@ -139,8 +142,8 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
         ) : (
           <>
             {!listening ? (
-              <div className="shrink-0 border-b border-border/60 bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
-                :{port} stopped listening
+              <div title={sentence} className="shrink-0 truncate border-b border-border/60 bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
+                {sentence}
               </div>
             ) : null}
             {refusal !== null && refusal.keepsFrame ? (
