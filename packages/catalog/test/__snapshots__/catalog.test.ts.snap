@@ -5,7 +5,6 @@ exports[`catalog > is the seeded catalog 1`] = `
   {
     "argument": "1 lines",
     "configPaths": 8,
-    "defaultOn": true,
     "id": "claude",
     "kind": "agent",
     "projectState": [
@@ -19,14 +18,14 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": 218103808,
     "source": {
       "images": 1,
-      "sessions": 159,
+      "road": "measured",
+      "sessions": 149,
     },
     "status": "claude auth status",
   },
   {
     "argument": "@openai/codex@0.153.0",
     "configPaths": 4,
-    "defaultOn": false,
     "id": "codex",
     "kind": "agent",
     "projectState": [
@@ -40,14 +39,14 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": 477102080,
     "source": {
       "images": 1,
-      "sessions": 7,
+      "road": "measured",
+      "sessions": 5,
     },
     "status": "codex login status",
   },
   {
     "argument": "@google/gemini-cli@0.58.0",
     "configPaths": 3,
-    "defaultOn": false,
     "id": "gemini",
     "kind": "agent",
     "projectState": [
@@ -62,6 +61,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": 198180864,
     "source": {
       "images": 0,
+      "road": "measured",
       "sessions": 0,
     },
     "status": "if test -s "$HOME/.gemini/oauth_creds.json"; then echo oauth_creds.json; elif test -n "$GEMINI_API_KEY"; then echo GEMINI_API_KEY; elif test -n "$GOOGLE_API_KEY"; then echo GOOGLE_API_KEY; else false; fi",
@@ -69,7 +69,6 @@ exports[`catalog > is the seeded catalog 1`] = `
   {
     "argument": "opencode-ai@1.18.27",
     "configPaths": 9,
-    "defaultOn": false,
     "id": "opencode",
     "kind": "agent",
     "projectState": [
@@ -82,14 +81,14 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": 705691648,
     "source": {
       "images": 0,
-      "sessions": 2,
+      "road": "measured",
+      "sessions": 0,
     },
     "status": "opencode auth list",
   },
   {
     "argument": "@earendil-works/pi-coding-agent@0.84.4",
     "configPaths": 9,
-    "defaultOn": false,
     "id": "pi",
     "kind": "agent",
     "projectState": [
@@ -101,14 +100,14 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": 173015040,
     "source": {
       "images": 0,
-      "sessions": 1,
+      "road": "measured",
+      "sessions": 0,
     },
     "status": "pi --list-models",
   },
   {
     "argument": "22 lines",
     "configPaths": 6,
-    "defaultOn": false,
     "id": "hermes",
     "kind": "agent",
     "projectState": [
@@ -120,7 +119,8 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": 507510784,
     "source": {
       "images": 0,
-      "sessions": 8,
+      "road": "measured",
+      "sessions": 1,
     },
     "status": "hermes auth list",
   },
@@ -136,6 +136,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": undefined,
     "source": {
       "images": 5,
+      "road": "unmeasured",
       "sessions": 118,
     },
     "status": undefined,
@@ -152,6 +153,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": undefined,
     "source": {
       "images": 3,
+      "road": "unmeasured",
       "sessions": 100,
     },
     "status": "gh auth status",
@@ -168,6 +170,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": undefined,
     "source": {
       "images": 4,
+      "road": "unmeasured",
       "sessions": 87,
     },
     "status": undefined,
@@ -184,6 +187,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": undefined,
     "source": {
       "images": 5,
+      "road": "unmeasured",
       "sessions": 17,
     },
     "status": undefined,
@@ -200,6 +204,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": undefined,
     "source": {
       "images": 4,
+      "road": "unmeasured",
       "sessions": 10,
     },
     "status": undefined,
@@ -216,6 +221,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": 262144000,
     "source": {
       "images": 5,
+      "road": "measured",
       "sessions": 73,
     },
     "status": undefined,
@@ -232,6 +238,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": undefined,
     "source": {
       "images": 3,
+      "road": "unmeasured",
       "sessions": 36,
     },
     "status": undefined,
@@ -248,6 +255,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": 80740352,
     "source": {
       "images": 4,
+      "road": "unmeasured",
       "sessions": 107,
     },
     "status": undefined,
@@ -264,6 +272,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": undefined,
     "source": {
       "images": 3,
+      "road": "unmeasured",
       "sessions": 46,
     },
     "status": undefined,
@@ -280,6 +289,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": undefined,
     "source": {
       "images": 3,
+      "road": "unmeasured",
       "sessions": 30,
     },
     "status": undefined,
@@ -296,7 +306,8 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": undefined,
     "source": {
       "images": 0,
-      "note": "measured on one Mac only; on by default for this user until a second data point",
+      "note": "sessions counted on one Mac only; on by default for this user until a second data point",
+      "road": "unmeasured",
       "sessions": 45,
     },
     "status": undefined,
@@ -313,6 +324,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": 263192576,
     "source": {
       "images": 4,
+      "road": "measured",
       "sessions": 9,
     },
     "status": undefined,
@@ -329,6 +341,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": undefined,
     "source": {
       "images": 3,
+      "road": "unmeasured",
       "sessions": 4,
     },
     "status": undefined,
@@ -345,6 +358,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": 359661568,
     "source": {
       "images": 4,
+      "road": "measured",
       "sessions": 0,
     },
     "status": undefined,
@@ -361,6 +375,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": undefined,
     "source": {
       "images": 4,
+      "road": "unmeasured",
       "sessions": 0,
     },
     "status": undefined,
@@ -377,6 +392,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": 230686720,
     "source": {
       "images": 4,
+      "road": "measured",
       "sessions": 0,
     },
     "status": undefined,
@@ -393,6 +409,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": undefined,
     "source": {
       "images": 0,
+      "road": "unmeasured",
       "sessions": 3,
     },
     "status": "wrangler whoami",
@@ -409,6 +426,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": undefined,
     "source": {
       "images": 0,
+      "road": "unmeasured",
       "sessions": 0,
     },
     "status": "if test -s "$HOME/.cloudflared/cert.pem"; then echo cert.pem; else false; fi",
@@ -425,6 +443,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": undefined,
     "source": {
       "images": 0,
+      "road": "measured",
       "sessions": 4,
     },
     "status": "gcloud auth list --filter=status:ACTIVE --format=value(account)",
@@ -441,6 +460,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": undefined,
     "source": {
       "images": 1,
+      "road": "measured",
       "sessions": 1,
     },
     "status": "kubectl config current-context",
@@ -457,6 +477,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": undefined,
     "source": {
       "images": 0,
+      "road": "unmeasured",
       "sessions": 1,
     },
     "status": "sh -c 'for p in $(aws configure list-profiles 2>/dev/null); do aws sts get-caller-identity --profile "$p" 2>/dev/null && exit 0; done; exit 1'",
@@ -473,6 +494,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": undefined,
     "source": {
       "images": 0,
+      "road": "unmeasured",
       "sessions": 1,
     },
     "status": "vercel whoami",
@@ -489,6 +511,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": undefined,
     "source": {
       "images": 0,
+      "road": "unmeasured",
       "sessions": 1,
     },
     "status": "netlify status",
@@ -505,6 +528,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": undefined,
     "source": {
       "images": 0,
+      "road": "unmeasured",
       "sessions": 1,
     },
     "status": "fly auth whoami",
@@ -521,6 +545,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": undefined,
     "source": {
       "images": 0,
+      "road": "unmeasured",
       "sessions": 1,
     },
     "status": "supabase projects list",
@@ -537,6 +562,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": undefined,
     "source": {
       "images": 0,
+      "road": "unmeasured",
       "sessions": 1,
     },
     "status": "railway whoami",
@@ -553,6 +579,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": undefined,
     "source": {
       "images": 0,
+      "road": "unmeasured",
       "sessions": 0,
     },
     "status": "doppler me",
@@ -569,6 +596,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": undefined,
     "source": {
       "images": 0,
+      "road": "unmeasured",
       "sessions": 0,
     },
     "status": undefined,
@@ -585,6 +613,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": undefined,
     "source": {
       "images": 0,
+      "road": "unmeasured",
       "sessions": 0,
     },
     "status": undefined,
@@ -601,6 +630,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": undefined,
     "source": {
       "images": 3,
+      "road": "unmeasured",
       "sessions": 0,
     },
     "status": undefined,
@@ -617,6 +647,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": undefined,
     "source": {
       "images": 2,
+      "road": "unmeasured",
       "sessions": 0,
     },
     "status": undefined,
@@ -633,6 +664,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "size": undefined,
     "source": {
       "images": 3,
+      "road": "unmeasured",
       "sessions": 0,
     },
     "status": undefined,

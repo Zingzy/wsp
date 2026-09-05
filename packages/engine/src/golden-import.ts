@@ -1106,9 +1106,10 @@ export function nodeMajorFor(floor: number, now: Date): NodeMajor | undefined {
 }
 
 /** Every installer pins a version; npm checks the registry's integrity hash for each tarball, uv is checksummed
- * by its release, git checkouts compare the commit. The catalog's agents install by their roads; the host owns
- * Claude Code's installer. Aider is not a catalog agent (its project state has no measured resolver, so wsp does
- * not ship it); its line stays for recipes that tick it: https://aider.chat/docs/install.html, the uv tool line. */
+ * by its release, git checkouts compare the commit. The catalog's agents install by their roads; Claude Code's
+ * installer is the catalog's GOLDEN_SETUP, which the setup stage runs, so it has no row here. Aider is not a
+ * catalog agent (its project state has no measured resolver, so wsp does not ship it); its line stays for recipes
+ * that tick it: https://aider.chat/docs/install.html, the uv tool line. */
 export const AGENT_INSTALLERS: Record<string, AgentInstaller> = {
   ...Object.fromEntries(CATALOG_AGENTS.filter(a => a.id !== "claude").map(a => [a.id, { name: a.name, install: agentInstallLine(a), smoke: smokeOf(a), ...(a.node !== undefined ? { node: a.node } : {}) }])),
   aider: { name: "Aider", install: `${UV_INSTALL}\nuv tool install --force --python 3.12 --with pip aider-chat==0.86.2`, smoke: "aider --version" },

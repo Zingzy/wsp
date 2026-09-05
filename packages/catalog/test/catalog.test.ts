@@ -63,8 +63,7 @@ describe("catalog", () => {
     expect(agentInstallLine(catalogEntry("claude")!)).toBe("curl -fsSL https://claude.ai/install.sh | bash");
     expect(agentInstallLine(catalogEntry("hermes")!)).toMatch(/git clone -q --depth 1 --branch v[\d.]+ https:\/\/github\.com\/NousResearch\/hermes-agent\.git/);
     expect(() => agentInstallLine(catalogEntry("git")!)).toThrow(/apt road/);
-    expect(() => agentInstallLine({ ...catalogEntry("wrangler")!, kind: "agent" })).toThrow(/no version/);
-    for (const e of CATALOG) if (e.kind === "tool") expect(e.projectState, e.id).toEqual([]);
+    expect(() => agentInstallLine({ ...catalogEntry("codex")!, installRoad: { road: "npm", package: "wrangler" } })).toThrow(/no version/);
   });
 
   it("names the evidence behind every default: sessions on this Mac and lab images that ship it", () => {
@@ -73,8 +72,17 @@ describe("catalog", () => {
       expect(e.source.images, e.id).toBeGreaterThanOrEqual(0);
       expect(e.source.images, e.id).toBeLessThanOrEqual(5);
     }
-    expect(CATALOG.filter(e => e.defaultOn).map(e => e.id)).toEqual(["claude", "git", "gh", "curl", "jq", "ripgrep", "node", "pnpm", "python", "uv", "docker", "agent-browser"]);
+    expect(CATALOG.filter(e => e.kind === "tool" && e.defaultOn).map(e => e.id)).toEqual(["git", "gh", "curl", "jq", "ripgrep", "node", "pnpm", "python", "uv", "docker", "agent-browser"]);
     expect(catalogEntry("agent-browser")?.source.note).toMatch(/one Mac/);
+  });
+
+  it("says which roads no guest has run yet", () => {
+    const unmeasured = CATALOG.filter(e => e.source.road === "unmeasured").map(e => e.id);
+    expect(unmeasured).toEqual([
+      "git", "gh", "curl", "jq", "ripgrep", "pnpm", "python", "uv", "docker", "agent-browser",
+      "rust", "maven", "wrangler", "cloudflared", "aws", "vercel", "netlify", "fly", "supabase", "railway", "doppler", "op", "ffmpeg", "yq", "git-lfs", "tmux",
+    ]);
+    for (const e of CATALOG_AGENTS) expect(e.source.road, e.id).toBe("measured");
   });
 
   it("carries no token-looking value", () => {
@@ -89,11 +97,11 @@ describe("catalog", () => {
       argument: roadArgument(e.installRoad),
       signIn: e.signIn.kind,
       status: e.signIn.status?.command,
-      defaultOn: e.defaultOn,
+      ...(e.kind === "tool" ? { defaultOn: e.defaultOn } : {}),
       source: e.source,
       size: e.size,
       configPaths: e.configPaths.length,
-      projectState: e.projectState.map(p => p.state),
+      projectState: e.kind === "agent" ? e.projectState.map(p => p.state) : [],
     }));
     expect(rows).toMatchSnapshot();
   });
