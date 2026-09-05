@@ -203,6 +203,9 @@ describe("daemon WS server", () => {
       await forbidden("git.status", { cwd: "." });
       await forbidden("ports.watch");
       await forbidden("sys.watch");
+      await forbidden("proc.watch");
+      await forbidden("proc.inspect", { pid: 1 });
+      await forbidden("proc.kill", { pid: 1, signal: "TERM" });
       await forbidden("manifest.get");
       await forbidden("tunnel.open", { tunnelId: "other", port: guestPort + 1 });
       expect(daemon.ptys.list().length).toBe(before);

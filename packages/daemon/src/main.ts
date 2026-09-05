@@ -12,6 +12,7 @@ import { InboxWatcher } from "./inbox.js";
 import { ProcessManifest, type ManifestOptions } from "./manifest.js";
 import { linuxModeProbe, ModeWatcher, type ModeProbe } from "./mode.js";
 import { PortWatcher, procNetTcpSource, type PortOpenEvent, type PortSnapshotSource } from "./ports.js";
+import { killProcess, ProcSampler } from "./proc.js";
 import { PtyManager } from "./pty-manager.js";
 import { procSysSource, SysSampler, type SysSource } from "./sys.js";
 import { localhostPortOf, settledLocalPorts } from "./local-urls.js";
@@ -43,6 +44,10 @@ export interface DaemonOptions {
   modeIntervalMs?: number;
   sysSource?: SysSource;
   sysIntervalMs?: number;
+  /** A directory laid out like /proc, for tests on darwin; the real one otherwise. */
+  procRoot?: string;
+  procPasswdPath?: string;
+  procIntervalMs?: number;
   /** Every fs.* and git.* path must resolve inside this directory; HOME by default. */
   root?: string;
   /** Unix socket the browser shim posts URLs to; absent means no shim socket (local and test daemons). */
@@ -99,6 +104,8 @@ interface ConnState {
   tunnels: Map<string, Socket>;
   /** Set when the auth frame named a port: only tunnel ops on it and ping are answered. */
   port?: number;
+  /** This socket's proc.watch, so proc.unwatch can end it before the socket does. */
+  unwatchProcs?: () => void;
 }
 
 /** Laptop connections one socket may hold open through the forward at once. */
@@ -126,6 +133,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
   let portWatcher: PortWatcher | null = null;
   let inboxWatcher: InboxWatcher | null = null;
   let sysSampler: SysSampler | null = null;
+  let procSampler: ProcSampler | null = null;
 
   const getPortWatcher = () => {
     if (!portWatcher) {
@@ -155,6 +163,16 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
       ...(opts.sysIntervalMs !== undefined ? { intervalMs: opts.sysIntervalMs } : {}),
     });
     return sysSampler;
+  };
+  const getProcSampler = () => {
+    procSampler ??= new ProcSampler({
+      // An exited pty's pid can be reused by a stranger; only live shells carry the label.
+      ptys: () => ptys.list().filter(p => !p.exited),
+      ...(opts.procRoot !== undefined ? { procRoot: opts.procRoot } : {}),
+      ...(opts.procPasswdPath !== undefined ? { passwdPath: opts.procPasswdPath } : {}),
+      ...(opts.procIntervalMs !== undefined ? { intervalMs: opts.procIntervalMs } : {}),
+    });
+    return procSampler;
   };
 
   // Inert until a pty.attach; the Linux-only default probe fails silently on
@@ -188,7 +206,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
       else if (port === undefined) spotter.spot(p => broadcast({ type: "callback.port", port: p }));
     },
   };
-  const ctx: Ctx = { ptys, manifest, modes, root, getPortWatcher, getInboxWatcher, getSysSampler, spotter, broadcast };
+  const ctx: Ctx = { ptys, manifest, modes, root, getPortWatcher, getInboxWatcher, getSysSampler, getProcSampler, spotter, broadcast };
   let openSocket: OpenSocket | undefined;
   if (opts.openSocketPath !== undefined) {
     try {
@@ -286,6 +304,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
       portWatcher?.stop();
       inboxWatcher?.stop();
       sysSampler?.stop();
+      procSampler?.stop();
       modes.stop();
       await openSocket?.close();
       for (const ws of wss.clients) ws.terminate();
@@ -303,6 +322,7 @@ interface Ctx {
   getPortWatcher(): PortWatcher;
   getInboxWatcher(): InboxWatcher;
   getSysSampler(): SysSampler;
+  getProcSampler(): ProcSampler;
   spotter: CallbackSpotter;
   broadcast(event: DaemonEvent): void;
 }
@@ -348,6 +368,16 @@ function requireString(msg: Request, key: string): string {
   const v = msg[key];
   if (typeof v !== "string") throw new OpError("bad-request", `${key} must be a string`);
   return v;
+}
+
+// Linux pid_max ceiling; above int32 process.kill throws instead of ESRCH, so both proc ops refuse alike.
+const PID_MAX = 4_194_304;
+function requirePid(msg: Request): number {
+  const pid = msg["pid"];
+  if (!Number.isInteger(pid) || (pid as number) < 1 || (pid as number) > PID_MAX) {
+    throw new OpError("bad-request", `pid must be an integer between 1 and ${PID_MAX}`);
+  }
+  return pid as number;
 }
 
 function optionalEnum<T extends string>(msg: Request, key: string, allowed: readonly T[]): T | undefined {
@@ -474,6 +504,36 @@ async function handle(ws: WebSocket, state: ConnState, ctx: Ctx, msg: Request): 
     }
     case "sys.watch": {
       state.detaches.push(ctx.getSysSampler().subscribe(s => push(ws, s)));
+      reply(ws, msg.id, {});
+      return;
+    }
+    case "proc.watch": {
+      if (state.unwatchProcs === undefined) {
+        const un = ctx.getProcSampler().subscribe(e => push(ws, e));
+        state.unwatchProcs = un;
+        state.detaches.push(un);
+      }
+      reply(ws, msg.id, {});
+      return;
+    }
+    case "proc.unwatch": {
+      const un = state.unwatchProcs;
+      if (un !== undefined) {
+        un();
+        state.detaches = state.detaches.filter(d => d !== un);
+        state.unwatchProcs = undefined;
+      }
+      reply(ws, msg.id, {});
+      return;
+    }
+    case "proc.inspect": {
+      reply(ws, msg.id, await ctx.getProcSampler().inspect(requirePid(msg)));
+      return;
+    }
+    case "proc.kill": {
+      const signal = optionalEnum(msg, "signal", ["TERM", "KILL"] as const);
+      if (signal === undefined) throw new OpError("bad-request", "signal is required");
+      killProcess(requirePid(msg), signal, { self: process.pid, parent: process.ppid });
       reply(ws, msg.id, {});
       return;
     }

@@ -633,6 +633,39 @@ export type PtyListEntry = z.infer<typeof PtyListEntry>;
 export const PtyListReply = z.object({ ptys: z.array(PtyListEntry) });
 export type PtyListReply = z.infer<typeof PtyListReply>;
 
+export const ProcSignal = z.enum(["TERM", "KILL"]);
+export type ProcSignal = z.infer<typeof ProcSignal>;
+
+/** One process as /proc/[pid] shows it. cpu is its busy share of one core
+ * over the interval (a threaded process can pass 100); rss in bytes;
+ * startedAt epoch milliseconds; cmdline the first 200 bytes with the NULs as
+ * spaces, empty for a kernel thread; pty names the daemon pty whose shell
+ * this is. The environment never travels: it holds tokens. */
+export const ProcEntry = z.object({
+  pid: z.number().int(),
+  ppid: z.number().int(),
+  user: z.string(),
+  state: z.string(),
+  comm: z.string(),
+  cmdline: z.string(),
+  cpu: z.number(),
+  rss: z.number(),
+  startedAt: z.number(),
+  pty: z.string().optional(),
+});
+export type ProcEntry = z.infer<typeof ProcEntry>;
+
+/** cwd is null when unreadable; ports are the TCP ports this pid listens on;
+ * children are the pids whose parent it is, as of the last snapshot. */
+export const ProcInspectReply = z.object({
+  pid: z.number().int(),
+  cwd: z.string().nullable(),
+  ports: z.array(z.number().int()),
+  threads: z.number().int(),
+  children: z.array(z.number().int()),
+});
+export type ProcInspectReply = z.infer<typeof ProcInspectReply>;
+
 export const DaemonRequest = z.discriminatedUnion("op", [
   z.object({
     id: reqId,
@@ -664,6 +697,18 @@ export const DaemonRequest = z.discriminatedUnion("op", [
    * closes. One sampler serves every subscriber and stops with the last one;
    * the first sample lands one interval after the reply, since cpu is a delta. */
   z.object({ id: reqId, op: z.literal("sys.watch") }),
+  /** Streams proc.snapshot events to this socket every two seconds until
+   * proc.unwatch or the socket closes. The daemon reads /proc only while some
+   * socket watches; the first snapshot lands one interval after the reply,
+   * since cpu is a delta. */
+  z.object({ id: reqId, op: z.literal("proc.watch") }),
+  z.object({ id: reqId, op: z.literal("proc.unwatch") }),
+  /** One process in depth, replied as a ProcInspectReply; this is the only op
+   * that scans /proc/net, and only for that pid's sockets. */
+  z.object({ id: reqId, op: z.literal("proc.inspect"), pid: z.number().int().positive() }),
+  /** Sends the signal. pid 1, the daemon and the daemon's parent are refused
+   * with code forbidden; a pid that is gone answers not-found. */
+  z.object({ id: reqId, op: z.literal("proc.kill"), pid: z.number().int().positive(), signal: ProcSignal }),
   z.object({ id: reqId, op: z.literal("ping") }),
   /** Lists one directory's direct children, each request under its own entry
    * cap. Paths are relative to the daemon's workspace root (HOME unless
@@ -726,6 +771,18 @@ export const SysSample = z.object({
 });
 export type SysSample = z.infer<typeof SysSample>;
 
+/** Every process the daemon read this tick. daemon is its own pid, so a
+ * client can name it; total counts /proc entries, procs holds at most the
+ * first thousand of them by pid. */
+export const ProcSnapshot = z.object({
+  type: z.literal("proc.snapshot"),
+  at: z.number(),
+  daemon: z.number().int(),
+  total: z.number().int(),
+  procs: z.array(ProcEntry),
+});
+export type ProcSnapshot = z.infer<typeof ProcSnapshot>;
+
 export const DaemonEvent = z.discriminatedUnion("type", [
   /** The first frame after the auth reply: root is the
    * absolute directory every fs.* and git.* path must resolve inside, so a
@@ -775,6 +832,7 @@ export const DaemonEvent = z.discriminatedUnion("type", [
    * person would click. Only the port travels; the host forwards it here. */
   z.object({ type: z.literal("localhost.url"), port: RelayPort }),
   SysSample,
+  ProcSnapshot,
 ]);
 export type DaemonEvent = z.infer<typeof DaemonEvent>;
 

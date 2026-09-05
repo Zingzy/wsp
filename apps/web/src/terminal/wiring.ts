@@ -9,6 +9,7 @@
 import { getBrowser } from "../browser/model.js";
 import { provideDaemonRoot, provideDaemonWire } from "../files/wire.js";
 import { getLive } from "../machine/live.js";
+import { getProcs } from "../machine/procs.js";
 import type { useStore } from "../protocol/store.js";
 import { useSignInStore } from "../shell/signInStore.js";
 import { connectDaemonLink, type DaemonLink, type DaemonLinkOptions } from "./daemon-link.js";
@@ -72,6 +73,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
             } else if (e.type === "browser.open") useSignInStore.getState().announce(w.id, e.url, e.port);
             else if (e.type === "daemon.hello") provideDaemonRoot(w.id, e.root);
             else if (e.type === "sys.sample") getLive(w.id).feedSample(e);
+            else if (e.type === "proc.snapshot") getProcs(w.id).feedSnapshot(e);
             else wt.feedEvent(e);
           },
           // "dead" is the link we closed on purpose; the model hears "connecting" instead.
@@ -83,6 +85,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
             if (s !== "dead") {
               wt.feedStatus(s);
               getLive(w.id).feedStatus(s);
+              getProcs(w.id).feedStatus(s);
             }
           },
         });
@@ -91,6 +94,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
         unlink(entry);
         wt.feedStatus("connecting");
         getLive(w.id).feedStatus("connecting");
+        getProcs(w.id).feedStatus("connecting");
       }
     }
     for (const [id, entry] of wired) {
