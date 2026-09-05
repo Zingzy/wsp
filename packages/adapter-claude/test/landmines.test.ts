@@ -93,6 +93,37 @@ describe("buildCommand", () => {
     expect(cmd).toContain(String.raw`'don'\''t run $(reboot) ` + "`id`'");
   });
 
+  it("maps the picked model, effort and permission mode to the CLI's flags", () => {
+    const cmd = buildCommand({ prompt: "x", sessionId, model: "claude-opus-5", effort: "high", permissionMode: "acceptEdits" });
+    expect(cmd).toContain("--model 'claude-opus-5'");
+    expect(cmd).toContain("--effort 'high'");
+    expect(cmd).toContain("--permission-mode 'acceptEdits'");
+    expect(cmd).not.toContain("--dangerously-skip-permissions");
+  });
+
+  it("no permission mode and bypassPermissions both skip permissions; default sends no permission flag at all", () => {
+    expect(buildCommand({ prompt: "x", sessionId })).toContain("--dangerously-skip-permissions");
+    const bypass = buildCommand({ prompt: "x", sessionId, permissionMode: "bypassPermissions" });
+    expect(bypass).toContain("--dangerously-skip-permissions");
+    expect(bypass).not.toContain("--permission-mode");
+    const plain = buildCommand({ prompt: "x", sessionId, permissionMode: "default" });
+    expect(plain).not.toContain("--dangerously-skip-permissions");
+    expect(plain).not.toContain("--permission-mode");
+  });
+
+  it("sends no model or effort flag when none was picked", () => {
+    const cmd = buildCommand({ prompt: "x", sessionId });
+    expect(cmd).not.toContain("--model");
+    expect(cmd).not.toContain("--effort");
+  });
+
+  it("rejects a picked value that is not a plain slug", () => {
+    expect(() => buildCommand({ prompt: "x", sessionId, model: "opus; rm -rf /" })).toThrow(/model/);
+    expect(() => buildCommand({ prompt: "x", sessionId, effort: "" })).toThrow(/effort/);
+    expect(() => buildCommand({ prompt: "x", sessionId, permissionMode: "plan mode" })).toThrow(/permissionMode/);
+    expect(buildCommand({ prompt: "x", sessionId, model: "claude-opus-5[1m]" })).toContain("--model 'claude-opus-5[1m]'");
+  });
+
   it("rejects zero or two session identifiers", () => {
     expect(() => buildCommand({ prompt: "x" })).toThrow(/exactly one/);
     expect(() => buildCommand({ prompt: "x", sessionId, resume: sessionId })).toThrow(

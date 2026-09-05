@@ -260,24 +260,7 @@ export interface ProviderSlashCommand {
   readonly input?: { readonly hint: string };
 }
 
-export interface ProviderModel {
-  readonly slug: string;
-  readonly name: string;
-  readonly shortName?: string;
-  readonly isCustom: boolean;
-  readonly isDefault?: boolean;
-}
-
-export interface PermissionMode {
-  readonly slug: string;
-  readonly name: string;
-  readonly description?: string;
-  readonly isDefault?: boolean;
-}
-
 export interface HarnessCatalog {
   readonly harness: string;
   readonly slashCommands: ReadonlyArray<ProviderSlashCommand>;
-  readonly models: ReadonlyArray<ProviderModel>;
-  readonly permissionModes: ReadonlyArray<PermissionMode>;
 }

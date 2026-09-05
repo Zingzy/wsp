@@ -50,6 +50,7 @@ import type {
   GoldenBuilderView,
   GoldenLogin,
   GoldenStage,
+  HarnessCatalog,
   RecipeDigest,
   PortProbeView,
   PortReachView,
@@ -69,6 +70,7 @@ import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy, idleReason } from
 import { connectDaemon, type DaemonReach } from "./reach.js";
 import { createStatusTracker, machineStateOf, type StatusApi, type StatusWatchOptions } from "./status.js";
 import type { Store } from "./store.js";
+import { HARNESS_CATALOGS } from "./harness-catalog.js";
 
 // --- adapter port -------------------------------------------------------------
 
@@ -81,6 +83,10 @@ export interface HarnessStartOptions {
   prompt: string;
   resume?: string;
   cwd?: string;
+  /** Catalog slugs the adapter maps to its CLI's flags; absent leaves the CLI's default. */
+  model?: string;
+  effort?: string;
+  permissionMode?: string;
   onEvent: (event: AdapterEvent) => void;
 }
 
@@ -383,13 +389,17 @@ export interface Runtime {
   readonly sessions: {
     start(
       workspaceId: string,
-      opts: { prompt: string; harness?: string; resume?: string; cwd?: string },
+      opts: { prompt: string; harness?: string; resume?: string; cwd?: string; model?: string; effort?: string; permissionMode?: string },
     ): Promise<SessionHandle>;
     list(workspaceId?: string): SessionView[];
     /** The workspace's persisted session events, oldest first; a chat replays these on mount. */
     history(workspaceId: string): Promise<SessionEvent[]>;
     /** Stops the session's running turn through its harness; a turn already over or an unknown id answers, never throws. */
     interrupt(sessionId: string): Promise<SessionInterruptResult>;
+  };
+  readonly harnesses: {
+    /** What each harness's CLI takes at launch; the composer's pickers render from this. */
+    list(): HarnessCatalog[];
   };
   readonly golden: {
     build(opts: GoldenBuildRequest): Promise<{ manifest: GoldenManifest; version: GoldenVersion }>;
@@ -1430,6 +1440,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         prompt: o.prompt,
         startedAt: Date.now(),
         ...(o.cwd !== undefined ? { cwd: o.cwd } : {}),
+        ...(o.model !== undefined ? { model: o.model } : {}),
+        ...(o.effort !== undefined ? { effort: o.effort } : {}),
+        ...(o.permissionMode !== undefined ? { permissionMode: o.permissionMode } : {}),
       };
       const turnId = randomUUID();
       const threadId = threadOf(workspaceId, o.resume);
@@ -1442,6 +1455,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           case "session.start": {
             sessionView.claudeSessionId = sessionId;
             if (event.cwd !== undefined) sessionView.cwd = event.cwd;
+            if (event.model !== undefined) sessionView.model = event.model;
             entry.record.claudeSessionId = sessionId;
             void persist(entry.record);
             record({
@@ -1498,6 +1512,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           prompt: o.prompt,
           ...(o.resume !== undefined ? { resume: o.resume } : {}),
           ...(o.cwd !== undefined ? { cwd: o.cwd } : {}),
+          ...(o.model !== undefined ? { model: o.model } : {}),
+          ...(o.effort !== undefined ? { effort: o.effort } : {}),
+          ...(o.permissionMode !== undefined ? { permissionMode: o.permissionMode } : {}),
           onEvent: forward,
         });
       } catch (e) {
@@ -2158,6 +2175,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     backend,
     workspaces,
     sessions: sessionsApi,
+    harnesses: { list: () => HARNESS_CATALOGS.map(c => ({ ...c })) },
     golden,
     status,
     reap: async olderThanMs => {

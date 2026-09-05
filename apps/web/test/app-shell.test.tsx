@@ -95,6 +95,14 @@ describe("app shell", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: "New thread" })).toBeNull());
   });
 
+  it("the header names the model and effort the selected workspace's latest session runs with", async () => {
+    await mountShell();
+    act(() => useStore.setState({ sessions: { ws_a: [{ id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", model: "claude-opus-5", effort: "high" }] } }));
+    const label = document.querySelector("[data-thread-model]");
+    expect(label?.textContent).toContain("claude-opus-5");
+    expect(label?.textContent).toContain("high");
+  });
+
   it("toggles the right panel from the layout control", async () => {
     await mountShell();
     fireEvent.click(screen.getByRole("button", { name: "Toggle right panel" }));

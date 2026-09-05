@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
 import type { ForwardEvent, PortForward } from "@wsp/protocol";
 import { DAEMON_TOKEN_SET } from "../src/daemon-token.js";
-import { createRuntime, type HarnessAdapterFactory, type HarnessSession } from "../src/runtime.js";
+import { createRuntime, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions } from "../src/runtime.js";
 import { serveRuntime, type ForwardsSource, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
 import { WsClient } from "./ws-client.js";
@@ -151,10 +151,12 @@ function stoppableHarness() {
   const h = {
     sessionId,
     interrupts: 0,
+    lastStart: undefined as HarnessStartOptions | undefined,
     complete: () => end({ status: "completed", text: "done" }),
     adapter: (() => ({
       start: o => {
         onEvent = o.onEvent;
+        h.lastStart = o;
         onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" });
         return {
           localId: sessionId,
@@ -170,6 +172,25 @@ function stoppableHarness() {
   };
   return h;
 }
+
+describe("serveRuntime harness catalog", () => {
+  it("harnesses.list replies with one catalog per harness and sessions.start carries the picks through", async () => {
+    const h = stoppableHarness();
+    const runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    const listed = await c.request("harnesses.list");
+    const catalogs = listed["harnesses"] as { harness: string; efforts: { value: string }[] }[];
+    expect(catalogs.find(x => x.harness === "claude")?.efforts.map(o => o.value)).toContain("high");
+    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const workspaceId = (created["workspace"] as { id: string }).id;
+    const started = await c.request("sessions.start", { workspaceId, prompt: "go", model: "claude-opus-5", effort: "high", permissionMode: "plan" });
+    expect(started["session"]).toMatchObject({ model: "claude-sonnet-4-5", effort: "high", permissionMode: "plan" });
+    expect(h.lastStart).toMatchObject({ model: "claude-opus-5", effort: "high", permissionMode: "plan" });
+    h.complete();
+    c.close();
+  });
+});
 
 describe("serveRuntime session interrupt", () => {
   type Harness = ReturnType<typeof stoppableHarness>;

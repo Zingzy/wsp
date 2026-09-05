@@ -6,6 +6,7 @@
 // token; the store re-runs its standing fetches when the status comes back
 // to live.
 import {
+  HarnessCatalog,
   PortForward,
   SessionInterruptOutcome,
   type Capabilities,
@@ -263,6 +264,9 @@ export interface Api {
    * accepted means the turn's done is already on the wire; not-running and not-found are answers, not errors. Optional so
    * fixtures that never stop a turn need not fake it; the composer offers no stop without it. */
   interruptSession?(sessionId: string): Promise<SessionInterruptOutcome>;
+  /** What each harness's CLI takes at launch; the composer's pickers render from it. Optional so fixtures without
+   * pickers need not fake it; without it the composer shows none. */
+  listHarnesses?(): Promise<HarnessCatalog[]>;
   subscribe(fn: (e: ProtocolEvent) => void): () => void;
   /** The named golden manifest, undefined on a fresh install: that absence is what points the page at wsp init. */
   getGolden(name?: string): Promise<GoldenManifest | undefined>;
@@ -285,6 +289,10 @@ export interface StartSessionOptions {
   harness?: string;
   resume?: string;
   cwd?: string;
+  /** Values from the harness catalog; absent leaves the CLI's own default for that flag. */
+  model?: string;
+  effort?: string;
+  permissionMode?: string;
 }
 
 /** The created view plus the runtime's notice when it stopped a builder kept after a save to make room. */
@@ -328,6 +336,8 @@ export function makeApi(c: ProtocolClient): Api {
     // Parsed, not trusted: an outcome outside the enum must not read as accepted.
     interruptSession: async sessionId =>
       SessionInterruptOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.interrupt", { sessionId })).outcome),
+    // Parsed, not trusted: a picker renders only values the wire type vouches for.
+    listHarnesses: async () => HarnessCatalog.array().parse((await c.request<{ harnesses?: unknown }>("harnesses.list")).harnesses),
     subscribe: fn => c.subscribe(fn),
     getGolden: async (name = "default") => (await c.request<{ manifest?: GoldenManifest }>("golden.get", { name })).manifest,
     listSnapshots: async name =>
