@@ -305,11 +305,11 @@ describe("connectDaemonSocket", () => {
     socket = await connectDaemonSocket({ url, token, heartbeatMs: 50 });
     const reply = await socket.op("manifest.get");
     expect(reply["ok"]).toBe(true);
-    await new Promise(r => setTimeout(r, 300));
     // Each beat is a completed op round trip, app-level because browsers
     // cannot send protocol pings.
+    for (const deadline = Date.now() + 4000; socket.beats < 2 && Date.now() < deadline; ) await new Promise(r => setTimeout(r, 10));
     expect(socket.beats).toBeGreaterThanOrEqual(2);
-  });
+  }, 15_000);
 
   it("receives inbox events after inbox.watch", async () => {
     const { url, token } = await startLocalDaemon();

@@ -209,6 +209,7 @@ describe("machineExecStream over this machine's bash", () => {
 });
 
 describe("machineExecStream polling a script that ends at once", () => {
+  // Twenty rounds of three to five real bash execs each: 3 s on an idle Mac, 24 s seen at load average 330.
   it("keeps the last line and the exit code when the poll lands as the script ends", async () => {
     const { machine, runDir } = localGuest();
     const results: { lines: string[]; exited: number | null }[] = [];
@@ -219,5 +220,5 @@ describe("machineExecStream polling a script that ends at once", () => {
       results.push({ lines, exited: await stream.exited });
     }
     expect(results).toEqual(Array.from({ length: 20 }, () => ({ lines: ["hi"], exited: 0 })));
-  });
+  }, 60_000);
 });

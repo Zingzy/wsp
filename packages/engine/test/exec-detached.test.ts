@@ -230,5 +230,6 @@ describe("execDetached over this machine's bash", () => {
     expect(pid).toBeGreaterThan(0);
     await new Promise(r => setTimeout(r, 200));
     expect(await machine.exec(`kill -0 ${pid} 2>/dev/null && echo alive || echo gone`)).toMatchObject({ stdout: "gone\n" });
+    expect((await machine.exec(`ls ${runDir}`)).stdout).toBe("");
   }, 15_000);
 });

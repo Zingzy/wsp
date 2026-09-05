@@ -8,7 +8,8 @@ describe("syntaxHighlighting", () => {
     const first = getSyntaxHighlighterPromise("typescript");
     expect(getSyntaxHighlighterPromise("typescript")).toBe(first);
     const highlighter = await first;
-    const html = highlighter.codeToHtml("const a: number = 1;", { lang: "typescript", theme: "pierre-dark" });
+    // The grammar's regexes compile in the wasm engine on the first tokenize, and shiki's 500 ms per-line limit cuts a cold line short on a loaded machine.
+    const html = highlighter.codeToHtml("const a: number = 1;", { lang: "typescript", theme: "pierre-dark", tokenizeTimeLimit: 0 });
     expect(html).toContain('<pre class="shiki pierre-dark"');
     expect(html.match(/<span style="color:/g)?.length ?? 0).toBeGreaterThan(3);
   });
