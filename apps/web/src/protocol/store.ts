@@ -226,7 +226,6 @@ export const useStore = create<State>((set, get) => {
   };
 });
 
-export function useWorkspaces(): WorkspaceView[] { return useStore(s => s.workspaces); }
 export function useSelectedId(): string | null { return useStore(s => s.selectedId); }
 export function useWorkspace(id: string | null): WorkspaceView | null {
   return useStore(s => (id ? s.workspaces.find(w => w.id === id) ?? null : null));
@@ -240,9 +239,6 @@ export function useCost(id: string | null): CostTick | null {
 export function useSpending(id: string | null): boolean {
   return useStore(s => (id ? (s.spending[id] ?? 0) > 0 : false));
 }
-export function useSession(workspaceId: string | null): SessionView[] {
-  return useStore(s => (workspaceId ? s.sessions[workspaceId] ?? NO_SESSIONS : NO_SESSIONS));
-}
 export function useReady(): boolean { return useStore(s => s.ready); }
 export function useForwards(): PortForward[] { return useStore(s => s.forwards); }
 /** Whether localhost:port on this computer is a page of that workspace to open: a printed link, not a sign-in callback. */
@@ -251,7 +247,7 @@ export function useForwarded(workspaceId: string | null, port: number | null): b
 }
 export function useCapabilities(): Capabilities | null { return useStore(s => s.capabilities); }
 
-/** Subscribe a component to raw protocol events (terminal/chat/browser tabs use this). */
+/** Subscribe a component to raw protocol events (the thread, terminal and browser surfaces use this). */
 export function useProtocolEvents(fn: (e: ProtocolEvent) => void): void {
   const api = useStore(s => s.api);
   useEffect(() => (api ? api.subscribe(fn) : undefined), [api, fn]);

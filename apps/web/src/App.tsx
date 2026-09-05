@@ -3,9 +3,10 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import type { GoldenBuilderView } from "@wsp/protocol";
 import { makeApi, ProtocolClient } from "./protocol/client.js";
 import { useReady, useSelectedId, useStore } from "./protocol/store.js";
-import { TabStrip } from "./components/TabStrip.js";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./components/ui/empty.js";
 import { WorkspaceTerminalDrawer } from "./components/WorkspaceTerminalDrawer.js";
 import { AppShell } from "./shell/AppShell.js";
+import { WorkspaceThread } from "./shell/WorkspaceThread.js";
 import { wireTerminals } from "./terminal/wiring.js";
 import { Wizard, type ChecklistItem, type KeyFlags } from "./wizard/Wizard.js";
 import { Gallery } from "./gallery/Gallery.js";
@@ -50,15 +51,25 @@ export function App({
 
 type Golden = "unknown" | "none" | "present";
 
-/** The center slot: the tabs, with the terminal drawer under them. */
+/** The center slot: the selected workspace's thread, with the terminal drawer under it. */
 function WorkspaceCenter() {
   const workspaceId = useSelectedId();
+  if (!workspaceId) {
+    return (
+      <Empty className="flex-1">
+        <EmptyHeader>
+          <EmptyTitle>Pick a workspace to continue</EmptyTitle>
+          <EmptyDescription>Select a workspace in the sidebar or create a new one.</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
+  }
   return (
     <>
       <div className="flex min-h-0 flex-1 flex-col">
-        <TabStrip />
+        <WorkspaceThread workspaceId={workspaceId} />
       </div>
-      {workspaceId ? <WorkspaceTerminalDrawer workspaceId={workspaceId} /> : null}
+      <WorkspaceTerminalDrawer workspaceId={workspaceId} />
     </>
   );
 }
@@ -72,7 +83,7 @@ export function Shell({ keys, builder, checklist }: { keys?: KeyFlags; builder?:
   useEffect(() => {
     if (!api) return;
     let live = true;
-    // A failed lookup falls through to the app; the rail's own create reports the error.
+    // A failed lookup falls through to the app; the sidebar's own create reports the error.
     void api
       .getGolden()
       .then(m => { if (live) setGolden(m ? "present" : "none"); })

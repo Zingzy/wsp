@@ -169,7 +169,7 @@ describe("command palette", () => {
   it("stays shut while the terminal owns focus", async () => {
     await mountShell();
     const term = document.createElement("div");
-    term.className = "xterm";
+    term.dataset["terminalOwner"] = "drawer";
     const ta = document.createElement("textarea");
     term.appendChild(ta);
     document.body.appendChild(term);

@@ -8,8 +8,8 @@ import { defineConfig } from "vitest/config";
 const pkg = (path: string) => fileURLToPath(new URL(`../../packages/${path}`, import.meta.url));
 
 export default defineConfig({
-  // Tailwind only touches stylesheets that import it; the CSS modules of the
-  // old tabs keep going through Vite's own pipeline.
+  // Tailwind only touches stylesheets that import it; the wizard's CSS module
+  // keeps going through Vite's own pipeline.
   plugins: [react(), tailwindcss()],
   // noVNC's H.264 decoder module uses top-level await, which vite's default
   // es2020 target rejects. build.target covers only the production bundle;

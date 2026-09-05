@@ -11,6 +11,22 @@ snapshot and restores your files. Claude runs inside them over the
 provider's exec channel, and your browser reaches each workspace's daemon
 directly.
 
+![The shell: workspaces and their threads in the sidebar, the selected workspace's thread and composer in the center, the surface picker in the right panel](docs/screenshots/shell.png)
+
+*The shell. Workspaces and their threads on the left, the thread with its composer in the center, the right panel's surface picker.*
+
+![The terminal drawer under the thread, a shell on the workspace's daemon](docs/screenshots/terminal.png)
+
+*The terminal drawer under the thread: a shell on the workspace, with tabs and splits.*
+
+![The browser pane framing a server the workspace is listening on](docs/screenshots/browser.png)
+
+*The browser pane: the workspace's listening ports as local servers, opened in place.*
+
+![The machine panel: state, reach, size, auto-nap, usage and the golden lineage](docs/screenshots/machine.png)
+
+*The machine panel: state, reach, size and auto-nap, spend so far, the golden lineage, pause and upgrade.*
+
 ## Quickstart
 
 Node 22+, pnpm, and a Solari API key. Add an Anthropic key if you want

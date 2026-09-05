@@ -70,7 +70,7 @@ async function mountShell() {
 }
 
 const tabbar = () => document.querySelector("[data-right-panel-tabbar]");
-// Lets the kit's post-mount effects (scroll fades, the meta panel's lineage fetch) settle inside act.
+// Lets the kit's post-mount effects (scroll fades, the machine surface's lineage fetch) settle inside act.
 const settle = () => act(() => new Promise<void>(resolve => setTimeout(resolve, 0)));
 
 describe("app shell", () => {

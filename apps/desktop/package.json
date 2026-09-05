@@ -9,7 +9,7 @@
     "build:app": "tsup && node scripts/stage.mjs",
     "build": "pnpm run build:deps && pnpm run build:app && electron-builder --config electron-builder.yml --mac --arm64 --x64 --linux",
     "start": "pnpm run build:app && electron build/app",
-    "smoke": "WSP_DESKTOP_SMOKE=1 vitest run --project node apps/desktop/test/smoke.electron.test.ts"
+    "smoke": "cd ../.. && WSP_DESKTOP_SMOKE=1 vitest run --project node apps/desktop/test/smoke.electron.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

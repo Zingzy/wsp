@@ -3,7 +3,7 @@
 // renders no rows. This gives every element a size (a 600px viewport for the
 // list's scroll node, 90px for everything else) and a ResizeObserver that
 // reports it, which is enough for the list to window rows the way a browser
-// would. Opt in per test file; xterm's own measuring must not see it.
+// would. Opt in per test file; the terminal surface's own measuring must not see it.
 const VIEWPORT_CLASS = "overscroll-y-contain";
 const VIEWPORT_PX = 600;
 const ROW_PX = 90;

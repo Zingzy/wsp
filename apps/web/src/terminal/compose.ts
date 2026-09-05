@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Local-line compose, as a pure table. In line mode (slave termios ICANON)
-// printable keys accumulate in a client-side buffer painted at the xterm
+// printable keys accumulate in a client-side buffer painted on the terminal
 // cursor, and Enter ships the whole line in one pty.write; every other key
 // flushes the buffer and passes through untouched, so completion, history and
 // interrupts need no special cases. In raw mode every key is passthrough.
-// Nothing here touches React or xterm: callers apply the returned writes.
+// Nothing here touches React or the terminal surface: callers apply the returned writes.
 import type { DaemonEvent } from "@wsp/protocol";
 
 export type PtyModeReport = Pick<Extract<DaemonEvent, { type: "pty.mode" }>, "mode" | "echo">;
@@ -17,7 +17,7 @@ export interface ComposeStep {
   readonly state: ComposeState;
   /** Bytes for pty.write, "" for none. */
   readonly toPty: string;
-  /** Bytes for the local xterm, "" for none. */
+  /** Bytes for the local terminal screen, "" for none. */
   readonly toScreen: string;
 }
 
@@ -37,12 +37,12 @@ function isPrintable(key: string): boolean {
 
 // One cell per code point: a wide glyph leaves a stray cell until the pty
 // repaints the line, and a line that wrapped cannot be walked back past
-// column zero (xterm has reverse wraparound off).
+// column zero (the terminal has reverse wraparound off).
 function erase(text: string): string {
   return "\b \b".repeat([...text].length);
 }
 
-/** What the xterm currently shows of the local buffer. */
+/** What the terminal screen currently shows of the local buffer. */
 function painted(s: ComposeState): string {
   return s.mode === "line" && s.echo ? s.buffer : "";
 }

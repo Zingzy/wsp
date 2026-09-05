@@ -1,19 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Screen tab: noVNC over the machine's desktop stream. Only desktop-kind
-// machines carry a stream; sandbox-kind machines (the v1 golden) have no
-// display, so the no-display frame is the common case, not an error.
-import { useEffect, useRef, useState, type ReactNode } from "react";
+// The screen surface: noVNC over the machine's desktop stream, in the right
+// panel and on the first-run builder. Only desktop-kind machines carry a
+// stream; sandbox-kind machines (the v1 golden) have no display, so the
+// no-display state is the common case, not an error.
+import { useEffect, useRef, useState } from "react";
 import RFB from "@novnc/novnc";
 import type { WorkspaceStatus } from "@wsp/protocol";
+import { Button } from "../components/ui/button.js";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty.js";
+import { Spinner } from "../components/ui/spinner.js";
+import { cn } from "../lib/utils.js";
 import { useStatus } from "../protocol/store.js";
-import styles from "./ScreenTab.module.css";
 
 // The wizard injects the builder's stream; a workspace's rides its status.
 function resolveStreamUrl(status: WorkspaceStatus | null, injected: string | undefined): string | null {
   return injected || status?.screen?.streamUrl || null;
 }
 
-export function ScreenTab({ workspaceId, streamUrl }: { workspaceId: string; streamUrl?: string }) {
+export function ScreenSurface({ workspaceId, streamUrl }: { workspaceId: string; streamUrl?: string }) {
   const status = useStatus(workspaceId);
   const url = resolveStreamUrl(status, streamUrl);
   if (!url) return <NoDisplay />;
@@ -22,14 +26,12 @@ export function ScreenTab({ workspaceId, streamUrl }: { workspaceId: string; str
 
 function NoDisplay() {
   return (
-    <div className={styles.pane}>
-      <div className={styles.center}>
-        <Frame label="screen">
-          <div className={styles.t1}>this machine has no display</div>
-          <div className={styles.t2}>sandbox machines run headless. a desktop workspace would stream here.</div>
-        </Frame>
-      </div>
-    </div>
+    <Empty className="h-full bg-[var(--terminal-background)]">
+      <EmptyHeader>
+        <EmptyTitle>This machine has no display</EmptyTitle>
+        <EmptyDescription>Sandbox machines run headless. A desktop workspace would stream here.</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
   );
 }
 
@@ -101,46 +103,49 @@ function ScreenViewer({ url }: { url: string }) {
 
   const live = phase === "live";
   return (
-    <div className={styles.pane}>
-      <div className={styles.bar}>
-        <span className={styles.lbl}>screen</span>
-        <span className={styles.right}>
-          {live ? <span className={styles.dot} title="live" /> : <span className={styles.state}>{phase}</span>}
-          <button
-            type="button"
+    <div className="flex h-full min-h-0 flex-col bg-[var(--terminal-background)]">
+      <div className="flex items-center gap-2 border-b border-border bg-background px-3 py-1.5">
+        <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">screen</span>
+        <span className="ml-auto flex items-center gap-2.5">
+          {live ? (
+            <span className="size-[7px] rounded-full bg-emerald-500 dark:bg-emerald-300/90" title="live" />
+          ) : (
+            <span className="font-mono text-[10.5px] text-muted-foreground">{phase}</span>
+          )}
+          <Button
+            size="xs"
+            variant={control ? "default" : "outline"}
             role="switch"
             aria-checked={control}
             aria-label="control"
-            className={styles.key}
-            data-on={control}
             disabled={!live}
             onClick={() => setControl(c => !c)}
           >
             {control ? "controlling" : "watching"}
-          </button>
+          </Button>
         </span>
       </div>
-      <div className={styles.well} data-live={live}>
-        <div ref={target} className={styles.target} data-control={control} />
+      <div className="relative min-h-0 flex-1">
+        <div ref={target} className={cn("absolute inset-0", !control && "pointer-events-none", !live && "invisible")} />
         {!live && (
-          <div className={styles.center}>
-            <Frame label="screen">
+          <Empty className="absolute inset-0 h-full">
+            <EmptyHeader>
               {phase === "refused" ? (
                 <>
-                  <div className={styles.t1}>the stream refused this connection</div>
-                  <div className={styles.t2}>{reason}</div>
+                  <EmptyTitle>The stream refused this connection</EmptyTitle>
+                  <EmptyDescription>{reason}</EmptyDescription>
                 </>
               ) : (
-                <div className={styles.t1}>
-                  {phase === "reconnecting" ? "stream dropped, retrying" : "waiting for the desktop"}
-                  <Ellipsis />
-                </div>
+                <>
+                  <Spinner className="mb-3 size-4 text-muted-foreground" />
+                  <EmptyTitle>{phase === "reconnecting" ? "Stream dropped, retrying" : "Waiting for the desktop"}</EmptyTitle>
+                </>
               )}
-            </Frame>
-          </div>
+            </EmptyHeader>
+          </Empty>
         )}
       </div>
-      <div className={styles.meta}>
+      <div className="border-t border-border bg-background px-3 py-1.5 text-center font-mono text-[10.5px] text-muted-foreground">
         {hostOf(url)} · {live ? (control ? "keyboard and mouse forwarded" : "view only") : phase}
       </div>
     </div>
@@ -153,27 +158,4 @@ function hostOf(url: string): string {
   } catch {
     return url;
   }
-}
-
-function Frame({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className={styles.frame}>
-      <span className={`${styles.cm} ${styles.tl}`} />
-      <span className={`${styles.cm} ${styles.tr}`} />
-      <span className={`${styles.cm} ${styles.bl}`} />
-      <span className={`${styles.cm} ${styles.br}`} />
-      <span className={styles.frameLbl}>{label}</span>
-      {children}
-    </div>
-  );
-}
-
-function Ellipsis() {
-  return (
-    <span className={styles.ell} aria-hidden="true">
-      <i />
-      <i />
-      <i />
-    </span>
-  );
 }

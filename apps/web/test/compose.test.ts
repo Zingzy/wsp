@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The compose table: for every mode and key class, what reaches the pty, what
-// the xterm paints locally, and what the buffer holds afterwards.
+// the terminal paints locally, and what the buffer holds afterwards.
 import { describe, expect, it } from "vitest";
 import { composeKey, composeMode, RAW_STATE, type ComposeState } from "../src/terminal/compose.js";
 

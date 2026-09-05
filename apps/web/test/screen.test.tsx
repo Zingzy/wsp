@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Screen tab against a fake RFB class: no socket, no noVNC wire. The fake
-// records construction and lets tests fire noVNC's CustomEvents by hand.
+// The screen surface against a fake RFB class: no socket, no noVNC wire. The
+// fake records construction and lets tests fire noVNC's CustomEvents by hand.
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceStatus } from "@wsp/protocol";
@@ -34,7 +34,7 @@ class FakeRfb extends EventTarget {
 
 vi.mock("@novnc/novnc", () => ({ default: FakeRfb }));
 
-const { ScreenTab } = await import("../src/tabs/ScreenTab.js");
+const { ScreenSurface } = await import("../src/screen/ScreenSurface.js");
 const { useStore } = await import("../src/protocol/store.js");
 
 const WS = "ws_screen001";
@@ -65,16 +65,16 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("screen tab", () => {
+describe("screen surface", () => {
   it("shows the no-display state when no stream url resolves and never opens a client", () => {
     seedStatus();
-    render(<ScreenTab workspaceId={WS} />);
-    expect(screen.getByText("this machine has no display")).toBeDefined();
+    render(<ScreenSurface workspaceId={WS} />);
+    expect(screen.getByText("This machine has no display")).toBeDefined();
     expect(FakeRfb.instances.length).toBe(0);
   });
 
   it("connects to the injected url and reports live once the handshake finishes", () => {
-    render(<ScreenTab workspaceId={WS} streamUrl={URL} />);
+    render(<ScreenSurface workspaceId={WS} streamUrl={URL} />);
     expect(FakeRfb.instances.length).toBe(1);
     const rfb = FakeRfb.instances[0]!;
     expect(rfb.url).toBe(URL);
@@ -87,12 +87,12 @@ describe("screen tab", () => {
 
   it("reads the screen stream carried on the workspace status", () => {
     seedStatus({ screen: { streamUrl: URL } });
-    render(<ScreenTab workspaceId={WS} />);
+    render(<ScreenSurface workspaceId={WS} />);
     expect(FakeRfb.instances[0]?.url).toBe(URL);
   });
 
   it("disconnects the client on unmount", () => {
-    const view = render(<ScreenTab workspaceId={WS} streamUrl={URL} />);
+    const view = render(<ScreenSurface workspaceId={WS} streamUrl={URL} />);
     const rfb = FakeRfb.instances[0]!;
     rfb.fire("connect");
     view.unmount();
@@ -100,7 +100,7 @@ describe("screen tab", () => {
   });
 
   it("starts view-only and toggles into control mode and back", () => {
-    render(<ScreenTab workspaceId={WS} streamUrl={URL} />);
+    render(<ScreenSurface workspaceId={WS} streamUrl={URL} />);
     const rfb = FakeRfb.instances[0]!;
     rfb.fire("connect");
     expect(rfb.viewOnly).toBe(true);
@@ -116,7 +116,7 @@ describe("screen tab", () => {
 
   it("reconnects with a fresh client after an unclean drop", () => {
     vi.useFakeTimers();
-    render(<ScreenTab workspaceId={WS} streamUrl={URL} />);
+    render(<ScreenSurface workspaceId={WS} streamUrl={URL} />);
     const first = FakeRfb.instances[0]!;
     first.fire("connect");
     first.fire("disconnect", { clean: false });
@@ -131,7 +131,7 @@ describe("screen tab", () => {
 
   it("resets the backoff once a reconnect succeeds", () => {
     vi.useFakeTimers();
-    render(<ScreenTab workspaceId={WS} streamUrl={URL} />);
+    render(<ScreenSurface workspaceId={WS} streamUrl={URL} />);
     FakeRfb.instances[0]!.fire("connect");
     FakeRfb.instances[0]!.fire("disconnect", { clean: false });
     act(() => {
@@ -148,7 +148,7 @@ describe("screen tab", () => {
 
   it("stops retrying after a security failure and says why", () => {
     vi.useFakeTimers();
-    render(<ScreenTab workspaceId={WS} streamUrl={URL} />);
+    render(<ScreenSurface workspaceId={WS} streamUrl={URL} />);
     const rfb = FakeRfb.instances[0]!;
     rfb.fire("securityfailure", { status: 1, reason: "bad ticket" });
     rfb.fire("disconnect", { clean: false });

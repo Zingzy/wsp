@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // First run: the window is the wizard until a golden image exists. wsp init
 // in the terminal picks what comes along and boots the builder; this is where
-// the builder gets pixels: the screen tab's component when it streams a
-// display, with a checklist of the sign-ins beside it; the terminal tab's
-// against its daemon otherwise, where the sign-ins already ran in the wsp init
-// terminal. Nothing here probes the builder, the person ticks the boxes.
+// the builder gets pixels: the screen surface when it streams a display, with
+// a checklist of the sign-ins beside it; a terminal against its daemon
+// otherwise, where the sign-ins already ran in the wsp init terminal. Nothing
+// here probes the builder, the person ticks the boxes.
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { ChecklistItem, GoldenBuilderView, GoldenStage } from "@wsp/protocol";
 import type { Api } from "../protocol/client.js";
 import { useStore } from "../protocol/store.js";
-import { ScreenTab } from "../tabs/ScreenTab.js";
-import { TerminalTab } from "../tabs/TerminalTab.js";
+import { ScreenSurface } from "../screen/ScreenSurface.js";
 import { connectDaemonLink, type DaemonLink } from "../terminal/daemon-link.js";
 import { provideTerminals, WorkspaceTerminals } from "../terminal/link.js";
+import { BuilderTerminal } from "./BuilderTerminal.js";
 import { SEAL_STAGES, initial, reduce, rowStates, type Step } from "./model.js";
 import styles from "./Wizard.module.css";
 
@@ -84,7 +84,7 @@ export function Wizard({
   };
 
   // One fork of the new golden, then the app. A failed fork still lands: the
-  // golden exists and the rail's own create can retry it.
+  // golden exists and the sidebar's own create can retry it.
   useEffect(() => {
     if (state.step !== "done" || !api || landed.current) return;
     landed.current = true;
@@ -195,7 +195,7 @@ function Hero({ builder, keys, checklist, onSeal }: { builder: GoldenBuilderView
   return (
     <section className={styles.hero}>
       <div className={styles.screen}>
-        {streamUrl !== undefined ? <ScreenTab workspaceId={builder.id} streamUrl={streamUrl} /> : <TerminalTab workspaceId={builder.id} />}
+        {streamUrl !== undefined ? <ScreenSurface workspaceId={builder.id} streamUrl={streamUrl} /> : <BuilderTerminal builderId={builder.id} />}
       </div>
       <aside className={styles.side}>
         <span className={styles.lbl}>{items.length > 0 ? "sign in, then save" : "check it over, then save"}</span>
