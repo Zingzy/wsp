@@ -197,7 +197,8 @@ describe("events.subscribe replay", () => {
     await srv.close();
     await c.closed();
 
-    // The new process over the same store issues sequences from 1 again and soon passes the old cursor.
+    // The new process over the same store issues sequences from 1 again (its first is the end it writes for the turn
+    // the restart cut) and soon passes the old cursor.
     const second = drivenHarness();
     const rtB = createRuntime({ backend: stubBackend(), store, adapters: { claude: second.adapter }, clock: fc.clock });
     srv = await serveRuntime(rtB, { port, authToken: "secret", now: fc.clock.now });
@@ -207,16 +208,16 @@ describe("events.subscribe replay", () => {
     for (const t of ["new 1", "new 2", "new 3"]) second.delta(t);
 
     const subB = await back.request("events.subscribe", { after: cursor, stream: streamA });
-    expect(subB).toEqual({ id: subB.id, ok: true, seq: 9, gap: true, stream: expect.any(String) });
+    expect(subB).toEqual({ id: subB.id, ok: true, seq: 10, gap: true, stream: expect.any(String) });
     expect(subB["stream"]).not.toBe(streamA);
     second.delta("live");
     const got = await received(back, 1);
     expect(texts(got)).toEqual(["live"]);
-    expect(seqs(got)).toEqual([10]);
-    // Without the stream the same cursor would have replayed 8 and 9 of a stream this client never saw.
+    expect(seqs(got)).toEqual([11]);
+    // Without the stream the same cursor would have replayed 8 to 10 of a stream this client never saw.
     const naive = await WsClient.connect(port, { token: "secret" });
-    expect(await naive.request("events.subscribe", { after: cursor })).toEqual({ id: expect.any(Number), ok: true, seq: 10, stream: subB["stream"] });
-    expect(texts(await received(naive, 3))).toEqual(["new 2", "new 3", "live"]);
+    expect(await naive.request("events.subscribe", { after: cursor })).toEqual({ id: expect.any(Number), ok: true, seq: 11, stream: subB["stream"] });
+    expect(texts(await received(naive, 4))).toEqual(["new 1", "new 2", "new 3", "live"]);
     back.close();
     naive.close();
   });

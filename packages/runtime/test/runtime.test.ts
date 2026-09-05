@@ -100,7 +100,7 @@ describe("runtime", () => {
     for (const e of events) {
       if (e.type.startsWith("session.")) expect((e as { workspaceId: string }).workspaceId).toBe(ws.id);
     }
-    expect(rt.sessions.list()[0]?.status).toBe("completed");
+    expect((await rt.sessions.list())[0]?.status).toBe("completed");
     // the workspace remembers the claude session id so later sends can --resume it
     expect((await rt.workspaces.get(ws.id)).claudeSessionId).toBe("11111111-1111-4111-8111-111111111111");
   });
@@ -271,7 +271,7 @@ describe("runtime session history", () => {
     expect(live.flatMap(e => ("threadId" in e ? [e.threadId] : []))).toEqual(history.map(e => e.threadId));
     // The session rows carry the same ids, so a sidebar can fold rows into the threads the transcript folds into;
     // the resumed turn shares the first one's local id and so its row.
-    expect(rt.sessions.list(ws.id).map(s => s.threadId)).toEqual([history[0]!.threadId, history[8]!.threadId]);
+    expect((await rt.sessions.list(ws.id)).map(s => s.threadId)).toEqual([history[0]!.threadId, history[8]!.threadId]);
     await rt.close();
   });
 
@@ -413,7 +413,7 @@ describe("runtime session history", () => {
     m.done("done");
     m.end();
     await handle.finished;
-    const ended = rt.sessions.list(ws.id)[0]!;
+    const ended = (await rt.sessions.list(ws.id))[0]!;
     expect(ended.endedAt).toBeGreaterThanOrEqual(ended.startedAt!);
     expect(ended.endedAt).toBeLessThanOrEqual(Date.now());
     expect(ended.prompt).toBe("go");
@@ -429,7 +429,7 @@ describe("runtime session history", () => {
     expect(handle.view()).toMatchObject({ model: "claude-opus-5", effort: "high", permissionMode: "plan" });
     // The CLI announces the model it resolved; that name replaces the request's on the view.
     m.start();
-    expect(rt.sessions.list(ws.id)[0]!.model).toBe("claude-sonnet-4-5");
+    expect((await rt.sessions.list(ws.id))[0]!.model).toBe("claude-sonnet-4-5");
     m.done("done");
     m.end();
     await handle.finished;
@@ -466,7 +466,7 @@ describe("runtime session history", () => {
     const handle = await rt.sessions.start(ws.id, { prompt: "go", cwd: "/root/app" });
     expect(handle.view().cwd).toBe("/root/app");
     m.start("/root/app/packages/web");
-    expect(rt.sessions.list(ws.id)[0]!.cwd).toBe("/root/app/packages/web");
+    expect((await rt.sessions.list(ws.id))[0]!.cwd).toBe("/root/app/packages/web");
     m.done("done");
     m.end();
     await handle.finished;
@@ -483,7 +483,7 @@ describe("runtime session history", () => {
     m.start("/root");
     m.tool("ls");
     m.tool("cd /root/2048 && ls", "/root/2048");
-    expect(rt.sessions.list(ws.id)[0]!.cwd).toBe("/root/2048");
+    expect((await rt.sessions.list(ws.id))[0]!.cwd).toBe("/root/2048");
     expect(deltas).toEqual([undefined, "/root/2048"]);
     m.done("done");
     m.end();
@@ -620,6 +620,113 @@ describe("runtime session history", () => {
     const persisted = await stored(ws.id);
     expect(persisted.length).toBeLessThanOrEqual(5000);
     expect(persisted.some(e => e.type === "session.start" && e.prompt === "t1299")).toBe(true);
+  });
+});
+
+describe("runtime session index", () => {
+  /** One completed turn per start, under the resume id when given; remembers every start the harness was asked for. */
+  const turns = () => {
+    const starts: HarnessStartOptions[] = [];
+    const adapter: HarnessAdapterFactory = () => ({
+      start: o => {
+        starts.push(o);
+        const sessionId = o.resume ?? randomUUID();
+        const result: TurnResult = { status: "completed", text: o.prompt };
+        const finished = Promise.resolve().then(() => {
+          o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5", cwd: o.cwd ?? "/root/work" });
+          o.onEvent({ type: "turn.done", sessionId, result });
+          o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+          return result;
+        });
+        return { localId: sessionId, claudeSessionId: sessionId, finished, interrupt: async () => {} };
+      },
+    });
+    return { adapter, starts };
+  };
+  /** A turn that announces itself and never settles: the host goes down under it. */
+  const HUNG_ID = "55555555-5555-4555-8555-555555555555";
+  const hung: HarnessAdapterFactory = () => ({
+    start: o => {
+      o.onEvent({ type: "session.start", sessionId: HUNG_ID, model: "claude-sonnet-4-5", cwd: "/root/work" });
+      return { localId: HUNG_ID, claudeSessionId: HUNG_ID, finished: new Promise<TurnResult>(() => {}), interrupt: async () => {} };
+    },
+  });
+
+  it("writes the index to the store and lists the rows after a restart; a turn the restart cut reads as ended", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const t = turns();
+    const rt1 = createRuntime({ backend, store, adapters: { claude: t.adapter, hung } });
+    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
+    await (await rt1.sessions.start(ws.id, { prompt: "first", cwd: "/root/app" })).finished;
+    await rt1.sessions.start(ws.id, { prompt: "second", harness: "hung" });
+    const before = await rt1.sessions.list(ws.id);
+    expect(before.map(s => s.status)).toEqual(["completed", "running"]);
+    await rt1.close();
+    const stored = (await store.get("sessions", ws.id)) as { sessions: unknown[] };
+    expect(stored.sessions).toHaveLength(2);
+
+    const rt2 = createRuntime({ backend, store, adapters: {} });
+    const after = await rt2.sessions.list(ws.id);
+    expect(after).toHaveLength(2);
+    expect(after[0]).toEqual({ ...before[0], threadId: before[0]!.threadId });
+    expect(after[0]).toMatchObject({ status: "completed", prompt: "first", cwd: "/root/app", model: "claude-sonnet-4-5", harness: "claude" });
+    expect(after[1]).toMatchObject({ id: HUNG_ID, prompt: "second", status: "failed", endedAt: expect.any(Number) });
+    expect(after[1]!.threadId).toBe(before[1]!.threadId);
+    const history = await rt2.sessions.history(ws.id);
+    expect(history.at(-1)).toMatchObject({ type: "session.end", sessionId: HUNG_ID, threadId: before[1]!.threadId, reason: "host restarted while the agent was working" });
+    expect(history.at(-1)!.turnId).toBe(history.at(-2)!.turnId);
+    expect(await rt2.sessions.interrupt(HUNG_ID)).toEqual({ outcome: "not-running" });
+    await rt2.close();
+    // the cut turn is written back ended, so a second restart does not end it again
+    const rt3 = createRuntime({ backend, store, adapters: {} });
+    expect((await rt3.sessions.history(ws.id)).filter(e => e.type === "session.end")).toHaveLength(2);
+    await rt3.close();
+  });
+
+  it("a resume after a restart joins the persisted thread and hands the harness the session id and folder", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt1 = createRuntime({ backend, store, adapters: { claude: turns().adapter } });
+    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
+    await (await rt1.sessions.start(ws.id, { prompt: "first", cwd: "/root/app" })).finished;
+    const [first] = await rt1.sessions.list(ws.id);
+    await rt1.close();
+    // the transcript is gone but the index survives: the thread still folds
+    await store.delete("transcripts", ws.id);
+
+    const t = turns();
+    const rt2 = createRuntime({ backend, store, adapters: { claude: t.adapter } });
+    await (await rt2.sessions.start(ws.id, { prompt: "more", resume: first!.claudeSessionId, cwd: first!.cwd })).finished;
+    expect(t.starts[0]).toMatchObject({ resume: first!.claudeSessionId, cwd: "/root/app" });
+    // the resumed turn keeps the session id, so it takes over that row, in memory and in the store
+    const rows = await rt2.sessions.list(ws.id);
+    expect(rows.map(s => s.prompt)).toEqual(["more"]);
+    expect(rows[0]!.threadId).toBe(first!.threadId);
+    await rt2.close();
+    const stored = (await store.get("sessions", ws.id)) as { sessions: { prompt: string; threadId: string }[] };
+    expect(stored.sessions.map(s => s.prompt)).toEqual(["more"]);
+    expect(stored.sessions[0]!.threadId).toBe(first!.threadId);
+  });
+
+  it("rows of a workspace whose machine is gone are still listed, and a deleted workspace takes its rows with it", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt1 = createRuntime({ backend, store, adapters: { claude: turns().adapter } });
+    const a = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
+    const b = await rt1.workspaces.create({ golden: "snap_g", name: "b" });
+    await (await rt1.sessions.start(a.id, { prompt: "on a" })).finished;
+    await (await rt1.sessions.start(b.id, { prompt: "on b" })).finished;
+    await rt1.close();
+    backend.machines[0]!.killed = true;
+
+    const rt2 = createRuntime({ backend, store, adapters: {} });
+    expect((await rt2.sessions.list(a.id)).map(s => s.prompt)).toEqual(["on a"]);
+    expect((await rt2.status.list()).find(w => w.id === a.id)?.machineState).toBe("gone");
+    await rt2.workspaces.delete(b.id);
+    expect(await rt2.sessions.list()).toHaveLength(1);
+    expect(await store.get("sessions", b.id)).toBeUndefined();
+    await rt2.close();
   });
 });
 

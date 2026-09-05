@@ -161,7 +161,7 @@ describe("the start guard", () => {
     await waking;
     const handle = await rt.sessions.start(ws.id, { prompt: "hi" });
     expect(handle.view().status).toBe("running");
-    expect(rt.sessions.list(ws.id)).toHaveLength(1);
+    expect(await rt.sessions.list(ws.id)).toHaveLength(1);
   });
 });
 
@@ -181,7 +181,7 @@ describe("sessions end with the machine", () => {
     const m = backend.machines[0]!;
     const pause = m.pause.bind(m);
     m.pause = async () => {
-      sessionsAtPause = rt.sessions.list(a.id).map(s => s.status);
+      sessionsAtPause = (await rt.sessions.list(a.id)).map(s => s.status);
       await pause();
     };
 
@@ -194,7 +194,7 @@ describe("sessions end with the machine", () => {
     for (const e of ended) expect(e).toMatchObject({ exitCode: null, sawResult: false, reason: PAUSED });
     expect(new Set(ended.map(e => e.sessionId))).toEqual(new Set([one.view().claudeSessionId, two.view().claudeSessionId]));
     expect(events.findIndex(e => e.type === "session.end")).toBeLessThan(events.findIndex(e => e.type === "workspace.napped"));
-    for (const s of rt.sessions.list(a.id)) expect(s).toMatchObject({ status: "failed", endedAt: expect.any(Number) });
+    for (const s of await rt.sessions.list(a.id)) expect(s).toMatchObject({ status: "failed", endedAt: expect.any(Number) });
     expect(interrupts).toEqual([a.id, a.id]);
     expect(other.view().status).toBe("running");
     expect(ends(events).filter(e => e.workspaceId === b.id)).toEqual([]);

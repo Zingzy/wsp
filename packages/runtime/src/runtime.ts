@@ -392,7 +392,8 @@ export interface Runtime {
       workspaceId: string,
       opts: { prompt: string; harness?: string; resume?: string; cwd?: string; model?: string; effort?: string; permissionMode?: string },
     ): Promise<SessionHandle>;
-    list(workspaceId?: string): SessionView[];
+    /** Every turn this state file knows, the ones before a restart with the state they were last written in. */
+    list(workspaceId?: string): Promise<SessionView[]>;
     /** The workspace's persisted session events, oldest first; a chat replays these on mount. */
     history(workspaceId: string): Promise<SessionEvent[]>;
     /** Stops the session's running turn through its harness; a turn already over or an unknown id answers, never throws. */
@@ -451,11 +452,14 @@ const GOLDENS = "goldens";
 const GOLDEN_RECIPES = "golden-recipes";
 const recipeKey = (name: string, version: number): string => `${name}@v${version}`;
 const TRANSCRIPTS = "transcripts";
+/** One document per workspace: the turns sessions.list serves, read back at boot so the rows outlive the process. */
+const SESSIONS = "sessions";
 
 /** What the timeline shows as the last row of a turn the runtime ended, not the harness. */
 const PAUSED_REASON = "machine paused while the agent was working";
 const DELETED_REASON = "machine deleted while the agent was working";
 const UNANSWERING_REASON = "machine stopped answering while the agent was working";
+const RESTARTED_REASON = "host restarted while the agent was working";
 /** A guest with no daemon is asked again after this long (one may be deployed later). */
 const DAEMON_TOKEN_MISS_TTL_MS = 60_000;
 /** Events kept per workspace; the oldest fall off so one chatty workspace cannot grow the store forever. */
@@ -467,6 +471,11 @@ export const TRANSCRIPT_FLUSH_MS = 250;
 interface TranscriptRecord {
   workspaceId: string;
   events: SessionEvent[];
+}
+
+interface SessionIndexRecord {
+  workspaceId: string;
+  sessions: (SessionView & { turnId: string })[];
 }
 
 /** Builders live apart from workspaces: never in the rail, and a record left
@@ -651,7 +660,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const builders = new Map<string, LiveBuilder>();
   /** The prepare in flight per golden name; a second call for the same recipe joins it instead of running the stages twice on one machine. */
   const preparing = new Map<string, { hash: string | undefined; promise: Promise<GoldenBuilderView> }>();
-  const sessions = new Map<string, { view: SessionView; handle: SessionHandle; end: (reason: string) => void }>();
+  /** A row read back from the store has no handle: its process died with the runtime that started it. */
+  const sessions = new Map<string, { view: SessionView; turnId: string; handle?: SessionHandle; end?: (reason: string) => void }>();
+  const indexFlushes = new Map<string, Promise<void>>();
   const transcripts = new Map<string, SessionEvent[]>();
   // Puts are chained per workspace so the later snapshot always lands last,
   // whatever order the store finishes in.
@@ -691,6 +702,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return queued;
   };
 
+  // Rows are copied at queue time, like the transcript: the store may serialise after it returns.
+  const persistSessions = (workspaceId: string): Promise<void> => {
+    const rows = [...sessions.values()].filter(s => s.view.workspaceId === workspaceId).map(s => ({ ...s.view, turnId: s.turnId }));
+    const snapshot: SessionIndexRecord = { workspaceId, sessions: rows };
+    const queued = (indexFlushes.get(workspaceId) ?? Promise.resolve())
+      .then(() => store.put(SESSIONS, workspaceId, snapshot))
+      .catch(() => {});
+    indexFlushes.set(workspaceId, queued);
+    return queued;
+  };
+
   // Deltas are only appended in memory; the store sees the transcript at turn
   // boundaries, so a crash mid-turn loses that turn's partial output and
   // nothing else. A session's end is written at once, anything before it waits
@@ -714,10 +736,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** A start without resume opens a thread; a resumed start joins the thread of the session it resumes, found by
    * the id the CLI announced (it may differ from the one first minted). A transcript from before threads existed
    * was one thread, so resuming into it stamps every event in place: the stamp fills an absent field once and never
-   * changes a value, so it runs at most once per transcript. A new thread leaves the old events as they were. */
+   * changes a value, so it runs at most once per transcript. A new thread leaves the old events as they were.
+   * The index is asked first: it keeps a thread whose start fell off the transcript cap. */
   const threadOf = (workspaceId: string, resume: string | undefined): string => {
     const events = transcripts.get(workspaceId) ?? [];
     if (resume !== undefined) {
+      for (const s of sessions.values()) {
+        if (s.view.workspaceId === workspaceId && s.view.claudeSessionId === resume && s.view.threadId !== undefined) return s.view.threadId;
+      }
       for (let i = events.length - 1; i >= 0; i--) {
         const e = events[i]!;
         if (e.type !== "session.start" || e.sessionId !== resume) continue;
@@ -1005,7 +1031,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** Every live session of a workspace ends here when its machine goes away under it; the harness's own end, if it ever comes, is dropped. */
   const endSessions = (workspaceId: string, reason: string): void => {
-    for (const s of sessions.values()) if (s.view.workspaceId === workspaceId) s.end(reason);
+    for (const s of sessions.values()) if (s.view.workspaceId === workspaceId) s.end?.(reason);
   };
 
   // Pausing is persisted and pushed before the provider is asked, so a list
@@ -1180,6 +1206,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       for (const raw of await store.list(TRANSCRIPTS)) {
         const t = raw as TranscriptRecord;
         transcripts.set(t.workspaceId, t.events);
+      }
+      for (const raw of await store.list(SESSIONS)) {
+        const index = raw as SessionIndexRecord;
+        if (!live.has(index.workspaceId)) continue;
+        let cut = false;
+        for (const { turnId, ...view } of index.sessions) {
+          // The harness process died with the runtime that started it, so a turn still running never settles.
+          if (view.status === "running") {
+            cut = true;
+            view.status = "failed";
+            view.endedAt = Date.now();
+            record({ type: "session.end", workspaceId: view.workspaceId, sessionId: view.claudeSessionId ?? view.id, turnId, threadId: view.threadId, exitCode: null, sawResult: false, reason: RESTARTED_REASON });
+          }
+          sessions.set(view.id, { view, turnId });
+        }
+        if (cut) void persistSessions(index.workspaceId);
       }
       for (const raw of await store.list(BUILDERS)) await admit(raw as StoredBuilder);
     })();
@@ -1384,11 +1426,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       });
       live.delete(id);
       transcripts.delete(id);
+      for (const [handleId, s] of sessions) if (s.view.workspaceId === id) sessions.delete(handleId);
       cancelFlush(id);
       await transcriptFlushes.get(id);
       transcriptFlushes.delete(id);
+      await indexFlushes.get(id);
+      indexFlushes.delete(id);
       await store.delete(WORKSPACES, id);
       await store.delete(TRANSCRIPTS, id);
+      await store.delete(SESSIONS, id);
       await store.delete(CREATES, `workspace/${id}`);
       await store.deleteBlob(VAULTS, id);
       bus.emit({ type: "workspace.deleted", workspaceId: id });
@@ -1467,6 +1513,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             if (event.model !== undefined) sessionView.model = event.model;
             entry.record.claudeSessionId = sessionId;
             void persist(entry.record);
+            void persistSessions(workspaceId);
             record({
               type: "session.start",
               workspaceId,
@@ -1499,6 +1546,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             return;
           case "turn.done":
             sessionView.status = event.result.status;
+            void persistSessions(workspaceId);
             record({ type: "session.done", workspaceId, sessionId, turnId, threadId, result: event.result });
             return;
           case "session.end":
@@ -1552,23 +1600,28 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ended = true;
         sessionView.status = "failed";
         sessionView.endedAt = Date.now();
+        void persistSessions(workspaceId);
         record({ type: "session.end", workspaceId, sessionId: sessionView.claudeSessionId ?? handleId, turnId, threadId, exitCode: null, sawResult: false, reason });
         void started.interrupt().catch(() => {});
       };
-      sessions.set(handleId, { view: sessionView, handle, end });
+      sessions.set(handleId, { view: sessionView, turnId, handle, end });
+      void persistSessions(workspaceId);
       started.finished
         .then(result => {
           if (!ended) sessionView.status = result.status;
           sessionView.endedAt ??= Date.now();
+          void persistSessions(workspaceId);
         })
         .catch(() => {
           if (!ended) sessionView.status = "failed";
           sessionView.endedAt ??= Date.now();
+          void persistSessions(workspaceId);
         });
       return handle;
     },
 
-    list(workspaceId) {
+    async list(workspaceId) {
+      await ready();
       const all = [...sessions.values()].map(s => ({ ...s.view }));
       return workspaceId === undefined ? all : all.filter(s => s.workspaceId === workspaceId);
     },
@@ -1581,7 +1634,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async interrupt(sessionId) {
       const s = sessions.get(sessionId);
       if (!s) return { outcome: "not-found" };
-      if (s.view.status !== "running") return { outcome: "not-running" };
+      if (s.view.status !== "running" || s.handle === undefined) return { outcome: "not-running" };
       await s.handle.interrupt();
       // The harness resolves finished only after session.end, so accepted means the turn is over on the transcript too.
       await s.handle.finished.catch(() => {});
@@ -2259,7 +2312,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         await store.put(BUILDERS, b.record.id, b.record);
       }
       for (const id of [...transcriptTimers.keys()]) void flushTranscript(id);
-      await Promise.all(transcriptFlushes.values());
+      await Promise.all([...transcriptFlushes.values(), ...indexFlushes.values()]);
     },
   };
 }
