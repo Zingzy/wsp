@@ -84,3 +84,7 @@ Appending a fix round to the build report by id hides it: the reviewer reads the
 ## Gates cost one run, not three
 
 A builder's gate skips the Electron packaging unless the diff touches apps/desktop: `pnpm -r --filter '!@wsp/desktop' build` for the build step, then `pnpm test`, `pnpm -r exec tsc --noEmit`, `pnpm --filter @wsp/web build`. The desktop package builds in the coordinator's merge gate, which always runs the full `pnpm build`. The coordinator's merge gate runs once, on the branch merged with origin/main in a fresh worktree; the merge onto main then re-checks that origin/main has not moved, merges, builds and pushes without a second test run, since the gated tree and the merged tree are the same. A flaky file that fails in the gate is rerun alone in that worktree before the chain continues.
+
+## Live runs stay out of builders' worktrees, and builders add by path
+
+The coordinator ran a live canary inside a builder's worktree (PR 39, 2026-09-05) and the builder's next `git add -A` committed the canary script, log, pid and output; the second-pass review caught it as a blocker and cost a round. Coordinator live runs happen in a coordinator worktree (`gate-*` or a `live-*` tree), never a builder's. Builders stage by path (`git add <files>`), never `-A` or `.`, and their self-review reads `git show --stat` of every commit in the round so a stray file is seen before the report exists.
