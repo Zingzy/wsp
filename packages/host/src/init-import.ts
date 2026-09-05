@@ -19,6 +19,7 @@ import {
   shellInstallFor,
   toolInstallsFor,
   type AgentInstaller,
+  type BrewTable,
   type FilesPlan,
   type GoldenImport,
   type ImportResult,
@@ -294,6 +295,8 @@ export interface ImportOptions {
   /** Keychain secrets already read, by service (see readSecrets). */
   secrets: ReadonlyMap<string, string>;
   platform: "darwin" | "linux";
+  /** This Mac's Homebrew, for the tap formulae with no Linux bottle: their source repositories. */
+  brew?: BrewTable;
   onResult?: (result: ImportResult) => void;
 }
 
@@ -393,7 +396,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
     rewrites: [[".claude/", `${CLAUDE_REL}/`], [".claude.json", `${CLAUDE_REL}/.claude.json`]],
   });
   const shell = shellInstallFor(bring);
-  const tools = toolInstallsFor(bring);
+  const tools = toolInstallsFor(bring, opts.brew);
   const editors = editorInstallsFor(bring);
   const agents = agentInstallsFor(bring, { claude: CLAUDE_INSTALLER });
   const label = (id: string) => bring.find(e => e.id === id)?.label ?? id;

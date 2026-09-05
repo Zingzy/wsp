@@ -28,6 +28,8 @@ export interface SelectItem {
   choices?: readonly { value: string; label: string }[];
   /** Takes its own tick: the all row leaves it alone; its group header still flips it. */
   own?: boolean;
+  /** Comes along with other rows rather than by a tick of its own: the box follows this over the ticks, space leaves it, no count includes it. */
+  follows?: (ticks: ReadonlySet<string>) => boolean;
 }
 
 export type Entry =
@@ -124,12 +126,12 @@ export function settle(entries: readonly Entry[], at: number, dir: 1 | -1 = 1): 
   return 0;
 }
 
-const tickable = (i: SelectItem): boolean => i.lock === undefined && i.choices === undefined;
+const tickable = (i: SelectItem): boolean => i.lock === undefined && i.choices === undefined && i.follows === undefined;
 /** What the all row flips: the tickable rows that do not take their own tick. */
 const byAll = (i: SelectItem): boolean => tickable(i) && i.own !== true;
 /** A row that comes along or can: always included, a tick, a tick of its own, or an answer. Only a row locked out is out, so
  * a screen's one denominator is what the found table called able to come. */
-const unlocked = (i: SelectItem): boolean => i.lock !== "off";
+const unlocked = (i: SelectItem): boolean => i.lock !== "off" && i.follows === undefined;
 /** A row that brings something: ticked, or answered with anything but its last choice. */
 function chosen(i: SelectItem, ticks: ReadonlySet<string>, choices: ReadonlyMap<string, string>): boolean {
   if (i.choices === undefined) return ticks.has(i.id);
@@ -346,7 +348,7 @@ class RungPrompt extends Prompt<Set<string>> {
         return this.line(entry.folded ? "▸" : "▾", entry.group, groupCount(entry.items, ticks, this.choices), 0, cols, current, true);
       case "item": {
         const i = entry.item;
-        return this.line(box(ticks.has(i.id)), i.label, this.second(i, width), i.group !== undefined ? 2 : 0, cols, current, false);
+        return this.line(box(i.follows !== undefined ? i.follows(ticks) : ticks.has(i.id)), i.label, this.second(i, width), i.group !== undefined ? 2 : 0, cols, current, false);
       }
       default: {
         const _exhaustive: never = entry;

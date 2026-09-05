@@ -15,6 +15,13 @@ export interface ToolResult {
   outcome: "installed" | "failed" | "skipped";
   note?: string;
   ms?: number;
+  /** The road a source install took, as its script reported: the release asset, or the module go installed. */
+  road?: ToolRoad;
+}
+
+export interface ToolRoad {
+  kind: "release" | "go";
+  from: string;
 }
 
 export interface ToolsOutcome {
@@ -59,6 +66,12 @@ export function reasonOf(res: ExecResult, timeoutS: number): string {
   const lines = (text: string): string[] => text.split("\n").map(l => l.trim()).filter(l => l !== "");
   const err = lines(res.stderr);
   return (err.filter(l => l.startsWith("Error:")).at(-1) ?? err.at(-1) ?? lines(res.stdout).at(-1) ?? `exit ${res.exitCode}`).slice(0, 160);
+}
+
+/** The last WSP_ROAD line a road install printed, when it printed one. */
+export function roadOf(stdout: string): ToolRoad | undefined {
+  const m = [...stdout.matchAll(/^WSP_ROAD (release|go) (\S+)/gm)].at(-1);
+  return m === undefined ? undefined : { kind: m[1] as ToolRoad["kind"], from: m[2]! };
 }
 
 export type FreeDisk = { kind: "free"; bytes: number } | { kind: "unknown"; reason: string };
@@ -117,7 +130,8 @@ export function guarded(script: string, timeoutS: number): string {
 function summarize(tools: ToolResult[], floor: string | undefined, housekeeping: string | undefined): string {
   const parts: string[] = [];
   const n = (o: ToolResult["outcome"]) => tools.filter(t => t.outcome === o);
-  parts.push(`${n("installed").length} installed`);
+  const roads = n("installed").filter(t => t.road !== undefined).map(t => `${t.label} ${t.road!.kind === "release" ? "from the GitHub release" : "with go install"}`);
+  parts.push(`${n("installed").length} installed${roads.length > 0 ? ` (${roads.join(", ")})` : ""}`);
   const failed = n("failed");
   if (failed.length > 0) parts.push(`${failed.length} failed: ${failed.map(t => `${t.label} (${t.note})`).join(", ")}`);
   const skipped = n("skipped");
@@ -166,7 +180,8 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
     if (res.exitCode === 0) {
       installed.add(tool.id);
       if (tool.id === "tools/homebrew") out.homebrew = { ...HOMEBREW };
-      out.tools.push({ id: tool.id, label: tool.label, outcome: "installed", ms });
+      const road = roadOf(res.stdout);
+      out.tools.push({ id: tool.id, label: tool.label, outcome: "installed", ms, ...(road !== undefined ? { road } : {}) });
     } else {
       out.tools.push({ id: tool.id, label: tool.label, outcome: "failed", note: reasonOf(res, TOOL_TIMEOUT_S), ms });
     }

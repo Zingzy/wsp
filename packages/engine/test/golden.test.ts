@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { editorInstallsFor } from "../src/golden-import.js";
-import { BUILDER_DISK_GB, BUILDER_IDLE_MS, MachineAliveError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextSetupSha, nextSmoke, prepareBuilder, rollback, sealGolden, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
+import { BUILDER_IDLE_MS, MachineAliveError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextSetupSha, nextSmoke, prepareBuilder, rollback, sealGolden, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
+import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import type { RecipeDigest } from "@wsp/protocol";
 import { NotFirstLifeError } from "../src/lifecycle.js";
 import { HOMEBREW, type ToolInstall } from "../src/golden-import.js";
@@ -552,6 +553,27 @@ describe("golden import stages", () => {
     expect(results[0]!.tools[1]).toEqual({ id: "tools/brew/gh", label: "gh", outcome: "failed", note: "Error: gh: no bottle available!", ms: expect.any(Number) });
     const { version } = await sealGolden(builder, { backend, smoke: "should-not-run" });
     expect(version.smoke.cmd).toBe("claude --version && codex --version");
+  });
+
+  it("a road install names the road it took: the result carries it and the stage summary says so", async () => {
+    const { backend, fetch } = backendFor([
+      ["releases/tags/v0.1.0", { exitCode: 0, stdout: "WSP_ROAD release diskbloom_0.1.0_linux_amd64.tar.gz\n", stderr: "" }],
+      ["releases/tags/v1.13.1", { exitCode: 0, stdout: "go: downloading\nWSP_ROAD go github.com/TheZoraiz/ascii-image-converter@v1.13.1\n", stderr: "" }],
+    ]);
+    const { stages, onStage } = stageRecorder();
+    const results: ImportResult[] = [];
+    const roads = [
+      { id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", manager: "github" as const, cmd: "curl https://api.github.com/repos/Zingzy/diskbloom/releases/tags/v0.1.0" },
+      { id: "tools/brew/thezoraiz/ascii-image-converter/ascii-image-converter", label: "ascii-image-converter", manager: "github" as const, cmd: "curl https://api.github.com/repos/TheZoraiz/ascii-image-converter/releases/tags/v1.13.1" },
+    ];
+    await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ tools: [...importOf().tools, ...roads], onResult: r => void results.push(r) }) });
+    expect(stages).toContain("installing-tools:5 installed (diskbloom from the GitHub release, ascii-image-converter with go install)");
+    expect(results[0]!.tools.slice(3)).toEqual([
+      { id: roads[0]!.id, label: "diskbloom", outcome: "installed", road: { kind: "release", from: "diskbloom_0.1.0_linux_amd64.tar.gz" }, ms: expect.any(Number) },
+      { id: roads[1]!.id, label: "ascii-image-converter", outcome: "installed", road: { kind: "go", from: "github.com/TheZoraiz/ascii-image-converter@v1.13.1" }, ms: expect.any(Number) },
+    ]);
+    // A brew install carries no road: it took the one its plan named.
+    expect(results[0]!.tools[1]).not.toHaveProperty("road");
   });
 
   it("an agent that fails refuses the seal with the installer's reason, kills the builder, reports the result, and never starts the tools", async () => {

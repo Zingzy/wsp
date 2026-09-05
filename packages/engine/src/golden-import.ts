@@ -84,14 +84,6 @@ export interface FilesPlan {
   rungs: Record<string, number>;
 }
 
-/** The most a recipe's files may add up to on this computer before the plan refuses to boot. A base
- * sandbox at the upload stage (daemon deployed, nothing else) had 2,245,024 KiB free of a 4 GB root,
- * 2192 MiB (measured 2026-09-04, df -Pk on a fresh machine). The upload needs the archive, its files
- * and 256 MiB of headroom under that, and the archive is at most as large as the files, so the files
- * must stay under (2192 - 256) / 2 = 968 MiB, rounded down. The tools stage's 800 MiB floor for the
- * agents allows more (1392 MiB), so the upload is the bound that counts. */
-export const PACK_BUDGET_BYTES = 960 * 1024 * 1024;
-
 export interface PlanFilesOptions {
   /** This computer's home with every link in it resolved, so link targets compare against it. */
   home: string;
@@ -299,7 +291,8 @@ export function recipeHash(digest: RecipeDigest): string {
 
 // --- tools -------------------------------------------------------------------
 
-export type ToolManager = "brew" | "npm" | "pnpm" | "bun" | "uv" | "pipx" | "cargo" | "go";
+/** `github` is the road for a tap formula with no Linux bottle: its release asset, else `go install` from its repository. */
+export type ToolManager = "brew" | "npm" | "pnpm" | "bun" | "uv" | "pipx" | "cargo" | "go" | "github";
 
 export interface ToolInstall {
   id: string;
@@ -321,7 +314,34 @@ export interface Brewfile {
   taps: string[];
   formulae: string[];
   skipped: SkippedItem[];
+  /** Tap formulae with no Linux bottle whose source repository is known; each installs from it instead. */
+  roads: { id: string; name: string; source: ToolSource }[];
 }
+
+/** The GitHub repository a formula builds from and the tag of the version the Mac has. */
+export interface ToolSource {
+  repo: string;
+  tag: string;
+}
+
+/** What this Mac's Homebrew says about one installed formula. */
+export interface BrewFormula {
+  name: string;
+  /** With the tap prefix for a tap formula; the same as name for homebrew/core. */
+  fullName: string;
+  /** Runtime dependencies by full name, direct and transitive. */
+  deps: string[];
+  /** The Cellar entry's size on the Mac, when read. */
+  bytes?: number;
+  macosOnly: boolean;
+  source?: ToolSource;
+}
+
+/** By full name. */
+export type BrewTable = ReadonlyMap<string, BrewFormula>;
+
+/** Tap formulae that only build for macOS and say nothing of it in their metadata. */
+export const MACOS_ONLY_FORMULAE: ReadonlySet<string> = new Set(["felixkratz/formulae/sketchybar", "felixkratz/formulae/borders", "koekeishiya/formulae/yabai", "koekeishiya/formulae/skhd"]);
 
 /** Homebrew itself is a git checkout at a release tag whose commit is checked
  * before anything runs (https://docs.brew.sh/Homebrew-on-Linux#alternative-installation). */
@@ -393,15 +413,19 @@ function homebrewBootstrap(): string {
   ].join("\n");
 }
 
-export function brewfileFor(entries: readonly RecipeEntry[]): Brewfile {
-  const out: Brewfile = { text: "", taps: [], formulae: [], skipped: [] };
+export function brewfileFor(entries: readonly RecipeEntry[], brew: BrewTable = new Map()): Brewfile {
+  const out: Brewfile = { text: "", taps: [], formulae: [], skipped: [], roads: [] };
   for (const e of entries) {
     if (!ticked(e) || e.rung !== "tools") continue;
     if (e.id.startsWith("tools/brew-tap/")) {
       out.taps.push(e.id.slice("tools/brew-tap/".length));
     } else if (e.id.startsWith("tools/brew/")) {
       const formula = e.id.slice("tools/brew/".length);
+      const info = brew.get(formula);
       if (e.linux === "no") out.skipped.push({ id: e.id, note: "no Linux bottle" });
+      else if (e.linux === "unknown" && (MACOS_ONLY_FORMULAE.has(formula) || info?.macosOnly === true)) out.skipped.push({ id: e.id, note: "macOS only" });
+      // Only a tap formula takes the road: a core formula unknown to the snapshot may well have a Linux bottle by now.
+      else if (e.linux === "unknown" && formula.includes("/") && info?.source !== undefined) out.roads.push({ id: e.id, name: info.name, source: info.source });
       else if (e.linux === "unknown") out.skipped.push({ id: e.id, note: "no Linux bottle known" });
       else out.formulae.push(formula);
     } else if (e.id.startsWith("tools/brew-cask/")) {
@@ -415,18 +439,18 @@ export function brewfileFor(entries: readonly RecipeEntry[]): Brewfile {
   return out;
 }
 
-const MANAGER_ORDER: readonly Exclude<ToolManager, "brew">[] = ["npm", "pnpm", "bun", "uv", "pipx", "cargo", "go"];
+const MANAGER_ORDER: readonly Exclude<ToolManager, "brew" | "github">[] = ["npm", "pnpm", "bun", "uv", "pipx", "cargo", "go"];
 
 // Homebrew's Linux bottles are built against a newer glibc than the base image
 // ships, so its first formula pulls Homebrew's own glibc and gcc in and, on
 // 6.0.21, a nested brew racing the parent for those locks fails one run in
 // two (measured: 4 of 7 plain runs failed, 3 of 3 passed with these first).
 // Each is its own single brew process, in this order, before any formula.
-const BREW_TOOLCHAIN: readonly string[] = ["glibc", "gcc"];
+export const BREW_TOOLCHAIN: readonly string[] = ["glibc", "gcc"];
 
 /** How each manager gets onto the machine before its first tool: uv by its
  * checksummed release, the rest as Homebrew for Linux formulae (npm rides the base Node). */
-const MANAGER_FORMULA: Record<Exclude<ToolManager, "brew" | "npm" | "uv">, string> = { pnpm: "pnpm", bun: "bun", pipx: "pipx", cargo: "rust", go: "go" };
+export const MANAGER_FORMULA: Record<Exclude<ToolManager, "brew" | "npm" | "uv" | "github">, string> = { pnpm: "pnpm", bun: "bun", pipx: "pipx", cargo: "rust", go: "go" };
 
 /** The collector puts a Go binary's `path@version` in its first path; recipes saved
  * before that carried it in the label as `name (path@version)`. */
@@ -437,7 +461,7 @@ function goModule(e: RecipeEntry): { path: string; version: string } | undefined
   return { path: spec.slice(0, at), version: spec.slice(at + 1) };
 }
 
-function managerCommand(e: RecipeEntry, manager: ToolManager): { cmd: string } | { note: string } {
+function managerCommand(e: RecipeEntry, manager: Exclude<ToolManager, "github">): { cmd: string } | { note: string } {
   const pkg = e.id.slice(`tools/${manager}/`.length);
   const v = e.version;
   switch (manager) {
@@ -461,6 +485,44 @@ function managerCommand(e: RecipeEntry, manager: ToolManager): { cmd: string } |
     case "brew":
       return { cmd: asLinuxbrew(`install ${pkg}`) };
   }
+}
+
+/** A tap formula with no Linux bottle, from its repository: the release asset built for this arch, unpacked
+ * and its binary put in /usr/local/bin; with no Linux asset and go on the machine, `go install` of the tag.
+ * The road taken is printed as a WSP_ROAD line for the stage to read. */
+function roadInstall(name: string, source: ToolSource): string {
+  const api = `https://api.github.com/repos/${source.repo}/releases/tags/${source.tag}`;
+  return [
+    "set -euo pipefail",
+    `name=${squote(name)}`,
+    'arch="$(uname -m)"',
+    'case "$arch" in x86_64) pat="amd64|x86_64|x64" ;; aarch64) pat="arm64|aarch64" ;; *) echo "Error: unsupported arch: $arch" >&2; exit 1 ;; esac',
+    'tmp="$(mktemp -d /tmp/wsp-road-XXXXXX)"',
+    "trap 'rm -rf \"$tmp\"' EXIT",
+    `urls="$(curl -fsSL ${squote(api)} | grep -o '"browser_download_url": *"[^"]*"' | cut -d'"' -f4 || true)"`,
+    `url="$(printf '%s\\n' "$urls" | grep -i linux | grep -iE "$pat" | grep -viE '\\.(sha256|sha256sum|sha512|sig|asc|txt|md5|pem|deb|rpm|apk)$' | head -1 || true)"`,
+    'if [ -n "$url" ]; then',
+    '  asset="${url##*/}"',
+    '  curl -fsSL -o "$tmp/$asset" "$url"',
+    '  case "$asset" in',
+    '    *.tar.gz|*.tgz) tar -xzf "$tmp/$asset" -C "$tmp" ;;',
+    '    *.tar.xz) tar -xJf "$tmp/$asset" -C "$tmp" ;;',
+    '    *.zip) if command -v unzip >/dev/null 2>&1; then unzip -qo "$tmp/$asset" -d "$tmp"; else python3 -m zipfile -e "$tmp/$asset" "$tmp"; fi ;;',
+    '    *) mv "$tmp/$asset" "$tmp/$name"; chmod +x "$tmp/$name"; asset="" ;;',
+    "  esac",
+    '  bin="$(find "$tmp" -type f -name "$name" | head -1)"',
+    `  [ -n "$bin" ] || bin="$(find "$tmp" -type f -perm -u+x ! -name "\${asset:-.}" ! -name '*.md' ! -name '*.txt' -printf '%s %p\\n' | sort -rn | head -1 | cut -d' ' -f2-)"`,
+    '  [ -n "$bin" ] || { echo "Error: no binary in ${asset:-the release}" >&2; exit 1; }',
+    '  install -m 0755 "$bin" "/usr/local/bin/$name"',
+    '  echo "WSP_ROAD release ${asset:-$url}"',
+    "elif command -v go >/dev/null 2>&1; then",
+    `  GOBIN=/usr/local/bin go install ${squote(`github.com/${source.repo}@${source.tag}`)}`,
+    `  echo "WSP_ROAD go github.com/${source.repo}@${source.tag}"`,
+    "else",
+    `  echo "Error: release ${source.tag} of ${source.repo} has no Linux build, and go is not on the machine" >&2`,
+    "  exit 1",
+    "fi",
+  ].join("\n");
 }
 
 /** How a removed tool comes off the machine; Go has no uninstall, so its binary is noted and left. */
@@ -496,8 +558,8 @@ export interface ToolsPlan {
   brewfile: string;
 }
 
-export function toolInstallsFor(entries: readonly RecipeEntry[]): ToolsPlan {
-  const brew = brewfileFor(entries);
+export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTable = new Map()): ToolsPlan {
+  const brew = brewfileFor(entries, table);
   const installs: ToolInstall[] = [];
   const skipped: SkippedItem[] = [...brew.skipped];
   const withPath = (cmd: string): string => `${PATH_LINE}\n${cmd}`;
@@ -551,6 +613,11 @@ export function toolInstallsFor(entries: readonly RecipeEntry[]): ToolsPlan {
       if ("note" in r) skipped.push({ id: e.id, note: r.note });
       else installs.push({ id: e.id, label: e.label, manager, cmd: withPath(r.cmd), ...(m !== undefined ? { after: m.after } : {}) });
     }
+  }
+  // Last, after any go the plan brings: a road install needs no brew and waits on nothing.
+  for (const r of brew.roads) {
+    const label = entries.find(e => e.id === r.id)?.label ?? r.name;
+    installs.push({ id: r.id, label, manager: "github", cmd: withPath(roadInstall(r.name, r.source)) });
   }
   return { installs, skipped, brewfile: brew.text };
 }
