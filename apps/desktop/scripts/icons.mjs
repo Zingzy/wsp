@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Rasterises the brand mark into build/icon.icns and build/icon.ico: a rounded
-// square in the app's dark ground with the tilde centred and padded, rendered
-// once per pixel size from the vector so no size is a downscale. Run once by
-// hand and commit the outputs; the icns step needs macOS for iconutil.
+// Run by hand and commit the outputs; the icns step needs macOS for iconutil.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -11,8 +8,11 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const mark = readFileSync(join(root, "..", "web", "src", "brand", "mark.svg"), "utf8");
+const web = join(root, "..", "web");
+const mark = readFileSync(join(web, "src", "brand", "mark.svg"), "utf8");
+const favicon = readFileSync(join(web, "public", "favicon.svg"), "utf8");
 const out = join(root, "build");
+const FAVICON = 32;
 
 const GROUND = "#09090b";
 const INK = "#f4f4f5";
@@ -44,6 +44,10 @@ function page(size) {
 </div></body></html>`;
 }
 
+function flat(svg, size) {
+  return `<!doctype html><html><body style="margin:0;background:transparent">${svg.replace("<svg ", `<svg style="display:block;width:${size}px;height:${size}px" `)}</body></html>`;
+}
+
 function ico(images) {
   const header = Buffer.alloc(6 + 16 * images.length);
   header.writeUInt16LE(0, 0);
@@ -66,15 +70,17 @@ function ico(images) {
 }
 
 const browser = await chromium.launch();
-const rendered = new Map();
-async function render(size) {
-  if (rendered.has(size)) return rendered.get(size);
+async function shoot(html, size) {
   const tab = await browser.newPage({ viewport: { width: size, height: size }, deviceScaleFactor: 1 });
-  await tab.setContent(page(size));
+  await tab.setContent(html);
   const png = await tab.screenshot({ omitBackground: true, type: "png" });
   await tab.close();
-  rendered.set(size, png);
   return png;
+}
+const rendered = new Map();
+async function render(size) {
+  if (!rendered.has(size)) rendered.set(size, await shoot(page(size), size));
+  return rendered.get(size);
 }
 
 mkdirSync(out, { recursive: true });
@@ -88,5 +94,6 @@ rmSync(iconset, { recursive: true, force: true });
 const icoImages = [];
 for (const size of ICO) icoImages.push([size, await render(size)]);
 writeFileSync(join(out, "icon.ico"), ico(icoImages));
+writeFileSync(join(web, "public", "favicon.png"), await shoot(flat(favicon, FAVICON), FAVICON));
 await browser.close();
-console.log(`wrote ${join(out, "icon.icns")} and ${join(out, "icon.ico")}`);
+console.log(`wrote ${join(out, "icon.icns")}, ${join(out, "icon.ico")} and ${join(web, "public", "favicon.png")}`);

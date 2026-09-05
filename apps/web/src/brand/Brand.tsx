@@ -13,7 +13,7 @@ export const WORDMARK_PATHS: readonly string[] = [
   "M26 1V13M26 1H29A4 4 0 0 1 29 9H26",
 ];
 
-/** The tilde alone. Decorative by default; pass an aria-label to name it. */
+/** The tilde alone, decorative: aria-hidden unless the caller overrides it. */
 export function Mark(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
