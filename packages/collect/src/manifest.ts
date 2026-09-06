@@ -4,9 +4,8 @@
 // the same shape with bring and choice filled in is saved as the recipe file,
 // so one schema covers both a fresh collection and a saved recipe.
 import { z } from "zod";
-import { Kind, Manager } from "./everything/row.js";
 
-export const RUNGS = ["identity", "shell", "editors", "toolchains", "tools", "agents", "logins", "everything"] as const;
+export const RUNGS = ["identity", "shell", "toolchains", "tools", "agents", "logins"] as const;
 export const Rung = z.enum(RUNGS);
 export type Rung = z.infer<typeof Rung>;
 
@@ -14,18 +13,6 @@ export type Rung = z.infer<typeof Rung>;
 export const LOGIN_CHOICES = ["copy", "machine", "skip"] as const;
 export const LoginChoice = z.enum(LOGIN_CHOICES);
 export type LoginChoice = z.infer<typeof LoginChoice>;
-
-/** An alias or function the login shell defines that runs a program the machine does not have by itself. */
-export const ShellAlias = z.object({
-  name: z.string().min(1),
-  /** The program the body runs, by the first command word that is not a builtin, a prefix word or another function. */
-  runs: z.string().min(1),
-  /** A suffix alias is undone with unalias -s; a function is listed but never undone. */
-  kind: z.enum(["alias", "suffix", "function"]),
-  /** The tools row that installs the program, when one does. */
-  tool: z.string().min(1).optional(),
-});
-export type ShellAlias = z.infer<typeof ShellAlias>;
 
 export const Default = z.enum(["bring", "skip"]);
 export type Default = z.infer<typeof Default>;
@@ -64,18 +51,8 @@ const Fields = z.object({
   version: z.string().min(1).optional(),
   /** Only on a tools row installed from a release: the tag installed and its asset's sha256, recorded on the first install of that tag and checked while the tag stands. */
   pin: z.object({ tag: z.string().min(1), sha256: z.string().min(1) }).optional(),
-  /** Only on a hand-installed tools row that is a Linux binary: the architecture its ELF header names; the copy is set aside on a machine of another one. */
-  arch: z.string().min(1).optional(),
   /** Credential-shaped: travels only when the person answers copy on this row, never on a bare tick. */
   consent: z.boolean().optional(),
-  /** Only on an everything row: the role the passes guessed. */
-  role: Kind.optional(),
-  /** Only on an everything row: the dotfiles manager whose home this directory is; the pack maps rc copies under it by name. */
-  manager: Manager.optional(),
-  /** Only on an everything row: files under paths minus excludes. */
-  files: z.number().int().nonnegative().optional(),
-  /** Only on an everything row: newest file under it, epoch ms; 0 when nothing on disk backs it. */
-  mtime: z.number().int().nonnegative().optional(),
   /** One line for the detail pane: what found the row and what the flags mean. */
   detail: z.string().optional(),
   /** Exported variable names cut from the carried copy of this file, for the person to set on the machine. Names only, never values. */
@@ -84,10 +61,6 @@ const Fields = z.object({
   login: z.string().min(1).optional(),
   /** Only on a shell row: the family the person's terminal draws with, read from its config; the app's terminal pane defaults to it. */
   font: z.string().min(1).optional(),
-  /** Only on the login shell's rc row: what the shell defines that runs a program, so the screens can say which point at a tool that is not coming and the machine can drop those. */
-  aliases: z.array(ShellAlias).optional(),
-  /** Only on the login shell's rc row: whether the shell listed aliases of its own or, when it listed none or did not answer, the rc files were read. */
-  aliasesFrom: z.enum(["shell", "files"]).optional(),
   /** Only on a zsh or bash rc row: the files it reads on a bare source line, `~`-relative under home and absolute outside it; the pack wraps each line whose file it does not carry so the machine skips it without an error. */
   sources: z.array(z.string().min(1)).optional(),
 });
@@ -98,11 +71,6 @@ export const ManifestEntry = Fields.superRefine((e, ctx) => {
   }
   if (e.choice !== undefined && e.rung !== "logins" && e.consent !== true) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["choice"], message: "only a logins row or a consent row carries a choice" });
-  }
-  for (const k of ["role", "files", "mtime", "manager"] as const) {
-    if (e[k] !== undefined && e.rung !== "everything") {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: [k], message: `only an everything row carries ${k}` });
-    }
   }
   if (e.linux !== undefined && e.rung !== "tools") {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["linux"], message: "only a tools row carries a linux marker" });
@@ -116,12 +84,6 @@ export const ManifestEntry = Fields.superRefine((e, ctx) => {
   if (e.font !== undefined && e.rung !== "shell") {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["font"], message: "only a shell row carries a terminal font" });
   }
-  if (e.aliases !== undefined && e.rung !== "shell") {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["aliases"], message: "only a shell row carries aliases" });
-  }
-  if (e.aliasesFrom !== undefined && e.rung !== "shell") {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["aliasesFrom"], message: "only a shell row says where its aliases were read" });
-  }
   if (e.sources !== undefined && e.rung !== "shell") {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["sources"], message: "only a shell row carries sourced files" });
   }
@@ -131,18 +93,7 @@ export const ManifestEntry = Fields.superRefine((e, ctx) => {
 });
 export type ManifestEntry = z.infer<typeof ManifestEntry>;
 
-/** A fact about a group of rows that no one row carries: what the list covers and what it leaves out. */
-export const GroupNote = z.object({
-  rung: Rung,
-  group: z.string().min(1),
-  /** Beside the header's count: which scope the rows come from. */
-  hint: z.string().min(1).optional(),
-  /** One dim line under the group's rows: what the list leaves out and why. */
-  note: z.string().min(1).optional(),
-});
-export type GroupNote = z.infer<typeof GroupNote>;
-
-export const Manifest = z.object({ entries: z.array(ManifestEntry), groups: z.array(GroupNote).optional() }).superRefine((m, ctx) => {
+export const Manifest = z.object({ entries: z.array(ManifestEntry) }).superRefine((m, ctx) => {
   const seen = new Set<string>();
   m.entries.forEach((e, i) => {
     if (seen.has(e.id)) {

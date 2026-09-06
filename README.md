@@ -49,9 +49,8 @@ machine, runs the sign-ins in your terminal, asks for each secret it cut from
 your rc files, seals the golden on Enter, forks your first workspace and opens
 the app on it. Every prompt has a flag: `--yes` takes the defaults,
 `--recipe <path>` ticks from a recipe `wsp recipe` wrote and goes straight to
-the sign-ins, `--manifest <path>` replays a saved `golden-recipe.json` screen
-by screen. Both files are saved next to the state so a second golden is a
-re-run.
+the sign-ins. The recipe and the rows it ticked are saved next to the state so
+a second golden is a re-run.
 
 `wsp` reads keys from `.env` in the working directory or from the
 environment, and asks once if neither is set. State is a JSON file:

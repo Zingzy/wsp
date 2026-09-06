@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { APT_ENV } from "@wsp/catalog";
 
 // Guest exec is bash -c with no HOME in the environment (measured live on
 // Solari sandboxes); under set -u the first "$HOME" would abort the script.
@@ -67,18 +68,18 @@ export const APT = (pkg: string, cmd = pkg): string =>
 
 export const DOTFILES_PRESETS = {
   zsh: `${PRELUDE}
-export DEBIAN_FRONTEND=noninteractive
+${APT_ENV}
 ${APT("zsh")}
 ${pinnedBinaryInstall(STARSHIP)}
 grep -qs 'starship init zsh' "$HOME/.zshrc" || printf '\\neval "$(starship init zsh)"\\n' >> "$HOME/.zshrc"
 if command -v chsh >/dev/null 2>&1; then chsh -s "$(command -v zsh)" "$(id -un)" || true; fi
 `,
   neovim: `${PRELUDE}
-export DEBIAN_FRONTEND=noninteractive
+${APT_ENV}
 ${APT("neovim", "nvim")}
 `,
   tmux: `${PRELUDE}
-export DEBIAN_FRONTEND=noninteractive
+${APT_ENV}
 ${APT("tmux")}
 `,
 } as const;

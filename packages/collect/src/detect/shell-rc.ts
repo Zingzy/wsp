@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Pass 6. Exported variables whose name says KEY, TOKEN, SECRET or PASSWORD
-// are listed by name and cut from a carried copy of the rc file, wherever
-// on the line the assignment sits. Values never leave this pass, so a cut
-// line takes its continuation and any open quote, substitution or heredoc
-// with it.
-import { RC_FILES as SHELL_RUNG_RC } from "../detect/shell.js";
-import { type Machine, basename, tilde } from "./host.js";
+// The rc files as the pack and the logins rung read them. Exported variables
+// whose name says KEY, TOKEN, SECRET or PASSWORD are listed by name and cut
+// from a carried copy of the rc file, wherever on the line the assignment
+// sits. Values never leave here, so a cut line takes its continuation and any
+// open quote, substitution or heredoc with it.
+import { RC_FILES as SHELL_RUNG_RC } from "./shell.js";
 
 /** fish reads every .fish file directly in this directory at startup, before config.fish. */
 export const FISH_CONF_D = ".config/fish/conf.d";
@@ -14,7 +13,7 @@ export const FISH_CONF_D = ".config/fish/conf.d";
 export const RC_PATHS = [...SHELL_RUNG_RC.map(n => `.${n}`), ".config/fish/config.fish"] as const;
 
 /** The names an rc file goes by, for a copy of one found under another directory. */
-export const RC_NAMES: ReadonlySet<string> = new Set(RC_PATHS.map(basename));
+export const RC_NAMES: ReadonlySet<string> = new Set(RC_PATHS.map(p => p.slice(p.lastIndexOf("/") + 1)));
 
 /** Whether a `~`-relative path is an rc file: one of RC_PATHS, or a .fish file directly in conf.d. */
 export function isRcPath(rel: string): boolean {
@@ -25,15 +24,6 @@ export function isRcPath(rel: string): boolean {
 /** The rc files as `~`-relative paths: RC_PATHS and the .fish files in conf.d's listing. */
 export function rcFiles(confD: readonly string[]): string[] {
   return [...RC_PATHS, ...confD.filter(n => n.endsWith(".fish")).map(n => `${FISH_CONF_D}/${n}`)];
-}
-
-export interface RcScan {
-  /** `~`-relative. */
-  path: string;
-  /** Variable names to set on the machine by hand. */
-  names: string[];
-  /** The file with those assignment lines removed. */
-  carried: string;
 }
 
 const SECRET_WORDS = new Set(["KEY", "APIKEY", "TOKEN", "SECRET", "PASSWORD"]);
@@ -296,48 +286,6 @@ export function sourcedPaths(text: string, home: string): string[] {
       const src = sourceCommand(cmd);
       const p = src === undefined ? undefined : sourcedPath(src.token, home);
       if (p !== undefined && !out.includes(p)) out.push(p);
-    }
-  }
-  return out;
-}
-
-export interface ShellRcOptions {
-  /** Collects rc files that exist but could not be read. */
-  notes?: string[];
-  /** Collects the files the rc files source, resolved, so a copy of one under another row is known to be stripped by identity. */
-  sourced?: Set<string>;
-}
-
-const under = (path: string, root: string): boolean => path === root || path.startsWith(`${root}/`);
-
-export async function shellRc(m: Machine, opts: ShellRcOptions = {}): Promise<RcScan[]> {
-  const out: RcScan[] = [];
-  // Read through the link so a stowed rc file is scanned; the scan is reported under the path the shell reads.
-  const scan = async (path: string): Promise<string | undefined> => {
-    const real = (await m.fs.realpath(path)) ?? path;
-    const text = await m.fs.readText(real);
-    if (text === undefined) {
-      if ((await m.fs.stat(real))?.kind === "file") opts.notes?.push(`${tilde(m.home, path)} could not be read (over 1 MB or unreadable) and was not scanned`);
-      return undefined;
-    }
-    const s = stripExports(text);
-    if (s.names.length > 0) out.push({ path: tilde(m.home, path), ...s });
-    return text;
-  };
-  const rcs = rcFiles(await m.fs.list(`${m.home}/${FISH_CONF_D}`)).map(rel => `${m.home}/${rel}`);
-  const own = new Set<string>();
-  for (const p of rcs) own.add((await m.fs.realpath(p)) ?? p);
-  const followed = new Set<string>();
-  for (const path of rcs) {
-    const text = await scan(path);
-    if (text === undefined) continue;
-    // One level: what an rc file sources is an rc file too; what those source in turn is not followed.
-    for (const s of sourcedPaths(text, m.home)) {
-      const real = await m.fs.realpath(s);
-      if (real === undefined || !under(real, m.home) || own.has(real) || followed.has(real) || (await m.fs.stat(real))?.kind !== "file") continue;
-      followed.add(real);
-      opts.sourced?.add(real);
-      await scan(s);
     }
   }
   return out;

@@ -14,13 +14,13 @@ const entry = {
 
 describe("manifest schema", () => {
   it("a choice sits on a logins row or a consent row, never on a plain one", () => {
-    const token = { rung: "everything", id: "everything/.demo-token", label: ".demo-token", paths: ["~/.demo-token"], bytes: 40, default: "skip", consent: true, choice: "copy" };
+    const token = { rung: "agents", id: "agents/mcp/claude/github", label: "github", paths: [], bytes: 0, default: "bring", consent: true, choice: "copy" };
     expect(parseManifest({ entries: [token] }).entries[0]).toMatchObject({ choice: "copy" });
     expect(() => parseManifest({ entries: [{ ...token, consent: undefined }] })).toThrow(/entries\.0\.choice: only a logins row or a consent row carries a choice/);
   });
 
-  it("lists the eight rungs in ladder order and the three login choices", () => {
-    expect(RUNGS).toEqual(["identity", "shell", "editors", "toolchains", "tools", "agents", "logins", "everything"]);
+  it("lists the six rungs in ladder order and the three login choices", () => {
+    expect(RUNGS).toEqual(["identity", "shell", "toolchains", "tools", "agents", "logins"]);
     expect(LOGIN_CHOICES).toEqual(["copy", "machine", "skip"]);
   });
 
@@ -63,7 +63,6 @@ describe("manifest schema", () => {
     ["a version on a row that is not a tool", { ...entry, version: "1.0.0" }],
     ["a login shell on a row that is not a shell row", { ...entry, login: "zsh" }],
     ["a terminal font on a row that is not a shell row", { ...entry, font: "Hack" }],
-    ["where the aliases were read on a row that is not a shell row", { ...entry, aliasesFrom: "files" }],
     ["sourced files on a row that is not a shell row", { ...entry, sources: ["~/.cargo/env"] }],
   ])("rejects %s", (_name, bad) => {
     expect(ManifestEntry.safeParse(bad).success).toBe(false);

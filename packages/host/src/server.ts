@@ -40,7 +40,7 @@ export interface HostOptions {
   autoOpen?: (workspaceId: string, url: string, port?: number) => boolean;
   /** The line logged when a sign-in page arrives and nothing opens, given the workspace name and the page's hostname. */
   openLine?: (workspace: string, hostname: string, url: string) => string;
-  /** The saved recipe file, named as the way to reuse a kept builder and read for the terminal font its ticks name. */
+  /** The saved recipe file, read for the terminal font its ticks name. */
   recipePath?: string;
 }
 
@@ -153,10 +153,9 @@ function describeSpared(m: SparedMachine): string {
 }
 
 /** A first-life builder from an earlier run is claimed, so the sweep never names it; the person still sees what bills. */
-function describeKept(b: GoldenBuilderView, rateUsdPerHour: number, recipePath: string | undefined): string {
+function describeKept(b: GoldenBuilderView, rateUsdPerHour: number): string {
   const ageMs = Date.now() - Date.parse(b.createdAt);
-  const reuse = recipePath === undefined ? "wsp init" : `wsp init --manifest ${recipePath}`;
-  return `reap: left alone ${b.id}: your earlier builder from this setup, still first-life, ${describeAge(ageMs)}, ${describeCost(rateUsdPerHour, ageMs)}; reuse it with ${reuse}, or it is stopped at six hours`;
+  return `reap: left alone ${b.id}: your earlier builder from this setup, still first-life, ${describeAge(ageMs)}, ${describeCost(rateUsdPerHour, ageMs)}; reuse it with wsp init, or it is stopped at six hours`;
 }
 
 /** A builder kept after its save is claimed, so the sweep never names it; the person still sees what bills and why. */
@@ -308,7 +307,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     else if (b.heldBy !== undefined) log(`reap: left alone ${b.id}: your earlier builder from this setup, in use by another wsp process (pid ${b.heldBy.pid}); never touched by this host`);
     else if (b.building === true) log(`reap: left alone ${b.id}: your earlier builder from this setup; its setup never finished; the next sweep stops it`);
     else if (b.sealed !== undefined) log(describeSealed(b, b.sealed, rt.backend.pricing.rateUsdPerHour(b.size)));
-    else if (b.firstLife === true && b.id !== opts.builder?.id) log(describeKept(b, rt.backend.pricing.rateUsdPerHour(b.size), opts.recipePath));
+    else if (b.firstLife === true && b.id !== opts.builder?.id) log(describeKept(b, rt.backend.pricing.rateUsdPerHour(b.size)));
   }
   try {
     const storage = await rt.golden.storage();

@@ -98,10 +98,9 @@ describe("toolSize", () => {
     expect(toolSize(brew("llvm@21"), new Map())).toEqual({ bytes: 2560 * MIB, road: "measured", deps: 0 });
   });
 
-  it("a formula nothing measured or read has no size; taps, casks and a measured npm global are handled", () => {
+  it("a formula nothing measured or read has no size; taps and a measured npm global are handled", () => {
     expect(toolSize(brew("gh"), new Map())).toBeUndefined();
     expect(toolSize(row({ id: "tools/brew-tap/zingzy/tap" }), TABLE)).toBeUndefined();
-    expect(toolSize(row({ id: "tools/brew-cask/rectangle" }), TABLE)).toBeUndefined();
     expect(toolSize(row({ id: "tools/npm/bun" }), TABLE)).toEqual({ bytes: 78 * MIB, road: "measured", deps: 0 });
     expect(toolSize(row({ id: "tools/npm/left-pad" }), TABLE)).toBeUndefined();
   });
@@ -141,14 +140,6 @@ describe("assumedSize", () => {
     expect(assumedSize(row({ id: "tools/cargo/ripgrep" }))).toEqual({ bytes: 100 * MIB, kind: "an install" });
     expect(assumedSize(row({ id: "tools/brew/nobody/tap/mystery" }))).toEqual({ bytes: 100 * MIB, kind: "an install" });
     expect(assumedSize({ ...row({ id: "agents/aider" }), rung: "agents" })).toEqual({ bytes: 350 * MIB, kind: "an agent" });
-  });
-
-  it("a command cask's row counts at the go default when it carries a go fallback, at the install default when it does not", () => {
-    const spoo = row({ id: "tools/cli/spoo", paths: ["github.com/spoo-me/spoo-cli@v0.4.1", "github.com/spoo-me/spoo-cli/cmd/spoo@v0.3.0"] });
-    expect(assumedSize(spoo)).toEqual({ bytes: 500 * MIB, kind: "a go install" });
-    const ngrok = row({ id: "tools/cli/ngrok", paths: ["github.com/ngrok/ngrok@v3"] });
-    expect(assumedSize(ngrok)).toEqual({ bytes: 100 * MIB, kind: "an install" });
-    expect(assumedSize(row({ id: "tools/cargo/spoo", paths: spoo.paths }))).toEqual({ bytes: 100 * MIB, kind: "an install" });
   });
 });
 
@@ -205,8 +196,8 @@ describe("estimateDisk", () => {
     expect(est.over).toBe(30 * GIB + BREW_TOOLCHAIN_BYTES - DISK_ROOM_BYTES);
   });
 
-  it("a cask or a tap adds nothing and is not unknown", () => {
-    const est = estimateDisk([row({ id: "tools/brew-cask/rectangle", label: "rectangle" }), row({ id: "tools/brew-tap/zingzy/tap", label: "zingzy/tap" })], 0, TABLE);
+  it("a tap adds nothing and is not unknown", () => {
+    const est = estimateDisk([row({ id: "tools/brew-tap/zingzy/tap", label: "zingzy/tap" })], 0, TABLE);
     expect(est.tools).toBe(0);
     expect(est.unknown).toEqual([]);
     expect(est.toolchain).toBe(BREW_TOOLCHAIN_BYTES);

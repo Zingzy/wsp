@@ -5,7 +5,7 @@
 // exported, whether a helper command is set.
 import { LOGIN_ROWS, loginRow, signsInByDefault } from "@wsp/catalog";
 import { type Host, type Platform, expand } from "../host.js";
-import { RC_PATHS, stripExports } from "../everything/shell-rc.js";
+import { RC_PATHS, stripExports } from "./shell-rc.js";
 import type { Default, ManifestEntry } from "../manifest.js";
 import { entry, found, item, present } from "./common.js";
 

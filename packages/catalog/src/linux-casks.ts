@@ -1,43 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Casks that are commands with a Linux build of their own, outside Homebrew.
-// Each installs from its vendor's release, hashed on the guest and printed on
-// the WSP_ROAD line the tools stage reads, so the first install of a version
-// records the checksum and the next install of that version checks it. The
-// version is the Mac's when the cask's version names the Linux build; else the
-// vendor's current one is fetched once and the pin holds it from then on.
+// Commands with a Linux build of their own, outside Homebrew, that the
+// catalog's vendor road installs. Each installs from its vendor's release,
+// hashed on the guest and printed on the WSP_ROAD line the tools stage reads,
+// so the first install of a version records the checksum and the next install
+// of that version checks it. The vendor's current version is fetched once and
+// the pin holds it from then on.
 import { shellQuote } from "@wsp/protocol";
-import type { ToolPin } from "./roads.js";
+import { type ToolPin, pinStateOf } from "./roads.js";
 
 export interface LinuxCask {
-  /** The cask tokens that ship the command on macOS. */
-  casks: readonly string[];
   /** The command the install puts on PATH. */
   bin: string;
   /** Where the Linux build comes from, for the row's column. */
   from: string;
   /** The row's detail line, under 76 columns: what lands on the machine. */
   detail: string;
-  /** Whether the Mac's cask version names the Linux build; false when the Linux build has its own release line. */
-  macVersion: boolean;
-  /** One bash script; version is what caskVersion picked, pin what a first install recorded. */
+  /** One bash script; version is the road's when it names one, pin what a first install recorded. */
   install(version: string | undefined, pin: ToolPin | undefined): string;
   uninstall: string;
-}
-
-/** The version a row's install is fixed to by the Mac: its version when the cask's names the Linux build, else none. */
-export function caskVersion(cask: LinuxCask, e: { version?: string }): string | undefined {
-  return cask.macVersion ? e.version : undefined;
-}
-
-/** How a cask install stands against the recipe's pin: nothing recorded, the same version (checked), or a
- * version the Mac has since moved to (a first install again, re-recorded). Without a Mac version the pin's own stands. */
-export function caskPinState(cask: LinuxCask, e: { version?: string; pin?: ToolPin }): "none" | "same" | "moved" {
-  return pinStateOf(caskVersion(cask, e), e.pin);
-}
-
-function pinStateOf(version: string | undefined, pin: ToolPin | undefined): "none" | "same" | "moved" {
-  if (pin === undefined) return "none";
-  return version === undefined || version === pin.tag ? "same" : "moved";
 }
 
 /** The version the script installs: the Mac's, else the pinned one, else the vendor's current one by `latest`. */
@@ -61,11 +41,9 @@ const GCLOUD_BINS = ["gcloud", "gsutil", "bq"];
 /** Google publishes the tarball per version and arch; the rapid channel's component list names the current version.
  * The x86_64 tarball bundles a Python; the arm one runs on the machine's python3. */
 export const GCLOUD: LinuxCask = {
-  casks: ["gcloud-cli", "google-cloud-sdk"],
   bin: "gcloud",
   from: "Google's Linux release",
   detail: "from Google's Linux release, checksum recorded on first install",
-  macVersion: true,
   install: (version, pin) =>
     [
       ...PRELUDE,
@@ -84,14 +62,11 @@ export const GCLOUD: LinuxCask = {
   uninstall: `rm -rf ${GCLOUD_HOME} ${GCLOUD_BINS.map(b => `/usr/local/bin/${b}`).join(" ")}`,
 };
 
-/** Docker Desktop ships kubectl on the Mac; on Linux the static binary comes from the Kubernetes release, checked
- * against the sum published beside it. The cask's version is Docker's, which says nothing about kubectl's. */
+/** The static binary from the Kubernetes release, checked against the sum published beside it. */
 export const KUBECTL: LinuxCask = {
-  casks: ["docker-desktop", "docker"],
   bin: "kubectl",
   from: "Kubernetes release",
   detail: "kubectl only, from the Kubernetes release; Docker itself has no Linux build",
-  macVersion: false,
   install: (version, pin) =>
     [
       ...PRELUDE,
@@ -110,19 +85,3 @@ export const KUBECTL: LinuxCask = {
 };
 
 export const LINUX_CASKS: readonly LinuxCask[] = [GCLOUD, KUBECTL];
-
-const CASK_PREFIX = "tools/brew-cask/";
-const CLI_PREFIX = "tools/cli/";
-
-/** The table's entry for a tools row: a command row by its command, an app cask row by its token. */
-export function linuxCaskFor(id: string): LinuxCask | undefined {
-  if (id.startsWith(CLI_PREFIX)) return linuxCaskByBin(id.slice(CLI_PREFIX.length));
-  if (!id.startsWith(CASK_PREFIX)) return undefined;
-  const token = id.slice(CASK_PREFIX.length);
-  return LINUX_CASKS.find(c => c.casks.includes(token));
-}
-
-/** The table's entry for a command, when one of the casks ships it. */
-export function linuxCaskByBin(bin: string): LinuxCask | undefined {
-  return LINUX_CASKS.find(c => c.bin === bin);
-}

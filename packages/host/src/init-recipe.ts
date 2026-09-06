@@ -5,10 +5,10 @@
 // golden recipe the ticked rows add up to.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { type LoginChoice, type Manifest, type ManifestEntry, type Rung, parseManifest } from "@wsp/collect";
-import { CATALOG_AGENTS, catalogEntry, catalogToolFor, linuxCaskByBin, linuxCaskFor, loginIdOf, loginRow } from "@wsp/catalog";
-import { CATALOG_PREFIX, agentOwning, neverCopied, packageOf, parseMcpId, rowRoad, type RecipeDigest } from "@wsp/engine";
-import { MCP_ID_PREFIX, Recipe } from "@wsp/protocol";
+import type { LoginChoice, Manifest, ManifestEntry, Rung } from "@wsp/collect";
+import { CATALOG_AGENTS, catalogEntry, catalogToolFor, loginIdOf, loginRow } from "@wsp/catalog";
+import { CATALOG_PREFIX, agentOwning, isMcpRow, neverCopied, packageOf, parseMcpId, rowRoad, type RecipeDigest } from "@wsp/engine";
+import { Recipe } from "@wsp/protocol";
 import type { GoldenImport, GoldenRecipe, Machine } from "@wsp/runtime";
 import type { Keys } from "./cli.js";
 import { GUEST_ENVS, claudeEnvs } from "./doctor.js";
@@ -16,24 +16,16 @@ import { GUEST_ENVS, claudeEnvs } from "./doctor.js";
 export const RUNG_TITLE: Record<Rung, string> = {
   identity: "Identity",
   shell: "Shell",
-  editors: "Editors",
   toolchains: "Toolchains",
   tools: "Tools",
   agents: "Agents",
   logins: "Sign-ins",
-  everything: "Everything else",
 };
 
 /** The prompt's words for each login choice; the choices themselves are the collector's. */
 export const LOGIN_CHOICES: readonly { value: LoginChoice; label: string }[] = [
   { value: "copy", label: "copy" },
   { value: "machine", label: "sign in" },
-  { value: "skip", label: "skip" },
-];
-
-/** A credential-shaped row's two answers: copy it, or leave it here. */
-export const CONSENT_CHOICES: readonly { value: LoginChoice; label: string }[] = [
-  { value: "copy", label: "copy" },
   { value: "skip", label: "skip" },
 ];
 
@@ -57,15 +49,6 @@ export function lockRefused(manifest: Manifest, isDir: (rel: string) => boolean 
   };
 }
 
-/** The tools rows for casks that are commands with a Linux release of their own: open to a tick, unticked unless saved so. */
-export function linuxCaskRows(entries: readonly ManifestEntry[]): ManifestEntry[] {
-  return entries.map(e => {
-    if (e.rung !== "tools" || linuxCaskFor(e.id) === undefined) return e;
-    const { reason: _reason, ...rest } = e;
-    return { ...rest, default: "skip", linux: "yes" };
-  });
-}
-
 /** The tools rows without a package an agent on the Agents screen installs itself: one tool, one row, one install. */
 export function withoutAgentTools(entries: readonly ManifestEntry[]): ManifestEntry[] {
   const agents = new Set(entries.filter(e => e.rung === "agents").map(e => e.id));
@@ -79,8 +62,6 @@ export function withoutAgentTools(entries: readonly ManifestEntry[]): ManifestEn
 const LOGIN_BIN: Readonly<Record<string, string>> = { gh: "gh", gcloud: "gcloud", wrangler: "wrangler", cloudflared: "cloudflared", vercel: "vercel", aws: "aws", kube: "kubectl" };
 /** Packages not named for the command they put on PATH. */
 const ROW_BIN: Readonly<Record<string, string>> = { awscli: "aws", "kubernetes-cli": "kubectl", "cloudflare-wrangler": "wrangler" };
-/** What would bring a command no tools row lists, when the Linux cask table does not say; the detail pane has 76 columns. */
-const BRINGS: Readonly<Record<string, string>> = { gh: "brew install gh", cloudflared: "brew install cloudflared", aws: "brew install awscli", wrangler: "npm install -g wrangler", vercel: "npm install -g vercel" };
 
 /** The command a tools row puts on PATH, when a road installs the row: the road's own answer, else the package's name. */
 function rowBin(t: ManifestEntry): string | undefined {
@@ -90,9 +71,10 @@ function rowBin(t: ManifestEntry): string | undefined {
   return ROW_BIN[pkg] ?? planned.bin ?? pkg.slice(pkg.lastIndexOf("/") + 1);
 }
 
+/** What brings a command no tools row lists: its catalog entry, ticked under What they need. */
 function brings(bin: string): string {
-  const cask = linuxCaskByBin(bin);
-  return cask !== undefined ? `a ${cask.casks[0]} cask would bring it` : `${BRINGS[bin] ?? `installing ${bin}`} brings it`;
+  const entry = catalogToolFor(bin);
+  return entry !== undefined ? `tick ${entry.name} under What they need to bring it` : `installing ${bin} brings it`;
 }
 
 export interface LoginTool {
@@ -209,21 +191,6 @@ export function isLoginChoice(v: unknown): v is LoginChoice {
   return LOGIN_CHOICES.some(c => c.value === v);
 }
 
-export function loadManifest(path: string): Manifest {
-  if (!existsSync(path)) throw new Error(`no manifest at ${path}`);
-  let data: unknown;
-  try {
-    data = JSON.parse(readFileSync(path, "utf8"));
-  } catch (e) {
-    throw new Error(`${path}: ${e instanceof Error ? e.message : String(e)}`);
-  }
-  try {
-    return parseManifest(data);
-  } catch (e) {
-    throw new Error(`${path}: ${e instanceof Error ? e.message : String(e)}`);
-  }
-}
-
 /** The small recipe wsp recipe wrote (or a person or an agent did), checked against the protocol's shape. */
 export function loadRecipe(path: string): Recipe {
   if (!existsSync(path)) throw new Error(`no recipe at ${path}`);
@@ -240,20 +207,16 @@ export function loadRecipe(path: string): Recipe {
 
 /** The catalog id a collector row stands for: an agents row its agent, a tools row the tool its package names. */
 export function catalogIdOf(e: ManifestEntry): string | undefined {
-  if (e.rung === "agents" && !e.id.startsWith(MCP_ID_PREFIX)) return agentName(e);
+  if (e.rung === "agents" && !isMcpRow(e)) return agentName(e);
   if (e.rung === "tools") return catalogToolFor(packageOf(e))?.id;
   return undefined;
 }
 
-/** The rungs the catalog model leaves out of a golden: their rows start off on the catalog path. */
-const OFF_THE_PATH: ReadonlySet<Rung> = new Set<Rung>(["editors", "everything"]);
-
 /** The collector's rows with the recipe's ticks written on: an agents or tools row is on when its catalog row is,
  * off when it is not or when no catalog row stands for it; an MCP row follows its agent; a saved sign-in answer
- * lands on the login row it names; an editors or everything row is off. Every other row keeps its default, as a
- * saved manifest would leave it. A ticked catalog tool this computer has no row for gets a bare row, the floor's
- * aside, so the build installs it by its catalog road; the bare rows of an earlier pass are made anew, so an untick
- * takes its row away. */
+ * lands on the login row it names. Every other row keeps its default. A ticked catalog tool this computer has no
+ * row for gets a bare row, the floor's aside, so the build installs it by its catalog road; the bare rows of an
+ * earlier pass are made anew, so an untick takes its row away. */
 export function applyRecipe(manifest: Manifest, recipe: Recipe): Manifest {
   const on = new Set(recipe.rows.filter(r => r.on).map(r => r.id));
   const answers = new Map<string, LoginChoice>(recipe.rows.flatMap(r => (r.signIn === undefined ? [] : [[`logins/${loginIdOf(r.id)}`, r.signIn]])));
@@ -268,8 +231,7 @@ export function applyRecipe(manifest: Manifest, recipe: Recipe): Manifest {
     ...manifest,
     entries: [
       ...own.map(e => {
-        if (OFF_THE_PATH.has(e.rung)) return { ...e, bring: false };
-        if (e.rung === "agents" && e.id.startsWith(MCP_ID_PREFIX)) {
+        if (isMcpRow(e)) {
           const agent = parseMcpId(e.id)?.agent;
           return { ...e, bring: initialTicks(e) && (agent === undefined || catalogEntry(agent)?.kind !== "agent" || on.has(agent)) };
         }
@@ -321,7 +283,7 @@ export function saveRecipe(path: string, manifest: Manifest, ticks: ReadonlySet<
     return { ...e, bring: ticks.has(e.id), ...(isLoginChoice(choice) ? { choice } : {}) };
   });
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify({ entries, ...(manifest.groups !== undefined ? { groups: manifest.groups } : {}) }, null, 2)}\n`);
+  writeFileSync(path, `${JSON.stringify({ entries }, null, 2)}\n`);
 }
 
 export function agentName(e: ManifestEntry): string {

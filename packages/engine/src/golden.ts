@@ -9,9 +9,9 @@
 import { createHash } from "node:crypto";
 import { ALREADY_APPLIED, fmtBytes, goldenHead, type GoldenBaseTool, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenStage, type GoldenVersion, type RecipeDigest } from "@wsp/protocol";
 import type { Removal } from "./golden-diff.js";
-import { NODE_PATH_LINE, type AgentInstall, type GuestFacts, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
+import { NODE_PATH_LINE, type AgentInstall, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
-import { MIB, TOOL_TIMEOUT_S, closing, freeBytes, freeNote, guardDeadlineMs, guarded, guestArch, installTools, reasonOf, sweepCaches, type ToolResult } from "./golden-tools.js";
+import { MIB, TOOL_TIMEOUT_S, closing, freeBytes, freeNote, guardDeadlineMs, guarded, installTools, reasonOf, sweepCaches, type ToolResult } from "./golden-tools.js";
 import { installBase } from "./golden-base.js";
 import { BUILDER_DISK_GB } from "./tool-sizes.js";
 import { assertFirstLife } from "./lifecycle.js";
@@ -156,8 +156,8 @@ export interface GoldenImport {
     bytes: number;
     /** Ticked paths the plan set aside (missing on disk, a private key), reported before packing. */
     skipped: SkippedPath[];
-    /** Builds the archive for this machine; a copy the machine cannot run is set aside in the result's skipped. */
-    pack: (guest: GuestFacts) => Promise<PackedFiles>;
+    /** Builds the archive. */
+    pack: () => Promise<PackedFiles>;
     /** The planned files a tool rewrites while it runs, `~`-relative: they never decide the hash, so an
      * attach uploads the latest copy again. Absent when none was ticked. */
     volatile?: { paths: string[]; pack: () => Promise<PackedFiles> };
@@ -324,7 +324,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
     } else {
       const rungs = Object.entries(imp.files.rungs).map(([r, n]) => `${r} ${n}`).join(", ");
       stage("applying-setup", `${imp.files.count} file${imp.files.count === 1 ? "" : "s"}: ${rungs}`);
-      const packed = await imp.files.pack(await guestArch(machine));
+      const packed = await imp.files.pack();
       packed.skipped = [...imp.files.skipped, ...packed.skipped];
       const notes = packed.skipped.map(s => `${s.path} (${s.note})`);
       stage("applying-setup", `${fmtBytes(packed.bytes)} packed${notes.length > 0 ? `; skipped ${notes.join(", ")}` : ""}`);

@@ -14,7 +14,6 @@ function laptop(): Host {
     home: "/Users/dev",
     fs: {
       stat: async p => (p === "/Users/dev/.claude/settings.json" ? { kind: "file", bytes: 10 } : undefined),
-      probe: async () => undefined,
       list: async () => [],
       readText: async () => undefined,
       walk: async () => [],
