@@ -472,6 +472,47 @@ describe("chat tab send after a harness died before its init", () => {
     expect(started[1]).toEqual({ workspaceId: WS, prompt: "and then this", resume: "sess_retry", cwd: "/root" });
   });
 
+  it("pinned to a dead thread and left mid-send for another thread, the retry's start re-homes the queued row under the thread it opened; the pin stays where the person went, and the row goes when they open that thread", async () => {
+    const history: Record<string, SessionEvent[]> = { [WS]: [...DEATH, ...STARTED] };
+    const deadRow: SessionView = { id: dead.sessionId, workspaceId: WS, harness: "claude", status: "failed", threadId: "thr_dead", prompt: "hello", startedAt: T0 };
+    const { api, started, emit } = fixtureApi([workspace], history, [deadRow]);
+    const record = (e: SessionEvent) => { history[WS] = [...history[WS]!, e]; emit(e); };
+    await setup(api, "thr_dead");
+    await screen.findByText(/exited before init/);
+    const editor = composerEditor();
+
+    await typeInto(editor, "again");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started.length).toBe(1));
+    await typeInto(editor, "and then this");
+    await press(editor, "Enter");
+    expect(queueOf("thr_dead")).toEqual(["and then this"]);
+
+    act(() => useStore.getState().select(WS, "thr_a"));
+    await screen.findByText(/Server is live at :3000\./);
+    expect(sendButton().getAttribute("aria-label")).toBe("Send message");
+    expect(queueOf("thr_a")).toEqual([]);
+
+    for (const e of OTHER.slice(0, 2)) record(e);
+    expect(queueOf("thr_dead")).toEqual(["and then this"]);
+    expect(queueOf("thr_other")).toEqual([]);
+
+    record(RETRY[0]!);
+    expect(useStore.getState().selectedThreadId).toBe("thr_a");
+    expect(queueOf("thr_retry")).toEqual(["and then this"]);
+    expect(queueOf("thr_dead")).toEqual([]);
+    expect(useComposerDraftStore.getState().held).toEqual({});
+    for (const e of [...RETRY.slice(1), ...OTHER.slice(2)]) record(e);
+    expect(screen.queryByText("Second time lucky.")).toBeNull();
+    expect(sendButton().getAttribute("aria-label")).toBe("Send message");
+    expect(started.length).toBe(1);
+
+    act(() => useStore.getState().select(WS, "thr_retry"));
+    await screen.findByText("Second time lucky.");
+    await waitFor(() => expect(started.length).toBe(2));
+    expect(started[1]).toEqual({ workspaceId: WS, prompt: "and then this", resume: "sess_retry", cwd: "/root" });
+  });
+
   it("on a fresh thread, another client's start during the send stays out; the start carrying the sent prompt opens the thread and takes the queued row", async () => {
     const { api, started, emit } = fixtureApi([workspace], { [WS]: STARTED });
     await setup(api);
