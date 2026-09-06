@@ -15,7 +15,7 @@ import { MIB, TOOL_TIMEOUT_S, closing, freeBytes, freeNote, guardDeadlineMs, gua
 import { installBase } from "./golden-base.js";
 import { BUILDER_DISK_GB } from "./tool-sizes.js";
 import { assertFirstLife } from "./lifecycle.js";
-import { applyMcp, type McpPlan, type McpResult } from "./golden-mcp.js";
+import { applyMcp, mcpTally, type McpPlan, type McpResult } from "./golden-mcp.js";
 import { BROWSER_SHIM_PATH, applyMachineContext, type ContextResult } from "./machine-context.js";
 import type { Machine, MachineBackend, MachineKind, MachineState } from "./machine.js";
 import { importInto } from "./vault.js";
@@ -418,9 +418,11 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
     // laptop definition back as it was. It is idempotent and touches only the servers the plan names. It does not count
     // as a run for the result: on an attach the saved result from the build stands, tools and agents included.
     let edited = false;
+    let servers: string | undefined;
     if (imp.mcp !== undefined) {
       edited = true;
       result.mcp = await applyMcp(machine, imp.mcp, stage, result.tools);
+      servers = mcpTally(result.mcp);
     } else if (done("installing-mcp")) {
       stage("installing-mcp", ALREADY_APPLIED);
     } else {
@@ -436,7 +438,8 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
       else mark("installing-mcp");
       // A refused rewrite over a document that landed leaves the saved result true: the machine still holds it.
       if (!ran && (context.failure === undefined || !contextWasOn)) imp.onContext?.({ context: context.context, ...(context.failure !== undefined ? { contextFailure: context.failure } : {}) });
-      stage("installing-mcp", `machine context: ${context.summary}`);
+      // The stage's last detail is what the terminal keeps as its end line, so the servers' tally rides with the context.
+      stage("installing-mcp", closing(servers, `machine context: ${context.summary}`));
     }
     if (ran || edited) {
       // A builder whose exec died (a full disk did it once) would be sealed and handed off answering nothing.
