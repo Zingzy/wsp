@@ -212,6 +212,12 @@ describe("wsp verbs over the host", () => {
     expect(followUp.code).toBe(0);
     expect(claude.starts.map(s => [s.prompt, s.resume])).toEqual([["from the app", undefined], ["and this", byPerson!.claudeSessionId]]);
 
+    // Every start the verbs made carries its own request id on the wire and on the recorded start, so an app view with
+    // the same text in flight cannot take it for its own; the app's start through the runtime sent none.
+    const requestIds = (await rt.sessions.history(alpha!.id)).filter(e => e.type === "session.start").map(e => e.requestId);
+    expect(requestIds.map(id => typeof id)).toEqual(["string", "undefined", "string", "string"]);
+    expect(new Set(requestIds).size).toBe(4);
+
     // A resumed turn takes over its thread's row, as the app sees it too: one row per thread, the opener kept.
     const listed = await run("threads", "--json");
     const [{ threads }] = json(listed.io) as [{ threads: ThreadView[] }];

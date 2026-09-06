@@ -67,7 +67,7 @@ function fixtureApi(workspaces: WorkspaceView[], history: Record<string, Session
 }
 
 /** The composer's half of a send, since ChatView alone mounts no composer: the start that follows must carry this prompt. */
-const sendFrom = (thread: ChatThreadHandle | null, prompt: string) => act(() => { thread!.setSending(true); thread!.appendUserTurn(prompt); });
+const sendFrom = (thread: ChatThreadHandle | null, prompt: string) => act(() => { thread!.setSending(true); thread!.appendUserTurn(prompt, "req_view"); });
 
 async function setup(api: Api, workspaceId = WS) {
   useStore.getState().bind(api);

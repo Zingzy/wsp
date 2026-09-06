@@ -299,6 +299,9 @@ export interface WorkspaceSizeSpec {
 export interface StartSessionOptions {
   workspaceId: string;
   prompt: string;
+  /** Minted per send; the runtime stamps it on the turn's session.start, which is how the sender tells its own start
+   * from another client's with the same text. */
+  requestId?: string;
   harness?: string;
   resume?: string;
   cwd?: string;
