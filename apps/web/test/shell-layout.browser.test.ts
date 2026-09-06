@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The shell's chrome in a real Chromium: the sidebar's brand lockup starts
 // where the search box does, a thread row's title keeps its room at the
-// default width, a status toast holds a long token inside its box, and
-// collapsing the sidebar leaves the page header's left padding alone. Vite
+// default width, a status toast holds a long token inside its box, the line
+// the runtime puts on a machine's row takes that row's second line whole,
+// uncut and without growing the row, and collapsing the sidebar leaves the
+// page header's left padding alone. Vite
 // serves test/shell to Playwright's browser, so like the glyph test it runs
 // only when asked for (WSP_RENDER=1) and skips without Playwright's Chromium
 // on the machine.
@@ -183,6 +185,36 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       const path = join(SHOTS_DIR, `sidebar-toast-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
       console.info(`sidebar toast screenshot: ${path}`);
+    }
+  }, 30_000);
+
+  it("the line the runtime puts on a machine's row is the whole second line, drawn whole and at the row's own height, in both themes", async () => {
+    const metaOf = (): Promise<{ text: string; clipped: boolean; height: number }[]> =>
+      page!.locator("[data-row-id^='ws:']").evaluateAll(rows =>
+        rows.map(row => {
+          const meta = row.querySelector<HTMLElement>("[data-workspace-meta]");
+          // textContent is the whole string whatever CSS does to it, so what the person sees is scroll against client.
+          return { text: meta?.textContent ?? "", clipped: meta !== null && meta.scrollWidth > meta.clientWidth, height: row.getBoundingClientRect().height };
+        }),
+      );
+    for (const theme of ["dark", "light"] as const) {
+      await open(theme);
+      const plain = await metaOf();
+      expect(plain[0]!.text).toContain("$0.110/hr");
+      expect(plain[0]!.text).not.toContain("helper");
+
+      await page!.goto(`${base}?theme=${theme}&helper=1`);
+      await page!.waitForSelector("[data-sidebar-row]");
+      const updating = await metaOf();
+      // The whole line, nothing beside it, drawn whole rather than cut, and the row is the height it always was.
+      // The slot is about 159px at the default width, so a line that outgrows it goes red here.
+      expect(updating[0]!.text).toBe("updating the helper");
+      expect(updating[0]!.clipped).toBe(false);
+      expect(updating[0]!.height).toBe(plain[0]!.height);
+      expect(updating.slice(1).map(m => m.text)).toEqual(plain.slice(1).map(m => m.text));
+      const path = join(SHOTS_DIR, `sidebar-helper-${theme}.png`);
+      await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
+      console.info(`sidebar helper line screenshot: ${path}`);
     }
   }, 30_000);
 

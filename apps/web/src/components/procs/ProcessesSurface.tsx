@@ -54,8 +54,7 @@ export function ProcessesSurface({ workspaceId }: { workspaceId: string }) {
 
   const count = snapshot === null ? "pending" : snapshot.procs.length < snapshot.total ? `${snapshot.procs.length} of ${snapshot.total}` : `${snapshot.total} processes`;
   const unavailable = stale === null && snapshot === null ? procs.unavailable : null;
-  const behind = daemonBehindLine(version);
-  const unavailableLine = unavailable === null ? null : behind !== null ? `${behind}; update it from the machine tab` : unavailable;
+  const unavailableLine = unavailable === null ? null : daemonBehindLine(version, "procs") ?? unavailable;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col font-mono text-[11px]" data-procs>

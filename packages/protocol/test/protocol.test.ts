@@ -347,7 +347,8 @@ describe("daemon wire types (one home for the ops from @wsp/daemon)", () => {
     expect(daemonVersionOf(current as { version?: number })).toBe(DAEMON_VERSION);
     expect(daemonVersionOf(DaemonEvent.parse({ type: "daemon.hello", root: "/root" }) as { version?: number })).toBe(1);
     expect(() => DaemonEvent.parse({ type: "daemon.hello", root: "/root", version: "2" })).toThrow();
-    expect(RuntimeRequest.parse({ id: 1, op: "workspaces.updateDaemon", workspaceId: "ws_a" })).toEqual({ id: 1, op: "workspaces.updateDaemon", workspaceId: "ws_a" });
+    // No client asks for a daemon update: the runtime reads the hello on its own connect and replaces an old daemon itself.
+    expect(() => RuntimeRequest.parse({ id: 1, op: "workspaces.updateDaemon", workspaceId: "ws_a" })).toThrow();
   });
 });
 

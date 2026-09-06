@@ -22,6 +22,12 @@ export function reachNote(reach: ReachState | null): string | null {
   return reach === "slow" ? "edge slow" : null;
 }
 
+/** The machine row's second line. What the runtime is doing to the machine's daemon takes the whole line while it
+ * is doing anything: it is the one thing on the row a person may be waiting on, and it leaves as soon as it lands. */
+export function workspaceMetaLine(daemonNote: string | undefined, parts: ReadonlyArray<string | null>): string {
+  return daemonNote ?? parts.filter((p): p is string => p !== null).join(" · ");
+}
+
 export function costLabel(input: {
   readonly phase: WorkspacePhase;
   readonly rateUsdPerHour: number | null;

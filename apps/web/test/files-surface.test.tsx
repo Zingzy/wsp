@@ -6,12 +6,13 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { FilesSurface } from "../src/files/FilesSurface.js";
+import { resetListings } from "../src/files/listing.js";
 import { useRootStore } from "../src/files/root.js";
 import { provideDaemonWire } from "../src/files/wire.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { onNewThreadRequest } from "../src/shell/shellRequests.js";
 import { useStore } from "../src/protocol/store.js";
-import { fakeWire, imported, LISTING, PROJECT_DEST, resetSurfaces, WS } from "./surface-harness.js";
+import { fakeWire, imported, LEVELS, LISTING, PROJECT_DEST, resetSurfaces, WS } from "./surface-harness.js";
 import { provideDaemonHello } from "../src/files/wire.js";
 
 beforeEach(resetSurfaces);
@@ -167,6 +168,36 @@ describe("files surface", () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": () => { throw new Error("daemon unreachable"); } }));
     render(<FilesSurface workspaceId={WS} theme="dark" />);
     await waitFor(() => expect(screen.getByText("daemon unreachable")).toBeTruthy());
+  });
+
+  it("says what the daemon predates in place of its refusal, when it is behind this app", async () => {
+    provideDaemonWire(WS, fakeWire({ "fs.list": params => (String(params["path"]) === PROJECT_DEST ? new Error(`${PROJECT_DEST} resolves outside the workspace root`) : LEVELS["/root"]!) }));
+    provideDaemonHello(WS, { root: "/root", version: 2 });
+    useStore.setState({ workspaces: [imported] });
+    const { container } = render(<FilesSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(treeRows(container).length).toBeGreaterThan(0));
+    expect(container.querySelector("[data-files-behind]")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: PROJECT_DEST }));
+    await waitFor(() => expect(container.querySelector("[data-files-behind]")).not.toBeNull());
+    expect(container.querySelector("[data-files-behind]")?.textContent).toBe("daemon v2 predates Files in imported projects");
+    expect(screen.queryByText(`${PROJECT_DEST} resolves outside the workspace root`)).toBeNull();
+  });
+
+  it("shows a refusal that has nothing to do with the version as itself, on a current daemon and on an old one alike", async () => {
+    const refuses = () => new Error("EACCES: permission denied, scandir '/root'");
+    provideDaemonWire(WS, fakeWire({ "fs.list": refuses }));
+    const { container, unmount } = render(<FilesSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(screen.getByText("EACCES: permission denied, scandir '/root'")).toBeTruthy());
+    expect(container.querySelector("[data-files-behind]")).toBeNull();
+    unmount();
+
+    // The daemon's home is the one folder every version browses, so a failure there is never the version's doing.
+    resetListings();
+    provideDaemonHello(WS, { root: "/root", version: 2 });
+    const old = render(<FilesSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(screen.getByText("EACCES: permission denied, scandir '/root'")).toBeTruthy());
+    expect(old.container.querySelector("[data-files-behind]")).toBeNull();
   });
 
   it("explains itself when the workspace has no daemon wire, and waits for the daemon's root", () => {

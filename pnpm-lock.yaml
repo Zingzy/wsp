@@ -321,6 +321,21 @@ importers:
         specifier: workspace:*
         version: link:../daemon
 
+  packages/wspx:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+      '@wsp/daemon':
+        specifier: workspace:*
+        version: link:../daemon
+      '@wsp/host':
+        specifier: workspace:*
+        version: link:../host
+      '@wsp/web':
+        specifier: workspace:*
+        version: link:../../apps/web
+
 packages:
 
   '@asamuzakjp/css-color@3.2.0':

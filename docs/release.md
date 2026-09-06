@@ -12,15 +12,24 @@ checkout of `main` on a computer with the Solari key in `.env`.
    [canary.md](canary.md).
 3. **Doctor.** `pnpm wsp doctor` once, and keep its table for the release
    notes.
-4. **Version.** Bump `version` in every `package.json` under `packages/` and
-   `apps/` to the same number: one tag, one `wsp --version` line, one
-   package on npm.
-5. **Publish the command line package.** `pnpm release` builds, packs and
-   publishes the package that puts `wsp` on PATH. Then, in an empty folder
-   on a shell with no `wsp` installed: `npm i -g <name>@<version>`,
-   `wsp --version`, `wsp recipe --out /tmp/recipe.json`, and
-   `wsp mcp install --agent claude` under a throwaway `HOME`. All four must
-   work before the tag exists.
+4. **Publish the command line package.** `pnpm release <version>` renumbers
+   every `package.json` under `packages/` and `apps/` that carries a version
+   (one tag, one `wsp --version` line, one package on npm), builds everything
+   but the desktop bundle, packs `packages/wspx` and publishes it. A bump
+   name works too: `pnpm release patch`. It rewrites the manifests in place
+   and commits nothing, naming each file it touched on its own output.
+   Between the build and the publish it runs `pnpm --filter @zingzy/wsp smoke`,
+   which installs the tarball into an empty folder on a clean environment and
+   runs `wsp --version`, `wsp recipe --out` and `wsp mcp install --agent
+   claude` under a throwaway `HOME`, so nothing reaches npm that has not been
+   installed and run. `--pack-only` stops after the tarball. Once it is
+   published, do the same from outside: `npm i -g @zingzy/wsp@<version>` in an empty
+   folder on a shell with no `wsp` installed.
+5. **Commit the version.** The renumbered manifests are still only in the
+   working tree. Stage them by the paths step 4 printed, never `-A`, and
+   commit: `git commit -m "chore: v<version>" <those paths>`. The tag in
+   step 7 then names a commit whose `package.json` files say the number that
+   is now on npm.
 6. **Desktop bundles.** `pnpm --filter @wsp/desktop build` produces
    `apps/desktop/dist/mac-arm64/wsp.app`, `apps/desktop/dist/mac/wsp.app`
    and the Linux AppImage. Run the packaged smoke,

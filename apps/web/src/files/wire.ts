@@ -4,9 +4,8 @@
 // the root every path must resolve inside, so pickers, pins and session
 // starts are built absolute, and the version that says which ops it answers.
 // terminal/wiring.ts provides both alongside the terminal model, so they ride
-// the same socket; a test provides fakes. An update of that daemon is also
-// held here by workspace, so the keycap that started it reads the same phase
-// after the machine tab was left and reopened.
+// the same socket; a test provides fakes. A daemon older than this app is the
+// runtime's to replace, not this app's: nothing here starts or watches one.
 import { useSyncExternalStore } from "react";
 import type { TerminalWire } from "../terminal/link.js";
 
@@ -15,16 +14,8 @@ export interface DaemonHello {
   version: number;
 }
 
-/** How long after the runtime's update resolves the keycap waits for the new daemon's hello. The link the update
- * killed redials with backoff up to 10 s, plus one more round when a redial beat the token rotation. */
-export const DAEMON_HELLO_WAIT_MS = 45_000;
-
-/** Deploying while the runtime works; awaiting the hello from when it resolves until the bound passes. */
-export type DaemonUpdatePhase = "deploying" | "awaiting-hello";
-
 const wires = new Map<string, TerminalWire>();
 const hellos = new Map<string, DaemonHello>();
-const updates = new Map<string, { phase: DaemonUpdatePhase; bound?: ReturnType<typeof setTimeout> }>();
 const fns = new Set<() => void>();
 
 function notify(): void {
@@ -43,15 +34,6 @@ export function provideDaemonHello(workspaceId: string, hello: DaemonHello | nul
   notify();
 }
 
-export function provideDaemonUpdate(workspaceId: string, phase: DaemonUpdatePhase | null): void {
-  const bound = updates.get(workspaceId)?.bound;
-  if (bound !== undefined) clearTimeout(bound);
-  if (phase === null) updates.delete(workspaceId);
-  else if (phase === "deploying") updates.set(workspaceId, { phase });
-  else updates.set(workspaceId, { phase, bound: setTimeout(() => provideDaemonUpdate(workspaceId, null), DAEMON_HELLO_WAIT_MS) });
-  notify();
-}
-
 export function getDaemonWire(workspaceId: string): TerminalWire | null {
   return wires.get(workspaceId) ?? null;
 }
@@ -62,10 +44,6 @@ export function getDaemonRoot(workspaceId: string): string | null {
 
 export function getDaemonVersion(workspaceId: string): number | null {
   return hellos.get(workspaceId)?.version ?? null;
-}
-
-export function getDaemonUpdate(workspaceId: string): DaemonUpdatePhase | null {
-  return updates.get(workspaceId)?.phase ?? null;
 }
 
 function subscribe(fn: () => void): () => void {
@@ -87,7 +65,3 @@ export function useDaemonVersion(workspaceId: string): number | null {
   return useSyncExternalStore(subscribe, () => getDaemonVersion(workspaceId));
 }
 
-/** null while no update of this workspace's daemon is in flight. */
-export function useDaemonUpdate(workspaceId: string): DaemonUpdatePhase | null {
-  return useSyncExternalStore(subscribe, () => getDaemonUpdate(workspaceId));
-}
