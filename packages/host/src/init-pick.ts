@@ -1,74 +1,43 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The screens of wsp init on the catalog: the agents (the six, the ones on
-// this Mac ticked), what they need (one line of counts and the disk line, the
-// row list behind one key), and the sign-ins and keys (logins that sign in on
-// the machine after the build listed, keys ticked to copy, and the wsp tools
-// offered to each agent here whose config the catalog knows). The recipe is
-// the state: catalog ids with a tick each; the collector's rows follow it.
+// this Mac ticked), what they need (the whole table of agents and tools, one
+// row each with its size, over the totals and the disk line), and the sign-ins
+// and keys (logins that sign in on the machine after the build listed, keys
+// ticked to copy, and the wsp tools offered to each agent here whose config
+// the catalog knows). The recipe is the state: catalog ids with a tick each;
+// the collector's rows follow it.
 import type { Readable, Writable } from "node:stream";
-import { styleText } from "node:util";
-import { Prompt, isCancel } from "@clack/core";
-import { S_BAR, S_STEP_ACTIVE, S_STEP_CANCEL, S_STEP_SUBMIT } from "@clack/prompts";
-import { CATALOG_AGENTS, CATALOG_TOOLS, MCP_AGENTS, type CatalogEntry, type ToolEntry, agentName as catalogName, sizeBytes } from "@wsp/catalog";
+import { CATALOG_AGENTS, CATALOG_TOOLS, MCP_AGENTS, catalogEntry, type AgentEntry, type CatalogEntry, type Size, type ToolEntry, agentName as catalogName, sizeBytes } from "@wsp/catalog";
 import type { LoginChoice, Manifest, ManifestEntry } from "@wsp/collect";
-import { estimateDisk, isMcpRow, parseMcpId, type BrewTable, type DiskEstimate } from "@wsp/engine";
-import { fmtBytes, type Recipe, type RecipeRow } from "@wsp/protocol";
+import { estimateDisk, isMcpRow, parseMcpId, plural, type BrewTable, type DiskEstimate } from "@wsp/engine";
+import { customRows, fmtBytes, type Recipe, type RecipeRow } from "@wsp/protocol";
 import { mcpConfigFile } from "./mcp-install.js";
-import { GUTTER, S_BAR_FOCUS, S_BAR_FOCUS_END, colourDepth, helpLine, isTTY, widthOf, wrap, type HelpKey } from "./init-layout.js";
-import { agentName, applyRecipe, comingRows, defaultAnswers, initialChoice, isTickable, loginShown, loginTool, rowsHere } from "./init-recipe.js";
-import { rungSelect, type FooterLine, type SelectItem } from "./init-select.js";
-import { diskLine, diskTone } from "./init-weight.js";
-import { hasLogin, signInFor } from "./signin-table.js";
+import { GUTTER, colourDepth, isTTY } from "./init-layout.js";
+import { agentName, applyRecipe, comingRows, defaultAnswers, initialChoice, isTickable, loginEntryId, loginShown, loginTool, rowsHere } from "./init-recipe.js";
+import { ALSO_EMPTY, ALSO_EMPTY_TOP, ALSO_TITLE, ALSO_TOP, alsoGroupLine, alsoItems, scannedTicks, withScanned } from "./init-also.js";
+import { answerOf, rungSelect, type Choice, type FooterLine, type RungAnswer, type RungSelectResult, type SelectItem } from "./init-select.js";
+import { BASE_GROUP, groupTotal, recipeTable, sizeCell, totalsLine, whyCell, type TableRow, UNKNOWN_SIZE } from "./init-table.js";
+import { diskHead, diskTone } from "./init-weight.js";
+import { hasLogin, signInFor, type SignIn } from "./signin-table.js";
+import { SIGN_IN_CHOICES, SIGN_IN_WORDS, signInChoice } from "./signin-words.js";
+import type { ScanRow } from "./scan.js";
 
+/** The six screens of a run, in order, with the one sentence each opens with. Screen 3 is the manager scan's, and
+ * screen 6 is the build itself. */
 export const AGENTS_TITLE = "Agents";
-export const NEED_TITLE = "What they need";
-export const SIGN_INS_TITLE = "Sign-ins and keys";
-/** The word over the floor rows on the tools list: they are on every machine, whatever is ticked. */
-export const BASE_WORD = "in the base";
-/** The word over the logins that run on the machine after the build; nothing here changes them. */
-export const MACHINE_WORD = "sign in on the machine after the build";
-/** The group over the rows that write on this Mac, under the keys that travel to the machine. */
-export const ON_THIS_MAC = "On this Mac";
-
-const dim = (s: string): string => styleText("dim", s);
-const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
+export const AGENTS_TOP = "Which coding agents go on your machine image.";
+export const TOOLS_TITLE = "Tools";
+export const TOOLS_TOP = "What installs on the image, from what you use.";
+export const SIGN_INS_TITLE = "Sign-ins";
+export const SIGN_INS_TOP = "Each row is something the machine needs to be signed in to. Choose how.";
+export const WSP_TITLE = "wsp for your agents";
+export const WSP_TOP = "Add wsp's MCP server and skill to the agents installed here, so they can drive your workspaces.";
+/** How many screens a run has, the build counted; the counter on every screen reads against it. */
+export const SCREENS = 6;
 
 const rowOf = (recipe: Recipe, id: string): RecipeRow | undefined => recipe.rows.find(r => r.id === id);
 /** Whether the recipe found the entry on this Mac. */
 const onThisMac = (recipe: Recipe, id: string): boolean => rowOf(recipe, id)?.source.kind === "installed";
-
-/** Where a tool's tick comes from, in the words the screen uses: the base for a floor row, else its recipe source. */
-export type SourceWord = typeof BASE_WORD | "installed here" | "used by your agents" | "popular in the catalog";
-const SOURCE_ORDER: readonly SourceWord[] = [BASE_WORD, "installed here", "used by your agents", "popular in the catalog"];
-
-export function sourceWord(e: ToolEntry, r: RecipeRow | undefined): SourceWord {
-  if (e.floor) return BASE_WORD;
-  switch (r?.source.kind) {
-    case "installed":
-      return "installed here";
-    case "used":
-      return "used by your agents";
-    default:
-      return "popular in the catalog";
-  }
-}
-
-/** Whether a tool is on the machine with this recipe: a floor row always, any other by its tick. */
-export const toolOn = (e: ToolEntry, r: RecipeRow | undefined): boolean => e.floor || r?.on === true;
-
-/** The screen's one line: how many tools are on and where each tick came from, the sources in a fixed order. */
-export function needLine(recipe: Recipe): string {
-  const counts = new Map<SourceWord, number>();
-  for (const e of CATALOG_TOOLS) {
-    const r = rowOf(recipe, e.id);
-    if (!toolOn(e, r)) continue;
-    const word = sourceWord(e, r);
-    counts.set(word, (counts.get(word) ?? 0) + 1);
-  }
-  const on = [...counts.values()].reduce((a, b) => a + b, 0);
-  const parts = SOURCE_ORDER.flatMap(w => (counts.has(w) ? [`${counts.get(w)} ${w}`] : []));
-  return `${plural(on, "tool")}${parts.length > 0 ? `: ${parts.join(", ")}` : ""}`;
-}
 
 /** The recipe with one kind's rows ticked as a screen left them: a row the recipe had keeps its source, an entry it
  * never named gets a row on the catalog's own evidence, so a tick on a fresh Mac is kept. */
@@ -92,6 +61,11 @@ export function withTools(recipe: Recipe, on: ReadonlySet<string>): Recipe {
   return withTicks(recipe, "tool", CATALOG_TOOLS, id => floor.has(id) || on.has(id));
 }
 
+/** The recipe with the agents and the tools ticked as the table screen left them. */
+export function withPicked(recipe: Recipe, on: ReadonlySet<string>): Recipe {
+  return withAgents(withTools(recipe, on), on);
+}
+
 /** The catalog ids a recipe ticks, agents or tools. */
 export const ticked = (recipe: Recipe, kind: RecipeRow["kind"]): Set<string> => new Set(recipe.rows.filter(r => r.kind === kind && r.on).map(r => r.id));
 
@@ -106,29 +80,43 @@ function rowsFor(manifest: Manifest, recipe: Recipe): { rows: ManifestEntry[]; b
 /** What the recipe costs on the builder's disk: the collector's rows it ticks, sized as the build would size them. */
 export function pickEstimate(manifest: Manifest, recipe: Recipe, brew: BrewTable): DiskEstimate {
   const { rows, bytes } = rowsFor(manifest, recipe);
-  return estimateDisk(rows, bytes, brew);
+  return estimateDisk(rows, bytes, brew, customRows(recipe));
 }
 
-/** The Disk line, loud in its weight's colour: the one loud element on the screen. */
+/** The Disk line, loud in its weight's colour: the one loud element on the screen. The parts behind the total stay
+ * off it, since every row above says its own size. */
 export function diskFooter(est: DiskEstimate): FooterLine {
   const tone = diskTone(est.total, est.room);
-  return { text: `Disk: ${diskLine(est)}`, ...(tone !== undefined ? { tone } : {}) };
+  return { text: `Disk: ${diskHead(est)}`, ...(tone !== undefined ? { tone } : {}) };
 }
+
+/** An agent's two detail lines: whether this Mac has it and what its config brings, then what it installs there. */
+function agentDetail(recipe: Recipe, manifest: Manifest, a: AgentEntry): string[] {
+  const own = manifest.entries.find(e => e.rung === "agents" && agentName(e) === a.id);
+  const config = own !== undefined && own.bytes > 0 ? `; its config (${fmtBytes(own.bytes)}) comes along` : "";
+  const here = onThisMac(recipe, a.id) ? `on this Mac${config}` : "not on this Mac; try it on the machine, nothing here changes";
+  return [here, sizeLine(a.size)];
+}
+
+/** What a row costs on the machine, in the one phrasing every row uses: the catalog's bytes with the day they were
+ * measured, or the plan's words for a row nobody measured. */
+function sizeLine(size: Size): string {
+  return "bytes" in size ? `about ${fmtBytes(size.bytes)} installed on the machine (measured ${size.on})` : UNKNOWN_SIZE;
+}
+
+const hintOf = (size: Size): { hint?: string } => {
+  const bytes = sizeBytes(size);
+  return bytes !== undefined ? { hint: fmtBytes(bytes) } : {};
+};
 
 /** The six agents: a size beside each, ticked when this Mac has it, the detail saying what comes and what installs. */
 export function agentItems(recipe: Recipe, manifest: Manifest): SelectItem[] {
-  return CATALOG_AGENTS.map(a => {
-    const r = rowOf(recipe, a.id);
-    const own = manifest.entries.find(e => e.rung === "agents" && agentName(e) === a.id);
-    const config = own !== undefined && own.bytes > 0 ? `; its config (${fmtBytes(own.bytes)}) comes along` : "";
-    const here = onThisMac(recipe, a.id) ? `on this Mac${config}` : "not on this Mac; try it on the machine, nothing here changes";
-    return {
-      id: a.id,
-      label: a.name,
-      ...("bytes" in a.size ? { hint: fmtBytes(a.size.bytes) } : {}),
-      detail: [here, "bytes" in a.size ? `installs about ${fmtBytes(a.size.bytes)} on the machine (measured ${a.size.on})` : "installs on the machine; size not measured yet"],
-    };
-  });
+  return CATALOG_AGENTS.map(a => ({
+    id: a.id,
+    label: a.name,
+    ...hintOf(a.size),
+    detail: agentDetail(recipe, manifest, a),
+  }));
 }
 
 /** The recipe source in words with its counts, for a tool's detail pane. */
@@ -145,38 +133,24 @@ function sourceLine(e: ToolEntry, r: RecipeRow | undefined): string {
   }
 }
 
-/** The catalog's tools: the floor as bullets under the title, the rest grouped by the source of their tick, a size
- * beside each where the catalog measured one, the detail naming the source with its counts and what the build does. */
-export function toolItems(recipe: Recipe, manifest: Manifest): SelectItem[] {
-  const here = rowsHere(manifest.entries);
-  const items = CATALOG_TOOLS.map((e): SelectItem & { word: SourceWord } => {
-    const r = rowOf(recipe, e.id);
-    const word = sourceWord(e, r);
-    const bytes = sizeBytes(e.size);
-    const size = bytes !== undefined ? `about ${fmtBytes(bytes)} installed on the machine` : "size not measured yet";
-    const build = e.floor ? "part of the base on every machine" : here.has(e.id) ? size : `${size}; no row here; installed by its ${e.installRoad.road} road`;
-    return {
-      id: e.id,
-      label: e.name,
-      word,
-      ...(bytes !== undefined ? { hint: fmtBytes(bytes) } : {}),
-      detail: [e.floor ? `${sourceLine(e, r)}; on every machine` : sourceLine(e, r), build],
-      ...(e.floor ? { lock: "on" } : { group: word.charAt(0).toUpperCase() + word.slice(1) }),
-    };
-  });
-  return SOURCE_ORDER.flatMap(w => items.filter(i => i.word === w)).map(({ word: _word, ...item }) => item);
+/** A tool's two detail lines: where its tick came from with the counts, then what the build does with it. */
+function toolDetail(recipe: Recipe, here: ReadonlySet<string>, e: ToolEntry): string[] {
+  const r = rowOf(recipe, e.id);
+  const size = sizeLine(e.size);
+  const build = e.floor ? "part of the base on every machine" : here.has(e.id) ? size : `${size}; no row here; installed by its ${e.installRoad.road} road`;
+  return [e.floor ? `${sourceLine(e, r)}; on every machine` : sourceLine(e, r), build];
 }
+
+/** The groups of the sign-ins screen, in order. */
+export const AGENT_LOGINS = "Agents";
+export const CLI_LOGINS = "Developer CLIs";
+export const MCP_LOGINS = "MCP servers from your agents' configs";
 
 export interface SignInScreen {
   items: SelectItem[];
-  /** The keys rows that start ticked: a copy by default or a saved copy answer. */
-  initial: Set<string>;
-  /** Every login row's answer once the ticks are known: the machine for the listed sign-ins, copy for a ticked keys
-   * row, and for an unticked one the sign-in on the machine when the row has one to run, else nothing. */
-  answers(ticks: ReadonlySet<string>): Map<string, LoginChoice>;
+  /** Every row's answer before anyone moves it. */
+  initial: Map<string, LoginChoice>;
 }
-
-const KEYS_LINE = "ticked, it is copied to the machine; unticked, ";
 
 /** The agents an MCP row belongs to: a server's own; for the mcp-remote row, every agent with a server here. */
 function mcpAgents(e: ManifestEntry, manifest: Manifest): string[] {
@@ -190,153 +164,164 @@ function mcpShown(e: ManifestEntry, manifest: Manifest, coming: ReadonlySet<stri
   return isMcpRow(e) && e.consent === true && mcpAgents(e, manifest).some(a => coming.has(`agents/${a}`));
 }
 
-/** The second column of an MCP row: the agent whose config the server sits in, so the row says what travels; the
- * mcp-remote row's is its size. */
-function mcpHint(e: ManifestEntry): string | undefined {
-  const agent = parseMcpId(e.id)?.agent;
-  if (agent !== undefined) return catalogName(agent);
-  return e.bytes > 0 ? fmtBytes(e.bytes) : undefined;
+/** Where an MCP server sits, in the words the row shows: the agent whose config holds it, or the agents whose
+ * sign-ins mcp-remote saved. */
+function mcpWhy(e: ManifestEntry, manifest: Manifest): string {
+  const own = parseMcpId(e.id)?.agent;
+  if (own !== undefined) return `in ${catalogName(own)}'s config`;
+  const agents = mcpAgents(e, manifest).map(catalogName);
+  return agents.length === 0 ? "saved by mcp-remote" : `sign-ins mcp-remote saved for ${agents.join(", ")}`;
 }
 
-/** The sign-ins the ticked agents and tools bring: a browser or device login is listed to sign in on the machine
- * after the build, with no action here; a key, a keys file or a config with no sign-in is a row to tick for the
- * copy, as is an MCP server that carries a secret, which starts unticked and stays off the machine unticked. A
- * login whose command is not coming, or one locked out, is listed with the reason and brings nothing. */
+/** The answers a login row can take: a copy when there is something here to copy, the sign-in when the catalog has a
+ * flow to run there, an API key when the tool reads one, and always skip. */
+export function choicesFor(e: ManifestEntry, s: SignIn): Choice[] {
+  const allowed = new Set<string>(["skip"]);
+  if (e.paths.length > 0 || e.bytes > 0) allowed.add("copy");
+  if (hasLogin(s)) allowed.add("machine");
+  if (hasLogin(s) && s.keyEnv !== undefined) allowed.add("key");
+  return SIGN_IN_CHOICES.filter(c => allowed.has(c.value));
+}
+
+/** A header's counts: how its rows answered, in the choice order, in short words. */
+export function signInGroupLine(items: readonly SelectItem[], a: RungAnswer): string {
+  const values = [...new Set(items.flatMap(i => (i.choices ?? []).map(c => c.value)))];
+  return SIGN_IN_CHOICES.filter(c => values.includes(c.value))
+    .map(c => `${items.filter(i => answerOf(i, a.answers) === c.value).length} ${SIGN_IN_WORDS[c.value].short}`)
+    .join(GUTTER);
+}
+
+/** Screen four's rows: everything the machine has to be signed in to, one row each with the choice it starts on.
+ * The agents' own logins first, then the developer CLIs, then the MCP servers the agents' configs carry auth for.
+ * A row whose command is not coming, or that the catalog locked out, is here with its reason and skip as its only
+ * answer, so nothing on the screen is silent. */
 export function signInItems(manifest: Manifest): SignInScreen {
   const coming = comingRows(manifest);
   const shown = manifest.entries.filter(e => (e.rung === "logins" && loginShown(e, manifest, coming)) || mcpShown(e, manifest, coming));
   const items: SelectItem[] = [];
-  const initial = new Set<string>();
-  const fixed = new Map<string, LoginChoice>();
-  const unticked = new Map<string, LoginChoice>();
-  for (const e of shown) {
-    if (e.rung !== "logins") {
-      if (!isTickable(e)) {
-        items.push({ id: e.id, label: e.label, detail: [e.detail ?? "", e.reason ?? ""], lock: "off" });
-        fixed.set(e.id, "skip");
-        continue;
-      }
-      unticked.set(e.id, "skip");
-      if (initialChoice(e) === "copy") initial.add(e.id);
-      const hint = mcpHint(e);
-      items.push({
-        id: e.id,
-        label: e.label,
-        ...(hint !== undefined ? { hint } : {}),
-        detail: [e.paths.length > 0 ? e.paths.join(", ") : "defined in the agent's config", e.detail ?? "", `${KEYS_LINE}not copied; the server stays off the machine`],
-      });
-      continue;
-    }
+  const initial = new Map<string, LoginChoice>();
+  const only = (id: string, label: string, group: string, why: string, detail: string[]): void => {
+    items.push({ id, label, group, why, detail, choices: [signInChoice("skip")] });
+    initial.set(id, "skip");
+  };
+  const mcp = shown.filter(e => e.rung !== "logins");
+  const logins = shown.filter(e => e.rung === "logins");
+  const agentLogin = (e: ManifestEntry): boolean => catalogEntry(loginEntryId(e))?.kind === "agent";
+  for (const e of [...logins.filter(agentLogin), ...logins.filter(x => !agentLogin(x))]) {
+    const group = agentLogin(e) ? AGENT_LOGINS : CLI_LOGINS;
     const s = signInFor(agentName(e));
-    const where = e.paths.length > 0 ? e.paths.join(", ") : "nothing to copy";
+    const where = e.paths.length > 0 ? e.paths.join(", ") : "nothing to copy here";
     if (!isTickable(e)) {
-      items.push({ id: e.id, label: e.label, detail: [where, e.reason ?? ""], lock: "off" });
-      fixed.set(e.id, "skip");
+      only(e.id, e.label, group, where, [e.reason ?? "", "this one is left alone"]);
       continue;
     }
     const tool = loginTool(e, manifest, coming);
     if (tool !== undefined && !tool.coming) {
-      items.push({ id: e.id, label: e.label, hint: `${tool.bin} not coming`, detail: [where, tool.why ?? ""], lock: "off" });
-      fixed.set(e.id, "skip");
+      only(e.id, e.label, group, `${tool.bin} is not coming`, [tool.why ?? "", where]);
       continue;
     }
+    const choices = choicesFor(e, s);
     const choice = initialChoice(e);
-    if (hasLogin(s) && choice === "machine") {
-      items.push({ id: e.id, label: e.label, hint: s.login, detail: [], lock: "on" });
-      fixed.set(e.id, "machine");
-      continue;
-    }
-    const otherwise: LoginChoice = hasLogin(s) ? "machine" : "skip";
-    unticked.set(e.id, otherwise);
-    if (choice === "copy") initial.add(e.id);
-    const why = e.detail ?? (s.kind !== "shell" ? s.note : undefined) ?? "";
+    initial.set(e.id, choices.some(c => c.value === choice) ? choice : (choices[0]?.value as LoginChoice));
     items.push({
       id: e.id,
       label: e.label,
-      ...(e.bytes > 0 ? { hint: fmtBytes(e.bytes) } : {}),
-      detail: [where, why, `${KEYS_LINE}${hasLogin(s) ? `you sign in there after the build (${s.login})` : "it stays here"}`],
+      group,
+      why: where,
+      choices,
+      detail: [hasLogin(s) ? s.login : (s.kind !== "shell" ? (s.note ?? "") : ""), e.detail ?? "", where],
     });
   }
-  return {
-    items,
-    initial,
-    answers: ticks => new Map([...fixed, ...[...unticked].map(([id, otherwise]): [string, LoginChoice] => [id, ticks.has(id) ? "copy" : otherwise])]),
-  };
+  for (const e of mcp) {
+    const why = mcpWhy(e, manifest);
+    if (!isTickable(e)) {
+      only(e.id, e.label, MCP_LOGINS, why, [e.reason ?? "", e.detail ?? ""]);
+      continue;
+    }
+    const choices = SIGN_IN_CHOICES.filter(c => c.value === "copy" || c.value === "skip");
+    initial.set(e.id, initialChoice(e) === "copy" ? "copy" : "skip");
+    items.push({
+      id: e.id,
+      label: e.label,
+      group: MCP_LOGINS,
+      why,
+      choices,
+      detail: [e.detail ?? "", e.paths.length > 0 ? `its token is in ${e.paths.join(", ")}` : "its token is in the agent's own config"],
+    });
+  }
+  return { items, initial };
 }
 
 const WSP_TOOLS = "wsp-tools/";
 /** The agent a wsp tools row is for; nothing for any other row on the screen. */
-const wspToolsAgent = (id: string): string | undefined => (id.startsWith(WSP_TOOLS) ? id.slice(WSP_TOOLS.length) : undefined);
+export const wspToolsAgent = (id: string): string | undefined => (id.startsWith(WSP_TOOLS) ? id.slice(WSP_TOOLS.length) : undefined);
 
-/** One row per agent on this Mac whose config the catalog can place the wsp MCP server in, whatever its tick for
- * the machine: the file the install writes under `home` as the hint, unticked and out of the all row's reach, so
- * nothing here is written unasked; the detail says what the tick does. */
-export function wspToolsItems(recipe: Recipe, home: string): SelectItem[] {
-  return MCP_AGENTS.filter(a => onThisMac(recipe, a.id)).map(a => ({
+/** Screen five's rows: one per agent on this Mac whose config the catalog can place the wsp MCP server in, whatever
+ * its tick for the machine. The file the tick writes reads under the row; an agent this computer has run threads
+ * with starts on, since it is the one that would use the server. */
+export function wspToolsItems(recipe: Recipe, home: string): { items: SelectItem[]; initial: Set<string> } {
+  const items = MCP_AGENTS.filter(a => onThisMac(recipe, a.id)).map((a): SelectItem => ({
     id: `${WSP_TOOLS}${a.id}`,
-    label: `wsp tools for ${a.name}`,
-    hint: mcpConfigFile(a, home).tilde,
-    group: ON_THIS_MAC,
-    detail: ["wsp joins its MCP servers, so it can drive workspaces, threads and commands", "ticked, it is written when the screens end; unticked, nothing here changes"],
-    apart: true,
+    label: a.name,
+    detail: [`writes ${mcpConfigFile(a, home).tilde}`],
   }));
+  const used = new Set(recipe.histories.filter(h => h.sessions > 0).map(h => `${WSP_TOOLS}${h.agent}`));
+  return { items, initial: new Set(items.filter(i => used.has(i.id)).map(i => i.id)) };
 }
 
-// --- the summary screen ------------------------------------------------------
+// --- the screens ------------------------------------------------------------
 
-type NeedAnswer = "next" | "adjust" | "back";
-const EDGE = 4;
-const NEED_KEYS: readonly HelpKey[] = [{ key: "a", does: "adjust" }, { key: "enter", does: "next" }, { key: "esc", does: "back" }];
+/** The table as a screen's rows: the size in the second column, why it is here in the middle, and the detail saying
+ * what the build does with it. The tools screen groups them by why; the agents screen is one flat list. */
+export function tableItems(rows: readonly TableRow[], recipe: Recipe, manifest: Manifest, depth: number, grouped: boolean): SelectItem[] {
+  const here = rowsHere(manifest.entries);
+  return rows.map((row): SelectItem => {
+    const e = catalogEntry(row.id);
+    const detail = e === undefined ? [] : e.kind === "agent" ? agentDetail(recipe, manifest, e) : toolDetail(recipe, here, e);
+    return {
+      id: row.id,
+      label: row.name,
+      why: whyCell(row, depth),
+      hint: sizeCell(row, depth),
+      detail: [...(row.note !== undefined ? [row.note] : []), ...detail],
+      ...(row.base ? { lock: "on" as const } : grouped ? { group: row.group } : {}),
+    };
+  });
+}
 
-interface NeedOptions {
+export interface TableScreenOptions {
+  title: string;
+  top: string;
+  /** The section counter shown after the title ("2/6"). */
   counter: string;
-  line: string;
-  disk: FooterLine;
+  rows: readonly TableRow[];
+  recipe: Recipe;
+  manifest: Manifest;
+  /** Grouped by why the row is here, the base rows as bullets under the title; a flat list otherwise. */
+  grouped: boolean;
+  /** Rebuilt from the ticks under the rows: what comes, what it downloads, and the disk it leaves. */
+  footer: (ticks: ReadonlySet<string>) => FooterLine[];
   input?: Readable;
   output?: Writable;
 }
 
-/** One line of counts, the Disk line loud under it, and three keys: a opens the row list, enter goes on, esc back. */
-class NeedPrompt extends Prompt<NeedAnswer> {
-  back = false;
-
-  constructor(private readonly o: NeedOptions) {
-    super({ render: () => this.frame(), ...(o.input ? { input: o.input } : {}), ...(o.output ? { output: o.output } : {}) }, false);
-    this.value = "next";
-    this.on("key", (char, key) => {
-      if (key.name === "escape") this.back = true;
-      if (char === "a" && this.state !== "submit" && this.state !== "cancel") {
-        this.value = "adjust";
-        this.state = "submit";
-      }
-    });
-  }
-
-  private frame(): string {
-    const width = widthOf(this.o.output);
-    const counter = `${GUTTER}${dim(this.o.counter)}`;
-    if (this.state === "submit" || (this.state === "cancel" && this.back)) {
-      return `${styleText("green", S_STEP_SUBMIT)}  ${NEED_TITLE}${counter}\n${dim(S_BAR)}  ${dim(this.back ? "back" : this.o.line)}`;
-    }
-    if (this.state === "cancel") return `${styleText("red", S_STEP_CANCEL)}  ${NEED_TITLE}${counter}\n${dim(S_BAR)}  ${dim("cancelled")}`;
-    const bar = dim(S_BAR_FOCUS);
-    const disk = this.o.disk;
-    // The Disk line wraps under its own label, every row of it in the tone: the one loud element on the screen.
-    const loud = (l: string): string => (typeof disk === "string" ? dim(l) : disk.tone === undefined ? l : styleText(disk.tone, l));
-    return [
-      `${styleText("cyan", S_STEP_ACTIVE)}  ${styleText("cyan", NEED_TITLE)}${counter}`,
-      ...wrap(this.o.line, width - EDGE).map(l => `${bar}  ${l}`),
-      ...wrap(typeof disk === "string" ? disk : disk.text, width - EDGE, " ".repeat("Disk: ".length)).map(l => `${bar}  ${loud(l)}`),
-      `${dim(S_BAR_FOCUS_END)}  ${helpLine(NEED_KEYS, colourDepth(isTTY(this.o.output)))}`,
-    ].join("\n");
-  }
-}
-
-export async function needScreen(o: NeedOptions): Promise<NeedAnswer | "cancel"> {
-  const prompt = new NeedPrompt(o);
-  const result = await prompt.prompt();
-  if (isCancel(result)) return prompt.back ? "back" : "cancel";
-  return result === "adjust" ? "adjust" : "next";
+/** A screen that is the table itself: every row with its size, space turning one on or off, the totals under them. */
+export function tableScreen(o: TableScreenOptions): Promise<RungSelectResult> {
+  const byId = new Map(o.rows.map(r => [r.id, r]));
+  return rungSelect({
+    title: o.title,
+    top: o.top,
+    counter: o.counter,
+    items: tableItems(o.rows, o.recipe, o.manifest, colourDepth(isTTY(o.output)), o.grouped),
+    initial: new Set(o.rows.filter(r => r.on).map(r => r.id)),
+    // Three lines: an agent wsp cannot drive yet says so above its own two.
+    detailLines: 3,
+    lockedTitle: BASE_GROUP,
+    groupLine: (items, a) => groupTotal(items.flatMap(i => byId.get(i.id) ?? []).map(r => ({ ...r, on: r.base || a.ticks.has(r.id) }))),
+    footer: a => o.footer(a.ticks),
+    ...(o.input ? { input: o.input } : {}),
+    ...(o.output ? { output: o.output } : {}),
+  });
 }
 
 // --- the flow ------------------------------------------------------------------
@@ -346,10 +331,13 @@ export interface PickOptions {
   manifest: Manifest;
   recipe: Recipe;
   brew: BrewTable;
-  /** The first screen: the agents, or the sign-ins alone when a recipe file already decided the rest. */
+  /** The first screen: the agents, or the sign-ins on, when a recipe file already decided the rest. */
   from: "agents" | "logins";
   /** The person's home, where an agent's config is read for the wsp tools rows. */
   home: string;
+  /** What the package managers here could put on the image: the rows of screen three. With none, that screen keeps
+   * its place and says nothing was found. */
+  scan?: readonly ScanRow[];
   input: Readable;
   output: Writable;
 }
@@ -362,62 +350,113 @@ export interface Picked {
   wspTools: Set<string>;
 }
 
-type Screen = "agents" | "need" | "logins";
+type Screen = "agents" | "tools" | "also" | "logins" | "wsp";
+/** Where each screen sits in the six a run has; the build is the sixth. */
+const SCREEN_AT: Record<Screen, number> = { agents: 1, tools: 2, also: 3, logins: 4, wsp: 5 };
 
-/** The screens in order, esc stepping back one; the recipe carries the ticks between them. */
+/** The screens in order, esc stepping back one; the recipe carries the ticks and the answers between them. */
 export async function pickScreens(o: PickOptions): Promise<Picked | "cancel"> {
-  const screens: readonly Screen[] = o.from === "agents" ? ["agents", "need", "logins"] : ["logins"];
+  // The scan screen keeps its place in the six whether or not the managers here had anything to offer.
+  const scan = o.scan ?? [];
+  const screens: readonly Screen[] = o.from === "agents" ? ["agents", "tools", "also", "logins", "wsp"] : ["logins", "wsp"];
   let recipe = o.recipe;
   let logins = new Map<string, LoginChoice>();
+  // What screens four and five were left on, so esc back onto them shows the answers again, as the recipe shows the
+  // ticks; undefined until the screen has been answered once, since an empty set is an answer of its own.
+  let wspTicks: Set<string> | undefined;
   let wspTools = new Set<string>();
   const streams = { input: o.input, output: o.output };
   let i = 0;
   while (i < screens.length) {
-    const counter = `${i + 1}/${screens.length}`;
     const screen = screens[i]!;
+    const counter = `${SCREEN_AT[screen]}/${SCREENS}`;
+    const step = (r: RungSelectResult): void => {
+      i += r.kind === "next" ? 1 : -1;
+    };
     switch (screen) {
       case "agents": {
-        const r = await rungSelect({ title: AGENTS_TITLE, counter, items: agentItems(recipe, o.manifest), initial: ticked(recipe, "agent"), ...streams });
+        const rows = recipeTable(recipe, CATALOG_AGENTS);
+        const r = await tableScreen({
+          title: AGENTS_TITLE,
+          top: AGENTS_TOP,
+          counter,
+          rows,
+          recipe,
+          manifest: o.manifest,
+          grouped: false,
+          footer: ticks => [totalsLine(recipeTable(withAgents(recipe, ticks), CATALOG_AGENTS), "agents")],
+          ...streams,
+        });
         if (r.kind === "cancel") return "cancel";
         recipe = withAgents(recipe, r.ticks);
-        if (r.kind === "next") i += 1;
+        step(r);
         break;
       }
-      case "need": {
-        const answer = await needScreen({ counter, line: needLine(recipe), disk: diskFooter(pickEstimate(o.manifest, recipe, o.brew)), ...streams });
-        if (answer === "cancel") return "cancel";
-        if (answer === "back") {
-          i -= 1;
-          break;
-        }
-        if (answer === "next") {
-          i += 1;
-          break;
-        }
-        const r = await rungSelect({
-          title: NEED_TITLE,
+      case "tools": {
+        const r = await tableScreen({
+          title: TOOLS_TITLE,
+          top: TOOLS_TOP,
           counter,
-          items: toolItems(recipe, o.manifest),
-          initial: ticked(recipe, "tool"),
-          lockedWord: BASE_WORD,
-          footer: ticks => [diskFooter(pickEstimate(o.manifest, withTools(recipe, ticks), o.brew))],
+          rows: recipeTable(recipe, CATALOG_TOOLS),
+          recipe,
+          manifest: o.manifest,
+          grouped: true,
+          footer: ticks => {
+            const next = withTools(recipe, ticks);
+            return [totalsLine(recipeTable(next, CATALOG_TOOLS), "tools"), diskFooter(pickEstimate(o.manifest, next, o.brew))];
+          },
           ...streams,
         });
         if (r.kind === "cancel") return "cancel";
         recipe = withTools(recipe, r.ticks);
+        step(r);
+        break;
+      }
+      case "also": {
+        // The Disk line follows the ticks here too: these are the heavy rows, and they are what the boot check reads.
+        const r = await rungSelect({
+          title: ALSO_TITLE,
+          top: scan.length > 0 ? ALSO_TOP : ALSO_EMPTY_TOP,
+          counter,
+          items: alsoItems(scan),
+          initial: scannedTicks(recipe, scan),
+          empty: ALSO_EMPTY,
+          groupLine: alsoGroupLine(scan),
+          footer: a => [diskFooter(pickEstimate(o.manifest, withScanned(recipe, scan, a.ticks), o.brew))],
+          ...streams,
+        });
+        if (r.kind === "cancel") return "cancel";
+        recipe = withScanned(recipe, scan, r.ticks);
+        step(r);
         break;
       }
       case "logins": {
         const s = signInItems(applyRecipe(o.manifest, recipe));
-        const r = await rungSelect({ title: SIGN_INS_TITLE, counter, items: [...s.items, ...wspToolsItems(recipe, o.home)], initial: s.initial, detailLines: 3, lockedWord: MACHINE_WORD, ...streams });
+        const answers = new Map([...s.initial].map(([id, choice]): [string, LoginChoice] => [id, logins.get(id) ?? choice]));
+        const r = await rungSelect({
+          title: SIGN_INS_TITLE,
+          top: SIGN_INS_TOP,
+          counter,
+          items: s.items,
+          initial: new Set(),
+          answers,
+          detailLines: 3,
+          groupLine: signInGroupLine,
+          ...streams,
+        });
         if (r.kind === "cancel") return "cancel";
-        logins = s.answers(r.ticks);
+        logins = new Map([...answers].map(([id, choice]): [string, LoginChoice] => [id, (r.answers.get(id) as LoginChoice) ?? choice]));
+        step(r);
+        break;
+      }
+      case "wsp": {
+        const w = wspToolsItems(recipe, o.home);
+        const initial = wspTicks === undefined ? w.initial : new Set([...wspTicks].filter(id => w.items.some(i => i.id === id)));
+        const r = await rungSelect({ title: WSP_TITLE, top: WSP_TOP, counter, items: w.items, initial, empty: "no agent here takes the wsp tools yet", ...streams });
+        if (r.kind === "cancel") return "cancel";
+        wspTicks = new Set(r.ticks);
         wspTools = new Set([...r.ticks].flatMap(id => wspToolsAgent(id) ?? []));
-        if (r.kind === "back") {
-          i = Math.max(0, i - 1);
-          break;
-        }
-        i += 1;
+        step(r);
         break;
       }
       default: {
@@ -425,6 +464,7 @@ export async function pickScreens(o: PickOptions): Promise<Picked | "cancel"> {
         return _exhaustive;
       }
     }
+    if (i < 0) i = 0;
   }
   return { recipe, logins, wspTools };
 }

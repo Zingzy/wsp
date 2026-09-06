@@ -33,6 +33,7 @@ import {
   withApiKeyHelper,
 } from "@wsp/engine";
 import { CLAUDE_CONFIG_DIR, MCP_AGENTS } from "@wsp/catalog";
+import type { RecipeCustomRow } from "@wsp/protocol";
 import { tarPackCommand } from "./doctor.js";
 
 const execFileAsync = promisify(execFile);
@@ -371,6 +372,8 @@ export interface ImportOptions {
   rows?: readonly ManifestEntry[];
   /** This Mac's Homebrew, for the tap formulae with no Linux bottle: their source repositories. */
   brew?: BrewTable;
+  /** The recipe's rows outside the catalog; they install after every catalog road and are never offered a sign-in. */
+  custom?: readonly RecipeCustomRow[];
   onResult?: (result: ImportResult) => void;
   onContext?: GoldenImport["onContext"];
 }
@@ -481,7 +484,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
     rewrites: [[".claude/", `${CLAUDE_REL}/`], [".claude.json", `${CLAUDE_REL}/.claude.json`]],
   });
   const shell = shellInstallFor(bring);
-  const tools = toolInstallsFor(bring, opts.brew);
+  const tools = toolInstallsFor(bring, opts.brew, opts.custom);
   const agents = agentInstallsFor(bring);
   const mcp = opts.rows !== undefined ? mcpPlanFor(opts.rows, { home, guestHome: GUEST_HOME, agents: MCP_SOURCES, binDirs: MCP_BIN_DIRS }) : undefined;
   const label = (id: string) => bring.find(e => e.id === id)?.label ?? id;
@@ -500,7 +503,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
       const value = opts.secrets.get(secretKey(s));
       return value === undefined ? [] : [{ id: s.id, path: secretPath(s), dest: s.dest, digest: createHash("sha256").update(value).digest("hex"), volatile: true }];
     });
-  const hash = recipeHash(recipeDigest(bring, digested));
+  const hash = recipeHash(recipeDigest(bring, digested, opts.custom));
   const settingsSource = join(home, CLAUDE_SETTINGS.slice(2));
   const packOpts: PackOptions = { secrets: opts.secrets, home, settingsPlanned: plan.files.some(f => f.source === settingsSource || f.source === dirname(settingsSource)) };
   const pack = (): Promise<PackedFiles> => packPlan(plan, packOpts);
@@ -512,7 +515,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
   return {
     recipeHash: hash,
     get recipe() {
-      return recipeDigest(bring, [...digested, ...secretDigests()]);
+      return recipeDigest(bring, [...digested, ...secretDigests()], opts.custom);
     },
     ...(anyFiles
       ? { files: { count, rungs: plan.rungs, bytes: plan.bytes, skipped: plan.skipped, pack, ...(volatile !== undefined ? { volatile } : {}) } }

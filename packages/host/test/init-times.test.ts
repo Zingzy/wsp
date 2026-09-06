@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { StageStep, StageView } from "../src/init.js";
-import { buildTimes, readBuildTimes, rebuildEstimate } from "../src/init-times.js";
+import { buildTakes, buildTimes, readBuildTimes, rebuildEstimate } from "../src/init-times.js";
 
 const step = (stage: StageStep["stage"], ms?: number): StageStep => ({ stage, start: "", end: "", fail: "", state: "done", tail: [], ...(ms !== undefined ? { ms } : {}) });
 const view = (...steps: StageStep[]): StageView => ({ steps });
@@ -51,6 +51,18 @@ describe("the last build read back from the import result", () => {
     expect(readBuildTimes(path)).toBeUndefined();
     writeFileSync(path, JSON.stringify({ build: { at: "2026-09-05T19:44:00.000Z", stages: { creating: 61_000, "installing-tools": 1_059_000 } } }));
     expect(readBuildTimes(path)).toEqual({ at: "2026-09-05T19:44:00.000Z", stages: { creating: 61_000, "installing-tools": 1_059_000 } });
+  });
+});
+
+describe("how long the build takes, in the build screen's own words", () => {
+  it("names the measured length as the last build's, and the constant as a guess, so both fit after \"The build takes\"", () => {
+    const at = AT.toISOString();
+    expect(buildTakes(undefined)).toBe("about ten minutes, not measured on this computer yet");
+    expect(buildTakes({ at, stages: { creating: 61_000, "installing-tools": 1_059_000, snapshotting: 40_000 } })).toBe("about 19 minutes, going by the last one");
+    expect(buildTakes({ at, stages: { creating: 30_000 } })).toBe("under a minute, going by the last one");
+    expect(buildTakes({ at, stages: { creating: 61_000 } })).toBe("about a minute, going by the last one");
+    // The two frames say the same length in their own words, from one measurement.
+    expect(rebuildEstimate({ at, stages: { creating: 61_000 } })).toBe("about a minute last time");
   });
 });
 

@@ -25,6 +25,7 @@ import {
   type Runtime,
 } from "@wsp/runtime";
 import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS } from "@wsp/catalog";
+import type { RecipeCustomRow } from "@wsp/protocol";
 import { assetDir } from "./assets.js";
 import { claudeEnvs, deployDaemon, doctor } from "./doctor.js";
 import { keychainReader } from "./init-import.js";
@@ -32,7 +33,9 @@ import { readBrewTable } from "./init-brew.js";
 import { runInit, type InitIO } from "./init.js";
 import { recipePath } from "./init-recipe.js";
 import { writeRecipe } from "./recipe-command.js";
-import { confirmPrompt, passwordPrompt, type PromptOptions } from "./init-layout.js";
+import { customFromFlags } from "./recipe-custom.js";
+import { scanTools } from "./scan.js";
+import { colourDepth, confirmPrompt, isTTY, passwordPrompt, type PromptOptions } from "./init-layout.js";
 import { TAGLINE, opening } from "./init-opening.js";
 import { systemOpener, type UrlOpener } from "./relay.js";
 import { hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from "./host-lock.js";
@@ -50,10 +53,11 @@ usage:
   wsp init           set up your first golden image: the agents, what they
                      need and the sign-ins, three screens, then the build and
                      the browser
-  wsp recipe         write the recipe: every catalog agent and tool with a tick
-                     from what is installed here, what your agents used (their
-                     session histories, read here, names and counts only) or the
-                     catalog's own default; review it, then wsp init --recipe
+  wsp recipe         write the recipe and print it as a table: every catalog
+                     agent and tool with a tick from what is installed here,
+                     what your agents used (their session histories, read here,
+                     names and counts only) or the catalog's own default, its
+                     download size beside it; then wsp init --recipe
   wsp doctor         run the reach loop end to end against one live machine
   wsp mcp            serve the verbs as MCP tools over stdio to an agent on this
                      computer; wsp mcp install --agent <id> puts the server in
@@ -88,6 +92,11 @@ options:
                      straight to the sign-ins; this machine is still read for
                      what travels
   --out PATH         recipe: where to write it (default <state dir>/recipe.json)
+  --add ID=COMMAND   recipe: carry a tool the catalog does not, installed by that
+                     command on the machine, repeatable; the line runs as given,
+                     after every catalog install, and gets no sign-in
+  --add-check ID=CMD recipe: what says an added tool is there (default
+                     command -v ID)
 
 keys are read from the environment, then ./.env, then ~/.wsp/.env (WSP_HOME
 overrides ~/.wsp). The prompt runs only when no Solari key is found; it asks
@@ -102,6 +111,8 @@ export interface CliIO {
   stream?(text: string): void;
   /** A yes-or-no question; resolves to "yes" or "no". */
   ask(question: string): Promise<string>;
+  /** A person is at the keyboard (stdin and stdout are terminals); absent means an agent or a pipe, and nothing is asked. */
+  isTTY?: boolean;
   /** A key, typed without echo. Lines after the first are shown under the question. */
   askSecret(question: string): Promise<string>;
 }
@@ -157,6 +168,7 @@ export function terminalIO(input: Stream<Readable> = process.stdin, output: Stre
     log: line => console.log(line),
     error: line => console.error(line),
     stream: text => process.stderr.write(text),
+    isTTY: screen,
     ask: q => (screen ? answered(confirmPrompt(split(q))).then(yes => (yes ? "yes" : "no")) : nobody(q)),
     askSecret: q => (screen ? answered(passwordPrompt(split(q))) : nobody(q)),
   };
@@ -339,6 +351,7 @@ async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: 
       secrets: keychainReader(),
       platform: platform() === "darwin" ? "darwin" : "linux",
       brew: () => readBrewTable(nodeHost()),
+      scan: recipe => scanTools(nodeHost(), recipe),
       runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `daemon on node ${(await deployDaemon(machine)).node}` }),
       host: (rt, builder, hooks) => hostFor(rt, keys, { ...opts, builder, ...hooks }, io),
     },
@@ -505,7 +518,7 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
   const verb = findVerb(argv);
   if (verb !== undefined) return runVerb(verb, argv, io, statePathFrom);
   if (argv[0] === MCP_COMMAND) return mcp(io, argv.slice(1), statePathFrom);
-  let values: { version?: boolean; help?: boolean; port?: string; "ws-port"?: string; state?: string; yes?: boolean; recipe?: string; out?: string };
+  let values: { version?: boolean; help?: boolean; port?: string; "ws-port"?: string; state?: string; yes?: boolean; recipe?: string; out?: string; add?: string[]; "add-check"?: string[] };
   let positionals: string[];
   try {
     ({ values, positionals } = parseArgs({
@@ -519,6 +532,8 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
         yes: { type: "boolean", short: "y" },
         recipe: { type: "string" },
         out: { type: "string" },
+        add: { type: "string", multiple: true },
+        "add-check": { type: "string", multiple: true },
       },
       allowPositionals: true,
     }));
@@ -550,9 +565,17 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
     }
     case "init":
       return init(io, opts, { yes: values.yes === true, ...(values.recipe !== undefined ? { recipe: values.recipe } : {}) });
-    case "recipe":
-      await writeRecipe(nodeHost(), resolve(values.out ?? join(dirname(opts.statePath), "recipe.json")), line => io.log(line));
+    case "recipe": {
+      let add: RecipeCustomRow[];
+      try {
+        add = customFromFlags({ add: values.add ?? [], ...(values["add-check"] !== undefined ? { addCheck: values["add-check"] } : {}) });
+      } catch (e) {
+        io.error(e instanceof Error ? e.message : String(e));
+        return 1;
+      }
+      await writeRecipe(nodeHost(), resolve(values.out ?? join(dirname(opts.statePath), "recipe.json")), line => io.log(line), { add, depth: colourDepth(isTTY(process.stdout)) });
       return 0;
+    }
     case "doctor": {
       const keys = await loadKeys(io);
       const rt = makeRuntime(keys, opts.statePath);

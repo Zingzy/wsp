@@ -70,6 +70,9 @@ export interface SessionHistory {
 /** An agent is never on by default: the wizard ticks the ones found on the Mac. */
 export interface AgentEntry extends EntryBase {
   kind: "agent";
+  /** wsp drives this agent's threads through a harness adapter of its own; absent, it installs and runs by hand
+   * on the machine but no thread can be started for it yet. Set it when the adapter lands. */
+  threads?: true;
   /** The directory the projectState rows sit under, relative to the home directory of the computer the agent ran on. */
   stateHome: string;
   /** Where that directory is on the guest when it is not stateHome under the guest's home, absolute. */
@@ -126,10 +129,6 @@ export function sizeBytes(s: Size): number | undefined {
   return "bytes" in s ? s.bytes : undefined;
 }
 
-/** What df moved across each agent's install on the same builder: the global, its caches and whatever the
- * installer put under /root; the cache sweep after the stage gives some of it back. */
-const AGENT_MIB = { claude: 208, codex: 455, gemini: 189, opencode: 673, pi: 165, hermes: 484 } as const;
-
 const MEASURED_ON = "2026-09-07";
 const measured = (method: SizeMethod, bytes: number, on: string = MEASURED_ON): Size => ({ bytes, on, method });
 const brew = (formula: string, bytes: number): { installRoad: InstallRoad; size: Size } => ({ installRoad: { road: "brew", formula }, size: measured("brew", bytes) });
@@ -139,12 +138,15 @@ const uvTool = (bytes: number, pkg: string): { installRoad: InstallRoad; size: S
 /** A release road; `go` is the repository's main package for the fall-through, left off when it has none; the bytes are the binary's. */
 const github = (bytes: number, repo: string, go?: string): { installRoad: InstallRoad; size: Size } => ({ installRoad: { road: "release", repo, ...(go !== undefined ? { go } : {}) }, size: measured("unpacked", bytes) });
 const tool = { kind: "tool", configPaths: [], floor: false } as const;
-const agent = (id: keyof typeof AGENT_MIB) => ({ id, kind: "agent", bin: id, size: measured("df", AGENT_MIB[id] * MIB, "2026-09-05") }) as const;
+/** An agent's bytes are what df moved across its install on the builder: the global, its caches and whatever the
+ * installer put under /root; the cache sweep after the stage gives some of it back. */
+const agent = (id: string, mib: number) => ({ id, kind: "agent", bin: id, size: measured("df", mib * MIB, "2026-09-05") }) as const;
 
 export const CATALOG: readonly CatalogEntry[] = [
   // --- agents: the six whose project state a move can follow -------------------------------------------------------
   {
-    ...agent("claude"),
+    ...agent("claude", 208),
+    threads: true,
     stateHome: ".claude",
     guestStateHome: CLAUDE_CONFIG_DIR,
     stateHomeEnv: "CLAUDE_CONFIG_DIR",
@@ -171,7 +173,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     source: { sessions: 149, images: 1, road: "measured" },
   },
   {
-    ...agent("codex"),
+    ...agent("codex", 455),
     stateHome: ".codex",
     name: "Codex",
     context: CODEX_CONTEXT,
@@ -192,7 +194,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     source: { sessions: 5, images: 1, road: "measured" },
   },
   {
-    ...agent("gemini"),
+    ...agent("gemini", 189),
     stateHome: ".gemini",
     name: "Gemini CLI",
     context: GEMINI_CONTEXT,
@@ -213,7 +215,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     source: { sessions: 0, images: 0, road: "measured" },
   },
   {
-    ...agent("opencode"),
+    ...agent("opencode", 673),
     stateHome: ".local/share/opencode",
     name: "OpenCode",
     context: OPENCODE_CONTEXT,
@@ -234,7 +236,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     source: { sessions: 0, images: 0, road: "measured" },
   },
   {
-    ...agent("pi"),
+    ...agent("pi", 165),
     stateHome: ".pi/agent",
     name: "Pi",
     context: PI_CONTEXT,
@@ -254,7 +256,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     source: { sessions: 0, images: 0, road: "measured" },
   },
   {
-    ...agent("hermes"),
+    ...agent("hermes", 484),
     stateHome: ".hermes",
     name: "Hermes Agent",
     context: HERMES_CONTEXT,

@@ -68,6 +68,10 @@ export function asLinuxbrew(cmd: string): string {
   return `su -s /bin/bash linuxbrew -c ${shellQuote(`${BREW_ENV} ${BREW} ${cmd}`)}`;
 }
 
+/** A `brew` for a script that runs as root and types its own formula line: the two above take the whole command as
+ * one quoted word, this one takes the arguments as they were typed and hands them on with their quoting intact. */
+export const LINUXBREW_SHIM = `brew() { su -s /bin/bash linuxbrew -c ${shellQuote(`export ${BREW_ENV}; exec "$0" "$@"`)} -- ${BREW} "$@"; }`;
+
 const brew: RoadModule<Road<"brew">> = {
   words: "with Homebrew",
   after: HOMEBREW_STEP,
