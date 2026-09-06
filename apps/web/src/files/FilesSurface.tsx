@@ -4,7 +4,9 @@
 // following the thread, and a new thread started in the shown folder. When
 // the daemon browses more than one root (home and an imported project), a row
 // above names them and switches between them. Picking a file opens it as its
-// own surface beside this one.
+// own surface beside this one. A root a daemon too old for it will not browse
+// says what that daemon predates in place of its refusal, which names a path
+// nobody asked about; the runtime is already replacing that daemon.
 import { ArrowUpIcon, MessageSquarePlusIcon, PinIcon, PinOffIcon } from "lucide-react";
 import { useEffect } from "react";
 import FileBrowserPanel from "../components/files/FileBrowserPanel.js";
@@ -12,17 +14,20 @@ import { Button } from "../components/ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { cn } from "../lib/utils.js";
+import { daemonBehindLine } from "../machine/daemon.js";
 import { useWorkspace } from "../protocol/store.js";
 import { useRightPanelStore } from "../rightPanelStore.js";
 import { requestNewThread } from "../shell/shellRequests.js";
 import { parentPath } from "./entries.js";
 import { useWorkspaceListing } from "./listing.js";
 import { rootOf, usePinned, useRoot, useRoots, useRootStore } from "./root.js";
-import { useDaemonWire } from "./wire.js";
+import { useDaemonRoot, useDaemonVersion, useDaemonWire } from "./wire.js";
 
 export function FilesSurface({ workspaceId, theme }: { workspaceId: string; theme: "light" | "dark" }) {
   const workspace = useWorkspace(workspaceId);
   const wire = useDaemonWire(workspaceId);
+  const version = useDaemonVersion(workspaceId);
+  const home = useDaemonRoot(workspaceId);
   const roots = useRoots(workspaceId);
   const root = useRoot(workspaceId);
   const pinned = usePinned(workspaceId);
@@ -35,6 +40,10 @@ export function FilesSurface({ workspaceId, theme }: { workspaceId: string; them
   const above = root === null ? null : parentPath(root);
   const parent = above !== null && rootOf(roots, above) !== null ? above : null;
   const current = root === null ? null : rootOf(roots, root);
+  // A daemon that predates the roots file browses its home and nothing else, so a folder outside it comes back
+  // refused, naming a path nobody asked about; that one refusal reads as what the daemon predates. Every other
+  // failure, on any daemon, is its own and says so.
+  const behind = root !== null && home !== null && rootOf([home], root) === null ? daemonBehindLine(version) : null;
 
   useEffect(() => {
     if (root !== null) ensure(root);
@@ -110,6 +119,7 @@ export function FilesSurface({ workspaceId, theme }: { workspaceId: string; them
         onExpandDirectory={ensure}
         onOpenFile={path => openFile(workspaceId, path)}
         onRefresh={dirs => dirs.forEach(refresh)}
+        behind={behind}
         theme={theme}
       />
     </div>

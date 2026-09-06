@@ -155,6 +155,9 @@ export const WorkspaceView = z.object({
   screen: z.object({ streamUrl: z.string() }).optional(),
   /** With phase gone: the provider's words when it stopped knowing the machine; every refusal quotes them. */
   gone: z.string().optional(),
+  /** One line for the machine's row while the runtime is doing something to the machine's daemon, or why the last
+   * attempt failed; absent whenever there is nothing to say. Not persisted: it says what this process is doing. */
+  daemonNote: z.string().optional(),
 });
 export type WorkspaceView = z.infer<typeof WorkspaceView>;
 
@@ -1383,10 +1386,6 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
    * reports. Replies with the WorkspaceView on its new machine; id and name
    * are kept. The way out of a zombie reach state. */
   z.object({ id: reqId, op: z.literal("workspaces.rebuild"), workspaceId: z.string() }),
-  /** Deploys the host's daemon bundle onto the workspace's running machine over the deploy path a golden build
-   * uses, stopping the daemon that was there: its terminals end, sessions and everything else on the machine
-   * keep running. The browser's link redials on its own and the new hello carries the new version. Replies {id, ok}. */
-  z.object({ id: reqId, op: z.literal("workspaces.updateDaemon"), workspaceId: z.string() }),
   /** Replies with { forwards: PortForward[] }, the host's open forwards; empty when no host holds any. */
   z.object({ id: reqId, op: z.literal("forwards.list") }),
   /** Closes one forward; refused when none is open on that workspace and port. */
@@ -1541,6 +1540,6 @@ export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { goneRefusal, needsRebuild, sendRefusal, workspaceState, workspaceWord, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
-export { AFTER_CUT_LINE, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, notifyLine, titleLine, turnCutLine, type DurationStyle, type TurnCutRule } from "./format.js";
+export { AFTER_CUT_LINE, DAEMON_UPDATING, daemonUpdateFailed, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, notifyLine, titleLine, turnCutLine, type DurationStyle, type TurnCutRule } from "./format.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { shellQuote } from "./shell-quote.js";

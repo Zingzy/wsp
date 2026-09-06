@@ -4,7 +4,7 @@
 // traversal; the new-workspace dialog; the zombie rebuild and the gone forget.
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { SessionView, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATING, daemonUpdateFailed, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -318,6 +318,26 @@ describe("rows from the fixture wire", () => {
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API) }));
     await waitFor(() => expect(rowOf("api").textContent).toContain("active"));
     expect(rowOf("api").textContent).not.toContain("edge slow");
+  });
+
+  it("while the runtime replaces the machine's helper the row says only that, and clears when it lands", async () => {
+    await mount(fakeApi([API, WEB], [status(API, { idleAt: iso(14.5 * 60_000) }), status(WEB)]), "api");
+    await waitFor(() => expect(rowOf("api").textContent).toContain("naps in 14m"));
+
+    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: { ...status(API, { idleAt: iso(14.5 * 60_000) }), daemonNote: DAEMON_UPDATING } }));
+    await waitFor(() => expect(rowOf("api").textContent).toContain(DAEMON_UPDATING));
+    // The one thing on the row worth waiting for takes the line; the rate and the countdown wait their turn.
+    expect(rowOf("api").textContent).not.toContain("naps in 14m");
+    expect(rowOf("api").textContent).not.toContain("$0.110/hr");
+    expect(rowOf("api").textContent).toContain("Running");
+    expect(rowOf("web").textContent).not.toContain(DAEMON_UPDATING);
+
+    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: { ...status(API, { idleAt: iso(14.5 * 60_000) }), daemonNote: daemonUpdateFailed("daemon deploy failed: NPM_FAIL") } }));
+    await waitFor(() => expect(rowOf("api").textContent).toContain("could not update the machine's helper: daemon deploy failed: NPM_FAIL"));
+
+    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API, { idleAt: iso(14.5 * 60_000) }) }));
+    await waitFor(() => expect(rowOf("api").textContent).toContain("naps in 14m"));
+    expect(rowOf("api").textContent).not.toContain("helper");
   });
 
   it("clicking a thread selects it under its workspace; clicking a workspace selects it with no thread pinned", async () => {

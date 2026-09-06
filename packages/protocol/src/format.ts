@@ -99,3 +99,12 @@ export function turnCutLine(rule: TurnCutRule, elapsedMs: number, limitMs: numbe
 
 /** The one line every client shows on a start whose thread's previous turn was cut, before the new turn's output. */
 export const AFTER_CUT_LINE = "previous turn was cut; resuming";
+
+/** The machine row's line while the runtime replaces a daemon older than this wsp, and the sentence it shows
+ * instead when the replacement failed. A person is never told the helper is called a daemon: they did not install
+ * it and cannot run it, so its name would only be one more thing to know. */
+export const DAEMON_UPDATING = "updating the machine's helper";
+
+export function daemonUpdateFailed(reason: string): string {
+  return `could not update the machine's helper: ${reason}`;
+}

@@ -3,12 +3,14 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe, type AdapterEvent, type TurnResult } from "@wsp/adapter-claude";
-import { SessionEvent, foldThreads, type EventUnion, type RecipeDigest } from "@wsp/protocol";
+import { DAEMON_UPDATING, DAEMON_VERSION, SessionEvent, daemonUpdateFailed, foldThreads, type EventUnion, type RecipeDigest, type WorkspaceStatus } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
+import { writeDaemonRootsScript } from "../src/daemon-roots.js";
 import { TABLE_PIN } from "../src/harness-catalog.js";
 import { CATALOG_TTL_MS, GRACE_MS, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, createRuntime, type GoldenExec, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
 import { machineExecStream } from "../src/machine-exec.js";
@@ -18,6 +20,7 @@ import { until } from "./until.js";
 import { wsRequest } from "./ws-client.js";
 import { stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
 import { fakeClock } from "./fake-clock.js";
+import { WebSocketServer } from "ws";
 
 describe("runtime", () => {
   it("creates a workspace from a golden manifest and emits protocol events", async () => {
@@ -1278,7 +1281,7 @@ describe("runtime daemon reach", () => {
         return "daemon on node v22";
       },
     };
-    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN, goldenRecipe: recipe });
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN, goldenRecipe: recipe, daemonHelloTimeoutMs: 50 });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     const m = backend.machines[0]!;
     m.previewUrl = async port => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, token: "e", expiresAt: Date.now() + 3_600_000 });
@@ -1296,6 +1299,170 @@ describe("runtime daemon reach", () => {
     await rt.workspaces.nap(ws.id);
     await expect(rt.workspaces.updateDaemon(ws.id)).rejects.toThrow("wake a before updating its daemon");
     expect(deployed).toEqual(["m1"]);
+  });
+
+  it("replaces a daemon older than this wsp by itself: the runtime connects to a machine it adopts, reads the hello and deploys, with nothing asking it to", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const store = memoryStore();
+    const daemon = await helloingDaemon(1);
+    try {
+      const before = createRuntime({ backend, store, adapters: {} });
+      const ws = await before.workspaces.create({ golden: "snap_g", name: "a" });
+      const m = backend.machines[0]!;
+      m.previewUrl = async () => ({ url: `ws://127.0.0.1:${daemon.port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
+
+      const deployed: string[] = [];
+      let release!: () => void;
+      const held = new Promise<void>(r => (release = r));
+      const recipe = {
+        setup: "true",
+        smoke: "true",
+        deployDaemon: async (machine: { id: string }) => {
+          deployed.push(machine.id);
+          await held;
+          daemon.announce(DAEMON_VERSION);
+        },
+      };
+      // The host starting again over the same store, on a machine that is already running: the one case a person
+      // hits after an upgrade, and the one nothing else in the runtime reaches.
+      const rt = createRuntime({ backend, store, adapters: {}, daemonToken: TOKEN, goldenRecipe: recipe, daemonHelloTimeoutMs: 2_000 });
+      const pushed: WorkspaceStatus[] = [];
+      rt.events.on("workspace.status", e => pushed.push((e as { status: WorkspaceStatus }).status));
+      await rt.workspaces.list();
+      await until(() => deployed.length === 1);
+      expect(deployed).toEqual(["m1"]);
+
+      // The row says what is being done while it is being done, and the status carrying it still carries the nap
+      // countdown: a client replaces the whole status, so a line that dropped it would blank the row.
+      await until(async () => (await rt.workspaces.get(ws.id)).daemonNote === DAEMON_UPDATING);
+      const updating = pushed.filter(st => st.daemonNote === DAEMON_UPDATING);
+      expect(updating).toHaveLength(1);
+      expect(updating[0]!.idleAt).toBeGreaterThan(Date.now());
+
+      release();
+      await until(async () => (await rt.workspaces.get(ws.id)).daemonNote === undefined);
+      expect(pushed.at(-1)!.daemonNote).toBeUndefined();
+      expect(pushed.at(-1)!.idleAt).toBeGreaterThan(Date.now());
+    } finally {
+      await daemon.close();
+    }
+  });
+
+  it("a deploy that fails leaves the old daemon serving and the reason on the machine's row", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const store = memoryStore();
+    const daemon = await helloingDaemon(1);
+    try {
+      const before = createRuntime({ backend, store, adapters: {} });
+      const ws = await before.workspaces.create({ golden: "snap_g", name: "a" });
+      const m = backend.machines[0]!;
+      m.previewUrl = async () => ({ url: `ws://127.0.0.1:${daemon.port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
+
+      let atDeploy = -1;
+      const recipe = {
+        setup: "true",
+        smoke: "true",
+        deployDaemon: async () => {
+          atDeploy = m.execLog.length;
+          throw new Error("daemon deploy failed: NPM_FAIL");
+        },
+      };
+      const rt = createRuntime({ backend, store, adapters: {}, daemonToken: TOKEN, goldenRecipe: recipe, daemonHelloTimeoutMs: 2_000 });
+      await rt.workspaces.list();
+      await until(async () => (await rt.workspaces.get(ws.id)).daemonNote === daemonUpdateFailed("daemon deploy failed: NPM_FAIL"));
+      // Nothing reached the machine after the deploy threw, the token was not rotated away from the daemon that
+      // holds it, and that daemon still answers with the version it always did.
+      expect(m.execLog.slice(atDeploy)).toEqual([]);
+      expect(await helloOf(daemon.port)).toBe(1);
+    } finally {
+      await daemon.close();
+    }
+  });
+
+  it("waits out a running turn before replacing the daemon, since the deploy ends what the turn runs under", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const store = memoryStore();
+    const daemon = await helloingDaemon(1, true);
+    let finish!: (r: TurnResult) => void;
+    const held: HarnessAdapterFactory = () => ({
+      steers: false,
+      start: o => {
+        const sessionId = "55555555-5555-4555-8555-555555555555";
+        queueMicrotask(() => o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" }));
+        return {
+          localId: sessionId,
+          finished: new Promise<TurnResult>(r => {
+            finish = result => {
+              o.onEvent({ type: "turn.done", sessionId, result });
+              o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+              r(result);
+            };
+          }),
+          interrupt: async () => {},
+        };
+      },
+    });
+    try {
+      const before = createRuntime({ backend, store, adapters: {} });
+      const ws = await before.workspaces.create({ golden: "snap_g", name: "a" });
+      backend.machines[0]!.previewUrl = async () => ({ url: `ws://127.0.0.1:${daemon.port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
+
+      const deployed: string[] = [];
+      const recipe = { setup: "true", smoke: "true", deployDaemon: async (m: { id: string }) => void deployed.push(m.id) };
+      const rt = createRuntime({ backend, store, adapters: { claude: held }, daemonToken: TOKEN, goldenRecipe: recipe, daemonHelloTimeoutMs: 5_000 });
+      await rt.workspaces.list();
+      // A turn opens while the runtime is still waiting on the machine's hello: the update it is about to run holds.
+      await rt.sessions.start(ws.id, { prompt: "go" });
+      await until(async () => (await rt.sessions.list())[0]?.status === "running");
+      daemon.release();
+      await new Promise(r => setTimeout(r, 200));
+      expect(deployed).toEqual([]);
+
+      finish({ status: "completed", text: "done" });
+      await until(() => deployed.length === 1);
+      expect(deployed).toEqual(["m1"]);
+    } finally {
+      finish?.({ status: "completed", text: "" });
+      await daemon.close();
+    }
+  });
+
+  it("writes the folders the record names on every connect, and again after the update, so a project imported before the daemon read that file is browsable", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const store = memoryStore();
+    const daemon = await helloingDaemon(1);
+    const roots = writeDaemonRootsScript(["/Users/dev/wsp"]);
+    try {
+      const before = createRuntime({ backend, store, adapters: {} });
+      const ws = await before.workspaces.create({ golden: "snap_g", name: "a" });
+      const stored = (await store.get("workspaces", ws.id)) as Record<string, unknown>;
+      await store.put("workspaces", ws.id, { ...stored, project: { name: "wsp", dest: "/Users/dev/wsp", importedAt: "2026-09-01T00:00:00Z" } });
+      const m = backend.machines[0]!;
+      m.previewUrl = async () => ({ url: `ws://127.0.0.1:${daemon.port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
+
+      let atDeploy = -1;
+      const recipe = {
+        setup: "true",
+        smoke: "true",
+        deployDaemon: async () => {
+          atDeploy = m.execLog.length;
+          daemon.announce(DAEMON_VERSION);
+        },
+      };
+      const from = m.execLog.length;
+      const rt = createRuntime({ backend, store, adapters: {}, daemonToken: TOKEN, goldenRecipe: recipe, daemonHelloTimeoutMs: 2_000 });
+      await rt.workspaces.list();
+      await until(() => m.execLog.slice(from).filter(cmd => cmd === roots).length === 2);
+      // Once before the daemon is asked anything, so the first files op lands; once after the daemon was replaced.
+      expect(m.execLog.slice(from, atDeploy).filter(cmd => cmd === roots)).toEqual([roots]);
+      expect(m.execLog.slice(atDeploy).filter(cmd => cmd === roots)).toEqual([roots]);
+    } finally {
+      await daemon.close();
+    }
   });
 
   it("updateDaemon refuses on a runtime whose recipe carries no deploy", async () => {
@@ -2077,6 +2244,54 @@ const TOKEN_PATH = "/root/.wsp-daemon-token";
 const TOKEN = "deadbeef".repeat(3);
 /** A guest with a daemon: the token write lands, everything else is silently fine. */
 const tokenGuest = (_m: unknown, cmd: string) => (cmd.includes(TOKEN_PATH) ? { exitCode: 0, stdout: `${DAEMON_TOKEN_SET}\n`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+
+/** A daemon on a loopback port that answers every op ok and announces the version it is set to right after the auth
+ * reply, as the real one does: the one way a client learns a daemon's version, and the only way to stand an old one
+ * up here, since the daemon in this checkout only ever announces the current version. */
+async function helloingDaemon(version: number, holdHello = false): Promise<{ port: number; announce: (v: number) => void; release: () => void; close: () => Promise<void> }> {
+  let announced = version;
+  let held = holdHello;
+  const waiting: (() => void)[] = [];
+  const wss = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+  await new Promise<void>(done => wss.once("listening", () => done()));
+  wss.on("connection", socket => {
+    const hello = (): void => socket.send(JSON.stringify({ type: "daemon.hello", root: "/root", version: announced }));
+    socket.on("message", raw => {
+      const { id, op } = JSON.parse(String(raw)) as { id: number; op: string };
+      socket.send(JSON.stringify({ id, ok: true }));
+      if (op !== "auth") return;
+      if (held) waiting.push(hello);
+      else hello();
+    });
+  });
+  return {
+    port: (wss.address() as AddressInfo).port,
+    announce: v => (announced = v),
+    release: () => {
+      held = false;
+      for (const say of waiting.splice(0)) say();
+    },
+    close: () => new Promise<void>(done => wss.close(() => done())),
+  };
+}
+
+/** The version a daemon on this port announces, read the way any client reads it: dial, auth, listen. */
+async function helloOf(port: number): Promise<number> {
+  const { default: WebSocket } = await import("ws");
+  const socket = new WebSocket(`ws://127.0.0.1:${port}`);
+  try {
+    return await new Promise<number>((done, fail) => {
+      socket.on("open", () => socket.send(JSON.stringify({ id: 1, op: "auth", token: TOKEN })));
+      socket.on("message", raw => {
+        const m = JSON.parse(String(raw)) as { type?: string; version?: number };
+        if (m.type === "daemon.hello") done(m.version ?? 1);
+      });
+      socket.on("error", fail);
+    });
+  } finally {
+    socket.close();
+  }
+}
 
 /** A real daemon on a loopback port for the runtime to ping, torn down with its inbox. */
 async function withDaemon<T>(fn: (port: number) => Promise<T>): Promise<T> {

@@ -26,6 +26,9 @@ interface FileBrowserPanelProps {
   onOpenFile: (path: string) => void;
   /** Called with every folder the tree currently shows a listing for. */
   onRefresh: (dirs: string[]) => void;
+  /** The machine's daemon predates this pane: what it predates, said in place of the daemon's own refusal, which
+   * names a path the person never asked about. Null on a current daemon. */
+  behind: string | null;
   theme: "light" | "dark";
 }
 
@@ -97,6 +100,7 @@ export default function FileBrowserPanel({
   onExpandDirectory,
   onOpenFile,
   onRefresh,
+  behind,
   theme,
 }: FileBrowserPanelProps) {
   const rootLevel = levels.get(root);
@@ -180,7 +184,13 @@ export default function FileBrowserPanel({
         />
       </div>
       {showError ? (
-        <div className="p-4 text-xs leading-relaxed text-destructive">{rootLevel.error}</div>
+        behind !== null ? (
+          <p className="p-4 font-mono text-[11px] leading-relaxed text-muted-foreground" data-files-behind>
+            {behind}
+          </p>
+        ) : (
+          <div className="p-4 text-xs leading-relaxed text-destructive">{rootLevel.error}</div>
+        )
       ) : (
         <FileTree
           model={model}

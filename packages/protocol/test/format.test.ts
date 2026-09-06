@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, notifyLine, titleLine, TURN_IDLE_MS, TURN_WALL_MS, turnCutLine } from "../src/index.js";
+import { DAEMON_UPDATING, daemonUpdateFailed, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, notifyLine, titleLine, TURN_IDLE_MS, TURN_WALL_MS, turnCutLine } from "../src/index.js";
 import { ROOT, sourceFiles } from "./source-files.js";
 
 describe("fmtBytes", () => {
@@ -86,6 +86,14 @@ describe("turnCutLine", () => {
   it("names the rule, how long the turn ran in the clock style and the limit, in the words the ticket row shows", () => {
     expect(turnCutLine("idle", 900_000, TURN_IDLE_MS)).toBe("stopped after 15m 00s with no output for 10m");
     expect(turnCutLine("wall", TURN_WALL_MS, TURN_WALL_MS)).toBe("stopped after 6h 00m 00s at the 6h cap on one turn");
+  });
+});
+
+describe("the machine row's line about its helper", () => {
+  it("says what is being done, and why it failed, without ever naming the daemon to a person", () => {
+    expect(DAEMON_UPDATING).toBe("updating the machine's helper");
+    expect(daemonUpdateFailed("daemon deploy failed: NPM_FAIL")).toBe("could not update the machine's helper: daemon deploy failed: NPM_FAIL");
+    for (const line of [DAEMON_UPDATING, daemonUpdateFailed("x")]) expect(line).not.toContain("daemon");
   });
 });
 

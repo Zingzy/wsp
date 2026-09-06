@@ -16,7 +16,7 @@ import type {
   WorkspaceView,
 } from "@wsp/protocol";
 import { MachineSurface } from "../src/components/machine/MachineSurface.js";
-import { DAEMON_HELLO_WAIT_MS, provideDaemonHello, provideDaemonUpdate } from "../src/files/wire.js";
+import { provideDaemonHello } from "../src/files/wire.js";
 import { getLive, resetLive } from "../src/machine/live.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -111,7 +111,6 @@ function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS,
 beforeEach(() => {
   resetLive();
   provideDaemonHello("ws_a", null);
-  provideDaemonUpdate("ws_a", null);
   document.documentElement.classList.add("dark");
   useStore.setState({
     api: null,
@@ -893,142 +892,12 @@ describe("live", () => {
   });
 });
 
-const updateLine = (): HTMLElement | null => document.querySelector<HTMLElement>('[data-k="daemon-update"]');
-const updateButton = (): HTMLButtonElement => screen.getByRole("button", { name: "update the daemon on api" }) as HTMLButtonElement;
-
 describe("daemon version", () => {
-  it.each(["dark", "light"] as const)("in the %s theme a daemon older than the app gets one mono muted line naming what it predates and a keycap that updates it; a current one gets no line", async theme => {
-    document.documentElement.classList.toggle("dark", theme === "dark");
-    const api = await mount([view("ws_a", "api")]);
-    const updateDaemon = vi.fn(async (_id: string) => {});
-    (api as Api).updateDaemon = updateDaemon;
-    expect(updateLine()).toBeNull();
-    act(() => provideDaemonHello("ws_a", { root: "/root", version: DAEMON_VERSION }));
-    expect(updateLine()).toBeNull();
-    act(() => provideDaemonHello("ws_a", { root: "/root", version: 2 }));
-    expect(updateLine()!.querySelector("span")!.textContent).toBe("daemon v2 predates Files in imported projects");
-    act(() => provideDaemonHello("ws_a", { root: "/root", version: 1 }));
-    const line = updateLine()!;
-    expect(line.querySelector("span")!.textContent).toBe("daemon v1 predates Live, Processes and Files in imported projects");
-    expect(line.className).toMatch(/font-mono/);
-    expect(line.className).toMatch(/text-muted-foreground/);
-    expect(line.className).toMatch(/\bh-6\b/);
-    expect(line.className).not.toMatch(/warning|caution|destructive|success|info/);
-    expect(line.querySelectorAll("[class*=badge], [data-slot=badge]")).toHaveLength(0);
-    const button = updateButton();
-    expect(button.textContent).toBe("update");
-    expect(line.querySelector("[role=tooltip]")!.textContent).toBe("Restarts the daemon on the machine. Open terminals end, chat threads keep running.");
-    expect(button.className).toMatch(/border/);
-    expect(button.className).toMatch(/\bh-5\b/);
-    expect(button.className).not.toMatch(/warning|caution|destructive|success|info/);
-    fireEvent.click(button);
-    expect(updateDaemon).toHaveBeenCalledWith("ws_a");
-    await waitFor(() => expect(updateButton().textContent).toBe("updating"));
-    expect(updateLine()!.className).toMatch(/\bh-6\b/);
-    // The new daemon's hello names a current version: the line leaves.
-    act(() => provideDaemonHello("ws_a", { root: "/root", version: DAEMON_VERSION }));
-    expect(updateLine()).toBeNull();
-  });
-
-  it("after the update resolves the keycap stays busy until the daemon's hello names a current version, so a second click cannot run the deploy again", async () => {
-    const api = await mount([view("ws_a", "api")]);
-    let settle!: () => void;
-    (api as Api).updateDaemon = vi.fn((_id: string) => new Promise<void>(resolve => (settle = resolve)));
-    act(() => provideDaemonHello("ws_a", { root: "/root", version: 1 }));
-    fireEvent.click(updateButton());
-    await waitFor(() => expect(updateButton().textContent).toBe("updating"));
-    await act(async () => settle());
-    // The runtime is done but the link it killed has not redialled yet: the line still reads v1 and the keycap stays busy.
-    expect(updateLine()!.querySelector("span")!.textContent).toBe("daemon v1 predates Live, Processes and Files in imported projects");
-    expect(updateButton().textContent).toBe("updating");
-    expect(updateButton().disabled).toBe(true);
-    act(() => provideDaemonHello("ws_a", { root: "/root", version: DAEMON_VERSION }));
-    expect(updateLine()).toBeNull();
-  });
-
-  it("a daemon that never reports back frees the keycap once the bound passes, with the daemon's line as the title", async () => {
-    const api = await mount([view("ws_a", "api")]);
-    (api as Api).updateDaemon = vi.fn(async (_id: string) => {});
-    act(() => provideDaemonHello("ws_a", { root: "/root", version: 1 }));
-    vi.useFakeTimers();
-    fireEvent.click(updateButton());
-    await act(async () => {});
-    expect(updateButton().textContent).toBe("updating");
-    act(() => vi.advanceTimersByTime(DAEMON_HELLO_WAIT_MS - 1));
-    expect(updateButton().textContent).toBe("updating");
-    act(() => vi.advanceTimersByTime(1));
-    expect(updateButton().textContent).toBe("update");
-    expect(updateButton().disabled).toBe(false);
-    expect(updateLine()!.querySelector("span")!.textContent).toBe("daemon v1 predates Live, Processes and Files in imported projects");
-    expect(updateLine()!.querySelector("span")!.getAttribute("title")).toBe("daemon v1 predates Live, Processes and Files in imported projects");
-  });
-
-  it("leaving the machine tab mid-update and coming back finds the keycap still busy: a click runs nothing more, and the current hello removes the line", async () => {
-    const api = await mount([view("ws_a", "api")]);
-    let settle!: () => void;
-    const updateDaemon = vi.fn((_id: string) => new Promise<void>(resolve => (settle = resolve)));
-    (api as Api).updateDaemon = updateDaemon;
-    act(() => provideDaemonHello("ws_a", { root: "/root", version: 1 }));
-    fireEvent.click(updateButton());
-    await act(async () => settle());
-    expect(updateButton().textContent).toBe("updating");
-    // The right panel renders one surface at a time: the processes pane or another workspace unmounts this one.
-    cleanup();
-    render(<MachineSurface workspaceId="ws_a" />);
-    await waitFor(() => expect(updateLine()).not.toBeNull());
-    expect(updateLine()!.querySelector("span")!.textContent).toBe("daemon v1 predates Live, Processes and Files in imported projects");
-    expect(updateButton().textContent).toBe("updating");
-    expect(updateButton().disabled).toBe(true);
-    fireEvent.click(updateButton());
-    expect(updateDaemon).toHaveBeenCalledTimes(1);
-    act(() => provideDaemonHello("ws_a", { root: "/root", version: DAEMON_VERSION }));
-    expect(updateLine()).toBeNull();
-  });
-
-  it("after a remount the bound still counts from when the runtime finished, not from the remount", async () => {
-    const api = await mount([view("ws_a", "api")]);
-    (api as Api).updateDaemon = vi.fn(async (_id: string) => {});
-    act(() => provideDaemonHello("ws_a", { root: "/root", version: 1 }));
-    vi.useFakeTimers();
-    fireEvent.click(updateButton());
-    await act(async () => {});
-    act(() => vi.advanceTimersByTime(20_000));
-    cleanup();
-    render(<MachineSurface workspaceId="ws_a" />);
-    await act(async () => {});
-    expect(updateButton().textContent).toBe("updating");
-    act(() => vi.advanceTimersByTime(DAEMON_HELLO_WAIT_MS - 20_000 - 1));
-    expect(updateButton().textContent).toBe("updating");
-    act(() => vi.advanceTimersByTime(1));
-    expect(updateButton().textContent).toBe("update");
-    expect(updateButton().disabled).toBe(false);
-    expect(updateLine()!.querySelector("span")!.getAttribute("title")).toBe("daemon v1 predates Live, Processes and Files in imported projects");
-  });
-
-  it("the keycap reads updating while the runtime redeploys, and a refusal takes the line's place", async () => {
-    const api = await mount([view("ws_a", "api")]);
-    let settle!: (e?: Error) => void;
-    (api as Api).updateDaemon = vi.fn((_id: string) => new Promise<void>((resolve, reject) => (settle = e => (e ? reject(e) : resolve()))));
-    act(() => provideDaemonHello("ws_a", { root: "/root", version: 1 }));
-    fireEvent.click(updateButton());
-    await waitFor(() => expect(updateButton().textContent).toBe("updating"));
-    expect(updateButton().disabled).toBe(true);
-    act(() => settle(new Error("daemon deploy failed: NPM_FAIL")));
-    await waitFor(() => expect(updateLine()!.querySelector("span")!.textContent).toBe("daemon deploy failed: NPM_FAIL"));
-    expect(updateButton().disabled).toBe(false);
-    expect(updateButton().textContent).toBe("update");
-  });
-
-  it("a client without the update op says so instead of offering nothing", async () => {
+  it("the machine tab offers nothing about a daemon older than the app: the runtime replaces it and the machine's row says so", async () => {
     await mount([view("ws_a", "api")]);
     act(() => provideDaemonHello("ws_a", { root: "/root", version: 1 }));
-    fireEvent.click(updateButton());
-    await waitFor(() => expect(updateLine()!.querySelector("span")!.textContent).toBe("This client cannot update daemons."));
-  });
-
-  it("a napping workspace shows no update line: its daemon is not running to replace", async () => {
-    await mount([view("ws_a", "api", "napping")]);
-    act(() => provideDaemonHello("ws_a", { root: "/root", version: 1 }));
-    expect(updateLine()).toBeNull();
+    expect(document.querySelector('[data-k="daemon-update"]')).toBeNull();
+    expect(screen.queryByRole("button", { name: "update the daemon on api" })).toBeNull();
+    expect(document.body.textContent).not.toContain("predates");
   });
 });

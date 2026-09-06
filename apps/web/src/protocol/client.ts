@@ -253,9 +253,6 @@ export interface Api {
   /** Drops a workspace whose machine is gone from the host's store; the row leaves on workspace.deleted. The host refuses
    * while the machine exists. Optional so fixtures without a gone machine need not fake it. */
   forget?(id: string): Promise<void>;
-  /** Redeploys the daemon on the workspace's machine, replacing the one there; the link redials by itself. Optional so
-   * fixtures with a current daemon need not fake it; the machine tab says so when a client lacks it. */
-  updateDaemon?(id: string): Promise<void>;
   /** The guest ports the host forwards to this computer's loopback; forward.open and forward.close keep the list current. Optional so fixtures without forwards need not fake it. */
   listForwards?(): Promise<PortForward[]>;
   stopForward?(workspaceId: string, port: number): Promise<void>;
@@ -387,7 +384,6 @@ export function makeApi(c: ProtocolClient): Api {
       (await c.request<{ workspace: WorkspaceView }>("workspaces.upgrade", { workspaceId: id, ...size })).workspace,
     rebuild: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.rebuild", { workspaceId: id })).workspace,
     forget: async id => void (await c.request("workspaces.forget", { workspaceId: id })),
-    updateDaemon: async id => void (await c.request("workspaces.updateDaemon", { workspaceId: id })),
     // Parsed, not trusted: a reply without the list must not become the list.
     listForwards: async () => PortForward.array().parse((await c.request<{ forwards?: unknown }>("forwards.list")).forwards),
     stopForward: async (workspaceId, port) => void (await c.request("forwards.stop", { workspaceId, port })),
