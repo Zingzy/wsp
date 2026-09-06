@@ -3837,7 +3837,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     const asked = f.text();
     expect(asked).toContain("Changes since golden v1");
     expect(asked).toContain("update 1 file: ~/.zshrc");
-    expect(asked).toContain("Golden v1 was sealed before the base tools existed and cannot take an update; the rebuild is the only road.");
+    expect(asked).toContain("Golden v1 was sealed before the base tools existed and cannot take an update; the rebuild is the only road, under a minute last time.");
     expect(asked).not.toContain("How do you want to apply them?");
     expect(asked).not.toContain("Update the golden");
     expect(asked).not.toContain("Small change");

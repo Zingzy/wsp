@@ -132,7 +132,7 @@ export async function updateRoad(o: UpdateRoadOptions): Promise<0 | 1 | "rebuild
   const head = manifest?.versions.find(v => v.version === manifest.head);
   if (head?.base === undefined) {
     note(describeDiff(diff).join("\n"), `Changes since golden v${version}`, out);
-    log.step(`Golden v${version} was sealed before the base tools existed and cannot take an update; the rebuild is the only road.`, out);
+    log.step(`Golden v${version} was sealed before the base tools existed and cannot take an update; the rebuild is the only road, ${rebuildEstimate(o.lastBuild)}.`, out);
     return "rebuild";
   }
   const kept = keptBuilder(await o.rt.golden.builders(), version);
