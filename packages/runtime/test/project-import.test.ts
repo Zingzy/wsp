@@ -139,6 +139,26 @@ describe("project.import on a workspace", () => {
     const landing = machine.runLog.find(s => s.includes("mv "))!;
     expect(landing).toContain("mkdir -p '/root/work'");
     expect(landing).toMatch(/test ! -e '\/root\/work\/proj' \|\| exit 66\nmv '\/root\/work\/proj\.wsp-in-[^']+' '\/root\/work\/proj'/);
+    // The daemon browses the landed folder beside its home: named in its roots file, written after the move.
+    const browsable = machine.execLog.find(c => c.includes("/root/.wsp/roots"))!;
+    expect(browsable).toBe("mkdir -p '/root/.wsp'\nprintf '%s\\n' '/root/work/proj' > '/root/.wsp/roots.next'\nmv -f '/root/.wsp/roots.next' '/root/.wsp/roots'");
+    expect(machine.execLog.indexOf(browsable)).toBeGreaterThan(machine.execLog.indexOf(landing));
+    expect((await rt.workspaces.get(ws.id))?.project).toMatchObject({ name: "proj", dest: "/root/work/proj" });
+  });
+
+  it("fails the import, with no project on the record, when the machine will not take the roots file", async () => {
+    const backend = stubBackend();
+    const plain = backend.execImpl;
+    backend.execImpl = (m, cmd) => (cmd.includes("/root/.wsp/roots") ? { exitCode: 1, stdout: "", stderr: "mkdir: read-only file system" } : plain(m, cmd));
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    await expect(rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/work/proj", bundler: fakeBundler() })).rejects.toThrow(
+      "could not make /root/work/proj browsable on the machine: mkdir: read-only file system",
+    );
+    expect(imports(events).at(-1)).toMatchObject({ stage: "failed", message: "could not make /root/work/proj browsable on the machine: mkdir: read-only file system" });
+    expect((await rt.workspaces.get(ws.id))?.project).toBeUndefined();
   });
 
   it("a rewrite the person accepted reaches the pack, is said in the consented line and named in the result", async () => {

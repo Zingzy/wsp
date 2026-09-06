@@ -23,6 +23,11 @@ export const view: WorkspaceView = {
   createdAt: "2026-09-01T00:00:00Z",
 };
 
+/** Where an imported project lands on the machine: its path on this computer, outside the daemon's home. */
+export const PROJECT_DEST = "/Users/dev/wsp";
+/** The same workspace after one import. */
+export const imported: WorkspaceView = { ...view, project: { name: "wsp", dest: PROJECT_DEST, importedAt: "2026-09-06T10:00:00Z" } };
+
 /** A canned body, or a function of the params returning one; a returned Error rejects the call with it. */
 export type Reply = Record<string, unknown> | ((params: Record<string, unknown>) => Record<string, unknown> | Error);
 
@@ -70,6 +75,8 @@ export const LEVELS: Record<string, Record<string, unknown>> = {
   "/root/wide": level([file("w0.txt")], { truncated: true, total: 10_001 }),
   "/root/app": level([dir("lib"), file("package.json")]),
   "/root/app/lib": level([file("index.ts")]),
+  [PROJECT_DEST]: level([dir("packages"), file("pnpm-workspace.yaml", 40)]),
+  [`${PROJECT_DEST}/packages`]: level([dir("web")]),
 };
 
 /** The fs.list reply for a folder; a folder outside LEVELS is the daemon's not-found, the locked one its refusal. */
