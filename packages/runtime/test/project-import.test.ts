@@ -5,7 +5,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { tarOf } from "@wsp/engine";
-import type { EventUnion, ProjectImportEvent, ProjectPlan } from "@wsp/protocol";
+import type { EventUnion, ProjectImportEvent, ProjectPlan, ProjectSecret } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { createRuntime, type PackedProject, type ProjectBundler } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
@@ -24,8 +24,11 @@ afterEach(async () => {
 const BINARY = Buffer.concat([Buffer.from("#!/bin/sh\necho run\n"), randomBytes(2048), Buffer.from([0x00, 0xff, 0x0a])]);
 const SOURCE = "/Users/dev/code/proj";
 
+const GIT_CONFIG: ProjectSecret = { path: ".git/config", bytes: 300, signals: ["url"], rewrite: { urls: ["https://github.com/example/proj.git"], drop: [] } };
+const AUTH_CONFIG: ProjectSecret = { path: ".git/config", bytes: 300, signals: ["keys", "url"], rewrite: { urls: ["https://github.com/example/proj.git"], drop: ["http.extraheader"] } };
+
 /** What the host would hand the runtime for a small folder: three secret-shaped files, one binary with an exec bit. */
-function fakeBundler(): ProjectBundler & { calls: string[] } {
+function fakeBundler(extra: ProjectSecret[] = []): ProjectBundler & { calls: string[] } {
   const plan: ProjectPlan = {
     source: SOURCE,
     repo: true,
@@ -33,6 +36,7 @@ function fakeBundler(): ProjectBundler & { calls: string[] } {
     bytes: 4321,
     secrets: [
       { path: ".env", bytes: 20, signals: ["name", "keys"] },
+      ...extra,
       { path: "config/secrets.json", bytes: 25, signals: ["name", "keys"] },
       { path: "keys/id_ed25519", bytes: 80, signals: ["name", "mode", "pem"] },
     ],
@@ -46,16 +50,17 @@ function fakeBundler(): ProjectBundler & { calls: string[] } {
       calls.push("plan");
       return plan;
     },
-    pack: async (carry): Promise<PackedProject> => {
-      calls.push(`pack ${[...carry].join(",")}`);
-      const cut = plan.secrets.map(s => s.path).filter(p => !carry.has(p));
+    pack: async (carry, rewrite): Promise<PackedProject> => {
+      calls.push(`pack ${[...carry].join(",")}${rewrite.size > 0 ? ` rewrite ${[...rewrite].join(",")}` : ""}`);
+      const rewritten = plan.secrets.filter(s => s.rewrite !== undefined && rewrite.has(s.path)).map(s => s.path);
+      const cut = plan.secrets.map(s => s.path).filter(p => !carry.has(p) && !rewritten.includes(p));
       const tar = tarOf([
         { path: "bin", mode: 0o755, dir: true },
         { path: "bin/run.sh", mode: 0o755, content: BINARY },
         { path: "src/index.ts", mode: 0o644, content: "export const a = 1;\n" },
-        ...plan.secrets.filter(s => carry.has(s.path)).map(s => ({ path: s.path, mode: 0o600, content: `${s.path} body\n` })),
+        ...plan.secrets.filter(s => carry.has(s.path) || rewritten.includes(s.path)).map(s => ({ path: s.path, mode: 0o600, content: `${s.path} body\n` })),
       ]);
-      return { tar, files: plan.files - cut.length, bytes: 4000, cut };
+      return { tar, files: plan.files - cut.length, bytes: 4000, cut, rewritten };
     },
   };
 }
@@ -81,7 +86,7 @@ describe("project.import on a workspace", () => {
     const bundler = fakeBundler();
     const result = await rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/work/proj", carry: [".env"], bundler });
     expect(bundler.calls).toEqual(["plan", "pack .env"]);
-    expect(result).toEqual({ dest: "/root/work/proj", files: 4, bytes: 4000, parts: 1, cut: ["config/secrets.json", "keys/id_ed25519"] });
+    expect(result).toEqual({ dest: "/root/work/proj", files: 4, bytes: 4000, parts: 1, cut: ["config/secrets.json", "keys/id_ed25519"], rewritten: [] });
     const stages = imports(events);
     expect(stages.map(e => e.stage)).toEqual(["planned", "consented", "packing", "uploading", "uploading", "landing", "done"]);
     expect(stages[0]!.message).toBe("6 files, 4.2 KB and the repository; 3 secret-shaped files; 2 caches left behind.");
@@ -107,6 +112,26 @@ describe("project.import on a workspace", () => {
     const landing = machine.runLog.find(s => s.includes("mv "))!;
     expect(landing).toContain("mkdir -p '/root/work'");
     expect(landing).toMatch(/test ! -e '\/root\/work\/proj' \|\| exit 66\nmv '\/root\/work\/proj\.wsp-in-[^']+' '\/root\/work\/proj'/);
+  });
+
+  it("a rewrite the person accepted reaches the pack, is said in the consented line and named in the result", async () => {
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const bundler = fakeBundler([GIT_CONFIG]);
+    const result = await rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/proj", carry: [".env"], rewrite: [".git/config"], bundler });
+    expect(bundler.calls).toEqual(["plan", "pack .env rewrite .git/config"]);
+    expect(result).toEqual({ dest: "/root/proj", files: 4, bytes: 4000, parts: 1, cut: ["config/secrets.json", "keys/id_ed25519"], rewritten: [".git/config"] });
+    const stages = imports(events);
+    expect(stages[0]!.message).toBe("6 files, 4.2 KB and the repository; 4 secret-shaped files; 2 caches left behind.");
+    expect(stages[1]!.message).toBe("Carrying .env; rewriting .git/config to https://github.com/example/proj.git; cut config/secrets.json, keys/id_ed25519.");
+    events.length = 0;
+    await rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/other", rewrite: [".git/config"], bundler: fakeBundler([AUTH_CONFIG]) });
+    expect(imports(events)[1]!.message).toBe("Rewriting .git/config to https://github.com/example/proj.git without http.extraheader; cut .env, config/secrets.json, keys/id_ed25519.");
+    events.length = 0;
+    await rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/third", rewrite: [".git/config"], bundler: fakeBundler([{ ...AUTH_CONFIG, rewrite: { urls: [], drop: ["http.extraheader"] } }]) });
+    expect(imports(events)[1]!.message).toBe("Rewriting .git/config without http.extraheader; cut .env, config/secrets.json, keys/id_ed25519.");
   });
 
   it("an existing path is refused with kind exists before any byte goes up, and replaced when asked", async () => {
@@ -153,16 +178,17 @@ describe("project.import on a workspace", () => {
       authToken: "t",
       projects: source => {
         sources.push(source);
-        return fakeBundler();
+        return fakeBundler([GIT_CONFIG]);
       },
     });
     const planned = await wsRequest(srv.port, "t", { op: "project.plan", source: SOURCE });
     expect(planned["ok"]).toBe(true);
-    expect((planned["plan"] as ProjectPlan).secrets.map(s => s.path)).toEqual([".env", "config/secrets.json", "keys/id_ed25519"]);
+    expect((planned["plan"] as ProjectPlan).secrets).toEqual(expect.arrayContaining([GIT_CONFIG]));
+    expect((planned["plan"] as ProjectPlan).secrets.map(s => s.path)).toEqual([".env", ".git/config", "config/secrets.json", "keys/id_ed25519"]);
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
-    const imported = await wsRequest(srv.port, "t", { op: "project.import", workspaceId: ws.id, source: SOURCE, dest: "/root/proj", carry: ["keys/id_ed25519"] });
+    const imported = await wsRequest(srv.port, "t", { op: "project.import", workspaceId: ws.id, source: SOURCE, dest: "/root/proj", carry: ["keys/id_ed25519"], rewrite: [".git/config"] });
     expect(imported["ok"]).toBe(true);
-    expect(imported["imported"]).toEqual({ dest: "/root/proj", files: 4, bytes: 4000, parts: 1, cut: [".env", "config/secrets.json"] });
+    expect(imported["imported"]).toEqual({ dest: "/root/proj", files: 4, bytes: 4000, parts: 1, cut: [".env", "config/secrets.json"], rewritten: [".git/config"] });
     expect(sources).toEqual([SOURCE, SOURCE]);
     await srv.close();
     srv = await serveRuntime(rt, { port: 0, authToken: "t" });

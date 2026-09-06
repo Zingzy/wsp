@@ -386,7 +386,7 @@ describe("golden import stages", () => {
   const ok = { exitCode: 0, stdout: "", stderr: "" };
   const FREE_KB_CMD = "df -Pk /root | awk 'NR==2{print $4}'";
   const mb = (n: number) => String(n * 1024);
-  const SWEEP_NEEDLE = "rm -rf /root/.npm /root/.cache/uv /root/.cache/go-build";
+  const SWEEP_NEEDLE = "rm -rf /root/.npm /root/.cache/uv /root/.cache/go-build /root/.cache/node-gyp";
 
   function importOf(over: Partial<GoldenImport> = {}): GoldenImport {
     return {
@@ -1055,12 +1055,12 @@ describe("golden import stages", () => {
   it("after the agents and again after the tools the install caches are swept under the guard, and the closing line says what came back and what is free", async () => {
     let sweeps = 0;
     const { backend, cmds, fetch } = backendFor(
-      [["rm -rf /root/.npm /root/.cache/uv /root/.cache/go-build", () => ((sweeps += 1), ok)]],
+      [["rm -rf /root/.npm /root/.cache/uv /root/.cache/go-build /root/.cache/node-gyp", () => ((sweeps += 1), ok)]],
       () => mb(3000 + sweeps * 700),
     );
     const { stages, onStage } = stageRecorder();
     await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf() });
-    const sweepCmds = cmds.filter(c => c.includes("rm -rf /root/.npm /root/.cache/uv /root/.cache/go-build"));
+    const sweepCmds = cmds.filter(c => c.includes("rm -rf /root/.npm /root/.cache/uv /root/.cache/go-build /root/.cache/node-gyp"));
     // Once after the base floor, once after the agents, once after the tools.
     expect(sweepCmds).toHaveLength(3);
     for (const sweep of sweepCmds) {
@@ -1070,7 +1070,7 @@ describe("golden import stages", () => {
       expect(sweep).toMatch(/while \[ \$t -lt 300 \]/);
     }
     const at = (needle: string) => cmds.findIndex(c => c.includes(needle));
-    const sweepsAt = cmds.flatMap((c, i) => (c.includes("rm -rf /root/.npm /root/.cache/uv /root/.cache/go-build") ? [i] : []));
+    const sweepsAt = cmds.flatMap((c, i) => (c.includes("rm -rf /root/.npm /root/.cache/uv /root/.cache/go-build /root/.cache/node-gyp") ? [i] : []));
     // The base's caches go before the daemon; the agents' before the tools stage reads the disk against its floor; the tools' after Homebrew's own housekeeping.
     expect(sweepsAt[0]).toBeLessThan(at("the-setup") < 0 ? at("claude-install") : at("the-setup"));
     expect(at("codex-install")).toBeLessThan(sweepsAt[1]!);
@@ -1082,7 +1082,7 @@ describe("golden import stages", () => {
     expect(stages).toContain("installing-harness:Claude Code, Codex installed; caches swept, 700 MB back; 4400 MB free");
     expect(stages).toContain("installing-tools:3 installed; caches swept, 700 MB back; 5100 MB free");
     // A sweep that fails is named, and the build goes on to the next stage.
-    const failing = backendFor([["rm -rf /root/.npm /root/.cache/uv /root/.cache/go-build", { exitCode: 1, stdout: "", stderr: "rm: cannot remove '/root/.npm': Device or resource busy" }]]);
+    const failing = backendFor([["rm -rf /root/.npm /root/.cache/uv /root/.cache/go-build /root/.cache/node-gyp", { exitCode: 1, stdout: "", stderr: "rm: cannot remove '/root/.npm': Device or resource busy" }]]);
     const rec = stageRecorder();
     const builder = await prepareBuilder({ backend: failing.backend, setup: "true", fetch: failing.fetch, onStage: rec.onStage, import: importOf() });
     expect(rec.stages).toContain("installing-harness:Claude Code, Codex installed; cache sweep failed (rm: cannot remove '/root/.npm': Device or resource busy); 3000 MB free");

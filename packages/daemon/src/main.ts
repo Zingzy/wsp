@@ -4,7 +4,7 @@ import type { IncomingMessage } from "node:http";
 import { connect as connectTcp, type Socket } from "node:net";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import { DaemonAuthRequest, type DaemonEvent } from "@wsp/protocol";
+import { DAEMON_VERSION, DaemonAuthRequest, type DaemonEvent } from "@wsp/protocol";
 import { WebSocketServer, type WebSocket } from "ws";
 import { listDir, readFileBounded, type FsReadEncoding } from "./fs-ops.js";
 import { gitDiff, gitStatus, type GitDiffScope } from "./git-ops.js";
@@ -268,7 +268,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
   const serve = (ws: WebSocket, port: number | undefined): void => {
     // A port-scoped socket is there to tunnel one port; the guest's pages and callback ports are not its business.
     if (port === undefined) authed.add(ws);
-    push(ws, { type: "daemon.hello", root });
+    push(ws, { type: "daemon.hello", root, version: DAEMON_VERSION });
     const state: ConnState = { detaches: [], tunnels: new Map(), ...(port !== undefined ? { port } : {}) };
     ws.on("close", () => {
       // Client is gone; ptys keep running. Only this socket's subscriptions and tunnels die.

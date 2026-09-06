@@ -152,11 +152,19 @@ export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
 export const SessionStatus = z.enum(["running", "completed", "interrupted", "failed"]);
 export type SessionStatus = z.infer<typeof SessionStatus>;
 
+/** Who asked the runtime for the turn: a person in the app, or the command line on this computer (a local agent
+ * directing the machine). Both are clients of one host; the sidebar shows which one opened a thread. */
+export const SessionOrigin = z.enum(["person", "cli"]);
+export type SessionOrigin = z.infer<typeof SessionOrigin>;
+
 export const SessionView = z.object({
   id: z.string(),
   workspaceId: z.string(),
   harness: z.string(),
   status: SessionStatus,
+  /** Who opened the thread this row belongs to: a resumed turn takes over the row of the turn it resumes and keeps
+   * its answer. Absent on rows written before provenance was recorded; foldThreads reads those as a person's. */
+  startedBy: SessionOrigin.optional(),
   claudeSessionId: z.string().optional(),
   /** The thread this turn belongs to, as the runtime stamps its events; rows sharing one are one sidebar thread. */
   threadId: z.string().optional(),
@@ -176,6 +184,54 @@ export const SessionView = z.object({
   contextWindow: z.string().optional(),
 });
 export type SessionView = z.infer<typeof SessionView>;
+
+/** One sidebar thread as every client lists it: the turns sharing a threadId (a row stamped none is its own),
+ * titled by the opening turn, in the state and times of the latest, with the opening turn's provenance, always
+ * filled in. id is the fold key, the runtime's thread id or the lone row's id; claudeSessionId is the latest
+ * turn's, what a send resumes. */
+export const ThreadView = z.object({
+  id: z.string(),
+  threadId: z.string().optional(),
+  workspaceId: z.string(),
+  harness: z.string(),
+  startedBy: SessionOrigin,
+  status: SessionStatus,
+  title: z.string(),
+  claudeSessionId: z.string().optional(),
+  startedAt: z.number().optional(),
+  endedAt: z.number().optional(),
+  turns: z.number().int().positive(),
+});
+export type ThreadView = z.infer<typeof ThreadView>;
+
+/** Folds the session index into threads, in the order each thread's first turn appears. The one place a row from
+ * before provenance was recorded is read as a person's; clients print the answer and never decide it. */
+export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] {
+  const byThread = new Map<string, SessionView[]>();
+  for (const session of sessions) {
+    const key = session.threadId ?? session.id;
+    const turns = byThread.get(key);
+    if (turns === undefined) byThread.set(key, [session]);
+    else turns.push(session);
+  }
+  return [...byThread].map(([id, turns]) => {
+    const first = turns[0]!;
+    const latest = turns[turns.length - 1]!;
+    return {
+      id,
+      ...(first.threadId !== undefined ? { threadId: first.threadId } : {}),
+      workspaceId: first.workspaceId,
+      harness: first.harness,
+      startedBy: first.startedBy ?? "person",
+      status: latest.status,
+      title: first.prompt ?? first.claudeSessionId ?? first.id,
+      ...(latest.claudeSessionId !== undefined ? { claudeSessionId: latest.claudeSessionId } : {}),
+      ...(latest.startedAt !== undefined ? { startedAt: latest.startedAt } : {}),
+      ...(latest.endedAt !== undefined ? { endedAt: latest.endedAt } : {}),
+      turns: turns.length,
+    };
+  });
+}
 
 // --- harness catalog (what the composer's pickers may offer) -------------------
 
@@ -378,11 +434,18 @@ export const InboxFileEvent = z.object({
 // --- project bundle: a folder on this computer landed on a workspace -----------
 
 /** How the collector's credential pass decided a file is secret-shaped: by name, by owner-only mode, by the key
- * names in it, by a PEM header, by a gitleaks hit, by the catalog, by secret-shaped exports, or by git history. */
-export const CredentialSignal = z.enum(["name", "mode", "keys", "pem", "gitleaks", "catalog", "exports", "history"]);
+ * names in it, by a PEM header, by a URL with a password in it, by a gitleaks hit, by the catalog, by secret-shaped
+ * exports, or by git history. */
+export const CredentialSignal = z.enum(["name", "mode", "keys", "pem", "url", "gitleaks", "catalog", "exports", "history"]);
 export type CredentialSignal = z.infer<typeof CredentialSignal>;
-/** A secret-shaped file in the folder, by path relative to it; it travels only when the import names it. */
-export const ProjectSecret = z.object({ path: z.string(), bytes: z.number(), signals: z.array(CredentialSignal) });
+/** How a repository config lands when its rewrite is accepted: `urls` as they then read, their userinfo removed,
+ * and `drop` the config keys (http.extraheader carrying an Authorization header) whose lines are left out. */
+export const ProjectRewrite = z.object({ urls: z.array(z.string()), drop: z.array(z.string()) });
+export type ProjectRewrite = z.infer<typeof ProjectRewrite>;
+/** A secret-shaped file in the folder, by path relative to it; it travels only when the import names it in carry,
+ * or in rewrite when `rewrite` is offered: then it lands rewritten as described, and the machine's own login (gh's)
+ * is the credential there. Offered only when the rewrite removes every secret shape the file has. */
+export const ProjectSecret = z.object({ path: z.string(), bytes: z.number(), signals: z.array(CredentialSignal), rewrite: ProjectRewrite.optional() });
 export type ProjectSecret = z.infer<typeof ProjectSecret>;
 /** What a project import would carry, for the person to read before anything is packed: the files and their bytes,
  * the secret-shaped ones, the caches left behind (relative paths) and the paths named but not carried, with why. */
@@ -416,9 +479,9 @@ export const ProjectImportEvent = z.object({
   total: z.number().optional(),
 });
 export type ProjectImportEvent = z.infer<typeof ProjectImportEvent>;
-/** What landed: the path on the machine, the files and bytes extracted there, the upload parts, and the
- * secret-shaped paths that were cut because the import did not name them. */
-export const ProjectImportResult = z.object({ dest: z.string(), files: z.number(), bytes: z.number(), parts: z.number(), cut: z.array(z.string()) });
+/** What landed: the path on the machine, the files and bytes extracted there, the upload parts, the secret-shaped
+ * paths that were cut because the import did not name them, and the ones that landed rewritten as the plan offered. */
+export const ProjectImportResult = z.object({ dest: z.string(), files: z.number(), bytes: z.number(), parts: z.number(), cut: z.array(z.string()), rewritten: z.array(z.string()) });
 export type ProjectImportResult = z.infer<typeof ProjectImportResult>;
 
 // --- desktop shell bridge (preload to page) -----------------------------------
@@ -892,11 +955,23 @@ export const ProcSnapshot = z.object({
 });
 export type ProcSnapshot = z.infer<typeof ProcSnapshot>;
 
+/** The daemon's protocol version, carried in its hello and bumped whenever an op is added, so a client can tell
+ * which ops a machine's daemon answers before asking. A hello without one is version 1: every daemon deployed
+ * before the field existed, which has the pty, ports, manifest, inbox, fs, git and tunnel ops and no sys or
+ * proc ops. */
+export const DAEMON_VERSION = 2;
+
+/** The version a hello announces, 1 when it carries none. */
+export function daemonVersionOf(hello: { version?: number }): number {
+  return hello.version ?? 1;
+}
+
 export const DaemonEvent = z.discriminatedUnion("type", [
   /** The first frame after the auth reply: root is the
    * absolute directory every fs.* and git.* path must resolve inside, so a
-   * client can build absolute paths for pickers, pins and session starts. */
-  z.object({ type: z.literal("daemon.hello"), root: z.string() }),
+   * client can build absolute paths for pickers, pins and session starts.
+   * version is DAEMON_VERSION as the daemon was built; absent on version 1. */
+  z.object({ type: z.literal("daemon.hello"), root: z.string(), version: z.number().int().optional() }),
   z.object({ type: z.literal("pty.data"), ptyId: z.string(), data: z.string() }),
   z.object({
     type: z.literal("pty.exit"),
@@ -1008,6 +1083,8 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     effort: z.string().optional(),
     permissionMode: z.string().optional(),
     contextWindow: z.string().optional(),
+    /** Absent reads as person: the app never sends it, the command line sends cli. */
+    startedBy: SessionOrigin.optional(),
   }),
   /** Replies with { harnesses: HarnessCatalog[] }, one per harness the runtime knows. With a workspace, the lists come
    * from the binaries on its machine where they answer; without one, from the runtime's table. */
@@ -1063,15 +1140,27 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
    * reports. Replies with the WorkspaceView on its new machine; id and name
    * are kept. The way out of a zombie reach state. */
   z.object({ id: reqId, op: z.literal("workspaces.rebuild"), workspaceId: z.string() }),
+  /** Deploys the host's daemon bundle onto the workspace's running machine over the deploy path a golden build
+   * uses, stopping the daemon that was there: its terminals end, sessions and everything else on the machine
+   * keep running. The browser's link redials on its own and the new hello carries the new version. Replies {id, ok}. */
+  z.object({ id: reqId, op: z.literal("workspaces.updateDaemon"), workspaceId: z.string() }),
   /** Replies with { forwards: PortForward[] }, the host's open forwards; empty when no host holds any. */
   z.object({ id: reqId, op: z.literal("forwards.list") }),
   /** Closes one forward; refused when none is open on that workspace and port. */
   z.object({ id: reqId, op: z.literal("forwards.stop"), workspaceId: z.string(), port: RelayPort }),
+  /** Runs one command on the workspace's machine the way a harness turn is launched: detached, as the same user,
+   * with the environment the harness adapter exports for a turn. argv is the command word by word; the runtime
+   * quotes each for the machine's shell, so a word stays one word. Replies { execId } once launched, then pushes
+   * ExecEvent frames to this socket only: exec.output per line, exec.exit last. The socket closing ends the
+   * command, and so does the machine going away under it (deleted, paused, or unanswering: exec.exit then carries
+   * the reason as its error); nothing else does, there is no deadline. */
+  z.object({ id: reqId, op: z.literal("workspaces.exec"), workspaceId: z.string(), argv: z.array(z.string()).min(1) }),
   /** Replies with { plan: ProjectPlan } for a folder on this computer; nothing is read into memory or uploaded. */
   z.object({ id: reqId, op: z.literal("project.plan"), source: z.string() }),
   /** Packs the folder and lands it at `dest` on the workspace's machine; progress rides project.import events and the
-   * reply is { imported: ProjectImportResult }. `carry` names the secret-shaped paths from the plan that may travel;
-   * every other secret-shaped file is cut and named. An existing `dest` is refused (kind "exists") unless `replace`. */
+   * reply is { imported: ProjectImportResult }. `carry` names the secret-shaped paths from the plan that may travel as
+   * they are; `rewrite` names the ones the plan offered a rewrite for, which land rewritten as offered and win over
+   * carry; every other secret-shaped file is cut and named. An existing `dest` is refused (kind "exists") unless `replace`. */
   z.object({
     id: reqId,
     op: z.literal("project.import"),
@@ -1080,9 +1169,18 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     dest: z.string(),
     replace: z.boolean().optional(),
     carry: z.array(z.string()).optional(),
+    rewrite: z.array(z.string()).optional(),
   }),
 ]);
 export type RuntimeRequest = z.infer<typeof RuntimeRequest>;
+
+/** What a workspaces.exec pushes to the socket that asked. exitCode is null when the command was ended without
+ * one (the socket closed or the launch failed); error says which. */
+export const ExecEvent = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("exec.output"), execId: z.string(), text: z.string() }),
+  z.object({ type: z.literal("exec.exit"), execId: z.string(), exitCode: z.number().int().nullable(), error: z.string().optional() }),
+]);
+export type ExecEvent = z.infer<typeof ExecEvent>;
 
 export const RuntimeOkResponse = z.object({ id: reqId.nullable(), ok: z.literal(true) }).passthrough();
 /** `kind` carries a typed failure when the runtime has one (engine WspError

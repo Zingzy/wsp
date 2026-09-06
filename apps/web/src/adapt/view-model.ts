@@ -5,7 +5,7 @@
 // useDiscoveredLocalServers.ts and contracts (commit 57a66608). Fields the
 // wsp wire cannot fill today are kept when a copied component reads them and
 // dropped when nothing does. Everything here is data: no React, no schemas.
-import type { MachineState, ReachState, SessionStatus, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import type { MachineState, ReachState, SessionOrigin, SessionStatus, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 
 // --- chat -------------------------------------------------------------------
 
@@ -219,6 +219,10 @@ export interface SidebarThreadSnapshot {
   readonly startedAt: string | null;
   readonly endedAt: string | null;
   readonly indicator: StatusIndicator | null;
+  /** The agent running inside the thread, by its harness id. */
+  readonly harness: string;
+  /** Who opened the thread, as the protocol's fold answers it. */
+  readonly startedBy: SessionOrigin;
 }
 
 /** One wsp workspace (a machine) as a sidebar project; its sessions are the threads. */

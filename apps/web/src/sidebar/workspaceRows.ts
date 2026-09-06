@@ -2,7 +2,7 @@
 // Row labels and dialog helpers for the workspace sidebar, all pure. The
 // adapter names the state; this file turns it into the words and classes a
 // row shows.
-import type { ReachState, WorkspacePhase, WorkspaceStatus } from "@wsp/protocol";
+import type { ReachState, SessionOrigin, WorkspacePhase, WorkspaceStatus } from "@wsp/protocol";
 import type { SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
 import { formatRelativeTimeLabel } from "../lib/timestampFormat.js";
 import { formatWorkingDurationLabel, type ThreadStatusPill } from "./Sidebar.logic.js";
@@ -33,6 +33,13 @@ export function costLabel(input: {
 }
 
 const PLAIN = { colorClass: "text-muted-foreground/70", dotClass: "bg-muted-foreground/60" };
+
+const OPENER_WORD: Record<SessionOrigin, string> = { person: "you", cli: "cli" };
+
+/** The agent inside the thread and who opened it: you, or the command line on this computer. */
+export function provenanceLabel(thread: Pick<SidebarThreadSnapshot, "harness" | "startedBy">): string {
+  return `${thread.harness} · ${OPENER_WORD[thread.startedBy]}`;
+}
 
 /** The pill keys on the session's status and wears the adapter's word: a running thread and one that did not settle carry one, the resting states none. */
 export function threadPill(thread: Pick<SidebarThreadSnapshot, "status" | "indicator">): ThreadStatusPill | null {

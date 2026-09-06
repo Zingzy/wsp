@@ -6,11 +6,12 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { fakeProcTree } from "../../../packages/daemon/test/fake-proc.js";
-import type { WorkspaceView } from "@wsp/protocol";
+import { startOldDaemon, type OldDaemon } from "../../../packages/daemon/test/old-daemon.js";
+import { DAEMON_VERSION, type WorkspaceView } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
-import { getDaemonRoot } from "../src/files/wire.js";
+import { getDaemonRoot, getDaemonVersion } from "../src/files/wire.js";
 import { getLive, resetLive } from "../src/machine/live.js";
 import { getProcs, resetProcs } from "../src/machine/procs.js";
 import { getTerminals } from "../src/terminal/link.js";
@@ -76,6 +77,7 @@ function fakeApi(workspaces: WorkspaceView[], daemonPort: () => number) {
 }
 
 let daemon: DaemonHandle | undefined;
+let oldDaemon: OldDaemon | undefined;
 let inboxDir: string | undefined;
 let procRoot: string | undefined;
 let unwire: (() => void) | undefined;
@@ -102,6 +104,8 @@ afterEach(async () => {
   unwire = undefined;
   await daemon?.close();
   daemon = undefined;
+  await oldDaemon?.close();
+  oldDaemon = undefined;
   if (inboxDir) rmSync(inboxDir, { recursive: true, force: true });
   inboxDir = undefined;
   if (procRoot) rmSync(procRoot, { recursive: true, force: true });
@@ -120,9 +124,9 @@ describe("wireTerminals", () => {
     await until(() => getLive("ws_run").snapshot().samples.length > 0);
     expect(getLive("ws_run").snapshot().reach).toBe("live");
     expect(getLive("ws_run").snapshot().samples[0]).toMatchObject({ type: "sys.sample", load1: 0.1, mem: { used: 1, total: 2 }, disk: { used: 3, total: 4 } });
-    expect(getLive("ws_nap").snapshot()).toEqual({ samples: [], reach: "unreachable" });
+    expect(getLive("ws_nap").snapshot()).toEqual({ samples: [], reach: "unreachable", unavailable: null });
     // Processes stream only while a pane holds a watch; the hold outlives the socket and asks again when it is back.
-    expect(getProcs("ws_run").snapshot()).toEqual({ snapshot: null, reach: "live" });
+    expect(getProcs("ws_run").snapshot()).toEqual({ snapshot: null, reach: "live", unavailable: null });
     const release = getProcs("ws_run").watch();
     await until(() => getProcs("ws_run").snapshot().snapshot !== null);
     expect(getProcs("ws_run").snapshot().snapshot!.procs.map(p => p.pid)).toEqual([1, 2]);
@@ -177,6 +181,36 @@ describe("wireTerminals", () => {
     await until(() => getTerminals("ws_a")?.status() === "live");
     emit({ type: "workspace.created", workspace: view("ws_b") });
     await until(() => getTerminals("ws_b")?.status() === "live");
+  }, 15_000);
+
+  it("a daemon from before the version says so in its hello, its refusals read unavailable instead of pending, and a redeployed daemon fills the rows", async () => {
+    oldDaemon = await startOldDaemon(TOKEN);
+    let port = oldDaemon.port;
+    const { api } = fakeApi([view("ws_a")], () => port);
+    unwire = wireTerminals(useStore, { backoffMs: () => 30 });
+    useStore.getState().bind(api);
+    await until(() => getTerminals("ws_a")?.status() === "live");
+    expect(getDaemonRoot("ws_a")).toBe("/root");
+    // A hello without a version is the first one; the app knows what it lacks from that alone.
+    expect(getDaemonVersion("ws_a")).toBe(1);
+    // The daemon answered sys.watch with an error and the app kept it: the rows read unavailable, never pending.
+    await until(() => getLive("ws_a").snapshot().unavailable !== null);
+    expect(getLive("ws_a").snapshot()).toEqual({ samples: [], reach: "live", unavailable: "unknown op: sys.watch" });
+    const release = getProcs("ws_a").watch();
+    await until(() => getProcs("ws_a").snapshot().unavailable !== null);
+    expect(getProcs("ws_a").snapshot()).toEqual({ snapshot: null, reach: "live", unavailable: "unknown op: proc.watch" });
+    expect(oldDaemon.ops.filter(op => op === "sys.watch" || op === "proc.watch")).toEqual(["sys.watch", "proc.watch"]);
+
+    // The update: the old daemon goes down and the current one answers the next dial on the same reach.
+    port = daemon!.port;
+    await oldDaemon.close();
+    oldDaemon = undefined;
+    await until(() => getDaemonVersion("ws_a") === DAEMON_VERSION);
+    await until(() => getLive("ws_a").snapshot().samples.length > 0);
+    expect(getLive("ws_a").snapshot().unavailable).toBeNull();
+    await until(() => getProcs("ws_a").snapshot().snapshot !== null);
+    expect(getProcs("ws_a").snapshot().unavailable).toBeNull();
+    release();
   }, 15_000);
 
   it("unwiring closes every link and empties the registry", async () => {

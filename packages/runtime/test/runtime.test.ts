@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
-import { catalogProbeCommand, type AdapterEvent, type TurnResult } from "@wsp/adapter-claude";
+import { catalogProbeCommand, parseCatalogProbe, type AdapterEvent, type TurnResult } from "@wsp/adapter-claude";
 import { SessionEvent, type EventUnion, type RecipeDigest } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
@@ -85,7 +85,7 @@ describe("runtime", () => {
           for (const e of feed) onEvent(e);
           return result;
         })();
-        return { localId: sessionId, claudeSessionId: sessionId, finished, interrupt: async () => {} };
+        return { localId: sessionId, finished, interrupt: async () => {} };
       },
     });
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: scripted } });
@@ -140,7 +140,7 @@ describe("runtime session history", () => {
         for (const e of feed) onEvent(e);
         return result;
       })();
-      return { localId: sessionId, claudeSessionId: sessionId, finished, interrupt: async () => {} };
+      return { localId: sessionId, finished, interrupt: async () => {} };
     },
   });
 
@@ -173,11 +173,11 @@ describe("runtime session history", () => {
     let finish!: (r: TurnResult) => void;
     const finished = new Promise<TurnResult>(r => (finish = r));
     const adapter: HarnessAdapterFactory = () => ({
-      catalogProbe: catalogProbeCommand({ configDir: "/root/.claude-cfg" }),
+      probeCatalog: exec => exec(catalogProbeCommand({ configDir: "/root/.claude-cfg" })).then(parseCatalogProbe),
       start: o => {
         onEvent = o.onEvent;
         lastStart = o;
-        return { localId: sessionId, claudeSessionId: sessionId, finished, interrupt: async () => {} };
+        return { localId: sessionId, finished, interrupt: async () => {} };
       },
     });
     return {
@@ -207,7 +207,7 @@ describe("runtime session history", () => {
           o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
           return result;
         });
-        return { localId: sessionId, claudeSessionId: sessionId, finished, interrupt: async () => {} };
+        return { localId: sessionId, finished, interrupt: async () => {} };
       },
     });
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: scripted } });
@@ -246,7 +246,7 @@ describe("runtime session history", () => {
         o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
         return result;
       });
-      return { localId, claudeSessionId: sessionId, finished, interrupt: async () => {} };
+      return { localId, finished, interrupt: async () => {} };
     },
   });
   /** Counts runs of one threadId in wire order. Enough here, where turns never overlap; a consumer folding a
@@ -295,6 +295,17 @@ describe("runtime session history", () => {
     expect(new Set(history.slice(0, 12).map(e => e.threadId)).size).toBe(1);
     expect(history[12]!.threadId).toMatch(UUID);
     expect(threads(history)).toBe(2);
+    await rt.close();
+  });
+
+  it("a row says who opened its thread: a resumed turn keeps the answer of the turn it resumes, a fresh start gives its own", async () => {
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: threaded() } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await (await rt.sessions.start(ws.id, { prompt: "first", startedBy: "cli" })).finished;
+    const resume = (await rt.workspaces.get(ws.id)).claudeSessionId!;
+    await (await rt.sessions.start(ws.id, { prompt: "second", resume })).finished;
+    await (await rt.sessions.start(ws.id, { prompt: "third" })).finished;
+    expect((await rt.sessions.list(ws.id)).map(s => [s.prompt, s.startedBy])).toEqual([["second", "cli"], ["third", "person"]]);
     await rt.close();
   });
 
@@ -495,6 +506,65 @@ describe("runtime session history", () => {
       const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
       const claude = (await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")!;
       expect(claude).toMatchObject({ source: "table", version: TABLE_PIN });
+      expect(probes(backend)).toHaveLength(0);
+      await rt.close();
+    });
+
+    /** A second harness whose binary answers with a version line; its adapter opts into the probe, whatever its id. */
+    const codexProbing: HarnessAdapterFactory = ctx => ({
+      ...threaded()(ctx),
+      probeCatalog: exec =>
+        exec("codex --describe").then(out => ({
+          version: out.trim(),
+          models: [{ slug: "gpt-5-codex", label: "Codex", efforts: ["high"], contextWindows: [], isDefault: true }],
+          efforts: ["low", "high"],
+          permissionModes: ["read-only"],
+        })),
+    });
+    const codexProbes = (backend: StubBackend) => backend.machines.flatMap(m => m.execLog.filter(cmd => cmd === "codex --describe"));
+    const twoBinaries = (backend: StubBackend) => {
+      backend.execImpl = (_m, cmd) => ({ exitCode: 0, stdout: cmd.includes("claude --help") ? PROBE_OUTPUT : cmd === "codex --describe" ? "0.9.0\n" : "", stderr: "" });
+    };
+
+    it("each adapter decides whether its binary is asked, whatever its harness id, and each harness keeps its own answer", async () => {
+      const backend = stubBackend();
+      twoBinaries(backend);
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: manual().adapter, codex: codexProbing } });
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const catalogs = await rt.harnesses.list(ws.id);
+      expect(catalogs.find(c => c.harness === "claude")).toMatchObject({ source: "harness", version: "2.1.257" });
+      const codex = catalogs.find(c => c.harness === "codex")!;
+      expect(codex).toMatchObject({ source: "harness", version: "0.9.0", label: "Codex" });
+      expect(codex.models).toEqual([{ value: "gpt-5-codex", label: "Codex", isDefault: true, efforts: ["high"], contextWindows: [] }]);
+      // The table lends the words for values the binary only names.
+      expect(codex.permissionModes).toEqual([{ value: "read-only", label: "Read only", description: "No edits, no commands that write" }]);
+      expect(probes(backend)).toHaveLength(1);
+      expect(codexProbes(backend)).toHaveLength(1);
+      await rt.close();
+
+      const quiet = stubBackend();
+      twoBinaries(quiet);
+      const rt2 = createRuntime({ backend: quiet, store: memoryStore(), adapters: { claude: threaded(), codex: codexProbing } });
+      const ws2 = await rt2.workspaces.create({ golden: "snap_g", name: "b" });
+      const later = await rt2.harnesses.list(ws2.id);
+      expect(later.find(c => c.harness === "claude")).toMatchObject({ source: "table", version: TABLE_PIN });
+      expect(later.find(c => c.harness === "codex")).toMatchObject({ source: "harness", version: "0.9.0" });
+      expect(probes(quiet)).toHaveLength(0);
+      expect(codexProbes(quiet)).toHaveLength(1);
+      await rt2.close();
+    });
+
+    it("a session start asks the binary of the harness that starts, when its adapter probes, and no other", async () => {
+      const backend = stubBackend();
+      twoBinaries(backend);
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: threaded(), codex: codexProbing } });
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      await (await rt.sessions.start(ws.id, { prompt: "go", harness: "codex" })).finished;
+      await new Promise(r => setImmediate(r));
+      expect(codexProbes(backend)).toHaveLength(1);
+      expect(probes(backend)).toHaveLength(0);
+      await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
+      await new Promise(r => setImmediate(r));
       expect(probes(backend)).toHaveLength(0);
       await rt.close();
     });
@@ -741,7 +811,7 @@ describe("runtime session index", () => {
           o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
           return result;
         });
-        return { localId: sessionId, claudeSessionId: sessionId, finished, interrupt: async () => {} };
+        return { localId: sessionId, finished, interrupt: async () => {} };
       },
     });
     return { adapter, starts };
@@ -751,7 +821,7 @@ describe("runtime session index", () => {
   const hung: HarnessAdapterFactory = () => ({
     start: o => {
       o.onEvent({ type: "session.start", sessionId: HUNG_ID, model: "claude-sonnet-4-5", cwd: "/root/work" });
-      return { localId: HUNG_ID, claudeSessionId: HUNG_ID, finished: new Promise<TurnResult>(() => {}), interrupt: async () => {} };
+      return { localId: HUNG_ID, finished: new Promise<TurnResult>(() => {}), interrupt: async () => {} };
     },
   });
 
@@ -785,6 +855,54 @@ describe("runtime session index", () => {
     const rt3 = createRuntime({ backend, store, adapters: {} });
     expect((await rt3.sessions.history(ws.id)).filter(e => e.type === "session.end")).toHaveLength(2);
     await rt3.close();
+  });
+
+  /** A harness that dies before init: only a done and an end, under the resume id or a fresh local one. */
+  const dying: HarnessAdapterFactory = () => ({
+    start: o => {
+      const localId = o.resume ?? randomUUID();
+      const result: TurnResult = { status: "failed", error: "claude exited before init (exit code 1)" };
+      const finished = Promise.resolve().then(() => {
+        o.onEvent({ type: "turn.done", sessionId: localId, result });
+        o.onEvent({ type: "session.end", sessionId: localId, exitCode: 1, sawResult: true });
+        return result;
+      });
+      // The real adapter hands back its local id as claudeSessionId until init re-keys it; the row must not take it.
+      return { localId, claudeSessionId: localId, finished, interrupt: async () => {} };
+    },
+  });
+
+  it("a harness that dies before init leaves its row and the workspace without a session id: no harness announced one", async () => {
+    const store = memoryStore();
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: dying } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "first" });
+    await handle.finished;
+    const [row] = await rt.sessions.list(ws.id);
+    expect(row).toMatchObject({ id: handle.id, status: "failed", prompt: "first", threadId: expect.any(String) });
+    expect(row!.claudeSessionId).toBeUndefined();
+    expect((await rt.workspaces.get(ws.id)).claudeSessionId).toBeUndefined();
+    // the dead turn's events still carry the adapter's local id, so the row is found by its id, not by a session
+    expect((await rt.sessions.history(ws.id)).map(e => e.sessionId)).toEqual([handle.id, handle.id]);
+    await rt.close();
+    const stored = (await store.get("sessions", ws.id)) as { sessions: { claudeSessionId?: string }[] };
+    expect(stored.sessions).toHaveLength(1);
+    expect(stored.sessions[0]!.claudeSessionId).toBeUndefined();
+  });
+
+  it("a resumed turn that dies before init keeps the resume id on its row: the harness answered that id in an earlier turn", async () => {
+    const store = memoryStore();
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: turns().adapter, dying } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await (await rt.sessions.start(ws.id, { prompt: "first" })).finished;
+    const [first] = await rt.sessions.list(ws.id);
+    const resume = first!.claudeSessionId!;
+    await (await rt.sessions.start(ws.id, { prompt: "again", resume, harness: "dying" })).finished;
+    const rows = await rt.sessions.list(ws.id);
+    expect(rows.map(r => [r.prompt, r.status, r.threadId, r.claudeSessionId])).toEqual([["again", "failed", first!.threadId, resume]]);
+    await rt.close();
+    const stored = (await store.get("sessions", ws.id)) as { sessions: { claudeSessionId?: string }[] };
+    expect(stored.sessions.map(r => r.claudeSessionId)).toEqual([resume]);
   });
 
   it("a resume after a restart joins the persisted thread and hands the harness the session id and folder", async () => {
@@ -838,7 +956,7 @@ describe("runtime session index", () => {
     const pending: HarnessAdapterFactory = () => ({
       start: o => {
         o.onEvent({ type: "session.start", sessionId: HUNG_ID, model: "claude-sonnet-4-5", cwd: "/root/work" });
-        return { localId: HUNG_ID, claudeSessionId: HUNG_ID, finished: new Promise<TurnResult>(r => (settle = r)), interrupt: async () => {} };
+        return { localId: HUNG_ID, finished: new Promise<TurnResult>(r => (settle = r)), interrupt: async () => {} };
       },
     });
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: pending } });
@@ -942,6 +1060,47 @@ describe("runtime daemon reach", () => {
     const reach = await rt.workspaces.daemonReach(ws.id);
     expect(reach.daemonToken).toBeUndefined();
     expect("daemonToken" in reach).toBe(false);
+  });
+
+  it("updateDaemon runs the recipe's deploy on the running machine, then writes this runtime's token again so the next reach opens the new daemon", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const deployed: string[] = [];
+    const recipe = {
+      setup: "true",
+      smoke: "true",
+      deployDaemon: async (machine: { id: string; exec(cmd: string): Promise<unknown> }) => {
+        deployed.push(machine.id);
+        await machine.exec("DEPLOY_DAEMON");
+        return "daemon on node v22";
+      },
+    };
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN, goldenRecipe: recipe });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const m = backend.machines[0]!;
+    m.previewUrl = async port => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, token: "e", expiresAt: Date.now() + 3_600_000 });
+    expect((await rt.workspaces.daemonReach(ws.id)).daemonToken).toBe(TOKEN);
+    const before = m.execLog.length;
+
+    await rt.workspaces.updateDaemon(ws.id);
+    expect(deployed).toEqual(["m1"]);
+    // The deploy started the daemon on its own token; the rotation after it is what makes the runtime's token open it.
+    const after = m.execLog.slice(before);
+    expect(after).toEqual(["DEPLOY_DAEMON", rotateDaemonTokenScript(TOKEN)]);
+    expect((await rt.workspaces.daemonReach(ws.id)).daemonToken).toBe(TOKEN);
+    expect(m.execLog.length).toBe(before + 2);
+
+    await rt.workspaces.nap(ws.id);
+    await expect(rt.workspaces.updateDaemon(ws.id)).rejects.toThrow("wake a before updating its daemon");
+    expect(deployed).toEqual(["m1"]);
+  });
+
+  it("updateDaemon refuses on a runtime whose recipe carries no deploy", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await expect(rt.workspaces.updateDaemon(ws.id)).rejects.toThrow("cannot deploy a daemon");
+    await expect(rt.workspaces.updateDaemon("ws_nobody")).rejects.toThrow("no such workspace");
   });
 
   it("writes the token again after a resurrect replaces the machine", async () => {

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A fake daemon wire for the files and diff surfaces: canned replies per op,
 // every call recorded, with the store holding one running workspace.
-import type { WorkspaceView } from "@wsp/protocol";
+import { DAEMON_VERSION, type WorkspaceView } from "@wsp/protocol";
 import { resetListings } from "../src/files/listing.js";
 import { useRootStore } from "../src/files/root.js";
-import { provideDaemonRoot, provideDaemonWire } from "../src/files/wire.js";
+import { provideDaemonHello, provideDaemonWire, type DaemonHello } from "../src/files/wire.js";
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import type { TerminalWire } from "../src/terminal/link.js";
@@ -12,6 +12,7 @@ import type { TerminalWire } from "../src/terminal/link.js";
 export const WS = "ws_a";
 /** What the fake daemon's hello names as its root. */
 export const DAEMON_ROOT = "/root";
+export const DAEMON_HELLO: DaemonHello = { root: DAEMON_ROOT, version: DAEMON_VERSION };
 
 export const view: WorkspaceView = {
   id: WS,
@@ -51,7 +52,7 @@ export function resetSurfaces(): void {
   window.localStorage.clear();
   resetListings();
   provideDaemonWire(WS, null);
-  provideDaemonRoot(WS, DAEMON_ROOT);
+  provideDaemonHello(WS, DAEMON_HELLO);
   useStore.setState({ workspaces: [view], selectedId: WS });
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useRootStore.setState({ byWorkspaceId: {} });

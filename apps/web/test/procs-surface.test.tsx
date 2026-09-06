@@ -6,10 +6,10 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProcEntry, ProcSnapshot } from "@wsp/protocol";
 import { ProcessesSurface, ROW_PX } from "../src/components/procs/ProcessesSurface.js";
-import { provideDaemonWire } from "../src/files/wire.js";
+import { provideDaemonHello, provideDaemonWire } from "../src/files/wire.js";
 import { getProcs, resetProcs } from "../src/machine/procs.js";
 import { useStore } from "../src/protocol/store.js";
-import { fakeWire, resetSurfaces, view, WS, type FakeWire } from "./surface-harness.js";
+import { DAEMON_ROOT, fakeWire, resetSurfaces, view, WS, type FakeWire } from "./surface-harness.js";
 
 const DAEMON = 40;
 
@@ -95,6 +95,35 @@ describe("processes surface", () => {
     expect(document.querySelectorAll("[data-selected]")).toHaveLength(0);
     unmount();
     expect(calls("proc.unwatch")).toHaveLength(1);
+  });
+
+  it("a daemon that refuses proc.watch: the count reads unavailable, never pending, and one line carries the reason", async () => {
+    delete wire.replies["proc.watch"];
+    render(<ProcessesSurface workspaceId={WS} />);
+    await flush();
+    expect(getProcs(WS).snapshot()).toEqual({ snapshot: null, reach: "live", unavailable: "unknown op: proc.watch" });
+    expect(document.querySelector("[data-procs-count]")!.textContent).toBe("unavailable");
+    expect(screen.queryByText("pending")).toBeNull();
+    const line = document.querySelector<HTMLElement>("[data-procs-unavailable]")!;
+    expect(line.textContent).toBe("unknown op: proc.watch");
+    expect(line.getAttribute("title")).toBe("unknown op: proc.watch");
+    expect(line.style.lineHeight).toBe(`${ROW_PX}px`);
+    expect(line.className).not.toMatch(/warning|caution|destructive|success/);
+    // The daemon's hello said it is behind: the line names what it predates and where the update is.
+    act(() => provideDaemonHello(WS, { root: DAEMON_ROOT, version: 1 }));
+    expect(document.querySelector("[data-procs-unavailable]")!.textContent).toBe("daemon v1 predates Live and Processes; update it from the machine tab");
+    // A redeployed daemon answers the watch: the reason goes and the rows fill.
+    wire.replies["proc.watch"] = {};
+    act(() => {
+      provideDaemonHello(WS, { root: DAEMON_ROOT, version: 2 });
+      getProcs(WS).feedStatus("connecting");
+      getProcs(WS).feedStatus("live");
+    });
+    await flush();
+    expect(getProcs(WS).snapshot().unavailable).toBeNull();
+    await feed(PROCS);
+    expect(document.querySelector("[data-procs-unavailable]")).toBeNull();
+    expect(document.querySelector("[data-procs-count]")!.textContent).toBe("6 processes");
   });
 
   it("a workspace with only the daemon running shows the daemon", async () => {

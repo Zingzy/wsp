@@ -3,19 +3,23 @@
 // /proc only while a socket watches, so the pane asks with proc.watch when it
 // mounts and proc.unwatch when it goes; terminal/wiring.ts feeds the pushes
 // and the link's status here, and a link that comes back is asked again while
-// a pane still wants it.
+// a pane still wants it. A daemon that refuses proc.watch leaves its reason
+// here, so the pane can say so instead of waiting.
 import { useSyncExternalStore } from "react";
 import { ProcInspectReply, type DaemonLinkStatus, type ProcSignal, type ProcSnapshot } from "@wsp/protocol";
 import { getDaemonWire } from "../files/wire.js";
+import { errorText } from "../lib/utils.js";
 
 export interface ProcsState {
   snapshot: ProcSnapshot | null;
   reach: "live" | "unreachable";
+  /** The daemon's refusal of proc.watch, null while it streams or has not been asked. */
+  unavailable: string | null;
 }
 
 export class WorkspaceProcs {
   readonly #workspaceId: string;
-  #state: ProcsState = { snapshot: null, reach: "unreachable" };
+  #state: ProcsState = { snapshot: null, reach: "unreachable", unavailable: null };
   #fns = new Set<() => void>();
   #watchers = 0;
 
@@ -69,7 +73,20 @@ export class WorkspaceProcs {
   }
 
   #request(op: "proc.watch" | "proc.unwatch"): void {
-    getDaemonWire(this.#workspaceId)?.request(op).catch(() => {});
+    const wire = getDaemonWire(this.#workspaceId);
+    if (!wire) return;
+    if (op === "proc.unwatch") {
+      wire.request(op).catch(() => {});
+      return;
+    }
+    wire.request(op).then(
+      () => this.#setUnavailable(null),
+      (e: unknown) => this.#setUnavailable(errorText(e)),
+    );
+  }
+
+  #setUnavailable(reason: string | null): void {
+    if (reason !== this.#state.unavailable) this.#set({ ...this.#state, unavailable: reason });
   }
 
   #set(next: ProcsState): void {

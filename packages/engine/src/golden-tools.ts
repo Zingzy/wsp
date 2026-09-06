@@ -114,12 +114,13 @@ export const closing = (...parts: (string | undefined)[]): string => parts.filte
 
 const SWEEP_TIMEOUT_S = 300;
 /** The caches the installs leave on the root disk: npm's tarballs, uv's wheels, go's module and build caches,
- * apt's debs. Each is rebuilt on use; together they held about 2 GB of the 20 GB builder after one recipe. */
+ * apt's debs, node-gyp's headers from the daemon's native build. Each is rebuilt on use; together they held about
+ * 2 GB of the 20 GB builder after one recipe. */
 const SWEEP_CACHES_CMD = [
   "set -euo pipefail",
   `export PATH=${TOOLS_PATH}`,
   "if command -v go >/dev/null 2>&1; then go clean -cache -modcache; fi",
-  "rm -rf /root/.npm /root/.cache/uv /root/.cache/go-build",
+  "rm -rf /root/.npm /root/.cache/uv /root/.cache/go-build /root/.cache/node-gyp",
   "if command -v apt-get >/dev/null 2>&1; then apt-get clean; fi",
 ].join("\n");
 

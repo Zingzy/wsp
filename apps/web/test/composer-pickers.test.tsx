@@ -87,8 +87,8 @@ import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { useComposerFavouritesStore } from "../src/components/chat/composerFavouritesStore.js";
 import { useComposerOptionsStore } from "../src/components/chat/composerOptionsStore.js";
-import { provideDaemonRoot, provideDaemonWire } from "../src/files/wire.js";
-import { DAEMON_ROOT, LISTING, fakeWire, resetSurfaces } from "./surface-harness.js";
+import { provideDaemonHello, provideDaemonWire } from "../src/files/wire.js";
+import { DAEMON_HELLO, LISTING, fakeWire, resetSurfaces } from "./surface-harness.js";
 import { CHAT_STREAM, CHAT_WS } from "./fixtures/chat-stream.js";
 
 let restoreLayout: () => void = () => {};
@@ -97,7 +97,7 @@ afterAll(() => restoreLayout());
 beforeEach(() => {
   window.localStorage.clear();
   resetSurfaces();
-  provideDaemonRoot(WS, DAEMON_ROOT);
+  provideDaemonHello(WS, DAEMON_HELLO);
   provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": { branch: { oid: "abc", head: "main", ahead: 0, behind: 0 }, entries: [], root: "/root" } }));
   useComposerDraftStore.setState({ drafts: {} });
   useComposerOptionsStore.setState({ byWorkspaceId: {} });
