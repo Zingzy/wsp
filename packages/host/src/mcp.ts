@@ -9,14 +9,15 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { ProjectExportResult, ProjectGolden, SessionStartOutcome, ThreadView, WorkspaceView } from "@wsp/protocol";
 import { VERSION } from "./version.js";
-import { absoluteFolder, checkedPicks, create, createFromHead, dialHost, execOn, exportProject, follow, nap, notifyOf, openingOf, projectGoldenOf, resumeOf, snapshot, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
+import { absoluteFolder, awake, checkedPicks, create, createFromHead, dialHost, execOn, exportProject, follow, nap, notifyOf, openingOf, projectGoldenOf, resumeOf, snapshot, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
 
 const INSTRUCTIONS = [
   "wsp runs cloud machines called workspaces, each with agents working inside it, and this server is the same host the",
   "person's app is open on: whatever you do here shows in their sidebar, and they can read and answer any thread.",
   "Start with workspaces. Open a thread with thread_new (a workspace, a task, and the agent to run, such as codex);",
   "it returns the reply when the turn ends. Continue a thread with send. Run a command on a machine with exec.",
-  "new forks the golden image into a fresh machine, or with from, a project golden; fork makes a sibling of a workspace, pause naps one.",
+  "new forks the golden image into a fresh machine, or with from, a project golden; fork makes a sibling of a workspace, pause naps one, wake wakes it.",
+  "thread_new, send and exec wake a paused workspace themselves before running, so a paused one needs no wake first.",
   "snapshot takes a project golden of a workspace with a project loaded: the golden plus that project as it stands, so every",
   "new machine forked from it starts a task with the project in place and no upload.",
   "export brings a project folder and the agent sessions keyed to it home from a workspace's machine to this computer.",
@@ -24,6 +25,8 @@ const INSTRUCTIONS = [
 
 /** Nothing printed: the tools answer with values, and the stages a create streams have no reader here. */
 const QUIET: Out = { emit: () => {}, stream: () => {} };
+/** The waking line has no reader here either: the tool's result says which machine ran. */
+const QUIET_LINE = (): void => {};
 
 export interface Dialer {
   (): Promise<HostClient>;
@@ -161,6 +164,14 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
     async ({ workspace: ref }) => asJson({ workspace: await nap(await dial(), ref) }),
   );
   server.registerTool(
+    "wake",
+    { description: "Wakes the workspace's machine and returns its view once the runtime has answered; one already running comes back unchanged. thread_new, send and exec do this themselves, so it is only needed to wake a machine ahead of them.", inputSchema: { workspace }, outputSchema: { workspace: WorkspaceView } },
+    async ({ workspace: ref }) => {
+      const client = await dial();
+      return asJson({ workspace: await awake(client, await workspaceOf(client, ref), QUIET_LINE) });
+    },
+  );
+  server.registerTool(
     "thread_new",
     {
       description: "Opens a thread in the workspace under the named agent, on the model, effort and access mode named or the catalog's defaults (a cheaper model for a review, say), in the folder cwd names or the workspace's project folder, and follows its first turn; returns the reply text when the turn ends, with the thread id for send. With notify, every turn of the thread that ends later sends one line (outcome, duration, cost, last line of the reply) into the named thread, so a caller need not wait here or poll.",
@@ -169,7 +180,7 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
     },
     async ({ workspace: ref, task, agent: harness, cwd: folder, notify: tell, ...input }) => {
       const client = await dial();
-      const target = await workspaceOf(client, ref);
+      const target = await awake(client, await workspaceOf(client, ref), QUIET_LINE);
       const out = turnOut(await follow(client, openingOf(target, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell) }), "agent", QUIET_TURN));
       return asText(out.text, out);
     },
@@ -183,7 +194,9 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
     },
     async ({ thread: ref, message, ...input }) => {
       const client = await dial();
-      const out = turnOut(await follow(client, resumeOf(await threadOf(client, ref), message, input), "agent", QUIET_TURN));
+      const thread = await threadOf(client, ref);
+      await awake(client, await workspaceOf(client, thread.workspaceId), QUIET_LINE);
+      const out = turnOut(await follow(client, resumeOf(thread, message, input), "agent", QUIET_TURN));
       return asText(out.text, out);
     },
   );
@@ -196,7 +209,7 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
     },
     async ({ workspace: ref, argv }) => {
       const client = await dial();
-      const target = await workspaceOf(client, ref);
+      const target = await awake(client, await workspaceOf(client, ref), QUIET_LINE);
       const output: string[] = [];
       const exit = await execOn(client, target.id, argv, e => {
         if (e.type === "exec.output") output.push(e.text);

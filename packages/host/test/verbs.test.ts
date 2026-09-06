@@ -140,6 +140,73 @@ describe("wsp verbs over the host", () => {
     expect(missing.io.errors).toEqual(["wsp pause: no workspace nope"]);
   });
 
+  it("wake wakes a paused workspace, one line on stderr while it does, and prints its state after; on a running one the runtime is asked and the state printed is the one read", async () => {
+    await run("new", "alpha");
+    await run("pause", "alpha");
+    const woken = await run("wake", "alpha");
+    expect(woken.code).toBe(0);
+    expect(woken.io.errors).toEqual(["waking alpha"]);
+    expect(woken.io.lines).toEqual(["alpha running"]);
+    expect((await rt.workspaces.list())[0]!.phase).toBe("running");
+    expect(backend.machines[0]!.paused).toBe(false);
+    const again = await run("wake", "alpha", "--json");
+    expect(again.code).toBe(0);
+    expect(again.io.errors).toEqual([]);
+    expect(json(again.io)).toEqual([{ workspace: expect.objectContaining({ name: "alpha", phase: "running" }) }]);
+    const plain = await run("wake", "alpha");
+    expect(plain.io.lines).toEqual(["alpha running"]);
+    const missing = await run("wake", "nope");
+    expect(missing.code).toBe(1);
+    expect(missing.io.errors).toEqual(["wsp wake: no workspace nope"]);
+  });
+
+  it("a machine the provider paused on its own, under a record that says running, is woken by wake and by exec: the runtime's one state read settles it", async () => {
+    await run("new", "alpha");
+    backend.machines[0]!.paused = true;
+    execGuest(backend, "awake-ok\n", 0);
+    const ran = await run("exec", "alpha", "--", "echo", "awake-ok");
+    expect(ran.code).toBe(0);
+    expect(ran.io.lines).toEqual(["awake-ok"]);
+    expect(backend.machines[0]!.paused).toBe(false);
+    backend.machines[0]!.paused = true;
+    const woken = await run("wake", "alpha");
+    expect(woken.code).toBe(0);
+    expect(woken.io.lines).toEqual(["alpha running"]);
+    expect(woken.io.errors).toEqual([]);
+    expect(backend.machines[0]!.paused).toBe(false);
+    expect((await rt.workspaces.list())[0]!.phase).toBe("running");
+  });
+
+  it("exec on a paused workspace wakes it first, says so on stderr, then runs the command; a running one is not woken", async () => {
+    await run("new", "alpha");
+    await run("pause", "alpha");
+    execGuest(backend, "awake-ok\n", 0);
+    const { code, io } = await run("exec", "alpha", "--", "echo", "awake-ok");
+    expect(code).toBe(0);
+    expect(io.errors).toEqual(["waking alpha"]);
+    expect(io.lines).toEqual(["awake-ok"]);
+    expect((await rt.workspaces.list())[0]!.phase).toBe("running");
+    const again = await run("exec", "alpha", "--", "echo", "awake-ok");
+    expect(again.code).toBe(0);
+    expect(again.io.errors).toEqual([]);
+  });
+
+  it("thread new and send on a paused workspace wake it first, one line on stderr, then run the turn", async () => {
+    await run("new", "alpha");
+    await run("pause", "alpha");
+    const opened = await run("thread", "new", "--in", "alpha", "hello");
+    expect(opened.code).toBe(0);
+    expect(opened.io.errors).toEqual(["waking alpha"]);
+    expect(opened.io.lines[1]).toBe("re: hello");
+    const [row] = await rt.sessions.list();
+    await run("pause", "alpha");
+    const sent = await run("send", row!.threadId!, "again");
+    expect(sent.code).toBe(0);
+    expect(sent.io.errors).toEqual(["waking alpha"]);
+    expect(sent.io.lines).toEqual(["re: again"]);
+    expect((await rt.workspaces.list())[0]!.phase).toBe("running");
+  });
+
   it("thread new opens a thread under the named agent, announces it, streams the reply and prints the last message", async () => {
     await run("new", "alpha");
     const [alpha] = await rt.workspaces.list();
@@ -604,7 +671,7 @@ describe("wsp verbs over the host", () => {
     old.on("connection", socket => {
       socket.on("message", raw => {
         const { id, op } = JSON.parse(String(raw)) as { id: number; op: string };
-        const reply = op === "workspaces.list" ? { workspaces: [workspace] } : op === "sessions.start" ? { session } : {};
+        const reply = op === "workspaces.list" ? { workspaces: [workspace] } : op === "workspaces.wake" ? { workspace } : op === "sessions.start" ? { session } : {};
         socket.send(JSON.stringify({ id, ok: true, ...reply }));
       });
     });
@@ -754,7 +821,7 @@ describe("wsp verbs over the host", () => {
   });
 
   it("every verb takes --json and --help; a bad flag prints the usage", async () => {
-    for (const verb of [["new"], ["fork"], ["snapshot"], ["pause"], ["threads"], ["thread", "new"], ["send"], ["exec"], ["import"], ["export"]]) {
+    for (const verb of [["new"], ["fork"], ["snapshot"], ["pause"], ["wake"], ["threads"], ["thread", "new"], ["send"], ["exec"], ["import"], ["export"]]) {
       const help = await run(...verb, "--help");
       expect(help.code).toBe(0);
       expect(help.io.lines[0]).toMatch(new RegExp(`^usage: wsp ${verb.join(" ")}`));

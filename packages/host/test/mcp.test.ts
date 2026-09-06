@@ -128,7 +128,7 @@ describe("the MCP server over the host", () => {
   it("offers the verbs as tools, each described, and none for import until it exists", async () => {
     const c = await connect();
     const { tools } = await c.listTools();
-    expect(tools.map(t => t.name).sort()).toEqual(["exec", "export", "fork", "new", "pause", "send", "snapshot", "thread_new", "threads", "workspaces"]);
+    expect(tools.map(t => t.name).sort()).toEqual(["exec", "export", "fork", "new", "pause", "send", "snapshot", "thread_new", "threads", "wake", "workspaces"]);
     for (const t of tools) expect(t.description, t.name).toMatch(/\S/);
     expect(Object.keys((tools.find(t => t.name === "new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["from", "name"]);
     expect(Object.keys((tools.find(t => t.name === "thread_new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "model", "notify", "task", "workspace"]);
@@ -228,6 +228,39 @@ describe("the MCP server over the host", () => {
     expect((await rt.workspaces.list())[0]!.phase).toBe("napping");
     const missing = await call("pause", { workspace: "nope" });
     expect(missing).toEqual({ text: "no workspace nope", structured: undefined, isError: true });
+  });
+
+  it("wake wakes a paused workspace and returns it running; on a running one it is a no-op that returns it as it is", async () => {
+    await call("new", { name: "alpha" });
+    await call("pause", { workspace: "alpha" });
+    const woken = await call("wake", { workspace: "alpha" });
+    expect(woken.isError).toBe(false);
+    expect(woken.structured).toEqual({ workspace: expect.objectContaining({ name: "alpha", phase: "running" }) });
+    expect((await rt.workspaces.list())[0]!.phase).toBe("running");
+    expect(backend.machines[0]!.paused).toBe(false);
+    const again = await call("wake", { workspace: "alpha" });
+    expect(again.structured).toEqual({ workspace: expect.objectContaining({ name: "alpha", phase: "running" }) });
+    const missing = await call("wake", { workspace: "nope" });
+    expect(missing).toEqual({ text: "no workspace nope", structured: undefined, isError: true });
+  });
+
+  it("exec, thread_new and send on a paused workspace wake it first and then run", async () => {
+    await call("new", { name: "alpha" });
+    await call("pause", { workspace: "alpha" });
+    execGuest(backend, "awake-ok\n", 0);
+    const ran = await call("exec", { workspace: "alpha", argv: ["echo", "awake-ok"] });
+    expect(ran).toEqual({ text: "awake-ok", structured: { exitCode: 0, output: ["awake-ok"] }, isError: false });
+    expect((await rt.workspaces.list())[0]!.phase).toBe("running");
+    await call("pause", { workspace: "alpha" });
+    const opened = await call("thread_new", { workspace: "alpha", task: "hello" });
+    expect(opened.isError).toBe(false);
+    expect(opened.text).toBe("re: hello");
+    const threadId = (opened.structured as { threadId: string }).threadId;
+    await call("pause", { workspace: "alpha" });
+    const sent = await call("send", { thread: threadId, message: "again" });
+    expect(sent.isError).toBe(false);
+    expect(sent.text).toBe("re: again");
+    expect((await rt.workspaces.list())[0]!.phase).toBe("running");
   });
 
   it("thread_new opens a thread under the named agent, started by the local agent, and returns the reply as the result", async () => {

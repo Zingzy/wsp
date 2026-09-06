@@ -66,7 +66,8 @@ ${verbHelp()}
 
   wsp send streams the reply to stderr as it arrives and prints the last message
   on stdout when the turn ends; wsp exec streams the command's output and exits
-  with its code.
+  with its code. thread new, send and exec wake a paused workspace first, with
+  one line on stderr saying so.
 
 options:
   --port N           app port (default 4400)
