@@ -4,15 +4,11 @@
 // caller's choice: what the agents used here, what is installed here, the
 // catalog's own default, or the three together. Names, paths and counts only;
 // nothing read leaves as a value.
-import { CATALOG, type CatalogEntry, type AgentEntry, catalogToolFor } from "@wsp/catalog";
+import { CATALOG, type CatalogEntry, type AgentEntry, catalogToolFor, sizeBytes } from "@wsp/catalog";
 import type { Recipe, RecipeRow, RecipeSource, RecipeTick } from "@wsp/protocol";
 import { presenceOf } from "./detect/presence.js";
-import { type AgentHistory, type Count, type Usage, readHistories } from "./history/index.js";
+import { type AgentHistory, type Count, type Usage, meetsUsedFloor, readHistories } from "./history/index.js";
 import type { Host } from "./host.js";
-
-/** Sessions an agent has to have reached for a tool before use alone ticks it under the blended rule: one session
- * is a look, not a habit. A `used` tick is the person's own choice and takes any use. */
-export const USED_TICK_SESSIONS = 2;
 
 /** How one rule reads the computer. `order` is the source kinds it reports for an entry, best first: the first kind
  * this computer has anything for is the row's source, so the words beside a row say what the rule went on. It takes
@@ -23,6 +19,8 @@ interface TickRule {
   /** Whether the row is on, read from everything this computer said about it rather than from the one source the
    * order picked to show: a rule may tick on a use while the row still reads as installed here. */
   on(sources: Sources, entry: CatalogEntry): boolean;
+  /** Whether this rule weighs a tool's use against the floor, so a table drawn from its recipe names the floor. */
+  weighsUse: boolean;
   /** Whether this rule ticks an agent the caller says no adapter can open a thread on. Only the rule that answers
    * about this computer does: it is saying what is here, not what wsp can drive. Every other rule holds such an
    * agent off, since ticking it would build a machine nothing here can open a thread on. */
@@ -37,28 +35,42 @@ type Sources = Partial<Record<RecipeSource["kind"], RecipeSource>>;
 /** The catalog's own default: a tool the catalog ships on, never an agent. */
 const catalogDefault = (_sources: Sources, entry: CatalogEntry): boolean => entry.kind === "tool" && entry.defaultOn;
 
+/** Whether what the agents ran ticks the entry: a tool at or over the floor its size sets, an agent on any session
+ * of its own, since an agent's sessions are the use and an agent's row is a question of what is here. */
+function usedEnough(sources: Sources, entry: CatalogEntry): boolean {
+  const used = sources.used;
+  if (used === undefined || used.kind !== "used") return false;
+  return entry.kind === "tool" ? meetsUsedFloor(used, sizeBytes(entry.size)) : true;
+}
+
 /** One rule per `--tick` word; adding a word is an entry here and nothing else. */
 const TICK_RULES: Readonly<Record<RecipeTick, TickRule>> = {
-  used: { order: entry => (entry.kind === "tool" ? USED_FIRST : INSTALLED_FIRST), on: sources => sources.used !== undefined, ticksAgentsWithoutAdapter: false },
-  installed: { order: installedFirst, on: sources => sources.installed !== undefined, ticksAgentsWithoutAdapter: true },
-  default: { order: installedFirst, on: catalogDefault, ticksAgentsWithoutAdapter: false },
+  used: { order: entry => (entry.kind === "tool" ? USED_FIRST : INSTALLED_FIRST), on: usedEnough, weighsUse: true, ticksAgentsWithoutAdapter: false },
+  installed: { order: installedFirst, on: sources => sources.installed !== undefined, weighsUse: false, ticksAgentsWithoutAdapter: true },
+  default: { order: installedFirst, on: catalogDefault, weighsUse: false, ticksAgentsWithoutAdapter: false },
 };
 
-/** What the wizard's screens start from when no rule was named: installed here, then a habit in the histories,
- * then the catalog's default, and an agent only ever from this computer. A use below the threshold is the row's
- * answer and vetoes the catalog default under it, so a tool looked at once stays off however popular it is. */
+/** What the wizard's screens start from when no rule was named: installed here, then use over the floor, then the
+ * catalog's default, and an agent only ever from this computer. A use below the floor is the row's answer and vetoes
+ * the catalog default under it, so a tool looked at once stays off however popular it is. */
 const BLENDED: TickRule = {
   // A tool says what the agents ran with it, so a row can read "installed here, never used"; an agent is placed by
   // whether it is on this computer, which is the only thing that ticks one.
   order: entry => (entry.kind === "tool" ? USED_FIRST : INSTALLED_FIRST),
+  weighsUse: true,
   ticksAgentsWithoutAdapter: false,
   on: (sources, entry) => {
     if (sources.installed !== undefined) return true;
     if (entry.kind !== "tool") return false;
-    const used = sources.used;
-    return used !== undefined && used.kind === "used" ? used.sessions >= USED_TICK_SESSIONS : catalogDefault(sources, entry);
+    return sources.used !== undefined ? usedEnough(sources, entry) : catalogDefault(sources, entry);
   },
 };
+
+/** Whether the rule a recipe went on (the named one, or the wizard's blended one when none is) weighs use against
+ * the floor, so the table drawn from it should name the floor. */
+export function floorApplies(tick: RecipeTick | undefined): boolean {
+  return (tick !== undefined ? TICK_RULES[tick] : BLENDED).weighsUse;
+}
 
 export interface RecipeOptions {
   /** The entries to decide; the shipped catalog by default. */
@@ -128,6 +140,8 @@ export async function computeRecipe(host: Host, opts: RecipeOptions = {}): Promi
   const threads = opts.threadAgents !== undefined ? new Set(opts.threadAgents) : undefined;
   const rows = catalog.map((e): RecipeRow => {
     const used = e.kind === "tool" ? usedTools.get(e.id) : agentUse(byAgent.get(e.id));
+    const bytes = sizeBytes(e.size);
+    const size = bytes !== undefined ? { size: bytes } : {};
     const installed = present.get(e.id);
     const popular: RecipeSource = { kind: "popular", sessions: e.source.sessions, images: e.source.images };
     const sources: Sources = {
@@ -137,7 +151,7 @@ export async function computeRecipe(host: Host, opts: RecipeOptions = {}): Promi
     };
     const source = rule.order(e).flatMap(kind => sources[kind] ?? [])[0] ?? popular;
     const held = e.kind === "agent" && threads !== undefined && !threads.has(e.id) && !rule.ticksAgentsWithoutAdapter;
-    return { id: e.id, kind: e.kind, on: !held && rule.on(sources, e), source, ...(e.size !== undefined ? { size: e.size } : {}) };
+    return { id: e.id, kind: e.kind, on: !held && rule.on(sources, e), source, ...size };
   });
   return {
     version: 1,

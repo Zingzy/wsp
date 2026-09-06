@@ -6,7 +6,7 @@ import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
 import { afterEach, describe, expect, it } from "vitest";
-import { HELP, loadKeys, saveQuestion, terminalIO, type CliIO } from "../src/cli.js";
+import { HELP, cli, jsonCliIO, loadKeys, saveQuestion, terminalIO, type CliIO } from "../src/cli.js";
 
 const SOLARI = "slr_live_fake_solari_key";
 
@@ -16,6 +16,31 @@ describe("help", () => {
     expect(HELP.replace(/\s+/g, " ")).toContain("--yes init: take every default and ask nothing (required off a terminal); a login with a browser or device sign-in, or one held in the Keychain, defaults to sign in on the machine unless a saved recipe answered copy, so macOS has nothing to ask either and the sign-ins wait for the app's terminal");
   });
 });
+
+describe("--json keeps stdout to the objects", () => {
+  it("every line the run says, and every question it cannot ask, goes to the stream beside stdout", async () => {
+    const err = new PassThrough();
+    const said: string[] = [];
+    err.on("data", (c: Buffer) => said.push(c.toString()));
+    const io = jsonCliIO(err);
+    io.log("app         http://127.0.0.1:4400");
+    io.error("reap: sweep failed");
+    io.stream?.("half a line");
+    await expect(io.askSecret("Solari API key\nNo Solari key found.")).rejects.toThrow(
+      "Solari API key: --json asks nothing; set it in the environment, ./.env, or ~/.wsp/.env.",
+    );
+    await expect(io.ask("Save the key so wsp stops asking?")).rejects.toThrow("--json asks nothing");
+    expect(said.join("")).toBe("app         http://127.0.0.1:4400\nreap: sweep failed\nhalf a line");
+  });
+
+  it("wsp init --yes --json is refused in one line, since --yes skips the sign-ins --json is there to print", async () => {
+    const said: string[] = [];
+    const io: CliIO = { log: l => said.push(`out ${l}`), error: l => said.push(`err ${l}`), ask: async () => "no", askSecret: async () => "" };
+    expect(await cli(["init", "--yes", "--json"], io)).toBe(1);
+    expect(said).toEqual(["err wsp init: --json prints the sign-ins as they are handed to you, and --yes skips the sign-ins, so there would be nothing to print. Drop one of them."]);
+  });
+});
+
 const ANTHROPIC = "sk-ant-x-fake-anthropic-key";
 
 interface FakeIO extends CliIO {

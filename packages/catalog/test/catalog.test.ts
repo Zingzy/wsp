@@ -4,7 +4,8 @@
 // the six whose project state has a measured resolver, every default names
 // its evidence, and the seeded rows are what the snapshot says they are.
 import { describe, expect, it } from "vitest";
-import { APT_INDEX, APT_UPDATE, BASE_FLOOR, CATALOG, CATALOG_AGENTS, CLAUDE_CONFIG_DIR, DEFAULT_AGENT, GCLOUD, HISTORY_FORMATS, HOMEBREW_STEP, KUBECTL, LINUX_CASKS, LOGIN_ROWS, ROADS, ROAD_MODULES, SIGN_IN_ROWS, agentName, baseEntryFor, baseNote, catalogEntry, catalogToolFor, guestEnv, hasLogin, installAfter, installLine, keysIdOf, keysRowOf, loginIdOf, loginRow, roadModule, smokeOf, type AgentEntry, type InstallRoad } from "../src/index.js";
+import * as catalog from "../src/index.js";
+import { APT_INDEX, APT_UPDATE, BASE_FLOOR, CATALOG, CATALOG_AGENTS, CLAUDE_CONFIG_DIR, DEFAULT_AGENT, GCLOUD, HISTORY_FORMATS, HOMEBREW_STEP, KUBECTL, LINUX_CASKS, LOGIN_ROWS, ROADS, ROAD_MODULES, SIGN_IN_ROWS, agentName, baseEntryFor, baseNote, catalogEntry, catalogToolFor, guestEnv, hasLogin, installAfter, installLine, keysIdOf, keysRowOf, loginIdOf, loginRow, roadModule, sizeBytes, smokeOf, SIZE_METHODS, type AgentEntry, type InstallRoad, type ToolEntry } from "../src/index.js";
 
 describe("catalog", () => {
   it("the default agent is the first entry, and it is an agent with a context module", () => {
@@ -130,7 +131,7 @@ describe("catalog", () => {
       if (a.guestStateHome !== undefined) expect(a.guestStateHome, a.id).toMatch(/^\/root\//);
       expect(hasLogin(a.signIn), a.id).toBe(true);
       expect(smokeOf(a)).toBe(`${a.id} --version`);
-      expect(a.size, a.id).toBeGreaterThan(0);
+      expect(sizeBytes(a.size), a.id).toBeGreaterThan(0);
     }
     expect(CATALOG_AGENTS.filter(a => a.guestStateHome !== undefined).map(a => [a.id, a.guestStateHome])).toEqual([["claude", "/root/.claude-cfg"]]);
     expect(installLine(catalogEntry("codex")!)).toBe("npm install -g @openai/codex@0.153.0");
@@ -262,12 +263,12 @@ describe("catalog", () => {
       expect(e.source.images, e.id).toBeGreaterThanOrEqual(0);
       expect(e.source.images, e.id).toBeLessThanOrEqual(5);
     }
-    expect(CATALOG.filter(e => e.kind === "tool" && e.defaultOn).map(e => e.id)).toEqual(["node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker", "gh", "agent-browser"]);
+    expect(CATALOG.filter(e => e.kind === "tool" && e.defaultOn).map(e => e.id)).toEqual(["node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync", "gh", "agent-browser"]);
     expect(catalogEntry("agent-browser")?.source.note).toMatch(/one Mac/);
   });
 
   it("seeds every golden with the base floor: the entries flagged for it, in catalog order, each default-on by a pinned road", () => {
-    expect(BASE_FLOOR.map(e => e.id)).toEqual(["node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker"]);
+    expect(BASE_FLOOR.map(e => e.id)).toEqual(["node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync"]);
     expect(BASE_FLOOR).toEqual(CATALOG.filter(e => e.kind === "tool" && e.floor));
     for (const e of BASE_FLOOR) {
       expect(e.defaultOn, e.id).toBe(true);
@@ -279,7 +280,7 @@ describe("catalog", () => {
     }
     expect(CATALOG.filter(e => e.kind === "tool" && e.defaultOn && !e.floor).map(e => e.id)).toEqual(["gh", "agent-browser"]);
     // The npm road runs on the floor's node, an apt package on the index read once, a script on what its entry names.
-    expect(BASE_FLOOR.map(e => installAfter(e))).toEqual([undefined, "node", undefined, "uv", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index"]);
+    expect(BASE_FLOOR.map(e => installAfter(e))).toEqual([undefined, "node", undefined, "uv", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index"]);
     expect(BASE_FLOOR.find(e => e.id === "node")!.brings).toEqual([{ bin: "npm", version: "npm --version" }]);
     expect(BASE_FLOOR.find(e => e.id === "docker")!.brings).toEqual([{ bin: "docker compose", version: "docker compose version" }]);
     // Docker's engine is by apt, so its script waits on the index read like the apt rows before it.
@@ -292,7 +293,7 @@ describe("catalog", () => {
     expect(python.installRoad.road === "script" && python.installRoad.script).toContain("uv python install 3.12");
     expect(python.installRoad.road === "script" && python.installRoad.script).toContain('ln -sfn "$(uv python find --managed-python 3.12)" /usr/local/bin/python3');
     expect(python.installRoad.road === "script" && python.installRoad.script).toContain("sha256sum -c");
-    expect(python.size).toBeUndefined();
+    expect(python.size).toEqual({ bytes: 108105728, on: "2026-09-07", method: "du" });
   });
 
   it("names the base row a recipe's tools row stands for: by id, command, road argument or a name it covers", () => {
@@ -328,10 +329,68 @@ describe("catalog", () => {
   it("says which roads no guest has run yet", () => {
     const unmeasured = CATALOG.filter(e => e.source.road === "unmeasured").map(e => e.id);
     expect(unmeasured).toEqual([
-      "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker", "gh", "agent-browser",
-      "rust", "maven", "wrangler", "cloudflared", "kubectl", "aws", "vercel", "netlify", "fly", "supabase", "railway", "doppler", "op", "ffmpeg", "yq", "git-lfs", "tmux",
+      "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync", "gh", "agent-browser",
+      "rust", "maven", "bun", "yarn", "ruff", "black", "mypy", "pyright", "pytest", "prettier", "eslint", "typescript",
+      "wrangler", "cloudflared", "kubectl", "aws", "vercel", "netlify", "fly", "supabase", "railway", "doppler", "op", "ffmpeg", "yq", "git-lfs", "tmux",
     ]);
     for (const e of CATALOG_AGENTS) expect(e.source.road, e.id).toBe("measured");
+  });
+
+  it("gives every row a size in bytes with the day and the way it was measured, or the reason nobody could measure it", () => {
+    for (const e of CATALOG) {
+      const s = e.size;
+      if ("bytes" in s) {
+        expect(s.bytes, e.id).toBeGreaterThan(0);
+        expect(Number.isInteger(s.bytes), e.id).toBe(true);
+        expect(s.on, e.id).toMatch(/^2026-\d\d-\d\d$/);
+        expect(Object.keys(SIZE_METHODS), e.id).toContain(s.method);
+        expect(sizeBytes(s), e.id).toBe(s.bytes);
+      } else {
+        expect(s.unmeasured.length, e.id).toBeGreaterThan(20);
+        expect(sizeBytes(s), e.id).toBeUndefined();
+      }
+    }
+    // The rows are the one place a size lives: no table of formula or global sizes beside them.
+    expect(Object.keys(catalog).filter(k => /_(MIB|BYTES)$/.test(k))).toEqual([]);
+    // The one row nobody could measure: its package sits in a repository the road does not add yet.
+    expect(CATALOG.filter(e => !("bytes" in e.size)).map(e => e.id)).toEqual(["op"]);
+    for (const text of Object.values(SIZE_METHODS)) expect(text).not.toMatch(/\u2014/);
+    for (const e of CATALOG) expect(`${e.name} ${e.source.note ?? ""}`, e.id).not.toMatch(/\u2014/);
+    // Every brew row counts its Linux runtime dependencies, so Rust carries the LLVM its bottle links against.
+    expect(sizeBytes(catalogEntry("rust")!.size)).toBeGreaterThan(3e9);
+    expect(sizeBytes(catalogEntry("git")!.size)).toBe(123789312);
+    expect(catalogEntry("claude")!.size).toEqual({ bytes: 208 * 1024 * 1024, on: "2026-09-05", method: "df" });
+  });
+
+  it("carries the tier 1 rows the lab sandboxes ship: the cheap universal ones on the floor, the rest on request", () => {
+    expect(BASE_FLOOR.map(e => e.id)).toEqual(["node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync"]);
+    expect(installLine(catalogEntry("build-essential")!)).toBe("export DEBIAN_FRONTEND=noninteractive\napt-get install -y -qq build-essential cmake ninja-build");
+    expect((catalogEntry("build-essential") as ToolEntry).brings).toEqual([{ bin: "cmake", version: "cmake --version" }, { bin: "ninja", version: "ninja --version" }]);
+    expect(catalogToolFor("make")?.id).toBe("build-essential");
+    expect(catalogToolFor("gcc")?.id).toBe("build-essential");
+    expect(catalogToolFor("cmake")?.id).toBe("build-essential");
+    // Debian ships fd as fdfind; the row puts the name agents type on PATH.
+    expect(installLine(catalogEntry("fd")!)).toBe("export DEBIAN_FRONTEND=noninteractive\napt-get install -y -qq fd-find\nln -sfn /usr/bin/fdfind /usr/local/bin/fd");
+    expect(installAfter(catalogEntry("fd") as ToolEntry)).toBe(APT_INDEX);
+    expect(catalogToolFor("fdfind")?.id).toBe("fd");
+    expect(catalogToolFor("unzip")?.id).toBe("zip");
+    expect(catalogToolFor("xz-utils")?.id).toBe("xz");
+    expect((catalogEntry("zip") as ToolEntry).brings).toEqual([{ bin: "unzip", version: "unzip -v" }]);
+    const optional = ["bun", "yarn", "ruff", "black", "mypy", "pyright", "pytest", "prettier", "eslint", "typescript"];
+    for (const id of optional) {
+      const e = catalogEntry(id) as ToolEntry;
+      expect(e?.kind, id).toBe("tool");
+      expect(e.defaultOn, id).toBe(false);
+      expect(e.floor, id).toBe(false);
+    }
+    expect(installLine(catalogEntry("bun")!)).toBe("npm install -g bun");
+    expect(installLine(catalogEntry("yarn")!)).toBe("corepack enable yarn\nCOREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack install -g yarn@stable");
+    expect(installAfter(catalogEntry("yarn") as ToolEntry)).toBe("node");
+    expect(installLine(catalogEntry("ruff")!)).toBe("uv tool install ruff");
+    expect(installLine(catalogEntry("typescript")!)).toBe("npm install -g typescript");
+    expect(catalogEntry("typescript")!.bin).toBe("tsc");
+    expect(catalogToolFor("tsc")?.id).toBe("typescript");
+    expect(catalogToolFor("bunx")?.id).toBe("bun");
   });
 
   it("carries no token-looking value", () => {

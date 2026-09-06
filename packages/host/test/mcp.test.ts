@@ -673,7 +673,7 @@ describe("the MCP server over the host", () => {
     expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8"))).tick).toBe("used");
 
     const flipped = RecipeAnswer.parse((await call("recipe", { out, set: ["java=on"] })).structured);
-    expect(allRows(flipped).find(r => r.id === "java")).toMatchObject({ on: true, size: 343 * 1024 * 1024 });
+    expect(allRows(flipped).find(r => r.id === "java")).toMatchObject({ on: true, size: 613280230 });
     expect(flipped.heavy.map(r => r.id)).toContain("java");
     // A word the catalog does not know is a tool error in one line, not a rewritten file.
     expect(await call("recipe", { out, set: ["jaava=on"] })).toMatchObject({ isError: true, text: '--set jaava=on: the catalog has no row called "jaava"' });

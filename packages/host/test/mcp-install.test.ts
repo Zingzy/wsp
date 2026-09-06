@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { HELP, cli, type CliIO } from "../src/cli.js";
+import { HELP, JSON_COMMANDS, PROSE_COMMANDS, cli, type CliIO } from "../src/cli.js";
 import { installEach, installLines, installMcp, mcpServerSpec } from "../src/mcp-install.js";
 import { WSP_SKILL } from "../src/skill.js";
 
@@ -128,12 +128,22 @@ describe("installing the MCP server for a local agent", () => {
   });
 
   it("--agent belongs to mcp install alone, a command with no JSON to print refuses --json, and mcp --help says its own usage", async () => {
-    // recipe is not on this list: it prints a table, and --json is that table as one object.
-    for (const cmd of ["up", "init", "doctor"]) {
+    // Which shared-parse commands print JSON is the command table's fact: init prints each sign-in hand-off as one
+    // object per line and takes the flag; recipe parses its own flags and prints its table as one object.
+    expect(PROSE_COMMANDS).toEqual(["up", "doctor"]);
+    expect(JSON_COMMANDS).toEqual(["init"]);
+    for (const cmd of PROSE_COMMANDS) {
       const out = io();
       expect(await cli([cmd, "--json", "--state", statePath], out), cmd).toBe(1);
       expect(out.errors[0], cmd).toContain("Unknown option '--json'");
       expect(out.lines, cmd).toEqual([]);
+    }
+    for (const cmd of JSON_COMMANDS) {
+      // --yes beside --json is init's own refusal, so the flag reached the command instead of the parse turning it away.
+      const out = io();
+      expect(await cli([cmd, "--json", "--yes", "--state", statePath], out), cmd).toBe(1);
+      expect(out.errors[0], cmd).not.toContain("Unknown option");
+      expect(out.errors[0], cmd).toContain("--json");
     }
     const agented = io();
     expect(await cli(["up", "--agent", "claude", "--state", statePath], agented)).toBe(1);

@@ -4,7 +4,7 @@ import { CATALOG } from "@wsp/catalog";
 import { Recipe } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
 import { computeRecipe, unknownCommands } from "../src/recipe.js";
-import { readHistories } from "../src/history/index.js";
+import { HEAVY_BYTES, HEAVY_USED_FLOOR, USED_FLOOR, meetsUsedFloor, readHistories } from "../src/history/index.js";
 import { fakeHost } from "./fake-host.js";
 
 const claudeLine = (sessionId: string, command: string): string =>
@@ -16,7 +16,7 @@ const laptop = () =>
     files: {
       "~/.claude/settings.json": "{}",
       "~/.claude/skills/": 2048,
-      "~/.claude/projects/-Users-dev-proj/s1.jsonl": [claudeLine("s1", "agent-browser open https://x && export API=sk-ant-x-secret-value"), claudeLine("s1", "go version")].join("\n"),
+      "~/.claude/projects/-Users-dev-proj/s1.jsonl": [claudeLine("s1", "agent-browser open https://x && export API=sk-ant-x-secret-value"), claudeLine("s1", "agent-browser click a; agent-browser click b; agent-browser fill c"), claudeLine("s1", "go version")].join("\n"),
       "~/.claude/projects/-Users-dev-proj/s2.jsonl": claudeLine("s2", "agent-browser snapshot"),
     },
   });
@@ -26,18 +26,18 @@ describe("computeRecipe", () => {
     const recipe = await computeRecipe(laptop(), { now: () => new Date("2026-09-06T03:00:00Z") });
     const row = (id: string) => recipe.rows.find(r => r.id === id)!;
     expect(row("claude")).toEqual({ id: "claude", kind: "agent", on: true, source: { kind: "installed", paths: ["~/.claude/settings.json", "~/.claude/skills"], bin: true }, size: 208 * 1024 * 1024 });
-    expect(row("gh")).toEqual({ id: "gh", kind: "tool", on: true, source: { kind: "installed", paths: [], bin: true } });
-    expect(row("agent-browser")).toEqual({ id: "agent-browser", kind: "tool", on: true, source: { kind: "used", sessions: 2, calls: 2 } });
-    // One session's use is recorded but does not tick a row the catalog leaves off; two sessions do (agent-browser above).
+    expect(row("gh")).toEqual({ id: "gh", kind: "tool", on: true, source: { kind: "installed", paths: [], bin: true }, size: 42188962 });
+    expect(row("agent-browser")).toEqual({ id: "agent-browser", kind: "tool", on: true, source: { kind: "used", sessions: 2, calls: 5 }, size: 81702912 });
+    // One session's use is recorded but does not tick a row the catalog leaves off; the floor does (agent-browser above).
     expect(row("go")).toMatchObject({ on: false, source: { kind: "used", sessions: 1, calls: 1 } });
-    expect(row("pnpm")).toEqual({ id: "pnpm", kind: "tool", on: true, source: { kind: "popular", sessions: 36, images: 3 } });
+    expect(row("pnpm")).toEqual({ id: "pnpm", kind: "tool", on: true, source: { kind: "popular", sessions: 36, images: 3 }, size: 20357120 });
     expect(row("rust")).toMatchObject({ on: false, source: { kind: "popular", sessions: 4, images: 3 } });
     // An agent is never on by default: the ones not found here stay off, with the catalog's evidence as their source.
     expect(row("codex")).toEqual({ id: "codex", kind: "agent", on: false, source: { kind: "popular", sessions: 5, images: 1 }, size: 455 * 1024 * 1024 });
     expect(recipe.rows.map(r => r.id)).toEqual(CATALOG.map(e => e.id));
     expect(recipe.at).toBe("2026-09-06T03:00:00.000Z");
     expect(recipe.histories).toEqual([
-      { agent: "claude", state: "read", sessions: 2, calls: 3 },
+      { agent: "claude", state: "read", sessions: 2, calls: 4 },
       { agent: "codex", state: "empty", sessions: 0, calls: 0 },
       { agent: "gemini", state: "no-reader", sessions: 0, calls: 0 },
       { agent: "opencode", state: "no-reader", sessions: 0, calls: 0 },
@@ -56,7 +56,7 @@ describe("computeRecipe", () => {
     });
     const recipe = await computeRecipe(host);
     // The counts are the row's source, so a screen can say "installed here, never used" and mean it.
-    expect(recipe.rows.find(r => r.id === "gh")).toEqual({ id: "gh", kind: "tool", on: true, source: { kind: "used", sessions: 1, calls: 1 } });
+    expect(recipe.rows.find(r => r.id === "gh")).toEqual({ id: "gh", kind: "tool", on: true, source: { kind: "used", sessions: 1, calls: 1 }, size: 42188962 });
     expect(recipe.rows.find(r => r.id === "git")).toMatchObject({ on: true, source: { kind: "installed" } });
   });
 
@@ -68,9 +68,11 @@ describe("computeRecipe", () => {
     expect(row(blended, "jq")).toMatchObject({ on: false, source: { kind: "used", sessions: 1, calls: 1 } });
     // A tool the catalog ships on that nothing here touched still follows the catalog.
     expect(row(blended, "curl")).toMatchObject({ on: true, source: { kind: "popular" } });
-    // Two sessions is the habit the threshold names, and then it is on.
+    // Two sessions and five commands is the floor, and then it is on; two sessions of one command each is still a look.
     const twice = await computeRecipe(fakeHost({ files: { "~/.claude/projects/-Users-dev-proj/s1.jsonl": claudeLine("s1", "jq ."), "~/.claude/projects/-Users-dev-proj/s2.jsonl": claudeLine("s2", "jq .") } }));
-    expect(row(twice, "jq")).toMatchObject({ on: true, source: { kind: "used", sessions: 2 } });
+    expect(row(twice, "jq")).toMatchObject({ on: false, source: { kind: "used", sessions: 2, calls: 2 } });
+    const habit = await computeRecipe(fakeHost({ files: { "~/.claude/projects/-Users-dev-proj/s1.jsonl": claudeLine("s1", "jq . a; jq . b; jq . c; jq . d"), "~/.claude/projects/-Users-dev-proj/s2.jsonl": claudeLine("s2", "jq .") } }));
+    expect(row(habit, "jq")).toMatchObject({ on: true, source: { kind: "used", sessions: 2, calls: 5 } });
     // An agent's own store is a use now, so the row says so; an agent is still only ever ticked from this computer.
     expect(row(blended, "claude")).toMatchObject({ on: false, kind: "agent", source: { kind: "used", sessions: 1 } });
   });
@@ -81,8 +83,9 @@ describe("computeRecipe", () => {
     // Installed here counts for nothing under used: the source is read used first, so an installed row that
     // reaches the table was never run.
     expect(row(used, "gh")).toMatchObject({ on: false, source: { kind: "installed" } });
-    expect(row(used, "agent-browser")).toMatchObject({ on: true, source: { kind: "used", sessions: 2 } });
-    expect(row(used, "go")).toMatchObject({ on: true, source: { kind: "used", sessions: 1 } });
+    expect(row(used, "agent-browser")).toMatchObject({ on: true, source: { kind: "used", sessions: 2, calls: 5 } });
+    // One command in one session is under the floor, so used says off and the row keeps its counts.
+    expect(row(used, "go")).toMatchObject({ on: false, source: { kind: "used", sessions: 1, calls: 1 } });
     expect(row(used, "pnpm")).toMatchObject({ on: false, source: { kind: "popular" } });
     expect(used.tick).toBe("used");
 
@@ -95,6 +98,28 @@ describe("computeRecipe", () => {
     expect(row(byDefault, "pnpm")).toMatchObject({ on: true });
     expect(row(byDefault, "go")).toMatchObject({ on: false });
     expect(row(byDefault, "claude")).toMatchObject({ on: false, kind: "agent" });
+  });
+
+  it("under used a tool is on at the floor: 2 sessions and 5 commands, 3 and 20 for a heavy row", async () => {
+    // Session 0 carries what the others do not, so the counts land exactly.
+    const ran = (cmd: string, sessions: number, calls: number): Record<string, string> =>
+      Object.fromEntries(Array.from({ length: sessions }, (_, s) => [`~/.claude/projects/-Users-dev-proj/${cmd}-${s}.jsonl`, Array.from({ length: s === 0 ? calls - sessions + 1 : 1 }, () => claudeLine(`${cmd}-${s}`, `${cmd} run`)).join("\n")]));
+    const row = async (files: Record<string, string>, id: string) => (await computeRecipe(fakeHost({ files }), { tick: "used" })).rows.find(r => r.id === id)!;
+    expect(await row(ran("wrangler", 1, 2), "wrangler")).toMatchObject({ on: false, source: { kind: "used", sessions: 1, calls: 2 } });
+    expect(await row(ran("wrangler", 2, 6), "wrangler")).toMatchObject({ on: true, source: { kind: "used", sessions: 2, calls: 6 } });
+    // Java is over 300 MB, so it is weighed against the heavy floor.
+    expect(await row(ran("java", 3, 5), "java")).toMatchObject({ on: false, source: { kind: "used", sessions: 3, calls: 5 } });
+    expect(await row(ran("java", 4, 30), "java")).toMatchObject({ on: true, source: { kind: "used", sessions: 4, calls: 30 } });
+    // Two version checks in one session are no use at all: the row falls to the catalog's own evidence.
+    const checks = { "~/.claude/projects/-Users-dev-proj/s1.jsonl": [claudeLine("s1", "vercel --version"), claudeLine("s1", "vercel -v")].join("\n") };
+    expect(await row(checks, "vercel")).toMatchObject({ on: false, source: { kind: "popular" } });
+    expect(USED_FLOOR).toEqual({ sessions: 2, calls: 5 });
+    expect(HEAVY_USED_FLOOR).toEqual({ sessions: 3, calls: 20 });
+    expect(HEAVY_BYTES).toBe(300 * 1024 * 1024);
+    expect(meetsUsedFloor({ sessions: 2, calls: 5 }, HEAVY_BYTES)).toBe(true);
+    expect(meetsUsedFloor({ sessions: 2, calls: 5 }, HEAVY_BYTES + 1)).toBe(false);
+    expect(meetsUsedFloor({ sessions: 3, calls: 20 }, HEAVY_BYTES + 1)).toBe(true);
+    expect(meetsUsedFloor({ sessions: 1, calls: 50 }, undefined)).toBe(false);
   });
 
   it("holds an agent no adapter can open a thread on off under every rule but installed", async () => {
@@ -117,13 +142,13 @@ describe("computeRecipe", () => {
   it("lists the commands the agents ran that no catalog row carries, most-run first, catalog rows and builtins out", async () => {
     const host = fakeHost({
       files: {
-        "~/.claude/projects/-Users-dev-proj/s1.jsonl": [claudeLine("s1", "pytest -q && ruff check"), claudeLine("s1", "export X=1; pytest")].join("\n"),
-        "~/.claude/projects/-Users-dev-proj/s2.jsonl": claudeLine("s2", "pytest; go build"),
+        "~/.claude/projects/-Users-dev-proj/s1.jsonl": [claudeLine("s1", "pulumi -q && tofu check"), claudeLine("s1", "export X=1; pulumi")].join("\n"),
+        "~/.claude/projects/-Users-dev-proj/s2.jsonl": claudeLine("s2", "pulumi; go build"),
       },
     });
     expect(unknownCommands(await readHistories(host))).toEqual([
-      { name: "pytest", calls: 3, sessions: 2 },
-      { name: "ruff", calls: 1, sessions: 1 },
+      { name: "pulumi", calls: 3, sessions: 2 },
+      { name: "tofu", calls: 1, sessions: 1 },
     ]);
   });
 

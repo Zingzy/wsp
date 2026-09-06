@@ -7,16 +7,16 @@
 // the catalog knows). The recipe is the state: catalog ids with a tick each;
 // the collector's rows follow it.
 import type { Readable, Writable } from "node:stream";
-import { CATALOG_AGENTS, CATALOG_TOOLS, MCP_AGENTS, catalogEntry, type AgentEntry, type CatalogEntry, type ToolEntry, agentName as catalogName } from "@wsp/catalog";
-import type { LoginChoice, Manifest, ManifestEntry } from "@wsp/collect";
-import { MEASURED_ON, estimateDisk, isMcpRow, parseMcpId, plural, type BrewTable, type DiskEstimate } from "@wsp/engine";
-import { customRows, fmtBytes, type Recipe, type RecipeRow } from "@wsp/protocol";
+import { CATALOG_AGENTS, CATALOG_TOOLS, MCP_AGENTS, catalogEntry, type AgentEntry, type CatalogEntry, type Size, type ToolEntry, agentName as catalogName, sizeBytes } from "@wsp/catalog";
+import { type LoginChoice, type Manifest, type ManifestEntry, floorApplies } from "@wsp/collect";
+import { estimateDisk, isMcpRow, parseMcpId, plural, type BrewTable, type DiskEstimate } from "@wsp/engine";
+import { customRows, fmtBytes, type Recipe, type RecipeCustomRow, type RecipeRow } from "@wsp/protocol";
 import { mcpConfigFile } from "./mcp-install.js";
 import { GUTTER, colourDepth, isTTY } from "./init-layout.js";
 import { agentName, applyRecipe, comingRows, defaultAnswers, initialChoice, isTickable, loginEntryId, loginShown, loginTool, rowsHere } from "./init-recipe.js";
 import { ALSO_EMPTY, ALSO_EMPTY_TOP, ALSO_TITLE, ALSO_TOP, alsoGroupLine, alsoItems, scannedTicks, withScanned } from "./init-also.js";
 import { answerOf, rungSelect, type Choice, type FooterLine, type RungAnswer, type RungSelectResult, type SelectItem } from "./init-select.js";
-import { BASE_GROUP, groupTotal, recipeTable, sizeCell, totalsLine, whyCell, type TableRow } from "./init-table.js";
+import { BASE_GROUP, FLOOR_LINE, groupTotal, recipeTable, sizeCell, totalsLine, whyCell, type TableRow, UNKNOWN_SIZE } from "./init-table.js";
 import { diskHead, diskTone } from "./init-weight.js";
 import { hasLogin, signInFor, type SignIn } from "./signin-table.js";
 import { SIGN_IN_CHOICES, SIGN_IN_WORDS, signInChoice } from "./signin-words.js";
@@ -30,7 +30,7 @@ export const TOOLS_TITLE = "Tools";
 export const TOOLS_TOP = "What installs on the image, from what you use.";
 export const SIGN_INS_TITLE = "Sign-ins";
 export const SIGN_INS_TOP = "Each row is something the machine needs to be signed in to. Choose how.";
-export const WSP_TITLE = "wsp for your agents";
+export const WSP_TITLE = "wsp for your agents on this Mac";
 export const WSP_TOP = "Add wsp's MCP server and skill to the agents installed here, so they can drive your workspaces.";
 /** How many screens a run has, the build counted; the counter on every screen reads against it. */
 export const SCREENS = 6;
@@ -43,7 +43,10 @@ const onThisMac = (recipe: Recipe, id: string): boolean => rowOf(recipe, id)?.so
  * never named gets a row on the catalog's own evidence, so a tick on a fresh Mac is kept. */
 function withTicks(recipe: Recipe, kind: RecipeRow["kind"], entries: readonly CatalogEntry[], on: (id: string) => boolean): Recipe {
   const rows = recipe.rows.map(r => (r.kind === kind ? { ...r, on: on(r.id) } : r));
-  const missing = entries.filter(e => !rows.some(r => r.id === e.id)).map((e): RecipeRow => ({ id: e.id, kind: e.kind, on: on(e.id), source: { kind: "popular", sessions: e.source.sessions, images: e.source.images }, ...(e.size !== undefined ? { size: e.size } : {}) }));
+  const missing = entries.filter(e => !rows.some(r => r.id === e.id)).map((e): RecipeRow => {
+    const bytes = sizeBytes(e.size);
+    return { id: e.id, kind: e.kind, on: on(e.id), source: { kind: "popular", sessions: e.source.sessions, images: e.source.images }, ...(bytes !== undefined ? { size: bytes } : {}) };
+  });
   return { ...recipe, rows: [...rows, ...missing] };
 }
 
@@ -52,10 +55,12 @@ export function withAgents(recipe: Recipe, on: ReadonlySet<string>): Recipe {
   return withTicks(recipe, "agent", CATALOG_AGENTS, id => on.has(id));
 }
 
-/** The recipe with the tools rows ticked as the list left them; a floor row stays on, since the base installs it anyway. */
+/** The recipe with the tools rows ticked as the list left them; a floor row stays on, since the base installs it
+ * anyway, and a row an agent added is on by being on the recipe, so leaving it unticked takes it off. */
 export function withTools(recipe: Recipe, on: ReadonlySet<string>): Recipe {
   const floor = new Set(CATALOG_TOOLS.filter(e => e.floor).map(e => e.id));
-  return withTicks(recipe, "tool", CATALOG_TOOLS, id => floor.has(id) || on.has(id));
+  const custom = customRows(recipe).filter(c => on.has(c.id));
+  return { ...withTicks(recipe, "tool", CATALOG_TOOLS, id => floor.has(id) || on.has(id)), ...(recipe.custom !== undefined ? { custom } : {}) };
 }
 
 /** The recipe with the agents and the tools ticked as the table screen left them. */
@@ -92,15 +97,26 @@ function agentDetail(recipe: Recipe, manifest: Manifest, a: AgentEntry): string[
   const own = manifest.entries.find(e => e.rung === "agents" && agentName(e) === a.id);
   const config = own !== undefined && own.bytes > 0 ? `; its config (${fmtBytes(own.bytes)}) comes along` : "";
   const here = onThisMac(recipe, a.id) ? `on this Mac${config}` : "not on this Mac; try it on the machine, nothing here changes";
-  return [here, a.size !== undefined ? `installs about ${fmtBytes(a.size)} on the machine (measured ${MEASURED_ON})` : "installs on the machine; size not measured yet"];
+  return [here, sizeLine(a.size)];
 }
+
+/** What a row costs on the machine, in the one phrasing every row uses: the catalog's bytes with the day they were
+ * measured, or the plan's words for a row nobody measured. */
+function sizeLine(size: Size): string {
+  return "bytes" in size ? `about ${fmtBytes(size.bytes)} installed on the machine (measured ${size.on})` : UNKNOWN_SIZE;
+}
+
+const hintOf = (size: Size): { hint?: string } => {
+  const bytes = sizeBytes(size);
+  return bytes !== undefined ? { hint: fmtBytes(bytes) } : {};
+};
 
 /** The six agents: a size beside each, ticked when this Mac has it, the detail saying what comes and what installs. */
 export function agentItems(recipe: Recipe, manifest: Manifest): SelectItem[] {
   return CATALOG_AGENTS.map(a => ({
     id: a.id,
     label: a.name,
-    ...(a.size !== undefined ? { hint: fmtBytes(a.size) } : {}),
+    ...hintOf(a.size),
     detail: agentDetail(recipe, manifest, a),
   }));
 }
@@ -119,10 +135,15 @@ function sourceLine(e: ToolEntry, r: RecipeRow | undefined): string {
   }
 }
 
+/** An added row's two detail lines: the lines that install it, and the command that says it is there. */
+function customDetail(c: RecipeCustomRow): string[] {
+  return [`installs with ${c.install.join("; ")}`, `checked with ${c.check}`];
+}
+
 /** A tool's two detail lines: where its tick came from with the counts, then what the build does with it. */
 function toolDetail(recipe: Recipe, here: ReadonlySet<string>, e: ToolEntry): string[] {
   const r = rowOf(recipe, e.id);
-  const size = e.size !== undefined ? `about ${fmtBytes(e.size)} on the machine` : "size not measured yet";
+  const size = sizeLine(e.size);
   const build = e.floor ? "part of the base on every machine" : here.has(e.id) ? size : `${size}; no row here; installed by its ${e.installRoad.road} road`;
   return [e.floor ? `${sourceLine(e, r)}; on every machine` : sourceLine(e, r), build];
 }
@@ -261,9 +282,11 @@ export function wspToolsItems(recipe: Recipe, home: string): { items: SelectItem
  * what the build does with it. The tools screen groups them by why; the agents screen is one flat list. */
 export function tableItems(rows: readonly TableRow[], recipe: Recipe, manifest: Manifest, depth: number, grouped: boolean): SelectItem[] {
   const here = rowsHere(manifest.entries);
+  const custom = new Map(customRows(recipe).map(c => [c.id, c]));
   return rows.map((row): SelectItem => {
-    const e = catalogEntry(row.id);
-    const detail = e === undefined ? [] : e.kind === "agent" ? agentDetail(recipe, manifest, e) : toolDetail(recipe, here, e);
+    const e = row.kind === "custom" ? undefined : catalogEntry(row.id);
+    const c = custom.get(row.id);
+    const detail = e !== undefined ? (e.kind === "agent" ? agentDetail(recipe, manifest, e) : toolDetail(recipe, here, e)) : c !== undefined ? customDetail(c) : [];
     return {
       id: row.id,
       label: row.name,
@@ -389,7 +412,7 @@ export async function pickScreens(o: PickOptions): Promise<Picked | "cancel"> {
           grouped: true,
           footer: ticks => {
             const next = withTools(recipe, ticks);
-            return [totalsLine(recipeTable(next, CATALOG_TOOLS), "tools"), diskFooter(pickEstimate(o.manifest, next, o.brew))];
+            return [totalsLine(recipeTable(next, CATALOG_TOOLS), "tools"), ...(floorApplies(recipe.tick) ? [{ text: FLOOR_LINE }] : []), diskFooter(pickEstimate(o.manifest, next, o.brew))];
           },
           ...streams,
         });

@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { MCP_ID_PREFIX, shellQuote, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
-import { APT_ENV, APT_INDEX, APT_UPDATE, BREW, BREW_PREFIX, CATALOG_AGENTS, CLAUDE_KEY_FILE, HOMEBREW, HOMEBREW_STEP, NODE_PATH_LINE, NODE_RELEASES, LINUXBREW_SHIM, ROADS, UV_INSTALL, asLinuxbrew, asLinuxbrewScript, baseEntryFor, baseNote, catalogEntry, installLine, nodeInstallScript, pinStateOf, ROAD_MODULES, roadModule, smokeOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolPin } from "@wsp/catalog";
+import { APT_ENV, APT_INDEX, APT_UPDATE, BREW, BREW_PREFIX, CATALOG_AGENTS, CLAUDE_KEY_FILE, HOMEBREW, HOMEBREW_STEP, NODE_PATH_LINE, NODE_RELEASES, LINUXBREW_SHIM, ROADS, UV_INSTALL, asLinuxbrew, asLinuxbrewScript, baseEntryFor, baseNote, catalogEntry, catalogToolFor, installLine, nodeInstallScript, pinStateOf, ROAD_MODULES, roadModule, smokeOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolPin } from "@wsp/catalog";
 
 export { CLAUDE_KEY_FILE, HOMEBREW, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
 
@@ -643,9 +643,15 @@ const MANAGER_ORDER: readonly ("npm" | "pnpm" | "bun" | "uv" | "pipx" | "cargo" 
 // Each is its own single brew process, in this order, before any formula.
 export const BREW_TOOLCHAIN: readonly string[] = ["glibc", "gcc"];
 
-/** How a manager the base does not carry gets onto the machine before its first tool: as a Homebrew for Linux
- * formula. A manager the floor brings (see baseEntryFor) needs none. */
-export const MANAGER_FORMULA: Readonly<Partial<Record<RoadName, string>>> = { bun: "bun", pipx: "pipx", cargo: "rust", go: "go" };
+/** The formula a manager with no catalog row comes by. */
+const MANAGER_FORMULA: Readonly<Partial<Record<RoadName, string>>> = { pipx: "pipx" };
+
+/** The Homebrew formula a manager comes by: its catalog row's, when that row takes the brew road, else the one named
+ * here; nothing for a manager the catalog installs another way or the base carries. */
+export function managerFormula(manager: RoadName): string | undefined {
+  const road = catalogToolFor(manager)?.installRoad;
+  return road === undefined ? MANAGER_FORMULA[manager] : road.road === "brew" ? road.formula : undefined;
+}
 
 const pinOf = (e: { pin?: ToolPin }): { pin?: ToolPin } => (e.pin !== undefined ? { pin: e.pin } : {});
 
@@ -760,22 +766,26 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
   // A row outside the catalog calls its manager's own command, so it counts as a row of that manager here: the
   // manager is brought onto the machine the one way this function knows, and the row waits on it.
   const customOf = (manager: RoadName): RecipeCustomRow[] => custom.filter(c => managerRoad(c) === manager);
-  // One step per manager that has rows, unless the base carries it or it already comes along as a formula, a catalog row or an npm global.
+  // One step per manager that has rows, unless the base carries it or it already comes along as a formula, a ticked
+  // catalog row or an npm global; the step takes the manager's catalog road, or its formula when the catalog has none.
   const managers = new Map<RoadName, { after: string; step?: ToolInstall; row?: { e: RecipeEntry; planned: PlannedRow } }>();
   const managerFormulae: string[] = [];
   for (const manager of MANAGER_ORDER) {
     if (rowsOf(manager).length + catalogRowsOf(manager).length + customOf(manager).length === 0 || baseEntryFor(manager) !== undefined) continue;
     const own = `tools/manager/${manager}`;
-    const formula = MANAGER_FORMULA[manager];
-    if (formula === undefined) throw new Error(`${manager} is neither in the base nor a formula`);
-    const fromCatalog = catalog.find(c => c.planned.road.road === "brew" && roadModule(c.planned.road).names(c.planned.road).includes(formula));
-    if (brew.formulae.includes(formula)) managers.set(manager, { after: `tools/brew/${formula}` });
+    const entry = catalogToolFor(manager);
+    const formula = managerFormula(manager);
+    const fromCatalog = entry === undefined ? undefined : catalog.find(c => packageOf(c.e) === entry.id);
+    // This Mac's Brewfile may already carry the manager, under its formula's name or its own.
+    const macFormula = [formula, manager].find(f => f !== undefined && brew.formulae.includes(f));
+    if (macFormula !== undefined) managers.set(manager, { after: `tools/brew/${macFormula}` });
     else if (fromCatalog !== undefined) managers.set(manager, { after: fromCatalog.e.id, row: fromCatalog });
     else if (npmTicked.has(manager)) managers.set(manager, { after: `tools/npm/${manager}` });
-    else {
+    else if (formula !== undefined) {
       managers.set(manager, { after: own, step: { id: own, label: manager, manager: "brew", cmd: withPath(asLinuxbrew(`install ${formula}`)), after: toolchain.last } });
       managerFormulae.push(formula);
-    }
+    } else if (entry !== undefined) managers.set(manager, { after: own, step: { id: own, label: manager, manager: entry.installRoad.road, cmd: withPath(installLine(entry)), bin: entry.bin } });
+    else throw new Error(`${manager} is neither in the base, nor in the catalog, nor a formula`);
   }
   const catalogFormulae = catalog.flatMap(c => (c.planned.road.road === "brew" ? roadModule(c.planned.road).names(c.planned.road) : []));
 

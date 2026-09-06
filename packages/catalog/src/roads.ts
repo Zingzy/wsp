@@ -186,6 +186,12 @@ export const PYTHON_INSTALL = [
   'ln -sfn "$(uv python find --managed-python 3.12)" /usr/local/bin/python3',
 ].join("\n");
 
+/** Debian ships fd as fdfind to dodge a name clash; agents type fd, so the row links it onto PATH under that name. */
+export const FD_INSTALL = [APT_ENV, "apt-get install -y -qq fd-find", "ln -sfn /usr/bin/fdfind /usr/local/bin/fd"].join("\n");
+
+/** Yarn through the corepack Node 22 ships, pinned to the current stable line, with the download prompt off. */
+export const YARN_INSTALL = ["corepack enable yarn", "COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack install -g yarn@stable"].join("\n");
+
 const HERMES = { tag: "v2026.8.31", commit: "29112bef099274229cadff79cdff7bf7b99c4b77" } as const;
 
 /** https://hermes-agent.nousresearch.com/docs/developer-guide/contributing#manual-clone-fallback */

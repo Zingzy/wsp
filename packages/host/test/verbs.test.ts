@@ -164,6 +164,12 @@ describe("wsp verbs over the host", () => {
     expect(io.lines[0]).toContain(line);
   });
 
+  it("wsp --help names the six screens of wsp init in order, as the wizard draws them", () => {
+    expect(HELP).not.toContain("three screens");
+    const init = HELP.slice(HELP.indexOf("  wsp init "), HELP.indexOf("  wsp recipe scan ")).replace(/\s+/g, " ");
+    expect(init).toContain("six screens: Agents, Tools, Also on this Mac, Sign-ins, wsp for your agents on this Mac, and Build");
+  });
+
   it("every line of wsp --help fits 100 columns", () => {
     const wide = HELP.split("\n").filter(l => l.length > 100);
     expect(wide).toEqual([]);

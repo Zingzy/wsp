@@ -8,14 +8,16 @@ import { CLAUDE_CONTEXT, CODEX_CONTEXT, GEMINI_CONTEXT, HERMES_CONTEXT, OPENCODE
 import { GCLOUD, KUBECTL } from "./linux-casks.js";
 import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, type McpConfig } from "./mcp.js";
 import { APT_INDEX, roadModule } from "./road-modules.js";
-import { CLAUDE_CONFIG_DIR, DOCKER_INSTALL, GOLDEN_SETUP, HERMES_INSTALL, MIB, NODE_RELEASES, PYTHON_INSTALL, UV_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
+import type { RoadName } from "./roads.js";
+import { CLAUDE_CONFIG_DIR, DOCKER_INSTALL, FD_INSTALL, GOLDEN_SETUP, HERMES_INSTALL, MIB, NODE_RELEASES, PYTHON_INSTALL, UV_INSTALL, YARN_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
 import { NO_SIGN_IN, SIGN_IN_ROWS, hasLogin, keysIdOf, keysRowOf, loginIdOf, type KeyFiles, type SignIn } from "./signin.js";
 
 export type EntryKind = "agent" | "tool";
 
 /** Where a default comes from: sessions with a tool call on the machine the histories were mined from (155 of them,
- * one Mac, 2026-09-05; an agent's row counts the sessions it ran), the count of the five published lab sandbox
- * images that ship the tool, and whether a guest has run the entry's road. */
+ * one Mac, 2026-09-05; the rows added on 2026-09-07 count the same Mac's 153; an agent's row counts the sessions it
+ * ran), the count of the five published lab sandbox images that ship the tool, and whether a guest has run the
+ * entry's road. */
 export interface Evidence {
   sessions: number;
   images: number;
@@ -50,8 +52,7 @@ interface EntryBase {
   /** Config the entry rewrites while it runs: it travels, and never decides whether a golden is the same golden. */
   volatile?: readonly string[];
   source: Evidence;
-  /** Bytes on the machine where measured. */
-  size?: number;
+  size: Size;
 }
 
 /** The session store formats a reader exists for; the collector registers one reader per format. */
@@ -109,58 +110,42 @@ export interface ToolEntry extends EntryBase {
 
 export type CatalogEntry = AgentEntry | ToolEntry;
 
-/** Cellar sizes on the Linux builder, as brew printed them after each pour on 2026-09-05; the Mac's Cellar
- * stands in for the rest, and for these two llvm builds it was a gigabyte short. */
-export const LINUX_FORMULA_MIB: Readonly<Record<string, number>> = {
-  "llvm@21": 2560,
-  "llvm@20": 2458,
-  openjdk: 412,
-  "openjdk@21": 343,
-  "openjdk@17": 316,
-  go: 251,
-  "firebase-cli": 262,
-  gradle: 220,
-  zig: 214,
-  "zig@0.15": 200,
-  swiftlint: 169,
-  mongosh: 156,
-  binutils: 135,
-  beads: 138,
-  logcli: 121,
-  node: 113,
-  rclone: 110,
-  "node@24": 106,
-  "icu4c@78": 94,
-  goreleaser: 85,
-  "python@3.14": 82,
-  "python@3.12": 77,
-  helm: 65,
-  uv: 60,
-  "helm@3": 60,
-};
+/** The ways a row's bytes were read, one entry each; a row names the one that measured it. Every method reads the
+ * amd64 install, the arch the machines run. */
+export const SIZE_METHODS = {
+  df: "df before and after the install on a Linux machine, caches included",
+  apt: "apt Installed-Size summed over the packages the install adds to debian:bookworm",
+  brew: "installed_size on the x86_64_linux bottle manifests of the formula and its runtime dependencies",
+  du: "du over what the install wrote, before and after, on node:22-bookworm",
+  unpacked: "the Linux x86_64 download, unpacked where it is an archive",
+} as const;
+export type SizeMethod = keyof typeof SIZE_METHODS;
 
-/** What df moved across each agent's install on the same builder: the global, its caches and whatever the
- * installer put under /root; the cache sweep after the stage gives some of it back. */
-const AGENT_MIB = { claude: 208, codex: 455, gemini: 189, opencode: 673, pi: 165, hermes: 484 } as const;
+/** What a row puts on the machine: the bytes with the day and the method that read them, or why nobody could. */
+export type Size = { bytes: number; on: string; method: SizeMethod } | { unmeasured: string };
 
-/** The Node release the agents stage puts under /usr/local when the base's major is under their floor. */
-export const NODE_BYTES = 250 * MIB;
+/** The bytes a size carries, or nothing for a row nobody measured. */
+export function sizeBytes(s: Size): number | undefined {
+  return "bytes" in s ? s.bytes : undefined;
+}
 
-const brew = (formula: string): { installRoad: InstallRoad; size?: number } => {
-  const mib = LINUX_FORMULA_MIB[formula];
-  return { installRoad: { road: "brew", formula }, ...(mib !== undefined ? { size: mib * MIB } : {}) };
-};
-const apt = (...packages: string[]): InstallRoad => ({ road: "apt", packages });
-const npm = (pkg: string, version?: string): InstallRoad => ({ road: "npm", package: pkg, ...(version !== undefined ? { version } : {}) });
-/** A release road; `go` is the repository's main package for the fall-through, left off when it has none. */
-const github = (repo: string, go?: string): InstallRoad => ({ road: "release", repo, ...(go !== undefined ? { go } : {}) });
+const MEASURED_ON = "2026-09-07";
+const measured = (method: SizeMethod, bytes: number, on: string = MEASURED_ON): Size => ({ bytes, on, method });
+const brew = (formula: string, bytes: number): { installRoad: InstallRoad; size: Size } => ({ installRoad: { road: "brew", formula }, size: measured("brew", bytes) });
+const apt = (bytes: number, ...packages: string[]): { installRoad: InstallRoad; size: Size } => ({ installRoad: { road: "apt", packages }, size: measured("apt", bytes) });
+const npm = (bytes: number, pkg: string, version?: string): { installRoad: InstallRoad; size: Size } => ({ installRoad: { road: "npm", package: pkg, ...(version !== undefined ? { version } : {}) }, size: measured("du", bytes) });
+const uvTool = (bytes: number, pkg: string): { installRoad: InstallRoad; size: Size } => ({ installRoad: { road: "uv", package: pkg }, size: measured("du", bytes) });
+/** A release road; `go` is the repository's main package for the fall-through, left off when it has none; the bytes are the binary's. */
+const github = (bytes: number, repo: string, go?: string): { installRoad: InstallRoad; size: Size } => ({ installRoad: { road: "release", repo, ...(go !== undefined ? { go } : {}) }, size: measured("unpacked", bytes) });
 const tool = { kind: "tool", configPaths: [], floor: false } as const;
-const agent = (id: keyof typeof AGENT_MIB) => ({ id, kind: "agent", bin: id, size: AGENT_MIB[id] * MIB }) as const;
+/** An agent's bytes are what df moved across its install on the builder: the global, its caches and whatever the
+ * installer put under /root; the cache sweep after the stage gives some of it back. */
+const agent = (id: string, mib: number) => ({ id, kind: "agent", bin: id, size: measured("df", mib * MIB, "2026-09-05") }) as const;
 
 export const CATALOG: readonly CatalogEntry[] = [
   // --- agents: the six whose project state a move can follow -------------------------------------------------------
   {
-    ...agent("claude"),
+    ...agent("claude", 208),
     threads: true,
     stateHome: ".claude",
     guestStateHome: CLAUDE_CONFIG_DIR,
@@ -188,12 +173,12 @@ export const CATALOG: readonly CatalogEntry[] = [
     source: { sessions: 149, images: 1, road: "measured" },
   },
   {
-    ...agent("codex"),
+    ...agent("codex", 455),
     stateHome: ".codex",
     name: "Codex",
     context: CODEX_CONTEXT,
     skills: "~/.codex/skills",
-    installRoad: npm("@openai/codex", "0.153.0"),
+    installRoad: { road: "npm", package: "@openai/codex", version: "0.153.0" },
     node: 16,
     signIn: SIGN_IN_ROWS.codex,
     // https://developers.openai.com/codex/config-basic (project scope is a trusted repo's .codex/config.toml)
@@ -209,12 +194,12 @@ export const CATALOG: readonly CatalogEntry[] = [
     source: { sessions: 5, images: 1, road: "measured" },
   },
   {
-    ...agent("gemini"),
+    ...agent("gemini", 189),
     stateHome: ".gemini",
     name: "Gemini CLI",
     context: GEMINI_CONTEXT,
     skills: "~/.gemini/skills",
-    installRoad: npm("@google/gemini-cli", "0.58.0"),
+    installRoad: { road: "npm", package: "@google/gemini-cli", version: "0.58.0" },
     node: 20,
     signIn: SIGN_IN_ROWS.gemini,
     // https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md (project scope is a repo's .gemini/settings.json)
@@ -230,12 +215,12 @@ export const CATALOG: readonly CatalogEntry[] = [
     source: { sessions: 0, images: 0, road: "measured" },
   },
   {
-    ...agent("opencode"),
+    ...agent("opencode", 673),
     stateHome: ".local/share/opencode",
     name: "OpenCode",
     context: OPENCODE_CONTEXT,
     skills: "~/.config/opencode/skills",
-    installRoad: npm("opencode-ai", "1.18.27"),
+    installRoad: { road: "npm", package: "opencode-ai", version: "1.18.27" },
     signIn: SIGN_IN_ROWS.opencode,
     // https://opencode.ai/docs/mcp-servers/ (project scope is a repo's opencode.json)
     mcp: { format: OPENCODE_JSON, files: ["~/.config/opencode/opencode.json", "~/.config/opencode/opencode.jsonc"], scope: "user scope" },
@@ -251,7 +236,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     source: { sessions: 0, images: 0, road: "measured" },
   },
   {
-    ...agent("pi"),
+    ...agent("pi", 165),
     stateHome: ".pi/agent",
     name: "Pi",
     context: PI_CONTEXT,
@@ -271,7 +256,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     source: { sessions: 0, images: 0, road: "measured" },
   },
   {
-    ...agent("hermes"),
+    ...agent("hermes", 484),
     stateHome: ".hermes",
     name: "Hermes Agent",
     context: HERMES_CONTEXT,
@@ -289,42 +274,60 @@ export const CATALOG: readonly CatalogEntry[] = [
 
   // --- tools on by default: both sources agree or one is overwhelming --------------------------------------------
   // The floor rows first, in the order the base stage installs them: a row waits only on rows above it.
-  { ...tool, id: "node", name: "Node 22 with npm", bin: "node", installRoad: { road: "script", script: nodeInstallScript(22, NODE_RELEASES[22]) }, floor: true, covers: ["node@22"], major: { name: "Node", version: "22" }, brings: [{ bin: "npm", version: "npm --version" }], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 73, images: 5, road: "measured" }, size: NODE_BYTES },
-  { ...tool, id: "pnpm", name: "pnpm", bin: "pnpm", installRoad: npm("pnpm", "11.9.0"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 36, images: 3, road: "unmeasured" } },
-  { ...tool, id: "uv", name: "uv", bin: "uv", installRoad: { road: "script", script: UV_INSTALL }, floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 46, images: 3, road: "unmeasured" } },
-  { ...tool, id: "python", name: "Python 3.12", bin: "python3", installRoad: { road: "script", script: PYTHON_INSTALL }, floor: true, after: "uv", covers: ["python@3.12"], major: { name: "Python", version: "3.12" }, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 107, images: 4, road: "unmeasured" } },
-  { ...tool, id: "git", name: "git", bin: "git", installRoad: apt("git"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 118, images: 5, road: "unmeasured" } },
-  { ...tool, id: "jq", name: "jq", bin: "jq", installRoad: apt("jq"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 17, images: 5, road: "unmeasured" } },
-  { ...tool, id: "ripgrep", name: "ripgrep", bin: "rg", installRoad: apt("ripgrep"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 10, images: 4, road: "unmeasured" } },
-  { ...tool, id: "curl", name: "curl", bin: "curl", installRoad: apt("curl"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 87, images: 4, road: "unmeasured" } },
-  { ...tool, id: "docker", name: "Docker engine and compose", bin: "docker", installRoad: { road: "script", script: DOCKER_INSTALL }, floor: true, after: APT_INDEX, covers: ["docker-compose"], brings: [{ bin: "docker compose", version: "docker compose version" }], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 30, images: 3, road: "unmeasured" } },
+  { ...tool, id: "node", name: "Node 22 with npm", bin: "node", installRoad: { road: "script", script: nodeInstallScript(22, NODE_RELEASES[22]) }, floor: true, covers: ["node@22"], major: { name: "Node", version: "22" }, brings: [{ bin: "npm", version: "npm --version" }], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 73, images: 5, road: "measured" }, size: measured("unpacked", 208449536) },
+  { ...tool, id: "pnpm", name: "pnpm", bin: "pnpm", ...npm(20357120, "pnpm", "11.9.0"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 36, images: 3, road: "unmeasured" } },
+  { ...tool, id: "uv", name: "uv", bin: "uv", installRoad: { road: "script", script: UV_INSTALL }, floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 46, images: 3, road: "unmeasured" }, size: measured("unpacked", 49660896) },
+  { ...tool, id: "python", name: "Python 3.12", bin: "python3", installRoad: { road: "script", script: PYTHON_INSTALL }, floor: true, after: "uv", covers: ["python@3.12"], major: { name: "Python", version: "3.12" }, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 107, images: 4, road: "unmeasured" }, size: measured("du", 108105728) },
+  { ...tool, id: "git", name: "git", bin: "git", ...apt(123789312, "git"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 118, images: 5, road: "unmeasured" } },
+  { ...tool, id: "jq", name: "jq", bin: "jq", ...apt(1170432, "jq"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 17, images: 5, road: "unmeasured" } },
+  { ...tool, id: "ripgrep", name: "ripgrep", bin: "rg", ...apt(4666368, "ripgrep"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 10, images: 4, road: "unmeasured" } },
+  { ...tool, id: "curl", name: "curl", bin: "curl", ...apt(15748096, "curl"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 87, images: 4, road: "unmeasured" } },
+  { ...tool, id: "docker", name: "Docker engine and compose", bin: "docker", installRoad: { road: "script", script: DOCKER_INSTALL }, floor: true, after: APT_INDEX, covers: ["docker-compose"], brings: [{ bin: "docker compose", version: "docker compose version" }], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 30, images: 3, road: "unmeasured" }, size: measured("df", 541765632) },
+  { ...tool, id: "build-essential", name: "C toolchain with cmake and ninja", bin: "cc", ...apt(491381760, "build-essential", "cmake", "ninja-build"), floor: true, covers: ["gcc", "g++", "make"], brings: [{ bin: "cmake", version: "cmake --version" }, { bin: "ninja", version: "ninja --version" }], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 15, images: 4, road: "unmeasured" } },
+  { ...tool, id: "fd", name: "fd", bin: "fd", installRoad: { road: "script", script: FD_INSTALL }, floor: true, after: APT_INDEX, covers: ["fd-find", "fdfind"], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 0, images: 1, road: "unmeasured" }, size: measured("apt", 3024896) },
+  { ...tool, id: "sqlite3", name: "sqlite3", bin: "sqlite3", ...apt(2845696, "sqlite3"), floor: true, covers: ["sqlite"], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 5, images: 1, road: "unmeasured" } },
+  { ...tool, id: "wget", name: "wget", bin: "wget", ...apt(12990464, "wget"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 0, images: 0, road: "unmeasured" } },
+  { ...tool, id: "zip", name: "zip and unzip", bin: "zip", ...apt(1019904, "zip", "unzip"), floor: true, brings: [{ bin: "unzip", version: "unzip -v" }], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 7, images: 0, road: "unmeasured" } },
+  { ...tool, id: "xz", name: "xz", bin: "xz", ...apt(1255424, "xz-utils"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 0, images: 0, road: "unmeasured" } },
+  { ...tool, id: "rsync", name: "rsync", bin: "rsync", ...apt(7237632, "rsync"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 2, images: 0, road: "unmeasured" } },
   // gh has no pinned release yet and agent-browser waits on a second data point: default-on through the tools stage.
-  { ...tool, id: "gh", name: "GitHub CLI", bin: "gh", installRoad: github("cli/cli", "github.com/cli/cli/v2/cmd/gh"), signIn: SIGN_IN_ROWS.gh, defaultOn: true, source: { sessions: 100, images: 3, road: "unmeasured" } },
-  { ...tool, id: "agent-browser", name: "agent-browser", bin: "agent-browser", installRoad: npm("agent-browser", "0.31.1"), signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 45, images: 0, road: "unmeasured", note: "sessions counted on one Mac only; on by default for this user until a second data point" } },
+  { ...tool, id: "gh", name: "GitHub CLI", bin: "gh", ...github(42188962, "cli/cli", "github.com/cli/cli/v2/cmd/gh"), signIn: SIGN_IN_ROWS.gh, defaultOn: true, source: { sessions: 100, images: 3, road: "unmeasured" } },
+  { ...tool, id: "agent-browser", name: "agent-browser", bin: "agent-browser", ...npm(81702912, "agent-browser", "0.31.1"), signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 45, images: 0, road: "unmeasured", note: "sessions counted on one Mac only; on by default for this user until a second data point" } },
 
   // --- tools on request ---------------------------------------------------------------------------------------------
-  { ...tool, id: "go", name: "Go", bin: "go", ...brew("go"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 9, images: 4, road: "measured" } },
-  { ...tool, id: "rust", name: "Rust with cargo", bin: "cargo", ...brew("rust"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 4, images: 3, road: "unmeasured" } },
-  { ...tool, id: "java", name: "Java 21", bin: "java", ...brew("openjdk@21"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 4, road: "measured" } },
-  { ...tool, id: "maven", name: "Maven", bin: "mvn", ...brew("maven"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 4, road: "unmeasured" } },
-  { ...tool, id: "gradle", name: "Gradle", bin: "gradle", ...brew("gradle"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 4, road: "measured" } },
-  { ...tool, id: "wrangler", name: "Cloudflare Wrangler", bin: "wrangler", installRoad: npm("wrangler"), covers: ["cloudflare-wrangler"], signIn: SIGN_IN_ROWS.wrangler, defaultOn: false, source: { sessions: 3, images: 0, road: "unmeasured" } },
-  { ...tool, id: "cloudflared", name: "cloudflared", bin: "cloudflared", installRoad: github("cloudflare/cloudflared", "github.com/cloudflare/cloudflared/cmd/cloudflared"), signIn: SIGN_IN_ROWS.cloudflared, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" } },
-  { ...tool, id: "gcloud", name: "Google Cloud CLI", bin: "gcloud", installRoad: { road: "vendor", cask: GCLOUD }, signIn: SIGN_IN_ROWS.gcloud, defaultOn: false, source: { sessions: 4, images: 0, road: "measured" } },
-  { ...tool, id: "kubectl", name: "kubectl", bin: "kubectl", installRoad: { road: "vendor", cask: KUBECTL }, covers: ["kubernetes-cli"], signIn: SIGN_IN_ROWS.kubectl, defaultOn: false, source: { sessions: 1, images: 1, road: "unmeasured" } },
-  { ...tool, id: "aws", name: "AWS CLI", bin: "aws", ...brew("awscli"), signIn: SIGN_IN_ROWS.aws, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
-  { ...tool, id: "vercel", name: "Vercel CLI", bin: "vercel", installRoad: npm("vercel"), signIn: SIGN_IN_ROWS.vercel, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
-  { ...tool, id: "netlify", name: "Netlify CLI", bin: "netlify", installRoad: npm("netlify-cli"), signIn: SIGN_IN_ROWS.netlify, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
-  { ...tool, id: "fly", name: "flyctl", bin: "fly", installRoad: github("superfly/flyctl", "github.com/superfly/flyctl"), signIn: SIGN_IN_ROWS.fly, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
-  { ...tool, id: "supabase", name: "Supabase CLI", bin: "supabase", installRoad: github("supabase/cli"), signIn: SIGN_IN_ROWS.supabase, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
-  { ...tool, id: "railway", name: "Railway CLI", bin: "railway", installRoad: npm("@railway/cli"), signIn: SIGN_IN_ROWS.railway, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
-  { ...tool, id: "doppler", name: "Doppler CLI", bin: "doppler", installRoad: github("DopplerHQ/cli", "github.com/DopplerHQ/cli"), signIn: SIGN_IN_ROWS.doppler, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" } },
+  { ...tool, id: "go", name: "Go", bin: "go", ...brew("go", 250752891), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 9, images: 4, road: "measured" } },
+  // Homebrew's rust bottle links against its llvm bottle, which is 2.5 GB of the total.
+  { ...tool, id: "rust", name: "Rust with cargo", bin: "cargo", ...brew("rust", 3153304814), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 4, images: 3, road: "unmeasured" } },
+  { ...tool, id: "java", name: "Java 21", bin: "java", ...brew("openjdk@21", 613280230), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 4, road: "measured" } },
+  { ...tool, id: "maven", name: "Maven", bin: "mvn", ...brew("maven", 677043395), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 4, road: "unmeasured" } },
+  { ...tool, id: "gradle", name: "Gradle", bin: "gradle", ...brew("gradle", 885977407), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 4, road: "measured" } },
+  { ...tool, id: "bun", name: "Bun", bin: "bun", ...npm(79572992, "bun"), brings: [{ bin: "bunx", version: "bunx --version" }], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 5, images: 3, road: "unmeasured" } },
+  { ...tool, id: "yarn", name: "Yarn", bin: "yarn", installRoad: { road: "script", script: YARN_INSTALL }, after: "node", signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 4, road: "unmeasured" }, size: measured("du", 3813376) },
+  { ...tool, id: "ruff", name: "ruff", bin: "ruff", ...uvTool(24584192, "ruff"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 3, images: 3, road: "unmeasured" } },
+  { ...tool, id: "black", name: "black", bin: "black", ...uvTool(8527872, "black"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 3, road: "unmeasured" } },
+  { ...tool, id: "mypy", name: "mypy", bin: "mypy", ...uvTool(59564032, "mypy"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 1, images: 3, road: "unmeasured" } },
+  { ...tool, id: "pyright", name: "pyright", bin: "pyright", ...uvTool(40140800, "pyright"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" } },
+  { ...tool, id: "pytest", name: "pytest", bin: "pytest", ...uvTool(7266304, "pytest"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 1, images: 3, road: "unmeasured" } },
+  { ...tool, id: "prettier", name: "Prettier", bin: "prettier", ...npm(10113024, "prettier"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 3, road: "unmeasured" } },
+  { ...tool, id: "eslint", name: "ESLint", bin: "eslint", ...npm(15249408, "eslint"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 1, images: 3, road: "unmeasured" } },
+  { ...tool, id: "typescript", name: "TypeScript", bin: "tsc", ...npm(32022528, "typescript"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 8, images: 0, road: "unmeasured" } },
+  { ...tool, id: "wrangler", name: "Cloudflare Wrangler", bin: "wrangler", ...npm(251080704, "wrangler"), covers: ["cloudflare-wrangler"], signIn: SIGN_IN_ROWS.wrangler, defaultOn: false, source: { sessions: 3, images: 0, road: "unmeasured" } },
+  { ...tool, id: "cloudflared", name: "cloudflared", bin: "cloudflared", ...github(42455400, "cloudflare/cloudflared", "github.com/cloudflare/cloudflared/cmd/cloudflared"), signIn: SIGN_IN_ROWS.cloudflared, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" } },
+  { ...tool, id: "gcloud", name: "Google Cloud CLI", bin: "gcloud", installRoad: { road: "vendor", cask: GCLOUD }, signIn: SIGN_IN_ROWS.gcloud, defaultOn: false, source: { sessions: 4, images: 0, road: "measured" }, size: measured("unpacked", 475987968) },
+  { ...tool, id: "kubectl", name: "kubectl", bin: "kubectl", installRoad: { road: "vendor", cask: KUBECTL }, covers: ["kubernetes-cli"], signIn: SIGN_IN_ROWS.kubectl, defaultOn: false, source: { sessions: 1, images: 1, road: "unmeasured" }, size: measured("unpacked", 61886626) },
+  { ...tool, id: "aws", name: "AWS CLI", bin: "aws", ...brew("awscli", 319703017), signIn: SIGN_IN_ROWS.aws, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
+  { ...tool, id: "vercel", name: "Vercel CLI", bin: "vercel", ...npm(338280448, "vercel"), signIn: SIGN_IN_ROWS.vercel, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
+  { ...tool, id: "netlify", name: "Netlify CLI", bin: "netlify", ...npm(377982976, "netlify-cli"), signIn: SIGN_IN_ROWS.netlify, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
+  { ...tool, id: "fly", name: "flyctl", bin: "fly", ...github(113168894, "superfly/flyctl", "github.com/superfly/flyctl"), signIn: SIGN_IN_ROWS.fly, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
+  { ...tool, id: "supabase", name: "Supabase CLI", bin: "supabase", ...github(96900296, "supabase/cli"), signIn: SIGN_IN_ROWS.supabase, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
+  { ...tool, id: "railway", name: "Railway CLI", bin: "railway", ...npm(28459008, "@railway/cli"), signIn: SIGN_IN_ROWS.railway, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
+  { ...tool, id: "doppler", name: "Doppler CLI", bin: "doppler", ...github(12550328, "DopplerHQ/cli", "github.com/DopplerHQ/cli"), signIn: SIGN_IN_ROWS.doppler, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" } },
   // 1Password publishes the CLI through its own apt repository, which the road has to add first.
-  { ...tool, id: "op", name: "1Password CLI", bin: "op", installRoad: apt("1password-cli"), signIn: SIGN_IN_ROWS.op, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" } },
-  { ...tool, id: "ffmpeg", name: "ffmpeg", bin: "ffmpeg", installRoad: apt("ffmpeg"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" } },
-  { ...tool, id: "yq", name: "yq", bin: "yq", installRoad: github("mikefarah/yq", "github.com/mikefarah/yq/v4"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 3, road: "unmeasured" } },
-  { ...tool, id: "git-lfs", name: "Git LFS", bin: "git-lfs", installRoad: apt("git-lfs"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 2, road: "unmeasured" } },
-  { ...tool, id: "tmux", name: "tmux", bin: "tmux", installRoad: apt("tmux"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 3, road: "unmeasured" } },
+  { ...tool, id: "op", name: "1Password CLI", bin: "op", installRoad: { road: "apt", packages: ["1password-cli"] }, signIn: SIGN_IN_ROWS.op, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" }, size: { unmeasured: "the package sits in 1Password's own apt repository, which the road does not add yet, so no index carries its size" } },
+  { ...tool, id: "ffmpeg", name: "ffmpeg", bin: "ffmpeg", ...apt(512696320, "ffmpeg"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" } },
+  { ...tool, id: "yq", name: "yq", bin: "yq", ...github(14180512, "mikefarah/yq", "github.com/mikefarah/yq/v4"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 3, road: "unmeasured" } },
+  { ...tool, id: "git-lfs", name: "Git LFS", bin: "git-lfs", ...apt(11213824, "git-lfs"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 2, road: "unmeasured" } },
+  { ...tool, id: "tmux", name: "tmux", bin: "tmux", ...apt(1492992, "tmux"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 3, road: "unmeasured" } },
 ];
 
 export const CATALOG_AGENTS: readonly AgentEntry[] = CATALOG.filter((e): e is AgentEntry => e.kind === "agent");
@@ -359,6 +362,11 @@ export function installAfter(e: ToolEntry): string | undefined {
 }
 
 const roadNames = (road: InstallRoad): readonly string[] => roadModule(road).names(road);
+
+/** The catalog tool that installs this package by this road (a formula by brew, a global by npm), or nothing. */
+export function catalogToolByRoad(road: RoadName, pkg: string): ToolEntry | undefined {
+  return CATALOG_TOOLS.find(e => e.installRoad.road === road && roadNames(e.installRoad).includes(pkg));
+}
 
 /** The catalog tool a package name the collector wrote stands for: by id, by the command it puts on PATH, by its
  * road's own name for it, by a name it covers, or by a command it brings along; or nothing. */

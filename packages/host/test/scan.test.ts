@@ -59,8 +59,8 @@ function laptop(over: Fake = {}): Host & { calls: string[] } {
         if (cmd === "npm" && args[0] === "ls") return over.globals === undefined ? NPM_GLOBALS : JSON.stringify({ dependencies: over.globals });
         if (cmd === "npm" && args[0] === "prefix") return "/opt/homebrew\n";
         if (cmd === "cargo") return "bacon v3.1.0:\n    bacon\n";
-        if (cmd === "uv") return "ruff v0.14.0\n- ruff\n";
-        if (cmd === "pipx") return JSON.stringify({ venvs: { ruff: { metadata: { main_package: { package_version: "0.13.0" } } } } });
+        if (cmd === "uv") return "httpie v0.14.0\n- httpie\n";
+        if (cmd === "pipx") return JSON.stringify({ venvs: { httpie: { metadata: { main_package: { package_version: "0.13.0" } } } } });
         if (cmd === "du") {
           if (over.du === null) return undefined;
           const kb = over.du ?? { just: 2048, blueutil: 100, turbo: 1024, codex: 512 };
@@ -127,7 +127,7 @@ describe("scanTools", () => {
   it("groups uv and pipx together and names cargo's own group", async () => {
     const rows = await scanTools(laptop({ brew: false, npm: false, cargo: true }));
     expect(rows).toEqual([
-      { id: "uv/ruff", name: "ruff", manager: "uv", group: "uv and pipx tools", install: "uv tool install ruff", check: "uv tool list | grep -q '^ruff '", version: "0.14.0" },
+      { id: "uv/httpie", name: "httpie", manager: "uv", group: "uv and pipx tools", install: "uv tool install httpie", check: "uv tool list | grep -q '^httpie '", version: "0.14.0" },
       { id: "cargo/bacon", name: "bacon", manager: "cargo", group: "cargo installs", install: "cargo install bacon", check: "cargo install --list | grep -q '^bacon '", version: "3.1.0" },
     ]);
   });
@@ -155,12 +155,12 @@ describe("scanTools", () => {
 
   it("keeps one name from two managers apart: two rows, two recipe ids, each with its own manager's line", async () => {
     const rows = await scanTools(laptop({ brew: false, npm: false, pipx: true }));
-    expect(rows.map(r => r.id)).toEqual(["uv/ruff", "pipx/ruff"]);
-    expect(rows.map(r => r.install)).toEqual(["uv tool install ruff", "pipx install ruff"]);
+    expect(rows.map(r => r.id)).toEqual(["uv/httpie", "pipx/httpie"]);
+    expect(rows.map(r => r.install)).toEqual(["uv tool install httpie", "pipx install httpie"]);
     // Each manager answers for its own, so no row leans on the package's name being the command it leaves.
-    expect(rows.map(r => r.check)).toEqual(["uv tool list | grep -q '^ruff '", "pipx list --short | grep -q '^ruff '"]);
+    expect(rows.map(r => r.check)).toEqual(["uv tool list | grep -q '^httpie '", "pipx list --short | grep -q '^httpie '"]);
     // Two rows under one recipe id would be two installs, two digest ticks and one check answering for both.
     expect(new Set(rows.map(r => customFromScan(r).id)).size).toBe(2);
-    expect(rows.map(r => customFromScan(r).name)).toEqual(["ruff", "ruff"]);
+    expect(rows.map(r => customFromScan(r).name)).toEqual(["httpie", "httpie"]);
   });
 });

@@ -6,7 +6,8 @@ import { CATALOG, type CatalogEntry } from "@wsp/catalog";
 import type { Recipe } from "@wsp/protocol";
 import { describe, expect, it, onTestFinished } from "vitest";
 import { GREY, grey } from "../src/init-layout.js";
-import { BASE_GROUP, CATALOG_GROUP, GROUP_LABEL, GROUP_ORDER, HERE_GROUP, HEAVY_BYTES, USED_GROUP, groupTotal, recipeTable, sizeCell, sizeText, tableLines, totalsLine, whyCell, type TableRow } from "../src/init-table.js";
+import { HEAVY_BYTES } from "@wsp/collect";
+import { ADDED_GROUP, BASE_GROUP, CATALOG_GROUP, FLOOR_LINE, GROUP_LABEL, GROUP_ORDER, HERE_GROUP, USED_GROUP, groupTotal, recipeTable, sizeCell, sizeText, tableLines, totalsLine, whyCell, type TableRow } from "../src/init-table.js";
 import { RECIPE } from "./init-fixture.js";
 
 /** A few catalog entries, in the catalog's own order. */
@@ -19,8 +20,8 @@ const shape = (rows: readonly TableRow[]): string[][] => rows.map(r => [r.on ? "
 describe("the table of what travels", () => {
   it("one row per catalog entry: the tick, why it is here in this computer's own words, and the size its install downloads", () => {
     expect(shape(recipeTable(with_(used("go", 3, 40)), slice("node", "claude", "go")))).toEqual([
-      ["on", "Node 22 with npm", "always on the image", "250.0 MB"],
-      ["on", "Go", "40 commands in 3 sessions", "251.0 MB"],
+      ["on", "Node 22 with npm", "always on the image", "198.8 MB"],
+      ["on", "Go", "40 commands in 3 sessions", "239.1 MB"],
       ["on", "Claude Code", "installed here, never used", "208.0 MB"],
     ]);
     // An agent this computer has run says how much; one it has never run says that, and one it does not have says that.
@@ -31,11 +32,48 @@ describe("the table of what travels", () => {
     ]);
     // A row the recipe never named falls to the catalog's own evidence.
     expect(shape(recipeTable({ ...RECIPE, rows: [] }, slice("go", "ripgrep")))).toEqual([
-      ["on", "ripgrep", "always on the image", "size unknown"],
-      ["off", "Go", "in the catalog, on request", "251.0 MB"],
+      ["on", "ripgrep", "always on the image", "4.5 MB"],
+      ["off", "Go", "in the catalog, on request", "239.1 MB"],
     ]);
     expect(recipeTable(RECIPE, slice("gh"))[0]).toMatchObject({ name: "GitHub CLI", group: HERE_GROUP, heavy: false });
-    expect(recipeTable(RECIPE, slice("gh"))[0]!.size).toBeUndefined();
+    expect(recipeTable(RECIPE, slice("gh"))[0]!.size).toBe(42188962);
+    // The one row the catalog could not measure reads as unknown.
+    expect(shape(recipeTable(RECIPE, slice("op")))).toEqual([["off", "1Password CLI", "in the catalog, on request", "size unknown"]]);
+  });
+
+  it("a row under the floor says so beside its counts, a heavy row against its own, and the footer names the floor once", () => {
+    const why = (r: Recipe["rows"][number]): string => recipeTable(with_(r), slice(r.id))[0]!.why;
+    expect(why(used("wrangler", 1, 2))).toBe("below the floor, 2 commands in 1 session");
+    expect(why(used("wrangler", 2, 6))).toBe("6 commands in 2 sessions");
+    expect(why(used("java", 3, 5))).toBe("heavy, below the floor, 5 commands in 3 sessions");
+    expect(why(used("java", 4, 30))).toBe("30 commands in 4 sessions");
+    expect(FLOOR_LINE).toBe("on when used in 2 sessions and 5 commands; heavy rows 3 and 20");
+    // Under a rule that never weighs use there is no floor to be below, so the counts stand alone.
+    const under = (tick: Recipe["tick"]): string => recipeTable({ ...with_(used("wrangler", 1, 2)), ...(tick !== undefined ? { tick } : {}) }, slice("wrangler"))[0]!.why;
+    expect(under("installed")).toBe("2 commands in 1 session");
+    expect(under("default")).toBe("2 commands in 1 session");
+    expect(under("used")).toBe("below the floor, 2 commands in 1 session");
+    expect(under(undefined)).toBe("below the floor, 2 commands in 1 session");
+  });
+
+  it("a row the agent added is its own group after the installed ones, on, with the install line as its why", () => {
+    const custom = [
+      { kind: "custom" as const, id: "just", name: "just", install: ["brew install just"], check: "command -v just", why: "added by the agent" },
+      { kind: "custom" as const, id: "cuda", name: "cuda", install: ["apt-get install -y cuda"], check: "command -v cuda", size: 2_000_000_000, why: "used in ml" },
+    ];
+    const rows = recipeTable({ ...with_(installed("gh")), custom }, slice("node", "gh", "go"));
+    expect(shape(rows)).toEqual([
+      ["on", "Node 22 with npm", "always on the image", "198.8 MB"],
+      ["on", "GitHub CLI", "installed here, never used", "40.2 MB"],
+      ["on", "cuda", "apt-get install -y cuda", "1.9 GB"],
+      ["on", "just", "brew install just", "size unknown"],
+      ["off", "Go", "in the catalog, on request", "239.1 MB"],
+    ]);
+    expect(rows[2]).toMatchObject({ id: "cuda", kind: "custom", group: ADDED_GROUP, base: false, heavy: true });
+    expect(GROUP_LABEL[ADDED_GROUP]).toBe("added");
+    // The agents table never carries one, and a recipe with none draws no such row.
+    expect(recipeTable({ ...RECIPE, custom }, slice("claude")).map(r => r.id)).toEqual(["claude"]);
+    expect(recipeTable(RECIPE, slice("node", "gh", "go")).some(r => r.group === ADDED_GROUP)).toBe(false);
   });
 
   it("an agent wsp cannot drive says so on its row, and the one it can says nothing", () => {
@@ -50,26 +88,27 @@ describe("the table of what travels", () => {
     expect(rows.map(r => r.name)).toEqual(["Node 22 with npm", "Go", "Cloudflare Wrangler", "Codex", "Claude Code", "GitHub CLI"]);
     expect(rows.filter(r => r.heavy).map(r => r.name)).toEqual(["Codex"]);
     expect(HEAVY_BYTES).toBe(300 * 1024 * 1024);
-    expect(GROUP_ORDER).toEqual(["Always on the image", "You use these", "Installed here, never used", "Also in the catalog"]);
+    expect(GROUP_ORDER).toEqual(["Always on the image", "You use these", "Installed here, never used", "Added by your agent", "Also in the catalog"]);
   });
 
   it("the totals: what comes, what it downloads, and how many sizes the catalog does not have", () => {
-    expect(totalsLine(recipeTable(with_(used("go", 3, 40)), slice("node", "claude", "go")), "tools")).toBe("On: 3 tools, 709.0 MB");
-    expect(totalsLine(recipeTable({ ...RECIPE, rows: [] }, slice("claude", "go", "ripgrep")))).toBe("On: 1 row, 0 B, 1 of unknown size");
+    expect(totalsLine(recipeTable(with_(used("go", 3, 40)), slice("node", "claude", "go")), "tools")).toBe("On: 3 tools, 645.9 MB");
+    expect(totalsLine(recipeTable({ ...RECIPE, rows: [] }, slice("claude", "go", "ripgrep")))).toBe("On: 1 row, 4.5 MB");
+    expect(totalsLine(recipeTable(with_(used("op", 1, 1)), slice("op", "ripgrep")))).toBe("On: 2 rows, 4.5 MB, 1 of unknown size");
     expect(totalsLine([])).toBe("On: 0 rows, 0 B");
     // A group's header carries the same two facts over its own rows, the base counted as rows and not as ticks.
-    expect(groupTotal(recipeTable(with_(used("go", 3, 40)), slice("node", "go")).filter(r => r.base))).toBe("1  250.0 MB");
-    expect(groupTotal(recipeTable(with_(used("go", 3, 40), used("wrangler", 1, 1)), slice("go", "wrangler")))).toBe("2 of 2  251.0 MB");
+    expect(groupTotal(recipeTable(with_(used("go", 3, 40)), slice("node", "go")).filter(r => r.base))).toBe("1  198.8 MB");
+    expect(groupTotal(recipeTable(with_(used("go", 3, 40), used("wrangler", 1, 1)), slice("go", "wrangler")))).toBe("2 of 2  478.6 MB");
     expect(groupTotal(recipeTable({ ...RECIPE, rows: [] }, slice("go", "java")))).toBe("0 of 2  0 B");
   });
 
   it("as text: the tick, the name, the why column, and the size flush right, each column as wide as its widest cell", () => {
     expect(tableLines(recipeTable(with_(used("go", 3, 40)), slice("node", "claude", "go")), 1)).toEqual([
-      "●  Node 22 with npm  base       always on the image         250.0 MB",
-      "●  Go                used       40 commands in 3 sessions   251.0 MB",
+      "●  Node 22 with npm  base       always on the image         198.8 MB",
+      "●  Go                used       40 commands in 3 sessions   239.1 MB",
       "●  Claude Code       installed  installed here, never used  208.0 MB",
     ]);
-    expect(tableLines(recipeTable({ ...RECIPE, rows: [] }, slice("go")), 1)).toEqual(["○  Go  catalog    in the catalog, on request  251.0 MB"]);
+    expect(tableLines(recipeTable({ ...RECIPE, rows: [] }, slice("go")), 1)).toEqual(["○  Go  catalog    in the catalog, on request  239.1 MB"]);
     expect(tableLines([], 1)).toEqual([]);
   });
 

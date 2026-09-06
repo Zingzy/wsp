@@ -17,7 +17,7 @@ import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BUILDER_DISK_GB, PACK_BUDGET_BYTES, TOOLS_DISK_FLOOR, agentInstallsFor, brewfileFor, estimateDisk, isMcpRow, pinState, plural, toolInstallsFor, type BrewTable, type ImportResult } from "@wsp/engine";
-import { ALREADY_APPLIED, customRows, fmtBytes, fmtMemGb } from "@wsp/protocol";
+import { ALREADY_APPLIED, customRows, fmtBytes, fmtDuration, fmtMemGb } from "@wsp/protocol";
 import { importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
   RUNG_TITLE,
@@ -47,15 +47,17 @@ import { SIGN_IN_WORDS } from "./signin-words.js";
 import type { ScanRow } from "./scan.js";
 import { installEach, installLines, mcpServerSpec } from "./mcp-install.js";
 import { carriedOver, historyLine } from "./recipe-command.js";
-import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, fmtDuration, isTTY, plainLine, rowsOf, table, widthOf, wrap } from "./init-layout.js";
+import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, isTTY, plainLine, rowsOf, table, widthOf, wrap } from "./init-layout.js";
 import { openRunLog, runLogPath } from "./init-log.js";
 import { secretsStage, type SecretOutcome } from "./init-secrets.js";
 import { buildTakes, buildTimes, readBuildTimes } from "./init-times.js";
 import { keptBuilder, stopKeptBuilder, updateRoad } from "./init-upgrade.js";
 import { retentionOffer } from "./storage.js";
+import { DONE_LINE, appUrl, askFirst, checkImportFolder, runFirst, type FirstResult } from "./init-first.js";
 import type { Tone } from "./init-select.js";
 import { diskLine, diskTone } from "./init-weight.js";
 import { builderLink, flowHooks, keyAsks, noteOutcomes, signInStage, stageLogins, type BuilderLink, type HostHooks, type LoginOutcome, type SignInFlow } from "./init-signin.js";
+import { handoffStage } from "./init-handoff.js";
 import type { HostHandle } from "./server.js";
 
 export interface InitIO {
@@ -71,14 +73,24 @@ export interface InitIO {
   signals: { on(event: "SIGINT" | "SIGTERM", listener: () => void): unknown; off(event: "SIGINT" | "SIGTERM", listener: () => void): unknown };
   /** Ends the process; the real one is process.exit. */
   exit(code: number): void;
+  /** One machine-readable object per line for whoever is driving the run, under --json; absent, nothing is
+   * printed this way and every line is the prose above. */
+  json?(record: Record<string, unknown>): void;
 }
 
 export interface InitOptions {
   /** Take every default and skip every prompt, the confirm included. */
   yes: boolean;
+  /** Ask nothing here, but still run the sign-ins on the machine and hand each page to the person: the shape an
+   * agent drives wsp init in. Off a terminal this is what a run without --yes does anyway. */
+  nonInteractive?: boolean;
   /** The small recipe of catalog ids that ticks the agents and tools rows: the screens for them are skipped and the
    * run lands on the sign-ins. This machine is still read for the rows and files. */
   recipeFile?: string;
+  /** --first-workspace: the name the first fork takes, and an answer of yes to the last question. */
+  firstWorkspace?: string;
+  /** --import: the folder whose project lands on that first workspace, and an answer of yes to the last question. */
+  importFolder?: string;
   /** Reads this computer, telling onRung how many rows each rung found as it finishes. */
   collect(onRung: (rung: Rung, rows: number) => void): Promise<Manifest>;
   /** Reads this computer against the catalog and the agents' session histories for the recipe the screens start
@@ -128,7 +140,6 @@ interface Earlier {
 }
 
 const GOLDEN_NAME = "default";
-const FIRST_WORKSPACE = "first";
 const DEFAULT_RETRY = { waitMs: 30_000, attempts: 20 };
 /** What ends a builder this run could not: a record its dead holder left is stale to the next start, which stops it. */
 const SWEEP = "the next wsp or wsp init on this computer stops it, or stop it from the Solari console.";
@@ -655,8 +666,12 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 
 export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult> {
   const out = { output: io.output };
-  // Off a terminal there is nobody to ask: it runs as if --yes were given.
-  const interactive = io.isTTY && !opts.yes;
+  // Off a terminal, and under --non-interactive on one, there is nobody to ask: it runs as if --yes were given.
+  const interactive = io.isTTY && !opts.yes && opts.nonInteractive !== true;
+  // Nobody to ask, but the sign-ins still run and each page is handed to the person; --yes is the one road that skips them.
+  const handoff = !interactive && !opts.yes;
+  // Which of the three reasons nothing is asked, in the words every taken-as-yes line uses.
+  const takenAs = opts.yes ? "--yes" : io.isTTY ? "--non-interactive" : "no terminal";
 
   let manifest: Manifest;
   // The catalog recipe the screens start from: the file given, else read off this computer once the rows are in.
@@ -665,6 +680,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const counts: string[] = [];
   const notes: string[] = [];
   try {
+    if (opts.importFolder !== undefined) checkImportFolder(opts.importFolder);
     if (opts.recipeFile !== undefined) given = loadRecipe(opts.recipeFile);
     manifest = await opts.collect((rung, rows) => {
       counts.push(`${RUNG_TITLE[rung]} ${rows}`);
@@ -748,18 +764,18 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       else answers.ticks.delete(id);
     }
   } else {
-    // --yes answers every screen with the word it would have opened on, read from the screens' own defaults.
+    // A run that asks nothing answers every screen with the word it would have opened on, read from the screens' own defaults.
     answers = defaultAnswers(manifest);
     for (const [id, choice] of signInItems(manifest).initial) {
       answers.choices.set(id, choice);
       if (choice === "copy") answers.ticks.add(id);
       else answers.ticks.delete(id);
     }
-    // The screens' defaults answer the build; nothing here writes on this computer, since --yes asked nobody about it.
+    // The screens' defaults answer the build; nothing here writes on this computer, since nobody was asked about it.
     for (const id of wspToolsItems(catalogRecipe, opts.home).initial) {
       const agent = wspToolsAgent(id);
       if (agent === undefined) continue;
-      log.message(dim(`The wsp tools were not added to ${catalogEntry(agent)?.name ?? agent} here: --yes writes nothing on this computer. Run wsp mcp install --agent ${agent} to add them.`), { output: io.output, symbol: dim(S_BAR) });
+      log.message(dim(`The wsp tools were not added to ${catalogEntry(agent)?.name ?? agent} here: a run taken as yes (${takenAs}) writes nothing on this computer. Run wsp mcp install --agent ${agent} to add them.`), { output: io.output, symbol: dim(S_BAR) });
     }
     // Nobody is here to click macOS's consent dialog: a login the Keychain holds signs in on the machine
     // unless a saved answer says copy, which is the person's own and keeps the recipe hash it was saved with.
@@ -963,7 +979,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
         return { code: 1 };
       }
     } else {
-      log.step(`${ask} Taken as yes (${opts.yes ? "--yes" : "no terminal"}).`, out);
+      log.step(`${ask} Taken as yes (${takenAs}).`, out);
     }
     for (const b of stop) {
       try {
@@ -986,7 +1002,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       return { code: 1 };
     }
   } else if (stop.length === 0) {
-    log.step(`${question} Taken as yes (${opts.yes ? "--yes" : "no terminal"}).`, out);
+    log.step(`${question} Taken as yes (${takenAs}).`, out);
   }
   if (attach === undefined) await stopKeptBuilder(rt, io.output);
 
@@ -1091,7 +1107,9 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const handle = await opts.host(rt, builder, flowHooks(flow, builder));
   const dial = (): Promise<BuilderLink> => (opts.daemon ?? builderLink)(rt, builder);
   // Secrets first: a key cut from an rc file is on the machine before any status check looks for it.
-  const skipSecretsWhy = interactive ? undefined : io.isTTY ? "--yes asks nothing; set them from the app's terminal" : "no terminal to paste into; set them from the app's terminal";
+  // Nobody is here to type: the flag that said so when there was a terminal, else the terminal that is missing.
+  const nobodyAsks = !io.isTTY ? "no terminal to paste into" : opts.yes ? "--yes asks nothing" : "--non-interactive asks nothing";
+  const skipSecretsWhy = interactive ? undefined : `${nobodyAsks}; set them from the app's terminal`;
   const secretOutcomes = await secretsStage({
     asks: [...(landed?.files?.cut ?? []).flatMap(c => c.names.map(name => ({ name, from: `cut from ${c.path}` }))), ...keyAsks(offered, choices)],
     dial,
@@ -1100,7 +1118,8 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     ...(skipSecretsWhy !== undefined ? { skipWhy: skipSecretsWhy } : {}),
     hide: value => runLog.hide(value),
   });
-  const skipWhy = interactive ? undefined : io.isTTY ? "--yes asks nothing; sign in from the app's terminal" : "no terminal to sign in from; use the app's terminal";
+  // Only --yes gets here: every other run without a terminal hands its sign-ins over instead of skipping them.
+  const skipWhy = interactive || handoff ? undefined : io.isTTY ? "--yes asks nothing; sign in from the app's terminal" : "no terminal to sign in from; use the app's terminal";
   const staged = stageLogins(offered, choices, ticks);
   // The pack's notes on a copied login's Keychain and helper items join what its reads left behind, once each.
   for (const s of landed?.files?.skipped ?? []) {
@@ -1109,15 +1128,25 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     if (have === undefined) left.set(s.id, s.note);
     else if (!have.includes(s.note)) left.set(s.id, `${have}; ${s.note}`);
   }
-  const outcomes = await signInStage({
-    logins: staged,
-    left,
-    dial,
-    terminal: { input: io.input, output: io.output },
-    ...(skipWhy !== undefined ? { skipWhy } : {}),
-    open: url => io.open(url),
-    flow,
-  });
+  const outcomes = handoff
+    ? await handoffStage({
+        logins: staged,
+        left,
+        dial,
+        output: io.output,
+        platform: opts.platform,
+        flow,
+        ...(io.json !== undefined ? { json: io.json } : {}),
+      })
+    : await signInStage({
+        logins: staged,
+        left,
+        dial,
+        terminal: { input: io.input, output: io.output },
+        ...(skipWhy !== undefined ? { skipWhy } : {}),
+        open: url => io.open(url),
+        flow,
+      });
   if (noteOutcomes(resultsPath, { logins: outcomes, secrets: secretOutcomes }).replaced) log.warn(`${resultsPath} could not be read; it was rewritten with the logins and secrets alone.`, out);
 
   const next = ((await rt.golden.get())?.head ?? 0) + 1;
@@ -1134,7 +1163,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       return leave(1);
     }
   } else {
-    log.step(`Sealing golden v${next}. Taken as yes (${opts.yes ? "--yes" : "no terminal"}).`, out);
+    log.step(`Sealing golden v${next}. Taken as yes (${takenAs}).`, out);
   }
   let sealed: Awaited<ReturnType<Runtime["golden"]["seal"]>> | undefined;
   let error: unknown;
@@ -1162,22 +1191,27 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
 
   if (version > 1) await retentionOffer({ rt, interactive, yes: opts.yes, input: io.input, output: io.output });
 
-  // Only the first seal ever forks a workspace; a rebuild leaves the existing ones on the version they came from.
+  // Only the first seal ever offers a workspace; a rebuild leaves the existing ones on the version they came from.
   const existing = await rt.workspaces.list();
+  let first: FirstResult | undefined;
   if (existing.length > 0) {
     log.step(`Your ${existing.length} workspace${existing.length === 1 ? " stays" : "s stay"} on the golden version ${existing.length === 1 ? "it was" : "they were"} forked from; upgrade ${existing.length === 1 ? "it" : "them"} from the app. New workspaces fork v${version}.`, out);
   } else {
-    const forking = spin(io.output, `Forking your first workspace, ${FIRST_WORKSPACE}`, io.isTTY);
-    try {
-      const first = await handle.createWorkspace(FIRST_WORKSPACE);
-      forking.stop();
-      log.step(`Workspace ${first.name} (${first.id}) forked from golden v${version}.${first.notice !== undefined ? ` ${first.notice}` : ""}`, out);
-    } catch (e) {
-      forking.stop();
-      log.warn(`The first workspace could not be forked: ${e instanceof Error ? e.message : String(e)}. Create one from the app.`, out);
+    const ask = await askFirst({
+      interactive,
+      ...(opts.firstWorkspace !== undefined ? { name: opts.firstWorkspace } : {}),
+      ...(opts.importFolder !== undefined ? { folder: opts.importFolder } : {}),
+      input: io.input,
+      output: io.output,
+    });
+    // No and esc both end with nothing forked; neither unwinds the seal, which is already on the account by here.
+    if (isCancel(ask) || ask === undefined) {
+      log.step(DONE_LINE, out);
+    } else {
+      first = await runFirst({ first: ask, handle, goldenVersion: version, output: io.output, spin: label => spin(io.output, label, io.isTTY) });
     }
   }
-  const url = `http://127.0.0.1:${handle.port}/`;
+  const url = appUrl(handle.port, first?.workspace.id);
   runLog.note(`app ${url}`);
   await openApp(url, handle, io, interactive, logLine(), out);
   outro("wsp keeps serving the app from this terminal; Ctrl-C stops it.", out);

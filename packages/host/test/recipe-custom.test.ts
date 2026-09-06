@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The rows a recipe carries that the catalog does not: what --add reads, how
-// they join a recipe, and the lines they take in its table.
+// they join a recipe, and the group they take in its table.
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Recipe } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { cli, type CliIO } from "../src/cli.js";
-import { customFromFlags, customTableLines, parsePair, withCustom } from "../src/recipe-custom.js";
+import { ADDED_GROUP } from "../src/init-table.js";
+import { RecipeAnswerRow, answerRows, recipeAnswer, recipePrintout } from "../src/recipe-answer.js";
+import { customFromFlags, parsePair, withCustom } from "../src/recipe-custom.js";
 
 const bare: Recipe = { version: 1, at: "2026-09-06T03:00:00Z", histories: [], rows: [] };
 
@@ -52,23 +54,26 @@ describe("a recipe's rows outside the catalog", () => {
     expect(twice.custom?.[0]!.install).toEqual(["apt-get install -y just"]);
   });
 
-  it("shows each row in the table with why it is there, its size and the exact command", () => {
+  it("draws each row in the tools table under its own group, on, the install line as its why and the size beside it", () => {
     const recipe = withCustom(bare, [
       ...customFromFlags({ add: ["just=brew install just"] }),
       { kind: "custom" as const, id: "cuda", name: "cuda", install: ["apt-get install -y cuda"], check: "command -v cuda", size: 2_000_000_000, why: "used in ml" },
     ]);
-    const lines = customTableLines(recipe);
-    expect(lines[0]).toBe("Rows the catalog does not carry:");
-    expect(lines[1]).toContain("id");
-    expect(lines[2]).toContain("just");
-    expect(lines[2]).toContain("added by the agent");
-    expect(lines[2]).toContain("size unknown");
-    expect(lines[2]).toContain("brew install just");
-    expect(lines[3]).toContain("1.9 GB");
+    const { tools } = answerRows(recipe);
+    expect(tools.filter(r => r.group === ADDED_GROUP).map(r => [r.id, r.kind, r.on, r.why, r.size])).toEqual([
+      ["cuda", "custom", true, "apt-get install -y cuda", 2_000_000_000],
+      ["just", "custom", true, "brew install just", undefined],
+    ]);
+    expect(RecipeAnswerRow.parse(tools.find(r => r.id === "cuda"))).toMatchObject({ kind: "custom", group: ADDED_GROUP, heavy: true });
+    const lines = recipePrintout(recipeAnswer(recipe, "/tmp/recipe.json"));
+    expect(lines.find(l => l.includes("cuda"))).toMatch(/^● {2}cuda\s+added\s+apt-get install -y cuda\s+1\.9 GB$/);
+    expect(lines.find(l => l.includes("just"))).toMatch(/^● {2}just\s+added\s+brew install just\s+size unknown$/);
+    expect(lines).not.toContain("Rows the catalog does not carry:");
   });
 
-  it("prints nothing when the recipe has none", () => {
-    expect(customTableLines(bare)).toEqual([]);
+  it("draws no such group when the recipe has none", () => {
+    expect(answerRows(bare).tools.some(r => r.group === ADDED_GROUP)).toBe(false);
+    expect(recipePrintout(recipeAnswer(bare, "/tmp/recipe.json")).some(l => l.includes("added "))).toBe(false);
   });
 });
 
