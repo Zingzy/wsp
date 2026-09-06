@@ -126,10 +126,11 @@ describe("the MCP server over the host", () => {
     vi.stubEnv("SOLARI_API_KEY", "");
   }
 
-  it("offers the verbs as tools, each described, and none for import until it exists", async () => {
+  it("offers the verbs as tools, each described", async () => {
     const c = await connect();
     const { tools } = await c.listTools();
-    expect(tools.map(t => t.name).sort()).toEqual(["delete", "exec", "export", "forget", "fork", "new", "pause", "send", "snapshot", "stop", "thread_new", "threads", "wake", "workspaces"]);
+    expect(tools.map(t => t.name).sort()).toEqual(["delete", "exec", "export", "forget", "fork", "import", "new", "pause", "send", "snapshot", "stop", "thread_new", "threads", "wake", "workspaces"]);
+    expect(Object.keys((tools.find(t => t.name === "import")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["agents", "cut", "folder", "keep", "replace", "workspace", "yes"]);
     for (const t of tools) expect(t.description, t.name).toMatch(/\S/);
     expect(Object.keys((tools.find(t => t.name === "new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["from", "name"]);
     expect(Object.keys((tools.find(t => t.name === "thread_new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "model", "notify", "task", "workspace"]);
@@ -563,6 +564,38 @@ describe("the MCP server over the host", () => {
     const again = await call("export", { workspace: "alpha", folder: dest, from: EXPORT_SOURCE });
     expect(again.isError).toBe(true);
     expect(again.text).toBe(`${dest} already exists on this computer with 2 files; export with replace to overwrite it`);
+  });
+
+  it("import without yes, keep or cut answers with the plan and uploads nothing; with yes it lands the folder at the same path and returns the done line with the plan and the result; keep carries the .env; a relative folder and a paused workspace are tool errors in one line", async () => {
+    const proj = join(dir, "proj");
+    mkdirSync(join(proj, "src"), { recursive: true });
+    writeFileSync(join(proj, "src", "index.ts"), "export const a = 1;\n");
+    writeFileSync(join(proj, ".env"), "API_TOKEN=sk-ant-x\n");
+    const real = realpathSync(proj);
+    await call("new", { name: "alpha" });
+    const landings = (): string[] => backend.machines[0]!.runLog.filter(s => s.includes("mv "));
+    const planned = await call("import", { workspace: "alpha", folder: proj });
+    expect(planned.isError).toBe(false);
+    expect(planned.text).toMatch(/^ {2}\.env {2,}name(, \w+)*, 19 B {2,}cut$/m);
+    expect(planned.text.split("\n").at(-1)).toBe("nothing imported; call import again with yes true to take these defaults, or keep and cut per secret-shaped row");
+    expect(planned.structured).toEqual({ plan: expect.objectContaining({ source: real, files: 2, secrets: [expect.objectContaining({ path: ".env" })] }) });
+    expect(landings()).toEqual([]);
+    const imported = await call("import", { workspace: "alpha", folder: proj, yes: true });
+    expect(imported.isError).toBe(false);
+    expect(imported.text).toBe(`1 file, 20 B, landed at ${real}.`);
+    expect(imported.structured).toEqual({ plan: expect.objectContaining({ source: real }), imported: { dest: real, files: 1, bytes: 20, parts: 1, cut: [".env"], rewritten: [], agents: [] } });
+    expect(landings()).toHaveLength(1);
+    const kept = await call("import", { workspace: "alpha", folder: proj, keep: [".env"], replace: true });
+    expect(kept.isError).toBe(false);
+    expect(kept.structured).toEqual({ plan: expect.objectContaining({ source: real }), imported: { dest: real, files: 2, bytes: 39, parts: 1, cut: [], rewritten: [], agents: [] } });
+    const relative = await call("import", { workspace: "alpha", folder: "proj", yes: true });
+    expect(relative.isError).toBe(true);
+    expect(relative.text).toBe("the folder must be an absolute path, got proj");
+    await call("pause", { workspace: "alpha" });
+    const paused = await call("import", { workspace: "alpha", folder: proj, yes: true });
+    expect(paused.isError).toBe(true);
+    expect(paused.text).toBe("Workspace is paused; wake it to import");
+    expect(landings()).toHaveLength(2);
   });
 
   it("exec runs the command on the workspace's machine as argv and returns its output and exit code; a non-zero exit is a result, not an error", async () => {
