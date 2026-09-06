@@ -131,8 +131,8 @@ describe("the MCP server over the host", () => {
     expect(tools.map(t => t.name).sort()).toEqual(["exec", "export", "fork", "new", "pause", "send", "snapshot", "thread_new", "threads", "workspaces"]);
     for (const t of tools) expect(t.description, t.name).toMatch(/\S/);
     expect(Object.keys((tools.find(t => t.name === "new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["from", "name"]);
-    expect(Object.keys((tools.find(t => t.name === "thread_new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["agent", "notify", "task", "workspace"]);
-    expect(Object.keys((tools.find(t => t.name === "fork")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["agent", "name", "notify", "task", "workspace"]);
+    expect(Object.keys((tools.find(t => t.name === "thread_new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["agent", "cwd", "notify", "task", "workspace"]);
+    expect(Object.keys((tools.find(t => t.name === "fork")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["agent", "cwd", "name", "notify", "task", "workspace"]);
     expect(c.getServerVersion()?.name).toBe("wsp");
     expect(c.getInstructions()).toContain("thread_new");
     expect(c.getInstructions()).toContain("snapshot");
@@ -240,6 +240,42 @@ describe("the MCP server over the host", () => {
     expect(claude.starts).toEqual([]);
     expect(made.text).toBe("codex: write tests");
     expect(made.structured).toEqual({ threadId: row!.threadId, workspaceId: alpha!.id, harness: "codex", text: "codex: write tests", outcome: "started" });
+  });
+
+  it("thread_new and fork take cwd, the folder the turn starts in; without it the workspace's project folder, else none", async () => {
+    await call("new", { name: "alpha" });
+    const [alpha] = await rt.workspaces.list();
+    const picked = await call("thread_new", { workspace: "alpha", agent: "codex", task: "write tests", cwd: "/root/work/elsewhere" });
+    expect(picked.isError).toBe(false);
+    expect(codex.starts.map(s => s.cwd)).toEqual(["/root/work/elsewhere"]);
+
+    const bare = await call("thread_new", { workspace: "alpha", task: "hello" });
+    expect(bare.isError).toBe(false);
+    expect(claude.starts.map(s => s.cwd)).toEqual([undefined]);
+
+    await rt.projects.import({ workspaceId: alpha!.id, source: "/Users/dev/proj", dest: "/root/work/proj", bundler: projectBundler() });
+    const inProject = await call("thread_new", { workspace: "alpha", task: "hello again" });
+    expect(inProject.isError).toBe(false);
+    expect(claude.starts.map(s => s.cwd)).toEqual([undefined, "/root/work/proj"]);
+
+    const forked = await call("fork", { workspace: "alpha", name: "worker", task: "build it", cwd: "/root/work/site" });
+    expect(forked.isError).toBe(false);
+    expect(claude.starts.at(-1)?.cwd).toBe("/root/work/site");
+    const { threads } = (await call("threads", { workspace: "worker" })).structured as { threads: ThreadView[] };
+    expect(threads.map(t => t.cwd)).toEqual(["/root/work/site"]);
+  });
+
+  it("a cwd that is not absolute is refused by thread_new and fork before anything is created or started", async () => {
+    await call("new", { name: "alpha" });
+    const relative = await call("thread_new", { workspace: "alpha", task: "look here", cwd: "packages/host" });
+    expect(relative.isError).toBe(true);
+    expect(relative.text).toContain('cwd is a path on the machine, absolute: got "packages/host"');
+    const forked = await call("fork", { workspace: "alpha", name: "worker", task: "build it", cwd: "packages/host" });
+    expect(forked.isError).toBe(true);
+    expect(forked.text).toContain('cwd is a path on the machine, absolute: got "packages/host"');
+    expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha"]);
+    expect(await rt.sessions.list()).toEqual([]);
+    expect(claude.starts).toEqual([]);
   });
 
   it("threads is the sidebar's data with the workspace's name on each row; the local agent's threads say so", async () => {

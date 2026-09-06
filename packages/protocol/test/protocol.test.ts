@@ -668,6 +668,17 @@ describe("thread provenance", () => {
     for (const t of threads) expect(ThreadView.parse(t)).toEqual(t);
   });
 
+  it("foldThreads carries the latest turn's folder, so every director shows where the thread works; a row without one shows none", () => {
+    const [worked, bare] = foldThreads([
+      { ...row, id: "s1", threadId: "thr_a", prompt: "make a server", cwd: "/root/work/proj" },
+      { ...row, id: "s2", threadId: "thr_a", prompt: "and tests", cwd: "/root/work/proj/packages" },
+      { ...row, id: "s3", threadId: "thr_b", prompt: "no folder" },
+    ]);
+    expect(worked!.cwd).toBe("/root/work/proj/packages");
+    expect(bare).not.toHaveProperty("cwd");
+    expect(ThreadView.parse(worked!).cwd).toBe("/root/work/proj/packages");
+  });
+
   it("a thread always says who opened it: the fold reads a row from before provenance as a person's, once, for every client", () => {
     const [t] = foldThreads([{ ...row, prompt: "old" }]);
     expect(t!.startedBy).toBe("person");

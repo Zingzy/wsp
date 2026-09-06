@@ -219,6 +219,8 @@ export const ThreadView = z.object({
   claudeSessionId: z.string().optional(),
   startedAt: z.number().optional(),
   endedAt: z.number().optional(),
+  /** The folder the latest turn's harness runs in, as SessionView.cwd; absent when no turn recorded one. */
+  cwd: z.string().optional(),
   turns: z.number().int().positive(),
 });
 export type ThreadView = z.infer<typeof ThreadView>;
@@ -247,6 +249,7 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       ...(latest.claudeSessionId !== undefined ? { claudeSessionId: latest.claudeSessionId } : {}),
       ...(latest.startedAt !== undefined ? { startedAt: latest.startedAt } : {}),
       ...(latest.endedAt !== undefined ? { endedAt: latest.endedAt } : {}),
+      ...(latest.cwd !== undefined ? { cwd: latest.cwd } : {}),
       turns: turns.length,
     };
   });
