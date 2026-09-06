@@ -159,6 +159,53 @@ describe("wsp verbs over the host", () => {
     expect(missing.io.errors).toEqual(["wsp pause: no workspace nope"]);
   });
 
+  it("forget asks once, naming what goes, drops a workspace whose machine is gone, and is refused with the reason while the machine exists", async () => {
+    await run("new", "alpha");
+    await run("new", "beta");
+    await run("thread", "new", "--in", "alpha", "build it");
+    const alpha = (await rt.workspaces.list()).find(w => w.name === "alpha")!;
+    const live = await run("forget", "alpha", "--yes");
+    expect(live.code).toBe(1);
+    expect(live.io.errors).toEqual(["wsp forget: alpha's machine m1 is still running; pause it or delete it at the provider first"]);
+    expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["alpha", "beta"]);
+
+    backend.machines[0]!.killed = true;
+    const asked: string[] = [];
+    const answer = async (reply: string, ...argv: string[]): Promise<{ code: number; io: Captured }> => {
+      const io = captured();
+      io.ask = async q => {
+        asked.push(q);
+        return reply;
+      };
+      return { code: await cli([...argv, "--state", statePath], io), io };
+    };
+    const kept = await answer("no", "forget", "alpha");
+    expect(kept.code).toBe(1);
+    expect(kept.io.errors).toEqual(["alpha kept"]);
+    expect(asked).toEqual(["Forget alpha?\nIts record and 1 thread leave this computer; the machine is already gone."]);
+    expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["alpha", "beta"]);
+
+    const forgot = await answer("yes", "forget", alpha.id);
+    expect(forgot.code).toBe(0);
+    expect(forgot.io.lines).toEqual([`forgot alpha ${alpha.id}: its record and 1 thread are gone from this computer`]);
+    expect(forgot.io.errors).toEqual([]);
+    expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["beta"]);
+    expect(await rt.sessions.list(alpha.id)).toEqual([]);
+    expect(await store.get("workspaces", alpha.id)).toBeUndefined();
+    expect(await store.get("transcripts", alpha.id)).toBeUndefined();
+
+    backend.machines[1]!.killed = true;
+    const beta = (await rt.workspaces.list())[0]!;
+    const asJson = await run("forget", "beta", "--yes", "--json");
+    expect(asJson.code).toBe(0);
+    expect(json(asJson.io)).toEqual([{ forgot: { workspaceId: beta.id, name: "beta", threads: 0 } }]);
+    expect(await rt.workspaces.list()).toEqual([]);
+
+    const missing = await run("forget", "nope", "--yes");
+    expect(missing.code).toBe(1);
+    expect(missing.io.errors).toEqual(["wsp forget: no workspace nope"]);
+  });
+
   it("thread new opens a thread under the named agent, announces it, streams the reply and prints the last message", async () => {
     await run("new", "alpha");
     const [alpha] = await rt.workspaces.list();
@@ -773,7 +820,7 @@ describe("wsp verbs over the host", () => {
   });
 
   it("every verb takes --json and --help; a bad flag prints the usage", async () => {
-    for (const verb of [["new"], ["fork"], ["snapshot"], ["pause"], ["threads"], ["thread", "new"], ["send"], ["exec"], ["import"], ["export"]]) {
+    for (const verb of [["new"], ["fork"], ["snapshot"], ["pause"], ["forget"], ["threads"], ["thread", "new"], ["send"], ["exec"], ["import"], ["export"]]) {
       const help = await run(...verb, "--help");
       expect(help.code).toBe(0);
       expect(help.io.lines[0]).toMatch(new RegExp(`^usage: wsp ${verb.join(" ")}`));

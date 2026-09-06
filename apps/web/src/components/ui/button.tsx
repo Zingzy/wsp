@@ -82,4 +82,7 @@ function Button({ className, variant, size, render, ...props }: ButtonProps) {
   });
 }
 
-export { Button, buttonVariants };
+/** The orange confirm tier on an outline button: the one look for an action after which something does not come back. */
+const WARN_BUTTON = "border-warning/50 text-warning-foreground [:hover,[data-pressed]]:border-warning [:hover,[data-pressed]]:bg-warning/8";
+
+export { Button, buttonVariants, WARN_BUTTON };

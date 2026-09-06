@@ -5,7 +5,7 @@
 // useDiscoveredLocalServers.ts and contracts (commit 57a66608). Fields the
 // wsp wire cannot fill today are kept when a copied component reads them and
 // dropped when nothing does. Everything here is data: no React, no schemas.
-import type { MachineState, ReachState, SessionOrigin, SessionStatus, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import type { MachineState, ReachState, SessionOrigin, SessionStatus, WorkspacePhase, WorkspaceState, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 
 // --- chat -------------------------------------------------------------------
 
@@ -241,6 +241,8 @@ export interface SidebarProjectSnapshot {
   readonly phase: WorkspacePhase;
   readonly machineState: MachineState | null;
   readonly reach: ReachState | null;
+  /** The one state word's key: phase, machine state and reach folded by the protocol. */
+  readonly state: WorkspaceState;
   readonly indicator: StatusIndicator;
   readonly threads: ReadonlyArray<SidebarThreadSnapshot>;
 }

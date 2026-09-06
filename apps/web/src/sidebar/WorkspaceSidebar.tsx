@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The left region: workspaces (machines) first, their sessions as threads
 // under each, over the adapter's SidebarProjectSnapshot. Search, the settled
-// shelf, keyboard traversal, the new-workspace dialog and the rebuild of a
-// zombie or gone machine live here; rows and logic come from the copied
-// t3code files beside this one. The surface itself is the shell's
-// sidebar-glass: nothing here paints a background.
-import { ChevronDownIcon, FolderInputIcon, FolderOutputIcon, MessageSquareIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
+// shelf, keyboard traversal, the new-workspace dialog, the rebuild of a
+// zombie or gone machine and the forget of a gone one live here; rows and
+// logic come from the copied t3code files beside this one. The surface
+// itself is the shell's sidebar-glass: nothing here paints a background.
+import { ChevronDownIcon, FolderInputIcon, FolderOutputIcon, MessageSquareIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { agentName } from "@wsp/catalog";
 import { needsRebuild } from "@wsp/protocol";
 import { deriveSidebarProjects, type SidebarProjectSnapshot, type SidebarThreadSnapshot } from "../adapt/index.js";
+import { ForgetWorkspaceDialog } from "../components/ForgetWorkspaceDialog.js";
 import { HarnessMark } from "../components/chat/HarnessMark.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty.js";
 import {
@@ -138,6 +139,7 @@ export function WorkspaceSidebar() {
   const canExport = api?.exportProject !== undefined;
   /** Workspace id to the machine id a rebuild was asked for; the action stays disabled while that machine is still the one reported. */
   const [rebuilding, setRebuilding] = useState<Readonly<Record<string, string>>>({});
+  const [forgetting, setForgetting] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
   const projects = useMemo(() => deriveSidebarProjects({ workspaces, statuses, sessions }), [workspaces, statuses, sessions]);
@@ -145,6 +147,7 @@ export function WorkspaceSidebar() {
   const visible = useMemo(() => visibleProjects(projects, query), [projects, query]);
   const importTarget = importing === null ? undefined : workspaces.find(w => w.id === importing.workspaceId);
   const exportTarget = exporting === null ? undefined : workspaces.find(w => w.id === exporting.workspaceId);
+  const forgetTarget = forgetting === null ? undefined : projects.find(p => p.id === forgetting);
 
   const openDialog = (): void => {
     setDialog({ key: Date.now(), name: defaultWorkspaceName([...workspaces.map(w => w.name), ...creations.map(c => c.name)]) });
@@ -248,8 +251,9 @@ export function WorkspaceSidebar() {
                 ))}
                 {visible.map(({ project, active, settled }) => {
                   const isCollapsed = collapsed.has(project.id);
-                  // A machine with the rebuild as its one action offers nothing else; new threads wait for it.
+                  // A machine with the rebuild as its one action offers nothing else; new threads wait for it. A gone one can also be forgotten.
                   const dead = needsRebuild({ phase: project.phase, machineState: project.machineState, reach: project.reach });
+                  const gone = project.state === "gone";
                   const rebuildAsked = rebuilding[project.id] !== undefined && rebuilding[project.id] === (project.status?.machineId ?? project.workspace.machineId);
                   const cost = costs[project.id] ?? null;
                   const meta = [
@@ -278,7 +282,7 @@ export function WorkspaceSidebar() {
                         isActive={selectedId === project.id && selectedThreadId === null}
                         data-sidebar-row
                         data-row-id={`ws:${project.id}`}
-                        className={cn(!dead && ACTION_PADDING[actions])}
+                        className={cn(!dead && ACTION_PADDING[actions], gone && ACTION_PADDING[1])}
                         onClick={() => select(project.id)}
                       >
                         <span
@@ -296,14 +300,27 @@ export function WorkspaceSidebar() {
                         </span>
                       </SidebarMenuButton>
                       {dead ? (
-                        <SidebarMenuAction
-                          aria-label={`Rebuild ${project.displayName}`}
-                          title={project.status?.reason ?? project.workspace.gone ?? "The machine answers nothing; rebuild it from the golden image"}
-                          disabled={rebuildAsked || !api?.rebuild}
-                          onClick={() => void rebuild(project)}
-                        >
-                          <RefreshCwIcon className={cn(rebuildAsked && "animate-spin")} />
-                        </SidebarMenuAction>
+                        <>
+                          {gone ? (
+                            <SidebarMenuAction
+                              className={ACTION_SLOTS[0]}
+                              aria-label={`Forget ${project.displayName}`}
+                              title="The machine is gone; forget the workspace to drop it from this computer"
+                              disabled={!api?.forget}
+                              onClick={() => setForgetting(project.id)}
+                            >
+                              <Trash2Icon />
+                            </SidebarMenuAction>
+                          ) : null}
+                          <SidebarMenuAction
+                            aria-label={`Rebuild ${project.displayName}`}
+                            title={project.status?.reason ?? project.workspace.gone ?? "The machine answers nothing; rebuild it from the golden image"}
+                            disabled={rebuildAsked || !api?.rebuild}
+                            onClick={() => void rebuild(project)}
+                          >
+                            <RefreshCwIcon className={cn(rebuildAsked && "animate-spin")} />
+                          </SidebarMenuAction>
+                        </>
                       ) : (
                         <>
                           {canExport ? (
@@ -462,6 +479,16 @@ export function WorkspaceSidebar() {
       ) : null}
       {exporting !== null && exportTarget !== undefined ? (
         <ExportProjectDialog key={exporting.key} workspace={exportTarget} onClose={() => setExporting(null)} />
+      ) : null}
+      {forgetTarget !== undefined ? (
+        <ForgetWorkspaceDialog
+          workspace={forgetTarget.workspace}
+          threads={forgetTarget.threads.length}
+          open
+          onOpenChange={next => {
+            if (!next) setForgetting(null);
+          }}
+        />
       ) : null}
     </>
   );

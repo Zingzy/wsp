@@ -10,7 +10,7 @@ import { z } from "zod";
 import { ProjectExportResult, ProjectGolden, SessionStartOutcome, ThreadView, WorkspaceView } from "@wsp/protocol";
 import { INSTRUCTIONS } from "./skill.js";
 import { VERSION } from "./version.js";
-import { absoluteFolder, checkedPicks, create, createFromHead, dialHost, execOn, exportProject, follow, nap, notifyOf, openingOf, projectGoldenOf, resumeOf, snapshot, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
+import { absoluteFolder, checkedPicks, create, createFromHead, dialHost, execOn, exportProject, follow, forget, forgetting, forgotLine, nap, notifyOf, openingOf, projectGoldenOf, resumeOf, snapshot, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
 
 /** Nothing printed: the tools answer with values, and the stages a create streams have no reader here. */
 const QUIET: Out = { emit: () => {}, stream: () => {} };
@@ -149,6 +149,21 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
     "pause",
     { description: "Naps the workspace's machine; it wakes on the next thread or command.", inputSchema: { workspace }, outputSchema: { workspace: WorkspaceView } },
     async ({ workspace: ref }) => asJson({ workspace: await nap(await dial(), ref) }),
+  );
+  server.registerTool(
+    "forget",
+    {
+      description:
+        "Drops a workspace whose machine the provider no longer has: its record and its threads leave this computer and the person's sidebar, and nothing is asked of the provider. Refused in one line while the machine still exists (pause it, or delete it at the provider, first).",
+      inputSchema: { workspace },
+      outputSchema: { workspaceId: z.string(), name: z.string(), threads: z.number().int() },
+    },
+    async ({ workspace: ref }) => {
+      const client = await dial();
+      const f = await forgetting(client, ref);
+      await forget(client, f);
+      return asText(forgotLine(f), { workspaceId: f.workspace.id, name: f.workspace.name, threads: f.threads });
+    },
   );
   server.registerTool(
     "thread_new",
