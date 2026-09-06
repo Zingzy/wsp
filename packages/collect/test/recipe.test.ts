@@ -45,6 +45,20 @@ describe("computeRecipe", () => {
     ]);
   });
 
+  it("a tool both installed here and used by the agents records what they ran, and being here still ticks it", async () => {
+    const host = fakeHost({
+      which: ["claude", "gh", "node", "git"],
+      files: {
+        "~/.claude/settings.json": "{}",
+        "~/.claude/projects/-Users-dev-proj/s1.jsonl": claudeLine("s1", "gh pr list"),
+      },
+    });
+    const recipe = await computeRecipe(host);
+    // The counts are the row's source, so a screen can say "installed here, never used" and mean it.
+    expect(recipe.rows.find(r => r.id === "gh")).toEqual({ id: "gh", kind: "tool", on: true, source: { kind: "used", sessions: 1, calls: 1 } });
+    expect(recipe.rows.find(r => r.id === "git")).toMatchObject({ on: true, source: { kind: "installed" } });
+  });
+
   it("writes the protocol's shape and never a value it read", async () => {
     const recipe = await computeRecipe(laptop());
     const text = JSON.stringify(recipe);

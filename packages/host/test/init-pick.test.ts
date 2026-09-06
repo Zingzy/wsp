@@ -1,71 +1,96 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The summary-first screens as pure rows and as a fake terminal: what the six
-// agents say, how the tools list groups by source, what the one counts line
-// reads, which logins are listed to sign in on the machine and which are keys
-// to tick, and the summary screen's three keys.
+// The five screens as pure rows and as a fake terminal: what the agents screen
+// says about each agent, what the tools screen makes of the table, what every
+// sign-in row's choice is and where its default comes from, which agents here
+// are offered the wsp tools, and the screens drawn whole.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
+import { CATALOG, CATALOG_AGENTS, CATALOG_TOOLS, type CatalogEntry } from "@wsp/catalog";
 import type { ManifestEntry } from "@wsp/collect";
 import type { Recipe } from "@wsp/protocol";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { BASE_WORD, ON_THIS_MAC, agentItems, needLine, needScreen, pickEstimate, signInItems, toolItems, withAgents, withTools, wspToolsItems } from "../src/init-pick.js";
+import {
+  AGENT_LOGINS,
+  CLI_LOGINS,
+  MAC_EMPTY,
+  MCP_LOGINS,
+  SIGN_INS_TOP,
+  TOOLS_TOP,
+  pickEstimate,
+  pickScreens,
+  signInGroupLine,
+  signInItems,
+  tableItems,
+  tableScreen,
+  withAgents,
+  withPicked,
+  withTools,
+  wspToolsItems,
+} from "../src/init-pick.js";
 import { applyRecipe, withCatalogAgents } from "../src/init-recipe.js";
+import { LATER_LINE, answerOf } from "../src/init-select.js";
+import { BASE_GROUP, CATALOG_GROUP, HERE_GROUP, USED_GROUP, groupTotal, recipeTable, totalsLine } from "../src/init-table.js";
 import { FIXTURE, RECIPE } from "./init-fixture.js";
 
-const KEY = { down: "\x1b[B", enter: "\r", esc: "\x1b", ctrlC: "\x03" };
+const KEY = { up: "\x1b[A", down: "\x1b[B", left: "\x1b[D", right: "\x1b[C", space: " ", enter: "\r", esc: "\x1b", ctrlC: "\x03" };
 const row = (r: Partial<Recipe["rows"][number]> & { id: string }): Recipe["rows"][number] => ({ kind: "tool", on: true, source: { kind: "popular", sessions: 0, images: 0 }, ...r });
+/** A few catalog entries, in the catalog's own order. */
+const slice = (...ids: string[]): CatalogEntry[] => CATALOG.filter(e => ids.includes(e.id));
+const text = (i: { text: string } | string | undefined): string => (typeof i === "string" ? i : (i?.text ?? ""));
 
-describe("what they need", () => {
-  it("one line: the tools on, then where each tick came from, the base first; a fresh Mac reads the floor alone", () => {
-    expect(needLine(RECIPE)).toBe("11 tools: 9 in the base, 2 installed here");
-    const used = { ...RECIPE, rows: [...RECIPE.rows, row({ id: "wrangler", source: { kind: "used", sessions: 3, calls: 40 } }), row({ id: "go", on: false, source: { kind: "used", sessions: 1, calls: 2 } }), row({ id: "agent-browser" })] };
-    expect(needLine(used)).toBe("13 tools: 9 in the base, 2 installed here, 1 used by your agents, 1 popular in the catalog");
-    expect(needLine({ ...RECIPE, rows: [] })).toBe("9 tools: 9 in the base");
+describe("the agents screen", () => {
+  it("one flat row per agent: what this computer did with it, its size, and the note when wsp cannot drive it", () => {
+    const histories = [{ agent: "claude", state: "read" as const, sessions: 151, calls: 4000 }];
+    const items = tableItems(recipeTable({ ...RECIPE, histories }, CATALOG_AGENTS), RECIPE, FIXTURE, 4, false);
+    expect(items.map(i => [i.label, text(i.why), text(i.hint)])).toEqual([
+      ["Claude Code", "used       used here, 151 sessions", "208.0 MB"],
+      ["Codex", "catalog    not installed here", "455.0 MB"],
+      ["OpenCode", "catalog    not installed here", "673.0 MB"],
+      ["Hermes Agent", "catalog    not installed here", "484.0 MB"],
+      ["Gemini CLI", "catalog    not installed here", "189.0 MB"],
+      ["Pi", "catalog    not installed here", "165.0 MB"],
+    ]);
+    // No groups on this screen, and nothing locked: the six are one list.
+    expect(items.every(i => i.group === undefined && i.lock === undefined)).toBe(true);
+    expect(items.find(i => i.label === "Codex")!.detail[0]).toBe("installs, but wsp cannot run its threads yet");
+    expect(items.find(i => i.label === "Claude Code")!.detail).toEqual(["on this Mac; its config (39.1 KB) comes along", "installs about 208.0 MB on the machine (measured 2026-09-05)"]);
   });
+});
 
-  it("the list: the floor as bullets under the title, the rest grouped by source in that order, a measured size beside a row, the detail naming the source and what the build does", () => {
+describe("the tools screen", () => {
+  it("the base as bullets under the title, the rest grouped by why it is here, the why column and the size beside each", () => {
     const recipe = { ...RECIPE, rows: [...RECIPE.rows, row({ id: "wrangler", source: { kind: "used", sessions: 3, calls: 40 } }), row({ id: "go", on: false, source: { kind: "used", sessions: 1, calls: 2 } })] };
-    const items = toolItems(recipe, FIXTURE);
+    const items = tableItems(recipeTable(recipe, CATALOG_TOOLS), recipe, FIXTURE, 4, true);
     expect(items.filter(i => i.lock === "on").map(i => i.label)).toEqual(["Node 22 with npm", "pnpm", "uv", "Python 3.12", "git", "jq", "ripgrep", "curl", "Docker engine and compose"]);
-    expect([...new Set(items.map(i => i.group))]).toEqual([undefined, "Installed here", "Used by your agents", "Popular in the catalog"]);
-    expect(items.filter(i => i.group === "Installed here").map(i => i.label)).toEqual(["GitHub CLI", "yq"]);
-    expect(items.filter(i => i.group === "Used by your agents").map(i => i.label)).toEqual(["Go", "Cloudflare Wrangler"]);
+    expect([...new Set(items.map(i => i.group))]).toEqual([undefined, USED_GROUP, HERE_GROUP, CATALOG_GROUP]);
+    expect(items.filter(i => i.group === HERE_GROUP).map(i => i.label)).toEqual(["GitHub CLI", "yq"]);
+    expect(items.filter(i => i.group === USED_GROUP).map(i => i.label)).toEqual(["Go", "Cloudflare Wrangler"]);
     const by = (id: string) => items.find(i => i.id === id)!;
+    // Every row in the used group carries its own count, so a wrong claim about what was run is visible.
+    expect(text(by("go").why)).toBe("used       2 commands in 1 session");
+    expect(text(by("wrangler").why)).toBe("used       40 commands in 3 sessions");
+    expect(text(by("gh").hint)).toBe("size unknown");
     expect(by("node").detail).toEqual(["ships in 5 lab images; on by default in the catalog; on every machine", "part of the base on every machine"]);
-    expect(by("gh")).toMatchObject({ group: "Installed here", detail: ["installed on this Mac", "size not measured yet"] });
-    expect(by("go")).toMatchObject({ hint: "251.0 MB", detail: ["your agents used it in 1 session (2 calls)", "about 251.0 MB on the machine; no row here; installed by its brew road"] });
-    expect(by("wrangler").detail).toEqual(["your agents used it in 3 sessions (40 calls)", "size not measured yet; no row here; installed by its npm road"]);
-    expect(by("agent-browser").detail).toEqual(["in no lab image; on by default in the catalog", "size not measured yet; no row here; installed by its npm road"]);
+    expect(by("go").detail).toEqual(["your agents used it in 1 session (2 calls)", "about 251.0 MB on the machine; no row here; installed by its brew road"]);
     expect(by("java").detail[0]).toBe("ships in 4 lab images; on request");
-    expect(BASE_WORD).toBe("in the base");
   });
 
-  it("ticks go back onto the recipe: a floor row stays on however the list left it, an agent follows its tick, and an entry the recipe never named gets a row on the catalog's evidence", () => {
+  it("ticks go back onto the recipe: a floor row stays on however the list left it, and an entry the recipe never named gets a row on the catalog's evidence", () => {
     const tools = withTools(RECIPE, new Set(["gh", "go"]));
     expect(tools.rows.filter(r => r.kind === "tool" && r.on).map(r => r.id)).toEqual(["node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker", "gh", "go"]);
     expect(tools.rows.find(r => r.id === "go")).toEqual({ id: "go", kind: "tool", on: true, source: { kind: "popular", sessions: 9, images: 4 }, size: 251 * 1024 * 1024 });
-    expect(tools.rows.filter(r => r.kind === "tool")).toHaveLength(32);
     expect(tools.rows.filter(r => r.kind === "agent")).toEqual(RECIPE.rows.filter(r => r.kind === "agent"));
     const agents = withAgents(RECIPE, new Set(["codex", "pi"]));
     expect(agents.rows.filter(r => r.kind === "agent").map(r => [r.id, r.on])).toEqual([["claude", false], ["codex", true], ["gemini", false], ["opencode", false], ["pi", true], ["hermes", false]]);
-    expect(agents.rows.find(r => r.id === "pi")).toMatchObject({ source: { kind: "popular", sessions: 0, images: 0 }, size: 165 * 1024 * 1024 });
+    const both = withPicked(RECIPE, new Set(["codex", "gh"]));
+    expect(both.rows.filter(r => r.on).map(r => r.id)).toEqual(["codex", "node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker", "gh"]);
   });
 });
 
-describe("the agents", () => {
-  it("the six in catalog order, a size beside each, on this Mac with its config or not on this Mac", () => {
-    const items = agentItems(RECIPE, FIXTURE);
-    expect(items.map(i => [i.label, i.hint])).toEqual([["Claude Code", "208.0 MB"], ["Codex", "455.0 MB"], ["Gemini CLI", "189.0 MB"], ["OpenCode", "673.0 MB"], ["Pi", "165.0 MB"], ["Hermes Agent", "484.0 MB"]]);
-    expect(items[0]!.detail).toEqual(["on this Mac; its config (39.1 KB) comes along", "installs about 208.0 MB on the machine (measured 2026-09-05)"]);
-    expect(items[1]!.detail[0]).toBe("not on this Mac; try it on the machine, nothing here changes");
-    expect(items.every(i => i.lock === undefined)).toBe(true);
-  });
-});
-
-describe("sign-ins and keys", () => {
+describe("the sign-ins screen", () => {
   const hermesKeys: ManifestEntry = { rung: "logins", id: "logins/hermes-keys", label: "Hermes Agent API keys", group: "Agent logins", paths: ["~/.hermes/.env"], bytes: 25_000, default: "bring", detail: "the keys in ~/.hermes/.env travel only by copy; no sign-in produces them" };
   const hermesLogin: ManifestEntry = { rung: "logins", id: "logins/hermes", label: "Hermes Agent login", group: "Agent logins", paths: ["~/.hermes/auth.json"], bytes: 400, default: "skip" };
   const kube: ManifestEntry = { rung: "logins", id: "logins/kube", label: "kubectl config", group: "CLI logins", paths: ["~/.kube/config"], bytes: 900, default: "bring" };
@@ -73,83 +98,81 @@ describe("sign-ins and keys", () => {
   const op: ManifestEntry = { rung: "logins", id: "logins/op", label: "1Password CLI", group: "CLI logins", paths: [], bytes: 0, default: "skip", reason: "needs the 1Password desktop app; the machine uses a service account token" };
   const laptop = { entries: [...FIXTURE.entries, hermesLogin, hermesKeys, kube, kubectl, op] };
   const recipe: Recipe = { ...RECIPE, rows: [...RECIPE.rows.map(r => (r.id === "codex" ? { ...r, on: true } : r)), { id: "hermes", kind: "agent", on: true, source: { kind: "installed", paths: ["~/.hermes/config.yaml"], bin: true } }, row({ id: "kubectl", source: { kind: "installed", paths: [], bin: true } })] };
+  const words = (s: { items: { id: string; choices?: readonly { value: string }[] }[] }, id: string): string[] => s.items.find(i => i.id === id)!.choices!.map(c => c.value);
 
-  it("a browser or device login is a bullet with its command, a key file or a config with no sign-in is a row to tick, and each row's answer follows", () => {
+  it("the agents first, then the developer CLIs, then the MCP servers; every row has its choice and nothing has a bare tick", () => {
     const s = signInItems(applyRecipe(withCatalogAgents(laptop), recipe));
-    expect(s.items.filter(i => i.lock === "on").map(i => [i.label, i.hint])).toEqual([["GitHub CLI login", "gh auth login"], ["Claude Code login", "claude auth login"], ["Codex login", "codex login"], ["Hermes Agent login", "hermes auth"]]);
-    expect(s.items.filter(i => i.lock === undefined).map(i => [i.label, i.hint])).toEqual([["Hermes Agent API keys", "24.4 KB"], ["kubectl config", "900 B"]]);
-    expect(s.items.find(i => i.id === "logins/hermes-keys")!.detail).toEqual(["~/.hermes/.env", "the keys in ~/.hermes/.env travel only by copy; no sign-in produces them", "ticked, it is copied to the machine; unticked, it stays here"]);
-    expect(s.items.find(i => i.id === "logins/kube")!.detail).toEqual(["~/.kube/config", "kubectl has no sign-in; copy the kubeconfig instead", "ticked, it is copied to the machine; unticked, it stays here"]);
-    expect(s.items.find(i => i.id === "logins/op")).toMatchObject({ lock: "off", detail: ["nothing to copy", "needs the 1Password desktop app; the machine uses a service account token"] });
-    // Both keys rows start ticked: a copy by default.
-    expect([...s.initial].sort()).toEqual(["logins/hermes-keys", "logins/kube"]);
-    // Gemini, OpenCode and Pi are off, so their bare login rows are not on the screen.
-    expect(s.items.map(i => i.id)).not.toContain("logins/gemini");
-    expect([...s.answers(new Set(["logins/kube"]))].sort()).toEqual([
-      ["logins/claude", "machine"], ["logins/codex", "machine"], ["logins/gh", "machine"], ["logins/hermes", "machine"], ["logins/hermes-keys", "skip"], ["logins/kube", "copy"], ["logins/op", "skip"],
+    expect([...new Set(s.items.map(i => i.group))]).toEqual([AGENT_LOGINS, CLI_LOGINS]);
+    expect(s.items.filter(i => i.group === AGENT_LOGINS).map(i => i.label)).toEqual(["Claude Code login", "Codex login", "Hermes Agent login", "Hermes Agent API keys"]);
+    expect(s.items.filter(i => i.group === CLI_LOGINS).map(i => i.label)).toEqual(["GitHub CLI login", "kubectl config", "1Password CLI"]);
+    expect(s.items.every(i => i.choices !== undefined && i.choices.length > 0)).toBe(true);
+    // Copy where there is something here to copy, the sign-in where the catalog has a flow, the key where the tool reads one.
+    expect(words(s, "logins/claude")).toEqual(["copy", "machine", "key", "skip"]);
+    expect(words(s, "logins/codex")).toEqual(["copy", "machine", "key", "skip"]);
+    expect(words(s, "logins/hermes")).toEqual(["copy", "machine", "skip"]);
+    expect(words(s, "logins/kube")).toEqual(["copy", "skip"]);
+    // A row the catalog locked out is here with its reason and skip as its only answer.
+    expect(words(s, "logins/op")).toEqual(["skip"]);
+    expect(s.items.find(i => i.id === "logins/op")).toMatchObject({ why: "nothing to copy here", detail: ["needs the 1Password desktop app; the machine uses a service account token", "this one is left alone"] });
+    expect([...s.initial].sort()).toEqual([
+      ["logins/claude", "machine"], ["logins/codex", "machine"], ["logins/gh", "machine"], ["logins/hermes", "machine"], ["logins/hermes-keys", "copy"], ["logins/kube", "copy"], ["logins/op", "skip"],
     ]);
+    // No row on this screen is about this Mac's own config, and no sentence explains one choice against another.
+    expect(s.items.some(i => i.id.startsWith("wsp-tools/"))).toBe(false);
+    expect(s.items.flatMap(i => i.detail).join(" ")).not.toMatch(/API key|instead of|rather than/);
   });
 
-  it("a saved copy answer on a login with a flow makes it a keys row, ticked; unticked, it signs in on the machine", () => {
+  it("a saved answer is where the row starts, and an answer the row cannot take falls back to its first", () => {
     const saved: Recipe = { ...recipe, rows: recipe.rows.map(r => (r.id === "gh" ? { ...r, signIn: "copy" as const } : r)) };
     const s = signInItems(applyRecipe(withCatalogAgents(laptop), saved));
-    const gh = s.items.find(i => i.id === "logins/gh")!;
-    expect(gh.lock).toBeUndefined();
-    expect(gh.hint).toBe("200 B");
-    expect(gh.detail).toEqual(["~/.config/gh/hosts.yml, Keychain: gh:github.com", "", "ticked, it is copied to the machine; unticked, you sign in there after the build (gh auth login)"]);
-    expect(s.initial.has("logins/gh")).toBe(true);
-    expect(s.answers(new Set()).get("logins/gh")).toBe("machine");
-    expect(s.answers(new Set(["logins/gh"])).get("logins/gh")).toBe("copy");
+    expect(s.initial.get("logins/gh")).toBe("copy");
+    const key: Recipe = { ...recipe, rows: recipe.rows.map(r => (r.id === "hermes" ? { ...r, signIn: "key" as const } : r)) };
+    // Hermes takes no API key, so the row opens on the first word it does take.
+    expect(signInItems(applyRecipe(withCatalogAgents(laptop), key)).initial.get("logins/hermes")).toBe("copy");
   });
 
-  it("an MCP server that carries a secret is a row to tick, unticked until the person says copy, shown with its agent; one without a secret follows its agent silently", () => {
+  it("an MCP server with auth is a row under its own group, named by the config it sits in, copy or skip", () => {
     const github: ManifestEntry = { rung: "agents", id: "agents/mcp/claude/github", label: "github", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "bring", consent: true, detail: "stdio: npx server-github; runs via npx; carries a secret: env GITHUB_TOKEN (40 B)" };
     const notes: ManifestEntry = { rung: "agents", id: "agents/mcp/claude/notes", label: "notes", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "bring", detail: "stdio: npx notes-mcp; carries no secret" };
     const remote: ManifestEntry = { rung: "agents", id: "agents/mcp/mcp-remote", label: "mcp-remote sign-ins", group: "MCP sign-ins", paths: ["~/.mcp-auth"], bytes: 1800, default: "bring", consent: true, detail: "browser sign-ins saved by mcp-remote for remote servers: 1 token (1.4 KB)" };
     const locked: ManifestEntry = { rung: "agents", id: "agents/mcp/claude/mac", label: "mac", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "skip", reason: "command is macOS-only, will not run", consent: true, detail: "stdio: /Applications/x; carries a secret: env A (4 B)" };
     const s = signInItems(applyRecipe(withCatalogAgents({ entries: [...FIXTURE.entries, github, notes, remote, locked] }), recipe));
-    const ids = s.items.map(i => i.id);
-    expect(ids).toEqual(expect.arrayContaining(["agents/mcp/claude/github", "agents/mcp/mcp-remote", "agents/mcp/claude/mac"]));
-    expect(ids).not.toContain("agents/mcp/claude/notes");
-    expect(s.items.find(i => i.id === github.id)).toEqual({ id: github.id, label: "github", hint: "Claude Code", detail: ["defined in the agent's config", github.detail, "ticked, it is copied to the machine; unticked, not copied; the server stays off the machine"] });
-    expect(s.items.find(i => i.id === remote.id)).toMatchObject({ hint: "1.8 KB", detail: ["~/.mcp-auth", remote.detail, "ticked, it is copied to the machine; unticked, not copied; the server stays off the machine"] });
-    expect(s.items.find(i => i.id === locked.id)).toMatchObject({ lock: "off", detail: [locked.detail, locked.reason] });
-    expect(s.initial.has(github.id)).toBe(false);
-    expect(s.answers(new Set()).get(github.id)).toBe("skip");
-    expect(s.answers(new Set([github.id])).get(github.id)).toBe("copy");
-    expect(s.answers(new Set([locked.id])).get(locked.id)).toBe("skip");
-    // A saved copy answer starts the row ticked; with Claude Code off its server is not on the screen at all.
-    expect(signInItems(applyRecipe(withCatalogAgents({ entries: [...FIXTURE.entries, { ...github, choice: "copy" }] }), recipe)).initial.has(github.id)).toBe(true);
+    expect(s.items.filter(i => i.group === MCP_LOGINS).map(i => [i.label, i.why])).toEqual([
+      ["github", "in Claude Code's config"],
+      ["mcp-remote sign-ins", "sign-ins mcp-remote saved for Claude Code"],
+      ["mac", "in Claude Code's config"],
+    ]);
+    expect(s.items.map(i => i.id)).not.toContain("agents/mcp/claude/notes");
+    expect(words(s, github.id)).toEqual(["copy", "skip"]);
+    // A server carrying a secret stays off the machine until the person says copy; one the catalog locked out cannot move at all.
+    expect(s.initial.get(github.id)).toBe("skip");
+    expect(words(s, locked.id)).toEqual(["skip"]);
+    expect(signInItems(applyRecipe(withCatalogAgents({ entries: [...FIXTURE.entries, { ...github, choice: "copy" }] }), recipe)).initial.get(github.id)).toBe("copy");
     const off = { ...recipe, rows: recipe.rows.map(r => (r.id === "claude" ? { ...r, on: false } : r)) };
-    const offIds = signInItems(applyRecipe(withCatalogAgents({ entries: [...FIXTURE.entries, github, remote] }), off)).items.map(i => i.id);
-    expect(offIds).not.toContain(github.id);
-    // The mcp-remote row belongs to the agents whose servers are here: absent when none of them is ticked, back with Codex's server once Codex is.
-    expect(offIds).not.toContain(remote.id);
-    const codexServer: ManifestEntry = { rung: "agents", id: "agents/mcp/codex/linear", label: "linear", group: "Codex MCP servers", paths: [], bytes: 0, default: "bring", consent: true, detail: "stdio: npx mcp-remote https://mcp.linear.app/sse; carries a secret: its saved sign-in" };
-    const withCodex = signInItems(applyRecipe(withCatalogAgents({ entries: [...FIXTURE.entries, github, remote, codexServer] }), off)).items;
-    expect(withCodex.map(i => i.id)).toEqual(expect.arrayContaining([remote.id, codexServer.id]));
-    expect(withCodex.find(i => i.id === codexServer.id)).toMatchObject({ hint: "Codex" });
-    expect(withCodex.find(i => i.id === remote.id)).toMatchObject({ hint: "1.8 KB" });
+    expect(signInItems(applyRecipe(withCatalogAgents({ entries: [...FIXTURE.entries, github, remote] }), off)).items.map(i => i.id)).not.toContain(github.id);
   });
 
-  it("the disk estimate counts what the build takes before anyone answers: a login whose command is not coming and a login of an unticked agent are left out", () => {
-    const off = { ...recipe, rows: recipe.rows.flatMap(r => (r.id === "kubectl" ? [] : r.id === "hermes" ? [{ ...r, on: false }] : [r])) };
-    const est = pickEstimate(withCatalogAgents(laptop), off, new Map());
-    // identity 512 + 1200, shell 3000 + 900, mise 300, Claude Code 40000, Codex 8000; not the kubeconfig (kubectl is off) nor the Hermes keys (Hermes is off).
-    expect(est.files).toBe(53_912);
-    const on = pickEstimate(withCatalogAgents(laptop), recipe, new Map());
-    expect(on.files).toBe(53_912 + 900 + 25_000);
-  });
-
-  it("a login whose command is not coming is listed locked with the reason and brings nothing", () => {
+  it("a login whose command is not coming is listed with the reason and skip alone", () => {
     const off = { ...recipe, rows: recipe.rows.filter(r => r.id !== "kubectl") };
     const s = signInItems(applyRecipe(withCatalogAgents(laptop), off));
-    expect(s.items.find(i => i.id === "logins/kube")).toMatchObject({ lock: "off", hint: "kubectl not coming", detail: ["~/.kube/config", "kubectl is not coming: its tool row is unticked; copy or sign in ticks it"] });
-    expect(s.answers(new Set(["logins/kube"])).get("logins/kube")).toBe("skip");
+    expect(s.items.find(i => i.id === "logins/kube")).toMatchObject({ why: "kubectl is not coming", detail: ["kubectl is not coming: its tool row is unticked; copy or sign in ticks it", "~/.kube/config"] });
+    expect(s.initial.get("logins/kube")).toBe("skip");
+  });
+
+  it("a group header counts how its rows answered, in the choice order", () => {
+    const s = signInItems(applyRecipe(withCatalogAgents(laptop), recipe));
+    const agents = s.items.filter(i => i.group === AGENT_LOGINS);
+    expect(signInGroupLine(agents, { ticks: new Set(), answers: new Map(s.initial) })).toBe("1 copy  3 sign in  0 API key  0 skip");
+  });
+
+  it("the disk estimate counts what the build takes before anyone answers", () => {
+    const off = { ...recipe, rows: recipe.rows.flatMap(r => (r.id === "kubectl" ? [] : r.id === "hermes" ? [{ ...r, on: false }] : [r])) };
+    expect(pickEstimate(withCatalogAgents(laptop), off, new Map()).files).toBe(53_912);
+    expect(pickEstimate(withCatalogAgents(laptop), recipe, new Map()).files).toBe(53_912 + 900 + 25_000);
   });
 });
 
-describe("the wsp tools rows", () => {
+describe("the wsp tools screen", () => {
   const here: Recipe["rows"][number]["source"] = { kind: "installed", paths: [], bin: true };
   const home = (): string => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-pick-home-"));
@@ -157,108 +180,217 @@ describe("the wsp tools rows", () => {
     return dir;
   };
 
-  it("one row per agent on this Mac whose config the catalog can place the server in: a noun label, the file as the hint, unticked and apart from the all row; an agent not here, or here with no such config, gets none", () => {
-    expect(wspToolsItems(RECIPE, home())).toEqual([
-      {
-        id: "wsp-tools/claude",
-        label: "wsp tools for Claude Code",
-        hint: "~/.claude.json",
-        group: ON_THIS_MAC,
-        detail: ["wsp joins its MCP servers, so it can drive workspaces, threads and commands", "ticked, it is written when the screens end; unticked, nothing here changes"],
-        apart: true,
-      },
-    ]);
-    expect(ON_THIS_MAC).toBe("On this Mac");
+  it("one row per agent here whose config the catalog can write, the file under the row, on for the agents this computer has run", () => {
+    const w = wspToolsItems({ ...RECIPE, histories: [{ agent: "claude", state: "read", sessions: 12, calls: 90 }] }, home());
+    expect(w.items).toEqual([{ id: "wsp-tools/claude", label: "Claude Code", detail: ["writes ~/.claude.json"] }]);
+    expect([...w.initial]).toEqual(["wsp-tools/claude"]);
+    // An agent here that has run nothing starts off; one that is not here at all is not a row.
+    const quiet = wspToolsItems(RECIPE, home());
+    expect(quiet.items.map(i => i.id)).toEqual(["wsp-tools/claude"]);
+    expect([...quiet.initial]).toEqual([]);
     const more: Recipe = {
       ...RECIPE,
-      rows: [
-        ...RECIPE.rows.map(r => (r.id === "codex" ? { ...r, source: here } : r)),
-        { id: "opencode", kind: "agent", on: false, source: here },
-        { id: "pi", kind: "agent", on: true, source: here },
-        { id: "hermes", kind: "agent", on: true, source: here },
-      ],
+      rows: [...RECIPE.rows.map(r => (r.id === "codex" ? { ...r, source: here } : r)), { id: "opencode", kind: "agent", on: false, source: here }, { id: "pi", kind: "agent", on: true, source: here }],
     };
-    const items = wspToolsItems(more, home());
-    // Catalog order, whatever the agent's tick for the machine; Pi and Hermes are here but the catalog knows no MCP config for them.
-    expect(items.map(i => i.label)).toEqual(["wsp tools for Claude Code", "wsp tools for Codex", "wsp tools for OpenCode"]);
-    expect(items.map(i => i.hint)).toEqual(["~/.claude.json", "~/.codex/config.toml", "~/.config/opencode/opencode.json"]);
-    expect(items.every(i => i.lock === undefined && i.apart === true)).toBe(true);
-    expect(wspToolsItems({ ...RECIPE, rows: [] }, home())).toEqual([]);
+    // Catalog order, whatever the agent's tick for the machine; Pi is here but the catalog knows no MCP config for it.
+    expect(wspToolsItems(more, home()).items.map(i => i.label)).toEqual(["Claude Code", "Codex", "OpenCode"]);
+    expect(wspToolsItems({ ...RECIPE, rows: [] }, home()).items).toEqual([]);
   });
 
-  it("the hint is the file the install writes: of two candidates, the one that exists here", () => {
+  it("the file under the row is the one the install writes: of two candidates, the one that exists here", () => {
     const h = home();
     mkdirSync(join(h, ".config", "opencode"), { recursive: true });
     writeFileSync(join(h, ".config", "opencode", "opencode.jsonc"), "{}\n");
-    const items = wspToolsItems({ ...RECIPE, rows: [{ id: "opencode", kind: "agent", on: false, source: here }] }, h);
-    expect(items.map(i => i.hint)).toEqual(["~/.config/opencode/opencode.jsonc"]);
+    const items = wspToolsItems({ ...RECIPE, rows: [{ id: "opencode", kind: "agent", on: false, source: here }] }, h).items;
+    expect(items.map(i => i.detail[0])).toEqual(["writes ~/.config/opencode/opencode.jsonc"]);
   });
 });
 
-describe("the summary screen", () => {
-  function streams() {
-    const input = new PassThrough();
-    const output = Object.assign(new PassThrough(), { columns: 80 });
-    const chunks: string[] = [];
-    output.on("data", (c: Buffer) => chunks.push(c.toString()));
-    return { input, output, text: () => stripVTControlCharacters(chunks.join("")), raw: () => chunks.join("") };
-  }
-  const settle = (ms = 5) => new Promise(r => setTimeout(r, ms));
-  const open = (o: ReturnType<typeof streams>, disk: string | { text: string; tone?: "yellow" | "yellowBright" | "red" } = "Disk: 1.4 GB of 15.2 GB on the 20 GB builder") => needScreen({ counter: "2/3", line: "11 tools: 9 in the base, 2 installed here", disk, input: o.input, output: o.output });
+function streams(columns = 100, rows = 40) {
+  const input = new PassThrough();
+  const output = Object.assign(new PassThrough(), { columns, rows });
+  const chunks: string[] = [];
+  output.on("data", (c: Buffer) => chunks.push(c.toString()));
+  return { input, output, text: () => stripVTControlCharacters(chunks.join("")), raw: () => chunks.join("") };
+}
+const settle = (ms = 10) => new Promise(r => setTimeout(r, ms));
 
-  it("draws the counts line, the Disk line under it in its tone and the three keys; a adjusts, enter goes on, esc back, ctrl-c cancels", async () => {
-    // styleText reads FORCE_COLOR at each call, so colour is on for this test alone.
-    const was = process.env["FORCE_COLOR"];
-    process.env["FORCE_COLOR"] = "1";
-    onTestFinished(() => {
-      if (was === undefined) delete process.env["FORCE_COLOR"];
-      else process.env["FORCE_COLOR"] = was;
+describe("the tools screen drawn", () => {
+  const recipe = { ...RECIPE, rows: [...RECIPE.rows, row({ id: "go", source: { kind: "used", sessions: 3, calls: 40 } })] };
+  const three = slice("node", "gh", "go");
+  const open = (o: ReturnType<typeof streams>) => {
+    const rows = recipeTable(recipe, three);
+    return tableScreen({
+      title: "Tools",
+      top: TOOLS_TOP,
+      counter: "2/6",
+      rows,
+      recipe,
+      manifest: FIXTURE,
+      grouped: true,
+      footer: ticks => [totalsLine(recipeTable(withTools(recipe, ticks), three), "tools"), { text: "Disk: 1.4 GB of 15.2 GB on the 20 GB builder" }],
+      input: o.input,
+      output: o.output,
     });
+  };
+
+  it("says what it decides, lists every row with its size, counts each group, and offers keys and nothing else", async () => {
     const o = streams();
-    const p = open(o, { text: "Disk: 10.1 GB of 15.2 GB on the 20 GB builder (files 1.7 KB, Homebrew's toolchain 1.0 GB, tools 9.1 GB)", tone: "yellowBright" });
+    const p = open(o);
     await settle(20);
     const t = o.text();
-    expect(t).toContain("◆  What they need  2/3");
-    expect(t).toContain("┃  11 tools: 9 in the base, 2 installed here");
-    // The Disk line wraps under its own label and every row of it carries the tone, the one colour on the screen.
-    expect(t).toContain("┃  Disk: 10.1 GB of 15.2 GB on the 20 GB builder (files 1.7 KB, Homebrew's\n┃        toolchain 1.0 GB, tools 9.1 GB)");
-    expect(o.raw().match(/\x1b\[93m/g)?.length).toBe(2);
-    expect(t).toContain("┗  a adjust • enter next • esc back");
-    o.input.write("a");
-    expect(await p).toBe("adjust");
-    expect(o.text()).toMatch(/◇  What they need  2\/3\n│  11 tools: 9 in the base, 2 installed here\n/);
+    expect(t).toContain("◆  Tools  2/6");
+    expect(t).toContain(`┃  ${TOOLS_TOP}`);
+    expect(t).toContain(`┃  ${LATER_LINE}`);
+    expect(t).toMatch(/▾ Always on the image\s+1\s+250\.0 MB\n┃\s+• Node 22 with npm\s+base\s+always on the image\s+250\.0 MB\n/);
+    expect(t).toMatch(/▾ You use these\s+1 of 1\s+251\.0 MB\n┃\s+● Go\s+used\s+40 commands in 3 sessions\s+251\.0 MB\n/);
+    expect(t).toMatch(/▾ Installed here, never used\s+1 of 1\s+0 B\n┃\s+● GitHub CLI\s+installed\s+installed here, never used\s+size unknown\n/);
+    expect(t).toContain("On: 3 tools, 501.0 MB, 1 of unknown size");
+    expect(t).toContain("Disk: 1.4 GB of 15.2 GB on the 20 GB builder");
+    expect(t).toContain("┗  space on or off • ← → fold • enter next • esc back");
+    // The two lines he struck out are gone with the all row.
+    expect(t).not.toContain("every row on this screen that can be ticked");
+    expect(t).not.toContain("left as it is");
+    expect(t).not.toMatch(/[●○] all/);
+    expect(t).not.toContain("Selected:");
+    // Space on a group header turns the whole group off, and the totals follow.
+    o.input.write(KEY.down);
+    await settle();
+    o.input.write(KEY.space);
+    await settle();
+    expect(o.text()).toMatch(/○ Go/);
+    expect(o.text()).toContain("On: 2 tools, 250.0 MB, 1 of unknown size");
+    o.input.write(KEY.enter);
+    const r = await p;
+    expect(r.kind === "next" && [...r.ticks].sort()).toEqual(["gh", "node"]);
+  });
 
-    const n = streams();
-    const next = open(n);
+  it("enter takes the defaults as they stand, esc goes back with them, ctrl-c cancels", async () => {
+    const o = streams();
+    const p = open(o);
     await settle(20);
-    // A plain string is the dim line with nothing loud on the screen.
-    expect(n.raw()).not.toMatch(/\x1b\[9[13]m|\x1b\[31m/);
-    n.input.write(KEY.enter);
-    expect(await next).toBe("next");
+    o.input.write(KEY.enter);
+    const r = await p;
+    expect(r.kind === "next" && [...r.ticks].sort()).toEqual(["gh", "go", "node"]);
 
     const b = streams();
     const back = open(b);
     await settle(20);
     b.input.write(KEY.esc);
     await settle(70);
-    expect(await back).toBe("back");
-    expect(b.text()).toMatch(/◇  What they need  2\/3\n│  back\n/);
+    expect((await back).kind).toBe("back");
 
     const c = streams();
     const cancelled = open(c);
     await settle(20);
     c.input.write(KEY.ctrlC);
-    expect(await cancelled).toBe("cancel");
-    expect(c.text()).toContain("cancelled");
-    // Any other key does nothing: the screen has three keys and no search.
-    const d = streams();
-    const waiting = open(d);
+    expect((await cancelled).kind).toBe("cancel");
+  });
+});
+
+describe("the whole flow", () => {
+  const laptop = { entries: FIXTURE.entries };
+  const flow = (o: ReturnType<typeof streams>) =>
+    pickScreens({ manifest: withCatalogAgents(laptop), recipe: RECIPE, brew: new Map(), from: "agents", home: tmpdir(), input: o.input, output: o.output });
+
+  it("five screens in order, each numbered against the six a run has, the scan screen holding its slot until it lands", async () => {
+    const o = streams(100, 30);
+    const p = flow(o);
     await settle(20);
-    d.input.write("x");
-    d.input.write(KEY.down);
+    expect(o.text()).toContain("◆  Agents  1/6");
+    o.input.write(KEY.enter);
     await settle(20);
-    expect(d.text()).not.toContain("◇  What they need");
-    d.input.write(KEY.enter);
-    expect(await waiting).toBe("next");
+    expect(o.text()).toContain("◆  Tools  2/6");
+    o.input.write(KEY.enter);
+    await settle(20);
+    const mac = o.text().slice(o.text().lastIndexOf("◆  Also on this Mac"));
+    expect(mac).toContain("◆  Also on this Mac  3/6");
+    expect(mac).toContain("What this Mac has installed that a package manager could put on the image too.");
+    expect(mac).toContain(MAC_EMPTY);
+    o.input.write(KEY.enter);
+    await settle(20);
+    const signIns = o.text().slice(o.text().lastIndexOf("◆  Sign-ins"));
+    expect(signIns).toContain("◆  Sign-ins  4/6");
+    expect(signIns).toContain(SIGN_INS_TOP);
+    o.input.write(KEY.enter);
+    await settle(20);
+    expect(o.text()).toContain("◆  wsp for your agents  5/6");
+    o.input.write(KEY.enter);
+    const picked = await p;
+    expect(picked).not.toBe("cancel");
+    if (picked === "cancel") return;
+    // Five keypresses, and every answer is the one each screen opened on.
+    expect(picked.recipe.rows.filter(r => r.on).map(r => r.id)).toEqual(RECIPE.rows.filter(r => r.on).map(r => r.id));
+    expect([...picked.logins].sort()).toEqual([["logins/claude", "machine"], ["logins/gh", "machine"]]);
+    expect([...picked.wspTools]).toEqual([]);
+  });
+
+  it("an answer stands when the screen is left and come back to, as a tick does", async () => {
+    const o = streams(100, 30);
+    const p = flow(o);
+    await settle(20);
+    for (let i = 0; i < 3; i += 1) {
+      o.input.write(KEY.enter);
+      await settle(20);
+    }
+    const at = () => o.text().slice(o.text().lastIndexOf("◆  Sign-ins"));
+    // Down onto the Claude Code row and right once: the row moves from the machine to its API key.
+    o.input.write(KEY.down);
+    await settle();
+    o.input.write(KEY.right);
+    await settle();
+    expect(at()).toMatch(/Claude Code login\s+[^\n]*API key/);
+    o.input.write(KEY.enter);
+    await settle(20);
+    expect(o.text()).toContain("◆  wsp for your agents  5/6");
+    // A tick on screen five, then esc back: the sign-in answer is still the one that was chosen.
+    o.input.write(KEY.space);
+    await settle();
+    o.input.write(KEY.esc);
+    await settle(90);
+    expect(at()).toMatch(/Claude Code login\s+[^\n]*API key/);
+    o.input.write(KEY.enter);
+    await settle(20);
+    // And screen five is still as it was left.
+    expect(o.text().slice(o.text().lastIndexOf("◆  wsp for your agents"))).toMatch(/● Claude Code/);
+    o.input.write(KEY.enter);
+    const picked = await p;
+    if (picked === "cancel") throw new Error("cancelled");
+    expect(picked.logins.get("logins/claude")).toBe("key");
+    expect([...picked.wspTools]).toEqual(["claude"]);
+  });
+
+  it("the sign-ins screen: a word per row, the arrows walk them, the header counts, and there is no all row", async () => {
+    const o = streams(100, 30);
+    const p = flow(o);
+    await settle(20);
+    o.input.write(KEY.enter);
+    await settle(20);
+    o.input.write(KEY.enter);
+    await settle(20);
+    o.input.write(KEY.enter);
+    await settle(20);
+    const at = () => o.text().slice(o.text().lastIndexOf("◆  Sign-ins"));
+    expect(at()).toMatch(/▾ Agents\s+0 copy\s+1 sign in\s+0 API key\s+0 skip\n┃\s+Claude Code login\s+Keychain: Claude Code-credentials\s+sign in on the machine\n/);
+    expect(at()).toMatch(/▾ Developer CLIs\s+0 copy\s+1 sign in\s+0 skip\n/);
+    expect(at()).toContain("┗  ← → choose • enter next • esc back");
+    expect(at()).not.toMatch(/[●○] all/);
+    // A sign-in row carries no box: its answer is the word, and one of the words is skip.
+    expect(at()).not.toMatch(/[●○] Claude Code login/);
+    // Right on the Claude Code row walks to the next word it takes; left walks back.
+    o.input.write(KEY.down);
+    await settle();
+    o.input.write(KEY.right);
+    await settle();
+    expect(at()).toMatch(/Claude Code login\s+Keychain: Claude Code-credentials\s+API key/);
+    o.input.write(KEY.left);
+    await settle();
+    expect(at()).toMatch(/Claude Code login\s+Keychain: Claude Code-credentials\s+sign in on the machine/);
+    o.input.write(KEY.enter);
+    await settle(20);
+    o.input.write(KEY.enter);
+    const picked = await p;
+    if (picked === "cancel") throw new Error("cancelled");
+    expect(picked.logins.get("logins/claude")).toBe("machine");
   });
 });

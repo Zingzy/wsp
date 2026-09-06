@@ -1,0 +1,156 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// The one table of what a recipe moves: every catalog agent and tool as a row
+// with its tick, why it is here in the words the person's own machine gives,
+// and the size its install downloads. wsp recipe prints it as text; wsp init's
+// agents and tools screens are the same rows as a list.
+import { CATALOG, MIB, type CatalogEntry } from "@wsp/catalog";
+import { plural } from "@wsp/engine";
+import { fmtBytes, type Recipe, type RecipeRow } from "@wsp/protocol";
+import { GREY, GUTTER, accent, grey } from "./init-layout.js";
+import type { Cell } from "./init-select.js";
+
+/** The groups a row falls in, in reading order: what always comes, what this computer's agents ran, what is here
+ * and unused, and the rest of the catalog. */
+export const BASE_GROUP = "Always on the image";
+export const USED_GROUP = "You use these";
+export const HERE_GROUP = "Installed here, never used";
+export const CATALOG_GROUP = "Also in the catalog";
+export type Group = typeof BASE_GROUP | typeof USED_GROUP | typeof HERE_GROUP | typeof CATALOG_GROUP;
+export const GROUP_ORDER: readonly Group[] = [BASE_GROUP, USED_GROUP, HERE_GROUP, CATALOG_GROUP];
+/** The one word that stands for a group where colour cannot say it. */
+export const GROUP_LABEL: Record<Group, string> = { [BASE_GROUP]: "base", [USED_GROUP]: "used", [HERE_GROUP]: "installed", [CATALOG_GROUP]: "catalog" };
+/** Over this a row is heavy: it comes first inside its group and its size is drawn brighter. */
+export const HEAVY_BYTES = 300 * MIB;
+/** What a row reads where the catalog has measured no size. */
+export const UNKNOWN_SIZE = "size unknown";
+
+const TICK_ON = "●";
+const TICK_OFF = "○";
+const LABEL_WIDTH = Math.max(...Object.values(GROUP_LABEL).map(l => l.length));
+
+/** One row of the table: a catalog entry with what the recipe made of it. */
+export interface TableRow {
+  id: string;
+  kind: CatalogEntry["kind"];
+  name: string;
+  on: boolean;
+  /** Always on the image: on the machine whatever is ticked, so nothing can turn it off. */
+  base: boolean;
+  group: Group;
+  /** Why it is here, with the counts behind it. */
+  why: string;
+  /** What its install downloads, where the catalog measured it. */
+  size?: number;
+  heavy: boolean;
+  /** Why wsp cannot drive this agent yet; absent on every other row. */
+  note?: string;
+}
+
+/** How many sessions of this agent the recipe read on this computer. */
+const sessionsOf = (recipe: Recipe, id: string): number => recipe.histories.find(h => h.agent === id)?.sessions ?? 0;
+
+export function groupOf(e: CatalogEntry, r: RecipeRow | undefined, sessions: number): Group {
+  if (e.kind === "tool" && e.floor) return BASE_GROUP;
+  if (e.kind === "agent") return r?.source.kind === "installed" ? (sessions > 0 ? USED_GROUP : HERE_GROUP) : CATALOG_GROUP;
+  switch (r?.source.kind) {
+    case "used":
+      return USED_GROUP;
+    case "installed":
+      return HERE_GROUP;
+    default:
+      return CATALOG_GROUP;
+  }
+}
+
+/** The why column: the counts this computer gave, in the plainest words each group has. */
+function whyLine(e: CatalogEntry, r: RecipeRow | undefined, sessions: number): string {
+  const group = groupOf(e, r, sessions);
+  if (group === BASE_GROUP) return "always on the image";
+  if (e.kind === "agent") return group === USED_GROUP ? `used here, ${plural(sessions, "session")}` : group === HERE_GROUP ? "installed here, never used" : "not installed here";
+  if (r?.source.kind === "used") return `${plural(r.source.calls, "command")} in ${plural(r.source.sessions, "session")}`;
+  if (group === HERE_GROUP) return "installed here, never used";
+  return e.defaultOn ? "in the catalog, on by default" : "in the catalog, on request";
+}
+
+/** Every catalog entry as a row: the recipe's tick and source where it named one, the catalog's own evidence where
+ * it did not; grouped by why it is here, the heavy rows first inside their group. */
+export function recipeTable(recipe: Recipe, catalog: readonly CatalogEntry[] = CATALOG): TableRow[] {
+  const rows = catalog.map((e): TableRow => {
+    const r = recipe.rows.find(x => x.id === e.id);
+    const base = e.kind === "tool" && e.floor;
+    const size = r?.size ?? e.size;
+    const sessions = e.kind === "agent" ? sessionsOf(recipe, e.id) : 0;
+    return {
+      id: e.id,
+      kind: e.kind,
+      name: e.name,
+      on: base || r?.on === true,
+      base,
+      group: groupOf(e, r, sessions),
+      why: whyLine(e, r, sessions),
+      ...(size !== undefined ? { size } : {}),
+      heavy: size !== undefined && size > HEAVY_BYTES,
+      ...(e.kind === "agent" && e.threads !== true ? { note: "installs, but wsp cannot run its threads yet" } : {}),
+    };
+  });
+  return GROUP_ORDER.flatMap(g => {
+    const group = rows.filter(r => r.group === g);
+    return [...group.filter(r => r.heavy), ...group.filter(r => !r.heavy)];
+  });
+}
+
+/** A row's size, or that the catalog has none for it. */
+export const sizeText = (r: TableRow): string => (r.size === undefined ? UNKNOWN_SIZE : fmtBytes(r.size));
+
+/** The style each group's why column takes from 256 colours up: what this computer ran in the accent, the rest down
+ * the ramp. */
+const PAINT: Record<Group, (s: string) => string> = {
+  [BASE_GROUP]: s => grey(GREY.dim, s),
+  [USED_GROUP]: accent,
+  [HERE_GROUP]: s => grey(GREY.bright, s),
+  [CATALOG_GROUP]: s => grey(GREY.mid, s),
+};
+
+/** The why column: coloured by its group from 256 colours up, and under that the group's word ahead of it, since a
+ * 16-colour terminal has no shade to spare. */
+export function whyCell(r: TableRow, depth: number): Cell {
+  if (depth >= 8) return { text: r.why, paint: PAINT[r.group] };
+  return { text: `${GROUP_LABEL[r.group].padEnd(LABEL_WIDTH)}${GUTTER}${r.why}` };
+}
+
+/** The size column: heavy rows a step brighter than the rest, so weight is seen before it is read. */
+export function sizeCell(r: TableRow, depth: number): Cell {
+  return { text: sizeText(r), ...(r.heavy && depth >= 8 ? { paint: (s: string) => grey(GREY.bright, s) } : {}) };
+}
+
+/** What the ticked rows come to: how many, what they download, and how many of them the catalog has no size for. */
+export function totalsLine(rows: readonly TableRow[], noun = "rows"): string {
+  const on = rows.filter(r => r.on);
+  const bytes = on.reduce((n, r) => n + (r.size ?? 0), 0);
+  const unknown = on.filter(r => r.size === undefined).length;
+  return `On: ${plural(on.length, noun.replace(/s$/, ""))}, ${fmtBytes(bytes)}${unknown > 0 ? `, ${unknown} of unknown size` : ""}`;
+}
+
+/** The rows of one group with their total: "You use these  3 of 7  1.2 GB". */
+export function groupTotal(rows: readonly TableRow[]): string {
+  const free = rows.filter(r => !r.base);
+  const on = rows.filter(r => r.on);
+  const bytes = on.reduce((n, r) => n + (r.size ?? 0), 0);
+  const count = free.length === 0 ? String(rows.length) : `${free.filter(r => r.on).length} of ${free.length}`;
+  return `${count}${GUTTER}${fmtBytes(bytes)}`;
+}
+
+/** The table as lines of text: the tick, the name, why it is here, and the size flush right, each column as wide as
+ * its widest cell. The tick takes the accent when the row comes. */
+export function tableLines(rows: readonly TableRow[], depth: number): string[] {
+  const cells = rows.map(r => ({ row: r, why: whyCell(r, depth), size: sizeCell(r, depth) }));
+  const width = (of: (c: (typeof cells)[number]) => string): number => Math.max(0, ...cells.map(of).map(t => t.length));
+  const name = width(c => c.row.name);
+  const why = width(c => c.why.text);
+  const size = width(c => c.size.text);
+  const paint = (c: Cell, padded: string): string => c.paint?.(padded) ?? padded;
+  return cells.map(c => {
+    const tick = c.row.on ? (depth > 1 ? accent(TICK_ON) : TICK_ON) : TICK_OFF;
+    return [tick, c.row.name.padEnd(name), paint(c.why, c.why.text.padEnd(why)), paint(c.size, c.size.text.padStart(size))].join(GUTTER).trimEnd();
+  });
+}

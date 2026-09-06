@@ -801,6 +801,12 @@ export const RecipeSource = z.discriminatedUnion("kind", [
 ]);
 export type RecipeSource = z.infer<typeof RecipeSource>;
 
+/** What happens to a login: copied from this computer, signed in on the machine after the build, set there as an
+ * API key the tool reads, or left out. One list, read by the collector's rows and by a recipe's rows alike. */
+export const LOGIN_CHOICES = ["copy", "machine", "key", "skip"] as const;
+export const LoginChoice = z.enum(LOGIN_CHOICES);
+export type LoginChoice = z.infer<typeof LoginChoice>;
+
 /** One catalog entry in a recipe: ticked or not, why, its size on the machine when the catalog measured one, and
  * the sign-in answer the person or the agent that wrote the recipe gave; absent, the wizard's default stands. */
 export const RecipeRow = z.object({
@@ -809,7 +815,7 @@ export const RecipeRow = z.object({
   on: z.boolean(),
   source: RecipeSource,
   size: z.number().int().nonnegative().optional(),
-  signIn: z.enum(["copy", "machine", "skip"]).optional(),
+  signIn: LoginChoice.optional(),
 });
 export type RecipeRow = z.infer<typeof RecipeRow>;
 
