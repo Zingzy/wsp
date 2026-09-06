@@ -12,6 +12,7 @@
 import type { ExecResult, MachineState, PreviewReach } from "@wsp/engine";
 import { appendCostPoint, type EventUnion, type ReachState, type ReachStatus, type WorkspaceCostEvent, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { realClock, type Clock } from "./clock.js";
+import type { Store } from "./store.js";
 
 /** The provider word the runtime's own phase implies: a wake in flight is a machine starting, a pause in flight still runs. */
 export function machineStateOf(phase: WorkspacePhase): MachineState {
@@ -81,8 +82,8 @@ export interface StatusApi {
   /** Refcounted: while at least one watcher holds this, the poller and cost
    * ticker run and their events ride the runtime bus. Returns the release. */
   watch(opts?: StatusWatchOptions): () => void;
-  /** The workspace's cost ticks since this runtime began metering it, folded to the rate changes and the newest tick. */
-  history(workspaceId: string): WorkspaceCostEvent[];
+  /** The workspace's cost ticks since metering began, across host restarts, folded to the rate changes and the newest tick. */
+  history(workspaceId: string): Promise<WorkspaceCostEvent[]>;
 }
 
 /** A workspace as the tracker needs it: the view, the size the provider built
@@ -99,6 +100,8 @@ export interface StatusRecord extends WorkspaceView {
 export interface StatusTrackerOptions {
   rateUsdPerHour(size: WorkspaceSize): number;
   records(): Promise<StatusRecord[]>;
+  /** Holds each workspace's folded cost history so the series and the meter behind it outlive the process. */
+  store: Store;
   emit(event: EventUnion): void;
   on(type: EventUnion["type"] | "*", listener: (e: EventUnion) => void): () => void;
   defaults?: StatusWatchOptions;
@@ -110,6 +113,14 @@ interface Meter {
   awakeMs: number;
   /** Set while running: when the current awake stretch began. */
   mark?: number;
+}
+
+const COST_HISTORIES = "cost-histories";
+
+/** One store document per workspace: its folded series as of the tick that last added a point. */
+interface CostHistoryRecord {
+  workspaceId: string;
+  points: WorkspaceCostEvent[];
 }
 
 const PROBE_TIMEOUT_MS = 10_000;
@@ -170,7 +181,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     if (e.type === "workspace.created") meter(e.workspace.id).mark = clock.now();
   });
   o.on("workspace.woken", e => {
-    if (e.type === "workspace.woken") meter(e.workspaceId).mark ??= clock.now();
+    if (e.type === "workspace.woken") meter(e.workspaceId).mark = clock.now();
   });
   o.on("workspace.napped", e => {
     if (e.type !== "workspace.napped") return;
@@ -181,11 +192,37 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   o.on("workspace.deleted", e => {
     if (e.type !== "workspace.deleted") return;
     meters.delete(e.workspaceId);
-    histories.delete(e.workspaceId);
+    forget(e.workspaceId);
     lastEmitted.delete(e.workspaceId);
     reconciled.delete(e.workspaceId);
     suspects.delete(e.workspaceId);
   });
+
+  // The stored series is as of the tick that last added a point, and a run of one rate is a straight line from
+  // there: a workspace running then resumes its awake stretch at that tick, so the host's downtime is metered as
+  // the provider billed it.
+  const loading = (async () => {
+    for (const raw of await o.store.list(COST_HISTORIES)) {
+      const doc = raw as CostHistoryRecord;
+      const last = Array.isArray(doc.points) ? doc.points.at(-1) : undefined;
+      if (last === undefined) continue;
+      histories.set(doc.workspaceId, doc.points);
+      const m = meter(doc.workspaceId);
+      m.awakeMs = last.awakeMs;
+      if (last.phase === "running") m.mark = Date.parse(last.at);
+    }
+  })().catch((e: unknown) => console.warn("cost histories not loaded; the series begins at the first tick", e));
+
+  // Writes land in order behind the load, so a save never lands under a delete that followed it.
+  let writes: Promise<void> = loading;
+  const persist = (step: () => Promise<void>): void => {
+    writes = writes.then(step).catch(() => {});
+  };
+
+  const forget = (id: string): void => {
+    histories.delete(id);
+    persist(() => o.store.delete(COST_HISTORIES, id));
+  };
 
   /** The provider's word, or our own when it cannot be had (weather is not a
    * reason to report a running workspace as anything else). */
@@ -314,6 +351,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   const lastEmitted = new Map<string, string>();
 
   const costTick = async (): Promise<void> => {
+    await loading;
     const now = clock.now();
     for (const { size, ...view } of await o.records()) {
       const m = meter(view.id);
@@ -330,7 +368,12 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
         accruedUsd: (rate * awakeMs) / 3_600_000,
         at: new Date(now).toISOString(),
       };
-      histories.set(view.id, appendCostPoint(histories.get(view.id) ?? [], tick));
+      const before = histories.get(view.id) ?? [];
+      const next = appendCostPoint(before, tick);
+      histories.set(view.id, next);
+      // A tick that replaced the newest point lies on the stored line; only an added point changes the document.
+      const added = before.length === 0 || next[next.length - 2] === before[before.length - 1];
+      if (added) persist(() => o.store.put(COST_HISTORIES, view.id, { workspaceId: view.id, points: next } satisfies CostHistoryRecord));
       o.emit(tick);
     }
   };
@@ -366,5 +409,10 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     };
   };
 
-  return { list, watch, history: id => histories.get(id) ?? [] };
+  const history: StatusApi["history"] = async id => {
+    await loading;
+    return histories.get(id) ?? [];
+  };
+
+  return { list, watch, history };
 }
