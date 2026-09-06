@@ -506,6 +506,8 @@ export interface BootPayload {
 export interface DesktopBridge {
   /** The installed faces for a family and its Nerd Font variants, from this computer's font directories. */
   localFonts(family: string): Promise<LocalFontFace[]>;
+  /** The system folder picker; the absolute path chosen, or nothing when it was dismissed. */
+  pickFolder(): Promise<string | undefined>;
 }
 
 // --- golden image (manifest, interactive builder, build stages) ---------------

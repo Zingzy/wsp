@@ -85,8 +85,9 @@ interface State {
   /** Mirrors the client's status; live with an api bound pulls list and statuses again so a reconnect converges. */
   setConn(conn: ConnStatus): void;
   select(id: string | null, threadId?: string | null): void;
-  /** Starts a create from the golden head, selects its row, and follows it through the stage events. */
-  createWorkspace(name: string): Promise<void>;
+  /** Starts a create from the golden head, selects its row, and follows it through the stage events; resolves with
+   * the runtime's id for the new workspace, or null when the create was refused. */
+  createWorkspace(name: string): Promise<string | null>;
   /** Runs a failed creation again under the same row. */
   retryCreation(key: string): Promise<void>;
   dismissCreation(key: string): void;
@@ -127,15 +128,16 @@ export const useStore = create<State>((set, get) => {
       selectedId: s.selectedId === key ? workspaceId : s.selectedId,
     }));
   };
-  const runCreation = async (key: string, name: string): Promise<void> => {
+  const runCreation = async (key: string, name: string): Promise<string | null> => {
     const api = get().api;
-    if (!api) return;
+    if (!api) return null;
     try {
       const { notice, ...workspace } = await api.createFromGoldenHead(name);
       if (notice !== undefined) set({ toast: notice });
       // The created event normally lands first; when the reply beats it, the row still has a workspace to become.
       set(s => (s.workspaces.some(w => w.id === workspace.id) ? {} : { workspaces: [...s.workspaces, workspace].sort((a, b) => a.id.localeCompare(b.id)) }));
       finishCreation(key, workspace.id);
+      return workspace.id;
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       patchCreation(key, c => ({
@@ -143,6 +145,7 @@ export const useStore = create<State>((set, get) => {
         failed: explainCreateRefusal(e),
         lines: c.lines.at(-1)?.stage === "failed" ? c.lines : [...c.lines, { stage: "failed", message, at: new Date().toISOString(), elapsedMs: c.lines.at(-1)?.elapsedMs ?? 0 }],
       }));
+      return null;
     }
   };
 
@@ -222,10 +225,10 @@ export const useStore = create<State>((set, get) => {
     },
     select(id, threadId = null) { set({ selectedId: id, selectedThreadId: threadId }); },
     async createWorkspace(name) {
-      if (!get().api) return;
+      if (!get().api) return null;
       const key = `creating:${++creationSeq}`;
       set(s => ({ creations: [...s.creations, { key, name, workspaceId: null, lines: NO_LINES, failed: null }], selectedId: key, selectedThreadId: null }));
-      await runCreation(key, name);
+      return runCreation(key, name);
     },
     async retryCreation(key) {
       const creation = get().creations.find(c => c.key === key);

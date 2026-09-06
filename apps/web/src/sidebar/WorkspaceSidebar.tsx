@@ -5,7 +5,7 @@
 // live here; rows and logic come from the copied t3code files beside this one.
 // The surface itself is the shell's sidebar-glass: nothing here paints a
 // background.
-import { ChevronDownIcon, MessageSquareIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
+import { ChevronDownIcon, FolderInputIcon, MessageSquareIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { deriveSidebarProjects, type SidebarProjectSnapshot, type SidebarThreadSnapshot } from "../adapt/index.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty.js";
@@ -33,7 +33,8 @@ import { cn } from "../lib/utils.js";
 import { useSelectedId, useSelectedThreadId, useStore, type Creation } from "../protocol/store.js";
 import { onNewWorkspaceRequest, requestNewThread } from "../shell/shellRequests.js";
 import { ForwardsList } from "./ForwardsList.js";
-import { NewWorkspaceDialog } from "./NewWorkspaceDialog.js";
+import { ImportProjectDialog } from "./ImportProjectDialog.js";
+import { NewWorkspaceDialog, type WorkspaceStart } from "./NewWorkspaceDialog.js";
 import { ProjectFavicon } from "./ProjectFavicon.js";
 import {
   resolveAdjacentThreadId,
@@ -91,6 +92,12 @@ interface DialogState {
   readonly name: string;
 }
 
+/** An import dialog open for one workspace; keyed per opening so its folder and plan reset. */
+interface ImportState {
+  readonly key: number;
+  readonly workspaceId: string;
+}
+
 export function WorkspaceSidebar() {
   const api = useStore(s => s.api);
   const workspaces = useStore(s => s.workspaces);
@@ -112,6 +119,8 @@ export function WorkspaceSidebar() {
   const [settledExpanded, setSettledExpanded] = useLocalStorage(SETTLED_EXPANDED_KEY, true, booleanCodec);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const [dialog, setDialog] = useState<DialogState | null>(null);
+  const [importing, setImporting] = useState<ImportState | null>(null);
+  const canImport = api?.planProject !== undefined && api.importProject !== undefined;
   /** Workspace id to the machine id a rebuild was asked for; the action stays disabled while that machine is still the one reported. */
   const [rebuilding, setRebuilding] = useState<Readonly<Record<string, string>>>({});
   const rootRef = useRef<HTMLDivElement>(null);
@@ -119,6 +128,7 @@ export function WorkspaceSidebar() {
   const projects = useMemo(() => deriveSidebarProjects({ workspaces, statuses, sessions }), [workspaces, statuses, sessions]);
   const searching = query.trim().length > 0;
   const visible = useMemo(() => visibleProjects(projects, query), [projects, query]);
+  const importTarget = importing === null ? undefined : workspaces.find(w => w.id === importing.workspaceId);
 
   const openDialog = (): void => {
     setDialog({ key: Date.now(), name: defaultWorkspaceName([...workspaces.map(w => w.name), ...creations.map(c => c.name)]) });
@@ -127,9 +137,10 @@ export function WorkspaceSidebar() {
   openDialogRef.current = openDialog;
   useEffect(() => onNewWorkspaceRequest(() => openDialogRef.current()), []);
 
-  const create = (name: string): void => {
+  const create = async (name: string, start: WorkspaceStart): Promise<void> => {
     setDialog(null);
-    void createWorkspace(name);
+    const id = await createWorkspace(name);
+    if (start === "import" && id !== null) setImporting({ key: Date.now(), workspaceId: id });
   };
 
   const rebuild = async (project: SidebarProjectSnapshot): Promise<void> => {
@@ -241,7 +252,10 @@ export function WorkspaceSidebar() {
                         isActive={selectedId === project.id && selectedThreadId === null}
                         data-sidebar-row
                         data-row-id={`ws:${project.id}`}
-                        className={cn(!zombie && collapsible && "group-has-data-[sidebar=menu-action]/menu-item:pe-14")}
+                        className={cn(
+                          !zombie && (collapsible || canImport) && "group-has-data-[sidebar=menu-action]/menu-item:pe-14",
+                          !zombie && collapsible && canImport && "group-has-data-[sidebar=menu-action]/menu-item:pe-19",
+                        )}
                         onClick={() => select(project.id)}
                       >
                         <span
@@ -269,6 +283,23 @@ export function WorkspaceSidebar() {
                         </SidebarMenuAction>
                       ) : (
                         <>
+                          {canImport ? (
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <SidebarMenuAction
+                                    showOnHover
+                                    className={collapsible ? "right-11" : "right-6"}
+                                    aria-label={`Import a project into ${project.displayName}`}
+                                    onClick={() => setImporting({ key: Date.now(), workspaceId: project.id })}
+                                  />
+                                }
+                              >
+                                <FolderInputIcon />
+                              </TooltipTrigger>
+                              <TooltipPopup side="bottom">Import a project from this Mac</TooltipPopup>
+                            </Tooltip>
+                          ) : null}
                           {collapsible ? (
                             <SidebarMenuAction
                               showOnHover
@@ -385,9 +416,12 @@ export function WorkspaceSidebar() {
         <NewWorkspaceDialog
           key={dialog.key}
           initialName={dialog.name}
-          onCreate={create}
+          onCreate={(name, start) => void create(name, start)}
           onCancel={() => setDialog(null)}
         />
+      ) : null}
+      {importing !== null && importTarget !== undefined ? (
+        <ImportProjectDialog key={importing.key} workspace={importTarget} onClose={() => setImporting(null)} />
       ) : null}
     </>
   );

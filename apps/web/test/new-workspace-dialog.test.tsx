@@ -35,8 +35,27 @@ describe("new workspace dialog", () => {
     const input = within(dialog).getByLabelText("Name") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "  beta " } });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(onCreate).toHaveBeenNthCalledWith(1, "beta");
+    expect(onCreate).toHaveBeenNthCalledWith(1, "beta", "fresh");
     fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
-    expect(onCreate).toHaveBeenNthCalledWith(2, "beta");
+    expect(onCreate).toHaveBeenNthCalledWith(2, "beta", "fresh");
+  });
+
+  it("offers start fresh and import a project, fresh first; the choice rides along with the name", async () => {
+    // Base UI's radio re-dispatches a click as a PointerEvent, which jsdom does not have.
+    vi.stubGlobal("PointerEvent", class extends MouseEvent {});
+    const onCreate = vi.fn();
+    render(<NewWorkspaceDialog initialName="workspace-1" onCreate={onCreate} onCancel={() => {}} />);
+    const dialog = await screen.findByRole("dialog");
+    const group = within(dialog).getByRole("radiogroup", { name: "Start from" });
+    const fresh = within(group).getByRole("radio", { name: /^Start fresh/ });
+    const imported = within(group).getByRole("radio", { name: /^Import a project/ });
+    expect(within(group).getAllByRole("radio")).toEqual([fresh, imported]);
+    expect([fresh, imported].map(r => r.getAttribute("aria-checked"))).toEqual(["true", "false"]);
+    expect(within(group).getByText("Then pick a folder on this Mac; it lands at the same path, caches left behind.")).toBeDefined();
+    fireEvent.click(imported);
+    expect([fresh, imported].map(r => r.getAttribute("aria-checked"))).toEqual(["false", "true"]);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
+    expect(onCreate).toHaveBeenCalledWith("workspace-1", "import");
+    vi.unstubAllGlobals();
   });
 });

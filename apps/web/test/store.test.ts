@@ -116,7 +116,7 @@ describe("store creations", () => {
     expect(useStore.getState().selectedId).toBe("ws_new");
     expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_a", "ws_new"]);
     finish(view("ws_new"));
-    await done;
+    expect(await done).toBe("ws_new");
     expect(useStore.getState().creations).toEqual([]);
   });
 
@@ -125,7 +125,7 @@ describe("store creations", () => {
     api.createFromGoldenHead = async () => ({ ...view("ws_new"), notice: "Stopped the builder kept from golden v1 (m0) to make room at the machine cap." });
     useStore.getState().bind(api);
     await flush();
-    await useStore.getState().createWorkspace("beta");
+    expect(await useStore.getState().createWorkspace("beta")).toBe("ws_new");
     expect(useStore.getState().creations).toEqual([]);
     expect(useStore.getState().selectedId).toBe("ws_new");
     expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_a", "ws_new"]);
@@ -148,7 +148,7 @@ describe("store creations", () => {
     };
     useStore.getState().bind(api);
     await flush();
-    await useStore.getState().createWorkspace("beta");
+    expect(await useStore.getState().createWorkspace("beta")).toBeNull();
     const failed = useStore.getState().creations[0]!;
     expect(failed.failed?.title).toBe("The provider refused: machine cap reached");
     expect(failed.lines.map(l => l.stage)).toEqual(["fork-requested", "failed"]);

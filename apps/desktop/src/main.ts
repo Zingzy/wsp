@@ -48,6 +48,15 @@ ipcMain.handle("fonts:local", (event, family: unknown) => {
   return localFontFaces(typeof family === "string" ? family : "", fonts);
 });
 
+// The picker returns a path on this computer, so only the host's own page may open it.
+ipcMain.handle("folder:pick", async event => {
+  if (session === undefined || !fromAppPage(event.senderFrame?.url, session.url)) throw new Error("folder:pick: not the app's page");
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const options = { properties: ["openDirectory" as const], title: "Import a project" };
+  const picked = await (win === null ? dialog.showOpenDialog(options) : dialog.showOpenDialog(win, options));
+  return picked.canceled ? undefined : picked.filePaths[0];
+});
+
 function locate(): Promise<Located> {
   const env = process.env["WSP_HOME"];
   const pointer = currentHome();
