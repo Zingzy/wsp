@@ -50,6 +50,7 @@ import { retentionOffer } from "./storage.js";
 import { rungSelect, type FooterLine, type RungSelectOptions, type SelectItem, type Tone } from "./init-select.js";
 import { DISK_HOLD_SHARE, HEAVY_BYTES, diskTone, weighed, weightTone } from "./init-weight.js";
 import { builderLink, flowHooks, noteOutcomes, signInStage, stageLogins, type BuilderLink, type HostHooks, type LoginOutcome, type SignInFlow } from "./init-signin.js";
+import { hasLogin, signInFor, signsInByDefault, type SignIn } from "./signin-table.js";
 import type { HostHandle } from "./server.js";
 
 export interface InitIO {
@@ -480,6 +481,14 @@ function spin(output: Writable, label: string, animate: boolean): Spinner {
 const CLAUDE_LOGIN_WHY = "Anthropic's terms forbid passing the OAuth credential along, so with it alone the default is to sign in on the machine.";
 /** What the answers on a login row do, and on a credential-shaped row. */
 const LOGIN_WHY = "copy brings it along; sign in does it in this terminal after the build";
+/** The login row's second detail line by its catalog row: a browser or device flow leads with the command it runs, or
+ * with the collector's reason when the row starts as a copy all the same; a tool with no sign-in says so, and a key
+ * gets the plain line. */
+function loginWhy(e: ManifestEntry, s: SignIn): string {
+  if (hasLogin(s) && signsInByDefault(s)) return e.default === "bring" ? `${e.detail ?? "copy brings it along"}; sign in runs ${s.login}` : `sign in runs ${s.login} after the build; copy brings it along`;
+  if (s.kind === "none" && s.note !== undefined) return s.note;
+  return LOGIN_WHY;
+}
 const CONSENT_WHY = "copy brings it along; skip leaves it here";
 const TICKED_FOR_LOGINS = "ticked under Tools for the sign-ins: ";
 const EVERYTHING_FOOTER = ["large items are listed but never copied without a tick", "know what one of these is? add it to the catalog"];
@@ -551,7 +560,7 @@ function detailWhy(e: ManifestEntry, lock: "on" | "off" | undefined, brew: BrewT
   if (lock === "off") return e.reason ?? "";
   if (lock === "on") return "always comes along";
   if (e.rung === "logins") {
-    if (agentName(e) !== "claude") return LOGIN_WHY;
+    if (agentName(e) !== "claude") return loginWhy(e, signInFor(agentName(e)));
     // The OAuth credential is the row's one path that is not a helper; a row of API key sources has no such rule to explain.
     const oauth = e.paths.some(p => !/^helper:/i.test(p));
     return [e.detail, oauth ? CLAUDE_LOGIN_WHY : LOGIN_WHY].filter(x => x !== undefined).join("; ");

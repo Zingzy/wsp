@@ -54,9 +54,10 @@ options:
   --state PATH       state file (default ~/.wsp/state.json, or ./.wsp/state.json
                      when the current directory has a .env)
   --yes              init: take every default and ask nothing (required off a
-                     terminal); a login held in the Keychain defaults to sign
-                     in on the machine unless a saved recipe answered copy, so
-                     macOS has nothing to ask either
+                     terminal); a login with a browser or device sign-in, or one
+                     held in the Keychain, defaults to sign in on the machine
+                     unless a saved recipe answered copy, so macOS has nothing
+                     to ask either and the sign-ins wait for the app's terminal
   --manifest PATH    init: tick from this file instead of reading the machine; a
                      saved recipe (<state dir>/golden-recipe.json) works here
 
