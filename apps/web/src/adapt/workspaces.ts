@@ -99,7 +99,7 @@ function deriveThread(thread: ThreadView): SidebarThreadSnapshot {
     endedAt: thread.endedAt !== undefined ? new Date(thread.endedAt).toISOString() : null,
     indicator: threadIndicator(thread),
     harness: thread.harness,
-    startedBy: thread.startedBy ?? null,
+    startedBy: thread.startedBy,
   };
 }
 

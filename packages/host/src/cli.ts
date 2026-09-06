@@ -36,7 +36,7 @@ import { TAGLINE, opening } from "./init-opening.js";
 import { systemOpener, type UrlOpener } from "./relay.js";
 import { hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from "./host-lock.js";
 import { startHost, type HostHandle } from "./server.js";
-import { findVerb, runVerb, verbHelp } from "./verbs.js";
+import { findVerb, runVerb, verbHelp, verbUsage } from "./verbs.js";
 
 const VERSION = (
   JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }
@@ -472,7 +472,7 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
       return doctor(rt, io, keys.anthropic !== undefined ? { envs: claudeEnvs(keys.anthropic) } : {});
     }
     default:
-      io.error(`unknown command: ${cmd}\n\n${HELP}`);
+      io.error(verbUsage(cmd) ?? `unknown command: ${cmd}\n\n${HELP}`);
       return 1;
   }
 }

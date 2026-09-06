@@ -10,7 +10,7 @@
 
 import { randomBytes } from "node:crypto";
 import { INLINE_EXEC_MS, type ExecResult, type Machine } from "@wsp/engine";
-import type { ExecStream, ExecStreamFactory } from "@wsp/adapter-claude";
+import { shellQuote, type ExecStream, type ExecStreamFactory } from "@wsp/adapter-claude";
 
 export interface MachineExecOptions {
   /** Delay between log polls. */
@@ -25,10 +25,6 @@ export interface MachineExecOptions {
 
 const CHUNK_BYTES = 262_144;
 const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
-function quote(value: string): string {
-  return `'${value.replaceAll("'", String.raw`'\''`)}'`;
-}
 
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
@@ -47,7 +43,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
 
     const exports = Object.entries(env)
       .filter(([k]) => ENV_KEY.test(k))
-      .map(([k, v]) => `export ${k}=${quote(v)}`)
+      .map(([k, v]) => `export ${k}=${shellQuote(v)}`)
       .join("\n");
     const script = `${exports}\n${command}\necho $? > ${base}.exit\n`;
     const b64 = Buffer.from(script, "utf8").toString("base64");

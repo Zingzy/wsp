@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { hostname } from "node:os";
-import { parseCatalogProbe, type AdapterEvent, type ExecStream, type TurnResult } from "@wsp/adapter-claude";
+import { parseCatalogProbe, shellQuote, type AdapterEvent, type ExecStream, type TurnResult } from "@wsp/adapter-claude";
 import {
   BUILDER_IDLE_MS,
   DAEMON_PORT,
@@ -109,6 +109,8 @@ export interface HarnessAdapter {
   start(options: HarnessStartOptions): HarnessSession;
   /** A shell line that makes the binary describe itself for harnesses.list; without one the table answers. */
   readonly catalogProbe?: string;
+  /** What a turn's command is exported with on the machine; a plain exec on the workspace runs with the same. */
+  readonly env?: Readonly<Record<string, string>>;
 }
 
 /** Called per session start with the workspace's CURRENT machine (it can change on wake/upgrade). */
@@ -391,9 +393,10 @@ export interface Runtime {
     touch(id: string): Promise<void>;
     /** One-shot command on the workspace's machine (plumbing for clients; sessions are the main road). */
     exec(id: string, cmd: string, opts?: { timeoutMs?: number }): Promise<ExecResult>;
-    /** The same command launched the way a harness turn is: detached on the machine, its output streamed by line,
-     * its exit code at the end. Rejects only when the workspace is unknown; a launch that fails ends the stream. */
-    execStream(id: string, cmd: string): Promise<ExecStream>;
+    /** The command, word by word, launched the way a harness turn is: detached on the machine, each word quoted for
+     * its shell, exported with what the default harness's turns get, its output streamed by line, its exit code at
+     * the end. Rejects when the workspace or that harness's adapter is unknown; a launch that fails ends the stream. */
+    execStream(id: string, argv: ReadonlyArray<string>): Promise<ExecStream>;
     /** How a browser dials this workspace's daemon; throws on backends without preview URLs. */
     daemonReach(id: string): Promise<DaemonReachView>;
     /** The public route to one guest port, for a browser to frame; same caching and refusal as daemonReach. */
@@ -1505,9 +1508,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return entry.machine.exec(cmd, o);
     },
 
-    async execStream(id, cmd) {
+    async execStream(id, argv) {
       const entry = await entryOf(id);
-      return machineExecStream(entry.machine)(cmd, { env: {} });
+      const { adapter } = adapterFor(entry);
+      // Only the socket ends a command; a build may outlive the deadline a harness turn gets.
+      return machineExecStream(entry.machine, { deadlineMs: Number.POSITIVE_INFINITY })(argv.map(shellQuote).join(" "), { env: { ...adapter.env } });
     },
 
     async daemonReach(id) {
@@ -1551,15 +1556,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return catalog;
   };
 
+  /** The adapter for a harness on this workspace's current machine; unnamed means the runtime's default. */
+  const adapterFor = (entry: LiveWorkspace, named?: string): { harness: string; adapter: HarnessAdapter } => {
+    const harness = named ?? "claude";
+    const factory = adapters[harness];
+    if (!factory) throw new Error(`no adapter registered for harness "${harness}"`);
+    return { harness, adapter: factory({ machine: entry.machine, workspaceId: entry.record.id }) };
+  };
+
   const sessionsApi: Runtime["sessions"] = {
     async start(workspaceId, o) {
       const entry = await entryOf(workspaceId);
       const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }));
       if (refusal !== null) throw new Error(refusal);
-      const harness = o.harness ?? "claude";
-      const factory = adapters[harness];
-      if (!factory) throw new Error(`no adapter registered for harness "${harness}"`);
-      const adapter = factory({ machine: entry.machine, workspaceId });
+      const { harness, adapter } = adapterFor(entry, o.harness);
       // A start is when the binary may have changed under us, so the catalog is refreshed here too, within its TTL.
       if (harness === "claude") void claudeCatalogOn(entry.machine, adapter);
 

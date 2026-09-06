@@ -221,8 +221,8 @@ export interface SidebarThreadSnapshot {
   readonly indicator: StatusIndicator | null;
   /** The agent running inside the thread, by its harness id. */
   readonly harness: string;
-  /** Who opened the thread; null on rows the runtime wrote before it recorded this. */
-  readonly startedBy: SessionOrigin | null;
+  /** Who opened the thread, as the protocol's fold answers it. */
+  readonly startedBy: SessionOrigin;
 }
 
 /** One wsp workspace (a machine) as a sidebar project; its sessions are the threads. */

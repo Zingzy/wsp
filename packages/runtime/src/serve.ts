@@ -255,7 +255,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true });
               return;
             case "workspaces.exec": {
-              const stream = await rt.workspaces.execStream(msg.workspaceId, msg.cmd);
+              const stream = await rt.workspaces.execStream(msg.workspaceId, msg.argv);
               const execId = randomBytes(6).toString("hex");
               let running = true;
               detaches.push(() => {

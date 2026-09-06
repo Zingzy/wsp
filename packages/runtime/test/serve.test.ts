@@ -580,10 +580,18 @@ function execGuest(backend: StubBackend, output: string, exit: number | undefine
   };
 }
 
+/** A harness that never runs here; it says what a turn on the machine is exported with, which is what exec runs with too. */
+const envAdapter = (env: Record<string, string>): HarnessAdapterFactory => () => ({
+  start: () => {
+    throw new Error("not started in this test");
+  },
+  env,
+});
+
 describe("serveRuntime workspaces.exec", () => {
   it("replies with an exec id, pushes each output line to the asking socket and the exit code last, and pushes nothing to another socket", async () => {
     const backend = stubBackend();
-    const runtime = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const runtime = createRuntime({ backend, store: memoryStore(), adapters: { claude: envAdapter({ CLAUDE_CONFIG_DIR: "/root/.claude", PATH: "/usr/bin" }) } });
     srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
     const other = await WsClient.connect(srv.port, { token: "secret" });
@@ -592,7 +600,7 @@ describe("serveRuntime workspaces.exec", () => {
     const workspaceId = (created["workspace"] as { id: string }).id;
     execGuest(backend, "one\ntwo\n", 3);
 
-    const started = await c.request("workspaces.exec", { workspaceId, cmd: "printf 'one\\ntwo\\n'; exit 3" });
+    const started = await c.request("workspaces.exec", { workspaceId, argv: ["sh", "-c", "printf 'one\\ntwo\\n'; exit 3"] });
     expect(started.ok).toBe(true);
     const execId = started["execId"] as string;
     expect(execId).toMatch(/^[0-9a-f]{12}$/);
@@ -603,11 +611,14 @@ describe("serveRuntime workspaces.exec", () => {
       { type: "exec.exit", execId, exitCode: 3 },
     ]);
     expect(other.events.filter(e => String(e.type).startsWith("exec."))).toEqual([]);
-    // The command travels base64-encoded inside the launch script.
+    // The command travels base64-encoded inside the launch script, each word quoted for the machine's shell, after
+    // the same exports a harness turn gets.
     const launch = backend.machines[0]!.execLog.find(cmd => cmd.includes("base64 -d"))!;
-    expect(Buffer.from(/printf '%s' '([A-Za-z0-9+/=]*)'/.exec(launch)![1]!, "base64").toString("utf8")).toContain("printf 'one\\ntwo\\n'; exit 3");
+    const script = Buffer.from(/printf '%s' '([A-Za-z0-9+/=]*)'/.exec(launch)![1]!, "base64").toString("utf8");
+    expect(script).toContain("export CLAUDE_CONFIG_DIR='/root/.claude'\nexport PATH='/usr/bin'\n");
+    expect(script).toContain("'sh' '-c' 'printf '\\''one\\ntwo\\n'\\''; exit 3'\n");
 
-    const missing = await c.request("workspaces.exec", { workspaceId: "ws_nope", cmd: "true" });
+    const missing = await c.request("workspaces.exec", { workspaceId: "ws_nope", argv: ["true"] });
     expect(missing.ok).toBe(false);
     c.close();
     other.close();
@@ -616,15 +627,27 @@ describe("serveRuntime workspaces.exec", () => {
     expect(backend.machines[0]!.execLog.some(cmd => cmd.includes("kill -TERM"))).toBe(false);
   });
 
-  it("the asking socket closing ends the command", async () => {
+  it("refuses like sessions.start when no adapter is registered for the harness whose environment it would run with", async () => {
     const backend = stubBackend();
     const runtime = createRuntime({ backend, store: memoryStore(), adapters: {} });
     srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
     const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
     const workspaceId = (created["workspace"] as { id: string }).id;
+    const refused = await c.request("workspaces.exec", { workspaceId, argv: ["true"] });
+    expect(refused).toMatchObject({ ok: false, error: 'no adapter registered for harness "claude"' });
+    expect(backend.machines[0]!.execLog.some(cmd => cmd.includes("base64 -d"))).toBe(false);
+  });
+
+  it("the asking socket closing ends the command", async () => {
+    const backend = stubBackend();
+    const runtime = createRuntime({ backend, store: memoryStore(), adapters: { claude: envAdapter({}) } });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const workspaceId = (created["workspace"] as { id: string }).id;
     execGuest(backend, "", undefined);
-    const started = await c.request("workspaces.exec", { workspaceId, cmd: "sleep 600" });
+    const started = await c.request("workspaces.exec", { workspaceId, argv: ["sleep", "600"] });
     expect(started.ok).toBe(true);
     const log = backend.machines[0]!.execLog;
     await until(() => log.some(cmd => cmd.includes("__WSP_EOF_")));

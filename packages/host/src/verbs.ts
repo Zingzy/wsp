@@ -35,8 +35,12 @@ export interface HostClient {
   events(): Promise<void>;
   /** Every frame that is not a reply: events after events(), the frames an exec pushes. */
   onFrame(fn: (frame: Frame) => void): () => void;
+  /** Settles when the socket is gone, however it went. */
+  readonly closed: Promise<void>;
   close(): void;
 }
+
+const DIAL_MS = 5_000;
 
 /** Where the host serving this state file listens and the token it wrote, or a plain refusal when none serves it. */
 export function hostAddress(statePath: string): { wsPort: number; token: string } {
@@ -52,14 +56,16 @@ export function hostAddress(statePath: string): { wsPort: number; token: string 
   return { wsPort: lock.wsPort, token };
 }
 
-/** One socket to the host: the token rides in the first frame, never in the URL; then request and reply by id. */
-export async function dialHost(statePath: string): Promise<HostClient> {
+/** One socket to the host: the token rides in the first frame, never in the URL; then request and reply by id.
+ * Open and auth share one deadline, so a port that accepts and never answers fails in one line. */
+export async function dialHost(statePath: string, deadlineMs = DIAL_MS): Promise<HostClient> {
   const { wsPort, token } = hostAddress(statePath);
   const ws = new WebSocket(`ws://127.0.0.1:${wsPort}`);
-  await new Promise<void>((done, fail) => {
+  const opened = new Promise<void>((done, fail) => {
     ws.once("open", () => done());
     ws.once("error", fail);
   });
+  const closed = new Promise<void>(done => ws.once("close", () => done()));
   let next = 1;
   const pending = new Map<number, { settle: (f: Frame) => void; fail: (e: Error) => void }>();
   const listeners = new Set<(f: Frame) => void>();
@@ -87,7 +93,18 @@ export async function dialHost(statePath: string): Promise<HostClient> {
     if (frame.ok !== true) throw new Error(typeof frame["error"] === "string" ? frame["error"] : `${op} failed`);
     return frame as T;
   };
-  await request("auth", { token });
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_, fail) => {
+    timer = setTimeout(() => fail(new Error(`the host on port ${wsPort} did not answer within ${deadlineMs} ms`)), deadlineMs);
+  });
+  try {
+    await Promise.race([opened.then(() => request("auth", { token })), deadline]);
+  } catch (e) {
+    ws.terminate();
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
   let subscribed: Promise<void> | undefined;
   return {
     request,
@@ -96,8 +113,19 @@ export async function dialHost(statePath: string): Promise<HostClient> {
       listeners.add(fn);
       return () => listeners.delete(fn);
     },
+    closed,
     close: () => ws.close(),
   };
+}
+
+/** A follower's promise, or a failure when the host goes away first: a director waiting on a turn must never hang. */
+function untilSettled<T>(client: HostClient, work: Promise<T>): Promise<T> {
+  return Promise.race([
+    work,
+    client.closed.then((): never => {
+      throw new Error("the host closed the connection");
+    }),
+  ]);
 }
 
 /** Frames pushed to the socket, held from before the request that names what to wait for: the id to match is
@@ -156,6 +184,8 @@ interface Verb {
   /** The words that select it; what follows is the verb's own. */
   name: string;
   usage: string;
+  /** One phrase on what it does, in every help. */
+  about: string;
   options: NonNullable<ParseArgsConfig["options"]>;
   run(ctx: VerbContext): Promise<number>;
 }
@@ -200,7 +230,7 @@ async function threadOf(client: HostClient, ref: string): Promise<ThreadView> {
 }
 
 function threadLine(t: ThreadView, workspaceName: string): string[] {
-  return [t.id, workspaceName, t.harness, t.status, t.startedBy ?? "person", t.title];
+  return [t.id, workspaceName, t.harness, t.status, t.startedBy, t.title];
 }
 
 /** Forks the golden's head into a new workspace, the way the app's create does, with the stages streamed as they land. */
@@ -216,7 +246,10 @@ async function create(client: HostClient, out: Out, golden: string, name: string
   await client.events();
   pushed.follow(
     f => f.type === "workspace.creating" && (f as unknown as WorkspaceCreatingEvent).name === name,
-    f => out.stream(`${(f as unknown as WorkspaceCreatingEvent).message}\n`),
+    f => {
+      out.emit(f);
+      out.stream(`${(f as unknown as WorkspaceCreatingEvent).message}\n`);
+    },
   );
   try {
     const { workspace, notice } = await client.request<{ workspace: WorkspaceView; notice?: string }>("workspaces.create", { golden, name });
@@ -240,7 +273,7 @@ async function follow(ctx: VerbContext, client: HostClient, start: Record<string
   if (threadId === undefined) throw new Error("the runtime stamped no thread on the session");
   if (announce) ctx.out.emit({ type: "thread", id: threadId, workspaceId: session.workspaceId, harness: session.harness, startedBy: session.startedBy }, `thread ${threadId}`);
   let result: TurnResult | undefined;
-  const code = await new Promise<number>(done => {
+  const ended = new Promise<number>(done => {
     pushed.follow(
       f => sessionEvent(f) && f.threadId === threadId,
       f => {
@@ -255,17 +288,22 @@ async function follow(ctx: VerbContext, client: HostClient, start: Record<string
       },
     );
   });
-  pushed.stop();
-  return code;
+  try {
+    return await untilSettled(client, ended);
+  } finally {
+    pushed.stop();
+  }
 }
 
 const notYet = (verb: string, usage: string, options: Verb["options"], does: string): Verb => ({
   name: verb,
   usage,
+  about: `${does}; not here yet, lands with the project bundle`,
   options,
   run: async ctx => {
     const line = `wsp ${verb} is not here yet: ${does} lands with the project bundle.`;
-    ctx.out.emit({ verb, available: false, note: line }, line);
+    if (ctx.flags["json"] === true) ctx.out.emit({ verb, available: false, note: line });
+    else ctx.io.error(line);
     return 1;
   },
 });
@@ -274,6 +312,7 @@ export const VERBS: readonly Verb[] = [
   {
     name: "new",
     usage: "wsp new <name>",
+    about: "a workspace forked from the golden's head",
     options: {},
     run: async ctx => {
       const [name] = ctx.args;
@@ -285,6 +324,7 @@ export const VERBS: readonly Verb[] = [
   {
     name: "fork",
     usage: 'wsp fork <workspace> [--name <name>] [--send "<task>" [--agent <name>]]',
+    about: "a new machine from the source's golden version, not a copy of its live disk",
     options: { name: { type: "string" }, send: { type: "string" }, agent: { type: "string" } },
     run: async ctx => {
       const [ref] = ctx.args;
@@ -301,6 +341,7 @@ export const VERBS: readonly Verb[] = [
   {
     name: "pause",
     usage: "wsp pause <workspace>",
+    about: "naps the workspace's machine",
     options: {},
     run: async ctx => {
       const [ref] = ctx.args;
@@ -315,6 +356,7 @@ export const VERBS: readonly Verb[] = [
   {
     name: "threads",
     usage: "wsp threads [--in <workspace>]",
+    about: "every thread as the sidebar lists it: agent, state, who opened it",
     options: { in: { type: "string" } },
     run: async ctx => {
       if (ctx.args.length !== 0) throw new Error("wsp threads takes no positional arguments");
@@ -334,6 +376,7 @@ export const VERBS: readonly Verb[] = [
   {
     name: "thread new",
     usage: 'wsp thread new --in <workspace> [--agent <name>] "<task>"',
+    about: "opens a thread in the workspace and follows its first turn",
     options: { in: { type: "string" }, agent: { type: "string" } },
     run: async ctx => {
       const [task] = ctx.args;
@@ -349,6 +392,7 @@ export const VERBS: readonly Verb[] = [
   {
     name: "send",
     usage: 'wsp send <thread> "<message>"',
+    about: "a message to the thread; follows the turn, prints the last message",
     options: {},
     run: async ctx => {
       const [ref, message] = ctx.args;
@@ -362,6 +406,7 @@ export const VERBS: readonly Verb[] = [
   {
     name: "exec",
     usage: "wsp exec <workspace> -- <command...>",
+    about: "runs the command on the workspace's machine, each word as given",
     options: {},
     run: async ctx => {
       const [ref, ...words] = ctx.args;
@@ -369,8 +414,8 @@ export const VERBS: readonly Verb[] = [
       const client = await ctx.client();
       const workspace = await workspaceOf(client, ref);
       const pushed = pushedFrames(client);
-      const { execId } = await client.request<{ execId: string }>("workspaces.exec", { workspaceId: workspace.id, cmd: words.join(" ") });
-      const code = await new Promise<number>(done => {
+      const { execId } = await client.request<{ execId: string }>("workspaces.exec", { workspaceId: workspace.id, argv: words });
+      const exited = new Promise<number>(done => {
         pushed.follow(
           f => (f.type === "exec.output" || f.type === "exec.exit") && f["execId"] === execId,
           f => {
@@ -382,8 +427,11 @@ export const VERBS: readonly Verb[] = [
           },
         );
       });
-      pushed.stop();
-      return code;
+      try {
+        return await untilSettled(client, exited);
+      } finally {
+        pushed.stop();
+      }
     },
   },
   notYet("import", "wsp import <folder> --to <workspace>", { to: { type: "string" } }, "moving a project folder into a workspace"),
@@ -398,10 +446,15 @@ export function findVerb(argv: ReadonlyArray<string>): Verb | undefined {
   });
 }
 
-/** One line per verb for the top-level help. */
+/** One line per verb for the top-level help: its usage, then what it does. */
 export function verbHelp(): string {
-  const rows = VERBS.map(v => [`  ${v.usage}`]);
-  return table(rows).join("\n");
+  return table(VERBS.map(v => [`  ${v.usage}`, v.about])).join("\n");
+}
+
+/** The usage of every verb that opens with this word, for a command that stopped short of one; none when no verb does. */
+export function verbUsage(word: string): string | undefined {
+  const usages = VERBS.filter(v => v.name.split(" ")[0] === word).map(v => `usage: ${v.usage}`);
+  return usages.length > 0 ? usages.join("\n") : undefined;
 }
 
 export async function runVerb(verb: Verb, argv: ReadonlyArray<string>, io: CliIO, defaultStatePath: () => string): Promise<number> {
@@ -416,7 +469,7 @@ export async function runVerb(verb: Verb, argv: ReadonlyArray<string>, io: CliIO
     return 1;
   }
   if (flags["help"] === true) {
-    io.log(`usage: ${verb.usage}\n\n  --json         print the raw protocol values, one JSON line each\n  --state PATH   the state file the host serves`);
+    io.log(`usage: ${verb.usage}\n  ${verb.about}\n\n  --json         print the raw protocol values, one JSON line each\n  --state PATH   the state file the host serves`);
     return 0;
   }
   const statePath = resolve(flag(flags, "state") ?? defaultStatePath());

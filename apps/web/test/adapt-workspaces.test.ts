@@ -74,8 +74,8 @@ describe("deriveSidebarProjects", () => {
     ]);
     expect(projects[0]).toMatchObject({ projectKey: LIVE_WS, environmentPresence: "remote-only", groupedProjectCount: 1, allRemoteMembersAreDesktopLocal: false, machineState: "running", reach: "reachable" });
     expect(projects[0]?.threads).toEqual([
-      { id: "s1", threadId: null, workspaceId: LIVE_WS, title: "hello", status: "completed", startedAt: "2026-09-02T17:19:35.668Z", endedAt: "2026-09-02T17:19:37.768Z", indicator: { label: "Idle", tone: "neutral", pulse: false }, harness: "claude", startedBy: null },
-      { id: "s0", threadId: null, workspaceId: LIVE_WS, title: "59094224", status: "running", startedAt: null, endedAt: null, indicator: { label: "Working", tone: "neutral", pulse: true }, harness: "claude", startedBy: null },
+      { id: "s1", threadId: null, workspaceId: LIVE_WS, title: "hello", status: "completed", startedAt: "2026-09-02T17:19:35.668Z", endedAt: "2026-09-02T17:19:37.768Z", indicator: { label: "Idle", tone: "neutral", pulse: false }, harness: "claude", startedBy: "person" },
+      { id: "s0", threadId: null, workspaceId: LIVE_WS, title: "59094224", status: "running", startedAt: null, endedAt: null, indicator: { label: "Working", tone: "neutral", pulse: true }, harness: "claude", startedBy: "person" },
     ]);
   });
 
@@ -97,7 +97,7 @@ describe("deriveSidebarProjects", () => {
       ["s4", null, "before threads", "failed", new Date(6_000).toISOString(), new Date(7_000).toISOString(), "Ended"],
     ]);
     // Provenance is the opening turn's: the thread the command line opened stays the command line's after a person's turn.
-    expect(p!.threads.map(t => [t.harness, t.startedBy])).toEqual([["claude", "cli"], ["codex", "person"], ["claude", null]]);
+    expect(p!.threads.map(t => [t.harness, t.startedBy])).toEqual([["claude", "cli"], ["codex", "person"], ["claude", "person"]]);
   });
 
   it("the restart log: a napping status wins over the stale view phase", () => {

@@ -4,15 +4,19 @@
 // reading the same session index the sidebar reads.
 import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TurnResult } from "@wsp/adapter-claude";
 import type { ExecResult } from "@wsp/engine";
 import { ThreadView } from "@wsp/protocol";
-import { createRuntime, memoryStore, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime } from "@wsp/runtime";
+import { createRuntime, memoryStore, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cli, serve, type CliIO } from "../src/cli.js";
+import { WebSocketServer } from "ws";
+import { HELP, cli, serve, type CliIO } from "../src/cli.js";
+import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
+import { dialHost } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 
@@ -71,24 +75,45 @@ function scriptedAgent(reply: (prompt: string) => string) {
   return { adapter, starts };
 }
 
-/** The guest side of the exec stream: the launch lands, one poll hands over the log with the exit code. */
-function execGuest(backend: StubBackend, output: string, exit: number) {
+/** A harness whose turn never ends: the session starts and nothing more arrives. */
+function stuckAgent(): HarnessAdapterFactory {
+  return () => ({
+    start: o => {
+      const sessionId = randomUUID();
+      queueMicrotask(() => o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" }));
+      return { localId: sessionId, claudeSessionId: sessionId, finished: new Promise<TurnResult>(() => {}), interrupt: async () => {} };
+    },
+  });
+}
+
+/** The guest side of the exec stream: the launch lands, one poll hands over the log with the exit code; with no exit
+ * the command reads as still running. */
+function execGuest(backend: StubBackend, output: string, exit: number | undefined) {
   const base = backend.execImpl;
   backend.execImpl = (m, cmd): Promise<ExecResult> | ExecResult => {
     if (cmd.includes("base64 -d")) return { exitCode: 0, stdout: "WSP_LAUNCHED\n", stderr: "" };
+    if (cmd.includes("kill -TERM") || cmd.includes("kill -KILL")) return { exitCode: 0, stdout: "", stderr: "" };
     const sentinel = /(__WSP_EOF_[a-z0-9]+__)/.exec(cmd)?.[1];
     if (sentinel !== undefined) {
       const from = Number(/tail -c \+(\d+)/.exec(cmd)?.[1] ?? "1") - 1;
-      return { exitCode: 0, stdout: `${Buffer.from(output).subarray(from).toString("base64")}\n${sentinel} ${exit} down\n`, stderr: "" };
+      const chunk = Buffer.from(output).subarray(from).toString("base64");
+      return { exitCode: 0, stdout: `${chunk}\n${sentinel} ${exit ?? ""} ${exit === undefined ? "up" : "down"}\n`, stderr: "" };
     }
     return base(m, cmd);
   };
+}
+
+/** The script the launch carried to the machine, decoded. */
+function launchedScript(backend: StubBackend): string {
+  const launch = backend.machines[0]!.execLog.find(cmd => cmd.includes("base64 -d"))!;
+  return Buffer.from(/printf '%s' '([A-Za-z0-9+/=]*)'/.exec(launch)![1]!, "base64").toString("utf8");
 }
 
 describe("wsp verbs over the host", () => {
   let dir: string;
   let statePath: string;
   let backend: StubBackend;
+  let store: Store;
   let rt: Runtime;
   let handle: HostHandle | undefined;
   let claude: ReturnType<typeof scriptedAgent>;
@@ -105,7 +130,7 @@ describe("wsp verbs over the host", () => {
     vi.stubEnv("HOME", join(dir, "user"));
     vi.stubEnv("WSP_HOME", join(dir, "home"));
     backend = stubBackend();
-    const store = memoryStore();
+    store = memoryStore();
     await store.put("goldens", "default", SEALED_GOLDEN);
     claude = scriptedAgent(prompt => (prompt === "die" ? "" : `re: ${prompt}`));
     codex = scriptedAgent(prompt => `codex: ${prompt}`);
@@ -144,7 +169,10 @@ describe("wsp verbs over the host", () => {
 
     const again = await run("new", "beta", "--json");
     expect(again.code).toBe(0);
-    expect(json(again.io)).toEqual([{ workspace: expect.objectContaining({ name: "beta" }) }]);
+    const values = json(again.io) as { type?: string; name?: string; workspace?: unknown }[];
+    expect(values.length).toBeGreaterThan(1);
+    expect(values.slice(0, -1).every(v => v.type === "workspace.creating" && v.name === "beta")).toBe(true);
+    expect(values.at(-1)).toEqual({ workspace: expect.objectContaining({ name: "beta" }) });
     expect(again.io.streamed).toBe("");
   });
 
@@ -176,6 +204,14 @@ describe("wsp verbs over the host", () => {
     expect(thread).toMatchObject({ harness: "claude", startedBy: "cli", prompt: "build it", status: "completed" });
     expect(sent.io.lines).toEqual([`created worker ${worker.id}`, `thread ${thread!.threadId}`, "re: build it"]);
     expect(sent.io.streamed.endsWith("re: build it")).toBe(true);
+  });
+
+  it("fork's help says it makes a new machine from the source's golden version, in wsp --help and wsp fork --help", async () => {
+    const line = "a new machine from the source's golden version";
+    expect(HELP).toContain(line);
+    const { code, io } = await run("fork", "--help");
+    expect(code).toBe(0);
+    expect(io.lines[0]).toContain(line);
   });
 
   it("pause naps the workspace and says so in the state vocabulary", async () => {
@@ -291,11 +327,10 @@ describe("wsp verbs over the host", () => {
   it("exec runs the command on the workspace's machine, streams its output and exits with its code", async () => {
     await run("new", "alpha");
     execGuest(backend, "one\ntwo\n", 3);
-    const { code, io } = await run("exec", "alpha", "--", "printf", "'one\\ntwo\\n';", "exit", "3");
+    const { code, io } = await run("exec", "alpha", "--", "sh", "-c", "printf 'one\\ntwo\\n'; exit 3");
     expect(code).toBe(3);
     expect(io.lines).toEqual(["one", "two"]);
-    const launch = backend.machines[0]!.execLog.find(cmd => cmd.includes("base64 -d"))!;
-    expect(Buffer.from(/printf '%s' '([A-Za-z0-9+/=]*)'/.exec(launch)![1]!, "base64").toString("utf8")).toContain("printf 'one\\ntwo\\n'; exit 3");
+    expect(launchedScript(backend)).toContain("'sh' '-c' 'printf '\\''one\\ntwo\\n'\\''; exit 3'\n");
 
     const raw = await run("exec", "alpha", "--json", "--", "true");
     expect(raw.code).toBe(3);
@@ -309,10 +344,63 @@ describe("wsp verbs over the host", () => {
     expect(bare.io.errors).toEqual(["wsp exec: wsp exec takes a workspace, then -- and the command"]);
   });
 
+  it("exec hands the machine each argument as it was given: a quoted word stays one word", async () => {
+    await run("new", "alpha");
+    execGuest(backend, "", 0);
+    const { code } = await run("exec", "alpha", "--", "grep", "a b", "file.txt");
+    expect(code).toBe(0);
+    expect(launchedScript(backend)).toContain("\n'grep' 'a b' 'file.txt'\n");
+  });
+
+  it("the host going away mid-turn fails the verb in one line with exit 1 instead of hanging", async () => {
+    await handle!.close();
+    handle = undefined;
+    rt = createRuntime({ backend, store, adapters: { claude: stuckAgent() } });
+    vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_verbs_key");
+    handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir: join(dir, "web"), runtime: rt });
+    await run("new", "alpha");
+    execGuest(backend, "", undefined);
+    const turn = run("thread", "new", "--in", "alpha", "hang");
+    const command = run("exec", "alpha", "--", "sleep", "600");
+    await new Promise(r => setTimeout(r, 300));
+    await handle.close();
+    handle = undefined;
+    const [t, c] = await Promise.all([turn, command]);
+    expect(t.code).toBe(1);
+    expect(t.io.errors).toEqual(["wsp thread new: the host closed the connection"]);
+    expect(t.io.lines).toHaveLength(1);
+    expect(c.code).toBe(1);
+    expect(c.io.errors).toEqual(["wsp exec: the host closed the connection"]);
+  });
+
+  it("a port that accepts but never answers fails the dial within its deadline, before and after the handshake", async () => {
+    await handle!.close();
+    handle = undefined;
+    const accepted: Socket[] = [];
+    const silent = createServer(socket => accepted.push(socket));
+    await new Promise<void>(r => silent.listen(0, "127.0.0.1", r));
+    const mute = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+    await new Promise<void>(r => mute.once("listening", r));
+    writeFileSync(hostTokenPath(statePath), "tok\n");
+    try {
+      for (const server of [silent, mute]) {
+        const wsPort = (server.address() as AddressInfo).port;
+        writeFileSync(lockPathFor(statePath), JSON.stringify({ pid: process.pid, port: wsPort, wsPort, startedAt: new Date().toISOString() }));
+        await expect(dialHost(statePath, 200)).rejects.toThrow(`the host on port ${wsPort} did not answer within 200 ms`);
+      }
+    } finally {
+      for (const client of mute.clients) client.terminate();
+      for (const socket of accepted) socket.destroy();
+      await new Promise(r => mute.close(r));
+      await new Promise(r => silent.close(r));
+    }
+  });
+
   it("import and export say in one plain line that they are not here yet", async () => {
     const imp = await run("import", "./proj", "--to", "alpha");
     expect(imp.code).toBe(1);
-    expect(imp.io.lines).toEqual(["wsp import is not here yet: moving a project folder into a workspace lands with the project bundle."]);
+    expect(imp.io.lines).toEqual([]);
+    expect(imp.io.errors).toEqual(["wsp import is not here yet: moving a project folder into a workspace lands with the project bundle."]);
     const exp = await run("export", "alpha", "./proj", "--json");
     expect(exp.code).toBe(1);
     expect(json(exp.io)).toEqual([{ verb: "export", available: false, note: expect.stringContaining("not here yet") }]);
@@ -328,6 +416,9 @@ describe("wsp verbs over the host", () => {
     const bad = await run("threads", "--nope");
     expect(bad.code).toBe(1);
     expect(bad.io.errors[0]).toContain("usage: wsp threads");
+    const half = await run("thread");
+    expect(half.code).toBe(1);
+    expect(half.io.errors).toEqual(['usage: wsp thread new --in <workspace> [--agent <name>] "<task>"']);
   });
 
   it("without a host serving the state file every verb refuses in one line before dialling anything", async () => {
