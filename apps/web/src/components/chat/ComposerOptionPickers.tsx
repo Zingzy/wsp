@@ -9,6 +9,7 @@
 // already running keeps its flags and shows them meanwhile.
 import { BrainIcon, ChevronDownIcon, CircleSlashIcon, HandIcon, LockIcon, LockOpenIcon, PenLineIcon, PencilRulerIcon, ShieldIcon, SparklesIcon, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo } from "react";
+import { DEFAULT_AGENT } from "@wsp/catalog";
 import type { HarnessCatalog, HarnessModel, HarnessOption } from "@wsp/protocol";
 import { useHarnessCatalog, useHarnessCatalogs, useLatestSession, useStore, useWorkspace } from "../../protocol/store";
 import { Button } from "../ui/button";
@@ -18,7 +19,7 @@ import { useComposerOptions, useComposerOptionsStore, type ComposerOptionKey } f
 import { contextWindowsFor, effectivePicks, effortsFor, resolveModel, runningPicks, startOptionsFrom, type ResolvedPicks, type StartPicks } from "./composerPicks";
 import type { ChatThreadHandle } from "./useChatThread";
 
-export const DEFAULT_HARNESS = "claude";
+export const DEFAULT_HARNESS = DEFAULT_AGENT.id;
 
 /** One icon per permission mode the table knows; a mode it does not gets the shield. */
 const ACCESS_ICONS: Readonly<Record<string, LucideIcon>> = {

@@ -4,6 +4,7 @@
 // status check, the global config that carries over, how it keys project
 // state to a path, and whether it is on by default with the evidence behind
 // that. The wizard's tables read from here; nothing here runs a command.
+import { CLAUDE_CONTEXT, CODEX_CONTEXT, GEMINI_CONTEXT, HERMES_CONTEXT, OPENCODE_CONTEXT, PI_CONTEXT, type AgentContext } from "./context.js";
 import { GCLOUD, KUBECTL } from "./linux-casks.js";
 import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, type McpConfig } from "./mcp.js";
 import { roadModule } from "./road-modules.js";
@@ -72,6 +73,8 @@ export interface AgentEntry extends EntryBase {
   stateHome: string;
   /** Where that directory is on the guest when it is not stateHome under the guest's home, absolute. */
   guestStateHome?: string;
+  /** The variable that points the agent at guestStateHome; a golden with the agent carries it in its envs. */
+  stateHomeEnv?: string;
   /** Every store that holds the project's path. */
   projectState: readonly ProjectState[];
   /** Absent while the agent's session format has no reader: its history reads as none. */
@@ -79,6 +82,8 @@ export interface AgentEntry extends EntryBase {
   /** Where the agent on this computer keeps its user-wide MCP servers and how one is named there, per its own docs;
    * absent when the catalog knows no such file for it, and wsp's server is then added by hand. */
   mcp?: McpConfig;
+  /** How the agent loads the machine context on the guest; absent, it gets no hook and no skill there. */
+  context?: AgentContext;
 }
 
 export interface ToolEntry extends EntryBase {
@@ -152,11 +157,13 @@ export const CATALOG: readonly CatalogEntry[] = [
     ...agent("claude"),
     stateHome: ".claude",
     guestStateHome: CLAUDE_CONFIG_DIR,
+    stateHomeEnv: "CLAUDE_CONFIG_DIR",
     name: "Claude Code",
+    context: CLAUDE_CONTEXT,
     installRoad: { road: "script", script: GOLDEN_SETUP },
     signIn: SIGN_IN_ROWS.claude,
     // https://docs.claude.com/en/docs/claude-code/mcp (user scope; project scope lives in each repo's .mcp.json)
-    mcp: { format: MCP_SERVERS_JSON, files: ["~/.claude.json"], scope: "user scope and your home folder" },
+    mcp: { format: MCP_SERVERS_JSON, files: ["~/.claude.json"], scope: "user scope and your home folder", httpAuth: "its sign-in is kept with the Claude Code login" },
     configPaths: [
       "~/.claude/settings.json", "~/.claude/CLAUDE.md", "~/.claude/skills", "~/.claude/agents", "~/.claude/commands",
       "~/.claude/plugins/installed_plugins.json", "~/.claude/plugins/known_marketplaces.json", "~/.claude.json",
@@ -176,6 +183,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     ...agent("codex"),
     stateHome: ".codex",
     name: "Codex",
+    context: CODEX_CONTEXT,
     installRoad: npm("@openai/codex", "0.153.0"),
     node: 16,
     signIn: SIGN_IN_ROWS.codex,
@@ -195,6 +203,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     ...agent("gemini"),
     stateHome: ".gemini",
     name: "Gemini CLI",
+    context: GEMINI_CONTEXT,
     installRoad: npm("@google/gemini-cli", "0.58.0"),
     node: 20,
     signIn: SIGN_IN_ROWS.gemini,
@@ -214,6 +223,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     ...agent("opencode"),
     stateHome: ".local/share/opencode",
     name: "OpenCode",
+    context: OPENCODE_CONTEXT,
     installRoad: npm("opencode-ai", "1.18.27"),
     signIn: SIGN_IN_ROWS.opencode,
     // https://opencode.ai/docs/mcp-servers/ (project scope is a repo's opencode.json)
@@ -233,6 +243,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     ...agent("pi"),
     stateHome: ".pi/agent",
     name: "Pi",
+    context: PI_CONTEXT,
     installRoad: { road: "npm", package: "@earendil-works/pi-coding-agent", version: "0.84.4", ignoreScripts: true },
     node: 22,
     signIn: SIGN_IN_ROWS.pi,
@@ -251,6 +262,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     ...agent("hermes"),
     stateHome: ".hermes",
     name: "Hermes Agent",
+    context: HERMES_CONTEXT,
     installRoad: { road: "script", script: HERMES_INSTALL },
     signIn: SIGN_IN_ROWS.hermes,
     configPaths: ["~/.hermes/config.yaml", "~/.hermes/SOUL.md", "~/.hermes/memories", "~/.hermes/skills", "~/.hermes/cron", "~/.hermes/hooks"],
@@ -303,7 +315,17 @@ export const CATALOG: readonly CatalogEntry[] = [
 ];
 
 export const CATALOG_AGENTS: readonly AgentEntry[] = CATALOG.filter((e): e is AgentEntry => e.kind === "agent");
+
+const firstAgent = CATALOG_AGENTS[0];
+if (firstAgent === undefined) throw new Error("the catalog has no agent");
+/** The agent a thread runs when none is named and the composer's first pick: the catalog's first agent. */
+export const DEFAULT_AGENT: AgentEntry = firstAgent;
 export const CATALOG_TOOLS: readonly ToolEntry[] = CATALOG.filter((e): e is ToolEntry => e.kind === "tool");
+
+/** The envs a golden carries for an agent on it: the variable that points it at its state home on the guest. */
+export function guestEnv(a: AgentEntry): Record<string, string> {
+  return a.stateHomeEnv !== undefined && a.guestStateHome !== undefined ? { [a.stateHomeEnv]: a.guestStateHome } : {};
+}
 
 /** An agent entry whose MCP config the catalog knows. */
 export type McpAgent = AgentEntry & { mcp: McpConfig };
@@ -347,6 +369,11 @@ export function baseNote(e: ToolEntry, macVersion: string | undefined): string {
 /** The entry by its id, or nothing. */
 export function catalogEntry(id: string): CatalogEntry | undefined {
   return BY_ID.get(id);
+}
+
+/** An entry as the catalog names it; an id the catalog does not know reads as itself. */
+export function agentName(id: string): string {
+  return catalogEntry(id)?.name ?? id;
 }
 
 /** One row the Sign-ins screen can show, under the login id the collector files it: an entry's own sign-in (a

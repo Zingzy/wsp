@@ -202,13 +202,13 @@ async function homeDeps(host: Host, server: McpServer, carriedPaths: readonly st
 }
 
 /** What a definition carries: secret-named env values by size, the file such a value points at (which travels on
- * the row), header values, and where its mcp-remote or Claude Code sign-in lives. Nothing is read. */
+ * the row), header values, and where its mcp-remote sign-in or, as the agent's entry says, its http sign-in lives. Nothing is read. */
 async function carried(host: Host, server: McpServer, agent: McpAgent, remoteTokens: ReadonlyMap<string, number>): Promise<Carried> {
   const out: Carried = { secrets: [], notes: [], paths: [], bytes: 0 };
   const t = server.transport;
   if (t.kind === "http") {
     for (const [k, v] of Object.entries(t.headers)) out.secrets.push(`header ${k} (${Buffer.byteLength(v)} B)`);
-    if (agent.id === "claude") out.notes.push("its sign-in is kept with the Claude Code login");
+    if (agent.mcp.httpAuth !== undefined) out.notes.push(agent.mcp.httpAuth);
     return out;
   }
   for (const [k, v] of Object.entries(t.env)) {

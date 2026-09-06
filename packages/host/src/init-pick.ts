@@ -8,7 +8,7 @@ import type { Readable, Writable } from "node:stream";
 import { styleText } from "node:util";
 import { Prompt, isCancel } from "@clack/core";
 import { S_BAR, S_STEP_ACTIVE, S_STEP_CANCEL, S_STEP_SUBMIT } from "@clack/prompts";
-import { CATALOG_AGENTS, CATALOG_TOOLS, type CatalogEntry, type ToolEntry, catalogEntry } from "@wsp/catalog";
+import { CATALOG_AGENTS, CATALOG_TOOLS, type CatalogEntry, type ToolEntry, agentName as catalogName } from "@wsp/catalog";
 import type { LoginChoice, Manifest, ManifestEntry } from "@wsp/collect";
 import { MEASURED_ON, estimateDisk, isMcpRow, parseMcpId, type BrewTable, type DiskEstimate } from "@wsp/engine";
 import { fmtBytes, type Recipe, type RecipeRow } from "@wsp/protocol";
@@ -184,7 +184,7 @@ function mcpShown(e: ManifestEntry, manifest: Manifest, coming: ReadonlySet<stri
  * mcp-remote row's is its size. */
 function mcpHint(e: ManifestEntry): string | undefined {
   const agent = parseMcpId(e.id)?.agent;
-  if (agent !== undefined) return catalogEntry(agent)?.name ?? agent;
+  if (agent !== undefined) return catalogName(agent);
   return e.bytes > 0 ? fmtBytes(e.bytes) : undefined;
 }
 

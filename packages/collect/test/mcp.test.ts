@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { CATALOG_AGENTS, type McpAgent, type McpFormat, type McpServer } from "@wsp/catalog";
+import { CATALOG_AGENTS, MCP_SERVERS_JSON, type McpAgent, type McpFormat, type McpServer } from "@wsp/catalog";
 import { detectMcp, linuxFit, mcpRemoteHash } from "../src/index.js";
 import { fakeHost } from "./fake-host.js";
 
@@ -199,6 +199,13 @@ describe("mcp servers", () => {
       ["agents/mcp/lines/alpha", "Lines MCP servers", "bring", "stdio: npx pkg; runs via npx; carries no secret"],
       ["agents/mcp/lines/beta", "Lines MCP servers", "skip", "stdio: /Applications/B.app/b; carries no secret"],
     ]);
+  });
+
+  it("an http server's sign-in note is what the agent's mcp module says; an entry that says nothing gets none", async () => {
+    const remote = (httpAuth?: string): McpAgent => ({ ...CATALOG_AGENTS.find(a => a.id === "gemini")!, id: "remote", name: "Remote", mcp: { format: MCP_SERVERS_JSON, files: ["~/.remote.json"], scope: "user scope", ...(httpAuth !== undefined ? { httpAuth } : {}) } });
+    const host = fakeHost({ files: { "~/.remote.json": JSON.stringify({ mcpServers: { notion: { type: "http", url: NOTION } } }) } });
+    expect((await detectMcp(host, [remote("its sign-in is kept with the Remote login")]))[0]?.detail).toBe("http: mcp.notion.com/mcp; nothing to install; its sign-in is kept with the Remote login");
+    expect((await detectMcp(host, [remote()]))[0]?.detail).toBe("http: mcp.notion.com/mcp; nothing to install; carries no secret");
   });
 
   it("linuxFit: home paths and Homebrew's prefix have a Linux equivalent, Library and Applications do not", () => {

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
+import { CATALOG_AGENTS, GOLDEN_SETUP } from "@wsp/catalog";
 import {
   UNMEASURED_ROAD,
   PATH_LINE,
@@ -867,32 +868,32 @@ describe("agentInstallsFor", () => {
   it("every known agent has a pinned installer, its version check, and the documentation it was read from", () => {
     for (const [name, a] of Object.entries(AGENT_INSTALLERS)) {
       expect(a.name, name).not.toBe("");
+      expect(a.smoke, name).toMatch(/--version/);
+      // The one curl into a shell the rules allow: the harness vendor's own installer, unpinned by design.
+      if (a.install === GOLDEN_SETUP) continue;
       expect(a.install, name).not.toMatch(/\|\s*(ba)?sh\b/);
       expect(a.install, name).not.toMatch(/@latest\b/);
       expect(a.install, name).toMatch(/@\d|==\d|--branch v?\d|releases\/download\/\d/);
-      expect(a.smoke, name).toMatch(/--version/);
     }
-    expect(Object.keys(AGENT_INSTALLERS).sort()).toEqual(["aider", "codex", "gemini", "hermes", "opencode", "pi"]);
+    expect(Object.keys(AGENT_INSTALLERS).sort()).toEqual(["aider", "claude", "codex", "gemini", "hermes", "opencode", "pi"]);
+    expect(AGENT_INSTALLERS["claude"]).toEqual({ name: "Claude Code", install: GOLDEN_SETUP, smoke: "claude --version" });
     // Engines floors as the registry states them at the pinned versions.
-    expect(Object.fromEntries(Object.entries(AGENT_INSTALLERS).map(([k, a]) => [k, a.node]))).toEqual({ codex: 16, gemini: 20, opencode: undefined, aider: undefined, pi: 22, hermes: undefined });
+    expect(Object.fromEntries(Object.entries(AGENT_INSTALLERS).map(([k, a]) => [k, a.node]))).toEqual({ claude: undefined, codex: 16, gemini: 20, opencode: undefined, aider: undefined, pi: 22, hermes: undefined });
   });
 
-  it("installs only the ticked agents, in recipe order, letting the caller supply an installer the table lacks", () => {
-    const claude = { name: "Claude Code", install: "curl -fsSL https://claude.ai/install.sh | bash", smoke: "claude --version" };
-    const a = agentInstallsFor(
-      [
-        row({ rung: "agents", id: "agents/claude" }),
-        row({ rung: "agents", id: "agents/codex" }),
-        row({ rung: "agents", id: "agents/gemini", bring: false }),
-        row({ rung: "agents", id: "agents/unknown-thing" }),
-        row({ rung: "shell", id: "shell/zshrc" }),
-      ],
-      { claude },
-    );
+  it("installs only the ticked agents, in recipe order, each from the catalog's table", () => {
+    const a = agentInstallsFor([
+      row({ rung: "agents", id: "agents/claude" }),
+      row({ rung: "agents", id: "agents/codex" }),
+      row({ rung: "agents", id: "agents/gemini", bring: false }),
+      row({ rung: "agents", id: "agents/unknown-thing" }),
+      row({ rung: "shell", id: "shell/zshrc" }),
+    ]);
     expect(a.installs.map(i => [i.id, i.name, i.smoke])).toEqual([
       ["agents/claude", "Claude Code", "claude --version"],
       ["agents/codex", "Codex", "codex --version"],
     ]);
+    expect(a.installs[0]!.install).toBe(GOLDEN_SETUP);
     expect(a.installs[1]!.install).toContain("npm install -g @openai/codex@");
     expect(a.skipped).toEqual([{ id: "agents/unknown-thing", note: "no installer known" }]);
   });
@@ -900,14 +901,14 @@ describe("agentInstallsFor", () => {
   it("asks for Node once, at the lowest supported pinned major that meets every ticked agent's floor, else the current LTS, and never without a floor", () => {
     const today = new Date("2026-09-03T00:00:00Z");
     // Node 20 left maintenance in April 2026: a Gemini-only recipe gets 22, not 20.
-    const gemini = agentInstallsFor([row({ rung: "agents", id: "agents/gemini" }), row({ rung: "agents", id: "agents/opencode" })], {}, today);
+    const gemini = agentInstallsFor([row({ rung: "agents", id: "agents/gemini" }), row({ rung: "agents", id: "agents/opencode" })], CATALOG_AGENTS, today);
     expect(gemini.node).toMatchObject({ floor: 20, version: NODE_RELEASES[22].version, agents: ["Gemini CLI"] });
-    const codexOnly = agentInstallsFor([row({ rung: "agents", id: "agents/codex" })], {}, today);
+    const codexOnly = agentInstallsFor([row({ rung: "agents", id: "agents/codex" })], CATALOG_AGENTS, today);
     expect(codexOnly.node).toMatchObject({ floor: 16, version: NODE_RELEASES[22].version, agents: ["Codex"] });
-    const both = agentInstallsFor([row({ rung: "agents", id: "agents/gemini" }), row({ rung: "agents", id: "agents/pi" })], {}, today);
+    const both = agentInstallsFor([row({ rung: "agents", id: "agents/gemini" }), row({ rung: "agents", id: "agents/pi" })], CATALOG_AGENTS, today);
     expect(both.node).toMatchObject({ floor: 22, version: NODE_RELEASES[22].version, agents: ["Gemini CLI", "Pi"] });
-    expect(agentInstallsFor([row({ rung: "agents", id: "agents/opencode" }), row({ rung: "agents", id: "agents/aider" })], {}, today).node).toBeUndefined();
-    expect(agentInstallsFor([row({ rung: "agents", id: "agents/pi", bring: false })], {}, today).node).toBeUndefined();
+    expect(agentInstallsFor([row({ rung: "agents", id: "agents/opencode" }), row({ rung: "agents", id: "agents/aider" })], CATALOG_AGENTS, today).node).toBeUndefined();
+    expect(agentInstallsFor([row({ rung: "agents", id: "agents/pi", bring: false })], CATALOG_AGENTS, today).node).toBeUndefined();
     // While 20 was still in maintenance it was the lowest satisfying major.
     expect(nodeMajorFor(20, new Date("2026-01-15T00:00:00Z"))).toBe(20);
     expect(nodeMajorFor(20, today)).toBe(22);
@@ -917,10 +918,8 @@ describe("agentInstallsFor", () => {
   });
 
   it("an agent whose floor no pinned major meets is set aside with a note rather than installed on a Node its engines refuse", () => {
-    const a = agentInstallsFor(
-      [row({ rung: "agents", id: "agents/future" }), row({ rung: "agents", id: "agents/codex" })],
-      { future: { name: "Future", install: "npm install -g future@1.0.0", smoke: "future --version", node: 24 } },
-    );
+    const future = { ...CATALOG_AGENTS.find(a => a.id === "codex")!, id: "future", name: "Future", installRoad: { road: "npm" as const, package: "future", version: "1.0.0" }, node: 24 };
+    const a = agentInstallsFor([row({ rung: "agents", id: "agents/future" }), row({ rung: "agents", id: "agents/codex" })], [...CATALOG_AGENTS, future]);
     expect(a.installs.map(i => i.id)).toEqual(["agents/codex"]);
     expect(a.skipped).toEqual([{ id: "agents/future", note: "needs Node 24, none pinned" }]);
     expect(a.node).toMatchObject({ floor: 16, agents: ["Codex"] });

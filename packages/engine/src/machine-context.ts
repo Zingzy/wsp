@@ -7,6 +7,7 @@
 // the person's files take (an exec body has a cap a six-agent set exceeded)
 // through a hook per agent without any file of the person's being touched. A
 // hook the person's own file already claims is left alone and named in the result.
+import { CATALOG_AGENTS, CONTEXT_MARKER, MODE, SKILL_NAME, agentName, type AgentContext, type AgentEntry, type ContextHooks, type ContextOutcomeKind, type GuestFile, type GuestRoots } from "@wsp/catalog";
 import { fmtBytes, shellQuote, type GoldenBaseTool, type GoldenVersion } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { BASE_VERSION_LINES, parseVersions } from "./golden-base.js";
@@ -17,26 +18,17 @@ import type { Machine } from "./machine.js";
 import { DAEMON_PORT } from "./preview.js";
 import { importInto, tarOf } from "./vault.js";
 
-export type ContextAgent = "claude" | "codex" | "gemini" | "opencode" | "pi" | "hermes";
+export { CONTEXT_MARKER, SKILL_NAME } from "@wsp/catalog";
+export type { ContextOutcomeKind, GuestFile, GuestRoots } from "@wsp/catalog";
 
-export const CONTEXT_AGENTS: readonly ContextAgent[] = ["claude", "codex", "gemini", "opencode", "pi", "hermes"];
+/** A catalog agent with a context module: the ones a guest is probed for and written for. */
+export type ContextAgent = AgentEntry & { context: AgentContext };
 
-const AGENT_NAMES: Record<ContextAgent, string> = { claude: "Claude Code", codex: "Codex", gemini: "Gemini CLI", opencode: "OpenCode", pi: "Pi", hermes: "Hermes Agent" };
-
-/** The first line of the source file and of every copy, so a person who finds one knows where it comes from. */
-export const CONTEXT_MARKER = "wsp writes this file when a workspace is forked; edits are overwritten.";
-
-export const SKILL_NAME = "wsp-machine";
+export const CONTEXT_AGENTS: readonly ContextAgent[] = CATALOG_AGENTS.filter((a): a is ContextAgent => a.context !== undefined);
 
 /** One line, plain, no colon or quote so every agent's frontmatter parser reads it whole; each caps it at 1,024 characters. */
 export const SKILL_DESCRIPTION =
   "How this cloud Linux machine differs from the person's computer, what did not install here, where secrets live, and how to keep a server alive, hand over a URL and sign in. Read it before starting a server, opening a port, using a secret or calling a tool that may not be installed.";
-
-/** Where the guest keeps system files and the home; tests point both at a temp dir and run the scripts on a local bash. */
-export interface GuestRoots {
-  etc: string;
-  home: string;
-}
 
 export const GUEST_ROOTS: GuestRoots = { etc: "/etc", home: "/root" };
 
@@ -112,14 +104,15 @@ export interface ContextProbe {
   has: Set<string>;
   /** The base floor's commands that answered, each with its version. */
   versions: GoldenBaseTool[];
-  agents: ContextAgent[];
+  /** The context agents found on PATH, by id. */
+  agents: string[];
   /** Names the secrets file exports, never values. */
   secrets: string[];
   shell: string;
   /** Aliases the login shell defines whose command is not on the machine. */
   aliases: { name: string; word: string }[];
-  /** Agents whose own file claims the hook wsp would use; Claude Code, Codex and OpenCode have no such hook. */
-  conflicts: Set<ContextAgent>;
+  /** Agents whose own file claims the hook wsp would use, by id; a module without a conflict check has no such hook. */
+  conflicts: Set<string>;
   facts?: BuildFacts;
 }
 
@@ -174,28 +167,6 @@ export const ALIAS_PROBES: Record<string, string> = {
   ].join("\n"),
 };
 
-/** True when the person's Gemini settings set context.fileName; comments are stripped the way Gemini strips them,
- * and a file that still does not parse is searched for the key by name. */
-const GEMINI_FILENAME_CHECK = [
-  'const t=require("fs").readFileSync(process.argv[1],"utf8");',
-  'let o="",i=0,s=false;',
-  "while(i<t.length){const c=t[i];",
-  'if(s){o+=c;if(c==="\\\\"&&i+1<t.length)o+=t[++i];else if(c===\'"\')s=false;i++}',
-  'else if(c===\'"\'){s=true;o+=c;i++}',
-  'else if(c==="/"&&t[i+1]==="/"){while(i<t.length&&t[i]!=="\\n")i++}',
-  'else if(c==="/"&&t[i+1]==="*"){const e=t.indexOf("*/",i+2);i=e<0?t.length:e+2}',
-  "else{o+=c;i++}}",
-  "let hit;try{const j=JSON.parse(o);hit=!!(j&&j.context&&j.context.fileName!==undefined)}catch{hit=/\"fileName\"\\s*:/.test(o)}",
-  "process.exit(hit?0:1)",
-].join("");
-
-/** True when agent.environment_hint is set to something other than an empty string. */
-const HERMES_HINT_CHECK = [
-  "/^[^[:space:]#]/{blk=$1}",
-  'blk=="agent:" && /^[[:space:]]+environment_hint[[:space:]]*:/{v=$0; sub(/^[^:]*:[[:space:]]*/,"",v); sub(/[[:space:]]+#.*$/,"",v); if (v!="" && v!="\\"\\"" && v!="\'\'") f=1}',
-  "END{exit !f}",
-].join(" ");
-
 /** Runs a command in the background and kills it at the bound, so a login shell that waits cannot hold the probe. */
 export function boundedCommand(seconds: number, cmd: string): string {
   return `${cmd} & p=$!; ( sleep ${seconds}; kill $p 2>/dev/null ) >/dev/null 2>&1 & k=$!; wait $p; kill $k 2>/dev/null`;
@@ -217,7 +188,7 @@ export function probeCommand(roots: GuestRoots = GUEST_ROOTS): string {
     `if [ -f ${e}/profile.d/wsp-golden.sh ]; then echo "HAS golden-path"; fi`,
     `if [ -x ${BROWSER_SHIM_PATH} ]; then echo "HAS wsp-open"; fi`,
     BASE_VERSION_LINES,
-    `for a in ${CONTEXT_AGENTS.join(" ")}; do if command -v "$a" >/dev/null 2>&1; then echo "AGENT $a"; fi; done`,
+    ...CONTEXT_AGENTS.map(a => `if command -v ${shellQuote(a.bin)} >/dev/null 2>&1; then echo "AGENT ${a.id}"; fi`),
     `sed -n 's/^export \\([A-Za-z_][A-Za-z0-9_]*\\)=.*/SECRET \\1/p' ${e}/profile.d/wsp-secrets.sh 2>/dev/null`,
     'shell=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7); shell=${shell##*/}; shell=${shell:-bash}',
     'echo "SHELL $shell"',
@@ -226,15 +197,13 @@ export function probeCommand(roots: GuestRoots = GUEST_ROOTS): string {
     `  fish) ${boundedCommand(8, `fish -lic ${shellQuote(ALIAS_PROBES["fish"]!)} </dev/null 2>/dev/null`)} ;;`,
     `  *) ${boundedCommand(8, `bash -lic ${shellQuote(ALIAS_PROBES["bash"]!)} </dev/null 2>/dev/null`)} ;;`,
     "esac",
-    `if [ -f ${h}/.gemini/settings.json ] && node -e ${shellQuote(GEMINI_FILENAME_CHECK)} ${h}/.gemini/settings.json 2>/dev/null; then echo "CONFLICT gemini"; fi`,
-    `if [ -f ${h}/.pi/agent/APPEND_SYSTEM.md ] && ! head -n 1 ${h}/.pi/agent/APPEND_SYSTEM.md | grep -qF ${shellQuote(CONTEXT_MARKER)}; then echo "CONFLICT pi"; fi`,
-    `if [ -f ${h}/.hermes/config.yaml ] && awk ${shellQuote(HERMES_HINT_CHECK)} ${h}/.hermes/config.yaml; then echo "CONFLICT hermes"; fi`,
+    ...CONTEXT_AGENTS.flatMap(a => (a.context.conflict === undefined ? [] : [`if ${a.context.conflict(roots)}; then echo "CONFLICT ${a.id}"; fi`])),
     `if [ -f ${factsPath(roots)} ]; then echo "FACTS $(base64 < ${factsPath(roots)} | tr -d '\\n')"; fi`,
     "echo WSP_CTX_END",
   ].join("\n");
 }
 
-const isAgent = (s: string): s is ContextAgent => (CONTEXT_AGENTS as readonly string[]).includes(s);
+const isAgent = (s: string): boolean => CONTEXT_AGENTS.some(a => a.id === s);
 
 /** The probe's lines between its markers; nothing when the markers are missing. */
 export function parseProbe(stdout: string): ContextProbe | undefined {
@@ -303,17 +272,10 @@ export interface ContextInput {
   agent?: ContextAgent;
 }
 
-/** What is true of a cd for this agent. Only Claude Code's shell is known to persist across tool calls, with the
- * files pane following it; every other agent gets the facts wsp has verified for all of them. */
-const cdFact = (agent: ContextAgent | undefined): string =>
-  agent === "claude"
-    ? "- Every agent session starts in the thread's folder; terminal panes open in the home folder. A cd moves your own shell, which persists across your tool calls, not the thread's folder, and the files pane follows that shell's folder unless you pinned the panes."
-    : "- Every agent session starts in the thread's folder; terminal panes open in the home folder.";
+/** What is true of a cd for this agent: its module's words when its shell differs, else the facts wsp has verified for all of them. */
+const cdFact = (agent: ContextAgent | undefined): string => agent?.context.cd?.fact ?? "- Every agent session starts in the thread's folder; terminal panes open in the home folder.";
 
-const cdHowto = (agent: ContextAgent | undefined): string =>
-  agent === "claude"
-    ? "- Work in a folder: cd <dir> in your shell and it stays there across your tool calls; the thread's folder does not move. Absolute paths work from anywhere."
-    : "- Work in a folder: cd <dir> && <cmd> on one line, or absolute paths.";
+const cdHowto = (agent: ContextAgent | undefined): string => agent?.context.cd?.howto ?? "- Work in a folder: cd <dir> && <cmd> on one line, or absolute paths.";
 
 function missingList(items: readonly { label: string; note: string }[]): string {
   return items.map(m => `${m.label} (${m.note})`).join("; ");
@@ -418,103 +380,18 @@ export function renderSkill(doc: string): string {
 
 // --- per agent ---------------------------------------------------------------
 
-export interface GuestFile {
-  path: string;
-  mode: number;
-  content: string;
-}
-
-export type ContextOutcomeKind = "written" | "fallback" | "not-loaded";
-
-/** What one agent gets: the files to land, how its always-loaded text arrives, and where its skill sits. */
-export interface AgentFiles {
-  outcome: ContextOutcomeKind;
-  files: GuestFile[];
-  /** The always-loaded hook, or the fallback that stands in for it. */
-  path?: string;
-  /** Why the always-loaded hook was not written. */
-  note?: string;
-  skill: string;
-}
-
-const MODE = 0o644;
-
-/** The text as a TOML string: a literal multi-line string, which needs no escaping, unless the text holds the
- * one sequence that would end it. */
-function tomlString(doc: string): string {
-  if (!doc.includes("'''")) return `'''\n${doc}'''`;
-  return JSON.stringify(doc);
-}
-
-/** What is written for each agent, from its source at the version the recipe pins. The always-loaded hook gets
- * the short text; when the person's own file sets the same key, that file wins, so the fallback hook carries the
- * short text instead, or nothing does and the result says so. The skill lands regardless, under wsp's own name. */
-export function agentFiles(agent: ContextAgent, short: string, skill: string, probe: ContextProbe, roots: GuestRoots = GUEST_ROOTS): AgentFiles {
-  const h = roots.home;
-  const e = roots.etc;
-  const source = contextPath(roots);
-  const conflict = probe.conflicts.has(agent);
-  const file = (path: string, content: string): GuestFile => ({ path, mode: MODE, content });
-  const skillAt = (dir: string): GuestFile => file(`${dir}/${SKILL_NAME}/SKILL.md`, skill);
-  switch (agent) {
-    case "claude": {
-      const s = skillAt(`${e}/claude-code/.claude/skills`);
-      return { outcome: "written", path: `${e}/claude-code/CLAUDE.md`, files: [file(`${e}/claude-code/CLAUDE.md`, short), s], skill: s.path };
-    }
-    case "codex": {
-      // Additive: the requirements layer's developer message lands beside the person's developer_instructions, never under them.
-      const s = skillAt(`${e}/codex/skills`);
-      return { outcome: "written", path: `${e}/codex/requirements.toml`, files: [file(`${e}/codex/requirements.toml`, `# ${CONTEXT_MARKER}\nadditional_developer_instructions = ${tomlString(short)}\n`), s], skill: s.path };
-    }
-    case "gemini": {
-      const s = skillAt(`${h}/.gemini/skills`);
-      if (conflict) {
-        const dir = `${h}/.gemini/extensions/${SKILL_NAME}`;
-        const manifest = `${JSON.stringify({ name: SKILL_NAME, version: "1.0.0", contextFileName: "WSP-MACHINE.md" }, null, 2)}\n`;
-        return { outcome: "fallback", path: dir, note: "~/.gemini/settings.json sets context.fileName", files: [file(`${dir}/gemini-extension.json`, manifest), file(`${dir}/WSP-MACHINE.md`, short), s], skill: s.path };
-      }
-      return {
-        outcome: "written",
-        path: `${h}/.gemini/WSP-MACHINE.md`,
-        files: [file(`${e}/gemini-cli/system-defaults.json`, `${JSON.stringify({ context: { fileName: ["GEMINI.md", "WSP-MACHINE.md"] } }, null, 2)}\n`), file(`${h}/.gemini/WSP-MACHINE.md`, short), s],
-        skill: s.path,
-      };
-    }
-    case "opencode": {
-      const s = skillAt(`${h}/.config/opencode/skills`);
-      return { outcome: "written", path: `${e}/opencode/opencode.json`, files: [file(`${e}/opencode/opencode.json`, `${JSON.stringify({ instructions: [source] }, null, 2)}\n`), s], skill: s.path };
-    }
-    case "pi": {
-      const s = skillAt(`${h}/.pi/agent/skills`);
-      if (conflict) {
-        const ext = `${h}/.pi/agent/extensions/${SKILL_NAME}.ts`;
-        const code = [
-          `// ${CONTEXT_MARKER}`,
-          'import { readFileSync } from "node:fs";',
-          "export default function (pi) {",
-          `  pi.on("before_agent_start", async event => ({ systemPrompt: \`\${event.systemPrompt}\\n\\n\${readFileSync(${JSON.stringify(source)}, "utf8")}\` }));`,
-          "}",
-          "",
-        ].join("\n");
-        return { outcome: "fallback", path: ext, note: "~/.pi/agent/APPEND_SYSTEM.md already exists", files: [file(ext, code), s], skill: s.path };
-      }
-      return { outcome: "written", path: `${h}/.pi/agent/APPEND_SYSTEM.md`, files: [file(`${h}/.pi/agent/APPEND_SYSTEM.md`, short), s], skill: s.path };
-    }
-    case "hermes": {
-      const s = skillAt(`${h}/.hermes/skills`);
-      if (conflict) return { outcome: "not-loaded", note: "~/.hermes/config.yaml sets agent.environment_hint", files: [s], skill: s.path };
-      const files: GuestFile[] = [file(`${e}/profile.d/wsp-machine.sh`, `# ${CONTEXT_MARKER}\nexport HERMES_ENVIRONMENT_HINT="$(cat ${source})"\n`)];
-      if (probe.has.has("fish")) files.push(file(`${e}/fish/conf.d/wsp-machine.fish`, `# ${CONTEXT_MARKER}\nset -gx HERMES_ENVIRONMENT_HINT (cat ${source} | string collect)\n`));
-      files.push(s);
-      return { outcome: "written", path: files[0]!.path, files, skill: s.path };
-    }
-  }
+/** What is written for each agent, from its module, with the texts rendered for it: the always-loaded hook gets the
+ * short text, or its fallback does when the person's own file sets the same key, or nothing does and the result says
+ * so; the skill lands regardless, under wsp's own name. */
+export function agentFiles(agent: ContextAgent, short: string, skill: string, probe: ContextProbe, roots: GuestRoots = GUEST_ROOTS): ContextHooks {
+  return agent.context.hooks({ short, skill, source: contextPath(roots), roots, conflict: probe.conflicts.has(agent.id), fish: probe.has.has("fish") });
 }
 
 // --- the run -----------------------------------------------------------------
 
 export interface ContextResult {
-  agent: ContextAgent;
+  /** The agent's catalog id. */
+  agent: string;
   outcome: ContextOutcomeKind;
   /** The always-loaded hook written, or the fallback standing in for it. */
   path?: string;
@@ -549,13 +426,13 @@ export interface ApplyContextOptions {
   fetch?: typeof globalThis.fetch;
 }
 
-function summarize(results: readonly ContextResult[], agents: readonly ContextAgent[], bytes: number): string {
+function summarize(results: readonly ContextResult[], agents: readonly string[], bytes: number): string {
   if (agents.length === 0) return `${fmtBytes(bytes)} written; no agent on the machine`;
-  const written = results.filter(r => r.outcome === "written").map(r => AGENT_NAMES[r.agent]);
+  const written = results.filter(r => r.outcome === "written").map(r => agentName(r.agent));
   const parts = [written.length > 0 ? `${fmtBytes(bytes)} written for ${written.join(", ")}` : `${fmtBytes(bytes)} written`];
   for (const r of results) {
-    if (r.outcome === "fallback") parts.push(`${AGENT_NAMES[r.agent]} by its fallback (${r.note})`);
-    if (r.outcome === "not-loaded") parts.push(`${AGENT_NAMES[r.agent]} not loaded (${r.note}), skill only`);
+    if (r.outcome === "fallback") parts.push(`${agentName(r.agent)} by its fallback (${r.note})`);
+    if (r.outcome === "not-loaded") parts.push(`${agentName(r.agent)} not loaded (${r.note}), skill only`);
   }
   return parts.filter(p => p !== "").join("; ");
 }
@@ -584,11 +461,11 @@ export async function applyMachineContext(machine: Machine, opts: ApplyContextOp
   ];
   const context: ContextResult[] = [];
   for (const agent of CONTEXT_AGENTS) {
-    if (!probe.agents.includes(agent)) continue;
+    if (!probe.agents.includes(agent.id)) continue;
     const forAgent = { ...input, agent };
     const out = agentFiles(agent, renderShortContext(forAgent), renderSkill(renderMachineContext(forAgent)), probe, roots);
     files.push(...out.files);
-    context.push({ agent, outcome: out.outcome, ...(out.path !== undefined ? { path: out.path } : {}), ...(out.note !== undefined ? { note: out.note } : {}), skill: out.skill });
+    context.push({ agent: agent.id, outcome: out.outcome, ...(out.path !== undefined ? { path: out.path } : {}), ...(out.note !== undefined ? { note: out.note } : {}), skill: out.skill });
   }
   const tar = tarOf(files);
   try {

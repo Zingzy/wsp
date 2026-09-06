@@ -4,7 +4,7 @@
 // name, a counted word, an agent's catalog name, each agent's outcome in the
 // one set of words the web has for it, and the refusal a caught error becomes
 // with the tone the status line gives it. No React here.
-import { catalogEntry } from "@wsp/catalog";
+import { agentName } from "@wsp/catalog";
 import type { ProjectAgentOutcome, ProjectAgentResult } from "@wsp/protocol";
 import { errorText } from "../lib/utils.js";
 import { RequestError } from "../protocol/client.js";
@@ -40,9 +40,6 @@ export function stepRows<S extends string>(steps: readonly S[], events: readonly
 }
 
 export const count = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
-
-/** An agent as the catalog names it; an id the catalog does not know reads as itself. */
-export const agentName = (id: string): string => catalogEntry(id)?.name ?? id;
 
 /** The folder's own name from the path as typed. */
 export const folderName = (path: string): string => path.replace(/\/+$/, "").split("/").at(-1) ?? path;

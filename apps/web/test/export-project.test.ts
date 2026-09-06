@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import type { ProjectAgentResult, ProjectExportEvent, ProjectExportResult, SessionView } from "@wsp/protocol";
 import { EXPORT_STEPS, agentRows, agentsRequest, exportLandedLine, exportStepRows, isExportOf, pickedDest } from "../src/sidebar/exportProject.js";
 import { RequestError } from "../src/protocol/client.js";
-import { agentName, agentOutcome, agentOutcomes, refusalOf, refusalTone } from "../src/sidebar/projectTrip.js";
+import { agentOutcome, agentOutcomes, refusalOf, refusalTone } from "../src/sidebar/projectTrip.js";
 
 const ev = (over: Partial<ProjectExportEvent>): ProjectExportEvent => ({
   type: "project.export",
@@ -78,12 +78,6 @@ describe("the destination a picked folder gives", () => {
 
 describe("agent outcome words", () => {
   const agent = (over: Partial<ProjectAgentResult>): ProjectAgentResult => ({ agent: "claude", files: 3, bytes: 900, outcome: "moved", ...over });
-
-  it("names each agent as the catalog does, an unknown id as itself", () => {
-    expect(agentName("claude")).toBe("Claude Code");
-    expect(agentName("gemini")).toBe("Gemini CLI");
-    expect(agentName("zed")).toBe("zed");
-  });
 
   it("names each agent and what became of its sessions in one set of words, with the rollouts skipped and no counts", () => {
     expect(agentOutcomes([agent({ sessions: 2 })])).toBe("Claude Code moved");

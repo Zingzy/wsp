@@ -86,7 +86,7 @@ function probeOf(over: Partial<ContextProbe> = {}): ContextProbe {
     overlay: false,
     has: new Set(["tmux", "fish", "brew", "golden-path", "wsp-open"]),
     versions: [],
-    agents: [...CONTEXT_AGENTS],
+    agents: CONTEXT_AGENTS.map(a => a.id),
     secrets: ["OPENAI_API_KEY", "GH_TOKEN"],
     shell: "zsh",
     aliases: [
@@ -97,6 +97,8 @@ function probeOf(over: Partial<ContextProbe> = {}): ContextProbe {
     ...over,
   };
 }
+
+const ctx = (id: string): ContextAgent => CONTEXT_AGENTS.find(a => a.id === id)!;
 
 const GOLDEN = { version: 3, createdAt: "2026-09-05T14:02:11.000Z", setupSha: "9f2a7c1d4e5b6a7f8091a2b3c4d5e6f7" };
 
@@ -109,7 +111,7 @@ describe("the probe", () => {
     expect([...probe.has]).toEqual(["tmux", "fish", "brew", "golden-path", "wsp-open"]);
     // The base floor's versions, each as its number; a command that printed nothing is not there.
     expect(probe.versions).toEqual([{ name: "node", version: "22.23.2" }, { name: "npm", version: "10.9.4" }, { name: "python3", version: "3.12.13" }]);
-    expect(probe.agents).toEqual([...CONTEXT_AGENTS]);
+    expect(probe.agents).toEqual(CONTEXT_AGENTS.map(a => a.id));
     expect(probe.secrets).toEqual(["OPENAI_API_KEY", "GH_TOKEN"]);
     expect(probe.shell).toBe("zsh");
     expect(probe.aliases).toEqual([
@@ -201,11 +203,11 @@ describe("the document", () => {
     expect(doc).toContain("- Work in a folder: cd <dir> && <cmd> on one line, or absolute paths.");
     expect(doc).not.toContain("does not move the thread");
     expect(doc).not.toContain("persists across");
-    const claude = renderMachineContext({ workspace: { name: "task-1" }, golden: GOLDEN, probe: probeOf(), facts: FACTS, agent: "claude" });
+    const claude = renderMachineContext({ workspace: { name: "task-1" }, golden: GOLDEN, probe: probeOf(), facts: FACTS, agent: ctx("claude") });
     expect(claude).toContain("- Every agent session starts in the thread's folder; terminal panes open in the home folder. A cd moves your own shell, which persists across your tool calls, not the thread's folder, and the files pane follows that shell's folder unless you pinned the panes.");
     expect(claude).toContain("- Work in a folder: cd <dir> in your shell and it stays there across your tool calls; the thread's folder does not move. Absolute paths work from anywhere.");
     expect(claude).not.toContain("open in the home folder.\n");
-    expect(renderMachineContext({ workspace: { name: "task-1" }, golden: GOLDEN, probe: probeOf(), facts: FACTS, agent: "codex" })).toBe(doc);
+    expect(renderMachineContext({ workspace: { name: "task-1" }, golden: GOLDEN, probe: probeOf(), facts: FACTS, agent: ctx("codex") })).toBe(doc);
     expect(doc).toContain("- Sign-ins go through wsp: BROWSER is /usr/local/bin/wsp-open");
     expect(doc).toContain("run wsp-open <url>");
     expect(doc).toContain("- Ask for a sign-in: run the tool's own login command");
@@ -247,8 +249,8 @@ describe("the document", () => {
     expect(short).toContain("- Every agent session starts in the thread's folder; terminal panes open in the home folder.");
     expect(short).not.toContain("lasts for that command only");
     expect(short).not.toContain("persists across");
-    expect(renderShortContext({ workspace: { name: "task-1" }, golden: GOLDEN, probe: probeOf(), facts: FACTS, agent: "claude" })).toContain("- Every agent session starts in the thread's folder; terminal panes open in the home folder. A cd moves your own shell, which persists across your tool calls, not the thread's folder, and the files pane follows that shell's folder unless you pinned the panes.");
-    expect(renderShortContext({ workspace: { name: "task-1" }, golden: GOLDEN, probe: probeOf(), facts: FACTS, agent: "gemini" })).toBe(short);
+    expect(renderShortContext({ workspace: { name: "task-1" }, golden: GOLDEN, probe: probeOf(), facts: FACTS, agent: ctx("claude") })).toContain("- Every agent session starts in the thread's folder; terminal panes open in the home folder. A cd moves your own shell, which persists across your tool calls, not the thread's folder, and the files pane follows that shell's folder unless you pinned the panes.");
+    expect(renderShortContext({ workspace: { name: "task-1" }, golden: GOLDEN, probe: probeOf(), facts: FACTS, agent: ctx("gemini") })).toBe(short);
     expect(short).toContain("- Sign-ins go through wsp: run the tool's own login command");
     expect(short).toContain("bind 0.0.0.0, not 127.0.0.1");
     expect(short).toContain("- Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed.");
@@ -293,8 +295,8 @@ describe("each agent's hooks", () => {
   const content = (out: { files: GuestFile[] }, path: string) => out.files.find(f => f.path === path)!.content;
 
   it("writes the short text through each always-loaded hook and the skill into each global skills directory", () => {
-    const out = Object.fromEntries(CONTEXT_AGENTS.map(a => [a, agentFiles(a, shortFor(a), skillFor(a), probeOf())])) as Record<string, ReturnType<typeof agentFiles>>;
-    for (const a of CONTEXT_AGENTS) expect(out[a]!.outcome).toBe("written");
+    const out = Object.fromEntries(CONTEXT_AGENTS.map(a => [a.id, agentFiles(a, shortFor(a), skillFor(a), probeOf())])) as Record<string, ReturnType<typeof agentFiles>>;
+    for (const a of CONTEXT_AGENTS) expect(out[a.id]!.outcome).toBe("written");
     expect(paths(out["claude"]!)).toEqual(["/etc/claude-code/CLAUDE.md", "/etc/claude-code/.claude/skills/wsp-machine/SKILL.md"]);
     expect(paths(out["codex"]!)).toEqual(["/etc/codex/requirements.toml", "/etc/codex/skills/wsp-machine/SKILL.md"]);
     expect(paths(out["gemini"]!)).toEqual(["/etc/gemini-cli/system-defaults.json", "/root/.gemini/WSP-MACHINE.md", "/root/.gemini/skills/wsp-machine/SKILL.md"]);
@@ -302,47 +304,47 @@ describe("each agent's hooks", () => {
     expect(paths(out["pi"]!)).toEqual(["/root/.pi/agent/APPEND_SYSTEM.md", "/root/.pi/agent/skills/wsp-machine/SKILL.md"]);
     expect(paths(out["hermes"]!)).toEqual(["/etc/profile.d/wsp-machine.sh", "/etc/fish/conf.d/wsp-machine.fish", "/root/.hermes/skills/wsp-machine/SKILL.md"]);
     for (const a of CONTEXT_AGENTS) {
-      const o = out[a]!;
+      const o = out[a.id]!;
       for (const f of o.files) expect(f.mode).toBe(0o644);
       expect(o.skill).toBe(o.files.at(-1)!.path);
-      expect(o.files.at(-1)!.content).toBe(a === "claude" ? skillFor("claude") : skill);
+      expect(o.files.at(-1)!.content).toBe(a.id === "claude" ? skillFor(ctx("claude")) : skill);
       expect(o.path).toBe(o.files[0]!.path === "/etc/gemini-cli/system-defaults.json" ? "/root/.gemini/WSP-MACHINE.md" : o.files[0]!.path);
-      expect(o.files.map(f => `${f.path}\n${f.content}`).join("\n----\n")).toMatchSnapshot(a);
+      expect(o.files.map(f => `${f.path}\n${f.content}`).join("\n----\n")).toMatchSnapshot(a.id);
     }
-    expect(content(out["claude"]!, "/etc/claude-code/CLAUDE.md")).toBe(shortFor("claude"));
+    expect(content(out["claude"]!, "/etc/claude-code/CLAUDE.md")).toBe(shortFor(ctx("claude")));
     expect(content(out["claude"]!, "/etc/claude-code/CLAUDE.md")).toContain("persists across your tool calls");
     expect(content(out["gemini"]!, "/root/.gemini/WSP-MACHINE.md")).toBe(short);
     expect(content(out["pi"]!, "/root/.pi/agent/APPEND_SYSTEM.md")).toBe(short);
   });
 
   it("the Codex string is a literal that TOML reads back as the short text, under the additive requirements key, and falls back when the text would end it", () => {
-    const toml = content(agentFiles("codex", short, skill, probeOf()), "/etc/codex/requirements.toml");
+    const toml = content(agentFiles(ctx("codex"), short, skill, probeOf()), "/etc/codex/requirements.toml");
     const m = /^# [^\n]*\nadditional_developer_instructions = '''\n([\s\S]*)'''\n$/.exec(toml);
     expect(m?.[1]).toBe(short);
     expect(toml).not.toContain("\ndeveloper_instructions");
-    const odd = content(agentFiles("codex", "a '''b", skill, probeOf()), "/etc/codex/requirements.toml");
+    const odd = content(agentFiles(ctx("codex"), "a '''b", skill, probeOf()), "/etc/codex/requirements.toml");
     expect(odd).toContain(`additional_developer_instructions = ${JSON.stringify("a '''b")}`);
   });
 
   it("Gemini and OpenCode get JSON that names ours and nothing of the person's", () => {
-    expect(JSON.parse(content(agentFiles("gemini", short, skill, probeOf()), "/etc/gemini-cli/system-defaults.json"))).toEqual({ context: { fileName: ["GEMINI.md", "WSP-MACHINE.md"] } });
-    expect(JSON.parse(content(agentFiles("opencode", short, skill, probeOf()), "/etc/opencode/opencode.json"))).toEqual({ instructions: ["/etc/wsp/machine-context.md"] });
+    expect(JSON.parse(content(agentFiles(ctx("gemini"), short, skill, probeOf()), "/etc/gemini-cli/system-defaults.json"))).toEqual({ context: { fileName: ["GEMINI.md", "WSP-MACHINE.md"] } });
+    expect(JSON.parse(content(agentFiles(ctx("opencode"), short, skill, probeOf()), "/etc/opencode/opencode.json"))).toEqual({ instructions: ["/etc/wsp/machine-context.md"] });
   });
 
   it("Hermes reads the short text into its hint, through fish too only when fish is there", () => {
-    const out = agentFiles("hermes", short, skill, probeOf({ has: new Set() }));
+    const out = agentFiles(ctx("hermes"), short, skill, probeOf({ has: new Set() }));
     expect(paths(out)).toEqual(["/etc/profile.d/wsp-machine.sh", "/root/.hermes/skills/wsp-machine/SKILL.md"]);
     expect(out.files[0]!.content).toContain('export HERMES_ENVIRONMENT_HINT="$(cat /etc/wsp/machine-context.md)"');
   });
 
   it("falls back when the person's own file sets the key: a Gemini extension, a Pi extension, nothing for Hermes; Codex is additive and never falls back", () => {
-    const all = probeOf({ conflicts: new Set(CONTEXT_AGENTS) });
-    const codex = agentFiles("codex", short, skill, all);
+    const all = probeOf({ conflicts: new Set(CONTEXT_AGENTS.map(a => a.id)) });
+    const codex = agentFiles(ctx("codex"), short, skill, all);
     expect(codex.outcome).toBe("written");
     expect(paths(codex)).toEqual(["/etc/codex/requirements.toml", "/etc/codex/skills/wsp-machine/SKILL.md"]);
     expect(codex.files.map(f => f.path)).not.toContain("/etc/codex/config.toml");
 
-    const gemini = agentFiles("gemini", short, skill, all);
+    const gemini = agentFiles(ctx("gemini"), short, skill, all);
     expect(gemini.outcome).toBe("fallback");
     expect(gemini.path).toBe("/root/.gemini/extensions/wsp-machine");
     expect(gemini.note).toBe("~/.gemini/settings.json sets context.fileName");
@@ -351,7 +353,7 @@ describe("each agent's hooks", () => {
     expect(content(gemini, "/root/.gemini/extensions/wsp-machine/WSP-MACHINE.md")).toBe(short);
     expect(paths(gemini)).not.toContain("/etc/gemini-cli/system-defaults.json");
 
-    const pi = agentFiles("pi", short, skill, all);
+    const pi = agentFiles(ctx("pi"), short, skill, all);
     expect(pi.outcome).toBe("fallback");
     expect(pi.path).toBe("/root/.pi/agent/extensions/wsp-machine.ts");
     expect(pi.note).toBe("~/.pi/agent/APPEND_SYSTEM.md already exists");
@@ -361,22 +363,40 @@ describe("each agent's hooks", () => {
     expect(ext).toContain('readFileSync("/etc/wsp/machine-context.md", "utf8")');
     expect(ext).toMatchSnapshot();
 
-    const hermes = agentFiles("hermes", short, skill, all);
+    const hermes = agentFiles(ctx("hermes"), short, skill, all);
     expect(hermes.outcome).toBe("not-loaded");
     expect(hermes.note).toBe("~/.hermes/config.yaml sets agent.environment_hint");
     expect(paths(hermes)).toEqual(["/root/.hermes/skills/wsp-machine/SKILL.md"]);
 
-    expect(agentFiles("claude", short, skill, all).outcome).toBe("written");
-    expect(agentFiles("opencode", short, skill, all).outcome).toBe("written");
+    expect(agentFiles(ctx("claude"), short, skill, all).outcome).toBe("written");
+    expect(agentFiles(ctx("opencode"), short, skill, all).outcome).toBe("written");
 
     expect(contextLine({ agent: "claude", outcome: "written", path: "/etc/claude-code/CLAUDE.md", skill: "/etc/claude-code/.claude/skills/wsp-machine/SKILL.md" })).toBe("context.claude: /etc/claude-code/CLAUDE.md; skill /etc/claude-code/.claude/skills/wsp-machine/SKILL.md");
     expect(contextLine({ agent: "gemini", outcome: "fallback", path: gemini.path!, note: gemini.note!, skill: gemini.skill })).toBe("context.gemini: fallback /root/.gemini/extensions/wsp-machine, ~/.gemini/settings.json sets context.fileName; skill /root/.gemini/skills/wsp-machine/SKILL.md");
     expect(contextLine({ agent: "hermes", outcome: "not-loaded", note: hermes.note!, skill: hermes.skill })).toBe("context.hermes: not loaded, ~/.hermes/config.yaml sets agent.environment_hint; only the wsp-machine skill's description is in the prompt; skill /root/.hermes/skills/wsp-machine/SKILL.md");
   });
 
+  it("asks the entry's context module for the hooks and the cd facts, so an agent the catalog gains needs no case here", () => {
+    const fake: ContextAgent = {
+      ...ctx("codex"),
+      id: "zed",
+      name: "Zed",
+      context: {
+        cd: { fact: "- Zed's cd is its own.", howto: "- Zed: cd in the pane." },
+        hooks: ({ short: s, skill: k, roots, conflict }) => ({ outcome: conflict ? "not-loaded" : "written", path: `${roots.home}/.zed/rules.md`, files: [{ path: `${roots.home}/.zed/rules.md`, mode: 0o644, content: s }, { path: `${roots.home}/.zed/skills/x`, mode: 0o644, content: k }], skill: `${roots.home}/.zed/skills/x` }),
+      },
+    };
+    expect(renderShortContext({ ...input, agent: fake })).toContain("- Zed's cd is its own.");
+    expect(renderMachineContext({ ...input, agent: fake })).toContain("- Zed: cd in the pane.");
+    expect(renderShortContext({ ...input, agent: ctx("codex") })).not.toContain("Zed");
+    const out = agentFiles(fake, "S", "K", probeOf());
+    expect(out).toEqual({ outcome: "written", path: "/root/.zed/rules.md", files: [{ path: "/root/.zed/rules.md", mode: 0o644, content: "S" }, { path: "/root/.zed/skills/x", mode: 0o644, content: "K" }], skill: "/root/.zed/skills/x" });
+    expect(agentFiles(fake, "S", "K", probeOf({ conflicts: new Set(["zed"]) })).outcome).toBe("not-loaded");
+  });
+
   it("never names the two paths that would replace a file of the person's", () => {
     for (const a of CONTEXT_AGENTS) {
-      for (const probe of [probeOf(), probeOf({ conflicts: new Set(CONTEXT_AGENTS) })]) {
+      for (const probe of [probeOf(), probeOf({ conflicts: new Set(CONTEXT_AGENTS.map(a => a.id)) })]) {
         for (const f of agentFiles(a, short, skill, probe).files) expect(f.path).not.toMatch(/\.codex\/AGENTS\.override\.md$|\.config\/opencode\/AGENTS\.md$/);
       }
     }
@@ -569,7 +589,7 @@ describe("applyMachineContext on a local guest", () => {
     const result: ImportResult = { recipeHash: "h", tools: [{ id: "tools/brew/x", label: "x", outcome: "failed", note: "boom" }], agents: [] };
     const out = await applyMachineContext(m, { workspace: { name: "task-1" }, golden: GOLDEN, result, roots });
     expect(out.failure).toBeUndefined();
-    expect(out.context).toEqual(CONTEXT_AGENTS.map(agent => ({ agent, outcome: "written", path: expect.any(String), skill: expect.stringMatching(/\/wsp-machine\/SKILL\.md$/) })));
+    expect(out.context).toEqual(CONTEXT_AGENTS.map(agent => ({ agent: agent.id, outcome: "written", path: expect.any(String), skill: expect.stringMatching(/\/wsp-machine\/SKILL\.md$/) })));
     expect(puts).toHaveLength(1);
     expect(out.summary).toBe(`${(puts[0]!.bytes / 1024).toFixed(1)} KB written for Claude Code, Codex, Gemini CLI, OpenCode, Pi, Hermes Agent`);
     // The texts travel as the archive, never inside a command: the probe and the untar are the only execs.

@@ -9,6 +9,7 @@
 // an existing folder comes back as the runtime's refusal naming it and its
 // file count, the one loud line, and the action becomes Replace and export.
 import { useCallback, useMemo, useRef, useState } from "react";
+import { agentName } from "@wsp/catalog";
 import { fmtBytes, type ProjectAgentResult, type ProjectExportEvent, type ProjectExportResult, type WorkspaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { Checkbox } from "../components/ui/checkbox.js";
@@ -17,7 +18,7 @@ import { useThreadFolder } from "../files/root.js";
 import type { ProtocolEvent } from "../protocol/client.js";
 import { useProtocolEvents, useStore } from "../protocol/store.js";
 import { agentRows, agentsRequest, exportLandedLine, exportStepRows, isExportOf, pickedDest } from "./exportProject.js";
-import { agentName, agentOutcome, count, refusalOf, refusalTone, type Refusal } from "./projectTrip.js";
+import { agentOutcome, count, refusalOf, refusalTone, type Refusal } from "./projectTrip.js";
 import { FactRow, FolderField, StatusLine, StepRows } from "./ProjectTripRows.js";
 
 type Phase = "idle" | "exporting" | "done";

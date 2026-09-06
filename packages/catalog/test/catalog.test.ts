@@ -4,9 +4,15 @@
 // the six whose project state has a measured resolver, every default names
 // its evidence, and the seeded rows are what the snapshot says they are.
 import { describe, expect, it } from "vitest";
-import { APT_INDEX, APT_UPDATE, BASE_FLOOR, CATALOG, CATALOG_AGENTS, GCLOUD, HISTORY_FORMATS, HOMEBREW_STEP, KUBECTL, LINUX_CASKS, LOGIN_ROWS, ROADS, ROAD_MODULES, SIGN_IN_ROWS, baseEntryFor, baseNote, catalogEntry, catalogToolFor, hasLogin, installAfter, installLine, keysIdOf, keysRowOf, loginIdOf, loginRow, roadModule, smokeOf, type InstallRoad } from "../src/index.js";
+import { APT_INDEX, APT_UPDATE, BASE_FLOOR, CATALOG, CATALOG_AGENTS, CLAUDE_CONFIG_DIR, DEFAULT_AGENT, GCLOUD, HISTORY_FORMATS, HOMEBREW_STEP, KUBECTL, LINUX_CASKS, LOGIN_ROWS, ROADS, ROAD_MODULES, SIGN_IN_ROWS, agentName, baseEntryFor, baseNote, catalogEntry, catalogToolFor, guestEnv, hasLogin, installAfter, installLine, keysIdOf, keysRowOf, loginIdOf, loginRow, roadModule, smokeOf, type AgentEntry, type InstallRoad } from "../src/index.js";
 
 describe("catalog", () => {
+  it("the default agent is the first entry, and it is an agent with a context module", () => {
+    expect(DEFAULT_AGENT).toBe(CATALOG_AGENTS[0]);
+    expect(DEFAULT_AGENT.id).toBe("claude");
+    expect(DEFAULT_AGENT.context).toBeDefined();
+  });
+
   it("names a session history for the agents with a reader, in a known format under a home path", () => {
     expect(CATALOG_AGENTS.filter(a => a.history !== undefined).map(a => a.id)).toEqual(["claude", "codex", "hermes"]);
     for (const a of CATALOG_AGENTS) {
@@ -33,6 +39,18 @@ describe("catalog", () => {
     expect(new Set(ids).size).toBe(ids.length);
     expect(catalogEntry("gh")?.name).toBe("GitHub CLI");
     expect(catalogEntry("nothing")).toBeUndefined();
+  });
+
+  it("names an entry as the catalog does and an id it does not know as itself", () => {
+    expect(agentName("claude")).toBe("Claude Code");
+    expect(agentName("gemini")).toBe("Gemini CLI");
+    expect(agentName("gh")).toBe("GitHub CLI");
+    expect(agentName("zed")).toBe("zed");
+  });
+
+  it("a golden's env for an agent points it at its guest state home only when the entry names the variable", () => {
+    expect(guestEnv(catalogEntry("claude") as AgentEntry)).toEqual({ CLAUDE_CONFIG_DIR });
+    for (const a of CATALOG_AGENTS.slice(1)) expect(guestEnv(a), a.id).toEqual({});
   });
 
   it("sends every entry down a known road with its argument", () => {

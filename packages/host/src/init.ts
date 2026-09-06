@@ -17,7 +17,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BUILDER_DISK_GB, PACK_BUDGET_BYTES, TOOLS_DISK_FLOOR, agentInstallsFor, brewfileFor, estimateDisk, isMcpRow, pinState, toolInstallsFor, type BrewTable, type ImportResult } from "@wsp/engine";
 import { ALREADY_APPLIED, fmtBytes, fmtMemGb } from "@wsp/protocol";
-import { CLAUDE_INSTALLER, importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
+import { importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
   LOGIN_CHOICES,
   RUNG_TITLE,
@@ -536,7 +536,7 @@ export function summaryNote(
   const answered = new Map(table(listed.map(e => [`  ${ellipsize(e.label, labelRoom)}`, answer(e)])).map((line, i) => [listed[i]!.id, line]));
   const lines = perRung.flatMap((entries, i) => [rows[i]!, ...entries.flatMap(e => answered.get(e.id) ?? [])]);
   const bring = manifest.entries.filter(e => ticks.has(e.id)).map(e => ({ ...e, bring: true }));
-  const agents = agentInstallsFor(bring, { claude: CLAUDE_INSTALLER }).installs.map(a => a.name);
+  const agents = agentInstallsFor(bring).installs.map(a => a.name);
   // Only what the person ticked counts as their tools; Homebrew and its toolchain are named apart.
   const steps = toolInstallsFor(bring, brew).installs;
   const tools = steps.filter(t => ticks.has(t.id)).length;

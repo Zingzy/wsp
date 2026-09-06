@@ -67,6 +67,8 @@ describe("procLabel", () => {
     expect(procLabel(procs[2]!, 40, new Map())).toBe("terminal");
     expect(procLabel(procs[3]!, 40, titles)).toBe("agent");
     expect(procLabel(procs[4]!, 40, titles)).toBeNull();
+    // Any catalog agent is named by the command its entry puts on PATH.
+    expect(procLabel(proc(43, 40, "codex"), 40, titles)).toBe("agent");
   });
 });
 

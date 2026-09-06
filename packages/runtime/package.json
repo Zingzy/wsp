@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@wsp/adapter-claude": "workspace:*",
+    "@wsp/catalog": "workspace:*",
     "@wsp/engine": "workspace:*",
     "@wsp/protocol": "workspace:*",
     "ws": "^8.21.3"
