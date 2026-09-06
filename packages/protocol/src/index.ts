@@ -6,6 +6,7 @@
 
 import { z } from "zod";
 import { titleLine } from "./format.js";
+import { shellQuote } from "./shell-quote.js";
 
 /** The one rule for a URL a guest may hand to the laptop: http or https in any
  * case, no whitespace or control characters, at most HTTP_URL_MAX bytes, and
@@ -823,17 +824,51 @@ export const RecipeHistory = z.object({
 });
 export type RecipeHistory = z.infer<typeof RecipeHistory>;
 
+/** A tool the recipe carries that the catalog does not, because an agent added it for the person's own projects:
+ * the lines that install it, run as given on the builder after every catalog road, and one command that exits 0
+ * once it is there. Nothing here is ever offered a sign-in: the install is the whole row. */
+export const RecipeCustomRow = z.object({
+  kind: z.literal("custom"),
+  id: z.string().min(1),
+  name: z.string().min(1),
+  install: z.array(z.string().min(1)).min(1),
+  check: z.string().min(1),
+  /** The package manager the lines call, when the row came off a scan of one: the build brings that manager onto
+   * the machine before the row runs. A row nobody named a manager for runs on what the base and the ticks left. */
+  manager: z.string().min(1).optional(),
+  /** Bytes on the machine, when whoever added the row measured one. */
+  size: z.number().int().nonnegative().optional(),
+  why: z.string().min(1),
+});
+export type RecipeCustomRow = z.infer<typeof RecipeCustomRow>;
+
 /** The small recipe: catalog ids with a tick each and the source of that tick, written by wsp recipe from this
  * computer (or by hand, or by a local agent), read by wsp init --recipe, the app's pick screen and the import
- * of a project. It names catalog entries only and never carries a path's content or a key. */
+ * of a project. Beside them, the rows an agent added for tools the catalog has none for. Names, ticks and install
+ * lines only: never a path's content, never a key. */
 export const Recipe = z.object({
   version: z.literal(1),
   /** When it was written, ISO 8601. */
   at: z.string().min(1),
   histories: z.array(RecipeHistory),
   rows: z.array(RecipeRow),
+  /** Rows outside the catalog, added on purpose; a recipe written before they existed carries none. */
+  custom: z.array(RecipeCustomRow).optional(),
 });
 export type Recipe = z.infer<typeof Recipe>;
+
+/** The custom rows a recipe carries: the one reading of a recipe that has none. */
+export function customRows(recipe: Pick<Recipe, "custom">): readonly RecipeCustomRow[] {
+  return recipe.custom ?? [];
+}
+
+/** What a row added without a check of its own is checked with: its command on PATH. */
+export function commandCheck(bin: string): string {
+  return `command -v ${shellQuote(bin)}`;
+}
+
+/** The why on a row an agent added without saying more. */
+export const ADDED_BY_AGENT = "added by the agent";
 
 /** The live machine a person sets up before sealing it as a golden. It is not
  * a workspace and never appears in the rail; `screen` is present when the
