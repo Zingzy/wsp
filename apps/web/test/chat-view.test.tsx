@@ -10,6 +10,7 @@ import type { EventUnion, SessionEvent, WorkspaceView } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { ChatView } from "../src/components/chat/ChatView.js";
+import type { ChatThreadHandle } from "../src/components/chat/useChatThread.js";
 import { CHAT_STREAM, CHAT_T0, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
 import { requestNewThread } from "../src/shell/shellRequests.js";
 
@@ -64,6 +65,9 @@ function fixtureApi(workspaces: WorkspaceView[], history: Record<string, Session
   const emit = (e: EventUnion) => act(() => { for (const fn of [...listeners]) fn(e); });
   return { api, emit };
 }
+
+/** The composer's half of a send, since ChatView alone mounts no composer: the start that follows must carry this prompt. */
+const sendFrom = (thread: ChatThreadHandle | null, prompt: string) => act(() => { thread!.setSending(true); thread!.appendUserTurn(prompt); });
 
 async function setup(api: Api, workspaceId = WS) {
   useStore.getState().bind(api);
@@ -202,11 +206,15 @@ describe("ChatView", () => {
 
   it("clears to the empty headline on a new-thread request and shows the fresh turn that follows", async () => {
     const { api, emit } = fixtureApi([workspace], { [WS]: settledTurn(WS, "add a health route", "Added GET /health.") });
-    await setup(api);
+    const handle: { current: ChatThreadHandle | null } = { current: null };
+    useStore.getState().bind(api);
+    await waitFor(() => expect(useStore.getState().workspaces.length).toBeGreaterThan(0));
+    render(<ChatView workspaceId={WS}>{thread => { handle.current = thread; return null; }}</ChatView>);
     await screen.findByText("Added GET /health.");
     act(() => requestNewThread({ workspaceId: WS }));
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in api?");
     expect(screen.queryByText("Added GET /health.")).toBeNull();
+    sendFrom(handle.current, "second thread");
     for (const e of settledTurn(WS, "second thread", "Second answer.", 2)) emit(e);
     await screen.findByText("Second answer.");
     expect(screen.getByText("second thread")).toBeDefined();
@@ -251,9 +259,10 @@ describe("ChatView", () => {
 
   it("drops the left turn's remaining events after a new thread is requested mid-turn and reports finishing until its end", async () => {
     const { api, emit } = fixtureApi([workspace]);
+    const handle: { current: ChatThreadHandle | null } = { current: null };
     useStore.getState().bind(api);
     await waitFor(() => expect(useStore.getState().workspaces.length).toBeGreaterThan(0));
-    render(<ChatView workspaceId={WS}>{thread => <span data-testid="finishing">{String(thread.finishing)}</span>}</ChatView>);
+    render(<ChatView workspaceId={WS}>{thread => { handle.current = thread; return <span data-testid="finishing">{String(thread.finishing)}</span>; }}</ChatView>);
     await waitFor(() => expect(screen.queryByText("loading transcript")).toBeNull());
     for (const e of FIXTURE.slice(0, 6)) emit(e);
     await screen.findByText(/Creating the server file, then starting it\./);
@@ -268,6 +277,7 @@ describe("ChatView", () => {
     emit(FIXTURE.at(-1)!);
     expect(screen.getByTestId("finishing").textContent).toBe("false");
     expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
+    sendFrom(handle.current, "start over");
     const fresh = { workspaceId: WS, sessionId: "sess_0002", turnId: "turn_0002" };
     emit({ type: "session.start", ...fresh, at: T0 + 100_000, prompt: "start over" });
     emit({ type: "session.delta", ...fresh, at: T0 + 100_500, kind: "text", text: "Fresh start." });

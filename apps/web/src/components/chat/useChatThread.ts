@@ -138,45 +138,57 @@ function lastThread(events: ReadonlyArray<SessionEvent>): SessionEvent[] {
 /**
  * The history reply, folded to the selected thread, or to its last thread when none is. A send in flight
  * decides otherwise: a view with a start keeps its own thread, since that send resumes it and another
- * thread's start in the reply is another client's, while a pinned thread that never started follows a thread
- * the reply shows and the view never knew, since nothing resumes a dead thread and that send opened a new one. A
+ * thread's start in the reply is another client's, while a view that never started takes the thread whose
+ * start carries the prompt it sent, since nothing resumes a dead thread and that send opened a new one, and
+ * stays where it was until the reply shows it, since any other new thread may be another client's. A
  * new-thread request that landed while history was in flight wins over the transcript it asked to leave,
- * unless the transcript already holds the thread that request opened: the runtime minted it an id no
- * earlier reply carried, so it is the person's own and loads as such. Only the left thread, or one the
- * view never knew, can hold a stale turn, whether or not the person's thread is present; a send whose
- * session.start the transcript cannot hold yet stays pending.
+ * unless the transcript already holds the thread that request opened, told the same way. Only the left
+ * thread, or one the view never knew, can hold a stale turn, whether or not the person's thread is present;
+ * a send whose session.start the transcript cannot hold yet stays pending, its prompt still shown.
  */
 export function reloadTranscript(s: ThreadState, events: ReadonlyArray<SessionEvent>, at: string, threadId: string | null = null): ThreadState {
   const own = foldTo(s, events, threadId);
-  const thread = own === undefined ? lastThread(events) : events.filter(e => e.threadId === own);
+  const thread = own === undefined ? lastThread(events) : own === null ? [] : events.filter(e => e.threadId === own);
   const arrivals = thread.map(() => at);
   const known = knowing(s.known, events);
   const strayed = replayStray(s, events);
-  const rebuilt = (stale: StaleTurn | null): ThreadState => ({ ...EMPTY, events: thread, arrivals, stale, known, stray: s.stray, ...replaySend(s, thread, threadId), ...strayed });
+  const rebuilt = (stale: StaleTurn | null): ThreadState => {
+    const send = replaySend(s, thread, threadId);
+    return { ...EMPTY, events: thread, arrivals, stale, known, stray: s.stray, pendingPrompt: send.sending === null ? null : s.pendingPrompt, ...send, ...strayed };
+  };
   if (!s.fresh) return rebuilt(null);
   if (s.stale?.kind === "pending-send") return { ...s, stale: runningTurn(events.filter(e => leftOrOwn(s, e))) ?? s.stale, known, ...strayed };
-  const id = thread[0]?.threadId;
   const stale = runningTurn(events.filter(e => e.threadId === s.left));
-  if (id !== undefined && !s.known.includes(id)) return rebuilt(stale);
+  if (thread.length > 0) return rebuilt(stale);
   return { ...s, stale, known, ...strayed };
 }
 
-/** The thread a reply folds to, undefined for its last one: the pin, when the view has one and no send in flight moved it; a view with a start and a send in flight keeps that thread; a pinned thread that never started follows a thread the view never knew, since that send opened a new one, and stays put while the reply has none. */
-function foldTo(s: ThreadState, events: ReadonlyArray<SessionEvent>, threadId: string | null): string | undefined {
-  if (s.sending === null) return threadId ?? undefined;
-  const held = heldThreadId(s);
-  if (held !== undefined || threadId === null) return held;
-  const last = events.at(-1)?.threadId;
-  return last === undefined || s.known.includes(last) ? threadId : undefined;
+/**
+ * The thread a reply folds to: undefined for its last one, null for none. Idle, the pin, else the last thread,
+ * or, fresh, only the dead thread of a send that already settled here. During a send, a view with a start keeps
+ * it; one without takes the thread its send opened, else keeps the pin or the start-less thread it showed.
+ */
+function foldTo(s: ThreadState, events: ReadonlyArray<SessionEvent>, threadId: string | null): string | null | undefined {
+  const shown = s.events.length === 0 ? null : s.events.at(-1)?.threadId;
+  if (s.sending === null) return s.fresh ? shown : threadId ?? undefined;
+  return heldThreadId(s) ?? sentThread(s, events) ?? threadId ?? shown;
+}
+
+/** The thread the send in flight opened, as a reply shows it: the one whose start carries the sent prompt, else one the view never knew with no start at all, its harness dead before init. */
+function sentThread(s: ThreadState, events: ReadonlyArray<SessionEvent>): string | undefined {
+  const start = events.find(e => startsSend(s, e));
+  if (start !== undefined) return start.threadId;
+  return threadIds(events).findLast(id => !s.known.includes(id) && !events.some(e => e.type === "session.start" && e.threadId === id));
 }
 
 /** What a replayed thread did with the send in flight, read the way live events would settle it: the events past the turn that had settled when it began. */
 function replaySend(s: ThreadState, thread: ReadonlyArray<SessionEvent>, pinned: string | null): Pick<ThreadState, "sending" | "named"> {
   if (s.sending === null) return { sending: null, named: null };
   const { after } = s.sending;
+  const held = heldThreadId(s);
   const since = thread.slice(thread.findLastIndex(e => e.turnId === after) + 1);
-  const start = since.find(e => e.type === "session.start");
-  if (start !== undefined) return { sending: null, named: nameOf(heldThreadId(s) ?? pinned ?? start.workspaceId, start) };
+  const start = since.find(e => e.type === "session.start" && (held !== undefined || startsSend(s, e)));
+  if (start !== undefined) return { sending: null, named: nameOf(held ?? pinned ?? start.workspaceId, start) };
   return since.some(e => e.type === "session.end") ? { sending: null, named: null } : { sending: s.sending, named: null };
 }
 
@@ -215,9 +227,26 @@ function leftOrOwn(state: ThreadState, e: SessionEvent): boolean {
   return unknownThread(state, e) || e.threadId === state.left;
 }
 
-/** The start of the send a view change left in flight: a thread the view never knew, carrying the prompt the person sent. */
+/** A start of a thread the view never knew, carrying a prompt the person sent: the runtime stamps the request's prompt on the start, and by id alone two clients' starts look the same. */
+function startsPrompt(state: ThreadState, e: SessionEvent, prompt: string | undefined): boolean {
+  return prompt !== undefined && e.type === "session.start" && unknownThread(state, e) && e.prompt === prompt;
+}
+
+/** The start of the send a view change left in flight. */
 function startsStray(state: ThreadState, e: SessionEvent): boolean {
-  return state.stray !== null && e.type === "session.start" && unknownThread(state, e) && e.prompt === state.stray.prompt;
+  return startsPrompt(state, e, state.stray?.prompt);
+}
+
+/** The start of the send in flight on this view. */
+function startsSend(state: ThreadState, e: SessionEvent): boolean {
+  return state.sending !== null && startsPrompt(state, e, state.pendingPrompt?.text);
+}
+
+/** An event of the send in flight on a view without a start: its own start, or the done and end of a thread the view never knew, its harness dying before it could start. A start with another prompt, or a delta, is another client's thread. */
+function sentEvent(state: ThreadState, e: SessionEvent): boolean {
+  if (state.sending === null) return false;
+  if (e.type === "session.start") return startsSend(state, e);
+  return e.type !== "session.delta" && unknownThread(state, e);
 }
 
 /**
@@ -238,19 +267,19 @@ export function dropEvent(state: ThreadState, e: SessionEvent): ThreadState {
 }
 
 /**
- * A view holds one thread: once its events carry a thread id, another thread's events are not its own. Fresh, a
- * session.start is its own, and so is any event from a thread it does not know while a send is in flight: that is
- * the send's own harness dying before its start, while a known thread waking is not, whether it was left or older.
- * A view whose thread never started (a harness that died before init, read back from history) holds that thread,
- * told by its events or by the pin, and, while a send is in flight, the unknown one the runtime mints for the
- * send, since nothing resumes a dead thread.
+ * A view holds one thread: once its events carry a thread id, another thread's events are not its own. Fresh, it
+ * holds only its send's own events, or the start of a send left in flight before it; a known thread waking is not
+ * its own, whether it was left or older. A view whose thread never started (a harness that died before init, read
+ * back from history) holds that thread, told by its events or by the pin, and, while a send is in flight, the
+ * thread the runtime mints for the send, since nothing resumes a dead thread. An empty view idle takes anything.
  */
 function inHeldThread(state: ThreadState, e: SessionEvent, pinned: string | null): boolean {
-  if (state.fresh) return e.type === "session.start" || (state.sending !== null && unknownThread(state, e));
+  if (state.fresh) return sentEvent(state, e) || startsStray(state, e);
   const held = heldThreadId(state);
   if (held !== undefined) return e.threadId === held;
   const last = state.events.at(-1)?.threadId ?? pinned ?? undefined;
-  return last === undefined || e.threadId === last || (state.sending !== null && unknownThread(state, e));
+  if (state.sending !== null) return e.threadId === last || sentEvent(state, e);
+  return last === undefined || e.threadId === last;
 }
 
 /**
