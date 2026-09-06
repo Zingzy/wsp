@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Where the panes are rooted: the thread's folder as it moves, unless pinned.
 import { beforeEach, describe, expect, it } from "vitest";
-import { rootOf, rootsOf, selectRoot, useRootStore } from "../src/files/root.js";
+import { parentWithin, rootOf, rootsOf, selectRoot, useRootStore } from "../src/files/root.js";
 
 const WS = "ws_root";
 const root = () => selectRoot(useRootStore.getState().byWorkspaceId, WS, ["/root"]);
@@ -85,6 +85,17 @@ describe("the browsable roots", () => {
     expect(rootOf(roots, "/root/work")).toBe("/root");
     expect(rootOf(roots, "/Users/dev")).toBeNull();
     expect(rootOf(roots, "/Users/dev/wsp-other")).toBeNull();
+  });
+
+  it("name the folder above only while a root still holds it, so up stops at each root's edge", () => {
+    const roots = ["/root", "/Users/dev/wsp"];
+    expect(parentWithin(roots, "/root/app/lib")).toBe("/root/app");
+    expect(parentWithin(roots, "/Users/dev/wsp/packages")).toBe("/Users/dev/wsp");
+    expect(parentWithin(roots, "/root")).toBeNull();
+    expect(parentWithin(roots, "/Users/dev/wsp")).toBeNull();
+    expect(parentWithin(roots, "/tmp/scratch")).toBeNull();
+    expect(parentWithin(["/"], "/")).toBeNull();
+    expect(parentWithin(["/"], "/tmp")).toBe("/");
   });
 
   it("let the agent's shell folder root the panes inside the imported project, as inside home", () => {
