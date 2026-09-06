@@ -13,7 +13,10 @@
 // feeds it to the command's stdin through a fifo, so a message reaches a
 // running process the runtime holds no pipe to. The tail's pid is recorded:
 // closeInput() kills it so the command reads EOF, and the script kills it once
-// the command ended, so nothing outlives the turn.
+// the command ended. When the stream ends, however it ends, the recorded
+// process group gets TERM then KILL and the run's files go: the CLI's own
+// children (MCP servers under npx) stay in the setsid group after it exits,
+// and were seen holding 90 MB each for the machine's life.
 
 import { randomBytes } from "node:crypto";
 import { INLINE_EXEC_MS, putFiles, type ExecResult, type GuestWrite, type Machine } from "@wsp/engine";
@@ -98,6 +101,19 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         .catch(() => undefined);
     };
 
+    // Runs after the last poll read the log, so the group's stragglers cannot cost the turn a line.
+    const reap = (): Promise<void> =>
+      machine
+        .exec(
+          `P=$(cat ${base}.pid 2>/dev/null); ` +
+            `if [ -n "$P" ]; then kill -TERM -- -$P 2>/dev/null; ` +
+            `for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 -- -$P 2>/dev/null || break; sleep 0.2; done; ` +
+            `kill -KILL -- -$P 2>/dev/null; fi; ` +
+            `rm -rf ${base}.*; true`,
+          { timeoutMs: execTimeoutMs },
+        )
+        .then(() => undefined, () => undefined);
+
     // The exit file is read before the log, so a poll that sees an exit code reads a log that is complete.
     const pollCmd = (offset: number): string =>
       `E=$(cat ${base}.exit 2>/dev/null); ` +
@@ -115,6 +131,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
 
       const launch = await launched.catch((e: unknown) => e as Error);
       if (launch instanceof Error || launch.exitCode !== 0 || !launch.stdout.includes("WSP_LAUNCHED")) {
+        await reap();
         finish(null);
         const detail = launch instanceof Error ? launch.message : `exit ${launch.exitCode}: ${launch.stderr}`;
         throw new Error(`remote launch failed on ${machine.id}: ${detail}`);
@@ -122,11 +139,12 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
 
       while (true) {
         if (killed) {
+          await reap();
           finish(null);
           return;
         }
         if (now() - startedAt > deadlineMs) {
-          signal("KILL");
+          await reap();
           finish(null);
           throw new Error(`remote stream deadline (${deadlineMs}ms) exceeded on ${machine.id}`);
         }
@@ -163,6 +181,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         if (exitStr !== "") {
           const tail = drainPending();
           if (tail !== undefined) yield tail;
+          await reap();
           finish(Number.parseInt(exitStr, 10));
           return;
         }
@@ -170,6 +189,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         if (live === "down" && ++downs > 1) {
           const tail = drainPending();
           if (tail !== undefined) yield tail;
+          await reap();
           finish(null);
           return;
         }
@@ -188,9 +208,10 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         if (input === undefined) throw new Error("this stream has no input channel");
         if (finishCode !== undefined) throw new Error("the stream has ended");
         await launched;
-        // The guest knows the command ended the moment its exit file exists, up to a poll before this side does.
+        // The guest knows the command ended the moment its exit file exists, up to a poll before this side does,
+        // and a reap in flight has taken the claim with the rest of the run.
         const res = await putFiles(machine, [{ path: `${base}.in`, text: `${line}\n`, append: true }], {
-          before: [`[ -e ${base}.exit ] && { echo WSP_GONE; exit 0; }`],
+          before: [`{ [ -e ${base}.exit ] || [ ! -d ${base}.d ]; } && { echo WSP_GONE; exit 0; }`],
           after: ["echo WSP_OK"],
           timeoutMs: execTimeoutMs,
         });
