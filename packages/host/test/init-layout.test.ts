@@ -4,7 +4,7 @@ import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it } from "vitest";
 import { isCancel } from "@clack/core";
 import { unicode } from "@clack/prompts";
-import { S_BAR_FOCUS, S_BAR_FOCUS_END, card, colourDepth, confirmPrompt, ellipsize, helpLine, passwordPrompt, plainLine, rowsOf, summarize, table, viewport, widthOf, wrap } from "../src/init-layout.js";
+import { S_BAR_FOCUS, S_BAR_FOCUS_END, card, colourDepth, confirmPrompt, ellipsize, helpLine, passwordPrompt, plainLine, rowsOf, summarize, table, textPrompt, viewport, widthOf, wrap } from "../src/init-layout.js";
 
 describe("init layout", () => {
   it("plainLine leaves what a terminal would: later carriage-return segments overprint earlier ones, escapes and controls go, a tab is a space", () => {
@@ -319,6 +319,39 @@ describe("confirm prompt", () => {
         await p;
       }),
     ));
+});
+
+describe("text prompt", () => {
+  it("draws the question and hint in the frame, echoes what is typed, and returns it on enter", async () => {
+    const { input, output, text } = streams();
+    const p = textPrompt({ message: "Which folder on this Mac?", hint: "Enter with nothing imports no project.", input, output });
+    await settle();
+    expect(text()).toBe(`◆  Which folder on this Mac?\n┃  Enter with nothing imports no project.\n┃  █\n┗  ${PASSWORD_HELP}`);
+    await press(input, "/Users/me/code/proj");
+    expect(text().slice(text().lastIndexOf("◆"))).toContain("┃  /Users/me/code/proj█");
+    await press(input, KEY.enter);
+    expect(await p).toBe("/Users/me/code/proj");
+    expect(text().slice(text().lastIndexOf("◇"))).toBe("◇  Which folder on this Mac?\n│  Enter with nothing imports no project.\n│  /Users/me/code/proj\n");
+  });
+
+  it("enter on nothing is the empty string, and esc and ctrl-c cancel", async () => {
+    const a = streams();
+    const pa = textPrompt({ message: "Which folder?", input: a.input, output: a.output });
+    await settle();
+    await press(a.input, KEY.enter);
+    expect(await pa).toBe("");
+    const b = streams();
+    const pb = textPrompt({ message: "Which folder?", input: b.input, output: b.output });
+    await settle();
+    await press(b.input, "/tmp", KEY.esc);
+    await until(b.text, "■");
+    expect(isCancel(await pb)).toBe(true);
+    const c = streams();
+    const pc = textPrompt({ message: "Which folder?", input: c.input, output: c.output });
+    await settle();
+    await press(c.input, KEY.ctrlC);
+    expect(isCancel(await pc)).toBe(true);
+  });
 });
 
 describe("password prompt", () => {

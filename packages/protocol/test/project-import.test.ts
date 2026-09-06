@@ -48,8 +48,8 @@ describe("importRequest", () => {
     expect(importRequest(plan, "/Users/me/code/proj", new Set(), new Set(["codex", "claude"]))).toMatchObject({ agents: ["claude", "codex"] });
   });
 
-  it("is assembled once: the command line, the MCP tool and the dialog call it and none spells the request out again", () => {
-    const callers = ["packages/host/src/verbs.ts", "packages/host/src/mcp.ts", "apps/web/src/sidebar/ImportProjectDialog.tsx"];
+  it("is assembled once: the command line, the MCP tool, the dialog and the wizard's first import call it and none spells the request out again", () => {
+    const callers = ["packages/host/src/verbs.ts", "packages/host/src/mcp.ts", "apps/web/src/sidebar/ImportProjectDialog.tsx", "packages/host/src/init-first.ts"];
     for (const rel of callers) {
       const source = readFileSync(join(ROOT, rel), "utf8");
       expect(source, rel).toContain("importRequest(");

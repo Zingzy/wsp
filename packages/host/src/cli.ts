@@ -111,6 +111,14 @@ options:
                      writes it; init writes <state dir>/recipe.json too) and go
                      straight to the sign-ins; this machine is still read for
                      what travels
+  --first-workspace NAME
+                     init: fork the first workspace under this name once the
+                     golden seals, without asking (default first)
+  --import FOLDER    init: import this folder's project onto that first
+                     workspace, with the consent the app's import starts from:
+                     caches left behind, secret-shaped files cut unless a
+                     rewrite drops their credentials, and the sessions your
+                     agents have for the folder travelling with it
   --non-interactive  init: ask nothing, but still run the sign-ins on the
                      machine: each one prints the page to open on this computer,
                      the code when the flow shows one, and the command that
@@ -358,7 +366,11 @@ function initRefusal(lock: HostLock, statePath: string): string {
   return `wsp init: a wsp host (pid ${lock.pid}) is already serving ${statePath}. Stop it first (Ctrl-C in its terminal, or kill ${lock.pid}), then run wsp init again, or point --state at a different file.`;
 }
 
-async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: string }, flags: { yes: boolean; nonInteractive: boolean; json: boolean; recipe?: string }): Promise<number> {
+async function init(
+  io: CliIO,
+  opts: { port: number; wsPort: number; statePath: string },
+  flags: { yes: boolean; nonInteractive: boolean; json: boolean; recipe?: string; firstWorkspace?: string; importFolder?: string },
+): Promise<number> {
   if (flags.json && flags.yes) {
     io.error("wsp init: --json prints the sign-ins as they are handed to you, and --yes skips the sign-ins, so there would be nothing to print. Drop one of them.");
     return 1;
@@ -378,6 +390,8 @@ async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: 
       yes: flags.yes,
       nonInteractive: flags.nonInteractive,
       ...(flags.recipe !== undefined ? { recipeFile: resolve(flags.recipe) } : {}),
+      ...(flags.firstWorkspace !== undefined ? { firstWorkspace: flags.firstWorkspace } : {}),
+      ...(flags.importFolder !== undefined ? { importFolder: resolve(flags.importFolder) } : {}),
       collect: collectThisComputer,
       recipe: onHistory => computeRecipe(nodeHost(), { onHistory }),
       keys,
@@ -497,6 +511,8 @@ interface SharedFlags {
   "non-interactive"?: boolean;
   json?: boolean;
   recipe?: string;
+  "first-workspace"?: string;
+  import?: string;
 }
 
 interface Command {
@@ -525,6 +541,8 @@ const COMMANDS: Readonly<Record<string, Command>> = {
         nonInteractive: values["non-interactive"] === true || values.json === true,
         json: values.json === true,
         ...(values.recipe !== undefined ? { recipe: values.recipe } : {}),
+        ...(values["first-workspace"] !== undefined ? { firstWorkspace: values["first-workspace"] } : {}),
+        ...(values.import !== undefined ? { importFolder: values.import } : {}),
       }),
   },
   doctor: {
@@ -719,6 +737,8 @@ export const SHARED_OPTIONS: Options = {
   "non-interactive": { type: "boolean" },
   json: { type: "boolean" },
   recipe: { type: "string" },
+  "first-workspace": { type: "string" },
+  import: { type: "string" },
 };
 
 const without = (options: Options, names: readonly string[]): Options => Object.fromEntries(Object.entries(options).filter(([name]) => !names.includes(name)));

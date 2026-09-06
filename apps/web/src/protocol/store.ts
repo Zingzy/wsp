@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect } from "react";
 import { create } from "zustand";
-import { NOTIFY_ME, type Capabilities, type HarnessCatalog, type PortForward, type SessionView, type WorkspaceCreateStage, type WorkspacePhase, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { NOTIFY_ME, workspaceFromHash, type Capabilities, type HarnessCatalog, type PortForward, type SessionView, type WorkspaceCreateStage, type WorkspacePhase, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
 import { useSignInStore } from "../shell/signInStore.js";
 
@@ -118,6 +118,14 @@ function groupSessions(rows: SessionView[]): Record<string, SessionView[]> {
 }
 
 const NO_LINES: CreationLine[] = [];
+
+/** The workspace the page's address opens on, when the list still has it: wsp init writes it after its first fork.
+ * An id that is gone falls through to the first row, as an address with no workspace in it does. */
+function addressed(workspaces: readonly WorkspaceView[]): string | undefined {
+  const id = typeof window === "undefined" ? undefined : workspaceFromHash(window.location.hash);
+  return id !== undefined && workspaces.some(w => w.id === id) ? id : undefined;
+}
+
 let creationSeq = 0;
 
 export const useStore = create<State>((set, get) => {
@@ -249,7 +257,7 @@ export const useStore = create<State>((set, get) => {
       const api = get().api;
       if (!api) return;
       const [workspaces, rows] = await Promise.all([api.listWorkspaces(), api.listSessions().catch(() => NO_SESSIONS)]);
-      set(s => ({ workspaces, sessions: groupSessions(rows), ready: true, selectedId: s.selectedId ?? workspaces[0]?.id ?? null }));
+      set(s => ({ workspaces, sessions: groupSessions(rows), ready: true, selectedId: s.selectedId ?? addressed(workspaces) ?? workspaces[0]?.id ?? null }));
     },
     async reloadSessions(workspaceId) {
       const api = get().api;

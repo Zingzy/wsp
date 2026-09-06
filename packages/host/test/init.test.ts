@@ -13,7 +13,7 @@ import { stripVTControlCharacters } from "node:util";
 import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
 import { RUNGS, parseManifest, type Manifest, type ManifestEntry } from "@wsp/collect";
 import { SNAPSHOT_STORAGE, type BackendPricing } from "@wsp/engine";
-import { ALREADY_APPLIED, Recipe, type GoldenManifest } from "@wsp/protocol";
+import { ALREADY_APPLIED, Recipe, type GoldenManifest, type ProjectImportResult, type ProjectPlan } from "@wsp/protocol";
 import { DAEMON_TOKEN_SET, createRuntime, goldenHead, memoryStore, type GoldenRecipe, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GOLDEN_SETUP, catalogEntry } from "@wsp/catalog";
@@ -21,6 +21,7 @@ import { applyRecipe, recipePath, withCatalogAgents } from "../src/init-recipe.j
 import { signInItems } from "../src/init-pick.js";
 import { CARD_FRAME, card, widthOf } from "../src/init-layout.js";
 import { reduceStages, runInit, stageLine, summaryNote, type HostHooks, type InitIO, type InitOptions } from "../src/init.js";
+import { FIRST_QUESTION, FOLDER_QUESTION } from "../src/init-first.js";
 import type { HostHandle } from "../src/server.js";
 import { startCallbackRelay } from "../src/relay.js";
 import type { ConnectOptions, DaemonSocket } from "../src/doctor.js";
@@ -37,6 +38,24 @@ const URL_RE = /http:\/\/127\.0\.0\.1:\d+\//;
 const SEAL_Q = (v: number) => `Seal this machine as golden v${v}?`;
 const BOOT = /Boot a \d+ vCPU/;
 const PRICING: BackendPricing = { rateUsdPerHour: s => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: SNAPSHOT_STORAGE };
+
+/** A folder as the host would plan it: one secret-shaped file that must be cut, one the plan offers a rewrite for,
+ * one agent with sessions and one without. What the wizard consents to out of this is the app's own default. */
+const PLAN: Omit<ProjectPlan, "source"> = {
+  repo: true,
+  files: 12,
+  bytes: 3072,
+  secrets: [
+    { path: ".env", bytes: 120, signals: ["keys"] },
+    { path: ".git/config", bytes: 300, signals: ["url"], rewrite: { urls: ["https://github.com/o/r"], drop: [] } },
+  ],
+  excluded: ["node_modules"],
+  skipped: [],
+  agents: [
+    { agent: "claude", name: "Claude Code", sessions: 46, bytes: 9_400_000, carry: "moves" },
+    { agent: "gemini", name: "Gemini CLI", sessions: 0, bytes: 0, carry: "moves" },
+  ],
+};
 
 interface Fake {
   io: InitIO;
@@ -62,6 +81,10 @@ interface Fake {
   signals: EventEmitter;
   /** Exit codes the run asked for, in order; the real one ends the process. */
   exits: number[];
+  /** What the end of the run did, in order: the fork, the import and the address the app opened on. */
+  trail: string[];
+  /** Every import the run asked for, as it asked for it. */
+  imports: { workspaceId: string; source: string; dest: string; carry?: readonly string[]; rewrite?: readonly string[]; agents?: readonly string[] }[];
   /** The objects --json printed, in order. */
   records: Record<string, unknown>[];
 }
@@ -124,6 +147,8 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
   const raw = () => chunks.join("");
   const clear = () => void chunks.splice(0);
   const opened: string[] = [];
+  const trail: string[] = [];
+  const imports: Fake["imports"] = [];
   const backends: StubBackend[] = [];
   const recipes: GoldenRecipe[] = [];
   const runtimes: Runtime[] = [];
@@ -141,6 +166,7 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
     env: over.env ?? {},
     open: async url => {
       opened.push(url);
+      trail.push(`open ${url}`);
       return true;
     },
     signals,
@@ -192,7 +218,7 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
       counters.hosts += 1;
       expect(builder.id).toBe(backends.at(-1)?.machines.find(m => !m.killed && m.spec.labels?.["wsp-builder"] === "1")?.id);
       hooks.push(h);
-      const handle: HostHandle = { port: 4400, wsPort: 4410, authToken: "tok", createWorkspace: name => forkHead(rt, name), close: async () => void (counters.closed += 1) };
+      const handle: HostHandle = { port: 4400, wsPort: 4410, authToken: "tok", createWorkspace: name => { trail.push(`fork ${name}`); return forkHead(rt, name); }, ...fakeProjects(trail, imports), close: async () => void (counters.closed += 1) };
       return handle;
     },
     daemon: async () => ({ link: link.dial(), close: () => {} }),
@@ -237,7 +263,23 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
     reads,
     signals,
     exits,
+    trail,
+    imports,
     records,
+  };
+}
+
+/** The handle's project roads as a fake: the plan is PLAN at the folder asked for, and the import records what the
+ * wizard consented to before answering with what landed. Nothing is read from disk and nothing is packed. */
+function fakeProjects(trail: string[], imports: Fake["imports"]): Pick<HostHandle, "planProject" | "importProject"> {
+  return {
+    planProject: async source => ({ ...PLAN, source }),
+    importProject: async o => {
+      trail.push(`import ${o.source} -> ${o.dest}`);
+      imports.push({ workspaceId: o.workspaceId, source: o.source, dest: o.dest, ...(o.carry !== undefined ? { carry: o.carry } : {}), ...(o.rewrite !== undefined ? { rewrite: o.rewrite } : {}), ...(o.agents !== undefined ? { agents: o.agents } : {}) });
+      const result: ProjectImportResult = { dest: o.dest, files: 12, bytes: 3072, parts: 1, cut: [".env"], rewritten: [".git/config"], agents: [{ agent: "claude", files: 40, bytes: 9_400_000, outcome: "moved", sessions: 46, rows: 46 }] };
+      return result;
+    },
   };
 }
 
@@ -254,6 +296,18 @@ async function sealIt(f: Fake, version = 1): Promise<void> {
   await f.press(KEY.enter);
 }
 
+/** The last question answered: false forks nothing, a folder imports it, "" forks the workspace with no project. */
+async function firstWorkspace(f: Fake, folder: string | false): Promise<void> {
+  await f.until(FIRST_QUESTION);
+  if (folder === false) {
+    await f.press("n");
+    return;
+  }
+  await f.press(KEY.enter);
+  await f.until(FOLDER_QUESTION);
+  await f.press(...(folder === "" ? [] : [folder]), KEY.enter);
+}
+
 /** A run that ends the way a crash after the boot does: the host never comes up, so the builder stays
  * unsealed and first-life for the next run to find. */
 async function bootedOnly(f: Fake): Promise<void> {
@@ -266,7 +320,7 @@ async function bootedOnly(f: Fake): Promise<void> {
 }
 
 /** A host whose first-workspace fork is refused, for runs that test the roads before it. */
-const quietHost = () => async (): Promise<HostHandle> => ({ port: 4400, wsPort: 4410, authToken: "tok", createWorkspace: async () => { throw new Error("no workspace in this fixture"); }, close: async () => {} });
+const quietHost = () => async (): Promise<HostHandle> => ({ port: 4400, wsPort: 4410, authToken: "tok", createWorkspace: async () => { throw new Error("no workspace in this fixture"); }, ...fakeProjects([], []), close: async () => {} });
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -664,6 +718,7 @@ describe("wsp init, the summary-first screens", () => {
     expect(f.text()).toMatch(/Recipe saved to .*golden-recipe\.json and .*recipe\.json/);
     await f.press("y");
     await sealIt(f);
+    await firstWorkspace(f, "");
     const result = await run;
     expect(result.code).toBe(0);
     const out = f.text();
@@ -888,6 +943,7 @@ describe("wsp init, the secrets step", () => {
     await f.until("ANTHROPIC_API_KEY: set in /etc/profile.d/wsp-secrets.sh on the machine");
     await f.until("Claude Code login: signed in (claude auth login exited 0)");
     await sealIt(f);
+    await firstWorkspace(f, "");
     const result = await run;
     expect(result.code).toBe(0);
     expect(result.secrets).toEqual([{ name: "ANTHROPIC_API_KEY", from: "cut from ~/.zshrc", state: "set" }]);
@@ -981,6 +1037,7 @@ describe("wsp init, the sign-in stage", () => {
     await f.press("s");
 
     await sealIt(f);
+    await firstWorkspace(f, "");
     const result = await run;
     expect(result.code).toBe(0);
     const out = f.text();
@@ -1007,6 +1064,7 @@ describe("wsp init, the sign-in stage", () => {
     await f.press("y");
     await f.until("Codex login: skipped (codex is not on the machine)");
     await sealIt(f);
+    await firstWorkspace(f, "");
     const result = await run;
     expect(result.code).toBe(0);
     expect(f.link.ptys.map(p => p.writes[0])).toEqual(["exec codex login || exit\r"]);
@@ -1040,6 +1098,7 @@ describe("wsp init, the sign-in stage", () => {
     await f.until(/signed in \(cloudflared tunnel login exited 0\)\n/);
     await f.until(SEAL_Q(1));
     await f.press(KEY.enter);
+    await firstWorkspace(f, "");
     const result = await run;
     expect(result.logins?.map(l => [l.state, l.exit])).toEqual([["signed-in", 0]]);
     expect(f.text()).toMatch(/Sign-ins\n│\s+cloudflared login\s+signed in\n/);
@@ -1075,6 +1134,7 @@ describe("wsp init, the sign-in stage", () => {
     await f.until(/exited 130[\s\S]*r retry   f retry/);
     await f.press("s");
     await sealIt(f);
+    await firstWorkspace(f, "");
     const result = await run;
     expect(result.code).toBe(0);
     expect(result.logins?.map(l => [l.state, l.note])).toEqual([["skipped", "skipped by you"]]);
@@ -1122,6 +1182,7 @@ describe("wsp init, the sign-in stage", () => {
     await f.until("r retry   f retry with codex login --device-auth   s skip");
     await f.press("s");
     await sealIt(f);
+    await firstWorkspace(f, "");
     const result = await run;
     expect(result.code).toBe(0);
     expect(result.logins).toEqual([{ id: "logins/codex", label: "Codex login", state: "skipped", command: "codex login", note: "skipped by you" }]);
@@ -1248,7 +1309,8 @@ describe("wsp init, flags and no terminal", () => {
     expect(out).toContain("Sealing golden v1. Taken as yes (no terminal).");
     expect(out).toContain("Golden v1 sealed.");
     expect(out).toMatch(/Workspace first \(ws_[0-9a-f]+\) forked from golden v1\./);
-    expect(out).toMatch(/^◇\s+Open http:\/\/127\.0\.0\.1:4400\/$/m);
+    // Off a terminal the last question is taken as yes with no folder, and the address opens on the workspace it forked.
+    expect(out).toMatch(/^◇\s+Open http:\/\/127\.0\.0\.1:4400\/#w\/ws_[0-9a-f]+$/m);
     expect(out).not.toContain("Opened http");
     // The builder, its smoke fork, the first workspace.
     expect(f.backends[0]!.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_golden-v1", true], ["snap_golden-v1", false]]);
@@ -2888,7 +2950,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     const hosted: string[] = [];
     f.opts.host = async (rt, builder) => {
       hosted.push(builder.id);
-      return { port: 4400, wsPort: 4410, authToken: "tok", createWorkspace: name => forkHead(rt, name), close: async () => {} };
+      return { port: 4400, wsPort: 4410, authToken: "tok", createWorkspace: name => forkHead(rt, name), ...fakeProjects([], []), close: async () => {} };
     };
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     const out = f.text();
@@ -3175,5 +3237,134 @@ describe("wsp init --recipe", () => {
     expect((await runInit(f.opts, f.io)).code).toBe(1);
     expect(f.text()).toMatch(/recipe\.json: invalid recipe: version/);
     expect(f.backends).toHaveLength(0);
+  });
+});
+
+describe("wsp init, the first workspace and its project", () => {
+  it("--first-workspace and --import fork, then import, then open the app on that workspace, with the consent the app's import starts from", async () => {
+    const f = fake({ tty: false });
+    const folder = mkdtempSync(join(tmpdir(), "wsp-init-proj-"));
+    dirs.push(folder);
+    f.opts.firstWorkspace = "proj";
+    f.opts.importFolder = folder;
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    const workspaces = await f.runtimes.at(-1)!.workspaces.list();
+    expect(workspaces.map(w => w.name)).toEqual(["proj"]);
+    // The fork, then the import onto it. Off a terminal nothing is launched, so the address is printed below.
+    expect(f.trail).toEqual(["fork proj", `import ${folder} -> ${folder}`]);
+    // The app's own defaults, unchanged: the rewrite travels, the bare secret is cut, the agent with sessions comes.
+    expect(f.imports).toEqual([{ workspaceId: workspaces[0]!.id, source: folder, dest: folder, carry: [], rewrite: [".git/config"], agents: ["claude"] }]);
+    const out = f.text();
+    expect(out).toMatch(/Workspace proj \(ws_[0-9a-f]+\) forked from golden v1\./);
+    expect(out).toContain("12 files, 3.0 KB; the repository whole; 46 sessions from Claude Code; 2 secret-shaped files read for what may travel.");
+    expect(out).toContain(`${folder} on proj: 12 files, 3.0 KB; 1 file rewritten without their credentials; 1 secret-shaped file cut.`);
+    expect(out).toMatch(new RegExp(`^◇\\s+Open http://127\\.0\\.0\\.1:4400/#w/${workspaces[0]!.id}$`, "m"));
+    expect(out).not.toContain("Done. wsp up starts the app");
+  });
+
+  it("No at the last question forks nothing, imports nothing, and leaves the plain address", async () => {
+    const f = fake({ tty: true });
+    const run = runInit(f.opts, f.io);
+    await throughScreens(f);
+    await f.until(BOOT);
+    await f.press("y");
+    await sealIt(f);
+    await f.until("Make your first workspace and import a project now?");
+    await f.press("n");
+    expect((await run).code).toBe(0);
+    expect(f.trail).toEqual(["open http://127.0.0.1:4400/"]);
+    expect(f.imports).toEqual([]);
+    expect(await f.runtimes.at(-1)!.workspaces.list()).toEqual([]);
+    const out = f.text();
+    expect(out).toContain("Done. wsp up starts the app; opening it now.");
+    expect(out).not.toContain("Forking your first workspace");
+  });
+
+  it("Yes with a typed folder forks under the default name and imports what was typed", async () => {
+    const f = fake({ tty: true });
+    const folder = mkdtempSync(join(tmpdir(), "wsp-init-proj-"));
+    dirs.push(folder);
+    const run = runInit(f.opts, f.io);
+    await throughScreens(f);
+    await f.until(BOOT);
+    await f.press("y");
+    await sealIt(f);
+    await f.until("Make your first workspace and import a project now?");
+    await f.press(KEY.enter);
+    await f.until("Which folder on this Mac?");
+    await f.press(folder, KEY.enter);
+    expect((await run).code).toBe(0);
+    const workspaces = await f.runtimes.at(-1)!.workspaces.list();
+    expect(workspaces.map(w => w.name)).toEqual(["first"]);
+    expect(f.trail).toEqual(["fork first", `import ${folder} -> ${folder}`, `open http://127.0.0.1:4400/#w/${workspaces[0]!.id}`]);
+  });
+
+  it("Yes with nothing typed forks the workspace and imports no project", async () => {
+    const f = fake({ tty: true });
+    const run = runInit(f.opts, f.io);
+    await throughScreens(f);
+    await f.until(BOOT);
+    await f.press("y");
+    await sealIt(f);
+    await f.until("Make your first workspace and import a project now?");
+    await f.press(KEY.enter);
+    await f.until("Which folder on this Mac?");
+    await f.press(KEY.enter);
+    expect((await run).code).toBe(0);
+    const workspaces = await f.runtimes.at(-1)!.workspaces.list();
+    expect(f.trail).toEqual(["fork first", `open http://127.0.0.1:4400/#w/${workspaces[0]!.id}`]);
+    expect(f.imports).toEqual([]);
+  });
+
+  it("a --import folder that is not there ends the run before anything is read or booted", async () => {
+    const f = fake({ tty: false, collect: async () => { throw new Error("collect must not run on a bad --import"); } });
+    f.opts.importFolder = join(tmpdir(), "wsp-init-no-such-folder");
+    expect((await runInit(f.opts, f.io)).code).toBe(1);
+    expect(f.text()).toContain(`--import ${f.opts.importFolder}: no folder there on this computer`);
+    expect(f.backends).toHaveLength(0);
+    expect(f.trail).toEqual([]);
+  });
+
+  it("a --import path that is a file, not a folder, ends the run the same way", async () => {
+    const f = fake({ tty: false, collect: async () => { throw new Error("collect must not run on a bad --import"); } });
+    const file = join(f.opts.home, ".zshrc");
+    f.opts.importFolder = file;
+    expect((await runInit(f.opts, f.io)).code).toBe(1);
+    expect(f.text()).toContain(`--import ${file}: not a folder`);
+    expect(f.backends).toHaveLength(0);
+  });
+
+  it("esc at the folder prompt forks the workspace with no project, the same as enter on nothing", async () => {
+    const f = fake({ tty: true });
+    const run = runInit(f.opts, f.io);
+    await throughScreens(f);
+    await f.until(BOOT);
+    await f.press("y");
+    await sealIt(f);
+    await f.until(FIRST_QUESTION);
+    await f.press(KEY.enter);
+    await f.until(FOLDER_QUESTION);
+    await f.press(KEY.esc);
+    expect((await run).code).toBe(0);
+    const workspaces = await f.runtimes.at(-1)!.workspaces.list();
+    expect(workspaces.map(w => w.name)).toEqual(["first"]);
+    expect(f.trail).toEqual(["fork first", `open http://127.0.0.1:4400/#w/${workspaces[0]!.id}`]);
+    expect(f.imports).toEqual([]);
+    expect(f.text()).not.toContain("Done. wsp up starts the app");
+  });
+
+  it("an import that fails keeps the workspace and says where to import it from", async () => {
+    const f = fake({ tty: false });
+    const folder = mkdtempSync(join(tmpdir(), "wsp-init-proj-"));
+    dirs.push(folder);
+    f.opts.importFolder = folder;
+    const host = f.opts.host;
+    f.opts.host = async (rt, builder, hooks) => ({ ...(await host(rt, builder, hooks)), importProject: async () => { throw new Error("the machine refused the upload"); } });
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    const workspaces = await f.runtimes.at(-1)!.workspaces.list();
+    expect(workspaces.map(w => w.name)).toEqual(["first"]);
+    expect(f.text()).toContain(`${folder} was not imported: the machine refused the upload. The workspace is up; import it from the app.`);
+    // The workspace survived the failed import, so the app still opens on it.
+    expect(f.text()).toMatch(new RegExp(`Open http://127\\.0\\.0\\.1:4400/#w/${workspaces[0]!.id}`));
   });
 });
