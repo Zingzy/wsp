@@ -11,6 +11,12 @@ const PREFIX_OPTION_ARGS: Readonly<Record<string, readonly string[]>> = { sudo: 
 /** Shell syntax and builtins that start a command but run nothing on their own. */
 const NOT_COMMANDS = new Set(["for", "case", "function", "fi", "done", "esac", "export", "local", "declare", "typeset", "readonly", "unset", "return", "exit", "break", "continue", "shift", "set", "cd", "echo", "printf", "true", "false", "[", "[[", "test", "wait", "trap", "source", ".", "alias", "eval", "read", ":"]);
 
+/** A command that only asks whether a program is there or which version: `which x`, `command -v x`, or `x` with one
+ * version flag (`--version`, `-version` as Java spells it, `-v`, `-V`) and nothing else. */
+const LOOKUPS = new Set(["which"]);
+const VERSION_FLAGS = new Set(["--version", "-version", "-v", "-V"]);
+const COMMAND_LOOKUP_FLAGS = new Set(["-v", "-V"]);
+
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 /** A redirection on its own (`>`, `2>`, `&>`, `<`), its target the next word. */
 const REDIRECT_ALONE = /^(?:\d*|&)[<>]{1,2}&?$/;
@@ -105,6 +111,8 @@ export function commandWords(command: string): string[] {
       i += REDIRECT_ALONE.test(w) ? 2 : 1;
       continue;
     }
+    // `command -v x` looks x up and runs nothing, so it stays a command of its own for isVersionCheck to see.
+    if (w === "command" && COMMAND_LOOKUP_FLAGS.has(words[i + 1] ?? "")) break;
     if (PREFIXES.has(w)) {
       const withArg = PREFIX_OPTION_ARGS[w] ?? [];
       i += 1;
@@ -119,9 +127,22 @@ export function commandWords(command: string): string[] {
   return [head.slice(head.lastIndexOf("/") + 1), ...rest.slice(1)];
 }
 
-/** The names of the programs a shell line runs, one per command in it, in order and with repeats. */
+/** Whether one command's words only ask whether a program is there or which version it is; nothing was worked with. */
+export function isVersionCheck(words: readonly string[]): boolean {
+  const [head, arg] = words;
+  if (head === undefined) return false;
+  if (LOOKUPS.has(head)) return true;
+  if (head === "command") return COMMAND_LOOKUP_FLAGS.has(arg ?? "");
+  return words.length === 2 && VERSION_FLAGS.has(arg!);
+}
+
+/** The names of the programs a shell line runs, one per command in it, in order and with repeats; a version check
+ * or a lookup is not a run. */
 export function commandNames(line: string): string[] {
-  return splitCommands(withoutHeredocs(line)).flatMap(c => commandWords(c).slice(0, 1));
+  return splitCommands(withoutHeredocs(line)).flatMap(c => {
+    const words = commandWords(c);
+    return isVersionCheck(words) ? [] : words.slice(0, 1);
+  });
 }
 
 export interface Install {

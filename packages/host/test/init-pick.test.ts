@@ -32,7 +32,7 @@ import {
 } from "../src/init-pick.js";
 import { applyRecipe, withCatalogAgents } from "../src/init-recipe.js";
 import { LATER_LINE, answerOf } from "../src/init-select.js";
-import { BASE_GROUP, CATALOG_GROUP, HERE_GROUP, USED_GROUP, groupTotal, recipeTable, totalsLine } from "../src/init-table.js";
+import { ADDED_GROUP, BASE_GROUP, CATALOG_GROUP, FLOOR_LINE, HERE_GROUP, USED_GROUP, groupTotal, recipeTable, totalsLine } from "../src/init-table.js";
 import { FIXTURE, RECIPE } from "./init-fixture.js";
 
 const KEY = { up: "\x1b[A", down: "\x1b[B", left: "\x1b[D", right: "\x1b[C", space: " ", enter: "\r", esc: "\x1b", ctrlC: "\x03" };
@@ -70,7 +70,7 @@ describe("the tools screen", () => {
     expect(items.filter(i => i.group === USED_GROUP).map(i => i.label)).toEqual(["Go", "Cloudflare Wrangler"]);
     const by = (id: string) => items.find(i => i.id === id)!;
     // Every row in the used group carries its own count, so a wrong claim about what was run is visible.
-    expect(text(by("go").why)).toBe("used       2 commands in 1 session");
+    expect(text(by("go").why)).toBe("used       below the floor, 2 commands in 1 session");
     expect(text(by("wrangler").why)).toBe("used       40 commands in 3 sessions");
     expect(text(by("gh").hint)).toBe("40.2 MB");
     expect(text(by("op").hint)).toBe("size unknown");
@@ -266,6 +266,23 @@ describe("the tools screen drawn", () => {
     expect(r.kind === "next" && [...r.ticks].sort()).toEqual(["gh", "node"]);
   });
 
+  it("a row the agent added sits in its own group, on, and leaving it unticked takes it off the recipe", () => {
+    const custom = [{ kind: "custom" as const, id: "just", name: "just", install: ["brew install just"], check: "command -v just", why: "added by the agent" }];
+    const recipe = { ...RECIPE, custom };
+    const items = tableItems(recipeTable(recipe, CATALOG_TOOLS), recipe, FIXTURE, 4, true);
+    const just = items.find(i => i.id === "just")!;
+    expect(just).toMatchObject({ label: "just", group: ADDED_GROUP });
+    expect(text(just.why)).toBe("added      brew install just");
+    expect(text(just.hint)).toBe("size unknown");
+    expect(just.detail).toEqual(["installs with brew install just", "checked with command -v just"]);
+    const groups = items.map(i => i.group);
+    expect(groups.indexOf(ADDED_GROUP)).toBeGreaterThan(groups.lastIndexOf(HERE_GROUP));
+    expect(groups.indexOf(ADDED_GROUP)).toBeLessThan(groups.indexOf(CATALOG_GROUP));
+    expect(tableItems(recipeTable(RECIPE, CATALOG_TOOLS), RECIPE, FIXTURE, 4, true).some(i => i.group === ADDED_GROUP)).toBe(false);
+    expect(withTools(recipe, new Set(["just"])).custom).toEqual(custom);
+    expect(withTools(recipe, new Set()).custom).toEqual([]);
+  });
+
   it("enter takes the defaults as they stand, esc goes back with them, ctrl-c cancels", async () => {
     const o = streams();
     const p = open(o);
@@ -302,6 +319,7 @@ describe("the whole flow", () => {
     o.input.write(KEY.enter);
     await settle(20);
     expect(o.text()).toContain("◆  Tools  2/6");
+    expect(o.text()).toContain(FLOOR_LINE);
     o.input.write(KEY.enter);
     await settle(20);
     const mac = o.text().slice(o.text().lastIndexOf("◆  Also on this Mac"));

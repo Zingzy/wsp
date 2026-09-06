@@ -90,8 +90,8 @@ function fixtureMachine(): { dir: string; home: string; state: string; project: 
   mkdirSync(join(home, ".claude", "projects", "s"), { recursive: true });
   mkdirSync(bin, { recursive: true });
   writeFileSync(join(home, ".claude", "settings.json"), "{}\n");
-  writeFileSync(join(home, ".claude", "projects", "s", "s1.jsonl"), `${[line("s1", ["node --version", "pnpm install"]), line("s1", ["pulumi -q"])].join("\n")}\n`);
-  writeFileSync(join(home, ".claude", "projects", "s", "s2.jsonl"), `${[line("s2", ["pnpm test", "node build.js", "pulumi"])].join("\n")}\n`);
+  writeFileSync(join(home, ".claude", "projects", "s", "s1.jsonl"), `${[line("s1", ["node build.js", "node build.js", "node build.js", "pnpm install", "pnpm install", "pnpm install"]), line("s1", ["pulumi -q"])].join("\n")}\n`);
+  writeFileSync(join(home, ".claude", "projects", "s", "s2.jsonl"), `${[line("s2", ["pnpm test", "pnpm test", "node build.js", "node build.js", "node build.js", "pulumi"])].join("\n")}\n`);
   writeFileSync(join(bin, "java"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
   // nodeHost() takes its home from HOME and answers `which` off PATH, so these two words are the whole computer
   // the verb sees: no transcript, config tree or binary of the box the suite runs on is read.
@@ -149,10 +149,10 @@ describe("wsp cli", () => {
     expect(logs).toContain("Tools");
     expect(logs.filter(l => l.startsWith("On: "))).toHaveLength(2);
     expect(logs.at(-1)).toContain(`wsp init --recipe ${out}`);
-    // What the fixture's own history and PATH say, the same on any box: two tools run in two sessions, one
+    // What the fixture's own history and PATH say, the same on any box: two tools run in two sessions above the floor, one
     // installed and never run, and one flipped on by hand.
-    expect(row("node")).toMatchObject({ on: true, source: { kind: "used", sessions: 2, calls: 2 } });
-    expect(row("pnpm")).toMatchObject({ on: true, source: { kind: "used", sessions: 2, calls: 2 } });
+    expect(row("node")).toMatchObject({ on: true, source: { kind: "used", sessions: 2, calls: 6 } });
+    expect(row("pnpm")).toMatchObject({ on: true, source: { kind: "used", sessions: 2, calls: 5 } });
     expect(row("java")).toMatchObject({ on: true, source: { kind: "installed", bin: true } });
     expect(row("gradle")).toMatchObject({ on: false, source: { kind: "popular" } });
     expect(logs.find(l => l.includes("Java 21"))).toMatch(/^● {2}Java 21\s+installed\s+installed here, never used\s+584\.9 MB$/);

@@ -53,7 +53,7 @@ export async function readHistories(host: Host, agents: readonly AgentEntry[] = 
 
 export { type Call, type HistoryReader } from "./reader.js";
 export { commandNames, commandWords, installNames, installsIn, splitCommands, withoutHeredocs, type Install } from "./commands.js";
-export { type Count, type Usage, inFolders, tally } from "./tally.js";
+export { type Count, type Usage, HEAVY_BYTES, HEAVY_USED_FLOOR, USED_FLOOR, inFolders, isHeavy, meetsUsedFloor, tally } from "./tally.js";
 export { claudeCall, claudeReader, claudeSession } from "./claude.js";
 export { codexCall, codexReader } from "./codex.js";
 export { hermesCall, hermesCalls, hermesReader } from "./hermes.js";

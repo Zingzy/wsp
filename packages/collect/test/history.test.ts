@@ -19,16 +19,24 @@ describe("command names", () => {
     expect(commandNames("for f in *.ts; do wc -l \"$f\"; done")).toEqual(["wc"]);
     expect(commandNames("VAR=1 sudo -u me env FOO=bar /usr/local/bin/python3 -c 1")).toEqual(["python3"]);
     expect(commandNames("time nohup node server.js &")).toEqual(["node"]);
-    expect(commandNames("echo $(git rev-parse HEAD) > `which out`")).toEqual(["git", "which"]);
+    expect(commandNames("echo $(git rev-parse HEAD) > `which out`")).toEqual(["git"]);
     expect(commandNames("2>/dev/null ls; > out.txt cat in; curl -s x >/dev/null 2>&1")).toEqual(["ls", "cat", "curl"]);
     expect(commandNames("2>&1 ls; >&2 echo x; &>/dev/null cat")).toEqual(["ls", "cat"]);
     expect(commandNames("./node_modules/.bin/tsc --noEmit")).toEqual(["tsc"]);
   });
 
+  it("a version check is not a use: --version, -v, which and command -v run nothing the agent works with", () => {
+    expect(commandNames("gh --version && vercel -v; which java; command -v aws")).toEqual([]);
+    expect(commandNames("java -version; python3 -V; pip -V && node -v")).toEqual([]);
+    expect(commandNames("node --version | head -1; grep -v foo x.txt; pytest -v tests")).toEqual(["head", "grep", "pytest"]);
+    expect(commandNames("command -v gh >/dev/null 2>&1 || brew install gh")).toEqual(["brew"]);
+    expect(installNames("command -v gh || npm i -g vercel")).toEqual([{ via: "npm", name: "vercel" }]);
+  });
+
   it("keeps an unquoted variable inside the word it sits in", () => {
     expect(commandNames("echo ${HOME}/go/bin/x")).toEqual([]);
     expect(commandNames("echo ${HOME}/bin; ls ${PWD}")).toEqual(["ls"]);
-    expect(commandNames("${HOME}/go/bin/x --version && $BIN/y ${FLAGS:-${MORE}} z")).toEqual(["x", "y"]);
+    expect(commandNames("${HOME}/go/bin/x --help && $BIN/y ${FLAGS:-${MORE}} z")).toEqual(["x", "y"]);
     expect(splitCommands("a ${b|c} d")).toEqual(["a ${b|c} d"]);
   });
 
