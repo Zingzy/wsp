@@ -493,14 +493,17 @@ export const ProjectImportEvent = z.object({
 });
 export type ProjectImportEvent = z.infer<typeof ProjectImportEvent>;
 /** What became of one agent the import named: `moved` when the agent is on the machine and its module re-keyed every
- * file to dest, `transcript-only` when it is on the machine but only its files landed and the rows in its shared store
- * that list them stayed behind, `carried` when it is not there so the files landed as they were, `nothing` when no
- * file of its travelled, `failed` when the move raised and nothing of that agent landed; files and bytes are what landed. */
+ * file to dest, or merged its rows into its store there; `transcript-only` when it is on the machine but only its
+ * files landed and the rows in its shared store that list them are still to come; `carried` when it is not there so
+ * the files landed as they were, `nothing` when no file of its travelled, `failed` when the move raised and nothing of
+ * that agent landed, or the merge on the machine failed after its files did; files and bytes are what landed. */
 export const ProjectAgentOutcome = z.enum(["moved", "transcript-only", "carried", "nothing", "failed"]);
 export type ProjectAgentOutcome = z.infer<typeof ProjectAgentOutcome>;
 /** `sessions` is how many the files hold when the trip counted them; `skipped` is how many sessions the agent's own
  * index named whose transcript was not under its home (Codex keeps archived ones elsewhere), so their rows moved
- * and nothing else did. */
+ * and nothing else did. `rows` is what the merge on the machine inserted or updated in the agent's store, once it
+ * ran; `note` says why the rows still wait when they could not be merged yet (the agent has not made its store
+ * there), or what the merge kept as the machine had it rather than as carried. */
 export const ProjectAgentResult = z.object({
   agent: z.string(),
   files: z.number(),
@@ -509,6 +512,8 @@ export const ProjectAgentResult = z.object({
   sessions: z.number().optional(),
   skipped: z.number().optional(),
   error: z.string().optional(),
+  rows: z.number().optional(),
+  note: z.string().optional(),
 });
 export type ProjectAgentResult = z.infer<typeof ProjectAgentResult>;
 /** What landed: the path on the machine, the files and bytes extracted there, the upload parts, the secret-shaped
