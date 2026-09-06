@@ -4,7 +4,7 @@
 // the tool prints it (fake names, masked tokens; nothing real).
 import { describe, expect, it } from "vitest";
 import { CLAUDE_CONFIG_DIR } from "@wsp/catalog";
-import { AWS_STATUS, CLAUDE_KEY_PATH, CLAUDE_STATUS, CLOUDFLARED_STATUS, GEMINI_STATUS, SIGN_INS, claudeSource, claudeWhy, geminiSource, hasLogin, secretNamed, signInFor, signInWords, statusOf, type SignIn } from "../src/signin-table.js";
+import { AWS_STATUS, CLAUDE_KEY_PATH, CLAUDE_STATUS, CLOUDFLARED_STATUS, GEMINI_STATUS, SIGN_INS, claudeSource, claudeWhy, geminiSource, hasLogin, secretNamed, signInFor, signInWords, signsInByDefault, statusOf, type SignIn } from "../src/signin-table.js";
 import { collectorLogins } from "./collector-logins.js";
 
 function command(name: string): Extract<SignIn, { login: string }> {
@@ -215,6 +215,13 @@ describe("sign-in table", () => {
     expect(command("hermes").kind).toBe("device");
     expect(command("opencode").kind).toBe("key");
     for (const name of ["claude", "codex", "gemini", "gcloud", "aws", "wrangler", "vercel", "pi", "cloudflared"]) expect(command(name).kind, name).toBe("oauth");
+  });
+
+  it("a browser or device flow starts as a sign-in on the machine; a key, no sign-in or a bare shell starts as a copy", () => {
+    const machine = collectorLogins().filter(id => signsInByDefault(signInFor(id)));
+    expect(machine.sort()).toEqual(["aws", "claude", "cloudflared", "codex", "gcloud", "gemini", "gh", "hermes", "pi", "vercel", "wrangler"]);
+    for (const id of ["opencode", "kube", "op"]) expect(signsInByDefault(signInFor(id)), id).toBe(false);
+    expect(signsInByDefault({ kind: "shell" })).toBe(false);
   });
 
   it("words a row for a checklist: the command, what to do instead, or a plain ask", () => {

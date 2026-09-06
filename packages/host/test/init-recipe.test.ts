@@ -44,7 +44,10 @@ describe("manifest ticks", () => {
 
 describe("login choices", () => {
   it("copy when the default is bring, sign in on the machine when it is skip or cannot be copied, and a saved choice wins", () => {
-    expect(initialChoice(byId("logins/gh"))).toBe("copy");
+    // The collector's default carries the catalog's word: a browser or device sign-in (gh, codex, the Claude OAuth credential) is skip, a key or a tool with no sign-in is bring.
+    expect(initialChoice(byId("logins/gh"))).toBe("machine");
+    expect(initialChoice(byId("logins/codex"))).toBe("machine");
+    expect(initialChoice({ ...byId("logins/gh"), default: "bring" })).toBe("copy");
     expect(initialChoice(byId("logins/claude"))).toBe("machine");
     expect(initialChoice({ ...byId("logins/gh"), default: "skip", reason: "expires in hours" })).toBe("machine");
     expect(initialChoice({ ...byId("logins/gh"), choice: "skip" })).toBe("skip");

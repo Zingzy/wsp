@@ -55,6 +55,19 @@ export function hasLogin(s: SignIn | { kind: "shell" }): s is LoginSignIn {
   return s.kind !== "none" && s.kind !== "shell";
 }
 
+/** Whether a login starts as a sign-in on the machine: a browser or device flow the relay finishes there. A key has no
+ * browser flow to produce it and a tool with no sign-in has nothing to run, so those start as a copy. */
+export function signsInByDefault(s: SignIn | { kind: "shell" }): boolean {
+  return s.kind === "oauth" || s.kind === "device";
+}
+
+/** The login id the collector files an entry's row under, where it differs from the entry's id: kubectl's row is its kubeconfig. */
+const LOGIN_IDS: Readonly<Record<string, string>> = { kubectl: "kube" };
+
+export function loginIdOf(entryId: string): string {
+  return LOGIN_IDS[entryId] ?? entryId;
+}
+
 /** No sign-in and nothing to say about it. */
 export const NO_SIGN_IN: SignIn = { kind: "none", sources: [] };
 

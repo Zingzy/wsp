@@ -1,27 +1,44 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { CATALOG, loginIdOf } from "@wsp/catalog";
 import { describe, expect, it } from "vitest";
 import { detectLogins } from "../src/index.js";
+import { loginDefault } from "../src/detect/logins.js";
 import { fakeHost } from "./fake-host.js";
 
 describe("logins", () => {
   it.each([
-    ["gh with its token in hosts.yml", "darwin", { "~/.config/gh/hosts.yml": 200 }, {}, "logins/gh", ["~/.config/gh/hosts.yml"], "bring"],
-    ["gcloud", "darwin", { "~/.config/gcloud/credentials.db": 4000, "~/.config/gcloud/configurations/config_default": 50, "~/.config/gcloud/logs/x.log": 9999 }, {}, "logins/gcloud", ["~/.config/gcloud/credentials.db", "~/.config/gcloud/configurations"], "bring"],
-    ["wrangler on macOS", "darwin", { "~/Library/Preferences/.wrangler/config/default.toml": 300 }, {}, "logins/wrangler", ["~/Library/Preferences/.wrangler/config/default.toml"], "bring"],
-    ["wrangler on Linux", "linux", { "~/.config/.wrangler/config/default.toml": 300 }, {}, "logins/wrangler", ["~/.config/.wrangler/config/default.toml"], "bring"],
-    ["cloudflared", "darwin", { "~/.cloudflared/cert.pem": 800 }, {}, "logins/cloudflared", ["~/.cloudflared/cert.pem"], "bring"],
-    ["vercel on macOS", "darwin", { "~/Library/Application Support/com.vercel.cli/auth.json": 100 }, {}, "logins/vercel", ["~/Library/Application Support/com.vercel.cli/auth.json"], "bring"],
-    ["vercel on Linux", "linux", { "~/.config/com.vercel.cli/auth.json": 100 }, {}, "logins/vercel", ["~/.config/com.vercel.cli/auth.json"], "bring"],
-    ["aws", "darwin", { "~/.aws/credentials": 120, "~/.aws/config": 300, "~/.aws/sso/cache/x.json": 900 }, {}, "logins/aws", ["~/.aws/credentials", "~/.aws/config"], "bring"],
+    ["gh with its token in hosts.yml", "darwin", { "~/.config/gh/hosts.yml": 200 }, {}, "logins/gh", ["~/.config/gh/hosts.yml"], "skip"],
+    ["gcloud", "darwin", { "~/.config/gcloud/credentials.db": 4000, "~/.config/gcloud/configurations/config_default": 50, "~/.config/gcloud/logs/x.log": 9999 }, {}, "logins/gcloud", ["~/.config/gcloud/credentials.db", "~/.config/gcloud/configurations"], "skip"],
+    ["wrangler on macOS", "darwin", { "~/Library/Preferences/.wrangler/config/default.toml": 300 }, {}, "logins/wrangler", ["~/Library/Preferences/.wrangler/config/default.toml"], "skip"],
+    ["wrangler on Linux", "linux", { "~/.config/.wrangler/config/default.toml": 300 }, {}, "logins/wrangler", ["~/.config/.wrangler/config/default.toml"], "skip"],
+    ["cloudflared", "darwin", { "~/.cloudflared/cert.pem": 800 }, {}, "logins/cloudflared", ["~/.cloudflared/cert.pem"], "skip"],
+    ["vercel on macOS", "darwin", { "~/Library/Application Support/com.vercel.cli/auth.json": 100 }, {}, "logins/vercel", ["~/Library/Application Support/com.vercel.cli/auth.json"], "skip"],
+    ["vercel on Linux", "linux", { "~/.config/com.vercel.cli/auth.json": 100 }, {}, "logins/vercel", ["~/.config/com.vercel.cli/auth.json"], "skip"],
+    ["aws", "darwin", { "~/.aws/credentials": 120, "~/.aws/config": 300, "~/.aws/sso/cache/x.json": 900 }, {}, "logins/aws", ["~/.aws/credentials", "~/.aws/config"], "skip"],
     ["kubectl", "darwin", { "~/.kube/config": 6000 }, {}, "logins/kube", ["~/.kube/config"], "bring"],
-    ["Codex", "darwin", { "~/.codex/auth.json": 900 }, {}, "logins/codex", ["~/.codex/auth.json"], "bring"],
-    ["Gemini CLI", "darwin", { "~/.gemini/oauth_creds.json": 500 }, {}, "logins/gemini", ["~/.gemini/oauth_creds.json"], "bring"],
+    ["Codex", "darwin", { "~/.codex/auth.json": 900 }, {}, "logins/codex", ["~/.codex/auth.json"], "skip"],
+    ["Gemini CLI", "darwin", { "~/.gemini/oauth_creds.json": 500 }, {}, "logins/gemini", ["~/.gemini/oauth_creds.json"], "skip"],
     ["OpenCode", "darwin", { "~/.local/share/opencode/auth.json": 200 }, {}, "logins/opencode", ["~/.local/share/opencode/auth.json"], "bring"],
-    ["Pi", "darwin", { "~/.pi/agent/auth.json": 900, "~/.pi/agent/settings.json": 80 }, {}, "logins/pi", ["~/.pi/agent/auth.json"], "bring"],
-    ["Hermes Agent", "darwin", { "~/.hermes/.env": 25_000, "~/.hermes/auth.json": 400, "~/.hermes/config.yaml": 600 }, {}, "logins/hermes", ["~/.hermes/.env", "~/.hermes/auth.json"], "bring"],
-  ])("%s", async (_name, platform, files, exec, id, paths, dflt) => {
+    ["Pi", "darwin", { "~/.pi/agent/auth.json": 900, "~/.pi/agent/settings.json": 80 }, {}, "logins/pi", ["~/.pi/agent/auth.json"], "skip"],
+  ])("%s: presence by path; a browser or device sign-in starts as a sign-in on the machine (skip), a key or no sign-in as a copy (bring)", async (_name, platform, files, exec, id, paths, dflt) => {
     const rows = await detectLogins(fakeHost({ platform: platform === "linux" ? "linux" : "darwin", files, exec }));
     expect(rows).toEqual([{ rung: "logins", id, label: expect.any(String), group: expect.any(String), paths, bytes: expect.any(Number), default: dflt }]);
+  });
+
+  it("Hermes Agent's one row carries its keys and its device login, so it starts as a copy and the detail says why", async () => {
+    const rows = await detectLogins(fakeHost({ files: { "~/.hermes/.env": 25_000, "~/.hermes/auth.json": 400, "~/.hermes/config.yaml": 600 } }));
+    expect(rows).toEqual([
+      { rung: "logins", id: "logins/hermes", label: "Hermes Agent API keys and logins", group: "Agent logins", paths: ["~/.hermes/.env", "~/.hermes/auth.json"], bytes: 25_400, default: "bring", detail: "the keys in ~/.hermes/.env travel only by copy" },
+    ]);
+    expect(loginDefault("hermes")).toBe("skip");
+  });
+
+  it("every login row's default follows its catalog entry's sign-in kind, and a login the catalog does not know starts as a copy", () => {
+    for (const e of CATALOG) expect(loginDefault(loginIdOf(e.id)), e.id).toBe(e.signIn.kind === "oauth" || e.signIn.kind === "device" ? "skip" : "bring");
+    expect(CATALOG.find(e => e.id === "kubectl")?.signIn.kind).toBe("none");
+    expect(loginDefault("kube")).toBe("bring");
+    expect(loginDefault("opencode")).toBe("bring");
+    expect(loginDefault("some-new-tool")).toBe("bring");
   });
 
   it("Claude Code on macOS is a Keychain item: presence only, sign in on the machine by default", async () => {
@@ -73,11 +90,11 @@ describe("logins", () => {
     expect(await detectLogins(fakeHost({ files: { "~/.claude/settings.json": "{ not json" } }))).toEqual([]);
   });
 
-  it("gh with its token in the macOS Keychain carries that item as a second path and still defaults to copy", async () => {
+  it("gh with its token in the macOS Keychain carries that item as a second path and still starts as a sign-in on the machine", async () => {
     const host = fakeHost({ files: { "~/.config/gh/hosts.yml": 200 }, exec: { "security find-generic-password -s gh:github.com": "keychain: ...\n" } });
     const rows = await detectLogins(host);
     expect(rows).toEqual([
-      { rung: "logins", id: "logins/gh", label: "GitHub CLI login", group: "CLI logins", paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"], bytes: 200, default: "bring" },
+      { rung: "logins", id: "logins/gh", label: "GitHub CLI login", group: "CLI logins", paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"], bytes: 200, default: "skip" },
     ]);
   });
 

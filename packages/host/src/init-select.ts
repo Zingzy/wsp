@@ -249,6 +249,14 @@ export function cutDistinct(labels: readonly string[], widthOf: (i: number) => n
   return out;
 }
 
+/** The answers in the order space steps through them, read from the middle one (the answer a sign-in row starts at) back
+ * to the first, then the last: "sign in, copy, skip"; two answers read as they are. */
+export function stepOrder(choices: readonly { label: string }[]): string {
+  const n = choices.length;
+  const start = Math.max(0, n - 2);
+  return choices.map((_, i) => choices[(start - i + n) % n]!.label).join(", ");
+}
+
 /** How the choice rows answered, the answers with none left out: "6 copy, 2 sign in"; with chosenOnly the last choice, the one that brings nothing, is left out too. */
 export function spreadOf(items: readonly SelectItem[], choices: ReadonlyMap<string, string>, chosenOnly = false): string {
   const first = items.find(i => i.choices !== undefined)?.choices ?? [];
@@ -343,12 +351,13 @@ class RungPrompt extends Prompt<Set<string>> {
     }
   }
 
-  /** Next answer for a choice row; the first answer is what the tick means. */
+  /** The answer before the current one, so a row that starts on its middle answer reaches the first, the tick, in one
+   * press (a sign-in row opting into copy); the first answer is what the tick means. */
   private cycle(item: SelectItem): void {
     const choices = item.choices ?? [];
     if (item.lock !== undefined || choices.length === 0) return;
     const at = choices.findIndex(c => c.value === this.choices.get(item.id));
-    const next = choices[(at + 1) % choices.length]!;
+    const next = choices[(at - 1 + choices.length) % choices.length]!;
     this.choices.set(item.id, next.value);
     if (next.value === choices[0]!.value) this.ticks().add(item.id);
     else this.ticks().delete(item.id);
@@ -527,7 +536,7 @@ class RungPrompt extends Prompt<Set<string>> {
     const keys: HelpKey[] = this.mixed
       ? [{ key: "space", does: "tick or change" }, KEY_FOLD, KEY_NEXT, KEY_BACK]
       : withChoices.length > 0
-        ? [{ key: "space", does: "change" }, KEY_NEXT, KEY_BACK]
+        ? [{ key: "space", does: stepOrder(withChoices[0]!.choices ?? []) }, KEY_NEXT, KEY_BACK]
         : [{ key: "space", does: "tick" }, KEY_FOLD, KEY_NEXT, KEY_BACK];
     lines.push(`${dim(S_BAR_FOCUS_END)}  ${helpLine(keys, colourDepth(isTTY(this.o.output)))}`);
     return lines.join("\n");
