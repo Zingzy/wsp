@@ -340,6 +340,8 @@ export function guestEnv(a: AgentEntry): Record<string, string> {
 export type McpAgent = AgentEntry & { mcp: McpConfig };
 /** The agents whose config the catalog knows how to read a server from and place one in, in catalog order. */
 export const MCP_AGENTS: readonly McpAgent[] = CATALOG_AGENTS.filter((a): a is McpAgent => a.mcp !== undefined);
+/** Those agents' ids as one line, for the usage, the help and the refusal that all name the same set. */
+export const MCP_AGENT_IDS: string = MCP_AGENTS.map(a => a.id).join(", ");
 
 const BY_ID: ReadonlyMap<string, CatalogEntry> = new Map(CATALOG.map(e => [e.id, e]));
 
