@@ -17,6 +17,7 @@ import {
   type GoldenVersion,
   type PortProbeView,
   type PortReachView,
+  ProjectExportResult,
   ProjectImportResult,
   ProjectPlan,
   type SessionEvent,
@@ -281,6 +282,10 @@ export interface Api {
   /** Packs the folder and lands it on the workspace's machine; progress rides project.import events, this resolves
    * with what landed. carry and rewrite name paths from the plan's secrets; an existing dest is refused unless replace. */
   importProject?(opts: ImportProjectOptions): Promise<ProjectImportResult>;
+  /** Brings a folder and the agent sessions keyed to it home from the workspace's machine; progress rides project.export
+   * events, this resolves with what landed. An existing dest is refused (kind "exists") unless replace. Optional so
+   * fixtures that never export need not fake it; the sidebar offers no export without it. */
+  exportProject?(opts: ExportProjectOptions): Promise<ProjectExportResult>;
   subscribe(fn: (e: ProtocolEvent) => void): () => void;
   /** The named golden manifest, undefined on a fresh install: that absence is what points the page at wsp init. */
   getGolden(name?: string): Promise<GoldenManifest | undefined>;
@@ -325,6 +330,17 @@ export interface ImportProjectOptions {
   replace?: boolean;
   carry?: string[];
   rewrite?: string[];
+}
+
+export interface ExportProjectOptions {
+  workspaceId: string;
+  /** The folder on the machine, absolute. */
+  source: string;
+  /** Where it lands on this computer, absolute; events echo this spelling. */
+  dest: string;
+  replace?: boolean;
+  /** The agents whose sessions come home, by catalog id; absent, every agent with sessions for the folder. */
+  agents?: string[];
 }
 
 /** The created view plus the runtime's notice when it stopped a builder kept after a save to make room. */
@@ -375,6 +391,7 @@ export function makeApi(c: ProtocolClient): Api {
     // Parsed, not trusted: the consent step renders only what the wire type vouches for.
     planProject: async source => ProjectPlan.parse((await c.request<{ plan?: unknown }>("project.plan", { source })).plan),
     importProject: async opts => ProjectImportResult.parse((await c.request<{ imported?: unknown }>("project.import", { ...opts })).imported),
+    exportProject: async opts => ProjectExportResult.parse((await c.request<{ exported?: unknown }>("project.export", { ...opts })).exported),
     subscribe: fn => c.subscribe(fn),
     getGolden: async (name = "default") => (await c.request<{ manifest?: GoldenManifest }>("golden.get", { name })).manifest,
     listSnapshots: async name =>

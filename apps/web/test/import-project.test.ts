@@ -5,7 +5,7 @@
 // the landed line with what was cut.
 import { describe, expect, it } from "vitest";
 import type { ProjectImportEvent, ProjectSecret } from "@wsp/protocol";
-import { IMPORT_STEPS, consentRequest, defaultConsent, isImportOf, landedLine, secretOffer, stepRows } from "../src/sidebar/importProject.js";
+import { IMPORT_STEPS, consentRequest, defaultConsent, importStepRows, isImportOf, landedLine, secretOffer } from "../src/sidebar/importProject.js";
 
 const ev = (over: Partial<ProjectImportEvent>): ProjectImportEvent => ({
   type: "project.import",
@@ -26,11 +26,11 @@ const header: ProjectSecret = { path: "vendor/x/.git/config", bytes: 200, signal
 describe("step rows", () => {
   it("lists the six steps in order with no message before any event", () => {
     expect(IMPORT_STEPS).toEqual(["planned", "consented", "packing", "uploading", "landing", "done"]);
-    expect(stepRows([])).toEqual(IMPORT_STEPS.map(stage => ({ stage, message: null, elapsedMs: null, fraction: null })));
+    expect(importStepRows([])).toEqual(IMPORT_STEPS.map(stage => ({ stage, message: null, elapsedMs: null, fraction: null })));
   });
 
   it("keeps the last event per step, the upload fraction from bytes of total, and leaves failed out of the rows", () => {
-    const rows = stepRows([
+    const rows = importStepRows([
       ev({}),
       ev({ stage: "consented", message: "Carrying .env; cut keys/id_ed25519.", elapsedMs: 20 }),
       ev({ stage: "packing", message: "Packing 11 files.", elapsedMs: 30 }),
@@ -93,5 +93,8 @@ describe("the landed line", () => {
     expect(landedLine(result, "/Users/me/code/proj", "api")).toBe("proj is at /Users/me/code/proj on api.");
     expect(landedLine(result, "/Users/me/code/proj/", "api")).toBe("proj is at /Users/me/code/proj on api.");
     expect(landedLine({ ...result, cut: ["keys/id_ed25519", ".env"] }, "/Users/me/code/proj", "api")).toBe("proj is at /Users/me/code/proj on api; cut keys/id_ed25519, .env.");
+    expect(landedLine({ ...result, agents: [{ agent: "claude", files: 2, bytes: 100, outcome: "moved", sessions: 2 }, { agent: "codex", files: 0, bytes: 0, outcome: "carried" }] }, "/Users/me/code/proj", "api")).toBe(
+      "proj is at /Users/me/code/proj on api; sessions: Claude Code moved, Codex carried unchanged.",
+    );
   });
 });

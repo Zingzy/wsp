@@ -306,10 +306,22 @@ describe("new thread", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
-  it("without the project ops no row offers the import", async () => {
+  it("without the project ops no row offers the import or the export", async () => {
     await mount(fakeApi([API], [status(API)]), "api");
     expect(screen.queryByRole("button", { name: /Import a project into/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Export a project from/ })).toBeNull();
     expect(screen.getByRole("button", { name: "New thread in api" })).toBeDefined();
+  });
+
+  it("a workspace row offers the export when the runtime can land folders here, and the dialog opens for that workspace", async () => {
+    const api = fakeApi([API, WEB], [status(API), status(WEB)]);
+    api.exportProject = vi.fn();
+    await mount(api, "api");
+    fireEvent.click(screen.getByRole("button", { name: "Export a project from web" }));
+    const dialog = await screen.findByRole("dialog", { name: "Export a project" });
+    expect(within(dialog).getByText(/From web\./)).toBeDefined();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
   it("a zombie row offers the rebuild and no new thread", async () => {
