@@ -11,7 +11,7 @@ import type { Readable, Writable } from "node:stream";
 import { parseArgs } from "node:util";
 import { isCancel } from "@clack/prompts";
 import { createClaudeAdapter } from "@wsp/adapter-claude";
-import { collect, nodeHost, nodeMachine, type Manifest, type Rung } from "@wsp/collect";
+import { collect, computeRecipe, nodeHost, nodeMachine, type Manifest, type Rung } from "@wsp/collect";
 import {
   SolariBackend,
   createRuntime,
@@ -46,8 +46,9 @@ export const HELP = `wsp - ${TAGLINE}
 usage:
   wsp up             start the app and the runtime over the golden you sealed
                      (plain wsp does the same)
-  wsp init           set up your first golden image: tick what comes along from
-                     this machine, build it, then finish in the browser
+  wsp init           set up your first golden image: the agents, what they
+                     need and the sign-ins, three screens, then the build and
+                     the browser
   wsp recipe         write the recipe: every catalog agent and tool with a tick
                      from what is installed here, what your agents used (their
                      session histories, read here, names and counts only) or the
@@ -65,11 +66,13 @@ options:
                      held in the Keychain, defaults to sign in on the machine
                      unless a saved recipe answered copy, so macOS has nothing
                      to ask either and the sign-ins wait for the app's terminal
-  --manifest PATH    init: tick from this file instead of reading the machine; a
-                     saved recipe (<state dir>/golden-recipe.json) works here
+  --manifest PATH    init: tick from this file instead of reading the machine,
+                     one screen per rung of it; a saved recipe (<state
+                     dir>/golden-recipe.json) works here
   --recipe PATH      init: tick the agents and tools from this recipe (wsp recipe
-                     writes it) and go straight to the sign-ins; this machine is
-                     still read for what travels
+                     writes it; init writes <state dir>/recipe.json too) and go
+                     straight to the sign-ins; this machine is still read for
+                     what travels
   --out PATH         recipe: where to write it (default <state dir>/recipe.json)
 
 keys are read from the environment, then ./.env, then ~/.wsp/.env (WSP_HOME
@@ -398,6 +401,7 @@ async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: 
       ...(flags.manifest !== undefined ? { manifestPath: resolve(flags.manifest) } : {}),
       ...(flags.recipe !== undefined ? { recipeFile: resolve(flags.recipe) } : {}),
       collect: collectThisComputer,
+      recipe: onHistory => computeRecipe(nodeHost(), { onHistory }),
       keys,
       pricing: new SolariBackend({ apiKey: keys.solari }).pricing,
       statePath: opts.statePath,

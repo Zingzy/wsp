@@ -7,9 +7,9 @@
 // ever asked on the remote machine.
 import type { Readable, Writable } from "node:stream";
 import { stripVTControlCharacters, styleText } from "node:util";
-import { APP_DATA_GROUP, LARGE_GROUP, MCP_REMOTE_ID, RUNGS, type LoginChoice, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
+import { APP_DATA_GROUP, LARGE_GROUP, MCP_REMOTE_ID, RUNGS, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
 import { describeAge, type BackendPricing } from "@wsp/engine";
-import { MCP_ID_PREFIX, type Recipe } from "@wsp/protocol";
+import { MCP_ID_PREFIX, type Recipe, type RecipeHistory } from "@wsp/protocol";
 import { PrepareStoppedError, type GoldenBuilderView, type GoldenRecipe, type GoldenStage, type Runtime } from "@wsp/runtime";
 import { S_BAR, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, cancel, isCancel, log, outro } from "@clack/prompts";
 import type { Keys } from "./cli.js";
@@ -26,8 +26,9 @@ import {
   agentName,
   applyRecipe,
   goldenRecipeFor,
+  type Answers,
+  defaultAnswers,
   hasChoices,
-  initialChoice,
   initialTicks,
   isLoginChoice,
   isTickable,
@@ -39,11 +40,17 @@ import {
   loginTool,
   recipeChanges,
   recipePath,
+  recipeWithAnswers,
   saveRecipe,
+  saveSmallRecipe,
+  smallRecipePath,
   tickLoginTools,
   unbuiltRows,
+  withCatalogAgents,
   withoutAgentTools,
 } from "./init-recipe.js";
+import { pickScreens } from "./init-pick.js";
+import { historyLine } from "./recipe-command.js";
 import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, fmtBytes, fmtDuration, isTTY, plainLine, rowsOf, table, widthOf, wrap } from "./init-layout.js";
 import { aliasLines } from "./init-aliases.js";
 import { sourceLines } from "./init-sources.js";
@@ -53,7 +60,7 @@ import { buildTimes, readBuildTimes } from "./init-times.js";
 import { keptBuilder, stopKeptBuilder, updateRoad } from "./init-upgrade.js";
 import { retentionOffer } from "./storage.js";
 import { rungSelect, type FooterLine, type RungSelectOptions, type SelectItem, type Tone } from "./init-select.js";
-import { DISK_HOLD_SHARE, HEAVY_BYTES, diskTone, weighed, weightTone } from "./init-weight.js";
+import { DISK_HOLD_SHARE, HEAVY_BYTES, diskHead, diskLine, diskParts, diskTone, weighed, weightTone } from "./init-weight.js";
 import { builderLink, flowHooks, noteOutcomes, signInStage, stageLogins, type BuilderLink, type HostHooks, type LoginOutcome, type SignInFlow } from "./init-signin.js";
 import { hasLogin, signInFor, signsInByDefault, type SignIn } from "./signin-table.js";
 import type { HostHandle } from "./server.js";
@@ -76,13 +83,17 @@ export interface InitIO {
 export interface InitOptions {
   /** Take every default and skip every prompt, the confirm included. */
   yes: boolean;
-  /** A collector manifest or a saved recipe to tick from instead of reading this machine. */
+  /** A collector manifest or a saved recipe to tick from instead of reading this machine; it walks the saved
+   * manifest's own screens, one per rung. */
   manifestPath?: string;
   /** The small recipe of catalog ids that ticks the agents and tools rows: the screens for them are skipped and the
    * run lands on the sign-ins. This machine is still read for the rows and files. */
   recipeFile?: string;
   /** Reads this computer, telling onRung how many rows each rung found as it finishes and onNote what could not be read. */
   collect(onRung: (rung: Rung, rows: number) => void, onNote: (note: string) => void): Promise<Manifest>;
+  /** Reads this computer against the catalog and the agents' session histories for the recipe the screens start
+   * from, telling onHistory each agent's counts as its history is read. */
+  recipe(onHistory: (h: RecipeHistory) => void): Promise<Recipe>;
   keys: Keys;
   /** Prices the builder the confirm names. */
   pricing: BackendPricing;
@@ -688,24 +699,6 @@ export function loginItems(entries: readonly ManifestEntry[], manifest: Manifest
   });
 }
 
-/** The estimate's parts that are not zero, and how many rows have no size. */
-function diskParts(est: DiskEstimate): string {
-  const parts = ([["files", est.files], ["Homebrew's toolchain", est.toolchain], ["tools", est.tools], ["agents", est.agents]] as const).filter(([, n]) => n > 0).map(([label, n]) => `${label} ${fmtBytes(n)}`);
-  const unknown = est.unknown.length > 0 ? `${est.unknown.length} unmeasured, ~${fmtBytes(est.assumed)}` : "";
-  return [parts.join(", "), unknown].filter(p => p !== "").join("; ");
-}
-
-/** The total against the room the builder's disk leaves. */
-function diskHead(est: DiskEstimate): string {
-  return est.over > 0 ? `${fmtBytes(est.total)}, ${fmtBytes(est.over)} over the ${fmtBytes(est.room)} the ${BUILDER_DISK_GB} GB builder leaves` : `${fmtBytes(est.total)} of ${fmtBytes(est.room)} on the ${BUILDER_DISK_GB} GB builder`;
-}
-
-/** The summary's line: the total, then the parts in brackets. */
-export function diskLine(est: DiskEstimate): string {
-  const parts = diskParts(est);
-  return parts === "" ? diskHead(est) : `${diskHead(est)} (${parts})`;
-}
-
 /** The running total under a screen: the rows ticked on earlier screens plus this one's ticks. */
 function diskUnder(earlier: readonly ManifestEntry[], entries: readonly ManifestEntry[], brew: BrewTable): (ticks: ReadonlySet<string>) => DiskEstimate {
   return ticks => {
@@ -875,25 +868,6 @@ export function summaryNote(
   return [...lines, "", ...closing.flatMap(([label, text, tone]) => wrap(`${label.padEnd(column)}${text}`, inner, " ".repeat(column)).map(l => (tone === undefined ? l : styleText(tone, l))))];
 }
 
-interface Answers {
-  ticks: Set<string>;
-  choices: Map<string, string>;
-}
-
-/** The answers a fresh screen starts with; `coming` is what earlier screens ticked, else every tools and agents row's default. */
-function defaultAnswers(manifest: Manifest, coming?: ReadonlySet<string>): Answers {
-  const earlier = coming ?? new Set(manifest.entries.filter(e => (e.rung === "agents" || e.rung === "tools") && initialTicks(e)).map(e => e.id));
-  const shown = manifest.entries.filter(e => loginShown(e, manifest, earlier));
-  // A login whose command is not coming starts at skip; a saved answer stands, and ticks the command's row instead (tickLoginTools).
-  const choiceOf = (e: ManifestEntry): LoginChoice => (e.rung === "logins" && e.choice === undefined && e.bring === undefined && loginTool(e, manifest, earlier)?.coming === false ? "skip" : initialChoice(e));
-  return {
-    // A saved recipe keeps its ticks: a login it brought as a sign-in on the machine stays ticked, as the run that saved it had it;
-    // a credential-shaped row is ticked only by its copy answer.
-    ticks: new Set(shown.filter(e => (e.rung === "logins" ? e.bring ?? (choiceOf(e) === "copy") : hasChoices(e) ? initialChoice(e) === "copy" : initialTicks(e))).map(e => e.id)),
-    choices: new Map(shown.filter(hasChoices).map(e => [e.id, choiceOf(e)])),
-  };
-}
-
 /** Names the builder about to bill: its size and the backend's rate for it. */
 function bootQuestion(recipe: GoldenRecipe, pricing: BackendPricing): string {
   const size = { cpu: recipe.cpu ?? pricing.defaultSize.cpu, memMb: recipe.memMb ?? pricing.defaultSize.memMb };
@@ -901,24 +875,16 @@ function bootQuestion(recipe: GoldenRecipe, pricing: BackendPricing): string {
   return `Boot a ${size.cpu} vCPU, ${Math.round(size.memMb / 1024)} GB builder on Solari and build this? About $${rate.toFixed(2)}/hr while it runs.`;
 }
 
-/** The screens, one per rung in `show`; a rung left out takes its defaults without a screen, so a recipe that has
- * already decided the agents and tools shows only the sign-ins. */
-async function tickRungs(manifest: Manifest, io: InitIO, brew: BrewTable, show: readonly Rung[] = RUNGS): Promise<Answers | "cancel"> {
+/** The saved manifest's screens, one per rung. */
+async function tickRungs(manifest: Manifest, io: InitIO, brew: BrewTable): Promise<Answers | "cancel"> {
   const answers = new Map<Rung, Answers>();
-  const rungsWithItems = RUNGS.filter(r => show.includes(r) && manifest.entries.some(e => e.rung === r));
+  const rungsWithItems = RUNGS.filter(r => manifest.entries.some(e => e.rung === r));
   let i = 0;
   while (i < RUNGS.length) {
     const rung = RUNGS[i]!;
     const agents = answers.get("agents")?.ticks ?? new Set<string>();
     const entries = manifest.entries.filter(e => e.rung === rung && loginShown(e, manifest, agents));
-    const counter = `${show.indexOf(rung) + 1}/${show.length}`;
-    if (!show.includes(rung)) {
-      const fresh = defaultAnswers(manifest, new Set([...answers.values()].flatMap(a => [...a.ticks])));
-      const own = (id: string): boolean => id.startsWith(`${rung}/`);
-      answers.set(rung, { ticks: new Set([...fresh.ticks].filter(own)), choices: new Map([...fresh.choices].filter(([id]) => own(id))) });
-      i += 1;
-      continue;
-    }
+    const counter = `${i + 1}/${RUNGS.length}`;
     if (entries.length === 0) {
       log.message(`${RUNG_TITLE[rung]}${GUTTER}${dim(counter)}\n${dim("nothing found")}`, { output: io.output, symbol: styleText("green", S_STEP_SUBMIT) });
       i += 1;
@@ -1006,6 +972,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
 
   let manifest: Manifest;
   let source: string;
+  // The catalog recipe the screens start from: the file given, else read off this computer; none with a saved manifest, which carries its own ticks.
   let catalogRecipe: Recipe | undefined;
   const spinner = spin(io.output, "Reading this computer", io.isTTY);
   const counts: string[] = [];
@@ -1031,6 +998,17 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     return { code: 1 };
   }
   spinner.stop();
+  if (opts.manifestPath === undefined && catalogRecipe === undefined) {
+    const histories = spin(io.output, "Reading what your agents used", io.isTTY);
+    try {
+      catalogRecipe = await opts.recipe(h => histories.detail(historyLine(h)));
+    } catch (e) {
+      histories.stop();
+      log.error(e instanceof Error ? e.message : String(e), out);
+      return { code: 1 };
+    }
+    histories.stop();
+  }
   // A row the pack would refuse whole is locked here with the pack's own sentence, judged on the same disk the pack reads.
   manifest = lockRefused(manifest, rel => {
     const st = statOf(join(opts.home, rel));
@@ -1049,17 +1027,34 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   }
   // A heavy formula starts unticked, judged on the sizes just read.
   manifest = { ...manifest, entries: weighed(linuxCaskRows(withoutAgentTools(manifest.entries)), brew) };
+  // The card counts what the collector found; the catalog's bare agent rows join the manifest after it.
+  const found = manifest;
   if (catalogRecipe !== undefined) {
-    manifest = applyRecipe(manifest, catalogRecipe);
+    manifest = applyRecipe(withCatalogAgents(manifest), catalogRecipe);
     const unbuilt = unbuiltRows(catalogRecipe, manifest.entries).map(r => catalogEntry(r.id)?.name ?? r.id);
     if (unbuilt.length > 0) notes.push(`Ticked in the recipe but not on this computer, so not in this build: ${unbuilt.join(", ")}.`);
   }
   if (notes.length > 0) log.warn(notes.join("\n"), out);
-  card("Found on this computer", detectionNote(manifest, source), io.output);
+  card("Found on this computer", detectionNote(found, source), io.output);
 
   let answers: Answers;
-  if (interactive) {
-    const picked = await tickRungs(manifest, io, brew, catalogRecipe === undefined ? RUNGS : ["logins"]);
+  if (interactive && catalogRecipe !== undefined) {
+    const picked = await pickScreens({ manifest, recipe: catalogRecipe, brew, from: opts.recipeFile === undefined ? "agents" : "logins", input: io.input, output: io.output });
+    if (picked === "cancel") {
+      cancel("Nothing was changed.", out);
+      return { code: 1 };
+    }
+    catalogRecipe = picked.recipe;
+    manifest = applyRecipe(manifest, catalogRecipe);
+    answers = defaultAnswers(manifest);
+    // The screens' own answers on the login rows: a ticked keys row is the copy, the listed sign-ins run on the machine.
+    for (const [id, choice] of picked.logins) {
+      answers.choices.set(id, choice);
+      if (choice === "copy") answers.ticks.add(id);
+      else answers.ticks.delete(id);
+    }
+  } else if (interactive) {
+    const picked = await tickRungs(manifest, io, brew);
     if (picked === "cancel") {
       cancel("Nothing was changed.", out);
       return { code: 1 };
@@ -1116,7 +1111,10 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const uploadBytes = imp.files?.bytes ?? 0;
   card("Summary", summaryNote(offered, ticks, choices, widthOf(io.output), uploadBytes, brew), io.output);
   saveRecipe(path, manifest, ticks, choices);
-  log.step(`Recipe saved to ${path}`, out);
+  // The small recipe beside it: the catalog ids with the ticks and answers as the screens left them, the form wsp init --recipe reads.
+  const small = catalogRecipe === undefined ? undefined : { path: smallRecipePath(opts.statePath), recipe: catalogRecipe };
+  if (small !== undefined) saveSmallRecipe(small.path, recipeWithAnswers(small.recipe, choices));
+  log.step(`Recipe saved to ${path}${small !== undefined ? ` and ${small.path}` : ""}`, out);
   // The whole recipe against the disk, before the account is read or anything boots: the tools stage would
   // otherwise fill the disk after the machine billed.
   const disk = estimateDisk(asBring(bring), uploadBytes, brew);
@@ -1220,6 +1218,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     for (const r of read.refused) choices.set(r.id, "machine");
     log.warn(read.refused.map(r => `${label(r.id)}: ${r.command !== undefined ? `the ${r.service} helper failed` : "Keychain read failed"} (${r.reason}); changed to sign in on the machine.`).join("\n"), out);
     saveRecipe(path, manifest, ticks, choices);
+    if (small !== undefined) saveSmallRecipe(small.path, recipeWithAnswers(small.recipe, choices));
     // The flipped rows change the recipe hash; the builder must carry the hash the saved recipe now has,
     // so wsp init --manifest on that file attaches to it later.
     bring = bringing();

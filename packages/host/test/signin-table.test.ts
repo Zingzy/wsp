@@ -22,7 +22,7 @@ const check = (name: string, output: string, exitCode: number): boolean => {
 describe("sign-in table", () => {
   it("covers every login the collector emits, and none of them falls through to a bare shell", () => {
     const ids = collectorLogins();
-    expect(ids).toEqual(expect.arrayContaining(["gh", "claude", "gcloud", "wrangler", "cloudflared", "vercel", "aws", "kube", "codex", "gemini", "opencode", "pi", "hermes", "op"]));
+    expect(ids).toEqual(expect.arrayContaining(["gh", "claude", "gcloud", "wrangler", "cloudflared", "vercel", "aws", "kube", "codex", "gemini", "opencode", "pi", "hermes", "hermes-keys", "op"]));
     for (const id of ids) expect(signInFor(id).kind, id).not.toBe("shell");
     expect(signInFor("some-new-tool")).toEqual({ kind: "shell" });
   });
@@ -63,7 +63,7 @@ describe("sign-in table", () => {
 
   it("has a status command for each tool that offers one, and says so for the rest", () => {
     const withStatus = Object.entries(SIGN_INS).filter(([, s]) => statusOf(s) !== undefined).map(([k]) => k);
-    expect(withStatus.sort()).toEqual(["aws", "claude", "cloudflared", "codex", "doppler", "fly", "gcloud", "gemini", "gh", "hermes", "kube", "netlify", "opencode", "pi", "railway", "supabase", "vercel", "wrangler"]);
+    expect(withStatus.sort()).toEqual(["aws", "claude", "cloudflared", "codex", "doppler", "fly", "gcloud", "gemini", "gh", "hermes", "hermes-keys", "kube", "netlify", "opencode", "pi", "railway", "supabase", "vercel", "wrangler"]);
     // cloudflared has no status command; its login writes the origin certificate, so the check proves that file.
     expect(command("cloudflared").status?.command).toBe(CLOUDFLARED_STATUS);
     expect(CLOUDFLARED_STATUS).toBe(`if test -s "$HOME/.cloudflared/cert.pem"; then echo cert.pem; else false; fi`);

@@ -31,6 +31,15 @@ export type LoginSource = "keychain" | "rc-key" | "file" | "helper";
  * (device), a key pasted or exported (key), or nothing to run on a headless machine (none). */
 export type SignInKind = "oauth" | "device" | "key" | "none";
 
+/** Key files beside a login that no sign-in on the machine produces: they travel only by copy, as a row of their
+ * own under the login's id plus "-keys", and the login's own status proves them once landed. */
+export interface KeyFiles {
+  /** `~/`-relative. */
+  paths: readonly string[];
+  /** The keys row's second detail line: what the files hold and why only a copy brings them. */
+  note: string;
+}
+
 export type SignIn =
   | {
       kind: Exclude<SignInKind, "none">;
@@ -44,6 +53,7 @@ export type SignIn =
       /** What the tool itself waits for the person, measured or read from its source; absent when it never gives up. */
       toolTimeoutMs?: number;
       note?: string;
+      keys?: KeyFiles;
     }
   /** Nothing to run on a headless machine; the note, when there is one, says what to do instead. A status still proves copied files. */
   | { kind: "none"; note?: string; sources: readonly LoginSource[]; status?: StatusCheck };
@@ -66,6 +76,18 @@ const LOGIN_IDS: Readonly<Record<string, string>> = { kubectl: "kube" };
 
 export function loginIdOf(entryId: string): string {
   return LOGIN_IDS[entryId] ?? entryId;
+}
+
+const KEYS_SUFFIX = "-keys";
+
+/** The login id the collector files an entry's key files under. */
+export function keysIdOf(entryId: string): string {
+  return `${loginIdOf(entryId)}${KEYS_SUFFIX}`;
+}
+
+/** The row a login's key files make: nothing to run on the machine, and the login's own status proves the copy. */
+export function keysRowOf(keys: KeyFiles, status: StatusCheck | undefined): SignIn {
+  return { kind: "none", sources: ["file"], note: keys.note, ...(status !== undefined ? { status } : {}) };
 }
 
 /** No sign-in and nothing to say about it. */
@@ -218,5 +240,12 @@ export const SIGN_IN_ROWS = {
   // pi lists a model only for a provider it holds credentials for, and prints a /login hint on exit 0 when it holds none.
   pi: { kind: "oauth", sources: ["file"], login: "pi", status: { command: "pi --list-models", signedIn: ok(/^provider\s+model\b/m) }, note: "type /login inside pi and pick a provider, then /exit; a key on the machine counts" },
   // The pool lists keys from ~/.hermes/.env and the environment beside stored logins; with none it prints nothing on exit 0.
-  hermes: { kind: "device", sources: ["file"], login: "hermes auth", status: { command: "hermes auth list", signedIn: ok(/\(\d+ credentials\):/), detail: secretNamed }, note: "pick Add a credential in the menu; keys in ~/.hermes/.env count" },
+  hermes: {
+    kind: "device",
+    sources: ["file"],
+    login: "hermes auth",
+    status: { command: "hermes auth list", signedIn: ok(/\(\d+ credentials\):/), detail: secretNamed },
+    note: "pick Add a credential in the menu; keys in ~/.hermes/.env count",
+    keys: { paths: ["~/.hermes/.env"], note: "the keys in ~/.hermes/.env travel only by copy; no sign-in produces them" },
+  },
 } satisfies Record<string, SignIn>;

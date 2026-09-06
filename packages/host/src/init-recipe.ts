@@ -6,7 +6,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type LoginChoice, type Manifest, type ManifestEntry, type Rung, parseManifest } from "@wsp/collect";
-import { catalogEntry, catalogToolFor, linuxCaskByBin, linuxCaskFor, loginIdOf } from "@wsp/catalog";
+import { CATALOG_AGENTS, catalogEntry, catalogToolFor, linuxCaskByBin, linuxCaskFor, loginIdOf, loginRow } from "@wsp/catalog";
 import { agentOwning, neverCopied, packageOf, parseMcpId, type RecipeDigest } from "@wsp/engine";
 import { MCP_ID_PREFIX, Recipe, type RecipeRow } from "@wsp/protocol";
 import type { GoldenImport, GoldenRecipe, Machine } from "@wsp/runtime";
@@ -159,11 +159,52 @@ export function initialChoice(e: ManifestEntry): LoginChoice {
   return e.default === "bring" ? "copy" : "machine";
 }
 
+/** The catalog entry a login row belongs to, by the login id it is filed under; a row the catalog does not know is its own. */
+export function loginEntryId(e: ManifestEntry): string {
+  return loginRow(agentName(e))?.entry.id ?? agentName(e);
+}
+
 /** A login that belongs to an agent is only offered when that agent comes along. */
 export function loginShown(e: ManifestEntry, manifest: Manifest, ticks: ReadonlySet<string>): boolean {
   if (e.rung !== "logins") return true;
-  const agent = manifest.entries.find(a => a.rung === "agents" && agentName(a) === agentName(e));
+  const agent = manifest.entries.find(a => a.rung === "agents" && agentName(a) === loginEntryId(e));
   return agent === undefined || ticks.has(agent.id);
+}
+
+/** The agents and tools rows that come along as the manifest stands: what the login rows are judged against. */
+export function comingRows(manifest: Manifest): Set<string> {
+  return new Set(manifest.entries.filter(e => (e.rung === "agents" || e.rung === "tools") && initialTicks(e)).map(e => e.id));
+}
+
+export interface Answers {
+  ticks: Set<string>;
+  choices: Map<string, string>;
+}
+
+/** The answers a fresh screen starts with; `coming` is what earlier screens ticked, else every tools and agents row's default. */
+export function defaultAnswers(manifest: Manifest, coming: ReadonlySet<string> = comingRows(manifest)): Answers {
+  const shown = manifest.entries.filter(e => loginShown(e, manifest, coming));
+  // A login whose command is not coming starts at skip; a saved answer stands, and ticks the command's row instead (tickLoginTools).
+  const choiceOf = (e: ManifestEntry): LoginChoice => (e.rung === "logins" && e.choice === undefined && e.bring === undefined && loginTool(e, manifest, coming)?.coming === false ? "skip" : initialChoice(e));
+  return {
+    // A saved recipe keeps its ticks: a login it brought as a sign-in on the machine stays ticked, as the run that saved it had it;
+    // a credential-shaped row is ticked only by its copy answer.
+    ticks: new Set(shown.filter(e => (e.rung === "logins" ? e.bring ?? (choiceOf(e) === "copy") : hasChoices(e) ? initialChoice(e) === "copy" : initialTicks(e))).map(e => e.id)),
+    choices: new Map(shown.filter(hasChoices).map(e => [e.id, choiceOf(e)])),
+  };
+}
+
+/** Every catalog agent as a row, the collector's where it found one here and a bare one otherwise, with a bare login
+ * row beside it so the agent can be ticked for the machine and signed in there after the build. A bare row has
+ * nothing to copy and starts off; the recipe decides its tick. */
+export function withCatalogAgents(manifest: Manifest): Manifest {
+  const has = (rung: Rung, name: string): boolean => manifest.entries.some(e => e.rung === rung && agentName(e) === name);
+  const bare = (rung: Rung, id: string, label: string): ManifestEntry => ({ rung, id, label, paths: [], bytes: 0, default: "skip" });
+  const added = CATALOG_AGENTS.flatMap(a => [
+    ...(has("agents", a.id) ? [] : [bare("agents", `agents/${a.id}`, a.name)]),
+    ...(has("logins", loginIdOf(a.id)) ? [] : [{ ...bare("logins", `logins/${loginIdOf(a.id)}`, `${a.name} login`), group: "Agent logins" }]),
+  ]);
+  return added.length === 0 ? manifest : { ...manifest, entries: [...manifest.entries, ...added] };
 }
 
 export function isLoginChoice(v: unknown): v is LoginChoice {
@@ -200,21 +241,26 @@ export function loadRecipe(path: string): Recipe {
 }
 
 /** The catalog id a collector row stands for: an agents row its agent, a tools row the tool its package names. */
-function catalogIdOf(e: ManifestEntry): string | undefined {
+export function catalogIdOf(e: ManifestEntry): string | undefined {
   if (e.rung === "agents" && !e.id.startsWith(MCP_ID_PREFIX)) return agentName(e);
   if (e.rung === "tools") return catalogToolFor(packageOf(e))?.id;
   return undefined;
 }
 
+/** The rungs the catalog model leaves out of a golden: their rows start off on the catalog path. */
+const OFF_THE_PATH: ReadonlySet<Rung> = new Set<Rung>(["editors", "everything"]);
+
 /** The collector's rows with the recipe's ticks written on: an agents or tools row is on when its catalog row is,
  * off when it is not or when no catalog row stands for it; an MCP row follows its agent; a saved sign-in answer
- * lands on the login row it names. Every other row keeps its default, as a saved manifest would leave it. */
+ * lands on the login row it names; an editors or everything row is off. Every other row keeps its default, as a
+ * saved manifest would leave it. */
 export function applyRecipe(manifest: Manifest, recipe: Recipe): Manifest {
   const on = new Set(recipe.rows.filter(r => r.on).map(r => r.id));
   const answers = new Map<string, LoginChoice>(recipe.rows.flatMap(r => (r.signIn === undefined ? [] : [[`logins/${loginIdOf(r.id)}`, r.signIn]])));
   return {
     ...manifest,
     entries: manifest.entries.map(e => {
+      if (OFF_THE_PATH.has(e.rung)) return { ...e, bring: false };
       if (e.rung === "agents" && e.id.startsWith(MCP_ID_PREFIX)) {
         const agent = parseMcpId(e.id)?.agent;
         return { ...e, bring: initialTicks(e) && (agent === undefined || catalogEntry(agent)?.kind !== "agent" || on.has(agent)) };
@@ -227,9 +273,14 @@ export function applyRecipe(manifest: Manifest, recipe: Recipe): Manifest {
   };
 }
 
+/** The catalog ids this computer has a collector row for. */
+export function rowsHere(entries: readonly ManifestEntry[]): Set<string> {
+  return new Set(entries.flatMap(e => catalogIdOf(e) ?? []));
+}
+
 /** The recipe's ticked rows this computer has no row for, the floor's aside: the build cannot install them yet. */
 export function unbuiltRows(recipe: Recipe, entries: readonly ManifestEntry[]): RecipeRow[] {
-  const here = new Set(entries.map(catalogIdOf));
+  const here = rowsHere(entries);
   return recipe.rows.filter(r => {
     const e = catalogEntry(r.id);
     return r.on && !here.has(r.id) && !(e?.kind === "tool" && e.floor);
@@ -238,6 +289,29 @@ export function unbuiltRows(recipe: Recipe, entries: readonly ManifestEntry[]): 
 
 export function recipePath(statePath: string): string {
   return join(dirname(statePath), "golden-recipe.json");
+}
+
+/** Where the small recipe lives, beside the saved manifest: what wsp recipe writes and wsp init --recipe reads. */
+export function smallRecipePath(statePath: string): string {
+  return join(dirname(statePath), "recipe.json");
+}
+
+/** The small recipe with the login answers written on: a row whose login row was answered carries the answer, a row
+ * whose login nobody answered carries none. The ticks are the recipe's own, as the screens left them. */
+export function recipeWithAnswers(recipe: Recipe, choices: ReadonlyMap<string, string>): Recipe {
+  return {
+    ...recipe,
+    rows: recipe.rows.map(r => {
+      const { signIn: _signIn, ...rest } = r;
+      const answer = choices.get(`logins/${loginIdOf(r.id)}`);
+      return { ...rest, ...(isLoginChoice(answer) ? { signIn: answer } : {}) };
+    }),
+  };
+}
+
+export function saveSmallRecipe(path: string, recipe: Recipe): void {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(recipe, null, 2)}\n`);
 }
 
 export function saveRecipe(path: string, manifest: Manifest, ticks: ReadonlySet<string>, choices: ReadonlyMap<string, string> = new Map()): void {
