@@ -281,6 +281,111 @@ async function throughScreens(f: Fake): Promise<void> {
 }
 
 describe("wsp init, interactive", () => {
+  it("offers what this Mac's package managers have as its own screen, every row off, and a tick writes that row into the recipe", async () => {
+    const f = fake();
+    const saved = join(dirname(f.opts.statePath), "recipe.json");
+    mkdirSync(dirname(saved), { recursive: true });
+    writeFileSync(saved, JSON.stringify({ version: 1, at: "2026-09-06T03:00:00.000Z", histories: [], rows: [], custom: [{ kind: "custom", id: "cuda", name: "cuda", install: ["apt-get install -y cuda"], check: "command -v cuda", why: "added by the agent" }] }));
+    // The scan is asked with what the recipe already installs, so it can leave those tools off the screen.
+    let asked: readonly { id: string }[] = [];
+    f.opts.scan = async recipe => {
+      asked = recipe;
+      return [
+        { id: "brew/llvm", name: "llvm", manager: "brew", group: "Homebrew formulae", install: "brew install llvm", check: "command -v llvm", size: 2 * 1024 * 1024 * 1024 },
+        { id: "npm/turbo", name: "turbo", manager: "npm", group: "npm globals", install: "npm install -g turbo", check: "command -v turbo" },
+      ];
+    };
+    const run = runInit(f.opts, f.io);
+    for (const screen of ["Agents", "What they need"]) {
+      await f.until(screen);
+      await f.press(KEY.enter);
+    }
+    await f.until("Also on this Mac");
+    const screen = f.text().slice(f.text().lastIndexOf("◆  Also on this Mac"));
+    // Four screens now, and this is the third; every row starts off.
+    expect(screen).toMatch(/Also on this Mac\s+3\/4/);
+    expect(screen).toMatch(/▾ Homebrew formulae\s+0 of 1/);
+    expect(screen).toMatch(/▾ npm globals\s+0 of 1/);
+    expect(screen).toContain("Selected: none");
+    // The screen that spends disk shows the Disk line, as What they need does, and it follows the ticks.
+    const disk = (text: string): string => text.slice(text.lastIndexOf("Disk: ")).split("\n")[0]!;
+    const before = disk(screen);
+    expect(before).toContain("on the 20 GB builder");
+    // Down to llvm, tick it, on to the sign-ins.
+    await f.press(KEY.down);
+    await f.press(KEY.down);
+    await f.press(" ");
+    expect(disk(f.text().slice(f.text().lastIndexOf("◆  Also on this Mac")))).not.toBe(before);
+    await f.press(KEY.enter);
+    await f.until("Sign-ins and keys");
+    await f.press(KEY.enter);
+    await f.until(BOOT);
+    await f.press(KEY.enter);
+    expect((await run).code).toBe(1);
+    expect(asked.map(r => r.id)).toEqual(["cuda"]);
+    expect(JSON.parse(readFileSync(join(dirs[0]!, "recipe.json"), "utf8")).custom).toEqual([
+      { kind: "custom", id: "cuda", name: "cuda", install: ["apt-get install -y cuda"], check: "command -v cuda", why: "added by the agent" },
+      { kind: "custom", id: "brew/llvm", name: "llvm", install: ["brew install llvm"], check: "command -v llvm", manager: "brew", size: 2 * 1024 * 1024 * 1024, why: "installed on this Mac by brew" },
+    ]);
+  });
+
+  it("keeps the rows wsp recipe --add wrote into the recipe beside the state, which a plain run rewrites", async () => {
+    const f = fake({ yes: true });
+    const saved = join(dirname(f.opts.statePath), "recipe.json");
+    mkdirSync(dirname(saved), { recursive: true });
+    writeFileSync(saved, JSON.stringify({
+      version: 1,
+      at: "2026-09-06T03:00:00.000Z",
+      histories: [],
+      rows: [],
+      custom: [{ kind: "custom", id: "just", name: "just", install: ["brew install just"], check: "command -v just", why: "added by the agent" }],
+    }));
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    expect(f.backends[0]!.machines[0]!.execLog.some(c => c.includes("brew install just"))).toBe(true);
+    expect(JSON.parse(readFileSync(saved, "utf8")).custom).toEqual([
+      { kind: "custom", id: "just", name: "just", install: ["brew install just"], check: "command -v just", why: "added by the agent" },
+    ]);
+  });
+
+  it("says so and carries on when the recipe beside the state cannot be read, rather than refusing to run", async () => {
+    const f = fake({ yes: true });
+    const saved = join(dirname(f.opts.statePath), "recipe.json");
+    mkdirSync(dirname(saved), { recursive: true });
+    writeFileSync(saved, "{ not json");
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    expect(f.text()).toContain("any rows it added are gone");
+  });
+
+  it("names Also on this Mac beside What they need when the recipe that overfills the disk has a row from it", async () => {
+    const f = fake({ yes: true });
+    const saved = join(dirname(f.opts.statePath), "recipe.json");
+    mkdirSync(dirname(saved), { recursive: true });
+    writeFileSync(saved, JSON.stringify({
+      version: 1,
+      at: "2026-09-06T03:00:00.000Z",
+      histories: [],
+      rows: [],
+      custom: [{ kind: "custom", id: "brew/llvm", name: "llvm", install: ["brew install llvm"], check: "command -v llvm", size: 30 * 1024 * 1024 * 1024, why: "installed on this Mac by brew" }],
+    }));
+    expect((await runInit(f.opts, f.io)).code).toBe(1);
+    const out = f.text();
+    expect(out).toContain("This recipe needs about");
+    expect(out).toContain("under What they need or Also on this Mac");
+    expect(f.backends.flatMap(b => b.machines)).toHaveLength(0);
+  });
+
+  it("leaves that screen out when no package manager here has anything the catalog does not", async () => {
+    const f = fake();
+    f.opts.scan = async () => [];
+    const run = runInit(f.opts, f.io);
+    await throughScreens(f);
+    await f.until(BOOT);
+    expect(f.text()).not.toContain("Also on this Mac");
+    expect(f.text()).toMatch(/Agents\s+1\/3/);
+    await f.press(KEY.enter);
+    await run;
+  });
+
   it("enter at the confirm takes No: the marker sits on No, nothing boots, and the recipe is kept", async () => {
     const f = fake();
     const run = runInit(f.opts, f.io);
@@ -2197,6 +2302,21 @@ describe("summaryNote", () => {
     }
   });
 
+  it("names every row outside the catalog with the command it runs, since the card is the last thing read before the boot", () => {
+    const custom = [
+      { kind: "custom" as const, id: "brew/just", name: "just", install: ["brew install just"], check: "command -v just", size: 4 * 1024 * 1024, why: "installed on this Mac by brew" },
+      { kind: "custom" as const, id: "ruff", name: "ruff", install: ["uv tool install ruff"], check: "ruff --version", why: "used in wsp" },
+    ];
+    const lines = summaryNote(FIXTURE, new Set(["tools/brew/gh"]), new Map(), 200, 0, new Map(), custom);
+    expect(lines).toContain("Added     just runs brew install just");
+    expect(lines).toContain("          ruff runs uv tool install ruff");
+    // They are the person's tools too: the Installs line counts them, the Disk line carries the measured one's
+    // 4 MB and counts the other beside the gh formula the Mac's Homebrew never sized.
+    expect(lines.find(l => l.startsWith("Installs"))).toContain("3 tools");
+    expect(lines.find(l => l.startsWith("Disk"))).toContain("tools 4.0 MB; 2 unmeasured");
+    expect(summaryNote(FIXTURE, new Set(["tools/brew/gh"]), new Map(), 200, 0).some(l => l.startsWith("Added"))).toBe(false);
+  });
+
   it("a tap formula that takes the road counts as a tool in the Installs line, with the checksum note the ruling asks for", () => {
     const tap = { rung: "tools" as const, id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", group: "Homebrew", paths: [], bytes: 0, default: "bring" as const, linux: "unknown" as const };
     const brew = new Map([["zingzy/tap/diskbloom", { name: "diskbloom", fullName: "zingzy/tap/diskbloom", deps: [], bytes: 4 * 1024 * 1024, macosOnly: false, source: { repo: "Zingzy/diskbloom", tag: "v0.1.0" } }]]);
@@ -2865,6 +2985,47 @@ describe("wsp init --recipe", () => {
     const tools = JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8")).tools as { id: string; outcome: string; note?: string }[];
     expect(tools.find(t => t.id === "tools/catalog/agent-browser")).toMatchObject({ outcome: "installed", note: "by an unmeasured road" });
     expect(f.text()).toMatch(/Installing tools\s+\d+ installed \(agent-browser by an un/);
+  });
+
+  it("a row the catalog does not carry installs after the catalog's own, is recorded by name, and is offered no sign-in", async () => {
+    const f = fake({ yes: true });
+    const path = join(dirname(f.opts.statePath), "recipe.json");
+    writeFileSync(path, JSON.stringify({
+      version: 1,
+      at: "2026-09-06T03:00:00.000Z",
+      histories: [],
+      rows: [{ id: "gh", kind: "tool", on: true, source: { kind: "used", sessions: 100, calls: 7919 } }],
+      custom: [{ kind: "custom", id: "just", name: "just", install: ["brew install just"], check: "command -v just", why: "used in wsp" }],
+    }));
+    f.opts.recipeFile = path;
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    const log = f.backends[0]!.machines[0]!.execLog;
+    expect(log.some(c => c.includes("brew install just"))).toBe(true);
+    // After every catalog road: the gh formula went first.
+    expect(log.findIndex(c => c.includes("brew install just"))).toBeGreaterThan(log.findIndex(c => c.includes("brew install gh")));
+    const tools = JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8")).tools as { id: string; label: string; outcome: string }[];
+    expect(tools.at(-1)).toMatchObject({ id: "tools/custom/just", label: "just", outcome: "installed" });
+    // The row travels in the small recipe, so a second run carries it; no sign-in was ever offered for it.
+    expect(JSON.parse(readFileSync(join(dirs[0]!, "recipe.json"), "utf8")).custom).toEqual([{ kind: "custom", id: "just", name: "just", install: ["brew install just"], check: "command -v just", why: "used in wsp" }]);
+    expect(f.text()).not.toContain("just login");
+  });
+
+  it("names the recipe file, not screens it never drew, when the recipe it was given overfills the disk", async () => {
+    const f = fake({ yes: true });
+    const path = join(dirname(f.opts.statePath), "given.json");
+    writeFileSync(path, JSON.stringify({
+      version: 1,
+      at: "2026-09-06T03:00:00.000Z",
+      histories: [],
+      rows: [],
+      custom: [{ kind: "custom", id: "brew/llvm", name: "llvm", install: ["brew install llvm"], check: "brew list llvm", manager: "brew", size: 30 * 1024 * 1024 * 1024, why: "installed on this Mac by brew" }],
+    }));
+    f.opts.recipeFile = path;
+    expect((await runInit(f.opts, f.io)).code).toBe(1);
+    const out = f.text();
+    expect(out).toContain(`Untick about 14.8 GB of tools or agents in ${path}`);
+    expect(out).not.toContain("What they need");
+    expect(f.backends.flatMap(b => b.machines)).toHaveLength(0);
   });
 
   it("the wsp tools rows follow the agents on this Mac, not the recipe's recorded source; a ticked row writes here, and a file with comments says they are gone", async () => {
