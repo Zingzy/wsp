@@ -519,6 +519,8 @@ function serverRow(config: McpConfig, server: McpServer, fit: LinuxFit, deps: Ho
     bytes: c.bytes,
     default: reason === undefined && !deps.gone ? "bring" : "skip",
     ...(reason !== undefined ? { reason } : {}),
+    // A server that carries a secret travels only on a copy answer, never on a bare tick.
+    ...(c.secrets.length > 0 ? { consent: true } : {}),
     detail: words.join("; "),
   };
 }
@@ -561,6 +563,7 @@ function remoteRow(store: RemoteStore, matched: readonly string[]): ManifestEntr
   return {
     ...base,
     default: "bring",
+    consent: true,
     detail: `browser sign-ins saved by mcp-remote for remote servers: ${n} token${n === 1 ? "" : "s"} (${fmt(tokenBytes)})${whom.length > 0 ? `, ${whom.join("; ")}` : ""}${older ? "; older bridge versions' folders stay here" : ""}`,
   };
 }

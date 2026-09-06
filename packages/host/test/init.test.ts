@@ -13,7 +13,7 @@ import { stripVTControlCharacters } from "node:util";
 import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
 import { APP_DATA_GROUP, RUNGS, claimedPaths, entriesFor, everything, nodeMachineFs, type Machine, type Manifest, type ManifestEntry } from "@wsp/collect";
 import { SNAPSHOT_STORAGE, type BackendPricing, type BrewFormula, type BrewTable } from "@wsp/engine";
-import { ALREADY_APPLIED, type GoldenManifest } from "@wsp/protocol";
+import { ALREADY_APPLIED, Recipe, type GoldenManifest } from "@wsp/protocol";
 import { DAEMON_TOKEN_SET, createRuntime, goldenHead, memoryStore, type GoldenRecipe, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { GOLDEN_SETUP } from "@wsp/catalog";
@@ -28,7 +28,7 @@ import { importResultPath } from "../src/init-import.js";
 import { noteOutcomes } from "../src/init-signin.js";
 import { checkScript } from "../src/signin-relay.js";
 import { answersChecks, checkTag, fakePtyLink, type CheckAnswer, type FakePty, type FakePtyLink } from "./fake-pty-link.js";
-import { EVERYTHING, FIXTURE } from "./init-fixture.js";
+import { EVERYTHING, FIXTURE, RECIPE } from "./init-fixture.js";
 import { guestAnswer, stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
 
 const SOLARI = "slr_live_fake_solari_key";
@@ -155,6 +155,7 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
   const opts: InitOptions = {
     yes: false,
     collect: async () => FIXTURE,
+    recipe: async () => RECIPE,
     keys: { solari: SOLARI },
     pricing: PRICING,
     statePath: join(dir, "state.json"),
@@ -271,9 +272,20 @@ function withGhCopy(f: Fake): void {
   writeFileSync(f.opts.manifestPath, JSON.stringify({ entries: FIXTURE.entries.map(e => (e.id === "logins/gh" ? { ...e, bring: true, choice: "copy" } : e)) }));
 }
 
+/** The eight screens of a saved manifest stay reachable through --manifest: what the collector would have found is
+ * written to a file and the run ticks from it, one screen per rung, as a saved recipe does. */
+async function oldScreens(f: Fake): Promise<void> {
+  const manifest = await f.opts.collect(() => {}, () => {});
+  const dir = mkdtempSync(join(tmpdir(), "wsp-init-manifest-"));
+  dirs.push(dir);
+  f.opts.manifestPath = join(dir, "manifest.json");
+  writeFileSync(f.opts.manifestPath, JSON.stringify(manifest));
+}
+
 describe("wsp init, interactive", () => {
   it("the Editors screen says what the rung is for and what each row does on the machine", async () => {
     const f = fake({ columns: 140 });
+    await oldScreens(f);
     const run = runInit(f.opts, f.io);
     await f.until("Identity");
     await f.press(KEY.enter);
@@ -303,6 +315,7 @@ describe("wsp init, interactive", () => {
 
   it("detects first, walks the seven rungs, confirms once, prepares through the runtime, signs in, seals on enter, forks the first workspace and opens the app", async () => {
     const f = fake();
+    await oldScreens(f);
     const run = runInit(f.opts, f.io);
 
     await f.until("Identity");
@@ -491,6 +504,7 @@ describe("wsp init, interactive", () => {
 
   it("escape on a later rung replays the earlier answer", async () => {
     const f = fake();
+    await oldScreens(f);
     const run = runInit(f.opts, f.io);
     await f.until("Identity");
     // The cursor starts on the all row and skips the git bullet: one down is ssh config, untick it.
@@ -518,6 +532,7 @@ describe("wsp init, interactive", () => {
 
   it("enter at the confirm takes No: the marker sits on No, nothing boots, and the recipe is kept for --manifest", async () => {
     const f = fake();
+    await oldScreens(f);
     const run = runInit(f.opts, f.io);
     for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
       await f.until(rung);
@@ -541,6 +556,7 @@ describe("wsp init, interactive", () => {
 
   it("an agent ticked then unticked on the Agents screen shows and then hides its login row", async () => {
     const f = fake();
+    await oldScreens(f);
     const run = runInit(f.opts, f.io);
     for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools"]) {
       await f.until(rung);
@@ -578,6 +594,7 @@ describe("wsp init, interactive", () => {
     const notes: ManifestEntry = { rung: "agents", id: "agents/mcp/claude/notes", label: "notes", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "skip", reason: "command ~/Library/Notes/mcp is macOS-only, will not run", detail: "stdio: ~/Library/Notes/mcp; carries no secret" };
     const scope = { rung: "agents" as const, group: "Claude Code MCP servers", hint: "user scope and your home folder", note: "12 more in 2 project folders stay on this computer (a repo's .mcp.json travels with it)" };
     const f = fake({ collect: async () => ({ entries: [...FIXTURE.entries, github, notes], groups: [scope] }), columns: 140 });
+    await oldScreens(f);
     const run = runInit(f.opts, f.io);
     for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools"]) {
       await f.until(rung);
@@ -637,6 +654,7 @@ describe("wsp init, interactive", () => {
 
   it("no at the seal question leaves the builder running for a later attach, closes the host and exits 1", async () => {
     const f = fake();
+    await oldScreens(f);
     const run = runInit(f.opts, f.io);
     for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
       await f.until(rung);
@@ -663,15 +681,22 @@ describe("wsp init, interactive", () => {
         for (const rung of RUNGS) onRung(rung, FIXTURE.entries.filter(e => e.rung === rung).length);
         return FIXTURE;
       },
+      recipe: async onHistory => {
+        for (const h of RECIPE.histories) onHistory(h);
+        return RECIPE;
+      },
     });
     const run = runInit(f.opts, f.io);
-    await f.until("1/8");
+    await f.until("1/3");
     const t = f.text();
     expect(t).toContain("Reading this computer  Identity 3");
     expect(t).toContain("Reading this computer  Identity 3, Shell 2, Editors 1, Toolchains 1, Tools 4, Agents 2, Sign-ins 3");
     expect(t.indexOf("Sign-ins 3")).toBeLessThan(t.indexOf("Found on this computer"));
-    for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
-      await f.until(rung);
+    // Then the recipe is read, its own spinner naming each agent's history as it lands.
+    expect(t.indexOf("Reading what your agents used")).toBeGreaterThan(t.indexOf("Sign-ins 3"));
+    expect(t).toContain("Reading what your agents used  Claude Code: no history here");
+    for (const screen of ["Agents", "What they need", "Sign-ins and keys"]) {
+      await f.until(screen);
       await f.press(KEY.enter);
     }
     await f.until(BOOT);
@@ -688,14 +713,14 @@ describe("wsp init, interactive", () => {
       },
     });
     const run = runInit(f.opts, f.io);
-    await f.until("1/8");
+    await f.until("1/3");
     const spins = f.text().split("\r").filter(l => l.includes("Reading this computer"));
     expect(spins.length).toBeGreaterThan(1);
     expect(spins.map(l => l.length).filter(n => n > 48)).toEqual([]);
     expect(spins.filter(l => /Identity 3$/.test(l)).length).toBeGreaterThan(0);
     expect(spins.at(-1)).toMatch(/Identity 3, Shell 2.*…$/);
-    for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
-      await f.until(rung);
+    for (const screen of ["Agents", "What they need", "Sign-ins and keys"]) {
+      await f.until(screen);
       await f.press(KEY.enter);
     }
     await f.until(BOOT);
@@ -703,14 +728,234 @@ describe("wsp init, interactive", () => {
     expect((await run).code).toBe(1);
   });
 
-  it("nothing found on this machine still shows the screens' empty state and reaches the confirm", async () => {
-    const f = fake({ collect: async () => ({ entries: [] }) });
+  it("nothing found on this machine still offers the six agents, unticked, and reaches the confirm", async () => {
+    const f = fake({ collect: async () => ({ entries: [] }), recipe: async () => ({ ...RECIPE, rows: RECIPE.rows.map(r => ({ ...r, on: r.kind === "tool" && r.source.kind === "popular" })) }) });
     const run = runInit(f.opts, f.io);
-    await f.until(BOOT);
+    await f.until("Agents");
     expect(f.text()).toContain("Nothing found to bring");
     expect(f.text()).toContain("--manifest");
+    // The catalog's six, none ticked: a fresh Mac still gets to try them on a machine.
+    expect(f.text()).toMatch(/all\s+0 of 6/);
+    for (const name of ["Claude Code", "Codex", "Gemini CLI", "OpenCode", "Pi", "Hermes Agent"]) expect(f.text()).toMatch(new RegExp(`○ ${name}\\s+[\\d.]+ MB`));
+    await f.press(KEY.enter);
+    await f.until("What they need");
+    expect(f.text()).toContain("9 tools: 9 in the base");
+    await f.press(KEY.enter);
+    await f.until("Sign-ins and keys");
+    expect(f.text()).toContain("nothing found");
+    await f.press(KEY.enter);
+    await f.until(BOOT);
     await f.press("n");
     expect((await run).code).toBe(1);
+  });
+});
+
+describe("wsp init, the summary-first screens", () => {
+  const hermesKeys: ManifestEntry = { rung: "logins", id: "logins/hermes-keys", label: "Hermes Agent API keys", group: "Agent logins", paths: ["~/.hermes/.env"], bytes: 25_000, default: "bring", detail: "the keys in ~/.hermes/.env travel only by copy; no sign-in produces them" };
+  const hermesLogin: ManifestEntry = { rung: "logins", id: "logins/hermes", label: "Hermes Agent login", group: "Agent logins", paths: ["~/.hermes/auth.json"], bytes: 400, default: "skip" };
+  const hermes: ManifestEntry = { rung: "agents", id: "agents/hermes", label: "Hermes Agent", paths: ["~/.hermes/config.yaml"], bytes: 600, default: "bring" };
+  const kube: ManifestEntry = { rung: "logins", id: "logins/kube", label: "kubectl config", group: "CLI logins", paths: ["~/.kube/config"], bytes: 900, default: "bring" };
+  const github: ManifestEntry = { rung: "agents", id: "agents/mcp/claude/github", label: "github", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "bring", consent: true, detail: "stdio: npx @modelcontextprotocol/server-github; runs via npx; carries a secret: env GITHUB_TOKEN (40 B)" };
+  const notes: ManifestEntry = { rung: "agents", id: "agents/mcp/claude/notes", label: "notes", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "bring", detail: "stdio: npx notes-mcp; runs via npx; carries no secret" };
+  /** This Mac with Hermes beside Claude Code and two of Claude Code's MCP servers, one with a token; a recipe that ticks Codex too, a tool the agents used that is not here, and one they looked at once. */
+  const LAPTOP: Manifest = { entries: [...FIXTURE.entries, hermes, hermesLogin, hermesKeys, kube, github, notes] };
+  const MEASURED: Recipe = {
+    ...RECIPE,
+    rows: [
+      ...RECIPE.rows.map(r => (r.id === "codex" ? { ...r, on: true } : r)),
+      { id: "hermes", kind: "agent", on: true, source: { kind: "installed", paths: ["~/.hermes/config.yaml"], bin: true } },
+      { id: "wrangler", kind: "tool", on: true, source: { kind: "used", sessions: 3, calls: 40 } },
+      { id: "go", kind: "tool", on: false, source: { kind: "used", sessions: 1, calls: 2 } },
+    ],
+  };
+
+  it("three screens: the six agents with this Mac's ticked, one line of counts over the loud Disk line with the rows behind a, the sign-ins listed and the keys ticked; then the build installs the agent ticked here and signs it in on the machine", async () => {
+    const f = fake({ collect: async () => LAPTOP, recipe: async () => MEASURED, columns: 100 });
+    // A tall terminal, so the whole tools list is on screen at once.
+    Object.assign(f.io.output, { rows: 50 });
+    for (const [rel, text] of [[".hermes/.env", "OPENAI_API_KEY=sk-x\n"], [".hermes/auth.json", "{}"], [".hermes/config.yaml", "model: x\n"], [".kube/config", "current-context: minikube\n"]] as const) {
+      mkdirSync(dirname(join(f.opts.home, rel)), { recursive: true });
+      writeFileSync(join(f.opts.home, rel), text);
+    }
+    const run = runInit(f.opts, f.io);
+
+    await f.until("Agents");
+    const one = f.text();
+    // Before any question: what was found; the tool the agents used that this Mac has no row for gets a bare row, not a warning.
+    expect(one).toContain("22 found on this computer. Nothing has left this computer.");
+    expect(one).not.toContain("not in this build");
+    // The catalog's six in its order, a size beside each, the three on this Mac ticked.
+    expect(one).toMatch(/◆  Agents  1\/3\n┃ {2}search/);
+    expect(one).toMatch(/all\s+3 of 6\n/);
+    expect(one).toMatch(/● Claude Code\s+208\.0 MB\n┃\s+● Codex\s+455\.0 MB\n┃\s+○ Gemini CLI\s+189\.0 MB\n┃\s+○ OpenCode\s+673\.0 MB\n┃\s+○ Pi\s+165\.0 MB\n┃\s+● Hermes Agent\s+484\.0 MB\n/);
+    expect(one).toMatch(/Selected: Claude Code, Codex, Hermes Agent\n/);
+    // Down onto Gemini CLI: the detail says it is not here and what installs; space ticks it for the machine.
+    await f.press(KEY.down, KEY.down, KEY.down);
+    await f.until("not on this Mac; try it on the machine, nothing here changes");
+    expect(f.text()).toContain("installs about 189.0 MB on the machine (measured 2026-09-05)");
+    await f.press(KEY.space);
+    await f.until(/● Gemini CLI/);
+    await f.press(KEY.enter);
+
+    await f.until("What they need");
+    const two = f.text().slice(f.text().lastIndexOf("◆  What they need"));
+    expect(two).toMatch(/^◆  What they need  2\/3\n┃  12 tools: 9 in the base, 2 installed here, 1 used by your agents\n┃  Disk: [\d.]+ GB of 15\.2 GB on the 20 GB builder \(files [\d.]+ KB, Homebrew's toolchain 1\.0 GB, agents\n┃ {8}1\.3 GB; 3 unmeasured, ~300\.0 MB\)\n┗  a adjust • enter next • esc back/);
+    // No search, no rows, no weight tiers: the counts, the Disk line and three keys.
+    expect(two).not.toMatch(/search|● |○ /);
+    // a opens the rows: the floor as bullets under the title, the rest grouped by the source of their tick.
+    await f.press("a");
+    await f.until(/▾ What they need\s+in the base/);
+    const list = f.text().slice(f.text().lastIndexOf("◆  What they need"));
+    expect(list).toMatch(/• Node 22 with npm\s+250\.0 MB\n/);
+    expect(list).toMatch(/▾ Installed here\s+2 of 2\n┃\s+● GitHub CLI\n┃\s+● yq\n┃\s+▾ Used by your agents\s+1 of 2\n/);
+    // Typing narrows the rows to a match; space unticks yq; enter keeps the ticks and returns to the counts.
+    await f.press("y", "q");
+    await f.until(/search {2}yq/);
+    await f.press(KEY.space);
+    await f.until(/○ yq/);
+    expect(f.text().slice(f.text().lastIndexOf("◆  What they need"))).toMatch(/Disk: /);
+    await f.press(KEY.enter);
+    await f.until("a adjust");
+    expect(f.text().slice(f.text().lastIndexOf("◆  What they need"))).toContain("11 tools: 9 in the base, 1 installed here, 1 used by your agents");
+    await f.press(KEY.enter);
+
+    await f.until("Sign-ins and keys");
+    const three = f.text().slice(f.text().lastIndexOf("◆  Sign-ins and keys"));
+    // The logins with a browser or device flow are listed with their command and no action here; Gemini's, ticked though not on this Mac, among them.
+    expect(three).toMatch(/▾ Sign-ins and keys\s+sign in on the machine after the build\n┃\s+• GitHub CLI login\s+gh auth login\n┃\s+• Claude Code login\s+claude auth login\n┃\s+• Codex login\s+codex login\n┃\s+• Hermes Agent login\s+hermes auth\n┃\s+• Gemini CLI login\s+gemini\n/);
+    // The keys: Hermes's .env beside its login, ticked to copy; the kubeconfig, whose command is not coming, locked with the reason;
+    // the MCP server with a token, its agent beside it, unticked until the person says copy. The server without one is not here: it follows its agent.
+    expect(three).toMatch(/● Hermes Agent API keys\s+24\.4 KB\n┃\s+○ kubectl config\s+stays here\n┃\s+○ github\s+Claude Code\n/);
+    expect(three).not.toContain("notes");
+    expect(three).not.toMatch(/sign in, copy, skip|\bcopy\b.*\bskip\b/);
+    await f.press(KEY.down);
+    await f.until("ticked, it is copied to the machine; unticked, it stays here");
+    expect(f.text()).toContain("the keys in ~/.hermes/.env travel only by copy; no sign-in produces them");
+    await f.press(KEY.space);
+    await f.until(/○ Hermes Agent API keys/);
+    await f.press(KEY.down, KEY.down);
+    await f.until("ticked, it is copied to the machine; unticked, not copied; the server stays off the machine");
+    expect(f.text()).toContain("defined in the agent's config");
+    expect(f.text()).toContain("stdio: npx @modelcontextprotocol/server-github; runs via npx; carries a secret");
+    await f.press(KEY.enter);
+
+    await f.until(BOOT);
+    const summary = f.text().slice(f.text().lastIndexOf("Summary"), f.text().lastIndexOf("Recipe saved"));
+    // The four agents and the one MCP server without a secret; the one with a token, unticked, is out and unlisted; no editor on this path.
+    // Gemini's row is the catalog's, added after what the collector found, so it installs last.
+    expect(summary).toMatch(/Editors\s+0 of 1\n/);
+    expect(summary).toMatch(/Agents\s+5 of 8/);
+    expect(summary).toMatch(/Sign-ins\s+5 sign in\n/);
+    expect(summary).toMatch(/Hermes Agent API keys\s+skip\n/);
+    expect(summary).toMatch(/kubectl config\s+skip\n/);
+    expect(summary).not.toContain("github");
+    expect(summary.replace(/\n\s*│?\s+/g, " ")).toMatch(/Installs\s+Claude Code, Codex, Hermes Agent, Gemini CLI, 2 tools plus Homebrew's toolchain, 1 MCP server/);
+    expect(f.text()).toMatch(/Recipe saved to .*golden-recipe\.json and .*recipe\.json/);
+    await f.press("y");
+    await sealIt(f);
+    const result = await run;
+    expect(result.code).toBe(0);
+    const out = f.text();
+    expect(out).not.toMatch(/—|\p{Emoji_Presentation}/u);
+    // The four agents installed, Gemini from the catalog's road though nothing of it is on this Mac; the five sign-ins ran here.
+    expect(out).toMatch(/Agents\n│\s+4 installed: Claude Code, Codex, Hermes Agent, Gemini CLI\n/);
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual(["exec gh auth login || exit\r", "exec claude auth login || exit\r", "exec codex login || exit\r", "exec hermes auth || exit\r", "exec gemini || exit\r"]);
+    expect(out).toMatch(/Gemini CLI login: signed in \(gemini exited 0\)/);
+    expect(f.reads).toEqual([]);
+    const log = f.backends[0]!.machines[0]!.execLog;
+    expect(log.some(c => c.includes("@google/gemini-cli@"))).toBe(true);
+    expect(log.some(c => c.includes("brew install yq"))).toBe(false);
+    expect(log.some(c => c.includes("brew install gh"))).toBe(true);
+    // Both recipe files: the collector's rows with the ticks, and the small one with the catalog ids, ticks and answers as the screens left them.
+    const saved = new Map(loadManifest(join(dirs[0]!, "golden-recipe.json")).entries.map(e => [e.id, e]));
+    expect(saved.get("agents/gemini")).toMatchObject({ bring: true, paths: [] });
+    expect(saved.get("agents/pi")).toMatchObject({ bring: false });
+    expect(saved.get("tools/brew/yq")).toMatchObject({ bring: false });
+    expect(saved.get("tools/brew/gh")).toMatchObject({ bring: true });
+    expect(saved.get("tools/npm/tsx")).toMatchObject({ bring: false });
+    expect(saved.get("logins/hermes-keys")).toMatchObject({ bring: false, choice: "skip" });
+    expect(saved.get("logins/hermes")).toMatchObject({ bring: false, choice: "machine" });
+    expect(saved.get("logins/gemini")).toMatchObject({ bring: false, choice: "machine" });
+    expect(saved.get("logins/kube")).toMatchObject({ bring: false, choice: "skip" });
+    expect(saved.get("editors/nvim")).toMatchObject({ bring: false });
+    expect(saved.get("agents/mcp/claude/github")).toMatchObject({ bring: false, choice: "skip" });
+    expect(saved.get("agents/mcp/claude/notes")).toMatchObject({ bring: true });
+    // The server with the token was never ticked, so the build left it off the machine's config and says why.
+    expect(JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8")).mcp).toEqual(expect.arrayContaining([expect.objectContaining({ name: "github", outcome: "skipped", note: "unticked" })]));
+    const small = Recipe.parse(JSON.parse(readFileSync(join(dirs[0]!, "recipe.json"), "utf8")));
+    const rows = new Map(small.rows.map(r => [r.id, r]));
+    expect(rows.get("gemini")).toMatchObject({ on: true, signIn: "machine" });
+    expect(rows.get("codex")).toMatchObject({ on: true, signIn: "machine" });
+    expect(rows.get("claude")).toMatchObject({ on: true, signIn: "machine" });
+    expect(rows.get("hermes")).toMatchObject({ on: true, signIn: "machine" });
+    expect(rows.get("yq")).toMatchObject({ on: false });
+    expect(rows.get("gh")).toMatchObject({ on: true, signIn: "machine" });
+    expect(rows.get("wrangler")).toMatchObject({ on: true });
+    expect(rows.get("node")).toMatchObject({ on: true });
+    expect(readFileSync(join(dirs[0]!, "recipe.json"), "utf8")).not.toMatch(/sk-x|minikube/);
+  });
+
+  it("esc steps back a screen and the ticks stand; the first screen stays put", async () => {
+    const f = fake({ collect: async () => LAPTOP, recipe: async () => MEASURED });
+    const run = runInit(f.opts, f.io);
+    await f.until("Agents");
+    await f.press(KEY.esc);
+    await new Promise(r => setTimeout(r, 100));
+    expect(f.text()).not.toContain("What they need");
+    await f.press(KEY.down, KEY.down, KEY.down, KEY.space, KEY.enter);
+    await f.until("What they need");
+    await f.press(KEY.esc);
+    await f.until(/Agents  1\/3[\s\S]*Agents  1\/3/);
+    expect(f.text().slice(f.text().lastIndexOf("◆  Agents"))).toMatch(/● Gemini CLI/);
+    await f.press(KEY.enter);
+    await f.until(/What they need  2\/3[\s\S]*What they need  2\/3/);
+    await f.press(KEY.enter);
+    await f.until("Sign-ins and keys");
+    await f.press(KEY.esc);
+    await f.until(/What they need  2\/3[\s\S]*What they need  2\/3[\s\S]*What they need  2\/3/);
+    await f.press(KEY.enter);
+    await f.until(/Sign-ins and keys  3\/3[\s\S]*Sign-ins and keys  3\/3/);
+    await f.press(KEY.enter);
+    await f.until(BOOT);
+    await f.press("n");
+    expect((await run).code).toBe(1);
+    const saved = new Map(loadManifest(join(dirs[0]!, "golden-recipe.json")).entries.map(e => [e.id, e]));
+    expect(saved.get("agents/gemini")).toMatchObject({ bring: true });
+    expect(saved.get("tools/catalog/wrangler")).toMatchObject({ label: "Cloudflare Wrangler", bring: true });
+  });
+
+  it("under --yes the recipe decides the ticks, the keys copy, the logins wait for the machine, and both recipe files are written", async () => {
+    const f = fake({ yes: true, collect: async () => LAPTOP, recipe: async () => MEASURED });
+    for (const rel of [".hermes/.env", ".hermes/auth.json", ".hermes/config.yaml", ".kube/config"]) {
+      mkdirSync(dirname(join(f.opts.home, rel)), { recursive: true });
+      writeFileSync(join(f.opts.home, rel), "x\n");
+    }
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    const out = f.text();
+    expect(out).not.toMatch(/Agents  1\/3|What they need|Sign-ins and keys/);
+    expect(out).not.toContain("not in this build");
+    expect(out.replace(/\n\s*│?\s+/g, " ")).toMatch(/Installs\s+Claude Code, Codex, Hermes Agent, 3 tools plus Homebrew's toolchain, 1 MCP server/);
+    expect(out).toMatch(/Hermes Agent API keys\s+copy\n/);
+    // The server with a token is consent: nobody is here to give it, so it stays off the machine.
+    expect(out).not.toMatch(/github\s+copy/);
+    // The copied keys are checked by the Hermes login's own status; the fake guest holds none, so the check says so.
+    expect(out).toContain("Hermes Agent API keys: not signed in (copied, but hermes auth list says not signed in)");
+    expect(out).toContain("Sign-ins on the machine skipped: GitHub CLI login, Claude Code login, Codex login, Hermes Agent login. --yes asks nothing; sign in from the app's terminal.");
+    expect(f.reads).toEqual([]);
+    const saved = new Map(loadManifest(join(dirs[0]!, "golden-recipe.json")).entries.map(e => [e.id, e]));
+    expect(saved.get("agents/codex")).toMatchObject({ bring: true });
+    expect(saved.get("agents/gemini")).toMatchObject({ bring: false });
+    expect(saved.get("tools/npm/tsx")).toMatchObject({ bring: false });
+    expect(saved.get("tools/catalog/wrangler")).toMatchObject({ label: "Cloudflare Wrangler", bring: true });
+    expect(saved.get("logins/hermes-keys")).toMatchObject({ bring: true, choice: "copy" });
+    expect(saved.get("logins/kube")).toMatchObject({ bring: false, choice: "skip" });
+    expect(saved.get("agents/mcp/claude/github")).toMatchObject({ bring: false, choice: "skip" });
+    expect(saved.get("agents/mcp/claude/notes")).toMatchObject({ bring: true });
+    expect(saved.get("editors/nvim")).toMatchObject({ bring: false });
+    const small = Recipe.parse(JSON.parse(readFileSync(join(dirs[0]!, "recipe.json"), "utf8")));
+    expect(small.rows.filter(r => r.on).map(r => r.id)).toEqual(["claude", "codex", "node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker", "gh", "yq", "hermes", "wrangler"]);
+    expect(small.rows.find(r => r.id === "gh")).toMatchObject({ signIn: "machine" });
+    expect(small.rows.find(r => r.id === "go")).not.toHaveProperty("signIn");
   });
 });
 
@@ -719,6 +964,7 @@ describe("wsp init, everything else", () => {
 
   it("under 100 columns the rows keep size and role only, so the label has room", async () => {
     const f = fake({ collect: async () => found() });
+    await oldScreens(f);
     const run = runInit(f.opts, f.io);
     for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
       await f.until(rung);
@@ -744,6 +990,7 @@ describe("wsp init, everything else", () => {
 
   it("the eighth screen lists the unclaimed rows unticked with size, files, date and role, answers a credential row per item, and saves both", async () => {
     const f = fake({ collect: async () => found(), columns: 100 });
+    await oldScreens(f);
     mkdirSync(join(f.opts.home, ".config", "demo", "cache"), { recursive: true });
     writeFileSync(join(f.opts.home, ".config", "demo", "settings.toml"), "theme = 1\n");
     writeFileSync(join(f.opts.home, ".config", "demo", "cache", "blob"), "x".repeat(500));
@@ -861,6 +1108,7 @@ describe("wsp init, everything else", () => {
 
   it("on a terminal each cut secret is asked for hidden and set before any login is checked; the pasted value rides the pty's environment into the machine's secrets file, out of the screen and the run log, and the copied logins' check reads that file first", async () => {
     const f = fake();
+    await oldScreens(f);
     writeFileSync(join(f.opts.home, ".zshrc"), "export A=1\nexport ANTHROPIC_API_KEY=fake\n");
     const run = runInit(f.opts, f.io);
     for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents"]) {
@@ -935,6 +1183,7 @@ describe("wsp init, everything else", () => {
     const netrc = { rung: "everything" as const, id: "everything/.netrc", label: ".netrc", paths: ["~/.netrc"], bytes: 30, default: "skip" as const, consent: true, role: "credential" as const, files: 1, mtime: Date.UTC(2026, 7, 12, 12), detail: "credential-shaped" };
     const env = { rung: "everything" as const, id: "everything/.env", label: ".env", paths: ["~/.env"], bytes: 20, default: "skip" as const, role: "unknown" as const, files: 1, mtime: Date.UTC(2026, 7, 12, 12), detail: "nothing says what this is" };
     const f = fake({ collect: async () => ({ entries: [...FIXTURE.entries, netrc, env, ...EVERYTHING] }), columns: 100 });
+    await oldScreens(f);
     writeFileSync(join(f.opts.home, ".netrc"), "machine api.example.com login me password fake-netrc\n", { mode: 0o600 });
     writeFileSync(join(f.opts.home, ".env"), "TOKEN=fake-env\n");
     const run = runInit(f.opts, f.io);
@@ -980,6 +1229,7 @@ describe("wsp init, everything else", () => {
   it("a directory named .env on this computer is offered as a plain row, ticks, and is copied", async () => {
     const env = { rung: "everything" as const, id: "everything/.env", label: ".env", paths: ["~/.env"], bytes: 60, default: "skip" as const, role: "unknown" as const, files: 2, mtime: Date.UTC(2026, 7, 12, 12), detail: "nothing says what this is" };
     const f = fake({ collect: async () => ({ entries: [...FIXTURE.entries, env, ...EVERYTHING] }), columns: 100 });
+    await oldScreens(f);
     mkdirSync(join(f.opts.home, ".env", "bin"), { recursive: true });
     writeFileSync(join(f.opts.home, ".env", "bin", "activate"), "export VIRTUAL_ENV=$HOME/.env\n");
     writeFileSync(join(f.opts.home, ".env", "pyvenv.cfg"), "home = /usr/bin\n");
@@ -1040,6 +1290,7 @@ describe("wsp init, the sign-in stage", () => {
 
   it("a login the status check does not confirm is offered a retry, then the table's fallback, then a skip; o opens the page here and arms auto-open for that command only; the skip lands in the notes", async () => {
     const f = fake({ signedIn: false, hold: true, collect: async () => CODEX_MANIFEST });
+    await oldScreens(f);
     const run = runInit(f.opts, f.io);
     await f.until("Identity");
     await f.press(KEY.enter);
@@ -1123,6 +1374,7 @@ describe("wsp init, the sign-in stage", () => {
 
   it("a tool that is not on the machine (exit 127) is skipped with that reason, its status command never runs, and nothing is asked", async () => {
     const f = fake({ missing: true, collect: async () => CODEX_MANIFEST });
+    await oldScreens(f);
     const run = runInit(f.opts, f.io);
     await f.until("Identity");
     await f.press(KEY.enter);
@@ -1151,6 +1403,7 @@ describe("wsp init, the sign-in stage", () => {
       ],
     };
     const f = fake({ signedIn: false, hold: true, collect: async () => CLOUDFLARED_MANIFEST });
+    await oldScreens(f);
     const run = runInit(f.opts, f.io);
     await f.until("Identity");
     await f.press(KEY.enter);
@@ -1190,6 +1443,7 @@ describe("wsp init, the sign-in stage", () => {
 
   it("a daemon link that drops under a login ends that command as not signed in, and the retry dials a fresh link", async () => {
     const f = fake({ signedIn: false, hold: true, collect: async () => CODEX_MANIFEST });
+    await oldScreens(f);
     const run = runInit(f.opts, f.io);
     await f.until("Identity");
     await f.press(KEY.enter);
@@ -1251,6 +1505,7 @@ describe("wsp init, the sign-in stage", () => {
 
   it("when the machine's terminal cannot be reached the login is not signed in with the reason, can be skipped, and the seal still comes", async () => {
     const f = fake({ collect: async () => CODEX_MANIFEST, daemon: async () => { throw new Error("no daemon token"); } });
+    await oldScreens(f);
     const run = runInit(f.opts, f.io);
     await f.until("Identity");
     await f.press(KEY.enter);
@@ -1333,6 +1588,7 @@ describe("wsp init, logins copied to the machine", () => {
 
   it("a copied login whose status check fails is offered the machine sign-in, which lands it as signed in; a copied kubeconfig is proved by its context", async () => {
     const f = fake({ collect: async () => COPIED_MANIFEST });
+    await oldScreens(f);
     ghOnBuilder(f);
     const { run } = await toTheBuilder(f);
     await f.until("GitHub CLI login: not signed in (copied, but gh auth status says not signed in)");
@@ -1366,6 +1622,7 @@ describe("wsp init, logins copied to the machine", () => {
 
   it("two gh accounts on this computer are read from the Keychain one each; a copy whose status lists one of them as failed is not signed in until the machine sign-in mends it", async () => {
     const f = fake({ collect: async () => COPIED_MANIFEST });
+    await oldScreens(f);
     mkdirSync(join(f.opts.home, ".config", "gh"), { recursive: true });
     writeFileSync(join(f.opts.home, ".config", "gh", "hosts.yml"), "github.com:\n    git_protocol: ssh\n    users:\n        other:\n        Zingzy:\n    user: Zingzy\n");
     ghOnBuilder(f);
@@ -1384,6 +1641,7 @@ describe("wsp init, logins copied to the machine", () => {
 
   it("a gh account with no Keychain item is left behind: the copy goes on without it, the row detail names it, and the check passes without it", async () => {
     const f = fake({ collect: async () => COPIED_MANIFEST });
+    await oldScreens(f);
     f.opts.secrets = {
       read: async (service, account) => {
         f.reads.push(`${service} (${account})`);
@@ -1554,6 +1812,7 @@ describe("wsp init, logins copied to the machine", () => {
 
   it("a copied login whose status check fails can be skipped instead; the skip is what the seal records", async () => {
     const f = fake({ collect: async () => COPIED_MANIFEST });
+    await oldScreens(f);
     ghOnBuilder(f);
     const { run } = await toTheBuilder(f);
     await f.until("GitHub CLI login  r sign in on the machine   s skip");
@@ -1595,6 +1854,7 @@ describe("wsp init, logins copied to the machine", () => {
   it("a login with no table row runs a bare shell on the machine; after it ends unclean the offer is a retry, since a pty has run", async () => {
     const SHELL_MANIFEST: Manifest = { entries: [FIXTURE.entries[0]!, { rung: "logins", id: "logins/foo", label: "foo login", group: "CLI logins", paths: ["~/.foo/auth.json"], bytes: 100, default: "skip" }] };
     const f = fake({ collect: async () => SHELL_MANIFEST });
+    await oldScreens(f);
     const run = runInit(f.opts, f.io);
     await f.until("Identity");
     await f.press(KEY.enter);
@@ -2252,6 +2512,7 @@ describe("wsp init, flags and no terminal", () => {
     writeFileSync(join(first.opts.home, ".zshrc"), "export A=2\n");
 
     const f = fake({ home: first.opts.home });
+    await oldScreens(f);
     f.opts.runtime = recipe => {
       f.backends.push(shared);
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
@@ -2909,6 +3170,7 @@ describe("wsp init, everything else over a HOME on disk", () => {
 
   it("rows sit under their parent, macOS app data is one folded group with its size, and no two rows read alike", async () => {
     const f = fake({ collect: async () => found(f.opts.home), columns: 80 });
+    await oldScreens(f);
     Object.assign(f.io.output, { rows: 60 });
     const run = runInit(f.opts, f.io);
     for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
@@ -3186,6 +3448,7 @@ describe("disk estimate before the boot", () => {
 
   it("under --yes a formula of 500 MB and over is left out by the weight policy, so the same Homebrew fits the builder", async () => {
     const f = fake({ yes: true, brew: async () => HUGE_GH });
+    await oldScreens(f);
     const run = runInit(f.opts, f.io);
     await f.until(BOOT);
     const out = f.text();
@@ -3276,6 +3539,7 @@ describe("disk estimate before the boot", () => {
       ["oniguruma", { name: "oniguruma", fullName: "oniguruma", deps: [], bytes: 1024 * 1024, macosOnly: false }],
     ]);
     const f = fake({ brew: async () => brew, columns: 120 });
+    await oldScreens(f);
     const run = runInit(f.opts, f.io);
     await f.until("Identity");
     for (const rung of ["Shell", "Editors", "Toolchains", "Tools"]) {
@@ -3352,6 +3616,7 @@ describe("disk estimate before the boot", () => {
     process.env["FORCE_COLOR"] = "3";
     try {
       const f = fake({ brew: async () => brew, collect: async () => ({ entries: tools }), columns: 120 });
+      await oldScreens(f);
       const run = runInit(f.opts, f.io);
       await f.until("Tools");
       const frame = () => f.raw().slice(f.raw().lastIndexOf("\x1b[36m◆\x1b[39m  \x1b[36mTools"));
@@ -3409,6 +3674,7 @@ describe("disk estimate before the boot", () => {
     process.env["FORCE_COLOR"] = "3";
     try {
       const f = fake({ brew: async () => brew, collect: async () => ({ entries: tools }), columns: 120 });
+      await oldScreens(f);
       const run = runInit(f.opts, f.io);
       await f.until("Tools");
       const frame = () => f.raw().slice(f.raw().lastIndexOf("\x1b[36m◆\x1b[39m  \x1b[36mTools"));
@@ -3447,6 +3713,7 @@ describe("disk estimate before the boot", () => {
     // The sentence takes three lines under 76 columns and two from there up to the 100 column cap.
     for (const [columns, slots] of [[60, 3], [76, 2], [80, 2]] as const) {
       const f = fake({ brew: async () => brew, collect: async () => ({ entries: tools }), columns });
+      await oldScreens(f);
       const run = runInit(f.opts, f.io);
       await f.until("Tools");
       // The last redraw's footer: the lines from its Selected line to its Disk line, the bar taken off.
@@ -3479,6 +3746,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     const store = memoryStore();
     const shared = stubBackend();
     const first = fake({ yes: true, ...over });
+    if (first.opts.manifestPath === undefined) await oldScreens(first);
     first.opts.runtime = recipe => {
       first.backends.push(shared);
       const rt = createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
@@ -3686,6 +3954,7 @@ describe("wsp init with a golden already built from a recipe", () => {
   it("an unchanged recipe says the golden already matches and boots nothing", async () => {
     const { shared, next } = await sealed();
     const f = next();
+    await oldScreens(f);
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     expect(f.text()).toContain("Golden v1 already matches this recipe. Nothing to update; run wsp to serve it.");
     expect(f.text()).not.toContain("Changes since");
@@ -3809,6 +4078,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     rmSync(importResultPath(first.opts.statePath));
     writeFileSync(join(first.opts.home, ".zshrc"), "export A=1\nexport B=2\n");
     const f = next({ yes: false, tty: true });
+    await oldScreens(f);
     const run = runInit(f.opts, f.io);
     for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
       await f.until(rung);
@@ -3882,6 +4152,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     const { shared, first, next } = await sealed();
     writeFileSync(join(first.opts.home, ".zshrc"), "export A=1\nexport B=2\n");
     const f = next({ yes: false, tty: true });
+    await oldScreens(f);
     const run = runInit(f.opts, f.io);
     for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
       await f.until(rung);
@@ -3921,6 +4192,7 @@ describe("wsp init, a login whose command is not coming", () => {
 
   it("the Tools screen offers the cask from Google's release; the Sign-ins screen says which commands are not coming, starts them at skip, names the cycle in its keys, and a copy answer ticks the cask", async () => {
     const f = fake({ collect: async () => LAPTOP });
+    await oldScreens(f);
     const run = runInit(f.opts, f.io);
     for (const rung of ["Identity", "Shell", "Editors", "Toolchains"]) {
       await f.until(rung);
@@ -4055,14 +4327,13 @@ describe("wsp init --recipe", () => {
     // The machine was still read; the card says what ticked it and counts the collector's rows, not the catalog's bare one.
     expect(out).toContain("16 found on this computer, ticked by the recipe.");
     expect(out).not.toContain("not in this build");
-    // No Identity, Tools or Agents screen: the sign-ins are the first and only screen.
-    expect(out).not.toContain("1/8");
-    expect(out).toMatch(/Sign-ins\s+1\/1/);
-    expect(out).not.toMatch(/Agents\s+6\/8/);
-    // Codex is on and Claude Code off, so only Codex's login is offered; the saved answer for gh stands.
-    expect(out).toContain("Codex login");
+    // No Agents or What they need screen: the sign-ins are the first and only screen.
+    expect(out).not.toContain("1/3");
+    expect(out).toMatch(/Sign-ins and keys\s+1\/1/);
+    // Codex is on and Claude Code off, so only Codex's login is listed, to sign in on the machine; the saved copy answer for gh is a ticked keys row.
+    expect(out).toMatch(/• Codex login\s+codex login/);
     expect(out).not.toContain("Claude Code login");
-    expect(out).toMatch(/GitHub CLI login\s+copy/);
+    expect(out).toMatch(/● GitHub CLI login\s+200 B/);
     await f.press(KEY.enter);
     await f.until(BOOT);
     await f.press(KEY.enter);
@@ -4078,8 +4349,9 @@ describe("wsp init --recipe", () => {
     expect(saved.get("logins/gh")).toMatchObject({ bring: true, choice: "copy" });
     expect(saved.get("logins/codex")).toMatchObject({ bring: false, choice: "machine" });
     // The other rungs took their defaults, as the screens would have.
+    // Identity keeps its default, as the screens would have left it; editors are off the catalog path.
     expect(saved.get("identity/git-user")).toMatchObject({ bring: true });
-    expect(saved.get("editors/nvim")).toMatchObject({ bring: true });
+    expect(saved.get("editors/nvim")).toMatchObject({ bring: false });
   });
 
   it("with --yes the recipe's saved copy answer is honoured like a saved manifest's: the Keychain is read, the golden built", async () => {

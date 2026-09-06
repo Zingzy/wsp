@@ -3,7 +3,7 @@
 // by service name without -w, and no login file is ever read. The rc files
 // and Claude Code's settings.json are read for names alone: which variable is
 // exported, whether a helper command is set.
-import { CATALOG, loginIdOf, signsInByDefault } from "@wsp/catalog";
+import { LOGIN_ROWS, loginRow, signsInByDefault } from "@wsp/catalog";
 import { type Host, type Platform, expand } from "../host.js";
 import { RC_PATHS, stripExports } from "../everything/shell-rc.js";
 import type { Default, ManifestEntry } from "../manifest.js";
@@ -19,11 +19,11 @@ interface Login {
   detail?: string;
 }
 
-/** What a login row starts as: a copy (bring) for a key or a tool with no sign-in, a sign-in on the machine (skip)
- * for a browser or device flow the catalog names; a tool the catalog does not know starts as a copy. */
+/** What a login row starts as: a copy (bring) for a key, a keys row or a tool with no sign-in, a sign-in on the
+ * machine (skip) for a browser or device flow the catalog names; a tool the catalog does not know starts as a copy. */
 export function loginDefault(id: string): Default {
-  const found = CATALOG.find(e => loginIdOf(e.id) === id);
-  return found !== undefined && signsInByDefault(found.signIn) ? "skip" : "bring";
+  const row = loginRow(id);
+  return row !== undefined && signsInByDefault(row.signIn) ? "skip" : "bring";
 }
 
 const LOGINS: readonly Login[] = [
@@ -37,9 +37,20 @@ const LOGINS: readonly Login[] = [
   { id: "gemini", label: "Gemini CLI login", group: "Agent logins", paths: { all: ["~/.gemini/oauth_creds.json"] } },
   { id: "opencode", label: "OpenCode login", group: "Agent logins", paths: { all: ["~/.local/share/opencode/auth.json"] } },
   { id: "pi", label: "Pi login", group: "Agent logins", paths: { all: ["~/.pi/agent/auth.json"] } },
-  // One row carries the keys and the device login; the keys reach the machine only by copy, so copy is the answer.
-  { id: "hermes", label: "Hermes Agent API keys and logins", group: "Agent logins", paths: { all: ["~/.hermes/.env", "~/.hermes/auth.json"] }, default: "bring", detail: "the keys in ~/.hermes/.env travel only by copy" },
+  { id: "hermes", label: "Hermes Agent login", group: "Agent logins", paths: { all: ["~/.hermes/auth.json"] } },
 ];
+
+/** The rows for key files the catalog names beside a login: one per entry whose keys are here, a copy by default. */
+async function keysRows(host: Host): Promise<ManifestEntry[]> {
+  const rows: ManifestEntry[] = [];
+  for (const r of LOGIN_ROWS) {
+    if (r.keys === undefined) continue;
+    const f = await found(host, r.keys.paths);
+    if (f.paths.length === 0) continue;
+    rows.push(entry({ rung: "logins", id: `logins/${r.id}`, label: `${r.entry.name} API keys`, group: r.entry.kind === "agent" ? "Agent logins" : "CLI logins", ...f, default: loginDefault(r.id), detail: r.keys.note }));
+  }
+  return rows;
+}
 
 async function keychainHas(host: Host, service: string): Promise<boolean> {
   if (host.platform !== "darwin") return false;
@@ -115,6 +126,7 @@ export async function detectLogins(host: Host): Promise<ManifestEntry[]> {
     if (f.paths.length === 0) continue;
     rows.push(entry({ rung: "logins", id: `logins/${l.id}`, label: l.label, group: l.group, ...f, default: l.default ?? loginDefault(l.id), ...(l.detail !== undefined ? { detail: l.detail } : {}) }));
   }
+  rows.push(...(await keysRows(host)));
   if (await host.exec.which("op")) {
     rows.push(item({ rung: "logins", id: "logins/op", label: "1Password CLI", group: "CLI logins", default: "skip", reason: "needs the 1Password desktop app; the machine uses a service account token" }));
   }
