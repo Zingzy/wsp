@@ -2,8 +2,9 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { shellQuote as protocolQuote } from "@wsp/protocol";
 import { afterAll, describe, expect, it } from "vitest";
-import { ProcessManifest } from "../src/manifest.js";
+import { ProcessManifest, shellQuote } from "../src/manifest.js";
 
 const tmp = mkdtempSync(join(tmpdir(), "wsp-manifest-"));
 const pidsToKill: number[] = [];
@@ -20,6 +21,10 @@ afterAll(() => {
 });
 
 describe("ProcessManifest", () => {
+  it("the daemon's quoting rule is the protocol's, byte for byte, without bundling the protocol package", () => {
+    for (const s of ["", "don't", "''", "a\nb", "-n", "h\u00e9 \u2713", "$HOME `id` $(x)", "back\\slash"]) expect(shellQuote(s)).toBe(protocolQuote(s));
+  });
+
   it("records entries, dedupes on cmd+cwd, and persists to disk", () => {
     const path = join(tmp, "manifest.json");
     const m = new ProcessManifest({ path });

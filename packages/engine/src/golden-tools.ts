@@ -7,7 +7,7 @@
 // process descended from it before returning, so a slow brew never holds a
 // cellar lock into the next tool's turn.
 import { MIB } from "@wsp/catalog";
-import type { GoldenStage } from "@wsp/protocol";
+import { shellQuote, type GoldenStage } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { BREW_HOUSEKEEPING, HOMEBREW, TOOLS_PATH, type GuestFacts, type ToolInstall } from "./golden-import.js";
 import type { ExecResult, Machine } from "./machine.js";
@@ -66,10 +66,6 @@ export function fmtBytes(n: number): string {
 }
 
 export const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
-
-function squote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
-}
 
 /** The line that names the failure, for a warning: the last `Error:` line on stderr (Homebrew
  * follows its error with advice), else the last stderr line, else stdout's; 124 is the guest-side timeout. */
@@ -158,7 +154,7 @@ const TREE_FN = [
 export function guarded(script: string, timeoutS: number): string {
   return [
     TREE_FN,
-    `setsid bash -c ${squote(script)} &`,
+    `setsid bash -c ${shellQuote(script)} &`,
     "p=$!",
     "t=0",
     `while [ $t -lt ${timeoutS} ] && kill -0 $p 2>/dev/null; do sleep 1; t=$((t+1)); done`,
@@ -216,7 +212,7 @@ function summarize(tools: ToolResult[], housekeeping: string | undefined): strin
 async function verifyCommands(machine: Machine, tools: readonly ToolInstall[], results: ToolResult[], stage: (detail: string) => void): Promise<void> {
   const named = results.filter(r => r.outcome === "installed").map(r => ({ result: r, bin: tools.find(t => t.id === r.id)?.bin })).filter((x): x is { result: ToolResult; bin: string } => x.bin !== undefined);
   if (named.length === 0) return;
-  const cmd = `export PATH=${TOOLS_PATH}\nfor b in ${named.map(x => squote(x.bin)).join(" ")}; do command -v "$b" >/dev/null 2>&1 || echo "missing $b"; done`;
+  const cmd = `export PATH=${TOOLS_PATH}\nfor b in ${named.map(x => shellQuote(x.bin)).join(" ")}; do command -v "$b" >/dev/null 2>&1 || echo "missing $b"; done`;
   const res = await machine.exec(cmd, { timeoutMs: INLINE_EXEC_MS });
   const failed = res.exitCode === 0 ? undefined : reasonOf(res, INLINE_EXEC_MS / 1000);
   if (failed !== undefined) stage(`the PATH check failed (${failed}): ${named.map(x => x.bin).join(", ")} count as failed`);

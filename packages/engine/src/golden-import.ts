@@ -6,7 +6,7 @@
 // runs the plan on the builder.
 import { createHash } from "node:crypto";
 import { join, relative } from "node:path";
-import { MCP_ID_PREFIX, type RecipeDigest } from "@wsp/protocol";
+import { MCP_ID_PREFIX, shellQuote, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
 import { CATALOG_AGENTS, CLAUDE_KEY_FILE, NODE_PATH_LINE, NODE_RELEASES, UV_INSTALL, baseEntryFor, baseNote, caskVersion, installLine, linuxCaskFor, nodeInstallScript, smokeOf, type NodeMajor, type ToolPin } from "@wsp/catalog";
 
@@ -603,18 +603,14 @@ export const PATH_LINE = `export PATH=${TOOLS_PATH} PNPM_HOME=${PNPM_HOME}`;
 const BREW_ENV = "HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 HOMEBREW_NO_ENV_HINTS=1 NONINTERACTIVE=1";
 const BREW = `${BREW_PREFIX}/bin/brew`;
 
-function squote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
-}
-
 // Homebrew refuses to run as root, so it lives under its own user at the
 // prefix its Linux bottles are built for; anything else compiles from source.
 function asLinuxbrewScript(script: string): string {
-  return `su -s /bin/bash linuxbrew -c ${squote(`export ${BREW_ENV}\n${script}`)}`;
+  return `su -s /bin/bash linuxbrew -c ${shellQuote(`export ${BREW_ENV}\n${script}`)}`;
 }
 
 function asLinuxbrew(cmd: string): string {
-  return `su -s /bin/bash linuxbrew -c ${squote(`${BREW_ENV} ${BREW} ${cmd}`)}`;
+  return `su -s /bin/bash linuxbrew -c ${shellQuote(`${BREW_ENV} ${BREW} ${cmd}`)}`;
 }
 
 /** After the tools loop: dependencies no formula needs any more (a failed formula
@@ -629,7 +625,7 @@ function brewSharedDeps(formulae: readonly string[]): string {
   return asLinuxbrewScript(
     [
       "set -uo pipefail",
-      `shared=$(${BREW} deps --for-each ${formulae.map(squote).join(" ")} | sed 's/^[^:]*: *//' | tr ' ' '\\n' | grep -vx -e '' ${keep} | sort | uniq -d || true)`,
+      `shared=$(${BREW} deps --for-each ${formulae.map(shellQuote).join(" ")} | sed 's/^[^:]*: *//' | tr ' ' '\\n' | grep -vx -e '' ${keep} | sort | uniq -d || true)`,
       'if [ -z "$shared" ]; then echo "no shared dependencies"; exit 0; fi',
       'echo "shared: $(echo $shared)"',
       `${BREW} install $shared; rc=$?`,
@@ -652,7 +648,7 @@ function homebrewBootstrap(): string {
     `  ln -sfn ../Homebrew/bin/brew ${BREW_PREFIX}/bin/brew`,
     "  chown -R linuxbrew:linuxbrew /home/linuxbrew",
     "fi",
-    `printf '%s\\n' ${squote(PATH_LINE)} > /etc/profile.d/wsp-golden.sh`,
+    `printf '%s\\n' ${shellQuote(PATH_LINE)} > /etc/profile.d/wsp-golden.sh`,
     `${asLinuxbrew("--version")} >/dev/null`,
   ].join("\n");
 }
@@ -760,18 +756,18 @@ function roadInstall(name: string, source: ToolSource, pin?: string, go = `githu
   const goBin = goBinary(go);
   return [
     "set -euo pipefail",
-    `name=${squote(name)}`,
+    `name=${shellQuote(name)}`,
     'arch="$(uname -m)"',
     'case "$arch" in x86_64) pat="amd64|x86_64|x64" ;; aarch64) pat="arm64|aarch64" ;; *) echo "Error: unsupported arch: $arch" >&2; exit 1 ;; esac',
     'tmp="$(mktemp -d /tmp/wsp-road-XXXXXX)"',
     "trap 'rm -rf \"$tmp\"' EXIT",
-    `urls="$(curl -fsSL ${squote(api)} | grep -o '"browser_download_url": *"[^"]*"' | cut -d'"' -f4 || true)"`,
+    `urls="$(curl -fsSL ${shellQuote(api)} | grep -o '"browser_download_url": *"[^"]*"' | cut -d'"' -f4 || true)"`,
     `url="$(printf '%s\\n' "$urls" | grep -i linux | grep -iE "$pat" | grep -viE '\\.(sha256|sha256sum|sha512|sig|asc|txt|md5|pem|deb|rpm|apk)$' | head -1 || true)"`,
     'if [ -n "$url" ]; then',
     '  asset="${url##*/}"',
     '  curl -fsSL -o "$tmp/$asset" "$url"',
     `  sum="$(sha256sum "$tmp/$asset" | cut -d' ' -f1)"`,
-    ...(pin !== undefined ? [`  [ "$sum" = ${squote(pin)} ] || { echo "Error: $asset does not match the checksum recorded on the first install of "${squote(source.tag)} >&2; exit 1; }`] : []),
+    ...(pin !== undefined ? [`  [ "$sum" = ${shellQuote(pin)} ] || { echo "Error: $asset does not match the checksum recorded on the first install of "${shellQuote(source.tag)} >&2; exit 1; }`] : []),
     '  case "$asset" in',
     '    *.tar.gz|*.tgz) tar -xzf "$tmp/$asset" -C "$tmp" ;;',
     '    *.tar.xz) tar -xJf "$tmp/$asset" -C "$tmp" ;;',
@@ -782,13 +778,13 @@ function roadInstall(name: string, source: ToolSource, pin?: string, go = `githu
     `  [ -n "$bin" ] || bin="$(find "$tmp" -type f -perm -u+x ! -name "\${asset:-.}" ! -name '*.md' ! -name '*.txt' -printf '%s %p\\n' | sort -rn | head -1 | cut -d' ' -f2-)"`,
     '  [ -n "$bin" ] || { echo "Error: no binary in ${asset:-the release}" >&2; exit 1; }',
     '  install -m 0755 "$bin" "/usr/local/bin/$name"',
-    `  echo "WSP_ROAD release \${asset:-$url} $sum "${squote(source.tag)}`,
+    `  echo "WSP_ROAD release \${asset:-$url} $sum "${shellQuote(source.tag)}`,
     "elif command -v go >/dev/null 2>&1; then",
-    `  GOBIN=/usr/local/bin go install ${squote(go)}`,
-    ...(goBin === name ? [] : [`  mv ${squote(`/usr/local/bin/${goBin}`)} "/usr/local/bin/$name"`]),
-    `  echo "WSP_ROAD go "${squote(go)}`,
+    `  GOBIN=/usr/local/bin go install ${shellQuote(go)}`,
+    ...(goBin === name ? [] : [`  mv ${shellQuote(`/usr/local/bin/${goBin}`)} "/usr/local/bin/$name"`]),
+    `  echo "WSP_ROAD go "${shellQuote(go)}`,
     "else",
-    `  echo "Error: release "${squote(source.tag)}" of "${squote(source.repo)}" has no Linux build, and go is not on the machine" >&2`,
+    `  echo "Error: release "${shellQuote(source.tag)}" of "${shellQuote(source.repo)}" has no Linux build, and go is not on the machine" >&2`,
     "  exit 1",
     "fi",
   ].join("\n");
@@ -803,7 +799,7 @@ export function toolUninstall(e: RecipeEntry): { cmd: string } | { note: string 
   const cask = linuxCaskFor(e.id);
   if (cask !== undefined) return { cmd: withPath(cask.uninstall) };
   if (e.id.startsWith("tools/brew-cask/") || e.id.startsWith("tools/mas/")) return { note: "never installed on Linux" };
-  if (e.id.startsWith(CLI_PREFIX)) return { cmd: withPath(`rm -f /usr/local/bin/${squote(e.id.slice(CLI_PREFIX.length))}`) };
+  if (e.id.startsWith(CLI_PREFIX)) return { cmd: withPath(`rm -f /usr/local/bin/${shellQuote(e.id.slice(CLI_PREFIX.length))}`) };
   if (e.id.startsWith(HAND_PREFIX)) return { note: "a copied file; it comes off with the files" };
   const manager = (["brew", ...MANAGER_ORDER] as const).find(m => e.id.startsWith(`tools/${m}/`));
   if (manager === undefined) return { note: "no manager known for this row" };
@@ -813,7 +809,7 @@ export function toolUninstall(e: RecipeEntry): { cmd: string } | { note: string 
       if (!pkg.includes("/")) return { cmd: withPath(asLinuxbrew(`uninstall ${pkg}`)) };
       // A tap formula with no Linux bottle took the road to /usr/local/bin under the formula's name, not to the cellar.
       const bin = pkg.slice(pkg.lastIndexOf("/") + 1);
-      return { cmd: withPath(`if [ -x ${BREW} ] && ${asLinuxbrew(`list --formula ${pkg}`)} >/dev/null 2>&1; then ${asLinuxbrew(`uninstall ${pkg}`)}; else rm -f /usr/local/bin/${squote(bin)}; fi`) };
+      return { cmd: withPath(`if [ -x ${BREW} ] && ${asLinuxbrew(`list --formula ${pkg}`)} >/dev/null 2>&1; then ${asLinuxbrew(`uninstall ${pkg}`)}; else rm -f /usr/local/bin/${shellQuote(bin)}; fi`) };
     }
     case "npm":
       return { cmd: withPath(`npm uninstall -g ${pkg}`) };
@@ -1020,7 +1016,7 @@ export function editorInstallsFor(entries: readonly RecipeEntry[]): EditorsPlan 
       else out.skipped.push({ id: e.id, note: "not an extension id" });
     }
     if (ids.length === 0) continue;
-    const list = ids.map(squote).join(" ");
+    const list = ids.map(shellQuote).join(" ");
     out.installs.push({
       id: `editors/${key}-ext`,
       label: `${ed.name} extension list`,
