@@ -12,7 +12,7 @@ import { join } from "node:path";
 import type { ManifestEntry } from "@wsp/collect";
 import { NODE_RELEASES, planFiles } from "@wsp/engine";
 import { afterEach, describe, expect, it } from "vitest";
-import { GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
+import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_SERVERS_JSON } from "@wsp/catalog";
 import { digestOf, importFor, importResultPath, keychainLogins, keychainReader, packPlan, readSecrets, statOf, type SecretReader } from "../src/init-import.js";
 import { GUARD_SOURCE_COMMENT, GUARD_SOURCE_LINE } from "../src/init-aliases.js";
 
@@ -1009,8 +1009,8 @@ describe("importFor", () => {
         {
           id: "claude", label: "Claude Code",
           scopes: [
-            { files: ["/root/.claude-cfg/.claude.json"], format: "claude", keep: ["github"], drop: [{ name: "notes", reason: "command ~/Library/x is macOS-only, will not run" }] },
-            { files: ["/root/.claude-cfg/.claude.json"], format: "claude", project: { from: home, to: "/root" }, keep: ["zomato"], drop: [] },
+            { files: ["/root/.claude-cfg/.claude.json"], format: MCP_SERVERS_JSON, keep: ["github"], drop: [{ name: "notes", reason: "command ~/Library/x is macOS-only, will not run" }] },
+            { files: ["/root/.claude-cfg/.claude.json"], format: MCP_SERVERS_JSON, project: { from: home, to: "/root" }, keep: ["zomato"], drop: [] },
           ],
           aside: [],
         },

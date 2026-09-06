@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { type ManifestEntry, detectMcp, linuxFit, mcpGroups, mcpRemoteHash, parseCodexMcp, parseMcp, type McpServer } from "../src/index.js";
+import { CATALOG_AGENTS, type McpAgent, type McpFormat, type McpServer } from "@wsp/catalog";
+import { type ManifestEntry, detectMcp, linuxFit, mcpGroups, mcpRemoteHash } from "../src/index.js";
 import { fakeHost } from "./fake-host.js";
 
 const HOME = "/Users/dev";
@@ -117,11 +118,6 @@ describe("mcp servers", () => {
       "[[hooks.SessionStart]]",
       "matcher = \"x\"",
     ].join("\n");
-    expect(parseCodexMcp(toml)).toEqual([
-      { name: "grafana", scope: "user", transport: { kind: "stdio", command: "/opt/homebrew/bin/uvx", args: ["mcp-grafana"], env: { GRAFANA_SERVICE_ACCOUNT_TOKEN: "glsa_abcdefghij", GRAFANA_URL: "https://g.example" } }, envRefs: [] },
-      { name: "sentry", scope: "user", transport: { kind: "http", url: "https://mcp.sentry.dev/mcp?x=1", headers: {} }, envRefs: ["SENTRY_TOKEN"] },
-      { name: "my server", scope: "user", transport: { kind: "stdio", command: "node", args: ["/Applications/Tool.app/Contents/mcp.js"], env: { A_KEY: "1234" } }, envRefs: [] },
-    ]);
     const rows = await detectMcp(fakeHost({ files: { "~/.codex/config.toml": toml } }));
     expect(rows.map(r => [r.id, r.default, r.reason, r.detail])).toEqual([
       ["agents/mcp/codex/grafana", "bring", undefined, "stdio: /opt/homebrew/bin/uvx mcp-grafana; needs uv, installed on the machine when missing; carries a secret: env GRAFANA_SERVICE_ACCOUNT_TOKEN (15 B)"],
@@ -208,14 +204,23 @@ describe("mcp servers", () => {
     expect(await detectMcp(fakeHost())).toEqual([]);
   });
 
-  it("parseMcp normalizes every format to one shape and ignores entries that name neither a command nor a url", () => {
-    expect(parseMcp("claude", JSON.stringify({ mcpServers: { a: { command: "x" }, b: { url: "https://b" }, c: { type: "sse", url: "https://c" }, d: {} } }), HOME)).toEqual<McpServer[]>([
-      { name: "a", scope: "user", transport: { kind: "stdio", command: "x", args: [], env: {} }, envRefs: [] },
-      { name: "b", scope: "user", transport: { kind: "http", url: "https://b", headers: {} }, envRefs: [] },
-      { name: "c", scope: "user", transport: { kind: "http", url: "https://c", headers: {} }, envRefs: [] },
+  it("an agent the catalog gains with a format of its own is read through its module: one row per server it names, under the agent's group, with the entry's scope on the heading", async () => {
+    const lines: McpFormat = {
+      read: text => text.split("\n").filter(l => l !== "").map((l): McpServer => {
+        const [name, command, ...args] = l.split(" ");
+        return { name: name!, scope: "user", transport: { kind: "stdio", command: command!, args, env: {} }, envRefs: [] };
+      }),
+      place: () => ({ text: "", commentsDropped: false }),
+      guest: "() => []",
+    };
+    const entry: McpAgent = { ...CATALOG_AGENTS.find(a => a.id === "pi")!, id: "lines", name: "Lines", mcp: { format: lines, files: ["~/.lines/servers.txt"], scope: "one file" } };
+    const host = fakeHost({ files: { "~/.lines/servers.txt": "alpha npx -y pkg\nbeta /Applications/B.app/b\n", "~/.claude.json": claudeJson() } });
+    const rows = await detectMcp(host, [], [entry]);
+    expect(rows.map(r => [r.id, r.group, r.default, r.detail])).toEqual([
+      ["agents/mcp/lines/alpha", "Lines MCP servers", "bring", "stdio: npx pkg; runs via npx; carries no secret"],
+      ["agents/mcp/lines/beta", "Lines MCP servers", "skip", "stdio: /Applications/B.app/b; carries no secret"],
     ]);
-    expect(parseMcp("opencode", '{"mcp":{"a":{"type":"local","command":[]}}}', HOME)).toEqual([]);
-    expect(parseMcp("gemini", "nope", HOME)).toEqual([]);
+    expect(await mcpGroups(host, rows, [entry])).toEqual([{ rung: "agents", group: "Lines MCP servers", hint: "one file" }]);
   });
 
   it("linuxFit: home paths and Homebrew's prefix have a Linux equivalent, Library and Applications do not", () => {

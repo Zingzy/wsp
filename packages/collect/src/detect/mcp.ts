@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // MCP servers travel with the agent that runs them, credentials included: one
 // row per server under its agent. The definition itself rides inside the
-// agent's config file (the agent's own row); this file reads that config to
-// say what each server is, what it needs on Linux and which secret it carries.
-// Token files are only stat'ed, never read.
+// agent's config file (the agent's own row); this file reads that config
+// through the catalog entry's format module to say what each server is, what
+// it needs on Linux and which secret it carries. Token files are only stat'ed,
+// never read.
 import { createHash } from "node:crypto";
-import { CATALOG_AGENTS, parseJsonc, type McpFormat } from "@wsp/catalog";
+import { MCP_AGENTS, parseJsonc, type McpAgent, type McpConfig, type McpServer, type McpTransport } from "@wsp/catalog";
 import { MCP_ID_PREFIX } from "@wsp/protocol";
 import { type Host, expand } from "../host.js";
 import type { GroupNote, ManifestEntry } from "../manifest.js";
@@ -16,36 +17,6 @@ import { BASE_INTERPRETERS, HAND_DIRS, HAND_GROUP, type HandBin, brought, carrie
 /** The row that carries mcp-remote's saved browser sign-ins for every agent. */
 export const MCP_REMOTE_ID = `${MCP_ID_PREFIX}mcp-remote`;
 export const MCP_REMOTE_LABEL = "mcp-remote sign-ins";
-
-export type { McpFormat } from "@wsp/catalog";
-
-export interface McpConfig {
-  agent: string;
-  label: string;
-  format: McpFormat;
-  /** `~/`-relative; the first that exists is read. */
-  files: readonly string[];
-  /** The scopes the read covers, shown on the group's heading; every agent's docs also give a project scope this file does not read. */
-  scope: string;
-}
-
-/** Where each agent keeps its user-wide MCP definitions: the catalog entries that name one, in catalog order. */
-export const MCP_CONFIGS: readonly McpConfig[] = CATALOG_AGENTS.flatMap(a =>
-  a.mcp !== undefined ? [{ agent: a.id, label: a.name, format: a.mcp.format, files: a.mcp.files, scope: a.mcp.scope }] : [],
-);
-
-export type McpTransport =
-  | { kind: "stdio"; command: string; args: string[]; env: Record<string, string>; cwd?: string }
-  | { kind: "http"; url: string; headers: Record<string, string> };
-
-export interface McpServer {
-  name: string;
-  /** `home`: Claude Code's project scope for the home folder itself, which the machine's home stands in for. */
-  scope: "user" | "home";
-  transport: McpTransport;
-  /** Variables the definition reads from the environment at run time (Codex's bearer_token_env_var); names only. */
-  envRefs: string[];
-}
 
 export type LinuxFit = { ok: true; needs: string } | { ok: false; reason: string };
 
@@ -58,156 +29,13 @@ const MCP_REMOTE_STORE = `${MCP_AUTH}/mcp-remote-v1`;
 function parseJson(text: string): Record<string, unknown> | undefined {
   try {
     const v: unknown = parseJsonc(text);
-    return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
+    return isObject(v) ? v : undefined;
   } catch {
     return undefined;
   }
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
-const str = (v: unknown): string | undefined => (typeof v === "string" && v !== "" ? v : undefined);
-const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
-function dict(v: unknown): Record<string, string> {
-  if (!isObject(v)) return {};
-  return Object.fromEntries(Object.entries(v).filter((e): e is [string, string] => typeof e[1] === "string"));
-}
-
-/** Claude Code and Gemini CLI share one shape: command/args/env/cwd, or url (httpUrl for Gemini's streamable HTTP) with headers. */
-function fromClaudeLike(name: string, raw: unknown, scope: McpServer["scope"]): McpServer | undefined {
-  if (!isObject(raw)) return undefined;
-  const command = str(raw.command);
-  const url = str(raw.httpUrl) ?? str(raw.url);
-  if (command !== undefined) {
-    const cwd = str(raw.cwd);
-    return { name, scope, transport: { kind: "stdio", command, args: strs(raw.args), env: dict(raw.env), ...(cwd !== undefined ? { cwd } : {}) }, envRefs: [] };
-  }
-  if (url !== undefined) return { name, scope, transport: { kind: "http", url, headers: dict(raw.headers) }, envRefs: [] };
-  return undefined;
-}
-
-function fromOpenCode(name: string, raw: unknown): McpServer | undefined {
-  if (!isObject(raw)) return undefined;
-  if (raw.type === "remote") {
-    const url = str(raw.url);
-    return url === undefined ? undefined : { name, scope: "user", transport: { kind: "http", url, headers: dict(raw.headers) }, envRefs: [] };
-  }
-  const [command, ...args] = strs(raw.command);
-  if (command === undefined) return undefined;
-  return { name, scope: "user", transport: { kind: "stdio", command, args, env: dict(raw.environment) }, envRefs: [] };
-}
-
-interface CodexTable {
-  values: Record<string, unknown>;
-  env: Record<string, string>;
-  headers: Record<string, string>;
-  envHeaders: Record<string, string>;
-}
-
-const TOML_HEADER = /^\[\s*mcp_servers\s*\.\s*(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9_-]+))\s*(?:\.\s*([A-Za-z0-9_-]+)\s*)?\]$/;
-const TOML_STRING = /"((?:[^"\\]|\\.)*)"|'([^']*)'/g;
-
-/** A line without its trailing comment: `#` outside quotes ends it. */
-function uncommented(line: string): string {
-  let quote: string | undefined;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i]!;
-    if (quote !== undefined) {
-      if (c === "\\" && quote === '"') i++;
-      else if (c === quote) quote = undefined;
-    } else if (c === '"' || c === "'") quote = c;
-    else if (c === "#") return line.slice(0, i);
-  }
-  return line;
-}
-
-function unescapeToml(s: string): string {
-  return s.replace(/\\(["\\nrt])/g, (_, ch: string) => ({ '"': '"', "\\": "\\", n: "\n", r: "\r", t: "\t" })[ch] ?? ch);
-}
-
-function tomlStrings(s: string): string[] {
-  return [...s.matchAll(TOML_STRING)].map(m => (m[1] !== undefined ? unescapeToml(m[1]) : m[2]!));
-}
-
-/** A basic string, an array of strings, or an inline table of strings; anything else is left out. */
-function tomlValue(raw: string): unknown {
-  const s = raw.trim();
-  if (s.startsWith("[")) return tomlStrings(s);
-  if (s.startsWith("{")) {
-    const out: Record<string, string> = {};
-    for (const m of s.slice(1, -1).matchAll(/(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9_-]+))\s*=\s*("(?:[^"\\]|\\.)*"|'[^']*')/g)) {
-      out[m[1] ?? m[2] ?? m[3]!] = tomlStrings(m[4]!)[0] ?? "";
-    }
-    return out;
-  }
-  if (s.startsWith('"') || s.startsWith("'")) return tomlStrings(s)[0];
-  return undefined;
-}
-
-/** Codex's `[mcp_servers.<name>]` tables and their env, http_headers and env_http_headers sub-tables, in file
- * order. Only the table form Codex documents and `codex mcp add` writes is read. */
-export function parseCodexMcp(text: string): McpServer[] {
-  const tables = new Map<string, CodexTable>();
-  let current: { name: string; sub?: string } | undefined;
-  const lines = text.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    const line = uncommented(lines[i]!).trim();
-    if (line === "") continue;
-    if (line.startsWith("[")) {
-      const m = TOML_HEADER.exec(line);
-      current = m === null ? undefined : { name: m[1] ?? m[2] ?? m[3]!, ...(m[4] !== undefined ? { sub: m[4] } : {}) };
-      if (current !== undefined && !tables.has(current.name)) tables.set(current.name, { values: {}, env: {}, headers: {}, envHeaders: {} });
-      continue;
-    }
-    if (current === undefined) continue;
-    const eq = line.indexOf("=");
-    if (eq < 0) continue;
-    const key = line.slice(0, eq).trim().replace(/^"(.*)"$/, "$1");
-    let value = line.slice(eq + 1).trim();
-    // A multi-line array closes on a later line.
-    while (value.startsWith("[") && !value.endsWith("]") && i + 1 < lines.length) value += uncommented(lines[++i]!).trim();
-    const parsed = tomlValue(value);
-    if (parsed === undefined) continue;
-    const table = tables.get(current.name)!;
-    if (current.sub === undefined) table.values[key] = parsed;
-    else if (typeof parsed === "string") {
-      if (current.sub === "env") table.env[key] = parsed;
-      else if (current.sub === "http_headers") table.headers[key] = parsed;
-      else if (current.sub === "env_http_headers") table.envHeaders[key] = parsed;
-    }
-  }
-  const out: McpServer[] = [];
-  for (const [name, t] of tables) {
-    const command = str(t.values.command);
-    const url = str(t.values.url);
-    const bearer = str(t.values.bearer_token_env_var);
-    const envRefs = [...(bearer !== undefined ? [bearer] : []), ...Object.values({ ...dict(t.values.env_http_headers), ...t.envHeaders })];
-    if (command !== undefined) {
-      out.push({ name, scope: "user", transport: { kind: "stdio", command, args: strs(t.values.args), env: { ...dict(t.values.env), ...t.env } }, envRefs });
-    } else if (url !== undefined) {
-      out.push({ name, scope: "user", transport: { kind: "http", url, headers: { ...dict(t.values.http_headers), ...t.headers } }, envRefs });
-    }
-  }
-  return out;
-}
-
-/** Every server an agent's config defines, in one shape; a file that does not parse defines none. */
-export function parseMcp(format: McpFormat, text: string, home: string): McpServer[] {
-  if (format === "codex") return parseCodexMcp(text);
-  const root = parseJson(text);
-  if (root === undefined) return [];
-  const out: McpServer[] = [];
-  if (format === "opencode") {
-    if (isObject(root.mcp)) for (const [name, raw] of Object.entries(root.mcp)) out.push(...present(fromOpenCode(name, raw)));
-    return out;
-  }
-  if (isObject(root.mcpServers)) for (const [name, raw] of Object.entries(root.mcpServers)) out.push(...present(fromClaudeLike(name, raw, "user")));
-  if (format === "claude" && isObject(root.projects) && isObject(root.projects[home]) && isObject((root.projects[home] as Record<string, unknown>).mcpServers)) {
-    for (const [name, raw] of Object.entries((root.projects[home] as Record<string, unknown>).mcpServers as Record<string, unknown>)) out.push(...present(fromClaudeLike(name, raw, "home")));
-  }
-  return out;
-}
-
-const present = <T>(v: T | undefined): T[] => (v === undefined ? [] : [v]);
 
 // --- what runs on Linux --------------------------------------------------------
 
@@ -416,12 +244,12 @@ async function homeDeps(host: Host, server: McpServer, carriedPaths: readonly st
 
 /** What a definition carries: secret-named env values by size, the file such a value points at (which travels on
  * the row), header values, and where its mcp-remote or Claude Code sign-in lives. Nothing is read. */
-async function carried(host: Host, server: McpServer, format: McpFormat, remoteTokens: ReadonlyMap<string, number>): Promise<Carried> {
+async function carried(host: Host, server: McpServer, agent: McpAgent, remoteTokens: ReadonlyMap<string, number>): Promise<Carried> {
   const out: Carried = { secrets: [], notes: [], paths: [], bytes: 0 };
   const t = server.transport;
   if (t.kind === "http") {
     for (const [k, v] of Object.entries(t.headers)) out.secrets.push(`header ${k} (${Buffer.byteLength(v)} B)`);
-    if (format === "claude") out.notes.push("its sign-in is kept with the Claude Code login");
+    if (agent.id === "claude") out.notes.push("its sign-in is kept with the Claude Code login");
     return out;
   }
   for (const [k, v] of Object.entries(t.env)) {
@@ -462,10 +290,10 @@ async function carried(host: Host, server: McpServer, format: McpFormat, remoteT
   return out;
 }
 
-const mcpGroup = (config: McpConfig): string => `${config.label} MCP servers`;
+const mcpGroup = (agent: McpAgent): string => `${agent.name} MCP servers`;
 
-function serverRow(config: McpConfig, server: McpServer, fit: LinuxFit, deps: HomeDeps, c: Carried, home: string): ManifestEntry {
-  const id = `${MCP_ID_PREFIX}${config.agent}/${server.scope === "home" ? "home/" : ""}${server.name}`;
+function serverRow(agent: McpAgent, server: McpServer, fit: LinuxFit, deps: HomeDeps, c: Carried, home: string): ManifestEntry {
+  const id = `${MCP_ID_PREFIX}${agent.id}/${server.scope === "home" ? "home/" : ""}${server.name}`;
   const reason = fit.ok ? undefined : fit.reason;
   const words = [
     ...(server.scope === "home" ? ["local to ~"] : []),
@@ -479,7 +307,7 @@ function serverRow(config: McpConfig, server: McpServer, fit: LinuxFit, deps: Ho
     rung: "agents",
     id,
     label: server.name,
-    group: mcpGroup(config),
+    group: mcpGroup(agent),
     paths: c.paths,
     bytes: c.bytes,
     default: reason === undefined && !deps.gone ? "bring" : "skip",
@@ -544,25 +372,26 @@ async function configText(host: Host, config: McpConfig): Promise<string | undef
 }
 
 /** One row per MCP server under its agent, then the mcp-remote sign-in store when there is one; prior is the
- * rows detected before this rung, whose tools rows say which interpreters reach the machine. */
-export async function detectMcp(host: Host, prior: readonly ManifestEntry[] = []): Promise<ManifestEntry[]> {
+ * rows detected before this rung, whose tools rows say which interpreters reach the machine. Each agent's config is
+ * read by its entry's format module, so an agent the catalog gains needs nothing here. */
+export async function detectMcp(host: Host, prior: readonly ManifestEntry[] = [], agents: readonly McpAgent[] = MCP_AGENTS): Promise<ManifestEntry[]> {
   const brings = brought(prior);
   const store = await remoteStore(host);
   const tokens = store?.tokens ?? new Map<string, number>();
   const rows: ManifestEntry[] = [];
   const matched: string[] = [];
   let hands: Map<string, HandBin> | undefined;
-  for (const config of MCP_CONFIGS) {
-    const text = await configText(host, config);
+  for (const agent of agents) {
+    const text = await configText(host, agent.mcp);
     if (text === undefined) continue;
     hands ??= new Map((await handBins(host)).map(b => [b.name, b]));
-    for (const server of parseMcp(config.format, text, host.home)) {
+    for (const server of agent.mcp.format.read(text, host.home)) {
       const fit = linuxFit(server, host.home, hands, brings);
-      const c = await carried(host, server, config.format, tokens);
+      const c = await carried(host, server, agent, tokens);
       const deps = await homeDeps(host, server, c.paths);
       const hash = server.transport.kind === "stdio" ? mcpRemoteHash(server.transport.args) : undefined;
       if (hash !== undefined && tokens.has(hash)) matched.push(server.name);
-      rows.push(serverRow(config, server, fit, deps, c, host.home));
+      rows.push(serverRow(agent, server, fit, deps, c, host.home));
     }
   }
   if (store !== undefined) rows.push(remoteRow(store, matched));
@@ -576,23 +405,23 @@ interface LeftOut {
   folders: number;
 }
 
-const claudeNames = (raw: unknown): string[] => (isObject(raw) ? Object.entries(raw).filter(([name, def]) => fromClaudeLike(name, def, "user") !== undefined).map(([name]) => name) : []);
-
 /** Servers Claude Code reads only inside a project folder: a project entry's own list (the home folder's is on
- * the rows) and the .mcp.json in that folder. Only the folders ~/.claude.json names are looked at. */
-async function claudeLeftOut(host: Host, root: Record<string, unknown>): Promise<LeftOut> {
+ * the rows) and the .mcp.json in that folder, both in the file's own shape. Only the folders ~/.claude.json names
+ * are looked at. */
+async function claudeLeftOut(host: Host, agent: McpAgent, root: Record<string, unknown>): Promise<LeftOut> {
   const out: LeftOut = { servers: 0, folders: 0 };
   if (!isObject(root.projects)) return out;
+  const names = (text: string): string[] => agent.mcp.format.read(text, host.home).filter(s => s.scope === "user").map(s => s.name);
   for (const [folder, project] of Object.entries(root.projects)) {
     if (!folder.startsWith("/")) continue;
-    const names = new Set(folder === host.home || !isObject(project) ? [] : claudeNames(project.mcpServers));
+    const found = new Set(folder === host.home ? [] : names(JSON.stringify(project)));
     const file = `${folder}/.mcp.json`;
     if ((await host.fs.stat(file))?.kind === "file") {
       const text = await host.fs.readText(file);
-      for (const name of claudeNames((text === undefined ? undefined : parseJson(text))?.mcpServers)) names.add(name);
+      if (text !== undefined) for (const name of names(text)) found.add(name);
     }
-    if (names.size === 0) continue;
-    out.servers += names.size;
+    if (found.size === 0) continue;
+    out.servers += found.size;
     out.folders += 1;
   }
   return out;
@@ -600,16 +429,16 @@ async function claudeLeftOut(host: Host, root: Record<string, unknown>): Promise
 
 /** What each agent's group covers, for the groups that have rows; Claude Code's also counts the project-scoped
  * servers it leaves out. */
-export async function mcpGroups(host: Host, rows: readonly ManifestEntry[]): Promise<GroupNote[]> {
+export async function mcpGroups(host: Host, rows: readonly ManifestEntry[], agents: readonly McpAgent[] = MCP_AGENTS): Promise<GroupNote[]> {
   const out: GroupNote[] = [];
-  for (const config of MCP_CONFIGS) {
-    const group = mcpGroup(config);
+  for (const agent of agents) {
+    const group = mcpGroup(agent);
     if (!rows.some(r => r.group === group)) continue;
-    const note: GroupNote = { rung: "agents", group, hint: config.scope };
-    if (config.format === "claude") {
-      const text = await configText(host, config);
+    const note: GroupNote = { rung: "agents", group, hint: agent.mcp.scope };
+    if (agent.id === "claude") {
+      const text = await configText(host, agent.mcp);
       const root = text === undefined ? undefined : parseJson(text);
-      const left = root === undefined ? undefined : await claudeLeftOut(host, root);
+      const left = root === undefined ? undefined : await claudeLeftOut(host, agent, root);
       if (left !== undefined && left.servers > 0) {
         note.note = `${left.servers} more in ${left.folders} project folder${left.folders === 1 ? "" : "s"} stay on this computer (a repo's .mcp.json travels with it)`;
       }
