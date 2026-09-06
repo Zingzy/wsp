@@ -3359,6 +3359,7 @@ describe("runtime golden update and the post-seal grace", () => {
       "ready:",
       "snapshotting:golden-v2",
       "smoke-forking:codex --version",
+      "smoke-forking:1 agent answers: Codex",
       "sealed:v2; builder kept for one more change",
     ]);
     const ran = builder.execLog.slice(before);
