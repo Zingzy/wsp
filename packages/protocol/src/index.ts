@@ -378,6 +378,18 @@ export const SessionSteerEvent = z.object({
   requestId: z.string().optional(),
 });
 
+/** Pushed once when a start finds the thread's turn running and a harness that takes no message mid-turn, so the
+ * caller can say it is waiting before the start's reply comes; not a session event, never in history. */
+export const SessionQueuedEvent = z.object({
+  type: z.literal("session.queued"),
+  workspaceId: z.string(),
+  threadId: z.string(),
+  prompt: z.string(),
+  /** The id the client minted for the sessions.start that waits. */
+  requestId: z.string().optional(),
+});
+export type SessionQueuedEvent = z.infer<typeof SessionQueuedEvent>;
+
 /** The events sessions.history replays: what a chat transcript folds. */
 export const SessionEvent = z.discriminatedUnion("type", [SessionStartEvent, SessionDeltaEvent, SessionDoneEvent, SessionEndEvent, SessionSteerEvent]);
 export type SessionEvent = z.infer<typeof SessionEvent>;
@@ -800,6 +812,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   SessionDoneEvent.extend(sequenced),
   SessionEndEvent.extend(sequenced),
   SessionSteerEvent.extend(sequenced),
+  SessionQueuedEvent.extend(sequenced),
   PortOpenEvent.extend(sequenced),
   PortCloseEvent.extend(sequenced),
   InboxFileEvent.extend(sequenced),
@@ -1172,6 +1185,9 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("workspaces.touch"), workspaceId: z.string() }),
   /** Replies with a DaemonReachView; the runtime remints the edge token when it nears expiry. */
   z.object({ id: reqId, op: z.literal("workspaces.daemonReach"), workspaceId: z.string() }),
+  /** Starts a turn and replies with a SessionStartResult. On a thread whose turn is still running the runtime never
+   * starts a second one on the session: the message joins the running turn when the harness steers (the reply names
+   * that turn), and otherwise waits for it to end before starting. */
   z.object({
     id: reqId,
     op: z.literal("sessions.start"),
@@ -1342,6 +1358,18 @@ export const SessionSteerOutcome = z.enum(["accepted", "not-running", "unsupport
 export type SessionSteerOutcome = z.infer<typeof SessionSteerOutcome>;
 export const SessionSteerResult = z.object({ outcome: SessionSteerOutcome });
 export type SessionSteerResult = z.infer<typeof SessionSteerResult>;
+
+// --- session start (how the turn the caller asked for came to be) --------------
+
+/** started: a turn of its own began. steered: the thread's turn was running and took the message mid-way, so
+ * session is that turn and a session.steer event carries the message. queued: the thread's turn was running and could
+ * not take a message, so this start waited for it to end and then began. The reply comes back once the turn began.
+ * turnId is the turn's, as its events carry it: a follower keys on it, since the thread's earlier turns share the
+ * session row. */
+export const SessionStartOutcome = z.enum(["started", "steered", "queued"]);
+export type SessionStartOutcome = z.infer<typeof SessionStartOutcome>;
+export const SessionStartResult = z.object({ session: SessionView, outcome: SessionStartOutcome, turnId: z.string() });
+export type SessionStartResult = z.infer<typeof SessionStartResult>;
 
 // --- snapshot lineage (golden manifest as the rollback UI reads it) -----------
 

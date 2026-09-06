@@ -23,6 +23,8 @@ import {
   type ProjectGolden,
   type SessionEvent,
   type SessionOrigin,
+  type SessionStartOutcome,
+  type SessionStartResult,
   type SessionView,
   type ThreadView,
   type TurnResult,
@@ -306,11 +308,13 @@ export async function create(client: HostClient, out: Out, golden: string, name:
 
 const sessionEvent = (f: Frame): f is Frame & SessionEvent => typeof f.type === "string" && f.type.startsWith("session.");
 
-/** A turn as a director sees it: the thread it opened or resumed, the harness's result once it ended, and the
+/** A turn as a director sees it: the thread it opened or resumed, how the start went (its own turn, or the thread's
+ * running one that took the message, or one that waited behind it), the harness's result once it ended, and the
  * runtime's reason when the runtime ended it. */
 export interface Turn {
   session: SessionView;
   threadId: string;
+  outcome: SessionStartOutcome;
   result?: TurnResult;
   reason?: string;
 }
@@ -326,25 +330,38 @@ export function resumeOf(thread: ThreadView, prompt: string): Record<string, unk
   return { workspaceId: thread.workspaceId, prompt, harness: thread.harness, resume: thread.claudeSessionId };
 }
 
-/** Starts a turn as `startedBy` and follows it to its end: `on.started` sees the thread as soon as the runtime names
- * it, `on.event` every event of the turn with the turn so far. Fails when the host goes away first. The send carries
- * its own request id so an app view with the same text in flight cannot take this turn's start for its own. */
+/** Starts a turn as `startedBy` and follows it to its end: `on.queued` when the runtime says the start waits behind
+ * the thread's running turn, `on.started` the thread as soon as the runtime names it, `on.event` every event of the
+ * turn with the turn so far. Fails when the host goes away first. The send carries its own request id so an app view
+ * with the same text in flight cannot take this turn's start for its own, and so the queued notice is known to be
+ * this start's. Events are picked by the turn's id: a start that waited behind the thread's running turn must not
+ * read that turn's end as its own. */
 export async function follow(
   client: HostClient,
   start: Record<string, unknown>,
   startedBy: SessionOrigin,
-  on: { started?(turn: Turn): void; event(e: SessionEvent, turn: Turn): void },
+  on: { queued?(): void; started?(turn: Turn): void; event(e: SessionEvent, turn: Turn): void },
 ): Promise<Turn> {
   const pushed = pushedFrames(client);
   await client.events();
-  const { session } = await client.request<{ session: SessionView }>("sessions.start", { ...start, startedBy, requestId: randomUUID() });
+  const requestId = randomUUID();
+  const offQueued = client.onFrame(f => {
+    if (f.type === "session.queued" && f["requestId"] === requestId) on.queued?.();
+  });
+  let reply: SessionStartResult;
+  try {
+    reply = await client.request<SessionStartResult>("sessions.start", { ...start, startedBy, requestId });
+  } finally {
+    offQueued();
+  }
+  const { session, outcome, turnId } = reply;
   const threadId = session.threadId;
   if (threadId === undefined) throw new Error("the runtime stamped no thread on the session");
-  const turn: Turn = { session, threadId };
+  const turn: Turn = { session, threadId, outcome };
   on.started?.(turn);
   const ended = new Promise<Turn>(done => {
     pushed.follow(
-      f => sessionEvent(f) && f.threadId === threadId,
+      f => sessionEvent(f) && f.turnId === turnId,
       f => {
         const e = f as unknown as SessionEvent;
         if (e.type === "session.done") turn.result = e.result;
@@ -367,13 +384,23 @@ export function turnFailure(turn: Turn): string | undefined {
   return turn.result?.error ?? turn.reason ?? `turn ${turn.result?.status ?? "ended without a result"}`;
 }
 
+/** What a send that met a running turn on its thread says on stderr: WAITING when the runtime announces the wait,
+ * the rest once it answered. */
+const WAITING = "waiting behind the running turn";
+const JOINED: Record<Exclude<SessionStartOutcome, "started">, string> = {
+  steered: "joined the running turn",
+  queued: "queued behind the running turn; it has ended and this turn started",
+};
+
 /** The verbs' way through a turn: text streams to stderr as it arrives, the last message is printed on stdout when
  * the turn ends, with --json every event of the turn is printed instead; the failure is one line on stderr, exit 1. */
 async function followVerb(ctx: VerbContext, client: HostClient, start: Record<string, unknown>, announce: boolean): Promise<number> {
   const turn = await follow(client, start, "cli", {
-    ...(announce
-      ? { started: (t: Turn) => ctx.out.emit({ type: "thread", id: t.threadId, workspaceId: t.session.workspaceId, harness: t.session.harness, startedBy: t.session.startedBy }, `thread ${t.threadId}`) }
-      : {}),
+    queued: () => ctx.io.error(WAITING),
+    started: (t: Turn) => {
+      if (announce) ctx.out.emit({ type: "thread", id: t.threadId, workspaceId: t.session.workspaceId, harness: t.session.harness, startedBy: t.session.startedBy }, `thread ${t.threadId}`);
+      if (t.outcome !== "started") ctx.io.error(JOINED[t.outcome]);
+    },
     event: (e, t) => {
       ctx.out.emit(e, e.type === "session.end" ? t.result?.text : undefined);
       if (e.type === "session.delta" && e.kind === "text") ctx.out.stream(e.text);

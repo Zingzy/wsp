@@ -81,6 +81,7 @@ import type {
   ReachState,
   SessionEvent,
   SessionInterruptResult,
+  SessionStartOutcome,
   SessionSteerResult,
   SessionOrigin,
   SessionView,
@@ -353,6 +354,10 @@ export interface SessionHandle {
   readonly id: string;
   readonly workspaceId: string;
   readonly finished: Promise<TurnResult>;
+  /** The runtime's id for the turn, as its events carry it. */
+  readonly turnId: string;
+  /** How the start that handed this out went: steered means the handle is the thread's running turn, not a new one. */
+  readonly outcome: SessionStartOutcome;
   view(): SessionView;
   interrupt(): Promise<void>;
   steer?(prompt: string): Promise<"accepted" | "not-running">;
@@ -608,6 +613,9 @@ export interface Runtime {
     export(opts: ProjectExportOptions): Promise<ProjectExportResult>;
   };
   readonly sessions: {
+    /** Starts a turn; never a second one on a session whose turn is running. A start on a thread whose turn runs
+     * steers the message into it when the harness steers (the handle is the running turn's, outcome steered), else
+     * waits for the turn to end and then starts (outcome queued), several such starts one after another in order. */
     start(
       workspaceId: string,
       opts: {
@@ -1864,18 +1872,53 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return { harness, adapter: factory({ machine: entry.machine, workspaceId: entry.record.id }) };
   };
 
+  type LiveSession = { view: SessionView; turnId: string; handle: SessionHandle };
+  const runningOn = (threadId: string): LiveSession | undefined => {
+    for (const s of sessions.values()) {
+      if (s.view.threadId === threadId && s.view.status === "running" && s.handle !== undefined) return s as LiveSession;
+    }
+    return undefined;
+  };
+  /** Recorded once the harness took the line, so the row sits where the turn could first see it. */
+  const recordSteer = (s: { view: SessionView; turnId: string }, handleId: string, o: { prompt: string; requestId?: string }): void => {
+    record({
+      type: "session.steer",
+      workspaceId: s.view.workspaceId,
+      sessionId: s.view.claudeSessionId ?? handleId,
+      turnId: s.turnId,
+      ...(s.view.threadId !== undefined ? { threadId: s.view.threadId } : {}),
+      prompt: o.prompt,
+      ...(o.requestId !== undefined ? { requestId: o.requestId } : {}),
+    });
+  };
+
   const sessionsApi: Runtime["sessions"] = {
     async start(workspaceId, o) {
       const entry = await entryOf(workspaceId);
-      const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }));
-      if (refusal !== null) throw new Error(refusal);
+      const refuse = (): void => {
+        const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }));
+        if (refusal !== null) throw new Error(refusal);
+      };
+      refuse();
       const { harness, adapter } = adapterFor(entry, o.harness);
+      const threadId = threadOf(workspaceId, o.resume);
+      let outcome: SessionStartOutcome = "started";
+      // Two processes on one harness session corrupt its transcript, so a thread runs one turn at a time.
+      for (let running = runningOn(threadId); running !== undefined; running = runningOn(threadId)) {
+        if (adapter.steers && running.handle.steer !== undefined && (await running.handle.steer(o.prompt)) === "accepted") {
+          recordSteer(running, running.handle.id, o);
+          return { ...running.handle, outcome: "steered" };
+        }
+        if (outcome === "started") bus.emit({ type: "session.queued", workspaceId, threadId, prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}) });
+        outcome = "queued";
+        await running.handle.finished.catch(() => {});
+        refuse();
+      }
       const table = harnessCatalog(harness);
       // A start is when the binary may have changed under us, so the catalog is refreshed here too, within its TTL.
       if (table !== undefined) void catalogOn(table, entry.machine, adapter);
 
       const turnId = randomUUID();
-      const threadId = threadOf(workspaceId, o.resume);
       const cwd = (o.resume !== undefined ? folderOf(workspaceId, o.resume) : undefined) ?? o.cwd;
       // Created before adapter.start so events that fire synchronously during
       // start() still land on the view. A resume id was announced by the harness
@@ -1989,6 +2032,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         id: handleId,
         workspaceId,
         finished: started.finished,
+        turnId,
+        outcome,
         view: () => ({ ...sessionView }),
         interrupt: () => started.interrupt(),
         ...(started.steer !== undefined ? { steer: (prompt: string) => started.steer!(prompt) } : {}),
@@ -2051,16 +2096,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (s.handle.steer === undefined) return { outcome: "unsupported" };
       const outcome = await s.handle.steer(o.prompt);
       if (outcome !== "accepted") return { outcome };
-      // Recorded once the harness took the line, so the row sits where the turn could first see it.
-      record({
-        type: "session.steer",
-        workspaceId: s.view.workspaceId,
-        sessionId: s.view.claudeSessionId ?? sessionId,
-        turnId: s.turnId,
-        ...(s.view.threadId !== undefined ? { threadId: s.view.threadId } : {}),
-        prompt: o.prompt,
-        ...(o.requestId !== undefined ? { requestId: o.requestId } : {}),
-      });
+      recordSteer(s, sessionId, o);
       return { outcome: "accepted" };
     },
   };

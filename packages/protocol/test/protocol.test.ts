@@ -35,6 +35,7 @@ import {
   SessionEvent,
   SessionInterruptResult,
   SessionSteerResult,
+  SessionStartResult,
   SnapshotLineage,
   SnapshotRollbackResult,
   SessionOrigin,
@@ -155,6 +156,19 @@ describe("protocol event union", () => {
     expect(SessionEvent.parse(plain)).toEqual(plain);
     expect(() => SessionEvent.parse({ ...steered, prompt: undefined })).toThrow();
     expect(() => SessionEvent.parse({ ...steered, prompt: 7 })).toThrow();
+  });
+});
+
+describe("session.queued", () => {
+  it("is a pushed event, not a session event: a start waiting behind the thread's running turn, with the send's request id, never in history", () => {
+    const queued = { type: "session.queued", workspaceId: "ws_1", threadId: "thread_0001", prompt: "and then this", requestId: "req_8" };
+    expect(EventUnion.parse(queued)).toEqual(queued);
+    expect(EventUnion.parse({ ...queued, seq: 4 })).toEqual({ ...queued, seq: 4 });
+    const { requestId: _r, ...plain } = queued;
+    expect(EventUnion.parse(plain)).toEqual(plain);
+    expect(() => EventUnion.parse({ ...queued, prompt: undefined })).toThrow();
+    expect(() => EventUnion.parse({ ...queued, threadId: undefined })).toThrow();
+    expect(() => SessionEvent.parse(queued)).toThrow();
   });
 });
 
@@ -431,6 +445,15 @@ describe("runtime wire types", () => {
     for (const outcome of ["accepted", "not-running", "unsupported", "not-found"]) expect(SessionSteerResult.parse({ outcome })).toEqual({ outcome });
     expect(() => SessionSteerResult.parse({ outcome: "queued" })).toThrow();
     expect(() => SessionSteerResult.parse({})).toThrow();
+  });
+
+  it("sessions.start answers the session and how the start went: started, steered into the running turn, or queued behind it", () => {
+    const session = { id: "s1", workspaceId: "ws_1", harness: "claude", status: "running" };
+    for (const outcome of ["started", "steered", "queued"]) expect(SessionStartResult.parse({ session, outcome, turnId: "t1" })).toEqual({ session, outcome, turnId: "t1" });
+    expect(() => SessionStartResult.parse({ session, outcome: "accepted", turnId: "t1" })).toThrow();
+    expect(() => SessionStartResult.parse({ session, turnId: "t1" })).toThrow();
+    expect(() => SessionStartResult.parse({ session, outcome: "started" })).toThrow();
+    expect(() => SessionStartResult.parse({ outcome: "started", turnId: "t1" })).toThrow();
   });
 
   it("snapshots.list / snapshots.rollback parse, and SnapshotLineage is the manifest plus its name", () => {
