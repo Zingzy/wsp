@@ -6,10 +6,10 @@
 // install in its own session and, at the timeout, kills that session and every
 // process descended from it before returning, so a slow brew never holds a
 // cellar lock into the next tool's turn.
-import { MIB } from "@wsp/catalog";
+import { HOMEBREW, MIB, ROAD_MODULES, type RoadName } from "@wsp/catalog";
 import type { GoldenStage } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
-import { BREW_HOUSEKEEPING, HOMEBREW, TOOLS_PATH, type GuestFacts, type ToolInstall } from "./golden-import.js";
+import { BREW_HOUSEKEEPING, TOOLS_PATH, type GuestFacts, type ToolInstall } from "./golden-import.js";
 import type { ExecResult, Machine } from "./machine.js";
 
 export interface ToolResult {
@@ -25,7 +25,7 @@ export interface ToolResult {
 }
 
 export interface ToolRoad {
-  kind: "release" | "go";
+  kind: Extract<RoadName, "release" | "go">;
   from: string;
   /** The release asset's sha256 as the guest read it, and the tag it came from; the recipe records both on the first install of a tag. */
   sha256?: string;
@@ -202,8 +202,12 @@ async function brewHousekeeping(machine: Machine, run: Run): Promise<string | un
 function summarize(tools: ToolResult[], housekeeping: string | undefined): string {
   const parts: string[] = [];
   const n = (o: ToolResult["outcome"]) => tools.filter(t => t.outcome === o);
-  const roads = n("installed").filter(t => t.road !== undefined).map(t => `${t.label} ${t.road!.kind === "release" ? "from its release" : "with go install"}`);
-  parts.push(`${n("installed").length} installed${roads.length > 0 ? ` (${roads.join(", ")})` : ""}`);
+  // An install is named when it says something more than that it landed: the road it took, a note its plan carried.
+  const named = n("installed").flatMap(t => {
+    const words = [...(t.road !== undefined ? [ROAD_MODULES[t.road.kind].words] : []), ...(t.note !== undefined ? [t.note] : [])];
+    return words.length > 0 ? [`${t.label} ${words.join(", ")}`] : [];
+  });
+  parts.push(`${n("installed").length} installed${named.length > 0 ? ` (${named.join(", ")})` : ""}`);
   const failed = n("failed");
   if (failed.length > 0) parts.push(`${failed.length} failed: ${failed.map(t => `${t.label} (${t.note})`).join(", ")}`);
   const skipped = n("skipped");
@@ -304,7 +308,7 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
       const left = await freeBytes(machine);
       reading = left;
       const bytes = free.kind === "free" && left.kind === "free" ? Math.max(0, free.bytes - left.bytes) : undefined;
-      out.tools.push({ id: tool.id, label: tool.label, outcome: "installed", ms, ...(bytes !== undefined ? { bytes } : {}), ...(road !== undefined ? { road } : {}) });
+      out.tools.push({ id: tool.id, label: tool.label, outcome: "installed", ...(tool.note !== undefined ? { note: tool.note } : {}), ms, ...(bytes !== undefined ? { bytes } : {}), ...(road !== undefined ? { road } : {}) });
     } else {
       out.tools.push({ id: tool.id, label: tool.label, outcome: "failed", note: reasonOf(res, TOOL_TIMEOUT_S), ms });
     }

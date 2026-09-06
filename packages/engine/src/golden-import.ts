@@ -8,9 +8,9 @@ import { createHash } from "node:crypto";
 import { join, relative } from "node:path";
 import { MCP_ID_PREFIX, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
-import { CATALOG_AGENTS, CLAUDE_KEY_FILE, NODE_PATH_LINE, NODE_RELEASES, UV_INSTALL, baseEntryFor, baseNote, caskVersion, installLine, linuxCaskFor, nodeInstallScript, smokeOf, type NodeMajor, type ToolPin } from "@wsp/catalog";
+import { APT_INDEX, APT_UPDATE, BREW, BREW_PREFIX, CATALOG_AGENTS, CLAUDE_KEY_FILE, HOMEBREW, HOMEBREW_STEP, NODE_PATH_LINE, NODE_RELEASES, UV_INSTALL, asLinuxbrew, asLinuxbrewScript, baseEntryFor, baseNote, catalogEntry, installLine, linuxCaskFor, nodeInstallScript, pinStateOf, ROAD_MODULES, roadModule, smokeOf, vendorRoad, type InstallRoad, type NodeMajor, type RoadName, type ToolPin } from "@wsp/catalog";
 
-export { CLAUDE_KEY_FILE, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
+export { CLAUDE_KEY_FILE, HOMEBREW, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
 
 export type { RecipeDigest };
 
@@ -476,20 +476,19 @@ export function recipeHash(digest: RecipeDigest): string {
 
 // --- tools -------------------------------------------------------------------
 
-/** `github` is the road for a tap formula with no Linux bottle and for a cask that is a command: its release asset, else `go install` from its repository. */
-export type ToolManager = "brew" | "npm" | "pnpm" | "bun" | "uv" | "pipx" | "cargo" | "go" | "github";
-
 export interface ToolInstall {
   id: string;
   label: string;
-  /** `script` is a base row's pinned installer. */
-  manager: ToolManager | EditorSource | "script";
+  /** The road the step takes; an extension list written as a file is a script. */
+  manager: RoadName;
   /** One bash -c script; exits non-zero on failure. */
   cmd: string;
   /** The install this one needs on the machine first; when that one did not install, this is skipped. */
   after?: string;
   /** The command the install puts on PATH, when the row names it; checked with command -v after the stage. */
   bin?: string;
+  /** What the result says beside the install once it lands: a road no golden build has proven yet. */
+  note?: string;
 }
 
 export interface SkippedItem {
@@ -528,6 +527,10 @@ export interface PlannedRoad {
 
 const CLI_PREFIX = "tools/cli/";
 const HAND_PREFIX = "tools/hand/";
+/** A tools row the recipe added for a catalog tool this computer has no row for: the tool's catalog id after the prefix. */
+export const CATALOG_PREFIX = "tools/catalog/";
+/** The note beside a catalog road's install when no golden build has proven the road yet. */
+export const UNMEASURED_ROAD = "by an unmeasured road";
 
 /** A hand-installed script or Linux binary is the one tools row that travels as a file, into the same bin directory. */
 const handCopy = (e: RecipeEntry): boolean => e.id.startsWith(HAND_PREFIX) && e.linux !== "no";
@@ -561,10 +564,7 @@ export interface ToolSource {
 
 /** How a road install stands against the recipe's pin: nothing recorded yet, the same tag (checked), or a
  * tag the Mac's Homebrew has since moved to (a first install again, re-recorded). */
-export function pinState(pin: ToolPin | undefined, source: ToolSource): "none" | "same" | "moved" {
-  if (pin === undefined) return "none";
-  return pin.tag === source.tag ? "same" : "moved";
-}
+export const pinState = (pin: ToolPin | undefined, source: ToolSource): "none" | "same" | "moved" => pinStateOf(source.tag, pin);
 
 /** What this Mac's Homebrew says about one installed formula. */
 export interface BrewFormula {
@@ -587,34 +587,15 @@ export type BrewTable = ReadonlyMap<string, BrewFormula>;
 /** Tap formulae that only build for macOS and say nothing of it in their metadata. */
 export const MACOS_ONLY_FORMULAE: ReadonlySet<string> = new Set(["felixkratz/formulae/sketchybar", "felixkratz/formulae/borders", "koekeishiya/formulae/yabai", "koekeishiya/formulae/skhd"]);
 
-/** Homebrew itself is a git checkout at a release tag whose commit is checked
- * before anything runs (https://docs.brew.sh/Homebrew-on-Linux#alternative-installation). */
-export const HOMEBREW = { tag: "6.0.21", commit: "560147012b9678b42ef5e83b690f0895552d1366" } as const;
-const BREW_PREFIX = "/home/linuxbrew/.linuxbrew";
 const PNPM_HOME = "/root/.local/share/pnpm";
-const GO_BIN = "/root/go/bin";
 
 /** Where the guest finds what the tools stage installs; each install line exports it so
  * it does not depend on the machine's own environment, and login shells get it from profile.d. */
 export const TOOLS_PATH = `/root/.local/bin:/usr/local/sbin:/usr/local/bin:${BREW_PREFIX}/bin:${BREW_PREFIX}/sbin:/root/go/bin:/root/.cargo/bin:${PNPM_HOME}:/root/.bun/bin:/usr/sbin:/usr/bin:/sbin:/bin`;
 export const PATH_LINE = `export PATH=${TOOLS_PATH} PNPM_HOME=${PNPM_HOME}`;
 
-// Install-time cleanup stays on: with it off, one recipe left 2.6 GB of bottles in the download cache on a 20 GB disk.
-const BREW_ENV = "HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 HOMEBREW_NO_ENV_HINTS=1 NONINTERACTIVE=1";
-const BREW = `${BREW_PREFIX}/bin/brew`;
-
 function squote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
-}
-
-// Homebrew refuses to run as root, so it lives under its own user at the
-// prefix its Linux bottles are built for; anything else compiles from source.
-function asLinuxbrewScript(script: string): string {
-  return `su -s /bin/bash linuxbrew -c ${squote(`export ${BREW_ENV}\n${script}`)}`;
-}
-
-function asLinuxbrew(cmd: string): string {
-  return `su -s /bin/bash linuxbrew -c ${squote(`${BREW_ENV} ${BREW} ${cmd}`)}`;
 }
 
 /** After the tools loop: dependencies no formula needs any more (a failed formula
@@ -694,7 +675,8 @@ export function brewfileFor(entries: readonly RecipeEntry[], brew: BrewTable = n
   return out;
 }
 
-const MANAGER_ORDER: readonly Exclude<ToolManager, "brew" | "github">[] = ["npm", "pnpm", "bun", "uv", "pipx", "cargo", "go"];
+/** The manager rows the collector writes (`tools/<manager>/<package>`), in the order their steps run. */
+const MANAGER_ORDER: readonly ("npm" | "pnpm" | "bun" | "uv" | "pipx" | "cargo" | "go")[] = ["npm", "pnpm", "bun", "uv", "pipx", "cargo", "go"];
 
 // Homebrew's Linux bottles are built against a newer glibc than the base image
 // ships, so its first formula pulls Homebrew's own glibc and gcc in and, on
@@ -705,130 +687,54 @@ export const BREW_TOOLCHAIN: readonly string[] = ["glibc", "gcc"];
 
 /** How a manager the base does not carry gets onto the machine before its first tool: as a Homebrew for Linux
  * formula. A manager the floor brings (see baseEntryFor) needs none. */
-export const MANAGER_FORMULA: Readonly<Partial<Record<ToolManager, string>>> = { bun: "bun", pipx: "pipx", cargo: "rust", go: "go" };
+export const MANAGER_FORMULA: Readonly<Partial<Record<RoadName, string>>> = { bun: "bun", pipx: "pipx", cargo: "rust", go: "go" };
 
-/** The collector puts a Go binary's `path@version` in its first path; recipes saved
- * before that carried it in the label as `name (path@version)`. */
-function goModule(e: RecipeEntry): { path: string; version: string } | undefined {
-  const spec = e.paths[0] ?? /\(([^()\s]+)\)/.exec(e.label)?.[1];
-  const at = spec?.lastIndexOf("@") ?? -1;
-  if (spec === undefined || at <= 0 || at === spec.length - 1) return undefined;
-  return { path: spec.slice(0, at), version: spec.slice(at + 1) };
-}
+const pinOf = (e: { pin?: ToolPin }): { pin?: ToolPin } => (e.pin !== undefined ? { pin: e.pin } : {});
 
-function managerCommand(e: RecipeEntry, manager: Exclude<ToolManager, "github">): { cmd: string } | { note: string } {
-  const pkg = e.id.slice(`tools/${manager}/`.length);
-  const v = e.version;
-  switch (manager) {
-    case "npm":
-    case "pnpm":
-    case "bun": {
-      const spec = v === undefined ? pkg : `${pkg}@${v}`;
-      return { cmd: manager === "npm" ? `npm install -g ${spec}` : `${manager} add -g ${spec}` };
-    }
-    case "uv":
-    case "pipx": {
-      const spec = v === undefined ? pkg : `${pkg}==${v}`;
-      return { cmd: manager === "uv" ? `uv tool install ${spec}` : `pipx install ${spec}` };
-    }
-    case "cargo":
-      return { cmd: v === undefined ? `cargo install ${pkg}` : `cargo install ${pkg} --version ${v}` };
-    case "go": {
-      const mod = goModule(e);
-      return mod ? { cmd: `go install ${mod.path}@${v ?? mod.version}` } : { note: "no module to install from" };
-    }
-    case "brew":
-      return { cmd: asLinuxbrew(`install ${pkg}`) };
+/** The release road of a command or tap row whose GitHub release is known, with the pin its first install recorded. */
+const releaseRoad = (r: Pick<PlannedRoad, "source" | "pin" | "go">): InstallRoad => ({ road: "release", repo: r.source.repo, version: r.source.tag, ...pinOf(r), ...(r.go !== undefined ? { go: r.go } : {}) });
+
+/** What a tools row installs by, with the command it puts on PATH where known: a catalog row its entry's road
+ * (noted when no golden build has proven the road), a formula row the brew road, a command or cask row its release
+ * or its vendor's, a manager row its manager's road at the row's version; nothing for a row no road installs.
+ * A release or vendor road carries the pin the row's first install recorded. */
+export function rowRoad(e: RecipeEntry): PlannedRow | undefined {
+  const pkg = packageOf(e);
+  if (e.id.startsWith(CATALOG_PREFIX)) {
+    const entry = catalogEntry(pkg);
+    if (entry?.kind !== "tool") return undefined;
+    return { road: { ...entry.installRoad, ...pinOf(e) }, bin: entry.bin, ...(entry.source.road === "unmeasured" ? { note: UNMEASURED_ROAD } : {}) };
   }
+  const cask = linuxCaskFor(e.id);
+  if (cask !== undefined) return { road: vendorRoad(cask, e), bin: cask.bin };
+  if (e.id.startsWith(CLI_PREFIX)) {
+    const cli = cliRoad(e);
+    return { road: cli !== undefined ? releaseRoad({ ...cli, ...pinOf(e) }) : { road: "release", ...pinOf(e) }, bin: pkg };
+  }
+  const manager = (["brew", ...MANAGER_ORDER] as const).find(m => e.id.startsWith(`tools/${m}/`));
+  if (manager === undefined) return undefined;
+  const road = ROAD_MODULES[manager].fromRow!({ name: pkg, ...(e.version !== undefined ? { version: e.version } : {}), paths: e.paths, label: e.label });
+  const bin = roadModule(road).bin?.(road);
+  return { road, ...(bin !== undefined ? { bin } : {}) };
 }
 
-/** The file `go install` writes for a module: its last path element, skipping a major-version suffix. */
-function goBinary(module: string): string {
-  const at = module.lastIndexOf("@");
-  const parts = (at > 0 ? module.slice(0, at) : module).split("/");
-  const last = parts.at(-1)!;
-  return /^v[1-9]\d*$/.test(last) && parts.length > 1 ? parts.at(-2)! : last;
+export interface PlannedRow {
+  road: InstallRoad;
+  bin?: string;
+  note?: string;
 }
 
-/** A tool from its repository: the release asset built for this arch, unpacked and its binary put in
- * /usr/local/bin; with no Linux asset and go on the machine, `go install` of the module at the tag, moved to
- * the row's command when the module is named otherwise. The asset's sha256 is checked against the pin when
- * the recipe has one for this tag, and printed with the tag on the WSP_ROAD line the stage reads either way,
- * so the first install of a tag records it. */
-function roadInstall(name: string, source: ToolSource, pin?: string, go = `github.com/${source.repo}@${source.tag}`): string {
-  const api = `https://api.github.com/repos/${source.repo}/releases/tags/${source.tag}`;
-  const goBin = goBinary(go);
-  return [
-    "set -euo pipefail",
-    `name=${squote(name)}`,
-    'arch="$(uname -m)"',
-    'case "$arch" in x86_64) pat="amd64|x86_64|x64" ;; aarch64) pat="arm64|aarch64" ;; *) echo "Error: unsupported arch: $arch" >&2; exit 1 ;; esac',
-    'tmp="$(mktemp -d /tmp/wsp-road-XXXXXX)"',
-    "trap 'rm -rf \"$tmp\"' EXIT",
-    `urls="$(curl -fsSL ${squote(api)} | grep -o '"browser_download_url": *"[^"]*"' | cut -d'"' -f4 || true)"`,
-    `url="$(printf '%s\\n' "$urls" | grep -i linux | grep -iE "$pat" | grep -viE '\\.(sha256|sha256sum|sha512|sig|asc|txt|md5|pem|deb|rpm|apk)$' | head -1 || true)"`,
-    'if [ -n "$url" ]; then',
-    '  asset="${url##*/}"',
-    '  curl -fsSL -o "$tmp/$asset" "$url"',
-    `  sum="$(sha256sum "$tmp/$asset" | cut -d' ' -f1)"`,
-    ...(pin !== undefined ? [`  [ "$sum" = ${squote(pin)} ] || { echo "Error: $asset does not match the checksum recorded on the first install of "${squote(source.tag)} >&2; exit 1; }`] : []),
-    '  case "$asset" in',
-    '    *.tar.gz|*.tgz) tar -xzf "$tmp/$asset" -C "$tmp" ;;',
-    '    *.tar.xz) tar -xJf "$tmp/$asset" -C "$tmp" ;;',
-    '    *.zip) if command -v unzip >/dev/null 2>&1; then unzip -qo "$tmp/$asset" -d "$tmp"; else python3 -m zipfile -e "$tmp/$asset" "$tmp"; fi ;;',
-    '    *) mv "$tmp/$asset" "$tmp/$name"; chmod +x "$tmp/$name"; asset="" ;;',
-    "  esac",
-    '  bin="$(find "$tmp" -type f -name "$name" | head -1)"',
-    `  [ -n "$bin" ] || bin="$(find "$tmp" -type f -perm -u+x ! -name "\${asset:-.}" ! -name '*.md' ! -name '*.txt' -printf '%s %p\\n' | sort -rn | head -1 | cut -d' ' -f2-)"`,
-    '  [ -n "$bin" ] || { echo "Error: no binary in ${asset:-the release}" >&2; exit 1; }',
-    '  install -m 0755 "$bin" "/usr/local/bin/$name"',
-    `  echo "WSP_ROAD release \${asset:-$url} $sum "${squote(source.tag)}`,
-    "elif command -v go >/dev/null 2>&1; then",
-    `  GOBIN=/usr/local/bin go install ${squote(go)}`,
-    ...(goBin === name ? [] : [`  mv ${squote(`/usr/local/bin/${goBin}`)} "/usr/local/bin/$name"`]),
-    `  echo "WSP_ROAD go "${squote(go)}`,
-    "else",
-    `  echo "Error: release "${squote(source.tag)}" of "${squote(source.repo)}" has no Linux build, and go is not on the machine" >&2`,
-    "  exit 1",
-    "fi",
-  ].join("\n");
-}
-
-/** How a removed tool comes off the machine; Go has no uninstall, so its binary is noted and left. */
+/** How a removed tool comes off the machine: through its road's module, on the tools PATH; a row no road installed is noted. */
 export function toolUninstall(e: RecipeEntry): { cmd: string } | { note: string } {
   const withPath = (cmd: string): string => `${PATH_LINE}\n${cmd}`;
   const base = baseRowFor(e);
   if (base !== undefined) return { note: `${base.name} is part of the base and stays` };
   if (e.id.startsWith("tools/brew-tap/")) return { cmd: withPath(asLinuxbrew(`untap ${e.id.slice("tools/brew-tap/".length)}`)) };
-  const cask = linuxCaskFor(e.id);
-  if (cask !== undefined) return { cmd: withPath(cask.uninstall) };
-  if (e.id.startsWith("tools/brew-cask/") || e.id.startsWith("tools/mas/")) return { note: "never installed on Linux" };
-  if (e.id.startsWith(CLI_PREFIX)) return { cmd: withPath(`rm -f /usr/local/bin/${squote(e.id.slice(CLI_PREFIX.length))}`) };
   if (e.id.startsWith(HAND_PREFIX)) return { note: "a copied file; it comes off with the files" };
-  const manager = (["brew", ...MANAGER_ORDER] as const).find(m => e.id.startsWith(`tools/${m}/`));
-  if (manager === undefined) return { note: "no manager known for this row" };
-  const pkg = e.id.slice(`tools/${manager}/`.length);
-  switch (manager) {
-    case "brew": {
-      if (!pkg.includes("/")) return { cmd: withPath(asLinuxbrew(`uninstall ${pkg}`)) };
-      // A tap formula with no Linux bottle took the road to /usr/local/bin under the formula's name, not to the cellar.
-      const bin = pkg.slice(pkg.lastIndexOf("/") + 1);
-      return { cmd: withPath(`if [ -x ${BREW} ] && ${asLinuxbrew(`list --formula ${pkg}`)} >/dev/null 2>&1; then ${asLinuxbrew(`uninstall ${pkg}`)}; else rm -f /usr/local/bin/${squote(bin)}; fi`) };
-    }
-    case "npm":
-      return { cmd: withPath(`npm uninstall -g ${pkg}`) };
-    case "pnpm":
-    case "bun":
-      return { cmd: withPath(`${manager} remove -g ${pkg}`) };
-    case "uv":
-      return { cmd: withPath(`uv tool uninstall ${pkg}`) };
-    case "pipx":
-      return { cmd: withPath(`pipx uninstall ${pkg}`) };
-    case "cargo":
-      return { cmd: withPath(`cargo uninstall ${pkg}`) };
-    case "go":
-      return { note: `go has no uninstall; the binary stays in ${GO_BIN}` };
-  }
+  const planned = rowRoad(e);
+  if (planned === undefined) return { note: e.id.startsWith("tools/brew-cask/") || e.id.startsWith("tools/mas/") ? "never installed on Linux" : "no manager known for this row" };
+  const r = roadModule(planned.road).uninstall(planned.road, planned.bin ?? packageOf(e));
+  return "cmd" in r ? { cmd: withPath(r.cmd) } : r;
 }
 
 export interface ToolsPlan {
@@ -844,7 +750,16 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
   const installs: ToolInstall[] = [];
   const skipped: SkippedItem[] = [...brew.skipped];
   const withPath = (cmd: string): string => `${PATH_LINE}\n${cmd}`;
-  const rowsOf = (manager: ToolManager): RecipeEntry[] => entries.filter(e => ticked(e) && e.rung === "tools" && e.id.startsWith(`tools/${manager}/`) && baseRowFor(e) === undefined);
+  const toolRows = entries.filter(e => ticked(e) && e.rung === "tools" && baseRowFor(e) === undefined);
+  const rowsOf = (manager: RoadName): RecipeEntry[] => toolRows.filter(e => e.id.startsWith(`tools/${manager}/`));
+  // A catalog row installs by its entry's road; a package road's rows go with the manager's, the rest after everything else.
+  const catalog = toolRows.flatMap(e => {
+    if (!e.id.startsWith(CATALOG_PREFIX)) return [];
+    const planned = rowRoad(e);
+    if (planned === undefined) skipped.push({ id: e.id, note: "not in the catalog" });
+    return planned === undefined ? [] : [{ e, planned }];
+  });
+  const catalogRowsOf = (manager: RoadName): RecipeEntry[] => catalog.filter(c => c.planned.road.road === manager).map(c => c.e);
   const npmTicked = new Set(rowsOf("npm").map(e => e.id.slice("tools/npm/".length)));
 
   // Homebrew's own toolchain, each step waiting on the one before; everything brew installs waits on the last.
@@ -858,10 +773,10 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
   );
 
   // One step per manager that has rows, unless the base carries it or it already comes along as a formula or an npm global.
-  const managers = new Map<ToolManager, { after: string; step?: ToolInstall }>();
+  const managers = new Map<RoadName, { after: string; step?: ToolInstall }>();
   const managerFormulae: string[] = [];
   for (const manager of MANAGER_ORDER) {
-    if (rowsOf(manager).length === 0 || baseEntryFor(manager) !== undefined) continue;
+    if (rowsOf(manager).length + catalogRowsOf(manager).length === 0 || baseEntryFor(manager) !== undefined) continue;
     const own = `tools/manager/${manager}`;
     const formula = MANAGER_FORMULA[manager];
     if (formula === undefined) throw new Error(`${manager} is neither in the base nor a formula`);
@@ -872,44 +787,62 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
       managerFormulae.push(formula);
     }
   }
+  const catalogFormulae = catalog.flatMap(c => (c.planned.road.road === "brew" ? roadModule(c.planned.road).names(c.planned.road) : []));
 
-  if (brew.taps.length + brew.formulae.length > 0 || managerFormulae.length > 0) {
+  if (brew.taps.length + brew.formulae.length > 0 || managerFormulae.length + catalogFormulae.length > 0) {
     installs.push({ id: "tools/homebrew", label: "Homebrew", manager: "brew", cmd: withPath(homebrewBootstrap()) });
     installs.push(...toolchain.steps);
     for (const t of brew.taps) installs.push({ id: `tools/brew-tap/${t}`, label: t, manager: "brew", cmd: withPath(asLinuxbrew(`tap ${t}`)), after: toolchain.last });
-    const formulae = [...brew.formulae, ...managerFormulae];
+    const formulae = [...brew.formulae, ...managerFormulae, ...catalogFormulae];
     if (formulae.length > 1) installs.push({ id: "tools/brew-shared", label: "shared Homebrew dependencies", manager: "brew", cmd: withPath(brewSharedDeps(formulae)), after: toolchain.last });
     for (const f of brew.formulae) installs.push({ id: `tools/brew/${f}`, label: f, manager: "brew", cmd: withPath(asLinuxbrew(`install ${f}`)), after: toolchain.last });
   }
+  // What a row waits on: the apt index read once by its own step, Homebrew's toolchain, the manager's step; a floor row is there already.
+  const APT_STEP = `tools/${APT_INDEX}`;
+  const afterFor = (road: InstallRoad): string | undefined => {
+    const dep = roadModule(road).after;
+    if (dep === APT_INDEX) {
+      if (!installs.some(t => t.id === APT_STEP)) installs.push({ id: APT_STEP, label: "apt index", manager: "apt", cmd: withPath(APT_UPDATE) });
+      return APT_STEP;
+    }
+    if (dep === HOMEBREW_STEP) return toolchain.last;
+    return managers.get(road.road)?.after;
+  };
+  const plan = (e: RecipeEntry, planned: PlannedRow): void => {
+    const line = roadModule(planned.road).install(planned.road, planned.bin ?? packageOf(e));
+    if (typeof line !== "string") {
+      skipped.push({ id: e.id, note: line.note });
+      return;
+    }
+    const after = afterFor(planned.road);
+    installs.push({ id: e.id, label: e.label, manager: planned.road.road, cmd: withPath(line), ...(after !== undefined ? { after } : {}), ...(planned.bin !== undefined ? { bin: planned.bin } : {}), ...(planned.note !== undefined ? { note: planned.note } : {}) });
+  };
   for (const manager of MANAGER_ORDER) {
     const rows = rowsOf(manager);
-    if (rows.length === 0) continue;
-    const m = managers.get(manager);
-    if (m?.step !== undefined) installs.push(m.step);
+    const fromCatalog = catalogRowsOf(manager);
+    if (rows.length + fromCatalog.length === 0) continue;
+    const step = managers.get(manager)?.step;
+    if (step !== undefined) installs.push(step);
     for (const e of rows) {
-      const r = managerCommand(e, manager);
-      if ("note" in r) skipped.push({ id: e.id, note: r.note });
-      else installs.push({ id: e.id, label: e.label, manager, cmd: withPath(r.cmd), ...(m !== undefined ? { after: m.after } : {}), ...(manager === "go" ? { bin: e.id.slice("tools/go/".length) } : {}) });
+      const planned = rowRoad(e);
+      if (planned !== undefined) plan(e, planned);
     }
+    for (const e of fromCatalog) plan(e, rowRoad(e)!);
   }
   // Last, after any go the plan brings: a road install needs no brew and waits on nothing.
-  for (const r of brew.roads) {
-    const label = entries.find(e => e.id === r.id)?.label ?? r.name;
-    installs.push({ id: r.id, label, manager: "github", cmd: withPath(roadInstall(r.name, r.source, pinState(r.pin, r.source) === "same" ? r.pin!.sha256 : undefined, r.go)), bin: r.name });
-  }
+  for (const r of brew.roads) plan(entries.find(e => e.id === r.id)!, { road: releaseRoad(r), bin: r.name });
   // A cask that is a command installs from its vendor's Linux release, hashed on the guest as a road is; a command row
   // with a GitHub release already went out as a road above.
-  for (const e of entries) {
-    const cask = ticked(e) && e.rung === "tools" && cliRoad(e) === undefined && baseRowFor(e) === undefined ? linuxCaskFor(e.id) : undefined;
-    if (cask !== undefined) installs.push({ id: e.id, label: e.label, manager: "release", cmd: withPath(cask.install(caskVersion(cask, e), e.pin)), bin: cask.bin });
+  for (const e of toolRows) {
+    const cask = cliRoad(e) === undefined ? linuxCaskFor(e.id) : undefined;
+    if (cask !== undefined) plan(e, { road: vendorRoad(cask, e), bin: cask.bin });
   }
+  // The catalog rows on every other road: Homebrew's, apt's, a release, a vendor's, a script.
+  for (const { e, planned } of catalog) if (!(MANAGER_ORDER as readonly string[]).includes(planned.road.road)) plan(e, planned);
   return { installs, skipped, base: brew.base, brewfile: brew.text };
 }
 
 // --- editors -----------------------------------------------------------------
-
-/** How an editors row gets onto the machine: a distro package, a pinned release tarball, or a list file for the person. */
-export type EditorSource = "apt" | "release" | "list";
 
 /** Helix by its release tarball (https://github.com/helix-editor/helix/releases), hashed at pin time; the
  * release publishes no sums file. The tarball carries the runtime directory beside the binary. */
@@ -951,7 +884,11 @@ export function terminalEditor(id: string): { name: string; uninstall: string } 
   if (!id.startsWith("editors/")) return undefined;
   const key = id.slice("editors/".length);
   const apt = APT_EDITORS[key];
-  if (apt !== undefined) return { name: apt.name, uninstall: `export DEBIAN_FRONTEND=noninteractive\napt-get purge -y -qq ${apt.pkg} && apt-get autoremove -y -qq --purge` };
+  if (apt !== undefined) {
+    const road: InstallRoad = { road: "apt", packages: [apt.pkg] };
+    const r = roadModule(road).uninstall(road, apt.bin);
+    return { name: apt.name, uninstall: "cmd" in r ? r.cmd : r.note };
+  }
   if (key === "helix") return { name: "helix", uninstall: "rm -rf /opt/helix /usr/local/bin/hx" };
   return undefined;
 }
@@ -1024,7 +961,7 @@ export function editorInstallsFor(entries: readonly RecipeEntry[]): EditorsPlan 
     out.installs.push({
       id: `editors/${key}-ext`,
       label: `${ed.name} extension list`,
-      manager: "list",
+      manager: "script",
       cmd: `${PRELUDE}\nmkdir -p "$HOME/${ed.dir}"\nprintf '%s\\n' ${list} > "$HOME/${extensionsFile(ed.dir)}"`,
     });
   }

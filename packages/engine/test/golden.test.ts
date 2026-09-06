@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { editorInstallsFor, recipeDigest, toolInstallsFor, type BrewTable, type GuestFacts, type RecipeEntry } from "../src/golden-import.js";
+import { UNMEASURED_ROAD, editorInstallsFor, recipeDigest, toolInstallsFor, type BrewTable, type GuestFacts, type RecipeEntry } from "../src/golden-import.js";
 import { diffRecipes, removalsFor, rowsToApply } from "../src/golden-diff.js";
 import { BUILDER_IDLE_MS, MachineAliveError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, rollback, sealGolden, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
@@ -761,8 +761,8 @@ describe("golden import stages", () => {
     const { stages, onStage } = stageRecorder();
     const results: ImportResult[] = [];
     const roads = [
-      { id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", manager: "github" as const, cmd: "curl https://api.github.com/repos/Zingzy/diskbloom/releases/tags/v0.1.0" },
-      { id: "tools/brew/thezoraiz/ascii-image-converter/ascii-image-converter", label: "ascii-image-converter", manager: "github" as const, cmd: "curl https://api.github.com/repos/TheZoraiz/ascii-image-converter/releases/tags/v1.13.1" },
+      { id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", manager: "release" as const, cmd: "curl https://api.github.com/repos/Zingzy/diskbloom/releases/tags/v0.1.0" },
+      { id: "tools/brew/thezoraiz/ascii-image-converter/ascii-image-converter", label: "ascii-image-converter", manager: "release" as const, cmd: "curl https://api.github.com/repos/TheZoraiz/ascii-image-converter/releases/tags/v1.13.1" },
     ];
     await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ tools: [...importOf().tools, ...roads], onResult: r => void results.push(r) }) });
     expect(stages).toContain("installing-tools:5 installed (diskbloom from its release, ascii-image-converter with go install); caches swept; 3000 MB free");
@@ -772,6 +772,28 @@ describe("golden import stages", () => {
     ]);
     // A brew install carries no road: it took the one its plan named.
     expect(results[0]!.tools[1]).not.toHaveProperty("road");
+  });
+
+  it("a catalog tool this computer has no row for installs by its catalog road on the guest: the current release is fetched, the road recorded, and the tally says the road is unmeasured", async () => {
+    const { backend, cmds, fetch, inline } = backendFor([
+      ["repos/cli/cli/releases/latest", { exitCode: 0, stdout: `WSP_ROAD release gh_2.86.0_linux_amd64.tar.gz ${"b".repeat(64)} v2.86.0\n`, stderr: "" }],
+    ]);
+    const plan = toolInstallsFor([
+      { rung: "tools", id: "tools/catalog/gh", label: "GitHub CLI", paths: [], bytes: 0, default: "skip", bring: true, linux: "yes" },
+      { rung: "tools", id: "tools/npm/wrangler", label: "wrangler", paths: [], bytes: 0, default: "bring", bring: true, version: "4.1.0" },
+    ]);
+    const { stages, onStage } = stageRecorder();
+    const results: ImportResult[] = [];
+    await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ tools: plan.installs, onResult: r => void results.push(r) }) });
+    const road = cmds.find(c => c.includes("repos/cli/cli/releases/latest"))!;
+    expect(road).toContain(`install -m 0755 "$bin" "/usr/local/bin/$name"`);
+    expect(road).toContain("go install '\\''github.com/cli/cli@latest'\\''");
+    expect(inline.filter(c => c.cmd.includes('echo "missing')).at(-1)!.cmd).toContain(`for b in 'gh'; do`);
+    expect(results[0]!.tools).toEqual([
+      { id: "tools/npm/wrangler", label: "wrangler", outcome: "installed", ms: expect.any(Number), bytes: 0 },
+      { id: "tools/catalog/gh", label: "GitHub CLI", outcome: "installed", note: UNMEASURED_ROAD, road: { kind: "release", from: "gh_2.86.0_linux_amd64.tar.gz", sha256: "b".repeat(64), tag: "v2.86.0" }, ms: expect.any(Number), bytes: 0 },
+    ]);
+    expect(stages).toContain(`installing-tools:2 installed (GitHub CLI from its release, ${UNMEASURED_ROAD}); caches swept; 3000 MB free`);
   });
 
   it("after the loop every install that names its command is checked with command -v on the tools PATH: one not there is failed with the reason, in the result and the summary", async () => {
@@ -784,7 +806,7 @@ describe("golden import stages", () => {
     const tools: ToolInstall[] = [
       ...importOf().tools,
       { id: "tools/go/gopls", label: "gopls", manager: "go", cmd: "go install gopls", bin: "gopls" },
-      { id: "tools/cli/spoo", label: "spoo", manager: "github", cmd: "curl https://api.github.com/repos/spoo-me/spoo-cli/releases/tags/v0.4.1", bin: "spoo" },
+      { id: "tools/cli/spoo", label: "spoo", manager: "release", cmd: "curl https://api.github.com/repos/spoo-me/spoo-cli/releases/tags/v0.4.1", bin: "spoo" },
     ];
     await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ tools, onResult: r => void results.push(r) }) });
     const check = inline.filter(c => c.cmd.includes('echo "missing')).at(-1)!;
@@ -836,7 +858,7 @@ describe("golden import stages", () => {
     const tools: ToolInstall[] = [
       ...importOf().tools,
       { id: "tools/go/gopls", label: "gopls", manager: "go", cmd: "go install gopls", bin: "gopls" },
-      { id: "tools/cli/spoo", label: "spoo", manager: "github", cmd: "curl https://api.github.com/repos/spoo-me/spoo-cli/releases/tags/v0.4.1", bin: "spoo" },
+      { id: "tools/cli/spoo", label: "spoo", manager: "release", cmd: "curl https://api.github.com/repos/spoo-me/spoo-cli/releases/tags/v0.4.1", bin: "spoo" },
     ];
     await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ tools, onResult: r => void results.push(r) }) });
     expect(results[0]!.tools.slice(3)).toEqual([

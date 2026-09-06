@@ -6,6 +6,7 @@
 // that. The wizard's tables read from here; nothing here runs a command.
 import { GCLOUD, KUBECTL } from "./linux-casks.js";
 import { mcpConfig, type McpConfig } from "./mcp.js";
+import { roadModule } from "./road-modules.js";
 import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, HERMES_INSTALL, MIB, NODE_RELEASES, PYTHON_INSTALL, UV_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
 import { NO_SIGN_IN, SIGN_IN_ROWS, hasLogin, keysIdOf, keysRowOf, loginIdOf, type KeyFiles, type SignIn } from "./signin.js";
 
@@ -140,7 +141,7 @@ const brew = (formula: string): { installRoad: InstallRoad; size?: number } => {
 };
 const apt = (...packages: string[]): InstallRoad => ({ road: "apt", packages });
 const npm = (pkg: string, version?: string): InstallRoad => ({ road: "npm", package: pkg, ...(version !== undefined ? { version } : {}) });
-const github = (repo: string): InstallRoad => ({ road: "release", asset: { github: repo } });
+const github = (repo: string): InstallRoad => ({ road: "release", repo });
 const tool = { kind: "tool", configPaths: [], floor: false } as const;
 const agent = (id: keyof typeof AGENT_MIB) => ({ id, kind: "agent", bin: id, size: AGENT_MIB[id] * MIB }) as const;
 
@@ -283,8 +284,8 @@ export const CATALOG: readonly CatalogEntry[] = [
   { ...tool, id: "gradle", name: "Gradle", bin: "gradle", ...brew("gradle"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 4, road: "measured" } },
   { ...tool, id: "wrangler", name: "Cloudflare Wrangler", bin: "wrangler", installRoad: npm("wrangler"), covers: ["cloudflare-wrangler"], signIn: SIGN_IN_ROWS.wrangler, defaultOn: false, source: { sessions: 3, images: 0, road: "unmeasured" } },
   { ...tool, id: "cloudflared", name: "cloudflared", bin: "cloudflared", installRoad: github("cloudflare/cloudflared"), signIn: SIGN_IN_ROWS.cloudflared, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" } },
-  { ...tool, id: "gcloud", name: "Google Cloud CLI", bin: "gcloud", installRoad: { road: "release", asset: { vendor: GCLOUD } }, signIn: SIGN_IN_ROWS.gcloud, defaultOn: false, source: { sessions: 4, images: 0, road: "measured" } },
-  { ...tool, id: "kubectl", name: "kubectl", bin: "kubectl", installRoad: { road: "release", asset: { vendor: KUBECTL } }, covers: ["kubernetes-cli"], signIn: SIGN_IN_ROWS.kubectl, defaultOn: false, source: { sessions: 1, images: 1, road: "unmeasured" } },
+  { ...tool, id: "gcloud", name: "Google Cloud CLI", bin: "gcloud", installRoad: { road: "vendor", cask: GCLOUD }, signIn: SIGN_IN_ROWS.gcloud, defaultOn: false, source: { sessions: 4, images: 0, road: "measured" } },
+  { ...tool, id: "kubectl", name: "kubectl", bin: "kubectl", installRoad: { road: "vendor", cask: KUBECTL }, covers: ["kubernetes-cli"], signIn: SIGN_IN_ROWS.kubectl, defaultOn: false, source: { sessions: 1, images: 1, road: "unmeasured" } },
   { ...tool, id: "aws", name: "AWS CLI", bin: "aws", ...brew("awscli"), signIn: SIGN_IN_ROWS.aws, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
   { ...tool, id: "vercel", name: "Vercel CLI", bin: "vercel", installRoad: npm("vercel"), signIn: SIGN_IN_ROWS.vercel, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
   { ...tool, id: "netlify", name: "Netlify CLI", bin: "netlify", installRoad: npm("netlify-cli"), signIn: SIGN_IN_ROWS.netlify, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
@@ -308,31 +309,13 @@ const BY_ID: ReadonlyMap<string, CatalogEntry> = new Map(CATALOG.map(e => [e.id,
 /** What every golden gets in its base stage, whatever the Mac has: the entries flagged for the floor, in catalog order. */
 export const BASE_FLOOR: readonly ToolEntry[] = CATALOG.filter((e): e is ToolEntry => e.kind === "tool" && e.floor);
 
-/** The floor row an entry's install runs on top of: the npm road on node, an apt package on the index read once
- * (`apt-index`), a script on what its entry names. */
+/** The floor row an entry's install runs on top of: what its road says (the npm road on node, an apt package on the
+ * index read once), else what the entry names (a script on `after`). */
 export function installAfter(e: ToolEntry): string | undefined {
-  switch (e.installRoad.road) {
-    case "npm":
-      return "node";
-    case "apt":
-      return "apt-index";
-    default:
-      return e.after;
-  }
+  return roadModule(e.installRoad).after ?? e.after;
 }
 
-const roadNames = (road: InstallRoad): readonly string[] => {
-  switch (road.road) {
-    case "brew":
-      return [road.formula];
-    case "npm":
-      return [road.package];
-    case "apt":
-      return road.packages;
-    default:
-      return [];
-  }
-};
+const roadNames = (road: InstallRoad): readonly string[] => roadModule(road).names(road);
 
 /** The catalog tool a package name the collector wrote stands for: by id, by the command it puts on PATH, by its
  * road's own name for it, by a name it covers, or by a command it brings along; or nothing. */
@@ -388,19 +371,10 @@ export function smokeOf(e: CatalogEntry): string {
   return `${e.bin} --version`;
 }
 
-/** The bash line an entry's road runs on the guest as it is: an npm package pinned, a script, an apt package. The
- * brew and release roads install through the tools stage's own machinery and have no line of their own. */
+/** The bash line an entry's road runs on the guest, from the road's module; an entry whose road has nothing to run is a
+ * catalog error, since every entry promises its command. */
 export function installLine(e: CatalogEntry): string {
-  const road = e.installRoad;
-  switch (road.road) {
-    case "npm":
-      if (road.version === undefined) throw new Error(`${e.id} names no version to pin`);
-      return `npm install -g ${road.ignoreScripts === true ? "--ignore-scripts " : ""}${road.package}@${road.version}`;
-    case "script":
-      return road.script;
-    case "apt":
-      return `export DEBIAN_FRONTEND=noninteractive\napt-get install -y -qq ${road.packages.join(" ")}`;
-    default:
-      throw new Error(`${e.id} takes the ${road.road} road, which has no install line of its own`);
-  }
+  const line = roadModule(e.installRoad).install(e.installRoad, e.bin);
+  if (typeof line !== "string") throw new Error(`${e.id}: ${line.note}`);
+  return line;
 }

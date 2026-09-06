@@ -4,7 +4,7 @@
 // the six whose project state has a measured resolver, every default names
 // its evidence, and the seeded rows are what the snapshot says they are.
 import { describe, expect, it } from "vitest";
-import { BASE_FLOOR, CATALOG, CATALOG_AGENTS, HISTORY_FORMATS, LINUX_CASKS, LOGIN_ROWS, ROADS, SIGN_IN_ROWS, baseEntryFor, baseNote, catalogEntry, catalogToolFor, hasLogin, installAfter, installLine, keysIdOf, keysRowOf, loginIdOf, loginRow, smokeOf } from "../src/index.js";
+import { APT_INDEX, APT_UPDATE, BASE_FLOOR, CATALOG, CATALOG_AGENTS, GCLOUD, HISTORY_FORMATS, HOMEBREW_STEP, KUBECTL, LINUX_CASKS, LOGIN_ROWS, ROADS, ROAD_MODULES, SIGN_IN_ROWS, baseEntryFor, baseNote, catalogEntry, catalogToolFor, hasLogin, installAfter, installLine, keysIdOf, keysRowOf, loginIdOf, loginRow, roadModule, smokeOf, vendorRoad, type InstallRoad } from "../src/index.js";
 
 describe("catalog", () => {
   it("names a session history for the agents with a reader, in a known format under a home path", () => {
@@ -44,11 +44,21 @@ describe("catalog", () => {
           expect(road.formula, e.id).toMatch(/^[\w@.+-]+$/);
           break;
         case "npm":
+        case "pnpm":
+        case "bun":
+        case "uv":
+        case "pipx":
+        case "cargo":
           expect(road.package, e.id).toMatch(/^(@[\w.-]+\/)?[\w.-]+$/);
           break;
+        case "go":
+          expect(road.module, e.id).toMatch(/^[\w.-]+\.[a-z]+\//);
+          break;
         case "release":
-          if ("github" in road.asset) expect(road.asset.github, e.id).toMatch(/^[\w.-]+\/[\w.-]+$/);
-          else expect(LINUX_CASKS, e.id).toContain(road.asset.vendor);
+          expect(road.repo, e.id).toMatch(/^[\w.-]+\/[\w.-]+$/);
+          break;
+        case "vendor":
+          expect(LINUX_CASKS, e.id).toContain(road.cask);
           break;
         case "apt":
           expect(road.packages.length, e.id).toBeGreaterThan(0);
@@ -109,15 +119,85 @@ describe("catalog", () => {
     expect(installLine(catalogEntry("pi")!)).toBe("npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.84.4");
     expect(installLine(catalogEntry("claude")!)).toBe("curl -fsSL https://claude.ai/install.sh | bash");
     expect(installLine(catalogEntry("hermes")!)).toMatch(/git clone -q --depth 1 --branch v[\d.]+ https:\/\/github\.com\/NousResearch\/hermes-agent\.git/);
-    expect(() => installLine({ ...catalogEntry("codex")!, installRoad: { road: "npm", package: "wrangler" } })).toThrow(/no version/);
+    // An agent's npm road is pinned in the data; an unpinned one would install whatever the registry serves that day.
+    for (const a of CATALOG_AGENTS) if (a.installRoad.road === "npm") expect(a.installRoad.version, a.id).toMatch(/^\d/);
   });
 
-  it("gives every pinned road one install line, and refuses the roads that install through Homebrew or a release", () => {
+  it("gives every entry one install line from its road's module: apt, npm, Homebrew as linuxbrew, a release at its current tag, a vendor's download", () => {
     expect(installLine(catalogEntry("git")!)).toBe("export DEBIAN_FRONTEND=noninteractive\napt-get install -y -qq git");
     expect(installLine(catalogEntry("docker")!)).toBe("export DEBIAN_FRONTEND=noninteractive\napt-get install -y -qq docker.io docker-compose-v2");
     expect(installLine(catalogEntry("pnpm")!)).toBe("npm install -g pnpm@11.9.0");
-    expect(() => installLine(catalogEntry("go")!)).toThrow(/brew road/);
-    expect(() => installLine(catalogEntry("gh")!)).toThrow(/release road/);
+    expect(installLine(catalogEntry("wrangler")!)).toBe("npm install -g wrangler");
+    expect(installLine(catalogEntry("go")!)).toMatch(/^su -s \/bin\/bash linuxbrew -c '.*HOMEBREW_NO_AUTO_UPDATE=1.*brew install go'$/);
+    const gh = installLine(catalogEntry("gh")!);
+    expect(gh).toContain("name='gh'");
+    // A failed API call (the rate limit, a network blip) leaves the release empty and falls through to go install.
+    expect(gh).toContain(`release="$(curl -fsSL 'https://api.github.com/repos/cli/cli/releases/latest' || true)"`);
+    expect(gh).toContain(`tag="$(printf '%s\\n' "$release" | grep -o '"tag_name": *"[^"]*"' | head -1 | cut -d'"' -f4 || true)"`);
+    expect(gh).toContain('echo "WSP_ROAD release ${asset:-$url} $sum $tag"');
+    expect(gh).toContain("go install 'github.com/cli/cli@latest'");
+    expect(gh).not.toContain('[ "$sum" =');
+    expect(installLine(catalogEntry("gcloud")!)).toBe(GCLOUD.install(undefined, undefined));
+    expect(installLine(catalogEntry("kubectl")!)).toBe(KUBECTL.install(undefined, undefined));
+    // The floor runs before Homebrew or the release machinery exist on the machine.
+    for (const e of BASE_FLOOR) expect(["brew", "release", "vendor"], e.id).not.toContain(e.installRoad.road);
+  });
+
+  it("has one module per road with its words, and each module writes the install and its uninstall twin from a row", () => {
+    expect(Object.keys(ROAD_MODULES).sort()).toEqual([...ROADS].sort());
+    for (const road of ROADS) expect(ROAD_MODULES[road].words, road).toMatch(/^(by|with|as|from) /);
+    const line = (road: InstallRoad, bin = "x") => roadModule(road).install(road, bin);
+    const off = (road: InstallRoad, bin = "x") => roadModule(road).uninstall(road, bin);
+    const row = (name: string, version?: string) => ({ name, ...(version !== undefined ? { version } : {}), paths: [], label: name });
+    const npm = ROAD_MODULES.npm.fromRow!(row("bun", "1.4.0"));
+    expect([line(npm), off(npm)]).toEqual(["npm install -g bun@1.4.0", { cmd: "npm uninstall -g bun" }]);
+    expect(line({ road: "npm", package: "@earendil-works/pi-coding-agent", version: "0.84.4", ignoreScripts: true })).toBe("npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.84.4");
+    const pnpm = ROAD_MODULES.pnpm.fromRow!(row("turbo", "2.5.0"));
+    expect([line(pnpm), off(pnpm)]).toEqual(["pnpm add -g turbo@2.5.0", { cmd: "pnpm remove -g turbo" }]);
+    const bun = ROAD_MODULES.bun.fromRow!(row("eslint"));
+    expect([line(bun), off(bun)]).toEqual(["bun add -g eslint", { cmd: "bun remove -g eslint" }]);
+    const uv = ROAD_MODULES.uv.fromRow!(row("ty", "0.0.56"));
+    expect([line(uv), off(uv)]).toEqual(["uv tool install ty==0.0.56", { cmd: "uv tool uninstall ty" }]);
+    const pipx = ROAD_MODULES.pipx.fromRow!(row("black", "24.1.0"));
+    expect([line(pipx), off(pipx)]).toEqual(["pipx install black==24.1.0", { cmd: "pipx uninstall black" }]);
+    expect(line(ROAD_MODULES.cargo.fromRow!(row("bat", "0.24.0")))).toBe("cargo install bat --version 0.24.0");
+    expect([line(ROAD_MODULES.cargo.fromRow!(row("bat"))), off(ROAD_MODULES.cargo.fromRow!(row("bat")))]).toEqual(["cargo install bat", { cmd: "cargo uninstall bat" }]);
+    // A Go row carries its module in its first path (or an older label); the row's version wins over the module's; no module, nothing to run.
+    const gopls = ROAD_MODULES.go.fromRow!({ name: "gopls", paths: ["golang.org/x/tools/gopls@v0.16.2"], label: "gopls" });
+    expect([line(gopls), ROAD_MODULES.go.bin!(gopls), off(gopls)]).toEqual(["go install golang.org/x/tools/gopls@v0.16.2", "gopls", { note: "go has no uninstall; the binary stays in /root/go/bin" }]);
+    expect(line(ROAD_MODULES.go.fromRow!({ name: "gopls", version: "v0.17.0", paths: ["golang.org/x/tools/gopls@v0.16.2"], label: "gopls" }))).toBe("go install golang.org/x/tools/gopls@v0.17.0");
+    expect(line(ROAD_MODULES.go.fromRow!({ name: "gopls", paths: [], label: "gopls (golang.org/x/tools/gopls@v0.16.2)" }))).toBe("go install golang.org/x/tools/gopls@v0.16.2");
+    expect(ROAD_MODULES.go.bin!(ROAD_MODULES.go.fromRow!({ name: "spoo", paths: ["github.com/spoo-me/spoo/v2@v2.0.0"], label: "spoo" }))).toBe("spoo");
+    const junk = ROAD_MODULES.go.fromRow!({ name: "junk", paths: [], label: "junk (no module info)" });
+    expect([junk, line(junk), ROAD_MODULES.go.bin!(junk)]).toEqual([{ road: "go" }, { note: "no module to install from" }, undefined]);
+    // Homebrew runs as its own user; a tap formula that took the road comes off from /usr/local/bin when the cellar never had it.
+    const gh = ROAD_MODULES.brew.fromRow!(row("gh"));
+    expect(line(gh)).toMatch(/^su -s \/bin\/bash linuxbrew -c 'HOMEBREW_NO_AUTO_UPDATE=1 .*brew install gh'$/);
+    expect(off(gh)).toEqual({ cmd: expect.stringMatching(/brew uninstall gh'$/) });
+    expect(off({ road: "brew", formula: "zingzy/tap/diskbloom" })).toEqual({ cmd: expect.stringMatching(/^if \[ -x \/home\/linuxbrew\/.linuxbrew\/bin\/brew \] && su .*brew list --formula zingzy\/tap\/diskbloom.* >\/dev\/null 2>&1; then su .*brew uninstall zingzy\/tap\/diskbloom.*; else rm -f \/usr\/local\/bin\/'diskbloom'; fi$/) });
+    // A release at a tag fetches that tag and prints it; with a pin for the same tag the sum is checked; a row that names no repository only comes off.
+    const tagged = line({ road: "release", repo: "spoo-me/spoo-cli", version: "v0.4.1" }, "spoo");
+    expect(tagged).toContain(`release="$(curl -fsSL 'https://api.github.com/repos/spoo-me/spoo-cli/releases/tags/v0.4.1' || true)"`);
+    expect(tagged).not.toContain("tag=\"$(");
+    expect(tagged).toContain(`echo "WSP_ROAD release \${asset:-$url} $sum "'v0.4.1'`);
+    expect(tagged).toContain("go install 'github.com/spoo-me/spoo-cli@v0.4.1'");
+    expect(line({ road: "release", repo: "spoo-me/spoo-cli", version: "v0.4.1", pin: { tag: "v0.4.1", sha256: "c".repeat(64) } }, "spoo")).toContain(`[ "$sum" = '${"c".repeat(64)}' ]`);
+    expect(line({ road: "release", repo: "spoo-me/spoo-cli", version: "v0.4.1", pin: { tag: "v0.4.0", sha256: "c".repeat(64) } }, "spoo")).not.toContain('[ "$sum" =');
+    // No version: a pin fixes the tag and is checked, as a vendor install does; none at all takes the current release.
+    expect(line({ road: "release", repo: "cli/cli", pin: { tag: "v2.86.0", sha256: "d".repeat(64) } }, "gh")).toContain("releases/tags/v2.86.0");
+    expect(line({ road: "release", repo: "cli/cli", pin: { tag: "v2.86.0", sha256: "d".repeat(64) } }, "gh")).toContain(`[ "$sum" = '${"d".repeat(64)}' ]`);
+    expect(line({ road: "release" }, "spoo")).toEqual({ note: "no GitHub release to install from" });
+    expect(off({ road: "release" }, "spoo")).toEqual({ cmd: "rm -f /usr/local/bin/'spoo'" });
+    // A vendor's download is the cask's own script, at the Mac's version when the cask names the Linux build.
+    const gcloud = vendorRoad(GCLOUD, { version: "575.0.0" });
+    expect([line(gcloud), off(gcloud), ROAD_MODULES.vendor.bin!(gcloud)]).toEqual([GCLOUD.install("575.0.0", undefined), { cmd: GCLOUD.uninstall }, "gcloud"]);
+    expect(vendorRoad(KUBECTL, { version: "4.80.0,232116", pin: { tag: "v1.37.0", sha256: "c".repeat(64) } })).toEqual({ road: "vendor", cask: KUBECTL, pin: { tag: "v1.37.0", sha256: "c".repeat(64) } });
+    // apt rows wait on the one index read; purge takes what the package alone pulled in.
+    const apt: InstallRoad = { road: "apt", packages: ["neovim"] };
+    expect([line(apt), off(apt), ROAD_MODULES.apt.after]).toEqual(["export DEBIAN_FRONTEND=noninteractive\napt-get install -y -qq neovim", { cmd: "export DEBIAN_FRONTEND=noninteractive\napt-get purge -y -qq neovim && apt-get autoremove -y -qq --purge" }, APT_INDEX]);
+    expect(APT_UPDATE).toBe("export DEBIAN_FRONTEND=noninteractive\napt-get update -qq");
+    expect([ROAD_MODULES.brew.after, ROAD_MODULES.npm.after]).toEqual([HOMEBREW_STEP, "node"]);
+    expect([line({ road: "script", script: "echo hi" }), off({ road: "script", script: "echo hi" }, "hi")]).toEqual(["echo hi", { note: "hi has no uninstaller; left on the machine" }]);
   });
 
   it("names the evidence behind every default: sessions on this Mac and lab images that ship it", () => {
@@ -223,9 +303,18 @@ function roadArgument(road: Road): string {
     case "brew":
       return road.formula;
     case "npm":
+    case "pnpm":
+    case "bun":
+    case "uv":
+    case "pipx":
+    case "cargo":
       return road.version === undefined ? road.package : `${road.package}@${road.version}`;
+    case "go":
+      return `${road.module}@${road.version}`;
     case "release":
-      return "github" in road.asset ? road.asset.github : road.asset.vendor.bin;
+      return road.repo ?? "";
+    case "vendor":
+      return road.cask.bin;
     case "apt":
       return road.packages.join(" ");
     case "script":
