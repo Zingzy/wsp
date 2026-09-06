@@ -42,9 +42,9 @@ describe("shellQuote", () => {
 
 describe("one copy of the rule", () => {
   const root = fileURLToPath(new URL("../../..", import.meta.url));
-  // The daemon must not bundle this package, so it keeps its own copy; its test pins the two equal.
-  const KEPT = new Set([join("packages", "protocol", "src", "shell-quote.ts"), join("packages", "daemon", "src", "manifest.ts")]);
-  const RULE = /'\\\\''|String\.raw`'\\''`/;
+  const HOME = join("packages", "protocol", "src", "shell-quote.ts");
+  // Both POSIX spellings of an embedded quote: close, backslash-quote, reopen; and close, double-quoted quote, reopen.
+  const RULE = /'\\\\''|String\.raw`'\\''`|'\\?"\\?'\\?"\\?'/;
 
   it("no other source file spells out the '\\'' rule", () => {
     const copies: string[] = [];
@@ -61,7 +61,7 @@ describe("one copy of the rule", () => {
         for (const f of files) {
           if (!/\.tsx?$/.test(f) || /\.test\.tsx?$/.test(f)) continue;
           const rel = join(top, pkg.name, "src", f);
-          if (KEPT.has(rel)) continue;
+          if (rel === HOME) continue;
           if (RULE.test(readFileSync(join(root, rel), "utf8"))) copies.push(rel);
         }
       }
