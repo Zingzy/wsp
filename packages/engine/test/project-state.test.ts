@@ -568,7 +568,7 @@ describe("roots", () => {
     ]);
     expect(stateRoots(homes, ["pi", "claude"])).toEqual(["/root/.claude-cfg/projects", "/root/.pi/agent/sessions"]);
     expect(stateRoots({ claude: "/x/.claude" })).toEqual(["/x/.claude/projects"]);
-    expect(() => stateRoots(homes, ["claude", "codx"])).toThrow("no agent called codx; the catalog knows claude, codex, gemini, opencode, pi, hermes");
+    expect(() => stateRoots(homes, ["claude", "codx"])).toThrow(`no agent called codx; the catalog knows ${CATALOG_AGENTS.map(a => a.id).join(", ")}`);
   });
 });
 

@@ -5,16 +5,18 @@
 import { spawn } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, renameSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join, relative } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { PROJECT_STATE_RESOLVERS, countProjectState, destExists, moveProjectState } from "@wsp/engine";
 import type { ProjectAgentResult } from "@wsp/protocol";
 import type { LandRequest, LandedAgent, LandedProject, ProjectLander } from "@wsp/runtime";
 import { CACHE_RULE, outcomeOf } from "./project-bundle.js";
 
-/** A destination is spelled out in full; the wire and the MCP tool carry it as the caller wrote it. */
-function absolute(dest: string): void {
+/** A destination is spelled out in full; the wire and the MCP tool carry it as the caller wrote it, so a trailing
+ * slash or a dot segment is dropped here before the path names a staging directory or a state key. */
+function destination(dest: string): string {
   if (!isAbsolute(dest)) throw new Error(`the destination must be an absolute path, got ${dest}`);
+  return resolve(dest);
 }
 
 /** Every regular file under a path, or the path itself when it is one. */
@@ -101,22 +103,22 @@ async function landState(state: NonNullable<LandRequest["state"]>, source: strin
  * rename leaves nothing at or beside the destination. An existing destination is refused first and again at the
  * rename, unless `replace` removes it. */
 async function land(req: LandRequest, homes: Readonly<Record<string, string>>): Promise<LandedProject> {
-  absolute(req.dest);
-  const at = filesAt(req.dest);
-  if (at !== undefined && !req.replace) throw destExists(req.dest, at.files);
-  const staging = `${req.dest}.wsp-in-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const dest = destination(req.dest);
+  const at = filesAt(dest);
+  if (at !== undefined && !req.replace) throw destExists(dest, at.files);
+  const staging = `${dest}.wsp-in-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   mkdirSync(staging, { recursive: true });
   try {
     await extract(req.tar, staging);
-    const target = join(dirname(realpathSync(staging)), basename(req.dest));
+    const target = join(dirname(realpathSync(staging)), basename(dest));
     const agents = req.state === undefined ? [] : await landState(req.state, req.source, target, homes);
-    const now = filesAt(req.dest);
+    const now = filesAt(dest);
     if (now !== undefined) {
-      if (!req.replace) throw destExists(req.dest, now.files);
-      rmSync(req.dest, { recursive: true, force: true });
+      if (!req.replace) throw destExists(dest, now.files);
+      rmSync(dest, { recursive: true, force: true });
     }
-    renameSync(staging, req.dest);
-    return { ...(filesAt(req.dest) ?? { files: 0, bytes: 0 }), agents };
+    renameSync(staging, dest);
+    return { ...(filesAt(dest) ?? { files: 0, bytes: 0 }), agents };
   } catch (e) {
     rmSync(staging, { recursive: true, force: true });
     throw e;
@@ -129,8 +131,7 @@ export function projectLander(homes: Readonly<Record<string, string>>): ProjectL
   return {
     caches: CACHE_RULE,
     probe: async dest => {
-      absolute(dest);
-      const at = filesAt(dest);
+      const at = filesAt(destination(dest));
       return at === undefined ? undefined : { files: at.files };
     },
     land: req => land(req, homes),

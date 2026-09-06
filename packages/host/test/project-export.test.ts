@@ -244,6 +244,23 @@ describe("projectLander", () => {
     expect(existsSync("code")).toBe(false);
   });
 
+  it("a destination spelled with a trailing slash, as the wire carries it, lands at the folder itself with its state keyed to that path", async () => {
+    const root = scratch();
+    const dest = `${join(root, "code", "proj")}/`;
+    const real = `${realpathSync(root)}/code/proj`;
+    const homes = macHomes(real);
+    const lander = projectLander(homes);
+    const landed = await lander.land({ source: SOURCE, dest, replace: false, tar: folderTar(), state: { tar: stateTar(), homes: guestAgentHomes() } });
+    expect(landed.files).toBe(3);
+    expect(readdirSync(join(root, "code"))).toEqual(["proj"]);
+    expect(readFileSync(join(root, "code", "proj", "src/index.ts"), "utf8")).toBe("export const a = 1;\n");
+    expect(landed.agents.map(a => [a.agent, a.outcome])).toEqual([["claude", "moved"], ["codex", "transcript-only"], ["hermes", "nothing"]]);
+    expect(readdirSync(join(homes["claude"]!, "projects")).sort()).toEqual([claudeKey(real), "-Users-me-other"].sort());
+    expect(readFileSync(join(homes["claude"]!, "projects", claudeKey(real), "S1.jsonl"), "utf8")).toBe(session("S1", real));
+    expect(await lander.probe(dest)).toEqual({ files: 3 });
+    await expect(lander.land({ source: SOURCE, dest, replace: false, tar: folderTar() })).rejects.toMatchObject({ kind: "exists", message: `${join(root, "code", "proj")} already exists on this computer with 3 files; export with replace to overwrite it` });
+  });
+
   it("agents named narrow whose state comes home; an agent whose store cannot be read is failed with the reason and the others still land", async () => {
     const root = scratch();
     const dest = join(root, "proj");

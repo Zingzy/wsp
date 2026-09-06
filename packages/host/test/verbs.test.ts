@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { CATALOG_AGENTS } from "@wsp/catalog";
 import { ThreadView } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -374,7 +375,7 @@ describe("wsp verbs over the host", () => {
     const typo = await run("export", "alpha", join(dir, "out", "proj"), "--agents", "claude,codx");
     expect(typo.code).toBe(1);
     expect(typo.io.lines).toEqual([]);
-    expect(typo.io.errors).toEqual(["wsp export: no agent called codx; the catalog knows claude, codex, gemini, opencode, pi, hermes"]);
+    expect(typo.io.errors).toEqual([`wsp export: no agent called codx; the catalog knows ${CATALOG_AGENTS.map(a => a.id).join(", ")}`]);
     expect(guest.sources).toEqual([]);
     expect(existsSync(join(dir, "out"))).toBe(false);
   });
