@@ -24,10 +24,13 @@ const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running
   createdAt: "2026-09-05T11:00:00Z",
 });
 const workspaces = [view("ws_a", "api"), view("ws_b", "web", "napping"), { ...view("ws_c", "old", "gone"), gone: "machine m_ws_c is gone at the provider: Not found" }];
-// The ticket's rows: long titles with the agent and both opener words, one working, one settled.
+// The ticket's rows: long titles with the agent and both opener words. ws_a mixes a working thread with an idle
+// one; ws_b has only idle ones, the shape that used to draw no Idle header at all.
 const sessions: SessionView[] = [
   { id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", prompt: "Now reply with exactly the word pong.", startedBy: "person", startedAt: Date.now() - 48 * 60_000 },
   { id: "s2", workspaceId: "ws_a", harness: "claude", status: "completed", prompt: "Reply with exactly the word hi.", startedBy: "cli", startedAt: Date.now() - 30 * 60_000, endedAt: Date.now() - 24 * 60_000 },
+  { id: "s3", workspaceId: "ws_b", harness: "claude", status: "completed", prompt: "Bump the lockfile and run the gate.", startedBy: "cli", startedAt: Date.now() - 90 * 60_000, endedAt: Date.now() - 80 * 60_000 },
+  { id: "s4", workspaceId: "ws_b", harness: "claude", status: "interrupted", prompt: "Drop the old preview shim.", startedBy: "person", startedAt: Date.now() - 120 * 60_000, endedAt: Date.now() - 110 * 60_000 },
 ];
 
 const api: Api = {

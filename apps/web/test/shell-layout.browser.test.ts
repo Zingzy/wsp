@@ -95,7 +95,12 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
         }),
       );
       console.info(`thread rows at ${theme}: ${JSON.stringify(rows)}`);
-      expect(rows.map(r => r?.meta)).toEqual(["Working·you (Claude Code · you)", "cli (Claude Code · cli)"]);
+      expect(rows.map(r => r?.meta)).toEqual([
+        "Working·you (Claude Code · you)",
+        "cli (Claude Code · cli)",
+        "cli (Claude Code · cli)",
+        "you (Claude Code · you)",
+      ]);
       for (const row of rows) {
         expect(row!.titleWidth).toBeGreaterThanOrEqual(row!.twelveChars);
         expect(row!.metaClipped).toBe(false);
@@ -104,6 +109,62 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       const path = join(SHOTS_DIR, `sidebar-threads-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
       console.info(`sidebar thread rows screenshot: ${path}`);
+    }
+  }, 30_000);
+
+  it("a workspace with no working thread still carries its Idle header, and an idle title sits closer to the background than a working one, in both themes", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await open(theme);
+      expect(await page!.locator("[data-row-id='settled:ws_b']").count()).toBe(1);
+      const titles = await page!.locator("[data-row-id^='thread:']").evaluateAll(rows => {
+        // The tokens compute to oklab(), which no regex reads as channels: rasterize each one and read the sRGB bytes back.
+        const ctx = Object.assign(document.createElement("canvas"), { width: 1, height: 1 }).getContext("2d")!;
+        const bytes = (color: string): number[] => {
+          ctx.clearRect(0, 0, 1, 1);
+          ctx.fillStyle = "#000000";
+          ctx.fillStyle = color;
+          ctx.fillRect(0, 0, 1, 1);
+          return [...ctx.getImageData(0, 0, 1, 1).data];
+        };
+        const luminance = (color: string): number => {
+          const [r = 0, g = 0, b = 0] = bytes(color).slice(0, 3).map(c => {
+            const s = c / 255;
+            return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+          });
+          return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        };
+        const backdrop = (el: Element): string => {
+          for (let node: Element | null = el; node !== null; node = node.parentElement) {
+            const painted = getComputedStyle(node).backgroundColor;
+            if (bytes(painted)[3] === 255) return painted;
+          }
+          return getComputedStyle(document.documentElement).backgroundColor;
+        };
+        return rows.map(row => {
+          const el = row.querySelector<HTMLElement>("[data-thread-title]")!;
+          const color = getComputedStyle(el).color;
+          return {
+            text: el.textContent ?? "",
+            // Which row is the working one comes from the row's own pill, not from where it sits in the list.
+            working: row.querySelector("[data-thread-meta] [aria-label=Working]") !== null,
+            color,
+            opaque: bytes(color)[3] === 255,
+            gap: Math.abs(luminance(color) - luminance(backdrop(el))),
+          };
+        });
+      });
+      console.info(`thread titles at ${theme}: ${JSON.stringify(titles)}`);
+      const [working, ...idles] = [...titles].sort((a, b) => Number(b.working) - Number(a.working));
+      expect(titles.filter(t => t.working)).toHaveLength(1);
+      expect(idles).toHaveLength(3);
+      expect(titles.map(t => t.opaque)).toEqual([true, true, true, true]);
+      for (const idle of idles) {
+        expect(idle.color).not.toBe(working!.color);
+        expect(idle.gap).toBeLessThan(working!.gap);
+      }
+      const path = join(SHOTS_DIR, `sidebar-idle-${theme}.png`);
+      await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
+      console.info(`sidebar idle group screenshot: ${path}`);
     }
   }, 30_000);
 

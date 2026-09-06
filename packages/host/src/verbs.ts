@@ -265,10 +265,25 @@ export async function threadRows(client: HostClient, within?: string): Promise<T
   return rows.map(t => ({ ...t, workspaceName: all.find(w => w.id === t.workspaceId)?.name ?? t.workspaceId }));
 }
 
+/** The workspace's name and its state word, the line pause and wake print once the runtime has answered. */
+export function stateLine(workspace: WorkspaceView): string {
+  return `${workspace.name} ${workspaceWord(workspaceState({ phase: workspace.phase })).toLowerCase()}`;
+}
+
 /** Naps the workspace a person names; the view after, as every director shows it. */
 export async function nap(client: HostClient, ref: string): Promise<WorkspaceView> {
   const source = await workspaceOf(client, ref);
   return (await client.request<{ workspace: WorkspaceView }>("workspaces.nap", { workspaceId: source.id })).workspace;
+}
+
+/** Every verb that needs the machine goes through here, so a paused or waking workspace is a wait and never the
+ * provider's error. The runtime is asked even when the view says running: only its state read catches a provider-side
+ * pause. The runtime refuses a gone workspace too; the refusal here exists to carry the verb's own action word. */
+export async function awake(client: HostClient, workspace: WorkspaceView, action: string, tell: (line: string) => void): Promise<WorkspaceView> {
+  const state = workspaceState({ phase: workspace.phase });
+  if (state === "gone") throw new Error(goneRefusal(action, workspace.gone));
+  if (state !== "running") tell(`waking ${workspace.name}`);
+  return (await client.request<{ workspace: WorkspaceView }>("workspaces.wake", { workspaceId: workspace.id })).workspace;
 }
 
 /** What a stop came to, as every director prints it: the runtime's three answers, none an error. */
@@ -704,7 +719,7 @@ export const VERBS: readonly Verb[] = [
       for (const dependent of ["agent", ...PICK_FLAGS, "cwd", "notify"]) if (task === undefined && flag(ctx.flags, dependent) !== undefined) throw new Error(`--${dependent} needs --send`);
       const client = await ctx.client();
       const source = await workspaceOf(client, ref);
-      if (source.phase === "gone") throw new Error(goneRefusal("fork", source.gone));
+      if (workspaceState({ phase: source.phase }) === "gone") throw new Error(goneRefusal("fork", source.gone));
       // Resolved and checked before the machine is minted, so a bad reference or pick costs nothing.
       const notify = await notifyOf(client, flag(ctx.flags, "notify"));
       const harness = flag(ctx.flags, "agent");
@@ -724,7 +739,21 @@ export const VERBS: readonly Verb[] = [
       const [ref] = ctx.args;
       if (ref === undefined || ctx.args.length !== 1) throw new Error("wsp pause takes one workspace");
       const workspace = await nap(await ctx.client(), ref);
-      ctx.out.emit({ workspace }, `${workspace.name} ${workspaceWord(workspaceState({ phase: workspace.phase })).toLowerCase()}`);
+      ctx.out.emit({ workspace }, stateLine(workspace));
+      return 0;
+    },
+  },
+  {
+    name: "wake",
+    usage: "wsp wake <workspace>",
+    about: "wakes the workspace's machine and prints its state once the runtime has answered",
+    options: {},
+    run: async ctx => {
+      const [ref] = ctx.args;
+      if (ref === undefined || ctx.args.length !== 1) throw new Error("wsp wake takes one workspace");
+      const client = await ctx.client();
+      const workspace = await awake(client, await workspaceOf(client, ref), "wake", line => ctx.io.error(line));
+      ctx.out.emit({ workspace }, stateLine(workspace));
       return 0;
     },
   },
@@ -783,7 +812,7 @@ export const VERBS: readonly Verb[] = [
       if (within === undefined) throw new Error("wsp thread new needs --in <workspace>");
       if (task === undefined || ctx.args.length !== 1) throw new Error("wsp thread new takes one task");
       const client = await ctx.client();
-      const workspace = await workspaceOf(client, within);
+      const workspace = await awake(client, await workspaceOf(client, within), "send", line => ctx.io.error(line));
       return followVerb(ctx, client, openingOf(workspace, task, { harness: flag(ctx.flags, "agent"), ...pickFlags(ctx.flags), cwd: flag(ctx.flags, "cwd"), notify: await notifyOf(client, flag(ctx.flags, "notify")) }), true);
     },
   },
@@ -797,7 +826,9 @@ export const VERBS: readonly Verb[] = [
       if (ref === undefined || message === undefined || ctx.args.length !== 2) throw new Error("wsp send takes a thread and one message");
       const client = await ctx.client();
       const picks = pickFlags(ctx.flags);
-      return followVerb(ctx, client, resumeOf(await threadOf(client, ref), message, picks), false, picks);
+      const thread = await threadOf(client, ref);
+      await awake(client, await workspaceOf(client, thread.workspaceId), "send", line => ctx.io.error(line));
+      return followVerb(ctx, client, resumeOf(thread, message, picks), false, picks);
     },
   },
   {
@@ -822,7 +853,7 @@ export const VERBS: readonly Verb[] = [
       const [ref, ...words] = ctx.args;
       if (ref === undefined || words.length === 0) throw new Error("wsp exec takes a workspace, then -- and the command");
       const client = await ctx.client();
-      const workspace = await workspaceOf(client, ref);
+      const workspace = await awake(client, await workspaceOf(client, ref), "exec", line => ctx.io.error(line));
       const exit = await execOn(client, workspace.id, words, e => ctx.out.emit(e, e.type === "exec.output" ? e.text : undefined));
       if (exit.error !== undefined) ctx.io.error(exit.error);
       return exit.exitCode ?? 1;

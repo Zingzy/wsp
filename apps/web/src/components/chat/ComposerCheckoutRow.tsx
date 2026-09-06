@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The strip under the composer naming where the thread works: the folder and
 // its git branch. Before the first message the folder is a picker over the
-// daemon's listings, one level at a time; the pick is what sessions.start
+// daemon's listings, one level at a time, across the same roots the panes
+// browse (its home and an imported project); the pick is what sessions.start
 // runs the harness in and where the panes root. Once a turn exists the row is
 // a label for the harness folder, which a cd in the agent's shell cannot move
 // (the CLI keys a session to it), so the label explains itself on hover and
@@ -10,15 +11,15 @@
 // not switched: the daemon has no checkout op.
 import { ArrowLeftIcon, ChevronDownIcon, CheckIcon, FolderGitIcon, FolderIcon, GitBranchIcon, LoaderCircleIcon, MessageSquarePlusIcon } from "lucide-react";
 import { useEffect, useState } from "react";
-import { baseName, parentPath } from "../../files/entries";
+import { baseName } from "../../files/entries";
 import { useWorkspaceListing } from "../../files/listing";
-import { useRootStore, useThreadFolder } from "../../files/root";
-import { useDaemonRoot, useDaemonWire } from "../../files/wire";
+import { parentWithin, rootOf, useRoots, useRootStore, useThreadFolder } from "../../files/root";
+import { useDaemonWire } from "../../files/wire";
 import { cn } from "../../lib/utils";
 import { DaemonOpError, gitStatus } from "../../terminal/daemon-fs";
 import type { TerminalWire } from "../../terminal/link";
 import { Button } from "../ui/button";
-import { Menu, MenuGroup, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
+import { Menu, MenuGroup, MenuItem, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ComposerSurface } from "./ComposerSurface";
 import type { ChatThreadHandle } from "./useChatThread";
@@ -53,13 +54,13 @@ const LOCKED_FOLDER_NOTE = "The folder this thread's harness runs in. A cd insid
 
 function FolderMenu({
   workspaceId,
-  daemonRoot,
+  roots,
   folder,
   defaultOpen,
   onPick,
 }: {
   workspaceId: string;
-  daemonRoot: string;
+  roots: readonly string[];
   folder: string;
   defaultOpen: boolean;
   onPick: (dir: string) => void;
@@ -68,8 +69,8 @@ function FolderMenu({
   const [dir, setDir] = useState(folder);
   const { levels, ensure } = useWorkspaceListing(workspaceId);
   const level = levels.get(dir);
-  // The daemon refuses anything above its root, so the menu stops there.
-  const parent = dir === daemonRoot ? null : parentPath(dir);
+  const parent = parentWithin(roots, dir);
+  const current = rootOf(roots, dir);
   const folders = level?.entries?.filter(entry => entry.kind === "directory") ?? null;
 
   useEffect(() => {
@@ -95,6 +96,21 @@ function FolderMenu({
         <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
       </MenuTrigger>
       <MenuPopup align="start" side="top" className="w-72">
+        {roots.length > 1 ? (
+          <>
+            <MenuRadioGroup aria-label="Browsable folders" value={current} onValueChange={next => typeof next === "string" && setDir(next)}>
+              {roots.map(candidate => (
+                <MenuRadioItem key={candidate} value={candidate} title={candidate} data-composer-folder-root={candidate}>
+                  <span className="flex min-w-0 items-center gap-2">
+                    <FolderIcon className="text-muted-foreground" aria-hidden />
+                    <span className="truncate font-mono">{candidate}</span>
+                  </span>
+                </MenuRadioItem>
+              ))}
+            </MenuRadioGroup>
+            <MenuSeparator />
+          </>
+        ) : null}
         <MenuItem onClick={() => onPick(dir)} data-composer-folder-pick={dir}>
           <CheckIcon />
           <span className="min-w-0 flex-1 truncate">
@@ -134,14 +150,14 @@ function FolderMenu({
 
 export function ComposerCheckoutRow({ workspaceId, thread }: { workspaceId: string; thread: ChatThreadHandle }) {
   const wire = useDaemonWire(workspaceId);
-  const daemonRoot = useDaemonRoot(workspaceId);
+  const roots = useRoots(workspaceId);
   const follow = useRootStore(s => s.follow);
   const shell = useRootStore(s => s.shell);
   const folder = useThreadFolder(workspaceId);
   const { cwd, shellCwd, entries, running } = thread.view;
   // An empty view whose send resumes a row with a folder is locked to that folder like a turn.
   const pickable = thread.hydrated && (thread.fresh || (entries.length === 0 && !running && cwd === null));
-  const canPick = wire !== null && daemonRoot !== null && folder !== null;
+  const canPick = wire !== null && roots.length > 0 && folder !== null;
   const [pickNext, setPickNext] = useState(false);
   const branch = useBranch(wire, folder, running);
 
@@ -164,7 +180,7 @@ export function ComposerCheckoutRow({ workspaceId, thread }: { workspaceId: stri
     <ComposerSurface.ContextStrip data-composer-checkout data-pickable={pickable || undefined}>
       <div className="flex min-w-10 flex-1 items-center gap-1">
         {pickable && canPick ? (
-          <FolderMenu workspaceId={workspaceId} daemonRoot={daemonRoot} folder={folder} defaultOpen={pickNext} onPick={dir => follow(workspaceId, dir)} />
+          <FolderMenu workspaceId={workspaceId} roots={roots} folder={folder} defaultOpen={pickNext} onPick={dir => follow(workspaceId, dir)} />
         ) : (
           <>
             <Tooltip>

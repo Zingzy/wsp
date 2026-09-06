@@ -5,7 +5,7 @@ description: How to run work on wsp workspaces from the command line or the MCP 
 
 # wsp
 
-wsp runs cloud machines called workspaces, forked in seconds from a golden image the person sealed with wsp init, each with coding agents working inside it as threads. The host on the person's computer (wsp up, or the desktop app) owns the machines and the keys; the wsp command line and the wsp MCP server are thin clients of that same host, so whatever you do here shows in the person's sidebar and they can read and answer any thread. Start with `workspaces` (or `wsp threads` on the command line) to see what is running. Open a thread with `thread_new`, giving the workspace, the task and the agent to run; it returns the reply when the turn ends. Continue a thread with `send`; `stop` ends a thread's running turn; run a command on a machine with `exec`; `snapshot` a workspace with a project loaded as a project golden and `new` from it so the next machine starts with the project in place; `export` brings a folder and its agent sessions home; `forget` drops a workspace whose machine the provider no longer has, and `delete` deletes a workspace's machine and drops it here.
+wsp runs cloud machines called workspaces, forked in seconds from a golden image the person sealed with wsp init, each with coding agents working inside it as threads. The host on the person's computer (wsp up, or the desktop app) owns the machines and the keys; the wsp command line and the wsp MCP server are thin clients of that same host, so whatever you do here shows in the person's sidebar and they can read and answer any thread. Start with `workspaces` (or `wsp threads` on the command line) to see what is running. Open a thread with `thread_new`, giving the workspace, the task and the agent to run; it returns the reply when the turn ends. Continue a thread with `send`; `stop` ends a thread's running turn; run a command on a machine with `exec`; `snapshot` a workspace with a project loaded as a project golden and `new` from it so the next machine starts with the project in place; `export` brings a folder and its agent sessions home; `forget` drops a workspace whose machine the provider no longer has, and `delete` deletes a workspace's machine and drops it here. `pause` naps a machine and `wake` wakes it; `thread_new`, `send` and `exec` wake a paused workspace themselves before running, so a paused one needs no wake first.
 
 ## Verbs and tools
 
@@ -17,12 +17,13 @@ The command line and the MCP server call the same functions. Every verb takes `-
 | `wsp new <name> [--from <project golden>]` | `new` | a workspace forked from the golden's head, or from a project golden by project name or snapshot id; booted and reachable when it returns |
 | `wsp fork <workspace> [--name <n>] [--send "<task>" [--agent] [--cwd] [--notify]]` | `fork` | a sibling from the source's golden version (a new machine, not a copy of its live disk); with a task, its first thread |
 | `wsp pause <workspace>` | `pause` | naps the machine; it wakes on the next thread or command |
+| `wsp wake <workspace>` | `wake` | wakes the machine ahead of a thread or command and prints its state after; a running one comes back unchanged |
 | `wsp forget <workspace> [--yes]` | `forget` | drops a workspace whose machine is gone: its record and threads leave this computer; refused while the machine exists |
 | `wsp delete <workspace> [--yes]` | `delete` | deletes the machine at the provider, then drops the workspace's record and threads from this computer; nothing left on that disk survives, and the tool deletes only when called with confirm true |
 | `wsp thread new --in <workspace> [--agent <id>] [--cwd <path>] [--notify <thread\|me>] "<task>"` | `thread_new` | opens a thread and follows its first turn to the reply |
 | `wsp send <thread> "<message>"` | `send` | a message into an existing thread; follows the turn to the reply |
 | `wsp stop <thread>` | `stop` | ends the thread's running turn, as the app's stop button does; the machine stays up |
-| `wsp exec <workspace> -- <command...>` | `exec` | runs the command on the machine, each word as given; output lines and the exit code |
+| `wsp exec <workspace> -- <command...>` | `exec` | runs the command on the machine, each word as given, waking it first when it is paused; output lines and the exit code |
 | `wsp snapshot <workspace>` | `snapshot` | a project golden: the golden plus the loaded project as it stands |
 | `wsp export <workspace> <folder> [--from <path>] [--replace] [--agents <ids>]` | `export` | the folder and the agent sessions keyed to it come home to this computer |
 | `wsp import <folder> --to <workspace>` | none | not here yet; import a project from the app's import dialog |
@@ -104,7 +105,7 @@ The folder must not exist on this computer unless `--replace`. `--from` is the f
 ## Costs and limits
 
 - A workspace costs about $0.11 an hour while awake (2 vCPU at $0.035 per vCPU-hour plus 4 GB at $0.01 per GB-hour). Snapshots are free up to 10 GB an organization, then $0.05 per GB-month from 2026-10-01.
-- A workspace naps by itself after 20 minutes without a person, a thread or a command touching it; the next thread or exec wakes it.
+- A workspace naps by itself after 20 minutes without a person, a thread or a command touching it; the next thread, send or exec wakes it, with `waking <name>` on stderr from the command line, and `wsp wake` wakes it ahead of them.
 - A turn is cut after 10 minutes with no output from the agent, and at 6 hours in all. A long silent step (a full install, a build) needs output flowing or it ends the turn.
 - The root disk is 20 GB; wsp keeps 2 GB free and skips tool installs that would go under it.
 - One thread runs one agent process; a 4 GB machine runs one build or one agent at a time. Put a second builder on a second workspace, not a second thread on the same one.
@@ -123,4 +124,4 @@ The folder must not exist on this computer unless `--replace`. `--from` is the f
 - A resumed thread runs in the folder its session started in, whatever folder is followed in the app (#236).
 - A send carries its own request id, so two clients sending the same text do not adopt each other's turn (#239).
 - The MCP server and the command line refuse a host of another version in one line; restart it with wsp up (#290).
-- Not here yet: choosing the model or effort (#291), a wake verb and exec on a napping workspace (#268), picking a machine size (#301), a GitHub credential on the machine (#279). A thread's title follows its latest message (#288), and a title with newlines breaks the threads table (#292).
+- Not here yet: choosing the model or effort (#291), picking a machine size (#301), a GitHub credential on the machine (#279). A thread's title follows its latest message (#288), and a title with newlines breaks the threads table (#292).

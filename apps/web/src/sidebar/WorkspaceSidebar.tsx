@@ -42,9 +42,9 @@ import { ImportProjectDialog } from "./ImportProjectDialog.js";
 import { NewWorkspaceDialog, type WorkspaceStart } from "./NewWorkspaceDialog.js";
 import { ProjectFavicon } from "./ProjectFavicon.js";
 import {
+  isThreadWorking,
   resolveAdjacentThreadId,
   resolveSettledTimestamp,
-  resolveSidebarThreadStatus,
   searchSidebarThreadsByTitle,
   sortSettledThreadsForSidebar,
   sortThreadsForSidebar,
@@ -64,11 +64,19 @@ import {
   textClassForTone,
 } from "./workspaceRows.js";
 
-const SETTLED_EXPANDED_KEY = "wsp:sidebar-settled-expanded";
+/** Which workspaces have their idle shelf shut, so a shelf is open until this workspace's own chevron shuts it. */
+const SETTLED_COLLAPSED_KEY = "wsp:sidebar-settled-collapsed";
+const NOTHING_COLLAPSED: ReadonlyArray<string> = [];
 const NEW_THREAD_SHORTCUT = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "chat.new");
 const NEW_THREAD_TITLE = NEW_THREAD_SHORTCUT ? `New thread (${NEW_THREAD_SHORTCUT})` : "New thread";
-const booleanCodec: Codec<boolean> = {
-  decode: raw => JSON.parse(raw) === true,
+const workspaceIdsCodec: Codec<ReadonlyArray<string>> = {
+  decode: raw => {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.some(id => typeof id !== "string")) {
+      throw new Error(`Expected workspace ids, got ${raw}.`);
+    }
+    return parsed as ReadonlyArray<string>;
+  },
   encode: value => JSON.stringify(value),
 };
 
@@ -86,8 +94,8 @@ function visibleProjects(projects: ReadonlyArray<SidebarProjectSnapshot>, query:
   for (const project of projects) {
     const threads = searching ? searchSidebarThreadsByTitle(project.threads, query) : project.threads;
     if (searching && threads.length === 0 && !project.displayName.toLowerCase().includes(needle)) continue;
-    const active = sortThreadsForSidebar(threads.filter(t => resolveSidebarThreadStatus(t) === "working"));
-    const settled = sortSettledThreadsForSidebar(threads.filter(t => resolveSidebarThreadStatus(t) !== "working"));
+    const active = sortThreadsForSidebar(threads.filter(t => isThreadWorking(t)));
+    const settled = sortSettledThreadsForSidebar(threads.filter(t => !isThreadWorking(t)));
     out.push({ project, active, settled });
   }
   return out;
@@ -130,7 +138,7 @@ export function WorkspaceSidebar() {
   const nowMs = useMemo(() => Date.now(), [nowMinute]);
 
   const [query, setQuery] = useState("");
-  const [settledExpanded, setSettledExpanded] = useLocalStorage(SETTLED_EXPANDED_KEY, true, booleanCodec);
+  const [settledCollapsed, setSettledCollapsed] = useLocalStorage(SETTLED_COLLAPSED_KEY, NOTHING_COLLAPSED, workspaceIdsCodec);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [importing, setImporting] = useState<ProjectDialogState | null>(null);
@@ -186,6 +194,10 @@ export function WorkspaceSidebar() {
       else next.add(id);
       return next;
     });
+  };
+
+  const toggleSettled = (id: string): void => {
+    setSettledCollapsed(prev => (prev.includes(id) ? prev.filter(other => other !== id) : [...prev, id]));
   };
 
   const rows = (): HTMLElement[] => Array.from(rootRef.current?.querySelectorAll<HTMLElement>("[data-sidebar-row]") ?? []);
@@ -251,6 +263,7 @@ export function WorkspaceSidebar() {
                 ))}
                 {visible.map(({ project, active, settled }) => {
                   const isCollapsed = collapsed.has(project.id);
+                  const settledOpen = !settledCollapsed.includes(project.id);
                   // A machine with the rebuild as its one action offers nothing else; new threads wait for it. A gone one can also be forgotten.
                   const dead = needsRebuild({ phase: project.phase, machineState: project.machineState, reach: project.reach });
                   const gone = project.state === "gone";
@@ -404,25 +417,25 @@ export function WorkspaceSidebar() {
                               onSelect={() => select(thread.workspaceId, thread.threadId)}
                             />
                           ))}
-                          {settled.length > 0 && active.length > 0 && !searching ? (
+                          {settled.length > 0 && !searching ? (
                             <SidebarMenuSubItem data-thread-selection-safe>
                               <button
                                 type="button"
                                 data-sidebar-row
                                 data-row-id={`settled:${project.id}`}
-                                aria-expanded={settledExpanded}
-                                onClick={() => setSettledExpanded(value => !value)}
+                                aria-expanded={settledOpen}
+                                onClick={() => toggleSettled(project.id)}
                                 className="my-1 flex w-full cursor-pointer items-center gap-2 px-2 text-left outline-hidden ring-ring focus-visible:ring-2 rounded-md"
                               >
                                 <span className="text-xs font-medium text-muted-foreground/50">
-                                  {settledExpanded ? "Idle" : `Idle (${settled.length})`}
+                                  {settledOpen ? "Idle" : `Idle (${settled.length})`}
                                 </span>
                                 <span className="h-px flex-1 bg-sidebar-border/60" />
-                                <ChevronDownIcon aria-hidden className={cn("size-3 text-muted-foreground/50 transition-transform", settledExpanded && "rotate-180")} />
+                                <ChevronDownIcon aria-hidden className={cn("size-3 text-muted-foreground/50 transition-transform", settledOpen && "rotate-180")} />
                               </button>
                             </SidebarMenuSubItem>
                           ) : null}
-                          {settledExpanded || searching || active.length === 0
+                          {settledOpen || searching
                             ? settled.map(thread => (
                                 <ThreadRow
                                   key={thread.id}
@@ -526,6 +539,8 @@ function CreationRow({ creation, active, onSelect }: { creation: Creation; activ
 /** The metadata sits under the title so it never takes the title's room; every row is one height. */
 function ThreadRow({ thread, time, active, onSelect }: { thread: SidebarThreadSnapshot; time: string; active: boolean; onSelect: () => void }) {
   const pill = threadPill(thread);
+  // The Idle header can be shut, so the row carries the difference itself, in the title's colour.
+  const idle = !isThreadWorking(thread);
   return (
     <SidebarMenuSubItem data-thread-item>
       <SidebarMenuSubButton
@@ -539,7 +554,7 @@ function ThreadRow({ thread, time, active, onSelect }: { thread: SidebarThreadSn
         <ProjectFavicon src={null} className="mt-0.5 size-3.5 opacity-60" fallbackIcon={MessageSquareIcon} />
         <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
           <span className="flex items-center gap-2">
-            <span data-thread-title className="min-w-0 flex-1 truncate">
+            <span data-thread-title className={cn("min-w-0 flex-1 truncate", idle && "text-sidebar-muted-foreground")}>
               {thread.title}
             </span>
             <span className="shrink-0 text-xs text-muted-foreground/55 tabular-nums">{time}</span>

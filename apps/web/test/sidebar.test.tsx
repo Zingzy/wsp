@@ -133,8 +133,8 @@ describe("rows from the fixture wire", () => {
       "api",
     );
     await waitFor(() => expect(screen.getByText("fix the port list")).toBeDefined());
-    // The Idle header shows only where a workspace has both working and idle threads; ws_b's single group has none.
-    expect(rowIds()).toEqual(["ws:ws_a", "thread:s1", "settled:ws_a", "thread:s2", "ws:ws_b", "thread:s3"]);
+    // Every workspace with an idle thread gets the Idle header, whether or not one of its threads is working.
+    expect(rowIds()).toEqual(["ws:ws_a", "thread:s1", "settled:ws_a", "thread:s2", "ws:ws_b", "settled:ws_b", "thread:s3"]);
     expect(rowOf("fix the port list").textContent).toContain("3m");
     expect(rowOf("upgrade node").textContent).toContain("50m");
     // a session without a prompt falls back to the harness session id
@@ -143,7 +143,7 @@ describe("rows from the fixture wire", () => {
     expect(within(rowOf("fix the port list")).getByLabelText("Working")).toBeDefined();
     expect(within(rowOf("59094224-bb3d")).getByLabelText("Ended")).toBeDefined();
     expect(within(rowOf("upgrade node")).queryByLabelText(/Idle|Completed/)).toBeNull();
-    expect(screen.getByRole("button", { name: /^Idle/ })).toBeDefined();
+    expect(screen.getAllByRole("button", { name: /^Idle/ })).toHaveLength(2);
     expect(screen.queryByText(/Settled/)).toBeNull();
   });
 
@@ -213,7 +213,73 @@ describe("rows from the fixture wire", () => {
     expect(rowOf(SHORT).className).toBe(rowOf(LONG).className);
   });
 
-  it("the idle shelf collapses per workspace and remembers it", async () => {
+  it("the idle shelf collapses per workspace and remembers it: the workspace beside it keeps its rows", async () => {
+    await mount(
+      fakeApi(
+        [API, WEB],
+        [status(API), status(WEB)],
+        [
+          session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000) }),
+          session("s2", "ws_a", { status: "completed", prompt: "upgrade node", startedAt: iso(-60_000), endedAt: iso(-1_000) }),
+          session("s3", "ws_b", { status: "completed", prompt: "bump the lockfile", startedAt: iso(-120_000), endedAt: iso(-2_000) }),
+        ],
+      ),
+      "api",
+    );
+    const toggle = (id: string): HTMLElement => document.querySelector<HTMLElement>(`[data-row-id='settled:${id}']`)!;
+    await waitFor(() => expect(toggle("ws_a")).toBeDefined());
+    expect(toggle("ws_a").getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(toggle("ws_a"));
+    expect(screen.queryByText("upgrade node")).toBeNull();
+    expect(toggle("ws_a").textContent).toContain("Idle (1)");
+    expect(toggle("ws_b").getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("bump the lockfile")).toBeDefined();
+    expect(window.localStorage.getItem("wsp:sidebar-settled-collapsed")).toBe('["ws_a"]');
+    fireEvent.click(toggle("ws_a"));
+    expect(screen.getByText("upgrade node")).toBeDefined();
+    expect(window.localStorage.getItem("wsp:sidebar-settled-collapsed")).toBe("[]");
+  });
+
+  it("a remembered collapse shuts only the workspace it names", async () => {
+    window.localStorage.setItem("wsp:sidebar-settled-collapsed", '["ws_a"]');
+    await mount(
+      fakeApi(
+        [API, WEB],
+        [status(API), status(WEB)],
+        [
+          session("s1", "ws_a", { status: "completed", prompt: "upgrade node", startedAt: iso(-60_000), endedAt: iso(-1_000) }),
+          session("s2", "ws_a", { status: "completed", prompt: "drop the old shim", startedAt: iso(-120_000), endedAt: iso(-2_000) }),
+          session("s3", "ws_b", { status: "completed", prompt: "bump the lockfile", startedAt: iso(-180_000), endedAt: iso(-3_000) }),
+        ],
+      ),
+      "api",
+    );
+    await waitFor(() => expect(screen.getByText("bump the lockfile")).toBeDefined());
+    expect(rowIds()).toEqual(["ws:ws_a", "settled:ws_a", "ws:ws_b", "settled:ws_b", "thread:s3"]);
+    expect(screen.getByRole("button", { name: "Idle (2)" })).toBeDefined();
+  });
+
+  it("a workspace whose threads are all idle still lists them under the Idle header, and the header collapses them", async () => {
+    await mount(
+      fakeApi(
+        [API],
+        [status(API)],
+        [
+          session("s1", "ws_a", { status: "completed", prompt: "upgrade node", startedAt: iso(-60_000), endedAt: iso(-1_000) }),
+          session("s2", "ws_a", { status: "completed", prompt: "bump the lockfile", startedAt: iso(-120_000), endedAt: iso(-2_000) }),
+          session("s3", "ws_a", { status: "interrupted", prompt: "drop the old shim", startedAt: iso(-180_000), endedAt: iso(-3_000) }),
+        ],
+      ),
+      "api",
+    );
+    await waitFor(() => expect(screen.getByText("upgrade node")).toBeDefined());
+    expect(rowIds()).toEqual(["ws:ws_a", "settled:ws_a", "thread:s1", "thread:s2", "thread:s3"]);
+    fireEvent.click(screen.getByRole("button", { name: /^Idle/ }));
+    expect(screen.queryByText("upgrade node")).toBeNull();
+    expect(screen.getByRole("button", { name: "Idle (3)" })).toBeDefined();
+  });
+
+  it("an idle thread's title reads in the muted foreground; a working one's does not", async () => {
     await mount(
       fakeApi(
         [API],
@@ -225,23 +291,10 @@ describe("rows from the fixture wire", () => {
       ),
       "api",
     );
-    const toggle = await screen.findByRole("button", { name: /Idle/ });
-    expect(toggle.getAttribute("aria-expanded")).toBe("true");
-    fireEvent.click(toggle);
-    expect(screen.queryByText("upgrade node")).toBeNull();
-    expect(screen.getByRole("button", { name: "Idle (1)" })).toBeDefined();
-    expect(window.localStorage.getItem("wsp:sidebar-settled-expanded")).toBe("false");
-  });
-
-  it("a workspace whose threads are all idle lists them under no header, even with the shelf remembered collapsed", async () => {
-    window.localStorage.setItem("wsp:sidebar-settled-expanded", "false");
-    await mount(
-      fakeApi([API], [status(API)], [session("s2", "ws_a", { status: "completed", prompt: "upgrade node", startedAt: iso(-60_000), endedAt: iso(-1_000) })]),
-      "api",
-    );
     await waitFor(() => expect(screen.getByText("upgrade node")).toBeDefined());
-    expect(screen.queryByRole("button", { name: /Idle|Settled/ })).toBeNull();
-    expect(rowIds()).toEqual(["ws:ws_a", "thread:s2"]);
+    const title = (text: string): HTMLElement => rowOf(text).querySelector<HTMLElement>("[data-thread-title]")!;
+    expect(title("upgrade node").className).toContain("text-sidebar-muted-foreground");
+    expect(title("fix the port list").className).not.toContain("text-sidebar-muted-foreground");
   });
 
   it("a workspace row carries phase, rate, accrued, idle countdown and the edge-slow note", async () => {
