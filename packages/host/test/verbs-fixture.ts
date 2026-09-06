@@ -150,11 +150,15 @@ export function stuckAgent(): HarnessAdapterFactory {
   });
 }
 
+/** The provider's answer to a command on a paused machine, word for word. */
+export const NOT_RUNNING = "Sandbox is not running";
+
 /** The guest side of the exec stream: the launch lands, one poll hands over the log with the exit code; with no exit
- * the command reads as still running. */
+ * the command reads as still running. A paused machine refuses every command as the provider does. */
 export function execGuest(backend: StubBackend, output: string, exit: number | undefined) {
   const base = backend.execImpl;
   backend.execImpl = (m, cmd): Promise<ExecResult> | ExecResult => {
+    if (m.paused) throw new Error(NOT_RUNNING);
     if (cmd.includes("base64 -d")) return { exitCode: 0, stdout: "WSP_LAUNCHED\n", stderr: "" };
     if (cmd.includes("kill -TERM") || cmd.includes("kill -KILL")) return { exitCode: 0, stdout: "", stderr: "" };
     const sentinel = /(__WSP_EOF_[a-z0-9]+__)/.exec(cmd)?.[1];

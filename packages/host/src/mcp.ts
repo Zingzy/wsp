@@ -10,10 +10,12 @@ import { z } from "zod";
 import { AFTER_CUT_LINE, ProjectExportResult, ProjectGolden, SessionInterruptOutcome, SessionStartOutcome, ThreadView, WorkspaceView } from "@wsp/protocol";
 import { INSTRUCTIONS } from "./skill.js";
 import { VERSION } from "./version.js";
-import { absoluteFolder, checkedPicks, create, createFromHead, dialHost, execOn, exportProject, follow, forget, forgetting, forgotLine, nap, notifyOf, openingOf, projectGoldenOf, resumeOf, snapshot, stop, stopLine, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
+import { absoluteFolder, awake, checkedPicks, create, createFromHead, dialHost, execOn, exportProject, follow, forget, forgetting, forgotLine, nap, notifyOf, openingOf, projectGoldenOf, resumeOf, snapshot, stop, stopLine, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
 
 /** Nothing printed: the tools answer with values, and the stages a create streams have no reader here. */
 const QUIET: Out = { emit: () => {}, stream: () => {} };
+/** The waking line has no reader here either: the tool's result says which machine ran. */
+const QUIET_LINE = (): void => {};
 
 export interface Dialer {
   (): Promise<HostClient>;
@@ -162,6 +164,14 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
     async ({ workspace: ref }) => asJson({ workspace: await nap(await dial(), ref) }),
   );
   server.registerTool(
+    "wake",
+    { description: "Wakes the workspace's machine and returns its view once the runtime has answered; one already running comes back unchanged. thread_new, send and exec do this themselves, so it is only needed to wake a machine ahead of them.", inputSchema: { workspace }, outputSchema: { workspace: WorkspaceView } },
+    async ({ workspace: ref }) => {
+      const client = await dial();
+      return asJson({ workspace: await awake(client, await workspaceOf(client, ref), "wake", QUIET_LINE) });
+    },
+  );
+  server.registerTool(
     "forget",
     {
       description:
@@ -185,7 +195,7 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
     },
     async ({ workspace: ref, task, agent: harness, cwd: folder, notify: tell, ...input }) => {
       const client = await dial();
-      const target = await workspaceOf(client, ref);
+      const target = await awake(client, await workspaceOf(client, ref), "send", QUIET_LINE);
       const out = turnOut(await follow(client, openingOf(target, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell) }), "agent", QUIET_TURN));
       return asText(turnText(out), out);
     },
@@ -199,7 +209,9 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
     },
     async ({ thread: ref, message, ...input }) => {
       const client = await dial();
-      const out = turnOut(await follow(client, resumeOf(await threadOf(client, ref), message, input), "agent", QUIET_TURN));
+      const thread = await threadOf(client, ref);
+      await awake(client, await workspaceOf(client, thread.workspaceId), "send", QUIET_LINE);
+      const out = turnOut(await follow(client, resumeOf(thread, message, input), "agent", QUIET_TURN));
       return asText(turnText(out), out);
     },
   );
@@ -224,7 +236,7 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
     },
     async ({ workspace: ref, argv }) => {
       const client = await dial();
-      const target = await workspaceOf(client, ref);
+      const target = await awake(client, await workspaceOf(client, ref), "exec", QUIET_LINE);
       const output: string[] = [];
       const exit = await execOn(client, target.id, argv, e => {
         if (e.type === "exec.output") output.push(e.text);
