@@ -458,7 +458,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "floor": false,
     "id": "gcloud",
     "kind": "tool",
-    "road": "release",
+    "road": "vendor",
     "signIn": "oauth",
     "size": undefined,
     "source": {
@@ -478,7 +478,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "floor": false,
     "id": "kubectl",
     "kind": "tool",
-    "road": "release",
+    "road": "vendor",
     "signIn": "none",
     "size": undefined,
     "source": {

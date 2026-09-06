@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import {
+  UNMEASURED_ROAD,
+  PATH_LINE,
+  CATALOG_PREFIX,
   AGENT_INSTALLERS,
   CURRENT_LTS,
   HELIX,
@@ -38,7 +41,7 @@ import {
   type RecipeDigest,
   type RecipeEntry,
 } from "../src/golden-import.js";
-import { LINUX_CASKS, caskPinState, linuxCaskByBin, linuxCaskFor } from "@wsp/catalog";
+import { KUBECTL, LINUX_CASKS, caskPinState, catalogEntry, linuxCaskByBin, linuxCaskFor } from "@wsp/catalog";
 
 const row = (over: Partial<RecipeEntry> & Pick<RecipeEntry, "rung" | "id">): RecipeEntry => ({
   label: over.id,
@@ -779,6 +782,79 @@ describe("toolInstallsFor", () => {
   });
 });
 
+describe("catalog rows", () => {
+  const catalog = (id: string, over: Partial<RecipeEntry> = {}) => row({ rung: "tools", id: `${CATALOG_PREFIX}${id}`, label: catalogEntry(id)?.name ?? id, linux: "yes", ...over });
+
+  it("a ticked catalog tool this computer has no row for installs by its catalog road, named for its command; a road no golden build has run is noted", () => {
+    const t = toolInstallsFor([catalog("gh"), catalog("wrangler"), catalog("ffmpeg"), catalog("kubectl"), catalog("gcloud"), catalog("tmux")]);
+    expect(t.installs.map(i => [i.id, i.manager, i.after, i.bin, i.note])).toEqual([
+      ["tools/catalog/wrangler", "npm", undefined, "wrangler", UNMEASURED_ROAD],
+      ["tools/catalog/gh", "release", undefined, "gh", UNMEASURED_ROAD],
+      ["tools/apt-index", "apt", undefined, undefined, undefined],
+      ["tools/catalog/ffmpeg", "apt", "tools/apt-index", "ffmpeg", UNMEASURED_ROAD],
+      ["tools/catalog/kubectl", "vendor", undefined, "kubectl", UNMEASURED_ROAD],
+      ["tools/catalog/gcloud", "vendor", undefined, "gcloud", undefined],
+      ["tools/catalog/tmux", "apt", "tools/apt-index", "tmux", UNMEASURED_ROAD],
+    ]);
+    const cmd = (id: string) => t.installs.find(i => i.id === id)!.cmd;
+    for (const i of t.installs) expect(i.cmd).toMatch(/^export PATH=.*PNPM_HOME=/);
+    expect(cmd("tools/catalog/wrangler")).toMatch(/\nnpm install -g wrangler$/);
+    expect(cmd("tools/catalog/gh")).toContain("'https://api.github.com/repos/cli/cli/releases/latest'");
+    expect(cmd("tools/catalog/gh")).toContain("name='gh'");
+    expect(cmd("tools/apt-index")).toMatch(/\nexport DEBIAN_FRONTEND=noninteractive\napt-get update -qq$/);
+    expect(cmd("tools/catalog/ffmpeg")).toMatch(/\napt-get install -y -qq ffmpeg$/);
+    expect(cmd("tools/catalog/kubectl")).toBe(`${PATH_LINE}\n${KUBECTL.install(undefined, undefined)}`);
+    expect(t.installs.some(i => i.id === "tools/homebrew")).toBe(false);
+    expect(t.skipped).toEqual([]);
+    expect(t.base).toEqual([]);
+  });
+
+  it("a catalog tool on the Homebrew road brings Homebrew and its toolchain along, waits on them, and shares dependencies with the formulae ticked; a road a golden build has run carries no note", () => {
+    const t = toolInstallsFor([catalog("go"), row({ rung: "tools", id: "tools/brew/yq", linux: "yes" })]);
+    expect(t.installs.map(i => [i.id, i.after])).toEqual([
+      ["tools/homebrew", undefined],
+      ["tools/brew-toolchain/glibc", "tools/homebrew"],
+      ["tools/brew-toolchain/gcc", "tools/brew-toolchain/glibc"],
+      ["tools/brew-shared", "tools/brew-toolchain/gcc"],
+      ["tools/brew/yq", "tools/brew-toolchain/gcc"],
+      ["tools/catalog/go", "tools/brew-toolchain/gcc"],
+    ]);
+    expect(t.installs.find(i => i.id === "tools/brew-shared")!.cmd).toContain(`brew deps --for-each '\\''yq'\\'' '\\''go'\\'' |`);
+    expect(t.installs.at(-1)).toMatchObject({ id: "tools/catalog/go", label: "Go", manager: "brew", bin: "go" });
+    expect(t.installs.at(-1)!.cmd).toMatch(/brew install go'$/);
+    expect(t.installs.at(-1)).not.toHaveProperty("note");
+    // Homebrew's own bootstrap comes along for a catalog formula alone, as it does for a manager's.
+    expect(toolInstallsFor([catalog("rust")]).installs.map(i => i.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/catalog/rust"]);
+  });
+
+  it("a catalog tool the floor carries is the base's, an id the catalog does not know is skipped, and a row this computer has keeps its own road at the laptop's version", () => {
+    const t = toolInstallsFor([catalog("git"), catalog("nothing", { label: "nothing" }), row({ rung: "tools", id: "tools/npm/wrangler", label: "wrangler", version: "4.1.0" })]);
+    expect(t.base).toEqual([{ id: "tools/catalog/git", name: "git", note: "git is part of the base" }]);
+    expect(t.skipped).toEqual([{ id: "tools/catalog/nothing", note: "not in the catalog" }]);
+    expect(t.installs.map(i => [i.id, i.manager, i.note])).toEqual([["tools/npm/wrangler", "npm", undefined]]);
+    expect(t.installs[0]!.cmd).toMatch(/\nnpm install -g wrangler@4\.1\.0$/);
+  });
+
+  it("a catalog tool comes off through the same module: the release binary, the formula, the apt package, the npm global, the vendor's tree", () => {
+    expect(toolUninstall(catalog("gh"))).toEqual({ cmd: `${PATH_LINE}\nrm -f /usr/local/bin/'gh'` });
+    expect(toolUninstall(catalog("go"))).toEqual({ cmd: expect.stringMatching(/brew uninstall go'$/) });
+    expect(toolUninstall(catalog("ffmpeg"))).toEqual({ cmd: `${PATH_LINE}\nexport DEBIAN_FRONTEND=noninteractive\napt-get purge -y -qq ffmpeg && apt-get autoremove -y -qq --purge` });
+    expect(toolUninstall(catalog("wrangler"))).toEqual({ cmd: `${PATH_LINE}\nnpm uninstall -g wrangler` });
+    expect(toolUninstall(catalog("gcloud"))).toEqual({ cmd: expect.stringContaining("rm -rf /opt/google-cloud-sdk") });
+    expect(toolUninstall(catalog("git"))).toEqual({ note: "git is part of the base and stays" });
+    expect(toolUninstall(catalog("nothing"))).toEqual({ note: "no manager known for this row" });
+  });
+
+  it("a bare row keeps the tag and checksum its first install recorded: the release fetches that tag and checks the sum, and so does the vendor's download", () => {
+    const t = toolInstallsFor([catalog("gh", { pin: { tag: "v2.86.0", sha256: "d".repeat(64) } }), catalog("kubectl", { pin: { tag: "v1.37.0", sha256: "e".repeat(64) } })]);
+    const gh = t.installs.find(i => i.id === "tools/catalog/gh")!.cmd;
+    expect(gh).toContain("'https://api.github.com/repos/cli/cli/releases/tags/v2.86.0'");
+    expect(gh).not.toContain("releases/latest");
+    expect(gh).toContain(`[ "$sum" = '${"d".repeat(64)}' ]`);
+    expect(t.installs.find(i => i.id === "tools/catalog/kubectl")!.cmd).toBe(`${PATH_LINE}\n${KUBECTL.install(undefined, { tag: "v1.37.0", sha256: "e".repeat(64) })}`);
+  });
+});
+
 describe("command-line tool rows", () => {
   const spoo = row({ rung: "tools", id: "tools/cli/spoo", label: "spoo", paths: ["github.com/spoo-me/spoo-cli@v0.4.1", "github.com/spoo-me/spoo-cli/cmd/spoo@v0.3.0"], version: "0.4.1" });
 
@@ -792,7 +868,7 @@ describe("command-line tool rows", () => {
   it("the install fetches the release's Linux asset first and falls back to go install of the module; the command's name is on the step for the check after the stage", () => {
     const t = toolInstallsFor([spoo, row({ rung: "tools", id: "tools/go/gopls", label: "gopls", paths: ["golang.org/x/tools/gopls@v0.16.2"], version: "v0.16.2" })]);
     const step = t.installs.at(-1)!;
-    expect(step).toMatchObject({ id: "tools/cli/spoo", label: "spoo", manager: "github", bin: "spoo" });
+    expect(step).toMatchObject({ id: "tools/cli/spoo", label: "spoo", manager: "release", bin: "spoo" });
     expect(step.after).toBeUndefined();
     expect(step.cmd).toContain("https://api.github.com/repos/spoo-me/spoo-cli/releases/tags/v0.4.1");
     expect(step.cmd).toContain('install -m 0755 "$bin" "/usr/local/bin/$name"');
@@ -816,7 +892,7 @@ describe("command-line tool rows", () => {
   it("a tap formula on the road names its binary too", () => {
     const table: BrewTable = new Map([["zingzy/tap/diskbloom", { name: "diskbloom", fullName: "zingzy/tap/diskbloom", deps: [], macosOnly: false, source: { repo: "Zingzy/diskbloom", tag: "v0.1.0" } }]]);
     const t = toolInstallsFor([row({ rung: "tools", id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", linux: "unknown" })], table);
-    expect(t.installs.at(-1)).toMatchObject({ id: "tools/brew/zingzy/tap/diskbloom", manager: "github", bin: "diskbloom" });
+    expect(t.installs.at(-1)).toMatchObject({ id: "tools/brew/zingzy/tap/diskbloom", manager: "release", bin: "diskbloom" });
     expect(t.installs.at(-1)!.cmd).not.toContain("mv '/usr/local/bin/");
   });
 
@@ -830,7 +906,7 @@ describe("command-line tool rows", () => {
     expect(v2.cmd).not.toContain("mv '/usr/local/bin/");
     const table: BrewTable = new Map([["spoo-me/tap/spoo", { name: "spoo", fullName: "spoo-me/tap/spoo", deps: [], macosOnly: false, source: { repo: "spoo-me/spoo-cli", tag: "v0.4.1" } }]]);
     const tap = toolInstallsFor([row({ rung: "tools", id: "tools/brew/spoo-me/tap/spoo", label: "spoo", linux: "unknown" })], table).installs.at(-1)!;
-    expect(tap).toMatchObject({ manager: "github", bin: "spoo" });
+    expect(tap).toMatchObject({ manager: "release", bin: "spoo" });
     expect(tap.cmd).toContain(`mv '/usr/local/bin/spoo-cli' "/usr/local/bin/$name"`);
   });
 });
@@ -873,8 +949,8 @@ describe("editorInstallsFor", () => {
       row({ rung: "editors", id: "editors/cursor-ext/anysphere.cursorpyright", label: "anysphere.cursorpyright" }),
     ]);
     expect(t.installs.map(i => [i.id, i.label, i.manager])).toEqual([
-      ["editors/vscode-ext", "VS Code extension list", "list"],
-      ["editors/cursor-ext", "Cursor extension list", "list"],
+      ["editors/vscode-ext", "VS Code extension list", "script"],
+      ["editors/cursor-ext", "Cursor extension list", "script"],
     ]);
     const vscode = t.installs[0]!.cmd;
     expect(vscode).toContain(`mkdir -p "$HOME/.vscode-server"`);
@@ -1120,14 +1196,14 @@ describe("casks that are commands with a Linux release of their own", () => {
 
   it("the command row of gcloud-cli installs from Google's release at the Mac's version, named for its command so the PATH check covers it", () => {
     const t = toolInstallsFor([row({ rung: "tools", id: "tools/cli/gcloud", label: "gcloud (gcloud-cli)", version: "575.0.0" })]);
-    expect(t.installs.map(i => [i.id, i.manager, i.bin])).toEqual([["tools/cli/gcloud", "release", "gcloud"]]);
+    expect(t.installs.map(i => [i.id, i.manager, i.bin])).toEqual([["tools/cli/gcloud", "vendor", "gcloud"]]);
     expect(t.installs[0]!.cmd).toContain("ver='575.0.0'");
     expect(toolUninstall(row({ rung: "tools", id: "tools/cli/gcloud" }))).toEqual({ cmd: expect.stringContaining("rm -rf /opt/google-cloud-sdk") });
   });
 
   it("gcloud installs Google's tarball for the Mac's version, links its commands into /usr/local/bin and prints the WSP_ROAD line with the sum and the version", () => {
     const t = toolInstallsFor([gcloud({ version: "575.0.0" })]);
-    expect(t.installs.map(i => [i.id, i.manager, i.after, i.bin])).toEqual([["tools/brew-cask/gcloud-cli", "release", undefined, "gcloud"]]);
+    expect(t.installs.map(i => [i.id, i.manager, i.after, i.bin])).toEqual([["tools/brew-cask/gcloud-cli", "vendor", undefined, "gcloud"]]);
     const cmd = t.installs[0]!.cmd;
     expect(cmd).toContain("set -euo pipefail");
     expect(cmd).toContain("ver='575.0.0'");
@@ -1178,12 +1254,12 @@ describe("casks that are commands with a Linux release of their own", () => {
 
   it("a command row that already goes out as a GitHub road installs once, as the road, not again from the cask table", () => {
     const t = toolInstallsFor([row({ rung: "tools", id: "tools/cli/kubectl", label: "kubectl", paths: ["github.com/kubernetes/kubernetes@v1.37.0"] })]);
-    expect(t.installs.map(i => [i.id, i.manager])).toEqual([["tools/cli/kubectl", "github"]]);
+    expect(t.installs.map(i => [i.id, i.manager])).toEqual([["tools/cli/kubectl", "release"]]);
   });
 
   it("docker-desktop brings kubectl alone: the static binary at the stable version, checked against the published sum; a pin fixes the version and adds its own check", () => {
     const fresh = toolInstallsFor([docker({ version: "4.80.0,232116" })]).installs[0]!;
-    expect(fresh.manager).toBe("release");
+    expect(fresh.manager).toBe("vendor");
     expect(fresh.cmd).toContain('ver="$(curl -fsSL https://dl.k8s.io/release/stable.txt)"');
     expect(fresh.cmd).not.toContain("4.80.0");
     expect(fresh.cmd).toContain('url="https://dl.k8s.io/release/$ver/bin/linux/$a/kubectl"');
