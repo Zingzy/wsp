@@ -6,8 +6,8 @@
 // that. The wizard's tables read from here; nothing here runs a command.
 import { GCLOUD, KUBECTL } from "./linux-casks.js";
 import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, type McpConfig } from "./mcp.js";
-import { roadModule } from "./road-modules.js";
-import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, HERMES_INSTALL, MIB, NODE_RELEASES, PYTHON_INSTALL, UV_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
+import { APT_INDEX, roadModule } from "./road-modules.js";
+import { CLAUDE_CONFIG_DIR, DOCKER_INSTALL, GOLDEN_SETUP, HERMES_INSTALL, MIB, NODE_RELEASES, PYTHON_INSTALL, UV_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
 import { NO_SIGN_IN, SIGN_IN_ROWS, hasLogin, keysIdOf, keysRowOf, loginIdOf, type KeyFiles, type SignIn } from "./signin.js";
 
 export type EntryKind = "agent" | "tool";
@@ -86,7 +86,7 @@ export interface ToolEntry extends EntryBase {
   defaultOn: boolean;
   /** On every golden from the base stage, whatever the Mac has; the floor runs these in catalog order. */
   floor: boolean;
-  /** The floor row a script road runs on top of, by id; the npm and apt roads say it themselves. */
+  /** What a script road runs on top of: a floor row by id, or the apt index; the npm and apt roads say it themselves. */
   after?: string;
   /** Commands that come along with this row and have a version of their own. */
   brings?: readonly { bin: string; version: string }[];
@@ -272,7 +272,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   { ...tool, id: "jq", name: "jq", bin: "jq", installRoad: apt("jq"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 17, images: 5, road: "unmeasured" } },
   { ...tool, id: "ripgrep", name: "ripgrep", bin: "rg", installRoad: apt("ripgrep"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 10, images: 4, road: "unmeasured" } },
   { ...tool, id: "curl", name: "curl", bin: "curl", installRoad: apt("curl"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 87, images: 4, road: "unmeasured" } },
-  { ...tool, id: "docker", name: "Docker engine and compose", bin: "docker", installRoad: apt("docker.io", "docker-compose-v2"), floor: true, covers: ["docker-compose"], brings: [{ bin: "docker compose", version: "docker compose version" }], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 30, images: 3, road: "unmeasured" } },
+  { ...tool, id: "docker", name: "Docker engine and compose", bin: "docker", installRoad: { road: "script", script: DOCKER_INSTALL }, floor: true, after: APT_INDEX, covers: ["docker-compose"], brings: [{ bin: "docker compose", version: "docker compose version" }], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 30, images: 3, road: "unmeasured" } },
   // gh has no pinned release yet and agent-browser waits on a second data point: default-on through the tools stage.
   { ...tool, id: "gh", name: "GitHub CLI", bin: "gh", installRoad: github("cli/cli", "github.com/cli/cli/v2/cmd/gh"), signIn: SIGN_IN_ROWS.gh, defaultOn: true, source: { sessions: 100, images: 3, road: "unmeasured" } },
   { ...tool, id: "agent-browser", name: "agent-browser", bin: "agent-browser", installRoad: npm("agent-browser", "0.31.1"), signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 45, images: 0, road: "unmeasured", note: "sessions counted on one Mac only; on by default for this user until a second data point" } },

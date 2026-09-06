@@ -63,7 +63,7 @@ describe("the base floor's plan", () => {
       ["base/jq", "apt", "base/apt-index", "jq"],
       ["base/ripgrep", "apt", "base/apt-index", "rg"],
       ["base/curl", "apt", "base/apt-index", "curl"],
-      ["base/docker", "apt", "base/apt-index", "docker"],
+      ["base/docker", "script", "base/apt-index", "docker"],
     ]);
     expect(plan.map(t => t.label)).toEqual(["Node 22 with npm", "pnpm", "uv", "Python 3.12", "apt index", "git", "jq", "ripgrep", "curl", "Docker engine and compose"]);
     expect(BASE_FLOOR.map(e => `base/${e.id}`)).toEqual(plan.filter(t => t.bin !== undefined).map(t => t.id));
@@ -85,7 +85,11 @@ describe("the base floor's plan", () => {
     expect(cmd("base/python")).toMatch(/\nuv python install 3\.12\nln -sfn "\$\(uv python find --managed-python 3\.12\)" \/usr\/local\/bin\/python3$/);
     expect(cmd("base/apt-index")).toMatch(/\nexport DEBIAN_FRONTEND=noninteractive\napt-get update -qq$/);
     expect(cmd("base/jq")).toMatch(/\nexport DEBIAN_FRONTEND=noninteractive\napt-get install -y -qq jq$/);
-    expect(cmd("base/docker")).toMatch(/\napt-get install -y -qq docker\.io docker-compose-v2$/);
+    const docker = cmd("base/docker");
+    expect(docker).toContain("\nexport DEBIAN_FRONTEND=noninteractive\napt-get install -y -qq docker.io\n");
+    expect(docker).toContain('curl -fSsL -o /tmp/docker-compose "https://github.com/docker/compose/releases/download/v5.5.1/docker-compose-linux-$arch"');
+    expect(docker).toContain('echo "$sha  /tmp/docker-compose" | sha256sum -c - >/dev/null');
+    expect(docker).toMatch(/\ninstall -D -m 0755 \/tmp\/docker-compose \/usr\/libexec\/docker\/cli-plugins\/docker-compose\nrm -f \/tmp\/docker-compose$/);
   });
 });
 
@@ -226,6 +230,13 @@ describe("installBase", () => {
     ]);
     expect(out.line).toBe("node 22.23.2, npm 10.9.4, pnpm 11.9.0, uv 0.12.9, python3 3.12.13; git skipped (apt index did not install); jq skipped (apt index did not install); ripgrep skipped (apt index did not install); curl skipped (apt index did not install); Docker engine and compose skipped (apt index did not install)");
     expect(stages).toContain("deploying-daemon:4 installed, 1 failed: apt index (E: Could not get lock /var/lib/apt/lists/lock), 5 skipped: git, jq, ripgrep, curl, Docker engine and compose (apt index did not install); caches swept; 2.9 GB free");
+  });
+
+  it("a floor step that fails is recorded by the last line its installer wrote, not a generic one", async () => {
+    const g = guest(script => (script.includes("apt-get install -y -qq docker.io") ? { exitCode: 100, stdout: "Reading package lists...\n", stderr: "E: Unable to locate package docker.io\n" } : script.includes("VERSION node:") ? { exitCode: 0, stdout: "VERSION node: v22.23.2\n", stderr: "" } : undefined));
+    const out = await installBase(g.machine, () => {});
+    expect(out.tools.find(t => t.id === "base/docker")).toMatchObject({ outcome: "failed", note: "E: Unable to locate package docker.io" });
+    expect(out.line).toBe("node 22.23.2; Docker engine and compose failed (E: Unable to locate package docker.io)");
   });
 
   it("an install that exits 0 without its command on PATH is a failure, not a version", async () => {

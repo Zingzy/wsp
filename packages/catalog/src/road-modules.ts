@@ -6,7 +6,7 @@
 // and the wizard ask a module through roadModule(); nothing outside this file
 // decides by a road's name. Every line is text: nothing here runs a command.
 import { shellQuote } from "@wsp/protocol";
-import { type InstallRoad, type PackageRoad, type RoadName, pinStateOf } from "./roads.js";
+import { APT_ENV, type InstallRoad, type PackageRoad, type RoadName, pinStateOf } from "./roads.js";
 
 type Road<K extends RoadName> = Extract<InstallRoad, { road: K }>;
 
@@ -45,8 +45,6 @@ const pinned = (pkg: string, version: string | undefined, sep: string): string =
 export const APT_INDEX = "apt-index";
 /** The pseudo step every formula waits on: Homebrew with its toolchain. */
 export const HOMEBREW_STEP = "homebrew";
-/** The one line every apt run exports, so no prompt can wait on a machine nobody types at. */
-export const APT_ENV = "export DEBIAN_FRONTEND=noninteractive";
 /** The index read, as the stage runs it before the first apt row. */
 export const APT_UPDATE = `${APT_ENV}\napt-get update -qq`;
 

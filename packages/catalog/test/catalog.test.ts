@@ -125,7 +125,23 @@ describe("catalog", () => {
 
   it("gives every entry one install line from its road's module: apt, npm, Homebrew as linuxbrew, a release at its current tag, a vendor's download", () => {
     expect(installLine(catalogEntry("git")!)).toBe("export DEBIAN_FRONTEND=noninteractive\napt-get install -y -qq git");
-    expect(installLine(catalogEntry("docker")!)).toBe("export DEBIAN_FRONTEND=noninteractive\napt-get install -y -qq docker.io docker-compose-v2");
+    // Bookworm has docker.io but no compose v2 package, so compose comes as the cli plugin from its release, checksummed.
+    expect(installLine(catalogEntry("docker")!)).toBe(
+      [
+        "export DEBIAN_FRONTEND=noninteractive",
+        "apt-get install -y -qq docker.io",
+        'arch="$(uname -m)"',
+        'case "$arch" in',
+        "  x86_64) sha=db1889184726840f75c4f9c001048430d4f25b3be3cb084d3ddd762bc0aed576 ;;",
+        "  aarch64) sha=732e3a84c1a0f67256ce80bc2598a24546b10ca05f9faa97efceb1171ece2ef7 ;;",
+        '  *) echo "unsupported arch: $arch" >&2; exit 1 ;;',
+        "esac",
+        'curl -fSsL -o /tmp/docker-compose "https://github.com/docker/compose/releases/download/v5.5.1/docker-compose-linux-$arch"',
+        'echo "$sha  /tmp/docker-compose" | sha256sum -c - >/dev/null',
+        "install -D -m 0755 /tmp/docker-compose /usr/libexec/docker/cli-plugins/docker-compose",
+        "rm -f /tmp/docker-compose",
+      ].join("\n"),
+    );
     expect(installLine(catalogEntry("pnpm")!)).toBe("npm install -g pnpm@11.9.0");
     expect(installLine(catalogEntry("wrangler")!)).toBe("npm install -g wrangler");
     expect(installLine(catalogEntry("go")!)).toMatch(/^su -s \/bin\/bash linuxbrew -c '.*HOMEBREW_NO_AUTO_UPDATE=1.*brew install go'$/);
@@ -248,6 +264,10 @@ describe("catalog", () => {
     expect(BASE_FLOOR.map(e => installAfter(e))).toEqual([undefined, "node", undefined, "uv", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index"]);
     expect(BASE_FLOOR.find(e => e.id === "node")!.brings).toEqual([{ bin: "npm", version: "npm --version" }]);
     expect(BASE_FLOOR.find(e => e.id === "docker")!.brings).toEqual([{ bin: "docker compose", version: "docker compose version" }]);
+    // Docker's engine is by apt, so its script waits on the index read like the apt rows before it.
+    const docker = BASE_FLOOR.find(e => e.id === "docker")!;
+    expect(docker.installRoad.road).toBe("script");
+    expect(installAfter(docker)).toBe(APT_INDEX);
     // Python comes as uv's managed 3.12, pinned by uv's own release, and python3 on PATH is that interpreter.
     const python = catalogEntry("python")!;
     expect(python.installRoad.road).toBe("script");
@@ -262,7 +282,6 @@ describe("catalog", () => {
     expect(baseEntryFor("rg")?.id).toBe("ripgrep");
     expect(baseEntryFor("python@3.12")?.id).toBe("python");
     expect(baseEntryFor("python3")?.id).toBe("python");
-    expect(baseEntryFor("docker-compose-v2")?.id).toBe("docker");
     expect(baseEntryFor("docker-compose")?.id).toBe("docker");
     expect(baseEntryFor("pnpm")?.id).toBe("pnpm");
     expect(baseEntryFor("node")?.id).toBe("node");
