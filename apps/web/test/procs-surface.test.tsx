@@ -111,7 +111,7 @@ describe("processes surface", () => {
     expect(line.className).not.toMatch(/warning|caution|destructive|success/);
     // The daemon's hello said it is behind: the line names what it predates and where the update is.
     act(() => provideDaemonHello(WS, { root: DAEMON_ROOT, version: 1 }));
-    expect(document.querySelector("[data-procs-unavailable]")!.textContent).toBe("daemon v1 predates Live and Processes; update it from the machine tab");
+    expect(document.querySelector("[data-procs-unavailable]")!.textContent).toBe("daemon v1 predates Live, Processes and Files in imported projects; update it from the machine tab");
     // A redeployed daemon answers the watch: the reason goes and the rows fill.
     wire.replies["proc.watch"] = {};
     act(() => {

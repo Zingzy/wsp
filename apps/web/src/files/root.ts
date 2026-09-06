@@ -2,10 +2,13 @@
 // Where the files and diff panes are rooted, per workspace: the folder the
 // thread's agent works in, as the composer picked it, the harness then
 // reported it, and the agent's own tool calls then moved its shell, unless
-// the person pinned the panes somewhere; before any, the daemon's own root.
-// Every path here is absolute. Not persisted: a reload follows the thread
-// again.
+// the person pinned the panes somewhere; before any, the daemon's home. The
+// roots the daemon browses are its home and the imported project folder on
+// the workspace record; both panes read that one list. Every path here is
+// absolute. Not persisted: a reload follows the thread again.
+import { useMemo } from "react";
 import { create } from "zustand";
+import { useStore } from "../protocol/store.js";
 import { useDaemonRoot } from "./wire.js";
 
 export interface WorkspaceRoot {
@@ -31,6 +34,20 @@ function within(path: string, folder: string): boolean {
   return path === folder || path.startsWith(folder === "/" ? "/" : `${folder}/`);
 }
 
+/** The browsable roots, home first: the daemon's home and the imported project folder when the record has one. Empty
+ * until the daemon's hello. */
+export function rootsOf(home: string | null, projectDest: string | undefined): string[] {
+  if (home === null) return [];
+  return projectDest === undefined || projectDest === home ? [home] : [home, projectDest];
+}
+
+/** The root a path sits in, the nearest when roots nest; null when it is outside every root. */
+export function rootOf(roots: readonly string[], path: string): string | null {
+  let found: string | null = null;
+  for (const root of roots) if (within(path, root) && (found === null || root.length > found.length)) found = root;
+  return found;
+}
+
 export const useRootStore = create<RootStoreState>()(set => ({
   byWorkspaceId: {},
   follow: (workspaceId, cwd) =>
@@ -50,16 +67,22 @@ export const useRootStore = create<RootStoreState>()(set => ({
 }));
 
 /** The folder the panes show: the pin, else the agent's shell folder where the daemon can list it, else the thread's
- * folder, else the daemon root (null until its hello). */
-export function selectRoot(byWorkspaceId: Record<string, WorkspaceRoot>, workspaceId: string, daemonRoot: string | null): string | null {
+ * folder, else the daemon's home (null until its hello). */
+export function selectRoot(byWorkspaceId: Record<string, WorkspaceRoot>, workspaceId: string, roots: readonly string[]): string | null {
   const entry = byWorkspaceId[workspaceId] ?? NONE;
-  const shell = entry.shell !== null && daemonRoot !== null && within(entry.shell, daemonRoot) ? entry.shell : null;
-  return entry.pinned ?? shell ?? entry.followed ?? daemonRoot;
+  const shell = entry.shell !== null && rootOf(roots, entry.shell) !== null ? entry.shell : null;
+  return entry.pinned ?? shell ?? entry.followed ?? roots[0] ?? null;
+}
+
+export function useRoots(workspaceId: string): string[] {
+  const home = useDaemonRoot(workspaceId);
+  const projectDest = useStore(s => s.workspaces.find(w => w.id === workspaceId)?.project?.dest);
+  return useMemo(() => rootsOf(home, projectDest), [home, projectDest]);
 }
 
 export function useRoot(workspaceId: string): string | null {
-  const daemonRoot = useDaemonRoot(workspaceId);
-  return useRootStore(s => selectRoot(s.byWorkspaceId, workspaceId, daemonRoot));
+  const roots = useRoots(workspaceId);
+  return useRootStore(s => selectRoot(s.byWorkspaceId, workspaceId, roots));
 }
 
 export function usePinned(workspaceId: string): boolean {

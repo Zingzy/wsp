@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DAEMON_VERSION } from "@wsp/protocol";
 import type {
   Capabilities,
   EventUnion,
@@ -844,11 +845,13 @@ describe("daemon version", () => {
     const updateDaemon = vi.fn(async (_id: string) => {});
     (api as Api).updateDaemon = updateDaemon;
     expect(updateLine()).toBeNull();
-    act(() => provideDaemonHello("ws_a", { root: "/root", version: 2 }));
+    act(() => provideDaemonHello("ws_a", { root: "/root", version: DAEMON_VERSION }));
     expect(updateLine()).toBeNull();
+    act(() => provideDaemonHello("ws_a", { root: "/root", version: 2 }));
+    expect(updateLine()!.querySelector("span")!.textContent).toBe("daemon v2 predates Files in imported projects");
     act(() => provideDaemonHello("ws_a", { root: "/root", version: 1 }));
     const line = updateLine()!;
-    expect(line.querySelector("span")!.textContent).toBe("daemon v1 predates Live and Processes");
+    expect(line.querySelector("span")!.textContent).toBe("daemon v1 predates Live, Processes and Files in imported projects");
     expect(line.className).toMatch(/font-mono/);
     expect(line.className).toMatch(/text-muted-foreground/);
     expect(line.className).toMatch(/\bh-6\b/);
@@ -865,7 +868,7 @@ describe("daemon version", () => {
     await waitFor(() => expect(updateButton().textContent).toBe("updating"));
     expect(updateLine()!.className).toMatch(/\bh-6\b/);
     // The new daemon's hello names a current version: the line leaves.
-    act(() => provideDaemonHello("ws_a", { root: "/root", version: 2 }));
+    act(() => provideDaemonHello("ws_a", { root: "/root", version: DAEMON_VERSION }));
     expect(updateLine()).toBeNull();
   });
 
@@ -878,10 +881,10 @@ describe("daemon version", () => {
     await waitFor(() => expect(updateButton().textContent).toBe("updating"));
     await act(async () => settle());
     // The runtime is done but the link it killed has not redialled yet: the line still reads v1 and the keycap stays busy.
-    expect(updateLine()!.querySelector("span")!.textContent).toBe("daemon v1 predates Live and Processes");
+    expect(updateLine()!.querySelector("span")!.textContent).toBe("daemon v1 predates Live, Processes and Files in imported projects");
     expect(updateButton().textContent).toBe("updating");
     expect(updateButton().disabled).toBe(true);
-    act(() => provideDaemonHello("ws_a", { root: "/root", version: 2 }));
+    act(() => provideDaemonHello("ws_a", { root: "/root", version: DAEMON_VERSION }));
     expect(updateLine()).toBeNull();
   });
 
@@ -898,8 +901,8 @@ describe("daemon version", () => {
     act(() => vi.advanceTimersByTime(1));
     expect(updateButton().textContent).toBe("update");
     expect(updateButton().disabled).toBe(false);
-    expect(updateLine()!.querySelector("span")!.textContent).toBe("daemon v1 predates Live and Processes");
-    expect(updateLine()!.querySelector("span")!.getAttribute("title")).toBe("daemon v1 predates Live and Processes");
+    expect(updateLine()!.querySelector("span")!.textContent).toBe("daemon v1 predates Live, Processes and Files in imported projects");
+    expect(updateLine()!.querySelector("span")!.getAttribute("title")).toBe("daemon v1 predates Live, Processes and Files in imported projects");
   });
 
   it("leaving the machine tab mid-update and coming back finds the keycap still busy: a click runs nothing more, and the current hello removes the line", async () => {
@@ -915,12 +918,12 @@ describe("daemon version", () => {
     cleanup();
     render(<MachineSurface workspaceId="ws_a" />);
     await waitFor(() => expect(updateLine()).not.toBeNull());
-    expect(updateLine()!.querySelector("span")!.textContent).toBe("daemon v1 predates Live and Processes");
+    expect(updateLine()!.querySelector("span")!.textContent).toBe("daemon v1 predates Live, Processes and Files in imported projects");
     expect(updateButton().textContent).toBe("updating");
     expect(updateButton().disabled).toBe(true);
     fireEvent.click(updateButton());
     expect(updateDaemon).toHaveBeenCalledTimes(1);
-    act(() => provideDaemonHello("ws_a", { root: "/root", version: 2 }));
+    act(() => provideDaemonHello("ws_a", { root: "/root", version: DAEMON_VERSION }));
     expect(updateLine()).toBeNull();
   });
 
@@ -941,7 +944,7 @@ describe("daemon version", () => {
     act(() => vi.advanceTimersByTime(1));
     expect(updateButton().textContent).toBe("update");
     expect(updateButton().disabled).toBe(false);
-    expect(updateLine()!.querySelector("span")!.getAttribute("title")).toBe("daemon v1 predates Live and Processes");
+    expect(updateLine()!.querySelector("span")!.getAttribute("title")).toBe("daemon v1 predates Live, Processes and Files in imported projects");
   });
 
   it("the keycap reads updating while the runtime redeploys, and a refusal takes the line's place", async () => {

@@ -46,7 +46,7 @@ describe.skipIf(skipped !== undefined)("the machine tab over an old daemon laid 
     await page!.goto(`${base}?theme=${theme}`);
     await page!.waitForSelector("[data-k=daemon-update]");
     expect(await page!.locator("[data-live-row] [data-k]").allTextContents()).toEqual(["unavailable", "unavailable", "unavailable"]);
-    expect(await page!.locator("[data-k=daemon-update] span").textContent()).toBe("daemon v1 predates Live and Processes");
+    expect(await page!.locator("[data-k=daemon-update] span").textContent()).toBe("daemon v1 predates Live, Processes and Files in imported projects");
     const tab = (await page!.locator("[data-testid=machine-tab]").boundingBox())!;
     const line = (await page!.locator("[data-k=daemon-update]").boundingBox())!;
     const button = (await page!.locator("[data-k=daemon-update] button").boundingBox())!;
@@ -80,7 +80,7 @@ describe.skipIf(skipped !== undefined)("the machine tab over an old daemon laid 
     await page!.waitForTimeout(1_200);
     expect(await page!.locator("[data-k=daemon-update] button").textContent()).toBe("updating");
     expect(await page!.locator("[data-k=daemon-update] button").isDisabled()).toBe(true);
-    expect(await page!.locator("[data-k=daemon-update] span").textContent()).toBe("daemon v1 predates Live and Processes");
+    expect(await page!.locator("[data-k=daemon-update] span").textContent()).toBe("daemon v1 predates Live, Processes and Files in imported projects");
 
     await page!.waitForSelector("[data-k=daemon-update]", { state: "detached" });
     expect(await page!.locator("[data-live-row=cpu] [data-k]").textContent()).toBe("12%");

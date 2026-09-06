@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRuntime, type Runtime } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import type { StatusWatchOptions } from "../src/status.js";
-import { memoryStore } from "../src/store.js";
+import { memoryStore, type Store } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { until } from "./until.js";
@@ -251,16 +251,34 @@ describe("status.watch cost events", () => {
 });
 
 describe("status.history", () => {
+  type Cost = EventUnion & { type: "workspace.cost" };
+  /** A store whose writes to the cost history collection are counted. */
+  function countingStore(): { store: Store; puts: () => number; deletes: () => number } {
+    const store = memoryStore();
+    const n = { puts: 0, deletes: 0 };
+    const put = store.put.bind(store);
+    const del = store.delete.bind(store);
+    store.put = async (collection, id, value) => {
+      if (collection === "cost-histories") n.puts++;
+      return put(collection, id, value);
+    };
+    store.delete = async (collection, id) => {
+      if (collection === "cost-histories") n.deletes++;
+      return del(collection, id);
+    };
+    return { store, puts: () => n.puts, deletes: () => n.deletes };
+  }
+
   it("holds the folded ticks since metering began and hands them out over the wire", async () => {
     const { rt } = testRuntime({ costIntervalMs: 15, pollIntervalMs: 60_000 });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
-    expect(rt.status.history(ws.id)).toEqual([]);
-    const costs: (EventUnion & { type: "workspace.cost" })[] = [];
-    rt.events.on("workspace.cost", e => costs.push(e as EventUnion & { type: "workspace.cost" }));
+    expect(await rt.status.history(ws.id)).toEqual([]);
+    const costs: Cost[] = [];
+    rt.events.on("workspace.cost", e => costs.push(e as Cost));
     const stop = rt.status.watch();
     await until(() => costs.length >= 4);
     // One rate the whole way: the first tick and the newest, nothing between.
-    let history = rt.status.history(ws.id);
+    let history = await rt.status.history(ws.id);
     expect(history).toHaveLength(2);
     // The bus stamps a seq on what it emits; the history holds the ticks as the tracker built them.
     expect(costs[0]).toMatchObject(history[0]!);
@@ -269,7 +287,7 @@ describe("status.history", () => {
     await rt.workspaces.nap(ws.id);
     const before = costs.length;
     await until(() => costs.length >= before + 3);
-    history = rt.status.history(ws.id);
+    history = await rt.status.history(ws.id);
     const rates = history.map(p => p.rateUsdPerHour);
     // The last running tick and the first napping one bracket the change; the napping run folds to its newest.
     expect(rates.slice(0, 2).every(r => r > 0)).toBe(true);
@@ -283,18 +301,148 @@ describe("status.history", () => {
     stop();
     c.close();
     expect(res.ok).toBe(true);
-    expect(res["points"]).toEqual(rt.status.history(ws.id));
-    expect(rt.status.history("ws_nobody")).toEqual([]);
+    expect(res["points"]).toEqual(await rt.status.history(ws.id));
+    expect(await rt.status.history("ws_nobody")).toEqual([]);
   });
 
-  it("forgets a deleted workspace's history", async () => {
-    const { rt } = testRuntime({ costIntervalMs: 15, pollIntervalMs: 60_000 });
+  it("survives a host restart: a fresh runtime over the same store hands out the stored ticks and meters on from them", async () => {
+    const backend = stubBackend();
+    const { store, puts } = countingStore();
+    const fc = fakeClock();
+    const status = { costIntervalMs: 15, pollIntervalMs: 60_000 };
+    // The clock jumps an hour: the idle window must not nap the workspace behind the test.
+    const idle = { defaultWindowMs: 24 * 3_600_000 };
+    const first = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status, idle });
+    const ws = await first.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const costs: Cost[] = [];
+    first.events.on("workspace.cost", e => costs.push(e as Cost));
+    let stop = first.status.watch();
+    await until(() => costs.length >= 2);
+    fc.advance(60_000);
+    await until(() => costs.at(-1)!.awakeMs >= 60_000 && costs.length >= 6);
+    stop();
+    const stored = await first.status.history(ws.id);
+    expect(stored).toHaveLength(2);
+    // Ticks of one rate replace the newest point in memory and reach the store only when a point is added.
+    expect(puts()).toBe(2);
+
+    // An hour down, the machine still running and billing the whole time. The store's newest point is the tick
+    // that added it, so the series it hands out before its first tick ends where the rate run began.
+    fc.advance(3_600_000);
+    const second = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status, idle });
+    const handed = await second.status.history(ws.id);
+    expect(handed).toHaveLength(2);
+    expect(handed[0]).toEqual(stored[0]);
+    expect(handed[1]).toMatchObject({ workspaceId: ws.id, phase: "running", rateUsdPerHour: stored[1]!.rateUsdPerHour });
+    const after: Cost[] = [];
+    second.events.on("workspace.cost", e => after.push(e as Cost));
+    stop = second.status.watch();
+    await until(() => after.length >= 2);
+    const tick = after.at(-1)!;
+    expect(tick.awakeMs).toBeGreaterThanOrEqual(60_000 + 3_600_000);
+    expect(tick.accruedUsd).toBeCloseTo((tick.rateUsdPerHour * tick.awakeMs) / 3_600_000, 10);
+    expect(tick.accruedUsd).toBeGreaterThan(0.1);
+    // The run continues at one rate: the stored first tick stays, the newest moves, no point was added.
+    const history = await second.status.history(ws.id);
+    expect(history).toHaveLength(2);
+    expect(history[0]).toEqual(stored[0]);
+    expect(history[1]).toMatchObject({ awakeMs: tick.awakeMs, accruedUsd: tick.accruedUsd });
+    expect(puts()).toBe(2);
+
+    // A nap after the restart is a rate change: it adds two points and both reach the store.
+    await second.workspaces.nap(ws.id);
+    const before = after.length;
+    await until(() => after.length >= before + 3);
+    stop();
+    expect(await second.status.history(ws.id)).toHaveLength(4);
+    expect(puts()).toBe(4);
+    const third = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status, idle });
+    const restored = await third.status.history(ws.id);
+    expect(restored).toHaveLength(4);
+    expect(restored.at(-1)!.rateUsdPerHour).toBe(0);
+    expect(restored.at(-1)!.awakeMs).toBe(tick.awakeMs);
+  });
+
+  it("a workspace napping across the restart keeps its total and accrues nothing until it wakes", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const fc = fakeClock();
+    const status = { costIntervalMs: 15, pollIntervalMs: 60_000 };
+    // The clock jumps an hour: the idle window must not nap the workspace behind the test.
+    const idle = { defaultWindowMs: 24 * 3_600_000 };
+    const first = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status, idle });
+    const ws = await first.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const costs: Cost[] = [];
+    first.events.on("workspace.cost", e => costs.push(e as Cost));
+    let stop = first.status.watch();
+    await until(() => costs.length >= 1);
+    fc.advance(30_000);
+    await first.workspaces.nap(ws.id);
+    await until(async () => costs.at(-1)!.rateUsdPerHour === 0 && (await first.status.history(ws.id)).length >= 3);
+    stop();
+    const total = costs.at(-1)!.awakeMs;
+    expect(total).toBe(30_000);
+
+    fc.advance(3_600_000);
+    const second = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status, idle });
+    const after: Cost[] = [];
+    second.events.on("workspace.cost", e => after.push(e as Cost));
+    stop = second.status.watch();
+    await until(() => after.length >= 2);
+    expect(after.at(-1)).toMatchObject({ phase: "napping", rateUsdPerHour: 0, awakeMs: total });
+    await second.workspaces.wake(ws.id);
+    fc.advance(10_000);
+    await until(() => after.at(-1)!.phase === "running" && after.at(-1)!.awakeMs >= total + 10_000);
+    stop();
+    expect(after.at(-1)!.awakeMs).toBe(total + 10_000);
+  });
+
+  it("a host that died between a nap and its tick does not bill the nap: the wake starts the stretch afresh", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const fc = fakeClock();
+    const status = { costIntervalMs: 15, pollIntervalMs: 60_000 };
+    const idle = { defaultWindowMs: 24 * 3_600_000 };
+    const first = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status, idle });
+    const ws = await first.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const costs: Cost[] = [];
+    first.events.on("workspace.cost", e => costs.push(e as Cost));
+    let stop = first.status.watch();
+    await until(() => costs.length >= 2);
+    stop();
+    // The store's newest point still says running when the nap lands and the host dies before the next tick.
+    await first.workspaces.nap(ws.id);
+
+    fc.advance(3_600_000);
+    const second = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status, idle });
+    expect((await second.status.history(ws.id)).at(-1)).toMatchObject({ phase: "running" });
+    const after: Cost[] = [];
+    second.events.on("workspace.cost", e => after.push(e as Cost));
+    stop = second.status.watch();
+    await until(() => after.length >= 1);
+    expect(after.at(-1)).toMatchObject({ phase: "napping", rateUsdPerHour: 0, awakeMs: 0 });
+    await second.workspaces.wake(ws.id);
+    fc.advance(10_000);
+    await until(() => after.at(-1)!.phase === "running" && after.at(-1)!.awakeMs > 0);
+    stop();
+    expect(after.at(-1)!.awakeMs).toBe(10_000);
+  });
+
+  it("forgets a deleted workspace's history, in memory and in the store", async () => {
+    const backend = stubBackend();
+    const { store, deletes } = countingStore();
+    const rt = createRuntime({ backend, store, adapters: {}, status: { costIntervalMs: 15, pollIntervalMs: 60_000 } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const costs: Cost[] = [];
+    rt.events.on("workspace.cost", e => costs.push(e as Cost));
     const stop = rt.status.watch();
-    await until(() => rt.status.history(ws.id).length >= 1);
+    await until(() => costs.length >= 1);
     await rt.workspaces.delete(ws.id);
     stop();
-    expect(rt.status.history(ws.id)).toEqual([]);
+    expect(await rt.status.history(ws.id)).toEqual([]);
+    await until(() => deletes() >= 1);
+    const fresh = createRuntime({ backend, store, adapters: {}, status: { costIntervalMs: 15, pollIntervalMs: 60_000 } });
+    expect(await fresh.status.history(ws.id)).toEqual([]);
   });
 });
 

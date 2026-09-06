@@ -10,7 +10,8 @@ import { useRootStore } from "../src/files/root.js";
 import { provideDaemonWire } from "../src/files/wire.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { onNewThreadRequest } from "../src/shell/shellRequests.js";
-import { fakeWire, LISTING, resetSurfaces, WS } from "./surface-harness.js";
+import { useStore } from "../src/protocol/store.js";
+import { fakeWire, imported, LISTING, PROJECT_DEST, resetSurfaces, WS } from "./surface-harness.js";
 import { provideDaemonHello } from "../src/files/wire.js";
 
 beforeEach(resetSurfaces);
@@ -35,6 +36,8 @@ function rowFor(container: HTMLElement, path: string): HTMLElement {
 
 const listCalls = (wire: { calls: [string, Record<string, unknown>][] }) => wire.calls.filter(([op]) => op === "fs.list").map(([, p]) => p["path"]);
 const rootLabel = (container: HTMLElement) => container.querySelector("[data-files-root]")?.textContent;
+const rootSwitch = (container: HTMLElement) =>
+  Array.from(container.querySelectorAll<HTMLButtonElement>("[data-files-roots] button")).map(b => [b.textContent, b.getAttribute("aria-pressed")]);
 
 describe("files surface", () => {
   it("lists the root one level with its folders shut, and lists a folder when it is opened", async () => {
@@ -52,6 +55,7 @@ describe("files surface", () => {
     expect(listCalls(wire)).toEqual(["/root", "/root/src"]);
     expect(rootLabel(container)).toBe("/root");
     expect((screen.getByRole("button", { name: "Up one folder" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(container.querySelector("[data-files-roots]")).toBeNull();
 
     fireEvent.click(rowFor(container, "src/"));
     await settle();
@@ -172,5 +176,47 @@ describe("files surface", () => {
     provideDaemonHello(WS, null);
     render(<FilesSurface workspaceId={WS} theme="dark" />);
     expect(screen.getAllByText("The workspace is not running.")).toHaveLength(2);
+  });
+
+  it("offers home and the imported project as roots, switches by pinning, and up stops at each root's edge", async () => {
+    const wire = fakeWire({ "fs.list": LISTING });
+    provideDaemonWire(WS, wire);
+    useStore.setState({ workspaces: [imported] });
+    const { container } = render(<FilesSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(treeRows(container).length).toBeGreaterThan(0));
+    expect(rootSwitch(container)).toEqual([["/root", "true"], [PROJECT_DEST, "false"]]);
+    expect(rootLabel(container)).toBe("/root");
+    expect(screen.getByRole("group", { name: "Browsable folders" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: PROJECT_DEST }));
+    await waitFor(() => expect(rootLabel(container)).toBe(PROJECT_DEST));
+    expect(treeRows(container).map(r => r.path)).toEqual(["packages/", "pnpm-workspace.yaml"]);
+    expect(listCalls(wire)).toEqual(["/root", PROJECT_DEST]);
+    expect(rootSwitch(container)).toEqual([["/root", "false"], [PROJECT_DEST, "true"]]);
+    expect(useRootStore.getState().byWorkspaceId[WS]).toEqual({ followed: null, pinned: PROJECT_DEST, shell: null });
+    expect((screen.getByRole("button", { name: "Up one folder" }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(rowFor(container, "packages/"));
+    await waitFor(() => expect(treeRows(container).map(r => r.path)).toContain("packages/web/"));
+    act(() => useRootStore.getState().pin(WS, `${PROJECT_DEST}/packages`));
+    await waitFor(() => expect(rootLabel(container)).toBe(`${PROJECT_DEST}/packages`));
+    expect(rootSwitch(container)).toEqual([["/root", "false"], [PROJECT_DEST, "true"]]);
+    expect((screen.getByRole("button", { name: "Up one folder" }) as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "/root" }));
+    await waitFor(() => expect(rootLabel(container)).toBe("/root"));
+    expect(rootSwitch(container)).toEqual([["/root", "true"], [PROJECT_DEST, "false"]]);
+  });
+
+  it("follows the thread into the imported project and lists it there", async () => {
+    const wire = fakeWire({ "fs.list": LISTING });
+    provideDaemonWire(WS, wire);
+    useStore.setState({ workspaces: [imported] });
+    act(() => useRootStore.getState().follow(WS, PROJECT_DEST));
+    const { container } = render(<FilesSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(treeRows(container).map(r => r.path)).toEqual(["packages/", "pnpm-workspace.yaml"]));
+    expect(listCalls(wire)).toEqual([PROJECT_DEST]);
+    expect(rootSwitch(container)).toEqual([["/root", "false"], [PROJECT_DEST, "true"]]);
+    expect(container.querySelector("[data-files-error]")).toBeNull();
   });
 });

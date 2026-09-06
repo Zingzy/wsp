@@ -37,7 +37,7 @@ export {
   type PreviewableServersInput,
   type StoppedPort,
 } from "./ports.js";
-export { deriveSidebarProjects, deriveThreads, workspaceIndicator, threadIndicator, turnWait, type SidebarInput } from "./workspaces.js";
+export { deriveSidebarProjects, workspaceIndicator, threadIndicator, turnWait, type SidebarInput } from "./workspaces.js";
 export { terminalPaneState, terminalPaneTitle, terminalEmptyLine, terminalInputRefusal, type TerminalPaneState, type TerminalPaneInput } from "./terminal-pane.js";
 export { toTerminalAttachEvent, isPtyEvent } from "./terminal.js";
 export { catalogFor, catalogFromHarness } from "./catalog.js";
