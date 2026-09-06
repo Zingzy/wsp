@@ -646,7 +646,7 @@ describe("runtime session history", () => {
     await rt.close();
   });
 
-  it("SessionView follows the agent's shell when a tool call moves it, and the delta event carries the folder", async () => {
+  it("SessionView keeps the harness folder when a tool call moves the shell; the delta event carries the move", async () => {
     const m = manual();
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: m.adapter } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
@@ -656,7 +656,7 @@ describe("runtime session history", () => {
     m.start("/root");
     m.tool("ls");
     m.tool("cd /root/2048 && ls", "/root/2048");
-    expect((await rt.sessions.list(ws.id))[0]!.cwd).toBe("/root/2048");
+    expect((await rt.sessions.list(ws.id))[0]!.cwd).toBe("/root");
     expect(deltas).toEqual([undefined, "/root/2048"]);
     m.done("done");
     m.end();
@@ -947,6 +947,32 @@ describe("runtime session index", () => {
     await rt2.workspaces.delete(b.id);
     expect(await rt2.sessions.list()).toHaveLength(1);
     expect(await store.get("sessions", b.id)).toBeUndefined();
+    await rt2.close();
+  });
+
+  it("a resume runs in the folder its session started in, whatever folder the request names or none", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const t = turns();
+    const rt = createRuntime({ backend, store, adapters: { claude: t.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await (await rt.sessions.start(ws.id, { prompt: "first", cwd: "/root/app" })).finished;
+    const [first] = await rt.sessions.list(ws.id);
+    await (await rt.sessions.start(ws.id, { prompt: "from another folder", resume: first!.claudeSessionId, cwd: "/root/other" })).finished;
+    await (await rt.sessions.start(ws.id, { prompt: "from the command line", resume: first!.claudeSessionId })).finished;
+    expect(t.starts.map(s => s.cwd)).toEqual(["/root/app", "/root/app", "/root/app"]);
+    expect((await rt.sessions.list(ws.id)).map(s => s.cwd)).toEqual(["/root/app"]);
+    // a start without resume still runs where it was asked to
+    await (await rt.sessions.start(ws.id, { prompt: "new thread", cwd: "/root/other" })).finished;
+    expect(t.starts[3]!.cwd).toBe("/root/other");
+    await rt.close();
+
+    // the index is gone but the transcript keeps the start: the folder still comes from it
+    await store.delete("sessions", ws.id);
+    const t2 = turns();
+    const rt2 = createRuntime({ backend, store, adapters: { claude: t2.adapter } });
+    await (await rt2.sessions.start(ws.id, { prompt: "after a restart", resume: first!.claudeSessionId, cwd: "/root/other" })).finished;
+    expect(t2.starts[0]!.cwd).toBe("/root/app");
     await rt2.close();
   });
 
@@ -2455,16 +2481,16 @@ describe("runtime golden import", () => {
       "creating:sandbox from base",
       "deploying-daemon",
       ...["Node 22 with npm", "pnpm", "uv", "Python 3.12", "apt index", "git", "jq", "ripgrep", "curl", "Docker engine and compose"].map((label, i) => `deploying-daemon:${label} (${i + 1}/10)`),
-      "deploying-daemon:10 installed; caches swept; 3000 MB free",
+      "deploying-daemon:10 installed; caches swept; 2.9 GB free",
       // The stub answers the versions read with nothing, so the stage closes on the disk alone.
-      "deploying-daemon:3000 MB free",
+      "deploying-daemon:2.9 GB free",
       "applying-setup:1 file: shell 1",
       "applying-setup:10 B packed",
       "installing-harness",
       "installing-harness:Codex (1/1)",
-      "installing-harness:Codex installed; caches swept; 3000 MB free",
+      "installing-harness:Codex installed; caches swept; 2.9 GB free",
       "installing-tools:jq (1/1)",
-      "installing-tools:1 installed; caches swept; 3000 MB free",
+      "installing-tools:1 installed; caches swept; 2.9 GB free",
       "installing-mcp:none configured",
       expect.stringMatching(/^installing-mcp:machine context: \d+(\.\d+)? KB written; no agent on the machine$/),
       "ready",
@@ -3312,7 +3338,7 @@ describe("runtime golden update and the post-seal grace", () => {
       "installing-harness:",
       "installing-harness:no agent ticked",
       "installing-tools:cowsay (1/1)",
-      "installing-tools:1 installed; caches swept; 3000 MB free",
+      "installing-tools:1 installed; caches swept; 2.9 GB free",
       "installing-mcp:none configured",
       expect.stringMatching(/^installing-mcp:machine context: \d+(\.\d+)? KB written; no agent on the machine$/),
       "ready:",

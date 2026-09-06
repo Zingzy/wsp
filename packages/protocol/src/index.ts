@@ -173,8 +173,9 @@ export const SessionView = z.object({
   /** Ms epoch, runtime clock; endedAt is unset while the session runs. */
   startedAt: z.number().optional(),
   endedAt: z.number().optional(),
-  /** The folder the agent works in: the start request's, then what the harness announced, then where its tool
-   * calls moved its shell. */
+  /** The folder the harness runs in: the start request's until the harness announces its own. A resume of this
+   * session runs here whatever folder it asks for, since the CLI keys the session to it; the shell folder the
+   * agent's tool calls move rides the delta events instead. */
   cwd: z.string().optional(),
   /** What the session runs with, as the harness's own slugs: the start request's model until the harness announces
    * its own; effort and permission mode as requested, since the CLI never echoes them. */
@@ -527,6 +528,8 @@ export interface BootPayload {
 export interface DesktopBridge {
   /** The installed faces for a family and its Nerd Font variants, from this computer's font directories. */
   localFonts(family: string): Promise<LocalFontFace[]>;
+  /** The system folder picker; the absolute path chosen, or nothing when it was dismissed. */
+  pickFolder(): Promise<string | undefined>;
 }
 
 // --- golden image (manifest, interactive builder, build stages) ---------------
@@ -1268,4 +1271,5 @@ export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { sendRefusal, workspaceState, workspaceWord, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
+export { fmtBytes } from "./format.js";
 export { shellQuote } from "./shell-quote.js";

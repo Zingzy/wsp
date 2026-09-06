@@ -11,6 +11,7 @@ export interface Retry {
 const bridge: DesktopBridge & { retry(): Promise<Retry> } = {
   retry: () => ipcRenderer.invoke("setup:retry"),
   localFonts: (family: string): Promise<LocalFontFace[]> => ipcRenderer.invoke("fonts:local", family),
+  pickFolder: (): Promise<string | undefined> => ipcRenderer.invoke("folder:pick"),
 };
 
 contextBridge.exposeInMainWorld("wsp", bridge);

@@ -11,8 +11,8 @@ import { S_BAR, S_STEP_ACTIVE, S_STEP_CANCEL, S_STEP_SUBMIT } from "@clack/promp
 import { CATALOG_AGENTS, CATALOG_TOOLS, type CatalogEntry, type ToolEntry, catalogEntry } from "@wsp/catalog";
 import type { LoginChoice, Manifest, ManifestEntry } from "@wsp/collect";
 import { MEASURED_ON, estimateDisk, parseMcpId, type BrewTable, type DiskEstimate } from "@wsp/engine";
-import { MCP_ID_PREFIX, type Recipe, type RecipeRow } from "@wsp/protocol";
-import { GUTTER, S_BAR_FOCUS, S_BAR_FOCUS_END, colourDepth, fmtBytes, helpLine, isTTY, widthOf, wrap, type HelpKey } from "./init-layout.js";
+import { MCP_ID_PREFIX, fmtBytes, type Recipe, type RecipeRow } from "@wsp/protocol";
+import { GUTTER, S_BAR_FOCUS, S_BAR_FOCUS_END, colourDepth, helpLine, isTTY, widthOf, wrap, type HelpKey } from "./init-layout.js";
 import { agentName, applyRecipe, comingRows, defaultAnswers, initialChoice, isTickable, loginShown, loginTool, rowsHere } from "./init-recipe.js";
 import { rungSelect, type FooterLine, type SelectItem } from "./init-select.js";
 import { diskLine, diskTone } from "./init-weight.js";

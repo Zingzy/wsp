@@ -8,6 +8,7 @@ import type { RetentionPlan, Runtime } from "@wsp/runtime";
 import { isCancel, log } from "@clack/prompts";
 import { confirmPrompt } from "./init-layout.js";
 
+/** The provider lists and bills snapshots in decimal GB (a 3839352227-byte snapshot is 3.84 GB to it), so this line keeps its unit rather than the binary one fmtBytes prints. */
 const gb = (bytes: number): string => `${(bytes / 1e9).toFixed(1)} GB`;
 const perMonth = (usd: number): string => `about $${usd.toFixed(2)}/month`;
 

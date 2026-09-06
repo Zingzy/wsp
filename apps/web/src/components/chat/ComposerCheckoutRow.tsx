@@ -139,7 +139,8 @@ export function ComposerCheckoutRow({ workspaceId, thread }: { workspaceId: stri
   const shell = useRootStore(s => s.shell);
   const folder = useThreadFolder(workspaceId);
   const { cwd, shellCwd, entries, running } = thread.view;
-  const pickable = thread.hydrated && (thread.fresh || (entries.length === 0 && !running));
+  // An empty view whose send resumes a row with a folder is locked to that folder like a turn.
+  const pickable = thread.hydrated && (thread.fresh || (entries.length === 0 && !running && cwd === null));
   const canPick = wire !== null && daemonRoot !== null && folder !== null;
   const [pickNext, setPickNext] = useState(false);
   const branch = useBranch(wire, folder, running);

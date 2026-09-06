@@ -19,7 +19,7 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { GOLDEN_SETUP } from "@wsp/catalog";
 import { loadManifest, recipePath } from "../src/init-recipe.js";
 import { CARD_FRAME, card, widthOf } from "../src/init-layout.js";
-import { editorsIntro, everythingItems, fmtBytes, reduceStages, runInit, selectItem, shellItems, stageLine, summaryNote, toolsItems, type HostHooks, type InitIO, type InitOptions } from "../src/init.js";
+import { editorsIntro, everythingItems, reduceStages, runInit, selectItem, shellItems, stageLine, summaryNote, toolsItems, type HostHooks, type InitIO, type InitOptions } from "../src/init.js";
 import type { HostHandle } from "../src/server.js";
 import { startCallbackRelay } from "../src/relay.js";
 import type { ConnectOptions, DaemonSocket } from "../src/doctor.js";
@@ -3296,12 +3296,6 @@ describe("everythingItems", () => {
     const [a, c] = everythingItems([arc, carve]);
     expect(a!.prefix).toBe("Application Support/");
     expect(c!.prefix).toBeUndefined();
-  });
-});
-
-describe("fmtBytes", () => {
-  it("steps through B, KB, MB and GB", () => {
-    expect([12, 2_048, 3 * 1024 * 1024, 32_000_000_000].map(fmtBytes)).toEqual(["12 B", "2.0 KB", "3.0 MB", "29.8 GB"]);
   });
 });
 
