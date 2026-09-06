@@ -9,7 +9,7 @@ import { MCP_ID_PREFIX, shellQuote } from "@wsp/protocol";
 import { TOOLS_PATH, UV_INSTALL, type RecipeEntry } from "./golden-import.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { TOOL_TIMEOUT_S, type ToolResult, closing, freeNote, guardDeadlineMs, guarded, reasonOf } from "./golden-tools.js";
-import type { Machine } from "./machine.js";
+import type { ExecResult, Machine } from "./machine.js";
 import type { StageListener } from "./golden.js";
 
 const MCP_REMOTE_ID = `${MCP_ID_PREFIX}mcp-remote`;
@@ -239,9 +239,13 @@ function guestRun(plan: McpPlan, agents: readonly McpAgentPlan[], write: boolean
   return { script: guestScript(editors), plan: { agents: guestAgents, guestHome: plan.guestHome, rewrites: plan.rewrites, binDirs: plan.binDirs, write } };
 }
 
+/** An exec the machine never ran (refused by the provider, lost while it napped) reads as a failed one with the
+ * error's words, so the stage names it on every server and the build goes on. */
+const refused = (e: unknown): ExecResult => ({ exitCode: -1, stdout: "", stderr: e instanceof Error ? e.message : String(e) });
+
 async function runScript(machine: Machine, plan: McpPlan, agents: readonly McpAgentPlan[], write: boolean): Promise<{ scopes: ScopeOutcome[] } | { failure: string }> {
   const run = guestRun(plan, agents, write);
-  const res = await machine.run(`export PATH="/usr/local/bin:$PATH"\nnode -e ${shellQuote(run.script)} ${shellQuote(JSON.stringify(run.plan))}`, { deadlineMs: 120_000 });
+  const res = await machine.run(`export PATH="/usr/local/bin:$PATH"\nnode -e ${shellQuote(run.script)} ${shellQuote(JSON.stringify(run.plan))}`, { deadlineMs: 120_000 }).catch(refused);
   const report = res.exitCode === 0 ? parseReport(res.stdout) : undefined;
   return report ?? { failure: `the config edit did not run (${reasonOf(res, 120)})` };
 }
@@ -295,7 +299,7 @@ export async function applyMcp(machine: Machine, plan: McpPlan, stage: StageList
   if ("scopes" in run) {
     const commands = [...new Set(run.scopes.flatMap(s => s.results.flatMap(r => (r.command !== undefined ? [asRun(r.command)] : []))))];
     if (commands.length > 0) {
-      const check = await machine.exec(`export PATH=${TOOLS_PATH}\n${commands.map(c => `if command -v ${shellQuote(c)} >/dev/null 2>&1; then echo ${shellQuote(`ok ${c}`)}; else echo ${shellQuote(`no ${c}`)}; fi`).join("\n")}`, { timeoutMs: INLINE_EXEC_MS });
+      const check = await machine.exec(`export PATH=${TOOLS_PATH}\n${commands.map(c => `if command -v ${shellQuote(c)} >/dev/null 2>&1; then echo ${shellQuote(`ok ${c}`)}; else echo ${shellQuote(`no ${c}`)}; fi`).join("\n")}`, { timeoutMs: INLINE_EXEC_MS }).catch(refused);
       for (const line of check.stdout.split("\n")) if (line.startsWith("no ")) missing.add(line.slice(3));
     }
     agents = withoutAbsent(plan, run.scopes, missing, asRun, tools);
@@ -334,7 +338,7 @@ export async function applyMcp(machine: Machine, plan: McpPlan, stage: StageList
   const viaUv = rows.filter(r => r.command !== undefined && ["uv", "uvx"].includes(basename(r.command)) && missing.has(asRun(r.command)));
   if (viaUv.length > 0) {
     stage("installing-mcp", `uv for ${viaUv.map(r => r.name).join(", ")}`);
-    const install = await machine.run(guarded(`set -euo pipefail\n${UV_INSTALL}`, TOOL_TIMEOUT_S), { deadlineMs: guardDeadlineMs(TOOL_TIMEOUT_S), onLine: line => stage("installing-mcp", `uv: ${line}`) });
+    const install = await machine.run(guarded(`set -euo pipefail\n${UV_INSTALL}`, TOOL_TIMEOUT_S), { deadlineMs: guardDeadlineMs(TOOL_TIMEOUT_S), onLine: line => stage("installing-mcp", `uv: ${line}`) }).catch(refused);
     for (const r of viaUv) {
       if (install.exitCode === 0) {
         r.notes.unshift("uv installed for it");
@@ -353,7 +357,7 @@ export async function applyMcp(machine: Machine, plan: McpPlan, stage: StageList
     r.shorts.push(short);
     r.notes.push(`${short}; the server starts once it is installed there`);
   }
-  stage("installing-mcp", closing(summarize(rows), await freeNote(machine)));
+  stage("installing-mcp", closing(summarize(rows), await freeNote(machine).catch(() => undefined)));
   return rows.map(strip);
 }
 

@@ -6,6 +6,7 @@
 // machine napping) is retried after a pause; the deadline bounds that too.
 
 import { randomBytes } from "node:crypto";
+import { EXEC_BODY_MAX, shellQuote } from "@wsp/protocol";
 import type { ExecResult, Machine, RunOptions } from "./machine.js";
 
 /** The longest one plain exec may take. The provider cuts any exec still running at about 29 s with a 502
@@ -15,6 +16,9 @@ export const INLINE_EXEC_MS = 20_000;
 export const DEADLINE_EXIT = 124;
 
 const RUN_DIR = "/tmp/wsp-run";
+/** Room left under the cap for what a backend wraps around the command on the wire: its JSON keys, its exec env line,
+ * one escape byte per newline. */
+const EXEC_ENVELOPE_BYTES = 512;
 /** One poll's read of each stream; a full read is followed by another at once. */
 const CHUNK_BYTES = 262_144;
 const POLL_MS = 2_000;
@@ -26,19 +30,34 @@ function sleep(ms: number): Promise<void> {
 }
 
 /** The wrapper is the session leader: its pid is the group the deadline kills, and it writes the exit file
- * after the script's streams are closed, so an exit file always means the streams are complete. */
-function launchCommand(runDir: string, base: string, script: string): string {
+ * after the script's streams are closed, so an exit file always means the streams are complete. The script goes up
+ * base64-encoded; one that does not fit one exec body goes up in pieces first, each to its own numbered file, and
+ * the launch joins them. A piece is written whole, never appended, so a retried exec lands it once. */
+function launchSequence(runDir: string, base: string, script: string): string[] {
   const b64 = Buffer.from(script, "utf8").toString("base64");
-  return [
-    `mkdir -p ${runDir}`,
-    `b=${base}`,
-    // exec honours no idempotency key and a launch whose answer was lost is retried; the claim makes the second a no-op.
-    `mkdir "$b.d" 2>/dev/null || { echo WSP_LAUNCHED; exit 0; }`,
-    `printf %s '${b64}' | base64 -d > "$b.sh" || exit 1`,
-    `setsid nohup bash -c 'bash "$0.sh" > "$0.out" 2> "$0.err" < /dev/null; echo $? > "$0.exit"' "$b" > /dev/null 2>&1 &`,
-    'echo $! > "$b.pid"',
-    "echo WSP_LAUNCHED",
-  ].join("\n");
+  const head = [`mkdir -p ${runDir}`, `b=${base}`];
+  const launch = (decode: string, ...then: string[]): string =>
+    [
+      ...head,
+      // A piece that went missing fails the join, so a spliced script never starts.
+      "set -o pipefail",
+      // exec honours no idempotency key and a launch whose answer was lost is retried; the claim makes the second a no-op.
+      `mkdir "$b.d" 2>/dev/null || { echo WSP_LAUNCHED; exit 0; }`,
+      `${decode} | base64 -d > "$b.sh" || exit 1`,
+      ...then,
+      `setsid nohup bash -c 'bash "$0.sh" > "$0.out" 2> "$0.err" < /dev/null; echo $? > "$0.exit"' "$b" > /dev/null 2>&1 &`,
+      'echo $! > "$b.pid"',
+      "echo WSP_LAUNCHED",
+    ].join("\n");
+  const inline = launch(`printf %s ${shellQuote(b64)}`);
+  if (inline.length + EXEC_ENVELOPE_BYTES <= EXEC_BODY_MAX) return [inline];
+  const piece = (i: number, part: string): string => [...head, `printf %s ${shellQuote(part)} > "$b.${i}" || exit 1`, "echo WSP_PIECE"].join("\n");
+  // Base64 decodes in groups of four, so a piece boundary on a multiple of four keeps the joined text decodable.
+  const size = Math.floor((EXEC_BODY_MAX - EXEC_ENVELOPE_BYTES - piece(b64.length, "").length) / 4) * 4;
+  const count = Math.ceil(b64.length / size);
+  const pieces = Array.from({ length: count }, (_, i) => piece(i, b64.slice(i * size, (i + 1) * size)));
+  const files = `"$b".{0..${count - 1}}`;
+  return [...pieces, launch(`cat ${files}`, `rm -f ${files}`)];
 }
 
 /** The exit file is read before the streams, so a poll that sees an exit code reads streams that are complete. */
@@ -117,9 +136,11 @@ export async function execDetached(machine: Machine, script: string, opts: RunOp
   const startedAt = Date.now();
   const exec = (cmd: string): Promise<ExecResult> => machine.exec(cmd, { timeoutMs: INLINE_EXEC_MS });
 
-  const launch = await exec(launchCommand(runDir, base, script));
-  if (launch.exitCode !== 0 || !launch.stdout.includes("WSP_LAUNCHED")) {
-    throw new Error(`launch failed on ${machine.id} (exit ${launch.exitCode}): ${launch.stderr.trim() || launch.stdout.trim()}`);
+  for (const cmd of launchSequence(runDir, base, script)) {
+    const launch = await exec(cmd);
+    if (launch.exitCode !== 0 || !/WSP_(PIECE|LAUNCHED)/.test(launch.stdout)) {
+      throw new Error(`launch failed on ${machine.id} (exit ${launch.exitCode}): ${launch.stderr.trim() || launch.stdout.trim()}`);
+    }
   }
 
   const out = new LineStream(opts.onLine);

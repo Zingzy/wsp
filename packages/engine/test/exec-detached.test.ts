@@ -8,8 +8,10 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { EXEC_BODY_MAX } from "@wsp/protocol";
 import { DEADLINE_EXIT, INLINE_EXEC_MS, execDetached } from "../src/exec-detached.js";
 import type { ExecResult, Machine } from "../src/machine.js";
+import { EXEC_ENV } from "../src/solari-backend.js";
 
 interface Step {
   out?: string;
@@ -37,12 +39,21 @@ function guest(steps: Step[]) {
   const kills: string[] = [];
   const polls: { out: number; err: number }[] = [];
   let cleaned = 0;
+  const pieces = new Map<number, string>();
   const machine = {
     id: "m1",
     async exec(cmd: string, o?: { timeoutMs?: number }): Promise<ExecResult> {
       calls.push({ cmd, timeoutMs: o?.timeoutMs });
+      if (cmd.includes("echo WSP_PIECE")) {
+        const m = /printf %s '([A-Za-z0-9+/=]*)' > "\$b\.(\d+)" \|\| exit 1\n/.exec(cmd);
+        if (m === null) throw new Error(`piece exec without a numbered file: ${cmd}`);
+        pieces.set(Number(m[2]), m[1]!);
+        return { exitCode: 0, stdout: "WSP_PIECE\n", stderr: "" };
+      }
       if (cmd.includes("echo WSP_LAUNCHED")) {
-        script = Buffer.from(cmd.match(/printf %s '([A-Za-z0-9+/=]*)'/)?.[1] ?? "", "base64").toString("utf8");
+        const joined = /cat "\$b"\.\{0\.\.(\d+)\} \| base64 -d/.exec(cmd);
+        const b64 = joined === null ? (cmd.match(/printf %s '([A-Za-z0-9+/=]*)' \| base64 -d/)?.[1] ?? "") : Array.from({ length: Number(joined[1]) + 1 }, (_, i) => pieces.get(i) ?? "").join("");
+        script = Buffer.from(b64, "base64").toString("utf8");
         return { exitCode: 0, stdout: "WSP_LAUNCHED\n", stderr: "" };
       }
       if (cmd.includes("kill -TERM")) {
@@ -74,6 +85,13 @@ function guest(steps: Step[]) {
   } as unknown as Machine;
   return { machine, calls, kills, polls, script: () => script, cleaned: () => cleaned };
 }
+
+/** The bytes the provider counts: its request with the backend's wrapper around the command. */
+const solariBody = (cmd: string): number => Buffer.byteLength(JSON.stringify({ cmd: "bash", args: ["-c", `${EXEC_ENV}\n${cmd}`], timeoutMs: INLINE_EXEC_MS }));
+/** Every exec before the first poll: the launch, with the pieces ahead of it when the script needs them. */
+const launchCalls = (calls: readonly Call[]): Call[] => calls.slice(0, calls.findIndex(c => c.cmd.includes("echo WSP_POLL")));
+/** Forty kilobytes of lines with quotes and bytes outside ASCII, so a piece boundary that broke the encoding would show. */
+const BIG_SCRIPT = Array.from({ length: 480 }, (_, i) => `echo 'line ${i} it'\\''s ünïcödé ${"y".repeat(50)}'`).join("\n");
 
 describe("execDetached over a scripted guest", () => {
   it("launches the script detached, reads both streams from where the last poll stopped, and returns the exit file", async () => {
@@ -144,6 +162,50 @@ describe("execDetached over a scripted guest", () => {
     expect(lines).toEqual(["partial"]);
   });
 
+  it("a script that fits one exec body goes up in one launch exec, as before", async () => {
+    const g = guest([{ out: "x\n", exit: 0 }]);
+    await execDetached(g.machine, "brew install gh", { deadlineMs: 10_000, pollMs: 1 });
+    const launch = launchCalls(g.calls);
+    expect(launch).toHaveLength(1);
+    expect(launch[0]!.cmd).toContain("printf %s 'YnJldyBpbnN0YWxsIGdo' | base64 -d");
+    expect(solariBody(launch[0]!.cmd)).toBeLessThanOrEqual(EXEC_BODY_MAX);
+    expect(g.script()).toBe("brew install gh");
+  });
+
+  it("a 40 KB script goes up in pieces, every exec body under the cap, and decodes byte for byte", async () => {
+    expect(Buffer.byteLength(BIG_SCRIPT)).toBeGreaterThan(40_000);
+    const g = guest([{ out: "x\n", exit: 0 }]);
+    const res = await execDetached(g.machine, BIG_SCRIPT, { deadlineMs: 10_000, pollMs: 1 });
+    expect(res.exitCode).toBe(0);
+    expect(g.script()).toBe(BIG_SCRIPT);
+    const launch = launchCalls(g.calls);
+    expect(launch.filter(c => c.cmd.includes("echo WSP_PIECE"))).toHaveLength(4);
+    expect(launch.at(-1)!.cmd).toContain('cat "$b".{0..3} | base64 -d > "$b.sh"');
+    expect(launch.at(-1)!.cmd).toContain('rm -f "$b".{0..3}');
+    for (const c of g.calls) expect(solariBody(c.cmd), c.cmd.slice(0, 80)).toBeLessThanOrEqual(EXEC_BODY_MAX);
+    // The pieces are cut as large as the cap allows, so the count is the smallest that fits.
+    for (const c of launch.slice(0, 3)) expect(solariBody(c.cmd)).toBeGreaterThan(EXEC_BODY_MAX - 1024);
+  });
+
+  it("a piece posted twice, as a retried exec is, lands once and the script still decodes whole", async () => {
+    const g = guest([{ out: "x\n", exit: 0 }]);
+    const retrying = {
+      id: "m1",
+      exec: async (cmd: string, o?: { timeoutMs?: number }) => {
+        const first = await g.machine.exec(cmd, o);
+        return cmd.includes("echo WSP_PIECE") ? g.machine.exec(cmd, o) : first;
+      },
+    } as unknown as Machine;
+    await execDetached(retrying, BIG_SCRIPT, { deadlineMs: 10_000, pollMs: 1 });
+    expect(g.calls.filter(c => c.cmd.includes("echo WSP_PIECE"))).toHaveLength(8);
+    expect(g.script()).toBe(BIG_SCRIPT);
+  });
+
+  it("a piece that does not confirm fails the run before the launch", async () => {
+    const machine = { id: "m9", exec: async () => ({ exitCode: 1, stdout: "", stderr: "bash: printf: write error: No space left on device" }) } as unknown as Machine;
+    await expect(execDetached(machine, BIG_SCRIPT, { deadlineMs: 1_000, pollMs: 1 })).rejects.toThrow(/launch failed on m9.*No space left/);
+  });
+
   it("a launch that does not confirm fails the run before any poll", async () => {
     const machine = { id: "m9", exec: async () => ({ exitCode: 1, stdout: "", stderr: "bash: base64: not found" }) } as unknown as Machine;
     await expect(execDetached(machine, "true", { deadlineMs: 1_000, pollMs: 1 })).rejects.toThrow(/launch failed on m9.*base64: not found/);
@@ -209,6 +271,23 @@ describe("execDetached over this machine's bash", () => {
     const res = await execDetached(retrying, `echo ran >> ${marks}; echo hi`, { deadlineMs: 20_000, pollMs: 50 }, runDir);
     expect(res).toEqual({ exitCode: 0, stdout: "hi\n", stderr: "" });
     expect(readFileSync(marks, "utf8")).toBe("ran\n");
+    expect((await machine.exec(`ls ${runDir}`)).stdout).toBe("");
+  });
+
+  it("a script over the cap runs for real from its pieces, each posted twice, and leaves no files", async () => {
+    const { machine, runDir } = localGuest();
+    const retrying = {
+      id: "local",
+      exec: async (cmd: string, o?: { timeoutMs?: number }) => {
+        const first = await machine.exec(cmd, o);
+        return cmd.includes("echo WSP_PIECE") ? machine.exec(cmd, o) : first;
+      },
+    } as unknown as Machine;
+    const res = await execDetached(retrying, `${BIG_SCRIPT}\necho tail`, { deadlineMs: 20_000, pollMs: 50 }, runDir);
+    expect(res.exitCode).toBe(0);
+    expect(res.stderr).toBe("");
+    expect(res.stdout.split("\n").slice(-3)).toEqual([`line 479 it's ünïcödé ${"y".repeat(50)}`, "tail", ""]);
+    expect(res.stdout.split("\n")).toHaveLength(482);
     expect((await machine.exec(`ls ${runDir}`)).stdout).toBe("");
   });
 
