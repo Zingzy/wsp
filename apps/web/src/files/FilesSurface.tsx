@@ -1,26 +1,29 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The right panel's Files surface: the copied tree rooted where the thread's
 // agent works, with a location bar naming the folder, a way up, a pin to stop
-// following the thread, and a new thread started in the shown folder. Picking
-// a file opens it as its own surface beside this one.
+// following the thread, and a new thread started in the shown folder. When
+// the daemon browses more than one root (home and an imported project), a row
+// above names them and switches between them. Picking a file opens it as its
+// own surface beside this one.
 import { ArrowUpIcon, MessageSquarePlusIcon, PinIcon, PinOffIcon } from "lucide-react";
 import { useEffect } from "react";
 import FileBrowserPanel from "../components/files/FileBrowserPanel.js";
 import { Button } from "../components/ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
+import { cn } from "../lib/utils.js";
 import { useWorkspace } from "../protocol/store.js";
 import { useRightPanelStore } from "../rightPanelStore.js";
 import { requestNewThread } from "../shell/shellRequests.js";
 import { parentPath } from "./entries.js";
 import { useWorkspaceListing } from "./listing.js";
-import { usePinned, useRoot, useRootStore } from "./root.js";
-import { useDaemonRoot, useDaemonWire } from "./wire.js";
+import { rootOf, usePinned, useRoot, useRoots, useRootStore } from "./root.js";
+import { useDaemonWire } from "./wire.js";
 
 export function FilesSurface({ workspaceId, theme }: { workspaceId: string; theme: "light" | "dark" }) {
   const workspace = useWorkspace(workspaceId);
   const wire = useDaemonWire(workspaceId);
-  const daemonRoot = useDaemonRoot(workspaceId);
+  const roots = useRoots(workspaceId);
   const root = useRoot(workspaceId);
   const pinned = usePinned(workspaceId);
   const pin = useRootStore(s => s.pin);
@@ -28,8 +31,10 @@ export function FilesSurface({ workspaceId, theme }: { workspaceId: string; them
   const follow = useRootStore(s => s.follow);
   const { levels, ensure, refresh } = useWorkspaceListing(workspaceId);
   const openFile = useRightPanelStore(s => s.openFile);
-  // The daemon refuses anything above its root, so up stops there.
-  const parent = root === null || root === daemonRoot ? null : parentPath(root);
+  // The daemon refuses anything outside every root, so up stops at a root's edge.
+  const above = root === null ? null : parentPath(root);
+  const parent = above !== null && rootOf(roots, above) !== null ? above : null;
+  const current = root === null ? null : rootOf(roots, root);
 
   useEffect(() => {
     if (root !== null) ensure(root);
@@ -43,6 +48,25 @@ export function FilesSurface({ workspaceId, theme }: { workspaceId: string; them
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {roots.length > 1 ? (
+        <div className="flex h-7 min-h-7 shrink-0 items-center gap-3 border-b border-border/60 px-2" role="group" aria-label="Browsable folders" data-files-roots>
+          {roots.map(candidate => (
+            <button
+              key={candidate}
+              type="button"
+              className={cn(
+                "min-w-0 truncate rounded-sm font-mono text-[11px] outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+                candidate === current ? "text-foreground" : "text-muted-foreground",
+              )}
+              title={candidate}
+              aria-pressed={candidate === current}
+              onClick={() => pin(workspaceId, candidate)}
+            >
+              {candidate}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <div className="flex h-7 min-h-7 shrink-0 items-center gap-0.5 border-b border-border/60 px-1.5" data-files-location>
         <Tooltip>
           <TooltipTrigger

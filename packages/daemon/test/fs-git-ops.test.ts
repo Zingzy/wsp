@@ -361,3 +361,28 @@ describe("git.diff", () => {
     expect(await c.request("git.diff", { cwd: "repo/escape", scope: "unstaged" })).toMatchObject({ ok: false, code: "outside-root" });
   });
 });
+
+describe("roots beyond home", () => {
+  it("lists and reads under a folder the roots file names, refuses what is outside every root, and reads a later line without a restart", async () => {
+    const project = mkdtempSync(join(tmpdir(), "wsp-fsgit-project-"));
+    writeFileSync(join(project, "README.md"), "# proj\n");
+    const rootsPath = join(root, ".wsp", "roots");
+    mkdirSync(join(root, ".wsp"), { recursive: true });
+    writeFileSync(rootsPath, `${project}\n`);
+    const d = await startDaemon({ port: 0, token: TOKEN, root, rootsPath, portsSource: async () => [] });
+    const c2 = await connect(d.port);
+    try {
+      expect(names(await c2.request("fs.list", { path: project }))).toEqual(["README.md"]);
+      expect(await c2.request("fs.read", { path: join(project, "README.md") })).toMatchObject({ ok: true, content: "# proj\n" });
+      expect(await c2.request("fs.list", { path: "." })).toMatchObject({ ok: true });
+      expect(await c2.request("fs.list", { path: outside })).toMatchObject({ ok: false, code: "outside-root", error: `${outside} resolves outside the workspace root` });
+      expect(await c2.request("git.status", { cwd: outside })).toMatchObject({ ok: false, code: "outside-root" });
+      writeFileSync(rootsPath, `${project}\n${outside}\n`);
+      expect(await c2.request("fs.list", { path: outside })).toMatchObject({ ok: true });
+    } finally {
+      c2.close();
+      await d.close();
+      rmSync(project, { recursive: true, force: true });
+    }
+  });
+});

@@ -94,6 +94,7 @@ import type {
 import { ALREADY_APPLIED, NOTIFY_ME, fmtBytes, notifyLine, sendRefusal, shellQuote, workspaceState } from "@wsp/protocol";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
+import { writeDaemonRootsScript } from "./daemon-roots.js";
 import { DAEMON_TOKEN_SET, assertTokenShape, rotateDaemonTokenScript } from "./daemon-token.js";
 import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy, idleReason } from "./idle.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
@@ -2828,6 +2829,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           }
           report("landing", `Landing sessions: ${outcomes()}.`);
         }
+        const browsable = await entry.machine.exec(writeDaemonRootsScript([o.dest]), { timeoutMs: INLINE_EXEC_MS });
+        if (browsable.exitCode !== 0) throw new Error(`could not make ${o.dest} browsable on the machine: ${browsable.stderr.slice(-200)}`);
         entry.record.project = { name: posix.basename(o.dest), dest: o.dest, importedAt: new Date(clock.now()).toISOString() };
         await persist(entry.record);
         report("done", `${plural(packed.files, "file")}, ${fmtBytes(packed.bytes)}, landed at ${o.dest}${parts > 1 ? ` in ${parts} parts` : ""}${agents.length > 0 ? `; sessions: ${outcomes()}` : ""}.`);

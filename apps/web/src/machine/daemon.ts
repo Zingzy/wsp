@@ -15,6 +15,7 @@ export interface DaemonFeature {
 export const DAEMON_FEATURES: readonly DaemonFeature[] = [
   { label: "Live", since: 2 },
   { label: "Processes", since: 2 },
+  { label: "Files in imported projects", since: 3 },
 ];
 
 export function missingFeatures(version: number): DaemonFeature[] {
