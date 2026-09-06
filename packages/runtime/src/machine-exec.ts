@@ -4,14 +4,16 @@
 // pause/resume while control-channel children get reaped (PoC P10/P4b). The
 // stream then polls the log, so a mid-turn nap only stalls polling: polls fail
 // while the machine is paused, recover after wake, and the turn's own output
-// picks up where it left off. The engine's execDetached runs the same launch
-// and poll contract for a command that ends on its own; this one streams and
-// can be signalled while it runs, which is what a harness turn needs.
+// picks up where it left off. The script goes up through the engine's
+// putFiles, so it lands under the exec body cap however long it is; the
+// engine's execDetached polls the same way for a command that ends on its
+// own, while this one streams and can be signalled while it runs, which is
+// what a harness turn needs.
 
 import { randomBytes } from "node:crypto";
-import { INLINE_EXEC_MS, type ExecResult, type Machine } from "@wsp/engine";
+import { INLINE_EXEC_MS, putFiles, type ExecResult, type Machine } from "@wsp/engine";
 import type { ExecStream, ExecStreamFactory } from "@wsp/adapter-claude";
-import { shellQuote } from "@wsp/protocol";
+import { EXEC_CHUNK_BYTES, shellQuote } from "@wsp/protocol";
 
 export interface MachineExecOptions {
   /** Delay between log polls. */
@@ -24,7 +26,6 @@ export interface MachineExecOptions {
   runDir?: string;
 }
 
-const CHUNK_BYTES = 262_144;
 const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 function sleep(ms: number): Promise<void> {
@@ -47,12 +48,6 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
       .map(([k, v]) => `export ${k}=${shellQuote(v)}`)
       .join("\n");
     const script = `${exports}\n${command}\necho $? > ${base}.exit\n`;
-    const b64 = Buffer.from(script, "utf8").toString("base64");
-    // exec honours no idempotency key and a launch whose answer was lost is retried; the claim makes the second a no-op.
-    const launchCmd =
-      `mkdir -p ${runDir}; mkdir ${base}.d 2>/dev/null || { echo WSP_LAUNCHED; exit 0; }; ` +
-      `printf '%s' '${b64}' | base64 -d > ${base}.sh; ` +
-      `setsid bash ${base}.sh > ${base}.log 2>&1 & echo $! > ${base}.pid; echo WSP_LAUNCHED`;
 
     let killed = false;
     let finishCode: number | null | undefined;
@@ -68,7 +63,12 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
     };
 
     // Spawn eagerly, like a local child process would.
-    const launched: Promise<ExecResult> = machine.exec(launchCmd, { timeoutMs: execTimeoutMs });
+    const launched: Promise<ExecResult> = putFiles(machine, [{ path: `${base}.sh`, text: script }], {
+      // exec honours no idempotency key and a launch whose answer was lost is retried; the claim makes the second a no-op.
+      before: [`mkdir ${base}.d 2>/dev/null || { echo WSP_LAUNCHED; exit 0; }`],
+      after: [`setsid bash ${base}.sh > ${base}.log 2>&1 & echo $! > ${base}.pid; echo WSP_LAUNCHED`],
+      timeoutMs: execTimeoutMs,
+    });
 
     const signal = (sig: "TERM" | "KILL"): void => {
       void launched
@@ -84,7 +84,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
     // The exit file is read before the log, so a poll that sees an exit code reads a log that is complete.
     const pollCmd = (offset: number): string =>
       `E=$(cat ${base}.exit 2>/dev/null); ` +
-      `tail -c +${offset + 1} ${base}.log 2>/dev/null | head -c ${CHUNK_BYTES} | base64 -w0; ` +
+      `tail -c +${offset + 1} ${base}.log 2>/dev/null | head -c ${EXEC_CHUNK_BYTES} | base64 -w0; ` +
       `P=$(cat ${base}.pid 2>/dev/null); ` +
       `printf '\\n${sentinel} %s %s\\n' "$E" ` +
       `"$([ -n "$P" ] && kill -0 "$P" 2>/dev/null && echo up || echo down)"`;

@@ -6,7 +6,8 @@
 // machine napping) is retried after a pause; the deadline bounds that too.
 
 import { randomBytes } from "node:crypto";
-import { EXEC_BODY_MAX, shellQuote } from "@wsp/protocol";
+import { posix } from "node:path";
+import { EXEC_BODY_MAX, EXEC_CHUNK_BYTES, shellQuote } from "@wsp/protocol";
 import type { ExecResult, Machine, RunOptions } from "./machine.js";
 
 /** The longest one plain exec may take. The provider cuts any exec still running at about 29 s with a 502
@@ -19,8 +20,6 @@ const RUN_DIR = "/tmp/wsp-run";
 /** Room left under the cap for what a backend wraps around the command on the wire: its JSON keys, its exec env line,
  * one escape byte per newline. */
 const EXEC_ENVELOPE_BYTES = 512;
-/** One poll's read of each stream; a full read is followed by another at once. */
-const CHUNK_BYTES = 262_144;
 const POLL_MS = 2_000;
 const FIRST_POLL_MS = 250;
 const NO_EXIT_NOTE = "wsp: the command ended without reporting an exit code";
@@ -29,35 +28,80 @@ function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
 }
 
+export interface GuestWrite {
+  /** Where on the guest; its directory is made if missing. */
+  path: string;
+  text: string;
+  /** Add to the file's end instead of replacing it. */
+  append?: boolean;
+}
+
+export interface PutFilesOptions {
+  /** Lines the last exec runs before any file lands. */
+  before?: string[];
+  /** Lines the last exec runs once every file is on disk. */
+  after?: string[];
+  timeoutMs?: number;
+}
+
+/** The execs that put the files on the guest, every body under the cap. The last exec runs `before`, lands each file,
+ * then runs `after`, so a caller's launch shares it. A file whose base64 fits that exec goes in it as one printf; a
+ * larger one goes up first in numbered pieces, each written whole to its own file so a retried exec lands it once, and
+ * the last exec joins them under pipefail so a missing piece fails the write instead of landing a spliced file. An
+ * append lands once behind a marker file of its own, since exec honours no idempotency key and a lost answer is
+ * retried; the marker, and the pieces of an append that `before` turned away, stay beside the file until the run's
+ * cleanup removes them. */
+function uploadSequence(files: GuestWrite[], before: string[], after: string[]): string[] {
+  const head = `mkdir -p ${[...new Set(files.map(f => posix.dirname(f.path)))].map(shellQuote).join(" ")}`;
+  const plan = files.map(f => ({ ...f, b64: Buffer.from(f.text, "utf8").toString("base64"), pieces: 0, mark: `${f.path}.a${randomBytes(6).toString("hex")}` }));
+  type Planned = (typeof plan)[number];
+  const land = (f: Planned): string[] => {
+    const names = `${shellQuote(f.path)}.{0..${f.pieces - 1}}`;
+    const decode = `${f.pieces === 0 ? `printf %s ${shellQuote(f.b64)}` : `cat ${names}`} | base64 -d ${f.append ? ">>" : ">"} ${shellQuote(f.path)}`;
+    const write = f.append ? `[ -e ${shellQuote(f.mark)} ] || { ${decode} && : > ${shellQuote(f.mark)}; } || exit 1` : `${decode} || exit 1`;
+    return f.pieces === 0 ? [write] : [write, `rm -f ${names}`];
+  };
+  const last = (): string => [head, ...before, "set -o pipefail", ...plan.flatMap(land), ...after].join("\n");
+  const piece = (path: string, i: number, part: string): string => [head, `printf %s ${shellQuote(part)} > ${shellQuote(path)}.${i} || exit 1`, "echo WSP_PIECE"].join("\n");
+  const fits = (cmd: string): boolean => Buffer.byteLength(cmd) + EXEC_ENVELOPE_BYTES <= EXEC_BODY_MAX;
+  const execs: string[] = [];
+  while (!fits(last())) {
+    const f = plan.filter(f => f.pieces === 0).sort((a, b) => b.b64.length - a.b64.length)[0];
+    if (f === undefined) throw new Error("the lines around the upload do not fit one exec body");
+    // Base64 decodes in groups of four, so a piece boundary on a multiple of four keeps the joined text decodable.
+    const size = Math.floor((EXEC_BODY_MAX - EXEC_ENVELOPE_BYTES - Buffer.byteLength(piece(f.path, f.b64.length, ""))) / 4) * 4;
+    f.pieces = Math.max(1, Math.ceil(f.b64.length / size));
+    for (let i = 0; i < f.pieces; i++) execs.push(piece(f.path, i, f.b64.slice(i * size, (i + 1) * size)));
+  }
+  return [...execs, last()];
+}
+
+/** The one way bytes go onto a guest through exec: sends the upload's execs in order, each piece confirmed before the
+ * next goes, and answers with the last exec's result, which the caller reads for its own marker. */
+export async function putFiles(machine: Machine, files: GuestWrite[], opts: PutFilesOptions = {}): Promise<ExecResult> {
+  const timeoutMs = opts.timeoutMs ?? INLINE_EXEC_MS;
+  const execs = uploadSequence(files, opts.before ?? [], opts.after ?? []);
+  for (const cmd of execs.slice(0, -1)) {
+    const res = await machine.exec(cmd, { timeoutMs });
+    if (res.exitCode !== 0 || !res.stdout.includes("WSP_PIECE")) {
+      throw new Error(`a piece did not land on ${machine.id} (exit ${res.exitCode}): ${res.stderr.trim() || res.stdout.trim()}`);
+    }
+  }
+  return machine.exec(execs.at(-1)!, { timeoutMs });
+}
+
 /** The wrapper is the session leader: its pid is the group the deadline kills, and it writes the exit file
- * after the script's streams are closed, so an exit file always means the streams are complete. The script goes up
- * base64-encoded; one that does not fit one exec body goes up in pieces first, each to its own numbered file, and
- * the launch joins them. A piece is written whole, never appended, so a retried exec lands it once. */
-function launchSequence(runDir: string, base: string, script: string): string[] {
-  const b64 = Buffer.from(script, "utf8").toString("base64");
-  const head = [`mkdir -p ${runDir}`, `b=${base}`];
-  const launch = (decode: string, ...then: string[]): string =>
-    [
-      ...head,
-      // A piece that went missing fails the join, so a spliced script never starts.
-      "set -o pipefail",
-      // exec honours no idempotency key and a launch whose answer was lost is retried; the claim makes the second a no-op.
-      `mkdir "$b.d" 2>/dev/null || { echo WSP_LAUNCHED; exit 0; }`,
-      `${decode} | base64 -d > "$b.sh" || exit 1`,
-      ...then,
+ * after the script's streams are closed, so an exit file always means the streams are complete. */
+function launch(machine: Machine, base: string, script: string): Promise<ExecResult> {
+  return putFiles(machine, [{ path: `${base}.sh`, text: script }], {
+    // exec honours no idempotency key and a launch whose answer was lost is retried; the claim makes the second a no-op.
+    before: [`b=${base}`, `mkdir "$b.d" 2>/dev/null || { echo WSP_LAUNCHED; exit 0; }`],
+    after: [
       `setsid nohup bash -c 'bash "$0.sh" > "$0.out" 2> "$0.err" < /dev/null; echo $? > "$0.exit"' "$b" > /dev/null 2>&1 &`,
       'echo $! > "$b.pid"',
       "echo WSP_LAUNCHED",
-    ].join("\n");
-  const inline = launch(`printf %s ${shellQuote(b64)}`);
-  if (inline.length + EXEC_ENVELOPE_BYTES <= EXEC_BODY_MAX) return [inline];
-  const piece = (i: number, part: string): string => [...head, `printf %s ${shellQuote(part)} > "$b.${i}" || exit 1`, "echo WSP_PIECE"].join("\n");
-  // Base64 decodes in groups of four, so a piece boundary on a multiple of four keeps the joined text decodable.
-  const size = Math.floor((EXEC_BODY_MAX - EXEC_ENVELOPE_BYTES - piece(b64.length, "").length) / 4) * 4;
-  const count = Math.ceil(b64.length / size);
-  const pieces = Array.from({ length: count }, (_, i) => piece(i, b64.slice(i * size, (i + 1) * size)));
-  const files = `"$b".{0..${count - 1}}`;
-  return [...pieces, launch(`cat ${files}`, `rm -f ${files}`)];
+    ],
+  });
 }
 
 /** The exit file is read before the streams, so a poll that sees an exit code reads streams that are complete. */
@@ -66,8 +110,8 @@ function pollCommand(base: string, outOffset: number, errOffset: number): string
     `b=${base}`,
     "echo WSP_POLL",
     `printf '%s\\n' "$(cat "$b.exit" 2>/dev/null)"`,
-    `printf '%s\\n' "$(tail -c +${outOffset + 1} "$b.out" 2>/dev/null | head -c ${CHUNK_BYTES} | base64 -w0)"`,
-    `printf '%s\\n' "$(tail -c +${errOffset + 1} "$b.err" 2>/dev/null | head -c ${CHUNK_BYTES} | base64 -w0)"`,
+    `printf '%s\\n' "$(tail -c +${outOffset + 1} "$b.out" 2>/dev/null | head -c ${EXEC_CHUNK_BYTES} | base64 -w0)"`,
+    `printf '%s\\n' "$(tail -c +${errOffset + 1} "$b.err" 2>/dev/null | head -c ${EXEC_CHUNK_BYTES} | base64 -w0)"`,
     `p=$(cat "$b.pid" 2>/dev/null); if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then echo up; else echo down; fi`,
     "echo WSP_POLL_END",
   ].join("\n");
@@ -136,11 +180,9 @@ export async function execDetached(machine: Machine, script: string, opts: RunOp
   const startedAt = Date.now();
   const exec = (cmd: string): Promise<ExecResult> => machine.exec(cmd, { timeoutMs: INLINE_EXEC_MS });
 
-  for (const cmd of launchSequence(runDir, base, script)) {
-    const launch = await exec(cmd);
-    if (launch.exitCode !== 0 || !/WSP_(PIECE|LAUNCHED)/.test(launch.stdout)) {
-      throw new Error(`launch failed on ${machine.id} (exit ${launch.exitCode}): ${launch.stderr.trim() || launch.stdout.trim()}`);
-    }
+  const launched = await launch(machine, base, script);
+  if (launched.exitCode !== 0 || !launched.stdout.includes("WSP_LAUNCHED")) {
+    throw new Error(`launch failed on ${machine.id} (exit ${launched.exitCode}): ${launched.stderr.trim() || launched.stdout.trim()}`);
   }
 
   const out = new LineStream(opts.onLine);
@@ -155,7 +197,7 @@ export async function execDetached(machine: Machine, script: string, opts: RunOp
   const read = (poll: Poll): boolean => {
     out.push(poll.out);
     err.push(poll.err);
-    return poll.out.length === CHUNK_BYTES || poll.err.length === CHUNK_BYTES;
+    return poll.out.length === EXEC_CHUNK_BYTES || poll.err.length === EXEC_CHUNK_BYTES;
   };
 
   let wait = Math.min(FIRST_POLL_MS, pollMs);
