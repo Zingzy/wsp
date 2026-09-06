@@ -19,7 +19,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 - Every agent session starts in the thread's folder; terminal panes open in the home folder. A cd moves your own shell, which persists across your tool calls, not the thread's folder, and the files pane follows that shell's folder unless you pinned the panes.
 - A server listening on a port shows in the app for the person to open; bind 0.0.0.0, not 127.0.0.1. A printed http://localhost:<port> link has its port forwarded to their computer. Ports below 1024 are not forwarded.
 - Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed. Install services natively.
-- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written. wsp keeps 2.0 GiB free.
+- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free.
 - Secrets are exported by /etc/profile.d/wsp-secrets.sh. Use them by name ($NAME); never print, log or commit a value, and never read that file.
 - Sign-ins go through wsp: run the tool's own login command and the page opens on the person's computer. Do not paste tokens into the terminal and do not ask for a password.
 
@@ -51,7 +51,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 
 - Workspace: task-1.
 - Golden: v3, sealed 2026-09-05, setup 9f2a7c1d4e5b.
-- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written. wsp keeps 2.0 GiB free and skips tool installs that would go under it.
+- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free and skips tool installs that would go under it.
 - Secrets set in /etc/profile.d/wsp-secrets.sh: OPENAI_API_KEY, GH_TOKEN. Use them by name ($NAME); a missing one is asked for through wsp, not typed here.
 - Tools that did not install: raycast (macOS app, no Linux build).
 - Agents that did not install: Zed (no installer known).
@@ -80,7 +80,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 - Every agent session starts in the thread's folder; terminal panes open in the home folder.
 - A server listening on a port shows in the app for the person to open; bind 0.0.0.0, not 127.0.0.1. A printed http://localhost:<port> link has its port forwarded to their computer. Ports below 1024 are not forwarded.
 - Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed. Install services natively.
-- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written. wsp keeps 2.0 GiB free.
+- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free.
 - Secrets are exported by /etc/profile.d/wsp-secrets.sh. Use them by name ($NAME); never print, log or commit a value, and never read that file.
 - Sign-ins go through wsp: run the tool's own login command and the page opens on the person's computer. Do not paste tokens into the terminal and do not ask for a password.
 '''
@@ -113,7 +113,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 
 - Workspace: task-1.
 - Golden: v3, sealed 2026-09-05, setup 9f2a7c1d4e5b.
-- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written. wsp keeps 2.0 GiB free and skips tool installs that would go under it.
+- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free and skips tool installs that would go under it.
 - Secrets set in /etc/profile.d/wsp-secrets.sh: OPENAI_API_KEY, GH_TOKEN. Use them by name ($NAME); a missing one is asked for through wsp, not typed here.
 - Tools that did not install: raycast (macOS app, no Linux build).
 - Agents that did not install: Zed (no installer known).
@@ -151,7 +151,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 - Every agent session starts in the thread's folder; terminal panes open in the home folder.
 - A server listening on a port shows in the app for the person to open; bind 0.0.0.0, not 127.0.0.1. A printed http://localhost:<port> link has its port forwarded to their computer. Ports below 1024 are not forwarded.
 - Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed. Install services natively.
-- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written. wsp keeps 2.0 GiB free.
+- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free.
 - Secrets are exported by /etc/profile.d/wsp-secrets.sh. Use them by name ($NAME); never print, log or commit a value, and never read that file.
 - Sign-ins go through wsp: run the tool's own login command and the page opens on the person's computer. Do not paste tokens into the terminal and do not ask for a password.
 
@@ -183,7 +183,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 
 - Workspace: task-1.
 - Golden: v3, sealed 2026-09-05, setup 9f2a7c1d4e5b.
-- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written. wsp keeps 2.0 GiB free and skips tool installs that would go under it.
+- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free and skips tool installs that would go under it.
 - Secrets set in /etc/profile.d/wsp-secrets.sh: OPENAI_API_KEY, GH_TOKEN. Use them by name ($NAME); a missing one is asked for through wsp, not typed here.
 - Tools that did not install: raycast (macOS app, no Linux build).
 - Agents that did not install: Zed (no installer known).
@@ -238,7 +238,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 
 - Workspace: task-1.
 - Golden: v3, sealed 2026-09-05, setup 9f2a7c1d4e5b.
-- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written. wsp keeps 2.0 GiB free and skips tool installs that would go under it.
+- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free and skips tool installs that would go under it.
 - Secrets set in /etc/profile.d/wsp-secrets.sh: OPENAI_API_KEY, GH_TOKEN. Use them by name ($NAME); a missing one is asked for through wsp, not typed here.
 - Tools that did not install: raycast (macOS app, no Linux build).
 - Agents that did not install: Zed (no installer known).
@@ -291,7 +291,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 
 - Workspace: task-1.
 - Golden: v3, sealed 2026-09-05, setup 9f2a7c1d4e5b.
-- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written. wsp keeps 2.0 GiB free and skips tool installs that would go under it.
+- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free and skips tool installs that would go under it.
 - Secrets set in /etc/profile.d/wsp-secrets.sh: OPENAI_API_KEY, GH_TOKEN. Use them by name ($NAME); a missing one is asked for through wsp, not typed here.
 - Tools that did not install: raycast (macOS app, no Linux build).
 - Agents that did not install: Zed (no installer known).
@@ -318,7 +318,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 - Every agent session starts in the thread's folder; terminal panes open in the home folder.
 - A server listening on a port shows in the app for the person to open; bind 0.0.0.0, not 127.0.0.1. A printed http://localhost:<port> link has its port forwarded to their computer. Ports below 1024 are not forwarded.
 - Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed. Install services natively.
-- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written. wsp keeps 2.0 GiB free.
+- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free.
 - Secrets are exported by /etc/profile.d/wsp-secrets.sh. Use them by name ($NAME); never print, log or commit a value, and never read that file.
 - Sign-ins go through wsp: run the tool's own login command and the page opens on the person's computer. Do not paste tokens into the terminal and do not ask for a password.
 
@@ -350,7 +350,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 
 - Workspace: task-1.
 - Golden: v3, sealed 2026-09-05, setup 9f2a7c1d4e5b.
-- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written. wsp keeps 2.0 GiB free and skips tool installs that would go under it.
+- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free and skips tool installs that would go under it.
 - Secrets set in /etc/profile.d/wsp-secrets.sh: OPENAI_API_KEY, GH_TOKEN. Use them by name ($NAME); a missing one is asked for through wsp, not typed here.
 - Tools that did not install: raycast (macOS app, no Linux build).
 - Agents that did not install: Zed (no installer known).
@@ -386,7 +386,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 
 - This machine is a golden builder, not a workspace yet.
 - Golden: not sealed yet.
-- Disk: size unknown when this file was written. wsp keeps 2.0 GiB free and skips tool installs that would go under it.
+- Disk: size unknown when this file was written. wsp keeps 2.0 GB free and skips tool installs that would go under it.
 - Secrets set in /etc/profile.d/wsp-secrets.sh: none. Use them by name ($NAME); a missing one is asked for through wsp, not typed here.
 - Tools that did not install: none.
 - Agents that did not install: none.
@@ -424,7 +424,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 
 - Workspace: task-1.
 - Golden: v3, sealed 2026-09-05, setup 9f2a7c1d4e5b.
-- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written. wsp keeps 2.0 GiB free and skips tool installs that would go under it.
+- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free and skips tool installs that would go under it.
 - Secrets set in /etc/profile.d/wsp-secrets.sh: OPENAI_API_KEY, GH_TOKEN. Use them by name ($NAME); a missing one is asked for through wsp, not typed here.
 - Tools that did not install: raycast (macOS app, no Linux build).
 - Agents that did not install: Zed (no installer known).
@@ -450,7 +450,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 - Every agent session starts in the thread's folder; terminal panes open in the home folder.
 - A server listening on a port shows in the app for the person to open; bind 0.0.0.0, not 127.0.0.1. A printed http://localhost:<port> link has its port forwarded to their computer. Ports below 1024 are not forwarded.
 - Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed. Install services natively.
-- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written. wsp keeps 2.0 GiB free.
+- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free.
 - Secrets are exported by /etc/profile.d/wsp-secrets.sh. Use them by name ($NAME); never print, log or commit a value, and never read that file.
 - Sign-ins go through wsp: run the tool's own login command and the page opens on the person's computer. Do not paste tokens into the terminal and do not ask for a password.
 "

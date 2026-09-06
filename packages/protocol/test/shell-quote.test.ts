@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { shellQuote } from "../src/index.js";
+import { ROOT, sourceFiles } from "./source-files.js";
 
 const TABLE: [string, string][] = [
   ["", "''"],
@@ -41,31 +41,12 @@ describe("shellQuote", () => {
 });
 
 describe("one copy of the rule", () => {
-  const root = fileURLToPath(new URL("../../..", import.meta.url));
   const HOME = join("packages", "protocol", "src", "shell-quote.ts");
   // Both POSIX spellings of an embedded quote: close, backslash-quote, reopen; and close, double-quoted quote, reopen.
   const RULE = /'\\\\''|String\.raw`'\\''`|'\\?"\\?'\\?"\\?'/;
 
   it("no other source file spells out the '\\'' rule", () => {
-    const copies: string[] = [];
-    for (const top of ["packages", "apps"]) {
-      for (const pkg of readdirSync(join(root, top), { withFileTypes: true })) {
-        if (!pkg.isDirectory()) continue;
-        const src = join(root, top, pkg.name, "src");
-        let files: string[];
-        try {
-          files = readdirSync(src, { recursive: true, encoding: "utf8" });
-        } catch {
-          continue;
-        }
-        for (const f of files) {
-          if (!/\.tsx?$/.test(f) || /\.test\.tsx?$/.test(f)) continue;
-          const rel = join(top, pkg.name, "src", f);
-          if (rel === HOME) continue;
-          if (RULE.test(readFileSync(join(root, rel), "utf8"))) copies.push(rel);
-        }
-      }
-    }
+    const copies = sourceFiles().filter(rel => rel !== HOME && RULE.test(readFileSync(join(ROOT, rel), "utf8")));
     expect(copies).toEqual([]);
   });
 });

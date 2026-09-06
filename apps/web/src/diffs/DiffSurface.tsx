@@ -264,7 +264,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
         {reply?.truncated ? (
           <p className="shrink-0 border-b border-border/70 bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground" data-diff-truncated>
-            This diff was cut at the daemon's 2 MiB budget. Files listed without a patch changed too.
+            This diff was cut at the daemon's 2 MB budget. Files listed without a patch changed too.
           </p>
         ) : null}
         {load.kind === "error" ? (

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The file surface over a fake wire: fs.read feeds the code view, markdown
-// renders and toggles back to source, and the 2 MiB cap is announced. The
+// renders and toggles back to source, and the 2 MB cap is announced. The
 // Pierre code view is stubbed; it is a worker-backed custom element.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -53,7 +53,7 @@ describe("file preview surface", () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "fs.read": { content: "x".repeat(64), size: 3 * 1024 * 1024, truncated: true } }));
     const { container } = render(<FilePreviewSurface workspaceId={WS} surface={fileSurface("/root/src/a.ts")} theme="dark" />);
     await waitFor(() => expect(container.querySelector("[data-file-truncated]")).not.toBeNull());
-    expect(container.querySelector("[data-file-truncated]")?.textContent).toContain("3.0 MiB");
+    expect(container.querySelector("[data-file-truncated]")?.textContent).toContain("3.0 MB");
   });
 
   it("shows a read refusal as the body", async () => {

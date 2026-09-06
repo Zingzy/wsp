@@ -1796,7 +1796,7 @@ describe("runtime machine context", () => {
     const doc = docOf(writes(backend, m)[0]!);
     expect(doc).toContain("- Workspace: task-1.");
     expect(doc).toContain("- Golden: v4, sealed 2026-09-05, setup abcdef012345.");
-    expect(doc).toContain("- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written.");
+    expect(doc).toContain("- Disk: 19.5 GB root disk, 11.2 GB free when this file was written.");
     expect(namesIn(writes(backend, m)[0]!)).toContain("etc/claude-code/CLAUDE.md");
     expect(namesIn(writes(backend, m)[0]!)).toContain("etc/claude-code/.claude/skills/wsp-machine/SKILL.md");
   });
