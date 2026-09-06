@@ -3202,6 +3202,26 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(await again.store.list("builders")).toEqual([]);
   });
 
+  it("coverage: a kept builder a second process rehydrates from the store seals its update with the floor the first process read", async () => {
+    const { backend, store, rt, clock } = started();
+    const floor = [{ name: "node", version: "22.23.2" }, { name: "pnpm", version: "10.4.1" }];
+    backend.execImpl = (m, cmd) => (cmd.includes("VERSION node:") && !cmd.includes("echo WSP_CTX") ? { exitCode: 0, stdout: "VERSION node: v22.23.2\nVERSION pnpm: 10.4.1\nVERSION docker: \n", stderr: "" } : dfOk(m, cmd));
+    const b = await rt.golden.prepare();
+    const { version: one } = await rt.golden.seal(b.id);
+    expect(one.base).toEqual(floor);
+    expect(await store.get("builders", b.id)).toMatchObject({ base: floor });
+    await rt.close();
+    // The second process runs no base stage and reads no versions: the floor v2 records is the record's alone.
+    backend.execImpl = dfOk;
+    const next = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()), clock });
+    const result = await next.golden.upgrade({ delta: deltaOf() });
+    expect(result.road).toBe("builder");
+    expect(result.version.base).toEqual(floor);
+    expect((await next.golden.get())?.versions.map(v => v.base)).toEqual([floor, floor]);
+    expect(await store.get("builders", b.id)).toMatchObject({ sealed: { version: 2 }, base: floor });
+    await next.close();
+  });
+
   it("with the builder gone the update forks the head at its size: the delta runs on the fork, v2 is sealed and current, the fork is kept for its own window, and v1 stays for rollback", async () => {
     const { backend, store, rt } = started();
     const b = await rt.golden.prepare();

@@ -4,7 +4,7 @@
 // once they are on. It runs under the base stage ahead of the daemon, so the
 // daemon's native module compiles against the Node the agents will run.
 import { BASE_FLOOR, installAfter, installLine, smokeOf } from "@wsp/catalog";
-import type { GoldenStage } from "@wsp/protocol";
+import type { GoldenBaseTool, GoldenStage } from "@wsp/protocol";
 import { PRELUDE } from "./dotfiles-presets.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { PATH_LINE, TOOLS_PATH, type ToolInstall } from "./golden-import.js";
@@ -47,14 +47,9 @@ export const BASE_VERSION_LINES = VERSION_CHECKS.map(c => `echo "VERSION ${c.nam
 /** The read as one exec, as the base stage runs it. */
 export const BASE_VERSIONS_CMD = `export PATH=${TOOLS_PATH}:$PATH\n${BASE_VERSION_LINES}`;
 
-export interface ToolVersion {
-  name: string;
-  version: string;
-}
-
 /** The versions the read printed, each as its number alone; a command that printed nothing, or nothing with a number in it, is left out. */
-export function parseVersions(stdout: string): ToolVersion[] {
-  const out: ToolVersion[] = [];
+export function parseVersions(stdout: string): GoldenBaseTool[] {
+  const out: GoldenBaseTool[] = [];
   for (const line of stdout.split("\n")) {
     const m = /^VERSION ([^:]+): (.*)$/.exec(line.trimEnd());
     if (m === null) continue;
@@ -66,7 +61,7 @@ export function parseVersions(stdout: string): ToolVersion[] {
 
 /** The base stage's closing words: each command with its version and, when df moved across its install, what it cost;
  * then every floor row that did not land, by its reason. */
-export function versionsLine(versions: readonly ToolVersion[], results: readonly ToolResult[]): string {
+export function versionsLine(versions: readonly GoldenBaseTool[], results: readonly ToolResult[]): string {
   const landed = versions.map(v => {
     const check = VERSION_CHECKS.find(c => c.name === v.name);
     const bytes = check?.id === undefined ? undefined : results.find(r => r.id === `base/${check.id}`)?.bytes;
@@ -79,7 +74,7 @@ export function versionsLine(versions: readonly ToolVersion[], results: readonly
 export interface BaseOutcome {
   tools: ToolResult[];
   /** What the read found on the machine; the sealed version records it. */
-  versions: ToolVersion[];
+  versions: GoldenBaseTool[];
   /** The stage's closing words. */
   line: string;
 }

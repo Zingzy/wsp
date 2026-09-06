@@ -7,12 +7,12 @@
 // long as they like, as long as nobody pauses it (snapshot-fresh rule).
 
 import { createHash } from "node:crypto";
-import { ALREADY_APPLIED, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenStage, type GoldenVersion, type RecipeDigest } from "@wsp/protocol";
+import { ALREADY_APPLIED, type GoldenBaseTool, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenStage, type GoldenVersion, type RecipeDigest } from "@wsp/protocol";
 import type { Removal } from "./golden-diff.js";
 import { NODE_PATH_LINE, type AgentInstall, type GuestFacts, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { MIB, TOOL_TIMEOUT_S, closing, fmtBytes, freeBytes, freeNote, guardDeadlineMs, guarded, guestArch, installTools, reasonOf, sweepCaches, type ToolResult } from "./golden-tools.js";
-import { installBase, type ToolVersion } from "./golden-base.js";
+import { installBase } from "./golden-base.js";
 import { BUILDER_DISK_GB } from "./tool-sizes.js";
 import { assertFirstLife } from "./lifecycle.js";
 import { applyMcp, type McpPlan, type McpResult } from "./golden-mcp.js";
@@ -121,7 +121,7 @@ export interface Builder {
   /** The golden snapshot this builder descends from, so the version it seals records its parent; absent on a fresh machine. */
   readonly parentSnapshotId?: string;
   /** The base tools' versions read on this machine after the base stage, or on the golden it was forked from. */
-  readonly base?: ToolVersion[];
+  readonly base?: GoldenBaseTool[];
 }
 
 // --- golden import: the person's files, tools and agents on the builder ------
@@ -713,13 +713,13 @@ export interface ApplyDeltaOptions {
   /** The tools missing from the version being updated; those the delta neither removes nor plans again stay missing. */
   previousMissing?: readonly GoldenMissingTool[];
   /** The base tools read on the version being updated; a version sealed before they existed has none and is refused. */
-  previousBase: readonly ToolVersion[] | undefined;
+  previousBase: readonly GoldenBaseTool[] | undefined;
   fetch?: typeof globalThis.fetch;
   onStage?: StageListener;
 }
 
 /** A version without the base tools never ran them, so a delta on it would report covered rows it does not have. */
-function refusePreFloor(base: readonly ToolVersion[] | undefined, which: string): asserts base is readonly ToolVersion[] {
+function refusePreFloor(base: readonly GoldenBaseTool[] | undefined, which: string): asserts base is readonly GoldenBaseTool[] {
   if (base === undefined) throw new Error(`${which} was sealed before the base tools existed and cannot take an update; run wsp init and pick the rebuild`);
 }
 

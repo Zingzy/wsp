@@ -21,7 +21,6 @@ import {
   nextSetupSha,
   type Builder,
   type BuildGoldenOptions,
-  type ToolVersion,
   type GoldenDelta,
   type GoldenImport,
   type ImportLedger,
@@ -50,6 +49,7 @@ import {
 import type {
   DaemonReachView,
   EventUnion,
+  GoldenBaseTool,
   GoldenBuilderView,
   GoldenLogin,
   GoldenStage,
@@ -556,7 +556,7 @@ interface BuilderRecord {
   /** What of the recipe this builder carries; a prepare with the same recipe hash reuses it. */
   import?: ImportLedger;
   /** The base tools read on this builder, or on the golden it was forked from; the version it seals records them. */
-  base?: ToolVersion[];
+  base?: GoldenBaseTool[];
   /** Saved as this version and kept running since; an update of that version lands on it, the sweep stops it at GRACE_MS. */
   sealed?: { at: string; version: number };
 }

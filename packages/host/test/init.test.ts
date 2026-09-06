@@ -13,7 +13,7 @@ import { stripVTControlCharacters } from "node:util";
 import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
 import { APP_DATA_GROUP, RUNGS, claimedPaths, entriesFor, everything, nodeMachineFs, type Machine, type Manifest, type ManifestEntry } from "@wsp/collect";
 import { SNAPSHOT_STORAGE, type BackendPricing, type BrewFormula, type BrewTable } from "@wsp/engine";
-import { ALREADY_APPLIED } from "@wsp/protocol";
+import { ALREADY_APPLIED, type GoldenManifest } from "@wsp/protocol";
 import { DAEMON_TOKEN_SET, createRuntime, memoryStore, type GoldenRecipe, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { GOLDEN_SETUP } from "@wsp/catalog";
@@ -3764,6 +3764,30 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(f.text()).toMatch(/Golden v2 sealed in \d+s on the builder kept since the save/);
     expect(f.text()).not.toMatch(BOOT);
     expect(shared.machines).toHaveLength(3);
+  });
+
+  it("a head sealed before the base tools existed is offered the rebuild only: no update choice, the boot question follows", async () => {
+    const { store, first, next } = await sealed();
+    const manifest = (await store.get("goldens", "default")) as GoldenManifest;
+    await store.put("goldens", "default", { ...manifest, versions: manifest.versions.map(({ base: _base, ...v }) => v) });
+    writeFileSync(join(first.opts.home, ".zshrc"), "export A=1\nexport B=2\n");
+    const f = next({ yes: false, tty: true });
+    const run = runInit(f.opts, f.io);
+    for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
+      await f.until(rung);
+      await f.press(KEY.enter);
+    }
+    await f.until(BOOT);
+    const asked = f.text();
+    expect(asked).toContain("Changes since golden v1");
+    expect(asked).toContain("update 1 file: ~/.zshrc");
+    expect(asked).toContain("Golden v1 was sealed before the base tools existed and cannot take an update; the rebuild is the only road.");
+    expect(asked).not.toContain("How do you want to apply them?");
+    expect(asked).not.toContain("Update the golden");
+    expect(asked).not.toContain("Small change");
+    await f.press(KEY.ctrlC);
+    expect((await run).code).toBe(1);
+    expect(f.text()).toContain("Nothing was booted. The recipe is kept.");
   });
 
   it("a kept builder another process holds does not count as the update's machine: the offer names the fork road and its two minutes", async () => {
