@@ -4,16 +4,15 @@
 // words, and the guard file the pack ships so the machine drops each such
 // alias when its command is missing instead of shadowing a command with
 // nothing.
-import type { ManifestEntry, ShellAlias } from "@wsp/collect";
+import { type ManifestEntry, type ShellAlias, guardLine } from "@wsp/collect";
 import { type BrewTable, toolSize } from "@wsp/engine";
 import { fmtBytes } from "./init-layout.js";
 import { HEAVY_BYTES } from "./init-weight.js";
 
-export type AliasFate = { fate: "coming" } | { fate: "missing"; why: string } | { fate: "unknown" };
+export type RowFate = { fate: "coming" } | { fate: "missing"; why: string } | { fate: "unknown" };
 
-/** Where the alias's tool stands: ticked, unticked with the reason the tools screen gives, or nothing here installs it. */
-export function aliasFate(a: ShellAlias, entries: readonly ManifestEntry[], ticks: ReadonlySet<string>, brew: BrewTable): AliasFate {
-  const row = a.tool === undefined ? undefined : entries.find(e => e.id === a.tool);
+/** Where a row stands: ticked, unticked with the reason its own screen gives, or no row at all. */
+export function rowFate(row: ManifestEntry | undefined, ticks: ReadonlySet<string>, brew: BrewTable): RowFate {
   if (row === undefined) return { fate: "unknown" };
   if (ticks.has(row.id)) return { fate: "coming" };
   if (row.reason !== undefined) return { fate: "missing", why: row.reason };
@@ -23,9 +22,21 @@ export function aliasFate(a: ShellAlias, entries: readonly ManifestEntry[], tick
   return { fate: "missing", why: "unticked, tick to bring" };
 }
 
+/** Where the alias's tool stands; an alias with no tool row is unknown. */
+export function aliasFate(a: ShellAlias, entries: readonly ManifestEntry[], ticks: ReadonlySet<string>, brew: BrewTable): RowFate {
+  return rowFate(a.tool === undefined ? undefined : entries.find(e => e.id === a.tool), ticks, brew);
+}
+
+/** At most `max` lines: all of them when they fit, else the first `max - 1` and one naming the rest. */
+export function capped<T>(items: readonly T[], max: number, line: (item: T) => string, name: (item: T) => string): string[] {
+  if (items.length <= max) return items.map(line);
+  const shown = items.slice(0, max - 1);
+  return [...shown.map(line), `${items.length - shown.length} more: ${items.slice(shown.length).map(name).join(", ")}`];
+}
+
 interface Group {
   runs: string;
-  fate: Exclude<AliasFate, { fate: "coming" }>;
+  fate: Exclude<RowFate, { fate: "coming" }>;
   members: ShellAlias[];
 }
 
@@ -62,20 +73,16 @@ const FROM_FILES_LINE = "aliases read from the rc files: the shell listed none o
 /** The detail pane's lines under a shell row: where the list came from when not the shell, then one per command its
  * aliases point at that is not coming, capped. */
 export function aliasLines(row: ManifestEntry, entries: readonly ManifestEntry[], ticks: ReadonlySet<string>, brew: BrewTable, max: number): string[] {
-  const all = groups(row, entries, ticks, brew);
-  const shown = all.length > max ? all.slice(0, max - 1) : all;
-  const lines = row.aliasesFrom === "files" ? [FROM_FILES_LINE] : [];
-  for (const g of shown) {
+  const line = (g: Group): string => {
     const tail = g.fate.fate === "missing" ? `which is not coming (${g.fate.why})` : `which nothing here installs (kept on the machine only if it has ${g.runs})`;
-    lines.push(`${subject(g.members)} ${verb(g.members.length)} at ${g.runs}, ${tail}`);
-  }
-  if (all.length > max) lines.push(`${all.length - shown.length} more: ${all.slice(shown.length).map(g => g.runs).join(", ")}`);
-  return lines;
+    return `${subject(g.members)} ${verb(g.members.length)} at ${g.runs}, ${tail}`;
+  };
+  return [...(row.aliasesFrom === "files" ? [FROM_FILES_LINE] : []), ...capped(groups(row, entries, ticks, brew), max, line, g => g.runs)];
 }
 
 /** Where the guard lands under the guest's home, and the line the rc file gets to read it after everything else. */
 export const GUARD_PATH = ".config/wsp/aliases.sh";
-export const GUARD_SOURCE_LINE = `[ -r "$HOME/${GUARD_PATH}" ] && . "$HOME/${GUARD_PATH}"`;
+export const GUARD_SOURCE_LINE = guardLine(`"$HOME/${GUARD_PATH}"`);
 export const GUARD_SOURCE_COMMENT = "# wsp: aliases whose command this machine lacks are dropped here, so the plain command runs";
 
 export interface AliasGuard {
