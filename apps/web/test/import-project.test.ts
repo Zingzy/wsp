@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The import dialog's pure parts: the step rows folded from project.import
-// events, which events belong to one import, the consent defaults and the
-// request they become, the secret offer wording as the tick changes it, and
-// the landed line with what was cut.
+// events, which events belong to one import, the consent defaults for the
+// secret-shaped files and the agents and the request they become, the secret
+// offer wording as the tick changes it, the agent row's words, and the landed
+// line with what was cut.
 import { describe, expect, it } from "vitest";
-import type { ProjectImportEvent, ProjectSecret } from "@wsp/protocol";
-import { IMPORT_STEPS, consentRequest, defaultConsent, importStepRows, isImportOf, landedLine, secretOffer } from "../src/sidebar/importProject.js";
+import type { ProjectAgent, ProjectImportEvent, ProjectSecret } from "@wsp/protocol";
+import { IMPORT_STEPS, agentState, agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importStepRows, isImportOf, landedLine, secretOffer } from "../src/sidebar/importProject.js";
 
 const ev = (over: Partial<ProjectImportEvent>): ProjectImportEvent => ({
   type: "project.import",
@@ -22,6 +23,35 @@ const env: ProjectSecret = { path: ".env", bytes: 120, signals: ["name", "keys"]
 const key: ProjectSecret = { path: "keys/id_ed25519", bytes: 400, signals: ["pem"] };
 const config: ProjectSecret = { path: ".git/config", bytes: 300, signals: ["url"], rewrite: { urls: ["https://github.com/o/r"], drop: [] } };
 const header: ProjectSecret = { path: "vendor/x/.git/config", bytes: 200, signals: ["keys"], rewrite: { urls: [], drop: ["http.extraheader"] } };
+
+const claude: ProjectAgent = { agent: "claude", name: "Claude Code", sessions: 46, bytes: 9_400_000, carry: "moves" };
+const codex: ProjectAgent = { agent: "codex", name: "Codex", sessions: 1, bytes: 12_000, carry: "transcript-only" };
+const empty: ProjectAgent = { agent: "gemini", name: "Gemini CLI", sessions: 0, bytes: 0, carry: "moves" };
+const broken: ProjectAgent = { agent: "opencode", name: "OpenCode", sessions: 0, bytes: 0, carry: "moves", error: "state.db is locked by another process" };
+
+describe("agent consent", () => {
+  it("starts every agent with readable sessions ticked, and none without sessions or with a read error", () => {
+    expect(canTravel(claude)).toBe(true);
+    expect(canTravel(empty)).toBe(false);
+    expect(canTravel(broken)).toBe(false);
+    expect([...defaultAgents([claude, codex, empty, broken])]).toEqual(["claude", "codex"]);
+    expect([...defaultAgents([])]).toEqual([]);
+  });
+
+  it("names the ticked agents in the plan's order, and nothing when none is ticked", () => {
+    expect(agentsRequest([claude, codex], new Set(["codex", "claude"]))).toEqual(["claude", "codex"]);
+    expect(agentsRequest([claude, codex], new Set(["codex"]))).toEqual(["codex"]);
+    expect(agentsRequest([claude, codex], new Set())).toBeUndefined();
+    expect(agentsRequest([], new Set(["claude"]))).toBeUndefined();
+  });
+
+  it("gives a row its session count, or its read error when the store could not be read", () => {
+    expect(agentState(claude)).toBe("46 sessions");
+    expect(agentState(codex)).toBe("1 session");
+    expect(agentState(empty)).toBe("0 sessions");
+    expect(agentState(broken)).toBe("state.db is locked by another process");
+  });
+});
 
 describe("step rows", () => {
   it("lists the six steps in order with no message before any event", () => {

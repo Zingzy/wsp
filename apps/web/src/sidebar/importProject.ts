@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // What the import dialog computes from the wire: the steps an import passes,
-// which events are its own, the consent it asks for and the request that
-// consent becomes. No React here.
-import type { ProjectImportEvent, ProjectImportResult, ProjectImportStage, ProjectPlan, ProjectSecret } from "@wsp/protocol";
-import { agentOutcomes, folderName, stepRows, type StepRow } from "./projectTrip.js";
+// which events are its own, the consent it asks for, for the secret-shaped
+// files and for the agents with sessions, and the request that consent
+// becomes. No React here.
+import type { ProjectAgent, ProjectImportEvent, ProjectImportResult, ProjectImportStage, ProjectPlan, ProjectSecret } from "@wsp/protocol";
+import { agentOutcomes, count, folderName, stepRows, type StepRow } from "./projectTrip.js";
 
 /** The steps every import passes in order; `failed` is not a step, it is the error line. */
 export const IMPORT_STEPS = ["planned", "consented", "packing", "uploading", "landing", "done"] as const satisfies readonly ProjectImportStage[];
@@ -29,6 +30,23 @@ export function consentRequest(secrets: readonly ProjectSecret[], ticked: Readon
     rewrite: chosen.filter(s => s.rewrite !== undefined).map(s => s.path),
   };
 }
+
+/** Only an agent with sessions the plan could read has anything to send; the runtime never reads one it cannot. */
+export const canTravel = (a: ProjectAgent): boolean => a.error === undefined && a.sessions > 0;
+
+/** An agent whose sessions can travel starts ticked; one with none, or whose store could not be read, does not. */
+export function defaultAgents(agents: readonly ProjectAgent[]): ReadonlySet<string> {
+  return new Set(agents.filter(canTravel).map(a => a.agent));
+}
+
+/** The request the agent ticks become, in the plan's order; nothing when none is ticked, which the runtime reads the same. */
+export function agentsRequest(agents: readonly ProjectAgent[], ticked: ReadonlySet<string>): string[] | undefined {
+  const chosen = agents.filter(a => ticked.has(a.agent)).map(a => a.agent);
+  return chosen.length === 0 ? undefined : chosen;
+}
+
+/** The row's muted words: the sessions it holds, or why its store could not be read. */
+export const agentState = (a: ProjectAgent): string => a.error ?? count(a.sessions, "session");
 
 const host = (url: string): string => {
   try {

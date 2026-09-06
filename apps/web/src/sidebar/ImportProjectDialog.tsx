@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Importing a folder on this Mac into a workspace: the folder is read into one
-// dense summary, the secret-shaped files are the one loud element and only
+// dense summary, the agents with sessions for it are ticked rows whose
+// sessions travel, the secret-shaped files are the one loud element and only
 // when the plan found some, one action starts the import, and the runtime's
 // events fill a fixed set of step rows. The desktop shell offers the system
 // picker; a browser tab has the path input alone and Enter reads it. The path
@@ -9,14 +10,14 @@
 // the person read: editing the path drops the plan and its ticks until the
 // folder is read again.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fmtBytes, type ProjectImportEvent, type ProjectImportResult, type ProjectPlan, type ProjectSecret, type WorkspaceView } from "@wsp/protocol";
+import { fmtBytes, type ProjectAgent, type ProjectImportEvent, type ProjectImportResult, type ProjectPlan, type ProjectSecret, type WorkspaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { Checkbox } from "../components/ui/checkbox.js";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
 import { errorText } from "../lib/utils.js";
 import type { ProtocolEvent } from "../protocol/client.js";
 import { useProtocolEvents, useStore } from "../protocol/store.js";
-import { consentRequest, defaultConsent, importStepRows, isImportOf, landedLine, secretOffer } from "./importProject.js";
+import { agentState, agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importStepRows, isImportOf, landedLine, secretOffer } from "./importProject.js";
 import { count, refusalOf, refusalTone, type Refusal } from "./projectTrip.js";
 import { FactRow, FolderField, StatusLine, StepRows } from "./ProjectTripRows.js";
 
@@ -44,6 +45,7 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
   const plan = planned?.plan ?? null;
   const [reading, setReading] = useState(false);
   const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set());
+  const [tickedAgents, setTickedAgents] = useState<ReadonlySet<string>>(new Set());
   const [events, setEvents] = useState<ProjectImportEvent[]>([]);
   const [phase, setPhase] = useState<Phase>("idle");
   const [result, setResult] = useState<ProjectImportResult | null>(null);
@@ -72,6 +74,7 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
         const next = await api.planProject(folder);
         setPlanned({ folder, plan: next });
         setTicked(defaultConsent(next.secrets));
+        setTickedAgents(defaultAgents(next.agents));
       } catch (e) {
         setRefusal({ message: errorText(e), exists: false });
       } finally {
@@ -96,12 +99,21 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
   const start = async (replace: boolean): Promise<void> => {
     if (plan === null || api?.importProject === undefined) return;
     const { carry, rewrite } = consentRequest(plan.secrets, ticked);
+    const travelling = agentsRequest(plan.agents, tickedAgents);
     sent.current = { source, plan };
     setPhase("importing");
     setEvents([]);
     setRefusal(null);
     try {
-      const landed = await api.importProject({ workspaceId: workspace.id, source, dest: plan.source, carry, rewrite, ...(replace ? { replace: true } : {}) });
+      const landed = await api.importProject({
+        workspaceId: workspace.id,
+        source,
+        dest: plan.source,
+        carry,
+        rewrite,
+        ...(travelling === undefined ? {} : { agents: travelling }),
+        ...(replace ? { replace: true } : {}),
+      });
       setResult(landed);
       setPhase("done");
     } catch (e) {
@@ -115,18 +127,19 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
     if (planned !== null && next.trim() !== planned.folder) {
       setPlanned(null);
       setTicked(new Set());
+      setTickedAgents(new Set());
       setRefusal(null);
     }
   };
 
-  const toggle = (path: string, on: boolean): void => {
-    setTicked(prev => {
-      const next = new Set(prev);
-      if (on) next.add(path);
-      else next.delete(path);
-      return next;
-    });
+  const toggled = (prev: ReadonlySet<string>, id: string, on: boolean): Set<string> => {
+    const next = new Set(prev);
+    if (on) next.add(id);
+    else next.delete(id);
+    return next;
   };
+  const toggle = (path: string, on: boolean): void => setTicked(prev => toggled(prev, path, on));
+  const toggleAgent = (agent: string, on: boolean): void => setTickedAgents(prev => toggled(prev, agent, on));
 
   const busy = reading || phase === "importing";
   const primary = phase === "done" ? "Done" : refusal?.exists ? "Replace and import" : "Import";
@@ -153,6 +166,7 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
               {...(bridge === undefined ? {} : { onPick: () => void pick() })}
             />
             <Summary plan={plan} />
+            {plan !== null && plan.agents.length > 0 ? <Agents agents={plan.agents} ticked={tickedAgents} disabled={phase !== "idle"} onToggle={toggleAgent} /> : null}
             {plan !== null && plan.secrets.length > 0 ? <Secrets secrets={plan.secrets} ticked={ticked} disabled={phase !== "idle"} onToggle={toggle} /> : null}
             <StepRows label="Import steps" transfer="Upload" rows={importStepRows(events)} />
             <StatusLine tone={refusalTone(refusal)}>{status}</StatusLine>
@@ -197,6 +211,26 @@ function Summary({ plan }: { plan: ProjectPlan | null }) {
         {plan === null ? "" : plan.source}
       </FactRow>
     </div>
+  );
+}
+
+function Agents({ agents, ticked, disabled, onToggle }: { agents: readonly ProjectAgent[]; ticked: ReadonlySet<string>; disabled: boolean; onToggle: (agent: string, on: boolean) => void }) {
+  return (
+    <section data-k="agents" className="flex flex-col gap-1 rounded-md border border-border/60 px-2.5 py-2">
+      <p className="font-mono text-[11px] text-muted-foreground">{`${count(agents.length, "agent")} on this Mac with sessions for the folder`}</p>
+      <ul className="flex flex-col">
+        {agents.map(a => (
+          <li key={a.agent} className="flex h-7 items-center gap-2 text-xs">
+            <Checkbox checked={ticked.has(a.agent)} disabled={disabled || !canTravel(a)} aria-label={a.name} onCheckedChange={next => onToggle(a.agent, next)} />
+            <span className="shrink-0 text-foreground">{a.name}</span>
+            <span data-k="state" className="ml-auto min-w-0 truncate font-mono text-[11px] tabular-nums text-muted-foreground" title={agentState(a)}>
+              {agentState(a)}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="text-[11px] text-muted-foreground">Ticked agents' sessions travel keyed to the path on the machine; the rest stay here.</p>
+    </section>
   );
 }
 

@@ -341,6 +341,8 @@ export interface ImportProjectOptions {
   replace?: boolean;
   carry?: string[];
   rewrite?: string[];
+  /** The plan's agents whose sessions travel, by catalog id; absent, none do. */
+  agents?: string[];
 }
 
 export interface ExportProjectOptions {

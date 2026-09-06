@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The import dialog in a real Chromium, both themes: every summary row, secret
-// row and step row keeps one height, the secrets box is the one element with
-// a colour of its own, every offer is whole in its row, the step labels read
+// The import dialog in a real Chromium, both themes: every summary row, agent
+// row, secret row and step row keeps one height, the secrets box is the one
+// element with a colour of its own, every offer is whole in its row, the step labels read
 // at AA before and after they are reached, nothing above the steps moves
 // while the import runs to done, and a landed line that needs three lines
 // grows its box instead of being cut. Photographed after the folder is read
@@ -82,6 +82,9 @@ describe.skipIf(skipped !== undefined)("the import dialog laid out in Chromium",
 
     const summary = await boxes("[data-k=files], [data-k=repository], [data-k=caches], [data-k=skipped], [data-k=dest]");
     expect(new Set(heights(summary)).size).toBe(1);
+    const agentRows = await boxes("[data-k=agents] li");
+    expect(agentRows).toHaveLength(3);
+    expect(new Set(heights(agentRows)).size).toBe(1);
     const secretRows = await boxes("[data-k=secrets] li");
     expect(secretRows).toHaveLength(3);
     expect(new Set(heights(secretRows)).size).toBe(1);
@@ -89,12 +92,17 @@ describe.skipIf(skipped !== undefined)("the import dialog laid out in Chromium",
     expect(steps).toHaveLength(6);
     expect(new Set(heights(steps)).size).toBe(1);
     expect(heights(steps)[0]).toBe(heights(secretRows)[0]);
+    expect(heights(steps)[0]).toBe(heights(agentRows)[0]);
+    expect(await page!.locator("[data-k=agents] [role=checkbox]").evaluateAll(els => els.map(el => el.getAttribute("aria-checked")))).toEqual(["true", "true", "false"]);
+    expect(await whole("[data-k=state]")).toEqual([true, true, true]);
 
-    // One loud element: the secrets box's border is its own colour; the summary and the steps share theirs.
+    // One loud element: the secrets box's border is its own colour; the summary, the agents and the steps share theirs.
     const summaryBox = await color("[data-k=summary]");
     const stepsBox = await color("[aria-label='Import steps']");
+    const agentsBox = await color("[data-k=agents]");
     const secretsBox = await color("[data-k=secrets]");
     expect(stepsBox).toBe(summaryBox);
+    expect(agentsBox).toBe(summaryBox);
     expect(secretsBox).not.toBe(summaryBox);
     expect(await page!.locator("[data-k=secrets] [role=checkbox]").evaluateAll(els => els.map(el => el.getAttribute("aria-checked")))).toEqual(["false", "false", "true"]);
     expect(await page!.locator("[data-k=offer]").allTextContents()).toEqual(["cut", "cut", "lands bare at github.com without http.extraheader"]);
@@ -107,21 +115,25 @@ describe.skipIf(skipped !== undefined)("the import dialog laid out in Chromium",
 
     const before = {
       files: (await boxes("[data-k=files]"))[0]!,
+      agents: (await boxes("[data-k=agents]"))[0]!,
       secrets: (await boxes("[data-k=secrets]"))[0]!,
       steps: await boxes("[data-step]"),
       button: (await boxes("button:has-text('Import')"))[0]!,
     };
     await page!.locator("button:has-text('Import')").click();
     await page!.waitForFunction(() => document.querySelector("[data-step=done]")?.textContent?.includes("landed at"));
+    expect(await page!.locator("[data-step=consented]").textContent()).toContain("Sessions travel for Claude Code (46 sessions), Codex (2 sessions).");
     await page!.waitForFunction(() => document.querySelector("[role=status]")?.textContent === "spoo is at /Users/me/code/spoo on api; cut .env, config/service-account.json.");
     expect(await uncut("[role=status]")).toBe(true);
     const after = {
       files: (await boxes("[data-k=files]"))[0]!,
+      agents: (await boxes("[data-k=agents]"))[0]!,
       secrets: (await boxes("[data-k=secrets]"))[0]!,
       steps: await boxes("[data-step]"),
       button: (await boxes("button:has-text('Done')"))[0]!,
     };
     expect(after.files).toEqual(before.files);
+    expect(after.agents).toEqual(before.agents);
     expect(after.secrets).toEqual(before.secrets);
     expect(after.steps).toEqual(before.steps);
     expect(after.button.y).toBe(before.button.y);
@@ -135,10 +147,11 @@ describe.skipIf(skipped !== undefined)("the import dialog laid out in Chromium",
     expect(existsSync(join(SHOTS, `import-done-${theme}.png`))).toBe(true);
   }, 40_000);
 
-  it("with nothing secret-shaped the box is absent and the steps sit right under the summary", async () => {
-    await page!.goto(`${base}?theme=dark&secrets=0`);
+  it("with nothing secret-shaped and no agent sessions both boxes are absent and the steps sit right under the summary", async () => {
+    await page!.goto(`${base}?theme=dark&secrets=0&agents=0`);
     await page!.waitForFunction(() => document.querySelector("[data-k=files]")?.textContent === "1204 files · 38.2 MB");
     expect(await page!.locator("[data-k=secrets]").count()).toBe(0);
+    expect(await page!.locator("[data-k=agents]").count()).toBe(0);
     const dest = (await boxes("[data-k=dest]"))[0]!;
     const firstStep = (await boxes("[data-step=planned]"))[0]!;
     expect(firstStep.y - (dest.y + dest.height)).toBeLessThan(40);

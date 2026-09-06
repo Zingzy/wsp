@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Served by Vite to a real browser: the import dialog for a running workspace
 // over a fake api, in either theme (?theme=light), with the folder already
-// read (?secrets=0 for a plan with nothing secret-shaped), as the desktop
-// shell shows it. Import plays the runtime's six events a beat apart and then
-// resolves, so a test can lay out and photograph the summary, the consent box
-// and the finished steps. With ?long=1 the folder sits at a 120-character path
+// read (?secrets=0 for a plan with nothing secret-shaped, ?agents=0 for one
+// with no agent sessions), as the desktop shell shows it. Import plays the
+// runtime's six events a beat apart and then resolves, so a test can lay out
+// and photograph the summary, the consent boxes and the finished steps. With ?long=1 the folder sits at a 120-character path
 // and four agents' sessions travelled, one of them failing, so the landed line
 // needs a third line.
 import { createRoot } from "react-dom/client";
@@ -46,7 +46,14 @@ const plan: ProjectPlan = {
         ],
   excluded: ["node_modules", "dist", ".venv", "coverage"],
   skipped: [{ path: "public/uploads", note: "points outside the folder; not followed" }],
-  agents: [],
+  agents:
+    params.get("agents") === "0"
+      ? []
+      : [
+          { agent: "claude", name: "Claude Code", sessions: 46, bytes: 9_400_000, carry: "moves" },
+          { agent: "codex", name: "Codex", sessions: 2, bytes: 88_000, carry: "transcript-only" },
+          { agent: "opencode", name: "OpenCode", sessions: 0, bytes: 0, carry: "moves", error: "state.db is locked by another process" },
+        ],
 };
 
 const listeners = new Set<(e: EventUnion) => void>();
@@ -78,9 +85,11 @@ const api: Api = {
   planProject: async () => plan,
   importProject: async o => {
     const cut = plan.secrets.filter(s => !(o.carry ?? []).includes(s.path) && !(o.rewrite ?? []).includes(s.path)).map(s => s.path);
+    const travelling = plan.agents.filter(a => a.error === undefined && (o.agents ?? []).includes(a.agent));
+    const sessions = plan.agents.length === 0 ? "" : travelling.length === 0 ? " No agent sessions travel." : ` Sessions travel for ${travelling.map(a => `${a.name} (${a.sessions} sessions)`).join(", ")}.`;
     emit({ stage: "planned", message: "1204 files, 38.2 MB and the repository; 3 secret-shaped files; 4 caches left behind.", elapsedMs: 180 });
     await beat(150);
-    emit({ stage: "consented", message: `Rewriting .git/config to https://github.com/zingzy/spoo.git without http.extraheader; cut ${cut.join(", ")}.`, elapsedMs: 190 });
+    emit({ stage: "consented", message: `Rewriting .git/config to https://github.com/zingzy/spoo.git without http.extraheader; cut ${cut.join(", ")}.${sessions}`, elapsedMs: 190 });
     await beat(150);
     emit({ stage: "packing", message: "Packing 1202 files.", elapsedMs: 210 });
     await beat(150);
