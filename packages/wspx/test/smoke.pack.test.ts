@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Packs the package and installs the tarball into an empty folder on a clean
-// environment, the way a stranger's `npm i -g wspx` does, then runs the three
-// commands that need no key. Gated on WSP_PACK_SMOKE=1 (pnpm --filter wspx
+// environment, the way a stranger's `npm i -g @zingzy/wsp` does, then runs the three
+// commands that need no key. Gated on WSP_PACK_SMOKE=1 (pnpm --filter @zingzy/wsp
 // smoke) so the unit suite never runs an npm install.
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
@@ -58,7 +58,7 @@ function wsp(...args: string[]): string {
 
 describe.runIf(SMOKE)("the packed command, installed from its tarball", () => {
   it("carries no dependency tree of its own", () => {
-    expect(readdirSync(join(installed, "node_modules")).filter(n => !n.startsWith("."))).toEqual(["wspx"]);
+    expect(readdirSync(join(installed, "node_modules")).filter(n => !n.startsWith("."))).toEqual(["@zingzy"]);
   });
 
   it("prints its version", () => {
@@ -84,7 +84,7 @@ describe.runIf(SMOKE)("the packed command, installed from its tarball", () => {
   // assetDir falls back to this checkout when the packed road misses, so the resolved directory is named
   // before it is read: without that, the case passes on an install that staged nothing.
   it("reads the web app and the daemon out of the tarball, not out of this checkout", () => {
-    const root = join(installed, "node_modules", "wspx");
+    const root = join(installed, "node_modules", "@zingzy", "wsp");
     const dist = join(root, "dist");
     for (const kind of ASSET_KINDS) {
       expect(assetDir(kind, dist)).toBe(stagedAsset(root, kind));
