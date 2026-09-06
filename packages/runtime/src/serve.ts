@@ -256,6 +256,10 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "workspaces.rebuild":
               send({ id: msg.id, ok: true, workspace: await rt.workspaces.rebuild(msg.workspaceId) });
               return;
+            case "workspaces.updateDaemon":
+              await rt.workspaces.updateDaemon(msg.workspaceId);
+              send({ id: msg.id, ok: true });
+              return;
             case "forwards.list":
               send({ id: msg.id, ok: true, forwards: opts.forwards?.list() ?? [] });
               return;

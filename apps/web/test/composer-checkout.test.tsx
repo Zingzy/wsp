@@ -66,8 +66,8 @@ import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { useNewThreadRequests } from "../src/components/chat/newThreadRequests.js";
 import { selectRoot, useRootStore } from "../src/files/root.js";
-import { provideDaemonRoot, provideDaemonWire } from "../src/files/wire.js";
-import { DAEMON_ROOT, fakeWire, LISTING, resetSurfaces } from "./surface-harness.js";
+import { provideDaemonHello, provideDaemonWire } from "../src/files/wire.js";
+import { DAEMON_HELLO, DAEMON_ROOT, fakeWire, LISTING, resetSurfaces } from "./surface-harness.js";
 import { CHAT_STREAM, CHAT_WS } from "./fixtures/chat-stream.js";
 
 let restoreLayout: () => void = () => {};
@@ -75,7 +75,7 @@ beforeAll(() => { restoreLayout = installFakeLayout(); });
 afterAll(() => restoreLayout());
 beforeEach(() => {
   resetSurfaces();
-  provideDaemonRoot(WS, DAEMON_ROOT);
+  provideDaemonHello(WS, DAEMON_HELLO);
   useComposerDraftStore.setState({ drafts: {} });
 });
 
@@ -181,7 +181,7 @@ describe("composer checkout row", () => {
 
   it("offers no picker and sends no cwd before the daemon named its root", async () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
-    provideDaemonRoot(WS, null);
+    provideDaemonHello(WS, null);
     const { api, started } = fixtureApi();
     await setup(api);
     expect(screen.queryByRole("button", { name: /Working folder/ })).toBeNull();

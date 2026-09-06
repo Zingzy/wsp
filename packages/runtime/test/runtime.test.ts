@@ -992,6 +992,47 @@ describe("runtime daemon reach", () => {
     expect("daemonToken" in reach).toBe(false);
   });
 
+  it("updateDaemon runs the recipe's deploy on the running machine, then writes this runtime's token again so the next reach opens the new daemon", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const deployed: string[] = [];
+    const recipe = {
+      setup: "true",
+      smoke: "true",
+      deployDaemon: async (machine: { id: string; exec(cmd: string): Promise<unknown> }) => {
+        deployed.push(machine.id);
+        await machine.exec("DEPLOY_DAEMON");
+        return "daemon on node v22";
+      },
+    };
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN, goldenRecipe: recipe });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const m = backend.machines[0]!;
+    m.previewUrl = async port => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, token: "e", expiresAt: Date.now() + 3_600_000 });
+    expect((await rt.workspaces.daemonReach(ws.id)).daemonToken).toBe(TOKEN);
+    const before = m.execLog.length;
+
+    await rt.workspaces.updateDaemon(ws.id);
+    expect(deployed).toEqual(["m1"]);
+    // The deploy started the daemon on its own token; the rotation after it is what makes the runtime's token open it.
+    const after = m.execLog.slice(before);
+    expect(after).toEqual(["DEPLOY_DAEMON", rotateDaemonTokenScript(TOKEN)]);
+    expect((await rt.workspaces.daemonReach(ws.id)).daemonToken).toBe(TOKEN);
+    expect(m.execLog.length).toBe(before + 2);
+
+    await rt.workspaces.nap(ws.id);
+    await expect(rt.workspaces.updateDaemon(ws.id)).rejects.toThrow("wake a before updating its daemon");
+    expect(deployed).toEqual(["m1"]);
+  });
+
+  it("updateDaemon refuses on a runtime whose recipe carries no deploy", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await expect(rt.workspaces.updateDaemon(ws.id)).rejects.toThrow("cannot deploy a daemon");
+    await expect(rt.workspaces.updateDaemon("ws_nobody")).rejects.toThrow("no such workspace");
+  });
+
   it("writes the token again after a resurrect replaces the machine", async () => {
     const backend = stubBackend();
     backend.execImpl = tokenGuest;

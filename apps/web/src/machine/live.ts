@@ -3,6 +3,8 @@
 // over the workspace's own daemon link (terminal/wiring.ts asks with sys.watch
 // on every live transition and feeds the pushes here); the link's status says
 // whether the newest sample is current or the last one before the socket went.
+// A daemon that refuses sys.watch leaves its reason here, so the rows can say
+// the stream is unavailable instead of waiting for it.
 import { useSyncExternalStore } from "react";
 import type { DaemonLinkStatus, SysSample } from "@wsp/protocol";
 
@@ -12,10 +14,12 @@ export const LIVE_WINDOW = 60;
 export interface LiveState {
   samples: SysSample[];
   reach: "live" | "unreachable";
+  /** The daemon's refusal of sys.watch, null while it streams or has not been asked. */
+  unavailable: string | null;
 }
 
 export class WorkspaceLive {
-  #state: LiveState = { samples: [], reach: "unreachable" };
+  #state: LiveState = { samples: [], reach: "unreachable", unavailable: null };
   #fns = new Set<() => void>();
 
   feedSample(s: SysSample): void {
@@ -27,6 +31,10 @@ export class WorkspaceLive {
   feedStatus(s: DaemonLinkStatus): void {
     const reach = s === "live" ? "live" : "unreachable";
     if (reach !== this.#state.reach) this.#set({ ...this.#state, reach });
+  }
+
+  feedUnavailable(reason: string | null): void {
+    if (reason !== this.#state.unavailable) this.#set({ ...this.#state, unavailable: reason });
   }
 
   onChange(fn: () => void): () => void {

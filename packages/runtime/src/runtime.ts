@@ -417,6 +417,9 @@ export interface Runtime {
     upgrade(id: string, spec?: WorkspaceSpec): Promise<WorkspaceView>;
     /** Fresh golden fork with the nap-time vault, old machine killed, id and name kept: the way out of a zombie. */
     rebuild(id: string): Promise<WorkspaceView>;
+    /** The recipe's daemon deploy on the running machine, replacing the daemon there, then this runtime's token
+     * written again so the next reach opens it. Throws on a workspace that is not running or a runtime without the deploy. */
+    updateDaemon(id: string): Promise<void>;
     delete(id: string): Promise<void>;
     /** A person acted in the workspace; its idle window starts over. */
     touch(id: string): Promise<void>;
@@ -1492,6 +1495,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       console.warn(`rebuild of ${id}: ${reason}`);
       await emitStatus(entry, entry.machine.previewUrl ? "reachable" : "unsupported", reason);
       return view(entry.record);
+    },
+
+    async updateDaemon(id) {
+      const entry = await entryOf(id);
+      const deploy = opts.goldenRecipe?.deployDaemon;
+      if (deploy === undefined) throw new Error("this runtime cannot deploy a daemon; the host wires the bundle");
+      if (entry.record.phase !== "running") throw new Error(`wake ${entry.record.name} before updating its daemon`);
+      await deploy(entry.machine);
+      daemonTokens.delete(entry.machine.id);
+      await daemonTokenOf(entry.machine);
     },
 
     async delete(id) {

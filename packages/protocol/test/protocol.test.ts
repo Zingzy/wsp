@@ -4,6 +4,8 @@ import {
   RecipeSource,
   Capabilities,
   GoldenVersion,
+  DAEMON_VERSION,
+  daemonVersionOf,
   DaemonAuthRequest,
   DaemonErrorCode,
   DaemonErrorResponse,
@@ -291,6 +293,16 @@ describe("daemon wire types (one home for the ops from @wsp/daemon)", () => {
     ];
     for (const e of events) expect(DaemonEvent.parse(e)).toBeTruthy();
     expect(() => DaemonEvent.parse({ type: "daemon.hello" })).toThrow();
+  });
+
+  it("the hello carries the daemon's version; one without is the first version, as every daemon deployed before the field", () => {
+    expect(DAEMON_VERSION).toBeGreaterThanOrEqual(2);
+    const current = DaemonEvent.parse({ type: "daemon.hello", root: "/root", version: DAEMON_VERSION });
+    expect(current).toEqual({ type: "daemon.hello", root: "/root", version: DAEMON_VERSION });
+    expect(daemonVersionOf(current as { version?: number })).toBe(DAEMON_VERSION);
+    expect(daemonVersionOf(DaemonEvent.parse({ type: "daemon.hello", root: "/root" }) as { version?: number })).toBe(1);
+    expect(() => DaemonEvent.parse({ type: "daemon.hello", root: "/root", version: "2" })).toThrow();
+    expect(RuntimeRequest.parse({ id: 1, op: "workspaces.updateDaemon", workspaceId: "ws_a" })).toEqual({ id: 1, op: "workspaces.updateDaemon", workspaceId: "ws_a" });
   });
 });
 

@@ -892,11 +892,23 @@ export const ProcSnapshot = z.object({
 });
 export type ProcSnapshot = z.infer<typeof ProcSnapshot>;
 
+/** The daemon's protocol version, carried in its hello and bumped whenever an op is added, so a client can tell
+ * which ops a machine's daemon answers before asking. A hello without one is version 1: every daemon deployed
+ * before the field existed, which has the pty, ports, manifest, inbox, fs, git and tunnel ops and no sys or
+ * proc ops. */
+export const DAEMON_VERSION = 2;
+
+/** The version a hello announces, 1 when it carries none. */
+export function daemonVersionOf(hello: { version?: number }): number {
+  return hello.version ?? 1;
+}
+
 export const DaemonEvent = z.discriminatedUnion("type", [
   /** The first frame after the auth reply: root is the
    * absolute directory every fs.* and git.* path must resolve inside, so a
-   * client can build absolute paths for pickers, pins and session starts. */
-  z.object({ type: z.literal("daemon.hello"), root: z.string() }),
+   * client can build absolute paths for pickers, pins and session starts.
+   * version is DAEMON_VERSION as the daemon was built; absent on version 1. */
+  z.object({ type: z.literal("daemon.hello"), root: z.string(), version: z.number().int().optional() }),
   z.object({ type: z.literal("pty.data"), ptyId: z.string(), data: z.string() }),
   z.object({
     type: z.literal("pty.exit"),
@@ -1063,6 +1075,10 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
    * reports. Replies with the WorkspaceView on its new machine; id and name
    * are kept. The way out of a zombie reach state. */
   z.object({ id: reqId, op: z.literal("workspaces.rebuild"), workspaceId: z.string() }),
+  /** Deploys the host's daemon bundle onto the workspace's running machine over the deploy path a golden build
+   * uses, stopping the daemon that was there: its terminals end, sessions and everything else on the machine
+   * keep running. The browser's link redials on its own and the new hello carries the new version. Replies {id, ok}. */
+  z.object({ id: reqId, op: z.literal("workspaces.updateDaemon"), workspaceId: z.string() }),
   /** Replies with { forwards: PortForward[] }, the host's open forwards; empty when no host holds any. */
   z.object({ id: reqId, op: z.literal("forwards.list") }),
   /** Closes one forward; refused when none is open on that workspace and port. */

@@ -255,6 +255,27 @@ describe("serveRuntime session interrupt", () => {
   });
 });
 
+describe("serveRuntime daemon update", () => {
+  it("workspaces.updateDaemon runs the deploy and answers ok; a missing workspace is an error reply", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const deployed: string[] = [];
+    const recipe = { setup: "true", smoke: "true", deployDaemon: async (m: { id: string }) => void deployed.push(m.id) };
+    const runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: DAEMON_TOKEN, goldenRecipe: recipe });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const id = (created["workspace"] as { id: string }).id;
+    const res = await c.request("workspaces.updateDaemon", { workspaceId: id });
+    expect(res).toEqual({ id: expect.anything(), ok: true });
+    expect(deployed).toEqual(["m1"]);
+    const missing = await c.request("workspaces.updateDaemon", { workspaceId: "ws_nobody" });
+    expect(missing.ok).toBe(false);
+    expect(String(missing["error"])).toContain("no such workspace");
+    c.close();
+  });
+});
+
 describe("serveRuntime daemon reach", () => {
   it("workspaces.daemonReach returns the view a browser dials the daemon with", async () => {
     const backend = stubBackend();

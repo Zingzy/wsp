@@ -38,7 +38,7 @@ describe("WorkspaceLive", () => {
   it("keeps the last sixty samples and reports the link's reach", () => {
     resetLive();
     const live = getLive("ws_a");
-    expect(live.snapshot()).toEqual({ samples: [], reach: "unreachable" });
+    expect(live.snapshot()).toEqual({ samples: [], reach: "unreachable", unavailable: null });
     const before = live.snapshot();
     for (let i = 0; i < LIVE_WINDOW + 10; i++) live.feedSample(sample(i));
     const after = live.snapshot();
@@ -55,6 +55,26 @@ describe("WorkspaceLive", () => {
     expect(live.snapshot().reach).toBe("unreachable");
     // A dropped link keeps the values it had: the rows show them dim under the word.
     expect(live.snapshot().samples).toHaveLength(LIVE_WINDOW);
+  });
+
+  it("keeps the daemon's refusal of the stream until the next answer clears it, one notification per change", () => {
+    resetLive();
+    const live = getLive("ws_c");
+    let n = 0;
+    live.onChange(() => n++);
+    live.feedStatus("live");
+    live.feedUnavailable("unknown op: sys.watch");
+    expect(live.snapshot()).toEqual({ samples: [], reach: "live", unavailable: "unknown op: sys.watch" });
+    const same = live.snapshot();
+    live.feedUnavailable("unknown op: sys.watch");
+    expect(live.snapshot()).toBe(same);
+    // The link dropping keeps the reason; a redeployed daemon that answers the watch is what clears it.
+    live.feedStatus("connecting");
+    expect(live.snapshot().unavailable).toBe("unknown op: sys.watch");
+    live.feedStatus("live");
+    live.feedUnavailable(null);
+    expect(live.snapshot()).toEqual({ samples: [], reach: "live", unavailable: null });
+    expect(n).toBe(5);
   });
 
   it("notifies on every change and stops after unsubscribe", () => {

@@ -15,6 +15,7 @@ import {
   connectDaemonSocket,
   deployDaemon,
   deployScript,
+  stopDaemonScript,
   previewHostSuffix,
   VITE_ALLOWED_HOSTS_ENV,
   GUEST_ENVS,
@@ -174,13 +175,28 @@ describe("deployScript", () => {
     expect(GUEST_NODE.sha256.aarch64).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it("leaves no build caches or foreign prebuilds behind (the desktop template boots with ~570MB free)", () => {
+  it("drops the foreign prebuilds out of its own bundle and touches no cache of the machine's owner", () => {
     const script = deployScript("aabbcc");
     // Headers ship inside the node tarball; pointing node-gyp at them skips a 65MB download.
     expect(script).toContain("export npm_config_nodedir=/usr/local");
-    const cleanup = script.indexOf("rm -rf /root/.npm /root/.cache/node-gyp /root/wsp-daemon/node_modules/node-pty/prebuilds");
+    const cleanup = script.indexOf("rm -rf /root/wsp-daemon/node_modules/node-pty/prebuilds");
     expect(cleanup).toBeGreaterThan(script.indexOf("npm install"));
     expect(cleanup).toBeLessThan(script.indexOf("setsid"));
+    // The deploy also runs as the update of a live workspace; its owner's npm and node-gyp caches are the golden
+    // build's sweep to take, not this script's.
+    expect(script).not.toMatch(/rm -rf[^\n]*\/root\/\.(npm|cache)/);
+  });
+
+  it("stops the daemon holding the port before starting the new one, so an update replaces a running daemon instead of reading it as up", () => {
+    const script = deployScript("aabbcc");
+    const stop = script.indexOf(stopDaemonScript());
+    expect(stop).toBeGreaterThan(script.indexOf("npm install"));
+    expect(stop).toBeGreaterThan(script.indexOf("umask 077"));
+    expect(stop).toBeLessThan(script.indexOf("setsid nohup node"));
+    // The pid is read off the socket table for the daemon's port, never matched by name.
+    expect(stopDaemonScript()).toContain("ss -ltnpH 'sport = :7070'");
+    expect(stopDaemonScript()).not.toMatch(/pkill|killall|pgrep/);
+    expect(stopDaemonScript()).toContain('kill "$old"');
   });
 
   it("names the node version on stdout before installing, so the deploy log can carry it", () => {
@@ -259,6 +275,8 @@ describe("deployDaemon", () => {
       expect(stub.execLog).toEqual([deployScript("abc123")]);
       // npm install on the guest can run past what one exec is allowed, so the deploy is a run.
       expect(stub.runLog).toEqual([deployScript("abc123")]);
+      // The same deploy is the daemon update on a person's live workspace: nothing of theirs is removed.
+      expect(stub.execLog.join("\n")).not.toMatch(/rm -rf[^\n]*\/root\/\.(npm|cache)/);
       expect(uploads).toHaveLength(1);
       expect(gunzipSync(uploads[0]!).toString("latin1")).toContain("start.mjs");
 
