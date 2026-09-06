@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, NODE_RELEASES } from "@wsp/catalog";
 import { DAEMON_PORT, TOOLS_PATH, type Machine } from "@wsp/engine";
-import { writeDaemonTokenScript, type GoldenVersion, type Runtime } from "@wsp/runtime";
+import { goldenHead, writeDaemonTokenScript, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
 import type { CliIO } from "./cli.js";
 
@@ -419,8 +419,7 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
     io.log("doctor: proving the reach loop against one live machine");
 
     let golden = "";
-    const manifest = await rt.golden.get();
-    const head = manifest?.versions.find(v => v.version === manifest.head);
+    const head = goldenHead(await rt.golden.get());
     if (head) {
       golden = head.snapshotId;
       timings.add("golden image", 0, `reused v${head.version} (${golden})`);

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Snapshot storage as the provider bills it, and which of a golden's versions
 // retention may offer to delete.
-import type { GoldenManifest, GoldenVersion, SnapshotStorage } from "@wsp/protocol";
+import { goldenHead, type GoldenManifest, type GoldenVersion, type SnapshotStorage } from "@wsp/protocol";
 import type { SnapshotRow, SnapshotStoragePricing } from "./machine.js";
 
 /** The provider quotes decimal GB: a 3839352227-byte snapshot lists as 3.84 GB. */
@@ -54,7 +54,7 @@ export function retentionPlan(
   pricing: SnapshotStoragePricing,
   keepCount = RETENTION_KEEP,
 ): RetentionPlan {
-  const head = manifest.versions.find(v => v.version === manifest.head);
+  const head = goldenHead(manifest);
   const bySnapshot = new Map(manifest.versions.map(v => [v.snapshotId, v]));
   const parentOf = (v: GoldenVersion): { parent: GoldenVersion | undefined; assumed: boolean } => {
     if (v.parentSnapshotId !== undefined) return { parent: bySnapshot.get(v.parentSnapshotId), assumed: false };
