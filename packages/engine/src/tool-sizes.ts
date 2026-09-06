@@ -5,7 +5,7 @@
 // toolchain is one line; agents carry measured sizes in the catalog; a row
 // nothing measured counts at a stated default for its kind. Nothing here runs a
 // command: the host reads the Mac's Homebrew and hands the table in.
-import { AGENT_INSTALLERS, BREW_TOOLCHAIN, CATALOG_PREFIX, MANAGER_FORMULA, MACOS_ONLY_FORMULAE, cliRoad, packageOf, toolInstallsFor, type BrewFormula, type BrewTable, type RecipeEntry, type ToolSource } from "./golden-import.js";
+import { AGENT_INSTALLERS, BREW_TOOLCHAIN, CATALOG_PREFIX, MANAGER_FORMULA, MACOS_ONLY_FORMULAE, packageOf, toolInstallsFor, type BrewFormula, type BrewTable, type RecipeEntry, type ToolSource } from "./golden-import.js";
 import { LINUX_FORMULA_MIB, MIB, catalogEntry } from "@wsp/catalog";
 import { TOOLS_DISK_FLOOR } from "./golden-tools.js";
 
@@ -45,11 +45,10 @@ export interface AssumedSize {
   kind: "a go install" | "a uv tool" | "an npm global" | "an agent" | "an install";
 }
 
-/** The stated default for a tools or agents row nothing measured. A command cask's row that falls back to
- * `go install` counts as a go install: the fallback fills the same module and build caches. */
+/** The stated default for a tools or agents row nothing measured. */
 export function assumedSize(e: RecipeEntry): AssumedSize {
   if (e.rung === "agents") return { bytes: ASSUMED_MIB.agent * MIB, kind: "an agent" };
-  if (e.id.startsWith("tools/go/") || (e.id.startsWith("tools/cli/") && cliRoad(e)?.go !== undefined)) return { bytes: ASSUMED_MIB.go * MIB, kind: "a go install" };
+  if (e.id.startsWith("tools/go/")) return { bytes: ASSUMED_MIB.go * MIB, kind: "a go install" };
   if (e.id.startsWith("tools/uv/")) return { bytes: ASSUMED_MIB.uv * MIB, kind: "a uv tool" };
   if (/^tools\/(npm|pnpm|bun)\//.test(e.id)) return { bytes: ASSUMED_MIB.npm * MIB, kind: "an npm global" };
   return { bytes: ASSUMED_MIB.other * MIB, kind: "an install" };
@@ -154,7 +153,7 @@ function closureOf(name: string, brew: BrewTable): Set<string> {
 const formulaOf = (e: RecipeEntry): string | undefined => (e.id.startsWith("tools/brew/") ? e.id.slice("tools/brew/".length) : undefined);
 
 /** What one tools row puts on the machine: a formula with its closure, a measured global; nothing for a
- * tap, a cask, or a row nothing measured or read. */
+ * tap or a row nothing measured or read. */
 export function toolSize(e: RecipeEntry, brew: BrewTable): ToolSize | undefined {
   if (e.id.startsWith(CATALOG_PREFIX)) {
     const size = catalogEntry(packageOf(e))?.size;

@@ -116,35 +116,6 @@ exports[`collect > matches the fixture laptop snapshot 1`] = `
       "rung": "shell",
     },
     {
-      "bytes": 120000,
-      "default": "bring",
-      "id": "editors/nvim",
-      "label": "neovim, installed with your config",
-      "paths": [
-        "~/.config/nvim",
-      ],
-      "rung": "editors",
-    },
-    {
-      "bytes": 2000,
-      "default": "skip",
-      "id": "editors/vscode",
-      "label": "VS Code settings, for VS Code over SSH",
-      "paths": [
-        "~/Library/Application Support/Code/User/settings.json",
-      ],
-      "rung": "editors",
-    },
-    {
-      "bytes": 0,
-      "default": "bring",
-      "group": "VS Code extensions, for VS Code over SSH",
-      "id": "editors/vscode-ext/ms-python.python",
-      "label": "ms-python.python",
-      "paths": [],
-      "rung": "editors",
-    },
-    {
       "bytes": 300,
       "default": "bring",
       "id": "toolchains/mise",
@@ -190,17 +161,6 @@ exports[`collect > matches the fixture laptop snapshot 1`] = `
       "label": "jq",
       "linux": "yes",
       "paths": [],
-      "rung": "tools",
-    },
-    {
-      "bytes": 0,
-      "default": "skip",
-      "group": "Homebrew casks",
-      "id": "tools/brew-cask/rectangle",
-      "label": "rectangle",
-      "linux": "no",
-      "paths": [],
-      "reason": "macOS app, no Linux build",
       "rung": "tools",
     },
     {

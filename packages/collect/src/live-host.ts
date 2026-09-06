@@ -1,18 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { spawn } from "node:child_process";
 import { createReadStream } from "node:fs";
-import { access, constants, lstat, mkdtemp, open, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { access, constants, readdir, readFile, stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import type { Host, HostExec, HostFs, Platform, Probe, RunOptions, Stat } from "./host.js";
+import type { Host, HostExec, HostFs, Platform, RunOptions, Stat } from "./host.js";
 
 // Plugin checkouts and dependency trees live under config dirs (nvim's lazy
 // lock is fine, its .git clones are not); their size would swamp the summary
 // and they are never uploaded.
 const SKIP_DIRS = new Set([".git", "node_modules"]);
-/** Enough for any magic number and a shebang line. */
-const PROBE_BYTES = 128;
 
 async function treeBytes(dir: string): Promise<number> {
   let total = 0;
@@ -65,38 +63,6 @@ export const nodeFs: HostFs = {
     if (s.isDirectory()) return { kind: "dir", bytes: await treeBytes(path) };
     if (s.isFile()) return { kind: "file", bytes: s.size };
     return undefined;
-  },
-  async probe(path): Promise<Probe | undefined> {
-    let s;
-    let target: string | undefined;
-    try {
-      if ((await lstat(path)).isSymbolicLink()) target = await realpath(path);
-      s = await stat(path);
-    } catch {
-      return undefined;
-    }
-    if (!s.isFile()) return undefined;
-    let executable = true;
-    try {
-      await access(path, constants.X_OK);
-    } catch {
-      executable = false;
-    }
-    const probe: Probe = { ...(target !== undefined ? { target } : {}), executable, head: new Uint8Array() };
-    let fh;
-    try {
-      fh = await open(path, "r");
-    } catch {
-      return probe;
-    }
-    try {
-      const buf = new Uint8Array(PROBE_BYTES);
-      const { bytesRead } = await fh.read(buf, 0, PROBE_BYTES, 0);
-      probe.head = buf.subarray(0, bytesRead);
-    } finally {
-      await fh.close();
-    }
-    return probe;
   },
   async list(dir) {
     try {
@@ -155,22 +121,7 @@ const CLOSE_GRACE_MS = 1000;
 
 export const nodeExec: HostExec = {
   which: onPath,
-  async run(cmd, args, opts = {}) {
-    let home: string | undefined;
-    if (opts.emptyHome === true) {
-      try {
-        home = await mkdtemp(join(tmpdir(), "wsp-home-"));
-      } catch {
-        return undefined;
-      }
-    }
-    const env = { ...process.env, ...opts.env, ...(home === undefined ? {} : { HOME: home, ZDOTDIR: home }) };
-    try {
-      return await spawnRun(cmd, args, env, opts);
-    } finally {
-      if (home !== undefined) await rm(home, { recursive: true, force: true }).catch(() => undefined);
-    }
-  },
+  run: (cmd, args, opts = {}) => spawnRun(cmd, args, { ...process.env, ...opts.env }, opts),
 };
 
 function spawnRun(cmd: string, args: readonly string[], env: NodeJS.ProcessEnv, opts: RunOptions): Promise<string | undefined> {
@@ -192,7 +143,7 @@ function spawnRun(cmd: string, args: readonly string[], env: NodeJS.ProcessEnv, 
     };
     const budget = setTimeout(() => {
       failed = true;
-      killGroup(opts.killSignal ?? "SIGTERM");
+      killGroup("SIGTERM");
     }, opts.timeoutMs ?? 120_000);
     const settle = (code: number | null, signal: NodeJS.Signals | null): void => {
       if (settled) return;

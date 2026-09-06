@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The sign-in stage over a scripted daemon link: the copied logins' status
-// checks run as one script with the secrets step's file read first, so a key
-// set there counts, each row checking with its seconds until its answer turns
-// it; the row names the key source the status reports, the exported key by the
-// file it was cut from. A machine sign-in is judged by its exit code. The
-// machine sign-in with a fake shim: the page the tool asks to open, when it
+// The sign-in stage over a scripted daemon link: a copied login is recorded as
+// copied and nothing runs for it; a machine sign-in is judged by its exit code.
+// The machine sign-in with a fake shim: the page the tool asks to open, when it
 // names a callback port, is what o opens, whichever order it and the printed
 // link arrive in.
 import { PassThrough } from "node:stream";
@@ -12,25 +9,10 @@ import { stripVTControlCharacters } from "node:util";
 import type { ManifestEntry } from "@wsp/collect";
 import { describe, expect, it } from "vitest";
 import { flowHooks, signInStage, type SignInFlow, type SignInStageOptions } from "../src/init-signin.js";
-import { SH_FILE } from "../src/init-secrets.js";
-import { CHECK_RUN_LINE, checkScript } from "../src/signin-relay.js";
-import { CLAUDE_STATUS } from "../src/signin-table.js";
-import { answersChecks, checkTag, fakePtyLink, type FakePty, type FakePtyLink } from "./fake-pty-link.js";
+import { fakePtyLink, type FakePty, type FakePtyLink } from "./fake-pty-link.js";
 
 const CLAUDE: ManifestEntry = { rung: "logins", id: "logins/claude", label: "Claude Code login", group: "Agent logins", paths: [], bytes: 0, default: "bring", choice: "copy" };
-const KUBE: ManifestEntry = { rung: "logins", id: "logins/kube", label: "kubectl config", group: "CLI logins", paths: [], bytes: 0, default: "bring", choice: "copy" };
-
-/** The fake builder answers every status command with this output and exit code, the way the tool prints it. */
-function answering(status: string, exitCode = 0): FakePtyLink {
-  const link = fakePtyLink();
-  link.script = answersChecks(link, () => ({ output: status, exitCode }));
-  return link;
-}
-
 const GH: ManifestEntry = { rung: "logins", id: "logins/gh", label: "GitHub CLI login", group: "CLI logins", paths: [], bytes: 0, default: "bring", choice: "copy" };
-const GH_IN = "github.com\n  ✓ Logged in to github.com account someone (keyring)";
-/** The check script typed on this pty for these status commands, as its writes read joined. */
-const typed = (pty: FakePty, ...commands: string[]): string => checkScript(commands, SH_FILE, checkTag(pty)).map(l => `${l}\r`).join("");
 
 function stage(link: FakePtyLink, over: Partial<SignInStageOptions> & { tty?: boolean } = {}) {
   const input = new PassThrough();
@@ -91,105 +73,18 @@ function claudeOnTheMachine(order: "before" | "after" | "never") {
   return { ...st, link, flow, shim, opened, lines, ready, press };
 }
 
-describe("the sign-in stage and the key sources", () => {
-  it("runs a copied login's status check as the check script in the promptless sh, the secrets file read first when it is there, so a key the secrets step exported counts", async () => {
-    const link = answering('{\n  "loggedIn": true,\n  "authMethod": "api_key",\n  "apiKeySource": "ANTHROPIC_API_KEY"\n}');
-    const { run } = stage(link, { secrets: new Map([["ANTHROPIC_API_KEY", "~/.zshrc"]]) });
-    const [r] = await run;
-    expect(link.ptys.map(p => p.created)).toEqual([{ cols: 200, rows: 50, shell: "/bin/sh", env: { PS1: "", PS2: "" } }]);
-    expect(link.ptys[0]!.writes.join("")).toBe(typed(link.ptys[0]!, CLAUDE_STATUS));
-    expect(checkScript([CLAUDE_STATUS], SH_FILE, "t")[4]).toBe("[ -r /etc/profile.d/wsp-secrets.sh ] && . /etc/profile.d/wsp-secrets.sh");
-    expect(r).toEqual({ id: "logins/claude", label: "Claude Code login", state: "signed-in", note: "copied; API key from ~/.zshrc, set on the machine as a secret; claude auth status" });
-  });
-
-  it("every copied login is checked by one script over one link, each row checking with its seconds until its answer arrives, turning in the order the tools finish", async () => {
+describe("the sign-in stage", () => {
+  it("a copied login is recorded as copied: nothing runs on the machine for it and nothing is offered", async () => {
     const link = fakePtyLink();
-    link.script = answersChecks(link, command => (command.startsWith("gh auth status") ? { output: GH_IN, exitCode: 0, after: 2 } : { output: '{\n  "loggedIn": true,\n  "authMethod": "claude.ai"\n}', exitCode: 0, after: 1 }));
-    const st = stage(link, { logins: [GH, CLAUDE] });
-    const rows = await st.run;
-    expect(link.dials).toBe(1);
-    expect(link.ptys.map(p => p.writes.join(""))).toEqual([typed(link.ptys[0]!, "gh auth status", CLAUDE_STATUS)]);
-    expect(rows).toEqual([
-      { id: "logins/gh", label: "GitHub CLI login", state: "signed-in", note: "copied; gh auth status" },
-      { id: "logins/claude", label: "Claude Code login", state: "signed-in", note: "copied; OAuth credentials; claude auth status" },
-    ]);
-    // Off a terminal each row is written as it changes: both checking, then claude's answer, then gh's.
-    expect(st.text().replace(/\r/g, "")).toMatch(
-      /GitHub CLI login: checking: gh auth status\s+0 s\n│\s+Claude Code login: checking: claude auth status\s+0 s\n│\s+Claude Code login: signed in \(copied; OAuth credentials; claude auth status\)\n│\s+GitHub CLI login: signed in \(copied; gh auth status\)\n│\n/,
-    );
-  });
-
-  it("on a terminal a checking row's seconds tick while the guest is quiet", async () => {
-    const link = fakePtyLink();
-    const checks = answersChecks(link, () => ({ output: GH_IN, exitCode: 0 }));
-    link.script = (pty, line) => {
-      if (line === CHECK_RUN_LINE) setTimeout(() => checks(pty, line), 60);
-      else checks(pty, line);
-    };
-    let t = 0;
-    const st = stage(link, { logins: [GH], tty: true, tickMs: 10, now: () => (t += 1000) });
-    await st.run;
-    expect(st.text()).toMatch(/checking: gh auth status\s+1 s[\s\S]*checking: gh auth status\s+2 s[\s\S]*checking: gh auth status\s+3 s/);
-  });
-
-  it("a tool still silent at the shared budget is reported with the others, once, and the pty is killed", async () => {
-    const link = fakePtyLink();
-    link.script = answersChecks(link, command => (command.startsWith("gh auth status") ? { output: GH_IN, exitCode: 0 } : undefined));
-    const st = stage(link, { logins: [GH, CLAUDE], checkBudgetMs: 500, skipWhy: "nobody here" });
-    const rows = await st.run;
-    expect(rows).toEqual([
-      { id: "logins/gh", label: "GitHub CLI login", state: "signed-in", note: "copied; gh auth status" },
-      { id: "logins/claude", label: "Claude Code login", state: "not-signed-in", note: "copied, but claude auth status did not answer within 1 s" },
-    ]);
-    expect(link.ptys).toHaveLength(1);
-    expect(link.ptys[0]!.killed).toBe(true);
-    expect(st.text()).not.toContain("1 min");
-  });
-
-  it("a link that drops during the checks leaves the rows still checking not signed in, with the reason", async () => {
-    const link = fakePtyLink();
-    link.script = answersChecks(link, command => (command.startsWith("gh auth status") ? { output: GH_IN, exitCode: 0 } : undefined));
     const st = stage(link, { logins: [GH, CLAUDE], skipWhy: "nobody here" });
-    for (let i = 0; i < 100 && link.ptys.length === 0; i++) await tick();
-    await tick();
-    link.drop();
     const rows = await st.run;
-    expect(rows.map(r => r.note)).toEqual(["copied; gh auth status", "copied, but the machine's terminal link dropped during the status check"]);
-  });
-
-  it("names the key source the status reports: the helper, the OAuth credentials, or an exported key the secrets step did not set", async () => {
-    const helper = stage(answering('{\n  "loggedIn": true,\n  "authMethod": "api_key_helper",\n  "apiKeySource": "apiKeyHelper"\n}\nWSP_KEY_FILE'));
-    expect((await helper.run)[0]!.note).toBe("copied; API key from the settings.json helper, key file present; claude auth status");
-    // The helper named with no key file behind it is the failure the check exists for: the row says why, not "not signed in".
-    const emptyKey = stage(answering('{\n  "loggedIn": true,\n  "authMethod": "api_key_helper",\n  "apiKeySource": "apiKeyHelper"\n}'), { skipWhy: "nobody here" });
-    expect((await emptyKey.run)[0]).toMatchObject({ state: "not-signed-in", note: "copied, but claude auth status names the settings.json helper while its key file is missing or empty on the machine" });
-    const oauth = stage(answering('{\n  "loggedIn": true,\n  "authMethod": "claude.ai",\n  "subscriptionType": "max"\n}'));
-    expect((await oauth.run)[0]!.note).toBe("copied; OAuth credentials; claude auth status");
-    const machineEnv = stage(answering('{\n  "loggedIn": true,\n  "authMethod": "api_key",\n  "apiKeySource": "ANTHROPIC_API_KEY"\n}'));
-    expect((await machineEnv.run)[0]!.note).toBe("copied; API key from ANTHROPIC_API_KEY on the machine; claude auth status");
-    expect(oauth.text()).toContain("Claude Code login: signed in (copied; OAuth credentials; claude auth status)");
-  });
-
-  it("a status that says not signed in, or a shell that cannot find the tool, reads as before with the file sourced", async () => {
-    const none = stage(answering('{\n  "loggedIn": false,\n  "authMethod": "none"\n}', 1), { skipWhy: "nobody here" });
-    expect((await none.run)[0]).toMatchObject({ state: "not-signed-in", note: "copied, but claude auth status says not signed in" });
-    const missing = stage(answering("sh: claude: not found", 127), { skipWhy: "nobody here" });
-    expect((await missing.run)[0]).toMatchObject({ state: "copied", exit: 127, note: "not verified: claude is not on the machine" });
-  });
-
-  it("a copied kubeconfig with no context set stays not signed in and nothing is offered, since kubectl has no sign-in", async () => {
-    const unset = stage(answering("", 1), { logins: [KUBE] });
-    expect((await unset.run)[0]).toMatchObject({ state: "not-signed-in", note: "copied, but kubectl config current-context says not signed in" });
-    expect(unset.text()).not.toMatch(/sign in on the machine|r retry/);
-  });
-
-  const SECRETS = new Map([["ANTHROPIC_API_KEY", "~/.zshrc"]]);
-
-  it("opencode's stored credential is a login with no key to name, and hermes names only a key the secrets step set", async () => {
-    const stored = answering("\x1b[0m\n┌  Credentials \x1b[90m~/.local/share/opencode/auth.json\n│\n●  Anthropic \x1b[90mapi\n│\n└  1 credentials\n");
-    expect((await stage(stored, { logins: [{ ...KUBE, id: "logins/opencode", label: "opencode" }], secrets: SECRETS }).run)[0]!.note).toBe("copied; opencode auth list");
-    const machineKey = answering("anthropic (1 credentials):\n  #1  ANTHROPIC_API_KEY    api_key env:ANTHROPIC_API_KEY ←\n");
-    expect((await stage(machineKey, { logins: [{ ...KUBE, id: "logins/hermes", label: "hermes" }] }).run)[0]!.note).toBe("copied; hermes auth list");
+    expect(rows).toEqual([
+      { id: "logins/gh", label: "GitHub CLI login", state: "copied" },
+      { id: "logins/claude", label: "Claude Code login", state: "copied" },
+    ]);
+    expect(link.ptys).toEqual([]);
+    expect(st.text()).toContain("GitHub CLI login: copied");
+    expect(st.text()).not.toMatch(/checking:|r retry|s skip/);
   });
 
   it("a sign-in on the machine that exits 0 is signed in by that exit: no status check follows, the next row comes at once, and nothing is offered", async () => {

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { CLI_GROUP, detectTools, parseBrewfile, parseCaskInfo, parseBunGlobals, parseCargoInstalls, parseGoVersionM, parseNpmGlobals, parsePipxList, parsePnpmGlobals, parseUvToolList } from "../src/index.js";
+import { detectTools, parseBrewfile, parseBunGlobals, parseCargoInstalls, parseGoVersionM, parseNpmGlobals, parsePipxList, parsePnpmGlobals, parseUvToolList } from "../src/index.js";
 import { fakeHost } from "./fake-host.js";
 
 const BREWFILE = `tap "homebrew/bundle"
@@ -14,19 +14,17 @@ vscode "ms-python.python"
 `;
 
 describe("tools", () => {
-  it("parses a Brewfile into taps, formulae, casks and mas apps", () => {
+  it("parses a Brewfile into taps and formulae; casks, mas apps and vscode lines have no Linux build and make no row", () => {
     expect(parseBrewfile(BREWFILE)).toEqual([
       { kind: "tap", name: "homebrew/bundle" },
       { kind: "brew", name: "gh" },
       { kind: "brew", name: "jq" },
       { kind: "brew", name: "oven-sh/bun/bun" },
       { kind: "brew", name: "mas" },
-      { kind: "cask", name: "rectangle" },
-      { kind: "mas", name: "Xcode" },
     ]);
   });
 
-  it("Homebrew rows: formulae marked by the Linux bottle snapshot, casks and mas locked off with the macOS reason", async () => {
+  it("Homebrew rows: taps, and formulae marked by the Linux bottle snapshot", async () => {
     const host = fakeHost({ which: ["brew"], exec: { "brew bundle dump --file=-": BREWFILE } });
     const rows = await detectTools(host);
     expect(rows).toEqual([
@@ -35,8 +33,6 @@ describe("tools", () => {
       { rung: "tools", id: "tools/brew/jq", label: "jq", group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "yes" },
       { rung: "tools", id: "tools/brew/oven-sh/bun/bun", label: "oven-sh/bun/bun", group: "Homebrew", paths: [], bytes: 0, default: "skip", linux: "unknown" },
       { rung: "tools", id: "tools/brew/mas", label: "mas", group: "Homebrew", paths: [], bytes: 0, default: "skip", reason: "no Linux bottle", linux: "no" },
-      { rung: "tools", id: "tools/brew-cask/rectangle", label: "rectangle", group: "Homebrew casks", paths: [], bytes: 0, default: "skip", reason: "macOS app, no Linux build", linux: "no" },
-      { rung: "tools", id: "tools/mas/Xcode", label: "Xcode", group: "Mac App Store", paths: [], bytes: 0, default: "skip", reason: "Mac App Store, macOS only", linux: "no" },
     ]);
   });
 
@@ -54,122 +50,6 @@ describe("tools", () => {
     const host = fakeHost({ platform: "linux", which: ["brew"], exec: { "brew bundle dump --file=-": 'brew "mas"\nbrew "oven-sh/bun/bun"\n' } });
     const rows = await detectTools(host);
     expect(rows.map(r => [r.id, r.default, r.linux])).toEqual([["tools/brew/mas", "bring", "yes"], ["tools/brew/oven-sh/bun/bun", "bring", "yes"]]);
-  });
-
-  const cask = (token: string, over: Record<string, unknown> = {}) => ({ token, full_token: token, tap: "homebrew/cask", version: "1.0", url: `https://example.com/${token}.zip`, artifacts: [{ app: [`${token}.app`] }], ...over });
-  const SPOO = cask("spoo", { full_token: "spoo-me/tap/spoo", tap: "spoo-me/tap", version: "0.4.1", url: "https://github.com/spoo-me/spoo-cli/releases/download/v0.4.1/spoo_0.4.1_darwin_arm64.tar.gz", artifacts: [{ binary: ["spoo"] }, { bash_completion: ["completions/spoo.bash"] }] });
-  const SPOO_STANZA = 'cask "spoo" do\n  on_macos do\n  end\n  on_linux do\n  end\n  binary "spoo"\nend\n';
-
-  it("reads each cask's artifacts, version, tap and url out of brew info, keyed by both its token and its full token", () => {
-    const info = parseCaskInfo({ casks: [SPOO, cask("rectangle"), { token: 7 }] });
-    expect(info.get("spoo")).toEqual({ token: "spoo", fullToken: "spoo-me/tap/spoo", tap: "spoo-me/tap", version: "0.4.1", url: SPOO.url, binaries: ["spoo"], app: false });
-    expect(info.get("spoo-me/tap/spoo")).toBe(info.get("spoo"));
-    expect(info.get("rectangle")).toMatchObject({ binaries: [], app: true });
-    expect(info.size).toBe(3);
-    expect(parseCaskInfo("nope").size).toBe(0);
-  });
-
-  it("a cask whose artifact is a binary from a GitHub release is a command-line tool: one row named for the command, installed from the release; the stanza's on_linux block makes it a Linux yes", async () => {
-    const dump = 'tap "spoo-me/tap"\ncask "spoo-me/tap/spoo"\ncask "rectangle"\n';
-    const host = fakeHost({ which: ["brew"], exec: { "brew bundle dump --file=-": dump, "brew info --json=v2 --cask spoo-me/tap/spoo rectangle": JSON.stringify({ casks: [SPOO, cask("rectangle")] }), "brew cat spoo-me/tap/spoo": SPOO_STANZA } });
-    const rows = await detectTools(host);
-    expect(rows).toEqual([
-      { rung: "tools", id: "tools/cli/spoo", label: "spoo", group: CLI_GROUP, paths: ["github.com/spoo-me/spoo-cli@v0.4.1"], bytes: 0, default: "bring", linux: "yes", version: "0.4.1" },
-      { rung: "tools", id: "tools/brew-cask/rectangle", label: "rectangle", group: "Homebrew casks", paths: [], bytes: 0, default: "skip", reason: "macOS app, no Linux build", linux: "no" },
-    ]);
-    // The stanza is read only for the casks that could take the road.
-    expect(host.calls.filter(c => c.startsWith("run brew cat"))).toEqual(["run brew cat spoo-me/tap/spoo"]);
-  });
-
-  it("a release cask whose stanza has no Linux block starts unticked but tickable; a binary cask from elsewhere is locked off as a CLI with no Linux road; an app that also ships a CLI is an app; a cask brew info does not know is an app", async () => {
-    const dump = 'cask "spoo-me/tap/spoo"\ncask "ngrok"\ncask "cursor"\ncask "mystery"\n';
-    const casks = [SPOO, cask("ngrok", { url: "https://bin.ngrok.com/a/x/ngrok-v3-3.39.11-darwin-arm64.zip", artifacts: [{ binary: ["ngrok"] }] }), cask("cursor", { artifacts: [{ app: ["Cursor.app"] }, { binary: ["/Applications/Cursor.app/Contents/Resources/app/bin/code"] }] })];
-    const host = fakeHost({ which: ["brew"], exec: { "brew bundle dump --file=-": dump, "brew info --json=v2 --cask spoo-me/tap/spoo ngrok cursor mystery": JSON.stringify({ casks }), "brew cat spoo-me/tap/spoo": 'cask "spoo" do\n  binary "spoo"\nend\n' } });
-    const rows = await detectTools(host);
-    expect(rows.map(r => [r.id, r.default, r.reason, r.linux])).toEqual([
-      ["tools/cli/spoo", "skip", undefined, "unknown"],
-      ["tools/cli/ngrok", "skip", "command-line tool, but not from a GitHub release; no Linux install path", "no"],
-      ["tools/brew-cask/cursor", "skip", "macOS app, no Linux build", "no"],
-      ["tools/brew-cask/mystery", "skip", "macOS app, no Linux build", "no"],
-    ]);
-  });
-
-  it("a multi-binary cask is named for the binary that matches its token, else the first; a brew info that fails leaves every cask an app", async () => {
-    const gcloud = cask("gcloud-cli", { url: "https://github.com/g/cloud/releases/download/v1/x.tar.gz", artifacts: [{ binary: ["google-cloud-sdk/bin/bq"] }, { binary: ["google-cloud-sdk/bin/gcloud"] }] });
-    const host = fakeHost({ which: ["brew"], exec: { "brew bundle dump --file=-": 'cask "gcloud-cli"\n', "brew info --json=v2 --cask gcloud-cli": JSON.stringify({ casks: [gcloud] }), "brew cat gcloud-cli": "" } });
-    expect((await detectTools(host)).map(r => [r.id, r.label, r.linux])).toEqual([["tools/cli/gcloud", "gcloud (gcloud-cli)", "unknown"]]);
-    const failing = fakeHost({ which: ["brew"], exec: { "brew bundle dump --file=-": 'cask "gcloud-cli"\n' } });
-    expect((await detectTools(failing)).map(r => [r.id, r.reason])).toEqual([["tools/brew-cask/gcloud-cli", "macOS app, no Linux build"]]);
-  });
-
-  it("a binary artifact's target is the command on PATH: it names the row, not the downloaded file; a cask with no version string carries none", async () => {
-    const tool = cask("tool", { url: "https://github.com/o/tool/releases/download/v2.0/tool_2.0_darwin_arm64", version: "", artifacts: [{ binary: ["tool_2.0_darwin_arm64", { target: "tool" }] }] });
-    expect(parseCaskInfo({ casks: [tool] }).get("tool")!.binaries).toEqual(["tool"]);
-    const host = fakeHost({ which: ["brew"], exec: { "brew bundle dump --file=-": 'cask "tool"\n', "brew info --json=v2 --cask tool": JSON.stringify({ casks: [tool] }), "brew cat tool": "" } });
-    const rows = await detectTools(host);
-    expect(rows.map(r => [r.id, r.label])).toEqual([["tools/cli/tool", "tool"]]);
-    expect(rows[0]).not.toHaveProperty("version");
-  });
-
-  it("one token brew info cannot resolve does not empty the map: the batch is retried per token and the rest still classify", async () => {
-    const dump = 'cask "spoo-me/tap/spoo"\ncask "gone"\ncask "rectangle"\n';
-    const exec = {
-      "brew bundle dump --file=-": dump,
-      "brew info --json=v2 --cask spoo-me/tap/spoo": JSON.stringify({ casks: [SPOO] }),
-      "brew info --json=v2 --cask rectangle": JSON.stringify({ casks: [cask("rectangle")] }),
-      "brew cat spoo-me/tap/spoo": SPOO_STANZA,
-    };
-    const host = fakeHost({ which: ["brew"], exec });
-    const rows = await detectTools(host);
-    expect(rows.map(r => [r.id, r.reason])).toEqual([
-      ["tools/cli/spoo", undefined],
-      ["tools/brew-cask/gone", "macOS app, no Linux build"],
-      ["tools/brew-cask/rectangle", "macOS app, no Linux build"],
-    ]);
-    expect(host.calls.filter(c => c.startsWith("run brew info"))).toEqual([
-      "run brew info --json=v2 --cask spoo-me/tap/spoo gone rectangle",
-      "run brew info --json=v2 --cask spoo-me/tap/spoo",
-      "run brew info --json=v2 --cask gone",
-      "run brew info --json=v2 --cask rectangle",
-    ]);
-    // A batch that resolves is one call.
-    const whole = fakeHost({ which: ["brew"], exec: { ...exec, "brew info --json=v2 --cask spoo-me/tap/spoo gone rectangle": JSON.stringify({ casks: [SPOO, cask("rectangle")] }) } });
-    await detectTools(whole);
-    expect(whole.calls.filter(c => c.startsWith("run brew info"))).toHaveLength(1);
-  });
-
-  it("a Go binary named like a locked-off CLI cask keeps its own row: nothing folds into a row nobody can tick", async () => {
-    const goOut = (path: string, v: string) => `x\n\tpath\t${path}\n\tmod\t${path}\t${v}\th1:abc=\n`;
-    const ngrok = cask("ngrok", { url: "https://bin.ngrok.com/a/x/ngrok-v3-3.39.11-darwin-arm64.zip", artifacts: [{ binary: ["ngrok"] }] });
-    const exec = {
-      "brew bundle dump --file=-": 'cask "ngrok"\n',
-      "brew info --json=v2 --cask ngrok": JSON.stringify({ casks: [ngrok] }),
-      "go version -m /Users/dev/go/bin/ngrok": goOut("github.com/ngrok/ngrok-cli", "v1.0.0"),
-    };
-    const rows = await detectTools(fakeHost({ which: ["brew", "go"], files: { "~/go/bin/ngrok": 1 }, exec }));
-    expect(rows.map(r => [r.id, r.reason, r.paths])).toEqual([
-      ["tools/cli/ngrok", "command-line tool, but not from a GitHub release; no Linux install path", []],
-      ["tools/go/ngrok", undefined, ["github.com/ngrok/ngrok-cli@v1.0.0"]],
-    ]);
-  });
-
-  it("a go binary named for a CLI cask's command folds into its row: one tick, the release first and the module as the fallback; the cask's tap folds in when no formula uses it, and stays when one does", async () => {
-    const goOut = (path: string, v: string) => `x\n\tpath\t${path}\n\tmod\t${path}\t${v}\th1:abc=\n`;
-    const exec = {
-      "brew bundle dump --file=-": 'tap "spoo-me/tap"\ntap "zingzy/tap"\nbrew "zingzy/tap/diskbloom"\ncask "spoo-me/tap/spoo"\n',
-      "brew info --json=v2 --cask spoo-me/tap/spoo": JSON.stringify({ casks: [SPOO] }),
-      "brew cat spoo-me/tap/spoo": SPOO_STANZA,
-      "go version -m /Users/dev/go/bin/spoo": goOut("github.com/spoo-me/spoo-cli/cmd/spoo", "v0.3.0"),
-      "go version -m /Users/dev/go/bin/gopls": goOut("golang.org/x/tools/gopls", "v0.16.2"),
-      "npm ls -g --depth=0 --json": JSON.stringify({ dependencies: { "spoo.me": { version: "0.1.0" } } }),
-    };
-    const host = fakeHost({ which: ["brew", "go", "npm"], files: { "~/go/bin/spoo": 1, "~/go/bin/gopls": 1 }, exec });
-    const rows = await detectTools(host);
-    expect(rows.map(r => r.id)).toEqual(["tools/brew-tap/zingzy/tap", "tools/brew/zingzy/tap/diskbloom", "tools/cli/spoo", "tools/npm/spoo.me", "tools/go/gopls"]);
-    expect(rows[2]).toEqual({ rung: "tools", id: "tools/cli/spoo", label: "spoo", group: CLI_GROUP, paths: ["github.com/spoo-me/spoo-cli@v0.4.1", "github.com/spoo-me/spoo-cli/cmd/spoo@v0.3.0"], bytes: 0, default: "bring", linux: "yes", version: "0.4.1" });
-    // The same module as the release repository adds no second path.
-    const same = fakeHost({ which: ["brew", "go"], files: { "~/go/bin/spoo": 1 }, exec: { ...exec, "go version -m /Users/dev/go/bin/spoo": goOut("github.com/spoo-me/spoo-cli", "v0.4.1") } });
-    expect((await detectTools(same))[2]!.paths).toEqual(["github.com/spoo-me/spoo-cli@v0.4.1"]);
   });
 
   it("no brew means no dump is attempted", async () => {

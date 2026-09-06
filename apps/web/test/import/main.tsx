@@ -4,9 +4,11 @@
 // read (?secrets=0 for a plan with nothing secret-shaped), as the desktop
 // shell shows it. Import plays the runtime's six events a beat apart and then
 // resolves, so a test can lay out and photograph the summary, the consent box
-// and the finished steps.
+// and the finished steps. With ?long=1 the folder sits at a 120-character path
+// and four agents' sessions travelled, one of them failing, so the landed line
+// needs a third line.
 import { createRoot } from "react-dom/client";
-import type { EventUnion, ProjectImportEvent, ProjectPlan, WorkspaceView } from "@wsp/protocol";
+import type { EventUnion, ProjectAgentResult, ProjectImportEvent, ProjectPlan, WorkspaceView } from "@wsp/protocol";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api } from "../../src/protocol/client";
 import { useStore } from "../../src/protocol/store";
@@ -18,7 +20,16 @@ document.documentElement.classList.toggle("dark", params.get("theme") !== "light
 // The desktop shell's bridge, so the picker button is laid out; nothing here opens a system dialog.
 window.wsp = { pickFolder: async () => undefined };
 
-const SOURCE = "/Users/me/code/spoo";
+const LONG = params.get("long") === "1";
+const SOURCE = LONG ? "/Users/me/code/clients/northwind-traders/platform/services/billing-reconciliation/workers/nightly-settlements-batch/spoo" : "/Users/me/code/spoo";
+const agents: ProjectAgentResult[] = LONG
+  ? [
+      { agent: "claude", files: 14, bytes: 1_204_000, outcome: "moved", sessions: 6 },
+      { agent: "codex", files: 3, bytes: 88_000, outcome: "transcript-only", sessions: 2, skipped: 1 },
+      { agent: "gemini", files: 0, bytes: 0, outcome: "nothing" },
+      { agent: "opencode", files: 0, bytes: 0, outcome: "failed", error: "state.db is locked by another process on the machine" },
+    ]
+  : [];
 const workspace: WorkspaceView = { id: "ws_api", name: "api", machineId: "m_api", phase: "running", golden: "snap_g", createdAt: "2026-09-05T11:00:00Z" };
 const plan: ProjectPlan = {
   source: SOURCE,
@@ -80,7 +91,7 @@ const api: Api = {
     emit({ stage: "landing", message: `Landing at ${SOURCE}.`, elapsedMs: 7_100 });
     await beat(150);
     emit({ stage: "done", message: `1202 files, 38.0 MB, landed at ${SOURCE}.`, elapsedMs: 9_800 });
-    return { dest: SOURCE, files: 1_202, bytes: 38.0 * 1024 * 1024, parts: 1, cut, rewritten: [".git/config"], agents: [] };
+    return { dest: SOURCE, files: 1_202, bytes: 38.0 * 1024 * 1024, parts: 1, cut, rewritten: [".git/config"], agents };
   },
   subscribe: fn => {
     listeners.add(fn);

@@ -14,6 +14,13 @@ export interface ToolPin {
   sha256: string;
 }
 
+/** How an install stands against the recipe's pin: nothing recorded, the same version (checked), or a version the
+ * source has since moved to (a first install again, re-recorded). Without a version the pin's own stands. */
+export function pinStateOf(version: string | undefined, pin: ToolPin | undefined): "none" | "same" | "moved" {
+  if (pin === undefined) return "none";
+  return version === undefined || version === pin.tag ? "same" : "moved";
+}
+
 /** A package manager's global; `version` absent means the current one, or the laptop's when a row mirrors one. */
 export interface PackageRoad<K extends string> {
   road: K;

@@ -2,9 +2,10 @@
 // The import dialog in a real Chromium, both themes: every summary row, secret
 // row and step row keeps one height, the secrets box is the one element with
 // a colour of its own, every offer is whole in its row, the step labels read
-// at AA before and after they are reached, and nothing above the steps moves
-// while the import runs to done. Photographed after the folder is read and
-// after it landed.
+// at AA before and after they are reached, nothing above the steps moves
+// while the import runs to done, and a landed line that needs three lines
+// grows its box instead of being cut. Photographed after the folder is read
+// and after it landed.
 // Runs only when asked for (WSP_RENDER=1) and skips without Playwright's
 // Chromium.
 import { existsSync, mkdirSync } from "node:fs";
@@ -12,6 +13,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { textContrast } from "./contrast";
 import { startVite, stopRender, type ViteChild } from "./vite-child";
 
 const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -34,6 +36,11 @@ interface Box {
   width: number;
   height: number;
 }
+
+const LONG = "/Users/me/code/clients/northwind-traders/platform/services/billing-reconciliation/workers/nightly-settlements-batch/spoo";
+const LONG_LANDED = `spoo is at ${LONG} on api; cut .env, config/service-account.json; sessions: Claude Code moved, Codex transcripts landed, not yet listed, 1 rollout skipped, Gemini CLI nothing to bring, OpenCode failed: state.db is locked by another process on the machine.`;
+/** Two lines of the status line's text, its floor; a third line grows it past this. */
+const ROW = 28;
 
 describe.skipIf(skipped !== undefined)("the import dialog laid out in Chromium", () => {
   let vite: ViteChild | undefined;
@@ -63,36 +70,10 @@ describe.skipIf(skipped !== undefined)("the import dialog laid out in Chromium",
   };
   const heights = (b: Box[]): number[] => b.map(x => Math.round(x.height));
   const color = (selector: string): Promise<string> => page!.locator(selector).first().evaluate(el => getComputedStyle(el).borderTopColor);
-  /** WCAG contrast of each element's text over what it sits on, translucent layers composited up to the first opaque one. */
-  const contrast = (selector: string): Promise<number[]> =>
-    page!.locator(selector).evaluateAll(els =>
-      els.map(el => {
-        // Chromium reports colours mixed in oklch as color(srgb ...); a canvas pixel reads any of them as 8-bit rgba.
-        const ctx = document.createElement("canvas").getContext("2d")!;
-        const parse = (c: string): number[] => {
-          ctx.clearRect(0, 0, 1, 1);
-          ctx.fillStyle = c;
-          ctx.fillRect(0, 0, 1, 1);
-          const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
-          return [r!, g!, b!, a! / 255];
-        };
-        const over = (top: number[], under: number[]): number[] => [0, 1, 2].map(i => top[i]! * top[3]! + under[i]! * (1 - top[3]!));
-        const layers: number[][] = [];
-        for (let n: Element | null = el; n !== null && layers.at(-1)?.[3] !== 1; n = n.parentElement) {
-          const c = parse(getComputedStyle(n).backgroundColor);
-          if (c[3]! > 0) layers.push(c);
-        }
-        const bg = layers.reverse().reduce((under, top) => over(top, under), [255, 255, 255]);
-        const fg = over(parse(getComputedStyle(el).color), bg);
-        const lum = (rgb: number[]): number => {
-          const f = (v: number): number => (v / 255 <= 0.03928 ? v / 255 / 12.92 : ((v / 255 + 0.055) / 1.055) ** 2.4);
-          return 0.2126 * f(rgb[0]!) + 0.7152 * f(rgb[1]!) + 0.0722 * f(rgb[2]!);
-        };
-        const [hi, lo] = [lum(fg), lum(bg)].sort((a, b) => b - a) as [number, number];
-        return Math.round(((hi + 0.05) / (lo + 0.05)) * 100) / 100;
-      }),
-    );
+  const contrast = (selector: string): Promise<number[]> => textContrast(page!, selector);
   const whole = (selector: string): Promise<boolean[]> => page!.locator(selector).evaluateAll(els => els.map(el => el.scrollWidth <= el.clientWidth));
+  /** The element's text fits its box in both directions: nothing cut by an ellipsis, no line pushed past its height. */
+  const uncut = (selector: string): Promise<boolean> => page!.locator(selector).first().evaluate(el => el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight);
 
   it.each(["dark", "light"] as const)("in the %s theme the rows share one height, the secrets box is the one loud element, and nothing moves through the import", async theme => {
     await page!.goto(`${base}?theme=${theme}`);
@@ -133,6 +114,7 @@ describe.skipIf(skipped !== undefined)("the import dialog laid out in Chromium",
     await page!.locator("button:has-text('Import')").click();
     await page!.waitForFunction(() => document.querySelector("[data-step=done]")?.textContent?.includes("landed at"));
     await page!.waitForFunction(() => document.querySelector("[role=status]")?.textContent === "spoo is at /Users/me/code/spoo on api; cut .env, config/service-account.json.");
+    expect(await uncut("[role=status]")).toBe(true);
     const after = {
       files: (await boxes("[data-k=files]"))[0]!,
       secrets: (await boxes("[data-k=secrets]"))[0]!,
@@ -162,4 +144,17 @@ describe.skipIf(skipped !== undefined)("the import dialog laid out in Chromium",
     expect(firstStep.y - (dest.y + dest.height)).toBeLessThan(40);
     await page!.locator("[role=dialog]").screenshot({ path: join(SHOTS, "import-plain-dark.png") });
   }, 30_000);
+
+  it.each(["dark", "light"] as const)("in the %s theme a landed line that needs three lines is whole and grows its box", async theme => {
+    await page!.goto(`${base}?theme=${theme}&long=1`);
+    await page!.waitForFunction(() => document.querySelector("[data-k=files]")?.textContent === "1204 files · 38.2 MB");
+    const before = (await boxes("[role=status]"))[0]!;
+    expect(Math.round(before.height)).toBe(ROW);
+    await page!.locator("button:has-text('Import')").click();
+    await page!.waitForFunction(line => document.querySelector("[role=status]")?.textContent === line, LONG_LANDED);
+    expect(await uncut("[role=status]")).toBe(true);
+    const after = (await boxes("[role=status]"))[0]!;
+    expect(Math.round(after.height)).toBeGreaterThan(ROW);
+    await page!.locator("[role=dialog]").screenshot({ path: join(SHOTS, `import-done-long-${theme}.png`) });
+  }, 40_000);
 });

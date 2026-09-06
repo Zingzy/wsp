@@ -5,10 +5,10 @@
 // of every ticked agent. Nothing here touches a disk or a machine; golden.ts
 // runs the plan on the builder.
 import { createHash } from "node:crypto";
-import { join, relative } from "node:path";
+import { join } from "node:path";
 import { MCP_ID_PREFIX, shellQuote, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
-import { APT_INDEX, APT_UPDATE, BREW, BREW_PREFIX, CATALOG_AGENTS, CLAUDE_KEY_FILE, HOMEBREW, HOMEBREW_STEP, NODE_PATH_LINE, NODE_RELEASES, UV_INSTALL, asLinuxbrew, asLinuxbrewScript, baseEntryFor, baseNote, catalogEntry, installLine, linuxCaskFor, nodeInstallScript, pinStateOf, ROAD_MODULES, roadModule, smokeOf, vendorRoad, type InstallRoad, type NodeMajor, type RoadName, type ToolPin } from "@wsp/catalog";
+import { APT_ENV, APT_INDEX, APT_UPDATE, BREW, BREW_PREFIX, CATALOG_AGENTS, CLAUDE_KEY_FILE, HOMEBREW, HOMEBREW_STEP, NODE_PATH_LINE, NODE_RELEASES, UV_INSTALL, asLinuxbrew, asLinuxbrewScript, baseEntryFor, baseNote, catalogEntry, installLine, nodeInstallScript, pinStateOf, ROAD_MODULES, roadModule, smokeOf, type InstallRoad, type NodeMajor, type RoadName, type ToolPin } from "@wsp/catalog";
 
 export { CLAUDE_KEY_FILE, HOMEBREW, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
 
@@ -36,8 +36,6 @@ export interface RecipeEntry {
   version?: string;
   /** Only on a tools row installed from a release: the tag installed and its asset's sha256, recorded on the first install of that tag and checked while the tag stands. */
   pin?: ToolPin;
-  /** Only on a hand-installed tools row that is a Linux binary: the arch its ELF header names. */
-  arch?: string;
   /** Credential-shaped: copied only when `choice` is copy, never on the tick alone. */
   consent?: boolean;
   /** Exported names cut from the carried copy of this file, for the checklist; the pack strips every rc file it stages on its own. */
@@ -66,27 +64,6 @@ export interface PlannedFile {
   excludes: string[];
   /** The tool rewrites this path while it runs: it ships, and an attach ships it again, but it never enters the recipe hash. */
   volatile: boolean;
-  /** A copied Linux binary's arch; the pack sets the file aside on a machine of another one. */
-  arch?: string;
-}
-
-/** What the engine reads off the machine before the files are packed. */
-export interface GuestFacts {
-  /** `uname -m`; absent when the read failed. */
-  arch?: string;
-}
-
-/** The planned files a machine can run and the ones set aside: a Linux binary built for another arch than the
- * machine's, or for any arch when the machine's could not be read, never lands. */
-export function forGuest(plan: FilesPlan, guest: GuestFacts, home: string): { files: PlannedFile[]; skipped: SkippedPath[] } {
-  const skipped: SkippedPath[] = [];
-  const files = plan.files.filter(f => {
-    if (f.arch === undefined || f.arch === guest.arch) return true;
-    const machine = guest.arch === undefined ? "the machine's architecture could not be read" : `the machine is ${guest.arch}`;
-    skipped.push({ id: f.id, path: `~/${relative(home, f.source)}`, note: `built for ${f.arch}; ${machine}` });
-    return false;
-  });
-  return { files, skipped };
 }
 
 /** A credential read on this computer at pack time, from the macOS Keychain or
@@ -145,6 +122,9 @@ export interface PlanFilesOptions {
 
 const ticked = (e: RecipeEntry): boolean => e.bring === true;
 const name = (e: RecipeEntry): string => e.id.slice(e.id.indexOf("/") + 1);
+
+/** An MCP server's row: under the agents rung, filed by the MCP id prefix; the one rule every reader of the agents rung asks. */
+export const isMcpRow = (e: Pick<RecipeEntry, "rung" | "id">): boolean => e.rung === "agents" && e.id.startsWith(MCP_ID_PREFIX);
 
 // Linux has no ~/Library; these are where the same programs read on XDG systems.
 const MAC_REWRITES: readonly [string, string][] = [
@@ -340,7 +320,7 @@ const HELPERS: Record<string, { dest: string; command: (text: string | undefined
 };
 
 export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOptions): FilesPlan {
-  const rewrites = [...(opts.rewrites ?? []), ...remoteEditorRewrites(opts.platform), ...(opts.platform === "darwin" ? MAC_REWRITES : [])];
+  const rewrites = [...(opts.rewrites ?? []), ...(opts.platform === "darwin" ? MAC_REWRITES : [])];
   // A prefix rewrite also moves the directory itself when a row names it bare.
   const rewrite = (rel: string): string => {
     for (const [from, to] of rewrites) {
@@ -351,7 +331,7 @@ export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOption
   };
   const plan: FilesPlan = { files: [], secrets: [], skipped: [], bytes: 0, rungs: {} };
   for (const e of entries) {
-    if (!ticked(e) || (e.rung === "tools" && !handCopy(e))) continue;
+    if (!ticked(e) || e.rung === "tools") continue;
     if (e.rung === "logins" && e.choice !== "copy") continue;
     let brought = 0;
     for (const p of e.paths) {
@@ -427,7 +407,7 @@ export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOption
         }
       }
       const excludes = (e.excludes ?? []).filter(x => x.startsWith(`${p}/`)).map(x => join(opts.home, x.slice(2)));
-      plan.files.push({ id: e.id, source, dest: rewrite(rel), mode: st.mode & 0o7777, dir: st.kind === "dir", excludes, volatile: (e.volatile ?? []).includes(p), ...(e.arch !== undefined ? { arch: e.arch } : {}) });
+      plan.files.push({ id: e.id, source, dest: rewrite(rel), mode: st.mode & 0o7777, dir: st.kind === "dir", excludes, volatile: (e.volatile ?? []).includes(p) });
       brought++;
     }
     if (brought > 0) {
@@ -501,7 +481,7 @@ export interface Brewfile {
   taps: string[];
   formulae: string[];
   skipped: SkippedItem[];
-  /** Tap formulae with no Linux bottle whose source repository is known, and command casks; each installs from its release. */
+  /** Tap formulae with no Linux bottle whose source repository is known; each installs from its release. */
   roads: PlannedRoad[];
   /** Rows the base stage already put on every golden, by the base row's name; nothing installs them twice. */
   base: BaseRow[];
@@ -521,39 +501,23 @@ export interface PlannedRoad {
   name: string;
   source: ToolSource;
   pin?: ToolPin;
-  /** The `module@version` go install falls back to; the repository at the tag when the row names none. */
-  go?: string;
 }
 
-const CLI_PREFIX = "tools/cli/";
-const HAND_PREFIX = "tools/hand/";
 /** A tools row the recipe added for a catalog tool this computer has no row for: the tool's catalog id after the prefix. */
 export const CATALOG_PREFIX = "tools/catalog/";
 /** The note beside a catalog road's install when no golden build has proven the road yet. */
 export const UNMEASURED_ROAD = "by an unmeasured road";
 
-/** A hand-installed script or Linux binary is the one tools row that travels as a file, into the same bin directory. */
-const handCopy = (e: RecipeEntry): boolean => e.id.startsWith(HAND_PREFIX) && e.linux !== "no";
-
 /** The package a tools row names: what follows its manager in the id (a tap formula keeps its slashes). */
 export const packageOf = (e: RecipeEntry): string => e.id.split("/").slice(2).join("/");
 
-/** The base row a tools row stands for, when the base stage installs the same tool on every golden; a hand copy is a
- * file of the person's and travels whatever the base has. The Mac's version is the row's, or the brew table's for a formula. */
+/** The base row a tools row stands for, when the base stage installs the same tool on every golden. The Mac's
+ * version is the row's, or the brew table's for a formula. */
 export function baseRowFor(e: RecipeEntry, brew: BrewTable = new Map()): BaseRow | undefined {
-  if (e.rung !== "tools" || e.id.startsWith(HAND_PREFIX)) return undefined;
+  if (e.rung !== "tools") return undefined;
   const pkg = packageOf(e);
   const entry = baseEntryFor(pkg);
   return entry === undefined ? undefined : { id: e.id, name: entry.name, note: baseNote(entry, e.version ?? brew.get(pkg)?.version) };
-}
-
-/** A command cask's road, from its paths as the collector wrote them: the release's `github.com/owner/repo@tag`
- * first, a Go binary's `module@version` last when one folded into the row. */
-export function cliRoad(e: RecipeEntry): Pick<PlannedRoad, "source" | "go"> | undefined {
-  const m = /^github\.com\/([^/@]+\/[^/@]+)@(.+)$/.exec(e.paths[0] ?? "");
-  if (m === null) return undefined;
-  const go = e.paths.length > 1 ? e.paths[e.paths.length - 1] : undefined;
-  return { source: { repo: m[1]!, tag: m[2]! }, ...(go !== undefined ? { go } : {}) };
 }
 
 /** The GitHub repository a formula builds from and the tag of the version the Mac has. */
@@ -619,7 +583,7 @@ function brewSharedDeps(formulae: readonly string[]): string {
 function homebrewBootstrap(): string {
   return [
     "set -euo pipefail",
-    "export DEBIAN_FRONTEND=noninteractive",
+    APT_ENV,
     `if [ ! -x ${BREW_PREFIX}/bin/brew ]; then`,
     "  if command -v apt-get >/dev/null 2>&1; then apt-get update -qq >/dev/null 2>&1 || true; apt-get install -y -qq procps curl file git >/dev/null 2>&1 || true; fi",
     "  id -u linuxbrew >/dev/null 2>&1 || useradd -m -s /bin/bash linuxbrew",
@@ -652,18 +616,6 @@ export function brewfileFor(entries: readonly RecipeEntry[], brew: BrewTable = n
       else if (e.linux === "unknown" && formula.includes("/") && info?.source !== undefined) out.roads.push({ id: e.id, name: info.name, source: info.source, ...(e.pin !== undefined ? { pin: e.pin } : {}) });
       else if (e.linux === "unknown") out.skipped.push({ id: e.id, note: "no Linux bottle known" });
       else out.formulae.push(formula);
-    } else if (e.id.startsWith(CLI_PREFIX)) {
-      const road = cliRoad(e);
-      if (road === undefined) {
-        if (linuxCaskFor(e.id) === undefined) out.skipped.push({ id: e.id, note: "no GitHub release to install from" });
-      }
-      else out.roads.push({ id: e.id, name: e.id.slice(CLI_PREFIX.length), ...road, ...(e.pin !== undefined ? { pin: e.pin } : {}) });
-    } else if (e.id.startsWith("tools/brew-cask/")) {
-      if (linuxCaskFor(e.id) === undefined) out.skipped.push({ id: e.id, note: "macOS app, no Linux build" });
-    } else if (e.id.startsWith("tools/mas/")) {
-      out.skipped.push({ id: e.id, note: "Mac App Store, macOS only" });
-    } else if (e.id.startsWith(HAND_PREFIX) && !handCopy(e)) {
-      out.skipped.push({ id: e.id, note: e.reason ?? "no Linux build" });
     }
   }
   const lines = [...out.taps.map(t => `tap "${t}"`), ...out.formulae.map(f => `brew "${f}"`)];
@@ -687,14 +639,14 @@ export const MANAGER_FORMULA: Readonly<Partial<Record<RoadName, string>>> = { bu
 
 const pinOf = (e: { pin?: ToolPin }): { pin?: ToolPin } => (e.pin !== undefined ? { pin: e.pin } : {});
 
-/** The release road of a command or tap row whose GitHub release is known, with the pin its first install recorded. */
-const releaseRoad = (r: Pick<PlannedRoad, "source" | "pin" | "go">): InstallRoad => ({ road: "release", repo: r.source.repo, version: r.source.tag, ...pinOf(r), go: r.go ?? `github.com/${r.source.repo}@${r.source.tag}` });
+/** The release road of a tap row whose GitHub release is known, with the pin its first install recorded and the
+ * repository's main package for `go install` to fall back to. */
+const releaseRoad = (r: Pick<PlannedRoad, "source" | "pin">): InstallRoad => ({ road: "release", repo: r.source.repo, version: r.source.tag, ...pinOf(r), go: `github.com/${r.source.repo}@${r.source.tag}` });
 
 /** What a tools row installs by, with the command it puts on PATH where known: a catalog row its entry's road at the
  * row's version where the road pins one (noted when no golden build has proven the road, or when the version could not
- * be pinned), a formula row the brew road, a command or cask row its release or its vendor's, a manager row its manager's
- * road at the row's version; nothing for a row no road installs. A release or vendor road carries the pin the row's
- * first install recorded. */
+ * be pinned), a formula row the brew road, a manager row its manager's road at the row's version; nothing for a row no
+ * road installs. A road carries the pin the row's first install recorded. */
 export function rowRoad(e: RecipeEntry): PlannedRow | undefined {
   const pkg = packageOf(e);
   if (e.id.startsWith(CATALOG_PREFIX)) {
@@ -707,12 +659,6 @@ export function rowRoad(e: RecipeEntry): PlannedRow | undefined {
       ...(e.version !== undefined && mod.at === undefined ? [`${e.version} asked, installed ${mod.words} at its current version`] : []),
     ];
     return { road: { ...road, ...pinOf(e) }, bin: entry.bin, ...(notes.length > 0 ? { note: notes.join("; ") } : {}) };
-  }
-  const cask = linuxCaskFor(e.id);
-  if (cask !== undefined) return { road: vendorRoad(cask, e), bin: cask.bin };
-  if (e.id.startsWith(CLI_PREFIX)) {
-    const cli = cliRoad(e);
-    return { road: cli !== undefined ? releaseRoad({ ...cli, ...pinOf(e) }) : { road: "release", ...pinOf(e) }, bin: pkg };
   }
   const manager = (["brew", ...MANAGER_ORDER] as const).find(m => e.id.startsWith(`tools/${m}/`));
   if (manager === undefined) return undefined;
@@ -733,9 +679,8 @@ export function toolUninstall(e: RecipeEntry): { cmd: string } | { note: string 
   const base = baseRowFor(e);
   if (base !== undefined) return { note: `${base.name} is part of the base and stays` };
   if (e.id.startsWith("tools/brew-tap/")) return { cmd: withPath(asLinuxbrew(`untap ${e.id.slice("tools/brew-tap/".length)}`)) };
-  if (e.id.startsWith(HAND_PREFIX)) return { note: "a copied file; it comes off with the files" };
   const planned = rowRoad(e);
-  if (planned === undefined) return { note: e.id.startsWith("tools/brew-cask/") || e.id.startsWith("tools/mas/") ? "never installed on Linux" : "no manager known for this row" };
+  if (planned === undefined) return { note: "no manager known for this row" };
   const r = roadModule(planned.road).uninstall(planned.road, planned.bin ?? packageOf(e));
   return "cmd" in r ? { cmd: withPath(r.cmd) } : r;
 }
@@ -837,142 +782,10 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
   }
   // Last, after any go the plan brings: a road install needs no brew and waits on nothing.
   for (const r of brew.roads) plan(entries.find(e => e.id === r.id)!, { road: releaseRoad(r), bin: r.name });
-  // A cask that is a command installs from its vendor's Linux release, hashed on the guest as a road is; a command row
-  // with a GitHub release already went out as a road above.
-  for (const e of toolRows) {
-    const cask = cliRoad(e) === undefined ? linuxCaskFor(e.id) : undefined;
-    if (cask !== undefined) plan(e, { road: vendorRoad(cask, e), bin: cask.bin });
-  }
   // The catalog rows on every other road: Homebrew's (unless one went out as a manager's step above), apt's, a release, a vendor's, a script.
   const asManager = new Set([...managers.values()].flatMap(m => (m.row !== undefined ? [m.row.e.id] : [])));
   for (const { e, planned } of catalog) if (!(MANAGER_ORDER as readonly string[]).includes(planned.road.road) && !asManager.has(e.id)) plan(e, planned);
   return { installs, skipped, base: brew.base, brewfile: brew.text };
-}
-
-// --- editors -----------------------------------------------------------------
-
-/** Helix by its release tarball (https://github.com/helix-editor/helix/releases), hashed at pin time; the
- * release publishes no sums file. The tarball carries the runtime directory beside the binary. */
-export const HELIX = {
-  version: "25.07.1",
-  sha256: {
-    x86_64: "3f08e63ecd388fff657ad39722f88bb03dcf326f1f2da2700d99e1dc40ab2e8b",
-    aarch64: "ce23fa8d395e633e3e54c052012f11965d91d8d5c2bfa659685f50430b4f8175",
-  },
-} as const;
-
-const HELIX_INSTALL = [
-  "if ! command -v hx >/dev/null 2>&1; then",
-  "  command -v xz >/dev/null 2>&1 || { apt-get update -qq; apt-get install -y -qq xz-utils; }",
-  '  arch="$(uname -m)"',
-  '  case "$arch" in',
-  `    x86_64) pkg=helix-${HELIX.version}-x86_64-linux.tar.xz sha=${HELIX.sha256.x86_64} ;;`,
-  `    aarch64) pkg=helix-${HELIX.version}-aarch64-linux.tar.xz sha=${HELIX.sha256.aarch64} ;;`,
-  '    *) echo "unsupported arch: $arch" >&2; exit 1 ;;',
-  "  esac",
-  `  curl -fsSL -o "/tmp/$pkg" "https://github.com/helix-editor/helix/releases/download/${HELIX.version}/$pkg"`,
-  '  echo "$sha  /tmp/$pkg" | sha256sum -c - >/dev/null',
-  "  rm -rf /opt/helix && mkdir -p /opt/helix",
-  '  tar -xJf "/tmp/$pkg" -C /opt/helix --strip-components=1',
-  "  ln -sfn /opt/helix/hx /usr/local/bin/hx",
-  '  rm -f "/tmp/$pkg"',
-  "fi",
-].join("\n");
-
-const APT_EDITORS: Record<string, { name: string; pkg: string; bin: string }> = {
-  nvim: { name: "neovim", pkg: "neovim", bin: "nvim" },
-  vim: { name: "vim", pkg: "vim", bin: "vim" },
-  emacs: { name: "emacs", pkg: "emacs-nox", bin: "emacs" },
-};
-
-/** An editors row that puts a binary on the machine: its name as the stage says it, and how it comes off (the apt
- * package purged with what it alone pulled in; helix's tree and link). Undefined for a row that is only its files. */
-export function terminalEditor(id: string): { name: string; uninstall: string } | undefined {
-  if (!id.startsWith("editors/")) return undefined;
-  const key = id.slice("editors/".length);
-  const apt = APT_EDITORS[key];
-  if (apt !== undefined) {
-    const road: InstallRoad = { road: "apt", packages: [apt.pkg] };
-    const r = roadModule(road).uninstall(road, apt.bin);
-    return { name: apt.name, uninstall: "cmd" in r ? r.cmd : r.note };
-  }
-  if (key === "helix") return { name: "helix", uninstall: "rm -rf /opt/helix /usr/local/bin/hx" };
-  return undefined;
-}
-
-export interface RemoteEditor {
-  name: string;
-  /** The remote server's data directory under the guest home. */
-  dir: string;
-  /** The command the editor's own terminal has, which installs onto the remote. */
-  cli: string;
-}
-
-/** The editors that open a machine over SSH through a server of their own on it; their rows carry what that server reads. */
-const REMOTE_EDITORS: Record<string, RemoteEditor & { userDir: { darwin: string; linux: string } }> = {
-  vscode: { name: "VS Code", dir: ".vscode-server", cli: "code", userDir: { darwin: "Library/Application Support/Code/User", linux: ".config/Code/User" } },
-  "vscode-insiders": { name: "VS Code Insiders", dir: ".vscode-server-insiders", cli: "code-insiders", userDir: { darwin: "Library/Application Support/Code - Insiders/User", linux: ".config/Code - Insiders/User" } },
-  cursor: { name: "Cursor", dir: ".cursor-server", cli: "cursor", userDir: { darwin: "Library/Application Support/Cursor/User", linux: ".config/Cursor/User" } },
-};
-
-/** The remote editor an editors row belongs to (its settings row or one of its extension rows), or nothing. */
-export function remoteEditorFor(id: string): RemoteEditor | undefined {
-  const key = /^editors\/([a-z-]+?)(?:-ext(?:\/|$)|$)/.exec(id)?.[1];
-  const ed = key === undefined ? undefined : REMOTE_EDITORS[key];
-  return ed === undefined ? undefined : { name: ed.name, dir: ed.dir, cli: ed.cli };
-}
-
-/** Machine-scope settings the server reads on connect: the server's data dir is `--server-data-dir` (~/.vscode-server by
- * default) and its user data lives at data/ under it, so the Machine settings file sits at data/Machine/settings.json. */
-export function remoteSettingsPath(dir: string): string {
-  return `${dir}/data/Machine/settings.json`;
-}
-
-/** The ticked extension ids, one per line, for the person to install from the editor's own terminal on the machine. */
-export function extensionsFile(dir: string): string {
-  return `${dir}/extensions.txt`;
-}
-
-function remoteEditorRewrites(platform: "darwin" | "linux"): [string, string][] {
-  return Object.values(REMOTE_EDITORS).map(ed => [`${ed.userDir[platform]}/settings.json`, remoteSettingsPath(ed.dir)]);
-}
-
-const EXTENSION_ID = /^[\w-]+\.[\w-]+$/;
-
-export interface EditorsPlan {
-  installs: ToolInstall[];
-  skipped: SkippedItem[];
-}
-
-/** What the ticked editors rows do on the machine: each terminal editor installed (its config travels with the files),
- * and per remote editor one file listing the ticked extensions. The rows run with the tools, before them. */
-export function editorInstallsFor(entries: readonly RecipeEntry[]): EditorsPlan {
-  const out: EditorsPlan = { installs: [], skipped: [] };
-  const rows = entries.filter(e => ticked(e) && e.rung === "editors");
-  for (const e of rows) {
-    const key = name(e);
-    const apt = APT_EDITORS[key];
-    if (apt !== undefined) out.installs.push({ id: e.id, label: apt.name, manager: "apt", cmd: `${PRELUDE}\nexport DEBIAN_FRONTEND=noninteractive\n${APT(apt.pkg, apt.bin)}` });
-    else if (key === "helix") out.installs.push({ id: e.id, label: "helix", manager: "release", cmd: `${PRELUDE}\nexport DEBIAN_FRONTEND=noninteractive\n${HELIX_INSTALL}` });
-  }
-  for (const [key, ed] of Object.entries(REMOTE_EDITORS)) {
-    const prefix = `editors/${key}-ext/`;
-    const ids: string[] = [];
-    for (const e of rows.filter(e => e.id.startsWith(prefix))) {
-      const ext = e.id.slice(prefix.length);
-      if (EXTENSION_ID.test(ext)) ids.push(ext);
-      else out.skipped.push({ id: e.id, note: "not an extension id" });
-    }
-    if (ids.length === 0) continue;
-    const list = ids.map(shellQuote).join(" ");
-    out.installs.push({
-      id: `editors/${key}-ext`,
-      label: `${ed.name} extension list`,
-      manager: "script",
-      cmd: `${PRELUDE}\nmkdir -p "$HOME/${ed.dir}"\nprintf '%s\\n' ${list} > "$HOME/${extensionsFile(ed.dir)}"`,
-    });
-  }
-  return out;
 }
 
 // --- shell -------------------------------------------------------------------
@@ -1039,7 +852,7 @@ export function shellInstallFor(entries: readonly RecipeEntry[]): ShellInstall |
   const login = entries.find(e => e.rung === "shell" && e.login !== undefined)?.login;
   const shell: LoginShell = fish && (!zsh || login === "fish") ? "fish" : "zsh";
   const frameworks = shellRows.map(e => e.id).filter(id => id in SHELL_FRAMEWORKS);
-  const lines = [PRELUDE, "export DEBIAN_FRONTEND=noninteractive"];
+  const lines = [PRELUDE, APT_ENV];
   if (zsh) lines.push(APT("zsh"));
   if (fish) lines.push(APT("fish"));
   if (frameworks.length > 0) lines.push(APT("git"), ...frameworks.map(id => pinnedClone(SHELL_FRAMEWORKS[id]!)));
@@ -1140,7 +953,7 @@ export function agentInstallsFor(entries: readonly RecipeEntry[], extra: Record<
   const table = { ...AGENT_INSTALLERS, ...extra };
   const out: AgentsPlan = { installs: [], skipped: [] };
   for (const e of entries) {
-    if (!ticked(e) || e.rung !== "agents" || e.id.startsWith(MCP_ID_PREFIX)) continue;
+    if (!ticked(e) || e.rung !== "agents" || isMcpRow(e)) continue;
     const installer = table[name(e)];
     if (installer) out.installs.push({ id: e.id, ...installer });
     else out.skipped.push({ id: e.id, note: "no installer known" });

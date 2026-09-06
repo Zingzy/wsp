@@ -75,6 +75,9 @@ importers:
       '@pierre/trees':
         specifier: 1.0.0-beta.4
         version: 1.0.0-beta.4(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@wsp/catalog':
+        specifier: workspace:*
+        version: link:../../packages/catalog
       '@wsp/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol

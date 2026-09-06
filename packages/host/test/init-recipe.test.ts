@@ -16,8 +16,6 @@ import {
   refusedNote,
   initialTicks,
   isTickable,
-  linuxCaskRows,
-  loadManifest,
   loadRecipe,
   loginTool,
   recipePath,
@@ -30,6 +28,8 @@ import {
 import { FIXTURE, byId } from "./init-fixture.js";
 
 const ANTHROPIC = "sk-ant-x-fake-anthropic-key";
+/** The saved manifest as the next run reads it. */
+const loadManifest = (path: string) => parseManifest(JSON.parse(readFileSync(path, "utf8")));
 
 describe("manifest ticks", () => {
   it("a skip with a reason cannot be ticked; a bare skip can", () => {
@@ -64,49 +64,31 @@ describe("login choices", () => {
 });
 
 describe("the command a login needs", () => {
-  const GCLOUD_CASK: ManifestEntry = { rung: "tools", id: "tools/brew-cask/gcloud-cli", label: "gcloud-cli", group: "Homebrew casks", paths: [], bytes: 0, default: "skip", reason: "macOS app, no Linux build", linux: "no" };
-  const DOCKER_CASK: ManifestEntry = { ...GCLOUD_CASK, id: "tools/brew-cask/docker-desktop", label: "docker-desktop" };
-  const RECTANGLE: ManifestEntry = { ...GCLOUD_CASK, id: "tools/brew-cask/rectangle", label: "rectangle" };
   const AWSCLI: ManifestEntry = { rung: "tools", id: "tools/brew/awscli", label: "awscli", group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "yes" };
-  /** gcloud-cli as the collector reads it when brew info answers: a command row, locked since Google's release is not on GitHub. */
-  const GCLOUD_CLI: ManifestEntry = { rung: "tools", id: "tools/cli/gcloud", label: "gcloud (gcloud-cli)", group: "Command-line tools", paths: [], bytes: 0, default: "skip", reason: "command-line tool, but not from a GitHub release; no Linux install path", linux: "no", version: "575.0.0" };
+  const LOCKED_AWSCLI: ManifestEntry = { ...AWSCLI, default: "skip", reason: "no Linux bottle", linux: "no" };
+  /** The bare row the recipe adds for a catalog tool this computer has no row for. */
+  const catalogRow = (id: string, label: string): ManifestEntry => ({ rung: "tools", id: `tools/catalog/${id}`, label, group: "Catalog", paths: [], bytes: 0, default: "skip", linux: "yes" });
+  const GCLOUD_ROW = catalogRow("gcloud", "Google Cloud CLI");
+  const KUBECTL_ROW: ManifestEntry = { rung: "tools", id: "tools/brew/kubernetes-cli", label: "kubernetes-cli", group: "Homebrew", paths: [], bytes: 0, default: "skip", linux: "yes" };
   const login = (id: string, label: string): ManifestEntry => ({ rung: "logins", id: `logins/${id}`, label, group: "CLI logins", paths: [`~/.${id}`], bytes: 10, default: "bring" });
   const GCLOUD = login("gcloud", "Google Cloud login");
   const WRANGLER = login("wrangler", "Cloudflare Wrangler login");
   const KUBE = login("kube", "kubectl config");
   const AWS = login("aws", "AWS keys and profiles");
-  const opened = linuxCaskRows([GCLOUD_CASK, DOCKER_CASK, RECTANGLE, AWSCLI]);
 
-  it("linuxCaskRows opens a cask the table knows to a tick, unticked and Linux yes, and leaves every other row as it was", () => {
-    expect(opened[0]).toEqual({ rung: "tools", id: "tools/brew-cask/gcloud-cli", label: "gcloud-cli", group: "Homebrew casks", paths: [], bytes: 0, default: "skip", linux: "yes" });
-    expect(isTickable(opened[0]!)).toBe(true);
-    expect(opened[1]).toMatchObject({ id: "tools/brew-cask/docker-desktop", linux: "yes" });
-    expect(opened[1]!.reason).toBeUndefined();
-    expect(opened[2]).toEqual(RECTANGLE);
-    expect(opened[3]).toEqual(AWSCLI);
-    // A saved tick stands: the row keeps its bring flag.
-    expect(linuxCaskRows([{ ...GCLOUD_CASK, bring: true }])[0]).toMatchObject({ bring: true, default: "skip" });
-    // The command row the collector makes of gcloud-cli opens the same way, its version kept for the install.
-    expect(linuxCaskRows([GCLOUD_CLI])[0]).toEqual({ rung: "tools", id: "tools/cli/gcloud", label: "gcloud (gcloud-cli)", group: "Command-line tools", paths: [], bytes: 0, default: "skip", linux: "yes", version: "575.0.0" });
-  });
-
-  it("a login's command is coming when its tools row is ticked, else the row is named as unticked, locked, or missing with what would bring it", () => {
-    const manifest = { entries: [...opened, ...FIXTURE.entries, GCLOUD, WRANGLER, KUBE, AWS] };
+  it("a login's command is coming when its tools row is ticked, else the row is named as unticked, locked, or missing with the catalog entry that brings it", () => {
+    const manifest = { entries: [GCLOUD_ROW, KUBECTL_ROW, AWSCLI, ...FIXTURE.entries, GCLOUD, WRANGLER, KUBE, AWS] };
     const none = new Set<string>();
-    expect(loginTool(GCLOUD, manifest, none)).toEqual({ bin: "gcloud", row: opened[0], coming: false, why: "gcloud is not coming: its tool row is unticked; copy or sign in ticks it" });
-    expect(loginTool(GCLOUD, manifest, new Set(["tools/brew-cask/gcloud-cli"]))).toEqual({ bin: "gcloud", row: opened[0], coming: true });
-    expect(loginTool(WRANGLER, manifest, none)).toEqual({ bin: "wrangler", coming: false, why: "wrangler is not coming: no row lists it; npm install -g wrangler brings it" });
-    // kubectl comes with Docker Desktop on this computer; the table names the cask that brings the Linux build.
-    expect(loginTool(KUBE, manifest, none)).toMatchObject({ bin: "kubectl", row: opened[1], coming: false, why: "kubectl is not coming: its tool row is unticked; copy or sign in ticks it" });
-    expect(loginTool(KUBE, { entries: [KUBE] }, none)?.why).toBe("kubectl is not coming: no row lists it; a docker-desktop cask would bring it");
-    // The command row of the same cask counts by its command.
-    const cli = linuxCaskRows([GCLOUD_CLI])[0]!;
-    expect(loginTool(GCLOUD, { entries: [cli, GCLOUD] }, new Set(["tools/cli/gcloud"]))).toEqual({ bin: "gcloud", row: cli, coming: true });
-    expect(loginTool(GCLOUD, { entries: [GCLOUD_CLI, GCLOUD] }, none)?.why).toBe("gcloud is not coming: its tool row cannot come (command-line tool, but not from a GitHub release; no Linux install path)");
-    // A formula not named for its command still counts.
+    expect(loginTool(GCLOUD, manifest, none)).toEqual({ bin: "gcloud", row: GCLOUD_ROW, coming: false, why: "gcloud is not coming: its tool row is unticked; copy or sign in ticks it" });
+    expect(loginTool(GCLOUD, manifest, new Set(["tools/catalog/gcloud"]))).toEqual({ bin: "gcloud", row: GCLOUD_ROW, coming: true });
+    expect(loginTool(WRANGLER, manifest, none)).toEqual({ bin: "wrangler", coming: false, why: "wrangler is not coming: no row lists it; tick Cloudflare Wrangler under What they need to bring it" });
+    expect(loginTool(KUBE, manifest, none)).toMatchObject({ bin: "kubectl", row: KUBECTL_ROW, coming: false, why: "kubectl is not coming: its tool row is unticked; copy or sign in ticks it" });
+    expect(loginTool(KUBE, { entries: [KUBE] }, none)?.why).toBe("kubectl is not coming: no row lists it; tick kubectl under What they need to bring it");
+    // A formula not named for its command still counts; a locked row says so.
     expect(loginTool(AWS, manifest, new Set(["tools/brew/awscli"]))).toEqual({ bin: "aws", row: AWSCLI, coming: true });
-    // A cask the table does not know stays locked, and the login says so.
-    expect(loginTool(GCLOUD, { entries: [RECTANGLE, { ...GCLOUD_CASK }, GCLOUD] }, none)).toMatchObject({ coming: false, why: "gcloud is not coming: its tool row cannot come (macOS app, no Linux build)" });
+    expect(loginTool(AWS, { entries: [LOCKED_AWSCLI, AWS] }, none)).toMatchObject({ coming: false, why: "aws is not coming: its tool row cannot come (no Linux bottle)" });
+    // A command the catalog does not know is named plainly.
+    expect(loginTool({ ...KUBE, id: "logins/cloudflared" }, { entries: [] }, none)?.why).toBe("cloudflared is not coming: no row lists it; tick cloudflared under What they need to bring it");
     // gh's row is ticked in the fixture's defaults; an agent's login follows its agent, not a tools row.
     expect(loginTool(byId("logins/gh"), manifest, new Set(["tools/brew/gh"]))).toEqual({ bin: "gh", row: byId("tools/brew/gh"), coming: true });
     expect(loginTool(byId("logins/claude"), manifest, none)).toBeUndefined();
@@ -121,13 +103,13 @@ describe("the command a login needs", () => {
   });
 
   it("tickLoginTools ticks the row of every login answered copy or sign in; a skip, a coming row and a locked row leave the ticks alone", () => {
-    const manifest = { entries: [...opened, GCLOUD, KUBE, WRANGLER, AWS, AWSCLI] };
+    const manifest = { entries: [GCLOUD_ROW, KUBECTL_ROW, GCLOUD, KUBE, WRANGLER, AWS, AWSCLI] };
     const ticks = new Set<string>(["tools/brew/awscli"]);
     const added = tickLoginTools(manifest, new Map([["logins/gcloud", "copy"], ["logins/kube", "machine"], ["logins/wrangler", "copy"], ["logins/aws", "copy"]]), ticks);
-    expect(added).toEqual(["gcloud-cli", "docker-desktop"]);
-    expect([...ticks]).toEqual(["tools/brew/awscli", "tools/brew-cask/gcloud-cli", "tools/brew-cask/docker-desktop"]);
+    expect(added).toEqual(["Google Cloud CLI", "kubernetes-cli"]);
+    expect([...ticks]).toEqual(["tools/brew/awscli", "tools/catalog/gcloud", "tools/brew/kubernetes-cli"]);
     const untouched = new Set<string>();
-    expect(tickLoginTools({ entries: [RECTANGLE, GCLOUD_CASK, GCLOUD] }, new Map([["logins/gcloud", "copy"]]), untouched)).toEqual([]);
+    expect(tickLoginTools({ entries: [LOCKED_AWSCLI, AWS] }, new Map([["logins/aws", "copy"]]), untouched)).toEqual([]);
     expect(tickLoginTools(manifest, new Map([["logins/gcloud", "skip"]]), untouched)).toEqual([]);
     expect(untouched.size).toBe(0);
   });
@@ -146,8 +128,8 @@ describe("npm globals an agent installs itself", () => {
 });
 
 describe("rows the plan refuses by name", () => {
-  const env: ManifestEntry = { rung: "everything", id: "everything/.env", label: ".env", paths: ["~/.env"], bytes: 20, default: "skip", role: "unknown", files: 1, mtime: 1 };
-  const netrc: ManifestEntry = { rung: "everything", id: "everything/.netrc", label: ".netrc", paths: ["~/.netrc"], bytes: 30, default: "skip", consent: true, role: "credential", files: 1, mtime: 1 };
+  const env: ManifestEntry = { rung: "shell", id: "shell/env", label: ".env", paths: ["~/.env"], bytes: 20, default: "skip" };
+  const netrc: ManifestEntry = { rung: "shell", id: "shell/netrc", label: ".netrc", paths: ["~/.netrc"], bytes: 30, default: "skip", consent: true };
 
   const file = () => false;
   const dir = () => true;
@@ -178,8 +160,8 @@ describe("rows the plan refuses by name", () => {
 });
 
 describe("consent rows", () => {
-  const token: ManifestEntry = { rung: "everything", id: "everything/.demo-token", label: ".demo-token", paths: ["~/.demo-token"], bytes: 40, default: "skip", consent: true, role: "credential", files: 1, mtime: 1 };
-  const plain: ManifestEntry = { rung: "everything", id: "everything/.config/demo", label: "demo", paths: ["~/.config/demo"], bytes: 300, default: "skip", role: "config", files: 2, mtime: 1 };
+  const token: ManifestEntry = { rung: "agents", id: "agents/mcp/claude/github", label: "github", paths: [], bytes: 0, default: "bring", consent: true };
+  const plain: ManifestEntry = { rung: "agents", id: "agents/mcp/claude/notes", label: "notes", paths: [], bytes: 0, default: "skip" };
 
   it("a login or a credential-shaped row is answered, not ticked; its answer starts at skip, a saved tick alone is not consent, and a saved choice wins", () => {
     expect(hasChoices(token)).toBe(true);
@@ -194,25 +176,22 @@ describe("consent rows", () => {
     expect(initialTicks({ ...plain, bring: true })).toBe(true);
   });
 
-  it("the schema takes a choice on a consent row and refuses one on a plain row, and keeps role, files and mtime to the everything rung", () => {
+  it("the schema takes a choice on a consent row and refuses one on a plain row", () => {
     expect(parseManifest({ entries: [{ ...token, choice: "copy" }] }).entries[0]).toMatchObject({ choice: "copy", consent: true });
     expect(() => parseManifest({ entries: [{ ...plain, choice: "copy" }] })).toThrow(/entries\.0\.choice: only a logins row or a consent row carries a choice/);
-    expect(() => parseManifest({ entries: [{ ...byId("shell/zshrc"), role: "config" }] })).toThrow(/entries\.0\.role: only an everything row carries role/);
-    expect(() => parseManifest({ entries: [{ ...byId("shell/zshrc"), files: 2 }] })).toThrow(/entries\.0\.files/);
     expect(parseManifest({ entries: [{ ...byId("shell/zshrc"), excludes: ["~/.zshrc.d/secret"] }] }).entries[0]).toMatchObject({ excludes: ["~/.zshrc.d/secret"] });
   });
 
-  it("the recipe round-trips an everything row: tick, answer, excludes and the row facts come back as saved", () => {
+  it("the recipe round-trips a consent row and an excludes list: tick, answer and excludes come back as saved", () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-recipe-"));
     try {
       const path = join(dir, "golden-recipe.json");
-      const withExcludes = { ...plain, excludes: ["~/.config/demo/cache"], detail: "looks like config" };
-      saveRecipe(path, { entries: [...FIXTURE.entries, withExcludes, token] }, new Set(["everything/.config/demo", "everything/.demo-token"]), new Map([["everything/.demo-token", "copy"]]));
+      const withExcludes = { ...byId("shell/zshrc"), excludes: ["~/.zshrc.d/secret"] };
+      saveRecipe(path, { entries: [...FIXTURE.entries.filter(e => e.id !== "shell/zshrc"), withExcludes, token] }, new Set(["shell/zshrc", "agents/mcp/claude/github"]), new Map([["agents/mcp/claude/github", "copy"]]));
       const back = loadManifest(path);
-      expect(back.entries.find(e => e.id === "everything/.config/demo")).toEqual({ ...withExcludes, bring: true });
-      expect(back.entries.find(e => e.id === "everything/.demo-token")).toEqual({ ...token, bring: true, choice: "copy" });
-      expect(back.entries.filter(e => e.rung === "everything").map(initialTicks)).toEqual([true, true]);
-      expect(initialChoice(back.entries.find(e => e.id === "everything/.demo-token")!)).toBe("copy");
+      expect(back.entries.find(e => e.id === "shell/zshrc")).toEqual({ ...withExcludes, bring: true });
+      expect(back.entries.find(e => e.id === "agents/mcp/claude/github")).toEqual({ ...token, bring: true, choice: "copy" });
+      expect(initialChoice(back.entries.find(e => e.id === "agents/mcp/claude/github")!)).toBe("copy");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -296,14 +275,6 @@ describe("recipe file", () => {
     expect(back.entries.filter(initialTicks).map(e => e.id)).toEqual(["identity/git-user", "shell/zshrc", "agents/claude", "logins/claude"]);
     expect(back.entries.filter(e => e.rung === "logins").map(initialChoice)).toEqual(["machine", "copy", "machine"]);
   });
-
-  it("loadManifest reports the path on a bad file, ahead of the collector's reason", () => {
-    dir = mkdtempSync(join(tmpdir(), "wsp-recipe-"));
-    expect(() => loadManifest(join(dir, "missing.json"))).toThrow(/missing\.json/);
-    const path = join(dir, "recipe.json");
-    writeFileSync(path, JSON.stringify({ entries: [{ ...byId("shell/zshrc"), choice: "copy" }] }));
-    expect(() => loadManifest(path)).toThrow(/recipe\.json: invalid manifest: entries\.0\.choice: only a logins row or a consent row carries a choice/);
-  });
 });
 
 describe("the small recipe", () => {
@@ -337,7 +308,7 @@ describe("the small recipe", () => {
     expect(loadRecipe(path)).toEqual(RECIPE);
   });
 
-  it("applyRecipe ticks the agents and tools rows from the catalog ids, turns editors and everything off, and leaves the other rungs to their defaults", () => {
+  it("applyRecipe ticks the agents and tools rows from the catalog ids and leaves the other rungs to their defaults", () => {
     const applied = applyRecipe({ ...FIXTURE, entries: [...FIXTURE.entries, { rung: "agents", id: "agents/mcp/claude/spoo-ops", label: "spoo-ops", paths: [], bytes: 0, default: "bring" }, { rung: "agents", id: "agents/mcp/codex/axiom", label: "axiom", paths: [], bytes: 0, default: "bring" }, { rung: "agents", id: "agents/mcp/mcp-remote", label: "mcp-remote", paths: [], bytes: 0, default: "bring" }, { rung: "tools", id: "tools/brew/openjdk@21", label: "openjdk@21", paths: [], bytes: 0, default: "skip", reason: "no Linux bottle" }] }, RECIPE);
     const bring = new Map(applied.entries.map(e => [e.id, e.bring]));
     expect(bring.get("agents/claude")).toBe(false);
@@ -355,8 +326,6 @@ describe("the small recipe", () => {
     // The ticked tools rows are gh's and the bare row the recipe added for agent-browser, which this Mac has no row for.
     expect(applied.entries.filter(e => e.rung === "tools" && initialTicks(e)).map(e => e.id)).toEqual(["tools/brew/gh", "tools/catalog/agent-browser"]);
     for (const id of ["identity/git-user", "identity/ssh-key", "shell/zshrc", "toolchains/mise"]) expect(bring.has(id) && bring.get(id) === undefined, id).toBe(true);
-    expect(bring.get("editors/nvim")).toBe(false);
-    expect(applyRecipe({ entries: [{ rung: "everything", id: "everything/.demo", label: ".demo", paths: ["~/.demo"], bytes: 10, default: "bring" }] }, RECIPE).entries[0]).toMatchObject({ bring: false });
     // The saved sign-in answer lands on the login row; a login the recipe did not answer keeps its own default.
     expect(applied.entries.find(e => e.id === "logins/gh")).toMatchObject({ choice: "copy" });
     expect(applied.entries.find(e => e.id === "logins/gh")?.bring).toBeUndefined();
