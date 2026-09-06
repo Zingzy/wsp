@@ -215,6 +215,17 @@ function summarize(rows: readonly Pending[]): string {
   return parts.length > 0 ? parts.join("; ") : "nothing to do";
 }
 
+/** The servers by outcome for the stage's end line, `11 installed, 9 skipped, 2 on first use`, the zero counts left
+ * out; nothing when the plan named no server. */
+export function mcpTally(rows: readonly McpResult[]): string | undefined {
+  const words: [McpResult["outcome"], string][] = [["installed", "installed"], ["skipped", "skipped"], ["fetched-on-first-use", "on first use"]];
+  const said = words.flatMap(([outcome, word]) => {
+    const n = rows.filter(r => r.outcome === outcome).length;
+    return n > 0 ? [`${n} ${word}`] : [];
+  });
+  return said.length > 0 ? said.join(", ") : undefined;
+}
+
 const strip = (r: Pending): McpResult => ({ id: r.id, agent: r.agent, name: r.name, outcome: r.outcome, ...(r.notes.length > 0 ? { note: r.notes.join("; ") } : {}) });
 
 interface GuestScope extends Omit<McpScope, "format"> {

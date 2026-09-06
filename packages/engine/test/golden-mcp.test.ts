@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import { applyMcp, mcpPlanFor, type McpPlan, type McpResult } from "../src/golden-mcp.js";
+import { applyMcp, mcpPlanFor, mcpTally, type McpPlan, type McpResult } from "../src/golden-mcp.js";
 import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, type McpFormat, type McpGuestEditor } from "@wsp/catalog";
 import { MCP_ID_PREFIX } from "@wsp/protocol";
 import type { RecipeEntry } from "../src/golden-import.js";
@@ -252,6 +252,13 @@ describe("applyMcp", () => {
     expect(cmds.filter(c => c.includes("astral-sh/uv/releases"))).toHaveLength(1);
     expect(cmds.indexOf(checks[0]!)).toBeLessThan(cmds.findIndex(c => c.includes("astral-sh/uv/releases")));
     expect(cmds.some(c => c.includes("ghp_secret"))).toBe(false);
+  });
+
+  it("the tally for the stage's end line counts the servers by outcome, zero counts left out, and says nothing for an empty plan", () => {
+    const row = (name: string, outcome: McpResult["outcome"]): McpResult => ({ id: `${MCP_ID_PREFIX}claude/${name}`, agent: "Claude Code", name, outcome });
+    expect(mcpTally([row("a", "installed"), row("b", "installed"), row("c", "skipped"), row("d", "fetched-on-first-use")])).toBe("2 installed, 1 skipped, 1 on first use");
+    expect(mcpTally([row("a", "installed")])).toBe("1 installed");
+    expect(mcpTally([])).toBeUndefined();
   });
 
   const geminiOnly = (root: string, over: Partial<McpPlan> = {}): McpPlan =>

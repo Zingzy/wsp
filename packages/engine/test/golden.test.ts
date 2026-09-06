@@ -1430,7 +1430,7 @@ describe("golden import stages", () => {
     expect(results).toEqual([]);
     expect(stages.slice(0, 5)).toEqual(["applying-setup:already applied", "uploading-files:already applied", "installing-harness:already applied", "installing-tools:already applied", "installing-mcp:Claude Code 1"]);
     expect(stages.at(-2)).toBe("installing-mcp:github skipped (the config edit did not run (exit 0)); 2.9 GB free");
-    expect(stages.at(-1)).toEqual(CONTEXT_WRITTEN);
+    expect(stages.at(-1)).toMatch(/^installing-mcp:1 skipped; machine context: \d+(\.\d+)? KB written; no agent on the machine$/);
     expect(cmds.length).toBeGreaterThan(before);
     expect(cmds.at(-1)).toBe("echo ok");
   });
