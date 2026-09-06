@@ -1,35 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// What the import dialog computes from the wire: the step rows an import
-// passes, which events are its own, the consent it asks for and the request
-// that consent becomes. No React here.
+// What the import dialog computes from the wire: the steps an import passes,
+// which events are its own, the consent it asks for and the request that
+// consent becomes. No React here.
 import type { ProjectImportEvent, ProjectImportResult, ProjectImportStage, ProjectPlan, ProjectSecret } from "@wsp/protocol";
+import { agentOutcomes, folderName, stepRows, type StepRow } from "./projectTrip.js";
 
 /** The steps every import passes in order; `failed` is not a step, it is the error line. */
 export const IMPORT_STEPS = ["planned", "consented", "packing", "uploading", "landing", "done"] as const satisfies readonly ProjectImportStage[];
 export type ImportStep = (typeof IMPORT_STEPS)[number];
 
-export interface StepRow {
-  readonly stage: ImportStep;
-  /** The runtime's sentence for the step, or nothing before it was reached. */
-  readonly message: string | null;
-  readonly elapsedMs: number | null;
-  /** Bytes sent of the archive's total while uploading, 0 to 1. */
-  readonly fraction: number | null;
-}
-
-const isStep = (stage: ProjectImportStage): stage is ImportStep => (IMPORT_STEPS as readonly string[]).includes(stage);
-
-/** One row per step, each holding the last event the runtime sent for it. */
-export function stepRows(events: readonly ProjectImportEvent[]): StepRow[] {
-  const last = new Map<ImportStep, ProjectImportEvent>();
-  for (const e of events) if (isStep(e.stage)) last.set(e.stage, e);
-  return IMPORT_STEPS.map(stage => {
-    const e = last.get(stage);
-    if (e === undefined) return { stage, message: null, elapsedMs: null, fraction: null };
-    const fraction = e.bytes !== undefined && e.total !== undefined && e.total > 0 ? e.bytes / e.total : null;
-    return { stage, message: e.message, elapsedMs: e.elapsedMs, fraction };
-  });
-}
+export const importStepRows = (events: readonly ProjectImportEvent[]): StepRow<ImportStep>[] => stepRows(IMPORT_STEPS, events);
 
 /** Whether an event is this import's: the runtime echoes the path as typed, the plan carries its realpath. */
 export function isImportOf(e: ProjectImportEvent, workspaceId: string, source: string, plan: ProjectPlan | null): boolean {
@@ -67,11 +47,9 @@ export function secretOffer(s: ProjectSecret, ticked: boolean): { short: string;
   return { short: `lands${bare([...new Set(s.rewrite.urls.map(host))])}${without}`, full: `lands${bare(s.rewrite.urls)}${without}` };
 }
 
-/** The folder's own name from the path as typed. */
-export const folderName = (source: string): string => source.replace(/\/+$/, "").split("/").at(-1) ?? source;
-
-/** Where the folder landed and, as the consent box promised, which secret-shaped files were cut on the way. */
+/** Where the folder landed, which secret-shaped files were cut on the way as the consent box promised, and what became of each agent's sessions. */
 export function landedLine(result: ProjectImportResult, source: string, workspaceName: string): string {
   const cut = result.cut.length > 0 ? `; cut ${result.cut.join(", ")}` : "";
-  return `${folderName(source)} is at ${result.dest} on ${workspaceName}${cut}.`;
+  const sessions = result.agents.length > 0 ? `; sessions: ${agentOutcomes(result.agents)}` : "";
+  return `${folderName(source)} is at ${result.dest} on ${workspaceName}${cut}${sessions}.`;
 }

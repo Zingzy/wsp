@@ -93,6 +93,8 @@ describe.skipIf(skipped !== undefined)("the import dialog laid out in Chromium",
       }),
     );
   const whole = (selector: string): Promise<boolean[]> => page!.locator(selector).evaluateAll(els => els.map(el => el.scrollWidth <= el.clientWidth));
+  /** The element's text fits its box in both directions: nothing cut by an ellipsis, no line pushed past its height. */
+  const uncut = (selector: string): Promise<boolean> => page!.locator(selector).first().evaluate(el => el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight);
 
   it.each(["dark", "light"] as const)("in the %s theme the rows share one height, the secrets box is the one loud element, and nothing moves through the import", async theme => {
     await page!.goto(`${base}?theme=${theme}`);
@@ -133,6 +135,7 @@ describe.skipIf(skipped !== undefined)("the import dialog laid out in Chromium",
     await page!.locator("button:has-text('Import')").click();
     await page!.waitForFunction(() => document.querySelector("[data-step=done]")?.textContent?.includes("landed at"));
     await page!.waitForFunction(() => document.querySelector("[role=status]")?.textContent === "spoo is at /Users/me/code/spoo on api; cut .env, config/service-account.json.");
+    expect(await uncut("[role=status]")).toBe(true);
     const after = {
       files: (await boxes("[data-k=files]"))[0]!,
       secrets: (await boxes("[data-k=secrets]"))[0]!,
