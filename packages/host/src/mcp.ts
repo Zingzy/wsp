@@ -9,14 +9,15 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { ProjectExportResult, ProjectGolden, SessionStartOutcome, ThreadView, WorkspaceView } from "@wsp/protocol";
 import { VERSION } from "./version.js";
-import { absoluteFolder, create, createFromHead, dialHost, execOn, exportProject, follow, nap, notifyOf, openingOf, projectGoldenOf, resumeOf, snapshot, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
+import { absoluteFolder, create, createFromHead, dialHost, execOn, exportProject, follow, forget, forgetting, forgotLine, nap, notifyOf, openingOf, projectGoldenOf, resumeOf, snapshot, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
 
 const INSTRUCTIONS = [
   "wsp runs cloud machines called workspaces, each with agents working inside it, and this server is the same host the",
   "person's app is open on: whatever you do here shows in their sidebar, and they can read and answer any thread.",
   "Start with workspaces. Open a thread with thread_new (a workspace, a task, and the agent to run, such as codex);",
   "it returns the reply when the turn ends. Continue a thread with send. Run a command on a machine with exec.",
-  "new forks the golden image into a fresh machine, or with from, a project golden; fork makes a sibling of a workspace, pause naps one.",
+  "new forks the golden image into a fresh machine, or with from, a project golden; fork makes a sibling of a workspace, pause naps one,",
+  "forget drops one whose machine the provider no longer has.",
   "snapshot takes a project golden of a workspace with a project loaded: the golden plus that project as it stands, so every",
   "new machine forked from it starts a task with the project in place and no upload.",
   "export brings a project folder and the agent sessions keyed to it home from a workspace's machine to this computer.",
@@ -152,6 +153,21 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
     "pause",
     { description: "Naps the workspace's machine; it wakes on the next thread or command.", inputSchema: { workspace }, outputSchema: { workspace: WorkspaceView } },
     async ({ workspace: ref }) => asJson({ workspace: await nap(await dial(), ref) }),
+  );
+  server.registerTool(
+    "forget",
+    {
+      description:
+        "Drops a workspace whose machine the provider no longer has: its record and its threads leave this computer and the person's sidebar, and nothing is asked of the provider. Refused in one line while the machine still exists (pause it, or delete it at the provider, first).",
+      inputSchema: { workspace },
+      outputSchema: { workspaceId: z.string(), name: z.string(), threads: z.number().int() },
+    },
+    async ({ workspace: ref }) => {
+      const client = await dial();
+      const f = await forgetting(client, ref);
+      await forget(client, f);
+      return asText(forgotLine(f), { workspaceId: f.workspace.id, name: f.workspace.name, threads: f.threads });
+    },
   );
   server.registerTool(
     "thread_new",

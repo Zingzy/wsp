@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The workspace sidebar over the fixture wire: rows from the store's
 // workspaces, statuses, costs and sessions; grouping; search; keyboard
-// traversal; the new-workspace dialog; the zombie rebuild action.
+// traversal; the new-workspace dialog; the zombie rebuild and the gone forget.
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionView, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
@@ -43,6 +43,7 @@ const session = (id: string, workspaceId: string, over: Partial<SessionView> = {
 type FakeApi = Api & {
   createFromGoldenHead: ReturnType<typeof vi.fn>;
   rebuild: ReturnType<typeof vi.fn>;
+  forget: ReturnType<typeof vi.fn>;
   watchStatuses: ReturnType<typeof vi.fn>;
 };
 
@@ -56,6 +57,7 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
     nap: vi.fn(async (id: string) => view(id, "?", "napping")),
     wake: vi.fn(async (id: string) => view(id, "?", "running")),
     rebuild: vi.fn(async (id: string) => ({ ...view(id, "?", "running"), machineId: "m_rebuilt" })),
+    forget: vi.fn(async (_id: string) => {}),
     upgrade: vi.fn(async (id: string) => view(id, "?", "running")),
     capabilities: vi.fn(async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true })),
     startSession: vi.fn(async (o: { workspaceId: string }) => session("s_x", o.workspaceId)),
@@ -490,6 +492,38 @@ describe("new workspace dialog", () => {
     fireEvent.keyDown(input, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(api.createFromGoldenHead).not.toHaveBeenCalled();
+  });
+});
+
+describe("gone machines", () => {
+  const GONE = status(API, { machineState: "gone", reach: { state: "gone" } });
+
+  it("a gone row offers forget and no new thread; confirming names what goes, calls the api once, and the row leaves on workspace.deleted", async () => {
+    const api = await mount(fakeApi([API], [GONE], [session("s1", "ws_a", { prompt: "fix the port list", status: "completed" })]), "api");
+    await waitFor(() => expect(rowOf("api").textContent).toContain("Gone"));
+    expect(screen.queryByRole("button", { name: "New thread in api" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Rebuild api" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Forget api" }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog.textContent).toContain("Forget api?");
+    expect(dialog.textContent).toContain("Its record and 1 thread leave this computer; the machine is already gone.");
+    expect(api.forget).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Forget" }));
+    await waitFor(() => expect(api.forget).toHaveBeenCalledTimes(1));
+    expect(api.forget).toHaveBeenCalledWith("ws_a");
+    act(() => useStore.getState().applyEvent({ type: "workspace.deleted", workspaceId: "ws_a" }));
+    await waitFor(() => expect(screen.queryByText("api")).toBeNull());
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("the host's refusal shows in the dialog and the row stays", async () => {
+    const api = await mount(fakeApi([API], [GONE]), "api");
+    const reason = "api's machine m_ws_a is still running; pause it or delete it at the provider first";
+    api.forget.mockRejectedValueOnce(new RequestError(reason, "conflict"));
+    fireEvent.click(screen.getByRole("button", { name: "Forget api" }));
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Forget" }));
+    await waitFor(() => expect(screen.getByText(reason)).toBeDefined());
+    expect(rowOf("api").textContent).toContain("Gone");
   });
 });
 

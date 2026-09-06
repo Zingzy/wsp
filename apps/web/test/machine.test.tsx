@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -533,6 +533,45 @@ describe("project goldens in the lineage", () => {
     fireEvent.click(screen.getByRole("button", { name: "snapshot api as a project golden" }));
     await waitFor(() => expect(fact("lineage-note")).toBe("snapshot of api refused: machine m1 is not first-life (it was resumed); snapshots only come from fresh machines"));
     expect(rowsUnder("v12")).toEqual(["pg-snap_taken"]);
+  });
+});
+
+describe("gone machines", () => {
+  const gone = (w: WorkspaceView): WorkspaceStatus => ({ ...status(w), machineState: "gone", reach: { state: "gone" } });
+
+  it("the footer offers forget in place of pause and holds upgrade; confirming names what goes and calls the api once", async () => {
+    const w = view("ws_a", "api");
+    const api = await mount([w]);
+    const forget = vi.fn(async (_id: string) => {});
+    api.forget = forget;
+    expect(screen.queryByRole("button", { name: "forget api" })).toBeNull();
+    act(() => api.emit({ type: "workspace.status", status: gone(w) }));
+    const forgetButton = await screen.findByRole("button", { name: "forget api" });
+    expect(screen.queryByRole("button", { name: "pause api" })).toBeNull();
+    expect((screen.getByRole("button", { name: "upgrade api" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(forgetButton);
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog.textContent).toContain("Forget api?");
+    expect(dialog.textContent).toContain("Its record and 0 threads leave this computer; the machine is already gone.");
+    expect(forget).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Forget" }));
+    await waitFor(() => expect(forget).toHaveBeenCalledTimes(1));
+    expect(forget).toHaveBeenCalledWith("ws_a");
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  });
+
+  it("the host's refusal shows in the dialog, which stays open", async () => {
+    const w = view("ws_a", "api");
+    const api = await mount([w]);
+    const reason = "api's machine m_ws_a is still running; pause it or delete it at the provider first";
+    api.forget = vi.fn(async (_id: string) => {
+      throw new Error(reason);
+    });
+    act(() => api.emit({ type: "workspace.status", status: gone(w) }));
+    fireEvent.click(await screen.findByRole("button", { name: "forget api" }));
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Forget" }));
+    await waitFor(() => expect(fact("forget-refusal")).toBe(reason));
+    expect(screen.getByRole("alertdialog")).toBeDefined();
   });
 });
 

@@ -589,6 +589,9 @@ export interface Runtime {
      * written again so the next reach opens it. Throws on a workspace that is not running or a runtime without the deploy. */
     updateDaemon(id: string): Promise<void>;
     delete(id: string): Promise<void>;
+    /** Drops a workspace whose machine the provider no longer has: its record, transcripts and sessions go and nothing
+     * is asked of the provider. Refused with the reason (kind conflict) while the machine still exists. */
+    forget(id: string): Promise<void>;
     /** A person acted in the workspace; its idle window starts over. */
     touch(id: string): Promise<void>;
     /** One-shot command on the workspace's machine (plumbing for clients; sessions are the main road). */
@@ -1339,6 +1342,24 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     for (const e of execs) if (e.workspaceId === workspaceId) e.end(reason);
   };
 
+  /** Everything a workspace left on this side once its machine is dealt with: live state, flushes, stored rows, vault. */
+  const drop = async (id: string): Promise<void> => {
+    live.delete(id);
+    transcripts.delete(id);
+    for (const [handleId, s] of sessions) if (s.view.workspaceId === id) sessions.delete(handleId);
+    cancelFlush(id);
+    await transcriptFlushes.get(id);
+    transcriptFlushes.delete(id);
+    await indexFlushes.get(id);
+    indexFlushes.delete(id);
+    await store.delete(WORKSPACES, id);
+    await store.delete(TRANSCRIPTS, id);
+    await store.delete(SESSIONS, id);
+    await store.delete(CREATES, `workspace/${id}`);
+    await store.deleteBlob(VAULTS, id);
+    bus.emit({ type: "workspace.deleted", workspaceId: id });
+  };
+
   // Pausing is persisted and pushed before the provider is asked, so a list
   // fetched mid-pause never says running, and the sessions end while the
   // machine can still be told to stop them.
@@ -1767,20 +1788,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await entry.machine.kill().catch((e: unknown) => {
         if ((e as { kind?: string }).kind !== "missing") throw e;
       });
-      live.delete(id);
-      transcripts.delete(id);
-      for (const [handleId, s] of sessions) if (s.view.workspaceId === id) sessions.delete(handleId);
-      cancelFlush(id);
-      await transcriptFlushes.get(id);
-      transcriptFlushes.delete(id);
-      await indexFlushes.get(id);
-      indexFlushes.delete(id);
-      await store.delete(WORKSPACES, id);
-      await store.delete(TRANSCRIPTS, id);
-      await store.delete(SESSIONS, id);
-      await store.delete(CREATES, `workspace/${id}`);
-      await store.deleteBlob(VAULTS, id);
-      bus.emit({ type: "workspace.deleted", workspaceId: id });
+      await drop(id);
+    },
+
+    async forget(id) {
+      const entry = await entryOf(id);
+      const state = await entry.machine.state();
+      if (state !== "gone") {
+        throw Object.assign(new Error(`${entry.record.name}'s machine ${entry.machine.id} is still ${state}; pause it or delete it at the provider first`), { kind: "conflict" });
+      }
+      endSessions(id, DELETED_REASON);
+      await drop(id);
     },
 
     async touch(id) {

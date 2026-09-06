@@ -20,6 +20,7 @@ export function deriveSidebarProjects(input: SidebarInput): SidebarProjectSnapsh
       const status = input.statuses?.[workspace.id] ?? null;
       const phase = status?.phase ?? workspace.phase;
       const threads = deriveThreads(input.sessions?.[workspace.id] ?? []);
+      const state = workspaceStateOf({ phase }, status);
       return {
         id: workspace.id,
         projectKey: workspace.id,
@@ -33,14 +34,23 @@ export function deriveSidebarProjects(input: SidebarInput): SidebarProjectSnapsh
         phase,
         machineState: status?.machineState ?? null,
         reach: status?.reach.state ?? null,
-        indicator: workspaceIndicator({ ...workspace, phase }, status),
+        state,
+        indicator: indicatorOf(state),
         threads,
       };
     });
 }
 
+/** The one state word's key for a workspace as the app knows it: its phase, and the machine state and reach of its status when one has arrived. */
+export function workspaceStateOf(workspace: Pick<WorkspaceView, "phase">, status: WorkspaceStatus | null): WorkspaceState {
+  return workspaceState({ phase: workspace.phase, machineState: status?.machineState, reach: status?.reach.state });
+}
+
 export function workspaceIndicator(workspace: Pick<WorkspaceView, "phase">, status: WorkspaceStatus | null): StatusIndicator {
-  const state = workspaceState({ phase: workspace.phase, machineState: status?.machineState, reach: status?.reach.state });
+  return indicatorOf(workspaceStateOf(workspace, status));
+}
+
+function indicatorOf(state: WorkspaceState): StatusIndicator {
   return { label: workspaceWord(state), tone: indicatorTone(state), pulse: state === "pausing" || state === "waking" };
 }
 

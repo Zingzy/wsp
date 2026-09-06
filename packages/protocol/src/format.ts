@@ -52,6 +52,16 @@ export function notifyLine(threadId: string, result: TurnResult): string {
   return `thread ${threadId.slice(0, 8)} finished (${facts.join(", ")})${tail !== undefined ? `: ${tail}` : ""}`;
 }
 
+/** A thread count with its noun, as the sidebar's counts and the verbs' lines say it. */
+export function fmtThreads(n: number): string {
+  return `${n} ${n === 1 ? "thread" : "threads"}`;
+}
+
+/** What forgetting a workspace takes off this computer, the one sentence every client's confirmation shows. */
+export function forgetNotice(threads: number): string {
+  return `Its record and ${fmtThreads(threads)} leave this computer; the machine is already gone.`;
+}
+
 /** Minutes and two-digit seconds, with whole hours ahead when there are any: how long a turn ran. */
 export function fmtElapsed(ms: number): string {
   const s = Math.round(ms / 1000);
