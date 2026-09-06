@@ -612,9 +612,9 @@ describe("wsp init, the summary-first screens", () => {
     // count and its size, the totals and the Disk line under them. Nothing is hidden behind a key.
     expect(two).toMatch(/^◆  Tools  2\/6\n┃ {2}What installs on the image, from what you use\.\n┃ {2}You can change this later\.\n┃ {2}search/);
     expect(two).toMatch(/▾ Always on the image\s+16\s+1\.5 GB\n┃\s+• Docker engine and compose\s+base\s+always on the image\s+516\.7 MB\n/);
-    expect(two).toMatch(/▾ You use these\s+1 of 2\s+239\.4 MB\n┃\s+○ Go\s+used\s+2 commands in 1 session\s+239\.1 MB\n┃\s+● Cloudflare Wrangler\s+used\s+40 commands in 3 sessions\s+239\.4 MB\n/);
+    expect(two).toMatch(/▾ You use these\s+1 of 2\s+239\.4 MB\n┃\s+○ Go\s+used\s+below the floor, 2 commands in 1[^\n]*?239\.1 MB\n┃\s+● Cloudflare Wrangler\s+used\s+40 commands in 3 sessions\s+239\.4 MB\n/);
     expect(two).toMatch(/▾ Installed here, never used\s+2 of 2\s+53\.8 MB\n┃\s+● GitHub CLI\s+installed\s+installed here, never used\s+40\.2 MB\n┃\s+● yq\s+installed\s+installed here, never used\s+13\.5 MB\n/);
-    expect(two).toMatch(/On: 19 tools, 1\.8 GB\n┃ {2}Disk: [\d.]+ GB of 15\.2 GB on the 20 GB builder\n┗ {2}space on or off • ← → fold • enter next • esc back/);
+    expect(two).toMatch(/On: 19 tools, 1\.8 GB\n┃ {2}on when used in 2 sessions and 5 commands; heavy rows 3 and 20\n┃ {2}Disk: [\d.]+ GB of 15\.2 GB on the 20 GB builder\n┗ {2}space on or off • ← → fold • enter next • esc back/);
     expect(two).not.toContain("adjust");
     expect(two).not.toContain("every row on this screen that can be ticked");
     // Typing narrows the rows to a match; space unticks yq and the totals follow it.

@@ -1,6 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { diskTone } from "../src/init-weight.js";
+import { HEAVY_BYTES } from "@wsp/collect";
+import { diskTone, sizeTone } from "../src/init-weight.js";
+
+describe("the tone a row's size takes", () => {
+  it("turns yellow where the one heavy rule says heavy, so a row at exactly the line is plain here as in the table", () => {
+    expect(sizeTone(HEAVY_BYTES)).toBeUndefined();
+    expect(sizeTone(HEAVY_BYTES + 1)).toBe("yellow");
+    expect(sizeTone(undefined)).toBeUndefined();
+    expect(sizeTone(500 * 1024 * 1024)).toBe("yellowBright");
+    expect(sizeTone(1024 * 1024 * 1024)).toBe("red");
+  });
+});
 
 const MIB = 1024 * 1024;
 

@@ -18,16 +18,17 @@ import { claudeLine, fakeHost, HOME } from "./recipe-fixture.js";
 const PROJ = `${HOME}/proj`;
 const OTHER = `${HOME}/other`;
 
-/** Claude Code and Java 21 on this computer; the agent's own sessions ran node and pnpm, and pulumi, which the
- * catalog does not carry. Java is installed and was never run. */
+/** Claude Code and Java 21 on this computer; the agent's own sessions ran node, gh and go past the floor, and
+ * pulumi, which the catalog does not carry. Java is installed and was never run. */
 const laptop = () =>
   fakeHost({
     which: ["claude", "java"],
     files: {
       "~/.claude/settings.json": "{}",
-      "~/.claude/projects/-Users-dev-proj/s1.jsonl": [claudeLine("s1", PROJ, ["node --version", "gh pr view"]), claudeLine("s1", PROJ, ["pulumi -q"])].join("\n"),
-      "~/.claude/projects/-Users-dev-proj/s2.jsonl": claudeLine("s2", PROJ, ["gh pr list", "node build.js"]),
-      "~/.claude/projects/-Users-dev-other/s3.jsonl": claudeLine("s3", OTHER, ["go build ./..."]),
+      "~/.claude/projects/-Users-dev-proj/s1.jsonl": [claudeLine("s1", PROJ, ["node --version", "gh pr view", "gh pr checks", "gh run list"]), claudeLine("s1", PROJ, ["pulumi -q"])].join("\n"),
+      "~/.claude/projects/-Users-dev-proj/s2.jsonl": claudeLine("s2", PROJ, ["gh pr list", "gh pr merge", "node build.js"]),
+      "~/.claude/projects/-Users-dev-other/s3.jsonl": claudeLine("s3", OTHER, ["go build ./...", "go test ./...", "go vet ./..."]),
+      "~/.claude/projects/-Users-dev-other/s4.jsonl": claudeLine("s4", OTHER, ["go build ./...", "go mod tidy"]),
     },
   });
 
@@ -52,7 +53,7 @@ describe("wsp recipe", () => {
     expect(table.tick).toBe("used");
     // node is on every image whatever a rule says, so the renderer puts it in the base group and says so.
     expect(row("node")).toMatchObject({ on: true, why: "always on the image", base: true, group: BASE_GROUP });
-    expect(row("gh")).toMatchObject({ on: true, why: "2 commands in 2 sessions", group: USED_GROUP });
+    expect(row("gh")).toMatchObject({ on: true, why: "5 commands in 2 sessions", group: USED_GROUP });
     expect(row("java")).toMatchObject({ on: false, why: "installed here, never used", group: HERE_GROUP, size: 613280230 });
     // A tool the catalog ships on but nobody here ran is off under this rule; only use ticks a row.
     expect(row("curl")).toMatchObject({ on: true, why: "always on the image", base: true });
@@ -80,7 +81,7 @@ describe("wsp recipe", () => {
     const under = await runRecipe(laptop(), { out, tick: "installed", set: ["go=on"] }, quiet, at);
     expect(under.tick).toBe("installed");
     expect(allRows(under).find(r => r.id === "java")).toMatchObject({ on: true, why: "installed here, never used" });
-    expect(allRows(under).find(r => r.id === "gh")).toMatchObject({ on: false, why: "2 commands in 2 sessions" });
+    expect(allRows(under).find(r => r.id === "gh")).toMatchObject({ on: false, why: "5 commands in 2 sessions" });
     expect(allRows(under).find(r => r.id === "go")).toMatchObject({ on: true });
     // The file now says the rule that really decided it, so the next run inherits the truth.
     expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8")))).toMatchObject({ tick: "installed" });
@@ -107,7 +108,7 @@ describe("wsp recipe", () => {
     const saved = Recipe.parse(JSON.parse(readFileSync(out, "utf8")));
     writeFileSync(out, JSON.stringify({ ...saved, rows: saved.rows.filter(r => r.id !== "gh") }));
     const after = await runRecipe(laptop(), { out, set: ["java=on"] }, quiet, at);
-    expect(allRows(after).find(r => r.id === "gh")).toMatchObject({ on: true, why: "2 commands in 2 sessions" });
+    expect(allRows(after).find(r => r.id === "gh")).toMatchObject({ on: true, why: "5 commands in 2 sessions" });
     expect(allRows(after).find(r => r.id === "java")).toMatchObject({ on: true });
   });
 
@@ -160,7 +161,7 @@ describe("wsp recipe", () => {
     expect(flipped.tick).toBeUndefined();
     expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8"))).tick).toBeUndefined();
     // An installed row cannot be said never to have been used under a rule that never read a use.
-    expect(allRows(flipped).find(r => r.id === "claude")).toMatchObject({ why: "used here, 3 sessions" });
+    expect(allRows(flipped).find(r => r.id === "claude")).toMatchObject({ why: "used here, 4 sessions" });
     expect(allRows(flipped).find(r => r.id === "go")).toMatchObject({ on: true });
     // Naming a rule is what stamps one on.
     expect((await runRecipe(laptop(), { out, tick: "used" }, quiet, at)).tick).toBe("used");
@@ -208,7 +209,7 @@ describe("wsp recipe", () => {
     dir = mkdtempSync(join(tmpdir(), "wsp-recipe-rules-"));
     const installed = await runRecipe(laptop(), { out: outPath(), tick: "installed" }, quiet, at);
     expect(allRows(installed).find(r => r.id === "java")).toMatchObject({ on: true, why: "installed here, never used" });
-    expect(allRows(installed).find(r => r.id === "gh")).toMatchObject({ on: false, why: "2 commands in 2 sessions" });
+    expect(allRows(installed).find(r => r.id === "gh")).toMatchObject({ on: false, why: "5 commands in 2 sessions" });
     const byDefault = await runRecipe(laptop(), { out: outPath(), tick: "default" }, quiet, at);
     expect(allRows(byDefault).find(r => r.id === "gh")).toMatchObject({ on: true });
     expect(allRows(byDefault).find(r => r.id === "java")).toMatchObject({ on: false });
@@ -246,7 +247,7 @@ describe("wsp recipe", () => {
     const table = await runRecipe(laptop(), { out: outPath() }, io, at);
     for (const line of recipePrintout(table)) io.log(line);
     expect(io.notes[0]).toBe("Reading this computer against the catalog and your agents' session histories. Nothing leaves this computer.");
-    expect(io.notes).toContain("Claude Code: 3 sessions, 6 tool calls");
+    expect(io.notes).toContain("Claude Code: 4 sessions, 13 tool calls");
     // The shared renderer's lines, which is what the wizard's screens draw: one row per entry, its own totals line.
     expect(io.logs[0]).toBe("Agents");
     expect(io.logs).toContain("Tools");

@@ -6,7 +6,8 @@ import { CATALOG, type CatalogEntry } from "@wsp/catalog";
 import type { Recipe } from "@wsp/protocol";
 import { describe, expect, it, onTestFinished } from "vitest";
 import { GREY, grey } from "../src/init-layout.js";
-import { BASE_GROUP, CATALOG_GROUP, GROUP_LABEL, GROUP_ORDER, HERE_GROUP, HEAVY_BYTES, USED_GROUP, groupTotal, recipeTable, sizeCell, sizeText, tableLines, totalsLine, whyCell, type TableRow } from "../src/init-table.js";
+import { HEAVY_BYTES } from "@wsp/collect";
+import { ADDED_GROUP, BASE_GROUP, CATALOG_GROUP, FLOOR_LINE, GROUP_LABEL, GROUP_ORDER, HERE_GROUP, USED_GROUP, groupTotal, recipeTable, sizeCell, sizeText, tableLines, totalsLine, whyCell, type TableRow } from "../src/init-table.js";
 import { RECIPE } from "./init-fixture.js";
 
 /** A few catalog entries, in the catalog's own order. */
@@ -40,6 +41,41 @@ describe("the table of what travels", () => {
     expect(shape(recipeTable(RECIPE, slice("op")))).toEqual([["off", "1Password CLI", "in the catalog, on request", "size unknown"]]);
   });
 
+  it("a row under the floor says so beside its counts, a heavy row against its own, and the footer names the floor once", () => {
+    const why = (r: Recipe["rows"][number]): string => recipeTable(with_(r), slice(r.id))[0]!.why;
+    expect(why(used("wrangler", 1, 2))).toBe("below the floor, 2 commands in 1 session");
+    expect(why(used("wrangler", 2, 6))).toBe("6 commands in 2 sessions");
+    expect(why(used("java", 3, 5))).toBe("heavy, below the floor, 5 commands in 3 sessions");
+    expect(why(used("java", 4, 30))).toBe("30 commands in 4 sessions");
+    expect(FLOOR_LINE).toBe("on when used in 2 sessions and 5 commands; heavy rows 3 and 20");
+    // Under a rule that never weighs use there is no floor to be below, so the counts stand alone.
+    const under = (tick: Recipe["tick"]): string => recipeTable({ ...with_(used("wrangler", 1, 2)), ...(tick !== undefined ? { tick } : {}) }, slice("wrangler"))[0]!.why;
+    expect(under("installed")).toBe("2 commands in 1 session");
+    expect(under("default")).toBe("2 commands in 1 session");
+    expect(under("used")).toBe("below the floor, 2 commands in 1 session");
+    expect(under(undefined)).toBe("below the floor, 2 commands in 1 session");
+  });
+
+  it("a row the agent added is its own group after the installed ones, on, with the install line as its why", () => {
+    const custom = [
+      { kind: "custom" as const, id: "just", name: "just", install: ["brew install just"], check: "command -v just", why: "added by the agent" },
+      { kind: "custom" as const, id: "cuda", name: "cuda", install: ["apt-get install -y cuda"], check: "command -v cuda", size: 2_000_000_000, why: "used in ml" },
+    ];
+    const rows = recipeTable({ ...with_(installed("gh")), custom }, slice("node", "gh", "go"));
+    expect(shape(rows)).toEqual([
+      ["on", "Node 22 with npm", "always on the image", "198.8 MB"],
+      ["on", "GitHub CLI", "installed here, never used", "40.2 MB"],
+      ["on", "cuda", "apt-get install -y cuda", "1.9 GB"],
+      ["on", "just", "brew install just", "size unknown"],
+      ["off", "Go", "in the catalog, on request", "239.1 MB"],
+    ]);
+    expect(rows[2]).toMatchObject({ id: "cuda", kind: "custom", group: ADDED_GROUP, base: false, heavy: true });
+    expect(GROUP_LABEL[ADDED_GROUP]).toBe("added");
+    // The agents table never carries one, and a recipe with none draws no such row.
+    expect(recipeTable({ ...RECIPE, custom }, slice("claude")).map(r => r.id)).toEqual(["claude"]);
+    expect(recipeTable(RECIPE, slice("node", "gh", "go")).some(r => r.group === ADDED_GROUP)).toBe(false);
+  });
+
   it("an agent wsp cannot drive says so on its row, and the one it can says nothing", () => {
     expect(recipeTable(RECIPE, slice("claude"))[0]!.note).toBeUndefined();
     expect(recipeTable(RECIPE, slice("codex"))[0]!.note).toBe("installs, but wsp cannot run its threads yet");
@@ -52,7 +88,7 @@ describe("the table of what travels", () => {
     expect(rows.map(r => r.name)).toEqual(["Node 22 with npm", "Go", "Cloudflare Wrangler", "Codex", "Claude Code", "GitHub CLI"]);
     expect(rows.filter(r => r.heavy).map(r => r.name)).toEqual(["Codex"]);
     expect(HEAVY_BYTES).toBe(300 * 1024 * 1024);
-    expect(GROUP_ORDER).toEqual(["Always on the image", "You use these", "Installed here, never used", "Also in the catalog"]);
+    expect(GROUP_ORDER).toEqual(["Always on the image", "You use these", "Installed here, never used", "Added by your agent", "Also in the catalog"]);
   });
 
   it("the totals: what comes, what it downloads, and how many sizes the catalog does not have", () => {

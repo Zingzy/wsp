@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { runScan, type RecipeIo } from "../src/recipe-command.js";
-import { USED_GROUP, type TableRow } from "../src/init-table.js";
+import { FLOOR_LINE, USED_GROUP, type TableRow } from "../src/init-table.js";
 import { ALSO_HERE_TITLE, COMMANDS_TITLE, NOT_SCANNED, RecipeScan, SIGN_INS_TITLE, alsoHereLines, scanPrintout, signInAdvice, tickAdvice } from "../src/recipe-answer.js";
 import { claudeLine, fakeHost, HOME } from "./recipe-fixture.js";
 
@@ -15,16 +15,17 @@ const MB = 1024 * 1024;
 const quiet: RecipeIo = { log: () => {}, note: () => {} };
 const at = () => new Date("2026-09-06T03:00:00Z");
 
-/** Claude Code and Java here, node, pnpm, gh and wrangler in the agent's own sessions, and pulumi, which the
- * catalog does not carry. */
+/** Claude Code and Java here; node, pnpm, gh, wrangler and go in the agent's own sessions past the floor, and
+ * pulumi, which the catalog does not carry. */
 const laptop = () =>
   fakeHost({
     which: ["claude", "java"],
     files: {
       "~/.claude/settings.json": "{}",
-      "~/.claude/projects/-Users-dev-proj/s1.jsonl": [claudeLine("s1", PROJ, ["node --version", "pnpm install", "pulumi -q"]), claudeLine("s1", PROJ, ["gh pr view"])].join("\n"),
-      "~/.claude/projects/-Users-dev-proj/s2.jsonl": claudeLine("s2", PROJ, ["pnpm test", "node build.js", "gh pr list", "wrangler deploy"]),
-      "~/.claude/projects/-Users-dev-other/s3.jsonl": claudeLine("s3", `${HOME}/other`, ["go build ./..."]),
+      "~/.claude/projects/-Users-dev-proj/s1.jsonl": [claudeLine("s1", PROJ, ["node --version", "pnpm install", "pulumi -q"]), claudeLine("s1", PROJ, ["gh pr view", "gh pr checks", "gh run list", "wrangler dev", "wrangler tail"])].join("\n"),
+      "~/.claude/projects/-Users-dev-proj/s2.jsonl": claudeLine("s2", PROJ, ["pnpm test", "node build.js", "gh pr list", "gh pr merge", "wrangler deploy", "wrangler tail", "wrangler dev"]),
+      "~/.claude/projects/-Users-dev-other/s3.jsonl": claudeLine("s3", `${HOME}/other`, ["go build ./...", "go test ./...", "go vet ./..."]),
+      "~/.claude/projects/-Users-dev-other/s4.jsonl": claudeLine("s4", `${HOME}/other`, ["go build ./...", "go mod tidy"]),
     },
   });
 
@@ -62,6 +63,38 @@ describe("wsp recipe scan", () => {
     expect(tickAdvice({ ...row, id: "node", kind: "tool", on: true, heavy: false, size: 250 * MB }).why).toBe("used here, 2 sessions");
   });
 
+  it("recommends off under the floor and says the counts and the floor, a heavy row against its own", async () => {
+    const under = fakeHost({
+      files: {
+        "~/.claude/projects/-Users-dev-proj/s1.jsonl": claudeLine("s1", PROJ, ["vercel --version", "vercel -v", "railway up", "railway status", "java -jar a.jar", "java -jar b.jar", "java -jar c.jar"]),
+        "~/.claude/projects/-Users-dev-proj/s2.jsonl": claudeLine("s2", PROJ, ["java -jar a.jar"]),
+        "~/.claude/projects/-Users-dev-proj/s3.jsonl": claudeLine("s3", PROJ, ["java -jar a.jar"]),
+      },
+    });
+    const scan = await runScan(under, {}, quiet, at);
+    const tool = (s: Awaited<ReturnType<typeof runScan>>, id: string) => s.tools.find(r => r.id === id)!;
+    // Two version checks in one session are not a use: the row is back on the catalog's own evidence.
+    expect(tool(scan, "vercel")).toMatchObject({ on: false, why: "in the catalog, on request", recommended: { value: "off", why: "in the catalog, on request" } });
+    expect(tool(scan, "railway")).toMatchObject({ on: false, why: "below the floor, 2 commands in 1 session", recommended: { value: "off", why: "below the floor, 2 commands in 1 session" } });
+    expect(tool(scan, "java")).toMatchObject({ on: false, heavy: true, why: "heavy, below the floor, 5 commands in 3 sessions", recommended: { value: "off", why: "heavy, below the floor, 5 commands in 3 sessions" } });
+    const many = (cmd: string, n: number): string[] => Array.from({ length: n }, (_, i) => `${cmd} step${i}`);
+    const over = fakeHost({
+      files: {
+        "~/.claude/projects/-Users-dev-proj/s1.jsonl": claudeLine("s1", PROJ, [...many("java", 27), ...many("wrangler", 5)]),
+        "~/.claude/projects/-Users-dev-proj/s2.jsonl": claudeLine("s2", PROJ, ["java -jar a.jar", "wrangler dev"]),
+        "~/.claude/projects/-Users-dev-proj/s3.jsonl": claudeLine("s3", PROJ, ["java -jar a.jar"]),
+        "~/.claude/projects/-Users-dev-proj/s4.jsonl": claudeLine("s4", PROJ, ["java -jar a.jar"]),
+      },
+    });
+    const past = await runScan(over, {}, quiet, at);
+    expect(tool(past, "java")).toMatchObject({ on: true, why: "30 commands in 4 sessions", recommended: { value: "on", why: "30 commands in 4 sessions; 584.9 MB on the machine, worth a question" } });
+    expect(tool(past, "wrangler")).toMatchObject({ on: true, why: "6 commands in 2 sessions", recommended: { value: "on", why: "6 commands in 2 sessions" } });
+    // The footer names the floor once, right under the Tools table's totals.
+    const lines = scanPrintout(scan);
+    expect(lines.filter(l => l === FLOOR_LINE)).toHaveLength(1);
+    expect(lines[lines.indexOf(FLOOR_LINE) - 1]).toMatch(/^On: \d+ tools/);
+  });
+
   it("recommends the key files where a login cannot produce them, and the machine where a browser can", () => {
     // Hermes signs in on the machine and its keys file cannot be produced there, so key gets both.
     expect(signInAdvice("hermes")).toMatchObject({ value: "key" });
@@ -87,7 +120,7 @@ describe("wsp recipe scan", () => {
     expect(lines).toContain(`  ${NOT_SCANNED}`);
     expect(lines).toContain(COMMANDS_TITLE);
     expect(lines).toContain(SIGN_INS_TITLE);
-    expect(lines.find(l => l.includes("Claude Code"))).toMatch(/^● {2}Claude Code\s+used\s+used here, 3 sessions\s+208\.0 MB {2}on$/);
+    expect(lines.find(l => l.includes("Claude Code"))).toMatch(/^● {2}Claude Code\s+used\s+used here, 4 sessions\s+208\.0 MB {2}on$/);
     // The shared renderer's totals line, one under each table.
     expect(lines.filter(l => l.startsWith("On: "))).toHaveLength(2);
   });
