@@ -541,8 +541,9 @@ describe("wsp init, interactive", () => {
     await f.press(KEY.enter);
     await f.until("Tools  2/6");
     // Nothing here and nothing ticked: the base rows still come, and every other row is on the screen at its size.
-    expect(f.text()).toMatch(/• ripgrep\s+base\s+always on the image\s+size unknown\n/);
-    expect(f.text()).toContain("On: 9 tools, 250.0 MB, 8 of unknown size");
+    // Sixteen base rows fold behind the visible two, and the why column is cut to the screen's width.
+    expect(f.text()).toMatch(/• fd\s+base\s+always on th\S*\s+2\.9 MB\n/);
+    expect(f.text()).toContain("On: 16 tools, 1.5 GB");
     await f.press(KEY.enter);
     await f.until("Also on this Mac");
     expect(f.text()).toContain("nothing found here yet");
@@ -598,7 +599,7 @@ describe("wsp init, the summary-first screens", () => {
     expect(one).toMatch(/● Hermes Agent\s+installed\s+installed here, never used\s+484\.0 MB\n┃\s+● Claude Code\s+installed\s+installed here, never used\s+208\.0 MB\n┃\s+● Codex\s+catalog\s+not installed here\s+455\.0 MB\n/);
     // Down onto Gemini CLI: the detail says wsp cannot drive it yet and what installs; space ticks it for the machine.
     await f.press(KEY.down, KEY.down, KEY.down, KEY.down);
-    await f.until("installs about 189.0 MB on the machine (measured 2026-09-05)");
+    await f.until("about 189.0 MB installed on the machine (measured 2026-09-05)");
     expect(f.text()).toContain("installs, but wsp cannot run its threads yet");
     expect(f.text()).toContain("not on this Mac; try it on the machine, nothing here changes");
     await f.press(KEY.space);
@@ -610,10 +611,10 @@ describe("wsp init, the summary-first screens", () => {
     // Screen two is the list itself: the base as bullets under the title, then a group per why, every row with its
     // count and its size, the totals and the Disk line under them. Nothing is hidden behind a key.
     expect(two).toMatch(/^◆  Tools  2\/6\n┃ {2}What installs on the image, from what you use\.\n┃ {2}You can change this later\.\n┃ {2}search/);
-    expect(two).toMatch(/▾ Always on the image\s+9\s+250\.0 MB\n┃\s+• Node 22 with npm\s+base\s+always on the image\s+250\.0 MB\n/);
-    expect(two).toMatch(/▾ You use these\s+1 of 2\s+0 B\n┃\s+○ Go\s+used\s+2 commands in 1 session\s+251\.0 MB\n┃\s+● Cloudflare Wrangler\s+used\s+40 commands in 3 sessions\s+size unknown\n/);
-    expect(two).toMatch(/▾ Installed here, never used\s+2 of 2\s+0 B\n┃\s+● GitHub CLI\s+installed\s+installed here, never used\s+size unknown\n┃\s+● yq\s+installed\s+installed here, never used\s+size unknown\n/);
-    expect(two).toMatch(/On: 12 tools, [\d.]+ MB, 11 of unknown size\n┃ {2}Disk: [\d.]+ GB of 15\.2 GB on the 20 GB builder\n┗ {2}space on or off • ← → fold • enter next • esc back/);
+    expect(two).toMatch(/▾ Always on the image\s+16\s+1\.5 GB\n┃\s+• Docker engine and compose\s+base\s+always on the image\s+516\.7 MB\n/);
+    expect(two).toMatch(/▾ You use these\s+1 of 2\s+239\.4 MB\n┃\s+○ Go\s+used\s+2 commands in 1 session\s+239\.1 MB\n┃\s+● Cloudflare Wrangler\s+used\s+40 commands in 3 sessions\s+239\.4 MB\n/);
+    expect(two).toMatch(/▾ Installed here, never used\s+2 of 2\s+53\.8 MB\n┃\s+● GitHub CLI\s+installed\s+installed here, never used\s+40\.2 MB\n┃\s+● yq\s+installed\s+installed here, never used\s+13\.5 MB\n/);
+    expect(two).toMatch(/On: 19 tools, 1\.8 GB\n┃ {2}Disk: [\d.]+ GB of 15\.2 GB on the 20 GB builder\n┗ {2}space on or off • ← → fold • enter next • esc back/);
     expect(two).not.toContain("adjust");
     expect(two).not.toContain("every row on this screen that can be ticked");
     // Typing narrows the rows to a match; space unticks yq and the totals follow it.
@@ -621,7 +622,7 @@ describe("wsp init, the summary-first screens", () => {
     await f.until(/search {2}yq/);
     await f.press(KEY.space);
     await f.until(/○ yq/);
-    expect(f.text().slice(f.text().lastIndexOf("◆  Tools"))).toContain("On: 11 tools");
+    expect(f.text().slice(f.text().lastIndexOf("◆  Tools"))).toContain("On: 18 tools");
     await f.press(KEY.enter);
 
     await f.until("Also on this Mac  3/6");
@@ -831,7 +832,7 @@ describe("wsp init, the summary-first screens", () => {
     expect(saved.get("agents/mcp/claude/github")).toMatchObject({ bring: false, choice: "skip" });
     expect(saved.get("agents/mcp/claude/notes")).toMatchObject({ bring: true });
     const small = Recipe.parse(JSON.parse(readFileSync(join(dirs[0]!, "recipe.json"), "utf8")));
-    expect(small.rows.filter(r => r.on).map(r => r.id)).toEqual(["claude", "codex", "node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker", "gh", "yq", "hermes", "wrangler"]);
+    expect(small.rows.filter(r => r.on).map(r => r.id)).toEqual(["claude", "codex", "node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync", "gh", "yq", "hermes", "wrangler"]);
     expect(small.rows.find(r => r.id === "gh")).toMatchObject({ signIn: "machine" });
     expect(small.rows.find(r => r.id === "go")).not.toHaveProperty("signIn");
     // --yes answers every row with the word its screen would have opened on: the same map signInItems hands the screen.

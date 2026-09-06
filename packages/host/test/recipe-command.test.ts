@@ -18,14 +18,14 @@ import { claudeLine, fakeHost, HOME } from "./recipe-fixture.js";
 const PROJ = `${HOME}/proj`;
 const OTHER = `${HOME}/other`;
 
-/** Claude Code and Java 21 on this computer; the agent's own sessions ran node and pnpm, and pytest, which the
+/** Claude Code and Java 21 on this computer; the agent's own sessions ran node and pnpm, and pulumi, which the
  * catalog does not carry. Java is installed and was never run. */
 const laptop = () =>
   fakeHost({
     which: ["claude", "java"],
     files: {
       "~/.claude/settings.json": "{}",
-      "~/.claude/projects/-Users-dev-proj/s1.jsonl": [claudeLine("s1", PROJ, ["node --version", "gh pr view"]), claudeLine("s1", PROJ, ["pytest -q"])].join("\n"),
+      "~/.claude/projects/-Users-dev-proj/s1.jsonl": [claudeLine("s1", PROJ, ["node --version", "gh pr view"]), claudeLine("s1", PROJ, ["pulumi -q"])].join("\n"),
       "~/.claude/projects/-Users-dev-proj/s2.jsonl": claudeLine("s2", PROJ, ["gh pr list", "node build.js"]),
       "~/.claude/projects/-Users-dev-other/s3.jsonl": claudeLine("s3", OTHER, ["go build ./..."]),
     },
@@ -53,7 +53,7 @@ describe("wsp recipe", () => {
     // node is on every image whatever a rule says, so the renderer puts it in the base group and says so.
     expect(row("node")).toMatchObject({ on: true, why: "always on the image", base: true, group: BASE_GROUP });
     expect(row("gh")).toMatchObject({ on: true, why: "2 commands in 2 sessions", group: USED_GROUP });
-    expect(row("java")).toMatchObject({ on: false, why: "installed here, never used", group: HERE_GROUP, size: 343 * 1024 * 1024 });
+    expect(row("java")).toMatchObject({ on: false, why: "installed here, never used", group: HERE_GROUP, size: 613280230 });
     // A tool the catalog ships on but nobody here ran is off under this rule; only use ticks a row.
     expect(row("curl")).toMatchObject({ on: true, why: "always on the image", base: true });
     expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8"))).tick).toBe("used");
@@ -66,7 +66,7 @@ describe("wsp recipe", () => {
     const flipped = await runRecipe(laptop(), { out, set: ["java=on"] }, quiet, at);
     expect(allRows(flipped).find(r => r.id === "java")).toMatchObject({ on: true });
     expect(flipped.heavy.map(r => r.id)).toContain("java");
-    expect(recipePrintout(flipped).find(l => l.includes("Java 21"))).toMatch(/^● {2}Java 21\s+installed\s+installed here, never used\s+343\.0 MB$/);
+    expect(recipePrintout(flipped).find(l => l.includes("Java 21"))).toMatch(/^● {2}Java 21\s+installed\s+installed here, never used\s+584\.9 MB$/);
     // The flip is in the file, so a later --set adds to it instead of starting over.
     const second = await runRecipe(laptop(), { out, set: ["go=on"] }, quiet, at);
     expect(allRows(second).filter(r => r.on).map(r => r.id)).toEqual(expect.arrayContaining(["java", "go", "gh"]));
@@ -233,11 +233,11 @@ describe("wsp recipe", () => {
   it("ends with the commands the agents ran that no catalog row carries, most-run first", async () => {
     dir = mkdtempSync(join(tmpdir(), "wsp-recipe-cmds-"));
     const table = await runRecipe(laptop(), { out: outPath() }, quiet, at);
-    expect(table.commands.map(c => c.name)).toContain("pytest");
+    expect(table.commands.map(c => c.name)).toContain("pulumi");
     expect(table.commands.map(c => c.name)).not.toContain("node");
     expect(table.commands.map(c => c.name)).not.toContain("go");
     expect(commandTableLines(table.commands)[0]).toBe("Commands your agents ran that the catalog does not carry:");
-    expect(commandTableLines(table.commands).join("\n")).toContain("pytest");
+    expect(commandTableLines(table.commands).join("\n")).toContain("pulumi");
   });
 
   it("prints the wizard's own two tables and the reading lines apart from them", async () => {
@@ -251,7 +251,7 @@ describe("wsp recipe", () => {
     expect(io.logs[0]).toBe("Agents");
     expect(io.logs).toContain("Tools");
     expect(io.logs.filter(l => l.startsWith("On: "))).toHaveLength(2);
-    expect(io.logs.find(l => l.includes("Java 21"))).toMatch(/^○ {2}Java 21\s+installed\s+installed here, never used\s+343\.0 MB$/);
+    expect(io.logs.find(l => l.includes("Java 21"))).toMatch(/^○ {2}Java 21\s+installed\s+installed here, never used\s+584\.9 MB$/);
     expect(table.heavy.every(r => r.on && r.heavy)).toBe(true);
   });
 });

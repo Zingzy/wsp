@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // What a recipe costs on the builder's disk, judged before anything boots: a
-// Homebrew formula is its dependency closure, sized from a table measured on
-// Linux where one exists and from this Mac's own Homebrew otherwise; Homebrew's
-// toolchain is one line; agents carry measured sizes in the catalog; a row
-// nothing measured counts at a stated default for its kind. Nothing here runs a
-// command: the host reads the Mac's Homebrew and hands the table in.
-import { AGENT_INSTALLERS, BREW_TOOLCHAIN, CATALOG_PREFIX, CUSTOM_PREFIX, MANAGER_FORMULA, MACOS_ONLY_FORMULAE, packageOf, toolInstallsFor, type BrewFormula, type BrewTable, type RecipeEntry, type ToolSource } from "./golden-import.js";
-import { LINUX_FORMULA_MIB, MIB, catalogEntry } from "@wsp/catalog";
+// row the catalog carries takes the catalog's measured size, which already
+// holds its Linux runtime dependencies, so two catalog formulae that share one
+// count it twice (the estimate overstates, never under); any other Homebrew
+// formula is its dependency closure from this Mac's own Homebrew, shared
+// members once; Homebrew's toolchain is one line; a row nothing measured counts
+// at a stated default for its kind. Nothing here runs a command: the host reads
+// the Mac's Homebrew and hands the table in.
+import { AGENT_INSTALLERS, BREW_TOOLCHAIN, CATALOG_PREFIX, CUSTOM_PREFIX, MACOS_ONLY_FORMULAE, managerFormula, packageOf, toolInstallsFor, type BrewFormula, type BrewTable, type RecipeEntry, type ToolSource } from "./golden-import.js";
+import { MIB, ROADS, catalogEntry, catalogToolByRoad, catalogToolFor, sizeBytes, type RoadName } from "@wsp/catalog";
 import type { RecipeCustomRow } from "@wsp/protocol";
 import { TOOLS_DISK_FLOOR } from "./golden-tools.js";
-
-export { NODE_BYTES } from "@wsp/catalog";
 
 /** Root disk asked for every builder and fork, Solari's cap: a 4 GB root filled during the tools stage and
  * five agents failed to install on it (measured 2026-09-05). */
@@ -26,14 +26,8 @@ export const PACK_BUDGET_BYTES = Math.floor((BUILDER_FREE_BYTES - UPLOAD_HEADROO
 /** What the recipe may take: what the builder has free less the floor the tools stage keeps free for unpack peaks. */
 export const DISK_ROOM_BYTES = BUILDER_FREE_BYTES - TOOLS_DISK_FLOOR;
 
-/** The day the tables below were read off a 20 GB Linux builder: Cellar sizes as brew printed them, agents and the
- * toolchain as df moved across their installs; the screens name it so the numbers read as a measurement, not as catalog truth. */
-export const MEASURED_ON = "2026-09-05";
-
 /** Homebrew's checkout with its own glibc and gcc, pulled in by the first formula: df moved 1006 MB across the three installs. */
 export const BREW_TOOLCHAIN_BYTES = 1024 * MIB;
-
-const OTHER_TOOL_MIB: Record<string, number> = { "tools/npm/bun": 78 };
 
 /** What a row nothing measured counts as, by what installs it: two go installs moved df by 115 MB and 924 MB
  * (module and build caches), three uv tools by 12 to 222 MB, three npm globals by 0 to 25 MB, six agents by
@@ -125,7 +119,7 @@ export function brewTable(json: unknown, du: ReadonlyMap<string, number>): BrewT
 
 export interface ToolSize {
   bytes: number;
-  /** Where the number came from: the table measured on Linux, or this Mac's Homebrew. */
+  /** Where the number came from: the catalog's measurement, or this Mac's Homebrew. */
   road: "measured" | "mac";
   /** Dependencies counted in besides the row's own formula. */
   deps: number;
@@ -133,17 +127,19 @@ export interface ToolSize {
 
 const TOOLCHAIN = new Set<string>(BREW_TOOLCHAIN);
 
-/** A formula's size on Linux when measured, else on this Mac. */
+/** A formula's size: the catalog's measured closure when it carries the formula, else this Mac's Cellar. */
 function formulaBytes(name: string, brew: BrewTable): number | undefined {
-  const measured = LINUX_FORMULA_MIB[name];
-  return measured !== undefined ? measured * MIB : brew.get(name)?.bytes;
+  const entry = catalogToolByRoad("brew", name);
+  return entry !== undefined ? sizeBytes(entry.size) : brew.get(name)?.bytes;
 }
 
-/** The formula and every formula it depends on, by full name, Homebrew's own toolchain left out. */
+/** The formula and every formula it depends on, by full name, Homebrew's own toolchain left out; a formula the
+ * catalog carries is a leaf, since its measured size already holds its runtime dependencies. */
 function closureOf(name: string, brew: BrewTable): Set<string> {
   const seen = new Set<string>([name]);
   const queue = [name];
   for (let n = queue.shift(); n !== undefined; n = queue.shift()) {
+    if (catalogToolByRoad("brew", n) !== undefined) continue;
     for (const d of brew.get(n)?.deps ?? []) {
       if (TOOLCHAIN.has(d) || seen.has(d)) continue;
       seen.add(d);
@@ -155,30 +151,37 @@ function closureOf(name: string, brew: BrewTable): Set<string> {
 
 const formulaOf = (e: RecipeEntry): string | undefined => (e.id.startsWith("tools/brew/") ? e.id.slice("tools/brew/".length) : undefined);
 
-/** What one tools row puts on the machine: a formula with its closure, a measured global; nothing for a
- * tap or a row nothing measured or read. */
+const isRoad = (s: string | undefined): s is RoadName => (ROADS as readonly string[]).includes(s ?? "");
+
+/** The catalog's measured size for a row: a catalog row's own, or the size of the catalog tool that installs the
+ * same package by the same road as this Mac's row (a formula by brew, a global by npm). */
+function catalogSize(e: RecipeEntry): ToolSize | undefined {
+  const manager = e.id.split("/")[1];
+  const entry = e.id.startsWith(CATALOG_PREFIX) ? catalogEntry(packageOf(e)) : isRoad(manager) ? catalogToolByRoad(manager, packageOf(e)) : undefined;
+  const size = entry === undefined ? undefined : sizeBytes(entry.size);
+  return size === undefined ? undefined : { bytes: size, road: "measured", deps: 0 };
+}
+
+/** What one tools row puts on the machine: the catalog's measurement where it carries the tool, else a formula
+ * with its closure from this Mac; nothing for a tap or a row nothing measured or read. */
 export function toolSize(e: RecipeEntry, brew: BrewTable): ToolSize | undefined {
-  if (e.id.startsWith(CATALOG_PREFIX)) {
-    const size = catalogEntry(packageOf(e))?.size;
-    return size === undefined ? undefined : { bytes: size, road: "measured", deps: 0 };
-  }
+  if (e.id.startsWith("tools/brew-tap/")) return undefined;
+  const known = catalogSize(e);
+  if (known !== undefined) return known;
   const formula = formulaOf(e);
-  if (formula === undefined) {
-    const other = OTHER_TOOL_MIB[e.id];
-    return other === undefined ? undefined : { bytes: other * MIB, road: "measured", deps: 0 };
-  }
-  if (formulaBytes(formula, brew) === undefined) return undefined;
+  if (formula === undefined || formulaBytes(formula, brew) === undefined) return undefined;
   const members = closureOf(formula, brew);
   let bytes = 0;
   for (const m of members) bytes += formulaBytes(m, brew) ?? 0;
-  return { bytes, road: LINUX_FORMULA_MIB[formula] !== undefined ? "measured" : "mac", deps: members.size - 1 };
+  return { bytes, road: "mac", deps: members.size - 1 };
 }
 
 const installable = (e: RecipeEntry): boolean => e.id.slice(e.id.indexOf("/") + 1) in AGENT_INSTALLERS;
 
 /** An agent's measured install size, by the row's name. */
 export function agentSize(e: RecipeEntry): number | undefined {
-  return catalogEntry(e.id.slice(e.id.indexOf("/") + 1))?.size;
+  const entry = catalogEntry(e.id.slice(e.id.indexOf("/") + 1));
+  return entry === undefined ? undefined : sizeBytes(entry.size);
 }
 
 export interface DiskEstimate {
@@ -218,7 +221,7 @@ export function estimateDisk(ticked: readonly RecipeEntry[], files: number, brew
   for (const e of ticked) {
     if (e.rung !== "tools" || !installs.has(e.id) || e.id.startsWith("tools/brew-tap/")) continue;
     const formula = formulaOf(e);
-    if (formula !== undefined) {
+    if (formula !== undefined && catalogToolByRoad("brew", formula) === undefined) {
       if (formulaBytes(formula, brew) === undefined) assume(e);
       else for (const m of closureOf(formula, brew)) members.add(m);
       continue;
@@ -227,10 +230,18 @@ export function estimateDisk(ticked: readonly RecipeEntry[], files: number, brew
     if (size === undefined) assume(e);
     else tools += size.bytes;
   }
+  // A manager's own step: its formula's closure when Homebrew installs it, else the catalog row's measurement.
   for (const t of plan.installs) {
-    if (!t.id.startsWith("tools/manager/") || t.manager !== "brew") continue;
-    const formula = MANAGER_FORMULA[t.label as keyof typeof MANAGER_FORMULA];
-    if (formula !== undefined) for (const m of closureOf(formula, brew)) members.add(m);
+    if (!t.id.startsWith("tools/manager/")) continue;
+    const manager = t.label as RoadName;
+    const formula = t.manager === "brew" ? managerFormula(manager) : undefined;
+    if (formula !== undefined) {
+      for (const m of closureOf(formula, brew)) members.add(m);
+      continue;
+    }
+    const entry = catalogToolFor(manager);
+    const bytes = entry === undefined ? undefined : sizeBytes(entry.size);
+    if (bytes !== undefined) tools += bytes;
   }
   for (const m of members) tools += formulaBytes(m, brew) ?? 0;
   for (const c of custom) {

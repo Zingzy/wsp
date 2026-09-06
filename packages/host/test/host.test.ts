@@ -77,7 +77,7 @@ function inlineScripts(html: string): string[] {
   return [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]!);
 }
 
-/** A computer for the recipe verb to read, written to a temp dir: one agent's history with node, pnpm and pytest
+/** A computer for the recipe verb to read, written to a temp dir: one agent's history with node, pnpm and pulumi
  * in two sessions, and java on PATH and never run. The verb reads a computer through nodeHost(), whose whole answer
  * comes from HOME and PATH, so pinning those two is what keeps these rows off whichever box the suite runs on. */
 function fixtureMachine(): { dir: string; home: string; state: string; project: string; close(): void } {
@@ -90,8 +90,8 @@ function fixtureMachine(): { dir: string; home: string; state: string; project: 
   mkdirSync(join(home, ".claude", "projects", "s"), { recursive: true });
   mkdirSync(bin, { recursive: true });
   writeFileSync(join(home, ".claude", "settings.json"), "{}\n");
-  writeFileSync(join(home, ".claude", "projects", "s", "s1.jsonl"), `${[line("s1", ["node --version", "pnpm install"]), line("s1", ["pytest -q"])].join("\n")}\n`);
-  writeFileSync(join(home, ".claude", "projects", "s", "s2.jsonl"), `${[line("s2", ["pnpm test", "node build.js", "pytest"])].join("\n")}\n`);
+  writeFileSync(join(home, ".claude", "projects", "s", "s1.jsonl"), `${[line("s1", ["node --version", "pnpm install"]), line("s1", ["pulumi -q"])].join("\n")}\n`);
+  writeFileSync(join(home, ".claude", "projects", "s", "s2.jsonl"), `${[line("s2", ["pnpm test", "node build.js", "pulumi"])].join("\n")}\n`);
   writeFileSync(join(bin, "java"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
   // nodeHost() takes its home from HOME and answers `which` off PATH, so these two words are the whole computer
   // the verb sees: no transcript, config tree or binary of the box the suite runs on is read.
@@ -137,7 +137,8 @@ describe("wsp cli", () => {
     expect(logs).toHaveLength(1);
     expect(errs[0]).toContain("Nothing leaves this computer");
     // The catalog's own default, so the rows are the catalog's and nothing of this computer moves them.
-    expect(allRows(table).filter(r => r.on).map(r => r.id)).toEqual(CATALOG.flatMap(e => (e.kind === "tool" && e.defaultOn ? [e.id] : [])));
+    // The table puts heavy rows first inside a group, so the two sides compare as sets.
+    expect(allRows(table).filter(r => r.on).map(r => r.id).sort()).toEqual(CATALOG.flatMap(e => (e.kind === "tool" && e.defaultOn ? [e.id] : [])).sort());
     expect(readFileSync(out, "utf8")).toContain('"tick": "default"');
 
     logs.length = 0;
@@ -154,9 +155,9 @@ describe("wsp cli", () => {
     expect(row("pnpm")).toMatchObject({ on: true, source: { kind: "used", sessions: 2, calls: 2 } });
     expect(row("java")).toMatchObject({ on: true, source: { kind: "installed", bin: true } });
     expect(row("gradle")).toMatchObject({ on: false, source: { kind: "popular" } });
-    expect(logs.find(l => l.includes("Java 21"))).toMatch(/^● {2}Java 21\s+installed\s+installed here, never used\s+343\.0 MB$/);
-    expect(logs.find(l => l.includes("Node 22"))).toMatch(/^● {2}Node 22 with npm\s+base\s+always on the image\s+250\.0 MB$/);
-    expect(logs).toContain("  pytest       2         2");
+    expect(logs.find(l => l.includes("Java 21"))).toMatch(/^● {2}Java 21\s+installed\s+installed here, never used\s+584\.9 MB$/);
+    expect(logs.find(l => l.includes("Node 22"))).toMatch(/^● {2}Node 22 with npm\s+base\s+always on the image\s+198\.8 MB$/);
+    expect(logs).toContain("  pulumi       2         2");
 
     errs.length = 0;
     expect(await cli(["recipe", "--out", out, "--state", box.state, "--tick", "everything"], io)).toBe(1);
@@ -182,9 +183,9 @@ describe("wsp cli", () => {
     expect(logs.at(-1)).toContain("Nothing was written.");
     expect(errs[0]).toContain("Nothing leaves this computer");
     // The fixture's own rows, the same on any box.
-    expect(logs.find(l => l.includes("Node 22"))).toMatch(/^● {2}Node 22 with npm\s+base\s+always on the image\s+250\.0 MB {2}on$/);
-    expect(logs.find(l => l.includes("Java 21"))).toMatch(/^○ {2}Java 21\s+installed\s+installed here, never used\s+343\.0 MB {2}off$/);
-    expect(logs).toContain("  pytest       2         2");
+    expect(logs.find(l => l.includes("Node 22"))).toMatch(/^● {2}Node 22 with npm\s+base\s+always on the image\s+198\.8 MB {2}on$/);
+    expect(logs.find(l => l.includes("Java 21"))).toMatch(/^○ {2}Java 21\s+installed\s+installed here, never used\s+584\.9 MB {2}off$/);
+    expect(logs).toContain("  pulumi       2         2");
 
     logs.length = 0;
     expect(await cli(["recipe", "scan", "--state", state, "--json"], io)).toBe(0);
@@ -198,9 +199,9 @@ describe("wsp cli", () => {
     };
     expect(scan.tick).toBe("used");
     for (const row of scan.tools) expect(row.recommended.why.length, row.id).toBeGreaterThan(0);
-    expect(scan.tools.filter(r => r.on).map(r => r.id).sort()).toEqual(["curl", "docker", "git", "jq", "node", "pnpm", "python", "ripgrep", "uv"]);
+    expect(scan.tools.filter(r => r.on).map(r => r.id).sort()).toEqual(["build-essential", "curl", "docker", "fd", "git", "jq", "node", "pnpm", "python", "ripgrep", "rsync", "sqlite3", "uv", "wget", "xz", "zip"]);
     expect(scan.agents.filter(r => r.on).map(r => r.id)).toEqual(["claude"]);
-    expect(scan.commands).toEqual([{ name: "pytest", calls: 2, sessions: 2 }]);
+    expect(scan.commands).toEqual([{ name: "pulumi", calls: 2, sessions: 2 }]);
     expect(scan.signIns.map(r => [r.id, r.recommended.value])).toEqual([["claude", "machine"]]);
     expect(existsSync(out)).toBe(false);
 
