@@ -7,6 +7,7 @@ import type { WorkspaceStatus } from "@wsp/protocol";
 import { RequestError } from "../src/protocol/client.js";
 import { explainCreateRefusal } from "../src/protocol/store.js";
 import {
+  isThreadWorking,
   resolveAdjacentThreadId,
   searchSidebarThreadsByTitle,
   sortSettledThreadsForSidebar,
@@ -63,6 +64,14 @@ describe("copied traversal and rollup", () => {
     expect(resolveAdjacentThreadId({ threadIds: ids, currentThreadId: "zz", direction: "next" })).toBeNull();
   });
 
+  it("only a running turn is working; a thread waiting on the user is idle whatever its session says", () => {
+    expect(isThreadWorking({ status: "running" })).toBe(true);
+    expect(isThreadWorking({ status: "completed" })).toBe(false);
+    expect(isThreadWorking({ status: "interrupted" })).toBe(false);
+    expect(isThreadWorking({ status: "failed" })).toBe(false);
+    expect(isThreadWorking({ status: "running", hasPendingApprovals: true })).toBe(false);
+    expect(isThreadWorking({ status: "running", hasPendingUserInput: true })).toBe(false);
+  });
 });
 
 const status = (over: Partial<WorkspaceStatus>): WorkspaceStatus => ({
