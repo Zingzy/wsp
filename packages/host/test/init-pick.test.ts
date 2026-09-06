@@ -314,7 +314,7 @@ describe("the whole flow", () => {
     expect(signIns).toContain(SIGN_INS_TOP);
     o.input.write(KEY.enter);
     await settle(20);
-    expect(o.text()).toContain("◆  wsp for your agents  5/6");
+    expect(o.text()).toContain("◆  wsp for your agents on this Mac  5/6");
     o.input.write(KEY.enter);
     const picked = await p;
     expect(picked).not.toBe("cancel");
@@ -342,7 +342,7 @@ describe("the whole flow", () => {
     expect(at()).toMatch(/Claude Code login\s+[^\n]*API key/);
     o.input.write(KEY.enter);
     await settle(20);
-    expect(o.text()).toContain("◆  wsp for your agents  5/6");
+    expect(o.text()).toContain("◆  wsp for your agents on this Mac  5/6");
     // A tick on screen five, then esc back: the sign-in answer is still the one that was chosen.
     o.input.write(KEY.space);
     await settle();
@@ -352,7 +352,7 @@ describe("the whole flow", () => {
     o.input.write(KEY.enter);
     await settle(20);
     // And screen five is still as it was left.
-    expect(o.text().slice(o.text().lastIndexOf("◆  wsp for your agents"))).toMatch(/● Claude Code/);
+    expect(o.text().slice(o.text().lastIndexOf("◆  wsp for your agents on this Mac"))).toMatch(/● Claude Code/);
     o.input.write(KEY.enter);
     const picked = await p;
     if (picked === "cancel") throw new Error("cancelled");

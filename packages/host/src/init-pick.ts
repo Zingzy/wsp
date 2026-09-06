@@ -30,7 +30,7 @@ export const TOOLS_TITLE = "Tools";
 export const TOOLS_TOP = "What installs on the image, from what you use.";
 export const SIGN_INS_TITLE = "Sign-ins";
 export const SIGN_INS_TOP = "Each row is something the machine needs to be signed in to. Choose how.";
-export const WSP_TITLE = "wsp for your agents";
+export const WSP_TITLE = "wsp for your agents on this Mac";
 export const WSP_TOP = "Add wsp's MCP server and skill to the agents installed here, so they can drive your workspaces.";
 /** How many screens a run has, the build counted; the counter on every screen reads against it. */
 export const SCREENS = 6;

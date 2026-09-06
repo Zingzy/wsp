@@ -279,7 +279,7 @@ function withGhCopy(f: Fake): void {
 }
 
 /** The five screens a run asks before the build, in order. */
-const SCREENS = ["Agents", "Tools", "Also on this Mac", "Sign-ins", "wsp for your agents"];
+const SCREENS = ["Agents", "Tools", "Also on this Mac", "Sign-ins", "wsp for your agents on this Mac"];
 
 /** Enter through every screen, taking the defaults each one opens on. */
 async function throughScreens(f: Fake, screens: readonly string[] = SCREENS): Promise<void> {
@@ -323,7 +323,7 @@ describe("wsp init, interactive", () => {
     await f.until(/● llvm/);
     expect(disk(f.text().slice(f.text().lastIndexOf("◆  Also on this Mac")))).not.toBe(before);
     await f.press(KEY.enter);
-    await throughScreens(f, ["Sign-ins", "wsp for your agents"]);
+    await throughScreens(f, ["Sign-ins", "wsp for your agents on this Mac"]);
     await f.until(BOOT);
     await f.press("n");
     expect((await run).code).toBe(1);
@@ -388,7 +388,7 @@ describe("wsp init, interactive", () => {
     expect(screen).toContain("What this Mac has installed that a package manager could put on the image");
     expect(screen).toContain("nothing found here yet");
     await f.press(KEY.enter);
-    await throughScreens(f, ["Sign-ins", "wsp for your agents"]);
+    await throughScreens(f, ["Sign-ins", "wsp for your agents on this Mac"]);
     await f.until(BOOT);
     await f.press("n");
     expect((await run).code).toBe(1);
@@ -550,7 +550,7 @@ describe("wsp init, interactive", () => {
     await f.until("Sign-ins  4/6");
     expect(f.text()).toContain("nothing found");
     await f.press(KEY.enter);
-    await f.until("wsp for your agents");
+    await f.until("wsp for your agents on this Mac");
     await f.press(KEY.enter);
     await f.until(BOOT);
     await f.press("n");
@@ -647,7 +647,7 @@ describe("wsp init, the summary-first screens", () => {
     await f.until(/Hermes Agent API keys\s+[^\n]*copy from this Mac/);
     await f.press(KEY.enter);
 
-    await f.until("wsp for your agents  5/6");
+    await f.until("wsp for your agents on this Mac  5/6");
     await f.press(KEY.enter);
 
     await f.until(BOOT);
@@ -731,7 +731,7 @@ describe("wsp init, the summary-first screens", () => {
     await f.until(/Also on this Mac  3\/6[\s\S]*Also on this Mac  3\/6/);
     await f.press(KEY.enter);
     await f.press(KEY.enter);
-    await f.until("wsp for your agents  5/6");
+    await f.until("wsp for your agents on this Mac  5/6");
     await f.press(KEY.enter);
     await f.until(BOOT);
     await f.press("n");
@@ -745,8 +745,8 @@ describe("wsp init, the summary-first screens", () => {
     const f = fake({ collect: async () => LAPTOP, recipe: async () => MEASURED });
     const run = runInit(f.opts, f.io);
     await throughScreens(f, ["Agents", "Tools", "Also on this Mac", "Sign-ins"]);
-    await f.until("wsp for your agents  5/6");
-    const five = f.text().slice(f.text().lastIndexOf("◆  wsp for your agents"));
+    await f.until("wsp for your agents on this Mac  5/6");
+    const five = f.text().slice(f.text().lastIndexOf("◆  wsp for your agents on this Mac"));
     // Claude Code is the one agent here whose config the catalog can place a server in: Hermes is here without one, Codex is not here.
     expect(five).toContain("Add wsp's MCP server and skill to the agents installed here, so they can");
     expect(five).toMatch(/○ Claude Code\n/);
@@ -782,7 +782,7 @@ describe("wsp init, the summary-first screens", () => {
     writeFileSync(join(broken.opts.home, ".claude.json"), "[]\n");
     const second = runInit(broken.opts, broken.io);
     await throughScreens(broken, ["Agents", "Tools", "Also on this Mac", "Sign-ins"]);
-    await broken.until("wsp for your agents  5/6");
+    await broken.until("wsp for your agents on this Mac  5/6");
     await broken.press(KEY.space);
     await broken.until(/● Claude Code/);
     await broken.press(KEY.enter);
@@ -3049,7 +3049,7 @@ describe("wsp init --recipe", () => {
     expect(out).not.toContain("Claude Code login");
     expect(out).toMatch(/GitHub CLI login\s+[^\n]*copy from this Mac/);
     await f.press(KEY.enter);
-    await f.until("wsp for your agents  5/6");
+    await f.until("wsp for your agents on this Mac  5/6");
     await f.press(KEY.enter);
     await f.until(BOOT);
     await f.press("n");
@@ -3141,8 +3141,8 @@ describe("wsp init --recipe", () => {
     // A recipe file decides the agents and the tools, so the run opens on the sign-ins and the wsp tools follow.
     await f.until("Sign-ins  4/6");
     await f.press(KEY.enter);
-    await f.until("wsp for your agents  5/6");
-    const screen = f.text().slice(f.text().lastIndexOf("◆  wsp for your agents"));
+    await f.until("wsp for your agents on this Mac  5/6");
+    const screen = f.text().slice(f.text().lastIndexOf("◆  wsp for your agents on this Mac"));
     expect(screen).toMatch(/○ Claude Code\n┃\s+○ Gemini CLI\n/);
     expect(screen).not.toContain("Codex");
     await f.press(..."gemini");
