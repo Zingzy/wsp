@@ -261,7 +261,7 @@ export function stripExports(text: string): { names: string[]; carried: string }
   return { names, carried: kept.join(eol) };
 }
 
-const SOURCE = /^([ \t]*)(source|\\?\.)[ \t]+("[^"]*"|'[^']*'|[^\s;&|<>()"'\\`]+)(.*)$/;
+const SOURCE = /^([ \t]*)(source|\\?\.)[ \t]+("[^"]*"|'[^']*'|[^\s;&|<>()"'\\`]+)(?=[\s;&|<>()]|$)(.*)$/;
 
 export interface SourceCommand {
   indent: string;

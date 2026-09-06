@@ -40,11 +40,11 @@ describe("pass 6: shell rc exports", () => {
     expect(sourcedPaths(text, "/Users/dev")).toEqual(["/Users/dev/.zsh/secrets.zsh", "/Users/dev/.zsh/work.zsh", "/Users/dev/.zsh/local.zsh", "/Users/dev/.zsh/if.zsh", "/Users/dev/.zsh/abs.zsh", "/Users/dev/.zsh/quoted.zsh", "/Users/dev/.nvm/nvm.sh"]);
   });
 
-  it("the alias fallback and the source guard read the same files: nvm's escaped dot counts, a dot segment or an empty segment does not", () => {
+  it("the alias fallback and the source guard read the same files: nvm's escaped dot counts, a dot segment, an empty segment or a token cut by a backslash or a quote does not", () => {
     const nvm = '\\. "$HOME/.nvm/nvm.sh"\n';
     expect(sourcedPaths(nvm, "/Users/dev")).toEqual(["/Users/dev/.nvm/nvm.sh"]);
     expect(bareSources(nvm, "/Users/dev")).toEqual(["~/.nvm/nvm.sh"]);
-    for (const line of ["source ~/../etc/profile\n", "source /Users/dev/../etc/profile\n", "source ~//x\n", ". ~/.zsh//x\n"]) {
+    for (const line of ["source ~/../etc/profile\n", "source /Users/dev/../etc/profile\n", "source ~//x\n", ". ~/.zsh//x\n", "source ~/.zsh/my\\ file.zsh\n", 'source ~/.x"y"\n']) {
       expect(sourcedPaths(line, "/Users/dev"), line).toEqual([]);
       expect(bareSources(line, "/Users/dev"), line).toEqual([]);
     }
