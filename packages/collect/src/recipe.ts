@@ -14,11 +14,15 @@ import type { Host } from "./host.js";
  * is a look, not a habit. A `used` tick is the person's own choice and takes any use. */
 export const USED_TICK_SESSIONS = 2;
 
-/** How one rule reads the computer. `order` is the source kinds it reports, best first: the first kind this
- * computer has anything for is the row's source, so the words beside a row say what the rule went on. */
+/** How one rule reads the computer. `order` is the source kinds it reports for an entry, best first: the first kind
+ * this computer has anything for is the row's source, so the words beside a row say what the rule went on. It takes
+ * the entry because a rule may read an agent and a tool differently: what the agents ran is the plainest thing to
+ * say about a tool, while an agent is placed by whether it is on this computer. */
 interface TickRule {
-  order: readonly RecipeSource["kind"][];
-  on(source: RecipeSource, entry: CatalogEntry): boolean;
+  order(entry: CatalogEntry): readonly RecipeSource["kind"][];
+  /** Whether the row is on, read from everything this computer said about it rather than from the one source the
+   * order picked to show: a rule may tick on a use while the row still reads as installed here. */
+  on(sources: Sources, entry: CatalogEntry): boolean;
   /** Whether this rule ticks an agent the caller says no adapter can open a thread on. Only the rule that answers
    * about this computer does: it is saying what is here, not what wsp can drive. Every other rule holds such an
    * agent off, since ticking it would build a machine nothing here can open a thread on. */
@@ -26,38 +30,35 @@ interface TickRule {
 }
 
 const INSTALLED_FIRST: readonly RecipeSource["kind"][] = ["installed", "used", "popular"];
+const USED_FIRST: readonly RecipeSource["kind"][] = ["used", "installed", "popular"];
+const installedFirst = (): readonly RecipeSource["kind"][] => INSTALLED_FIRST;
+/** Everything this computer said about one entry; `popular` is the catalog's own and is always there. */
+type Sources = Partial<Record<RecipeSource["kind"], RecipeSource>>;
 /** The catalog's own default: a tool the catalog ships on, never an agent. */
-const catalogDefault = (_source: RecipeSource, entry: CatalogEntry): boolean => entry.kind === "tool" && entry.defaultOn;
+const catalogDefault = (_sources: Sources, entry: CatalogEntry): boolean => entry.kind === "tool" && entry.defaultOn;
 
 /** One rule per `--tick` word; adding a word is an entry here and nothing else. */
 const TICK_RULES: Readonly<Record<RecipeTick, TickRule>> = {
-  used: { order: ["used", "installed", "popular"], on: source => source.kind === "used", ticksAgentsWithoutAdapter: false },
-  installed: { order: INSTALLED_FIRST, on: source => source.kind === "installed", ticksAgentsWithoutAdapter: true },
-  default: { order: INSTALLED_FIRST, on: catalogDefault, ticksAgentsWithoutAdapter: false },
+  used: { order: entry => (entry.kind === "tool" ? USED_FIRST : INSTALLED_FIRST), on: sources => sources.used !== undefined, ticksAgentsWithoutAdapter: false },
+  installed: { order: installedFirst, on: sources => sources.installed !== undefined, ticksAgentsWithoutAdapter: true },
+  default: { order: installedFirst, on: catalogDefault, ticksAgentsWithoutAdapter: false },
 };
 
 /** What the wizard's screens start from when no rule was named: installed here, then a habit in the histories,
  * then the catalog's default, and an agent only ever from this computer. A use below the threshold is the row's
  * answer and vetoes the catalog default under it, so a tool looked at once stays off however popular it is. */
 const BLENDED: TickRule = {
-  order: INSTALLED_FIRST,
+  // A tool says what the agents ran with it, so a row can read "installed here, never used"; an agent is placed by
+  // whether it is on this computer, which is the only thing that ticks one.
+  order: entry => (entry.kind === "tool" ? USED_FIRST : INSTALLED_FIRST),
   ticksAgentsWithoutAdapter: false,
-  on: (source, entry) => {
-    if (source.kind === "installed") return true;
+  on: (sources, entry) => {
+    if (sources.installed !== undefined) return true;
     if (entry.kind !== "tool") return false;
-    return source.kind === "used" ? source.sessions >= USED_TICK_SESSIONS : catalogDefault(source, entry);
+    const used = sources.used;
+    return used !== undefined && used.kind === "used" ? used.sessions >= USED_TICK_SESSIONS : catalogDefault(sources, entry);
   },
 };
-
-/** Whether a rule reads a use before what is installed. Under one that does, an installed row is only ever a row
- * with no use at all, so a reader may say so; under any other, an installed row says nothing either way. Derived
- * from the rule's own `order`, so a word added to TICK_RULES answers this by existing. A recipe that names no rule
- * makes no such claim. */
-export function readsUsedFirst(tick: RecipeTick | undefined): boolean {
-  if (tick === undefined) return false;
-  const { order } = TICK_RULES[tick];
-  return order.indexOf("used") < order.indexOf("installed");
-}
 
 export interface RecipeOptions {
   /** The entries to decide; the shipped catalog by default. */
@@ -127,15 +128,16 @@ export async function computeRecipe(host: Host, opts: RecipeOptions = {}): Promi
   const threads = opts.threadAgents !== undefined ? new Set(opts.threadAgents) : undefined;
   const rows = catalog.map((e): RecipeRow => {
     const used = e.kind === "tool" ? usedTools.get(e.id) : agentUse(byAgent.get(e.id));
+    const installed = present.get(e.id);
     const popular: RecipeSource = { kind: "popular", sessions: e.source.sessions, images: e.source.images };
-    const sources: Partial<Record<RecipeSource["kind"], RecipeSource>> = {
-      ...(present.has(e.id) ? { installed: present.get(e.id) } : {}),
+    const sources: Sources = {
+      ...(installed !== undefined ? { installed } : {}),
       ...(used !== undefined ? { used: { kind: "used" as const, ...used } } : {}),
       popular,
     };
-    const source = rule.order.flatMap(kind => sources[kind] ?? [])[0] ?? popular;
+    const source = rule.order(e).flatMap(kind => sources[kind] ?? [])[0] ?? popular;
     const held = e.kind === "agent" && threads !== undefined && !threads.has(e.id) && !rule.ticksAgentsWithoutAdapter;
-    return { id: e.id, kind: e.kind, on: !held && rule.on(source, e), source, ...(e.size !== undefined ? { size: e.size } : {}) };
+    return { id: e.id, kind: e.kind, on: !held && rule.on(sources, e), source, ...(e.size !== undefined ? { size: e.size } : {}) };
   });
   return {
     version: 1,

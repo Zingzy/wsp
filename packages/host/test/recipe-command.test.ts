@@ -5,13 +5,14 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { computeRecipe } from "@wsp/collect";
-import { RECIPE_SIGN_INS, Recipe, type RecipeSignIn } from "@wsp/protocol";
+import { LOGIN_CHOICES, Recipe, type LoginChoice } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { applySets, parseSet, parseSets, parseSignIn, runRecipe, type RecipeIo } from "../src/recipe-command.js";
-import { applyRecipe, loginAnswers, recipeWithAnswers, signInAnswerOf, withCatalogAgents } from "../src/init-recipe.js";
+import { applyRecipe, withCatalogAgents } from "../src/init-recipe.js";
 import { signInItems } from "../src/init-pick.js";
 import { saveSmallRecipe } from "../src/recipe-file.js";
-import { HEAVY_BYTES, commandTableLines, recipePrintout, recipeTableLines, recipeTotalLine } from "../src/recipe-table.js";
+import { BASE_GROUP, HERE_GROUP, USED_GROUP } from "../src/init-table.js";
+import { allRows, commandTableLines, recipePrintout } from "../src/recipe-answer.js";
 import { claudeLine, fakeHost, HOME } from "./recipe-fixture.js";
 
 const PROJ = `${HOME}/proj`;
@@ -24,8 +25,8 @@ const laptop = () =>
     which: ["claude", "java"],
     files: {
       "~/.claude/settings.json": "{}",
-      "~/.claude/projects/-Users-dev-proj/s1.jsonl": [claudeLine("s1", PROJ, ["node --version", "pnpm install"]), claudeLine("s1", PROJ, ["pytest -q"])].join("\n"),
-      "~/.claude/projects/-Users-dev-proj/s2.jsonl": claudeLine("s2", PROJ, ["pnpm test", "node build.js"]),
+      "~/.claude/projects/-Users-dev-proj/s1.jsonl": [claudeLine("s1", PROJ, ["node --version", "gh pr view"]), claudeLine("s1", PROJ, ["pytest -q"])].join("\n"),
+      "~/.claude/projects/-Users-dev-proj/s2.jsonl": claudeLine("s2", PROJ, ["gh pr list", "node build.js"]),
       "~/.claude/projects/-Users-dev-other/s3.jsonl": claudeLine("s3", OTHER, ["go build ./..."]),
     },
   });
@@ -47,13 +48,14 @@ describe("wsp recipe", () => {
     dir = mkdtempSync(join(tmpdir(), "wsp-recipe-used-"));
     const out = outPath();
     const table = await runRecipe(laptop(), { out }, quiet, at);
-    const row = (id: string) => table.rows.find(r => r.id === id)!;
+    const row = (id: string) => allRows(table).find(r => r.id === id)!;
     expect(table.tick).toBe("used");
-    expect(row("node")).toMatchObject({ on: true, why: "used 2 times in 2 sessions" });
-    expect(row("pnpm")).toMatchObject({ on: true, why: "used 2 times in 2 sessions" });
-    expect(row("java")).toMatchObject({ on: false, why: "installed here, never used", size: 343 * 1024 * 1024 });
+    // node is on every image whatever a rule says, so the renderer puts it in the base group and says so.
+    expect(row("node")).toMatchObject({ on: true, why: "always on the image", base: true, group: BASE_GROUP });
+    expect(row("gh")).toMatchObject({ on: true, why: "2 commands in 2 sessions", group: USED_GROUP });
+    expect(row("java")).toMatchObject({ on: false, why: "installed here, never used", group: HERE_GROUP, size: 343 * 1024 * 1024 });
     // A tool the catalog ships on but nobody here ran is off under this rule; only use ticks a row.
-    expect(row("curl")).toMatchObject({ on: false, why: "catalog default" });
+    expect(row("curl")).toMatchObject({ on: true, why: "always on the image", base: true });
     expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8"))).tick).toBe("used");
   });
 
@@ -62,12 +64,12 @@ describe("wsp recipe", () => {
     const out = outPath();
     await runRecipe(laptop(), { out }, quiet, at);
     const flipped = await runRecipe(laptop(), { out, set: ["java=on"] }, quiet, at);
-    expect(flipped.rows.find(r => r.id === "java")).toMatchObject({ on: true });
+    expect(allRows(flipped).find(r => r.id === "java")).toMatchObject({ on: true });
     expect(flipped.heavy.map(r => r.id)).toContain("java");
-    expect(recipeTableLines(flipped.rows).find(l => l.startsWith("java "))).toMatch(/\bon\b.*343\.0 MB$/);
+    expect(recipePrintout(flipped).find(l => l.includes("Java 21"))).toMatch(/^● {2}Java 21\s+installed\s+installed here, never used\s+343\.0 MB$/);
     // The flip is in the file, so a later --set adds to it instead of starting over.
     const second = await runRecipe(laptop(), { out, set: ["go=on"] }, quiet, at);
-    expect(second.rows.filter(r => r.on).map(r => r.id)).toEqual(expect.arrayContaining(["java", "go", "node", "pnpm"]));
+    expect(allRows(second).filter(r => r.on).map(r => r.id)).toEqual(expect.arrayContaining(["java", "go", "gh"]));
     expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8"))).rows.find(r => r.id === "java")?.on).toBe(true);
   });
 
@@ -77,9 +79,9 @@ describe("wsp recipe", () => {
     await runRecipe(laptop(), { out }, quiet, at);
     const under = await runRecipe(laptop(), { out, tick: "installed", set: ["go=on"] }, quiet, at);
     expect(under.tick).toBe("installed");
-    expect(under.rows.find(r => r.id === "java")).toMatchObject({ on: true, why: "installed here" });
-    expect(under.rows.find(r => r.id === "node")).toMatchObject({ on: false, why: "used 2 times in 2 sessions" });
-    expect(under.rows.find(r => r.id === "go")).toMatchObject({ on: true });
+    expect(allRows(under).find(r => r.id === "java")).toMatchObject({ on: true, why: "installed here, never used" });
+    expect(allRows(under).find(r => r.id === "gh")).toMatchObject({ on: false, why: "2 commands in 2 sessions" });
+    expect(allRows(under).find(r => r.id === "go")).toMatchObject({ on: true });
     // The file now says the rule that really decided it, so the next run inherits the truth.
     expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8")))).toMatchObject({ tick: "installed" });
   });
@@ -89,31 +91,31 @@ describe("wsp recipe", () => {
     const out = outPath();
     await runRecipe(laptop(), { out, set: ["java=on"] }, quiet, at);
     // No rule input: what is in the file stands, so an earlier flip is still there.
-    expect((await runRecipe(laptop(), { out }, quiet, at)).rows.find(r => r.id === "java")).toMatchObject({ on: true });
+    expect(allRows(await runRecipe(laptop(), { out }, quiet, at)).find(r => r.id === "java")).toMatchObject({ on: true });
     // A rule input re-decides, so the flip goes.
-    expect((await runRecipe(laptop(), { out, tick: "used" }, quiet, at)).rows.find(r => r.id === "java")).toMatchObject({ on: false });
+    expect(allRows(await runRecipe(laptop(), { out, tick: "used" }, quiet, at)).find(r => r.id === "java")).toMatchObject({ on: false });
     await runRecipe(laptop(), { out, set: ["java=on"] }, quiet, at);
-    expect((await runRecipe(laptop(), { out, projects: [PROJ] }, quiet, at)).rows.find(r => r.id === "java")).toMatchObject({ on: false });
+    expect(allRows(await runRecipe(laptop(), { out, projects: [PROJ] }, quiet, at)).find(r => r.id === "java")).toMatchObject({ on: false });
   });
 
   it("lets the rule decide a catalog row the saved file never carried, instead of dropping it to off", async () => {
     dir = mkdtempSync(join(tmpdir(), "wsp-recipe-grown-"));
     const out = outPath();
     const first = await runRecipe(laptop(), { out }, quiet, at);
-    expect(first.rows.find(r => r.id === "node")).toMatchObject({ on: true });
+    expect(allRows(first).find(r => r.id === "gh")).toMatchObject({ on: true });
     // The catalog grew a row since the file was written: strip it and flip something else.
     const saved = Recipe.parse(JSON.parse(readFileSync(out, "utf8")));
-    writeFileSync(out, JSON.stringify({ ...saved, rows: saved.rows.filter(r => r.id !== "node") }));
+    writeFileSync(out, JSON.stringify({ ...saved, rows: saved.rows.filter(r => r.id !== "gh") }));
     const after = await runRecipe(laptop(), { out, set: ["java=on"] }, quiet, at);
-    expect(after.rows.find(r => r.id === "node")).toMatchObject({ on: true, why: "used 2 times in 2 sessions" });
-    expect(after.rows.find(r => r.id === "java")).toMatchObject({ on: true });
+    expect(allRows(after).find(r => r.id === "gh")).toMatchObject({ on: true, why: "2 commands in 2 sessions" });
+    expect(allRows(after).find(r => r.id === "java")).toMatchObject({ on: true });
   });
 
-  it("writes the sign-in answer a --signin names, keeps it across a later flip, and refuses a word or a row it cannot honour", async () => {
+  it("writes the sign-in answer a --signin names, keeps it across a later flip, and refuses a word or a row it does not know", async () => {
     dir = mkdtempSync(join(tmpdir(), "wsp-recipe-signin-"));
     const out = outPath();
     const signed = await runRecipe(laptop(), { out, signin: ["claude=machine", "gh=copy"] }, quiet, at);
-    expect(signed.rows.length).toBeGreaterThan(0);
+    expect(allRows(signed).length).toBeGreaterThan(0);
     const saved = () => Recipe.parse(JSON.parse(readFileSync(out, "utf8")));
     expect(saved().rows.find(r => r.id === "claude")?.signIn).toBe("machine");
     expect(saved().rows.find(r => r.id === "gh")?.signIn).toBe("copy");
@@ -123,8 +125,8 @@ describe("wsp recipe", () => {
     expect(parseSignIn("hermes=key")).toEqual({ id: "hermes", choice: "key" });
     expect(() => parseSignIn("claude=maybe")).toThrow("--signin takes <id>=copy|machine|key|skip");
     expect(() => parseSignIn("clawd=copy")).toThrow('the catalog has no row called "clawd"');
-    // Only a row the catalog files key files for can answer key; the answer lands on that keys row.
-    expect(() => parseSignIn("gh=key")).toThrow("has no key files beside its login");
+    // A word a row cannot take is not refused here: the sign-ins screen falls back to the first word it takes.
+    expect(parseSignIn("gh=key")).toEqual({ id: "gh", choice: "key" });
   });
 
   it("keeps a sign-in answer through a run that names a rule: the answer is the person's and no rule decides it", async () => {
@@ -143,7 +145,7 @@ describe("wsp recipe", () => {
     expect(answers()).toEqual([["claude", "machine"], ["gh", "copy"]]);
     // This run's own word wins over the one in the file.
     const last = await runRecipe(laptop(), { out, tick: "used", signin: ["gh=machine"] }, quiet, at);
-    expect(last.rows.find(r => r.id === "gh")?.id).toBe("gh");
+    expect(allRows(last).find(r => r.id === "gh")?.id).toBe("gh");
     expect(answers()).toEqual([["claude", "machine"], ["gh", "machine"]]);
   });
 
@@ -158,32 +160,13 @@ describe("wsp recipe", () => {
     expect(flipped.tick).toBeUndefined();
     expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8"))).tick).toBeUndefined();
     // An installed row cannot be said never to have been used under a rule that never read a use.
-    expect(flipped.rows.find(r => r.id === "claude")).toMatchObject({ why: "installed here" });
-    expect(flipped.rows.find(r => r.id === "go")).toMatchObject({ on: true });
+    expect(allRows(flipped).find(r => r.id === "claude")).toMatchObject({ why: "used here, 3 sessions" });
+    expect(allRows(flipped).find(r => r.id === "go")).toMatchObject({ on: true });
     // Naming a rule is what stamps one on.
     expect((await runRecipe(laptop(), { out, tick: "used" }, quiet, at)).tick).toBe("used");
   });
 
-  it("turns a key answer into the keys row travelling and the login still running on the machine", () => {
-    const rows = [{ id: "hermes", kind: "agent" as const, on: true, source: { kind: "installed" as const, paths: [], bin: true }, signIn: "key" as const }];
-    expect([...loginAnswers({ version: 1, at: "x", histories: [], rows })]).toEqual([
-      ["logins/hermes-keys", "copy"],
-      ["logins/hermes", "machine"],
-    ]);
-    const copied = [{ ...rows[0]!, signIn: "copy" as const }];
-    expect([...loginAnswers({ version: 1, at: "x", histories: [], rows: copied })]).toEqual([["logins/hermes", "copy"]]);
-  });
 
-  it("reads a key answer back off the login rows the wizard answered, so init rewriting the file keeps it", () => {
-    const recipe = (signIn: RecipeSignIn) => ({ version: 1 as const, at: "x", histories: [], rows: [{ id: "hermes", kind: "agent" as const, on: true, source: { kind: "installed" as const, paths: [], bin: true }, signIn }] });
-    // What wsp init does at the end of a run: the screens' answers written back onto the small recipe.
-    const roundTrip = (signIn: RecipeSignIn): string | undefined => recipeWithAnswers(recipe(signIn), loginAnswers(recipe(signIn))).rows[0]?.signIn;
-    for (const word of RECIPE_SIGN_INS) expect(roundTrip(word), word).toBe(word);
-    // A keys row copied beside a login copied in its own right is the login's answer, not key.
-    expect(signInAnswerOf("hermes", new Map([["logins/hermes-keys", "copy"], ["logins/hermes", "copy"]]))).toBe("copy");
-    expect(signInAnswerOf("hermes", new Map([["logins/hermes-keys", "copy"], ["logins/hermes", "skip"]]))).toBe("key");
-    expect(signInAnswerOf("hermes", new Map())).toBeUndefined();
-  });
 
   it("carries the rows --add names into the file, keeps an earlier run's, and offers none of them a sign-in", async () => {
     dir = mkdtempSync(join(tmpdir(), "wsp-recipe-add-"));
@@ -209,7 +192,7 @@ describe("wsp recipe", () => {
     const io = collect();
     const table = await runRecipe(laptop(), { out, add: ["just=brew install just"] }, io, at);
     expect(io.notes.find(l => l.includes("could not be read"))).toContain("its ticks, sign-in answers and added rows go with it");
-    expect(table.rows.length).toBeGreaterThan(0);
+    expect(allRows(table).length).toBeGreaterThan(0);
     expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8"))).custom?.map(r => r.id)).toEqual(["just"]);
   });
 
@@ -224,27 +207,27 @@ describe("wsp recipe", () => {
   it("ticks what is installed under installed, and what the catalog ships on under default", async () => {
     dir = mkdtempSync(join(tmpdir(), "wsp-recipe-rules-"));
     const installed = await runRecipe(laptop(), { out: outPath(), tick: "installed" }, quiet, at);
-    expect(installed.rows.find(r => r.id === "java")).toMatchObject({ on: true, why: "installed here" });
-    expect(installed.rows.find(r => r.id === "node")).toMatchObject({ on: false, why: "used 2 times in 2 sessions" });
+    expect(allRows(installed).find(r => r.id === "java")).toMatchObject({ on: true, why: "installed here, never used" });
+    expect(allRows(installed).find(r => r.id === "gh")).toMatchObject({ on: false, why: "2 commands in 2 sessions" });
     const byDefault = await runRecipe(laptop(), { out: outPath(), tick: "default" }, quiet, at);
-    expect(byDefault.rows.find(r => r.id === "curl")).toMatchObject({ on: true });
-    expect(byDefault.rows.find(r => r.id === "java")).toMatchObject({ on: false });
+    expect(allRows(byDefault).find(r => r.id === "gh")).toMatchObject({ on: true });
+    expect(allRows(byDefault).find(r => r.id === "java")).toMatchObject({ on: false });
   });
 
   it("holds an agent this host cannot open a thread on off, whatever its history said", async () => {
     dir = mkdtempSync(join(tmpdir(), "wsp-recipe-agents-"));
     const table = await runRecipe(laptop(), { out: outPath() }, quiet, at);
-    expect(table.rows.find(r => r.id === "claude")).toMatchObject({ on: true, kind: "agent" });
-    for (const id of ["codex", "gemini", "opencode", "pi", "hermes"]) expect(table.rows.find(r => r.id === id), id).toMatchObject({ on: false });
+    expect(allRows(table).find(r => r.id === "claude")).toMatchObject({ on: true, kind: "agent" });
+    for (const id of ["codex", "gemini", "opencode", "pi", "hermes"]) expect(allRows(table).find(r => r.id === id), id).toMatchObject({ on: false });
   });
 
   it("weighs the histories by the folders --project names, so another project's tools do not count", async () => {
     dir = mkdtempSync(join(tmpdir(), "wsp-recipe-project-"));
     const all = await runRecipe(laptop(), { out: outPath() }, quiet, at);
-    expect(all.rows.find(r => r.id === "go")).toMatchObject({ on: true });
+    expect(allRows(all).find(r => r.id === "go")).toMatchObject({ on: true });
     const one = await runRecipe(laptop(), { out: outPath(), projects: [PROJ] }, quiet, at);
-    expect(one.rows.find(r => r.id === "go")).toMatchObject({ on: false, why: "catalog default" });
-    expect(one.rows.find(r => r.id === "node")).toMatchObject({ on: true });
+    expect(allRows(one).find(r => r.id === "go")).toMatchObject({ on: false, why: "in the catalog, on request" });
+    expect(allRows(one).find(r => r.id === "gh")).toMatchObject({ on: true });
   });
 
   it("ends with the commands the agents ran that no catalog row carries, most-run first", async () => {
@@ -257,16 +240,18 @@ describe("wsp recipe", () => {
     expect(commandTableLines(table.commands).join("\n")).toContain("pytest");
   });
 
-  it("prints the table on its own and the reading lines apart from it, and says what the ticked rows add up to", async () => {
+  it("prints the wizard's own two tables and the reading lines apart from them", async () => {
     dir = mkdtempSync(join(tmpdir(), "wsp-recipe-print-"));
     const io = collect();
     const table = await runRecipe(laptop(), { out: outPath() }, io, at);
     for (const line of recipePrintout(table)) io.log(line);
     expect(io.notes[0]).toBe("Reading this computer against the catalog and your agents' session histories. Nothing leaves this computer.");
     expect(io.notes).toContain("Claude Code: 3 sessions, 6 tool calls");
-    expect(io.logs[0]).toMatch(/^id +on +why +size$/);
-    expect(io.logs).toContain(recipeTotalLine(table.rows));
-    expect(recipeTotalLine(table.rows)).toMatch(/^\d+ rows on, .* measured and \d+ rows? not; \d+ rows? over 300\.0 MB\.$/);
-    expect(table.heavy.every(r => (r.size ?? 0) > HEAVY_BYTES)).toBe(true);
+    // The shared renderer's lines, which is what the wizard's screens draw: one row per entry, its own totals line.
+    expect(io.logs[0]).toBe("Agents");
+    expect(io.logs).toContain("Tools");
+    expect(io.logs.filter(l => l.startsWith("On: "))).toHaveLength(2);
+    expect(io.logs.find(l => l.includes("Java 21"))).toMatch(/^○ {2}Java 21\s+installed\s+installed here, never used\s+343\.0 MB$/);
+    expect(table.heavy.every(r => r.on && r.heavy)).toBe(true);
   });
 });

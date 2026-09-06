@@ -5,13 +5,14 @@
 // golden recipe the ticked rows add up to.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { LoginChoice, Manifest, ManifestEntry, Rung } from "@wsp/collect";
-import { CATALOG_AGENTS, NO_SIGN_IN, catalogEntry, catalogToolFor, guestEnv, hasLogin, keysIdOf, loginIdOf, loginRow } from "@wsp/catalog";
+import { LOGIN_CHOICES, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
+import { CATALOG_AGENTS, catalogEntry, catalogToolFor, guestEnv, hasLogin, loginIdOf, loginRow } from "@wsp/catalog";
 import { CATALOG_PREFIX, agentOwning, isMcpRow, neverCopied, packageOf, parseMcpId, rowRoad, type RecipeDigest } from "@wsp/engine";
-import { Recipe, type RecipeSignIn } from "@wsp/protocol";
+import { Recipe, type LoginChoice } from "@wsp/protocol";
 import type { GoldenImport, GoldenRecipe, Machine } from "@wsp/runtime";
 import type { Keys } from "./cli.js";
 import { GUEST_ENVS } from "./doctor.js";
+import { SIGN_IN_WORDS } from "./signin-words.js";
 export { loadRecipe, saveSmallRecipe, smallRecipePath, withTicksOf } from "./recipe-file.js";
 
 export const RUNG_TITLE: Record<Rung, string> = {
@@ -22,13 +23,6 @@ export const RUNG_TITLE: Record<Rung, string> = {
   agents: "Agents",
   logins: "Sign-ins",
 };
-
-/** The prompt's words for each login choice; the choices themselves are the collector's. */
-export const LOGIN_CHOICES: readonly { value: LoginChoice; label: string }[] = [
-  { value: "copy", label: "copy" },
-  { value: "machine", label: "sign in" },
-  { value: "skip", label: "skip" },
-];
 
 /** The plan's note when every path of a row is refused by name, asked of the same rule the pack asks with the
  * same answer about what is on disk (`isDir`: true, false, or undefined when the path is not there). */
@@ -73,10 +67,10 @@ function rowBin(t: ManifestEntry): string | undefined {
   return catalogToolFor(pkg)?.bin ?? planned.bin ?? pkg.slice(pkg.lastIndexOf("/") + 1);
 }
 
-/** What brings a command no tools row lists: its catalog entry, ticked under What they need. */
+/** What brings a command no tools row lists: its catalog entry, ticked under Tools. */
 function brings(bin: string): string {
   const entry = catalogToolFor(bin);
-  return entry !== undefined ? `tick ${entry.name} under What they need to bring it` : `installing ${bin} brings it`;
+  return entry !== undefined ? `tick ${entry.name} under Tools to bring it` : `installing ${bin} brings it`;
 }
 
 export interface LoginTool {
@@ -190,7 +184,7 @@ export function withCatalogAgents(manifest: Manifest): Manifest {
 }
 
 export function isLoginChoice(v: unknown): v is LoginChoice {
-  return LOGIN_CHOICES.some(c => c.value === v);
+  return LOGIN_CHOICES.includes(v as LoginChoice);
 }
 
 /** The catalog id a collector row stands for: an agents row its agent, a tools row the tool its package names. */
@@ -200,24 +194,6 @@ export function catalogIdOf(e: ManifestEntry): string | undefined {
   return undefined;
 }
 
-/** A recipe row's sign-in answer as the login rows the collector files. copy, machine and skip land on the entry's
- * own login row. key lands on the keys row beside it, so the key files travel and nothing else of the login does;
- * the login itself is then run on the machine when it has one to run. */
-export function loginAnswers(recipe: Recipe): Map<string, LoginChoice> {
-  const out = new Map<string, LoginChoice>();
-  for (const r of recipe.rows) {
-    if (r.signIn === undefined) continue;
-    const login = loginIdOf(r.id);
-    if (r.signIn !== "key") {
-      out.set(`logins/${login}`, r.signIn);
-      continue;
-    }
-    out.set(`logins/${keysIdOf(r.id)}`, "copy");
-    out.set(`logins/${login}`, hasLogin(loginRow(login)?.signIn ?? NO_SIGN_IN) ? "machine" : "skip");
-  }
-  return out;
-}
-
 /** The collector's rows with the recipe's ticks written on: an agents or tools row is on when its catalog row is,
  * off when it is not or when no catalog row stands for it; an MCP row follows its agent; a saved sign-in answer
  * lands on the login row it names. Every other row keeps its default. A ticked catalog tool this computer has no
@@ -225,7 +201,7 @@ export function loginAnswers(recipe: Recipe): Map<string, LoginChoice> {
  * earlier pass are made anew, so an untick takes its row away. */
 export function applyRecipe(manifest: Manifest, recipe: Recipe): Manifest {
   const on = new Set(recipe.rows.filter(r => r.on).map(r => r.id));
-  const answers = loginAnswers(recipe);
+  const answers = new Map<string, LoginChoice>(recipe.rows.flatMap(r => (r.signIn === undefined ? [] : [[`logins/${loginIdOf(r.id)}`, r.signIn]])));
   const own = manifest.entries.filter(e => !e.id.startsWith(CATALOG_PREFIX));
   const here = new Set(own.map(catalogIdOf));
   const bare = recipe.rows.flatMap((r): ManifestEntry[] => {
@@ -260,16 +236,6 @@ export function recipePath(statePath: string): string {
   return join(dirname(statePath), "golden-recipe.json");
 }
 
-/** The word a catalog row's sign-in reads back as, from the login rows the screens answered. `key` writes two of
- * them (the keys row copied, the login left to run on the machine), so it has to be read off both: a keys row
- * copied beside a login that is not itself copied is what `key` put there. A login copied in its own right is that
- * login's answer, whatever its keys row says, since `copy` is the closest of the four words to it. */
-export function signInAnswerOf(id: string, choices: ReadonlyMap<string, string>): RecipeSignIn | undefined {
-  const login = choices.get(`logins/${loginIdOf(id)}`);
-  if (choices.get(`logins/${keysIdOf(id)}`) === "copy" && login !== "copy") return "key";
-  return isLoginChoice(login) ? login : undefined;
-}
-
 /** The small recipe with the login answers written on: a row whose login rows were answered carries the word they
  * add up to, a row nobody answered carries none. The ticks are the recipe's own, as the screens left them. */
 export function recipeWithAnswers(recipe: Recipe, choices: ReadonlyMap<string, string>): Recipe {
@@ -277,8 +243,8 @@ export function recipeWithAnswers(recipe: Recipe, choices: ReadonlyMap<string, s
     ...recipe,
     rows: recipe.rows.map(r => {
       const { signIn: _signIn, ...rest } = r;
-      const answer = signInAnswerOf(r.id, choices);
-      return { ...rest, ...(answer !== undefined ? { signIn: answer } : {}) };
+      const answer = choices.get(`logins/${loginIdOf(r.id)}`);
+      return { ...rest, ...(isLoginChoice(answer) ? { signIn: answer } : {}) };
     }),
   };
 }
@@ -302,7 +268,7 @@ export function agentName(e: ManifestEntry): string {
  * files that came or went with it are not listed again. */
 export function recipeChanges(from: RecipeDigest, to: RecipeDigest, manifest: Manifest): string[] {
   const label = (id: string): string => manifest.entries.find(e => e.id === id)?.label ?? id;
-  const word = (choice: string | undefined): string => LOGIN_CHOICES.find(c => c.value === choice)?.label ?? choice ?? "ticked";
+  const word = (choice: string | undefined): string => (isLoginChoice(choice) ? SIGN_IN_WORDS[choice].short : (choice ?? "ticked"));
   const out: string[] = [];
   const noted = new Set<string>();
   const was = new Map(from.ticks.map(t => [t.id, t]));

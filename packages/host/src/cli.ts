@@ -23,7 +23,7 @@ import {
   type Runtime,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS } from "@wsp/catalog";
-import { RECIPE_SIGN_INS, RECIPE_TICKS } from "@wsp/protocol";
+import { LOGIN_CHOICES, RECIPE_TICKS } from "@wsp/protocol";
 import { assetDir } from "./assets.js";
 import { HARNESS_ADAPTERS } from "./adapters.js";
 import { claudeEnvs, deployDaemon, doctor } from "./doctor.js";
@@ -33,9 +33,9 @@ import { runInit, type InitIO } from "./init.js";
 import { recipePath } from "./init-recipe.js";
 import { smallRecipePath } from "./recipe-file.js";
 import { isRecipeTick, runRecipe, runScan } from "./recipe-command.js";
-import { recipePrintout, scanPrintout } from "./recipe-table.js";
+import { recipeAnswer, recipePrintout, scanPrintout } from "./recipe-answer.js";
 import { scanTools } from "./scan.js";
-import { confirmPrompt, passwordPrompt, type PromptOptions } from "./init-layout.js";
+import { colourDepth, confirmPrompt, isTTY, passwordPrompt, type PromptOptions } from "./init-layout.js";
 import { TAGLINE, opening } from "./init-opening.js";
 import { systemOpener, type UrlOpener } from "./relay.js";
 import { hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from "./host-lock.js";
@@ -464,7 +464,7 @@ const RECIPE_COMMAND = "recipe";
 const WRITE_ONLY_FLAGS = ["tick", "set", "signin", "add", "add-check", "out"] as const;
 
 const recipeUsage = (): string =>
-  `usage: wsp ${RECIPE_COMMAND} [--tick used|installed|default] [--set <id>=on|off] [--signin <id>=${RECIPE_SIGN_INS.join("|")}] [--add <id>=<command>] [--add-check <id>=<command>] [--project <folder>] [--out <path>] [--json]\n       wsp ${RECIPE_COMMAND} scan [--project <folder>] [--json]`;
+  `usage: wsp ${RECIPE_COMMAND} [--tick used|installed|default] [--set <id>=on|off] [--signin <id>=${LOGIN_CHOICES.join("|")}] [--add <id>=<command>] [--add-check <id>=<command>] [--project <folder>] [--out <path>] [--json]\n       wsp ${RECIPE_COMMAND} scan [--project <folder>] [--json]`;
 
 /** `wsp recipe` and `wsp recipe scan`: read this computer, write the recipe file (scan writes nothing) and print
  * the table, or the same object as JSON. Progress goes to stderr so what is on stdout is the whole answer. */
@@ -517,6 +517,7 @@ async function recipe(io: CliIO, argv: string[], statePathOf: (flag?: string) =>
   }
   // The reading is progress, not the answer: stdout carries the table alone, so --json is one object and nothing else.
   const streams = { log: (line: string) => io.log(line), note: (line: string) => io.error(line) };
+  const depth = colourDepth(isTTY(process.stdout));
   const projects = values.project !== undefined ? { projects: values.project.map(p => resolve(p)) } : {};
   const out = resolve(values.out ?? smallRecipePath(statePath));
   try {
@@ -524,7 +525,7 @@ async function recipe(io: CliIO, argv: string[], statePathOf: (flag?: string) =>
       const scan = await runScan(nodeHost(), { ...projects, alsoHere: recipe => scanTools(nodeHost(), recipe) }, streams);
       if (values.json === true) io.log(JSON.stringify(scan));
       else {
-        for (const line of scanPrintout(scan)) io.log(line);
+        for (const line of scanPrintout(scan, depth)) io.log(line);
         io.log(`Nothing was written. Take the do column with wsp recipe --set <id>=on and --signin <id>=machine, then run wsp init --recipe ${out}.`);
       }
       return 0;
@@ -544,7 +545,7 @@ async function recipe(io: CliIO, argv: string[], statePathOf: (flag?: string) =>
     );
     if (values.json === true) io.log(JSON.stringify(table));
     else {
-      for (const line of recipePrintout(table)) io.log(line);
+      for (const line of recipePrintout(table, depth)) io.log(line);
       io.log(`Recipe written to ${out}. Review it, flip a row with wsp recipe --set <id>=on, then run wsp init --recipe ${out}.`);
     }
     return 0;

@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { runScan, type RecipeIo } from "../src/recipe-command.js";
-import { ALSO_HERE_TITLE, COMMANDS_TITLE, NOT_SCANNED, RecipeScan, SIGN_INS_TITLE, alsoHereLines, scanPrintout, signInAdvice, tickAdvice } from "../src/recipe-table.js";
+import { USED_GROUP, type TableRow } from "../src/init-table.js";
+import { ALSO_HERE_TITLE, COMMANDS_TITLE, NOT_SCANNED, RecipeScan, SIGN_INS_TITLE, alsoHereLines, scanPrintout, signInAdvice, tickAdvice } from "../src/recipe-answer.js";
 import { claudeLine, fakeHost, HOME } from "./recipe-fixture.js";
 
 const PROJ = `${HOME}/proj`;
@@ -34,7 +35,7 @@ describe("wsp recipe scan", () => {
     expect(existsSync(join(dir, "recipe.json"))).toBe(false);
     expect(scan.tick).toBe("used");
     expect(scan.at).toBe("2026-09-06T03:00:00.000Z");
-    expect(scan.agents.map(r => r.id)).toEqual(["claude", "codex", "gemini", "opencode", "pi", "hermes"]);
+    expect(scan.agents.map(r => r.id).sort()).toEqual(["claude", "codex", "gemini", "hermes", "opencode", "pi"]);
     expect(scan.tools.find(r => r.id === "node")).toMatchObject({ on: true });
     expect(scan.tools.find(r => r.id === "java")).toMatchObject({ on: false, why: "installed here, never used" });
     expect(scan.commands.map(c => c.name)).toEqual(["pytest"]);
@@ -45,7 +46,7 @@ describe("wsp recipe scan", () => {
 
   it("carries what to do with every row and one line of why, so an agent applies the rest and asks about the delta", async () => {
     const scan = await runScan(laptop(), {}, quiet, at);
-    expect(scan.tools.find(r => r.id === "node")?.recommended).toEqual({ value: "on", why: "used 2 times in 2 sessions" });
+    expect(scan.tools.find(r => r.id === "node")?.recommended).toEqual({ value: "on", why: "always on the image" });
     expect(scan.tools.find(r => r.id === "java")?.recommended).toEqual({ value: "off", why: "installed here, never used" });
     for (const row of [...scan.agents, ...scan.tools]) expect(row.recommended.value, row.id).toBe(row.on ? "on" : "off");
     for (const row of scan.signIns) expect(row.recommended.why.length, row.id).toBeGreaterThan(0);
@@ -53,11 +54,12 @@ describe("wsp recipe scan", () => {
   });
 
   it("says a heavy row is worth a question in the same line, and nothing else is", () => {
-    const heavy = tickAdvice({ id: "opencode", name: "OpenCode", kind: "agent", on: true, why: "used 4 times in 2 sessions", size: 673 * MB });
-    expect(heavy).toEqual({ value: "on", why: "used 4 times in 2 sessions; 673.0 MB on the machine, worth a question" });
+    const row: TableRow = { id: "opencode", name: "OpenCode", kind: "agent", base: false, group: USED_GROUP, why: "used here, 2 sessions", size: 673 * MB, heavy: true, on: true };
+    const heavy = tickAdvice({ ...row, on: true });
+    expect(heavy).toEqual({ value: "on", why: "used here, 2 sessions; 673.0 MB on the machine, worth a question" });
     // Off, so nothing is being added and there is nothing to ask about.
-    expect(tickAdvice({ id: "opencode", name: "OpenCode", kind: "agent", on: false, why: "catalog default", size: 673 * MB }).why).toBe("catalog default");
-    expect(tickAdvice({ id: "node", name: "Node 22 with npm", kind: "tool", on: true, why: "used twice", size: 250 * MB }).why).toBe("used twice");
+    expect(tickAdvice({ ...row, on: false }).why).toBe("used here, 2 sessions");
+    expect(tickAdvice({ ...row, id: "node", kind: "tool", on: true, heavy: false, size: 250 * MB }).why).toBe("used here, 2 sessions");
   });
 
   it("recommends the key files where a login cannot produce them, and the machine where a browser can", () => {
@@ -78,14 +80,16 @@ describe("wsp recipe scan", () => {
   it("prints every section in order, the do column beside each row", async () => {
     const lines = scanPrintout(await runScan(laptop(), {}, quiet, at));
     expect(lines[0]).toBe("Agents");
-    expect(lines[1]).toMatch(/^ {2}id +on +why +size +do$/);
+    // The shared renderer's own line, with the one column the scan adds.
+    expect(lines.find(l => l.includes("Java 21"))).toMatch(/^○ {2}Java 21\s+installed\s+installed here, never used\s+343\.0 MB {2}off$/);
     expect(lines).toContain("Tools");
     expect(lines).toContain(ALSO_HERE_TITLE);
     expect(lines).toContain(`  ${NOT_SCANNED}`);
     expect(lines).toContain(COMMANDS_TITLE);
     expect(lines).toContain(SIGN_INS_TITLE);
-    expect(lines.find(l => l.startsWith("  claude "))).toMatch(/\bon\b.*208\.0 MB {2}on$/);
-    expect(lines.find(l => /^\d+ rows on,/.test(l))).toMatch(/rows? over 300\.0 MB\.$/);
+    expect(lines.find(l => l.includes("Claude Code"))).toMatch(/^● {2}Claude Code\s+used\s+used here, 3 sessions\s+208\.0 MB {2}on$/);
+    // The shared renderer's totals line, one under each table.
+    expect(lines.filter(l => l.startsWith("On: "))).toHaveLength(2);
   });
 
   it("weighs the histories by the folders it is given, as the write verb does", async () => {

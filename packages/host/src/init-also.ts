@@ -3,14 +3,21 @@
 // image, grouped by manager, every row off until it is ticked. A tick writes a
 // row the catalog does not carry into the recipe; unticking takes it away
 // again, so the screen and the recipe say the same thing on a second pass.
+import { styleText } from "node:util";
 import { fmtBytes, customRows, type Recipe, type RecipeCustomRow } from "@wsp/protocol";
-import type { SelectItem } from "./init-select.js";
+import { GUTTER } from "./init-layout.js";
+import type { RungAnswer, SelectItem } from "./init-select.js";
 import { sizeTone } from "./init-weight.js";
 import { customFromScan, type ScanRow } from "./scan.js";
 
 export const ALSO_TITLE = "Also on this Mac";
+export const ALSO_TOP = "We found these installed on this Mac. Tick the ones you or your agents need on the image.";
+/** What the screen says when no manager here offered a row: it keeps its place in the six either way. */
+export const ALSO_EMPTY_TOP = "What this Mac has installed that a package manager could put on the image too.";
+export const ALSO_EMPTY = "nothing found here yet";
 
-/** One row per scanned tool, grouped by its manager, with the line that installs it and its size here. */
+/** One row per scanned tool, grouped by its manager, with the line that installs it and its size here. A heavy
+ * size takes its weight's colour, the one hue on the row. */
 export function alsoItems(rows: readonly ScanRow[]): SelectItem[] {
   return rows.map(r => {
     const tone = sizeTone(r.size);
@@ -18,11 +25,20 @@ export function alsoItems(rows: readonly ScanRow[]): SelectItem[] {
       id: r.id,
       label: r.name,
       group: r.group,
-      hint: r.size === undefined ? "size unknown" : fmtBytes(r.size),
-      ...(tone !== undefined ? { tone } : {}),
+      hint: { text: r.size === undefined ? "size unknown" : fmtBytes(r.size), ...(tone !== undefined ? { paint: (padded: string) => styleText(tone, padded) } : {}) },
       detail: [r.install, r.version === undefined ? "installs on the machine after everything in the catalog" : `${r.version} here; installs on the machine after everything in the catalog`],
     };
   });
+}
+
+/** A manager's header: how many of its rows are ticked and what they weigh here, as the tools screen counts its own. */
+export function alsoGroupLine(rows: readonly ScanRow[]): (items: readonly SelectItem[], a: RungAnswer) => string {
+  const by = new Map(rows.map(r => [r.id, r]));
+  return (items, a) => {
+    const on = items.filter(i => a.ticks.has(i.id));
+    const bytes = on.reduce((n, i) => n + (by.get(i.id)?.size ?? 0), 0);
+    return `${on.length} of ${items.length}${GUTTER}${fmtBytes(bytes)}`;
+  };
 }
 
 /** The recipe with the screen's ticks on it: every ticked scan row is a row of its own, and a row an earlier pass

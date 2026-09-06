@@ -17,7 +17,7 @@ import { createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runti
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { serve } from "../src/cli.js";
 import { dialer, mcpServer, serveMcp } from "../src/mcp.js";
-import { RecipeScan, RecipeTable, recipePrintout, scanPrintout } from "../src/recipe-table.js";
+import { RecipeAnswer, RecipeScan, allRows, recipePrintout, scanPrintout } from "../src/recipe-answer.js";
 import { WSP_SKILL, instructionsOf } from "../src/skill.js";
 import type { HostHandle } from "../src/server.js";
 import type { HostClient } from "../src/verbs.js";
@@ -632,15 +632,15 @@ describe("the MCP server over the host", () => {
   it("recipe reads this computer, writes the file and answers with the same table the command line prints, set and all", async () => {
     const out = join(dir, "recipe.json");
     const first = await call("recipe", { out });
-    const table = RecipeTable.parse(first.structured);
+    const table = RecipeAnswer.parse(first.structured);
     expect(table.tick).toBe("used");
     expect(table.out).toBe(out);
-    expect(table.rows.map(r => r.id)).toEqual(CATALOG.map(e => e.id));
+    expect(allRows(table).map(r => r.id).sort()).toEqual(CATALOG.map(e => e.id).sort());
     expect(first.text).toBe(recipePrintout(table).join("\n"));
     expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8"))).tick).toBe("used");
 
-    const flipped = RecipeTable.parse((await call("recipe", { out, set: ["java=on"] })).structured);
-    expect(flipped.rows.find(r => r.id === "java")).toMatchObject({ on: true, size: 343 * 1024 * 1024 });
+    const flipped = RecipeAnswer.parse((await call("recipe", { out, set: ["java=on"] })).structured);
+    expect(allRows(flipped).find(r => r.id === "java")).toMatchObject({ on: true, size: 343 * 1024 * 1024 });
     expect(flipped.heavy.map(r => r.id)).toContain("java");
     // A word the catalog does not know is a tool error in one line, not a rewritten file.
     expect(await call("recipe", { out, set: ["jaava=on"] })).toMatchObject({ isError: true, text: '--set jaava=on: the catalog has no row called "jaava"' });
@@ -660,8 +660,8 @@ describe("the MCP server over the host", () => {
     const scan = RecipeScan.parse(result.structured);
     expect(existsSync(out)).toBe(false);
     expect(scan.tick).toBe("used");
-    expect(scan.agents.map(r => r.id)).toEqual(CATALOG.filter(e => e.kind === "agent").map(e => e.id));
-    expect(scan.tools.map(r => r.id)).toEqual(CATALOG.filter(e => e.kind === "tool").map(e => e.id));
+    expect(scan.agents.map(r => r.id).sort()).toEqual(CATALOG.filter(e => e.kind === "agent").map(e => e.id).sort());
+    expect(scan.tools.map(r => r.id).sort()).toEqual(CATALOG.filter(e => e.kind === "tool").map(e => e.id).sort());
     expect(scan.alsoHere).toEqual({ scanned: false, managers: [] });
     for (const row of [...scan.agents, ...scan.tools]) expect(row.recommended.value, row.id).toBe(row.on ? "on" : "off");
     expect(result.text).toBe(scanPrintout(scan).join("\n"));
@@ -695,7 +695,7 @@ describe("the MCP server never talks to the provider", () => {
     const walked = closure("mcp.ts");
     // The collector reads this computer for the recipe tool; it depends on the catalog and the protocol and nothing else.
     expect(walked.get("mcp.ts")!.filter(i => i.startsWith("@wsp/"))).toEqual(["@wsp/collect", "@wsp/protocol"]);
-    expect([...walked.keys()].sort()).toContain("recipe-table.ts");
+    expect([...walked.keys()].sort()).toContain("recipe-answer.ts");
     expect([...walked.keys()].sort()).toContain("init-layout.ts");
     for (const [file, imports] of walked) {
       for (const i of imports) expect(`${i} in ${file}`).not.toMatch(/@wsp\/(runtime|engine|adapter-claude|daemon|web)/);

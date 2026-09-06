@@ -8,10 +8,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { nodeHost } from "@wsp/collect";
-import { AFTER_CUT_LINE, ProjectExportResult, ProjectGolden, RECIPE_SIGN_INS, RECIPE_TICKS, RecipeTick, SessionInterruptOutcome, SessionStartOutcome, ThreadView, WorkspaceView, deleteNotice } from "@wsp/protocol";
+import { AFTER_CUT_LINE, ProjectExportResult, ProjectGolden, LOGIN_CHOICES, RECIPE_TICKS, RecipeTick, SessionInterruptOutcome, SessionStartOutcome, ThreadView, WorkspaceView, deleteNotice } from "@wsp/protocol";
 import { smallRecipePath } from "./recipe-file.js";
 import { runRecipe, runScan, type ScanInput } from "./recipe-command.js";
-import { RecipeScan, RecipeTable, recipePrintout, scanPrintout } from "./recipe-table.js";
+import { RecipeAnswer, RecipeScan, recipePrintout, scanPrintout } from "./recipe-answer.js";
 import { INSTRUCTIONS } from "./skill.js";
 import { VERSION } from "./version.js";
 import { absoluteFolder, absolutePath, awake, checkedPicks, create, createFromHead, deleteWorkspace, deletedLine, dialHost, dropping, execOn, exportProject, follow, forget, forgotLine, nap, notifyOf, openingOf, projectGoldenOf, resumeOf, snapshot, stop, stopLine, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
@@ -131,14 +131,14 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: S
       inputSchema: {
         tick: RecipeTick.optional().describe(`which rule decides every tick: ${RECIPE_TICKS.join(", ")}. Naming it re-decides every row from the rule, so any flip an earlier call made goes; absent, the file's own rule and its ticks stand, and used decides a first call and any row the file does not carry`),
         set: z.array(z.string()).optional().describe('rows to flip by catalog id, "<id>=on" or "<id>=off", applied over whatever decided the row. On a call that names tick or project they sit over the rule\'s fresh answer; on any other call they sit over the ticks already in the file'),
-        signin: z.array(z.string()).optional().describe(`what happens to a row's sign-in, "<id>=${RECIPE_SIGN_INS.join("|")}"; key brings the key files beside its login and the login still runs on the machine. An answer already in the file stands until a later call names that row again, whatever tick or project do to the ticks`),
+        signin: z.array(z.string()).optional().describe(`what happens to a row's sign-in, "<id>=${LOGIN_CHOICES.join("|")}"; key brings the key files beside its login and the login still runs on the machine. An answer already in the file stands until a later call names that row again, whatever tick or project do to the ticks`),
         add: z.array(z.string()).optional().describe('tools the catalog does not carry, "<id>=<install command>"; the line runs on the machine as given after every catalog install, and such a row is never offered a sign-in. Rows an earlier call added stand, whatever tick or project do to the ticks'),
         add_check: z.array(z.string()).optional().describe('what proves an added tool landed, "<id>=<command that exits 0>"; without one the id on PATH is the check'),
         why: z.string().optional().describe("what the rows this call adds are for, in your own words; absent, they say an agent added them"),
         project: WEIGH_BY_FOLDERS,
         out: z.string().optional().describe("where the recipe file goes, absolute; absent means the host's own recipe.json beside its state"),
       },
-      outputSchema: RecipeTable.shape,
+      outputSchema: RecipeAnswer.shape,
     },
     async ({ tick, set, signin, add, add_check: addCheck, why, project, out }) => {
       const table = await runRecipe(nodeHost(), {

@@ -1,142 +1,139 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The recipe as one table: a row per catalog agent and tool with its tick,
-// why it has that tick, and what it costs on the machine. The rule for the
-// words and for what counts as a heavy row lives here alone, so the recipe
-// verb, the MCP tool and the wizard's What they need screen say the same
-// thing about the same recipe.
-import { agentName, hasLogin, keysIdOf, loginIdOf, loginRow, signsInByDefault } from "@wsp/catalog";
-import { readsUsedFirst, type CommandCount } from "@wsp/collect";
-import { RecipeCustomRow, RecipeTick, customRows, fmtBytes, plural, type Recipe, type RecipeRow, type RecipeSource } from "@wsp/protocol";
+// What `wsp recipe` and `wsp recipe scan` answer with: the rows the shared
+// table renderer builds, plus what only these two verbs know, which is what to
+// do about each row and why. The rows, their groups, their words and the heavy
+// rule all come from init-table, so the verbs and the wizard's screens can
+// never say different things about the same recipe; nothing here draws a
+// second table of catalog rows.
+import { CATALOG_AGENTS, CATALOG_TOOLS, keysIdOf, loginIdOf, loginRow, signsInByDefault, hasLogin } from "@wsp/catalog";
+import type { CommandCount } from "@wsp/collect";
+import { RecipeCustomRow, RecipeTick, customRows, fmtBytes, type Recipe } from "@wsp/protocol";
 import { z } from "zod";
 import { table } from "./init-layout.js";
+import { BASE_GROUP, CATALOG_GROUP, HEAVY_BYTES, HERE_GROUP, USED_GROUP, recipeTable, tableLines, totalsLine, type TableRow } from "./init-table.js";
 import { customTableLines } from "./recipe-custom.js";
 import type { ScanRow } from "./scan.js";
 import { signInFor, signInWords } from "./signin-table.js";
 
-/** A row this big is one the person is asked about before it is built: it is a real part of the wait and the disk. */
-export const HEAVY_BYTES = 300 * 1024 * 1024;
-
 /** How many of the uncatalogued commands the printout shows: enough to see the shape of the person's work. */
 export const COMMANDS_SHOWN = 12;
 
-/** What the printout says about a row whose size the catalog never measured. */
-export const UNMEASURED = "not measured";
-
-/** Why a row has the tick it has, in the words a person and an agent both read. `usedFirst` is the rule's own
- * answer to whether it reads a use before what is installed (readsUsedFirst): under one that does, an installed
- * row that reached this far has no use at all and says so, and under any other it says only that it is here. */
-export function whyLine(source: RecipeSource, usedFirst: boolean): string {
-  switch (source.kind) {
-    case "used":
-      return `used ${plural(source.calls, "time")} in ${plural(source.sessions, "session")}`;
-    case "installed":
-      return usedFirst ? "installed here, never used" : "installed here";
-    case "popular":
-      return "catalog default";
-    default: {
-      const _exhaustive: never = source;
-      return _exhaustive;
-    }
-  }
-}
-
-export const RecipeTableRow = z.object({
+/** One catalog row as an answer carries it: the shared renderer's row, named field by field so a client reading
+ * this over MCP has a shape and not a table of text. */
+export const RecipeAnswerRow = z.object({
   /** The catalog id, the same word `--set` takes. */
   id: z.string(),
-  name: z.string(),
   kind: z.enum(["agent", "tool"]),
+  name: z.string(),
   on: z.boolean(),
+  /** On the image whatever is ticked, so nothing can turn it off. */
+  base: z.boolean(),
+  /** Which of the renderer's groups it reads under. */
+  group: z.enum([BASE_GROUP, USED_GROUP, HERE_GROUP, CATALOG_GROUP]),
   why: z.string(),
-  /** What it adds to the machine, when the catalog measured it. */
+  /** What its install downloads, when the catalog measured it. */
   size: z.number().int().nonnegative().optional(),
+  /** Big enough to put to the person before anything is built. */
+  heavy: z.boolean(),
+  /** Why wsp cannot drive this agent yet; absent on every other row. */
+  note: z.string().optional(),
 });
-export type RecipeTableRow = z.infer<typeof RecipeTableRow>;
+export type RecipeAnswerRow = z.infer<typeof RecipeAnswerRow>;
 
 export const RecipeCommand = z.object({ name: z.string(), calls: z.number().int().nonnegative(), sessions: z.number().int().nonnegative() });
 export type RecipeCommand = z.infer<typeof RecipeCommand>;
 
-export const RecipeTable = z.object({
+const rowOf = (r: TableRow): RecipeAnswerRow => ({
+  id: r.id,
+  kind: r.kind,
+  name: r.name,
+  on: r.on,
+  base: r.base,
+  group: r.group,
+  why: r.why,
+  ...(r.size !== undefined ? { size: r.size } : {}),
+  heavy: r.heavy,
+  ...(r.note !== undefined ? { note: r.note } : {}),
+});
+
+/** The agents and the tools as the shared renderer groups and orders them, which is the order both screens draw. */
+export const answerRows = (recipe: Recipe): { agents: RecipeAnswerRow[]; tools: RecipeAnswerRow[] } => ({
+  agents: recipeTable(recipe, CATALOG_AGENTS).map(rowOf),
+  tools: recipeTable(recipe, CATALOG_TOOLS).map(rowOf),
+});
+
+export const RecipeAnswer = z.object({
   /** Which rule decided the ticks; absent on a recipe that names none, as the wizard's own do. */
   tick: RecipeTick.optional(),
   /** When the recipe was read off this computer, ISO 8601. */
   at: z.string(),
   /** Where the recipe file sits. */
   out: z.string(),
-  rows: z.array(RecipeTableRow),
+  agents: z.array(RecipeAnswerRow),
+  tools: z.array(RecipeAnswerRow),
   /** Every ticked row the catalog measured, added up. */
   totalBytes: z.number().int().nonnegative(),
-  /** The ticked rows over HEAVY_BYTES, biggest first: the ones to put to the person before the build. */
-  heavy: z.array(RecipeTableRow),
+  /** The ticked rows the renderer calls heavy, biggest first: the ones to put to the person before the build. */
+  heavy: z.array(RecipeAnswerRow),
   /** The commands the agents ran here that no catalog row carries, most-run first. */
   commands: z.array(RecipeCommand),
   /** The rows this recipe installs that the catalog has none for, as the file carries them. */
   custom: z.array(RecipeCustomRow),
 });
-export type RecipeTable = z.infer<typeof RecipeTable>;
+export type RecipeAnswer = z.infer<typeof RecipeAnswer>;
 
-/** A recipe's rows as the table shows them, in catalog order: what a caller with a recipe and no file hands to
- * recipeTableLines (the wizard's What they need screen does exactly this). */
-export function recipeTableRows(recipe: Recipe): RecipeTableRow[] {
-  const usedFirst = readsUsedFirst(recipe.tick);
-  return recipe.rows.map((r: RecipeRow): RecipeTableRow => ({
-    id: r.id,
-    name: agentName(r.id),
-    kind: r.kind,
-    on: r.on,
-    why: whyLine(r.source, usedFirst),
-    ...(r.size !== undefined ? { size: r.size } : {}),
-  }));
-}
+/** Both tables' rows in the order they are drawn, for a caller that wants the whole recipe in one list. */
+export const allRows = (a: Pick<RecipeAnswer, "agents" | "tools">): RecipeAnswerRow[] => [...a.agents, ...a.tools];
 
-/** The recipe as the table every client shows, with the file it was written to and what it adds up to. */
-export function recipeTable(recipe: Recipe, out: string, commands: readonly CommandCount[] = []): RecipeTable {
-  const rows = recipeTableRows(recipe);
-  const on = rows.filter(r => r.on);
+/** The ticked rows worth a question, biggest first. */
+export const heavyRows = <T extends { on: boolean; heavy: boolean; size?: number }>(rows: readonly T[]): T[] => rows.filter(r => r.on && r.heavy).sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
+
+/** What the ticked rows add up to on the machine, of the ones the catalog measured. */
+export const totalBytes = (rows: readonly RecipeAnswerRow[]): number => rows.reduce((n, r) => n + (r.on ? (r.size ?? 0) : 0), 0);
+
+/** The recipe as the verb and the MCP tool answer with it. */
+export function recipeAnswer(recipe: Recipe, out: string, commands: readonly CommandCount[] = []): RecipeAnswer {
+  const { agents, tools } = answerRows(recipe);
+  const all = [...agents, ...tools];
   return {
     ...(recipe.tick !== undefined ? { tick: recipe.tick } : {}),
     at: recipe.at,
     out,
-    rows,
-    totalBytes: totalBytes(rows),
-    heavy: heavyRows(rows),
+    agents,
+    tools,
+    totalBytes: totalBytes(all),
+    heavy: heavyRows(all),
     commands: commands.map(c => ({ name: c.name, calls: c.calls, sessions: c.sessions })),
     custom: [...customRows(recipe)],
   };
 }
 
-/** A ticked row big enough to put to the person before anything is built. An unticked row adds nothing, however
- * big it is, so it is never one. */
-export const isHeavy = (row: RecipeTableRow): boolean => row.on && row.size !== undefined && row.size > HEAVY_BYTES;
+/** A row as the shared renderer draws one: every field it needs is on the row already, so the verbs draw the same
+ * table the wizard's screens draw and add only the column each of them knows. */
+export const drawn = (r: RecipeAnswerRow): TableRow => ({
+  id: r.id,
+  kind: r.kind,
+  name: r.name,
+  on: r.on,
+  base: r.base,
+  group: r.group,
+  why: r.why,
+  ...(r.size !== undefined ? { size: r.size } : {}),
+  heavy: r.heavy,
+  ...(r.note !== undefined ? { note: r.note } : {}),
+});
 
-/** The ticked rows worth a question, biggest first. */
-export const heavyRows = <T extends RecipeTableRow>(rows: readonly T[]): T[] => rows.filter(isHeavy).sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
-
-/** What the ticked rows add up to on the machine, of the ones the catalog measured. */
-export const totalBytes = (rows: readonly RecipeTableRow[]): number => rows.reduce((n, r) => n + (r.on ? (r.size ?? 0) : 0), 0);
-
-/** The table itself: a header and one line per row, columns lined up, no colour. The wizard draws these lines
- * inside its own frame, so nothing here knows about a terminal. */
-export function recipeTableLines(rows: readonly RecipeTableRow[]): string[] {
-  return table(
-    [["id", "on", "why", "size"], ...rows.map(r => [r.id, r.on ? "on" : "off", r.why, r.size !== undefined ? fmtBytes(r.size) : UNMEASURED])],
-    ["left", "left", "left", "right"],
-  );
-}
-
-/** The last line under a table of rows: what the ticked ones add up to, how many the catalog never measured (so
- * the total is a floor, not the whole), and how many are worth putting to the person. The scan's tables and the
- * recipe's one table both end in this line, so the two can never say different things about the same rows. */
-export function recipeTotalLine(rows: readonly RecipeTableRow[]): string {
-  const on = rows.filter(r => r.on);
-  const unmeasured = on.filter(r => r.size === undefined).length;
-  const bytes = fmtBytes(totalBytes(rows));
-  const of = unmeasured > 0 ? `${bytes} measured and ${plural(unmeasured, "row")} not` : bytes;
-  return `${plural(on.length, "row")} on, ${of}; ${plural(heavyRows(rows).length, "row")} over ${fmtBytes(HEAVY_BYTES)}.`;
+/** The two tables the shared renderer draws, each under its title with its own totals line. */
+export function answerTables(a: Pick<RecipeAnswer, "agents" | "tools">, depth: number): string[] {
+  return ([["Agents", a.agents, "agents"] as const, ["Tools", a.tools, "tools"] as const]).flatMap(([title, rows, noun], i) => {
+    const table = rows.map(drawn);
+    return [...(i > 0 ? [""] : []), title, ...tableLines(table, depth), totalsLine(table, noun)];
+  });
 }
 
 export const COMMANDS_TITLE = "Commands your agents ran that the catalog does not carry:";
 
-/** The second table: what this person works with that no catalog row installs, most-run first. */
+/** What this person works with that no catalog row installs, most-run first. */
 export function commandTableLines(commands: readonly RecipeCommand[], shown = COMMANDS_SHOWN): string[] {
   if (commands.length === 0) return [COMMANDS_TITLE, "  none"];
   const rows = commands.slice(0, shown);
@@ -147,11 +144,11 @@ export function commandTableLines(commands: readonly RecipeCommand[], shown = CO
   ];
 }
 
-/** Everything the recipe verb and the MCP tool print: the table, its total line, the rows the catalog does not
- * carry that this recipe installs anyway, then the commands table. */
-export function recipePrintout(t: RecipeTable): string[] {
-  const custom = customTableLines({ custom: t.custom });
-  return [...recipeTableLines(t.rows), recipeTotalLine(t.rows), ...(custom.length > 0 ? ["", ...custom] : []), "", ...commandTableLines(t.commands)];
+/** Everything the recipe verb and the MCP tool print: the two tables, the rows the catalog does not carry that
+ * this recipe installs anyway, then the commands. */
+export function recipePrintout(answer: RecipeAnswer, depth = 1): string[] {
+  const custom = customTableLines(answer);
+  return [...answerTables(answer, depth), ...(custom.length > 0 ? ["", ...custom] : []), "", ...commandTableLines(answer.commands)];
 }
 
 // --- the scan: every option, with what an agent should do about each ------------------------------------------
@@ -169,7 +166,7 @@ export const RecipeAdvice = z.object({
 });
 export type RecipeAdvice = z.infer<typeof RecipeAdvice>;
 
-export const RecipeScanRow = RecipeTableRow.extend({ recommended: RecipeAdvice });
+export const RecipeScanRow = RecipeAnswerRow.extend({ recommended: RecipeAdvice });
 export type RecipeScanRow = z.infer<typeof RecipeScanRow>;
 
 export const RecipeScanSignIn = z.object({
@@ -203,9 +200,9 @@ export type RecipeScan = z.infer<typeof RecipeScan>;
 
 /** What to do with a row without asking, and why: the rule's own tick, with the one thing that makes a row worth a
  * question said in the same line. Nothing else here is a delta. */
-export function tickAdvice(row: RecipeTableRow): RecipeAdvice {
+export function tickAdvice(row: RecipeAnswerRow): RecipeAdvice {
   const size = row.size;
-  return { value: row.on ? "on" : "off", why: isHeavy(row) && size !== undefined ? `${row.why}; ${fmtBytes(size)} on the machine, worth a question` : row.why };
+  return { value: row.on ? "on" : "off", why: row.on && row.heavy && size !== undefined ? `${row.why}; ${fmtBytes(size)} on the machine, worth a question` : row.why };
 }
 
 /** What to do with a row's sign-in without asking: key files beside a login come first, since key brings them and
@@ -219,9 +216,6 @@ export function signInAdvice(id: string): RecipeAdvice {
   return { value: "skip", why: "nothing to sign in to and nothing here to bring" };
 }
 
-/** Every option this computer offers, read once: the agents and tools with the rule's tick and what to do about
- * each, the tools outside the catalog (nothing scans for them yet), the commands the catalog does not carry, and
- * the sign-in each ticked row brings. Nothing is written. */
 /** The scan's own rows grouped under the manager that has them, in the order the scanner found them; nothing
  * having looked is not the same answer as nothing having been found, so an absent list says so. */
 export function alsoHereOf(rows: readonly ScanRow[] | undefined): RecipeScanAlso {
@@ -235,16 +229,21 @@ export function alsoHereOf(rows: readonly ScanRow[] | undefined): RecipeScanAlso
   return { scanned: true, managers: [...managers.values()] };
 }
 
+/** Every option this computer offers, read once: the agents and tools with the rule's tick and what to do about
+ * each, the tools outside the catalog a manager here has, the commands the catalog does not carry, and the sign-in
+ * each ticked row brings. Nothing is written. */
 export function recipeScan(recipe: Recipe, commands: readonly CommandCount[] = [], alsoHere?: readonly ScanRow[]): RecipeScan {
-  const rows = recipeTableRows(recipe).map((r): RecipeScanRow => ({ ...r, recommended: tickAdvice(r) }));
-  const on = rows.filter(r => r.on);
+  const { agents, tools } = answerRows(recipe);
+  const withAdvice = (rows: readonly RecipeAnswerRow[]): RecipeScanRow[] => rows.map(r => ({ ...r, recommended: tickAdvice(r) }));
+  const all = [...withAdvice(agents), ...withAdvice(tools)];
+  const on = all.filter(r => r.on);
   return {
     tick: recipe.tick ?? "used",
     at: recipe.at,
-    agents: rows.filter(r => r.kind === "agent"),
-    tools: rows.filter(r => r.kind === "tool"),
-    totalBytes: totalBytes(rows),
-    heavy: heavyRows(rows),
+    agents: withAdvice(agents),
+    tools: withAdvice(tools),
+    totalBytes: totalBytes(all),
+    heavy: heavyRows(all),
     alsoHere: alsoHereOf(alsoHere),
     commands: commands.map(c => ({ name: c.name, calls: c.calls, sessions: c.sessions })),
     signIns: on.flatMap((r): RecipeScanSignIn[] => {
@@ -253,17 +252,6 @@ export function recipeScan(recipe: Recipe, commands: readonly CommandCount[] = [
       return [{ id: r.id, name: r.name, signIn: signInWords(s), recommended: signInAdvice(r.id) }];
     }),
   };
-}
-
-/** The scan rows with the recommendation beside them: the table's own columns plus what to do and why. */
-export function scanTableLines(rows: readonly RecipeScanRow[]): string[] {
-  return table(
-    [
-      ["id", "on", "why", "size", "do"],
-      ...rows.map(r => [r.id, r.on ? "on" : "off", r.recommended.why, r.size !== undefined ? fmtBytes(r.size) : UNMEASURED, r.recommended.value]),
-    ],
-    ["left", "left", "left", "right", "left"],
-  );
 }
 
 export const SIGN_INS_TITLE = "Sign-ins the ticked rows bring:";
@@ -279,19 +267,15 @@ export function alsoHereLines(also: RecipeScanAlso): string[] {
   if (also.managers.length === 0) return [ALSO_HERE_TITLE, "  none"];
   return [
     ALSO_HERE_TITLE,
-    ...also.managers.flatMap(m => [`  ${m.manager}`, ...table(m.rows.map(r => [r.id, r.install, r.size !== undefined ? fmtBytes(r.size) : UNMEASURED]), ["left", "left", "right"]).map(l => `    ${l}`)]),
+    ...also.managers.flatMap(m => [`  ${m.manager}`, ...table(m.rows.map(r => [r.id, r.install, r.size === undefined ? "size unknown" : fmtBytes(r.size)]), ["left", "left", "right"]).map(l => `    ${l}`)]),
   ];
 }
 
-/** The whole scan on the terminal: agents, tools, the tools outside the catalog, the commands, the sign-ins. */
-export function scanPrintout(s: RecipeScan): string[] {
+/** The whole scan on the terminal: the two tables with what to do beside each row, the tools outside the catalog,
+ * the commands, the sign-ins. */
+export function scanPrintout(s: RecipeScan, depth = 1): string[] {
   return [
-    "Agents",
-    ...scanTableLines(s.agents).map(l => `  ${l}`),
-    "",
-    "Tools",
-    ...scanTableLines(s.tools).map(l => `  ${l}`),
-    recipeTotalLine([...s.agents, ...s.tools]),
+    ...adviceTables(s, depth),
     "",
     ...alsoHereLines(s.alsoHere),
     "",
@@ -300,3 +284,15 @@ export function scanPrintout(s: RecipeScan): string[] {
     ...signInTableLines(s.signIns),
   ];
 }
+
+/** The shared renderer's lines with the do column beside them. */
+export function adviceTables(s: RecipeScan, depth: number): string[] {
+  return ([["Agents", s.agents, "agents"] as const, ["Tools", s.tools, "tools"] as const]).flatMap(([title, rows, noun], i) => {
+    const table = rows.map(drawn);
+    const lines = tableLines(table, depth);
+    const width = Math.max(0, ...lines.map(l => l.length));
+    return [...(i > 0 ? [""] : []), title, ...lines.map((l, n) => `${l.padEnd(width)}  ${rows[n]!.recommended.value}`), totalsLine(table, noun)];
+  });
+}
+
+export { HEAVY_BYTES };

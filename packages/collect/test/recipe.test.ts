@@ -46,6 +46,20 @@ describe("computeRecipe", () => {
     ]);
   });
 
+  it("a tool both installed here and used by the agents records what they ran, and being here still ticks it", async () => {
+    const host = fakeHost({
+      which: ["claude", "gh", "node", "git"],
+      files: {
+        "~/.claude/settings.json": "{}",
+        "~/.claude/projects/-Users-dev-proj/s1.jsonl": claudeLine("s1", "gh pr list"),
+      },
+    });
+    const recipe = await computeRecipe(host);
+    // The counts are the row's source, so a screen can say "installed here, never used" and mean it.
+    expect(recipe.rows.find(r => r.id === "gh")).toEqual({ id: "gh", kind: "tool", on: true, source: { kind: "used", sessions: 1, calls: 1 } });
+    expect(recipe.rows.find(r => r.id === "git")).toMatchObject({ on: true, source: { kind: "installed" } });
+  });
+
   it("a use below the threshold is the blended rule's answer and vetoes the catalog's own default", async () => {
     // The wizard's screens start from this rule; a tool the catalog ships on that was looked at once stays off.
     const host = fakeHost({ files: { "~/.claude/projects/-Users-dev-proj/s1.jsonl": claudeLine("s1", "jq . package.json") } });
@@ -86,7 +100,8 @@ describe("computeRecipe", () => {
   it("holds an agent no adapter can open a thread on off under every rule but installed", async () => {
     const claudeOnly = { threadAgents: ["claude"] };
     const used = await computeRecipe(laptop(), { tick: "used", ...claudeOnly });
-    expect(used.rows.find(r => r.id === "claude")).toMatchObject({ on: true, source: { kind: "used" } });
+    // An agent is placed by whether it is on this computer, so its row still says installed; the use ticks it.
+    expect(used.rows.find(r => r.id === "claude")).toMatchObject({ on: true, source: { kind: "installed" } });
     const codexHere = () => fakeHost({ which: ["codex"], files: { "~/.codex/config.toml": "" } });
     expect((await computeRecipe(codexHere(), { tick: "used", ...claudeOnly })).rows.find(r => r.id === "codex")).toMatchObject({ on: false });
     expect((await computeRecipe(codexHere(), { tick: "installed", ...claudeOnly })).rows.find(r => r.id === "codex")).toMatchObject({ on: true });

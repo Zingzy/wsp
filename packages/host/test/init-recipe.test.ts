@@ -82,19 +82,19 @@ describe("the command a login needs", () => {
     const none = new Set<string>();
     expect(loginTool(GCLOUD, manifest, none)).toEqual({ bin: "gcloud", row: GCLOUD_ROW, coming: false, why: "gcloud is not coming: its tool row is unticked; copy or sign in ticks it" });
     expect(loginTool(GCLOUD, manifest, new Set(["tools/catalog/gcloud"]))).toEqual({ bin: "gcloud", row: GCLOUD_ROW, coming: true });
-    expect(loginTool(WRANGLER, manifest, none)).toEqual({ bin: "wrangler", coming: false, why: "wrangler is not coming: no row lists it; tick Cloudflare Wrangler under What they need to bring it" });
+    expect(loginTool(WRANGLER, manifest, none)).toEqual({ bin: "wrangler", coming: false, why: "wrangler is not coming: no row lists it; tick Cloudflare Wrangler under Tools to bring it" });
     expect(loginTool(KUBE, manifest, none)).toMatchObject({ bin: "kubectl", row: KUBECTL_ROW, coming: false, why: "kubectl is not coming: its tool row is unticked; copy or sign in ticks it" });
-    expect(loginTool(KUBE, { entries: [KUBE] }, none)?.why).toBe("kubectl is not coming: no row lists it; tick kubectl under What they need to bring it");
+    expect(loginTool(KUBE, { entries: [KUBE] }, none)?.why).toBe("kubectl is not coming: no row lists it; tick kubectl under Tools to bring it");
     // A formula not named for its command still counts; a locked row says so.
     expect(loginTool(AWS, manifest, new Set(["tools/brew/awscli"]))).toEqual({ bin: "aws", row: AWSCLI, coming: true });
     expect(loginTool(AWS, { entries: [LOCKED_AWSCLI, AWS] }, none)).toMatchObject({ coming: false, why: "aws is not coming: its tool row cannot come (no Linux bottle)" });
     // A command the catalog does not know is named plainly.
-    expect(loginTool({ ...KUBE, id: "logins/cloudflared" }, { entries: [] }, none)?.why).toBe("cloudflared is not coming: no row lists it; tick cloudflared under What they need to bring it");
+    expect(loginTool({ ...KUBE, id: "logins/cloudflared" }, { entries: [] }, none)?.why).toBe("cloudflared is not coming: no row lists it; tick cloudflared under Tools to bring it");
     // gh's row is ticked in the fixture's defaults; an agent's login follows its agent, not a tools row.
     expect(loginTool(byId("logins/gh"), manifest, new Set(["tools/brew/gh"]))).toEqual({ bin: "gh", row: byId("tools/brew/gh"), coming: true });
     expect(loginTool(byId("logins/claude"), manifest, none)).toBeUndefined();
     // Any catalog tool's login names its command; a keys row beside an agent's login follows the agent.
-    expect(loginTool(login("fly", "Fly login"), { entries: [] }, none)?.why).toBe("fly is not coming: no row lists it; tick flyctl under What they need to bring it");
+    expect(loginTool(login("fly", "Fly login"), { entries: [] }, none)?.why).toBe("fly is not coming: no row lists it; tick flyctl under Tools to bring it");
     expect(loginTool(login("hermes-keys", "Hermes keys"), { entries: [] }, none)).toBeUndefined();
     expect(loginTool(byId("tools/brew/gh"), manifest, none)).toBeUndefined();
   });
@@ -382,6 +382,14 @@ describe("the small recipe", () => {
     expect(loginShown(keys, withKeys, new Set(["agents/hermes"]))).toBe(true);
     expect(loginShown(keys, withKeys, new Set())).toBe(false);
     expect(loginShown(keys, { entries: [keys] }, new Set())).toBe(true);
+  });
+
+  it("an API key answer round-trips through the small recipe, and the screens read it back", () => {
+    const out = recipeWithAnswers(RECIPE, new Map([["logins/claude", "key"]]));
+    const parsed = Recipe.parse(JSON.parse(JSON.stringify(out)));
+    expect(parsed.rows.find(r => r.id === "claude")).toMatchObject({ signIn: "key" });
+    // The saved answer is what the sign-ins screen opens that row on.
+    expect(initialChoice({ rung: "logins", id: "logins/claude", label: "Claude Code login", paths: ["Keychain: Claude Code-credentials"], bytes: 0, default: "skip", choice: "key" })).toBe("key");
   });
 
   it("recipeWithAnswers writes the login answers onto the small recipe and leaves the ticks as they are; a row nobody answered carries none", () => {

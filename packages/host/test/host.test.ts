@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
 import { CATALOG } from "@wsp/catalog";
+import { allRows, type RecipeAnswer } from "../src/recipe-answer.js";
 import { BUILDER_IDLE_MS, type GoldenImport } from "@wsp/engine";
 import { createRuntime, memoryStore, type HarnessAdapterFactory, type ReapResult, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -131,18 +132,21 @@ describe("wsp cli", () => {
     const row = (id: string) => JSON.parse(readFileSync(out, "utf8")).rows.find((r: { id: string }) => r.id === id);
 
     expect(await cli(["recipe", "--out", out, "--state", box.state, "--tick", "default", "--json"], io)).toBe(0);
-    const table = JSON.parse(logs.at(-1)!) as { tick: string; out: string; rows: { id: string; on: boolean; why: string }[] };
+    const table = JSON.parse(logs.at(-1)!) as RecipeAnswer;
     expect(table).toMatchObject({ tick: "default", out });
     expect(logs).toHaveLength(1);
     expect(errs[0]).toContain("Nothing leaves this computer");
     // The catalog's own default, so the rows are the catalog's and nothing of this computer moves them.
-    expect(table.rows.filter(r => r.on).map(r => r.id)).toEqual(CATALOG.flatMap(e => (e.kind === "tool" && e.defaultOn ? [e.id] : [])));
+    expect(allRows(table).filter(r => r.on).map(r => r.id)).toEqual(CATALOG.flatMap(e => (e.kind === "tool" && e.defaultOn ? [e.id] : [])));
     expect(readFileSync(out, "utf8")).toContain('"tick": "default"');
 
     logs.length = 0;
     errs.length = 0;
     expect(await cli(["recipe", "--out", out, "--state", box.state, "--tick", "used", "--set", "java=on"], io)).toBe(0);
-    expect(logs[0]).toMatch(/^id +on +why +size$/);
+    // The wizard's own two tables, drawn by the one renderer both it and this verb call.
+    expect(logs[0]).toBe("Agents");
+    expect(logs).toContain("Tools");
+    expect(logs.filter(l => l.startsWith("On: "))).toHaveLength(2);
     expect(logs.at(-1)).toContain(`wsp init --recipe ${out}`);
     // What the fixture's own history and PATH say, the same on any box: two tools run in two sessions, one
     // installed and never run, and one flipped on by hand.
@@ -150,8 +154,8 @@ describe("wsp cli", () => {
     expect(row("pnpm")).toMatchObject({ on: true, source: { kind: "used", sessions: 2, calls: 2 } });
     expect(row("java")).toMatchObject({ on: true, source: { kind: "installed", bin: true } });
     expect(row("gradle")).toMatchObject({ on: false, source: { kind: "popular" } });
-    expect(logs.find(l => l.startsWith("java "))).toMatch(/^java +on +installed here, never used +343\.0 MB$/);
-    expect(logs.find(l => l.startsWith("node "))).toMatch(/^node +on +used 2 times in 2 sessions +250\.0 MB$/);
+    expect(logs.find(l => l.includes("Java 21"))).toMatch(/^● {2}Java 21\s+installed\s+installed here, never used\s+343\.0 MB$/);
+    expect(logs.find(l => l.includes("Node 22"))).toMatch(/^● {2}Node 22 with npm\s+base\s+always on the image\s+250\.0 MB$/);
     expect(logs).toContain("  pytest       2         2");
 
     errs.length = 0;
@@ -178,8 +182,8 @@ describe("wsp cli", () => {
     expect(logs.at(-1)).toContain("Nothing was written.");
     expect(errs[0]).toContain("Nothing leaves this computer");
     // The fixture's own rows, the same on any box.
-    expect(logs.find(l => l.trim().startsWith("node "))).toMatch(/^ {2}node +on +used 2 times in 2 sessions +250\.0 MB +on$/);
-    expect(logs.find(l => l.trim().startsWith("java "))).toMatch(/^ {2}java +off +installed here, never used +343\.0 MB +off$/);
+    expect(logs.find(l => l.includes("Node 22"))).toMatch(/^● {2}Node 22 with npm\s+base\s+always on the image\s+250\.0 MB {2}on$/);
+    expect(logs.find(l => l.includes("Java 21"))).toMatch(/^○ {2}Java 21\s+installed\s+installed here, never used\s+343\.0 MB {2}off$/);
     expect(logs).toContain("  pytest       2         2");
 
     logs.length = 0;
@@ -194,7 +198,7 @@ describe("wsp cli", () => {
     };
     expect(scan.tick).toBe("used");
     for (const row of scan.tools) expect(row.recommended.why.length, row.id).toBeGreaterThan(0);
-    expect(scan.tools.filter(r => r.on).map(r => r.id)).toEqual(["node", "pnpm"]);
+    expect(scan.tools.filter(r => r.on).map(r => r.id).sort()).toEqual(["curl", "docker", "git", "jq", "node", "pnpm", "python", "ripgrep", "uv"]);
     expect(scan.agents.filter(r => r.on).map(r => r.id)).toEqual(["claude"]);
     expect(scan.commands).toEqual([{ name: "pytest", calls: 2, sessions: 2 }]);
     expect(scan.signIns.map(r => [r.id, r.recommended.value])).toEqual([["claude", "machine"]]);

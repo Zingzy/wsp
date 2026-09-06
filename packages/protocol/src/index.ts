@@ -802,13 +802,12 @@ export const RecipeSource = z.discriminatedUnion("kind", [
 ]);
 export type RecipeSource = z.infer<typeof RecipeSource>;
 
-/** What happens to an entry's sign-in: its files are copied from this computer, it is signed into on the machine
- * after the build, only the key files beside its login travel (the row the catalog files under the login's id plus
- * "-keys"), or nothing of it goes. One word per row; nothing here explains a key against a login. */
-export const RecipeSignIn = z.enum(["copy", "machine", "key", "skip"]);
-export type RecipeSignIn = z.infer<typeof RecipeSignIn>;
-/** The words `--signin` takes, in the order the help lists them. */
-export const RECIPE_SIGN_INS: readonly RecipeSignIn[] = RecipeSignIn.options;
+/** What happens to a login: copied from this computer, signed in on the machine after the build, set there as an
+ * API key the tool reads, or left out. One list, read by the collector's rows, by a recipe's rows and by the words
+ * `wsp recipe --signin` takes. */
+export const LOGIN_CHOICES = ["copy", "machine", "key", "skip"] as const;
+export const LoginChoice = z.enum(LOGIN_CHOICES);
+export type LoginChoice = z.infer<typeof LoginChoice>;
 
 /** One catalog entry in a recipe: ticked or not, why, its size on the machine when the catalog measured one, and
  * the sign-in answer the person or the agent that wrote the recipe gave; absent, the wizard's default stands. */
@@ -818,7 +817,7 @@ export const RecipeRow = z.object({
   on: z.boolean(),
   source: RecipeSource,
   size: z.number().int().nonnegative().optional(),
-  signIn: RecipeSignIn.optional(),
+  signIn: LoginChoice.optional(),
 });
 export type RecipeRow = z.infer<typeof RecipeRow>;
 

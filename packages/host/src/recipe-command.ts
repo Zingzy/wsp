@@ -4,13 +4,13 @@
 // command line and single rows flipped by id. Names and counts only; the
 // histories are read here and nothing of them leaves.
 import { existsSync } from "node:fs";
-import { agentName, catalogEntry, keysIdOf, loginRow } from "@wsp/catalog";
+import { agentName, catalogEntry } from "@wsp/catalog";
 import { type AgentHistory, type Host, computeRecipe, unknownCommands } from "@wsp/collect";
-import { RECIPE_SIGN_INS, RECIPE_TICKS, customRows, plural, type Recipe, type RecipeCustomRow, type RecipeHistory, type RecipeSignIn, type RecipeTick } from "@wsp/protocol";
+import { LOGIN_CHOICES, RECIPE_TICKS, customRows, plural, type Recipe, type RecipeCustomRow, type RecipeHistory, type LoginChoice, type RecipeTick } from "@wsp/protocol";
 import { THREAD_AGENTS } from "./thread-agents.js";
 import { loadRecipe, saveSmallRecipe } from "./recipe-file.js";
 import { customFromFlags, withCustom } from "./recipe-custom.js";
-import { recipeScan, recipeTable, type RecipeScan, type RecipeTable } from "./recipe-table.js";
+import { recipeAnswer, recipeScan, type RecipeAnswer, type RecipeScan } from "./recipe-answer.js";
 import type { ScanRow } from "./scan.js";
 
 /** One line per agent: what its history here said. */
@@ -57,25 +57,24 @@ export function isRecipeTick(word: string): word is RecipeTick {
   return (RECIPE_TICKS as readonly string[]).includes(word);
 }
 
-/** The catalog row and the word a `--signin` says of it; `key` needs the entry to have key files beside its login,
- * since that is the row the answer lands on. */
-export function parseSignIn(word: string): { id: string; choice: RecipeSignIn } {
+/** The catalog row and the word a `--signin` says of it. A word the row cannot take is not refused here: the
+ * sign-ins screen falls back to the first word that row does take, which is where that rule lives. */
+export function parseSignIn(word: string): { id: string; choice: LoginChoice } {
   const eq = word.indexOf("=");
   const id = eq < 0 ? word : word.slice(0, eq);
   const choice = eq < 0 ? "" : word.slice(eq + 1);
-  if (!(RECIPE_SIGN_INS as readonly string[]).includes(choice)) throw new Error(`--signin takes <id>=${RECIPE_SIGN_INS.join("|")}, not ${JSON.stringify(word)}`);
+  if (!(LOGIN_CHOICES as readonly string[]).includes(choice)) throw new Error(`--signin takes <id>=${LOGIN_CHOICES.join("|")}, not ${JSON.stringify(word)}`);
   if (catalogEntry(id) === undefined) throw new Error(`--signin ${word}: the catalog has no row called ${JSON.stringify(id)}`);
-  if (choice === "key" && loginRow(keysIdOf(id)) === undefined) throw new Error(`--signin ${word}: ${agentName(id)} has no key files beside its login; copy or machine are its words`);
-  return { id, choice: choice as RecipeSignIn };
+  return { id, choice: choice as LoginChoice };
 }
 
 /** The sign-in answers the `--signin` words ask for, later words winning over earlier ones. */
-export function parseSignIns(words: readonly string[]): Map<string, RecipeSignIn> {
+export function parseSignIns(words: readonly string[]): Map<string, LoginChoice> {
   return new Map(words.map(parseSignIn).map(({ id, choice }) => [id, choice]));
 }
 
 /** The recipe with the asked-for sign-in answers written on; every other row keeps the answer it had. */
-export function applySignIns(recipe: Recipe, answers: ReadonlyMap<string, RecipeSignIn>): Recipe {
+export function applySignIns(recipe: Recipe, answers: ReadonlyMap<string, LoginChoice>): Recipe {
   if (answers.size === 0) return recipe;
   return { ...recipe, rows: recipe.rows.map(r => (answers.has(r.id) ? { ...r, signIn: answers.get(r.id)! } : r)) };
 }
@@ -120,8 +119,8 @@ export function withSavedTicks(computed: Recipe, saved: Recipe): Recipe {
 
 /** The sign-in answers a saved recipe carries. No rule decides one: `computeRecipe` never writes a `signIn`, so a
  * run that lets the rule decide every tick would drop the person's answers on the floor if these did not travel. */
-export function savedSignIns(saved: Recipe | undefined): Map<string, RecipeSignIn> {
-  return new Map((saved?.rows ?? []).flatMap((r): [string, RecipeSignIn][] => (r.signIn === undefined ? [] : [[r.id, r.signIn]])));
+export function savedSignIns(saved: Recipe | undefined): Map<string, LoginChoice> {
+  return new Map((saved?.rows ?? []).flatMap((r): [string, LoginChoice][] => (r.signIn === undefined ? [] : [[r.id, r.signIn]])));
 }
 
 /** The recipe already at this path, or nothing when there is none. A file nobody can read is about to be rewritten
@@ -181,7 +180,7 @@ export async function runScan(host: Host, input: ScanInput = {}, io: RecipeIo = 
  * input (`tick` or `projects`) lets the rule decide every tick again, and any other run keeps what the file already
  * says and puts this run's flips on top. A row the file never carried always takes the rule's answer. Sign-in
  * answers stand through every run, whatever the rule: nothing but the person decides one. */
-export async function runRecipe(host: Host, input: RecipeInput, io: RecipeIo = QUIET, now?: () => Date): Promise<RecipeTable> {
+export async function runRecipe(host: Host, input: RecipeInput, io: RecipeIo = QUIET, now?: () => Date): Promise<RecipeAnswer> {
   const sets = parseSets(input.set ?? []);
   // Refused before this computer is read, as the other words are: a line that cannot be answered costs no scan.
   const added = customFromFlags({ add: input.add ?? [], ...(input.addCheck !== undefined ? { addCheck: input.addCheck } : {}), ...(input.why !== undefined ? { why: input.why } : {}) });
@@ -208,5 +207,5 @@ export async function runRecipe(host: Host, input: RecipeInput, io: RecipeIo = Q
   // The rows outside the catalog are the file's, not this computer's: an earlier run's stand, so --add adds up.
   const recipe = withCustom({ ...applySignIns(applySets(base, sets), signIns), ...(saved !== undefined ? { custom: [...customRows(saved)] } : {}) }, added);
   saveSmallRecipe(input.out, recipe);
-  return recipeTable(recipe, input.out, unknownCommands(histories));
+  return recipeAnswer(recipe, input.out, unknownCommands(histories));
 }
