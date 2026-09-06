@@ -656,6 +656,10 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
       case "workspace.napped":
         void drop(e.workspaceId, "the workspace napped", "pause");
         return;
+      case "workspace.gone":
+        // The forwards wait like a nap's: a rebuild lands as workspace.upgraded and redials them.
+        void drop(e.workspaceId, "the machine is gone", "pause", "the rebuild");
+        return;
       case "workspace.deleted":
         void drop(e.workspaceId, "the workspace was deleted", "close");
         return;

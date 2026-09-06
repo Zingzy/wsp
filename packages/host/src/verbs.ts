@@ -15,6 +15,7 @@ import {
   NOTIFY_ME,
   foldThreads,
   goldenHead,
+  goneRefusal,
   workspaceState,
   workspaceWord,
   type ExecEvent,
@@ -580,6 +581,7 @@ export const VERBS: readonly Verb[] = [
       for (const dependent of ["agent", "cwd", "notify"]) if (task === undefined && flag(ctx.flags, dependent) !== undefined) throw new Error(`--${dependent} needs --send`);
       const client = await ctx.client();
       const source = await workspaceOf(client, ref);
+      if (source.phase === "gone") throw new Error(goneRefusal("fork", source.gone));
       // Resolved before the machine is minted, so a bad reference costs nothing.
       const notify = await notifyOf(client, flag(ctx.flags, "notify"));
       const created = await create(client, ctx.out, source.golden, flag(ctx.flags, "name") ?? `${source.name}-fork`);

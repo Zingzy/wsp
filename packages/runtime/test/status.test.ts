@@ -415,3 +415,49 @@ describe("status zombie at rest", () => {
     }
   });
 });
+
+describe("gone machines and the meter", () => {
+  type Cost = EventUnion & { type: "workspace.cost" };
+
+  it("a record found gone at hydrate drops its awake mark without folding: gone ticks are frozen and the first tick after a rebuild does not bill the downtime", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const fc = fakeClock();
+    const status = { costIntervalMs: 15, pollIntervalMs: 60_000 };
+    // The clock jumps an hour: the idle window must not nap the workspace behind the test.
+    const idle = { defaultWindowMs: 24 * 3_600_000 };
+    const first = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status, idle });
+    const ws = await first.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const costs: Cost[] = [];
+    first.events.on("workspace.cost", e => costs.push(e as Cost));
+    let stop = first.status.watch();
+    await until(() => costs.length >= 1);
+    fc.advance(60_000);
+    await until(() => costs.at(-1)!.awakeMs >= 60_000);
+    stop();
+    await first.close();
+    const stored = costs.at(-1)!.awakeMs;
+
+    // An hour down, and the machine deleted at the provider meanwhile: the next host finds it gone.
+    backend.machines[0]!.killed = true;
+    fc.advance(3_600_000);
+    const second = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status, idle });
+    const after: Cost[] = [];
+    second.events.on("workspace.cost", e => after.push(e as Cost));
+    stop = second.status.watch();
+    await until(() => after.filter(t => t.phase === "gone").length >= 2);
+    const gone = after.filter(t => t.phase === "gone");
+    expect(gone[0]).toMatchObject({ rateUsdPerHour: 0 });
+    expect(gone[1]!.awakeMs).toBe(gone[0]!.awakeMs);
+    expect(gone[0]!.awakeMs).toBeLessThanOrEqual(stored);
+
+    await second.workspaces.rebuild(ws.id);
+    await until(() => after.at(-1)!.phase === "running");
+    fc.advance(10_000);
+    await until(() => after.at(-1)!.awakeMs >= gone[0]!.awakeMs + 10_000);
+    // The stretch begins at the rebuild: the hour the host was down and the machine did not exist is not on the bill.
+    expect(after.at(-1)!.awakeMs).toBe(gone[0]!.awakeMs + 10_000);
+    stop();
+    await second.close();
+  });
+});

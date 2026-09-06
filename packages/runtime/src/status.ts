@@ -23,11 +23,19 @@ export function machineStateOf(phase: WorkspacePhase): MachineState {
       return "paused";
     case "waking":
       return "starting";
+    case "gone":
+      return "gone";
     default: {
       const _exhaustive: never = phase;
       return "running";
     }
   }
+}
+
+/** What a record says about a machine the provider stopped knowing, quoting the provider where it said anything. */
+export function goneWords(machineId: string, providerWords?: string): string {
+  const base = `machine ${machineId} is gone at the provider`;
+  return providerWords === undefined || providerWords === "" ? base : `${base}: ${providerWords}`;
 }
 
 export interface ProbeOptions {
@@ -154,6 +162,8 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   const meters = new Map<string, Meter>();
   const histories = new Map<string, WorkspaceCostEvent[]>();
   const reconciled = new Map<string, { state: MachineState; at: number }>();
+  /** The words behind a gone answer, per workspace, so the status that reports it can quote the provider. */
+  const goneReasons = new Map<string, string>();
   const suspects = new Map<string, Suspect>();
 
   // Exact awake accounting comes from lifecycle events, not poll edges. A
@@ -172,33 +182,40 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   o.on("workspace.woken", e => {
     if (e.type === "workspace.woken") meter(e.workspaceId).mark ??= clock.now();
   });
-  o.on("workspace.napped", e => {
-    if (e.type !== "workspace.napped") return;
-    const m = meter(e.workspaceId);
-    if (m.mark !== undefined) m.awakeMs += clock.now() - m.mark;
-    m.mark = undefined;
-  });
+  // Awake time ends where the machine did: at the pause, or at the moment the provider was found not to know it.
+  for (const type of ["workspace.napped", "workspace.gone"] as const) {
+    o.on(type, e => {
+      if (e.type !== type) return;
+      const m = meter(e.workspaceId);
+      if (m.mark !== undefined) m.awakeMs += clock.now() - m.mark;
+      m.mark = undefined;
+    });
+  }
   o.on("workspace.deleted", e => {
     if (e.type !== "workspace.deleted") return;
     meters.delete(e.workspaceId);
     histories.delete(e.workspaceId);
     lastEmitted.delete(e.workspaceId);
     reconciled.delete(e.workspaceId);
+    goneReasons.delete(e.workspaceId);
     suspects.delete(e.workspaceId);
   });
 
   /** The provider's word, or our own when it cannot be had (weather is not a
    * reason to report a running workspace as anything else). */
   const askProvider = async (r: StatusRecord): Promise<MachineState> => {
+    let state: MachineState;
+    let words: string | undefined;
     try {
-      const state = await r.providerState();
-      reconciled.set(r.id, { state, at: clock.now() });
-      return state;
+      state = await r.providerState();
     } catch (e) {
       if ((e as { kind?: string }).kind !== "missing") return machineStateOf(r.phase);
-      reconciled.set(r.id, { state: "gone", at: clock.now() });
-      return "gone";
+      state = "gone";
+      words = e instanceof Error ? e.message : String(e);
     }
+    reconciled.set(r.id, { state, at: clock.now() });
+    if (state === "gone") goneReasons.set(r.id, goneWords(r.machineId, words));
+    return state;
   };
 
   const machineState = async (r: StatusRecord, reconcile: StatusListOptions["reconcile"], reachFailed: boolean): Promise<MachineState> => {
@@ -280,9 +297,15 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
         void providerState;
         void exec;
         const base = { ...view, size, rateUsdPerHour: o.rateUsdPerHour(size), ...(idleAt !== undefined ? { idleAt } : {}) };
+        const gone = (reason: string | undefined): WorkspaceStatus => ({ ...base, machineState: "gone", reach: { state: "gone" }, ...(reason !== undefined ? { reason } : {}) });
         const done = (state: MachineState, reach: WorkspaceStatus["reach"]): WorkspaceStatus =>
-          state === "gone" ? { ...base, machineState: state, reach: { state: "gone" } } : { ...base, machineState: state, reach };
+          state === "gone" ? gone(goneReasons.get(r.id) ?? goneWords(r.machineId)) : { ...base, machineState: state, reach };
 
+        // A gone record already holds the provider's last word; asking again would only 404.
+        if (view.phase === "gone") {
+          suspects.delete(r.id);
+          return gone(view.gone);
+        }
         // Measured: the reach goes dark only while paused and works again on wake.
         if (view.phase !== "running") {
           suspects.delete(r.id);
@@ -318,6 +341,9 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     for (const { size, ...view } of await o.records()) {
       const m = meter(view.id);
       if (view.phase === "running") m.mark ??= now;
+      // A gone record's stretch is over and its end unknown (the host may have been down when the provider lost the
+      // machine): the mark goes without folding, so no tick after a rebuild bills the gap.
+      else if (view.phase === "gone") m.mark = undefined;
       const running = view.phase === "running" && m.mark !== undefined;
       const rate = o.rateUsdPerHour(size);
       const awakeMs = m.awakeMs + (running ? now - m.mark! : 0);

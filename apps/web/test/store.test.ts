@@ -361,6 +361,16 @@ describe("store workspaces", () => {
     expect(useStore.getState().statuses["ws_a"]?.machineId).toBe("m3");
   });
 
+  it("gone carries the phase and the provider's words onto the view and its status", async () => {
+    const { api, emit } = fakeApi([view("ws_a")], []);
+    useStore.getState().bind(api);
+    await flush();
+    emit({ type: "workspace.gone", workspaceId: "ws_a", machineId: "m1", reason: "machine m1 is gone at the provider: Not found" });
+    expect(useStore.getState().workspaces[0]!).toMatchObject({ phase: "gone", gone: "machine m1 is gone at the provider: Not found" });
+    emit({ type: "workspace.upgraded", workspaceId: "ws_a", machineId: "m2" });
+    expect(useStore.getState().workspaces[0]!).toMatchObject({ phase: "running", machineId: "m2" });
+  });
+
   it("session.start counts spending and workspace.deleted prunes it", async () => {
     const { api, emit } = fakeApi([view("ws_a")], []);
     useStore.getState().bind(api);

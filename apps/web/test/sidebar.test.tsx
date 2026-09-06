@@ -8,6 +8,7 @@ import type { SessionView, WorkspaceStatus, WorkspaceView } from "@wsp/protocol"
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
+import { statusOf } from "./workspace-status.js";
 import { onNewThreadRequest } from "../src/shell/shellRequests.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 
@@ -23,14 +24,7 @@ const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running
   createdAt: new Date(NOW - 60 * 60_000).toISOString(),
 });
 
-const status = (w: WorkspaceView, over: Partial<WorkspaceStatus> = {}): WorkspaceStatus => ({
-  ...w,
-  machineState: w.phase === "napping" ? "paused" : "running",
-  reach: { state: w.phase === "napping" ? "napping" : "reachable" },
-  size: { cpu: 2, memMb: 4096 },
-  rateUsdPerHour: 0.11,
-  ...over,
-});
+const status = statusOf;
 
 const session = (id: string, workspaceId: string, over: Partial<SessionView> = {}): SessionView => ({
   id,
@@ -532,6 +526,20 @@ describe("new workspace dialog", () => {
     fireEvent.keyDown(input, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(api.createFromGoldenHead).not.toHaveBeenCalled();
+  });
+});
+
+describe("gone machines", () => {
+  it("a gone row reads Gone with no rate or countdown, offers the rebuild with the provider's words, and no new thread", async () => {
+    const OLD: WorkspaceView = { ...view("ws_c", "old", "gone"), gone: "machine m_ws_c is gone at the provider: Not found" };
+    await mount(fakeApi([OLD], [status(OLD, { machineState: "gone", reach: { state: "gone" }, reason: OLD.gone! })]), "old");
+    const row = rowOf("old");
+    expect(row.textContent).toContain("Gone");
+    expect(row.textContent).not.toContain("/hr");
+    expect(row.textContent).not.toContain("naps");
+    expect(row.textContent).not.toContain("active");
+    expect(screen.getByRole("button", { name: "Rebuild old" }).getAttribute("title")).toBe("machine m_ws_c is gone at the provider: Not found");
+    expect(screen.queryByRole("button", { name: "New thread in old" })).toBeNull();
   });
 });
 
