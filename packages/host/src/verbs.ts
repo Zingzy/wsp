@@ -3,7 +3,8 @@
 // the host's protocol on localhost, authenticated with the token the host
 // wrote to the state dir. One command table, one dial, one output formatter;
 // a verb is a function from its parsed arguments and the client to an exit
-// code. Nothing here reads a key or imports the runtime: the host is the only
+// code. The MCP server is a second door onto the same exported functions.
+// Nothing here reads a key or imports the runtime: the host is the only
 // process that talks to the provider.
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -17,6 +18,7 @@ import {
   type ExecEvent,
   type GoldenManifest,
   type SessionEvent,
+  type SessionOrigin,
   type SessionView,
   type ThreadView,
   type TurnResult,
@@ -198,7 +200,7 @@ const COMMON: NonNullable<ParseArgsConfig["options"]> = {
 
 const flag = (flags: Flags, name: string): string | undefined => (typeof flags[name] === "string" ? (flags[name] as string) : undefined);
 
-async function workspaces(client: HostClient): Promise<WorkspaceView[]> {
+export async function workspaces(client: HostClient): Promise<WorkspaceView[]> {
   return (await client.request<{ workspaces: WorkspaceView[] }>("workspaces.list")).workspaces;
 }
 
@@ -208,7 +210,7 @@ async function threads(client: HostClient, workspaceId?: string): Promise<Thread
 }
 
 /** A workspace as a person names it: by id, else by its name when exactly one carries it. */
-async function workspaceOf(client: HostClient, ref: string): Promise<WorkspaceView> {
+export async function workspaceOf(client: HostClient, ref: string): Promise<WorkspaceView> {
   const all = await workspaces(client);
   const byId = all.find(w => w.id === ref);
   if (byId !== undefined) return byId;
@@ -219,7 +221,7 @@ async function workspaceOf(client: HostClient, ref: string): Promise<WorkspaceVi
 }
 
 /** A thread by id, or by a prefix of it that names exactly one. */
-async function threadOf(client: HostClient, ref: string): Promise<ThreadView> {
+export async function threadOf(client: HostClient, ref: string): Promise<ThreadView> {
   const all = await threads(client);
   const exact = all.find(t => t.id === ref);
   if (exact !== undefined) return exact;
@@ -229,19 +231,35 @@ async function threadOf(client: HostClient, ref: string): Promise<ThreadView> {
   throw new Error(`no thread ${ref}`);
 }
 
-function threadLine(t: ThreadView, workspaceName: string): string[] {
-  return [t.id, workspaceName, t.harness, t.status, t.startedBy, t.title];
+export type ThreadRow = ThreadView & { workspaceName: string };
+
+/** The sidebar's rows with each workspace's name on them, within one workspace when named, as every director lists them. */
+export async function threadRows(client: HostClient, within?: string): Promise<ThreadRow[]> {
+  const all = await workspaces(client);
+  const scope = within !== undefined ? await workspaceOf(client, within) : undefined;
+  const rows = await threads(client, scope?.id);
+  return rows.map(t => ({ ...t, workspaceName: all.find(w => w.id === t.workspaceId)?.name ?? t.workspaceId }));
+}
+
+/** Naps the workspace a person names; the view after, as every director shows it. */
+export async function nap(client: HostClient, ref: string): Promise<WorkspaceView> {
+  const source = await workspaceOf(client, ref);
+  return (await client.request<{ workspace: WorkspaceView }>("workspaces.nap", { workspaceId: source.id })).workspace;
+}
+
+function threadLine(t: ThreadRow): string[] {
+  return [t.id, t.workspaceName, t.harness, t.status, t.startedBy, t.title];
 }
 
 /** Forks the golden's head into a new workspace, the way the app's create does, with the stages streamed as they land. */
-async function createFromHead(client: HostClient, out: Out, name: string): Promise<WorkspaceCreateResult> {
+export async function createFromHead(client: HostClient, out: Out, name: string): Promise<WorkspaceCreateResult> {
   const { manifest } = await client.request<{ manifest?: GoldenManifest }>("golden.get", { name: "default" });
   const head = goldenHead(manifest);
   if (head === undefined) throw new Error("no golden yet; run wsp init");
   return create(client, out, head.snapshotId, name);
 }
 
-async function create(client: HostClient, out: Out, golden: string, name: string): Promise<WorkspaceCreateResult> {
+export async function create(client: HostClient, out: Out, golden: string, name: string): Promise<WorkspaceCreateResult> {
   const pushed = pushedFrames(client);
   await client.events();
   pushed.follow(
@@ -263,33 +281,102 @@ async function create(client: HostClient, out: Out, golden: string, name: string
 
 const sessionEvent = (f: Frame): f is Frame & SessionEvent => typeof f.type === "string" && f.type.startsWith("session.");
 
-/** Starts a turn and follows it to its end. Text streams to stderr as it arrives; the last message is printed on
- * stdout when the turn ends; with --json every event of the turn is printed instead. 0 when the turn completed. */
-async function follow(ctx: VerbContext, client: HostClient, start: Record<string, unknown>, announce: boolean): Promise<number> {
+/** A turn as a director sees it: the thread it opened or resumed, the harness's result once it ended, and the
+ * runtime's reason when the runtime ended it. */
+export interface Turn {
+  session: SessionView;
+  threadId: string;
+  result?: TurnResult;
+  reason?: string;
+}
+
+/** The start that opens a new thread in a workspace, under the named agent or the runtime's default. */
+export function openingOf(workspaceId: string, prompt: string, harness?: string): Record<string, unknown> {
+  return { workspaceId, prompt, ...(harness !== undefined ? { harness } : {}) };
+}
+
+/** The start a message to an existing thread makes: its latest turn resumed under the thread's own agent. */
+export function resumeOf(thread: ThreadView, prompt: string): Record<string, unknown> {
+  if (thread.claudeSessionId === undefined) throw new Error(`thread ${thread.id} has no session to resume yet`);
+  return { workspaceId: thread.workspaceId, prompt, harness: thread.harness, resume: thread.claudeSessionId };
+}
+
+/** Starts a turn as `startedBy` and follows it to its end: `on.started` sees the thread as soon as the runtime names
+ * it, `on.event` every event of the turn with the turn so far. Fails when the host goes away first. */
+export async function follow(
+  client: HostClient,
+  start: Record<string, unknown>,
+  startedBy: SessionOrigin,
+  on: { started?(turn: Turn): void; event(e: SessionEvent, turn: Turn): void },
+): Promise<Turn> {
   const pushed = pushedFrames(client);
   await client.events();
-  const { session } = await client.request<{ session: SessionView }>("sessions.start", { ...start, startedBy: "cli" });
+  const { session } = await client.request<{ session: SessionView }>("sessions.start", { ...start, startedBy });
   const threadId = session.threadId;
   if (threadId === undefined) throw new Error("the runtime stamped no thread on the session");
-  if (announce) ctx.out.emit({ type: "thread", id: threadId, workspaceId: session.workspaceId, harness: session.harness, startedBy: session.startedBy }, `thread ${threadId}`);
-  let result: TurnResult | undefined;
-  const ended = new Promise<number>(done => {
+  const turn: Turn = { session, threadId };
+  on.started?.(turn);
+  const ended = new Promise<Turn>(done => {
     pushed.follow(
       f => sessionEvent(f) && f.threadId === threadId,
       f => {
         const e = f as unknown as SessionEvent;
-        const last = e.type === "session.end";
-        ctx.out.emit(e, last ? result?.text : undefined);
-        if (e.type === "session.delta" && e.kind === "text") ctx.out.stream(e.text);
-        if (e.type === "session.done") result = e.result;
-        if (!last) return;
-        if (result?.status !== "completed") ctx.io.error(result?.error ?? e.reason ?? `turn ${result?.status ?? "ended without a result"}`);
-        done(result?.status === "completed" ? 0 : 1);
+        if (e.type === "session.done") turn.result = e.result;
+        if (e.type === "session.end" && e.reason !== undefined) turn.reason = e.reason;
+        on.event(e, turn);
+        if (e.type === "session.end") done(turn);
       },
     );
   });
   try {
     return await untilSettled(client, ended);
+  } finally {
+    pushed.stop();
+  }
+}
+
+/** Why the turn did not complete, in one line; nothing when it did. */
+export function turnFailure(turn: Turn): string | undefined {
+  if (turn.result?.status === "completed") return undefined;
+  return turn.result?.error ?? turn.reason ?? `turn ${turn.result?.status ?? "ended without a result"}`;
+}
+
+/** The verbs' way through a turn: text streams to stderr as it arrives, the last message is printed on stdout when
+ * the turn ends, with --json every event of the turn is printed instead; the failure is one line on stderr, exit 1. */
+async function followVerb(ctx: VerbContext, client: HostClient, start: Record<string, unknown>, announce: boolean): Promise<number> {
+  const turn = await follow(client, start, "cli", {
+    ...(announce
+      ? { started: (t: Turn) => ctx.out.emit({ type: "thread", id: t.threadId, workspaceId: t.session.workspaceId, harness: t.session.harness, startedBy: t.session.startedBy }, `thread ${t.threadId}`) }
+      : {}),
+    event: (e, t) => {
+      ctx.out.emit(e, e.type === "session.end" ? t.result?.text : undefined);
+      if (e.type === "session.delta" && e.kind === "text") ctx.out.stream(e.text);
+    },
+  });
+  const failure = turnFailure(turn);
+  if (failure !== undefined) ctx.io.error(failure);
+  return failure === undefined ? 0 : 1;
+}
+
+export type ExecExit = Extract<ExecEvent, { type: "exec.exit" }>;
+
+/** Runs argv on the workspace's machine and follows it to its exit; `on` sees each output line and the exit. Fails
+ * when the host goes away first. */
+export async function execOn(client: HostClient, workspaceId: string, argv: readonly string[], on: (e: ExecEvent) => void): Promise<ExecExit> {
+  const pushed = pushedFrames(client);
+  const { execId } = await client.request<{ execId: string }>("workspaces.exec", { workspaceId, argv });
+  const exited = new Promise<ExecExit>(done => {
+    pushed.follow(
+      f => (f.type === "exec.output" || f.type === "exec.exit") && f["execId"] === execId,
+      f => {
+        const e = f as unknown as ExecEvent;
+        on(e);
+        if (e.type === "exec.exit") done(e);
+      },
+    );
+  });
+  try {
+    return await untilSettled(client, exited);
   } finally {
     pushed.stop();
   }
@@ -334,8 +421,7 @@ export const VERBS: readonly Verb[] = [
       const created = await create(client, ctx.out, source.golden, flag(ctx.flags, "name") ?? `${source.name}-fork`);
       const task = flag(ctx.flags, "send");
       if (task === undefined) return 0;
-      const agent = flag(ctx.flags, "agent");
-      return follow(ctx, client, { workspaceId: created.workspace.id, prompt: task, ...(agent !== undefined ? { harness: agent } : {}) }, true);
+      return followVerb(ctx, client, openingOf(created.workspace.id, task, flag(ctx.flags, "agent")), true);
     },
   },
   {
@@ -346,9 +432,7 @@ export const VERBS: readonly Verb[] = [
     run: async ctx => {
       const [ref] = ctx.args;
       if (ref === undefined || ctx.args.length !== 1) throw new Error("wsp pause takes one workspace");
-      const client = await ctx.client();
-      const source = await workspaceOf(client, ref);
-      const { workspace } = await client.request<{ workspace: WorkspaceView }>("workspaces.nap", { workspaceId: source.id });
+      const workspace = await nap(await ctx.client(), ref);
       ctx.out.emit({ workspace }, `${workspace.name} ${workspaceWord(workspaceState({ phase: workspace.phase })).toLowerCase()}`);
       return 0;
     },
@@ -360,16 +444,8 @@ export const VERBS: readonly Verb[] = [
     options: { in: { type: "string" } },
     run: async ctx => {
       if (ctx.args.length !== 0) throw new Error("wsp threads takes no positional arguments");
-      const client = await ctx.client();
-      const all = await workspaces(client);
-      const within = flag(ctx.flags, "in");
-      const scope = within !== undefined ? await workspaceOf(client, within) : undefined;
-      const rows = await threads(client, scope?.id);
-      const nameOf = (id: string): string => all.find(w => w.id === id)?.name ?? id;
-      ctx.out.emit(
-        { threads: rows },
-        table([["THREAD", "WORKSPACE", "AGENT", "STATE", "BY", "TITLE"], ...rows.map(t => threadLine(t, nameOf(t.workspaceId)))]).join("\n"),
-      );
+      const rows = await threadRows(await ctx.client(), flag(ctx.flags, "in"));
+      ctx.out.emit({ threads: rows.map(({ workspaceName: _name, ...t }) => t) }, table([["THREAD", "WORKSPACE", "AGENT", "STATE", "BY", "TITLE"], ...rows.map(threadLine)]).join("\n"));
       return 0;
     },
   },
@@ -385,8 +461,7 @@ export const VERBS: readonly Verb[] = [
       if (task === undefined || ctx.args.length !== 1) throw new Error("wsp thread new takes one task");
       const client = await ctx.client();
       const workspace = await workspaceOf(client, within);
-      const agent = flag(ctx.flags, "agent");
-      return follow(ctx, client, { workspaceId: workspace.id, prompt: task, ...(agent !== undefined ? { harness: agent } : {}) }, true);
+      return followVerb(ctx, client, openingOf(workspace.id, task, flag(ctx.flags, "agent")), true);
     },
   },
   {
@@ -398,9 +473,7 @@ export const VERBS: readonly Verb[] = [
       const [ref, message] = ctx.args;
       if (ref === undefined || message === undefined || ctx.args.length !== 2) throw new Error("wsp send takes a thread and one message");
       const client = await ctx.client();
-      const thread = await threadOf(client, ref);
-      if (thread.claudeSessionId === undefined) throw new Error(`thread ${thread.id} has no session to resume yet`);
-      return follow(ctx, client, { workspaceId: thread.workspaceId, prompt: message, harness: thread.harness, resume: thread.claudeSessionId }, false);
+      return followVerb(ctx, client, resumeOf(await threadOf(client, ref), message), false);
     },
   },
   {
@@ -413,25 +486,9 @@ export const VERBS: readonly Verb[] = [
       if (ref === undefined || words.length === 0) throw new Error("wsp exec takes a workspace, then -- and the command");
       const client = await ctx.client();
       const workspace = await workspaceOf(client, ref);
-      const pushed = pushedFrames(client);
-      const { execId } = await client.request<{ execId: string }>("workspaces.exec", { workspaceId: workspace.id, argv: words });
-      const exited = new Promise<number>(done => {
-        pushed.follow(
-          f => (f.type === "exec.output" || f.type === "exec.exit") && f["execId"] === execId,
-          f => {
-            const e = f as unknown as ExecEvent;
-            ctx.out.emit(e, e.type === "exec.output" ? e.text : undefined);
-            if (e.type !== "exec.exit") return;
-            if (e.error !== undefined) ctx.io.error(e.error);
-            done(e.exitCode ?? 1);
-          },
-        );
-      });
-      try {
-        return await untilSettled(client, exited);
-      } finally {
-        pushed.stop();
-      }
+      const exit = await execOn(client, workspace.id, words, e => ctx.out.emit(e, e.type === "exec.output" ? e.text : undefined));
+      if (exit.error !== undefined) ctx.io.error(exit.error);
+      return exit.exitCode ?? 1;
     },
   },
   notYet("import", "wsp import <folder> --to <workspace>", { to: { type: "string" } }, "moving a project folder into a workspace"),

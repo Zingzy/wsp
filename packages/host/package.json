@@ -13,6 +13,7 @@
   "dependencies": {
     "@clack/core": "1.4.3",
     "@clack/prompts": "1.7.0",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "@wsp/adapter-claude": "workspace:*",
     "@wsp/catalog": "workspace:*",
     "@wsp/collect": "workspace:*",
@@ -21,7 +22,8 @@
     "@wsp/protocol": "workspace:*",
     "@wsp/runtime": "workspace:*",
     "@wsp/web": "workspace:*",
-    "ws": "^8.21.3"
+    "ws": "^8.21.3",
+    "zod": "3.25.76"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

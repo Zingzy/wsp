@@ -5,6 +5,7 @@
 // say what each server is, what it needs on Linux and which secret it carries.
 // Token files are only stat'ed, never read.
 import { createHash } from "node:crypto";
+import { CATALOG_AGENTS, parseJsonc, type McpFormat } from "@wsp/catalog";
 import { MCP_ID_PREFIX } from "@wsp/protocol";
 import { type Host, expand } from "../host.js";
 import type { GroupNote, ManifestEntry } from "../manifest.js";
@@ -16,7 +17,7 @@ import { BASE_INTERPRETERS, HAND_DIRS, HAND_GROUP, type HandBin, brought, carrie
 export const MCP_REMOTE_ID = `${MCP_ID_PREFIX}mcp-remote`;
 export const MCP_REMOTE_LABEL = "mcp-remote sign-ins";
 
-export type McpFormat = "claude" | "codex" | "gemini" | "opencode";
+export type { McpFormat } from "@wsp/catalog";
 
 export interface McpConfig {
   agent: string;
@@ -28,17 +29,10 @@ export interface McpConfig {
   scope: string;
 }
 
-/** Where each agent keeps its user-wide MCP definitions, per its own docs. */
-export const MCP_CONFIGS: readonly McpConfig[] = [
-  // https://docs.claude.com/en/docs/claude-code/mcp (user scope; project scope lives in each repo's .mcp.json)
-  { agent: "claude", label: "Claude Code", format: "claude", files: ["~/.claude.json"], scope: "user scope and your home folder" },
-  // https://developers.openai.com/codex/config-basic (project scope is a trusted repo's .codex/config.toml)
-  { agent: "codex", label: "Codex", format: "codex", files: ["~/.codex/config.toml"], scope: "user scope" },
-  // https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md (project scope is a repo's .gemini/settings.json)
-  { agent: "gemini", label: "Gemini CLI", format: "gemini", files: ["~/.gemini/settings.json"], scope: "user scope" },
-  // https://opencode.ai/docs/mcp-servers/ (project scope is a repo's opencode.json)
-  { agent: "opencode", label: "OpenCode", format: "opencode", files: ["~/.config/opencode/opencode.json", "~/.config/opencode/opencode.jsonc"], scope: "user scope" },
-];
+/** Where each agent keeps its user-wide MCP definitions: the catalog entries that name one, in catalog order. */
+export const MCP_CONFIGS: readonly McpConfig[] = CATALOG_AGENTS.flatMap(a =>
+  a.mcp !== undefined ? [{ agent: a.id, label: a.name, format: a.mcp.format, files: a.mcp.files, scope: a.mcp.scope }] : [],
+);
 
 export type McpTransport =
   | { kind: "stdio"; command: string; args: string[]; env: Record<string, string>; cwd?: string }
@@ -61,38 +55,9 @@ const MCP_REMOTE_STORE = `${MCP_AUTH}/mcp-remote-v1`;
 
 // --- parsing -----------------------------------------------------------------
 
-/** Comments outside strings go; Gemini CLI and OpenCode accept them in their settings. */
-function stripJsonComments(text: string): string {
-  let out = "";
-  let i = 0;
-  let inString = false;
-  while (i < text.length) {
-    const c = text[i]!;
-    if (inString) {
-      out += c;
-      if (c === "\\" && i + 1 < text.length) out += text[++i];
-      else if (c === '"') inString = false;
-      i++;
-    } else if (c === '"') {
-      inString = true;
-      out += c;
-      i++;
-    } else if (c === "/" && text[i + 1] === "/") {
-      while (i < text.length && text[i] !== "\n") i++;
-    } else if (c === "/" && text[i + 1] === "*") {
-      const end = text.indexOf("*/", i + 2);
-      i = end < 0 ? text.length : end + 2;
-    } else {
-      out += c;
-      i++;
-    }
-  }
-  return out;
-}
-
 function parseJson(text: string): Record<string, unknown> | undefined {
   try {
-    const v: unknown = JSON.parse(stripJsonComments(text));
+    const v: unknown = parseJsonc(text);
     return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
   } catch {
     return undefined;
@@ -519,6 +484,8 @@ function serverRow(config: McpConfig, server: McpServer, fit: LinuxFit, deps: Ho
     bytes: c.bytes,
     default: reason === undefined && !deps.gone ? "bring" : "skip",
     ...(reason !== undefined ? { reason } : {}),
+    // A server that carries a secret travels only on a copy answer, never on a bare tick.
+    ...(c.secrets.length > 0 ? { consent: true } : {}),
     detail: words.join("; "),
   };
 }
@@ -561,6 +528,7 @@ function remoteRow(store: RemoteStore, matched: readonly string[]): ManifestEntr
   return {
     ...base,
     default: "bring",
+    consent: true,
     detail: `browser sign-ins saved by mcp-remote for remote servers: ${n} token${n === 1 ? "" : "s"} (${fmt(tokenBytes)})${whom.length > 0 ? `, ${whom.join("; ")}` : ""}${older ? "; older bridge versions' folders stay here" : ""}`,
   };
 }

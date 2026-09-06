@@ -417,6 +417,9 @@ exports[`catalog > is the seeded catalog 1`] = `
   {
     "argument": "wrangler",
     "configPaths": 0,
+    "covers": [
+      "cloudflare-wrangler",
+    ],
     "defaultOn": false,
     "floor": false,
     "id": "wrangler",
@@ -468,6 +471,9 @@ exports[`catalog > is the seeded catalog 1`] = `
   {
     "argument": "kubectl",
     "configPaths": 0,
+    "covers": [
+      "kubernetes-cli",
+    ],
     "defaultOn": false,
     "floor": false,
     "id": "kubectl",
