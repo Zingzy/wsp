@@ -16,6 +16,7 @@ const version = (n: number) => ({
   setupSha: `sha${n}`,
   createdAt: `2026-08-${10 + n}T00:00:00.000Z`,
   smoke: { cmd: "true", exitCode: 0 },
+  base: [{ name: "node", version: "22.23.2" }],
   ...(n > 1 ? { parentSnapshotId: `snap_golden-v${n - 1}` } : {}),
 });
 

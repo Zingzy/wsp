@@ -64,8 +64,8 @@ export async function stageDaemonBundle(stageDir: string, daemonDir = resolveDae
   );
 }
 
-/** Desktop templates ship no node; the sandbox template carries its own and
- * keeps it (an agent that needs a newer one asks for it in the import). */
+/** A golden builder has the base floor's Node 22 under /usr/local before this runs; a desktop template or a
+ * doctor's scratch machine with no node at all gets the same release here. */
 export const GUEST_NODE = NODE_RELEASES[22];
 
 function nodeBootstrap(): string {
@@ -82,8 +82,9 @@ function nodeBootstrap(): string {
     '  echo "$sha  /tmp/$pkg" | sha256sum -c - >/dev/null',
     '  tar -xzf "/tmp/$pkg" -C /usr/local --strip-components=1',
     '  rm -f "/tmp/$pkg"',
-    "  export npm_config_nodedir=/usr/local",
     "fi",
+    // A Node under /usr/local carries its headers, so node-pty compiles against them instead of downloading a set.
+    'case "$(command -v node)" in /usr/local/bin/node) export npm_config_nodedir=/usr/local ;; esac',
   ].join("\n");
 }
 

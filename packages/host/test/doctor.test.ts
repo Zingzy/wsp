@@ -154,13 +154,16 @@ describe("deployScript", () => {
     expect(redact(rotateDaemonTokenScript(token))).not.toContain(token);
   });
 
-  it("bootstraps a pinned, sha256-checked Node into /usr/local only when the guest has none", () => {
+  it("bootstraps a pinned, sha256-checked Node into /usr/local only when the guest has none, and compiles against a /usr/local Node's own headers", () => {
     const script = deployScript("aabbcc");
     const bootstrap = script.indexOf("if ! command -v node");
     expect(script).not.toContain("node_major");
     const npm = script.indexOf("npm install");
     expect(bootstrap).toBeGreaterThan(-1);
     expect(bootstrap).toBeLessThan(npm);
+    const nodedir = script.indexOf('case "$(command -v node)" in /usr/local/bin/node) export npm_config_nodedir=/usr/local ;; esac');
+    expect(nodedir).toBeGreaterThan(bootstrap);
+    expect(nodedir).toBeLessThan(npm);
     expect(script).toContain(`https://nodejs.org/dist/v${GUEST_NODE.version}/`);
     expect(script).toContain(`node-v${GUEST_NODE.version}-linux-x64.tar.gz sha=${GUEST_NODE.sha256.x86_64}`);
     expect(script).toContain(`node-v${GUEST_NODE.version}-linux-arm64.tar.gz sha=${GUEST_NODE.sha256.aarch64}`);

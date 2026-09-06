@@ -50,6 +50,7 @@ import {
 import type {
   DaemonReachView,
   EventUnion,
+  GoldenBaseTool,
   GoldenBuilderView,
   GoldenLogin,
   GoldenStage,
@@ -555,6 +556,8 @@ interface BuilderRecord {
   building?: true;
   /** What of the recipe this builder carries; a prepare with the same recipe hash reuses it. */
   import?: ImportLedger;
+  /** The base tools read on this builder, or on the golden it was forked from; the version it seals records them. */
+  base?: GoldenBaseTool[];
   /** Saved as this version and kept running since; an update of that version lands on it, the sweep stops it at GRACE_MS. */
   sealed?: { at: string; version: number };
 }
@@ -1155,6 +1158,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     builder: {
       machine, kind: record.kind, baseTemplate: record.baseTemplate, setupSha: record.setupSha, createdAt: record.createdAt, firstLife: record.firstLife, size: record.size,
       ...(record.import !== undefined ? { import: record.import } : {}),
+      ...(record.base !== undefined ? { base: record.base } : {}),
     },
     life: lifeOf(record, machine, record.firstLife),
   });
@@ -1868,6 +1872,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       firstLife: true,
       ...(builder.machine.streamUrl !== undefined ? { streamUrl: builder.machine.streamUrl } : {}),
       ...(builder.import !== undefined ? { import: builder.import } : {}),
+      ...(builder.base !== undefined ? { base: builder.base } : {}),
     };
     const entry: LiveBuilder = placeholder ?? { record, builder, life: "own" };
     entry.record = record;
@@ -2118,7 +2123,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         } else {
           stage("creating", `your builder from v${head.version}, kept since the save`);
           try {
-            const applied = await applyDelta(kept.builder.machine, o.delta, { setup: recipe.setup, previousSmoke: head.smoke.cmd, ...(head.missingTools !== undefined ? { previousMissing: head.missingTools } : {}), onStage: stage });
+            const applied = await applyDelta(kept.builder.machine, o.delta, { setup: recipe.setup, previousSmoke: head.smoke.cmd, previousBase: head.base, ...(head.missingTools !== undefined ? { previousMissing: head.missingTools } : {}), onStage: stage });
             const setupSha = nextSetupSha(head.setupSha, recipe.setup, o.delta.import);
             kept.record.import = applied.ledger;
             kept.record.setupSha = setupSha;
