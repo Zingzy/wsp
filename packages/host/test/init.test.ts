@@ -14,7 +14,7 @@ import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
 import { APP_DATA_GROUP, RUNGS, claimedPaths, entriesFor, everything, nodeMachineFs, type Machine, type Manifest, type ManifestEntry } from "@wsp/collect";
 import { SNAPSHOT_STORAGE, type BackendPricing, type BrewFormula, type BrewTable } from "@wsp/engine";
 import { ALREADY_APPLIED, type GoldenManifest } from "@wsp/protocol";
-import { DAEMON_TOKEN_SET, createRuntime, memoryStore, type GoldenRecipe, type Runtime } from "@wsp/runtime";
+import { DAEMON_TOKEN_SET, createRuntime, goldenHead, memoryStore, type GoldenRecipe, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { GOLDEN_SETUP } from "@wsp/catalog";
 import { loadManifest, recipePath } from "../src/init-recipe.js";
@@ -233,8 +233,7 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
 
 /** What the host's own create does: a fork of the golden's head under the given name. */
 async function forkHead(rt: Runtime, name: string) {
-  const manifest = await rt.golden.get();
-  const head = manifest?.versions.find(v => v.version === manifest.head);
+  const head = goldenHead(await rt.golden.get());
   if (!head) throw new Error("no golden image yet");
   return rt.workspaces.create({ golden: head.snapshotId, name });
 }

@@ -13,6 +13,7 @@ import {
   applyDotfiles,
   createRuntime,
   describeAge,
+  goldenHead,
   jsonFileStore,
   machineExecStream,
   type EventUnion,
@@ -110,13 +111,10 @@ class Timings {
 }
 
 async function ensureGolden(rt: Runtime, envs: Record<string, string>, timings: Timings): Promise<string> {
-  const existing = await rt.golden.get();
-  if (existing) {
-    const head = existing.versions.find(v => v.version === existing.head);
-    if (head) {
-      timings.add("golden build", 0, `reused v${head.version} (${head.snapshotId})`);
-      return head.snapshotId;
-    }
+  const head = goldenHead(await rt.golden.get());
+  if (head) {
+    timings.add("golden build", 0, `reused v${head.version} (${head.snapshotId})`);
+    return head.snapshotId;
   }
   const { version } = await timings.time(
     "golden build",

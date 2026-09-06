@@ -497,6 +497,11 @@ export type GoldenVersion = z.infer<typeof GoldenVersion>;
 export const GoldenManifest = z.object({ head: z.number(), versions: z.array(GoldenVersion) });
 export type GoldenManifest = z.infer<typeof GoldenManifest>;
 
+/** The sealed version a manifest's head names, or nothing: a manifest without one has no golden to serve or fork. */
+export function goldenHead(manifest: GoldenManifest | undefined): GoldenVersion | undefined {
+  return manifest?.versions.find(v => v.version === manifest.head);
+}
+
 /** What a golden is built from, as its builder records it: every ticked row
  * with its login answer and tool pin, and every planned path with a digest of
  * the bytes that travel. Two recipes with equal digests build the same golden;

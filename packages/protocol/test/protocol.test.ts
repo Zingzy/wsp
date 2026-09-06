@@ -17,6 +17,7 @@ import {
   GitStatusReply,
   GoldenManifest,
   GoldenStageEvent,
+  goldenHead,
   HarnessCatalog,
   PortReachView,
   RuntimeErrorResponse,
@@ -516,5 +517,22 @@ describe("golden version logins", () => {
     expect(GoldenVersion.parse(base).missingTools).toBeUndefined();
     expect(() => GoldenVersion.parse({ ...base, missingTools: [{ name: "gopls", note: "no Linux bottle" }] })).toThrow();
     expect(() => GoldenVersion.parse({ ...base, missingTools: [{ name: "gopls", outcome: "installed", note: "" }] })).toThrow();
+  });
+});
+
+describe("goldenHead", () => {
+  const v1: GoldenVersion = { version: 1, snapshotId: "snap_1", baseTemplate: "base", setupSha: "x", createdAt: "2026-09-01T00:00:00Z", smoke: { cmd: "true", exitCode: 0 } };
+
+  it("is nothing without a manifest", () => {
+    expect(goldenHead(undefined)).toBeUndefined();
+  });
+
+  it("is nothing when the head names a version the manifest lacks", () => {
+    expect(goldenHead({ head: 2, versions: [v1] })).toBeUndefined();
+  });
+
+  it("is the version the head names", () => {
+    const v2: GoldenVersion = { ...v1, version: 2, snapshotId: "snap_2" };
+    expect(goldenHead({ head: 2, versions: [v1, v2] })).toBe(v2);
   });
 });
