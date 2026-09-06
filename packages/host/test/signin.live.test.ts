@@ -131,6 +131,7 @@ describe.runIf(LIVE)("sign-in stage (live)", () => {
     const opts: InitOptions = {
       yes: false,
       collect: async () => MANIFEST,
+      recipe: async () => ({ version: 1, at: new Date().toISOString(), histories: [], rows: [] }),
       keys: { solari: env.SOLARI_API_KEY },
       pricing,
       statePath,

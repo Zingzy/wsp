@@ -40,14 +40,18 @@ pnpm wsp up         # every start after that: the app on http://127.0.0.1:4400 o
 pnpm wsp doctor     # prove the reach path against one live machine
 ```
 
-`wsp init` reads what this machine has, shows it, and walks eight screens
-(identity, shell, editors, toolchains, tools, agents, sign-ins, everything
-else) where you tick what comes along. One summary, one confirm, then it
-boots the machine, runs the sign-ins in your terminal, asks for each secret
-it cut from your rc files, seals the golden on Enter, forks your first
-workspace and opens the app on it. Every prompt has a flag: `--yes` takes the defaults,
-`--manifest <path>` ticks from a file, and the ticks are saved as
-`golden-recipe.json` next to the state so a second golden is a re-run.
+`wsp init` reads what this machine has and what your agents used, then walks
+three screens: the agents (the catalog's six, the ones on this Mac ticked),
+what they need (one line of counts and the disk line, the tool rows behind
+one key), and the sign-ins and keys (logins sign in on the machine after the
+build; keys are ticked to copy). One summary, one confirm, then it boots the
+machine, runs the sign-ins in your terminal, asks for each secret it cut from
+your rc files, seals the golden on Enter, forks your first workspace and opens
+the app on it. Every prompt has a flag: `--yes` takes the defaults,
+`--recipe <path>` ticks from a recipe `wsp recipe` wrote and goes straight to
+the sign-ins, `--manifest <path>` replays a saved `golden-recipe.json` screen
+by screen. Both files are saved next to the state so a second golden is a
+re-run.
 
 `wsp` reads keys from `.env` in the working directory or from the
 environment, and asks once if neither is set. State is a JSON file:

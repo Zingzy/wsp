@@ -69,6 +69,8 @@ export interface RungSelectOptions {
   detailLines?: number;
   /** Groups that start folded. */
   folded?: readonly string[];
+  /** The word beside the title over the rows that are always included; "always included" unless the screen has a truer one. */
+  lockedWord?: string;
   /** A second cell after a group header's count: its size, on a screen whose rows carry one. */
   groupHint?: (group: string, items: readonly SelectItem[]) => string | undefined;
   /** One dim line under a group, after its rows whether folded or not: what the list leaves out. */
@@ -370,7 +372,7 @@ class RungPrompt extends Prompt<Set<string>> {
     const labels = [3, ...items.map(i => i.label.length + (i.group !== undefined || i.lock === "on" ? 2 : 0)), ...items.map(i => i.group?.length ?? 0), hasLocked ? this.o.title.length : 0];
     const second = Math.max(
       fmtCount(items.length, items.length).length,
-      hasLocked ? LOCKED_WORD.length : 0,
+      hasLocked ? this.lockedWord.length : 0,
       ...items.map(i => this.second(i, width).length),
       ...[...new Set(items.map(i => i.group))].map(g => (g === undefined ? 0 : this.groupSecond(g, items.filter(i => i.group === g)).length)),
     );
@@ -383,6 +385,10 @@ class RungPrompt extends Prompt<Set<string>> {
     const count = groupCount(items, this.ticks(), this.choices);
     const hint = this.o.groupHint?.(group, items);
     return hint === undefined || hint === "" ? count : `${count}${GUTTER}${hint}`;
+  }
+
+  private get lockedWord(): string {
+    return this.o.lockedWord ?? LOCKED_WORD;
   }
 
   /** The indent of an item's row: grouped rows and bullets sit two columns in. */
@@ -441,7 +447,7 @@ class RungPrompt extends Prompt<Set<string>> {
         return this.line(box(flips.length > 0 && flips.every(i => ticks.has(i.id))), "all", fmtCount(free.filter(i => chosen(i, ticks, this.choices)).length, free.length), 0, cols, current, false);
       }
       case "locked":
-        return this.line(dim("▾"), this.o.title, LOCKED_WORD, 0, cols, false, false);
+        return this.line(dim("▾"), this.o.title, this.lockedWord, 0, cols, false, false);
       case "bullet":
         return this.line(dim("•"), label(entry.item), entry.item.hint ?? "", 2, cols, false, false);
       case "more":

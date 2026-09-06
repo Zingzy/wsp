@@ -6,7 +6,7 @@
 // that. The wizard's tables read from here; nothing here runs a command.
 import { GCLOUD, KUBECTL } from "./linux-casks.js";
 import { GOLDEN_SETUP, HERMES_INSTALL, MIB, NODE_RELEASES, PYTHON_INSTALL, UV_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
-import { NO_SIGN_IN, SIGN_IN_ROWS, type SignIn } from "./signin.js";
+import { NO_SIGN_IN, SIGN_IN_ROWS, hasLogin, keysIdOf, keysRowOf, loginIdOf, type KeyFiles, type SignIn } from "./signin.js";
 
 export type EntryKind = "agent" | "tool";
 
@@ -258,10 +258,10 @@ export const CATALOG: readonly CatalogEntry[] = [
   { ...tool, id: "java", name: "Java 21", bin: "java", ...brew("openjdk@21"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 4, road: "measured" } },
   { ...tool, id: "maven", name: "Maven", bin: "mvn", ...brew("maven"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 4, road: "unmeasured" } },
   { ...tool, id: "gradle", name: "Gradle", bin: "gradle", ...brew("gradle"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 4, road: "measured" } },
-  { ...tool, id: "wrangler", name: "Cloudflare Wrangler", bin: "wrangler", installRoad: npm("wrangler"), signIn: SIGN_IN_ROWS.wrangler, defaultOn: false, source: { sessions: 3, images: 0, road: "unmeasured" } },
+  { ...tool, id: "wrangler", name: "Cloudflare Wrangler", bin: "wrangler", installRoad: npm("wrangler"), covers: ["cloudflare-wrangler"], signIn: SIGN_IN_ROWS.wrangler, defaultOn: false, source: { sessions: 3, images: 0, road: "unmeasured" } },
   { ...tool, id: "cloudflared", name: "cloudflared", bin: "cloudflared", installRoad: github("cloudflare/cloudflared"), signIn: SIGN_IN_ROWS.cloudflared, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" } },
   { ...tool, id: "gcloud", name: "Google Cloud CLI", bin: "gcloud", installRoad: { road: "release", asset: { vendor: GCLOUD } }, signIn: SIGN_IN_ROWS.gcloud, defaultOn: false, source: { sessions: 4, images: 0, road: "measured" } },
-  { ...tool, id: "kubectl", name: "kubectl", bin: "kubectl", installRoad: { road: "release", asset: { vendor: KUBECTL } }, signIn: SIGN_IN_ROWS.kubectl, defaultOn: false, source: { sessions: 1, images: 1, road: "unmeasured" } },
+  { ...tool, id: "kubectl", name: "kubectl", bin: "kubectl", installRoad: { road: "release", asset: { vendor: KUBECTL } }, covers: ["kubernetes-cli"], signIn: SIGN_IN_ROWS.kubectl, defaultOn: false, source: { sessions: 1, images: 1, road: "unmeasured" } },
   { ...tool, id: "aws", name: "AWS CLI", bin: "aws", ...brew("awscli"), signIn: SIGN_IN_ROWS.aws, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
   { ...tool, id: "vercel", name: "Vercel CLI", bin: "vercel", installRoad: npm("vercel"), signIn: SIGN_IN_ROWS.vercel, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
   { ...tool, id: "netlify", name: "Netlify CLI", bin: "netlify", installRoad: npm("netlify-cli"), signIn: SIGN_IN_ROWS.netlify, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
@@ -335,6 +335,29 @@ export function baseNote(e: ToolEntry, macVersion: string | undefined): string {
 /** The entry by its id, or nothing. */
 export function catalogEntry(id: string): CatalogEntry | undefined {
   return BY_ID.get(id);
+}
+
+/** One row the Sign-ins screen can show, under the login id the collector files it: an entry's own sign-in (a
+ * login to run, or a note about having none), or the keys row beside a login whose key files travel only by copy. */
+export interface LoginRow {
+  id: string;
+  entry: CatalogEntry;
+  signIn: SignIn;
+  /** The key files this row copies; absent on the login itself. */
+  keys?: KeyFiles;
+}
+
+export const LOGIN_ROWS: readonly LoginRow[] = CATALOG.flatMap((e): LoginRow[] => {
+  const s = e.signIn;
+  if (!hasLogin(s)) return s.note !== undefined ? [{ id: loginIdOf(e.id), entry: e, signIn: s }] : [];
+  return [{ id: loginIdOf(e.id), entry: e, signIn: s }, ...(s.keys === undefined ? [] : [{ id: keysIdOf(e.id), entry: e, signIn: keysRowOf(s.keys, s.status), keys: s.keys }])];
+});
+
+const LOGIN_ROW_BY_ID: ReadonlyMap<string, LoginRow> = new Map(LOGIN_ROWS.map(r => [r.id, r]));
+
+/** The sign-in row filed under a login id, or nothing for a tool the catalog does not know. */
+export function loginRow(id: string): LoginRow | undefined {
+  return LOGIN_ROW_BY_ID.get(id);
 }
 
 /** Exits 0 once an entry is on the machine. */

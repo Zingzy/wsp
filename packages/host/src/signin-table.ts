@@ -2,7 +2,7 @@
 // The sign-in rows the init terminal runs, read off the catalog by the login
 // id the collector emits; a tool the catalog does not know gets a shell where
 // the person types the tool's own command.
-import { CATALOG, hasLogin, loginIdOf, type SignIn as CatalogSignIn, type StatusCheck } from "@wsp/catalog";
+import { LOGIN_ROWS, hasLogin, type SignIn as CatalogSignIn, type StatusCheck } from "@wsp/catalog";
 
 export type { LoginSource, StatusCheck } from "@wsp/catalog";
 export { AWS_STATUS, CLAUDE_KEY_PATH, CLAUDE_STATUS, CLOUDFLARED_STATUS, GEMINI_STATUS, claudeSource, claudeWhy, geminiSource, hasLogin, secretNamed, signsInByDefault } from "@wsp/catalog";
@@ -10,8 +10,8 @@ export { AWS_STATUS, CLAUDE_KEY_PATH, CLAUDE_STATUS, CLOUDFLARED_STATUS, GEMINI_
 /** A catalog row, or a shell for a tool with no row. */
 export type SignIn = CatalogSignIn | { kind: "shell" };
 
-/** Every catalog entry with a sign-in to run or a note about it, by the login id the collector emits. */
-export const SIGN_INS: Readonly<Record<string, CatalogSignIn>> = Object.fromEntries(CATALOG.filter(e => hasLogin(e.signIn) || e.signIn.note !== undefined).map(e => [loginIdOf(e.id), e.signIn]));
+/** Every sign-in row the catalog files, by the login id the collector emits: an entry's own, and the keys row beside a login whose key files travel only by copy. */
+export const SIGN_INS: Readonly<Record<string, CatalogSignIn>> = Object.fromEntries(LOGIN_ROWS.map(r => [r.id, r.signIn]));
 
 /** The status check a row carries, whichever kind it is. */
 export function statusOf(s: SignIn): StatusCheck | undefined {

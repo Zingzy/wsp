@@ -5,12 +5,13 @@ import { join } from "node:path";
 import { type ManifestEntry, parseManifest } from "@wsp/collect";
 import { afterEach, describe, expect, it } from "vitest";
 import type { GoldenImport } from "@wsp/runtime";
-import type { Recipe } from "@wsp/protocol";
+import { Recipe } from "@wsp/protocol";
 import {
   applyRecipe,
   goldenRecipeFor,
   hasChoices,
   initialChoice,
+  loginShown,
   lockRefused,
   refusedNote,
   initialTicks,
@@ -24,6 +25,8 @@ import {
   tickLoginTools,
   unbuiltRows,
   withoutAgentTools,
+  withCatalogAgents,
+  recipeWithAnswers,
 } from "../src/init-recipe.js";
 import { FIXTURE, byId } from "./init-fixture.js";
 
@@ -335,7 +338,7 @@ describe("the small recipe", () => {
     expect(loadRecipe(path)).toEqual(RECIPE);
   });
 
-  it("applyRecipe ticks the agents and tools rows from the catalog ids and leaves the other rungs to their defaults", () => {
+  it("applyRecipe ticks the agents and tools rows from the catalog ids, turns editors and everything off, and leaves the other rungs to their defaults", () => {
     const applied = applyRecipe({ ...FIXTURE, entries: [...FIXTURE.entries, { rung: "agents", id: "agents/mcp/claude/spoo-ops", label: "spoo-ops", paths: [], bytes: 0, default: "bring" }, { rung: "agents", id: "agents/mcp/codex/axiom", label: "axiom", paths: [], bytes: 0, default: "bring" }, { rung: "agents", id: "agents/mcp/mcp-remote", label: "mcp-remote", paths: [], bytes: 0, default: "bring" }, { rung: "tools", id: "tools/brew/openjdk@21", label: "openjdk@21", paths: [], bytes: 0, default: "skip", reason: "no Linux bottle" }] }, RECIPE);
     const bring = new Map(applied.entries.map(e => [e.id, e.bring]));
     expect(bring.get("agents/claude")).toBe(false);
@@ -351,13 +354,53 @@ describe("the small recipe", () => {
     expect(bring.get("tools/brew/rectangle")).toBe(false);
     expect(bring.get("tools/brew/openjdk@21")).toBe(false);
     expect(applied.entries.filter(e => e.rung === "tools").every(e => initialTicks(e) === (e.id === "tools/brew/gh"))).toBe(true);
-    for (const id of ["identity/git-user", "identity/ssh-key", "shell/zshrc", "editors/nvim", "toolchains/mise"]) expect(bring.has(id) && bring.get(id) === undefined, id).toBe(true);
+    for (const id of ["identity/git-user", "identity/ssh-key", "shell/zshrc", "toolchains/mise"]) expect(bring.has(id) && bring.get(id) === undefined, id).toBe(true);
+    expect(bring.get("editors/nvim")).toBe(false);
+    expect(applyRecipe({ entries: [{ rung: "everything", id: "everything/.demo", label: ".demo", paths: ["~/.demo"], bytes: 10, default: "bring" }] }, RECIPE).entries[0]).toMatchObject({ bring: false });
     // The saved sign-in answer lands on the login row; a login the recipe did not answer keeps its own default.
     expect(applied.entries.find(e => e.id === "logins/gh")).toMatchObject({ choice: "copy" });
     expect(applied.entries.find(e => e.id === "logins/gh")?.bring).toBeUndefined();
     expect(applied.entries.find(e => e.id === "logins/claude")).not.toHaveProperty("choice");
     expect(applied.entries.find(e => e.id === "logins/codex")).not.toHaveProperty("choice");
     expect(initialChoice(applied.entries.find(e => e.id === "logins/gh")!)).toBe("copy");
+  });
+
+  it("withCatalogAgents adds a bare agents row and a bare login row for every catalog agent this computer has none for, and leaves the found ones alone", () => {
+    const rows = withCatalogAgents(FIXTURE).entries;
+    const added = rows.slice(FIXTURE.entries.length);
+    expect(added.map(e => e.id)).toEqual(["agents/gemini", "logins/gemini", "agents/opencode", "logins/opencode", "agents/pi", "logins/pi", "agents/hermes", "logins/hermes"]);
+    expect(added.find(e => e.id === "agents/gemini")).toEqual({ rung: "agents", id: "agents/gemini", label: "Gemini CLI", paths: [], bytes: 0, default: "skip" });
+    expect(added.find(e => e.id === "logins/hermes")).toEqual({ rung: "logins", id: "logins/hermes", label: "Hermes Agent login", group: "Agent logins", paths: [], bytes: 0, default: "skip" });
+    // A bare row starts off and unticked; the recipe decides.
+    expect(added.every(e => !initialTicks(e))).toBe(true);
+    expect(added.filter(e => e.rung === "logins").every(e => initialChoice(e) === "machine")).toBe(true);
+    // The found rows keep their place and their fields; a manifest with every agent gains nothing.
+    expect(rows.slice(0, FIXTURE.entries.length)).toEqual(FIXTURE.entries);
+    const full = withCatalogAgents({ entries: [...FIXTURE.entries, ...added] });
+    expect(full.entries).toHaveLength(FIXTURE.entries.length + added.length);
+    // The keys row beside Hermes follows the Hermes agent row like the login does.
+    const keys: ManifestEntry = { rung: "logins", id: "logins/hermes-keys", label: "Hermes Agent API keys", group: "Agent logins", paths: ["~/.hermes/.env"], bytes: 100, default: "bring" };
+    const withKeys = { entries: [...rows, keys] };
+    expect(loginShown(keys, withKeys, new Set(["agents/hermes"]))).toBe(true);
+    expect(loginShown(keys, withKeys, new Set())).toBe(false);
+    expect(loginShown(keys, { entries: [keys] }, new Set())).toBe(true);
+  });
+
+  it("recipeWithAnswers writes the login answers onto the small recipe and leaves the ticks as they are; a row nobody answered carries none", () => {
+    const out = recipeWithAnswers(RECIPE, new Map([["logins/gh", "machine"], ["logins/claude", "copy"], ["logins/kube", "copy"], ["logins/codex", "skip"]]));
+    const by = new Map(out.rows.map(r => [r.id, r]));
+    expect(by.get("claude")).toMatchObject({ on: false, signIn: "copy" });
+    expect(by.get("codex")).toMatchObject({ on: true, signIn: "skip" });
+    // gh's saved copy gives way to the screens' answer.
+    expect(by.get("gh")).toMatchObject({ on: true, signIn: "machine" });
+    expect(by.get("yq")).toMatchObject({ on: false });
+    expect(by.get("yq")).not.toHaveProperty("signIn");
+    // kubectl's login row is filed as kube; the answer lands on the kubectl row over the saved one.
+    expect(by.get("kubectl")).toMatchObject({ on: false, signIn: "copy" });
+    expect(out.at).toBe(RECIPE.at);
+    expect(Recipe.parse(out)).toEqual(out);
+    // A saved answer the screens did not repeat is gone rather than stale.
+    expect(recipeWithAnswers(RECIPE, new Map()).rows.find(r => r.id === "kubectl")).not.toHaveProperty("signIn");
   });
 
   it("unbuiltRows names the ticked rows this computer has no row for, the floor aside", () => {
