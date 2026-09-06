@@ -17,7 +17,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { caskPinState, catalogEntry, linuxCaskFor } from "@wsp/catalog";
 import { BREW_TOOLCHAIN_BYTES, BUILDER_DISK_GB, MEASURED_ON, PACK_BUDGET_BYTES, TOOLS_DISK_FLOOR, agentInstallsFor, agentSize, assumedSize, brewfileFor, cliRoad, editorInstallsFor, estimateDisk, extensionsFile, pinState, remoteEditorFor, remoteSettingsPath, toolInstallsFor, toolSize, type BrewTable, type DiskEstimate, type ImportResult, type ToolSize } from "@wsp/engine";
-import { ALREADY_APPLIED } from "@wsp/protocol";
+import { ALREADY_APPLIED, fmtBytes } from "@wsp/protocol";
 import { CLAUDE_INSTALLER, importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
   CONSENT_CHOICES,
@@ -44,7 +44,7 @@ import {
   unbuiltRows,
   withoutAgentTools,
 } from "./init-recipe.js";
-import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, fmtBytes, fmtDuration, isTTY, plainLine, rowsOf, table, widthOf, wrap } from "./init-layout.js";
+import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, fmtDuration, isTTY, plainLine, rowsOf, table, widthOf, wrap } from "./init-layout.js";
 import { aliasLines } from "./init-aliases.js";
 import { sourceLines } from "./init-sources.js";
 import { openRunLog, runLogPath } from "./init-log.js";
@@ -130,7 +130,6 @@ const DEFAULT_RETRY = { waitMs: 30_000, attempts: 20 };
 const SWEEP = "the next wsp or wsp init on this computer stops it, or stop it from the Solari console.";
 const dim = (s: string): string => styleText("dim", s);
 
-export { fmtBytes };
 
 // --- stage stream ----------------------------------------------------------
 

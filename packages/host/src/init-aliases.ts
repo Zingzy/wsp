@@ -6,7 +6,7 @@
 // nothing.
 import { type ManifestEntry, type ShellAlias, guardLine } from "@wsp/collect";
 import { type BrewTable, toolSize } from "@wsp/engine";
-import { fmtBytes } from "./init-layout.js";
+import { fmtBytes } from "@wsp/protocol";
 import { HEAVY_BYTES } from "./init-weight.js";
 
 export type RowFate = { fate: "coming" } | { fate: "missing"; why: string } | { fate: "unknown" };

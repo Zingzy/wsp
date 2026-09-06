@@ -245,6 +245,7 @@ export function WorkspaceSidebar() {
                     .join(" · ");
                   const showThreads = !isCollapsed && active.length + settled.length > 0;
                   const collapsible = project.threads.length > 0 && !searching;
+                  const actions = Number(collapsible) + Number(canImport);
                   return (
                     <SidebarMenuItem key={project.id}>
                       <SidebarMenuButton
@@ -253,8 +254,8 @@ export function WorkspaceSidebar() {
                         data-sidebar-row
                         data-row-id={`ws:${project.id}`}
                         className={cn(
-                          !zombie && (collapsible || canImport) && "group-has-data-[sidebar=menu-action]/menu-item:pe-14",
-                          !zombie && collapsible && canImport && "group-has-data-[sidebar=menu-action]/menu-item:pe-19",
+                          !zombie && actions === 1 && "group-has-data-[sidebar=menu-action]/menu-item:pe-14",
+                          !zombie && actions === 2 && "group-has-data-[sidebar=menu-action]/menu-item:pe-19",
                         )}
                         onClick={() => select(project.id)}
                       >

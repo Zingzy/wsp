@@ -2,7 +2,8 @@
 // The import dialog over a fake api: a folder is read into one summary, the
 // secrets box is the only loud element and only when the plan found one,
 // ticks become carry and rewrite, the import's events fill the step rows,
-// the landed line names the folder on the machine, and a refusal prints the
+// the landed line names the folder on the machine and what was cut, editing
+// the path after a read drops the plan and its ticks, and a refusal prints the
 // runtime's words with replace as the one follow-up.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -59,7 +60,7 @@ function fakeApi(plan: ProjectPlan = PLAN) {
     listSessions: vi.fn(async () => []),
     getGolden: async () => undefined,
     planProject: vi.fn(async (_source: string) => plan),
-    importProject: vi.fn(async () => ({ dest: plan.source, files: 11, bytes: 2_900, parts: 1, cut: [], rewritten: [".git/config"] })),
+    importProject: vi.fn(async () => ({ dest: plan.source, files: 11, bytes: 2_900, parts: 1, cut: [] as string[], rewritten: [".git/config"] })),
     subscribe: vi.fn((fn: (e: EventUnion) => void) => {
       listeners.add(fn);
       return () => listeners.delete(fn);
@@ -124,7 +125,7 @@ describe("import project dialog", () => {
     expect((within(root).getByRole("button", { name: "Import" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("shows the secrets box only when the plan found one, with the rewrite ticked and the plain file not", async () => {
+  it("shows the secrets box only when the plan found one, with the rewrite ticked and the plain file not, each row's words following its tick", async () => {
     const { api } = fakeApi();
     useStore.getState().bind(api);
     render(<ImportProjectDialog workspace={workspace} onClose={() => {}} />);
@@ -136,9 +137,34 @@ describe("import project dialog", () => {
     const config = within(box).getByRole("checkbox", { name: /\.git\/config/ });
     expect(env.getAttribute("aria-checked")).toBe("false");
     expect(config.getAttribute("aria-checked")).toBe("true");
-    expect(within(box).getByText("travels as it is")).toBeDefined();
-    expect(within(box).getByText("lands as https://github.com/o/r")).toBeDefined();
+    const offers = (): string[] => Array.from(box.querySelectorAll<HTMLElement>("[data-k=offer]")).map(el => el.textContent ?? "");
+    expect(offers()).toEqual(["cut", "lands bare at github.com"]);
+    expect(box.querySelectorAll<HTMLElement>("[data-k=offer]")[1]!.title).toBe("lands bare at https://github.com/o/r");
     expect(within(box).getByText("name, keys · 120 B")).toBeDefined();
+    fireEvent.click(env);
+    fireEvent.click(config);
+    expect(offers()).toEqual(["travels as it is", "cut"]);
+  });
+
+  it("editing the path after a read drops the plan and the ticks, and Import waits for the folder to be read again", async () => {
+    const { api } = fakeApi();
+    api.planProject.mockImplementation(async (source: string) => ({ ...PLAN, source: `/private${source}` }));
+    useStore.getState().bind(api);
+    render(<ImportProjectDialog workspace={workspace} onClose={() => {}} />);
+    const root = await dialog();
+    await readFolder(root);
+    fireEvent.click(within(root).getByRole("checkbox", { name: /\.env/ }));
+    const input = within(root).getByLabelText("Folder on this Mac");
+    fireEvent.change(input, { target: { value: "/var/other" } });
+    expect((within(root).getByRole("button", { name: "Import" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(value(root, "files")).toBe("");
+    expect(value(root, "dest")).toBe("");
+    expect(root.querySelector("[data-k=secrets]")).toBeNull();
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(value(root, "dest")).toBe("/private/var/other"));
+    expect(within(root).getByRole("checkbox", { name: /\.env/ }).getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(within(root).getByRole("button", { name: "Import" }));
+    expect(api.importProject).toHaveBeenCalledWith({ workspaceId: "ws_a", source: "/var/other", dest: "/private/var/other", carry: [], rewrite: [".git/config"] });
   });
 
   it("with no secret-shaped file the box is not rendered", async () => {
@@ -151,7 +177,7 @@ describe("import project dialog", () => {
     expect(root.querySelectorAll("[data-step]")).toHaveLength(6);
   });
 
-  it("Import sends the ticks as carry and rewrite with dest at the realpath, fills the steps from events, and names what landed", async () => {
+  it("Import sends the ticks as carry and rewrite with dest at the realpath, fills the steps from events, and names what landed and what was cut", async () => {
     const { api, emit } = fakeApi();
     useStore.getState().bind(api);
     const onClose = vi.fn();
@@ -160,12 +186,13 @@ describe("import project dialog", () => {
     await readFolder(root);
     fireEvent.click(within(root).getByRole("checkbox", { name: /\.env/ }));
     let finish!: () => void;
-    api.importProject.mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve({ dest: "/private/var/proj", files: 11, bytes: 2_900, parts: 1, cut: [], rewritten: [".git/config"] }); }));
+    api.importProject.mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve({ dest: "/private/var/proj", files: 11, bytes: 2_900, parts: 1, cut: ["keys/id_ed25519"], rewritten: [".git/config"] }); }));
     fireEvent.click(within(root).getByRole("button", { name: "Import" }));
     expect(api.importProject).toHaveBeenCalledWith({ workspaceId: "ws_a", source: "/var/proj", dest: "/private/var/proj", carry: [".env"], rewrite: [".git/config"] });
     expect((within(root).getByRole("button", { name: "Import" }) as HTMLButtonElement).disabled).toBe(true);
-    // The import runs on the runtime whatever this dialog does, so it cannot be dismissed while it runs.
+    // The import runs on the runtime whatever this dialog does, so it cannot be dismissed while it runs, and the status line says so.
     expect((within(root).getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(root).getByRole("status").textContent).toBe("Importing. This stays open until it lands; closing it would not stop the import.");
     fireEvent.keyDown(root, { key: "Escape" });
     expect(onClose).not.toHaveBeenCalled();
 
@@ -182,7 +209,7 @@ describe("import project dialog", () => {
     emit(event({ stage: "landing", message: "Landing at /private/var/proj.", elapsedMs: 70 }));
     emit(event({ stage: "done", message: "11 files, 2.8 KB, landed at /private/var/proj.", elapsedMs: 80 }));
     await act(async () => finish());
-    await waitFor(() => expect(within(root).getByRole("status").textContent).toBe("proj is at /private/var/proj on api."));
+    await waitFor(() => expect(within(root).getByRole("status").textContent).toBe("proj is at /private/var/proj on api; cut keys/id_ed25519."));
     expect(within(root).queryByRole("button", { name: "Cancel" })).toBeNull();
     const done = within(root).getByRole("button", { name: "Done" });
     fireEvent.click(done);

@@ -66,19 +66,19 @@ const api: Api = {
   planProject: async () => plan,
   importProject: async o => {
     const cut = plan.secrets.filter(s => !(o.carry ?? []).includes(s.path) && !(o.rewrite ?? []).includes(s.path)).map(s => s.path);
-    emit({ stage: "planned", message: "1204 files, 38 MB and the repository; 3 secret-shaped files; 4 caches left behind.", elapsedMs: 180 });
+    emit({ stage: "planned", message: "1204 files, 38.2 MB and the repository; 3 secret-shaped files; 4 caches left behind.", elapsedMs: 180 });
     await beat(150);
     emit({ stage: "consented", message: `Rewriting .git/config to https://github.com/zingzy/spoo.git without http.extraheader; cut ${cut.join(", ")}.`, elapsedMs: 190 });
     await beat(150);
     emit({ stage: "packing", message: "Packing 1202 files.", elapsedMs: 210 });
     await beat(150);
-    emit({ stage: "uploading", message: "Uploading 31 MB.", elapsedMs: 2_400, bytes: 0, total: 32_505_856 });
+    emit({ stage: "uploading", message: "Uploading 31.0 MB.", elapsedMs: 2_400, bytes: 0, total: 32_505_856 });
     await beat(150);
-    emit({ stage: "uploading", message: "Part 1 of 1, 31 MB of 31 MB.", elapsedMs: 6_900, bytes: 32_505_856, total: 32_505_856 });
+    emit({ stage: "uploading", message: "Part 1 of 1, 31.0 MB of 31.0 MB.", elapsedMs: 6_900, bytes: 32_505_856, total: 32_505_856 });
     await beat(150);
     emit({ stage: "landing", message: `Landing at ${SOURCE}.`, elapsedMs: 7_100 });
     await beat(150);
-    emit({ stage: "done", message: `1202 files, 37 MB, landed at ${SOURCE}.`, elapsedMs: 9_800 });
+    emit({ stage: "done", message: `1202 files, 38.0 MB, landed at ${SOURCE}.`, elapsedMs: 9_800 });
     return { dest: SOURCE, files: 1_202, bytes: 38.0 * 1024 * 1024, parts: 1, cut, rewritten: [".git/config"] };
   },
   subscribe: fn => {

@@ -12,7 +12,6 @@ import {
   goldenHead,
   importInto,
   landBundle,
-  fmtBytes,
   plural,
   killUntilGone,
   prepareBuilder,
@@ -74,7 +73,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, sendRefusal, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, fmtBytes, sendRefusal, workspaceState } from "@wsp/protocol";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { DAEMON_TOKEN_SET, assertTokenShape, rotateDaemonTokenScript } from "./daemon-token.js";

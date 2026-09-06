@@ -7,7 +7,7 @@
 // process descended from it before returning, so a slow brew never holds a
 // cellar lock into the next tool's turn.
 import { MIB } from "@wsp/catalog";
-import type { GoldenStage } from "@wsp/protocol";
+import { fmtBytes, type GoldenStage } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { BREW_HOUSEKEEPING, HOMEBREW, TOOLS_PATH, type GuestFacts, type ToolInstall } from "./golden-import.js";
 import type { ExecResult, Machine } from "./machine.js";
@@ -58,12 +58,6 @@ const CELLAR_LOCKED = /has already locked/;
 /** Every lock Homebrew holds, taken and released in turn: returns once no brew is mid-install. */
 const BREW_LOCK_WAIT_S = 600;
 const BREW_LOCK_WAIT_CMD = `for l in /home/linuxbrew/.linuxbrew/var/homebrew/locks/*.lock; do [ -e "$l" ] && flock -w ${BREW_LOCK_WAIT_S} "$l" true; done; true`;
-
-export function fmtBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < MIB) return `${(n / 1024).toFixed(1)} KB`;
-  return `${Math.round(n / MIB)} MB`;
-}
 
 export const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 

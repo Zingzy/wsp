@@ -31,12 +31,6 @@ export function stepRows(events: readonly ProjectImportEvent[]): StepRow[] {
   });
 }
 
-/** The runtime's reason when the import threw, in its words. */
-export function failedMessage(events: readonly ProjectImportEvent[]): string | null {
-  const failed = events.filter(e => e.stage === "failed").at(-1);
-  return failed === undefined ? null : failed.message;
-}
-
 /** Whether an event is this import's: the runtime echoes the path as typed, the plan carries its realpath. */
 export function isImportOf(e: ProjectImportEvent, workspaceId: string, source: string, plan: ProjectPlan | null): boolean {
   return e.workspaceId === workspaceId && (e.source === source || (plan !== null && e.source === plan.source));
@@ -56,25 +50,28 @@ export function consentRequest(secrets: readonly ProjectSecret[], ticked: Readon
   };
 }
 
-/** What ticking the row does to the file. */
-export function secretOffer(s: ProjectSecret): string {
-  if (s.rewrite === undefined) return "travels as it is";
-  const as = s.rewrite.urls.length > 0 ? ` as ${s.rewrite.urls.join(", ")}` : "";
-  const without = s.rewrite.drop.length > 0 ? ` without ${s.rewrite.drop.join(", ")}` : "";
-  return `lands${as}${without}`;
-}
+const host = (url: string): string => {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+};
 
-/** Sizes in the wizard's units, one decimal from a kilobyte up. */
-export function bytesLabel(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`;
-  if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MB`;
-  return `${(n / 1024 ** 3).toFixed(1)} GB`;
+/** The row's words for its tick: cut, travels as it is, or lands bare at its hosts (the URLs whole in the title) without the dropped keys. */
+export function secretOffer(s: ProjectSecret, ticked: boolean): { short: string; full: string } {
+  if (!ticked) return { short: "cut", full: "cut" };
+  if (s.rewrite === undefined) return { short: "travels as it is", full: "travels as it is" };
+  const without = s.rewrite.drop.length > 0 ? ` without ${s.rewrite.drop.join(", ")}` : "";
+  const bare = (urls: readonly string[]): string => (urls.length > 0 ? ` bare at ${urls.join(", ")}` : "");
+  return { short: `lands${bare([...new Set(s.rewrite.urls.map(host))])}${without}`, full: `lands${bare(s.rewrite.urls)}${without}` };
 }
 
 /** The folder's own name from the path as typed. */
 export const folderName = (source: string): string => source.replace(/\/+$/, "").split("/").at(-1) ?? source;
 
+/** Where the folder landed and, as the consent box promised, which secret-shaped files were cut on the way. */
 export function landedLine(result: ProjectImportResult, source: string, workspaceName: string): string {
-  return `${folderName(source)} is at ${result.dest} on ${workspaceName}.`;
+  const cut = result.cut.length > 0 ? `; cut ${result.cut.join(", ")}` : "";
+  return `${folderName(source)} is at ${result.dest} on ${workspaceName}${cut}.`;
 }

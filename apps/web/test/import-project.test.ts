@@ -1,20 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The import dialog's pure parts: the step rows folded from project.import
 // events, which events belong to one import, the consent defaults and the
-// request they become, the secret offer wording, sizes, and the landed line.
+// request they become, the secret offer wording as the tick changes it, and
+// the landed line with what was cut.
 import { describe, expect, it } from "vitest";
 import type { ProjectImportEvent, ProjectSecret } from "@wsp/protocol";
-import {
-  IMPORT_STEPS,
-  bytesLabel,
-  consentRequest,
-  defaultConsent,
-  failedMessage,
-  isImportOf,
-  landedLine,
-  secretOffer,
-  stepRows,
-} from "../src/sidebar/importProject.js";
+import { IMPORT_STEPS, consentRequest, defaultConsent, isImportOf, landedLine, secretOffer, stepRows } from "../src/sidebar/importProject.js";
 
 const ev = (over: Partial<ProjectImportEvent>): ProjectImportEvent => ({
   type: "project.import",
@@ -55,8 +46,6 @@ describe("step rows", () => {
       ["landing", null, null, null],
       ["done", null, null, null],
     ]);
-    expect(failedMessage([ev({}), ev({ stage: "failed", message: "the machine went away", elapsedMs: 60 })])).toBe("the machine went away");
-    expect(failedMessage([ev({})])).toBeNull();
   });
 });
 
@@ -84,28 +73,25 @@ describe("consent", () => {
     expect(consentRequest([env, config], new Set([".env", ".git/config", "gone"]))).toEqual({ carry: [".env"], rewrite: [".git/config"] });
   });
 
-  it("words each offer: as it is, the bare urls, the dropped keys, or both", () => {
-    expect(secretOffer(env)).toBe("travels as it is");
-    expect(secretOffer(config)).toBe("lands as https://github.com/o/r");
-    expect(secretOffer(header)).toBe("lands without http.extraheader");
-    expect(secretOffer({ ...config, rewrite: { urls: ["https://github.com/o/r", "https://github.com/o/s"], drop: ["http.extraheader"] } })).toBe(
-      "lands as https://github.com/o/r, https://github.com/o/s without http.extraheader",
-    );
+  it("words each row by its tick: unticked is cut; ticked travels as it is, or lands bare at the host without the dropped keys", () => {
+    expect(secretOffer(env, false)).toEqual({ short: "cut", full: "cut" });
+    expect(secretOffer(env, true)).toEqual({ short: "travels as it is", full: "travels as it is" });
+    expect(secretOffer(config, false)).toEqual({ short: "cut", full: "cut" });
+    expect(secretOffer(config, true)).toEqual({ short: "lands bare at github.com", full: "lands bare at https://github.com/o/r" });
+    expect(secretOffer(header, true)).toEqual({ short: "lands without http.extraheader", full: "lands without http.extraheader" });
+    expect(secretOffer({ ...config, rewrite: { urls: ["https://github.com/o/r", "https://gitlab.com/o/s", "https://github.com/o/t"], drop: ["http.extraheader"] } }, true)).toEqual({
+      short: "lands bare at github.com, gitlab.com without http.extraheader",
+      full: "lands bare at https://github.com/o/r, https://gitlab.com/o/s, https://github.com/o/t without http.extraheader",
+    });
+    expect(secretOffer({ ...config, rewrite: { urls: ["not a url"], drop: [] } }, true).short).toBe("lands bare at not a url");
   });
 });
 
-describe("labels", () => {
-  it("sizes read in the wizard's units", () => {
-    expect(bytesLabel(0)).toBe("0 B");
-    expect(bytesLabel(1023)).toBe("1023 B");
-    expect(bytesLabel(1024)).toBe("1.0 KB");
-    expect(bytesLabel(38.2 * 1024 * 1024)).toBe("38.2 MB");
-    expect(bytesLabel(2.3 * 1024 ** 3)).toBe("2.3 GB");
-  });
-
-  it("the landed line names the folder, its path on the machine and the workspace", () => {
-    const result = { dest: "/Users/me/code/proj", files: 11, bytes: 2_900, parts: 1, cut: ["keys/id_ed25519"], rewritten: [".git/config"] };
+describe("the landed line", () => {
+  it("names the folder, its path on the machine and the workspace, then what was cut", () => {
+    const result = { dest: "/Users/me/code/proj", files: 11, bytes: 2_900, parts: 1, cut: [], rewritten: [".git/config"] };
     expect(landedLine(result, "/Users/me/code/proj", "api")).toBe("proj is at /Users/me/code/proj on api.");
     expect(landedLine(result, "/Users/me/code/proj/", "api")).toBe("proj is at /Users/me/code/proj on api.");
+    expect(landedLine({ ...result, cut: ["keys/id_ed25519", ".env"] }, "/Users/me/code/proj", "api")).toBe("proj is at /Users/me/code/proj on api; cut keys/id_ed25519, .env.");
   });
 });

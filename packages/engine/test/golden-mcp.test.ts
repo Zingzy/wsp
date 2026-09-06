@@ -291,12 +291,12 @@ describe("applyMcp", () => {
 
   it("the reason names the recipe's tool row that would have brought the command, and what became of it", async () => {
     const cases: { row: McpPlan["tools"][number]; result?: ToolResult; note: string }[] = [
-      { row: { id: "tools/go/codebase-memory-mcp", ticked: true }, result: { id: "tools/go/codebase-memory-mcp", label: "codebase-memory-mcp", outcome: "skipped", note: "1803 MB free, keeping 2048 MB free" }, note: "command not on the machine; tools/go/codebase-memory-mcp was skipped (1803 MB free, keeping 2048 MB free)" },
+      { row: { id: "tools/go/codebase-memory-mcp", ticked: true }, result: { id: "tools/go/codebase-memory-mcp", label: "codebase-memory-mcp", outcome: "skipped", note: "1.8 GB free, keeping 2.0 GB free" }, note: "command not on the machine; tools/go/codebase-memory-mcp was skipped (1.8 GB free, keeping 2.0 GB free)" },
       { row: { id: "tools/go/codebase-memory-mcp", ticked: true }, result: { id: "tools/go/codebase-memory-mcp", label: "codebase-memory-mcp", outcome: "failed", note: "exit 1: go: module not found" }, note: "command not on the machine; tools/go/codebase-memory-mcp failed (exit 1: go: module not found)" },
       { row: { id: "tools/brew/codebase-memory-mcp", ticked: false, reason: "no Linux bottle" }, note: "command not on the machine; tools/brew/codebase-memory-mcp was not ticked (no Linux bottle)" },
       { row: { id: "tools/cargo/codebase-memory-mcp", ticked: false }, note: "command not on the machine; tools/cargo/codebase-memory-mcp was not ticked" },
       { row: { id: "tools/npm/codebase-memory-mcp", ticked: true }, note: "command not on the machine; tools/npm/codebase-memory-mcp was ticked, but nothing by that name is on PATH" },
-      { row: { id: "tools/go/other-bin", ticked: true }, result: { id: "tools/go/other-bin", label: "other-bin", outcome: "skipped", note: "1803 MB free, keeping 2048 MB free" }, note: "command not on the machine" },
+      { row: { id: "tools/go/other-bin", ticked: true }, result: { id: "tools/go/other-bin", label: "other-bin", outcome: "skipped", note: "1.8 GB free, keeping 2.0 GB free" }, note: "command not on the machine" },
     ];
     for (const c of cases) {
       const { root, machine } = guest(["npx"]);

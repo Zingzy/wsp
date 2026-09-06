@@ -5,9 +5,11 @@
 // events fill a fixed set of step rows. The desktop shell offers the system
 // picker; a browser tab has the path input alone and Enter reads it. The path
 // shows as the person picked it; the plan speaks in realpaths, so the
-// destination and the events are matched on that.
+// destination and the events are matched on that. A consent is for the plan
+// the person read: editing the path drops the plan and its ticks until the
+// folder is read again.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import type { ProjectImportEvent, ProjectImportResult, ProjectPlan, ProjectSecret, WorkspaceView } from "@wsp/protocol";
+import { fmtBytes, type ProjectImportEvent, type ProjectImportResult, type ProjectPlan, type ProjectSecret, type WorkspaceView } from "@wsp/protocol";
 import { durationLabel } from "../components/machine/format.js";
 import { Button } from "../components/ui/button.js";
 import { Checkbox } from "../components/ui/checkbox.js";
@@ -18,7 +20,6 @@ import { cn, errorText } from "../lib/utils.js";
 import { RequestError, type ProtocolEvent } from "../protocol/client.js";
 import { useProtocolEvents, useStore } from "../protocol/store.js";
 import {
-  bytesLabel,
   consentRequest,
   defaultConsent,
   isImportOf,
@@ -42,11 +43,20 @@ interface Sent {
   readonly plan: ProjectPlan | null;
 }
 
+/** The plan and the path, as typed, it was read for. */
+interface Planned {
+  readonly folder: string;
+  readonly plan: ProjectPlan;
+}
+
+const IMPORTING = "Importing. This stays open until it lands; closing it would not stop the import.";
+
 export function ImportProjectDialog({ workspace, initialSource, onClose }: { workspace: WorkspaceView; initialSource?: string; onClose: () => void }) {
   const api = useStore(s => s.api);
   const bridge = typeof window === "undefined" ? undefined : window.wsp?.pickFolder;
   const [source, setSource] = useState(initialSource ?? "");
-  const [plan, setPlan] = useState<ProjectPlan | null>(null);
+  const [planned, setPlanned] = useState<Planned | null>(null);
+  const plan = planned?.plan ?? null;
   const [reading, setReading] = useState(false);
   const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set());
   const [events, setEvents] = useState<ProjectImportEvent[]>([]);
@@ -69,13 +79,13 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
       if (folder === "" || api?.planProject === undefined) return;
       setReading(true);
       setRefusal(null);
-      setPlan(null);
+      setPlanned(null);
       setEvents([]);
       setResult(null);
       setPhase("idle");
       try {
         const next = await api.planProject(folder);
-        setPlan(next);
+        setPlanned({ folder, plan: next });
         setTicked(defaultConsent(next.secrets));
       } catch (e) {
         setRefusal({ message: errorText(e), exists: false });
@@ -115,6 +125,15 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
     }
   };
 
+  const edit = (next: string): void => {
+    setSource(next);
+    if (planned !== null && next.trim() !== planned.folder) {
+      setPlanned(null);
+      setTicked(new Set());
+      setRefusal(null);
+    }
+  };
+
   const toggle = (path: string, on: boolean): void => {
     setTicked(prev => {
       const next = new Set(prev);
@@ -126,7 +145,7 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
 
   const busy = reading || phase === "importing";
   const primary = phase === "done" ? "Done" : refusal?.exists ? "Replace and import" : "Import";
-  const status = refusal !== null ? refusal.message : result !== null ? landedLine(result, sent.current.source, workspace.name) : reading ? "Reading the folder." : "";
+  const status = refusal !== null ? refusal.message : result !== null ? landedLine(result, sent.current.source, workspace.name) : reading ? "Reading the folder." : phase === "importing" ? IMPORTING : "";
 
   return (
     <Dialog open onOpenChange={open => { if (!open && phase !== "importing") onClose(); }}>
@@ -152,7 +171,7 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
                   placeholder="/Users/you/code/project"
                   value={source}
                   disabled={busy}
-                  onChange={e => setSource(e.target.value)}
+                  onChange={e => edit(e.target.value)}
                   onKeyDown={e => {
                     if (e.key === "Enter") {
                       e.preventDefault();
@@ -216,7 +235,7 @@ function Summary({ plan }: { plan: ProjectPlan | null }) {
         {plan === null ? "" : plan.repo ? "git, .git travels whole" : "none"}
       </Row>
       <Row label="Files" k="files">
-        {plan === null ? "" : `${count(plan.files, "file")} · ${bytesLabel(plan.bytes)}`}
+        {plan === null ? "" : `${count(plan.files, "file")} · ${fmtBytes(plan.bytes)}`}
       </Row>
       <Row label="Caches left behind" k="caches">
         {plan === null ? "" : plan.excluded.length === 0 ? "none" : plan.excluded.join(", ")}
@@ -236,18 +255,22 @@ function Secrets({ secrets, ticked, disabled, onToggle }: { secrets: readonly Pr
     <section data-k="secrets" className="flex flex-col gap-1 rounded-md border border-warning/32 bg-warning-surface px-2.5 py-2">
       <p className="font-mono text-[11px] text-warning-foreground">{count(secrets.length, "secret-shaped file")}</p>
       <ul className="flex flex-col">
-        {secrets.map(s => (
-          <li key={s.path} className="flex h-7 items-center gap-2 text-xs">
-            <Checkbox checked={ticked.has(s.path)} disabled={disabled} aria-label={s.path} onCheckedChange={on => onToggle(s.path, on)} />
-            <span className="max-w-[45%] shrink-0 truncate font-mono text-foreground" title={s.path}>
-              {s.path}
-            </span>
-            <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">{`${s.signals.join(", ")} · ${bytesLabel(s.bytes)}`}</span>
-            <span className="ml-auto min-w-0 truncate text-[11px] text-muted-foreground" title={secretOffer(s)}>
-              {secretOffer(s)}
-            </span>
-          </li>
-        ))}
+        {secrets.map(s => {
+          const on = ticked.has(s.path);
+          const offer = secretOffer(s, on);
+          return (
+            <li key={s.path} className="flex h-7 items-center gap-2 text-xs">
+              <Checkbox checked={on} disabled={disabled} aria-label={s.path} onCheckedChange={next => onToggle(s.path, next)} />
+              <span className="max-w-[45%] shrink-0 truncate font-mono text-foreground" title={s.path}>
+                {s.path}
+              </span>
+              <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">{`${s.signals.join(", ")} · ${fmtBytes(s.bytes)}`}</span>
+              <span data-k="offer" className="ml-auto min-w-0 truncate text-[11px] text-muted-foreground" title={offer.full}>
+                {offer.short}
+              </span>
+            </li>
+          );
+        })}
       </ul>
       <p className="text-[11px] text-muted-foreground">Ticked files travel; a ticked rewrite lands without its credentials; the rest is cut and named.</p>
     </section>
@@ -259,7 +282,7 @@ function Steps({ rows }: { rows: readonly StepRow[] }) {
     <ol aria-label="Import steps" className="divide-y divide-border/40 rounded-md border border-border/60 px-2.5">
       {rows.map(r => (
         <li key={r.stage} data-step={r.stage} className="flex h-7 items-center gap-3 text-xs">
-          <span className={cn("w-[4.5rem] shrink-0 font-mono text-[11px] uppercase tracking-wider", r.message === null ? "text-muted-foreground/50" : "text-muted-foreground")}>{r.stage}</span>
+          <span data-k="step-label" className={cn("w-[4.5rem] shrink-0 font-mono text-[11px] uppercase tracking-wider", r.message === null ? "text-muted-foreground" : "text-foreground")}>{r.stage}</span>
           <span className="min-w-0 flex-1 truncate text-foreground" title={r.message ?? undefined}>
             {r.message ?? ""}
           </span>
