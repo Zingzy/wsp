@@ -1276,6 +1276,10 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     memMb: z.number().optional(),
   }),
   z.object({ id: reqId, op: z.literal("workspaces.delete"), workspaceId: z.string() }),
+  /** Drops a workspace whose machine the provider no longer has: the record, its transcripts and its sessions leave the
+   * store, workspace.deleted follows, and nothing is asked of the provider. Refused with the reason (kind "conflict")
+   * while the machine still exists: pause it or delete it at the provider first. */
+  z.object({ id: reqId, op: z.literal("workspaces.forget"), workspaceId: z.string() }),
   /** Snapshots the workspace's disk as a project golden and replies with { projectGolden }. Refused when the workspace
    * is not running, holds no project, or its machine is not first-life (kind "notFirstLife"). The guest freezes for
    * about three seconds and keeps its first life. */
@@ -1531,6 +1535,6 @@ export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { goneRefusal, needsRebuild, sendRefusal, workspaceState, workspaceWord, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
-export { fmtBytes, fmtCost, fmtDuration, fmtMemGb, notifyLine, titleLine, turnCutLine, type DurationStyle, type TurnCutRule } from "./format.js";
+export { fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, notifyLine, titleLine, turnCutLine, type DurationStyle, type TurnCutRule } from "./format.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { shellQuote } from "./shell-quote.js";

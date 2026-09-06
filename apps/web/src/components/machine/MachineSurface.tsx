@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The machine surface of the right panel: facts, live utilisation, spend,
-// lineage with rollback, pause, wake, upgrade and rebuild for one workspace's
-// machine.
+// lineage with rollback, pause, wake, upgrade, rebuild and forget for one
+// workspace's machine.
 import { CopyIcon } from "lucide-react";
 import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
-import { needsRebuild, type GoldenMissingTool, type GoldenVersion, type ProjectGolden, type SnapshotLineage, type SysSample, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { foldThreads, needsRebuild, type GoldenMissingTool, type GoldenVersion, type ProjectGolden, type SnapshotLineage, type SysSample, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { provideDaemonUpdate, useDaemonUpdate, useDaemonVersion } from "../../files/wire.js";
 import { cn, errorText } from "../../lib/utils.js";
 import { daemonBehindLine } from "../../machine/daemon.js";
@@ -21,8 +21,9 @@ import {
   AlertDialogTitle,
 } from "../ui/alert-dialog.js";
 import { Badge } from "../ui/badge.js";
-import { Button } from "../ui/button.js";
+import { Button, WARN_BUTTON } from "../ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty.js";
+import { ForgetWorkspaceDialog } from "../ForgetWorkspaceDialog.js";
 import { ScrollArea } from "../ui/scroll-area.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip.js";
 import {
@@ -217,8 +218,6 @@ function useClock(ticking: boolean): number {
   }, [ticking]);
   return now;
 }
-
-const WARN_BUTTON = "border-warning/50 text-warning-foreground [:hover,[data-pressed]]:border-warning [:hover,[data-pressed]]:bg-warning/8";
 
 function Rebuild({ workspace }: { workspace: WorkspaceView }) {
   const api = useStore(s => s.api);
@@ -698,8 +697,10 @@ function MissingTools({ tools }: { tools: GoldenMissingTool[] }) {
 function Actions({ workspace, status, upgrade }: { workspace: WorkspaceView; status: WorkspaceStatus | null; upgrade: Upgrade }) {
   const toggle = useStore(s => s.toggle);
   const capabilities = useCapabilities();
+  const sessions = useStore(s => s.sessions[workspace.id]);
   const [open, setOpen] = useState(false);
   const [picked, setPicked] = useState<WorkspaceSize | null>(null);
+  const [forgetting, setForgetting] = useState(false);
   const running = workspace.phase === "running";
   const waking = workspace.phase === "waking";
   const pausing = workspace.phase === "pausing";
@@ -723,7 +724,18 @@ function Actions({ workspace, status, upgrade }: { workspace: WorkspaceView; sta
   return (
     <footer className="flex flex-col gap-2 border-t border-border/60 p-3">
       <div className="flex gap-2">
-        {!gone && (
+        {gone ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className={cn("flex-1", WARN_BUTTON)}
+            aria-label={`forget ${workspace.name}`}
+            title="The machine is gone; drop the workspace from this computer"
+            onClick={() => setForgetting(true)}
+          >
+            Forget
+          </Button>
+        ) : (
           <Button
             variant="outline"
             size="sm"
@@ -789,6 +801,7 @@ function Actions({ workspace, status, upgrade }: { workspace: WorkspaceView; sta
           </div>
         </div>
       )}
+      {gone && <ForgetWorkspaceDialog workspace={workspace} threads={foldThreads(sessions ?? []).length} open={forgetting} onOpenChange={setForgetting} />}
       <p className="min-h-4 text-[11px] text-muted-foreground" role="status">
         {upgrade.phase.kind === "resizing" && "Resizing…"}
         {upgrade.phase.kind === "settling" && "Resized."}

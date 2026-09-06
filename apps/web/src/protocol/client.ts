@@ -250,6 +250,9 @@ export interface Api {
   upgrade(id: string, size: WorkspaceSizeSpec): Promise<WorkspaceView>;
   /** Replaces a zombie's machine with a fresh golden fork carrying the vault; id and name stay. Optional so fixtures without a zombie need not fake it. */
   rebuild?(id: string): Promise<WorkspaceView>;
+  /** Drops a workspace whose machine is gone from the host's store; the row leaves on workspace.deleted. The host refuses
+   * while the machine exists. Optional so fixtures without a gone machine need not fake it. */
+  forget?(id: string): Promise<void>;
   /** Redeploys the daemon on the workspace's machine, replacing the one there; the link redials by itself. Optional so
    * fixtures with a current daemon need not fake it; the machine tab says so when a client lacks it. */
   updateDaemon?(id: string): Promise<void>;
@@ -383,6 +386,7 @@ export function makeApi(c: ProtocolClient): Api {
     upgrade: async (id, size) =>
       (await c.request<{ workspace: WorkspaceView }>("workspaces.upgrade", { workspaceId: id, ...size })).workspace,
     rebuild: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.rebuild", { workspaceId: id })).workspace,
+    forget: async id => void (await c.request("workspaces.forget", { workspaceId: id })),
     updateDaemon: async id => void (await c.request("workspaces.updateDaemon", { workspaceId: id })),
     // Parsed, not trusted: a reply without the list must not become the list.
     listForwards: async () => PortForward.array().parse((await c.request<{ forwards?: unknown }>("forwards.list")).forwards),
