@@ -1,13 +1,13 @@
 import { execFile, execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { gzipSync } from "node:zlib";
-import { UPLOAD_PART_BYTES, exportPaths, importInto, tarOf } from "../src/vault.js";
+import { UPLOAD_PART_BYTES, exportPaths, fitsTar, importInto, landBundle, tarOf } from "../src/vault.js";
 import type { ExecResult, Machine } from "../src/machine.js";
 
 const TAR_BYTES = Buffer.from("fake-tgz-bytes-" + "x".repeat(64));
@@ -354,6 +354,104 @@ describe("vault import in parts", () => {
   });
 });
 
+describe("landBundle", () => {
+  const dirs: string[] = [];
+  const guestFiles: string[] = [];
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+    for (const p of guestFiles.splice(0)) rmSync(p, { force: true });
+  });
+
+  /** This computer stands in for the guest, as in the parts tests: uploads land where the URL says and bash runs the scripts. */
+  async function guest() {
+    const puts: string[] = [];
+    const server = createServer((req, res) => {
+      const path = new URL(req.url!, "http://x").searchParams.get("path")!;
+      const chunks: Buffer[] = [];
+      req.on("data", c => chunks.push(c as Buffer));
+      req.on("end", () => {
+        puts.push(path);
+        guestFiles.push(path);
+        writeFileSync(path, Buffer.concat(chunks));
+        res.writeHead(200).end();
+      });
+    });
+    await new Promise<void>(r => server.listen(0, "127.0.0.1", r));
+    server.unref();
+    const port = (server.address() as AddressInfo).port;
+    const machine: Machine = {
+      id: "mv", kind: "sandbox", streamUrl: undefined,
+      exec: cmd =>
+        new Promise<ExecResult>(resolve => {
+          execFile("bash", ["-c", cmd], (err, stdout, stderr) => {
+            resolve({ exitCode: err === null ? 0 : ((err as { code?: number }).code ?? 1), stdout, stderr });
+          });
+        }),
+      run: script => machine.exec(script),
+      snapshot: async () => "snap", pause: async () => {}, resume: async () => {},
+      kill: async () => {}, state: async () => "running" as const,
+      downloadUrl: async p => `http://127.0.0.1:${port}/download?path=${encodeURIComponent(p)}`,
+      uploadUrl: async p => `http://127.0.0.1:${port}/upload?path=${encodeURIComponent(p)}`,
+    };
+    return { machine, puts, close: () => server.close() };
+  }
+
+  const binary = Buffer.concat([Buffer.from("#!/bin/sh\necho hi\n"), randomBytes(3000), Buffer.from([0, 0xff, 0x0a])]);
+  const bundle = () =>
+    tarOf([
+      { path: "src", mode: 0o755, dir: true },
+      { path: "src/run.sh", mode: 0o755, content: binary },
+      { path: "src/plain.txt", mode: 0o644, content: "plain\n" },
+    ]);
+
+  it("lands the archive at the path, parents made, with the bytes, the exec bit and the stages in order, and leaves no staging directory", async () => {
+    const g = await guest();
+    const root = mkdtempSync(join(tmpdir(), "wsp-land-"));
+    dirs.push(root);
+    const dest = join(root, "work", "proj");
+    const stages: string[] = [];
+    try {
+      const out = await landBundle(g.machine, bundle(), dest, { onPart: () => stages.push("part"), onLanding: () => stages.push("landing") });
+      expect(out.parts).toBe(1);
+      expect(stages).toEqual(["part", "landing"]);
+      expect(readFileSync(join(dest, "src/run.sh")).equals(binary)).toBe(true);
+      expect(statSync(join(dest, "src/run.sh")).mode & 0o777).toBe(0o755);
+      expect(readFileSync(join(dest, "src/plain.txt"), "utf8")).toBe("plain\n");
+      expect(readdirSync(join(root, "work"))).toEqual(["proj"]);
+      for (const p of g.puts) expect(existsSync(p)).toBe(false);
+    } finally {
+      g.close();
+    }
+  });
+
+  it("refuses an existing destination with kind exists before any byte goes up, and replaces it when told to", async () => {
+    const g = await guest();
+    const root = mkdtempSync(join(tmpdir(), "wsp-land-"));
+    dirs.push(root);
+    const dest = join(root, "proj");
+    mkdirSync(dest);
+    writeFileSync(join(dest, "old.txt"), "old\n");
+    try {
+      await expect(landBundle(g.machine, bundle(), dest)).rejects.toMatchObject({ kind: "exists", message: expect.stringContaining("import with replace") });
+      expect(g.puts).toEqual([]);
+      expect(readFileSync(join(dest, "old.txt"), "utf8")).toBe("old\n");
+      await landBundle(g.machine, bundle(), dest, { replace: true });
+      expect(existsSync(join(dest, "old.txt"))).toBe(false);
+      expect(readFileSync(join(dest, "src/plain.txt"), "utf8")).toBe("plain\n");
+      expect(readdirSync(root)).toEqual(["proj"]);
+    } finally {
+      g.close();
+    }
+  });
+
+  it("refuses a relative destination and the root", async () => {
+    const { machine } = vaultStub();
+    await expect(landBundle(machine, bundle(), "work/proj")).rejects.toThrow(/absolute path/);
+    await expect(landBundle(machine, bundle(), "/")).rejects.toThrow(/absolute path/);
+    await expect(landBundle(machine, bundle(), "//")).rejects.toThrow(/absolute path/);
+  });
+});
+
 describe("tarOf", () => {
   const dirs: string[] = [];
   afterEach(() => {
@@ -386,5 +484,25 @@ describe("tarOf", () => {
 
   it("refuses a path a ustar header cannot hold", () => {
     expect(() => tarOf([{ path: `/${"x".repeat(120)}`, mode: 0o644, content: "" }])).toThrow(/ustar/);
+    expect(fitsTar(`/${"x".repeat(120)}`)).toBe(false);
+    expect(fitsTar("a/b.txt")).toBe(true);
+    expect(fitsTar("a/link", "t".repeat(101))).toBe(false);
+  });
+
+  it("carries bytes as they are, a directory of its own, a symlink as a link and the exec bit", () => {
+    const tail = Buffer.concat([Buffer.from("text then binary\n"), randomBytes(1500), Buffer.from([0x00, 0xff, 0xfe])]);
+    const tgz = tarOf([
+      { path: "proj", mode: 0o750, dir: true },
+      { path: "proj/empty", mode: 0o755, dir: true },
+      { path: "proj/bin/run", mode: 0o755, content: tail },
+      { path: "proj/link", target: "bin/run" },
+    ]);
+    const dir = extract(tgz);
+    expect(readFileSync(join(dir, "proj/bin/run")).equals(tail)).toBe(true);
+    expect(statSync(join(dir, "proj/bin/run")).mode & 0o777).toBe(0o755);
+    expect(statSync(join(dir, "proj/empty")).isDirectory()).toBe(true);
+    expect(statSync(join(dir, "proj/empty")).mode & 0o777).toBe(0o755);
+    expect(lstatSync(join(dir, "proj/link")).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(join(dir, "proj/link"))).toBe("bin/run");
   });
 });
