@@ -75,6 +75,12 @@ export function forgetNotice(threads: number): string {
   return `Its record and ${fmtThreads(threads)} leave this computer; the machine is already gone.`;
 }
 
+/** What deleting a workspace takes, the one sentence every client's confirmation shows: the machine goes at the
+ * provider, the record and the threads go from here. */
+export function deleteNotice(threads: number): string {
+  return `Its machine is deleted at the provider; its record and ${fmtThreads(threads)} leave this computer.`;
+}
+
 /** A thread's title as every list shows it: the prompt's first non-empty line with its whitespace collapsed, so a
  * multi-paragraph brief is one row in the CLI's table and one line in the sidebar. */
 export function titleLine(text: string): string {

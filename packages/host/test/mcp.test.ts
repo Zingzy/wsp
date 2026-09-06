@@ -129,12 +129,13 @@ describe("the MCP server over the host", () => {
   it("offers the verbs as tools, each described, and none for import until it exists", async () => {
     const c = await connect();
     const { tools } = await c.listTools();
-    expect(tools.map(t => t.name).sort()).toEqual(["exec", "export", "forget", "fork", "new", "pause", "send", "snapshot", "stop", "thread_new", "threads", "wake", "workspaces"]);
+    expect(tools.map(t => t.name).sort()).toEqual(["delete", "exec", "export", "forget", "fork", "new", "pause", "send", "snapshot", "stop", "thread_new", "threads", "wake", "workspaces"]);
     for (const t of tools) expect(t.description, t.name).toMatch(/\S/);
     expect(Object.keys((tools.find(t => t.name === "new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["from", "name"]);
     expect(Object.keys((tools.find(t => t.name === "thread_new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "model", "notify", "task", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "fork")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "model", "name", "notify", "task", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "send")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "effort", "message", "model", "thread"]);
+    expect(Object.keys((tools.find(t => t.name === "delete")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["confirm", "workspace"]);
     expect(c.getServerVersion()?.name).toBe("wsp");
     expect(c.getInstructions()).toBe(instructionsOf(WSP_SKILL));
     expect(c.getInstructions()).toContain("thread_new");
@@ -280,6 +281,33 @@ describe("the MCP server over the host", () => {
     expect(forgot.text).toBe(`forgot alpha ${alpha!.id}: its record and 0 threads are gone from this computer`);
     expect(await rt.workspaces.list()).toEqual([]);
     expect(await store.get("workspaces", alpha!.id)).toBeUndefined();
+  });
+
+  it("delete without confirm deletes nothing and answers with what would go; with confirm it kills the machine and drops the record and threads", async () => {
+    await call("new", { name: "alpha" });
+    const [alpha] = await rt.workspaces.list();
+    await call("thread_new", { workspace: "alpha", task: "build it" });
+
+    const asked = await call("delete", { workspace: "alpha" });
+    expect(asked.isError).toBe(true);
+    expect(asked.text).toBe("alpha kept. Its machine is deleted at the provider; its record and 1 thread leave this computer. Ask the person, then call delete again with confirm true.");
+    expect(asked.structured).toEqual({ workspaceId: alpha!.id, name: "alpha", machineId: alpha!.machineId, threads: 1 });
+    expect(backend.machines[0]!.killed).toBe(false);
+    expect(await rt.workspaces.list()).toHaveLength(1);
+
+    const refused = await call("delete", { workspace: "alpha", confirm: false });
+    expect(refused.isError).toBe(true);
+    expect(backend.machines[0]!.killed).toBe(false);
+
+    const deleted = await call("delete", { workspace: "alpha", confirm: true });
+    expect(deleted.isError).toBe(false);
+    expect(deleted.structured).toEqual({ workspaceId: alpha!.id, name: "alpha", machineId: alpha!.machineId, threads: 1 });
+    expect(deleted.text).toBe(`deleted alpha ${alpha!.id}: machine ${alpha!.machineId} is gone at the provider, and its record and 1 thread are gone from this computer`);
+    expect(backend.machines[0]!.killed).toBe(true);
+    expect(await rt.workspaces.list()).toEqual([]);
+    expect(await store.get("workspaces", alpha!.id)).toBeUndefined();
+    const missing = await call("delete", { workspace: "nope", confirm: true });
+    expect(missing).toEqual({ text: "no workspace nope", structured: undefined, isError: true });
   });
 
   it("thread_new opens a thread under the named agent, started by the local agent, and returns the reply as the result", async () => {
