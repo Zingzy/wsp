@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The MCP stage against a guest that is a temp directory: the merge script
-// runs under this machine's node, the command checks and the uv install are
-// canned, so the files it writes are the proof.
+// runs under this machine's node; the command checks, the uv install and the df
+// reading are canned, so the files it writes are the proof.
 import { execFile } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -12,11 +12,12 @@ import { applyMcp, mcpPlanFor, mcpTally, type McpPlan, type McpResult } from "..
 import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, type McpFormat, type McpGuestEditor } from "@wsp/catalog";
 import { MCP_ID_PREFIX } from "@wsp/protocol";
 import type { RecipeEntry } from "../src/golden-import.js";
-import type { ToolResult } from "../src/golden-tools.js";
+import { FREE_KB_CMD, type ToolResult } from "../src/golden-tools.js";
 import type { ExecResult, Machine } from "../src/machine.js";
 
 const execFileAsync = promisify(execFile);
 const HOME = "/Users/dev";
+const FREE_KB = String(3000 * 1024);
 
 const row = (id: string, over: Partial<RecipeEntry> = {}): RecipeEntry => ({ rung: "agents", id, label: id.slice(id.lastIndexOf("/") + 1), paths: [], bytes: 0, default: "bring", bring: true, ...over });
 
@@ -73,7 +74,7 @@ afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
-/** A guest whose files are a temp directory and whose exec is this machine's bash, except the PATH checks and the uv install, which are canned. */
+/** A guest whose files are a temp directory and whose exec is this machine's bash, except the PATH checks, the uv install and the df reading, which are canned. */
 function guest(present: string[], canned: Record<string, ExecResult> = {}) {
   const root = mkdtempSync(join(tmpdir(), "wsp-mcp-guest-"));
   dirs.push(root);
@@ -82,6 +83,7 @@ function guest(present: string[], canned: Record<string, ExecResult> = {}) {
   const exec = async (cmd: string): Promise<ExecResult> => {
     cmds.push(cmd);
     if (cmd.includes("astral-sh/uv/releases")) return canned.uv ?? { exitCode: 0, stdout: "", stderr: "" };
+    if (cmd === FREE_KB_CMD) return { exitCode: 0, stdout: `${FREE_KB}\n`, stderr: "" };
     if (cmd.includes("command -v")) {
       const asked = [...cmd.matchAll(/command -v '([^']*)'/g)].map(m => m[1]!);
       return { exitCode: 0, stdout: asked.map(c => `${present.includes(c) ? "ok" : "no"} ${c}`).join("\n"), stderr: "" };
@@ -243,7 +245,7 @@ describe("applyMcp", () => {
     expect(stages).toEqual([
       "installing-mcp:Claude Code 5, Codex 2, Gemini CLI 2, OpenCode 2",
       "installing-mcp:uv for gsc, whatsapp, grafana",
-      "installing-mcp:memory installed; github, zomato: package fetched on first use by npx; gsc, whatsapp, grafana: uv installed, package fetched on first use by uv; notes skipped (command ~/Library/Application Support/Notes/mcp is macOS-only, will not run); sentry skipped (unticked); gone skipped (path /Applications/X.app/x is macOS-only, will not run); ctx skipped (OpenCode's config is not on the machine); late skipped (OpenCode is not ticked, so its config did not travel)",
+      "installing-mcp:memory installed; github, zomato: package fetched on first use by npx; gsc, whatsapp, grafana: uv installed, package fetched on first use by uv; notes skipped (command ~/Library/Application Support/Notes/mcp is macOS-only, will not run); sentry skipped (unticked); gone skipped (path /Applications/X.app/x is macOS-only, will not run); ctx skipped (OpenCode's config is not on the machine); late skipped (OpenCode is not ticked, so its config did not travel); 2.9 GB free",
     ]);
     // Every command is looked for once on the machine's PATH; uv, found missing, is installed by its checksummed release.
     const checks = cmds.filter(c => c.includes("command -v '"));
@@ -275,7 +277,7 @@ describe("applyMcp", () => {
       { id: `${MCP_ID_PREFIX}gemini/memory`, agent: "Gemini CLI", name: "memory", outcome: "skipped", note: "command not on the machine" },
     ]);
     expect(geminiServers(root)).toEqual(["gone"]);
-    expect(stages.at(-1)).toBe("vanished skipped (not in the config that travelled); memory skipped (command not on the machine)");
+    expect(stages.at(-1)).toBe("vanished skipped (not in the config that travelled); memory skipped (command not on the machine); 2.9 GB free");
   });
 
   it("a server whose command is on the machine is written and installed", async () => {
