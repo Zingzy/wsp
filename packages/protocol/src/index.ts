@@ -18,6 +18,8 @@ export const HTTP_URL_MAX = 8192;
  * Too Large above 16 KiB (a 17,176 byte launch body was refused on 2026-09-06). Anything larger goes to the guest in
  * more than one exec or through an upload. */
 export const EXEC_BODY_MAX = 16 * 1024;
+/** How much of a detached command's output one poll exec reads; a full read is followed by another at once. */
+export const EXEC_CHUNK_BYTES = 262_144;
 export function isHttpUrl(url: unknown): url is string {
   if (typeof url !== "string" || url.length > HTTP_URL_MAX || !HTTP_URL_RE.test(url)) return false;
   try {
