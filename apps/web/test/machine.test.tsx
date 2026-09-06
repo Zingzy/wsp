@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -13,8 +13,8 @@ import type {
   WorkspaceStatus,
   WorkspaceView,
 } from "@wsp/protocol";
-import { DAEMON_HELLO_WAIT_MS, MachineSurface } from "../src/components/machine/MachineSurface.js";
-import { provideDaemonHello } from "../src/files/wire.js";
+import { MachineSurface } from "../src/components/machine/MachineSurface.js";
+import { DAEMON_HELLO_WAIT_MS, provideDaemonHello, provideDaemonUpdate } from "../src/files/wire.js";
 import { getLive, resetLive } from "../src/machine/live.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -104,6 +104,7 @@ function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS,
 beforeEach(() => {
   resetLive();
   provideDaemonHello("ws_a", null);
+  provideDaemonUpdate("ws_a", null);
   document.documentElement.classList.add("dark");
   useStore.setState({
     api: null,
@@ -788,6 +789,48 @@ describe("daemon version", () => {
     expect(updateButton().textContent).toBe("update");
     expect(updateButton().disabled).toBe(false);
     expect(updateLine()!.querySelector("span")!.textContent).toBe("daemon v1 predates Live and Processes");
+    expect(updateLine()!.querySelector("span")!.getAttribute("title")).toBe("daemon v1 predates Live and Processes");
+  });
+
+  it("leaving the machine tab mid-update and coming back finds the keycap still busy: a click runs nothing more, and the current hello removes the line", async () => {
+    const api = await mount([view("ws_a", "api")]);
+    let settle!: () => void;
+    const updateDaemon = vi.fn((_id: string) => new Promise<void>(resolve => (settle = resolve)));
+    (api as Api).updateDaemon = updateDaemon;
+    act(() => provideDaemonHello("ws_a", { root: "/root", version: 1 }));
+    fireEvent.click(updateButton());
+    await act(async () => settle());
+    expect(updateButton().textContent).toBe("updating");
+    // The right panel renders one surface at a time: the processes pane or another workspace unmounts this one.
+    cleanup();
+    render(<MachineSurface workspaceId="ws_a" />);
+    await waitFor(() => expect(updateLine()).not.toBeNull());
+    expect(updateLine()!.querySelector("span")!.textContent).toBe("daemon v1 predates Live and Processes");
+    expect(updateButton().textContent).toBe("updating");
+    expect(updateButton().disabled).toBe(true);
+    fireEvent.click(updateButton());
+    expect(updateDaemon).toHaveBeenCalledTimes(1);
+    act(() => provideDaemonHello("ws_a", { root: "/root", version: 2 }));
+    expect(updateLine()).toBeNull();
+  });
+
+  it("after a remount the bound still counts from when the runtime finished, not from the remount", async () => {
+    const api = await mount([view("ws_a", "api")]);
+    (api as Api).updateDaemon = vi.fn(async (_id: string) => {});
+    act(() => provideDaemonHello("ws_a", { root: "/root", version: 1 }));
+    vi.useFakeTimers();
+    fireEvent.click(updateButton());
+    await act(async () => {});
+    act(() => vi.advanceTimersByTime(20_000));
+    cleanup();
+    render(<MachineSurface workspaceId="ws_a" />);
+    await act(async () => {});
+    expect(updateButton().textContent).toBe("updating");
+    act(() => vi.advanceTimersByTime(DAEMON_HELLO_WAIT_MS - 20_000 - 1));
+    expect(updateButton().textContent).toBe("updating");
+    act(() => vi.advanceTimersByTime(1));
+    expect(updateButton().textContent).toBe("update");
+    expect(updateButton().disabled).toBe(false);
     expect(updateLine()!.querySelector("span")!.getAttribute("title")).toBe("daemon v1 predates Live and Processes");
   });
 
