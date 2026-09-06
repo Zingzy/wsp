@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Served by Vite to a real browser: the app shell over a fake api with three
 // workspaces (running, paused, gone) and two threads, in either theme
-// (?theme=light) and with a status toast in the footer (?toast=...), so a
-// test can measure the chrome's geometry, which jsdom cannot lay out.
+// (?theme=light), with a status toast in the footer (?toast=...) and with the
+// runtime replacing the first machine's helper (?helper=1), so a test can
+// measure the chrome's geometry, which jsdom cannot lay out.
 import { createRoot } from "react-dom/client";
-import type { SessionView, WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATING, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api } from "../../src/protocol/client";
@@ -38,7 +39,7 @@ const api: Api = {
   getWorkspace: async id => workspaces.find(w => w.id === id)!,
   createWorkspace: async () => workspaces[0]!,
   createFromGoldenHead: async () => workspaces[0]!,
-  watchStatuses: async () => workspaces.map(w => statusOf(w)),
+  watchStatuses: async () => workspaces.map(w => statusOf(w, params.get("helper") === "1" && w.id === "ws_a" ? { daemonNote: DAEMON_UPDATING } : {})),
   forget: async () => {},
   nap: async id => workspaces.find(w => w.id === id)!,
   wake: async id => workspaces.find(w => w.id === id)!,

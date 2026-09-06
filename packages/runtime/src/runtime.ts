@@ -61,6 +61,7 @@ import {
   applyMachineContext,
 } from "@wsp/engine";
 import type {
+  DaemonEvent,
   DaemonReachView,
   EventUnion,
   GoldenBaseTool,
@@ -93,7 +94,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, NOTIFY_ME, fmtBytes, fmtDuration, goneRefusal, notifyLine, sendRefusal, shellQuote, startPicks, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, notifyLine, sendRefusal, shellQuote, startPicks, workspaceState } from "@wsp/protocol";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -423,6 +424,9 @@ export interface RuntimeOptions {
   wake?: WakeOptions;
   /** The token every daemon this runtime reaches is given; minted fresh per process when absent (tests pin one). */
   daemonToken?: string;
+  /** How long a daemon gets to announce itself when an update reads the version either side of its deploy; the
+   * hello lands on connect, so a daemon that is there answers in one round trip (tests shrink it). */
+  daemonHelloTimeoutMs?: number;
 }
 
 export interface WakeOptions {
@@ -433,6 +437,8 @@ export interface WakeOptions {
 }
 
 const WAKE_PING_TIMEOUT_MS = 30_000;
+/** A daemon that is up answers the hello on connect; a machine whose daemon is gone costs this once on each side of an update. */
+const DAEMON_HELLO_TIMEOUT_MS = 5_000;
 /** The probe's fetch bound; the frame keeps loading meanwhile, so silence costs nothing but the sentence. */
 const PORT_PROBE_TIMEOUT_MS = 10_000;
 /** How the import's done line reads each agent's outcome, after the agent's name. */
@@ -591,7 +597,8 @@ export interface Runtime {
      * guest freezes for about three seconds and stays first-life. */
     snapshot(id: string): Promise<ProjectGolden>;
     /** The recipe's daemon deploy on the running machine, replacing the daemon there, then this runtime's token
-     * written again so the next reach opens it. Throws on a workspace that is not running or a runtime without the deploy. */
+     * written again so the next reach opens it. The runtime runs it by itself when a machine's daemon is older than
+     * this wsp. Throws on a workspace that is not running or a runtime without the deploy. */
     updateDaemon(id: string): Promise<void>;
     delete(id: string): Promise<void>;
     /** Drops a workspace whose machine the provider no longer has: its record, transcripts and sessions go and nothing
@@ -911,6 +918,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const { backend, store, adapters } = opts;
   const bus = eventBus();
   const pingTimeoutMs = opts.wake?.pingTimeoutMs ?? WAKE_PING_TIMEOUT_MS;
+  const daemonHelloTimeoutMs = opts.daemonHelloTimeoutMs ?? DAEMON_HELLO_TIMEOUT_MS;
   const vaultCapBytes = opts.wake?.vaultCapBytes ?? VAULT_CAP_BYTES;
   const defaultIdleWindowMs = opts.idle?.defaultWindowMs ?? DEFAULT_IDLE_WINDOW_MS;
   const hostId = opts.hostId ?? hostname();
@@ -1066,6 +1074,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return undefined;
   };
 
+  /** What the runtime is doing to a machine's daemon, by workspace: the line its row shows while an update runs and
+   * the sentence left there when one failed. Held here rather than on the record because it says what this process
+   * is doing, not what the workspace is. */
+  const daemonNotes = new Map<string, string>();
+
   const view = (r: WorkspaceRecord): WorkspaceView => ({
     id: r.id,
     name: r.name,
@@ -1077,6 +1090,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     ...(r.screen !== undefined ? { screen: r.screen } : {}),
     ...(r.project !== undefined ? { project: r.project } : {}),
     ...(r.gone !== undefined ? { gone: r.gone } : {}),
+    ...(daemonNotes.has(r.id) ? { daemonNote: daemonNotes.get(r.id)! } : {}),
   });
 
   const persist = async (r: WorkspaceRecord): Promise<void> => {
@@ -1119,9 +1133,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** A status pushed outside the poll, for a phase change the poller would show
    * late. Machine state is what the phase implies: asking the provider here
-   * would reset its idle timer for a fact the runtime already knows. */
+   * would reset its idle timer for a fact the runtime already knows. The nap
+   * countdown rides along as the poller sends it: a client replaces the whole
+   * status, so leaving it out would blank the row until the next poll. */
   const emitStatus = async (entry: LiveWorkspace, reach: ReachState, reason?: string): Promise<void> => {
     const size = entry.record.size;
+    const idleAt = entry.record.phase === "running" ? idle.idleAt(entry.record.id) : undefined;
     bus.emit({
       type: "workspace.status",
       status: {
@@ -1131,8 +1148,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         size,
         rateUsdPerHour: backend.pricing.rateUsdPerHour(size),
         ...(reason !== undefined ? { reason } : {}),
+        ...(idleAt !== undefined ? { idleAt } : {}),
       },
     });
+  };
+
+  /** The one preamble every dial this runtime makes to a machine's daemon repeats: the preview route, then this
+   * runtime's token on the guest, then the link. null when the guest holds no daemon token, which each caller reads
+   * its own way. The caller owns the link and closes it; the previewUrl guard stays with the caller, which knows
+   * what a backend without preview routes means for it. */
+  const dialDaemon = async (entry: LiveWorkspace, deadline: number, o: { onEvent?: (e: DaemonEvent) => void; heartbeatMs?: number } = {}): Promise<DaemonReach | null> => {
+    const reach = await until(entry.ws.daemonReach(), deadline, "preview route");
+    const token = await until(daemonTokenOf(entry.machine), deadline, "daemon token");
+    if (token === undefined) return null;
+    return connectDaemon({ previewUrl: reach.url, token, onEvent: o.onEvent ?? (() => {}), ...(o.heartbeatMs !== undefined ? { heartbeatMs: o.heartbeatMs } : {}) });
   };
 
   /** The daemon answering through the edge is what proves a resumed guest
@@ -1143,16 +1172,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const machine = entry.machine;
     if (!machine.previewUrl) return undefined;
     const deadline = Date.now() + pingTimeoutMs;
-    let link: DaemonReach | undefined;
+    let link: DaemonReach | null = null;
     try {
-      const reach = await until(entry.ws.daemonReach(), deadline, "preview route");
-      const token = await until(daemonTokenOf(machine), deadline, "daemon token");
-      if (token === undefined) {
+      link = await dialDaemon(entry, deadline, { heartbeatMs: pingTimeoutMs });
+      if (link === null) {
         // No daemon to ask; an exec that returns is the guest's own answer.
         await until(machine.exec("true"), deadline, "guest exec");
         return undefined;
       }
-      link = connectDaemon({ previewUrl: reach.url, token, onEvent: () => {}, heartbeatMs: pingTimeoutMs });
       await until(link.ready, deadline, "daemon link");
       await until(link.request("ping"), deadline, "daemon ping");
       return undefined;
@@ -1161,6 +1188,120 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     } finally {
       link?.close();
     }
+  };
+
+  /** The version the machine's daemon announces in its hello, null when no daemon answers within the bound: a
+   * daemon says what it is on connect and answers no op for it, so reading the version is one dial and one frame.
+   * A machine whose daemon is gone, whose backend mints no preview route or whose guest holds no token has none. */
+  const helloVersion = async (entry: LiveWorkspace): Promise<number | null> => {
+    if (!entry.machine.previewUrl) return null;
+    const deadline = Date.now() + daemonHelloTimeoutMs;
+    let link: DaemonReach | null = null;
+    try {
+      let announce: (v: number) => void = () => {};
+      const hello = new Promise<number>(done => (announce = done));
+      link = await dialDaemon(entry, deadline, { onEvent: e => (e.type === "daemon.hello" ? announce(daemonVersionOf(e)) : undefined) });
+      if (link === null) return null;
+      return await until(hello, deadline, "daemon hello");
+    } catch {
+      return null;
+    } finally {
+      link?.close();
+    }
+  };
+
+  /** The machine's row now, rather than at the next poll. A machine that stopped running is left to the poller:
+   * only it knows what that machine's reach is by then. */
+  const pushStatus = async (entry: LiveWorkspace): Promise<void> => {
+    if (entry.record.phase !== "running") return;
+    await emitStatus(entry, entry.machine.previewUrl ? "reachable" : "unsupported");
+  };
+
+  /** The line the machine's row carries while the runtime is doing something to its daemon; undefined clears it. */
+  const noteDaemon = async (entry: LiveWorkspace, note: string | undefined): Promise<void> => {
+    if (note === undefined) daemonNotes.delete(entry.record.id);
+    else daemonNotes.set(entry.record.id, note);
+    await pushStatus(entry);
+  };
+
+  /** A line for the machine's row that rides one status and no more, so the next poll shows the row's own facts
+   * again. What the row is for is the machine's rate and its nap countdown; a failure nobody here can act on must
+   * not sit on top of them for the life of the host. */
+  const flashDaemon = async (entry: LiveWorkspace, note: string): Promise<void> => {
+    daemonNotes.set(entry.record.id, note);
+    await pushStatus(entry);
+    daemonNotes.delete(entry.record.id);
+  };
+
+  /** The folders the record says this machine's daemon may browse beside its home. Derived state: the record is the
+   * one place, and the file follows it on every connect, so a project that landed before the daemon read that file
+   * is browsable without a second import. Non-fatal: an update or a turn must not fail on it. */
+  const writeDaemonRoots = async (entry: LiveWorkspace): Promise<void> => {
+    const dest = entry.record.project?.dest;
+    if (dest === undefined) return;
+    const written = await entry.machine.exec(writeDaemonRootsScript([dest]), { timeoutMs: INLINE_EXEC_MS }).catch((e: unknown) => ({ exitCode: 1, stdout: "", stderr: e instanceof Error ? e.message : String(e) }));
+    if (written.exitCode !== 0) console.warn(`browsable folders for ${entry.record.id} not written on ${entry.machine.id}: ${written.stderr.slice(-200)}`);
+  };
+
+  /** Settles once no turn is running on the workspace: at once when none is, else when the last one ends. Replacing
+   * the daemon ends the ptys under it, so the work a person or an agent started finishes first. */
+  const turnRuns = (workspaceId: string): boolean => [...sessions.values()].some(s => s.view.workspaceId === workspaceId && s.view.status === "running");
+
+  const whenNoTurnRuns = (workspaceId: string): Promise<void> => {
+    if (!turnRuns(workspaceId)) return Promise.resolve();
+    return new Promise(done => {
+      // A turn leaves running on its done or its end and on nothing else, so this wakes twice a turn rather than
+      // once per output chunk of every workspace on the bus.
+      const offs: (() => void)[] = [];
+      const check = (): void => {
+        if (turnRuns(workspaceId)) return;
+        for (const off of offs) off();
+        done();
+      };
+      offs.push(bus.on("session.done", check), bus.on("session.end", check));
+    });
+  };
+
+  /** Everything the runtime settles with a machine's daemon the moment it can reach it, and the only place that
+   * does: the folders the record says it may browse, then a daemon older than this wsp replaced with this one's,
+   * waiting out any running turn first. Nobody asks for it, and nothing about it is a person's to know: the panes
+   * that need the new ops simply work once it lands. A failure leaves the old daemon serving, says so on the row
+   * once, and puts the reason in this host's log, where the person who runs the host can read it.
+   * One run per machine at a time, so two connects at once do the work once. */
+  const daemonSyncs = new Map<string, Promise<void>>();
+  const syncDaemon = (entry: LiveWorkspace): Promise<void> => {
+    const key = entry.machine.id;
+    const held = daemonSyncs.get(key);
+    if (held !== undefined) return held;
+    const work = (async () => {
+      await writeDaemonRoots(entry);
+      const version = await helloVersion(entry);
+      if (version === null || version >= DAEMON_VERSION) return;
+      if (opts.goldenRecipe?.deployDaemon === undefined) return;
+      await whenNoTurnRuns(entry.record.id);
+      if (entry.record.phase !== "running") return;
+      await noteDaemon(entry, DAEMON_UPDATING);
+      // Marking the row awaits a push, which is several ticks wide; a turn that opened inside that window would
+      // lose its ptys to the deploy, so the wait runs again until nothing is running as the deploy starts.
+      while (turnRuns(entry.record.id)) await whenNoTurnRuns(entry.record.id);
+      try {
+        await workspaces.updateDaemon(entry.record.id);
+        await writeDaemonRoots(entry);
+        await noteDaemon(entry, undefined);
+      } catch (e) {
+        const reason = e instanceof Error ? e.message : String(e);
+        await noteDaemon(entry, undefined);
+        // A machine that napped or went under the update did not fail one: its row says what its phase says.
+        if (entry.record.phase !== "running") return;
+        console.warn(`daemon on ${entry.machine.id} (workspace ${entry.record.id}) not updated: ${reason}`);
+        await flashDaemon(entry, DAEMON_UPDATE_FAILED);
+      }
+    })();
+    daemonSyncs.set(key, work);
+    void work.catch(() => {}).then(() => {
+      if (daemonSyncs.get(key) === work) daemonSyncs.delete(key);
+    });
+    return work;
   };
 
   /** Size is always explicit: a create that names none gets the provider's own
@@ -1325,6 +1466,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     entry.record.machineId = entry.ws.machineId;
     entry.record.firstLife = entry.ws.isFirstLife;
     delete entry.record.gone;
+    void syncDaemon(entry);
   };
 
   const attach = (record: WorkspaceRecord, machine: Machine): LiveWorkspace => {
@@ -1392,6 +1534,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const drop = async (id: string): Promise<void> => {
     live.delete(id);
     transcripts.delete(id);
+    daemonNotes.delete(id);
     for (const [handleId, s] of sessions) if (s.view.workspaceId === id) sessions.delete(handleId);
     cancelFlush(id);
     await transcriptFlushes.get(id);
@@ -1611,7 +1754,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           else console.warn(`workspace ${stored.id} was left ${stored.phase} and its machine is ${atProvider} at the provider; the record hydrates ${phase}`);
           await persist(record);
         }
-        if (phase === "running") idle.touch(stored.id);
+        if (phase === "running") {
+          idle.touch(stored.id);
+          void syncDaemon(live.get(stored.id)!);
+        }
       }
       for (const raw of await store.list(TRANSCRIPTS)) {
         const t = raw as TranscriptRecord;
@@ -1725,6 +1871,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         fault = `preview route for ${entry.machine.id} not minted (${e instanceof Error ? e.message : String(e)})`;
       }
       report("daemon-answering", fault === undefined ? "Daemon answered through the edge." : "Daemon did not answer through the edge.", fault);
+      void syncDaemon(entry);
     }
     await persist(record);
     delete entry.creating;

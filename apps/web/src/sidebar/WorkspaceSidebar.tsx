@@ -62,6 +62,7 @@ import {
   threadPill,
   reachNote,
   textClassForTone,
+  workspaceMetaLine,
 } from "./workspaceRows.js";
 
 /** Which workspaces have their idle shelf shut, so a shelf is open until this workspace's own chevron shuts it. */
@@ -269,7 +270,7 @@ export function WorkspaceSidebar() {
                   const gone = project.state === "gone";
                   const rebuildAsked = rebuilding[project.id] !== undefined && rebuilding[project.id] === (project.status?.machineId ?? project.workspace.machineId);
                   const cost = costs[project.id] ?? null;
-                  const meta = [
+                  const meta = workspaceMetaLine(project.status !== null ? project.status.daemonNote : project.workspace.daemonNote, [
                     costLabel({
                       phase: project.phase,
                       rateUsdPerHour: cost?.rateUsdPerHour ?? project.status?.rateUsdPerHour ?? null,
@@ -277,9 +278,7 @@ export function WorkspaceSidebar() {
                     }),
                     idleCountdownLabel(project.status, nowMs),
                     reachNote(project.reach),
-                  ]
-                    .filter((part): part is string => part !== null)
-                    .join(" · ");
+                  ]);
                   const showThreads = !isCollapsed && active.length + settled.length > 0;
                   const collapsible = project.threads.length > 0 && !searching;
                   const actions = Number(collapsible) + Number(canImport) + Number(canExport);
@@ -308,7 +307,9 @@ export function WorkspaceSidebar() {
                             <span className={cn("shrink-0 text-[10px] font-medium", textClassForTone(project.indicator.tone))}>{project.indicator.label}</span>
                           </span>
                           {meta.length > 0 ? (
-                            <span className="truncate text-[11px] font-normal text-sidebar-muted-foreground tabular-nums">{meta}</span>
+                            <span className="truncate text-[11px] font-normal text-sidebar-muted-foreground tabular-nums" title={meta} data-workspace-meta>
+                              {meta}
+                            </span>
                           ) : null}
                         </span>
                       </SidebarMenuButton>

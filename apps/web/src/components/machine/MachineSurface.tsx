@@ -5,9 +5,7 @@
 import { CopyIcon } from "lucide-react";
 import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { foldThreads, needsRebuild, type GoldenMissingTool, type GoldenVersion, type ProjectGolden, type SnapshotLineage, type SysSample, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
-import { provideDaemonUpdate, useDaemonUpdate, useDaemonVersion } from "../../files/wire.js";
 import { cn, errorText } from "../../lib/utils.js";
-import { daemonBehindLine } from "../../machine/daemon.js";
 import { LIVE_WINDOW, useWorkspaceLive } from "../../machine/live.js";
 import { upgradeOptions, useCostSeries, useUpgrade, type Upgrade } from "../../protocol/machine.js";
 import { useCapabilities, useCost, useProtocolEvents, useStatus, useStore, useWorkspace } from "../../protocol/store.js";
@@ -25,7 +23,6 @@ import { Button, WARN_BUTTON } from "../ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty.js";
 import { ForgetWorkspaceDialog } from "../ForgetWorkspaceDialog.js";
 import { ScrollArea } from "../ui/scroll-area.js";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip.js";
 import {
   bytesOfLabel,
   diskTier,
@@ -278,15 +275,13 @@ type Stale = "napping" | "unreachable" | null;
 
 /** cpu, memory and disk from the guest, one sparkline each. A napping workspace, or a running one whose link is
  * down, keeps the last values dim under the word for it; the daemon says nothing about a machine it is not on. A
- * daemon that refused the stream puts the word unavailable in the slots, and one older than this app gets a line
- * under the rows naming what it predates, with the update. */
+ * daemon that refused the stream puts the word unavailable in the slots, and the runtime replaces a daemon too old
+ * to serve them without anyone here asking: the machine's row says so while it does. */
 function Live({ workspace }: { workspace: WorkspaceView }) {
   const live = useWorkspaceLive(workspace.id);
-  const version = useDaemonVersion(workspace.id);
   const last = live.samples[live.samples.length - 1];
   const stale: Stale = workspace.phase === "napping" || workspace.phase === "pausing" ? "napping" : live.reach === "live" ? null : "unreachable";
   const share = (m: { used: number; total: number }): number => (m.total > 0 ? (m.used / m.total) * 100 : 0);
-  const behind = workspace.phase === "running" ? daemonBehindLine(version) : null;
   return (
     <Section label="Live" aside={last !== undefined && stale === null ? `load ${last.load1.toFixed(2)}` : undefined}>
       <div className="mt-1 divide-y divide-border/40">
@@ -294,58 +289,7 @@ function Live({ workspace }: { workspace: WorkspaceView }) {
         <LiveRow label="memory" k="mem" samples={live.samples} y={s => share(s.mem)} text={s => bytesOfLabel(s.mem.used, s.mem.total)} stale={stale} unavailable={live.unavailable} />
         <LiveRow label="disk" k="disk" samples={live.samples} y={s => share(s.disk)} text={s => bytesOfLabel(s.disk.used, s.disk.total)} tier={s => diskTier(share(s.disk))} stale={stale} unavailable={live.unavailable} />
       </div>
-      {behind !== null && <DaemonUpdate workspace={workspace} line={behind} />}
     </Section>
-  );
-}
-
-/** One fixed-height line: what the machine's daemon predates, and the update as a keycap. The runtime redeploys the
- * daemon and the link redials on its own; the line leaves when the new hello names a current version. The keycap
- * stays busy until then, so a second click cannot run the deploy again while the old version is still on show. The
- * phase is the workspace's, not this mount's: the right panel unmounts the tab whenever another surface shows. */
-function DaemonUpdate({ workspace, line }: { workspace: WorkspaceView; line: string }) {
-  const api = useStore(s => s.api);
-  const busy = useDaemonUpdate(workspace.id) !== null;
-  const [note, setNote] = useState<string | null>(null);
-
-  const update = async (): Promise<void> => {
-    if (!api?.updateDaemon) {
-      setNote("This client cannot update daemons.");
-      return;
-    }
-    provideDaemonUpdate(workspace.id, "deploying");
-    setNote(null);
-    try {
-      await api.updateDaemon(workspace.id);
-      provideDaemonUpdate(workspace.id, "awaiting-hello");
-    } catch (e) {
-      setNote(errorText(e));
-      provideDaemonUpdate(workspace.id, null);
-    }
-  };
-
-  return (
-    <div className="mt-1 flex h-6 items-center justify-between gap-2 font-mono text-[11px] text-muted-foreground" data-k="daemon-update">
-      <span className="min-w-0 truncate" title={note ?? line}>
-        {note ?? line}
-      </span>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <button
-              type="button"
-              disabled={busy}
-              aria-label={`update the daemon on ${workspace.name}`}
-              onClick={() => void update()}
-              className="h-5 shrink-0 cursor-pointer rounded-sm border border-border bg-muted/40 px-1.5 text-muted-foreground hover:text-foreground disabled:cursor-default disabled:opacity-50"
-            >
-              {busy ? "updating" : "update"}
-            </button>
-          }
-        />
-        <TooltipPopup side="top">Restarts the daemon on the machine. Open terminals end, chat threads keep running.</TooltipPopup>
-      </Tooltip>
-    </div>
   );
 }
 
