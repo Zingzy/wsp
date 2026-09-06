@@ -43,6 +43,7 @@ import {
 } from "./init-recipe.js";
 import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, fmtBytes, fmtDuration, isTTY, plainLine, rowsOf, table, widthOf, wrap } from "./init-layout.js";
 import { aliasLines } from "./init-aliases.js";
+import { sourceLines } from "./init-sources.js";
 import { openRunLog, runLogPath } from "./init-log.js";
 import { secretsStage, type SecretOutcome } from "./init-secrets.js";
 import { keptBuilder, stopKeptBuilder, updateRoad } from "./init-upgrade.js";
@@ -633,13 +634,16 @@ export function selectItem(e: ManifestEntry, hintFor?: (width: number) => string
   };
 }
 
-/** Lines the shell row's detail pane gives to aliases before folding the rest into one. */
+/** Lines the shell row's detail pane gives to aliases, and to sourced files, before folding the rest into one. */
 const ALIAS_LINES = 3;
+const SOURCE_LINES = 2;
 
-/** The Shell screen's rows: each with the aliases whose tool is not coming under it, judged on the tools screen's own ticks when the person has been there, else on the defaults. */
+/** The Shell screen's rows: under each, the aliases whose tool is not coming, judged on the tools screen's own ticks
+ * when the person has been there, else on the defaults, and the files it sources that no row starting ticked carries. */
 export function shellItems(entries: readonly ManifestEntry[], all: readonly ManifestEntry[], toolTicks: ReadonlySet<string> | undefined, brew: BrewTable): SelectItem[] {
   const ticks = toolTicks ?? new Set(all.filter(e => e.rung === "tools" && initialTicks(e)).map(e => e.id));
-  return entries.map(e => selectItem(e, undefined, brew, aliasLines(e, all, ticks, brew, ALIAS_LINES)));
+  const coming = new Set(all.filter(e => initialTicks(e)).map(e => e.id));
+  return entries.map(e => selectItem(e, undefined, brew, [...aliasLines(e, all, ticks, brew, ALIAS_LINES), ...sourceLines(e, all, coming, SOURCE_LINES)]));
 }
 
 const TOOLCHAIN_ROW = "tools/homebrew-toolchain";

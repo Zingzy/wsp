@@ -761,6 +761,27 @@ describe("packPlan: rc files with secret exports", () => {
   });
 });
 
+describe("packPlan: source guard", () => {
+  it("a bare source line whose file is not in the pack, or sits outside home, is wrapped so the machine skips it; one whose file travels, a guarded line and a fish config stay as written; the mode holds", async () => {
+    const home = laptop();
+    mkdirSync(join(home, ".zsh"));
+    writeFileSync(join(home, ".zsh", "functions.zsh"), "f() { :; }\n");
+    mkdirSync(join(home, ".config", "fish"), { recursive: true });
+    writeFileSync(join(home, ".config", "fish", "config.fish"), "source ~/.config/fish/local.fish\n");
+    const rc = ['. "$HOME/.cargo/env"', "source ~/.zsh/functions.zsh", `source ${home}/.deno/env  # deno`, "[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh", "export RO_KEY=fake-ro-value", "source $ZSH/oh-my-zsh.sh", "source /opt/homebrew/opt/nvm/nvm.sh", ""].join("\n");
+    writeFileSync(join(home, ".zshrc"), rc, { mode: 0o444 });
+    const rows = [row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"] }), row({ rung: "everything", id: "everything/.zsh", paths: ["~/.zsh"] }), row({ rung: "shell", id: "shell/fish", paths: ["~/.config/fish"] })];
+    const packed = await packPlan(planFiles(rows, { home, stat: statOf, platform: "darwin" }), { secrets: new Map(), home });
+    expect(listTar(packed.tar).find(e => e.path === ".zshrc")?.mode).toMatch(/^-r--r--r--/);
+    const dir = extract(packed.tar);
+    expect(readFileSync(join(dir, ".zshrc"), "utf8")).toBe(['[ -r "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"', "source ~/.zsh/functions.zsh", `[ -r ${home}/.deno/env ] && source ${home}/.deno/env # deno`, "[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh", "source $ZSH/oh-my-zsh.sh", "[ -r /opt/homebrew/opt/nvm/nvm.sh ] && source /opt/homebrew/opt/nvm/nvm.sh", ""].join("\n"));
+    expect(readFileSync(join(dir, ".config", "fish", "config.fish"), "utf8")).toBe("source ~/.config/fish/local.fish\n");
+    expect(packed.cut).toEqual([{ path: "~/.zshrc", names: ["RO_KEY"] }]);
+    const without = await packPlan(planFiles([rows[0]!], { home, stat: statOf, platform: "darwin" }), { secrets: new Map(), home });
+    expect(readFileSync(join(extract(without.tar), ".zshrc"), "utf8")).toContain("[ -r ~/.zsh/functions.zsh ] && source ~/.zsh/functions.zsh");
+  });
+});
+
 describe("packPlan: alias guard", () => {
   const guard = { text: "# ls points at eza: not coming (unticked, tick to bring)\n_wsp_on_path 'eza' || unalias -- 'ls' 2>/dev/null\n", rc: ".zshrc" };
 

@@ -8,7 +8,7 @@ import { chmodSync, closeSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtemp
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { AGENTS, CLAUDE_SETTINGS, FISH_CONF_D, HAND_PREFIX, MANAGER_HOMES, MCP_BIN_DIRS, MCP_CONFIGS, type ManifestEntry, RC_NAMES, READ_LIMIT, isRcPath, managedRc, portableShebang, rcFiles, sourcedPaths, stripExports } from "@wsp/collect";
+import { AGENTS, CLAUDE_SETTINGS, FISH_CONF_D, HAND_PREFIX, MANAGER_HOMES, MCP_BIN_DIRS, MCP_CONFIGS, type ManifestEntry, RC_NAMES, READ_LIMIT, guardSources, isRcPath, managedRc, portableShebang, rcFiles, sourcedPaths, stripExports } from "@wsp/collect";
 import {
   agentInstallsFor,
   editorInstallsFor,
@@ -326,17 +326,20 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
       if (f.id.startsWith(HAND_PREFIX) && !f.dir) portable(target);
     }
     // Every rc file staged, by name where dotfiles live or by identity with one of the laptop's, ships as its
-    // carried copy: secret exports are set on the machine by hand, never carried in the file. The copy keeps
-    // the laptop's mode, so a read-only file is opened writable for the one write and closed again.
+    // carried copy: secret exports are set on the machine by hand, never carried in the file, and a bare source
+    // of a file under home that is not in this pack is wrapped so the machine skips it instead of printing an
+    // error. The copy keeps the laptop's mode, so a read-only file is opened writable for the one write.
     const cut: CutNames[] = [];
     const strip = (staged: string): void => {
-      const { names, carried } = stripExports(readFileSync(staged, "utf8"));
-      if (names.length === 0) return;
+      const text = readFileSync(staged, "utf8");
+      const { names, carried } = stripExports(text);
+      const guarded = staged.endsWith(".fish") ? carried : guardSources(carried, opts.home, rel => existsSync(join(stage, rel)));
+      if (names.length > 0) cut.push({ path: `~/${relative(stage, staged)}`, names });
+      if (guarded === text) return;
       const mode = statSync(staged).mode & 0o7777;
       chmodSync(staged, 0o600);
-      writeFileSync(staged, carried);
+      writeFileSync(staged, guarded);
       chmodSync(staged, mode);
-      cut.push({ path: `~/${relative(stage, staged)}`, names });
     };
     const walk = (dir: string): void => {
       for (const name of readdirSync(dir)) {
