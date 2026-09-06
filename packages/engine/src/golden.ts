@@ -754,8 +754,8 @@ export function nextSmoke(previous: string, removed: readonly string[], added: s
 /** What an updated image is missing: the previous version's missing tools the delta neither removed nor planned again,
  * then what this delta's tools stage skipped or failed. */
 export function nextMissing(previous: readonly GoldenMissingTool[], delta: GoldenDelta, fresh: readonly GoldenMissingTool[]): GoldenMissingTool[] {
-  const touched = new Set([...delta.removals.map(r => r.label), ...delta.import.tools.map(t => t.label), ...(delta.import.skippedTools ?? []).map(t => t.label)]);
-  return [...previous.filter(p => !touched.has(p.name)), ...fresh];
+  const touched = new Set([...delta.removals, ...delta.import.tools, ...(delta.import.skippedTools ?? [])].map(t => t.id));
+  return [...previous.filter(p => !touched.has(p.id)), ...fresh];
 }
 
 /** Takes the removals off the machine, then runs the delta through the import
