@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Served by Vite to a real browser: the app shell over a fake api with three
-// workspaces (one gone) and one thread, in either theme (?theme=light), so a
+// workspaces (one gone) and two threads, in either theme (?theme=light), so a
 // test can measure the chrome's geometry, which jsdom cannot lay out.
 import { createRoot } from "react-dom/client";
 import type { SessionView, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
@@ -31,7 +31,11 @@ const status = (w: WorkspaceView, over: Partial<WorkspaceStatus> = {}): Workspac
 });
 const workspaces = [view("ws_a", "api"), view("ws_b", "web", "napping"), view("ws_c", "pa")];
 const statuses = [status(workspaces[0]!), status(workspaces[1]!), status(workspaces[2]!, { machineState: "gone", reach: { state: "gone" } })];
-const sessions: SessionView[] = [{ id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", prompt: "fix the port list", startedAt: Date.now() - 3 * 60_000 }];
+// The ticket's rows: long titles with the agent and both opener words, one working, one settled.
+const sessions: SessionView[] = [
+  { id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", prompt: "Now reply with exactly the word pong.", startedBy: "person", startedAt: Date.now() - 48 * 60_000 },
+  { id: "s2", workspaceId: "ws_a", harness: "claude", status: "completed", prompt: "Reply with exactly the word hi.", startedBy: "cli", startedAt: Date.now() - 30 * 60_000, endedAt: Date.now() - 24 * 60_000 },
+];
 
 const api: Api = {
   listWorkspaces: async () => workspaces,

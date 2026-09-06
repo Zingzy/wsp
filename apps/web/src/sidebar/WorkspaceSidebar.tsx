@@ -8,8 +8,10 @@
 // background.
 import { ChevronDownIcon, FolderInputIcon, FolderOutputIcon, MessageSquareIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { agentName } from "@wsp/catalog";
 import { deriveSidebarProjects, type SidebarProjectSnapshot, type SidebarThreadSnapshot } from "../adapt/index.js";
 import { ForgetWorkspaceDialog } from "../components/ForgetWorkspaceDialog.js";
+import { HarnessMark } from "../components/chat/HarnessMark.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty.js";
 import {
   SidebarContent,
@@ -55,6 +57,7 @@ import {
   defaultWorkspaceName,
   dotClassForTone,
   idleCountdownLabel,
+  openerWord,
   provenanceLabel,
   threadPill,
   reachNote,
@@ -515,7 +518,9 @@ function CreationRow({ creation, active, onSelect }: { creation: Creation; activ
   );
 }
 
+/** The metadata sits under the title so it never takes the title's room; every row is one height. */
 function ThreadRow({ thread, time, active, onSelect }: { thread: SidebarThreadSnapshot; time: string; active: boolean; onSelect: () => void }) {
+  const pill = threadPill(thread);
   return (
     <SidebarMenuSubItem data-thread-item>
       <SidebarMenuSubButton
@@ -524,15 +529,28 @@ function ThreadRow({ thread, time, active, onSelect }: { thread: SidebarThreadSn
         data-sidebar-row
         data-row-id={`thread:${thread.id}`}
         onClick={onSelect}
-        className="h-8 w-full"
+        className="h-11 w-full items-start py-1.5"
       >
-        <ProjectFavicon src={null} className="size-3.5 opacity-60" fallbackIcon={MessageSquareIcon} />
-        <ThreadRowLeadingStatus status={threadPill(thread)} />
-        <span className="min-w-0 flex-1 truncate">{thread.title}</span>
-        <span data-thread-provenance className="shrink-0 font-mono text-[10px] text-muted-foreground/55">
-          {provenanceLabel(thread)}
+        <ProjectFavicon src={null} className="mt-0.5 size-3.5 opacity-60" fallbackIcon={MessageSquareIcon} />
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
+          <span className="flex items-center gap-2">
+            <span data-thread-title className="min-w-0 flex-1 truncate">
+              {thread.title}
+            </span>
+            <span className="shrink-0 text-xs text-muted-foreground/55 tabular-nums">{time}</span>
+          </span>
+          <span data-thread-meta className="flex min-w-0 items-center gap-1.5 font-mono text-[10px] text-muted-foreground/55">
+            <ThreadRowLeadingStatus status={pill} />
+            {pill ? <span aria-hidden>·</span> : null}
+            <Tooltip>
+              <TooltipTrigger render={<span data-thread-provenance aria-label={provenanceLabel(thread)} className="inline-flex min-w-0 items-center gap-1" />}>
+                <HarnessMark harness={thread.harness} label={agentName(thread.harness)} className="size-3" />
+                <span className="truncate">{openerWord(thread.startedBy)}</span>
+              </TooltipTrigger>
+              <TooltipPopup side="top">{provenanceLabel(thread)}</TooltipPopup>
+            </Tooltip>
+          </span>
         </span>
-        <span className="ml-auto shrink-0 text-xs text-muted-foreground/55 tabular-nums">{time}</span>
       </SidebarMenuSubButton>
     </SidebarMenuSubItem>
   );
