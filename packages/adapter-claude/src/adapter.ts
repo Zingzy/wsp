@@ -341,7 +341,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           }
         }
       } catch (cause) {
-        // A torn-down transport may throw mid-iteration; treat it as stream end.
+        // The transport ended the turn itself and its message says why; that message is the turn's error.
         streamError = cause instanceof Error ? cause.message : String(cause);
       }
       const exitCode = await stream.exited;
@@ -351,9 +351,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           ? { status: "interrupted" }
           : {
               status: "failed",
-              error:
-                `claude exited with code ${String(exitCode)} before emitting a result` +
-                (streamError === undefined ? "" : ` (stream error: ${streamError})`),
+              error: streamError ?? `claude exited with code ${String(exitCode)} before emitting a result`,
             };
         options.onEvent({ type: "turn.done", sessionId: claudeSessionId, result: turnResult });
       }
