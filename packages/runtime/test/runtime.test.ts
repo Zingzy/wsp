@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
-import { catalogProbeCommand, type AdapterEvent, type TurnResult } from "@wsp/adapter-claude";
+import { catalogProbeCommand, parseCatalogProbe, type AdapterEvent, type TurnResult } from "@wsp/adapter-claude";
 import { SessionEvent, type EventUnion, type RecipeDigest } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
@@ -173,7 +173,7 @@ describe("runtime session history", () => {
     let finish!: (r: TurnResult) => void;
     const finished = new Promise<TurnResult>(r => (finish = r));
     const adapter: HarnessAdapterFactory = () => ({
-      catalogProbe: catalogProbeCommand({ configDir: "/root/.claude-cfg" }),
+      probeCatalog: exec => exec(catalogProbeCommand({ configDir: "/root/.claude-cfg" })).then(parseCatalogProbe),
       start: o => {
         onEvent = o.onEvent;
         lastStart = o;
@@ -495,6 +495,65 @@ describe("runtime session history", () => {
       const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
       const claude = (await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")!;
       expect(claude).toMatchObject({ source: "table", version: TABLE_PIN });
+      expect(probes(backend)).toHaveLength(0);
+      await rt.close();
+    });
+
+    /** A second harness whose binary answers with a version line; its adapter opts into the probe, whatever its id. */
+    const codexProbing: HarnessAdapterFactory = ctx => ({
+      ...threaded()(ctx),
+      probeCatalog: exec =>
+        exec("codex --describe").then(out => ({
+          version: out.trim(),
+          models: [{ slug: "gpt-5-codex", label: "Codex", efforts: ["high"], contextWindows: [], isDefault: true }],
+          efforts: ["low", "high"],
+          permissionModes: ["read-only"],
+        })),
+    });
+    const codexProbes = (backend: StubBackend) => backend.machines.flatMap(m => m.execLog.filter(cmd => cmd === "codex --describe"));
+    const twoBinaries = (backend: StubBackend) => {
+      backend.execImpl = (_m, cmd) => ({ exitCode: 0, stdout: cmd.includes("claude --help") ? PROBE_OUTPUT : cmd === "codex --describe" ? "0.9.0\n" : "", stderr: "" });
+    };
+
+    it("each adapter decides whether its binary is asked, whatever its harness id, and each harness keeps its own answer", async () => {
+      const backend = stubBackend();
+      twoBinaries(backend);
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: manual().adapter, codex: codexProbing } });
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const catalogs = await rt.harnesses.list(ws.id);
+      expect(catalogs.find(c => c.harness === "claude")).toMatchObject({ source: "harness", version: "2.1.257" });
+      const codex = catalogs.find(c => c.harness === "codex")!;
+      expect(codex).toMatchObject({ source: "harness", version: "0.9.0", label: "Codex" });
+      expect(codex.models).toEqual([{ value: "gpt-5-codex", label: "Codex", isDefault: true, efforts: ["high"], contextWindows: [] }]);
+      // The table lends the words for values the binary only names.
+      expect(codex.permissionModes).toEqual([{ value: "read-only", label: "Read only", description: "No edits, no commands that write" }]);
+      expect(probes(backend)).toHaveLength(1);
+      expect(codexProbes(backend)).toHaveLength(1);
+      await rt.close();
+
+      const quiet = stubBackend();
+      twoBinaries(quiet);
+      const rt2 = createRuntime({ backend: quiet, store: memoryStore(), adapters: { claude: threaded(), codex: codexProbing } });
+      const ws2 = await rt2.workspaces.create({ golden: "snap_g", name: "b" });
+      const later = await rt2.harnesses.list(ws2.id);
+      expect(later.find(c => c.harness === "claude")).toMatchObject({ source: "table", version: TABLE_PIN });
+      expect(later.find(c => c.harness === "codex")).toMatchObject({ source: "harness", version: "0.9.0" });
+      expect(probes(quiet)).toHaveLength(0);
+      expect(codexProbes(quiet)).toHaveLength(1);
+      await rt2.close();
+    });
+
+    it("a session start asks the binary of the harness that starts, when its adapter probes, and no other", async () => {
+      const backend = stubBackend();
+      twoBinaries(backend);
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: threaded(), codex: codexProbing } });
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      await (await rt.sessions.start(ws.id, { prompt: "go", harness: "codex" })).finished;
+      await new Promise(r => setImmediate(r));
+      expect(codexProbes(backend)).toHaveLength(1);
+      expect(probes(backend)).toHaveLength(0);
+      await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
+      await new Promise(r => setImmediate(r));
       expect(probes(backend)).toHaveLength(0);
       await rt.close();
     });

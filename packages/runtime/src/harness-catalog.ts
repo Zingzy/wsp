@@ -1,14 +1,28 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // What each harness's CLI accepts at launch, as its --help spells it, so the
 // composer's pickers offer only values the CLI will take. This table is the
-// fallback: Claude Code's lists come from the binary on the workspace's
-// machine when it answers (catalogFromProbe), and the table lends it the
-// labels and descriptions the binary has no words for. Codex, Gemini CLI,
-// OpenCode, Pi and Hermes have no adapter yet; their catalogs name the flags
-// their CLIs document so the pickers are right the day one lands. A list is
-// empty where the CLI has no such flag or takes open values.
-import type { ClaudeCatalogProbe } from "@wsp/adapter-claude";
+// fallback: an adapter that probes reads its lists from the binary on the
+// workspace's machine when it answers (catalogFromProbe), and the table lends
+// it the labels and descriptions the binary has no words for. Codex, Gemini
+// CLI, OpenCode, Pi and Hermes have no adapter yet; their catalogs name the
+// flags their CLIs document so the pickers are right the day one lands. A
+// list is empty where the CLI has no such flag or takes open values.
 import type { HarnessCatalog, HarnessModel, HarnessOption } from "@wsp/protocol";
+
+/** What an adapter reads off its binary: the values it takes, without the words the table lends them. */
+export interface HarnessCatalogProbe {
+  version: string | null;
+  models: readonly {
+    slug: string;
+    label: string;
+    description?: string;
+    efforts: readonly string[];
+    contextWindows: readonly string[];
+    isDefault: boolean;
+  }[];
+  efforts: readonly string[];
+  permissionModes: readonly string[];
+}
 
 /** What the table was read against; a catalog served from it carries this as its version. */
 export const TABLE_PIN = "claude --help 2.1.257, 2026-09-05";
@@ -103,8 +117,7 @@ export function harnessCatalog(harness: string): HarnessCatalog | undefined {
 }
 
 /** The binary's lists in the wire shape: its values and defaults win, the table lends labels and descriptions it knows. */
-export function catalogFromProbe(probe: ClaudeCatalogProbe): HarnessCatalog {
-  const table = harnessCatalog("claude")!;
+export function catalogFromProbe(table: HarnessCatalog, probe: HarnessCatalogProbe): HarnessCatalog {
   const known = (list: readonly HarnessOption[], value: string): HarnessOption | undefined => list.find(o => o.value === value);
   const models: HarnessModel[] = probe.models.map(m => ({
     value: m.slug,
