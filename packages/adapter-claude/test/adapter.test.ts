@@ -63,8 +63,20 @@ describe("ClaudeAdapter over the recorded fixture", () => {
     expect(exec.calls[0]?.command).toContain("--model 'claude-opus-5'");
     expect(exec.calls[0]?.command).toContain("--effort 'low'");
     expect(exec.calls[0]?.command).toContain("--permission-mode 'plan'");
-    // The probe line the runtime runs carries the same config dir as the session.
-    expect(adapter.catalogProbe).toContain("CLAUDE_CONFIG_DIR='/root/.claude-cfg'");
+  });
+
+  it("probes the catalog through the exec it is handed, under the session's config dir, and reads the answer", async () => {
+    const adapter = createClaudeAdapter({ exec: scriptedExec([]).factory, configDir: "/root/.claude-cfg" });
+    const ran: string[] = [];
+    const probe = await adapter.probeCatalog(async command => {
+      ran.push(command);
+      return readFileSync(new URL("./fixtures/catalog-probe.txt", import.meta.url), "utf8");
+    });
+    expect(ran).toHaveLength(1);
+    expect(ran[0]).toContain("CLAUDE_CONFIG_DIR='/root/.claude-cfg'");
+    expect(probe?.version).toBe("2.1.257");
+    expect(probe?.models.map(m => m.slug)).toContain("claude-opus-5");
+    expect(await adapter.probeCatalog(async () => "garbage\n")).toBeNull();
   });
 
   it("normalizes the stream into session.start / turn.delta / turn.done / session.end", async () => {

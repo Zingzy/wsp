@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { hostname } from "node:os";
-import { parseCatalogProbe, shellQuote, type AdapterEvent, type ExecStream, type TurnResult } from "@wsp/adapter-claude";
+import { shellQuote, type AdapterEvent, type ExecStream, type TurnResult } from "@wsp/adapter-claude";
 import {
   BUILDER_IDLE_MS,
   DAEMON_PORT,
@@ -82,7 +82,7 @@ import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy, idleReason } from
 import { connectDaemon, type DaemonReach } from "./reach.js";
 import { createStatusTracker, machineStateOf, type StatusApi, type StatusWatchOptions } from "./status.js";
 import type { Store } from "./store.js";
-import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog } from "./harness-catalog.js";
+import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, type HarnessCatalogProbe } from "./harness-catalog.js";
 
 // --- adapter port -------------------------------------------------------------
 
@@ -112,8 +112,8 @@ export interface HarnessSession {
 
 export interface HarnessAdapter {
   start(options: HarnessStartOptions): HarnessSession;
-  /** A shell line that makes the binary describe itself for harnesses.list; without one the table answers. */
-  readonly catalogProbe?: string;
+  /** Asks the binary on the workspace's machine what it takes, null when it does not answer; absent, the table alone answers and nothing runs. */
+  probeCatalog?(exec: (command: string) => Promise<string>): Promise<HarnessCatalogProbe | null>;
   /** What a turn's command is exported with on the machine; a plain exec on the workspace runs with the same. Absent
    * means nothing is exported and both run with the machine's own environment only. */
   readonly env?: Readonly<Record<string, string>>;
@@ -478,9 +478,9 @@ export interface Runtime {
   };
   readonly harnesses: {
     /** What each harness with an adapter takes at launch; the composer's pickers render from this. With a running
-     * workspace the binaries on its machine are asked, at a session start too, and their answer, or the table when they
-     * give none, is kept per machine for CATALOG_TTL_MS; without one, or on a workspace that is not running, the table
-     * answers. */
+     * workspace each adapter that probes is asked on its machine, at a session start too, and its answer, or the table
+     * when it gives none, is kept per machine and harness for CATALOG_TTL_MS; without one, or on a workspace that is not
+     * running, the table answers. */
     list(workspaceId?: string): Promise<HarnessCatalog[]>;
   };
   readonly golden: {
@@ -1625,20 +1625,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
   };
 
-  /** One probe per machine per TTL, a failed one included and one in flight shared: a binary that does not answer
-   * costs one exec, not one per composer mount. */
+  /** One probe per harness per machine per TTL, a failed one included and one in flight shared: a binary that does
+   * not answer costs one exec, not one per composer mount. */
   const catalogs = new Map<string, { at: number; catalog: Promise<HarnessCatalog> }>();
-  const claudeCatalogOn = (machine: Machine, adapter: HarnessAdapter): Promise<HarnessCatalog> => {
-    const probe = adapter.catalogProbe;
-    if (probe === undefined) return Promise.resolve({ ...harnessCatalog("claude")! });
-    const hit = catalogs.get(machine.id);
+  const catalogOn = (table: HarnessCatalog, machine: Machine, adapter: HarnessAdapter): Promise<HarnessCatalog> => {
+    if (adapter.probeCatalog === undefined) return Promise.resolve({ ...table });
+    const key = `${machine.id}:${table.harness}`;
+    const hit = catalogs.get(key);
     const now = clock.now();
     if (hit !== undefined && now - hit.at < CATALOG_TTL_MS) return hit.catalog;
-    const catalog = machine
-      .exec(probe, { timeoutMs: CATALOG_PROBE_TIMEOUT_MS })
-      .then(res => parseCatalogProbe(res.stdout), () => null)
-      .then(parsed => (parsed === null ? { ...harnessCatalog("claude")! } : catalogFromProbe(parsed)));
-    catalogs.set(machine.id, { at: now, catalog });
+    const catalog = adapter
+      .probeCatalog(command => machine.exec(command, { timeoutMs: CATALOG_PROBE_TIMEOUT_MS }).then(res => res.stdout))
+      .then(parsed => (parsed === null ? { ...table } : catalogFromProbe(table, parsed)), () => ({ ...table }));
+    catalogs.set(key, { at: now, catalog });
     return catalog;
   };
 
@@ -1656,8 +1655,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }));
       if (refusal !== null) throw new Error(refusal);
       const { harness, adapter } = adapterFor(entry, o.harness);
+      const table = harnessCatalog(harness);
       // A start is when the binary may have changed under us, so the catalog is refreshed here too, within its TTL.
-      if (harness === "claude") void claudeCatalogOn(entry.machine, adapter);
+      if (table !== undefined) void catalogOn(table, entry.machine, adapter);
 
       const turnId = randomUUID();
       const threadId = threadOf(workspaceId, o.resume);
@@ -2473,7 +2473,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (workspaceId === undefined) return table;
         const entry = await entryOf(workspaceId);
         if (entry.record.phase !== "running") return table;
-        return Promise.all(table.map(c => (c.harness === "claude" ? claudeCatalogOn(entry.machine, adapters[c.harness]!({ machine: entry.machine, workspaceId })) : c)));
+        return Promise.all(table.map(c => catalogOn(c, entry.machine, adapters[c.harness]!({ machine: entry.machine, workspaceId }))));
       },
     },
     golden,
