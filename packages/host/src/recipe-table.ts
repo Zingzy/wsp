@@ -6,9 +6,11 @@
 // thing about the same recipe.
 import { agentName, hasLogin, keysIdOf, loginIdOf, loginRow, signsInByDefault } from "@wsp/catalog";
 import { readsUsedFirst, type CommandCount } from "@wsp/collect";
-import { RecipeTick, fmtBytes, plural, type Recipe, type RecipeRow, type RecipeSource } from "@wsp/protocol";
+import { RecipeCustomRow, RecipeTick, customRows, fmtBytes, plural, type Recipe, type RecipeRow, type RecipeSource } from "@wsp/protocol";
 import { z } from "zod";
 import { table } from "./init-layout.js";
+import { customTableLines } from "./recipe-custom.js";
+import type { ScanRow } from "./scan.js";
 import { signInFor, signInWords } from "./signin-table.js";
 
 /** A row this big is one the person is asked about before it is built: it is a real part of the wait and the disk. */
@@ -67,6 +69,8 @@ export const RecipeTable = z.object({
   heavy: z.array(RecipeTableRow),
   /** The commands the agents ran here that no catalog row carries, most-run first. */
   commands: z.array(RecipeCommand),
+  /** The rows this recipe installs that the catalog has none for, as the file carries them. */
+  custom: z.array(RecipeCustomRow),
 });
 export type RecipeTable = z.infer<typeof RecipeTable>;
 
@@ -96,6 +100,7 @@ export function recipeTable(recipe: Recipe, out: string, commands: readonly Comm
     totalBytes: totalBytes(rows),
     heavy: heavyRows(rows),
     commands: commands.map(c => ({ name: c.name, calls: c.calls, sessions: c.sessions })),
+    custom: [...customRows(recipe)],
   };
 }
 
@@ -142,17 +147,19 @@ export function commandTableLines(commands: readonly RecipeCommand[], shown = CO
   ];
 }
 
-/** Everything the recipe verb and the MCP tool print: the table, its total line, then the commands table. */
+/** Everything the recipe verb and the MCP tool print: the table, its total line, the rows the catalog does not
+ * carry that this recipe installs anyway, then the commands table. */
 export function recipePrintout(t: RecipeTable): string[] {
-  return [...recipeTableLines(t.rows), recipeTotalLine(t.rows), "", ...commandTableLines(t.commands)];
+  const custom = customTableLines({ custom: t.custom });
+  return [...recipeTableLines(t.rows), recipeTotalLine(t.rows), ...(custom.length > 0 ? ["", ...custom] : []), "", ...commandTableLines(t.commands)];
 }
 
 // --- the scan: every option, with what an agent should do about each ------------------------------------------
 
 /** The heading over the tools this computer has that no catalog row carries, grouped by what installed them. */
 export const ALSO_HERE_TITLE = "Also on this Mac";
-/** What that section says while nothing on this computer scans for those tools. */
-export const NO_SCANNER = "no scanner yet";
+/** What that section says when nothing looked, which is not the same answer as nothing being found. */
+export const NOT_SCANNED = "nothing looked for them here";
 
 export const RecipeAdvice = z.object({
   /** What to do without asking: `on` or `off` for a tick row, one of the sign-in words for a sign-in row. */
@@ -175,7 +182,7 @@ export const RecipeScanSignIn = z.object({
 export type RecipeScanSignIn = z.infer<typeof RecipeScanSignIn>;
 
 export const RecipeScanAlso = z.object({
-  /** False while nothing here looks for tools outside the catalog, so a reader tells empty from unscanned. */
+  /** Whether anything looked at all, so a reader tells empty from unscanned. */
   scanned: z.boolean(),
   managers: z.array(z.object({ manager: z.string(), rows: z.array(z.object({ id: z.string(), install: z.string(), size: z.number().int().nonnegative().optional() })) })),
 });
@@ -215,7 +222,20 @@ export function signInAdvice(id: string): RecipeAdvice {
 /** Every option this computer offers, read once: the agents and tools with the rule's tick and what to do about
  * each, the tools outside the catalog (nothing scans for them yet), the commands the catalog does not carry, and
  * the sign-in each ticked row brings. Nothing is written. */
-export function recipeScan(recipe: Recipe, commands: readonly CommandCount[] = []): RecipeScan {
+/** The scan's own rows grouped under the manager that has them, in the order the scanner found them; nothing
+ * having looked is not the same answer as nothing having been found, so an absent list says so. */
+export function alsoHereOf(rows: readonly ScanRow[] | undefined): RecipeScanAlso {
+  if (rows === undefined) return { scanned: false, managers: [] };
+  const managers = new Map<string, { manager: string; rows: { id: string; install: string; size?: number }[] }>();
+  for (const r of rows) {
+    const group = managers.get(r.group) ?? { manager: r.group, rows: [] };
+    group.rows.push({ id: r.id, install: r.install, ...(r.size !== undefined ? { size: r.size } : {}) });
+    managers.set(r.group, group);
+  }
+  return { scanned: true, managers: [...managers.values()] };
+}
+
+export function recipeScan(recipe: Recipe, commands: readonly CommandCount[] = [], alsoHere?: readonly ScanRow[]): RecipeScan {
   const rows = recipeTableRows(recipe).map((r): RecipeScanRow => ({ ...r, recommended: tickAdvice(r) }));
   const on = rows.filter(r => r.on);
   return {
@@ -225,7 +245,7 @@ export function recipeScan(recipe: Recipe, commands: readonly CommandCount[] = [
     tools: rows.filter(r => r.kind === "tool"),
     totalBytes: totalBytes(rows),
     heavy: heavyRows(rows),
-    alsoHere: { scanned: false, managers: [] },
+    alsoHere: alsoHereOf(alsoHere),
     commands: commands.map(c => ({ name: c.name, calls: c.calls, sessions: c.sessions })),
     signIns: on.flatMap((r): RecipeScanSignIn[] => {
       const s = signInFor(loginIdOf(r.id));
@@ -255,7 +275,7 @@ export function signInTableLines(rows: readonly RecipeScanSignIn[]): string[] {
 
 /** What the section on tools outside the catalog says: the rows by manager, or that nothing looked for them. */
 export function alsoHereLines(also: RecipeScanAlso): string[] {
-  if (!also.scanned) return [ALSO_HERE_TITLE, `  ${NO_SCANNER}`];
+  if (!also.scanned) return [ALSO_HERE_TITLE, `  ${NOT_SCANNED}`];
   if (also.managers.length === 0) return [ALSO_HERE_TITLE, "  none"];
   return [
     ALSO_HERE_TITLE,

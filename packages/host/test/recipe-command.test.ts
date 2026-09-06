@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The recipe verb: which rule decides the ticks, flipping one row by id,
 // weighing the histories by project, and the table the printout draws.
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { computeRecipe } from "@wsp/collect";
 import { RECIPE_SIGN_INS, Recipe, type RecipeSignIn } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { applySets, parseSet, parseSets, parseSignIn, runRecipe, type RecipeIo } from "../src/recipe-command.js";
-import { loginAnswers, recipeWithAnswers, signInAnswerOf } from "../src/init-recipe.js";
+import { applyRecipe, loginAnswers, recipeWithAnswers, signInAnswerOf, withCatalogAgents } from "../src/init-recipe.js";
+import { signInItems } from "../src/init-pick.js";
 import { saveSmallRecipe } from "../src/recipe-file.js";
 import { HEAVY_BYTES, commandTableLines, recipePrintout, recipeTableLines, recipeTotalLine } from "../src/recipe-table.js";
 import { claudeLine, fakeHost, HOME } from "./recipe-fixture.js";
@@ -184,10 +185,32 @@ describe("wsp recipe", () => {
     expect(signInAnswerOf("hermes", new Map())).toBeUndefined();
   });
 
-  it("refuses an --add until something scans for tools outside the catalog, and points a catalog id at --set", async () => {
+  it("carries the rows --add names into the file, keeps an earlier run's, and offers none of them a sign-in", async () => {
     dir = mkdtempSync(join(tmpdir(), "wsp-recipe-add-"));
-    await expect(runRecipe(laptop(), { out: outPath(), add: ["jj"] }, quiet, at)).rejects.toThrow('--add jj: no scan row for "jj"; nothing here scans for tools outside the catalog yet');
-    await expect(runRecipe(laptop(), { out: outPath(), add: ["gh"] }, quiet, at)).rejects.toThrow("--add gh: GitHub CLI is a catalog row; wsp recipe --set gh=on ticks it");
+    const out = outPath();
+    const custom = () => Recipe.parse(JSON.parse(readFileSync(out, "utf8"))).custom;
+    await runRecipe(laptop(), { out, add: ["just=brew install just"] }, quiet, at);
+    expect(custom()).toEqual([{ kind: "custom", id: "just", name: "just", install: ["brew install just"], check: "command -v 'just'", why: "added by the agent" }]);
+    // A rule input re-decides every tick; the rows outside the catalog are the file's and stand through it.
+    await runRecipe(laptop(), { out, tick: "installed", add: ["ruff=uv tool install ruff"], addCheck: ["ruff=ruff --version"] }, quiet, at);
+    expect(custom()?.map(r => r.id)).toEqual(["just", "ruff"]);
+    expect(custom()?.find(r => r.id === "ruff")?.check).toBe("ruff --version");
+    // The install is the whole row: no catalog row appears for it and no sign-in is ever offered.
+    expect(custom()?.every(r => !("signIn" in r))).toBe(true);
+    expect(signInItems(applyRecipe(withCatalogAgents({ entries: [] }), Recipe.parse(JSON.parse(readFileSync(out, "utf8"))))).items.map(i => i.id)).not.toContain("logins/just");
+    await expect(runRecipe(laptop(), { out, add: ["just"] }, quiet, at)).rejects.toThrow('--add takes <id>=<command>, not "just"');
+  });
+
+  it("says so and rewrites the file when the recipe already there cannot be read, rather than refusing to run", async () => {
+    dir = mkdtempSync(join(tmpdir(), "wsp-recipe-unreadable-"));
+    const out = outPath();
+    mkdirSync(dirname(out), { recursive: true });
+    writeFileSync(out, "{ not json");
+    const io = collect();
+    const table = await runRecipe(laptop(), { out, add: ["just=brew install just"] }, io, at);
+    expect(io.notes.find(l => l.includes("could not be read"))).toContain("its ticks, sign-in answers and added rows go with it");
+    expect(table.rows.length).toBeGreaterThan(0);
+    expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8"))).custom?.map(r => r.id)).toEqual(["just"]);
   });
 
   it("refuses a --set word that is not <id>=on or <id>=off, or names no catalog row", () => {

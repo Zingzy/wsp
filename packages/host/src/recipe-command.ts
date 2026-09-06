@@ -6,10 +6,12 @@
 import { existsSync } from "node:fs";
 import { agentName, catalogEntry, keysIdOf, loginRow } from "@wsp/catalog";
 import { type AgentHistory, type Host, computeRecipe, unknownCommands } from "@wsp/collect";
-import { RECIPE_SIGN_INS, RECIPE_TICKS, plural, type Recipe, type RecipeHistory, type RecipeSignIn, type RecipeTick } from "@wsp/protocol";
+import { RECIPE_SIGN_INS, RECIPE_TICKS, customRows, plural, type Recipe, type RecipeCustomRow, type RecipeHistory, type RecipeSignIn, type RecipeTick } from "@wsp/protocol";
 import { THREAD_AGENTS } from "./thread-agents.js";
 import { loadRecipe, saveSmallRecipe } from "./recipe-file.js";
+import { customFromFlags, withCustom } from "./recipe-custom.js";
 import { recipeScan, recipeTable, type RecipeScan, type RecipeTable } from "./recipe-table.js";
+import type { ScanRow } from "./scan.js";
 
 /** One line per agent: what its history here said. */
 export function historyLine(h: RecipeHistory): string {
@@ -78,16 +80,6 @@ export function applySignIns(recipe: Recipe, answers: ReadonlyMap<string, Recipe
   return { ...recipe, rows: recipe.rows.map(r => (answers.has(r.id) ? { ...r, signIn: answers.get(r.id)! } : r)) };
 }
 
-/** Why an `--add` cannot be answered yet: the install line comes from a scan row, and nothing here scans for tools
- * outside the catalog. A catalog id is a `--set`, and says so rather than reading as unknown. A word that carries
- * its own line (`<id>=<line>`) is named by its id, so the refusal is about the row and not about the spelling. */
-export function noAddLine(word: string): never {
-  const eq = word.indexOf("=");
-  const id = eq < 0 ? word : word.slice(0, eq);
-  if (catalogEntry(id) !== undefined) throw new Error(`--add ${id}: ${agentName(id)} is a catalog row; wsp recipe --set ${id}=on ticks it`);
-  throw new Error(`--add ${id}: no scan row for ${JSON.stringify(id)}; nothing here scans for tools outside the catalog yet`);
-}
-
 export interface RecipeInput {
   /** Where the recipe file lives; it is read for the ticks a `set` adds to, and rewritten. */
   out: string;
@@ -97,8 +89,12 @@ export interface RecipeInput {
   set?: readonly string[];
   /** `<id>=copy|machine|key|skip`, repeatable: what happens to that row's sign-in. */
   signin?: readonly string[];
-  /** Catalog ids to add from a scan row's install line; none can be answered until something scans for them. */
+  /** `<id>=<install command>`, repeatable: a tool the catalog does not carry, added to the file beside the rows. */
   add?: readonly string[];
+  /** `<id>=<command that exits 0 once it is there>` for an added row; without one the id on PATH is the check. */
+  addCheck?: readonly string[];
+  /** What the added rows say they are for; the agent's own words. */
+  why?: string;
   /** Folders to weigh the histories against, absolute: only sessions that ran in one of them count. */
   projects?: readonly string[];
 }
@@ -128,6 +124,26 @@ export function savedSignIns(saved: Recipe | undefined): Map<string, RecipeSignI
   return new Map((saved?.rows ?? []).flatMap((r): [string, RecipeSignIn][] => (r.signIn === undefined ? [] : [[r.id, r.signIn]])));
 }
 
+/** The recipe already at this path, or nothing when there is none. A file nobody can read is about to be rewritten
+ * anyway, so what it held is named rather than the run stopping: the ticks, the sign-in answers and the rows it
+ * added all go with it, and saying so is better than a run that refuses to write anything. */
+export function readSaved(out: string, note: (line: string) => void): Recipe | undefined {
+  if (!existsSync(out)) return undefined;
+  try {
+    return loadRecipe(out);
+  } catch (e) {
+    note(`${out} could not be read (${e instanceof Error ? e.message : String(e)}); it is rewritten, and its ticks, sign-in answers and added rows go with it.`);
+    return undefined;
+  }
+}
+
+/** The rows outside the catalog a recipe already at this path carries. Both writers of that file, the recipe verb
+ * and the wizard, read it through readSaved, so neither writes over what the other added. */
+export function carriedOver(out: string, log: (line: string) => void): { custom?: RecipeCustomRow[] } {
+  const custom = readSaved(out, log)?.custom;
+  return custom === undefined ? {} : { custom };
+}
+
 /** Whether the run named something the rule reads, so the rule decides every row again rather than the file standing. */
 const namesRule = (input: RecipeInput): boolean => input.tick !== undefined || (input.projects ?? []).length > 0;
 
@@ -135,6 +151,10 @@ const namesRule = (input: RecipeInput): boolean => input.tick !== undefined || (
 export interface ScanInput {
   /** Folders to weigh the histories by, absolute. */
   projects?: readonly string[];
+  /** What else a package manager on this computer has. Handed in rather than imported: the scanner reaches the
+   * engine for its sizes and its road lines, and the MCP server may not, so its caller decides whether it runs.
+   * Absent, the scan says nothing looked rather than that nothing was found. */
+  alsoHere?: (recipe: readonly RecipeCustomRow[]) => Promise<readonly ScanRow[]>;
 }
 
 /** Reads this computer once and answers with every option it offers and what to do about each. Nothing is written,
@@ -153,7 +173,8 @@ export async function runScan(host: Host, input: ScanInput = {}, io: RecipeIo = 
       io.note(historyLine(h));
     },
   });
-  return recipeScan(recipe, unknownCommands(histories));
+  const alsoHere = input.alsoHere !== undefined ? await input.alsoHere(customRows(recipe)) : undefined;
+  return recipeScan(recipe, unknownCommands(histories), alsoHere);
 }
 
 /** Reads this computer, writes the recipe and answers with the table. The file is the state: a run that names a rule
@@ -162,11 +183,11 @@ export async function runScan(host: Host, input: ScanInput = {}, io: RecipeIo = 
  * answers stand through every run, whatever the rule: nothing but the person decides one. */
 export async function runRecipe(host: Host, input: RecipeInput, io: RecipeIo = QUIET, now?: () => Date): Promise<RecipeTable> {
   const sets = parseSets(input.set ?? []);
-  const saved = existsSync(input.out) ? loadRecipe(input.out) : undefined;
+  // Refused before this computer is read, as the other words are: a line that cannot be answered costs no scan.
+  const added = customFromFlags({ add: input.add ?? [], ...(input.addCheck !== undefined ? { addCheck: input.addCheck } : {}), ...(input.why !== undefined ? { why: input.why } : {}) });
+  const saved = readSaved(input.out, io.note);
   // The file's answers first, this run's words over them; a word never given leaves the file's answer standing.
   const signIns = new Map([...savedSignIns(saved), ...parseSignIns(input.signin ?? [])]);
-  // Refused before this computer is read, as the other words are: a line that cannot be answered costs no scan.
-  for (const word of input.add ?? []) noAddLine(word);
   // The rule this run goes on: the one named, else the one the file was written under, else `used` on a first run.
   // A file that names none is the wizard's, whose rule is the blended one, so computeRecipe is left to decide.
   const named = input.tick ?? saved?.tick;
@@ -184,7 +205,8 @@ export async function runRecipe(host: Host, input: RecipeInput, io: RecipeIo = Q
     },
   });
   const base = saved !== undefined && !namesRule(input) ? withSavedTicks(computed, saved) : computed;
-  const recipe = applySignIns(applySets(base, sets), signIns);
+  // The rows outside the catalog are the file's, not this computer's: an earlier run's stand, so --add adds up.
+  const recipe = withCustom({ ...applySignIns(applySets(base, sets), signIns), ...(saved !== undefined ? { custom: [...customRows(saved)] } : {}) }, added);
   saveSmallRecipe(input.out, recipe);
   return recipeTable(recipe, input.out, unknownCommands(histories));
 }

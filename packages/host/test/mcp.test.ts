@@ -138,7 +138,7 @@ describe("the MCP server over the host", () => {
     expect(Object.keys((tools.find(t => t.name === "fork")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "model", "name", "notify", "task", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "send")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "effort", "message", "model", "thread"]);
     expect(Object.keys((tools.find(t => t.name === "delete")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["confirm", "workspace"]);
-    expect(Object.keys((tools.find(t => t.name === "recipe")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["add", "out", "project", "set", "signin", "tick"]);
+    expect(Object.keys((tools.find(t => t.name === "recipe")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["add", "add_check", "out", "project", "set", "signin", "tick", "why"]);
     expect(c.getServerVersion()?.name).toBe("wsp");
     expect(c.getInstructions()).toBe(instructionsOf(WSP_SKILL));
     expect(c.getInstructions()).toContain("thread_new");
@@ -620,7 +620,7 @@ describe("the MCP server over the host", () => {
     client = undefined;
     const toServer = new PassThrough();
     const fromServer = new PassThrough();
-    const served = serveMcp(statePath, { input: toServer, output: fromServer });
+    const served = serveMcp(statePath, {}, { input: toServer, output: fromServer });
     const stdio = new Client({ name: "test-agent", version: "0.0.0" });
     await stdio.connect(streamTransport(toServer, fromServer));
     const result = await stdio.callTool({ name: "workspaces", arguments: {} });
@@ -655,6 +655,7 @@ describe("the MCP server over the host", () => {
 
   it("recipe_scan answers with every option and a recommendation per row, and writes nothing", async () => {
     const out = join(dir, "untouched.json");
+    // No scanner is handed to this server, so nothing looked for tools outside the catalog and it says so.
     const result = await call("recipe_scan", {});
     const scan = RecipeScan.parse(result.structured);
     expect(existsSync(out)).toBe(false);
@@ -664,7 +665,7 @@ describe("the MCP server over the host", () => {
     expect(scan.alsoHere).toEqual({ scanned: false, managers: [] });
     for (const row of [...scan.agents, ...scan.tools]) expect(row.recommended.value, row.id).toBe(row.on ? "on" : "off");
     expect(result.text).toBe(scanPrintout(scan).join("\n"));
-    expect(result.text).toContain("no scanner yet");
+    expect(result.text).toContain("nothing looked for them here");
   });
 });
 

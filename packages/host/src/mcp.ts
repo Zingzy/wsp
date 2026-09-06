@@ -10,7 +10,7 @@ import { z } from "zod";
 import { nodeHost } from "@wsp/collect";
 import { AFTER_CUT_LINE, ProjectExportResult, ProjectGolden, RECIPE_SIGN_INS, RECIPE_TICKS, RecipeTick, SessionInterruptOutcome, SessionStartOutcome, ThreadView, WorkspaceView, deleteNotice } from "@wsp/protocol";
 import { smallRecipePath } from "./recipe-file.js";
-import { runRecipe, runScan } from "./recipe-command.js";
+import { runRecipe, runScan, type ScanInput } from "./recipe-command.js";
 import { RecipeScan, RecipeTable, recipePrintout, scanPrintout } from "./recipe-table.js";
 import { INSTRUCTIONS } from "./skill.js";
 import { VERSION } from "./version.js";
@@ -85,7 +85,7 @@ function turnOut(turn: Turn): z.infer<typeof TurnOut> {
 
 const QUIET_TURN = { event: () => {} };
 
-export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpServer {
+export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: ScanInput["alsoHere"] } = {}): McpServer {
   const dial = opts.dial ?? dialer(statePath);
   const server = new McpServer({ name: "wsp", version: VERSION }, { instructions: INSTRUCTIONS });
   const workspace = z.string().describe("the workspace's name, or its id when two share a name");
@@ -111,12 +111,15 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
     "recipe_scan",
     {
       description:
-        "Every option this computer offers for a machine, read once and written nowhere: the person's agents and the catalog's tools with the tick their own use reaches and what each adds to the machine, the tools here no catalog row carries (alsoHere, whose scanned is false while nothing looks for them, so an empty managers there is unscanned and not none found), the commands their agents ran that the catalog does not carry, and the sign-in each ticked row brings. Every row carries a recommended value and a one-line reason, so apply those and put only the rows whose reason says worth a question. Run this before recipe, and before asking the person anything. Only names and counts are read.",
+        "Every option this computer offers for a machine, read once and written nowhere: the person's agents and the catalog's tools with the tick their own use reaches and what each adds to the machine, what else a package manager on this computer has that the image could take (alsoHere, by manager, with the line that installs each on the machine, which is the line to hand recipe's add), whose scanned says whether anything looked, the commands their agents ran that the catalog does not carry, and the sign-in each ticked row brings. Every row carries a recommended value and a one-line reason, so apply those and put only the rows whose reason says worth a question. Run this before recipe, and before asking the person anything. Only names and counts are read.",
       inputSchema: { project: PROJECT_FOLDERS },
       outputSchema: RecipeScan.shape,
     },
     async ({ project }) => {
-      const scan = await runScan(nodeHost(), project !== undefined ? { projects: projectFolders(project) } : {});
+      const scan = await runScan(nodeHost(), {
+        ...(project !== undefined ? { projects: projectFolders(project) } : {}),
+        ...(opts.alsoHere !== undefined ? { alsoHere: opts.alsoHere } : {}),
+      });
       return asText(scanPrintout(scan).join("\n"), scan);
     },
   );
@@ -129,19 +132,23 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
         tick: RecipeTick.optional().describe(`which rule decides every tick: ${RECIPE_TICKS.join(", ")}. Naming it re-decides every row from the rule, so any flip an earlier call made goes; absent, the file's own rule and its ticks stand, and used decides a first call and any row the file does not carry`),
         set: z.array(z.string()).optional().describe('rows to flip by catalog id, "<id>=on" or "<id>=off", applied over whatever decided the row. On a call that names tick or project they sit over the rule\'s fresh answer; on any other call they sit over the ticks already in the file'),
         signin: z.array(z.string()).optional().describe(`what happens to a row's sign-in, "<id>=${RECIPE_SIGN_INS.join("|")}"; key brings the key files beside its login and the login still runs on the machine. An answer already in the file stands until a later call names that row again, whatever tick or project do to the ticks`),
-        add: z.array(z.string()).optional().describe("catalog ids to add from a scan row's install line; nothing here scans for tools outside the catalog yet, so each one is refused by name"),
+        add: z.array(z.string()).optional().describe('tools the catalog does not carry, "<id>=<install command>"; the line runs on the machine as given after every catalog install, and such a row is never offered a sign-in. Rows an earlier call added stand, whatever tick or project do to the ticks'),
+        add_check: z.array(z.string()).optional().describe('what proves an added tool landed, "<id>=<command that exits 0>"; without one the id on PATH is the check'),
+        why: z.string().optional().describe("what the rows this call adds are for, in your own words; absent, they say an agent added them"),
         project: WEIGH_BY_FOLDERS,
         out: z.string().optional().describe("where the recipe file goes, absolute; absent means the host's own recipe.json beside its state"),
       },
       outputSchema: RecipeTable.shape,
     },
-    async ({ tick, set, signin, add, project, out }) => {
+    async ({ tick, set, signin, add, add_check: addCheck, why, project, out }) => {
       const table = await runRecipe(nodeHost(), {
         out: out === undefined ? smallRecipePath(statePath) : absolutePath("out is a path on this computer", out),
         ...(tick !== undefined ? { tick } : {}),
         ...(set !== undefined ? { set } : {}),
         ...(signin !== undefined ? { signin } : {}),
         ...(add !== undefined ? { add } : {}),
+        ...(addCheck !== undefined ? { addCheck } : {}),
+        ...(why !== undefined ? { why } : {}),
         ...(project !== undefined ? { projects: projectFolders(project) } : {}),
       });
       return asText(recipePrintout(table).join("\n"), table);
@@ -347,9 +354,9 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
 }
 
 /** The server on stdio until the agent is done with it: its stdin ending closes the transport, and the host socket with it. */
-export async function serveMcp(statePath: string, streams: { input: Readable; output: Writable } = { input: process.stdin, output: process.stdout }): Promise<void> {
+export async function serveMcp(statePath: string, opts: { alsoHere?: ScanInput["alsoHere"] } = {}, streams: { input: Readable; output: Writable } = { input: process.stdin, output: process.stdout }): Promise<void> {
   const dial = dialer(statePath);
-  const server = mcpServer(statePath, { dial });
+  const server = mcpServer(statePath, { dial, ...(opts.alsoHere !== undefined ? { alsoHere: opts.alsoHere } : {}) });
   const transport = new StdioServerTransport(streams.input, streams.output);
   const closed = new Promise<void>(done => {
     server.server.onclose = () => done();

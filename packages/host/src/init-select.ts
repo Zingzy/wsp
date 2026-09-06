@@ -22,6 +22,8 @@ export interface SelectItem {
   label: string;
   /** The dim second column: a size, a state word. */
   hint?: string;
+  /** The weight the hint carries, when the screen colours sizes; dim without one. */
+  tone?: Tone;
   group?: string;
   /** Lines for the detail pane while this item is highlighted; the reason a row is locked belongs here. */
   detail: string[];
@@ -322,11 +324,11 @@ class RungPrompt extends Prompt<Set<string>> {
     return i.hint ?? "";
   }
 
-  private line(glyph: string, label: string, second: string, indent: number, cols: { label: number; second: number }, current: boolean, heading: boolean): string {
+  private line(glyph: string, label: string, second: string, indent: number, cols: { label: number; second: number }, current: boolean, heading: boolean, tone?: Tone): string {
     const field = ellipsize(label, cols.label - indent).padEnd(cols.label - indent);
     const text = heading ? styleText("bold", field) : current ? field : dim(field);
     const cell = second.padStart(cols.second);
-    return `${current ? styleText("cyan", "❯") : " "} ${" ".repeat(indent)}${glyph} ${text}${second !== "" ? `${GUTTER}${dim(cell)}` : ""}`.trimEnd();
+    return `${current ? styleText("cyan", "❯") : " "} ${" ".repeat(indent)}${glyph} ${text}${second !== "" ? `${GUTTER}${tone === undefined ? dim(cell) : styleText(tone, cell)}` : ""}`.trimEnd();
   }
 
   private row(entry: Entry, current: boolean, cols: { label: number; second: number }, cuts: Map<SelectItem, string>): string {
@@ -351,7 +353,7 @@ class RungPrompt extends Prompt<Set<string>> {
         return this.line(entry.folded ? "▸" : "▾", entry.group, groupCount(entry.items, ticks), 0, cols, current, true);
       case "item": {
         const i = entry.item;
-        return this.line(box(ticks.has(i.id)), label(i), this.second(i), RungPrompt.indent(i), cols, current, false);
+        return this.line(box(ticks.has(i.id)), label(i), this.second(i), RungPrompt.indent(i), cols, current, false, i.tone);
       }
       default: {
         const _exhaustive: never = entry;

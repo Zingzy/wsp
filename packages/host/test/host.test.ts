@@ -173,7 +173,8 @@ describe("wsp cli", () => {
     expect(logs[0]).toBe("Agents");
     expect(logs).toContain("Tools");
     expect(logs).toContain("Also on this Mac");
-    expect(logs).toContain("  no scanner yet");
+    // The scanner runs on the command line, and the fixture PATH has no package manager on it.
+    expect(logs).toContain("  none");
     expect(logs.at(-1)).toContain("Nothing was written.");
     expect(errs[0]).toContain("Nothing leaves this computer");
     // The fixture's own rows, the same on any box.

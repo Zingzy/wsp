@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { runScan, type RecipeIo } from "../src/recipe-command.js";
-import { ALSO_HERE_TITLE, COMMANDS_TITLE, NO_SCANNER, RecipeScan, SIGN_INS_TITLE, alsoHereLines, scanPrintout, signInAdvice, tickAdvice } from "../src/recipe-table.js";
+import { ALSO_HERE_TITLE, COMMANDS_TITLE, NOT_SCANNED, RecipeScan, SIGN_INS_TITLE, alsoHereLines, scanPrintout, signInAdvice, tickAdvice } from "../src/recipe-table.js";
 import { claudeLine, fakeHost, HOME } from "./recipe-fixture.js";
 
 const PROJ = `${HOME}/proj`;
@@ -67,8 +67,8 @@ describe("wsp recipe scan", () => {
     expect(signInAdvice("gh")).toMatchObject({ value: "machine" });
   });
 
-  it("prints the heading for the tools no catalog row carries and says nothing scans for them yet", () => {
-    expect(alsoHereLines({ scanned: false, managers: [] })).toEqual([ALSO_HERE_TITLE, `  ${NO_SCANNER}`]);
+  it("prints the heading for the tools no catalog row carries, telling nothing looked from nothing found", () => {
+    expect(alsoHereLines({ scanned: false, managers: [] })).toEqual([ALSO_HERE_TITLE, `  ${NOT_SCANNED}`]);
     expect(alsoHereLines({ scanned: true, managers: [] })).toEqual([ALSO_HERE_TITLE, "  none"]);
     const lines = alsoHereLines({ scanned: true, managers: [{ manager: "brew", rows: [{ id: "jj", install: "brew install jj", size: 40 * MB }] }] });
     expect(lines[1]).toBe("  brew");
@@ -81,7 +81,7 @@ describe("wsp recipe scan", () => {
     expect(lines[1]).toMatch(/^ {2}id +on +why +size +do$/);
     expect(lines).toContain("Tools");
     expect(lines).toContain(ALSO_HERE_TITLE);
-    expect(lines).toContain(`  ${NO_SCANNER}`);
+    expect(lines).toContain(`  ${NOT_SCANNED}`);
     expect(lines).toContain(COMMANDS_TITLE);
     expect(lines).toContain(SIGN_INS_TITLE);
     expect(lines.find(l => l.startsWith("  claude "))).toMatch(/\bon\b.*208\.0 MB {2}on$/);

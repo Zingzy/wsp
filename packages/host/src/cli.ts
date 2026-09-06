@@ -34,6 +34,7 @@ import { recipePath } from "./init-recipe.js";
 import { smallRecipePath } from "./recipe-file.js";
 import { isRecipeTick, runRecipe, runScan } from "./recipe-command.js";
 import { recipePrintout, scanPrintout } from "./recipe-table.js";
+import { scanTools } from "./scan.js";
 import { confirmPrompt, passwordPrompt, type PromptOptions } from "./init-layout.js";
 import { TAGLINE, opening } from "./init-opening.js";
 import { systemOpener, type UrlOpener } from "./relay.js";
@@ -53,10 +54,10 @@ usage:
                      need and the sign-ins, three screens, then the build and
                      the browser
   wsp recipe scan    read this computer and print every option, writing
-                     nothing: the agents, the tools with why and size, the
-                     tools no catalog row carries (nothing looks for those
-                     yet, so that section says so), the commands your agents
-                     ran, and the sign-ins, each with what to do about it and
+                     nothing: the agents, the tools with why and size, what
+                     else a package manager here has that the image could
+                     take, the commands your agents ran, and the sign-ins,
+                     each with what to do about it and
                      one line of why; --project weighs the histories by a
                      folder and --json prints it as one object
   wsp recipe         write the recipe and print it as a table: every catalog
@@ -67,9 +68,10 @@ usage:
                      ticks what your agents actually ran here); --set <id>=on|off
                      and --signin <id>=copy|machine|key|skip flip a row and a
                      sign-in by catalog id, key bringing the key files beside a
-                     login and nothing else of it; --add <id> takes a tool from
-                     a scan row, and is refused by name until something here
-                     scans for those; --project weighs the histories by a folder,
+                     login and nothing else of it; --add <id>=<command> carries
+                     a tool the catalog does not, installed by that command on
+                     the machine, with --add-check <id>=<command> saying it is
+                     there; --project weighs the histories by a folder,
                      --out says where the file goes and --json prints the table
                      as one object. Naming --tick or --project decides every
                      tick again; without either, what the file says stands and
@@ -354,6 +356,7 @@ async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: 
       secrets: keychainReader(),
       platform: platform() === "darwin" ? "darwin" : "linux",
       brew: () => readBrewTable(nodeHost()),
+      scan: recipe => scanTools(nodeHost(), recipe),
       runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `daemon on node ${(await deployDaemon(machine)).node}` }),
       host: (rt, builder, hooks) => hostFor(rt, keys, { ...opts, builder, ...hooks }, io),
     },
@@ -458,16 +461,16 @@ const RECIPE_COMMAND = "recipe";
 
 /** The words only the write verb reads. `scan` writes nothing, so one of these on its line is a person asking for
  * something that will not happen, and it is refused rather than dropped. */
-const WRITE_ONLY_FLAGS = ["tick", "set", "signin", "add", "out"] as const;
+const WRITE_ONLY_FLAGS = ["tick", "set", "signin", "add", "add-check", "out"] as const;
 
 const recipeUsage = (): string =>
-  `usage: wsp ${RECIPE_COMMAND} [--tick used|installed|default] [--set <id>=on|off] [--signin <id>=${RECIPE_SIGN_INS.join("|")}] [--add <id>] [--project <folder>] [--out <path>] [--json]\n       wsp ${RECIPE_COMMAND} scan [--project <folder>] [--json]`;
+  `usage: wsp ${RECIPE_COMMAND} [--tick used|installed|default] [--set <id>=on|off] [--signin <id>=${RECIPE_SIGN_INS.join("|")}] [--add <id>=<command>] [--add-check <id>=<command>] [--project <folder>] [--out <path>] [--json]\n       wsp ${RECIPE_COMMAND} scan [--project <folder>] [--json]`;
 
 /** `wsp recipe` and `wsp recipe scan`: read this computer, write the recipe file (scan writes nothing) and print
  * the table, or the same object as JSON. Progress goes to stderr so what is on stdout is the whole answer. */
 async function recipe(io: CliIO, argv: string[], statePathOf: (flag?: string) => string): Promise<number> {
   const usage = recipeUsage();
-  let values: { out?: string; tick?: string; set?: string[]; signin?: string[]; add?: string[]; project?: string[]; json?: boolean; state?: string; help?: boolean };
+  let values: { out?: string; tick?: string; set?: string[]; signin?: string[]; add?: string[]; "add-check"?: string[]; project?: string[]; json?: boolean; state?: string; help?: boolean };
   let words: string[];
   try {
     ({ values, positionals: words } = parseArgs({
@@ -478,6 +481,7 @@ async function recipe(io: CliIO, argv: string[], statePathOf: (flag?: string) =>
         set: { type: "string", multiple: true },
         signin: { type: "string", multiple: true },
         add: { type: "string", multiple: true },
+        "add-check": { type: "string", multiple: true },
         project: { type: "string", multiple: true },
         json: { type: "boolean" },
         state: { type: "string" },
@@ -517,7 +521,7 @@ async function recipe(io: CliIO, argv: string[], statePathOf: (flag?: string) =>
   const out = resolve(values.out ?? smallRecipePath(statePath));
   try {
     if (scanning) {
-      const scan = await runScan(nodeHost(), projects, streams);
+      const scan = await runScan(nodeHost(), { ...projects, alsoHere: recipe => scanTools(nodeHost(), recipe) }, streams);
       if (values.json === true) io.log(JSON.stringify(scan));
       else {
         for (const line of scanPrintout(scan)) io.log(line);
@@ -533,6 +537,7 @@ async function recipe(io: CliIO, argv: string[], statePathOf: (flag?: string) =>
         ...(values.set !== undefined ? { set: values.set } : {}),
         ...(values.signin !== undefined ? { signin: values.signin } : {}),
         ...(values.add !== undefined ? { add: values.add } : {}),
+        ...(values["add-check"] !== undefined ? { addCheck: values["add-check"] } : {}),
         ...projects,
       },
       streams,
@@ -594,7 +599,7 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
   }
   const statePath = statePathOf(values.state);
   if (words.length === 0) {
-    await serveMcp(statePath);
+    await serveMcp(statePath, { alsoHere: recipe => scanTools(nodeHost(), recipe) });
     return 0;
   }
   if (words[0] !== "install" || words.length !== 1) {
@@ -644,6 +649,8 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
         yes: { type: "boolean", short: "y" },
         recipe: { type: "string" },
         out: { type: "string" },
+        add: { type: "string", multiple: true },
+        "add-check": { type: "string", multiple: true },
       },
       allowPositionals: true,
     }));

@@ -87,8 +87,8 @@ The command line and the MCP server call the same functions. Every verb takes `-
 | `wsp snapshot <workspace>` | `snapshot` | a project golden: the golden plus the loaded project as it stands |
 | `wsp export <workspace> <folder> [--from <path>] [--replace] [--agents <ids>]` | `export` | the folder and the agent sessions keyed to it come home to this computer |
 | `wsp import <folder> --to <workspace>` | none | not here yet; import a project from the app's import dialog |
-| `wsp recipe scan [--project <folder>] [--json]` | `recipe_scan` | reads this computer and prints every option, writing nothing: the agents, the tools with why and size, the tools no catalog row carries, the commands the agents ran, and the sign-ins, each with what to do about it and why |
-| `wsp recipe [--tick used\|installed\|default] [--set <id>=on\|off] [--signin <id>=copy\|machine\|key\|skip] [--add <id>] [--project <folder>] [--json]` | `recipe` | writes the recipe for a machine and prints it as a table: every catalog agent and tool with its tick, why, and its size, and the commands the agents ran that the catalog does not carry |
+| `wsp recipe scan [--project <folder>] [--json]` | `recipe_scan` | reads this computer and prints every option, writing nothing: the agents, the tools with why and size, what else a package manager here has that the image could take, the commands the agents ran, and the sign-ins, each with what to do about it and why |
+| `wsp recipe [--tick used\|installed\|default] [--set <id>=on\|off] [--signin <id>=copy\|machine\|key\|skip] [--add <id>=<command>] [--add-check <id>=<command>] [--project <folder>] [--json]` | `recipe` | writes the recipe for a machine and prints it as a table: every catalog agent and tool with its tick, why, and its size, and the commands the agents ran that the catalog does not carry |
 
 `wsp mcp` serves these tools over stdio; `wsp mcp install --agent <id>` writes the server into that agent's own MCP config and this skill into its skills folder. `--agent` repeats to do several in one call, one failing id costing the others nothing, and `--json` answers with one line holding what each agent took and a `failures` array, exit 1 when that array is not empty. An entry under `installed` with no `path` took the skill and not the server, which is the by-hand line the prose prints. Only agents the catalog knows an MCP config for get the server: claude, codex, gemini, opencode. The rest get the skill and a by-hand line.
 
@@ -172,6 +172,24 @@ The folder must not exist on this computer unless `--replace`. `--from` is the f
 - The root disk is 20 GB; wsp keeps 2 GB free and skips tool installs that would go under it.
 - One thread runs one agent process; a 4 GB machine runs one build or one agent at a time. Put a second builder on a second workspace, not a second thread on the same one.
 - The model, effort and permission mode are the agent's own defaults; the command line and the MCP tools cannot choose them yet. Choose the role by the brief and the agent, and keep review threads short.
+
+## Tools the catalog does not carry
+
+`wsp recipe` ticks catalog rows. A tool the person's projects use that the catalog has no row for goes on the image as its own row:
+
+```
+wsp recipe --add just="brew install just" --add-check just="just --version"
+wsp recipe --add ruff="uv tool install ruff"
+```
+
+`--add <id>=<install command>` is repeatable and `--add-check <id>=<command>` says what proves the tool landed (without one, `command -v <id>`). The line runs on the machine as given, as root, after every catalog install, with Homebrew and apt already there. Rules for adding one:
+
+- Add only what the person's own history or their repository files show in use: a formula in their Brewfile, a tool their agents ran, a runner their project's config names. Never add on a guess.
+- Prefer a Homebrew, npm, uv or apt form (`brew install x`, `npm install -g x`, `uv tool install x`, `apt-get install -y x`) over a downloader. A line that pipes a download into a shell is refused in review.
+- One tool per row, so a row that fails names the tool that failed. A failed row does not fail the build; it is listed as failed on the machine's lineage.
+- There is no sign-in for these rows. A tool that needs a login needs a catalog row; say so instead of adding it.
+
+`wsp init` also offers what this Mac's package managers already have, on the Also on this Mac screen, and a tick there writes the same kind of row with the size measured here.
 
 ## Rules learned the hard way
 

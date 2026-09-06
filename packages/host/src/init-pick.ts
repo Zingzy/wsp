@@ -12,13 +12,15 @@ import { S_BAR, S_STEP_ACTIVE, S_STEP_CANCEL, S_STEP_SUBMIT } from "@clack/promp
 import { CATALOG_AGENTS, CATALOG_TOOLS, MCP_AGENTS, type CatalogEntry, type ToolEntry, agentName as catalogName } from "@wsp/catalog";
 import type { LoginChoice, Manifest, ManifestEntry } from "@wsp/collect";
 import { MEASURED_ON, estimateDisk, isMcpRow, parseMcpId, type BrewTable, type DiskEstimate } from "@wsp/engine";
-import { fmtBytes, plural, type Recipe, type RecipeRow } from "@wsp/protocol";
+import { customRows, fmtBytes, plural, type Recipe, type RecipeRow } from "@wsp/protocol";
 import { mcpConfigFile } from "./mcp-install.js";
 import { GUTTER, S_BAR_FOCUS, S_BAR_FOCUS_END, colourDepth, helpLine, isTTY, widthOf, wrap, type HelpKey } from "./init-layout.js";
 import { agentName, applyRecipe, comingRows, defaultAnswers, initialChoice, isTickable, loginShown, loginTool, rowsHere } from "./init-recipe.js";
+import { ALSO_TITLE, alsoItems, scannedTicks, withScanned } from "./init-also.js";
 import { rungSelect, type FooterLine, type SelectItem } from "./init-select.js";
 import { diskLine, diskTone } from "./init-weight.js";
 import { hasLogin, signInFor } from "./signin-table.js";
+import type { ScanRow } from "./scan.js";
 
 export const AGENTS_TITLE = "Agents";
 export const NEED_TITLE = "What they need";
@@ -102,7 +104,7 @@ function rowsFor(manifest: Manifest, recipe: Recipe): { rows: ManifestEntry[]; b
 /** What the recipe costs on the builder's disk: the collector's rows it ticks, sized as the build would size them. */
 export function pickEstimate(manifest: Manifest, recipe: Recipe, brew: BrewTable): DiskEstimate {
   const { rows, bytes } = rowsFor(manifest, recipe);
-  return estimateDisk(rows, bytes, brew);
+  return estimateDisk(rows, bytes, brew, customRows(recipe));
 }
 
 /** The Disk line, loud in its weight's colour: the one loud element on the screen. */
@@ -345,6 +347,8 @@ export interface PickOptions {
   from: "agents" | "logins";
   /** The person's home, where an agent's config is read for the wsp tools rows. */
   home: string;
+  /** What the package managers here could put on the image: the Also on this Mac screen. With none, that screen is not shown. */
+  scan?: readonly ScanRow[];
   input: Readable;
   output: Writable;
 }
@@ -357,11 +361,12 @@ export interface Picked {
   wspTools: Set<string>;
 }
 
-type Screen = "agents" | "need" | "logins";
+type Screen = "agents" | "need" | "also" | "logins";
 
 /** The screens in order, esc stepping back one; the recipe carries the ticks between them. */
 export async function pickScreens(o: PickOptions): Promise<Picked | "cancel"> {
-  const screens: readonly Screen[] = o.from === "agents" ? ["agents", "need", "logins"] : ["logins"];
+  const scan = o.scan ?? [];
+  const screens: readonly Screen[] = o.from === "agents" ? ["agents", "need", ...(scan.length > 0 ? (["also"] as const) : []), "logins"] : ["logins"];
   let recipe = o.recipe;
   let logins = new Map<string, LoginChoice>();
   let wspTools = new Set<string>();
@@ -400,6 +405,21 @@ export async function pickScreens(o: PickOptions): Promise<Picked | "cancel"> {
         });
         if (r.kind === "cancel") return "cancel";
         recipe = withTools(recipe, r.ticks);
+        break;
+      }
+      case "also": {
+        // The Disk line follows the ticks here too: these are the heavy rows, and they are what the boot check reads.
+        const r = await rungSelect({
+          title: ALSO_TITLE,
+          counter,
+          items: alsoItems(scan),
+          initial: scannedTicks(recipe, scan),
+          footer: ticks => [diskFooter(pickEstimate(o.manifest, withScanned(recipe, scan, ticks), o.brew))],
+          ...streams,
+        });
+        if (r.kind === "cancel") return "cancel";
+        recipe = withScanned(recipe, scan, r.ticks);
+        i += r.kind === "back" ? -1 : 1;
         break;
       }
       case "logins": {
