@@ -73,7 +73,8 @@ function cwdOf(line: string): string | undefined {
 /**
  * Moves every directory under parent keyed by `keyOf` to a path at or under `from`: the key is lossy (a slash and a
  * dash key alike), so the transcript's recorded cwd decides, and a directory with no transcript moves only when it is
- * the project's own key. Returns the renamed directories and every transcript whose cwd was rewritten.
+ * the project's own key. A directory two projects share through the key moves or stays whole on its first transcript.
+ * Returns the renamed directories and every transcript whose cwd was rewritten.
  */
 export async function moveKeyedDirectories(parent: string, keyOf: (path: string) => string, from: string, to: string): Promise<{ files: string[]; changed: number }> {
   const files: string[] = [];
@@ -121,6 +122,7 @@ export function filesUnder(dir: string, ext: string): string[] {
 
 /**
  * Rewrites the JSON lines `edit` returns true for and leaves every other byte alone, including a truncated last line.
+ * A rewritten line is re-serialized, so integer-like keys reorder and integers past 2^53 round on that line alone.
  * Returns the count of lines rewritten; a file with none is not touched.
  */
 export async function rewriteJsonl(file: string, edit: (line: Record<string, unknown>) => boolean): Promise<number> {

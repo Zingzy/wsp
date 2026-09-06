@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The agents that index sessions in sqlite (Codex, OpenCode, Hermes) get their
-// rows updated through node's own sqlite binding, so the engine carries no
-// native dependency. A missing database is nothing found, never created.
+// The agents that index sessions in sqlite get their rows updated through
+// node's own binding, so the engine carries no native dependency. A missing
+// database is nothing found, never created.
 import { existsSync } from "node:fs";
-import type { SQLInputValue } from "node:sqlite";
-
-// vite-node 2 does not list node:sqlite as a builtin and would try to resolve it as a package.
-const { DatabaseSync } = process.getBuiltinModule("node:sqlite") as typeof import("node:sqlite");
+import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 
 export interface RowUpdate {
   sql: string;
@@ -19,16 +16,25 @@ export const underPath = (column: string): string => `(${column} = $from or subs
 export const movedColumn = (column: string): string => `iif(${underPath(column)}, $to || substr(${column}, length($from) + 1), ${column})`;
 export const pathParams = (from: string, to: string): Record<string, SQLInputValue> => ({ $from: from, $to: to });
 
-/** Runs each update in one transaction and returns the rows each one changed, or nothing when the file is absent. */
-export function updateRows(db: string, updates: readonly RowUpdate[]): number[] | undefined {
+/** Runs fn on the open database inside one transaction, or returns nothing when the file is absent. */
+export function inTransaction<T>(db: string, fn: (d: DatabaseSync) => T): T | undefined {
   if (!existsSync(db)) return undefined;
+  // Fetched here, not at import: loading node:sqlite prints an ExperimentalWarning, and vite-node 2 cannot resolve an import of it.
+  const { DatabaseSync } = process.getBuiltinModule("node:sqlite") as typeof import("node:sqlite");
   const d = new DatabaseSync(db);
   try {
     d.exec("begin");
-    const changed = updates.map(u => Number(d.prepare(u.sql).run(u.params).changes));
+    const out = fn(d);
     d.exec("commit");
-    return changed;
+    return out;
   } finally {
     d.close();
   }
 }
+
+/** Runs one update and returns the rows it changed. */
+export const runUpdate = (d: DatabaseSync, u: RowUpdate): number => Number(d.prepare(u.sql).run(u.params).changes);
+
+/** Runs each update in one transaction and returns the rows each one changed, or nothing when the file is absent. */
+export const updateRows = (db: string, updates: readonly RowUpdate[]): number[] | undefined =>
+  inTransaction(db, d => updates.map(u => runUpdate(d, u)));

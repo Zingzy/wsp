@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The registry of project-state resolvers, one per catalog agent, and the core
-// that walks the catalog's agents and applies each one. Adding an agent is its
-// catalog entry, its module and one line in the list below; nothing here
-// switches on an agent id.
+// The registry of project-state resolvers by catalog agent id, and the core
+// that walks the catalog's agents and applies each one. The catalog cannot
+// import the engine, so this registry is the one engine place an agent
+// touches: its entry, its module and one line below. Nothing here switches
+// on an agent id.
 import { existsSync } from "node:fs";
-import { CATALOG_AGENTS } from "@wsp/catalog";
+import { CATALOG_AGENTS, type AgentEntry } from "@wsp/catalog";
 import { claudeResolver } from "./claude.js";
 import { codexResolver } from "./codex.js";
 import { geminiResolver } from "./gemini.js";
@@ -15,14 +16,9 @@ import { resolveProjectPath, type MovedState, type ProjectStateResolver } from "
 
 export { resolveProjectPath, type MovedState, type ProjectStateResolver } from "./resolver.js";
 
-export const PROJECT_STATE_RESOLVERS: readonly ProjectStateResolver[] = [
-  claudeResolver,
-  codexResolver,
-  geminiResolver,
-  opencodeResolver,
-  piResolver,
-  hermesResolver,
-];
+export const PROJECT_STATE_RESOLVERS: ReadonlyMap<string, ProjectStateResolver> = new Map(
+  [claudeResolver, codexResolver, geminiResolver, hermesResolver, opencodeResolver, piResolver].map(r => [r.agent, r]),
+);
 
 export interface ProjectStateMove {
   /** The project's old absolute path, as the agents stored it on the machine it came from. */
@@ -41,12 +37,12 @@ export type AgentMoveReport =
   | { agent: string; outcome: "failed"; error: string };
 
 /** Applies the move for every catalog agent and reports each one; a home is left as it was when its move fails. */
-export async function moveProjectState(move: ProjectStateMove, resolvers: readonly ProjectStateResolver[] = PROJECT_STATE_RESOLVERS): Promise<AgentMoveReport[]> {
+export async function moveProjectState(move: ProjectStateMove, agents: readonly Pick<AgentEntry, "id">[] = CATALOG_AGENTS): Promise<AgentMoveReport[]> {
   const from = resolveProjectPath(move.from);
   const to = resolveProjectPath(move.to);
   const report: AgentMoveReport[] = [];
-  for (const { id: agent } of CATALOG_AGENTS) {
-    const resolver = resolvers.find(r => r.agent === agent);
+  for (const { id: agent } of agents) {
+    const resolver = PROJECT_STATE_RESOLVERS.get(agent);
     if (from === to) {
       report.push({ agent, outcome: "nothing" });
       continue;

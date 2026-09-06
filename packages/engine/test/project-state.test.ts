@@ -68,7 +68,7 @@ function seed(db: string, schema: string, inserts: readonly [string, readonly (s
 }
 
 const resolverFor = (agent: string): ProjectStateResolver => {
-  const r = PROJECT_STATE_RESOLVERS.find(x => x.agent === agent);
+  const r = PROJECT_STATE_RESOLVERS.get(agent);
   if (r === undefined) throw new Error(`no resolver for ${agent}`);
   return r;
 };
@@ -250,6 +250,25 @@ describe("codex resolver", () => {
     write(join(home, "config.toml"), "");
     expect(await resolverFor("codex").move(home, FROM, TO)).toEqual([]);
   });
+
+  it("reads only the rollouts the index names, under this home even when rollout_path was recorded under another", async () => {
+    const home = join(scratch(), "codex");
+    const t1 = join("sessions", "2026", "09", "05", "rollout-2026-09-05T21-58-00-t1.jsonl");
+    const orphan = join(home, "sessions", "2026", "09", "05", "rollout-2026-09-05T23-00-00-t9.jsonl");
+    write(join(home, t1), lines(codexMeta(FROM), codexItem, codexTurn(FROM)));
+    write(orphan, lines(codexMeta(FROM), codexItem));
+    seed(join(home, "state_5.sqlite"), CODEX_SCHEMA, [["insert into threads values (?, ?, ?, 0, 1)", ["t1", join("/Users/me/.codex", t1), FROM]]]);
+    const moved = await resolverFor("codex").move(home, FROM, TO);
+    expect(tree(home)).toEqual({
+      [t1]: lines(codexMeta(TO), codexItem, codexTurn(TO)),
+      "sessions/2026/09/05/rollout-2026-09-05T23-00-00-t9.jsonl": lines(codexMeta(FROM), codexItem),
+      "state_5.sqlite": { threads: [{ id: "t1", rollout_path: join("/Users/me/.codex", t1), cwd: TO, archived: 0, updated_at: 1 }] },
+    });
+    expect(moved).toEqual([
+      { state: "thread index", files: [join(home, "state_5.sqlite")], changed: 1 },
+      { state: "rollout transcript", files: [join(home, t1)], changed: 2 },
+    ]);
+  });
 });
 
 // --- Hermes -----------------------------------------------------------------------------------------------------------
@@ -412,13 +431,15 @@ describe("opencode resolver", () => {
 // --- the core ---------------------------------------------------------------------------------------------------------
 
 describe("moveProjectState", () => {
-  it("registers one module per catalog agent, each naming only measured rows of its entry", () => {
-    expect(PROJECT_STATE_RESOLVERS.map(r => r.agent)).toEqual(CATALOG_AGENTS.map(a => a.id));
-    for (const a of CATALOG_AGENTS) {
-      const measured = a.projectState.filter(s => s.status === "measured").map(s => s.state);
-      const r = resolverFor(a.id);
-      expect(r.states.length, a.id).toBeGreaterThan(0);
-      for (const s of r.states) expect(measured, `${a.id} ${s}`).toContain(s);
+  it("registers each module under its own catalog agent, naming only measured rows of that entry", () => {
+    expect(PROJECT_STATE_RESOLVERS.size).toBeGreaterThan(0);
+    for (const [id, r] of PROJECT_STATE_RESOLVERS) {
+      expect(r.agent).toBe(id);
+      const entry = CATALOG_AGENTS.find(a => a.id === id);
+      if (entry === undefined) throw new Error(`${id} is not a catalog agent`);
+      const measured = entry.projectState.filter(s => s.status === "measured").map(s => s.state);
+      expect(r.states.length, id).toBeGreaterThan(0);
+      for (const s of r.states) expect(measured, `${id} ${s}`).toContain(s);
     }
   });
 
@@ -442,13 +463,14 @@ describe("moveProjectState", () => {
     expect(report[0]).toMatchObject({ outcome: "moved", moved: [{ state: "session transcripts" }, { state: "auto memory" }] });
   });
 
-  it("reports an agent without a module as transcript-only and never touches its home", async () => {
+  it("reports a catalog agent without a module as transcript-only and never touches its home", async () => {
     const root = scratch();
-    const hermes = hermesHome(root);
-    const before = tree(hermes);
-    const report = await moveProjectState({ from: FROM, to: TO, homes: { hermes } }, PROJECT_STATE_RESOLVERS.filter(r => r.agent !== "hermes"));
-    expect(report.find(r => r.agent === "hermes")).toEqual({ agent: "hermes", outcome: "transcript-only" });
-    expect(tree(hermes)).toEqual(before);
+    const home = hermesHome(root);
+    const before = tree(home);
+    const report = await moveProjectState({ from: FROM, to: TO, homes: { newagent: home } }, [...CATALOG_AGENTS, { id: "newagent" }]);
+    expect(report.find(r => r.agent === "newagent")).toEqual({ agent: "newagent", outcome: "transcript-only" });
+    expect(report.filter(r => r.outcome === "transcript-only")).toHaveLength(1);
+    expect(tree(home)).toEqual(before);
   });
 
   it("keys on the real path: a symlinked destination resolves before the dashed key is built", async () => {
