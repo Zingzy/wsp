@@ -12,6 +12,7 @@ import {
   goldenHead,
   importInto,
   landBundle,
+  parseMergeOutput,
   plural,
   agentsOnMachine,
   guestAgentHomes,
@@ -221,10 +222,12 @@ export interface StateRequest {
 }
 
 /** The agents' state as the host packs it: an archive of each agent's files at its machine home, for the guest's
- * root, and what became of each agent. */
+ * root, what became of each agent, and the merge scripts in the archive by agent, each at its path on the guest, for
+ * the runtime to run once the archive has landed. */
 export interface PackedState {
   tar: Buffer;
   agents: ProjectAgentResult[];
+  merges: { agent: string; script: string }[];
 }
 
 /** A folder on this computer as the host reads it; the runtime never touches the disk itself. `plan` reads names
@@ -362,6 +365,33 @@ const OUTCOME_WORDS: Record<Exclude<ProjectAgentOutcome, "failed">, string> = {
   carried: "carried unchanged since it is not on the machine",
   nothing: "had nothing to carry",
 };
+function outcomeWords(a: ProjectAgentResult): string {
+  if (a.outcome === "failed") return `failed: ${a.error ?? "no reason given"}`;
+  const word = OUTCOME_WORDS[a.outcome];
+  if (a.outcome === "moved" && a.rows !== undefined) return a.rows > 0 ? `${word}, ${plural(a.rows, "row")} merged` : `${word}, its rows already there`;
+  if (a.outcome === "transcript-only" && a.note !== undefined) return `${word} (${a.note})`;
+  return word;
+}
+/** Bounds a merge that hangs; one project's rows take python3 well under it. */
+const MERGE_DEADLINE_MS = 120_000;
+
+/** Runs one agent's merge script on the machine and folds what it printed into the agent's result: rows merged is
+ * moved, a store not there yet leaves the rows waiting with the reason, a failure carries the last line of stderr.
+ * The script is removed either way, and its directory once it is empty. */
+async function mergeOnMachine(machine: Machine, script: string, agent: ProjectAgentResult): Promise<ProjectAgentResult> {
+  const dir = script.slice(0, script.lastIndexOf("/"));
+  const run = await machine.run(`python3 ${shellQuote(script)}; s=$?; rm -f ${shellQuote(script)}; rmdir ${shellQuote(dir)} 2>/dev/null; exit $s`, { deadlineMs: MERGE_DEADLINE_MS });
+  if (run.exitCode !== 0) {
+    const why = run.stderr.trimEnd().split("\n").at(-1) || "no output";
+    return { ...agent, outcome: "failed", error: `the merge on the machine failed (exit ${run.exitCode}): ${why}` };
+  }
+  try {
+    const out = parseMergeOutput(run.stdout);
+    return "waiting" in out ? { ...agent, note: out.waiting } : { ...agent, outcome: "moved", rows: out.merged };
+  } catch (e) {
+    return { ...agent, outcome: "failed", error: e instanceof Error ? e.message : String(e) };
+  }
+}
 
 /** Vite's and Next's refusals fit in a few hundred bytes; a page that loaded fine is not carried back whole. */
 export const PORT_PROBE_BODY_CAP = 2048;
@@ -2501,19 +2531,28 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           onLanding: () => report("landing", `Landing at ${o.dest}.`),
         });
         const nameOf = (id: string): string => plan.agents.find(a => a.agent === id)?.name ?? id;
-        const outcomes = (state?.agents ?? []).map(a => `${nameOf(a.agent)} ${a.outcome === "failed" ? `failed: ${a.error ?? "no reason given"}` : OUTCOME_WORDS[a.outcome]}`);
-        if (state !== undefined && state.agents.some(a => a.files > 0)) {
-          const files = state.agents.reduce((n, a) => n + a.files, 0);
-          report("uploading", `Uploading ${plural(files, "session file")}, ${fmtBytes(state.tar.length)}.`, { bytes: 0, total: state.tar.length });
+        const agents = [...(state?.agents ?? [])];
+        const outcomes = (): string => agents.map(a => `${nameOf(a.agent)} ${outcomeWords(a)}`).join(", ");
+        if (state !== undefined && (agents.some(a => a.files > 0) || state.merges.length > 0)) {
+          const files = agents.reduce((n, a) => n + a.files, 0);
+          const what = [...(files > 0 ? [plural(files, "session file")] : []), ...(state.merges.length > 0 ? ["the rows to merge"] : [])].join(" and ");
+          report("uploading", `Uploading ${what}, ${fmtBytes(state.tar.length)}.`, { bytes: 0, total: state.tar.length });
           await importInto(entry.machine, state.tar, "/", {
             overlay: true,
             timeoutMs: 600_000,
             onPart: p => report("uploading", `Part ${p.part} of ${p.parts}, ${fmtBytes(p.bytes)} of ${fmtBytes(p.total)}.`, { bytes: p.bytes, total: p.total }),
           });
-          report("landing", `Landing sessions: ${outcomes.join(", ")}.`);
+          if (state.merges.length > 0) {
+            report("landing", `Merging rows into ${state.merges.map(m => nameOf(m.agent)).join(", ")}.`);
+            for (const m of state.merges) {
+              const at = agents.findIndex(a => a.agent === m.agent);
+              if (at >= 0) agents[at] = await mergeOnMachine(entry.machine, m.script, agents[at]!);
+            }
+          }
+          report("landing", `Landing sessions: ${outcomes()}.`);
         }
-        report("done", `${plural(packed.files, "file")}, ${fmtBytes(packed.bytes)}, landed at ${o.dest}${parts > 1 ? ` in ${parts} parts` : ""}${outcomes.length > 0 ? `; sessions: ${outcomes.join(", ")}` : ""}.`);
-        return { dest: o.dest, files: packed.files, bytes: packed.bytes, parts, cut: packed.cut, rewritten: packed.rewritten, agents: state?.agents ?? [] };
+        report("done", `${plural(packed.files, "file")}, ${fmtBytes(packed.bytes)}, landed at ${o.dest}${parts > 1 ? ` in ${parts} parts` : ""}${agents.length > 0 ? `; sessions: ${outcomes()}` : ""}.`);
+        return { dest: o.dest, files: packed.files, bytes: packed.bytes, parts, cut: packed.cut, rewritten: packed.rewritten, agents };
       } catch (e) {
         report("failed", e instanceof Error ? e.message : String(e));
         throw e;

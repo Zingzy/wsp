@@ -2,13 +2,14 @@
 // Each fixture is the tree an agent left after one headless scratch run, as
 // measured on 2026-09-05; the move runs against it and the tree is compared
 // byte for byte with what the agent needs at the new path.
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { ProjectCarry } from "@wsp/protocol";
-import { PROJECT_STATE_RESOLVERS, agentHomes, countProjectState, guestAgentHomes, moveProjectState, resolveProjectPath, underProject, type ProjectStateResolver } from "../src/project-state/index.js";
+import { PROJECT_STATE_RESOLVERS, agentHomes, countProjectState, guestAgentHomes, moveProjectState, parseMergeOutput, resolveProjectPath, underProject, type MergeOutput, type ProjectStateResolver } from "../src/project-state/index.js";
 
 const { DatabaseSync } = process.getBuiltinModule("node:sqlite") as typeof import("node:sqlite");
 
@@ -285,6 +286,8 @@ function hermesHome(root: string): string {
     ["insert into sessions values (?, ?, ?, 1)", ["20260906_035000_cccccc", FROM_SUB, FROM]],
     ["insert into sessions values (?, ?, ?, 1)", ["20260906_036000_dddddd", DECOY, DECOY]],
     ["insert into messages values (1, ?, 'hi')", ["20260906_033144_55e3e2"]],
+    ["insert into messages values (2, ?, 'there')", ["20260906_033144_55e3e2"]],
+    ["insert into messages values (3, ?, 'other')", ["20260906_030000_aaaaaa"]],
   ]);
   write(join(home, "sessions", "request_dump_20260906_033144_55e3e2_1.json"), "{}\n");
   return home;
@@ -303,7 +306,11 @@ describe("hermes resolver", () => {
           { id: "20260906_035000_cccccc", cwd: TO_SUB, git_repo_root: TO, message_count: 1 },
           { id: "20260906_036000_dddddd", cwd: DECOY, git_repo_root: DECOY, message_count: 1 },
         ],
-        messages: [{ id: 1, session_id: "20260906_033144_55e3e2", content: "hi" }],
+        messages: [
+          { id: 1, session_id: "20260906_033144_55e3e2", content: "hi" },
+          { id: 2, session_id: "20260906_033144_55e3e2", content: "there" },
+          { id: 3, session_id: "20260906_030000_aaaaaa", content: "other" },
+        ],
       },
       "sessions/request_dump_20260906_033144_55e3e2_1.json": "{}\n",
     });
@@ -376,7 +383,19 @@ const OPENCODE_SCHEMA = [
   "create table project (id text primary key, worktree text not null, vcs text, name text, sandboxes text, time_created integer)",
   "create table project_directory (project_id text not null, directory text not null, primary key (project_id, directory))",
   "create table session (id text primary key, project_id text not null, directory text not null, title text)",
+  "create table message (id text primary key, session_id text not null, role text)",
+  "create table part (id text primary key, message_id text not null, text text)",
 ].join(";");
+const OPENCODE_MESSAGES = {
+  message: [
+    { id: "msg_1", session_id: "ses_1", role: "user" },
+    { id: "msg_2", session_id: "ses_2", role: "user" },
+  ],
+  part: [
+    { id: "prt_1", message_id: "msg_1", text: "hi" },
+    { id: "prt_2", message_id: "msg_2", text: "loose" },
+  ],
+};
 
 function opencodeHome(root: string): string {
   const home = join(root, "opencode");
@@ -392,6 +411,10 @@ function opencodeHome(root: string): string {
     ["insert into session values ('ses_2', 'global', ?, 'loose')", ["/Users/me/scratch"]],
     ["insert into session values ('ses_3', ?, ?, 'deeper')", [HASH, FROM_SUB]],
     ["insert into session values ('ses_4', 'deadbeef', ?, 'sibling')", [DECOY]],
+    ["insert into message values ('msg_1', 'ses_1', 'user')", []],
+    ["insert into message values ('msg_2', 'ses_2', 'user')", []],
+    ["insert into part values ('prt_1', 'msg_1', 'hi')", []],
+    ["insert into part values ('prt_2', 'msg_2', 'loose')", []],
   ]);
   return home;
 }
@@ -419,6 +442,7 @@ describe("opencode resolver", () => {
           { id: "ses_3", project_id: HASH, directory: TO_SUB, title: "deeper" },
           { id: "ses_4", project_id: "deadbeef", directory: DECOY, title: "sibling" },
         ],
+        ...OPENCODE_MESSAGES,
       },
     });
     expect(moved).toEqual([
@@ -649,5 +673,252 @@ describe("countProjectState", () => {
     expect(Object.keys(guest)).toEqual(CATALOG_AGENTS.map(a => a.id));
     expect(guest["claude"]).toBe("/root/.claude-cfg");
     expect(guest["codex"]).toBe("/root/.codex");
+  });
+});
+
+// --- the merge on the machine -----------------------------------------------------------------------------------------
+// The rows an agent keeps in a store shared with other projects cannot land as files, so the module emits a script the
+// machine runs: here python3 runs it over a fake machine home that already holds another project's rows.
+
+const mergeFor = (agent: string): NonNullable<ProjectStateResolver["merge"]> => {
+  const merge = resolverFor(agent).merge;
+  if (merge === undefined) throw new Error(`${agent} has no merge`);
+  return merge.bind(resolverFor(agent));
+};
+
+/** Runs the script as the runtime does on the machine: python3 over a file, the last stdout line as the result. */
+function runMerge(script: string): { exit: number; out: MergeOutput | undefined; err: string } {
+  const file = join(scratch(), "merge.py");
+  writeFileSync(file, script);
+  const r = spawnSync("python3", [file], { encoding: "utf8" });
+  let out: MergeOutput | undefined;
+  try {
+    out = parseMergeOutput(r.stdout);
+  } catch {
+    out = undefined;
+  }
+  return { exit: r.status ?? -1, out, err: r.stderr };
+}
+
+/** A machine's Codex home after the overlay landed: its own thread for another project, and the project's rollouts
+ * as they left this computer, cwd unrewritten because the skeleton had no index to name them. */
+function codexGuest(root: string): string {
+  const guest = join(root, "guest-codex");
+  const t2 = join(guest, "sessions", "2026", "09", "04", "rollout-2026-09-04T10-00-00-t2.jsonl");
+  write(t2, lines(codexMeta(OTHER), codexItem, codexTurn(OTHER)));
+  write(join(guest, "sessions", "2026", "09", "05", "rollout-2026-09-05T21-58-00-t1.jsonl"), lines(codexMeta(FROM), codexItem, codexTurn(FROM), codexEvent));
+  write(join(guest, "sessions", "2026", "09", "05", "rollout-2026-09-05T22-00-00-t3.jsonl"), lines(codexMeta(FROM_SUB), codexItem, codexTurn(FROM_SUB)));
+  seed(join(guest, "state_5.sqlite"), CODEX_SCHEMA, [["insert into threads values (?, ?, ?, 0, 7)", ["t2", t2, OTHER]]]);
+  return guest;
+}
+
+describe("merge on the machine", () => {
+  it("Codex: the project's thread rows land in the machine's index at the machine paths, the landed rollouts get their cwd, the machine's own rows stay, a thread whose rollout never travelled is not listed, and a second run changes nothing", async () => {
+    const root = scratch();
+    const mac = codexHome(root);
+    const guest = codexGuest(root);
+    seed(join(mac, "state_5.sqlite"), "", [["insert into threads values ('t5', ?, ?, 1, 5)", [join(mac, "archived_sessions", "rollout-2026-09-01T09-00-00-t5.jsonl"), FROM]]]);
+    const before = tree(mac);
+    const script = await mergeFor("codex")(mac, FROM, TO, guest);
+    if (script === undefined) throw new Error("no script");
+    expect(runMerge(script)).toEqual({ exit: 0, out: { merged: 2, kept: 0 }, err: "" });
+    const t1 = join(guest, "sessions", "2026", "09", "05", "rollout-2026-09-05T21-58-00-t1.jsonl");
+    const t2 = join(guest, "sessions", "2026", "09", "04", "rollout-2026-09-04T10-00-00-t2.jsonl");
+    const t3 = join(guest, "sessions", "2026", "09", "05", "rollout-2026-09-05T22-00-00-t3.jsonl");
+    const after = {
+      "sessions/2026/09/04/rollout-2026-09-04T10-00-00-t2.jsonl": lines(codexMeta(OTHER), codexItem, codexTurn(OTHER)),
+      "sessions/2026/09/05/rollout-2026-09-05T21-58-00-t1.jsonl": lines(codexMeta(TO), codexItem, codexTurn(TO), codexEvent),
+      "sessions/2026/09/05/rollout-2026-09-05T22-00-00-t3.jsonl": lines(codexMeta(TO_SUB), codexItem, codexTurn(TO_SUB)),
+      "state_5.sqlite": {
+        threads: [
+          { id: "t1", rollout_path: t1, cwd: TO, archived: 0, updated_at: 1 },
+          { id: "t2", rollout_path: t2, cwd: OTHER, archived: 0, updated_at: 7 },
+          { id: "t3", rollout_path: t3, cwd: TO_SUB, archived: 0, updated_at: 3 },
+        ],
+      },
+    };
+    expect(tree(guest)).toEqual(after);
+    expect(runMerge(script)).toEqual({ exit: 0, out: { merged: 0, kept: 2 }, err: "" });
+    expect(tree(guest)).toEqual(after);
+    expect(tree(mac)).toEqual(before);
+  });
+
+  it("Codex: a thread the machine already lists keeps its own columns and gets only cwd and rollout_path", async () => {
+    const root = scratch();
+    const mac = codexHome(root);
+    const guest = codexGuest(root);
+    const t1 = join(guest, "sessions", "2026", "09", "05", "rollout-2026-09-05T21-58-00-t1.jsonl");
+    seed(join(guest, "state_5.sqlite"), "", [["insert into threads values ('t1', ?, ?, 1, 9)", ["/Users/me/.codex/sessions/2026/09/05/rollout-2026-09-05T21-58-00-t1.jsonl", FROM]]]);
+    const script = await mergeFor("codex")(mac, FROM, TO, guest);
+    expect(runMerge(script!).out).toEqual({ merged: 2, kept: 0 });
+    expect((tree(guest)["state_5.sqlite"] as Record<string, unknown[]>)["threads"]).toEqual([
+      { id: "t1", rollout_path: t1, cwd: TO, archived: 1, updated_at: 9 },
+      expect.objectContaining({ id: "t2" }),
+      expect.objectContaining({ id: "t3" }),
+    ]);
+  });
+
+  it("a machine without the store waits and gets no store; a store whose table lacks a column fails and is left as it was", async () => {
+    const root = scratch();
+    const mac = codexHome(root);
+    const empty = join(root, "guest-empty");
+    mkdirSync(empty);
+    const script = await mergeFor("codex")(mac, FROM, TO, empty);
+    expect(runMerge(script!)).toEqual({ exit: 0, out: { waiting: `no ${join(empty, "state_5.sqlite")} on the machine` }, err: "" });
+    expect(tree(empty)).toEqual({});
+    const old = join(root, "guest-old");
+    seed(join(old, "state_5.sqlite"), "create table threads (id text primary key, rollout_path text not null, cwd text not null)", [["insert into threads values ('t2', 'x', ?)", [OTHER]]]);
+    const before = tree(old);
+    const run = runMerge((await mergeFor("codex")(mac, FROM, TO, old))!);
+    expect(run.exit).toBe(1);
+    expect(run.out).toBeUndefined();
+    expect(run.err).toMatch(/no column named archived|has no column named archived/);
+    expect(tree(old)).toEqual(before);
+  });
+
+  it("Hermes: the sessions at the path or under it land with cwd and git_repo_root moved, a null root stays null, their messages land under the machine's own ids, the machine's rows and messages stay", async () => {
+    const root = scratch();
+    const mac = hermesHome(root);
+    const guest = join(root, "guest-hermes");
+    seed(join(guest, "state.db"), HERMES_SCHEMA, [
+      ["insert into sessions values (?, ?, ?, 1)", ["20260906_030000_aaaaaa", "/root/other", "/root/other"]],
+      ["insert into messages values (1, ?, 'theirs')", ["20260906_030000_aaaaaa"]],
+    ]);
+    const script = await mergeFor("hermes")(mac, FROM, TO, guest);
+    expect(runMerge(script!)).toEqual({ exit: 0, out: { merged: 5, kept: 0 }, err: "" });
+    const after = {
+      "state.db": {
+        sessions: [
+          { id: "20260906_030000_aaaaaa", cwd: "/root/other", git_repo_root: "/root/other", message_count: 1 },
+          { id: "20260906_033144_55e3e2", cwd: TO, git_repo_root: TO, message_count: 2 },
+          { id: "20260906_034000_bbbbbb", cwd: TO, git_repo_root: null, message_count: 1 },
+          { id: "20260906_035000_cccccc", cwd: TO_SUB, git_repo_root: TO, message_count: 1 },
+        ],
+        messages: [
+          { id: 1, session_id: "20260906_030000_aaaaaa", content: "theirs" },
+          { id: 2, session_id: "20260906_033144_55e3e2", content: "hi" },
+          { id: 3, session_id: "20260906_033144_55e3e2", content: "there" },
+        ],
+      },
+    };
+    expect(tree(guest)).toEqual(after);
+    expect(runMerge(script!).out).toEqual({ merged: 0, kept: 5 });
+    expect(tree(guest)).toEqual(after);
+  });
+
+  it("Hermes: a session whose messages the machine already holds keeps them as they are, even when this computer has more", async () => {
+    const root = scratch();
+    const mac = hermesHome(root);
+    const guest = join(root, "guest-hermes");
+    seed(join(guest, "state.db"), HERMES_SCHEMA, [
+      ["insert into sessions values (?, ?, ?, 1)", ["20260906_033144_55e3e2", TO, TO]],
+      ["insert into messages values (7, ?, 'edited here')", ["20260906_033144_55e3e2"]],
+    ]);
+    expect(runMerge((await mergeFor("hermes")(mac, FROM, TO, guest))!).out).toEqual({ merged: 2, kept: 3 });
+    expect((tree(guest)["state.db"] as Record<string, unknown[]>)["messages"]).toEqual([{ id: 7, session_id: "20260906_033144_55e3e2", content: "edited here" }]);
+  });
+
+  it("OpenCode: the project row keeps its id and takes the machine path with sandboxes cleared, its directories, sessions, messages and parts land, the global project and its sessions stay", async () => {
+    const root = scratch();
+    const mac = opencodeHome(root);
+    const guest = join(root, "guest-opencode");
+    seed(join(guest, "opencode.db"), OPENCODE_SCHEMA, [
+      ["insert into project values (?, '/root/elsewhere/b_2.x', 'git', 'b_2.x', ?, 5)", [HASH, `["/root/elsewhere/b_2.x-copy"]`]],
+      ["insert into project values ('global', '/', null, null, '[]', 0)", []],
+      ["insert into project_directory values ('global', '/root/scratch')", []],
+      ["insert into session values ('ses_9', 'global', '/root/scratch', 'theirs')", []],
+      ["insert into message values ('msg_9', 'ses_9', 'user')", []],
+      ["insert into part values ('prt_9', 'msg_9', 'theirs')", []],
+    ]);
+    const script = await mergeFor("opencode")(mac, FROM, TO, guest);
+    expect(runMerge(script!)).toEqual({ exit: 0, out: { merged: 7, kept: 0 }, err: "" });
+    const after = {
+      "opencode.db": {
+        project: [
+          { id: HASH, worktree: TO, vcs: "git", name: "b_2.x", sandboxes: "[]", time_created: 5 },
+          { id: "global", worktree: "/", vcs: null, name: null, sandboxes: "[]", time_created: 0 },
+        ],
+        project_directory: [
+          { project_id: HASH, directory: TO },
+          { project_id: HASH, directory: TO_SUB },
+          { project_id: "global", directory: "/root/scratch" },
+        ],
+        session: [
+          { id: "ses_1", project_id: HASH, directory: TO, title: "first" },
+          { id: "ses_3", project_id: HASH, directory: TO_SUB, title: "deeper" },
+          { id: "ses_9", project_id: "global", directory: "/root/scratch", title: "theirs" },
+        ],
+        message: [
+          { id: "msg_1", session_id: "ses_1", role: "user" },
+          { id: "msg_9", session_id: "ses_9", role: "user" },
+        ],
+        part: [
+          { id: "prt_1", message_id: "msg_1", text: "hi" },
+          { id: "prt_9", message_id: "msg_9", text: "theirs" },
+        ],
+      },
+    };
+    expect(tree(guest)).toEqual(after);
+    expect(runMerge(script!).out).toEqual({ merged: 0, kept: 7 });
+    expect(tree(guest)).toEqual(after);
+  });
+
+  it("Gemini: the registry keys for the root and the sub-folder land with their slugs, the landed .project_root files get the machine path, the machine's own key stays; a machine without a registry gets one", async () => {
+    const root = scratch();
+    const mac = geminiHome(root);
+    const guest = join(root, "guest-gemini");
+    write(join(guest, "projects.json"), JSON.stringify({ projects: { "/root/other": "other" } }, null, 2) + "\n");
+    write(join(guest, "tmp", "other", ".project_root"), "/root/other");
+    write(join(guest, "tmp", "b_2.x", ".project_root"), FROM);
+    write(join(guest, "tmp", "b_2.x", "chats", "session-2026-09-05T21-59-a1b2c3d4.jsonl"), geminiChat);
+    write(join(guest, "history", "b_2.x", ".project_root"), FROM + "\n");
+    write(join(guest, "tmp", "sub", ".project_root"), FROM_SUB);
+    const script = await mergeFor("gemini")(mac, FROM, TO, guest);
+    expect(runMerge(script!)).toEqual({ exit: 0, out: { merged: 2, kept: 0 }, err: "" });
+    const after = {
+      "projects.json": JSON.stringify({ projects: { "/root/other": "other", [TO]: "b_2.x", [TO_SUB]: "sub" } }, null, 2) + "\n",
+      "tmp/other/.project_root": "/root/other",
+      "tmp/b_2.x/.project_root": TO,
+      "tmp/b_2.x/chats/session-2026-09-05T21-59-a1b2c3d4.jsonl": geminiChat,
+      "history/b_2.x/.project_root": TO + "\n",
+      "tmp/sub/.project_root": TO_SUB,
+    };
+    expect(tree(guest)).toEqual(after);
+    expect(runMerge(script!).out).toEqual({ merged: 0, kept: 2 });
+    expect(tree(guest)).toEqual(after);
+    const bare = join(root, "guest-bare");
+    expect(runMerge((await mergeFor("gemini")(mac, FROM, TO, bare))!).out).toEqual({ merged: 2, kept: 0 });
+    expect(tree(bare)).toEqual({ "projects.json": JSON.stringify({ projects: { [TO]: "b_2.x", [TO_SUB]: "sub" } }, null, 2) + "\n" });
+  });
+
+  it("Gemini: a slug another path on the machine already owns fails naming it, and the registry is left as it was", async () => {
+    const root = scratch();
+    const mac = geminiHome(root);
+    const guest = join(root, "guest-gemini");
+    const registry = JSON.stringify({ projects: { "/root/other/b_2.x": "b_2.x" } }) + "\n";
+    write(join(guest, "projects.json"), registry);
+    const run = runMerge((await mergeFor("gemini")(mac, FROM, TO, guest))!);
+    expect(run).toEqual({ exit: 1, out: undefined, err: `slug b_2.x already belongs to /root/other/b_2.x in ${join(guest, "projects.json")}\n` });
+    expect(tree(guest)).toEqual({ "projects.json": registry });
+  });
+
+  it("a home with no row for the path emits no script; the agents whose files carry every key have no merge", async () => {
+    const root = scratch();
+    for (const [agent, home] of [["codex", codexHome(root)], ["hermes", hermesHome(root)], ["opencode", opencodeHome(root)], ["gemini", geminiHome(root)]] as const) {
+      expect(await mergeFor(agent)(home, "/Users/me/never", TO, "/root/x"), agent).toBeUndefined();
+      const empty = join(root, `${agent}-empty`);
+      mkdirSync(empty);
+      expect(await mergeFor(agent)(empty, FROM, TO, "/root/x"), agent).toBeUndefined();
+    }
+    expect(resolverFor("claude").merge).toBeUndefined();
+    expect(resolverFor("pi").merge).toBeUndefined();
+  });
+
+  it("the script's result is its last line; anything else is an error naming what came back", () => {
+    expect(parseMergeOutput('noise\n{"merged": 2, "kept": 1}\n')).toEqual({ merged: 2, kept: 1 });
+    expect(parseMergeOutput('{"waiting": "no store"}')).toEqual({ waiting: "no store" });
+    expect(() => parseMergeOutput("Traceback\n")).toThrow(/Traceback/);
+    expect(() => parseMergeOutput("")).toThrow(/nothing/);
+    expect(() => parseMergeOutput('{"merged": "x"}')).toThrow(/merged/);
   });
 });

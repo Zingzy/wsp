@@ -648,13 +648,15 @@ describe("the project plan", () => {
       rewritten: [],
       agents: [
         { agent: "claude", files: 3, bytes: 40, outcome: "moved" },
-        { agent: "codex", files: 1, bytes: 40, outcome: "transcript-only" },
+        { agent: "codex", files: 1, bytes: 40, outcome: "moved", rows: 2 },
         { agent: "gemini", files: 1, bytes: 40, outcome: "carried" },
-        { agent: "hermes", files: 0, bytes: 0, outcome: "nothing" },
+        { agent: "hermes", files: 0, bytes: 0, outcome: "transcript-only", note: "no /root/.hermes/state.db on the machine" },
+        { agent: "opencode", files: 0, bytes: 0, outcome: "nothing" },
         { agent: "pi", files: 0, bytes: 0, outcome: "failed", error: "x already exists" },
       ],
     };
     expect(ProjectImportResult.parse(result)).toEqual(result);
     expect(ProjectImportResult.safeParse({ ...result, agents: [{ agent: "pi", files: 0, bytes: 0, outcome: "lost" }] }).success).toBe(false);
+    expect(ProjectImportResult.safeParse({ ...result, agents: [{ agent: "codex", files: 1, bytes: 40, outcome: "moved", rows: "two" }] }).success).toBe(false);
   });
 });

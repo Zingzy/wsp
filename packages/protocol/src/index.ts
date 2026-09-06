@@ -493,12 +493,15 @@ export const ProjectImportEvent = z.object({
 });
 export type ProjectImportEvent = z.infer<typeof ProjectImportEvent>;
 /** What became of one agent the import named: `moved` when the agent is on the machine and its module re-keyed every
- * file to dest, `transcript-only` when it is on the machine but only its files landed and the rows in its shared store
- * that list them stayed behind, `carried` when it is not there so the files landed as they were, `nothing` when no
- * file of its travelled, `failed` when the move raised and nothing of that agent landed; files and bytes are what landed. */
+ * file to dest, or merged its rows into its store there; `transcript-only` when it is on the machine but only its
+ * files landed and the rows in its shared store that list them are still to come; `carried` when it is not there so
+ * the files landed as they were, `nothing` when no file of its travelled, `failed` when the move raised and nothing of
+ * that agent landed, or the merge on the machine failed after its files did; files and bytes are what landed. */
 export const ProjectAgentOutcome = z.enum(["moved", "transcript-only", "carried", "nothing", "failed"]);
 export type ProjectAgentOutcome = z.infer<typeof ProjectAgentOutcome>;
-export const ProjectAgentResult = z.object({ agent: z.string(), files: z.number(), bytes: z.number(), outcome: ProjectAgentOutcome, error: z.string().optional() });
+/** `rows` is what the merge on the machine inserted or updated in the agent's store, once it ran; `note` says why the
+ * rows still wait when they could not be merged yet (the agent has not made its store there). */
+export const ProjectAgentResult = z.object({ agent: z.string(), files: z.number(), bytes: z.number(), outcome: ProjectAgentOutcome, error: z.string().optional(), rows: z.number().optional(), note: z.string().optional() });
 export type ProjectAgentResult = z.infer<typeof ProjectAgentResult>;
 /** What landed: the path on the machine, the files and bytes extracted there, the upload parts, the secret-shaped
  * paths that were cut because the import did not name them, the ones that landed rewritten as the plan offered, and

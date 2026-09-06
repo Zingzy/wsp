@@ -32,9 +32,14 @@ const AGENTS: ProjectAgent[] = [
   { agent: "pi", name: "Pi", sessions: 1, bytes: 512, carry: "moves" },
   { agent: "codex", name: "Codex", sessions: 3, bytes: 900, carry: "transcript-only" },
 ];
+/** An agent whose state for the folder is rows alone: nothing to land as a file, a merge to run. */
+const HERMES: ProjectAgent = { agent: "hermes", name: "Hermes Agent", sessions: 1, bytes: 0, carry: "transcript-only" };
+const MERGE_DIR = "/tmp/wsp-merge-0000";
+const mergeCommand = (agent: string): string => `python3 '${MERGE_DIR}/${agent}.py'; s=$?; rm -f '${MERGE_DIR}/${agent}.py'; rmdir '${MERGE_DIR}' 2>/dev/null; exit $s`;
 
 /** What the host would hand the runtime for a small folder: three secret-shaped files, one binary with an exec bit,
- * and, when asked, three agents with sessions for it; the state pack lands one file per agent under its machine home. */
+ * and, when asked, agents with sessions for it; the state pack lands one file per agent with bytes under its machine
+ * home, and a merge script for each agent on the machine whose rows stay in a shared store. */
 function fakeBundler(extra: ProjectSecret[] = [], agents: ProjectAgent[] = []): ProjectBundler & { calls: string[] } {
   const plan: ProjectPlan = {
     source: SOURCE,
@@ -72,9 +77,15 @@ function fakeBundler(extra: ProjectSecret[] = [], agents: ProjectAgent[] = []): 
     },
     packState: async (req): Promise<PackedState> => {
       calls.push(`state ${req.agents.map(a => `${a.agent}${a.present ? "+" : "-"}`).join(",")} to ${req.dest}`);
-      const files = req.agents.map(a => ({ path: `${a.home}/sessions/${a.agent}.jsonl`, mode: 0o600, content: `${a.agent} at ${a.present ? req.dest : SOURCE}\n` }));
-      const outcome = (a: StateRequest["agents"][number]): ProjectAgentOutcome => (!a.present ? "carried" : agents.find(x => x.agent === a.agent)?.carry === "moves" ? "moved" : "transcript-only");
-      return { tar: tarOf(files), agents: files.map((f, i) => ({ agent: req.agents[i]!.agent, files: 1, bytes: f.content.length, outcome: outcome(req.agents[i]!) })) };
+      const planned = (id: string): ProjectAgent | undefined => agents.find(x => x.agent === id);
+      const files = req.agents.filter(a => (planned(a.agent)?.bytes ?? 0) > 0).map(a => ({ agent: a.agent, path: `${a.home}/sessions/${a.agent}.jsonl`, mode: 0o600, content: `${a.agent} at ${a.present ? req.dest : SOURCE}\n` }));
+      const merges = req.agents.filter(a => a.present && planned(a.agent)?.carry === "transcript-only").map(a => ({ agent: a.agent, script: `${MERGE_DIR}/${a.agent}.py` }));
+      const outcome = (a: StateRequest["agents"][number]): ProjectAgentOutcome => (!a.present ? "carried" : planned(a.agent)?.carry === "moves" ? "moved" : "transcript-only");
+      return {
+        tar: tarOf([...files, ...merges.map(m => ({ path: m.script, mode: 0o600, content: "print()\n" }))]),
+        agents: req.agents.map(a => ({ agent: a.agent, files: files.filter(f => f.agent === a.agent).length, bytes: files.filter(f => f.agent === a.agent).reduce((n, f) => n + f.content.length, 0), outcome: outcome(a) })),
+        merges,
+      };
     },
   };
 }
@@ -173,10 +184,10 @@ describe("project.import on a workspace", () => {
     expect(landing).not.toContain("exit 66");
   });
 
-  it("the agents named travel: their state is packed with the machine's presence per agent, lands as an overlay on the guest's root after the project, and the result says what became of each; an agent not named is never read", async () => {
+  it("the agents named travel: their state is packed with the machine's presence per agent, lands as an overlay on the guest's root after the project, the merges run there, and the result says what became of each; an agent not named is never read", async () => {
     const backend = stubBackend();
     const base = backend.execImpl;
-    backend.execImpl = (m, cmd) => (cmd.includes('echo "missing') ? { exitCode: 0, stdout: "missing pi\n", stderr: "" } : base(m, cmd));
+    backend.execImpl = (m, cmd) => (cmd.includes('echo "missing') ? { exitCode: 0, stdout: "missing pi\n", stderr: "" } : cmd.startsWith("python3 ") ? { exitCode: 0, stdout: 'rewrote 2 rollouts\n{"merged": 3, "kept": 0}\n', stderr: "" } : base(m, cmd));
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
@@ -188,29 +199,68 @@ describe("project.import on a workspace", () => {
     expect(result.agents).toEqual([
       { agent: "claude", files: 1, bytes: Buffer.byteLength("claude at /root/work/proj\n"), outcome: "moved" },
       { agent: "pi", files: 1, bytes: Buffer.byteLength(`pi at ${SOURCE}\n`), outcome: "carried" },
-      { agent: "codex", files: 1, bytes: Buffer.byteLength("codex at /root/work/proj\n"), outcome: "transcript-only" },
+      { agent: "codex", files: 1, bytes: Buffer.byteLength("codex at /root/work/proj\n"), outcome: "moved", rows: 3 },
     ]);
     const probe = backend.machines[0]!.execLog.find(c => c.includes('echo "missing'))!;
     expect(probe).toContain("for b in 'claude' 'codex' 'pi'; do command -v");
     expect(probe).not.toContain("gemini");
     const stages = imports(events);
-    expect(stages.map(e => e.stage)).toEqual(["planned", "consented", "packing", "uploading", "uploading", "landing", "uploading", "uploading", "landing", "done"]);
+    expect(stages.map(e => e.stage)).toEqual(["planned", "consented", "packing", "uploading", "uploading", "landing", "uploading", "uploading", "landing", "landing", "done"]);
     expect(stages[1]!.message).toBe("Carrying .env; cut config/secrets.json, keys/id_ed25519. Sessions travel for Claude Code (2 sessions), Pi (1 session), Codex (3 sessions).");
-    expect(stages[6]!.message).toMatch(/^Uploading 3 session files, /);
-    const said = "Claude Code moved, Pi carried unchanged since it is not on the machine, Codex transcripts landed but not yet in its session list";
-    expect(stages[8]!.message).toBe(`Landing sessions: ${said}.`);
-    expect(stages[9]!.message).toBe(`4 files, 3.9 KB, landed at /root/work/proj; sessions: ${said}.`);
+    expect(stages[6]!.message).toMatch(/^Uploading 3 session files and the rows to merge, /);
+    expect(stages[8]!.message).toBe("Merging rows into Codex.");
+    const said = "Claude Code moved, Pi carried unchanged since it is not on the machine, Codex moved, 3 rows merged";
+    expect(stages[9]!.message).toBe(`Landing sessions: ${said}.`);
+    expect(stages[10]!.message).toBe(`4 files, 3.9 KB, landed at /root/work/proj; sessions: ${said}.`);
     expect(backend.puts).toHaveLength(before + 2);
     const out = extract(backend.puts[before + 1]!.body);
     expect(readFileSync(join(out, "root/.claude-cfg/sessions/claude.jsonl"), "utf8")).toBe("claude at /root/work/proj\n");
     expect(readFileSync(join(out, "root/.pi/agent/sessions/pi.jsonl"), "utf8")).toBe(`pi at ${SOURCE}\n`);
     expect(readFileSync(join(out, "root/.codex/sessions/codex.jsonl"), "utf8")).toBe("codex at /root/work/proj\n");
+    expect(readFileSync(join(out, "tmp/wsp-merge-0000/codex.py"), "utf8")).toBe("print()\n");
     const machine = backend.machines[0]!;
     // The create landed the machine context by the same road; the import's two archives are the last two.
     const untars = machine.runLog.filter(s => s.includes("tar xzf")).slice(-2);
     expect(untars[0]).toMatch(/tar xzf - -C '\/root\/work\/proj\.wsp-in-[^']+' --no-same-owner/);
     expect(untars[1]).toMatch(/tar xzf - -C '\/' --no-same-owner/);
     expect(machine.runLog.findIndex(s => s.includes("mv "))).toBeLessThan(machine.runLog.indexOf(untars[1]!));
+    // The merge runs after the overlay has landed, as a run with a deadline, and takes its script away.
+    const merge = machine.runLog.indexOf(mergeCommand("codex"));
+    expect(merge).toBeGreaterThan(machine.runLog.indexOf(untars[1]!));
+    expect(machine.runLog.filter(s => s.startsWith("python3 "))).toEqual([mergeCommand("codex")]);
+  });
+
+  it("a merge the machine cannot take yet leaves the rows waiting with the reason, one that fails says why, and rows alone still travel", async () => {
+    const backend = stubBackend();
+    const base = backend.execImpl;
+    backend.execImpl = (m, cmd) =>
+      cmd.startsWith(`python3 '${MERGE_DIR}/codex.py'`)
+        ? { exitCode: 0, stdout: '{"waiting": "no /root/.codex/state_5.sqlite on the machine"}\n', stderr: "" }
+        : cmd.startsWith(`python3 '${MERGE_DIR}/hermes.py'`)
+          ? { exitCode: 127, stdout: "", stderr: "bash: line 1: python3: command not found\n" }
+          : base(m, cmd);
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const before = backend.puts.length;
+    const result = await rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/work/proj", agents: ["codex", "hermes"], bundler: fakeBundler([], [...AGENTS, HERMES]) });
+    expect(result.agents).toEqual([
+      { agent: "codex", files: 1, bytes: Buffer.byteLength("codex at /root/work/proj\n"), outcome: "transcript-only", note: "no /root/.codex/state_5.sqlite on the machine" },
+      { agent: "hermes", files: 0, bytes: 0, outcome: "failed", error: "the merge on the machine failed (exit 127): bash: line 1: python3: command not found" },
+    ]);
+    const said = "Codex transcripts landed but not yet in its session list (no /root/.codex/state_5.sqlite on the machine), Hermes Agent failed: the merge on the machine failed (exit 127): bash: line 1: python3: command not found";
+    expect(imports(events).at(-1)!.message).toBe(`3 files, 3.9 KB, landed at /root/work/proj; sessions: ${said}.`);
+    expect(backend.machines[0]!.runLog.filter(s => s.startsWith("python3 "))).toEqual([mergeCommand("codex"), mergeCommand("hermes")]);
+    events.length = 0;
+    backend.execImpl = (m, cmd) => (cmd.startsWith("python3 ") ? { exitCode: 0, stdout: '{"merged": 0, "kept": 1}\n', stderr: "" } : base(m, cmd));
+    const again = await rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/work/other", agents: ["hermes"], bundler: fakeBundler([], [HERMES]) });
+    expect(again.agents).toEqual([{ agent: "hermes", files: 0, bytes: 0, outcome: "moved", rows: 0 }]);
+    expect(backend.puts).toHaveLength(before + 4);
+    const stages = imports(events);
+    expect(stages.map(e => e.stage)).toEqual(["planned", "consented", "packing", "uploading", "uploading", "landing", "uploading", "uploading", "landing", "landing", "done"]);
+    expect(stages[6]!.message).toMatch(/^Uploading the rows to merge, /);
+    expect(stages[10]!.message).toBe("3 files, 3.9 KB, landed at /root/work/other; sessions: Hermes Agent moved, its rows already there.");
   });
 
   it("an agent the plan could not read never travels, even when named, and the consented line says why", async () => {

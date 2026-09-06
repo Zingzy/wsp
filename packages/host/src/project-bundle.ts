@@ -2,6 +2,7 @@
 // A project folder on this computer, read for the trip to a workspace: the tracked tree, the state beside it
 // that is not a cache, and the repository whole. A cache is recreated on the machine, never carried.
 import { execFile } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -288,18 +289,20 @@ export function packProject(listing: ProjectListing, carry: ReadonlySet<string>,
 }
 
 /** One agent's outcome from what travelled and what its module did with it: files the module re-keyed are moved only
- * when its carry says they hold every key; otherwise the rows that list them stayed behind and it is transcript-only. */
-function outcomeOf(files: number, present: boolean, carry: ProjectCarry | undefined, report: AgentMoveReport | undefined): ProjectAgentOutcome {
+ * when its carry says they hold every key; otherwise the rows that list them are still to be merged on the machine
+ * and it is transcript-only until the merge there has run. */
+function outcomeOf(files: number, present: boolean, carry: ProjectCarry | undefined, report: AgentMoveReport | undefined, merging: boolean): ProjectAgentOutcome {
   if (report?.outcome === "failed") return "failed";
-  if (files === 0) return "nothing";
+  if (files === 0 && !merging) return "nothing";
   if (!present) return "carried";
   return report?.outcome === "moved" && carry === "moves" ? "moved" : "transcript-only";
 }
 
 /** Each named agent's state for the folder, copied out of its home on this computer into a home of its own under a
  * scratch directory, re-keyed there to the destination for the agents on the machine, and archived at the agent's
- * machine home for the guest's root. The homes on this computer are read, never written; an agent whose move raises
- * lands nothing and carries the error. */
+ * machine home for the guest's root; beside them, for each agent on the machine whose rows sit in a shared store, the
+ * merge script its module emits, at a scratch path under the guest's /tmp. The homes on this computer are read, never
+ * written; an agent whose move or merge raises lands nothing and carries the error. */
 export async function packState(root: string, homes: Readonly<Record<string, string>>, req: StateRequest): Promise<PackedState> {
   const scratch = mkdtempSync(join(tmpdir(), "wsp-state-"));
   try {
@@ -320,8 +323,20 @@ export async function packState(root: string, homes: Readonly<Record<string, str
     const reports = new Map((await moveProjectState({ from: root, to: req.dest, homes: skeletons }, present)).map(r => [r.agent, r]));
     const entries: TarEntry[] = [];
     const agents: ProjectAgentResult[] = [];
+    const merges: PackedState["merges"] = [];
+    const mergeDir = `/tmp/wsp-merge-${randomBytes(4).toString("hex")}`;
     for (const { agent, home, present } of req.agents) {
-      const report = reports.get(agent);
+      const resolver = PROJECT_STATE_RESOLVERS.get(agent);
+      let report = reports.get(agent);
+      const here = homes[agent];
+      let script: string | undefined;
+      if (present && report?.outcome !== "failed" && resolver?.merge !== undefined && here !== undefined && existsSync(here)) {
+        try {
+          script = await resolver.merge(here, root, req.dest, home);
+        } catch (e) {
+          report = { agent, outcome: "failed", error: e instanceof Error ? e.message : String(e) };
+        }
+      }
       const skeleton = skeletons[agent];
       const files = skeleton === undefined || report?.outcome === "failed" ? [] : filesUnder(skeleton, "").map(f => ({ abs: f, rel: relative(skeleton, f) }));
       let bytes = 0;
@@ -330,10 +345,15 @@ export async function packState(root: string, homes: Readonly<Record<string, str
         entries.push({ path: `${home}/${f.rel}`, mode: statSync(f.abs).mode & 0o7777, content });
         bytes += content.length;
       }
-      const outcome = outcomeOf(files.length, present, PROJECT_STATE_RESOLVERS.get(agent)?.carry, report);
+      if (script !== undefined) {
+        const path = `${mergeDir}/${agent}.py`;
+        entries.push({ path, mode: 0o600, content: script });
+        merges.push({ agent, script: path });
+      }
+      const outcome = outcomeOf(files.length, present, resolver?.carry, report, script !== undefined);
       agents.push({ agent, files: files.length, bytes, outcome, ...(report?.outcome === "failed" ? { error: report.error } : {}) });
     }
-    return { tar: tarOf(entries), agents };
+    return { tar: tarOf(entries), agents, merges };
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
