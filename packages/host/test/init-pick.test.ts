@@ -20,34 +20,34 @@ const row = (r: Partial<Recipe["rows"][number]> & { id: string }): Recipe["rows"
 
 describe("what they need", () => {
   it("one line: the tools on, then where each tick came from, the base first; a fresh Mac reads the floor alone", () => {
-    expect(needLine(RECIPE)).toBe("11 tools: 9 in the base, 2 installed here");
+    expect(needLine(RECIPE)).toBe("18 tools: 16 in the base, 2 installed here");
     const used = { ...RECIPE, rows: [...RECIPE.rows, row({ id: "wrangler", source: { kind: "used", sessions: 3, calls: 40 } }), row({ id: "go", on: false, source: { kind: "used", sessions: 1, calls: 2 } }), row({ id: "agent-browser" })] };
-    expect(needLine(used)).toBe("13 tools: 9 in the base, 2 installed here, 1 used by your agents, 1 popular in the catalog");
-    expect(needLine({ ...RECIPE, rows: [] })).toBe("9 tools: 9 in the base");
+    expect(needLine(used)).toBe("20 tools: 16 in the base, 2 installed here, 1 used by your agents, 1 popular in the catalog");
+    expect(needLine({ ...RECIPE, rows: [] })).toBe("16 tools: 16 in the base");
   });
 
   it("the list: the floor as bullets under the title, the rest grouped by source in that order, a measured size beside a row, the detail naming the source and what the build does", () => {
     const recipe = { ...RECIPE, rows: [...RECIPE.rows, row({ id: "wrangler", source: { kind: "used", sessions: 3, calls: 40 } }), row({ id: "go", on: false, source: { kind: "used", sessions: 1, calls: 2 } })] };
     const items = toolItems(recipe, FIXTURE);
-    expect(items.filter(i => i.lock === "on").map(i => i.label)).toEqual(["Node 22 with npm", "pnpm", "uv", "Python 3.12", "git", "jq", "ripgrep", "curl", "Docker engine and compose"]);
+    expect(items.filter(i => i.lock === "on").map(i => i.label)).toEqual(["Node 22 with npm", "pnpm", "uv", "Python 3.12", "git", "jq", "ripgrep", "curl", "Docker engine and compose", "C toolchain with cmake and ninja", "fd", "sqlite3", "wget", "zip and unzip", "xz", "rsync"]);
     expect([...new Set(items.map(i => i.group))]).toEqual([undefined, "Installed here", "Used by your agents", "Popular in the catalog"]);
     expect(items.filter(i => i.group === "Installed here").map(i => i.label)).toEqual(["GitHub CLI", "yq"]);
     expect(items.filter(i => i.group === "Used by your agents").map(i => i.label)).toEqual(["Go", "Cloudflare Wrangler"]);
     const by = (id: string) => items.find(i => i.id === id)!;
     expect(by("node").detail).toEqual(["ships in 5 lab images; on by default in the catalog; on every machine", "part of the base on every machine"]);
-    expect(by("gh")).toMatchObject({ group: "Installed here", detail: ["installed on this Mac", "size not measured yet"] });
-    expect(by("go")).toMatchObject({ hint: "251.0 MB", detail: ["your agents used it in 1 session (2 calls)", "about 251.0 MB on the machine; no row here; installed by its brew road"] });
-    expect(by("wrangler").detail).toEqual(["your agents used it in 3 sessions (40 calls)", "size not measured yet; no row here; installed by its npm road"]);
-    expect(by("agent-browser").detail).toEqual(["in no lab image; on by default in the catalog", "size not measured yet; no row here; installed by its npm road"]);
+    expect(by("gh")).toMatchObject({ group: "Installed here", hint: "40.2 MB", detail: ["installed on this Mac", "about 40.2 MB installed on the machine"] });
+    expect(by("go")).toMatchObject({ hint: "239.1 MB", detail: ["your agents used it in 1 session (2 calls)", "about 239.1 MB installed on the machine; no row here; installed by its brew road"] });
+    expect(by("wrangler").detail).toEqual(["your agents used it in 3 sessions (40 calls)", "about 239.4 MB installed on the machine; no row here; installed by its npm road"]);
+    expect(by("agent-browser").detail).toEqual(["in no lab image; on by default in the catalog", "about 77.9 MB installed on the machine; no row here; installed by its npm road"]);
     expect(by("java").detail[0]).toBe("ships in 4 lab images; on request");
     expect(BASE_WORD).toBe("in the base");
   });
 
   it("ticks go back onto the recipe: a floor row stays on however the list left it, an agent follows its tick, and an entry the recipe never named gets a row on the catalog's evidence", () => {
     const tools = withTools(RECIPE, new Set(["gh", "go"]));
-    expect(tools.rows.filter(r => r.kind === "tool" && r.on).map(r => r.id)).toEqual(["node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker", "gh", "go"]);
-    expect(tools.rows.find(r => r.id === "go")).toEqual({ id: "go", kind: "tool", on: true, source: { kind: "popular", sessions: 9, images: 4 }, size: 251 * 1024 * 1024 });
-    expect(tools.rows.filter(r => r.kind === "tool")).toHaveLength(32);
+    expect(tools.rows.filter(r => r.kind === "tool" && r.on).map(r => r.id)).toEqual(["node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync", "gh", "go"]);
+    expect(tools.rows.find(r => r.id === "go")).toEqual({ id: "go", kind: "tool", on: true, source: { kind: "popular", sessions: 9, images: 4 }, size: 250752891 });
+    expect(tools.rows.filter(r => r.kind === "tool")).toHaveLength(49);
     expect(tools.rows.filter(r => r.kind === "agent")).toEqual(RECIPE.rows.filter(r => r.kind === "agent"));
     const agents = withAgents(RECIPE, new Set(["codex", "pi"]));
     expect(agents.rows.filter(r => r.kind === "agent").map(r => [r.id, r.on])).toEqual([["claude", false], ["codex", true], ["gemini", false], ["opencode", false], ["pi", true], ["hermes", false]]);
@@ -90,7 +90,7 @@ describe("sign-ins and keys", () => {
     ]);
   });
 
-  it("a saved copy answer on a login with a flow makes it a keys row, ticked; unticked, it signs in on the machine", () => {
+  it("a saved copy answer on a login with a flow makes it a keys row, ticked; unticked, it signs in installed on the machine", () => {
     const saved: Recipe = { ...recipe, rows: recipe.rows.map(r => (r.id === "gh" ? { ...r, signIn: "copy" as const } : r)) };
     const s = signInItems(applyRecipe(withCatalogAgents(laptop), saved));
     const gh = s.items.find(i => i.id === "logins/gh")!;
@@ -204,7 +204,7 @@ describe("the summary screen", () => {
     return { input, output, text: () => stripVTControlCharacters(chunks.join("")), raw: () => chunks.join("") };
   }
   const settle = (ms = 5) => new Promise(r => setTimeout(r, ms));
-  const open = (o: ReturnType<typeof streams>, disk: string | { text: string; tone?: "yellow" | "yellowBright" | "red" } = "Disk: 1.4 GB of 15.2 GB on the 20 GB builder") => needScreen({ counter: "2/3", line: "11 tools: 9 in the base, 2 installed here", disk, input: o.input, output: o.output });
+  const open = (o: ReturnType<typeof streams>, disk: string | { text: string; tone?: "yellow" | "yellowBright" | "red" } = "Disk: 1.4 GB of 15.2 GB on the 20 GB builder") => needScreen({ counter: "2/3", line: "18 tools: 16 in the base, 2 installed here", disk, input: o.input, output: o.output });
 
   it("draws the counts line, the Disk line under it in its tone and the three keys; a adjusts, enter goes on, esc back, ctrl-c cancels", async () => {
     // styleText reads FORCE_COLOR at each call, so colour is on for this test alone.
@@ -219,14 +219,14 @@ describe("the summary screen", () => {
     await settle(20);
     const t = o.text();
     expect(t).toContain("◆  What they need  2/3");
-    expect(t).toContain("┃  11 tools: 9 in the base, 2 installed here");
+    expect(t).toContain("┃  18 tools: 16 in the base, 2 installed here");
     // The Disk line wraps under its own label and every row of it carries the tone, the one colour on the screen.
     expect(t).toContain("┃  Disk: 10.1 GB of 15.2 GB on the 20 GB builder (files 1.7 KB, Homebrew's\n┃        toolchain 1.0 GB, tools 9.1 GB)");
     expect(o.raw().match(/\x1b\[93m/g)?.length).toBe(2);
     expect(t).toContain("┗  a adjust • enter next • esc back");
     o.input.write("a");
     expect(await p).toBe("adjust");
-    expect(o.text()).toMatch(/◇  What they need  2\/3\n│  11 tools: 9 in the base, 2 installed here\n/);
+    expect(o.text()).toMatch(/◇  What they need  2\/3\n│  18 tools: 16 in the base, 2 installed here\n/);
 
     const n = streams();
     const next = open(n);

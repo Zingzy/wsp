@@ -9,9 +9,9 @@ import type { Readable, Writable } from "node:stream";
 import { styleText } from "node:util";
 import { Prompt, isCancel } from "@clack/core";
 import { S_BAR, S_STEP_ACTIVE, S_STEP_CANCEL, S_STEP_SUBMIT } from "@clack/prompts";
-import { CATALOG_AGENTS, CATALOG_TOOLS, MCP_AGENTS, type CatalogEntry, type ToolEntry, agentName as catalogName } from "@wsp/catalog";
+import { CATALOG_AGENTS, CATALOG_TOOLS, MCP_AGENTS, type CatalogEntry, type ToolEntry, agentName as catalogName, sizeBytes } from "@wsp/catalog";
 import type { LoginChoice, Manifest, ManifestEntry } from "@wsp/collect";
-import { MEASURED_ON, estimateDisk, isMcpRow, parseMcpId, type BrewTable, type DiskEstimate } from "@wsp/engine";
+import { estimateDisk, isMcpRow, parseMcpId, type BrewTable, type DiskEstimate } from "@wsp/engine";
 import { fmtBytes, type Recipe, type RecipeRow } from "@wsp/protocol";
 import { mcpConfigFile } from "./mcp-install.js";
 import { GUTTER, S_BAR_FOCUS, S_BAR_FOCUS_END, colourDepth, helpLine, isTTY, widthOf, wrap, type HelpKey } from "./init-layout.js";
@@ -74,7 +74,10 @@ export function needLine(recipe: Recipe): string {
  * never named gets a row on the catalog's own evidence, so a tick on a fresh Mac is kept. */
 function withTicks(recipe: Recipe, kind: RecipeRow["kind"], entries: readonly CatalogEntry[], on: (id: string) => boolean): Recipe {
   const rows = recipe.rows.map(r => (r.kind === kind ? { ...r, on: on(r.id) } : r));
-  const missing = entries.filter(e => !rows.some(r => r.id === e.id)).map((e): RecipeRow => ({ id: e.id, kind: e.kind, on: on(e.id), source: { kind: "popular", sessions: e.source.sessions, images: e.source.images }, ...(e.size !== undefined ? { size: e.size } : {}) }));
+  const missing = entries.filter(e => !rows.some(r => r.id === e.id)).map((e): RecipeRow => {
+    const bytes = sizeBytes(e.size);
+    return { id: e.id, kind: e.kind, on: on(e.id), source: { kind: "popular", sessions: e.source.sessions, images: e.source.images }, ...(bytes !== undefined ? { size: bytes } : {}) };
+  });
   return { ...recipe, rows: [...rows, ...missing] };
 }
 
@@ -122,8 +125,8 @@ export function agentItems(recipe: Recipe, manifest: Manifest): SelectItem[] {
     return {
       id: a.id,
       label: a.name,
-      ...(a.size !== undefined ? { hint: fmtBytes(a.size) } : {}),
-      detail: [here, a.size !== undefined ? `installs about ${fmtBytes(a.size)} on the machine (measured ${MEASURED_ON})` : "installs on the machine; size not measured yet"],
+      ...("bytes" in a.size ? { hint: fmtBytes(a.size.bytes) } : {}),
+      detail: [here, "bytes" in a.size ? `installs about ${fmtBytes(a.size.bytes)} on the machine (measured ${a.size.on})` : "installs on the machine; size not measured yet"],
     };
   });
 }
@@ -149,13 +152,14 @@ export function toolItems(recipe: Recipe, manifest: Manifest): SelectItem[] {
   const items = CATALOG_TOOLS.map((e): SelectItem & { word: SourceWord } => {
     const r = rowOf(recipe, e.id);
     const word = sourceWord(e, r);
-    const size = e.size !== undefined ? `about ${fmtBytes(e.size)} on the machine` : "size not measured yet";
+    const bytes = sizeBytes(e.size);
+    const size = bytes !== undefined ? `about ${fmtBytes(bytes)} installed on the machine` : "size not measured yet";
     const build = e.floor ? "part of the base on every machine" : here.has(e.id) ? size : `${size}; no row here; installed by its ${e.installRoad.road} road`;
     return {
       id: e.id,
       label: e.name,
       word,
-      ...(e.size !== undefined ? { hint: fmtBytes(e.size) } : {}),
+      ...(bytes !== undefined ? { hint: fmtBytes(bytes) } : {}),
       detail: [e.floor ? `${sourceLine(e, r)}; on every machine` : sourceLine(e, r), build],
       ...(e.floor ? { lock: "on" } : { group: word.charAt(0).toUpperCase() + word.slice(1) }),
     };

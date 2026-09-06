@@ -410,7 +410,7 @@ describe("wsp init, interactive", () => {
     for (const name of ["Claude Code", "Codex", "Gemini CLI", "OpenCode", "Pi", "Hermes Agent"]) expect(f.text()).toMatch(new RegExp(`○ ${name}\\s+[\\d.]+ MB`));
     await f.press(KEY.enter);
     await f.until("What they need");
-    expect(f.text()).toContain("9 tools: 9 in the base");
+    expect(f.text()).toContain("16 tools: 16 in the base");
     await f.press(KEY.enter);
     await f.until("Sign-ins and keys");
     expect(f.text()).toContain("nothing found");
@@ -470,15 +470,15 @@ describe("wsp init, the summary-first screens", () => {
 
     await f.until("What they need");
     const two = f.text().slice(f.text().lastIndexOf("◆  What they need"));
-    expect(two).toMatch(/^◆  What they need  2\/3\n┃  12 tools: 9 in the base, 2 installed here, 1 used by your agents\n┃  Disk: [\d.]+ GB of 15\.2 GB on the 20 GB builder \(files [\d.]+ KB, Homebrew's toolchain 1\.0 GB, agents\n┃ {8}1\.3 GB; 3 unmeasured, ~300\.0 MB\)\n┗  a adjust • enter next • esc back/);
+    expect(two).toMatch(/^◆  What they need  2\/3\n┃  19 tools: 16 in the base, 2 installed here, 1 used by your agents\n┃  Disk: [\d.]+ GB of 15\.2 GB on the 20 GB builder \(files [\d.]+ KB, Homebrew's toolchain 1\.0 GB, tools\n┃ {8}239\.4 MB, agents 1\.3 GB; 2 unmeasured, ~200\.0 MB\)\n┗  a adjust • enter next • esc back/);
     // No search, no rows, no weight tiers: the counts, the Disk line and three keys.
     expect(two).not.toMatch(/search|● |○ /);
     // a opens the rows: the floor as bullets under the title, the rest grouped by the source of their tick.
     await f.press("a");
     await f.until(/▾ What they need\s+in the base/);
     const list = f.text().slice(f.text().lastIndexOf("◆  What they need"));
-    expect(list).toMatch(/• Node 22 with npm\s+250\.0 MB\n/);
-    expect(list).toMatch(/▾ Installed here\s+2 of 2\n┃\s+● GitHub CLI\n┃\s+● yq\n┃\s+▾ Used by your agents\s+1 of 2\n/);
+    expect(list).toMatch(/• Node 22 with npm\s+198\.8 MB\n/);
+    expect(list).toMatch(/▾ Installed here\s+2 of 2\n┃\s+● GitHub CLI\s+40\.2 MB\n┃\s+● yq\s+13\.5 MB\n┃\s+▾ Used by your agents\s+1 of 2\n/);
     // Typing narrows the rows to a match; space unticks yq; enter keeps the ticks and returns to the counts.
     await f.press("y", "q");
     await f.until(/search {2}yq/);
@@ -487,7 +487,7 @@ describe("wsp init, the summary-first screens", () => {
     expect(f.text().slice(f.text().lastIndexOf("◆  What they need"))).toMatch(/Disk: /);
     await f.press(KEY.enter);
     await f.until("a adjust");
-    expect(f.text().slice(f.text().lastIndexOf("◆  What they need"))).toContain("11 tools: 9 in the base, 1 installed here, 1 used by your agents");
+    expect(f.text().slice(f.text().lastIndexOf("◆  What they need"))).toContain("18 tools: 16 in the base, 1 installed here, 1 used by your agents");
     await f.press(KEY.enter);
 
     await f.until("Sign-ins and keys");
@@ -691,7 +691,7 @@ describe("wsp init, the summary-first screens", () => {
     expect(saved.get("agents/mcp/claude/github")).toMatchObject({ bring: false, choice: "skip" });
     expect(saved.get("agents/mcp/claude/notes")).toMatchObject({ bring: true });
     const small = Recipe.parse(JSON.parse(readFileSync(join(dirs[0]!, "recipe.json"), "utf8")));
-    expect(small.rows.filter(r => r.on).map(r => r.id)).toEqual(["claude", "codex", "node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker", "gh", "yq", "hermes", "wrangler"]);
+    expect(small.rows.filter(r => r.on).map(r => r.id)).toEqual(["claude", "codex", "node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync", "gh", "yq", "hermes", "wrangler"]);
     expect(small.rows.find(r => r.id === "gh")).toMatchObject({ signIn: "machine" });
     expect(small.rows.find(r => r.id === "go")).not.toHaveProperty("signIn");
   });

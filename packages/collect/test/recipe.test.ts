@@ -25,11 +25,11 @@ describe("computeRecipe", () => {
     const recipe = await computeRecipe(laptop(), { now: () => new Date("2026-09-06T03:00:00Z") });
     const row = (id: string) => recipe.rows.find(r => r.id === id)!;
     expect(row("claude")).toEqual({ id: "claude", kind: "agent", on: true, source: { kind: "installed", paths: ["~/.claude/settings.json", "~/.claude/skills"], bin: true }, size: 208 * 1024 * 1024 });
-    expect(row("gh")).toEqual({ id: "gh", kind: "tool", on: true, source: { kind: "installed", paths: [], bin: true } });
-    expect(row("agent-browser")).toEqual({ id: "agent-browser", kind: "tool", on: true, source: { kind: "used", sessions: 2, calls: 2 } });
+    expect(row("gh")).toEqual({ id: "gh", kind: "tool", on: true, source: { kind: "installed", paths: [], bin: true }, size: 42188962 });
+    expect(row("agent-browser")).toEqual({ id: "agent-browser", kind: "tool", on: true, source: { kind: "used", sessions: 2, calls: 2 }, size: 81702912 });
     // One session's use is recorded but does not tick a row the catalog leaves off; two sessions do (agent-browser above).
     expect(row("go")).toMatchObject({ on: false, source: { kind: "used", sessions: 1, calls: 1 } });
-    expect(row("pnpm")).toEqual({ id: "pnpm", kind: "tool", on: true, source: { kind: "popular", sessions: 36, images: 3 } });
+    expect(row("pnpm")).toEqual({ id: "pnpm", kind: "tool", on: true, source: { kind: "popular", sessions: 36, images: 3 }, size: 20357120 });
     expect(row("rust")).toMatchObject({ on: false, source: { kind: "popular", sessions: 4, images: 3 } });
     // An agent is never on by default: the ones not found here stay off, with the catalog's evidence as their source.
     expect(row("codex")).toEqual({ id: "codex", kind: "agent", on: false, source: { kind: "popular", sessions: 5, images: 1 }, size: 455 * 1024 * 1024 });

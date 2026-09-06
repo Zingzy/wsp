@@ -3,7 +3,7 @@
 // the source of it. Installed here wins, then used by the agents' own session
 // histories, then the catalog's evidence for a fresh computer. Names, paths
 // and counts only; nothing read leaves as a value.
-import { CATALOG, type CatalogEntry, type AgentEntry } from "@wsp/catalog";
+import { CATALOG, type CatalogEntry, type AgentEntry, sizeBytes } from "@wsp/catalog";
 import type { Recipe, RecipeHistory, RecipeRow, RecipeSource } from "@wsp/protocol";
 import { presenceOf } from "./detect/presence.js";
 import { type AgentHistory, type Count, readHistories } from "./history/index.js";
@@ -46,7 +46,8 @@ export async function computeRecipe(host: Host, opts: RecipeOptions = {}): Promi
   const histories = await readHistories(host, catalog.filter((e): e is AgentEntry => e.kind === "agent"), opts.onHistory);
   const used = usedTools(histories);
   const rows = catalog.map((e): RecipeRow => {
-    const size = e.size !== undefined ? { size: e.size } : {};
+    const bytes = sizeBytes(e.size);
+    const size = bytes !== undefined ? { size: bytes } : {};
     const installed = present.get(e.id);
     if (installed !== undefined) return { id: e.id, kind: e.kind, on: true, source: installed, ...size };
     const u = e.kind === "tool" ? used.get(e.id) : undefined;
