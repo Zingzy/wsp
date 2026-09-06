@@ -16,6 +16,7 @@ import {
   ServerIcon,
   SquareTerminalIcon,
 } from "lucide-react";
+import { needsRebuild } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../../adapt/index.js";
 import { cn } from "../../lib/utils.js";
 import { compactTimeLabel, dotClassForTone } from "../../sidebar/workspaceRows.js";
@@ -131,11 +132,11 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
     });
   }
 
-  if (selected?.reach === "zombie") {
+  if (selected !== null && needsRebuild(selected)) {
     items.push({
       kind: "action",
       value: "action:rebuild",
-      searchTerms: ["rebuild machine", "zombie", "replace"],
+      searchTerms: ["rebuild machine", "zombie", "gone", "replace"],
       icon: <RefreshCwIcon className={ITEM_ICON_CLASS} />,
       ...scoped("Rebuild machine", handlers.rebuild),
       description: input.canRebuild ? "Replaces the machine with a fresh fork of the golden image" : "This client cannot rebuild machines",

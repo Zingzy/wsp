@@ -16,6 +16,7 @@ import { createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runti
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { serve } from "../src/cli.js";
 import { dialer, mcpServer, serveMcp } from "../src/mcp.js";
+import { WSP_SKILL, instructionsOf } from "../src/skill.js";
 import type { HostHandle } from "../src/server.js";
 import type { HostClient } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
@@ -128,15 +129,17 @@ describe("the MCP server over the host", () => {
   it("offers the verbs as tools, each described, and none for import until it exists", async () => {
     const c = await connect();
     const { tools } = await c.listTools();
-    expect(tools.map(t => t.name).sort()).toEqual(["exec", "export", "fork", "new", "pause", "send", "snapshot", "stop", "thread_new", "threads", "workspaces"]);
+    expect(tools.map(t => t.name).sort()).toEqual(["exec", "export", "forget", "fork", "new", "pause", "send", "snapshot", "stop", "thread_new", "threads", "workspaces"]);
     for (const t of tools) expect(t.description, t.name).toMatch(/\S/);
     expect(Object.keys((tools.find(t => t.name === "new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["from", "name"]);
     expect(Object.keys((tools.find(t => t.name === "thread_new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "model", "notify", "task", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "fork")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "model", "name", "notify", "task", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "send")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "effort", "message", "model", "thread"]);
     expect(c.getServerVersion()?.name).toBe("wsp");
+    expect(c.getInstructions()).toBe(instructionsOf(WSP_SKILL));
     expect(c.getInstructions()).toContain("thread_new");
     expect(c.getInstructions()).toContain("snapshot");
+    for (const t of tools) expect(WSP_SKILL, t.name).toContain(`\`${t.name}\``);
   });
 
   it("snapshot takes a project golden of the workspace as wsp snapshot does, and new with from forks it by project name or snapshot id; a workspace without a project, and a name no golden carries, are tool errors in one line", async () => {
@@ -228,6 +231,22 @@ describe("the MCP server over the host", () => {
     expect((await rt.workspaces.list())[0]!.phase).toBe("napping");
     const missing = await call("pause", { workspace: "nope" });
     expect(missing).toEqual({ text: "no workspace nope", structured: undefined, isError: true });
+  });
+
+  it("forget drops a workspace whose machine is gone and says what went; one whose machine exists is a tool error with the reason", async () => {
+    await call("new", { name: "alpha" });
+    const [alpha] = await rt.workspaces.list();
+    const refused = await call("forget", { workspace: "alpha" });
+    expect(refused).toEqual({ text: "alpha's machine m1 is still running; pause it or delete it at the provider first", structured: undefined, isError: true });
+    expect(await rt.workspaces.list()).toHaveLength(1);
+
+    backend.machines[0]!.killed = true;
+    const forgot = await call("forget", { workspace: "alpha" });
+    expect(forgot.isError).toBe(false);
+    expect(forgot.structured).toEqual({ workspaceId: alpha!.id, name: "alpha", threads: 0 });
+    expect(forgot.text).toBe(`forgot alpha ${alpha!.id}: its record and 0 threads are gone from this computer`);
+    expect(await rt.workspaces.list()).toEqual([]);
+    expect(await store.get("workspaces", alpha!.id)).toBeUndefined();
   });
 
   it("thread_new opens a thread under the named agent, started by the local agent, and returns the reply as the result", async () => {
@@ -535,6 +554,6 @@ describe("the MCP server never talks to the provider", () => {
     const imports = [...source.matchAll(/ from "([^"]+)";$/gm)].map(m => m[1]!);
     const workspacePackages = imports.filter(i => i.startsWith("@wsp/"));
     expect(workspacePackages).toEqual(["@wsp/protocol"]);
-    expect(imports.filter(i => i.startsWith("./"))).toEqual(["./version.js", "./verbs.js"]);
+    expect(imports.filter(i => i.startsWith("./"))).toEqual(["./skill.js", "./version.js", "./verbs.js"]);
   });
 });

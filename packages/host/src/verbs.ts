@@ -13,8 +13,11 @@ import { parseArgs, type ParseArgsConfig } from "node:util";
 import WebSocket from "ws";
 import {
   NOTIFY_ME,
+  fmtThreads,
   foldThreads,
+  forgetNotice,
   goldenHead,
+  goneRefusal,
   startPicks,
   workspaceState,
   workspaceWord,
@@ -284,6 +287,31 @@ const STOP_WORDS: Record<SessionInterruptOutcome, string> = { accepted: "stopped
 
 export function stopLine(stopped: Stopped): string {
   return `thread ${stopped.threadId} ${STOP_WORDS[stopped.outcome]}`;
+}
+
+/** What a forget takes off this computer, counted before anyone is asked: the workspace's record and its threads. */
+export interface Forgetting {
+  workspace: WorkspaceView;
+  threads: number;
+}
+
+export async function forgetting(client: HostClient, ref: string): Promise<Forgetting> {
+  const workspace = await workspaceOf(client, ref);
+  return { workspace, threads: (await threads(client, workspace.id)).length };
+}
+
+/** The one confirmation a forget asks, naming what goes; the first line is the question, the second its hint. */
+export function forgetQuestion(f: Forgetting): string {
+  return `Forget ${f.workspace.name}?\n${forgetNotice(f.threads)}`;
+}
+
+/** Drops the workspace from the host's store; the runtime refuses while its machine still exists. */
+export async function forget(client: HostClient, f: Forgetting): Promise<void> {
+  await client.request("workspaces.forget", { workspaceId: f.workspace.id });
+}
+
+export function forgotLine(f: Forgetting): string {
+  return `forgot ${f.workspace.name} ${f.workspace.id}: its record and ${fmtThreads(f.threads)} are gone from this computer`;
 }
 
 /** The most characters a folder cell holds before its front is cut: the end of a path is what a person recognises. */
@@ -649,6 +677,7 @@ export const VERBS: readonly Verb[] = [
       for (const dependent of ["agent", ...PICK_FLAGS, "cwd", "notify"]) if (task === undefined && flag(ctx.flags, dependent) !== undefined) throw new Error(`--${dependent} needs --send`);
       const client = await ctx.client();
       const source = await workspaceOf(client, ref);
+      if (source.phase === "gone") throw new Error(goneRefusal("fork", source.gone));
       // Resolved and checked before the machine is minted, so a bad reference or pick costs nothing.
       const notify = await notifyOf(client, flag(ctx.flags, "notify"));
       const harness = flag(ctx.flags, "agent");
@@ -669,6 +698,25 @@ export const VERBS: readonly Verb[] = [
       if (ref === undefined || ctx.args.length !== 1) throw new Error("wsp pause takes one workspace");
       const workspace = await nap(await ctx.client(), ref);
       ctx.out.emit({ workspace }, `${workspace.name} ${workspaceWord(workspaceState({ phase: workspace.phase })).toLowerCase()}`);
+      return 0;
+    },
+  },
+  {
+    name: "forget",
+    usage: "wsp forget <workspace> [--yes]",
+    about: "drops a gone workspace and its threads from this computer; refused while its machine exists",
+    options: { yes: { type: "boolean" } },
+    run: async ctx => {
+      const [ref] = ctx.args;
+      if (ref === undefined || ctx.args.length !== 1) throw new Error("wsp forget takes one workspace");
+      const client = await ctx.client();
+      const f = await forgetting(client, ref);
+      if (ctx.flags["yes"] !== true && (await ctx.io.ask(forgetQuestion(f))) !== "yes") {
+        ctx.io.error(`${f.workspace.name} kept`);
+        return 1;
+      }
+      await forget(client, f);
+      ctx.out.emit({ forgot: { workspaceId: f.workspace.id, name: f.workspace.name, threads: f.threads } }, forgotLine(f));
       return 0;
     },
   },
