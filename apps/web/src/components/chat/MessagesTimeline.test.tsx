@@ -802,7 +802,7 @@ describe("MessagesTimeline", () => {
     );
 
     expect(markup).toContain("Working for");
-    expect(markup).toContain("Running pnpm");
+    expect(markup).toContain('Running <span class="font-mono">pnpm test</span>');
     expect(markup).toContain("live-activity-focus");
   });
 
@@ -853,7 +853,7 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("Running pnpm");
+    expect(markup).toContain('Running <span class="font-mono">pnpm test</span>');
     expect(markup).not.toContain("tool call failed");
   });
 
@@ -904,12 +904,53 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("Ran pnpm");
+    expect(markup).toContain('Ran <span class="font-mono">pnpm lint</span>');
     expect(markup).toContain("lucide-terminal");
     expect(markup).toContain("live-activity-focus");
-    expect(markup).not.toContain("Running pnpm");
+    expect(markup).not.toContain("Running ");
     expect(markup).not.toContain("Thinking");
     expect(markup).not.toContain('data-timeline-row-kind="thinking"');
+  });
+
+  it("labels a command row with its whole first line in mono, or with the harness's description in prose", () => {
+    const turnId = "turn-live";
+    const commandEntry = (id: string, command: string, description?: string): TimelineEntry => ({
+      id: `entry-${id}`,
+      kind: "work",
+      createdAt: MESSAGE_CREATED_AT,
+      entry: {
+        id: `work-${id}`,
+        createdAt: MESSAGE_CREATED_AT,
+        turnId,
+        toolCallId: `call-${id}`,
+        label: "Bash",
+        tone: "tool",
+        itemType: "command_execution",
+        command,
+        ...(description !== undefined ? { description } : {}),
+        toolLifecycleStatus: "completed",
+        sourceActivityKind: "tool.completed",
+      },
+    });
+    const renderLive = (entry: TimelineEntry) =>
+      renderToStaticMarkup(
+        <MessagesTimeline
+          {...buildProps()}
+          isWorking
+          activeTurnStartedAt={MESSAGE_CREATED_AT}
+          turns={[buildTurn(turnId, "running", MESSAGE_CREATED_AT, null)]}
+          timelineEntries={[entry]}
+        />,
+      );
+
+    const plain = renderLive(commandEntry("status", "cd /repo && git status"));
+    expect(plain).toContain('Ran <span class="font-mono">cd /repo &amp;&amp; git status</span>');
+    expect(plain).not.toContain("Ran cd<");
+
+    const described = renderLive(commandEntry("described", "cd /repo && git status", "Show working tree status"));
+    expect(described).toContain("<span>Show working tree status</span>");
+    expect(described).not.toContain("Ran ");
+    expect(described).not.toContain("font-mono");
   });
 
   it("keeps failed lifecycle entries discoverable in mixed activity summaries", () => {
@@ -1075,6 +1116,7 @@ describe("MessagesTimeline", () => {
     expect(expandedGroup).not.toBeNull();
     const commandRow = within(expandedGroup as HTMLElement).getByRole("button", { name: "ls" });
     expect(commandRow.getAttribute("aria-expanded")).toBe("false");
+    expect(commandRow.querySelector(".font-mono")?.textContent).toBe("ls");
     // The reasoning row collapses to its preview line and expands to the full text.
     const thinkingRow = within(expandedGroup as HTMLElement).getByRole("button", {
       name: "quiet reasoning",

@@ -79,43 +79,52 @@ describe("work entry labels", () => {
 
   it("keeps custom titles and output for unrecognized tools", () => {
     const unknownEntry = { ...entry, toolTitle: "mcp__github__search_issues" };
-    expect(liveWorkEntryLabel(unknownEntry, undefined, true)).toBe("Mcp__github__search_issues");
-    expect(workEntryDisplayLabel({ ...unknownEntry, detail: "Found 3 issues" }, undefined)).toBe(
-      "Found 3 issues",
+    expect(liveWorkEntryLabel(unknownEntry, undefined, true)).toEqual(
+      { verb: null, text: "Mcp__github__search_issues", mono: false },
+    );
+    expect(workEntryDisplayLabel({ ...unknownEntry, detail: "Found 3 issues" }, undefined)).toEqual(
+      { verb: null, text: "Found 3 issues", mono: false },
     );
   });
 
-  it("keeps command summaries compact without replacing the full command in expanded rows", () => {
-    const commandEntry = { ...entry, command: "vp test run", detail: "All tests passed" };
-    expect(liveWorkEntryLabel(commandEntry, undefined, true)).toBe("Running vp");
-    expect(liveWorkEntryLabel(commandEntry, undefined, false)).toBe("Ran vp");
-    expect(workEntryDisplayLabel(commandEntry, undefined)).toBe("vp test run");
+  it("shows the whole command line in mono, with the state word only on the live row", () => {
+    const commandEntry = { ...entry, command: "git status", detail: "On branch main" };
+    expect(liveWorkEntryLabel(commandEntry, undefined, true)).toEqual({ verb: "Running", text: "git status", mono: true });
+    expect(liveWorkEntryLabel(commandEntry, undefined, false)).toEqual({ verb: "Ran", text: "git status", mono: true });
+    expect(workEntryDisplayLabel(commandEntry, undefined)).toEqual({ verb: null, text: "git status", mono: true });
   });
 
-  it("summarizes the program inside a shell wrapper while preserving the expanded command", () => {
-    const command = "/bin/zsh -lc 'vp test run apps/web/src/session-logic.test.ts'";
-    const commandEntry = { ...entry, command };
-    expect(liveWorkEntryLabel(commandEntry, undefined, true)).toBe("Running vp");
-    expect(liveWorkEntryLabel(commandEntry, undefined, false)).toBe("Ran vp");
-    expect(workEntryDisplayLabel(commandEntry, undefined)).toBe(command);
+  it("shows a multi-line command's first line and leaves the rest to the expanded body", () => {
+    const commandEntry = { ...entry, command: "  git   status\ngit diff --stat\n" };
+    expect(liveWorkEntryLabel(commandEntry, undefined, false)).toEqual({ verb: "Ran", text: "git status", mono: true });
+    expect(workEntryDisplayLabel(commandEntry, undefined)).toEqual({ verb: null, text: "git status", mono: true });
+  });
+
+  it("shows the harness's description alone: it carries its own verb", () => {
+    const commandEntry = { ...entry, command: "git status", description: "Show working tree status", detail: "On branch main" };
+    const label = { verb: null, text: "Show working tree status", mono: false };
+    expect(liveWorkEntryLabel(commandEntry, undefined, true)).toEqual(label);
+    expect(liveWorkEntryLabel({ ...commandEntry, toolLifecycleStatus: "failed" }, undefined, false)).toEqual(label);
+    expect(workEntryDisplayLabel(commandEntry, undefined)).toEqual(label);
   });
 
   it.each([
-    ["inProgress", "Running vp"],
-    ["completed", "Ran vp"],
-    ["failed", "Failed vp"],
-    ["declined", "Declined vp"],
-    ["stopped", "Stopped vp"],
+    ["inProgress", "Running"],
+    ["completed", "Ran"],
+    ["failed", "Failed"],
+    ["declined", "Declined"],
+    ["stopped", "Stopped"],
   ] as const)(
     "uses the command's %s outcome even while the turn continues",
-    (toolLifecycleStatus, label) => {
+    (toolLifecycleStatus, verb) => {
       const commandEntry = {
         ...entry,
         command: "/bin/bash -lc 'vp test run'",
         toolLifecycleStatus,
       };
-      expect(liveWorkEntryLabel(commandEntry, undefined, true)).toBe(label);
-      expect(liveWorkEntryLabel(commandEntry, undefined, false)).toBe(label);
+      const label = { verb, text: "/bin/bash -lc 'vp test run'", mono: true };
+      expect(liveWorkEntryLabel(commandEntry, undefined, true)).toEqual(label);
+      expect(liveWorkEntryLabel(commandEntry, undefined, false)).toEqual(label);
     },
   );
 
@@ -128,12 +137,9 @@ describe("work entry labels", () => {
       detail: "The failing test imports the old module.\nI should repoint it.",
       preview: "The failing test imports the old module.",
     };
-    expect(workEntryDisplayLabel(reasoningEntry, undefined)).toBe(
-      "The failing test imports the old module.",
-    );
-    expect(liveWorkEntryLabel(reasoningEntry, undefined, false)).toBe(
-      "The failing test imports the old module.",
-    );
+    const label = { verb: null, text: "The failing test imports the old module.", mono: false };
+    expect(workEntryDisplayLabel(reasoningEntry, undefined)).toEqual(label);
+    expect(liveWorkEntryLabel(reasoningEntry, undefined, false)).toEqual(label);
   });
 });
 

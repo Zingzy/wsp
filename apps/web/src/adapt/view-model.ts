@@ -51,6 +51,8 @@ export interface WorkLogEntry {
   /** The one collapsed line for a row whose detail is prose (reasoning): its first line, cut like a tool preview. */
   readonly preview?: string;
   readonly command?: string;
+  /** The Bash tool's description: the harness's own sentence for the call, shown in place of the command and its state word. */
+  readonly description?: string;
   readonly changedFiles?: ReadonlyArray<string>;
   readonly tone: "thinking" | "tool" | "info" | "error";
   readonly toolTitle?: string;

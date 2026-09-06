@@ -355,10 +355,14 @@ function describeToolCall(base: WorkLogEntry, toolName: string, inputText: strin
   if (input === null) return withKind;
   const filePath = str(input["file_path"]) ?? str(input["notebook_path"]);
   const command = str(input["command"]);
-  const detail = filePath ?? str(input["pattern"]) ?? str(input["query"]) ?? str(input["url"]) ?? str(input["description"]) ?? str(input["prompt"]);
+  const description = str(input["description"]);
+  const detail = filePath ?? str(input["pattern"]) ?? str(input["query"]) ?? str(input["url"]) ?? description ?? str(input["prompt"]);
+  const shell = toolName === "Bash"
+    ? { ...(command !== undefined ? { command } : {}), ...(description !== undefined ? { description } : {}) }
+    : {};
   return {
     ...withKind,
-    ...(command !== undefined && toolName === "Bash" ? { command } : {}),
+    ...shell,
     ...(filePath !== undefined && FILE_CHANGE_TOOLS.has(toolName) ? { changedFiles: [filePath] } : {}),
     ...(detail !== undefined ? { detail } : {}),
   };
@@ -378,9 +382,18 @@ export function isCodeSearchTool(toolName: string | undefined): boolean {
   return toolName !== undefined && CODE_SEARCH_TOOLS.has(toolName);
 }
 
+function compactLines(text: string): string[] {
+  return text.split(/\r?\n/).map(line => line.replace(/\s+/g, " ").trim()).filter(line => line.length > 0);
+}
+
+/** The line a row shows for a command: its first non-empty line, whole; the row's width cuts it. */
+export function commandFirstLine(command: string): string {
+  return compactLines(command)[0] ?? command.trim();
+}
+
 /** First non-empty line, cut to 84 characters like t3code's inline preview; fence-only output has nothing to show. */
 export function summarizeOutput(text: string): string | undefined {
-  const lines = text.split(/\r?\n/).map(line => line.replace(/\s+/g, " ").trim()).filter(line => line.length > 0);
+  const lines = compactLines(text);
   const first = lines.find(line => line !== "```");
   if (first === undefined) return lines.length > 1 ? `${lines.length} lines` : undefined;
   return first.length <= 84 ? first : `${first.slice(0, 83).trimEnd()}…`;
