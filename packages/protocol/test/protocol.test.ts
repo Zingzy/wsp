@@ -558,11 +558,12 @@ describe("goldenHead", () => {
 describe("thread provenance", () => {
   const row = { id: "s1", workspaceId: "ws_1", harness: "claude", status: "completed" } as const;
 
-  it("SessionView carries who asked for the turn, person or cli, and stays optional for rows written before", () => {
+  it("SessionView carries who asked for the turn, person, cli or agent, and stays optional for rows written before", () => {
     expect(SessionView.parse({ ...row, startedBy: "cli" }).startedBy).toBe("cli");
+    expect(SessionView.parse({ ...row, startedBy: "agent" }).startedBy).toBe("agent");
     expect(SessionView.parse(row).startedBy).toBeUndefined();
     expect(() => SessionView.parse({ ...row, startedBy: "robot" })).toThrow();
-    expect(SessionOrigin.options).toEqual(["person", "cli"]);
+    expect(SessionOrigin.options).toEqual(["person", "cli", "agent"]);
   });
 
   it("sessions.start takes startedBy and nothing else new", () => {

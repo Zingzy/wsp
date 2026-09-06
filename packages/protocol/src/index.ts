@@ -152,9 +152,9 @@ export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
 export const SessionStatus = z.enum(["running", "completed", "interrupted", "failed"]);
 export type SessionStatus = z.infer<typeof SessionStatus>;
 
-/** Who asked the runtime for the turn: a person in the app, or the command line on this computer (a local agent
- * directing the machine). Both are clients of one host; the sidebar shows which one opened a thread. */
-export const SessionOrigin = z.enum(["person", "cli"]);
+/** Who asked the runtime for the turn: a person in the app, the command line on this computer, or a local agent
+ * through the MCP server. All are clients of one host; the sidebar shows which one opened a thread. */
+export const SessionOrigin = z.enum(["person", "cli", "agent"]);
 export type SessionOrigin = z.infer<typeof SessionOrigin>;
 
 export const SessionView = z.object({
@@ -1083,7 +1083,7 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     effort: z.string().optional(),
     permissionMode: z.string().optional(),
     contextWindow: z.string().optional(),
-    /** Absent reads as person: the app never sends it, the command line sends cli. */
+    /** Absent reads as person: the app never sends it, the command line sends cli, the MCP server sends agent. */
     startedBy: SessionOrigin.optional(),
   }),
   /** Replies with { harnesses: HarnessCatalog[] }, one per harness the runtime knows. With a workspace, the lists come
