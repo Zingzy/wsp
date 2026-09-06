@@ -294,6 +294,24 @@ describe("new thread", () => {
     off();
   });
 
+  it("a workspace row offers the import when the runtime can read folders here, and the dialog opens for that workspace", async () => {
+    const api = fakeApi([API, WEB], [status(API), status(WEB)]);
+    api.planProject = vi.fn(async () => ({ source: "/private/var/proj", repo: true, files: 3, bytes: 900, secrets: [], excluded: [], skipped: [] }));
+    api.importProject = vi.fn();
+    await mount(api, "api");
+    fireEvent.click(screen.getByRole("button", { name: "Import a project into web" }));
+    const dialog = await screen.findByRole("dialog", { name: "Import a project" });
+    expect(within(dialog).getByText(/Into web\./)).toBeDefined();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("without the project ops no row offers the import", async () => {
+    await mount(fakeApi([API], [status(API)]), "api");
+    expect(screen.queryByRole("button", { name: /Import a project into/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "New thread in api" })).toBeDefined();
+  });
+
   it("a zombie row offers the rebuild and no new thread", async () => {
     await mount(fakeApi([API], [status(API, { reach: { state: "zombie" } })]), "api");
     await waitFor(() => expect(screen.getByRole("button", { name: "Rebuild api" })).toBeDefined());
@@ -421,6 +439,23 @@ describe("new workspace dialog", () => {
     fireEvent.keyDown(again, { key: "Enter" });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(useStore.getState().creations.map(c => c.name)).toEqual(["gamma", "gamma"]);
+  });
+
+  it("the second choice creates, then opens the import dialog for the workspace the runtime made", async () => {
+    vi.stubGlobal("PointerEvent", class extends MouseEvent {});
+    const api = fakeApi([API], [status(API)]);
+    api.planProject = vi.fn(async () => ({ source: "/private/var/proj", repo: true, files: 3, bytes: 900, secrets: [], excluded: [], skipped: [] }));
+    api.importProject = vi.fn();
+    api.createFromGoldenHead = vi.fn(async (name: string) => view("ws_beta", name));
+    await mount(api, "api");
+    const { dialog, input } = await openDialog();
+    fireEvent.change(input, { target: { value: "beta" } });
+    fireEvent.click(within(dialog).getByRole("radio", { name: /^Import a project/ }));
+    fireEvent.keyDown(input, { key: "Enter" });
+    const importDialog = await screen.findByRole("dialog", { name: "Import a project" });
+    expect(within(importDialog).getByText(/Into beta\./)).toBeDefined();
+    expect(useStore.getState().selectedId).toBe("ws_beta");
+    vi.unstubAllGlobals();
   });
 
   it("Escape cancels without creating; a blank name cannot be submitted", async () => {

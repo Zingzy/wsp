@@ -7,11 +7,11 @@
 // the person's files take (an exec body has a cap a six-agent set exceeded)
 // through a hook per agent without any file of the person's being touched. A
 // hook the person's own file already claims is left alone and named in the result.
-import { shellQuote, type GoldenBaseTool, type GoldenVersion } from "@wsp/protocol";
+import { fmtBytes, shellQuote, type GoldenBaseTool, type GoldenVersion } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { BASE_VERSION_LINES, parseVersions } from "./golden-base.js";
 import { TOOLS_PATH } from "./golden-import.js";
-import { TOOLS_DISK_FLOOR, fmtBytes } from "./golden-tools.js";
+import { TOOLS_DISK_FLOOR } from "./golden-tools.js";
 import type { ImportResult } from "./golden.js";
 import type { Machine } from "./machine.js";
 import { DAEMON_PORT } from "./preview.js";
