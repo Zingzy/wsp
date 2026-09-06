@@ -4217,3 +4217,143 @@ describe("runtime session steer", () => {
     await rt.close();
   });
 });
+
+describe("a start on a thread whose turn is running", () => {
+  /** A harness whose every turn runs until the test ends it; a resumed start keeps the session id, as the real one
+   * does, and steers when told to. */
+  const held = (steers: boolean) => {
+    const starts: HarnessStartOptions[] = [];
+    const steered: string[] = [];
+    const turns: { sessionId: string; onEvent: (e: AdapterEvent) => void; finish: (r: TurnResult) => void }[] = [];
+    const adapter: HarnessAdapterFactory = () => ({
+      steers,
+      start: o => {
+        starts.push(o);
+        const sessionId = o.resume ?? randomUUID();
+        let finish!: (r: TurnResult) => void;
+        const finished = new Promise<TurnResult>(r => (finish = r));
+        turns.push({ sessionId, onEvent: o.onEvent, finish });
+        o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" });
+        return {
+          localId: sessionId,
+          finished,
+          interrupt: async () => {},
+          ...(steers
+            ? {
+                steer: async (prompt: string) => {
+                  steered.push(prompt);
+                  return "accepted" as const;
+                },
+              }
+            : {}),
+        };
+      },
+    });
+    const end = (turn: number, text: string): void => {
+      const t = turns[turn]!;
+      t.onEvent({ type: "turn.done", sessionId: t.sessionId, result: { status: "completed", text } });
+      t.onEvent({ type: "session.end", sessionId: t.sessionId, exitCode: 0, sawResult: true });
+      t.finish({ status: "completed", text });
+    };
+    return { adapter, starts, steered, end };
+  };
+  const settle = () => new Promise<void>(r => setTimeout(r, 20));
+
+  it("on a harness that steers, the start becomes a steer: session.steer is recorded with the request id, no second session.start, and the caller holds the running turn", async () => {
+    const h = held(true);
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const first = await rt.sessions.start(ws.id, { prompt: "loop for a minute", requestId: "req_1" });
+    expect(first.outcome).toBe("started");
+    const sid = first.view().claudeSessionId!;
+    const joined = await rt.sessions.start(ws.id, { prompt: "end with STEERED", resume: sid, requestId: "req_2", startedBy: "cli" });
+    expect(joined.outcome).toBe("steered");
+    expect(joined.id).toBe(first.id);
+    expect(joined.turnId).toBe(first.turnId);
+    expect(joined.finished).toBe(first.finished);
+    expect(joined.view()).toMatchObject({ threadId: first.view().threadId, status: "running", prompt: "loop for a minute" });
+    expect(h.starts).toHaveLength(1);
+    expect(h.steered).toEqual(["end with STEERED"]);
+    expect(events.filter(e => e.type === "session.start")).toHaveLength(1);
+    expect(events.some(e => e.type === "session.queued")).toBe(false);
+    expect(events.filter(e => e.type === "session.steer")).toMatchObject([{ sessionId: sid, turnId: first.turnId, threadId: first.view().threadId, prompt: "end with STEERED", requestId: "req_2" }]);
+    expect(await rt.sessions.list(ws.id)).toHaveLength(1);
+    h.end(0, "done STEERED");
+    expect(await joined.finished).toEqual({ status: "completed", text: "done STEERED" });
+    expect((await rt.sessions.history(ws.id)).map(e => e.type)).toEqual(["session.start", "session.steer", "session.done", "session.end"]);
+    await rt.close();
+  });
+
+  it("on a harness that cannot steer, the start waits for the running turn and follows its done: one turn at a time on the session", async () => {
+    const h = held(false);
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const first = await rt.sessions.start(ws.id, { prompt: "one" });
+    const sid = first.view().claudeSessionId!;
+    let second: Awaited<ReturnType<typeof rt.sessions.start>> | undefined;
+    const pending = rt.sessions.start(ws.id, { prompt: "two", resume: sid, requestId: "req_2" }).then(s => (second = s));
+    await settle();
+    expect(h.starts.map(s => s.prompt)).toEqual(["one"]);
+    expect(second).toBeUndefined();
+    // The wait is announced at once, so a caller can say it is waiting before the reply comes.
+    expect(events.filter(e => e.type === "session.queued")).toEqual([{ type: "session.queued", workspaceId: ws.id, threadId: first.view().threadId, prompt: "two", requestId: "req_2", seq: expect.any(Number) }]);
+    h.end(0, "one done");
+    await pending;
+    expect(second!.outcome).toBe("queued");
+    expect(second!.turnId).not.toBe(first.turnId);
+    expect(h.starts.map(s => [s.prompt, s.resume])).toEqual([["one", undefined], ["two", sid]]);
+    expect(second!.view()).toMatchObject({ status: "running", prompt: "two", threadId: first.view().threadId });
+    h.end(1, "two done");
+    expect(await second!.finished).toEqual({ status: "completed", text: "two done" });
+    const history = await rt.sessions.history(ws.id);
+    expect(history.map(e => e.type)).toEqual(["session.start", "session.done", "session.end", "session.start", "session.done", "session.end"]);
+    expect(history[3]).toMatchObject({ type: "session.start", prompt: "two", requestId: "req_2", threadId: first.view().threadId, turnId: second!.turnId });
+    expect(history.some(e => e.type === "session.steer")).toBe(false);
+    expect(events.filter(e => e.type === "session.queued")).toHaveLength(1);
+    await rt.close();
+  });
+
+  it("two sends queued behind one turn run in order, each after the one before it ended", async () => {
+    const h = held(false);
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const sid = (await rt.sessions.start(ws.id, { prompt: "one" })).view().claudeSessionId!;
+    const outcomes: string[] = [];
+    const two = rt.sessions.start(ws.id, { prompt: "two", resume: sid }).then(s => outcomes.push(`two:${s.outcome}`));
+    const three = rt.sessions.start(ws.id, { prompt: "three", resume: sid }).then(s => outcomes.push(`three:${s.outcome}`));
+    await settle();
+    expect(h.starts.map(s => s.prompt)).toEqual(["one"]);
+    expect(events.filter(e => e.type === "session.queued").map(e => (e as { prompt: string }).prompt)).toEqual(["two", "three"]);
+    h.end(0, "one done");
+    await two;
+    await settle();
+    expect(h.starts.map(s => s.prompt)).toEqual(["one", "two"]);
+    expect(outcomes).toEqual(["two:queued"]);
+    h.end(1, "two done");
+    await three;
+    expect(h.starts.map(s => s.prompt)).toEqual(["one", "two", "three"]);
+    expect(outcomes).toEqual(["two:queued", "three:queued"]);
+    h.end(2, "three done");
+    // Each waiter says so once, when it first waits; the second wait of the third send is not announced again.
+    expect(events.filter(e => e.type === "session.queued")).toHaveLength(2);
+    expect((await rt.sessions.history(ws.id)).filter(e => e.type === "session.start").map(e => e.prompt)).toEqual(["one", "two", "three"]);
+    await rt.close();
+  });
+
+  it("a start on another thread of the same workspace is not held back by the running turn", async () => {
+    const h = held(false);
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await rt.sessions.start(ws.id, { prompt: "one" });
+    const other = await rt.sessions.start(ws.id, { prompt: "elsewhere" });
+    expect(other.outcome).toBe("started");
+    expect(h.starts.map(s => s.prompt)).toEqual(["one", "elsewhere"]);
+    await rt.close();
+  });
+});

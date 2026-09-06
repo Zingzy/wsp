@@ -7,7 +7,7 @@ import type { Readable, Writable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { ProjectExportResult, ProjectGolden, ThreadView, WorkspaceView } from "@wsp/protocol";
+import { ProjectExportResult, ProjectGolden, SessionStartOutcome, ThreadView, WorkspaceView } from "@wsp/protocol";
 import { VERSION } from "./version.js";
 import { create, createFromHead, dialHost, execOn, exportProject, follow, nap, openingOf, projectGoldenOf, resumeOf, snapshot, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
 
@@ -56,7 +56,8 @@ export function dialer(statePath: string): Dialer {
 }
 
 const Created = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
-const TurnOut = z.object({ threadId: z.string(), workspaceId: z.string(), harness: z.string(), text: z.string() });
+/** outcome says how the message landed: its own turn, steered into the thread's running one, or queued behind it. */
+const TurnOut = z.object({ threadId: z.string(), workspaceId: z.string(), harness: z.string(), text: z.string(), outcome: SessionStartOutcome });
 const ThreadRowOut = ThreadView.extend({ workspaceName: z.string() });
 const Argv = z.array(z.string()).min(1);
 
@@ -66,7 +67,7 @@ type Structured = Record<string, unknown>;
 const asJson = (structured: Structured) => ({ content: [{ type: "text" as const, text: JSON.stringify(structured, null, 2) }], structuredContent: structured });
 const asText = (text: string, structured: Structured) => ({ content: [{ type: "text" as const, text }], structuredContent: structured });
 
-const turnView = (turn: Turn): z.infer<typeof TurnOut> => ({ threadId: turn.threadId, workspaceId: turn.session.workspaceId, harness: turn.session.harness, text: turn.result?.text ?? "" });
+const turnView = (turn: Turn): z.infer<typeof TurnOut> => ({ threadId: turn.threadId, workspaceId: turn.session.workspaceId, harness: turn.session.harness, text: turn.result?.text ?? "", outcome: turn.outcome });
 
 /** The turn's reply as the tool result; a turn that did not complete is a tool error with the harness's reason. */
 function turnOut(turn: Turn): z.infer<typeof TurnOut> {
@@ -166,7 +167,7 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
   server.registerTool(
     "send",
     {
-      description: "Sends a message to an existing thread (by id, or a prefix of it) and returns the reply when the turn ends; a person's message on the same thread lands in order with yours.",
+      description: "Sends a message to an existing thread (by id, or a prefix of it) and returns the reply when the turn ends; a person's message on the same thread lands in order with yours. When the thread's turn is still running the message joins it (outcome steered) or waits for it and then runs (outcome queued); the reply is that turn's.",
       inputSchema: { thread: z.string(), message: z.string() },
       outputSchema: TurnOut.shape,
     },

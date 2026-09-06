@@ -279,6 +279,27 @@ describe("serveRuntime session interrupt", () => {
     c.close();
   });
 
+  it("sessions.start replies with how the start went: started on a fresh thread, steered when the thread's turn runs and the harness steers, with the running turn as the session", async () => {
+    const h = stoppableHarness();
+    const runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    await c.request("events.subscribe");
+    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const workspaceId = (created["workspace"] as { id: string }).id;
+    const first = await c.request("sessions.start", { workspaceId, prompt: "go", requestId: "req_1" });
+    expect(first).toMatchObject({ ok: true, outcome: "started", turnId: expect.any(String), session: { id: h.sessionId, status: "running" } });
+    expect(c.events.filter(e => e.type === "session.start")).toMatchObject([{ turnId: first["turnId"] }]);
+    const joined = await c.request("sessions.start", { workspaceId, prompt: "and STEERED", resume: h.sessionId, requestId: "req_2", startedBy: "cli" });
+    expect(joined).toMatchObject({ ok: true, outcome: "steered", turnId: first["turnId"], session: { id: h.sessionId, status: "running", prompt: "go" } });
+    expect((joined["session"] as { threadId: string }).threadId).toBe((first["session"] as { threadId: string }).threadId);
+    expect(h.steered).toEqual(["and STEERED"]);
+    expect(c.events.filter(e => e.type === "session.start")).toHaveLength(1);
+    expect(c.events.filter(e => e.type === "session.steer")).toMatchObject([{ prompt: "and STEERED", requestId: "req_2" }]);
+    h.complete();
+    c.close();
+  });
+
   it("interrupting the same turn twice is accepted once, then not-running", async () => {
     const h = stoppableHarness();
     const runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter }, clock: fakeClock().clock });

@@ -17,7 +17,7 @@ import type { HostHandle } from "../src/server.js";
 import { dialHost } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
-import { EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, launchedScript, projectBundler, scriptedAgent, stuckAgent, type Captured } from "./verbs-fixture.js";
+import { EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, launchedScript, projectBundler, heldAgent, scriptedAgent, stuckAgent, type Captured } from "./verbs-fixture.js";
 
 describe("wsp verbs over the host", () => {
   let dir: string;
@@ -230,6 +230,63 @@ describe("wsp verbs over the host", () => {
     expect(prefixed.code).toBe(0);
     const missing = await run("send", "nope", "x");
     expect(missing.io.errors).toEqual(["wsp send: no thread nope"]);
+  });
+
+  it("send into a thread whose turn runs joins that turn when the agent steers: one stderr line, the running turn's reply, one session.start and one session.steer", async () => {
+    const held = heldAgent(true);
+    await handle?.close();
+    rt = createRuntime({ backend, store, adapters: { claude: held.adapter } });
+    vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_verbs_key");
+    handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir: join(dir, "web"), runtime: rt });
+    vi.stubEnv("SOLARI_API_KEY", "");
+    await run("new", "alpha");
+    const first = run("thread", "new", "--in", "alpha", "loop for a minute, then say done");
+    await vi.waitFor(() => expect(held.starts).toHaveLength(1));
+    const [row] = await rt.sessions.list();
+    const sent = run("send", row!.threadId!, "end your last line with STEERED");
+    await vi.waitFor(() => expect(held.steered).toEqual(["end your last line with STEERED"]));
+    expect(held.starts).toHaveLength(1);
+    held.release(0, "done STEERED");
+    const opened = await first;
+    const joined = await sent;
+    expect(joined.code).toBe(0);
+    expect(joined.io.errors).toEqual(["joined the running turn"]);
+    expect(joined.io.lines).toEqual(["done STEERED"]);
+    expect(joined.io.streamed).toBe("done STEERED");
+    expect(opened.io.lines).toEqual([`thread ${row!.threadId}`, "done STEERED"]);
+    const [alpha] = await rt.workspaces.list();
+    const history = await rt.sessions.history(alpha!.id);
+    expect(history.map(e => e.type)).toEqual(["session.start", "session.steer", "session.delta", "session.done", "session.end"]);
+    expect(history[1]).toMatchObject({ type: "session.steer", prompt: "end your last line with STEERED", requestId: expect.any(String) });
+    expect(await rt.sessions.list()).toHaveLength(1);
+  });
+
+  it("send into a thread whose turn runs on an agent that cannot steer waits for that turn, then starts its own: one stderr line, the second start after the first done", async () => {
+    const held = heldAgent(false);
+    await handle?.close();
+    rt = createRuntime({ backend, store, adapters: { claude: held.adapter } });
+    vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_verbs_key");
+    handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir: join(dir, "web"), runtime: rt });
+    vi.stubEnv("SOLARI_API_KEY", "");
+    await run("new", "alpha");
+    const first = run("thread", "new", "--in", "alpha", "one");
+    await vi.waitFor(() => expect(held.starts).toHaveLength(1));
+    const [row] = await rt.sessions.list();
+    const sent = run("send", row!.threadId!, "two");
+    await new Promise(r => setTimeout(r, 50));
+    expect(held.starts).toHaveLength(1);
+    held.release(0, "one done");
+    await vi.waitFor(() => expect(held.starts).toHaveLength(2));
+    expect(held.starts.map(s => [s.prompt, s.resume])).toEqual([["one", undefined], ["two", row!.claudeSessionId]]);
+    expect((await first).io.lines).toEqual([`thread ${row!.threadId}`, "one done"]);
+    held.release(1, "two done");
+    const queued = await sent;
+    expect(queued.code).toBe(0);
+    expect(queued.io.errors).toEqual(["waiting behind the running turn", "queued behind the running turn; it has ended and this turn started"]);
+    expect(queued.io.lines).toEqual(["two done"]);
+    const [alpha] = await rt.workspaces.list();
+    expect((await rt.sessions.history(alpha!.id)).map(e => e.type)).toEqual(["session.start", "session.delta", "session.done", "session.end", "session.start", "session.delta", "session.done", "session.end"]);
+    expect(held.steered).toEqual([]);
   });
 
   it("send --json prints the turn's raw events and nothing else", async () => {

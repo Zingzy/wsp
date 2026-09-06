@@ -20,7 +20,7 @@ import type { HostHandle } from "../src/server.js";
 import type { HostClient } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
-import { EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, projectBundler, scriptedAgent, stuckAgent } from "./verbs-fixture.js";
+import { EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, projectBundler, heldAgent, scriptedAgent, stuckAgent } from "./verbs-fixture.js";
 
 interface Called {
   text: string;
@@ -190,7 +190,7 @@ describe("the MCP server over the host", () => {
     const worker = (await rt.workspaces.list()).find(w => w.name === "worker")!;
     const [thread] = await rt.sessions.list(worker.id);
     expect(thread).toMatchObject({ harness: "claude", startedBy: "agent", prompt: "build it", status: "completed" });
-    expect(sent.structured).toMatchObject({ workspace: expect.objectContaining({ name: "worker" }), turn: { threadId: thread!.threadId, workspaceId: worker.id, harness: "claude", text: "re: build it" } });
+    expect(sent.structured).toMatchObject({ workspace: expect.objectContaining({ name: "worker" }), turn: { threadId: thread!.threadId, workspaceId: worker.id, harness: "claude", text: "re: build it", outcome: "started" } });
   });
 
   it("fork with a task whose first turn fails names the minted workspace beside the reason, so a retry does not mint another", async () => {
@@ -237,7 +237,7 @@ describe("the MCP server over the host", () => {
     expect(codex.starts.map(s => s.prompt)).toEqual(["write tests"]);
     expect(claude.starts).toEqual([]);
     expect(made.text).toBe("codex: write tests");
-    expect(made.structured).toEqual({ threadId: row!.threadId, workspaceId: alpha!.id, harness: "codex", text: "codex: write tests" });
+    expect(made.structured).toEqual({ threadId: row!.threadId, workspaceId: alpha!.id, harness: "codex", text: "codex: write tests", outcome: "started" });
   });
 
   it("threads is the sidebar's data with the workspace's name on each row; the local agent's threads say so", async () => {
@@ -269,7 +269,7 @@ describe("the MCP server over the host", () => {
     const reply = await call("send", { thread: byAgent!.threadId!, message: "second" });
     expect(reply.isError).toBe(false);
     expect(reply.text).toBe("codex: second");
-    expect(reply.structured).toEqual({ threadId: byAgent!.threadId, workspaceId: alpha!.id, harness: "codex", text: "codex: second" });
+    expect(reply.structured).toEqual({ threadId: byAgent!.threadId, workspaceId: alpha!.id, harness: "codex", text: "codex: second", outcome: "started" });
     expect(codex.starts.map(s => [s.prompt, s.resume])).toEqual([["first", undefined], ["second", byAgent!.claudeSessionId]]);
     const followUp = await call("send", { thread: byPerson!.threadId!.slice(0, 8), message: "and this" });
     expect(followUp.text).toBe("re: and this");
@@ -284,6 +284,24 @@ describe("the MCP server over the host", () => {
     ]);
     const missing = await call("send", { thread: "nope", message: "x" });
     expect(missing).toEqual({ text: "no thread nope", structured: undefined, isError: true });
+  });
+
+  it("send into a thread whose turn runs joins that turn when the agent steers and returns the running turn's reply; no second start", async () => {
+    const held = heldAgent(true);
+    await restartHost({ claude: held.adapter });
+    await call("new", { name: "alpha" });
+    const first = call("thread_new", { workspace: "alpha", task: "loop, then say done" });
+    await vi.waitFor(() => expect(held.starts).toHaveLength(1));
+    const [row] = await rt.sessions.list();
+    const sent = call("send", { thread: row!.threadId!, message: "end with STEERED" });
+    await vi.waitFor(() => expect(held.steered).toEqual(["end with STEERED"]));
+    held.release(0, "done STEERED");
+    expect((await first).text).toBe("done STEERED");
+    const joined = await sent;
+    expect(joined.isError).toBe(false);
+    expect(joined.structured).toEqual({ threadId: row!.threadId, workspaceId: row!.workspaceId, harness: "claude", text: "done STEERED", outcome: "steered" });
+    expect(held.starts).toHaveLength(1);
+    expect((await rt.sessions.history(row!.workspaceId)).map(e => e.type)).toEqual(["session.start", "session.steer", "session.delta", "session.done", "session.end"]);
   });
 
   it("a failed turn is a tool error carrying the harness's reason", async () => {
