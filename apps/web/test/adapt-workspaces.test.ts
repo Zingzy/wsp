@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Workspaces and statuses into sidebar projects with status indicators.
 import { describe, expect, it } from "vitest";
-import type { MachineState, ReachState, SessionView, WorkspacePhase, WorkspaceStatus } from "@wsp/protocol";
-import { deriveSidebarProjects, threadIndicator, turnWait, workspaceIndicator } from "../src/adapt/index.js";
+import type { MachineState, ReachState, SessionView, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import { deriveSidebarProjects, threadIndicator, turnWait, workspaceIndicator, type SidebarInput } from "../src/adapt/index.js";
 import { LIVE_RUN_1, LIVE_RUN_1_RESTART, LIVE_WORKSPACE_1, LIVE_WORKSPACE_2, LIVE_WS } from "./fixtures/live-run-1.js";
 
 const status = (phase: WorkspacePhase, machineState: MachineState, reach: ReachState, id = "ws_a"): WorkspaceStatus => ({
@@ -57,7 +57,7 @@ describe("deriveSidebarProjects", () => {
     return out;
   };
 
-  it("live run 1: two machines in creation order, each a remote project with its machine as the environment label", () => {
+  it("live run 1: two machines, the one created later and still quiet above the one whose thread ended before it existed, each a remote project with its machine as the environment label", () => {
     const projects = deriveSidebarProjects({
       workspaces: [LIVE_WORKSPACE_2, LIVE_WORKSPACE_1],
       statuses: statusesFrom(LIVE_RUN_1),
@@ -69,11 +69,11 @@ describe("deriveSidebarProjects", () => {
       },
     });
     expect(projects.map(p => [p.displayName, p.indicator.label, p.remoteEnvironmentLabels, p.threads.length])).toEqual([
-      ["first", "Running", ["machine-1"], 2],
       ["yolo", "Running", ["machine-2"], 0],
+      ["first", "Running", ["machine-1"], 2],
     ]);
-    expect(projects[0]).toMatchObject({ projectKey: LIVE_WS, environmentPresence: "remote-only", groupedProjectCount: 1, allRemoteMembersAreDesktopLocal: false, machineState: "running", reach: "reachable" });
-    expect(projects[0]?.threads).toEqual([
+    expect(projects[1]).toMatchObject({ projectKey: LIVE_WS, environmentPresence: "remote-only", groupedProjectCount: 1, allRemoteMembersAreDesktopLocal: false, machineState: "running", reach: "reachable" });
+    expect(projects[1]?.threads).toEqual([
       { id: "s1", threadId: null, workspaceId: LIVE_WS, title: "hello", status: "completed", startedAt: "2026-09-02T17:19:35.668Z", endedAt: "2026-09-02T17:19:37.768Z", indicator: { label: "Idle", tone: "neutral", pulse: false }, harness: "claude", startedBy: "person" },
       { id: "s0", threadId: null, workspaceId: LIVE_WS, title: "59094224", status: "running", startedAt: null, endedAt: null, indicator: { label: "Working", tone: "neutral", pulse: true }, harness: "claude", startedBy: "person" },
     ]);
@@ -98,6 +98,70 @@ describe("deriveSidebarProjects", () => {
     ]);
     // Provenance is the opening turn's: the thread the command line opened stays the command line's after a person's turn.
     expect(p!.threads.map(t => [t.harness, t.startedBy])).toEqual([["claude", "cli"], ["codex", "person"], ["claude", "person"]]);
+  });
+
+  describe("order", () => {
+    const HOUR = 60 * 60_000;
+    const T = Date.parse("2026-09-06T12:00:00Z");
+    const ws = (id: string, phase: WorkspacePhase, createdAgoMs: number): WorkspaceView => ({
+      id, name: id, machineId: `m_${id}`, phase, golden: "snap", createdAt: new Date(T - createdAgoMs).toISOString(),
+    });
+    const at = (w: WorkspaceView, machineState: MachineState, reach: ReachState, over: Partial<WorkspaceStatus> = {}): WorkspaceStatus => ({
+      ...w, machineState, reach: { state: reach }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11, ...over,
+    });
+    const turn = (id: string, workspaceId: string, startedAgoMs: number, endedAgoMs?: number): SessionView => ({
+      id, workspaceId, harness: "claude", status: endedAgoMs === undefined ? "running" : "completed", prompt: id,
+      startedAt: T - startedAgoMs, ...(endedAgoMs === undefined ? {} : { endedAt: T - endedAgoMs }),
+    });
+    const runningOld = ws("running-old", "running", 72 * HOUR);
+    const runningMid = ws("running-mid", "running", 24 * HOUR);
+    const unreachableNew = ws("unreachable-new", "running", 10 * 60_000);
+    const pausedOld = ws("paused-old", "napping", 48 * HOUR);
+    const pausedNew = ws("paused-new", "napping", 30 * 60_000);
+    const goneNew = ws("gone-new", "running", 60_000);
+    const fleet = {
+      workspaces: [runningOld, pausedOld, runningMid, goneNew, pausedNew, unreachableNew],
+      statuses: {
+        [runningOld.id]: at(runningOld, "running", "reachable"),
+        [runningMid.id]: at(runningMid, "running", "reachable"),
+        [unreachableNew.id]: at(unreachableNew, "running", "unreachable"),
+        [pausedOld.id]: at(pausedOld, "paused", "napping"),
+        [pausedNew.id]: at(pausedNew, "paused", "napping"),
+        [goneNew.id]: at(goneNew, "gone", "gone"),
+      },
+      sessions: {
+        [runningOld.id]: [turn("s1", runningOld.id, 5 * 60_000)],
+        [pausedOld.id]: [turn("s2", pausedOld.id, 2 * HOUR, HOUR)],
+      },
+    };
+    const order = (input: SidebarInput) => deriveSidebarProjects(input).map(p => p.id);
+
+    it("workspaces whose machine is up lead however old, then the paused, then the gone; inside a group the latest turn or creation is on top", () => {
+      expect(order(fleet)).toEqual(["running-old", "unreachable-new", "running-mid", "paused-new", "paused-old", "gone-new"]);
+    });
+
+    it("a status tick that leaves the state alone leaves the order alone; a state change or a new turn moves the row", () => {
+      const ticked = {
+        ...fleet,
+        statuses: {
+          ...fleet.statuses,
+          [runningOld.id]: at(runningOld, "running", "slow", { idleAt: T + 9 * 60_000 }),
+          [runningMid.id]: at(runningMid, "running", "reachable", { idleAt: T + 3 * 60_000 }),
+        },
+      };
+      expect(order(ticked)).toEqual(order(fleet));
+      const woke = { ...fleet, statuses: { ...fleet.statuses, [pausedNew.id]: at({ ...pausedNew, phase: "running" }, "running", "reachable") } };
+      expect(order(woke)).toEqual(["running-old", "unreachable-new", "paused-new", "running-mid", "paused-old", "gone-new"]);
+      const spoke = { ...fleet, sessions: { ...fleet.sessions, [runningMid.id]: [turn("s3", runningMid.id, 60_000)] } };
+      expect(order(spoke)).toEqual(["running-mid", "running-old", "unreachable-new", "paused-new", "paused-old", "gone-new"]);
+    });
+
+    it("a workspace just created, still waking, sits at the top of the up group with no thread yet", () => {
+      const fresh = ws("fresh", "running", 0);
+      expect(order({ ...fleet, workspaces: [...fleet.workspaces, fresh], statuses: { ...fleet.statuses, [fresh.id]: at(fresh, "starting", "unreachable") } })).toEqual([
+        "fresh", "running-old", "unreachable-new", "running-mid", "paused-new", "paused-old", "gone-new",
+      ]);
+    });
   });
 
   it("the restart log: a napping status wins over the stale view phase", () => {
