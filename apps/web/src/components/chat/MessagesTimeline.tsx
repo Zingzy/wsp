@@ -941,6 +941,9 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
 
   return (
     <div className="group flex flex-col items-end gap-1">
+      {row.message.steered === true ? (
+        <span data-user-message-steered="true" className="pe-1 font-mono text-[11px] leading-4 text-muted-foreground">steered</span>
+      ) : null}
       <div className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground">
         <CollapsibleUserMessageBody
           text={row.message.text}

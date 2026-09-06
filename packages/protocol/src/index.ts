@@ -281,6 +281,9 @@ export const HarnessCatalog = z.object({
   efforts: z.array(HarnessOption),
   contextWindows: z.array(HarnessOption),
   permissionModes: z.array(HarnessOption),
+  /** Whether a running turn of this harness takes a message (sessions.steer); false where the runtime's table alone
+   * answers, since only the adapter on a machine knows. The composer picks send-now's road from this before the click. */
+  steers: z.boolean(),
 });
 export type HarnessCatalog = z.infer<typeof HarnessCatalog>;
 
@@ -365,8 +368,18 @@ export const SessionEndEvent = z.object({
   reason: z.string().optional(),
 });
 
+/** A message the person sent into the turn while it ran; stamped by the runtime once the harness took it, so a
+ * replayed transcript shows it where the turn saw it. No session.start comes with it: the turn is the same one. */
+export const SessionSteerEvent = z.object({
+  type: z.literal("session.steer"),
+  ...sessionScope,
+  prompt: z.string(),
+  /** The id the client minted for the sessions.steer, as on session.start. */
+  requestId: z.string().optional(),
+});
+
 /** The events sessions.history replays: what a chat transcript folds. */
-export const SessionEvent = z.discriminatedUnion("type", [SessionStartEvent, SessionDeltaEvent, SessionDoneEvent, SessionEndEvent]);
+export const SessionEvent = z.discriminatedUnion("type", [SessionStartEvent, SessionDeltaEvent, SessionDoneEvent, SessionEndEvent, SessionSteerEvent]);
 export type SessionEvent = z.infer<typeof SessionEvent>;
 
 // --- workspace / port / inbox events ----------------------------------------
@@ -786,6 +799,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   SessionDeltaEvent.extend(sequenced),
   SessionDoneEvent.extend(sequenced),
   SessionEndEvent.extend(sequenced),
+  SessionSteerEvent.extend(sequenced),
   PortOpenEvent.extend(sequenced),
   PortCloseEvent.extend(sequenced),
   InboxFileEvent.extend(sequenced),
@@ -1184,6 +1198,9 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("sessions.history"), workspaceId: z.string() }),
   /** Asks the harness to stop the session's running turn; replies with a SessionInterruptResult. */
   z.object({ id: reqId, op: z.literal("sessions.interrupt"), sessionId: z.string() }),
+  /** Sends a message into the session's running turn; replies with a SessionSteerResult. Takes the runtime's session
+   * id, as sessions.interrupt does. */
+  z.object({ id: reqId, op: z.literal("sessions.steer"), sessionId: z.string(), prompt: z.string(), requestId: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("golden.get"), name: z.string() }),
   /** Replies with the backend's Capabilities; the UI gates features on these. */
   z.object({ id: reqId, op: z.literal("capabilities.get") }),
@@ -1314,6 +1331,17 @@ export const SessionInterruptOutcome = z.enum(["accepted", "not-running", "not-f
 export type SessionInterruptOutcome = z.infer<typeof SessionInterruptOutcome>;
 export const SessionInterruptResult = z.object({ outcome: SessionInterruptOutcome });
 export type SessionInterruptResult = z.infer<typeof SessionInterruptResult>;
+
+// --- session steer (what send-now on a queued row gets back) -------------------
+
+/** accepted: the harness took the message into the running turn and a session.steer event carries it.
+ * not-running: the turn had ended, or had not started, when the message was offered; the caller starts a turn instead.
+ * unsupported: the session's harness takes no message mid-turn (its catalog says steers: false).
+ * not-found: this runtime holds no such session. None is an error reply. */
+export const SessionSteerOutcome = z.enum(["accepted", "not-running", "unsupported", "not-found"]);
+export type SessionSteerOutcome = z.infer<typeof SessionSteerOutcome>;
+export const SessionSteerResult = z.object({ outcome: SessionSteerOutcome });
+export type SessionSteerResult = z.infer<typeof SessionSteerResult>;
 
 // --- snapshot lineage (golden manifest as the rollback UI reads it) -----------
 

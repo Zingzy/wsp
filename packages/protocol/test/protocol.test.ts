@@ -34,6 +34,7 @@ import {
   RuntimeResponse,
   SessionEvent,
   SessionInterruptResult,
+  SessionSteerResult,
   SnapshotLineage,
   SnapshotRollbackResult,
   SessionOrigin,
@@ -143,6 +144,17 @@ describe("protocol event union", () => {
     expect(
       EventUnion.parse({ type: "session.end", workspaceId: "w", sessionId: "s", exitCode: null, sawResult: false }),
     ).toBeTruthy();
+  });
+
+  it("session.steer is a session event: the message the person sent into a running turn, with the turn's scope and the send's request id", () => {
+    const steered = { type: "session.steer", workspaceId: "ws_1", sessionId: "s1", turnId: "turn_0001", threadId: "thread_0001", at: 1756687889412, prompt: "and say pineapple", requestId: "req_7" };
+    expect(SessionEvent.parse(steered)).toEqual(steered);
+    expect(EventUnion.parse(JSON.parse(JSON.stringify(steered)))).toEqual(steered);
+    expect(EventUnion.parse({ ...steered, seq: 9 })).toEqual({ ...steered, seq: 9 });
+    const { requestId: _r, ...plain } = steered;
+    expect(SessionEvent.parse(plain)).toEqual(plain);
+    expect(() => SessionEvent.parse({ ...steered, prompt: undefined })).toThrow();
+    expect(() => SessionEvent.parse({ ...steered, prompt: 7 })).toThrow();
   });
 });
 
@@ -381,10 +393,14 @@ describe("runtime wire types", () => {
       efforts: [{ value: "high", label: "High", isDefault: true }],
       contextWindows: [{ value: "200k", label: "200k" }, { value: "1m", label: "1M", isDefault: true }],
       permissionModes: [{ value: "plan", label: "Plan", description: "Read and plan only" }],
+      steers: true,
     };
     expect(HarnessCatalog.parse(catalog)).toEqual(catalog);
-    const bare = { harness: "pi", label: "Pi", source: "table", version: null, models: [], efforts: [], contextWindows: [], permissionModes: [] };
+    const bare = { harness: "pi", label: "Pi", source: "table", version: null, models: [], efforts: [], contextWindows: [], permissionModes: [], steers: false };
     expect(HarnessCatalog.parse(bare)).toEqual(bare);
+    // steers says whether a running turn of this harness takes a message; the composer decides send-now from it before the click
+    expect(() => HarnessCatalog.parse({ ...catalog, steers: undefined })).toThrow();
+    expect(() => HarnessCatalog.parse({ ...catalog, steers: "yes" })).toThrow();
     expect(() => HarnessCatalog.parse({ ...catalog, models: [{ value: "x" }] })).toThrow();
     expect(() => HarnessCatalog.parse({ ...catalog, efforts: undefined })).toThrow();
     expect(() => HarnessCatalog.parse({ ...catalog, source: "guess" })).toThrow();
@@ -403,6 +419,18 @@ describe("runtime wire types", () => {
     expect(() => SessionInterruptResult.parse({ outcome: "stopped" })).toThrow();
     expect(() => SessionInterruptResult.parse({})).toThrow();
     expect(RuntimeResponse.parse({ id: 21, ok: true, outcome: "not-running" })).toBeTruthy();
+  });
+
+  it("sessions.steer carries the message for the running turn and answers one of four outcomes", () => {
+    const steer = { id: 24, op: "sessions.steer", sessionId: "s1", prompt: "also check the tests", requestId: "req_2" };
+    expect(RuntimeRequest.parse(steer)).toEqual(steer);
+    const { requestId: _r, ...plain } = steer;
+    expect(RuntimeRequest.parse(plain)).toEqual(plain);
+    expect(() => RuntimeRequest.parse({ id: 24, op: "sessions.steer", sessionId: "s1" })).toThrow(); // prompt required
+    expect(() => RuntimeRequest.parse({ id: 24, op: "sessions.steer", prompt: "x" })).toThrow(); // sessionId required
+    for (const outcome of ["accepted", "not-running", "unsupported", "not-found"]) expect(SessionSteerResult.parse({ outcome })).toEqual({ outcome });
+    expect(() => SessionSteerResult.parse({ outcome: "queued" })).toThrow();
+    expect(() => SessionSteerResult.parse({})).toThrow();
   });
 
   it("snapshots.list / snapshots.rollback parse, and SnapshotLineage is the manifest plus its name", () => {

@@ -19,9 +19,12 @@
 // dies before init drains nothing behind it. Rows read back from storage are
 // held too. Held rows go only after the person's next Enter or send-now here,
 // never on their own, and a row typed during a turn goes ahead of the held
-// ones it releases. Send-now on a row puts it at
-// the head and stops the turn, since the harness runs one process per turn
-// with stdin closed and takes no message mid-turn. The editor is also
+// ones it releases. Send-now on a row puts it at the head; when the harness's
+// catalog says it steers, the row goes into the running turn through
+// sessions.steer and leaves the queue once the runtime took it (the thread
+// shows it from the session.steer event), while not-running leaves it at the
+// head for the turn's end. A harness that does not steer gets the turn stopped
+// first, with the one-line notice. The editor is also
 // disabled while the turn a new thread left behind is still finishing: stop
 // reaches only the visible turn, so a second session must not start until
 // that one ends. The checkout row under the composer picks the folder a fresh
@@ -81,6 +84,13 @@ interface StopAttempt {
   readonly error: string | null;
 }
 
+/** What the last send-now into a running turn left behind: the row while it is in flight, the runtime's refusal after. */
+interface SteerAttempt {
+  readonly turnId: string;
+  readonly rowId: string | null;
+  readonly error: string | null;
+}
+
 export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thread: ChatThreadHandle }) {
   const api = useStore(s => s.api);
   const conn = useStore(s => s.conn);
@@ -89,12 +99,13 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const status = useStatus(workspaceId);
   const [stop, setStop] = useState<StopAttempt | null>(null);
   const [steering, setSteering] = useState<string | null>(null);
+  const [steered, setSteered] = useState<SteerAttempt | null>(null);
   const draft = useComposerDraft(workspaceId);
   const { threadKey, named } = thread;
   const queue = useComposerQueue(threadKey);
   const held = useComposerQueueHeld(threadKey);
   const cwd = useThreadFolder(workspaceId);
-  const { harness: harnessId, startOptions } = useComposerPicks(workspaceId, thread);
+  const { harness: harnessId, startOptions, catalog: harnessCatalog } = useComposerPicks(workspaceId, thread);
   const setDraft = useComposerDraftStore(s => s.setDraft);
   const enqueue = useComposerDraftStore(s => s.enqueue);
   const editQueued = useComposerDraftStore(s => s.editQueued);
@@ -136,13 +147,18 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     return row?.id ?? runningTurn.sessionId;
   }, [runningTurn, sessions]);
   const stopAttempt = stop !== null && runningTurn !== null && stop.turnId === runningTurn.turnId ? stop : null;
+  const steerAttempt = steered !== null && runningTurn !== null && steered.turnId === runningTurn.turnId ? steered : null;
   const canStop = runningTurn !== null && api?.interruptSession !== undefined;
+  // The catalog answers before the click: a harness that steers takes the row into the turn, any other gets the turn stopped.
+  const canSteer = canStop && harnessCatalog?.steers === true && api?.steerSession !== undefined;
   const banner =
     stopAttempt !== null && stopAttempt.error !== null
       ? { text: `Could not stop: ${stopAttempt.error}`, variant: "error" as const }
-      : unavailable !== null
-        ? { text: unavailable, variant: "warning" as const }
-        : null;
+      : steerAttempt !== null && steerAttempt.error !== null
+        ? { text: `Could not send now: ${steerAttempt.error}`, variant: "error" as const }
+        : unavailable !== null
+          ? { text: unavailable, variant: "warning" as const }
+          : null;
 
   const trigger = useMemo(() => detectComposerTrigger(draft.prompt, draft.cursor), [draft]);
   const searchKey = trigger ? `${trigger.kind}:${trigger.query.trim().toLowerCase()}` : null;
@@ -241,10 +257,32 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
       release(threadKey);
       promoteQueued(threadKey, id);
       if (!canStop) return;
+      if (!canSteer) {
+        setSteering(id);
+        interrupt();
+        return;
+      }
+      const method = api?.steerSession;
+      const row = queue.find(r => r.id === id);
+      if (method === undefined || runningTurn === null || stopTarget === null || row === undefined || steerAttempt?.rowId != null) return;
+      const { turnId } = runningTurn;
       setSteering(id);
-      interrupt();
+      setSteered({ turnId, rowId: id, error: null });
+      void method(stopTarget, row.prompt.trim(), newId()).then(
+        outcome => {
+          setSteering(null);
+          if (outcome === "accepted") removeQueued(threadKey, id);
+          // not-running: the turn beat the message, so the row stays at the head and the head effect starts it once the turn ends.
+          const error = outcome === "not-found" ? "the runtime does not know this session" : outcome === "unsupported" ? "this harness takes no message mid-turn" : null;
+          setSteered(error === null ? null : { turnId, rowId: null, error });
+        },
+        (err: unknown) => {
+          setSteering(null);
+          setSteered({ turnId, rowId: null, error: err instanceof Error ? err.message : String(err) });
+        },
+      );
     },
-    [canStop, interrupt, promoteQueued, release, threadKey],
+    [api, canSteer, canStop, interrupt, promoteQueued, queue, release, removeQueued, runningTurn, steerAttempt, stopTarget, threadKey],
   );
 
   const selectItem = useCallback(
@@ -307,7 +345,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
       <ComposerQueue
         rows={queue}
         steering={stopAttempt?.error ? null : steering}
-        steer={unavailable !== null ? null : canStop ? "stop" : busy ? null : "now"}
+        steer={unavailable !== null ? null : canSteer ? "now" : canStop ? "stop" : busy ? null : "now"}
         onEdit={(id, prompt) => editQueued(threadKey, id, prompt)}
         onRemove={id => removeQueued(threadKey, id)}
         onSteer={steer}

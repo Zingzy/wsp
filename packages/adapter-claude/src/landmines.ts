@@ -71,7 +71,6 @@ export function newSessionId(): string {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface BuildCommandOptions {
-  prompt: string;
   /** Fresh session: the self-generated UUID passed as --session-id. */
   sessionId?: string;
   /** Existing session: passed as --resume instead. */
@@ -110,14 +109,17 @@ function permissionFlags(mode: string | undefined): string[] {
 }
 
 /**
- * Print-mode stream-json refuses to run without --verbose, and `claude -p`
- * hangs unless stdin is closed (solari-poc probes, RESULTS.md P1).
+ * Print-mode stream-json refuses to run without --verbose. `claude -p` reads
+ * stdin to the end, so stdin is either closed or a stream-json channel the
+ * caller writes and closes on purpose, never a silent open pipe (solari-poc
+ * probes, RESULTS.md P1): the prompt and every later message are user lines
+ * on that channel, and EOF ends the process after its current turn.
  * Guest exec carries no HOME (measured on Solari sandboxes), so the default
  * cwd is `~`: tilde expansion falls back to the passwd entry where "$HOME"
  * would expand to nothing.
  */
 export function buildCommand(options: BuildCommandOptions): string {
-  const { prompt, sessionId, resume, cwd, model, effort, permissionMode, contextWindow } = options;
+  const { sessionId, resume, cwd, model, effort, permissionMode, contextWindow } = options;
   if ((sessionId === undefined) === (resume === undefined)) {
     throw new Error("buildCommand needs exactly one of sessionId or resume");
   }
@@ -127,22 +129,32 @@ export function buildCommand(options: BuildCommandOptions): string {
   }
   const idFlag = sessionId === undefined ? `--resume ${id}` : `--session-id ${id}`;
   const claude = [
-    `claude -p ${shellQuote(prompt)}`,
+    "claude -p",
+    "--input-format stream-json",
     "--output-format stream-json",
     "--verbose",
     ...permissionFlags(permissionMode),
     ...slugFlag("--model", "model", modelWithContext(model, contextWindow)),
     ...slugFlag("--effort", "effort", effort),
     idFlag,
-    "</dev/null",
   ].join(" ");
   return `cd ${cwd === undefined ? "~" : shellQuote(cwd)} && ${claude}`;
+}
+
+/** One line of the stdin channel: a user message in the CLI's stream-json input shape. */
+export function userMessageLine(text: string, sessionId: string): string {
+  return JSON.stringify({
+    type: "user",
+    message: { role: "user", content: [{ type: "text", text }] },
+    parent_tool_use_id: null,
+    session_id: sessionId,
+  });
 }
 
 /**
  * Interrupt policy from t3code interruptTurn: a graceful interrupt can be
  * acknowledged while background tasks keep the CLI alive, so interrupt is a
- * hard boundary: teardown (close stdin/SIGTERM), then SIGKILL after this
+ * hard boundary: teardown (SIGTERM), then SIGKILL after this
  * grace window.
  */
 export const INTERRUPT_GRACE_MS = 5_000;

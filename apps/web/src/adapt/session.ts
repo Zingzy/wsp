@@ -88,9 +88,9 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
     const full: WorkLogEntry = { ...entry, id: `${t.summary.turnId}:w${t.ordinal}`, turnId: t.summary.turnId };
     return push({ id: full.id, kind: "work", createdAt: at, entry: full });
   };
-  const addMessage = (t: TurnBuild, role: ChatMessage["role"], text: string, at: string, streaming: boolean): number => {
+  const addMessage = (t: TurnBuild, role: ChatMessage["role"], text: string, at: string, streaming: boolean, steered = false): number => {
     t.ordinal += 1;
-    const m: ChatMessage = { id: `${t.summary.turnId}:m${t.ordinal}`, role, text, turnId: t.summary.turnId, streaming, createdAt: at, updatedAt: at };
+    const m: ChatMessage = { id: `${t.summary.turnId}:m${t.ordinal}`, role, text, turnId: t.summary.turnId, streaming, createdAt: at, updatedAt: at, ...(steered ? { steered } : {}) };
     return push(messageEntry(m));
   };
   const finishTurn = (t: TurnBuild, result: TurnResult, at: string): void => {
@@ -161,6 +161,12 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
       }
       case "session.delta": {
         applyDelta(turnFor(event, at), event, at);
+        continue;
+      }
+      case "session.steer": {
+        const t = turnFor(event, at);
+        closeOpenMessage(t);
+        addMessage(t, "user", event.prompt, at, false, true);
         continue;
       }
       case "session.done": {

@@ -23,6 +23,41 @@ const liveSession = sessionEventsOf(LIVE_RUN_1);
 const liveEvents = liveSession.map(s => s.event);
 const liveAt = (_e: SessionEvent, index: number) => liveSession[index]?.at;
 
+describe("deriveSession: a message steered into the running turn", () => {
+  const scoped = { workspaceId: "ws_t", sessionId: "sess_t", turnId: "turn_s" };
+  const events: SessionEvent[] = [
+    { type: "session.start", ...scoped, at: 1_000, prompt: "run the long job" },
+    { type: "session.delta", ...scoped, at: 2_000, kind: "text", text: "Starting." },
+    { type: "session.steer", ...scoped, at: 3_000, prompt: "when it ends, say pineapple", requestId: "req_s" },
+    { type: "session.delta", ...scoped, at: 4_000, kind: "text", text: "Pineapple." },
+  ];
+
+  it("is the person's own message row inside the same turn, in wire order, marked steered", () => {
+    const model = deriveSession(events);
+    expect(model.turns).toHaveLength(1);
+    expect(model.running).toBe(true);
+    expect(model.messages.map(m => [m.role, m.text, m.steered ?? false, m.turnId])).toEqual([
+      ["user", "run the long job", false, "turn_s"],
+      ["assistant", "Starting.", false, "turn_s"],
+      ["user", "when it ends, say pineapple", true, "turn_s"],
+      ["assistant", "Pineapple.", false, "turn_s"],
+    ]);
+    expect(model.messages[2]!.createdAt).toBe(new Date(3_000).toISOString());
+  });
+
+  it("a settled turn keeps the steered row visible: user rows never fold behind Worked for", () => {
+    const settled: SessionEvent[] = [...events, { type: "session.done", ...scoped, at: 5_000, result: { status: "completed", durationMs: 4_000 } }, { type: "session.end", ...scoped, at: 5_100, exitCode: 0, sawResult: true }];
+    const model = deriveSession(settled);
+    const rows = deriveMessagesTimelineRows({ timelineEntries: model.timeline, turns: model.turns, isWorking: false, activeTurnStartedAt: null });
+    const shown = rows.filter(r => r.kind === "message").map(r => (r.kind === "message" ? [r.message.role, r.message.text] : []));
+    expect(shown).toEqual([
+      ["user", "run the long job"],
+      ["user", "when it ends, say pineapple"],
+      ["assistant", "Pineapple."],
+    ]);
+  });
+});
+
 describe("deriveSession: the chat fixture", () => {
   const model = deriveSession(CHAT_STREAM);
 

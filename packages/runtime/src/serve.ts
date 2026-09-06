@@ -226,6 +226,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "sessions.interrupt":
               send({ id: msg.id, ok: true, ...(await rt.sessions.interrupt(msg.sessionId)) });
               return;
+            case "sessions.steer":
+              send({ id: msg.id, ok: true, ...(await rt.sessions.steer(msg.sessionId, { prompt: msg.prompt, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) })) });
+              return;
             case "golden.get":
               send({ id: msg.id, ok: true, manifest: await rt.golden.get(msg.name) });
               return;

@@ -151,9 +151,11 @@ function stoppableHarness() {
   const h = {
     sessionId,
     interrupts: 0,
+    steered: [] as string[],
     lastStart: undefined as HarnessStartOptions | undefined,
     complete: () => end({ status: "completed", text: "done" }),
     adapter: (() => ({
+      steers: true,
       start: o => {
         onEvent = o.onEvent;
         h.lastStart = o;
@@ -164,6 +166,10 @@ function stoppableHarness() {
           interrupt: async () => {
             h.interrupts++;
             setImmediate(() => end({ status: "interrupted" }));
+          },
+          steer: async (prompt: string) => {
+            h.steered.push(prompt);
+            return "accepted" as const;
           },
         };
       },
@@ -241,6 +247,35 @@ describe("serveRuntime session interrupt", () => {
       const reply = `reply:${String(res.id)}`;
       if (row.outcome === "accepted") expect(arrived.slice(0, arrived.indexOf(reply) + 1)).toEqual(["session.done", "session.end", reply]);
     }
+    c.close();
+  });
+
+  it("sessions.steer round-trips: the session.steer event reaches subscribers before the accepted reply, and history holds it", async () => {
+    const h = stoppableHarness();
+    const runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    await c.request("events.subscribe");
+    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const workspaceId = (created["workspace"] as { id: string }).id;
+    await c.request("sessions.start", { workspaceId, prompt: "go", requestId: "req_1" });
+    const arrived: string[] = [];
+    c.ws.on("message", raw => {
+      const m = JSON.parse(String(raw)) as { id?: number; type?: string };
+      arrived.push(m.type ?? `reply:${String(m.id)}`);
+    });
+    const res = await c.request("sessions.steer", { sessionId: h.sessionId, prompt: "and the tests", requestId: "req_2" });
+    expect(res).toEqual({ id: expect.any(Number), ok: true, outcome: "accepted" });
+    expect(h.steered).toEqual(["and the tests"]);
+    expect(arrived).toEqual(["session.steer", `reply:${String(res.id)}`]);
+    expect(c.events.filter(e => e.type === "session.steer")).toMatchObject([{ workspaceId, sessionId: h.sessionId, prompt: "and the tests", requestId: "req_2" }]);
+    h.complete();
+    const history = (await c.request("sessions.history", { workspaceId }))["events"] as { type: string; turnId?: string }[];
+    expect(history.map(e => e.type)).toEqual(["session.start", "session.steer", "session.done", "session.end"]);
+    expect(history[1]!.turnId).toBe(history[0]!.turnId);
+    expect((await c.request("sessions.steer", { sessionId: h.sessionId, prompt: "late" }))["outcome"]).toBe("not-running");
+    expect((await c.request("sessions.steer", { sessionId: "nope", prompt: "x" }))["outcome"]).toBe("not-found");
+    expect((await c.request("sessions.steer", { sessionId: h.sessionId })).ok).toBe(false);
     c.close();
   });
 
@@ -605,6 +640,7 @@ function execGuest(backend: StubBackend, output: string, exit: number | undefine
 
 /** A harness that never runs here; it says what a turn on the machine is exported with, which is what exec runs with too. */
 const envAdapter = (env: Record<string, string>): HarnessAdapterFactory => () => ({
+  steers: false,
   start: () => {
     throw new Error("not started in this test");
   },

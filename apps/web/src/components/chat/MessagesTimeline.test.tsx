@@ -440,6 +440,18 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('data-user-message-footer="true"');
   });
 
+  it("marks a steered user message with the muted mono word and nothing else; a plain one carries no mark", () => {
+    const entry = buildUserTimelineEntry("when it ends, say pineapple");
+    const steered = renderToStaticMarkup(
+      <MessagesTimeline {...buildProps()} timelineEntries={[{ ...entry, message: { ...entry.message, steered: true } }]} />,
+    );
+    expect(steered).toContain('data-user-message-steered="true"');
+    expect(steered).toMatch(/font-mono[^>]*>steered</);
+    expect(steered).not.toContain("role=\"status\"");
+    const plain = renderToStaticMarkup(<MessagesTimeline {...buildProps()} timelineEntries={[entry]} />);
+    expect(plain).not.toContain("steered");
+  });
+
   it("does not render collapse controls for short user messages", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline

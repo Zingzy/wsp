@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildCommand, buildEnv, newSessionId } from "../src/landmines.js";
+import { buildCommand, buildEnv, newSessionId, userMessageLine } from "../src/landmines.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -67,34 +67,32 @@ describe("newSessionId", () => {
 describe("buildCommand", () => {
   const sessionId = "e16ed170-8257-4668-879e-fe836341633c";
 
-  it("carries every required flag for a fresh session", () => {
-    const cmd = buildCommand({ prompt: "say ok", sessionId });
+  it("carries every required flag for a fresh session and reads its messages from stdin as stream-json", () => {
+    const cmd = buildCommand({ sessionId });
     expect(cmd).toContain("--output-format stream-json");
+    expect(cmd).toContain("--input-format stream-json");
     expect(cmd).toContain("--verbose");
     expect(cmd).toContain("--dangerously-skip-permissions");
     expect(cmd).toContain(`--session-id ${sessionId}`);
-    expect(cmd.endsWith("</dev/null")).toBe(true);
+    // stdin is the message channel now: never closed on the command, never a positional prompt
+    expect(cmd).not.toContain("</dev/null");
+    expect(cmd).toMatch(/claude -p --/);
     expect(cmd).not.toContain("--resume");
   });
 
   it("uses --resume instead of --session-id when resuming", () => {
-    const cmd = buildCommand({ prompt: "say ok", resume: sessionId });
+    const cmd = buildCommand({ resume: sessionId });
     expect(cmd).toContain(`--resume ${sessionId}`);
     expect(cmd).not.toContain("--session-id");
   });
 
   it("prefixes cd when a cwd is given", () => {
-    const cmd = buildCommand({ prompt: "say ok", sessionId, cwd: "/root/app" });
+    const cmd = buildCommand({ sessionId, cwd: "/root/app" });
     expect(cmd.startsWith("cd '/root/app' && claude -p")).toBe(true);
   });
 
-  it("single-quotes the prompt so shell metacharacters stay inert", () => {
-    const cmd = buildCommand({ prompt: "don't run $(reboot) `id`", sessionId });
-    expect(cmd).toContain(String.raw`'don'\''t run $(reboot) ` + "`id`'");
-  });
-
   it("maps the picked model, effort and permission mode to the CLI's flags", () => {
-    const cmd = buildCommand({ prompt: "x", sessionId, model: "claude-opus-5", effort: "high", permissionMode: "acceptEdits" });
+    const cmd = buildCommand({ sessionId, model: "claude-opus-5", effort: "high", permissionMode: "acceptEdits" });
     expect(cmd).toContain("--model 'claude-opus-5'");
     expect(cmd).toContain("--effort 'high'");
     expect(cmd).toContain("--permission-mode 'acceptEdits'");
@@ -102,44 +100,60 @@ describe("buildCommand", () => {
   });
 
   it("no permission mode and bypassPermissions both skip permissions; default sends no permission flag at all", () => {
-    expect(buildCommand({ prompt: "x", sessionId })).toContain("--dangerously-skip-permissions");
-    const bypass = buildCommand({ prompt: "x", sessionId, permissionMode: "bypassPermissions" });
+    expect(buildCommand({ sessionId })).toContain("--dangerously-skip-permissions");
+    const bypass = buildCommand({ sessionId, permissionMode: "bypassPermissions" });
     expect(bypass).toContain("--dangerously-skip-permissions");
     expect(bypass).not.toContain("--permission-mode");
-    const plain = buildCommand({ prompt: "x", sessionId, permissionMode: "default" });
+    const plain = buildCommand({ sessionId, permissionMode: "default" });
     expect(plain).not.toContain("--dangerously-skip-permissions");
     expect(plain).not.toContain("--permission-mode");
   });
 
   it("a context window rides the model as the CLI's own suffix; 200k is the plain slug", () => {
-    expect(buildCommand({ prompt: "x", sessionId, model: "claude-opus-5", contextWindow: "1m" })).toContain("--model 'claude-opus-5[1m]'");
-    expect(buildCommand({ prompt: "x", sessionId, model: "claude-opus-5", contextWindow: "200k" })).toContain("--model 'claude-opus-5'");
-    expect(() => buildCommand({ prompt: "x", sessionId, model: "claude-opus-5", contextWindow: "2m" })).toThrow(/contextWindow/);
-    expect(() => buildCommand({ prompt: "x", sessionId, contextWindow: "1m" })).toThrow(/contextWindow/);
+    expect(buildCommand({ sessionId, model: "claude-opus-5", contextWindow: "1m" })).toContain("--model 'claude-opus-5[1m]'");
+    expect(buildCommand({ sessionId, model: "claude-opus-5", contextWindow: "200k" })).toContain("--model 'claude-opus-5'");
+    expect(() => buildCommand({ sessionId, model: "claude-opus-5", contextWindow: "2m" })).toThrow(/contextWindow/);
+    expect(() => buildCommand({ sessionId, contextWindow: "1m" })).toThrow(/contextWindow/);
   });
 
   it("sends no model or effort flag when none was picked", () => {
-    const cmd = buildCommand({ prompt: "x", sessionId });
+    const cmd = buildCommand({ sessionId });
     expect(cmd).not.toContain("--model");
     expect(cmd).not.toContain("--effort");
   });
 
   it("rejects a picked value that is not a plain slug", () => {
-    expect(() => buildCommand({ prompt: "x", sessionId, model: "opus; rm -rf /" })).toThrow(/model/);
-    expect(() => buildCommand({ prompt: "x", sessionId, effort: "" })).toThrow(/effort/);
-    expect(() => buildCommand({ prompt: "x", sessionId, permissionMode: "plan mode" })).toThrow(/permissionMode/);
-    expect(buildCommand({ prompt: "x", sessionId, model: "claude-opus-5[1m]" })).toContain("--model 'claude-opus-5[1m]'");
+    expect(() => buildCommand({ sessionId, model: "opus; rm -rf /" })).toThrow(/model/);
+    expect(() => buildCommand({ sessionId, effort: "" })).toThrow(/effort/);
+    expect(() => buildCommand({ sessionId, permissionMode: "plan mode" })).toThrow(/permissionMode/);
+    expect(buildCommand({ sessionId, model: "claude-opus-5[1m]" })).toContain("--model 'claude-opus-5[1m]'");
   });
 
   it("rejects zero or two session identifiers", () => {
-    expect(() => buildCommand({ prompt: "x" })).toThrow(/exactly one/);
-    expect(() => buildCommand({ prompt: "x", sessionId, resume: sessionId })).toThrow(
+    expect(() => buildCommand({})).toThrow(/exactly one/);
+    expect(() => buildCommand({ sessionId, resume: sessionId })).toThrow(
       /exactly one/,
     );
   });
 
   it("rejects a session identifier that is not a UUID", () => {
-    expect(() => buildCommand({ prompt: "x", resume: "$(rm -rf /)" })).toThrow(/UUID/);
-    expect(() => buildCommand({ prompt: "x", sessionId: "abc" })).toThrow(/UUID/);
+    expect(() => buildCommand({ resume: "$(rm -rf /)" })).toThrow(/UUID/);
+    expect(() => buildCommand({ sessionId: "abc" })).toThrow(/UUID/);
+  });
+});
+
+describe("userMessageLine", () => {
+  const sessionId = "e16ed170-8257-4668-879e-fe836341633c";
+
+  it("is one stream-json user line the CLI takes on stdin, with the text intact", () => {
+    const text = "don't run $(reboot) `id`\nsecond line with \"quotes\"";
+    const line = userMessageLine(text, sessionId);
+    expect(line).not.toContain("\n");
+    expect(JSON.parse(line)).toEqual({
+      type: "user",
+      message: { role: "user", content: [{ type: "text", text }] },
+      parent_tool_use_id: null,
+      session_id: sessionId,
+    });
   });
 });

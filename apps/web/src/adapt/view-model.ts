@@ -17,6 +17,8 @@ export interface ChatMessage {
   readonly text: string;
   readonly turnId: string | null;
   readonly streaming: boolean;
+  /** A user message sent into the turn while it ran, not the one that opened it. */
+  readonly steered?: boolean;
   /** ISO time, or "" when the wire carried none (session events are unstamped). */
   readonly createdAt: string;
   readonly updatedAt: string;

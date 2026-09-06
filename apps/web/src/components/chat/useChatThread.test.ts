@@ -21,6 +21,32 @@ const state = (events: ReadonlyArray<SessionEvent>, extra: Partial<ThreadState> 
   ...extra,
 });
 
+describe("reduceEvent with a steer", () => {
+  const A = { workspaceId: CHAT_WS, sessionId: "sess_a", turnId: "turn_a", threadId: "thr_a" };
+  const B = { workspaceId: CHAT_WS, sessionId: "sess_b", turnId: "turn_b", threadId: "thr_b" };
+
+  it("a steer of the held thread lands in it; a steer of another thread is another client's live turn and is dropped, even while a send is pending", () => {
+    const held = state([{ type: "session.start", ...A, prompt: "go" }, { type: "session.delta", ...A, kind: "text", text: "on it" }]);
+    const own = reduceEvent(held, { type: "session.steer", ...A, prompt: "and pineapple" }, T0);
+    expect(own.events.at(-1)).toMatchObject({ type: "session.steer", prompt: "and pineapple" });
+    const other = reduceEvent(held, { type: "session.steer", ...B, prompt: "elsewhere" }, T0);
+    expect(other.events).toHaveLength(2);
+    const pending = { ...held, sending: { after: "turn_a" }, pendingPrompt: { text: "next", requestId: REQ, at: T0 } };
+    const strayed = reduceEvent(pending, { type: "session.steer", ...B, prompt: "elsewhere" }, T0);
+    expect(strayed.events).toHaveLength(2);
+    expect(strayed.sending).toEqual({ after: "turn_a" });
+    expect(strayed.known).toEqual(["thr_b"]);
+  });
+
+  it("a fresh view with a send pending never takes a steer for its own send: only a start or a death does", () => {
+    const fresh = state([], { fresh: true, sending: { after: undefined }, pendingPrompt: { text: "first", requestId: REQ, at: T0 } });
+    const next = reduceEvent(fresh, { type: "session.steer", ...B, prompt: "elsewhere" }, T0);
+    expect(next.events).toEqual([]);
+    expect(next.sending).toEqual({ after: undefined });
+    expect(next.fresh).toBe(true);
+  });
+});
+
 describe("deriveChatThread", () => {
   it("keeps every untouched entry's object across a text chunk, replacing only the streaming message", () => {
     const upToTool = CHAT_STREAM.slice(0, 6);
