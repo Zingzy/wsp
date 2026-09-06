@@ -442,12 +442,12 @@ describe("new workspace dialog", () => {
 
   it("a create that made room shows the notice as a toast, the way a failure shows its line", async () => {
     const api = fakeApi([API], [status(API)]);
-    api.createFromGoldenHead = vi.fn(async (name: string) => ({ ...view("ws_new", name), notice: "Stopped the builder kept from golden v1 (m1) to make room at the machine cap." }));
+    api.createFromGoldenHead = vi.fn(async (name: string) => ({ ...view("ws_new", name), notice: "Stopped the builder kept from golden v1 to make room at the machine cap." }));
     await mount(api, "api");
     const { input } = await openDialog();
     fireEvent.keyDown(input, { key: "Enter" });
     await screen.findByRole("status", { name: /Stopped the builder kept from golden v1/ });
-    expect(useStore.getState().toast).toBe("Stopped the builder kept from golden v1 (m1) to make room at the machine cap.");
+    expect(useStore.getState().toast).toBe("Stopped the builder kept from golden v1 to make room at the machine cap.");
   });
 
   it("offers a default name, creates on Enter, selects the creating row, shows its current stage whole, and swaps to the workspace on workspace.created", async () => {

@@ -1586,13 +1586,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       let made = false;
       await refreshBuilders();
       for (const x of [...builders.values()].filter(x => (x.life === "own" || x.life === "reusable") && x.record.sealed !== undefined)) {
-        const stopped = `Stopped the builder kept from golden v${x.record.sealed!.version} (${x.record.id}) to make room at the machine cap.`;
+        const stopped = `Stopped the builder kept from golden v${x.record.sealed!.version} to make room at the machine cap.`;
         graceTimers.get(x.record.id)?.();
         graceTimers.delete(x.record.id);
         await killUntilGone(backend, x.builder.machine, opts.killConfirm);
         await forgetBuilder(x.record.id);
         notices.push(stopped);
-        console.warn(`workspace ${record.id}: ${stopped.charAt(0).toLowerCase()}${stopped.slice(1, -1)}`);
+        console.warn(`workspace ${record.id}: ${stopped.charAt(0).toLowerCase()}${stopped.slice(1, -1)} (${x.record.id})`);
         report("fork-requested", "Fork of the golden image requested again.", stopped);
         try {
           await fork(record, bind, undefined, report);
