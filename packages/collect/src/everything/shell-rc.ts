@@ -261,20 +261,41 @@ export function stripExports(text: string): { names: string[]; carried: string }
   return { names, carried: kept.join(eol) };
 }
 
-const SOURCE = /^\s*(?:source|\.)\s+(?:"([^"]*)"|'([^']*)'|(\S+))/;
+const SOURCE = /^([ \t]*)(source|\\?\.)[ \t]+("[^"]*"|'[^']*'|[^\s;&|<>()"'\\`]+)(?=[\s;&|<>()]|$)(.*)$/;
 
-/** The files an rc file reads with `source` or `.` by a literal path (`~/x`, `$HOME/x`, `/abs/x`), in order, once each.
- * A path holding another variable, a glob or a substitution is skipped: what it means is only known to a running shell. */
+export interface SourceCommand {
+  indent: string;
+  word: string;
+  /** As written, quotes included. */
+  token: string;
+  /** Everything after the token. */
+  rest: string;
+}
+
+/** A command that reads a file: its `source` or `.` word (nvm writes `\.` to dodge an alias on the dot), the one token after it and what follows. */
+export function sourceCommand(command: string): SourceCommand | undefined {
+  const m = SOURCE.exec(command);
+  return m === null ? undefined : { indent: m[1]!, word: m[2]!, token: m[3]!, rest: m[4]! };
+}
+
+/** The file a source token names, absolute, when the token is literal: `~/`, `$HOME/` and `${HOME}/` fold to home; a
+ * variable elsewhere, a glob, a substitution, an escape or an empty, `.` or `..` segment is left to a running shell. */
+export function sourcedPath(token: string, home: string): string | undefined {
+  const raw = /^(["']).*\1$/.test(token) ? token.slice(1, -1) : token;
+  const path = raw.replace(/^(?:~|\$HOME|\$\{HOME\})(?=\/)/, () => home);
+  if (!path.startsWith("/") || /[$`*?[\]\\]/.test(path) || path.split("/").slice(1).some(seg => seg === "" || seg === "." || seg === "..")) return undefined;
+  return path;
+}
+
+/** The files an rc file reads with `source` or `.` by a literal path, anywhere on the line, in order, once each. */
 export function sourcedPaths(text: string, home: string): string[] {
   const out: string[] = [];
   for (const line of text.split(/\r?\n/)) {
+    // simpleCommands splits on braces, so `${HOME}` is folded before the split.
     for (const cmd of simpleCommands(line.replace(/\$\{HOME\}/g, "$HOME"))) {
-      const m = SOURCE.exec(cmd);
-      const raw = m?.[1] ?? m?.[2] ?? m?.[3];
-      if (raw === undefined) continue;
-      const p = raw.replace(/^(?:~|\$HOME)(?=\/)/, home);
-      if (!p.startsWith("/") || /[$`*?[]/.test(p) || out.includes(p)) continue;
-      out.push(p);
+      const src = sourceCommand(cmd);
+      const p = src === undefined ? undefined : sourcedPath(src.token, home);
+      if (p !== undefined && !out.includes(p)) out.push(p);
     }
   }
   return out;

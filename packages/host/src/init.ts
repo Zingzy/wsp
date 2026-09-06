@@ -43,13 +43,16 @@ import {
 } from "./init-recipe.js";
 import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, fmtBytes, fmtDuration, isTTY, plainLine, rowsOf, table, widthOf, wrap } from "./init-layout.js";
 import { aliasLines } from "./init-aliases.js";
+import { sourceLines } from "./init-sources.js";
 import { openRunLog, runLogPath } from "./init-log.js";
 import { secretsStage, type SecretOutcome } from "./init-secrets.js";
+import { buildTimes, readBuildTimes } from "./init-times.js";
 import { keptBuilder, stopKeptBuilder, updateRoad } from "./init-upgrade.js";
 import { retentionOffer } from "./storage.js";
 import { rungSelect, type FooterLine, type RungSelectOptions, type SelectItem, type Tone } from "./init-select.js";
 import { DISK_HOLD_SHARE, HEAVY_BYTES, diskTone, weighed, weightTone } from "./init-weight.js";
 import { builderLink, flowHooks, noteOutcomes, signInStage, stageLogins, type BuilderLink, type HostHooks, type LoginOutcome, type SignInFlow } from "./init-signin.js";
+import { hasLogin, signInFor, signsInByDefault, type SignIn } from "./signin-table.js";
 import type { HostHandle } from "./server.js";
 
 export interface InitIO {
@@ -480,6 +483,14 @@ function spin(output: Writable, label: string, animate: boolean): Spinner {
 const CLAUDE_LOGIN_WHY = "Anthropic's terms forbid passing the OAuth credential along, so with it alone the default is to sign in on the machine.";
 /** What the answers on a login row do, and on a credential-shaped row. */
 const LOGIN_WHY = "copy brings it along; sign in does it in this terminal after the build";
+/** The login row's second detail line by its catalog row: a browser or device flow leads with the command it runs, or
+ * with the collector's reason when the row starts as a copy all the same; a tool with no sign-in says so, and a key
+ * gets the plain line. */
+function loginWhy(e: ManifestEntry, s: SignIn): string {
+  if (hasLogin(s) && signsInByDefault(s)) return e.default === "bring" ? `${e.detail ?? "copy brings it along"}; sign in runs ${s.login}` : `sign in runs ${s.login} after the build; copy brings it along`;
+  if (s.kind === "none" && s.note !== undefined) return s.note;
+  return LOGIN_WHY;
+}
 const CONSENT_WHY = "copy brings it along; skip leaves it here";
 const TICKED_FOR_LOGINS = "ticked under Tools for the sign-ins: ";
 const EVERYTHING_FOOTER = ["large items are listed but never copied without a tick", "know what one of these is? add it to the catalog"];
@@ -551,7 +562,7 @@ function detailWhy(e: ManifestEntry, lock: "on" | "off" | undefined, brew: BrewT
   if (lock === "off") return e.reason ?? "";
   if (lock === "on") return "always comes along";
   if (e.rung === "logins") {
-    if (agentName(e) !== "claude") return LOGIN_WHY;
+    if (agentName(e) !== "claude") return loginWhy(e, signInFor(agentName(e)));
     // The OAuth credential is the row's one path that is not a helper; a row of API key sources has no such rule to explain.
     const oauth = e.paths.some(p => !/^helper:/i.test(p));
     return [e.detail, oauth ? CLAUDE_LOGIN_WHY : LOGIN_WHY].filter(x => x !== undefined).join("; ");
@@ -624,13 +635,16 @@ export function selectItem(e: ManifestEntry, hintFor?: (width: number) => string
   };
 }
 
-/** Lines the shell row's detail pane gives to aliases before folding the rest into one. */
+/** Lines the shell row's detail pane gives to aliases, and to sourced files, before folding the rest into one. */
 const ALIAS_LINES = 3;
+const SOURCE_LINES = 2;
 
-/** The Shell screen's rows: each with the aliases whose tool is not coming under it, judged on the tools screen's own ticks when the person has been there, else on the defaults. */
+/** The Shell screen's rows: under each, the aliases whose tool is not coming, judged on the tools screen's own ticks
+ * when the person has been there, else on the defaults, and the files it sources that no row starting ticked carries. */
 export function shellItems(entries: readonly ManifestEntry[], all: readonly ManifestEntry[], toolTicks: ReadonlySet<string> | undefined, brew: BrewTable): SelectItem[] {
   const ticks = toolTicks ?? new Set(all.filter(e => e.rung === "tools" && initialTicks(e)).map(e => e.id));
-  return entries.map(e => selectItem(e, undefined, brew, aliasLines(e, all, ticks, brew, ALIAS_LINES)));
+  const coming = new Set(all.filter(e => initialTicks(e)).map(e => e.id));
+  return entries.map(e => selectItem(e, undefined, brew, [...aliasLines(e, all, ticks, brew, ALIAS_LINES), ...sourceLines(e, all, coming, brew, SOURCE_LINES)]));
 }
 
 const TOOLCHAIN_ROW = "tools/homebrew-toolchain";
@@ -1053,6 +1067,8 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   // Filled by the Keychain reads below, after the earlier-builder check; the pack reads it only at build time.
   const secrets = new Map<string, string>();
   const resultsPath = importResultPath(opts.statePath);
+  // Read before the first write of the file; every result written this run carries it until a seal measures anew.
+  const lastBuild = readBuildTimes(resultsPath);
   const path = recipePath(opts.statePath);
   let landed: ImportResult | undefined;
   const importOf = (rows: readonly ManifestEntry[]) =>
@@ -1063,7 +1079,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       rows: manifest.entries.map(e => ({ ...e, bring: ticks.has(e.id) })),
       brew,
       onResult: r => {
-        writeFileSync(resultsPath, `${JSON.stringify(r, null, 2)}\n`);
+        writeFileSync(resultsPath, `${JSON.stringify({ ...r, ...(lastBuild !== undefined ? { build: lastBuild } : {}) }, null, 2)}\n`);
         landed = r;
         // The first install of a release tag pins its asset: the tag and the checksum the guest read go into the recipe for later installs of that tag.
         const pins = new Map(r.tools.filter(t => t.outcome === "installed" && t.road?.sha256 !== undefined && t.road.tag !== undefined).map(t => [t.id, { tag: t.road!.tag!, sha256: t.road!.sha256! }]));
@@ -1198,7 +1214,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   // builder already carrying this recipe is attached to instead, since the update would bill beside it.
   const current = attach === undefined ? await rt.golden.recipe(GOLDEN_NAME) : undefined;
   if (current !== undefined) {
-    const road = await updateRoad({ rt, current, imp, bring, rows: manifest.entries, importOf, interactive, yes: opts.yes, input: io.input, output: io.output, stream: (words, run) => streamStages(rt, io, words, run, runLog.note) });
+    const road = await updateRoad({ rt, current, imp, bring, rows: manifest.entries, importOf, lastBuild, interactive, yes: opts.yes, input: io.input, output: io.output, stream: (words, run) => streamStages(rt, io, words, run, runLog.note) });
     if (road !== "rebuild") {
       if (road === 0 && landed !== undefined) log.info(installsTally(landed, resultsPath).join("\n"), out);
       if (road === 0) await retentionOffer({ rt, interactive, yes: opts.yes, input: io.input, output: io.output });
@@ -1335,7 +1351,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     io.signals.off("SIGINT", onInt);
     io.signals.off("SIGTERM", onTerm);
   }
-  stream.stop();
+  const prepared = stream.stop();
   off();
   if (landed !== undefined) log.info(installsTally(landed, resultsPath).join("\n"), out);
 
@@ -1401,6 +1417,8 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     outro("Seal failed and the builder is gone. Run wsp init again; the recipe is kept.", out);
     return leave(1);
   }
+  const measured = buildTimes([prepared, view], new Date());
+  if (measured !== undefined) noteOutcomes(resultsPath, { build: measured });
   const version = sealed.version.version;
   const kept = keptBuilder(await rt.golden.builders(), version);
   log.success(

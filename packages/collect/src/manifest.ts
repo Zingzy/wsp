@@ -88,6 +88,8 @@ const Fields = z.object({
   aliases: z.array(ShellAlias).optional(),
   /** Only on the login shell's rc row: whether the shell listed aliases of its own or, when it listed none or did not answer, the rc files were read. */
   aliasesFrom: z.enum(["shell", "files"]).optional(),
+  /** Only on a zsh or bash rc row: the files it reads on a bare source line, `~`-relative under home and absolute outside it; the pack wraps each line whose file it does not carry so the machine skips it without an error. */
+  sources: z.array(z.string().min(1)).optional(),
 });
 
 export const ManifestEntry = Fields.superRefine((e, ctx) => {
@@ -119,6 +121,9 @@ export const ManifestEntry = Fields.superRefine((e, ctx) => {
   }
   if (e.aliasesFrom !== undefined && e.rung !== "shell") {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["aliasesFrom"], message: "only a shell row says where its aliases were read" });
+  }
+  if (e.sources !== undefined && e.rung !== "shell") {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["sources"], message: "only a shell row carries sourced files" });
   }
   if (e.required === true && e.default === "skip") {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["required"], message: "a required row cannot default to skip" });

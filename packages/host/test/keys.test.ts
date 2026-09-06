@@ -11,9 +11,9 @@ import { HELP, loadKeys, saveQuestion, terminalIO, type CliIO } from "../src/cli
 const SOLARI = "slr_live_fake_solari_key";
 
 describe("help", () => {
-  it("--yes says a login held in the Keychain signs in on the machine, so macOS has nothing to ask either", () => {
+  it("--yes says a browser or device login, or one held in the Keychain, signs in on the machine, so macOS has nothing to ask either", () => {
     setup();
-    expect(HELP.replace(/\s+/g, " ")).toContain("--yes init: take every default and ask nothing (required off a terminal); a login held in the Keychain defaults to sign in on the machine unless a saved recipe answered copy, so macOS has nothing to ask either");
+    expect(HELP.replace(/\s+/g, " ")).toContain("--yes init: take every default and ask nothing (required off a terminal); a login with a browser or device sign-in, or one held in the Keychain, defaults to sign in on the machine unless a saved recipe answered copy, so macOS has nothing to ask either and the sign-ins wait for the app's terminal");
   });
 });
 const ANTHROPIC = "sk-ant-x-fake-anthropic-key";

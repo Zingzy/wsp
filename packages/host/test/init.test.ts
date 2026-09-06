@@ -24,6 +24,7 @@ import type { HostHandle } from "../src/server.js";
 import { startCallbackRelay } from "../src/relay.js";
 import type { ConnectOptions, DaemonSocket } from "../src/doctor.js";
 import { SH_FILE, appendCommand, readCommand } from "../src/init-secrets.js";
+import { importResultPath } from "../src/init-import.js";
 import { noteOutcomes } from "../src/init-signin.js";
 import { checkScript } from "../src/signin-relay.js";
 import { answersChecks, checkTag, fakePtyLink, type CheckAnswer, type FakePty, type FakePtyLink } from "./fake-pty-link.js";
@@ -336,13 +337,13 @@ describe("wsp init, interactive", () => {
     expect(f.text()).toContain("Claude Code");
     await f.press(KEY.enter);
     await f.until("Sign-ins");
-    expect(f.text()).toMatch(/GitHub CLI login\s+copy/);
+    // Both logins have a browser or device flow, so both start as a sign-in on the machine; nothing is copied unless the person opts in.
+    expect(f.text()).toMatch(/GitHub CLI login\s+sign in/);
     expect(f.text()).toMatch(/Claude Code login\s+sign in/);
-    expect(f.text()).toMatch(/Sign-ins\s+7\/8\s+1 copy, 1 sign in/);
+    expect(f.text()).toMatch(/Sign-ins\s+7\/8\s+2 sign in/);
     // Codex was left unticked on the Agents screen, so its login is not offered.
     expect(f.text()).not.toContain("Codex login");
-    // Past the CLI logins heading onto gh: copy -> sign in.
-    await f.press(KEY.down, KEY.space, KEY.enter);
+    await f.press(KEY.enter);
 
     await f.until(BOOT);
     const summary = f.text().slice(f.text().lastIndexOf("Summary"), f.text().lastIndexOf("Recipe saved"));
@@ -551,7 +552,7 @@ describe("wsp init, interactive", () => {
     await f.press(KEY.down, KEY.down, KEY.space, KEY.enter);
     await f.until("Sign-ins");
     expect(f.text()).toContain("Codex login");
-    expect(f.text()).toMatch(/Sign-ins\s+7\/8\s+2 copy, 1 sign in/);
+    expect(f.text()).toMatch(/Sign-ins\s+7\/8\s+3 sign in/);
     expect(f.text()).toMatch(/Agent logins\s+2\n/);
     await f.press(KEY.esc);
     await f.until("6/8");
@@ -559,13 +560,13 @@ describe("wsp init, interactive", () => {
     await f.press(KEY.down, KEY.down, KEY.space, KEY.enter);
     await f.until("Sign-ins");
     expect(f.text()).not.toContain("Codex login");
-    expect(f.text()).toMatch(/Sign-ins\s+7\/8\s+1 copy, 1 sign in/);
+    expect(f.text()).toMatch(/Sign-ins\s+7\/8\s+2 sign in/);
     expect(f.text()).toMatch(/Agent logins\s+1\n/);
     await f.press(KEY.enter);
     await f.until(BOOT);
     const summary = f.text().slice(f.text().lastIndexOf("Summary"));
     expect(summary).not.toContain("Codex login");
-    expect(summary).toMatch(/Sign-ins\s+1 copy, 1 sign in\s+200 B/);
+    expect(summary).toMatch(/Sign-ins\s+2 sign in\n/);
     await f.press(KEY.enter);
     expect((await run).code).toBe(1);
     const saved = loadManifest(join(dirs[0]!, "golden-recipe.json"));
@@ -779,7 +780,7 @@ describe("wsp init, everything else", () => {
     expect(screen).toContain("0 ticked\n");
     expect(screen).toContain("large items are listed but never copied without a tick");
     expect(screen).toContain("know what one of these is? add it to the catalog");
-    expect(screen).toContain("space tick or change • ← → fold • enter next • esc back");
+    expect(screen).toContain("space tick or copy, skip • ← → fold • enter next • esc back");
     // The all row ticks the plain rows and leaves the large one alone; its count still runs over every row that can come.
     await f.press(KEY.space);
     expect(f.text()).toMatch(/all\s+1 of 3\n/);
@@ -803,7 +804,7 @@ describe("wsp init, everything else", () => {
     const summary = f.text().slice(f.text().lastIndexOf("Summary"), f.text().lastIndexOf("Recipe saved"));
     expect(summary).toMatch(/Everything else\s+2 of 4\s+340 B\n│\s+\.demo-token\s+copy\n/);
     expect(summary).not.toMatch(/\n│\s+demo\s/);
-    expect(summary).toMatch(/Sign-ins\s+1 copy, 1 sign in[^\n]*\n│\s+GitHub CLI login\s+copy/);
+    expect(summary).toMatch(/Sign-ins\s+2 sign in[^\n]*\n│\s+GitHub CLI login\s+sign in/);
     await f.press(KEY.enter);
     expect((await run).code).toBe(1);
     expect(f.backends.flatMap(b => b.machines)).toHaveLength(0);
@@ -825,10 +826,10 @@ describe("wsp init, everything else", () => {
     writeFileSync(join(again.opts.home, ".config", "demo", "cache", "blob"), "x".repeat(500));
     writeFileSync(join(again.opts.home, ".demo-token"), "fake-token\n", { mode: 0o600 });
     expect((await runInit(again.opts, again.io)).code).toBe(0);
-    expect(again.text()).toMatch(/\d files: identity \d, shell 1, logins 1, everything 2/);
-    // The credential row is not a sign-in: the seal summary lists the two logins and never the token file.
+    expect(again.text()).toMatch(/\d files: identity \d, shell 1, everything 2/);
+    // The credential row is not a sign-in: the seal summary lists the two logins, both waiting for the app's terminal under --yes, and never the token file.
     const signIns = again.text().slice(again.text().lastIndexOf("Sign-ins\n"), again.text().lastIndexOf("Secrets\n"));
-    expect(signIns).toMatch(/GitHub CLI login\s+signed in/);
+    expect(signIns).toMatch(/GitHub CLI login\s+skipped/);
     expect(signIns).toMatch(/Claude Code login\s+skipped/);
     expect(signIns).not.toContain(".demo-token");
     const result = JSON.parse(readFileSync(join(dirname(again.opts.statePath), "golden-import.json"), "utf8")) as { files: { bytes: number; skipped: { id: string }[] } };
@@ -863,10 +864,15 @@ describe("wsp init, everything else", () => {
     const f = fake();
     writeFileSync(join(f.opts.home, ".zshrc"), "export A=1\nexport ANTHROPIC_API_KEY=fake\n");
     const run = runInit(f.opts, f.io);
-    for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
+    for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents"]) {
       await f.until(rung);
       await f.press(KEY.enter);
     }
+    // Past the CLI logins heading onto gh: one space opts its copy in, so a copied login's check follows the secrets.
+    await f.until("Sign-ins");
+    await f.press(KEY.down, KEY.space);
+    await f.until(/GitHub CLI login\s+copy/);
+    await f.press(KEY.enter);
     await f.until(BOOT);
     await f.press("y");
     await f.until("Secrets were cut from your files. Paste each to set it on the machine, or leave it empty to skip.");
@@ -967,7 +973,7 @@ describe("wsp init, everything else", () => {
     writeFileSync(join(again.opts.home, ".env"), "TOKEN=fake-env\n");
     expect((await runInit(again.opts, again.io)).code).toBe(0);
     expect(again.text()).toMatch(/Everything else\s+1 of 6/);
-    expect(again.text()).toMatch(/files: identity \d, shell 1, logins 1, everything 1/);
+    expect(again.text()).toMatch(/files: identity \d, shell 1, everything 1/);
     const result = JSON.parse(readFileSync(join(dirname(again.opts.statePath), "golden-import.json"), "utf8")) as { files: { skipped: { id: string; note: string }[] } };
     expect(result.files.skipped.filter(s => s.id.startsWith("everything/"))).toEqual([]);
   });
@@ -1001,7 +1007,7 @@ describe("wsp init, everything else", () => {
     mkdirSync(join(again.opts.home, ".env", "bin"), { recursive: true });
     writeFileSync(join(again.opts.home, ".env", "bin", "activate"), "export VIRTUAL_ENV=$HOME/.env\n");
     expect((await runInit(again.opts, again.io)).code).toBe(0);
-    expect(again.text()).toMatch(/files: identity \d, shell 1, logins 1, everything 1/);
+    expect(again.text()).toMatch(/files: identity \d, shell 1, everything 1/);
     const result = JSON.parse(readFileSync(join(dirname(again.opts.statePath), "golden-import.json"), "utf8")) as { files: { skipped: { id: string }[] } };
     expect(result.files.skipped.filter(s => s.id.startsWith("everything/"))).toEqual([]);
   });
@@ -1276,7 +1282,7 @@ describe("wsp init, logins copied to the machine", () => {
       FIXTURE.entries[0]!,
       { rung: "tools", id: "tools/brew/gh", label: "gh", group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "yes" },
       { rung: "tools", id: "tools/brew/kubernetes-cli", label: "kubernetes-cli", group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "yes" },
-      { rung: "logins", id: "logins/gh", label: "GitHub CLI login", group: "CLI logins", paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"], bytes: 200, default: "bring" },
+      { rung: "logins", id: "logins/gh", label: "GitHub CLI login", group: "CLI logins", paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"], bytes: 200, default: "skip" },
       { rung: "logins", id: "logins/kube", label: "kubectl config", group: "CLI logins", paths: ["~/.kube/config"], bytes: 900, default: "bring" },
     ],
   };
@@ -1300,7 +1306,7 @@ describe("wsp init, logins copied to the machine", () => {
     };
   }
 
-  /** Through the screens and the boot question; the run itself is handed back unawaited. */
+  /** Through the screens and the boot question, gh opted into copy with one space on its row; the run itself is handed back unawaited. */
   async function toTheBuilder(f: Fake): Promise<{ run: ReturnType<typeof runInit> }> {
     const run = runInit(f.opts, f.io);
     await f.until("Identity");
@@ -1308,7 +1314,10 @@ describe("wsp init, logins copied to the machine", () => {
     await f.until("Tools");
     await f.press(KEY.enter);
     await f.until("Sign-ins");
-    expect(f.text()).toMatch(/GitHub CLI login\s+copy/);
+    expect(f.text()).toMatch(/GitHub CLI login\s+sign in/);
+    expect(f.text()).toMatch(/kubectl config\s+copy/);
+    await f.press(KEY.down, KEY.space);
+    await f.until(/GitHub CLI login\s+copy/);
     await f.press(KEY.enter);
     await f.until(BOOT);
     await f.press("y");
@@ -1492,6 +1501,21 @@ describe("wsp init, logins copied to the machine", () => {
     expect(landedRefused.files.skipped).toEqual([{ id: "agents/claude", path: "~/.claude/settings.json", note: "apiKeyHelper left out of the copy: the command runs on this computer only" }]);
   });
 
+  it("a login row's detail says what its default does: a browser or device flow names the command sign in runs, a key gets the plain line, a tool with no sign-in says so", () => {
+    const why = (id: string, dflt: "bring" | "skip" = "skip", detail?: string) => selectItem({ rung: "logins", id: `logins/${id}`, label: id, group: "CLI logins", paths: ["~/x"], bytes: 1, default: dflt, ...(detail !== undefined ? { detail } : {}) }).detail[1];
+    expect(why("gh")).toBe("sign in runs gh auth login after the build; copy brings it along");
+    expect(why("gcloud")).toBe("sign in runs gcloud auth login after the build; copy brings it along");
+    // Hermes has a device flow but its keys travel only by copy, so the collector starts it as a copy and says why.
+    expect(why("hermes", "bring", "the keys in ~/.hermes/.env travel only by copy")).toBe("the keys in ~/.hermes/.env travel only by copy; sign in runs hermes auth");
+    expect(why("hermes", "bring")).toBe("copy brings it along; sign in runs hermes auth");
+    expect(why("opencode", "bring")).toBe("copy brings it along; sign in does it in this terminal after the build");
+    expect(why("kube", "bring")).toBe("kubectl has no sign-in; copy the kubeconfig instead");
+    expect(why("some-new-tool", "bring")).toBe("copy brings it along; sign in does it in this terminal after the build");
+    // Every line fits the detail pane of an 80 column terminal.
+    for (const id of ["gh", "gcloud", "wrangler", "cloudflared", "vercel", "aws", "codex", "gemini", "pi"]) expect(why(id)!.length, id).toBeLessThanOrEqual(76);
+    expect(why("hermes", "bring", "the keys in ~/.hermes/.env travel only by copy")!.length).toBeLessThanOrEqual(76);
+  });
+
   it("the Claude Code login row explains the OAuth rule only when the OAuth credential is on it; a row of API key sources gets the plain login line", () => {
     const claude = (paths: string[], detail: string) => selectItem({ rung: "logins", id: "logins/claude", label: "Claude Code login", group: "Agent logins", paths, bytes: 0, default: "bring", detail }).detail[1];
     expect(claude(["Keychain: Claude Code-credentials", "Helper: ~/.claude/settings.json"], "Claude Code uses the apiKeyHelper in ~/.claude/settings.json; also found: OAuth credentials")).toBe(
@@ -1611,8 +1635,8 @@ describe("wsp init, flags and no terminal", () => {
     expect(f.backends[0]!.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_golden-v1", true], ["snap_golden-v1", false]]);
     expect((await f.runtimes.at(-1)!.workspaces.list()).map(w => w.name)).toEqual(["first"]);
     expect(f.opened).toEqual([]);
-    // Nobody is here to click macOS's consent dialog: the gh login, held in the Keychain, defaults to sign in on the
-    // machine instead of copy, so the Keychain is never asked and the sign-in is skipped.
+    // The gh login has a device flow, so it starts as a sign-in on the machine: nobody is here to run it or to click
+    // macOS's consent dialog, so the Keychain is never asked and the sign-in is skipped for the app's terminal.
     expect(f.reads).toEqual([]);
     expect(out).toMatch(/GitHub CLI login\s+sign in/);
     expect(result.logins?.find(l => l.id === "logins/gh")?.state).toBe("skipped");
@@ -2240,7 +2264,7 @@ describe("wsp init, flags and no terminal", () => {
     }
     await f.until("Stop it, then boot");
     const ask = f.text().slice(f.text().lastIndexOf("A builder from an earlier"));
-    expect(ask).toMatch(/built from a different recipe: ~\/\.zshrc changed/);
+    expect(ask).toMatch(/built from a different recipe: GitHub CLI login unticked, ~\/\.zshrc changed/);
     expect(ask).toMatch(/No\s+costs\s+nothing;\s+nothing\s+is\s+stopped\s+and\s+the\s+recipe\s+is\s+kept/);
     expect(ask).toContain(`${S_RADIO_ACTIVE} No`);
     await f.press(KEY.enter);
@@ -3471,7 +3495,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(builder.killed).toBe(false);
     expect(await store.get("golden-recipes", "default@v1")).toBeDefined();
     const next = (o: Partial<InitOptions> & { tty?: boolean } = {}) => {
-      const f = fake({ yes: true, home: first.opts.home, ...o });
+      const f = fake({ yes: true, home: first.opts.home, statePath: first.opts.statePath, ...o });
       f.opts.runtime = recipe => {
         f.backends.push(shared);
         const rt = createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
@@ -3485,6 +3509,7 @@ describe("wsp init with a golden already built from a recipe", () => {
 
   it("--yes with a small change: the changes since v1 are listed, the update runs on the kept builder with the one sentence, v2 is current, and no machine boots", async () => {
     const { store, shared, first, next } = await sealed();
+    const before = JSON.parse(readFileSync(join(dirname(first.opts.statePath), "golden-import.json"), "utf8")) as { recipeHash: string; build: unknown };
     writeFileSync(join(first.opts.home, ".zshrc"), "export A=1\nexport B=2\n");
     const f = next({ tty: false });
     const result = await runInit(f.opts, f.io);
@@ -3505,6 +3530,10 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(out).toContain("The builder stays up (about $0.11/h, one of the account's machine slots) until wsp init updates on it again, a wsp sweep stops it ten minutes after the save, or the provider's six-hour idle kill fires.");
     // The builder, v1's smoke fork, v2's smoke fork: nothing else booted.
     expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_golden-v1", true], ["snap_golden-v2", true]]);
+    // The update rewrote the import result; the first build's measured stages stay in it for the next rebuild offer.
+    const after = JSON.parse(readFileSync(join(dirname(first.opts.statePath), "golden-import.json"), "utf8")) as { recipeHash: string; build: unknown };
+    expect(after.recipeHash).not.toBe(before.recipeHash);
+    expect(after.build).toEqual(before.build);
     expect(await store.get("goldens", "default")).toMatchObject({ head: 2 });
     // The update kept the golden's disk, so what v1's sign-in stage recorded (both skipped under --yes) is stamped on v2 as it was.
     const skipped = [{ name: "GitHub CLI login", state: "skipped" }, { name: "Claude Code login", state: "skipped" }];
@@ -3715,6 +3744,8 @@ describe("wsp init with a golden already built from a recipe", () => {
     const alpha = await createRuntime({ backend: shared, store, adapters: {} }).workspaces.create({ golden: "snap_golden-v1", name: "alpha" });
     const manifestPath = join(first.opts.home, "manifest.json");
     writeFileSync(manifestPath, JSON.stringify({ entries: FIXTURE.entries.map(e => (e.id === "agents/codex" ? { ...e, bring: true } : e)) }));
+    // A measured build on this computer whose tools stage alone took 17m39s; the stages sum to 22 minutes.
+    noteOutcomes(importResultPath(first.opts.statePath), { build: { at: "2026-09-05T19:44:00.000Z", stages: { creating: 62_000, "deploying-daemon": 35_000, "applying-setup": 4_000, "uploading-files": 6_000, "installing-harness": 48_000, "installing-tools": 1_059_000, "installing-mcp": 3_000, snapshotting: 41_000, "smoke-forking": 82_000 } } });
     const f = next({ manifestPath });
     const hosted: string[] = [];
     f.opts.host = async (rt, builder) => {
@@ -3724,7 +3755,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     const out = f.text();
     expect(out).toContain("add 1 agent: Codex");
-    expect(out).toContain("A big change: a rebuild from scratch is the safer road, about ten minutes.");
+    expect(out.replace(/\s*│?\s*\n│\s+/g, " ")).toContain("A big change: a rebuild from scratch is the safer road, about 22 minutes last time.");
     expect(out).toContain("Rebuilding from scratch. Taken as the default (--yes).");
     // The kept builder holds a slot the rebuild needs; it goes after the confirm and before the boot, said once.
     expect(out).toContain("Stopping the builder kept from golden v1 (m1) to free its machine slot.");
@@ -3757,13 +3788,38 @@ describe("wsp init with a golden already built from a recipe", () => {
     await f.until("How do you want to apply them?");
     const asked = f.text();
     expect(asked).toContain("Update the golden (under a minute, about $0.11/hr while it runs)");
-    expect(asked).toContain("Rebuild from scratch (about ten minutes)");
+    expect(asked).toContain("Rebuild from scratch (under a minute last time)");
     expect(asked.indexOf("Update the golden")).toBeLessThan(asked.indexOf("Rebuild from scratch"));
     await f.press(KEY.enter);
     expect((await run).code).toBe(0);
     expect(f.text()).toMatch(/Golden v2 sealed in \d+s on the builder kept since the save/);
     expect(f.text()).not.toMatch(BOOT);
     expect(shared.machines).toHaveLength(3);
+  });
+
+  it("the seal records how long each stage of the build ran in the import result, the closing stages apart", async () => {
+    const { first } = await sealed();
+    const { build } = JSON.parse(readFileSync(join(dirname(first.opts.statePath), "golden-import.json"), "utf8")) as { build: { at: string; stages: Record<string, number> } };
+    expect(Date.parse(build.at)).toBeGreaterThan(Date.now() - 60_000);
+    expect(Object.keys(build.stages)).toEqual(["creating", "deploying-daemon", "applying-setup", "uploading-files", "installing-harness", "installing-tools", "installing-mcp", "snapshotting", "smoke-forking"]);
+    for (const ms of Object.values(build.stages)) expect(ms).toBeGreaterThanOrEqual(0);
+  });
+
+  it("with no measured build in the import result the rebuild is offered at the assumed ten minutes and says so", async () => {
+    const { shared, first, next } = await sealed();
+    rmSync(importResultPath(first.opts.statePath));
+    writeFileSync(join(first.opts.home, ".zshrc"), "export A=1\nexport B=2\n");
+    const f = next({ yes: false, tty: true });
+    const run = runInit(f.opts, f.io);
+    for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
+      await f.until(rung);
+      await f.press(KEY.enter);
+    }
+    await f.until("How do you want to apply them?");
+    expect(f.text()).toContain("Rebuild from scratch (about ten minutes, not measured on this computer yet)");
+    await f.press(KEY.ctrlC);
+    await run;
+    expect(shared.machines).toHaveLength(2);
   });
 
   it("a head sealed before the base tools existed is offered the rebuild only: no update choice, the boot question follows", async () => {
@@ -3864,7 +3920,7 @@ describe("wsp init, a login whose command is not coming", () => {
   /** A card's wrapped closing lines as one line each. */
   const unwrapped = (card: string): string => card.replace(/\n│ {12}/g, " ");
 
-  it("the Tools screen offers the cask from Google's release; the Sign-ins screen says which commands are not coming, starts them at skip, and a copy answer ticks the cask", async () => {
+  it("the Tools screen offers the cask from Google's release; the Sign-ins screen says which commands are not coming, starts them at skip, names the cycle in its keys, and a copy answer ticks the cask", async () => {
     const f = fake({ collect: async () => LAPTOP });
     const run = runInit(f.opts, f.io);
     for (const rung of ["Identity", "Shell", "Editors", "Toolchains"]) {
@@ -3881,12 +3937,16 @@ describe("wsp init, a login whose command is not coming", () => {
     await f.until("Agents");
     await f.press(KEY.enter);
     await f.until("Sign-ins");
-    expect(f.text()).toMatch(/GitHub CLI login\s+copy\n/);
+    expect(f.text()).toMatch(/GitHub CLI login\s+sign in\n/);
     expect(f.text()).toMatch(/Google Cloud login\s+gcloud not coming\s+skip\n/);
     expect(f.text()).toMatch(/Cloudflare Wrangler login\s+wrangler not coming\s+skip\n/);
-    // Down past the heading and gh onto gcloud: the detail says why and what a copy does; space answers copy.
+    // Every row here is answered, so the keys name the cycle alone, not a tick nothing on the screen has.
+    expect(f.text()).toContain("┗  space sign in, copy, skip • ← → fold • enter next • esc back");
+    // Down past the heading and gh onto gcloud: the detail says why and what a copy does; space steps skip to sign in, then to copy.
     await f.press(KEY.down, KEY.down);
     await f.until("gcloud is not coming: its tool row is unticked; copy or sign in ticks it");
+    await f.press(KEY.space);
+    await f.until(/Google Cloud login\s+gcloud not coming\s+sign in/);
     await f.press(KEY.space);
     await f.until(/Google Cloud login\s+gcloud not coming\s+copy/);
     await f.press(KEY.down);
@@ -3950,16 +4010,21 @@ describe("wsp init, a login whose command is not coming", () => {
 });
 
 describe("shellItems", () => {
-  const zshrc: ManifestEntry = { rung: "shell", id: "shell/zshrc", label: "~/.zshrc", paths: ["~/.zshrc"], bytes: 3000, default: "bring", aliases: [{ name: "ls", runs: "eza", kind: "alias", tool: "tools/brew/eza" }, { name: "cat", runs: "bat", kind: "alias", tool: "tools/brew/bat" }] };
+  const zshrc: ManifestEntry = { rung: "shell", id: "shell/zshrc", label: "~/.zshrc", paths: ["~/.zshrc"], bytes: 3000, default: "bring", aliases: [{ name: "ls", runs: "eza", kind: "alias", tool: "tools/brew/eza" }, { name: "cat", runs: "bat", kind: "alias", tool: "tools/brew/bat" }], sources: ["~/.cargo/env", "~/.config/starship.toml"] };
   const starship: ManifestEntry = { rung: "shell", id: "shell/starship", label: "starship prompt", paths: ["~/.config/starship.toml"], bytes: 900, default: "bring" };
   const eza: ManifestEntry = { rung: "tools", id: "tools/brew/eza", label: "eza", group: "Homebrew", paths: [], bytes: 0, default: "skip", linux: "yes" };
   const bat: ManifestEntry = { rung: "tools", id: "tools/brew/bat", label: "bat", group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "yes" };
 
   it("a shell row's detail names the aliases whose tool starts unticked, after its own two lines; the tools screen's own ticks win once it was visited", () => {
     const fresh = shellItems([zshrc, starship], [zshrc, starship, eza, bat], undefined, new Map());
-    expect(fresh[0]!.detail).toEqual(["~/.zshrc", "2.9 KB, brought by default", "alias ls points at eza, which is not coming (unticked, tick to bring)"]);
+    expect(fresh[0]!.detail).toEqual(["~/.zshrc", "2.9 KB, brought by default", "alias ls points at eza, which is not coming (unticked, tick to bring)", "sources ~/.cargo/env, which nothing here brings; the machine skips that line"]);
     expect(fresh[1]!.detail).toEqual(["~/.config/starship.toml", "900 B, brought by default"]);
     const visited = shellItems([zshrc], [zshrc, starship, eza, bat], new Set(["tools/brew/eza"]), new Map());
-    expect(visited[0]!.detail).toEqual(["~/.zshrc", "2.9 KB, brought by default", "alias cat points at bat, which is not coming (unticked, tick to bring)"]);
+    expect(visited[0]!.detail).toEqual(["~/.zshrc", "2.9 KB, brought by default", "alias cat points at bat, which is not coming (unticked, tick to bring)", "sources ~/.cargo/env, which nothing here brings; the machine skips that line"]);
+  });
+
+  it("a sourced file that a row carries is quiet while that row starts ticked and named once it starts unticked", () => {
+    const skipped = { ...starship, default: "skip" as const };
+    expect(shellItems([zshrc], [zshrc, skipped, eza, bat], new Set(["tools/brew/eza", "tools/brew/bat"]), new Map())[0]!.detail.at(-1)).toBe("sources ~/.config/starship.toml, which is not coming (starship prompt unticked, tick to bring); the machine skips that line");
   });
 });

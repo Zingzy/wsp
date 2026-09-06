@@ -250,7 +250,7 @@ exports[`collect > matches the fixture laptop snapshot 1`] = `
     },
     {
       "bytes": 200,
-      "default": "bring",
+      "default": "skip",
       "group": "CLI logins",
       "id": "logins/gh",
       "label": "GitHub CLI login",
@@ -261,7 +261,7 @@ exports[`collect > matches the fixture laptop snapshot 1`] = `
     },
     {
       "bytes": 300,
-      "default": "bring",
+      "default": "skip",
       "group": "CLI logins",
       "id": "logins/aws",
       "label": "AWS keys and profiles",
@@ -272,7 +272,7 @@ exports[`collect > matches the fixture laptop snapshot 1`] = `
     },
     {
       "bytes": 900,
-      "default": "bring",
+      "default": "skip",
       "group": "Agent logins",
       "id": "logins/codex",
       "label": "Codex login",

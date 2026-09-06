@@ -7,6 +7,7 @@ import { detectIdentity } from "./detect/identity.js";
 import { detectLogins } from "./detect/logins.js";
 import { detectMcp, mcpGroups } from "./detect/mcp.js";
 import { detectShell } from "./detect/shell.js";
+import { shellSources } from "./detect/sources.js";
 import { detectTerminalFont } from "./detect/terminal.js";
 import { detectToolchains } from "./detect/toolchains.js";
 import { detectTools } from "./detect/tools.js";
@@ -19,7 +20,11 @@ import { type GroupNote, type Manifest, type ManifestEntry, RUNGS, type Rung, pa
 
 export const DETECTORS: Record<Exclude<Rung, "everything">, Detector> = {
   identity: detectIdentity,
-  shell: async host => [...(await detectShell(host)), ...(await detectTerminalFont(host))],
+  shell: async host => {
+    const rows = await detectShell(host);
+    await shellSources(host, rows);
+    return [...rows, ...(await detectTerminalFont(host))];
+  },
   editors: detectEditors,
   toolchains: detectToolchains,
   tools: detectTools,
