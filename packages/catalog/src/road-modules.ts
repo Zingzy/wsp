@@ -176,7 +176,7 @@ function releaseInstall(name: string, repo: string, tag: string | undefined, pin
     'case "$arch" in x86_64) pat="amd64|x86_64|x64" ;; aarch64) pat="arm64|aarch64" ;; *) echo "Error: unsupported arch: $arch" >&2; exit 1 ;; esac',
     'tmp="$(mktemp -d /tmp/wsp-road-XXXXXX)"',
     "trap 'rm -rf \"$tmp\"' EXIT",
-    `release="$(curl -fsSL ${squote(api)})"`,
+    `release="$(curl -fsSL ${squote(api)} || true)"`,
     ...(tag === undefined ? [`tag="$(printf '%s\\n' "$release" | grep -o '"tag_name": *"[^"]*"' | head -1 | cut -d'"' -f4 || true)"`] : []),
     `urls="$(printf '%s\\n' "$release" | grep -o '"browser_download_url": *"[^"]*"' | cut -d'"' -f4 || true)"`,
     `url="$(printf '%s\\n' "$urls" | grep -i linux | grep -iE "$pat" | grep -viE '\\.(sha256|sha256sum|sha512|sig|asc|txt|md5|pem|deb|rpm|apk)$' | head -1 || true)"`,

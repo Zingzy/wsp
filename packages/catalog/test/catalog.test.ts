@@ -105,7 +105,8 @@ describe("catalog", () => {
     expect(installLine(catalogEntry("go")!)).toMatch(/^su -s \/bin\/bash linuxbrew -c '.*HOMEBREW_NO_AUTO_UPDATE=1.*brew install go'$/);
     const gh = installLine(catalogEntry("gh")!);
     expect(gh).toContain("name='gh'");
-    expect(gh).toContain(`release="$(curl -fsSL 'https://api.github.com/repos/cli/cli/releases/latest')"`);
+    // A failed API call (the rate limit, a network blip) leaves the release empty and falls through to go install.
+    expect(gh).toContain(`release="$(curl -fsSL 'https://api.github.com/repos/cli/cli/releases/latest' || true)"`);
     expect(gh).toContain(`tag="$(printf '%s\\n' "$release" | grep -o '"tag_name": *"[^"]*"' | head -1 | cut -d'"' -f4 || true)"`);
     expect(gh).toContain('echo "WSP_ROAD release ${asset:-$url} $sum $tag"');
     expect(gh).toContain("go install 'github.com/cli/cli@latest'");
@@ -150,7 +151,7 @@ describe("catalog", () => {
     expect(off({ road: "brew", formula: "zingzy/tap/diskbloom" })).toEqual({ cmd: expect.stringMatching(/^if \[ -x \/home\/linuxbrew\/.linuxbrew\/bin\/brew \] && su .*brew list --formula zingzy\/tap\/diskbloom.* >\/dev\/null 2>&1; then su .*brew uninstall zingzy\/tap\/diskbloom.*; else rm -f \/usr\/local\/bin\/'diskbloom'; fi$/) });
     // A release at a tag fetches that tag and prints it; with a pin for the same tag the sum is checked; a row that names no repository only comes off.
     const tagged = line({ road: "release", repo: "spoo-me/spoo-cli", version: "v0.4.1" }, "spoo");
-    expect(tagged).toContain("'https://api.github.com/repos/spoo-me/spoo-cli/releases/tags/v0.4.1'");
+    expect(tagged).toContain(`release="$(curl -fsSL 'https://api.github.com/repos/spoo-me/spoo-cli/releases/tags/v0.4.1' || true)"`);
     expect(tagged).not.toContain("tag=\"$(");
     expect(tagged).toContain(`echo "WSP_ROAD release \${asset:-$url} $sum "'v0.4.1'`);
     expect(tagged).toContain("go install 'github.com/spoo-me/spoo-cli@v0.4.1'");

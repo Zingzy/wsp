@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type LoginChoice, type Manifest, type ManifestEntry, type Rung, parseManifest } from "@wsp/collect";
 import { catalogEntry, catalogToolFor, linuxCaskByBin, linuxCaskFor, loginIdOf } from "@wsp/catalog";
-import { CATALOG_PREFIX, agentOwning, neverCopied, packageOf, parseMcpId, type RecipeDigest } from "@wsp/engine";
+import { CATALOG_PREFIX, agentOwning, neverCopied, packageOf, parseMcpId, rowRoad, type RecipeDigest } from "@wsp/engine";
 import { MCP_ID_PREFIX, Recipe } from "@wsp/protocol";
 import type { GoldenImport, GoldenRecipe, Machine } from "@wsp/runtime";
 import type { Keys } from "./cli.js";
@@ -82,15 +82,12 @@ const ROW_BIN: Readonly<Record<string, string>> = { awscli: "aws", "kubernetes-c
 /** What would bring a command no tools row lists, when the Linux cask table does not say; the detail pane has 76 columns. */
 const BRINGS: Readonly<Record<string, string>> = { gh: "brew install gh", cloudflared: "brew install cloudflared", aws: "brew install awscli", wrangler: "npm install -g wrangler", vercel: "npm install -g vercel" };
 
-/** The command a tools row puts on PATH, when the row is a catalog tool, a package or a cask that is a command. */
+/** The command a tools row puts on PATH, when a road installs the row: the road's own answer, else the package's name. */
 function rowBin(t: ManifestEntry): string | undefined {
-  if (t.id.startsWith(CATALOG_PREFIX)) return catalogEntry(packageOf(t))?.bin;
-  const cask = linuxCaskFor(t.id);
-  if (cask !== undefined) return cask.bin;
-  const m = /^tools\/(?:brew|cli|npm|pnpm|bun|uv|pipx|cargo|go)\/(.+)$/.exec(t.id);
-  if (m === null) return undefined;
-  const pkg = m[1]!;
-  return ROW_BIN[pkg] ?? pkg.slice(pkg.lastIndexOf("/") + 1);
+  const planned = rowRoad(t);
+  if (planned === undefined) return undefined;
+  const pkg = packageOf(t);
+  return ROW_BIN[pkg] ?? planned.bin ?? pkg.slice(pkg.lastIndexOf("/") + 1);
 }
 
 function brings(bin: string): string {

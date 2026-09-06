@@ -689,21 +689,27 @@ export const BREW_TOOLCHAIN: readonly string[] = ["glibc", "gcc"];
  * formula. A manager the floor brings (see baseEntryFor) needs none. */
 export const MANAGER_FORMULA: Readonly<Partial<Record<RoadName, string>>> = { bun: "bun", pipx: "pipx", cargo: "rust", go: "go" };
 
+const pinOf = (e: { pin?: ToolPin }): { pin?: ToolPin } => (e.pin !== undefined ? { pin: e.pin } : {});
+
+/** The release road of a command or tap row whose GitHub release is known, with the pin its first install recorded. */
+const releaseRoad = (r: Pick<PlannedRoad, "source" | "pin" | "go">): InstallRoad => ({ road: "release", repo: r.source.repo, version: r.source.tag, ...pinOf(r), ...(r.go !== undefined ? { go: r.go } : {}) });
+
 /** What a tools row installs by, with the command it puts on PATH where known: a catalog row its entry's road
  * (noted when no golden build has proven the road), a formula row the brew road, a command or cask row its release
- * or its vendor's, a manager row its manager's road at the row's version; nothing for a row no road installs. */
+ * or its vendor's, a manager row its manager's road at the row's version; nothing for a row no road installs.
+ * A release or vendor road carries the pin the row's first install recorded. */
 export function rowRoad(e: RecipeEntry): PlannedRow | undefined {
   const pkg = packageOf(e);
   if (e.id.startsWith(CATALOG_PREFIX)) {
     const entry = catalogEntry(pkg);
     if (entry?.kind !== "tool") return undefined;
-    return { road: entry.installRoad, bin: entry.bin, ...(entry.source.road === "unmeasured" ? { note: UNMEASURED_ROAD } : {}) };
+    return { road: { ...entry.installRoad, ...pinOf(e) }, bin: entry.bin, ...(entry.source.road === "unmeasured" ? { note: UNMEASURED_ROAD } : {}) };
   }
   const cask = linuxCaskFor(e.id);
   if (cask !== undefined) return { road: vendorRoad(cask, e), bin: cask.bin };
   if (e.id.startsWith(CLI_PREFIX)) {
     const cli = cliRoad(e);
-    return { road: { road: "release", ...(cli !== undefined ? { repo: cli.source.repo, version: cli.source.tag, ...(cli.go !== undefined ? { go: cli.go } : {}) } : {}), ...(e.pin !== undefined ? { pin: e.pin } : {}) }, bin: pkg };
+    return { road: cli !== undefined ? releaseRoad({ ...cli, ...pinOf(e) }) : { road: "release", ...pinOf(e) }, bin: pkg };
   }
   const manager = (["brew", ...MANAGER_ORDER] as const).find(m => e.id.startsWith(`tools/${m}/`));
   if (manager === undefined) return undefined;
@@ -824,10 +830,7 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
     for (const e of fromCatalog) plan(e, rowRoad(e)!);
   }
   // Last, after any go the plan brings: a road install needs no brew and waits on nothing.
-  for (const r of brew.roads) {
-    const road: InstallRoad = { road: "release", repo: r.source.repo, version: r.source.tag, ...(r.pin !== undefined ? { pin: r.pin } : {}), ...(r.go !== undefined ? { go: r.go } : {}) };
-    plan(entries.find(e => e.id === r.id)!, { road, bin: r.name });
-  }
+  for (const r of brew.roads) plan(entries.find(e => e.id === r.id)!, { road: releaseRoad(r), bin: r.name });
   // A cask that is a command installs from its vendor's Linux release, hashed on the guest as a road is; a command row
   // with a GitHub release already went out as a road above.
   for (const e of toolRows) {

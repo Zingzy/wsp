@@ -844,6 +844,15 @@ describe("catalog rows", () => {
     expect(toolUninstall(catalog("git"))).toEqual({ note: "git is part of the base and stays" });
     expect(toolUninstall(catalog("nothing"))).toEqual({ note: "no manager known for this row" });
   });
+
+  it("a bare row keeps the tag and checksum its first install recorded: the release fetches that tag and checks the sum, and so does the vendor's download", () => {
+    const t = toolInstallsFor([catalog("gh", { pin: { tag: "v2.86.0", sha256: "d".repeat(64) } }), catalog("kubectl", { pin: { tag: "v1.37.0", sha256: "e".repeat(64) } })]);
+    const gh = t.installs.find(i => i.id === "tools/catalog/gh")!.cmd;
+    expect(gh).toContain("'https://api.github.com/repos/cli/cli/releases/tags/v2.86.0'");
+    expect(gh).not.toContain("releases/latest");
+    expect(gh).toContain(`[ "$sum" = '${"d".repeat(64)}' ]`);
+    expect(t.installs.find(i => i.id === "tools/catalog/kubectl")!.cmd).toBe(`${PATH_LINE}\n${KUBECTL.install(undefined, { tag: "v1.37.0", sha256: "e".repeat(64) })}`);
+  });
 });
 
 describe("command-line tool rows", () => {
