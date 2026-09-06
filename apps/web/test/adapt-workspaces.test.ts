@@ -23,6 +23,8 @@ describe("workspaceIndicator", () => {
     ["running", "running", "no-daemon", "Unreachable", "neutral", false],
     ["running", "gone", "gone", "Gone", "neutral", false],
     ["napping", "gone", "gone", "Gone", "neutral", false],
+    ["gone", "gone", "gone", "Gone", "neutral", false],
+    ["gone", null, null, "Gone", "neutral", false],
     ["running", "running", "zombie", "Unreachable", "neutral", false],
     ["running", "running", "slow", "Running", "running", false],
   ])("phase %s, machine %s, reach %s -> %s", (phase, machineState, reach, label, tone, pulse) => {

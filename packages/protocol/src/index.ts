@@ -80,8 +80,10 @@ export type Capabilities = z.infer<typeof Capabilities>;
 
 // --- views -----------------------------------------------------------------
 
-/** pausing: the runtime is stashing the vault and asking the provider to pause; a send is refused from here on. */
-export const WorkspacePhase = z.enum(["running", "pausing", "napping", "waking"]);
+/** pausing: the runtime is stashing the vault and asking the provider to pause; a send is refused from here on.
+ * gone: the provider no longer knows the machine (deleted behind wsp, or expired); nothing bills and nothing
+ * runs until a rebuild puts a fresh fork under the record or the workspace is deleted. */
+export const WorkspacePhase = z.enum(["running", "pausing", "napping", "waking", "gone"]);
 export type WorkspacePhase = z.infer<typeof WorkspacePhase>;
 
 /** Backend vocabulary: a napping workspace's machine reads "paused" here.
@@ -151,6 +153,8 @@ export const WorkspaceView = z.object({
   claudeSessionId: z.string().optional(),
   /** Present when the machine streams a display (desktop kind); sandbox machines are headless. */
   screen: z.object({ streamUrl: z.string() }).optional(),
+  /** With phase gone: the provider's words when it stopped knowing the machine; every refusal quotes them. */
+  gone: z.string().optional(),
 });
 export type WorkspaceView = z.infer<typeof WorkspaceView>;
 
@@ -512,6 +516,14 @@ export const WorkspaceUpgradedEvent = z.object({
   machineId: z.string(),
 });
 export const WorkspaceDeletedEvent = z.object({ type: z.literal("workspace.deleted"), workspaceId: z.string() });
+/** The provider stopped knowing the machine: the workspace's phase is gone from here until a rebuild or a delete.
+ * Sessions on it ended, the rate is 0, the idle window is dropped; reason carries the provider's words. */
+export const WorkspaceGoneEvent = z.object({
+  type: z.literal("workspace.gone"),
+  workspaceId: z.string(),
+  machineId: z.string(),
+  reason: z.string(),
+});
 
 export const WorkspaceStatusEvent = z.object({ type: z.literal("workspace.status"), status: WorkspaceStatus });
 
@@ -888,6 +900,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   WorkspaceWokenEvent.extend(sequenced),
   WorkspaceUpgradedEvent.extend(sequenced),
   WorkspaceDeletedEvent.extend(sequenced),
+  WorkspaceGoneEvent.extend(sequenced),
   WorkspaceStatusEvent.extend(sequenced),
   WorkspaceCostEvent.extend(sequenced),
   SessionStartEvent.extend(sequenced),
@@ -1517,7 +1530,7 @@ export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;
 export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
-export { sendRefusal, workspaceState, workspaceWord, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
+export { goneRefusal, needsRebuild, sendRefusal, workspaceState, workspaceWord, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
 export { fmtBytes, fmtCost, fmtDuration, fmtElapsed, fmtMemGb, notifyLine, titleLine, turnCutLine, type TurnCutRule } from "./format.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { shellQuote } from "./shell-quote.js";
