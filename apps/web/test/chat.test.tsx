@@ -305,6 +305,15 @@ describe("chat tab send after a harness died before its init", () => {
     { type: "session.end", ...retry, exitCode: 0, sawResult: true },
   ];
   const STARTED: SessionEvent[] = CHAT_STREAM.map(e => ({ ...e, threadId: "thr_a" }));
+  // Another client's send on the same workspace: a thread this tab never queued a row in.
+  const other = { workspaceId: WS, sessionId: "sess_other", turnId: "turn_other", threadId: "thr_other" };
+  const OTHER: SessionEvent[] = [
+    { type: "session.start", ...other, prompt: "from another tab" },
+    { type: "session.delta", ...other, kind: "text", text: "Elsewhere." },
+    { type: "session.done", ...other, result: { status: "completed", durationMs: 500, costUsd: 0.001 } },
+    { type: "session.end", ...other, exitCode: 0, sawResult: true },
+  ];
+  const queueOf = (key: string) => (useComposerDraftStore.getState().queues[key] ?? []).map(r => r.prompt);
 
   it("on a workspace with no thread yet, the next send carries no resume, and the thread the runtime mints for it lands in the view", async () => {
     const bare: WorkspaceView = { ...workspace, claudeSessionId: undefined };
@@ -386,6 +395,120 @@ describe("chat tab send after a harness died before its init", () => {
     for (const e of RETRY.slice(2)) record(e);
     await waitFor(() => expect(started.length).toBe(2));
     expect(started[1]).toEqual({ workspaceId: WS, prompt: "and then this", resume: "sess_retry", cwd: "/root" });
+  });
+
+  it("on the latest view of a dead thread, another client's start during the send is kept out; the start carrying the sent prompt is the person's own and takes the queued row", async () => {
+    const { api, started, emit } = fixtureApi([workspace], { [WS]: [...STARTED, ...DEATH] });
+    await setup(api);
+    await screen.findByText(/exited before init/);
+    const editor = composerEditor();
+
+    await typeInto(editor, "again");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started.length).toBe(1));
+    await typeInto(editor, "and then this");
+    await press(editor, "Enter");
+    expect(queueOf(WS)).toEqual(["and then this"]);
+
+    for (const e of OTHER.slice(0, 2)) emit(e);
+    expect(screen.queryByText("Elsewhere.")).toBeNull();
+    expect(screen.getByText("again")).toBeDefined();
+    expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
+    expect(queueOf(WS)).toEqual(["and then this"]);
+    expect(queueOf("thr_other")).toEqual([]);
+
+    for (const e of RETRY.slice(0, 2)) emit(e);
+    expect(stopButton()).toBeDefined();
+    expect(screen.getByText("Second time lucky.")).toBeDefined();
+    expect(queueOf("thr_retry")).toEqual(["and then this"]);
+
+    for (const e of OTHER.slice(2)) emit(e);
+    expect(stopButton()).toBeDefined();
+    expect(started.length).toBe(1);
+
+    for (const e of RETRY.slice(2)) emit(e);
+    await waitFor(() => expect(started.length).toBe(2));
+    expect(started[1]).toEqual({ workspaceId: WS, prompt: "and then this", resume: "sess_retry", cwd: "/root" });
+  });
+
+  it("pinned to a dead thread, another client's start during the send moves neither the pin nor the queued row; the start carrying the sent prompt moves both", async () => {
+    const history: Record<string, SessionEvent[]> = { [WS]: [...DEATH, ...STARTED] };
+    const deadRow: SessionView = { id: dead.sessionId, workspaceId: WS, harness: "claude", status: "failed", threadId: "thr_dead", prompt: "hello", startedAt: T0 };
+    const { api, started, emit } = fixtureApi([workspace], history, [deadRow]);
+    const record = (e: SessionEvent) => { history[WS] = [...history[WS]!, e]; emit(e); };
+    await setup(api, "thr_dead");
+    await screen.findByText(/exited before init/);
+    const editor = composerEditor();
+
+    await typeInto(editor, "again");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started.length).toBe(1));
+    await typeInto(editor, "and then this");
+    await press(editor, "Enter");
+    expect(queueOf("thr_dead")).toEqual(["and then this"]);
+
+    for (const e of OTHER.slice(0, 2)) record(e);
+    expect(useStore.getState().selectedThreadId).toBe("thr_dead");
+    expect(screen.queryByText("Elsewhere.")).toBeNull();
+    expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
+    expect(queueOf("thr_dead")).toEqual(["and then this"]);
+    expect(queueOf("thr_other")).toEqual([]);
+
+    record(RETRY[0]!);
+    expect(useStore.getState().selectedThreadId).toBe("thr_retry");
+    await waitFor(() => expect(screen.queryByText("loading transcript")).toBeNull());
+    expect(stopButton()).toBeDefined();
+    expect(queueOf("thr_retry")).toEqual(["and then this"]);
+    record(RETRY[1]!);
+    expect(screen.getByText("Second time lucky.")).toBeDefined();
+
+    for (const e of OTHER.slice(2)) record(e);
+    expect(stopButton()).toBeDefined();
+    expect(screen.queryByText("Elsewhere.")).toBeNull();
+    expect(started.length).toBe(1);
+
+    for (const e of RETRY.slice(2)) record(e);
+    await waitFor(() => expect(started.length).toBe(2));
+    expect(started[1]).toEqual({ workspaceId: WS, prompt: "and then this", resume: "sess_retry", cwd: "/root" });
+  });
+
+  it("on a fresh thread, another client's start during the send stays out; the start carrying the sent prompt opens the thread and takes the queued row", async () => {
+    const { api, started, emit } = fixtureApi([workspace], { [WS]: STARTED });
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    act(() => requestNewThread({ workspaceId: WS }));
+    const editor = composerEditor();
+
+    await typeInto(editor, "start over");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started.length).toBe(1));
+    expect(started[0]).toEqual({ workspaceId: WS, prompt: "start over", cwd: "/root" });
+    await typeInto(editor, "and then this");
+    await press(editor, "Enter");
+    expect(queueOf(WS)).toEqual(["and then this"]);
+
+    for (const e of OTHER.slice(0, 2)) emit(e);
+    expect(screen.queryByText("Elsewhere.")).toBeNull();
+    expect(screen.getByText("start over")).toBeDefined();
+    expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
+    expect(queueOf(WS)).toEqual(["and then this"]);
+    expect(queueOf("thr_other")).toEqual([]);
+
+    const fresh = { workspaceId: WS, sessionId: "sess_0002", turnId: "turn_0002", threadId: "thr_b" };
+    emit({ type: "session.start", ...fresh, prompt: "start over" });
+    emit({ type: "session.delta", ...fresh, kind: "text", text: "Fresh start." });
+    expect(screen.getByText("Fresh start.")).toBeDefined();
+    expect(stopButton()).toBeDefined();
+    expect(queueOf("thr_b")).toEqual(["and then this"]);
+
+    for (const e of OTHER.slice(2)) emit(e);
+    expect(stopButton()).toBeDefined();
+    expect(started.length).toBe(1);
+
+    emit({ type: "session.done", ...fresh, result: { status: "completed", durationMs: 1000, costUsd: 0.001 } });
+    emit({ type: "session.end", ...fresh, exitCode: 0, sawResult: true });
+    await waitFor(() => expect(started.length).toBe(2));
+    expect(started[1]).toEqual({ workspaceId: WS, prompt: "and then this", resume: "sess_0002", cwd: "/root" });
   });
 });
 
