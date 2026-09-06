@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { sendRefusal, workspaceState, workspaceWord, type WorkspaceState } from "../src/index.js";
+import { goneRefusal, needsRebuild, sendRefusal, workspaceState, workspaceWord, type WorkspaceState } from "../src/index.js";
 
 describe("workspaceState", () => {
   it("phase alone: running, pausing, napping and waking each have one word", () => {
@@ -8,6 +8,11 @@ describe("workspaceState", () => {
     expect(workspaceState({ phase: "pausing" })).toBe("pausing");
     expect(workspaceState({ phase: "napping" })).toBe("paused");
     expect(workspaceState({ phase: "waking" })).toBe("waking");
+  });
+
+  it("phase gone is gone whatever the machine or the reach say: the record outlives the provider's view", () => {
+    expect(workspaceState({ phase: "gone" })).toBe("gone");
+    expect(workspaceState({ phase: "gone", machineState: "running", reach: "reachable" })).toBe("gone");
   });
 
   it("the provider's word overrides the phase only where it contradicts it", () => {
@@ -40,5 +45,21 @@ describe("workspaceState", () => {
     expect(sendRefusal("waking")).toBe("Workspace is waking; sends open when it is running");
     expect(sendRefusal("unreachable")).toBe("Workspace is unreachable; sends open when the machine answers");
     expect(sendRefusal("gone")).toBe("Workspace machine is gone; rebuild it to send");
+  });
+
+  it("needsRebuild: the rebuild is the one action for a gone machine or a zombie, and for nothing else", () => {
+    expect(needsRebuild({ phase: "gone" })).toBe(true);
+    expect(needsRebuild({ phase: "running", machineState: "gone", reach: "gone" })).toBe(true);
+    expect(needsRebuild({ phase: "running", machineState: "running", reach: "zombie" })).toBe(true);
+    expect(needsRebuild({ phase: "running", machineState: "running", reach: "unreachable" })).toBe(false);
+    expect(needsRebuild({ phase: "napping", machineState: "paused", reach: "napping" })).toBe(false);
+    expect(needsRebuild({ phase: "running" })).toBe(false);
+  });
+
+  it("goneRefusal is one sentence per verb, quoting the provider when the caller holds its words; a send's is sendRefusal's", () => {
+    expect(goneRefusal("wake")).toBe("Workspace machine is gone; rebuild it to wake");
+    expect(goneRefusal("fork", "machine m1 is gone at the provider: Not found")).toBe("Workspace machine is gone; rebuild it to fork (machine m1 is gone at the provider: Not found)");
+    expect(goneRefusal("wake", "")).toBe("Workspace machine is gone; rebuild it to wake");
+    expect(sendRefusal("gone", "machine m1 is gone at the provider: Not found")).toBe(goneRefusal("send", "machine m1 is gone at the provider: Not found"));
   });
 });

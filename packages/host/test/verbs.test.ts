@@ -7,8 +7,8 @@ import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { ThreadView } from "@wsp/protocol";
-import { createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
+import { ThreadView, markedDefault } from "@wsp/protocol";
+import { createRuntime, harnessCatalog, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { HELP, cli, serve } from "../src/cli.js";
@@ -116,6 +116,25 @@ describe("wsp verbs over the host", () => {
     expect(sent.io.streamed.endsWith("re: build it")).toBe(true);
   });
 
+  it("fork and thread new refuse a workspace whose machine is gone, quoting the provider", async () => {
+    await run("new", "alpha");
+    const [alpha] = await rt.workspaces.list();
+    await handle!.close();
+    handle = undefined;
+    backend.machines[0]!.killed = true; // deleted at the provider while no host ran
+    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter } });
+    vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_verbs_key");
+    handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir: join(dir, "web"), runtime: rt });
+    const words = `machine ${alpha!.machineId} is gone at the provider: gone`;
+    const forked = await run("fork", "alpha");
+    expect(forked.code).toBe(1);
+    expect(forked.io.errors).toEqual([`wsp fork: Workspace machine is gone; rebuild it to fork (${words})`]);
+    const opened = await run("thread", "new", "--in", "alpha", "do it");
+    expect(opened.code).toBe(1);
+    expect(opened.io.errors).toEqual([`wsp thread new: Workspace machine is gone; rebuild it to send (${words})`]);
+    expect((await rt.workspaces.list()).map(w => [w.name, w.phase])).toEqual([["alpha", "gone"]]);
+  });
+
   it("fork's help says it makes a new machine from the source's golden version, in wsp --help and wsp fork --help", async () => {
     const line = "a new machine from the source's golden version";
     expect(HELP).toContain(line);
@@ -138,6 +157,53 @@ describe("wsp verbs over the host", () => {
     const missing = await run("pause", "nope");
     expect(missing.code).toBe(1);
     expect(missing.io.errors).toEqual(["wsp pause: no workspace nope"]);
+  });
+
+  it("forget asks once, naming what goes, drops a workspace whose machine is gone, and is refused with the reason while the machine exists", async () => {
+    await run("new", "alpha");
+    await run("new", "beta");
+    await run("thread", "new", "--in", "alpha", "build it");
+    const alpha = (await rt.workspaces.list()).find(w => w.name === "alpha")!;
+    const live = await run("forget", "alpha", "--yes");
+    expect(live.code).toBe(1);
+    expect(live.io.errors).toEqual(["wsp forget: alpha's machine m1 is still running; pause it or delete it at the provider first"]);
+    expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["alpha", "beta"]);
+
+    backend.machines[0]!.killed = true;
+    const asked: string[] = [];
+    const answer = async (reply: string, ...argv: string[]): Promise<{ code: number; io: Captured }> => {
+      const io = captured();
+      io.ask = async q => {
+        asked.push(q);
+        return reply;
+      };
+      return { code: await cli([...argv, "--state", statePath], io), io };
+    };
+    const kept = await answer("no", "forget", "alpha");
+    expect(kept.code).toBe(1);
+    expect(kept.io.errors).toEqual(["alpha kept"]);
+    expect(asked).toEqual(["Forget alpha?\nIts record and 1 thread leave this computer; the machine is already gone."]);
+    expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["alpha", "beta"]);
+
+    const forgot = await answer("yes", "forget", alpha.id);
+    expect(forgot.code).toBe(0);
+    expect(forgot.io.lines).toEqual([`forgot alpha ${alpha.id}: its record and 1 thread are gone from this computer`]);
+    expect(forgot.io.errors).toEqual([]);
+    expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["beta"]);
+    expect(await rt.sessions.list(alpha.id)).toEqual([]);
+    expect(await store.get("workspaces", alpha.id)).toBeUndefined();
+    expect(await store.get("transcripts", alpha.id)).toBeUndefined();
+
+    backend.machines[1]!.killed = true;
+    const beta = (await rt.workspaces.list())[0]!;
+    const asJson = await run("forget", "beta", "--yes", "--json");
+    expect(asJson.code).toBe(0);
+    expect(json(asJson.io)).toEqual([{ forgot: { workspaceId: beta.id, name: "beta", threads: 0 } }]);
+    expect(await rt.workspaces.list()).toEqual([]);
+
+    const missing = await run("forget", "nope", "--yes");
+    expect(missing.code).toBe(1);
+    expect(missing.io.errors).toEqual(["wsp forget: no workspace nope"]);
   });
 
   it("thread new opens a thread under the named agent, announces it, streams the reply and prints the last message", async () => {
@@ -253,11 +319,64 @@ describe("wsp verbs over the host", () => {
     expect(claude.starts.at(-1)?.cwd).toBe("/root/work/proj");
   });
 
+  it("--model, --effort and --access on thread new, fork --send and send reach the start as the fields the composer sends; a new thread without --model runs the catalog's default, the model the composer shows", async () => {
+    await run("new", "alpha");
+    const picked = await run("thread", "new", "--in", "alpha", "--model", "claude-sonnet-5", "--effort", "low", "--access", "plan", "review it");
+    expect(picked.code).toBe(0);
+    expect(claude.starts.map(s => [s.model, s.effort, s.permissionMode])).toEqual([["claude-sonnet-5", "low", "plan"]]);
+
+    const bare = await run("thread", "new", "--in", "alpha", "hello");
+    expect(bare.code).toBe(0);
+    const shown = markedDefault(harnessCatalog("claude")!.models)!.value;
+    expect(shown).toBe("claude-opus-5");
+    expect(claude.starts.at(-1)).toMatchObject({ model: shown });
+    expect(claude.starts.at(-1)!.effort).toBeUndefined();
+    expect(claude.starts.at(-1)!.permissionMode).toBeUndefined();
+    const [, thread] = await rt.sessions.list();
+
+    const same = await run("send", thread!.threadId!, "go on");
+    expect(same.code).toBe(0);
+    expect(claude.starts.at(-1)).toMatchObject({ resume: thread!.claudeSessionId });
+    expect(claude.starts.at(-1)!.model).toBeUndefined();
+    const changed = await run("send", thread!.threadId!, "--model", "claude-fable-5-1", "--effort", "max", "--access", "acceptEdits", "now think");
+    expect(changed.code).toBe(0);
+    expect(claude.starts.at(-1)).toMatchObject({ resume: thread!.claudeSessionId, model: "claude-fable-5-1", effort: "max", permissionMode: "acceptEdits" });
+
+    const forked = await run("fork", "alpha", "--name", "worker", "--send", "build it", "--model", "claude-sonnet-5", "--access", "bypassPermissions");
+    expect(forked.code).toBe(0);
+    expect(claude.starts.at(-1)).toMatchObject({ model: "claude-sonnet-5", permissionMode: "bypassPermissions" });
+    expect(claude.starts.at(-1)!.effort).toBeUndefined();
+  });
+
+  it("a model, effort or access mode the agent's catalog does not list is refused with that list, in the composer's words, and nothing starts", async () => {
+    await run("new", "alpha");
+    const model = await run("thread", "new", "--in", "alpha", "--model", "claude-haiku-4-5", "review it");
+    expect(model.code).toBe(1);
+    expect(model.io.errors).toEqual(['wsp thread new: model "claude-haiku-4-5" is not one claude takes; one of: Fable 5.1 (claude-fable-5-1), Opus 5 (claude-opus-5), Sonnet 5 (claude-sonnet-5)']);
+    const effort = await run("thread", "new", "--in", "alpha", "--effort", "ultra", "review it");
+    expect(effort.code).toBe(1);
+    expect(effort.io.errors).toEqual(['wsp thread new: effort "ultra" is not one claude takes; one of: Low (low), Medium (medium), High (high), Extra high (xhigh), Max (max)']);
+    const access = await run("fork", "alpha", "--send", "build it", "--access", "yolo");
+    expect(access.code).toBe(1);
+    expect(access.io.errors[0]).toMatch(/^wsp fork: access mode "yolo" is not one claude takes; one of: Default \(default\), Accept edits \(acceptEdits\), /);
+    // Checked against the table before the fork is minted, for the named agent or the default one.
+    const other = await run("fork", "alpha", "--send", "build it", "--agent", "codex", "--effort", "ultra");
+    expect(other.code).toBe(1);
+    expect(other.io.errors).toEqual(['wsp fork: effort "ultra" is not one codex takes; one of: Minimal (minimal), Low (low), Medium (medium), High (high), Extra high (xhigh)']);
+    expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha"]);
+    expect(claude.starts).toEqual([]);
+    expect(codex.starts).toEqual([]);
+    expect(await rt.sessions.list()).toEqual([]);
+    const dangling = await run("fork", "alpha", "--model", "claude-sonnet-5");
+    expect(dangling.code).toBe(1);
+    expect(dangling.io.errors).toEqual(["wsp fork: --model needs --send"]);
+  });
+
   it("a --cwd that is not absolute is refused with the usage line before anything is created, started or dialled; fork's --cwd needs --send", async () => {
     await run("new", "alpha");
     const relative = await run("thread", "new", "--in", "alpha", "--cwd", "packages/host", "look here");
     expect(relative.code).toBe(1);
-    expect(relative.io.errors).toEqual(['--cwd is a path on the machine, absolute: got "packages/host"\n\nusage: wsp thread new --in <workspace> [--agent <name>] [--cwd <path>] [--notify <thread|me>] "<task>"']);
+    expect(relative.io.errors).toEqual(['--cwd is a path on the machine, absolute: got "packages/host"\n\nusage: wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify] "<task>"']);
     const forked = await run("fork", "alpha", "--send", "build it", "--cwd", "packages/host");
     expect(forked.code).toBe(1);
     expect(forked.io.errors[0]).toMatch(/^--cwd is a path on the machine, absolute: got "packages\/host"\n\nusage: wsp fork /);
@@ -280,6 +399,20 @@ describe("wsp verbs over the host", () => {
     const asJson = await run("threads", "--json");
     const [{ threads }] = json(asJson.io) as [{ threads: ThreadView[] }];
     expect(threads[0]!.cwd).toBe(deep);
+  });
+
+  it("threads shows a multi-paragraph brief as one row, titled by its first line and cut at the end to the column with an ellipsis", async () => {
+    await run("new", "alpha");
+    const brief = "You are a builder for the wsp repo, which is at /Users/zingzy/wsp on this machine.\n\nTicket: Zingzy/wsp-map#292.\nBuild: the fix.";
+    await run("thread", "new", "--in", "alpha", brief);
+    const { io } = await run("threads");
+    const rows = io.lines[0]!.split("\n");
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toMatch(/  You are a builder for the wsp repo, which is at \/Users\/zing…$/);
+    expect(rows[1]!.split("  ").at(-1)).toHaveLength(60);
+    const asJson = await run("threads", "--json");
+    const [{ threads }] = json(asJson.io) as [{ threads: ThreadView[] }];
+    expect(threads[0]!.title).toBe("You are a builder for the wsp repo, which is at /Users/zingzy/wsp on this machine.");
   });
 
   it("send resumes the thread's latest session under its own agent; the thread keeps its id and who opened it", async () => {
@@ -307,8 +440,8 @@ describe("wsp verbs over the host", () => {
     const listed = await run("threads", "--json");
     const [{ threads }] = json(listed.io) as [{ threads: ThreadView[] }];
     expect(threads.map(t => [t.id, t.harness, t.startedBy, t.title, t.turns])).toEqual([
-      [byCli!.threadId, "codex", "cli", "second", 1],
-      [byPerson!.threadId, "claude", "person", "and this", 1],
+      [byCli!.threadId, "codex", "cli", "first", 1],
+      [byPerson!.threadId, "claude", "person", "from the app", 1],
     ]);
 
     const prefixed = await run("send", byCli!.threadId!.slice(0, 8), "third");
@@ -328,14 +461,15 @@ describe("wsp verbs over the host", () => {
     const first = run("thread", "new", "--in", "alpha", "loop for a minute, then say done");
     await vi.waitFor(() => expect(held.starts).toHaveLength(1));
     const [row] = await rt.sessions.list();
-    const sent = run("send", row!.threadId!, "end your last line with STEERED");
+    const sent = run("send", row!.threadId!, "--model", "claude-sonnet-5", "--effort", "low", "end your last line with STEERED");
     await vi.waitFor(() => expect(held.steered).toEqual(["end your last line with STEERED"]));
     expect(held.starts).toHaveLength(1);
     held.release(0, "done STEERED");
     const opened = await first;
     const joined = await sent;
     expect(joined.code).toBe(0);
-    expect(joined.io.errors).toEqual(["joined the running turn"]);
+    // The picks cannot change a turn already running; the one line says which were dropped.
+    expect(joined.io.errors).toEqual(["joined the running turn; --model, --effort dropped, it keeps its own model, effort and access"]);
     expect(joined.io.lines).toEqual(["done STEERED"]);
     expect(joined.io.streamed).toBe("done STEERED");
     expect(opened.io.lines).toEqual([`thread ${row!.threadId}`, "done STEERED"]);
@@ -703,7 +837,7 @@ describe("wsp verbs over the host", () => {
   });
 
   it("every verb takes --json and --help; a bad flag prints the usage", async () => {
-    for (const verb of [["new"], ["fork"], ["snapshot"], ["pause"], ["threads"], ["thread", "new"], ["send"], ["exec"], ["import"], ["export"]]) {
+    for (const verb of [["new"], ["fork"], ["snapshot"], ["pause"], ["forget"], ["threads"], ["thread", "new"], ["send"], ["exec"], ["import"], ["export"]]) {
       const help = await run(...verb, "--help");
       expect(help.code).toBe(0);
       expect(help.io.lines[0]).toMatch(new RegExp(`^usage: wsp ${verb.join(" ")}`));
@@ -714,7 +848,7 @@ describe("wsp verbs over the host", () => {
     expect(bad.io.errors[0]).toContain("usage: wsp threads");
     const half = await run("thread");
     expect(half.code).toBe(1);
-    expect(half.io.errors).toEqual(['usage: wsp thread new --in <workspace> [--agent <name>] [--cwd <path>] [--notify <thread|me>] "<task>"']);
+    expect(half.io.errors).toEqual(['usage: wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify] "<task>"']);
   });
 
   it("without a host serving the state file every verb refuses in one line before dialling anything", async () => {

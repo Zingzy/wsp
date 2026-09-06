@@ -23,6 +23,9 @@ import {
   GoldenStageEvent,
   goldenHead,
   HarnessCatalog,
+  contextWindowsFor,
+  effortsFor,
+  markedDefault,
   PortReachView,
   ProjectExportEvent,
   ProjectExportResult,
@@ -383,6 +386,7 @@ describe("runtime wire types", () => {
       { id: 19, op: "golden.seal", builderId: "m1" },
       { id: 20, op: "golden.builderReach", builderId: "m1" },
       { id: 21, op: "sessions.interrupt", sessionId: "s1" },
+      { id: 22, op: "workspaces.forget", workspaceId: "ws_1" },
     ];
     for (const r of reqs) expect(RuntimeRequest.parse(r)).toEqual(r);
     expect(() => RuntimeRequest.parse({ id: 21, op: "sessions.interrupt" })).toThrow(); // sessionId required
@@ -417,6 +421,7 @@ describe("runtime wire types", () => {
       steers: true,
     };
     expect(HarnessCatalog.parse(catalog)).toEqual(catalog);
+    expect(HarnessCatalog.parse({ ...catalog, isDefault: true })).toEqual({ ...catalog, isDefault: true });
     const bare = { harness: "pi", label: "Pi", source: "table", version: null, models: [], efforts: [], contextWindows: [], permissionModes: [], steers: false };
     expect(HarnessCatalog.parse(bare)).toEqual(bare);
     // steers says whether a running turn of this harness takes a message; the composer decides send-now from it before the click
@@ -427,6 +432,37 @@ describe("runtime wire types", () => {
     expect(() => HarnessCatalog.parse({ ...catalog, source: "guess" })).toThrow();
     const { source: _s, version: _v, contextWindows: _w, ...old } = catalog;
     expect(() => HarnessCatalog.parse(old)).toThrow();
+  });
+
+  it("a model without its own lists takes the catalog's; a model with lists narrows them in the catalog's order; the marked default is one option or none", () => {
+    const catalog: HarnessCatalog = {
+      harness: "claude",
+      label: "Claude Code",
+      source: "harness",
+      version: "2.1.257",
+      models: [
+        { value: "claude-opus-5", label: "Opus 5", isDefault: true, contextWindows: ["200k", "1m"] },
+        { value: "claude-sonnet-5", label: "Sonnet 5", contextWindows: [] },
+        { value: "claude-haiku-4-5", label: "Haiku", efforts: [], contextWindows: [] },
+        { value: "claude-next", label: "Next", efforts: ["high"] },
+      ],
+      efforts: [{ value: "low", label: "Low" }, { value: "high", label: "High" }],
+      contextWindows: [{ value: "200k", label: "200k" }, { value: "1m", label: "1M", isDefault: true }],
+      permissionModes: [{ value: "plan", label: "Plan" }],
+      steers: true,
+    };
+    expect(effortsFor(catalog, catalog.models[0]!).map(o => o.value)).toEqual(["low", "high"]);
+    expect(effortsFor(catalog, catalog.models[3]!).map(o => o.value)).toEqual(["high"]);
+    expect(effortsFor(catalog, catalog.models[2]!)).toEqual([]);
+    expect(effortsFor(catalog, null)).toEqual(catalog.efforts);
+    expect(contextWindowsFor(catalog, catalog.models[0]!).map(o => o.value)).toEqual(["200k", "1m"]);
+    expect(contextWindowsFor(catalog, catalog.models[1]!)).toEqual([]);
+    expect(contextWindowsFor(catalog, catalog.models[3]!).map(o => o.value)).toEqual(["200k", "1m"]);
+    expect(contextWindowsFor(catalog, null)).toEqual([]);
+    expect(markedDefault(catalog.models)?.value).toBe("claude-opus-5");
+    expect(markedDefault(catalog.contextWindows)?.value).toBe("1m");
+    expect(markedDefault(catalog.permissionModes)).toBeUndefined();
+    expect(markedDefault([])).toBeUndefined();
   });
 
   it("SessionView records the model, effort, permission mode and context window the session runs with", () => {
@@ -683,6 +719,11 @@ describe("thread provenance", () => {
     expect(worked!.cwd).toBe("/root/work/proj/packages");
     expect(bare).not.toHaveProperty("cwd");
     expect(ThreadView.parse(worked!).cwd).toBe("/root/work/proj/packages");
+  });
+
+  it("foldThreads titles a thread by its opening prompt's first line, so the CLI's table and the sidebar show one line for a multi-paragraph brief", () => {
+    const [t] = foldThreads([{ ...row, prompt: "You are a builder.\n\nTicket: Zingzy/wsp-map#292.\nBuild: the fix." }]);
+    expect(t!.title).toBe("You are a builder.");
   });
 
   it("a thread always says who opened it: the fold reads a row from before provenance as a person's, once, for every client", () => {

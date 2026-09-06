@@ -54,6 +54,7 @@ import {
   type RunOptions,
   type RetentionPlan,
   type WspError,
+  type WorkspacePhase as EnginePhase,
   retentionPlan,
   rollback as rollbackGolden,
   snapshotStorage,
@@ -87,18 +88,19 @@ import type {
   SessionView,
   SnapshotStorage,
   WorkspaceCreateStage,
+  WorkspacePhase,
   WorkspaceProject,
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, NOTIFY_ME, fmtBytes, notifyLine, sendRefusal, shellQuote, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, NOTIFY_ME, fmtBytes, goneRefusal, notifyLine, sendRefusal, shellQuote, startPicks, workspaceState } from "@wsp/protocol";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
 import { DAEMON_TOKEN_SET, assertTokenShape, rotateDaemonTokenScript } from "./daemon-token.js";
 import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy, idleReason } from "./idle.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
-import { createStatusTracker, machineStateOf, type StatusApi, type StatusWatchOptions } from "./status.js";
+import { createStatusTracker, goneWords, machineStateOf, type StatusApi, type StatusWatchOptions } from "./status.js";
 import type { Store } from "./store.js";
 import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, type HarnessCatalogProbe } from "./harness-catalog.js";
 
@@ -334,6 +336,8 @@ interface WorkspaceRecord extends WorkspaceView {
   firstLife: boolean;
   /** The provider's view of the current machine when it was created; a wake compares against it. */
   shape?: MachineShape;
+  /** With phase gone: the provider's words when the machine was found missing; cleared when a fresh machine lands. */
+  gone?: string;
 }
 
 interface LiveWorkspace {
@@ -590,6 +594,9 @@ export interface Runtime {
      * written again so the next reach opens it. Throws on a workspace that is not running or a runtime without the deploy. */
     updateDaemon(id: string): Promise<void>;
     delete(id: string): Promise<void>;
+    /** Drops a workspace whose machine the provider no longer has: its record, transcripts and sessions go and nothing
+     * is asked of the provider. Refused with the reason (kind conflict) while the machine still exists. */
+    forget(id: string): Promise<void>;
     /** A person acted in the workspace; its idle window starts over. */
     touch(id: string): Promise<void>;
     /** One-shot command on the workspace's machine (plumbing for clients; sessions are the main road). */
@@ -718,6 +725,7 @@ const PAUSED_REASON = "machine paused while the agent was working";
 const DELETED_REASON = "machine deleted while the agent was working";
 const UNANSWERING_REASON = "machine stopped answering while the agent was working";
 const RESTARTED_REASON = "host restarted while the agent was working";
+const GONE_REASON = "machine gone at the provider while the agent was working";
 /** A guest with no daemon is asked again after this long (one may be deployed later). */
 const DAEMON_TOKEN_MISS_TTL_MS = 60_000;
 /** Events kept per workspace; the oldest fall off so one chatty workspace cannot grow the store forever. */
@@ -1066,6 +1074,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     ...(r.claudeSessionId !== undefined ? { claudeSessionId: r.claudeSessionId } : {}),
     ...(r.screen !== undefined ? { screen: r.screen } : {}),
     ...(r.project !== undefined ? { project: r.project } : {}),
+    ...(r.gone !== undefined ? { gone: r.gone } : {}),
   });
 
   const persist = async (r: WorkspaceRecord): Promise<void> => {
@@ -1290,6 +1299,32 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return machine;
     });
 
+  /** The engine knows three phases. A pause in flight is a nap to it (the wake resumes either way); a gone record's
+   * machine is a stand-in it only ever meets through rebuild, which replaces the machine whatever the phase says. */
+  const enginePhaseOf = (phase: WorkspacePhase): EnginePhase => {
+    switch (phase) {
+      case "running":
+      case "napping":
+      case "waking":
+        return phase;
+      case "pausing":
+      case "gone":
+        return "napping";
+      default: {
+        const _exhaustive: never = phase;
+        return "running";
+      }
+    }
+  };
+
+  /** The record follows the engine once a wake, upgrade or rebuild put a machine under it; a gone record is gone no more. */
+  const followMachine = (entry: LiveWorkspace): void => {
+    entry.record.phase = "running";
+    entry.record.machineId = entry.ws.machineId;
+    entry.record.firstLife = entry.ws.isFirstLife;
+    delete entry.record.gone;
+  };
+
   const attach = (record: WorkspaceRecord, machine: Machine): LiveWorkspace => {
     const entry: LiveWorkspace = { record, machine, ws: undefined as unknown as Workspace };
     entry.ws = new Workspace(
@@ -1337,7 +1372,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           return fault === undefined || both === "" ? fault : `${fault} (${both})`;
         },
       },
-      { phase: record.phase === "pausing" ? "napping" : record.phase, firstLife: record.firstLife },
+      { phase: enginePhaseOf(record.phase), firstLife: record.firstLife },
     );
     live.set(record.id, entry);
     return entry;
@@ -1349,6 +1384,24 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const endSessions = (workspaceId: string, reason: string): void => {
     for (const s of sessions.values()) if (s.view.workspaceId === workspaceId) s.end?.(reason);
     for (const e of execs) if (e.workspaceId === workspaceId) e.end(reason);
+  };
+
+  /** Everything a workspace left on this side once its machine is dealt with: live state, flushes, stored rows, vault. */
+  const drop = async (id: string): Promise<void> => {
+    live.delete(id);
+    transcripts.delete(id);
+    for (const [handleId, s] of sessions) if (s.view.workspaceId === id) sessions.delete(handleId);
+    cancelFlush(id);
+    await transcriptFlushes.get(id);
+    transcriptFlushes.delete(id);
+    await indexFlushes.get(id);
+    indexFlushes.delete(id);
+    await store.delete(WORKSPACES, id);
+    await store.delete(TRANSCRIPTS, id);
+    await store.delete(SESSIONS, id);
+    await store.delete(CREATES, `workspace/${id}`);
+    await store.deleteBlob(VAULTS, id);
+    bus.emit({ type: "workspace.deleted", workspaceId: id });
   };
 
   // Pausing is persisted and pushed before the provider is asked, so a list
@@ -1395,11 +1448,28 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     bus.emit({ type: "workspace.napped", workspaceId: entry.record.id });
     await emitStatus(entry, "napping", "paused outside wsp");
   };
+  /** The provider stopped knowing the machine (deleted behind wsp, or expired): the record follows the fact and stays
+   * there. Nothing bills, the idle window is dropped, sessions end; rebuild and delete are the roads out. */
+  const adoptGone = async (entry: LiveWorkspace, reason: string): Promise<void> => {
+    if (entry.record.phase === "gone" || entry.napping || entry.waking) return;
+    entry.record.phase = "gone";
+    entry.record.gone = reason;
+    await persist(entry.record);
+    endSessions(entry.record.id, GONE_REASON);
+    console.warn(`workspace ${entry.record.id} is gone: ${reason}`);
+    bus.emit({ type: "workspace.gone", workspaceId: entry.record.id, machineId: entry.record.machineId, reason });
+    await emitStatus(entry, "gone", reason);
+  };
   bus.on("workspace.status", e => {
     if (e.type !== "workspace.status") return;
     if (e.status.reach.state === "zombie") endSessions(e.status.id, UNANSWERING_REASON);
     const entry = live.get(e.status.id);
-    if (entry !== undefined && e.status.phase === "running" && e.status.machineState === "paused") void adoptPause(entry);
+    if (entry === undefined) return;
+    if (e.status.phase === "running" && e.status.machineState === "paused") void adoptPause(entry);
+    // A status about a machine since replaced says nothing about the one now under the record.
+    if (e.status.machineState === "gone" && e.status.phase !== "gone" && e.status.machineId === entry.record.machineId) {
+      void adoptGone(entry, e.status.reason ?? goneWords(e.status.machineId));
+    }
   });
 
   const idle = createIdlePolicy({
@@ -1418,7 +1488,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     bus.on(type, e => idle.touch((e as { workspaceId: string }).workspaceId));
   }
   bus.on("workspace.created", e => e.type === "workspace.created" && idle.touch(e.workspace.id));
-  for (const type of ["workspace.napped", "workspace.deleted"] as const) {
+  for (const type of ["workspace.napped", "workspace.gone", "workspace.deleted"] as const) {
     bus.on(type, e => idle.forget((e as { workspaceId: string }).workspaceId));
   }
 
@@ -1504,21 +1574,28 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
       for (const raw of await store.list(WORKSPACES)) {
         const stored = raw as Omit<WorkspaceRecord, "size"> & { size?: WorkspaceSize };
+        // The store is the fleet's truth and get(id) the provider's: a record whose machine 404s is gone, whatever
+        // phase it was left at, and says so before anything lists it.
+        let missing: string | undefined;
         const machine = await backend.get(stored.machineId).catch((e: unknown) => {
-          if ((e as { kind?: string }).kind === "missing") return deadMachine(stored.machineId);
-          throw e;
+          if ((e as { kind?: string }).kind !== "missing") throw e;
+          missing = goneWords(stored.machineId, e instanceof Error ? e.message : String(e));
+          return deadMachine(stored.machineId);
         });
         // A record left at pausing died mid-pause: whether or not the provider got the call, a wake resumes it either way.
-        const phase = stored.phase === "pausing" ? "napping" : stored.phase;
-        attach(
-          {
-            ...stored,
-            phase,
-            size: stored.size ?? sizeBuilt(await shapeOf(machine), backend.pricing.defaultSize),
-            ...(machine.streamUrl !== undefined ? { screen: { streamUrl: machine.streamUrl } } : {}),
-          },
-          machine,
-        );
+        const phase: WorkspacePhase = missing !== undefined || stored.phase === "gone" ? "gone" : stored.phase === "pausing" ? "napping" : stored.phase;
+        const record: WorkspaceRecord = {
+          ...stored,
+          phase,
+          size: stored.size ?? sizeBuilt(await shapeOf(machine), backend.pricing.defaultSize),
+          ...(machine.streamUrl !== undefined ? { screen: { streamUrl: machine.streamUrl } } : {}),
+        };
+        if (phase === "gone") record.gone = stored.gone ?? missing ?? goneWords(stored.machineId);
+        attach(record, machine);
+        if (phase === "gone" && stored.phase !== "gone") {
+          console.warn(`workspace ${stored.id} is gone: ${record.gone}`);
+          await persist(record);
+        }
         if (phase === "running") idle.touch(stored.id);
       }
       for (const raw of await store.list(TRANSCRIPTS)) {
@@ -1679,6 +1756,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async wake(id) {
       const entry = await entryOf(id);
       if (entry.waking) return entry.waking;
+      if (entry.record.phase === "gone") throw new Error(goneRefusal("wake", entry.record.gone));
       if (entry.napping) await entry.napping.catch(() => {});
       // A wake nobody should need is the one sign the provider paused the machine on its own: one read settles it.
       if (entry.record.phase === "running" && (await entry.machine.state().catch(() => "running")) === "paused") await adoptPause(entry);
@@ -1689,9 +1767,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         await emitStatus(entry, "napping");
         try {
           const result = await entry.ws.wake();
-          entry.record.phase = "running";
-          entry.record.machineId = entry.ws.machineId;
-          entry.record.firstLife = entry.ws.isFirstLife;
+          followMachine(entry);
           await persist(entry.record);
           bus.emit({ type: "workspace.woken", workspaceId: id, machineId: entry.record.machineId, resurrected: result.resurrected });
           if (result.reason !== undefined) console.warn(`wake of ${id}: ${result.reason}`);
@@ -1712,9 +1788,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async upgrade(id, spec) {
       const entry = await entryOf(id);
       await entry.ws.upgrade(spec);
-      entry.record.machineId = entry.ws.machineId;
-      entry.record.phase = "running";
-      entry.record.firstLife = entry.ws.isFirstLife;
+      followMachine(entry);
       entry.record.spec = {
         ...entry.record.spec,
         ...(spec?.envs !== undefined ? { envs: spec.envs } : {}),
@@ -1731,9 +1805,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const old = entry.record.machineId;
       const vaulted = (await store.getBlob(VAULTS, id)) !== undefined;
       await entry.ws.rebuild();
-      entry.record.machineId = entry.ws.machineId;
-      entry.record.phase = "running";
-      entry.record.firstLife = true;
+      followMachine(entry);
       await persist(entry.record);
       bus.emit({ type: "workspace.upgraded", workspaceId: id, machineId: entry.record.machineId });
       const reason = `rebuilt: ${old} replaced by ${entry.record.machineId}, ${vaulted ? "nap-time vault imported" : "no vault to import"}`;
@@ -1779,20 +1851,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await entry.machine.kill().catch((e: unknown) => {
         if ((e as { kind?: string }).kind !== "missing") throw e;
       });
-      live.delete(id);
-      transcripts.delete(id);
-      for (const [handleId, s] of sessions) if (s.view.workspaceId === id) sessions.delete(handleId);
-      cancelFlush(id);
-      await transcriptFlushes.get(id);
-      transcriptFlushes.delete(id);
-      await indexFlushes.get(id);
-      indexFlushes.delete(id);
-      await store.delete(WORKSPACES, id);
-      await store.delete(TRANSCRIPTS, id);
-      await store.delete(SESSIONS, id);
-      await store.delete(CREATES, `workspace/${id}`);
-      await store.deleteBlob(VAULTS, id);
-      bus.emit({ type: "workspace.deleted", workspaceId: id });
+      await drop(id);
+    },
+
+    async forget(id) {
+      const entry = await entryOf(id);
+      const state = await entry.machine.state();
+      if (state !== "gone") {
+        throw Object.assign(new Error(`${entry.record.name}'s machine ${entry.machine.id} is still ${state}; pause it or delete it at the provider first`), { kind: "conflict" });
+      }
+      endSessions(id, DELETED_REASON);
+      await drop(id);
     },
 
     async touch(id) {
@@ -1880,6 +1949,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return catalog;
   };
 
+  /** The mark goes on the way out, never into the cache: a start and a list share one cached table. */
+  const markDefault = (c: HarnessCatalog): HarnessCatalog => ({ ...c, ...(c.harness === DEFAULT_AGENT.id ? { isDefault: true } : {}) });
+
   /** The adapter for a harness on this workspace's current machine; unnamed means the runtime's default. */
   const adapterFor = (entry: LiveWorkspace, named?: string): { harness: string; adapter: HarnessAdapter } => {
     const harness = named ?? DEFAULT_AGENT.id;
@@ -1930,12 +2002,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       console.warn(`thread ${from.slice(0, 8)} ended, but its line did not reach thread ${notify.slice(0, 8)}: ${e instanceof Error ? e.message : String(e)}`);
     });
   };
-  bus.on("workspace.woken", e => {
-    if (e.type !== "workspace.woken") return;
-    const lines = heldLines.get(e.workspaceId) ?? [];
-    heldLines.delete(e.workspaceId);
-    for (const l of lines) deliver(l.from, l.notify, l.text);
-  });
+  // A wake or a rebuild (of a gone or zombie machine) puts the workspace back to running: the held lines go now.
+  for (const type of ["workspace.woken", "workspace.upgraded"] as const) {
+    bus.on(type, e => {
+      if (e.type !== type) return;
+      const lines = heldLines.get(e.workspaceId) ?? [];
+      heldLines.delete(e.workspaceId);
+      for (const l of lines) deliver(l.from, l.notify, l.text);
+    });
+  }
   /** The one line an ending turn sends where its thread's start said: into a thread, or nowhere further for me, whom
    * the recorded event reaches. Recorded before the turn's session.done, since a follower ends there. */
   const notifyEnd = (s: { view: SessionView; turnId: string }, notify: string, result: TurnResult): void => {
@@ -1962,7 +2037,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async start(workspaceId, o) {
       const entry = await entryOf(workspaceId);
       const refuse = (): void => {
-        const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }));
+        const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone);
         if (refusal !== null) throw new Error(refusal);
       };
       refuse();
@@ -1980,6 +2055,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         }
       }
       const notify = o.notify ?? notifyOf(threadId);
+      const table = harnessCatalog(harness);
+      // Checked against the binary's own lists, the ones the composer shows for this workspace.
+      const picks = startPicks(table === undefined ? undefined : await catalogOn(table, entry.machine, adapter), o, o.resume === undefined);
       let outcome: SessionStartOutcome = "started";
       // Two processes on one harness session corrupt its transcript, so a thread runs one turn at a time.
       for (let running = runningOn(threadId); running !== undefined; running = runningOn(threadId)) {
@@ -1992,10 +2070,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         await running.handle.finished.catch(() => {});
         refuse();
       }
-      const table = harnessCatalog(harness);
-      // A start is when the binary may have changed under us, so the catalog is refreshed here too, within its TTL.
-      if (table !== undefined) void catalogOn(table, entry.machine, adapter);
-
       const turnId = randomUUID();
       const cwd = (o.resume !== undefined ? folderOf(workspaceId, o.resume) : undefined) ?? o.cwd;
       const afterCut = o.resume !== undefined && cutBefore(workspaceId, threadId);
@@ -2013,9 +2087,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         startedAt: Date.now(),
         ...(o.resume !== undefined ? { claudeSessionId: o.resume } : {}),
         ...(cwd !== undefined ? { cwd } : {}),
-        ...(o.model !== undefined ? { model: o.model } : {}),
-        ...(o.effort !== undefined ? { effort: o.effort } : {}),
-        ...(o.permissionMode !== undefined ? { permissionMode: o.permissionMode } : {}),
+        ...picks,
         ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}),
       };
       let ended = false;
@@ -2094,9 +2166,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           prompt: o.prompt,
           ...(o.resume !== undefined ? { resume: o.resume } : {}),
           ...(cwd !== undefined ? { cwd } : {}),
-          ...(o.model !== undefined ? { model: o.model } : {}),
-          ...(o.effort !== undefined ? { effort: o.effort } : {}),
-          ...(o.permissionMode !== undefined ? { permissionMode: o.permissionMode } : {}),
+          ...picks,
           ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}),
           onEvent: forward,
         });
@@ -2110,8 +2180,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       );
       const handleId = started.localId;
       sessionView.id = handleId;
-      // A resumed turn takes over the row of the turn it resumes; the row keeps saying who opened the thread.
-      if (o.resume !== undefined) sessionView.startedBy = sessions.get(handleId)?.view.startedBy ?? sessionView.startedBy;
+      // A resumed turn takes over the row of the turn it resumes; the row keeps saying who opened the thread and
+      // with what, since every client titles the thread by the row's prompt. Later turns live in the transcript.
+      const resumed = o.resume !== undefined ? sessions.get(handleId)?.view : undefined;
+      if (resumed !== undefined) {
+        sessionView.startedBy = resumed.startedBy ?? sessionView.startedBy;
+        if (resumed.prompt !== undefined) sessionView.prompt = resumed.prompt;
+      }
 
       const handle: SessionHandle = {
         id: handleId,
@@ -2176,7 +2251,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const s = sessions.get(sessionId);
       if (!s) return { outcome: "not-found" };
       const entry = await entryOf(s.view.workspaceId);
-      const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }));
+      const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone);
       if (refusal !== null) throw new Error(refusal);
       if (s.view.status !== "running" || s.handle === undefined) return { outcome: "not-running" };
       if (s.handle.steer === undefined) return { outcome: "unsupported" };
@@ -2923,11 +2998,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     harnesses: {
       list: async workspaceId => {
         // Only a harness with an adapter can run a turn; the rest of the table waits for one.
-        const table = HARNESS_CATALOGS.filter(c => c.harness in adapters).map(c => ({ ...c }));
-        if (workspaceId === undefined) return table;
+        const table = HARNESS_CATALOGS.filter(c => c.harness in adapters);
+        if (workspaceId === undefined) return table.map(markDefault);
         const entry = await entryOf(workspaceId);
-        if (entry.record.phase !== "running") return table;
-        return Promise.all(table.map(c => catalogOn(c, entry.machine, adapters[c.harness]!({ machine: entry.machine, workspaceId }))));
+        if (entry.record.phase !== "running") return table.map(markDefault);
+        return Promise.all(table.map(c => catalogOn(c, entry.machine, adapters[c.harness]!({ machine: entry.machine, workspaceId })).then(markDefault)));
       },
     },
     golden,

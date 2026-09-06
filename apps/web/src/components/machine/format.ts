@@ -34,6 +34,8 @@ export function divergentMachineState(phase: WorkspacePhase, state: MachineState
     case "pausing":
     case "waking":
       return state === "gone" ? state : null;
+    case "gone":
+      return null;
     default: {
       const _exhaustive: never = phase;
       return null;

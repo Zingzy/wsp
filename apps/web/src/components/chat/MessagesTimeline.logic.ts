@@ -1,11 +1,11 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/chat/MessagesTimeline.logic.ts at 57a66608 (MIT).
 // Differs from upstream: Equal.equals is a local shallow equality, codex directive rendering is removed, and the row derivation (deriveMessagesTimelineRows, deriveTurnFolds, computeMessageDurationStart, MessagesTimelineRow) lives in the adapter.
-import { commandProgramName } from "../../work-log/commandLabel";
 import {
   normalizeCompactToolLabel,
   resolveWorkEntryToolPresentation,
 } from "../../work-log/presentation";
 import {
+  commandFirstLine,
   indicatesNeutral,
   type MessagesTimelineRow,
   type TurnSummary,
@@ -24,33 +24,50 @@ export type TimelineLatestTurn = Pick<
   "turnId" | "state" | "startedAt" | "completedAt"
 >;
 
-export function workEntryDisplayLabel(entry: WorkLogEntry, workspaceRoot: string | undefined) {
-  if (entry.preview) return entry.preview;
+/** What a tool row reads: a state word ahead of a command, the label, and whether the label is shell text. */
+export interface WorkEntryLabel {
+  readonly verb: string | null;
+  readonly text: string;
+  readonly mono: boolean;
+}
+
+function prose(text: string): WorkEntryLabel {
+  return { verb: null, text, mono: false };
+}
+
+/** The label as one line, for accessible names and tests. */
+export function workEntryLabelText(label: WorkEntryLabel): string {
+  return label.verb === null ? label.text : `${label.verb} ${label.text}`;
+}
+
+export function workEntryDisplayLabel(entry: WorkLogEntry, workspaceRoot: string | undefined): WorkEntryLabel {
+  if (entry.preview) return prose(entry.preview);
   const toolPresentation = resolveWorkEntryToolPresentation(entry);
-  if (toolPresentation) return toolPresentation.displayName;
-  if (entry.command) return entry.command;
-  if (entry.detail) return entry.detail;
+  if (toolPresentation) return prose(toolPresentation.displayName);
+  if (entry.description) return prose(entry.description);
+  if (entry.command?.trim()) return { verb: null, text: commandFirstLine(entry.command), mono: true };
+  if (entry.detail) return prose(entry.detail);
   const [firstPath] = entry.changedFiles ?? [];
   if (firstPath) {
     const path = formatWorkspaceRelativePath(firstPath, workspaceRoot);
-    return entry.changedFiles!.length === 1
+    return prose(entry.changedFiles!.length === 1
       ? path
-      : `${path} +${entry.changedFiles!.length - 1} more`;
+      : `${path} +${entry.changedFiles!.length - 1} more`);
   }
   const heading = normalizeCompactToolLabel(entry.toolTitle || entry.label);
-  return `${heading.charAt(0).toUpperCase()}${heading.slice(1)}`;
+  return prose(`${heading.charAt(0).toUpperCase()}${heading.slice(1)}`);
 }
 
 export function liveWorkEntryLabel(
   entry: WorkLogEntry,
   workspaceRoot: string | undefined,
   active: boolean,
-) {
+): WorkEntryLabel {
   const toolPresentation = resolveWorkEntryToolPresentation(
     entry,
     active ? "inProgress" : "completed",
   );
-  if (toolPresentation) return toolPresentation.displayName;
+  if (toolPresentation) return prose(toolPresentation.displayName);
   const command = entry.command?.trim();
   if (command) {
     const status = entry.toolLifecycleStatus ?? (active ? "inProgress" : "completed");
@@ -64,7 +81,9 @@ export function liveWorkEntryLabel(
             : status === "stopped"
               ? "Stopped"
               : "Ran";
-    return `${verb} ${commandProgramName(command) ?? "command"}`;
+    return entry.description
+      ? prose(entry.description)
+      : { verb, text: commandFirstLine(command), mono: true };
   }
   return workEntryDisplayLabel(entry, workspaceRoot);
 }
