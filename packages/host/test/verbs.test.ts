@@ -2,112 +2,21 @@
 // The wsp verbs against a host over the fake runtime: each one a client of
 // the protocol on localhost, authenticated with the token the host wrote,
 // reading the same session index the sidebar reads.
-import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { TurnResult } from "@wsp/adapter-claude";
-import type { ExecResult } from "@wsp/engine";
 import { ThreadView } from "@wsp/protocol";
-import { createRuntime, memoryStore, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime, type Store } from "@wsp/runtime";
+import { createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
-import { HELP, cli, serve, type CliIO } from "../src/cli.js";
+import { HELP, cli, serve } from "../src/cli.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
 import { dialHost } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
-
-const PAGE = `<!doctype html>
-<html><head><script type="module" crossorigin src="/assets/app.js"></script></head>
-<body><div id="root"></div>
-<script>window.__WSP__ = window.__WSP__ || { wsPort: 4410, token: "" };</script>
-</body></html>
-`;
-
-interface Captured extends CliIO {
-  lines: string[];
-  errors: string[];
-  streamed: string;
-}
-
-const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
-function captured(): Captured {
-  const io: Captured = {
-    lines: [],
-    errors: [],
-    streamed: "",
-    log: l => io.lines.push(l),
-    error: l => io.errors.push(l),
-    stream: t => (io.streamed += t),
-    ask: noPrompt,
-    askSecret: noPrompt,
-  };
-  return io;
-}
-
-/** A harness that answers every prompt with reply(prompt) in two text deltas, or fails the turn when the reply is
- * empty; a resumed start keeps the session id, as the real one does. */
-function scriptedAgent(reply: (prompt: string) => string) {
-  const starts: HarnessStartOptions[] = [];
-  const adapter: HarnessAdapterFactory = () => ({
-    start: o => {
-      starts.push(o);
-      const sessionId = o.resume ?? randomUUID();
-      const text = reply(o.prompt);
-      const result: TurnResult = text === "" ? { status: "failed", error: "the harness died" } : { status: "completed", text };
-      const finished = Promise.resolve().then(() => {
-        o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" });
-        if (text !== "") {
-          o.onEvent({ type: "turn.delta", sessionId, kind: "text", text: text.slice(0, 4) });
-          o.onEvent({ type: "turn.delta", sessionId, kind: "tool_use", text: "ls", toolName: "Bash" });
-          o.onEvent({ type: "turn.delta", sessionId, kind: "text", text: text.slice(4) });
-        }
-        o.onEvent({ type: "turn.done", sessionId, result });
-        o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
-        return result;
-      });
-      return { localId: sessionId, finished, interrupt: async () => {} };
-    },
-  });
-  return { adapter, starts };
-}
-
-/** A harness whose turn never ends: the session starts and nothing more arrives. */
-function stuckAgent(): HarnessAdapterFactory {
-  return () => ({
-    start: o => {
-      const sessionId = randomUUID();
-      queueMicrotask(() => o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" }));
-      return { localId: sessionId, finished: new Promise<TurnResult>(() => {}), interrupt: async () => {} };
-    },
-  });
-}
-
-/** The guest side of the exec stream: the launch lands, one poll hands over the log with the exit code; with no exit
- * the command reads as still running. */
-function execGuest(backend: StubBackend, output: string, exit: number | undefined) {
-  const base = backend.execImpl;
-  backend.execImpl = (m, cmd): Promise<ExecResult> | ExecResult => {
-    if (cmd.includes("base64 -d")) return { exitCode: 0, stdout: "WSP_LAUNCHED\n", stderr: "" };
-    if (cmd.includes("kill -TERM") || cmd.includes("kill -KILL")) return { exitCode: 0, stdout: "", stderr: "" };
-    const sentinel = /(__WSP_EOF_[a-z0-9]+__)/.exec(cmd)?.[1];
-    if (sentinel !== undefined) {
-      const from = Number(/tail -c \+(\d+)/.exec(cmd)?.[1] ?? "1") - 1;
-      const chunk = Buffer.from(output).subarray(from).toString("base64");
-      return { exitCode: 0, stdout: `${chunk}\n${sentinel} ${exit ?? ""} ${exit === undefined ? "up" : "down"}\n`, stderr: "" };
-    }
-    return base(m, cmd);
-  };
-}
-
-/** The script the launch carried to the machine, decoded. */
-function launchedScript(backend: StubBackend): string {
-  const launch = backend.machines[0]!.execLog.find(cmd => cmd.includes("base64 -d"))!;
-  return Buffer.from(/printf '%s' '([A-Za-z0-9+/=]*)'/.exec(launch)![1]!, "base64").toString("utf8");
-}
+import { PAGE, captured, execGuest, launchedScript, scriptedAgent, stuckAgent, type Captured } from "./verbs-fixture.js";
 
 describe("wsp verbs over the host", () => {
   let dir: string;

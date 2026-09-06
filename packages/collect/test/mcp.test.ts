@@ -130,8 +130,8 @@ describe("mcp servers", () => {
     ]);
   });
 
-  it("Gemini CLI and OpenCode: mcpServers and mcp, comments allowed, a bare binary named as what the machine needs", async () => {
-    const gemini = '{\n  // my servers\n  "mcpServers": { "memory": { "command": "~/.local/bin/codebase-memory-mcp" }, "docs": { "httpUrl": "https://docs.example/mcp", "headers": { "Authorization": "Bearer abcdef" } } }\n}\n';
+  it("Gemini CLI and OpenCode: mcpServers and mcp, comments and trailing commas allowed, a bare binary named as what the machine needs", async () => {
+    const gemini = '{\n  // my servers\n  "mcpServers": { "memory": { "command": "~/.local/bin/codebase-memory-mcp" }, "docs": { "httpUrl": "https://docs.example/mcp", "headers": { "Authorization": "Bearer abcdef" } }, },\n}\n';
     const opencode = '{ "mcp": { "memory": { "type": "local", "command": ["/Users/dev/.local/bin/codebase-memory-mcp", "--v"], "environment": { "MEM_KEY": "k" }, "enabled": true }, "ctx": { "type": "remote", "url": "https://ctx.example/mcp" } } }';
     const rows = await detectMcp(fakeHost({ files: { "~/.gemini/settings.json": gemini, "~/.config/opencode/opencode.jsonc": opencode } }));
     expect(rows.map(r => [r.id, r.group, r.detail])).toEqual([

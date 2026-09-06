@@ -21,6 +21,6 @@ Laws. Read /Users/zingzy/wsp/.claude/skills/wsp-review/SKILL.md fully before the
 - TDD for logic: the test exists and went red first, or the report says why not. Components get render and interaction tests. New source files carry `// SPDX-License-Identifier: AGPL-3.0-only`.
 - Comments: one line, only for a constraint the code cannot show. No TODO, FIXME, HACK, ticket numbers or narration in code.
 - Smallest change that works. Delete before adding. No compatibility shims for behaviour nobody shipped.
-- Self-review before the report: read every changed file whole, revert each new test's fix to prove it goes red, walk the wsp-pr-review silent-bugs list. The report says the self-review ran and what it caught.
+- Self-review before the report: read every changed file whole, revert each new test's fix to prove it goes red (commit or `git stash` your edits first; `git checkout HEAD -- <file>` over uncommitted work deletes the fix, which has happened twice), walk the wsp-pr-review silent-bugs list. The report says the self-review ran and what it caught.
 
 Report. One comment per ticket on Zingzy/wsp-map titled `Build report` (or `Fix round N (review round N)` after a review), with: the sha, what landed per acceptance item, deviations from the ticket and why, gate output summary, the self-review line, what was not done. Text on the ticket, never a file path. Never `--edit-last`. Re-read the posted comment. Then tell the coordinator: branch, sha, PR number, gate result, anything needing a ruling.
