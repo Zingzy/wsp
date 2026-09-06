@@ -2,7 +2,7 @@
 // The wsp verbs against a host over the fake runtime: each one a client of
 // the protocol on localhost, authenticated with the token the host wrote,
 // reading the same session index the sidebar reads.
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,7 +16,7 @@ import type { HostHandle } from "../src/server.js";
 import { dialHost } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
-import { PAGE, captured, execGuest, launchedScript, scriptedAgent, stuckAgent, type Captured } from "./verbs-fixture.js";
+import { EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, launchedScript, scriptedAgent, stuckAgent, type Captured } from "./verbs-fixture.js";
 
 describe("wsp verbs over the host", () => {
   let dir: string;
@@ -322,14 +322,50 @@ describe("wsp verbs over the host", () => {
     }
   });
 
-  it("import and export say in one plain line that they are not here yet", async () => {
+  it("import says in one plain line that it is not here yet", async () => {
     const imp = await run("import", "./proj", "--to", "alpha");
     expect(imp.code).toBe(1);
     expect(imp.io.lines).toEqual([]);
     expect(imp.io.errors).toEqual(["wsp import is not here yet: moving a project folder into a workspace lands with the project bundle."]);
-    const exp = await run("export", "alpha", "./proj", "--json");
-    expect(exp.code).toBe(1);
-    expect(json(exp.io)).toEqual([{ verb: "export", available: false, note: expect.stringContaining("not here yet") }]);
+  });
+
+  it("export brings the folder home to the path given, streams the stages, prints the done line, and keys the sessions to the folder in the homes here", async () => {
+    const guest = exportGuest(backend);
+    await run("new", "alpha");
+    const dest = join(dir, "out", "proj");
+    const { code, io } = await run("export", "alpha", dest, "--from", EXPORT_SOURCE);
+    expect(io.errors).toEqual([]);
+    expect(code).toBe(0);
+    expect(readFileSync(join(dest, "src", "index.ts"), "utf8")).toBe("export const a = 1;\n");
+    expect(readFileSync(join(dest, ".env"), "utf8")).toBe("TOKEN=x\n");
+    const real = realpathSync(dest);
+    const key = real.replace(/[^A-Za-z0-9]/g, "-");
+    expect(readFileSync(join(dir, "user", ".claude", "projects", key, "S1.jsonl"), "utf8")).toBe(EXPORT_SESSION(real));
+    expect(io.lines).toEqual([`2 files, 28 B, landed at ${dest}; 1 cache left behind; sessions: Claude Code (1 session) moved.`]);
+    expect(io.streamed.split("\n").filter(l => l !== "")).toEqual(expect.arrayContaining([`Packing ${EXPORT_SOURCE} on the machine.`, "Packing the agents' state for it on the machine.", `Landing at ${dest}.`]));
+    expect(io.streamed).not.toContain("landed at");
+    expect(guest.sources).toEqual([EXPORT_SOURCE]);
+  });
+
+  it("export refuses an existing folder in two lines, the second naming --replace, and replaces it when asked; --from defaults to the folder's own path; --agents narrows; --json prints the result", async () => {
+    const guest = exportGuest(backend);
+    await run("new", "alpha");
+    const dest = join(dir, "out", "proj");
+    mkdirSync(dest, { recursive: true });
+    writeFileSync(join(dest, "old.txt"), "old");
+    const refused = await run("export", "alpha", dest);
+    expect(refused.code).toBe(1);
+    expect(refused.io.lines).toEqual([]);
+    expect(refused.io.errors).toEqual([`wsp export: ${dest} already exists on this computer with 1 file; export with replace to overwrite it\nRun again with --replace to overwrite it.`]);
+    expect(guest.sources).toEqual([]);
+    const replaced = await run("export", "alpha", dest, "--replace", "--agents", "codex,pi", "--json");
+    expect(replaced.code).toBe(0);
+    expect(replaced.io.errors).toEqual([]);
+    expect(json(replaced.io)).toEqual([{ exported: { dest, files: 2, bytes: 28, excluded: ["node_modules"], agents: [] } }]);
+    expect(replaced.io.streamed).toBe("");
+    expect(existsSync(join(dest, "old.txt"))).toBe(false);
+    expect(guest.sources).toEqual([dest]);
+    expect(existsSync(join(dir, "user", ".claude"))).toBe(false);
   });
 
   it("every verb takes --json and --help; a bad flag prints the usage", async () => {

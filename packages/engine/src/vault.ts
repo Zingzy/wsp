@@ -15,6 +15,13 @@ export interface VaultOptions {
   overlay?: boolean;
   /** Import only: called as each part lands, with the bytes sent so far. */
   onPart?: (progress: UploadProgress) => void;
+  /** Export only: called as the archive comes down, with the bytes received so far of its total. */
+  onProgress?: (progress: DownloadProgress) => void;
+}
+
+export interface DownloadProgress {
+  bytes: number;
+  total: number;
 }
 
 export interface UploadProgress {
@@ -28,10 +35,31 @@ function quote(p: string): string {
   return `'${p.replace(/'/g, `'\\''`)}'`;
 }
 
+/** The archive at path on the guest, brought down over its signed URL; total is the size read on the guest when
+ * the caller has it, else the archive's own length once it is here. */
+async function download(machine: Machine, path: string, opts: VaultOptions, total?: number): Promise<Buffer> {
+  const doFetch = opts.fetch ?? globalThis.fetch;
+  const url = await machine.downloadUrl(path);
+  const res = await doFetch(url);
+  if (!res.ok) throw new Error(`vault export download failed: HTTP ${res.status}`);
+  if (opts.onProgress === undefined || res.body === null) return Buffer.from(await res.arrayBuffer());
+  const length = Number(res.headers.get("content-length"));
+  const known = total ?? (Number.isFinite(length) && length > 0 ? length : undefined);
+  opts.onProgress({ bytes: 0, total: known ?? 0 });
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  const reader = res.body.getReader();
+  for (let next = await reader.read(); !next.done; next = await reader.read()) {
+    chunks.push(Buffer.from(next.value));
+    bytes += next.value.length;
+    opts.onProgress({ bytes, total: known ?? bytes });
+  }
+  return Buffer.concat(chunks);
+}
+
 // Signed-URL transport on both directions (PoC P5: ~1s round trips). exec
 // stdout could carry base64 for small exports but hits response-size limits.
 export async function exportPaths(machine: Machine, paths: string[], opts: VaultOptions = {}): Promise<Buffer> {
-  const doFetch = opts.fetch ?? globalThis.fetch;
   const tmp = `/tmp/wsp-vault-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tgz`;
   const rel = paths.map(p => quote(p.replace(/^\//, "")));
   const tar = await machine.run(`tar czf ${quote(tmp)} -C / ${rel.join(" ")}`, { deadlineMs: opts.timeoutMs ?? 120_000 });
@@ -47,12 +75,51 @@ export async function exportPaths(machine: Machine, paths: string[], opts: Vault
         throw Object.assign(new Error(`vault export is ${bytes} bytes, over the ${opts.maxBytes} byte cap`), { kind: "vaultTooLarge", bytes });
       }
     }
-    const url = await machine.downloadUrl(tmp);
-    const res = await doFetch(url);
-    if (!res.ok) throw new Error(`vault export download failed: HTTP ${res.status}`);
-    return Buffer.from(await res.arrayBuffer());
+    return await download(machine, tmp, opts);
   } finally {
     await machine.exec(`rm -f ${quote(tmp)}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => {});
+  }
+}
+
+/** What a folder's archive leaves behind: any entry whose name matches one of the globs (find's -name, so a bracket
+ * expression spells a case rule), and any directory holding one of the marker files, whatever its name. */
+export interface CacheRule {
+  globs: readonly string[];
+  markers: readonly string[];
+}
+
+/** The script that archives a folder on the guest from its own root into `out`: find names every cache root under
+ * the rule, tar leaves those subtrees behind, and the roots come back on stdout one per line, relative to the folder.
+ * Nothing under a .git directory is judged, as on the trip out. Only find and tar features both GNU and BSD have. */
+export function folderExportScript(dir: string, rule: CacheRule, out: string): string {
+  const named = [...rule.globs.map(g => `-name ${quote(g)}`), ...rule.markers.map(m => `\\( -type d -exec test -f ${quote(`{}/${m}`)} \\; \\)`)];
+  const list = `${out}.list`;
+  return [
+    "set -eo pipefail",
+    `cd ${quote(dir)}`,
+    `find . -mindepth 1 \\( -path './.git' -o -path '*/.git' \\) -prune -o \\( ${named.join(" -o ")} \\) -prune -print > ${quote(list)}`,
+    `tar czf ${quote(out)} -X ${quote(list)} .`,
+    `sed 's|^\\./||' ${quote(list)}`,
+    `rm -f ${quote(list)}`,
+  ].join("\n");
+}
+
+/** A folder on the guest as an archive rooted at the folder, its caches left behind under the rule and named; the
+ * folder is checked first so a wrong path costs one command, and the guest keeps nothing afterwards. */
+export async function exportFolder(machine: Machine, dir: string, rule: CacheRule, opts: VaultOptions = {}): Promise<{ tar: Buffer; excluded: string[] }> {
+  const probe = await machine.exec(`test -d ${quote(dir)} && echo yes || echo no`, { timeoutMs: INLINE_EXEC_MS });
+  if (probe.exitCode !== 0 || probe.stdout.trim() !== "yes") throw new Error(`${dir} is not a folder on the machine`);
+  const tmp = `/tmp/wsp-out-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tgz`;
+  try {
+    const packed = await machine.run(folderExportScript(dir, rule, tmp), { deadlineMs: opts.timeoutMs ?? 600_000 });
+    if (packed.exitCode !== 0) throw new Error(`packing ${dir} on the machine failed (exit ${packed.exitCode}): ${packed.stderr.slice(-500)}`);
+    const excluded = packed.stdout.split("\n").filter(l => l !== "").sort();
+    const size = await machine.exec(`wc -c < ${quote(tmp)}`, { timeoutMs: INLINE_EXEC_MS });
+    const total = Number(size.stdout.trim());
+    if (size.exitCode !== 0 || !Number.isFinite(total)) throw new Error(`the archive's size on the machine is unknown: ${size.stderr.slice(-200)}`);
+    return { tar: await download(machine, tmp, opts, total), excluded };
+  } finally {
+    await machine.exec(`rm -f ${quote(tmp)} ${quote(`${tmp}.list`)}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => {});
   }
 }
 

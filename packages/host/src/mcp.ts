@@ -7,9 +7,9 @@ import type { Readable, Writable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { ThreadView, WorkspaceView } from "@wsp/protocol";
+import { ProjectExportResult, ThreadView, WorkspaceView } from "@wsp/protocol";
 import { VERSION } from "./version.js";
-import { create, createFromHead, dialHost, execOn, follow, nap, openingOf, resumeOf, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type HostClient, type Out, type Turn } from "./verbs.js";
+import { create, createFromHead, dialHost, execOn, exportProject, follow, nap, openingOf, resumeOf, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
 
 const INSTRUCTIONS = [
   "wsp runs cloud machines called workspaces, each with agents working inside it, and this server is the same host the",
@@ -17,6 +17,7 @@ const INSTRUCTIONS = [
   "Start with workspaces. Open a thread with thread_new (a workspace, a task, and the agent to run, such as codex);",
   "it returns the reply when the turn ends. Continue a thread with send. Run a command on a machine with exec.",
   "new forks the golden image into a fresh machine, fork makes a sibling of a workspace, pause naps one.",
+  "export brings a project folder and the agent sessions keyed to it home from a workspace's machine to this computer.",
 ].join(" ");
 
 /** Nothing printed: the tools answer with values, and the stages a create streams have no reader here. */
@@ -172,6 +173,31 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
       });
       if (exit.error !== undefined) throw new Error(exit.error);
       return asText(output.join("\n"), { exitCode: exit.exitCode, output });
+    },
+  );
+  server.registerTool(
+    "export",
+    {
+      description:
+        "Brings a project folder and the agent sessions keyed to it home from the workspace's machine to this computer: the folder lands at `folder` (absolute, must not exist unless replace), the sessions in the agents' homes here keyed to it. `from` is the folder's path on the machine, the same path as `folder` when absent. The result says per agent what moved, what landed as transcripts only, and how many indexed rollouts were skipped.",
+      inputSchema: {
+        workspace,
+        folder: z.string().describe("where the folder lands on this computer, absolute"),
+        from: z.string().optional().describe("the folder's path on the machine; defaults to folder"),
+        replace: z.boolean().optional().describe("remove what is at folder first; without it an existing folder is refused"),
+        agents: z.array(z.string()).optional().describe("catalog ids of the agents whose sessions come home; absent means every agent with sessions for the folder"),
+      },
+      outputSchema: ProjectExportResult.shape,
+    },
+    async ({ workspace: ref, folder, from, replace, agents }) => {
+      const client = await dial();
+      const target = await workspaceOf(client, ref);
+      const req: ExportRequest = { source: from ?? folder, dest: folder, ...(replace !== undefined ? { replace } : {}), ...(agents !== undefined ? { agents } : {}) };
+      let done = "";
+      const exported = await exportProject(client, target.id, req, e => {
+        if (e.stage === "done") done = e.message;
+      });
+      return asText(done, exported);
     },
   );
   return server;

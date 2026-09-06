@@ -4,10 +4,12 @@ import { shellQuote, type AdapterEvent, type ExecStream, type TurnResult } from 
 import {
   BUILDER_IDLE_MS,
   DAEMON_PORT,
+  INLINE_EXEC_MS,
   NotFirstLifeError,
   OWNER_LABEL,
   Workspace,
   buildGolden,
+  exportFolder,
   exportPaths,
   goldenHead,
   importInto,
@@ -16,6 +18,7 @@ import {
   plural,
   agentsOnMachine,
   guestAgentHomes,
+  stateRoots,
   killUntilGone,
   prepareBuilder,
   reap,
@@ -27,6 +30,7 @@ import {
   nextSetupSha,
   type Builder,
   type BuildGoldenOptions,
+  type CacheRule,
   type GoldenDelta,
   type GoldenImport,
   type ImportLedger,
@@ -65,6 +69,8 @@ import type {
   PortReachView,
   ProjectAgentOutcome,
   ProjectAgentResult,
+  ProjectExportResult,
+  ProjectExportStage,
   ProjectImportResult,
   ProjectImportStage,
   ProjectPlan,
@@ -238,6 +244,55 @@ export interface ProjectBundler {
   packState(req: StateRequest): Promise<PackedState>;
 }
 
+/** The folder's archive as it came off the machine, rooted at the folder, and the agents' state that came with it. */
+export interface LandRequest {
+  /** The folder's path on the machine: the key its agent state on the machine is stored under. */
+  source: string;
+  /** Where the folder lands on this computer, absolute. */
+  dest: string;
+  /** Remove what is at dest first; without it an existing dest is refused with kind "exists". */
+  replace: boolean;
+  tar: Buffer;
+  /** The agents' state roots as an archive of the guest's root, each agent's home on the guest by catalog id, and the
+   * agents whose state comes home (every one with sessions for the folder when absent). */
+  state?: { tar: Buffer; homes: Readonly<Record<string, string>>; agents?: readonly string[] };
+}
+
+/** One agent's result with its catalog name, for the sentence the runtime says about it. */
+export type LandedAgent = ProjectAgentResult & { name: string };
+
+/** What landed on this computer: the folder's files and bytes, and each agent found on the machine with sessions for
+ * the folder and what became of its state here. */
+export interface LandedProject {
+  files: number;
+  bytes: number;
+  agents: LandedAgent[];
+}
+
+/** This computer's side of an export, as the host does it; the runtime never touches the disk itself. `probe` looks at
+ * the destination before anything is read from the machine, `land` extracts the folder beside its destination and
+ * moves it into place, then keys the agents' state to it in their homes here as an overlay. */
+export interface ProjectLander {
+  /** What the machine's archive leaves behind: the bundle's own cache rule, so the trip home drops what the trip out dropped. */
+  caches: CacheRule;
+  /** How many files sit at dest on this computer now, or nothing when the path is free. */
+  probe(dest: string): Promise<{ files: number } | undefined>;
+  land(req: LandRequest): Promise<LandedProject>;
+}
+
+export interface ProjectExportOptions {
+  workspaceId: string;
+  /** The folder on the machine, absolute. */
+  source: string;
+  /** Where it lands on this computer, absolute. */
+  dest: string;
+  /** Remove what is at dest first; without it an existing dest is refused with kind "exists" before anything is read. */
+  replace?: boolean;
+  /** The agents whose state comes home, by catalog id; absent, every agent with sessions for the folder on the machine. */
+  agents?: readonly string[];
+  lander: ProjectLander;
+}
+
 export interface ProjectImportOptions {
   workspaceId: string;
   /** The folder on this computer, absolute; named in the events. */
@@ -363,6 +418,22 @@ const OUTCOME_WORDS: Record<Exclude<ProjectAgentOutcome, "failed">, string> = {
   carried: "carried unchanged since it is not on the machine",
   nothing: "had nothing to carry",
 };
+/** The same for the export's done line, where the state lands on this computer; `carried` cannot happen here. */
+const HOME_WORDS: Record<Exclude<ProjectAgentOutcome, "failed">, string> = {
+  moved: "moved",
+  "transcript-only": "transcripts landed but not yet in its session list here",
+  carried: "carried unchanged",
+  nothing: "had nothing to bring",
+};
+
+/** One agent's export outcome in words: the name, the sessions counted, what became of them, the rollouts skipped. */
+function homeOutcome(a: LandedAgent): string {
+  const counted = a.sessions === undefined ? "" : ` (${plural(a.sessions, "session")})`;
+  const skipped = a.skipped === undefined || a.skipped === 0 ? "" : `, ${plural(a.skipped, "indexed rollout")} not under sessions/ skipped`;
+  return `${a.name}${counted} ${a.outcome === "failed" ? `failed: ${a.error ?? "no reason given"}` : HOME_WORDS[a.outcome]}${skipped}`;
+}
+
+const destExists = (dest: string, files: number): Error => Object.assign(new Error(`${dest} already exists on this computer with ${plural(files, "file")}; export with replace to overwrite it`), { kind: "exists" });
 
 /** Vite's and Next's refusals fit in a few hundred bytes; a page that loaded fine is not carried back whole. */
 export const PORT_PROBE_BODY_CAP = 2048;
@@ -481,6 +552,8 @@ export interface Runtime {
   readonly projects: {
     /** Lands the host's bundle of a folder on the workspace's machine; progress rides project.import events. */
     import(opts: ProjectImportOptions): Promise<ProjectImportResult>;
+    /** Brings a folder and the agent state keyed to it home from the workspace's machine; progress rides project.export events. */
+    export(opts: ProjectExportOptions): Promise<ProjectExportResult>;
   };
   readonly sessions: {
     start(
@@ -1229,7 +1302,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   });
   // Every road into a workspace the runtime can see starts its window over;
   // typing over the browser's daemon link arrives as workspaces.touch.
-  for (const type of ["session.start", "session.delta", "session.done", "session.end", "inbox.file", "workspace.woken", "workspace.upgraded", "project.import"] as const) {
+  for (const type of ["session.start", "session.delta", "session.done", "session.end", "inbox.file", "workspace.woken", "workspace.upgraded", "project.import", "project.export"] as const) {
     bus.on(type, e => idle.touch((e as { workspaceId: string }).workspaceId));
   }
   bus.on("workspace.created", e => e.type === "workspace.created" && idle.touch(e.workspace.id));
@@ -2501,6 +2574,41 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         }
         report("done", `${plural(packed.files, "file")}, ${fmtBytes(packed.bytes)}, landed at ${o.dest}${parts > 1 ? ` in ${parts} parts` : ""}${outcomes.length > 0 ? `; sessions: ${outcomes.join(", ")}` : ""}.`);
         return { dest: o.dest, files: packed.files, bytes: packed.bytes, parts, cut: packed.cut, rewritten: packed.rewritten, agents: state?.agents ?? [] };
+      } catch (e) {
+        report("failed", e instanceof Error ? e.message : String(e));
+        throw e;
+      }
+    },
+    async export(o) {
+      const entry = await entryOf(o.workspaceId);
+      if (entry.record.phase !== "running") throw new Error(`workspace ${o.workspaceId} is ${entry.record.phase}; wake it before exporting`);
+      const began = clock.now();
+      const report = (stage: ProjectExportStage, message: string, progress?: { bytes: number; total: number }): void => {
+        bus.emit({ type: "project.export", workspaceId: o.workspaceId, source: o.source, dest: o.dest, stage, message, elapsedMs: clock.now() - began, ...progress });
+      };
+      const downloading = (what: string) => (p: { bytes: number; total: number }): void => report("downloading", `${what}: ${fmtBytes(p.bytes)} of ${fmtBytes(p.total)}.`, p);
+      try {
+        const at = await o.lander.probe(o.dest);
+        if (at !== undefined && o.replace !== true) throw destExists(o.dest, at.files);
+        report("packing", `Packing ${o.source} on the machine.`);
+        const folder = await exportFolder(entry.machine, o.source, o.lander.caches, { timeoutMs: 600_000, onProgress: downloading("The folder") });
+        const homes = guestAgentHomes();
+        const roots = stateRoots(homes, o.agents);
+        const found = roots.length === 0 ? { exitCode: 0, stdout: "", stderr: "" } : await entry.machine.exec(`for p in ${roots.map(shellQuote).join(" ")}; do test -e "$p" && echo "$p"; done; true`, { timeoutMs: INLINE_EXEC_MS });
+        if (found.exitCode !== 0) throw new Error(`could not look for agent state on the machine: ${found.stderr.slice(-200)}`);
+        const present = found.stdout.split("\n").filter(l => l !== "");
+        let state: LandRequest["state"];
+        if (present.length > 0) {
+          report("packing", `Packing the agents' state for it on the machine.`);
+          const tar = await exportPaths(entry.machine, present, { timeoutMs: 600_000, onProgress: downloading("Agent state") });
+          state = { tar, homes, ...(o.agents !== undefined ? { agents: o.agents } : {}) };
+        }
+        report("landing", `Landing at ${o.dest}.`);
+        const landed = await o.lander.land({ source: o.source, dest: o.dest, replace: o.replace === true, tar: folder.tar, ...(state !== undefined ? { state } : {}) });
+        const outcomes = landed.agents.map(homeOutcome);
+        const caches = folder.excluded.length === 0 ? "" : `; ${plural(folder.excluded.length, "cache")} left behind`;
+        report("done", `${plural(landed.files, "file")}, ${fmtBytes(landed.bytes)}, landed at ${o.dest}${caches}; ${outcomes.length === 0 ? "no agent sessions for it on the machine" : `sessions: ${outcomes.join(", ")}`}.`);
+        return { dest: o.dest, files: landed.files, bytes: landed.bytes, excluded: folder.excluded, agents: landed.agents.map(({ name: _name, ...a }) => a) };
       } catch (e) {
         report("failed", e instanceof Error ? e.message : String(e));
         throw e;

@@ -24,6 +24,8 @@ import {
   goldenHead,
   HarnessCatalog,
   PortReachView,
+  ProjectExportEvent,
+  ProjectExportResult,
   ProjectImportResult,
   ProjectPlan,
   RuntimeErrorResponse,
@@ -656,5 +658,38 @@ describe("the project plan", () => {
     };
     expect(ProjectImportResult.parse(result)).toEqual(result);
     expect(ProjectImportResult.safeParse({ ...result, agents: [{ agent: "pi", files: 0, bytes: 0, outcome: "lost" }] }).success).toBe(false);
+  });
+});
+
+describe("the project export", () => {
+  it("names the workspace, the folder on the machine and the folder here; agents narrow whose state comes home", () => {
+    const req = { id: "r1", op: "project.export", workspaceId: "ws_1", source: "/root/work/proj", dest: "/Users/dev/proj", replace: true, agents: ["claude", "codex"] };
+    expect(RuntimeRequest.parse(req)).toEqual(req);
+    const bare = { id: "r2", op: "project.export", workspaceId: "ws_1", source: "/root/work/proj", dest: "/Users/dev/proj" };
+    expect(RuntimeRequest.parse(bare)).toEqual(bare);
+    expect(RuntimeRequest.safeParse({ ...bare, dest: undefined }).success).toBe(false);
+  });
+
+  it("its events ride the union with the stages in order, and the result counts sessions and skipped rollouts per agent", () => {
+    for (const stage of ["packing", "downloading", "landing", "done", "failed"]) {
+      const e = { type: "project.export", workspaceId: "ws_1", source: "/root/work/proj", dest: "/Users/dev/proj", stage, message: "x", elapsedMs: 3, seq: 1 };
+      expect(EventUnion.parse(e)).toEqual(e);
+    }
+    expect(ProjectExportEvent.safeParse({ type: "project.export", workspaceId: "w", source: "/a", dest: "/b", stage: "uploading", message: "", elapsedMs: 0 }).success).toBe(false);
+    const result = {
+      dest: "/Users/dev/proj",
+      files: 12,
+      bytes: 4096,
+      excluded: ["node_modules", "dist"],
+      agents: [
+        { agent: "claude", files: 3, bytes: 40, outcome: "moved", sessions: 2 },
+        { agent: "codex", files: 1, bytes: 40, outcome: "transcript-only", sessions: 2, skipped: 1 },
+        { agent: "hermes", files: 0, bytes: 0, outcome: "nothing", sessions: 1 },
+        { agent: "pi", files: 0, bytes: 0, outcome: "failed", error: "not a database" },
+      ],
+    };
+    expect(ProjectExportResult.parse(result)).toEqual(result);
+    expect(ProjectExportResult.safeParse({ ...result, excluded: undefined }).success).toBe(false);
+    expect(ProjectImportResult.parse({ dest: "/root/p", files: 1, bytes: 1, parts: 1, cut: [], rewritten: [], agents: [{ agent: "codex", files: 1, bytes: 1, outcome: "transcript-only", skipped: 2 }] }).agents[0]).toMatchObject({ skipped: 2 });
   });
 });
