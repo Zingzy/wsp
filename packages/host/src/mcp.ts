@@ -7,10 +7,10 @@ import type { Readable, Writable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { AFTER_CUT_LINE, ProjectExportResult, ProjectGolden, SessionStartOutcome, ThreadView, WorkspaceView } from "@wsp/protocol";
+import { AFTER_CUT_LINE, ProjectExportResult, ProjectGolden, SessionInterruptOutcome, SessionStartOutcome, ThreadView, WorkspaceView } from "@wsp/protocol";
 import { INSTRUCTIONS } from "./skill.js";
 import { VERSION } from "./version.js";
-import { absoluteFolder, checkedPicks, create, createFromHead, dialHost, execOn, exportProject, follow, forget, forgetting, forgotLine, nap, notifyOf, openingOf, projectGoldenOf, resumeOf, snapshot, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
+import { absoluteFolder, checkedPicks, create, createFromHead, dialHost, execOn, exportProject, follow, forget, forgetting, forgotLine, nap, notifyOf, openingOf, projectGoldenOf, resumeOf, snapshot, stop, stopLine, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
 
 /** Nothing printed: the tools answer with values, and the stages a create streams have no reader here. */
 const QUIET: Out = { emit: () => {}, stream: () => {} };
@@ -201,6 +201,18 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
       const client = await dial();
       const out = turnOut(await follow(client, resumeOf(await threadOf(client, ref), message, input), "agent", QUIET_TURN));
       return asText(turnText(out), out);
+    },
+  );
+  server.registerTool(
+    "stop",
+    {
+      description: "Stops the thread's running turn (by id, or a prefix of it), as the app's stop button does; the machine stays up and the thread takes the next send. outcome accepted means the turn ended interrupted; not-running means it had already ended, which is an answer, not an error.",
+      inputSchema: { thread: z.string() },
+      outputSchema: { threadId: z.string(), outcome: SessionInterruptOutcome },
+    },
+    async ({ thread: ref }) => {
+      const stopped = await stop(await dial(), ref);
+      return asText(stopLine(stopped), { ...stopped });
     },
   );
   server.registerTool(

@@ -5,7 +5,7 @@ description: How to run work on wsp workspaces from the command line or the MCP 
 
 # wsp
 
-wsp runs cloud machines called workspaces, forked in seconds from a golden image the person sealed with wsp init, each with coding agents working inside it as threads. The host on the person's computer (wsp up, or the desktop app) owns the machines and the keys; the wsp command line and the wsp MCP server are thin clients of that same host, so whatever you do here shows in the person's sidebar and they can read and answer any thread. Start with `workspaces` (or `wsp threads` on the command line) to see what is running. Open a thread with `thread_new`, giving the workspace, the task and the agent to run; it returns the reply when the turn ends. Continue a thread with `send`; run a command on a machine with `exec`; `snapshot` a workspace with a project loaded as a project golden and `new` from it so the next machine starts with the project in place; `export` brings a folder and its agent sessions home; `forget` drops a workspace whose machine the provider no longer has.
+wsp runs cloud machines called workspaces, forked in seconds from a golden image the person sealed with wsp init, each with coding agents working inside it as threads. The host on the person's computer (wsp up, or the desktop app) owns the machines and the keys; the wsp command line and the wsp MCP server are thin clients of that same host, so whatever you do here shows in the person's sidebar and they can read and answer any thread. Start with `workspaces` (or `wsp threads` on the command line) to see what is running. Open a thread with `thread_new`, giving the workspace, the task and the agent to run; it returns the reply when the turn ends. Continue a thread with `send`; `stop` ends a thread's running turn; run a command on a machine with `exec`; `snapshot` a workspace with a project loaded as a project golden and `new` from it so the next machine starts with the project in place; `export` brings a folder and its agent sessions home; `forget` drops a workspace whose machine the provider no longer has.
 
 ## Verbs and tools
 
@@ -20,6 +20,7 @@ The command line and the MCP server call the same functions. Every verb takes `-
 | `wsp forget <workspace> [--yes]` | `forget` | drops a workspace whose machine is gone: its record and threads leave this computer; refused while the machine exists |
 | `wsp thread new --in <workspace> [--agent <id>] [--cwd <path>] [--notify <thread\|me>] "<task>"` | `thread_new` | opens a thread and follows its first turn to the reply |
 | `wsp send <thread> "<message>"` | `send` | a message into an existing thread; follows the turn to the reply |
+| `wsp stop <thread>` | `stop` | ends the thread's running turn, as the app's stop button does; the machine stays up |
 | `wsp exec <workspace> -- <command...>` | `exec` | runs the command on the machine, each word as given; output lines and the exit code |
 | `wsp snapshot <workspace>` | `snapshot` | a project golden: the golden plus the loaded project as it stands |
 | `wsp export <workspace> <folder> [--from <path>] [--replace] [--agents <ids>]` | `export` | the folder and the agent sessions keyed to it come home to this computer |
@@ -44,6 +45,14 @@ wsp send 1a2b3c4d "Also cover the codex case in the test."
 ```
 
 A message into a thread whose turn is not running starts a new turn (outcome `started`). Into a thread whose turn is running: when the agent can take input mid-turn (Claude Code does) the message joins the running turn (outcome `steered`) and the reply is that turn's; otherwise the message waits for the running turn to end and then runs (outcome `queued`). The command line says which on stderr. A person's message on the same thread lands in order with yours. Never start a second thread to hurry a running one.
+
+### stop
+
+```
+wsp stop 1a2b3c4d
+```
+
+Ends the thread's running turn through the runtime, the way the app's stop button does; the turn ends with status interrupted and whoever followed it gets `turn interrupted`. The line says `thread <id> stopped`, or `thread <id> not running` when the turn had already ended; both exit 0, since neither is an error. The machine is not paused or killed and the thread takes the next `send`. Use it when a `send` started a turn you did not mean to, instead of pausing the workspace.
 
 ### exec
 
@@ -113,4 +122,4 @@ The folder must not exist on this computer unless `--replace`. `--from` is the f
 - A resumed thread runs in the folder its session started in, whatever folder is followed in the app (#236).
 - A send carries its own request id, so two clients sending the same text do not adopt each other's turn (#239).
 - The MCP server and the command line refuse a host of another version in one line; restart it with wsp up (#290).
-- Not here yet: choosing the model or effort (#291), stopping a running turn (#287), a wake verb and exec on a napping workspace (#268), picking a machine size (#301), a GitHub credential on the machine (#279). A thread's title follows its latest message (#288), and a title with newlines breaks the threads table (#292).
+- Not here yet: choosing the model or effort (#291), a wake verb and exec on a napping workspace (#268), picking a machine size (#301), a GitHub credential on the machine (#279). A thread's title follows its latest message (#288), and a title with newlines breaks the threads table (#292).

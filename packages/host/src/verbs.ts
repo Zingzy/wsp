@@ -29,6 +29,8 @@ import {
   type ProjectExportResult,
   type ProjectGolden,
   type SessionEvent,
+  type SessionInterruptOutcome,
+  SessionInterruptResult,
   type SessionOrigin,
   type SessionStartOutcome,
   SessionStartResult,
@@ -266,6 +268,26 @@ export async function threadRows(client: HostClient, within?: string): Promise<T
 export async function nap(client: HostClient, ref: string): Promise<WorkspaceView> {
   const source = await workspaceOf(client, ref);
   return (await client.request<{ workspace: WorkspaceView }>("workspaces.nap", { workspaceId: source.id })).workspace;
+}
+
+/** What a stop came to, as every director prints it: the runtime's three answers, none an error. */
+export interface Stopped {
+  threadId: string;
+  outcome: SessionInterruptOutcome;
+}
+
+/** Stops the running turn of the thread a person names, through the runtime as the app's stop button does; the
+ * machine is not touched. Parsed, not trusted: an outcome outside the enum must not read as stopped. */
+export async function stop(client: HostClient, ref: string): Promise<Stopped> {
+  const thread = await threadOf(client, ref);
+  const { outcome } = SessionInterruptResult.parse(await client.request("sessions.interrupt", { sessionId: thread.sessionId }));
+  return { threadId: thread.id, outcome };
+}
+
+const STOP_WORDS: Record<SessionInterruptOutcome, string> = { accepted: "stopped", "not-running": "not running", "not-found": "not found by the host" };
+
+export function stopLine(stopped: Stopped): string {
+  return `thread ${stopped.threadId} ${STOP_WORDS[stopped.outcome]}`;
 }
 
 /** What a forget takes off this computer, counted before anyone is asked: the workspace's record and its threads. */
@@ -741,6 +763,19 @@ export const VERBS: readonly Verb[] = [
       const client = await ctx.client();
       const picks = pickFlags(ctx.flags);
       return followVerb(ctx, client, resumeOf(await threadOf(client, ref), message, picks), false, picks);
+    },
+  },
+  {
+    name: "stop",
+    usage: "wsp stop <thread>",
+    about: "stops the thread's running turn, as the app's stop does; the machine stays up",
+    options: {},
+    run: async ctx => {
+      const [ref] = ctx.args;
+      if (ref === undefined || ctx.args.length !== 1) throw new Error("wsp stop takes one thread");
+      const stopped = await stop(await ctx.client(), ref);
+      ctx.out.emit(stopped, stopLine(stopped));
+      return 0;
     },
   },
   {
