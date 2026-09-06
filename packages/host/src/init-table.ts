@@ -3,7 +3,7 @@
 // with its tick, why it is here in the words the person's own machine gives,
 // and the size its install downloads. wsp recipe prints it as text; wsp init's
 // agents and tools screens are the same rows as a list.
-import { CATALOG, MIB, type CatalogEntry } from "@wsp/catalog";
+import { CATALOG, MIB, type CatalogEntry, sizeBytes } from "@wsp/catalog";
 import { fmtBytes, plural, type Recipe, type RecipeRow } from "@wsp/protocol";
 import { GREY, GUTTER, accent, grey } from "./init-layout.js";
 import type { Cell } from "./init-select.js";
@@ -77,7 +77,7 @@ export function recipeTable(recipe: Recipe, catalog: readonly CatalogEntry[] = C
   const rows = catalog.map((e): TableRow => {
     const r = recipe.rows.find(x => x.id === e.id);
     const base = e.kind === "tool" && e.floor;
-    const size = r?.size ?? e.size;
+    const size = r?.size ?? sizeBytes(e.size);
     const sessions = e.kind === "agent" ? sessionsOf(recipe, e.id) : 0;
     return {
       id: e.id,

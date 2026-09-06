@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A small laptop as the collector would describe it, fixed so the screens'
 // tests can name rows; the real collector is what wsp init runs.
+import { BASE_FLOOR } from "@wsp/catalog";
 import type { Manifest, ManifestEntry } from "@wsp/collect";
 import type { Recipe } from "@wsp/protocol";
 
@@ -39,7 +40,7 @@ export const RECIPE: Recipe = {
   rows: [
     { id: "claude", kind: "agent", on: true, source: { kind: "installed", paths: ["~/.claude/settings.json"], bin: true }, size: 208 * 1024 * 1024 },
     { id: "codex", kind: "agent", on: false, source: { kind: "popular", sessions: 5, images: 1 }, size: 455 * 1024 * 1024 },
-    ...["node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker"].map((id): Recipe["rows"][number] => ({ id, kind: "tool", on: true, source: { kind: "popular", sessions: 10, images: 5 } })),
+    ...BASE_FLOOR.map(e => e.id).map((id): Recipe["rows"][number] => ({ id, kind: "tool", on: true, source: { kind: "popular", sessions: 10, images: 5 } })),
     { id: "gh", kind: "tool", on: true, source: { kind: "installed", paths: [], bin: true } },
     { id: "yq", kind: "tool", on: true, source: { kind: "installed", paths: [], bin: true } },
   ],

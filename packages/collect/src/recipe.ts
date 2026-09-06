@@ -4,7 +4,7 @@
 // caller's choice: what the agents used here, what is installed here, the
 // catalog's own default, or the three together. Names, paths and counts only;
 // nothing read leaves as a value.
-import { CATALOG, type CatalogEntry, type AgentEntry, catalogToolFor } from "@wsp/catalog";
+import { CATALOG, type CatalogEntry, type AgentEntry, catalogToolFor, sizeBytes } from "@wsp/catalog";
 import type { Recipe, RecipeRow, RecipeSource, RecipeTick } from "@wsp/protocol";
 import { presenceOf } from "./detect/presence.js";
 import { type AgentHistory, type Count, type Usage, readHistories } from "./history/index.js";
@@ -128,6 +128,8 @@ export async function computeRecipe(host: Host, opts: RecipeOptions = {}): Promi
   const threads = opts.threadAgents !== undefined ? new Set(opts.threadAgents) : undefined;
   const rows = catalog.map((e): RecipeRow => {
     const used = e.kind === "tool" ? usedTools.get(e.id) : agentUse(byAgent.get(e.id));
+    const bytes = sizeBytes(e.size);
+    const size = bytes !== undefined ? { size: bytes } : {};
     const installed = present.get(e.id);
     const popular: RecipeSource = { kind: "popular", sessions: e.source.sessions, images: e.source.images };
     const sources: Sources = {
@@ -137,7 +139,7 @@ export async function computeRecipe(host: Host, opts: RecipeOptions = {}): Promi
     };
     const source = rule.order(e).flatMap(kind => sources[kind] ?? [])[0] ?? popular;
     const held = e.kind === "agent" && threads !== undefined && !threads.has(e.id) && !rule.ticksAgentsWithoutAdapter;
-    return { id: e.id, kind: e.kind, on: !held && rule.on(sources, e), source, ...(e.size !== undefined ? { size: e.size } : {}) };
+    return { id: e.id, kind: e.kind, on: !held && rule.on(sources, e), source, ...size };
   });
   return {
     version: 1,

@@ -15,14 +15,14 @@ const MB = 1024 * 1024;
 const quiet: RecipeIo = { log: () => {}, note: () => {} };
 const at = () => new Date("2026-09-06T03:00:00Z");
 
-/** Claude Code and Java here, node, pnpm, gh and wrangler in the agent's own sessions, and pytest, which the
+/** Claude Code and Java here, node, pnpm, gh and wrangler in the agent's own sessions, and pulumi, which the
  * catalog does not carry. */
 const laptop = () =>
   fakeHost({
     which: ["claude", "java"],
     files: {
       "~/.claude/settings.json": "{}",
-      "~/.claude/projects/-Users-dev-proj/s1.jsonl": [claudeLine("s1", PROJ, ["node --version", "pnpm install", "pytest -q"]), claudeLine("s1", PROJ, ["gh pr view"])].join("\n"),
+      "~/.claude/projects/-Users-dev-proj/s1.jsonl": [claudeLine("s1", PROJ, ["node --version", "pnpm install", "pulumi -q"]), claudeLine("s1", PROJ, ["gh pr view"])].join("\n"),
       "~/.claude/projects/-Users-dev-proj/s2.jsonl": claudeLine("s2", PROJ, ["pnpm test", "node build.js", "gh pr list", "wrangler deploy"]),
       "~/.claude/projects/-Users-dev-other/s3.jsonl": claudeLine("s3", `${HOME}/other`, ["go build ./..."]),
     },
@@ -38,7 +38,7 @@ describe("wsp recipe scan", () => {
     expect(scan.agents.map(r => r.id).sort()).toEqual(["claude", "codex", "gemini", "hermes", "opencode", "pi"]);
     expect(scan.tools.find(r => r.id === "node")).toMatchObject({ on: true });
     expect(scan.tools.find(r => r.id === "java")).toMatchObject({ on: false, why: "installed here, never used" });
-    expect(scan.commands.map(c => c.name)).toEqual(["pytest"]);
+    expect(scan.commands.map(c => c.name)).toEqual(["pulumi"]);
     expect(scan.signIns.map(r => r.id)).toEqual(["claude", "gh", "wrangler"]);
     expect(scan.signIns.find(r => r.id === "gh")).toMatchObject({ signIn: "gh auth login" });
     rmSync(dir, { recursive: true, force: true });
@@ -81,7 +81,7 @@ describe("wsp recipe scan", () => {
     const lines = scanPrintout(await runScan(laptop(), {}, quiet, at));
     expect(lines[0]).toBe("Agents");
     // The shared renderer's own line, with the one column the scan adds.
-    expect(lines.find(l => l.includes("Java 21"))).toMatch(/^○ {2}Java 21\s+installed\s+installed here, never used\s+343\.0 MB {2}off$/);
+    expect(lines.find(l => l.includes("Java 21"))).toMatch(/^○ {2}Java 21\s+installed\s+installed here, never used\s+584\.9 MB {2}off$/);
     expect(lines).toContain("Tools");
     expect(lines).toContain(ALSO_HERE_TITLE);
     expect(lines).toContain(`  ${NOT_SCANNED}`);

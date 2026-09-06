@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
+import { catalogEntry, sizeBytes } from "@wsp/catalog";
 import { MIB, TOOLS_DISK_FLOOR } from "../src/golden-tools.js";
 import { brewfileFor, pinState, toolInstallsFor, type BrewTable, type RecipeEntry } from "../src/golden-import.js";
 import {
@@ -90,18 +91,23 @@ describe("toolSize", () => {
     expect(s.road).toBe("mac");
   });
 
-  it("a formula measured on Linux takes the measured number over the Mac's, and its dependencies still count", () => {
-    const s = toolSize(brew("llvm@21"), TABLE)!;
-    expect(s.bytes).toBe(2560 * MIB + 5120 * 1024);
-    expect(s.road).toBe("measured");
-    // Without a Mac table the measured formula still has a number, its dependencies unknown.
-    expect(toolSize(brew("llvm@21"), new Map())).toEqual({ bytes: 2560 * MIB, road: "measured", deps: 0 });
+  it("a formula the catalog carries takes the catalog's measured closure, once, whatever this Mac's table says about it", () => {
+    const go = sizeBytes(catalogEntry("go")!.size)!;
+    expect(toolSize(brew("go"), new Map())).toEqual({ bytes: go, road: "measured", deps: 0 });
+    // The catalog's number already holds the Linux runtime dependencies, so the Mac's are not added on top.
+    const table: BrewTable = new Map([...TABLE, ["go", { name: "go", fullName: "go", deps: ["zstd"], bytes: 1, macosOnly: false }]]);
+    expect(toolSize(brew("go"), table)).toEqual({ bytes: go, road: "measured", deps: 0 });
+    // A formula the catalog does not carry is sized from this Mac alone, with its closure; without a table it has no size.
+    expect(toolSize(brew("llvm@21"), TABLE)).toEqual({ bytes: (2048000 + 5120) * 1024, road: "mac", deps: 1 });
+    expect(toolSize(brew("llvm@21"), new Map())).toBeUndefined();
   });
 
-  it("a formula nothing measured or read has no size; taps and a measured npm global are handled", () => {
+  it("a formula nothing measured or read has no size; taps are nothing; a manager's global the catalog carries takes the catalog's number", () => {
     expect(toolSize(brew("gh"), new Map())).toBeUndefined();
     expect(toolSize(row({ id: "tools/brew-tap/zingzy/tap" }), TABLE)).toBeUndefined();
-    expect(toolSize(row({ id: "tools/npm/bun" }), TABLE)).toEqual({ bytes: 78 * MIB, road: "measured", deps: 0 });
+    expect(toolSize(row({ id: "tools/npm/bun" }), TABLE)).toEqual({ bytes: sizeBytes(catalogEntry("bun")!.size), road: "measured", deps: 0 });
+    expect(toolSize(row({ id: "tools/npm/typescript" }), TABLE)).toEqual({ bytes: sizeBytes(catalogEntry("typescript")!.size), road: "measured", deps: 0 });
+    expect(toolSize(row({ id: "tools/uv/ruff" }), TABLE)).toEqual({ bytes: sizeBytes(catalogEntry("ruff")!.size), road: "measured", deps: 0 });
     expect(toolSize(row({ id: "tools/npm/left-pad" }), TABLE)).toBeUndefined();
   });
 
@@ -151,8 +157,8 @@ describe("estimateDisk", () => {
     const est = estimateDisk(ticked, files, TABLE);
     expect(est.files).toBe(files);
     expect(est.toolchain).toBe(BREW_TOOLCHAIN_BYTES);
-    // ffmpeg + x264 + openssl@3 + ca-certificates (openssl@3's own row adds nothing new) + llvm@21 measured + zstd.
-    expect(est.tools).toBe((102400 + 20480 + 30720 + 1024 + 5120) * 1024 + 2560 * MIB);
+    // ffmpeg + x264 + openssl@3 + ca-certificates (openssl@3's own row adds nothing new) + llvm@21 + zstd, all from this Mac.
+    expect(est.tools).toBe((102400 + 20480 + 30720 + 1024 + 5120 + 2048000) * 1024);
     // The agents run on the base's Node 22, which is the base floor's cost, not theirs.
     expect(est.agents).toBe((673 + 189) * MIB);
     expect(est.unknown).toEqual([]);
@@ -165,7 +171,7 @@ describe("estimateDisk", () => {
   it("no Homebrew formula, no toolchain; an npm row and an agent nobody measured are named as unknown", () => {
     const est = estimateDisk([row({ id: "tools/npm/left-pad", label: "left-pad" }), row({ id: "tools/npm/bun", label: "bun" }), { ...row({ id: "agents/aider", label: "Aider" }), rung: "agents" as const }, { ...row({ id: "agents/zed", label: "Zed" }), rung: "agents" as const }], 0, TABLE);
     expect(est.toolchain).toBe(0);
-    expect(est.tools).toBe(78 * MIB);
+    expect(est.tools).toBe(sizeBytes(catalogEntry("bun")!.size)!);
     // Zed has no installer, so nothing of it lands on the machine and nothing is unknown about it.
     expect(est.unknown).toEqual(["left-pad", "Aider"]);
     // The unknown rows still count, each at its kind's default, and the total carries them.
@@ -181,13 +187,14 @@ describe("estimateDisk", () => {
     expect(estimateDisk([codex, pi], 0, TABLE).agents).toBe((455 + 165) * MIB);
   });
 
-  it("a manager the plan pulls in as a formula counts, and so does the toolchain it needs", () => {
+  it("a manager the plan pulls in as a formula counts at the catalog's measurement, and so does the toolchain it needs", () => {
+    const rust = sizeBytes(catalogEntry("rust")!.size)!;
     const est = estimateDisk([row({ id: "tools/cargo/bat", label: "bat" })], 0, new Map([["rust", { name: "rust", fullName: "rust", deps: [], bytes: 400 * MIB, macosOnly: false }]]));
     expect(est.toolchain).toBe(BREW_TOOLCHAIN_BYTES);
-    expect(est.tools).toBe(400 * MIB);
+    expect(est.tools).toBe(rust);
     expect(est.unknown).toEqual(["bat"]);
     expect(est.assumed).toBe(100 * MIB);
-    expect(est.total).toBe(BREW_TOOLCHAIN_BYTES + 400 * MIB + 100 * MIB);
+    expect(est.total).toBe(BREW_TOOLCHAIN_BYTES + rust + 100 * MIB);
   });
 
   it("says by how much a recipe overshoots the room", () => {

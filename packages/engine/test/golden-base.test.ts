@@ -64,8 +64,15 @@ describe("the base floor's plan", () => {
       ["base/ripgrep", "apt", "base/apt-index", "rg"],
       ["base/curl", "apt", "base/apt-index", "curl"],
       ["base/docker", "script", "base/apt-index", "docker"],
+      ["base/build-essential", "apt", "base/apt-index", "cc"],
+      ["base/fd", "script", "base/apt-index", "fd"],
+      ["base/sqlite3", "apt", "base/apt-index", "sqlite3"],
+      ["base/wget", "apt", "base/apt-index", "wget"],
+      ["base/zip", "apt", "base/apt-index", "zip"],
+      ["base/xz", "apt", "base/apt-index", "xz"],
+      ["base/rsync", "apt", "base/apt-index", "rsync"],
     ]);
-    expect(plan.map(t => t.label)).toEqual(["Node 22 with npm", "pnpm", "uv", "Python 3.12", "apt index", "git", "jq", "ripgrep", "curl", "Docker engine and compose"]);
+    expect(plan.map(t => t.label)).toEqual(["Node 22 with npm", "pnpm", "uv", "Python 3.12", "apt index", "git", "jq", "ripgrep", "curl", "Docker engine and compose", "C toolchain with cmake and ninja", "fd", "sqlite3", "wget", "zip and unzip", "xz", "rsync"]);
     expect(BASE_FLOOR.map(e => `base/${e.id}`)).toEqual(plan.filter(t => t.bin !== undefined).map(t => t.id));
   });
 
@@ -102,7 +109,7 @@ describe("the versions read", () => {
     expect(BASE_VERSIONS_CMD).toContain('echo "VERSION rg: $(rg --version 2>/dev/null | head -n 1)"');
     expect(BASE_VERSIONS_CMD).toContain('echo "VERSION docker compose: $(docker compose version 2>/dev/null | head -n 1)"');
     expect(BASE_VERSIONS_CMD).toContain('echo "VERSION git: $(git --version 2>/dev/null | head -n 1)"');
-    expect(BASE_VERSIONS_CMD.split("\n").filter(l => l.startsWith("echo \"VERSION"))).toHaveLength(11);
+    expect(BASE_VERSIONS_CMD.split("\n").filter(l => l.startsWith("echo \"VERSION"))).toHaveLength(21);
   });
 
   it("keeps the version number out of each tool's own wording, and leaves out a command that printed nothing", () => {
@@ -159,8 +166,9 @@ describe("installBase", () => {
     }, () => mb(free));
     const { stages, stage } = recorder();
     const out = await installBase(g.machine, stage);
-    expect(stages[0]).toBe("deploying-daemon:Node 22 with npm (1/10)");
-    expect(stages).toContain("deploying-daemon:Docker engine and compose (10/10)");
+    expect(stages[0]).toBe("deploying-daemon:Node 22 with npm (1/17)");
+    expect(stages).toContain("deploying-daemon:Docker engine and compose (10/17)");
+    expect(stages).toContain("deploying-daemon:rsync (17/17)");
     expect(stages.every(s => s.startsWith("deploying-daemon"))).toBe(true);
     expect(out.tools.map(t => [t.id, t.outcome, t.bytes])).toEqual([
       ["base/node", "installed", 250 * 1024 * 1024],
@@ -173,10 +181,17 @@ describe("installBase", () => {
       ["base/ripgrep", "installed", 0],
       ["base/curl", "installed", 0],
       ["base/docker", "installed", 400 * 1024 * 1024],
+      ["base/build-essential", "installed", 0],
+      ["base/fd", "installed", 0],
+      ["base/sqlite3", "installed", 0],
+      ["base/wget", "installed", 0],
+      ["base/zip", "installed", 0],
+      ["base/xz", "installed", 0],
+      ["base/rsync", "installed", 0],
     ]);
     expect(out.line).toBe("node 22.23.2 (250.0 MB), npm 10.9.4, pnpm 11.9.0, uv 0.12.9, python3 3.12.13, git 2.43.0, jq 1.7.1, rg 14.1.0, curl 8.5.0, docker 27.5.1 (400.0 MB), docker compose 2.29.2");
     expect(g.cmds.filter(c => c.includes("VERSION node:"))).toHaveLength(1);
-    expect(g.ran).toHaveLength(11);
+    expect(g.ran).toHaveLength(18);
   });
 
   it("reads df once between installs, and sizes an install after the rescue from the reading the cleanup left", async () => {
@@ -206,10 +221,17 @@ describe("installBase", () => {
       ["base/ripgrep", "installed", 0],
       ["base/curl", "installed", 0],
       ["base/docker", "installed", 0],
+      ["base/build-essential", "installed", 0],
+      ["base/fd", "installed", 0],
+      ["base/sqlite3", "installed", 0],
+      ["base/wget", "installed", 0],
+      ["base/zip", "installed", 0],
+      ["base/xz", "installed", 0],
+      ["base/rsync", "installed", 0],
     ]);
     // One read before the loop; the rescue's sweep reads before and after itself and the loop reads once more after
-    // it; one after each of the ten installs; the closing sweep and line read three more.
-    expect(g.cmds.filter(c => c === FREE_KB_CMD)).toHaveLength(17);
+    // it; one after each of the seventeen installs; the closing sweep and line read three more.
+    expect(g.cmds.filter(c => c === FREE_KB_CMD)).toHaveLength(24);
   });
 
   it("a step that fails is named on the stage and in the line, and what waited on it is skipped by its name", async () => {
@@ -227,9 +249,16 @@ describe("installBase", () => {
       ["base/ripgrep", "skipped", "apt index did not install"],
       ["base/curl", "skipped", "apt index did not install"],
       ["base/docker", "skipped", "apt index did not install"],
+      ["base/build-essential", "skipped", "apt index did not install"],
+      ["base/fd", "skipped", "apt index did not install"],
+      ["base/sqlite3", "skipped", "apt index did not install"],
+      ["base/wget", "skipped", "apt index did not install"],
+      ["base/zip", "skipped", "apt index did not install"],
+      ["base/xz", "skipped", "apt index did not install"],
+      ["base/rsync", "skipped", "apt index did not install"],
     ]);
-    expect(out.line).toBe("node 22.23.2, npm 10.9.4, pnpm 11.9.0, uv 0.12.9, python3 3.12.13; git skipped (apt index did not install); jq skipped (apt index did not install); ripgrep skipped (apt index did not install); curl skipped (apt index did not install); Docker engine and compose skipped (apt index did not install)");
-    expect(stages).toContain("deploying-daemon:4 installed, 1 failed: apt index (E: Could not get lock /var/lib/apt/lists/lock), 5 skipped: git, jq, ripgrep, curl, Docker engine and compose (apt index did not install); caches swept; 2.9 GB free");
+    expect(out.line).toBe("node 22.23.2, npm 10.9.4, pnpm 11.9.0, uv 0.12.9, python3 3.12.13; git skipped (apt index did not install); jq skipped (apt index did not install); ripgrep skipped (apt index did not install); curl skipped (apt index did not install); Docker engine and compose skipped (apt index did not install); C toolchain with cmake and ninja skipped (apt index did not install); fd skipped (apt index did not install); sqlite3 skipped (apt index did not install); wget skipped (apt index did not install); zip and unzip skipped (apt index did not install); xz skipped (apt index did not install); rsync skipped (apt index did not install)");
+    expect(stages).toContain("deploying-daemon:4 installed, 1 failed: apt index (E: Could not get lock /var/lib/apt/lists/lock), 12 skipped: git, jq, ripgrep, curl, Docker engine and compose, C toolchain with cmake and ninja, fd, sqlite3, wget, zip and unzip, xz, rsync (apt index did not install); caches swept; 2.9 GB free");
   });
 
   it("a floor step that fails is recorded by the last line its installer wrote, not a generic one", async () => {

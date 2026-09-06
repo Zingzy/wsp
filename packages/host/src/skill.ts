@@ -17,7 +17,7 @@ export const SETUP_HEADING = "## Setting a person up from nothing";
 /** What a caller holding only the tools cannot read off them: where the whole procedure lives, and that the setup
  * verbs are on the command line alone, so a caller with a shell should reach for that instead. */
 const BEYOND_THE_TOOLS =
-  "The steps, with the exact line to run and what to watch for after each, are in the wsp skill, which `wsp mcp install --agent <id>` writes into this agent's skills folder; when you have a shell prefer the `wsp` command line, since `wsp init` and `wsp up` are the command line's alone and the init is the person's to run in their own terminal.";
+  "The steps, with the exact line to run and what to watch for after each, are in the wsp skill, which `wsp mcp install --agent <id>` writes into this agent's skills folder; when you have a shell prefer the `wsp` command line, since `wsp init` and `wsp up` are the command line's alone.";
 
 /** The lines from `from` up to the next blank line or heading, trimmed and joined as one paragraph. */
 function paragraph(lines: readonly string[], from: number): string {

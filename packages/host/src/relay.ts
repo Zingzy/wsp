@@ -16,9 +16,14 @@ import { DAEMON_CONNECT_TIMEOUT_MS, connectDaemonSocket, type ConnectOptions, ty
 
 export type UrlOpener = (url: string) => Promise<boolean>;
 
+/** The command this computer opens a page with; the sign-in hand-off prints it for the person to run. */
+export function openerCommand(os: NodeJS.Platform = platform()): string {
+  return os === "darwin" ? "open" : os === "win32" ? "explorer" : "xdg-open";
+}
+
 /** Runs the platform opener and reports whether it exited clean. */
 export function systemOpener(os: NodeJS.Platform = platform()): UrlOpener {
-  const cmd = os === "darwin" ? "open" : os === "win32" ? "explorer" : "xdg-open";
+  const cmd = openerCommand(os);
   return url =>
     new Promise(resolve => {
       const child = spawn(cmd, [url], { stdio: "ignore" });
