@@ -173,8 +173,9 @@ export const SessionView = z.object({
   /** Ms epoch, runtime clock; endedAt is unset while the session runs. */
   startedAt: z.number().optional(),
   endedAt: z.number().optional(),
-  /** The folder the agent works in: the start request's, then what the harness announced, then where its tool
-   * calls moved its shell. */
+  /** The folder the harness runs in: the start request's until the harness announces its own. A resume of this
+   * session runs here whatever folder it asks for, since the CLI keys the session to it; the shell folder the
+   * agent's tool calls move rides the delta events instead. */
   cwd: z.string().optional(),
   /** What the session runs with, as the harness's own slugs: the start request's model until the harness announces
    * its own; effort and permission mode as requested, since the CLI never echoes them. */

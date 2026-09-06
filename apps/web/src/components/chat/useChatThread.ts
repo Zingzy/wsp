@@ -13,7 +13,7 @@
 // so that turn keeps running unseen and the composer stays closed until its
 // end arrives.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { SessionEvent, SessionHarness } from "@wsp/protocol";
+import type { SessionEvent, SessionHarness, SessionView } from "@wsp/protocol";
 import { useProtocolEvents, useStore } from "../../protocol/store";
 import type { ProtocolEvent } from "../../protocol/client";
 import { deriveSession, type TimelineEntry, type TurnSummary } from "./adapt";
@@ -26,7 +26,8 @@ export interface ChatThreadView {
   readonly activeTurnStartedAt: string | null;
   /** The latest turn once it has settled; null while it runs or before any turn. */
   readonly settled: TurnSummary | null;
-  /** The folder the thread's harness runs in, as its last session.start named it. */
+  /** The folder the thread's harness runs in, as its last session.start named it, or, with no start in view, as the
+   * row the next send resumes carries: the strip shows it and the send runs there. */
   readonly cwd: string | null;
   /** Where the agent's tool shell last was, as its tool calls moved it; null until one did. */
   readonly shellCwd: string | null;
@@ -395,6 +396,12 @@ function leaveView(s: ThreadState, sameWorkspace: boolean, latest: boolean): Thr
   return { ...EMPTY, known: knowing(s.known, s.events), stray: prompt === undefined ? s.stray : { prompt } };
 }
 
+/** The row a view without a session.start resumes from: pinned, the thread's latest turn the harness answered; on the latest view, the turn the workspace remembers. */
+function resumedRow(rows: ReadonlyArray<SessionView> | undefined, threadId: string | null, remembered: string | undefined): SessionView | undefined {
+  if (threadId !== null) return rows?.findLast(r => r.threadId === threadId && r.claudeSessionId !== undefined);
+  return remembered === undefined ? undefined : rows?.findLast(r => r.claudeSessionId === remembered);
+}
+
 /** The session the thread's last session.start opened; a turn that ended without one, its harness dead before init, names an id no harness ever held. */
 export function startedSession(events: ReadonlyArray<SessionEvent>): string | undefined {
   return lastStart(events)?.sessionId;
@@ -407,7 +414,8 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
   const gaps = useStore(s => s.gaps);
   const remembered = useStore(s => s.workspaces.find(w => w.id === workspaceId)?.claudeSessionId);
   // The runtime stamps a row only once the harness announced its session, so a capped pinned thread resumes by its row and a dead one resumes nothing.
-  const rowSession = useStore(s => (threadId === null ? undefined : s.sessions[workspaceId]?.findLast(r => r.threadId === threadId && r.claudeSessionId !== undefined)?.claudeSessionId));
+  const rowSession = useStore(s => resumedRow(s.sessions[workspaceId], threadId, remembered)?.claudeSessionId);
+  const rowCwd = useStore(s => resumedRow(s.sessions[workspaceId], threadId, remembered)?.cwd);
   const viewKey = threadId === null ? workspaceId : `${workspaceId}/${threadId}`;
   const [state, setState] = useState<ThreadState>(EMPTY);
   const [viewed, setViewed] = useState({ workspaceId, threadId });
@@ -456,11 +464,13 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
   );
   useProtocolEvents(onEvent);
 
+  // A view without a start resumes its row: pinned, always; on the latest view, only while it is empty.
+  const fromRow = !state.fresh && startedSession(state.events) === undefined && (threadId !== null || state.events.length === 0);
   const view = useMemo(() => {
     const next = deriveChatThread(state, previousEntries.current);
     previousEntries.current = next.entries;
-    return next;
-  }, [state]);
+    return fromRow && rowCwd !== undefined ? { ...next, cwd: rowCwd } : next;
+  }, [state, fromRow, rowCwd]);
   const setSending = useCallback(
     (sending: boolean) =>
       setState(s => {
@@ -499,7 +509,7 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
     busy: state.sending !== null || view.running || finishing,
     sending: state.sending !== null,
     fresh: state.fresh,
-    resume: state.fresh ? undefined : (startedSession(state.events) ?? (threadId === null ? (state.events.length === 0 ? remembered : undefined) : rowSession)),
+    resume: state.fresh ? undefined : (startedSession(state.events) ?? (fromRow ? (threadId === null ? remembered : rowSession) : undefined)),
     finishing,
     threadKey: heldThreadId(state) ?? threadId ?? workspaceId,
     named: state.named,
