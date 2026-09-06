@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { PROJECT_STATE_RESOLVERS, moveProjectState, type ProjectStateResolver } from "../src/project-state/index.js";
+import { PROJECT_STATE_RESOLVERS, moveProjectState, resolveProjectPath, underProject, type ProjectStateResolver } from "../src/project-state/index.js";
 
 const { DatabaseSync } = process.getBuiltinModule("node:sqlite") as typeof import("node:sqlite");
 
@@ -429,6 +429,16 @@ describe("opencode resolver", () => {
 });
 
 // --- the core ---------------------------------------------------------------------------------------------------------
+
+describe("project path rules", () => {
+  it("a path is under the project at the root or inside it, never a sibling sharing the prefix; a trailing slash is not part of the key", () => {
+    expect(underProject("/a/proj", "/a/proj")).toBe(true);
+    expect(underProject("/a/proj/src/deep", "/a/proj")).toBe(true);
+    expect(underProject("/a/proj2", "/a/proj")).toBe(false);
+    expect(underProject("/a", "/a/proj")).toBe(false);
+    expect(resolveProjectPath("/a/proj/")).toBe("/a/proj");
+  });
+});
 
 describe("moveProjectState", () => {
   it("registers each module under its own catalog agent, naming only measured rows of that entry", () => {

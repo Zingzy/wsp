@@ -36,11 +36,15 @@ export function resolveProjectPath(path: string): string {
   }
 }
 
+/** Whether path is the project root or sits inside it; a sibling that shares the prefix is not. */
+export function underProject(path: string, root: string): boolean {
+  return path === root || path.startsWith(`${root}/`);
+}
+
 /** Where a path lands when the project moves: `to` for the project root, the same tail under `to` for a folder
- * inside it, nothing for anything else, so a sibling that shares the prefix stays where it is. */
+ * inside it, nothing for anything else. */
 export function movedPath(path: string, from: string, to: string): string | undefined {
-  if (path === from) return to;
-  return path.startsWith(`${from}/`) ? to + path.slice(from.length) : undefined;
+  return underProject(path, from) ? to + path.slice(from.length) : undefined;
 }
 
 /** The `cwd` recorded in the first transcript line under dir that carries one, or nothing. */

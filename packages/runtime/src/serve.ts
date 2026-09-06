@@ -9,7 +9,7 @@ import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 import { RuntimeRequest, type ForwardEvent, type PortForward } from "@wsp/protocol";
-import type { Runtime } from "./runtime.js";
+import type { ProjectBundler, Runtime } from "./runtime.js";
 
 /** The port forwards a host holds, as the app lists and stops them. The
  * runtime keeps none itself: the host that owns the daemon links supplies this. */
@@ -28,6 +28,8 @@ export interface ServeOptions {
   /** Injectable clock for ticket-expiry tests. */
   now?: () => number;
   forwards?: ForwardsSource;
+  /** How a folder on this computer is read for project.plan and project.import; without it both are refused. */
+  projects?: (source: string) => ProjectBundler;
 }
 
 export interface RuntimeServer {
@@ -40,6 +42,13 @@ interface Ticket {
   expiresAt: number;
 }
 
+function bundlerFrom(opts: ServeOptions): (source: string) => ProjectBundler {
+  return source => {
+    if (opts.projects === undefined) throw new Error("this runtime cannot read folders on this computer");
+    return opts.projects(source);
+  };
+}
+
 function safeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a);
   const bb = Buffer.from(b);
@@ -47,6 +56,7 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<RuntimeServer> {
+  const bundler = bundlerFrom(opts);
   if (!opts.authToken) throw new Error("serveRuntime refuses to start without an auth token");
   const now = opts.now ?? Date.now;
   const ticketTtlMs = opts.ticketTtlMs ?? 300_000;
@@ -253,6 +263,14 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               if (!opts.forwards?.stop(msg.workspaceId, msg.port)) throw new Error(`nothing is forwarding localhost:${msg.port} for that workspace`);
               send({ id: msg.id, ok: true });
               return;
+            case "project.plan":
+              send({ id: msg.id, ok: true, plan: await bundler(msg.source).plan() });
+              return;
+            case "project.import": {
+              const { workspaceId, source, dest, replace, carry } = msg;
+              send({ id: msg.id, ok: true, imported: await rt.projects.import({ workspaceId, source, dest, replace, carry, bundler: bundler(source) }) });
+              return;
+            }
           }
         } catch (e) {
           const kind = (e as { kind?: unknown }).kind;

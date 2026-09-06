@@ -14,7 +14,7 @@ import { opencodeResolver } from "./opencode.js";
 import { piResolver } from "./pi.js";
 import { resolveProjectPath, type MovedState, type ProjectStateResolver } from "./resolver.js";
 
-export { resolveProjectPath, type MovedState, type ProjectStateResolver } from "./resolver.js";
+export { resolveProjectPath, underProject, type MovedState, type ProjectStateResolver } from "./resolver.js";
 
 export const PROJECT_STATE_RESOLVERS: ReadonlyMap<string, ProjectStateResolver> = new Map(
   [claudeResolver, codexResolver, geminiResolver, hermesResolver, opencodeResolver, piResolver].map(r => [r.agent, r]),

@@ -11,6 +11,9 @@ import {
   exportPaths,
   goldenHead,
   importInto,
+  landBundle,
+  fmtBytes,
+  plural,
   killUntilGone,
   prepareBuilder,
   reap,
@@ -58,6 +61,9 @@ import type {
   RecipeDigest,
   PortProbeView,
   PortReachView,
+  ProjectImportResult,
+  ProjectImportStage,
+  ProjectPlan,
   ReachState,
   SessionEvent,
   SessionInterruptResult,
@@ -188,6 +194,34 @@ export interface CreateWorkspaceOptions extends WorkspaceSpec {
   name: string;
   /** Auto-nap window; undefined takes the runtime default, null turns auto-nap off. */
   idleWindowMs?: number | null;
+}
+
+/** A folder's archive as the host packs it: the bytes, what went in, and the secret-shaped paths left out. */
+export interface PackedProject {
+  tar: Buffer;
+  files: number;
+  bytes: number;
+  cut: string[];
+}
+
+/** A folder on this computer as the host reads it; the runtime never touches the disk itself. `plan` reads names
+ * and sizes, `pack` reads the bytes once consent is known: a secret-shaped file travels only when `carry` names it. */
+export interface ProjectBundler {
+  plan(): Promise<ProjectPlan>;
+  pack(carry: ReadonlySet<string>): Promise<PackedProject>;
+}
+
+export interface ProjectImportOptions {
+  workspaceId: string;
+  /** The folder on this computer, absolute; named in the events. */
+  source: string;
+  /** Where the folder lands on the machine, absolute; its parents are made. */
+  dest: string;
+  /** Remove what is at dest first; without it an existing dest is refused with kind "exists". */
+  replace?: boolean;
+  /** The secret-shaped paths from the plan that may travel; every other one is cut and named. */
+  carry?: readonly string[];
+  bundler: ProjectBundler;
 }
 
 interface WorkspaceRecord extends WorkspaceView {
@@ -397,6 +431,10 @@ export interface Runtime {
      * all. A 401 is the edge refusing the token, so the port's route is reminted before the reply and the next portReach
      * carries the fresh one. */
     portProbe(id: string, port: number): Promise<PortProbeView>;
+  };
+  readonly projects: {
+    /** Lands the host's bundle of a folder on the workspace's machine; progress rides project.import events. */
+    import(opts: ProjectImportOptions): Promise<ProjectImportResult>;
   };
   readonly sessions: {
     start(
@@ -1131,7 +1169,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   });
   // Every road into a workspace the runtime can see starts its window over;
   // typing over the browser's daemon link arrives as workspaces.touch.
-  for (const type of ["session.start", "session.delta", "session.done", "session.end", "inbox.file", "workspace.woken", "workspace.upgraded"] as const) {
+  for (const type of ["session.start", "session.delta", "session.done", "session.end", "inbox.file", "workspace.woken", "workspace.upgraded", "project.import"] as const) {
     bus.on(type, e => idle.touch((e as { workspaceId: string }).workspaceId));
   }
   bus.on("workspace.created", e => e.type === "workspace.created" && idle.touch(e.workspace.id));
@@ -2278,6 +2316,44 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
   };
 
+  const projects: Runtime["projects"] = {
+    async import(o) {
+      const entry = await entryOf(o.workspaceId);
+      if (entry.record.phase !== "running") throw new Error(`workspace ${o.workspaceId} is ${entry.record.phase}; wake it before importing`);
+      const began = clock.now();
+      const report = (stage: ProjectImportStage, message: string, progress?: { bytes: number; total: number }): void => {
+        bus.emit({ type: "project.import", workspaceId: o.workspaceId, source: o.source, dest: o.dest, stage, message, elapsedMs: clock.now() - began, ...progress });
+      };
+      try {
+        const plan = await o.bundler.plan();
+        report("planned", `${plural(plan.files, "file")}, ${fmtBytes(plan.bytes)}${plan.repo ? " and the repository" : ""}; ${plural(plan.secrets.length, "secret-shaped file")}; ${plural(plan.excluded.length, "cache")} left behind.`);
+        const carry = new Set(o.carry ?? []);
+        const carried = plan.secrets.filter(s => carry.has(s.path)).map(s => s.path);
+        const cut = plan.secrets.filter(s => !carry.has(s.path)).map(s => s.path);
+        report(
+          "consented",
+          plan.secrets.length === 0
+            ? "No secret-shaped files."
+            : `${carried.length === 0 ? "No secret-shaped file travels" : `Carrying ${carried.join(", ")}`}; ${cut.length === 0 ? "nothing cut" : `cut ${cut.join(", ")}`}.`,
+        );
+        report("packing", `Packing ${plural(plan.files - cut.length, "file")}.`);
+        const packed = await o.bundler.pack(carry);
+        report("uploading", `Uploading ${fmtBytes(packed.tar.length)}.`, { bytes: 0, total: packed.tar.length });
+        const { parts } = await landBundle(entry.machine, packed.tar, o.dest, {
+          ...(o.replace !== undefined ? { replace: o.replace } : {}),
+          timeoutMs: 600_000,
+          onPart: p => report("uploading", `Part ${p.part} of ${p.parts}, ${fmtBytes(p.bytes)} of ${fmtBytes(p.total)}.`, { bytes: p.bytes, total: p.total }),
+          onLanding: () => report("landing", `Landing at ${o.dest}.`),
+        });
+        report("done", `${plural(packed.files, "file")}, ${fmtBytes(packed.bytes)}, landed at ${o.dest}${parts > 1 ? ` in ${parts} parts` : ""}.`);
+        return { dest: o.dest, files: packed.files, bytes: packed.bytes, parts, cut: packed.cut };
+      } catch (e) {
+        report("failed", e instanceof Error ? e.message : String(e));
+        throw e;
+      }
+    },
+  };
+
   const status = createStatusTracker({
     rateUsdPerHour: size => backend.pricing.rateUsdPerHour(size),
     records: async () => {
@@ -2301,6 +2377,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     events: bus,
     backend,
     workspaces,
+    projects,
     sessions: sessionsApi,
     harnesses: {
       list: async workspaceId => {
