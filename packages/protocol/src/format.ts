@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Binary units with one decimal for the wizard, the engine's stage lines, the
-// runtime's import events and the app; a turn's duration and cost as the
-// chat's footer and the notify line print them. The files that keep their own
+// runtime's import events and the app; a turn's duration as the chat's footer,
+// the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
 import type { TurnResult } from "./index.js";
 const KIB = 1024;
@@ -21,20 +21,33 @@ export function fmtMemGb(memMb: number): string {
   return `${Number((memMb / 1024).toFixed(1))} GB`;
 }
 
-/** A turn's wall time: ms under a second, tenths under ten, whole seconds under a minute, then minutes and seconds. */
-export function fmtDuration(durationMs: number): string {
-  if (!Number.isFinite(durationMs) || durationMs < 0) return "0ms";
-  if (durationMs < 1_000) return `${Math.max(1, Math.round(durationMs))}ms`;
-  if (durationMs < 10_000) {
-    const tenths = Math.round(durationMs / 100) / 10;
+/** How a duration reads: short is the chat footer's and the notify line's ("1.5s", "8m 12s"), clock is the cut
+ * line's ("15m 00s", "1h 00m 00s"). */
+export type DurationStyle = "short" | "clock";
+
+const pad2 = (n: number): string => String(n).padStart(2, "0");
+
+/** The short style under a minute: ms under a second, tenths under ten, whole seconds after; nothing sensible is "0ms". */
+function shortSeconds(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "0ms";
+  if (ms < 1_000) return `${Math.max(1, Math.round(ms))}ms`;
+  if (ms < 10_000) {
+    const tenths = Math.round(ms / 100) / 10;
     return tenths >= 10 ? "10s" : `${tenths.toFixed(1)}s`;
   }
-  if (durationMs < 60_000) return `${Math.round(durationMs / 1_000)}s`;
-  const minutes = Math.floor(durationMs / 60_000);
-  const seconds = Math.round((durationMs % 60_000) / 1_000);
-  if (seconds === 0) return `${minutes}m`;
-  if (seconds === 60) return `${minutes + 1}m`;
-  return `${minutes}m ${seconds}s`;
+  return `${Math.round(ms / 1_000)}s`;
+}
+
+/** How long a turn ran. Short: ms under a second, tenths under ten, whole seconds under a minute, then minutes and
+ * seconds. Clock: minutes and two-digit seconds, whole hours ahead once there are any. */
+export function fmtDuration(ms: number, style: DurationStyle = "short"): string {
+  if (style === "short" && (ms < 60_000 || !Number.isFinite(ms))) return shortSeconds(ms);
+  const total = Number.isFinite(ms) && ms > 0 ? Math.round(ms / 1_000) : 0;
+  const hours = Math.floor(total / 3_600);
+  const minutes = Math.floor((total % 3_600) / 60);
+  const seconds = total % 60;
+  if (style === "short") return seconds === 0 ? `${hours * 60 + minutes}m` : `${hours * 60 + minutes}m ${seconds}s`;
+  return hours === 0 ? `${minutes}m ${pad2(seconds)}s` : `${hours}h ${pad2(minutes)}m ${pad2(seconds)}s`;
 }
 
 /** A turn's cost in dollars: cents, or four places under a cent so a short turn does not read as free. */
@@ -52,18 +65,21 @@ export function notifyLine(threadId: string, result: TurnResult): string {
   return `thread ${threadId.slice(0, 8)} finished (${facts.join(", ")})${tail !== undefined ? `: ${tail}` : ""}`;
 }
 
+/** A thread count with its noun, as the sidebar's counts and the verbs' lines say it. */
+export function fmtThreads(n: number): string {
+  return `${n} ${n === 1 ? "thread" : "threads"}`;
+}
+
+/** What forgetting a workspace takes off this computer, the one sentence every client's confirmation shows. */
+export function forgetNotice(threads: number): string {
+  return `Its record and ${fmtThreads(threads)} leave this computer; the machine is already gone.`;
+}
+
 /** A thread's title as every list shows it: the prompt's first non-empty line with its whitespace collapsed, so a
  * multi-paragraph brief is one row in the CLI's table and one line in the sidebar. */
 export function titleLine(text: string): string {
   const first = text.split(/\r?\n/).find(l => l.trim().length > 0) ?? "";
   return first.replace(/\s+/g, " ").trim();
-}
-
-/** Minutes and two-digit seconds, with whole hours ahead when there are any: how long a turn ran. */
-export function fmtElapsed(ms: number): string {
-  const s = Math.round(ms / 1000);
-  const sec = `${String(s % 60).padStart(2, "0")}s`;
-  return s < 3600 ? `${Math.floor(s / 60)}m ${sec}` : `${Math.floor(s / 3600)}h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m ${sec}`;
 }
 
 /** A limit as one unit: whole hours when it is hours, else whole minutes. */
@@ -77,6 +93,9 @@ export type TurnCutRule = "idle" | "wall";
 /** The one line every client shows for a turn the runtime cut: which rule, how long the turn ran, the limit. */
 export function turnCutLine(rule: TurnCutRule, elapsedMs: number, limitMs: number): string {
   return rule === "idle"
-    ? `stopped after ${fmtElapsed(elapsedMs)} with no output for ${fmtLimit(limitMs)}`
-    : `stopped after ${fmtElapsed(elapsedMs)} at the ${fmtLimit(limitMs)} cap on one turn`;
+    ? `stopped after ${fmtDuration(elapsedMs, "clock")} with no output for ${fmtLimit(limitMs)}`
+    : `stopped after ${fmtDuration(elapsedMs, "clock")} at the ${fmtLimit(limitMs)} cap on one turn`;
 }
+
+/** The one line every client shows on a start whose thread's previous turn was cut, before the new turn's output. */
+export const AFTER_CUT_LINE = "previous turn was cut; resuming";

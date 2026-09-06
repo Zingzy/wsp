@@ -127,6 +127,17 @@ describe("deriveSession: streaming states", () => {
     expect(m.workEntries[0]).toMatchObject({ command: "ls -la", detail: "total 0", toolLifecycleStatus: "completed" });
   });
 
+  it("keeps the Bash tool's description on the row after its output replaces the detail", () => {
+    const m = deriveSession([start, tool("Bash", { command: "git status", description: "Show working tree status" }), result("On branch main")]);
+    expect(m.workEntries[0]).toMatchObject({ command: "git status", description: "Show working tree status", detail: "On branch main" });
+  });
+
+  it("another tool's description field stays a detail and never becomes the row's label", () => {
+    const m = deriveSession([start, tool("Task", { description: "scan repo", prompt: "find every caller" }), result("Found 12 files")]);
+    expect(m.workEntries[0]).toMatchObject({ detail: "Found 12 files" });
+    expect(m.workEntries[0]).not.toHaveProperty("description");
+  });
+
   it("a tool_result with no visible call still renders as a completed row", () => {
     const m = deriveSession([start, result("orphan output", false, "t9")]);
     expect(m.workEntries[0]).toMatchObject({ toolCallId: "t9", label: "tool", detail: "orphan output", toolLifecycleStatus: "completed" });
@@ -158,6 +169,14 @@ describe("deriveSession: streaming states", () => {
     const errors = m.workEntries.filter(w => w.tone === "error");
     if (errorLabel === null) expect(errors).toEqual([]);
     else expect(errors).toEqual([expect.objectContaining({ label: errorLabel, sourceActivityKind: "runtime.error", turnId: "sess_t#1" })]);
+  });
+
+  it("a start stamped afterCut puts an info row under the prompt, so the person knows why context may be missing", () => {
+    const m = deriveSession([{ ...start, afterCut: true } as SessionEvent, done, end]);
+    const rows = m.workEntries.filter(w => w.sourceActivityKind === "runtime.resume");
+    expect(rows.map(w => [w.label, w.tone, w.turnId])).toEqual([["previous turn was cut; resuming", "info", "sess_t#1"]]);
+    expect(m.timeline.slice(0, 2).map(e => e.kind)).toEqual(["message", "work"]);
+    expect(deriveSession([start, done, end]).workEntries.filter(w => w.sourceActivityKind === "runtime.resume")).toEqual([]);
   });
 
   it("createdAt: the wire's at wins, then the caller's clock, then empty", () => {

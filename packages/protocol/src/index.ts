@@ -80,8 +80,10 @@ export type Capabilities = z.infer<typeof Capabilities>;
 
 // --- views -----------------------------------------------------------------
 
-/** pausing: the runtime is stashing the vault and asking the provider to pause; a send is refused from here on. */
-export const WorkspacePhase = z.enum(["running", "pausing", "napping", "waking"]);
+/** pausing: the runtime is stashing the vault and asking the provider to pause; a send is refused from here on.
+ * gone: the provider no longer knows the machine (deleted behind wsp, or expired); nothing bills and nothing
+ * runs until a rebuild puts a fresh fork under the record or the workspace is deleted. */
+export const WorkspacePhase = z.enum(["running", "pausing", "napping", "waking", "gone"]);
 export type WorkspacePhase = z.infer<typeof WorkspacePhase>;
 
 /** Backend vocabulary: a napping workspace's machine reads "paused" here.
@@ -151,6 +153,8 @@ export const WorkspaceView = z.object({
   claudeSessionId: z.string().optional(),
   /** Present when the machine streams a display (desktop kind); sandbox machines are headless. */
   screen: z.object({ streamUrl: z.string() }).optional(),
+  /** With phase gone: the provider's words when it stopped knowing the machine; every refusal quotes them. */
+  gone: z.string().optional(),
 });
 export type WorkspaceView = z.infer<typeof WorkspaceView>;
 
@@ -187,7 +191,8 @@ export const SessionView = z.object({
   claudeSessionId: z.string().optional(),
   /** The thread this turn belongs to, as the runtime stamps its events; rows sharing one are one sidebar thread. */
   threadId: z.string().optional(),
-  /** The user's turn that started this session. */
+  /** The turn that opened this row's thread; a resumed turn keeps it, and its own prompt rides its session.start
+   * event, so the title every client derives from a row never follows the latest send. */
   prompt: z.string().optional(),
   /** Ms epoch, runtime clock; endedAt is unset while the session runs. */
   startedAt: z.number().optional(),
@@ -207,8 +212,8 @@ export type SessionView = z.infer<typeof SessionView>;
 
 /** One sidebar thread as every client lists it: the turns sharing a threadId (a row stamped none is its own),
  * titled by the opening turn, in the state and times of the latest, with the opening turn's provenance, always
- * filled in. id is the fold key, the runtime's thread id or the lone row's id; claudeSessionId is the latest
- * turn's, what a send resumes. */
+ * filled in. id is the fold key, the runtime's thread id or the lone row's id; sessionId is the latest turn's row
+ * id, what a stop interrupts; claudeSessionId is the latest turn's harness id, what a send resumes. */
 export const ThreadView = z.object({
   id: z.string(),
   threadId: z.string().optional(),
@@ -217,6 +222,7 @@ export const ThreadView = z.object({
   startedBy: SessionOrigin,
   status: SessionStatus,
   title: z.string(),
+  sessionId: z.string(),
   claudeSessionId: z.string().optional(),
   startedAt: z.number().optional(),
   endedAt: z.number().optional(),
@@ -247,6 +253,7 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       startedBy: first.startedBy ?? "person",
       status: latest.status,
       title: first.prompt !== undefined ? titleLine(first.prompt) : first.claudeSessionId ?? first.id,
+      sessionId: latest.id,
       ...(latest.claudeSessionId !== undefined ? { claudeSessionId: latest.claudeSessionId } : {}),
       ...(latest.startedAt !== undefined ? { startedAt: latest.startedAt } : {}),
       ...(latest.endedAt !== undefined ? { endedAt: latest.endedAt } : {}),
@@ -401,6 +408,9 @@ export const SessionStartEvent = z.object({
   /** The id the client minted for the sessions.start that opened this turn, stamped by the runtime; absent when the
    * client sent none. Two clients sending the same text at the same moment are told apart by this, not the prompt. */
   requestId: z.string().optional(),
+  /** Set when the thread's previous turn ended with no exit code and no result (a deadline, a host restart, a nap
+   * that ended it), so clients say the harness resumes a transcript that may be missing context; absent otherwise. */
+  afterCut: z.literal(true).optional(),
   model: z.string().optional(),
   cwd: z.string().optional(),
   tools: z.array(z.string()).optional(),
@@ -512,6 +522,14 @@ export const WorkspaceUpgradedEvent = z.object({
   machineId: z.string(),
 });
 export const WorkspaceDeletedEvent = z.object({ type: z.literal("workspace.deleted"), workspaceId: z.string() });
+/** The provider stopped knowing the machine: the workspace's phase is gone from here until a rebuild or a delete.
+ * Sessions on it ended, the rate is 0, the idle window is dropped; reason carries the provider's words. */
+export const WorkspaceGoneEvent = z.object({
+  type: z.literal("workspace.gone"),
+  workspaceId: z.string(),
+  machineId: z.string(),
+  reason: z.string(),
+});
 
 export const WorkspaceStatusEvent = z.object({ type: z.literal("workspace.status"), status: WorkspaceStatus });
 
@@ -888,6 +906,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   WorkspaceWokenEvent.extend(sequenced),
   WorkspaceUpgradedEvent.extend(sequenced),
   WorkspaceDeletedEvent.extend(sequenced),
+  WorkspaceGoneEvent.extend(sequenced),
   WorkspaceStatusEvent.extend(sequenced),
   WorkspaceCostEvent.extend(sequenced),
   SessionStartEvent.extend(sequenced),
@@ -1263,6 +1282,10 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     memMb: z.number().optional(),
   }),
   z.object({ id: reqId, op: z.literal("workspaces.delete"), workspaceId: z.string() }),
+  /** Drops a workspace whose machine the provider no longer has: the record, its transcripts and its sessions leave the
+   * store, workspace.deleted follows, and nothing is asked of the provider. Refused with the reason (kind "conflict")
+   * while the machine still exists: pause it or delete it at the provider first. */
+  z.object({ id: reqId, op: z.literal("workspaces.forget"), workspaceId: z.string() }),
   /** Snapshots the workspace's disk as a project golden and replies with { projectGolden }. Refused when the workspace
    * is not running, holds no project, or its machine is not first-life (kind "notFirstLife"). The guest freezes for
    * about three seconds and keeps its first life. */
@@ -1517,7 +1540,7 @@ export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;
 export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
-export { sendRefusal, workspaceState, workspaceWord, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
-export { fmtBytes, fmtCost, fmtDuration, fmtElapsed, fmtMemGb, notifyLine, titleLine, turnCutLine, type TurnCutRule } from "./format.js";
+export { goneRefusal, needsRebuild, sendRefusal, workspaceState, workspaceWord, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
+export { AFTER_CUT_LINE, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, notifyLine, titleLine, turnCutLine, type DurationStyle, type TurnCutRule } from "./format.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { shellQuote } from "./shell-quote.js";

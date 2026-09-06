@@ -223,6 +223,12 @@ describe("session wire fields the face reads", () => {
     expect(() => SessionEvent.parse({ ...started, harness: { slashCommands: "compact" } })).toThrow();
   });
 
+  it("session.start may say the thread's previous turn was cut, and only as true: the fact is stated or absent", () => {
+    const started = { type: "session.start", workspaceId: "ws_1", sessionId: "s1", afterCut: true };
+    expect(SessionEvent.parse(started)).toEqual(started);
+    expect(() => SessionEvent.parse({ ...started, afterCut: false })).toThrow();
+  });
+
   it("SessionView carries prompt, startedAt and endedAt so the sidebar can title and sort threads", () => {
     const running = {
       id: "0b6a9c1e-0000-4000-8000-000000000000",
@@ -380,6 +386,7 @@ describe("runtime wire types", () => {
       { id: 19, op: "golden.seal", builderId: "m1" },
       { id: 20, op: "golden.builderReach", builderId: "m1" },
       { id: 21, op: "sessions.interrupt", sessionId: "s1" },
+      { id: 22, op: "workspaces.forget", workspaceId: "ws_1" },
     ];
     for (const r of reqs) expect(RuntimeRequest.parse(r)).toEqual(r);
     expect(() => RuntimeRequest.parse({ id: 21, op: "sessions.interrupt" })).toThrow(); // sessionId required
@@ -688,7 +695,7 @@ describe("thread provenance", () => {
     expect(SessionEvent.parse(none)).toEqual(none);
   });
 
-  it("foldThreads groups turns by threadId, titles by the opening turn, reads state and resume id from the latest, and keeps the opener's provenance", () => {
+  it("foldThreads groups turns by threadId, titles by the opening turn, reads state, row id and resume id from the latest, and keeps the opener's provenance", () => {
     const threads = foldThreads([
       { ...row, id: "s1", threadId: "thr_a", startedBy: "cli", prompt: "make a server", claudeSessionId: "c1", startedAt: 1_000, endedAt: 2_000 },
       { ...row, id: "s2", threadId: "thr_b", prompt: "unrelated", startedAt: 3_000, endedAt: 4_000 },
@@ -696,9 +703,9 @@ describe("thread provenance", () => {
       { ...row, id: "s4", status: "failed", prompt: "before threads", startedAt: 6_000, endedAt: 7_000 },
     ]);
     expect(threads).toEqual([
-      { id: "thr_a", threadId: "thr_a", workspaceId: "ws_1", harness: "claude", startedBy: "cli", status: "running", title: "make a server", claudeSessionId: "c2", startedAt: 5_000, turns: 2 },
-      { id: "thr_b", threadId: "thr_b", workspaceId: "ws_1", harness: "claude", startedBy: "person", status: "completed", title: "unrelated", startedAt: 3_000, endedAt: 4_000, turns: 1 },
-      { id: "s4", workspaceId: "ws_1", harness: "claude", startedBy: "person", status: "failed", title: "before threads", startedAt: 6_000, endedAt: 7_000, turns: 1 },
+      { id: "thr_a", threadId: "thr_a", workspaceId: "ws_1", harness: "claude", startedBy: "cli", status: "running", title: "make a server", sessionId: "s3", claudeSessionId: "c2", startedAt: 5_000, turns: 2 },
+      { id: "thr_b", threadId: "thr_b", workspaceId: "ws_1", harness: "claude", startedBy: "person", status: "completed", title: "unrelated", sessionId: "s2", startedAt: 3_000, endedAt: 4_000, turns: 1 },
+      { id: "s4", workspaceId: "ws_1", harness: "claude", startedBy: "person", status: "failed", title: "before threads", sessionId: "s4", startedAt: 6_000, endedAt: 7_000, turns: 1 },
     ]);
     for (const t of threads) expect(ThreadView.parse(t)).toEqual(t);
   });
@@ -722,7 +729,7 @@ describe("thread provenance", () => {
   it("a thread always says who opened it: the fold reads a row from before provenance as a person's, once, for every client", () => {
     const [t] = foldThreads([{ ...row, prompt: "old" }]);
     expect(t!.startedBy).toBe("person");
-    expect(() => ThreadView.parse({ id: "s1", workspaceId: "ws_1", harness: "claude", status: "completed", title: "old", turns: 1 })).toThrow();
+    expect(() => ThreadView.parse({ id: "s1", workspaceId: "ws_1", harness: "claude", status: "completed", title: "old", sessionId: "s1", turns: 1 })).toThrow();
   });
 });
 

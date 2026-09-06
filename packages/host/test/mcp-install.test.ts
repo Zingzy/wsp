@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HELP, cli, type CliIO } from "../src/cli.js";
 import { installLines, installMcp, mcpServerSpec } from "../src/mcp-install.js";
+import { WSP_SKILL } from "../src/skill.js";
 
 const PROC = { execPath: "/opt/node/bin/node", execArgv: ["--disable-warning=ExperimentalWarning"], argv: ["/opt/node/bin/node", "/opt/wsp/dist/bin.js", "mcp", "install"] };
 
@@ -46,9 +47,9 @@ describe("installing the MCP server for a local agent", () => {
 
   it("places the server in the agent's config file under the home, creating the file and its folder, and says where", () => {
     const spec = mcpServerSpec(statePath, PROC);
-    expect(installMcp("claude", spec, home)).toEqual({ agent: "Claude Code", path: "~/.claude.json", commentsDropped: false });
+    expect(installMcp("claude", spec, home)).toEqual({ agent: "Claude Code", path: "~/.claude.json", commentsDropped: false, skill: "~/.claude/skills/wsp/SKILL.md" });
     expect(JSON.parse(readFileSync(join(home, ".claude.json"), "utf8"))).toEqual({ mcpServers: { wsp: { command: spec.command, args: spec.args } } });
-    expect(installMcp("codex", spec, home)).toEqual({ agent: "Codex", path: "~/.codex/config.toml", commentsDropped: false });
+    expect(installMcp("codex", spec, home)).toEqual({ agent: "Codex", path: "~/.codex/config.toml", commentsDropped: false, skill: "~/.codex/skills/wsp/SKILL.md" });
     expect(readFileSync(join(home, ".codex", "config.toml"), "utf8")).toContain("[mcp_servers.wsp]\n");
     mkdirSync(join(home, ".gemini"), { recursive: true });
     writeFileSync(join(home, ".gemini", "settings.json"), '{ "theme": "dark" }\n');
@@ -60,32 +61,47 @@ describe("installing the MCP server for a local agent", () => {
     const spec = mcpServerSpec(statePath, PROC);
     mkdirSync(join(home, ".config", "opencode"), { recursive: true });
     writeFileSync(join(home, ".config", "opencode", "opencode.jsonc"), '{\n  // mine\n  "mcp": { "other": { "type": "remote", "url": "https://ctx.example/mcp" }, },\n}\n');
-    expect(installMcp("opencode", spec, home)).toEqual({ agent: "OpenCode", path: "~/.config/opencode/opencode.jsonc", commentsDropped: true });
+    expect(installMcp("opencode", spec, home)).toEqual({ agent: "OpenCode", path: "~/.config/opencode/opencode.jsonc", commentsDropped: true, skill: "~/.config/opencode/skills/wsp/SKILL.md" });
     expect(existsSync(join(home, ".config", "opencode", "opencode.json"))).toBe(false);
     expect(JSON.parse(readFileSync(join(home, ".config", "opencode", "opencode.jsonc"), "utf8"))).toEqual({
       mcp: { other: { type: "remote", url: "https://ctx.example/mcp" }, wsp: { type: "local", command: [spec.command, ...spec.args], enabled: true } },
     });
   });
 
-  it("an agent the catalog has no MCP config for gets nothing written and no path; an agent it does not know is refused in one line", () => {
+  it("the skill lands in the agent's skills folder under the home, the repo's file as it is, and a second install replaces an older copy", () => {
     const spec = mcpServerSpec(statePath, PROC);
-    expect(installMcp("pi", spec, home)).toEqual({ agent: "Pi" });
-    expect(installMcp("hermes", spec, home)).toEqual({ agent: "Hermes Agent" });
-    expect(() => installMcp("emacs", spec, home)).toThrow("no agent emacs in the catalog; agents with an MCP config: claude, codex, gemini, opencode");
-    expect(existsSync(join(home, ".pi"))).toBe(false);
-    expect(existsSync(join(home, ".hermes"))).toBe(false);
+    installMcp("claude", spec, home);
+    installMcp("codex", spec, home);
+    expect(readFileSync(join(home, ".claude", "skills", "wsp", "SKILL.md"), "utf8")).toBe(WSP_SKILL);
+    expect(readFileSync(join(home, ".codex", "skills", "wsp", "SKILL.md"), "utf8")).toBe(WSP_SKILL);
+    expect(WSP_SKILL.startsWith("---\nname: wsp\n")).toBe(true);
+    writeFileSync(join(home, ".claude", "skills", "wsp", "SKILL.md"), "old\n");
+    installMcp("claude", spec, home);
+    expect(readFileSync(join(home, ".claude", "skills", "wsp", "SKILL.md"), "utf8")).toBe(WSP_SKILL);
   });
 
-  it("what an install says: the agent and its file, the dropped-comments line when the rewrite lost them, and the by-hand line when nothing was written", () => {
-    expect(installLines({ agent: "Claude Code", path: "~/.claude.json", commentsDropped: false })).toEqual(["Claude Code now has the wsp tools: ~/.claude.json"]);
-    expect(installLines({ agent: "Gemini CLI", path: "~/.gemini/settings.json", commentsDropped: true })).toEqual(["Gemini CLI now has the wsp tools: ~/.gemini/settings.json", "The file held comments; the rewrite is plain JSON, so they are gone."]);
-    expect(installLines({ agent: "Pi" })).toEqual(["Pi: the catalog has no MCP config for it yet, so nothing was written; add the server by hand."]);
+  it("an agent the catalog has no MCP config for gets the skill and no config path; an agent it does not know is refused in one line", () => {
+    const spec = mcpServerSpec(statePath, PROC);
+    expect(installMcp("pi", spec, home)).toEqual({ agent: "Pi", skill: "~/.pi/agent/skills/wsp/SKILL.md" });
+    expect(installMcp("hermes", spec, home)).toEqual({ agent: "Hermes Agent", skill: "~/.hermes/skills/wsp/SKILL.md" });
+    expect(() => installMcp("emacs", spec, home)).toThrow("no agent emacs in the catalog; agents with an MCP config: claude, codex, gemini, opencode");
+    expect(readFileSync(join(home, ".pi", "agent", "skills", "wsp", "SKILL.md"), "utf8")).toBe(WSP_SKILL);
+    expect(readFileSync(join(home, ".hermes", "skills", "wsp", "SKILL.md"), "utf8")).toBe(WSP_SKILL);
+    expect(existsSync(join(home, ".pi", "agent", "settings.json"))).toBe(false);
+    expect(existsSync(join(home, ".hermes", "config.yaml"))).toBe(false);
+  });
+
+  it("what an install says: the agent and its file, the dropped-comments line when the rewrite lost them, the by-hand line when the server was not written, and where the skill went", () => {
+    expect(installLines({ agent: "Claude Code", path: "~/.claude.json", commentsDropped: false, skill: "~/.claude/skills/wsp/SKILL.md" })).toEqual(["Claude Code now has the wsp tools: ~/.claude.json", "The wsp skill went to ~/.claude/skills/wsp/SKILL.md"]);
+    expect(installLines({ agent: "Gemini CLI", path: "~/.gemini/settings.json", commentsDropped: true, skill: "~/.gemini/skills/wsp/SKILL.md" })).toEqual(["Gemini CLI now has the wsp tools: ~/.gemini/settings.json", "The file held comments; the rewrite is plain JSON, so they are gone.", "The wsp skill went to ~/.gemini/skills/wsp/SKILL.md"]);
+    expect(installLines({ agent: "Pi", skill: "~/.pi/agent/skills/wsp/SKILL.md" })).toEqual(["Pi: the catalog has no MCP config for it yet, so the server was not written; add it by hand.", "The wsp skill went to ~/.pi/agent/skills/wsp/SKILL.md"]);
   });
 
   it("wsp mcp install --agent <id> writes the config for this state file and prints one line; without --agent it prints the usage", async () => {
     const out = io();
     expect(await cli(["mcp", "install", "--agent", "claude", "--state", statePath], out)).toBe(0);
-    expect(out.lines).toEqual(["Claude Code now has the wsp tools: ~/.claude.json"]);
+    expect(out.lines).toEqual(["Claude Code now has the wsp tools: ~/.claude.json", "The wsp skill went to ~/.claude/skills/wsp/SKILL.md"]);
+    expect(readFileSync(join(home, ".claude", "skills", "wsp", "SKILL.md"), "utf8")).toBe(WSP_SKILL);
     const written = JSON.parse(readFileSync(join(home, ".claude.json"), "utf8")) as { mcpServers: { wsp: { command: string; args: string[] } } };
     expect(written.mcpServers.wsp.command).toBe(process.execPath);
     expect(written.mcpServers.wsp.args.slice(-3)).toEqual(["mcp", "--state", statePath]);
@@ -96,10 +112,10 @@ describe("installing the MCP server for a local agent", () => {
     writeFileSync(join(home, ".gemini", "settings.json"), '{\n  // the look\n  "theme": "dark"\n}\n');
     const commented = io();
     expect(await cli(["mcp", "install", "--agent", "gemini", "--state", statePath], commented)).toBe(0);
-    expect(commented.lines).toEqual(["Gemini CLI now has the wsp tools: ~/.gemini/settings.json", "The file held comments; the rewrite is plain JSON, so they are gone."]);
+    expect(commented.lines).toEqual(["Gemini CLI now has the wsp tools: ~/.gemini/settings.json", "The file held comments; the rewrite is plain JSON, so they are gone.", "The wsp skill went to ~/.gemini/skills/wsp/SKILL.md"]);
     const none = io();
     expect(await cli(["mcp", "install", "--agent", "pi", "--state", statePath], none)).toBe(0);
-    expect(none.lines).toEqual(["Pi: the catalog has no MCP config for it yet, so nothing was written; add the server by hand."]);
+    expect(none.lines).toEqual(["Pi: the catalog has no MCP config for it yet, so the server was not written; add it by hand.", "The wsp skill went to ~/.pi/agent/skills/wsp/SKILL.md"]);
     expect(none.errors).toEqual([]);
     const unknown = io();
     expect(await cli(["mcp", "install", "--agent", "emacs", "--state", statePath], unknown)).toBe(1);

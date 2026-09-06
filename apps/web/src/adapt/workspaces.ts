@@ -21,7 +21,7 @@ export function deriveSidebarProjects(input: SidebarInput): SidebarProjectSnapsh
     .map(workspace => {
       const status = input.statuses?.[workspace.id] ?? null;
       const phase = status?.phase ?? workspace.phase;
-      const state = workspaceState({ phase, machineState: status?.machineState, reach: status?.reach.state });
+      const state = workspaceStateOf({ phase }, status);
       const threads = foldThreads(input.sessions?.[workspace.id] ?? []);
       const project: SidebarProjectSnapshot = {
         id: workspace.id,
@@ -36,6 +36,7 @@ export function deriveSidebarProjects(input: SidebarInput): SidebarProjectSnapsh
         phase,
         machineState: status?.machineState ?? null,
         reach: status?.reach.state ?? null,
+        state,
         indicator: indicatorFor(state),
         threads: threads.map(deriveThread),
       };
@@ -50,8 +51,13 @@ function lastActivityMs(workspace: Pick<WorkspaceView, "createdAt">, threads: Re
   return Math.max(Date.parse(workspace.createdAt), ...threads.flatMap(t => [t.startedAt ?? 0, t.endedAt ?? 0]));
 }
 
+/** The one state word's key for a workspace as the app knows it: its phase, and the machine state and reach of its status when one has arrived. */
+export function workspaceStateOf(workspace: Pick<WorkspaceView, "phase">, status: WorkspaceStatus | null): WorkspaceState {
+  return workspaceState({ phase: workspace.phase, machineState: status?.machineState, reach: status?.reach.state });
+}
+
 export function workspaceIndicator(workspace: Pick<WorkspaceView, "phase">, status: WorkspaceStatus | null): StatusIndicator {
-  return indicatorFor(workspaceState({ phase: workspace.phase, machineState: status?.machineState, reach: status?.reach.state }));
+  return indicatorFor(workspaceStateOf(workspace, status));
 }
 
 function indicatorFor(state: WorkspaceState): StatusIndicator {

@@ -13,6 +13,8 @@ export default defineConfig([
     platform: "node",
     target: "node22",
     external: ["electron", "bufferutil", "utf-8-validate"],
+    // The host's wsp skill rides in as text, the way its own build inlines it.
+    loader: { ".md": "text" },
     outExtension: () => ({ js: ".mjs" }),
     // ws is CommonJS and requires node builtins at load; ESM output has no require of its own.
     banner: { js: 'import { createRequire as __createRequire } from "node:module"; const require = __createRequire(import.meta.url);' },

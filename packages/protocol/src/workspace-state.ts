@@ -24,6 +24,8 @@ export function workspaceState(input: WorkspaceStateInput): WorkspaceState {
       return "paused";
     case "waking":
       return "waking";
+    case "gone":
+      return "gone";
     case "running":
       if (machine === "paused") return "paused";
       if (machine === "starting") return "waking";
@@ -49,8 +51,9 @@ export function workspaceWord(state: WorkspaceState): string {
   return WORDS[state];
 }
 
-/** Why a turn cannot be sent in this state; null while running. */
-export function sendRefusal(state: WorkspaceState): string | null {
+/** Why a turn cannot be sent in this state; null while running. goneWords are the provider's, quoted when the
+ * caller holds them (the runtime does, the composer does not). */
+export function sendRefusal(state: WorkspaceState, goneWords?: string): string | null {
   switch (state) {
     case "running":
       return null;
@@ -62,10 +65,23 @@ export function sendRefusal(state: WorkspaceState): string | null {
     case "unreachable":
       return "Workspace is unreachable; sends open when the machine answers";
     case "gone":
-      return "Workspace machine is gone; rebuild it to send";
+      return goneRefusal("send", goneWords);
     default: {
       const _exhaustive: never = state;
       return null;
     }
   }
+}
+
+/** Rebuild is the one action left: the machine is gone, or a zombie the provider still calls running. Every
+ * surface that offers the rebuild (sidebar row, palette, Machine tab) asks this and nothing else. */
+export function needsRebuild(input: WorkspaceStateInput): boolean {
+  return workspaceState(input) === "gone" || input.reach === "zombie";
+}
+
+/** The one sentence for a verb a gone machine cannot take (send, wake, fork), with the provider's words when the
+ * caller holds them; rebuild and delete are the roads out. */
+export function goneRefusal(action: string, words?: string): string {
+  const sentence = `Workspace machine is gone; rebuild it to ${action}`;
+  return words === undefined || words === "" ? sentence : `${sentence} (${words})`;
 }

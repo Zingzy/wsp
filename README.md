@@ -1,15 +1,17 @@
 # wsp
 
-Cloud workspaces for coding agents, run from your own machine. `npx wsp`
-starts an embedded runtime, a status page on localhost, and a WebSocket API
-for clients. There is no hosted control plane: you bring your own provider
-keys, and every call goes straight from the wsp process to the provider.
+Your setup, on cloud machines, for coding agents.
 
-Workspaces fork from a golden snapshot in seconds, nap when idle, and wake
-with RAM intact. If a paused machine vanishes, wsp rebuilds it from the
-snapshot and restores your files. Claude runs inside them over the
-provider's exec channel, and your browser reaches each workspace's daemon
-directly.
+wsp builds a cloud machine that has what your computer has: the coding
+agents you use, the tools they need, your sign-ins. It seals that machine
+as a golden image and forks workspaces from it in seconds. Agents work
+inside the workspaces. You read and answer them from an app on your own
+computer, from the command line, or from another agent over MCP. There is
+no hosted service in between: wsp runs on your computer and talks straight
+to the machine provider with your key.
+
+Workspaces nap when idle and wake with RAM intact. If a paused machine
+disappears, wsp rebuilds it from the golden image and puts your files back.
 
 ![The shell: workspaces and their threads in the sidebar, the selected workspace's thread and composer in the center, the surface picker in the right panel](docs/screenshots/shell.png)
 
@@ -27,164 +29,164 @@ directly.
 
 *The machine panel: state, reach, size and auto-nap, spend so far, the golden lineage, pause and upgrade.*
 
-## Quickstart
+## Before you start
 
-Node 22+, pnpm, and a Solari API key. Add an Anthropic key if you want
-claude sessions.
+- **Node 22 or newer** on your computer.
+- **A Solari account and API key.** Solari provides the machines. Make a
+  key at [console.getsolari.com](https://console.getsolari.com). wsp asks
+  for it once on the first run and offers to save it in `~/.wsp/.env`. Machines cost
+  money while they run; a workspace that sits idle naps on its own.
+- **A way for Claude to sign in.** Either an Anthropic API key, which wsp
+  asks for next to the Solari key and copies into every workspace, or a
+  Claude subscription, in which case skip the key and sign in on the machine
+  when the first run asks. The login is sealed into the golden image, so it
+  happens once.
+- Other agents (Codex, Gemini, OpenCode, pi, Hermes) sign in the same way,
+  in your terminal, during the first run.
+
+## Install and first run
 
 ```sh
+npm i -g wspcloud
+wsp init
+```
+
+`wsp init` reads your computer: which agents are installed, what they used
+(names and counts from their session histories, nothing else), and which
+tools and sign-ins go with them. It then walks three screens:
+
+1. **Agents.** The six the catalog knows, with the ones on your computer
+   ticked.
+2. **What they need.** One line of counts and one line of disk; the left
+   and right arrow keys unfold the tool rows under them.
+3. **Sign-ins and keys.** Logins sign in on the machine after the build;
+   keys are ticked to copy.
+
+One summary, one confirm. Then it boots the first machine, installs what
+you ticked, runs each sign-in in your terminal, asks for each secret it cut
+from your shell files, and seals the golden image when you press Enter.
+It forks your first workspace from that image and opens the app on it at
+`http://127.0.0.1:4400`. Nothing leaves your disk before the confirm, and
+no question is ever asked on the remote machine.
+
+Every prompt has a flag. `--yes` takes every default and asks nothing.
+`--recipe <path>` ticks the agents and tools from a recipe that
+`wsp recipe` wrote and goes straight to the sign-ins. The recipe is saved
+next to the state, so a second golden image is a re-run.
+
+## Every day after
+
+```sh
+wsp up
+```
+
+starts the app and the runtime over the golden you sealed. Everything else
+runs from another terminal while the host is up, and every verb takes
+`--json` for the raw protocol values:
+
+| command | what it does |
+|---|---|
+| `wsp new <name>` | a workspace forked from the golden's head, or with `--from`, from a project golden |
+| `wsp snapshot <workspace>` | a project golden: the golden plus the project as it is now, ready to fork |
+| `wsp fork <workspace>` | a sibling machine from the source's golden version; `--send "<task>"` opens a thread in it |
+| `wsp pause <workspace>` | naps the machine |
+| `wsp threads` | every thread: agent, state, who opened it, the folder it works in |
+| `wsp thread new --in <workspace> "<task>"` | opens a thread and follows its first turn; `--agent`, `--cwd`, `--notify <thread\|me>` |
+| `wsp send <thread> "<message>"` | a message to a thread; steers a running turn or queues behind it, then prints the reply |
+| `wsp exec <workspace> -- <command...>` | runs a command on the machine and exits with its code |
+| `wsp export <workspace> <folder>` | brings a project folder and the agent sessions keyed to it home |
+| `wsp doctor` | runs the reach loop end to end against one live machine and prints what it measured |
+
+`wsp --help` prints the same list with the flags.
+
+## For agents
+
+An agent on your computer can drive wsp the way you do. One command puts the
+wsp MCP server into that agent's own config and the wsp skill into its
+skills folder:
+
+```sh
+wsp mcp install --agent claude     # or codex, gemini, opencode
+```
+
+The MCP tools are the verbs above: `workspaces`, `threads`, `new`,
+`snapshot`, `fork`, `pause`, `thread_new`, `send`, `exec`, `export`. A
+thread an agent opens shows in your sidebar like any other, and you can read
+and answer it there. The skill, `skills/wsp/SKILL.md`, tells the agent what
+each verb does, how to build with wsp (a workspace with the repo in it, one
+thread per task, review threads, `--notify me` when a turn ends), where a
+person has to step in (sign-ins, keys, the machine cap, picking a size), and
+what costs what. The server's own instructions are derived from the same
+file, so the two cannot drift.
+
+An agent can also prepare the first run. `wsp recipe --out recipe.json`
+writes every catalog agent and tool with a tick from what is installed here
+and what your agents used. Review it, then run `wsp init --recipe
+recipe.json` yourself, because the sign-ins need your terminal.
+
+## Desktop app
+
+The same host and app in one Electron window, the host started for you. It
+reads the same `~/.wsp` state as the command line, so run `wsp init` once
+first; opened before that, it shows a page saying what is missing. Bundles
+are on the [GitHub Releases](https://github.com/Zingzy/wsp/releases) page
+for macOS (Apple silicon and Intel) and Linux (AppImage). They are not
+signed:
+
+- **macOS** refuses to open an unsigned app on the first try. Right-click
+  the app and choose Open, or clear the quarantine flag once:
+  `xattr -dr com.apple.quarantine /Applications/wsp.app`.
+- **Linux** needs the AppImage marked executable: `chmod +x wsp-*.AppImage`.
+
+## Your keys stay on your computer
+
+The runtime runs inside the `wsp` process on your computer. Your provider
+key travels only in direct requests from that process to the provider's API,
+and your Anthropic key or Claude login only to the machines you build. The
+app and the WebSocket API bind `127.0.0.1` only. Keys are read from the
+environment, then `./.env`, then `~/.wsp/.env`; state is one JSON file,
+`~/.wsp/state.json`, or `./.wsp/state.json` in a checkout with a `.env`.
+One state file belongs to one computer.
+
+## Building from source
+
+```sh
+git clone https://github.com/Zingzy/wsp.git && cd wsp
 pnpm install && pnpm build
-printf 'SOLARI_API_KEY=%s\n' "$YOUR_KEY" > .env
-pnpm wsp init       # first run: tick what comes along, build and seal your golden, land in the app
-pnpm wsp up         # every start after that: the app on http://127.0.0.1:4400 over the golden you sealed
-pnpm wsp doctor     # prove the reach path against one live machine
+pnpm wsp init
 ```
 
-`wsp init` reads what this machine has and what your agents used, then walks
-three screens: the agents (the catalog's six, the ones on this Mac ticked),
-what they need (one line of counts and the disk line, the tool rows behind
-one key), and the sign-ins and keys (logins sign in on the machine after the
-build; keys are ticked to copy). One summary, one confirm, then it boots the
-machine, runs the sign-ins in your terminal, asks for each secret it cut from
-your rc files, seals the golden on Enter, forks your first workspace and opens
-the app on it. Every prompt has a flag: `--yes` takes the defaults,
-`--recipe <path>` ticks from a recipe `wsp recipe` wrote and goes straight to
-the sign-ins. The recipe and the rows it ticked are saved next to the state so
-a second golden is a re-run.
-
-`wsp` reads keys from `.env` in the working directory or from the
-environment, and asks once if neither is set. State is a JSON file:
-`./.wsp/state.json` in a checkout with a `.env`, `~/.wsp/state.json`
-otherwise. One state file belongs to one machine: a WSP_HOME on a shared
-or synced drive is not supported.
-
-## The reach path, measured
-
-A browser talks to a workspace's in-guest daemon through a per-workspace
-preview URL minted from the provider. TLS ends at the provider's edge. The
-edge checks its signed token, and the daemon checks its own token on top,
-because the daemon binds 0.0.0.0 and that token is what guards the port.
-Preview tokens expire after 60 minutes; wsp reuses a minted URL while it is
-under about 50 minutes old, then swaps tokens (the hostname never changes).
-The edge drops sockets that stay quiet for about 30 seconds, so clients send
-an app-level heartbeat every 10. A paused workspace's URL goes dark and the
-same URL routes again about a second after wake.
-
-Running `wsp-daemon` on your own machine (tests, local hacking) will make
-macOS and Windows ask about incoming connections, because 0.0.0.0 accepts
-from the network. For local runs bind loopback and point it at a token file
-of your own, since the in-guest one lives under /root:
-
-```
-printf '%s' dev > /tmp/wsp-daemon-token
-wsp-daemon --host 127.0.0.1 --token-path /tmp/wsp-daemon-token
-```
-
-The file is read at every connection's auth frame, so the host can rotate it
-while the daemon runs. Only in-guest deployments need the 0.0.0.0 default,
-since the preview edge dials eth0.
-
-`wsp doctor` walks the whole loop against one live machine and prints what
-it measured. One run, client in India, machine in us-west:
-
-```
-step                   time      note
------------------------------------------------------------------------------
-golden image           0ms       reused v1 (snap_dl414bbklze6)
-fork workspace         15.4s     machine ZGVza3RvcC1wb29sLWktMGZk…
-deploy daemon          5889ms    tar upload + in-guest npm install (node-pty compile) + start on 0.0.0.0:7070
-mint previewUrl        1125ms    expires in 60min, host c66506663eaa315a9131-7070.preview.getsolari.com
-ws connect + first op  1354ms    TLS + upgrade + authed manifest.get through the preview edge
-heartbeats (3 x 10s)   30.4s     socket alive past the ~30s idle sweep
-inbox round trip       3277ms    REST touch -> inbox.file over the preview socket (~2s watcher quiet window)
-kill + verify zero     947ms     workspace deleted, no machines left on the account
------------------------------------------------------------------------------
-TOTAL                  58.4s
-```
-
-The golden image builds once (28s in the same session) and every later fork
-reuses it.
-
-## Live canary
-
-The provider changes under us. On 2026-09-04 its host pool started refusing
-a create field it had accepted and ignored two days earlier, and every
-`wsp init` booted nothing until someone read the error off a live run. The
-canary posts every create body wsp sends to the real API and fails naming
-the provider's answer word for word, next to the body it sent.
-
-```sh
-pnpm canary                    # about three minutes, a few cents
-WSP_LIVE_LONG=1 pnpm canary    # adds the 65 minute createdAt reading, about $0.11
-```
-
-It needs `SOLARI_API_KEY` in `.env` at the repo root and a free slot under
-the account's machine cap: it holds one machine at a time, kills everything
-it makes by id, deletes the snapshot it sealed, and never touches a machine
-it did not create. Run it once a day and before every release; a red case is
-the signal to change a create body on purpose, not a flake to rerun. Under
-`WSP_LIVE=1` the root vitest config runs test files one at a time, so
-nothing else live should run beside it.
-
-One more test stays out of the default run for a different reason: the
-terminal pane's glyph test (`apps/web/src/terminal/ghostty/glyphs.browser.test.ts`)
-starts a Vite dev server and Playwright's Chromium to draw Nerd Font
-codepoints through the real pane and read the pixels back. It runs only under
-`WSP_RENDER=1 pnpm test`, needs `pnpm exec playwright install chromium` once,
-and skips, saying so, when that browser is missing.
-
-What it covers:
-
-- `packages/engine/test/create-canary.live.test.ts`: the builder body from
-  `prepareBuilder`, the smoke fork body from `sealGolden` and the fork body
-  from `forkGolden`, each asserted 201 and killed until gone; and the listing
-  row of a machine it just created carrying `metadata`, `cpu` and `memMb`,
-  which the sweep's owner and cost lines read.
-- `packages/runtime/test/create-canary.live.test.ts`: the workspace body the
-  runtime itself posts (owner label, lifecycle pause, idle backstop), created
-  through `workspaces.create` on a snapshot the case takes and deletes, and
-  removed through `workspaces.delete` with the machine read gone.
-- `packages/engine/test/solari-quirks.live.test.ts`: the platform bugs we
-  coded around, one case each, shouting when the platform changes so a guard
-  is relaxed on purpose.
-- `packages/engine/test/createdat-drift.live.test.ts` (only with
-  `WSP_LIVE_LONG=1`): one base
-  sandbox with the builder's lifecycle, never exec'd or paused, read right
-  after create and at 2, 10 and 65 minutes. A measurement, not a guard: it
-  prints every `createdAt` and `expiresAt`, asserts only that the machine
-  stayed running and is gone after the kill. Measured 2026-09-04, the
-  provider's `createdAt` tracks the wall clock about five minutes behind, so
-  nothing in wsp reads it for a decision.
-
-## Capability flags
-
-Backends implement `MachineBackend` plus a `capabilities` descriptor:
-`{ liveCloneForks, ramPreservingPause, resize, previewUrls, signedUrls, containers }`.
-Clients read the flags instead of assuming. A backend without preview URLs
-loses browser reach and the UI says so instead of pretending. Solari is the
-first backend, and it reports `containers: false`: its guest kernel (6.6.30)
-has no overlayfs or netfilter, so Docker does not run there and services get
-installed natively.
-
-## Keys never leave your machine
-
-The runtime runs inside the `wsp` process on your machine, so your provider
-key travels only in direct requests from that process to the provider's API.
-The app and the WebSocket API bind 127.0.0.1 only.
-
-## Packages
+`pnpm wsp <anything>` runs the checkout's own `wsp`. The tests run without
+any key (`pnpm test`); the live tests, which create real machines, run only
+under `WSP_LIVE=1` and are described in [docs/canary.md](docs/canary.md).
+How a browser reaches a workspace, and what one measured run of `wsp doctor`
+looks like, is in [docs/reach.md](docs/reach.md). Cutting a release is
+[docs/release.md](docs/release.md). The laws the code follows are in
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 | package | what it is |
 |---|---|
-| `@wsp/catalog` | the agents and tools wsp can put on a machine: roads, sign-ins, config paths, defaults |
+| `@wsp/protocol` | zod schemas for every wire message, and the one place text is formatted |
+| `@wsp/catalog` | the agents and tools wsp can put on a machine: install roads, sign-ins, config paths |
+| `@wsp/collect` | reads your computer: installed tools, session histories, shell files, logins |
 | `@wsp/engine` | machine backends, workspace lifecycle, golden images, vault |
 | `@wsp/daemon` | in-guest daemon: ptys, port watch, inbox, process manifest |
 | `@wsp/adapter-claude` | drives claude headless inside a workspace |
-| `@wsp/protocol` | zod schemas for every wire message |
-| `@wsp/runtime` | embeddable runtime: workspaces, sessions, events over WS |
-| `@wsp/host` | the `wsp` bin: embedded runtime, serves the app, doctor |
-| `wspx` | dev CLI over the same runtime |
+| `@wsp/runtime` | embeddable runtime: workspaces, sessions, events over WebSocket |
+| `@wsp/host` | the `wsp` command: embedded runtime, the app, the verbs, the MCP server |
+| `@wsp/web` | the app |
+| `@wsp/desktop` | the Electron shell around the host and the app |
+| `@wsp/wspx` | a development-only command line over the same runtime and state file |
+
+## Issues
+
+File bugs and requests at
+[github.com/Zingzy/wsp/issues](https://github.com/Zingzy/wsp/issues). Say
+what you ran, what you saw, and the output of `wsp --version`. Never paste
+a key.
 
 ## License
 
-AGPL-3.0-only.
+AGPL-3.0-only. See [LICENSE](LICENSE). Code adapted from other projects is
+listed with its own license in
+[THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).

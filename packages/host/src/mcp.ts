@@ -7,21 +7,10 @@ import type { Readable, Writable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { ProjectExportResult, ProjectGolden, SessionStartOutcome, ThreadView, WorkspaceView } from "@wsp/protocol";
+import { AFTER_CUT_LINE, ProjectExportResult, ProjectGolden, SessionInterruptOutcome, SessionStartOutcome, ThreadView, WorkspaceView } from "@wsp/protocol";
+import { INSTRUCTIONS } from "./skill.js";
 import { VERSION } from "./version.js";
-import { absoluteFolder, awake, checkedPicks, create, createFromHead, dialHost, execOn, exportProject, follow, nap, notifyOf, openingOf, projectGoldenOf, resumeOf, snapshot, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
-
-const INSTRUCTIONS = [
-  "wsp runs cloud machines called workspaces, each with agents working inside it, and this server is the same host the",
-  "person's app is open on: whatever you do here shows in their sidebar, and they can read and answer any thread.",
-  "Start with workspaces. Open a thread with thread_new (a workspace, a task, and the agent to run, such as codex);",
-  "it returns the reply when the turn ends. Continue a thread with send. Run a command on a machine with exec.",
-  "new forks the golden image into a fresh machine, or with from, a project golden; fork makes a sibling of a workspace, pause naps one, wake wakes it.",
-  "thread_new, send and exec wake a paused workspace themselves before running, so a paused one needs no wake first.",
-  "snapshot takes a project golden of a workspace with a project loaded: the golden plus that project as it stands, so every",
-  "new machine forked from it starts a task with the project in place and no upload.",
-  "export brings a project folder and the agent sessions keyed to it home from a workspace's machine to this computer.",
-].join(" ");
+import { absoluteFolder, awake, checkedPicks, create, createFromHead, dialHost, execOn, exportProject, follow, forget, forgetting, forgotLine, nap, notifyOf, openingOf, projectGoldenOf, resumeOf, snapshot, stop, stopLine, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
 
 /** Nothing printed: the tools answer with values, and the stages a create streams have no reader here. */
 const QUIET: Out = { emit: () => {}, stream: () => {} };
@@ -59,8 +48,9 @@ export function dialer(statePath: string): Dialer {
 }
 
 const Created = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
-/** outcome says how the message landed: its own turn, steered into the thread's running one, or queued behind it. */
-const TurnOut = z.object({ threadId: z.string(), workspaceId: z.string(), harness: z.string(), text: z.string(), outcome: SessionStartOutcome });
+/** outcome says how the message landed: its own turn, steered into the thread's running one, or queued behind it;
+ * afterCut is set when the thread's previous turn ended without a result, so the reply may be missing context. */
+const TurnOut = z.object({ threadId: z.string(), workspaceId: z.string(), harness: z.string(), text: z.string(), outcome: SessionStartOutcome, afterCut: z.literal(true).optional() });
 const ThreadRowOut = ThreadView.extend({ workspaceName: z.string() });
 const Argv = z.array(z.string()).min(1);
 
@@ -70,7 +60,17 @@ type Structured = Record<string, unknown>;
 const asJson = (structured: Structured) => ({ content: [{ type: "text" as const, text: JSON.stringify(structured, null, 2) }], structuredContent: structured });
 const asText = (text: string, structured: Structured) => ({ content: [{ type: "text" as const, text }], structuredContent: structured });
 
-const turnView = (turn: Turn): z.infer<typeof TurnOut> => ({ threadId: turn.threadId, workspaceId: turn.session.workspaceId, harness: turn.session.harness, text: turn.result?.text ?? "", outcome: turn.outcome });
+const turnView = (turn: Turn): z.infer<typeof TurnOut> => ({
+  threadId: turn.threadId,
+  workspaceId: turn.session.workspaceId,
+  harness: turn.session.harness,
+  text: turn.result?.text ?? "",
+  outcome: turn.outcome,
+  ...(turn.afterCut === true ? { afterCut: true as const } : {}),
+});
+
+/** The reply as the tool's text, with the cut line first when the thread's previous turn did not finish. */
+const turnText = (out: z.infer<typeof TurnOut>): string => (out.afterCut === true ? `${AFTER_CUT_LINE}\n${out.text}` : out.text);
 
 /** The turn's reply as the tool result; a turn that did not complete is a tool error with the harness's reason. */
 function turnOut(turn: Turn): z.infer<typeof TurnOut> {
@@ -168,7 +168,22 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
     { description: "Wakes the workspace's machine and returns its view once the runtime has answered; one already running comes back unchanged. thread_new, send and exec do this themselves, so it is only needed to wake a machine ahead of them.", inputSchema: { workspace }, outputSchema: { workspace: WorkspaceView } },
     async ({ workspace: ref }) => {
       const client = await dial();
-      return asJson({ workspace: await awake(client, await workspaceOf(client, ref), QUIET_LINE) });
+      return asJson({ workspace: await awake(client, await workspaceOf(client, ref), "wake", QUIET_LINE) });
+    },
+  );
+  server.registerTool(
+    "forget",
+    {
+      description:
+        "Drops a workspace whose machine the provider no longer has: its record and its threads leave this computer and the person's sidebar, and nothing is asked of the provider. Refused in one line while the machine still exists (pause it, or delete it at the provider, first).",
+      inputSchema: { workspace },
+      outputSchema: { workspaceId: z.string(), name: z.string(), threads: z.number().int() },
+    },
+    async ({ workspace: ref }) => {
+      const client = await dial();
+      const f = await forgetting(client, ref);
+      await forget(client, f);
+      return asText(forgotLine(f), { workspaceId: f.workspace.id, name: f.workspace.name, threads: f.threads });
     },
   );
   server.registerTool(
@@ -180,9 +195,9 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
     },
     async ({ workspace: ref, task, agent: harness, cwd: folder, notify: tell, ...input }) => {
       const client = await dial();
-      const target = await awake(client, await workspaceOf(client, ref), QUIET_LINE);
+      const target = await awake(client, await workspaceOf(client, ref), "send", QUIET_LINE);
       const out = turnOut(await follow(client, openingOf(target, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell) }), "agent", QUIET_TURN));
-      return asText(out.text, out);
+      return asText(turnText(out), out);
     },
   );
   server.registerTool(
@@ -195,9 +210,21 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
     async ({ thread: ref, message, ...input }) => {
       const client = await dial();
       const thread = await threadOf(client, ref);
-      await awake(client, await workspaceOf(client, thread.workspaceId), QUIET_LINE);
+      await awake(client, await workspaceOf(client, thread.workspaceId), "send", QUIET_LINE);
       const out = turnOut(await follow(client, resumeOf(thread, message, input), "agent", QUIET_TURN));
-      return asText(out.text, out);
+      return asText(turnText(out), out);
+    },
+  );
+  server.registerTool(
+    "stop",
+    {
+      description: "Stops the thread's running turn (by id, or a prefix of it), as the app's stop button does; the machine stays up and the thread takes the next send. outcome accepted means the turn ended interrupted; not-running means it had already ended, which is an answer, not an error.",
+      inputSchema: { thread: z.string() },
+      outputSchema: { threadId: z.string(), outcome: SessionInterruptOutcome },
+    },
+    async ({ thread: ref }) => {
+      const stopped = await stop(await dial(), ref);
+      return asText(stopLine(stopped), { ...stopped });
     },
   );
   server.registerTool(
@@ -209,7 +236,7 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
     },
     async ({ workspace: ref, argv }) => {
       const client = await dial();
-      const target = await awake(client, await workspaceOf(client, ref), QUIET_LINE);
+      const target = await awake(client, await workspaceOf(client, ref), "exec", QUIET_LINE);
       const output: string[] = [];
       const exit = await execOn(client, target.id, argv, e => {
         if (e.type === "exec.output") output.push(e.text);

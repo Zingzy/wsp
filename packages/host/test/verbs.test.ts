@@ -17,7 +17,7 @@ import type { HostHandle } from "../src/server.js";
 import { dialHost } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
-import { EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, launchedScript, projectBundler, doneOnlyAgent, heldAgent, scriptedAgent, stuckAgent, type Captured } from "./verbs-fixture.js";
+import { CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, launchedScript, projectBundler, doneOnlyAgent, heldAgent, scriptedAgent, stuckAgent, type Captured } from "./verbs-fixture.js";
 
 describe("wsp verbs over the host", () => {
   let dir: string;
@@ -68,6 +68,16 @@ describe("wsp verbs over the host", () => {
   const json = (io: Captured): unknown[] => io.lines.map(l => JSON.parse(l) as unknown);
   const head = (m: typeof SEALED_GOLDEN) => m.versions.find(v => v.version === m.head)!;
 
+  /** The host again on the same state file, over a runtime with these adapters; the verbs still see no key. */
+  async function restartHost(adapters: Parameters<typeof createRuntime>[0]["adapters"], over: Store = store): Promise<void> {
+    await handle?.close();
+    handle = undefined;
+    rt = createRuntime({ backend, store: over, adapters });
+    vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_verbs_key");
+    handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir: join(dir, "web"), runtime: rt });
+    vi.stubEnv("SOLARI_API_KEY", "");
+  }
+
   it("new forks the golden's head into a workspace of that name, streams the create's stages and prints the id", async () => {
     const { code, io } = await run("new", "alpha");
     expect(code).toBe(0);
@@ -87,11 +97,7 @@ describe("wsp verbs over the host", () => {
   });
 
   it("new refuses in one line when there is no golden", async () => {
-    await handle!.close();
-    handle = undefined;
-    rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
-    vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_verbs_key");
-    handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir: join(dir, "web"), runtime: rt });
+    await restartHost({}, memoryStore());
     const { code, io } = await run("new", "alpha");
     expect(code).toBe(1);
     expect(io.errors).toEqual(["wsp new: no golden yet; run wsp init"]);
@@ -114,6 +120,29 @@ describe("wsp verbs over the host", () => {
     expect(thread).toMatchObject({ harness: "claude", startedBy: "cli", prompt: "build it", status: "completed" });
     expect(sent.io.lines).toEqual([`created worker ${worker.id}`, `thread ${thread!.threadId}`, "re: build it"]);
     expect(sent.io.streamed.endsWith("re: build it")).toBe(true);
+  });
+
+  it("fork, thread new, exec and wake refuse a workspace whose machine is gone, quoting the provider, with no waking line", async () => {
+    await run("new", "alpha");
+    const [alpha] = await rt.workspaces.list();
+    await handle!.close();
+    handle = undefined;
+    backend.machines[0]!.killed = true; // deleted at the provider while no host ran
+    await restartHost({ claude: claude.adapter });
+    const words = `machine ${alpha!.machineId} is gone at the provider: gone`;
+    const forked = await run("fork", "alpha");
+    expect(forked.code).toBe(1);
+    expect(forked.io.errors).toEqual([`wsp fork: Workspace machine is gone; rebuild it to fork (${words})`]);
+    const opened = await run("thread", "new", "--in", "alpha", "do it");
+    expect(opened.code).toBe(1);
+    expect(opened.io.errors).toEqual([`wsp thread new: Workspace machine is gone; rebuild it to send (${words})`]);
+    const ran = await run("exec", "alpha", "--", "echo", "hi");
+    expect(ran.code).toBe(1);
+    expect(ran.io.errors).toEqual([`wsp exec: Workspace machine is gone; rebuild it to exec (${words})`]);
+    const woken = await run("wake", "alpha");
+    expect(woken.code).toBe(1);
+    expect(woken.io.errors).toEqual([`wsp wake: Workspace machine is gone; rebuild it to wake (${words})`]);
+    expect((await rt.workspaces.list()).map(w => [w.name, w.phase])).toEqual([["alpha", "gone"]]);
   });
 
   it("fork's help says it makes a new machine from the source's golden version, in wsp --help and wsp fork --help", async () => {
@@ -207,6 +236,53 @@ describe("wsp verbs over the host", () => {
     expect((await rt.workspaces.list())[0]!.phase).toBe("running");
   });
 
+  it("forget asks once, naming what goes, drops a workspace whose machine is gone, and is refused with the reason while the machine exists", async () => {
+    await run("new", "alpha");
+    await run("new", "beta");
+    await run("thread", "new", "--in", "alpha", "build it");
+    const alpha = (await rt.workspaces.list()).find(w => w.name === "alpha")!;
+    const live = await run("forget", "alpha", "--yes");
+    expect(live.code).toBe(1);
+    expect(live.io.errors).toEqual(["wsp forget: alpha's machine m1 is still running; pause it or delete it at the provider first"]);
+    expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["alpha", "beta"]);
+
+    backend.machines[0]!.killed = true;
+    const asked: string[] = [];
+    const answer = async (reply: string, ...argv: string[]): Promise<{ code: number; io: Captured }> => {
+      const io = captured();
+      io.ask = async q => {
+        asked.push(q);
+        return reply;
+      };
+      return { code: await cli([...argv, "--state", statePath], io), io };
+    };
+    const kept = await answer("no", "forget", "alpha");
+    expect(kept.code).toBe(1);
+    expect(kept.io.errors).toEqual(["alpha kept"]);
+    expect(asked).toEqual(["Forget alpha?\nIts record and 1 thread leave this computer; the machine is already gone."]);
+    expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["alpha", "beta"]);
+
+    const forgot = await answer("yes", "forget", alpha.id);
+    expect(forgot.code).toBe(0);
+    expect(forgot.io.lines).toEqual([`forgot alpha ${alpha.id}: its record and 1 thread are gone from this computer`]);
+    expect(forgot.io.errors).toEqual([]);
+    expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["beta"]);
+    expect(await rt.sessions.list(alpha.id)).toEqual([]);
+    expect(await store.get("workspaces", alpha.id)).toBeUndefined();
+    expect(await store.get("transcripts", alpha.id)).toBeUndefined();
+
+    backend.machines[1]!.killed = true;
+    const beta = (await rt.workspaces.list())[0]!;
+    const asJson = await run("forget", "beta", "--yes", "--json");
+    expect(asJson.code).toBe(0);
+    expect(json(asJson.io)).toEqual([{ forgot: { workspaceId: beta.id, name: "beta", threads: 0 } }]);
+    expect(await rt.workspaces.list()).toEqual([]);
+
+    const missing = await run("forget", "nope", "--yes");
+    expect(missing.code).toBe(1);
+    expect(missing.io.errors).toEqual(["wsp forget: no workspace nope"]);
+  });
+
   it("thread new opens a thread under the named agent, announces it, streams the reply and prints the last message", async () => {
     await run("new", "alpha");
     const [alpha] = await rt.workspaces.list();
@@ -238,6 +314,23 @@ describe("wsp verbs over the host", () => {
     expect(io.lines).toHaveLength(1);
     expect(io.lines[0]).toMatch(/^thread /);
     expect(io.errors).toEqual(["the harness died"]);
+  });
+
+  it("a send into a thread whose last turn was cut says so on stderr before the reply; the send after that says nothing", async () => {
+    await run("new", "alpha");
+    const cut = await run("thread", "new", "--in", "alpha", "cut");
+    expect(cut.code).toBe(1);
+    expect(cut.io.errors).toEqual([CUT_LINE]);
+    const [row] = await rt.sessions.list();
+    const resumed = await run("send", row!.threadId!, "again");
+    expect(resumed.code).toBe(0);
+    expect(resumed.io.errors).toEqual(["previous turn was cut; resuming"]);
+    expect(resumed.io.lines).toEqual(["re: again"]);
+    const next = await run("send", row!.threadId!, "once more");
+    expect(next.code).toBe(0);
+    expect(next.io.errors).toEqual([]);
+    const asJson = await run("send", row!.threadId!, "and json", "--json");
+    expect(json(asJson.io).filter(e => (e as { type: string }).type === "session.start")).toEqual([expect.not.objectContaining({ afterCut: true })]);
   });
 
   it("threads is the sidebar's data: one row per thread with agent, state, who opened it and its folder, filtered by --in", async () => {
@@ -424,8 +517,8 @@ describe("wsp verbs over the host", () => {
     const listed = await run("threads", "--json");
     const [{ threads }] = json(listed.io) as [{ threads: ThreadView[] }];
     expect(threads.map(t => [t.id, t.harness, t.startedBy, t.title, t.turns])).toEqual([
-      [byCli!.threadId, "codex", "cli", "second", 1],
-      [byPerson!.threadId, "claude", "person", "and this", 1],
+      [byCli!.threadId, "codex", "cli", "first", 1],
+      [byPerson!.threadId, "claude", "person", "from the app", 1],
     ]);
 
     const prefixed = await run("send", byCli!.threadId!.slice(0, 8), "third");
@@ -436,11 +529,7 @@ describe("wsp verbs over the host", () => {
 
   it("send into a thread whose turn runs joins that turn when the agent steers: one stderr line, the running turn's reply, one session.start and one session.steer", async () => {
     const held = heldAgent(true);
-    await handle?.close();
-    rt = createRuntime({ backend, store, adapters: { claude: held.adapter } });
-    vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_verbs_key");
-    handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir: join(dir, "web"), runtime: rt });
-    vi.stubEnv("SOLARI_API_KEY", "");
+    await restartHost({ claude: held.adapter });
     await run("new", "alpha");
     const first = run("thread", "new", "--in", "alpha", "loop for a minute, then say done");
     await vi.waitFor(() => expect(held.starts).toHaveLength(1));
@@ -466,11 +555,7 @@ describe("wsp verbs over the host", () => {
 
   it("send into a thread whose turn runs on an agent that cannot steer waits for that turn, then starts its own: one stderr line, the second start after the first done", async () => {
     const held = heldAgent(false);
-    await handle?.close();
-    rt = createRuntime({ backend, store, adapters: { claude: held.adapter } });
-    vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_verbs_key");
-    handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir: join(dir, "web"), runtime: rt });
-    vi.stubEnv("SOLARI_API_KEY", "");
+    await restartHost({ claude: held.adapter });
     await run("new", "alpha");
     const first = run("thread", "new", "--in", "alpha", "one");
     await vi.waitFor(() => expect(held.starts).toHaveLength(1));
@@ -490,6 +575,34 @@ describe("wsp verbs over the host", () => {
     const [alpha] = await rt.workspaces.list();
     expect((await rt.sessions.history(alpha!.id)).map(e => e.type)).toEqual(["session.start", "session.delta", "session.done", "session.end", "session.start", "session.delta", "session.done", "session.end"]);
     expect(held.steered).toEqual([]);
+  });
+
+  it("stop ends the thread's running turn through the runtime and says so; a thread whose turn is over says not running; the machine stays up", async () => {
+    const held = heldAgent(false);
+    await restartHost({ claude: held.adapter });
+    await run("new", "alpha");
+    const first = run("thread", "new", "--in", "alpha", "loop forever");
+    await vi.waitFor(() => expect(held.starts).toHaveLength(1));
+    const [row] = await rt.sessions.list();
+    const stopped = await run("stop", row!.threadId!.slice(0, 8));
+    expect(stopped.code).toBe(0);
+    expect(stopped.io.lines).toEqual([`thread ${row!.threadId} stopped`]);
+    expect(held.interrupted).toEqual([row!.id]);
+    const opened = await first;
+    expect(opened.code).toBe(1);
+    expect(opened.io.errors).toEqual(["turn interrupted"]);
+    expect((await rt.sessions.list())[0]).toMatchObject({ id: row!.id, status: "interrupted" });
+    const [alpha] = await rt.workspaces.list();
+    expect(alpha!.phase).toBe("running");
+    expect(backend.machines[0]).toMatchObject({ paused: false, killed: false });
+
+    const idle = await run("stop", row!.threadId!, "--json");
+    expect(idle.code).toBe(0);
+    expect(json(idle.io)).toEqual([{ threadId: row!.threadId, outcome: "not-running" }]);
+    expect(held.interrupted).toHaveLength(1);
+    const missing = await run("stop", "nope");
+    expect(missing.code).toBe(1);
+    expect(missing.io.errors).toEqual(["wsp stop: no thread nope"]);
   });
 
   it("thread new --notify me prints the thread's end once on stderr, after the reply, and records it in the thread", async () => {
@@ -512,11 +625,7 @@ describe("wsp verbs over the host", () => {
 
   it("thread new --notify <thread> tells that thread, by a prefix of its id, when the child ends: the running parent takes the line as a steer and the child's command prints no notice", async () => {
     const held = heldAgent(true);
-    await handle?.close();
-    rt = createRuntime({ backend, store, adapters: { claude: held.adapter } });
-    vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_verbs_key");
-    handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir: join(dir, "web"), runtime: rt });
-    vi.stubEnv("SOLARI_API_KEY", "");
+    await restartHost({ claude: held.adapter });
     await run("new", "alpha");
     const parent = run("thread", "new", "--in", "alpha", "orchestrate the builders");
     await vi.waitFor(() => expect(held.starts).toHaveLength(1));
@@ -576,11 +685,7 @@ describe("wsp verbs over the host", () => {
 
   it("thread new, send and fork --send return with the reply on the turn's session.done; a session.end that never comes is not waited for", async () => {
     const agent = doneOnlyAgent(prompt => `re: ${prompt}`);
-    await handle?.close();
-    rt = createRuntime({ backend, store, adapters: { claude: agent.adapter } });
-    vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_verbs_key");
-    handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir: join(dir, "web"), runtime: rt });
-    vi.stubEnv("SOLARI_API_KEY", "");
+    await restartHost({ claude: agent.adapter });
     await run("new", "alpha");
     const opened = await run("thread", "new", "--in", "alpha", "first");
     const [row] = await rt.sessions.list();
@@ -626,17 +731,13 @@ describe("wsp verbs over the host", () => {
   });
 
   it("the host going away mid-turn fails the verb in one line with exit 1 instead of hanging", async () => {
-    await handle!.close();
-    handle = undefined;
-    rt = createRuntime({ backend, store, adapters: { claude: stuckAgent() } });
-    vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_verbs_key");
-    handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir: join(dir, "web"), runtime: rt });
+    await restartHost({ claude: stuckAgent() });
     await run("new", "alpha");
     execGuest(backend, "", undefined);
     const turn = run("thread", "new", "--in", "alpha", "hang");
     const command = run("exec", "alpha", "--", "sleep", "600");
     await new Promise(r => setTimeout(r, 300));
-    await handle.close();
+    await handle!.close();
     handle = undefined;
     const [t, c] = await Promise.all([turn, command]);
     expect(t.code).toBe(1);
@@ -821,7 +922,7 @@ describe("wsp verbs over the host", () => {
   });
 
   it("every verb takes --json and --help; a bad flag prints the usage", async () => {
-    for (const verb of [["new"], ["fork"], ["snapshot"], ["pause"], ["wake"], ["threads"], ["thread", "new"], ["send"], ["exec"], ["import"], ["export"]]) {
+    for (const verb of [["new"], ["fork"], ["snapshot"], ["pause"], ["wake"], ["forget"], ["threads"], ["thread", "new"], ["send"], ["stop"], ["exec"], ["import"], ["export"]]) {
       const help = await run(...verb, "--help");
       expect(help.code).toBe(0);
       expect(help.io.lines[0]).toMatch(new RegExp(`^usage: wsp ${verb.join(" ")}`));

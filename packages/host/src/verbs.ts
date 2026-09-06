@@ -12,9 +12,13 @@ import { resolve } from "node:path";
 import { parseArgs, type ParseArgsConfig } from "node:util";
 import WebSocket from "ws";
 import {
+  AFTER_CUT_LINE,
   NOTIFY_ME,
+  fmtThreads,
   foldThreads,
+  forgetNotice,
   goldenHead,
+  goneRefusal,
   startPicks,
   workspaceState,
   workspaceWord,
@@ -25,6 +29,8 @@ import {
   type ProjectExportResult,
   type ProjectGolden,
   type SessionEvent,
+  type SessionInterruptOutcome,
+  SessionInterruptResult,
   type SessionOrigin,
   type SessionStartOutcome,
   SessionStartResult,
@@ -270,10 +276,58 @@ export async function nap(client: HostClient, ref: string): Promise<WorkspaceVie
 }
 
 /** Every verb that needs the machine goes through here, so a paused or waking workspace is a wait and never the
- * provider's error. The runtime is asked even when the view says running: only its state read catches a provider-side pause. */
-export async function awake(client: HostClient, workspace: WorkspaceView, tell: (line: string) => void): Promise<WorkspaceView> {
-  if (workspaceState({ phase: workspace.phase }) !== "running") tell(`waking ${workspace.name}`);
+ * provider's error. The runtime is asked even when the view says running: only its state read catches a provider-side
+ * pause. The runtime refuses a gone workspace too; the refusal here exists to carry the verb's own action word. */
+export async function awake(client: HostClient, workspace: WorkspaceView, action: string, tell: (line: string) => void): Promise<WorkspaceView> {
+  const state = workspaceState({ phase: workspace.phase });
+  if (state === "gone") throw new Error(goneRefusal(action, workspace.gone));
+  if (state !== "running") tell(`waking ${workspace.name}`);
   return (await client.request<{ workspace: WorkspaceView }>("workspaces.wake", { workspaceId: workspace.id })).workspace;
+}
+
+/** What a stop came to, as every director prints it: the runtime's three answers, none an error. */
+export interface Stopped {
+  threadId: string;
+  outcome: SessionInterruptOutcome;
+}
+
+/** Stops the running turn of the thread a person names, through the runtime as the app's stop button does; the
+ * machine is not touched. Parsed, not trusted: an outcome outside the enum must not read as stopped. */
+export async function stop(client: HostClient, ref: string): Promise<Stopped> {
+  const thread = await threadOf(client, ref);
+  const { outcome } = SessionInterruptResult.parse(await client.request("sessions.interrupt", { sessionId: thread.sessionId }));
+  return { threadId: thread.id, outcome };
+}
+
+const STOP_WORDS: Record<SessionInterruptOutcome, string> = { accepted: "stopped", "not-running": "not running", "not-found": "not found by the host" };
+
+export function stopLine(stopped: Stopped): string {
+  return `thread ${stopped.threadId} ${STOP_WORDS[stopped.outcome]}`;
+}
+
+/** What a forget takes off this computer, counted before anyone is asked: the workspace's record and its threads. */
+export interface Forgetting {
+  workspace: WorkspaceView;
+  threads: number;
+}
+
+export async function forgetting(client: HostClient, ref: string): Promise<Forgetting> {
+  const workspace = await workspaceOf(client, ref);
+  return { workspace, threads: (await threads(client, workspace.id)).length };
+}
+
+/** The one confirmation a forget asks, naming what goes; the first line is the question, the second its hint. */
+export function forgetQuestion(f: Forgetting): string {
+  return `Forget ${f.workspace.name}?\n${forgetNotice(f.threads)}`;
+}
+
+/** Drops the workspace from the host's store; the runtime refuses while its machine still exists. */
+export async function forget(client: HostClient, f: Forgetting): Promise<void> {
+  await client.request("workspaces.forget", { workspaceId: f.workspace.id });
+}
+
+export function forgotLine(f: Forgetting): string {
+  return `forgot ${f.workspace.name} ${f.workspace.id}: its record and ${fmtThreads(f.threads)} are gone from this computer`;
 }
 
 /** The most characters a folder cell holds before its front is cut: the end of a path is what a person recognises. */
@@ -356,6 +410,8 @@ export interface Turn {
   outcome: SessionStartOutcome;
   result?: TurnResult;
   reason?: string;
+  /** The thread's previous turn ended without a result, as the turn's session.start said. */
+  afterCut?: true;
 }
 
 /** A folder named for a thread, refused unless absolute: the harness would run a relative one against its own home
@@ -463,6 +519,7 @@ export async function follow(
       f => sessionEvent(f) && f.turnId === turnId,
       f => {
         const e = f as unknown as SessionEvent;
+        if (e.type === "session.start" && e.afterCut === true) turn.afterCut = true;
         if (e.type === "session.done") turn.result = e.result;
         if (e.type === "session.end" && e.reason !== undefined) turn.reason = e.reason;
         on.event(e, turn);
@@ -509,6 +566,7 @@ async function followVerb(ctx: VerbContext, client: HostClient, start: Record<st
     },
     event: e => {
       ctx.out.emit(e, e.type === "session.done" ? e.result.text : undefined);
+      if (e.type === "session.start" && e.afterCut === true) ctx.io.error(AFTER_CUT_LINE);
       if (e.type === "session.delta" && e.kind === "text") ctx.out.stream(e.text);
       if (e.type === "session.notify" && e.notify === NOTIFY_ME) ctx.io.error(e.text);
     },
@@ -639,6 +697,7 @@ export const VERBS: readonly Verb[] = [
       for (const dependent of ["agent", ...PICK_FLAGS, "cwd", "notify"]) if (task === undefined && flag(ctx.flags, dependent) !== undefined) throw new Error(`--${dependent} needs --send`);
       const client = await ctx.client();
       const source = await workspaceOf(client, ref);
+      if (workspaceState({ phase: source.phase }) === "gone") throw new Error(goneRefusal("fork", source.gone));
       // Resolved and checked before the machine is minted, so a bad reference or pick costs nothing.
       const notify = await notifyOf(client, flag(ctx.flags, "notify"));
       const harness = flag(ctx.flags, "agent");
@@ -671,8 +730,27 @@ export const VERBS: readonly Verb[] = [
       const [ref] = ctx.args;
       if (ref === undefined || ctx.args.length !== 1) throw new Error("wsp wake takes one workspace");
       const client = await ctx.client();
-      const workspace = await awake(client, await workspaceOf(client, ref), line => ctx.io.error(line));
+      const workspace = await awake(client, await workspaceOf(client, ref), "wake", line => ctx.io.error(line));
       ctx.out.emit({ workspace }, stateLine(workspace));
+      return 0;
+    },
+  },
+  {
+    name: "forget",
+    usage: "wsp forget <workspace> [--yes]",
+    about: "drops a gone workspace and its threads from this computer; refused while its machine exists",
+    options: { yes: { type: "boolean" } },
+    run: async ctx => {
+      const [ref] = ctx.args;
+      if (ref === undefined || ctx.args.length !== 1) throw new Error("wsp forget takes one workspace");
+      const client = await ctx.client();
+      const f = await forgetting(client, ref);
+      if (ctx.flags["yes"] !== true && (await ctx.io.ask(forgetQuestion(f))) !== "yes") {
+        ctx.io.error(`${f.workspace.name} kept`);
+        return 1;
+      }
+      await forget(client, f);
+      ctx.out.emit({ forgot: { workspaceId: f.workspace.id, name: f.workspace.name, threads: f.threads } }, forgotLine(f));
       return 0;
     },
   },
@@ -699,7 +777,7 @@ export const VERBS: readonly Verb[] = [
       if (within === undefined) throw new Error("wsp thread new needs --in <workspace>");
       if (task === undefined || ctx.args.length !== 1) throw new Error("wsp thread new takes one task");
       const client = await ctx.client();
-      const workspace = await awake(client, await workspaceOf(client, within), line => ctx.io.error(line));
+      const workspace = await awake(client, await workspaceOf(client, within), "send", line => ctx.io.error(line));
       return followVerb(ctx, client, openingOf(workspace, task, { harness: flag(ctx.flags, "agent"), ...pickFlags(ctx.flags), cwd: flag(ctx.flags, "cwd"), notify: await notifyOf(client, flag(ctx.flags, "notify")) }), true);
     },
   },
@@ -714,8 +792,21 @@ export const VERBS: readonly Verb[] = [
       const client = await ctx.client();
       const picks = pickFlags(ctx.flags);
       const thread = await threadOf(client, ref);
-      await awake(client, await workspaceOf(client, thread.workspaceId), line => ctx.io.error(line));
+      await awake(client, await workspaceOf(client, thread.workspaceId), "send", line => ctx.io.error(line));
       return followVerb(ctx, client, resumeOf(thread, message, picks), false, picks);
+    },
+  },
+  {
+    name: "stop",
+    usage: "wsp stop <thread>",
+    about: "stops the thread's running turn, as the app's stop does; the machine stays up",
+    options: {},
+    run: async ctx => {
+      const [ref] = ctx.args;
+      if (ref === undefined || ctx.args.length !== 1) throw new Error("wsp stop takes one thread");
+      const stopped = await stop(await ctx.client(), ref);
+      ctx.out.emit(stopped, stopLine(stopped));
+      return 0;
     },
   },
   {
@@ -727,7 +818,7 @@ export const VERBS: readonly Verb[] = [
       const [ref, ...words] = ctx.args;
       if (ref === undefined || words.length === 0) throw new Error("wsp exec takes a workspace, then -- and the command");
       const client = await ctx.client();
-      const workspace = await awake(client, await workspaceOf(client, ref), line => ctx.io.error(line));
+      const workspace = await awake(client, await workspaceOf(client, ref), "exec", line => ctx.io.error(line));
       const exit = await execOn(client, workspace.id, words, e => ctx.out.emit(e, e.type === "exec.output" ? e.text : undefined));
       if (exit.error !== undefined) ctx.io.error(exit.error);
       return exit.exitCode ?? 1;
