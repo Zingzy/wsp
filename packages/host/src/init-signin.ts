@@ -7,6 +7,7 @@
 // each login came to is written next to the import result so the golden's
 // notes carry it.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import type { Writable } from "node:stream";
 import { styleText } from "node:util";
 import type { ManifestEntry } from "@wsp/collect";
 import type { LoginState } from "@wsp/protocol";
@@ -44,6 +45,11 @@ export interface SignInFlow {
   /** A page the machine asked to open that returns through a forwarded port, arrived while nothing was armed. */
   callbackUrl?: string;
   show?: (line: string) => void;
+  /** Each page the machine asks to open while a stage holds this flow, with the callback port when it named one:
+   * the hand-off stage prints it for the person, the terminal stage waits for o instead and leaves this unset. */
+  onPage?: (url: string, port?: number) => void;
+  /** What the relay's line says for a page it did not open; the terminal stage's o is the default. */
+  openWords?: string;
 }
 
 /** The line the relay logs for a page it did not open, while a pty is on screen. */
@@ -71,12 +77,14 @@ export function flowHooks(flow: SignInFlow, builder: { id: string; name: string 
         flow.armed = false;
         return true;
       }
-      if (port !== undefined && flow.show !== undefined) flow.callbackUrl = url;
+      if (flow.show === undefined) return false;
+      if (port !== undefined) flow.callbackUrl = url;
+      flow.onPage?.(url, port);
       return false;
     },
     openLine: (workspace, hostname, url) => {
       if (workspace !== target || flow.show === undefined) return `${workspace}: a sign-in page for ${hostname} is ready; open it from the app`;
-      return `${workspace}: ${url === flow.openedUrl ? "that page is already open here" : OPEN_LINE}`;
+      return `${workspace}: ${url === flow.openedUrl ? "that page is already open here" : (flow.openWords ?? OPEN_LINE)}`;
     },
     onLine: line => {
       if (flow.show === undefined) return false;
@@ -133,8 +141,14 @@ export interface SignInStageOptions {
   now?: () => number;
 }
 
-const CAP_MS = 15 * 60_000;
+/** How long a sign-in is given when the tool itself names no wait. */
+export const SIGN_IN_CAP_MS = 15 * 60_000;
 const dim = (s: string): string => styleText("dim", s);
+
+/** How long one sign-in command is given: what the tool itself waits, plus a minute for the person to finish, else the cap. */
+export function signInCapMs(s: SignIn, capMs: number): number {
+  return hasLogin(s) && s.toolTimeoutMs !== undefined ? s.toolTimeoutMs + 60_000 : capMs;
+}
 
 const STATE_WORDS: Record<LoginState, string> = {
   "signed-in": "signed in",
@@ -154,11 +168,28 @@ function detailOf(o: LoginOutcome): string {
 }
 
 /** The row's state and detail; the detail cut to `width` cells for the row as a whole. */
-function stateLine(o: LoginOutcome, width = Infinity): string {
+export function stateLine(o: LoginOutcome, width = Infinity): string {
   const word = STATE_WORDS[o.state];
   const colored = o.state === "signed-in" ? styleText("green", word) : o.state === "not-signed-in" ? styleText("yellow", word) : dim(word);
   const detail = ellipsize(detailOf(o), width - o.label.length - word.length - 5);
   return `${o.label}: ${colored}${detail !== "" ? dim(` (${detail})`) : ""}`;
+}
+
+/** The outcomes a sign-in stage starts from, with the copied logins already settled: a copied login's files are on
+ * the machine, so nothing runs for it here and its status is the catalog's to check from the app, not this
+ * terminal's. What is left is the rows to sign in on the machine, each beside the outcome it fills in. */
+export function copiedOutcomes(logins: readonly ManifestEntry[], left: ReadonlyMap<string, string> | undefined, output: Writable): { outcomes: LoginOutcome[]; machine: [ManifestEntry, LoginOutcome][] } {
+  const outcomes = logins.map((e): LoginOutcome => {
+    const had = left?.get(e.id);
+    return { id: e.id, label: e.label, state: "skipped", ...(had !== undefined ? { left: had } : {}) };
+  });
+  const rows = logins.map((e, i): [ManifestEntry, LoginOutcome] => [e, outcomes[i]!]);
+  for (const [e, r] of rows) {
+    if (e.choice !== "copy") continue;
+    r.state = "copied";
+    log.message(stateLine(r), { output, symbol: dim(S_BAR) });
+  }
+  return { outcomes, machine: rows.filter(([e]) => e.choice !== "copy") };
 }
 
 /** Label, state, detail per login; the detail is cut so the note frame (6 columns) never wraps a row. */
@@ -171,22 +202,9 @@ function summaryRows(outcomes: readonly LoginOutcome[], width: number): string[]
 
 export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]> {
   const out = { output: o.terminal.output };
-  const capMs = o.capMs ?? CAP_MS;
-  const outcomes: LoginOutcome[] = o.logins.map(e => {
-    const left = o.left?.get(e.id);
-    return { id: e.id, label: e.label, state: "skipped", ...(left !== undefined ? { left } : {}) };
-  });
-  if (outcomes.length === 0) return outcomes;
-  const isCopied = (e: ManifestEntry): boolean => e.choice === "copy";
-  const rows = (copied: boolean) => o.logins.map((e, i) => [e, outcomes[i]!] as const).filter(([e]) => isCopied(e) === copied);
-
-  // A copied login's files are on the machine; its status is the catalog's to check from the app, not this terminal's.
-  for (const [, r] of rows(true)) {
-    r.state = "copied";
-    log.message(stateLine(r), { output: o.terminal.output, symbol: dim(S_BAR) });
-  }
-
-  const machine = rows(false);
+  const capMs = o.capMs ?? SIGN_IN_CAP_MS;
+  if (o.logins.length === 0) return [];
+  const { outcomes, machine } = copiedOutcomes(o.logins, o.left, o.terminal.output);
   if (o.skipWhy !== undefined) {
     for (const [, r] of machine) r.note = o.skipWhy;
     if (machine.length > 0) log.step(`Sign-ins on the machine skipped: ${machine.map(([, r]) => r.label).join(", ")}. ${o.skipWhy[0]!.toUpperCase()}${o.skipWhy.slice(1)}.`, out);
@@ -197,7 +215,7 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
 
   /** The command's pty over one fresh link, its exit code the row's state; every failure is this login's note, never the run's end. */
   const attempt = async (entry: ManifestEntry, r: LoginOutcome, s: SignIn, command: string | undefined): Promise<void> => {
-    const timeoutMs = hasLogin(s) && s.toolTimeoutMs !== undefined ? s.toolTimeoutMs + 60_000 : capMs;
+    const timeoutMs = signInCapMs(s, capMs);
     const daemon = await o.dial();
     try {
       const show = (line: string): void => void o.terminal.output.write(`\r\n  ${dim(line)}\r\n`);
@@ -317,7 +335,7 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
 }
 
 /** The first word of a command past its NAME=value prefixes: the tool the shell could not find. */
-function toolOf(command: string): string {
+export function toolOf(command: string): string {
   return command.split(" ").find(w => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w)) ?? command;
 }
 

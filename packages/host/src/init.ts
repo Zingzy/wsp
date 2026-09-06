@@ -54,6 +54,7 @@ import { retentionOffer } from "./storage.js";
 import type { Tone } from "./init-select.js";
 import { diskLine, diskTone } from "./init-weight.js";
 import { builderLink, flowHooks, noteOutcomes, signInStage, stageLogins, type BuilderLink, type HostHooks, type LoginOutcome, type SignInFlow } from "./init-signin.js";
+import { handoffStage } from "./init-handoff.js";
 import type { HostHandle } from "./server.js";
 
 export interface InitIO {
@@ -69,11 +70,17 @@ export interface InitIO {
   signals: { on(event: "SIGINT" | "SIGTERM", listener: () => void): unknown; off(event: "SIGINT" | "SIGTERM", listener: () => void): unknown };
   /** Ends the process; the real one is process.exit. */
   exit(code: number): void;
+  /** One machine-readable object per line for whoever is driving the run, under --json; absent, nothing is
+   * printed this way and every line is the prose above. */
+  json?(record: Record<string, unknown>): void;
 }
 
 export interface InitOptions {
   /** Take every default and skip every prompt, the confirm included. */
   yes: boolean;
+  /** Ask nothing here, but still run the sign-ins on the machine and hand each page to the person: the shape an
+   * agent drives wsp init in. Off a terminal this is what a run without --yes does anyway. */
+  nonInteractive?: boolean;
   /** The small recipe of catalog ids that ticks the agents and tools rows: the screens for them are skipped and the
    * run lands on the sign-ins. This machine is still read for the rows and files. */
   recipeFile?: string;
@@ -603,8 +610,12 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 
 export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult> {
   const out = { output: io.output };
-  // Off a terminal there is nobody to ask: it runs as if --yes were given.
-  const interactive = io.isTTY && !opts.yes;
+  // Off a terminal, and under --non-interactive on one, there is nobody to ask: it runs as if --yes were given.
+  const interactive = io.isTTY && !opts.yes && opts.nonInteractive !== true;
+  // Nobody to ask, but the sign-ins still run and each page is handed to the person; --yes is the one road that skips them.
+  const handoff = !interactive && !opts.yes;
+  // Which of the three reasons nothing is asked, in the words every taken-as-yes line uses.
+  const takenAs = opts.yes ? "--yes" : io.isTTY ? "--non-interactive" : "no terminal";
 
   let manifest: Manifest;
   // The catalog recipe the screens start from: the file given, else read off this computer once the rows are in.
@@ -881,7 +892,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
         return { code: 1 };
       }
     } else {
-      log.step(`${ask} Taken as yes (${opts.yes ? "--yes" : "no terminal"}).`, out);
+      log.step(`${ask} Taken as yes (${takenAs}).`, out);
     }
     for (const b of stop) {
       try {
@@ -903,7 +914,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       return { code: 1 };
     }
   } else if (stop.length === 0) {
-    log.step(`${question} Taken as yes (${opts.yes ? "--yes" : "no terminal"}).`, out);
+    log.step(`${question} Taken as yes (${takenAs}).`, out);
   }
   if (attach === undefined) await stopKeptBuilder(rt, io.output);
 
@@ -1008,7 +1019,9 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const handle = await opts.host(rt, builder, flowHooks(flow, builder));
   const dial = (): Promise<BuilderLink> => (opts.daemon ?? builderLink)(rt, builder);
   // Secrets first: a key cut from an rc file is on the machine before any status check looks for it.
-  const skipSecretsWhy = interactive ? undefined : io.isTTY ? "--yes asks nothing; set them from the app's terminal" : "no terminal to paste into; set them from the app's terminal";
+  // Nobody is here to type: the flag that said so when there was a terminal, else the terminal that is missing.
+  const nobodyAsks = !io.isTTY ? "no terminal to paste into" : opts.yes ? "--yes asks nothing" : "--non-interactive asks nothing";
+  const skipSecretsWhy = interactive ? undefined : `${nobodyAsks}; set them from the app's terminal`;
   const secretOutcomes = await secretsStage({
     cut: landed?.files?.cut ?? [],
     dial,
@@ -1017,7 +1030,8 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     ...(skipSecretsWhy !== undefined ? { skipWhy: skipSecretsWhy } : {}),
     hide: value => runLog.hide(value),
   });
-  const skipWhy = interactive ? undefined : io.isTTY ? "--yes asks nothing; sign in from the app's terminal" : "no terminal to sign in from; use the app's terminal";
+  // Only --yes gets here: every other run without a terminal hands its sign-ins over instead of skipping them.
+  const skipWhy = interactive || handoff ? undefined : io.isTTY ? "--yes asks nothing; sign in from the app's terminal" : "no terminal to sign in from; use the app's terminal";
   const staged = stageLogins(offered, choices, ticks);
   // The pack's notes on a copied login's Keychain and helper items join what its reads left behind, once each.
   for (const s of landed?.files?.skipped ?? []) {
@@ -1026,15 +1040,25 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     if (have === undefined) left.set(s.id, s.note);
     else if (!have.includes(s.note)) left.set(s.id, `${have}; ${s.note}`);
   }
-  const outcomes = await signInStage({
-    logins: staged,
-    left,
-    dial,
-    terminal: { input: io.input, output: io.output },
-    ...(skipWhy !== undefined ? { skipWhy } : {}),
-    open: url => io.open(url),
-    flow,
-  });
+  const outcomes = handoff
+    ? await handoffStage({
+        logins: staged,
+        left,
+        dial,
+        output: io.output,
+        platform: opts.platform,
+        flow,
+        ...(io.json !== undefined ? { json: io.json } : {}),
+      })
+    : await signInStage({
+        logins: staged,
+        left,
+        dial,
+        terminal: { input: io.input, output: io.output },
+        ...(skipWhy !== undefined ? { skipWhy } : {}),
+        open: url => io.open(url),
+        flow,
+      });
   if (noteOutcomes(resultsPath, { logins: outcomes, secrets: secretOutcomes }).replaced) log.warn(`${resultsPath} could not be read; it was rewritten with the logins and secrets alone.`, out);
 
   const next = ((await rt.golden.get())?.head ?? 0) + 1;
@@ -1051,7 +1075,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       return leave(1);
     }
   } else {
-    log.step(`Sealing golden v${next}. Taken as yes (${opts.yes ? "--yes" : "no terminal"}).`, out);
+    log.step(`Sealing golden v${next}. Taken as yes (${takenAs}).`, out);
   }
   let sealed: Awaited<ReturnType<Runtime["golden"]["seal"]>> | undefined;
   let error: unknown;

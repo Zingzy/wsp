@@ -84,6 +84,15 @@ options:
                      writes it; init writes <state dir>/recipe.json too) and go
                      straight to the sign-ins; this machine is still read for
                      what travels
+  --non-interactive  init: ask nothing, but still run the sign-ins on the
+                     machine: each one prints the page to open on this computer,
+                     the code when the flow shows one, and the command that
+                     opens it, then waits for you (this is what a run off a
+                     terminal does anyway)
+  --json             init: print each sign-in hand-off and its outcome as one
+                     JSON object on stdout, everything else on stderr; implies
+                     --non-interactive, and is refused beside --yes, which skips
+                     the sign-ins
   --out PATH         recipe: where to write it (default <state dir>/recipe.json)
   --agent ID         mcp install: the agent whose MCP config gets the server
 
@@ -158,6 +167,16 @@ export function terminalIO(input: Stream<Readable> = process.stdin, output: Stre
     ask: q => (screen ? answered(confirmPrompt(split(q))).then(yes => (yes ? "yes" : "no")) : nobody(q)),
     askSecret: q => (screen ? answered(passwordPrompt(split(q))) : nobody(q)),
   };
+}
+
+/** What an init under --json speaks through: stdout carries the objects alone, so every line the run says goes to
+ * stderr beside them, and a key that is not in the environment or a .env file is an error rather than a prompt on a
+ * stream nobody is reading. */
+export function jsonCliIO(err: Writable = process.stderr): CliIO {
+  const say = (line: string): void => void err.write(`${line}\n`);
+  const nobody = (q: string): Promise<never> =>
+    Promise.reject(new Error(`${q.split("\n")[0]}: --json asks nothing; set it in the environment, ./.env, or ~/.wsp/.env.`));
+  return { log: say, error: say, stream: text => void err.write(text), ask: nobody, askSecret: nobody };
 }
 
 function parseEnvFile(path: string): Record<string, string> {
@@ -273,17 +292,19 @@ export function makeRuntime(keys: Keys, statePath: string, recipe: GoldenRecipe 
   });
 }
 
-export function terminalInitIO(): InitIO {
+/** With --json stdout carries the objects alone, so every line the run says moves to stderr beside it. */
+export function terminalInitIO(json = false): InitIO {
   const os = platform();
   return {
     input: process.stdin,
-    output: process.stdout,
+    output: json ? process.stderr : process.stdout,
     stderr: process.stderr,
     isTTY: process.stdin.isTTY === true && process.stdout.isTTY === true,
     env: process.env,
     open: systemOpener(os),
     signals: process,
     exit: code => process.exit(code),
+    ...(json ? { json: (record: Record<string, unknown>) => void process.stdout.write(`${JSON.stringify(record)}\n`) } : {}),
   };
 }
 
@@ -314,18 +335,25 @@ function initRefusal(lock: HostLock, statePath: string): string {
   return `wsp init: a wsp host (pid ${lock.pid}) is already serving ${statePath}. Stop it first (Ctrl-C in its terminal, or kill ${lock.pid}), then run wsp init again, or point --state at a different file.`;
 }
 
-async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: string }, flags: { yes: boolean; recipe?: string }): Promise<number> {
+async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: string }, flags: { yes: boolean; nonInteractive: boolean; json: boolean; recipe?: string }): Promise<number> {
+  if (flags.json && flags.yes) {
+    io.error("wsp init: --json prints the sign-ins as they are handed to you, and --yes skips the sign-ins, so there would be nothing to print. Drop one of them.");
+    return 1;
+  }
   const held = servingHost(opts.statePath);
   if (held !== undefined) {
     io.error(initRefusal(held, opts.statePath));
     return 1;
   }
-  const screen = terminalInitIO();
+  // Under --json every line this run says, the host's own included, goes to stderr so stdout is the objects' alone.
+  const say = flags.json ? jsonCliIO() : io;
+  const screen = terminalInitIO(flags.json);
   opening(screen, { command: "init", version: VERSION, yes: flags.yes });
-  const keys = await loadKeys(io, undefined, { anthropic: false });
+  const keys = await loadKeys(say, undefined, { anthropic: false });
   const result = await runInit(
     {
       yes: flags.yes,
+      nonInteractive: flags.nonInteractive,
       ...(flags.recipe !== undefined ? { recipeFile: resolve(flags.recipe) } : {}),
       collect: collectThisComputer,
       recipe: onHistory => computeRecipe(nodeHost(), { onHistory }),
@@ -337,11 +365,11 @@ async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: 
       platform: platform() === "darwin" ? "darwin" : "linux",
       brew: () => readBrewTable(nodeHost()),
       runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `daemon on node ${(await deployDaemon(machine)).node}` }),
-      host: (rt, builder, hooks) => hostFor(rt, keys, { ...opts, builder, ...hooks }, io),
+      host: (rt, builder, hooks) => hostFor(rt, keys, { ...opts, builder, ...hooks }, say),
     },
     screen,
   );
-  if (result.handle !== undefined) stopOnSignals(result.handle, io);
+  if (result.handle !== undefined) stopOnSignals(result.handle, say);
   return result.code;
 }
 
@@ -461,7 +489,7 @@ async function mcp(io: CliIO, statePath: string, words: string[], agent: string 
 export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<number> {
   const verb = findVerb(argv);
   if (verb !== undefined) return runVerb(verb, argv, io, defaultStatePath);
-  let values: { version?: boolean; help?: boolean; port?: string; "ws-port"?: string; state?: string; yes?: boolean; recipe?: string; out?: string; agent?: string };
+  let values: { version?: boolean; help?: boolean; port?: string; "ws-port"?: string; state?: string; yes?: boolean; "non-interactive"?: boolean; json?: boolean; recipe?: string; out?: string; agent?: string };
   let positionals: string[];
   try {
     ({ values, positionals } = parseArgs({
@@ -473,6 +501,8 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
         "ws-port": { type: "string" },
         state: { type: "string" },
         yes: { type: "boolean", short: "y" },
+        "non-interactive": { type: "boolean" },
+        json: { type: "boolean" },
         recipe: { type: "string" },
         out: { type: "string" },
         agent: { type: "string" },
@@ -506,7 +536,13 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
       return 0;
     }
     case "init":
-      return init(io, opts, { yes: values.yes === true, ...(values.recipe !== undefined ? { recipe: values.recipe } : {}) });
+      return init(io, opts, {
+        yes: values.yes === true,
+        // --json has nobody to answer the screens: its objects are for whoever is driving the run.
+        nonInteractive: values["non-interactive"] === true || values.json === true,
+        json: values.json === true,
+        ...(values.recipe !== undefined ? { recipe: values.recipe } : {}),
+      });
     case "recipe":
       await writeRecipe(nodeHost(), resolve(values.out ?? join(dirname(opts.statePath), "recipe.json")), line => io.log(line));
       return 0;
