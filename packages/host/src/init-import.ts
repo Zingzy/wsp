@@ -8,7 +8,7 @@ import { chmodSync, closeSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtemp
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { AGENTS, CLAUDE_SETTINGS, FISH_CONF_D, HAND_PREFIX, MANAGER_HOMES, MCP_BIN_DIRS, MCP_CONFIGS, type ManifestEntry, RC_NAMES, READ_LIMIT, guardSources, isRcPath, managedRc, portableShebang, rcFiles, sourcedPaths, stripExports } from "@wsp/collect";
+import { AGENTS, CLAUDE_SETTINGS, FISH_CONF_D, HAND_PREFIX, MANAGER_HOMES, MCP_BIN_DIRS, type ManifestEntry, RC_NAMES, READ_LIMIT, guardSources, isRcPath, managedRc, portableShebang, rcFiles, sourcedPaths, stripExports } from "@wsp/collect";
 import {
   agentInstallsFor,
   editorInstallsFor,
@@ -36,7 +36,7 @@ import {
   secretPath,
   withApiKeyHelper,
 } from "@wsp/engine";
-import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
+import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENTS } from "@wsp/catalog";
 import { tarPackCommand } from "./doctor.js";
 import { type AliasGuard, GUARD_PATH, GUARD_SOURCE_COMMENT, GUARD_SOURCE_LINE, aliasGuardFor } from "./init-aliases.js";
 
@@ -504,7 +504,7 @@ function guestPath(tildePath: string): string {
   return `${GUEST_HOME}/${moved}`;
 }
 
-const MCP_AGENTS = Object.fromEntries(MCP_CONFIGS.map(c => [c.agent, { label: c.label, format: c.format, files: c.files.map(guestPath) }]));
+const MCP_SOURCES = Object.fromEntries(MCP_AGENTS.map(a => [a.id, { label: a.name, format: a.mcp.format, files: a.mcp.files.map(guestPath) }]));
 
 /** Which of a row's paths its tool rewrites while it runs. Volatility is the tool's property, not a saved choice:
  * the catalog decides for every row it knows, so a recipe file saved before the list existed, or with a list the
@@ -539,7 +539,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
   const tools = toolInstallsFor(bring, opts.brew);
   const editors = editorInstallsFor(bring);
   const agents = agentInstallsFor(bring, { claude: CLAUDE_INSTALLER });
-  const mcp = opts.rows !== undefined ? mcpPlanFor(opts.rows, { home, guestHome: GUEST_HOME, agents: MCP_AGENTS, binDirs: MCP_BIN_DIRS }) : undefined;
+  const mcp = opts.rows !== undefined ? mcpPlanFor(opts.rows, { home, guestHome: GUEST_HOME, agents: MCP_SOURCES, binDirs: MCP_BIN_DIRS }) : undefined;
   const label = (id: string) => bring.find(e => e.id === id)?.label ?? id;
   const anyFiles = plan.files.length + plan.secrets.length + plan.skipped.length > 0;
   // A login's Keychain items count once, however many accounts they are read for.

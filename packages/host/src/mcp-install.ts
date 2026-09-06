@@ -5,13 +5,10 @@
 // only reads and writes.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { CATALOG_AGENTS, type AgentEntry, type McpServerSpec, type Placed } from "@wsp/catalog";
+import { CATALOG_AGENTS, MCP_AGENTS, type McpServerSpec, type Placed } from "@wsp/catalog";
 
 /** The name the server has in every agent's config. */
 export const MCP_SERVER_NAME = "wsp";
-
-/** The agents whose config the catalog knows how to place a server in. */
-export const MCP_AGENTS: readonly AgentEntry[] = CATALOG_AGENTS.filter(a => a.mcp !== undefined);
 
 /** How the agent runs this same wsp again: the node, the flags and the script this process was started with, then
  * `mcp --state <path>`, so the agent's own cwd never picks another state file. */
@@ -38,7 +35,7 @@ export function installMcp(agentId: string, server: McpServerSpec, home: string)
   const text = existsSync(file.abs) ? readFileSync(file.abs, "utf8") : undefined;
   let placed: Placed;
   try {
-    placed = entry.mcp.place(text, MCP_SERVER_NAME, server);
+    placed = entry.mcp.format.place(text, MCP_SERVER_NAME, server);
   } catch (e) {
     throw new Error(`${file.tilde}: ${e instanceof Error ? e.message : String(e)}`);
   }

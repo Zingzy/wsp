@@ -22,7 +22,7 @@ export { AGENTS, detectAgents } from "./detect/agents.js";
 export { type Presence, presenceOf } from "./detect/presence.js";
 export * from "./history/index.js";
 export { type RecipeOptions, USED_TICK_SESSIONS, computeRecipe } from "./recipe.js";
-export { MCP_BIN_DIRS, MCP_CONFIGS, MCP_REMOTE_ID, MCP_REMOTE_LABEL, detectMcp, homePaths, linuxFit, mcpGroups, mcpRemoteHash, parseCodexMcp, parseMcp, type LinuxFit, type McpConfig, type McpFormat, type McpServer, type McpTransport } from "./detect/mcp.js";
+export { MCP_BIN_DIRS, MCP_REMOTE_ID, MCP_REMOTE_LABEL, detectMcp, homePaths, linuxFit, mcpGroups, mcpRemoteHash, type LinuxFit } from "./detect/mcp.js";
 export { CLAUDE_KEY_ENV, CLAUDE_SETTINGS, apiKeyHelperOf, detectLogins } from "./detect/logins.js";
 export { buildLookup, convertMackup, dirKey, isCredential, isMacOnly, lookup, parseMackupCfg, renderCatalog, type CatalogEntry, type CatalogPath, type CredentialOverlay, type Lookup, type MackupCatalog } from "./catalog.js";
 export type { Entry, EnvName, Exec, Fs, Machine } from "./everything/host.js";

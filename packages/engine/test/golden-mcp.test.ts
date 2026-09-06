@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { applyMcp, mcpPlanFor, type McpPlan, type McpResult } from "../src/golden-mcp.js";
+import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, type McpFormat, type McpGuestEditor } from "@wsp/catalog";
 import { MCP_ID_PREFIX } from "@wsp/protocol";
 import type { RecipeEntry } from "../src/golden-import.js";
 import type { ToolResult } from "../src/golden-tools.js";
@@ -20,10 +21,10 @@ const HOME = "/Users/dev";
 const row = (id: string, over: Partial<RecipeEntry> = {}): RecipeEntry => ({ rung: "agents", id, label: id.slice(id.lastIndexOf("/") + 1), paths: [], bytes: 0, default: "bring", bring: true, ...over });
 
 const AGENTS = {
-  claude: { label: "Claude Code", format: "claude" as const, files: ["/root/.claude-cfg/.claude.json"] },
-  codex: { label: "Codex", format: "codex" as const, files: ["/root/.codex/config.toml"] },
-  gemini: { label: "Gemini CLI", format: "gemini" as const, files: ["/root/.gemini/settings.json"] },
-  opencode: { label: "OpenCode", format: "opencode" as const, files: ["/root/.config/opencode/opencode.json", "/root/.config/opencode/opencode.jsonc"] },
+  claude: { label: "Claude Code", format: MCP_SERVERS_JSON, files: ["/root/.claude-cfg/.claude.json"] },
+  codex: { label: "Codex", format: CODEX_TOML, files: ["/root/.codex/config.toml"] },
+  gemini: { label: "Gemini CLI", format: MCP_SERVERS_JSON, files: ["/root/.gemini/settings.json"] },
+  opencode: { label: "OpenCode", format: OPENCODE_JSON, files: ["/root/.config/opencode/opencode.json", "/root/.config/opencode/opencode.jsonc"] },
 };
 
 describe("mcpPlanFor", () => {
@@ -48,8 +49,8 @@ describe("mcpPlanFor", () => {
         {
           id: "claude", label: "Claude Code",
           scopes: [
-            { files: AGENTS.claude.files, format: "claude", keep: ["github"], drop: [{ name: "notes", reason: "command ~/Library/x is macOS-only, will not run" }, { name: "old", reason: "unticked" }] },
-            { files: AGENTS.claude.files, format: "claude", project: { from: HOME, to: "/root" }, keep: ["zomato"], drop: [] },
+            { files: AGENTS.claude.files, format: MCP_SERVERS_JSON, keep: ["github"], drop: [{ name: "notes", reason: "command ~/Library/x is macOS-only, will not run" }, { name: "old", reason: "unticked" }] },
+            { files: AGENTS.claude.files, format: MCP_SERVERS_JSON, project: { from: HOME, to: "/root" }, keep: ["zomato"], drop: [] },
           ],
           aside: [],
         },
@@ -148,14 +149,14 @@ function planOn(root: string, over: Partial<McpPlan> = {}): McpPlan {
       {
         id: "claude", label: "Claude Code",
         scopes: [
-          { files: [file(".claude-cfg/.claude.json")], format: "claude", keep: ["github", "gsc"], drop: [{ name: "notes", reason: "command ~/Library/Application Support/Notes/mcp is macOS-only, will not run" }] },
-          { files: [file(".claude-cfg/.claude.json")], format: "claude", project: { from: HOME, to: root }, keep: ["zomato", "whatsapp"], drop: [] },
+          { files: [file(".claude-cfg/.claude.json")], format: MCP_SERVERS_JSON, keep: ["github", "gsc"], drop: [{ name: "notes", reason: "command ~/Library/Application Support/Notes/mcp is macOS-only, will not run" }] },
+          { files: [file(".claude-cfg/.claude.json")], format: MCP_SERVERS_JSON, project: { from: HOME, to: root }, keep: ["zomato", "whatsapp"], drop: [] },
         ],
         aside: [],
       },
-      { id: "codex", label: "Codex", scopes: [{ files: [file(".codex/config.toml")], format: "codex", keep: ["grafana"], drop: [{ name: "sentry", reason: "unticked" }] }], aside: [] },
-      { id: "gemini", label: "Gemini CLI", scopes: [{ files: [file(".gemini/settings.json")], format: "gemini", keep: ["memory"], drop: [{ name: "gone", reason: "path /Applications/X.app/x is macOS-only, will not run" }] }], aside: [] },
-      { id: "opencode", label: "OpenCode", scopes: [{ files: [file(".config/opencode/opencode.json")], format: "opencode", keep: ["ctx"], drop: [] }], aside: [{ id: `${MCP_ID_PREFIX}opencode/late`, name: "late", reason: "OpenCode is not ticked, so its config did not travel" }] },
+      { id: "codex", label: "Codex", scopes: [{ files: [file(".codex/config.toml")], format: CODEX_TOML, keep: ["grafana"], drop: [{ name: "sentry", reason: "unticked" }] }], aside: [] },
+      { id: "gemini", label: "Gemini CLI", scopes: [{ files: [file(".gemini/settings.json")], format: MCP_SERVERS_JSON, keep: ["memory"], drop: [{ name: "gone", reason: "path /Applications/X.app/x is macOS-only, will not run" }] }], aside: [] },
+      { id: "opencode", label: "OpenCode", scopes: [{ files: [file(".config/opencode/opencode.json")], format: OPENCODE_JSON, keep: ["ctx"], drop: [] }], aside: [{ id: `${MCP_ID_PREFIX}opencode/late`, name: "late", reason: "OpenCode is not ticked, so its config did not travel" }] },
     ],
     guestHome: root,
     rewrites: [[`${HOME}/`, `${root}/`], ["/opt/homebrew/", "/home/linuxbrew/.linuxbrew/"]],
@@ -254,7 +255,7 @@ describe("applyMcp", () => {
   });
 
   const geminiOnly = (root: string, over: Partial<McpPlan> = {}): McpPlan =>
-    planOn(root, { agents: [{ id: "gemini", label: "Gemini CLI", scopes: [{ files: [join(root, ".gemini/settings.json")], format: "gemini", keep: ["memory", "vanished"], drop: [] }], aside: [] }], ...over });
+    planOn(root, { agents: [{ id: "gemini", label: "Gemini CLI", scopes: [{ files: [join(root, ".gemini/settings.json")], format: MCP_SERVERS_JSON, keep: ["memory", "vanished"], drop: [] }], aside: [] }], ...over });
   const geminiServers = (root: string): string[] => Object.keys(JSON.parse(readFileSync(join(root, ".gemini/settings.json"), "utf8")).mcpServers);
 
   it("a server whose command is not on the machine is taken out of the config and skipped with the reason; a kept server the config no longer holds is named", async () => {
@@ -281,7 +282,7 @@ describe("applyMcp", () => {
   it("a server that runs through npx is written even when npx is not on the machine yet", async () => {
     const { root, machine } = guest([]);
     seed(root);
-    const plan = planOn(root, { agents: [{ id: "claude", label: "Claude Code", scopes: [{ files: [join(root, ".claude-cfg/.claude.json")], format: "claude", keep: ["github"], drop: [] }], aside: [] }] });
+    const plan = planOn(root, { agents: [{ id: "claude", label: "Claude Code", scopes: [{ files: [join(root, ".claude-cfg/.claude.json")], format: MCP_SERVERS_JSON, keep: ["github"], drop: [] }], aside: [] }] });
     const results = await applyMcp(machine, plan, () => {});
     expect(results).toEqual<McpResult[]>([
       { id: `${MCP_ID_PREFIX}claude/github`, agent: "Claude Code", name: "github", outcome: "fetched-on-first-use", note: "npx fetches the package on first use; npx is not on the machine; the server starts once it is installed there" },
@@ -315,6 +316,58 @@ describe("applyMcp", () => {
     expect([".claude-cfg/.claude.json", ".codex/config.toml", ".gemini/settings.json"].map(f => readFileSync(join(root, f), "utf8"))).toEqual(after);
     expect(second).toEqual(first);
     expect(second.filter(r => r.name === "zomato" || r.name === "whatsapp").map(r => r.outcome)).toEqual(["fetched-on-first-use", "fetched-on-first-use"]);
+  });
+
+  it("OpenCode's config: the kept local server's command and paths are rewritten under the mcp key, the dropped one comes out, the rest of the file stays", async () => {
+    const { root, machine } = guest(["ctx-bin"]);
+    mkdirSync(join(root, ".config", "opencode"), { recursive: true });
+    const before = { $schema: "https://opencode.ai/config.json", theme: "dark", mcp: { ctx: { type: "local", command: ["/opt/homebrew/bin/ctx-bin", `${HOME}/notes`], enabled: true }, late: { type: "remote", url: "https://late.example/mcp" }, other: { type: "remote", url: "https://o.example" } } };
+    writeFileSync(join(root, ".config", "opencode", "opencode.json"), `${JSON.stringify(before, null, 2)}\n`);
+    const plan = planOn(root, { agents: [{ id: "opencode", label: "OpenCode", scopes: [{ files: [join(root, ".config/opencode/opencode.json")], format: OPENCODE_JSON, keep: ["ctx"], drop: [{ name: "late", reason: "unticked" }] }], aside: [] }] });
+    const results = await applyMcp(machine, plan, () => {});
+    expect(results).toEqual<McpResult[]>([
+      { id: `${MCP_ID_PREFIX}opencode/ctx`, agent: "OpenCode", name: "ctx", outcome: "installed" },
+      { id: `${MCP_ID_PREFIX}opencode/late`, agent: "OpenCode", name: "late", outcome: "skipped", note: "unticked" },
+    ]);
+    expect(JSON.parse(readFileSync(join(root, ".config", "opencode", "opencode.json"), "utf8"))).toEqual({
+      $schema: "https://opencode.ai/config.json", theme: "dark",
+      mcp: { ctx: { type: "local", command: ["ctx-bin", `${root}/notes`], enabled: true }, other: { type: "remote", url: "https://o.example" } },
+    });
+  });
+
+  // A format the catalog does not have: one line per server, `name command args...`. The stage runs it with no
+  // change of its own, so a fourth format is one module on the catalog entry.
+  const linesEditor: McpGuestEditor = (lib, scope, file) => {
+    const kept = lib.fs.readFileSync(file, "utf8").split("\n").filter(l => l !== "" && !scope.drop.includes(l.split(" ")[0]!));
+    const out = kept.map(l => {
+      const [name, command, ...args] = l.split(" ");
+      return scope.keep.includes(name!) ? [name, lib.rewriteString(command!, true), ...args.map(a => lib.rewriteString(a, false))].join(" ") : l;
+    });
+    const written = scope.keep.map(name => {
+      const line = out.find(l => l.startsWith(`${name} `));
+      return line === undefined ? { name, outcome: "missing" as const } : { name, outcome: "written" as const, command: line.split(" ")[1]! };
+    });
+    if (lib.write) lib.fs.writeFileSync(file, `${out.join("\n")}\n`);
+    return [...written, ...scope.drop.map(name => ({ name, outcome: "dropped" as const }))];
+  };
+  const LINES: McpFormat = { read: () => [], place: () => ({ text: "", commentsDropped: false }), guest: String(linesEditor) };
+
+  it("a format the catalog gains is one module: the stage runs the module's editor on the machine and reports through it, with no format of its own", async () => {
+    const { root, cmds, machine } = guest(["alpha"]);
+    mkdirSync(join(root, ".lines"));
+    writeFileSync(join(root, ".lines", "servers.txt"), `alpha /opt/homebrew/bin/alpha --dir=${HOME}/x\nbeta beta-bin\nother keeper\n`);
+    const plan = planOn(root, { agents: [{ id: "lines", label: "Lines", scopes: [{ files: [join(root, ".lines/servers.txt")], format: LINES, keep: ["alpha", "gone"], drop: [{ name: "beta", reason: "unticked" }] }], aside: [] }] });
+    const results = await applyMcp(machine, plan, () => {});
+    expect(results).toEqual<McpResult[]>([
+      { id: `${MCP_ID_PREFIX}lines/alpha`, agent: "Lines", name: "alpha", outcome: "installed" },
+      { id: `${MCP_ID_PREFIX}lines/gone`, agent: "Lines", name: "gone", outcome: "skipped", note: "not in the config that travelled" },
+      { id: `${MCP_ID_PREFIX}lines/beta`, agent: "Lines", name: "beta", outcome: "skipped", note: "unticked" },
+    ]);
+    expect(readFileSync(join(root, ".lines", "servers.txt"), "utf8")).toBe(`alpha alpha --dir=${root}/x\nother keeper\n`);
+    // The module's editor travels inside the one script, and only the formats the plan uses do.
+    const script = cmds.find(c => c.includes("node -e"))!;
+    expect(script).toContain('startsWith(`${name} `)');
+    expect(script).not.toContain("mcp_servers");
   });
 
   it("a failed uv install is named on every server that needed it, and the definitions still land", async () => {

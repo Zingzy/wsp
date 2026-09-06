@@ -50,3 +50,6 @@ export function readJsonc(text: string): Jsonc {
 }
 
 export const parseJsonc = (text: string): unknown => readJsonc(text).value;
+
+/** The reader as source for code that runs elsewhere: every function `readJsonc` is made of, in declaration order. */
+export const JSONC_READER: readonly ((...args: never[]) => unknown)[] = [withoutTrailingComma, readJsonc];

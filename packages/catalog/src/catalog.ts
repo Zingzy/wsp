@@ -5,7 +5,7 @@
 // state to a path, and whether it is on by default with the evidence behind
 // that. The wizard's tables read from here; nothing here runs a command.
 import { GCLOUD, KUBECTL } from "./linux-casks.js";
-import { mcpConfig, type McpConfig } from "./mcp.js";
+import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, type McpConfig } from "./mcp.js";
 import { roadModule } from "./road-modules.js";
 import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, HERMES_INSTALL, MIB, NODE_RELEASES, PYTHON_INSTALL, UV_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
 import { NO_SIGN_IN, SIGN_IN_ROWS, hasLogin, keysIdOf, keysRowOf, loginIdOf, type KeyFiles, type SignIn } from "./signin.js";
@@ -156,7 +156,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     installRoad: { road: "script", script: GOLDEN_SETUP },
     signIn: SIGN_IN_ROWS.claude,
     // https://docs.claude.com/en/docs/claude-code/mcp (user scope; project scope lives in each repo's .mcp.json)
-    mcp: mcpConfig("claude", ["~/.claude.json"], "user scope and your home folder"),
+    mcp: { format: MCP_SERVERS_JSON, files: ["~/.claude.json"], scope: "user scope and your home folder" },
     configPaths: [
       "~/.claude/settings.json", "~/.claude/CLAUDE.md", "~/.claude/skills", "~/.claude/agents", "~/.claude/commands",
       "~/.claude/plugins/installed_plugins.json", "~/.claude/plugins/known_marketplaces.json", "~/.claude.json",
@@ -180,7 +180,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     node: 16,
     signIn: SIGN_IN_ROWS.codex,
     // https://developers.openai.com/codex/config-basic (project scope is a trusted repo's .codex/config.toml)
-    mcp: mcpConfig("codex", ["~/.codex/config.toml"], "user scope"),
+    mcp: { format: CODEX_TOML, files: ["~/.codex/config.toml"], scope: "user scope" },
     configPaths: ["~/.codex/config.toml", "~/.codex/AGENTS.md", "~/.codex/prompts", "~/.codex/skills"],
     projectState: [
       { state: "rollout transcript", location: "sessions/YYYY/MM/DD/rollout-TIMESTAMP-THREADID.jsonl", key: "by date and thread id, not by path", pathFields: ["cwd in the session_meta payload and on per-turn lines"], move: "rewrite cwd", status: "measured" },
@@ -199,7 +199,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     node: 20,
     signIn: SIGN_IN_ROWS.gemini,
     // https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md (project scope is a repo's .gemini/settings.json)
-    mcp: mcpConfig("gemini", ["~/.gemini/settings.json"], "user scope"),
+    mcp: { format: MCP_SERVERS_JSON, files: ["~/.gemini/settings.json"], scope: "user scope" },
     configPaths: ["~/.gemini/settings.json", "~/.gemini/GEMINI.md", "~/.gemini/commands"],
     projectState: [
       { state: "project registry", location: "projects.json", key: "{\"projects\": {\"PATH\": \"SLUG\"}}; SLUG is the folder basename, deduplicated", pathFields: ["the key"], move: "rewrite the key, keep the slug", status: "measured" },
@@ -217,7 +217,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     installRoad: npm("opencode-ai", "1.18.27"),
     signIn: SIGN_IN_ROWS.opencode,
     // https://opencode.ai/docs/mcp-servers/ (project scope is a repo's opencode.json)
-    mcp: mcpConfig("opencode", ["~/.config/opencode/opencode.json", "~/.config/opencode/opencode.jsonc"], "user scope"),
+    mcp: { format: OPENCODE_JSON, files: ["~/.config/opencode/opencode.json", "~/.config/opencode/opencode.jsonc"], scope: "user scope" },
     configPaths: [
       "~/.config/opencode/opencode.json", "~/.config/opencode/opencode.jsonc", "~/.config/opencode/AGENTS.md", "~/.config/opencode/package.json",
       "~/.config/opencode/agents", "~/.config/opencode/commands", "~/.config/opencode/plugins", "~/.config/opencode/skills", "~/.config/opencode/themes",
@@ -304,6 +304,11 @@ export const CATALOG: readonly CatalogEntry[] = [
 
 export const CATALOG_AGENTS: readonly AgentEntry[] = CATALOG.filter((e): e is AgentEntry => e.kind === "agent");
 export const CATALOG_TOOLS: readonly ToolEntry[] = CATALOG.filter((e): e is ToolEntry => e.kind === "tool");
+
+/** An agent entry whose MCP config the catalog knows. */
+export type McpAgent = AgentEntry & { mcp: McpConfig };
+/** The agents whose config the catalog knows how to read a server from and place one in, in catalog order. */
+export const MCP_AGENTS: readonly McpAgent[] = CATALOG_AGENTS.filter((a): a is McpAgent => a.mcp !== undefined);
 
 const BY_ID: ReadonlyMap<string, CatalogEntry> = new Map(CATALOG.map(e => [e.id, e]));
 
