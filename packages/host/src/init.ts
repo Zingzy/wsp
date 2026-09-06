@@ -1106,6 +1106,8 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
           saveRecipe(path, manifest, ticks, choices);
         }
       },
+      // An attach reports no result, so the build's file stands; the retried write's outcome replaces the failure it recorded.
+      onContext: o => noteOutcomes(resultsPath, { context: o.context, contextFailure: o.contextFailure }),
     });
   let imp = importOf(bring);
   const uploadBytes = imp.files?.bytes ?? 0;

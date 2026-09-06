@@ -352,10 +352,10 @@ describe("lineage", () => {
 
   it("lists the tools missing from the forked version under a micro-label, one row per tool with its cause and reason, under that version alone", async () => {
     const missing = [
-      { name: "gopls", outcome: "skipped" as const, note: "no Linux bottle" },
-      { name: "Homebrew", outcome: "failed" as const, note: "git: not found" },
+      { id: "tools/brew/gopls", name: "gopls", outcome: "skipped" as const, note: "no Linux bottle" },
+      { id: "tools/homebrew", name: "Homebrew", outcome: "failed" as const, note: "git: not found" },
     ];
-    const lineage: SnapshotLineage = { name: "default", head: 12, versions: [{ ...gv(11), missingTools: [{ name: "Raycast", outcome: "skipped", note: "macOS app, no Linux build" }] }, { ...gv(12), missingTools: missing }] };
+    const lineage: SnapshotLineage = { name: "default", head: 12, versions: [{ ...gv(11), missingTools: [{ id: "tools/brew-cask/raycast", name: "Raycast", outcome: "skipped", note: "macOS app, no Linux build" }] }, { ...gv(12), missingTools: missing }] };
     await mount([onV12()], CAPS, lineage);
     await waitFor(() => expect(fact("v12")).toBe("v12headthis fork"));
     const lists = document.querySelectorAll("[data-k='missing-tools']");
