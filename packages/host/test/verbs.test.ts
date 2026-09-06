@@ -365,6 +365,20 @@ describe("wsp verbs over the host", () => {
     expect(threads[0]!.cwd).toBe(deep);
   });
 
+  it("threads shows a multi-paragraph brief as one row, titled by its first line and cut at the end to the column with an ellipsis", async () => {
+    await run("new", "alpha");
+    const brief = "You are a builder for the wsp repo, which is at /Users/zingzy/wsp on this machine.\n\nTicket: Zingzy/wsp-map#292.\nBuild: the fix.";
+    await run("thread", "new", "--in", "alpha", brief);
+    const { io } = await run("threads");
+    const rows = io.lines[0]!.split("\n");
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toMatch(/  You are a builder for the wsp repo, which is at \/Users\/zing…$/);
+    expect(rows[1]!.split("  ").at(-1)).toHaveLength(60);
+    const asJson = await run("threads", "--json");
+    const [{ threads }] = json(asJson.io) as [{ threads: ThreadView[] }];
+    expect(threads[0]!.title).toBe("You are a builder for the wsp repo, which is at /Users/zingzy/wsp on this machine.");
+  });
+
   it("send resumes the thread's latest session under its own agent; the thread keeps its id and who opened it", async () => {
     await run("new", "alpha");
     const [alpha] = await rt.workspaces.list();
