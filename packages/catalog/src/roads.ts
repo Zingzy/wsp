@@ -121,6 +121,14 @@ export function nodeInstallScript(floor: number, release: NodeRelease): string {
   ].join("\n");
 }
 
+/** Python 3.12 as uv's managed interpreter: uv pins the python-build-standalone release and checks its sha256,
+ * so the pin is uv's own; python3 on PATH is a link to that interpreter, ahead of whatever the image ships. */
+export const PYTHON_INSTALL = [
+  UV_INSTALL,
+  "uv python install 3.12",
+  'ln -sfn "$(uv python find --managed-python 3.12)" /usr/local/bin/python3',
+].join("\n");
+
 const HERMES = { tag: "v2026.8.31", commit: "29112bef099274229cadff79cdff7bf7b99c4b77" } as const;
 
 /** https://hermes-agent.nousresearch.com/docs/developer-guide/contributing#manual-clone-fallback */

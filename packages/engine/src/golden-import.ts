@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { join, relative } from "node:path";
 import { MCP_ID_PREFIX, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
-import { CATALOG_AGENTS, CLAUDE_KEY_FILE, NODE_PATH_LINE, NODE_RELEASES, UV_INSTALL, agentInstallLine, caskVersion, linuxCaskFor, nodeInstallScript, smokeOf, type NodeMajor, type ToolPin } from "@wsp/catalog";
+import { CATALOG_AGENTS, CLAUDE_KEY_FILE, NODE_PATH_LINE, NODE_RELEASES, UV_INSTALL, baseEntryFor, baseNote, caskVersion, installLine, linuxCaskFor, nodeInstallScript, smokeOf, type NodeMajor, type ToolPin } from "@wsp/catalog";
 
 export { CLAUDE_KEY_FILE, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
 
@@ -482,7 +482,8 @@ export type ToolManager = "brew" | "npm" | "pnpm" | "bun" | "uv" | "pipx" | "car
 export interface ToolInstall {
   id: string;
   label: string;
-  manager: ToolManager | EditorSource;
+  /** `script` is a base row's pinned installer. */
+  manager: ToolManager | EditorSource | "script";
   /** One bash -c script; exits non-zero on failure. */
   cmd: string;
   /** The install this one needs on the machine first; when that one did not install, this is skipped. */
@@ -503,6 +504,16 @@ export interface Brewfile {
   skipped: SkippedItem[];
   /** Tap formulae with no Linux bottle whose source repository is known, and command casks; each installs from its release. */
   roads: PlannedRoad[];
+  /** Rows the base stage already put on every golden, by the base row's name; nothing installs them twice. */
+  base: BaseRow[];
+}
+
+export interface BaseRow {
+  id: string;
+  /** The base row it stands for, as the catalog names it. */
+  name: string;
+  /** What the build reports for the row: the base row's name, and this Mac's major beside the floor's when they differ. */
+  note: string;
 }
 
 export interface PlannedRoad {
@@ -520,6 +531,18 @@ const HAND_PREFIX = "tools/hand/";
 
 /** A hand-installed script or Linux binary is the one tools row that travels as a file, into the same bin directory. */
 const handCopy = (e: RecipeEntry): boolean => e.id.startsWith(HAND_PREFIX) && e.linux !== "no";
+
+/** The package a tools row names: what follows its manager in the id (a tap formula keeps its slashes). */
+const packageOf = (e: RecipeEntry): string => e.id.split("/").slice(2).join("/");
+
+/** The base row a tools row stands for, when the base stage installs the same tool on every golden; a hand copy is a
+ * file of the person's and travels whatever the base has. The Mac's version is the row's, or the brew table's for a formula. */
+export function baseRowFor(e: RecipeEntry, brew: BrewTable = new Map()): BaseRow | undefined {
+  if (e.rung !== "tools" || e.id.startsWith(HAND_PREFIX)) return undefined;
+  const pkg = packageOf(e);
+  const entry = baseEntryFor(pkg);
+  return entry === undefined ? undefined : { id: e.id, name: entry.name, note: baseNote(entry, e.version ?? brew.get(pkg)?.version) };
+}
 
 /** A command cask's road, from its paths as the collector wrote them: the release's `github.com/owner/repo@tag`
  * first, a Go binary's `module@version` last when one folded into the row. */
@@ -552,6 +575,8 @@ export interface BrewFormula {
   deps: string[];
   /** The Cellar entry's size on the Mac, when read. */
   bytes?: number;
+  /** The version installed on the Mac, as brew reported it. */
+  version?: string;
   macosOnly: boolean;
   source?: ToolSource;
 }
@@ -572,7 +597,7 @@ const GO_BIN = "/root/go/bin";
 /** Where the guest finds what the tools stage installs; each install line exports it so
  * it does not depend on the machine's own environment, and login shells get it from profile.d. */
 export const TOOLS_PATH = `/root/.local/bin:/usr/local/sbin:/usr/local/bin:${BREW_PREFIX}/bin:${BREW_PREFIX}/sbin:/root/go/bin:/root/.cargo/bin:${PNPM_HOME}:/root/.bun/bin:/usr/sbin:/usr/bin:/sbin:/bin`;
-const PATH_LINE = `export PATH=${TOOLS_PATH} PNPM_HOME=${PNPM_HOME}`;
+export const PATH_LINE = `export PATH=${TOOLS_PATH} PNPM_HOME=${PNPM_HOME}`;
 
 // Install-time cleanup stays on: with it off, one recipe left 2.6 GB of bottles in the download cache on a 20 GB disk.
 const BREW_ENV = "HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 HOMEBREW_NO_ENV_HINTS=1 NONINTERACTIVE=1";
@@ -633,10 +658,13 @@ function homebrewBootstrap(): string {
 }
 
 export function brewfileFor(entries: readonly RecipeEntry[], brew: BrewTable = new Map()): Brewfile {
-  const out: Brewfile = { text: "", taps: [], formulae: [], skipped: [], roads: [] };
+  const out: Brewfile = { text: "", taps: [], formulae: [], skipped: [], roads: [], base: [] };
   for (const e of entries) {
     if (!ticked(e) || e.rung !== "tools") continue;
-    if (e.id.startsWith("tools/brew-tap/")) {
+    const base = baseRowFor(e, brew);
+    if (base !== undefined) {
+      out.base.push(base);
+    } else if (e.id.startsWith("tools/brew-tap/")) {
       out.taps.push(e.id.slice("tools/brew-tap/".length));
     } else if (e.id.startsWith("tools/brew/")) {
       const formula = e.id.slice("tools/brew/".length);
@@ -675,9 +703,9 @@ const MANAGER_ORDER: readonly Exclude<ToolManager, "brew" | "github">[] = ["npm"
 // Each is its own single brew process, in this order, before any formula.
 export const BREW_TOOLCHAIN: readonly string[] = ["glibc", "gcc"];
 
-/** How each manager gets onto the machine before its first tool: uv by its
- * checksummed release, the rest as Homebrew for Linux formulae (npm rides the base Node). */
-export const MANAGER_FORMULA: Record<Exclude<ToolManager, "brew" | "npm" | "uv" | "github">, string> = { pnpm: "pnpm", bun: "bun", pipx: "pipx", cargo: "rust", go: "go" };
+/** How a manager the base does not carry gets onto the machine before its first tool: as a Homebrew for Linux
+ * formula. A manager the floor brings (see baseEntryFor) needs none. */
+export const MANAGER_FORMULA: Readonly<Partial<Record<ToolManager, string>>> = { bun: "bun", pipx: "pipx", cargo: "rust", go: "go" };
 
 /** The collector puts a Go binary's `path@version` in its first path; recipes saved
  * before that carried it in the label as `name (path@version)`. */
@@ -769,6 +797,8 @@ function roadInstall(name: string, source: ToolSource, pin?: string, go = `githu
 /** How a removed tool comes off the machine; Go has no uninstall, so its binary is noted and left. */
 export function toolUninstall(e: RecipeEntry): { cmd: string } | { note: string } {
   const withPath = (cmd: string): string => `${PATH_LINE}\n${cmd}`;
+  const base = baseRowFor(e);
+  if (base !== undefined) return { note: `${base.name} is part of the base and stays` };
   if (e.id.startsWith("tools/brew-tap/")) return { cmd: withPath(asLinuxbrew(`untap ${e.id.slice("tools/brew-tap/".length)}`)) };
   const cask = linuxCaskFor(e.id);
   if (cask !== undefined) return { cmd: withPath(cask.uninstall) };
@@ -804,6 +834,8 @@ export function toolUninstall(e: RecipeEntry): { cmd: string } | { note: string 
 export interface ToolsPlan {
   installs: ToolInstall[];
   skipped: SkippedItem[];
+  /** Ticked rows the base stage covers; they count as installed without a step. */
+  base: BaseRow[];
   brewfile: string;
 }
 
@@ -812,7 +844,7 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
   const installs: ToolInstall[] = [];
   const skipped: SkippedItem[] = [...brew.skipped];
   const withPath = (cmd: string): string => `${PATH_LINE}\n${cmd}`;
-  const rowsOf = (manager: ToolManager): RecipeEntry[] => entries.filter(e => ticked(e) && e.rung === "tools" && e.id.startsWith(`tools/${manager}/`));
+  const rowsOf = (manager: ToolManager): RecipeEntry[] => entries.filter(e => ticked(e) && e.rung === "tools" && e.id.startsWith(`tools/${manager}/`) && baseRowFor(e) === undefined);
   const npmTicked = new Set(rowsOf("npm").map(e => e.id.slice("tools/npm/".length)));
 
   // Homebrew's own toolchain, each step waiting on the one before; everything brew installs waits on the last.
@@ -825,17 +857,14 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
     { steps: [], last: "tools/homebrew" },
   );
 
-  // One step per manager that has rows, unless it already comes along as a formula or an npm global.
+  // One step per manager that has rows, unless the base carries it or it already comes along as a formula or an npm global.
   const managers = new Map<ToolManager, { after: string; step?: ToolInstall }>();
   const managerFormulae: string[] = [];
   for (const manager of MANAGER_ORDER) {
-    if (manager === "npm" || rowsOf(manager).length === 0) continue;
+    if (rowsOf(manager).length === 0 || baseEntryFor(manager) !== undefined) continue;
     const own = `tools/manager/${manager}`;
-    if (manager === "uv") {
-      managers.set(manager, { after: own, step: { id: own, label: "uv", manager: "uv", cmd: withPath(`set -euo pipefail\n${UV_INSTALL}`) } });
-      continue;
-    }
     const formula = MANAGER_FORMULA[manager];
+    if (formula === undefined) throw new Error(`${manager} is neither in the base nor a formula`);
     if (brew.formulae.includes(formula)) managers.set(manager, { after: `tools/brew/${formula}` });
     else if (npmTicked.has(manager)) managers.set(manager, { after: `tools/npm/${manager}` });
     else {
@@ -871,10 +900,10 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
   // A cask that is a command installs from its vendor's Linux release, hashed on the guest as a road is; a command row
   // with a GitHub release already went out as a road above.
   for (const e of entries) {
-    const cask = ticked(e) && e.rung === "tools" && cliRoad(e) === undefined ? linuxCaskFor(e.id) : undefined;
+    const cask = ticked(e) && e.rung === "tools" && cliRoad(e) === undefined && baseRowFor(e) === undefined ? linuxCaskFor(e.id) : undefined;
     if (cask !== undefined) installs.push({ id: e.id, label: e.label, manager: "release", cmd: withPath(cask.install(caskVersion(cask, e), e.pin)), bin: cask.bin });
   }
-  return { installs, skipped, brewfile: brew.text };
+  return { installs, skipped, base: brew.base, brewfile: brew.text };
 }
 
 // --- editors -----------------------------------------------------------------
@@ -1111,7 +1140,7 @@ export function nodeMajorFor(floor: number, now: Date): NodeMajor | undefined {
  * catalog agent (its project state has no measured resolver, so wsp does not ship it); its line stays for recipes
  * that tick it: https://aider.chat/docs/install.html, the uv tool line. */
 export const AGENT_INSTALLERS: Record<string, AgentInstaller> = {
-  ...Object.fromEntries(CATALOG_AGENTS.filter(a => a.id !== "claude").map(a => [a.id, { name: a.name, install: agentInstallLine(a), smoke: smokeOf(a), ...(a.node !== undefined ? { node: a.node } : {}) }])),
+  ...Object.fromEntries(CATALOG_AGENTS.filter(a => a.id !== "claude").map(a => [a.id, { name: a.name, install: installLine(a), smoke: smokeOf(a), ...(a.node !== undefined ? { node: a.node } : {}) }])),
   aider: { name: "Aider", install: `${UV_INSTALL}\nuv tool install --force --python 3.12 --with pip aider-chat==0.86.2`, smoke: "aider --version" },
 };
 

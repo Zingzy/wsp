@@ -969,7 +969,7 @@ describe("importFor", () => {
         row({ rung: "identity", id: "identity/git-user", paths: ["~/.gitconfig"], bytes: 20 }),
         row({ rung: "agents", id: "agents/claude", paths: ["~/.claude/settings.json", "~/.claude.json"], bytes: 5 }),
         row({ rung: "agents", id: "agents/codex", paths: ["~/.codex/config.toml"] }),
-        row({ rung: "tools", id: "tools/brew/jq", linux: "yes" }),
+        row({ rung: "tools", id: "tools/brew/yq", linux: "yes" }),
         row({ rung: "tools", id: "tools/brew/zingzy/tap/diskbloom", label: "zingzy/tap/diskbloom", linux: "unknown" }),
         row({ rung: "tools", id: "tools/npm/bun", label: "bun@1.4.0", version: "1.4.0" }),
         row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"], choice: "copy" }),
@@ -988,7 +988,7 @@ describe("importFor", () => {
       row({ rung: "editors", id: "editors/vscode", label: "VS Code settings, for VS Code over SSH", paths: ["~/Library/Application Support/Code/User/settings.json"], bytes: 3 }),
       row({ rung: "editors", id: "editors/vscode-ext/ms-python.python", label: "ms-python.python" }),
     );
-    expect(imp.tools.map(t => t.id)).toEqual(["editors/nvim", "editors/vscode-ext", "tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/brew/jq", "tools/npm/bun"]);
+    expect(imp.tools.map(t => t.id)).toEqual(["editors/nvim", "editors/vscode-ext", "tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/brew/yq", "tools/npm/bun"]);
     expect(imp.recipe?.files.map(f => f.dest)).toContain(".vscode-server/data/Machine/settings.json");
   });
 
@@ -1036,14 +1036,20 @@ describe("importFor", () => {
       { id: "agents/claude", path: "~/.claude.json", note: "no longer on this computer" },
       { id: "agents/codex", path: "~/.codex/config.toml", note: "no longer on this computer" },
     ]);
-    expect(imp.tools.map(t => t.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/brew/jq", "tools/npm/bun"]);
+    expect(imp.tools.map(t => t.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/brew/yq", "tools/npm/bun"]);
     expect(imp.node).toMatchObject({ floor: 16, version: NODE_RELEASES[22].version, agents: ["Codex"] });
     expect(imp.agents.map(a => [a.id, a.install, a.smoke])).toEqual([
       ["agents/claude", GOLDEN_SETUP, GOLDEN_SMOKE],
       ["agents/codex", expect.stringContaining("npm install -g @openai/codex@"), "codex --version"],
     ]);
     expect(imp.skippedAgents).toEqual([]);
+    expect(imp.baseTools).toEqual([]);
     expect(ticks(home, row({ rung: "agents", id: "agents/zed", label: "Zed" })).skippedAgents).toEqual([{ id: "agents/zed", name: "Zed", note: "no installer known" }]);
+    // A ticked row the base floor covers is no step and no skip: it lands in the result as installed, by the base row's name.
+    const covered = ticks(home, row({ rung: "tools", id: "tools/brew/jq", label: "jq" }), row({ rung: "tools", id: "tools/npm/pnpm", label: "pnpm" }));
+    expect(covered.tools.map(t => t.id)).not.toContain("tools/brew/jq");
+    expect(covered.skippedTools!.map(s => s.id)).not.toContain("tools/brew/jq");
+    expect(covered.baseTools).toEqual([{ id: "tools/brew/jq", label: "jq", note: "jq is part of the base" }, { id: "tools/npm/pnpm", label: "pnpm", note: "pnpm is part of the base" }]);
   });
 
   it("carries the person's shell when zsh's rows are ticked, with the frameworks among them, and none when only bash's are", () => {

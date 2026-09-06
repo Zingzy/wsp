@@ -415,6 +415,9 @@ export type GoldenLogin = z.infer<typeof GoldenLogin>;
  * with the reason it gave. Forks of the version are missing it. */
 export const GoldenMissingTool = z.object({ name: z.string(), outcome: z.enum(["skipped", "failed"]), note: z.string() });
 export type GoldenMissingTool = z.infer<typeof GoldenMissingTool>;
+/** One base tool's command with the version read on the builder after the base stage. */
+export const GoldenBaseTool = z.object({ name: z.string(), version: z.string() });
+export type GoldenBaseTool = z.infer<typeof GoldenBaseTool>;
 
 /** One sealed image. `kind` is the machine kind the snapshot was taken from and
  * therefore restores as; entries sealed before kind was recorded were all
@@ -439,6 +442,9 @@ export const GoldenVersion = z.object({
   /** The snapshot the builder that sealed this version descends from: an update's head. Absent on a version built
    * from a fresh machine, and on versions sealed before this was recorded. */
   parentSnapshotId: z.string().optional(),
+  /** Every base tool's command with the version read after the base stage on the builder this version descends from.
+   * Absent on a version sealed before the base tools existed; its forks never ran them, so an update is refused. */
+  base: z.array(GoldenBaseTool).optional(),
 });
 export type GoldenVersion = z.infer<typeof GoldenVersion>;
 

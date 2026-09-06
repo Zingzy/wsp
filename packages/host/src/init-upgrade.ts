@@ -129,9 +129,14 @@ export async function updateRoad(o: UpdateRoadOptions): Promise<0 | 1 | "rebuild
     log.success(`Golden v${version} already matches this recipe. Nothing to update; run wsp to serve it.`, out);
     return 0;
   }
-  const kept = keptBuilder(await o.rt.golden.builders(), version);
   const head = manifest?.versions.find(v => v.version === manifest.head);
-  const rateUsdPerHour = o.rt.backend.pricing.rateUsdPerHour(head?.size ?? kept?.size ?? o.rt.backend.pricing.defaultSize);
+  if (head?.base === undefined) {
+    note(describeDiff(diff).join("\n"), `Changes since golden v${version}`, out);
+    log.step(`Golden v${version} was sealed before the base tools existed and cannot take an update; the rebuild is the only road, ${rebuildEstimate(o.lastBuild)}.`, out);
+    return "rebuild";
+  }
+  const kept = keptBuilder(await o.rt.golden.builders(), version);
+  const rateUsdPerHour = o.rt.backend.pricing.rateUsdPerHour(head.size ?? kept?.size ?? o.rt.backend.pricing.defaultSize);
   const offer: UpgradeOffer = { diff, small: isSmallDelta(diff, id => rowOf(id)?.bytes ?? 0), onBuilder: kept !== undefined, version, rateUsdPerHour, lastBuild: o.lastBuild };
   note(describeOffer(offer).join("\n"), `Changes since golden v${version}`, out);
 
@@ -163,7 +168,7 @@ export async function updateRoad(o: UpdateRoadOptions): Promise<0 | 1 | "rebuild
   const t0 = Date.now();
   let result: Awaited<ReturnType<Runtime["golden"]["upgrade"]>> | undefined;
   let error: unknown;
-  const logins = carryLogins(head?.logins, diff);
+  const logins = carryLogins(head.logins, diff);
   const view = await o.stream(UPGRADE_STEPS, () => o.rt.golden.upgrade({ delta, ...(logins !== undefined ? { logins } : {}) }).then(r => (result = r), e => (error = e)));
   if (result === undefined) {
     if (view.failure === undefined) log.error(error instanceof Error ? error.message : String(error), out);

@@ -167,7 +167,7 @@ export interface StageFrame {
  * stage running is charged to. */
 export const PREPARE_STEPS: readonly StageWords[] = [
   { stage: "creating", start: "Creating the machine", end: "Machine created", fail: "Creating the machine failed" },
-  { stage: "deploying-daemon", start: "Installing the base (Node, the daemon)", end: "Base installed", fail: "Installing the base failed" },
+  { stage: "deploying-daemon", start: "Installing the base (tools and daemon)", end: "Base installed", fail: "Installing the base failed" },
   { stage: "applying-setup", start: "Applying your setup", end: "Setup applied", fail: "Applying your setup failed" },
   { stage: "uploading-files", start: "Uploading your files", end: "Files uploaded", fail: "Uploading your files failed" },
   { stage: "installing-harness", start: "Installing agents", end: "Agents installed", fail: "Installing agents failed" },

@@ -7,7 +7,6 @@ import {
   BUILDER_DISK_GB,
   BUILDER_FREE_BYTES,
   DISK_ROOM_BYTES,
-  NODE_BYTES,
   PACK_BUDGET_BYTES,
   agentSize,
   assumedSize,
@@ -61,6 +60,7 @@ describe("the Mac's Homebrew as a table", () => {
     // Direct and transitive runtime dependencies, each once.
     expect(ffmpeg.deps.sort()).toEqual(["ca-certificates", "openssl@3", "x264"]);
     expect(ffmpeg.bytes).toBe(102400 * 1024);
+    expect(ffmpeg.version).toBe("8.1.2");
     expect(TABLE.get("gh")!.source).toEqual({ repo: "cli/cli", tag: "v2.100.0" });
     expect(TABLE.get("zingzy/tap/diskbloom")!.source).toEqual({ repo: "Zingzy/diskbloom", tag: "v0.1.0" });
     expect(TABLE.get("someone/tap/gitonly")!.source).toEqual({ repo: "someone/gitonly", tag: "v3.1.0" });
@@ -162,8 +162,8 @@ describe("estimateDisk", () => {
     expect(est.toolchain).toBe(BREW_TOOLCHAIN_BYTES);
     // ffmpeg + x264 + openssl@3 + ca-certificates (openssl@3's own row adds nothing new) + llvm@21 measured + zstd.
     expect(est.tools).toBe((102400 + 20480 + 30720 + 1024 + 5120) * 1024 + 2560 * MIB);
-    // Gemini CLI's engines floor (20) is above the base's Node 18, so the stage installs a Node and it counts with the agents.
-    expect(est.agents).toBe((673 + 189) * MIB + NODE_BYTES);
+    // The agents run on the base's Node 22, which is the base floor's cost, not theirs.
+    expect(est.agents).toBe((673 + 189) * MIB);
     expect(est.unknown).toEqual([]);
     expect(est.assumed).toBe(0);
     expect(est.total).toBe(est.files + est.toolchain + est.tools + est.agents);
@@ -183,18 +183,18 @@ describe("estimateDisk", () => {
     expect(est.total).toBe(est.tools + est.assumed);
   });
 
-  it("an agent whose floor the base's Node already meets brings no Node", () => {
+  it("no agent brings a Node of its own: the base's 22 meets every pinned floor", () => {
     const codex = { ...row({ id: "agents/codex" }), rung: "agents" as const };
     expect(estimateDisk([codex], 0, TABLE).agents).toBe(455 * MIB);
     const pi = { ...row({ id: "agents/pi" }), rung: "agents" as const };
-    expect(estimateDisk([codex, pi], 0, TABLE).agents).toBe((455 + 165) * MIB + NODE_BYTES);
+    expect(estimateDisk([codex, pi], 0, TABLE).agents).toBe((455 + 165) * MIB);
   });
 
   it("a manager the plan pulls in as a formula counts, and so does the toolchain it needs", () => {
-    const est = estimateDisk([row({ id: "tools/cargo/ripgrep", label: "ripgrep" })], 0, new Map([["rust", { name: "rust", fullName: "rust", deps: [], bytes: 400 * MIB, macosOnly: false }]]));
+    const est = estimateDisk([row({ id: "tools/cargo/bat", label: "bat" })], 0, new Map([["rust", { name: "rust", fullName: "rust", deps: [], bytes: 400 * MIB, macosOnly: false }]]));
     expect(est.toolchain).toBe(BREW_TOOLCHAIN_BYTES);
     expect(est.tools).toBe(400 * MIB);
-    expect(est.unknown).toEqual(["ripgrep"]);
+    expect(est.unknown).toEqual(["bat"]);
     expect(est.assumed).toBe(100 * MIB);
     expect(est.total).toBe(BREW_TOOLCHAIN_BYTES + 400 * MIB + 100 * MIB);
   });
