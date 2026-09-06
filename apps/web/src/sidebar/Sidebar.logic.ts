@@ -106,7 +106,7 @@ export type SidebarThreadStatus =
   | "failed"
   | "ready";
 
-interface SidebarThreadStatusInput {
+export interface SidebarThreadStatusInput {
   readonly status: SessionStatus;
   readonly hasPendingApprovals?: boolean;
   readonly hasPendingUserInput?: boolean;
@@ -128,6 +128,11 @@ export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): Si
     return "failed";
   }
   return "ready";
+}
+
+/** The one reading of "this thread has a turn running". */
+export function isThreadWorking(thread: SidebarThreadStatusInput): boolean {
+  return resolveSidebarThreadStatus(thread) === "working";
 }
 
 /** NaN-safe Date.parse for sort comparators: a malformed timestamp must not
