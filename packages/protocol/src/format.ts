@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Binary units with one decimal for the wizard, the engine's stage lines, the
-// runtime's import events and the app. The files that keep their own rule are
-// the exception list in the protocol format test, each with its reason.
+// runtime's import events and the app; a turn's duration and cost as the
+// chat's footer and the notify line print them. The files that keep their own
+// rule are the exception list in the protocol format test, each with its reason.
+import type { TurnResult } from "./index.js";
 const KIB = 1024;
 const MIB = KIB * 1024;
 const GIB = MIB * 1024;
@@ -17,6 +19,37 @@ export function fmtBytes(n: number): string {
 /** A machine size's memory in GB as the size table names it: whole when whole, else one decimal; a size spec, not a byte count. */
 export function fmtMemGb(memMb: number): string {
   return `${Number((memMb / 1024).toFixed(1))} GB`;
+}
+
+/** A turn's wall time: ms under a second, tenths under ten, whole seconds under a minute, then minutes and seconds. */
+export function fmtDuration(durationMs: number): string {
+  if (!Number.isFinite(durationMs) || durationMs < 0) return "0ms";
+  if (durationMs < 1_000) return `${Math.max(1, Math.round(durationMs))}ms`;
+  if (durationMs < 10_000) {
+    const tenths = Math.round(durationMs / 100) / 10;
+    return tenths >= 10 ? "10s" : `${tenths.toFixed(1)}s`;
+  }
+  if (durationMs < 60_000) return `${Math.round(durationMs / 1_000)}s`;
+  const minutes = Math.floor(durationMs / 60_000);
+  const seconds = Math.round((durationMs % 60_000) / 1_000);
+  if (seconds === 0) return `${minutes}m`;
+  if (seconds === 60) return `${minutes + 1}m`;
+  return `${minutes}m ${seconds}s`;
+}
+
+/** A turn's cost in dollars: cents, or four places under a cent so a short turn does not read as free. */
+export function fmtCost(usd: number): string {
+  return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
+}
+
+/** The one line a thread's end sends to whoever its start named: the thread's first eight characters, the outcome
+ * word with the duration and cost the harness reported, and the last non-empty line of the reply, or the error when
+ * there is no reply. */
+export function notifyLine(threadId: string, result: TurnResult): string {
+  const facts = [result.status, ...(result.durationMs !== undefined ? [fmtDuration(result.durationMs)] : []), ...(result.costUsd !== undefined ? [fmtCost(result.costUsd)] : [])];
+  const lines = (result.text ?? "").split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+  const tail = lines.at(-1) ?? result.error;
+  return `thread ${threadId.slice(0, 8)} finished (${facts.join(", ")})${tail !== undefined ? `: ${tail}` : ""}`;
 }
 
 /** Minutes and two-digit seconds, with whole hours ahead when there are any: how long a turn ran. */

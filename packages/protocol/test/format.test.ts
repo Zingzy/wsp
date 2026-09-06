@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { fmtBytes, fmtElapsed, fmtMemGb, TURN_IDLE_MS, TURN_WALL_MS, turnCutLine } from "../src/index.js";
+import { fmtBytes, fmtCost, fmtDuration, fmtElapsed, fmtMemGb, notifyLine, TURN_IDLE_MS, TURN_WALL_MS, turnCutLine } from "../src/index.js";
 import { ROOT, sourceFiles } from "./source-files.js";
 
 describe("fmtBytes", () => {
@@ -20,6 +20,33 @@ describe("fmtBytes", () => {
     expect(fmtBytes(3000 * 1024 * 1024)).toBe("2.9 GB");
     expect(fmtBytes(2048 * 1024 * 1024)).toBe("2.0 GB");
     expect(fmtBytes(250 * 1024 * 1024)).toBe("250.0 MB");
+  });
+});
+
+describe("a turn's duration and cost", () => {
+  it("fmtDuration reads ms under a second, tenths under ten, whole seconds under a minute, then minutes and seconds", () => {
+    expect([0, 7, 999, 1500, 9960, 10458, 59_400, 60_000, 101_515, 492_000, 862_399, -5, 4000].map(fmtDuration)).toEqual([
+      "1ms", "7ms", "999ms", "1.5s", "10s", "10s", "59s", "1m", "1m 42s", "8m 12s", "14m 22s", "0ms", "4.0s",
+    ]);
+  });
+
+  it("fmtCost reads cents, and four places under a cent", () => {
+    expect([1.94, 0.22, 0.01, 0.0042, 0].map(fmtCost)).toEqual(["$1.94", "$0.22", "$0.01", "$0.0042", "$0.0000"]);
+  });
+});
+
+describe("notifyLine", () => {
+  const THREAD = "c452d1e8-7a1b-4f2c-9e3d-000000000001";
+
+  it("names the thread by its first eight characters, then the outcome, duration and cost, then the reply's last non-empty line", () => {
+    expect(notifyLine(THREAD, { status: "completed", durationMs: 492_000, costUsd: 1.94, text: "Ran the gate.\n\nAll 12 tests green.\n" })).toBe("thread c452d1e8 finished (completed, 8m 12s, $1.94): All 12 tests green.");
+  });
+
+  it("failed and interrupted carry their words; an error stands in for a reply that has none, and facts the harness did not report are left out", () => {
+    expect(notifyLine(THREAD, { status: "failed", durationMs: 3_000, error: "the harness died" })).toBe("thread c452d1e8 finished (failed, 3.0s): the harness died");
+    expect(notifyLine(THREAD, { status: "interrupted", durationMs: 12_000, costUsd: 0.03, text: "Stopped mid-way." })).toBe("thread c452d1e8 finished (interrupted, 12s, $0.03): Stopped mid-way.");
+    expect(notifyLine(THREAD, { status: "failed", error: "machine paused while the agent was working" })).toBe("thread c452d1e8 finished (failed): machine paused while the agent was working");
+    expect(notifyLine(THREAD, { status: "interrupted" })).toBe("thread c452d1e8 finished (interrupted)");
   });
 });
 

@@ -38,6 +38,14 @@ describe("reduceEvent with a steer", () => {
     expect(strayed.known).toEqual(["thr_b"]);
   });
 
+  it("a session.notify of the held thread lands in it as its turn's event; another thread's is dropped", () => {
+    const held = state([{ type: "session.start", ...A, prompt: "build it" }, { type: "session.done", ...A, result: { status: "completed", text: "all green" } }]);
+    const own = reduceEvent(held, { type: "session.notify", ...A, notify: "thr_parent", text: "thread thr_a finished (completed): all green" }, T0);
+    expect(own.events.at(-1)).toMatchObject({ type: "session.notify", notify: "thr_parent" });
+    const other = reduceEvent(held, { type: "session.notify", ...B, notify: "me", text: "thread thr_b finished (completed): x" }, T0);
+    expect(other.events).toHaveLength(2);
+  });
+
   it("a fresh view with a send pending never takes a steer for its own send: only a start or a death does", () => {
     const fresh = state([], { fresh: true, sending: { after: undefined }, pendingPrompt: { text: "first", requestId: REQ, at: T0 } });
     const next = reduceEvent(fresh, { type: "session.steer", ...B, prompt: "elsewhere" }, T0);

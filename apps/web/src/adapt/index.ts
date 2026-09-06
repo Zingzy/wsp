@@ -6,7 +6,6 @@ export * from "./view-model.js";
 export { deriveSession, summarizeOutput, type SessionModel, type DeriveSessionOptions } from "./session.js";
 export {
   deriveMessagesTimelineRows,
-  formatDuration,
   summarizeToolGroup,
   toolGroupAction,
   toolGroupSummaryKind,

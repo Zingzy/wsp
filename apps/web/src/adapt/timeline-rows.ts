@@ -5,6 +5,7 @@
 // wsp's turns can express: no proposed plans, subagent fleets, checkpoints or
 // MCP presentation tables. Turn duration comes from the turn summary because
 // entries are unstamped on our wire.
+import { fmtDuration } from "@wsp/protocol";
 import type { MessagesTimelineRow, TimelineEntry, ToolGroupAction, ToolGroupSummaryKind, TurnSummary, WorkLogEntry } from "./view-model.js";
 import { isCodeSearchTool } from "./session.js";
 
@@ -203,7 +204,7 @@ function deriveTurnFolds(
     const firstHidden = group.entries.find(e => hidden.has(e.id))!;
     const turn = turnById.get(turnId);
     const durationMs = turn?.durationMs ?? elapsedMs(turn?.startedAt ?? group.entries[0]!.createdAt, turn?.completedAt ?? group.entries[group.entries.length - 1]!.createdAt);
-    const duration = durationMs !== null ? formatDuration(durationMs) : null;
+    const duration = durationMs !== null ? fmtDuration(durationMs) : null;
     const label = turn?.state === "interrupted"
       ? (duration ? `You stopped after ${duration}` : "You stopped this response")
       : (duration ? `Worked for ${duration}` : "Worked");
@@ -393,19 +394,4 @@ export function toolGroupSummaryKind(entries: ReadonlyArray<WorkLogEntry>): Tool
     return "other";
   }));
   return fallback.size === 1 ? [...fallback][0]! : "mixed";
-}
-
-export function formatDuration(durationMs: number): string {
-  if (!Number.isFinite(durationMs) || durationMs < 0) return "0ms";
-  if (durationMs < 1_000) return `${Math.max(1, Math.round(durationMs))}ms`;
-  if (durationMs < 10_000) {
-    const tenths = Math.round(durationMs / 100) / 10;
-    return tenths >= 10 ? "10s" : `${tenths.toFixed(1)}s`;
-  }
-  if (durationMs < 60_000) return `${Math.round(durationMs / 1_000)}s`;
-  const minutes = Math.floor(durationMs / 60_000);
-  const seconds = Math.round((durationMs % 60_000) / 1_000);
-  if (seconds === 0) return `${minutes}m`;
-  if (seconds === 60) return `${minutes + 1}m`;
-  return `${minutes}m ${seconds}s`;
 }

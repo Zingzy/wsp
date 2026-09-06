@@ -43,6 +43,7 @@ import {
   ThreadView,
   ExecEvent,
   foldThreads,
+  NOTIFY_ME,
   WorkspaceStatus,
   WorkspaceView,
 } from "../src/index.js";
@@ -626,6 +627,19 @@ describe("thread provenance", () => {
   it("sessions.start takes startedBy and nothing else new", () => {
     expect(RuntimeRequest.parse({ id: 1, op: "sessions.start", workspaceId: "ws_1", prompt: "go", startedBy: "cli" })).toMatchObject({ startedBy: "cli" });
     expect(() => RuntimeRequest.parse({ id: 1, op: "sessions.start", workspaceId: "ws_1", prompt: "go", startedBy: "app" })).toThrow();
+  });
+
+  it("sessions.start may name who its thread's ends are told: a thread id or me; session.notify carries the line in the ending thread's transcript", () => {
+    const req = { id: 1, op: "sessions.start", workspaceId: "ws_1", prompt: "build it", notify: "thread_parent_0001" };
+    expect(RuntimeRequest.parse(req)).toEqual(req);
+    expect(RuntimeRequest.parse({ ...req, notify: NOTIFY_ME })).toEqual({ ...req, notify: "me" });
+    expect(() => RuntimeRequest.parse({ ...req, notify: 7 })).toThrow();
+    const told = { type: "session.notify", workspaceId: "ws_1", sessionId: "s1", turnId: "turn_0002", threadId: "thread_child_0001", at: 1756687889412, notify: "thread_parent_0001", text: "thread thread_c finished (completed, 8m 12s, $1.94): all green" };
+    expect(SessionEvent.parse(told)).toEqual(told);
+    expect(EventUnion.parse(JSON.parse(JSON.stringify(told)))).toEqual(told);
+    expect(EventUnion.parse({ ...told, seq: 12 })).toEqual({ ...told, seq: 12 });
+    expect(() => SessionEvent.parse({ ...told, notify: undefined })).toThrow();
+    expect(() => SessionEvent.parse({ ...told, text: undefined })).toThrow();
   });
 
   it("sessions.start may carry the client's request id, and session.start carries it back, so a client tells its own start from another's with the same prompt", () => {

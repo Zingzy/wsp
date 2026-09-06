@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect } from "react";
 import { create } from "zustand";
-import type { Capabilities, HarnessCatalog, PortForward, SessionView, WorkspaceCreateStage, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import { NOTIFY_ME, type Capabilities, type HarnessCatalog, type PortForward, type SessionView, type WorkspaceCreateStage, type WorkspacePhase, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
 import { useSignInStore } from "../shell/signInStore.js";
 
@@ -385,6 +385,9 @@ export const useStore = create<State>((set, get) => {
         case "session.end":
           set(s => ({ spending: { ...s.spending, [e.workspaceId]: Math.max(0, (s.spending[e.workspaceId] ?? 0) - 1) } }));
           void get().reloadSessions(e.workspaceId);
+          return;
+        case "session.notify":
+          if (e.notify === NOTIFY_ME) set({ toast: e.text });
           return;
         default:
           return;

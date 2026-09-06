@@ -91,7 +91,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, fmtBytes, sendRefusal, shellQuote, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, NOTIFY_ME, fmtBytes, notifyLine, sendRefusal, shellQuote, workspaceState } from "@wsp/protocol";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { DAEMON_TOKEN_SET, assertTokenShape, rotateDaemonTokenScript } from "./daemon-token.js";
@@ -631,6 +631,10 @@ export interface Runtime {
         startedBy?: SessionOrigin;
         /** The client's id for this send, stamped on the turn's session.start as sent. */
         requestId?: string;
+        /** A thread id, or NOTIFY_ME: kept on the thread this start opens, so the end of every turn on it sends one
+         * line (notifyLine) into that thread through this same start, or, for me, records it for the person. A start
+         * that resumes a thread keeps what the thread had. Rejects when no thread has that id. */
+        notify?: string;
       },
     ): Promise<SessionHandle>;
     /** Every turn this state file knows, the ones before a restart as they were last written; one that was still
@@ -730,7 +734,7 @@ interface TranscriptRecord {
 
 interface SessionIndexRecord {
   workspaceId: string;
-  sessions: (SessionView & { turnId: string })[];
+  sessions: (SessionView & { turnId: string; notify?: string })[];
 }
 
 /** Builders live apart from workspaces: never in the rail, and a record left
@@ -918,7 +922,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The prepare in flight per golden name; a second call for the same recipe joins it instead of running the stages twice on one machine. */
   const preparing = new Map<string, { hash: string | undefined; promise: Promise<GoldenBuilderView> }>();
   /** A row read back from the store has no handle: its process died with the runtime that started it. */
-  const sessions = new Map<string, { view: SessionView; turnId: string; handle?: SessionHandle; end?: (reason: string) => void }>();
+  const sessions = new Map<string, { view: SessionView; turnId: string; notify?: string; handle?: SessionHandle; end?: (reason: string) => void }>();
   /** Every exec stream still running, so the machine going away ends it the way it ends a session. */
   const execs = new Set<{ workspaceId: string; end: (reason: string) => void }>();
   const indexFlushes = new Map<string, Promise<void>>();
@@ -974,7 +978,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const persistSessions = (workspaceId: string): Promise<void> => {
     if (!live.has(workspaceId)) return Promise.resolve();
     capSessions(workspaceId);
-    const rows = [...sessions.values()].filter(s => s.view.workspaceId === workspaceId).map(s => ({ ...s.view, turnId: s.turnId }));
+    const rows = [...sessions.values()].filter(s => s.view.workspaceId === workspaceId).map(s => ({ ...s.view, turnId: s.turnId, ...(s.notify !== undefined ? { notify: s.notify } : {}) }));
     const snapshot: SessionIndexRecord = { workspaceId, sessions: rows };
     const queued = (indexFlushes.get(workspaceId) ?? Promise.resolve())
       .then(() => store.put(SESSIONS, workspaceId, snapshot))
@@ -1517,7 +1521,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           continue;
         }
         let cut = false;
-        for (const { turnId, ...view } of index.sessions) {
+        for (const { turnId, notify, ...view } of index.sessions) {
           // The harness process died with the runtime that started it, so a turn still running never settles.
           if (view.status === "running") {
             cut = true;
@@ -1525,7 +1529,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             view.endedAt = Date.now();
             record({ type: "session.end", workspaceId: view.workspaceId, sessionId: view.claudeSessionId ?? view.id, turnId, threadId: view.threadId, exitCode: null, sawResult: false, reason: RESTARTED_REASON });
           }
-          sessions.set(view.id, { view, turnId });
+          sessions.set(view.id, { view, turnId, ...(notify !== undefined ? { notify } : {}) });
         }
         if (cut) void persistSessions(index.workspaceId);
       }
@@ -1879,6 +1883,56 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
     return undefined;
   };
+  /** The latest row of a thread, by its runtime id, across every workspace: a thread is named from anywhere. */
+  const latestOn = (threadId: string): SessionView | undefined => {
+    let latest: SessionView | undefined;
+    for (const s of sessions.values()) {
+      if (s.view.threadId === threadId && (latest === undefined || (s.view.startedAt ?? 0) >= (latest.startedAt ?? 0))) latest = s.view;
+    }
+    return latest;
+  };
+  /** What the thread's start registered, kept by every turn on it. */
+  const notifyOf = (threadId: string): string | undefined => {
+    for (const s of sessions.values()) {
+      if (s.view.threadId === threadId && s.notify !== undefined) return s.notify;
+    }
+    return undefined;
+  };
+  /** Lines for a parent whose workspace could not take a start when the child ended (napping, or the nap that ended
+   * the child), sent when that workspace wakes; in memory only, so a host restart during the nap drops them. */
+  const heldLines = new Map<string, { from: string; notify: string; text: string }[]>();
+  /** The line into the parent thread as a send would go: steered into its running turn, queued behind it, or a turn
+   * of its own. A parent with no session to resume drops the line with a warning; the child's end must not fail on it. */
+  const deliver = (from: string, notify: string, text: string): void => {
+    const parent = latestOn(notify);
+    if (parent?.claudeSessionId === undefined) {
+      console.warn(`thread ${from.slice(0, 8)} ended, but thread ${notify.slice(0, 8)} has no session to tell`);
+      return;
+    }
+    const phase = live.get(parent.workspaceId)?.record.phase;
+    if (phase !== undefined && sendRefusal(workspaceState({ phase })) !== null) {
+      heldLines.set(parent.workspaceId, [...(heldLines.get(parent.workspaceId) ?? []), { from, notify, text }]);
+      return;
+    }
+    sessionsApi.start(parent.workspaceId, { prompt: text, harness: parent.harness, resume: parent.claudeSessionId, startedBy: "agent" }).catch((e: unknown) => {
+      console.warn(`thread ${from.slice(0, 8)} ended, but its line did not reach thread ${notify.slice(0, 8)}: ${e instanceof Error ? e.message : String(e)}`);
+    });
+  };
+  bus.on("workspace.woken", e => {
+    if (e.type !== "workspace.woken") return;
+    const lines = heldLines.get(e.workspaceId) ?? [];
+    heldLines.delete(e.workspaceId);
+    for (const l of lines) deliver(l.from, l.notify, l.text);
+  });
+  /** The one line an ending turn sends where its thread's start said: into a thread, or nowhere further for me, whom
+   * the recorded event reaches. Recorded before the turn's session.done, since a follower ends there. */
+  const notifyEnd = (s: { view: SessionView; turnId: string }, notify: string, result: TurnResult): void => {
+    const threadId = s.view.threadId;
+    if (threadId === undefined) return;
+    const text = notifyLine(threadId, result);
+    record({ type: "session.notify", workspaceId: s.view.workspaceId, sessionId: s.view.claudeSessionId ?? s.view.id, turnId: s.turnId, threadId, notify, text });
+    if (notify !== NOTIFY_ME) deliver(threadId, notify, text);
+  };
   /** Recorded once the harness took the line, so the row sits where the turn could first see it. */
   const recordSteer = (s: { view: SessionView; turnId: string }, handleId: string, o: { prompt: string; requestId?: string }): void => {
     record({
@@ -1902,6 +1956,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       refuse();
       const { harness, adapter } = adapterFor(entry, o.harness);
       const threadId = threadOf(workspaceId, o.resume);
+      if (o.notify !== undefined && o.notify !== NOTIFY_ME) {
+        if (latestOn(o.notify) === undefined) throw new Error(`no thread ${o.notify} to notify`);
+        if (o.notify === threadId) throw new Error("a thread cannot notify itself");
+        // Each end would start the next turn on the other thread with no one sending anything, so the chain is
+        // walked whole; it is a lead and its builders, so it is short.
+        const seen = new Set<string>();
+        for (let link = notifyOf(o.notify); link !== undefined && link !== NOTIFY_ME && !seen.has(link); link = notifyOf(link)) {
+          if (link === threadId) throw new Error(`thread ${o.notify.slice(0, 8)} already notifies this thread; a cycle would run forever`);
+          seen.add(link);
+        }
+      }
+      const notify = o.notify ?? notifyOf(threadId);
       let outcome: SessionStartOutcome = "started";
       // Two processes on one harness session corrupt its transcript, so a thread runs one turn at a time.
       for (let running = runningOn(threadId); running !== undefined; running = runningOn(threadId)) {
@@ -1985,6 +2051,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           case "turn.done":
             sessionView.status = event.result.status;
             void persistSessions(workspaceId);
+            if (notify !== undefined) notifyEnd({ view: sessionView, turnId }, notify, event.result);
             record({ type: "session.done", workspaceId, sessionId, turnId, threadId, result: event.result });
             return;
           case "session.end":
@@ -2044,10 +2111,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         sessionView.status = "failed";
         sessionView.endedAt = Date.now();
         void persistSessions(workspaceId);
+        if (notify !== undefined) notifyEnd({ view: sessionView, turnId }, notify, { status: "failed", error: reason });
         record({ type: "session.end", workspaceId, sessionId: sessionView.claudeSessionId ?? handleId, turnId, threadId, exitCode: null, sawResult: false, reason });
         void started.interrupt().catch(() => {});
       };
-      sessions.set(handleId, { view: sessionView, turnId, handle, end });
+      sessions.set(handleId, { view: sessionView, turnId, ...(notify !== undefined ? { notify } : {}), handle, end });
       void persistSessions(workspaceId);
       started.finished
         .then(result => {

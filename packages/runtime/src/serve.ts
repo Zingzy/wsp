@@ -210,6 +210,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 ...(msg.contextWindow !== undefined ? { contextWindow: msg.contextWindow } : {}),
                 ...(msg.startedBy !== undefined ? { startedBy: msg.startedBy } : {}),
                 ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
+                ...(msg.notify !== undefined ? { notify: msg.notify } : {}),
               });
               send({ id: msg.id, ok: true, session: handle.view(), outcome: handle.outcome, turnId: handle.turnId });
               return;

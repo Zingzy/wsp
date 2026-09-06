@@ -7,7 +7,7 @@
 // session id repeats across turns. Wire order is the timeline order. createdAt
 // is the wire's `at` (ms epoch) as ISO, else the caller's receipt clock, else
 // "" for unstamped history.
-import type { SessionEvent, SessionHarness, TurnResult } from "@wsp/protocol";
+import { NOTIFY_ME, type SessionEvent, type SessionHarness, type TurnResult } from "@wsp/protocol";
 import type {
   ChatMessage,
   ProviderRequestKind,
@@ -167,6 +167,13 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
         const t = turnFor(event, at);
         closeOpenMessage(t);
         addMessage(t, "user", event.prompt, at, false, true);
+        continue;
+      }
+      case "session.notify": {
+        const t = turnFor(event, at);
+        closeOpenMessage(t);
+        const label = event.notify === NOTIFY_ME ? "told you" : `told thread ${event.notify.slice(0, 8)}`;
+        addWork(t, { createdAt: at, label, detail: event.text, tone: "info", sourceActivityKind: "runtime.notify" }, at);
         continue;
       }
       case "session.done": {

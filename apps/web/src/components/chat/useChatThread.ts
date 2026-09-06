@@ -100,7 +100,7 @@ export interface ThreadState {
 }
 
 const EMPTY: ThreadState = { events: [], arrivals: [], pendingPrompt: null, localErrors: [], fresh: false, stale: null, sending: null, left: undefined, known: [], named: null, stray: null };
-const SESSION_TYPES: ReadonlySet<string> = new Set(["session.start", "session.delta", "session.done", "session.end", "session.steer"]);
+const SESSION_TYPES: ReadonlySet<string> = new Set(["session.start", "session.delta", "session.done", "session.end", "session.steer", "session.notify"]);
 const now = () => new Date().toISOString();
 
 function isSessionEvent(e: ProtocolEvent): e is SessionEvent {
@@ -304,7 +304,7 @@ export function reduceEvent(state: ThreadState, e: SessionEvent, at: string, pin
   const { stale } = state;
   if (stale !== null) {
     if (stale.kind === "pending-send") {
-      const known = e.type === "session.start" || e.type === "session.delta" || e.type === "session.steer" ? knowing(state.known, [e]) : state.known;
+      const known = e.type === "session.start" || e.type === "session.delta" || e.type === "session.steer" || e.type === "session.notify" ? knowing(state.known, [e]) : state.known;
       if (e.type === "session.start") return { ...state, known, stale: { kind: "turn", turnId: e.turnId, sessionId: e.sessionId } };
       if (e.type === "session.end" && leftOrOwn(state, e) && e.turnId !== stale.after) return { ...state, stale: null };
       return known === state.known ? state : { ...state, known };

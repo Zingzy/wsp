@@ -11,11 +11,11 @@
 // on the dead one.
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import type { LegendListRef } from "@legendapp/list/react";
-import { workspaceState } from "@wsp/protocol";
+import { fmtCost, fmtDuration, workspaceState } from "@wsp/protocol";
 import { useStatus, useStore, useWorkspace } from "../../protocol/store";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { cn } from "../../lib/utils";
-import { DEFAULT_TIMESTAMP_FORMAT, formatDuration, turnWait, type TimestampFormat, type TurnSummary } from "./adapt";
+import { DEFAULT_TIMESTAMP_FORMAT, turnWait, type TimestampFormat, type TurnSummary } from "./adapt";
 import { MessagesTimeline, type MachineWait } from "./MessagesTimeline";
 import { useNewThreadRequests } from "./newThreadRequests";
 import { useChatThread, type ChatThreadHandle } from "./useChatThread";
@@ -116,10 +116,6 @@ function EmptyThread({ workspaceName }: { workspaceName: string }) {
   );
 }
 
-function formatCost(usd: number): string {
-  return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
-}
-
 const TURN_STATUS: Record<TurnSummary["state"], string> = {
   running: "running",
   completed: "completed",
@@ -131,8 +127,8 @@ const TURN_STATUS: Record<TurnSummary["state"], string> = {
 function SettledFooter({ turn }: { turn: TurnSummary }) {
   const failed = turn.state !== "completed";
   const parts: string[] = [];
-  if (turn.durationMs !== null) parts.push(`Worked for ${formatDuration(turn.durationMs)}`);
-  if (turn.costUsd !== null) parts.push(formatCost(turn.costUsd));
+  if (turn.durationMs !== null) parts.push(`Worked for ${fmtDuration(turn.durationMs)}`);
+  if (turn.costUsd !== null) parts.push(fmtCost(turn.costUsd));
   return (
     <div
       data-testid="settled-footer"

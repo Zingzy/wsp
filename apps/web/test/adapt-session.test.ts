@@ -2,8 +2,8 @@
 // Session events into the chat view models: messages, work rows, turn
 // summaries and the timeline rows the transplanted MessagesTimeline renders.
 import { describe, expect, it } from "vitest";
-import type { SessionEvent } from "@wsp/protocol";
-import { deriveMessagesTimelineRows, deriveSession, formatDuration } from "../src/adapt/index.js";
+import { fmtDuration, type SessionEvent } from "@wsp/protocol";
+import { deriveMessagesTimelineRows, deriveSession } from "../src/adapt/index.js";
 import type { WorkLogEntry } from "../src/adapt/index.js";
 import { CHAT_STREAM, CHAT_TURN } from "./fixtures/chat-stream.js";
 import { LIVE_RUN_1, LIVE_SID, sessionEventsOf } from "./fixtures/live-run-1.js";
@@ -332,8 +332,32 @@ describe("deriveMessagesTimelineRows", () => {
   });
 });
 
-describe("formatDuration", () => {
+describe("the turn's duration comes from the protocol's one formatter", () => {
   it.each([
     [0, "1ms"], [7, "7ms"], [999, "999ms"], [1500, "1.5s"], [9960, "10s"], [10458, "10s"], [59_400, "59s"], [60_000, "1m"], [101_515, "1m 42s"], [862_399, "14m 22s"], [-5, "0ms"], [4000, "4.0s"],
-  ])("%d ms -> %s", (ms, text) => expect(formatDuration(ms)).toBe(text));
+  ])("%d ms -> %s", (ms, text) => expect(fmtDuration(ms)).toBe(text));
+});
+
+describe("deriveSession: a thread's end told where its start said", () => {
+  const scoped = { workspaceId: "ws_t", sessionId: "sess_t", turnId: "turn_n", threadId: "thread_child_0001" };
+  const line = "thread thread_c finished (completed, 8m 12s, $1.94): all green";
+  const events = (notify: string): SessionEvent[] => [
+    { type: "session.start", ...scoped, at: 1_000, prompt: "build it" },
+    { type: "session.delta", ...scoped, at: 2_000, kind: "text", text: "all green" },
+    { type: "session.notify", ...scoped, at: 2_999, notify, text: line },
+    { type: "session.done", ...scoped, at: 3_000, result: { status: "completed", durationMs: 492_000, costUsd: 1.94, text: "all green" } },
+    { type: "session.end", ...scoped, at: 3_100, exitCode: 0, sawResult: true },
+  ];
+
+  it("is one info work row in the turn naming the thread told, with the line as its detail", () => {
+    const model = deriveSession(events("thread_parent_0001"));
+    const rows = model.workEntries.filter(w => w.sourceActivityKind === "runtime.notify");
+    expect(rows.map(w => [w.label, w.detail, w.tone, w.turnId])).toEqual([["told thread thread_p", line, "info", "turn_n"]]);
+    expect(model.turns[0]).toMatchObject({ state: "completed", durationMs: 492_000, costUsd: 1.94 });
+  });
+
+  it("names the person when the start said me", () => {
+    const model = deriveSession(events("me"));
+    expect(model.workEntries.filter(w => w.sourceActivityKind === "runtime.notify").map(w => w.label)).toEqual(["told you"]);
+  });
 });
