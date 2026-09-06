@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HELP, cli, type CliIO } from "../src/cli.js";
-import { installLines, installMcp, mcpServerSpec } from "../src/mcp-install.js";
+import { installEach, installLines, installMcp, mcpServerSpec } from "../src/mcp-install.js";
 import { WSP_SKILL } from "../src/skill.js";
 
 const PROC = { execPath: "/opt/node/bin/node", execArgv: ["--disable-warning=ExperimentalWarning"], argv: ["/opt/node/bin/node", "/opt/wsp/dist/bin.js", "mcp", "install"] };
@@ -91,6 +91,73 @@ describe("installing the MCP server for a local agent", () => {
     expect(existsSync(join(home, ".hermes", "config.yaml"))).toBe(false);
   });
 
+  it("several --agent are installed in turn and one bad id costs the others nothing; the report names each by its catalog id", () => {
+    const spec = mcpServerSpec(statePath, PROC);
+    const report = installEach(["claude", "emacs", "pi"], spec, home);
+    expect(report).toEqual({
+      installed: [
+        { id: "claude", agent: "Claude Code", path: "~/.claude.json", commentsDropped: false, skill: "~/.claude/skills/wsp/SKILL.md" },
+        { id: "pi", agent: "Pi", skill: "~/.pi/agent/skills/wsp/SKILL.md" },
+      ],
+      failures: [{ id: "emacs", error: "no agent emacs in the catalog; agents with an MCP config: claude, codex, gemini, opencode" }],
+    });
+    expect(existsSync(join(home, ".claude.json"))).toBe(true);
+    expect(readFileSync(join(home, ".pi", "agent", "skills", "wsp", "SKILL.md"), "utf8")).toBe(WSP_SKILL);
+  });
+
+  it("wsp mcp install --json prints the report as one JSON line and nothing else, and exits 1 when an agent failed", async () => {
+    const out = io();
+    expect(await cli(["mcp", "install", "--agent", "claude", "--agent", "codex", "--json", "--state", statePath], out)).toBe(0);
+    expect(out.lines).toHaveLength(1);
+    expect(out.errors).toEqual([]);
+    expect(JSON.parse(out.lines[0]!)).toEqual({
+      installed: [
+        { id: "claude", agent: "Claude Code", path: "~/.claude.json", commentsDropped: false, skill: "~/.claude/skills/wsp/SKILL.md" },
+        { id: "codex", agent: "Codex", path: "~/.codex/config.toml", commentsDropped: false, skill: "~/.codex/skills/wsp/SKILL.md" },
+      ],
+      failures: [],
+    });
+    const partial = io();
+    expect(await cli(["mcp", "install", "--agent", "emacs", "--agent", "gemini", "--json", "--state", statePath], partial)).toBe(1);
+    expect(partial.errors).toEqual([]);
+    const report = JSON.parse(partial.lines[0]!) as { installed: Array<{ id: string }>; failures: Array<{ id: string; error: string }> };
+    expect(report.installed.map(i => i.id)).toEqual(["gemini"]);
+    expect(report.failures).toEqual([{ id: "emacs", error: "no agent emacs in the catalog; agents with an MCP config: claude, codex, gemini, opencode" }]);
+    expect(readFileSync(join(home, ".gemini", "skills", "wsp", "SKILL.md"), "utf8")).toBe(WSP_SKILL);
+    expect(HELP).toContain("--json");
+  });
+
+  it("--agent and --json belong to mcp install alone: a command that has no JSON to print refuses the flag, and mcp --help says its own usage", async () => {
+    for (const cmd of ["recipe", "up", "init", "doctor"]) {
+      const out = io();
+      expect(await cli([cmd, "--json", "--state", statePath], out), cmd).toBe(1);
+      expect(out.errors[0], cmd).toContain("Unknown option '--json'");
+      expect(out.lines, cmd).toEqual([]);
+    }
+    const agented = io();
+    expect(await cli(["up", "--agent", "claude", "--state", statePath], agented)).toBe(1);
+    expect(agented.errors[0]).toContain("Unknown option '--agent'");
+    const help = io();
+    expect(await cli(["mcp", "--help", "--state", statePath], help)).toBe(0);
+    expect(help.lines).toEqual(["usage: wsp mcp\n       wsp mcp install --agent <id> [--agent <id>] [--json]   (claude, codex, gemini, opencode)"]);
+    const stray = io();
+    expect(await cli(["mcp", "install", "--nope", "--state", statePath], stray)).toBe(1);
+    expect(stray.errors[0]).toContain("Unknown option '--nope'");
+  });
+
+  it("a line that puts a flag before the word gets mcp's own usage, the way a verb's line gets its verb's", async () => {
+    const flagFirst = io();
+    expect(await cli(["--state", statePath, "mcp"], flagFirst)).toBe(1);
+    expect(flagFirst.errors).toEqual(["usage: wsp mcp\n       wsp mcp install --agent <id> [--agent <id>] [--json]   (claude, codex, gemini, opencode)"]);
+    expect(flagFirst.lines).toEqual([]);
+    const verbLine = io();
+    expect(await cli(["--state", statePath, "threads"], verbLine)).toBe(1);
+    expect(verbLine.errors[0]).toContain("usage: wsp threads");
+    const nonsense = io();
+    expect(await cli(["--state", statePath, "nope"], nonsense)).toBe(1);
+    expect(nonsense.errors[0]).toContain("unknown command: nope");
+  });
+
   it("what an install says: the agent and its file, the dropped-comments line when the rewrite lost them, the by-hand line when the server was not written, and where the skill went", () => {
     expect(installLines({ agent: "Claude Code", path: "~/.claude.json", commentsDropped: false, skill: "~/.claude/skills/wsp/SKILL.md" })).toEqual(["Claude Code now has the wsp tools: ~/.claude.json", "The wsp skill went to ~/.claude/skills/wsp/SKILL.md"]);
     expect(installLines({ agent: "Gemini CLI", path: "~/.gemini/settings.json", commentsDropped: true, skill: "~/.gemini/skills/wsp/SKILL.md" })).toEqual(["Gemini CLI now has the wsp tools: ~/.gemini/settings.json", "The file held comments; the rewrite is plain JSON, so they are gone.", "The wsp skill went to ~/.gemini/skills/wsp/SKILL.md"]);
@@ -107,7 +174,7 @@ describe("installing the MCP server for a local agent", () => {
     expect(written.mcpServers.wsp.args.slice(-3)).toEqual(["mcp", "--state", statePath]);
     const bare = io();
     expect(await cli(["mcp", "install", "--state", statePath], bare)).toBe(1);
-    expect(bare.errors).toEqual(["usage: wsp mcp install --agent <id>   (claude, codex, gemini, opencode)"]);
+    expect(bare.errors).toEqual(["usage: wsp mcp install --agent <id> [--agent <id>] [--json]   (claude, codex, gemini, opencode)"]);
     mkdirSync(join(home, ".gemini"), { recursive: true });
     writeFileSync(join(home, ".gemini", "settings.json"), '{\n  // the look\n  "theme": "dark"\n}\n');
     const commented = io();

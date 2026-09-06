@@ -909,7 +909,7 @@ export function verbUsage(word: string): string | undefined {
   return usages.length > 0 ? usages.join("\n") : undefined;
 }
 
-export async function runVerb(verb: Verb, argv: ReadonlyArray<string>, io: CliIO, defaultStatePath: () => string): Promise<number> {
+export async function runVerb(verb: Verb, argv: ReadonlyArray<string>, io: CliIO, statePathOf: (flag?: string) => string): Promise<number> {
   let flags: Flags;
   let args: string[];
   try {
@@ -925,7 +925,7 @@ export async function runVerb(verb: Verb, argv: ReadonlyArray<string>, io: CliIO
     io.log(`usage: ${verb.usage}\n  ${verb.about}\n\n  --json         print the raw protocol values, one JSON line each\n  --state PATH   the state file the host serves`);
     return 0;
   }
-  const statePath = resolve(flag(flags, "state") ?? defaultStatePath());
+  const statePath = statePathOf(flag(flags, "state"));
   let client: HostClient | undefined;
   const ctx: VerbContext = {
     args,
