@@ -52,7 +52,7 @@ export type BundleFile = BundlePath &
         kind: "file";
         mode: number;
         bytes: number;
-        /** Secret-shaped by the collector's credential rules; travels only when named. */
+        /** Secret-shaped by the collector's credential rules, which read untracked and ignored files only; travels only when named. */
         secret: boolean;
       }
     | { kind: "dir"; mode: number }
@@ -144,7 +144,7 @@ async function gitConfigSecret(path: string, st: { size: number; mode: number },
   return { path, bytes: st.size, signals, ...(offered ? { rewrite } : {}) };
 }
 
-/** One directory level. Under .git only a repository config is judged; under a cache-named directory only tracked paths are kept.
+/** One directory level. The secret scan skips a tracked file and, under .git, judges only a repository config; under a cache-named directory only tracked paths are kept.
  * A directory or entry the process cannot read is named in skipped and the walk goes on; only the folder itself throws. */
 function walk(w: Walk, dir: string, relDir: string, inGit: boolean, onlyTracked: boolean): void {
   let names: string[];
@@ -212,6 +212,8 @@ function walk(w: Walk, dir: string, relDir: string, inGit: boolean, onlyTracked:
     }
     const file: BundleFile = { rel, abs, kind: "file", mode, bytes: st.size, secret: false };
     w.files.push(file);
+    // A tracked file's content is in the repository, which travels whole, so cutting the working copy protects nothing.
+    if (isTracked) continue;
     const gitConfig = GIT_CONFIG.test(rel);
     if (inGit && !gitConfig) continue;
     const read = async (): Promise<string | undefined> => {

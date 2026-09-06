@@ -43,7 +43,7 @@ import {
   withoutAgentTools,
 } from "./init-recipe.js";
 import { pickScreens } from "./init-pick.js";
-import { installLines, installMcp, mcpServerSpec } from "./mcp-install.js";
+import { installEach, installLines, mcpServerSpec } from "./mcp-install.js";
 import { historyLine } from "./recipe-command.js";
 import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, fmtDuration, isTTY, plainLine, rowsOf, table, widthOf, wrap } from "./init-layout.js";
 import { openRunLog, runLogPath } from "./init-log.js";
@@ -750,12 +750,10 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const small = { path: smallRecipePath(opts.statePath), recipe: catalogRecipe };
   saveSmallRecipe(small.path, recipeWithAnswers(small.recipe, choices));
   log.step(`Recipe saved to ${path} and ${small.path}`, out);
-  for (const agent of wspTools) {
-    try {
-      log.step(installLines(installMcp(agent, mcpServerSpec(opts.statePath), opts.home)).join("\n"), out);
-    } catch (e) {
-      log.warn(`${catalogEntry(agent)?.name ?? agent} did not get the wsp tools: ${e instanceof Error ? e.message : String(e)}. Fix the file and run wsp mcp install --agent ${agent}.`, out);
-    }
+  const wspToolsPlaced = installEach(wspTools, mcpServerSpec(opts.statePath), opts.home);
+  for (const placed of wspToolsPlaced.installed) log.step(installLines(placed).join("\n"), out);
+  for (const failed of wspToolsPlaced.failures) {
+    log.warn(`${catalogEntry(failed.id)?.name ?? failed.id} did not get the wsp tools: ${failed.error}. Fix the file and run wsp mcp install --agent ${failed.id}.`, out);
   }
   // The whole recipe against the disk, before the account is read or anything boots: the tools stage would
   // otherwise fill the disk after the machine billed.

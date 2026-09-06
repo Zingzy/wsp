@@ -24,7 +24,7 @@ import {
   type Machine,
   type Runtime,
 } from "@wsp/runtime";
-import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENTS } from "@wsp/catalog";
+import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS } from "@wsp/catalog";
 import { assetDir } from "./assets.js";
 import { claudeEnvs, deployDaemon, doctor } from "./doctor.js";
 import { keychainReader } from "./init-import.js";
@@ -38,7 +38,7 @@ import { systemOpener, type UrlOpener } from "./relay.js";
 import { hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from "./host-lock.js";
 import { startHost, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
-import { installLines, installMcp, mcpServerSpec } from "./mcp-install.js";
+import { installEach, installLines, mcpServerSpec } from "./mcp-install.js";
 import { findVerb, runVerb, verbHelp, verbUsage } from "./verbs.js";
 import { VERSION } from "./version.js";
 
@@ -57,8 +57,11 @@ usage:
   wsp doctor         run the reach loop end to end against one live machine
   wsp mcp            serve the verbs as MCP tools over stdio to an agent on this
                      computer; wsp mcp install --agent <id> puts the server in
-                     that agent's own MCP config (${MCP_AGENTS.map(a => a.id).join(", ")})
-                     and the wsp skill in its skills folder
+                     that agent's own MCP config (${MCP_AGENT_IDS})
+                     and the wsp skill in its skills folder. --agent repeats,
+                     and --json prints one line holding what each agent took and
+                     a failures array for the ones that took nothing; both are
+                     read by mcp install alone
   wsp --version      print the version
 
 verbs, against the host wsp up started; every one takes --json for the raw
@@ -94,7 +97,6 @@ options:
                      --non-interactive, and is refused beside --yes, which skips
                      the sign-ins
   --out PATH         recipe: where to write it (default <state dir>/recipe.json)
-  --agent ID         mcp install: the agent whose MCP config gets the server
 
 keys are read from the environment, then ./.env, then ~/.wsp/.env (WSP_HOME
 overrides ~/.wsp). The prompt runs only when no Solari key is found; it asks
@@ -269,6 +271,12 @@ function defaultStatePath(): string {
   // A .env in cwd marks a dev checkout; share its .wsp state with wspx.
   if (existsSync(join(process.cwd(), ".env"))) return join(process.cwd(), ".wsp", "state.json");
   return join(wspHome(), "state.json");
+}
+
+/** The state file a command works on: its `--state` word when it gave one, else this computer's default, absolute
+ * either way, so the lock, the token and the recipe beside it name one path whatever the cwd is. */
+function statePathFrom(flag?: string): string {
+  return resolve(flag ?? defaultStatePath());
 }
 
 export function makeRuntime(keys: Keys, statePath: string, recipe: GoldenRecipe = goldenRecipe(keys)): Runtime {
@@ -457,34 +465,75 @@ async function hostFor(
   }
 }
 
-/** `wsp mcp` serves until the agent closes its stdin; `wsp mcp install --agent <id>` writes the agent's config. */
-async function mcp(io: CliIO, statePath: string, words: string[], agent: string | undefined): Promise<number> {
-  const ids = MCP_AGENTS.map(a => a.id).join(", ");
+/** The word `mcp` opens the command, as a verb's words open a verb: its flags are its own, so it is dispatched on
+ * that word before the shared parse ever sees them. */
+const MCP_COMMAND = "mcp";
+
+const mcpInstallUsage = (): string => `wsp ${MCP_COMMAND} install --agent <id> [--agent <id>] [--json]   (${MCP_AGENT_IDS})`;
+const mcpUsage = (): string => `usage: wsp ${MCP_COMMAND}\n       ${mcpInstallUsage()}`;
+
+/** The usage of the command a line stopped short of, whether it is a verb or `mcp`; none when no command owns the
+ * word. `mcp` needs its own answer here because it is not in the verb table and its flags follow the word. */
+function commandUsage(word: string): string | undefined {
+  return word === MCP_COMMAND ? mcpUsage() : verbUsage(word);
+}
+
+/** `wsp mcp` serves until the agent closes its stdin; `wsp mcp install --agent <id>` writes the agent's config,
+ * once per `--agent` given, and answers with the lines or, with `--json`, the report as one line. Its flags are
+ * parsed here rather than in the table every command shares, so a command that has no JSON to print refuses
+ * `--json` instead of taking it and printing prose. */
+async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => string): Promise<number> {
+  const usage = mcpUsage();
+  let values: { agent?: string[]; json?: boolean; state?: string; help?: boolean };
+  let words: string[];
+  try {
+    ({ values, positionals: words } = parseArgs({
+      args: argv,
+      options: {
+        agent: { type: "string", multiple: true },
+        json: { type: "boolean" },
+        state: { type: "string" },
+        help: { type: "boolean", short: "h" },
+      },
+      allowPositionals: true,
+    }));
+  } catch (e) {
+    io.error(`${e instanceof Error ? e.message : String(e)}\n\n${usage}`);
+    return 1;
+  }
+  if (values.help === true) {
+    io.log(usage);
+    return 0;
+  }
+  const statePath = statePathOf(values.state);
   if (words.length === 0) {
     await serveMcp(statePath);
     return 0;
   }
   if (words[0] !== "install" || words.length !== 1) {
-    io.error(`unknown command: mcp ${words.join(" ")}\n\nusage: wsp mcp\n       wsp mcp install --agent <id>   (${ids})`);
+    io.error(`unknown command: ${MCP_COMMAND} ${words.join(" ")}\n\n${usage}`);
     return 1;
   }
-  if (agent === undefined) {
-    io.error(`usage: wsp mcp install --agent <id>   (${ids})`);
+  const agents = values.agent ?? [];
+  if (agents.length === 0) {
+    io.error(`usage: ${mcpInstallUsage()}`);
     return 1;
   }
-  try {
-    for (const line of installLines(installMcp(agent, mcpServerSpec(statePath), homedir()))) io.log(line);
-    return 0;
-  } catch (e) {
-    io.error(`wsp mcp install: ${e instanceof Error ? e.message : String(e)}`);
-    return 1;
+  const json = values.json === true;
+  const report = installEach(agents, mcpServerSpec(statePath), homedir());
+  if (json) io.log(JSON.stringify(report));
+  else {
+    for (const placed of report.installed) for (const line of installLines(placed)) io.log(line);
+    for (const failed of report.failures) io.error(`wsp mcp install: ${failed.error}`);
   }
+  return report.failures.length > 0 ? 1 : 0;
 }
 
 export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<number> {
   const verb = findVerb(argv);
-  if (verb !== undefined) return runVerb(verb, argv, io, defaultStatePath);
-  let values: { version?: boolean; help?: boolean; port?: string; "ws-port"?: string; state?: string; yes?: boolean; "non-interactive"?: boolean; json?: boolean; recipe?: string; out?: string; agent?: string };
+  if (verb !== undefined) return runVerb(verb, argv, io, statePathFrom);
+  if (argv[0] === MCP_COMMAND) return mcp(io, argv.slice(1), statePathFrom);
+  let values: { version?: boolean; help?: boolean; port?: string; "ws-port"?: string; state?: string; yes?: boolean; "non-interactive"?: boolean; json?: boolean; recipe?: string; out?: string };
   let positionals: string[];
   try {
     ({ values, positionals } = parseArgs({
@@ -500,7 +549,6 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
         json: { type: "boolean" },
         recipe: { type: "string" },
         out: { type: "string" },
-        agent: { type: "string" },
       },
       allowPositionals: true,
     }));
@@ -519,7 +567,7 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
   const opts = {
     port: values.port !== undefined ? Number(values.port) : 4400,
     wsPort: values["ws-port"] !== undefined ? Number(values["ws-port"]) : 4410,
-    statePath: resolve(values.state ?? defaultStatePath()),
+    statePath: statePathFrom(values.state),
   };
   const [cmd] = positionals;
   switch (cmd) {
@@ -541,15 +589,13 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
     case "recipe":
       await writeRecipe(nodeHost(), resolve(values.out ?? join(dirname(opts.statePath), "recipe.json")), line => io.log(line));
       return 0;
-    case "mcp":
-      return mcp(io, opts.statePath, positionals.slice(1), values.agent);
     case "doctor": {
       const keys = await loadKeys(io);
       const rt = makeRuntime(keys, opts.statePath);
       return doctor(rt, io, keys.anthropic !== undefined ? { envs: claudeEnvs(keys.anthropic) } : {});
     }
     default:
-      io.error(verbUsage(cmd) ?? `unknown command: ${cmd}\n\n${HELP}`);
+      io.error(commandUsage(cmd) ?? `unknown command: ${cmd}\n\n${HELP}`);
       return 1;
   }
 }

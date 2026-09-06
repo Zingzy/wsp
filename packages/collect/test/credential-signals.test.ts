@@ -37,6 +37,37 @@ describe("credential shape", () => {
     expect(keysSignal("sort_key=46\nhide_kernel_threads=1\n")).toBe(false);
     expect(keysSignal('{"packages":{"node_modules/password-prompt":{"version":"1"}}}')).toBe(false);
     expect(keysSignal('["token"]')).toBe(false);
+    const crlf = "API_KEY=sk-live-000fake\r\nPASSWORD=hunter2\r\n";
+    expect(topLevelKeys(crlf)).toEqual(["API_KEY", "PASSWORD"]);
+    expect(keysSignal(crlf)).toBe(true);
+    expect(keysSignal("github.com:\r\n    oauth_token: ghp_000fake\r\n")).toBe(true);
+    expect(keysSignal('[registry]\r\napi_key = "xaat-000-fake"\r\n')).toBe(true);
+    expect(keysSignal('api_key = "${AXIOM_TOKEN}"\r\n')).toBe(false);
+  });
+
+  it("a value that points at a secret is not one: a workflow's template reference, a compose or toml environment reference, a placeholder, an empty value", async () => {
+    const workflow = "name: ci\njobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n        with:\n          token: ${{ secrets.GITHUB_TOKEN }}\n";
+    expect(keysSignal(workflow)).toBe(false);
+    for (const reference of ["password: ${DB_PASSWORD}\n", 'api_key = "${AXIOM_TOKEN}"\n', "SECRET_KEY=$SECRET_KEY\n", "API_TOKEN=<your-token>\n", "API_TOKEN=\n", '{"token":""}', '{"token":"${TOKEN}"}', 'access_key = "${AWS_ACCESS_KEY_ID:-none}"\n', 'api_key = "${AXIOM_TOKEN}" # set in CI\n', "api_key: ${AXIOM_TOKEN} # prod\n", "token: ${{ secrets.X }}   # ci\n", "password: # not set\n"]) {
+      expect(keysSignal(reference), reference).toBe(false);
+    }
+    for (const held of ["API_KEY=sk-live-000fake\n", 'api_key = "sk-live-000fake"\n', '{"token":"sk-ant-x"}', "password: hunter2\n", "API_KEY=abc#def\n", "password: hunter2 # note\n"]) {
+      expect(keysSignal(held), held).toBe(true);
+    }
+    const compose = "services:\n  api:\n    environment:\n      DATABASE_URL: postgres://u:${PW}@db:5432/app\n";
+    expect(urlSignal(compose)).toBe(false);
+    expect(bareUrls(compose)).toEqual({ text: compose, urls: [] });
+    for (const reference of ["DATABASE_URL=postgres://u:$PW@db:5432/app\n", "DATABASE_URL=postgres://u:<password>@db:5432/app\n", "REDIS_URL=redis://:${REDIS_PASSWORD}@cache:6379\n"]) {
+      expect(urlSignal(reference), reference).toBe(false);
+      expect(bareUrls(reference)).toEqual({ text: reference, urls: [] });
+    }
+    expect(urlSignal("DATABASE_URL=postgres://u:s3cr3t@db:5432/app\n")).toBe(true);
+    const read = (name: string, text: string) => fileSignals(name, { bytes: Buffer.byteLength(text), mode: 0o644 }, async () => text, false);
+    expect(await read("ci.yml", workflow)).toBeUndefined();
+    expect(await read("docker-compose.yml", compose)).toBeUndefined();
+    expect(await read("vector.toml", '[sinks.axiom]\napi_key = "${AXIOM_TOKEN}"\n')).toBeUndefined();
+    expect(await read(".env", "API_KEY=sk-live-000fake\n")).toEqual(["name", "keys"]);
+    expect(await read(".env", "API_KEY=sk-live-000fake\r\n")).toEqual(["name", "keys"]);
   });
 
   it("PEM header", () => {

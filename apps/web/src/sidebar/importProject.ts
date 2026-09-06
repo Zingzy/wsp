@@ -65,9 +65,9 @@ export function secretOffer(s: ProjectSecret, ticked: boolean): { short: string;
   return { short: `lands${bare([...new Set(s.rewrite.urls.map(host))])}${without}`, full: `lands${bare(s.rewrite.urls)}${without}` };
 }
 
-/** Where the folder landed, which secret-shaped files were cut on the way as the consent box promised, and what became of each agent's sessions. */
+/** Where the folder landed, how many secret-shaped files were cut on the way and where their list is, and what became of each agent's sessions. */
 export function landedLine(result: ProjectImportResult, source: string, workspaceName: string): string {
-  const cut = result.cut.length > 0 ? `; cut ${result.cut.join(", ")}` : "";
+  const cut = result.cut.length > 0 ? `; cut ${count(result.cut.length, "file")}, listed above` : "";
   const sessions = result.agents.length > 0 ? `; sessions: ${agentOutcomes(result.agents)}` : "";
   return `${folderName(source)} is at ${result.dest} on ${workspaceName}${cut}${sessions}.`;
 }
