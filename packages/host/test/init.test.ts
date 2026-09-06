@@ -24,6 +24,7 @@ import type { HostHandle } from "../src/server.js";
 import { startCallbackRelay } from "../src/relay.js";
 import type { ConnectOptions, DaemonSocket } from "../src/doctor.js";
 import { SH_FILE, appendCommand, readCommand } from "../src/init-secrets.js";
+import { importResultPath } from "../src/init-import.js";
 import { noteOutcomes } from "../src/init-signin.js";
 import { checkScript } from "../src/signin-relay.js";
 import { answersChecks, checkTag, fakePtyLink, type CheckAnswer, type FakePty, type FakePtyLink } from "./fake-pty-link.js";
@@ -3494,7 +3495,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(builder.killed).toBe(false);
     expect(await store.get("golden-recipes", "default@v1")).toBeDefined();
     const next = (o: Partial<InitOptions> & { tty?: boolean } = {}) => {
-      const f = fake({ yes: true, home: first.opts.home, ...o });
+      const f = fake({ yes: true, home: first.opts.home, statePath: first.opts.statePath, ...o });
       f.opts.runtime = recipe => {
         f.backends.push(shared);
         const rt = createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
@@ -3508,6 +3509,7 @@ describe("wsp init with a golden already built from a recipe", () => {
 
   it("--yes with a small change: the changes since v1 are listed, the update runs on the kept builder with the one sentence, v2 is current, and no machine boots", async () => {
     const { store, shared, first, next } = await sealed();
+    const before = JSON.parse(readFileSync(join(dirname(first.opts.statePath), "golden-import.json"), "utf8")) as { recipeHash: string; build: unknown };
     writeFileSync(join(first.opts.home, ".zshrc"), "export A=1\nexport B=2\n");
     const f = next({ tty: false });
     const result = await runInit(f.opts, f.io);
@@ -3528,6 +3530,10 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(out).toContain("The builder stays up (about $0.11/h, one of the account's machine slots) until wsp init updates on it again, a wsp sweep stops it ten minutes after the save, or the provider's six-hour idle kill fires.");
     // The builder, v1's smoke fork, v2's smoke fork: nothing else booted.
     expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_golden-v1", true], ["snap_golden-v2", true]]);
+    // The update rewrote the import result; the first build's measured stages stay in it for the next rebuild offer.
+    const after = JSON.parse(readFileSync(join(dirname(first.opts.statePath), "golden-import.json"), "utf8")) as { recipeHash: string; build: unknown };
+    expect(after.recipeHash).not.toBe(before.recipeHash);
+    expect(after.build).toEqual(before.build);
     expect(await store.get("goldens", "default")).toMatchObject({ head: 2 });
     // The update kept the golden's disk, so what v1's sign-in stage recorded (both skipped under --yes) is stamped on v2 as it was.
     const skipped = [{ name: "GitHub CLI login", state: "skipped" }, { name: "Claude Code login", state: "skipped" }];
@@ -3738,6 +3744,8 @@ describe("wsp init with a golden already built from a recipe", () => {
     const alpha = await createRuntime({ backend: shared, store, adapters: {} }).workspaces.create({ golden: "snap_golden-v1", name: "alpha" });
     const manifestPath = join(first.opts.home, "manifest.json");
     writeFileSync(manifestPath, JSON.stringify({ entries: FIXTURE.entries.map(e => (e.id === "agents/codex" ? { ...e, bring: true } : e)) }));
+    // A measured build on this computer whose tools stage alone took 17m39s; the stages sum to 22 minutes.
+    noteOutcomes(importResultPath(first.opts.statePath), { build: { at: "2026-09-05T19:44:00.000Z", stages: { creating: 62_000, "deploying-daemon": 35_000, "applying-setup": 4_000, "uploading-files": 6_000, "installing-harness": 48_000, "installing-tools": 1_059_000, "installing-mcp": 3_000, snapshotting: 41_000, "smoke-forking": 82_000 } } });
     const f = next({ manifestPath });
     const hosted: string[] = [];
     f.opts.host = async (rt, builder) => {
@@ -3747,7 +3755,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     const out = f.text();
     expect(out).toContain("add 1 agent: Codex");
-    expect(out).toContain("A big change: a rebuild from scratch is the safer road, about ten minutes.");
+    expect(out.replace(/\s*│?\s*\n│\s+/g, " ")).toContain("A big change: a rebuild from scratch is the safer road, about 22 minutes last time.");
     expect(out).toContain("Rebuilding from scratch. Taken as the default (--yes).");
     // The kept builder holds a slot the rebuild needs; it goes after the confirm and before the boot, said once.
     expect(out).toContain("Stopping the builder kept from golden v1 (m1) to free its machine slot.");
@@ -3780,13 +3788,38 @@ describe("wsp init with a golden already built from a recipe", () => {
     await f.until("How do you want to apply them?");
     const asked = f.text();
     expect(asked).toContain("Update the golden (under a minute, about $0.11/hr while it runs)");
-    expect(asked).toContain("Rebuild from scratch (about ten minutes)");
+    expect(asked).toContain("Rebuild from scratch (under a minute last time)");
     expect(asked.indexOf("Update the golden")).toBeLessThan(asked.indexOf("Rebuild from scratch"));
     await f.press(KEY.enter);
     expect((await run).code).toBe(0);
     expect(f.text()).toMatch(/Golden v2 sealed in \d+s on the builder kept since the save/);
     expect(f.text()).not.toMatch(BOOT);
     expect(shared.machines).toHaveLength(3);
+  });
+
+  it("the seal records how long each stage of the build ran in the import result, the closing stages apart", async () => {
+    const { first } = await sealed();
+    const { build } = JSON.parse(readFileSync(join(dirname(first.opts.statePath), "golden-import.json"), "utf8")) as { build: { at: string; stages: Record<string, number> } };
+    expect(Date.parse(build.at)).toBeGreaterThan(Date.now() - 60_000);
+    expect(Object.keys(build.stages)).toEqual(["creating", "deploying-daemon", "applying-setup", "uploading-files", "installing-harness", "installing-tools", "installing-mcp", "snapshotting", "smoke-forking"]);
+    for (const ms of Object.values(build.stages)) expect(ms).toBeGreaterThanOrEqual(0);
+  });
+
+  it("with no measured build in the import result the rebuild is offered at the assumed ten minutes and says so", async () => {
+    const { shared, first, next } = await sealed();
+    rmSync(importResultPath(first.opts.statePath));
+    writeFileSync(join(first.opts.home, ".zshrc"), "export A=1\nexport B=2\n");
+    const f = next({ yes: false, tty: true });
+    const run = runInit(f.opts, f.io);
+    for (const rung of ["Identity", "Shell", "Editors", "Toolchains", "Tools", "Agents", "Sign-ins"]) {
+      await f.until(rung);
+      await f.press(KEY.enter);
+    }
+    await f.until("How do you want to apply them?");
+    expect(f.text()).toContain("Rebuild from scratch (about ten minutes, not measured on this computer yet)");
+    await f.press(KEY.ctrlC);
+    await run;
+    expect(shared.machines).toHaveLength(2);
   });
 
   it("a kept builder another process holds does not count as the update's machine: the offer names the fork road and its two minutes", async () => {
