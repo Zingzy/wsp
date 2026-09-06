@@ -533,7 +533,7 @@ const HAND_PREFIX = "tools/hand/";
 const handCopy = (e: RecipeEntry): boolean => e.id.startsWith(HAND_PREFIX) && e.linux !== "no";
 
 /** The package a tools row names: what follows its manager in the id (a tap formula keeps its slashes). */
-const packageOf = (e: RecipeEntry): string => e.id.split("/").slice(2).join("/");
+export const packageOf = (e: RecipeEntry): string => e.id.split("/").slice(2).join("/");
 
 /** The base row a tools row stands for, when the base stage installs the same tool on every golden; a hand copy is a
  * file of the person's and travels whatever the base has. The Mac's version is the row's, or the brew table's for a formula. */

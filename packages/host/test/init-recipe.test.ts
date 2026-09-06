@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { type ManifestEntry, parseManifest } from "@wsp/collect";
 import { afterEach, describe, expect, it } from "vitest";
 import type { GoldenImport } from "@wsp/runtime";
+import type { Recipe } from "@wsp/protocol";
 import {
+  applyRecipe,
   goldenRecipeFor,
   hasChoices,
   initialChoice,
@@ -15,10 +17,12 @@ import {
   isTickable,
   linuxCaskRows,
   loadManifest,
+  loadRecipe,
   loginTool,
   recipePath,
   saveRecipe,
   tickLoginTools,
+  unbuiltRows,
   withoutAgentTools,
 } from "../src/init-recipe.js";
 import { FIXTURE, byId } from "./init-fixture.js";
@@ -297,5 +301,67 @@ describe("recipe file", () => {
     const path = join(dir, "recipe.json");
     writeFileSync(path, JSON.stringify({ entries: [{ ...byId("shell/zshrc"), choice: "copy" }] }));
     expect(() => loadManifest(path)).toThrow(/recipe\.json: invalid manifest: entries\.0\.choice: only a logins row or a consent row carries a choice/);
+  });
+});
+
+describe("the small recipe", () => {
+  let dir: string;
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  const RECIPE: Recipe = {
+    version: 1,
+    at: "2026-09-06T03:00:00.000Z",
+    histories: [{ agent: "claude", state: "read", sessions: 149, calls: 87593 }],
+    rows: [
+      { id: "claude", kind: "agent", on: false, source: { kind: "popular", sessions: 149, images: 1 } },
+      { id: "codex", kind: "agent", on: true, source: { kind: "installed", paths: ["~/.codex/config.toml"], bin: true }, size: 1 },
+      { id: "gh", kind: "tool", on: true, source: { kind: "used", sessions: 100, calls: 7919 }, signIn: "copy" },
+      { id: "yq", kind: "tool", on: false, source: { kind: "popular", sessions: 0, images: 3 } },
+      { id: "agent-browser", kind: "tool", on: true, source: { kind: "used", sessions: 45, calls: 2591 } },
+      { id: "git", kind: "tool", on: true, source: { kind: "popular", sessions: 118, images: 5 } },
+      { id: "kubectl", kind: "tool", on: false, source: { kind: "popular", sessions: 1, images: 1 }, signIn: "machine" },
+    ],
+  };
+
+  it("loadRecipe names the path on a missing or malformed file and checks the protocol's shape", () => {
+    dir = mkdtempSync(join(tmpdir(), "wsp-recipe-"));
+    expect(() => loadRecipe(join(dir, "missing.json"))).toThrow(/no recipe at .*missing\.json/);
+    const path = join(dir, "recipe.json");
+    writeFileSync(path, "{");
+    expect(() => loadRecipe(path)).toThrow(/recipe\.json: /);
+    writeFileSync(path, JSON.stringify({ ...RECIPE, rows: [{ id: "gh", kind: "tool", on: true, source: { kind: "guess" } }] }));
+    expect(() => loadRecipe(path)).toThrow(/recipe\.json: invalid recipe: rows\.0\.source/);
+    writeFileSync(path, JSON.stringify(RECIPE));
+    expect(loadRecipe(path)).toEqual(RECIPE);
+  });
+
+  it("applyRecipe ticks the agents and tools rows from the catalog ids and leaves the other rungs to their defaults", () => {
+    const applied = applyRecipe({ ...FIXTURE, entries: [...FIXTURE.entries, { rung: "agents", id: "agents/mcp/claude/spoo-ops", label: "spoo-ops", paths: [], bytes: 0, default: "bring" }, { rung: "agents", id: "agents/mcp/codex/axiom", label: "axiom", paths: [], bytes: 0, default: "bring" }, { rung: "agents", id: "agents/mcp/mcp-remote", label: "mcp-remote", paths: [], bytes: 0, default: "bring" }, { rung: "tools", id: "tools/brew/openjdk@21", label: "openjdk@21", paths: [], bytes: 0, default: "skip", reason: "no Linux bottle" }] }, RECIPE);
+    const bring = new Map(applied.entries.map(e => [e.id, e.bring]));
+    expect(bring.get("agents/claude")).toBe(false);
+    expect(bring.get("agents/codex")).toBe(true);
+    // An MCP server follows its agent; the mcp-remote row is no agent's and keeps its default.
+    expect(bring.get("agents/mcp/claude/spoo-ops")).toBe(false);
+    expect(bring.get("agents/mcp/codex/axiom")).toBe(true);
+    expect(bring.get("agents/mcp/mcp-remote")).toBe(true);
+    // gh is the catalog's gh; yq is off in the recipe; tsx stands for no catalog tool; a locked row stays locked whatever the recipe says.
+    expect(bring.get("tools/brew/gh")).toBe(true);
+    expect(bring.get("tools/brew/yq")).toBe(false);
+    expect(bring.get("tools/npm/tsx")).toBe(false);
+    expect(bring.get("tools/brew/rectangle")).toBe(false);
+    expect(bring.get("tools/brew/openjdk@21")).toBe(false);
+    expect(applied.entries.filter(e => e.rung === "tools").every(e => initialTicks(e) === (e.id === "tools/brew/gh"))).toBe(true);
+    for (const id of ["identity/git-user", "identity/ssh-key", "shell/zshrc", "editors/nvim", "toolchains/mise"]) expect(bring.has(id) && bring.get(id) === undefined, id).toBe(true);
+    // The saved sign-in answer lands on the login row; a login the recipe did not answer keeps its own default.
+    expect(applied.entries.find(e => e.id === "logins/gh")).toMatchObject({ choice: "copy" });
+    expect(applied.entries.find(e => e.id === "logins/gh")?.bring).toBeUndefined();
+    expect(applied.entries.find(e => e.id === "logins/claude")).not.toHaveProperty("choice");
+    expect(applied.entries.find(e => e.id === "logins/codex")).not.toHaveProperty("choice");
+    expect(initialChoice(applied.entries.find(e => e.id === "logins/gh")!)).toBe("copy");
+  });
+
+  it("unbuiltRows names the ticked rows this computer has no row for, the floor aside", () => {
+    expect(unbuiltRows(RECIPE, FIXTURE.entries).map(r => r.id)).toEqual(["agent-browser"]);
+    expect(unbuiltRows(RECIPE, []).map(r => r.id)).toEqual(["codex", "gh", "agent-browser"]);
   });
 });

@@ -78,8 +78,9 @@ const LINUXBREW = "/home/linuxbrew/.linuxbrew/";
 /** Rows whose last id segment is the binary they put on PATH; taps, casks and the toolchain install none. */
 const BINARY_ROW = /^tools\/(brew|go|cargo|npm|pnpm|bun|pipx|uv|hand)\//;
 
-/** A row's agent, scope and server name from its id: `agents/mcp/<agent>/<name>`, or `agents/mcp/<agent>/home/<name>`. */
-function parseId(id: string): { agent: string; home: boolean; name: string } | undefined {
+/** A row's agent, scope and server name from its id: `agents/mcp/<agent>/<name>`, or `agents/mcp/<agent>/home/<name>`;
+ * nothing for a row that is not a server, the mcp-remote row included. */
+export function parseMcpId(id: string): { agent: string; home: boolean; name: string } | undefined {
   if (!id.startsWith(MCP_ID_PREFIX) || id === MCP_REMOTE_ID) return undefined;
   const rest = id.slice(MCP_ID_PREFIX.length).split("/");
   const agent = rest[0];
@@ -96,7 +97,7 @@ export function mcpPlanFor(rows: readonly RecipeEntry[], opts: McpPlanOptions): 
   const agents: McpAgentPlan[] = [];
   for (const [agent, source] of Object.entries(opts.agents)) {
     const own = rows.flatMap(e => {
-      const p = parseId(e.id);
+      const p = parseMcpId(e.id);
       return p !== undefined && p.agent === agent ? [{ row: e, home: p.home, name: p.name }] : [];
     });
     if (own.length === 0) continue;

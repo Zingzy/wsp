@@ -6,8 +6,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type LoginChoice, type Manifest, type ManifestEntry, type Rung, parseManifest } from "@wsp/collect";
-import { linuxCaskByBin, linuxCaskFor } from "@wsp/catalog";
-import { agentOwning, neverCopied, type RecipeDigest } from "@wsp/engine";
+import { catalogEntry, catalogToolFor, linuxCaskByBin, linuxCaskFor, loginIdOf } from "@wsp/catalog";
+import { agentOwning, neverCopied, packageOf, parseMcpId, type RecipeDigest } from "@wsp/engine";
+import { MCP_ID_PREFIX, Recipe, type RecipeRow } from "@wsp/protocol";
 import type { GoldenImport, GoldenRecipe, Machine } from "@wsp/runtime";
 import type { Keys } from "./cli.js";
 import { GUEST_ENVS, claudeEnvs } from "./doctor.js";
@@ -182,6 +183,57 @@ export function loadManifest(path: string): Manifest {
   } catch (e) {
     throw new Error(`${path}: ${e instanceof Error ? e.message : String(e)}`);
   }
+}
+
+/** The small recipe wsp recipe wrote (or a person or an agent did), checked against the protocol's shape. */
+export function loadRecipe(path: string): Recipe {
+  if (!existsSync(path)) throw new Error(`no recipe at ${path}`);
+  let data: unknown;
+  try {
+    data = JSON.parse(readFileSync(path, "utf8"));
+  } catch (e) {
+    throw new Error(`${path}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  const r = Recipe.safeParse(data);
+  if (r.success) return r.data;
+  throw new Error(`${path}: invalid recipe: ${r.error.issues.map(i => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
+}
+
+/** The catalog id a collector row stands for: an agents row its agent, a tools row the tool its package names. */
+function catalogIdOf(e: ManifestEntry): string | undefined {
+  if (e.rung === "agents" && !e.id.startsWith(MCP_ID_PREFIX)) return agentName(e);
+  if (e.rung === "tools") return catalogToolFor(packageOf(e))?.id;
+  return undefined;
+}
+
+/** The collector's rows with the recipe's ticks written on: an agents or tools row is on when its catalog row is,
+ * off when it is not or when no catalog row stands for it; an MCP row follows its agent; a saved sign-in answer
+ * lands on the login row it names. Every other row keeps its default, as a saved manifest would leave it. */
+export function applyRecipe(manifest: Manifest, recipe: Recipe): Manifest {
+  const on = new Set(recipe.rows.filter(r => r.on).map(r => r.id));
+  const answers = new Map<string, LoginChoice>(recipe.rows.flatMap(r => (r.signIn === undefined ? [] : [[`logins/${loginIdOf(r.id)}`, r.signIn]])));
+  return {
+    ...manifest,
+    entries: manifest.entries.map(e => {
+      if (e.rung === "agents" && e.id.startsWith(MCP_ID_PREFIX)) {
+        const agent = parseMcpId(e.id)?.agent;
+        return { ...e, bring: initialTicks(e) && (agent === undefined || catalogEntry(agent)?.kind !== "agent" || on.has(agent)) };
+      }
+      const id = catalogIdOf(e);
+      if (id !== undefined || e.rung === "tools") return { ...e, bring: id !== undefined && on.has(id) };
+      const answer = e.rung === "logins" ? answers.get(e.id) : undefined;
+      return answer === undefined ? e : { ...e, choice: answer };
+    }),
+  };
+}
+
+/** The recipe's ticked rows this computer has no row for, the floor's aside: the build cannot install them yet. */
+export function unbuiltRows(recipe: Recipe, entries: readonly ManifestEntry[]): RecipeRow[] {
+  const here = new Set(entries.map(catalogIdOf));
+  return recipe.rows.filter(r => {
+    const e = catalogEntry(r.id);
+    return r.on && !here.has(r.id) && !(e?.kind === "tool" && e.floor);
+  });
 }
 
 export function recipePath(statePath: string): string {

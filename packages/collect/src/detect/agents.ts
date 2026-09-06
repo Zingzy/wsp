@@ -2,7 +2,8 @@
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import type { Host } from "../host.js";
 import type { ManifestEntry } from "../manifest.js";
-import { entry, found } from "./common.js";
+import { entry } from "./common.js";
+import { presenceOf } from "./presence.js";
 
 interface Agent {
   id: string;
@@ -25,9 +26,9 @@ export const AGENTS: readonly Agent[] = CATALOG_AGENTS.flatMap(a => [...(a.id ==
 export async function detectAgents(host: Host): Promise<ManifestEntry[]> {
   const rows: ManifestEntry[] = [];
   for (const a of AGENTS) {
-    const f = await found(host, a.config);
-    if (f.paths.length === 0 && !(await host.exec.which(a.bin))) continue;
-    rows.push(entry({ rung: "agents", id: `agents/${a.id}`, label: a.label, ...f, ...(a.volatile !== undefined ? { volatile: a.volatile } : {}) }));
+    const p = await presenceOf(host, { configPaths: a.config, bin: a.bin });
+    if (p === undefined) continue;
+    rows.push(entry({ rung: "agents", id: `agents/${a.id}`, label: a.label, paths: p.paths, bytes: p.bytes, ...(a.volatile !== undefined ? { volatile: a.volatile } : {}) }));
   }
   return rows;
 }

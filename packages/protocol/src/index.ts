@@ -465,6 +465,50 @@ export const RecipeDigest = z.object({
 });
 export type RecipeDigest = z.infer<typeof RecipeDigest>;
 
+/** Where a recipe row's tick comes from: the entry is on this computer (what was found: its config paths and
+ * whether its command is on PATH), the agents' session histories on this computer used it (in how many sessions,
+ * how many calls), or nothing local says anything and the catalog's own evidence decides. */
+export const RecipeSource = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("installed"), paths: z.array(z.string()), bin: z.boolean() }),
+  z.object({ kind: z.literal("used"), sessions: z.number().int().nonnegative(), calls: z.number().int().nonnegative() }),
+  z.object({ kind: z.literal("popular"), sessions: z.number().int().nonnegative(), images: z.number().int().nonnegative() }),
+]);
+export type RecipeSource = z.infer<typeof RecipeSource>;
+
+/** One catalog entry in a recipe: ticked or not, why, its size on the machine when the catalog measured one, and
+ * the sign-in answer the person or the agent that wrote the recipe gave; absent, the wizard's default stands. */
+export const RecipeRow = z.object({
+  id: z.string().min(1),
+  kind: z.enum(["agent", "tool"]),
+  on: z.boolean(),
+  source: RecipeSource,
+  size: z.number().int().nonnegative().optional(),
+  signIn: z.enum(["copy", "machine", "skip"]).optional(),
+});
+export type RecipeRow = z.infer<typeof RecipeRow>;
+
+/** What one agent's session history on this computer gave: read with these counts, empty, there but unreadable, or
+ * no reader for its format yet. Names and counts only; nothing a session held travels. */
+export const RecipeHistory = z.object({
+  agent: z.string().min(1),
+  state: z.enum(["read", "empty", "unreadable", "no-reader"]),
+  sessions: z.number().int().nonnegative(),
+  calls: z.number().int().nonnegative(),
+});
+export type RecipeHistory = z.infer<typeof RecipeHistory>;
+
+/** The small recipe: catalog ids with a tick each and the source of that tick, written by wsp recipe from this
+ * computer (or by hand, or by a local agent), read by wsp init --recipe, the app's pick screen and the import
+ * of a project. It names catalog entries only and never carries a path's content or a key. */
+export const Recipe = z.object({
+  version: z.literal(1),
+  /** When it was written, ISO 8601. */
+  at: z.string().min(1),
+  histories: z.array(RecipeHistory),
+  rows: z.array(RecipeRow),
+});
+export type Recipe = z.infer<typeof Recipe>;
+
 /** The live machine a person sets up before sealing it as a golden. It is not
  * a workspace and never appears in the rail; `screen` is present when the
  * machine streams a display (desktop kind). */
