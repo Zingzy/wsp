@@ -2,11 +2,13 @@
 // The export dialog's pure parts: the step rows folded from project.export
 // events, which events belong to one export, the agent rows the workspace's
 // threads give it and the request their ticks become, the destination a
-// picked parent folder gives, and the landed line with each agent's words.
+// picked parent folder gives, the landed line, each agent's words and the
+// refusal a caught error becomes with the tone the status line gives it.
 import { describe, expect, it } from "vitest";
 import type { ProjectAgentResult, ProjectExportEvent, ProjectExportResult, SessionView } from "@wsp/protocol";
 import { EXPORT_STEPS, agentRows, agentsRequest, exportLandedLine, exportStepRows, isExportOf, pickedDest } from "../src/sidebar/exportProject.js";
-import { agentName, agentOutcome, agentOutcomes } from "../src/sidebar/projectTrip.js";
+import { RequestError } from "../src/protocol/client.js";
+import { agentName, agentOutcome, agentOutcomes, refusalOf, refusalTone } from "../src/sidebar/projectTrip.js";
 
 const ev = (over: Partial<ProjectExportEvent>): ProjectExportEvent => ({
   type: "project.export",
@@ -83,7 +85,7 @@ describe("agent outcome words", () => {
     expect(agentName("zed")).toBe("zed");
   });
 
-  it("names each agent and what became of its sessions in the short words, with the rollouts skipped and no counts", () => {
+  it("names each agent and what became of its sessions in one set of words, with the rollouts skipped and no counts", () => {
     expect(agentOutcomes([agent({ sessions: 2 })])).toBe("Claude Code moved");
     expect(agentOutcomes([agent({ agent: "codex", outcome: "transcript-only", sessions: 1, skipped: 2 })])).toBe("Codex transcripts landed, not yet listed, 2 rollouts skipped");
     expect(agentOutcomes([agent({ agent: "gemini", outcome: "nothing", files: 0, bytes: 0 })])).toBe("Gemini CLI nothing to bring");
@@ -93,21 +95,34 @@ describe("agent outcome words", () => {
     expect(agentOutcomes([agent({ sessions: 1 }), agent({ agent: "codex", outcome: "nothing" })])).toBe("Claude Code moved, Codex nothing to bring");
   });
 
-  it("has a short form for a row's end that keeps the same facts", () => {
-    expect(agentOutcome(agent({ outcome: "transcript-only", skipped: 1 }))).toEqual({ short: "transcripts landed, not yet listed, 1 rollout skipped", full: "transcripts landed, not yet in its session list, 1 indexed rollout skipped" });
-    expect(agentOutcome(agent({ outcome: "nothing" }))).toEqual({ short: "nothing to bring", full: "had nothing to bring" });
-    expect(agentOutcome(agent({ outcome: "failed", error: "locked" }))).toEqual({ short: "failed: locked", full: "failed: locked" });
+  it("gives a row's end the same words as the landed line", () => {
+    expect(agentOutcome(agent({ outcome: "transcript-only", skipped: 1 }))).toBe("transcripts landed, not yet listed, 1 rollout skipped");
+    expect(agentOutcome(agent({ outcome: "nothing" }))).toBe("nothing to bring");
+    expect(agentOutcome(agent({ outcome: "failed", error: "locked" }))).toBe("failed: locked");
+  });
+});
+
+describe("a refusal from a caught error", () => {
+  it("knows the one refusal with a follow-up, an existing destination, and reads any other error's words", () => {
+    expect(refusalOf(new RequestError("/x exists with 3 files", "exists"))).toEqual({ message: "/x exists with 3 files", exists: true });
+    expect(refusalOf(new RequestError("/x is not a folder", "invalid"))).toEqual({ message: "/x is not a folder", exists: false });
+    expect(refusalOf(new Error("the machine went away"))).toEqual({ message: "the machine went away", exists: false });
+    expect(refusalOf("socket closed")).toEqual({ message: "socket closed", exists: false });
+  });
+
+  it("colours the status line: quiet with none, caution for one asking a replace, error for any other", () => {
+    expect(refusalTone(null)).toBe("quiet");
+    expect(refusalTone({ message: "/x exists", exists: true })).toBe("caution");
+    expect(refusalTone({ message: "/x is not a folder", exists: false })).toBe("error");
   });
 });
 
 describe("the landed line", () => {
   const result: ProjectExportResult = { dest: "/Users/me/code/proj", files: 11, bytes: 2_900, excluded: [], agents: [] };
 
-  it("names the folder on this Mac, the caches left behind and the sessions, or that the machine had none", () => {
+  it("names the folder on this Mac once, leaving the caches and each agent's outcome to their rows, and says when the machine had no sessions", () => {
     expect(exportLandedLine(result, "/root/proj")).toBe("proj is at /Users/me/code/proj on this Mac; no agent sessions for it on the machine.");
-    expect(exportLandedLine({ ...result, excluded: ["node_modules"] }, "/root/proj/")).toBe("proj is at /Users/me/code/proj on this Mac; 1 cache left behind; no agent sessions for it on the machine.");
-    expect(exportLandedLine({ ...result, excluded: ["node_modules", "dist"], agents: [{ agent: "claude", files: 2, bytes: 100, outcome: "moved", sessions: 2 }] }, "/root/proj")).toBe(
-      "proj is at /Users/me/code/proj on this Mac; 2 caches left behind; sessions: Claude Code moved.",
-    );
+    expect(exportLandedLine({ ...result, excluded: ["node_modules"] }, "/root/proj/")).toBe("proj is at /Users/me/code/proj on this Mac; no agent sessions for it on the machine.");
+    expect(exportLandedLine({ ...result, excluded: ["node_modules", "dist"], agents: [{ agent: "claude", files: 2, bytes: 100, outcome: "moved", sessions: 2 }] }, "/root/proj")).toBe("proj is at /Users/me/code/proj on this Mac.");
   });
 });

@@ -3,14 +3,15 @@
 // with the desktop shell's folder picker beside it when there is one, a fact
 // row with its value flush right in mono, and the fixed list of step rows the
 // runtime's events fill, and the status line under them. Every row is one
-// height so nothing moves between states.
+// height so nothing moves between states; only the status line may grow, since
+// a refusal or a landed line is never cut.
 import type { KeyboardEvent, ReactNode } from "react";
 import { durationLabel } from "../components/machine/format.js";
 import { Button } from "../components/ui/button.js";
 import { Input } from "../components/ui/input.js";
 import { Label } from "../components/ui/label.js";
 import { cn } from "../lib/utils.js";
-import type { StepRow } from "./projectTrip.js";
+import type { StatusTone, StepRow } from "./projectTrip.js";
 
 export function FolderField({
   id,
@@ -105,11 +106,11 @@ export function StepRows({ label, transfer, rows }: { label: string; transfer: s
 }
 
 /** What the trip has to say right now: quiet while it runs or has landed, the caution colour for a refusal that asks for a
- * replace, the error colour for one that does not. Two lines of the row's height, never cut: a sentence that needs the
- * second line wraps into it and nothing under it moves. */
-export function StatusLine({ tone, children }: { tone: "quiet" | "caution" | "error"; children: string }) {
+ * replace, the error colour for one that does not. Two lines of the row's height and never cut: a sentence wraps into
+ * the second line, an unbroken path breaks where it must, and a third line grows the box rather than being clipped. */
+export function StatusLine({ tone, children }: { tone: StatusTone; children: string }) {
   return (
-    <p role="status" className={cn("h-7 text-[11px] leading-[14px]", tone === "quiet" ? "text-muted-foreground" : tone === "caution" ? "text-warning-foreground" : "text-destructive-foreground")} title={children}>
+    <p role="status" className={cn("min-h-7 break-words text-[11px] leading-[14px]", tone === "quiet" ? "text-muted-foreground" : tone === "caution" ? "text-warning-foreground" : "text-destructive-foreground")} title={children}>
       {children}
     </p>
   );

@@ -14,20 +14,13 @@ import { Button } from "../components/ui/button.js";
 import { Checkbox } from "../components/ui/checkbox.js";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
 import { useThreadFolder } from "../files/root.js";
-import { errorText } from "../lib/utils.js";
-import { RequestError, type ProtocolEvent } from "../protocol/client.js";
+import type { ProtocolEvent } from "../protocol/client.js";
 import { useProtocolEvents, useStore } from "../protocol/store.js";
 import { agentRows, agentsRequest, exportLandedLine, exportStepRows, isExportOf, pickedDest } from "./exportProject.js";
-import { agentName, agentOutcome, count } from "./projectTrip.js";
+import { agentName, agentOutcome, count, refusalOf, refusalTone, type Refusal } from "./projectTrip.js";
 import { FactRow, FolderField, StatusLine, StepRows } from "./ProjectTripRows.js";
 
 type Phase = "idle" | "exporting" | "done";
-
-interface Refusal {
-  readonly message: string;
-  /** The destination already exists here; the one follow-up is to replace it. */
-  readonly exists: boolean;
-}
 
 const EXPORTING = "Exporting. This stays open until it lands; closing it would not stop the export.";
 
@@ -78,7 +71,7 @@ export function ExportProjectDialog({ workspace, onClose }: { workspace: Workspa
       setResult(landed);
       setPhase("done");
     } catch (e) {
-      setRefusal({ message: errorText(e), exists: e instanceof RequestError && e.kind === "exists" });
+      setRefusal(refusalOf(e));
       setPhase("idle");
     }
   };
@@ -141,7 +134,7 @@ export function ExportProjectDialog({ workspace, onClose }: { workspace: Workspa
               </FactRow>
             </div>
             <StepRows label="Export steps" transfer="Download" rows={exportStepRows(events)} />
-            <StatusLine tone={refusal === null ? "quiet" : refusal.exists ? "caution" : "error"}>{status}</StatusLine>
+            <StatusLine tone={refusalTone(refusal)}>{status}</StatusLine>
           </DialogPanel>
           <DialogFooter>
             {phase === "done" ? null : (
@@ -179,15 +172,14 @@ function Agents({
         <ul className="flex flex-col">
           {rows.map(agent => {
             const landed = outcomeOf(agent);
-            const words = landed === undefined ? null : agentOutcome(landed);
             const name = agentName(agent);
             return (
               <li key={agent} className="flex h-7 items-center gap-2 text-xs">
                 <Checkbox checked={ticked.has(agent)} disabled={disabled} aria-label={name} onCheckedChange={next => onToggle(agent, next)} />
                 <span className="shrink-0 text-foreground">{name}</span>
                 {landed?.sessions === undefined ? null : <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">{count(landed.sessions, "session")}</span>}
-                <span data-k="outcome" className="ml-auto min-w-0 truncate text-[11px] text-muted-foreground" title={words?.full}>
-                  {words?.short ?? ""}
+                <span data-k="outcome" className="ml-auto min-w-0 truncate text-[11px] text-muted-foreground">
+                  {landed === undefined ? "" : agentOutcome(landed)}
                 </span>
               </li>
             );

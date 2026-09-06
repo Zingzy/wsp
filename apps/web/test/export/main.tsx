@@ -4,7 +4,9 @@
 // known, three agents with threads, as the desktop shell shows it. Export
 // plays the runtime's events a beat apart and then resolves; with ?exists=1
 // the first request is refused because the destination is already here, so a
-// test can lay out and photograph the refusal, then Replace and export.
+// test can lay out and photograph the refusal, then Replace and export; with
+// ?long=1 the folder sits at a 120-character path with no space in it, so the
+// refusal that begins with it has to wrap.
 import { createRoot } from "react-dom/client";
 import type { EventUnion, ProjectExportEvent, ProjectExportResult, SessionView, WorkspaceView } from "@wsp/protocol";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
@@ -19,7 +21,7 @@ document.documentElement.classList.toggle("dark", params.get("theme") !== "light
 // The desktop shell's bridge, so the picker button is laid out; nothing here opens a system dialog.
 window.wsp = { pickFolder: async () => undefined };
 
-const SOURCE = "/Users/me/code/spoo";
+const SOURCE = params.get("long") === "1" ? "/Users/me/code/clients/northwind-traders/platform/services/billing-reconciliation/workers/nightly-settlements-batch/spoo" : "/Users/me/code/spoo";
 const workspace: WorkspaceView = { id: "ws_api", name: "api", machineId: "m_api", phase: "running", golden: "snap_g", createdAt: "2026-09-05T11:00:00Z" };
 const session = (id: string, harness: string): SessionView => ({ id, workspaceId: workspace.id, harness, status: "completed", threadId: `t_${id}`, cwd: SOURCE });
 const landed: ProjectExportResult = {

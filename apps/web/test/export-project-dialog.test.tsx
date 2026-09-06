@@ -2,8 +2,8 @@
 // The export dialog over a fake api: the folder on the machine opens as the
 // thread's folder with the Mac destination mirroring it until edited or
 // picked, the workspace's threads give the agent rows and their ticks the
-// request, the export's events fill the step rows, the landed line and each
-// row name what became of the sessions, an existing destination prints the
+// request, the export's events fill the step rows, the landed line names the
+// folder and each row what became of its sessions, an existing destination prints the
 // runtime's words as the one loud line with Replace and export as the one
 // follow-up, and any other refusal prints its words and leaves Export as it was.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -207,15 +207,10 @@ describe("export project dialog", () => {
     emit(event({ stage: "landing", message: "Landing at /root/proj.", elapsedMs: 70 }));
     emit(event({ stage: "done", message: "11 files, 2.8 KB, landed at /root/proj; 1 cache left behind; sessions: Claude Code (2 sessions) moved.", elapsedMs: 80 }));
     await act(async () => finish());
-    await waitFor(() =>
-      expect(within(root).getByRole("status").textContent).toBe(
-        "proj is at /root/proj on this Mac; 1 cache left behind; sessions: Claude Code moved, Codex transcripts landed, not yet listed, 1 rollout skipped.",
-      ),
-    );
+    await waitFor(() => expect(within(root).getByRole("status").textContent).toBe("proj is at /root/proj on this Mac."));
     expect(value(root, "files")).toBe("11 files · 2.8 KB");
     expect(value(root, "caches")).toBe("node_modules");
     expect(outcomes(root)).toEqual(["moved", "transcripts landed, not yet listed, 1 rollout skipped"]);
-    expect(root.querySelectorAll<HTMLElement>("[data-k=outcome]")[1]!.title).toBe("transcripts landed, not yet in its session list, 1 indexed rollout skipped");
     expect(within(root).queryByRole("button", { name: "Cancel" })).toBeNull();
     fireEvent.click(button(root, "Done"));
     expect(onClose).toHaveBeenCalled();

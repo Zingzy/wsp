@@ -4,7 +4,7 @@
 // threads give it and the request their ticks become, where a picked parent
 // folder lands the project, and the landed line. No React here.
 import type { ProjectExportEvent, ProjectExportResult, ProjectExportStage, SessionView } from "@wsp/protocol";
-import { agentOutcomes, count, folderName, stepRows, type StepRow } from "./projectTrip.js";
+import { folderName, stepRows, type StepRow } from "./projectTrip.js";
 
 /** The steps every export passes in order; `failed` is not a step, it is the error line. */
 export const EXPORT_STEPS = ["packing", "downloading", "landing", "done"] as const satisfies readonly ProjectExportStage[];
@@ -32,9 +32,9 @@ export function pickedDest(picked: string, source: string): string {
   return `${picked.replace(/\/+$/, "")}/${folderName(source)}`;
 }
 
-/** Where the folder landed on this Mac, the caches left behind and what became of each agent's sessions. */
+/** Where the folder landed on this Mac; the caches and each agent's outcome are in their rows, so only the fact no row
+ * can carry, that the machine had no sessions for it, joins the line. */
 export function exportLandedLine(result: ProjectExportResult, source: string): string {
-  const caches = result.excluded.length === 0 ? "" : `; ${count(result.excluded.length, "cache")} left behind`;
-  const sessions = result.agents.length === 0 ? "no agent sessions for it on the machine" : `sessions: ${agentOutcomes(result.agents)}`;
-  return `${folderName(source)} is at ${result.dest} on this Mac${caches}; ${sessions}.`;
+  const sessions = result.agents.length === 0 ? "; no agent sessions for it on the machine" : "";
+  return `${folderName(source)} is at ${result.dest} on this Mac${sessions}.`;
 }

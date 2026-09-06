@@ -3,9 +3,10 @@
 // row and step row keeps one height, no box has a colour of its own, the
 // refusal for an existing destination is the one loud line and the only thing
 // that changes colour, the step labels read at AA before and after they are
-// reached, the status line is never cut at the refusal or at done, and nothing
-// above the steps moves while the export runs to done.
-// Photographed at open, at the refusal and after it landed.
+// reached, the status line is never cut at the refusal or at done, even when
+// the destination is one unbroken 120-character path, and nothing above the
+// steps moves while the export runs to done.
+// Photographed at open, at the refusal, at a long refusal and after it landed.
 // Runs only when asked for (WSP_RENDER=1) and skips without Playwright's
 // Chromium.
 import { existsSync, mkdirSync } from "node:fs";
@@ -36,8 +37,11 @@ interface Box {
   height: number;
 }
 
-const LANDED = "spoo is at /Users/me/code/spoo on this Mac; 4 caches left behind; sessions: Claude Code moved, Codex transcripts landed, not yet listed, 1 rollout skipped, Gemini CLI nothing to bring.";
+const LANDED = "spoo is at /Users/me/code/spoo on this Mac.";
 const REFUSED = "/Users/me/code/spoo already exists on this computer with 1204 files; export with replace to overwrite it";
+const LONG = "/Users/me/code/clients/northwind-traders/platform/services/billing-reconciliation/workers/nightly-settlements-batch/spoo";
+/** Two lines of the status line's text, its floor; a third line grows it past this. */
+const ROW = 28;
 
 describe.skipIf(skipped !== undefined)("the export dialog laid out in Chromium", () => {
   let vite: ViteChild | undefined;
@@ -201,5 +205,26 @@ describe.skipIf(skipped !== undefined)("the export dialog laid out in Chromium",
     expect(after.button.y).toBe(before.button.y);
     expect(await textColor("[role=status]")).toBe(quiet);
     expect(await uncut("[role=status]")).toBe(true);
+  }, 40_000);
+
+  it.each(["dark", "light"] as const)("in the %s theme a refusal that begins with a 120-character path wraps whole, and so does the landed line under it", async theme => {
+    await page!.goto(`${base}?theme=${theme}&exists=1&long=1`);
+    await page!.waitForFunction(path => (document.querySelector("#export-dest") as HTMLInputElement | null)?.value === path, LONG);
+    const dialog = page!.locator("[role=dialog]");
+    const before = await layout();
+    expect(Math.round(before.status.height)).toBe(ROW);
+
+    await page!.locator("button:has-text('Export')").click();
+    await page!.waitForFunction(path => document.querySelector("[role=status]")?.textContent?.startsWith(path), LONG);
+    expect(await uncut("[role=status]")).toBe(true);
+    const refused = await layout();
+    expect(refused.status.height).toBeGreaterThanOrEqual(before.status.height);
+    expect(refused.steps.map(s => s.height)).toEqual(before.steps.map(s => s.height));
+    await dialog.screenshot({ path: join(SHOTS, `export-refused-long-${theme}.png`) });
+
+    await page!.locator("button:has-text('Replace and export')").click();
+    await page!.waitForFunction(path => document.querySelector("[role=status]")?.textContent === `spoo is at ${path} on this Mac.`, LONG);
+    expect(await uncut("[role=status]")).toBe(true);
+    expect(await whole("[data-k=outcome]")).toEqual([true, true, true]);
   }, 40_000);
 });

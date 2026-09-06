@@ -13,20 +13,14 @@ import { fmtBytes, type ProjectImportEvent, type ProjectImportResult, type Proje
 import { Button } from "../components/ui/button.js";
 import { Checkbox } from "../components/ui/checkbox.js";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
-import { cn, errorText } from "../lib/utils.js";
-import { RequestError, type ProtocolEvent } from "../protocol/client.js";
+import { errorText } from "../lib/utils.js";
+import type { ProtocolEvent } from "../protocol/client.js";
 import { useProtocolEvents, useStore } from "../protocol/store.js";
 import { consentRequest, defaultConsent, importStepRows, isImportOf, landedLine, secretOffer } from "./importProject.js";
-import { count } from "./projectTrip.js";
+import { count, refusalOf, refusalTone, type Refusal } from "./projectTrip.js";
 import { FactRow, FolderField, StatusLine, StepRows } from "./ProjectTripRows.js";
 
 type Phase = "idle" | "importing" | "done";
-
-interface Refusal {
-  readonly message: string;
-  /** The destination already exists on the machine; the one follow-up is to replace it. */
-  readonly exists: boolean;
-}
 
 /** What the import was asked with, so its events are recognised whatever the path spelling. */
 interface Sent {
@@ -111,7 +105,7 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
       setResult(landed);
       setPhase("done");
     } catch (e) {
-      setRefusal({ message: errorText(e), exists: e instanceof RequestError && e.kind === "exists" });
+      setRefusal(refusalOf(e));
       setPhase("idle");
     }
   };
@@ -161,7 +155,7 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
             <Summary plan={plan} />
             {plan !== null && plan.secrets.length > 0 ? <Secrets secrets={plan.secrets} ticked={ticked} disabled={phase !== "idle"} onToggle={toggle} /> : null}
             <StepRows label="Import steps" transfer="Upload" rows={importStepRows(events)} />
-            <StatusLine tone={refusal === null ? "quiet" : refusal.exists ? "caution" : "error"}>{status}</StatusLine>
+            <StatusLine tone={refusalTone(refusal)}>{status}</StatusLine>
           </DialogPanel>
           <DialogFooter>
             {phase === "done" ? null : (
