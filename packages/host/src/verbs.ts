@@ -15,10 +15,12 @@ import {
   NOTIFY_ME,
   foldThreads,
   goldenHead,
+  startPicks,
   workspaceState,
   workspaceWord,
   type ExecEvent,
   type GoldenManifest,
+  type HarnessCatalog,
   type ProjectExportEvent,
   type ProjectExportResult,
   type ProjectGolden,
@@ -209,6 +211,10 @@ const COMMON: NonNullable<ParseArgsConfig["options"]> = {
   help: { type: "boolean", short: "h" },
 };
 
+/** The model, effort and access mode flags, on every verb that starts a turn. */
+const PICK_FLAGS = ["model", "effort", "access"] as const;
+const PICK_OPTIONS: NonNullable<ParseArgsConfig["options"]> = Object.fromEntries(PICK_FLAGS.map(name => [name, { type: "string" }]));
+
 const flag = (flags: Flags, name: string): string | undefined => (typeof flags[name] === "string" ? (flags[name] as string) : undefined);
 
 export async function workspaces(client: HostClient): Promise<WorkspaceView[]> {
@@ -346,12 +352,40 @@ export function threadFolder(workspace: WorkspaceView, cwd?: string): string | u
   return absoluteFolder(cwd) ?? workspace.project?.dest;
 }
 
+/** The model, effort and access mode a start names, as the composer's pickers name them; the runtime checks each
+ * against the harness's catalog and refuses with the list. access is the wire's permissionMode. */
+export type Picks = Partial<Record<(typeof PICK_FLAGS)[number], string>>;
+
+/** The picks as sessions.start carries them: the fields the app's composer sends, absent ones left out. */
+export function picksOf(picks: Picks): Record<string, string> {
+  return { ...(picks.model !== undefined ? { model: picks.model } : {}), ...(picks.effort !== undefined ? { effort: picks.effort } : {}), ...(picks.access !== undefined ? { permissionMode: picks.access } : {}) };
+}
+
+/** The three pick flags as given on the command line. */
+export function pickFlags(flags: Flags): Picks {
+  return Object.fromEntries(PICK_FLAGS.map(name => [name, flag(flags, name)]));
+}
+
+/** Refuses a pick the harness table does not list, in the runtime's own words, before a machine is minted for it;
+ * the table is what the runtime knows without a machine, and the start on the new machine checks the rest. */
+export async function checkedPicks(client: HostClient, harness: string | undefined, picks: Picks): Promise<void> {
+  const { harnesses } = await client.request<{ harnesses: HarnessCatalog[] }>("harnesses.list");
+  startPicks(harnesses.find(c => (harness === undefined ? c.isDefault === true : c.harness === harness)), picksOf(picks), true);
+}
+
 /** The start that opens a new thread in a workspace, under the named agent or the runtime's default, in the named
  * folder or the workspace's own; cwd is the field the app's composer sends. notify is the thread its every turn's end
  * is told to, or NOTIFY_ME. */
-export function openingOf(workspace: WorkspaceView, prompt: string, opts: { harness?: string; cwd?: string; notify?: string } = {}): Record<string, unknown> {
+export function openingOf(workspace: WorkspaceView, prompt: string, opts: Picks & { harness?: string; cwd?: string; notify?: string } = {}): Record<string, unknown> {
   const cwd = threadFolder(workspace, opts.cwd);
-  return { workspaceId: workspace.id, prompt, ...(cwd !== undefined ? { cwd } : {}), ...(opts.harness !== undefined ? { harness: opts.harness } : {}), ...(opts.notify !== undefined ? { notify: opts.notify } : {}) };
+  return {
+    workspaceId: workspace.id,
+    prompt,
+    ...(cwd !== undefined ? { cwd } : {}),
+    ...(opts.harness !== undefined ? { harness: opts.harness } : {}),
+    ...(opts.notify !== undefined ? { notify: opts.notify } : {}),
+    ...picksOf(opts),
+  };
 }
 
 /** What a --notify names for the runtime: NOTIFY_ME as given, else the thread the reference picks, by its full id. */
@@ -361,10 +395,11 @@ export async function notifyOf(client: HostClient, ref: string | undefined): Pro
   return thread.threadId ?? thread.id;
 }
 
-/** The start a message to an existing thread makes: its latest turn resumed under the thread's own agent. */
-export function resumeOf(thread: ThreadView, prompt: string): Record<string, unknown> {
+/** The start a message to an existing thread makes: its latest turn resumed under the thread's own agent, with any
+ * pick named for this turn; the harness takes a new model, effort or mode on a resume. */
+export function resumeOf(thread: ThreadView, prompt: string, picks: Picks = {}): Record<string, unknown> {
   if (thread.claudeSessionId === undefined) throw new Error(`thread ${thread.id} has no session to resume yet`);
-  return { workspaceId: thread.workspaceId, prompt, harness: thread.harness, resume: thread.claudeSessionId };
+  return { workspaceId: thread.workspaceId, prompt, harness: thread.harness, resume: thread.claudeSessionId, ...picksOf(picks) };
 }
 
 /** Starts a turn as `startedBy` and follows it to its reply: `on.queued` when the runtime says the start waits behind
@@ -426,22 +461,26 @@ export function turnFailure(turn: Turn): string | undefined {
 }
 
 /** What a send that met a running turn on its thread says on stderr: WAITING when the runtime announces the wait,
- * the rest once it answered. */
+ * the rest once it answered. A steered message cannot change the running turn's picks, so the line names the flags
+ * it dropped. */
 const WAITING = "waiting behind the running turn";
-const JOINED: Record<Exclude<SessionStartOutcome, "started">, string> = {
-  steered: "joined the running turn",
-  queued: "queued behind the running turn; it has ended and this turn started",
+const JOINED: Record<Exclude<SessionStartOutcome, "started">, (picks: Picks) => string> = {
+  steered: picks => {
+    const dropped = PICK_FLAGS.filter(name => picks[name] !== undefined).map(name => `--${name}`);
+    return `joined the running turn${dropped.length === 0 ? "" : `; ${dropped.join(", ")} dropped, it keeps its own model, effort and access`}`;
+  },
+  queued: () => "queued behind the running turn; it has ended and this turn started",
 };
 
 /** The verbs' way through a turn: text streams to stderr as it arrives, the last message is printed on stdout when
  * the reply is complete, with --json every event of the turn up to its done is printed instead; the failure is one
  * line on stderr, exit 1. */
-async function followVerb(ctx: VerbContext, client: HostClient, start: Record<string, unknown>, announce: boolean): Promise<number> {
+async function followVerb(ctx: VerbContext, client: HostClient, start: Record<string, unknown>, announce: boolean, picks: Picks = {}): Promise<number> {
   const turn = await follow(client, start, "cli", {
     queued: () => ctx.io.error(WAITING),
     started: (t: Turn) => {
       if (announce) ctx.out.emit({ type: "thread", id: t.threadId, workspaceId: t.session.workspaceId, harness: t.session.harness, startedBy: t.session.startedBy }, `thread ${t.threadId}`);
-      if (t.outcome !== "started") ctx.io.error(JOINED[t.outcome]);
+      if (t.outcome !== "started") ctx.io.error(JOINED[t.outcome](picks));
     },
     event: e => {
       ctx.out.emit(e, e.type === "session.done" ? e.result.text : undefined);
@@ -565,21 +604,24 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "fork",
-    usage: 'wsp fork <workspace> [--name <name>] [--send "<task>" [--agent, --cwd, --notify as thread new]]',
+    usage: 'wsp fork <workspace> [--name <name>] [--send "<task>" [the flags of thread new]]',
     about: "a new machine from the source's golden version, not a copy of its live disk",
-    options: { name: { type: "string" }, send: { type: "string" }, agent: { type: "string" }, cwd: { type: "string" }, notify: { type: "string" } },
+    options: { name: { type: "string" }, send: { type: "string" }, agent: { type: "string" }, ...PICK_OPTIONS, cwd: { type: "string" }, notify: { type: "string" } },
     run: async ctx => {
       const [ref] = ctx.args;
       if (ref === undefined || ctx.args.length !== 1) throw new Error("wsp fork takes one workspace");
       const task = flag(ctx.flags, "send");
-      for (const dependent of ["agent", "cwd", "notify"]) if (task === undefined && flag(ctx.flags, dependent) !== undefined) throw new Error(`--${dependent} needs --send`);
+      for (const dependent of ["agent", ...PICK_FLAGS, "cwd", "notify"]) if (task === undefined && flag(ctx.flags, dependent) !== undefined) throw new Error(`--${dependent} needs --send`);
       const client = await ctx.client();
       const source = await workspaceOf(client, ref);
-      // Resolved before the machine is minted, so a bad reference costs nothing.
+      // Resolved and checked before the machine is minted, so a bad reference or pick costs nothing.
       const notify = await notifyOf(client, flag(ctx.flags, "notify"));
+      const harness = flag(ctx.flags, "agent");
+      const picks = pickFlags(ctx.flags);
+      if (task !== undefined) await checkedPicks(client, harness, picks);
       const created = await create(client, ctx.out, source.golden, flag(ctx.flags, "name") ?? `${source.name}-fork`);
       if (task === undefined) return 0;
-      return followVerb(ctx, client, openingOf(created.workspace, task, { harness: flag(ctx.flags, "agent"), cwd: flag(ctx.flags, "cwd"), notify }), true);
+      return followVerb(ctx, client, openingOf(created.workspace, task, { harness, ...picks, cwd: flag(ctx.flags, "cwd"), notify }), true);
     },
   },
   {
@@ -609,9 +651,9 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "thread new",
-    usage: 'wsp thread new --in <workspace> [--agent <name>] [--cwd <path>] [--notify <thread|me>] "<task>"',
-    about: "opens a thread in the workspace, in its project folder or --cwd, and follows its first turn",
-    options: { in: { type: "string" }, agent: { type: "string" }, cwd: { type: "string" }, notify: { type: "string" } },
+    usage: 'wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify] "<task>"',
+    about: "opens a thread with the agent, model, effort and access the app offers; follows its first turn",
+    options: { in: { type: "string" }, agent: { type: "string" }, ...PICK_OPTIONS, cwd: { type: "string" }, notify: { type: "string" } },
     run: async ctx => {
       const [task] = ctx.args;
       const within = flag(ctx.flags, "in");
@@ -619,19 +661,20 @@ export const VERBS: readonly Verb[] = [
       if (task === undefined || ctx.args.length !== 1) throw new Error("wsp thread new takes one task");
       const client = await ctx.client();
       const workspace = await workspaceOf(client, within);
-      return followVerb(ctx, client, openingOf(workspace, task, { harness: flag(ctx.flags, "agent"), cwd: flag(ctx.flags, "cwd"), notify: await notifyOf(client, flag(ctx.flags, "notify")) }), true);
+      return followVerb(ctx, client, openingOf(workspace, task, { harness: flag(ctx.flags, "agent"), ...pickFlags(ctx.flags), cwd: flag(ctx.flags, "cwd"), notify: await notifyOf(client, flag(ctx.flags, "notify")) }), true);
     },
   },
   {
     name: "send",
-    usage: 'wsp send <thread> "<message>"',
-    about: "a message to the thread; follows the turn, prints the last message",
-    options: {},
+    usage: 'wsp send <thread> [--model, --effort, --access <value>] "<message>"',
+    about: "a message to the thread, on a named model, effort or access; a running turn keeps its own",
+    options: PICK_OPTIONS,
     run: async ctx => {
       const [ref, message] = ctx.args;
       if (ref === undefined || message === undefined || ctx.args.length !== 2) throw new Error("wsp send takes a thread and one message");
       const client = await ctx.client();
-      return followVerb(ctx, client, resumeOf(await threadOf(client, ref), message), false);
+      const picks = pickFlags(ctx.flags);
+      return followVerb(ctx, client, resumeOf(await threadOf(client, ref), message, picks), false, picks);
     },
   },
   {
