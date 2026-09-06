@@ -116,6 +116,25 @@ describe("wsp verbs over the host", () => {
     expect(sent.io.streamed.endsWith("re: build it")).toBe(true);
   });
 
+  it("fork and thread new refuse a workspace whose machine is gone, quoting the provider", async () => {
+    await run("new", "alpha");
+    const [alpha] = await rt.workspaces.list();
+    await handle!.close();
+    handle = undefined;
+    backend.machines[0]!.killed = true; // deleted at the provider while no host ran
+    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter } });
+    vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_verbs_key");
+    handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir: join(dir, "web"), runtime: rt });
+    const words = `machine ${alpha!.machineId} is gone at the provider: gone`;
+    const forked = await run("fork", "alpha");
+    expect(forked.code).toBe(1);
+    expect(forked.io.errors).toEqual([`wsp fork: Workspace machine is gone; rebuild it to fork (${words})`]);
+    const opened = await run("thread", "new", "--in", "alpha", "do it");
+    expect(opened.code).toBe(1);
+    expect(opened.io.errors).toEqual([`wsp thread new: Workspace machine is gone; rebuild it to send (${words})`]);
+    expect((await rt.workspaces.list()).map(w => [w.name, w.phase])).toEqual([["alpha", "gone"]]);
+  });
+
   it("fork's help says it makes a new machine from the source's golden version, in wsp --help and wsp fork --help", async () => {
     const line = "a new machine from the source's golden version";
     expect(HELP).toContain(line);

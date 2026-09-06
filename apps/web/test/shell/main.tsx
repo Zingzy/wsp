@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Served by Vite to a real browser: the app shell over a fake api with two
-// workspaces and two threads, in either theme (?theme=light) and with a
-// status toast in the footer (?toast=...), so a test can measure the chrome's
-// geometry, which jsdom cannot lay out.
+// Served by Vite to a real browser: the app shell over a fake api with three
+// workspaces (running, paused, gone) and two threads, in either theme
+// (?theme=light) and with a status toast in the footer (?toast=...), so a
+// test can measure the chrome's geometry, which jsdom cannot lay out.
 import { createRoot } from "react-dom/client";
-import type { SessionView, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import type { SessionView, WorkspaceView } from "@wsp/protocol";
+import { statusOf } from "../workspace-status";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api } from "../../src/protocol/client";
 import { useStore } from "../../src/protocol/store";
@@ -22,14 +23,7 @@ const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running
   golden: "snap_g",
   createdAt: "2026-09-05T11:00:00Z",
 });
-const status = (w: WorkspaceView): WorkspaceStatus => ({
-  ...w,
-  machineState: w.phase === "napping" ? "paused" : "running",
-  reach: { state: w.phase === "napping" ? "napping" : "reachable" },
-  size: { cpu: 2, memMb: 4096 },
-  rateUsdPerHour: 0.11,
-});
-const workspaces = [view("ws_a", "api"), view("ws_b", "web", "napping")];
+const workspaces = [view("ws_a", "api"), view("ws_b", "web", "napping"), { ...view("ws_c", "old", "gone"), gone: "machine m_ws_c is gone at the provider: Not found" }];
 // The ticket's rows: long titles with the agent and both opener words, one working, one settled.
 const sessions: SessionView[] = [
   { id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", prompt: "Now reply with exactly the word pong.", startedBy: "person", startedAt: Date.now() - 48 * 60_000 },
@@ -41,7 +35,7 @@ const api: Api = {
   getWorkspace: async id => workspaces.find(w => w.id === id)!,
   createWorkspace: async () => workspaces[0]!,
   createFromGoldenHead: async () => workspaces[0]!,
-  watchStatuses: async () => workspaces.map(status),
+  watchStatuses: async () => workspaces.map(w => statusOf(w)),
   nap: async id => workspaces.find(w => w.id === id)!,
   wake: async id => workspaces.find(w => w.id === id)!,
   upgrade: async id => workspaces.find(w => w.id === id)!,

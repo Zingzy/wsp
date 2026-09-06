@@ -14,6 +14,7 @@ import { CATALOG_TTL_MS, GRACE_MS, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, cre
 import { machineExecStream } from "../src/machine-exec.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
+import { until } from "./until.js";
 import { wsRequest } from "./ws-client.js";
 import { stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
 import { fakeClock } from "./fake-clock.js";
@@ -4523,7 +4524,8 @@ describe("a thread whose start named who to tell", () => {
   it("the thread keeps who to tell: a later send into it, and a turn after the host restarted, both tell the parent", async () => {
     const h = held(true);
     const store = memoryStore();
-    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: h.adapter } });
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store, adapters: { claude: h.adapter } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     const parent = await rt.sessions.start(ws.id, { prompt: "orchestrate" });
     const parentThread = parent.view().threadId!;
@@ -4540,7 +4542,7 @@ describe("a thread whose start named who to tell", () => {
     await rt.close();
 
     const h2 = held(true);
-    const rt2 = createRuntime({ backend: stubBackend(), store, adapters: { claude: h2.adapter } });
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h2.adapter } });
     const parentAgain = await rt2.sessions.start(ws.id, { prompt: "still here", resume: parent.view().claudeSessionId! });
     expect(parentAgain.view().threadId).toBe(parentThread);
     const third = await rt2.sessions.start(ws.id, { prompt: "and the tests", resume: kidSid });
@@ -4622,5 +4624,116 @@ describe("a thread whose start named who to tell", () => {
     expect(kinds).toEqual(["session.start", "session.notify", "session.end"]);
     expect(events.find(e => e.type === "session.notify")).toMatchObject({ notify: "me", text: `thread ${kid.view().threadId!.slice(0, 8)} finished (failed): machine paused while the agent was working` });
     await rt.close();
+  });
+});
+
+describe("gone machines", () => {
+  /** A port nothing listens on: a reach probe against it fails at once, the way a dead edge route does. */
+  const closedPort = async (): Promise<number> => {
+    const probe = createServer();
+    await new Promise<void>(r => probe.listen(0, "127.0.0.1", r));
+    const port = (probe.address() as { port: number }).port;
+    await new Promise<void>(r => probe.close(() => r()));
+    return port;
+  };
+  /** A turn that announces itself and never settles on its own: only the runtime ending it ends it. */
+  const held: HarnessAdapterFactory = () => ({
+    steers: false,
+    start: o => {
+      const sessionId = randomUUID();
+      o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5", cwd: "/root/work" });
+      return { localId: sessionId, finished: new Promise<TurnResult>(() => {}), interrupt: async () => {} };
+    },
+  });
+  /** Two workspaces, one napping, both machines deleted at the provider while no host ran; the same store hydrated again. */
+  const hydratedGone = async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt1 = createRuntime({ backend, store, adapters: {} });
+    const a = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
+    const b = await rt1.workspaces.create({ golden: "snap_g", name: "b" });
+    await rt1.workspaces.nap(b.id);
+    await rt1.close();
+    for (const m of backend.machines) m.killed = true;
+    const rt = createRuntime({ backend, store, adapters: {} });
+    return { backend, store, rt, a, b };
+  };
+
+  it("a stored workspace whose machine the provider no longer knows hydrates as gone with the provider's words, whatever phase it was left at", async () => {
+    const { store, rt, a, b } = await hydratedGone();
+    const listed = await rt.workspaces.list();
+    expect(listed.map(w => [w.name, w.phase, w.gone])).toEqual([
+      ["a", "gone", "machine m1 is gone at the provider: gone"],
+      ["b", "gone", "machine m2 is gone at the provider: gone"],
+    ]);
+    // Written back before anything lists it: a second host over the store reads gone without asking the provider.
+    expect(await store.get("workspaces", a.id)).toMatchObject({ phase: "gone", gone: "machine m1 is gone at the provider: gone" });
+    expect(await store.get("workspaces", b.id)).toMatchObject({ phase: "gone" });
+    const statuses = await rt.status.list();
+    const sa = statuses.find(s => s.id === a.id)!;
+    expect(sa).toMatchObject({ phase: "gone", machineState: "gone", reach: { state: "gone" }, reason: "machine m1 is gone at the provider: gone" });
+    expect(sa.idleAt).toBeUndefined();
+    await rt.close();
+  });
+
+  it("a gone workspace refuses wake and sends with the provider's words; nap is a no-op; rebuild is the road out", async () => {
+    const { backend, store, rt, a } = await hydratedGone();
+    const words = "machine m1 is gone at the provider: gone";
+    await expect(rt.workspaces.wake(a.id)).rejects.toThrow(`Workspace machine is gone; rebuild it to wake (${words})`);
+    await expect(rt.sessions.start(a.id, { prompt: "hi" })).rejects.toThrow(`Workspace machine is gone; rebuild it to send (${words})`);
+    expect(await rt.workspaces.nap(a.id)).toMatchObject({ phase: "gone" });
+    expect(backend.machines).toHaveLength(2);
+
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const rebuilt = await rt.workspaces.rebuild(a.id);
+    expect(rebuilt).toMatchObject({ phase: "running", machineId: "m3" });
+    expect(rebuilt.gone).toBeUndefined();
+    expect(backend.machines[2]!.spec.fromSnapshot).toBe("snap_g");
+    expect(events.find(e => e.type === "workspace.upgraded")).toMatchObject({ workspaceId: a.id, machineId: "m3" });
+    expect((await rt.status.list()).find(s => s.id === a.id)).toMatchObject({ phase: "running", machineState: "running", machineId: "m3" });
+    expect(await store.get("workspaces", a.id)).toMatchObject({ phase: "running", machineId: "m3" });
+    expect((await store.get("workspaces", a.id) as { gone?: string }).gone).toBeUndefined();
+    expect(await rt.workspaces.wake(a.id)).toMatchObject({ phase: "running" });
+    await rt.close();
+  });
+
+  it("the reach poll finds a running machine gone: the workspace moves to gone, its turn ends, the idle window drops and the bill stops", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: { claude: held }, status: { pollIntervalMs: 5, costIntervalMs: 5, reconcileMinMs: 0 } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const port = await closedPort();
+    backend.machines[0]!.previewUrl = async p => ({ url: `http://127.0.0.1:${port}/?port=${p}`, token: "t", expiresAt: Date.now() + 3_600_000 });
+    await rt.sessions.start(ws.id, { prompt: "work" });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const stop = rt.status.watch();
+    try {
+      // Unreachable alone is weather: the provider still says running, so the workspace does.
+      await until(() => events.some(e => e.type === "workspace.status" && e.status.reach.state === "unreachable"));
+      expect(await rt.workspaces.get(ws.id)).toMatchObject({ phase: "running" });
+      expect(events.some(e => e.type === "workspace.gone")).toBe(false);
+
+      backend.machines[0]!.killed = true; // deleted through the provider's API under a running host
+      await until(() => events.some(e => e.type === "workspace.gone"));
+      expect(events.find(e => e.type === "workspace.gone")).toMatchObject({ workspaceId: ws.id, machineId: "m1", reason: "machine m1 is gone at the provider" });
+      expect(await rt.workspaces.get(ws.id)).toMatchObject({ phase: "gone", gone: "machine m1 is gone at the provider" });
+      expect(await store.get("workspaces", ws.id)).toMatchObject({ phase: "gone", gone: "machine m1 is gone at the provider" });
+      expect(events.find(e => e.type === "session.end")).toMatchObject({ workspaceId: ws.id, reason: "machine gone at the provider while the agent was working" });
+      expect((await rt.sessions.list(ws.id)).map(s => s.status)).toEqual(["failed"]);
+
+      // The bill stops where the machine did: rate 0 and the awake time frozen from one tick to the next.
+      await until(() => events.filter(e => e.type === "workspace.cost" && e.phase === "gone").length >= 2);
+      const ticks = events.filter((e): e is EventUnion & { type: "workspace.cost" } => e.type === "workspace.cost" && e.phase === "gone");
+      expect(ticks[0]).toMatchObject({ rateUsdPerHour: 0 });
+      expect(ticks[1]!.awakeMs).toBe(ticks[0]!.awakeMs);
+      const last = events.filter((e): e is EventUnion & { type: "workspace.status" } => e.type === "workspace.status").at(-1)!;
+      expect(last.status).toMatchObject({ phase: "gone", machineState: "gone", reach: { state: "gone" }, reason: "machine m1 is gone at the provider" });
+      expect(last.status.idleAt).toBeUndefined();
+    } finally {
+      stop();
+      await rt.close();
+    }
   });
 });

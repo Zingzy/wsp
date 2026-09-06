@@ -152,9 +152,9 @@ export const useStore = create<State>((set, get) => {
     }
   };
 
-  // wake-via-resurrect and upgrade replace the machine, so those events carry a new machineId
-  const setPhase = (id: string, phase: WorkspacePhase, machineId?: string): void => {
-    const patch = { phase, ...(machineId !== undefined ? { machineId } : {}) };
+  // wake-via-resurrect and upgrade replace the machine, so those events carry a new machineId; gone carries the words
+  const setPhase = (id: string, phase: WorkspacePhase, machineId?: string, gone?: string): void => {
+    const patch = { phase, ...(machineId !== undefined ? { machineId } : {}), ...(gone !== undefined ? { gone } : {}) };
     set(s => ({
       workspaces: s.workspaces.map(w => (w.id === id ? { ...w, ...patch } : w)),
       statuses: s.statuses[id] ? { ...s.statuses, [id]: { ...s.statuses[id]!, ...patch } } : s.statuses,
@@ -346,6 +346,9 @@ export const useStore = create<State>((set, get) => {
         // napped/woken carry only ids; they are also the optimistic toggle's reconcile.
         case "workspace.napped":
           setPhase(e.workspaceId, "napping");
+          return;
+        case "workspace.gone":
+          setPhase(e.workspaceId, "gone", undefined, e.reason);
           return;
         case "workspace.woken":
         case "workspace.upgraded":
