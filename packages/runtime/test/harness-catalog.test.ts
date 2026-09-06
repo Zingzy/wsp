@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import type { ClaudeCatalogProbe } from "@wsp/adapter-claude";
 import { HarnessCatalog } from "@wsp/protocol";
-import { HARNESS_CATALOGS, TABLE_PIN, catalogFromProbe, harnessCatalog } from "../src/harness-catalog.js";
+import { HARNESS_CATALOGS, TABLE_PIN, catalogFromProbe, harnessCatalog, type HarnessCatalogProbe } from "../src/harness-catalog.js";
 
 describe("harness catalogs", () => {
   it("names every harness the recipe collects, each parsing as the wire type with at most one default per picker", () => {
@@ -41,7 +40,7 @@ describe("harness catalogs", () => {
 });
 
 describe("catalogFromProbe", () => {
-  const probe: ClaudeCatalogProbe = {
+  const probe: HarnessCatalogProbe = {
     version: "2.1.257",
     models: [
       { slug: "claude-opus-5", label: "Opus", description: "Opus 5 with 1M context", efforts: ["low", "high"], contextWindows: ["200k", "1m"], isDefault: true },
@@ -53,7 +52,7 @@ describe("catalogFromProbe", () => {
   };
 
   it("takes the binary's values and defaults, borrows the table's labels and descriptions, and says the binary answered", () => {
-    const catalog = catalogFromProbe(probe);
+    const catalog = catalogFromProbe(harnessCatalog("claude")!, probe);
     expect(HarnessCatalog.parse(catalog)).toEqual(catalog);
     expect(catalog).toMatchObject({ harness: "claude", label: "Claude Code", source: "harness", version: "2.1.257" });
     expect(catalog.models).toEqual([
@@ -72,6 +71,6 @@ describe("catalogFromProbe", () => {
   });
 
   it("a probe without a version says so instead of pretending to the table's pin", () => {
-    expect(catalogFromProbe({ ...probe, version: null }).version).toBeNull();
+    expect(catalogFromProbe(harnessCatalog("claude")!, { ...probe, version: null }).version).toBeNull();
   });
 });
