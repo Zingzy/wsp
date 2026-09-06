@@ -2876,6 +2876,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   const status = createStatusTracker({
     rateUsdPerHour: size => backend.pricing.rateUsdPerHour(size),
+    store,
     records: async () => {
       await ready();
       return [...live.values()].filter(e => !e.creating).map(e => ({

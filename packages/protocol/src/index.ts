@@ -465,7 +465,7 @@ export const WorkspaceCostEvent = z.object({
   phase: WorkspacePhase,
   /** Current burn: the size's awake rate while running, 0 while napping. */
   rateUsdPerHour: z.number(),
-  /** Total awake milliseconds behind accruedUsd since this runtime began tracking. */
+  /** Total awake milliseconds behind accruedUsd since metering began; carried across host restarts. */
   awakeMs: z.number(),
   accruedUsd: z.number(),
   at: z.string(),
@@ -1260,8 +1260,8 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
   /** Replies with { storage: SnapshotStorage | null }: every snapshot on the account by count, size and monthly
    * cost; null on a backend whose capabilities lack snapshotListing. */
   z.object({ id: reqId, op: z.literal("snapshots.storage") }),
-  /** Replies with { points: WorkspaceCostEvent[] }: the workspace's cost ticks since this runtime began metering it,
-   * folded to the ticks where the rate changed plus the newest (appendCostPoint); empty before the first tick. */
+  /** Replies with { points: WorkspaceCostEvent[] }: the workspace's cost ticks since metering began, across host
+   * restarts, folded to the ticks where the rate changed plus the newest (appendCostPoint); empty before the first tick. */
   z.object({ id: reqId, op: z.literal("cost.history"), workspaceId: z.string() }),
   /** Moves the golden's head to a version already in its manifest; replies with a
    * SnapshotRollbackResult. A version outside the manifest fails with kind "missing". */
