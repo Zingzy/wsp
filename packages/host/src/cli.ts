@@ -486,6 +486,62 @@ async function hostFor(
   }
 }
 
+/** The flags the shared parse reads; a command that answers on its own word (mcp, recipe) parses its own. */
+interface SharedFlags {
+  version?: boolean;
+  help?: boolean;
+  port?: string;
+  "ws-port"?: string;
+  state?: string;
+  yes?: boolean;
+  "non-interactive"?: boolean;
+  json?: boolean;
+  recipe?: string;
+  out?: string;
+}
+
+interface Command {
+  /** Whether stdout is objects under --json; a command without it refuses the flag rather than hand prose to whoever reads them. */
+  json: boolean;
+  run(io: CliIO, opts: { port: number; wsPort: number; statePath: string }, values: SharedFlags): Promise<number>;
+}
+
+/** The commands the shared parse serves, by word; a line with no word is `up`. */
+const COMMANDS: Readonly<Record<string, Command>> = {
+  up: {
+    json: false,
+    run: async (io, opts) => {
+      const handle = await up(io, opts);
+      if (handle === undefined) return 1;
+      stopOnSignals(handle, io);
+      return 0;
+    },
+  },
+  init: {
+    json: true,
+    run: (io, opts, values) =>
+      init(io, opts, {
+        yes: values.yes === true,
+        // --json has nobody to answer the screens: its objects are for whoever is driving the run.
+        nonInteractive: values["non-interactive"] === true || values.json === true,
+        json: values.json === true,
+        ...(values.recipe !== undefined ? { recipe: values.recipe } : {}),
+      }),
+  },
+  doctor: {
+    json: false,
+    run: async (io, opts) => {
+      const keys = await loadKeys(io);
+      const rt = makeRuntime(keys, opts.statePath);
+      return doctor(rt, io, keys.anthropic !== undefined ? { envs: claudeEnvs(keys.anthropic) } : {});
+    },
+  },
+};
+
+/** The words that take --json on the shared parse and those that refuse it, the one fact the refusal and its test read. */
+export const JSON_COMMANDS: readonly string[] = Object.keys(COMMANDS).filter(w => COMMANDS[w]!.json);
+export const PROSE_COMMANDS: readonly string[] = Object.keys(COMMANDS).filter(w => !COMMANDS[w]!.json);
+
 /** The word `recipe` opens the command, as `mcp` does: its flags are its own, so `--json` and the rest never reach
  * the shared parse, where a command with no table to print would take them and answer in prose. */
 const RECIPE_COMMAND = "recipe";
@@ -658,18 +714,7 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
   if (verb !== undefined) return runVerb(verb, argv, io, statePathFrom);
   if (argv[0] === MCP_COMMAND) return mcp(io, argv.slice(1), statePathFrom);
   if (argv[0] === RECIPE_COMMAND) return recipe(io, argv.slice(1), statePathFrom);
-  let values: {
-    version?: boolean;
-    help?: boolean;
-    port?: string;
-    "ws-port"?: string;
-    state?: string;
-    yes?: boolean;
-    "non-interactive"?: boolean;
-    json?: boolean;
-    recipe?: string;
-    out?: string;
-  };
+  let values: SharedFlags;
   let positionals: string[];
   try {
     ({ values, positionals } = parseArgs({
@@ -707,35 +752,15 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
     wsPort: values["ws-port"] !== undefined ? Number(values["ws-port"]) : 4410,
     statePath: statePathFrom(values.state),
   };
-  const [cmd] = positionals;
-  // --json promises whoever reads stdout one object per line; only init keeps that promise, the rest would hand them prose.
-  if (values.json === true && cmd !== "init") {
-    io.error(`Unknown option '--json' for wsp ${cmd ?? "up"}: it belongs to wsp init, which prints its sign-ins that way.`);
+  const word = positionals[0] ?? "up";
+  const command = COMMANDS[word];
+  if (command === undefined) {
+    io.error(commandUsage(word) ?? `unknown command: ${word}\n\n${HELP}`);
     return 1;
   }
-  switch (cmd) {
-    case undefined:
-    case "up": {
-      const handle = await up(io, opts);
-      if (handle === undefined) return 1;
-      stopOnSignals(handle, io);
-      return 0;
-    }
-    case "init":
-      return init(io, opts, {
-        yes: values.yes === true,
-        // --json has nobody to answer the screens: its objects are for whoever is driving the run.
-        nonInteractive: values["non-interactive"] === true || values.json === true,
-        json: values.json === true,
-        ...(values.recipe !== undefined ? { recipe: values.recipe } : {}),
-      });
-    case "doctor": {
-      const keys = await loadKeys(io);
-      const rt = makeRuntime(keys, opts.statePath);
-      return doctor(rt, io, keys.anthropic !== undefined ? { envs: claudeEnvs(keys.anthropic) } : {});
-    }
-    default:
-      io.error(commandUsage(cmd) ?? `unknown command: ${cmd}\n\n${HELP}`);
-      return 1;
+  if (values.json === true && !command.json) {
+    io.error(`Unknown option '--json' for wsp ${word}: only ${JSON_COMMANDS.map(w => `wsp ${w}`).join(", ")} prints JSON.`);
+    return 1;
   }
+  return command.run(io, opts, values);
 }
