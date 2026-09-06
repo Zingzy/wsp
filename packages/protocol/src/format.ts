@@ -65,14 +65,16 @@ export function notifyLine(threadId: string, result: TurnResult): string {
   return `thread ${threadId.slice(0, 8)} finished (${facts.join(", ")})${tail !== undefined ? `: ${tail}` : ""}`;
 }
 
-/** A count with its noun, plural by an s: the sidebar's counts, the plan's rows and the verbs' lines say it this way. */
-export function fmtCount(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? "" : "s"}`;
+/** A count with its noun, the noun pluralised by an s: the one rule every line that counts rows, sessions, calls,
+ * threads or a plan's files reads, so none of them says "1 sessions". A noun that does not take an s is spelled by
+ * its caller. */
+export function plural(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? "" : "s"}`;
 }
 
 /** A thread count with its noun, as the sidebar's counts and the verbs' lines say it. */
 export function fmtThreads(n: number): string {
-  return fmtCount(n, "thread");
+  return plural(n, "thread");
 }
 
 /** What forgetting a workspace takes off this computer, the one sentence every client's confirmation shows. */

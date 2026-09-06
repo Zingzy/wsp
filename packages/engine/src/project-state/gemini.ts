@@ -2,7 +2,8 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { mergeScript, pyData } from "./merge.js";
-import { filesUnder, movedPath, underProject, type MovedState, type ProjectStateResolver } from "./resolver.js";
+import { underProject } from "@wsp/protocol";
+import { filesUnder, movedPath, type MovedState, type ProjectStateResolver } from "./resolver.js";
 
 /** The registry maps each resolved project path to the slug naming its tmp and history directories. */
 interface Registry {
