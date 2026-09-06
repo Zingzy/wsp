@@ -7,7 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { installFakeLayout } from "./fake-layout.js";
 import { composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
 import type { EventUnion, SessionEvent, WorkspaceView } from "@wsp/protocol";
-import { useStore } from "../src/protocol/store.js";
+import { useSelectedThreadId, useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
@@ -68,11 +68,17 @@ function fixtureApi(workspaces: WorkspaceView[], history: Record<string, Session
   return { api, started, emit };
 }
 
-async function setup(api: Api) {
+/** The center slot as the shell mounts it: the thread the store selects, so a pin the view moves reaches the mount. */
+function Selected() {
+  return <WorkspaceThread workspaceId={WS} threadId={useSelectedThreadId()} />;
+}
+
+async function setup(api: Api, threadId: string | null = null) {
   useStore.getState().bind(api);
   useStore.getState().setConn("live");
+  useStore.getState().select(WS, threadId);
   await waitFor(() => expect(useStore.getState().workspaces.length).toBeGreaterThan(0));
-  const view = render(<WorkspaceThread workspaceId={WS} />);
+  const view = render(<Selected />);
   await waitFor(() => expect(screen.queryByText("loading transcript")).toBeNull());
   return view;
 }
@@ -281,6 +287,103 @@ describe("chat tab composer", () => {
     await press(editor, "Enter");
     expect(started.length).toBe(0);
     expect(sendButton().disabled).toBe(true);
+  });
+});
+
+describe("chat tab send after a harness died before its init", () => {
+  // The runtime stamps the thread it minted on every event of a turn, the done and end of one whose harness died before init included; no session.start ever carries this id.
+  const dead = { workspaceId: WS, sessionId: "9b2a7c1e-0d4f-4a6b-8e3c-5f7a9d1b2c3e", turnId: "turn_dead", threadId: "thr_dead" };
+  const DEATH: SessionEvent[] = [
+    { type: "session.done", ...dead, result: { status: "failed", error: "claude exited before init (exit code 1)" } },
+    { type: "session.end", ...dead, exitCode: 1, sawResult: true },
+  ];
+  const retry = { workspaceId: WS, sessionId: "sess_retry", turnId: "turn_retry", threadId: "thr_retry" };
+  const RETRY: SessionEvent[] = [
+    { type: "session.start", ...retry, prompt: "again" },
+    { type: "session.delta", ...retry, kind: "text", text: "Second time lucky." },
+    { type: "session.done", ...retry, result: { status: "completed", durationMs: 900, costUsd: 0.001 } },
+    { type: "session.end", ...retry, exitCode: 0, sawResult: true },
+  ];
+  const STARTED: SessionEvent[] = CHAT_STREAM.map(e => ({ ...e, threadId: "thr_a" }));
+
+  it("on a workspace with no thread yet, the next send carries no resume, and the thread the runtime mints for it lands in the view", async () => {
+    const bare: WorkspaceView = { ...workspace, claudeSessionId: undefined };
+    const { api, started, emit } = fixtureApi([bare]);
+    await setup(api);
+    const editor = composerEditor();
+
+    await typeInto(editor, "hello");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started.length).toBe(1));
+    expect(started[0]).toEqual({ workspaceId: WS, prompt: "hello", cwd: "/root" });
+
+    for (const e of DEATH) emit(e);
+    expect(screen.getByText(/exited before init/)).toBeDefined();
+    expect(sendButton().getAttribute("aria-label")).toBe("Send message");
+
+    await typeInto(editor, "again");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started.length).toBe(2));
+    expect(started[1]).toEqual({ workspaceId: WS, prompt: "again", cwd: "/root" });
+    expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
+
+    for (const e of RETRY) emit(e);
+    expect(screen.getByText("Second time lucky.")).toBeDefined();
+    expect(sendButton().getAttribute("aria-label")).toBe("Send message");
+  });
+
+  it("a dead new thread read back from history starts fresh: the workspace's remembered session is not resumed into it", async () => {
+    const { api, started } = fixtureApi([workspace], { [WS]: [...STARTED, ...DEATH] });
+    await setup(api);
+    await screen.findByText(/exited before init/);
+    expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();
+    const editor = composerEditor();
+
+    await typeInto(editor, "again");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started.length).toBe(1));
+    expect(started[0]).toEqual({ workspaceId: WS, prompt: "again", cwd: "/root" });
+  });
+
+  it("pinned from the sidebar, a dead thread's next send carries no resume; the view and the pin follow the thread the runtime mints, and a reload after the follow keeps it, its queued row included", async () => {
+    const history: Record<string, SessionEvent[]> = { [WS]: [...DEATH, ...STARTED] };
+    const { api, started, emit } = fixtureApi([workspace], history);
+    // The runtime records an event before it pushes it, so a reload after the follow finds the retry in the reply.
+    const record = (e: SessionEvent) => { history[WS] = [...history[WS]!, e]; emit(e); };
+    const queued = () => (screen.getByRole("textbox", { name: "Queued message" }) as HTMLTextAreaElement).value;
+    await setup(api, "thr_dead");
+    await screen.findByText(/exited before init/);
+    expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();
+    const editor = composerEditor();
+
+    await typeInto(editor, "again");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started.length).toBe(1));
+    expect(started[0]).toEqual({ workspaceId: WS, prompt: "again", cwd: "/root" });
+    expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
+    await typeInto(editor, "and then this");
+    await press(editor, "Enter");
+    expect(useComposerDraftStore.getState().queues["thr_dead"]?.map(r => r.prompt)).toEqual(["and then this"]);
+
+    record(RETRY[0]!);
+    expect(useStore.getState().selectedThreadId).toBe("thr_retry");
+    await waitFor(() => expect(screen.queryByText("loading transcript")).toBeNull());
+    expect(stopButton()).toBeDefined();
+    expect(useComposerDraftStore.getState().queues["thr_retry"]?.map(r => r.prompt)).toEqual(["and then this"]);
+    expect(queued()).toBe("and then this");
+    record(RETRY[1]!);
+    expect(screen.getByText("Second time lucky.")).toBeDefined();
+
+    act(() => useStore.getState().noteGap());
+    await waitFor(() => expect(screen.queryByText("loading transcript")).toBeNull());
+    expect(screen.getByText("Second time lucky.")).toBeDefined();
+    expect(screen.queryByText(/exited before init/)).toBeNull();
+    expect(stopButton()).toBeDefined();
+    expect(queued()).toBe("and then this");
+
+    for (const e of RETRY.slice(2)) record(e);
+    await waitFor(() => expect(started.length).toBe(2));
+    expect(started[1]).toEqual({ workspaceId: WS, prompt: "and then this", resume: "sess_retry", cwd: "/root" });
   });
 });
 

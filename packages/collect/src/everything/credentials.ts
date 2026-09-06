@@ -3,6 +3,7 @@
 // names in a JSON, YAML, TOML or KEY=value file, or by a PEM header. Every
 // hit is a flag for the person to see; nothing here is ever pre-ticked, and
 // no value read here leaves this function.
+import type { CredentialSignal } from "@wsp/protocol";
 import { isLarge } from "./gate.js";
 import { type Entry, type Machine, basename, tilde } from "./host.js";
 import type { Dir } from "./roles.js";
@@ -11,7 +12,7 @@ import { RC_PATHS } from "./shell-rc.js";
 import { budget, walk } from "./walk.js";
 
 /** exports and history come from pass 8: a file under a manager home with secret-shaped exports the name mapping does not reach, and a git repository there. */
-export type Signal = "name" | "mode" | "keys" | "pem" | "gitleaks" | "catalog" | "exports" | "history";
+export type Signal = CredentialSignal;
 
 export interface Credential {
   /** Absolute. A directory when the whole tree is key material. */
@@ -94,7 +95,7 @@ export function nameSignal(name: string): boolean {
   return NAME_PATTERNS.some(p => p.test(name));
 }
 
-export function modeSignal(e: Entry): boolean {
+export function modeSignal(e: { mode: number; bytes: number }): boolean {
   return (e.mode & 0o077) === 0 && e.bytes > 0 && e.bytes <= MAX_BYTES;
 }
 
@@ -141,16 +142,17 @@ export function pemSignal(text: string): boolean {
 // Mode alone is believed only for a structured file right inside its app directory whose content did
 // not parse as plain config: deeper down, or once the keys read as settings, it marks tracker files,
 // lock files and themes far more often than secrets.
-async function inspect(m: Machine, path: string, e: Entry, shallow: boolean): Promise<Credential | undefined> {
-  const name = basename(path);
+/** The signals one file carries, or nothing when it is not secret-shaped. `read` is called only for a small file
+ * of a shape worth opening; `shallow` says the file sits right inside its app directory. */
+export async function fileSignals(name: string, e: { bytes: number; mode: number }, read: () => Promise<string | undefined>, shallow: boolean): Promise<Signal[] | undefined> {
   const ext = extension(name);
-  if (e.bytes === 0 || skippedName(name) || chromiumState(path)) return undefined;
+  if (e.bytes === 0 || skippedName(name)) return undefined;
   const signals: Signal[] = [];
   if (nameSignal(name)) signals.push("name");
   if (modeSignal(e)) signals.push("mode");
   let parsed = false;
   if (e.bytes > 0 && e.bytes <= MAX_BYTES && READABLE_EXTENSIONS.has(ext)) {
-    const text = await m.fs.readText(path);
+    const text = await read();
     if (text !== undefined && /^\s*(\{\s*\}|\[\s*\])?\s*$/.test(text)) return undefined;
     if (text !== undefined) {
       parsed = topLevelKeys(text).length > 0;
@@ -160,7 +162,13 @@ async function inspect(m: Machine, path: string, e: Entry, shallow: boolean): Pr
   }
   if (signals.length === 0) return undefined;
   if (signals.length === 1 && signals[0] === "mode" && !(shallow && STRUCTURED_EXTENSIONS.has(ext) && !parsed)) return undefined;
-  return { path, bytes: e.bytes, files: 1, mode: e.mode, mtime: e.mtime, signals };
+  return signals;
+}
+
+async function inspect(m: Machine, path: string, e: Entry, shallow: boolean): Promise<Credential | undefined> {
+  if (chromiumState(path)) return undefined;
+  const signals = await fileSignals(basename(path), e, () => m.fs.readText(path), shallow);
+  return signals === undefined ? undefined : { path, bytes: e.bytes, files: 1, mode: e.mode, mtime: e.mtime, signals };
 }
 
 /** `gitleaks dir --redact` JSON report: File and RuleID only; Secret and Match are redacted by the flag and never read. A relative File is joined to root. */

@@ -236,6 +236,8 @@ export interface ApplyImportOptions {
   base?: ToolResult[];
   /** Stages this builder already carries; those for the same recipe hash are skipped. */
   ledger?: ImportLedger;
+  /** Only on an update: what came off the machine before the stages, so the context's facts drop it and the result names it. */
+  removed?: RemovalResult[];
   fetch?: typeof globalThis.fetch;
   onStage?: StageListener;
 }
@@ -262,7 +264,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
     ...(recipe !== undefined ? { recipe } : {}),
     ...(prior?.missingTools !== undefined ? { missingTools: prior.missingTools } : {}),
   };
-  const result: ImportResult = { recipeHash: imp.recipeHash, tools: [], agents: [], ...(opts.base !== undefined ? { base: opts.base } : {}) };
+  const result: ImportResult = { recipeHash: imp.recipeHash, tools: [], agents: [], ...(opts.base !== undefined ? { base: opts.base } : {}), ...(opts.removed !== undefined ? { removed: opts.removed } : {}) };
   const done = (s: ImportStage): boolean => ledger.applied.includes(s);
   const mark = (s: ImportStage): void => {
     if (!done(s)) ledger.applied.push(s);
@@ -415,18 +417,18 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
     if (imp.mcp !== undefined) {
       edited = true;
       result.mcp = await applyMcp(machine, imp.mcp, stage, result.tools);
-      mark("installing-mcp");
     } else if (done("installing-mcp")) {
       stage("installing-mcp", ALREADY_APPLIED);
     } else {
       stage("installing-mcp", "none configured");
-      mark("installing-mcp");
     }
-    if (harnessRan || ran || edited) {
+    // The stage is applied once the context is on the machine, so an attach after a failed write runs it again.
+    if (harnessRan || ran || edited || !done("installing-mcp")) {
       // After the tools, so the document can name what did not install.
       const context = await applyMachineContext(machine, { result, ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}) });
       result.context = context.context;
       if (context.failure !== undefined) result.contextFailure = context.failure;
+      else mark("installing-mcp");
       stage("installing-mcp", `machine context: ${context.summary}`);
     }
     if (ran || edited) {
@@ -762,18 +764,18 @@ export async function applyDelta(machine: Machine, delta: GoldenDelta, opts: App
     stage("applying-setup", [done.length > 0 ? `removed ${done.join(", ")}` : "", ...notes].filter(s => s !== "").join("; "));
   }
   // The stages report only when one of them ran; a delta that only removes still has its removals to report.
-  const withRemoved = (r: ImportResult): ImportResult => ({ ...r, ...(removed.length > 0 ? { removed } : {}) });
   const report = delta.import.onResult;
   let reported = false;
-  const imp: GoldenImport = { ...delta.import, ...(report !== undefined ? { onResult: (r: ImportResult) => { reported = true; report(withRemoved(r)); } } : {}) };
+  const imp: GoldenImport = { ...delta.import, ...(report !== undefined ? { onResult: (r: ImportResult) => { reported = true; report(r); } } : {}) };
   const applied = await applyGoldenImport(machine, {
     import: imp,
     setup: opts.setup,
     onStage: stage,
+    ...(removed.length > 0 ? { removed } : {}),
     ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}),
     ...(opts.setupTimeoutMs !== undefined ? { setupTimeoutMs: opts.setupTimeoutMs } : {}),
   });
-  const result = withRemoved(applied.result);
+  const result = applied.result;
   if (!reported && removed.length > 0) report?.(result);
   const gone = delta.removals.flatMap(r => (r.smoke !== undefined ? [r.smoke] : []));
   applied.ledger.smoke = nextSmoke(opts.previousSmoke, gone, applied.ledger.smoke);

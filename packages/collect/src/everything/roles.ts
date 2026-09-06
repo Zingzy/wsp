@@ -45,14 +45,23 @@ interface Scan {
   binFiles: ReadonlySet<string>;
 }
 
+/** Directories an install recreates, under a home or in a project; never copied. */
+export const INSTALL_NAMES: ReadonlySet<string> = new Set(["node_modules", "venv", ".venv", "virtenv", "site-packages", "__pycache__"]);
+/** What a project's own tooling regenerates: build output, coverage, framework and task-runner caches. */
+export const OUTPUT_NAMES: ReadonlySet<string> = new Set(["dist", "build", "out", "target", "coverage", ".next", ".nuxt", ".turbo", ".tox", ".gradle"]);
 const STATE_NAMES = new Set(["node_modules", "venv", ".venv", "virtenv", "logs", "extensions", "installs", "versions", "builds", "projects", "sessions", ".git", "toolchains", "registry", "avd", "_npx"]);
 
+/** Finder's per-directory metadata; it means nothing on a Linux machine. */
+export const FINDER_METADATA = /^\.DS_Store$/;
 /** Files a shell or an app regenerates: compiled completions, sqlite journals, lock and temp files, Finder metadata. */
-const CACHE_FILES = [/^\.DS_Store$/, /^\.zcompdump/, /\.zwc$/, /-(shm|wal)$/, /\.lock$/, /\.tmp\./];
+const CACHE_FILES = [FINDER_METADATA, /^\.zcompdump/, /\.zwc$/, /-(shm|wal)$/, /\.lock$/, /\.tmp\./];
+
+/** A name that says cache, wherever the word sits: .cache, .eslintcache, .parcel-cache, __pycache__. */
+export const CACHE_WORD = /cache/i;
 
 /** Cache or state from the name alone, at any depth; undefined when the name says nothing. */
 export function roleByName(name: string): Role | undefined {
-  if (/cache/i.test(name) || CACHE_FILES.some(p => p.test(name))) return "cache";
+  if (CACHE_WORD.test(name) || CACHE_FILES.some(p => p.test(name))) return "cache";
   if (STATE_NAMES.has(name) || /history|sessions$/i.test(name)) return "state";
   return undefined;
 }

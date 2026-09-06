@@ -431,6 +431,52 @@ export const InboxFileEvent = z.object({
   bytes: z.number(),
 });
 
+// --- project bundle: a folder on this computer landed on a workspace -----------
+
+/** How the collector's credential pass decided a file is secret-shaped: by name, by owner-only mode, by the key
+ * names in it, by a PEM header, by a gitleaks hit, by the catalog, by secret-shaped exports, or by git history. */
+export const CredentialSignal = z.enum(["name", "mode", "keys", "pem", "gitleaks", "catalog", "exports", "history"]);
+export type CredentialSignal = z.infer<typeof CredentialSignal>;
+/** A secret-shaped file in the folder, by path relative to it; it travels only when the import names it. */
+export const ProjectSecret = z.object({ path: z.string(), bytes: z.number(), signals: z.array(CredentialSignal) });
+export type ProjectSecret = z.infer<typeof ProjectSecret>;
+/** What a project import would carry, for the person to read before anything is packed: the files and their bytes,
+ * the secret-shaped ones, the caches left behind (relative paths) and the paths named but not carried, with why. */
+export const ProjectPlan = z.object({
+  /** The folder on this computer, absolute. */
+  source: z.string(),
+  /** Whether the folder has a .git; the repository travels whole when it does. */
+  repo: z.boolean(),
+  /** Regular files that would travel, the secret-shaped ones counted. */
+  files: z.number(),
+  bytes: z.number(),
+  secrets: z.array(ProjectSecret),
+  excluded: z.array(z.string()),
+  skipped: z.array(z.object({ path: z.string(), note: z.string() })),
+});
+export type ProjectPlan = z.infer<typeof ProjectPlan>;
+/** The steps of one import in order; `failed` ends one that threw. */
+export const ProjectImportStage = z.enum(["planned", "consented", "packing", "uploading", "landing", "done", "failed"]);
+export type ProjectImportStage = z.infer<typeof ProjectImportStage>;
+/** Progress of one import: one plain sentence per stage, the time since it began, and on uploading the bytes sent so
+ * far of the archive's total. */
+export const ProjectImportEvent = z.object({
+  type: z.literal("project.import"),
+  workspaceId: z.string(),
+  source: z.string(),
+  dest: z.string(),
+  stage: ProjectImportStage,
+  message: z.string(),
+  elapsedMs: z.number(),
+  bytes: z.number().optional(),
+  total: z.number().optional(),
+});
+export type ProjectImportEvent = z.infer<typeof ProjectImportEvent>;
+/** What landed: the path on the machine, the files and bytes extracted there, the upload parts, and the
+ * secret-shaped paths that were cut because the import did not name them. */
+export const ProjectImportResult = z.object({ dest: z.string(), files: z.number(), bytes: z.number(), parts: z.number(), cut: z.array(z.string()) });
+export type ProjectImportResult = z.infer<typeof ProjectImportResult>;
+
 // --- desktop shell bridge (preload to page) -----------------------------------
 
 /** One installed font file the desktop shell hands the page for its terminal, registered under the family the file names. */
@@ -614,6 +660,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   GoldenStageEvent.extend(sequenced),
   ForwardOpenEvent.extend(sequenced),
   ForwardCloseEvent.extend(sequenced),
+  ProjectImportEvent.extend(sequenced),
 ]);
 export type EventUnion = z.infer<typeof EventUnion>;
 
@@ -1040,6 +1087,20 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
    * ExecEvent frames to this socket only: exec.output per line, exec.exit last. The socket closing ends the
    * command; nothing else does, there is no deadline. */
   z.object({ id: reqId, op: z.literal("workspaces.exec"), workspaceId: z.string(), argv: z.array(z.string()).min(1) }),
+  /** Replies with { plan: ProjectPlan } for a folder on this computer; nothing is read into memory or uploaded. */
+  z.object({ id: reqId, op: z.literal("project.plan"), source: z.string() }),
+  /** Packs the folder and lands it at `dest` on the workspace's machine; progress rides project.import events and the
+   * reply is { imported: ProjectImportResult }. `carry` names the secret-shaped paths from the plan that may travel;
+   * every other secret-shaped file is cut and named. An existing `dest` is refused (kind "exists") unless `replace`. */
+  z.object({
+    id: reqId,
+    op: z.literal("project.import"),
+    workspaceId: z.string(),
+    source: z.string(),
+    dest: z.string(),
+    replace: z.boolean().optional(),
+    carry: z.array(z.string()).optional(),
+  }),
 ]);
 export type RuntimeRequest = z.infer<typeof RuntimeRequest>;
 

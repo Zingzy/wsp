@@ -8,7 +8,7 @@
   "scripts": {
     "test": "vitest run",
     "build": "pnpm -r build",
-    "wsp": "node packages/host/dist/bin.js",
+    "wsp": "node --disable-warning=ExperimentalWarning packages/host/dist/bin.js",
     "canary": "WSP_LIVE=1 vitest run packages/engine/test/create-canary.live.test.ts packages/runtime/test/create-canary.live.test.ts packages/engine/test/solari-quirks.live.test.ts packages/engine/test/createdat-drift.live.test.ts"
   },
   "devDependencies": {
