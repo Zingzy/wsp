@@ -38,7 +38,7 @@ export type ToolLifecycleItemType =
 export type ProviderRequestKind = "command" | "file-read" | "file-change" | "mcp-elicitation";
 
 /** Which wire event produced a work row; the copied rows key chrome on it. */
-export type WorkLogSourceKind = "tool.started" | "tool.completed" | "reasoning" | "runtime.error" | "runtime.notify";
+export type WorkLogSourceKind = "tool.started" | "tool.completed" | "reasoning" | "runtime.error" | "runtime.notify" | "runtime.resume";
 
 export interface WorkLogEntry {
   readonly id: string;

@@ -96,3 +96,6 @@ export function turnCutLine(rule: TurnCutRule, elapsedMs: number, limitMs: numbe
     ? `stopped after ${fmtDuration(elapsedMs, "clock")} with no output for ${fmtLimit(limitMs)}`
     : `stopped after ${fmtDuration(elapsedMs, "clock")} at the ${fmtLimit(limitMs)} cap on one turn`;
 }
+
+/** The one line every client shows on a start whose thread's previous turn was cut, before the new turn's output. */
+export const AFTER_CUT_LINE = "previous turn was cut; resuming";

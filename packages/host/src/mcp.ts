@@ -7,7 +7,7 @@ import type { Readable, Writable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { ProjectExportResult, ProjectGolden, SessionStartOutcome, ThreadView, WorkspaceView } from "@wsp/protocol";
+import { AFTER_CUT_LINE, ProjectExportResult, ProjectGolden, SessionStartOutcome, ThreadView, WorkspaceView } from "@wsp/protocol";
 import { INSTRUCTIONS } from "./skill.js";
 import { VERSION } from "./version.js";
 import { absoluteFolder, checkedPicks, create, createFromHead, dialHost, execOn, exportProject, follow, forget, forgetting, forgotLine, nap, notifyOf, openingOf, projectGoldenOf, resumeOf, snapshot, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
@@ -46,8 +46,9 @@ export function dialer(statePath: string): Dialer {
 }
 
 const Created = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
-/** outcome says how the message landed: its own turn, steered into the thread's running one, or queued behind it. */
-const TurnOut = z.object({ threadId: z.string(), workspaceId: z.string(), harness: z.string(), text: z.string(), outcome: SessionStartOutcome });
+/** outcome says how the message landed: its own turn, steered into the thread's running one, or queued behind it;
+ * afterCut is set when the thread's previous turn ended without a result, so the reply may be missing context. */
+const TurnOut = z.object({ threadId: z.string(), workspaceId: z.string(), harness: z.string(), text: z.string(), outcome: SessionStartOutcome, afterCut: z.literal(true).optional() });
 const ThreadRowOut = ThreadView.extend({ workspaceName: z.string() });
 const Argv = z.array(z.string()).min(1);
 
@@ -57,7 +58,17 @@ type Structured = Record<string, unknown>;
 const asJson = (structured: Structured) => ({ content: [{ type: "text" as const, text: JSON.stringify(structured, null, 2) }], structuredContent: structured });
 const asText = (text: string, structured: Structured) => ({ content: [{ type: "text" as const, text }], structuredContent: structured });
 
-const turnView = (turn: Turn): z.infer<typeof TurnOut> => ({ threadId: turn.threadId, workspaceId: turn.session.workspaceId, harness: turn.session.harness, text: turn.result?.text ?? "", outcome: turn.outcome });
+const turnView = (turn: Turn): z.infer<typeof TurnOut> => ({
+  threadId: turn.threadId,
+  workspaceId: turn.session.workspaceId,
+  harness: turn.session.harness,
+  text: turn.result?.text ?? "",
+  outcome: turn.outcome,
+  ...(turn.afterCut === true ? { afterCut: true as const } : {}),
+});
+
+/** The reply as the tool's text, with the cut line first when the thread's previous turn did not finish. */
+const turnText = (out: z.infer<typeof TurnOut>): string => (out.afterCut === true ? `${AFTER_CUT_LINE}\n${out.text}` : out.text);
 
 /** The turn's reply as the tool result; a turn that did not complete is a tool error with the harness's reason. */
 function turnOut(turn: Turn): z.infer<typeof TurnOut> {
@@ -176,7 +187,7 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
       const client = await dial();
       const target = await workspaceOf(client, ref);
       const out = turnOut(await follow(client, openingOf(target, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell) }), "agent", QUIET_TURN));
-      return asText(out.text, out);
+      return asText(turnText(out), out);
     },
   );
   server.registerTool(
@@ -189,7 +200,7 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
     async ({ thread: ref, message, ...input }) => {
       const client = await dial();
       const out = turnOut(await follow(client, resumeOf(await threadOf(client, ref), message, input), "agent", QUIET_TURN));
-      return asText(out.text, out);
+      return asText(turnText(out), out);
     },
   );
   server.registerTool(

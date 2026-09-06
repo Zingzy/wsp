@@ -171,6 +171,14 @@ describe("deriveSession: streaming states", () => {
     else expect(errors).toEqual([expect.objectContaining({ label: errorLabel, sourceActivityKind: "runtime.error", turnId: "sess_t#1" })]);
   });
 
+  it("a start stamped afterCut puts an info row under the prompt, so the person knows why context may be missing", () => {
+    const m = deriveSession([{ ...start, afterCut: true } as SessionEvent, done, end]);
+    const rows = m.workEntries.filter(w => w.sourceActivityKind === "runtime.resume");
+    expect(rows.map(w => [w.label, w.tone, w.turnId])).toEqual([["previous turn was cut; resuming", "info", "sess_t#1"]]);
+    expect(m.timeline.slice(0, 2).map(e => e.kind)).toEqual(["message", "work"]);
+    expect(deriveSession([start, done, end]).workEntries.filter(w => w.sourceActivityKind === "runtime.resume")).toEqual([]);
+  });
+
   it("createdAt: the wire's at wins, then the caller's clock, then empty", () => {
     const wire = deriveSession(CHAT_STREAM, { at: () => "1999-01-01T00:00:00Z" });
     expect(wire.messages[0]?.createdAt).toBe("2026-09-01T01:31:30.612Z");

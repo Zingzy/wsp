@@ -527,6 +527,52 @@ describe("result classification", () => {
     expect(end.sawResult).toBe(false);
   });
 
+  it("a result with no text and no usage is a failed turn whose reason is the process's stderr tail, stderr after the result included", async () => {
+    const init = `{"type":"system","subtype":"init","session_id":"${FIXTURE_SESSION_ID}"}`;
+    const usage = { input_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0, service_tier: "standard" };
+    const empty = `{"type":"result","subtype":"success","is_error":false,"duration_ms":26,"result":"","session_id":"${FIXTURE_SESSION_ID}","total_cost_usd":0,"usage":${JSON.stringify(usage)}}`;
+    const exec = scriptedExec([init, "No conversation found with session ID: e16ed170", empty, "", "Error: transcript ended mid-turn"], { exitCode: 1 });
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { events, onEvent } = collect();
+
+    const result = await adapter.start({ prompt: "x", resume: FIXTURE_SESSION_ID, onEvent }).finished;
+
+    expect(result).toEqual({
+      status: "failed",
+      durationMs: 26,
+      costUsd: 0,
+      usage,
+      text: "",
+      error: "claude answered with no output and no usage after 26ms: No conversation found with session ID: e16ed170\nError: transcript ended mid-turn",
+    });
+    expect(events.map((e) => e.type)).toEqual(["session.start", "turn.done", "session.end"]);
+    expect(events[1]).toMatchObject({ type: "turn.done", result });
+    expect(events[2]).toMatchObject({ type: "session.end", exitCode: 1, sawResult: true });
+    expect(exec.order).toEqual(["closeInput"]);
+  });
+
+  it("a result with no text and no usage and a quiet stderr fails with the duration alone; the tail keeps the last five lines", async () => {
+    const init = `{"type":"system","subtype":"init","session_id":"${FIXTURE_SESSION_ID}"}`;
+    const empty = `{"type":"result","subtype":"success","is_error":false,"duration_ms":1500,"result":"","session_id":"${FIXTURE_SESSION_ID}","total_cost_usd":0,"usage":{"input_tokens":0,"output_tokens":0}}`;
+    const quiet = await resultRun(empty);
+    expect(quiet.result.status).toBe("failed");
+    expect(quiet.result.error).toBe("claude answered with no output and no usage after 1.5s");
+
+    const noisy = scriptedExec([init, ...["one", "two", "three", "four", "five", "six"].map((n) => `line ${n}`), empty]);
+    const adapter = createClaudeAdapter({ exec: noisy.factory, configDir: "/root/.claude-cfg" });
+    const { onEvent } = collect();
+    const result = await adapter.start({ prompt: "x", onEvent }).finished;
+    expect(result.error).toBe("claude answered with no output and no usage after 1.5s: line two\nline three\nline four\nline five\nline six");
+  });
+
+  it("a completed result with text keeps its status whatever its usage says; one with usage keeps it whatever its text says", async () => {
+    const withText = await resultRun(`{"type":"result","subtype":"success","is_error":false,"duration_ms":30,"result":"ok","session_id":"${FIXTURE_SESSION_ID}","usage":{"input_tokens":0,"output_tokens":0}}`);
+    expect(withText.result).toMatchObject({ status: "completed", text: "ok" });
+    const withUsage = await resultRun(`{"type":"result","subtype":"success","is_error":false,"duration_ms":30,"result":"","session_id":"${FIXTURE_SESSION_ID}","usage":{"input_tokens":12,"output_tokens":0}}`);
+    expect(withUsage.result).toMatchObject({ status: "completed", text: "" });
+    expect(withUsage.result.error).toBeUndefined();
+  });
+
   it("skips lines that are not stream-json events", async () => {
     const lines = [
       "not json at all",

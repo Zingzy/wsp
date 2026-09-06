@@ -7,7 +7,7 @@
 // session id repeats across turns. Wire order is the timeline order. createdAt
 // is the wire's `at` (ms epoch) as ISO, else the caller's receipt clock, else
 // "" for unstamped history.
-import { NOTIFY_ME, type SessionEvent, type SessionHarness, type TurnResult } from "@wsp/protocol";
+import { AFTER_CUT_LINE, NOTIFY_ME, type SessionEvent, type SessionHarness, type TurnResult } from "@wsp/protocol";
 import type {
   ChatMessage,
   ProviderRequestKind,
@@ -157,6 +157,7 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
         harness = event.harness ?? harness;
         turn = openTurn(event, event.turnId ?? `${event.sessionId}#${count}`, count, at);
         if (event.prompt !== undefined) addMessage(turn, "user", event.prompt, at, false);
+        if (event.afterCut === true) addWork(turn, { createdAt: at, label: AFTER_CUT_LINE, tone: "info", sourceActivityKind: "runtime.resume" }, at);
         continue;
       }
       case "session.delta": {
