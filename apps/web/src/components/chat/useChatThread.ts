@@ -8,10 +8,10 @@
 // arrival clock for unstamped events, and the things the wire cannot know
 // yet: a prompt the user just sent, a send that failed locally, a new
 // thread requested while a turn was still running, and a send still in
-// flight when the person moved to another thread. The composer's stop
-// reaches only the turn it shows and the runtime has no per-workspace guard,
-// so that turn keeps running unseen and the composer stays closed until its
-// end arrives.
+// flight when the person moved to another thread, with the key its rows
+// wait under. The composer's stop reaches only the turn it shows and the
+// runtime has no per-workspace guard, so that turn keeps running unseen and
+// the composer stays closed until its end arrives.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SessionEvent, SessionHarness, SessionView } from "@wsp/protocol";
 import { useProtocolEvents, useStore } from "../../protocol/store";
@@ -89,8 +89,8 @@ export interface ThreadState {
   readonly known: ReadonlyArray<string>;
   /** The last send's start once it landed: the key its rows waited under (the thread id the view held or was pinned to, or the workspace id without one) and the thread the start carried. Null from the send until then, and after a send that settled without a start. */
   readonly named: NamedStart | null;
-  /** A send whose rows wait under the workspace id, left in flight by a view change: its start, told by the prompt the runtime stamps on it, still names those rows from whichever view sees it. */
-  readonly stray: { readonly prompt: string } | null;
+  /** A send from a view without a start, left in flight by a view change: the key its rows wait under (the pin, or the workspace id from the latest view) and the prompt the runtime stamps on its start, which still names those rows from whichever view sees it. */
+  readonly stray: { readonly prompt: string; readonly key: string } | null;
 }
 
 const EMPTY: ThreadState = { events: [], arrivals: [], pendingPrompt: null, localErrors: [], fresh: false, stale: null, sending: null, left: undefined, known: [], named: null, stray: null };
@@ -233,9 +233,10 @@ function startsPrompt(state: ThreadState, e: SessionEvent, prompt: string | unde
   return prompt !== undefined && e.type === "session.start" && unknownThread(state, e) && e.prompt === prompt;
 }
 
-/** The start of the send a view change left in flight. */
+/** The start of the send a view change left in flight: under a thread the view never knew, or, resumed from its row, under the thread its rows wait under. */
 function startsStray(state: ThreadState, e: SessionEvent): boolean {
-  return startsPrompt(state, e, state.stray?.prompt);
+  const { stray } = state;
+  return stray !== null && e.type === "session.start" && e.prompt === stray.prompt && (unknownThread(state, e) || e.threadId === stray.key);
 }
 
 /** The start of the send in flight on this view. */
@@ -258,7 +259,7 @@ function sentEvent(state: ThreadState, e: SessionEvent): boolean {
  * for the person's own send later.
  */
 export function dropEvent(state: ThreadState, e: SessionEvent): ThreadState {
-  if (startsStray(state, e)) return { ...state, stray: null, named: nameOf(e.workspaceId, e) };
+  if (state.stray !== null && startsStray(state, e)) return { ...state, stray: null, named: nameOf(state.stray.key, e) };
   if (state.stray !== null && unknownThread(state, e)) {
     if (e.type === "session.end") return { ...state, stray: null };
     if (e.type === "session.done") return state;
@@ -269,13 +270,13 @@ export function dropEvent(state: ThreadState, e: SessionEvent): ThreadState {
 
 /**
  * A view holds one thread: once its events carry a thread id, another thread's events are not its own. Fresh, it
- * holds only its send's own events, or the start of a send left in flight before it; a known thread waking is not
- * its own, whether it was left or older. A view whose thread never started (a harness that died before init, read
+ * holds only its send's own events, or the start of a new thread a send left in flight before it opened; a known
+ * thread waking is not its own, whether it was left, older, or resumed by that send. A view whose thread never started (a harness that died before init, read
  * back from history) holds that thread, told by its events or by the pin, and, while a send is in flight, the
  * thread the runtime mints for the send, since nothing resumes a dead thread. An empty view idle takes anything.
  */
 function inHeldThread(state: ThreadState, e: SessionEvent, pinned: string | null): boolean {
-  if (state.fresh) return sentEvent(state, e) || startsStray(state, e);
+  if (state.fresh) return sentEvent(state, e) || (startsStray(state, e) && unknownThread(state, e));
   const held = heldThreadId(state);
   if (held !== undefined) return e.threadId === held;
   const last = state.events.at(-1)?.threadId ?? pinned ?? undefined;
@@ -305,7 +306,7 @@ export function reduceEvent(state: ThreadState, e: SessionEvent, at: string, pin
   }
   if (!inHeldThread(state, e, pinned)) return dropEvent(state, e);
   const next = append(state, e, at);
-  if (state.sending === null) return startsStray(state, e) ? { ...next, stray: null, named: nameOf(e.workspaceId, e) } : next;
+  if (state.sending === null) return state.stray !== null && startsStray(state, e) ? { ...next, stray: null, named: nameOf(state.stray.key, e) } : next;
   const starts = e.type === "session.start";
   const settles = starts || (e.type === "session.end" && e.turnId !== state.sending.after);
   const named = starts ? nameOf(heldThreadId(state) ?? pinned ?? e.workspaceId, e) : state.named;
@@ -386,14 +387,20 @@ export function deriveChatThread(state: ThreadState, previous: ReadonlyArray<Tim
   };
 }
 
+interface ViewKey {
+  readonly workspaceId: string;
+  readonly threadId: string | null;
+}
+
 /**
  * The state one view leaves for the next: nothing across workspaces; within one, what it knew, and a send
- * still in flight from the latest view before its thread had an id, whose rows wait under the workspace id.
+ * still in flight from a view without a start, whose rows wait under the pin or, from the latest view, the
+ * workspace id: nothing resumes a dead thread, so that start opens a thread no view holds yet.
  */
-function leaveView(s: ThreadState, sameWorkspace: boolean, latest: boolean): ThreadState {
-  if (!sameWorkspace) return EMPTY;
-  const prompt = latest && s.sending !== null && heldThreadId(s) === undefined ? s.pendingPrompt?.text : undefined;
-  return { ...EMPTY, known: knowing(s.known, s.events), stray: prompt === undefined ? s.stray : { prompt } };
+export function leaveView(s: ThreadState, from: ViewKey, to: ViewKey): ThreadState {
+  if (from.workspaceId !== to.workspaceId) return EMPTY;
+  const prompt = s.sending !== null && heldThreadId(s) === undefined ? s.pendingPrompt?.text : undefined;
+  return { ...EMPTY, known: knowing(s.known, s.events), stray: prompt === undefined ? s.stray : { prompt, key: from.threadId ?? from.workspaceId } };
 }
 
 /** The row a view without a session.start resumes from: pinned, the thread's latest turn the harness answered; on the latest view, the turn the workspace remembers. */
@@ -426,7 +433,7 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
   if (viewed.workspaceId !== workspaceId || viewed.threadId !== threadId) {
     const from = viewed;
     setViewed({ workspaceId, threadId });
-    setState(s => leaveView(s, from.workspaceId === workspaceId, from.threadId === null));
+    setState(s => leaveView(s, from, { workspaceId, threadId }));
   }
 
   useEffect(() => {

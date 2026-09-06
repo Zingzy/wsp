@@ -28,6 +28,7 @@ export const opencodeResolver: ProjectStateResolver = {
   agent: "opencode",
   carry: "transcript-only",
   states: UPDATES.map(([state]) => state),
+  roots: [DB],
   async move(home, from, to) {
     const db = join(home, DB);
     const rows = updateRows(db, UPDATES.map(([, sql]) => ({ sql, params: pathParams(from, to) })));

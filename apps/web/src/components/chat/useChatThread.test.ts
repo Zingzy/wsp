@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { SessionEvent } from "@wsp/protocol";
 import { CHAT_STREAM, CHAT_WS } from "../../../test/fixtures/chat-stream";
-import { deriveChatThread, dropEvent, reduceEvent, reloadTranscript, stabilizeEntries, startedSession, type StaleTurn, type ThreadState } from "./useChatThread";
+import { deriveChatThread, dropEvent, leaveView, reduceEvent, reloadTranscript, stabilizeEntries, startedSession, type StaleTurn, type ThreadState } from "./useChatThread";
 
 const T0 = "2026-09-01T02:00:00.000Z";
 const state = (events: ReadonlyArray<SessionEvent>, extra: Partial<ThreadState> = {}): ThreadState => ({
@@ -561,12 +561,57 @@ describe("reduceEvent", () => {
 
 describe("a send a view change left in flight", () => {
   const A = CHAT_STREAM.map(e => ({ ...e, threadId: "thr_a" }));
-  const stray = { prompt: "first" };
+  const stray = { prompt: "first", key: CHAT_WS };
   const pinned = state(A, { known: ["thr_a"], stray });
+
   const n = { workspaceId: CHAT_WS, sessionId: "sess_n", turnId: "turn_n1", threadId: "thr_n" };
   const c = { workspaceId: CHAT_WS, sessionId: "sess_c", turnId: "turn_c1", threadId: "thr_c" };
   const x = { workspaceId: CHAT_WS, sessionId: "sess_x", turnId: "turn_x1", threadId: "thr_x" };
   const N_START: SessionEvent = { type: "session.start", ...n, prompt: "first" };
+  const here = { workspaceId: CHAT_WS, threadId: null };
+  const deadEvents: SessionEvent[] = [
+    { type: "session.done", ...x, result: { status: "failed", error: "claude exited before init" } },
+    { type: "session.end", ...x, exitCode: 1, sawResult: true },
+  ];
+
+  it("leaving a start-less view mid-send carries the send with the key its rows waited under: the workspace id from the latest view, the pin from a pinned one; a started view or an idle one carries nothing", () => {
+    const inFlight = { sending: { after: "turn_x1" }, pendingPrompt: { text: "first", at: T0 } };
+    const fromLatest = leaveView(state([], { known: ["thr_a"], ...inFlight }), here, { ...here, threadId: "thr_a" });
+    expect(fromLatest).toEqual(state([], { known: ["thr_a"], stray }));
+    const fromPin = leaveView(state(deadEvents, { known: ["thr_a", "thr_x"], ...inFlight }), { ...here, threadId: "thr_x" }, { ...here, threadId: "thr_a" });
+    expect(fromPin).toEqual(state([], { known: ["thr_a", "thr_x"], stray: { prompt: "first", key: "thr_x" } }));
+    expect(leaveView(state(A, { known: ["thr_a"], ...inFlight }), { ...here, threadId: "thr_a" }, here).stray).toBeNull();
+    expect(leaveView(state(deadEvents, { known: ["thr_x"] }), { ...here, threadId: "thr_x" }, here).stray).toBeNull();
+    expect(leaveView(state([], { known: ["thr_a"], stray }), here, { ...here, threadId: "thr_a" }).stray).toEqual(stray);
+    expect(leaveView(state([], { known: ["thr_a"], stray, ...inFlight }), { ...here, threadId: "thr_a" }, { workspaceId: "ws_other", threadId: null })).toEqual(state([]));
+  });
+
+  it("the start of a send left from a pinned dead view names the rows under the pin, on whichever view drops it or holds it", () => {
+    const fromPin = { prompt: "first", key: "thr_x" };
+    const dropped = dropEvent(state(A, { known: ["thr_a", "thr_x"], stray: fromPin }), N_START);
+    expect(dropped.stray).toBeNull();
+    expect(dropped.named).toEqual({ key: "thr_x", thread: "thr_n" });
+    const held = reduceEvent(state([], { fresh: true, left: "thr_a", known: ["thr_a", "thr_x"], stray: fromPin }), N_START, T0);
+    expect(held.named).toEqual({ key: "thr_x", thread: "thr_n" });
+    const replayed = reloadTranscript(state([], { known: ["thr_a", "thr_x"], stray: fromPin }), [...deadEvents, ...A, N_START], T0, "thr_a");
+    expect(replayed.events).toEqual(A);
+    expect(replayed.named).toEqual({ key: "thr_x", thread: "thr_n" });
+  });
+
+  it("a send left from a pinned thread that resumed its row starts under that same thread: its start settles it without moving the rows, and another thread's start with the prompt under a known id does not", () => {
+    const fromPin = { prompt: "first", key: "thr_x" };
+    const resumed = dropEvent(state(A, { known: ["thr_a", "thr_x"], stray: fromPin }), { type: "session.start", ...x, prompt: "first" });
+    expect(resumed.stray).toBeNull();
+    expect(resumed.named).toEqual({ key: "thr_x", thread: "thr_x" });
+    const other = dropEvent(state(A, { known: ["thr_a", "thr_x", "thr_c"], stray: fromPin }), { type: "session.start", ...c, prompt: "first" });
+    expect(other.stray).toEqual(fromPin);
+    expect(other.named).toBeNull();
+    const fresh = reduceEvent(state([], { fresh: true, left: "thr_a", known: ["thr_a", "thr_x"], stray: fromPin }), { type: "session.start", ...x, prompt: "first" }, T0);
+    expect(fresh.events).toEqual([]);
+    expect(fresh.fresh).toBe(true);
+    expect(fresh.stray).toBeNull();
+    expect(fresh.named).toEqual({ key: "thr_x", thread: "thr_x" });
+  });
 
   it("its start, told by the prompt it carries, names the rows under the workspace id on whichever view drops it", () => {
     const landed = dropEvent(pinned, N_START);

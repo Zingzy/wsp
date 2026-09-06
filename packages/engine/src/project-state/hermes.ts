@@ -12,6 +12,7 @@ export const hermesResolver: ProjectStateResolver = {
   agent: "hermes",
   carry: "transcript-only",
   states: ["sessions"],
+  roots: [DB],
   async move(home, from, to) {
     const db = join(home, DB);
     const [changed = 0] = updateRows(db, [{

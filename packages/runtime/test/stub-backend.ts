@@ -23,6 +23,8 @@ export interface StubBackend extends MachineBackend {
   machines: StubMachine[];
   /** Every body PUT to an upload URL the stub minted, with the machine and guest path it was for. */
   puts: { machine: string; path: string; body: Buffer }[];
+  /** What a download URL serves for a guest path; absent, an empty archive. */
+  downloads?: (path: string) => Buffer;
   execImpl: (m: StubMachine, cmd: string) => Promise<ExecResult> | ExecResult;
   /** Every snapshot taken and not deleted, as the provider would list it. */
   snapshots: SnapshotRow[];
@@ -34,8 +36,8 @@ export interface StubBackend extends MachineBackend {
 // Two zero blocks is a complete empty tar, so downloads are real archives.
 const EMPTY_TGZ = gzipSync(Buffer.alloc(1024));
 
-/** One loopback server per backend: GET serves the empty tar, PUT accepts anything and records it. */
-function vaultServer(puts: StubBackend["puts"]): () => Promise<string> {
+/** One loopback server per backend: GET serves the archive `downloads` gives for the path (the empty tar without it), PUT accepts anything and records it. */
+function vaultServer(puts: StubBackend["puts"], downloads: () => StubBackend["downloads"]): () => Promise<string> {
   let origin: Promise<string> | undefined;
   return () =>
     (origin ??= new Promise(resolve => {
@@ -49,7 +51,10 @@ function vaultServer(puts: StubBackend["puts"]): () => Promise<string> {
             puts.push({ machine: url.searchParams.get("machine")!, path: url.searchParams.get("path")!, body: Buffer.concat(chunks) });
             res.writeHead(200).end();
           });
-        } else res.writeHead(200, { "content-type": "application/gzip" }).end(EMPTY_TGZ);
+        } else {
+          const body = downloads()?.(new URL(req.url!, "http://x").pathname.replace(/^\/download/, "")) ?? EMPTY_TGZ;
+          res.writeHead(200, { "content-type": "application/gzip", "content-length": String(body.length) }).end(body);
+        }
       });
       server.unref();
       server.listen(0, "127.0.0.1", () => resolve(`http://127.0.0.1:${(server.address() as AddressInfo).port}`));
@@ -61,7 +66,7 @@ export function stubBackend(): StubBackend {
   const machines: StubMachine[] = [];
   const snapshots: SnapshotRow[] = [];
   const puts: StubBackend["puts"] = [];
-  const vaultOrigin = vaultServer(puts);
+  const vaultOrigin = vaultServer(puts, () => backend.downloads);
 
   const backend: StubBackend = {
     capabilities: { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true },
