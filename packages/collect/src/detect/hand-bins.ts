@@ -3,9 +3,10 @@
 // no package manager lists them, so nothing on the machine can install them.
 // A binary built for macOS stays here; a script or a Linux binary can travel
 // as a copy of the file. The row says which from the file's first bytes.
+import { fmtBytes } from "@wsp/protocol";
 import { type Host, expand } from "../host.js";
 import type { ManifestEntry } from "../manifest.js";
-import { entry, fmt } from "./common.js";
+import { entry } from "./common.js";
 
 export const HAND_GROUP = "Installed by hand";
 export const HAND_PREFIX = "tools/hand/";
@@ -114,7 +115,7 @@ const NO_ARCH = "for neither x86_64 nor aarch64";
 
 function words(bin: HandBin, brings: ReadonlySet<string>): string {
   const dir = bin.path.slice(0, bin.path.lastIndexOf("/"));
-  const size = fmt(bin.bytes);
+  const size = fmtBytes(bin.bytes);
   const copy = `travels as a copy into ${dir} on the machine if ticked${dir === "~/bin" ? ", and ~/bin is not on the machine's PATH" : ""}`;
   const f = bin.format;
   switch (f.kind) {

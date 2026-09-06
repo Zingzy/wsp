@@ -1271,5 +1271,5 @@ export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { sendRefusal, workspaceState, workspaceWord, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
-export { fmtBytes } from "./format.js";
+export { fmtBytes, fmtMemGb } from "./format.js";
 export { shellQuote } from "./shell-quote.js";

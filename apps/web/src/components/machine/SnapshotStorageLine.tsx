@@ -7,6 +7,7 @@ import { useProtocolEvents, useStore } from "../../protocol/store.js";
 
 export function storageLine(s: SnapshotStorage): string {
   const count = `${s.count} snapshot${s.count === 1 ? "" : "s"}`;
+  // The provider lists and bills snapshots in decimal GB (a 3839352227-byte snapshot is 3.84 GB to it), so this line keeps its unit rather than the binary one fmtBytes prints.
   const size = `${(s.totalBytes / 1e9).toFixed(1)} GB`;
   const cost = s.monthlyUsd > 0 ? `about $${s.monthlyUsd.toFixed(2)}/month above the free ${s.freeGb} GB from ${s.billedFrom}` : `inside the free ${s.freeGb} GB`;
   return `${count} · ${size} · ${cost}`;

@@ -317,7 +317,7 @@ export async function shellRc(m: Machine, opts: ShellRcOptions = {}): Promise<Rc
     const real = (await m.fs.realpath(path)) ?? path;
     const text = await m.fs.readText(real);
     if (text === undefined) {
-      if ((await m.fs.stat(real))?.kind === "file") opts.notes?.push(`${tilde(m.home, path)} could not be read (over 1 MiB or unreadable) and was not scanned`);
+      if ((await m.fs.stat(real))?.kind === "file") opts.notes?.push(`${tilde(m.home, path)} could not be read (over 1 MB or unreadable) and was not scanned`);
       return undefined;
     }
     const s = stripExports(text);

@@ -148,7 +148,7 @@ describe("everything: the seven passes folded into rows", () => {
     const base = home();
     const { [`security dump-keychain ${LOGIN_KEYCHAIN}`]: _dump, ...exec } = base.exec ?? {};
     const { notes, rows } = await everything(laptop({ ...base, exec, files: { ...base.files, "~/.bashrc": { bytes: 3_000_000 } } }), { now: NOW });
-    expect(notes).toEqual(expect.arrayContaining(["security dump-keychain failed; Keychain logins are not listed", "~/.bashrc could not be read (over 1 MiB or unreadable) and was not scanned"]));
+    expect(notes).toEqual(expect.arrayContaining(["security dump-keychain failed; Keychain logins are not listed", "~/.bashrc could not be read (over 1 MB or unreadable) and was not scanned"]));
     expect(rows.filter(r => r.kind === "device-bound-login")).toEqual([]);
   });
 

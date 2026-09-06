@@ -605,8 +605,8 @@ describe("live", () => {
     await mount([view("ws_a", "api")]);
     feed("ws_a", [0, 1, 2, 3, 4].map(i => sysSample(i)));
     await waitFor(() => expect(fact("cpu")).toBe("33%"));
-    expect(fact("mem")).toBe("1.0 of 4.0 GB");
-    expect(fact("disk")).toBe("20.0 of 100.0 GB");
+    expect(fact("mem")).toBe("1.0 GB of 4.0 GB");
+    expect(fact("disk")).toBe("20.0 GB of 100.0 GB");
     expect(screen.getByText("load 0.42")).toBeDefined();
     for (const k of ["cpu", "mem", "disk"]) {
       const row = liveRow(k);
@@ -665,16 +665,16 @@ describe("live", () => {
     const tone = (k: string): string => valueSlot(k).className;
     const disk = (pct: number): SysSample => sysSample(0, { cpu: 95, disk: { used: pct * GiB, total: 100 * GiB } });
     feed("ws_a", [disk(49.9)]);
-    await waitFor(() => expect(fact("disk")).toBe("49.9 of 100.0 GB"));
+    await waitFor(() => expect(fact("disk")).toBe("49.9 GB of 100.0 GB"));
     expect(tone("disk")).not.toMatch(/warning|caution|destructive/);
     feed("ws_a", [disk(50)]);
-    await waitFor(() => expect(fact("disk")).toBe("50.0 of 100.0 GB"));
+    await waitFor(() => expect(fact("disk")).toBe("50.0 GB of 100.0 GB"));
     expect(tone("disk")).toMatch(/text-warning-foreground/);
     feed("ws_a", [disk(65)]);
-    await waitFor(() => expect(fact("disk")).toBe("65.0 of 100.0 GB"));
+    await waitFor(() => expect(fact("disk")).toBe("65.0 GB of 100.0 GB"));
     expect(tone("disk")).toMatch(/text-caution-foreground/);
     feed("ws_a", [disk(75)]);
-    await waitFor(() => expect(fact("disk")).toBe("75.0 of 100.0 GB"));
+    await waitFor(() => expect(fact("disk")).toBe("75.0 GB of 100.0 GB"));
     expect(tone("disk")).toMatch(/text-destructive-foreground/);
     expect(fact("cpu")).toBe("95%");
     expect(tone("cpu")).not.toMatch(/warning|caution|destructive/);

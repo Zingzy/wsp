@@ -46,7 +46,6 @@ export const skillPath = (roots: GuestRoots = GUEST_ROOTS): string => `${roots.e
 const factsPath = (roots: GuestRoots): string => `${roots.etc}/wsp/machine-context.json`;
 const SECRETS_SH = "/etc/profile.d/wsp-secrets.sh";
 const SECRETS_FISH = "/etc/fish/conf.d/wsp-secrets.fish";
-const GIB = 1024 * 1024 * 1024;
 
 /** Mirrors @wsp/daemon's OPEN_SHIM_PATH (the engine cannot import the daemon package, which only runs inside guests); a host test pins the two equal. */
 export const BROWSER_SHIM_PATH = "/usr/local/bin/wsp-open";
@@ -316,8 +315,6 @@ const cdHowto = (agent: ContextAgent | undefined): string =>
     ? "- Work in a folder: cd <dir> in your shell and it stays there across your tool calls; the thread's folder does not move. Absolute paths work from anywhere."
     : "- Work in a folder: cd <dir> && <cmd> on one line, or absolute paths.";
 
-const gib = (bytes: number): string => `${(bytes / GIB).toFixed(1)} GiB`;
-
 function missingList(items: readonly { label: string; note: string }[]): string {
   return items.map(m => `${m.label} (${m.note})`).join("; ");
 }
@@ -349,8 +346,8 @@ export function renderMachineContext(input: ContextInput): string {
   workspace.push(input.golden !== undefined ? `- Golden: v${input.golden.version}, sealed ${input.golden.createdAt.slice(0, 10)}, setup ${input.golden.setupSha.slice(0, 12)}.` : input.workspace !== undefined ? "- Golden: version not recorded." : "- Golden: not sealed yet.");
   workspace.push(
     probe.disk !== undefined
-      ? `- Disk: ${gib(probe.disk.sizeBytes)} root disk, ${gib(probe.disk.freeBytes)} free when this file was written. wsp keeps ${gib(TOOLS_DISK_FLOOR)} free and skips tool installs that would go under it.`
-      : `- Disk: size unknown when this file was written. wsp keeps ${gib(TOOLS_DISK_FLOOR)} free and skips tool installs that would go under it.`,
+      ? `- Disk: ${fmtBytes(probe.disk.sizeBytes)} root disk, ${fmtBytes(probe.disk.freeBytes)} free when this file was written. wsp keeps ${fmtBytes(TOOLS_DISK_FLOOR)} free and skips tool installs that would go under it.`
+      : `- Disk: size unknown when this file was written. wsp keeps ${fmtBytes(TOOLS_DISK_FLOOR)} free and skips tool installs that would go under it.`,
   );
   workspace.push(`- Secrets set in ${SECRETS_SH}: ${probe.secrets.length > 0 ? probe.secrets.join(", ") : "none"}. Use them by name ($NAME); a missing one is asked for through wsp, not typed here.`);
   workspace.push(`- Tools that did not install: ${facts.tools.length > 0 ? missingList(facts.tools) : "none"}.`);
@@ -405,8 +402,8 @@ export function renderShortContext(input: ContextInput): string {
   else if (containers.length === 0) lines.push("- Docker and Podman are not installed.");
   lines.push(
     probe.disk !== undefined
-      ? `- Disk: ${gib(probe.disk.sizeBytes)} root disk, ${gib(probe.disk.freeBytes)} free when this file was written. wsp keeps ${gib(TOOLS_DISK_FLOOR)} free.`
-      : `- Disk: size unknown when this file was written. wsp keeps ${gib(TOOLS_DISK_FLOOR)} free.`,
+      ? `- Disk: ${fmtBytes(probe.disk.sizeBytes)} root disk, ${fmtBytes(probe.disk.freeBytes)} free when this file was written. wsp keeps ${fmtBytes(TOOLS_DISK_FLOOR)} free.`
+      : `- Disk: size unknown when this file was written. wsp keeps ${fmtBytes(TOOLS_DISK_FLOOR)} free.`,
     `- Secrets are exported by ${SECRETS_SH}. Use them by name ($NAME); never print, log or commit a value, and never read that file.`,
   );
   if (probe.has.has("wsp-open")) lines.push("- Sign-ins go through wsp: run the tool's own login command and the page opens on the person's computer. Do not paste tokens into the terminal and do not ask for a password.");
