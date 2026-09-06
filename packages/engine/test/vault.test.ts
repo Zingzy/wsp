@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { gzipSync } from "node:zlib";
-import { UPLOAD_PART_BYTES, exportPaths, fitsTar, importInto, landBundle, tarOf } from "../src/vault.js";
+import { UPLOAD_PART_BYTES, exportFolder, exportPaths, fitsTar, folderExportScript, importInto, landBundle, tarOf, type CacheRule } from "../src/vault.js";
 import type { ExecResult, Machine } from "../src/machine.js";
 
 const TAR_BYTES = Buffer.from("fake-tgz-bytes-" + "x".repeat(64));
@@ -504,5 +504,119 @@ describe("tarOf", () => {
     expect(statSync(join(dir, "proj/empty")).mode & 0o777).toBe(0o755);
     expect(lstatSync(join(dir, "proj/link")).isSymbolicLink()).toBe(true);
     expect(readlinkSync(join(dir, "proj/link"))).toBe("bin/run");
+  });
+});
+
+describe("exportFolder", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+  const RULE: CacheRule = { globs: ["node_modules", "dist", "*[cC][aA][cC][hH][eE]*", ".DS_Store"], markers: ["pyvenv.cfg"] };
+
+  /** A folder with source, ignored state, a repository and every cache shape the rule names. */
+  function folder(): string {
+    const root = mkdtempSync(join(tmpdir(), "wsp-export-src-"));
+    dirs.push(root);
+    const put = (rel: string, text: string): void => {
+      mkdirSync(join(root, rel, ".."), { recursive: true });
+      writeFileSync(join(root, rel), text);
+    };
+    put("src/a.ts", "a\n");
+    put("src/cache-utils.ts", "tracked or not, the name says cache\n");
+    put(".env", "TOKEN=x\n");
+    put(".git/config", "[core]\n");
+    put(".git/build/keep", "nothing under .git is judged\n");
+    put("node_modules/left/index.js", "cache\n");
+    put("dist/out.js", "output\n");
+    put(".cache/x", "cache\n");
+    put("notes/CacheNotes.md", "the word, any case\n");
+    put(".DS_Store", "finder");
+    put("myenv/pyvenv.cfg", "home = /usr/bin\n");
+    put("myenv/bin/python", "venv by marker\n");
+    put("deep/dir/.DS_Store", "finder");
+    mkdirSync(join(root, "really-empty"));
+    return root;
+  }
+
+  /** This computer stands in for the guest: bash runs the script and the download serves the file the URL names. */
+  async function guest() {
+    const server = createServer((req, res) => {
+      const path = new URL(req.url!, "http://x").searchParams.get("path")!;
+      if (!existsSync(path)) {
+        res.writeHead(404).end();
+        return;
+      }
+      const body = readFileSync(path);
+      res.writeHead(200, { "content-length": String(body.length) }).end(body);
+    });
+    await new Promise<void>(r => server.listen(0, "127.0.0.1", r));
+    server.unref();
+    const port = (server.address() as AddressInfo).port;
+    const cmds: string[] = [];
+    const machine: Machine = {
+      id: "mv", kind: "sandbox", streamUrl: undefined,
+      exec: cmd => {
+        cmds.push(cmd);
+        return new Promise<ExecResult>(resolve => {
+          execFile("bash", ["-c", cmd], (err, stdout, stderr) => {
+            resolve({ exitCode: err === null ? 0 : ((err as { code?: number }).code ?? 1), stdout, stderr });
+          });
+        });
+      },
+      run: script => machine.exec(script),
+      snapshot: async () => "snap", pause: async () => {}, resume: async () => {},
+      kill: async () => {}, state: async () => "running" as const,
+      downloadUrl: async p => `http://127.0.0.1:${port}/download?path=${encodeURIComponent(p)}`,
+      uploadUrl: async p => `http://127.0.0.1:${port}/upload?path=${encodeURIComponent(p)}`,
+    };
+    return { machine, cmds, close: () => server.close() };
+  }
+
+  const listing = (tgz: Buffer): string[] =>
+    execFileSync("tar", ["-tzf", "-"], { input: tgz }).toString().trim().split("\n").filter(l => l !== "").map(l => l.replace(/^\.\//, "").replace(/\/$/, "")).filter(l => l !== "." && l !== "").sort();
+
+  it("the script tars the folder from its root, leaves every cache root the rule names behind, names them on stdout, and judges nothing under .git", async () => {
+    const root = folder();
+    const out = join(root, "..", `${basename(root)}.tgz`);
+    dirs.push(out);
+    const script = folderExportScript(root, RULE, out);
+    const ran = await new Promise<ExecResult>(resolve => execFile("bash", ["-c", script], (err, stdout, stderr) => resolve({ exitCode: err === null ? 0 : 1, stdout, stderr })));
+    expect(ran.stderr).toBe("");
+    expect(ran.exitCode).toBe(0);
+    expect(ran.stdout.trim().split("\n").sort()).toEqual([".DS_Store", ".cache", "deep/dir/.DS_Store", "dist", "myenv", "node_modules", "notes/CacheNotes.md", "src/cache-utils.ts"]);
+    expect(listing(readFileSync(out))).toEqual([".env", ".git", ".git/build", ".git/build/keep", ".git/config", "deep", "deep/dir", "notes", "really-empty", "src", "src/a.ts"]);
+    expect(existsSync(`${out}.list`)).toBe(false);
+  });
+
+  it("brings the archive home over the download road with its size known up front and the excluded roots, and leaves nothing on the guest", async () => {
+    const g = await guest();
+    const root = folder();
+    try {
+      const seen: { bytes: number; total: number }[] = [];
+      const { tar, excluded } = await exportFolder(g.machine, root, RULE, { fetch: globalThis.fetch, onProgress: p => seen.push(p) });
+      expect(excluded).toEqual([".DS_Store", ".cache", "deep/dir/.DS_Store", "dist", "myenv", "node_modules", "notes/CacheNotes.md", "src/cache-utils.ts"]);
+      expect(listing(tar)).toContain("src/a.ts");
+      expect(listing(tar)).not.toContain("dist/out.js");
+      expect(seen.at(-1)).toEqual({ bytes: tar.length, total: tar.length });
+      expect(seen.every(p => p.total === tar.length && p.bytes <= tar.length)).toBe(true);
+      const tmp = /tar czf '([^']+)'/.exec(g.cmds.find(c => c.includes("tar czf")) ?? "")?.[1];
+      expect(tmp).toMatch(/^\/tmp\/wsp-out-/);
+      expect(existsSync(tmp!)).toBe(false);
+      expect(g.cmds.some(c => c.startsWith("rm -f ") && c.includes(tmp!))).toBe(true);
+    } finally {
+      g.close();
+    }
+  });
+
+  it("a folder that is not on the machine fails with a plain sentence before any download", async () => {
+    const g = await guest();
+    try {
+      const missing = join(tmpdir(), "wsp-export-none-" + randomBytes(4).toString("hex"));
+      await expect(exportFolder(g.machine, missing, RULE, { fetch: globalThis.fetch })).rejects.toThrow(`${missing} is not a folder on the machine`);
+      expect(g.cmds.some(c => c.includes("tar czf"))).toBe(false);
+    } finally {
+      g.close();
+    }
   });
 });

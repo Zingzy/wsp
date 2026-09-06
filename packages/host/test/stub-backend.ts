@@ -21,6 +21,8 @@ export interface StubMachine extends Machine {
 export interface StubBackend extends MachineBackend {
   machines: StubMachine[];
   execImpl: (m: StubMachine, cmd: string) => Promise<ExecResult> | ExecResult;
+  /** What a download URL serves for a guest path; absent, an empty archive. */
+  downloads?: (path: string) => Buffer;
   /** Every snapshot taken and not deleted, as the provider would list it. */
   snapshots: SnapshotRow[];
   /** What the next snapshot is listed at; a golden measured 7.8 to 8.5 GB live. */
@@ -31,15 +33,18 @@ export interface StubBackend extends MachineBackend {
 // Two zero blocks is a complete empty tar, so downloads are real archives.
 const EMPTY_TGZ = gzipSync(Buffer.alloc(1024));
 
-/** One loopback server per backend: GET serves the empty tar, PUT accepts anything. */
-function vaultServer(): () => Promise<string> {
+/** One loopback server per backend: GET serves the archive `downloads` gives for the path (the empty tar without it), PUT accepts anything. */
+function vaultServer(downloads: () => StubBackend["downloads"]): () => Promise<string> {
   let origin: Promise<string> | undefined;
   return () =>
     (origin ??= new Promise(resolve => {
       const server = createServer((req, res) => {
         res.setHeader("connection", "close");
         if (req.method === "PUT") req.resume().on("end", () => res.writeHead(200).end());
-        else res.writeHead(200, { "content-type": "application/gzip" }).end(EMPTY_TGZ);
+        else {
+          const body = downloads()?.(new URL(req.url!, "http://x").pathname.replace(/^\/download/, "")) ?? EMPTY_TGZ;
+          res.writeHead(200, { "content-type": "application/gzip", "content-length": String(body.length) }).end(body);
+        }
       });
       server.unref();
       server.listen(0, "127.0.0.1", () => resolve(`http://127.0.0.1:${(server.address() as AddressInfo).port}`));
@@ -67,7 +72,7 @@ export function stubBackend(): StubBackend {
   let seq = 0;
   const machines: StubMachine[] = [];
   const snapshots: SnapshotRow[] = [];
-  const vaultOrigin = vaultServer();
+  const vaultOrigin = vaultServer(() => backend.downloads);
 
   const backend: StubBackend = {
     capabilities: { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true },

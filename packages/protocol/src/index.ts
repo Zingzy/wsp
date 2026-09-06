@@ -498,13 +498,48 @@ export type ProjectImportEvent = z.infer<typeof ProjectImportEvent>;
  * file of its travelled, `failed` when the move raised and nothing of that agent landed; files and bytes are what landed. */
 export const ProjectAgentOutcome = z.enum(["moved", "transcript-only", "carried", "nothing", "failed"]);
 export type ProjectAgentOutcome = z.infer<typeof ProjectAgentOutcome>;
-export const ProjectAgentResult = z.object({ agent: z.string(), files: z.number(), bytes: z.number(), outcome: ProjectAgentOutcome, error: z.string().optional() });
+/** `sessions` is how many the files hold when the trip counted them; `skipped` is how many sessions the agent's own
+ * index named whose transcript was not under its home (Codex keeps archived ones elsewhere), so their rows moved
+ * and nothing else did. */
+export const ProjectAgentResult = z.object({
+  agent: z.string(),
+  files: z.number(),
+  bytes: z.number(),
+  outcome: ProjectAgentOutcome,
+  sessions: z.number().optional(),
+  skipped: z.number().optional(),
+  error: z.string().optional(),
+});
 export type ProjectAgentResult = z.infer<typeof ProjectAgentResult>;
 /** What landed: the path on the machine, the files and bytes extracted there, the upload parts, the secret-shaped
  * paths that were cut because the import did not name them, the ones that landed rewritten as the plan offered, and
  * each named agent's outcome. */
 export const ProjectImportResult = z.object({ dest: z.string(), files: z.number(), bytes: z.number(), parts: z.number(), cut: z.array(z.string()), rewritten: z.array(z.string()), agents: z.array(ProjectAgentResult) });
 export type ProjectImportResult = z.infer<typeof ProjectImportResult>;
+/** The steps of one export in order; `failed` ends one that threw. */
+export const ProjectExportStage = z.enum(["packing", "downloading", "landing", "done", "failed"]);
+export type ProjectExportStage = z.infer<typeof ProjectExportStage>;
+/** Progress of one export, the bundle's trip home: one plain sentence per stage, the time since it began, and on
+ * downloading the bytes received so far of the archive's total. `source` is the folder on the machine, `dest` where
+ * it lands on this computer. */
+export const ProjectExportEvent = z.object({
+  type: z.literal("project.export"),
+  workspaceId: z.string(),
+  source: z.string(),
+  dest: z.string(),
+  stage: ProjectExportStage,
+  message: z.string(),
+  elapsedMs: z.number(),
+  bytes: z.number().optional(),
+  total: z.number().optional(),
+});
+export type ProjectExportEvent = z.infer<typeof ProjectExportEvent>;
+/** What came home: the folder on this computer, the files and bytes landed there, the cache roots left behind on
+ * the machine (relative paths), and each agent whose state for the folder was found on the machine with what became
+ * of it here: `moved` when its module keyed every file to dest, `transcript-only` when the files landed but the rows
+ * in its shared store here do not list them yet, `nothing` when it had no file to bring, `failed` with the reason. */
+export const ProjectExportResult = z.object({ dest: z.string(), files: z.number(), bytes: z.number(), excluded: z.array(z.string()), agents: z.array(ProjectAgentResult) });
+export type ProjectExportResult = z.infer<typeof ProjectExportResult>;
 
 // --- desktop shell bridge (preload to page) -----------------------------------
 
@@ -737,6 +772,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   ForwardOpenEvent.extend(sequenced),
   ForwardCloseEvent.extend(sequenced),
   ProjectImportEvent.extend(sequenced),
+  ProjectExportEvent.extend(sequenced),
 ]);
 export type EventUnion = z.infer<typeof EventUnion>;
 
@@ -1196,6 +1232,21 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     replace: z.boolean().optional(),
     carry: z.array(z.string()).optional(),
     rewrite: z.array(z.string()).optional(),
+    agents: z.array(z.string()).optional(),
+  }),
+  /** The bundle's trip home: tars `source` on the workspace's machine with the bundle's cache exclusions and the
+   * agent state keyed to it, lands the folder at `dest` on this computer and the state in the agents' homes here,
+   * keyed to `dest`; progress rides project.export events and the reply is { exported: ProjectExportResult }.
+   * `agents` narrows whose state comes home, by catalog id; absent, every agent with sessions for the folder does.
+   * An existing `dest` is refused (kind "exists", the message naming it and how many files it holds) unless
+   * `replace`; nothing is read from the machine before that check. */
+  z.object({
+    id: reqId,
+    op: z.literal("project.export"),
+    workspaceId: z.string(),
+    source: z.string(),
+    dest: z.string(),
+    replace: z.boolean().optional(),
     agents: z.array(z.string()).optional(),
   }),
 ]);

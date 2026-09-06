@@ -19,6 +19,7 @@ export const geminiResolver: ProjectStateResolver = {
   agent: "gemini",
   carry: "transcript-only",
   states: ["project registry", "project temp dir", "shell history"],
+  roots: [REGISTRY, ...SLUG_DIRS.map(([, dir]) => dir)],
   async move(home, from, to) {
     const file = join(home, REGISTRY);
     const registry = readRegistry(file);

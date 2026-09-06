@@ -80,6 +80,20 @@ export function guestAgentHomes(): Record<string, string> {
   return Object.fromEntries(CATALOG_AGENTS.map(a => [a.id, a.guestStateHome ?? join(GUEST_HOME, a.stateHome)]));
 }
 
+/** The paths a trip pulls from the homes: each registered module's roots under its agent's home, in catalog order,
+ * for the agents named (every one with a home when none is). An id the catalog does not know is refused, so a typo
+ * is a sentence rather than a trip that brings nothing. */
+export function stateRoots(homes: Readonly<Record<string, string>>, ids?: readonly string[]): string[] {
+  const unknown = ids?.find(id => !CATALOG_AGENTS.some(a => a.id === id));
+  if (unknown !== undefined) throw new Error(`no agent called ${unknown}; the catalog knows ${CATALOG_AGENTS.map(a => a.id).join(", ")}`);
+  return CATALOG_AGENTS.flatMap(({ id }) => {
+    const home = homes[id];
+    const resolver = PROJECT_STATE_RESOLVERS.get(id);
+    if (home === undefined || resolver === undefined || (ids !== undefined && !ids.includes(id))) return [];
+    return resolver.roots.map(root => join(home, root));
+  });
+}
+
 /** The agents whose home holds sessions for the folder, in catalog order, each with its name, the bytes of the files
  * its module names for the folder and how its state travels; an agent with no home on disk, no module or no session
  * for the folder has no row. An agent whose store cannot be read keeps a row carrying the reason, and the count goes

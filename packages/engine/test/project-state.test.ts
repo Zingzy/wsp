@@ -8,7 +8,7 @@ import { dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { ProjectCarry } from "@wsp/protocol";
-import { PROJECT_STATE_RESOLVERS, agentHomes, countProjectState, guestAgentHomes, moveProjectState, resolveProjectPath, underProject, type ProjectStateResolver } from "../src/project-state/index.js";
+import { PROJECT_STATE_RESOLVERS, agentHomes, countProjectState, guestAgentHomes, moveProjectState, resolveProjectPath, stateRoots, underProject, type ProjectStateResolver } from "../src/project-state/index.js";
 
 const { DatabaseSync } = process.getBuiltinModule("node:sqlite") as typeof import("node:sqlite");
 
@@ -250,6 +250,27 @@ describe("codex resolver", () => {
     const home = join(scratch(), "codex");
     write(join(home, "config.toml"), "");
     expect(await resolverFor("codex").move(home, FROM, TO)).toEqual([]);
+  });
+
+  it("counts the indexed rollouts it could not reach: one archived outside sessions/ and one whose file is gone move their rows and nothing else", async () => {
+    const home = join(scratch(), "codex");
+    const t1 = join("sessions", "2026", "09", "05", "rollout-2026-09-05T21-58-00-t1.jsonl");
+    write(join(home, t1), lines(codexMeta(FROM), codexItem));
+    write(join(home, "archived_sessions", "rollout-2026-09-01T10-00-00-t7.jsonl"), lines(codexMeta(FROM), codexItem));
+    seed(join(home, "state_5.sqlite"), CODEX_SCHEMA, [
+      ["insert into threads values (?, ?, ?, 0, 1)", ["t1", join(home, t1), FROM]],
+      ["insert into threads values (?, ?, ?, 1, 2)", ["t7", join(home, "archived_sessions", "rollout-2026-09-01T10-00-00-t7.jsonl"), FROM]],
+      ["insert into threads values (?, ?, ?, 0, 3)", ["t8", join(home, "sessions", "2026", "09", "02", "rollout-gone-t8.jsonl"), FROM_SUB]],
+      ["insert into threads values (?, ?, ?, 0, 4)", ["t2", join(home, "sessions", "x", "rollout-t2.jsonl"), OTHER]],
+    ]);
+    const moved = await resolverFor("codex").move(home, FROM, TO);
+    expect(moved).toEqual([
+      { state: "thread index", files: [join(home, "state_5.sqlite")], changed: 3, skipped: 2 },
+      { state: "rollout transcript", files: [join(home, t1)], changed: 1 },
+    ]);
+    expect(tree(home)).toMatchObject({ "archived_sessions/rollout-2026-09-01T10-00-00-t7.jsonl": lines(codexMeta(FROM), codexItem) });
+    const all = await resolverFor("codex").move(codexHome(scratch()), FROM, TO);
+    expect(all[0]).not.toHaveProperty("skipped");
   });
 
   it("reads only the rollouts the index names, under this home even when rollout_path was recorded under another", async () => {
@@ -521,6 +542,35 @@ describe("moveProjectState", () => {
 });
 
 // --- sessions per agent -----------------------------------------------------------------------------------------------
+
+describe("roots", () => {
+  it("each module names the paths under its home it reads, so a trip pulls those and nothing else from a home; stateRoots joins them onto each agent's home", () => {
+    expect(Object.fromEntries([...PROJECT_STATE_RESOLVERS.values()].map(r => [r.agent, r.roots]))).toEqual({
+      claude: ["projects"],
+      codex: ["state_5.sqlite", "sessions"],
+      gemini: ["projects.json", "tmp", "history"],
+      hermes: ["state.db"],
+      opencode: ["opencode.db"],
+      pi: ["sessions"],
+    });
+    for (const r of PROJECT_STATE_RESOLVERS.values()) for (const root of r.roots) expect(root, r.agent).not.toMatch(/^\/|\.\./);
+    const homes = guestAgentHomes();
+    expect(stateRoots(homes)).toEqual([
+      "/root/.claude-cfg/projects",
+      "/root/.codex/state_5.sqlite",
+      "/root/.codex/sessions",
+      "/root/.gemini/projects.json",
+      "/root/.gemini/tmp",
+      "/root/.gemini/history",
+      "/root/.local/share/opencode/opencode.db",
+      "/root/.pi/agent/sessions",
+      "/root/.hermes/state.db",
+    ]);
+    expect(stateRoots(homes, ["pi", "claude"])).toEqual(["/root/.claude-cfg/projects", "/root/.pi/agent/sessions"]);
+    expect(stateRoots({ claude: "/x/.claude" })).toEqual(["/x/.claude/projects"]);
+    expect(() => stateRoots(homes, ["claude", "codx"])).toThrow(`no agent called codx; the catalog knows ${CATALOG_AGENTS.map(a => a.id).join(", ")}`);
+  });
+});
 
 describe("sessions", () => {
   it("counts every agent's sessions at the path or under it: never a sibling sharing the prefix, another project or a subagent transcript", async () => {

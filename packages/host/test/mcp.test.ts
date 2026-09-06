@@ -2,7 +2,7 @@
 // The MCP server over the host: an MCP client calls each tool against a host
 // over the fake runtime, through the same socket client and verb logic the
 // command line uses; a thread it opens is the local agent's.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -20,7 +20,7 @@ import type { HostHandle } from "../src/server.js";
 import type { HostClient } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
-import { PAGE, captured, execGuest, scriptedAgent, stuckAgent } from "./verbs-fixture.js";
+import { EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, scriptedAgent, stuckAgent } from "./verbs-fixture.js";
 
 interface Called {
   text: string;
@@ -125,10 +125,10 @@ describe("the MCP server over the host", () => {
     vi.stubEnv("SOLARI_API_KEY", "");
   }
 
-  it("offers the verbs as tools, each described, and none for import or export until they exist", async () => {
+  it("offers the verbs as tools, each described, and none for import until it exists", async () => {
     const c = await connect();
     const { tools } = await c.listTools();
-    expect(tools.map(t => t.name).sort()).toEqual(["exec", "fork", "new", "pause", "send", "thread_new", "threads", "workspaces"]);
+    expect(tools.map(t => t.name).sort()).toEqual(["exec", "export", "fork", "new", "pause", "send", "thread_new", "threads", "workspaces"]);
     for (const t of tools) expect(t.description, t.name).toMatch(/\S/);
     expect(c.getServerVersion()?.name).toBe("wsp");
     expect(c.getInstructions()).toContain("thread_new");
@@ -255,6 +255,22 @@ describe("the MCP server over the host", () => {
     const failed = await call("thread_new", { workspace: "alpha", task: "die" });
     expect(failed).toEqual({ text: "the harness died", structured: undefined, isError: true });
     expect((await rt.sessions.list())[0]).toMatchObject({ startedBy: "agent", status: "failed" });
+  });
+
+  it("export brings the folder and the sessions keyed to it home and returns the done line with the result; an existing folder is a tool error naming it", async () => {
+    exportGuest(backend);
+    await call("new", { name: "alpha" });
+    const dest = join(dir, "out", "proj");
+    const exported = await call("export", { workspace: "alpha", folder: dest, from: EXPORT_SOURCE });
+    expect(exported.isError).toBe(false);
+    expect(exported.text).toBe(`2 files, 28 B, landed at ${dest}; 1 cache left behind; sessions: Claude Code (1 session) moved.`);
+    expect(exported.structured).toEqual({ dest, files: 2, bytes: 28, excluded: ["node_modules"], agents: [{ agent: "claude", files: 1, bytes: EXPORT_SESSION(realpathSync(dest)).length, outcome: "moved", sessions: 1 }] });
+    expect(readFileSync(join(dest, "src", "index.ts"), "utf8")).toBe("export const a = 1;\n");
+    const key = realpathSync(dest).replace(/[^A-Za-z0-9]/g, "-");
+    expect(readFileSync(join(dir, "user", ".claude", "projects", key, "S1.jsonl"), "utf8")).toBe(EXPORT_SESSION(realpathSync(dest)));
+    const again = await call("export", { workspace: "alpha", folder: dest, from: EXPORT_SOURCE });
+    expect(again.isError).toBe(true);
+    expect(again.text).toBe(`${dest} already exists on this computer with 2 files; export with replace to overwrite it`);
   });
 
   it("exec runs the command on the workspace's machine as argv and returns its output and exit code; a non-zero exit is a result, not an error", async () => {

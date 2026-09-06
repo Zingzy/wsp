@@ -6,7 +6,7 @@ import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSy
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { CACHE_WORD, FINDER_METADATA, INSTALL_NAMES, OUTPUT_NAMES, bareUrls, fileSignals, keysSignal } from "@wsp/collect";
-import { PROJECT_STATE_RESOLVERS, TAR_MAX_FILE_BYTES, countProjectState, filesUnder, fitsTar, moveProjectState, resolveProjectPath, tarOf, underProject, type AgentMoveReport, type TarEntry } from "@wsp/engine";
+import { PROJECT_STATE_RESOLVERS, TAR_MAX_FILE_BYTES, countProjectState, filesUnder, fitsTar, moveProjectState, resolveProjectPath, tarOf, underProject, type AgentMoveReport, type CacheRule, type TarEntry } from "@wsp/engine";
 import { CredentialSignal, type ProjectAgentOutcome, type ProjectAgentResult, type ProjectCarry, type ProjectPlan, type ProjectRewrite, type ProjectSecret } from "@wsp/protocol";
 import type { PackedProject, PackedState, ProjectBundler, StateRequest } from "@wsp/runtime";
 
@@ -32,6 +32,13 @@ const LS_FILES_MAX_BYTES = 256 * 1024 * 1024;
 export function isCacheName(name: string): boolean {
   return INSTALL_NAMES.has(name) || OUTPUT_NAMES.has(name) || CACHE_WORD.test(name) || FINDER_METADATA.test(name);
 }
+
+/** The same rule as find spells it, for the archive a machine packs on the trip home: the name sets as they are, the
+ * cache word as a case-blind glob, the Finder file by name, and the venv marker for a directory under any name. */
+export const CACHE_RULE: CacheRule = {
+  globs: [...INSTALL_NAMES, ...OUTPUT_NAMES, "*[cC][aA][cC][hH][eE]*", ".DS_Store"],
+  markers: [VENV_MARKER],
+};
 
 interface BundlePath {
   /** Relative to the folder, slash-separated: the path in the archive. */
@@ -289,7 +296,7 @@ export function packProject(listing: ProjectListing, carry: ReadonlySet<string>,
 
 /** One agent's outcome from what travelled and what its module did with it: files the module re-keyed are moved only
  * when its carry says they hold every key; otherwise the rows that list them stayed behind and it is transcript-only. */
-function outcomeOf(files: number, present: boolean, carry: ProjectCarry | undefined, report: AgentMoveReport | undefined): ProjectAgentOutcome {
+export function outcomeOf(files: number, present: boolean, carry: ProjectCarry | undefined, report: AgentMoveReport | undefined): ProjectAgentOutcome {
   if (report?.outcome === "failed") return "failed";
   if (files === 0) return "nothing";
   if (!present) return "carried";

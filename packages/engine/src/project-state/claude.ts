@@ -10,6 +10,7 @@ export const claudeResolver: ProjectStateResolver = {
   agent: "claude",
   carry: "moves",
   states: ["session transcripts", "auto memory"],
+  roots: ["projects"],
   async move(home, from, to) {
     const { files, changed } = await moveKeyedDirectories(join(home, "projects"), claudeProjectKey, from, to);
     if (changed === 0) return [];

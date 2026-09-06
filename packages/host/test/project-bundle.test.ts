@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { INSTALL_NAMES, OUTPUT_NAMES } from "@wsp/collect";
-import { agentHomes } from "@wsp/engine";
+import { agentHomes, folderExportScript } from "@wsp/engine";
 import { afterEach, describe, expect, it } from "vitest";
-import { isCacheName, packProject, planProject, projectBundler } from "../src/project-bundle.js";
+import { CACHE_RULE, isCacheName, packProject, planProject, projectBundler } from "../src/project-bundle.js";
 
 const { DatabaseSync } = process.getBuiltinModule("node:sqlite") as typeof import("node:sqlite");
 
@@ -260,6 +260,23 @@ describe("planProject", () => {
     for (const n of [...INSTALL_NAMES, ...OUTPUT_NAMES]) expect(isCacheName(n)).toBe(true);
     for (const n of [".parcel-cache", "__pycache__", ".pytest_cache", "CacheStorage", ".DS_Store"]) expect(isCacheName(n)).toBe(true);
     for (const n of ["src", "lib", "cached-results.md", "Cargo.lock", "yarn.lock", "data.sqlite-wal", "DS_Store.bak"]) expect(isCacheName(n)).toBe(n === "cached-results.md");
+  });
+
+  it("the trip home leaves behind what the trip out left behind: the machine-side script under CACHE_RULE names the same cache roots as planProject, and its archive holds the plan's files, tracked files inside a cache root and the outside links being the two differences", async () => {
+    const root = fixture();
+    const { plan, files } = await planProject(root, {});
+    const out = join(root, "..", `${basename(root)}.tgz`);
+    dirs.push(out);
+    const script = folderExportScript(realpathSync(root), CACHE_RULE, out);
+    const ran = spawnSync("bash", ["-c", script], { encoding: "utf8" });
+    expect(ran.stderr).toBe("");
+    expect(ran.status).toBe(0);
+    expect(ran.stdout.trim().split("\n").sort()).toEqual([...plan.excluded].sort());
+    const archived = listed(readFileSync(out)).map(l => l.replace(/^\.\//, "").replace(/\/$/, "")).filter(l => l !== "." && l !== "");
+    const planned = files.map(f => f.rel).filter(rel => !plan.excluded.some(root => rel === root || rel.startsWith(`${root}/`)));
+    expect(archived.sort()).toEqual([...planned, "outside-link", "up-link"].sort());
+    for (const name of ["node_modules", "dist", "build", ".cache", ".DS_Store", "__pycache__", ".eslintcache", "MyCache"]) expect(isCacheName(name), name).toBe(true);
+    for (const name of ["src", "notes.txt", "data.sqlite-wal", "caching.md"]) expect(isCacheName(name), name).toBe(false);
   });
 
   it("Finder metadata stays behind at every level; sqlite journals travel", async () => {
