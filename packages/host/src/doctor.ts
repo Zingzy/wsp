@@ -6,14 +6,14 @@
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, NODE_RELEASES } from "@wsp/catalog";
 import { DAEMON_PORT, TOOLS_PATH, type Machine } from "@wsp/engine";
 import { goldenHead, writeDaemonTokenScript, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
+import { assetDir } from "./assets.js";
 import type { CliIO } from "./cli.js";
 
 const execFileAsync = promisify(execFile);
@@ -38,15 +38,10 @@ printf '%s' "$1" | curl -s -m 1 -o /dev/null --unix-socket ${OPEN_SOCKET_PATH} -
 exit 0
 `;
 
-function resolveDaemonDir(): string {
-  const require = createRequire(import.meta.url);
-  return dirname(require.resolve("@wsp/daemon/package.json"));
-}
-
 /** Lay out an installable copy of the daemon: its dist build, a start script,
  * and a package.json whose dependency pins mirror the daemon's (node-pty has
  * no linux prebuilds, so the guest's npm install compiles it, ~5s). */
-export async function stageDaemonBundle(stageDir: string, daemonDir = resolveDaemonDir()): Promise<void> {
+export async function stageDaemonBundle(stageDir: string, daemonDir = assetDir("daemon")): Promise<void> {
   const daemonPkg = JSON.parse(readFileSync(join(daemonDir, "package.json"), "utf8")) as {
     dependencies: Record<string, string>;
   };
