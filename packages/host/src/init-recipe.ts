@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import type { LoginChoice, Manifest, ManifestEntry, Rung } from "@wsp/collect";
 import { CATALOG_AGENTS, NO_SIGN_IN, catalogEntry, catalogToolFor, guestEnv, hasLogin, keysIdOf, loginIdOf, loginRow } from "@wsp/catalog";
 import { CATALOG_PREFIX, agentOwning, isMcpRow, neverCopied, packageOf, parseMcpId, rowRoad, type RecipeDigest } from "@wsp/engine";
-import { Recipe } from "@wsp/protocol";
+import { Recipe, type RecipeSignIn } from "@wsp/protocol";
 import type { GoldenImport, GoldenRecipe, Machine } from "@wsp/runtime";
 import type { Keys } from "./cli.js";
 import { GUEST_ENVS } from "./doctor.js";
@@ -260,15 +260,25 @@ export function recipePath(statePath: string): string {
   return join(dirname(statePath), "golden-recipe.json");
 }
 
-/** The small recipe with the login answers written on: a row whose login row was answered carries the answer, a row
- * whose login nobody answered carries none. The ticks are the recipe's own, as the screens left them. */
+/** The word a catalog row's sign-in reads back as, from the login rows the screens answered. `key` writes two of
+ * them (the keys row copied, the login left to run on the machine), so it has to be read off both: a keys row
+ * copied beside a login that is not itself copied is what `key` put there. A login copied in its own right is that
+ * login's answer, whatever its keys row says, since `copy` is the closest of the four words to it. */
+export function signInAnswerOf(id: string, choices: ReadonlyMap<string, string>): RecipeSignIn | undefined {
+  const login = choices.get(`logins/${loginIdOf(id)}`);
+  if (choices.get(`logins/${keysIdOf(id)}`) === "copy" && login !== "copy") return "key";
+  return isLoginChoice(login) ? login : undefined;
+}
+
+/** The small recipe with the login answers written on: a row whose login rows were answered carries the word they
+ * add up to, a row nobody answered carries none. The ticks are the recipe's own, as the screens left them. */
 export function recipeWithAnswers(recipe: Recipe, choices: ReadonlyMap<string, string>): Recipe {
   return {
     ...recipe,
     rows: recipe.rows.map(r => {
       const { signIn: _signIn, ...rest } = r;
-      const answer = choices.get(`logins/${loginIdOf(r.id)}`);
-      return { ...rest, ...(isLoginChoice(answer) ? { signIn: answer } : {}) };
+      const answer = signInAnswerOf(r.id, choices);
+      return { ...rest, ...(answer !== undefined ? { signIn: answer } : {}) };
     }),
   };
 }

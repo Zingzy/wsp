@@ -5,7 +5,7 @@
 // folder. The catalog says where and how; this file only reads and writes.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { CATALOG_AGENTS, MCP_AGENTS, type AgentEntry, type McpAgent, type McpServerSpec, type Placed } from "@wsp/catalog";
+import { CATALOG_AGENTS, MCP_AGENTS, MCP_AGENT_IDS, type AgentEntry, type McpAgent, type McpServerSpec, type Placed } from "@wsp/catalog";
 import { SKILL_NAME, WSP_SKILL } from "./skill.js";
 
 /** The name the server has in every agent's config. */
@@ -51,7 +51,7 @@ function installSkill(agent: AgentEntry, home: string): string {
  * skill into its skills folder. Says which agent and which files, and whether the config's comments were lost. */
 export function installMcp(agentId: string, server: McpServerSpec, home: string): Installed {
   const entry = CATALOG_AGENTS.find(a => a.id === agentId);
-  if (entry === undefined) throw new Error(`no agent ${agentId} in the catalog; agents with an MCP config: ${MCP_AGENTS.map(a => a.id).join(", ")}`);
+  if (entry === undefined) throw new Error(`no agent ${agentId} in the catalog; agents with an MCP config: ${MCP_AGENT_IDS}`);
   const agent = MCP_AGENTS.find(a => a.id === agentId);
   if (agent === undefined) return { agent: entry.name, skill: installSkill(entry, home) };
   const file = mcpConfigFile(agent, home);
@@ -65,6 +65,28 @@ export function installMcp(agentId: string, server: McpServerSpec, home: string)
   mkdirSync(dirname(file.abs), { recursive: true });
   writeFileSync(file.abs, placed.text);
   return { agent: entry.name, path: file.tilde, commentsDropped: placed.commentsDropped, skill: installSkill(entry, home) };
+}
+
+/** One `wsp mcp install` as a machine reads it: every agent that took the server or the skill under the catalog id
+ * it was asked for, and every one that took neither with the reason, so a caller naming several is not left
+ * guessing which of them landed. */
+export interface InstallReport {
+  installed: Array<Installed & { id: string }>;
+  failures: Array<{ id: string; error: string }>;
+}
+
+/** Installs for each agent in turn and keeps going past one that fails: an id the catalog does not know must not
+ * cost the agents named beside it. */
+export function installEach(agentIds: Iterable<string>, server: McpServerSpec, home: string): InstallReport {
+  const report: InstallReport = { installed: [], failures: [] };
+  for (const id of agentIds) {
+    try {
+      report.installed.push({ id, ...installMcp(id, server, home) });
+    } catch (e) {
+      report.failures.push({ id, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  return report;
 }
 
 /** What an install says, for the command and the wizard alike: the agent and its file, then the comments line

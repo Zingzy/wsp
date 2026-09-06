@@ -19,6 +19,10 @@ export const USED_TICK_SESSIONS = 2;
 interface TickRule {
   order: readonly RecipeSource["kind"][];
   on(source: RecipeSource, entry: CatalogEntry): boolean;
+  /** Whether this rule ticks an agent the caller says no adapter can open a thread on. Only the rule that answers
+   * about this computer does: it is saying what is here, not what wsp can drive. Every other rule holds such an
+   * agent off, since ticking it would build a machine nothing here can open a thread on. */
+  ticksAgentsWithoutAdapter: boolean;
 }
 
 const INSTALLED_FIRST: readonly RecipeSource["kind"][] = ["installed", "used", "popular"];
@@ -27,9 +31,9 @@ const catalogDefault = (_source: RecipeSource, entry: CatalogEntry): boolean => 
 
 /** One rule per `--tick` word; adding a word is an entry here and nothing else. */
 const TICK_RULES: Readonly<Record<RecipeTick, TickRule>> = {
-  used: { order: ["used", "installed", "popular"], on: source => source.kind === "used" },
-  installed: { order: INSTALLED_FIRST, on: source => source.kind === "installed" },
-  default: { order: INSTALLED_FIRST, on: catalogDefault },
+  used: { order: ["used", "installed", "popular"], on: source => source.kind === "used", ticksAgentsWithoutAdapter: false },
+  installed: { order: INSTALLED_FIRST, on: source => source.kind === "installed", ticksAgentsWithoutAdapter: true },
+  default: { order: INSTALLED_FIRST, on: catalogDefault, ticksAgentsWithoutAdapter: false },
 };
 
 /** What the wizard's screens start from when no rule was named: installed here, then a habit in the histories,
@@ -37,12 +41,23 @@ const TICK_RULES: Readonly<Record<RecipeTick, TickRule>> = {
  * answer and vetoes the catalog default under it, so a tool looked at once stays off however popular it is. */
 const BLENDED: TickRule = {
   order: INSTALLED_FIRST,
+  ticksAgentsWithoutAdapter: false,
   on: (source, entry) => {
     if (source.kind === "installed") return true;
     if (entry.kind !== "tool") return false;
     return source.kind === "used" ? source.sessions >= USED_TICK_SESSIONS : catalogDefault(source, entry);
   },
 };
+
+/** Whether a rule reads a use before what is installed. Under one that does, an installed row is only ever a row
+ * with no use at all, so a reader may say so; under any other, an installed row says nothing either way. Derived
+ * from the rule's own `order`, so a word added to TICK_RULES answers this by existing. A recipe that names no rule
+ * makes no such claim. */
+export function readsUsedFirst(tick: RecipeTick | undefined): boolean {
+  if (tick === undefined) return false;
+  const { order } = TICK_RULES[tick];
+  return order.indexOf("used") < order.indexOf("installed");
+}
 
 export interface RecipeOptions {
   /** The entries to decide; the shipped catalog by default. */
@@ -119,7 +134,7 @@ export async function computeRecipe(host: Host, opts: RecipeOptions = {}): Promi
       popular,
     };
     const source = rule.order.flatMap(kind => sources[kind] ?? [])[0] ?? popular;
-    const held = e.kind === "agent" && threads !== undefined && !threads.has(e.id) && opts.tick !== "installed";
+    const held = e.kind === "agent" && threads !== undefined && !threads.has(e.id) && !rule.ticksAgentsWithoutAdapter;
     return { id: e.id, kind: e.kind, on: !held && rule.on(source, e), source, ...(e.size !== undefined ? { size: e.size } : {}) };
   });
   return {

@@ -6,12 +6,10 @@
 import { existsSync } from "node:fs";
 import { agentName, catalogEntry, keysIdOf, loginRow } from "@wsp/catalog";
 import { type AgentHistory, type Host, computeRecipe, unknownCommands } from "@wsp/collect";
-import { RECIPE_SIGN_INS, RECIPE_TICKS, type Recipe, type RecipeHistory, type RecipeSignIn, type RecipeTick } from "@wsp/protocol";
+import { RECIPE_SIGN_INS, RECIPE_TICKS, plural, type Recipe, type RecipeHistory, type RecipeSignIn, type RecipeTick } from "@wsp/protocol";
 import { THREAD_AGENTS } from "./thread-agents.js";
 import { loadRecipe, saveSmallRecipe } from "./recipe-file.js";
 import { recipeScan, recipeTable, type RecipeScan, type RecipeTable } from "./recipe-table.js";
-
-const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** One line per agent: what its history here said. */
 export function historyLine(h: RecipeHistory): string {
@@ -81,8 +79,11 @@ export function applySignIns(recipe: Recipe, answers: ReadonlyMap<string, Recipe
 }
 
 /** Why an `--add` cannot be answered yet: the install line comes from a scan row, and nothing here scans for tools
- * outside the catalog. A catalog id is a `--set`, and says so rather than reading as unknown. */
-export function noAddLine(id: string): never {
+ * outside the catalog. A catalog id is a `--set`, and says so rather than reading as unknown. A word that carries
+ * its own line (`<id>=<line>`) is named by its id, so the refusal is about the row and not about the spelling. */
+export function noAddLine(word: string): never {
+  const eq = word.indexOf("=");
+  const id = eq < 0 ? word : word.slice(0, eq);
   if (catalogEntry(id) !== undefined) throw new Error(`--add ${id}: ${agentName(id)} is a catalog row; wsp recipe --set ${id}=on ticks it`);
   throw new Error(`--add ${id}: no scan row for ${JSON.stringify(id)}; nothing here scans for tools outside the catalog yet`);
 }
@@ -111,19 +112,20 @@ export interface RecipeIo {
 
 const QUIET: RecipeIo = { log: () => {}, note: () => {} };
 
-/** This computer's recipe with the answers the file already carries written back on, row by row: a row the file
- * names keeps the tick and the sign-in answer it was left with, and a row it does not name (the catalog grew since
- * it was written) keeps the rule's own. Unlike the wizard's rule, the file is not the authority on rows it lacks. */
-export function withSavedAnswers(computed: Recipe, saved: Recipe): Recipe {
-  const rows = new Map(saved.rows.map(r => [r.id, r]));
-  return {
-    ...computed,
-    rows: computed.rows.map(r => {
-      const was = rows.get(r.id);
-      if (was === undefined) return r;
-      return { ...r, on: was.on, ...(was.signIn === undefined ? {} : { signIn: was.signIn }) };
-    }),
-  };
+/** This computer's recipe with the ticks the file already carries written back on, row by row: a row the file names
+ * keeps the tick it was left with, and a row it does not name (the catalog grew since it was written) keeps the
+ * rule's own; the rule is the file's, so the ticks and the words beside them come from the same one. Unlike the
+ * wizard's rule, the file is not the authority on rows it lacks. Sign-in answers do not travel here: they are the
+ * person's under every rule, so savedSignIns carries them. */
+export function withSavedTicks(computed: Recipe, saved: Recipe): Recipe {
+  const on = new Map(saved.rows.map(r => [r.id, r.on]));
+  return { ...computed, rows: computed.rows.map(r => (on.has(r.id) ? { ...r, on: on.get(r.id) === true } : r)) };
+}
+
+/** The sign-in answers a saved recipe carries. No rule decides one: `computeRecipe` never writes a `signIn`, so a
+ * run that lets the rule decide every tick would drop the person's answers on the floor if these did not travel. */
+export function savedSignIns(saved: Recipe | undefined): Map<string, RecipeSignIn> {
+  return new Map((saved?.rows ?? []).flatMap((r): [string, RecipeSignIn][] => (r.signIn === undefined ? [] : [[r.id, r.signIn]])));
 }
 
 /** Whether the run named something the rule reads, so the rule decides every row again rather than the file standing. */
@@ -155,17 +157,24 @@ export async function runScan(host: Host, input: ScanInput = {}, io: RecipeIo = 
 }
 
 /** Reads this computer, writes the recipe and answers with the table. The file is the state: a run that names a rule
- * input (`tick` or `projects`) lets the rule decide every row again, and any other run keeps what the file already
- * says and puts this run's flips on top. A row the file never carried always takes the rule's answer. */
+ * input (`tick` or `projects`) lets the rule decide every tick again, and any other run keeps what the file already
+ * says and puts this run's flips on top. A row the file never carried always takes the rule's answer. Sign-in
+ * answers stand through every run, whatever the rule: nothing but the person decides one. */
 export async function runRecipe(host: Host, input: RecipeInput, io: RecipeIo = QUIET, now?: () => Date): Promise<RecipeTable> {
   const sets = parseSets(input.set ?? []);
-  const signIns = parseSignIns(input.signin ?? []);
   const saved = existsSync(input.out) ? loadRecipe(input.out) : undefined;
-  const tick = input.tick ?? saved?.tick ?? "used";
+  // The file's answers first, this run's words over them; a word never given leaves the file's answer standing.
+  const signIns = new Map([...savedSignIns(saved), ...parseSignIns(input.signin ?? [])]);
+  // Refused before this computer is read, as the other words are: a line that cannot be answered costs no scan.
+  for (const word of input.add ?? []) noAddLine(word);
+  // The rule this run goes on: the one named, else the one the file was written under, else `used` on a first run.
+  // A file that names none is the wizard's, whose rule is the blended one, so computeRecipe is left to decide.
+  const named = input.tick ?? saved?.tick;
+  const rule = named !== undefined ? { tick: named } : saved !== undefined ? {} : { tick: "used" as const };
   io.note("Reading this computer against the catalog and your agents' session histories. Nothing leaves this computer.");
   const histories: AgentHistory[] = [];
   const computed = await computeRecipe(host, {
-    tick,
+    ...rule,
     threadAgents: THREAD_AGENTS,
     ...(input.projects !== undefined && input.projects.length > 0 ? { folders: input.projects } : {}),
     ...(now !== undefined ? { now } : {}),
@@ -174,8 +183,7 @@ export async function runRecipe(host: Host, input: RecipeInput, io: RecipeIo = Q
       io.note(historyLine(h));
     },
   });
-  for (const id of input.add ?? []) noAddLine(id);
-  const base = saved !== undefined && !namesRule(input) ? withSavedAnswers(computed, saved) : computed;
+  const base = saved !== undefined && !namesRule(input) ? withSavedTicks(computed, saved) : computed;
   const recipe = applySignIns(applySets(base, sets), signIns);
   saveSmallRecipe(input.out, recipe);
   return recipeTable(recipe, input.out, unknownCommands(histories));

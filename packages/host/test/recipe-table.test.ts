@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The one renderer the recipe verb, the MCP tool and the wizard's What they
 // need screen all draw from: rows in, lines out, no colour and no terminal.
+import { readsUsedFirst } from "@wsp/collect";
+import { RECIPE_TICKS } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
 import { HARNESS_ADAPTERS } from "../src/adapters.js";
 import { THREAD_AGENTS } from "../src/thread-agents.js";
@@ -16,14 +18,16 @@ const rows: RecipeTableRow[] = [
 
 describe("the recipe table", () => {
   it("says why a row has its tick in the words the rule went on", () => {
-    expect(whyLine({ kind: "used", sessions: 37, calls: 412 }, "used")).toBe("used 412 times in 37 sessions");
-    expect(whyLine({ kind: "used", sessions: 1, calls: 1 }, "used")).toBe("used 1 time in 1 session");
-    // Under used the sources are read used first, so an installed row that got this far was never run.
-    expect(whyLine({ kind: "installed", paths: [], bin: true }, "used")).toBe("installed here, never used");
-    expect(whyLine({ kind: "installed", paths: [], bin: true }, "installed")).toBe("installed here");
-    expect(whyLine({ kind: "popular", sessions: 3, images: 2 }, "default")).toBe("catalog default");
-    // A recipe the wizard wrote names no rule, so nothing can claim the row was never used.
-    expect(whyLine({ kind: "installed", paths: [], bin: true }, undefined)).toBe("installed here");
+    expect(whyLine({ kind: "used", sessions: 37, calls: 412 }, true)).toBe("used 412 times in 37 sessions");
+    expect(whyLine({ kind: "used", sessions: 1, calls: 1 }, true)).toBe("used 1 time in 1 session");
+    // A rule that reads a use before what is installed leaves only never-run rows on the installed source.
+    expect(whyLine({ kind: "installed", paths: [], bin: true }, true)).toBe("installed here, never used");
+    expect(whyLine({ kind: "installed", paths: [], bin: true }, false)).toBe("installed here");
+    expect(whyLine({ kind: "popular", sessions: 3, images: 2 }, false)).toBe("catalog default");
+    // Which rules read a use first is the collector's answer, not a word this file knows.
+    expect(RECIPE_TICKS.map(readsUsedFirst)).toEqual([true, false, false]);
+    // A recipe the wizard wrote names no rule, so nothing can claim a row was never used.
+    expect(readsUsedFirst(undefined)).toBe(false);
   });
 
   it("renders a recipe that names no rule without claiming one, so the wizard's own recipes read right", () => {
@@ -68,13 +72,13 @@ describe("the recipe table", () => {
     expect(table.totalBytes).toBe((343 + 673) * MB);
     expect(table.heavy.map(r => r.id)).toEqual(["opencode", "java"]);
     expect(HEAVY_BYTES).toBe(300 * MB);
-    expect(recipeTotalLine(table)).toBe("2 rows on, 1016.0 MB; 2 rows over 300.0 MB.");
+    expect(recipeTotalLine(table.rows)).toBe("2 rows on, 1016.0 MB; 2 rows over 300.0 MB.");
     expect(table.rows.find(r => r.id === "opencode")?.name).toBe("OpenCode");
   });
 
   it("says when a ticked row's size was never measured, so the total reads as a floor", () => {
     const t = recipeTable({ version: 1, at: "x", tick: "used", histories: [], rows: [{ id: "pnpm", kind: "tool", on: true, source: { kind: "popular", sessions: 1, images: 1 } }] }, "/tmp/r.json");
-    expect(recipeTotalLine(t)).toBe("1 row on, 0 B measured and 1 row not; 0 rows over 300.0 MB.");
+    expect(recipeTotalLine(t.rows)).toBe("1 row on, 0 B measured and 1 row not; 0 rows over 300.0 MB.");
   });
 
   it("lists the commands the catalog does not carry under one title, and says so when there are none", () => {

@@ -5,6 +5,7 @@ import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
+import { CATALOG } from "@wsp/catalog";
 import { BUILDER_IDLE_MS, type GoldenImport } from "@wsp/engine";
 import { createRuntime, memoryStore, type HarnessAdapterFactory, type ReapResult, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -75,7 +76,41 @@ function inlineScripts(html: string): string[] {
   return [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]!);
 }
 
+/** A computer for the recipe verb to read, written to a temp dir: one agent's history with node, pnpm and pytest
+ * in two sessions, and java on PATH and never run. The verb reads a computer through nodeHost(), whose whole answer
+ * comes from HOME and PATH, so pinning those two is what keeps these rows off whichever box the suite runs on. */
+function fixtureMachine(): { dir: string; home: string; state: string; project: string; close(): void } {
+  const dir = mkdtempSync(join(tmpdir(), "wsp-cli-recipe-"));
+  const home = join(dir, "home");
+  const bin = join(dir, "bin");
+  const project = join(home, "proj");
+  const line = (sessionId: string, commands: readonly string[]): string =>
+    JSON.stringify({ type: "assistant", cwd: project, sessionId, message: { role: "assistant", content: commands.map(command => ({ type: "tool_use", id: "toolu_1", name: "Bash", input: { command } })) } });
+  mkdirSync(join(home, ".claude", "projects", "s"), { recursive: true });
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(join(home, ".claude", "settings.json"), "{}\n");
+  writeFileSync(join(home, ".claude", "projects", "s", "s1.jsonl"), `${[line("s1", ["node --version", "pnpm install"]), line("s1", ["pytest -q"])].join("\n")}\n`);
+  writeFileSync(join(home, ".claude", "projects", "s", "s2.jsonl"), `${[line("s2", ["pnpm test", "node build.js", "pytest"])].join("\n")}\n`);
+  writeFileSync(join(bin, "java"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  // nodeHost() takes its home from HOME and answers `which` off PATH, so these two words are the whole computer
+  // the verb sees: no transcript, config tree or binary of the box the suite runs on is read.
+  vi.stubEnv("HOME", home);
+  vi.stubEnv("PATH", bin);
+  return {
+    dir,
+    home,
+    state: join(dir, "state.json"),
+    project,
+    close: () => {
+      vi.unstubAllEnvs();
+      rmSync(dir, { recursive: true, force: true });
+    },
+  };
+}
+
 describe("wsp cli", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
   it("--version prints the package version", async () => {
     const lines: string[] = [];
     const code = await cli(["--version"], quietIO(lines));
@@ -88,38 +123,52 @@ describe("wsp cli", () => {
   });
 
   it("recipe writes the file, prints the table on stdout and the reading on stderr, and refuses a --tick word it does not know", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "wsp-cli-recipe-"));
-    const out = join(dir, "recipe.json");
+    const box = fixtureMachine();
+    const out = join(box.dir, "recipe.json");
     const logs: string[] = [];
     const errs: string[] = [];
     const io: CliIO = { log: l => logs.push(l), error: l => errs.push(l), ask: noPrompt, askSecret: noPrompt };
-    expect(await cli(["recipe", "--out", out, "--tick", "default", "--json"], io)).toBe(0);
-    const table = JSON.parse(logs.at(-1)!) as { tick: string; out: string; rows: { id: string }[] };
+    const row = (id: string) => JSON.parse(readFileSync(out, "utf8")).rows.find((r: { id: string }) => r.id === id);
+
+    expect(await cli(["recipe", "--out", out, "--state", box.state, "--tick", "default", "--json"], io)).toBe(0);
+    const table = JSON.parse(logs.at(-1)!) as { tick: string; out: string; rows: { id: string; on: boolean; why: string }[] };
     expect(table).toMatchObject({ tick: "default", out });
     expect(logs).toHaveLength(1);
     expect(errs[0]).toContain("Nothing leaves this computer");
-    expect(JSON.parse(readFileSync(out, "utf8")).tick).toBe("default");
+    // The catalog's own default, so the rows are the catalog's and nothing of this computer moves them.
+    expect(table.rows.filter(r => r.on).map(r => r.id)).toEqual(CATALOG.flatMap(e => (e.kind === "tool" && e.defaultOn ? [e.id] : [])));
+    expect(readFileSync(out, "utf8")).toContain('"tick": "default"');
 
     logs.length = 0;
     errs.length = 0;
-    expect(await cli(["recipe", "--out", out, "--set", "java=on"], io)).toBe(0);
+    expect(await cli(["recipe", "--out", out, "--state", box.state, "--tick", "used", "--set", "java=on"], io)).toBe(0);
     expect(logs[0]).toMatch(/^id +on +why +size$/);
     expect(logs.at(-1)).toContain(`wsp init --recipe ${out}`);
-    expect(JSON.parse(readFileSync(out, "utf8")).rows.find((r: { id: string }) => r.id === "java").on).toBe(true);
+    // What the fixture's own history and PATH say, the same on any box: two tools run in two sessions, one
+    // installed and never run, and one flipped on by hand.
+    expect(row("node")).toMatchObject({ on: true, source: { kind: "used", sessions: 2, calls: 2 } });
+    expect(row("pnpm")).toMatchObject({ on: true, source: { kind: "used", sessions: 2, calls: 2 } });
+    expect(row("java")).toMatchObject({ on: true, source: { kind: "installed", bin: true } });
+    expect(row("gradle")).toMatchObject({ on: false, source: { kind: "popular" } });
+    expect(logs.find(l => l.startsWith("java "))).toMatch(/^java +on +installed here, never used +343\.0 MB$/);
+    expect(logs.find(l => l.startsWith("node "))).toMatch(/^node +on +used 2 times in 2 sessions +250\.0 MB$/);
+    expect(logs).toContain("  pytest       2         2");
 
     errs.length = 0;
-    expect(await cli(["recipe", "--out", out, "--tick", "everything"], io)).toBe(1);
+    expect(await cli(["recipe", "--out", out, "--state", box.state, "--tick", "everything"], io)).toBe(1);
     expect(errs.at(-1)).toBe('--tick takes one of used, installed, default, not "everything"');
-    rmSync(dir, { recursive: true, force: true });
+    box.close();
   });
 
   it("recipe scan prints every section and writes nothing; an unknown subverb is one usage line", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "wsp-cli-scan-"));
-    const out = join(dir, "recipe.json");
+    const box = fixtureMachine();
+    // scan takes no --out, so its state file is what says where a recipe would have gone.
+    const state = box.state;
+    const out = join(box.dir, "recipe.json");
     const logs: string[] = [];
     const errs: string[] = [];
     const io: CliIO = { log: l => logs.push(l), error: l => errs.push(l), ask: noPrompt, askSecret: noPrompt };
-    expect(await cli(["recipe", "scan", "--out", out], io)).toBe(0);
+    expect(await cli(["recipe", "scan", "--state", state], io)).toBe(0);
     expect(existsSync(out)).toBe(false);
     expect(logs[0]).toBe("Agents");
     expect(logs).toContain("Tools");
@@ -127,19 +176,49 @@ describe("wsp cli", () => {
     expect(logs).toContain("  no scanner yet");
     expect(logs.at(-1)).toContain("Nothing was written.");
     expect(errs[0]).toContain("Nothing leaves this computer");
+    // The fixture's own rows, the same on any box.
+    expect(logs.find(l => l.trim().startsWith("node "))).toMatch(/^ {2}node +on +used 2 times in 2 sessions +250\.0 MB +on$/);
+    expect(logs.find(l => l.trim().startsWith("java "))).toMatch(/^ {2}java +off +installed here, never used +343\.0 MB +off$/);
+    expect(logs).toContain("  pytest       2         2");
 
     logs.length = 0;
-    expect(await cli(["recipe", "scan", "--out", out, "--json"], io)).toBe(0);
+    expect(await cli(["recipe", "scan", "--state", state, "--json"], io)).toBe(0);
     expect(logs).toHaveLength(1);
-    const scan = JSON.parse(logs[0]!) as { tick: string; tools: { id: string; recommended: { value: string; why: string } }[] };
+    const scan = JSON.parse(logs[0]!) as {
+      tick: string;
+      agents: { id: string; on: boolean }[];
+      tools: { id: string; on: boolean; recommended: { value: string; why: string } }[];
+      commands: { name: string; calls: number; sessions: number }[];
+      signIns: { id: string; recommended: { value: string } }[];
+    };
     expect(scan.tick).toBe("used");
     for (const row of scan.tools) expect(row.recommended.why.length, row.id).toBeGreaterThan(0);
+    expect(scan.tools.filter(r => r.on).map(r => r.id)).toEqual(["node", "pnpm"]);
+    expect(scan.agents.filter(r => r.on).map(r => r.id)).toEqual(["claude"]);
+    expect(scan.commands).toEqual([{ name: "pytest", calls: 2, sessions: 2 }]);
+    expect(scan.signIns.map(r => [r.id, r.recommended.value])).toEqual([["claude", "machine"]]);
     expect(existsSync(out)).toBe(false);
 
     errs.length = 0;
     expect(await cli(["recipe", "sniff"], io)).toBe(1);
     expect(errs.at(-1)).toContain("unknown command: wsp recipe sniff");
-    rmSync(dir, { recursive: true, force: true });
+
+    // scan writes nothing, so a flag that only the write verb reads is refused by name rather than swallowed.
+    logs.length = 0;
+    errs.length = 0;
+    expect(await cli(["recipe", "scan", "--state", state, "--tick", "installed", "--set", "go=on", "--out", out], io)).toBe(1);
+    expect(errs[0]).toContain("wsp recipe scan writes nothing, so --tick, --set and --out are the write verb's alone");
+    expect(errs[0]).toContain("usage: wsp recipe");
+    expect(logs).toEqual([]);
+    errs.length = 0;
+    expect(await cli(["recipe", "scan", "--add", "jj"], io)).toBe(1);
+    expect(errs[0]).toContain("so --add is the write verb's alone");
+    errs.length = 0;
+    expect(await cli(["recipe", "scan", "--signin", "gh=copy"], io)).toBe(1);
+    expect(errs[0]).toContain("so --signin is the write verb's alone");
+    // What scan does take stays taken.
+    expect(await cli(["recipe", "scan", "--project", box.project, "--json"], io)).toBe(0);
+    box.close();
   });
 });
 

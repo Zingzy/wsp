@@ -143,9 +143,9 @@ describe("the MCP server over the host", () => {
     expect(c.getInstructions()).toBe(instructionsOf(WSP_SKILL));
     expect(c.getInstructions()).toContain("thread_new");
     // The setup sequence an agent follows the first time, so it never has to guess at the order.
-    expect(c.getInstructions()).toContain("run `recipe_scan`");
-    expect(c.getInstructions()).toContain("write the answers with `recipe`");
-    expect(c.getInstructions()).toContain("wsp init --recipe <out>");
+    expect(c.getInstructions()).toContain("then `recipe_scan`, which writes nothing");
+    expect(c.getInstructions()).toContain("then `recipe` with their answers");
+    expect(c.getInstructions()).toContain("wsp init --recipe <path>");
     expect(c.getInstructions()).toContain("snapshot");
     for (const t of tools) expect(WSP_SKILL, t.name).toContain(`\`${t.name}\``);
   });

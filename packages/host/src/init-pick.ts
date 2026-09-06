@@ -12,7 +12,7 @@ import { S_BAR, S_STEP_ACTIVE, S_STEP_CANCEL, S_STEP_SUBMIT } from "@clack/promp
 import { CATALOG_AGENTS, CATALOG_TOOLS, MCP_AGENTS, type CatalogEntry, type ToolEntry, agentName as catalogName } from "@wsp/catalog";
 import type { LoginChoice, Manifest, ManifestEntry } from "@wsp/collect";
 import { MEASURED_ON, estimateDisk, isMcpRow, parseMcpId, type BrewTable, type DiskEstimate } from "@wsp/engine";
-import { fmtBytes, type Recipe, type RecipeRow } from "@wsp/protocol";
+import { fmtBytes, plural, type Recipe, type RecipeRow } from "@wsp/protocol";
 import { mcpConfigFile } from "./mcp-install.js";
 import { GUTTER, S_BAR_FOCUS, S_BAR_FOCUS_END, colourDepth, helpLine, isTTY, widthOf, wrap, type HelpKey } from "./init-layout.js";
 import { agentName, applyRecipe, comingRows, defaultAnswers, initialChoice, isTickable, loginShown, loginTool, rowsHere } from "./init-recipe.js";
@@ -31,7 +31,6 @@ export const MACHINE_WORD = "sign in on the machine after the build";
 export const ON_THIS_MAC = "On this Mac";
 
 const dim = (s: string): string => styleText("dim", s);
-const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 const rowOf = (recipe: Recipe, id: string): RecipeRow | undefined => recipe.rows.find(r => r.id === id);
 /** Whether the recipe found the entry on this Mac. */

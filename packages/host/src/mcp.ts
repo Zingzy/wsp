@@ -101,6 +101,8 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
   };
 
   const PROJECT_FOLDERS = z.array(z.string()).optional().describe("folders on this computer, absolute, to weigh the histories by: only sessions that ran in one of them or under it count");
+  /** The same folders on the write verb, where naming them is also naming a rule input, so it re-decides the ticks. */
+  const WEIGH_BY_FOLDERS = z.array(z.string()).optional().describe("folders on this computer, absolute, to weigh the histories by: only sessions that ran in one of them or under it count. Naming one re-decides every tick from the rule, as tick does, so any flip an earlier call made goes");
   /** Absolute, since this server's own folder is wherever the agent launched it and a prefix test on a relative
    * path silently matches nothing. */
   const projectFolders = (folders: readonly string[]): string[] => folders.map(f => absolutePath("project is a folder on this computer", f));
@@ -109,7 +111,7 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
     "recipe_scan",
     {
       description:
-        "Every option this computer offers for a machine, read once and written nowhere: the person's agents and the catalog's tools with the tick their own use reaches and what each adds to the machine, the tools here no catalog row carries, the commands their agents ran that the catalog does not carry, and the sign-in each ticked row brings. Every row carries a recommended value and a one-line reason, so apply those and put only the rows whose reason says worth a question. Run this before recipe, and before asking the person anything. Only names and counts are read.",
+        "Every option this computer offers for a machine, read once and written nowhere: the person's agents and the catalog's tools with the tick their own use reaches and what each adds to the machine, the tools here no catalog row carries (alsoHere, whose scanned is false while nothing looks for them, so an empty managers there is unscanned and not none found), the commands their agents ran that the catalog does not carry, and the sign-in each ticked row brings. Every row carries a recommended value and a one-line reason, so apply those and put only the rows whose reason says worth a question. Run this before recipe, and before asking the person anything. Only names and counts are read.",
       inputSchema: { project: PROJECT_FOLDERS },
       outputSchema: RecipeScan.shape,
     },
@@ -122,13 +124,13 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
     "recipe",
     {
       description:
-        `The recipe for a machine, read off this computer and written to a file: every catalog agent and tool with its tick, why it has that tick, and what it adds to the machine, plus the commands the person's agents ran that no catalog row carries. tick names the rule: used (the default) ticks what their agents actually ran here, installed ticks what is on this computer, default ticks what the catalog ships on; an agent wsp cannot open a thread on is off unless installed. Put the heavy rows to the person with their sizes before anything is built, then flip rows with set and hand them \`wsp init --recipe <out>\` to run themselves, since the sign-ins need their machine. Only names and counts are read; nothing a session held is returned.`,
+        `The recipe for a machine, read off this computer and written to a file: every catalog agent and tool with its tick, why it has that tick, and what it adds to the machine, plus the commands the person's agents ran that no catalog row carries. tick names the rule: used ticks what their agents actually ran here, installed ticks what is on this computer, default ticks what the catalog ships on; an agent wsp cannot open a thread on is off unless installed. The file is the state, so a second call is not a fresh start: naming tick or project lets the rule decide every tick again and throws away the flips a call before it made, and a call that names neither keeps what the file says and puts its own flips on top. Sign-in answers stand through every call whatever the rule, since nothing but the person decides one. Put the heavy rows to the person with their sizes before anything is built, then flip rows with set and hand them \`wsp init --recipe <out>\` to run themselves, since the sign-ins need their machine. Only names and counts are read; nothing a session held is returned.`,
       inputSchema: {
-        tick: RecipeTick.optional().describe(`which rule decides every tick: ${RECIPE_TICKS.join(", ")}; absent means the file's own rule, else used`),
-        set: z.array(z.string()).optional().describe('rows to flip by catalog id, "<id>=on" or "<id>=off"; applied over the rule and on top of the ticks already in the file'),
-        signin: z.array(z.string()).optional().describe(`what happens to a row's sign-in, "<id>=${RECIPE_SIGN_INS.join("|")}"; key brings the key files beside its login and nothing else of it`),
+        tick: RecipeTick.optional().describe(`which rule decides every tick: ${RECIPE_TICKS.join(", ")}. Naming it re-decides every row from the rule, so any flip an earlier call made goes; absent, the file's own rule and its ticks stand, and used decides a first call and any row the file does not carry`),
+        set: z.array(z.string()).optional().describe('rows to flip by catalog id, "<id>=on" or "<id>=off", applied over whatever decided the row. On a call that names tick or project they sit over the rule\'s fresh answer; on any other call they sit over the ticks already in the file'),
+        signin: z.array(z.string()).optional().describe(`what happens to a row's sign-in, "<id>=${RECIPE_SIGN_INS.join("|")}"; key brings the key files beside its login and the login still runs on the machine. An answer already in the file stands until a later call names that row again, whatever tick or project do to the ticks`),
         add: z.array(z.string()).optional().describe("catalog ids to add from a scan row's install line; nothing here scans for tools outside the catalog yet, so each one is refused by name"),
-        project: PROJECT_FOLDERS,
+        project: WEIGH_BY_FOLDERS,
         out: z.string().optional().describe("where the recipe file goes, absolute; absent means the host's own recipe.json beside its state"),
       },
       outputSchema: RecipeTable.shape,

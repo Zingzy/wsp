@@ -4,10 +4,12 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Recipe } from "@wsp/protocol";
+import { computeRecipe } from "@wsp/collect";
+import { RECIPE_SIGN_INS, Recipe, type RecipeSignIn } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { applySets, parseSet, parseSets, parseSignIn, runRecipe, type RecipeIo } from "../src/recipe-command.js";
-import { loginAnswers } from "../src/init-recipe.js";
+import { loginAnswers, recipeWithAnswers, signInAnswerOf } from "../src/init-recipe.js";
+import { saveSmallRecipe } from "../src/recipe-file.js";
 import { HEAVY_BYTES, commandTableLines, recipePrintout, recipeTableLines, recipeTotalLine } from "../src/recipe-table.js";
 import { claudeLine, fakeHost, HOME } from "./recipe-fixture.js";
 
@@ -124,6 +126,43 @@ describe("wsp recipe", () => {
     expect(() => parseSignIn("gh=key")).toThrow("has no key files beside its login");
   });
 
+  it("keeps a sign-in answer through a run that names a rule: the answer is the person's and no rule decides it", async () => {
+    dir = mkdtempSync(join(tmpdir(), "wsp-recipe-signin-carry-"));
+    const out = outPath();
+    const answers = () => {
+      const saved = Recipe.parse(JSON.parse(readFileSync(out, "utf8")));
+      return saved.rows.flatMap(r => (r.signIn === undefined ? [] : [[r.id, r.signIn]]));
+    };
+    await runRecipe(laptop(), { out, signin: ["claude=machine", "gh=copy"] }, quiet, at);
+    expect(answers()).toEqual([["claude", "machine"], ["gh", "copy"]]);
+    // A rule input re-decides every tick; it has nothing to say about a sign-in, so nothing of it is lost.
+    await runRecipe(laptop(), { out, tick: "installed" }, quiet, at);
+    expect(answers()).toEqual([["claude", "machine"], ["gh", "copy"]]);
+    await runRecipe(laptop(), { out, projects: [PROJ] }, quiet, at);
+    expect(answers()).toEqual([["claude", "machine"], ["gh", "copy"]]);
+    // This run's own word wins over the one in the file.
+    const last = await runRecipe(laptop(), { out, tick: "used", signin: ["gh=machine"] }, quiet, at);
+    expect(last.rows.find(r => r.id === "gh")?.id).toBe("gh");
+    expect(answers()).toEqual([["claude", "machine"], ["gh", "machine"]]);
+  });
+
+  it("leaves a recipe that names no rule naming none when the file stands, so its rows are not read as used", async () => {
+    dir = mkdtempSync(join(tmpdir(), "wsp-recipe-untagged-"));
+    const out = outPath();
+    // What the wizard writes: the blended rule, and no tick field at all.
+    const wizard = await computeRecipe(laptop(), { now: at });
+    expect(wizard.tick).toBeUndefined();
+    saveSmallRecipe(out, wizard);
+    const flipped = await runRecipe(laptop(), { out, set: ["go=on"] }, quiet, at);
+    expect(flipped.tick).toBeUndefined();
+    expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8"))).tick).toBeUndefined();
+    // An installed row cannot be said never to have been used under a rule that never read a use.
+    expect(flipped.rows.find(r => r.id === "claude")).toMatchObject({ why: "installed here" });
+    expect(flipped.rows.find(r => r.id === "go")).toMatchObject({ on: true });
+    // Naming a rule is what stamps one on.
+    expect((await runRecipe(laptop(), { out, tick: "used" }, quiet, at)).tick).toBe("used");
+  });
+
   it("turns a key answer into the keys row travelling and the login still running on the machine", () => {
     const rows = [{ id: "hermes", kind: "agent" as const, on: true, source: { kind: "installed" as const, paths: [], bin: true }, signIn: "key" as const }];
     expect([...loginAnswers({ version: 1, at: "x", histories: [], rows })]).toEqual([
@@ -132,6 +171,17 @@ describe("wsp recipe", () => {
     ]);
     const copied = [{ ...rows[0]!, signIn: "copy" as const }];
     expect([...loginAnswers({ version: 1, at: "x", histories: [], rows: copied })]).toEqual([["logins/hermes", "copy"]]);
+  });
+
+  it("reads a key answer back off the login rows the wizard answered, so init rewriting the file keeps it", () => {
+    const recipe = (signIn: RecipeSignIn) => ({ version: 1 as const, at: "x", histories: [], rows: [{ id: "hermes", kind: "agent" as const, on: true, source: { kind: "installed" as const, paths: [], bin: true }, signIn }] });
+    // What wsp init does at the end of a run: the screens' answers written back onto the small recipe.
+    const roundTrip = (signIn: RecipeSignIn): string | undefined => recipeWithAnswers(recipe(signIn), loginAnswers(recipe(signIn))).rows[0]?.signIn;
+    for (const word of RECIPE_SIGN_INS) expect(roundTrip(word), word).toBe(word);
+    // A keys row copied beside a login copied in its own right is the login's answer, not key.
+    expect(signInAnswerOf("hermes", new Map([["logins/hermes-keys", "copy"], ["logins/hermes", "copy"]]))).toBe("copy");
+    expect(signInAnswerOf("hermes", new Map([["logins/hermes-keys", "copy"], ["logins/hermes", "skip"]]))).toBe("key");
+    expect(signInAnswerOf("hermes", new Map())).toBeUndefined();
   });
 
   it("refuses an --add until something scans for tools outside the catalog, and points a catalog id at --set", async () => {
@@ -192,8 +242,8 @@ describe("wsp recipe", () => {
     expect(io.notes[0]).toBe("Reading this computer against the catalog and your agents' session histories. Nothing leaves this computer.");
     expect(io.notes).toContain("Claude Code: 3 sessions, 6 tool calls");
     expect(io.logs[0]).toMatch(/^id +on +why +size$/);
-    expect(io.logs).toContain(recipeTotalLine(table));
-    expect(recipeTotalLine(table)).toMatch(/^\d+ rows on, .* measured and \d+ rows? not; \d+ rows? over 300\.0 MB\.$/);
+    expect(io.logs).toContain(recipeTotalLine(table.rows));
+    expect(recipeTotalLine(table.rows)).toMatch(/^\d+ rows on, .* measured and \d+ rows? not; \d+ rows? over 300\.0 MB\.$/);
     expect(table.heavy.every(r => (r.size ?? 0) > HEAVY_BYTES)).toBe(true);
   });
 });

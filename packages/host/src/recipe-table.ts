@@ -5,8 +5,8 @@
 // verb, the MCP tool and the wizard's What they need screen say the same
 // thing about the same recipe.
 import { agentName, hasLogin, keysIdOf, loginIdOf, loginRow, signsInByDefault } from "@wsp/catalog";
-import type { CommandCount } from "@wsp/collect";
-import { RecipeTick, fmtBytes, type Recipe, type RecipeRow, type RecipeSource } from "@wsp/protocol";
+import { readsUsedFirst, type CommandCount } from "@wsp/collect";
+import { RecipeTick, fmtBytes, plural, type Recipe, type RecipeRow, type RecipeSource } from "@wsp/protocol";
 import { z } from "zod";
 import { table } from "./init-layout.js";
 import { signInFor, signInWords } from "./signin-table.js";
@@ -17,20 +17,18 @@ export const HEAVY_BYTES = 300 * 1024 * 1024;
 /** How many of the uncatalogued commands the printout shows: enough to see the shape of the person's work. */
 export const COMMANDS_SHOWN = 12;
 
-const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
-
 /** What the printout says about a row whose size the catalog never measured. */
 export const UNMEASURED = "not measured";
 
-/** Why a row has the tick it has, in the words a person and an agent both read. Under `used` the sources are read
- * used first, so an installed row that reached this far was never used and says so; a recipe that names no rule
- * (the wizard's own) cannot claim that, and its installed rows say only that they are here. */
-export function whyLine(source: RecipeSource, tick: RecipeTick | undefined): string {
+/** Why a row has the tick it has, in the words a person and an agent both read. `usedFirst` is the rule's own
+ * answer to whether it reads a use before what is installed (readsUsedFirst): under one that does, an installed
+ * row that reached this far has no use at all and says so, and under any other it says only that it is here. */
+export function whyLine(source: RecipeSource, usedFirst: boolean): string {
   switch (source.kind) {
     case "used":
       return `used ${plural(source.calls, "time")} in ${plural(source.sessions, "session")}`;
     case "installed":
-      return tick === "used" ? "installed here, never used" : "installed here";
+      return usedFirst ? "installed here, never used" : "installed here";
     case "popular":
       return "catalog default";
     default: {
@@ -75,13 +73,13 @@ export type RecipeTable = z.infer<typeof RecipeTable>;
 /** A recipe's rows as the table shows them, in catalog order: what a caller with a recipe and no file hands to
  * recipeTableLines (the wizard's What they need screen does exactly this). */
 export function recipeTableRows(recipe: Recipe): RecipeTableRow[] {
-  const tick = recipe.tick;
+  const usedFirst = readsUsedFirst(recipe.tick);
   return recipe.rows.map((r: RecipeRow): RecipeTableRow => ({
     id: r.id,
     name: agentName(r.id),
     kind: r.kind,
     on: r.on,
-    why: whyLine(r.source, tick),
+    why: whyLine(r.source, usedFirst),
     ...(r.size !== undefined ? { size: r.size } : {}),
   }));
 }
@@ -95,11 +93,21 @@ export function recipeTable(recipe: Recipe, out: string, commands: readonly Comm
     at: recipe.at,
     out,
     rows,
-    totalBytes: on.reduce((n, r) => n + (r.size ?? 0), 0),
-    heavy: on.filter(r => (r.size ?? 0) > HEAVY_BYTES).sort((a, b) => (b.size ?? 0) - (a.size ?? 0)),
+    totalBytes: totalBytes(rows),
+    heavy: heavyRows(rows),
     commands: commands.map(c => ({ name: c.name, calls: c.calls, sessions: c.sessions })),
   };
 }
+
+/** A ticked row big enough to put to the person before anything is built. An unticked row adds nothing, however
+ * big it is, so it is never one. */
+export const isHeavy = (row: RecipeTableRow): boolean => row.on && row.size !== undefined && row.size > HEAVY_BYTES;
+
+/** The ticked rows worth a question, biggest first. */
+export const heavyRows = <T extends RecipeTableRow>(rows: readonly T[]): T[] => rows.filter(isHeavy).sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
+
+/** What the ticked rows add up to on the machine, of the ones the catalog measured. */
+export const totalBytes = (rows: readonly RecipeTableRow[]): number => rows.reduce((n, r) => n + (r.on ? (r.size ?? 0) : 0), 0);
 
 /** The table itself: a header and one line per row, columns lined up, no colour. The wizard draws these lines
  * inside its own frame, so nothing here knows about a terminal. */
@@ -110,13 +118,15 @@ export function recipeTableLines(rows: readonly RecipeTableRow[]): string[] {
   );
 }
 
-/** The last line under the table: what the ticked rows add up to, how many the catalog never measured (so the
- * total is a floor, not the whole), and how many are worth putting to the person. */
-export function recipeTotalLine(t: RecipeTable): string {
-  const on = t.rows.filter(r => r.on);
+/** The last line under a table of rows: what the ticked ones add up to, how many the catalog never measured (so
+ * the total is a floor, not the whole), and how many are worth putting to the person. The scan's tables and the
+ * recipe's one table both end in this line, so the two can never say different things about the same rows. */
+export function recipeTotalLine(rows: readonly RecipeTableRow[]): string {
+  const on = rows.filter(r => r.on);
   const unmeasured = on.filter(r => r.size === undefined).length;
-  const of = unmeasured > 0 ? `${fmtBytes(t.totalBytes)} measured and ${plural(unmeasured, "row")} not` : fmtBytes(t.totalBytes);
-  return `${plural(on.length, "row")} on, ${of}; ${plural(t.heavy.length, "row")} over ${fmtBytes(HEAVY_BYTES)}.`;
+  const bytes = fmtBytes(totalBytes(rows));
+  const of = unmeasured > 0 ? `${bytes} measured and ${plural(unmeasured, "row")} not` : bytes;
+  return `${plural(on.length, "row")} on, ${of}; ${plural(heavyRows(rows).length, "row")} over ${fmtBytes(HEAVY_BYTES)}.`;
 }
 
 export const COMMANDS_TITLE = "Commands your agents ran that the catalog does not carry:";
@@ -134,7 +144,7 @@ export function commandTableLines(commands: readonly RecipeCommand[], shown = CO
 
 /** Everything the recipe verb and the MCP tool print: the table, its total line, then the commands table. */
 export function recipePrintout(t: RecipeTable): string[] {
-  return [...recipeTableLines(t.rows), recipeTotalLine(t), "", ...commandTableLines(t.commands)];
+  return [...recipeTableLines(t.rows), recipeTotalLine(t.rows), "", ...commandTableLines(t.commands)];
 }
 
 // --- the scan: every option, with what an agent should do about each ------------------------------------------
@@ -188,8 +198,7 @@ export type RecipeScan = z.infer<typeof RecipeScan>;
  * question said in the same line. Nothing else here is a delta. */
 export function tickAdvice(row: RecipeTableRow): RecipeAdvice {
   const size = row.size;
-  const heavy = row.on && size !== undefined && size > HEAVY_BYTES;
-  return { value: row.on ? "on" : "off", why: heavy ? `${row.why}; ${fmtBytes(size)} on the machine, worth a question` : row.why };
+  return { value: row.on ? "on" : "off", why: isHeavy(row) && size !== undefined ? `${row.why}; ${fmtBytes(size)} on the machine, worth a question` : row.why };
 }
 
 /** What to do with a row's sign-in without asking: key files beside a login come first, since key brings them and
@@ -214,8 +223,8 @@ export function recipeScan(recipe: Recipe, commands: readonly CommandCount[] = [
     at: recipe.at,
     agents: rows.filter(r => r.kind === "agent"),
     tools: rows.filter(r => r.kind === "tool"),
-    totalBytes: on.reduce((n, r) => n + (r.size ?? 0), 0),
-    heavy: on.filter(r => (r.size ?? 0) > HEAVY_BYTES).sort((a, b) => (b.size ?? 0) - (a.size ?? 0)),
+    totalBytes: totalBytes(rows),
+    heavy: heavyRows(rows),
     alsoHere: { scanned: false, managers: [] },
     commands: commands.map(c => ({ name: c.name, calls: c.calls, sessions: c.sessions })),
     signIns: on.flatMap((r): RecipeScanSignIn[] => {
@@ -256,15 +265,13 @@ export function alsoHereLines(also: RecipeScanAlso): string[] {
 
 /** The whole scan on the terminal: agents, tools, the tools outside the catalog, the commands, the sign-ins. */
 export function scanPrintout(s: RecipeScan): string[] {
-  const unmeasured = [...s.agents, ...s.tools].filter(r => r.on && r.size === undefined).length;
-  const of = unmeasured > 0 ? `${fmtBytes(s.totalBytes)} measured and ${plural(unmeasured, "row")} not` : fmtBytes(s.totalBytes);
   return [
     "Agents",
     ...scanTableLines(s.agents).map(l => `  ${l}`),
     "",
     "Tools",
     ...scanTableLines(s.tools).map(l => `  ${l}`),
-    `${plural(s.agents.filter(r => r.on).length + s.tools.filter(r => r.on).length, "row")} on, ${of}; ${plural(s.heavy.length, "row")} over ${fmtBytes(HEAVY_BYTES)}.`,
+    recipeTotalLine([...s.agents, ...s.tools]),
     "",
     ...alsoHereLines(s.alsoHere),
     "",
