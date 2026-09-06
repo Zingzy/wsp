@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { SolariBackend, type MachineShape } from "@wsp/engine";
-import type { EventUnion } from "@wsp/protocol";
+import { GoldenManifest, goldenHead, type EventUnion } from "@wsp/protocol";
 import { createRuntime, type Runtime } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 
@@ -30,11 +30,8 @@ function apiKey(): string {
 function goldenId(): string {
   if (process.env.WSP_GOLDEN) return process.env.WSP_GOLDEN;
   const statePath = process.env.WSP_LIVE_STATE ?? join(homedir(), "wsp-live", ".home", "state.json");
-  const state = JSON.parse(readFileSync(statePath, "utf8")) as {
-    goldens?: Record<string, { head: number; versions: { version: number; snapshotId: string }[] }>;
-  };
-  const g = state.goldens?.["default"];
-  const head = g?.versions.find(v => v.version === g.head);
+  const state = JSON.parse(readFileSync(statePath, "utf8")) as { goldens?: Record<string, unknown> };
+  const head = goldenHead(GoldenManifest.optional().parse(state.goldens?.["default"]));
   if (!head) throw new Error(`no golden head in ${statePath}; set WSP_GOLDEN`);
   return head.snapshotId;
 }
