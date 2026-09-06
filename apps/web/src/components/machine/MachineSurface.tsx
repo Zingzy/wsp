@@ -4,8 +4,7 @@
 // workspace's machine.
 import { CopyIcon } from "lucide-react";
 import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
-import { foldThreads, type GoldenMissingTool, type GoldenVersion, type ProjectGolden, type SnapshotLineage, type SysSample, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
-import { workspaceStateOf } from "../../adapt/workspaces.js";
+import { foldThreads, needsRebuild, type GoldenMissingTool, type GoldenVersion, type ProjectGolden, type SnapshotLineage, type SysSample, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { provideDaemonUpdate, useDaemonUpdate, useDaemonVersion } from "../../files/wire.js";
 import { cn, errorText } from "../../lib/utils.js";
 import { daemonBehindLine } from "../../machine/daemon.js";
@@ -101,7 +100,7 @@ function Header({ workspace, status }: { workspace: WorkspaceView; status: Works
 }
 
 function PhaseDot({ workspace, status }: { workspace: WorkspaceView; status: WorkspaceStatus | null }) {
-  const dead = status?.machineState === "gone" || status?.reach.state === "zombie";
+  const dead = needsRebuild({ phase: workspace.phase, machineState: status?.machineState, reach: status?.reach.state });
   return (
     <span
       aria-hidden
@@ -156,6 +155,7 @@ function Facts({ workspace, status, awakeMs, pendingSize }: FactsProps) {
   const now = useClock(status?.idleAt !== undefined);
   const diverged = status ? divergentMachineState(workspace.phase, status.machineState) : null;
   const zombie = status?.reach.state === "zombie";
+  const rebuild = needsRebuild({ phase: workspace.phase, machineState: status?.machineState, reach: status?.reach.state });
   return (
     <Section label="Machine">
       <div className="mt-1 divide-y divide-border/40">
@@ -196,7 +196,7 @@ function Facts({ workspace, status, awakeMs, pendingSize }: FactsProps) {
           {status.reason}
         </p>
       )}
-      {zombie && <Rebuild workspace={workspace} />}
+      {rebuild && <Rebuild workspace={workspace} />}
       <p className="mt-1.5 text-[11px] text-muted-foreground/70">The idle window is fixed when a workspace is created.</p>
       {capabilities?.containers === false && (
         <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground" data-k="containers">
@@ -701,10 +701,10 @@ function Actions({ workspace, status, upgrade }: { workspace: WorkspaceView; sta
   const [open, setOpen] = useState(false);
   const [picked, setPicked] = useState<WorkspaceSize | null>(null);
   const [forgetting, setForgetting] = useState(false);
-  const gone = workspaceStateOf(workspace, status) === "gone";
   const running = workspace.phase === "running";
   const waking = workspace.phase === "waking";
   const pausing = workspace.phase === "pausing";
+  const gone = workspace.phase === "gone";
   // Backend fact, not a probe: a provider that cannot resize gets no picker at all.
   const canResize = capabilities?.resize === true;
   const options = status && canResize ? upgradeOptions(status.size) : [];

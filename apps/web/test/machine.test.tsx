@@ -20,6 +20,7 @@ import { DAEMON_HELLO_WAIT_MS, provideDaemonHello, provideDaemonUpdate } from ".
 import { getLive, resetLive } from "../src/machine/live.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
+import { statusOf } from "./workspace-status.js";
 
 // Base UI's tooltip opens on pointer hover, which jsdom cannot stage; the popup renders inline instead.
 vi.mock("../src/components/ui/tooltip.js", () => ({
@@ -37,13 +38,7 @@ const view = (id: string, name: string, phase: WorkspacePhase = "running"): Work
   createdAt: "2026-08-30T09:00:00Z",
 });
 
-const status = (w: WorkspaceView): WorkspaceStatus => ({
-  ...w,
-  machineState: w.phase === "napping" ? "paused" : "running",
-  reach: { state: w.phase === "napping" ? "napping" : "reachable" },
-  size: { cpu: 2, memMb: 4096 },
-  rateUsdPerHour: 0.11,
-});
+const status = statusOf;
 
 const costEvent = (workspaceId: string, rate: number, awakeMs: number, at: string): EventUnion => ({
   type: "workspace.cost",
@@ -97,7 +92,7 @@ function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS,
     getWorkspace: vi.fn(async id => workspaces.find(w => w.id === id)!),
     createWorkspace: vi.fn<(golden: string, name?: string) => Promise<WorkspaceView>>(async () => workspaces[0]!),
     createFromGoldenHead: vi.fn(async (name: string) => view("ws_new", name)),
-    watchStatuses: vi.fn(async () => workspaces.map(status)),
+    watchStatuses: vi.fn(async () => workspaces.map(w => status(w))),
     nap: vi.fn(async (id: string) => view(id, "?", "napping")),
     wake: vi.fn(async (id: string) => view(id, "?", "running")),
     listSessions: vi.fn(async () => []),
@@ -538,15 +533,12 @@ describe("project goldens in the lineage", () => {
 });
 
 describe("gone machines", () => {
-  const gone = (w: WorkspaceView): WorkspaceStatus => ({ ...status(w), machineState: "gone", reach: { state: "gone" } });
+  const gone = (): WorkspaceView => ({ ...view("ws_a", "api", "gone"), gone: "machine m_ws_a_0123456789abcdef is gone at the provider: Not found" });
 
   it("the footer offers forget in place of pause and holds upgrade; confirming names what goes and calls the api once", async () => {
-    const w = view("ws_a", "api");
-    const api = await mount([w]);
+    const api = await mount([gone()]);
     const forget = vi.fn(async (_id: string) => {});
     api.forget = forget;
-    expect(screen.queryByRole("button", { name: "forget api" })).toBeNull();
-    act(() => api.emit({ type: "workspace.status", status: gone(w) }));
     const forgetButton = await screen.findByRole("button", { name: "forget api" });
     expect(screen.queryByRole("button", { name: "pause api" })).toBeNull();
     expect((screen.getByRole("button", { name: "upgrade api" }) as HTMLButtonElement).disabled).toBe(true);
@@ -562,13 +554,11 @@ describe("gone machines", () => {
   });
 
   it("the host's refusal shows in the dialog, which stays open", async () => {
-    const w = view("ws_a", "api");
-    const api = await mount([w]);
+    const api = await mount([gone()]);
     const reason = "api's machine m_ws_a is still running; pause it or delete it at the provider first";
     api.forget = vi.fn(async (_id: string) => {
       throw new Error(reason);
     });
-    act(() => api.emit({ type: "workspace.status", status: gone(w) }));
     fireEvent.click(await screen.findByRole("button", { name: "forget api" }));
     fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Forget" }));
     await waitFor(() => expect(fact("forget-refusal")).toBe(reason));
@@ -713,6 +703,35 @@ describe("zombie", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(rebuild).not.toHaveBeenCalled();
+  });
+});
+
+describe("gone machine", () => {
+  const WORDS = "machine m_ws_a_0123456789abcdef is gone at the provider: Not found";
+  const gone = (): WorkspaceView => ({ ...view("ws_a", "api", "gone"), gone: WORDS });
+
+  it("reads Gone with the provider's words, no rate and no nap window, offers the rebuild and neither pause, wake nor upgrade", async () => {
+    await mount([gone()]);
+    expect(fact("state")).toBe("Gone");
+    expect(fact("reach")).toBe("gone");
+    expect(fact("reason")).toBe(WORDS);
+    expect(fact("idle")).toBe("not scheduled");
+    expect(fact("rate")).toBe("$0.000/hr");
+    expect(screen.getByRole("button", { name: "rebuild api" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "pause api" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "wake api" })).toBeNull();
+    expect((screen.getByRole("button", { name: "upgrade api" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("the rebuild asks first, then calls the api once", async () => {
+    const api = await mount([gone()]);
+    const rebuild = vi.fn(async (id: string) => ({ ...view(id, "api"), machineId: "m_fresh" }));
+    api.rebuild = rebuild;
+    fireEvent.click(screen.getByRole("button", { name: "rebuild api" }));
+    await screen.findByRole("alertdialog");
+    fireEvent.click(screen.getByRole("button", { name: "Rebuild" }));
+    await waitFor(() => expect(rebuild).toHaveBeenCalledTimes(1));
+    expect(rebuild).toHaveBeenCalledWith("ws_a");
   });
 });
 
