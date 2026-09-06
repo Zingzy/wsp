@@ -4052,10 +4052,9 @@ describe("wsp init --recipe", () => {
     const run = runInit(f.opts, f.io);
     await f.until("Sign-ins");
     const out = f.text();
-    // The machine was still read; the card says what ticked it; the one row the build cannot install is named before the card.
+    // The machine was still read; the card says what ticked it and counts the collector's rows, not the catalog's bare one.
     expect(out).toContain("16 found on this computer, ticked by the recipe.");
-    expect(out).toContain("Ticked in the recipe but not on this computer, so not in this build: agent-browser.");
-    expect(out.indexOf("not in this build")).toBeLessThan(out.indexOf("Found on this computer"));
+    expect(out).not.toContain("not in this build");
     // No Identity, Tools or Agents screen: the sign-ins are the first and only screen.
     expect(out).not.toContain("1/8");
     expect(out).toMatch(/Sign-ins\s+1\/1/);
@@ -4074,6 +4073,8 @@ describe("wsp init --recipe", () => {
     expect(saved.get("tools/brew/gh")).toMatchObject({ bring: true });
     expect(saved.get("tools/brew/yq")).toMatchObject({ bring: false });
     expect(saved.get("tools/npm/tsx")).toMatchObject({ bring: false });
+    // The ticked tool this Mac has no row for is saved as the catalog's bare row, so the build installs it by its road.
+    expect(saved.get("tools/catalog/agent-browser")).toMatchObject({ label: "agent-browser", bring: true });
     expect(saved.get("logins/gh")).toMatchObject({ bring: true, choice: "copy" });
     expect(saved.get("logins/codex")).toMatchObject({ bring: false, choice: "machine" });
     // The other rungs took their defaults, as the screens would have.
@@ -4095,6 +4096,11 @@ describe("wsp init --recipe", () => {
     expect(saved.get("tools/brew/yq")).toMatchObject({ bring: false });
     expect(saved.get("logins/gh")).toMatchObject({ bring: true, choice: "copy" });
     expect(f.text()).toContain("GitHub CLI login: signed in (copied; gh auth status)");
+    // agent-browser has no row here: the build installed it by its catalog road, an npm global, and the tally says the road is unmeasured.
+    expect(f.backends[0]!.machines[0]!.execLog.some(c => c.includes("npm install -g agent-browser@0.31.1"))).toBe(true);
+    const tools = JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8")).tools as { id: string; outcome: string; note?: string }[];
+    expect(tools.find(t => t.id === "tools/catalog/agent-browser")).toMatchObject({ outcome: "installed", note: "by an unmeasured road" });
+    expect(f.text()).toMatch(/Installing tools\s+\d+ installed \(agent-browser by an un/);
   });
 
   it("a recipe that does not parse ends the run before anything is read or booted", async () => {

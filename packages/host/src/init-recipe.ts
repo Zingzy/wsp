@@ -7,8 +7,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type LoginChoice, type Manifest, type ManifestEntry, type Rung, parseManifest } from "@wsp/collect";
 import { catalogEntry, catalogToolFor, linuxCaskByBin, linuxCaskFor, loginIdOf } from "@wsp/catalog";
-import { agentOwning, neverCopied, packageOf, parseMcpId, type RecipeDigest } from "@wsp/engine";
-import { MCP_ID_PREFIX, Recipe, type RecipeRow } from "@wsp/protocol";
+import { CATALOG_PREFIX, agentOwning, neverCopied, packageOf, parseMcpId, type RecipeDigest } from "@wsp/engine";
+import { MCP_ID_PREFIX, Recipe } from "@wsp/protocol";
 import type { GoldenImport, GoldenRecipe, Machine } from "@wsp/runtime";
 import type { Keys } from "./cli.js";
 import { GUEST_ENVS, claudeEnvs } from "./doctor.js";
@@ -82,8 +82,9 @@ const ROW_BIN: Readonly<Record<string, string>> = { awscli: "aws", "kubernetes-c
 /** What would bring a command no tools row lists, when the Linux cask table does not say; the detail pane has 76 columns. */
 const BRINGS: Readonly<Record<string, string>> = { gh: "brew install gh", cloudflared: "brew install cloudflared", aws: "brew install awscli", wrangler: "npm install -g wrangler", vercel: "npm install -g vercel" };
 
-/** The command a tools row puts on PATH, when the row is a package or a cask that is a command. */
+/** The command a tools row puts on PATH, when the row is a catalog tool, a package or a cask that is a command. */
 function rowBin(t: ManifestEntry): string | undefined {
+  if (t.id.startsWith(CATALOG_PREFIX)) return catalogEntry(packageOf(t))?.bin;
   const cask = linuxCaskFor(t.id);
   if (cask !== undefined) return cask.bin;
   const m = /^tools\/(?:brew|cli|npm|pnpm|bun|uv|pipx|cargo|go)\/(.+)$/.exec(t.id);
@@ -208,32 +209,35 @@ function catalogIdOf(e: ManifestEntry): string | undefined {
 
 /** The collector's rows with the recipe's ticks written on: an agents or tools row is on when its catalog row is,
  * off when it is not or when no catalog row stands for it; an MCP row follows its agent; a saved sign-in answer
- * lands on the login row it names. Every other row keeps its default, as a saved manifest would leave it. */
+ * lands on the login row it names. Every other row keeps its default, as a saved manifest would leave it. A ticked
+ * catalog tool this computer has no row for gets a bare row, the floor's aside, so the build installs it by its
+ * catalog road; the bare rows of an earlier pass are made anew, so an untick takes its row away. */
 export function applyRecipe(manifest: Manifest, recipe: Recipe): Manifest {
   const on = new Set(recipe.rows.filter(r => r.on).map(r => r.id));
   const answers = new Map<string, LoginChoice>(recipe.rows.flatMap(r => (r.signIn === undefined ? [] : [[`logins/${loginIdOf(r.id)}`, r.signIn]])));
+  const own = manifest.entries.filter(e => !e.id.startsWith(CATALOG_PREFIX));
+  const here = new Set(own.map(catalogIdOf));
+  const bare = recipe.rows.flatMap((r): ManifestEntry[] => {
+    const e = catalogEntry(r.id);
+    if (!r.on || here.has(r.id) || e?.kind !== "tool" || e.floor) return [];
+    return [{ rung: "tools", id: `${CATALOG_PREFIX}${e.id}`, label: e.name, group: "Catalog", paths: [], bytes: 0, default: "skip", linux: "yes", bring: true }];
+  });
   return {
     ...manifest,
-    entries: manifest.entries.map(e => {
-      if (e.rung === "agents" && e.id.startsWith(MCP_ID_PREFIX)) {
-        const agent = parseMcpId(e.id)?.agent;
-        return { ...e, bring: initialTicks(e) && (agent === undefined || catalogEntry(agent)?.kind !== "agent" || on.has(agent)) };
-      }
-      const id = catalogIdOf(e);
-      if (id !== undefined || e.rung === "tools") return { ...e, bring: id !== undefined && on.has(id) };
-      const answer = e.rung === "logins" ? answers.get(e.id) : undefined;
-      return answer === undefined ? e : { ...e, choice: answer };
-    }),
+    entries: [
+      ...own.map(e => {
+        if (e.rung === "agents" && e.id.startsWith(MCP_ID_PREFIX)) {
+          const agent = parseMcpId(e.id)?.agent;
+          return { ...e, bring: initialTicks(e) && (agent === undefined || catalogEntry(agent)?.kind !== "agent" || on.has(agent)) };
+        }
+        const id = catalogIdOf(e);
+        if (id !== undefined || e.rung === "tools") return { ...e, bring: id !== undefined && on.has(id) };
+        const answer = e.rung === "logins" ? answers.get(e.id) : undefined;
+        return answer === undefined ? e : { ...e, choice: answer };
+      }),
+      ...bare,
+    ],
   };
-}
-
-/** The recipe's ticked rows this computer has no row for, the floor's aside: the build cannot install them yet. */
-export function unbuiltRows(recipe: Recipe, entries: readonly ManifestEntry[]): RecipeRow[] {
-  const here = new Set(entries.map(catalogIdOf));
-  return recipe.rows.filter(r => {
-    const e = catalogEntry(r.id);
-    return r.on && !here.has(r.id) && !(e?.kind === "tool" && e.floor);
-  });
 }
 
 export function recipePath(statePath: string): string {

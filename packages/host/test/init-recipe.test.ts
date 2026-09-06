@@ -22,7 +22,6 @@ import {
   recipePath,
   saveRecipe,
   tickLoginTools,
-  unbuiltRows,
   withoutAgentTools,
 } from "../src/init-recipe.js";
 import { FIXTURE, byId } from "./init-fixture.js";
@@ -350,7 +349,8 @@ describe("the small recipe", () => {
     expect(bring.get("tools/npm/tsx")).toBe(false);
     expect(bring.get("tools/brew/rectangle")).toBe(false);
     expect(bring.get("tools/brew/openjdk@21")).toBe(false);
-    expect(applied.entries.filter(e => e.rung === "tools").every(e => initialTicks(e) === (e.id === "tools/brew/gh"))).toBe(true);
+    // The ticked tools rows are gh's and the bare row the recipe added for agent-browser, which this Mac has no row for.
+    expect(applied.entries.filter(e => e.rung === "tools" && initialTicks(e)).map(e => e.id)).toEqual(["tools/brew/gh", "tools/catalog/agent-browser"]);
     for (const id of ["identity/git-user", "identity/ssh-key", "shell/zshrc", "editors/nvim", "toolchains/mise"]) expect(bring.has(id) && bring.get(id) === undefined, id).toBe(true);
     // The saved sign-in answer lands on the login row; a login the recipe did not answer keeps its own default.
     expect(applied.entries.find(e => e.id === "logins/gh")).toMatchObject({ choice: "copy" });
@@ -360,8 +360,21 @@ describe("the small recipe", () => {
     expect(initialChoice(applied.entries.find(e => e.id === "logins/gh")!)).toBe("copy");
   });
 
-  it("unbuiltRows names the ticked rows this computer has no row for, the floor aside", () => {
-    expect(unbuiltRows(RECIPE, FIXTURE.entries).map(r => r.id)).toEqual(["agent-browser"]);
-    expect(unbuiltRows(RECIPE, []).map(r => r.id)).toEqual(["codex", "gh", "agent-browser"]);
+  it("applyRecipe adds a bare ticked row for a catalog tool this computer has no row for, the floor's aside, and makes them anew on the next pass", () => {
+    const applied = applyRecipe(FIXTURE, RECIPE);
+    // gh is here as a formula, git is the floor's, codex is an agent and kubectl is off: agent-browser alone gets a row, one a manifest accepts.
+    const bare = applied.entries.filter(e => e.id.startsWith("tools/catalog/"));
+    expect(bare).toEqual([{ rung: "tools", id: "tools/catalog/agent-browser", label: "agent-browser", group: "Catalog", paths: [], bytes: 0, default: "skip", linux: "yes", bring: true }]);
+    expect(initialTicks(bare[0]!)).toBe(true);
+    expect(parseManifest(applied)).toEqual(applied);
+    const empty = applyRecipe({ entries: [] }, RECIPE);
+    expect(empty.entries.map(e => e.id)).toEqual(["tools/catalog/gh", "tools/catalog/agent-browser"]);
+    const again = applyRecipe(empty, { ...RECIPE, rows: RECIPE.rows.map(r => (r.id === "gh" ? { ...r, on: false } : r)) });
+    expect(again.entries.map(e => e.id)).toEqual(["tools/catalog/agent-browser"]);
+  });
+
+  it("a login's command counts as coming when the catalog's bare row brings it", () => {
+    const gh: ManifestEntry = { rung: "tools", id: "tools/catalog/gh", label: "GitHub CLI", group: "Catalog", paths: [], bytes: 0, default: "skip", linux: "yes", bring: true };
+    expect(loginTool(byId("logins/gh"), { entries: [byId("logins/gh"), gh] }, new Set(["tools/catalog/gh"]))).toEqual({ bin: "gh", row: gh, coming: true });
   });
 });
