@@ -7,14 +7,15 @@ import { type Call, type HistoryReader, isRecord, stem, tryJson } from "./reader
 
 const SHELLS = new Set(["exec_command", "shell", "container.exec", "local_shell"]);
 
-export function codexCall(session: string, name: string, args: unknown): Call {
+export function codexCall(session: string, name: string, args: unknown, folder?: string): Call {
   const arg = isRecord(args) ? args : {};
+  const where = folder !== undefined ? { folder } : {};
   if (SHELLS.has(name)) {
     const cmd = arg["cmd"] ?? arg["command"];
-    if (typeof cmd === "string") return { session, kind: "shell", line: cmd };
-    if (Array.isArray(cmd) && cmd.every(w => typeof w === "string")) return { session, kind: "shell", line: cmd.join(" ") };
+    if (typeof cmd === "string") return { session, ...where, kind: "shell", line: cmd };
+    if (Array.isArray(cmd) && cmd.every(w => typeof w === "string")) return { session, ...where, kind: "shell", line: cmd.join(" ") };
   }
-  return { session, kind: "other", name };
+  return { session, ...where, kind: "other", name };
 }
 
 export const codexReader: HistoryReader = {
@@ -22,14 +23,21 @@ export const codexReader: HistoryReader = {
     for (const file of await host.fs.walk(root)) {
       if (!file.endsWith(".jsonl")) continue;
       const session = stem(file);
+      // The rollout opens with a session_meta whose payload names the folder; every call after it is that folder's.
+      let folder: string | undefined;
       for await (const line of host.fs.lines(file)) {
+        if (folder === undefined && line.includes('"session_meta"')) {
+          const meta = tryJson(line);
+          const payload = isRecord(meta) && isRecord(meta["payload"]) ? meta["payload"] : undefined;
+          if (payload !== undefined && typeof payload["cwd"] === "string") folder = payload["cwd"];
+        }
         if (!line.includes('"function_call"')) continue;
         const row = tryJson(line);
         if (!isRecord(row) || row["type"] !== "response_item" || !isRecord(row["payload"])) continue;
         const payload = row["payload"];
         if (payload["type"] !== "function_call" || typeof payload["name"] !== "string") continue;
         const args = typeof payload["arguments"] === "string" ? tryJson(payload["arguments"]) : payload["arguments"];
-        yield codexCall(session, payload["name"], args);
+        yield codexCall(session, payload["name"], args, folder);
       }
     }
   },

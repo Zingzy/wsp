@@ -329,6 +329,51 @@ describe("wsp init, interactive", () => {
     ]);
   });
 
+  it("keeps the rows wsp recipe --add wrote into the recipe beside the state, which a plain run rewrites", async () => {
+    const f = fake({ yes: true });
+    const saved = join(dirname(f.opts.statePath), "recipe.json");
+    mkdirSync(dirname(saved), { recursive: true });
+    writeFileSync(saved, JSON.stringify({
+      version: 1,
+      at: "2026-09-06T03:00:00.000Z",
+      histories: [],
+      rows: [],
+      custom: [{ kind: "custom", id: "just", name: "just", install: ["brew install just"], check: "command -v just", why: "added by the agent" }],
+    }));
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    expect(f.backends[0]!.machines[0]!.execLog.some(c => c.includes("brew install just"))).toBe(true);
+    expect(JSON.parse(readFileSync(saved, "utf8")).custom).toEqual([
+      { kind: "custom", id: "just", name: "just", install: ["brew install just"], check: "command -v just", why: "added by the agent" },
+    ]);
+  });
+
+  it("says so and carries on when the recipe beside the state cannot be read, rather than refusing to run", async () => {
+    const f = fake({ yes: true });
+    const saved = join(dirname(f.opts.statePath), "recipe.json");
+    mkdirSync(dirname(saved), { recursive: true });
+    writeFileSync(saved, "{ not json");
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    expect(f.text()).toContain("added rows go with it");
+  });
+
+  it("names Also on this Mac beside What they need when the recipe that overfills the disk has a row from it", async () => {
+    const f = fake({ yes: true });
+    const saved = join(dirname(f.opts.statePath), "recipe.json");
+    mkdirSync(dirname(saved), { recursive: true });
+    writeFileSync(saved, JSON.stringify({
+      version: 1,
+      at: "2026-09-06T03:00:00.000Z",
+      histories: [],
+      rows: [],
+      custom: [{ kind: "custom", id: "brew/llvm", name: "llvm", install: ["brew install llvm"], check: "command -v llvm", size: 30 * 1024 * 1024 * 1024, why: "installed on this Mac by brew" }],
+    }));
+    expect((await runInit(f.opts, f.io)).code).toBe(1);
+    const out = f.text();
+    expect(out).toContain("This recipe needs about");
+    expect(out).toContain("under Tools or Also on this Mac");
+    expect(f.backends.flatMap(b => b.machines)).toHaveLength(0);
+  });
+
   it("with no manager row to offer, the third screen keeps its place and says so", async () => {
     const f = fake();
     const run = runInit(f.opts, f.io);

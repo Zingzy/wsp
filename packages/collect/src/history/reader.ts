@@ -5,7 +5,14 @@
 // result an agent saw is kept or returned.
 import type { Host } from "../host.js";
 
-export type Call = { session: string; kind: "shell"; line: string } | { session: string; kind: "other"; name: string };
+interface CallBase {
+  session: string;
+  /** The folder the session ran in, as its own store records it; a format that records none leaves it off, and a
+   * recipe weighed against named folders then counts nothing from it. */
+  folder?: string;
+}
+
+export type Call = (CallBase & { kind: "shell"; line: string }) | (CallBase & { kind: "other"; name: string });
 
 export interface HistoryReader {
   /** Every tool call under root (absolute: a directory of transcripts or one database file), keyed by the top-level

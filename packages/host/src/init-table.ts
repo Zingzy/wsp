@@ -4,8 +4,7 @@
 // and the size its install downloads. wsp recipe prints it as text; wsp init's
 // agents and tools screens are the same rows as a list.
 import { CATALOG, MIB, type CatalogEntry, sizeBytes } from "@wsp/catalog";
-import { plural } from "@wsp/engine";
-import { fmtBytes, type Recipe, type RecipeRow } from "@wsp/protocol";
+import { fmtBytes, plural, type Recipe, type RecipeRow } from "@wsp/protocol";
 import { GREY, GUTTER, accent, grey } from "./init-layout.js";
 import type { Cell } from "./init-select.js";
 

@@ -59,7 +59,8 @@ const CELLAR_LOCKED = /has already locked/;
 const BREW_LOCK_WAIT_S = 600;
 const BREW_LOCK_WAIT_CMD = `for l in /home/linuxbrew/.linuxbrew/var/homebrew/locks/*.lock; do [ -e "$l" ] && flock -w ${BREW_LOCK_WAIT_S} "$l" true; done; true`;
 
-export const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
+/** Re-exported so the engine's callers keep one import; the rule itself lives beside fmtBytes in the protocol. */
+export { plural } from "@wsp/protocol";
 
 /** The line that names the failure, for a warning: the last `Error:` line on stderr (Homebrew
  * follows its error with advice), else the last stderr line, else stdout's; 124 is the guest-side timeout. */

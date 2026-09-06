@@ -80,11 +80,15 @@ describe("the recipe verb's flags", () => {
   const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
   const io = (lines: string[], errors: string[]): CliIO => ({ log: l => lines.push(l), error: l => errors.push(l), ask: noPrompt, askSecret: noPrompt });
 
-  it("names both flags in the help", async () => {
+  it("names both flags in the help, and in the recipe verb's own usage", async () => {
     const lines: string[] = [];
     expect(await cli(["--help"], io(lines, []))).toBe(0);
-    expect(lines.join("\n")).toContain("--add ID=COMMAND");
-    expect(lines.join("\n")).toContain("--add-check ID=CMD");
+    // recipe parses its own flags, so its words sit with the verb rather than in the shared options block.
+    expect(lines.join("\n")).toContain("--add <id>=<command> carries");
+    expect(lines.join("\n")).toContain("--add-check <id>=<command> saying it is");
+    const usage: string[] = [];
+    expect(await cli(["recipe", "--help"], io(usage, []))).toBe(0);
+    expect(usage.join("\n")).toContain("[--add <id>=<command>] [--add-check <id>=<command>]");
   });
 
   it("refuses a spec that is not <id>=<command> before it reads this computer, and writes nothing", async () => {
@@ -93,7 +97,7 @@ describe("the recipe verb's flags", () => {
     const lines: string[] = [];
     const errors: string[] = [];
     expect(await cli(["recipe", "--out", join(dir, "recipe.json"), "--add", "just"], io(lines, errors))).toBe(1);
-    expect(errors[0]).toBe('--add takes <id>=<command>, not "just"');
+    expect(errors[0]).toBe('wsp recipe: --add takes <id>=<command>, not "just"');
     expect(lines).toEqual([]);
   });
 
