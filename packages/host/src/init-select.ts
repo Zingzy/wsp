@@ -533,10 +533,12 @@ class RungPrompt extends Prompt<Set<string>> {
       const text = ellipsize(typeof f === "string" ? f : f.text, width - EDGE);
       lines.push(text === "" ? bar : `${bar}  ${typeof f === "string" ? dim(text) : f.tone === undefined ? text : styleText(f.tone, text)}`);
     }
+    const order = stepOrder(withChoices[0]?.choices ?? []);
+    const tickable = this.o.items.some(i => i.choices === undefined && i.lock === undefined);
     const keys: HelpKey[] = this.mixed
-      ? [{ key: "space", does: "tick or change" }, KEY_FOLD, KEY_NEXT, KEY_BACK]
+      ? [{ key: "space", does: tickable ? `tick or ${order}` : order }, KEY_FOLD, KEY_NEXT, KEY_BACK]
       : withChoices.length > 0
-        ? [{ key: "space", does: stepOrder(withChoices[0]!.choices ?? []) }, KEY_NEXT, KEY_BACK]
+        ? [{ key: "space", does: order }, KEY_NEXT, KEY_BACK]
         : [{ key: "space", does: "tick" }, KEY_FOLD, KEY_NEXT, KEY_BACK];
     lines.push(`${dim(S_BAR_FOCUS_END)}  ${helpLine(keys, colourDepth(isTTY(this.o.output)))}`);
     return lines.join("\n");

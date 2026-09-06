@@ -779,7 +779,7 @@ describe("wsp init, everything else", () => {
     expect(screen).toContain("0 ticked\n");
     expect(screen).toContain("large items are listed but never copied without a tick");
     expect(screen).toContain("know what one of these is? add it to the catalog");
-    expect(screen).toContain("space tick or change • ← → fold • enter next • esc back");
+    expect(screen).toContain("space tick or copy, skip • ← → fold • enter next • esc back");
     // The all row ticks the plain rows and leaves the large one alone; its count still runs over every row that can come.
     await f.press(KEY.space);
     expect(f.text()).toMatch(/all\s+1 of 3\n/);
@@ -3863,7 +3863,7 @@ describe("wsp init, a login whose command is not coming", () => {
   /** A card's wrapped closing lines as one line each. */
   const unwrapped = (card: string): string => card.replace(/\n│ {12}/g, " ");
 
-  it("the Tools screen offers the cask from Google's release; the Sign-ins screen says which commands are not coming, starts them at skip, and a copy answer ticks the cask", async () => {
+  it("the Tools screen offers the cask from Google's release; the Sign-ins screen says which commands are not coming, starts them at skip, names the cycle in its keys, and a copy answer ticks the cask", async () => {
     const f = fake({ collect: async () => LAPTOP });
     const run = runInit(f.opts, f.io);
     for (const rung of ["Identity", "Shell", "Editors", "Toolchains"]) {
@@ -3883,6 +3883,8 @@ describe("wsp init, a login whose command is not coming", () => {
     expect(f.text()).toMatch(/GitHub CLI login\s+sign in\n/);
     expect(f.text()).toMatch(/Google Cloud login\s+gcloud not coming\s+skip\n/);
     expect(f.text()).toMatch(/Cloudflare Wrangler login\s+wrangler not coming\s+skip\n/);
+    // Every row here is answered, so the keys name the cycle alone, not a tick nothing on the screen has.
+    expect(f.text()).toContain("┗  space sign in, copy, skip • ← → fold • enter next • esc back");
     // Down past the heading and gh onto gcloud: the detail says why and what a copy does; space steps skip to sign in, then to copy.
     await f.press(KEY.down, KEY.down);
     await f.until("gcloud is not coming: its tool row is unticked; copy or sign in ticks it");

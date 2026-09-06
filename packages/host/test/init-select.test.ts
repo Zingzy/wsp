@@ -706,7 +706,7 @@ describe("rungSelect", () => {
     expect(text()).toMatch(/Everything else \(3 items, 340 B\)\s+8\/8\n/);
     expect(text()).not.toContain("1 skip");
     expect(text()).toMatch(/Keychain, device-bound\s+1\n/);
-    expect(text()).toContain("┗  space tick or change • ← → fold • enter next • esc back");
+    expect(text()).toContain("┗  space tick or sign in, copy, skip • ← → fold • enter next • esc back");
     clear();
     // Space steps back through the three answers here: skip, sign in, copy.
     await press(input, KEY.down, KEY.down, KEY.space, KEY.space);

@@ -217,7 +217,7 @@ describe("sign-in table", () => {
     for (const name of ["claude", "codex", "gemini", "gcloud", "aws", "wrangler", "vercel", "pi", "cloudflared"]) expect(command(name).kind, name).toBe("oauth");
   });
 
-  it("a browser or device flow starts as a sign-in on the machine; a key, no sign-in or a bare shell starts as a copy", () => {
+  it("signsInByDefault holds for the oauth and device kinds and not for key, none or a bare shell", () => {
     const machine = collectorLogins().filter(id => signsInByDefault(signInFor(id)));
     expect(machine.sort()).toEqual(["aws", "claude", "cloudflared", "codex", "gcloud", "gemini", "gh", "hermes", "pi", "vercel", "wrangler"]);
     for (const id of ["opencode", "kube", "op"]) expect(signsInByDefault(signInFor(id)), id).toBe(false);
