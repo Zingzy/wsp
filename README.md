@@ -47,12 +47,12 @@ disappears, wsp rebuilds it from the golden image and puts your files back.
 ## Install and first run
 
 ```sh
-npm i -g wspx
+npm i -g @zingzy/wsp
 wsp init
 ```
 
-The package is `wspx`; the command it puts on your path is `wsp`. To try it
-once without installing, `npx wspx init` runs the same first run, but nothing
+The package is `@zingzy/wsp`; the command it puts on your path is `wsp`. To try it
+once without installing, `npx @zingzy/wsp init` runs the same first run, but nothing
 is left on the path afterwards.
 
 `wsp init` reads your computer: which agents are installed, what they used
@@ -181,7 +181,7 @@ looks like, is in [docs/reach.md](docs/reach.md). Cutting a release is
 | `@wsp/web` | the app |
 | `@wsp/desktop` | the Electron shell around the host and the app |
 | `@wsp/wspx` | a development-only command line over the same runtime and state file |
-| `wspx` | what npm publishes: the host, the app and the daemon in one bundle |
+| `@zingzy/wsp` | what npm publishes: the host, the app and the daemon in one bundle |
 
 ## Issues
 

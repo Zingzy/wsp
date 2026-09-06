@@ -18,12 +18,12 @@ checkout of `main` on a computer with the Solari key in `.env`.
    but the desktop bundle, packs `packages/wspx` and publishes it. A bump
    name works too: `pnpm release patch`. It rewrites the manifests in place
    and commits nothing, naming each file it touched on its own output.
-   Between the build and the publish it runs `pnpm --filter wspx smoke`,
+   Between the build and the publish it runs `pnpm --filter @zingzy/wsp smoke`,
    which installs the tarball into an empty folder on a clean environment and
    runs `wsp --version`, `wsp recipe --out` and `wsp mcp install --agent
    claude` under a throwaway `HOME`, so nothing reaches npm that has not been
    installed and run. `--pack-only` stops after the tarball. Once it is
-   published, do the same from outside: `npm i -g wspx@<version>` in an empty
+   published, do the same from outside: `npm i -g @zingzy/wsp@<version>` in an empty
    folder on a shell with no `wsp` installed.
 5. **Commit the version.** The renumbered manifests are still only in the
    working tree. Stage them by the paths step 4 printed, never `-A`, and

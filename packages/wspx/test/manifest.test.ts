@@ -18,8 +18,8 @@ const manifest = JSON.parse(readFileSync(`${pkg}package.json`, "utf8")) as {
 };
 
 describe("the published package", () => {
-  it("is wspx and puts wsp on the path", () => {
-    expect(manifest.name).toBe("wspx");
+  it("is @zingzy/wsp and puts wsp on the path", () => {
+    expect(manifest.name).toBe("@zingzy/wsp");
     expect(manifest.bin).toEqual({ wsp: "./dist/bin.js" });
     expect(manifest.private).toBeUndefined();
     expect(manifest.license).toBe("AGPL-3.0-only");
@@ -38,7 +38,7 @@ describe("the published package", () => {
   });
 
   it("keeps the script that builds its dependencies first", () => {
-    expect(manifest.scripts["build:deps"]).toBe('pnpm --filter "wspx^..." build');
+    expect(manifest.scripts["build:deps"]).toBe('pnpm --filter "@zingzy/wsp^..." build');
   });
 
   it("ships the bundle and the staged assets", () => {
