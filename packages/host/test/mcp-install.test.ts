@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HELP, cli, type CliIO } from "../src/cli.js";
-import { installMcp, mcpServerSpec } from "../src/mcp-install.js";
+import { installLines, installMcp, mcpServerSpec } from "../src/mcp-install.js";
 
 const PROC = { execPath: "/opt/node/bin/node", execArgv: ["--disable-warning=ExperimentalWarning"], argv: ["/opt/node/bin/node", "/opt/wsp/dist/bin.js", "mcp", "install"] };
 
@@ -74,6 +74,12 @@ describe("installing the MCP server for a local agent", () => {
     expect(() => installMcp("emacs", spec, home)).toThrow("no agent emacs in the catalog; agents with an MCP config: claude, codex, gemini, opencode");
     expect(existsSync(join(home, ".pi"))).toBe(false);
     expect(existsSync(join(home, ".hermes"))).toBe(false);
+  });
+
+  it("what an install says: the agent and its file, the dropped-comments line when the rewrite lost them, and the by-hand line when nothing was written", () => {
+    expect(installLines({ agent: "Claude Code", path: "~/.claude.json", commentsDropped: false })).toEqual(["Claude Code now has the wsp tools: ~/.claude.json"]);
+    expect(installLines({ agent: "Gemini CLI", path: "~/.gemini/settings.json", commentsDropped: true })).toEqual(["Gemini CLI now has the wsp tools: ~/.gemini/settings.json", "The file held comments; the rewrite is plain JSON, so they are gone."]);
+    expect(installLines({ agent: "Pi" })).toEqual(["Pi: the catalog has no MCP config for it yet, so nothing was written; add the server by hand."]);
   });
 
   it("wsp mcp install --agent <id> writes the config for this state file and prints one line; without --agent it prints the usage", async () => {

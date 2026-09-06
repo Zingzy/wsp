@@ -38,7 +38,7 @@ import { systemOpener, type UrlOpener } from "./relay.js";
 import { hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from "./host-lock.js";
 import { startHost, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
-import { installMcp, mcpServerSpec } from "./mcp-install.js";
+import { installLines, installMcp, mcpServerSpec } from "./mcp-install.js";
 import { findVerb, runVerb, verbHelp, verbUsage } from "./verbs.js";
 import { VERSION } from "./version.js";
 
@@ -448,9 +448,7 @@ async function mcp(io: CliIO, statePath: string, words: string[], agent: string 
     return 1;
   }
   try {
-    const placed = installMcp(agent, mcpServerSpec(statePath), homedir());
-    io.log(placed.path !== undefined ? `${placed.agent} now has the wsp tools: ${placed.path}` : `${placed.agent}: the catalog has no MCP config for it yet, so nothing was written; add the server by hand.`);
-    if (placed.commentsDropped === true) io.log("The file held comments; the rewrite is plain JSON, so they are gone.");
+    for (const line of installLines(installMcp(agent, mcpServerSpec(statePath), homedir()))) io.log(line);
     return 0;
   } catch (e) {
     io.error(`wsp mcp install: ${e instanceof Error ? e.message : String(e)}`);

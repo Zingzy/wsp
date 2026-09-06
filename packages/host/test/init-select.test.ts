@@ -111,6 +111,26 @@ describe("rung entries", () => {
     toggleEntry(ticks, entries[2]!, ITEMS);
     expect([...ticks]).toEqual(["git"]);
   });
+
+  it("a row kept apart is out of the all row's reach: all skips it, its group heading still flips it, and its own tick works", () => {
+    const items: SelectItem[] = [...ITEMS, { id: "wsp/claude", label: "wsp tools for Claude Code", hint: "~/.claude.json", group: "On this Mac", detail: ["written here"], apart: true }];
+    const ticks = new Set<string>();
+    const entries = buildEntries(items, "", new Set());
+    expect(shape(entries).slice(-2)).toEqual(["#On this Mac", "wsp/claude"]);
+    toggleEntry(ticks, entries[2]!, items);
+    expect([...ticks].sort()).toEqual(["gh", "jq", "pnpm", "zshrc"]);
+    // With every row all reaches ticked, the next all clears them; the apart row never entered the count.
+    toggleEntry(ticks, entries[2]!, items);
+    expect([...ticks]).toEqual([]);
+    toggleEntry(ticks, entries[11]!, items);
+    expect([...ticks]).toEqual(["wsp/claude"]);
+    toggleEntry(ticks, entries[11]!, items);
+    expect([...ticks]).toEqual([]);
+    toggleEntry(ticks, entries[12]!, items);
+    expect([...ticks]).toEqual(["wsp/claude"]);
+    // An apart row alone does not earn a screen an all row.
+    expect(shape(buildEntries(items.slice(-1), "", new Set()))).toEqual(["#On this Mac", "wsp/claude"]);
+  });
 });
 
 describe("rungSelect", () => {
@@ -149,6 +169,24 @@ describe("rungSelect", () => {
     expect(done[0]).toMatch(/◇  Tools\s+5\/7$/);
     expect(done[1]).toBe("│  git name and email, pnpm, ~/.zshrc");
     expect(done.slice(1).some(l => l.includes("┃") || l.includes("┗"))).toBe(false);
+  });
+
+  it("the all row's count and box leave the apart rows out, and its detail names the group all leaves alone", async () => {
+    const { input, output, text } = streams();
+    const items: SelectItem[] = [...ITEMS, { id: "wsp/claude", label: "wsp tools for Claude Code", hint: "~/.claude.json", group: "On this Mac", detail: ["written here"], apart: true }];
+    Object.assign(output, { rows: 40 });
+    const p = rungSelect({ title: "Sign-ins and keys", counter: "3/3", items, initial: new Set(["gh", "jq", "pnpm", "zshrc"]), input, output });
+    await settle();
+    expect(text()).toMatch(/\n┃ ❯ ● all\s+5 of 5\n/);
+    expect(text()).toMatch(/▾ On this Mac\s+0 of 1\n┃\s+○ wsp tools for Claude Code\s+~\/\.claude\.json\n/);
+    expect(text()).toMatch(/every row on this screen that can be ticked\n┃\s+On this Mac is left as it is; tick those rows one by one\n/);
+    await press(input, KEY.space);
+    expect(text().slice(text().lastIndexOf("◆"))).toMatch(/○ all\s+1 of 5\n/);
+    await press(input, KEY.enter);
+    const result = await p;
+    expect(result.kind).toBe("next");
+    if (result.kind !== "next") return;
+    expect([...result.ticks]).toEqual(["git"]);
   });
 
   it("with colour on, the title is cyan, a group name is bold, and the frame uses no other colour", async () => {
