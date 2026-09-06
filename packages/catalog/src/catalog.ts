@@ -5,6 +5,7 @@
 // state to a path, and whether it is on by default with the evidence behind
 // that. The wizard's tables read from here; nothing here runs a command.
 import { GCLOUD, KUBECTL } from "./linux-casks.js";
+import { mcpConfig, type McpConfig } from "./mcp.js";
 import { GOLDEN_SETUP, HERMES_INSTALL, MIB, NODE_RELEASES, PYTHON_INSTALL, UV_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
 import { NO_SIGN_IN, SIGN_IN_ROWS, type SignIn } from "./signin.js";
 
@@ -70,6 +71,9 @@ export interface AgentEntry extends EntryBase {
   projectState: readonly ProjectState[];
   /** Absent while the agent's session format has no reader: its history reads as none. */
   history?: SessionHistory;
+  /** Where the agent on this computer keeps its user-wide MCP servers and how one is named there, per its own docs;
+   * absent when the catalog knows no such file for it, and wsp's server is then added by hand. */
+  mcp?: McpConfig;
 }
 
 export interface ToolEntry extends EntryBase {
@@ -143,6 +147,8 @@ export const CATALOG: readonly CatalogEntry[] = [
     name: "Claude Code",
     installRoad: { road: "script", script: GOLDEN_SETUP },
     signIn: SIGN_IN_ROWS.claude,
+    // https://docs.claude.com/en/docs/claude-code/mcp (user scope; project scope lives in each repo's .mcp.json)
+    mcp: mcpConfig("claude", ["~/.claude.json"], "user scope and your home folder"),
     configPaths: [
       "~/.claude/settings.json", "~/.claude/CLAUDE.md", "~/.claude/skills", "~/.claude/agents", "~/.claude/commands",
       "~/.claude/plugins/installed_plugins.json", "~/.claude/plugins/known_marketplaces.json", "~/.claude.json",
@@ -164,6 +170,8 @@ export const CATALOG: readonly CatalogEntry[] = [
     installRoad: npm("@openai/codex", "0.153.0"),
     node: 16,
     signIn: SIGN_IN_ROWS.codex,
+    // https://developers.openai.com/codex/config-basic (project scope is a trusted repo's .codex/config.toml)
+    mcp: mcpConfig("codex", ["~/.codex/config.toml"], "user scope"),
     configPaths: ["~/.codex/config.toml", "~/.codex/AGENTS.md", "~/.codex/prompts", "~/.codex/skills"],
     projectState: [
       { state: "rollout transcript", location: "sessions/YYYY/MM/DD/rollout-TIMESTAMP-THREADID.jsonl", key: "by date and thread id, not by path", pathFields: ["cwd in the session_meta payload and on per-turn lines"], move: "rewrite cwd", status: "measured" },
@@ -180,6 +188,8 @@ export const CATALOG: readonly CatalogEntry[] = [
     installRoad: npm("@google/gemini-cli", "0.58.0"),
     node: 20,
     signIn: SIGN_IN_ROWS.gemini,
+    // https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md (project scope is a repo's .gemini/settings.json)
+    mcp: mcpConfig("gemini", ["~/.gemini/settings.json"], "user scope"),
     configPaths: ["~/.gemini/settings.json", "~/.gemini/GEMINI.md", "~/.gemini/commands"],
     projectState: [
       { state: "project registry", location: "projects.json", key: "{\"projects\": {\"PATH\": \"SLUG\"}}; SLUG is the folder basename, deduplicated", pathFields: ["the key"], move: "rewrite the key, keep the slug", status: "measured" },
@@ -195,6 +205,8 @@ export const CATALOG: readonly CatalogEntry[] = [
     name: "OpenCode",
     installRoad: npm("opencode-ai", "1.18.27"),
     signIn: SIGN_IN_ROWS.opencode,
+    // https://opencode.ai/docs/mcp-servers/ (project scope is a repo's opencode.json)
+    mcp: mcpConfig("opencode", ["~/.config/opencode/opencode.json", "~/.config/opencode/opencode.jsonc"], "user scope"),
     configPaths: [
       "~/.config/opencode/opencode.json", "~/.config/opencode/opencode.jsonc", "~/.config/opencode/AGENTS.md", "~/.config/opencode/package.json",
       "~/.config/opencode/agents", "~/.config/opencode/commands", "~/.config/opencode/plugins", "~/.config/opencode/skills", "~/.config/opencode/themes",

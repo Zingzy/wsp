@@ -34,9 +34,9 @@ export function costLabel(input: {
 
 const PLAIN = { colorClass: "text-muted-foreground/70", dotClass: "bg-muted-foreground/60" };
 
-const OPENER_WORD: Record<SessionOrigin, string> = { person: "you", cli: "cli" };
+const OPENER_WORD: Record<SessionOrigin, string> = { person: "you", cli: "cli", agent: "agent" };
 
-/** The agent inside the thread and who opened it: you, or the command line on this computer. */
+/** The agent inside the thread and who opened it: you, the command line on this computer, or a local agent. */
 export function provenanceLabel(thread: Pick<SidebarThreadSnapshot, "harness" | "startedBy">): string {
   return `${thread.harness} · ${OPENER_WORD[thread.startedBy]}`;
 }

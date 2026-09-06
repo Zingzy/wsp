@@ -37,11 +37,10 @@ import { TAGLINE, opening } from "./init-opening.js";
 import { systemOpener, type UrlOpener } from "./relay.js";
 import { hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from "./host-lock.js";
 import { startHost, type HostHandle } from "./server.js";
+import { serveMcp } from "./mcp.js";
+import { MCP_AGENTS, installMcp, mcpServerSpec } from "./mcp-install.js";
 import { findVerb, runVerb, verbHelp, verbUsage } from "./verbs.js";
-
-const VERSION = (
-  JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }
-).version;
+import { VERSION } from "./version.js";
 
 export const HELP = `wsp - ${TAGLINE}
 
@@ -55,6 +54,9 @@ usage:
                      session histories, read here, names and counts only) or the
                      catalog's own default; review it, then wsp init --recipe
   wsp doctor         run the reach loop end to end against one live machine
+  wsp mcp            serve the verbs as MCP tools over stdio to an agent on this
+                     computer; wsp mcp install --agent <id> puts the server in
+                     that agent's own MCP config (${MCP_AGENTS.map(a => a.id).join(", ")})
   wsp --version      print the version
 
 verbs, against the host wsp up started; every one takes --json for the raw
@@ -81,6 +83,7 @@ options:
                      writes it) and go straight to the sign-ins; this machine is
                      still read for what travels
   --out PATH         recipe: where to write it (default <state dir>/recipe.json)
+  --agent ID         mcp install: the agent whose MCP config gets the server
 
 keys are read from the environment, then ./.env, then ~/.wsp/.env (WSP_HOME
 overrides ~/.wsp). The prompt runs only when no Solari key is found; it asks
@@ -429,10 +432,36 @@ async function hostFor(
   }
 }
 
+/** `wsp mcp` serves until the agent closes its stdin; `wsp mcp install --agent <id>` writes the agent's config. */
+async function mcp(io: CliIO, statePath: string, words: string[], agent: string | undefined): Promise<number> {
+  const ids = MCP_AGENTS.map(a => a.id).join(", ");
+  if (words.length === 0) {
+    await serveMcp(statePath);
+    return 0;
+  }
+  if (words[0] !== "install" || words.length !== 1) {
+    io.error(`unknown command: mcp ${words.join(" ")}\n\nusage: wsp mcp\n       wsp mcp install --agent <id>   (${ids})`);
+    return 1;
+  }
+  if (agent === undefined) {
+    io.error(`usage: wsp mcp install --agent <id>   (${ids})`);
+    return 1;
+  }
+  try {
+    const placed = installMcp(agent, mcpServerSpec(statePath), homedir());
+    io.log(placed.path !== undefined ? `${placed.agent} now has the wsp tools: ${placed.path}` : `${placed.agent}: the catalog has no MCP config for it yet, so nothing was written; add the server by hand.`);
+    if (placed.commentsDropped === true) io.log("The file held comments; the rewrite is plain JSON, so they are gone.");
+    return 0;
+  } catch (e) {
+    io.error(`wsp mcp install: ${e instanceof Error ? e.message : String(e)}`);
+    return 1;
+  }
+}
+
 export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<number> {
   const verb = findVerb(argv);
   if (verb !== undefined) return runVerb(verb, argv, io, defaultStatePath);
-  let values: { version?: boolean; help?: boolean; port?: string; "ws-port"?: string; state?: string; yes?: boolean; manifest?: string; recipe?: string; out?: string };
+  let values: { version?: boolean; help?: boolean; port?: string; "ws-port"?: string; state?: string; yes?: boolean; manifest?: string; recipe?: string; out?: string; agent?: string };
   let positionals: string[];
   try {
     ({ values, positionals } = parseArgs({
@@ -447,6 +476,7 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
         manifest: { type: "string" },
         recipe: { type: "string" },
         out: { type: "string" },
+        agent: { type: "string" },
       },
       allowPositionals: true,
     }));
@@ -485,6 +515,8 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
     case "recipe":
       await writeRecipe(nodeHost(), resolve(values.out ?? join(dirname(opts.statePath), "recipe.json")), line => io.log(line));
       return 0;
+    case "mcp":
+      return mcp(io, opts.statePath, positionals.slice(1), values.agent);
     case "doctor": {
       const keys = await loadKeys(io);
       const rt = makeRuntime(keys, opts.statePath);
