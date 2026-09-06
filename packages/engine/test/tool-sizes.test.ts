@@ -241,7 +241,7 @@ describe("tap formulae without a Linux bottle", () => {
   it("the road install is its own step after everything brew does: the release for this arch, else go install, and it names the road it took", () => {
     const plan = toolInstallsFor([brew("gh"), ...rows], TABLE);
     const road = plan.installs.at(-1)!;
-    expect(road).toMatchObject({ id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", manager: "github" });
+    expect(road).toMatchObject({ id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", manager: "release" });
     expect(road.after).toBeUndefined();
     expect(road.cmd).toContain("https://api.github.com/repos/Zingzy/diskbloom/releases/tags/v0.1.0");
     expect(road.cmd).toContain("install -m 0755");

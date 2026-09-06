@@ -18,13 +18,13 @@ const lineage: SnapshotLineage = {
   name: "default",
   head: 12,
   versions: [
-    { ...version(11), missingTools: [{ name: "Raycast", outcome: "skipped", note: "macOS app, no Linux build" }] },
+    { ...version(11), missingTools: [{ id: "tools/brew-cask/raycast", name: "Raycast", outcome: "skipped", note: "macOS app, no Linux build" }] },
     {
       ...version(12),
       missingTools: [
-        { name: "gopls", outcome: "skipped", note: "no Linux bottle" },
-        { name: "diskbloom", outcome: "skipped", note: "no GitHub release to install from" },
-        { name: "Homebrew", outcome: "failed", note: "exit 1: git: not found; the base image has no git and the bootstrap script needs it before it can clone the tap" },
+        { id: "tools/brew/gopls", name: "gopls", outcome: "skipped", note: "no Linux bottle" },
+        { id: "tools/cli/diskbloom", name: "diskbloom", outcome: "skipped", note: "no GitHub release to install from" },
+        { id: "tools/homebrew", name: "Homebrew", outcome: "failed", note: "exit 1: git: not found; the base image has no git and the bootstrap script needs it before it can clone the tap" },
       ],
     },
   ],

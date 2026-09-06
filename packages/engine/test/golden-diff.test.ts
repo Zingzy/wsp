@@ -225,6 +225,9 @@ describe("removals", () => {
     ["tools/pipx/httpie", /pipx uninstall httpie$/],
     ["tools/cargo/bat", /cargo uninstall bat$/],
     ["tools/cli/spoo", /rm -f \/usr\/local\/bin\/'spoo'$/],
+    // A catalog row the recipe added comes off by its catalog road.
+    ["tools/catalog/gh", /rm -f \/usr\/local\/bin\/'gh'$/],
+    ["tools/catalog/ffmpeg", /apt-get purge -y -qq ffmpeg && apt-get autoremove -y -qq --purge$/],
   ])("a removed %s is uninstalled through its manager, on the tools PATH", (id, cmd) => {
     const [r] = removed([row("tools", id)]);
     expect(r).toMatchObject({ what: "tool", id });
@@ -242,6 +245,7 @@ describe("removals", () => {
     ["tools/brew/jq", "jq is part of the base and stays"],
     ["tools/npm/pnpm", "pnpm is part of the base and stays"],
     ["tools/cargo/ripgrep", "ripgrep is part of the base and stays"],
+    ["tools/catalog/git", "git is part of the base and stays"],
   ])("a removed %s has no command and is noted", (id, note) => {
     expect(removed([row("tools", id)])).toEqual([{ what: "tool", id, label: expect.any(String), note }]);
   });

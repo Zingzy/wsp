@@ -2,7 +2,7 @@
 // The recipe diff: what a golden was built from (the digest its seal wrote)
 // against the recipe now, as rows to apply on top and rows to take off. Pure;
 // golden.ts runs the result on a fork or on the kept builder.
-import { MCP_ID_PREFIX, type RecipeDigest } from "@wsp/protocol";
+import { MCP_ID_PREFIX, shellQuote, type RecipeDigest } from "@wsp/protocol";
 import { AGENT_INSTALLERS, agentUninstall, extensionsFile, remoteEditorFor, terminalEditor, toolUninstall, type AgentInstaller, type RecipeEntry } from "./golden-import.js";
 
 type Tick = RecipeDigest["ticks"][number];
@@ -167,17 +167,13 @@ export function rowsToApply(d: RecipeDiff): Set<string> {
 
 const GUEST_HOME = "/root";
 
-function squote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
-}
-
 /** A removed file is deleted at its guest path; a dest that could climb out of home is refused with a note. */
 function fileRemoval(f: FileChange): Removal {
   const parts = f.dest.split("/");
   if (f.dest === "" || parts.some(p => p === "" || p === "." || p === "..")) {
     return { what: "file", id: f.id, label: `~/${f.dest}`, note: "path refused; left on the machine" };
   }
-  return { what: "file", id: f.id, label: `~/${f.dest}`, cmd: `rm -rf -- ${squote(`${GUEST_HOME}/${f.dest}`)}` };
+  return { what: "file", id: f.id, label: `~/${f.dest}`, cmd: `rm -rf -- ${shellQuote(`${GUEST_HOME}/${f.dest}`)}` };
 }
 
 /** Everything the diff takes off the machine: removed files, removed tools
@@ -195,7 +191,7 @@ export function removalsFor(d: RecipeDiff, from: RecipeDigest, installers: Recor
     }
     const remote = t.id.endsWith("-ext") ? remoteEditorFor(t.id) : undefined;
     if (remote !== undefined) {
-      out.push({ what: "editor", id: t.id, label: t.label, cmd: `rm -f -- ${squote(`${GUEST_HOME}/${extensionsFile(remote.dir)}`)}` });
+      out.push({ what: "editor", id: t.id, label: t.label, cmd: `rm -f -- ${shellQuote(`${GUEST_HOME}/${extensionsFile(remote.dir)}`)}` });
       continue;
     }
     const tick = from.ticks.find(x => x.id === t.id);

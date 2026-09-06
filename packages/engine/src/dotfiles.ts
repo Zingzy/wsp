@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { shellQuote } from "@wsp/protocol";
 import { CHEZMOI, DOTFILES_PRESETS, PRELUDE, pinnedBinaryInstall } from "./dotfiles-presets.js";
 import type { Machine } from "./machine.js";
 
@@ -83,10 +84,6 @@ export function parseListing(stdout: string): RepoEntry[] {
     .map(line => ({ path: line.slice(2), kind: line.startsWith("d") ? ("dir" as const) : ("file" as const) }));
 }
 
-function quote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
-}
-
 const CLONE_DIR = `"$HOME/.dotfiles"`;
 
 export function cloneScript(url: string): string {
@@ -94,7 +91,7 @@ export function cloneScript(url: string): string {
 export GIT_TERMINAL_PROMPT=0 DEBIAN_FRONTEND=noninteractive
 command -v git >/dev/null 2>&1 || { apt-get update -qq; apt-get install -y -qq git; }
 rm -rf ${CLONE_DIR}
-git clone --depth 1 ${quote(url)} ${CLONE_DIR}
+git clone --depth 1 ${shellQuote(url)} ${CLONE_DIR}
 `;
 }
 
@@ -112,13 +109,13 @@ export function applyScript(manager: DotfilesManager, url: string, listing: Repo
       return `${PRELUDE}
 export GIT_TERMINAL_PROMPT=0
 ${pinnedBinaryInstall(CHEZMOI)}
-chezmoi init --apply ${quote(url)}
+chezmoi init --apply ${shellQuote(url)}
 `;
     case "yadm":
       return `${PRELUDE}
 export GIT_TERMINAL_PROMPT=0 DEBIAN_FRONTEND=noninteractive
 command -v yadm >/dev/null 2>&1 || { apt-get update -qq; apt-get install -y -qq yadm; }
-yadm clone --no-bootstrap ${quote(url)}
+yadm clone --no-bootstrap ${shellQuote(url)}
 if [ -x "$HOME/.config/yadm/bootstrap" ]; then yadm bootstrap
 elif [ -x "$HOME/bootstrap" ]; then "$HOME/bootstrap"
 fi
@@ -128,7 +125,7 @@ fi
 export DEBIAN_FRONTEND=noninteractive
 command -v stow >/dev/null 2>&1 || { apt-get update -qq; apt-get install -y -qq stow; }
 cd ${CLONE_DIR}
-stow --verbose --target "$HOME" ${stowPackages(listing).map(quote).join(" ")}
+stow --verbose --target "$HOME" ${stowPackages(listing).map(shellQuote).join(" ")}
 `;
     case "plain":
       return `${PRELUDE}

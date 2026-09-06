@@ -6,7 +6,8 @@
 // CLI spells a 1M context as a "[1m]" suffix on the model. Measured on
 // 2.1.257: one line, exit 0 on stdin EOF, no API call.
 
-import { buildEnv, shellQuote } from "./landmines.js";
+import { shellQuote } from "@wsp/protocol";
+import { buildEnv } from "./landmines.js";
 
 const SEP = "__WSP_CATALOG_SEP__";
 const INIT_REQUEST = JSON.stringify({ type: "control_request", request_id: "init", request: { subtype: "initialize", hooks: {} } });

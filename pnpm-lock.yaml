@@ -169,12 +169,20 @@ importers:
         version: link:../../packages/daemon
 
   packages/adapter-claude:
+    dependencies:
+      '@wsp/protocol':
+        specifier: workspace:*
+        version: link:../protocol
     devDependencies:
       '@types/node':
         specifier: ^22.20.1
         version: 22.20.1
 
-  packages/catalog: {}
+  packages/catalog:
+    dependencies:
+      '@wsp/protocol':
+        specifier: workspace:*
+        version: link:../protocol
 
   packages/collect:
     dependencies:

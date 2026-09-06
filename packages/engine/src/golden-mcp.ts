@@ -4,7 +4,7 @@
 // carries a definition: the plan names which servers stay, which come out and
 // why, and the prefixes that read differently on the machine. A script on the
 // guest edits the files in place and touches no server it was not told about.
-import { MCP_ID_PREFIX } from "@wsp/protocol";
+import { MCP_ID_PREFIX, shellQuote } from "@wsp/protocol";
 import { TOOLS_PATH, UV_INSTALL, type RecipeEntry } from "./golden-import.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { TOOL_TIMEOUT_S, type ToolResult, closing, freeNote, guardDeadlineMs, guarded, reasonOf } from "./golden-tools.js";
@@ -295,10 +295,6 @@ interface ScopeOutcome {
   results: { name: string; outcome: "written" | "missing" | "dropped"; command?: string }[];
 }
 
-function squote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
-}
-
 /** The last line that parses as the script's report. */
 function parseReport(stdout: string): { scopes: ScopeOutcome[] } | undefined {
   const line = stdout.trim().split("\n").at(-1);
@@ -351,7 +347,7 @@ interface GuestPlan extends Omit<McpPlan, "tools"> {
 const guestPlan = (plan: McpPlan, agents: McpAgentPlan[], write: boolean): GuestPlan => ({ agents, guestHome: plan.guestHome, rewrites: plan.rewrites, binDirs: plan.binDirs, write });
 
 async function runScript(machine: Machine, plan: GuestPlan): Promise<{ scopes: ScopeOutcome[] } | { failure: string }> {
-  const res = await machine.run(`export PATH="/usr/local/bin:$PATH"\nnode -e ${squote(GUEST_SCRIPT)} ${squote(JSON.stringify(plan))}`, { deadlineMs: 120_000 });
+  const res = await machine.run(`export PATH="/usr/local/bin:$PATH"\nnode -e ${shellQuote(GUEST_SCRIPT)} ${shellQuote(JSON.stringify(plan))}`, { deadlineMs: 120_000 });
   const report = res.exitCode === 0 ? parseReport(res.stdout) : undefined;
   return report ?? { failure: `the config edit did not run (${reasonOf(res, 120)})` };
 }
@@ -405,7 +401,7 @@ export async function applyMcp(machine: Machine, plan: McpPlan, stage: StageList
   if ("scopes" in run) {
     const commands = [...new Set(run.scopes.flatMap(s => s.results.flatMap(r => (r.command !== undefined ? [asRun(r.command)] : []))))];
     if (commands.length > 0) {
-      const check = await machine.exec(`export PATH=${TOOLS_PATH}\n${commands.map(c => `if command -v ${squote(c)} >/dev/null 2>&1; then echo ${squote(`ok ${c}`)}; else echo ${squote(`no ${c}`)}; fi`).join("\n")}`, { timeoutMs: INLINE_EXEC_MS });
+      const check = await machine.exec(`export PATH=${TOOLS_PATH}\n${commands.map(c => `if command -v ${shellQuote(c)} >/dev/null 2>&1; then echo ${shellQuote(`ok ${c}`)}; else echo ${shellQuote(`no ${c}`)}; fi`).join("\n")}`, { timeoutMs: INLINE_EXEC_MS });
       for (const line of check.stdout.split("\n")) if (line.startsWith("no ")) missing.add(line.slice(3));
     }
     agents = withoutAbsent(plan, run.scopes, missing, asRun, tools);

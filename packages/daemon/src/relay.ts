@@ -30,8 +30,7 @@ const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 /** Below this the laptop would need root to bind; the host refuses them, so they are never named. */
 const MIN_RELAY_PORT = 1024;
 
-/** Copies of @wsp/protocol's HTTP_URL_RE, HTTP_URL_MAX and isHttpUrl: importing that package would
- * bundle zod into the guest for one rule. The daemon test pins them equal. */
+/** Copies of @wsp/protocol's HTTP_URL_RE, HTTP_URL_MAX and isHttpUrl; the daemon test pins them equal. */
 export const OPEN_URL_RE = /^https?:\/\/[^\s\x00-\x1f\x7f]+$/i;
 export const OPEN_URL_MAX = 8192;
 export function isOpenUrl(url: string): boolean {

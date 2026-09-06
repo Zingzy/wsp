@@ -7,7 +7,7 @@
 // the person's files take (an exec body has a cap a six-agent set exceeded)
 // through a hook per agent without any file of the person's being touched. A
 // hook the person's own file already claims is left alone and named in the result.
-import { fmtBytes, type GoldenBaseTool, type GoldenVersion } from "@wsp/protocol";
+import { fmtBytes, shellQuote, type GoldenBaseTool, type GoldenVersion } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { BASE_VERSION_LINES, parseVersions } from "./golden-base.js";
 import { TOOLS_PATH } from "./golden-import.js";
@@ -124,10 +124,6 @@ export interface ContextProbe {
   facts?: BuildFacts;
 }
 
-function squote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
-}
-
 /** Words an alias may start with before the command it runs. */
 const ALIAS_PREFIX = "sudo|command|builtin|exec|env|nohup|noglob|nocorrect|time";
 
@@ -227,13 +223,13 @@ export function probeCommand(roots: GuestRoots = GUEST_ROOTS): string {
     'shell=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7); shell=${shell##*/}; shell=${shell:-bash}',
     'echo "SHELL $shell"',
     "case $shell in",
-    `  zsh) ${boundedCommand(8, `zsh -lic ${squote(ALIAS_PROBES["zsh"]!)} </dev/null 2>/dev/null`)} ;;`,
-    `  fish) ${boundedCommand(8, `fish -lic ${squote(ALIAS_PROBES["fish"]!)} </dev/null 2>/dev/null`)} ;;`,
-    `  *) ${boundedCommand(8, `bash -lic ${squote(ALIAS_PROBES["bash"]!)} </dev/null 2>/dev/null`)} ;;`,
+    `  zsh) ${boundedCommand(8, `zsh -lic ${shellQuote(ALIAS_PROBES["zsh"]!)} </dev/null 2>/dev/null`)} ;;`,
+    `  fish) ${boundedCommand(8, `fish -lic ${shellQuote(ALIAS_PROBES["fish"]!)} </dev/null 2>/dev/null`)} ;;`,
+    `  *) ${boundedCommand(8, `bash -lic ${shellQuote(ALIAS_PROBES["bash"]!)} </dev/null 2>/dev/null`)} ;;`,
     "esac",
-    `if [ -f ${h}/.gemini/settings.json ] && node -e ${squote(GEMINI_FILENAME_CHECK)} ${h}/.gemini/settings.json 2>/dev/null; then echo "CONFLICT gemini"; fi`,
-    `if [ -f ${h}/.pi/agent/APPEND_SYSTEM.md ] && ! head -n 1 ${h}/.pi/agent/APPEND_SYSTEM.md | grep -qF ${squote(CONTEXT_MARKER)}; then echo "CONFLICT pi"; fi`,
-    `if [ -f ${h}/.hermes/config.yaml ] && awk ${squote(HERMES_HINT_CHECK)} ${h}/.hermes/config.yaml; then echo "CONFLICT hermes"; fi`,
+    `if [ -f ${h}/.gemini/settings.json ] && node -e ${shellQuote(GEMINI_FILENAME_CHECK)} ${h}/.gemini/settings.json 2>/dev/null; then echo "CONFLICT gemini"; fi`,
+    `if [ -f ${h}/.pi/agent/APPEND_SYSTEM.md ] && ! head -n 1 ${h}/.pi/agent/APPEND_SYSTEM.md | grep -qF ${shellQuote(CONTEXT_MARKER)}; then echo "CONFLICT pi"; fi`,
+    `if [ -f ${h}/.hermes/config.yaml ] && awk ${shellQuote(HERMES_HINT_CHECK)} ${h}/.hermes/config.yaml; then echo "CONFLICT hermes"; fi`,
     `if [ -f ${factsPath(roots)} ]; then echo "FACTS $(base64 < ${factsPath(roots)} | tr -d '\\n')"; fi`,
     "echo WSP_CTX_END",
   ].join("\n");

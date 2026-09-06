@@ -6,7 +6,7 @@
 // nothing.
 import { type ManifestEntry, type ShellAlias, guardLine } from "@wsp/collect";
 import { type BrewTable, toolSize } from "@wsp/engine";
-import { fmtBytes } from "@wsp/protocol";
+import { fmtBytes, shellQuote } from "@wsp/protocol";
 import { HEAVY_BYTES } from "./init-weight.js";
 
 export type RowFate = { fate: "coming" } | { fate: "missing"; why: string } | { fate: "unknown" };
@@ -91,9 +91,6 @@ export interface AliasGuard {
   rc: string;
 }
 
-/** Single-quoted for the shell: a quoted word is never alias-expanded, which matters for a global alias's name. */
-const sq = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`;
-
 /** command -v would also answer for an alias or a function, so a self-alias like eza='eza --icons' would hide a missing eza. */
 const ON_PATH = 'if [ -n "${ZSH_VERSION-}" ]; then _wsp_on_path() { whence -p -- "$1" >/dev/null 2>&1; }; else _wsp_on_path() { type -P -- "$1" >/dev/null 2>&1; }; fi';
 
@@ -112,8 +109,9 @@ export function aliasGuardFor(rows: readonly ManifestEntry[], brew: BrewTable = 
     const names = [...plain, ...suffix];
     const why = g.fate.fate === "missing" ? `not coming (${g.fate.why})` : "nothing here installs it";
     lines.push(`# ${named(names)} ${verb(names.length)} at ${g.runs}: ${why}`);
-    const drops = [...(plain.length > 0 ? [`unalias -- ${plain.map(sq).join(" ")} 2>/dev/null`] : []), ...(suffix.length > 0 ? [`[ -n "\${ZSH_VERSION-}" ] && unalias -s -- ${suffix.map(sq).join(" ")} 2>/dev/null`] : [])];
-    lines.push(`_wsp_on_path ${sq(g.runs)} || ${drops.length === 1 && plain.length > 0 ? drops[0] : `{ ${drops.join("; ")}; }`}`);
+    // Every name is quoted: a quoted word is never alias-expanded, which matters for a global alias's name.
+    const drops = [...(plain.length > 0 ? [`unalias -- ${plain.map(shellQuote).join(" ")} 2>/dev/null`] : []), ...(suffix.length > 0 ? [`[ -n "\${ZSH_VERSION-}" ] && unalias -s -- ${suffix.map(shellQuote).join(" ")} 2>/dev/null`] : [])];
+    lines.push(`_wsp_on_path ${shellQuote(g.runs)} || ${drops.length === 1 && plain.length > 0 ? drops[0] : `{ ${drops.join("; ")}; }`}`);
   }
   if (lines.length === 0) return undefined;
   const head = [

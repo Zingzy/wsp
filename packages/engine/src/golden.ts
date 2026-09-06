@@ -178,6 +178,9 @@ export interface GoldenImport {
   mcp?: McpPlan;
   /** Called once per prepare that ran anything; a re-run that skipped every stage has nothing to report. */
   onResult?: (result: ImportResult) => void;
+  /** Called when a pass that reports no result wrote the machine context, so the saved result can take the write's
+   * outcome in place of the one the build recorded. */
+  onContext?: (outcome: Pick<ImportResult, "context" | "contextFailure">) => void;
 }
 
 export type ImportStage = "applying-setup" | "uploading-files" | "installing-tools" | "installing-harness" | "installing-mcp";
@@ -391,8 +394,9 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
     mark("installing-harness");
   }
 
+  const toolsRan = !only && !done("installing-tools");
   if (!only) {
-    if (done("installing-tools")) {
+    if (!toolsRan) {
       stage("installing-tools", ALREADY_APPLIED);
     } else {
       for (const t of imp.skippedTools ?? []) result.tools.push({ id: t.id, label: t.label, outcome: "skipped", note: t.note });
@@ -423,12 +427,15 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
       stage("installing-mcp", "none configured");
     }
     // The stage is applied once the context is on the machine, so an attach after a failed write runs it again.
-    if (harnessRan || ran || edited || !done("installing-mcp")) {
+    const contextWasOn = done("installing-mcp");
+    if (harnessRan || ran || edited || !contextWasOn) {
       // After the tools, so the document can name what did not install.
-      const context = await applyMachineContext(machine, { result, ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}) });
+      const context = await applyMachineContext(machine, { result: withSkippedStages(result, ledger, imp, { tools: toolsRan, harness: harnessRan }), ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}) });
       result.context = context.context;
       if (context.failure !== undefined) result.contextFailure = context.failure;
       else mark("installing-mcp");
+      // A refused rewrite over a document that landed leaves the saved result true: the machine still holds it.
+      if (!ran && (context.failure === undefined || !contextWasOn)) imp.onContext?.({ context: context.context, ...(context.failure !== undefined ? { contextFailure: context.failure } : {}) });
       stage("installing-mcp", `machine context: ${context.summary}`);
     }
     if (ran || edited) {
@@ -468,7 +475,18 @@ async function installNode(machine: Machine, node: NodeInstall, stage: StageList
 }
 
 function missingToolsOf(tools: readonly ToolResult[]): GoldenMissingTool[] {
-  return tools.flatMap(t => (t.outcome === "installed" ? [] : [{ name: t.label, outcome: t.outcome, note: t.note ?? "no reason recorded" }]));
+  return tools.flatMap(t => (t.outcome === "installed" ? [] : [{ id: t.id, name: t.label, outcome: t.outcome, note: t.note ?? "no reason recorded" }]));
+}
+
+/** A stage this pass skipped has no outcomes in the result, but what it left off the machine is known: the ledger
+ * keeps the tools, the plan the agents and files it set aside. The context's facts read this, the report the result. */
+function withSkippedStages(result: ImportResult, ledger: ImportLedger, imp: GoldenImport, ran: { tools: boolean; harness: boolean }): ImportResult {
+  return {
+    ...result,
+    tools: ran.tools ? result.tools : (ledger.missingTools ?? []).map(m => ({ id: m.id, label: m.name, outcome: m.outcome, note: m.note })),
+    agents: ran.harness ? result.agents : (imp.skippedAgents ?? []).map(a => ({ id: a.id, name: a.name, outcome: "skipped" as const, note: a.note })),
+    ...(result.files === undefined && imp.files !== undefined ? { files: { bytes: 0, skipped: imp.files.skipped } } : {}),
+  };
 }
 
 function summarizeAgents(agents: AgentResult[]): string {

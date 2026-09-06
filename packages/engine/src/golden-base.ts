@@ -3,7 +3,7 @@
 // the catalog's floor rows by each row's own road, and the versions read back
 // once they are on. It runs under the base stage ahead of the daemon, so the
 // daemon's native module compiles against the Node the agents will run.
-import { BASE_FLOOR, installAfter, installLine, smokeOf } from "@wsp/catalog";
+import { APT_INDEX, APT_UPDATE, BASE_FLOOR, installAfter, installLine, smokeOf } from "@wsp/catalog";
 import { fmtBytes, type GoldenBaseTool, type GoldenStage } from "@wsp/protocol";
 import { PRELUDE } from "./dotfiles-presets.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
@@ -12,10 +12,9 @@ import { installTools, type ToolResult } from "./golden-tools.js";
 import type { Machine } from "./machine.js";
 
 const BASE_STAGE: GoldenStage = "deploying-daemon";
-const APT_INDEX = "base/apt-index";
-const APT_ENV = "export DEBIAN_FRONTEND=noninteractive";
 
 const stepId = (id: string): string => `base/${id}`;
+const APT_STEP = stepId(APT_INDEX);
 
 const withEnv = (cmd: string): string => `${PRELUDE}\n${PATH_LINE}\n${cmd}`;
 
@@ -25,7 +24,7 @@ export function baseInstalls(): ToolInstall[] {
   const out: ToolInstall[] = [];
   for (const e of BASE_FLOOR) {
     const dep = installAfter(e);
-    if (dep !== undefined && stepId(dep) === APT_INDEX && !out.some(t => t.id === APT_INDEX)) out.push({ id: APT_INDEX, label: "apt index", manager: "apt", cmd: withEnv(`${APT_ENV}\napt-get update -qq`) });
+    if (dep === APT_INDEX && !out.some(t => t.id === APT_STEP)) out.push({ id: APT_STEP, label: "apt index", manager: "apt", cmd: withEnv(APT_UPDATE) });
     out.push({ id: stepId(e.id), label: e.name, manager: e.installRoad.road, cmd: withEnv(installLine(e)), ...(dep !== undefined ? { after: stepId(dep) } : {}), bin: e.bin });
   }
   return out;
@@ -67,7 +66,7 @@ export function versionsLine(versions: readonly GoldenBaseTool[], results: reado
     const bytes = check?.id === undefined ? undefined : results.find(r => r.id === `base/${check.id}`)?.bytes;
     return `${v.name} ${v.version}${bytes !== undefined && bytes > 0 ? ` (${fmtBytes(bytes)})` : ""}`;
   });
-  const missed = results.filter(r => r.id !== APT_INDEX && r.outcome !== "installed").map(r => `${r.label} ${r.outcome} (${r.note})`);
+  const missed = results.filter(r => r.id !== APT_STEP && r.outcome !== "installed").map(r => `${r.label} ${r.outcome} (${r.note})`);
   return [landed.join(", "), ...missed].filter(s => s !== "").join("; ");
 }
 

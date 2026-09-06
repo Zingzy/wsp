@@ -79,7 +79,7 @@ describe("the delta of a binary row", () => {
     const before = importOf(one);
     const after = importOf(two);
     const delta = deltaFor(diffRecipes(before.recipe!, after.recipe!), before.recipe!, after, two, importOf);
-    expect(delta.import.tools.map(t => [t.id, t.label, t.manager])).toEqual([["editors/vscode-ext", "VS Code extension list", "list"]]);
+    expect(delta.import.tools.map(t => [t.id, t.label, t.manager])).toEqual([["editors/vscode-ext", "VS Code extension list", "script"]]);
     expect(delta.import.tools[0]!.cmd).toContain(`'ms-python.python' 'esbenp.prettier-vscode' > "$HOME/.vscode-server/extensions.txt"`);
     expect(delta.removals).toEqual([]);
   });
