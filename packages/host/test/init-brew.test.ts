@@ -31,6 +31,8 @@ function fakeHost(over: { brew?: boolean; info?: string | null; cellar?: string[
       probe: async () => undefined,
       list: async dir => (dir === "/opt/homebrew/Cellar" ? (cellar ?? []) : []),
       readText: async () => undefined,
+      walk: async () => [],
+      async *lines() {},
     },
   };
 }

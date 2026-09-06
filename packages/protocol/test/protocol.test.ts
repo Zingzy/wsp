@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  Recipe,
+  RecipeSource,
   Capabilities,
   GoldenVersion,
   DaemonAuthRequest,
@@ -534,5 +536,20 @@ describe("goldenHead", () => {
   it("is the version the head names", () => {
     const v2: GoldenVersion = { ...v1, version: 2, snapshotId: "snap_2" };
     expect(goldenHead({ head: 2, versions: [v1, v2] })).toBe(v2);
+  });
+});
+
+describe("the small recipe", () => {
+  const row = { id: "gh", kind: "tool", on: true, source: { kind: "used", sessions: 100, calls: 7919 }, signIn: "copy" };
+  const recipe = { version: 1, at: "2026-09-06T03:00:00.000Z", histories: [{ agent: "claude", state: "read", sessions: 149, calls: 87593 }], rows: [row] };
+
+  it("is catalog ids with a tick and the source of it, and nothing a session or a file held", () => {
+    expect(Recipe.parse(recipe)).toEqual(recipe);
+    expect(Recipe.safeParse({ ...recipe, version: 2 }).success).toBe(false);
+    expect(Recipe.safeParse({ ...recipe, rows: [{ ...row, source: { kind: "guess" } }] }).success).toBe(false);
+    expect(Recipe.safeParse({ ...recipe, rows: [{ ...row, signIn: "maybe" }] }).success).toBe(false);
+    expect(Recipe.safeParse({ ...recipe, histories: [{ agent: "claude", state: "read", sessions: -1, calls: 0 }] }).success).toBe(false);
+    expect(RecipeSource.parse({ kind: "installed", paths: ["~/.claude/settings.json"], bin: true })).toEqual({ kind: "installed", paths: ["~/.claude/settings.json"], bin: true });
+    expect(RecipeSource.safeParse({ kind: "installed", paths: ["~/.claude/settings.json"] }).success).toBe(false);
   });
 });

@@ -92,6 +92,15 @@ export function fakeHost(laptop: FakeLaptop = {}): Host & { calls: string[] } {
       const v = files.get(path);
       return typeof v === "string" ? v : undefined;
     },
+    async walk(dir) {
+      return [...files.keys()].filter(k => k.startsWith(`${dir}/`) && !k.endsWith("/")).sort();
+    },
+    async *lines(path) {
+      calls.push(`lines ${path}`);
+      const v = files.get(path);
+      if (typeof v !== "string") return;
+      for (const line of v.split("\n")) yield line;
+    },
   };
 
   const which = new Set(laptop.which ?? []);

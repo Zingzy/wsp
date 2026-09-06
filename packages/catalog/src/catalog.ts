@@ -51,11 +51,25 @@ interface EntryBase {
   size?: number;
 }
 
+/** The session store formats a reader exists for; the collector registers one reader per format. */
+export const HISTORY_FORMATS = ["claude-jsonl", "codex-rollout", "hermes-sqlite"] as const;
+export type HistoryFormat = (typeof HISTORY_FORMATS)[number];
+
+/** Where an agent keeps its session histories on the computer and in which format: transcripts under a directory
+ * or one database file. Only tool names and command words are ever read from them, never a line's content. */
+export interface SessionHistory {
+  format: HistoryFormat;
+  /** `~/`-relative. */
+  root: string;
+}
+
 /** An agent is never on by default: the wizard ticks the ones found on the Mac. */
 export interface AgentEntry extends EntryBase {
   kind: "agent";
   /** Every store that holds the project's path. */
   projectState: readonly ProjectState[];
+  /** Absent while the agent's session format has no reader: its history reads as none. */
+  history?: SessionHistory;
 }
 
 export interface ToolEntry extends EntryBase {
@@ -141,6 +155,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       { state: "per-project settings", location: "~/.claude.json, the projects object", key: "the plain resolved path as the JSON key", pathFields: ["the key"], move: "rename the key", status: "inferred" },
       { state: "prompt history", location: "history.jsonl", key: "one line per prompt", pathFields: ["project"], move: "rewrite the field", status: "inferred" },
     ],
+    history: { format: "claude-jsonl", root: "~/.claude/projects" },
     source: { sessions: 149, images: 1, road: "measured" },
   },
   {
@@ -156,6 +171,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       { state: "trust", location: "config.toml, table [projects.\"PATH\"]", key: "the quoted resolved path as the TOML table name", pathFields: ["the table name"], move: "rename the table", status: "inferred" },
       { state: "memories", location: "memories/rollout_summaries/*.md and memories/MEMORY.md", key: "global files", pathFields: ["cwd: and path: lines in each summary", "applies_to: cwd=PATH lines in MEMORY.md"], move: "rewrite if memories should follow the project", status: "inferred" },
     ],
+    history: { format: "codex-rollout", root: "~/.codex/sessions" },
     source: { sessions: 5, images: 1, road: "measured" },
   },
   {
@@ -217,6 +233,7 @@ export const CATALOG: readonly CatalogEntry[] = [
       { state: "sessions", location: "state.db, table sessions", key: "id like 20260906_033144_55e3e2", pathFields: ["cwd", "git_repo_root"], move: "update sessions set cwd and git_repo_root", status: "measured" },
       { state: "projects registry", location: "projects.db: projects.primary_path, project_folders.path, discovered_repos.root", key: "resolved path columns", pathFields: ["primary_path", "path", "root"], move: "update the rows", status: "inferred" },
     ],
+    history: { format: "hermes-sqlite", root: "~/.hermes/state.db" },
     source: { sessions: 1, images: 0, road: "measured" },
   },
 
@@ -261,6 +278,7 @@ export const CATALOG: readonly CatalogEntry[] = [
 ];
 
 export const CATALOG_AGENTS: readonly AgentEntry[] = CATALOG.filter((e): e is AgentEntry => e.kind === "agent");
+export const CATALOG_TOOLS: readonly ToolEntry[] = CATALOG.filter((e): e is ToolEntry => e.kind === "tool");
 
 const BY_ID: ReadonlyMap<string, CatalogEntry> = new Map(CATALOG.map(e => [e.id, e]));
 
@@ -293,10 +311,16 @@ const roadNames = (road: InstallRoad): readonly string[] => {
   }
 };
 
-/** The base row a recipe's tools row stands for, by the package name the collector wrote (or a command the row
- * brings along), or nothing. */
+/** The catalog tool a package name the collector wrote stands for: by id, by the command it puts on PATH, by its
+ * road's own name for it, by a name it covers, or by a command it brings along; or nothing. */
+export function catalogToolFor(pkg: string): ToolEntry | undefined {
+  return CATALOG_TOOLS.find(e => e.id === pkg || e.bin === pkg || roadNames(e.installRoad).includes(pkg) || (e.covers ?? []).includes(pkg) || (e.brings ?? []).some(b => b.bin === pkg));
+}
+
+/** The base row a recipe's tools row stands for, or nothing when the tool is not on the floor. */
 export function baseEntryFor(pkg: string): ToolEntry | undefined {
-  return BASE_FLOOR.find(e => e.id === pkg || e.bin === pkg || roadNames(e.installRoad).includes(pkg) || (e.covers ?? []).includes(pkg) || (e.brings ?? []).some(b => b.bin === pkg));
+  const e = catalogToolFor(pkg);
+  return e?.floor === true ? e : undefined;
 }
 
 /** What a ticked row the floor covers says in the build: the base row's name, or both majors when this Mac's differs

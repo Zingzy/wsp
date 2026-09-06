@@ -31,6 +31,7 @@ import { keychainReader } from "./init-import.js";
 import { readBrewTable } from "./init-brew.js";
 import { runInit, type InitIO } from "./init.js";
 import { recipePath } from "./init-recipe.js";
+import { writeRecipe } from "./recipe-command.js";
 import { confirmPrompt, passwordPrompt, type PromptOptions } from "./init-layout.js";
 import { TAGLINE, opening } from "./init-opening.js";
 import { systemOpener, type UrlOpener } from "./relay.js";
@@ -47,6 +48,10 @@ usage:
                      (plain wsp does the same)
   wsp init           set up your first golden image: tick what comes along from
                      this machine, build it, then finish in the browser
+  wsp recipe         write the recipe: every catalog agent and tool with a tick
+                     from what is installed here, what your agents used (their
+                     session histories, read here, names and counts only) or the
+                     catalog's own default; review it, then wsp init --recipe
   wsp doctor         run the reach loop end to end against one live machine
   wsp --version      print the version
 
@@ -62,6 +67,10 @@ options:
                      to ask either and the sign-ins wait for the app's terminal
   --manifest PATH    init: tick from this file instead of reading the machine; a
                      saved recipe (<state dir>/golden-recipe.json) works here
+  --recipe PATH      init: tick the agents and tools from this recipe (wsp recipe
+                     writes it) and go straight to the sign-ins; this machine is
+                     still read for what travels
+  --out PATH         recipe: where to write it (default <state dir>/recipe.json)
 
 keys are read from the environment, then ./.env, then ~/.wsp/.env (WSP_HOME
 overrides ~/.wsp). The prompt runs only when no Solari key is found; it asks
@@ -374,7 +383,7 @@ function initRefusal(lock: HostLock, statePath: string): string {
   return `wsp init: a wsp host (pid ${lock.pid}) is already serving ${statePath}. Stop it first (Ctrl-C in its terminal, or kill ${lock.pid}), then run wsp init again, or point --state at a different file.`;
 }
 
-async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: string }, flags: { yes: boolean; manifest?: string }): Promise<number> {
+async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: string }, flags: { yes: boolean; manifest?: string; recipe?: string }): Promise<number> {
   const held = servingHost(opts.statePath);
   if (held !== undefined) {
     io.error(initRefusal(held, opts.statePath));
@@ -387,6 +396,7 @@ async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: 
     {
       yes: flags.yes,
       ...(flags.manifest !== undefined ? { manifestPath: resolve(flags.manifest) } : {}),
+      ...(flags.recipe !== undefined ? { recipeFile: resolve(flags.recipe) } : {}),
       collect: collectThisComputer,
       keys,
       pricing: new SolariBackend({ apiKey: keys.solari }).pricing,
@@ -494,7 +504,7 @@ async function hostFor(
 }
 
 export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<number> {
-  let values: { version?: boolean; help?: boolean; port?: string; "ws-port"?: string; state?: string; yes?: boolean; manifest?: string };
+  let values: { version?: boolean; help?: boolean; port?: string; "ws-port"?: string; state?: string; yes?: boolean; manifest?: string; recipe?: string; out?: string };
   let positionals: string[];
   try {
     ({ values, positionals } = parseArgs({
@@ -507,6 +517,8 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
         state: { type: "string" },
         yes: { type: "boolean", short: "y" },
         manifest: { type: "string" },
+        recipe: { type: "string" },
+        out: { type: "string" },
       },
       allowPositionals: true,
     }));
@@ -537,7 +549,14 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
       return 0;
     }
     case "init":
-      return init(io, opts, { yes: values.yes === true, ...(values.manifest !== undefined ? { manifest: values.manifest } : {}) });
+      if (values.manifest !== undefined && values.recipe !== undefined) {
+        io.error("wsp init takes --manifest or --recipe, not both: a manifest carries its own ticks.");
+        return 1;
+      }
+      return init(io, opts, { yes: values.yes === true, ...(values.manifest !== undefined ? { manifest: values.manifest } : {}), ...(values.recipe !== undefined ? { recipe: values.recipe } : {}) });
+    case "recipe":
+      await writeRecipe(nodeHost(), resolve(values.out ?? join(dirname(opts.statePath), "recipe.json")), line => io.log(line));
+      return 0;
     case "doctor": {
       const keys = await loadKeys(io);
       const rt = makeRuntime(keys, opts.statePath);

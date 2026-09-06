@@ -25,6 +25,10 @@ export interface HostFs {
   list(dir: string): Promise<string[]>;
   /** Only for files whose content is configuration, never a credential. */
   readText(path: string): Promise<string | undefined>;
+  /** Every regular file under dir, absolute and sorted, links and the dependency trees under it left out; empty when dir is missing. */
+  walk(dir: string): Promise<string[]>;
+  /** The file one line at a time, for a reader that keeps names and counts and drops the line; nothing when it cannot be opened. */
+  lines(path: string): AsyncIterable<string>;
 }
 
 export interface RunOptions {

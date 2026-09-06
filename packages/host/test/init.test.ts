@@ -4027,3 +4027,82 @@ describe("shellItems", () => {
     expect(shellItems([zshrc], [zshrc, skipped, eza, bat], new Set(["tools/brew/eza", "tools/brew/bat"]), new Map())[0]!.detail.at(-1)).toBe("sources ~/.config/starship.toml, which is not coming (starship prompt unticked, tick to bring); the machine skips that line");
   });
 });
+
+describe("wsp init --recipe", () => {
+  const recipeFile = (f: Fake): string => {
+    const path = join(dirname(f.opts.statePath), "recipe.json");
+    writeFileSync(path, JSON.stringify({
+      version: 1,
+      at: "2026-09-06T03:00:00.000Z",
+      histories: [],
+      rows: [
+        { id: "claude", kind: "agent", on: false, source: { kind: "popular", sessions: 149, images: 1 } },
+        { id: "codex", kind: "agent", on: true, source: { kind: "installed", paths: ["~/.codex/config.toml"], bin: true } },
+        { id: "gh", kind: "tool", on: true, source: { kind: "used", sessions: 100, calls: 7919 }, signIn: "copy" },
+        { id: "yq", kind: "tool", on: false, source: { kind: "popular", sessions: 0, images: 3 } },
+        { id: "agent-browser", kind: "tool", on: true, source: { kind: "used", sessions: 45, calls: 2591 } },
+      ],
+    }));
+    return path;
+  };
+
+  it("skips the pick screens and lands on the sign-ins, the recipe's ticks and answers in place, then saves them", async () => {
+    const f = fake();
+    f.opts.recipeFile = recipeFile(f);
+    const run = runInit(f.opts, f.io);
+    await f.until("Sign-ins");
+    const out = f.text();
+    // The machine was still read; the card says what ticked it; the one row the build cannot install is named before the card.
+    expect(out).toContain("16 found on this computer, ticked by the recipe.");
+    expect(out).toContain("Ticked in the recipe but not on this computer, so not in this build: agent-browser.");
+    expect(out.indexOf("not in this build")).toBeLessThan(out.indexOf("Found on this computer"));
+    // No Identity, Tools or Agents screen: the sign-ins are the first and only screen.
+    expect(out).not.toContain("1/8");
+    expect(out).toMatch(/Sign-ins\s+1\/1/);
+    expect(out).not.toMatch(/Agents\s+6\/8/);
+    // Codex is on and Claude Code off, so only Codex's login is offered; the saved answer for gh stands.
+    expect(out).toContain("Codex login");
+    expect(out).not.toContain("Claude Code login");
+    expect(out).toMatch(/GitHub CLI login\s+copy/);
+    await f.press(KEY.enter);
+    await f.until(BOOT);
+    await f.press(KEY.enter);
+    expect((await run).code).toBe(1);
+    const saved = new Map(loadManifest(join(dirs[0]!, "golden-recipe.json")).entries.map(e => [e.id, e]));
+    expect(saved.get("agents/codex")).toMatchObject({ bring: true });
+    expect(saved.get("agents/claude")).toMatchObject({ bring: false });
+    expect(saved.get("tools/brew/gh")).toMatchObject({ bring: true });
+    expect(saved.get("tools/brew/yq")).toMatchObject({ bring: false });
+    expect(saved.get("tools/npm/tsx")).toMatchObject({ bring: false });
+    expect(saved.get("logins/gh")).toMatchObject({ bring: true, choice: "copy" });
+    expect(saved.get("logins/codex")).toMatchObject({ bring: false, choice: "machine" });
+    // The other rungs took their defaults, as the screens would have.
+    expect(saved.get("identity/git-user")).toMatchObject({ bring: true });
+    expect(saved.get("editors/nvim")).toMatchObject({ bring: true });
+  });
+
+  it("with --yes the recipe's saved copy answer is honoured like a saved manifest's: the Keychain is read, the golden built", async () => {
+    const f = fake({ yes: true });
+    f.opts.recipeFile = recipeFile(f);
+    mkdirSync(join(f.opts.home, ".config", "gh"), { recursive: true });
+    writeFileSync(join(f.opts.home, ".config", "gh", "hosts.yml"), "github.com:\n    user: Zingzy\n");
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(0);
+    expect(f.reads).toEqual(["gh:github.com"]);
+    const saved = new Map(loadManifest(join(dirs[0]!, "golden-recipe.json")).entries.map(e => [e.id, e]));
+    expect(saved.get("agents/codex")).toMatchObject({ bring: true });
+    expect(saved.get("agents/claude")).toMatchObject({ bring: false });
+    expect(saved.get("tools/brew/yq")).toMatchObject({ bring: false });
+    expect(saved.get("logins/gh")).toMatchObject({ bring: true, choice: "copy" });
+    expect(f.text()).toContain("GitHub CLI login: signed in (copied; gh auth status)");
+  });
+
+  it("a recipe that does not parse ends the run before anything is read or booted", async () => {
+    const f = fake({ collect: async () => { throw new Error("collect must not run on a bad recipe"); } });
+    f.opts.recipeFile = join(dirname(f.opts.statePath), "recipe.json");
+    writeFileSync(f.opts.recipeFile, JSON.stringify({ version: 2 }));
+    expect((await runInit(f.opts, f.io)).code).toBe(1);
+    expect(f.text()).toMatch(/recipe\.json: invalid recipe: version/);
+    expect(f.backends).toHaveLength(0);
+  });
+});
