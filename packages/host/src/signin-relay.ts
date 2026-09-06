@@ -223,6 +223,86 @@ export async function relayPty(o: RelayOptions): Promise<RelayOutcome> {
   return outcome;
 }
 
+export interface WatchOutcome {
+  /** -1 when the pty never exited: a timeout, a dropped link, or the caller's stop. */
+  exitCode: number;
+  timedOut: boolean;
+  /** The daemon link went away under the pty. */
+  dropped: boolean;
+  /** The caller had seen enough and ended it before the tool did. */
+  stopped: boolean;
+}
+
+export interface WatchOptions {
+  link: PtyLink;
+  /** The line the guest shell runs; the pty exits with its status. */
+  command: string;
+  /** Every chunk the tool printed, before that chunk's URLs are reported, so a code printed beside a page is in
+   * hand when the page arrives. */
+  onData?(text: string): void;
+  /** Each URL the tool printed, once. */
+  onUrl?(url: string): void;
+  /** The pty is killed after this long. */
+  timeoutMs: number;
+  /** Settles when the caller wants the pty ended early. */
+  stop?: Promise<unknown>;
+  /** A URL that ends a chunk is reported after this much quiet, for a tool that prints it and blocks. Default 300 ms. */
+  flushMs?: number;
+}
+
+/** The same pty as relayPty with nobody at this terminal: nothing is typed
+ * back and nothing is drawn, the tool's output goes to the caller and each page
+ * it prints is reported as it arrives. What the sign-in hand-off runs, where
+ * the person opens the page on their own computer instead. */
+export async function watchPty(o: WatchOptions): Promise<WatchOutcome> {
+  // Wide, so a printed URL is never wrapped onto two lines before the scanner reads it.
+  const ptyId = ptyIdOf(await o.link.op("pty.create", { cols: 200, rows: 50, shell: "bash" }));
+  const scanner = new UrlScanner();
+  const outcome: WatchOutcome = { exitCode: -1, timedOut: false, dropped: false, stopped: false };
+  let ended = false;
+  let done: (() => void) | undefined;
+  const exited = new Promise<void>(r => (done = r));
+  const end = (mark: () => void): void => {
+    if (ended) return;
+    ended = true;
+    mark();
+    done?.();
+  };
+  let flush: NodeJS.Timeout | undefined;
+  const report = (urls: string[]): void => {
+    for (const url of urls) o.onUrl?.(url);
+  };
+  const detach = o.link.onEvent(e => {
+    if (e["ptyId"] !== ptyId) return;
+    if (e["type"] === "pty.data") {
+      const data = String(e["data"]);
+      o.onData?.(data);
+      report(scanner.feed(data));
+      if (flush) clearTimeout(flush);
+      flush = setTimeout(() => report(scanner.flush()), o.flushMs ?? FLUSH_MS);
+      flush.unref();
+      return;
+    }
+    if (e["type"] === "pty.exit") end(() => (outcome.exitCode = Number(e["exitCode"])));
+  });
+  void o.link.closed?.then(() => end(() => (outcome.dropped = true)));
+  void o.stop?.then(() => end(() => (outcome.stopped = true)));
+  const timer = setTimeout(() => end(() => (outcome.timedOut = true)), o.timeoutMs);
+  timer.unref();
+  try {
+    okOrThrow("pty.attach", await o.link.op("pty.attach", { ptyId }));
+    const line = shellLine(o.command);
+    if (line !== undefined) await o.link.op("pty.write", { ptyId, data: line });
+    await exited;
+  } finally {
+    clearTimeout(timer);
+    if (flush) clearTimeout(flush);
+    detach();
+    await o.link.op("pty.kill", { ptyId }).catch(() => {});
+  }
+  return outcome;
+}
+
 export interface QuietRun {
   output: string;
   exitCode: number;

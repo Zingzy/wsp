@@ -6,7 +6,7 @@
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it } from "vitest";
-import { OFFER_MS, UrlScanner, hyperlink, relayPty, runQuiet, shellLine, stripOsc8, urlsIn, type RelayTerminal } from "../src/signin-relay.js";
+import { OFFER_MS, UrlScanner, hyperlink, relayPty, runQuiet, shellLine, stripOsc8, urlsIn, watchPty, type RelayTerminal } from "../src/signin-relay.js";
 import { fakePtyLink, type FakePty } from "./fake-pty-link.js";
 
 interface Term extends RelayTerminal {
@@ -303,6 +303,57 @@ describe("relayPty", () => {
     expect(pty.writes).toEqual(["exit\r"]);
     link.exit(pty, 0);
     await run;
+  });
+});
+
+describe("watchPty", () => {
+  it("runs the command on a wide pty with nothing typed back, reports each page once, and ends with the tool's exit", async () => {
+    const link = fakePtyLink();
+    const seen: string[] = [];
+    const chunks: string[] = [];
+    link.script = (pty, line) => {
+      if (!line.startsWith("exec ")) return;
+      link.data(pty, `visit https://github.com/login/device to sign in\r\n`);
+      link.data(pty, `still https://github.com/login/device, then https://github.com/settings\r\n`);
+      link.exit(pty, 0);
+    };
+    const out = await watchPty({ link, command: "gh auth login", timeoutMs: 60_000, onUrl: u => seen.push(u), onData: c => chunks.push(c) });
+    expect(out).toEqual({ exitCode: 0, timedOut: false, dropped: false, stopped: false });
+    expect(seen).toEqual(["https://github.com/login/device", "https://github.com/settings"]);
+    expect(chunks.join("")).toContain("visit https://github.com/login/device");
+    expect(link.ptys[0]!.created).toMatchObject({ cols: 200, rows: 50, shell: "bash" });
+    expect(link.ptys[0]!.writes).toEqual(["exec gh auth login || exit\r"]);
+    expect(link.ptys[0]!.killed).toBe(true);
+  });
+
+  it("the caller's stop, a link that goes away and a timeout each end it with no exit code, and the pty is killed either way", async () => {
+    const held = () => {
+      const link = fakePtyLink();
+      link.script = (pty, line) => {
+        if (line.startsWith("exec ")) link.data(pty, "waiting for you...\r\n");
+      };
+      return link;
+    };
+    const stopping = held();
+    let settle: (() => void) | undefined;
+    const stop = new Promise<void>(r => (settle = r));
+    const stopped = watchPty({ link: stopping.dial(), command: "gh auth login", timeoutMs: 60_000, stop });
+    await firstPty(stopping);
+    await tick();
+    settle!();
+    expect(await stopped).toEqual({ exitCode: -1, timedOut: false, dropped: false, stopped: true });
+    expect(stopping.ptys[0]!.killed).toBe(true);
+
+    const dropping = held();
+    const gone = watchPty({ link: dropping.dial(), command: "gh auth login", timeoutMs: 60_000 });
+    await firstPty(dropping);
+    await tick();
+    dropping.drop();
+    expect(await gone).toMatchObject({ exitCode: -1, dropped: true, stopped: false });
+
+    const slow = held();
+    expect(await watchPty({ link: slow, command: "gh auth login", timeoutMs: 20 })).toEqual({ exitCode: -1, timedOut: true, dropped: false, stopped: false });
+    expect(slow.ptys[0]!.killed).toBe(true);
   });
 });
 

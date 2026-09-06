@@ -48,6 +48,9 @@ export type SignIn =
       sources: readonly LoginSource[];
       /** The device-code, paste-code or no-browser variant, offered on a retry. */
       fallback?: string;
+      /** The shape the one-time code prints in, for a flow whose page asks for one; matched against what the tool
+       * printed, past the URLs it printed. Absent, the flow shows no code and none is read out of its output. */
+      code?: RegExp;
       /** The variable the tool reads an API key from; a key loaded on this computer is set under it on the machine. */
       keyEnv?: string;
       /** Absent when the tool has no status command: the login is then "not verified". */
@@ -178,7 +181,15 @@ export function claudeSource(output: string, secrets: ReadonlyMap<string, string
 export const SIGN_IN_ROWS = {
   // Device flow by default; the shim opens the device page and the person types the code there. The status lists
   // every account of the host, so one is signed in only when none of them failed.
-  gh: { kind: "device", sources: ["file", "keychain"], login: "gh auth login", status: { command: "gh auth status", signedIn: o => /Logged in to/.test(o) && !/Failed to log in/.test(o) }, toolTimeoutMs: 15 * MIN },
+  gh: {
+    kind: "device",
+    sources: ["file", "keychain"],
+    login: "gh auth login",
+    // Two groups of four, as gh prints it: "! First copy your one-time code: XXXX-XXXX".
+    code: /\b[A-Z0-9]{4}-[A-Z0-9]{4}\b/,
+    status: { command: "gh auth status", signedIn: o => /Logged in to/.test(o) && !/Failed to log in/.test(o) },
+    toolTimeoutMs: 15 * MIN,
+  },
   // Under the daemon pty DISPLAY is unset, so gcloud, gemini and railway take their paste or device flow by themselves.
   gcloud: {
     kind: "oauth",

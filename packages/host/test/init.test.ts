@@ -62,6 +62,8 @@ interface Fake {
   signals: EventEmitter;
   /** Exit codes the run asked for, in order; the real one ends the process. */
   exits: number[];
+  /** The objects --json printed, in order. */
+  records: Record<string, unknown>[];
 }
 
 const DEVICE_URL = "https://github.com/login/device";
@@ -110,7 +112,7 @@ function scriptedLink(state: { signedIn: boolean; hold: boolean; missing: boolea
   return link;
 }
 
-function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string, string>; columns?: number; signedIn?: boolean; hold?: boolean; missing?: boolean } = {}): Fake {
+function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string, string>; columns?: number; signedIn?: boolean; hold?: boolean; missing?: boolean; json?: boolean } = {}): Fake {
   const input = new PassThrough();
   const output = new PassThrough();
   const stderr = Object.assign(new PassThrough(), { isTTY: over.tty ?? true });
@@ -130,6 +132,7 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
   const counters = { hosts: 0, closed: 0 };
   const signals = new EventEmitter();
   const exits: number[] = [];
+  const records: Record<string, unknown>[] = [];
   const io: InitIO = {
     input,
     output,
@@ -144,6 +147,7 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
     exit: code => {
       exits.push(code);
     },
+    ...(over.json === true ? { json: (record: Record<string, unknown>) => records.push(record) } : {}),
   };
   const dir = mkdtempSync(join(tmpdir(), "wsp-init-"));
   dirs.push(dir);
@@ -155,7 +159,7 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
   writeFileSync(join(home, ".ssh", "config"), "Host work\n", { mode: 0o600 });
   const reads: string[] = [];
   const store = memoryStore();
-  const { tty: _tty, env: _env, columns: _columns, signedIn: _signedIn, hold: _hold, missing: _missing, ...rest } = over;
+  const { tty: _tty, env: _env, columns: _columns, signedIn: _signedIn, hold: _hold, missing: _missing, json: _json, ...rest } = over;
   const opts: InitOptions = {
     yes: false,
     collect: async () => FIXTURE,
@@ -233,6 +237,7 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
     reads,
     signals,
     exits,
+    records,
   };
 }
 
@@ -794,7 +799,7 @@ describe("wsp init, the summary-first screens", () => {
     const f = fake({ yes: true, collect: async () => LAPTOP, recipe: async () => used });
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     expect(existsSync(join(f.opts.home, ".claude.json"))).toBe(false);
-    expect(f.text()).toContain("The wsp tools were not added to Claude Code here: --yes writes nothing on this computer. Run wsp mcp install --agent claude to add them.");
+    expect(f.text()).toContain("The wsp tools were not added to Claude Code here: a run taken as yes (--yes) writes nothing on this computer. Run wsp mcp install --agent claude to add them.");
   });
 
   it("under --yes the recipe decides the ticks, the keys copy, the logins wait for the machine, and both recipe files are written; no agent's config here is touched", async () => {
@@ -840,6 +845,19 @@ describe("wsp init, the summary-first screens", () => {
 });
 
 describe("wsp init, the secrets step", () => {
+  it("a cut secret is skipped under --non-interactive naming that flag, and under --yes off a terminal naming the terminal, as the sign-ins do", async () => {
+    const tty = fake({ nonInteractive: true });
+    writeFileSync(join(tty.opts.home, ".zshrc"), "export A_KEY=fake\n");
+    expect((await runInit(tty.opts, tty.io)).code).toBe(0);
+    expect(tty.text()).toContain("Secrets skipped: A_KEY (cut from ~/.zshrc). --non-interactive asks nothing; set them from the app's terminal.");
+
+    const pipe = fake({ yes: true, tty: false });
+    writeFileSync(join(pipe.opts.home, ".zshrc"), "export A_KEY=fake\n");
+    expect((await runInit(pipe.opts, pipe.io)).code).toBe(0);
+    expect(pipe.text()).toContain("Secrets skipped: A_KEY (cut from ~/.zshrc). No terminal to paste into; set them from the app's terminal.");
+    expect(pipe.text()).toContain("Sign-ins on the machine skipped: GitHub CLI login, Claude Code login. No terminal to sign in from; use the app's terminal.");
+  });
+
   it("an rc file with a cut secret export is named in the secrets step, skipped under --yes with the reason and recorded", async () => {
     // The recipe row carries no secrets field: the names come from the pack, which strips the file as it stands at build time.
     const f = fake({ yes: true });
@@ -1235,13 +1253,17 @@ describe("wsp init, flags and no terminal", () => {
     expect(f.backends[0]!.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_golden-v1", true], ["snap_golden-v1", false]]);
     expect((await f.runtimes.at(-1)!.workspaces.list()).map(w => w.name)).toEqual(["first"]);
     expect(f.opened).toEqual([]);
-    // The gh login has a device flow, so it starts as a sign-in on the machine: nobody is here to run it or to click
-    // macOS's consent dialog, so the Keychain is never asked and the sign-in is skipped for the app's terminal.
+    // The gh login has a device flow, so it starts as a sign-in on the machine: nobody is here to click macOS's
+    // consent dialog, so the Keychain is never asked, and the sign-in runs on the machine with its page handed over.
     expect(f.reads).toEqual([]);
     expect(out).toMatch(/GitHub CLI login\s+sign in/);
-    expect(result.logins?.find(l => l.id === "logins/gh")?.state).toBe("skipped");
+    expect(out).toContain(`GitHub CLI login: open ${DEVICE_URL} on this computer`);
+    expect(out).toContain(`open '${DEVICE_URL}'`);
+    expect(result.logins?.find(l => l.id === "logins/gh")).toMatchObject({ state: "signed-in", note: "gh auth login exited 0" });
     expect(loadManifest(join(dirs[0]!, "golden-recipe.json")).entries.find(e => e.id === "logins/gh")?.choice).toBe("machine");
     expect(out).not.toContain("from your Keychain");
+    // Nothing is printed as an object without --json.
+    expect(f.records).toEqual([]);
   });
 
   it("off a terminal a saved copy answer still reads the Keychain, and says what is read before macOS can ask", async () => {
@@ -1255,17 +1277,58 @@ describe("wsp init, flags and no terminal", () => {
     const said = out.indexOf("Reading gh:github.com from your Keychain, as the saved recipe answered copy; macOS may ask you to allow it.");
     expect(said).toBeGreaterThan(-1);
     expect(said).toBeLessThan(out.search(BOOT));
-    // The copied gh login is recorded as copied with nobody here; the one sign-in chosen for the machine is skipped and said so.
+    // The copied gh login is recorded as copied with nobody here and nothing runs for it; the one sign-in chosen
+    // for the machine is run there and its page handed over.
     expect(f.text()).toContain("GitHub CLI login: copied");
-    expect(f.text()).toContain("Sign-ins on the machine skipped: Claude Code login. No terminal to sign in from; use the app's terminal.");
-    expect(f.link.ptys).toEqual([]);
-    expect(f.link.dials).toBe(0);
+    expect(f.text()).toContain(`Claude Code login: open ${CLAUDE_URL} on this computer`);
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual(["exec claude auth login || exit\r"]);
     expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({
       logins: [
         { id: "logins/gh", state: "copied" },
-        { id: "logins/claude", state: "skipped", note: "no terminal to sign in from; use the app's terminal" },
+        { id: "logins/claude", state: "signed-in", note: "claude auth login exited 0" },
       ],
     });
+  });
+
+  it("under --non-interactive --json on a terminal: no screens, each sign-in's page and outcome as one object, and the run ends 0", async () => {
+    const f = fake({ nonInteractive: true, json: true });
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(0);
+    const out = f.text();
+    expect(out).not.toMatch(/Agents  1\/6|Sign-ins  4\/6/);
+    expect(out).toContain("Taken as yes (--non-interactive)");
+    expect(out).toContain("Sealing golden v1. Taken as yes (--non-interactive).");
+    expect(f.records).toEqual([
+      { event: "sign-in", tool: "gh", label: "GitHub CLI login", browserUrl: DEVICE_URL, nextCommand: `open '${DEVICE_URL}'`, waitSeconds: 960 },
+      { event: "sign-in-result", tool: "gh", label: "GitHub CLI login", state: "signed-in", note: "gh auth login exited 0" },
+      { event: "sign-in", tool: "claude", label: "Claude Code login", browserUrl: CLAUDE_URL, nextCommand: `open '${CLAUDE_URL}'`, waitSeconds: 900 },
+      { event: "sign-in-result", tool: "claude", label: "Claude Code login", state: "signed-in", note: "claude auth login exited 0" },
+    ]);
+    expect(result.logins?.map(l => l.state)).toEqual(["signed-in", "signed-in"]);
+  });
+
+  it("under --non-interactive a recipe answering copy for a Keychain login asks nothing and still copies it", async () => {
+    const f = fake({ nonInteractive: true });
+    withGhCopy(f);
+    mkdirSync(join(f.opts.home, ".config", "gh"), { recursive: true });
+    writeFileSync(join(f.opts.home, ".config", "gh", "hosts.yml"), "github.com:\n    user: Zingzy\n");
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    expect(f.reads).toEqual(["gh:github.com"]);
+    expect(f.text()).toContain("GitHub CLI login: copied");
+    // The screens never ran, so nothing was typed at: the only pty is the one sign-in chosen for the machine.
+    expect(f.text()).not.toMatch(/Agents  1\/6|Sign-ins  4\/6/);
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual(["exec claude auth login || exit\r"]);
+  });
+
+  it("on a terminal without the flag the six screens still run", async () => {
+    const f = fake();
+    const run = runInit(f.opts, f.io);
+    await throughScreens(f);
+    await f.until(BOOT);
+    for (const screen of SCREENS) expect(f.text()).toContain(screen);
+    await f.press("n");
+    expect((await run).code).toBe(1);
+    expect(f.records).toEqual([]);
   });
 
   it("a Keychain login the reader refuses is read before anything boots, turns into a sign-in on the machine, and says so before the confirm", async () => {
@@ -2482,10 +2545,10 @@ describe("stage stream", () => {
     expect(line.length).toBe(60);
     const long = stripVTControlCharacters(stageLine("o", "Base installed", "x".repeat(80), 61_000, 60, 20));
     expect(long.length).toBe(60);
-    expect(long).toMatch(/x…  1m 01s$/);
+    expect(long).toMatch(/x…  1m 1s$/);
     expect(stripVTControlCharacters(stageLine("o", "Ready", undefined, undefined, 60, 20))).toBe("o  Ready");
     // Off a terminal there is no width: nothing is cut and the duration follows two spaces after the detail.
-    expect(stripVTControlCharacters(stageLine("o", "Base installed", "x".repeat(80), 61_000, undefined, 20))).toBe(`o  Base installed        ${"x".repeat(80)}  1m 01s`);
+    expect(stripVTControlCharacters(stageLine("o", "Base installed", "x".repeat(80), 61_000, undefined, 20))).toBe(`o  Base installed        ${"x".repeat(80)}  1m 1s`);
   });
 
   it("frames for another golden are ignored", () => {

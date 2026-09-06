@@ -46,13 +46,6 @@ export function table(rows: readonly (readonly string[])[], align: readonly Alig
   });
 }
 
-/** Seconds to one decimal under a minute, then minutes and seconds. */
-export function fmtDuration(ms: number): string {
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  const s = Math.round(ms / 1000);
-  return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
-}
-
 /** The terminal width when the stream knows it, else clack's 80. Capped so a wide window does not spread the columns. */
 export function widthOf(output: Writable | undefined, cap = 100): number {
   const columns = output !== undefined && "columns" in output && typeof output.columns === "number" ? output.columns : 80;
