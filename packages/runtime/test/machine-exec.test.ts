@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EXEC_ENV, INLINE_EXEC_MS, type ExecResult, type Machine } from "@wsp/engine";
-import { EXEC_BODY_MAX, shellQuote } from "@wsp/protocol";
+import { EXEC_BODY_MAX, TURN_IDLE_MS, shellQuote } from "@wsp/protocol";
 import { machineExecStream } from "../src/machine-exec.js";
 import { stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
 
@@ -305,11 +305,11 @@ describe("machineExecStream", () => {
     expect(guest.writes).toHaveLength(1);
   });
 
-  it("a write after the command exited but before the poll saw it answers gone with one exec, appends nothing and leaves the deadline alone", async () => {
+  it("a write after the command exited but before the poll saw it answers gone with one exec, appends nothing and leaves the idle clock alone", async () => {
     const { backend, machine } = await makeMachine();
     const guest = scriptGuest(backend, [{}, {}, {}, {}]);
     let now = 0;
-    const stream = machineExecStream(machine, { pollMs: 200, deadlineMs: 1000, now: () => now })("claude", { env: {}, input: ["first"] });
+    const stream = machineExecStream(machine, { pollMs: 200, idleMs: 1000, now: () => now })("claude", { env: {}, input: ["first"] });
     const first = stream.lines[Symbol.asyncIterator]().next();
     await new Promise(r => setTimeout(r, 20));
     guest.exit(0);
@@ -319,7 +319,7 @@ describe("machineExecStream", () => {
     expect(guest.writes[0]).toMatch(/^mkdir -p '\/tmp\/wsp-run'\n\{ \[ -e \/tmp\/wsp-run\/[a-f0-9]+\.exit \] \|\| \[ ! -d \/tmp\/wsp-run\/[a-f0-9]+\.d \]; \} && \{ echo WSP_GONE; exit 0; \}\nset -o pipefail\n\[ -e '\/tmp\/wsp-run\/[a-f0-9]+\.in\.a[0-9a-f]{12}' \] \|\| \{ printf %s '[A-Za-z0-9+/=]+' \| base64 -d >> '\/tmp\/wsp-run\/[a-f0-9]+\.in' && : > '[^']+'; \} \|\| exit 1\necho WSP_OK$/);
     expect(guest.getInput()).toBe("first\n");
     now = 1100;
-    await expect(first).rejects.toThrow(/deadline/);
+    await expect(first).rejects.toThrow(/^stopped after 0m 01s with no output for 0m$/);
     expect(await stream.exited).toBeNull();
   });
 
@@ -338,11 +338,11 @@ describe("machineExecStream", () => {
     expect(guest.kills.filter(k => !k.includes("rm -rf"))).toHaveLength(1);
   });
 
-  it("a write restarts the deadline; past it the stream ends with the error and the process group is killed", async () => {
+  it("a write restarts the idle clock; past it the stream ends with the idle line and the process group is killed", async () => {
     const { backend, machine } = await makeMachine();
     const guest = scriptGuest(backend, []);
     let now = 0;
-    const stream = machineExecStream(machine, { pollMs: 1, deadlineMs: 1000, now: () => now })("claude", { env: {}, input: ["first"] });
+    const stream = machineExecStream(machine, { pollMs: 1, idleMs: 1000, now: () => now })("claude", { env: {}, input: ["first"] });
     const it = stream.lines[Symbol.asyncIterator]();
     const first = it.next();
     now = 900;
@@ -351,11 +351,75 @@ describe("machineExecStream", () => {
     await new Promise(r => setTimeout(r, 20));
     expect(guest.kills).toEqual([]);
     now = 2000;
-    await expect(first).rejects.toThrow(/deadline/);
+    await expect(first).rejects.toThrow(/^stopped after 0m 02s with no output for 0m$/);
     expect(await stream.exited).toBeNull();
     expect(guest.kills.some(k => k.includes("kill -KILL -- -$P"))).toBe(true);
     expect(guest.childAlive()).toBe(false);
     expect(guest.files()).toEqual([]);
+  });
+
+  /** A guest whose clock moves one minute per poll and whose command prints one line a minute until `quietFromMs`. */
+  function minuteGuest(backend: StubBackend, quietFromMs: number, exitAtMs = Number.POSITIVE_INFINITY) {
+    const steps: Step[] = [];
+    const guest = scriptGuest(backend, steps);
+    const clock = { now: 0 };
+    const inner = backend.execImpl;
+    backend.execImpl = async (m, cmd): Promise<ExecResult> => {
+      if (cmd.includes("__WSP_EOF_")) {
+        clock.now += 60_000;
+        if (clock.now < quietFromMs) steps.push({ append: `tick ${clock.now / 60_000}\n` });
+        else if (clock.now >= exitAtMs) steps.push({ exit: 0 });
+        else steps.push({});
+      }
+      return inner(m, cmd);
+    };
+    return { guest, clock };
+  }
+
+  it("a stream that prints a line every minute runs past the old 15 minute wall clock and ends on its own exit", async () => {
+    const { backend, machine } = await makeMachine();
+    const { guest, clock } = minuteGuest(backend, 21 * 60_000, 21 * 60_000);
+    const stream = machineExecStream(machine, { pollMs: 1, now: () => clock.now })("claude", { env: {} });
+    const seen: string[] = [];
+    for await (const line of stream.lines) seen.push(line);
+    expect(seen).toHaveLength(20);
+    expect(seen.at(-1)).toBe("tick 20");
+    expect(clock.now).toBeGreaterThan(900_000);
+    expect(await stream.exited).toBe(0);
+    expect(guest.files()).toEqual([]);
+  });
+
+  it("a stream that goes silent is cut once no byte came for the idle limit, and the error names the rule and the turn's run", async () => {
+    const { backend, machine } = await makeMachine();
+    const { guest, clock } = minuteGuest(backend, 6 * 60_000);
+    const stream = machineExecStream(machine, { pollMs: 1, now: () => clock.now })("claude", { env: {} });
+    const seen: string[] = [];
+    await expect(
+      (async () => {
+        for await (const line of stream.lines) seen.push(line);
+      })(),
+    ).rejects.toThrow(/^stopped after 15m 00s with no output for 10m$/);
+    expect(seen).toHaveLength(5);
+    expect(clock.now).toBe(5 * 60_000 + TURN_IDLE_MS);
+    expect(await stream.exited).toBeNull();
+    expect(guest.kills.some(k => k.includes("kill -KILL -- -$P"))).toBe(true);
+    expect(guest.childAlive()).toBe(false);
+    expect(guest.files()).toEqual([]);
+  });
+
+  it("a stream that never goes quiet is still cut at the wall cap, and the error names the cap", async () => {
+    const { backend, machine } = await makeMachine();
+    const { guest, clock } = minuteGuest(backend, Number.POSITIVE_INFINITY);
+    const stream = machineExecStream(machine, { pollMs: 1, deadlineMs: 2 * 3_600_000, now: () => clock.now })("claude", { env: {} });
+    const seen: string[] = [];
+    await expect(
+      (async () => {
+        for await (const line of stream.lines) seen.push(line);
+      })(),
+    ).rejects.toThrow(/^stopped after 2h 00m 00s at the 2h cap on one turn$/);
+    expect(seen).toHaveLength(120);
+    expect(await stream.exited).toBeNull();
+    expect(guest.childAlive()).toBe(false);
   });
 
   it("tolerates exec failures mid-poll (a napping machine) and finishes after recovery", async () => {

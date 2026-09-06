@@ -21,18 +21,20 @@
 import { randomBytes } from "node:crypto";
 import { INLINE_EXEC_MS, putFiles, type ExecResult, type GuestWrite, type Machine } from "@wsp/engine";
 import type { ExecStream, ExecStreamFactory } from "@wsp/adapter-claude";
-import { EXEC_CHUNK_BYTES, shellQuote } from "@wsp/protocol";
+import { EXEC_CHUNK_BYTES, TURN_IDLE_MS, TURN_WALL_MS, shellQuote, turnCutLine } from "@wsp/protocol";
 
 export interface MachineExecOptions {
   /** Delay between log polls. */
   pollMs?: number;
-  /** Hard ceiling for one stream; the stream ends with exit null past it. */
+  /** How long the log may stay quiet, write() included, before the stream ends with exit null and the idle line. */
+  idleMs?: number;
+  /** The cap on one stream however much it prints; the stream ends with exit null and the wall line past it. */
   deadlineMs?: number;
   /** Per-poll REST exec timeout. */
   execTimeoutMs?: number;
   /** Directory inside the guest for script/log/pid/exit files. */
   runDir?: string;
-  /** The clock the deadline reads. */
+  /** The clock both limits read. */
   now?: () => number;
 }
 
@@ -44,7 +46,8 @@ function sleep(ms: number): Promise<void> {
 
 export function machineExecStream(machine: Machine, opts: MachineExecOptions = {}): ExecStreamFactory {
   const pollMs = opts.pollMs ?? 1500;
-  const deadlineMs = opts.deadlineMs ?? 900_000;
+  const idleMs = opts.idleMs ?? TURN_IDLE_MS;
+  const deadlineMs = opts.deadlineMs ?? TURN_WALL_MS;
   const execTimeoutMs = opts.execTimeoutMs ?? INLINE_EXEC_MS;
   const runDir = opts.runDir ?? "/tmp/wsp-run";
   const now = opts.now ?? Date.now;
@@ -69,7 +72,8 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
 
     let killed = false;
     let inputClosed = false;
-    let startedAt = now();
+    const startedAt = now();
+    let lastByteAt = startedAt;
     let finishCode: number | null | undefined;
     let resolveExit: (code: number | null) => void = () => {};
     const exited = new Promise<number | null>(resolve => {
@@ -143,10 +147,12 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
           finish(null);
           return;
         }
-        if (now() - startedAt > deadlineMs) {
+        const elapsed = now() - startedAt;
+        const cut = elapsed >= deadlineMs ? "wall" : now() - lastByteAt >= idleMs ? "idle" : undefined;
+        if (cut !== undefined) {
           await reap();
           finish(null);
-          throw new Error(`remote stream deadline (${deadlineMs}ms) exceeded on ${machine.id}`);
+          throw new Error(turnCutLine(cut, elapsed, cut === "wall" ? deadlineMs : idleMs));
         }
 
         let res: ExecResult;
@@ -169,6 +175,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         offset += chunk.length;
 
         if (chunk.length > 0) {
+          lastByteAt = now();
           pending = Buffer.concat([pending, chunk]);
           let nl: number;
           while ((nl = pending.indexOf(0x0a)) !== -1) {
@@ -217,8 +224,8 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         });
         if (res.stdout.includes("WSP_GONE")) return "gone";
         if (res.exitCode !== 0 || !res.stdout.includes("WSP_OK")) throw new Error(`remote write failed on ${machine.id}: exit ${res.exitCode}: ${res.stderr}`);
-        // The person just acted, so the turn gets its deadline over.
-        startedAt = now();
+        // The person just acted, so the turn gets its idle time over.
+        lastByteAt = now();
         return "written";
       },
       closeInput: () => {

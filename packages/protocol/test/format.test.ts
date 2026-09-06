@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { fmtBytes, fmtMemGb } from "../src/index.js";
+import { fmtBytes, fmtElapsed, fmtMemGb, TURN_IDLE_MS, TURN_WALL_MS, turnCutLine } from "../src/index.js";
 import { ROOT, sourceFiles } from "./source-files.js";
 
 describe("fmtBytes", () => {
@@ -20,6 +20,25 @@ describe("fmtBytes", () => {
     expect(fmtBytes(3000 * 1024 * 1024)).toBe("2.9 GB");
     expect(fmtBytes(2048 * 1024 * 1024)).toBe("2.0 GB");
     expect(fmtBytes(250 * 1024 * 1024)).toBe("250.0 MB");
+  });
+});
+
+describe("fmtElapsed and turnCutLine", () => {
+  it("minutes and two-digit seconds, hours ahead once there are any", () => {
+    expect([0, 999, 61_000, 900_000, 3_599_499, 3_600_000, 6 * 3_600_000 + 65_000].map(fmtElapsed)).toEqual([
+      "0m 00s",
+      "0m 01s",
+      "1m 01s",
+      "15m 00s",
+      "59m 59s",
+      "1h 00m 00s",
+      "6h 01m 05s",
+    ]);
+  });
+
+  it("names the rule, how long the turn ran and the limit, in the words the ticket row shows", () => {
+    expect(turnCutLine("idle", 900_000, TURN_IDLE_MS)).toBe("stopped after 15m 00s with no output for 10m");
+    expect(turnCutLine("wall", TURN_WALL_MS, TURN_WALL_MS)).toBe("stopped after 6h 00m 00s at the 6h cap on one turn");
   });
 });
 
