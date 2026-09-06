@@ -144,7 +144,7 @@ export function toolItems(recipe: Recipe, manifest: Manifest): SelectItem[] {
     const r = rowOf(recipe, e.id);
     const word = sourceWord(e, r);
     const size = e.size !== undefined ? `about ${fmtBytes(e.size)} on the machine` : "size not measured yet";
-    const build = e.floor ? "part of the base on every machine" : here.has(e.id) ? size : `${size}; this Mac has no row for it, so this build leaves it out`;
+    const build = e.floor ? "part of the base on every machine" : here.has(e.id) ? size : `${size}; no row here; installed by its ${e.installRoad.road} road`;
     return {
       id: e.id,
       label: e.name,

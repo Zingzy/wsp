@@ -33,9 +33,9 @@ describe("what they need", () => {
     const by = (id: string) => items.find(i => i.id === id)!;
     expect(by("node").detail).toEqual(["ships in 5 lab images; on by default in the catalog; on every machine", "part of the base on every machine"]);
     expect(by("gh")).toMatchObject({ group: "Installed here", detail: ["installed on this Mac", "size not measured yet"] });
-    expect(by("go")).toMatchObject({ hint: "251.0 MB", detail: ["your agents used it in 1 session (2 calls)", "about 251.0 MB on the machine; this Mac has no row for it, so this build leaves it out"] });
-    expect(by("wrangler").detail).toEqual(["your agents used it in 3 sessions (40 calls)", "size not measured yet; this Mac has no row for it, so this build leaves it out"]);
-    expect(by("agent-browser").detail).toEqual(["in no lab image; on by default in the catalog", "size not measured yet; this Mac has no row for it, so this build leaves it out"]);
+    expect(by("go")).toMatchObject({ hint: "251.0 MB", detail: ["your agents used it in 1 session (2 calls)", "about 251.0 MB on the machine; no row here; installed by its brew road"] });
+    expect(by("wrangler").detail).toEqual(["your agents used it in 3 sessions (40 calls)", "size not measured yet; no row here; installed by its npm road"]);
+    expect(by("agent-browser").detail).toEqual(["in no lab image; on by default in the catalog", "size not measured yet; no row here; installed by its npm road"]);
     expect(by("java").detail[0]).toBe("ships in 4 lab images; on request");
     expect(BASE_WORD).toBe("in the base");
   });
