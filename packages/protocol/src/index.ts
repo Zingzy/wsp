@@ -521,8 +521,9 @@ export type LoginState = z.infer<typeof LoginState>;
 export const GoldenLogin = z.object({ name: z.string(), state: LoginState });
 export type GoldenLogin = z.infer<typeof GoldenLogin>;
 /** A tool the builder's import did not put on the image: set aside at plan or install time, or failed to install,
- * with the reason it gave. Forks of the version are missing it. */
-export const GoldenMissingTool = z.object({ name: z.string(), outcome: z.enum(["skipped", "failed"]), note: z.string() });
+ * with the reason it gave. Forks of the version are missing it. `id` is the recipe row's, the key the machine's own
+ * record of what did not install is kept by. */
+export const GoldenMissingTool = z.object({ id: z.string(), name: z.string(), outcome: z.enum(["skipped", "failed"]), note: z.string() });
 export type GoldenMissingTool = z.infer<typeof GoldenMissingTool>;
 /** One base tool's command with the version read on the builder after the base stage. */
 export const GoldenBaseTool = z.object({ name: z.string(), version: z.string() });
