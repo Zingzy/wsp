@@ -36,7 +36,7 @@ claude sessions.
 pnpm install && pnpm build
 printf 'SOLARI_API_KEY=%s\n' "$YOUR_KEY" > .env
 pnpm wsp init       # first run: tick what comes along, build and seal your golden, land in the app
-pnpm wsp            # the app on http://127.0.0.1:4400
+pnpm wsp up         # every start after that: the app on http://127.0.0.1:4400 over the golden you sealed
 pnpm wsp doctor     # prove the reach path against one live machine
 ```
 

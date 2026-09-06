@@ -17,12 +17,14 @@ export {
   serve,
   servingHost,
   terminalIO,
+  up,
   wspHome,
   HELP,
   type CliIO,
   type HostLock,
   type Keys,
   type KeySources,
+  type ServeOptions,
 } from "./cli.js";
 export {
   startCallbackRelay,
