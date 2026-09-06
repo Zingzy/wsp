@@ -22,19 +22,25 @@ function scriptGuest(backend: StubBackend, steps: Step[]) {
   let log = Buffer.alloc(0);
   let exitFile = "";
   let alive = true;
+  let child = false;
   let launch = "";
   let step = 0;
   const kills: string[] = [];
   const writes: string[] = [];
   const calls: string[] = [];
   const pieces = new Map<string, string>();
+  /** What is on the guest now; the reap empties it. */
   const disk = new Map<string, string>();
-  const at = (suffix: string): string => [...disk].find(([path]) => path.endsWith(suffix))?.[1] ?? "";
+  /** What every exec wrote, kept after the reap so a test can read the script it ran. */
+  const landed = new Map<string, string>();
+  const at = (suffix: string): string => [...landed].find(([path]) => path.endsWith(suffix))?.[1] ?? "";
   /** Lands every file the exec writes, inline or joined from pieces, replaced or appended. */
   const land = (cmd: string): void => {
     for (const m of cmd.matchAll(/(?:printf %s '([A-Za-z0-9+/=]*)'|cat '([^']*)'\.\{0\.\.(\d+)\}) \| base64 -d (>>?) '([^']*)'/g)) {
       const b64 = m[1] ?? Array.from({ length: Number(m[3]) + 1 }, (_, i) => pieces.get(`${m[2]}.${i}`) ?? "").join("");
-      disk.set(m[5]!, (m[4] === ">>" ? at(m[5]!) : "") + Buffer.from(b64, "base64").toString("utf8"));
+      const text = (m[4] === ">>" ? at(m[5]!) : "") + Buffer.from(b64, "base64").toString("utf8");
+      disk.set(m[5]!, text);
+      landed.set(m[5]!, text);
     }
   };
 
@@ -49,11 +55,16 @@ function scriptGuest(backend: StubBackend, steps: Step[]) {
     if (cmd.includes("WSP_LAUNCHED")) {
       launch = cmd;
       land(cmd);
+      child = true;
       return { exitCode: 0, stdout: "WSP_LAUNCHED\n", stderr: "" };
     }
     if (cmd.includes("kill -KILL") || cmd.includes("kill -TERM")) {
       kills.push(cmd);
+      // A signal to the group takes the leader and what it spawned; one to a pid takes that pid alone.
+      if (cmd.includes("-- -$P")) child = false;
       if (!cmd.includes(".tail")) alive = false;
+      const rm = /rm -rf ([^ ]+)\.\*/.exec(cmd);
+      if (rm) for (const path of [...disk.keys()]) if (path.startsWith(`${rm[1]}.`)) disk.delete(path);
       return { exitCode: 0, stdout: "", stderr: "" };
     }
     if (cmd.includes("echo WSP_OK")) {
@@ -81,7 +92,17 @@ function scriptGuest(backend: StubBackend, steps: Step[]) {
     }
     throw new Error(`guest got unexpected command: ${cmd}`);
   };
-  return { kills, writes, calls, getScript: () => at(".sh"), getLaunch: () => launch, getInput: () => at(".in"), exit: (code: number) => (exitFile = String(code)) };
+  return {
+    kills,
+    writes,
+    calls,
+    getScript: () => at(".sh"),
+    getLaunch: () => launch,
+    getInput: () => at(".in"),
+    exit: (code: number) => (exitFile = String(code)),
+    childAlive: () => child,
+    files: () => [...disk.keys()],
+  };
 }
 
 /** The bytes the provider counts: its request with the backend's wrapper around the command. */
@@ -114,6 +135,37 @@ describe("machineExecStream", () => {
     expect(await stream.exited).toBe(0);
     expect(guest.getScript()).toContain("export CLAUDE_CONFIG_DIR='/root/.claude-cfg'");
     expect(guest.getScript()).toContain("claude -p 'hi' </dev/null");
+  });
+
+  it("when the poll sees the exit code the run's process group gets TERM then KILL after the log tail is read, and its files go", async () => {
+    const { backend, machine } = await makeMachine();
+    const guest = scriptGuest(backend, [{ append: "almost" }, { append: " done\n", exit: 0 }, {}]);
+    const stream = machineExecStream(machine, { pollMs: 5 })("claude -p 'hi' & sleep 300 &", { env: {} });
+    const lines: string[] = [];
+    for await (const l of stream.lines) lines.push(l);
+    expect(await stream.exited).toBe(0);
+    expect(lines).toEqual(["almost done"]);
+    expect(guest.childAlive()).toBe(false);
+    expect(guest.files()).toEqual([]);
+    expect(guest.kills).toHaveLength(1);
+    const reap = guest.kills[0]!;
+    expect(reap).toMatch(/^P=\$\(cat \/tmp\/wsp-run\/[a-f0-9]{12}\.pid 2>\/dev\/null\); /);
+    expect(reap.indexOf("kill -TERM -- -$P")).toBeGreaterThan(-1);
+    expect(reap.indexOf("kill -TERM -- -$P")).toBeLessThan(reap.indexOf("kill -KILL -- -$P"));
+    expect(reap.indexOf("kill -KILL -- -$P")).toBeLessThan(reap.indexOf("rm -rf /tmp/wsp-run/"));
+    expect(reap).toMatch(/rm -rf \/tmp\/wsp-run\/[a-f0-9]{12}\.\*; true$/);
+    const polls = guest.calls.filter(c => c.includes("__WSP_EOF_"));
+    expect(guest.calls.indexOf(reap)).toBeGreaterThan(guest.calls.indexOf(polls.at(-1)!));
+  });
+
+  it("a leader that died without an exit file still gets its group reaped and its files removed", async () => {
+    const { backend, machine } = await makeMachine();
+    const guest = scriptGuest(backend, [{ append: "partial output\n" }, { dead: true }, {}]);
+    const stream = machineExecStream(machine, { pollMs: 5 })("claude -p 'hi'", { env: {} });
+    for await (const _ of stream.lines) void _;
+    expect(await stream.exited).toBeNull();
+    expect(guest.childAlive()).toBe(false);
+    expect(guest.files()).toEqual([]);
   });
 
   it("a command that fits one exec body launches in one exec, under the cap", async () => {
@@ -192,6 +244,8 @@ describe("machineExecStream", () => {
     for await (const _ of stream.lines) void _;
     expect(await stream.exited).toBeNull();
     expect(guest.kills.some(k => k.includes("kill -KILL"))).toBe(true);
+    expect(guest.childAlive()).toBe(false);
+    expect(guest.files()).toEqual([]);
   });
 
   it("without an input channel the command runs as before: no input file, no tail, and write rejects", async () => {
@@ -262,7 +316,7 @@ describe("machineExecStream", () => {
     now = 900;
     expect(await stream.write("late")).toBe("gone");
     expect(guest.writes).toHaveLength(1);
-    expect(guest.writes[0]).toMatch(/^mkdir -p '\/tmp\/wsp-run'\n\[ -e \/tmp\/wsp-run\/[a-f0-9]+\.exit \] && \{ echo WSP_GONE; exit 0; \}\nset -o pipefail\n\[ -e '\/tmp\/wsp-run\/[a-f0-9]+\.in\.a[0-9a-f]{12}' \] \|\| \{ printf %s '[A-Za-z0-9+/=]+' \| base64 -d >> '\/tmp\/wsp-run\/[a-f0-9]+\.in' && : > '[^']+'; \} \|\| exit 1\necho WSP_OK$/);
+    expect(guest.writes[0]).toMatch(/^mkdir -p '\/tmp\/wsp-run'\n\{ \[ -e \/tmp\/wsp-run\/[a-f0-9]+\.exit \] \|\| \[ ! -d \/tmp\/wsp-run\/[a-f0-9]+\.d \]; \} && \{ echo WSP_GONE; exit 0; \}\nset -o pipefail\n\[ -e '\/tmp\/wsp-run\/[a-f0-9]+\.in\.a[0-9a-f]{12}' \] \|\| \{ printf %s '[A-Za-z0-9+/=]+' \| base64 -d >> '\/tmp\/wsp-run\/[a-f0-9]+\.in' && : > '[^']+'; \} \|\| exit 1\necho WSP_OK$/);
     expect(guest.getInput()).toBe("first\n");
     now = 1100;
     await expect(first).rejects.toThrow(/deadline/);
@@ -276,11 +330,12 @@ describe("machineExecStream", () => {
     stream.closeInput();
     stream.closeInput();
     for await (const _ of stream.lines) void _;
-    expect(guest.kills).toHaveLength(1);
-    expect(guest.kills[0]).toMatch(/P=\$\(cat \/tmp\/wsp-run\/[a-f0-9]+\.tail 2>\/dev\/null\); \[ -n "\$P" \] && kill -TERM "\$P"/);
-    expect(guest.kills[0]).not.toContain("-- -");
+    const before = guest.kills.filter(k => !k.includes("rm -rf"));
+    expect(before).toHaveLength(1);
+    expect(before[0]).toMatch(/P=\$\(cat \/tmp\/wsp-run\/[a-f0-9]+\.tail 2>\/dev\/null\); \[ -n "\$P" \] && kill -TERM "\$P"/);
+    expect(before[0]).not.toContain("-- -");
     stream.closeInput();
-    expect(guest.kills).toHaveLength(1);
+    expect(guest.kills.filter(k => !k.includes("rm -rf"))).toHaveLength(1);
   });
 
   it("a write restarts the deadline; past it the stream ends with the error and the process group is killed", async () => {
@@ -299,6 +354,8 @@ describe("machineExecStream", () => {
     await expect(first).rejects.toThrow(/deadline/);
     expect(await stream.exited).toBeNull();
     expect(guest.kills.some(k => k.includes("kill -KILL -- -$P"))).toBe(true);
+    expect(guest.childAlive()).toBe(false);
+    expect(guest.files()).toEqual([]);
   });
 
   it("tolerates exec failures mid-poll (a napping machine) and finishes after recovery", async () => {
@@ -324,8 +381,17 @@ describe("machineExecStream", () => {
 });
 
 const dirs: string[] = [];
+const children: number[] = [];
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  // The test asserts the child is gone; this keeps a red run from leaving a sleep behind on the Mac.
+  for (const pid of children.splice(0)) {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      continue;
+    }
+  }
 });
 
 /** This machine's bash as the guest; setsid is perl's setpgrp where the OS has none and base64 loses -w0. */
@@ -376,6 +442,23 @@ describe("machineExecStream over this machine's bash", () => {
   });
 });
 
+describe("machineExecStream reaping a real turn's process group", () => {
+  it("a child the command left in the background is gone once the turn ended, and the run directory is empty", async () => {
+    const { machine, runDir } = localGuest();
+    const childFile = join(runDir, "..", "child");
+    const stream = machineExecStream(machine, { pollMs: 20, runDir })(`sleep 300 & echo $! > ${shellQuote(childFile)}; echo hi`, { env: {} });
+    const lines: string[] = [];
+    for await (const l of stream.lines) lines.push(l);
+    expect(await stream.exited).toBe(0);
+    expect(lines).toEqual(["hi"]);
+    const childPid = Number(readFileSync(childFile, "utf8").trim());
+    children.push(childPid);
+    expect(childPid).toBeGreaterThan(0);
+    await vi.waitFor(() => expect(() => process.kill(childPid, 0)).toThrow(), { timeout: 5000 });
+    expect(readdirSync(runDir)).toEqual([]);
+  }, 15_000);
+});
+
 describe("machineExecStream feeding a real process over the input channel", () => {
   it("the seeded line and a later write reach the command's stdin in order, closeInput ends it, and the tail is gone after", async () => {
     const { machine, runDir } = localGuest();
@@ -391,7 +474,6 @@ describe("machineExecStream feeding a real process over the input channel", () =
     expect(await stream.write("world")).toBe("written");
     await vi.waitFor(() => expect(lines).toEqual(["hello", "world"]), { timeout: 5000 });
     stream.closeInput();
-    await vi.waitFor(() => expect(file(".exit")).toBeDefined(), { timeout: 5000 });
     await reading;
     expect(lines).toEqual(["hello", "world"]);
     expect(await stream.exited).toBe(0);
@@ -400,21 +482,33 @@ describe("machineExecStream feeding a real process over the input channel", () =
 
   it("a write after the command exited answers gone and the input file keeps only what the process could read", async () => {
     const { machine, runDir } = localGuest();
-    const stream = machineExecStream(machine, { pollMs: 1000, runDir })("cat", { env: {}, input: ["hello"] });
+    let holdPolls = false;
+    const held: (() => void)[] = [];
+    const gated = {
+      id: "local",
+      exec: async (cmd: string, o?: { timeoutMs?: number }) => {
+        if (holdPolls && cmd.includes("__WSP_EOF_")) await new Promise<void>(r => held.push(r));
+        return machine.exec(cmd, o);
+      },
+    } as unknown as Machine;
+    const stream = machineExecStream(gated, { pollMs: 20, runDir })("cat", { env: {}, input: ["hello"] });
     const lines: string[] = [];
     const reading = (async () => {
       for await (const l of stream.lines) lines.push(l);
     })();
     const file = (suffix: string): string | undefined => readdirSync(runDir).find(f => f.endsWith(suffix));
     await vi.waitFor(() => expect(readFileSync(join(runDir, file(".tail")!), "utf8").trim()).not.toBe(""), { timeout: 5000 });
+    holdPolls = true;
     stream.closeInput();
     await vi.waitFor(() => expect(file(".exit")).toBeDefined(), { timeout: 5000 });
     expect(await stream.write("late")).toBe("gone");
+    expect(readFileSync(join(runDir, file(".in")!), "utf8")).toBe("hello\n");
+    holdPolls = false;
+    for (const release of held.splice(0)) release();
     await reading;
     expect(lines).toEqual(["hello"]);
     expect(await stream.exited).toBe(0);
-    const inFile = readdirSync(runDir).find(f => f.endsWith(".in"))!;
-    expect(readFileSync(join(runDir, inFile), "utf8")).toBe("hello\n");
+    expect(readdirSync(runDir)).toEqual([]);
   }, 15_000);
 });
 
