@@ -4729,6 +4729,71 @@ describe("a thread whose start named who to tell", () => {
     expect(events.find(e => e.type === "session.notify")).toMatchObject({ notify: "me", text: `thread ${kid.view().threadId!.slice(0, 8)} finished (failed): machine paused while the agent was working` });
     await rt.close();
   });
+
+  it("a turn a host restart cut is told the same way: the parent, in another workspace whose rows load later, gets the line as a turn of its own since its own turn was cut too", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h1 = held(true);
+    const rt1 = createRuntime({ backend, store, adapters: { claude: h1.adapter } });
+    // The child's workspace has the older sessions document, so the sweep meets the child before its parent.
+    const kidWs = await rt1.workspaces.create({ golden: "snap_g", name: "builder" });
+    const warmup = await rt1.sessions.start(kidWs.id, { prompt: "warm up" });
+    h1.end(0, "ready");
+    await warmup.finished;
+    const parentWs = await rt1.workspaces.create({ golden: "snap_g", name: "lead" });
+    const parent = await rt1.sessions.start(parentWs.id, { prompt: "orchestrate" });
+    const parentThread = parent.view().threadId!;
+    const kid = await rt1.sessions.start(kidWs.id, { prompt: "build it", notify: parentThread, startedBy: "agent" });
+    const kidThread = kid.view().threadId!;
+    await rt1.close();
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 723_000);
+    const h2 = held(true);
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h2.adapter } });
+    try {
+      const line = `thread ${kidThread.slice(0, 8)} finished (failed): cut by a host restart after 12m 03s`;
+      const kidHistory = (await rt2.sessions.history(kidWs.id)).filter(e => e.threadId === kidThread);
+      expect(kidHistory.map(e => e.type)).toEqual(["session.start", "session.notify", "session.end"]);
+      expect(kidHistory[1]).toMatchObject({ type: "session.notify", turnId: kid.turnId, sessionId: kid.view().claudeSessionId, notify: parentThread, text: line });
+      expect(kidHistory[2]).toMatchObject({ type: "session.end", turnId: kid.turnId, reason: "host restarted while the agent was working" });
+      await vi.waitFor(() => expect(h2.starts).toHaveLength(1));
+      expect(h2.starts[0]).toMatchObject({ prompt: line, resume: parent.view().claudeSessionId });
+      expect(h2.steered).toEqual([]);
+      const parentHistory = (await rt2.sessions.history(parentWs.id)).filter(e => e.threadId === parentThread);
+      expect(parentHistory.map(e => e.type)).toEqual(["session.start", "session.end", "session.start"]);
+      expect(parentHistory[2]).toMatchObject({ type: "session.start", prompt: line });
+      h2.end(0, "read it");
+      await rt2.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a turn a host restart cut that was to tell me records the line in its thread, with the row's span", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h1 = held(true);
+    const rt1 = createRuntime({ backend, store, adapters: { claude: h1.adapter } });
+    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
+    const kid = await rt1.sessions.start(ws.id, { prompt: "build it", notify: "me" });
+    await rt1.close();
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 45_000);
+    const rt2 = createRuntime({ backend, store, adapters: {} });
+    try {
+      const events: EventUnion[] = [];
+      rt2.events.on("*", e => events.push(e));
+      const history = await rt2.sessions.history(ws.id);
+      expect(history.map(e => e.type)).toEqual(["session.start", "session.notify", "session.end"]);
+      expect(history[1]).toMatchObject({ type: "session.notify", turnId: kid.turnId, notify: "me", text: `thread ${kid.view().threadId!.slice(0, 8)} finished (failed): cut by a host restart after 0m 45s` });
+      expect(events.filter(e => e.type === "session.notify")).toHaveLength(1);
+      await rt2.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("gone machines", () => {
