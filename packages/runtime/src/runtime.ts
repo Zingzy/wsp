@@ -453,9 +453,9 @@ export interface Runtime {
   };
   readonly harnesses: {
     /** What each harness with an adapter takes at launch; the composer's pickers render from this. With a running
-     * workspace the binaries on its machine are asked, at a session start too, and their answer, or the table when they
-     * give none, is kept per machine for CATALOG_TTL_MS; without one, or on a workspace that is not running, the table
-     * answers. */
+     * workspace each adapter that probes is asked on its machine, at a session start too, and its answer, or the table
+     * when it gives none, is kept per machine and harness for CATALOG_TTL_MS; without one, or on a workspace that is not
+     * running, the table answers. */
     list(workspaceId?: string): Promise<HarnessCatalog[]>;
   };
   readonly golden: {
