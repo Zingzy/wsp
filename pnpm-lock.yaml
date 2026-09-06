@@ -298,6 +298,9 @@ importers:
       '@wsp/adapter-claude':
         specifier: workspace:*
         version: link:../adapter-claude
+      '@wsp/catalog':
+        specifier: workspace:*
+        version: link:../catalog
       '@wsp/engine':
         specifier: workspace:*
         version: link:../engine

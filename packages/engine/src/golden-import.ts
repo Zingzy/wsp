@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { MCP_ID_PREFIX, shellQuote, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
-import { APT_ENV, APT_INDEX, APT_UPDATE, BREW, BREW_PREFIX, CATALOG_AGENTS, CLAUDE_KEY_FILE, HOMEBREW, HOMEBREW_STEP, NODE_PATH_LINE, NODE_RELEASES, UV_INSTALL, asLinuxbrew, asLinuxbrewScript, baseEntryFor, baseNote, catalogEntry, installLine, nodeInstallScript, pinStateOf, ROAD_MODULES, roadModule, smokeOf, type InstallRoad, type NodeMajor, type RoadName, type ToolPin } from "@wsp/catalog";
+import { APT_ENV, APT_INDEX, APT_UPDATE, BREW, BREW_PREFIX, CATALOG_AGENTS, CLAUDE_KEY_FILE, HOMEBREW, HOMEBREW_STEP, NODE_PATH_LINE, NODE_RELEASES, UV_INSTALL, asLinuxbrew, asLinuxbrewScript, baseEntryFor, baseNote, catalogEntry, installLine, nodeInstallScript, pinStateOf, ROAD_MODULES, roadModule, smokeOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolPin } from "@wsp/catalog";
 
 export { CLAUDE_KEY_FILE, HOMEBREW, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
 
@@ -892,14 +892,17 @@ export function nodeMajorFor(floor: number, now: Date): NodeMajor | undefined {
 }
 
 /** Every installer pins a version; npm checks the registry's integrity hash for each tarball, uv is checksummed
- * by its release, git checkouts compare the commit. The catalog's agents install by their roads; Claude Code's
- * installer is the catalog's GOLDEN_SETUP, which the setup stage runs, so it has no row here. Aider is not a
+ * by its release, git checkouts compare the commit. The catalog's agents install by their roads. Aider is not a
  * catalog agent (its project state has no measured resolver, so wsp does not ship it); its line stays for recipes
  * that tick it: https://aider.chat/docs/install.html, the uv tool line. */
-export const AGENT_INSTALLERS: Record<string, AgentInstaller> = {
-  ...Object.fromEntries(CATALOG_AGENTS.filter(a => a.id !== "claude").map(a => [a.id, { name: a.name, install: installLine(a), smoke: smokeOf(a), ...(a.node !== undefined ? { node: a.node } : {}) }])),
-  aider: { name: "Aider", install: `${UV_INSTALL}\nuv tool install --force --python 3.12 --with pip aider-chat==0.86.2`, smoke: "aider --version" },
-};
+export function agentInstallers(agents: readonly AgentEntry[]): Record<string, AgentInstaller> {
+  return {
+    ...Object.fromEntries(agents.map(a => [a.id, { name: a.name, install: installLine(a), smoke: smokeOf(a), ...(a.node !== undefined ? { node: a.node } : {}) }])),
+    aider: { name: "Aider", install: `${UV_INSTALL}\nuv tool install --force --python 3.12 --with pip aider-chat==0.86.2`, smoke: "aider --version" },
+  };
+}
+
+export const AGENT_INSTALLERS: Record<string, AgentInstaller> = agentInstallers(CATALOG_AGENTS);
 
 /** The package an installer's npm or uv line puts on the machine, read off the line's pinned spec. */
 const NPM_INSTALL_LINE = /^npm install -g (?:--ignore-scripts )?(\S+?)@\S+$/m;
@@ -947,10 +950,9 @@ export interface AgentsPlan {
   node?: NodeInstall;
 }
 
-/** The ticked agents with an installer, in recipe order; `extra` adds or
- * overrides installers the table lacks (the host owns the Claude Code line). */
-export function agentInstallsFor(entries: readonly RecipeEntry[], extra: Record<string, AgentInstaller> = {}, now: Date = new Date()): AgentsPlan {
-  const table = { ...AGENT_INSTALLERS, ...extra };
+/** The ticked agents with an installer, in recipe order, from the installers of `agents`, the catalog's by default. */
+export function agentInstallsFor(entries: readonly RecipeEntry[], agents: readonly AgentEntry[] = CATALOG_AGENTS, now: Date = new Date()): AgentsPlan {
+  const table = agentInstallers(agents);
   const out: AgentsPlan = { installs: [], skipped: [] };
   for (const e of entries) {
     if (!ticked(e) || e.rung !== "agents" || isMcpRow(e)) continue;

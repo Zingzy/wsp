@@ -41,4 +41,5 @@ export {
 export { deriveSidebarProjects, deriveThreads, workspaceIndicator, threadIndicator, turnWait, type SidebarInput } from "./workspaces.js";
 export { terminalPaneState, terminalPaneTitle, terminalEmptyLine, terminalInputRefusal, type TerminalPaneState, type TerminalPaneInput } from "./terminal-pane.js";
 export { toTerminalAttachEvent, isPtyEvent } from "./terminal.js";
-export { CLAUDE_CODE_CATALOG, catalogFor, catalogFromHarness } from "./catalog.js";
+export { catalogFor, catalogFromHarness } from "./catalog.js";
+export { HARNESS_CLIENTS, harnessClient, type HarnessClient, type HarnessGlyph } from "./harnesses.js";

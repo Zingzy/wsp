@@ -6,12 +6,12 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { LoginChoice, Manifest, ManifestEntry, Rung } from "@wsp/collect";
-import { CATALOG_AGENTS, catalogEntry, catalogToolFor, loginIdOf, loginRow } from "@wsp/catalog";
+import { CATALOG_AGENTS, catalogEntry, catalogToolFor, guestEnv, hasLogin, loginIdOf, loginRow } from "@wsp/catalog";
 import { CATALOG_PREFIX, agentOwning, isMcpRow, neverCopied, packageOf, parseMcpId, rowRoad, type RecipeDigest } from "@wsp/engine";
 import { Recipe } from "@wsp/protocol";
 import type { GoldenImport, GoldenRecipe, Machine } from "@wsp/runtime";
 import type { Keys } from "./cli.js";
-import { GUEST_ENVS, claudeEnvs } from "./doctor.js";
+import { GUEST_ENVS } from "./doctor.js";
 
 export const RUNG_TITLE: Record<Rung, string> = {
   identity: "Identity",
@@ -58,17 +58,18 @@ export function withoutAgentTools(entries: readonly ManifestEntry[]): ManifestEn
   });
 }
 
-/** The command a CLI login is for; an agent's login follows its agent row instead (see loginShown). */
-const LOGIN_BIN: Readonly<Record<string, string>> = { gh: "gh", gcloud: "gcloud", wrangler: "wrangler", cloudflared: "cloudflared", vercel: "vercel", aws: "aws", kube: "kubectl" };
-/** Packages not named for the command they put on PATH. */
-const ROW_BIN: Readonly<Record<string, string>> = { awscli: "aws", "kubernetes-cli": "kubectl", "cloudflare-wrangler": "wrangler" };
+/** The command a CLI login is for, from the catalog tool its row is filed under; an agent's login follows its agent row instead (see loginShown). */
+function loginBin(e: ManifestEntry): string | undefined {
+  const entry = loginRow(agentName(e))?.entry;
+  return entry?.kind === "tool" ? entry.bin : undefined;
+}
 
-/** The command a tools row puts on PATH, when a road installs the row: the road's own answer, else the package's name. */
+/** The command a tools row puts on PATH, when a road installs the row: the catalog's answer, else the road's, else the package's name. */
 function rowBin(t: ManifestEntry): string | undefined {
   const planned = rowRoad(t);
   if (planned === undefined) return undefined;
   const pkg = packageOf(t);
-  return ROW_BIN[pkg] ?? planned.bin ?? pkg.slice(pkg.lastIndexOf("/") + 1);
+  return catalogToolFor(pkg)?.bin ?? planned.bin ?? pkg.slice(pkg.lastIndexOf("/") + 1);
 }
 
 /** What brings a command no tools row lists: its catalog entry, ticked under What they need. */
@@ -90,7 +91,7 @@ export interface LoginTool {
 
 /** Whether the command a CLI login needs is coming with the ticks so far; undefined for a login that follows an agent. */
 export function loginTool(e: ManifestEntry, manifest: Manifest, coming: ReadonlySet<string>): LoginTool | undefined {
-  const bin = e.rung === "logins" ? LOGIN_BIN[agentName(e)] : undefined;
+  const bin = e.rung === "logins" ? loginBin(e) : undefined;
   if (bin === undefined) return undefined;
   const rows = manifest.entries.filter(t => t.rung === "tools" && rowBin(t) === bin);
   const row = rows.find(r => coming.has(r.id)) ?? rows.find(isTickable) ?? rows[0];
@@ -348,19 +349,28 @@ export function recipeChanges(from: RecipeDigest, to: RecipeDigest, manifest: Ma
 /** What the builder runs. The harness line and smoke are bare: the import
  * carries every ticked agent with its own installer and version check, and
  * the builder's seal smokes the ones that installed. Nothing ticked means a
- * bare machine that still has to fork and boot to seal. */
+ * bare machine that still has to fork and boot to seal. The envs are every
+ * guest's plus what each ticked agent's entry asks for: its state home
+ * variable, and a loaded key under the variable its sign-in reads. */
 export function goldenRecipeFor(
   bring: readonly ManifestEntry[],
   keys: Pick<Keys, "anthropic">,
   hooks: { deployDaemon?: (machine: Machine) => Promise<void | string>; import?: GoldenImport } = {},
 ): GoldenRecipe {
-  const claude = bring.some(e => e.rung === "agents" && agentName(e) === "claude");
+  const loaded: Record<string, string> = keys.anthropic !== undefined ? { ANTHROPIC_API_KEY: keys.anthropic } : {};
+  const envs: Record<string, string> = { ...GUEST_ENVS };
+  for (const e of bring) {
+    const agent = e.rung === "agents" ? catalogEntry(agentName(e)) : undefined;
+    if (agent?.kind !== "agent") continue;
+    const key = hasLogin(agent.signIn) ? agent.signIn.keyEnv : undefined;
+    Object.assign(envs, guestEnv(agent), key !== undefined && loaded[key] !== undefined ? { [key]: loaded[key] } : {});
+  }
   return {
     setup: "true",
     smoke: "true",
     cpu: 2,
     memMb: 4096,
-    envs: claude ? claudeEnvs(keys.anthropic) : { ...GUEST_ENVS },
+    envs,
     ...(hooks.deployDaemon !== undefined ? { deployDaemon: hooks.deployDaemon } : {}),
     ...(hooks.import !== undefined ? { import: hooks.import } : {}),
   };

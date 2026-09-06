@@ -18,7 +18,6 @@ import {
   refusedPath,
   shellInstallFor,
   toolInstallsFor,
-  type AgentInstaller,
   type BrewTable,
   type FilesPlan,
   type GoldenImport,
@@ -33,7 +32,7 @@ import {
   secretPath,
   withApiKeyHelper,
 } from "@wsp/engine";
-import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENTS } from "@wsp/catalog";
+import { CLAUDE_CONFIG_DIR, MCP_AGENTS } from "@wsp/catalog";
 import { tarPackCommand } from "./doctor.js";
 
 const execFileAsync = promisify(execFile);
@@ -113,9 +112,6 @@ export function keychainReader(run: (file: string, args: string[]) => Promise<{ 
     },
   };
 }
-
-/** Claude Code's installer is the one curl into a shell the rules allow. */
-export const CLAUDE_INSTALLER: AgentInstaller = { name: "Claude Code", install: GOLDEN_SETUP, smoke: GOLDEN_SMOKE };
 
 /** The last line `security` printed, since its stderr names the cause and never the secret. A helper's failure is its
  * exit status alone: the command line and whatever it printed may carry the key. */
@@ -486,7 +482,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
   });
   const shell = shellInstallFor(bring);
   const tools = toolInstallsFor(bring, opts.brew);
-  const agents = agentInstallsFor(bring, { claude: CLAUDE_INSTALLER });
+  const agents = agentInstallsFor(bring);
   const mcp = opts.rows !== undefined ? mcpPlanFor(opts.rows, { home, guestHome: GUEST_HOME, agents: MCP_SOURCES, binDirs: MCP_BIN_DIRS }) : undefined;
   const label = (id: string) => bring.find(e => e.id === id)?.label ?? id;
   const anyFiles = plan.files.length + plan.secrets.length + plan.skipped.length > 0;

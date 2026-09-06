@@ -20,8 +20,8 @@ interface Agent {
 /** Aider is not a catalog agent (its project state has no measured resolver, so wsp does not ship it); its row stays for laptops that have it. */
 const AIDER: Agent = { id: "aider", label: "Aider", bin: "aider", config: ["~/.aider.conf.yml", "~/.aider.model.settings.yml", "~/.aider.model.metadata.json"] };
 
-/** The catalog's agents in its order, each with the config that travels. */
-export const AGENTS: readonly Agent[] = CATALOG_AGENTS.flatMap(a => [...(a.id === "pi" ? [AIDER] : []), { id: a.id, label: a.name, bin: a.bin, config: a.configPaths, ...(a.volatile !== undefined ? { volatile: a.volatile } : {}) }]);
+/** The catalog's agents in its order, each with the config that travels, then Aider. */
+export const AGENTS: readonly Agent[] = [...CATALOG_AGENTS.map((a): Agent => ({ id: a.id, label: a.name, bin: a.bin, config: a.configPaths, ...(a.volatile !== undefined ? { volatile: a.volatile } : {}) })), AIDER];
 
 export async function detectAgents(host: Host): Promise<ManifestEntry[]> {
   const rows: ManifestEntry[] = [];

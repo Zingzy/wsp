@@ -2,6 +2,7 @@
 // Row labels and dialog helpers for the workspace sidebar, all pure. The
 // adapter names the state; this file turns it into the words and classes a
 // row shows.
+import { agentName } from "@wsp/catalog";
 import type { ReachState, SessionOrigin, WorkspacePhase, WorkspaceStatus } from "@wsp/protocol";
 import type { SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
 import { formatRelativeTimeLabel } from "../lib/timestampFormat.js";
@@ -38,7 +39,7 @@ const OPENER_WORD: Record<SessionOrigin, string> = { person: "you", cli: "cli", 
 
 /** The agent inside the thread and who opened it: you, the command line on this computer, or a local agent. */
 export function provenanceLabel(thread: Pick<SidebarThreadSnapshot, "harness" | "startedBy">): string {
-  return `${thread.harness} · ${OPENER_WORD[thread.startedBy]}`;
+  return `${agentName(thread.harness)} · ${OPENER_WORD[thread.startedBy]}`;
 }
 
 /** The pill keys on the session's status and wears the adapter's word: a running thread and one that did not settle carry one, the resting states none. */

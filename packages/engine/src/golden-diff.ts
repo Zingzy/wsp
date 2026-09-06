@@ -3,7 +3,7 @@
 // against the recipe now, as rows to apply on top and rows to take off. Pure;
 // golden.ts runs the result on a fork or on the kept builder.
 import { MCP_ID_PREFIX, shellQuote, type RecipeDigest } from "@wsp/protocol";
-import { AGENT_INSTALLERS, agentUninstall, toolUninstall, type AgentInstaller, type RecipeEntry } from "./golden-import.js";
+import { AGENT_INSTALLERS, agentUninstall, toolUninstall, type RecipeEntry } from "./golden-import.js";
 
 type Tick = RecipeDigest["ticks"][number];
 type DigestFile = RecipeDigest["files"][number];
@@ -141,9 +141,8 @@ function fileRemoval(f: FileChange): Removal {
 }
 
 /** Everything the diff takes off the machine: removed files, removed tools
- * through their manager, removed agents through their installer's inverse.
- * `installers` adds the agents the table lacks (the host owns Claude Code's). */
-export function removalsFor(d: RecipeDiff, from: RecipeDigest, installers: Record<string, AgentInstaller> = {}): Removal[] {
+ * through their manager, removed agents through their installer's inverse. */
+export function removalsFor(d: RecipeDiff, from: RecipeDigest): Removal[] {
   const out: Removal[] = [];
   for (const f of d.files) if (f.change === "removed") out.push(fileRemoval(f));
   for (const t of d.tools) {
@@ -153,14 +152,13 @@ export function removalsFor(d: RecipeDiff, from: RecipeDigest, installers: Recor
     const r = row === undefined ? { note: "row not in the recipe the golden was built from" } : toolUninstall(row);
     out.push({ what: "tool", id: t.id, label: t.label, ...r });
   }
-  const table = { ...AGENT_INSTALLERS, ...installers };
   for (const a of d.agents) {
     if (a.change !== "removed") continue;
     if (a.id.startsWith(MCP_ID_PREFIX)) {
       out.push({ what: "agent", id: a.id, label: a.label, note: "an MCP server; the MCP stage takes it out of the agent's config" });
       continue;
     }
-    const installer = table[nameOf(a.id)];
+    const installer = AGENT_INSTALLERS[nameOf(a.id)];
     const r = installer === undefined ? { note: "no installer known, so nothing to uninstall" } : agentUninstall(installer);
     out.push({ what: "agent", id: a.id, label: a.label, ...r, ...(installer !== undefined ? { smoke: installer.smoke } : {}) });
   }

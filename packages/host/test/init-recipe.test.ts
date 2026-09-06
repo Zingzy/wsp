@@ -93,6 +93,9 @@ describe("the command a login needs", () => {
     // gh's row is ticked in the fixture's defaults; an agent's login follows its agent, not a tools row.
     expect(loginTool(byId("logins/gh"), manifest, new Set(["tools/brew/gh"]))).toEqual({ bin: "gh", row: byId("tools/brew/gh"), coming: true });
     expect(loginTool(byId("logins/claude"), manifest, none)).toBeUndefined();
+    // Any catalog tool's login names its command; a keys row beside an agent's login follows the agent.
+    expect(loginTool(login("fly", "Fly login"), { entries: [] }, none)?.why).toBe("fly is not coming: no row lists it; tick flyctl under What they need to bring it");
+    expect(loginTool(login("hermes-keys", "Hermes keys"), { entries: [] }, none)).toBeUndefined();
     expect(loginTool(byId("tools/brew/gh"), manifest, none)).toBeUndefined();
   });
 
@@ -242,6 +245,13 @@ describe("goldenRecipeFor", () => {
     const noKey = goldenRecipeFor(bring("agents/claude"), {});
     expect(noKey.envs).not.toHaveProperty("ANTHROPIC_API_KEY");
     expect(noKey.envs).toHaveProperty("CLAUDE_CONFIG_DIR");
+  });
+
+  it("a ticked agent whose entry names no state home variable and no key variable adds nothing, even with a key loaded", () => {
+    const codex = goldenRecipeFor(bring("agents/codex", "shell/zshrc"), { anthropic: ANTHROPIC });
+    expect(codex.envs).not.toHaveProperty("CLAUDE_CONFIG_DIR");
+    expect(codex.envs).not.toHaveProperty("ANTHROPIC_API_KEY");
+    expect(codex.envs).toEqual(goldenRecipeFor(bring("shell/zshrc"), {}).envs);
   });
 
   it("threads the daemon deploy hook through", () => {
