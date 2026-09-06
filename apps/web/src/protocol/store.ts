@@ -27,6 +27,8 @@ export interface Creation {
   /** What select() takes for it; stable from the click through the runtime's first stage event. */
   readonly key: string;
   readonly name: string;
+  /** The snapshot the create forks, when it is not the golden's head: a project golden's. */
+  readonly golden?: string;
   /** The id the runtime minted, known from its first stage event. */
   readonly workspaceId: string | null;
   readonly lines: ReadonlyArray<CreationLine>;
@@ -85,9 +87,10 @@ interface State {
   /** Mirrors the client's status; live with an api bound pulls list and statuses again so a reconnect converges. */
   setConn(conn: ConnStatus): void;
   select(id: string | null, threadId?: string | null): void;
-  /** Starts a create from the golden head, selects its row, and follows it through the stage events; resolves with
-   * the runtime's id for the new workspace, or null when the create was refused. */
-  createWorkspace(name: string): Promise<string | null>;
+  /** Starts a create from the golden head, or from `golden` (a project golden's snapshot) when given, selects its row,
+   * and follows it through the stage events; resolves with the runtime's id for the new workspace, or null when the
+   * create was refused. */
+  createWorkspace(name: string, golden?: string): Promise<string | null>;
   /** Runs a failed creation again under the same row. */
   retryCreation(key: string): Promise<void>;
   dismissCreation(key: string): void;
@@ -128,11 +131,11 @@ export const useStore = create<State>((set, get) => {
       selectedId: s.selectedId === key ? workspaceId : s.selectedId,
     }));
   };
-  const runCreation = async (key: string, name: string): Promise<string | null> => {
+  const runCreation = async (key: string, name: string, golden?: string): Promise<string | null> => {
     const api = get().api;
     if (!api) return null;
     try {
-      const { notice, ...workspace } = await api.createFromGoldenHead(name);
+      const { notice, ...workspace } = await (golden === undefined ? api.createFromGoldenHead(name) : api.createWorkspace(golden, name));
       if (notice !== undefined) set({ toast: notice });
       // The created event normally lands first; when the reply beats it, the row still has a workspace to become.
       set(s => (s.workspaces.some(w => w.id === workspace.id) ? {} : { workspaces: [...s.workspaces, workspace].sort((a, b) => a.id.localeCompare(b.id)) }));
@@ -224,17 +227,17 @@ export const useStore = create<State>((set, get) => {
       if (conn === "live" && api) pull(api);
     },
     select(id, threadId = null) { set({ selectedId: id, selectedThreadId: threadId }); },
-    async createWorkspace(name) {
+    async createWorkspace(name, golden) {
       if (!get().api) return null;
       const key = `creating:${++creationSeq}`;
-      set(s => ({ creations: [...s.creations, { key, name, workspaceId: null, lines: NO_LINES, failed: null }], selectedId: key, selectedThreadId: null }));
-      return runCreation(key, name);
+      set(s => ({ creations: [...s.creations, { key, name, ...(golden !== undefined ? { golden } : {}), workspaceId: null, lines: NO_LINES, failed: null }], selectedId: key, selectedThreadId: null }));
+      return runCreation(key, name, golden);
     },
     async retryCreation(key) {
       const creation = get().creations.find(c => c.key === key);
       if (!creation) return;
       patchCreation(key, c => ({ ...c, workspaceId: null, lines: NO_LINES, failed: null }));
-      await runCreation(key, creation.name);
+      await runCreation(key, creation.name, creation.golden);
     },
     dismissCreation(key) {
       set(s => ({

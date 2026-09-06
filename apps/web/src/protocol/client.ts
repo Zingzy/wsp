@@ -18,6 +18,7 @@ import {
   type PortProbeView,
   type PortReachView,
   ProjectExportResult,
+  ProjectGolden,
   ProjectImportResult,
   ProjectPlan,
   type SessionEvent,
@@ -298,6 +299,11 @@ export interface Api {
   costHistory?(workspaceId: string): Promise<WorkspaceCostEvent[]>;
   /** Moves head to a version in the manifest; workspaces already forked keep their image. */
   rollbackSnapshot(version: number, name?: string): Promise<SnapshotRollbackResult>;
+  /** Snapshots the workspace's disk as a project golden; the runtime refuses a machine that is not first-life. Optional
+   * so fixtures without a project need not fake it; the Lineage section offers no snapshot without it. */
+  snapshotWorkspace?(id: string): Promise<ProjectGolden>;
+  /** Every project golden the runtime took; the Lineage section lists each under the version it stands on. */
+  listProjectGoldens?(): Promise<ProjectGolden[]>;
 }
 
 export interface WorkspaceSizeSpec {
@@ -399,6 +405,9 @@ export function makeApi(c: ProtocolClient): Api {
     snapshotStorage: async () => (await c.request<{ storage: SnapshotStorage | null }>("snapshots.storage")).storage,
     // Parsed, not trusted: the chart interpolates whatever numbers it is handed.
     costHistory: async workspaceId => WorkspaceCostEvent.array().parse((await c.request<{ points?: unknown }>("cost.history", { workspaceId })).points),
+    // Parsed, not trusted: the lineage renders and forks only snapshots the wire type vouches for.
+    snapshotWorkspace: async id => ProjectGolden.parse((await c.request<{ projectGolden?: unknown }>("workspaces.snapshot", { workspaceId: id })).projectGolden),
+    listProjectGoldens: async () => ProjectGolden.array().parse((await c.request<{ projectGoldens?: unknown }>("projectGoldens.list")).projectGoldens),
     rollbackSnapshot: async (version, name) => {
       const { lineage, existingWorkspaces } = await c.request<SnapshotRollbackResult>("snapshots.rollback", {
         version,

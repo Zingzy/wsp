@@ -11,7 +11,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/stdio.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
-import { ThreadView, WorkspaceView } from "@wsp/protocol";
+import { ProjectGolden, ThreadView, WorkspaceView } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { serve } from "../src/cli.js";
@@ -20,7 +20,7 @@ import type { HostHandle } from "../src/server.js";
 import type { HostClient } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
-import { EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, scriptedAgent, stuckAgent } from "./verbs-fixture.js";
+import { EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, projectBundler, scriptedAgent, stuckAgent } from "./verbs-fixture.js";
 
 interface Called {
   text: string;
@@ -128,10 +128,42 @@ describe("the MCP server over the host", () => {
   it("offers the verbs as tools, each described, and none for import until it exists", async () => {
     const c = await connect();
     const { tools } = await c.listTools();
-    expect(tools.map(t => t.name).sort()).toEqual(["exec", "export", "fork", "new", "pause", "send", "thread_new", "threads", "workspaces"]);
+    expect(tools.map(t => t.name).sort()).toEqual(["exec", "export", "fork", "new", "pause", "send", "snapshot", "thread_new", "threads", "workspaces"]);
     for (const t of tools) expect(t.description, t.name).toMatch(/\S/);
+    expect(Object.keys((tools.find(t => t.name === "new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["from", "name"]);
     expect(c.getServerVersion()?.name).toBe("wsp");
     expect(c.getInstructions()).toContain("thread_new");
+    expect(c.getInstructions()).toContain("snapshot");
+  });
+
+  it("snapshot takes a project golden of the workspace as wsp snapshot does, and new with from forks it by project name or snapshot id; a workspace without a project, and a name no golden carries, are tool errors in one line", async () => {
+    await call("new", { name: "alpha" });
+    const [alpha] = await rt.workspaces.list();
+    const bare = await call("snapshot", { workspace: "alpha" });
+    expect(bare).toEqual({ text: "alpha has no project loaded; import one before snapshotting it", structured: undefined, isError: true });
+    expect(await rt.golden.projects()).toEqual([]);
+
+    await rt.projects.import({ workspaceId: alpha!.id, source: "/Users/dev/proj", dest: "/root/work/proj", bundler: projectBundler() });
+    const taken = await call("snapshot", { workspace: "alpha" });
+    expect(taken.isError).toBe(false);
+    const [golden] = await rt.golden.projects();
+    expect(golden).toMatchObject({ project: { name: "proj", dest: "/root/work/proj" }, golden: "snap_gold", version: 1, workspaceId: alpha!.id, workspaceName: "alpha" });
+    expect(taken.structured).toEqual({ projectGolden: golden });
+    expect(ProjectGolden.parse((taken.structured as { projectGolden: unknown }).projectGolden)).toEqual(golden);
+    expect(JSON.parse(taken.text)).toEqual(taken.structured);
+
+    const byName = await call("new", { name: "task-a", from: "proj" });
+    expect(byName.isError).toBe(false);
+    const taskA = (await rt.workspaces.list()).find(w => w.name === "task-a")!;
+    expect(taskA).toMatchObject({ golden: golden!.snapshotId, project: golden!.project });
+    expect(byName.structured).toEqual({ workspace: expect.objectContaining({ id: taskA.id, name: "task-a", golden: golden!.snapshotId }) });
+    const byId = await call("new", { name: "task-b", from: golden!.snapshotId });
+    expect(byId.isError).toBe(false);
+    expect((await rt.workspaces.list()).find(w => w.name === "task-b")).toMatchObject({ golden: golden!.snapshotId, project: golden!.project });
+
+    const missing = await call("new", { name: "task-c", from: "nope" });
+    expect(missing).toEqual({ text: "no project golden named nope; wsp snapshot <workspace> takes one", structured: undefined, isError: true });
+    expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["alpha", "task-a", "task-b"]);
   });
 
   it("new forks the golden's head into a workspace of that name; workspaces lists it as the app sees it", async () => {

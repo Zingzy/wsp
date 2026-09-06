@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { hostname } from "node:os";
+import { posix } from "node:path";
 import type { AdapterEvent, ExecStream, TurnResult } from "@wsp/adapter-claude";
 import { DEFAULT_AGENT } from "@wsp/catalog";
 import {
@@ -73,6 +74,7 @@ import type {
   ProjectAgentResult,
   ProjectExportResult,
   ProjectExportStage,
+  ProjectGolden,
   ProjectImportResult,
   ProjectImportStage,
   ProjectPlan,
@@ -83,6 +85,7 @@ import type {
   SessionView,
   SnapshotStorage,
   WorkspaceCreateStage,
+  WorkspaceProject,
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
@@ -565,6 +568,11 @@ export interface Runtime {
     upgrade(id: string, spec?: WorkspaceSpec): Promise<WorkspaceView>;
     /** Fresh golden fork with the nap-time vault, old machine killed, id and name kept: the way out of a zombie. */
     rebuild(id: string): Promise<WorkspaceView>;
+    /** Snapshots the running machine as a project golden: the golden it stands on plus the project as it is now, so a
+     * fork of the snapshot starts a task with the project in place. Refused in one sentence when the workspace is not
+     * running or holds no project; a machine that was ever resumed is refused by the engine (kind notFirstLife). The
+     * guest freezes for about three seconds and stays first-life. */
+    snapshot(id: string): Promise<ProjectGolden>;
     /** The recipe's daemon deploy on the running machine, replacing the daemon there, then this runtime's token
      * written again so the next reach opens it. Throws on a workspace that is not running or a runtime without the deploy. */
     updateDaemon(id: string): Promise<void>;
@@ -649,6 +657,8 @@ export interface Runtime {
     kill(builderId: string): Promise<void>;
     /** Moves the golden's head; new forks follow it, workspaces already forked keep their image. */
     rollback(version: number, name?: string): Promise<GoldenManifest>;
+    /** Every project golden this runtime took, oldest first. */
+    projects(): Promise<ProjectGolden[]>;
     /** Every snapshot on the account by count, size and monthly cost past the free GB, sized from the provider's
      * listing; undefined on a backend that cannot list snapshots. */
     storage(): Promise<SnapshotStorage | undefined>;
@@ -672,6 +682,8 @@ const WORKSPACES = "workspaces";
 const GOLDENS = "goldens";
 /** The recipe each sealed version was built from, keyed `<name>@v<version>`; the next update diffs against the head's. */
 const GOLDEN_RECIPES = "golden-recipes";
+/** One document per project golden, keyed by its snapshot id. */
+const PROJECT_GOLDENS = "project-goldens";
 const recipeKey = (name: string, version: number): string => `${name}@v${version}`;
 const TRANSCRIPTS = "transcripts";
 /** One document per workspace: the turns sessions.list serves, read back at boot so the rows outlive the process. */
@@ -1018,6 +1030,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     createdAt: r.createdAt,
     ...(r.claudeSessionId !== undefined ? { claudeSessionId: r.claudeSessionId } : {}),
     ...(r.screen !== undefined ? { screen: r.screen } : {}),
+    ...(r.project !== undefined ? { project: r.project } : {}),
   });
 
   const persist = async (r: WorkspaceRecord): Promise<void> => {
@@ -1045,6 +1058,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (hit !== undefined) return hit;
     }
     return undefined;
+  };
+
+  /** What stands behind a snapshot a workspace forks from: a golden version, or a project golden and the version at
+   * the root of its lineage. `golden` is that root's snapshot id, the one a snapshot taken from the fork records. */
+  const imageOf = async (snapshotId: string): Promise<{ golden: string; version?: GoldenVersion; project?: WorkspaceProject }> => {
+    const version = await goldenVersionOf(snapshotId);
+    if (version !== undefined) return { golden: snapshotId, version };
+    const project = (await store.get(PROJECT_GOLDENS, snapshotId)) as ProjectGolden | undefined;
+    if (project === undefined) return { golden: snapshotId };
+    const root = await goldenVersionOf(project.golden);
+    return { golden: project.golden, ...(root !== undefined ? { version: root } : {}), project: project.project };
   };
 
   /** A status pushed outside the poll, for a phase change the poller would show
@@ -1211,7 +1235,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * versions sealed before it was recorded were all sandbox. */
   const fork = (record: WorkspaceRecord, bind: (machine: Machine) => void, override?: WorkspaceSpec, report?: StageReport): Promise<Machine> =>
     claiming(`workspace/${record.id}`, async b => {
-      const golden = await goldenVersionOf(record.golden);
+      const golden = (await imageOf(record.golden)).version;
       const spec = forkSpec(record, golden?.kind ?? "sandbox", override);
       const machine = await b.create(spec);
       // Named by its record before the claim is released, so no sweep sees it unclaimed.
@@ -1501,7 +1525,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The create itself, one stage report per awaited step. The hostname is set inside the fork, before the daemon
    * is asked and before the workspace is listed or reachable, so no shell can open under the guest's boot name. */
   const createStaged = async (o: CreateWorkspaceOptions, id: string, report: StageReport): Promise<CreatedWorkspace> => {
-    const inherited = (await goldenVersionOf(o.golden))?.size;
+    const image = await imageOf(o.golden);
+    const inherited = image.version?.size;
     const record: WorkspaceRecord = {
       id,
       name: o.name,
@@ -1509,6 +1534,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       phase: "running",
       golden: o.golden,
       createdAt: new Date().toISOString(),
+      ...(image.project !== undefined ? { project: image.project } : {}),
       spec: {
         ...(o.envs !== undefined ? { envs: o.envs } : {}),
         ...(o.labels !== undefined ? { labels: o.labels } : {}),
@@ -1679,6 +1705,27 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       console.warn(`rebuild of ${id}: ${reason}`);
       await emitStatus(entry, entry.machine.previewUrl ? "reachable" : "unsupported", reason);
       return view(entry.record);
+    },
+
+    async snapshot(id) {
+      const entry = await entryOf(id);
+      const { name, project } = entry.record;
+      if (project === undefined) throw new Error(`${name} has no project loaded; import one before snapshotting it`);
+      if (entry.record.phase !== "running") throw new Error(`${name} is ${entry.record.phase}; only a running first-life machine can be snapshotted`);
+      const createdAt = new Date(clock.now()).toISOString();
+      const snapshotId = await entry.ws.checkpoint(`project-${project.name}-${createdAt.replace(/[:.]/g, "-")}`, `snapshot of ${name}`);
+      const image = await imageOf(entry.record.golden);
+      const golden: ProjectGolden = {
+        snapshotId,
+        project,
+        golden: image.golden,
+        ...(image.version !== undefined ? { version: image.version.version } : {}),
+        workspaceId: id,
+        workspaceName: name,
+        createdAt,
+      };
+      await store.put(PROJECT_GOLDENS, snapshotId, golden);
+      return golden;
     },
 
     async updateDaemon(id) {
@@ -2554,6 +2601,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await store.put(GOLDENS, key, next);
       return next;
     },
+
+    async projects() {
+      await ready();
+      return ((await store.list(PROJECT_GOLDENS)) as ProjectGolden[]).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    },
   };
 
   const projects: Runtime["projects"] = {
@@ -2635,6 +2687,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           }
           report("landing", `Landing sessions: ${outcomes()}.`);
         }
+        entry.record.project = { name: posix.basename(o.dest), dest: o.dest, importedAt: new Date(clock.now()).toISOString() };
+        await persist(entry.record);
         report("done", `${plural(packed.files, "file")}, ${fmtBytes(packed.bytes)}, landed at ${o.dest}${parts > 1 ? ` in ${parts} parts` : ""}${agents.length > 0 ? `; sessions: ${outcomes()}` : ""}.`);
         return { dest: o.dest, files: packed.files, bytes: packed.bytes, parts, cut: packed.cut, rewritten: packed.rewritten, agents };
       } catch (e) {

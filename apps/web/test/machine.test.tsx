@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   Capabilities,
   EventUnion,
+  ProjectGolden,
   SnapshotLineage,
   SnapshotRollbackResult,
   SysSample,
@@ -58,7 +59,7 @@ const EMPTY_LINEAGE: SnapshotLineage = { name: "default", head: null, versions: 
 
 // The surface's cost series listens through api.subscribe like the store does,
 // so tests push events through the same channel.
-function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS, lineage: SnapshotLineage = EMPTY_LINEAGE, history?: EventUnion[]) {
+function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS, lineage: SnapshotLineage = EMPTY_LINEAGE, history?: EventUnion[], projects: ProjectGolden[] = []) {
   const listeners = new Set<(e: EventUnion) => void>();
   let current = lineage;
   const api: Api & {
@@ -68,7 +69,16 @@ function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS,
     upgrade: ReturnType<typeof vi.fn<(id: string, size: WorkspaceSize) => Promise<WorkspaceView>>>;
     rollbackSnapshot: ReturnType<typeof vi.fn<(version: number, name?: string) => Promise<SnapshotRollbackResult>>>;
     listSnapshots: ReturnType<typeof vi.fn<() => Promise<SnapshotLineage>>>;
+    listProjectGoldens: ReturnType<typeof vi.fn<() => Promise<ProjectGolden[]>>>;
+    snapshotWorkspace: ReturnType<typeof vi.fn<(id: string) => Promise<ProjectGolden>>>;
+    createWorkspace: ReturnType<typeof vi.fn<(golden: string, name?: string) => Promise<WorkspaceView>>>;
   } = {
+    listProjectGoldens: vi.fn<() => Promise<ProjectGolden[]>>(async () => projects),
+    snapshotWorkspace: vi.fn<(id: string) => Promise<ProjectGolden>>(async id => {
+      const taken = pg("snap_taken", "snap_golden-v12", { workspaceId: id, createdAt: "2026-09-07T08:00:00.000Z" });
+      projects = [...projects, taken];
+      return taken;
+    }),
     upgrade: vi.fn(async (id: string, _size: WorkspaceSize) => view(id, "?", "running")),
     capabilities: vi.fn(async () => capabilities),
     portReach: vi.fn(async (_id: string, port: number) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 })),
@@ -84,7 +94,7 @@ function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS,
     }),
     listWorkspaces: vi.fn(async () => workspaces),
     getWorkspace: vi.fn(async id => workspaces.find(w => w.id === id)!),
-    createWorkspace: vi.fn(async () => workspaces[0]!),
+    createWorkspace: vi.fn<(golden: string, name?: string) => Promise<WorkspaceView>>(async () => workspaces[0]!),
     createFromGoldenHead: vi.fn(async (name: string) => view("ws_new", name)),
     watchStatuses: vi.fn(async () => workspaces.map(status)),
     nap: vi.fn(async (id: string) => view(id, "?", "napping")),
@@ -125,8 +135,8 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-async function mount(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS, lineage: SnapshotLineage = EMPTY_LINEAGE, history?: EventUnion[]) {
-  const api = fakeApi(workspaces, capabilities, lineage, history);
+async function mount(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS, lineage: SnapshotLineage = EMPTY_LINEAGE, history?: EventUnion[], projects?: ProjectGolden[]) {
+  const api = fakeApi(workspaces, capabilities, lineage, history, projects);
   useStore.getState().bind(api);
   render(<MachineSurface workspaceId={workspaces[0]!.id} />);
   await waitFor(() => expect(useStore.getState().ready).toBe(true));
@@ -147,6 +157,18 @@ const gv = (n: number) => ({
 });
 const twoVersions: SnapshotLineage = { name: "default", head: 12, versions: [gv(11), gv(12)] };
 const onV12 = (): WorkspaceView => ({ ...view("ws_a", "api"), golden: "snap_golden-v12" });
+
+const PROJECT = { name: "proj", dest: "/root/work/proj", importedAt: "2026-09-06T10:01:00.000Z" };
+const pg = (snapshotId: string, golden: string, over: Partial<ProjectGolden> = {}): ProjectGolden => ({
+  snapshotId,
+  project: PROJECT,
+  golden,
+  version: Number(golden.slice(-2)),
+  workspaceId: "ws_a",
+  workspaceName: "api",
+  createdAt: "2026-09-06T10:06:00.000Z",
+  ...over,
+});
 
 describe("machine facts", () => {
   it("renders id, state, reach and size from the enriched status", async () => {
@@ -469,6 +491,48 @@ describe("lineage", () => {
     act(() => api.emit({ type: "golden.stage", name: "default", stage: "sealed" }));
     await waitFor(() => expect(fact("v13")).toBe("v13head"));
     expect(api.listSnapshots).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("project goldens in the lineage", () => {
+  const goldens = [pg("snap_p1", "snap_golden-v12"), pg("snap_p2", "snap_golden-v12", { createdAt: "2026-09-06T11:00:00.000Z", workspaceName: "task-a", workspaceId: "ws_b" }), pg("snap_p3", "snap_golden-v11")];
+  const rowsUnder = (version: string): string[] => [...document.querySelectorAll(`[data-k='${version}']`)[0]!.closest("li")!.querySelectorAll("[data-k^='pg-']")].map(el => el.getAttribute("data-k")!);
+
+  it("lists each project golden under the version it stands on, newest first, marks the one this workspace forks from, and a fork creates a workspace from its snapshot", async () => {
+    const api = await mount([{ ...view("ws_a", "api"), golden: "snap_p2", project: PROJECT }], CAPS, twoVersions, undefined, goldens);
+    await waitFor(() => expect(rowsUnder("v12")).toEqual(["pg-snap_p2", "pg-snap_p1"]));
+    expect(rowsUnder("v11")).toEqual(["pg-snap_p3"]);
+    expect(fact("v12")).toBe("v12head");
+    expect(fact("pg-snap_p2")).toBe("projthis fork");
+    expect(fact("pg-snap_p1")).toBe("proj");
+    expect(screen.getByText("snapshot 2026-09-06 · imported 2026-09-06 · from task-a")).toBeDefined();
+    expect(screen.getByText("forked 2026-08-30 · proj imported 2026-09-06")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "fork proj from snap_p1" }));
+    await waitFor(() => expect(api.createWorkspace).toHaveBeenCalledWith("snap_p1", "proj-fork"));
+    expect(api.createFromGoldenHead).not.toHaveBeenCalled();
+  });
+
+  it("without any project golden the versions render as before and nothing is listed under them", async () => {
+    await mount([onV12()], CAPS, twoVersions);
+    await waitFor(() => expect(fact("v12")).toBe("v12headthis fork"));
+    expect(document.querySelector("[data-k^='pg-']")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^snapshot / })).toBeNull();
+  });
+
+  it("snapshot sits on the live disk row once a project is loaded: it calls the api, lists the new golden and says what it is for; a refusal shows the runtime's sentence", async () => {
+    const api = await mount([{ ...onV12(), project: PROJECT }], CAPS, twoVersions);
+    await waitFor(() => expect(fact("v12")).toBe("v12headthis fork"));
+    expect(api.listProjectGoldens).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "snapshot api as a project golden" }));
+    await waitFor(() => expect(api.snapshotWorkspace).toHaveBeenCalledWith("ws_a"));
+    await waitFor(() => expect(rowsUnder("v12")).toEqual(["pg-snap_taken"]));
+    expect(api.listProjectGoldens).toHaveBeenCalledTimes(2);
+    expect(fact("lineage-note")).toBe("Project golden of proj taken. New forks of it start with the project.");
+
+    api.snapshotWorkspace.mockRejectedValueOnce(new Error("snapshot of api refused: machine m1 is not first-life (it was resumed); snapshots only come from fresh machines"));
+    fireEvent.click(screen.getByRole("button", { name: "snapshot api as a project golden" }));
+    await waitFor(() => expect(fact("lineage-note")).toBe("snapshot of api refused: machine m1 is not first-life (it was resumed); snapshots only come from fresh machines"));
+    expect(rowsUnder("v12")).toEqual(["pg-snap_taken"]);
   });
 });
 

@@ -5,7 +5,7 @@
 import { randomUUID } from "node:crypto";
 import type { TurnResult } from "@wsp/adapter-claude";
 import { tarOf, type ExecResult } from "@wsp/engine";
-import type { HarnessAdapterFactory, HarnessStartOptions } from "@wsp/runtime";
+import type { HarnessAdapterFactory, HarnessStartOptions, ProjectBundler } from "@wsp/runtime";
 import type { CliIO } from "../src/cli.js";
 import type { StubBackend } from "./stub-backend.js";
 
@@ -91,6 +91,15 @@ export function execGuest(backend: StubBackend, output: string, exit: number | u
     return base(m, cmd);
   };
 }
+
+/** A folder of one file landing on the machine, the way the app's import hands it to the runtime. */
+export const projectBundler = (): ProjectBundler => ({
+  plan: async () => ({ source: "/Users/dev/proj", repo: true, files: 1, bytes: 20, secrets: [], excluded: [], skipped: [], agents: [] }),
+  pack: async () => ({ tar: tarOf([{ path: "src/index.ts", mode: 0o644, content: "export const a = 1;\n" }]), files: 1, bytes: 20, cut: [], rewritten: [] }),
+  packState: async () => {
+    throw new Error("no agent state here");
+  },
+});
 
 export const EXPORT_SOURCE = "/root/work/proj";
 /** The one Claude Code session on the machine for the folder, as the export brings it down. */
