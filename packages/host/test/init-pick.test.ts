@@ -3,12 +3,15 @@
 // agents say, how the tools list groups by source, what the one counts line
 // reads, which logins are listed to sign in on the machine and which are keys
 // to tick, and the summary screen's three keys.
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import type { ManifestEntry } from "@wsp/collect";
 import type { Recipe } from "@wsp/protocol";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { BASE_WORD, agentItems, needLine, needScreen, pickEstimate, signInItems, toolItems, withAgents, withTools } from "../src/init-pick.js";
+import { BASE_WORD, ON_THIS_MAC, agentItems, needLine, needScreen, pickEstimate, signInItems, toolItems, withAgents, withTools, wspToolsItems } from "../src/init-pick.js";
 import { applyRecipe, withCatalogAgents } from "../src/init-recipe.js";
 import { FIXTURE, RECIPE } from "./init-fixture.js";
 
@@ -143,6 +146,52 @@ describe("sign-ins and keys", () => {
     const s = signInItems(applyRecipe(withCatalogAgents(laptop), off));
     expect(s.items.find(i => i.id === "logins/kube")).toMatchObject({ lock: "off", hint: "kubectl not coming", detail: ["~/.kube/config", "kubectl is not coming: its tool row is unticked; copy or sign in ticks it"] });
     expect(s.answers(new Set(["logins/kube"])).get("logins/kube")).toBe("skip");
+  });
+});
+
+describe("the wsp tools rows", () => {
+  const here: Recipe["rows"][number]["source"] = { kind: "installed", paths: [], bin: true };
+  const home = (): string => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-pick-home-"));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    return dir;
+  };
+
+  it("one row per agent on this Mac whose config the catalog can place the server in: a noun label, the file as the hint, unticked and apart from the all row; an agent not here, or here with no such config, gets none", () => {
+    expect(wspToolsItems(RECIPE, home())).toEqual([
+      {
+        id: "wsp-tools/claude",
+        label: "wsp tools for Claude Code",
+        hint: "~/.claude.json",
+        group: ON_THIS_MAC,
+        detail: ["wsp joins its MCP servers, so it can drive workspaces, threads and commands", "ticked, it is written when the screens end; unticked, nothing here changes"],
+        apart: true,
+      },
+    ]);
+    expect(ON_THIS_MAC).toBe("On this Mac");
+    const more: Recipe = {
+      ...RECIPE,
+      rows: [
+        ...RECIPE.rows.map(r => (r.id === "codex" ? { ...r, source: here } : r)),
+        { id: "opencode", kind: "agent", on: false, source: here },
+        { id: "pi", kind: "agent", on: true, source: here },
+        { id: "hermes", kind: "agent", on: true, source: here },
+      ],
+    };
+    const items = wspToolsItems(more, home());
+    // Catalog order, whatever the agent's tick for the machine; Pi and Hermes are here but the catalog knows no MCP config for them.
+    expect(items.map(i => i.label)).toEqual(["wsp tools for Claude Code", "wsp tools for Codex", "wsp tools for OpenCode"]);
+    expect(items.map(i => i.hint)).toEqual(["~/.claude.json", "~/.codex/config.toml", "~/.config/opencode/opencode.json"]);
+    expect(items.every(i => i.lock === undefined && i.apart === true)).toBe(true);
+    expect(wspToolsItems({ ...RECIPE, rows: [] }, home())).toEqual([]);
+  });
+
+  it("the hint is the file the install writes: of two candidates, the one that exists here", () => {
+    const h = home();
+    mkdirSync(join(h, ".config", "opencode"), { recursive: true });
+    writeFileSync(join(h, ".config", "opencode", "opencode.jsonc"), "{}\n");
+    const items = wspToolsItems({ ...RECIPE, rows: [{ id: "opencode", kind: "agent", on: false, source: here }] }, h);
+    expect(items.map(i => i.hint)).toEqual(["~/.config/opencode/opencode.jsonc"]);
   });
 });
 

@@ -24,6 +24,7 @@ import {
   withoutAgentTools,
   withCatalogAgents,
   recipeWithAnswers,
+  withTicksOf,
 } from "../src/init-recipe.js";
 import { FIXTURE, byId } from "./init-fixture.js";
 
@@ -388,5 +389,30 @@ describe("the small recipe", () => {
     expect(Recipe.parse(out)).toEqual(out);
     // A saved answer the screens did not repeat is gone rather than stale.
     expect(recipeWithAnswers(RECIPE, new Map()).rows.find(r => r.id === "kubectl")).not.toHaveProperty("signIn");
+  });
+
+  it("withTicksOf writes a saved recipe's ticks and answers onto this computer's rows: a row the saved one lacks is off and unanswered, a saved row this computer has no row for comes after them as saved", () => {
+    const here: Recipe = {
+      ...RECIPE,
+      at: "2026-09-06T09:00:00.000Z",
+      histories: [],
+      rows: [
+        { id: "claude", kind: "agent", on: true, source: { kind: "installed", paths: ["~/.claude/settings.json"], bin: true }, signIn: "machine" },
+        { id: "codex", kind: "agent", on: false, source: { kind: "popular", sessions: 5, images: 1 }, size: 2 },
+        { id: "gh", kind: "tool", on: true, source: { kind: "installed", paths: [], bin: true } },
+        { id: "gemini", kind: "agent", on: true, source: { kind: "installed", paths: ["~/.gemini/settings.json"], bin: true } },
+      ],
+    };
+    const out = withTicksOf(here, RECIPE);
+    expect(out.rows).toEqual([
+      { id: "claude", kind: "agent", on: false, source: { kind: "installed", paths: ["~/.claude/settings.json"], bin: true } },
+      { id: "codex", kind: "agent", on: true, source: { kind: "popular", sessions: 5, images: 1 }, size: 2 },
+      { id: "gh", kind: "tool", on: true, source: { kind: "installed", paths: [], bin: true }, signIn: "copy" },
+      { id: "gemini", kind: "agent", on: false, source: { kind: "installed", paths: ["~/.gemini/settings.json"], bin: true } },
+      ...RECIPE.rows.filter(r => !["claude", "codex", "gh"].includes(r.id)),
+    ]);
+    expect(out.at).toBe(here.at);
+    expect(out.histories).toEqual([]);
+    expect(Recipe.parse(out)).toEqual(out);
   });
 });
