@@ -257,8 +257,16 @@ export async function nap(client: HostClient, ref: string): Promise<WorkspaceVie
   return (await client.request<{ workspace: WorkspaceView }>("workspaces.nap", { workspaceId: source.id })).workspace;
 }
 
+/** The most characters a folder cell holds before its front is cut: the end of a path is what a person recognises. */
+const FOLDER_WIDTH = 40;
+
+/** The path within `width` cells, cut at the front behind an ellipsis when it is longer. */
+export function shortenedFront(path: string, width: number): string {
+  return path.length <= width ? path : `…${path.slice(path.length - width + 1)}`;
+}
+
 function threadLine(t: ThreadRow): string[] {
-  return [t.id, t.workspaceName, t.harness, t.status, t.startedBy, t.title];
+  return [t.id, t.workspaceName, t.harness, t.status, t.startedBy, t.cwd !== undefined ? shortenedFront(t.cwd, FOLDER_WIDTH) : "", t.title];
 }
 
 /** Forks the golden's head into a new workspace, the way the app's create does, with the stages streamed as they land. */
@@ -323,9 +331,25 @@ export interface Turn {
   reason?: string;
 }
 
-/** The start that opens a new thread in a workspace, under the named agent or the runtime's default. */
-export function openingOf(workspaceId: string, prompt: string, harness?: string): Record<string, unknown> {
-  return { workspaceId, prompt, ...(harness !== undefined ? { harness } : {}) };
+/** A folder named for a thread, refused unless absolute: the harness would run a relative one against its own home
+ * and fail inside the guest, where the person reads it as a harness failure. */
+export function absoluteFolder(cwd: string | undefined): string | undefined {
+  if (cwd !== undefined && !cwd.startsWith("/")) throw new Error(`--cwd is a path on the machine, absolute: got "${cwd}"`);
+  return cwd;
+}
+
+/** The folder a new thread works in: the one named, else the workspace's imported project folder, else none, and the
+ * harness starts in its own home. A thread's folder decides which project state its agent loads, so a workspace with
+ * a project opens its threads there. */
+export function threadFolder(workspace: WorkspaceView, cwd?: string): string | undefined {
+  return absoluteFolder(cwd) ?? workspace.project?.dest;
+}
+
+/** The start that opens a new thread in a workspace, under the named agent or the runtime's default, in the named
+ * folder or the workspace's own; cwd is the field the app's composer sends. */
+export function openingOf(workspace: WorkspaceView, prompt: string, opts: { harness?: string; cwd?: string } = {}): Record<string, unknown> {
+  const cwd = threadFolder(workspace, opts.cwd);
+  return { workspaceId: workspace.id, prompt, ...(cwd !== undefined ? { cwd } : {}), ...(opts.harness !== undefined ? { harness: opts.harness } : {}) };
 }
 
 /** The start a message to an existing thread makes: its latest turn resumed under the thread's own agent. */
@@ -531,18 +555,19 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "fork",
-    usage: 'wsp fork <workspace> [--name <name>] [--send "<task>" [--agent <name>]]',
+    usage: 'wsp fork <workspace> [--name <name>] [--send "<task>" [--agent <name>] [--cwd <path>]]',
     about: "a new machine from the source's golden version, not a copy of its live disk",
-    options: { name: { type: "string" }, send: { type: "string" }, agent: { type: "string" } },
+    options: { name: { type: "string" }, send: { type: "string" }, agent: { type: "string" }, cwd: { type: "string" } },
     run: async ctx => {
       const [ref] = ctx.args;
       if (ref === undefined || ctx.args.length !== 1) throw new Error("wsp fork takes one workspace");
+      const task = flag(ctx.flags, "send");
+      for (const dependent of ["agent", "cwd"]) if (task === undefined && flag(ctx.flags, dependent) !== undefined) throw new Error(`--${dependent} needs --send`);
       const client = await ctx.client();
       const source = await workspaceOf(client, ref);
       const created = await create(client, ctx.out, source.golden, flag(ctx.flags, "name") ?? `${source.name}-fork`);
-      const task = flag(ctx.flags, "send");
       if (task === undefined) return 0;
-      return followVerb(ctx, client, openingOf(created.workspace.id, task, flag(ctx.flags, "agent")), true);
+      return followVerb(ctx, client, openingOf(created.workspace, task, { harness: flag(ctx.flags, "agent"), cwd: flag(ctx.flags, "cwd") }), true);
     },
   },
   {
@@ -561,20 +586,20 @@ export const VERBS: readonly Verb[] = [
   {
     name: "threads",
     usage: "wsp threads [--in <workspace>]",
-    about: "every thread as the sidebar lists it: agent, state, who opened it",
+    about: "every thread as the sidebar lists it: agent, state, who opened it, the folder it works in",
     options: { in: { type: "string" } },
     run: async ctx => {
       if (ctx.args.length !== 0) throw new Error("wsp threads takes no positional arguments");
       const rows = await threadRows(await ctx.client(), flag(ctx.flags, "in"));
-      ctx.out.emit({ threads: rows.map(({ workspaceName: _name, ...t }) => t) }, table([["THREAD", "WORKSPACE", "AGENT", "STATE", "BY", "TITLE"], ...rows.map(threadLine)]).join("\n"));
+      ctx.out.emit({ threads: rows.map(({ workspaceName: _name, ...t }) => t) }, table([["THREAD", "WORKSPACE", "AGENT", "STATE", "BY", "FOLDER", "TITLE"], ...rows.map(threadLine)]).join("\n"));
       return 0;
     },
   },
   {
     name: "thread new",
-    usage: 'wsp thread new --in <workspace> [--agent <name>] "<task>"',
-    about: "opens a thread in the workspace and follows its first turn",
-    options: { in: { type: "string" }, agent: { type: "string" } },
+    usage: 'wsp thread new --in <workspace> [--agent <name>] [--cwd <path on the machine>] "<task>"',
+    about: "opens a thread in the workspace, in its project folder or --cwd, and follows its first turn",
+    options: { in: { type: "string" }, agent: { type: "string" }, cwd: { type: "string" } },
     run: async ctx => {
       const [task] = ctx.args;
       const within = flag(ctx.flags, "in");
@@ -582,7 +607,7 @@ export const VERBS: readonly Verb[] = [
       if (task === undefined || ctx.args.length !== 1) throw new Error("wsp thread new takes one task");
       const client = await ctx.client();
       const workspace = await workspaceOf(client, within);
-      return followVerb(ctx, client, openingOf(workspace.id, task, flag(ctx.flags, "agent")), true);
+      return followVerb(ctx, client, openingOf(workspace, task, { harness: flag(ctx.flags, "agent"), cwd: flag(ctx.flags, "cwd") }), true);
     },
   },
   {
@@ -669,6 +694,7 @@ export async function runVerb(verb: Verb, argv: ReadonlyArray<string>, io: CliIO
     const parsed = parseArgs({ args: argv.slice(verb.name.split(" ").length), options: { ...COMMON, ...verb.options }, allowPositionals: true });
     flags = parsed.values as Flags;
     args = parsed.positionals;
+    absoluteFolder(flag(flags, "cwd"));
   } catch (e) {
     io.error(`${e instanceof Error ? e.message : String(e)}\n\nusage: ${verb.usage}`);
     return 1;
