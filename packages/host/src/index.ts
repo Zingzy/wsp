@@ -15,15 +15,14 @@ export {
   loadKeys,
   makeRuntime,
   serve,
-  servingHost,
   terminalIO,
   wspHome,
   HELP,
   type CliIO,
-  type HostLock,
   type Keys,
   type KeySources,
 } from "./cli.js";
+export { servingHost, type HostLock } from "./host-lock.js";
 export {
   startCallbackRelay,
   systemOpener,

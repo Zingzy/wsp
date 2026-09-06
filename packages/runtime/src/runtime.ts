@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { hostname } from "node:os";
-import { parseCatalogProbe, type AdapterEvent, type TurnResult } from "@wsp/adapter-claude";
+import { parseCatalogProbe, type AdapterEvent, type ExecStream, type TurnResult } from "@wsp/adapter-claude";
 import {
   BUILDER_IDLE_MS,
   DAEMON_PORT,
@@ -61,6 +61,7 @@ import type {
   ReachState,
   SessionEvent,
   SessionInterruptResult,
+  SessionOrigin,
   SessionView,
   SnapshotStorage,
   WorkspaceCreateStage,
@@ -68,6 +69,7 @@ import type {
   WorkspaceView,
 } from "@wsp/protocol";
 import { ALREADY_APPLIED, sendRefusal, workspaceState } from "@wsp/protocol";
+import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { DAEMON_TOKEN_SET, assertTokenShape, rotateDaemonTokenScript } from "./daemon-token.js";
 import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy, idleReason } from "./idle.js";
@@ -389,6 +391,9 @@ export interface Runtime {
     touch(id: string): Promise<void>;
     /** One-shot command on the workspace's machine (plumbing for clients; sessions are the main road). */
     exec(id: string, cmd: string, opts?: { timeoutMs?: number }): Promise<ExecResult>;
+    /** The same command launched the way a harness turn is: detached on the machine, its output streamed by line,
+     * its exit code at the end. Rejects only when the workspace is unknown; a launch that fails ends the stream. */
+    execStream(id: string, cmd: string): Promise<ExecStream>;
     /** How a browser dials this workspace's daemon; throws on backends without preview URLs. */
     daemonReach(id: string): Promise<DaemonReachView>;
     /** The public route to one guest port, for a browser to frame; same caching and refusal as daemonReach. */
@@ -401,7 +406,18 @@ export interface Runtime {
   readonly sessions: {
     start(
       workspaceId: string,
-      opts: { prompt: string; harness?: string; resume?: string; cwd?: string; model?: string; effort?: string; permissionMode?: string; contextWindow?: string },
+      opts: {
+        prompt: string;
+        harness?: string;
+        resume?: string;
+        cwd?: string;
+        model?: string;
+        effort?: string;
+        permissionMode?: string;
+        contextWindow?: string;
+        /** Absent means a person asked. */
+        startedBy?: SessionOrigin;
+      },
     ): Promise<SessionHandle>;
     /** Every turn this state file knows, the ones before a restart as they were last written; one that was still
      * running then reads as failed. */
@@ -1489,6 +1505,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return entry.machine.exec(cmd, o);
     },
 
+    async execStream(id, cmd) {
+      const entry = await entryOf(id);
+      return machineExecStream(entry.machine)(cmd, { env: {} });
+    },
+
     async daemonReach(id) {
       const entry = await entryOf(id);
       const reach = await entry.ws.daemonReach();
@@ -1551,6 +1572,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         workspaceId,
         harness,
         status: "running",
+        startedBy: o.startedBy ?? "person",
         threadId,
         prompt: o.prompt,
         startedAt: Date.now(),
@@ -1647,6 +1669,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const handleId = started.localId;
       sessionView.id = handleId;
       sessionView.claudeSessionId ??= started.claudeSessionId;
+      // A resumed turn takes over the row of the turn it resumes; the row keeps saying who opened the thread.
+      if (o.resume !== undefined) sessionView.startedBy = sessions.get(handleId)?.view.startedBy ?? sessionView.startedBy;
 
       const handle: SessionHandle = {
         id: handleId,

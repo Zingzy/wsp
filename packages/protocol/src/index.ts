@@ -152,11 +152,19 @@ export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
 export const SessionStatus = z.enum(["running", "completed", "interrupted", "failed"]);
 export type SessionStatus = z.infer<typeof SessionStatus>;
 
+/** Who asked the runtime for the turn: a person in the app, or the command line on this computer (a local agent
+ * directing the machine). Both are clients of one host; the sidebar shows which one opened a thread. */
+export const SessionOrigin = z.enum(["person", "cli"]);
+export type SessionOrigin = z.infer<typeof SessionOrigin>;
+
 export const SessionView = z.object({
   id: z.string(),
   workspaceId: z.string(),
   harness: z.string(),
   status: SessionStatus,
+  /** Who opened the thread this row belongs to: a resumed turn takes over the row of the turn it resumes and keeps
+   * its answer. Absent on rows written before provenance was recorded; readers treat those as a person's. */
+  startedBy: SessionOrigin.optional(),
   claudeSessionId: z.string().optional(),
   /** The thread this turn belongs to, as the runtime stamps its events; rows sharing one are one sidebar thread. */
   threadId: z.string().optional(),
@@ -176,6 +184,52 @@ export const SessionView = z.object({
   contextWindow: z.string().optional(),
 });
 export type SessionView = z.infer<typeof SessionView>;
+
+/** One sidebar thread as every client lists it: the turns sharing a threadId (a row stamped none is its own),
+ * titled by the opening turn, in the state and times of the latest, with the opening turn's provenance. id is the
+ * fold key, the runtime's thread id or the lone row's id; claudeSessionId is the latest turn's, what a send resumes. */
+export const ThreadView = z.object({
+  id: z.string(),
+  threadId: z.string().optional(),
+  workspaceId: z.string(),
+  harness: z.string(),
+  startedBy: SessionOrigin.optional(),
+  status: SessionStatus,
+  title: z.string(),
+  claudeSessionId: z.string().optional(),
+  startedAt: z.number().optional(),
+  endedAt: z.number().optional(),
+  turns: z.number().int().positive(),
+});
+export type ThreadView = z.infer<typeof ThreadView>;
+
+/** Folds the session index into threads, in the order each thread's first turn appears. */
+export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] {
+  const byThread = new Map<string, SessionView[]>();
+  for (const session of sessions) {
+    const key = session.threadId ?? session.id;
+    const turns = byThread.get(key);
+    if (turns === undefined) byThread.set(key, [session]);
+    else turns.push(session);
+  }
+  return [...byThread].map(([id, turns]) => {
+    const first = turns[0]!;
+    const latest = turns[turns.length - 1]!;
+    return {
+      id,
+      ...(first.threadId !== undefined ? { threadId: first.threadId } : {}),
+      workspaceId: first.workspaceId,
+      harness: first.harness,
+      ...(first.startedBy !== undefined ? { startedBy: first.startedBy } : {}),
+      status: latest.status,
+      title: first.prompt ?? first.claudeSessionId ?? first.id,
+      ...(latest.claudeSessionId !== undefined ? { claudeSessionId: latest.claudeSessionId } : {}),
+      ...(latest.startedAt !== undefined ? { startedAt: latest.startedAt } : {}),
+      ...(latest.endedAt !== undefined ? { endedAt: latest.endedAt } : {}),
+      turns: turns.length,
+    };
+  });
+}
 
 // --- harness catalog (what the composer's pickers may offer) -------------------
 
@@ -917,6 +971,8 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     effort: z.string().optional(),
     permissionMode: z.string().optional(),
     contextWindow: z.string().optional(),
+    /** Absent reads as person: the app never sends it, the command line sends cli. */
+    startedBy: SessionOrigin.optional(),
   }),
   /** Replies with { harnesses: HarnessCatalog[] }, one per harness the runtime knows. With a workspace, the lists come
    * from the binaries on its machine where they answer; without one, from the runtime's table. */
@@ -976,8 +1032,20 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("forwards.list") }),
   /** Closes one forward; refused when none is open on that workspace and port. */
   z.object({ id: reqId, op: z.literal("forwards.stop"), workspaceId: z.string(), port: RelayPort }),
+  /** Runs one command on the workspace's machine the way a harness turn is launched (detached, as the same user,
+   * the machine's envs). Replies { execId } once launched, then pushes ExecEvent frames to this socket only:
+   * exec.output per line, exec.exit last. The socket closing ends the command. */
+  z.object({ id: reqId, op: z.literal("workspaces.exec"), workspaceId: z.string(), cmd: z.string().min(1) }),
 ]);
 export type RuntimeRequest = z.infer<typeof RuntimeRequest>;
+
+/** What a workspaces.exec pushes to the socket that asked. exitCode is null when the command was ended without
+ * one (the socket closed, the launch failed, or the stream's deadline passed); error says which. */
+export const ExecEvent = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("exec.output"), execId: z.string(), text: z.string() }),
+  z.object({ type: z.literal("exec.exit"), execId: z.string(), exitCode: z.number().int().nullable(), error: z.string().optional() }),
+]);
+export type ExecEvent = z.infer<typeof ExecEvent>;
 
 export const RuntimeOkResponse = z.object({ id: reqId.nullable(), ok: z.literal(true) }).passthrough();
 /** `kind` carries a typed failure when the runtime has one (engine WspError

@@ -34,7 +34,9 @@ import { recipePath } from "./init-recipe.js";
 import { confirmPrompt, passwordPrompt, type PromptOptions } from "./init-layout.js";
 import { TAGLINE, opening } from "./init-opening.js";
 import { systemOpener, type UrlOpener } from "./relay.js";
+import { hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from "./host-lock.js";
 import { startHost, type HostHandle } from "./server.js";
+import { findVerb, runVerb, verbHelp } from "./verbs.js";
 
 const VERSION = (
   JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }
@@ -49,6 +51,14 @@ usage:
                      this machine, build it, then finish in the browser
   wsp doctor         run the reach loop end to end against one live machine
   wsp --version      print the version
+
+verbs, against the host wsp up started; every one takes --json for the raw
+protocol values:
+${verbHelp()}
+
+  wsp send streams the reply to stderr as it arrives and prints the last message
+  on stdout when the turn ends; wsp exec streams the command's output and exits
+  with its code.
 
 options:
   --port N           app port (default 4400)
@@ -72,6 +82,8 @@ With a Solari key present, a missing Anthropic key is only noted at start.
 export interface CliIO {
   log(line: string): void;
   error(line: string): void;
+  /** Raw text on stderr, no newline added: a reply as it streams in. */
+  stream?(text: string): void;
   /** A yes-or-no question; resolves to "yes" or "no". */
   ask(question: string): Promise<string>;
   /** A key, typed without echo. Lines after the first are shown under the question. */
@@ -128,6 +140,7 @@ export function terminalIO(input: Stream<Readable> = process.stdin, output: Stre
   return {
     log: line => console.log(line),
     error: line => console.error(line),
+    stream: text => process.stderr.write(text),
     ask: q => (screen ? answered(confirmPrompt(split(q))).then(yes => (yes ? "yes" : "no")) : nobody(q)),
     askSecret: q => (screen ? answered(passwordPrompt(split(q))) : nobody(q)),
   };
@@ -244,93 +257,6 @@ export function makeRuntime(keys: Keys, statePath: string, recipe: GoldenRecipe 
     goldenRecipe: recipe,
     hostId: hostIdentity(),
   });
-}
-
-export interface HostLock {
-  pid: number;
-  port: number;
-  wsPort: number;
-  startedAt: string;
-}
-
-function isHostLock(v: unknown): v is HostLock {
-  return (
-    typeof v === "object" &&
-    v !== null &&
-    "pid" in v &&
-    typeof v.pid === "number" &&
-    "port" in v &&
-    typeof v.port === "number" &&
-    "wsPort" in v &&
-    typeof v.wsPort === "number" &&
-    "startedAt" in v &&
-    typeof v.startedAt === "string"
-  );
-}
-
-function errnoCode(e: unknown): string | undefined {
-  return e instanceof Error && "code" in e && typeof e.code === "string" ? e.code : undefined;
-}
-
-/** EPERM means the pid exists under another user, so it counts as alive. */
-function pidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return errnoCode(e) === "EPERM";
-  }
-}
-
-function readLock(path: string): HostLock | undefined {
-  if (!existsSync(path)) return undefined;
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
-    return isHostLock(parsed) ? parsed : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function heldBy(lock: HostLock, statePath: string): Error {
-  return new Error(
-    `another wsp host (pid ${lock.pid}) is already serving ${statePath} on port ${lock.port} (ws ${lock.wsPort}). ` +
-      "Stop it first, or point --state at a different file.",
-  );
-}
-
-function lockPathFor(statePath: string): string {
-  return join(dirname(statePath), "host.lock");
-}
-
-/** The host whose lock names this state file, when that process is still alive. */
-export function servingHost(statePath: string): HostLock | undefined {
-  const held = readLock(lockPathFor(statePath));
-  return held !== undefined && pidAlive(held.pid) ? held : undefined;
-}
-
-/** One state file, one host. A lock whose pid is gone is a crash leftover and
- * gives way; a lock this process cannot parse is treated the same. */
-function refuseIfServed(lockPath: string, statePath: string): void {
-  const held = readLock(lockPath);
-  if (held !== undefined && pidAlive(held.pid)) throw heldBy(held, statePath);
-}
-
-/** Seeded with the requested ports so a refusal during startup can name them;
- * rewritten with the bound ports once the host is up. */
-function takeLock(lockPath: string, statePath: string, ports: { port: number; wsPort: number }): HostLock {
-  refuseIfServed(lockPath, statePath);
-  const lock: HostLock = { pid: process.pid, ...ports, startedAt: new Date().toISOString() };
-  mkdirSync(dirname(lockPath), { recursive: true });
-  rmSync(lockPath, { force: true });
-  try {
-    writeFileSync(lockPath, JSON.stringify(lock), { flag: "wx" });
-  } catch (e) {
-    if (errnoCode(e) !== "EEXIST") throw e;
-    const winner = readLock(lockPath);
-    throw winner !== undefined ? heldBy(winner, statePath) : new Error(`another wsp host just took ${lockPath}`);
-  }
-  return lock;
 }
 
 export function terminalInitIO(): InitIO {
@@ -465,7 +391,7 @@ async function hostFor(
     });
     writeFileSync(lockPath, JSON.stringify({ ...lock, port: handle.port, wsPort: handle.wsPort }));
     // Other local tools read the token from disk; the WS never sees it in a URL.
-    const tokenPath = join(dirname(opts.statePath), "host-token");
+    const tokenPath = hostTokenPath(opts.statePath);
     writeFileSync(tokenPath, handle.authToken, { mode: 0o600 });
     const home = resolve(wspHome());
     const pointer = currentHomePointer();
@@ -494,6 +420,8 @@ async function hostFor(
 }
 
 export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<number> {
+  const verb = findVerb(argv);
+  if (verb !== undefined) return runVerb(verb, argv, io, defaultStatePath);
   let values: { version?: boolean; help?: boolean; port?: string; "ws-port"?: string; state?: string; yes?: boolean; manifest?: string };
   let positionals: string[];
   try {

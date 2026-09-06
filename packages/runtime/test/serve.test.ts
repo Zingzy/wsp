@@ -7,7 +7,7 @@ import { createRuntime, type HarnessAdapterFactory, type HarnessSession, type Ha
 import { serveRuntime, type ForwardsSource, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
 import { WsClient } from "./ws-client.js";
-import { stubBackend } from "./stub-backend.js";
+import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { fakeClock } from "./fake-clock.js";
 import { until } from "./until.js";
 
@@ -533,5 +533,102 @@ describe("serveRuntime forwards (the host's, listed and stopped from the app)", 
     expect((await c.request("forwards.list"))["forwards"]).toEqual([]);
     expect((await c.request("forwards.stop", { workspaceId: "ws_1", port: 8123 })).ok).toBe(false);
     c.close();
+  });
+});
+
+describe("serveRuntime thread provenance", () => {
+  it("sessions.start records who asked, cli when the request says so and person when it says nothing, and sessions.list carries it", async () => {
+    const h = stoppableHarness();
+    const runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const workspaceId = (created["workspace"] as { id: string }).id;
+    const rows = async (): Promise<string[]> => ((await c.request("sessions.list", { workspaceId }))["sessions"] as { startedBy: string }[]).map(s => s.startedBy);
+    const byCli = await c.request("sessions.start", { workspaceId, prompt: "go", startedBy: "cli" });
+    expect(byCli["session"]).toMatchObject({ startedBy: "cli" });
+    expect(await rows()).toEqual(["cli"]);
+    h.complete();
+    // The stoppable harness reuses one local id, so the second start replaces the first row.
+    const byPerson = await c.request("sessions.start", { workspaceId, prompt: "go on" });
+    expect(byPerson["session"]).toMatchObject({ startedBy: "person" });
+    expect(await rows()).toEqual(["person"]);
+    const refused = await c.request("sessions.start", { workspaceId, prompt: "go", startedBy: "app" });
+    expect(refused.ok).toBe(false);
+    c.close();
+  });
+});
+
+/** A guest for the exec stream's launch and poll contract: the launch lands, the first poll hands over the whole
+ * log, and the leader is up until the exit file is written or the stream signals it. */
+function execGuest(backend: StubBackend, output: string, exit: number | undefined) {
+  const base = backend.execImpl;
+  let alive = true;
+  backend.execImpl = (m, cmd) => {
+    if (cmd.includes("base64 -d")) return { exitCode: 0, stdout: "WSP_LAUNCHED\n", stderr: "" };
+    if (cmd.includes("kill -TERM") || cmd.includes("kill -KILL")) {
+      alive = false;
+      return { exitCode: 0, stdout: "", stderr: "" };
+    }
+    const sentinel = /(__WSP_EOF_[a-z0-9]+__)/.exec(cmd)?.[1];
+    if (sentinel !== undefined) {
+      const from = Number(/tail -c \+(\d+)/.exec(cmd)?.[1] ?? "1") - 1;
+      const chunk = Buffer.from(output).subarray(from).toString("base64");
+      return { exitCode: 0, stdout: `${chunk}\n${sentinel} ${exit ?? ""} ${alive ? "up" : "down"}\n`, stderr: "" };
+    }
+    return base(m, cmd);
+  };
+}
+
+describe("serveRuntime workspaces.exec", () => {
+  it("replies with an exec id, pushes each output line to the asking socket and the exit code last, and pushes nothing to another socket", async () => {
+    const backend = stubBackend();
+    const runtime = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    const other = await WsClient.connect(srv.port, { token: "secret" });
+    await other.request("events.subscribe");
+    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const workspaceId = (created["workspace"] as { id: string }).id;
+    execGuest(backend, "one\ntwo\n", 3);
+
+    const started = await c.request("workspaces.exec", { workspaceId, cmd: "printf 'one\\ntwo\\n'; exit 3" });
+    expect(started.ok).toBe(true);
+    const execId = started["execId"] as string;
+    expect(execId).toMatch(/^[0-9a-f]{12}$/);
+    await until(() => c.events.some(e => e.type === "exec.exit"));
+    expect(c.events).toEqual([
+      { type: "exec.output", execId, text: "one" },
+      { type: "exec.output", execId, text: "two" },
+      { type: "exec.exit", execId, exitCode: 3 },
+    ]);
+    expect(other.events.filter(e => String(e.type).startsWith("exec."))).toEqual([]);
+    // The command travels base64-encoded inside the launch script.
+    const launch = backend.machines[0]!.execLog.find(cmd => cmd.includes("base64 -d"))!;
+    expect(Buffer.from(/printf '%s' '([A-Za-z0-9+/=]*)'/.exec(launch)![1]!, "base64").toString("utf8")).toContain("printf 'one\\ntwo\\n'; exit 3");
+
+    const missing = await c.request("workspaces.exec", { workspaceId: "ws_nope", cmd: "true" });
+    expect(missing.ok).toBe(false);
+    c.close();
+    other.close();
+    // A command that has exited is not signalled again when its socket goes.
+    await new Promise(r => setTimeout(r, 50));
+    expect(backend.machines[0]!.execLog.some(cmd => cmd.includes("kill -TERM"))).toBe(false);
+  });
+
+  it("the asking socket closing ends the command", async () => {
+    const backend = stubBackend();
+    const runtime = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const workspaceId = (created["workspace"] as { id: string }).id;
+    execGuest(backend, "", undefined);
+    const started = await c.request("workspaces.exec", { workspaceId, cmd: "sleep 600" });
+    expect(started.ok).toBe(true);
+    const log = backend.machines[0]!.execLog;
+    await until(() => log.some(cmd => cmd.includes("__WSP_EOF_")));
+    c.close();
+    await until(() => log.some(cmd => cmd.includes("kill -TERM")));
   });
 });

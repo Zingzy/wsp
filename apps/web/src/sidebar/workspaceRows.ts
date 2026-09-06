@@ -34,6 +34,12 @@ export function costLabel(input: {
 
 const PLAIN = { colorClass: "text-muted-foreground/70", dotClass: "bg-muted-foreground/60" };
 
+/** The agent inside the thread and who opened it: you, or the command line on this computer. A row from before
+ * provenance was recorded was a person's. */
+export function provenanceLabel(thread: Pick<SidebarThreadSnapshot, "harness" | "startedBy">): string {
+  return `${thread.harness} · ${thread.startedBy === "cli" ? "cli" : "you"}`;
+}
+
 /** The pill keys on the session's status and wears the adapter's word: a running thread and one that did not settle carry one, the resting states none. */
 export function threadPill(thread: Pick<SidebarThreadSnapshot, "status" | "indicator">): ThreadStatusPill | null {
   if (!thread.indicator) return null;
