@@ -125,6 +125,8 @@ export interface CliIO {
   stream?(text: string): void;
   /** A yes-or-no question; resolves to "yes" or "no". */
   ask(question: string): Promise<string>;
+  /** A person is at the keyboard (stdin and stdout are terminals); absent means an agent or a pipe, and nothing is asked. */
+  isTTY?: boolean;
   /** A key, typed without echo. Lines after the first are shown under the question. */
   askSecret(question: string): Promise<string>;
 }
@@ -180,6 +182,7 @@ export function terminalIO(input: Stream<Readable> = process.stdin, output: Stre
     log: line => console.log(line),
     error: line => console.error(line),
     stream: text => process.stderr.write(text),
+    isTTY: screen,
     ask: q => (screen ? answered(confirmPrompt(split(q))).then(yes => (yes ? "yes" : "no")) : nobody(q)),
     askSecret: q => (screen ? answered(passwordPrompt(split(q))) : nobody(q)),
   };

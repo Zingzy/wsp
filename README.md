@@ -98,6 +98,7 @@ runs from another terminal while the host is up, and every verb takes
 | `wsp thread new --in <workspace> "<task>"` | opens a thread and follows its first turn; `--agent`, `--cwd`, `--notify <thread\|me>` |
 | `wsp send <thread> "<message>"` | a message to a thread; steers a running turn or queues behind it, then prints the reply |
 | `wsp exec <workspace> -- <command...>` | runs a command on the machine and exits with its code |
+| `wsp import <folder> --to <workspace>` | lands a project folder on the machine at its path here; the plan first, `--yes` to move it |
 | `wsp export <workspace> <folder>` | brings a project folder and the agent sessions keyed to it home |
 | `wsp doctor` | runs the reach loop end to end against one live machine and prints what it measured |
 

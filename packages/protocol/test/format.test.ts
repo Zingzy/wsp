@@ -67,6 +67,12 @@ describe("notifyLine", () => {
 });
 
 describe("fmtThreads, forgetNotice and deleteNotice", () => {
+  it("counts anything with its noun, plural by an s", () => {
+    expect(plural(1, "file")).toBe("1 file");
+    expect(plural(0, "file")).toBe("0 files");
+    expect(plural(2, "secret-shaped file")).toBe("2 secret-shaped files");
+  });
+
   it("counts threads with the noun, and names what a forget and a delete each take off this computer", () => {
     expect([0, 1, 2].map(fmtThreads)).toEqual(["0 threads", "1 thread", "2 threads"]);
     expect(forgetNotice(1)).toBe("Its record and 1 thread leave this computer; the machine is already gone.");

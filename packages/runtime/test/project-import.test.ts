@@ -346,7 +346,7 @@ describe("project.import on a workspace", () => {
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
     await rt.workspaces.nap(ws.id);
     const bundler = fakeBundler();
-    await expect(rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/proj", bundler })).rejects.toThrow(/is napping; wake it before importing/);
+    await expect(rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/proj", bundler })).rejects.toThrow(/^Workspace is paused; wake it to import$/);
     await expect(rt.projects.import({ workspaceId: "ws_nope", source: SOURCE, dest: "/root/proj", bundler })).rejects.toThrow(/no such workspace/);
     expect(bundler.calls).toEqual([]);
   });

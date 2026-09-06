@@ -14,7 +14,7 @@ import { WebSocketServer } from "ws";
 import { HELP, cli, serve } from "../src/cli.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
-import { dialHost } from "../src/verbs.js";
+import { PLAN_ONLY, dialHost } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, launchedScript, projectBundler, doneOnlyAgent, heldAgent, scriptedAgent, stuckAgent, type Captured } from "./verbs-fixture.js";
@@ -902,11 +902,140 @@ describe("wsp verbs over the host", () => {
     expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["alpha", "task-a", "task-b"]);
   });
 
-  it("import says in one plain line that it is not here yet", async () => {
-    const imp = await run("import", "./proj", "--to", "alpha");
-    expect(imp.code).toBe(1);
-    expect(imp.io.lines).toEqual([]);
-    expect(imp.io.errors).toEqual(["wsp import is not here yet: moving a project folder into a workspace lands with the project bundle."]);
+  /** A folder on this computer with one source file and one secret-shaped file, not a repository. */
+  function projectFolder(): string {
+    const proj = join(dir, "proj");
+    mkdirSync(join(proj, "src"), { recursive: true });
+    writeFileSync(join(proj, "src", "index.ts"), "export const a = 1;\n");
+    writeFileSync(join(proj, ".env"), "API_TOKEN=sk-ant-x\n");
+    return proj;
+  }
+  const landings = (): string[] => backend.machines[0]!.runLog.filter(s => s.includes("mv "));
+
+  it("import off a terminal prints the plan with the .env cut by default, moves nothing without --yes, --keep or --cut, and names --yes on stderr", async () => {
+    const proj = projectFolder();
+    await run("new", "alpha");
+    const { code, io } = await run("import", proj, "--to", "alpha");
+    expect(code).toBe(0);
+    expect(io.errors).toEqual([PLAN_ONLY]);
+    const text = io.lines.join("\n");
+    expect(text).toMatch(/^Repository {2,}none$/m);
+    expect(text).toMatch(/^Files {2,}2 files, 39 B$/m);
+    expect(text).toMatch(/^Caches left behind {2,}none$/m);
+    expect(text).toMatch(new RegExp(`^Lands at {2,}${realpathSync(proj)}$`, "m"));
+    expect(text).toMatch(/^Secret-shaped {2,}1 file$/m);
+    expect(text).toMatch(/^ {2}\.env {2,}name(, \w+)*, 19 B {2,}cut$/m);
+    expect(text).toMatch(/^Agents {2,}none with sessions for the folder$/m);
+    expect(landings()).toEqual([]);
+    expect(io.streamed).toBe("");
+  });
+
+  it("import with a person at the terminal prints the plan and asks once, default no: no lands nothing and prints no hint, yes lands the folder", async () => {
+    const proj = projectFolder();
+    await run("new", "alpha");
+    const person = async (reply: string): Promise<{ code: number; io: Captured }> => {
+      const io = captured();
+      io.isTTY = true;
+      io.ask = async q => {
+        asked.push(q);
+        return reply;
+      };
+      return { code: await cli(["import", proj, "--to", "alpha", "--state", statePath], io), io };
+    };
+    const declined = await person("no");
+    expect(declined.code).toBe(0);
+    expect(declined.io.errors).toEqual([]);
+    expect(declined.io.lines.join("\n")).toMatch(/^Secret-shaped {2,}1 file$/m);
+    expect(asked).toEqual(["Import now? y/N"]);
+    expect(landings()).toEqual([]);
+    const accepted = await person("yes");
+    expect(accepted.code).toBe(0);
+    expect(accepted.io.errors).toEqual([]);
+    expect(accepted.io.lines.at(-1)).toBe(`1 file, 20 B, landed at ${realpathSync(proj)}.`);
+    expect(asked).toEqual(["Import now? y/N", "Import now? y/N"]);
+    expect(landings()).toHaveLength(1);
+  });
+
+  it("import --yes packs the folder without the .env, streams the stages, lands it at the same path on the machine and prints the done line; --json prints the plan and the outcome", async () => {
+    const proj = projectFolder();
+    const real = realpathSync(proj);
+    await run("new", "alpha");
+    const { code, io } = await run("import", proj, "--to", "alpha", "--yes");
+    expect(io.errors).toEqual([]);
+    expect(code).toBe(0);
+    expect(io.lines.at(-1)).toBe(`1 file, 20 B, landed at ${real}.`);
+    expect(io.streamed.split("\n").filter(l => l !== "")).toEqual(expect.arrayContaining(["No secret-shaped file travels; cut .env.", "Packing 1 file.", `Landing at ${real}.`]));
+    expect(io.streamed).not.toContain("landed at");
+    expect(landings()).toHaveLength(1);
+    expect(landings()[0]).toMatch(new RegExp(`test ! -e '${real}' \\|\\| exit 66\nmv '${real}\\.wsp-in-[^']+' '${real}'`));
+    const [ws] = await rt.workspaces.list();
+    expect(ws!.project).toMatchObject({ name: "proj", dest: real });
+
+    const again = await run("import", proj, "--to", "alpha", "--yes", "--replace", "--json");
+    expect(again.code).toBe(0);
+    expect(again.io.streamed).toBe("");
+    const values = json(again.io) as [{ plan: unknown }, { imported: unknown }];
+    expect(values).toHaveLength(2);
+    expect(values[0]).toEqual({ plan: expect.objectContaining({ source: real, repo: false, files: 2, bytes: 39, excluded: [], agents: [], secrets: [expect.objectContaining({ path: ".env", bytes: 19 })] }) });
+    expect(values[1]).toEqual({ imported: { dest: real, files: 1, bytes: 20, parts: 1, cut: [".env"], rewritten: [], agents: [] } });
+    expect(landings()[1]).toContain(`rm -rf '${real}'`);
+  });
+
+  it("import --keep carries the secret-shaped row and is consent enough; a --keep or --cut path the plan does not list is refused before anything moves", async () => {
+    const proj = projectFolder();
+    const real = realpathSync(proj);
+    await run("new", "alpha");
+    const kept = await run("import", proj, "--to", "alpha", "--keep", ".env", "--json");
+    expect(kept.code).toBe(0);
+    expect(kept.io.errors).toEqual([]);
+    expect(json(kept.io).at(-1)).toEqual({ imported: { dest: real, files: 2, bytes: 39, parts: 1, cut: [], rewritten: [], agents: [] } });
+    expect(landings()).toHaveLength(1);
+    const bad = await run("import", proj, "--to", "alpha", "--cut", "src/index.ts", "--replace");
+    expect(bad.code).toBe(1);
+    expect(bad.io.lines).toEqual([]);
+    expect(bad.io.errors).toEqual(["wsp import: src/index.ts is not a secret-shaped file in the plan; the plan lists .env"]);
+    expect(landings()).toHaveLength(1);
+  });
+
+  it("import refuses a paused workspace with the protocol's sentence before reading the folder, an --agents id without sessions naming the plan's, and a folder already on the machine in two lines, the second naming --replace", async () => {
+    const proj = projectFolder();
+    const real = realpathSync(proj);
+    await run("new", "alpha");
+    await run("pause", "alpha");
+    const paused = await run("import", proj, "--to", "alpha", "--yes");
+    expect(paused.code).toBe(1);
+    expect(paused.io.lines).toEqual([]);
+    expect(paused.io.errors).toEqual(["wsp import: Workspace is paused; wake it to import"]);
+    await run("wake", "alpha");
+    const noSessions = await run("import", proj, "--to", "alpha", "--yes", "--agents", "claude");
+    expect(noSessions.code).toBe(1);
+    expect(noSessions.io.lines).toEqual([]);
+    expect(noSessions.io.errors).toEqual(["wsp import: claude has no sessions for this folder"]);
+    const base = backend.execImpl;
+    backend.execImpl = (m, cmd) => (cmd.startsWith("test -e ") ? { exitCode: 0, stdout: "yes\n", stderr: "" } : base(m, cmd));
+    const taken = await run("import", proj, "--to", "alpha", "--yes");
+    expect(taken.code).toBe(1);
+    expect(taken.io.errors).toEqual([`wsp import: ${real} already exists on the machine; import with replace to overwrite it\nRun again with --replace to overwrite it.`]);
+    expect(landings()).toEqual([]);
+  });
+
+  it("import lists the agents with sessions for the folder, sends the ticked ones' sessions keyed to the path on the machine when --agents names them", async () => {
+    const proj = projectFolder();
+    const real = realpathSync(proj);
+    const key = real.replace(/[^A-Za-z0-9]/g, "-");
+    mkdirSync(join(dir, "user", ".claude", "projects", key), { recursive: true });
+    writeFileSync(join(dir, "user", ".claude", "projects", key, "S1.jsonl"), EXPORT_SESSION(real));
+    await run("new", "alpha");
+    const planned = await run("import", proj, "--to", "alpha");
+    expect(planned.io.lines.join("\n")).toMatch(/^Agents {2,}1 agent with sessions for the folder\n {2}Claude Code {2,}1 session {2,}sessions travel$/m);
+    const { code, io } = await run("import", proj, "--to", "alpha", "--yes", "--agents", "claude", "--json");
+    expect(io.errors).toEqual([]);
+    expect(code).toBe(0);
+    const { imported } = json(io).at(-1) as { imported: { agents: { agent: string; files: number; outcome: string }[] } };
+    expect(imported.agents).toEqual([{ agent: "claude", files: 1, bytes: EXPORT_SESSION(real).length, outcome: "transcript-only" }]);
+    const uploads = backend.machines[0]!.runLog.filter(s => s.includes("tar xzf"));
+    expect(uploads.at(-1)).toContain("tar xzf - -C '/' --no-same-owner");
+    expect(landings()).toHaveLength(1);
   });
 
   it("export brings the folder home to the path given, streams the stages, prints the done line, and keys the sessions to the folder in the homes here", async () => {

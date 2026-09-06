@@ -8,13 +8,13 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { nodeHost } from "@wsp/collect";
-import { AFTER_CUT_LINE, ProjectExportResult, ProjectGolden, LOGIN_CHOICES, RECIPE_TICKS, RecipeTick, SessionInterruptOutcome, SessionStartOutcome, ThreadView, WorkspaceView, deleteNotice } from "@wsp/protocol";
+import { AFTER_CUT_LINE, LOGIN_CHOICES, ProjectExportResult, ProjectGolden, ProjectImportResult, ProjectPlan, RECIPE_TICKS, RecipeTick, SessionInterruptOutcome, SessionStartOutcome, ThreadView, WorkspaceView, actionRefusal, deleteNotice, importConsented, importRequest, workspaceState } from "@wsp/protocol";
 import { smallRecipePath } from "./recipe-file.js";
 import { runRecipe, runScan, type ScanInput } from "./recipe-command.js";
 import { RecipeAnswer, RecipeScan, recipePrintout, scanPrintout } from "./recipe-answer.js";
 import { INSTRUCTIONS } from "./skill.js";
 import { VERSION } from "./version.js";
-import { absoluteFolder, absolutePath, awake, checkedPicks, create, createFromHead, deleteWorkspace, deletedLine, dialHost, dropping, execOn, exportProject, follow, forget, forgotLine, nap, notifyOf, openingOf, projectGoldenOf, resumeOf, snapshot, stop, stopLine, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
+import { absoluteFolder, absolutePath, agentsChosen, awake, checkedPicks, create, createFromHead, deleteWorkspace, deletedLine, dialHost, dropping, execOn, exportProject, follow, forget, forgotLine, importProject, nap, notifyOf, openingOf, planLines, planProject, projectGoldenOf, resumeOf, secretsChosen, snapshot, stop, stopLine, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
 
 /** Nothing printed: the tools answer with values, and the stages a create streams have no reader here. */
 const QUIET: Out = { emit: () => {}, stream: () => {} };
@@ -84,6 +84,9 @@ function turnOut(turn: Turn): z.infer<typeof TurnOut> {
 }
 
 const QUIET_TURN = { event: () => {} };
+
+/** The line under a plan the tool returned without importing: the call that says yes, and the two per-row answers. */
+const PLAN_ONLY_TOOL = "nothing imported; call import again with yes true to take these defaults, or keep and cut per secret-shaped row";
 
 export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: ScanInput["alsoHere"] } = {}): McpServer {
   const dial = opts.dial ?? dialer(statePath);
@@ -323,6 +326,39 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: S
       });
       if (exit.error !== undefined) throw new Error(exit.error);
       return asText(output.join("\n"), { exitCode: exit.exitCode, output });
+    },
+  );
+  server.registerTool(
+    "import",
+    {
+      description:
+        "Lands a project folder from this computer on the workspace's machine at the same path, as the app's import dialog does, with the sessions of the agents named keyed to it there. Called without yes, keep or cut it uploads nothing and answers with the plan: the repository, files and size, the caches left behind, each secret-shaped file with its default (cut, unless a rewrite that removes the credential is offered) and each agent with sessions for the folder; put those rows to the person, then call again with yes true for the defaults or keep and cut per row. Refused in one line while the workspace is not running.",
+      inputSchema: {
+        workspace,
+        folder: z.string().describe("the folder on this computer, absolute; it lands at this path on the machine"),
+        yes: z.boolean().optional().describe("true imports with the plan's defaults; absent or false answers with the plan and imports nothing unless keep or cut is given"),
+        keep: z.array(z.string()).optional().describe("secret-shaped paths from the plan, relative to the folder, that travel (as they are, or rewritten when the plan offers it)"),
+        cut: z.array(z.string()).optional().describe("secret-shaped paths from the plan that stay behind, for rows the plan would carry rewritten"),
+        agents: z.array(z.string()).optional().describe("catalog ids of the agents whose sessions travel, each with sessions in the plan; absent means every agent the plan lists with readable sessions"),
+        replace: z.boolean().optional().describe("remove what is at the path on the machine first; without it an existing folder there is refused"),
+      },
+      outputSchema: { plan: ProjectPlan, imported: ProjectImportResult.optional() },
+    },
+    async ({ workspace: ref, folder, yes, keep = [], cut = [], agents, replace }) => {
+      const client = await dial();
+      const target = await workspaceOf(client, ref);
+      const refusal = actionRefusal(workspaceState({ phase: target.phase }), "import", target.gone);
+      if (refusal !== null) throw new Error(refusal);
+      const plan = await planProject(client, folder);
+      const ticked = secretsChosen(plan, keep, cut);
+      const chosen = agentsChosen(plan, agents);
+      const lines = planLines(plan, ticked, chosen).join("\n");
+      if (!importConsented({ yes, keep, cut })) return asText(`${lines}\n${PLAN_ONLY_TOOL}`, { plan });
+      let done = "";
+      const imported = await importProject(client, target.id, importRequest(plan, folder, ticked, chosen, replace), e => {
+        if (e.stage === "done") done = e.message;
+      });
+      return asText(done, { plan, imported });
     },
   );
   server.registerTool(

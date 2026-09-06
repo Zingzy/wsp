@@ -14,12 +14,21 @@ import WebSocket from "ws";
 import {
   AFTER_CUT_LINE,
   NOTIFY_ME,
+  actionRefusal,
+  canTravel,
+  defaultAgents,
+  defaultConsent,
   deleteNotice,
+  fmtBytes,
+  plural,
   fmtThreads,
   foldThreads,
   forgetNotice,
   goldenHead,
   goneRefusal,
+  importConsented,
+  importRequest,
+  secretOffer,
   startPicks,
   workspaceState,
   workspaceWord,
@@ -29,6 +38,10 @@ import {
   type ProjectExportEvent,
   type ProjectExportResult,
   type ProjectGolden,
+  type ProjectImportEvent,
+  type ProjectImportRequest,
+  type ProjectImportResult,
+  type ProjectPlan,
   type SessionEvent,
   type SessionInterruptOutcome,
   SessionInterruptResult,
@@ -192,7 +205,7 @@ function table(rows: ReadonlyArray<ReadonlyArray<string>>): string[] {
   return rows.map(row => row.map((cell, i) => (i === row.length - 1 ? cell : cell.padEnd(widths[i]!))).join("  ").trimEnd());
 }
 
-type Flags = Record<string, string | boolean | undefined>;
+type Flags = Record<string, string | boolean | string[] | undefined>;
 
 interface VerbContext {
   args: string[];
@@ -223,6 +236,7 @@ const PICK_FLAGS = ["model", "effort", "access"] as const;
 const PICK_OPTIONS: NonNullable<ParseArgsConfig["options"]> = Object.fromEntries(PICK_FLAGS.map(name => [name, { type: "string" }]));
 
 const flag = (flags: Flags, name: string): string | undefined => (typeof flags[name] === "string" ? (flags[name] as string) : undefined);
+const flagList = (flags: Flags, name: string): string[] => (Array.isArray(flags[name]) ? (flags[name] as string[]) : []);
 
 export async function workspaces(client: HostClient): Promise<WorkspaceView[]> {
   return (await client.request<{ workspaces: WorkspaceView[] }>("workspaces.list")).workspaces;
@@ -656,6 +670,76 @@ export async function exportProject(client: HostClient, workspaceId: string, req
   }
 }
 
+/** The plan for a folder on this computer, as the app's dialog reads it: nothing is packed or uploaded. */
+export async function planProject(client: HostClient, source: string): Promise<ProjectPlan> {
+  return (await client.request<{ plan: ProjectPlan }>("project.plan", { source })).plan;
+}
+
+/** Lands a folder on this computer at dest on the workspace's machine, the way the app's dialog does: `on` sees each
+ * stage of the import as the runtime says it, and the result is what landed. Fails when the host goes away first. */
+export async function importProject(client: HostClient, workspaceId: string, req: ProjectImportRequest, on: (e: ProjectImportEvent) => void): Promise<ProjectImportResult> {
+  const pushed = pushedFrames(client);
+  await client.events();
+  pushed.follow(
+    f => f.type === "project.import" && f["workspaceId"] === workspaceId && f["source"] === req.source && f["dest"] === req.dest,
+    f => on(f as unknown as ProjectImportEvent),
+  );
+  try {
+    const { imported } = await untilSettled(client, client.request<{ imported: ProjectImportResult }>("project.import", { workspaceId, ...req }));
+    return imported;
+  } finally {
+    pushed.stop();
+  }
+}
+
+/** The rows a person changed from the plan's defaults: keep ticks a secret-shaped row, cut unticks it; a path the
+ * plan does not list as secret-shaped is refused, since nothing would change for it. */
+export function secretsChosen(plan: ProjectPlan, keep: readonly string[], cut: readonly string[]): ReadonlySet<string> {
+  const listed = new Set(plan.secrets.map(s => s.path));
+  for (const path of [...keep, ...cut]) {
+    if (!listed.has(path)) throw new Error(`${path} is not a secret-shaped file in the plan${listed.size === 0 ? "; the plan lists none" : `; the plan lists ${[...listed].join(", ")}`}`);
+  }
+  const ticked = new Set(defaultConsent(plan.secrets));
+  for (const path of keep) ticked.add(path);
+  for (const path of cut) ticked.delete(path);
+  return ticked;
+}
+
+/** The agents whose sessions travel: the ones named, each with sessions in the plan, else the plan's default. */
+export function agentsChosen(plan: ProjectPlan, named: readonly string[] | undefined): ReadonlySet<string> {
+  if (named === undefined) return defaultAgents(plan.agents);
+  const travelling = plan.agents.filter(canTravel);
+  for (const id of named) {
+    if (!travelling.some(a => a.agent === id)) throw new Error(`${id} has no sessions for this folder${travelling.length === 0 ? "" : `; the plan lists ${travelling.map(a => a.agent).join(", ")}`}`);
+  }
+  return new Set(named);
+}
+
+/** The plan as the dialog shows it, one fact per line: the repository, the files and their size, the caches left
+ * behind, the paths not carried, where it lands, then each secret-shaped row with its signals, size and what its tick
+ * means, and each agent with its sessions and whether they travel. */
+export function planLines(plan: ProjectPlan, ticked: ReadonlySet<string>, agents: ReadonlySet<string>): string[] {
+  const rows: string[][] = [
+    ["Repository", plan.repo ? "git, .git travels whole" : "none"],
+    ["Files", `${plural(plan.files, "file")}, ${fmtBytes(plan.bytes)}`],
+    ["Caches left behind", plan.excluded.length === 0 ? "none" : plan.excluded.join(", ")],
+    ["Not carried", plan.skipped.length === 0 ? "none" : plural(plan.skipped.length, "path")],
+    ...plan.skipped.map(s => [`  ${s.path}`, s.note]),
+    ["Lands at", plan.source],
+    ["Secret-shaped", plan.secrets.length === 0 ? "none" : plural(plan.secrets.length, "file")],
+    ...plan.secrets.map(s => [`  ${s.path}`, `${s.signals.join(", ")}, ${fmtBytes(s.bytes)}`, secretOffer(s, ticked.has(s.path)).full]),
+    ["Agents", plan.agents.length === 0 ? "none with sessions for the folder" : `${plural(plan.agents.length, "agent")} with sessions for the folder`],
+    ...plan.agents.map(a => [`  ${a.name}`, a.error ?? plural(a.sessions, "session"), agents.has(a.agent) ? "sessions travel" : "stays"]),
+  ];
+  return table(rows);
+}
+
+/** The line under a plan nobody has consented to yet, off a terminal: nothing moved, and the two ways to say yes. */
+export const PLAN_ONLY = "nothing imported; run again with --yes to take these defaults, or --keep <path> and --cut <path> per secret-shaped row";
+
+/** The one question a person at the terminal is asked under the plan; no is the default and moves nothing. */
+export const IMPORT_NOW = "Import now? y/N";
+
 /** The agents a --agents flag names, comma-separated; nothing when the flag is absent. */
 export function agentsFlag(value: string | undefined): string[] | undefined {
   if (value === undefined) return undefined;
@@ -670,19 +754,6 @@ async function confirmed(ctx: VerbContext, question: string, d: Dropping): Promi
   ctx.io.error(`${d.workspace.name} kept`);
   return false;
 }
-
-const notYet = (verb: string, usage: string, options: Verb["options"], does: string): Verb => ({
-  name: verb,
-  usage,
-  about: `${does}; not here yet, lands with the project bundle`,
-  options,
-  run: async ctx => {
-    const line = `wsp ${verb} is not here yet: ${does} lands with the project bundle.`;
-    if (ctx.flags["json"] === true) ctx.out.emit({ verb, available: false, note: line });
-    else ctx.io.error(line);
-    return 1;
-  },
-});
 
 export const VERBS: readonly Verb[] = [
   {
@@ -865,7 +936,50 @@ export const VERBS: readonly Verb[] = [
       return exit.exitCode ?? 1;
     },
   },
-  notYet("import", "wsp import <folder> --to <workspace>", { to: { type: "string" } }, "moving a project folder into a workspace"),
+  {
+    name: "import",
+    usage: "wsp import <folder> --to <workspace> [--yes] [--keep, --cut <path>] [--agents <ids>] [--replace]",
+    about: "lands a folder on the machine at its path here; the plan first, then --yes or one question",
+    options: { to: { type: "string" }, yes: { type: "boolean" }, keep: { type: "string", multiple: true }, cut: { type: "string", multiple: true }, agents: { type: "string" }, replace: { type: "boolean" } },
+    run: async ctx => {
+      const [folder] = ctx.args;
+      const to = flag(ctx.flags, "to");
+      if (to === undefined) throw new Error("wsp import needs --to <workspace>");
+      if (folder === undefined || ctx.args.length !== 1) throw new Error("wsp import takes one folder on this computer");
+      const source = resolve(folder);
+      const named = agentsFlag(flag(ctx.flags, "agents"));
+      const client = await ctx.client();
+      const workspace = await workspaceOf(client, to);
+      const refusal = actionRefusal(workspaceState({ phase: workspace.phase }), "import", workspace.gone);
+      if (refusal !== null) throw new Error(refusal);
+      const plan = await planProject(client, source);
+      const keep = flagList(ctx.flags, "keep");
+      const cut = flagList(ctx.flags, "cut");
+      const ticked = secretsChosen(plan, keep, cut);
+      const agents = agentsChosen(plan, named);
+      ctx.out.emit({ plan }, planLines(plan, ticked, agents).join("\n"));
+      if (!importConsented({ yes: ctx.flags["yes"] === true, keep, cut })) {
+        if (ctx.io.isTTY !== true) {
+          ctx.io.error(PLAN_ONLY);
+          return 0;
+        }
+        if ((await ctx.io.ask(IMPORT_NOW)) !== "yes") return 0;
+      }
+      let done = "";
+      try {
+        const imported = await importProject(client, workspace.id, importRequest(plan, source, ticked, agents, ctx.flags["replace"] === true), e => {
+          if (e.stage === "done") done = e.message;
+          else if (e.stage !== "failed") ctx.out.stream(`${e.message}\n`);
+        });
+        ctx.out.emit({ imported }, done);
+        return 0;
+      } catch (e) {
+        if ((e as { kind?: unknown }).kind !== "exists") throw e;
+        ctx.io.error(`wsp import: ${e instanceof Error ? e.message : String(e)}\nRun again with --replace to overwrite it.`);
+        return 1;
+      }
+    },
+  },
   {
     name: "export",
     usage: "wsp export <workspace> <folder> [--from <path on the machine>] [--replace] [--agents <ids>]",
