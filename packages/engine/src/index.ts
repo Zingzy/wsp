@@ -17,3 +17,4 @@ export * from "./golden-mcp.js";
 export * from "./machine-context.js";
 export * from "./snapshot-storage.js";
 export * from "./tool-sizes.js";
+export * from "./project-state/index.js";
