@@ -131,8 +131,9 @@ describe("the MCP server over the host", () => {
     expect(tools.map(t => t.name).sort()).toEqual(["exec", "export", "forget", "fork", "new", "pause", "send", "snapshot", "thread_new", "threads", "workspaces"]);
     for (const t of tools) expect(t.description, t.name).toMatch(/\S/);
     expect(Object.keys((tools.find(t => t.name === "new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["from", "name"]);
-    expect(Object.keys((tools.find(t => t.name === "thread_new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["agent", "cwd", "notify", "task", "workspace"]);
-    expect(Object.keys((tools.find(t => t.name === "fork")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["agent", "cwd", "name", "notify", "task", "workspace"]);
+    expect(Object.keys((tools.find(t => t.name === "thread_new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "model", "notify", "task", "workspace"]);
+    expect(Object.keys((tools.find(t => t.name === "fork")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "model", "name", "notify", "task", "workspace"]);
+    expect(Object.keys((tools.find(t => t.name === "send")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "effort", "message", "model", "thread"]);
     expect(c.getServerVersion()?.name).toBe("wsp");
     expect(c.getInstructions()).toContain("thread_new");
     expect(c.getInstructions()).toContain("snapshot");
@@ -279,6 +280,42 @@ describe("the MCP server over the host", () => {
     expect(claude.starts.at(-1)?.cwd).toBe("/root/work/site");
     const { threads } = (await call("threads", { workspace: "worker" })).structured as { threads: ThreadView[] };
     expect(threads.map(t => t.cwd)).toEqual(["/root/work/site"]);
+  });
+
+  it("thread_new, send and fork take model, effort and access, the composer's three picks; a new thread without a model runs the catalog's default and an unlisted value is refused with the list", async () => {
+    await call("new", { name: "alpha" });
+    const picked = await call("thread_new", { workspace: "alpha", task: "review it", model: "claude-sonnet-5", effort: "low", access: "plan" });
+    expect(picked.isError).toBe(false);
+    expect(claude.starts.map(s => [s.model, s.effort, s.permissionMode])).toEqual([["claude-sonnet-5", "low", "plan"]]);
+    const bare = await call("thread_new", { workspace: "alpha", task: "hello" });
+    expect(bare.isError).toBe(false);
+    expect(claude.starts.at(-1)).toMatchObject({ model: "claude-opus-5" });
+    expect(claude.starts.at(-1)!.effort).toBeUndefined();
+    const threadId = (bare.structured as { threadId: string }).threadId;
+    const sent = await call("send", { thread: threadId, message: "now think", model: "claude-fable-5-1", effort: "max" });
+    expect(sent.isError).toBe(false);
+    expect(claude.starts.at(-1)).toMatchObject({ model: "claude-fable-5-1", effort: "max" });
+    expect(claude.starts.at(-1)!.resume).toBeDefined();
+    const kept = await call("send", { thread: threadId, message: "go on" });
+    expect(kept.isError).toBe(false);
+    expect(claude.starts.at(-1)!.model).toBeUndefined();
+    const forked = await call("fork", { workspace: "alpha", name: "worker", task: "build it", model: "claude-sonnet-5", access: "bypassPermissions" });
+    expect(forked.isError).toBe(false);
+    expect(claude.starts.at(-1)).toMatchObject({ model: "claude-sonnet-5", permissionMode: "bypassPermissions" });
+
+    const before = claude.starts.length;
+    const refused = await call("thread_new", { workspace: "alpha", task: "review it", model: "claude-haiku-4-5" });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toBe('model "claude-haiku-4-5" is not one claude takes; one of: Fable 5.1 (claude-fable-5-1), Opus 5 (claude-opus-5), Sonnet 5 (claude-sonnet-5)');
+    const mode = await call("send", { thread: threadId, message: "go", access: "yolo" });
+    expect(mode.isError).toBe(true);
+    expect(mode.text).toMatch(/^access mode "yolo" is not one claude takes; one of: Default \(default\), /);
+    const minted = (await rt.workspaces.list()).map(w => w.name);
+    const fork = await call("fork", { workspace: "alpha", name: "cheap", task: "review", model: "claude-haiku-4-5" });
+    expect(fork.isError).toBe(true);
+    expect(fork.text).toBe('model "claude-haiku-4-5" is not one claude takes; one of: Fable 5.1 (claude-fable-5-1), Opus 5 (claude-opus-5), Sonnet 5 (claude-sonnet-5)');
+    expect((await rt.workspaces.list()).map(w => w.name)).toEqual(minted);
+    expect(claude.starts).toHaveLength(before);
   });
 
   it("a cwd that is not absolute is refused by thread_new and fork before anything is created or started", async () => {

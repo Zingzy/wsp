@@ -9,7 +9,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { ProjectExportResult, ProjectGolden, SessionStartOutcome, ThreadView, WorkspaceView } from "@wsp/protocol";
 import { VERSION } from "./version.js";
-import { absoluteFolder, create, createFromHead, dialHost, execOn, exportProject, follow, forget, forgetting, forgotLine, nap, notifyOf, openingOf, projectGoldenOf, resumeOf, snapshot, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
+import { absoluteFolder, checkedPicks, create, createFromHead, dialHost, execOn, exportProject, follow, forget, forgetting, forgotLine, nap, notifyOf, openingOf, projectGoldenOf, resumeOf, snapshot, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
 
 const INSTRUCTIONS = [
   "wsp runs cloud machines called workspaces, each with agents working inside it, and this server is the same host the",
@@ -86,6 +86,12 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
   const agent = z.string().optional().describe("the agent to run in the thread, such as claude or codex; absent means the host's default");
   const notify = z.string().optional().describe("a thread (by id, or a prefix of it) told in one line each time a turn of the new thread ends, as a message into it; or me, for the person's app");
   const cwd = z.string().optional().describe("the folder on the machine the thread works in, absolute; absent means the workspace's project folder, else the home folder");
+  /** The same three words the app's composer uses; the runtime refuses a value the agent's catalog does not list, naming the list. */
+  const picks = {
+    model: z.string().optional().describe("the model the turn runs on, by the agent's own slug (claude-sonnet-5); absent on a new thread means the catalog's default, on send the thread's own"),
+    effort: z.string().optional().describe("the reasoning effort, by the agent's own word (low, medium, high); absent means the agent's default"),
+    access: z.string().optional().describe("the access mode, by the agent's own word (plan, acceptEdits, bypassPermissions); absent means the agent's default"),
+  };
 
   server.registerTool(
     "workspaces",
@@ -127,18 +133,19 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
     "fork",
     {
       description: "A sibling workspace from the source's golden version (a new machine, not a copy of its live disk); with a task, its first thread is opened and the reply returned. When that first turn fails, the error still names the workspace, which exists: continue with thread_new on it rather than forking again.",
-      inputSchema: { workspace, name: z.string().optional().describe("defaults to <source>-fork"), task: z.string().optional(), agent, cwd, notify },
+      inputSchema: { workspace, name: z.string().optional().describe("defaults to <source>-fork"), task: z.string().optional(), agent, ...picks, cwd, notify },
       outputSchema: Created.extend({ turn: TurnOut.optional(), failure: z.string().optional() }).shape,
     },
-    async ({ workspace: ref, name, task, agent: harness, cwd: folder, notify: tell }) => {
+    async ({ workspace: ref, name, task, agent: harness, cwd: folder, notify: tell, ...input }) => {
       absoluteFolder(folder);
       const client = await dial();
       const source = await workspaceOf(client, ref);
+      if (task !== undefined) await checkedPicks(client, harness, input);
       const created = await create(client, QUIET, source.golden, name ?? `${source.name}-fork`);
       if (task === undefined) return asJson(created);
       let failure: string;
       try {
-        const turn = await follow(client, openingOf(created.workspace, task, { harness, cwd: folder, notify: await notifyOf(client, tell) }), "agent", QUIET_TURN);
+        const turn = await follow(client, openingOf(created.workspace, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell) }), "agent", QUIET_TURN);
         const ended = turnFailure(turn);
         if (ended === undefined) return asJson({ ...created, turn: turnView(turn) });
         failure = ended;
@@ -172,27 +179,27 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
   server.registerTool(
     "thread_new",
     {
-      description: "Opens a thread in the workspace under the named agent, in the folder cwd names or the workspace's project folder, and follows its first turn; returns the reply text when the turn ends, with the thread id for send. With notify, every turn of the thread that ends later sends one line (outcome, duration, cost, last line of the reply) into the named thread, so a caller need not wait here or poll.",
-      inputSchema: { workspace, task: z.string(), agent, cwd, notify },
+      description: "Opens a thread in the workspace under the named agent, on the model, effort and access mode named or the catalog's defaults (a cheaper model for a review, say), in the folder cwd names or the workspace's project folder, and follows its first turn; returns the reply text when the turn ends, with the thread id for send. With notify, every turn of the thread that ends later sends one line (outcome, duration, cost, last line of the reply) into the named thread, so a caller need not wait here or poll.",
+      inputSchema: { workspace, task: z.string(), agent, ...picks, cwd, notify },
       outputSchema: TurnOut.shape,
     },
-    async ({ workspace: ref, task, agent: harness, cwd: folder, notify: tell }) => {
+    async ({ workspace: ref, task, agent: harness, cwd: folder, notify: tell, ...input }) => {
       const client = await dial();
       const target = await workspaceOf(client, ref);
-      const out = turnOut(await follow(client, openingOf(target, task, { harness, cwd: folder, notify: await notifyOf(client, tell) }), "agent", QUIET_TURN));
+      const out = turnOut(await follow(client, openingOf(target, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell) }), "agent", QUIET_TURN));
       return asText(out.text, out);
     },
   );
   server.registerTool(
     "send",
     {
-      description: "Sends a message to an existing thread (by id, or a prefix of it) and returns the reply when the turn ends; a person's message on the same thread lands in order with yours. When the thread's turn is still running the message joins it (outcome steered) or waits for it and then runs (outcome queued); the reply is that turn's.",
-      inputSchema: { thread: z.string(), message: z.string() },
+      description: "Sends a message to an existing thread (by id, or a prefix of it) and returns the reply when the turn ends; a person's message on the same thread lands in order with yours. A model, effort or access named here is the turn's; a turn that joins a running one keeps that one's. When the thread's turn is still running the message joins it (outcome steered) or waits for it and then runs (outcome queued); the reply is that turn's.",
+      inputSchema: { thread: z.string(), message: z.string(), ...picks },
       outputSchema: TurnOut.shape,
     },
-    async ({ thread: ref, message }) => {
+    async ({ thread: ref, message, ...input }) => {
       const client = await dial();
-      const out = turnOut(await follow(client, resumeOf(await threadOf(client, ref), message), "agent", QUIET_TURN));
+      const out = turnOut(await follow(client, resumeOf(await threadOf(client, ref), message, input), "agent", QUIET_TURN));
       return asText(out.text, out);
     },
   );
