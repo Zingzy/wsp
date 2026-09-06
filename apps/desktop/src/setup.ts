@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { loadKeys, makeRuntime, type Keys, type KeySources } from "@wsp/host";
-import type { Runtime } from "@wsp/runtime";
+import { goldenHead, type Runtime } from "@wsp/runtime";
 
 export type Setup = { ready: true; runtime: Runtime } | { ready: false; missing: "key" | "golden" };
 
@@ -31,7 +31,6 @@ export async function checkSetup(opts: SetupOptions): Promise<Setup> {
   const keys = await findKeys(opts.sources);
   if (keys === undefined) return { ready: false, missing: "key" };
   const runtime = (opts.runtimeFor ?? makeRuntime)(keys, opts.statePath);
-  const manifest = await runtime.golden.get();
-  const head = manifest?.versions.find(v => v.version === manifest.head);
+  const head = goldenHead(await runtime.golden.get());
   return head !== undefined ? { ready: true, runtime } : { ready: false, missing: "golden" };
 }

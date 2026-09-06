@@ -7,7 +7,7 @@
 // long as they like, as long as nobody pauses it (snapshot-fresh rule).
 
 import { createHash } from "node:crypto";
-import { ALREADY_APPLIED, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenStage, type GoldenVersion, type RecipeDigest } from "@wsp/protocol";
+import { ALREADY_APPLIED, goldenHead, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenStage, type GoldenVersion, type RecipeDigest } from "@wsp/protocol";
 import type { Removal } from "./golden-diff.js";
 import { NODE_PATH_LINE, type AgentInstall, type GuestFacts, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
@@ -19,7 +19,7 @@ import { BROWSER_SHIM_PATH, applyMachineContext, type ContextResult } from "./ma
 import type { Machine, MachineBackend, MachineKind, MachineState } from "./machine.js";
 import { importInto } from "./vault.js";
 
-export type { GoldenLogin, GoldenManifest, GoldenMissingTool, GoldenStage, GoldenVersion };
+export { goldenHead, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenStage, type GoldenVersion };
 
 export type StageListener = (stage: GoldenStage, detail?: string) => void;
 
@@ -854,7 +854,7 @@ export async function forkGolden(
   manifest: GoldenManifest,
   overrides: ForkOverrides = {},
 ): Promise<Machine> {
-  const head = manifest.versions.find(v => v.version === manifest.head);
+  const head = goldenHead(manifest);
   if (!head) throw new Error(`manifest head ${manifest.head} has no version entry`);
   return backend.create({
     kind: overrides.kind ?? head.kind ?? "sandbox",

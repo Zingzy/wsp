@@ -9,6 +9,7 @@ import {
   Workspace,
   buildGolden,
   exportPaths,
+  goldenHead,
   importInto,
   killUntilGone,
   prepareBuilder,
@@ -2090,7 +2091,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const recipe = recipeOrThrow();
       const name = o.name ?? "default";
       const prior = (await store.get(GOLDENS, name)) as GoldenManifest | undefined;
-      const head = prior?.versions.find(v => v.version === prior.head);
+      const head = goldenHead(prior);
       if (prior === undefined || head === undefined) throw new Error(`no golden named "${name}" to update; wsp init builds one`);
       const stage = stageOf(name);
       // Past its window a kept builder is never used, running or not: it is stopped here and the update forks; one

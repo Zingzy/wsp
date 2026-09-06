@@ -15,6 +15,7 @@ import { collect, nodeHost, nodeMachine, type Manifest, type Rung } from "@wsp/c
 import {
   SolariBackend,
   createRuntime,
+  goldenHead,
   hostIdentity,
   jsonFileStore,
   machineExecStream,
@@ -418,11 +419,10 @@ export async function serve(io: CliIO, opts: ServeOptions): Promise<HostHandle> 
   return hostFor(rt, keys, opts, io);
 }
 
-/** The host over the state and golden init sealed, or nothing (with the refusal printed) when no golden exists yet. */
 export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle | undefined> {
   const keys = await loadKeys(io, undefined, { anthropic: false });
   const rt = opts.runtime ?? makeRuntime(keys, opts.statePath);
-  if ((await rt.golden.get()) === undefined) {
+  if (goldenHead(await rt.golden.get()) === undefined) {
     io.error("no golden yet; run wsp init");
     return undefined;
   }

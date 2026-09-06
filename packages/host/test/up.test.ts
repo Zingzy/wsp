@@ -79,8 +79,8 @@ describe("wsp up", () => {
     expect(readFileSync(tokenPath, "utf8")).toBe(handle.authToken);
   });
 
-  it("refuses with one plain line and starts nothing when no golden is sealed", async () => {
-    stateFile({ workspaces: {} });
+  it("refuses with one plain line and starts nothing when the manifest's head has no version", async () => {
+    stateFile({ goldens: { default: { ...SEALED_GOLDEN, head: 2 } } });
     const lines: string[] = [];
     const errors: string[] = [];
     const handle = await up(quietIO(lines, errors), { port: 0, wsPort: 0, statePath, webDir, runtime: fileRuntime() });

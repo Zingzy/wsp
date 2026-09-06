@@ -12,6 +12,7 @@ import {
   type Capabilities,
   type DaemonReachView,
   type EventUnion,
+  goldenHead,
   type GoldenManifest,
   type GoldenVersion,
   type PortProbeView,
@@ -313,7 +314,7 @@ export function makeApi(c: ProtocolClient): Api {
     createWorkspace: create,
     createFromGoldenHead: async name => {
       const { manifest } = await c.request<{ manifest?: GoldenManifest }>("golden.get", { name: "default" });
-      const head = manifest?.versions.find(v => v.version === manifest.head);
+      const head = goldenHead(manifest);
       if (!head) throw new Error("no golden image yet; build one first (wspx golden build)");
       return create(head.snapshotId, name);
     },

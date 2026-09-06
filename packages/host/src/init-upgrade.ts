@@ -7,7 +7,7 @@ import { styleText } from "node:util";
 import type { ManifestEntry } from "@wsp/collect";
 import { describeDiff, diffRecipes, isEmptyDiff, isSmallDelta, removalsFor, rowsToApply, type GoldenDelta, type GoldenImport, type RecipeDiff } from "@wsp/engine";
 import type { GoldenLogin, RecipeDigest } from "@wsp/protocol";
-import { GRACE_MS, type GoldenBuilderView, type Runtime } from "@wsp/runtime";
+import { GRACE_MS, goldenHead, type GoldenBuilderView, type Runtime } from "@wsp/runtime";
 import { cancel, isCancel, log, note, outro, select } from "@clack/prompts";
 import { CLAUDE_INSTALLER } from "./init-import.js";
 import { rebuildEstimate, type BuildTimes } from "./init-times.js";
@@ -130,7 +130,7 @@ export async function updateRoad(o: UpdateRoadOptions): Promise<0 | 1 | "rebuild
     return 0;
   }
   const kept = keptBuilder(await o.rt.golden.builders(), version);
-  const head = manifest?.versions.find(v => v.version === manifest.head);
+  const head = goldenHead(manifest);
   const rateUsdPerHour = o.rt.backend.pricing.rateUsdPerHour(head?.size ?? kept?.size ?? o.rt.backend.pricing.defaultSize);
   const offer: UpgradeOffer = { diff, small: isSmallDelta(diff, id => rowOf(id)?.bytes ?? 0), onBuilder: kept !== undefined, version, rateUsdPerHour, lastBuild: o.lastBuild };
   note(describeOffer(offer).join("\n"), `Changes since golden v${version}`, out);
