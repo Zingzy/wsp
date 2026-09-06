@@ -8,7 +8,7 @@ import { randomBytes } from "node:crypto";
 import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
-import { RuntimeRequest, type ForwardEvent, type PortForward } from "@wsp/protocol";
+import { RuntimeRequest, type ExecEvent, type ForwardEvent, type PortForward } from "@wsp/protocol";
 import type { ProjectBundler, Runtime } from "./runtime.js";
 
 /** The port forwards a host holds, as the app lists and stops them. The
@@ -192,6 +192,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 ...(msg.effort !== undefined ? { effort: msg.effort } : {}),
                 ...(msg.permissionMode !== undefined ? { permissionMode: msg.permissionMode } : {}),
                 ...(msg.contextWindow !== undefined ? { contextWindow: msg.contextWindow } : {}),
+                ...(msg.startedBy !== undefined ? { startedBy: msg.startedBy } : {}),
               });
               send({ id: msg.id, ok: true, session: handle.view() });
               return;
@@ -267,12 +268,34 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               if (!opts.forwards?.stop(msg.workspaceId, msg.port)) throw new Error(`nothing is forwarding localhost:${msg.port} for that workspace`);
               send({ id: msg.id, ok: true });
               return;
+            case "workspaces.exec": {
+              const stream = await rt.workspaces.execStream(msg.workspaceId, msg.argv);
+              const execId = randomBytes(6).toString("hex");
+              let running = true;
+              detaches.push(() => {
+                if (running) stream.teardown();
+              });
+              const push = (e: ExecEvent): void => send(e);
+              send({ id: msg.id, ok: true, execId });
+              void (async () => {
+                let error: string | undefined;
+                try {
+                  for await (const text of stream.lines) push({ type: "exec.output", execId, text });
+                } catch (e) {
+                  error = e instanceof Error ? e.message : String(e);
+                }
+                const exitCode = await stream.exited;
+                running = false;
+                push({ type: "exec.exit", execId, exitCode, ...(error !== undefined ? { error } : {}) });
+              })();
+              return;
+            }
             case "project.plan":
               send({ id: msg.id, ok: true, plan: await bundler(msg.source).plan() });
               return;
             case "project.import": {
-              const { workspaceId, source, dest, replace, carry } = msg;
-              send({ id: msg.id, ok: true, imported: await rt.projects.import({ workspaceId, source, dest, replace, carry, bundler: bundler(source) }) });
+              const { workspaceId, source, dest, replace, carry, rewrite } = msg;
+              send({ id: msg.id, ok: true, imported: await rt.projects.import({ workspaceId, source, dest, replace, carry, rewrite, bundler: bundler(source) }) });
               return;
             }
           }

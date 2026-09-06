@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { hostname } from "node:os";
-import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
+import { shellQuote, type AdapterEvent, type ExecStream, type TurnResult } from "@wsp/adapter-claude";
 import {
   BUILDER_IDLE_MS,
   DAEMON_PORT,
@@ -67,6 +67,7 @@ import type {
   ReachState,
   SessionEvent,
   SessionInterruptResult,
+  SessionOrigin,
   SessionView,
   SnapshotStorage,
   WorkspaceCreateStage,
@@ -74,6 +75,7 @@ import type {
   WorkspaceView,
 } from "@wsp/protocol";
 import { ALREADY_APPLIED, sendRefusal, workspaceState } from "@wsp/protocol";
+import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { DAEMON_TOKEN_SET, assertTokenShape, rotateDaemonTokenScript } from "./daemon-token.js";
 import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy, idleReason } from "./idle.js";
@@ -112,6 +114,9 @@ export interface HarnessAdapter {
   start(options: HarnessStartOptions): HarnessSession;
   /** Asks the binary on the workspace's machine what it takes, null when it does not answer; absent, the table alone answers and nothing runs. */
   probeCatalog?(exec: (command: string) => Promise<string>): Promise<HarnessCatalogProbe | null>;
+  /** What a turn's command is exported with on the machine; a plain exec on the workspace runs with the same. Absent
+   * means nothing is exported and both run with the machine's own environment only. */
+  readonly env?: Readonly<Record<string, string>>;
 }
 
 /** Called per session start with the workspace's CURRENT machine (it can change on wake/upgrade). */
@@ -195,19 +200,22 @@ export interface CreateWorkspaceOptions extends WorkspaceSpec {
   idleWindowMs?: number | null;
 }
 
-/** A folder's archive as the host packs it: the bytes, what went in, and the secret-shaped paths left out. */
+/** A folder's archive as the host packs it: the bytes, what went in, the secret-shaped paths left out, and the ones
+ * that went in rewritten as the plan offered. */
 export interface PackedProject {
   tar: Buffer;
   files: number;
   bytes: number;
   cut: string[];
+  rewritten: string[];
 }
 
 /** A folder on this computer as the host reads it; the runtime never touches the disk itself. `plan` reads names
- * and sizes, `pack` reads the bytes once consent is known: a secret-shaped file travels only when `carry` names it. */
+ * and sizes, `pack` reads the bytes once consent is known: a secret-shaped file travels only when `carry` names it,
+ * or rewritten when `rewrite` names a path the plan offered a rewrite for. */
 export interface ProjectBundler {
   plan(): Promise<ProjectPlan>;
-  pack(carry: ReadonlySet<string>): Promise<PackedProject>;
+  pack(carry: ReadonlySet<string>, rewrite: ReadonlySet<string>): Promise<PackedProject>;
 }
 
 export interface ProjectImportOptions {
@@ -218,8 +226,10 @@ export interface ProjectImportOptions {
   dest: string;
   /** Remove what is at dest first; without it an existing dest is refused with kind "exists". */
   replace?: boolean;
-  /** The secret-shaped paths from the plan that may travel; every other one is cut and named. */
+  /** The secret-shaped paths from the plan that may travel as they are; every other one is cut and named. */
   carry?: readonly string[];
+  /** The paths the plan offered a rewrite for that land rewritten; wins over carry for the same path. */
+  rewrite?: readonly string[];
   bundler: ProjectBundler;
 }
 
@@ -425,6 +435,10 @@ export interface Runtime {
     touch(id: string): Promise<void>;
     /** One-shot command on the workspace's machine (plumbing for clients; sessions are the main road). */
     exec(id: string, cmd: string, opts?: { timeoutMs?: number }): Promise<ExecResult>;
+    /** The command, word by word, launched the way a harness turn is: detached on the machine, each word quoted for
+     * its shell, exported with what the default harness's turns get, its output streamed by line, its exit code at
+     * the end. Rejects when the workspace or that harness's adapter is unknown; a launch that fails ends the stream. */
+    execStream(id: string, argv: ReadonlyArray<string>): Promise<ExecStream>;
     /** How a browser dials this workspace's daemon; throws on backends without preview URLs. */
     daemonReach(id: string): Promise<DaemonReachView>;
     /** The public route to one guest port, for a browser to frame; same caching and refusal as daemonReach. */
@@ -441,7 +455,18 @@ export interface Runtime {
   readonly sessions: {
     start(
       workspaceId: string,
-      opts: { prompt: string; harness?: string; resume?: string; cwd?: string; model?: string; effort?: string; permissionMode?: string; contextWindow?: string },
+      opts: {
+        prompt: string;
+        harness?: string;
+        resume?: string;
+        cwd?: string;
+        model?: string;
+        effort?: string;
+        permissionMode?: string;
+        contextWindow?: string;
+        /** Absent means a person asked. */
+        startedBy?: SessionOrigin;
+      },
     ): Promise<SessionHandle>;
     /** Every turn this state file knows, the ones before a restart as they were last written; one that was still
      * running then reads as failed. */
@@ -721,6 +746,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const preparing = new Map<string, { hash: string | undefined; promise: Promise<GoldenBuilderView> }>();
   /** A row read back from the store has no handle: its process died with the runtime that started it. */
   const sessions = new Map<string, { view: SessionView; turnId: string; handle?: SessionHandle; end?: (reason: string) => void }>();
+  /** Every exec stream still running, so the machine going away ends it the way it ends a session. */
+  const execs = new Set<{ workspaceId: string; end: (reason: string) => void }>();
   const indexFlushes = new Map<string, Promise<void>>();
   const transcripts = new Map<string, SessionEvent[]>();
   // Puts are chained per workspace so the later snapshot always lands last,
@@ -1103,9 +1130,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   const idleWindowOf = (r: WorkspaceRecord): number | null => (r.idleWindowMs === undefined ? defaultIdleWindowMs : r.idleWindowMs);
 
-  /** Every live session of a workspace ends here when its machine goes away under it; the harness's own end, if it ever comes, is dropped. */
+  /** Every live session and exec of a workspace ends here when its machine goes away under it; the harness's own end, if it ever comes, is dropped. */
   const endSessions = (workspaceId: string, reason: string): void => {
     for (const s of sessions.values()) if (s.view.workspaceId === workspaceId) s.end?.(reason);
+    for (const e of execs) if (e.workspaceId === workspaceId) e.end(reason);
   };
 
   // Pausing is persisted and pushed before the provider is asked, so a list
@@ -1539,6 +1567,40 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return entry.machine.exec(cmd, o);
     },
 
+    async execStream(id, argv) {
+      const entry = await entryOf(id);
+      const { adapter } = adapterFor(entry);
+      // Only the socket or the machine going away ends a command; a build may outlive the deadline a harness turn gets.
+      const inner = machineExecStream(entry.machine, { deadlineMs: Number.POSITIVE_INFINITY })(argv.map(shellQuote).join(" "), { env: { ...adapter.env } });
+      let endWith: (reason: string) => void = () => {};
+      const ended = new Promise<{ reason: string }>(resolve => {
+        endWith = reason => resolve({ reason });
+      });
+      const running = {
+        workspaceId: id,
+        end: (reason: string): void => {
+          endWith(reason);
+          inner.kill();
+        },
+      };
+      execs.add(running);
+      // The inner poll loop notices the kill one poll late; the reason reaches the reader as soon as it is known.
+      const lines = async function* (): AsyncGenerator<string> {
+        const it = inner.lines[Symbol.asyncIterator]();
+        try {
+          while (true) {
+            const next = await Promise.race([it.next(), ended]);
+            if ("reason" in next) throw new Error(next.reason);
+            if (next.done) return;
+            yield next.value;
+          }
+        } finally {
+          execs.delete(running);
+        }
+      };
+      return { ...inner, lines: lines(), exited: Promise.race([inner.exited, ended.then(() => null)]) };
+    },
+
     async daemonReach(id) {
       const entry = await entryOf(id);
       const reach = await entry.ws.daemonReach();
@@ -1579,15 +1641,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return catalog;
   };
 
+  /** The adapter for a harness on this workspace's current machine; unnamed means the runtime's default. */
+  const adapterFor = (entry: LiveWorkspace, named?: string): { harness: string; adapter: HarnessAdapter } => {
+    const harness = named ?? "claude";
+    const factory = adapters[harness];
+    if (!factory) throw new Error(`no adapter registered for harness "${harness}"`);
+    return { harness, adapter: factory({ machine: entry.machine, workspaceId: entry.record.id }) };
+  };
+
   const sessionsApi: Runtime["sessions"] = {
     async start(workspaceId, o) {
       const entry = await entryOf(workspaceId);
       const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }));
       if (refusal !== null) throw new Error(refusal);
-      const harness = o.harness ?? "claude";
-      const factory = adapters[harness];
-      if (!factory) throw new Error(`no adapter registered for harness "${harness}"`);
-      const adapter = factory({ machine: entry.machine, workspaceId });
+      const { harness, adapter } = adapterFor(entry, o.harness);
       const table = harnessCatalog(harness);
       // A start is when the binary may have changed under us, so the catalog is refreshed here too, within its TTL.
       if (table !== undefined) void catalogOn(table, entry.machine, adapter);
@@ -1602,6 +1669,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         workspaceId,
         harness,
         status: "running",
+        startedBy: o.startedBy ?? "person",
         threadId,
         prompt: o.prompt,
         startedAt: Date.now(),
@@ -1698,6 +1766,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       );
       const handleId = started.localId;
       sessionView.id = handleId;
+      // A resumed turn takes over the row of the turn it resumes; the row keeps saying who opened the thread.
+      if (o.resume !== undefined) sessionView.startedBy = sessions.get(handleId)?.view.startedBy ?? sessionView.startedBy;
 
       const handle: SessionHandle = {
         id: handleId,
@@ -2341,16 +2411,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const plan = await o.bundler.plan();
         report("planned", `${plural(plan.files, "file")}, ${fmtBytes(plan.bytes)}${plan.repo ? " and the repository" : ""}; ${plural(plan.secrets.length, "secret-shaped file")}; ${plural(plan.excluded.length, "cache")} left behind.`);
         const carry = new Set(o.carry ?? []);
-        const carried = plan.secrets.filter(s => carry.has(s.path)).map(s => s.path);
-        const cut = plan.secrets.filter(s => !carry.has(s.path)).map(s => s.path);
-        report(
-          "consented",
-          plan.secrets.length === 0
-            ? "No secret-shaped files."
-            : `${carried.length === 0 ? "No secret-shaped file travels" : `Carrying ${carried.join(", ")}`}; ${cut.length === 0 ? "nothing cut" : `cut ${cut.join(", ")}`}.`,
-        );
+        const rewrite = new Set(o.rewrite ?? []);
+        const rewriting = plan.secrets.flatMap(s => (s.rewrite !== undefined && rewrite.has(s.path) ? [{ path: s.path, ...s.rewrite }] : []));
+        const rewritten = new Set(rewriting.map(r => r.path));
+        const carried = plan.secrets.filter(s => carry.has(s.path) && !rewritten.has(s.path)).map(s => s.path);
+        const cut = plan.secrets.filter(s => !carry.has(s.path) && !rewritten.has(s.path)).map(s => s.path);
+        const clauses = [
+          ...(carried.length > 0 ? [`carrying ${carried.join(", ")}`] : []),
+          ...(rewriting.length > 0 ? [`rewriting ${rewriting.map(r => `${r.path}${r.urls.length > 0 ? ` to ${r.urls.join(", ")}` : ""}${r.drop.length > 0 ? ` without ${r.drop.join(", ")}` : ""}`).join(", ")}`] : []),
+          ...(carried.length === 0 && rewriting.length === 0 ? ["no secret-shaped file travels"] : []),
+          cut.length === 0 ? "nothing cut" : `cut ${cut.join(", ")}`,
+        ].join("; ");
+        report("consented", plan.secrets.length === 0 ? "No secret-shaped files." : `${clauses.charAt(0).toUpperCase()}${clauses.slice(1)}.`);
         report("packing", `Packing ${plural(plan.files - cut.length, "file")}.`);
-        const packed = await o.bundler.pack(carry);
+        const packed = await o.bundler.pack(carry, rewrite);
         report("uploading", `Uploading ${fmtBytes(packed.tar.length)}.`, { bytes: 0, total: packed.tar.length });
         const { parts } = await landBundle(entry.machine, packed.tar, o.dest, {
           ...(o.replace !== undefined ? { replace: o.replace } : {}),
@@ -2359,7 +2433,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           onLanding: () => report("landing", `Landing at ${o.dest}.`),
         });
         report("done", `${plural(packed.files, "file")}, ${fmtBytes(packed.bytes)}, landed at ${o.dest}${parts > 1 ? ` in ${parts} parts` : ""}.`);
-        return { dest: o.dest, files: packed.files, bytes: packed.bytes, parts, cut: packed.cut };
+        return { dest: o.dest, files: packed.files, bytes: packed.bytes, parts, cut: packed.cut, rewritten: packed.rewritten };
       } catch (e) {
         report("failed", e instanceof Error ? e.message : String(e));
         throw e;

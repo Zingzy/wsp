@@ -51,6 +51,7 @@ import {
   defaultWorkspaceName,
   dotClassForTone,
   idleCountdownLabel,
+  provenanceLabel,
   threadPill,
   reachNote,
   textClassForTone,
@@ -435,6 +436,9 @@ function ThreadRow({ thread, time, active, onSelect }: { thread: SidebarThreadSn
         <ProjectFavicon src={null} className="size-3.5 opacity-60" fallbackIcon={MessageSquareIcon} />
         <ThreadRowLeadingStatus status={threadPill(thread)} />
         <span className="min-w-0 flex-1 truncate">{thread.title}</span>
+        <span data-thread-provenance className="shrink-0 font-mono text-[10px] text-muted-foreground/55">
+          {provenanceLabel(thread)}
+        </span>
         <span className="ml-auto shrink-0 text-xs text-muted-foreground/55 tabular-nums">{time}</span>
       </SidebarMenuSubButton>
     </SidebarMenuSubItem>

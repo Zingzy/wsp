@@ -99,6 +99,8 @@ export interface ClaudeAdapter {
   readonly sessions: ReadonlyMap<string, ClaudeSession>;
   /** Makes the binary describe itself under the same config dir as a session; null when it did not answer. */
   probeCatalog(exec: (command: string) => Promise<string>): Promise<ClaudeCatalogProbe | null>;
+  /** What every session's command is exported with; the one environment a turn on the machine gets. */
+  readonly env: Readonly<Record<string, string>>;
 }
 
 function rec(value: unknown): Record<string, unknown> | undefined {
@@ -271,6 +273,7 @@ function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: strin
 
 export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
   const sessions = new Map<string, ClaudeSession>();
+  const env = buildEnv({ base: deps.baseEnv, configDir: deps.configDir, apiKey: deps.apiKey });
 
   const start = (options: StartOptions): ClaudeSession => {
     const localId = options.resume ?? newSessionId();
@@ -283,8 +286,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       permissionMode: options.permissionMode,
       contextWindow: options.contextWindow,
     });
-    const env = buildEnv({ base: deps.baseEnv, configDir: deps.configDir, apiKey: deps.apiKey });
-    const stream = deps.exec(command, { env });
+    const stream = deps.exec(command, { env: { ...env } });
 
     let claudeSessionId = localId;
     let sawResult = false;
@@ -367,5 +369,5 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     return session;
   };
 
-  return { start, sessions, probeCatalog: exec => exec(catalogProbeCommand({ configDir: deps.configDir })).then(parseCatalogProbe) };
+  return { start, sessions, probeCatalog: exec => exec(catalogProbeCommand({ configDir: deps.configDir })).then(parseCatalogProbe), env };
 }

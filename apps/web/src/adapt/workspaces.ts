@@ -4,7 +4,7 @@
 // sidebarProjectGrouping.ts SidebarProjectSnapshot and Sidebar.logic.ts
 // resolveThreadStatusPill (commit 57a66608). Phase is the product word and
 // leads; machine state and reach only add when they diverge from it.
-import { workspaceState, workspaceWord, type SessionView, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { foldThreads, workspaceState, workspaceWord, type SessionView, type ThreadView, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicator } from "./view-model.js";
 
 export interface SidebarInput {
@@ -83,31 +83,23 @@ export function turnWait(state: WorkspaceState): { readonly label: string; reado
   }
 }
 
-/** One row per turn from the wire, one thread per row here: turns sharing a threadId fold into one, in the order the first of each started. */
+/** One row per turn from the wire, one thread per row here: the protocol's fold, in the order the first turn of each started. */
 export function deriveThreads(sessions: ReadonlyArray<SessionView>): SidebarThreadSnapshot[] {
-  const byThread = new Map<string, SessionView[]>();
-  for (const session of sessions) {
-    const key = session.threadId ?? session.id;
-    const turns = byThread.get(key);
-    if (turns === undefined) byThread.set(key, [session]);
-    else turns.push(session);
-  }
-  return [...byThread].map(([id, turns]) => deriveThread(id, turns));
+  return foldThreads(sessions).map(deriveThread);
 }
 
-/** The thread reads as its opening prompt; its state and times are the latest turn's, since that is what is running or just settled. */
-function deriveThread(id: string, turns: ReadonlyArray<SessionView>): SidebarThreadSnapshot {
-  const first = turns[0]!;
-  const latest = turns[turns.length - 1]!;
+function deriveThread(thread: ThreadView): SidebarThreadSnapshot {
   return {
-    id,
-    threadId: first.threadId ?? null,
-    workspaceId: first.workspaceId,
-    title: first.prompt ?? first.claudeSessionId ?? first.id,
-    status: latest.status,
-    startedAt: latest.startedAt !== undefined ? new Date(latest.startedAt).toISOString() : null,
-    endedAt: latest.endedAt !== undefined ? new Date(latest.endedAt).toISOString() : null,
-    indicator: threadIndicator(latest),
+    id: thread.id,
+    threadId: thread.threadId ?? null,
+    workspaceId: thread.workspaceId,
+    title: thread.title,
+    status: thread.status,
+    startedAt: thread.startedAt !== undefined ? new Date(thread.startedAt).toISOString() : null,
+    endedAt: thread.endedAt !== undefined ? new Date(thread.endedAt).toISOString() : null,
+    indicator: threadIndicator(thread),
+    harness: thread.harness,
+    startedBy: thread.startedBy,
   };
 }
 

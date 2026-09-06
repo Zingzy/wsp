@@ -151,6 +151,28 @@ describe("rows from the fixture wire", () => {
     expect(screen.queryByText(/Settled/)).toBeNull();
   });
 
+  it("every thread row says which agent runs in it and who opened it, in muted mono", async () => {
+    await mount(
+      fakeApi(
+        [API],
+        [status(API)],
+        [
+          session("s1", "ws_a", { prompt: "fix the port list", startedBy: "cli" }),
+          session("s2", "ws_a", { prompt: "upgrade node", harness: "codex", startedBy: "person" }),
+          session("s3", "ws_a", { prompt: "before provenance" }),
+        ],
+      ),
+      "api",
+    );
+    await waitFor(() => expect(screen.getByText("fix the port list")).toBeDefined());
+    const provenance = (title: string): HTMLElement => within(rowOf(title)).getByText(/·/);
+    expect(provenance("fix the port list").textContent).toBe("claude · cli");
+    expect(provenance("upgrade node").textContent).toBe("codex · you");
+    expect(provenance("before provenance").textContent).toBe("claude · you");
+    expect(provenance("fix the port list").className).toContain("font-mono");
+    expect(provenance("fix the port list").className).toContain("text-muted-foreground");
+  });
+
   it("the idle shelf collapses per workspace and remembers it", async () => {
     await mount(
       fakeApi(
