@@ -160,6 +160,7 @@ describe("rows from the fixture wire", () => {
           session("s1", "ws_a", { prompt: "fix the port list", startedBy: "cli" }),
           session("s2", "ws_a", { prompt: "upgrade node", harness: "codex", startedBy: "person" }),
           session("s3", "ws_a", { prompt: "before provenance" }),
+          session("s4", "ws_a", { prompt: "from the director", startedBy: "agent" }),
         ],
       ),
       "api",
@@ -169,6 +170,7 @@ describe("rows from the fixture wire", () => {
     expect(provenance("fix the port list").textContent).toBe("claude · cli");
     expect(provenance("upgrade node").textContent).toBe("codex · you");
     expect(provenance("before provenance").textContent).toBe("claude · you");
+    expect(provenance("from the director").textContent).toBe("claude · agent");
     expect(provenance("fix the port list").className).toContain("font-mono");
     expect(provenance("fix the port list").className).toContain("text-muted-foreground");
   });

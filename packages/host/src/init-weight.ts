@@ -3,7 +3,8 @@
 // column and the Disk line, and decides the tick a formula starts with. Hue on
 // these screens means weight and nothing else.
 import type { ManifestEntry } from "@wsp/collect";
-import { toolSize, type BrewTable } from "@wsp/engine";
+import { BUILDER_DISK_GB, toolSize, type BrewTable, type DiskEstimate } from "@wsp/engine";
+import { fmtBytes } from "@wsp/protocol";
 import type { Tone } from "./init-select.js";
 
 const MIB = 1024 * 1024;
@@ -38,4 +39,22 @@ export function weighed(entries: readonly ManifestEntry[], brew: BrewTable): Man
     const size = toolSize(e, brew);
     return size !== undefined && size.bytes >= HEAVY_BYTES ? { ...e, default: "skip" } : e;
   });
+}
+
+/** The estimate's parts that are not zero, and how many rows have no size. */
+export function diskParts(est: DiskEstimate): string {
+  const parts = ([["files", est.files], ["Homebrew's toolchain", est.toolchain], ["tools", est.tools], ["agents", est.agents]] as const).filter(([, n]) => n > 0).map(([label, n]) => `${label} ${fmtBytes(n)}`);
+  const unknown = est.unknown.length > 0 ? `${est.unknown.length} unmeasured, ~${fmtBytes(est.assumed)}` : "";
+  return [parts.join(", "), unknown].filter(p => p !== "").join("; ");
+}
+
+/** The total against the room the builder's disk leaves. */
+export function diskHead(est: DiskEstimate): string {
+  return est.over > 0 ? `${fmtBytes(est.total)}, ${fmtBytes(est.over)} over the ${fmtBytes(est.room)} the ${BUILDER_DISK_GB} GB builder leaves` : `${fmtBytes(est.total)} of ${fmtBytes(est.room)} on the ${BUILDER_DISK_GB} GB builder`;
+}
+
+/** The summary's line: the total, then the parts in brackets. */
+export function diskLine(est: DiskEstimate): string {
+  const parts = diskParts(est);
+  return parts === "" ? diskHead(est) : `${diskHead(est)} (${parts})`;
 }

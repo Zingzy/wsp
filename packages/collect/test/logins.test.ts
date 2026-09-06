@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { CATALOG, loginIdOf } from "@wsp/catalog";
+import { CATALOG, LOGIN_ROWS, loginIdOf } from "@wsp/catalog";
 import { describe, expect, it } from "vitest";
 import { detectLogins } from "../src/index.js";
 import { loginDefault } from "../src/detect/logins.js";
@@ -25,16 +25,22 @@ describe("logins", () => {
     expect(rows).toEqual([{ rung: "logins", id, label: expect.any(String), group: expect.any(String), paths, bytes: expect.any(Number), default: dflt }]);
   });
 
-  it("Hermes Agent's one row carries its keys and its device login, so it starts as a copy and the detail says why", async () => {
+  it("Hermes Agent is two rows: its device login, a sign-in on the machine, and the keys file beside it, a copy the row explains", async () => {
     const rows = await detectLogins(fakeHost({ files: { "~/.hermes/.env": 25_000, "~/.hermes/auth.json": 400, "~/.hermes/config.yaml": 600 } }));
     expect(rows).toEqual([
-      { rung: "logins", id: "logins/hermes", label: "Hermes Agent API keys and logins", group: "Agent logins", paths: ["~/.hermes/.env", "~/.hermes/auth.json"], bytes: 25_400, default: "bring", detail: "the keys in ~/.hermes/.env travel only by copy" },
+      { rung: "logins", id: "logins/hermes", label: "Hermes Agent login", group: "Agent logins", paths: ["~/.hermes/auth.json"], bytes: 400, default: "skip" },
+      { rung: "logins", id: "logins/hermes-keys", label: "Hermes Agent API keys", group: "Agent logins", paths: ["~/.hermes/.env"], bytes: 25_000, default: "bring", detail: "the keys in ~/.hermes/.env travel only by copy; no sign-in produces them" },
     ]);
     expect(loginDefault("hermes")).toBe("skip");
+    expect(loginDefault("hermes-keys")).toBe("bring");
+    // Each row stands on its own file: keys with no login, a login with no keys.
+    expect((await detectLogins(fakeHost({ files: { "~/.hermes/.env": 100 } }))).map(r => r.id)).toEqual(["logins/hermes-keys"]);
+    expect((await detectLogins(fakeHost({ files: { "~/.hermes/auth.json": 100 } }))).map(r => r.id)).toEqual(["logins/hermes"]);
   });
 
   it("every login row's default follows its catalog entry's sign-in kind, and a login the catalog does not know starts as a copy", () => {
     for (const e of CATALOG) expect(loginDefault(loginIdOf(e.id)), e.id).toBe(e.signIn.kind === "oauth" || e.signIn.kind === "device" ? "skip" : "bring");
+    for (const r of LOGIN_ROWS) expect(loginDefault(r.id), r.id).toBe(r.signIn.kind === "oauth" || r.signIn.kind === "device" ? "skip" : "bring");
     expect(CATALOG.find(e => e.id === "kubectl")?.signIn.kind).toBe("none");
     expect(loginDefault("kube")).toBe("bring");
     expect(loginDefault("opencode")).toBe("bring");

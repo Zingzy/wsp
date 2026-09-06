@@ -240,15 +240,28 @@ const MATRIX: readonly Cell[] = [
     note: "copied, but pi --list-models says not signed in",
   },
 
+  // The device login and the keys file beside it are two rows: the login signs in on the machine, the keys copy.
   {
     tool: "hermes",
     source: "file",
     laptop: { files: { "~/.hermes/.env": 25_000, "~/.hermes/auth.json": 400 } },
-    row: { paths: ["~/.hermes/.env", "~/.hermes/auth.json"], default: "bring", detail: "the keys in ~/.hermes/.env travel only by copy", starts: "copy" },
+    row: { paths: ["~/.hermes/auth.json"], default: "skip", starts: "machine" },
     answer: { output: "nous (1 credentials):\n  #1  device_code          oauth   device_code ←\n", exitCode: 0 },
     state: "signed-in",
     note: "copied; hermes auth list",
   },
+  {
+    tool: "hermes-keys",
+    source: "file",
+    laptop: { files: { "~/.hermes/.env": 25_000, "~/.hermes/auth.json": 400 } },
+    row: { paths: ["~/.hermes/.env"], default: "bring", detail: "the keys in ~/.hermes/.env travel only by copy; no sign-in produces them", starts: "copy" },
+    // A key the copied .env holds is one the secrets step never set, so the pool names it and the row names no source.
+    answer: { output: "openai (1 credentials):\n  #1  OPENAI_API_KEY    api_key env:OPENAI_API_KEY ←\n", exitCode: 0 },
+    state: "signed-in",
+    note: "copied; hermes auth list",
+  },
+  ...(["keychain", "rc-key", "helper"] as const).map((source): Unreachable => ({ tool: "hermes-keys", source, unreachable: "the keys row is the ~/.hermes/.env file alone; a key elsewhere travels as a secret or not at all" })),
+  { tool: "hermes-keys", source: "none", laptop: {}, answer: { output: "", exitCode: 0 }, state: "not-signed-in", note: "copied, but hermes auth list says not signed in" },
   {
     tool: "hermes",
     source: "rc-key",
@@ -307,7 +320,9 @@ const MATRIX: readonly Cell[] = [
 ];
 
 /** The shell's own 127 on a guest without the tool: the check cannot run, and the row says so. */
-const MISSING: readonly string[] = ["gh", "gcloud", "wrangler", "vercel", "kube", "codex", "opencode", "pi", "hermes", "claude"];
+const MISSING: readonly string[] = ["gh", "gcloud", "wrangler", "vercel", "kube", "codex", "opencode", "pi", "hermes", "hermes-keys", "claude"];
+/** The command a row's status runs, where the row is not named for it. */
+const BIN: Readonly<Record<string, string>> = { kube: "kubectl", "hermes-keys": "hermes" };
 
 const cellName = (tool: string, source: Source): string => `${tool} x ${source}`;
 const reachable = (c: Cell): c is Reachable => !("unreachable" in c);
@@ -427,8 +442,9 @@ describe("the sign-in matrix, cell by cell", () => {
 
   it.each(MISSING)("%s: a guest without the tool leaves the copied login not verified, with the shell's own 127 and no status read", async tool => {
     const status = statusOf(SIGN_INS[tool]!)!;
-    const [r] = await guest(tool, "copy", { output: `sh: 1: ${tool === "kube" ? "kubectl" : tool}: not found`, exitCode: 127 }).run;
-    expect(r).toEqual({ id: `logins/${tool}`, label: tool, state: "copied", command: status.command, exit: 127, note: `not verified: ${tool === "kube" ? "kubectl" : tool} is not on the machine` });
+    const bin = BIN[tool] ?? tool;
+    const [r] = await guest(tool, "copy", { output: `sh: 1: ${bin}: not found`, exitCode: 127 }).run;
+    expect(r).toEqual({ id: `logins/${tool}`, label: tool, state: "copied", command: status.command, exit: 127, note: `not verified: ${bin} is not on the machine` });
   });
 
   it("aws and gemini have no missing-tool cell: aws's check runs inside sh -c and gemini's is shell builtins, so both answer not signed in instead", async () => {

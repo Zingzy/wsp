@@ -2,6 +2,7 @@
 // A small laptop as the collector would describe it, fixed so the screens'
 // tests can name rows; the real collector is what wsp init runs.
 import type { Manifest, ManifestEntry } from "@wsp/collect";
+import type { Recipe } from "@wsp/protocol";
 
 export const FIXTURE: Manifest = {
   entries: [
@@ -37,4 +38,19 @@ export const byId = (id: string): ManifestEntry => {
   const e = FIXTURE.entries.find(x => x.id === id);
   if (!e) throw new Error(`no fixture entry ${id}`);
   return e;
+};
+
+/** The small recipe wsp recipe would write on the same laptop: Claude Code and the two formulae installed here,
+ * Codex known to the catalog but not here, the floor on by default; tsx stands for no catalog tool and is left out. */
+export const RECIPE: Recipe = {
+  version: 1,
+  at: "2026-09-06T03:00:00.000Z",
+  histories: [{ agent: "claude", state: "empty", sessions: 0, calls: 0 }],
+  rows: [
+    { id: "claude", kind: "agent", on: true, source: { kind: "installed", paths: ["~/.claude/settings.json"], bin: true }, size: 208 * 1024 * 1024 },
+    { id: "codex", kind: "agent", on: false, source: { kind: "popular", sessions: 5, images: 1 }, size: 455 * 1024 * 1024 },
+    ...["node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker"].map((id): Recipe["rows"][number] => ({ id, kind: "tool", on: true, source: { kind: "popular", sessions: 10, images: 5 } })),
+    { id: "gh", kind: "tool", on: true, source: { kind: "installed", paths: [], bin: true } },
+    { id: "yq", kind: "tool", on: true, source: { kind: "installed", paths: [], bin: true } },
+  ],
 };
