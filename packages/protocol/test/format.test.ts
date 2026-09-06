@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { fmtBytes, fmtCost, fmtDuration, fmtElapsed, fmtMemGb, fmtThreads, forgetNotice, notifyLine, titleLine, TURN_IDLE_MS, TURN_WALL_MS, turnCutLine } from "../src/index.js";
+import { fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, notifyLine, titleLine, TURN_IDLE_MS, TURN_WALL_MS, turnCutLine } from "../src/index.js";
 import { ROOT, sourceFiles } from "./source-files.js";
 
 describe("fmtBytes", () => {
@@ -24,10 +24,26 @@ describe("fmtBytes", () => {
 });
 
 describe("a turn's duration and cost", () => {
-  it("fmtDuration reads ms under a second, tenths under ten, whole seconds under a minute, then minutes and seconds", () => {
-    expect([0, 7, 999, 1500, 9960, 10458, 59_400, 60_000, 101_515, 492_000, 862_399, -5, 4000].map(fmtDuration)).toEqual([
-      "1ms", "7ms", "999ms", "1.5s", "10s", "10s", "59s", "1m", "1m 42s", "8m 12s", "14m 22s", "0ms", "4.0s",
+  it("fmtDuration's short style reads ms under a second, tenths under ten, whole seconds under a minute, then minutes and seconds", () => {
+    expect([0, 7, 999, 1500, 9960, 10458, 59_400, 59_600, 60_000, 101_515, 492_000, 862_399, 3_665_000, -5, NaN, 4000].map(ms => fmtDuration(ms))).toEqual([
+      "1ms", "7ms", "999ms", "1.5s", "10s", "10s", "59s", "60s", "1m", "1m 42s", "8m 12s", "14m 22s", "61m 5s", "0ms", "0ms", "4.0s",
     ]);
+  });
+
+  it("fmtDuration's clock style reads minutes and two-digit seconds, hours ahead once there are any, and nothing sensible as zero", () => {
+    expect([0, 999, 61_000, 900_000, 3_599_499, 3_600_000, 6 * 3_600_000 + 65_000, -5, NaN].map(ms => fmtDuration(ms, "clock"))).toEqual([
+      "0m 00s", "0m 01s", "1m 01s", "15m 00s", "59m 59s", "1h 00m 00s", "6h 01m 05s", "0m 00s", "0m 00s",
+    ]);
+  });
+
+  it("both styles round the same instant to the same minute and second", () => {
+    for (const ms of [60_499, 60_500, 119_999, 3_599_999, 5_400_500]) {
+      const short = fmtDuration(ms);
+      const clock = fmtDuration(ms, "clock");
+      const [, sm, ss] = /^(\d+)m(?: (\d+)s)?$/.exec(short) ?? [];
+      const [, ch, cm, cs] = /^(?:(\d+)h )?(\d+)m (\d+)s$/.exec(clock) ?? [];
+      expect([Number(sm), Number(ss ?? 0)]).toEqual([Number(ch ?? 0) * 60 + Number(cm), Number(cs)]);
+    }
   });
 
   it("fmtCost reads cents, and four places under a cent", () => {
@@ -66,20 +82,8 @@ describe("titleLine", () => {
   });
 });
 
-describe("fmtElapsed and turnCutLine", () => {
-  it("minutes and two-digit seconds, hours ahead once there are any", () => {
-    expect([0, 999, 61_000, 900_000, 3_599_499, 3_600_000, 6 * 3_600_000 + 65_000].map(fmtElapsed)).toEqual([
-      "0m 00s",
-      "0m 01s",
-      "1m 01s",
-      "15m 00s",
-      "59m 59s",
-      "1h 00m 00s",
-      "6h 01m 05s",
-    ]);
-  });
-
-  it("names the rule, how long the turn ran and the limit, in the words the ticket row shows", () => {
+describe("turnCutLine", () => {
+  it("names the rule, how long the turn ran in the clock style and the limit, in the words the ticket row shows", () => {
     expect(turnCutLine("idle", 900_000, TURN_IDLE_MS)).toBe("stopped after 15m 00s with no output for 10m");
     expect(turnCutLine("wall", TURN_WALL_MS, TURN_WALL_MS)).toBe("stopped after 6h 00m 00s at the 6h cap on one turn");
   });
