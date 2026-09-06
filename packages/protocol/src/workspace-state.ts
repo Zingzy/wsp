@@ -90,3 +90,22 @@ export function goneRefusal(action: string, words?: string): string {
   const sentence = `Workspace machine is gone; rebuild it to ${action}`;
   return words === undefined || words === "" ? sentence : `${sentence} (${words})`;
 }
+
+/** What a workspace's image is, for a move onto the golden's head: whether any golden of this host knows the
+ * snapshot it forked from as a version, and whether that snapshot is a project golden. */
+export interface ImageMoveInput {
+  knownVersion: boolean;
+  projectImage: boolean;
+}
+
+/** Why a workspace cannot be moved onto its golden's head, or null when it can. One rule, so the app's offer and
+ * the runtime's refusal cannot drift apart: the app hides the button on the sentence the runtime would throw.
+ * A move replaces the machine, so only a running one can take it; a project image is refused outright, since the
+ * disk the move leaves behind is the project's. */
+export function imageMoveRefusal(name: string, state: WorkspaceState, image: ImageMoveInput): string | null {
+  if (image.projectImage) return `${name} was forked from a project image, which a version move would throw away; make a new workspace on the newer version instead`;
+  if (!image.knownVersion) return `${name}'s image is not a version of any golden this host knows`;
+  if (state === "gone") return `${name}'s machine is gone; rebuild it to move it to a newer image`;
+  if (state !== "running") return `${name} is ${workspaceWord(state).toLowerCase()}; wake it to move it to a newer image`;
+  return null;
+}

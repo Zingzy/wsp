@@ -6,7 +6,7 @@
 // runs the plan on the builder.
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { MCP_ID_PREFIX, shellQuote, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
+import { MCP_ID_PREFIX, shellQuote, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
 import { APT_ENV, APT_INDEX, APT_UPDATE, BREW, BREW_PREFIX, CATALOG_AGENTS, CLAUDE_KEY_FILE, HOMEBREW, HOMEBREW_STEP, NODE_PATH_LINE, NODE_RELEASES, LINUXBREW_SHIM, ROADS, UV_INSTALL, asLinuxbrew, asLinuxbrewScript, baseEntryFor, baseNote, catalogEntry, catalogToolFor, installLine, nodeInstallScript, pinStateOf, ROAD_MODULES, roadModule, smokeOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolPin } from "@wsp/catalog";
 
@@ -30,7 +30,9 @@ export interface RecipeEntry {
   reason?: string;
   required?: boolean;
   bring?: boolean;
-  choice?: string;
+  /** A logins or consent row's answer; the same union the collector and the recipe carry, so a digest built from
+   * these rows is a digest the diff can read exhaustively. */
+  choice?: LoginChoice;
   linux?: string;
   /** The version the laptop runs (tools rows); the install pins it. */
   version?: string;

@@ -7,8 +7,8 @@
 // long as they like, as long as nobody pauses it (snapshot-fresh rule).
 
 import { createHash } from "node:crypto";
-import { ALREADY_APPLIED, fmtBytes, goldenHead, type GoldenBaseTool, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenStage, type GoldenVersion, type RecipeDigest } from "@wsp/protocol";
-import type { Removal } from "./golden-diff.js";
+import { ALREADY_APPLIED, MCP_ID_PREFIX, fmtBytes, goldenHead, type GoldenBaseTool, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenRetired, type GoldenStage, type GoldenVersion, type RecipeDigest } from "@wsp/protocol";
+import { nameOf, rungOf } from "./golden-diff.js";
 import { AGENT_INSTALLERS, NODE_PATH_LINE, type AgentInstall, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { MIB, TOOL_TIMEOUT_S, closing, freeBytes, freeNote, guardDeadlineMs, guarded, installTools, plural, reasonOf, sweepCaches, type ToolResult } from "./golden-tools.js";
@@ -122,6 +122,9 @@ export interface Builder {
   readonly parentSnapshotId?: string;
   /** The base tools' versions read on this machine after the base stage, or on the golden it was forked from. */
   readonly base?: GoldenBaseTool[];
+  /** What this machine carries that its recipe no longer asks for, carried from the version it was forked from;
+   * absent on a fresh machine, whose recipe asks for everything on it. */
+  readonly retired?: GoldenRetired[];
 }
 
 // --- golden import: the person's files, tools and agents on the builder ------
@@ -204,15 +207,6 @@ export interface AgentResult {
   ms?: number;
 }
 
-/** What an update took off the machine, or left there and why. */
-export interface RemovalResult {
-  what: Removal["what"];
-  id: string;
-  label: string;
-  outcome: "removed" | "failed" | "kept";
-  note?: string;
-}
-
 export interface ImportResult {
   recipeHash: string;
   files?: { bytes: number; skipped: SkippedPath[]; cut?: CutNames[] };
@@ -221,8 +215,8 @@ export interface ImportResult {
   tools: ToolResult[];
   agents: AgentResult[];
   mcp?: McpResult[];
-  /** Only on an update: the removals it ran before the stages. */
-  removed?: RemovalResult[];
+  /** Only on an update: the rows it took out of the recipe and left on the image. */
+  retired?: GoldenRetired[];
   /** The base stage's outcomes on a fresh builder; an update's fork carries its golden's. */
   base?: ToolResult[];
   /** The machine context each installed agent got, or why it did not; absent when no stage ran. */
@@ -239,8 +233,8 @@ export interface ApplyImportOptions {
   base?: ToolResult[];
   /** Stages this builder already carries; those for the same recipe hash are skipped. */
   ledger?: ImportLedger;
-  /** Only on an update: what came off the machine before the stages, so the context's facts drop it and the result names it. */
-  removed?: RemovalResult[];
+  /** Only on an update: the rows the recipe stopped asking for, so the result names what the image still carries. */
+  retired?: GoldenRetired[];
   fetch?: typeof globalThis.fetch;
   onStage?: StageListener;
 }
@@ -267,7 +261,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
     ...(recipe !== undefined ? { recipe } : {}),
     ...(prior?.missingTools !== undefined ? { missingTools: prior.missingTools } : {}),
   };
-  const result: ImportResult = { recipeHash: imp.recipeHash, tools: [], agents: [], ...(opts.base !== undefined ? { base: opts.base } : {}), ...(opts.removed !== undefined ? { removed: opts.removed } : {}) };
+  const result: ImportResult = { recipeHash: imp.recipeHash, tools: [], agents: [], ...(opts.base !== undefined ? { base: opts.base } : {}), ...(opts.retired !== undefined ? { retired: opts.retired } : {}) };
   const done = (s: ImportStage): boolean => ledger.applied.includes(s);
   const mark = (s: ImportStage): void => {
     if (!done(s)) ledger.applied.push(s);
@@ -703,6 +697,7 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
       ...(opts.logins !== undefined ? { logins: opts.logins } : {}),
       ...(builder.import?.missingTools !== undefined ? { missingTools: builder.import.missingTools } : {}),
       ...(builder.base !== undefined ? { base: builder.base } : {}),
+      ...(builder.retired !== undefined && builder.retired.length > 0 ? { retired: builder.retired } : {}),
     };
     const kept = builderAlive ? "; builder kept for one more change" : "";
     stage("sealed", leak === undefined ? `v${versionNum}${kept}` : `v${versionNum}${kept}; ${leak}`);
@@ -724,10 +719,16 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
 
 /** What changed between the recipe a golden was built from and the recipe now:
  * rows to apply, planned like a first build and hashed as the whole new
- * recipe, and what comes off the machine first. */
+ * recipe, and the rows it stops asking for. */
 export interface GoldenDelta {
   import: GoldenImport;
-  removals: Removal[];
+  /** The rows this delta takes out of the recipe. Nothing is taken off the image for them; this is what the run
+   * says it is doing, so it names only what changed now. */
+  retired: GoldenRetired[];
+  /** Every row the next version's image carries that its recipe does not ask for: this delta's, plus the ones the
+   * version being updated already carried, less any this delta installs again. What the version records, which is
+   * a longer list than the run's words and must not be read as them. */
+  retiredOnImage: GoldenRetired[];
 }
 
 export interface ApplyDeltaOptions {
@@ -735,7 +736,7 @@ export interface ApplyDeltaOptions {
   setupTimeoutMs?: number;
   /** The smoke of the version being updated; removed agents leave it, added ones join it. */
   previousSmoke: string;
-  /** The tools missing from the version being updated; those the delta neither removes nor plans again stay missing. */
+  /** The tools missing from the version being updated; those the delta neither retires nor plans again stay missing. */
   previousMissing?: readonly GoldenMissingTool[];
   /** The base tools read on the version being updated; a version sealed before they existed has none and is refused. */
   previousBase: readonly GoldenBaseTool[] | undefined;
@@ -774,37 +775,25 @@ export function smokeTally(smoke: string): string {
   return `${plural(checks.length, "agent")} ${checks.length === 1 ? "answers" : "answer"}: ${names.join(", ")}`;
 }
 
-/** What an updated image is missing: the previous version's missing tools the delta neither removed nor planned again,
- * then what this delta's tools stage skipped or failed. */
+/** What an updated image is missing: the previous version's missing tools the delta neither retired nor planned again,
+ * then what this delta's tools stage skipped or failed. A retired tool leaves the list; the recipe stopped asking
+ * for it, so a fork has nothing to explain. */
 export function nextMissing(previous: readonly GoldenMissingTool[], delta: GoldenDelta, fresh: readonly GoldenMissingTool[]): GoldenMissingTool[] {
-  const touched = new Set([...delta.removals, ...delta.import.tools, ...(delta.import.skippedTools ?? [])].map(t => t.id));
+  const touched = new Set([...delta.retired, ...delta.import.tools, ...(delta.import.skippedTools ?? [])].map(t => t.id));
   return [...previous.filter(p => !touched.has(p.id)), ...fresh];
 }
 
-/** Takes the removals off the machine, then runs the delta through the import
- * stages. A removal that fails is a warning named in the stage detail; the
- * files and upload fail the update as they fail a build. The result reported
- * carries the removals beside what the stages installed. */
+
+/** Runs the delta through the import stages. Nothing is taken off the machine:
+ * a row the recipe dropped keeps its bytes and rides the version's retired
+ * list, so the update only ever adds. The files and upload fail the update as
+ * they fail a build; each tool and agent fails alone. */
 export async function applyDelta(machine: Machine, delta: GoldenDelta, opts: ApplyDeltaOptions): Promise<{ ledger: ImportLedger; result: ImportResult }> {
   refusePreFloor(opts.previousBase, "this golden");
   const stage = opts.onStage ?? (() => {});
-  const removed: RemovalResult[] = [];
-  if (delta.removals.length > 0) {
-    stage("applying-setup", `removing ${delta.removals.length} item${delta.removals.length === 1 ? "" : "s"}`);
-    for (const r of delta.removals) {
-      if (r.cmd === undefined) {
-        removed.push({ what: r.what, id: r.id, label: r.label, outcome: "kept", note: r.note ?? "left on the machine" });
-        continue;
-      }
-      const res = await machine.run(guarded(r.cmd, TOOL_TIMEOUT_S), { deadlineMs: guardDeadlineMs(TOOL_TIMEOUT_S), onLine: line => stage("applying-setup", `${r.label}: ${line}`) });
-      if (res.exitCode === 0) removed.push({ what: r.what, id: r.id, label: r.label, outcome: "removed" });
-      else removed.push({ what: r.what, id: r.id, label: r.label, outcome: "failed", note: reasonOf(res, TOOL_TIMEOUT_S) });
-    }
-    const done = removed.filter(r => r.outcome === "removed").map(r => r.label);
-    const notes = removed.filter(r => r.outcome !== "removed").map(r => (r.outcome === "failed" ? `${r.label} not removed (${r.note})` : `${r.label}: ${r.note}`));
-    stage("applying-setup", [done.length > 0 ? `removed ${done.join(", ")}` : "", ...notes].filter(s => s !== "").join("; "));
-  }
-  // The stages report only when one of them ran; a delta that only removes still has its removals to report.
+  const retired = delta.retired;
+  if (retired.length > 0) stage("applying-setup", `${plural(retired.length, "row")} left on the image, retired: ${retired.map(r => r.name).join(", ")}`);
+  // The stages report only when one of them ran; a delta that only retires rows still has them to report.
   const report = delta.import.onResult;
   let reported = false;
   const imp: GoldenImport = { ...delta.import, ...(report !== undefined ? { onResult: (r: ImportResult) => { reported = true; report(r); } } : {}) };
@@ -812,13 +801,19 @@ export async function applyDelta(machine: Machine, delta: GoldenDelta, opts: App
     import: imp,
     setup: opts.setup,
     onStage: stage,
-    ...(removed.length > 0 ? { removed } : {}),
+    ...(retired.length > 0 ? { retired } : {}),
     ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}),
     ...(opts.setupTimeoutMs !== undefined ? { setupTimeoutMs: opts.setupTimeoutMs } : {}),
   });
   const result = applied.result;
-  if (!reported && removed.length > 0) report?.(result);
-  const gone = delta.removals.flatMap(r => (r.smoke !== undefined ? [r.smoke] : []));
+  if (!reported && retired.length > 0) report?.(result);
+  // A retired agent is still on the image, but the recipe stopped asking for it, so its check leaves the smoke:
+  // the next version is only ever held to what its own recipe claims. The rung decides, never the id's last
+  // segment: a tools row may end in an agent's name and must not take that agent's check with it.
+  const gone = retired.flatMap(r => {
+    const installer = rungOf(r.id) === "agents" && !r.id.startsWith(MCP_ID_PREFIX) ? AGENT_INSTALLERS[nameOf(r.id)] : undefined;
+    return installer !== undefined ? [installer.smoke] : [];
+  });
   applied.ledger.smoke = nextSmoke(opts.previousSmoke, gone, applied.ledger.smoke);
   const missing = nextMissing(opts.previousMissing ?? [], delta, applied.ledger.missingTools ?? []);
   if (missing.length > 0) applied.ledger.missingTools = missing;
@@ -879,6 +874,7 @@ export async function upgradeBuilder(opts: UpgradeBuilderOptions): Promise<Build
       import: applied.ledger,
       parentSnapshotId: opts.head.snapshotId,
       base: [...opts.head.base],
+      retired: opts.delta.retiredOnImage,
     };
   } catch (e) {
     let detail = messageOf(e);
