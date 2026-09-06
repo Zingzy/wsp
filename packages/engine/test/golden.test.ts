@@ -94,6 +94,10 @@ function stageRecorder() {
   return { stages, onStage };
 }
 
+/** The base floor's own lines under its stage: the df warning, one per step, the loop's summary. The stage's closing line stays. */
+const BASE_STEP = /^deploying-daemon:(free disk unknown|.* \(\d+\/10\)$|\d+ installed)/;
+const sansBase = (stages: readonly string[]): string[] => stages.filter(s => !BASE_STEP.test(s));
+
 describe("golden pipeline", () => {
   it("seals no version when the smoke fork fails, and leaves no machine or snapshot behind", async () => {
     const { backend, killed, deletedSnapshots } = recordingBackend({
@@ -165,7 +169,7 @@ describe("golden pipeline", () => {
 
 describe("interactive golden: prepare then seal", () => {
   it("prepare boots a sandbox from the sandbox template with the builder disk, runs daemon then harness, and reports stages", async () => {
-    const { backend, created, timeline } = recordingBackend();
+    const { ran, backend, created, timeline } = recordingBackend();
     const { stages, onStage } = stageRecorder();
     const daemonOn: string[] = [];
     const builder = await prepareBuilder({
@@ -180,7 +184,9 @@ describe("interactive golden: prepare then seal", () => {
     expect(builder.firstLife).toBe(true);
     expect(builder.machine.streamUrl).toBeUndefined();
     expect(daemonOn).toEqual(["m1"]);
-    expect(stages).toEqual(["creating:sandbox from base", "deploying-daemon", "installing-harness", "ready"]);
+    expect(sansBase(stages)).toEqual(["creating:sandbox from base", "deploying-daemon", "installing-harness", "ready"]);
+    // The floor goes on before the daemon: node first, so the daemon's native module compiles against it.
+    expect(ran.filter(r => r.id === "m1").map(r => r.script).findIndex(s => s.includes("nodejs.org/dist"))).toBe(0);
     expect(timeline).toEqual(["create m1"]); // alive and waiting for the person
   });
 
@@ -200,7 +206,7 @@ describe("interactive golden: prepare then seal", () => {
     const { backend } = recordingBackend();
     const { stages, onStage } = stageRecorder();
     await prepareBuilder({ backend, setup: "true", deployDaemon: async () => "node v22.23.2", onStage });
-    expect(stages).toEqual(["creating:sandbox from base", "deploying-daemon", "deploying-daemon:node v22.23.2", "installing-harness", "ready"]);
+    expect(sansBase(stages)).toEqual(["creating:sandbox from base", "deploying-daemon", "deploying-daemon:node v22.23.2", "installing-harness", "ready"]);
   });
 
   it("prepare with kind desktop picks the desktop template and streams a display", async () => {
@@ -240,8 +246,8 @@ describe("interactive golden: prepare then seal", () => {
     expect(version).toMatchObject({ version: 1, kind: "desktop", baseTemplate: "default", snapshotId: "snap_golden-v1" });
     expect(version.setupSha).toBe(builder.setupSha);
     expect(manifest.head).toBe(1);
-    expect(stages).toEqual([
-      "creating:desktop from default", "installing-harness", "ready",
+    expect(sansBase(stages)).toEqual([
+      "creating:desktop from default", "deploying-daemon", "installing-harness", "ready",
       "snapshotting:golden-v1", "smoke-forking:claude --version", "sealed:v1",
     ]);
   });
@@ -534,7 +540,7 @@ describe("golden import stages", () => {
       backend, setup: "true", deployDaemon: async () => "node v22", fetch, onStage,
       import: importOf({ onResult: r => void results.push(r) }),
     });
-    expect(stages).toEqual([
+    expect(sansBase(stages)).toEqual([
       "creating:sandbox from base",
       "deploying-daemon", "deploying-daemon:node v22; 3000 MB free",
       "applying-setup:3 files: identity 1, shell 2",
@@ -575,12 +581,13 @@ describe("golden import stages", () => {
     expect(builder.setupSha).toBe(createHash("sha256").update("true\nclaude-install\ncodex-install").digest("hex"));
     expect(results).toEqual([{
       recipeHash: "h1",
+      base: expect.any(Array),
       files: { bytes: 1200, skipped: [{ id: "shell/bashrc", path: "~/.bashrc", note: "no longer on this computer" }], cut: [] },
       homebrew: HOMEBREW,
       tools: [
-        { id: "tools/homebrew", label: "Homebrew", outcome: "installed", ms: expect.any(Number) },
-        { id: "tools/brew/gh", label: "gh", outcome: "installed", ms: expect.any(Number) },
-        { id: "tools/npm/bun", label: "bun@1.4.0", outcome: "installed", ms: expect.any(Number) },
+        { id: "tools/homebrew", label: "Homebrew", outcome: "installed", ms: expect.any(Number), bytes: 0 },
+        { id: "tools/brew/gh", label: "gh", outcome: "installed", ms: expect.any(Number), bytes: 0 },
+        { id: "tools/npm/bun", label: "bun@1.4.0", outcome: "installed", ms: expect.any(Number), bytes: 0 },
       ],
       agents: [
         { id: "agents/claude", name: "Claude Code", outcome: "installed", ms: expect.any(Number) },
@@ -626,6 +633,8 @@ describe("golden import stages", () => {
     expect(inlineCmds).toContain("test -x /usr/local/bin/wsp-open");
     for (const i of inline) {
       expect(i.timeoutMs, i.cmd).toBeLessThanOrEqual(INLINE_EXEC_MS);
+      // The base floor's versions read is ten --version calls, inline and bounded like the rest.
+      if (i.cmd.includes('echo "VERSION node:')) continue;
       expect(i.cmd, "a long command ran inline").not.toMatch(/setsid bash -c|tar |the-setup|--version/);
     }
   });
@@ -716,8 +725,8 @@ describe("golden import stages", () => {
     await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ tools: [...importOf().tools, ...roads], onResult: r => void results.push(r) }) });
     expect(stages).toContain("installing-tools:5 installed (diskbloom from its release, ascii-image-converter with go install); caches swept; 3000 MB free");
     expect(results[0]!.tools.slice(3)).toEqual([
-      { id: roads[0]!.id, label: "diskbloom", outcome: "installed", road: { kind: "release", from: "diskbloom_0.1.0_linux_amd64.tar.gz", sha256: "a".repeat(64), tag: "v0.1.0" }, ms: expect.any(Number) },
-      { id: roads[1]!.id, label: "ascii-image-converter", outcome: "installed", road: { kind: "go", from: "github.com/TheZoraiz/ascii-image-converter@v1.13.1" }, ms: expect.any(Number) },
+      { id: roads[0]!.id, label: "diskbloom", outcome: "installed", road: { kind: "release", from: "diskbloom_0.1.0_linux_amd64.tar.gz", sha256: "a".repeat(64), tag: "v0.1.0" }, ms: expect.any(Number), bytes: 0 },
+      { id: roads[1]!.id, label: "ascii-image-converter", outcome: "installed", road: { kind: "go", from: "github.com/TheZoraiz/ascii-image-converter@v1.13.1" }, ms: expect.any(Number), bytes: 0 },
     ]);
     // A brew install carries no road: it took the one its plan named.
     expect(results[0]!.tools[1]).not.toHaveProperty("road");
@@ -736,17 +745,19 @@ describe("golden import stages", () => {
       { id: "tools/cli/spoo", label: "spoo", manager: "github", cmd: "curl https://api.github.com/repos/spoo-me/spoo-cli/releases/tags/v0.4.1", bin: "spoo" },
     ];
     await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ tools, onResult: r => void results.push(r) }) });
-    const check = inline.find(c => c.cmd.includes('echo "missing'))!;
+    const check = inline.filter(c => c.cmd.includes('echo "missing')).at(-1)!;
     expect(check.cmd).toMatch(/^export PATH=\/root\/\.local\/bin:.*\/usr\/local\/bin.*\n/);
     expect(check.cmd).toContain(`for b in 'gopls' 'spoo'; do command -v "$b" >/dev/null 2>&1 || echo "missing $b"; done`);
     expect(check.timeoutMs).toBe(INLINE_EXEC_MS);
-    expect(results[0]!.tools.find(t => t.id === "tools/cli/spoo")).toEqual({ id: "tools/cli/spoo", label: "spoo", outcome: "failed", note: "spoo is not on PATH after the install", ms: expect.any(Number) });
+    expect(results[0]!.tools.find(t => t.id === "tools/cli/spoo")).toEqual({ id: "tools/cli/spoo", label: "spoo", outcome: "failed", note: "spoo is not on PATH after the install", ms: expect.any(Number), bytes: 0 });
     expect(results[0]!.tools.find(t => t.id === "tools/go/gopls")).toMatchObject({ outcome: "installed" });
     expect(stages).toContain("installing-tools:4 installed, 1 failed: spoo (spoo is not on PATH after the install); caches swept; 3000 MB free");
-    // Nothing named its command: no check runs.
+    // Nothing of the person's named its command: the only check is the base floor's.
     const plain = backendFor();
     await prepareBuilder({ backend: plain.backend, setup: "true", fetch: plain.fetch, onStage: stageRecorder().onStage, import: importOf() });
-    expect(plain.inline.some(c => c.cmd.includes('echo "missing'))).toBe(false);
+    const checks = plain.inline.filter(c => c.cmd.includes('echo "missing'));
+    expect(checks).toHaveLength(1);
+    expect(checks[0]!.cmd).toContain(`for b in 'node' 'pnpm' 'uv' 'python3' 'git' 'jq' 'rg' 'curl' 'docker'; do`);
   });
 
   it("a tap road and a CLI row whose go module is named otherwise land under the row's command and pass the check: the road is kept, on the fake guest end to end", async () => {
@@ -765,10 +776,10 @@ describe("golden import stages", () => {
     await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ tools: plan.installs, onResult: r => void results.push(r) }) });
     expect(cmds.find(c => c.includes("releases/tags/v0.2.0"))).toContain(`mv '\\''/usr/local/bin/bloom-cli'\\'' "/usr/local/bin/$name"`);
     expect(cmds.find(c => c.includes("releases/tags/v0.4.1"))).toContain(`mv '\\''/usr/local/bin/spoo-cli'\\'' "/usr/local/bin/$name"`);
-    expect(inline.find(c => c.cmd.includes('echo "missing'))!.cmd).toContain(`for b in 'bloom' 'spoo'; do`);
+    expect(inline.filter(c => c.cmd.includes('echo "missing')).at(-1)!.cmd).toContain(`for b in 'bloom' 'spoo'; do`);
     expect(results[0]!.tools).toEqual([
-      { id: "tools/brew/zingzy/tap/bloom", label: "bloom", outcome: "installed", road: { kind: "go", from: "github.com/Zingzy/bloom-cli@v0.2.0" }, ms: expect.any(Number) },
-      { id: "tools/cli/spoo", label: "spoo", outcome: "installed", road: { kind: "go", from: "github.com/spoo-me/spoo-cli@v0.4.1" }, ms: expect.any(Number) },
+      { id: "tools/brew/zingzy/tap/bloom", label: "bloom", outcome: "installed", road: { kind: "go", from: "github.com/Zingzy/bloom-cli@v0.2.0" }, ms: expect.any(Number), bytes: 0 },
+      { id: "tools/cli/spoo", label: "spoo", outcome: "installed", road: { kind: "go", from: "github.com/spoo-me/spoo-cli@v0.4.1" }, ms: expect.any(Number), bytes: 0 },
     ]);
     expect(stages).toContain("installing-tools:2 installed (bloom with go install, spoo with go install); caches swept; 3000 MB free");
   });
@@ -787,8 +798,8 @@ describe("golden import stages", () => {
     ];
     await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ tools, onResult: r => void results.push(r) }) });
     expect(results[0]!.tools.slice(3)).toEqual([
-      { id: "tools/go/gopls", label: "gopls", outcome: "failed", note: "gopls could not be checked on PATH: timed out after 20s", ms: expect.any(Number) },
-      { id: "tools/cli/spoo", label: "spoo", outcome: "failed", note: "spoo could not be checked on PATH: timed out after 20s", ms: expect.any(Number) },
+      { id: "tools/go/gopls", label: "gopls", outcome: "failed", note: "gopls could not be checked on PATH: timed out after 20s", ms: expect.any(Number), bytes: 0 },
+      { id: "tools/cli/spoo", label: "spoo", outcome: "failed", note: "spoo could not be checked on PATH: timed out after 20s", ms: expect.any(Number), bytes: 0 },
     ]);
     expect(stages).toContain("installing-tools:the PATH check failed (timed out after 20s): gopls, spoo count as failed");
     expect(stages).toContain("installing-tools:3 installed, 2 failed: gopls (gopls could not be checked on PATH: timed out after 20s), spoo (spoo could not be checked on PATH: timed out after 20s); caches swept; 3000 MB free");
@@ -989,7 +1000,7 @@ describe("golden import stages", () => {
     expect(at("brew autoremove")).toBeLessThan(at("brew cleanup -s --prune=all"));
     expect(at("brew cleanup -s --prune=all")).toBeLessThan(cmds.indexOf("echo ok"));
     expect(stages).toContain("installing-tools:3 installed; Homebrew cleanup freed 1000 MB; caches swept; 4000 MB free");
-    const sweep = cmds.indexOf("rm -f /tmp/wsp-vault-*.tgz");
+    const sweep = cmds.lastIndexOf("rm -f /tmp/wsp-vault-*.tgz");
     expect(sweep).toBeGreaterThan(at("tar xzf"));
     expect(sweep).toBeLessThan(at("brew-bootstrap"));
     // A cleanup that fails is named, and the tools it followed still count.
@@ -1008,7 +1019,8 @@ describe("golden import stages", () => {
     const { stages, onStage } = stageRecorder();
     await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf() });
     const sweepCmds = cmds.filter(c => c.includes("rm -rf /root/.npm /root/.cache/uv /root/.cache/go-build"));
-    expect(sweepCmds).toHaveLength(2);
+    // Once after the base floor, once after the agents, once after the tools.
+    expect(sweepCmds).toHaveLength(3);
     for (const sweep of sweepCmds) {
       expect(sweep).toMatch(/\nsetsid bash -c 'set -euo pipefail\nexport PATH=\/root\/\.local\/bin:/);
       expect(sweep).toContain("if command -v go >/dev/null 2>&1; then go clean -cache -modcache; fi");
@@ -1016,14 +1028,17 @@ describe("golden import stages", () => {
       expect(sweep).toMatch(/while \[ \$t -lt 300 \]/);
     }
     const at = (needle: string) => cmds.findIndex(c => c.includes(needle));
-    // The agents' caches go before the tools stage reads the disk against its floor; the tools' go after Homebrew's own housekeeping.
-    expect(at("codex-install")).toBeLessThan(cmds.indexOf(sweepCmds[0]!));
-    expect(cmds.indexOf(sweepCmds[0]!)).toBeLessThan(at("brew-bootstrap"));
-    expect(at("brew cleanup -s --prune=all")).toBeLessThan(cmds.lastIndexOf(sweepCmds[1]!));
-    expect(cmds.lastIndexOf(sweepCmds[1]!)).toBeLessThan(cmds.indexOf("echo ok"));
+    const sweepsAt = cmds.flatMap((c, i) => (c.includes("rm -rf /root/.npm /root/.cache/uv /root/.cache/go-build") ? [i] : []));
+    // The base's caches go before the daemon; the agents' before the tools stage reads the disk against its floor; the tools' after Homebrew's own housekeeping.
+    expect(sweepsAt[0]).toBeLessThan(at("the-setup") < 0 ? at("claude-install") : at("the-setup"));
+    expect(at("codex-install")).toBeLessThan(sweepsAt[1]!);
+    expect(sweepsAt[1]).toBeLessThan(at("brew-bootstrap"));
+    expect(at("brew cleanup -s --prune=all")).toBeLessThan(sweepsAt[2]!);
+    expect(sweepsAt[2]).toBeLessThan(cmds.indexOf("echo ok"));
     // Each closing line carries what the sweep gave back and the df reading the stage left.
-    expect(stages).toContain("installing-harness:Claude Code, Codex installed; caches swept, 700 MB back; 3700 MB free");
-    expect(stages).toContain("installing-tools:3 installed; caches swept, 700 MB back; 4400 MB free");
+    expect(stages).toContain("deploying-daemon:10 installed; caches swept, 700 MB back; 3700 MB free");
+    expect(stages).toContain("installing-harness:Claude Code, Codex installed; caches swept, 700 MB back; 4400 MB free");
+    expect(stages).toContain("installing-tools:3 installed; caches swept, 700 MB back; 5100 MB free");
     // A sweep that fails is named, and the build goes on to the next stage.
     const failing = backendFor([["rm -rf /root/.npm /root/.cache/uv /root/.cache/go-build", { exitCode: 1, stdout: "", stderr: "rm: cannot remove '/root/.npm': Device or resource busy" }]]);
     const rec = stageRecorder();
@@ -1037,10 +1052,10 @@ describe("golden import stages", () => {
     let bootstrapped = false;
     let cleanups = 0;
     let sweeps = 0;
-    // The upload, the two agents (with their sweep) and Homebrew read a roomy disk; the first formula reads it low, and the cleanup gives little back.
+    // The base floor and the two agents (a sweep each), the upload and Homebrew read a roomy disk; the first formula reads it low, and the cleanup gives little back.
     const { backend, cmds, fetch } = backendFor(
       [["brew-bootstrap", () => ((bootstrapped = true), ok)], ["brew cleanup -s --prune=all", () => (cleanups++, ok)], [SWEEP_NEEDLE, () => (sweeps++, ok)]],
-      () => mb(!bootstrapped ? 3000 : cleanups === 0 ? 1800 : sweeps === 1 ? 1900 : 1950),
+      () => mb(!bootstrapped ? 3000 : cleanups === 0 ? 1800 : sweeps === 2 ? 1900 : 1950),
     );
     const { stages, onStage } = stageRecorder();
     const results: ImportResult[] = [];
@@ -1060,10 +1075,10 @@ describe("golden import stages", () => {
     expect(at("brew autoremove")).toBeGreaterThan(at("brew-bootstrap"));
     expect(at("brew autoremove")).toBeLessThan(at("brew cleanup -s --prune=all"));
     const sweepsAt = cmds.flatMap((c, i) => (c.includes(SWEEP_NEEDLE) ? [i] : []));
-    expect(sweepsAt[1]).toBeGreaterThan(at("brew cleanup -s --prune=all"));
-    expect(sweepsAt[1]).toBeLessThan(cmds.length - 1 - [...cmds].reverse().findIndex(c => c.includes("brew cleanup -s --prune=all")));
+    expect(sweepsAt[2]).toBeGreaterThan(at("brew cleanup -s --prune=all"));
+    expect(sweepsAt[2]).toBeLessThan(cmds.length - 1 - [...cmds].reverse().findIndex(c => c.includes("brew cleanup -s --prune=all")));
     expect(cleanups).toBe(2);
-    expect(sweeps).toBe(3);
+    expect(sweeps).toBe(4);
   });
 
   it("at the first reading under the floor the cleanup runs and df is read again: the install goes on when the floor clears, and a later dip skips without another cleanup", async () => {
@@ -1088,9 +1103,9 @@ describe("golden import stages", () => {
       "installing-tools:2 installed, 1 skipped: bun@1.4.0 (500 MB free, keeping 2048 MB free); caches swept; 500 MB free",
     ]);
     expect(results[0]!.tools.map(t => [t.id, t.outcome])).toEqual([["tools/homebrew", "installed"], ["tools/brew/gh", "installed"], ["tools/npm/bun", "skipped"]]);
-    // One rescue in the loop, one housekeeping after it.
+    // One rescue in the loop, one housekeeping after it; the base, the agents, the rescue and the tools each sweep.
     expect(cleanups).toBe(2);
-    expect(cmds.filter(c => c.includes(SWEEP_NEEDLE))).toHaveLength(3);
+    expect(cmds.filter(c => c.includes(SWEEP_NEEDLE))).toHaveLength(4);
   });
 
   it("under the floor with no Homebrew on the machine the cache sweep alone runs, and the install goes on when it clears the floor", async () => {
@@ -1099,7 +1114,7 @@ describe("golden import stages", () => {
     const failing = { exitCode: 1, stdout: "", stderr: "Error: bootstrap failed" };
     const { backend, cmds, fetch } = backendFor(
       [["brew-bootstrap", () => ((bootstrapped = true), failing)], [SWEEP_NEEDLE, () => (sweeps++, ok)]],
-      () => mb(!bootstrapped ? 3000 : sweeps === 1 ? 1800 : 2500),
+      () => mb(!bootstrapped ? 3000 : sweeps === 2 ? 1800 : 2500),
     );
     const { stages, onStage } = stageRecorder();
     const results: ImportResult[] = [];
@@ -1113,8 +1128,8 @@ describe("golden import stages", () => {
       "installing-tools:1 installed, 1 failed: Homebrew (Error: bootstrap failed), 1 skipped: gh (Homebrew did not install); caches swept; 2500 MB free",
     ]);
     expect(results[0]!.tools.map(t => [t.id, t.outcome])).toEqual([["tools/homebrew", "failed"], ["tools/brew/gh", "skipped"], ["tools/npm/bun", "installed"]]);
-    // The agents' sweep, the rescue in the loop, the housekeeping after it.
-    expect(sweeps).toBe(3);
+    // The base's sweep, the agents' sweep, the rescue in the loop, the housekeeping after it.
+    expect(sweeps).toBe(4);
   });
 
   it("when df cannot be read after the cleanup the tools left are skipped, and the row says the rescue ran and what was unknown", async () => {
@@ -1222,8 +1237,9 @@ describe("golden import stages", () => {
     const { backend, cmds, puts, fetch } = backendFor();
     const { stages, onStage } = stageRecorder();
     const builder = await prepareBuilder({ backend, setup: "true", fetch, onStage, import: { recipeHash: "h0", tools: [], agents: [] } });
-    expect(stages).toEqual([
+    expect(sansBase(stages)).toEqual([
       "creating:sandbox from base",
+      "deploying-daemon", "deploying-daemon:3000 MB free",
       "applying-setup:nothing ticked",
       "uploading-files:nothing to upload",
       "installing-harness",
@@ -1235,7 +1251,7 @@ describe("golden import stages", () => {
     ]);
     expect(puts).toHaveLength(1);
     // The harness ran, so the context is written and the machine is asked whether it still answers before the hand-off.
-    expect(cmds.map(c => (c.includes("echo WSP_CTX") ? "probe" : c.includes("tar xzf - -C '/' ") ? "write" : c))).toEqual(["true", "probe", "write", "echo ok"]);
+    expect(cmds.slice(cmds.indexOf("true")).map(c => (c.includes("echo WSP_CTX") ? "probe" : c.includes("tar xzf - -C '/' ") ? "write" : c))).toEqual(["true", "probe", "write", "echo ok"]);
     expect(builder.import?.smoke).toBe("true");
 
     let result: ImportResult | undefined;
@@ -1345,7 +1361,7 @@ describe("golden import stages", () => {
     const { backend } = recordingBackend();
     const { stages, onStage } = stageRecorder();
     const builder = await prepareBuilder({ backend, setup: "echo setup", onStage });
-    expect(stages).toEqual(["creating:sandbox from base", "installing-harness", "ready"]);
+    expect(sansBase(stages)).toEqual(["creating:sandbox from base", "deploying-daemon", "installing-harness", "ready"]);
     expect(builder.import).toBeUndefined();
     expect(builder.setupSha).toBe(createHash("sha256").update("echo setup").digest("hex"));
   });
@@ -1575,7 +1591,7 @@ describe("golden import stages", () => {
       const { stages, onStage } = stageRecorder();
       const results: ImportResult[] = [];
       const base = [entry("shell", "shell/zshrc", { paths: ["~/.zshrc"], bytes: 10 })];
-      const binaries = [entry("editors", "editors/vim", { label: "vim, installed" }), entry("tools", "tools/brew/jq", { linux: "yes" }), entry("tools", "tools/brew/zingzy/tap/diskbloom", { linux: "unknown" })];
+      const binaries = [entry("editors", "editors/vim", { label: "vim, installed" }), entry("tools", "tools/brew/gh", { linux: "yes" }), entry("tools", "tools/brew/zingzy/tap/diskbloom", { linux: "unknown" })];
       const guardedCmds = (from: number) => cmds.slice(from).filter(c => c.includes("setsid bash -c"));
 
       const v1 = await sealGolden(await prepareBuilder({ backend, setup: "true", fetch, import: planOf(base, "h1", results) }), { backend, smoke: "true" });
@@ -1587,10 +1603,10 @@ describe("golden import stages", () => {
       const b2 = await upgradeBuilder({ backend, head: v1.version, delta: up, setup: "true", fetch, onStage });
       const installs = guardedCmds(n1);
       expect(installs.some(c => c.includes("apt-get install -y -qq vim"))).toBe(true);
-      expect(installs.some(c => c.includes("brew install jq"))).toBe(true);
+      expect(installs.some(c => c.includes("brew install gh"))).toBe(true);
       expect(installs.some(c => c.includes("name='\\''diskbloom'\\''") && c.includes('install -m 0755 "$bin" "/usr/local/bin/$name"'))).toBe(true);
       expect(installs.some(c => c.includes("uninstall") || c.includes("apt-get purge"))).toBe(false);
-      expect(results.at(-1)!.tools.filter(t => binaries.some(b => b.id === t.id)).map(t => [t.id, t.outcome])).toEqual([["editors/vim", "installed"], ["tools/brew/jq", "installed"], ["tools/brew/zingzy/tap/diskbloom", "installed"]]);
+      expect(results.at(-1)!.tools.filter(t => binaries.some(b => b.id === t.id)).map(t => [t.id, t.outcome])).toEqual([["editors/vim", "installed"], ["tools/brew/gh", "installed"], ["tools/brew/zingzy/tap/diskbloom", "installed"]]);
       expect(results.at(-1)!.removed).toBeUndefined();
       const v2 = await sealGolden(b2, { backend, smoke: "true", manifest: v1.manifest });
       expect(v2.version.version).toBe(2);
@@ -1603,18 +1619,18 @@ describe("golden import stages", () => {
       const b3 = await upgradeBuilder({ backend, head: v2.version, delta: down, setup: "true", fetch, onStage });
       const removals = guardedCmds(n2);
       expect(removals).toHaveLength(3);
-      expect(removals[0]).toContain("brew uninstall jq");
+      expect(removals[0]).toContain("brew uninstall gh");
       expect(removals[1]).toContain("rm -f /usr/local/bin/'\\''diskbloom'\\''");
       expect(removals[2]).toContain("apt-get purge -y -qq vim");
       expect(cmds.slice(n2).some(c => c.includes("apt-get install") || c.includes("brew install"))).toBe(false);
-      expect(stages).toContain("applying-setup:removed jq, diskbloom, vim");
+      expect(stages).toContain("applying-setup:removed gh, diskbloom, vim");
       expect(results.at(-1)).toEqual({
         recipeHash: "h3",
         files: { bytes: 0, skipped: [] },
         tools: [],
         agents: [],
         removed: [
-          { what: "tool", id: "tools/brew/jq", label: "jq", outcome: "removed" },
+          { what: "tool", id: "tools/brew/gh", label: "gh", outcome: "removed" },
           { what: "tool", id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", outcome: "removed" },
           { what: "editor", id: "editors/vim", label: "vim", outcome: "removed" },
         ],

@@ -5,8 +5,8 @@
 // toolchain is one line; agents carry measured sizes in the catalog; a row
 // nothing measured counts at a stated default for its kind. Nothing here runs a
 // command: the host reads the Mac's Homebrew and hands the table in.
-import { AGENT_INSTALLERS, BREW_TOOLCHAIN, MANAGER_FORMULA, MACOS_ONLY_FORMULAE, agentInstallsFor, cliRoad, toolInstallsFor, type BrewFormula, type BrewTable, type RecipeEntry, type ToolSource } from "./golden-import.js";
-import { LINUX_FORMULA_MIB, MIB, NODE_BYTES, catalogEntry } from "@wsp/catalog";
+import { AGENT_INSTALLERS, BREW_TOOLCHAIN, MANAGER_FORMULA, MACOS_ONLY_FORMULAE, cliRoad, toolInstallsFor, type BrewFormula, type BrewTable, type RecipeEntry, type ToolSource } from "./golden-import.js";
+import { LINUX_FORMULA_MIB, MIB, catalogEntry } from "@wsp/catalog";
 import { TOOLS_DISK_FLOOR } from "./golden-tools.js";
 
 export { NODE_BYTES } from "@wsp/catalog";
@@ -14,8 +14,9 @@ export { NODE_BYTES } from "@wsp/catalog";
 /** Root disk asked for every builder and fork, Solari's cap: a 4 GB root filled during the tools stage and
  * five agents failed to install on it (measured 2026-09-05). */
 export const BUILDER_DISK_GB = 20;
-/** What df -Pk said was free on a 20 GB builder with the daemon and the login shell on it, before the upload:
- * 17,992,136 KiB (measured 2026-09-05). The base image and the filesystem's reserved blocks are both inside it. */
+/** What df -Pk said was free on a 20 GB builder after the base stage, before the upload: 17,992,136 KiB (measured
+ * 2026-09-05, when the base was the daemon alone). The base image, the filesystem's reserved blocks and everything the
+ * base stage installs are inside it, so it is read again on the first golden built with the base floor. */
 export const BUILDER_FREE_BYTES = 17570 * MIB;
 const UPLOAD_HEADROOM_BYTES = 256 * MIB;
 /** The most a recipe's files may add up to on this computer before the plan refuses to boot. The upload needs
@@ -30,10 +31,6 @@ export const MEASURED_ON = "2026-09-05";
 
 /** Homebrew's checkout with its own glibc and gcc, pulled in by the first formula: df moved 1006 MB across the three installs. */
 export const BREW_TOOLCHAIN_BYTES = 1024 * MIB;
-
-/** The Node major the base image ships: the builder's log read `node v18.20.4` before the Node step (2026-09-05);
- * a floor at or under it keeps the base's Node and installs nothing. */
-const BASE_NODE_MAJOR = 18;
 
 const OTHER_TOOL_MIB: Record<string, number> = { "tools/npm/bun": 78 };
 
@@ -188,7 +185,7 @@ export interface DiskEstimate {
   toolchain: number;
   /** Every formula the ticked rows and the plan's managers pull in, each once, plus measured globals. */
   tools: number;
-  /** The measured agents, and the Node release the stage installs when an agent's floor is above the base's. */
+  /** The measured agents; the Node they run on is the base's. */
   agents: number;
   /** Ticked rows that install something whose size nothing knows, by label. */
   unknown: string[];
@@ -238,8 +235,6 @@ export function estimateDisk(ticked: readonly RecipeEntry[], files: number, brew
     if (size === undefined) assume(e);
     else agents += size;
   }
-  const node = agentInstallsFor(ticked).node;
-  if (node !== undefined && node.floor > BASE_NODE_MAJOR) agents += NODE_BYTES;
   const total = files + toolchain + tools + agents + assumed;
   return { files, toolchain, tools, agents, unknown, assumed, total, room: DISK_ROOM_BYTES, over: Math.max(0, total - DISK_ROOM_BYTES) };
 }

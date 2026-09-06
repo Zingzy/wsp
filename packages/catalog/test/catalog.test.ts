@@ -4,7 +4,7 @@
 // the six whose project state has a measured resolver, every default names
 // its evidence, and the seeded rows are what the snapshot says they are.
 import { describe, expect, it } from "vitest";
-import { CATALOG, CATALOG_AGENTS, LINUX_CASKS, ROADS, SIGN_IN_ROWS, agentInstallLine, catalogEntry, hasLogin, smokeOf } from "../src/index.js";
+import { BASE_FLOOR, CATALOG, CATALOG_AGENTS, LINUX_CASKS, ROADS, SIGN_IN_ROWS, agentInstallLine, baseEntryFor, catalogEntry, hasLogin, smokeOf } from "../src/index.js";
 
 describe("catalog", () => {
   it("gives every entry its own id", () => {
@@ -76,6 +76,38 @@ describe("catalog", () => {
     expect(catalogEntry("agent-browser")?.source.note).toMatch(/one Mac/);
   });
 
+  it("seeds every golden with the base floor: default-on tools in install order, each by a pinned road", () => {
+    expect(BASE_FLOOR.map(e => e.id)).toEqual(["node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker"]);
+    for (const e of BASE_FLOOR) {
+      expect(e.kind, e.id).toBe("tool");
+      expect(e.defaultOn, e.id).toBe(true);
+      expect(e.installRoad.road, e.id).not.toBe("release");
+      if (e.installRoad.road === "npm") expect(e.installRoad.version, e.id).toBeDefined();
+    }
+    // Python comes as uv's managed 3.12, pinned by uv's own release, and python3 on PATH is that interpreter.
+    const python = catalogEntry("python")!;
+    expect(python.installRoad.road).toBe("script");
+    expect(python.installRoad.road === "script" && python.installRoad.script).toContain("uv python install 3.12");
+    expect(python.installRoad.road === "script" && python.installRoad.script).toContain('ln -sfn "$(uv python find --managed-python 3.12)" /usr/local/bin/python3');
+    expect(python.installRoad.road === "script" && python.installRoad.script).toContain("sha256sum -c");
+    expect(python.size).toBeUndefined();
+  });
+
+  it("names the base row a recipe's tools row stands for: by id, command, road argument or a name it covers", () => {
+    expect(baseEntryFor("jq")?.id).toBe("jq");
+    expect(baseEntryFor("rg")?.id).toBe("ripgrep");
+    expect(baseEntryFor("python@3.12")?.id).toBe("python");
+    expect(baseEntryFor("python3")?.id).toBe("python");
+    expect(baseEntryFor("docker-compose-v2")?.id).toBe("docker");
+    expect(baseEntryFor("docker-compose")?.id).toBe("docker");
+    expect(baseEntryFor("pnpm")?.id).toBe("pnpm");
+    expect(baseEntryFor("node")?.id).toBe("node");
+    expect(baseEntryFor("python@3.14")).toBeUndefined();
+    expect(baseEntryFor("git")?.id).toBe("git");
+    expect(baseEntryFor("gh")).toBeUndefined();
+    expect(baseEntryFor("agent-browser")).toBeUndefined();
+  });
+
   it("says which roads no guest has run yet", () => {
     const unmeasured = CATALOG.filter(e => e.source.road === "unmeasured").map(e => e.id);
     expect(unmeasured).toEqual([
@@ -97,11 +129,11 @@ describe("catalog", () => {
       argument: roadArgument(e.installRoad),
       signIn: e.signIn.kind,
       status: e.signIn.status?.command,
-      ...(e.kind === "tool" ? { defaultOn: e.defaultOn } : {}),
+      ...(e.kind === "tool" ? { defaultOn: e.defaultOn, ...(e.covers !== undefined ? { covers: e.covers } : {}) } : {}),
       source: e.source,
       size: e.size,
       configPaths: e.configPaths.length,
-      projectState: e.kind === "agent" ? e.projectState.map(p => p.state) : [],
+      ...(e.kind === "agent" ? { projectState: e.projectState.map(p => p.state) } : {}),
     }));
     expect(rows).toMatchSnapshot();
   });

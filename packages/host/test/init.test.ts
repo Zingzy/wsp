@@ -363,7 +363,7 @@ describe("wsp init, interactive", () => {
     expect(summary).toMatch(/Upload\s+\d[\d.]* [KM]B, nothing has left this computer yet/);
     // Their three ticked tools; Homebrew's own glibc and gcc are named apart, not counted as theirs.
     expect(summary).toMatch(/Installs\s+Claude Code, neovim, 3 tools plus Homebrew's toolchain/);
-    // Without a Homebrew table the two formulae have no size and count at 100 MB each, pnpm at 50; the toolchain and Claude Code are measured.
+    // Without a Homebrew table the two formulae have no size and count at 100 MB each, tsx at 50; the toolchain and Claude Code are measured.
     expect(summary.replace(/\n\s*│?\s+/g, " ")).toMatch(/Disk\s+1\.4 GB of 15\.2 GB on the 20 GB builder \(files [\d.]+ KB, Homebrew's toolchain 1\.0 GB, agents 208\.0 MB; 3 unmeasured, ~250\.0 MB\)/);
     expect(f.backends.flatMap(b => b.machines)).toHaveLength(0);
     await f.press("y");
@@ -402,7 +402,7 @@ describe("wsp init, interactive", () => {
     const ready = out.indexOf("Ready to seal golden v1");
     expect(ready).toBeGreaterThan(signing);
     const summaryCard = out.slice(ready, out.indexOf(SEAL_Q(1)));
-    // Homebrew, its two toolchain formulae, the shared step, gh, jq, pnpm and neovim.
+    // Homebrew, its two toolchain formulae, the shared step, gh, yq, tsx and neovim.
     expect(summaryCard).toMatch(/Tools\n│\s+8 installed\n/);
     expect(summaryCard).toMatch(/Agents\n│\s+1 installed: Claude Code\n/);
     expect(summaryCard).toMatch(/Sign-ins\n│\s+GitHub CLI login\s+signed in\n│\s+Claude Code login\s+signed in\n/);
@@ -429,9 +429,9 @@ describe("wsp init, interactive", () => {
     expect(backend.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_golden-v1", true], ["snap_golden-v1", false]]);
     const log = backend.machines[0]!.execLog;
     expect(log.some(c => c.includes("tar xzf") && c.includes("--no-same-owner"))).toBe(true);
-    expect(log.filter(c => c.includes("brew install") || c.includes("npm install -g pnpm"))).toHaveLength(6);
-    expect(log.map(c => /brew install ([a-z@.-]+)/.exec(c)?.[1]).filter(Boolean)).toEqual(["glibc", "gcc", "gh", "jq"]);
-    // gh and jq share dependencies: one brew process installs those before either formula.
+    expect(log.filter(c => c.includes("brew install") || c.includes("npm install -g tsx"))).toHaveLength(6);
+    expect(log.map(c => /brew install ([a-z@.-]+)/.exec(c)?.[1]).filter(Boolean)).toEqual(["glibc", "gcc", "gh", "yq"]);
+    // gh and yq share dependencies: one brew process installs those before either formula.
     expect(log.filter(c => c.includes("brew deps --for-each"))).toHaveLength(1);
     expect(log.findIndex(c => c.includes("brew deps --for-each"))).toBeLessThan(log.findIndex(c => c.includes("brew install gh")));
     expect(log.some(c => c.includes(GOLDEN_SETUP))).toBe(true);
@@ -439,7 +439,7 @@ describe("wsp init, interactive", () => {
     expect(JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8"))).toMatchObject({
       files: { bytes: expect.any(Number) },
       homebrew: { tag: expect.stringMatching(/^6\./), commit: expect.stringMatching(/^[0-9a-f]{40}$/) },
-      tools: [{ id: "editors/nvim", outcome: "installed" }, { id: "tools/homebrew", outcome: "installed" }, { id: "tools/brew-toolchain/glibc", outcome: "installed" }, { id: "tools/brew-toolchain/gcc", outcome: "installed" }, { id: "tools/brew-shared", outcome: "installed" }, { id: "tools/brew/gh", outcome: "installed" }, { id: "tools/brew/jq", outcome: "installed" }, { id: "tools/npm/pnpm", outcome: "installed" }],
+      tools: [{ id: "editors/nvim", outcome: "installed" }, { id: "tools/homebrew", outcome: "installed" }, { id: "tools/brew-toolchain/glibc", outcome: "installed" }, { id: "tools/brew-toolchain/gcc", outcome: "installed" }, { id: "tools/brew-shared", outcome: "installed" }, { id: "tools/brew/gh", outcome: "installed" }, { id: "tools/brew/yq", outcome: "installed" }, { id: "tools/npm/tsx", outcome: "installed" }],
       agents: [{ id: "agents/claude", outcome: "installed" }],
       logins: [
         { id: "logins/gh", label: "GitHub CLI login", state: "signed-in", command: "gh auth login", note: "gh auth login exited 0" },
@@ -455,7 +455,7 @@ describe("wsp init, interactive", () => {
     const bring = saved.entries.filter(e => e.bring).map(e => e.id);
     expect(bring).toEqual([
       "identity/git-user", "identity/ssh-config", "shell/zshrc", "shell/starship", "editors/nvim", "toolchains/mise",
-      "tools/brew/gh", "tools/brew/jq", "tools/npm/pnpm", "agents/claude",
+      "tools/brew/gh", "tools/brew/yq", "tools/npm/tsx", "agents/claude",
     ]);
     expect(saved.entries.filter(e => e.rung === "logins").map(e => e.choice)).toEqual(["machine", "machine", undefined]);
     expect(out).toContain("golden-recipe.json");
@@ -1829,7 +1829,7 @@ describe("wsp init, flags and no terminal", () => {
     const f = fake({ yes: true, manifestPath: path });
     f.opts.runtime = recipe => {
       const backend = stubBackend();
-      backend.execImpl = (_m, cmd) => (cmd.includes("brew install jq") ? { exitCode: 1, stdout: "", stderr: "curl: no route" } : guestAnswer(cmd));
+      backend.execImpl = (_m, cmd) => (cmd.includes("brew install yq") ? { exitCode: 1, stdout: "", stderr: "curl: no route" } : guestAnswer(cmd));
       f.backends.push(backend);
       f.recipes.push(recipe);
       return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
@@ -1845,7 +1845,7 @@ describe("wsp init, flags and no terminal", () => {
     const tally = out.slice(out.indexOf("Tools, agents and machine context:"));
     expect(tally.split("\n").slice(0, 2).map(l => l.replace(/^[│◇]\s+/, ""))).toEqual([
       expect.stringMatching(/^Tools, agents and machine context: 9 installed, 1 failed, 0 skipped; the list is in .*golden-import\.json$/),
-      "jq failed: curl: no route",
+      "yq failed: curl: no route",
     ]);
     expect(f.recipes[0]!.import?.node).toMatchObject({ floor: 16, agents: ["Codex"] });
   });
@@ -2506,7 +2506,7 @@ describe("wsp init, a signal during prepare", () => {
     f.opts.runtime = recipe => {
       const backend = stubBackend();
       backend.execImpl = (m, cmd) => {
-        if (!cmd.includes("brew install jq")) return guestAnswer(cmd);
+        if (!cmd.includes("brew install yq")) return guestAnswer(cmd);
         return new Promise((_, reject) => {
           const kill = m.kill.bind(m);
           m.kill = async () => {
@@ -2549,7 +2549,7 @@ describe("wsp init, a signal during prepare", () => {
     f.opts.runtime = recipe => {
       const backend = stubBackend();
       backend.execImpl = (m, cmd) => {
-        if (!cmd.includes("brew install jq")) return guestAnswer(cmd);
+        if (!cmd.includes("brew install yq")) return guestAnswer(cmd);
         // The stream is animating here; the signal that follows stops it and must hand the streams back.
         duringPrepare = f.io.stderr.write;
         return new Promise((_, reject) => {
@@ -2789,14 +2789,14 @@ describe("editorsIntro", () => {
 
 describe("summaryNote", () => {
   it("the Machine disk line adds files, Homebrew's toolchain, the formulae's closures and the agents against the room, and names what has no size", () => {
-    const ticks = new Set(["tools/brew/gh", "tools/brew/jq", "tools/npm/pnpm", "agents/claude", "agents/codex"]);
+    const ticks = new Set(["tools/brew/gh", "tools/brew/yq", "tools/npm/tsx", "agents/claude", "agents/codex"]);
     const brew = new Map([
       ["gh", { name: "gh", fullName: "gh", deps: [], bytes: 50 * 1024 * 1024, macosOnly: false }],
-      ["jq", { name: "jq", fullName: "jq", deps: ["oniguruma"], bytes: 2 * 1024 * 1024, macosOnly: false }],
+      ["yq", { name: "yq", fullName: "yq", deps: ["oniguruma"], bytes: 2 * 1024 * 1024, macosOnly: false }],
       ["oniguruma", { name: "oniguruma", fullName: "oniguruma", deps: [], bytes: 1024 * 1024, macosOnly: false }],
     ]);
     const lines = summaryNote(FIXTURE, ticks, new Map(), 200, 300 * 1024 * 1024, brew);
-    // 300 MB files + 1024 toolchain + 53 tools + 663 agents + 50 assumed for pnpm = 2090 MiB.
+    // 300 MB files + 1024 toolchain + 53 tools + 663 agents + 50 assumed for tsx = 2090 MiB.
     expect(lines).toContain("Disk      2.0 GB of 15.2 GB on the 20 GB builder (files 300.0 MB, Homebrew's toolchain 1.0 GB, tools 53.0 MB, agents 663.0 MB; 1 unmeasured, ~50.0 MB)");
     const huge = new Map([["gh", { name: "gh", fullName: "gh", deps: [], bytes: 30 * 1024 * 1024 * 1024, macosOnly: false }]]);
     const over = summaryNote(FIXTURE, new Set(["tools/brew/gh"]), new Map(), 200, 0, huge).find(l => l.startsWith("Disk"));
@@ -2832,7 +2832,7 @@ describe("summaryNote", () => {
   });
 
   it("wraps a long Installs line under its own column instead of letting the frame break it with a stray indent", () => {
-    const ticks = new Set(["tools/brew/gh", "tools/brew/jq", "tools/npm/pnpm", "agents/claude"]);
+    const ticks = new Set(["tools/brew/gh", "tools/brew/yq", "tools/npm/tsx", "agents/claude"]);
     const narrow = summaryNote(FIXTURE, ticks, new Map(), 48);
     const at = narrow.indexOf("Installs  Claude Code, 3 tools plus");
     expect(at).toBeGreaterThan(-1);
@@ -2843,7 +2843,7 @@ describe("summaryNote", () => {
   });
 
   it("the card prints the pre-wrapped lines one for one, none past the columns, so nothing is wrapped twice", () => {
-    const ticks = new Set(["tools/brew/gh", "tools/brew/jq", "tools/npm/pnpm", "agents/claude"]);
+    const ticks = new Set(["tools/brew/gh", "tools/brew/yq", "tools/npm/tsx", "agents/claude"]);
     for (const columns of [50, 80]) {
       const output = Object.assign(new PassThrough(), { columns });
       const chunks: string[] = [];
@@ -2983,7 +2983,7 @@ describe("stage stream", () => {
     ]);
     expect(view.steps.map(s => [s.start, s.end])).toEqual([
       ["Creating the machine", "Machine created"],
-      ["Installing the base (Node, the daemon)", "Base installed"],
+      ["Installing the base (tools and daemon)", "Base installed"],
       ["Installing agents", "Agents installed"],
     ]);
     expect(view.steps[0]).toMatchObject({ tail: ["sandbox from default"] });
@@ -3249,7 +3249,7 @@ describe("disk estimate before the boot", () => {
   it("the Tools screen puts a size beside every tick, Homebrew's toolchain at the top of its group, and the running total at the bottom; the Agents screen shows install sizes", async () => {
     const brew = new Map([
       ["gh", { name: "gh", fullName: "gh", deps: [], bytes: 50 * 1024 * 1024, macosOnly: false }],
-      ["jq", { name: "jq", fullName: "jq", deps: ["oniguruma"], bytes: 2 * 1024 * 1024, macosOnly: false }],
+      ["yq", { name: "yq", fullName: "yq", deps: ["oniguruma"], bytes: 2 * 1024 * 1024, macosOnly: false }],
       ["oniguruma", { name: "oniguruma", fullName: "oniguruma", deps: [], bytes: 1024 * 1024, macosOnly: false }],
     ]);
     const f = fake({ brew: async () => brew, columns: 120 });
@@ -3270,16 +3270,16 @@ describe("disk estimate before the boot", () => {
     expect(tapsOnly[0]!.follows!(new Set(["tools/brew-tap/zingzy/tap"]))).toBe(true);
     expect(tapsOnly[0]!.follows!(new Set())).toBe(false);
     expect(screen).toMatch(/● gh\s+50\.0 MB/);
-    expect(screen).toMatch(/● jq\s+3\.0 MB/);
+    expect(screen).toMatch(/● yq\s+3\.0 MB/);
     // A row nothing measured shows its kind's default behind a tilde.
-    expect(screen).toMatch(/● pnpm\s+~50\.0 MB/);
+    expect(screen).toMatch(/● tsx\s+~50\.0 MB/);
     expect(screen).toMatch(/○ rectangle\s+stays here/);
-    // Files from the earlier screens, the toolchain and the two formulae so far; pnpm has no size.
+    // Files from the earlier screens, the toolchain and the two formulae so far; tsx has no size.
     expect(screen).toMatch(/files 1[\d.]+ KB, Homebrew's toolchain 1\.0 GB, tools 53\.0 MB; 1 unmeasured, ~50\.0 MB\n┃\n┃  Disk: 1\.1 GB of 15\.2 GB on the 20 GB builder\n┗/);
-    // Past the group header, the toolchain row and gh onto jq; its detail names the closure and where the number came from.
+    // Past the group header, the toolchain row and gh onto yq; its detail names the closure and where the number came from.
     await f.press(KEY.down, KEY.down, KEY.down, KEY.down);
     expect(f.text()).toContain("about 3.0 MB with 1 dependency, from this Mac's Homebrew; brought by default");
-    // Unticking jq drops its closure from the total.
+    // Unticking yq drops its closure from the total.
     await f.press(KEY.space);
     expect(f.text().split("\n").filter(l => l.includes("Homebrew's toolchain 1.0 GB, tools")).at(-1)).toMatch(/tools 50\.0 MB/);
     await f.press(KEY.enter);

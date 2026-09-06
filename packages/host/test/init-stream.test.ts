@@ -332,7 +332,7 @@ describe("stage stream on a terminal", () => {
       expect(lines[0]).toBe("│  heartbeat for builder b1 not written: ETIMEDOUT");
       expect(lines[1]).toBe("│  hostname first on m1 failed: no route");
       expect(lines[2]).toMatch(/^◇  Machine created\s+sandbox from default\s+1\.0s$/);
-      expect(lines[3]).toMatch(/^[◒◐◓◑]  Installing the base \(Node, the daemon\)$/);
+      expect(lines[3]).toMatch(/^[◒◐◓◑]  Installing the base \(tools and daemon\)$/);
       expect(lines).toHaveLength(4);
       expect(sunk).toEqual(["heartbeat for builder b1 not written: ETIMEDOUT", "hostname first on m1 failed: no route"]);
       stream.stop();

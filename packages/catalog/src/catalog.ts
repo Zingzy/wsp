@@ -5,7 +5,7 @@
 // state to a path, and whether it is on by default with the evidence behind
 // that. The wizard's tables read from here; nothing here runs a command.
 import { GCLOUD, KUBECTL } from "./linux-casks.js";
-import { GOLDEN_SETUP, HERMES_INSTALL, MIB, NODE_RELEASES, UV_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
+import { GOLDEN_SETUP, HERMES_INSTALL, MIB, NODE_RELEASES, PYTHON_INSTALL, UV_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
 import { NO_SIGN_IN, SIGN_IN_ROWS, type SignIn } from "./signin.js";
 
 export type EntryKind = "agent" | "tool";
@@ -61,6 +61,8 @@ export interface AgentEntry extends EntryBase {
 export interface ToolEntry extends EntryBase {
   kind: "tool";
   defaultOn: boolean;
+  /** Package names a recipe's tools row may carry for this same tool, besides its id, its command and its road's argument. */
+  covers?: readonly string[];
 }
 
 export type CatalogEntry = AgentEntry | ToolEntry;
@@ -218,9 +220,9 @@ export const CATALOG: readonly CatalogEntry[] = [
   { ...tool, id: "ripgrep", name: "ripgrep", bin: "rg", installRoad: apt("ripgrep"), signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 10, images: 4, road: "unmeasured" } },
   { ...tool, id: "node", name: "Node 22 with npm", bin: "node", installRoad: { road: "script", script: nodeInstallScript(22, NODE_RELEASES[22]) }, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 73, images: 5, road: "measured" }, size: NODE_BYTES },
   { ...tool, id: "pnpm", name: "pnpm", bin: "pnpm", installRoad: npm("pnpm", "11.9.0"), signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 36, images: 3, road: "unmeasured" } },
-  { ...tool, id: "python", name: "Python 3.12", bin: "python3", ...brew("python@3.12"), signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 107, images: 4, road: "unmeasured" } },
+  { ...tool, id: "python", name: "Python 3.12", bin: "python3", installRoad: { road: "script", script: PYTHON_INSTALL }, covers: ["python@3.12"], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 107, images: 4, road: "unmeasured" } },
   { ...tool, id: "uv", name: "uv", bin: "uv", installRoad: { road: "script", script: UV_INSTALL }, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 46, images: 3, road: "unmeasured" } },
-  { ...tool, id: "docker", name: "Docker engine and compose", bin: "docker", installRoad: apt("docker.io", "docker-compose-v2"), signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 30, images: 3, road: "unmeasured" } },
+  { ...tool, id: "docker", name: "Docker engine and compose", bin: "docker", installRoad: apt("docker.io", "docker-compose-v2"), covers: ["docker-compose"], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 30, images: 3, road: "unmeasured" } },
   { ...tool, id: "agent-browser", name: "agent-browser", bin: "agent-browser", installRoad: npm("agent-browser", "0.31.1"), signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 45, images: 0, road: "unmeasured", note: "sessions counted on one Mac only; on by default for this user until a second data point" } },
 
   // --- tools on request ---------------------------------------------------------------------------------------------
@@ -251,6 +253,29 @@ export const CATALOG: readonly CatalogEntry[] = [
 export const CATALOG_AGENTS: readonly AgentEntry[] = CATALOG.filter((e): e is AgentEntry => e.kind === "agent");
 
 const BY_ID: ReadonlyMap<string, CatalogEntry> = new Map(CATALOG.map(e => [e.id, e]));
+
+/** What every golden gets in its base stage, whatever the Mac has, in install order: the default-on tools with a
+ * pinned road. gh has no pinned release yet and agent-browser waits on a second data point. pnpm needs node first and
+ * python needs uv. */
+export const BASE_FLOOR: readonly ToolEntry[] = ["node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker"].map(id => BY_ID.get(id) as ToolEntry);
+
+const roadNames = (road: InstallRoad): readonly string[] => {
+  switch (road.road) {
+    case "brew":
+      return [road.formula];
+    case "npm":
+      return [road.package];
+    case "apt":
+      return road.packages;
+    default:
+      return [];
+  }
+};
+
+/** The base row a recipe's tools row stands for, by the package name the collector wrote, or nothing. */
+export function baseEntryFor(pkg: string): ToolEntry | undefined {
+  return BASE_FLOOR.find(e => e.id === pkg || e.bin === pkg || roadNames(e.installRoad).includes(pkg) || (e.covers ?? []).includes(pkg));
+}
 
 /** The entry by its id, or nothing. */
 export function catalogEntry(id: string): CatalogEntry | undefined {

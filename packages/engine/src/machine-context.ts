@@ -9,6 +9,7 @@
 // hook the person's own file already claims is left alone and named in the result.
 import type { GoldenVersion } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
+import { BASE_VERSIONS_CMD, parseVersions, type ToolVersion } from "./golden-base.js";
 import { TOOLS_PATH } from "./golden-import.js";
 import { TOOLS_DISK_FLOOR, fmtBytes } from "./golden-tools.js";
 import type { ImportResult } from "./golden.js";
@@ -78,7 +79,7 @@ export function mergeFacts(prior: BuildFacts | undefined, result: ImportResult |
     const kept = list.flatMap(m => (rows.some(r => r.id === m.id) ? missing.filter(r => r.id === m.id) : [m]));
     return [...kept, ...missing.filter(r => !list.some(m => m.id === r.id))];
   };
-  facts.tools = fold(facts.tools, result.tools);
+  facts.tools = fold(facts.tools, [...(result.base ?? []), ...result.tools]);
   facts.agents = fold(facts.agents, result.agents.map(a => ({ id: a.id, label: a.name, outcome: a.outcome, ...(a.note !== undefined ? { note: a.note } : {}) })));
   for (const r of result.removed ?? []) {
     if (r.outcome !== "removed") continue;
@@ -110,6 +111,8 @@ export interface ContextProbe {
   overlay: boolean;
   /** Binaries and files found: docker, podman, tmux, fish, brew, golden-path, wsp-open. */
   has: Set<string>;
+  /** The base floor's commands that answered, each with its version. */
+  versions: ToolVersion[];
   agents: ContextAgent[];
   /** Names the secrets file exports, never values. */
   secrets: string[];
@@ -218,6 +221,7 @@ export function probeCommand(roots: GuestRoots = GUEST_ROOTS): string {
     'for b in docker podman tmux fish brew; do if command -v "$b" >/dev/null 2>&1; then echo "HAS $b"; fi; done',
     `if [ -f ${e}/profile.d/wsp-golden.sh ]; then echo "HAS golden-path"; fi`,
     `if [ -x ${BROWSER_SHIM_PATH} ]; then echo "HAS wsp-open"; fi`,
+    BASE_VERSIONS_CMD,
     `for a in ${CONTEXT_AGENTS.join(" ")}; do if command -v "$a" >/dev/null 2>&1; then echo "AGENT $a"; fi; done`,
     `sed -n 's/^export \\([A-Za-z_][A-Za-z0-9_]*\\)=.*/SECRET \\1/p' ${e}/profile.d/wsp-secrets.sh 2>/dev/null`,
     'shell=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7); shell=${shell##*/}; shell=${shell:-bash}',
@@ -243,7 +247,7 @@ export function parseProbe(stdout: string): ContextProbe | undefined {
   const start = lines.indexOf("WSP_CTX");
   const end = lines.indexOf("WSP_CTX_END");
   if (start === -1 || end === -1 || end < start) return undefined;
-  const probe: ContextProbe = { overlay: false, has: new Set(), agents: [], secrets: [], shell: "bash", aliases: [], conflicts: new Set() };
+  const probe: ContextProbe = { overlay: false, has: new Set(), versions: parseVersions(lines.slice(start + 1, end).join("\n")), agents: [], secrets: [], shell: "bash", aliases: [], conflicts: new Set() };
   for (const line of lines.slice(start + 1, end)) {
     const sp = line.indexOf(" ");
     const key = sp === -1 ? line : line.slice(0, sp);
@@ -331,6 +335,7 @@ export function renderMachineContext(input: ContextInput): string {
   const secretsFile = fish ? `${SECRETS_SH} and ${SECRETS_FISH}` : SECRETS_SH;
   const machine: string[] = [];
   machine.push(`- Linux${probe.kernel !== undefined ? ` ${probe.kernel}` : ""}, user root, home /root. macOS apps, casks and Mac App Store apps are not here.`);
+  if (probe.versions.length > 0) machine.push(`- On every wsp machine: ${probe.versions.map(v => `${v.name} ${v.version}`).join(", ")}.`);
   if (probe.has.has("brew")) machine.push("- Homebrew is at /home/linuxbrew/.linuxbrew.");
   if (probe.has.has("golden-path")) machine.push(`- Login shells get their PATH from /etc/profile.d/wsp-golden.sh: ${TOOLS_PATH}`);
   const containers = ["docker", "podman"].filter(b => probe.has.has(b));

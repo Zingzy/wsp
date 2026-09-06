@@ -34,7 +34,10 @@ describe("host golden recipe", () => {
     expect(view.id).toBe(builder.id);
     expect(deployed).toEqual([builder.id]);
     // The base stage closes with a df reading, then the setup runs.
-    expect(builder.execLog).toEqual(["df -Pk /root | awk 'NR==2{print $4}'", GOLDEN_SETUP]);
+    // The base floor's steps come first; the df that closes the base stage and the setup are the last two.
+    expect(builder.execLog[0]).toBe("rm -f /tmp/wsp-vault-*.tgz");
+    expect(builder.runLog.some(s => s.includes("nodejs.org/dist"))).toBe(true);
+    expect(builder.execLog.slice(-2)).toEqual(["df -Pk /root | awk 'NR==2{print $4}'", GOLDEN_SETUP]);
     expect(builder.spec).toMatchObject({ kind: "sandbox", onIdle: "kill", envs: { ANTHROPIC_API_KEY: ANTHROPIC } });
     expect(builder.spec.idleTimeoutMs).toBeGreaterThan(0);
 

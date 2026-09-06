@@ -12,6 +12,7 @@ import type { Removal } from "./golden-diff.js";
 import { NODE_PATH_LINE, type AgentInstall, type GuestFacts, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { MIB, TOOL_TIMEOUT_S, closing, fmtBytes, freeBytes, freeNote, guardDeadlineMs, guarded, guestArch, installTools, reasonOf, sweepCaches, type ToolResult } from "./golden-tools.js";
+import { installBase } from "./golden-base.js";
 import { BUILDER_DISK_GB } from "./tool-sizes.js";
 import { assertFirstLife } from "./lifecycle.js";
 import { applyMcp, type McpPlan, type McpResult } from "./golden-mcp.js";
@@ -169,6 +170,8 @@ export interface GoldenImport {
   skippedAgents?: { id: string; name: string; note: string }[];
   /** Ticked tools the plan set aside (no Linux bottle, a macOS app); they land in the result with the installs. */
   skippedTools?: { id: string; label: string; note: string }[];
+  /** Ticked tools the base stage already put on every golden; they land in the result as installed, by the base row's name. */
+  baseTools?: { id: string; label: string; name: string }[];
   /** The MCP servers to keep in or take out of each agent's config once it is on the machine; absent when no row is one. */
   mcp?: McpPlan;
   /** Called once per prepare that ran anything; a re-run that skipped every stage has nothing to report. */
@@ -215,6 +218,8 @@ export interface ImportResult {
   mcp?: McpResult[];
   /** Only on an update: the removals it ran before the stages. */
   removed?: RemovalResult[];
+  /** The base stage's outcomes on a fresh builder; an update's fork carries its golden's. */
+  base?: ToolResult[];
   /** The machine context each installed agent got, or why it did not; absent when no stage ran. */
   context?: ContextResult[];
   /** Why no machine context was written, when the probe or the upload failed; context is empty then. */
@@ -225,6 +230,8 @@ export interface ApplyImportOptions {
   import?: GoldenImport;
   setup: string;
   setupTimeoutMs?: number;
+  /** What the base stage did on this builder, so a floor row that did not land is in the result with the person's tools. */
+  base?: ToolResult[];
   /** Stages this builder already carries; those for the same recipe hash are skipped. */
   ledger?: ImportLedger;
   fetch?: typeof globalThis.fetch;
@@ -253,7 +260,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
     ...(recipe !== undefined ? { recipe } : {}),
     ...(prior?.missingTools !== undefined ? { missingTools: prior.missingTools } : {}),
   };
-  const result: ImportResult = { recipeHash: imp.recipeHash, tools: [], agents: [] };
+  const result: ImportResult = { recipeHash: imp.recipeHash, tools: [], agents: [], ...(opts.base !== undefined ? { base: opts.base } : {}) };
   const done = (s: ImportStage): boolean => ledger.applied.includes(s);
   const mark = (s: ImportStage): void => {
     if (!done(s)) ledger.applied.push(s);
@@ -385,6 +392,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
       stage("installing-tools", ALREADY_APPLIED);
     } else {
       for (const t of imp.skippedTools ?? []) result.tools.push({ id: t.id, label: t.label, outcome: "skipped", note: t.note });
+      for (const t of imp.baseTools ?? []) result.tools.push({ id: t.id, label: t.label, outcome: "installed", note: `${t.name} is part of the base` });
       if (imp.tools.length === 0) {
         stage("installing-tools", "nothing ticked");
       } else {
@@ -393,7 +401,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
         result.tools.push(...tools.tools);
         if (tools.homebrew !== undefined) result.homebrew = tools.homebrew;
       }
-      const missing = missingToolsOf(result.tools);
+      const missing = missingToolsOf([...(result.base ?? []), ...result.tools]);
       if (missing.length > 0) ledger.missingTools = missing;
       else delete ledger.missingTools;
       mark("installing-tools");
@@ -562,14 +570,15 @@ export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Build
   });
   try {
     const size = await sizeBuilt(machine, asked);
-    if (opts.deployDaemon) {
-      stage("deploying-daemon");
-      const deployed = await opts.deployDaemon(machine);
-      const detail = closing(typeof deployed === "string" ? deployed : undefined, await freeNote(machine));
-      if (detail !== "") stage("deploying-daemon", detail);
-    }
+    stage("deploying-daemon");
+    // The floor goes on before the daemon, whose native module compiles against the Node it finds first on PATH.
+    const base = await installBase(machine, stage);
+    const deployed = opts.deployDaemon ? await opts.deployDaemon(machine) : undefined;
+    const detail = closing(base.line, typeof deployed === "string" ? deployed : undefined, await freeNote(machine));
+    if (detail !== "") stage("deploying-daemon", detail);
     const applied = await applyGoldenImport(machine, {
       setup: opts.setup,
+      base: base.tools,
       onStage: stage,
       ...(opts.import !== undefined ? { import: opts.import } : {}),
       ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}),

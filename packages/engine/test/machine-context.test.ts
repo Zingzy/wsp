@@ -59,6 +59,10 @@ const PROBE_OUT = [
   "HAS brew",
   "HAS golden-path",
   "HAS wsp-open",
+  "VERSION node: v22.23.2",
+  "VERSION npm: 10.9.4",
+  "VERSION python3: Python 3.12.13",
+  "VERSION docker: ",
   "AGENT claude",
   "AGENT codex",
   "AGENT gemini",
@@ -81,6 +85,7 @@ function probeOf(over: Partial<ContextProbe> = {}): ContextProbe {
     disk: { sizeBytes: 20466256 * 1024, freeBytes: 11720704 * 1024 },
     overlay: false,
     has: new Set(["tmux", "fish", "brew", "golden-path", "wsp-open"]),
+    versions: [],
     agents: [...CONTEXT_AGENTS],
     secrets: ["OPENAI_API_KEY", "GH_TOKEN"],
     shell: "zsh",
@@ -102,6 +107,8 @@ describe("the probe", () => {
     expect(probe.disk).toEqual({ sizeBytes: 20466256 * 1024, freeBytes: 11720704 * 1024 });
     expect(probe.overlay).toBe(false);
     expect([...probe.has]).toEqual(["tmux", "fish", "brew", "golden-path", "wsp-open"]);
+    // The base floor's versions, each as its number; a command that printed nothing is not there.
+    expect(probe.versions).toEqual([{ name: "node", version: "22.23.2" }, { name: "npm", version: "10.9.4" }, { name: "python3", version: "3.12.13" }]);
     expect(probe.agents).toEqual([...CONTEXT_AGENTS]);
     expect(probe.secrets).toEqual(["OPENAI_API_KEY", "GH_TOKEN"]);
     expect(probe.shell).toBe("zsh");
@@ -123,7 +130,15 @@ describe("the probe", () => {
     expect(probe.shell).toBe("bash");
     expect([...probe.conflicts]).toEqual(["gemini"]);
     expect(probe.secrets).toEqual([]);
+    expect(probe.versions).toEqual([]);
     expect(probe.facts).toBeUndefined();
+  });
+
+  it("asks the base floor's commands for their versions on the tools PATH", () => {
+    const cmd = probeCommand();
+    expect(cmd).toContain('echo "VERSION node: $(node --version 2>/dev/null | head -n 1)"');
+    expect(cmd).toContain('echo "VERSION python3: $(python3 --version 2>/dev/null | head -n 1)"');
+    expect(cmd).toContain('echo "VERSION docker compose: $(docker compose version 2>/dev/null | head -n 1)"');
   });
 });
 
@@ -148,6 +163,20 @@ describe("the facts", () => {
     expect(next.files).toEqual([
       { path: "~/.ssh/id_ed25519", note: "private key, never copied" },
       { path: "~/.netrc", note: ".netrc is never copied; sign in on the machine" },
+    ]);
+  });
+
+  it("a base floor row that did not land is a tool that did not install, beside the person's", () => {
+    const next = mergeFacts(undefined, result({
+      base: [
+        { id: "base/node", label: "Node 22 with npm", outcome: "installed", bytes: 0 },
+        { id: "base/docker", label: "Docker engine and compose", outcome: "failed", note: "E: Unable to locate package docker-compose-v2" },
+      ],
+      tools: [{ id: "tools/brew/x", label: "x", outcome: "failed", note: "Error: no bottle" }],
+    }));
+    expect(next.tools).toEqual([
+      { id: "base/docker", label: "Docker engine and compose", note: "E: Unable to locate package docker-compose-v2" },
+      { id: "tools/brew/x", label: "x", note: "Error: no bottle" },
     ]);
   });
 
@@ -242,6 +271,14 @@ describe("the document", () => {
     expect(SKILL_DESCRIPTION.length).toBeLessThan(1024);
     expect(SKILL_DESCRIPTION).not.toMatch(/[\n:"#\u2014]/);
     expect(SKILL_NAME).toMatch(/^[a-z0-9-]{1,64}$/);
+  });
+});
+
+describe("the document's base line", () => {
+  it("names the base floor's versions when the probe read them, and says nothing when it read none", () => {
+    const doc = renderMachineContext({ probe: probeOf({ versions: [{ name: "node", version: "22.23.2" }, { name: "python3", version: "3.12.13" }, { name: "docker compose", version: "2.29.2" }] }), facts: FACTS });
+    expect(doc).toContain("- On every wsp machine: node 22.23.2, python3 3.12.13, docker compose 2.29.2.");
+    expect(renderMachineContext({ probe: probeOf(), facts: FACTS })).not.toContain("On every wsp machine");
   });
 });
 

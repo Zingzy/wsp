@@ -212,7 +212,7 @@ export function goldenRecipe(
     cpu: 2,
     memMb: 4096,
     envs: claudeEnvs(keys.anthropic),
-    deployDaemon: hooks.deployDaemon ?? (async machine => `node ${(await deployDaemon(machine)).node}`),
+    deployDaemon: hooks.deployDaemon ?? (async machine => `daemon on node ${(await deployDaemon(machine)).node}`),
   };
 }
 
@@ -392,7 +392,7 @@ async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: 
       secrets: keychainReader(),
       platform: platform() === "darwin" ? "darwin" : "linux",
       brew: () => readBrewTable(nodeHost()),
-      runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `node ${(await deployDaemon(machine)).node}` }),
+      runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `daemon on node ${(await deployDaemon(machine)).node}` }),
       host: (rt, builder, hooks) => hostFor(rt, keys, { ...opts, builder, ...hooks }, io),
     },
     screen,
