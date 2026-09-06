@@ -352,10 +352,10 @@ describe("lineage", () => {
 
   it("lists the tools missing from the forked version under a micro-label, one row per tool with its cause and reason, under that version alone", async () => {
     const missing = [
-      { name: "gopls", outcome: "skipped" as const, note: "no Linux bottle" },
-      { name: "Homebrew", outcome: "failed" as const, note: "git: not found" },
+      { id: "tools/brew/gopls", name: "gopls", outcome: "skipped" as const, note: "no Linux bottle" },
+      { id: "tools/homebrew", name: "Homebrew", outcome: "failed" as const, note: "git: not found" },
     ];
-    const lineage: SnapshotLineage = { name: "default", head: 12, versions: [{ ...gv(11), missingTools: [{ name: "Raycast", outcome: "skipped", note: "macOS app, no Linux build" }] }, { ...gv(12), missingTools: missing }] };
+    const lineage: SnapshotLineage = { name: "default", head: 12, versions: [{ ...gv(11), missingTools: [{ id: "tools/brew-cask/raycast", name: "Raycast", outcome: "skipped", note: "macOS app, no Linux build" }] }, { ...gv(12), missingTools: missing }] };
     await mount([onV12()], CAPS, lineage);
     await waitFor(() => expect(fact("v12")).toBe("v12headthis fork"));
     const lists = document.querySelectorAll("[data-k='missing-tools']");
@@ -368,6 +368,21 @@ describe("lineage", () => {
       ["Homebrew", "failed: git: not found"],
     ]);
     expect(screen.queryByText("Raycast")).toBeNull();
+  });
+
+  it("two missing tools sharing a label are two rows keyed apart", async () => {
+    const missing = [
+      { id: "tools/brew/gh", name: "gh", outcome: "skipped" as const, note: "no Linux bottle" },
+      { id: "tools/cli/gh", name: "gh", outcome: "failed" as const, note: "curl: not found" },
+    ];
+    const lineage: SnapshotLineage = { name: "default", head: 12, versions: [gv(11), { ...gv(12), missingTools: missing }] };
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    await mount([onV12()], CAPS, lineage);
+    await waitFor(() => expect(fact("v12")).toBe("v12headthis fork"));
+    const rows = [...document.querySelectorAll("[data-k='missing-tools'] li")].map(li => li.querySelector("[data-k='missing-note']")?.textContent);
+    expect(rows).toEqual(["skipped: no Linux bottle", "failed: curl: not found"]);
+    expect(errors.mock.calls.map(c => String(c[0]))).not.toContainEqual(expect.stringContaining("same key"));
+    errors.mockRestore();
   });
 
   it("a version that recorded no missing tools gets no list and no label", async () => {

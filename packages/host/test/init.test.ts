@@ -781,9 +781,9 @@ describe("wsp init, the summary-first screens", () => {
 
     await f.until("Agents");
     const one = f.text();
-    // Before any question: what was found, then the tool the agents used that this Mac has no row for.
+    // Before any question: what was found; the tool the agents used that this Mac has no row for gets a bare row, not a warning.
     expect(one).toContain("22 found on this computer. Nothing has left this computer.");
-    expect(one).toContain("Ticked in the recipe but not on this computer, so not in this build: Cloudflare Wrangler.");
+    expect(one).not.toContain("not in this build");
     // The catalog's six in its order, a size beside each, the three on this Mac ticked.
     expect(one).toMatch(/◆  Agents  1\/3\n┃ {2}search/);
     expect(one).toMatch(/all\s+3 of 6\n/);
@@ -799,7 +799,7 @@ describe("wsp init, the summary-first screens", () => {
 
     await f.until("What they need");
     const two = f.text().slice(f.text().lastIndexOf("◆  What they need"));
-    expect(two).toMatch(/^◆  What they need  2\/3\n┃  12 tools: 9 in the base, 2 installed here, 1 used by your agents\n┃  Disk: [\d.]+ GB of 15\.2 GB on the 20 GB builder \(files [\d.]+ KB, Homebrew's toolchain 1\.0 GB, agents\n┃ {8}1\.3 GB; 2 unmeasured, ~200\.0 MB\)\n┗  a adjust • enter next • esc back/);
+    expect(two).toMatch(/^◆  What they need  2\/3\n┃  12 tools: 9 in the base, 2 installed here, 1 used by your agents\n┃  Disk: [\d.]+ GB of 15\.2 GB on the 20 GB builder \(files [\d.]+ KB, Homebrew's toolchain 1\.0 GB, agents\n┃ {8}1\.3 GB; 3 unmeasured, ~300\.0 MB\)\n┗  a adjust • enter next • esc back/);
     // No search, no rows, no weight tiers: the counts, the Disk line and three keys.
     expect(two).not.toMatch(/search|● |○ /);
     // a opens the rows: the floor as bullets under the title, the rest grouped by the source of their tick.
@@ -849,7 +849,7 @@ describe("wsp init, the summary-first screens", () => {
     expect(summary).toMatch(/Hermes Agent API keys\s+skip\n/);
     expect(summary).toMatch(/kubectl config\s+skip\n/);
     expect(summary).not.toContain("github");
-    expect(summary.replace(/\n\s*│?\s+/g, " ")).toMatch(/Installs\s+Claude Code, Codex, Hermes Agent, Gemini CLI, 1 tool plus Homebrew's toolchain, 1 MCP server/);
+    expect(summary.replace(/\n\s*│?\s+/g, " ")).toMatch(/Installs\s+Claude Code, Codex, Hermes Agent, Gemini CLI, 2 tools plus Homebrew's toolchain, 1 MCP server/);
     expect(f.text()).toMatch(/Recipe saved to .*golden-recipe\.json and .*recipe\.json/);
     await f.press("y");
     await sealIt(f);
@@ -919,7 +919,9 @@ describe("wsp init, the summary-first screens", () => {
     await f.until(BOOT);
     await f.press("n");
     expect((await run).code).toBe(1);
-    expect(loadManifest(join(dirs[0]!, "golden-recipe.json")).entries.find(e => e.id === "agents/gemini")).toMatchObject({ bring: true });
+    const saved = new Map(loadManifest(join(dirs[0]!, "golden-recipe.json")).entries.map(e => [e.id, e]));
+    expect(saved.get("agents/gemini")).toMatchObject({ bring: true });
+    expect(saved.get("tools/catalog/wrangler")).toMatchObject({ label: "Cloudflare Wrangler", bring: true });
   });
 
   it("under --yes the recipe decides the ticks, the keys copy, the logins wait for the machine, and both recipe files are written", async () => {
@@ -931,8 +933,8 @@ describe("wsp init, the summary-first screens", () => {
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     const out = f.text();
     expect(out).not.toMatch(/Agents  1\/3|What they need|Sign-ins and keys/);
-    expect(out).toContain("Ticked in the recipe but not on this computer, so not in this build: Cloudflare Wrangler.");
-    expect(out.replace(/\n\s*│?\s+/g, " ")).toMatch(/Installs\s+Claude Code, Codex, Hermes Agent, 2 tools plus Homebrew's toolchain, 1 MCP server/);
+    expect(out).not.toContain("not in this build");
+    expect(out.replace(/\n\s*│?\s+/g, " ")).toMatch(/Installs\s+Claude Code, Codex, Hermes Agent, 3 tools plus Homebrew's toolchain, 1 MCP server/);
     expect(out).toMatch(/Hermes Agent API keys\s+copy\n/);
     // The server with a token is consent: nobody is here to give it, so it stays off the machine.
     expect(out).not.toMatch(/github\s+copy/);
@@ -944,6 +946,7 @@ describe("wsp init, the summary-first screens", () => {
     expect(saved.get("agents/codex")).toMatchObject({ bring: true });
     expect(saved.get("agents/gemini")).toMatchObject({ bring: false });
     expect(saved.get("tools/npm/tsx")).toMatchObject({ bring: false });
+    expect(saved.get("tools/catalog/wrangler")).toMatchObject({ label: "Cloudflare Wrangler", bring: true });
     expect(saved.get("logins/hermes-keys")).toMatchObject({ bring: true, choice: "copy" });
     expect(saved.get("logins/kube")).toMatchObject({ bring: false, choice: "skip" });
     expect(saved.get("agents/mcp/claude/github")).toMatchObject({ bring: false, choice: "skip" });
@@ -2152,6 +2155,55 @@ describe("wsp init, flags and no terminal", () => {
       "machine context failed: write failed: vault import untar failed (exit 2): tar: etc/wsp: Cannot mkdir: Read-only file system",
     ]);
     expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({ context: [], contextFailure: expect.stringMatching(/^write failed: vault import untar failed/) });
+  });
+
+  /** A build whose context write the builder refused once, so the results file carries contextFailure; the next init over the same store attaches and the retried write lands. */
+  async function builtWithRefusedContextWrite() {
+    const store = memoryStore();
+    const shared = stubBackend();
+    let refusals = 0;
+    // The builder refuses the root untar once: the build's context write fails, the attach's lands.
+    shared.execImpl = (m, cmd) => (m.spec.fromSnapshot === undefined && cmd.includes("tar xzf - -C '/' ") && refusals++ === 0 ? { exitCode: 2, stdout: "", stderr: "tar: etc/wsp: Cannot mkdir: Read-only file system\n" } : guestAnswer(cmd));
+    const runtimeOver = (f: Fake) => (recipe: GoldenRecipe) => {
+      f.backends.push(shared);
+      return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+    };
+    const first = fake({ yes: true });
+    first.opts.runtime = runtimeOver(first);
+    await bootedOnly(first);
+    const resultsPath = join(dirname(first.opts.statePath), "golden-import.json");
+    const built = JSON.parse(readFileSync(resultsPath, "utf8")) as { tools: unknown[]; agents: unknown[]; context: unknown[]; contextFailure?: string };
+    expect(built).toMatchObject({ context: [], contextFailure: expect.stringMatching(/^write failed: vault import untar failed/) });
+    expect(built.tools.length).toBeGreaterThan(0);
+    expect(built.agents.length).toBeGreaterThan(0);
+    const attach = async (): Promise<Fake> => {
+      const f = fake({ yes: true, tty: false, home: first.opts.home, statePath: first.opts.statePath });
+      f.opts.runtime = runtimeOver(f);
+      await bootedOnly(f);
+      expect(f.text()).toMatch(/Attaching to your earlier builder/);
+      expect(shared.machines).toHaveLength(1);
+      return f;
+    };
+    return { resultsPath, built, attach };
+  }
+
+  it("an attach whose retried context write lands takes the failure out of the saved result and keeps the build's tools and agents", async () => {
+    const { resultsPath, built, attach } = await builtWithRefusedContextWrite();
+    const f = await attach();
+    expect(f.text()).not.toContain("could not be read");
+    const after = JSON.parse(readFileSync(resultsPath, "utf8")) as typeof built;
+    expect(after.contextFailure).toBeUndefined();
+    expect(after.context).toEqual([]);
+    expect(after.tools).toEqual(built.tools);
+    expect(after.agents).toEqual(built.agents);
+  });
+
+  it("an attach whose retried write lands over a results file that no longer parses says the file was rewritten with the context alone", async () => {
+    const { resultsPath, attach } = await builtWithRefusedContextWrite();
+    writeFileSync(resultsPath, "{ not json");
+    const f = await attach();
+    expect(f.text()).toContain(`${resultsPath} could not be read; it was rewritten with the machine context alone.`);
+    expect(JSON.parse(readFileSync(resultsPath, "utf8"))).toEqual({ context: [] });
   });
 
   it("a line on stderr while the stages animate is drawn by the stream, and a build that fails hands the streams back", async () => {
@@ -4321,10 +4373,9 @@ describe("wsp init --recipe", () => {
     const run = runInit(f.opts, f.io);
     await f.until("Sign-ins");
     const out = f.text();
-    // The machine was still read; the card says what ticked it; the one row the build cannot install is named before the card.
+    // The machine was still read; the card says what ticked it and counts the collector's rows, not the catalog's bare one.
     expect(out).toContain("16 found on this computer, ticked by the recipe.");
-    expect(out).toContain("Ticked in the recipe but not on this computer, so not in this build: agent-browser.");
-    expect(out.indexOf("not in this build")).toBeLessThan(out.indexOf("Found on this computer"));
+    expect(out).not.toContain("not in this build");
     // No Agents or What they need screen: the sign-ins are the first and only screen.
     expect(out).not.toContain("1/3");
     expect(out).toMatch(/Sign-ins and keys\s+1\/1/);
@@ -4342,6 +4393,8 @@ describe("wsp init --recipe", () => {
     expect(saved.get("tools/brew/gh")).toMatchObject({ bring: true });
     expect(saved.get("tools/brew/yq")).toMatchObject({ bring: false });
     expect(saved.get("tools/npm/tsx")).toMatchObject({ bring: false });
+    // The ticked tool this Mac has no row for is saved as the catalog's bare row, so the build installs it by its road.
+    expect(saved.get("tools/catalog/agent-browser")).toMatchObject({ label: "agent-browser", bring: true });
     expect(saved.get("logins/gh")).toMatchObject({ bring: true, choice: "copy" });
     expect(saved.get("logins/codex")).toMatchObject({ bring: false, choice: "machine" });
     // The other rungs took their defaults, as the screens would have.
@@ -4364,6 +4417,11 @@ describe("wsp init --recipe", () => {
     expect(saved.get("tools/brew/yq")).toMatchObject({ bring: false });
     expect(saved.get("logins/gh")).toMatchObject({ bring: true, choice: "copy" });
     expect(f.text()).toContain("GitHub CLI login: signed in (copied; gh auth status)");
+    // agent-browser has no row here: the build installed it by its catalog road, an npm global, and the tally says the road is unmeasured.
+    expect(f.backends[0]!.machines[0]!.execLog.some(c => c.includes("npm install -g agent-browser@0.31.1"))).toBe(true);
+    const tools = JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8")).tools as { id: string; outcome: string; note?: string }[];
+    expect(tools.find(t => t.id === "tools/catalog/agent-browser")).toMatchObject({ outcome: "installed", note: "by an unmeasured road" });
+    expect(f.text()).toMatch(/Installing tools\s+\d+ installed \(agent-browser by an un/);
   });
 
   it("a recipe that does not parse ends the run before anything is read or booted", async () => {

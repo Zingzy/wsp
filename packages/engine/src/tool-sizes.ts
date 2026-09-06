@@ -5,7 +5,7 @@
 // toolchain is one line; agents carry measured sizes in the catalog; a row
 // nothing measured counts at a stated default for its kind. Nothing here runs a
 // command: the host reads the Mac's Homebrew and hands the table in.
-import { AGENT_INSTALLERS, BREW_TOOLCHAIN, MANAGER_FORMULA, MACOS_ONLY_FORMULAE, cliRoad, toolInstallsFor, type BrewFormula, type BrewTable, type RecipeEntry, type ToolSource } from "./golden-import.js";
+import { AGENT_INSTALLERS, BREW_TOOLCHAIN, CATALOG_PREFIX, MANAGER_FORMULA, MACOS_ONLY_FORMULAE, cliRoad, packageOf, toolInstallsFor, type BrewFormula, type BrewTable, type RecipeEntry, type ToolSource } from "./golden-import.js";
 import { LINUX_FORMULA_MIB, MIB, catalogEntry } from "@wsp/catalog";
 import { TOOLS_DISK_FLOOR } from "./golden-tools.js";
 
@@ -156,6 +156,10 @@ const formulaOf = (e: RecipeEntry): string | undefined => (e.id.startsWith("tool
 /** What one tools row puts on the machine: a formula with its closure, a measured global; nothing for a
  * tap, a cask, or a row nothing measured or read. */
 export function toolSize(e: RecipeEntry, brew: BrewTable): ToolSize | undefined {
+  if (e.id.startsWith(CATALOG_PREFIX)) {
+    const size = catalogEntry(packageOf(e))?.size;
+    return size === undefined ? undefined : { bytes: size, road: "measured", deps: 0 };
+  }
   const formula = formulaOf(e);
   if (formula === undefined) {
     const other = OTHER_TOOL_MIB[e.id];

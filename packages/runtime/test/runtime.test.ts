@@ -3780,7 +3780,7 @@ describe("runtime golden update and the post-seal grace", () => {
     const skippedTools = [{ id: "tools/brew-cask/raycast", label: "Raycast", note: "macOS app, no Linux build" }];
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipeWith({ ...importOf(), skippedTools }), clock: fakeClock().clock });
     const b = await rt.golden.prepare();
-    const want = [{ name: "Raycast", outcome: "skipped", note: "macOS app, no Linux build" }];
+    const want = [{ id: "tools/brew-cask/raycast", name: "Raycast", outcome: "skipped", note: "macOS app, no Linux build" }];
     expect((await rt.golden.seal(b.id)).version.missingTools).toEqual(want);
     const two = await rt.golden.upgrade({ delta: deltaOf("h2") });
     expect(two.road).toBe("builder");
