@@ -6,23 +6,17 @@ import {
   CATALOG_PREFIX,
   AGENT_INSTALLERS,
   CURRENT_LTS,
-  HELIX,
   NODE_RELEASES,
   agentInstallsFor,
   agentOwning,
   brewfileFor,
-  editorInstallsFor,
   dropGhAccount,
   ghAccounts,
-  extensionsFile,
   HOMEBREW,
-  remoteEditorFor,
-  remoteSettingsPath,
   nodeInstallScript,
   neverCopied,
   nodeMajorFor,
   placeGhToken,
-  forGuest,
   planFiles,
   recipeDigest,
   recipeHash,
@@ -41,7 +35,7 @@ import {
   type RecipeDigest,
   type RecipeEntry,
 } from "../src/golden-import.js";
-import { KUBECTL, LINUX_CASKS, caskPinState, catalogEntry, linuxCaskByBin, linuxCaskFor } from "@wsp/catalog";
+import { KUBECTL, catalogEntry } from "@wsp/catalog";
 
 const row = (over: Partial<RecipeEntry> & Pick<RecipeEntry, "rung" | "id">): RecipeEntry => ({
   label: over.id,
@@ -143,35 +137,15 @@ describe("planFiles: which laptop files travel and where they land", () => {
     expect(p.skipped).toEqual([]);
   });
 
-  it("a hand-installed script or ELF is the one tools row that travels: as a copy with its execute bit, an ELF with its arch; a macOS binary's row does not", () => {
+  it("a tools row never travels as a file, whatever paths it carries", () => {
     const p = plan([
-      row({ rung: "tools", id: "tools/hand/deploy", paths: ["~/.local/bin/deploy"], bytes: 18, linux: "unknown" }),
-      row({ rung: "tools", id: "tools/hand/agent", paths: ["~/.local/bin/agent"], bytes: 9_000_000, linux: "unknown", arch: "aarch64" }),
-      row({ rung: "tools", id: "tools/hand/omp", paths: ["~/.local/bin/omp"], bytes: 122_000_000, linux: "no", default: "skip", reason: "installed by hand; no Linux build known" }),
+      row({ rung: "tools", id: "tools/go/gopls", paths: ["golang.org/x/tools/gopls@v0.16.2"] }),
+      row({ rung: "tools", id: "tools/nix-home-manager", paths: ["~/.config/home-manager"] }),
+      row({ rung: "tools", id: "tools/hand/deploy", paths: ["~/.local/bin/deploy"], linux: "yes" }),
     ]);
-    expect(p.files).toEqual([
-      { id: "tools/hand/deploy", source: `${HOME}/.local/bin/deploy`, dest: ".local/bin/deploy", mode: 0o755, dir: false, excludes: [], volatile: false },
-      { id: "tools/hand/agent", source: `${HOME}/.local/bin/agent`, dest: ".local/bin/agent", mode: 0o755, dir: false, excludes: [], volatile: false, arch: "aarch64" },
-    ]);
-    expect(p.rungs).toEqual({ tools: 2 });
+    expect(p.files).toEqual([]);
     expect(p.skipped).toEqual([]);
-  });
-
-  it("forGuest sets aside a copy built for another arch than the machine's, or for any arch when the machine's could not be read", () => {
-    const p = plan([
-      row({ rung: "tools", id: "tools/hand/deploy", paths: ["~/.local/bin/deploy"], bytes: 18, linux: "unknown" }),
-      row({ rung: "tools", id: "tools/hand/agent", paths: ["~/.local/bin/agent"], bytes: 9_000_000, linux: "unknown", arch: "aarch64" }),
-    ]);
-    const same = forGuest(p, { arch: "aarch64" }, HOME);
-    expect(same.files.map(f => f.id)).toEqual(["tools/hand/deploy", "tools/hand/agent"]);
-    expect(same.skipped).toEqual([]);
-    const other = forGuest(p, { arch: "x86_64" }, HOME);
-    expect(other.files.map(f => f.id)).toEqual(["tools/hand/deploy"]);
-    expect(other.skipped).toEqual([{ id: "tools/hand/agent", path: "~/.local/bin/agent", note: "built for aarch64; the machine is x86_64" }]);
-    const unread = forGuest(p, {}, HOME);
-    expect(unread.files.map(f => f.id)).toEqual(["tools/hand/deploy"]);
-    expect(unread.skipped).toEqual([{ id: "tools/hand/agent", path: "~/.local/bin/agent", note: "built for aarch64; the machine's architecture could not be read" }]);
-    expect(p.files).toHaveLength(2);
+    expect(p.rungs).toEqual({});
   });
 
   it("a login chosen as copy travels with its mode", () => {
@@ -221,26 +195,26 @@ describe("planFiles: which laptop files travel and where they land", () => {
   it("a row whose file no longer exists is skipped with a note; a path outside ~ too", () => {
     const p = plan([
       row({ rung: "shell", id: "shell/bashrc", paths: ["~/.bashrc"] }),
-      row({ rung: "editors", id: "editors/etc", paths: ["/etc/vimrc"] }),
+      row({ rung: "shell", id: "shell/etc", paths: ["/etc/vimrc"] }),
     ]);
     expect(p.files).toEqual([]);
     expect(p.skipped).toEqual([
       { id: "shell/bashrc", path: "~/.bashrc", note: "no longer on this computer" },
-      { id: "editors/etc", path: "/etc/vimrc", note: "not under your home directory" },
+      { id: "shell/etc", path: "/etc/vimrc", note: "not under your home directory" },
     ]);
   });
 
   it("rewrites macOS library paths to their Linux XDG homes, and applies the caller's rewrites first", () => {
     const p = plan(
       [
-        row({ rung: "editors", id: "editors/cursor", paths: ["~/Library/Application Support/Cursor/User/settings.json"] }),
+        row({ rung: "shell", id: "shell/cursor", paths: ["~/Library/Application Support/Cursor/User/settings.json"] }),
         row({ rung: "logins", id: "logins/wrangler", paths: ["~/Library/Preferences/.wrangler/config/default.toml"], choice: "copy" }),
         row({ rung: "agents", id: "agents/claude", paths: ["~/.claude/settings.json", "~/.claude.json"] }),
       ],
       { rewrites: [[".claude/", ".claude-cfg/"], [".claude.json", ".claude-cfg/.claude.json"]] },
     );
     expect(p.files.map(f => f.dest)).toEqual([
-      ".cursor-server/data/Machine/settings.json",
+      ".config/Cursor/User/settings.json",
       ".config/.wrangler/config/default.toml",
       ".claude-cfg/settings.json",
       ".claude-cfg/.claude.json",
@@ -248,23 +222,6 @@ describe("planFiles: which laptop files travel and where they land", () => {
     // A row that names the directory itself moves with it; the guest's config dir is what CLAUDE_CONFIG_DIR reads.
     const bare = plan([row({ rung: "agents", id: "agents/claude", paths: ["~/.claude"] })], { rewrites: [[".claude/", ".claude-cfg/"]] });
     expect(bare.files.map(f => [f.dest, f.dir])).toEqual([[".claude-cfg", true]]);
-  });
-
-  it("an editor's settings.json lands where its remote server reads machine settings, from either laptop", () => {
-    const mac = plan([row({ rung: "editors", id: "editors/vscode", paths: ["~/Library/Application Support/Code/User/settings.json"] })]);
-    expect(mac.files.map(f => f.dest)).toEqual([".vscode-server/data/Machine/settings.json"]);
-    const linux = plan(
-      [row({ rung: "editors", id: "editors/vscode", paths: ["~/.config/Code/User/settings.json"] }), row({ rung: "editors", id: "editors/cursor", paths: ["~/.config/Cursor/User/settings.json"] })],
-      { platform: "linux" },
-    );
-    expect(linux.files.map(f => f.dest)).toEqual([".vscode-server/data/Machine/settings.json", ".cursor-server/data/Machine/settings.json"]);
-    const insiders = plan([
-      row({ rung: "editors", id: "editors/vscode-insiders", paths: ["~/Library/Application Support/Code - Insiders/User/settings.json"] }),
-      row({ rung: "editors", id: "editors/zed", paths: ["~/.config/zed"] }),
-    ]);
-    expect(insiders.files.map(f => [f.dest, f.dir])).toEqual([[".vscode-server-insiders/data/Machine/settings.json", false], [".config/zed", true]]);
-    // The path is the remote server's: `--server-data-dir` defaults to ~/.vscode-server, its user data to data/ under it.
-    expect(remoteSettingsPath(".vscode-server")).toBe(".vscode-server/data/Machine/settings.json");
   });
 
   it("a Keychain item becomes a secret to read at pack time on macOS, and a skip note elsewhere", () => {
@@ -561,14 +518,13 @@ describe("recipeDigest and recipeHash", () => {
 });
 
 describe("brewfileFor", () => {
-  it("lists ticked taps and formulae with a Linux bottle; unknown and macOS-only ones are noted, casks never", () => {
+  it("lists ticked taps and formulae with a Linux bottle; unknown and macOS-only ones are noted", () => {
     const b = brewfileFor([
       row({ rung: "tools", id: "tools/brew-tap/zingzy/tap", linux: "yes" }),
       row({ rung: "tools", id: "tools/brew/gh", linux: "yes" }),
       row({ rung: "tools", id: "tools/brew/jq", linux: "yes", bring: false }),
       row({ rung: "tools", id: "tools/brew/zingzy/tap/diskbloom", linux: "unknown" }),
       row({ rung: "tools", id: "tools/brew/mas", linux: "no", bring: true }),
-      row({ rung: "tools", id: "tools/brew-cask/rectangle", linux: "no", bring: true }),
       row({ rung: "tools", id: "tools/brew/bat" }),
     ]);
     expect(b.text).toBe(['tap "zingzy/tap"', 'brew "gh"', 'brew "bat"', ""].join("\n"));
@@ -577,19 +533,7 @@ describe("brewfileFor", () => {
     expect(b.skipped).toEqual([
       { id: "tools/brew/zingzy/tap/diskbloom", note: "no Linux bottle known" },
       { id: "tools/brew/mas", note: "no Linux bottle" },
-      { id: "tools/brew-cask/rectangle", note: "macOS app, no Linux build" },
     ]);
-  });
-
-  it("a hand-installed row is no install: a locked row is noted as skipped with its own reason, a copied script is neither installed nor skipped here", () => {
-    const t = toolInstallsFor([
-      row({ rung: "tools", id: "tools/hand/omp", linux: "no", default: "skip", reason: "installed by hand; no Linux build known" }),
-      row({ rung: "tools", id: "tools/hand/blob", linux: "no", default: "skip", reason: "installed by hand; no recognised format" }),
-      row({ rung: "tools", id: "tools/hand/deploy", paths: ["~/.local/bin/deploy"], bytes: 18, linux: "unknown" }),
-    ]);
-    expect(t.installs).toEqual([]);
-    expect(t.skipped).toEqual([{ id: "tools/hand/omp", note: "installed by hand; no Linux build known" }, { id: "tools/hand/blob", note: "installed by hand; no recognised format" }]);
-    expect(toolUninstall(row({ rung: "tools", id: "tools/hand/deploy" }))).toEqual({ note: "a copied file; it comes off with the files" });
   });
 
   it("is empty when nothing Homebrew is ticked", () => {
@@ -704,7 +648,7 @@ describe("toolInstallsFor", () => {
     expect(t.installs.find(i => i.id === "tools/uv/ty")!.cmd).toMatch(/uv tool install ty$/);
   });
 
-  it("rows the base floor covers install nothing and are listed as the base's, whatever road the Mac had them by; a hand copy still travels", () => {
+  it("rows the base floor covers install nothing and are listed as the base's, whatever road the Mac had them by", () => {
     // Homebrew's node is the current major and its python the current 3.x: the Mac's versions come from the brew table.
     const table: BrewTable = new Map([
       ["node", { name: "node", fullName: "node", deps: [], macosOnly: false, version: "24.1.0" }],
@@ -719,10 +663,8 @@ describe("toolInstallsFor", () => {
       row({ rung: "tools", id: "tools/brew/python", linux: "yes" }),
       row({ rung: "tools", id: "tools/brew/uv", linux: "yes" }),
       row({ rung: "tools", id: "tools/cargo/ripgrep", label: "ripgrep", version: "14.1.0" }),
-      row({ rung: "tools", id: "tools/brew-cask/docker", linux: "no" }),
       row({ rung: "tools", id: "tools/brew/docker-compose", linux: "yes" }),
       row({ rung: "tools", id: "tools/brew/python@3.14", linux: "yes" }),
-      row({ rung: "tools", id: "tools/hand/jq", label: "jq", paths: ["~/.local/bin/jq"], linux: "yes" }),
     ], table);
     expect(t.base).toEqual([
       { id: "tools/brew/jq", name: "jq", note: "jq is part of the base" },
@@ -732,7 +674,6 @@ describe("toolInstallsFor", () => {
       { id: "tools/brew/python", name: "Python 3.12", note: "Python 3.12 is part of the base; this Mac runs Python 3.14" },
       { id: "tools/brew/uv", name: "uv", note: "uv is part of the base" },
       { id: "tools/cargo/ripgrep", name: "ripgrep", note: "ripgrep is part of the base" },
-      { id: "tools/brew-cask/docker", name: "Docker engine and compose", note: "Docker engine and compose is part of the base" },
       { id: "tools/brew/docker-compose", name: "Docker engine and compose", note: "Docker engine and compose is part of the base" },
     ]);
     // A row with no table entry and no version says the base row alone; a versioned row on the floor's major does too.
@@ -742,7 +683,6 @@ describe("toolInstallsFor", () => {
     expect(t.skipped).toEqual([]);
     expect(t.brewfile).toBe('brew "python@3.14"\n');
     expect(toolUninstall(row({ rung: "tools", id: "tools/brew/jq" }))).toEqual({ note: "jq is part of the base and stays" });
-    expect(toolUninstall(row({ rung: "tools", id: "tools/hand/jq" }))).toEqual({ note: "a copied file; it comes off with the files" });
   });
 
   it("one formula has nothing to share, so no shared step; two get one between the taps and the first formula", () => {
@@ -855,142 +795,34 @@ describe("catalog rows", () => {
   });
 });
 
-describe("command-line tool rows", () => {
-  const spoo = row({ rung: "tools", id: "tools/cli/spoo", label: "spoo", paths: ["github.com/spoo-me/spoo-cli@v0.4.1", "github.com/spoo-me/spoo-cli/cmd/spoo@v0.3.0"], version: "0.4.1" });
-
-  it("a CLI row takes the road: the release named by its first path, the module in its last path as the go fallback; one with no release is skipped", () => {
-    const b = brewfileFor([spoo, row({ rung: "tools", id: "tools/cli/ngrok", label: "ngrok" })]);
-    expect(b.roads).toEqual([{ id: "tools/cli/spoo", name: "spoo", source: { repo: "spoo-me/spoo-cli", tag: "v0.4.1" }, go: "github.com/spoo-me/spoo-cli/cmd/spoo@v0.3.0" }]);
-    expect(b.skipped).toEqual([{ id: "tools/cli/ngrok", note: "no GitHub release to install from" }]);
-    expect(b.text).toBe("");
-  });
-
-  it("the install fetches the release's Linux asset first and falls back to go install of the module; the command's name is on the step for the check after the stage", () => {
-    const t = toolInstallsFor([spoo, row({ rung: "tools", id: "tools/go/gopls", label: "gopls", paths: ["golang.org/x/tools/gopls@v0.16.2"], version: "v0.16.2" })]);
-    const step = t.installs.at(-1)!;
-    expect(step).toMatchObject({ id: "tools/cli/spoo", label: "spoo", manager: "release", bin: "spoo" });
-    expect(step.after).toBeUndefined();
-    expect(step.cmd).toContain("https://api.github.com/repos/spoo-me/spoo-cli/releases/tags/v0.4.1");
-    expect(step.cmd).toContain('install -m 0755 "$bin" "/usr/local/bin/$name"');
-    expect(step.cmd).toContain("GOBIN=/usr/local/bin go install 'github.com/spoo-me/spoo-cli/cmd/spoo@v0.3.0'");
-    expect(step.cmd).not.toContain('[ "$sum" =');
-    // A Go row names its binary too; a formula does not, its command rarely being its name.
-    expect(t.installs.find(i => i.id === "tools/go/gopls")).toMatchObject({ bin: "gopls" });
-    expect(t.installs.find(i => i.id === "tools/manager/go")).not.toHaveProperty("bin");
-    expect(t.installs.map(i => i.id).indexOf("tools/cli/spoo")).toBeGreaterThan(t.installs.map(i => i.id).indexOf("tools/go/gopls"));
-  });
-
-  it("a pin for the same tag is checked; one for another tag is not; a row with one path installs the repository itself with go", () => {
-    const pinned = toolInstallsFor([{ ...spoo, pin: { tag: "v0.4.1", sha256: "c".repeat(64) } }]).installs.at(-1)!;
-    expect(pinned.cmd).toContain(`[ "$sum" = '${"c".repeat(64)}' ]`);
-    const moved = toolInstallsFor([{ ...spoo, pin: { tag: "v0.4.0", sha256: "c".repeat(64) } }]).installs.at(-1)!;
-    expect(moved.cmd).not.toContain('[ "$sum" =');
-    const alone = toolInstallsFor([{ ...spoo, paths: ["github.com/spoo-me/spoo-cli@v0.4.1"] }]).installs.at(-1)!;
-    expect(alone.cmd).toContain("go install 'github.com/spoo-me/spoo-cli@v0.4.1'");
-  });
-
+describe("tap formulae on the release road", () => {
   it("a tap formula on the road names its binary too", () => {
     const table: BrewTable = new Map([["zingzy/tap/diskbloom", { name: "diskbloom", fullName: "zingzy/tap/diskbloom", deps: [], macosOnly: false, source: { repo: "Zingzy/diskbloom", tag: "v0.1.0" } }]]);
     const t = toolInstallsFor([row({ rung: "tools", id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", linux: "unknown" })], table);
-    expect(t.installs.at(-1)).toMatchObject({ id: "tools/brew/zingzy/tap/diskbloom", manager: "release", bin: "diskbloom" });
-    expect(t.installs.at(-1)!.cmd).not.toContain("mv '/usr/local/bin/");
+    const step = t.installs.at(-1)!;
+    expect(step).toMatchObject({ id: "tools/brew/zingzy/tap/diskbloom", manager: "release", bin: "diskbloom" });
+    expect(step.after).toBeUndefined();
+    expect(step.cmd).toContain("https://api.github.com/repos/Zingzy/diskbloom/releases/tags/v0.1.0");
+    expect(step.cmd).toContain('install -m 0755 "$bin" "/usr/local/bin/$name"');
+    expect(step.cmd).toContain("GOBIN=/usr/local/bin go install 'github.com/Zingzy/diskbloom@v0.1.0'");
+    expect(step.cmd).not.toContain("mv '/usr/local/bin/");
+    expect(step.cmd).not.toContain('[ "$sum" =');
   });
 
-  it("the go fallback lands under the row's command: a module whose last element is another name is moved there, on a CLI row and a tap road alike; a /vN module suffix is not the name", () => {
-    const alone = toolInstallsFor([{ ...spoo, paths: ["github.com/spoo-me/spoo-cli@v0.4.1"] }]).installs.at(-1)!;
-    expect(alone.cmd).toContain(`GOBIN=/usr/local/bin go install 'github.com/spoo-me/spoo-cli@v0.4.1'\n  mv '/usr/local/bin/spoo-cli' "/usr/local/bin/$name"\n  echo "WSP_ROAD go "`);
-    const folded = toolInstallsFor([spoo]).installs.at(-1)!;
-    expect(folded.cmd).toContain(`go install 'github.com/spoo-me/spoo-cli/cmd/spoo@v0.3.0'\n  echo "WSP_ROAD go "`);
-    expect(folded.cmd).not.toContain("mv '/usr/local/bin/");
-    const v2 = toolInstallsFor([{ ...spoo, paths: ["github.com/spoo-me/spoo-cli@v2.0.0", "github.com/spoo-me/spoo/v2@v2.0.0"] }]).installs.at(-1)!;
-    expect(v2.cmd).not.toContain("mv '/usr/local/bin/");
+  it("a pin for the same tag is checked; one for another tag is not", () => {
+    const table: BrewTable = new Map([["zingzy/tap/diskbloom", { name: "diskbloom", fullName: "zingzy/tap/diskbloom", deps: [], macosOnly: false, source: { repo: "Zingzy/diskbloom", tag: "v0.1.0" } }]]);
+    const road = (pin: { tag: string; sha256: string }) => toolInstallsFor([row({ rung: "tools", id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", linux: "unknown", pin })], table).installs.at(-1)!;
+    expect(road({ tag: "v0.1.0", sha256: "c".repeat(64) }).cmd).toContain(`[ "$sum" = '${"c".repeat(64)}' ]`);
+    expect(road({ tag: "v0.0.9", sha256: "c".repeat(64) }).cmd).not.toContain('[ "$sum" =');
+  });
+
+  it("the go fallback lands under the row's command: a module whose last element is another name is moved there; a /vN module suffix is not the name", () => {
     const table: BrewTable = new Map([["spoo-me/tap/spoo", { name: "spoo", fullName: "spoo-me/tap/spoo", deps: [], macosOnly: false, source: { repo: "spoo-me/spoo-cli", tag: "v0.4.1" } }]]);
     const tap = toolInstallsFor([row({ rung: "tools", id: "tools/brew/spoo-me/tap/spoo", label: "spoo", linux: "unknown" })], table).installs.at(-1)!;
     expect(tap).toMatchObject({ manager: "release", bin: "spoo" });
-    expect(tap.cmd).toContain(`mv '/usr/local/bin/spoo-cli' "/usr/local/bin/$name"`);
-  });
-});
-
-describe("editorInstallsFor", () => {
-  it("installs each ticked terminal editor: apt for neovim, vim and emacs, helix from its pinned release; unticked rows and config-only rows add nothing", () => {
-    const t = editorInstallsFor([
-      row({ rung: "editors", id: "editors/nvim", label: "neovim, installed with your config", paths: ["~/.config/nvim"] }),
-      row({ rung: "editors", id: "editors/helix", label: "helix, installed" }),
-      row({ rung: "editors", id: "editors/vim", label: "vim, installed with your config", paths: ["~/.vimrc"], bring: false }),
-      row({ rung: "editors", id: "editors/emacs", label: "emacs, installed with your config", paths: ["~/.emacs.d/init.el"] }),
-      row({ rung: "editors", id: "editors/vscode", label: "VS Code settings, for VS Code over SSH", paths: ["~/.config/Code/User/settings.json"] }),
-    ]);
-    expect(t.installs.map(i => [i.id, i.label, i.manager])).toEqual([
-      ["editors/nvim", "neovim", "apt"],
-      ["editors/helix", "helix", "release"],
-      ["editors/emacs", "emacs", "apt"],
-    ]);
-    const cmd = (id: string) => t.installs.find(i => i.id === id)!.cmd;
-    expect(cmd("editors/nvim")).toContain("command -v nvim >/dev/null 2>&1 ||");
-    expect(cmd("editors/nvim")).toContain("apt-get install -y -qq neovim");
-    expect(cmd("editors/emacs")).toContain("apt-get install -y -qq emacs-nox");
-    // Helix ships as a tarball with its runtime beside the binary, so it is unpacked whole and linked onto PATH.
-    expect(cmd("editors/helix")).toContain(`https://github.com/helix-editor/helix/releases/download/${HELIX.version}/$pkg`);
-    expect(cmd("editors/helix")).toContain(`x86_64) pkg=helix-${HELIX.version}-x86_64-linux.tar.xz sha=${HELIX.sha256.x86_64}`);
-    expect(cmd("editors/helix")).toContain(`aarch64) pkg=helix-${HELIX.version}-aarch64-linux.tar.xz sha=${HELIX.sha256.aarch64}`);
-    expect(cmd("editors/helix")).toContain("sha256sum -c -");
-    expect(cmd("editors/helix")).toContain("ln -sfn /opt/helix/hx /usr/local/bin/hx");
-    for (const i of t.installs) {
-      expect(i.cmd).toContain("set -euo pipefail");
-      expect(i.cmd).not.toMatch(/curl[^\n]*\|\s*(ba)?sh/);
-    }
-  });
-
-  it("the ticked extensions of each remote editor are written as one list file for the person to apply from the editor's terminal", () => {
-    const t = editorInstallsFor([
-      row({ rung: "editors", id: "editors/vscode-ext/ms-python.python", label: "ms-python.python" }),
-      row({ rung: "editors", id: "editors/vscode-ext/esbenp.prettier-vscode", label: "esbenp.prettier-vscode" }),
-      row({ rung: "editors", id: "editors/vscode-ext/left.out", label: "left.out", bring: false }),
-      row({ rung: "editors", id: "editors/cursor-ext/anysphere.cursorpyright", label: "anysphere.cursorpyright" }),
-    ]);
-    expect(t.installs.map(i => [i.id, i.label, i.manager])).toEqual([
-      ["editors/vscode-ext", "VS Code extension list", "script"],
-      ["editors/cursor-ext", "Cursor extension list", "script"],
-    ]);
-    const vscode = t.installs[0]!.cmd;
-    expect(vscode).toContain(`mkdir -p "$HOME/.vscode-server"`);
-    expect(vscode).toContain(`printf '%s\\n' 'ms-python.python' 'esbenp.prettier-vscode' > "$HOME/${extensionsFile(".vscode-server")}"`);
-    expect(vscode).not.toContain("left.out");
-    expect(t.installs[1]!.cmd).toContain(`'anysphere.cursorpyright' > "$HOME/.cursor-server/extensions.txt"`);
-    expect(remoteEditorFor("editors/cursor-ext/anysphere.cursorpyright")).toEqual({ name: "Cursor", dir: ".cursor-server", cli: "cursor" });
-    expect(remoteEditorFor("editors/vscode")).toEqual({ name: "VS Code", dir: ".vscode-server", cli: "code" });
-    expect(remoteEditorFor("editors/nvim")).toBeUndefined();
-  });
-
-  it("VS Code Insiders has its own server directory; Zed's row is its files alone, no server writes anything for it", () => {
-    const insiders = { name: "VS Code Insiders", dir: ".vscode-server-insiders", cli: "code-insiders" };
-    expect(remoteEditorFor("editors/vscode-insiders")).toEqual(insiders);
-    expect(remoteEditorFor("editors/vscode-insiders-ext")).toEqual(insiders);
-    expect(remoteEditorFor("editors/vscode-insiders-ext/ms-python.python")).toEqual(insiders);
-    expect(remoteEditorFor("editors/zed")).toBeUndefined();
-    const t = editorInstallsFor([
-      row({ rung: "editors", id: "editors/vscode-insiders-ext/ms-python.python", label: "ms-python.python" }),
-      row({ rung: "editors", id: "editors/vscode-ext/esbenp.prettier-vscode", label: "esbenp.prettier-vscode" }),
-      row({ rung: "editors", id: "editors/zed", label: "Zed settings, for Zed over SSH", paths: ["~/.config/zed"] }),
-    ]);
-    expect(t.installs.map(i => [i.id, i.label])).toEqual([
-      ["editors/vscode-ext", "VS Code extension list"],
-      ["editors/vscode-insiders-ext", "VS Code Insiders extension list"],
-    ]);
-    expect(t.installs[1]!.cmd).toContain(`printf '%s\\n' 'ms-python.python' > "$HOME/.vscode-server-insiders/extensions.txt"`);
-    expect(t.installs[0]!.cmd).not.toContain("ms-python.python");
-  });
-
-  it("an extension id that is not publisher.name is left out of the list rather than run", () => {
-    const t = editorInstallsFor([row({ rung: "editors", id: "editors/vscode-ext/$(rm -rf /)", label: "odd" }), row({ rung: "editors", id: "editors/vscode-ext/ok.ext", label: "ok.ext" })]);
-    expect(t.installs).toHaveLength(1);
-    expect(t.installs[0]!.cmd).toContain("'ok.ext'");
-    expect(t.installs[0]!.cmd).not.toContain("rm -rf");
-    expect(t.skipped).toEqual([{ id: "editors/vscode-ext/$(rm -rf /)", note: "not an extension id" }]);
-  });
-
-  it("with nothing ticked there is nothing to install", () => {
-    expect(editorInstallsFor([row({ rung: "tools", id: "tools/brew/gh", linux: "yes" })])).toEqual({ installs: [], skipped: [] });
+    expect(tap.cmd).toContain(`GOBIN=/usr/local/bin go install 'github.com/spoo-me/spoo-cli@v0.4.1'\n  mv '/usr/local/bin/spoo-cli' "/usr/local/bin/$name"\n  echo "WSP_ROAD go "`);
+    const v2: BrewTable = new Map([["spoo-me/tap/spoo", { name: "spoo", fullName: "spoo-me/tap/spoo", deps: [], macosOnly: false, source: { repo: "spoo-me/spoo/v2", tag: "v2.0.0" } }]]);
+    expect(toolInstallsFor([row({ rung: "tools", id: "tools/brew/spoo-me/tap/spoo", label: "spoo", linux: "unknown" })], v2).installs.at(-1)!.cmd).not.toContain("mv '/usr/local/bin/");
   });
 });
 
@@ -1165,123 +997,5 @@ describe("shellInstallFor", () => {
       expect(repo.branch).toMatch(/^(main|master)$/);
       expect(repo.home).not.toMatch(/^[~/]/);
     }
-  });
-});
-
-describe("casks that are commands with a Linux release of their own", () => {
-  const gcloud = (over: Partial<RecipeEntry> = {}) => row({ rung: "tools", id: "tools/brew-cask/gcloud-cli", label: "gcloud-cli", ...over });
-  const docker = (over: Partial<RecipeEntry> = {}) => row({ rung: "tools", id: "tools/brew-cask/docker-desktop", label: "docker-desktop", ...over });
-  const PIN = { tag: "575.0.0", sha256: "b".repeat(64) };
-
-  it("the table knows gcloud-cli by its cask tokens or its command row, and docker-desktop for the kubectl it ships; an app cask is not in it", () => {
-    expect(linuxCaskFor("tools/brew-cask/gcloud-cli")?.bin).toBe("gcloud");
-    expect(linuxCaskFor("tools/cli/gcloud")?.bin).toBe("gcloud");
-    expect(linuxCaskFor("tools/cli/ngrok")).toBeUndefined();
-    expect(linuxCaskFor("tools/brew-cask/google-cloud-sdk")?.bin).toBe("gcloud");
-    expect(linuxCaskFor("tools/brew-cask/docker-desktop")?.bin).toBe("kubectl");
-    expect(linuxCaskFor("tools/brew-cask/rectangle")).toBeUndefined();
-    expect(linuxCaskFor("tools/brew/gcloud-cli")).toBeUndefined();
-    expect(linuxCaskByBin("kubectl")?.casks).toEqual(["docker-desktop", "docker"]);
-    for (const c of LINUX_CASKS) {
-      expect(c.from).not.toMatch(/[()]/);
-      expect(c.detail.length).toBeLessThanOrEqual(76);
-    }
-  });
-
-  it("brewfileFor sets a known cask aside for the install step instead of skipping it, as a cask row or as the command row the collector makes of it; an app cask and a command cask without a release are still skipped", () => {
-    const b = brewfileFor([gcloud(), row({ rung: "tools", id: "tools/cli/gcloud", label: "gcloud (gcloud-cli)", version: "575.0.0" }), row({ rung: "tools", id: "tools/brew-cask/rectangle" }), row({ rung: "tools", id: "tools/cli/ngrok" })]);
-    expect(b.roads).toEqual([]);
-    expect(b.skipped).toEqual([{ id: "tools/brew-cask/rectangle", note: "macOS app, no Linux build" }, { id: "tools/cli/ngrok", note: "no GitHub release to install from" }]);
-  });
-
-  it("the command row of gcloud-cli installs from Google's release at the Mac's version, named for its command so the PATH check covers it", () => {
-    const t = toolInstallsFor([row({ rung: "tools", id: "tools/cli/gcloud", label: "gcloud (gcloud-cli)", version: "575.0.0" })]);
-    expect(t.installs.map(i => [i.id, i.manager, i.bin])).toEqual([["tools/cli/gcloud", "vendor", "gcloud"]]);
-    expect(t.installs[0]!.cmd).toContain("ver='575.0.0'");
-    expect(toolUninstall(row({ rung: "tools", id: "tools/cli/gcloud" }))).toEqual({ cmd: expect.stringContaining("rm -rf /opt/google-cloud-sdk") });
-  });
-
-  it("gcloud installs Google's tarball for the Mac's version, links its commands into /usr/local/bin and prints the WSP_ROAD line with the sum and the version", () => {
-    const t = toolInstallsFor([gcloud({ version: "575.0.0" })]);
-    expect(t.installs.map(i => [i.id, i.manager, i.after, i.bin])).toEqual([["tools/brew-cask/gcloud-cli", "vendor", undefined, "gcloud"]]);
-    const cmd = t.installs[0]!.cmd;
-    expect(cmd).toContain("set -euo pipefail");
-    expect(cmd).toContain("ver='575.0.0'");
-    expect(cmd).toContain('pkg="google-cloud-cli-$ver-linux-$a.tar.gz"');
-    expect(cmd).toContain('"https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/$pkg"');
-    expect(cmd).toMatch(/x86_64\) a=x86_64 ;; aarch64\) a=arm ;;/);
-    expect(cmd).toContain(`[ "$a" != arm ] || command -v python3 >/dev/null || { echo "Error: gcloud on arm needs python3 on the machine; Google's arm tarball bundles none" >&2; exit 1; }`);
-    expect(cmd).toContain("ln -sf /opt/google-cloud-sdk/bin/gcloud /usr/local/bin/gcloud");
-    expect(cmd).toContain('echo "WSP_ROAD release $pkg $sum $ver"');
-    expect(cmd).not.toContain("does not match");
-    expect(cmd).not.toContain("components-2.json");
-  });
-
-  it("without a Mac version and without a pin the current version is read from Google's component list; a pin alone fixes the version to the pinned one", () => {
-    const fresh = toolInstallsFor([gcloud()]).installs[0]!.cmd;
-    expect(fresh).toContain("https://dl.google.com/dl/cloudsdk/channels/rapid/components-2.json");
-    expect(fresh).toContain('[ -n "$ver" ] ||');
-    const pinned = toolInstallsFor([gcloud({ pin: PIN })]).installs[0]!.cmd;
-    expect(pinned).toContain("ver='575.0.0'");
-    expect(pinned).toContain(`[ "$sum" = '${PIN.sha256}' ] ||`);
-    expect(pinned).not.toContain("components-2.json");
-  });
-
-  it("gcloud across two runs: the first records, the second checks while the Mac's version is the recorded one, and re-records once it moved", () => {
-    const cask = linuxCaskFor("tools/brew-cask/gcloud-cli")!;
-    expect(caskPinState(cask, gcloud({ version: "575.0.0" }))).toBe("none");
-    expect(caskPinState(cask, gcloud({ pin: PIN }))).toBe("same");
-    expect(caskPinState(cask, gcloud({ version: "575.0.0", pin: PIN }))).toBe("same");
-    const same = toolInstallsFor([gcloud({ version: "575.0.0", pin: PIN })]).installs[0]!.cmd;
-    expect(same).toContain(`[ "$sum" = '${PIN.sha256}' ] || { echo "Error: $pkg does not match the checksum recorded on the first install of $ver" >&2; exit 1; }`);
-    expect(caskPinState(cask, gcloud({ version: "583.0.0", pin: PIN }))).toBe("moved");
-    const moved = toolInstallsFor([gcloud({ version: "583.0.0", pin: PIN })]).installs[0]!.cmd;
-    expect(moved).toContain("ver='583.0.0'");
-    expect(moved).not.toContain("does not match");
-  });
-
-  it("kubectl across two runs: Docker's version never names the release, so the second run checks the recorded sum whatever Docker moved to", () => {
-    const cask = linuxCaskFor("tools/brew-cask/docker-desktop")!;
-    const pin = { tag: "v1.37.0", sha256: "c".repeat(64) };
-    expect(caskPinState(cask, docker({ version: "4.80.0,232116" }))).toBe("none");
-    expect(caskPinState(cask, docker({ version: "4.80.0,232116", pin }))).toBe("same");
-    expect(caskPinState(cask, docker({ version: "4.81.0,240001", pin }))).toBe("same");
-    const cmd = toolInstallsFor([docker({ version: "4.81.0,240001", pin })]).installs[0]!.cmd;
-    expect(cmd).toContain("ver='v1.37.0'");
-    expect(cmd).toContain(`[ "$sum" = '${pin.sha256}' ] ||`);
-    expect(cmd).not.toContain("4.81.0");
-  });
-
-  it("a command row that already goes out as a GitHub road installs once, as the road, not again from the cask table", () => {
-    const t = toolInstallsFor([row({ rung: "tools", id: "tools/cli/kubectl", label: "kubectl", paths: ["github.com/kubernetes/kubernetes@v1.37.0"] })]);
-    expect(t.installs.map(i => [i.id, i.manager])).toEqual([["tools/cli/kubectl", "release"]]);
-  });
-
-  it("docker-desktop brings kubectl alone: the static binary at the stable version, checked against the published sum; a pin fixes the version and adds its own check", () => {
-    const fresh = toolInstallsFor([docker({ version: "4.80.0,232116" })]).installs[0]!;
-    expect(fresh.manager).toBe("vendor");
-    expect(fresh.cmd).toContain('ver="$(curl -fsSL https://dl.k8s.io/release/stable.txt)"');
-    expect(fresh.cmd).not.toContain("4.80.0");
-    expect(fresh.cmd).toContain('url="https://dl.k8s.io/release/$ver/bin/linux/$a/kubectl"');
-    expect(fresh.cmd).toMatch(/x86_64\) a=amd64 ;; aarch64\) a=arm64 ;;/);
-    expect(fresh.cmd).toContain('echo "$(cat "$tmp/kubectl.sha256")  $tmp/kubectl" | sha256sum -c - >/dev/null');
-    expect(fresh.cmd).toContain('install -m 0755 "$tmp/kubectl" /usr/local/bin/kubectl');
-    expect(fresh.cmd).toContain('echo "WSP_ROAD release kubectl-$ver-linux-$a $sum $ver"');
-    const pinned = toolInstallsFor([docker({ version: "4.80.0,232116", pin: { tag: "v1.37.0", sha256: "c".repeat(64) } })]).installs[0]!.cmd;
-    expect(pinned).toContain("ver='v1.37.0'");
-    expect(pinned).not.toContain("stable.txt");
-    expect(pinned).toContain(`[ "$sum" = '${"c".repeat(64)}' ] || { echo "Error: kubectl $ver does not match`);
-  });
-
-  it("an unticked known cask installs nothing; a ticked one comes last, after every manager", () => {
-    expect(toolInstallsFor([gcloud({ bring: false })]).installs).toEqual([]);
-    const t = toolInstallsFor([gcloud({ version: "575.0.0" }), row({ rung: "tools", id: "tools/npm/wrangler", label: "wrangler@4.106.0", version: "4.106.0" })]);
-    expect(t.installs.map(i => i.id)).toEqual(["tools/npm/wrangler", "tools/brew-cask/gcloud-cli"]);
-  });
-
-  it("a known cask comes off the machine by the table's command; an app cask was never there", () => {
-    expect(toolUninstall(gcloud())).toEqual({ cmd: expect.stringContaining("rm -rf /opt/google-cloud-sdk /usr/local/bin/gcloud /usr/local/bin/gsutil /usr/local/bin/bq") });
-    expect(toolUninstall(docker())).toEqual({ cmd: expect.stringContaining("rm -f /usr/local/bin/kubectl") });
-    expect(toolUninstall(row({ rung: "tools", id: "tools/brew-cask/rectangle" }))).toEqual({ note: "never installed on Linux" });
   });
 });

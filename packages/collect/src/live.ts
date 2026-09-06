@@ -2,11 +2,10 @@
 // Prints the manifest for the machine this runs on: JSON on stdout, a per-rung
 // count and size on stderr so the JSON can be piped as is.
 import { collect } from "./collect.js";
-import { nodeMachine } from "./everything/node-machine.js";
 import { nodeHost } from "./live-host.js";
 import { RUNGS } from "./manifest.js";
 
-const manifest = await collect(nodeHost(), { machine: nodeMachine() });
+const manifest = await collect(nodeHost());
 for (const rung of RUNGS) {
   const rows = manifest.entries.filter(e => e.rung === rung);
   const bytes = rows.reduce((n, e) => n + e.bytes, 0);

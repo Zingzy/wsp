@@ -6,8 +6,7 @@
 // and the wizard ask a module through roadModule(); nothing outside this file
 // decides by a road's name. Every line is text: nothing here runs a command.
 import { shellQuote } from "@wsp/protocol";
-import { caskVersion, type LinuxCask } from "./linux-casks.js";
-import type { InstallRoad, PackageRoad, RoadName, ToolPin } from "./roads.js";
+import { type InstallRoad, type PackageRoad, type RoadName, pinStateOf } from "./roads.js";
 
 type Road<K extends RoadName> = Extract<InstallRoad, { road: K }>;
 
@@ -43,7 +42,8 @@ const pinned = (pkg: string, version: string | undefined, sep: string): string =
 export const APT_INDEX = "apt-index";
 /** The pseudo step every formula waits on: Homebrew with its toolchain. */
 export const HOMEBREW_STEP = "homebrew";
-const APT_ENV = "export DEBIAN_FRONTEND=noninteractive";
+/** The one line every apt run exports, so no prompt can wait on a machine nobody types at. */
+export const APT_ENV = "export DEBIAN_FRONTEND=noninteractive";
 /** The index read, as the stage runs it before the first apt row. */
 export const APT_UPDATE = `${APT_ENV}\napt-get update -qq`;
 
@@ -151,20 +151,14 @@ const go: RoadModule<Road<"go">> = {
 
 // --- releases ------------------------------------------------------------------
 
-/** How an install stands against the recipe's pin: nothing recorded, the same version (checked), or a version the
- * source has since moved to (a first install again, re-recorded). Without a version the pin's own stands. */
-export function pinStateOf(version: string | undefined, pin: ToolPin | undefined): "none" | "same" | "moved" {
-  if (pin === undefined) return "none";
-  return version === undefined || version === pin.tag ? "same" : "moved";
-}
-
 /** A tool from its repository: the release asset built for this arch, unpacked and its binary put in
- * /usr/local/bin; with no Linux asset and go on the machine, `go install` of the module at the tag, moved to
- * the row's command when the module is named otherwise. The asset's sha256 is checked against the pin when
+ * /usr/local/bin; with no Linux asset and go on the machine, `go install` of the repository's module at the tag,
+ * moved to the row's command when the module is named otherwise. The asset's sha256 is checked against the pin when
  * the recipe has one for this tag, and printed with the tag on the WSP_ROAD line the stage reads either way,
  * so the first install of a tag records it. Without a tag the current release is fetched and its tag read. */
-function releaseInstall(name: string, repo: string, tag: string | undefined, pin: string | undefined, go = `github.com/${repo}@${tag ?? "latest"}`): string {
+function releaseInstall(name: string, repo: string, tag: string | undefined, pin: string | undefined): string {
   const api = tag === undefined ? `https://api.github.com/repos/${repo}/releases/latest` : `https://api.github.com/repos/${repo}/releases/tags/${tag}`;
+  const go = `github.com/${repo}@${tag ?? "latest"}`;
   const goBin = goBinary(go);
   return [
     "set -euo pipefail",
@@ -210,7 +204,7 @@ const release: RoadModule<Road<"release">> = {
     if (r.repo === undefined) return { note: "no GitHub release to install from" };
     // Without a version the pinned tag stands, as a vendor install does; a first install with neither takes the current release.
     const tag = r.version ?? r.pin?.tag;
-    return releaseInstall(bin, r.repo, tag, pinStateOf(tag, r.pin) === "same" ? r.pin!.sha256 : undefined, r.go);
+    return releaseInstall(bin, r.repo, tag, pinStateOf(tag, r.pin) === "same" ? r.pin!.sha256 : undefined);
   },
   uninstall: (_r, bin) => ({ cmd: `rm -f /usr/local/bin/${shellQuote(bin)}` }),
   names: () => [],
@@ -223,12 +217,6 @@ const vendor: RoadModule<Road<"vendor">> = {
   names: () => [],
   bin: r => r.cask.bin,
 };
-
-/** A cask's vendor road for a recipe row: fixed to the Mac's version when the cask's names the Linux build, with the row's pin. */
-export function vendorRoad(cask: LinuxCask, e: { version?: string; pin?: ToolPin }): Road<"vendor"> {
-  const version = caskVersion(cask, e);
-  return { road: "vendor", cask, ...(version !== undefined ? { version } : {}), ...(e.pin !== undefined ? { pin: e.pin } : {}) };
-}
 
 // --- the distro and plain scripts ----------------------------------------------
 

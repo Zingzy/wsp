@@ -15,12 +15,13 @@ import { LIVE, liveEnv } from "../../engine/test/live.js";
 
 const BIN = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
 
-// One dotfile and one non-Claude agent: enough to give the run four real stages without Homebrew.
-const MANIFEST = {
-  entries: [
-    { rung: "identity", id: "identity/git-user", label: "git name and email", paths: ["~/.gitconfig"], bytes: 40, default: "bring", required: true },
-    { rung: "agents", id: "agents/codex", label: "Codex", paths: ["~/.codex/config.toml"], bytes: 20, default: "bring" },
-  ],
+// One non-Claude agent on and no tool beyond the base: with the one dotfile the fake HOME holds, enough to give the
+// run four real stages without Homebrew.
+const RECIPE = {
+  version: 1,
+  at: "2026-09-06T00:00:00.000Z",
+  histories: [],
+  rows: [{ id: "codex", kind: "agent", on: true, source: { kind: "installed", paths: ["~/.codex/config.toml"], bin: false } }],
 };
 
 interface State {
@@ -52,9 +53,9 @@ describe.runIf(LIVE)("builder reuse across processes (live: wsp init twice on on
     await gone;
   };
 
-  const spawnInit = (manifestPath: string): { child: ChildProcess; output: string[] } => {
+  const spawnInit = (recipeFile: string): { child: ChildProcess; output: string[] } => {
     const output: string[] = [];
-    const child = spawn(process.execPath, [BIN, "init", "--manifest", manifestPath, "--yes", "--port", "0", "--ws-port", "0", "--state", statePath], {
+    const child = spawn(process.execPath, [BIN, "init", "--recipe", recipeFile, "--yes", "--port", "0", "--ws-port", "0", "--state", statePath], {
       cwd: home,
       env: { ...process.env, SOLARI_API_KEY: env.SOLARI_API_KEY, ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY, HOME: home, WSP_HOME: home },
       stdio: ["ignore", "pipe", "pipe"],
@@ -65,9 +66,9 @@ describe.runIf(LIVE)("builder reuse across processes (live: wsp init twice on on
     return { child, output };
   };
 
-  /** Runs `wsp init --manifest --yes` and resolves once `needle` is printed, with everything printed so far. */
-  const runInit = (manifestPath: string, needle = "This terminal reports the save."): { child: ChildProcess; handedOff: Promise<string> } => {
-    const { child, output } = spawnInit(manifestPath);
+  /** Runs `wsp init --recipe --yes` and resolves once `needle` is printed, with everything printed so far. */
+  const runInit = (recipeFile: string, needle = "This terminal reports the save."): { child: ChildProcess; handedOff: Promise<string> } => {
+    const { child, output } = spawnInit(recipeFile);
     const handedOff = new Promise<string>((resolve, reject) => {
       const check = (): void => {
         if (output.join("").includes(needle)) resolve(output.join(""));
@@ -79,10 +80,10 @@ describe.runIf(LIVE)("builder reuse across processes (live: wsp init twice on on
     return { child, handedOff };
   };
 
-  /** Runs `wsp init --manifest --yes` to its exit; one that starts serving instead is stopped and reported as such. */
-  const runToExit = (manifestPath: string): Promise<{ code: number | null; output: string }> =>
+  /** Runs `wsp init --recipe --yes` to its exit; one that starts serving instead is stopped and reported as such. */
+  const runToExit = (recipeFile: string): Promise<{ code: number | null; output: string }> =>
     new Promise(resolve => {
-      const { child, output } = spawnInit(manifestPath);
+      const { child, output } = spawnInit(recipeFile);
       const onData = (): void => {
         if (output.join("").includes("This terminal reports the save.")) void stop(child).then(() => resolve({ code: null, output: `${output.join("")}\n[the process began serving; stopped by the test]` }));
       };
@@ -115,11 +116,11 @@ describe.runIf(LIVE)("builder reuse across processes (live: wsp init twice on on
     writeFileSync(join(home, ".gitconfig"), "[user]\n\tname = wsp live\n\temail = live@example.invalid\n");
     mkdirSync(join(home, ".codex"), { recursive: true });
     writeFileSync(join(home, ".codex", "config.toml"), "model = \"o4-mini\"\n");
-    const manifestPath = join(home, "manifest.json");
-    writeFileSync(manifestPath, JSON.stringify(MANIFEST));
+    const recipeFile = join(home, "recipe.json");
+    writeFileSync(recipeFile, JSON.stringify(RECIPE));
 
     const t1 = Date.now();
-    const first = runInit(manifestPath);
+    const first = runInit(recipeFile);
     const out1 = await first.handedOff;
     const run1Ms = Date.now() - t1;
     const afterFirst = readState();
@@ -139,7 +140,7 @@ describe.runIf(LIVE)("builder reuse across processes (live: wsp init twice on on
     expect(existsSync(join(home, "state", "host.lock"))).toBe(false);
 
     const t2 = Date.now();
-    const second = runInit(manifestPath);
+    const second = runInit(recipeFile);
     const out2 = await second.handedOff;
     const run2Ms = Date.now() - t2;
     print(`run 2: hand-off after ${run2Ms} ms`);
@@ -176,12 +177,12 @@ describe.runIf(LIVE)("builder reuse across processes (live: wsp init twice on on
   });
 
   it("a process stopped mid-prepare leaves a placeholder its dead holder cannot finish: the next init, at once and again after a minute, lists it, boots nothing and kills nothing; the machine is stopped by its recorded id", { timeout: 900_000 }, async () => {
-    const manifestPath = join(home, "manifest.json");
-    writeFileSync(manifestPath, JSON.stringify(MANIFEST));
+    const recipeFile = join(home, "recipe.json");
+    writeFileSync(recipeFile, JSON.stringify(RECIPE));
     const before = new Set(Object.keys(readState().builders ?? {}));
 
     const t1 = Date.now();
-    const a = runInit(manifestPath, "Installing agents");
+    const a = runInit(recipeFile, "Installing agents");
     await a.handedOff;
     const midPrepareMs = Date.now() - t1;
     const placeholder = Object.values(readState().builders ?? {}).find(b => !before.has(b.id));
@@ -194,7 +195,7 @@ describe.runIf(LIVE)("builder reuse across processes (live: wsp init twice on on
     const owner = readState().owner?.id?.id;
 
     const t2 = Date.now();
-    const b = await runToExit(manifestPath);
+    const b = await runToExit(recipeFile);
     print(`init within a second (after ${t2 - t1} ms): exit ${b.code}\n${scrub(b.output)}`);
     expect(b.code).toBe(1);
     expect(b.output).toContain(`default (${id})`);
@@ -204,7 +205,7 @@ describe.runIf(LIVE)("builder reuse across processes (live: wsp init twice on on
     expect(b.output).not.toMatch(/Boot a \d+ vCPU/);
 
     await new Promise(r => setTimeout(r, 60_000));
-    const c = await runToExit(manifestPath);
+    const c = await runToExit(recipeFile);
     print(`init after a minute: exit ${c.code}\n${scrub(c.output)}`);
     expect(c.code).toBe(1);
     expect(c.output).toContain("its setup never finished");

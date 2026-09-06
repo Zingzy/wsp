@@ -4,15 +4,13 @@
 // reader, and the import object the runtime hands to the builder.
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, closeSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { AGENTS, CLAUDE_SETTINGS, FISH_CONF_D, HAND_PREFIX, MANAGER_HOMES, MCP_BIN_DIRS, MCP_CONFIGS, type ManifestEntry, RC_NAMES, READ_LIMIT, guardSources, isRcPath, managedRc, portableShebang, rcFiles, sourcedPaths, stripExports } from "@wsp/collect";
+import { AGENTS, CLAUDE_SETTINGS, FISH_CONF_D, MCP_BIN_DIRS, MCP_CONFIGS, type ManifestEntry, RC_NAMES, guardSources, isRcPath, rcFiles, sourcedPaths, stripExports } from "@wsp/collect";
 import {
   agentInstallsFor,
-  editorInstallsFor,
-  forGuest,
   mcpPlanFor,
   planFiles,
   recipeDigest,
@@ -24,7 +22,6 @@ import {
   type BrewTable,
   type FilesPlan,
   type GoldenImport,
-  type GuestFacts,
   type ImportResult,
   type CutNames,
   type PackedFiles,
@@ -38,22 +35,17 @@ import {
 } from "@wsp/engine";
 import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
 import { tarPackCommand } from "./doctor.js";
-import { type AliasGuard, GUARD_PATH, GUARD_SOURCE_COMMENT, GUARD_SOURCE_LINE, aliasGuardFor } from "./init-aliases.js";
 
 const execFileAsync = promisify(execFile);
 const GUEST_HOME = "/root";
+/** The largest file read whole here: an rc file or a login's own settings, never anything bigger. */
+const READ_LIMIT = 1024 * 1024;
 
 /** An rc file by name at HOME or one directory deep (a dotfiles directory keeps dotted copies), plus fish's own config
- * and conf.d; a same-named file deeper down belongs to some program and is left as found. Inside a dotfiles manager's
- * home, named by the collector or known by its usual path, a copy is mapped back to the rc file it stands for. */
-function rcMatcher(homes: readonly string[]): (rel: string) => boolean {
-  const managers = [...new Set([...MANAGER_HOMES, ...homes])];
-  return rel => {
-    const segs = rel.split("/");
-    if (isRcPath(rel) || (segs.length <= 2 && RC_NAMES.has(segs.at(-1) ?? ""))) return true;
-    const home = managers.find(h => rel.startsWith(`${h}/`));
-    return home !== undefined && managedRc(rel.slice(home.length + 1));
-  };
+ * and conf.d; a same-named file deeper down belongs to some program and is left as found. */
+function isRcFile(rel: string): boolean {
+  const segs = rel.split("/");
+  return isRcPath(rel) || (segs.length <= 2 && RC_NAMES.has(segs.at(-1) ?? ""));
 }
 
 function listDir(dir: string): string[] {
@@ -225,48 +217,8 @@ export interface PackOptions {
   secrets: ReadonlyMap<string, string>;
   /** This computer's home, links resolved; a link inside a copied directory must resolve under it. */
   home: string;
-  /** `~`-relative directories the recipe marks as a dotfiles manager's home, besides the usual ones. */
-  managerHomes?: readonly string[];
   /** Whether ~/.claude/settings.json is among the plan's files, in this pack or an earlier one this pack lands over; left out, this pack's files decide. */
   settingsPlanned?: boolean;
-  /** The alias guard the ticks call for; it ships when its rc file is in this pack, which then reads it last. */
-  guard?: AliasGuard;
-}
-
-/** Ships the guard under the staged home and has the rc file that carried the aliases read it last, once, at the rc file's own mode; nothing when that rc file is not in this pack. */
-function placeGuard(stage: string, guard: AliasGuard): void {
-  const rc = join(stage, guard.rc);
-  if (!existsSync(rc) || !statSync(rc).isFile()) return;
-  const file = join(stage, GUARD_PATH);
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, guard.text, { mode: 0o644 });
-  const text = readFileSync(rc, "utf8");
-  if (text.includes(GUARD_SOURCE_LINE)) return;
-  const mode = statSync(rc).mode & 0o7777;
-  chmodSync(rc, 0o600);
-  writeFileSync(rc, `${text}${text === "" || text.endsWith("\n") ? "" : "\n"}\n${GUARD_SOURCE_COMMENT}\n${GUARD_SOURCE_LINE}\n`);
-  chmodSync(rc, mode);
-}
-
-/** A staged hand-installed script whose first line names an interpreter only this laptop has is rewritten to find it by name on the machine's PATH; the bytes after the first line are written back untouched. */
-function portable(staged: string): void {
-  const magic = Buffer.alloc(2);
-  const fd = openSync(staged, "r");
-  try {
-    readSync(fd, magic, 0, 2, 0);
-  } finally {
-    closeSync(fd);
-  }
-  if (magic.toString("latin1") !== "#!") return;
-  const bytes = readFileSync(staged);
-  const newline = bytes.indexOf(0x0a);
-  const end = newline === -1 ? bytes.length : newline;
-  const line = portableShebang(bytes.subarray(0, end).toString("utf8"));
-  if (line === undefined) return;
-  const mode = statSync(staged).mode & 0o7777;
-  chmodSync(staged, 0o600);
-  writeFileSync(staged, Buffer.concat([Buffer.from(line, "utf8"), bytes.subarray(end)]));
-  chmodSync(staged, mode);
 }
 
 /** Copies the planned files into a staging tree, renders each secret into it,
@@ -290,7 +242,6 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
     });
     const modes = parentModes(files, opts.home);
     const rcReal = rcIdentities(opts.home);
-    const rcByName = rcMatcher(opts.managerHomes ?? []);
     const twins = new Set<string>();
     for (const f of files) {
       const target = join(stage, f.dest);
@@ -323,7 +274,6 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
       };
       cpSync(f.source, target, { recursive: true, dereference: true, filter: keep });
       chmodSync(target, f.mode);
-      if (f.id.startsWith(HAND_PREFIX) && !f.dir) portable(target);
     }
     // Every rc file staged, by name where dotfiles live or by identity with one of the laptop's, ships as its
     // carried copy: secret exports are set on the machine by hand, never carried in the file, and a bare source
@@ -346,12 +296,11 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
         const p = join(dir, name);
         const st = lstatSync(p);
         if (st.isDirectory()) walk(p);
-        else if (st.isFile() && (rcByName(relative(stage, p)) || twins.has(p))) strip(p);
+        else if (st.isFile() && (isRcFile(relative(stage, p)) || twins.has(p))) strip(p);
       }
     };
     walk(stage);
     cut.sort((a, b) => (a.path < b.path ? -1 : 1));
-    if (opts.guard !== undefined) placeGuard(stage, opts.guard);
     // A dropped account leaves the staged file before any token lands, so the active mark has moved by the time
     // the account it moved to is placed and the host token follows it.
     for (const s of plan.secrets) {
@@ -537,14 +486,12 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
   });
   const shell = shellInstallFor(bring);
   const tools = toolInstallsFor(bring, opts.brew);
-  const editors = editorInstallsFor(bring);
   const agents = agentInstallsFor(bring, { claude: CLAUDE_INSTALLER });
   const mcp = opts.rows !== undefined ? mcpPlanFor(opts.rows, { home, guestHome: GUEST_HOME, agents: MCP_AGENTS, binDirs: MCP_BIN_DIRS }) : undefined;
   const label = (id: string) => bring.find(e => e.id === id)?.label ?? id;
   const anyFiles = plan.files.length + plan.secrets.length + plan.skipped.length > 0;
   // A login's Keychain items count once, however many accounts they are read for.
   const count = plan.files.length + new Set(plan.secrets.map(s => `${s.id} ${s.service}`)).size;
-  const managerHomes = bring.filter(e => e.manager !== undefined).flatMap(e => e.paths).filter(p => p.startsWith("~/")).map(p => p.slice(2));
   const tilde = (f: PlannedFile): string => `~/${relative(home, f.source)}`;
   // A login whose value comes from the Keychain is one unit with its file: a re-login is the same golden with a
   // fresher token, so the file is volatile too and the pair re-renders on attach.
@@ -559,13 +506,8 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
     });
   const hash = recipeHash(recipeDigest(bring, digested));
   const settingsSource = join(home, CLAUDE_SETTINGS.slice(2));
-  const guard = aliasGuardFor(opts.rows ?? bring, opts.brew);
-  const packOpts: PackOptions = { secrets: opts.secrets, home, managerHomes, settingsPlanned: plan.files.some(f => f.source === settingsSource || f.source === dirname(settingsSource)), ...(guard !== undefined ? { guard } : {}) };
-  const pack = async (guest: GuestFacts): Promise<PackedFiles> => {
-    const fit = forGuest(plan, guest, home);
-    const packed = await packPlan({ ...plan, files: fit.files }, packOpts);
-    return { ...packed, skipped: [...fit.skipped, ...packed.skipped] };
-  };
+  const packOpts: PackOptions = { secrets: opts.secrets, home, settingsPlanned: plan.files.some(f => f.source === settingsSource || f.source === dirname(settingsSource)) };
+  const pack = (): Promise<PackedFiles> => packPlan(plan, packOpts);
   const volatileFiles = files.filter(f => f.volatile);
   const volatile =
     volatileFiles.length > 0 || plan.secrets.length > 0
@@ -580,11 +522,11 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
       ? { files: { count, rungs: plan.rungs, bytes: plan.bytes, skipped: plan.skipped, pack, ...(volatile !== undefined ? { volatile } : {}) } }
       : {}),
     ...(shell !== undefined ? { shell } : {}),
-    tools: [...editors.installs, ...tools.installs],
+    tools: tools.installs,
     ...(agents.node !== undefined ? { node: agents.node } : {}),
     agents: agents.installs,
     skippedAgents: agents.skipped.map(s => ({ id: s.id, name: label(s.id), note: s.note })),
-    skippedTools: [...editors.skipped, ...tools.skipped].map(s => ({ id: s.id, label: label(s.id), note: s.note })),
+    skippedTools: tools.skipped.map(s => ({ id: s.id, label: label(s.id), note: s.note })),
     baseTools: tools.base.map(b => ({ id: b.id, label: label(b.id), note: b.note })),
     ...(mcp !== undefined ? { mcp } : {}),
     ...(opts.onResult !== undefined ? { onResult: opts.onResult } : {}),

@@ -47,40 +47,24 @@ describe("the delta of a binary row", () => {
     for (const h of homes.splice(0)) rmSync(h, { recursive: true, force: true });
   });
 
-  it("ticked later, a terminal editor with no config plans its install and nothing else; unticked, its uninstall and nothing else", () => {
+  it("ticked later, a binary row plans its install and nothing else; unticked, its uninstall and nothing else", () => {
     const home = realpathSync(mkdtempSync(join(tmpdir(), "wsp-upgrade-home-")));
     homes.push(home);
-    const vim: ManifestEntry = { rung: "editors", id: "editors/vim", label: "vim, installed", paths: [], bytes: 0, default: "bring", bring: true };
+    const gh: ManifestEntry = { rung: "tools", id: "tools/brew/gh", label: "gh", group: "Homebrew", paths: [], bytes: 0, default: "bring", bring: true, linux: "yes" };
     const importOf = (rows: readonly ManifestEntry[]) => importFor(rows, { home, secrets: new Map(), platform: "darwin" });
     const before = importOf([]);
-    const after = importOf([vim]);
-    const labelOf = (id: string) => (id === vim.id ? vim.label : id);
+    const after = importOf([gh]);
 
-    const up = deltaFor(diffRecipes(before.recipe!, after.recipe!, labelOf), before.recipe!, after, [vim], importOf);
-    expect(up.import.tools.map(t => [t.id, t.label, t.manager])).toEqual([["editors/vim", "vim", "apt"]]);
-    expect(up.import.tools[0]!.cmd).toContain("apt-get install -y -qq vim");
+    const up = deltaFor(diffRecipes(before.recipe!, after.recipe!), before.recipe!, after, [gh], importOf);
+    expect(up.import.tools.map(t => t.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/brew/gh"]);
+    expect(up.import.tools.at(-1)!.cmd).toContain("brew install gh");
     expect(up.import.files).toBeUndefined();
     expect(up.import.agents).toEqual([]);
     expect(up.import.recipeHash).toBe(after.recipeHash);
     expect(up.removals).toEqual([]);
 
-    const down = deltaFor(diffRecipes(after.recipe!, before.recipe!, labelOf), after.recipe!, before, [], importOf);
+    const down = deltaFor(diffRecipes(after.recipe!, before.recipe!), after.recipe!, before, [], importOf);
     expect(down.import.tools).toEqual([]);
-    expect(down.removals).toEqual([{ what: "editor", id: "editors/vim", label: "vim", cmd: expect.stringContaining("apt-get purge -y -qq vim") }]);
-  });
-
-  it("one more extension ticked plans the whole list from every ticked extension row", () => {
-    const home = realpathSync(mkdtempSync(join(tmpdir(), "wsp-upgrade-home-")));
-    homes.push(home);
-    const ext = (id: string): ManifestEntry => ({ rung: "editors", id: `editors/vscode-ext/${id}`, label: id, paths: [], bytes: 0, default: "skip", bring: true });
-    const one = [ext("ms-python.python")];
-    const two = [...one, ext("esbenp.prettier-vscode")];
-    const importOf = (rows: readonly ManifestEntry[]) => importFor(rows, { home, secrets: new Map(), platform: "darwin" });
-    const before = importOf(one);
-    const after = importOf(two);
-    const delta = deltaFor(diffRecipes(before.recipe!, after.recipe!), before.recipe!, after, two, importOf);
-    expect(delta.import.tools.map(t => [t.id, t.label, t.manager])).toEqual([["editors/vscode-ext", "VS Code extension list", "script"]]);
-    expect(delta.import.tools[0]!.cmd).toContain(`'ms-python.python' 'esbenp.prettier-vscode' > "$HOME/.vscode-server/extensions.txt"`);
-    expect(delta.removals).toEqual([]);
+    expect(down.removals).toEqual([{ what: "tool", id: "tools/brew/gh", label: "gh", cmd: expect.stringContaining("brew uninstall gh") }]);
   });
 });

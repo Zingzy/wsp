@@ -14,6 +14,13 @@ export interface ToolPin {
   sha256: string;
 }
 
+/** How an install stands against the recipe's pin: nothing recorded, the same version (checked), or a version the
+ * source has since moved to (a first install again, re-recorded). Without a version the pin's own stands. */
+export function pinStateOf(version: string | undefined, pin: ToolPin | undefined): "none" | "same" | "moved" {
+  if (pin === undefined) return "none";
+  return version === undefined || version === pin.tag ? "same" : "moved";
+}
+
 /** A package manager's global; `version` absent means the current one, or the laptop's when a row mirrors one. */
 export interface PackageRoad<K extends string> {
   road: K;
@@ -32,9 +39,8 @@ export type InstallRoad =
   /** `go install` of a module at a version; a row whose module nobody could read carries none and installs nothing. */
   | { road: "go"; module?: string; version?: string }
   /** A GitHub repository's Linux asset for the arch, at `version` (a tag) or the current release; `pin` is what the first
-   * install of that tag recorded and `go` the module `go install` falls back to. A row that came back from a golden's
-   * digest names no repository: it only ever comes off. */
-  | { road: "release"; repo?: string; version?: string; pin?: ToolPin; go?: string }
+   * install of that tag recorded. A row that came back from a golden's digest names no repository: it only ever comes off. */
+  | { road: "release"; repo?: string; version?: string; pin?: ToolPin }
   /** A vendor's own Linux download, as its cask row scripts and hashes it. */
   | { road: "vendor"; cask: LinuxCask; version?: string; pin?: ToolPin }
   | { road: "apt"; packages: readonly string[] }

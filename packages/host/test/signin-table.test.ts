@@ -4,8 +4,11 @@
 // the tool prints it (fake names, masked tokens; nothing real).
 import { describe, expect, it } from "vitest";
 import { CLAUDE_CONFIG_DIR } from "@wsp/catalog";
-import { AWS_STATUS, CLAUDE_KEY_PATH, CLAUDE_STATUS, CLOUDFLARED_STATUS, GEMINI_STATUS, SIGN_INS, claudeSource, claudeWhy, geminiSource, hasLogin, secretNamed, signInFor, signInWords, signsInByDefault, statusOf, type SignIn } from "../src/signin-table.js";
+import { AWS_STATUS, CLAUDE_KEY_PATH, CLAUDE_STATUS, CLOUDFLARED_STATUS, GEMINI_STATUS, SIGN_INS, claudeSource, claudeWhy, geminiSource, hasLogin, secretNamed, signInFor, signInWords, signsInByDefault, type SignIn } from "../src/signin-table.js";
 import { collectorLogins } from "./collector-logins.js";
+
+/** The catalog's status check on a row, whichever kind it is. */
+const statusOf = (s: SignIn) => (s.kind === "shell" ? undefined : s.status);
 
 function command(name: string): Extract<SignIn, { login: string }> {
   const s = signInFor(name);

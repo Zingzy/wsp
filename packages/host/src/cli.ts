@@ -11,7 +11,7 @@ import type { Readable, Writable } from "node:stream";
 import { parseArgs } from "node:util";
 import { isCancel } from "@clack/prompts";
 import { createClaudeAdapter } from "@wsp/adapter-claude";
-import { collect, computeRecipe, nodeHost, nodeMachine, type Manifest, type Rung } from "@wsp/collect";
+import { collect, computeRecipe, nodeHost, type Manifest, type Rung } from "@wsp/collect";
 import {
   SolariBackend,
   createRuntime,
@@ -78,9 +78,6 @@ options:
                      held in the Keychain, defaults to sign in on the machine
                      unless a saved recipe answered copy, so macOS has nothing
                      to ask either and the sign-ins wait for the app's terminal
-  --manifest PATH    init: tick from this file instead of reading the machine,
-                     one screen per rung of it; a saved recipe (<state
-                     dir>/golden-recipe.json) works here
   --recipe PATH      init: tick the agents and tools from this recipe (wsp recipe
                      writes it; init writes <state dir>/recipe.json too) and go
                      straight to the sign-ins; this machine is still read for
@@ -288,9 +285,9 @@ export function terminalInitIO(): InitIO {
   };
 }
 
-/** The collector's ladder over this laptop, then everything else it left unclaimed; onRung lets the terminal count rows as each rung lands. */
-function collectThisComputer(onRung: (rung: Rung, rows: number) => void, onNote: (note: string) => void): Promise<Manifest> {
-  return collect(nodeHost(), { onRung, onNote, machine: nodeMachine() });
+/** The collector's ladder over this laptop; onRung lets the terminal count rows as each rung lands. */
+function collectThisComputer(onRung: (rung: Rung, rows: number) => void): Promise<Manifest> {
+  return collect(nodeHost(), { onRung });
 }
 
 /** Ctrl-C and a service stop both end with the lock removed. `once` leaves a
@@ -315,7 +312,7 @@ function initRefusal(lock: HostLock, statePath: string): string {
   return `wsp init: a wsp host (pid ${lock.pid}) is already serving ${statePath}. Stop it first (Ctrl-C in its terminal, or kill ${lock.pid}), then run wsp init again, or point --state at a different file.`;
 }
 
-async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: string }, flags: { yes: boolean; manifest?: string; recipe?: string }): Promise<number> {
+async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: string }, flags: { yes: boolean; recipe?: string }): Promise<number> {
   const held = servingHost(opts.statePath);
   if (held !== undefined) {
     io.error(initRefusal(held, opts.statePath));
@@ -327,7 +324,6 @@ async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: 
   const result = await runInit(
     {
       yes: flags.yes,
-      ...(flags.manifest !== undefined ? { manifestPath: resolve(flags.manifest) } : {}),
       ...(flags.recipe !== undefined ? { recipeFile: resolve(flags.recipe) } : {}),
       collect: collectThisComputer,
       recipe: onHistory => computeRecipe(nodeHost(), { onHistory }),
@@ -465,7 +461,7 @@ async function mcp(io: CliIO, statePath: string, words: string[], agent: string 
 export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<number> {
   const verb = findVerb(argv);
   if (verb !== undefined) return runVerb(verb, argv, io, defaultStatePath);
-  let values: { version?: boolean; help?: boolean; port?: string; "ws-port"?: string; state?: string; yes?: boolean; manifest?: string; recipe?: string; out?: string; agent?: string };
+  let values: { version?: boolean; help?: boolean; port?: string; "ws-port"?: string; state?: string; yes?: boolean; recipe?: string; out?: string; agent?: string };
   let positionals: string[];
   try {
     ({ values, positionals } = parseArgs({
@@ -477,7 +473,6 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
         "ws-port": { type: "string" },
         state: { type: "string" },
         yes: { type: "boolean", short: "y" },
-        manifest: { type: "string" },
         recipe: { type: "string" },
         out: { type: "string" },
         agent: { type: "string" },
@@ -511,11 +506,7 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
       return 0;
     }
     case "init":
-      if (values.manifest !== undefined && values.recipe !== undefined) {
-        io.error("wsp init takes --manifest or --recipe, not both: a manifest carries its own ticks.");
-        return 1;
-      }
-      return init(io, opts, { yes: values.yes === true, ...(values.manifest !== undefined ? { manifest: values.manifest } : {}), ...(values.recipe !== undefined ? { recipe: values.recipe } : {}) });
+      return init(io, opts, { yes: values.yes === true, ...(values.recipe !== undefined ? { recipe: values.recipe } : {}) });
     case "recipe":
       await writeRecipe(nodeHost(), resolve(values.out ?? join(dirname(opts.statePath), "recipe.json")), line => io.log(line));
       return 0;

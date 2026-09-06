@@ -1,27 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The signing-in stage of wsp init: the logins copied to the builder are
-// checked there with the tools' own status commands, all at once over one pty,
-// each row turning as its answer arrives; each login chosen as "sign in on the
+// The signing-in stage of wsp init: each login chosen as "sign in on the
 // machine" runs in this terminal over a pty on the builder, and its exit code
-// says whether it landed. The summary before the seal offers the machine
-// sign-in for a copied login the check refused, and a retry (with the
-// no-browser variant when the table has one) or a skip for a sign-in that
-// failed. What each login came to is written next to the import result so the
-// golden's notes carry it.
+// says whether it landed; a login whose files were copied is recorded as
+// copied. The summary before the seal offers a retry (with the no-browser
+// variant when the table has one) or a skip for a sign-in that failed. What
+// each login came to is written next to the import result so the golden's
+// notes carry it.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import type { Writable } from "node:stream";
 import { styleText } from "node:util";
 import type { ManifestEntry } from "@wsp/collect";
 import type { LoginState } from "@wsp/protocol";
 import type { GoldenBuilderView, Runtime } from "@wsp/runtime";
 import { S_BAR, log, note } from "@clack/prompts";
 import { connectDaemonSocket, type ConnectOptions, type DaemonSocket } from "./doctor.js";
-import { GUTTER, ellipsize, isTTY, table, widthOf } from "./init-layout.js";
+import { GUTTER, ellipsize, table, widthOf } from "./init-layout.js";
 import { agentName } from "./init-recipe.js";
-import { SH_FILE } from "./init-secrets.js";
 import { readKey } from "./init-select.js";
-import { relayPty, runChecks, type CheckAnswer, type PtyLink, type RelayTerminal } from "./signin-relay.js";
-import { hasLogin, signInFor, statusOf, type SignIn, type StatusCheck } from "./signin-table.js";
+import { relayPty, type PtyLink, type RelayTerminal } from "./signin-relay.js";
+import { hasLogin, signInFor, type SignIn } from "./signin-table.js";
 
 export interface LoginOutcome {
   id: string;
@@ -121,13 +117,10 @@ export async function builderLink(rt: Runtime, builder: GoldenBuilderView, conne
 }
 
 export interface SignInStageOptions {
-  /** The logins the stage owns: a choice of copy is checked on the builder, any other is signed in there. */
+  /** The logins the stage owns: a choice of copy is recorded as copied, any other is signed in on the builder. */
   logins: readonly ManifestEntry[];
   /** By login id, what its copy went to the machine without; shown beside the row's note throughout. */
   left?: ReadonlyMap<string, string>;
-  /** The names the secrets step set on the machine before this stage, by the file each was cut from; a status
-   * check that names one as the login's source says so on the row. */
-  secrets?: ReadonlyMap<string, string>;
   /** A fresh link to the builder's daemon, dialled before each command so a dropped one costs that command alone. */
   dial(): Promise<BuilderLink>;
   terminal: RelayTerminal;
@@ -137,16 +130,10 @@ export interface SignInStageOptions {
   flow: SignInFlow;
   /** A tool that never gives up is stopped after this. Default 15 min. */
   capMs?: number;
-  /** The status checks share this budget; one still silent then is reported with the others. Default 15 s. */
-  checkBudgetMs?: number;
-  /** How often a checking row's seconds are redrawn. Default 1 s. */
-  tickMs?: number;
   now?: () => number;
 }
 
 const CAP_MS = 15 * 60_000;
-const CHECK_MS = 15_000;
-const TICK_MS = 1000;
 const dim = (s: string): string => styleText("dim", s);
 
 const STATE_WORDS: Record<LoginState, string> = {
@@ -159,10 +146,6 @@ const STATE_WORDS: Record<LoginState, string> = {
 
 function minutes(ms: number): string {
   return `${Math.round(ms / 60_000)} min`;
-}
-
-function seconds(ms: number): string {
-  return `${Math.round(ms / 1000)} s`;
 }
 
 /** The row's note and what its copy left behind, as one detail. */
@@ -178,29 +161,6 @@ function stateLine(o: LoginOutcome, width = Infinity): string {
   return `${o.label}: ${colored}${detail !== "" ? dim(` (${detail})`) : ""}`;
 }
 
-/** The row while its status command runs: the command and the seconds so far, the command cut to `width` cells for the row. */
-function checkingLine(o: LoginOutcome, command: string, elapsedMs: number, width: number): string {
-  const secs = seconds(elapsedMs);
-  const head = `${o.label}: checking: `;
-  return `${o.label}: ${dim(`checking: ${ellipsize(command, width - head.length - 2 - secs.length)}`)}  ${dim(secs)}`;
-}
-
-/** Rows redrawn in place on a terminal: each draw moves back over the last one, and a row is cut to the width so
- * none wraps and the count to move back over stays true; the final draw may wrap, nothing follows it. Off a
- * terminal a row is written when it changes, whole. */
-function liveBlock(output: Writable & { columns?: number }, live: boolean): { draw(rows: readonly ((width: number) => string)[], final?: boolean): void } {
-  const width = widthOf(output, Infinity) - 4;
-  let last: string[] = [];
-  return {
-    draw(rows, final = false) {
-      const lines = rows.map(row => row(final || !live ? Infinity : width));
-      if (live) output.write(`${last.length > 0 ? `\x1b[${last.length}A` : ""}${lines.map(l => `\r\x1b[2K${dim(S_BAR)}  ${l}\n`).join("")}`);
-      else output.write(lines.filter((l, i) => l !== last[i]).map(l => `${dim(S_BAR)}  ${l}\n`).join(""));
-      last = lines;
-    },
-  };
-}
-
 /** Label, state, detail per login; the detail is cut so the note frame (6 columns) never wraps a row. */
 function summaryRows(outcomes: readonly LoginOutcome[], width: number): string[] {
   const labelW = Math.max(...outcomes.map(r => r.label.length));
@@ -212,8 +172,6 @@ function summaryRows(outcomes: readonly LoginOutcome[], width: number): string[]
 export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]> {
   const out = { output: o.terminal.output };
   const capMs = o.capMs ?? CAP_MS;
-  const budgetMs = o.checkBudgetMs ?? CHECK_MS;
-  const now = o.now ?? Date.now;
   const outcomes: LoginOutcome[] = o.logins.map(e => {
     const left = o.left?.get(e.id);
     return { id: e.id, label: e.label, state: "skipped", ...(left !== undefined ? { left } : {}) };
@@ -221,80 +179,11 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
   if (outcomes.length === 0) return outcomes;
   const isCopied = (e: ManifestEntry): boolean => e.choice === "copy";
   const rows = (copied: boolean) => o.logins.map((e, i) => [e, outcomes[i]!] as const).filter(([e]) => isCopied(e) === copied);
-  /** The signed-in note: the source the status names, then the command that proved it. */
-  const provedBy = (status: StatusCheck, output: string, lead?: string): string => [lead, status.detail?.(output, o.secrets ?? new Map()), status.command].filter((x): x is string => x !== undefined).join("; ");
 
-  /** Every copied login's status command at once over one link: a row reads checking with its seconds until its
-   * answer arrives and turns then; a refusal hands the login to the machine sign-in below. */
-  const checkCopied = async (copied: readonly (readonly [ManifestEntry, LoginOutcome])[]): Promise<void> => {
-    const checks: { r: LoginOutcome; check: StatusCheck }[] = [];
-    for (const [entry, r] of copied) {
-      r.state = "copied";
-      const check = statusOf(signInFor(agentName(entry)));
-      if (check === undefined) {
-        r.note = `not verified: no status command known for ${agentName(entry)}`;
-        log.message(stateLine(r), { output: o.terminal.output, symbol: dim(S_BAR) });
-        continue;
-      }
-      checks.push({ r, check });
-    }
-    if (checks.length === 0) return;
-    const pending = new Set(checks);
-    const started = now();
-    const live = isTTY(o.terminal.output);
-    const block = liveBlock(o.terminal.output, live);
-    const draw = (final = false): void => block.draw(checks.map(c => (width: number) => (pending.has(c) ? checkingLine(c.r, c.check.command, now() - started, width) : stateLine(c.r, width))), final);
-    const answered = ({ r, check }: (typeof checks)[number], a: CheckAnswer): void => {
-      const command = check.command;
-      // The shell's own "not found": the files are there and nothing on the machine can read them yet.
-      if (a.exitCode === 127) {
-        r.command = command;
-        r.exit = 127;
-        r.note = `not verified: ${toolOf(command)} is not on the machine`;
-        return;
-      }
-      const signedIn = check.signedIn(a.output, a.exitCode);
-      r.state = signedIn ? "signed-in" : "not-signed-in";
-      r.note = signedIn ? provedBy(check, a.output, "copied") : `copied, but ${check.why?.(a.output) ?? `${command} says not signed in`}`;
-    };
-    const refused = (why: (c: (typeof checks)[number]) => string): void => {
-      for (const c of pending) {
-        c.r.state = "not-signed-in";
-        c.r.note = why(c);
-      }
-    };
-    // Off a terminal a row is written as it settles; on one the seconds tick.
-    const timer = live ? setInterval(draw, o.tickMs ?? TICK_MS) : undefined;
-    timer?.unref();
-    draw();
-    try {
-      const daemon = await o.dial();
-      try {
-        const run = await runChecks(daemon.link, { commands: checks.map(c => c.check.typed ?? c.check.command), secretsFile: SH_FILE, budgetMs }, (i, a) => {
-          const c = checks[i]!;
-          answered(c, a);
-          pending.delete(c);
-          if (pending.size > 0) draw();
-        });
-        if (run.dropped) refused(() => "copied, but the machine's terminal link dropped during the status check");
-        else if (run.timedOut) refused(c => `copied, but ${c.check.command} did not answer within ${seconds(budgetMs)}`);
-        else refused(c => `copied, but the check ended without an answer from ${c.check.command}`);
-      } finally {
-        daemon.close();
-      }
-    } catch (e) {
-      refused(() => `copied, but the check failed: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      if (timer !== undefined) clearInterval(timer);
-      pending.clear();
-      draw(true);
-    }
-  };
-
-  const copied = rows(true);
-  if (copied.length > 0) {
-    log.step("Checking the logins copied to the machine", out);
-    await checkCopied(copied);
+  // A copied login's files are on the machine; its status is the catalog's to check from the app, not this terminal's.
+  for (const [, r] of rows(true)) {
+    r.state = "copied";
+    log.message(stateLine(r), { output: o.terminal.output, symbol: dim(S_BAR) });
   }
 
   const machine = rows(false);

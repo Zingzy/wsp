@@ -8,11 +8,10 @@
 // wraps each line whose file it does not carry in a readability test. A line
 // naming this computer's home literally is wrapped too, the home written as
 // "$HOME", so a carried file is found under the machine's home.
-import { tilde } from "../everything/host.js";
-import { sourceCommand, sourcedPath } from "../everything/shell-rc.js";
-import { type Host, expand } from "../host.js";
+import { type Host, expand, tilde } from "../host.js";
 import type { ManifestEntry } from "../manifest.js";
 import { RC_FILES } from "./shell.js";
+import { sourceCommand, sourcedPath } from "./shell-rc.js";
 
 interface Bare {
   line: number;
@@ -59,7 +58,7 @@ export function bareSources(text: string, home: string): string[] {
 }
 
 /** A source line that reads its file only when the file is there. */
-export function guardLine(token: string, word = "."): string {
+function guardLine(token: string, word: string): string {
   return `[ -r ${token} ] && ${word} ${token}`;
 }
 

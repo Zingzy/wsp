@@ -1,43 +1,35 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// wsp init: read this machine, let the person tick what comes along one rung
-// at a time, confirm once, build the golden's first machine through the
-// runtime, run the sign-ins chosen for the machine in this terminal, set the
-// secrets the pack cut, seal on Enter, fork the first workspace and open the
-// app on it. Nothing leaves the disk before the confirm, and no question is
-// ever asked on the remote machine.
+// wsp init: read this machine, let the person tick the agents, what they need
+// and the sign-ins on three screens, confirm once, build the golden's first
+// machine through the runtime, run the sign-ins chosen for the machine in this
+// terminal, set the secrets the pack cut, seal on Enter, fork the first
+// workspace and open the app on it. Nothing leaves the disk before the confirm,
+// and no question is ever asked on the remote machine.
 import type { Readable, Writable } from "node:stream";
 import { stripVTControlCharacters, styleText } from "node:util";
-import { APP_DATA_GROUP, LARGE_GROUP, MCP_REMOTE_ID, RUNGS, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
+import { MCP_REMOTE_ID, RUNGS, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
 import { describeAge, type BackendPricing } from "@wsp/engine";
-import { MCP_ID_PREFIX, type Recipe, type RecipeHistory } from "@wsp/protocol";
+import type { Recipe, RecipeHistory } from "@wsp/protocol";
 import { PrepareStoppedError, type GoldenBuilderView, type GoldenRecipe, type GoldenStage, type Runtime } from "@wsp/runtime";
 import { S_BAR, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, cancel, isCancel, log, outro } from "@clack/prompts";
 import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { ROAD_MODULES, caskPinState, linuxCaskFor } from "@wsp/catalog";
-import { BREW_TOOLCHAIN_BYTES, BUILDER_DISK_GB, MEASURED_ON, PACK_BUDGET_BYTES, TOOLS_DISK_FLOOR, agentInstallsFor, agentSize, assumedSize, brewfileFor, cliRoad, editorInstallsFor, estimateDisk, extensionsFile, pinState, remoteEditorFor, remoteSettingsPath, toolInstallsFor, toolSize, type BrewTable, type DiskEstimate, type ImportResult, type ToolSize } from "@wsp/engine";
+import { BUILDER_DISK_GB, PACK_BUDGET_BYTES, TOOLS_DISK_FLOOR, agentInstallsFor, brewfileFor, estimateDisk, isMcpRow, pinState, toolInstallsFor, type BrewTable, type ImportResult } from "@wsp/engine";
 import { ALREADY_APPLIED, fmtBytes } from "@wsp/protocol";
 import { CLAUDE_INSTALLER, importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
-  CONSENT_CHOICES,
   LOGIN_CHOICES,
   RUNG_TITLE,
-  agentName,
   applyRecipe,
   goldenRecipeFor,
   type Answers,
   defaultAnswers,
-  hasChoices,
-  initialTicks,
   isLoginChoice,
   isTickable,
-  linuxCaskRows,
-  loadManifest,
   loadRecipe,
   lockRefused,
   loginShown,
-  loginTool,
   recipeChanges,
   recipePath,
   recipeWithAnswers,
@@ -51,17 +43,14 @@ import {
 import { pickScreens } from "./init-pick.js";
 import { historyLine } from "./recipe-command.js";
 import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, fmtDuration, isTTY, plainLine, rowsOf, table, widthOf, wrap } from "./init-layout.js";
-import { aliasLines } from "./init-aliases.js";
-import { sourceLines } from "./init-sources.js";
 import { openRunLog, runLogPath } from "./init-log.js";
 import { secretsStage, type SecretOutcome } from "./init-secrets.js";
 import { buildTimes, readBuildTimes } from "./init-times.js";
 import { keptBuilder, stopKeptBuilder, updateRoad } from "./init-upgrade.js";
 import { retentionOffer } from "./storage.js";
-import { rungSelect, type FooterLine, type RungSelectOptions, type SelectItem, type Tone } from "./init-select.js";
-import { DISK_HOLD_SHARE, HEAVY_BYTES, diskHead, diskLine, diskParts, diskTone, weighed, weightTone } from "./init-weight.js";
+import type { Tone } from "./init-select.js";
+import { diskLine, diskTone } from "./init-weight.js";
 import { builderLink, flowHooks, noteOutcomes, signInStage, stageLogins, type BuilderLink, type HostHooks, type LoginOutcome, type SignInFlow } from "./init-signin.js";
-import { hasLogin, signInFor, signsInByDefault, type SignIn } from "./signin-table.js";
 import type { HostHandle } from "./server.js";
 
 export interface InitIO {
@@ -82,14 +71,11 @@ export interface InitIO {
 export interface InitOptions {
   /** Take every default and skip every prompt, the confirm included. */
   yes: boolean;
-  /** A collector manifest or a saved recipe to tick from instead of reading this machine; it walks the saved
-   * manifest's own screens, one per rung. */
-  manifestPath?: string;
   /** The small recipe of catalog ids that ticks the agents and tools rows: the screens for them are skipped and the
    * run lands on the sign-ins. This machine is still read for the rows and files. */
   recipeFile?: string;
-  /** Reads this computer, telling onRung how many rows each rung found as it finishes and onNote what could not be read. */
-  collect(onRung: (rung: Rung, rows: number) => void, onNote: (note: string) => void): Promise<Manifest>;
+  /** Reads this computer, telling onRung how many rows each rung found as it finishes. */
+  collect(onRung: (rung: Rung, rows: number) => void): Promise<Manifest>;
   /** Reads this computer against the catalog and the agents' session histories for the recipe the screens start
    * from, telling onHistory each agent's counts as its history is read. */
   recipe(onHistory: (h: RecipeHistory) => void): Promise<Recipe>;
@@ -494,292 +480,8 @@ function spin(output: Writable, label: string, animate: boolean): Spinner {
 
 // --- screens ---------------------------------------------------------------
 
-/** Anthropic forbids a host to collect or pass along the OAuth credential, which is why that login is signed in on the machine unless the person opts in; an API key is the person's own to set. */
-const CLAUDE_LOGIN_WHY = "Anthropic's terms forbid passing the OAuth credential along, so with it alone the default is to sign in on the machine.";
-/** What the answers on a login row do, and on a credential-shaped row. */
-const LOGIN_WHY = "copy brings it along; sign in does it in this terminal after the build";
-/** The login row's second detail line by its catalog row: a browser or device flow leads with the command it runs, or
- * with the collector's reason when the row starts as a copy all the same; a tool with no sign-in says so, and a key
- * gets the plain line. */
-function loginWhy(e: ManifestEntry, s: SignIn): string {
-  if (hasLogin(s) && signsInByDefault(s)) return e.default === "bring" ? `${e.detail ?? "copy brings it along"}; sign in runs ${s.login}` : `sign in runs ${s.login} after the build; copy brings it along`;
-  if (s.kind === "none" && s.note !== undefined) return s.note;
-  return LOGIN_WHY;
-}
-const CONSENT_WHY = "copy brings it along; skip leaves it here";
 const TICKED_FOR_LOGINS = "ticked under Tools for the sign-ins: ";
-const EVERYTHING_FOOTER = ["large items are listed but never copied without a tick", "know what one of these is? add it to the catalog"];
-/** Names as a list: "a", "a and b", "a, b and c". */
-function listed(names: readonly string[]): string {
-  return names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
-}
-
-/** What the Editors screen is for, under its title: one line for the terminal editors it holds, one for the remote
- * editors' rows; a line whose rows are not on the screen is left out. */
-export function editorsIntro(entries: readonly ManifestEntry[]): string[] {
-  const terminal = entries.filter(e => remoteEditorFor(e.id) === undefined && editorInstallsFor([{ ...e, bring: true }]).installs.length > 0);
-  const names = terminal.map(e => editorInstallsFor([{ ...e, bring: true }]).installs[0]!.label);
-  const remote = [...new Set(entries.map(e => remoteEditorFor(e.id)?.name).filter((n): n is string => n !== undefined))];
-  const config = terminal.every(e => e.paths.length > 0) ? " with your config" : terminal.some(e => e.paths.length > 0) ? " with the config found here" : "";
-  const one = names.length === 1;
-  return [
-    ...(names.length > 0 ? [`${listed(names)} ${one ? "is" : "are"} installed on the machine${config}; ${one ? "it runs" : "they run"} in the workspace's terminal.`] : []),
-    ...(remote.length > 0 ? [`${listed(remote)} rows are settings and extension names, used only if you open this machine from your editor over SSH; nothing runs here.`] : []),
-  ];
-}
-
-/** How a ticked editors row reaches the machine, for its detail line; nothing for a row the import has no step for. */
-function editorWhy(e: ManifestEntry): string | undefined {
-  const remote = remoteEditorFor(e.id);
-  if (remote !== undefined) {
-    if (e.paths.length > 0) return `lands at ~/${remoteSettingsPath(remote.dir)}, read only when ${remote.name} opens this machine over SSH; nothing runs here`;
-    return `then, in ${remote.name}'s terminal on the machine: xargs -n1 ${remote.cli} --install-extension < ~/${extensionsFile(remote.dir)}`;
-  }
-  const step = editorInstallsFor([{ ...e, bring: true }]).installs[0];
-  if (step === undefined) return undefined;
-  return `installed on the machine ${ROAD_MODULES[step.manager].words}${e.paths.length > 0 ? "; your config comes along" : ""}`;
-}
-
-const isMcpRow = (e: ManifestEntry): boolean => e.rung === "agents" && e.id.startsWith(MCP_ID_PREFIX);
-const roadWords = (size: ToolSize): string => (size.road === "measured" ? `measured on Linux ${MEASURED_ON}` : "from this Mac's Homebrew");
-const depsWords = (size: ToolSize): string => (size.deps === 0 ? "" : ` with ${size.deps} dependenc${size.deps === 1 ? "y" : "ies"}`);
-
-/** A row nothing measured counts at its kind's default, and the detail says so. */
-function assumedWords(e: ManifestEntry): string {
-  const assumed = assumedSize(e);
-  return `not measured, ~${fmtBytes(assumed.bytes)} assumed for ${assumed.kind}`;
-}
-
-/** Where a tool's number came from, for the detail pane. */
-function sizeWhy(e: ManifestEntry, brew: BrewTable): string {
-  const size = toolSize(e, brew);
-  return size === undefined ? assumedWords(e) : `about ${fmtBytes(size.bytes)}${depsWords(size)}, ${roadWords(size)}`;
-}
-
-/** A formula's second detail line: why it starts unticked when it does, then its size and where the number came from. */
-function toolWhy(e: ManifestEntry, brew: BrewTable): string {
-  const cask = linuxCaskFor(e.id);
-  if (cask !== undefined) return cask.detail;
-  const unknown = e.linux === "unknown" ? "Linux build unknown, tick to try; " : "";
-  if (e.id.startsWith("tools/cli/")) {
-    const go = e.paths.length > 1;
-    return `${unknown}its Linux release binary${go ? ", else go install of the module" : ""}; ${assumedWords(e)}${go ? " since the fallback fills go's caches" : ""}; checksum recorded on first install; ${e.default === "bring" ? "brought by default" : "left out by default"}`;
-  }
-  if (e.linux === "unknown") return `${unknown}${sizeWhy(e, brew)}`;
-  const size = toolSize(e, brew);
-  if (size !== undefined && size.bytes >= HEAVY_BYTES) return `${fmtBytes(size.bytes)}${depsWords(size)}, tick to bring; ${roadWords(size)}`;
-  return `${sizeWhy(e, brew)}; ${e.default === "bring" ? "brought by default" : "left out by default"}`;
-}
-
-/** The second detail line: why a row is locked, else what ticking it means. */
-function detailWhy(e: ManifestEntry, lock: "on" | "off" | undefined, brew: BrewTable): string {
-  if (lock === "off") return e.reason ?? "";
-  if (lock === "on") return "always comes along";
-  if (e.rung === "logins") {
-    if (agentName(e) !== "claude") return loginWhy(e, signInFor(agentName(e)));
-    // The OAuth credential is the row's one path that is not a helper; a row of API key sources has no such rule to explain.
-    const oauth = e.paths.some(p => !/^helper:/i.test(p));
-    return [e.detail, oauth ? CLAUDE_LOGIN_WHY : LOGIN_WHY].filter(x => x !== undefined).join("; ");
-  }
-  if (e.rung === "everything" || isMcpRow(e)) return e.detail ?? "";
-  if (e.font !== undefined) return "the app's terminal draws with it when this computer has it installed; unticked, the app uses its own font";
-  if (e.rung === "agents") {
-    if (!hasInstaller(e)) return "its config comes along; no installer yet, install it there yourself";
-    const size = agentSize(e);
-    const config = e.bytes > 0 ? `its config (${fmtBytes(e.bytes)}) comes along` : "its config comes along";
-    return `installs ${size === undefined ? `on the machine (${assumedWords(e)})` : `about ${fmtBytes(size)} on the machine (measured ${MEASURED_ON})`}; ${config}`;
-  }
-  const byDefault = e.default === "bring" ? "brought by default" : "left out by default";
-  if (e.rung === "tools") return e.id.startsWith("tools/brew-tap/") ? `its formula list, a few MB; the formulae carry the size; ${byDefault}` : toolWhy(e, brew);
-  const size = e.bytes > 0 ? `${fmtBytes(e.bytes)}, ` : "";
-  const editor = e.rung === "editors" ? editorWhy(e) : undefined;
-  return `${size}${editor ?? byDefault}`;
-}
-
-/** The first detail line of a row without a path: what stands in for the copy. */
-function whereNothing(e: ManifestEntry): string {
-  const remote = e.rung === "editors" ? remoteEditorFor(e.id) : undefined;
-  if (remote !== undefined) return `listed in ~/${extensionsFile(remote.dir)} on the machine; nothing installs until you connect`;
-  if (isMcpRow(e)) return "defined in the agent's config, which travels with the agent's row";
-  if (e.font !== undefined) return "read from your terminal's config; nothing to copy";
-  if (e.rung === "logins") return "nothing to copy; copy checks the login on the machine";
-  return e.rung === "everything" || e.rung === "editors" ? "nothing to copy" : "reinstalled on the machine";
-}
-
-const hasInstaller = (e: ManifestEntry): boolean => agentInstallsFor([{ ...e, bring: true }], { claude: CLAUDE_INSTALLER }).installs.length > 0;
-
-/** What a tools or agents row puts on the machine, when something measured it; an agent nothing installs weighs what travels. */
-function installBytes(e: ManifestEntry, brew: BrewTable): number | undefined {
-  if (e.rung === "agents") return hasInstaller(e) ? agentSize(e) : e.bytes > 0 ? e.bytes : undefined;
-  return e.id.startsWith("tools/brew-tap/") ? undefined : toolSize(e, brew)?.bytes;
-}
-
-/** A row nothing measured counts at its kind's default; the tilde marks the number as assumed. */
-const assumedHint = (e: ManifestEntry): string => `~${fmtBytes(assumedSize(e).bytes)}`;
-
-/** The second column of a tools or agents row: its weight on the machine, marked when assumed; nothing for a tap or an agent that only travels. */
-function installHint(e: ManifestEntry, brew: BrewTable): string | undefined {
-  const cask = linuxCaskFor(e.id);
-  if (cask !== undefined) return cask.from;
-  const bytes = installBytes(e, brew);
-  if (bytes !== undefined) return fmtBytes(bytes);
-  return e.id.startsWith("tools/brew-tap/") || (e.rung === "agents" && !hasInstaller(e)) ? undefined : assumedHint(e);
-}
-
-export function selectItem(e: ManifestEntry, hintFor?: (width: number) => string, brew: BrewTable = new Map(), more: readonly string[] = []): SelectItem {
-  const minus = e.excludes !== undefined && e.excludes.length > 0 ? ` minus ${e.excludes.join(", ")}` : "";
-  const where = e.paths.length > 0 ? `${e.paths.join(", ")}${minus}` : whereNothing(e);
-  const lock = e.required ? "on" : !isTickable(e) ? "off" : undefined;
-  const installs = e.rung === "tools" || e.rung === "agents";
-  const hint = installs ? installHint(e, brew) : e.bytes > 0 && e.rung !== "logins" ? fmtBytes(e.bytes) : undefined;
-  const tone = installs ? weightTone(installBytes(e, brew) ?? (hint === undefined ? 0 : assumedSize(e).bytes)) : undefined;
-  // A path-shaped app data label is the row's ~/Library parent, a slash, then its name; the parent goes dim. A carve's worded label stays whole.
-  const parent = e.group === APP_DATA_GROUP && e.paths[0] === `~/Library/${e.label}` ? e.label.slice(0, e.label.indexOf("/") + 1) : "";
-  return {
-    id: e.id,
-    label: e.label,
-    ...(hintFor !== undefined ? { hintFor } : hint !== undefined ? { hint } : {}),
-    ...(tone !== undefined ? { tone } : {}),
-    ...(e.group !== undefined ? { group: e.group } : {}),
-    detail: [where, detailWhy(e, lock, brew), ...(e.consent === true && lock === undefined ? [CONSENT_WHY] : []), ...more],
-    ...(lock !== undefined ? { lock } : {}),
-    ...(hasChoices(e) ? { choices: e.rung === "logins" ? LOGIN_CHOICES : CONSENT_CHOICES } : {}),
-    ...(e.group === LARGE_GROUP || e.group === APP_DATA_GROUP ? { own: true } : {}),
-    ...(parent !== "" ? { prefix: parent } : {}),
-  };
-}
-
-/** Lines the shell row's detail pane gives to aliases, and to sourced files, before folding the rest into one. */
-const ALIAS_LINES = 3;
-const SOURCE_LINES = 2;
-
-/** The Shell screen's rows: under each, the aliases whose tool is not coming, judged on the tools screen's own ticks
- * when the person has been there, else on the defaults, and the files it sources that no row starting ticked carries. */
-export function shellItems(entries: readonly ManifestEntry[], all: readonly ManifestEntry[], toolTicks: ReadonlySet<string> | undefined, brew: BrewTable): SelectItem[] {
-  const ticks = toolTicks ?? new Set(all.filter(e => e.rung === "tools" && initialTicks(e)).map(e => e.id));
-  const coming = new Set(all.filter(e => initialTicks(e)).map(e => e.id));
-  return entries.map(e => selectItem(e, undefined, brew, [...aliasLines(e, all, ticks, brew, ALIAS_LINES), ...sourceLines(e, all, coming, brew, SOURCE_LINES)]));
-}
-
-const TOOLCHAIN_ROW = "tools/homebrew-toolchain";
 const asBring = (entries: readonly ManifestEntry[]): ManifestEntry[] => entries.map(e => ({ ...e, bring: true }));
-
-/** The Tools screen's rows: a size beside each, and Homebrew's own toolchain as one line at the top of the
- * Homebrew group, ticked whenever the ticks would put Homebrew on the machine. */
-export function toolsItems(entries: readonly ManifestEntry[], brew: BrewTable): SelectItem[] {
-  const items = entries.map(e => selectItem(e, undefined, brew));
-  const canBrew = entries.some(e => e.id.startsWith("tools/brew/") || e.id.startsWith("tools/brew-tap/") || /^tools\/(pnpm|bun|cargo|go|pipx)\//.test(e.id));
-  if (!canBrew) return items;
-  const group = entries.find(e => e.id.startsWith("tools/brew/") && e.group !== undefined)?.group;
-  const tone = weightTone(BREW_TOOLCHAIN_BYTES);
-  const toolchain: SelectItem = {
-    id: TOOLCHAIN_ROW,
-    label: "Homebrew's toolchain (glibc, gcc)",
-    hint: fmtBytes(BREW_TOOLCHAIN_BYTES),
-    ...(group !== undefined ? { group } : {}),
-    ...(tone !== undefined ? { tone } : {}),
-    detail: ["pulled in by the first Homebrew formula; Linux bottles are built against Homebrew's own glibc", `about ${fmtBytes(BREW_TOOLCHAIN_BYTES)}, measured on Linux ${MEASURED_ON}`],
-    follows: ticks => toolInstallsFor(asBring(entries.filter(e => ticks.has(e.id))), brew).installs.some(t => t.id === "tools/homebrew"),
-  };
-  const at = group === undefined ? 0 : items.findIndex(i => i.group === group);
-  items.splice(at < 0 ? 0 : at, 0, toolchain);
-  return items;
-}
-
-/** The Sign-ins screen's rows: a login whose command is not coming says so in its column, and its detail says why and what brings it. */
-export function loginItems(entries: readonly ManifestEntry[], manifest: Manifest, coming: ReadonlySet<string>, brew: BrewTable): SelectItem[] {
-  return entries.map(e => {
-    const item = selectItem(e, undefined, brew);
-    const tool = loginTool(e, manifest, coming);
-    if (tool === undefined || tool.coming) return item;
-    return { ...item, hint: `${tool.bin} not coming`, detail: [item.detail[0] ?? "", tool.why ?? ""] };
-  });
-}
-
-/** The running total under a screen: the rows ticked on earlier screens plus this one's ticks. */
-function diskUnder(earlier: readonly ManifestEntry[], entries: readonly ManifestEntry[], brew: BrewTable): (ticks: ReadonlySet<string>) => DiskEstimate {
-  return ticks => {
-    const rows = asBring([...earlier, ...entries.filter(e => ticks.has(e.id))]);
-    return estimateDisk(rows, rows.reduce((n, e) => n + e.bytes, 0), brew);
-  };
-}
-
-/** In the red tier the screen holds Enter, and the footer says what to do instead of the parts. */
-const heldDisk = (est: DiskEstimate): boolean => diskTone(est.total, est.room) === "red";
-const tooFull = (rung: Rung): string => `Too full to build. Untick ${rung} you do not need on the machine until the estimate leaves the red; keep headroom for what the build installs.`;
-
-/** Under a screen: the parts of the running total, dim, then the Disk line loud in its weight's colour, directly above the
- * keys. As many slots as the way out takes wrapped at this width, every frame, so the screen does not move under a tick:
- * the parts wrapped over them and empty lines after, or, in the red tier, the whole sentence. */
-function diskFooter(estimate: (ticks: ReadonlySet<string>) => DiskEstimate, rung: Rung): (ticks: ReadonlySet<string>, width: number) => FooterLine[] {
-  return (ticks, width) => {
-    const est = estimate(ticks);
-    const tone = diskTone(est.total, est.room);
-    const slots = wrap(tooFull(rung), width, "");
-    const parts = wrap(diskParts(est), width, "").slice(0, slots.length);
-    const head: FooterLine[] = heldDisk(est) ? slots.map(text => ({ text })) : [...parts, ...slots.slice(parts.length).map(() => "")];
-    return [...head, { text: `Disk: ${diskHead(est)}`, ...(tone !== undefined ? { tone } : {}) }];
-  };
-}
-
-/** The Tools and Agents screens' footer and hold, over one estimate of the ticks. */
-function diskScreen(earlier: readonly ManifestEntry[], entries: readonly ManifestEntry[], brew: BrewTable, rung: Rung): Pick<RungSelectOptions, "footer" | "hold"> {
-  const estimate = diskUnder(earlier, entries, brew);
-  return { footer: diskFooter(estimate, rung), hold: ticks => heldDisk(estimate(ticks)) };
-}
-
-/** The day a file last changed, in this computer's own calendar. */
-function localDay(ms: number): string {
-  if (ms <= 0) return "";
-  const d = new Date(ms);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-/** The everything rows with size, file count, last change and role guess as one aligned second
- * column, read from the terminal width every frame: under 100 columns only size and role, so the
- * label keeps its room. A row with nothing to copy shows its lock instead and does not widen the columns. */
-export function everythingItems(entries: readonly ManifestEntry[]): SelectItem[] {
-  const files = (n: number | undefined): string => (n === undefined || n === 0 ? "" : `${n} file${n === 1 ? "" : "s"}`);
-  const shown = entries.filter(e => e.paths.length > 0);
-  // A row the walk never entered has neither bytes nor files; a measured empty row still has a file.
-  const size = (e: ManifestEntry): string => (e.bytes > 0 || (e.files ?? 0) > 0 ? fmtBytes(e.bytes) : "not measured");
-  const cells = (e: ManifestEntry, wide: boolean): string[] => (wide ? [size(e), files(e.files), localDay(e.mtime ?? 0), e.role ?? ""] : [size(e), e.role ?? ""]);
-  // table() trims each row's tail; one width for every hint keeps the size column in line whatever the role word's length.
-  const hintsFor = (wide: boolean): Map<string, string> => {
-    const hints = table(shown.map(e => cells(e, wide)), wide ? ["right", "right", "left", "left"] : ["right", "left"]);
-    const span = Math.max(0, ...hints.map(h => h.length));
-    return new Map(shown.map((e, i) => [e.id, hints[i]!.padEnd(span)]));
-  };
-  const byLayout = new Map<boolean, Map<string, string>>();
-  const hintAt = (id: string, width: number): string => {
-    const wide = width >= 100;
-    const hints = byLayout.get(wide) ?? hintsFor(wide);
-    byLayout.set(wide, hints);
-    return hints.get(id) ?? "";
-  };
-  return entries.map(e => (e.paths.length > 0 ? selectItem(e, width => hintAt(e.id, width)) : selectItem(e)));
-}
-
-/** The size alone: the screen's one count is the all row's, over the rows that can come, as the found table put it. */
-export function everythingTitle(entries: readonly ManifestEntry[]): string {
-  return `${RUNG_TITLE.everything} (${fmtBytes(entries.reduce((n, e) => n + e.bytes, 0))})`;
-}
-
-/** Each group's size beside its count, so a folded group still says what it weighs. */
-function everythingGroupHint(entries: readonly ManifestEntry[]): (group: string, items: readonly SelectItem[]) => string | undefined {
-  const bytes = new Map(entries.map(e => [e.id, e.bytes]));
-  return (_group, items) => {
-    const n = items.reduce((sum, i) => sum + (bytes.get(i.id) ?? 0), 0);
-    return n > 0 ? fmtBytes(n) : undefined;
-  };
-}
-
-function everythingFooter(entries: readonly ManifestEntry[]): (ticks: ReadonlySet<string>) => string[] {
-  return ticks => {
-    const on = entries.filter(e => ticks.has(e.id));
-    return [`${on.length} ticked${on.length > 0 ? `, ${fmtBytes(on.reduce((n, e) => n + e.bytes, 0))}` : ""}`, ...EVERYTHING_FOOTER];
-  };
-}
 
 const bytesOf = (entries: readonly ManifestEntry[]): string => {
   const n = entries.reduce((sum, e) => sum + e.bytes, 0);
@@ -788,9 +490,7 @@ const bytesOf = (entries: readonly ManifestEntry[]): string => {
 
 /** One row per rung: name, how many rows, their size, and how many can come when some cannot. */
 function detectionNote(manifest: Manifest, source: string): string[] {
-  if (manifest.entries.length === 0) {
-    return ["Nothing found to bring.", "--manifest <path> lists what should come along.", "", "Nothing has left this computer."];
-  }
+  if (manifest.entries.length === 0) return ["Nothing found to bring.", "", "Nothing has left this computer."];
   const rows = RUNGS.map(rung => manifest.entries.filter(e => e.rung === rung))
     .filter(entries => entries.length > 0)
     .map(entries => {
@@ -801,7 +501,7 @@ function detectionNote(manifest: Manifest, source: string): string[] {
 }
 
 /** One row per rung with its ticks and size, the sign-ins under theirs with the answer each
- * got, a credential-shaped row under Everything else when it got an answer other than skip,
+ * got, a credential-shaped row under its rung when it got an answer other than skip,
  * then what uploads and what installs, wrapped under their own column. `upload` is the plan's own
  * count of the bytes that travel; without it the ticked rows' sizes stand in. */
 export function summaryNote(
@@ -837,8 +537,6 @@ export function summaryNote(
   const lines = perRung.flatMap((entries, i) => [rows[i]!, ...entries.flatMap(e => answered.get(e.id) ?? [])]);
   const bring = manifest.entries.filter(e => ticks.has(e.id)).map(e => ({ ...e, bring: true }));
   const agents = agentInstallsFor(bring, { claude: CLAUDE_INSTALLER }).installs.map(a => a.name);
-  // The terminal editors by name; an extension list is a file, not an install.
-  const editors = editorInstallsFor(bring).installs.filter(s => remoteEditorFor(s.id) === undefined).map(s => s.label);
   // Only what the person ticked counts as their tools; Homebrew and its toolchain are named apart.
   const steps = toolInstallsFor(bring, brew).installs;
   const tools = steps.filter(t => ticks.has(t.id)).length;
@@ -849,11 +547,7 @@ export function summaryNote(
   const PIN_WORDS = { none: "checksum recorded on first install", same: "checksum checked against the first install", moved: "new release, checksum recorded" } as const;
   const pinWords = [...new Set(roads.map(r => PIN_WORDS[pinState(r.pin, r.source)]))].join("; ");
   const fromReleases = roads.length === 0 ? "" : `, ${roads.length} from ${roads.length === 1 ? "its" : "their"} GitHub release${roads.length === 1 ? "" : "s"} (${pinWords})`;
-  const fromCasks = bring.flatMap(e => {
-    const cask = e.rung === "tools" && cliRoad(e) === undefined ? linuxCaskFor(e.id) : undefined;
-    return cask === undefined ? [] : [`, ${e.label} from ${cask.from} (${PIN_WORDS[caskPinState(cask, e)]})`];
-  });
-  const installs = [...agents, ...editors, ...(tools > 0 ? [`${tools} tool${tools === 1 ? "" : "s"}${toolchain}${fromReleases}${fromCasks.join("")}`] : []), ...(servers > 0 ? [`${servers} MCP server${servers === 1 ? "" : "s"}`] : [])];
+  const installs = [...agents, ...(tools > 0 ? [`${tools} tool${tools === 1 ? "" : "s"}${toolchain}${fromReleases}`] : []), ...(servers > 0 ? [`${servers} MCP server${servers === 1 ? "" : "s"}`] : [])];
   const est = estimateDisk(bring, upload, brew);
   // The Disk line takes its weight's colour here too: the card is the last thing read before the confirm.
   const closing: [string, string, Tone | undefined][] = [
@@ -870,64 +564,6 @@ function bootQuestion(recipe: GoldenRecipe, pricing: BackendPricing): string {
   const size = { cpu: recipe.cpu ?? pricing.defaultSize.cpu, memMb: recipe.memMb ?? pricing.defaultSize.memMb };
   const rate = pricing.rateUsdPerHour(size);
   return `Boot a ${size.cpu} vCPU, ${Math.round(size.memMb / 1024)} GB builder on Solari and build this? About $${rate.toFixed(2)}/hr while it runs.`;
-}
-
-/** The saved manifest's screens, one per rung. */
-async function tickRungs(manifest: Manifest, io: InitIO, brew: BrewTable): Promise<Answers | "cancel"> {
-  const answers = new Map<Rung, Answers>();
-  const rungsWithItems = RUNGS.filter(r => manifest.entries.some(e => e.rung === r));
-  let i = 0;
-  while (i < RUNGS.length) {
-    const rung = RUNGS[i]!;
-    const agents = answers.get("agents")?.ticks ?? new Set<string>();
-    const entries = manifest.entries.filter(e => e.rung === rung && loginShown(e, manifest, agents));
-    const counter = `${i + 1}/${RUNGS.length}`;
-    if (entries.length === 0) {
-      log.message(`${RUNG_TITLE[rung]}${GUTTER}${dim(counter)}\n${dim("nothing found")}`, { output: io.output, symbol: styleText("green", S_STEP_SUBMIT) });
-      i += 1;
-      continue;
-    }
-    const prior = answers.get(rung);
-    const earlier = [...answers].filter(([r]) => r !== rung).flatMap(([, a]) => manifest.entries.filter(e => a.ticks.has(e.id)));
-    const coming = new Set(earlier.map(e => e.id));
-    const fresh = defaultAnswers(manifest, coming);
-    const groups = new Map((manifest.groups ?? []).filter(g => g.rung === rung).map(g => [g.group, g]));
-    const items = rung === "everything" ? everythingItems(entries) : rung === "tools" ? toolsItems(entries, brew) : rung === "shell" ? shellItems(entries, manifest.entries, answers.get("tools")?.ticks, brew) : rung === "logins" ? loginItems(entries, manifest, coming, brew) : entries.map(e => selectItem(e, undefined, brew));
-    const result = await rungSelect({
-      title: rung === "everything" ? everythingTitle(entries) : RUNG_TITLE[rung],
-      counter,
-      items,
-      initial: prior?.ticks ?? fresh.ticks,
-      initialChoices: prior?.choices ?? fresh.choices,
-      groupHint: rung === "everything" ? everythingGroupHint(entries) : g => groups.get(g)?.hint,
-      groupNote: g => groups.get(g)?.note,
-      ...(rung === "everything" ? { footer: everythingFooter(entries), detailLines: 3, folded: [APP_DATA_GROUP] } : rung === "tools" || rung === "agents" ? diskScreen(earlier, entries, brew, rung) : {}),
-      ...(rung === "editors" ? { intro: editorsIntro(entries) } : {}),
-      ...(rung === "shell" ? { detailLines: Math.max(...items.map(i => i.detail.length)) } : {}),
-      input: io.input,
-      output: io.output,
-    });
-    if (result.kind === "cancel") return "cancel";
-    answers.set(rung, { ticks: result.ticks, choices: result.choices });
-    // A sign-in chosen for a command that is not coming brings the command: its tools row is ticked here, and said so.
-    const tools = answers.get("tools");
-    if (rung === "logins" && result.kind === "next" && tools !== undefined) {
-      const added = tickLoginTools(manifest, result.choices, tools.ticks);
-      if (added.length > 0) log.message(dim(`${TICKED_FOR_LOGINS}${added.join(", ")}`), { output: io.output, symbol: dim(S_BAR) });
-    }
-    if (result.kind === "back") {
-      const idx = rungsWithItems.indexOf(rung);
-      i = idx > 0 ? RUNGS.indexOf(rungsWithItems[idx - 1]!) : i;
-      continue;
-    }
-    i += 1;
-  }
-  const all: Answers = { ticks: new Set(), choices: new Map() };
-  for (const a of answers.values()) {
-    for (const id of a.ticks) all.ticks.add(id);
-    for (const [id, c] of a.choices) all.choices.set(id, c);
-  }
-  return all;
 }
 
 function isCapRefusal(e: unknown): boolean {
@@ -968,34 +604,27 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const interactive = io.isTTY && !opts.yes;
 
   let manifest: Manifest;
-  let source: string;
-  // The catalog recipe the screens start from: the file given, else read off this computer; none with a saved manifest, which carries its own ticks.
-  let catalogRecipe: Recipe | undefined;
+  // The catalog recipe the screens start from: the file given, else read off this computer once the rows are in.
+  let given: Recipe | undefined;
   const spinner = spin(io.output, "Reading this computer", io.isTTY);
   const counts: string[] = [];
   const notes: string[] = [];
   try {
-    if (opts.recipeFile !== undefined) catalogRecipe = loadRecipe(opts.recipeFile);
-    if (opts.manifestPath !== undefined) {
-      manifest = loadManifest(opts.manifestPath);
-      source = `listed in ${opts.manifestPath}`;
-    } else {
-      manifest = await opts.collect(
-        (rung, rows) => {
-          counts.push(`${RUNG_TITLE[rung]} ${rows}`);
-          spinner.detail(counts.join(", "));
-        },
-        note => notes.push(note),
-      );
-      source = catalogRecipe === undefined ? "found on this computer" : "found on this computer, ticked by the recipe";
-    }
+    if (opts.recipeFile !== undefined) given = loadRecipe(opts.recipeFile);
+    manifest = await opts.collect((rung, rows) => {
+      counts.push(`${RUNG_TITLE[rung]} ${rows}`);
+      spinner.detail(counts.join(", "));
+    });
   } catch (e) {
     spinner.stop();
     log.error(e instanceof Error ? e.message : String(e), out);
     return { code: 1 };
   }
   spinner.stop();
-  if (opts.manifestPath === undefined && catalogRecipe === undefined) {
+  const source = given === undefined ? "found on this computer" : "found on this computer, ticked by the recipe";
+  let catalogRecipe: Recipe;
+  if (given !== undefined) catalogRecipe = given;
+  else {
     const histories = spin(io.output, "Reading what your agents used", io.isTTY);
     try {
       catalogRecipe = await opts.recipe(h => histories.detail(historyLine(h)));
@@ -1022,16 +651,15 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     }
     sizes.stop();
   }
-  // A heavy formula starts unticked, judged on the sizes just read.
-  manifest = { ...manifest, entries: weighed(linuxCaskRows(withoutAgentTools(manifest.entries)), brew) };
+  manifest = { ...manifest, entries: withoutAgentTools(manifest.entries) };
   // The card counts what the collector found; the catalog's bare rows join the manifest after it.
   const found = manifest;
-  if (catalogRecipe !== undefined) manifest = applyRecipe(withCatalogAgents(manifest), catalogRecipe);
+  manifest = applyRecipe(withCatalogAgents(manifest), catalogRecipe);
   if (notes.length > 0) log.warn(notes.join("\n"), out);
   card("Found on this computer", detectionNote(found, source), io.output);
 
   let answers: Answers;
-  if (interactive && catalogRecipe !== undefined) {
+  if (interactive) {
     const picked = await pickScreens({ manifest, recipe: catalogRecipe, brew, from: opts.recipeFile === undefined ? "agents" : "logins", input: io.input, output: io.output });
     if (picked === "cancel") {
       cancel("Nothing was changed.", out);
@@ -1046,13 +674,6 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       if (choice === "copy") answers.ticks.add(id);
       else answers.ticks.delete(id);
     }
-  } else if (interactive) {
-    const picked = await tickRungs(manifest, io, brew);
-    if (picked === "cancel") {
-      cancel("Nothing was changed.", out);
-      return { code: 1 };
-    }
-    answers = picked;
   } else {
     answers = defaultAnswers(manifest);
     // Nobody is here to click macOS's consent dialog: a login the Keychain holds signs in on the machine
@@ -1109,29 +730,22 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   card("Summary", summaryNote(offered, ticks, choices, widthOf(io.output), uploadBytes, brew), io.output);
   saveRecipe(path, manifest, ticks, choices);
   // The small recipe beside it: the catalog ids with the ticks and answers as the screens left them, the form wsp init --recipe reads.
-  const small = catalogRecipe === undefined ? undefined : { path: smallRecipePath(opts.statePath), recipe: catalogRecipe };
-  if (small !== undefined) saveSmallRecipe(small.path, recipeWithAnswers(small.recipe, choices));
-  log.step(`Recipe saved to ${path}${small !== undefined ? ` and ${small.path}` : ""}`, out);
+  const small = { path: smallRecipePath(opts.statePath), recipe: catalogRecipe };
+  saveSmallRecipe(small.path, recipeWithAnswers(small.recipe, choices));
+  log.step(`Recipe saved to ${path} and ${small.path}`, out);
   // The whole recipe against the disk, before the account is read or anything boots: the tools stage would
   // otherwise fill the disk after the machine billed.
   const disk = estimateDisk(asBring(bring), uploadBytes, brew);
-  // A headless run stops where the screens hold: in the red tier, with the screens' own sentence.
-  if (!interactive && heldDisk(disk)) {
-    log.error(`${tooFull("tools")} This recipe needs about ${fmtBytes(disk.total)} on the machine, ${Math.round((disk.total / disk.room) * 100)} percent of the ${fmtBytes(disk.room)} the ${BUILDER_DISK_GB} GB builder leaves.`, out);
-    cancel(`Nothing was booted. Set bring to false on rows in ${path} until the estimate is under ${fmtBytes(disk.room * DISK_HOLD_SHARE)}, then run wsp init --yes --manifest ${path}; the recipe is kept.`, out);
-    return { code: 1 };
-  }
   if (disk.over > 0) {
     log.error(`This recipe needs about ${fmtBytes(disk.total)} on the machine; the ${BUILDER_DISK_GB} GB disk leaves ${fmtBytes(disk.room)} after the base image and ${fmtBytes(TOOLS_DISK_FLOOR)} of headroom.`, out);
-    cancel(`Nothing was booted. Untick about ${fmtBytes(disk.over)} of tools, agents or files (each screen shows sizes and the total) and run wsp init again; the recipe is kept.`, out);
+    cancel(`Nothing was booted. Untick about ${fmtBytes(disk.over)} of tools or agents under What they need and run wsp init again; the recipe is kept.`, out);
     return { code: 1 };
   }
   // Judged on the recipe's own sizes, before the account is read or anything boots: the builder's disk
   // check would refuse the same files after the machine billed.
   if (uploadBytes > PACK_BUDGET_BYTES) {
     log.error(`Your files add up to ${fmtBytes(uploadBytes)}; the machine's disk leaves ${fmtBytes(PACK_BUDGET_BYTES)} for them beside the tools and agents.`, out);
-    const fix = interactive ? "Untick the larger rows (each screen shows sizes) and run wsp init again" : `Set bring to false on the larger rows in ${path}, then run wsp init --yes --manifest ${path}`;
-    cancel(`Nothing was booted. ${fix}; the recipe is kept.`, out);
+    cancel(`Nothing was booted. The rows and their sizes are listed in ${path}; shrink or remove the largest on this computer and run wsp init again. The recipe is kept.`, out);
     return { code: 1 };
   }
   let recipe = goldenRecipeFor(bring, opts.keys, { import: imp });
@@ -1212,12 +826,16 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   if (read.dropped.length > 0) log.warn(read.dropped.map(d => `${label(d.id)}: ${d.left} (${d.reason}).`).join("\n"), out);
   const left = new Map(read.dropped.map(d => [d.id, read.dropped.filter(x => x.id === d.id).map(x => x.left).join("; ")]));
   if (read.refused.length > 0) {
-    for (const r of read.refused) choices.set(r.id, "machine");
+    // A sign-in on the machine is an answer, not a tick: the row leaves the ticks as the screens would have left it.
+    for (const r of read.refused) {
+      choices.set(r.id, "machine");
+      ticks.delete(r.id);
+    }
     log.warn(read.refused.map(r => `${label(r.id)}: ${r.command !== undefined ? `the ${r.service} helper failed` : "Keychain read failed"} (${r.reason}); changed to sign in on the machine.`).join("\n"), out);
     saveRecipe(path, manifest, ticks, choices);
-    if (small !== undefined) saveSmallRecipe(small.path, recipeWithAnswers(small.recipe, choices));
+    saveSmallRecipe(small.path, recipeWithAnswers(small.recipe, choices));
     // The flipped rows change the recipe hash; the builder must carry the hash the saved recipe now has,
-    // so wsp init --manifest on that file attaches to it later.
+    // so the next wsp init on the same answers attaches to it.
     bring = bringing();
     imp = importOf(bring);
     recipe = goldenRecipeFor(bring, opts.keys, { import: imp });
@@ -1266,7 +884,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   if (attach !== undefined) {
     log.step(`Attaching to your earlier builder: ${describeBuilder(attach)}. Nothing new boots; stages already applied are skipped.`, out);
   } else if (stop.length === 0 && interactive) {
-    const go = await confirmPrompt({ message: question, hint: "No costs nothing and keeps the recipe for wsp init --manifest.", input: io.input, output: io.output });
+    const go = await confirmPrompt({ message: question, hint: "No costs nothing and keeps the recipe for wsp init --recipe.", input: io.input, output: io.output });
     if (isCancel(go) || !go) {
       cancel("Nothing was booted. The recipe is kept.", out);
       return { code: 1 };
@@ -1324,7 +942,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     const line =
       e instanceof PrepareStoppedError && e.builderId !== undefined
         ? e.kept
-          ? `Stopped ${where}. Your earlier builder ${attach?.name ?? GOLDEN_NAME} (${e.builderId}) was not stopped: it has a first life worth keeping and stays up at about $${opts.pricing.rateUsdPerHour(attach?.size ?? opts.pricing.defaultSize).toFixed(2)}/hr. wsp init --manifest ${path} attaches to it again; the sweep stops it once it is six hours old.`
+          ? `Stopped ${where}. Your earlier builder ${attach?.name ?? GOLDEN_NAME} (${e.builderId}) was not stopped: it has a first life worth keeping and stays up at about $${opts.pricing.rateUsdPerHour(attach?.size ?? opts.pricing.defaultSize).toFixed(2)}/hr. wsp init --recipe ${small.path} attaches to it again; the sweep stops it once it is six hours old.`
           : e.left === undefined
             ? `Stopped ${where}. Builder ${e.builderId} is gone; nothing is billing.`
             : `Stopped ${where}. Builder ${e.builderId} did not stop (${e.left}); ${SWEEP}`
@@ -1398,7 +1016,6 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const outcomes = await signInStage({
     logins: staged,
     left,
-    secrets: new Map(secretOutcomes.filter(r => r.state === "set").map(r => [r.name, r.path])),
     dial,
     terminal: { input: io.input, output: io.output },
     ...(skipWhy !== undefined ? { skipWhy } : {}),
@@ -1417,7 +1034,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   if (interactive) {
     const go = await confirmPrompt({ message: `Seal this machine as golden v${next}?`, hint: "Enter seals: a snapshot, then a fork to prove it. No leaves the machine up.", initialValue: true, input: io.input, output: io.output });
     if (isCancel(go) || !go) {
-      cancel(`Nothing was sealed. Builder ${builder.id} stays up at about $${opts.pricing.rateUsdPerHour(builder.size).toFixed(2)}/hr; wsp init --manifest ${path} attaches to it again, and the sweep stops it once it is six hours old.`, out);
+      cancel(`Nothing was sealed. Builder ${builder.id} stays up at about $${opts.pricing.rateUsdPerHour(builder.size).toFixed(2)}/hr; wsp init --recipe ${small.path} attaches to it again, and the sweep stops it once it is six hours old.`, out);
       return leave(1);
     }
   } else {

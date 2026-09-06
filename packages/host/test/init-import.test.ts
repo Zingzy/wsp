@@ -6,7 +6,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ManifestEntry } from "@wsp/collect";
@@ -14,7 +14,6 @@ import { NODE_RELEASES, planFiles } from "@wsp/engine";
 import { afterEach, describe, expect, it } from "vitest";
 import { GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
 import { digestOf, importFor, importResultPath, keychainLogins, keychainReader, packPlan, readSecrets, statOf, type SecretReader } from "../src/init-import.js";
-import { GUARD_SOURCE_COMMENT, GUARD_SOURCE_LINE } from "../src/init-aliases.js";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -130,7 +129,7 @@ describe("packPlan", () => {
     symlinkSync(join(home, "nowhere"), join(home, ".config", "tool", "gone"));
     symlinkSync(join(home, ".config", "tool"), join(home, ".config", "tool", "self"));
     const plan = planFiles(
-      [row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"] }), row({ rung: "editors", id: "editors/tool", paths: ["~/.config/tool"] })],
+      [row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"] }), row({ rung: "shell", id: "shell/tool", paths: ["~/.config/tool"] })],
       { home, stat: statOf, platform: "darwin" },
     );
     expect(plan.files.map(f => [f.dest, f.dir])).toEqual([[".zshrc", false], [".config/tool", true]]);
@@ -144,10 +143,10 @@ describe("packPlan", () => {
     expect(readFileSync(join(dir, ".zshrc"), "utf8")).toBe("export FROM=dotfiles\n");
     expect(readFileSync(join(dir, ".config", "tool", "fine"), "utf8")).toBe("export FROM=dotfiles\n");
     expect([...packed.skipped].sort((a, b) => a.path.localeCompare(b.path))).toEqual([
-      { id: "editors/tool", path: "~/.config/tool/gone", note: "a link whose target is gone" },
-      { id: "editors/tool", path: "~/.config/tool/key", note: "a link to ~/.ssh/id_ed25519: private key, never copied" },
-      { id: "editors/tool", path: "~/.config/tool/outside", note: `a link to ${realpathSync("/etc/hosts")}, outside your home directory` },
-      { id: "editors/tool", path: "~/.config/tool/self", note: "a link into its own directory" },
+      { id: "shell/tool", path: "~/.config/tool/gone", note: "a link whose target is gone" },
+      { id: "shell/tool", path: "~/.config/tool/key", note: "a link to ~/.ssh/id_ed25519: private key, never copied" },
+      { id: "shell/tool", path: "~/.config/tool/outside", note: `a link to ${realpathSync("/etc/hosts")}, outside your home directory` },
+      { id: "shell/tool", path: "~/.config/tool/self", note: "a link into its own directory" },
     ]);
     // The laptop's own link and target are untouched.
     expect(statSync(join(home, "dotfiles", "zshrc")).mode & 0o777).toBe(0o644);
@@ -159,11 +158,11 @@ describe("packPlan", () => {
     writeFileSync(join(home, "dotfiles", "config", "tool", "conf"), "a = 1\n");
     symlinkSync(join(home, "dotfiles", "config"), join(home, ".config2"));
     symlinkSync(join(home, ".config2", "tool"), join(home, ".config2", "tool", "self"));
-    const plan = planFiles([row({ rung: "editors", id: "editors/tool", paths: ["~/.config2/tool"] })], { home, stat: statOf, platform: "darwin" });
+    const plan = planFiles([row({ rung: "shell", id: "shell/tool", paths: ["~/.config2/tool"] })], { home, stat: statOf, platform: "darwin" });
     expect(plan.files.map(f => f.dest)).toEqual([".config2/tool"]);
     const packed = await packPlan(plan, { secrets: new Map(), home });
     expect(listTar(packed.tar).map(e => e.path).filter(p => p !== "").sort()).toEqual([".config2/", ".config2/tool/", ".config2/tool/conf"]);
-    expect(packed.skipped).toEqual([{ id: "editors/tool", path: "~/.config2/tool/self", note: "a link into its own directory" }]);
+    expect(packed.skipped).toEqual([{ id: "shell/tool", path: "~/.config2/tool/self", note: "a link into its own directory" }]);
   });
 
   it("a cycle of links between sibling directories inside a copied directory is left out, not walked to ELOOP", async () => {
@@ -174,11 +173,11 @@ describe("packPlan", () => {
     writeFileSync(join(home, ".config", "b", "b.toml"), "b\n");
     symlinkSync(join(home, ".config", "b"), join(home, ".config", "a", "link"));
     symlinkSync(join(home, ".config", "a"), join(home, ".config", "b", "link"));
-    const plan = planFiles([row({ rung: "editors", id: "editors/a", paths: ["~/.config/a"] })], { home, stat: statOf, platform: "darwin" });
+    const plan = planFiles([row({ rung: "shell", id: "shell/a", paths: ["~/.config/a"] })], { home, stat: statOf, platform: "darwin" });
     const packed = await packPlan(plan, { secrets: new Map(), home });
     // b is reached once through a's link and shipped; b's link back to a is the cycle and stays out.
     expect(listTar(packed.tar).map(e => e.path).filter(p => p !== "").sort()).toEqual([".config/", ".config/a/", ".config/a/a.toml", ".config/a/link/", ".config/a/link/b.toml"]);
-    expect(packed.skipped).toEqual([{ id: "editors/a", path: "~/.config/a/link/link", note: "a link into a directory already copied" }]);
+    expect(packed.skipped).toEqual([{ id: "shell/a", path: "~/.config/a/link/link", note: "a link into a directory already copied" }]);
   });
 
   it("parent directories the pack creates keep the laptop's mode, also when a rewrite renames or shortens the path", async () => {
@@ -400,7 +399,7 @@ describe("packPlan", () => {
     const read = await readSecrets(keychainLogins(rows, "darwin", home), reader({ [HELPER]: "sk-ant-x-helper" }));
     const imp = importFor(rows, { home, secrets: read.values, platform: "darwin" });
     expect(imp.files?.volatile?.paths).toEqual(["~/.claude.json", "Helper: ~/.claude/settings.json"]);
-    const first = await imp.files!.pack({ arch: "x86_64" });
+    const first = await imp.files!.pack();
     expect(readFileSync(join(extract(first.tar), ".claude-cfg", "settings.json"), "utf8")).toBe('{\n  "apiKeyHelper": "cat /root/.claude-cfg/anthropic-api-key",\n  "model": "opus"\n}\n');
     const again = await imp.files!.volatile!.pack();
     expect(listTar(again.tar).map(e => e.path).filter(p => p !== "" && !p.endsWith("/")).sort()).toEqual([".claude-cfg/.claude.json", ".claude-cfg/anthropic-api-key"]);
@@ -408,7 +407,7 @@ describe("packPlan", () => {
     // With no settings.json among the plan's files both packs write the one naming the key file, the same bytes over the same bytes.
     const bare = importFor([{ ...rows[0]!, paths: ["~/.claude.json"], volatile: ["~/.claude.json"] }, rows[1]!], { home, secrets: read.values, platform: "darwin" });
     const stub = '{\n  "apiKeyHelper": "cat /root/.claude-cfg/anthropic-api-key"\n}\n';
-    expect(readFileSync(join(extract((await bare.files!.pack({ arch: "x86_64" })).tar), ".claude-cfg", "settings.json"), "utf8")).toBe(stub);
+    expect(readFileSync(join(extract((await bare.files!.pack()).tar), ".claude-cfg", "settings.json"), "utf8")).toBe(stub);
     expect(readFileSync(join(extract((await bare.files!.volatile!.pack()).tar), ".claude-cfg", "settings.json"), "utf8")).toBe(stub);
   });
 
@@ -507,19 +506,20 @@ describe("packPlan", () => {
   });
 });
 
-describe("packPlan: everything rows", () => {
+describe("packPlan: excludes and consent rows", () => {
   function demo(home: string): void {
     mkdirSync(join(home, ".config", "demo", "cache"), { recursive: true });
     writeFileSync(join(home, ".config", "demo", "settings.toml"), "theme = 1\n");
     writeFileSync(join(home, ".config", "demo", "cache", "blob"), "x".repeat(2_000));
-    writeFileSync(join(home, ".demo-token"), "fake-token\n", { mode: 0o600 });
+    mkdirSync(join(home, ".config", "gsc"), { recursive: true });
+    writeFileSync(join(home, ".config", "gsc", "creds.json"), "fake-token\n", { mode: 0o600 });
   }
 
   it("copies a row's paths minus its excludes: the excluded subtree is not in the archive and is not a skip", async () => {
     const home = laptop();
     demo(home);
     const plan = planFiles(
-      [row({ rung: "everything", id: "everything/.config/demo", paths: ["~/.config/demo"], excludes: ["~/.config/demo/cache"], bytes: 10 })],
+      [row({ rung: "shell", id: "shell/demo", paths: ["~/.config/demo"], excludes: ["~/.config/demo/cache"], bytes: 10 })],
       { home, stat: statOf, platform: "darwin" },
     );
     expect(plan.files.map(f => f.excludes)).toEqual([[join(home, ".config", "demo", "cache")]]);
@@ -534,13 +534,13 @@ describe("packPlan: everything rows", () => {
   it("a credential-shaped row travels only with copy as its answer, at 0600; ticked without it, it is a note and nothing is packed", async () => {
     const home = laptop();
     demo(home);
-    const token = (over: Partial<ManifestEntry>): ManifestEntry => row({ rung: "everything", id: "everything/.demo-token", paths: ["~/.demo-token"], bytes: 11, consent: true, ...over });
+    const token = (over: Partial<ManifestEntry>): ManifestEntry => row({ rung: "agents", id: "agents/mcp/claude/gsc", paths: ["~/.config/gsc/creds.json"], bytes: 11, consent: true, ...over });
     const noAnswer = importFor([token({})], { home, secrets: new Map(), platform: "darwin" });
-    expect(noAnswer.files).toMatchObject({ count: 0, skipped: [{ id: "everything/.demo-token", path: "~/.demo-token", note: "credential-shaped; not copied without your answer on its row" }] });
+    expect(noAnswer.files).toMatchObject({ count: 0, skipped: [{ id: "agents/mcp/claude/gsc", path: "~/.config/gsc/creds.json", note: "credential-shaped; not copied without your answer on its row" }] });
     const yes = importFor([token({ choice: "copy" })], { home, secrets: new Map(), platform: "darwin" });
-    expect(yes.files).toMatchObject({ count: 1, skipped: [], rungs: { everything: 1 } });
-    const packed = await yes.files!.pack({ arch: "x86_64" });
-    const entry = listTar(packed.tar).find(e => e.path === ".demo-token");
+    expect(yes.files).toMatchObject({ count: 1, skipped: [], rungs: { agents: 1 } });
+    const packed = await yes.files!.pack();
+    const entry = listTar(packed.tar).find(e => e.path === ".config/gsc/creds.json");
     expect(entry?.mode).toMatch(/^-rw-------/);
     expect(packed.skipped).toEqual([]);
   });
@@ -595,7 +595,7 @@ describe("packPlan: rc files with secret exports", () => {
     writeFileSync(join(home, ".dotfiles", "README.md"), "export NOT_RC_TOKEN=kept-here\n");
     symlinkSync(join(home, ".dotfiles", "zshrc"), join(home, ".zshrc"));
     const plan = planFiles(
-      [row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"] }), row({ rung: "everything", id: "everything/.dotfiles", paths: ["~/.dotfiles"] })],
+      [row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"] }), row({ rung: "shell", id: "shell/dotfiles", paths: ["~/.dotfiles"] })],
       { home, stat: statOf, platform: "darwin" },
     );
     const packed = await packPlan(plan, { secrets: new Map(), home });
@@ -626,8 +626,8 @@ describe("packPlan: rc files with secret exports", () => {
     writeFileSync(join(home, ".config", "fish", "config.fish"), "set -gx FISH_KEY fake-fish\nset -g theme x\n");
     const plan = planFiles(
       [
-        row({ rung: "everything", id: "everything/.dotfiles", paths: ["~/.dotfiles"] }),
-        row({ rung: "everything", id: "everything/.config/app", paths: ["~/.config/app"] }),
+        row({ rung: "shell", id: "shell/dotfiles", paths: ["~/.dotfiles"] }),
+        row({ rung: "shell", id: "shell/app", paths: ["~/.config/app"] }),
         row({ rung: "shell", id: "shell/fish", paths: ["~/.config/fish"] }),
       ],
       { home, stat: statOf, platform: "darwin" },
@@ -639,109 +639,6 @@ describe("packPlan: rc files with secret exports", () => {
     expect(readFileSync(join(dir, ".config", "app", ".profile"), "utf8")).toBe("export DEEP_KEY=kept-deep\nset -o vi\n");
     expect(readFileSync(join(dir, ".config", "app", "shell", ".bashrc"), "utf8")).toBe("export DEEPER_KEY=kept-deeper\n");
     expect(packed.cut).toEqual([{ path: "~/.config/fish/config.fish", names: ["FISH_KEY"] }, { path: "~/.dotfiles/.zshrc", names: ["SHALLOW_KEY"] }]);
-  });
-
-  it("inside a dotfiles-manager home a plain copy is stripped by its mapped name: ~/.dotfiles/zshrc and chezmoi's dot_zshrc, not a README", async () => {
-    const home = laptop();
-    writeFileSync(join(home, ".zshrc"), "export PATH=$HOME/bin:$PATH\nexport OWN_KEY=fake-own\n");
-    mkdirSync(join(home, ".dotfiles", "zsh"), { recursive: true });
-    writeFileSync(join(home, ".dotfiles", "zshrc"), "export PATH=$HOME/bin:$PATH\nexport PLAIN_KEY=fake-plain\n");
-    writeFileSync(join(home, ".dotfiles", "zsh", "aliases"), "alias g=git\nexport ALIAS_TOKEN=fake-alias\n");
-    writeFileSync(join(home, ".dotfiles", "README.md"), "export README_TOKEN=kept\n");
-    mkdirSync(join(home, ".local", "share", "chezmoi", "dot_config", "fish"), { recursive: true });
-    writeFileSync(join(home, ".local", "share", "chezmoi", "dot_zshrc"), "export CHEZ_KEY=fake-chez\nalias ll='ls -l'\n");
-    writeFileSync(join(home, ".local", "share", "chezmoi", "dot_config", "fish", "config.fish"), "set -gx CHEZ_FISH_KEY fake-chez-fish\nset -g theme x\n");
-    writeFileSync(join(home, ".local", "share", "chezmoi", "dot_gitconfig"), "[user]\n\tname = Me\n");
-    const plan = planFiles(
-      [
-        row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"] }),
-        row({ rung: "everything", id: "everything/.dotfiles", paths: ["~/.dotfiles"] }),
-        row({ rung: "everything", id: "everything/.local/share/chezmoi", paths: ["~/.local/share/chezmoi"] }),
-      ],
-      { home, stat: statOf, platform: "darwin" },
-    );
-    const packed = await packPlan(plan, { secrets: new Map(), home });
-    const dir = extract(packed.tar);
-    expect(readFileSync(join(dir, ".zshrc"), "utf8")).toBe("export PATH=$HOME/bin:$PATH\n");
-    expect(readFileSync(join(dir, ".dotfiles", "zshrc"), "utf8")).toBe("export PATH=$HOME/bin:$PATH\n");
-    expect(readFileSync(join(dir, ".dotfiles", "zsh", "aliases"), "utf8")).toBe("alias g=git\n");
-    expect(readFileSync(join(dir, ".dotfiles", "README.md"), "utf8")).toBe("export README_TOKEN=kept\n");
-    expect(readFileSync(join(dir, ".local", "share", "chezmoi", "dot_zshrc"), "utf8")).toBe("alias ll='ls -l'\n");
-    expect(readFileSync(join(dir, ".local", "share", "chezmoi", "dot_config", "fish", "config.fish"), "utf8")).toBe("set -g theme x\n");
-    expect(readFileSync(join(dir, ".local", "share", "chezmoi", "dot_gitconfig"), "utf8")).toBe("[user]\n\tname = Me\n");
-    const bytes = gunzipSync(packed.tar);
-    for (const v of ["fake-own", "fake-plain", "fake-alias", "fake-chez", "fake-chez-fish"]) expect(bytes.includes(v)).toBe(false);
-    expect(packed.cut).toEqual([
-      { path: "~/.dotfiles/zsh/aliases", names: ["ALIAS_TOKEN"] },
-      { path: "~/.dotfiles/zshrc", names: ["PLAIN_KEY"] },
-      { path: "~/.local/share/chezmoi/dot_config/fish/config.fish", names: ["CHEZ_FISH_KEY"] },
-      { path: "~/.local/share/chezmoi/dot_zshrc", names: ["CHEZ_KEY"] },
-      { path: "~/.zshrc", names: ["OWN_KEY"] },
-    ]);
-  });
-
-  it("the mapping reaches chezmoi's attribute prefixes and .tmpl, fish's conf.d, a stow directory the row names, and one level of what an rc sources", async () => {
-    const home = laptop();
-    writeFileSync(join(home, ".zshrc"), "source ~/.zsh/secrets.zsh\nsource ~/.zsh/*.zsh\nexport PATH=$HOME/bin:$PATH\n");
-    mkdirSync(join(home, ".zsh"));
-    writeFileSync(join(home, ".zsh", "secrets.zsh"), "export SRC_KEY=fake-sourced\nsource ~/.zsh/level2.zsh\nalias s=ls\n");
-    writeFileSync(join(home, ".zsh", "level2.zsh"), "export L2_KEY=kept-two-levels-down\n");
-    mkdirSync(join(home, ".config", "fish", "conf.d"), { recursive: true });
-    writeFileSync(join(home, ".config", "fish", "conf.d", "work.fish"), "set -gx WORK_KEY fake-confd\nset -g theme x\n");
-    writeFileSync(join(home, ".config", "fish", "conf.d", "notes.txt"), "set -gx NOTE_KEY kept-not-fish\n");
-    const chez = join(home, ".local", "share", "chezmoi");
-    mkdirSync(join(chez, "exact_dot_config", "fish", "conf.d"), { recursive: true });
-    mkdirSync(join(chez, "dot_config", "app"), { recursive: true });
-    writeFileSync(join(chez, "private_dot_zshrc"), "export PRIV_KEY=fake-priv\nalias a=b\n");
-    writeFileSync(join(chez, "dot_zshrc.tmpl"), "export TMPL_KEY={{ fake-tmpl }}\nalias c=d\n");
-    writeFileSync(join(chez, "exact_dot_config", "fish", "conf.d", "private_work.fish.tmpl"), "set -gx CHEZ_CONFD_KEY fake-chez-confd\nset -g y 1\n");
-    writeFileSync(join(chez, "dot_config", "app", "settings"), "export APP_TOKEN=kept-not-rc\n");
-    writeFileSync(join(chez, "private_dot_gitconfig"), "[user]\n\tname = Me\n");
-    mkdirSync(join(home, "code", "dots", "zsh"), { recursive: true });
-    writeFileSync(join(home, "code", "dots", "zsh", ".zshrc"), "export STOW_KEY=fake-stow\nalias e=f\n");
-    writeFileSync(join(home, "code", "dots", "zsh", "aliases"), "export STOW_ALIAS_TOKEN=fake-stow-alias\n");
-    mkdirSync(join(home, "code", "other"));
-    writeFileSync(join(home, "code", "other", "zshrc"), "export OTHER_KEY=kept-not-a-manager-home\n");
-    const imp = importFor(
-      [
-        row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"] }),
-        row({ rung: "shell", id: "shell/fish", paths: ["~/.config/fish"] }),
-        row({ rung: "everything", id: "everything/.zsh", paths: ["~/.zsh"] }),
-        row({ rung: "everything", id: "everything/.local/share/chezmoi", paths: ["~/.local/share/chezmoi"], manager: "chezmoi" }),
-        row({ rung: "everything", id: "everything/code/dots", paths: ["~/code/dots"], manager: "stow" }),
-        row({ rung: "everything", id: "everything/code/other", paths: ["~/code/other"] }),
-      ],
-      { home, secrets: new Map(), platform: "darwin" },
-    );
-    const packed = await imp.files!.pack({ arch: "x86_64" });
-    const dir = extract(packed.tar);
-    const read = (...p: string[]) => readFileSync(join(dir, ...p), "utf8");
-    expect(read(".zshrc")).toBe("source ~/.zsh/secrets.zsh\nsource ~/.zsh/*.zsh\nexport PATH=$HOME/bin:$PATH\n");
-    expect(read(".zsh", "secrets.zsh")).toBe("source ~/.zsh/level2.zsh\nalias s=ls\n");
-    expect(read(".zsh", "level2.zsh")).toBe("export L2_KEY=kept-two-levels-down\n");
-    expect(read(".config", "fish", "conf.d", "work.fish")).toBe("set -g theme x\n");
-    expect(read(".config", "fish", "conf.d", "notes.txt")).toBe("set -gx NOTE_KEY kept-not-fish\n");
-    expect(read(".local", "share", "chezmoi", "private_dot_zshrc")).toBe("alias a=b\n");
-    expect(read(".local", "share", "chezmoi", "dot_zshrc.tmpl")).toBe("alias c=d\n");
-    expect(read(".local", "share", "chezmoi", "exact_dot_config", "fish", "conf.d", "private_work.fish.tmpl")).toBe("set -g y 1\n");
-    expect(read(".local", "share", "chezmoi", "dot_config", "app", "settings")).toBe("export APP_TOKEN=kept-not-rc\n");
-    expect(read(".local", "share", "chezmoi", "private_dot_gitconfig")).toBe("[user]\n\tname = Me\n");
-    expect(read("code", "dots", "zsh", ".zshrc")).toBe("alias e=f\n");
-    expect(read("code", "dots", "zsh", "aliases")).toBe("");
-    expect(read("code", "other", "zshrc")).toBe("export OTHER_KEY=kept-not-a-manager-home\n");
-    const bytes = gunzipSync(packed.tar);
-    expect(bytes.includes("fake-")).toBe(false);
-    for (const v of ["kept-two-levels-down", "kept-not-fish", "kept-not-rc", "kept-not-a-manager-home"]) expect(bytes.includes(v), v).toBe(true);
-    expect(packed.cut).toEqual([
-      { path: "~/.config/fish/conf.d/work.fish", names: ["WORK_KEY"] },
-      { path: "~/.local/share/chezmoi/dot_zshrc.tmpl", names: ["TMPL_KEY"] },
-      { path: "~/.local/share/chezmoi/exact_dot_config/fish/conf.d/private_work.fish.tmpl", names: ["CHEZ_CONFD_KEY"] },
-      { path: "~/.local/share/chezmoi/private_dot_zshrc", names: ["PRIV_KEY"] },
-      { path: "~/.zsh/secrets.zsh", names: ["SRC_KEY"] },
-      { path: "~/code/dots/zsh/.zshrc", names: ["STOW_KEY"] },
-      { path: "~/code/dots/zsh/aliases", names: ["STOW_ALIAS_TOKEN"] },
-    ]);
-    expect(packed.skipped).toEqual([]);
   });
 
   it("a read-only rc file ships stripped at its own mode, and one without a secret ships untouched", async () => {
@@ -770,7 +667,7 @@ describe("packPlan: source guard", () => {
     writeFileSync(join(home, ".config", "fish", "config.fish"), "source ~/.config/fish/local.fish\n");
     const rc = ['. "$HOME/.cargo/env"', "source ~/.zsh/functions.zsh", `source ${home}/.deno/env  # deno`, "[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh", "export RO_KEY=fake-ro-value", "source $ZSH/oh-my-zsh.sh", "source /opt/homebrew/opt/nvm/nvm.sh", `. "${home}/.zsh/functions.zsh"`, ""].join("\n");
     writeFileSync(join(home, ".zshrc"), rc, { mode: 0o444 });
-    const rows = [row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"] }), row({ rung: "everything", id: "everything/.zsh", paths: ["~/.zsh"] }), row({ rung: "shell", id: "shell/fish", paths: ["~/.config/fish"] })];
+    const rows = [row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"] }), row({ rung: "shell", id: "shell/zsh", paths: ["~/.zsh"] }), row({ rung: "shell", id: "shell/fish", paths: ["~/.config/fish"] })];
     const packed = await packPlan(planFiles(rows, { home, stat: statOf, platform: "darwin" }), { secrets: new Map(), home });
     expect(listTar(packed.tar).find(e => e.path === ".zshrc")?.mode).toMatch(/^-r--r--r--/);
     const dir = extract(packed.tar);
@@ -779,57 +676,6 @@ describe("packPlan: source guard", () => {
     expect(packed.cut).toEqual([{ path: "~/.zshrc", names: ["RO_KEY"] }]);
     const without = await packPlan(planFiles([rows[0]!], { home, stat: statOf, platform: "darwin" }), { secrets: new Map(), home });
     expect(readFileSync(join(extract(without.tar), ".zshrc"), "utf8")).toContain("[ -r ~/.zsh/functions.zsh ] && source ~/.zsh/functions.zsh");
-  });
-});
-
-describe("packPlan: alias guard", () => {
-  const guard = { text: "# ls points at eza: not coming (unticked, tick to bring)\n_wsp_on_path 'eza' || unalias -- 'ls' 2>/dev/null\n", rc: ".zshrc" };
-
-  it("ships the guard under .config/wsp and the rc file reads it after its own lines, once, at the rc file's own mode", async () => {
-    const home = laptop();
-    writeFileSync(join(home, ".zshrc"), "export RO_KEY=fake-ro-value\nsource $ZSH/oh-my-zsh.sh", { mode: 0o444 });
-    const plan = planFiles([row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"] })], { home, stat: statOf, platform: "darwin" });
-    const packed = await packPlan(plan, { secrets: new Map(), home, guard });
-    const entries = listTar(packed.tar);
-    expect(entries.find(e => e.path === ".zshrc")?.mode).toMatch(/^-r--r--r--/);
-    expect(entries.find(e => e.path === ".config/wsp/aliases.sh")?.mode).toMatch(/^-rw-r--r--/);
-    const dir = extract(packed.tar);
-    expect(readFileSync(join(dir, ".config", "wsp", "aliases.sh"), "utf8")).toBe(guard.text);
-    const rc = readFileSync(join(dir, ".zshrc"), "utf8");
-    expect(rc).toBe(`source $ZSH/oh-my-zsh.sh\n\n${GUARD_SOURCE_COMMENT}\n${GUARD_SOURCE_LINE}\n`);
-    chmodSync(join(home, ".zshrc"), 0o644);
-    writeFileSync(join(home, ".zshrc"), rc);
-    const again = await packPlan(planFiles([row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"] })], { home, stat: statOf, platform: "darwin" }), { secrets: new Map(), home, guard });
-    expect(readFileSync(join(extract(again.tar), ".zshrc"), "utf8")).toBe(rc);
-  });
-
-  it("no guard when the rc file that would read it is not in this pack", async () => {
-    const home = laptop();
-    const plan = planFiles([row({ rung: "identity", id: "identity/git-user", paths: ["~/.gitconfig"] })], { home, stat: statOf, platform: "darwin" });
-    const packed = await packPlan(plan, { secrets: new Map(), home, guard });
-    expect(listTar(packed.tar).map(e => e.path).filter(p => p !== "")).toEqual([".gitconfig"]);
-  });
-
-  it("importFor builds the guard from every row's tick: an unticked eza puts one in the pack, a ticked one leaves the pack alone", async () => {
-    const home = laptop();
-    writeFileSync(join(home, ".zshrc"), "plugins=(eza)\n");
-    const zshrc = row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"], bytes: 14, aliases: [{ name: "ls", runs: "eza", kind: "alias" as const, tool: "tools/brew/eza" }, { name: "o", runs: "open", kind: "alias" as const }] });
-    const eza = row({ rung: "tools", id: "tools/brew/eza", linux: "yes" });
-    const packOf = async (rows: ManifestEntry[]) => {
-      const imp = importFor(rows.filter(r => r.bring), { home, secrets: new Map(), platform: "darwin", rows });
-      const dir = extract((await imp.files!.pack({ arch: "x86_64" })).tar);
-      return { rc: readFileSync(join(dir, ".zshrc"), "utf8"), guard: existsSync(join(dir, ".config", "wsp", "aliases.sh")) ? readFileSync(join(dir, ".config", "wsp", "aliases.sh"), "utf8") : undefined };
-    };
-    const unticked = await packOf([zshrc, { ...eza, bring: false }]);
-    expect(unticked.guard).toContain("# ls points at eza: not coming (unticked, tick to bring)\n_wsp_on_path 'eza' || unalias -- 'ls' 2>/dev/null");
-    expect(unticked.guard).toContain("# o points at open: nothing here installs it\n_wsp_on_path 'open' || unalias -- 'o' 2>/dev/null");
-    expect(unticked.rc).toContain(GUARD_SOURCE_LINE);
-    const ticked = await packOf([zshrc, eza]);
-    expect(ticked.guard).toContain("unalias -- 'o'");
-    expect(ticked.guard).not.toContain("eza");
-    const plain = await packOf([{ ...zshrc, aliases: [zshrc.aliases![0]!] }, eza]);
-    expect(plain.guard).toBeUndefined();
-    expect(plain.rc).toBe("plugins=(eza)\n");
   });
 });
 
@@ -977,20 +823,6 @@ describe("importFor", () => {
       ],
       { home, secrets: new Map(), platform: "darwin" },
     );
-
-  it("ticked editors rows become installs ahead of the tools, and their settings.json lands in the remote server's data dir", () => {
-    const home = laptop();
-    mkdirSync(join(home, "Library", "Application Support", "Code", "User"), { recursive: true });
-    writeFileSync(join(home, "Library", "Application Support", "Code", "User", "settings.json"), "{}\n");
-    const imp = ticks(
-      home,
-      row({ rung: "editors", id: "editors/nvim", label: "neovim, installed with your config", paths: ["~/.config/nvim"], bytes: 10 }),
-      row({ rung: "editors", id: "editors/vscode", label: "VS Code settings, for VS Code over SSH", paths: ["~/Library/Application Support/Code/User/settings.json"], bytes: 3 }),
-      row({ rung: "editors", id: "editors/vscode-ext/ms-python.python", label: "ms-python.python" }),
-    );
-    expect(imp.tools.map(t => t.id)).toEqual(["editors/nvim", "editors/vscode-ext", "tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/brew/yq", "tools/npm/bun"]);
-    expect(imp.recipe?.files.map(f => f.dest)).toContain(".vscode-server/data/Machine/settings.json");
-  });
 
   it("with every row of the manifest, the MCP plan names each agent's config on the guest, keeps the ticked servers and drops the rest; MCP rows are never agents to install", () => {
     const home = laptop();
@@ -1178,42 +1010,5 @@ describe("importFor", () => {
     expect(imp.skippedTools).toEqual([{ id: "tools/brew/zingzy/tap/diskbloom", label: "zingzy/tap/diskbloom", note: "no Linux bottle known" }]);
     expect(imp.onResult).toBe(onResult);
     expect(importResultPath("/x/state.json")).toBe("/x/golden-import.json");
-  });
-});
-
-describe("hand-installed copies", () => {
-  it("a script whose first line names an interpreter outside the system dirs is packed to find it by name; an ELF built for another arch than the machine's is set aside", async () => {
-    const home = laptop();
-    mkdirSync(join(home, ".local", "bin"), { recursive: true });
-    writeFileSync(join(home, ".local", "bin", "notes"), "#!/opt/homebrew/bin/node\nconsole.log(1)\n", { mode: 0o755 });
-    writeFileSync(join(home, ".local", "bin", "hermes"), "#!/usr/bin/env bash\nexec run\n", { mode: 0o755 });
-    writeFileSync(join(home, ".local", "bin", "agent"), Buffer.from([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0xb7, 0, 1, 0, 0, 0]), { mode: 0o755 });
-    const imp = importFor(
-      [
-        row({ rung: "tools", id: "tools/hand/notes", paths: ["~/.local/bin/notes"], bytes: 40, linux: "unknown" }),
-        row({ rung: "tools", id: "tools/hand/hermes", paths: ["~/.local/bin/hermes"], bytes: 30, linux: "unknown" }),
-        row({ rung: "tools", id: "tools/hand/agent", paths: ["~/.local/bin/agent"], bytes: 24, linux: "unknown", arch: "aarch64" }),
-      ],
-      { home, secrets: new Map(), platform: "darwin" },
-    );
-    expect(imp.files).toMatchObject({ count: 3, rungs: { tools: 3 }, skipped: [] });
-    const packed = await imp.files!.pack({ arch: "x86_64" });
-    expect(packed.skipped).toEqual([{ id: "tools/hand/agent", path: "~/.local/bin/agent", note: "built for aarch64; the machine is x86_64" }]);
-    expect(listTar(packed.tar).map(e => e.path).filter(p => p.startsWith(".local/bin/") && !p.endsWith("/")).sort()).toEqual([".local/bin/hermes", ".local/bin/notes"]);
-    const dir = extract(packed.tar);
-    expect(readFileSync(join(dir, ".local", "bin", "notes"), "utf8")).toBe("#!/usr/bin/env node\nconsole.log(1)\n");
-    expect(readFileSync(join(dir, ".local", "bin", "hermes"), "utf8")).toBe("#!/usr/bin/env bash\nexec run\n");
-    expect(statSync(join(dir, ".local", "bin", "notes")).mode & 0o777).toBe(0o755);
-    expect((await imp.files!.pack({ arch: "aarch64" })).skipped).toEqual([]);
-  });
-
-  it("the shebang rewrite changes the first line's bytes only: a script carrying a binary tail keeps every byte after the newline", async () => {
-    const home = laptop();
-    mkdirSync(join(home, ".local", "bin"), { recursive: true });
-    const tail = Buffer.from([0x0a, 0xff, 0xfe, 0x00, 0x80, 0xc3, 0x28, 0xf0, 0x90, 0x0a, 0xed, 0xa0, 0x80]);
-    writeFileSync(join(home, ".local", "bin", "setup"), Buffer.concat([Buffer.from("#!/opt/homebrew/bin/bash -e", "utf8"), tail]), { mode: 0o755 });
-    const imp = importFor([row({ rung: "tools", id: "tools/hand/setup", paths: ["~/.local/bin/setup"], bytes: 40, linux: "unknown" })], { home, secrets: new Map(), platform: "darwin" });
-    const dir = extract((await imp.files!.pack({ arch: "x86_64" })).tar);
-    expect(readFileSync(join(dir, ".local", "bin", "setup"))).toEqual(Buffer.concat([Buffer.from("#!/usr/bin/env -S bash -e", "utf8"), tail]));
   });
 });
