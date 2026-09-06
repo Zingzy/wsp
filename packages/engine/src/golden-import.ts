@@ -487,7 +487,7 @@ export interface ToolInstall {
   after?: string;
   /** The command the install puts on PATH, when the row names it; checked with command -v after the stage. */
   bin?: string;
-  /** What the result says beside the install once it lands: a road no golden build has proven yet. */
+  /** What the result says beside the install once it lands: a road no golden build has proven yet, a version the road could not pin. */
   note?: string;
 }
 
@@ -688,18 +688,25 @@ export const MANAGER_FORMULA: Readonly<Partial<Record<RoadName, string>>> = { bu
 const pinOf = (e: { pin?: ToolPin }): { pin?: ToolPin } => (e.pin !== undefined ? { pin: e.pin } : {});
 
 /** The release road of a command or tap row whose GitHub release is known, with the pin its first install recorded. */
-const releaseRoad = (r: Pick<PlannedRoad, "source" | "pin" | "go">): InstallRoad => ({ road: "release", repo: r.source.repo, version: r.source.tag, ...pinOf(r), ...(r.go !== undefined ? { go: r.go } : {}) });
+const releaseRoad = (r: Pick<PlannedRoad, "source" | "pin" | "go">): InstallRoad => ({ road: "release", repo: r.source.repo, version: r.source.tag, ...pinOf(r), go: r.go ?? `github.com/${r.source.repo}@${r.source.tag}` });
 
-/** What a tools row installs by, with the command it puts on PATH where known: a catalog row its entry's road
- * (noted when no golden build has proven the road), a formula row the brew road, a command or cask row its release
- * or its vendor's, a manager row its manager's road at the row's version; nothing for a row no road installs.
- * A release or vendor road carries the pin the row's first install recorded. */
+/** What a tools row installs by, with the command it puts on PATH where known: a catalog row its entry's road at the
+ * row's version where the road pins one (noted when no golden build has proven the road, or when the version could not
+ * be pinned), a formula row the brew road, a command or cask row its release or its vendor's, a manager row its manager's
+ * road at the row's version; nothing for a row no road installs. A release or vendor road carries the pin the row's
+ * first install recorded. */
 export function rowRoad(e: RecipeEntry): PlannedRow | undefined {
   const pkg = packageOf(e);
   if (e.id.startsWith(CATALOG_PREFIX)) {
     const entry = catalogEntry(pkg);
     if (entry?.kind !== "tool") return undefined;
-    return { road: { ...entry.installRoad, ...pinOf(e) }, bin: entry.bin, ...(entry.source.road === "unmeasured" ? { note: UNMEASURED_ROAD } : {}) };
+    const mod = roadModule(entry.installRoad);
+    const road = e.version !== undefined && mod.at !== undefined ? mod.at(entry.installRoad, e.version) : entry.installRoad;
+    const notes = [
+      ...(entry.source.road === "unmeasured" ? [UNMEASURED_ROAD] : []),
+      ...(e.version !== undefined && mod.at === undefined ? [`${e.version} asked, installed ${mod.words} at its current version`] : []),
+    ];
+    return { road: { ...road, ...pinOf(e) }, bin: entry.bin, ...(notes.length > 0 ? { note: notes.join("; ") } : {}) };
   }
   const cask = linuxCaskFor(e.id);
   if (cask !== undefined) return { road: vendorRoad(cask, e), bin: cask.bin };
@@ -768,15 +775,17 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
     { steps: [], last: "tools/homebrew" },
   );
 
-  // One step per manager that has rows, unless the base carries it or it already comes along as a formula or an npm global.
-  const managers = new Map<RoadName, { after: string; step?: ToolInstall }>();
+  // One step per manager that has rows, unless the base carries it or it already comes along as a formula, a catalog row or an npm global.
+  const managers = new Map<RoadName, { after: string; step?: ToolInstall; row?: { e: RecipeEntry; planned: PlannedRow } }>();
   const managerFormulae: string[] = [];
   for (const manager of MANAGER_ORDER) {
     if (rowsOf(manager).length + catalogRowsOf(manager).length === 0 || baseEntryFor(manager) !== undefined) continue;
     const own = `tools/manager/${manager}`;
     const formula = MANAGER_FORMULA[manager];
     if (formula === undefined) throw new Error(`${manager} is neither in the base nor a formula`);
+    const fromCatalog = catalog.find(c => c.planned.road.road === "brew" && roadModule(c.planned.road).names(c.planned.road).includes(formula));
     if (brew.formulae.includes(formula)) managers.set(manager, { after: `tools/brew/${formula}` });
+    else if (fromCatalog !== undefined) managers.set(manager, { after: fromCatalog.e.id, row: fromCatalog });
     else if (npmTicked.has(manager)) managers.set(manager, { after: `tools/npm/${manager}` });
     else {
       managers.set(manager, { after: own, step: { id: own, label: manager, manager: "brew", cmd: withPath(asLinuxbrew(`install ${formula}`)), after: toolchain.last } });
@@ -817,8 +826,9 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
     const rows = rowsOf(manager);
     const fromCatalog = catalogRowsOf(manager);
     if (rows.length + fromCatalog.length === 0) continue;
-    const step = managers.get(manager)?.step;
-    if (step !== undefined) installs.push(step);
+    const brings = managers.get(manager);
+    if (brings?.step !== undefined) installs.push(brings.step);
+    if (brings?.row !== undefined) plan(brings.row.e, brings.row.planned);
     for (const e of rows) {
       const planned = rowRoad(e);
       if (planned !== undefined) plan(e, planned);
@@ -833,8 +843,9 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
     const cask = cliRoad(e) === undefined ? linuxCaskFor(e.id) : undefined;
     if (cask !== undefined) plan(e, { road: vendorRoad(cask, e), bin: cask.bin });
   }
-  // The catalog rows on every other road: Homebrew's, apt's, a release, a vendor's, a script.
-  for (const { e, planned } of catalog) if (!(MANAGER_ORDER as readonly string[]).includes(planned.road.road)) plan(e, planned);
+  // The catalog rows on every other road: Homebrew's (unless one went out as a manager's step above), apt's, a release, a vendor's, a script.
+  const asManager = new Set([...managers.values()].flatMap(m => (m.row !== undefined ? [m.row.e.id] : [])));
+  for (const { e, planned } of catalog) if (!(MANAGER_ORDER as readonly string[]).includes(planned.road.road) && !asManager.has(e.id)) plan(e, planned);
   return { installs, skipped, base: brew.base, brewfile: brew.text };
 }
 
