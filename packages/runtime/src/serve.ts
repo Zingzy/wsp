@@ -267,9 +267,8 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, plan: await bundler(msg.source).plan() });
               return;
             case "project.import": {
-              const { id, op, ...rest } = msg;
-              void op;
-              send({ id, ok: true, imported: await rt.projects.import({ ...rest, bundler: bundler(msg.source) }) });
+              const { workspaceId, source, dest, replace, carry } = msg;
+              send({ id: msg.id, ok: true, imported: await rt.projects.import({ workspaceId, source, dest, replace, carry, bundler: bundler(source) }) });
               return;
             }
           }

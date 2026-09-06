@@ -2,6 +2,7 @@
 // Snapshot storage in words: the line wsp prints at start, and wsp init's
 // offer to delete the golden versions retention no longer needs.
 import type { Readable, Writable } from "node:stream";
+import { plural } from "@wsp/engine";
 import type { GoldenVersion, SnapshotStorage } from "@wsp/protocol";
 import type { RetentionPlan, Runtime } from "@wsp/runtime";
 import { isCancel, log } from "@clack/prompts";
@@ -9,7 +10,6 @@ import { confirmPrompt } from "./init-layout.js";
 
 const gb = (bytes: number): string => `${(bytes / 1e9).toFixed(1)} GB`;
 const perMonth = (usd: number): string => `about $${usd.toFixed(2)}/month`;
-const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** v1, v2 and v3. */
 function versionList(versions: readonly GoldenVersion[]): string {

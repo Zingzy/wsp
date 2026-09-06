@@ -4,8 +4,8 @@
 import { execFile } from "node:child_process";
 import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { CACHE_WORD, INSTALL_NAMES, OUTPUT_NAMES, fileSignals } from "@wsp/collect";
-import { TAR_MAX_FILE_BYTES, fitsTar, tarOf, type TarEntry } from "@wsp/engine";
+import { CACHE_WORD, FINDER_METADATA, INSTALL_NAMES, OUTPUT_NAMES, fileSignals } from "@wsp/collect";
+import { TAR_MAX_FILE_BYTES, fitsTar, resolveProjectPath, tarOf, underProject, type TarEntry } from "@wsp/engine";
 import type { ProjectPlan, ProjectSecret } from "@wsp/protocol";
 import type { PackedProject, ProjectBundler } from "@wsp/runtime";
 
@@ -14,26 +14,26 @@ const VENV_MARKER = "pyvenv.cfg";
 const GIT_DIR = ".git";
 const LS_FILES_MAX_BYTES = 256 * 1024 * 1024;
 
-/** The cache rule, from the collector's name sets: what an install recreates, what a build regenerates, or a name that says cache. */
+/** The cache rule, from the collector's rules: what an install recreates, what a build regenerates, a name that says cache, or Finder metadata. */
 export function isCacheName(name: string): boolean {
-  return INSTALL_NAMES.has(name) || OUTPUT_NAMES.has(name) || CACHE_WORD.test(name);
+  return INSTALL_NAMES.has(name) || OUTPUT_NAMES.has(name) || CACHE_WORD.test(name) || FINDER_METADATA.test(name);
 }
 
 interface BundlePath {
   /** Relative to the folder, slash-separated: the path in the archive. */
   rel: string;
   abs: string;
-  mode: number;
 }
 export type BundleFile = BundlePath &
   (
     | {
         kind: "file";
+        mode: number;
         bytes: number;
         /** Secret-shaped by the collector's credential rules; travels only when named. */
         secret: boolean;
       }
-    | { kind: "dir" }
+    | { kind: "dir"; mode: number }
     | {
         kind: "link";
         /** The target as written, never followed. */
@@ -74,14 +74,29 @@ interface Walk {
   scans: Promise<void>[];
 }
 
-const insideFolder = (source: string, abs: string): boolean => abs === source || abs.startsWith(`${source}/`);
+const codeOf = (e: unknown): string => (e as { code?: string }).code ?? "error";
 
-/** One directory level. Under .git nothing is judged; under a cache-named directory only tracked paths are kept. */
+/** One directory level. Under .git nothing is judged; under a cache-named directory only tracked paths are kept.
+ * A directory or entry the process cannot read is named in skipped and the walk goes on; only the folder itself throws. */
 function walk(w: Walk, dir: string, relDir: string, inGit: boolean, onlyTracked: boolean): void {
-  for (const name of readdirSync(dir).sort()) {
+  let names: string[];
+  try {
+    names = readdirSync(dir).sort();
+  } catch (e) {
+    if (relDir === "") throw e;
+    w.skipped.push({ path: relDir, note: `cannot be read (${codeOf(e)}); what it holds does not travel` });
+    return;
+  }
+  for (const name of names) {
     const abs = join(dir, name);
     const rel = relDir === "" ? name : `${relDir}/${name}`;
-    const st = lstatSync(abs);
+    let st: ReturnType<typeof lstatSync>;
+    try {
+      st = lstatSync(abs);
+    } catch (e) {
+      w.skipped.push({ path: rel, note: `cannot be read (${codeOf(e)})` });
+      continue;
+    }
     const mode = st.mode & 0o7777;
     const isTracked = w.tracked.has(rel);
     if (onlyTracked && !isTracked && !w.trackedDirs.has(rel)) continue;
@@ -91,9 +106,9 @@ function walk(w: Walk, dir: string, relDir: string, inGit: boolean, onlyTracked:
     }
     if (st.isSymbolicLink()) {
       const target = readlinkSync(abs);
-      if (isAbsolute(target) || !insideFolder(w.source, resolve(dirname(abs), target))) w.skipped.push({ path: rel, note: `a link to ${target}, outside the folder; not followed` });
+      if (isAbsolute(target) || !underProject(resolve(dirname(abs), target), w.source)) w.skipped.push({ path: rel, note: `a link to ${target}, outside the folder; not followed` });
       else if (!fitsTar(rel, target)) w.skipped.push({ path: rel, note: "a link the archive cannot hold: the path or the target is too long" });
-      else w.files.push({ rel, abs, kind: "link", mode, target });
+      else w.files.push({ rel, abs, kind: "link", target });
       continue;
     }
     if (st.isDirectory()) {
@@ -152,7 +167,7 @@ function walk(w: Walk, dir: string, relDir: string, inGit: boolean, onlyTracked:
  * elsewhere. Throws when the folder is not an absolute path to a directory. */
 export async function planProject(source: string): Promise<ProjectListing> {
   if (!isAbsolute(source)) throw new Error(`the folder must be an absolute path, got ${source}`);
-  const root = source.replace(/\/+$/, "") || "/";
+  const root = resolveProjectPath(source);
   if (!existsSync(root) || !statSync(root).isDirectory()) throw new Error(`${root} is not a folder on this computer`);
   const repo = existsSync(join(root, GIT_DIR));
   const tracked = repo ? await trackedPaths(root) : new Set<string>();

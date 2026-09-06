@@ -13,6 +13,7 @@ import {
   importInto,
   landBundle,
   fmtBytes,
+  plural,
   killUntilGone,
   prepareBuilder,
   reap,
@@ -2323,7 +2324,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const report = (stage: ProjectImportStage, message: string, progress?: { bytes: number; total: number }): void => {
         bus.emit({ type: "project.import", workspaceId: o.workspaceId, source: o.source, dest: o.dest, stage, message, elapsedMs: clock.now() - began, ...progress });
       };
-      const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
       try {
         const plan = await o.bundler.plan();
         report("planned", `${plural(plan.files, "file")}, ${fmtBytes(plan.bytes)}${plan.repo ? " and the repository" : ""}; ${plural(plan.secrets.length, "secret-shaped file")}; ${plural(plan.excluded.length, "cache")} left behind.`);

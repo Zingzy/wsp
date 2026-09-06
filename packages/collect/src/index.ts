@@ -26,7 +26,7 @@ export type { Entry, EnvName, Exec, Fs, Machine } from "./everything/host.js";
 export { ENV_NAMES, READ_LIMIT } from "./everything/host.js";
 export { FLAGS, Flag, KINDS, Kind, MANAGERS, Manager, MEASURED, Measured, Row, Rows } from "./everything/row.js";
 export { OWNERS, type Leftover, type Owner, type Provenance, type Tool, binaryNames, parseCrates2, provenance } from "./everything/provenance.js";
-export { CACHE_WORD, INSTALL_NAMES, OUTPUT_NAMES, type Dir, type Role, type RolesOptions, roleByName, roles } from "./everything/roles.js";
+export { CACHE_WORD, FINDER_METADATA, INSTALL_NAMES, OUTPUT_NAMES, type Dir, type Role, type RolesOptions, roleByName, roles } from "./everything/roles.js";
 export { type Pair, type Pairing, candidates, pair } from "./everything/pairing.js";
 export { type Credential, type CredentialScan, type CredentialsOptions, type Signal, GITLEAKS_MAX_ROOTS, MAX_BYTES, credentials, fileSignals, keysSignal, modeSignal, nameSignal, parseGitleaks, pemSignal, topLevelKeys } from "./everything/credentials.js";
 export { type KeychainItem, type KeychainOptions, keychain, parseKeychainDump, serviceOwner } from "./everything/keychain.js";

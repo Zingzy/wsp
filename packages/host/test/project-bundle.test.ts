@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { INSTALL_NAMES, OUTPUT_NAMES } from "@wsp/collect";
@@ -77,7 +77,7 @@ describe("planProject", () => {
     const { plan, files } = await planProject(root);
     const rels = files.map(f => f.rel);
     expect(plan.repo).toBe(true);
-    expect(plan.source).toBe(root);
+    expect(plan.source).toBe(realpathSync(root));
     for (const kept of ["src/index.ts", "bin/run.sh", "notes.txt", ".env", "config/secrets.json", "data.sqlite", ".git/HEAD", ".git/config", "dist/keep.js", "build/README.md", "empty-dir/.keep", "really-empty", "inside-link"]) {
       expect(rels, kept).toContain(kept);
     }
@@ -139,10 +139,39 @@ describe("planProject", () => {
     await expect(planProject(join(root, "missing"))).rejects.toThrow(/not a folder/);
   });
 
-  it("the cache rule is the collector's name sets plus the word", () => {
+  it("the cache rule is the collector's name sets, the word and the Finder file", () => {
     for (const n of [...INSTALL_NAMES, ...OUTPUT_NAMES]) expect(isCacheName(n)).toBe(true);
-    for (const n of [".parcel-cache", "__pycache__", ".pytest_cache", "CacheStorage"]) expect(isCacheName(n)).toBe(true);
-    for (const n of ["src", "lib", "cached-results.md", "Cargo.lock", "yarn.lock"]) expect(isCacheName(n)).toBe(n === "cached-results.md");
+    for (const n of [".parcel-cache", "__pycache__", ".pytest_cache", "CacheStorage", ".DS_Store"]) expect(isCacheName(n)).toBe(true);
+    for (const n of ["src", "lib", "cached-results.md", "Cargo.lock", "yarn.lock", "data.sqlite-wal", "DS_Store.bak"]) expect(isCacheName(n)).toBe(n === "cached-results.md");
+  });
+
+  it("Finder metadata stays behind at every level; sqlite journals travel", async () => {
+    const root = mkdtempSync(join(tmpdir(), "wsp-finder-"));
+    dirs.push(root);
+    put(root, ".DS_Store", "finder\n");
+    put(root, "src/.DS_Store", "finder\n");
+    put(root, "src/a.ts", "a\n");
+    put(root, "data.sqlite-wal", "journal\n");
+    const { plan, files } = await planProject(root);
+    expect(files.map(f => f.rel)).toEqual(["data.sqlite-wal", "src", "src/a.ts"]);
+    expect(plan.excluded).toEqual([".DS_Store", "src/.DS_Store"]);
+  });
+
+  it("a directory the process cannot read is named in skipped and the rest travels", async () => {
+    const root = mkdtempSync(join(tmpdir(), "wsp-locked-"));
+    dirs.push(root);
+    put(root, "a.txt", "a\n");
+    put(root, "locked/hidden.txt", "hidden\n");
+    put(root, "z.txt", "z\n");
+    chmodSync(join(root, "locked"), 0o000);
+    try {
+      const { plan, files } = await planProject(root);
+      expect(files.map(f => f.rel)).toEqual(["a.txt", "locked", "z.txt"]);
+      expect(plan.skipped).toEqual([{ path: "locked", note: "cannot be read (EACCES); what it holds does not travel" }]);
+      expect(plan.files).toBe(2);
+    } finally {
+      chmodSync(join(root, "locked"), 0o755);
+    }
   });
 });
 
