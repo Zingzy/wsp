@@ -38,7 +38,7 @@ export {
   type UrlOpener,
 } from "./relay.js";
 export { GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
-export { isCacheName, packProject, planProject, projectBundler, type BundleFile, type ProjectListing } from "./project-bundle.js";
+export { isCacheName, packProject, packState, planProject, projectBundler, type BundleFile, type ProjectListing } from "./project-bundle.js";
 export {
   doctor,
   deployDaemon,

@@ -2,7 +2,9 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { homedir } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
+import { agentHomes } from "@wsp/engine";
 import type { BootPayload } from "@wsp/protocol";
 import { describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { projectBundler } from "./project-bundle.js";
@@ -211,7 +213,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   });
   let rtServer: RuntimeServer;
   try {
-    rtServer = await serveRuntime(rt, { port: opts.wsPort ?? 4410, authToken, forwards: relay, projects: projectBundler });
+    rtServer = await serveRuntime(rt, { port: opts.wsPort ?? 4410, authToken, forwards: relay, projects: source => projectBundler(source, agentHomes(homedir())) });
   } catch (e) {
     await relay.close();
     throw e;

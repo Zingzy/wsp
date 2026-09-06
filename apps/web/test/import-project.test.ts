@@ -50,7 +50,7 @@ describe("step rows", () => {
 });
 
 describe("which events belong to the import", () => {
-  const plan = { source: "/private/var/proj", repo: true, files: 1, bytes: 1, secrets: [], excluded: [], skipped: [] };
+  const plan = { source: "/private/var/proj", repo: true, files: 1, bytes: 1, secrets: [], excluded: [], skipped: [], agents: [] };
   it("matches the workspace with the path as typed or the plan's realpath, nothing else", () => {
     expect(isImportOf(ev({ source: "/var/proj" }), "ws_a", "/var/proj", plan)).toBe(true);
     expect(isImportOf(ev({ source: "/private/var/proj" }), "ws_a", "/var/proj", plan)).toBe(true);
@@ -89,7 +89,7 @@ describe("consent", () => {
 
 describe("the landed line", () => {
   it("names the folder, its path on the machine and the workspace, then what was cut", () => {
-    const result = { dest: "/Users/me/code/proj", files: 11, bytes: 2_900, parts: 1, cut: [], rewritten: [".git/config"] };
+    const result = { dest: "/Users/me/code/proj", files: 11, bytes: 2_900, parts: 1, cut: [], rewritten: [".git/config"], agents: [] };
     expect(landedLine(result, "/Users/me/code/proj", "api")).toBe("proj is at /Users/me/code/proj on api.");
     expect(landedLine(result, "/Users/me/code/proj/", "api")).toBe("proj is at /Users/me/code/proj on api.");
     expect(landedLine({ ...result, cut: ["keys/id_ed25519", ".env"] }, "/Users/me/code/proj", "api")).toBe("proj is at /Users/me/code/proj on api; cut keys/id_ed25519, .env.");

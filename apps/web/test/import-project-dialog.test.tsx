@@ -25,6 +25,7 @@ const PLAN: ProjectPlan = {
   ],
   excluded: ["node_modules", "dist"],
   skipped: [{ path: "link-out", note: "points outside the folder; not followed" }],
+  agents: [],
 };
 
 const event = (over: Partial<ProjectImportEvent>): EventUnion => ({
@@ -60,7 +61,7 @@ function fakeApi(plan: ProjectPlan = PLAN) {
     listSessions: vi.fn(async () => []),
     getGolden: async () => undefined,
     planProject: vi.fn(async (_source: string) => plan),
-    importProject: vi.fn(async () => ({ dest: plan.source, files: 11, bytes: 2_900, parts: 1, cut: [] as string[], rewritten: [".git/config"] })),
+    importProject: vi.fn(async () => ({ dest: plan.source, files: 11, bytes: 2_900, parts: 1, cut: [] as string[], rewritten: [".git/config"], agents: [] })),
     subscribe: vi.fn((fn: (e: EventUnion) => void) => {
       listeners.add(fn);
       return () => listeners.delete(fn);
@@ -186,7 +187,7 @@ describe("import project dialog", () => {
     await readFolder(root);
     fireEvent.click(within(root).getByRole("checkbox", { name: /\.env/ }));
     let finish!: () => void;
-    api.importProject.mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve({ dest: "/private/var/proj", files: 11, bytes: 2_900, parts: 1, cut: ["keys/id_ed25519"], rewritten: [".git/config"] }); }));
+    api.importProject.mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve({ dest: "/private/var/proj", files: 11, bytes: 2_900, parts: 1, cut: ["keys/id_ed25519"], rewritten: [".git/config"], agents: [] }); }));
     fireEvent.click(within(root).getByRole("button", { name: "Import" }));
     expect(api.importProject).toHaveBeenCalledWith({ workspaceId: "ws_a", source: "/var/proj", dest: "/private/var/proj", carry: [".env"], rewrite: [".git/config"] });
     expect((within(root).getByRole("button", { name: "Import" }) as HTMLButtonElement).disabled).toBe(true);
