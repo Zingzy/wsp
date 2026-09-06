@@ -369,7 +369,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       command,
       finished,
       steer: async (prompt) => {
-        const running = (): boolean => sawInit && !sawResult && !exited;
+        const running = (): boolean => sawInit && !sawResult && !exited && !interruptRequested;
         if (!running()) return "not-running";
         const wrote = await stream.write(userMessageLine(prompt, claudeSessionId));
         // The turn may have ended while the write travelled; the line then sits unread and the caller starts a turn.

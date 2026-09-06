@@ -221,6 +221,23 @@ describe("machineExecStream", () => {
     expect(script.indexOf(`echo $? > ${base}.exit`)).toBeLessThan(script.indexOf(`kill $(cat ${base}.tail)`));
   });
 
+  it("a seeded prompt over the cap goes up in pieces ahead of the launch, every exec body under the cap, and the input file decodes byte for byte", async () => {
+    const prompt = `{"type":"user","text":${JSON.stringify(Array.from({ length: 520 }, (_, i) => `line ${i} it's ünïcödé ${"y".repeat(50)}`).join("\n"))}}`;
+    expect(Buffer.byteLength(prompt)).toBeGreaterThan(40_000);
+    const { backend, machine } = await makeMachine();
+    const guest = scriptGuest(backend, [{ append: '{"type":"result"}\n', exit: 0 }, {}]);
+    const stream = machineExecStream(machine, { pollMs: 5 })("claude -p --input-format stream-json", { env: {}, input: [prompt] });
+    for await (const _ of stream.lines) void _;
+    expect(await stream.exited).toBe(0);
+    for (const c of guest.calls) expect(solariBody(c), c.slice(0, 80)).toBeLessThanOrEqual(EXEC_BODY_MAX);
+    const launch = launchCalls(guest.calls);
+    expect(launch.filter(c => c.endsWith("echo WSP_PIECE"))).toHaveLength(4);
+    expect(launch).toHaveLength(5);
+    expect(launch.at(-1)).toMatch(/mkdir \/tmp\/wsp-run\/[a-f0-9]+\.d 2>\/dev\/null \|\| \{ echo WSP_LAUNCHED; exit 0; \}\nset -o pipefail\n.*\nmkfifo \/tmp\/wsp-run\/[a-f0-9]+\.fifo\nsetsid bash /s);
+    expect(guest.getInput()).toBe(`${prompt}\n`);
+    expect(guest.getScript()).toContain("claude -p --input-format stream-json");
+  });
+
   it("write appends one base64-decoded line to the input file with one exec; a write after the stream ended rejects", async () => {
     const { backend, machine } = await makeMachine();
     const guest = scriptGuest(backend, [{}, {}, {}, { exit: 0 }, {}]);
@@ -367,18 +384,18 @@ describe("machineExecStream feeding a real process over the input channel", () =
     const reading = (async () => {
       for await (const l of stream.lines) lines.push(l);
     })();
-    await new Promise(r => setTimeout(r, 200));
-    await stream.write("world");
-    await new Promise(r => setTimeout(r, 200));
+    const file = (suffix: string): string | undefined => readdirSync(runDir).find(f => f.endsWith(suffix));
+    await vi.waitFor(() => expect(readFileSync(join(runDir, file(".tail")!), "utf8").trim()).not.toBe(""), { timeout: 5000 });
+    const tailPid = Number(readFileSync(join(runDir, file(".tail")!), "utf8").trim());
+    expect(tailPid).toBeGreaterThan(0);
+    expect(await stream.write("world")).toBe("written");
+    await vi.waitFor(() => expect(lines).toEqual(["hello", "world"]), { timeout: 5000 });
     stream.closeInput();
+    await vi.waitFor(() => expect(file(".exit")).toBeDefined(), { timeout: 5000 });
     await reading;
     expect(lines).toEqual(["hello", "world"]);
     expect(await stream.exited).toBe(0);
-    const tailFile = readdirSync(runDir).find(f => f.endsWith(".tail"))!;
-    const tailPid = Number(readFileSync(join(runDir, tailFile), "utf8").trim());
-    expect(tailPid).toBeGreaterThan(0);
-    await new Promise(r => setTimeout(r, 100));
-    expect(() => process.kill(tailPid, 0)).toThrow();
+    await vi.waitFor(() => expect(() => process.kill(tailPid, 0)).toThrow(), { timeout: 5000 });
   }, 15_000);
 
   it("a write after the command exited answers gone and the input file keeps only what the process could read", async () => {

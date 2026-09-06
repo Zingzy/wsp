@@ -57,8 +57,8 @@ function scriptedExec(lines: string[], opts: { exitCode?: number; hang?: boolean
   return { factory, calls, order };
 }
 
-/** A stream the test feeds line by line and ends by hand, with every write recorded; beforeWrite runs inside write() before the line lands, and gone makes the guest report the process over so no line lands. */
-function manualExec(opts: { beforeWrite?: () => Promise<void>; gone?: boolean } = {}) {
+/** A stream the test feeds line by line and ends by hand, with every write recorded; beforeWrite runs inside write() before the line lands, gone makes the guest report the process over so no line lands, and slowTeardown leaves the process up after teardown, as a CLI held by background tasks is. */
+function manualExec(opts: { beforeWrite?: () => Promise<void>; gone?: boolean; slowTeardown?: boolean } = {}) {
   const calls: ScriptedExec["calls"] = [];
   const writes: string[] = [];
   const order: string[] = [];
@@ -97,7 +97,7 @@ function manualExec(opts: { beforeWrite?: () => Promise<void>; gone?: boolean } 
       exited,
       teardown: () => {
         order.push("teardown");
-        end(143);
+        if (opts.slowTeardown !== true) end(143);
       },
       kill: () => {
         order.push("kill");
@@ -415,6 +415,22 @@ describe("steer over the stdin channel", () => {
     expect(exec.writes).toEqual([]);
     exec.end(1);
     expect((await session.finished).status).toBe("failed");
+  });
+
+  it("once interrupt was asked answers not-running and writes nothing, before the process is seen to exit", async () => {
+    const exec = manualExec({ slowTeardown: true });
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg", interruptGraceMs: 30 });
+    const { events, onEvent } = collect();
+    const session = adapter.start({ prompt: "go", onEvent });
+    exec.push(init);
+    await until(() => events.some((e) => e.type === "session.start"));
+    const interrupting = session.interrupt();
+    expect(exec.order).toEqual(["teardown"]);
+    expect(await session.steer("into a stopping turn")).toBe("not-running");
+    expect(exec.writes).toEqual([]);
+    await interrupting;
+    expect(exec.order).toEqual(["teardown", "kill"]);
+    expect((await session.finished).status).toBe("interrupted");
   });
 
   it("a write that lands after the turn ended answers not-running: the line sits unread and the caller starts a turn instead", async () => {
