@@ -5,7 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const pkg = (name: string) => fileURLToPath(new URL(`./packages/${name}/src/index.ts`, import.meta.url));
+// Paths are pinned to this file, not the cwd, so a run started inside one package sees the same tree as a root run.
+const here = (path: string) => fileURLToPath(new URL(path, import.meta.url));
+const pkg = (name: string) => here(`./packages/${name}/src/index.ts`);
 const alias = {
   "@wsp/engine": pkg("engine"),
   "@wsp/adapter-claude": pkg("adapter-claude"),
@@ -19,6 +21,7 @@ const alias = {
 
 export default [
   {
+    root: here("./"),
     resolve: { alias },
     test: {
       name: "node",
@@ -28,5 +31,5 @@ export default [
       env: { XDG_CONFIG_HOME: join(tmpdir(), "wsp-test-config") },
     },
   },
-  "./apps/web/vite.config.ts",
+  here("./apps/web/vite.config.ts"),
 ];
