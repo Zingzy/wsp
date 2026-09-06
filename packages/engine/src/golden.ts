@@ -7,11 +7,12 @@
 // long as they like, as long as nobody pauses it (snapshot-fresh rule).
 
 import { createHash } from "node:crypto";
-import { ALREADY_APPLIED, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenStage, type GoldenVersion, type RecipeDigest } from "@wsp/protocol";
+import { ALREADY_APPLIED, goldenHead, type GoldenBaseTool, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenStage, type GoldenVersion, type RecipeDigest } from "@wsp/protocol";
 import type { Removal } from "./golden-diff.js";
 import { NODE_PATH_LINE, type AgentInstall, type GuestFacts, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { MIB, TOOL_TIMEOUT_S, closing, fmtBytes, freeBytes, freeNote, guardDeadlineMs, guarded, guestArch, installTools, reasonOf, sweepCaches, type ToolResult } from "./golden-tools.js";
+import { installBase } from "./golden-base.js";
 import { BUILDER_DISK_GB } from "./tool-sizes.js";
 import { assertFirstLife } from "./lifecycle.js";
 import { applyMcp, type McpPlan, type McpResult } from "./golden-mcp.js";
@@ -19,7 +20,7 @@ import { BROWSER_SHIM_PATH, applyMachineContext, type ContextResult } from "./ma
 import type { Machine, MachineBackend, MachineKind, MachineState } from "./machine.js";
 import { importInto } from "./vault.js";
 
-export type { GoldenLogin, GoldenManifest, GoldenMissingTool, GoldenStage, GoldenVersion };
+export { goldenHead, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenStage, type GoldenVersion };
 
 export type StageListener = (stage: GoldenStage, detail?: string) => void;
 
@@ -119,6 +120,8 @@ export interface Builder {
   readonly import?: ImportLedger;
   /** The golden snapshot this builder descends from, so the version it seals records its parent; absent on a fresh machine. */
   readonly parentSnapshotId?: string;
+  /** The base tools' versions read on this machine after the base stage, or on the golden it was forked from. */
+  readonly base?: GoldenBaseTool[];
 }
 
 // --- golden import: the person's files, tools and agents on the builder ------
@@ -169,6 +172,8 @@ export interface GoldenImport {
   skippedAgents?: { id: string; name: string; note: string }[];
   /** Ticked tools the plan set aside (no Linux bottle, a macOS app); they land in the result with the installs. */
   skippedTools?: { id: string; label: string; note: string }[];
+  /** Ticked tools the base stage already put on every golden; they land in the result as installed, with the planner's note. */
+  baseTools?: { id: string; label: string; note: string }[];
   /** The MCP servers to keep in or take out of each agent's config once it is on the machine; absent when no row is one. */
   mcp?: McpPlan;
   /** Called once per prepare that ran anything; a re-run that skipped every stage has nothing to report. */
@@ -215,14 +220,20 @@ export interface ImportResult {
   mcp?: McpResult[];
   /** Only on an update: the removals it ran before the stages. */
   removed?: RemovalResult[];
+  /** The base stage's outcomes on a fresh builder; an update's fork carries its golden's. */
+  base?: ToolResult[];
   /** The machine context each installed agent got, or why it did not; absent when no stage ran. */
   context?: ContextResult[];
+  /** Why no machine context was written, when the probe or the upload failed; context is empty then. */
+  contextFailure?: string;
 }
 
 export interface ApplyImportOptions {
   import?: GoldenImport;
   setup: string;
   setupTimeoutMs?: number;
+  /** What the base stage did on this builder, so a floor row that did not land is in the result with the person's tools. */
+  base?: ToolResult[];
   /** Stages this builder already carries; those for the same recipe hash are skipped. */
   ledger?: ImportLedger;
   fetch?: typeof globalThis.fetch;
@@ -251,7 +262,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
     ...(recipe !== undefined ? { recipe } : {}),
     ...(prior?.missingTools !== undefined ? { missingTools: prior.missingTools } : {}),
   };
-  const result: ImportResult = { recipeHash: imp.recipeHash, tools: [], agents: [] };
+  const result: ImportResult = { recipeHash: imp.recipeHash, tools: [], agents: [], ...(opts.base !== undefined ? { base: opts.base } : {}) };
   const done = (s: ImportStage): boolean => ledger.applied.includes(s);
   const mark = (s: ImportStage): void => {
     if (!done(s)) ledger.applied.push(s);
@@ -383,6 +394,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
       stage("installing-tools", ALREADY_APPLIED);
     } else {
       for (const t of imp.skippedTools ?? []) result.tools.push({ id: t.id, label: t.label, outcome: "skipped", note: t.note });
+      for (const t of imp.baseTools ?? []) result.tools.push({ id: t.id, label: t.label, outcome: "installed", note: t.note });
       if (imp.tools.length === 0) {
         stage("installing-tools", "nothing ticked");
       } else {
@@ -391,7 +403,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
         result.tools.push(...tools.tools);
         if (tools.homebrew !== undefined) result.homebrew = tools.homebrew;
       }
-      const missing = missingToolsOf(result.tools);
+      const missing = missingToolsOf([...(result.base ?? []), ...result.tools]);
       if (missing.length > 0) ledger.missingTools = missing;
       else delete ledger.missingTools;
       mark("installing-tools");
@@ -412,8 +424,9 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
     }
     if (harnessRan || ran || edited) {
       // After the tools, so the document can name what did not install.
-      const context = await applyMachineContext(machine, { result });
+      const context = await applyMachineContext(machine, { result, ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}) });
       result.context = context.context;
+      if (context.failure !== undefined) result.contextFailure = context.failure;
       stage("installing-mcp", `machine context: ${context.summary}`);
     }
     if (ran || edited) {
@@ -559,14 +572,15 @@ export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Build
   });
   try {
     const size = await sizeBuilt(machine, asked);
-    if (opts.deployDaemon) {
-      stage("deploying-daemon");
-      const deployed = await opts.deployDaemon(machine);
-      const detail = closing(typeof deployed === "string" ? deployed : undefined, await freeNote(machine));
-      if (detail !== "") stage("deploying-daemon", detail);
-    }
+    stage("deploying-daemon");
+    // The floor goes on before the daemon, whose native module compiles against the Node it finds first on PATH.
+    const base = await installBase(machine, stage);
+    const deployed = opts.deployDaemon ? await opts.deployDaemon(machine) : undefined;
+    const detail = closing(base.line, typeof deployed === "string" ? deployed : undefined, await freeNote(machine));
+    if (detail !== "") stage("deploying-daemon", detail);
     const applied = await applyGoldenImport(machine, {
       setup: opts.setup,
+      base: base.tools,
       onStage: stage,
       ...(opts.import !== undefined ? { import: opts.import } : {}),
       ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}),
@@ -581,6 +595,7 @@ export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Build
       createdAt,
       firstLife: true,
       size,
+      base: base.versions,
       ...(opts.import !== undefined ? { import: applied.ledger } : {}),
     };
   } catch (e) {
@@ -662,6 +677,7 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
       browserShim,
       ...(opts.logins !== undefined ? { logins: opts.logins } : {}),
       ...(builder.import?.missingTools !== undefined ? { missingTools: builder.import.missingTools } : {}),
+      ...(builder.base !== undefined ? { base: builder.base } : {}),
     };
     const kept = builderAlive ? "; builder kept for one more change" : "";
     stage("sealed", leak === undefined ? `v${versionNum}${kept}` : `v${versionNum}${kept}; ${leak}`);
@@ -696,8 +712,15 @@ export interface ApplyDeltaOptions {
   previousSmoke: string;
   /** The tools missing from the version being updated; those the delta neither removes nor plans again stay missing. */
   previousMissing?: readonly GoldenMissingTool[];
+  /** The base tools read on the version being updated; a version sealed before they existed has none and is refused. */
+  previousBase: readonly GoldenBaseTool[] | undefined;
   fetch?: typeof globalThis.fetch;
   onStage?: StageListener;
+}
+
+/** A version without the base tools never ran them, so a delta on it would report covered rows it does not have. */
+function refusePreFloor(base: readonly GoldenBaseTool[] | undefined, which: string): asserts base is readonly GoldenBaseTool[] {
+  if (base === undefined) throw new Error(`${which} was sealed before the base tools existed and cannot take an update; run wsp init and pick the rebuild`);
 }
 
 /** The version checks of what is on the image after the delta: the previous
@@ -720,6 +743,7 @@ export function nextMissing(previous: readonly GoldenMissingTool[], delta: Golde
  * files and upload fail the update as they fail a build. The result reported
  * carries the removals beside what the stages installed. */
 export async function applyDelta(machine: Machine, delta: GoldenDelta, opts: ApplyDeltaOptions): Promise<{ ledger: ImportLedger; result: ImportResult }> {
+  refusePreFloor(opts.previousBase, "this golden");
   const stage = opts.onStage ?? (() => {});
   const removed: RemovalResult[] = [];
   if (delta.removals.length > 0) {
@@ -774,6 +798,7 @@ export interface UpgradeBuilderOptions extends MachineSize {
  * it: a builder to seal as the next version. The fork carries the daemon and
  * everything the recipe already put there, so nothing but the delta runs. */
 export async function upgradeBuilder(opts: UpgradeBuilderOptions): Promise<Builder> {
+  refusePreFloor(opts.head.base, `golden v${opts.head.version}`);
   const stage = opts.onStage ?? (() => {});
   const kind = opts.head.kind ?? "sandbox";
   stage("creating", `fork of golden v${opts.head.version}`);
@@ -793,6 +818,7 @@ export async function upgradeBuilder(opts: UpgradeBuilderOptions): Promise<Build
     const applied = await applyDelta(machine, opts.delta, {
       setup: opts.setup,
       previousSmoke: opts.head.smoke.cmd,
+      previousBase: opts.head.base,
       ...(opts.head.missingTools !== undefined ? { previousMissing: opts.head.missingTools } : {}),
       onStage: stage,
       ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}),
@@ -809,6 +835,7 @@ export async function upgradeBuilder(opts: UpgradeBuilderOptions): Promise<Build
       size,
       import: applied.ledger,
       parentSnapshotId: opts.head.snapshotId,
+      base: [...opts.head.base],
     };
   } catch (e) {
     let detail = messageOf(e);
@@ -851,7 +878,7 @@ export async function forkGolden(
   manifest: GoldenManifest,
   overrides: ForkOverrides = {},
 ): Promise<Machine> {
-  const head = manifest.versions.find(v => v.version === manifest.head);
+  const head = goldenHead(manifest);
   if (!head) throw new Error(`manifest head ${manifest.head} has no version entry`);
   return backend.create({
     kind: overrides.kind ?? head.kind ?? "sandbox",

@@ -3,6 +3,7 @@
 // by service name without -w, and no login file is ever read. The rc files
 // and Claude Code's settings.json are read for names alone: which variable is
 // exported, whether a helper command is set.
+import { CATALOG, loginIdOf, signsInByDefault } from "@wsp/catalog";
 import { type Host, type Platform, expand } from "../host.js";
 import { RC_PATHS, stripExports } from "../everything/shell-rc.js";
 import type { Default, ManifestEntry } from "../manifest.js";
@@ -13,7 +14,16 @@ interface Login {
   label: string;
   group: "CLI logins" | "Agent logins";
   paths: Partial<Record<Platform, string[]>> & { all?: string[] };
+  /** Set where the catalog's sign-in kind is not the row's answer; the detail says why. */
   default?: Default;
+  detail?: string;
+}
+
+/** What a login row starts as: a copy (bring) for a key or a tool with no sign-in, a sign-in on the machine (skip)
+ * for a browser or device flow the catalog names; a tool the catalog does not know starts as a copy. */
+export function loginDefault(id: string): Default {
+  const found = CATALOG.find(e => loginIdOf(e.id) === id);
+  return found !== undefined && signsInByDefault(found.signIn) ? "skip" : "bring";
 }
 
 const LOGINS: readonly Login[] = [
@@ -27,7 +37,8 @@ const LOGINS: readonly Login[] = [
   { id: "gemini", label: "Gemini CLI login", group: "Agent logins", paths: { all: ["~/.gemini/oauth_creds.json"] } },
   { id: "opencode", label: "OpenCode login", group: "Agent logins", paths: { all: ["~/.local/share/opencode/auth.json"] } },
   { id: "pi", label: "Pi login", group: "Agent logins", paths: { all: ["~/.pi/agent/auth.json"] } },
-  { id: "hermes", label: "Hermes Agent API keys and logins", group: "Agent logins", paths: { all: ["~/.hermes/.env", "~/.hermes/auth.json"] } },
+  // One row carries the keys and the device login; the keys reach the machine only by copy, so copy is the answer.
+  { id: "hermes", label: "Hermes Agent API keys and logins", group: "Agent logins", paths: { all: ["~/.hermes/.env", "~/.hermes/auth.json"] }, default: "bring", detail: "the keys in ~/.hermes/.env travel only by copy" },
 ];
 
 async function keychainHas(host: Host, service: string): Promise<boolean> {
@@ -41,7 +52,7 @@ async function ghRow(host: Host): Promise<ManifestEntry | undefined> {
   const f = await found(host, ["~/.config/gh/hosts.yml"]);
   if (f.paths.length === 0) return undefined;
   const paths = (await keychainHas(host, "gh:github.com")) ? [...f.paths, "Keychain: gh:github.com"] : f.paths;
-  return entry({ rung: "logins", id: "logins/gh", label: "GitHub CLI login", group: "CLI logins", paths, bytes: f.bytes });
+  return entry({ rung: "logins", id: "logins/gh", label: "GitHub CLI login", group: "CLI logins", paths, bytes: f.bytes, default: loginDefault("gh") });
 }
 
 /** The settings file whose apiKeyHelper prints the key; the plan reads the command from it at pack time. */
@@ -102,7 +113,7 @@ export async function detectLogins(host: Host): Promise<ManifestEntry[]> {
   for (const l of LOGINS) {
     const f = await found(host, [...(l.paths[host.platform] ?? []), ...(l.paths.all ?? [])]);
     if (f.paths.length === 0) continue;
-    rows.push(entry({ rung: "logins", id: `logins/${l.id}`, label: l.label, group: l.group, ...f, ...(l.default !== undefined ? { default: l.default } : {}) }));
+    rows.push(entry({ rung: "logins", id: `logins/${l.id}`, label: l.label, group: l.group, ...f, default: l.default ?? loginDefault(l.id), ...(l.detail !== undefined ? { detail: l.detail } : {}) }));
   }
   if (await host.exec.which("op")) {
     rows.push(item({ rung: "logins", id: "logins/op", label: "1Password CLI", group: "CLI logins", default: "skip", reason: "needs the 1Password desktop app; the machine uses a service account token" }));

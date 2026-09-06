@@ -3,16 +3,19 @@
 // each agent loads at start with the facts it must not get wrong, and a skill
 // in its global skills directory with the full document of what this machine
 // is and how the common things are done on it. A probe reads the facts off the
-// guest, both are rendered here, and a second exec writes them back through a
-// hook per agent without any file of the person's being touched. A hook the
-// person's own file already claims is left alone and named in the result.
-import type { GoldenVersion } from "@wsp/protocol";
+// guest, both are rendered here, and the files go back up the same upload road
+// the person's files take (an exec body has a cap a six-agent set exceeded)
+// through a hook per agent without any file of the person's being touched. A
+// hook the person's own file already claims is left alone and named in the result.
+import type { GoldenBaseTool, GoldenVersion } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
+import { BASE_VERSION_LINES, parseVersions } from "./golden-base.js";
 import { TOOLS_PATH } from "./golden-import.js";
-import { TOOLS_DISK_FLOOR } from "./golden-tools.js";
+import { TOOLS_DISK_FLOOR, fmtBytes } from "./golden-tools.js";
 import type { ImportResult } from "./golden.js";
 import type { Machine } from "./machine.js";
 import { DAEMON_PORT } from "./preview.js";
+import { importInto, tarOf } from "./vault.js";
 
 export type ContextAgent = "claude" | "codex" | "gemini" | "opencode" | "pi" | "hermes";
 
@@ -76,7 +79,7 @@ export function mergeFacts(prior: BuildFacts | undefined, result: ImportResult |
     const kept = list.flatMap(m => (rows.some(r => r.id === m.id) ? missing.filter(r => r.id === m.id) : [m]));
     return [...kept, ...missing.filter(r => !list.some(m => m.id === r.id))];
   };
-  facts.tools = fold(facts.tools, result.tools);
+  facts.tools = fold(facts.tools, [...(result.base ?? []), ...result.tools]);
   facts.agents = fold(facts.agents, result.agents.map(a => ({ id: a.id, label: a.name, outcome: a.outcome, ...(a.note !== undefined ? { note: a.note } : {}) })));
   for (const r of result.removed ?? []) {
     if (r.outcome !== "removed") continue;
@@ -108,6 +111,8 @@ export interface ContextProbe {
   overlay: boolean;
   /** Binaries and files found: docker, podman, tmux, fish, brew, golden-path, wsp-open. */
   has: Set<string>;
+  /** The base floor's commands that answered, each with its version. */
+  versions: GoldenBaseTool[];
   agents: ContextAgent[];
   /** Names the secrets file exports, never values. */
   secrets: string[];
@@ -216,6 +221,7 @@ export function probeCommand(roots: GuestRoots = GUEST_ROOTS): string {
     'for b in docker podman tmux fish brew; do if command -v "$b" >/dev/null 2>&1; then echo "HAS $b"; fi; done',
     `if [ -f ${e}/profile.d/wsp-golden.sh ]; then echo "HAS golden-path"; fi`,
     `if [ -x ${BROWSER_SHIM_PATH} ]; then echo "HAS wsp-open"; fi`,
+    BASE_VERSION_LINES,
     `for a in ${CONTEXT_AGENTS.join(" ")}; do if command -v "$a" >/dev/null 2>&1; then echo "AGENT $a"; fi; done`,
     `sed -n 's/^export \\([A-Za-z_][A-Za-z0-9_]*\\)=.*/SECRET \\1/p' ${e}/profile.d/wsp-secrets.sh 2>/dev/null`,
     'shell=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7); shell=${shell##*/}; shell=${shell:-bash}',
@@ -241,7 +247,7 @@ export function parseProbe(stdout: string): ContextProbe | undefined {
   const start = lines.indexOf("WSP_CTX");
   const end = lines.indexOf("WSP_CTX_END");
   if (start === -1 || end === -1 || end < start) return undefined;
-  const probe: ContextProbe = { overlay: false, has: new Set(), agents: [], secrets: [], shell: "bash", aliases: [], conflicts: new Set() };
+  const probe: ContextProbe = { overlay: false, has: new Set(), versions: parseVersions(lines.slice(start + 1, end).join("\n")), agents: [], secrets: [], shell: "bash", aliases: [], conflicts: new Set() };
   for (const line of lines.slice(start + 1, end)) {
     const sp = line.indexOf(" ");
     const key = sp === -1 ? line : line.slice(0, sp);
@@ -329,6 +335,7 @@ export function renderMachineContext(input: ContextInput): string {
   const secretsFile = fish ? `${SECRETS_SH} and ${SECRETS_FISH}` : SECRETS_SH;
   const machine: string[] = [];
   machine.push(`- Linux${probe.kernel !== undefined ? ` ${probe.kernel}` : ""}, user root, home /root. macOS apps, casks and Mac App Store apps are not here.`);
+  if (probe.versions.length > 0) machine.push(`- On every wsp machine: ${probe.versions.map(v => `${v.name} ${v.version}`).join(", ")}.`);
   if (probe.has.has("brew")) machine.push("- Homebrew is at /home/linuxbrew/.linuxbrew.");
   if (probe.has.has("golden-path")) machine.push(`- Login shells get their PATH from /etc/profile.d/wsp-golden.sh: ${TOOLS_PATH}`);
   const containers = ["docker", "podman"].filter(b => probe.has.has(b));
@@ -511,26 +518,6 @@ export function agentFiles(agent: ContextAgent, short: string, skill: string, pr
   }
 }
 
-/** One exec that lands every file with its mode: each distinct content is decoded once and copied to the paths
- * that share it, so a text travels once however many agents take a copy. */
-export function writeCommand(files: readonly GuestFile[]): string {
-  const lines = ["set -e", "umask 022"];
-  const written = new Map<string, string>();
-  for (const f of files) {
-    const dir = f.path.slice(0, f.path.lastIndexOf("/"));
-    const mode = f.mode.toString(8);
-    lines.push(`mkdir -p ${squote(dir)}`);
-    const first = written.get(f.content);
-    if (first === undefined) {
-      lines.push(`printf '%s' ${squote(Buffer.from(f.content, "utf8").toString("base64"))} | base64 --decode > ${squote(f.path)}`, `chmod ${mode} ${squote(f.path)}`);
-      written.set(f.content, f.path);
-    } else {
-      lines.push(`install -m ${mode} ${squote(first)} ${squote(f.path)}`);
-    }
-  }
-  return lines.join("\n");
-}
-
 // --- the run -----------------------------------------------------------------
 
 export interface ContextResult {
@@ -565,12 +552,14 @@ export interface ApplyContextOptions {
   /** What this run installed or set aside, folded into the facts the guest keeps. */
   result?: ImportResult;
   roots?: GuestRoots;
+  /** The upload's transport; tests inject one. */
+  fetch?: typeof globalThis.fetch;
 }
 
-function summarize(results: readonly ContextResult[], agents: readonly ContextAgent[]): string {
-  if (agents.length === 0) return "written; no agent on the machine";
+function summarize(results: readonly ContextResult[], agents: readonly ContextAgent[], bytes: number): string {
+  if (agents.length === 0) return `${fmtBytes(bytes)} written; no agent on the machine`;
   const written = results.filter(r => r.outcome === "written").map(r => AGENT_NAMES[r.agent]);
-  const parts = [written.length > 0 ? `written for ${written.join(", ")}` : ""];
+  const parts = [written.length > 0 ? `${fmtBytes(bytes)} written for ${written.join(", ")}` : `${fmtBytes(bytes)} written`];
   for (const r of results) {
     if (r.outcome === "fallback") parts.push(`${AGENT_NAMES[r.agent]} by its fallback (${r.note})`);
     if (r.outcome === "not-loaded") parts.push(`${AGENT_NAMES[r.agent]} not loaded (${r.note}), skill only`);
@@ -581,8 +570,8 @@ function summarize(results: readonly ContextResult[], agents: readonly ContextAg
 const failed = (failure: string): ContextOutcome => ({ context: [], summary: `not written (${failure})`, failure });
 
 /** Probes the guest, renders the short text and the skill once for the shared source files and once per agent, and
- * writes them with every agent's hooks in two short execs. Never throws: a guest that does not answer is reported in the outcome and the caller decides what that
- * means. */
+ * lands them with every agent's hooks as one archive through the upload road. Never throws: a guest that does not
+ * answer is reported in the outcome and the caller decides what that means. */
 export async function applyMachineContext(machine: Machine, opts: ApplyContextOptions = {}): Promise<ContextOutcome> {
   const roots = opts.roots ?? GUEST_ROOTS;
   let probed;
@@ -608,12 +597,12 @@ export async function applyMachineContext(machine: Machine, opts: ApplyContextOp
     files.push(...out.files);
     context.push({ agent, outcome: out.outcome, ...(out.path !== undefined ? { path: out.path } : {}), ...(out.note !== undefined ? { note: out.note } : {}), skill: out.skill });
   }
-  let wrote;
+  const tar = tarOf(files);
   try {
-    wrote = await machine.exec(writeCommand(files), { timeoutMs: INLINE_EXEC_MS });
+    await importInto(machine, tar, "/", { overlay: true, ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}) });
   } catch (e) {
-    return failed(`write failed: ${e instanceof Error ? e.message : String(e)}`);
+    // The road's message may end in the guest's stderr; the summary is one stage line.
+    return failed(`write failed: ${(e instanceof Error ? e.message : String(e)).trim().replace(/\n+/g, "; ")}`);
   }
-  if (wrote.exitCode !== 0) return failed(`write exited ${wrote.exitCode}: ${wrote.stderr.trim().split("\n").at(-1) ?? ""}`);
-  return { context, summary: summarize(context, probe.agents) };
+  return { context, summary: summarize(context, probe.agents, tar.length) };
 }

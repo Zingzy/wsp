@@ -7,9 +7,10 @@ import { styleText } from "node:util";
 import type { ManifestEntry } from "@wsp/collect";
 import { describeDiff, diffRecipes, isEmptyDiff, isSmallDelta, removalsFor, rowsToApply, type GoldenDelta, type GoldenImport, type RecipeDiff } from "@wsp/engine";
 import type { GoldenLogin, RecipeDigest } from "@wsp/protocol";
-import { GRACE_MS, type GoldenBuilderView, type Runtime } from "@wsp/runtime";
+import { GRACE_MS, goldenHead, type GoldenBuilderView, type Runtime } from "@wsp/runtime";
 import { cancel, isCancel, log, note, outro, select } from "@clack/prompts";
 import { CLAUDE_INSTALLER } from "./init-import.js";
+import { rebuildEstimate, type BuildTimes } from "./init-times.js";
 import type { StageWords } from "./init.js";
 
 const dim = (s: string): string => styleText("dim", s);
@@ -41,6 +42,8 @@ export interface UpgradeOffer {
   version: number;
   /** What each machine the update boots costs while it runs. */
   rateUsdPerHour: number;
+  /** The last build this computer measured, when there is one; the rebuild road is estimated from it. */
+  lastBuild: BuildTimes | undefined;
 }
 
 /** The cost line: the fork road boots a fork and a smoke fork, the kept builder road a smoke fork beside the builder. */
@@ -70,7 +73,7 @@ const ON_FORK = "about two minutes";
 
 export function describeOffer(o: UpgradeOffer): string[] {
   const where = o.onBuilder ? `on the builder kept since the save, ${ON_BUILDER}` : `on a fork of the golden, ${ON_FORK}`;
-  return [...describeDiff(o.diff), "", o.small ? `Small change: update ${where}; ${describeCost(o)}.` : `A big change: a rebuild from scratch is the safer road, about ten minutes.`, ...(o.small ? [] : [`An update would run ${where}; ${describeCost(o)}.`])];
+  return [...describeDiff(o.diff), "", o.small ? `Small change: update ${where}; ${describeCost(o)}.` : `A big change: a rebuild from scratch is the safer road, ${rebuildEstimate(o.lastBuild)}.`, ...(o.small ? [] : [`An update would run ${where}; ${describeCost(o)}.`])];
 }
 
 /** What the updated version says about its logins: the previous version's outcomes as they were, since the update
@@ -105,6 +108,7 @@ export interface UpdateRoadOptions {
   /** Every row this computer offered, ticked or not: the words and sizes the diff is described with. */
   rows: readonly ManifestEntry[];
   importOf: (rows: readonly ManifestEntry[]) => GoldenImport;
+  lastBuild: BuildTimes | undefined;
   interactive: boolean;
   yes: boolean;
   /** Draws the update's stages as they arrive; returns once the runtime call settles. */
@@ -125,10 +129,15 @@ export async function updateRoad(o: UpdateRoadOptions): Promise<0 | 1 | "rebuild
     log.success(`Golden v${version} already matches this recipe. Nothing to update; run wsp to serve it.`, out);
     return 0;
   }
+  const head = goldenHead(manifest);
+  if (head?.base === undefined) {
+    note(describeDiff(diff).join("\n"), `Changes since golden v${version}`, out);
+    log.step(`Golden v${version} was sealed before the base tools existed and cannot take an update; the rebuild is the only road, ${rebuildEstimate(o.lastBuild)}.`, out);
+    return "rebuild";
+  }
   const kept = keptBuilder(await o.rt.golden.builders(), version);
-  const head = manifest?.versions.find(v => v.version === manifest.head);
   const rateUsdPerHour = o.rt.backend.pricing.rateUsdPerHour(head?.size ?? kept?.size ?? o.rt.backend.pricing.defaultSize);
-  const offer: UpgradeOffer = { diff, small: isSmallDelta(diff, id => rowOf(id)?.bytes ?? 0), onBuilder: kept !== undefined, version, rateUsdPerHour };
+  const offer: UpgradeOffer = { diff, small: isSmallDelta(diff, id => rowOf(id)?.bytes ?? 0), onBuilder: kept !== undefined, version, rateUsdPerHour, lastBuild: o.lastBuild };
   note(describeOffer(offer).join("\n"), `Changes since golden v${version}`, out);
 
   let road: "update" | "rebuild";
@@ -137,7 +146,7 @@ export async function updateRoad(o: UpdateRoadOptions): Promise<0 | 1 | "rebuild
       message: "How do you want to apply them?",
       options: [
         { value: "update", label: `Update the golden (${offer.onBuilder ? ON_BUILDER : ON_FORK}, about $${rateUsdPerHour.toFixed(2)}/hr while it runs)`, hint: `v${version + 1} from v${version} plus the changes` },
-        { value: "rebuild", label: "Rebuild from scratch (about ten minutes)", hint: "a fresh machine, every file and tool again" },
+        { value: "rebuild", label: `Rebuild from scratch (${rebuildEstimate(o.lastBuild)})`, hint: "a fresh machine, every file and tool again" },
       ],
       initialValue: offer.small ? "update" : "rebuild",
       input: o.input,
@@ -159,7 +168,7 @@ export async function updateRoad(o: UpdateRoadOptions): Promise<0 | 1 | "rebuild
   const t0 = Date.now();
   let result: Awaited<ReturnType<Runtime["golden"]["upgrade"]>> | undefined;
   let error: unknown;
-  const logins = carryLogins(head?.logins, diff);
+  const logins = carryLogins(head.logins, diff);
   const view = await o.stream(UPGRADE_STEPS, () => o.rt.golden.upgrade({ delta, ...(logins !== undefined ? { logins } : {}) }).then(r => (result = r), e => (error = e)));
   if (result === undefined) {
     if (view.failure === undefined) log.error(error instanceof Error ? error.message : String(error), out);

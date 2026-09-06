@@ -2,6 +2,7 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { gzipSync } from "node:zlib";
+import { NODE_RELEASES } from "@wsp/catalog";
 import { SNAPSHOT_STORAGE } from "@wsp/engine";
 import type { ExecResult, Machine, MachineBackend, MachineSpec, MachineState, RunOptions, SnapshotRow } from "@wsp/engine";
 
@@ -45,10 +46,20 @@ function vaultServer(): () => Promise<string> {
     }));
 }
 
-/** What a bare guest answers: nothing, except the Node step, which finds the base Node and keeps it, and the reach check. */
+/** The Node the fake's base image ships, as the real one did before the base floor. */
+const BASE_NODE = "v18.20.4";
+
+/** What a bare guest answers: nothing, except a Node step, which keeps the base's Node when it meets the step's floor
+ * and installs the pinned release when it does not, and the reach check. */
 export function guestAnswer(cmd: string): ExecResult {
-  if (cmd.includes("NODE_HAVE")) return { exitCode: 0, stdout: "NODE_HAVE v18.20.4\nNODE_KEPT v18.20.4\n", stderr: "" };
+  if (cmd.includes("NODE_HAVE")) {
+    const floor = Number(/-ge (\d+) \]/.exec(cmd)?.[1] ?? 0);
+    const kept = Number(BASE_NODE.slice(1).split(".")[0]) >= floor;
+    return { exitCode: 0, stdout: `NODE_HAVE ${BASE_NODE}\n${kept ? `NODE_KEPT ${BASE_NODE}` : `NODE_INSTALLED v${NODE_RELEASES[22].version}`}\n`, stderr: "" };
+  }
   if (cmd === "echo ok") return { exitCode: 0, stdout: "ok\n", stderr: "" };
+  // The machine context probe answers with its markers and nothing found, as a bare guest would.
+  if (cmd.includes("echo WSP_CTX")) return { exitCode: 0, stdout: "WSP_CTX\nWSP_CTX_END\n", stderr: "" };
   return { exitCode: 0, stdout: "", stderr: "" };
 }
 

@@ -192,7 +192,7 @@ describe("rungSelect", () => {
       expect(frame).toContain("\x1b[36m◆\x1b[39m  \x1b[36mTools\x1b[39m");
       expect(frame).toMatch(/▾ \x1b\[1mHomebrew\s*\x1b\[22m/);
       expect(frame).toMatch(/\x1b\[2m○\x1b\[22m \x1b\[2m\.demo-token\s*\x1b\[22m  \x1b\[2m\s*skip\x1b\[22m/);
-      expect(frame).toContain("\x1b[38;5;247mspace\x1b[39m \x1b[38;5;243mchange\x1b[39m");
+      expect(frame).toContain("\x1b[38;5;247mspace\x1b[39m \x1b[38;5;243mcopy, skip\x1b[39m");
       // One accent, dim for the rest, bold on headings, inverse for the search cursor, the two help greys, and their resets.
       const sgr = new Set([...frame.matchAll(/\x1b\[([0-9;]*)m/g)].map(m => m[1]));
       expect([...sgr].sort()).toEqual(["1", "2", "22", "27", "36", "38;5;243", "38;5;247", "39", "7"].sort());
@@ -370,15 +370,15 @@ describe("rungSelect", () => {
     expect(text()).toMatch(/CLI logins\s+1\n/);
     expect(text()).not.toContain("0 of 0");
     clear();
-    // Past the CLI heading, gh, and the Agent heading onto claude: sign in -> skip.
+    // Past the CLI heading, gh, and the Agent heading onto claude: sign in -> copy, the one-press opt-in.
     await press(input, KEY.down, KEY.down, KEY.down, KEY.space);
-    expect(text()).toMatch(/Sign-ins\s+7\/7\s+2 copy, 2 skip/);
+    expect(text()).toMatch(/Sign-ins\s+7\/7\s+3 copy, 1 skip/);
     expect(text()).toMatch(/Agent logins\s+3\n/);
     await press(input, KEY.enter);
     await p;
   });
 
-  it("a row with choices cycles them on space, has no all row, and reports the choice; copy counts as a tick", async () => {
+  it("a row with choices steps back through them on space (sign in reaches copy in one press), has no all row, and reports the choice; copy counts as a tick", async () => {
     const items: SelectItem[] = [
       { id: "gh", label: "GitHub CLI login", detail: ["~/.config/gh/hosts.yml"], choices: CHOICES },
       { id: "claude", label: "Claude Code login", detail: ["Keychain"], choices: CHOICES },
@@ -397,13 +397,20 @@ describe("rungSelect", () => {
     expect(text()).not.toContain("all ");
     expect(text()).toMatch(/GitHub CLI login\s+copy/);
     expect(text()).toMatch(/Claude Code login\s+sign in/);
-    expect(text()).toContain("┗  space change • enter next • esc back");
+    // The help line names the order space steps through, from the answer a sign-in row starts at.
+    expect(text()).toContain("┗  space sign in, copy, skip • enter next • esc back");
     clear();
+    // From copy: skip, then sign in, then copy again.
+    await press(input, KEY.space);
+    expect(text()).toMatch(/GitHub CLI login\s+skip/);
     await press(input, KEY.space);
     expect(text()).toMatch(/GitHub CLI login\s+sign in/);
     await press(input, KEY.space);
-    await press(input, KEY.space);
-    await press(input, KEY.down, KEY.space, KEY.enter);
+    expect(text()).toMatch(/GitHub CLI login\s+copy/);
+    // From sign in, one press is the copy opt-in; a second skips.
+    await press(input, KEY.down, KEY.space);
+    expect(text()).toMatch(/Claude Code login\s+copy/);
+    await press(input, KEY.space, KEY.enter);
     const result = await p;
     expect(result.kind).toBe("next");
     if (result.kind !== "next") return;
@@ -699,9 +706,10 @@ describe("rungSelect", () => {
     expect(text()).toMatch(/Everything else \(3 items, 340 B\)\s+8\/8\n/);
     expect(text()).not.toContain("1 skip");
     expect(text()).toMatch(/Keychain, device-bound\s+1\n/);
-    expect(text()).toContain("┗  space tick or change • ← → fold • enter next • esc back");
+    expect(text()).toContain("┗  space tick or sign in, copy, skip • ← → fold • enter next • esc back");
     clear();
-    await press(input, KEY.down, KEY.down, KEY.space);
+    // Space steps back through the three answers here: skip, sign in, copy.
+    await press(input, KEY.down, KEY.down, KEY.space, KEY.space);
     expect(lines().filter(l => /[○●] \.demo-token/.test(l)).at(-1)).toMatch(/credential  copy$/);
     expect(text()).toContain("Selected: .demo-token");
     await press(input, KEY.enter);
@@ -822,13 +830,13 @@ describe("rungSelect", () => {
     expect(text()).toMatch(/Sign-ins\s+7\/8\s+1 copy, 1 sign in\n/);
     expect(text()).toContain("Selected: GitHub CLI login");
     clear();
-    // gh: copy -> sign in; nothing is ticked now, so the line counts the sign-ins as the header does.
-    await press(input, KEY.space);
-    expect(text()).toContain("Selected: 2 sign in");
-    // gh: sign in -> skip; a skip is not a choice of anything.
+    // gh: copy -> skip; nothing is ticked now, so the line counts the sign-ins as the header does.
     await press(input, KEY.space);
     expect(text()).toContain("Selected: 1 sign in");
+    // claude: sign in -> copy, the opt-in, is a tick and is named; copy -> skip is not a choice of anything.
     await press(input, KEY.down, KEY.space);
+    expect(text()).toContain("Selected: Claude Code login");
+    await press(input, KEY.space);
     expect(text()).toContain("Selected: none");
     await press(input, KEY.enter);
     await p;

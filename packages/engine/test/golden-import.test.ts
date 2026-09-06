@@ -38,7 +38,7 @@ import {
   type RecipeDigest,
   type RecipeEntry,
 } from "../src/golden-import.js";
-import { LINUX_CASKS, caskPinState, linuxCaskByBin, linuxCaskFor } from "../src/linux-casks.js";
+import { LINUX_CASKS, caskPinState, linuxCaskByBin, linuxCaskFor } from "@wsp/catalog";
 
 const row = (over: Partial<RecipeEntry> & Pick<RecipeEntry, "rung" | "id">): RecipeEntry => ({
   label: over.id,
@@ -607,7 +607,7 @@ describe("toolInstallsFor", () => {
       row({ rung: "tools", id: "tools/bun/eslint", label: "eslint@9.0.0", version: "9.0.0" }),
       row({ rung: "tools", id: "tools/uv/ty", label: "ty v0.0.56", version: "0.0.56" }),
       row({ rung: "tools", id: "tools/pipx/black", label: "black 24.1.0", version: "24.1.0" }),
-      row({ rung: "tools", id: "tools/cargo/ripgrep", label: "ripgrep 14.1.0", version: "14.1.0" }),
+      row({ rung: "tools", id: "tools/cargo/bat", label: "bat 0.24.0", version: "0.24.0" }),
       row({ rung: "tools", id: "tools/brew/mas", linux: "no" }),
       row({ rung: "tools", id: "tools/go/junk", label: "junk (no module info)" }),
     ]);
@@ -622,16 +622,14 @@ describe("toolInstallsFor", () => {
       ["tools/brew/gh", "brew", "tools/brew-toolchain/gcc"],
       ["tools/npm/bun", "npm", undefined],
       ["tools/npm/@monid-ai/cli", "npm", undefined],
-      ["tools/npm/pnpm", "npm", undefined],
-      // pnpm and bun came as npm globals, so their rows wait on those lines rather than on a formula.
-      ["tools/pnpm/turbo", "pnpm", "tools/npm/pnpm"],
+      // bun came as an npm global, so its rows wait on that line rather than on a formula; pnpm and uv are the base's, so their rows wait on nothing.
+      ["tools/pnpm/turbo", "pnpm", undefined],
       ["tools/bun/eslint", "bun", "tools/npm/bun"],
-      ["tools/manager/uv", "uv", undefined],
-      ["tools/uv/ty", "uv", "tools/manager/uv"],
+      ["tools/uv/ty", "uv", undefined],
       ["tools/manager/pipx", "brew", "tools/brew-toolchain/gcc"],
       ["tools/pipx/black", "pipx", "tools/manager/pipx"],
       ["tools/manager/cargo", "brew", "tools/brew-toolchain/gcc"],
-      ["tools/cargo/ripgrep", "cargo", "tools/manager/cargo"],
+      ["tools/cargo/bat", "cargo", "tools/manager/cargo"],
       ["tools/manager/go", "brew", "tools/brew-toolchain/gcc"],
       ["tools/go/sqlc", "go", "tools/manager/go"],
     ]);
@@ -657,16 +655,13 @@ describe("toolInstallsFor", () => {
     for (const i of t.installs) expect(i.cmd).not.toContain("HOMEBREW_NO_INSTALL_CLEANUP");
     expect(cmd("tools/npm/bun")).toMatch(/npm install -g bun@1\.4\.0$/);
     expect(cmd("tools/npm/@monid-ai/cli")).toMatch(/npm install -g @monid-ai\/cli@0\.3\.1$/);
-    expect(cmd("tools/npm/pnpm")).toMatch(/npm install -g pnpm$/);
     expect(cmd("tools/pnpm/turbo")).toMatch(/pnpm add -g turbo@2\.5\.0$/);
     expect(cmd("tools/bun/eslint")).toMatch(/bun add -g eslint@9\.0\.0$/);
-    expect(cmd("tools/manager/uv")).toContain("sha256sum -c");
-    expect(cmd("tools/manager/uv")).toContain("install -m 0755");
     expect(cmd("tools/uv/ty")).toMatch(/uv tool install ty==0\.0\.56$/);
     expect(cmd("tools/manager/pipx")).toMatch(/brew install pipx'$/);
     expect(cmd("tools/pipx/black")).toMatch(/pipx install black==24\.1\.0$/);
     expect(cmd("tools/manager/cargo")).toMatch(/brew install rust'$/);
-    expect(cmd("tools/cargo/ripgrep")).toMatch(/cargo install ripgrep --version 14\.1\.0$/);
+    expect(cmd("tools/cargo/bat")).toMatch(/cargo install bat --version 0\.24\.0$/);
     expect(cmd("tools/manager/go")).toMatch(/brew install go'$/);
     expect(cmd("tools/go/sqlc")).toMatch(/go install github\.com\/sqlc-dev\/sqlc\/cmd\/sqlc@v1\.31\.1$/);
     for (const i of t.installs) expect(i.cmd).toMatch(/^export PATH=.*PNPM_HOME=/);
@@ -674,6 +669,7 @@ describe("toolInstallsFor", () => {
       { id: "tools/brew/mas", note: "no Linux bottle" },
       { id: "tools/go/junk", note: "no module to install from" },
     ]);
+    expect(t.base).toEqual([{ id: "tools/npm/pnpm", name: "pnpm", note: "pnpm is part of the base" }]);
     expect(t.brewfile).toBe(['tap "zingzy/tap"', 'brew "gh"', ""].join("\n"));
   });
 
@@ -689,30 +685,70 @@ describe("toolInstallsFor", () => {
 
   it("a row with no version installs the manager's latest; a manager already ticked as a formula is not installed twice", () => {
     const t = toolInstallsFor([
-      row({ rung: "tools", id: "tools/brew/pnpm", linux: "yes" }),
-      row({ rung: "tools", id: "tools/pnpm/turbo", label: "turbo" }),
+      row({ rung: "tools", id: "tools/brew/bun", linux: "yes" }),
+      row({ rung: "tools", id: "tools/bun/elysia", label: "elysia" }),
       row({ rung: "tools", id: "tools/uv/ty", label: "ty" }),
     ]);
     expect(t.installs.map(i => [i.id, i.after])).toEqual([
       ["tools/homebrew", undefined],
       ["tools/brew-toolchain/glibc", "tools/homebrew"],
       ["tools/brew-toolchain/gcc", "tools/brew-toolchain/glibc"],
-      ["tools/brew/pnpm", "tools/brew-toolchain/gcc"],
-      ["tools/pnpm/turbo", "tools/brew/pnpm"],
-      ["tools/manager/uv", undefined],
-      ["tools/uv/ty", "tools/manager/uv"],
+      ["tools/brew/bun", "tools/brew-toolchain/gcc"],
+      ["tools/bun/elysia", "tools/brew/bun"],
+      ["tools/uv/ty", undefined],
     ]);
-    expect(t.installs.find(i => i.id === "tools/pnpm/turbo")!.cmd).toMatch(/pnpm add -g turbo$/);
+    expect(t.installs.find(i => i.id === "tools/bun/elysia")!.cmd).toMatch(/bun add -g elysia$/);
     expect(t.installs.find(i => i.id === "tools/uv/ty")!.cmd).toMatch(/uv tool install ty$/);
+  });
+
+  it("rows the base floor covers install nothing and are listed as the base's, whatever road the Mac had them by; a hand copy still travels", () => {
+    // Homebrew's node is the current major and its python the current 3.x: the Mac's versions come from the brew table.
+    const table: BrewTable = new Map([
+      ["node", { name: "node", fullName: "node", deps: [], macosOnly: false, version: "24.1.0" }],
+      ["python", { name: "python", fullName: "python", deps: [], macosOnly: false, version: "3.14.0" }],
+      ["python@3.12", { name: "python@3.12", fullName: "python@3.12", deps: [], macosOnly: false, version: "3.12.7" }],
+    ]);
+    const t = toolInstallsFor([
+      row({ rung: "tools", id: "tools/brew/jq", linux: "yes" }),
+      row({ rung: "tools", id: "tools/npm/pnpm", label: "pnpm", version: "10.0.0" }),
+      row({ rung: "tools", id: "tools/brew/python@3.12", linux: "yes" }),
+      row({ rung: "tools", id: "tools/brew/node", linux: "yes" }),
+      row({ rung: "tools", id: "tools/brew/python", linux: "yes" }),
+      row({ rung: "tools", id: "tools/brew/uv", linux: "yes" }),
+      row({ rung: "tools", id: "tools/cargo/ripgrep", label: "ripgrep", version: "14.1.0" }),
+      row({ rung: "tools", id: "tools/brew-cask/docker", linux: "no" }),
+      row({ rung: "tools", id: "tools/brew/docker-compose", linux: "yes" }),
+      row({ rung: "tools", id: "tools/brew/python@3.14", linux: "yes" }),
+      row({ rung: "tools", id: "tools/hand/jq", label: "jq", paths: ["~/.local/bin/jq"], linux: "yes" }),
+    ], table);
+    expect(t.base).toEqual([
+      { id: "tools/brew/jq", name: "jq", note: "jq is part of the base" },
+      { id: "tools/npm/pnpm", name: "pnpm", note: "pnpm is part of the base" },
+      { id: "tools/brew/python@3.12", name: "Python 3.12", note: "Python 3.12 is part of the base" },
+      { id: "tools/brew/node", name: "Node 22 with npm", note: "Node 22 is part of the base; this Mac runs Node 24" },
+      { id: "tools/brew/python", name: "Python 3.12", note: "Python 3.12 is part of the base; this Mac runs Python 3.14" },
+      { id: "tools/brew/uv", name: "uv", note: "uv is part of the base" },
+      { id: "tools/cargo/ripgrep", name: "ripgrep", note: "ripgrep is part of the base" },
+      { id: "tools/brew-cask/docker", name: "Docker engine and compose", note: "Docker engine and compose is part of the base" },
+      { id: "tools/brew/docker-compose", name: "Docker engine and compose", note: "Docker engine and compose is part of the base" },
+    ]);
+    // A row with no table entry and no version says the base row alone; a versioned row on the floor's major does too.
+    expect(toolInstallsFor([row({ rung: "tools", id: "tools/brew/node", linux: "yes" })]).base[0]!.note).toBe("Node 22 with npm is part of the base");
+    expect(toolInstallsFor([row({ rung: "tools", id: "tools/npm/node", label: "node", version: "22.20.0" })]).base[0]!.note).toBe("Node 22 with npm is part of the base");
+    expect(t.installs.map(i => i.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/brew/python@3.14"]);
+    expect(t.skipped).toEqual([]);
+    expect(t.brewfile).toBe('brew "python@3.14"\n');
+    expect(toolUninstall(row({ rung: "tools", id: "tools/brew/jq" }))).toEqual({ note: "jq is part of the base and stays" });
+    expect(toolUninstall(row({ rung: "tools", id: "tools/hand/jq" }))).toEqual({ note: "a copied file; it comes off with the files" });
   });
 
   it("one formula has nothing to share, so no shared step; two get one between the taps and the first formula", () => {
     const one = toolInstallsFor([row({ rung: "tools", id: "tools/brew/gh", linux: "yes" })]);
     expect(one.installs.map(i => i.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/brew/gh"]);
-    const two = toolInstallsFor([row({ rung: "tools", id: "tools/brew/gh", linux: "yes" }), row({ rung: "tools", id: "tools/brew/jq", linux: "yes" }), row({ rung: "tools", id: "tools/brew-tap/zingzy/tap", linux: "yes" })]);
-    expect(two.installs.map(i => i.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/brew-tap/zingzy/tap", "tools/brew-shared", "tools/brew/gh", "tools/brew/jq"]);
+    const two = toolInstallsFor([row({ rung: "tools", id: "tools/brew/gh", linux: "yes" }), row({ rung: "tools", id: "tools/brew/yq", linux: "yes" }), row({ rung: "tools", id: "tools/brew-tap/zingzy/tap", linux: "yes" })]);
+    expect(two.installs.map(i => i.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/brew-tap/zingzy/tap", "tools/brew-shared", "tools/brew/gh", "tools/brew/yq"]);
     expect(two.installs.find(i => i.id === "tools/brew-shared")).toMatchObject({ label: "shared Homebrew dependencies", after: "tools/brew-toolchain/gcc" });
-    expect(two.installs.find(i => i.id === "tools/brew-shared")!.cmd).toContain(`brew deps --for-each '\\''gh'\\'' '\\''jq'\\'' |`);
+    expect(two.installs.find(i => i.id === "tools/brew-shared")!.cmd).toContain(`brew deps --for-each '\\''gh'\\'' '\\''yq'\\'' |`);
   });
 
   it("the housekeeping after the loop is autoremove then a full cleanup, each as linuxbrew with the tools PATH", () => {
@@ -722,8 +758,8 @@ describe("toolInstallsFor", () => {
   });
 
   it("a manager needed only for its rows brings Homebrew along even when no formula is ticked", () => {
-    const t = toolInstallsFor([row({ rung: "tools", id: "tools/cargo/ripgrep", label: "ripgrep 14.1.0", version: "14.1.0" })]);
-    expect(t.installs.map(i => i.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/manager/cargo", "tools/cargo/ripgrep"]);
+    const t = toolInstallsFor([row({ rung: "tools", id: "tools/cargo/bat", label: "bat 0.24.0", version: "0.24.0" })]);
+    expect(t.installs.map(i => i.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/manager/cargo", "tools/cargo/bat"]);
   });
 
   it("no Homebrew step when no formula, tap or manager needs it; unticked rows install nothing", () => {

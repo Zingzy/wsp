@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -1163,7 +1164,8 @@ describe("runtime golden builders", () => {
     const seen: GoldenExec[] = [];
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: { ...recipe, onExec: e => void seen.push(e) } });
     await rt.golden.prepare({ name: "default" });
-    expect(backend.machines[0]!.runLog).toEqual(["install"]);
+    // The base stage's steps and the cache sweeps run under the guard; the harness install is the one bare run.
+    expect(backend.machines[0]!.runLog.filter(s => !s.includes("setsid bash -c"))).toEqual(["install"]);
     expect(seen.filter(e => e.cmd === "install")).toEqual([expect.objectContaining({ machineId: "m1", exitCode: 0, stdout: "harness on\n" })]);
   });
 
@@ -1589,8 +1591,10 @@ describe("runtime golden rollback", () => {
 
 describe("runtime machine context", () => {
   const probe = "WSP_CTX\nKERNEL 6.6.30\nDISK 20466256 11720704\nAGENT claude\nSHELL zsh\nWSP_CTX_END\n";
-  const writes = (m: { execLog: string[] }) => m.execLog.filter(c => c.includes("'/etc/wsp/machine-context.md'"));
-  const docOf = (write: string) => Buffer.from(/printf '%s' '([A-Za-z0-9+/=]+)' \| base64 --decode > '\/etc\/wsp\/skills\/wsp-machine\/SKILL\.md'/.exec(write)![1]!, "base64").toString("utf8");
+  const namesIn = (tgz: Buffer): string[] => execFileSync("tar", ["-tzf", "-"], { input: tgz }).toString("utf8").trim().split("\n");
+  /** The context archives that went up for a machine: the texts travel through the upload road, never inside an exec. */
+  const writes = (backend: StubBackend, m: StubMachine) => backend.puts.filter(p => p.machine === m.id && namesIn(p.body).includes("etc/wsp/machine-context.md")).map(p => p.body);
+  const docOf = (tgz: Buffer) => execFileSync("tar", ["-xzOf", "-", "etc/wsp/skills/wsp-machine/SKILL.md"], { input: tgz }).toString("utf8");
   const version = { version: 4, snapshotId: "snap_g", baseTemplate: "base", setupSha: "abcdef0123456789", createdAt: "2026-09-05T10:00:00.000Z", smoke: { cmd: "true", exitCode: 0 } };
 
   it("refreshes the document on the fresh fork with the workspace's name and its golden version", async () => {
@@ -1601,42 +1605,36 @@ describe("runtime machine context", () => {
     const rt = createRuntime({ backend, store, adapters: {} });
     await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
     const m = backend.machines[0]!;
-    expect(writes(m)).toHaveLength(1);
-    expect(m.execLog.indexOf(writes(m)[0]!)).toBeGreaterThan(m.execLog.findIndex(c => c.startsWith("hostname ")));
-    const doc = docOf(writes(m)[0]!);
+    expect(writes(backend, m)).toHaveLength(1);
+    expect(m.execLog.some(c => c.includes("base64 --decode"))).toBe(false);
+    expect(m.execLog.findIndex(c => c.includes("tar xzf - -C '/' "))).toBeGreaterThan(m.execLog.findIndex(c => c.startsWith("hostname ")));
+    const doc = docOf(writes(backend, m)[0]!);
     expect(doc).toContain("- Workspace: task-1.");
     expect(doc).toContain("- Golden: v4, sealed 2026-09-05, setup abcdef012345.");
     expect(doc).toContain("- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written.");
-    expect(writes(m)[0]).toContain("'/etc/claude-code/CLAUDE.md'");
-    expect(writes(m)[0]).toContain("'/etc/claude-code/.claude/skills/wsp-machine/SKILL.md'");
+    expect(namesIn(writes(backend, m)[0]!)).toContain("etc/claude-code/CLAUDE.md");
+    expect(namesIn(writes(backend, m)[0]!)).toContain("etc/claude-code/.claude/skills/wsp-machine/SKILL.md");
   });
 
   it("refreshes again on the fork an upgrade boots, and a guest that does not answer is only logged", async () => {
     const backend = stubBackend();
     backend.execImpl = (_m, cmd) => (cmd.includes("ls -A /root") ? { exitCode: 0, stdout: "notes.md\n", stderr: "" } : cmd.includes("echo WSP_CTX") ? { exitCode: 0, stdout: probe, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (_url: string, init?: { method?: string }) =>
-        init?.method === "PUT" ? new Response(null, { status: 200 }) : new Response(Buffer.from("tarbytes")),
-      ),
-    );
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
       const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
-      expect(docOf(writes(backend.machines[0]!)[0]!)).toContain("- Golden: version not recorded.");
+      expect(docOf(writes(backend, backend.machines[0]!)[0]!)).toContain("- Golden: version not recorded.");
       await rt.workspaces.upgrade(ws.id, { cpu: 4 });
-      expect(writes(backend.machines[1]!)).toHaveLength(1);
-      expect(docOf(writes(backend.machines[1]!)[0]!)).toContain("- Workspace: task-1.");
+      expect(writes(backend, backend.machines[1]!)).toHaveLength(1);
+      expect(docOf(writes(backend, backend.machines[1]!)[0]!)).toContain("- Workspace: task-1.");
 
       backend.execImpl = () => ({ exitCode: 0, stdout: "", stderr: "" });
       const silent = await rt.workspaces.create({ golden: "snap_g", name: "task-2" });
       expect(silent.name).toBe("task-2");
-      expect(writes(backend.machines[2]!)).toHaveLength(0);
+      expect(writes(backend, backend.machines[2]!)).toHaveLength(0);
       expect(warn.mock.calls.some(c => String(c[0]).includes("machine context for") && String(c[0]).includes("without its markers"))).toBe(true);
     } finally {
       warn.mockRestore();
-      vi.unstubAllGlobals();
     }
   });
 });
@@ -2296,6 +2294,11 @@ describe("runtime golden import", () => {
     const b = await rt.golden.prepare();
     expect(frames.filter(f => !f.startsWith("uploading-files:"))).toEqual([
       "creating:sandbox from base",
+      "deploying-daemon",
+      ...["Node 22 with npm", "pnpm", "uv", "Python 3.12", "apt index", "git", "jq", "ripgrep", "curl", "Docker engine and compose"].map((label, i) => `deploying-daemon:${label} (${i + 1}/10)`),
+      "deploying-daemon:10 installed; caches swept; 3000 MB free",
+      // The stub answers the versions read with nothing, so the stage closes on the disk alone.
+      "deploying-daemon:3000 MB free",
       "applying-setup:1 file: shell 1",
       "applying-setup:10 B packed",
       "installing-harness",
@@ -2304,7 +2307,7 @@ describe("runtime golden import", () => {
       "installing-tools:jq (1/1)",
       "installing-tools:1 installed; caches swept; 3000 MB free",
       "installing-mcp:none configured",
-      "installing-mcp:machine context: written; no agent on the machine",
+      expect.stringMatching(/^installing-mcp:machine context: \d+(\.\d+)? KB written; no agent on the machine$/),
       "ready",
     ]);
     expect(await store.get("builders", b.id)).toMatchObject({ import: { recipeHash: "h1", applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools", "installing-mcp"], smoke: "codex --version" } });
@@ -2992,7 +2995,9 @@ describe("runtime golden import", () => {
     const log = backend.machines[0]!.execLog;
     expect(log.filter(c => c.includes("brew install jq"))).toHaveLength(1);
     expect(log.filter(c => c.includes("codex-install"))).toHaveLength(1);
-    expect(log.filter(c => c.includes("tar"))).toHaveLength(1);
+    // One untar of the person's files under /root and one of the machine context at the root.
+    expect(log.filter(c => c.includes("tar xzf - -C '/root'"))).toHaveLength(1);
+    expect(log.filter(c => c.includes("tar xzf - -C '/' "))).toHaveLength(1);
     expect(await rt.golden.builders()).toHaveLength(1);
   });
 
@@ -3150,7 +3155,7 @@ describe("runtime golden update and the post-seal grace", () => {
       "installing-tools:cowsay (1/1)",
       "installing-tools:1 installed; caches swept; 3000 MB free",
       "installing-mcp:none configured",
-      "installing-mcp:machine context: written; no agent on the machine",
+      expect.stringMatching(/^installing-mcp:machine context: \d+(\.\d+)? KB written; no agent on the machine$/),
       "ready:",
       "snapshotting:golden-v2",
       "smoke-forking:codex --version",
@@ -3195,6 +3200,26 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(await next.reap()).toEqual({ reaped: [{ id: b2.id, builder: true, reason: "grace", ageMs: GRACE_MS + 5_000 }], spared: [] });
     expect(again.backend.machines[0]!.killed).toBe(true);
     expect(await again.store.list("builders")).toEqual([]);
+  });
+
+  it("coverage: a kept builder a second process rehydrates from the store seals its update with the floor the first process read", async () => {
+    const { backend, store, rt, clock } = started();
+    const floor = [{ name: "node", version: "22.23.2" }, { name: "pnpm", version: "10.4.1" }];
+    backend.execImpl = (m, cmd) => (cmd.includes("VERSION node:") && !cmd.includes("echo WSP_CTX") ? { exitCode: 0, stdout: "VERSION node: v22.23.2\nVERSION pnpm: 10.4.1\nVERSION docker: \n", stderr: "" } : dfOk(m, cmd));
+    const b = await rt.golden.prepare();
+    const { version: one } = await rt.golden.seal(b.id);
+    expect(one.base).toEqual(floor);
+    expect(await store.get("builders", b.id)).toMatchObject({ base: floor });
+    await rt.close();
+    // The second process runs no base stage and reads no versions: the floor v2 records is the record's alone.
+    backend.execImpl = dfOk;
+    const next = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()), clock });
+    const result = await next.golden.upgrade({ delta: deltaOf() });
+    expect(result.road).toBe("builder");
+    expect(result.version.base).toEqual(floor);
+    expect((await next.golden.get())?.versions.map(v => v.base)).toEqual([floor, floor]);
+    expect(await store.get("builders", b.id)).toMatchObject({ sealed: { version: 2 }, base: floor });
+    await next.close();
   });
 
   it("with the builder gone the update forks the head at its size: the delta runs on the fork, v2 is sealed and current, the fork is kept for its own window, and v1 stays for rollback", async () => {

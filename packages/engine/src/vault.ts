@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { gzipSync } from "node:zlib";
 import { backoffMs, classify, shouldRetry } from "./errors.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import type { Machine } from "./machine.js";
@@ -98,6 +99,63 @@ async function putPart(doFetch: Fetch, url: string, bytes: Uint8Array<ArrayBuffe
     if (!shouldRetry(kind, attempt)) throw new Error(uploadFailure(res.status, body, part, parts, attempt));
     await new Promise(r => setTimeout(r, backoffMs(attempt)));
   }
+}
+
+/** A file for the upload road: its path on the guest, its mode and its text. */
+export interface TarEntry {
+  path: string;
+  mode: number;
+  content: string;
+}
+
+const TAR_BLOCK = 512;
+
+function tarField(header: Buffer, at: number, length: number, value: string): void {
+  header.write(value, at, length, "utf8");
+}
+
+/** A ustar name of at most 100 bytes with a prefix of at most 155, split at a slash; a path neither field holds is refused. */
+function tarName(path: string): { name: string; prefix: string } {
+  if (Buffer.byteLength(path) <= 100) return { name: path, prefix: "" };
+  for (let cut = path.lastIndexOf("/"); cut > 0; cut = path.lastIndexOf("/", cut - 1)) {
+    const prefix = path.slice(0, cut);
+    const name = path.slice(cut + 1);
+    if (Buffer.byteLength(prefix) <= 155 && Buffer.byteLength(name) <= 100) return { name, prefix };
+  }
+  throw new Error(`${path} does not fit a ustar header`);
+}
+
+/** A gzipped ustar archive of the entries, each at its path with its mode and owned by root, for importInto to land
+ * at the root of the guest: paths lose their leading slash, as tar wants them. */
+export function tarOf(entries: readonly TarEntry[]): Buffer {
+  const mtime = Math.floor(Date.now() / 1000);
+  const blocks: Buffer[] = [];
+  for (const e of entries) {
+    const body = Buffer.from(e.content, "utf8");
+    const { name, prefix } = tarName(e.path.replace(/^\/+/, ""));
+    const header = Buffer.alloc(TAR_BLOCK);
+    tarField(header, 0, 100, name);
+    tarField(header, 100, 8, `${e.mode.toString(8).padStart(7, "0")}\0`);
+    tarField(header, 108, 8, "0000000\0");
+    tarField(header, 116, 8, "0000000\0");
+    tarField(header, 124, 12, `${body.length.toString(8).padStart(11, "0")}\0`);
+    tarField(header, 136, 12, `${mtime.toString(8).padStart(11, "0")}\0`);
+    tarField(header, 148, 8, "        ");
+    tarField(header, 156, 1, "0");
+    tarField(header, 257, 6, "ustar\0");
+    tarField(header, 263, 2, "00");
+    tarField(header, 265, 32, "root");
+    tarField(header, 297, 32, "root");
+    tarField(header, 345, 155, prefix);
+    let sum = 0;
+    for (const b of header) sum += b;
+    tarField(header, 148, 8, `${sum.toString(8).padStart(6, "0")}\0 `);
+    blocks.push(header, body);
+    const pad = (TAR_BLOCK - (body.length % TAR_BLOCK)) % TAR_BLOCK;
+    if (pad > 0) blocks.push(Buffer.alloc(pad));
+  }
+  blocks.push(Buffer.alloc(TAR_BLOCK * 2));
+  return gzipSync(Buffer.concat(blocks));
 }
 
 // A hash mismatch exits with its own code so the caller can tell it from a failed extraction.

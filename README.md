@@ -36,7 +36,7 @@ claude sessions.
 pnpm install && pnpm build
 printf 'SOLARI_API_KEY=%s\n' "$YOUR_KEY" > .env
 pnpm wsp init       # first run: tick what comes along, build and seal your golden, land in the app
-pnpm wsp            # the app on http://127.0.0.1:4400
+pnpm wsp up         # every start after that: the app on http://127.0.0.1:4400 over the golden you sealed
 pnpm wsp doctor     # prove the reach path against one live machine
 ```
 
@@ -173,6 +173,7 @@ The app and the WebSocket API bind 127.0.0.1 only.
 
 | package | what it is |
 |---|---|
+| `@wsp/catalog` | the agents and tools wsp can put on a machine: roads, sign-ins, config paths, defaults |
 | `@wsp/engine` | machine backends, workspace lifecycle, golden images, vault |
 | `@wsp/daemon` | in-guest daemon: ptys, port watch, inbox, process manifest |
 | `@wsp/adapter-claude` | drives claude headless inside a workspace |

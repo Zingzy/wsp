@@ -5,7 +5,7 @@
 // records the checksum and the next install of that version checks it. The
 // version is the Mac's when the cask's version names the Linux build; else the
 // vendor's current one is fetched once and the pin holds it from then on.
-import type { ToolPin } from "./golden-import.js";
+import type { ToolPin } from "./roads.js";
 
 export interface LinuxCask {
   /** The cask tokens that ship the command on macOS. */
@@ -63,7 +63,7 @@ const GCLOUD_BINS = ["gcloud", "gsutil", "bq"];
 
 /** Google publishes the tarball per version and arch; the rapid channel's component list names the current version.
  * The x86_64 tarball bundles a Python; the arm one runs on the machine's python3. */
-const GCLOUD: LinuxCask = {
+export const GCLOUD: LinuxCask = {
   casks: ["gcloud-cli", "google-cloud-sdk"],
   bin: "gcloud",
   from: "Google's Linux release",
@@ -89,7 +89,7 @@ const GCLOUD: LinuxCask = {
 
 /** Docker Desktop ships kubectl on the Mac; on Linux the static binary comes from the Kubernetes release, checked
  * against the sum published beside it. The cask's version is Docker's, which says nothing about kubectl's. */
-const KUBECTL: LinuxCask = {
+export const KUBECTL: LinuxCask = {
   casks: ["docker-desktop", "docker"],
   bin: "kubectl",
   from: "Kubernetes release",

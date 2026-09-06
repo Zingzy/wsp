@@ -15,6 +15,7 @@ import { collect, nodeHost, nodeMachine, type Manifest, type Rung } from "@wsp/c
 import {
   SolariBackend,
   createRuntime,
+  goldenHead,
   hostIdentity,
   jsonFileStore,
   machineExecStream,
@@ -24,7 +25,8 @@ import {
   type Machine,
   type Runtime,
 } from "@wsp/runtime";
-import { CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, claudeEnvs, deployDaemon, doctor } from "./doctor.js";
+import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
+import { claudeEnvs, deployDaemon, doctor } from "./doctor.js";
 import { keychainReader } from "./init-import.js";
 import { readBrewTable } from "./init-brew.js";
 import { runInit, type InitIO } from "./init.js";
@@ -41,7 +43,8 @@ const VERSION = (
 export const HELP = `wsp - ${TAGLINE}
 
 usage:
-  wsp                start the runtime and serve the app on localhost
+  wsp up             start the app and the runtime over the golden you sealed
+                     (plain wsp does the same)
   wsp init           set up your first golden image: tick what comes along from
                      this machine, build it, then finish in the browser
   wsp doctor         run the reach loop end to end against one live machine
@@ -53,9 +56,10 @@ options:
   --state PATH       state file (default ~/.wsp/state.json, or ./.wsp/state.json
                      when the current directory has a .env)
   --yes              init: take every default and ask nothing (required off a
-                     terminal); a login held in the Keychain defaults to sign
-                     in on the machine unless a saved recipe answered copy, so
-                     macOS has nothing to ask either
+                     terminal); a login with a browser or device sign-in, or one
+                     held in the Keychain, defaults to sign in on the machine
+                     unless a saved recipe answered copy, so macOS has nothing
+                     to ask either and the sign-ins wait for the app's terminal
   --manifest PATH    init: tick from this file instead of reading the machine; a
                      saved recipe (<state dir>/golden-recipe.json) works here
 
@@ -211,7 +215,7 @@ export function goldenRecipe(
     cpu: 2,
     memMb: 4096,
     envs: claudeEnvs(keys.anthropic),
-    deployDaemon: hooks.deployDaemon ?? (async machine => `node ${(await deployDaemon(machine)).node}`),
+    deployDaemon: hooks.deployDaemon ?? (async machine => `daemon on node ${(await deployDaemon(machine)).node}`),
   };
 }
 
@@ -234,7 +238,7 @@ export function makeRuntime(keys: Keys, statePath: string, recipe: GoldenRecipe 
       claude: ctx =>
         createClaudeAdapter({
           exec: machineExecStream(ctx.machine),
-          configDir: CONFIG_DIR,
+          configDir: CLAUDE_CONFIG_DIR,
         }),
     },
     goldenRecipe: recipe,
@@ -391,7 +395,7 @@ async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: 
       secrets: keychainReader(),
       platform: platform() === "darwin" ? "darwin" : "linux",
       brew: () => readBrewTable(nodeHost()),
-      runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `node ${(await deployDaemon(machine)).node}` }),
+      runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `daemon on node ${(await deployDaemon(machine)).node}` }),
       host: (rt, builder, hooks) => hostFor(rt, keys, { ...opts, builder, ...hooks }, io),
     },
     screen,
@@ -400,12 +404,28 @@ async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: 
   return result.code;
 }
 
-export async function serve(
-  io: CliIO,
-  opts: { port: number; wsPort: number; statePath: string; webDir?: string; runtime?: Runtime; openUrl?: UrlOpener },
-): Promise<HostHandle> {
+export interface ServeOptions {
+  port: number;
+  wsPort: number;
+  statePath: string;
+  webDir?: string;
+  runtime?: Runtime;
+  openUrl?: UrlOpener;
+}
+
+export async function serve(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   const keys = await loadKeys(io);
   const rt = opts.runtime ?? makeRuntime(keys, opts.statePath);
+  return hostFor(rt, keys, opts, io);
+}
+
+export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle | undefined> {
+  const keys = await loadKeys(io, undefined, { anthropic: false });
+  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath);
+  if (goldenHead(await rt.golden.get()) === undefined) {
+    io.error("no golden yet; run wsp init");
+    return undefined;
+  }
   return hostFor(rt, keys, opts, io);
 }
 
@@ -510,8 +530,12 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
   const [cmd] = positionals;
   switch (cmd) {
     case undefined:
-      stopOnSignals(await serve(io, opts), io);
+    case "up": {
+      const handle = await up(io, opts);
+      if (handle === undefined) return 1;
+      stopOnSignals(handle, io);
       return 0;
+    }
     case "init":
       return init(io, opts, { yes: values.yes === true, ...(values.manifest !== undefined ? { manifest: values.manifest } : {}) });
     case "doctor": {

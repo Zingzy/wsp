@@ -12,7 +12,7 @@ import { join } from "node:path";
 import type { ManifestEntry } from "@wsp/collect";
 import { NODE_RELEASES, planFiles } from "@wsp/engine";
 import { afterEach, describe, expect, it } from "vitest";
-import { GOLDEN_SETUP, GOLDEN_SMOKE } from "../src/doctor.js";
+import { GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
 import { digestOf, importFor, importResultPath, keychainLogins, keychainReader, packPlan, readSecrets, statOf, type SecretReader } from "../src/init-import.js";
 import { GUARD_SOURCE_COMMENT, GUARD_SOURCE_LINE } from "../src/init-aliases.js";
 
@@ -761,6 +761,27 @@ describe("packPlan: rc files with secret exports", () => {
   });
 });
 
+describe("packPlan: source guard", () => {
+  it("a bare source line whose file is not in the pack, or sits outside home, is wrapped so the machine skips it; one naming this computer's home is wrapped with the home written as $HOME; one whose file travels, a guarded line and a fish config stay as written; the mode holds", async () => {
+    const home = laptop();
+    mkdirSync(join(home, ".zsh"));
+    writeFileSync(join(home, ".zsh", "functions.zsh"), "f() { :; }\n");
+    mkdirSync(join(home, ".config", "fish"), { recursive: true });
+    writeFileSync(join(home, ".config", "fish", "config.fish"), "source ~/.config/fish/local.fish\n");
+    const rc = ['. "$HOME/.cargo/env"', "source ~/.zsh/functions.zsh", `source ${home}/.deno/env  # deno`, "[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh", "export RO_KEY=fake-ro-value", "source $ZSH/oh-my-zsh.sh", "source /opt/homebrew/opt/nvm/nvm.sh", `. "${home}/.zsh/functions.zsh"`, ""].join("\n");
+    writeFileSync(join(home, ".zshrc"), rc, { mode: 0o444 });
+    const rows = [row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"] }), row({ rung: "everything", id: "everything/.zsh", paths: ["~/.zsh"] }), row({ rung: "shell", id: "shell/fish", paths: ["~/.config/fish"] })];
+    const packed = await packPlan(planFiles(rows, { home, stat: statOf, platform: "darwin" }), { secrets: new Map(), home });
+    expect(listTar(packed.tar).find(e => e.path === ".zshrc")?.mode).toMatch(/^-r--r--r--/);
+    const dir = extract(packed.tar);
+    expect(readFileSync(join(dir, ".zshrc"), "utf8")).toBe(['[ -r "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"', "source ~/.zsh/functions.zsh", '[ -r "$HOME"/.deno/env ] && source "$HOME"/.deno/env # deno', "[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh", "source $ZSH/oh-my-zsh.sh", "[ -r /opt/homebrew/opt/nvm/nvm.sh ] && source /opt/homebrew/opt/nvm/nvm.sh", '[ -r "$HOME/.zsh/functions.zsh" ] && . "$HOME/.zsh/functions.zsh"', ""].join("\n"));
+    expect(readFileSync(join(dir, ".config", "fish", "config.fish"), "utf8")).toBe("source ~/.config/fish/local.fish\n");
+    expect(packed.cut).toEqual([{ path: "~/.zshrc", names: ["RO_KEY"] }]);
+    const without = await packPlan(planFiles([rows[0]!], { home, stat: statOf, platform: "darwin" }), { secrets: new Map(), home });
+    expect(readFileSync(join(extract(without.tar), ".zshrc"), "utf8")).toContain("[ -r ~/.zsh/functions.zsh ] && source ~/.zsh/functions.zsh");
+  });
+});
+
 describe("packPlan: alias guard", () => {
   const guard = { text: "# ls points at eza: not coming (unticked, tick to bring)\n_wsp_on_path 'eza' || unalias -- 'ls' 2>/dev/null\n", rc: ".zshrc" };
 
@@ -948,7 +969,7 @@ describe("importFor", () => {
         row({ rung: "identity", id: "identity/git-user", paths: ["~/.gitconfig"], bytes: 20 }),
         row({ rung: "agents", id: "agents/claude", paths: ["~/.claude/settings.json", "~/.claude.json"], bytes: 5 }),
         row({ rung: "agents", id: "agents/codex", paths: ["~/.codex/config.toml"] }),
-        row({ rung: "tools", id: "tools/brew/jq", linux: "yes" }),
+        row({ rung: "tools", id: "tools/brew/yq", linux: "yes" }),
         row({ rung: "tools", id: "tools/brew/zingzy/tap/diskbloom", label: "zingzy/tap/diskbloom", linux: "unknown" }),
         row({ rung: "tools", id: "tools/npm/bun", label: "bun@1.4.0", version: "1.4.0" }),
         row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"], choice: "copy" }),
@@ -967,7 +988,7 @@ describe("importFor", () => {
       row({ rung: "editors", id: "editors/vscode", label: "VS Code settings, for VS Code over SSH", paths: ["~/Library/Application Support/Code/User/settings.json"], bytes: 3 }),
       row({ rung: "editors", id: "editors/vscode-ext/ms-python.python", label: "ms-python.python" }),
     );
-    expect(imp.tools.map(t => t.id)).toEqual(["editors/nvim", "editors/vscode-ext", "tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/brew/jq", "tools/npm/bun"]);
+    expect(imp.tools.map(t => t.id)).toEqual(["editors/nvim", "editors/vscode-ext", "tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/brew/yq", "tools/npm/bun"]);
     expect(imp.recipe?.files.map(f => f.dest)).toContain(".vscode-server/data/Machine/settings.json");
   });
 
@@ -1015,14 +1036,20 @@ describe("importFor", () => {
       { id: "agents/claude", path: "~/.claude.json", note: "no longer on this computer" },
       { id: "agents/codex", path: "~/.codex/config.toml", note: "no longer on this computer" },
     ]);
-    expect(imp.tools.map(t => t.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/brew/jq", "tools/npm/bun"]);
+    expect(imp.tools.map(t => t.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/brew/yq", "tools/npm/bun"]);
     expect(imp.node).toMatchObject({ floor: 16, version: NODE_RELEASES[22].version, agents: ["Codex"] });
     expect(imp.agents.map(a => [a.id, a.install, a.smoke])).toEqual([
       ["agents/claude", GOLDEN_SETUP, GOLDEN_SMOKE],
       ["agents/codex", expect.stringContaining("npm install -g @openai/codex@"), "codex --version"],
     ]);
     expect(imp.skippedAgents).toEqual([]);
+    expect(imp.baseTools).toEqual([]);
     expect(ticks(home, row({ rung: "agents", id: "agents/zed", label: "Zed" })).skippedAgents).toEqual([{ id: "agents/zed", name: "Zed", note: "no installer known" }]);
+    // A ticked row the base floor covers is no step and no skip: it lands in the result as installed, by the base row's name.
+    const covered = ticks(home, row({ rung: "tools", id: "tools/brew/jq", label: "jq" }), row({ rung: "tools", id: "tools/npm/pnpm", label: "pnpm" }));
+    expect(covered.tools.map(t => t.id)).not.toContain("tools/brew/jq");
+    expect(covered.skippedTools!.map(s => s.id)).not.toContain("tools/brew/jq");
+    expect(covered.baseTools).toEqual([{ id: "tools/brew/jq", label: "jq", note: "jq is part of the base" }, { id: "tools/npm/pnpm", label: "pnpm", note: "pnpm is part of the base" }]);
   });
 
   it("carries the person's shell when zsh's rows are ticked, with the frameworks among them, and none when only bash's are", () => {

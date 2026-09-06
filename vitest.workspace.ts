@@ -14,6 +14,7 @@ const alias = {
   "@wsp/runtime": pkg("runtime"),
   "@wsp/host": pkg("host"),
   "@wsp/collect": pkg("collect"),
+  "@wsp/catalog": pkg("catalog"),
 };
 
 export default [

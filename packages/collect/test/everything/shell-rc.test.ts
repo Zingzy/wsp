@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { FISH_CONF_D, RC_NAMES, RC_PATHS, isRcPath, isSecretName, rcFiles, shellRc, sourcedPaths, stripExports } from "../../src/index.js";
+import { FISH_CONF_D, RC_NAMES, RC_PATHS, bareSources, isRcPath, isSecretName, rcFiles, shellRc, sourcedPaths, stripExports } from "../../src/index.js";
 import { home, laptop } from "./fixture.js";
 
 describe("pass 6: shell rc exports", () => {
@@ -35,8 +35,19 @@ describe("pass 6: shell rc exports", () => {
       "alias s='source ~/.zsh/aliased.zsh'",
       "source relative/path.zsh",
       "source ~/.zsh/secrets.zsh",
+      '\\. "$HOME/.nvm/nvm.sh"',
     ].join("\n");
-    expect(sourcedPaths(text, "/Users/dev")).toEqual(["/Users/dev/.zsh/secrets.zsh", "/Users/dev/.zsh/work.zsh", "/Users/dev/.zsh/local.zsh", "/Users/dev/.zsh/if.zsh", "/Users/dev/.zsh/abs.zsh", "/Users/dev/.zsh/quoted.zsh"]);
+    expect(sourcedPaths(text, "/Users/dev")).toEqual(["/Users/dev/.zsh/secrets.zsh", "/Users/dev/.zsh/work.zsh", "/Users/dev/.zsh/local.zsh", "/Users/dev/.zsh/if.zsh", "/Users/dev/.zsh/abs.zsh", "/Users/dev/.zsh/quoted.zsh", "/Users/dev/.nvm/nvm.sh"]);
+  });
+
+  it("the alias fallback and the source guard read the same files: nvm's escaped dot counts, a dot segment, an empty segment or a token cut by a backslash or a quote does not", () => {
+    const nvm = '\\. "$HOME/.nvm/nvm.sh"\n';
+    expect(sourcedPaths(nvm, "/Users/dev")).toEqual(["/Users/dev/.nvm/nvm.sh"]);
+    expect(bareSources(nvm, "/Users/dev")).toEqual(["~/.nvm/nvm.sh"]);
+    for (const line of ["source ~/../etc/profile\n", "source /Users/dev/../etc/profile\n", "source ~//x\n", ". ~/.zsh//x\n", "source ~/.zsh/my\\ file.zsh\n", 'source ~/.x"y"\n']) {
+      expect(sourcedPaths(line, "/Users/dev"), line).toEqual([]);
+      expect(bareSources(line, "/Users/dev"), line).toEqual([]);
+    }
   });
 
   it("follows one level of what an rc file sources, names the sourced file under the path as written, and reads a linked rc through its target", async () => {

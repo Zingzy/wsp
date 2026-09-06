@@ -10,7 +10,8 @@
       "@wsp/protocol": ["./packages/protocol/src/index.ts"],
       "@wsp/runtime": ["./packages/runtime/src/index.ts"],
       "@wsp/host": ["./packages/host/src/index.ts"],
-      "@wsp/collect": ["./packages/collect/src/index.ts"]
+      "@wsp/collect": ["./packages/collect/src/index.ts"],
+      "@wsp/catalog": ["./packages/catalog/src/index.ts"]
     }
   }
 }

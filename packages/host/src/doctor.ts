@@ -10,8 +10,9 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
-import { DAEMON_PORT, NODE_RELEASES, TOOLS_PATH, type Machine } from "@wsp/engine";
-import { writeDaemonTokenScript, type GoldenVersion, type Runtime } from "@wsp/runtime";
+import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, NODE_RELEASES } from "@wsp/catalog";
+import { DAEMON_PORT, TOOLS_PATH, type Machine } from "@wsp/engine";
+import { goldenHead, writeDaemonTokenScript, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
 import type { CliIO } from "./cli.js";
 
@@ -63,8 +64,8 @@ export async function stageDaemonBundle(stageDir: string, daemonDir = resolveDae
   );
 }
 
-/** Desktop templates ship no node; the sandbox template carries its own and
- * keeps it (an agent that needs a newer one asks for it in the import). */
+/** A golden builder has the base floor's Node 22 under /usr/local before this runs; a desktop template or a
+ * doctor's scratch machine with no node at all gets the same release here. */
 export const GUEST_NODE = NODE_RELEASES[22];
 
 function nodeBootstrap(): string {
@@ -81,8 +82,9 @@ function nodeBootstrap(): string {
     '  echo "$sha  /tmp/$pkg" | sha256sum -c - >/dev/null',
     '  tar -xzf "/tmp/$pkg" -C /usr/local --strip-components=1',
     '  rm -f "/tmp/$pkg"',
-    "  export npm_config_nodedir=/usr/local",
     "fi",
+    // A Node under /usr/local carries its headers, so node-pty compiles against them instead of downloading a set.
+    'case "$(command -v node)" in /usr/local/bin/node) export npm_config_nodedir=/usr/local ;; esac',
   ].join("\n");
 }
 
@@ -363,12 +365,6 @@ class Timings {
 export function isReserved(labels: Record<string, string>): boolean {
   return "poc" in labels;
 }
-/** Harness install and its proof; the scripted doctor build and the init recipe share them. */
-export const GOLDEN_SETUP = "curl -fsSL https://claude.ai/install.sh | bash";
-export const GOLDEN_SMOKE = "claude --version";
-
-export const CONFIG_DIR = "/root/.claude-cfg";
-
 /** Envs every guest needs: a PATH that reaches the daemon's node, the harness
  * install, and what the golden import's tools stage puts on the machine. */
 export const GUEST_ENVS: Record<string, string> = {
@@ -385,7 +381,7 @@ export const GUEST_ENVS: Record<string, string> = {
 export function claudeEnvs(anthropicKey?: string, golden?: Pick<GoldenVersion, "browserShim">): Record<string, string> {
   return {
     ...(anthropicKey !== undefined ? { ANTHROPIC_API_KEY: anthropicKey } : {}),
-    CLAUDE_CONFIG_DIR: CONFIG_DIR,
+    CLAUDE_CONFIG_DIR,
     ...GUEST_ENVS,
     ...(golden?.browserShim === true ? { BROWSER: OPEN_SHIM_PATH } : {}),
   };
@@ -423,8 +419,7 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
     io.log("doctor: proving the reach loop against one live machine");
 
     let golden = "";
-    const manifest = await rt.golden.get();
-    const head = manifest?.versions.find(v => v.version === manifest.head);
+    const head = goldenHead(await rt.golden.get());
     if (head) {
       golden = head.snapshotId;
       timings.add("golden image", 0, `reused v${head.version} (${golden})`);

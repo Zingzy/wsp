@@ -19,6 +19,8 @@ export interface StubMachine extends Machine {
 
 export interface StubBackend extends MachineBackend {
   machines: StubMachine[];
+  /** Every body PUT to an upload URL the stub minted, with the machine and guest path it was for. */
+  puts: { machine: string; path: string; body: Buffer }[];
   execImpl: (m: StubMachine, cmd: string) => Promise<ExecResult> | ExecResult;
   /** Every snapshot taken and not deleted, as the provider would list it. */
   snapshots: SnapshotRow[];
@@ -30,15 +32,22 @@ export interface StubBackend extends MachineBackend {
 // Two zero blocks is a complete empty tar, so downloads are real archives.
 const EMPTY_TGZ = gzipSync(Buffer.alloc(1024));
 
-/** One loopback server per backend: GET serves the empty tar, PUT accepts anything. */
-function vaultServer(): () => Promise<string> {
+/** One loopback server per backend: GET serves the empty tar, PUT accepts anything and records it. */
+function vaultServer(puts: StubBackend["puts"]): () => Promise<string> {
   let origin: Promise<string> | undefined;
   return () =>
     (origin ??= new Promise(resolve => {
       const server = createServer((req, res) => {
         res.setHeader("connection", "close");
-        if (req.method === "PUT") req.resume().on("end", () => res.writeHead(200).end());
-        else res.writeHead(200, { "content-type": "application/gzip" }).end(EMPTY_TGZ);
+        if (req.method === "PUT") {
+          const url = new URL(req.url!, "http://x");
+          const chunks: Buffer[] = [];
+          req.on("data", c => chunks.push(c as Buffer));
+          req.on("end", () => {
+            puts.push({ machine: url.searchParams.get("machine")!, path: url.searchParams.get("path")!, body: Buffer.concat(chunks) });
+            res.writeHead(200).end();
+          });
+        } else res.writeHead(200, { "content-type": "application/gzip" }).end(EMPTY_TGZ);
       });
       server.unref();
       server.listen(0, "127.0.0.1", () => resolve(`http://127.0.0.1:${(server.address() as AddressInfo).port}`));
@@ -49,12 +58,14 @@ export function stubBackend(): StubBackend {
   let seq = 0;
   const machines: StubMachine[] = [];
   const snapshots: SnapshotRow[] = [];
-  const vaultOrigin = vaultServer();
+  const puts: StubBackend["puts"] = [];
+  const vaultOrigin = vaultServer(puts);
 
   const backend: StubBackend = {
     capabilities: { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true },
     pricing: { rateUsdPerHour: (s: { cpu: number; memMb: number }) => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: SNAPSHOT_STORAGE },
     machines,
+    puts,
     snapshots,
     snapshotBytes: 8_000_000_000,
     // The machine context probe answers with its markers and nothing found, as a bare guest would.
@@ -112,7 +123,7 @@ export function stubBackend(): StubBackend {
           return `${await vaultOrigin()}/download${path}`;
         },
         async uploadUrl(path: string): Promise<string> {
-          return `${await vaultOrigin()}/upload${path}`;
+          return `${await vaultOrigin()}/upload?machine=${m.id}&path=${encodeURIComponent(path)}`;
         },
       };
       machines.push(m);

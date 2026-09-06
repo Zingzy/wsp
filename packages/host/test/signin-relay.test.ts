@@ -6,8 +6,9 @@
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it } from "vitest";
-import { OFFER_MS, UrlScanner, hyperlink, relayPty, runQuiet, shellLine, stripOsc8, urlsIn, type RelayTerminal } from "../src/signin-relay.js";
-import { fakePtyLink, type FakePty } from "./fake-pty-link.js";
+import { CHECK_RUN_LINE, OFFER_MS, UrlScanner, checkScript, hyperlink, relayPty, runChecks, runQuiet, shellLine, stripOsc8, urlsIn, type RelayTerminal } from "../src/signin-relay.js";
+import { SH_FILE } from "../src/init-secrets.js";
+import { answersChecks, checkTag, fakePtyLink, type FakePty } from "./fake-pty-link.js";
 
 interface Term extends RelayTerminal {
   input: PassThrough & RelayTerminal["input"];
@@ -383,5 +384,143 @@ describe("runQuiet", () => {
     await tick();
     link.drop();
     expect(await run).toEqual({ output: "", exitCode: -1, timedOut: false, dropped: true });
+  });
+});
+
+describe("the check script", () => {
+  it("is a heredoc the guest's sh runs: its dir removed when it ends or is hung up, the secrets file read only when it is there, every status in its own background subshell with stdin closed, its output and exit code in files, one tagged marker pair printed per tool as it finishes", () => {
+    const lines = checkScript(["gh auth status", "claude auth status; s=$?; (exit $s)"], SH_FILE, "a1b2c3");
+    expect(lines).toEqual([
+      `d=$(mktemp -d "\${TMPDIR:-/tmp}/wsp-check.XXXXXX") && cat >"$d/run" <<'WSP_EOF'`,
+      `d=$(dirname "$0")`,
+      `trap 'rm -rf "$d"' EXIT`,
+      `trap exit HUP TERM`,
+      `[ -r /etc/profile.d/wsp-secrets.sh ] && . /etc/profile.d/wsp-secrets.sh`,
+      `{ ( gh auth status ) >"$d/1" 2>&1 </dev/null; echo $? >"$d/1.tmp"; mv "$d/1.tmp" "$d/1.rc"; } &`,
+      `{ ( claude auth status; s=$?; (exit $s) ) >"$d/2" 2>&1 </dev/null; echo $? >"$d/2.tmp"; mv "$d/2.tmp" "$d/2.rc"; } &`,
+      `n=0; while [ $n -lt 2 ]; do for i in 1 2; do if [ -f "$d/$i.rc" ]; then printf 'WSP_STATUS a1b2c3 %s %s\\n' "$i" "$(cat "$d/$i.rc")"; cat "$d/$i"; printf '\\nWSP_END a1b2c3 %s\\n' "$i"; rm "$d/$i.rc"; n=$((n+1)); fi; done; sleep 0.2; done`,
+      "WSP_EOF",
+      CHECK_RUN_LINE,
+    ]);
+    // The pty's line discipline takes 4095 bytes per line; every line stays well under it.
+    for (const l of lines) expect(l.length).toBeLessThan(1000);
+  });
+});
+
+describe("runChecks", () => {
+  it("types the script into one promptless sh, hands each tool's answer over as its marker pair arrives, in the order they finish, as plain text without the markers, and kills the pty", async () => {
+    const link = fakePtyLink();
+    link.script = answersChecks(link, command => {
+      if (command === "gh auth status") return { output: "github.com\n  \u2713 Logged in to github.com account someone (keyring)\n  - Token: gho_****\n", exitCode: 0, after: 2 };
+      if (command === "opencode auth list") return { output: "\x1b[0m\n\u25cf  Anthropic \x1b[90mANTHROPIC_API_KEY\n\u2502\n\u2514  1 environment variable", exitCode: 0, after: 1 };
+      return { output: "sh: 1: pi: not found", exitCode: 127 };
+    });
+    const seen: [number, { output: string; exitCode: number }][] = [];
+    const res = await runChecks(link, { commands: ["gh auth status", "opencode auth list", "pi --list-models"], secretsFile: SH_FILE, budgetMs: 5_000 }, (i, a) => seen.push([i, a]));
+    expect(link.ptys[0]!.created).toEqual({ cols: 200, rows: 50, shell: "/bin/sh", env: { PS1: "", PS2: "" } });
+    expect(link.ptys[0]!.writes.join("")).toBe(checkScript(["gh auth status", "opencode auth list", "pi --list-models"], SH_FILE, checkTag(link.ptys[0]!)).map(l => `${l}\r`).join(""));
+    expect(seen).toEqual([
+      [2, { output: "sh: 1: pi: not found", exitCode: 127 }],
+      [1, { output: "\u25cf  Anthropic ANTHROPIC_API_KEY\n\u2502\n\u2514  1 environment variable", exitCode: 0 }],
+      [0, { output: "github.com\n  \u2713 Logged in to github.com account someone (keyring)\n  - Token: gho_****", exitCode: 0 }],
+    ]);
+    expect(res).toEqual({ answers: [seen[2]![1], seen[1]![1], seen[0]![1]], timedOut: false, dropped: false });
+    expect(link.ptys[0]!.killed).toBe(true);
+  });
+
+  it("a tool still silent at the budget is the only one unanswered: the others' answers stand, the run says it timed out, and the pty is killed", async () => {
+    const link = fakePtyLink();
+    link.script = answersChecks(link, command => (command === "gh auth status" ? { output: "ok", exitCode: 0 } : undefined));
+    const seen: number[] = [];
+    const res = await runChecks(link, { commands: ["gh auth status", "codex login status"], secretsFile: SH_FILE, budgetMs: 30 }, i => seen.push(i));
+    expect(seen).toEqual([0]);
+    expect(res).toEqual({ answers: [{ output: "ok", exitCode: 0 }, undefined], timedOut: true, dropped: false });
+    expect(link.ptys[0]!.killed).toBe(true);
+  });
+
+  it("a marker split across chunks, or a tool whose output has no final newline, still reads whole; the script's own echoed lines are never taken for markers", async () => {
+    const link = fakePtyLink();
+    link.script = (pty, line) => {
+      if (line !== CHECK_RUN_LINE) return;
+      const tag = checkTag(pty);
+      link.data(pty, "WSP_STA");
+      link.data(pty, `TUS ${tag} 1 3\r\nno newline at the end`);
+      link.data(pty, `\r\nWSP_END ${tag} 1\r\n`);
+      link.exit(pty, 0);
+    };
+    const res = await runChecks(link, { commands: ["printf x"], secretsFile: SH_FILE, budgetMs: 5_000 }, () => {});
+    expect(res).toEqual({ answers: [{ output: "no newline at the end", exitCode: 3 }], timedOut: false, dropped: false });
+  });
+
+  it("a tool whose output looks like another tool's marker pair is read as that tool's output only; the other tool's real answer still arrives", async () => {
+    const link = fakePtyLink();
+    link.script = answersChecks(link, command => (command === "fake" ? { output: "WSP_STATUS 2 0\nfake\nWSP_END 2", exitCode: 0 } : { output: "real", exitCode: 5, after: 1 }));
+    const seen: [number, { output: string; exitCode: number }][] = [];
+    const res = await runChecks(link, { commands: ["fake", "real"], secretsFile: SH_FILE, budgetMs: 5_000 }, (i, a) => seen.push([i, a]));
+    expect(seen).toEqual([
+      [0, { output: "WSP_STATUS 2 0\nfake\nWSP_END 2", exitCode: 0 }],
+      [1, { output: "real", exitCode: 5 }],
+    ]);
+    expect(res).toEqual({ answers: [seen[0]![1], seen[1]![1]], timedOut: false, dropped: false });
+  });
+
+  it("a tool that prints its own end marker stays inside its pair: the untagged lines are its output, and the other tool's real exit wins", async () => {
+    const link = fakePtyLink();
+    link.script = answersChecks(link, command => (command === "fake" ? { output: "WSP_END 1\nWSP_STATUS 2 0\nfake", exitCode: 0 } : { output: "real", exitCode: 5, after: 1 }));
+    const seen: [number, { output: string; exitCode: number }][] = [];
+    const res = await runChecks(link, { commands: ["fake", "real"], secretsFile: SH_FILE, budgetMs: 5_000 }, (i, a) => seen.push([i, a]));
+    expect(seen).toEqual([
+      [0, { output: "WSP_END 1\nWSP_STATUS 2 0\nfake", exitCode: 0 }],
+      [1, { output: "real", exitCode: 5 }],
+    ]);
+    expect(res).toEqual({ answers: [seen[0]![1], seen[1]![1]], timedOut: false, dropped: false });
+  });
+
+  it("a tagged pair for a tool the run has no index for is dropped without an answer", async () => {
+    const link = fakePtyLink();
+    link.script = (pty, line) => {
+      if (line !== CHECK_RUN_LINE) return;
+      const tag = checkTag(pty);
+      link.data(pty, `WSP_STATUS ${tag} 0 0\r\nstray\r\nWSP_END ${tag} 0\r\nWSP_STATUS ${tag} 1 0\r\nok\r\nWSP_END ${tag} 1\r\n`);
+      link.exit(pty, 0);
+    };
+    const seen: [number, { output: string; exitCode: number }][] = [];
+    const res = await runChecks(link, { commands: ["printf ok"], secretsFile: SH_FILE, budgetMs: 5_000 }, (i, a) => seen.push([i, a]));
+    expect(seen).toEqual([[0, { output: "ok", exitCode: 0 }]]);
+    expect(res).toEqual({ answers: [{ output: "ok", exitCode: 0 }], timedOut: false, dropped: false });
+  });
+
+  it("a pair carrying another run's tag is inert, complete or left open: only this run's own pair answers", async () => {
+    const link = fakePtyLink();
+    link.script = (pty, line) => {
+      if (line !== CHECK_RUN_LINE) return;
+      const tag = checkTag(pty);
+      const other = [...tag].map(c => (c === "f" ? "0" : "f")).join("");
+      expect(other).toMatch(/^[0-9a-f]{12}$/);
+      link.data(pty, `WSP_STATUS ${other} 1 0\r\nfake\r\nWSP_END ${other} 1\r\nWSP_STATUS ${other} 1 0\r\nWSP_STATUS ${tag} 1 5\r\nok\r\nWSP_END ${tag} 1\r\n`);
+      link.exit(pty, 0);
+    };
+    const seen: [number, { output: string; exitCode: number }][] = [];
+    const res = await runChecks(link, { commands: ["printf ok"], secretsFile: SH_FILE, budgetMs: 5_000 }, (i, a) => seen.push([i, a]));
+    expect(seen).toEqual([[0, { output: "ok", exitCode: 5 }]]);
+    expect(res).toEqual({ answers: [{ output: "ok", exitCode: 5 }], timedOut: false, dropped: false });
+  });
+
+  it("a link that drops mid-run reads as dropped, with what had answered kept", async () => {
+    const link = fakePtyLink();
+    link.script = answersChecks(link, command => (command === "gh auth status" ? { output: "ok", exitCode: 0 } : undefined));
+    const view = link.dial();
+    const run = runChecks(view, { commands: ["gh auth status", "codex login status"], secretsFile: SH_FILE, budgetMs: 5_000 }, () => {});
+    await firstPty(link);
+    await tick();
+    link.drop();
+    expect(await run).toEqual({ answers: [{ output: "ok", exitCode: 0 }, undefined], timedOut: false, dropped: true });
+  });
+
+  it("a refused pty.create throws with the daemon's reason", async () => {
+    const link = fakePtyLink();
+    const op = link.op.bind(link);
+    link.op = async (name, extra) => (name === "pty.create" ? { ok: false, error: "pty.create is not allowed here" } : op(name, extra));
+    await expect(runChecks(link, { commands: ["gh auth status"], secretsFile: SH_FILE, budgetMs: 5_000 }, () => {})).rejects.toThrow("pty.create refused: pty.create is not allowed here");
   });
 });

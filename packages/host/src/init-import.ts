@@ -8,7 +8,7 @@ import { chmodSync, closeSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtemp
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { AGENTS, CLAUDE_SETTINGS, FISH_CONF_D, HAND_PREFIX, MANAGER_HOMES, MCP_BIN_DIRS, MCP_CONFIGS, type ManifestEntry, RC_NAMES, READ_LIMIT, isRcPath, managedRc, portableShebang, rcFiles, sourcedPaths, stripExports } from "@wsp/collect";
+import { AGENTS, CLAUDE_SETTINGS, FISH_CONF_D, HAND_PREFIX, MANAGER_HOMES, MCP_BIN_DIRS, MCP_CONFIGS, type ManifestEntry, RC_NAMES, READ_LIMIT, guardSources, isRcPath, managedRc, portableShebang, rcFiles, sourcedPaths, stripExports } from "@wsp/collect";
 import {
   agentInstallsFor,
   editorInstallsFor,
@@ -36,7 +36,8 @@ import {
   secretPath,
   withApiKeyHelper,
 } from "@wsp/engine";
-import { CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, tarPackCommand } from "./doctor.js";
+import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
+import { tarPackCommand } from "./doctor.js";
 import { type AliasGuard, GUARD_PATH, GUARD_SOURCE_COMMENT, GUARD_SOURCE_LINE, aliasGuardFor } from "./init-aliases.js";
 
 const execFileAsync = promisify(execFile);
@@ -325,17 +326,20 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
       if (f.id.startsWith(HAND_PREFIX) && !f.dir) portable(target);
     }
     // Every rc file staged, by name where dotfiles live or by identity with one of the laptop's, ships as its
-    // carried copy: secret exports are set on the machine by hand, never carried in the file. The copy keeps
-    // the laptop's mode, so a read-only file is opened writable for the one write and closed again.
+    // carried copy: secret exports are set on the machine by hand, never carried in the file, and a bare source
+    // of a file under home that is not in this pack is wrapped so the machine skips it instead of printing an
+    // error. The copy keeps the laptop's mode, so a read-only file is opened writable for the one write.
     const cut: CutNames[] = [];
     const strip = (staged: string): void => {
-      const { names, carried } = stripExports(readFileSync(staged, "utf8"));
-      if (names.length === 0) return;
+      const text = readFileSync(staged, "utf8");
+      const { names, carried } = stripExports(text);
+      const guarded = staged.endsWith(".fish") ? carried : guardSources(carried, opts.home, rel => existsSync(join(stage, rel)));
+      if (names.length > 0) cut.push({ path: `~/${relative(stage, staged)}`, names });
+      if (guarded === text) return;
       const mode = statSync(staged).mode & 0o7777;
       chmodSync(staged, 0o600);
-      writeFileSync(staged, carried);
+      writeFileSync(staged, guarded);
       chmodSync(staged, mode);
-      cut.push({ path: `~/${relative(stage, staged)}`, names });
     };
     const walk = (dir: string): void => {
       for (const name of readdirSync(dir)) {
@@ -439,7 +443,7 @@ export function statOf(abs: string): PathInfo | undefined {
   return { kind: st.isDirectory() ? "dir" : "file", mode: st.mode & 0o7777, size: st.size, mtimeMs: st.mtimeMs, realpath };
 }
 
-const underHome = (abs: string, home: string): boolean => abs === home || abs.startsWith(`${home}/`);
+export const under = (path: string, root: string): boolean => path === root || path.startsWith(`${root}/`);
 
 /** sha256 of what a planned path ships: every entry under it by relative path,
  * mode and bytes, excludes left out, links followed only into home and never
@@ -464,7 +468,7 @@ export function digestOf(source: string, excludes: readonly string[], home: stri
         // walked or one already walked, never into a refused path.
         const parent = resolved(dirname(abs)) ?? dirname(abs);
         const own = parent === target || parent.startsWith(`${target}/`);
-        const why = !underHome(target, home) ? "outside home" : own ? "own directory" : entered.has(target) ? "already walked" : refusedPath(relative(home, target), statSync(target).isDirectory());
+        const why = !under(target, home) ? "outside home" : own ? "own directory" : entered.has(target) ? "already walked" : refusedPath(relative(home, target), statSync(target).isDirectory());
         if (why !== undefined) {
           hash.update(`L ${rel} ${relative(home, target)} ${why}\n`);
           return;
@@ -490,7 +494,7 @@ export function digestOf(source: string, excludes: readonly string[], home: stri
 }
 
 /** The guest's Claude config dir, relative to its home; the laptop's ~/.claude lands there. */
-const CLAUDE_REL = CONFIG_DIR.replace(/^\/root\//, "");
+const CLAUDE_REL = CLAUDE_CONFIG_DIR.replace(/^\/root\//, "");
 
 /** Where a laptop config lands on the guest, by the same rewrite the files plan applies. */
 function guestPath(tildePath: string): string {
@@ -580,6 +584,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
     agents: agents.installs,
     skippedAgents: agents.skipped.map(s => ({ id: s.id, name: label(s.id), note: s.note })),
     skippedTools: [...editors.skipped, ...tools.skipped].map(s => ({ id: s.id, label: label(s.id), note: s.note })),
+    baseTools: tools.base.map(b => ({ id: b.id, label: label(b.id), note: b.note })),
     ...(mcp !== undefined ? { mcp } : {}),
     ...(opts.onResult !== undefined ? { onResult: opts.onResult } : {}),
   };

@@ -5,31 +5,18 @@ import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
-import { BUILDER_IDLE_MS, type GoldenImport, type GoldenManifest } from "@wsp/engine";
+import { BUILDER_IDLE_MS, type GoldenImport } from "@wsp/engine";
 import { createRuntime, memoryStore, type HarnessAdapterFactory, type ReapResult, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cli, serve, type CliIO } from "../src/cli.js";
 import { claudeEnvs } from "../src/doctor.js";
 import { REAP_INTERVAL_MS, startHost, type HostHandle } from "../src/server.js";
+import { SEALED_GOLDEN as GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
   version: string;
   bin: Record<string, string>;
-};
-
-const GOLDEN: GoldenManifest = {
-  head: 1,
-  versions: [
-    {
-      version: 1,
-      snapshotId: "snap_gold",
-      baseTemplate: "base",
-      setupSha: "x",
-      createdAt: "2026-09-01T00:00:00Z",
-      smoke: { cmd: "true", exitCode: 0 },
-    },
-  ],
 };
 
 // Stands in for apps/web/dist: the dev boot line the host replaces, one

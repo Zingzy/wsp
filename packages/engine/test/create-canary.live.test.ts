@@ -15,7 +15,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
 import type { WspError } from "../src/errors.js";
-import { BUILDER_IDLE_MS, forkGolden, killUntilGone, prepareBuilder, sealGolden, type GoldenManifest } from "../src/golden.js";
+import { BUILDER_IDLE_MS, forkGolden, goldenHead, killUntilGone, prepareBuilder, sealGolden, type GoldenManifest } from "../src/golden.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import type { Machine } from "../src/machine.js";
 import { SolariBackend } from "../src/solari-backend.js";
@@ -121,7 +121,7 @@ describe.runIf(LIVE)("create canary, live", () => {
       if ((await stateOf(id)) === "gone") continue;
       await killUntilGone(backend, await backend.get(id)).catch(() => alive.push(id));
     }
-    const snapshotId = manifest?.versions.find(v => v.version === manifest?.head)?.snapshotId;
+    const snapshotId = goldenHead(manifest)?.snapshotId;
     let snapshot = "no snapshot";
     if (snapshotId !== undefined) {
       snapshot = await backend.deleteSnapshot(snapshotId).then(
