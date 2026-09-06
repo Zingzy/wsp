@@ -84,7 +84,7 @@ one, and the command that opens it, then waits for you while it asks the
 tool on the machine whether you are through. That is what a run off a
 terminal does anyway. `--json` prints each of those as one object on stdout,
 with every other line on stderr, so an agent can drive the setup and hand
-you the sign-ins. It is refused beside `--yes`, which skips the sign-ins
+you the sign-ins. It is refused beside `--yes`: that skips the sign-ins, so
 there would be nothing left to print.
 
 ## Every day after

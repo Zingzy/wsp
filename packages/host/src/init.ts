@@ -17,7 +17,7 @@ import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BUILDER_DISK_GB, PACK_BUDGET_BYTES, TOOLS_DISK_FLOOR, agentInstallsFor, brewfileFor, estimateDisk, isMcpRow, pinState, toolInstallsFor, type BrewTable, type ImportResult } from "@wsp/engine";
-import { ALREADY_APPLIED, fmtBytes, fmtMemGb } from "@wsp/protocol";
+import { ALREADY_APPLIED, fmtBytes, fmtDuration, fmtMemGb } from "@wsp/protocol";
 import { importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
   LOGIN_CHOICES,
@@ -45,7 +45,7 @@ import {
 import { pickScreens } from "./init-pick.js";
 import { installEach, installLines, mcpServerSpec } from "./mcp-install.js";
 import { historyLine } from "./recipe-command.js";
-import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, fmtDuration, isTTY, plainLine, rowsOf, table, widthOf, wrap } from "./init-layout.js";
+import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, isTTY, plainLine, rowsOf, table, widthOf, wrap } from "./init-layout.js";
 import { openRunLog, runLogPath } from "./init-log.js";
 import { secretsStage, type SecretOutcome } from "./init-secrets.js";
 import { buildTimes, readBuildTimes } from "./init-times.js";

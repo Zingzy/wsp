@@ -7,7 +7,7 @@ import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import type { ManifestEntry } from "@wsp/collect";
 import { describe, expect, it } from "vitest";
-import { codeIn, handoffStage, type HandoffOptions } from "../src/init-handoff.js";
+import { cadence, codeIn, handoffStage, type HandoffOptions } from "../src/init-handoff.js";
 import { flowHooks, type SignInFlow } from "../src/init-signin.js";
 import { signInFor } from "../src/signin-table.js";
 import { fakePtyLink, type FakePty, type FakePtyLink } from "./fake-pty-link.js";
@@ -75,6 +75,16 @@ describe("the code beside a page", () => {
   });
 });
 
+describe("how often the status is asked", () => {
+  it("every pollMs for the first minute, then every twenty seconds or the caller's slower cadence", () => {
+    expect(cadence(0, 5_000)).toBe(5_000);
+    expect(cadence(59_999, 5_000)).toBe(5_000);
+    expect(cadence(60_000, 5_000)).toBe(20_000);
+    expect(cadence(15 * 60_000, 5_000)).toBe(20_000);
+    expect(cadence(60_000, 30_000)).toBe(30_000);
+  });
+});
+
 describe("the sign-in hand-off", () => {
   it("prints the page, the code and the command that opens it once, then signs the row in on the check that says so", async () => {
     const link = ghLink({ after: 1, hold: true });
@@ -100,6 +110,25 @@ describe("the sign-in hand-off", () => {
     const st = stage(ghLink({ after: 0, hold: true }), { platform: "linux" });
     await st.run;
     expect(st.json[0]).toMatchObject({ nextCommand: `xdg-open '${DEVICE}'` });
+  });
+
+  it("a status that says signed in gives the command a moment to end on its own before its pty is killed", async () => {
+    const link = fakePtyLink();
+    let login: FakePty | undefined;
+    link.script = (pty, line) => {
+      if (line.includes("WSP_STATUS")) {
+        link.data(pty, `github.com\n  ✓ Logged in to github.com account Zingzy\r\nWSP_STATUS 0\r\n`);
+        link.exit(pty, 0);
+        // gh writes its git protocol and credential helper after the status already says logged in.
+        setTimeout(() => link.exit(login!, 0), 20);
+        return;
+      }
+      login = pty;
+      link.data(pty, `! First copy your one-time code: ${CODE}\r\nOpen this page to continue: ${DEVICE}\r\n`);
+    };
+    const st = stage(link, { graceMs: 500 });
+    const [r] = await st.run;
+    expect(r).toMatchObject({ state: "signed-in", exit: 0, note: "gh auth status says signed in" });
   });
 
   it("a deadline that passes leaves the row not signed in with what the last check said, and the run goes on", async () => {
@@ -203,12 +232,19 @@ describe("the sign-in hand-off", () => {
   it("a daemon that refuses the pty ends the row at once with the reason, never at the deadline", async () => {
     const link = fakePtyLink();
     const real = link.op.bind(link);
-    link.op = async (name, extra = {}) => (name === "pty.create" ? { ok: false, error: "pty.create is not allowed here" } : real(name, extra));
+    let creates = 0;
+    link.op = async (name, extra = {}) => {
+      if (name !== "pty.create") return real(name, extra);
+      creates += 1;
+      return { ok: false, error: "pty.create is not allowed here" };
+    };
     const st = stage(link, { deadlineMs: 30_000, pollMs: 10_000 });
     const t0 = Date.now();
     const [r] = await st.run;
     expect(r).toMatchObject({ state: "not-signed-in", note: "pty.create refused: pty.create is not allowed here" });
     expect(Date.now() - t0).toBeLessThan(5_000);
+    // The login's pty alone was asked for: a status check on a login that never ran answers nothing.
+    expect(creates).toBe(1);
   });
 
   it("with no --json nothing is printed as an object and the lines still say the page and the outcome", async () => {

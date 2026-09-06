@@ -703,6 +703,19 @@ describe("wsp init, the summary-first screens", () => {
 });
 
 describe("wsp init, the secrets step", () => {
+  it("a cut secret is skipped under --non-interactive naming that flag, and under --yes off a terminal naming the terminal, as the sign-ins do", async () => {
+    const tty = fake({ nonInteractive: true });
+    writeFileSync(join(tty.opts.home, ".zshrc"), "export A_KEY=fake\n");
+    expect((await runInit(tty.opts, tty.io)).code).toBe(0);
+    expect(tty.text()).toContain("Secrets skipped: A_KEY (~/.zshrc). --non-interactive asks nothing; set them from the app's terminal.");
+
+    const pipe = fake({ yes: true, tty: false });
+    writeFileSync(join(pipe.opts.home, ".zshrc"), "export A_KEY=fake\n");
+    expect((await runInit(pipe.opts, pipe.io)).code).toBe(0);
+    expect(pipe.text()).toContain("Secrets skipped: A_KEY (~/.zshrc). No terminal to paste into; set them from the app's terminal.");
+    expect(pipe.text()).toContain("Sign-ins on the machine skipped: GitHub CLI login, Claude Code login. No terminal to sign in from; use the app's terminal.");
+  });
+
   it("an rc file with a cut secret export is named in the secrets step, skipped under --yes with the reason and recorded", async () => {
     // The recipe row carries no secrets field: the names come from the pack, which strips the file as it stands at build time.
     const f = fake({ yes: true });
@@ -2375,10 +2388,10 @@ describe("stage stream", () => {
     expect(line.length).toBe(60);
     const long = stripVTControlCharacters(stageLine("o", "Base installed", "x".repeat(80), 61_000, 60, 20));
     expect(long.length).toBe(60);
-    expect(long).toMatch(/x…  1m 01s$/);
+    expect(long).toMatch(/x…  1m 1s$/);
     expect(stripVTControlCharacters(stageLine("o", "Ready", undefined, undefined, 60, 20))).toBe("o  Ready");
     // Off a terminal there is no width: nothing is cut and the duration follows two spaces after the detail.
-    expect(stripVTControlCharacters(stageLine("o", "Base installed", "x".repeat(80), 61_000, undefined, 20))).toBe(`o  Base installed        ${"x".repeat(80)}  1m 01s`);
+    expect(stripVTControlCharacters(stageLine("o", "Base installed", "x".repeat(80), 61_000, undefined, 20))).toBe(`o  Base installed        ${"x".repeat(80)}  1m 1s`);
   });
 
   it("frames for another golden are ignored", () => {

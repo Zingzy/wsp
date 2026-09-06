@@ -68,6 +68,11 @@ export function codeIn(text: string, shape: RegExp | undefined): string | undefi
   return shape.exec(words)?.[0];
 }
 
+/** How long until the status is next asked: pollMs through the first minute, then the slower of it and SLOW_POLL_MS. */
+export function cadence(elapsedMs: number, pollMs: number): number {
+  return elapsedMs < FAST_FOR_MS ? pollMs : Math.max(pollMs, SLOW_POLL_MS);
+}
+
 /** Resolves after ms, or as soon as `until` settles, leaving no timer behind either way. */
 function wait(ms: number, until: Promise<unknown>): Promise<void> {
   return new Promise(resolve => {
@@ -190,7 +195,7 @@ export async function handoffStage(o: HandoffOptions): Promise<LoginOutcome[]> {
     let why: string | undefined;
     try {
       while (run === undefined && failure === undefined && now() < until) {
-        await wait(now() - started < FAST_FOR_MS ? pollMs : Math.max(pollMs, SLOW_POLL_MS), watching);
+        await wait(cadence(now() - started, pollMs), watching);
         if (run !== undefined || failure !== undefined || status === undefined) continue;
         const answer = await asked(status);
         if (answer === true) {
