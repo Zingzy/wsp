@@ -132,7 +132,7 @@ describe("serveRuntime session history", () => {
 });
 
 // A harness that cannot stop the process it owns is not a harness; the port refuses one at compile time.
-const noStop = { localId: "s", claudeSessionId: "s", finished: Promise.resolve<TurnResult>({ status: "completed" }) };
+const noStop = { localId: "s", finished: Promise.resolve<TurnResult>({ status: "completed" }) };
 // @ts-expect-error interrupt is required on HarnessSession
 noStop satisfies HarnessSession;
 
@@ -160,7 +160,6 @@ function stoppableHarness() {
         onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" });
         return {
           localId: sessionId,
-          claudeSessionId: sessionId,
           finished,
           interrupt: async () => {
             h.interrupts++;

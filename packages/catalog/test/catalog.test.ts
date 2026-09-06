@@ -4,9 +4,30 @@
 // the six whose project state has a measured resolver, every default names
 // its evidence, and the seeded rows are what the snapshot says they are.
 import { describe, expect, it } from "vitest";
-import { BASE_FLOOR, CATALOG, CATALOG_AGENTS, LINUX_CASKS, ROADS, SIGN_IN_ROWS, baseEntryFor, baseNote, catalogEntry, hasLogin, installAfter, installLine, smokeOf } from "../src/index.js";
+import { BASE_FLOOR, CATALOG, CATALOG_AGENTS, HISTORY_FORMATS, LINUX_CASKS, ROADS, SIGN_IN_ROWS, baseEntryFor, baseNote, catalogEntry, catalogToolFor, hasLogin, installAfter, installLine, smokeOf } from "../src/index.js";
 
 describe("catalog", () => {
+  it("names a session history for the agents with a reader, in a known format under a home path", () => {
+    expect(CATALOG_AGENTS.filter(a => a.history !== undefined).map(a => a.id)).toEqual(["claude", "codex", "hermes"]);
+    for (const a of CATALOG_AGENTS) {
+      if (a.history === undefined) continue;
+      expect(HISTORY_FORMATS, a.id).toContain(a.history.format);
+      expect(a.history.root, a.id).toMatch(/^~\/\./);
+    }
+  });
+
+  it("finds the tool a package name stands for by id, command, road name, cover or brought command; the floor is the subset on it", () => {
+    expect(catalogToolFor("rg")?.id).toBe("ripgrep");
+    expect(catalogToolFor("cli/cli")).toBeUndefined();
+    expect(catalogToolFor("awscli")?.id).toBe("aws");
+    expect(catalogToolFor("npm")?.id).toBe("node");
+    expect(catalogToolFor("openjdk@21")?.id).toBe("java");
+    expect(catalogToolFor("cargo")?.id).toBe("rust");
+    expect(baseEntryFor("cargo")).toBeUndefined();
+    expect(baseEntryFor("npm")?.id).toBe("node");
+    expect(catalogToolFor("claude")).toBeUndefined();
+  });
+
   it("gives every entry its own id", () => {
     const ids = CATALOG.map(e => e.id);
     expect(new Set(ids).size).toBe(ids.length);

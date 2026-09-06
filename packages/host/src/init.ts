@@ -9,13 +9,13 @@ import type { Readable, Writable } from "node:stream";
 import { stripVTControlCharacters, styleText } from "node:util";
 import { APP_DATA_GROUP, LARGE_GROUP, MCP_REMOTE_ID, RUNGS, type LoginChoice, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
 import { describeAge, type BackendPricing } from "@wsp/engine";
-import { MCP_ID_PREFIX } from "@wsp/protocol";
+import { MCP_ID_PREFIX, type Recipe } from "@wsp/protocol";
 import { PrepareStoppedError, type GoldenBuilderView, type GoldenRecipe, type GoldenStage, type Runtime } from "@wsp/runtime";
 import { S_BAR, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, cancel, isCancel, log, outro } from "@clack/prompts";
 import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { caskPinState, linuxCaskFor } from "@wsp/catalog";
+import { caskPinState, catalogEntry, linuxCaskFor } from "@wsp/catalog";
 import { BREW_TOOLCHAIN_BYTES, BUILDER_DISK_GB, MEASURED_ON, PACK_BUDGET_BYTES, TOOLS_DISK_FLOOR, agentInstallsFor, agentSize, assumedSize, brewfileFor, cliRoad, editorInstallsFor, estimateDisk, extensionsFile, pinState, remoteEditorFor, remoteSettingsPath, toolInstallsFor, toolSize, type BrewTable, type DiskEstimate, type ImportResult, type ToolSize } from "@wsp/engine";
 import { ALREADY_APPLIED } from "@wsp/protocol";
 import { CLAUDE_INSTALLER, importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
@@ -24,6 +24,7 @@ import {
   LOGIN_CHOICES,
   RUNG_TITLE,
   agentName,
+  applyRecipe,
   goldenRecipeFor,
   hasChoices,
   initialChoice,
@@ -32,6 +33,7 @@ import {
   isTickable,
   linuxCaskRows,
   loadManifest,
+  loadRecipe,
   lockRefused,
   loginShown,
   loginTool,
@@ -39,6 +41,7 @@ import {
   recipePath,
   saveRecipe,
   tickLoginTools,
+  unbuiltRows,
   withoutAgentTools,
 } from "./init-recipe.js";
 import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, fmtBytes, fmtDuration, isTTY, plainLine, rowsOf, table, widthOf, wrap } from "./init-layout.js";
@@ -75,6 +78,9 @@ export interface InitOptions {
   yes: boolean;
   /** A collector manifest or a saved recipe to tick from instead of reading this machine. */
   manifestPath?: string;
+  /** The small recipe of catalog ids that ticks the agents and tools rows: the screens for them are skipped and the
+   * run lands on the sign-ins. This machine is still read for the rows and files. */
+  recipeFile?: string;
   /** Reads this computer, telling onRung how many rows each rung found as it finishes and onNote what could not be read. */
   collect(onRung: (rung: Rung, rows: number) => void, onNote: (note: string) => void): Promise<Manifest>;
   keys: Keys;
@@ -895,15 +901,24 @@ function bootQuestion(recipe: GoldenRecipe, pricing: BackendPricing): string {
   return `Boot a ${size.cpu} vCPU, ${Math.round(size.memMb / 1024)} GB builder on Solari and build this? About $${rate.toFixed(2)}/hr while it runs.`;
 }
 
-async function tickRungs(manifest: Manifest, io: InitIO, brew: BrewTable): Promise<Answers | "cancel"> {
+/** The screens, one per rung in `show`; a rung left out takes its defaults without a screen, so a recipe that has
+ * already decided the agents and tools shows only the sign-ins. */
+async function tickRungs(manifest: Manifest, io: InitIO, brew: BrewTable, show: readonly Rung[] = RUNGS): Promise<Answers | "cancel"> {
   const answers = new Map<Rung, Answers>();
-  const rungsWithItems = RUNGS.filter(r => manifest.entries.some(e => e.rung === r));
+  const rungsWithItems = RUNGS.filter(r => show.includes(r) && manifest.entries.some(e => e.rung === r));
   let i = 0;
   while (i < RUNGS.length) {
     const rung = RUNGS[i]!;
     const agents = answers.get("agents")?.ticks ?? new Set<string>();
     const entries = manifest.entries.filter(e => e.rung === rung && loginShown(e, manifest, agents));
-    const counter = `${i + 1}/${RUNGS.length}`;
+    const counter = `${show.indexOf(rung) + 1}/${show.length}`;
+    if (!show.includes(rung)) {
+      const fresh = defaultAnswers(manifest, new Set([...answers.values()].flatMap(a => [...a.ticks])));
+      const own = (id: string): boolean => id.startsWith(`${rung}/`);
+      answers.set(rung, { ticks: new Set([...fresh.ticks].filter(own)), choices: new Map([...fresh.choices].filter(([id]) => own(id))) });
+      i += 1;
+      continue;
+    }
     if (entries.length === 0) {
       log.message(`${RUNG_TITLE[rung]}${GUTTER}${dim(counter)}\n${dim("nothing found")}`, { output: io.output, symbol: styleText("green", S_STEP_SUBMIT) });
       i += 1;
@@ -991,10 +1006,12 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
 
   let manifest: Manifest;
   let source: string;
+  let catalogRecipe: Recipe | undefined;
   const spinner = spin(io.output, "Reading this computer", io.isTTY);
   const counts: string[] = [];
   const notes: string[] = [];
   try {
+    if (opts.recipeFile !== undefined) catalogRecipe = loadRecipe(opts.recipeFile);
     if (opts.manifestPath !== undefined) {
       manifest = loadManifest(opts.manifestPath);
       source = `listed in ${opts.manifestPath}`;
@@ -1006,7 +1023,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
         },
         note => notes.push(note),
       );
-      source = "found on this computer";
+      source = catalogRecipe === undefined ? "found on this computer" : "found on this computer, ticked by the recipe";
     }
   } catch (e) {
     spinner.stop();
@@ -1032,12 +1049,17 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   }
   // A heavy formula starts unticked, judged on the sizes just read.
   manifest = { ...manifest, entries: weighed(linuxCaskRows(withoutAgentTools(manifest.entries)), brew) };
+  if (catalogRecipe !== undefined) {
+    manifest = applyRecipe(manifest, catalogRecipe);
+    const unbuilt = unbuiltRows(catalogRecipe, manifest.entries).map(r => catalogEntry(r.id)?.name ?? r.id);
+    if (unbuilt.length > 0) notes.push(`Ticked in the recipe but not on this computer, so not in this build: ${unbuilt.join(", ")}.`);
+  }
   if (notes.length > 0) log.warn(notes.join("\n"), out);
   card("Found on this computer", detectionNote(manifest, source), io.output);
 
   let answers: Answers;
   if (interactive) {
-    const picked = await tickRungs(manifest, io, brew);
+    const picked = await tickRungs(manifest, io, brew, catalogRecipe === undefined ? RUNGS : ["logins"]);
     if (picked === "cancel") {
       cancel("Nothing was changed.", out);
       return { code: 1 };

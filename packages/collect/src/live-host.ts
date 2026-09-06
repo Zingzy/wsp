@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { spawn } from "node:child_process";
+import { createReadStream } from "node:fs";
 import { access, constants, lstat, mkdtemp, open, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { createInterface } from "node:readline";
 import type { Host, HostExec, HostFs, Platform, Probe, RunOptions, Stat } from "./host.js";
 
 // Plugin checkouts and dependency trees live under config dirs (nvim's lazy
@@ -34,6 +36,22 @@ async function treeBytes(dir: string): Promise<number> {
     }
   }
   return total;
+}
+
+async function walkFiles(dir: string, out: string[]): Promise<void> {
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const e of entries) {
+    if (e.isSymbolicLink()) continue;
+    const p = join(dir, e.name);
+    if (e.isDirectory()) {
+      if (!SKIP_DIRS.has(e.name)) await walkFiles(p, out);
+    } else if (e.isFile()) out.push(p);
+  }
 }
 
 export const nodeFs: HostFs = {
@@ -92,6 +110,28 @@ export const nodeFs: HostFs = {
       return await readFile(path, "utf8");
     } catch {
       return undefined;
+    }
+  },
+  async walk(dir) {
+    const out: string[] = [];
+    await walkFiles(dir, out);
+    return out.sort();
+  },
+  async *lines(path) {
+    try {
+      await access(path, constants.R_OK);
+    } catch {
+      return;
+    }
+    const stream = createReadStream(path);
+    const rl = createInterface({ input: stream, crlfDelay: Number.POSITIVE_INFINITY });
+    // A read error is not forwarded by the line iterator; closing the interface ends it instead of hanging it.
+    stream.on("error", () => rl.close());
+    try {
+      yield* rl;
+    } finally {
+      rl.close();
+      stream.destroy();
     }
   },
 };

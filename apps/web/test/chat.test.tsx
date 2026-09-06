@@ -6,7 +6,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { installFakeLayout } from "./fake-layout.js";
 import { composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
-import type { EventUnion, SessionEvent, WorkspaceView } from "@wsp/protocol";
+import type { EventUnion, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
 import { useSelectedThreadId, useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
@@ -36,7 +36,7 @@ const workspace: WorkspaceView = {
 
 const FIXTURE: ReadonlyArray<EventUnion> = CHAT_STREAM;
 
-function fixtureApi(workspaces: WorkspaceView[], history: Record<string, SessionEvent[]> = {}) {
+function fixtureApi(workspaces: WorkspaceView[], history: Record<string, SessionEvent[]> = {}, rows: SessionView[] = []) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
   const started: Array<{ workspaceId: string; prompt: string; resume?: string }> = [];
   const api: Api = {
@@ -53,7 +53,7 @@ function fixtureApi(workspaces: WorkspaceView[], history: Record<string, Session
     wake: async id => workspaces.find(w => w.id === id)!,
     upgrade: async id => workspaces.find(w => w.id === id)!,
     capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true }),
-    listSessions: async () => [],
+    listSessions: async id => (id === undefined ? rows : rows.filter(r => r.workspaceId === id)),
     watchStatuses: async () => [],
     createFromGoldenHead: async () => workspaces[0]!,
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
@@ -347,7 +347,9 @@ describe("chat tab send after a harness died before its init", () => {
 
   it("pinned from the sidebar, a dead thread's next send carries no resume; the view and the pin follow the thread the runtime mints, and a reload after the follow keeps it, its queued row included", async () => {
     const history: Record<string, SessionEvent[]> = { [WS]: [...DEATH, ...STARTED] };
-    const { api, started, emit } = fixtureApi([workspace], history);
+    // The runtime stamps a row's session id only when the harness announces one, so the dead row has none to resume.
+    const deadRow: SessionView = { id: dead.sessionId, workspaceId: WS, harness: "claude", status: "failed", threadId: "thr_dead", prompt: "hello", startedAt: T0 };
+    const { api, started, emit } = fixtureApi([workspace], history, [deadRow]);
     // The runtime records an event before it pushes it, so a reload after the follow finds the retry in the reply.
     const record = (e: SessionEvent) => { history[WS] = [...history[WS]!, e]; emit(e); };
     const queued = () => (screen.getByRole("textbox", { name: "Queued message" }) as HTMLTextAreaElement).value;
@@ -384,6 +386,23 @@ describe("chat tab send after a harness died before its init", () => {
     for (const e of RETRY.slice(2)) record(e);
     await waitFor(() => expect(started.length).toBe(2));
     expect(started[1]).toEqual({ workspaceId: WS, prompt: "and then this", resume: "sess_retry", cwd: "/root" });
+  });
+});
+
+describe("chat tab pinned thread whose session.start fell off the transcript cap", () => {
+  const TAIL: SessionEvent[] = CHAT_STREAM.slice(1).map(e => ({ ...e, threadId: "thr_a" }));
+  const row: SessionView = { id: "sess_0001", workspaceId: WS, harness: "claude", status: "completed", claudeSessionId: "sess_0001", threadId: "thr_a", prompt: "hello", startedAt: T0 };
+
+  it("the next send resumes the session the thread's row remembers, not the workspace's latest", async () => {
+    const { api, started } = fixtureApi([workspace], { [WS]: TAIL }, [row]);
+    await setup(api, "thr_a");
+    await screen.findByText(/Server is live at :3000\./);
+    const editor = composerEditor();
+
+    await typeInto(editor, "more");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started.length).toBe(1));
+    expect(started[0]).toEqual({ workspaceId: WS, prompt: "more", resume: "sess_0001", cwd: "/root" });
   });
 });
 

@@ -69,7 +69,7 @@ function scriptedAgent(reply: (prompt: string) => string) {
         o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
         return result;
       });
-      return { localId: sessionId, claudeSessionId: sessionId, finished, interrupt: async () => {} };
+      return { localId: sessionId, finished, interrupt: async () => {} };
     },
   });
   return { adapter, starts };
@@ -81,7 +81,7 @@ function stuckAgent(): HarnessAdapterFactory {
     start: o => {
       const sessionId = randomUUID();
       queueMicrotask(() => o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" }));
-      return { localId: sessionId, claudeSessionId: sessionId, finished: new Promise<TurnResult>(() => {}), interrupt: async () => {} };
+      return { localId: sessionId, finished: new Promise<TurnResult>(() => {}), interrupt: async () => {} };
     },
   });
 }
