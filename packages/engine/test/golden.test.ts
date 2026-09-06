@@ -507,8 +507,50 @@ describe("golden import stages", () => {
     expect(stages).toContain(`installing-mcp:machine context: not written (${failure})`);
     expect(results[0]!.context).toEqual([]);
     expect(results[0]!.contextFailure).toBe(failure);
-    expect(builder.import?.applied).toContain("installing-mcp");
+    // The stage is applied only once the context landed, so a later attach runs the write again.
+    expect(builder.import?.applied).not.toContain("installing-mcp");
     expect(cmds.at(-1)).toBe("echo ok");
+  });
+
+  it("a context write that failed on the build runs again on attach, and the MCP stage is marked applied only once it landed", async () => {
+    const { backend, cmds, puts, fetch: accept } = backendFor();
+    // The person's files are the first PUT; the build's context archive is the second and is refused, the attach's goes through.
+    const refused = new Set([1]);
+    const fetch: typeof globalThis.fetch = async (url, init) => {
+      if (!refused.has(puts.length)) return accept(url, init);
+      puts.push(Buffer.from(init?.body as Uint8Array));
+      return new Response(JSON.stringify({ error: "Payload Too Large", limit: 1024 }), { status: 413 });
+    };
+    const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf() });
+    expect(builder.import?.applied).toEqual(["applying-setup", "uploading-files", "installing-harness", "installing-tools"]);
+    const before = { cmds: cmds.length, puts: puts.length };
+    const { stages, onStage } = stageRecorder();
+    const again = await applyGoldenImport(builder.machine, { import: importOf(), setup: "true", ledger: builder.import, fetch, onStage });
+    expect(stages).toEqual([
+      "applying-setup:already applied",
+      "uploading-files:already applied",
+      "installing-harness:already applied",
+      "installing-tools:already applied",
+      "installing-mcp:none configured",
+      CONTEXT_WRITTEN,
+    ]);
+    expect(puts).toHaveLength(before.puts + 1);
+    expect(namesIn(puts.at(-1)!)).toContain("etc/wsp/machine-context.json");
+    expect(cmds.slice(before.cmds).map(c => (c.includes("echo WSP_CTX") ? "probe" : c.includes("tar xzf - -C '/' ") ? "write" : c))).toEqual(["probe", "write"]);
+    expect(again.ledger.applied).toEqual(["applying-setup", "uploading-files", "installing-harness", "installing-tools", "installing-mcp"]);
+    // With the context on the machine, the next attach runs nothing.
+    const third = stageRecorder();
+    await applyGoldenImport(builder.machine, { import: importOf(), setup: "true", ledger: again.ledger, fetch, onStage: third.onStage });
+    expect(third.stages.at(-1)).toBe("installing-mcp:already applied");
+    expect(puts).toHaveLength(before.puts + 1);
+
+    // A retry that fails again leaves the stage unmarked, so the attach after it tries once more.
+    refused.add(puts.length + 1).add(puts.length + 2);
+    const other = await prepareBuilder({ backend, setup: "true", fetch, import: importOf() });
+    const rec = stageRecorder();
+    const still = await applyGoldenImport(other.machine, { import: importOf(), setup: "true", ledger: other.import, fetch, onStage: rec.onStage });
+    expect(rec.stages.at(-1)).toMatch(/^installing-mcp:machine context: not written \(write failed: .*HTTP 413/);
+    expect(still.ledger.applied).not.toContain("installing-mcp");
   });
 
   it("an archive over one upload part says how many parts it went up in", async () => {
@@ -1501,6 +1543,24 @@ describe("golden import stages", () => {
       await applyDelta(machine, deltaOf({ removals: [] }), { setup: "true", previousSmoke: "true", previousBase: head.base, fetch, onStage });
       expect(stages[0]).toBe("applying-setup:3 files: identity 1, shell 2");
       expect(cmds.slice(0, 2)).toEqual(["uname -m", FREE_KB_CMD]);
+    });
+
+    it("an update whose agents changed writes the machine context again after its stages: the added agent gets its hook, and it and the removed one leave the facts", async () => {
+      // The fork carries the previous version's facts, which name both agents as not installed.
+      const prior = { tools: [], agents: [{ id: "agents/codex", label: "Codex", note: "no installer" }, { id: "agents/gemini", label: "Gemini CLI", note: "no installer" }], files: [] };
+      const probe = `WSP_CTX\nAGENT claude\nAGENT codex\nFACTS ${Buffer.from(JSON.stringify(prior)).toString("base64")}\nWSP_CTX_END\n`;
+      const { backend, cmds, puts, fetch } = backendFor([["echo WSP_CTX", { exitCode: 0, stdout: probe, stderr: "" }]]);
+      const machine = await backend.create({ kind: "sandbox", template: "base" });
+      const { stages, onStage } = stageRecorder();
+      const { ledger } = await applyDelta(machine, deltaOf(), { setup: "true", previousSmoke: head.smoke.cmd, previousBase: head.base, fetch, onStage });
+      expect(stages.at(-1)).toMatch(/^installing-mcp:machine context: \d+(\.\d+)? KB written for Claude Code, Codex$/);
+      expect(ledger.applied).toContain("installing-mcp");
+      const write = cmds.findIndex(c => c.includes("tar xzf - -C '/' "));
+      expect(write).toBeGreaterThan(cmds.findIndex(c => c.includes("codex-install")));
+      expect(write).toBeGreaterThan(cmds.findIndex(c => c.includes("npm uninstall -g @google/gemini-cli")));
+      const tgz = puts.at(-1)!;
+      expect(namesIn(tgz)).toContain("etc/codex/requirements.toml");
+      expect(JSON.parse(fileIn(tgz, "etc/wsp/machine-context.json"))).toEqual({ tools: [], agents: [], files: [{ path: "~/.bashrc", note: "no longer on this computer" }] });
     });
 
     it.each([
