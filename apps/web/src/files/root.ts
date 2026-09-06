@@ -9,6 +9,7 @@
 import { useMemo } from "react";
 import { create } from "zustand";
 import { useStore } from "../protocol/store.js";
+import { parentPath } from "./entries.js";
 import { useDaemonRoot } from "./wire.js";
 
 export interface WorkspaceRoot {
@@ -46,6 +47,12 @@ export function rootOf(roots: readonly string[], path: string): string | null {
   let found: string | null = null;
   for (const root of roots) if (within(path, root) && (found === null || root.length > found.length)) found = root;
   return found;
+}
+
+/** The folder above, while a root still holds it: null at a root's edge, which is where the daemon refuses to list. */
+export function parentWithin(roots: readonly string[], path: string): string | null {
+  const above = parentPath(path);
+  return above !== null && rootOf(roots, above) !== null ? above : null;
 }
 
 export const useRootStore = create<RootStoreState>()(set => ({

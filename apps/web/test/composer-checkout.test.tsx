@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The checkout row under the composer: before the first message it offers
-// the folder and names its branch over the daemon wire, and the send starts
-// the session in that folder; after a turn it is a label carrying the
-// harness's own cwd, which the panes follow until pinned. Base UI's menu
-// popup never settles under jsdom (its positioner loops and a close hangs
-// the run), so the menu primitives are stood in by a plain open/closed
-// context here and the picker's own browsing and picking run for real.
+// the folder and names its branch over the daemon wire, across the same
+// roots the panes browse, and the send starts the session in that folder;
+// after a turn it is a label carrying the harness's own cwd, which the
+// panes follow until pinned. Base UI's menu popup never settles under jsdom
+// (its positioner loops and a close hangs the run), so the menu primitives
+// are stood in by a plain open/closed context here and the picker's own
+// browsing and picking run for real.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { cloneElement, createContext, useContext, useState, type ReactElement, type ReactNode } from "react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -48,8 +49,23 @@ vi.mock("../src/components/ui/menu.js", () => {
     );
   };
   const MenuGroup = ({ children }: { children: ReactNode }) => <div role="group">{children}</div>;
+  // Base UI's radio items hold the checked state and never close the menu; the stand-in does the same.
+  const RadioCtx = createContext<{ value: unknown; change: (value: unknown) => void }>({ value: null, change: () => {} });
+  const MenuRadioGroup = ({ children, value, onValueChange, ...props }: { children: ReactNode; value?: unknown; onValueChange?: (value: unknown) => void; [key: string]: unknown }) => (
+    <div role="group" {...(props as Record<string, unknown>)}>
+      <RadioCtx.Provider value={{ value, change: onValueChange ?? (() => {}) }}>{children}</RadioCtx.Provider>
+    </div>
+  );
+  const MenuRadioItem = ({ children, value, ...props }: { children: ReactNode; value: unknown; [key: string]: unknown }) => {
+    const ctx = useContext(RadioCtx);
+    return (
+      <div role="menuitemradio" aria-checked={ctx.value === value ? "true" : "false"} onClick={() => ctx.change(value)} {...(props as Record<string, unknown>)}>
+        {children}
+      </div>
+    );
+  };
   const MenuSeparator = () => <hr />;
-  return { Menu, MenuTrigger, MenuPopup, MenuItem, MenuGroup, MenuSeparator };
+  return { Menu, MenuTrigger, MenuPopup, MenuItem, MenuGroup, MenuRadioGroup, MenuRadioItem, MenuSeparator };
 });
 
 vi.mock("../src/components/ui/tooltip.js", () => ({
@@ -67,7 +83,7 @@ import { useComposerDraftStore } from "../src/components/chat/composerDraftStore
 import { useNewThreadRequests } from "../src/components/chat/newThreadRequests.js";
 import { selectRoot, useRootStore } from "../src/files/root.js";
 import { provideDaemonHello, provideDaemonWire } from "../src/files/wire.js";
-import { DAEMON_HELLO, DAEMON_ROOT, fakeWire, LISTING, resetSurfaces } from "./surface-harness.js";
+import { DAEMON_HELLO, DAEMON_ROOT, fakeWire, imported, LISTING, PROJECT_DEST, resetSurfaces } from "./surface-harness.js";
 import { CHAT_STREAM, CHAT_WS } from "./fixtures/chat-stream.js";
 
 let restoreLayout: () => void = () => {};
@@ -89,9 +105,11 @@ const workspace: WorkspaceView = {
   createdAt: "2026-09-01T00:00:00Z",
   claudeSessionId: "sess_0001",
 };
+/** The same workspace after one import: the picker browses home and the project folder. */
+const withProject: WorkspaceView = { ...workspace, project: imported.project };
 const STATUS = { branch: { oid: "abc", head: "feature/panes", ahead: 0, behind: 0 }, entries: [], root: "/root/app" };
 
-function fixtureApi(history: SessionEvent[] = [], rows: SessionView[] = []) {
+function fixtureApi(history: SessionEvent[] = [], rows: SessionView[] = [], ws: WorkspaceView = workspace) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
   const started: Array<{ workspaceId: string; prompt: string; resume?: string; cwd?: string }> = [];
   const api: Api = {
@@ -101,16 +119,16 @@ function fixtureApi(history: SessionEvent[] = [], rows: SessionView[] = []) {
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     snapshotStorage: async () => null,
     rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
-    listWorkspaces: async () => [workspace],
-    getWorkspace: async () => workspace,
-    createWorkspace: async () => workspace,
-    nap: async () => workspace,
-    wake: async () => workspace,
-    upgrade: async () => workspace,
+    listWorkspaces: async () => [ws],
+    getWorkspace: async () => ws,
+    createWorkspace: async () => ws,
+    nap: async () => ws,
+    wake: async () => ws,
+    upgrade: async () => ws,
     capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true }),
     listSessions: async () => rows,
     watchStatuses: async () => [],
-    createFromGoldenHead: async () => workspace,
+    createFromGoldenHead: async () => ws,
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
     getGolden: async () => undefined,
     startSession: async opts => {
@@ -137,6 +155,8 @@ const branch = () => document.querySelector<HTMLElement>("[data-composer-branch]
 const root = () => selectRoot(useRootStore.getState().byWorkspaceId, WS, [DAEMON_ROOT]);
 const menuEntry = (path: string) => document.querySelector<HTMLElement>(`[data-composer-folder-entry="${path}"]`);
 const menuPick = (path: string) => document.querySelector<HTMLElement>(`[data-composer-folder-pick="${path}"]`);
+const menuRoots = () =>
+  Array.from(document.querySelectorAll<HTMLElement>("[data-composer-folder-root]")).map(el => [el.dataset["composerFolderRoot"], el.getAttribute("aria-checked")]);
 
 describe("composer checkout row", () => {
   it("offers the folder before the first message, names its branch, and starts the session there", async () => {
@@ -153,6 +173,7 @@ describe("composer checkout row", () => {
     await waitFor(() => expect(menuEntry("/root/app")).not.toBeNull());
     expect(menuPick("/root")).not.toBeNull();
     expect(screen.queryByText(/Up to/)).toBeNull();
+    expect(menuRoots()).toEqual([]);
     fireEvent.click(menuEntry("/root/app")!);
     await waitFor(() => expect(menuEntry("/root/app/lib")).not.toBeNull());
     expect(wire.calls.filter(([op]) => op === "fs.list").map(([, p]) => p["path"])).toEqual(["/root", "/root/app"]);
@@ -166,6 +187,38 @@ describe("composer checkout row", () => {
     await press(editor, "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
     expect(started[0]).toMatchObject({ prompt: "build it here", cwd: "/root/app" });
+  });
+
+  it("offers home and the imported project as roots, and browses and picks inside the project", async () => {
+    const wire = fakeWire({ "fs.list": LISTING, "git.status": params => ({ ...STATUS, root: String(params["cwd"]) }) });
+    provideDaemonWire(WS, wire);
+    const { api, started } = fixtureApi([], [], withProject);
+    await setup(api);
+    expect(folder()).toBe("/root");
+
+    fireEvent.click(screen.getByRole("button", { name: "Working folder: /root" }));
+    await waitFor(() => expect(menuEntry("/root/app")).not.toBeNull());
+    expect(menuRoots()).toEqual([["/root", "true"], [PROJECT_DEST, "false"]]);
+
+    fireEvent.click(document.querySelector<HTMLElement>(`[data-composer-folder-root="${PROJECT_DEST}"]`)!);
+    await waitFor(() => expect(menuEntry(`${PROJECT_DEST}/packages`)).not.toBeNull());
+    expect(menuRoots()).toEqual([["/root", "false"], [PROJECT_DEST, "true"]]);
+    expect(menuPick(PROJECT_DEST)).not.toBeNull();
+    // Up stops at the project root, which the daemon browses; its parent is outside every root.
+    expect(screen.queryByText(/Up to/)).toBeNull();
+
+    fireEvent.click(menuEntry(`${PROJECT_DEST}/packages`)!);
+    await waitFor(() => expect(menuEntry(`${PROJECT_DEST}/packages/web`)).not.toBeNull());
+    expect(screen.getByText(/Up to/).textContent).toBe(`Up to ${PROJECT_DEST}`);
+    expect(wire.calls.filter(([op]) => op === "fs.list").map(([, p]) => p["path"])).toEqual(["/root", PROJECT_DEST, `${PROJECT_DEST}/packages`]);
+
+    fireEvent.click(menuPick(`${PROJECT_DEST}/packages`)!);
+    await waitFor(() => expect(screen.getByRole("button", { name: `Working folder: ${PROJECT_DEST}/packages` })).toBeTruthy());
+    const editor = composerEditor();
+    await typeInto(editor, "work in the project");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]).toMatchObject({ prompt: "work in the project", cwd: `${PROJECT_DEST}/packages` });
   });
 
   it("starts an unpicked thread in the daemon root", async () => {
