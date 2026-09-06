@@ -127,6 +127,17 @@ describe("deriveSession: streaming states", () => {
     expect(m.workEntries[0]).toMatchObject({ command: "ls -la", detail: "total 0", toolLifecycleStatus: "completed" });
   });
 
+  it("keeps the Bash tool's description on the row after its output replaces the detail", () => {
+    const m = deriveSession([start, tool("Bash", { command: "git status", description: "Show working tree status" }), result("On branch main")]);
+    expect(m.workEntries[0]).toMatchObject({ command: "git status", description: "Show working tree status", detail: "On branch main" });
+  });
+
+  it("another tool's description field stays a detail and never becomes the row's label", () => {
+    const m = deriveSession([start, tool("Task", { description: "scan repo", prompt: "find every caller" }), result("Found 12 files")]);
+    expect(m.workEntries[0]).toMatchObject({ detail: "Found 12 files" });
+    expect(m.workEntries[0]).not.toHaveProperty("description");
+  });
+
   it("a tool_result with no visible call still renders as a completed row", () => {
     const m = deriveSession([start, result("orphan output", false, "t9")]);
     expect(m.workEntries[0]).toMatchObject({ toolCallId: "t9", label: "tool", detail: "orphan output", toolLifecycleStatus: "completed" });

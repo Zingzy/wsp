@@ -93,7 +93,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, NOTIFY_ME, fmtBytes, fmtElapsed, goneRefusal, notifyLine, sendRefusal, shellQuote, startPicks, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, NOTIFY_ME, fmtBytes, fmtDuration, goneRefusal, notifyLine, sendRefusal, shellQuote, startPicks, workspaceState } from "@wsp/protocol";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -594,6 +594,9 @@ export interface Runtime {
      * written again so the next reach opens it. Throws on a workspace that is not running or a runtime without the deploy. */
     updateDaemon(id: string): Promise<void>;
     delete(id: string): Promise<void>;
+    /** Drops a workspace whose machine the provider no longer has: its record, transcripts and sessions go and nothing
+     * is asked of the provider. Refused with the reason (kind conflict) while the machine still exists. */
+    forget(id: string): Promise<void>;
     /** A person acted in the workspace; its idle window starts over. */
     touch(id: string): Promise<void>;
     /** One-shot command on the workspace's machine (plumbing for clients; sessions are the main road). */
@@ -724,7 +727,7 @@ const UNANSWERING_REASON = "machine stopped answering while the agent was workin
 const RESTARTED_REASON = "host restarted while the agent was working";
 const GONE_REASON = "machine gone at the provider while the agent was working";
 /** What a cut turn's parent hears: the row's own span, since no harness result reports one. */
-const restartCutLine = (elapsedMs: number): string => `cut by a host restart after ${fmtElapsed(elapsedMs)}`;
+const restartCutLine = (elapsedMs: number): string => `cut by a host restart after ${fmtDuration(elapsedMs, "clock")}`;
 /** A guest with no daemon is asked again after this long (one may be deployed later). */
 const DAEMON_TOKEN_MISS_TTL_MS = 60_000;
 /** Events kept per workspace; the oldest fall off so one chatty workspace cannot grow the store forever. */
@@ -1374,6 +1377,24 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     for (const e of execs) if (e.workspaceId === workspaceId) e.end(reason);
   };
 
+  /** Everything a workspace left on this side once its machine is dealt with: live state, flushes, stored rows, vault. */
+  const drop = async (id: string): Promise<void> => {
+    live.delete(id);
+    transcripts.delete(id);
+    for (const [handleId, s] of sessions) if (s.view.workspaceId === id) sessions.delete(handleId);
+    cancelFlush(id);
+    await transcriptFlushes.get(id);
+    transcriptFlushes.delete(id);
+    await indexFlushes.get(id);
+    indexFlushes.delete(id);
+    await store.delete(WORKSPACES, id);
+    await store.delete(TRANSCRIPTS, id);
+    await store.delete(SESSIONS, id);
+    await store.delete(CREATES, `workspace/${id}`);
+    await store.deleteBlob(VAULTS, id);
+    bus.emit({ type: "workspace.deleted", workspaceId: id });
+  };
+
   // Pausing is persisted and pushed before the provider is asked, so a list
   // fetched mid-pause never says running, and the sessions end while the
   // machine can still be told to stop them.
@@ -1824,20 +1845,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await entry.machine.kill().catch((e: unknown) => {
         if ((e as { kind?: string }).kind !== "missing") throw e;
       });
-      live.delete(id);
-      transcripts.delete(id);
-      for (const [handleId, s] of sessions) if (s.view.workspaceId === id) sessions.delete(handleId);
-      cancelFlush(id);
-      await transcriptFlushes.get(id);
-      transcriptFlushes.delete(id);
-      await indexFlushes.get(id);
-      indexFlushes.delete(id);
-      await store.delete(WORKSPACES, id);
-      await store.delete(TRANSCRIPTS, id);
-      await store.delete(SESSIONS, id);
-      await store.delete(CREATES, `workspace/${id}`);
-      await store.deleteBlob(VAULTS, id);
-      bus.emit({ type: "workspace.deleted", workspaceId: id });
+      await drop(id);
+    },
+
+    async forget(id) {
+      const entry = await entryOf(id);
+      const state = await entry.machine.state();
+      if (state !== "gone") {
+        throw Object.assign(new Error(`${entry.record.name}'s machine ${entry.machine.id} is still ${state}; pause it or delete it at the provider first`), { kind: "conflict" });
+      }
+      endSessions(id, DELETED_REASON);
+      await drop(id);
     },
 
     async touch(id) {
@@ -2150,8 +2168,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       );
       const handleId = started.localId;
       sessionView.id = handleId;
-      // A resumed turn takes over the row of the turn it resumes; the row keeps saying who opened the thread.
-      if (o.resume !== undefined) sessionView.startedBy = sessions.get(handleId)?.view.startedBy ?? sessionView.startedBy;
+      // A resumed turn takes over the row of the turn it resumes; the row keeps saying who opened the thread and
+      // with what, since every client titles the thread by the row's prompt. Later turns live in the transcript.
+      const resumed = o.resume !== undefined ? sessions.get(handleId)?.view : undefined;
+      if (resumed !== undefined) {
+        sessionView.startedBy = resumed.startedBy ?? sessionView.startedBy;
+        if (resumed.prompt !== undefined) sessionView.prompt = resumed.prompt;
+      }
 
       const handle: SessionHandle = {
         id: handleId,

@@ -5,7 +5,7 @@
 // useDiscoveredLocalServers.ts and contracts (commit 57a66608). Fields the
 // wsp wire cannot fill today are kept when a copied component reads them and
 // dropped when nothing does. Everything here is data: no React, no schemas.
-import type { MachineState, ReachState, SessionOrigin, SessionStatus, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import type { MachineState, ReachState, SessionOrigin, SessionStatus, WorkspacePhase, WorkspaceState, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 
 // --- chat -------------------------------------------------------------------
 
@@ -51,6 +51,8 @@ export interface WorkLogEntry {
   /** The one collapsed line for a row whose detail is prose (reasoning): its first line, cut like a tool preview. */
   readonly preview?: string;
   readonly command?: string;
+  /** The Bash tool's description: the harness's own sentence for the call, shown in place of the command and its state word. */
+  readonly description?: string;
   readonly changedFiles?: ReadonlyArray<string>;
   readonly tone: "thinking" | "tool" | "info" | "error";
   readonly toolTitle?: string;
@@ -241,6 +243,8 @@ export interface SidebarProjectSnapshot {
   readonly phase: WorkspacePhase;
   readonly machineState: MachineState | null;
   readonly reach: ReachState | null;
+  /** The one state word's key: phase, machine state and reach folded by the protocol. */
+  readonly state: WorkspaceState;
   readonly indicator: StatusIndicator;
   readonly threads: ReadonlyArray<SidebarThreadSnapshot>;
 }

@@ -36,6 +36,7 @@ const api: Api = {
   createWorkspace: async () => workspaces[0]!,
   createFromGoldenHead: async () => workspaces[0]!,
   watchStatuses: async () => workspaces.map(w => statusOf(w)),
+  forget: async () => {},
   nap: async id => workspaces.find(w => w.id === id)!,
   wake: async id => workspaces.find(w => w.id === id)!,
   upgrade: async id => workspaces.find(w => w.id === id)!,

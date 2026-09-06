@@ -6,7 +6,7 @@ import { createServer, type Server } from "node:http";
 import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe, type AdapterEvent, type TurnResult } from "@wsp/adapter-claude";
-import { SessionEvent, type EventUnion, type RecipeDigest } from "@wsp/protocol";
+import { SessionEvent, foldThreads, type EventUnion, type RecipeDigest } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { TABLE_PIN } from "../src/harness-catalog.js";
@@ -317,8 +317,29 @@ describe("runtime session history", () => {
     const resume = (await rt.workspaces.get(ws.id)).claudeSessionId!;
     await (await rt.sessions.start(ws.id, { prompt: "second", resume })).finished;
     await (await rt.sessions.start(ws.id, { prompt: "third" })).finished;
-    expect((await rt.sessions.list(ws.id)).map(s => [s.prompt, s.startedBy])).toEqual([["second", "cli"], ["third", "person"]]);
+    expect((await rt.sessions.list(ws.id)).map(s => [s.prompt, s.startedBy])).toEqual([["first", "cli"], ["third", "person"]]);
     await rt.close();
+  });
+
+  it("a thread is titled by its first prompt: a second send leaves the row's prompt, and so the folded title, unchanged, also across a restart", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: { claude: threaded() } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const titles = async (r: typeof rt) => foldThreads(await r.sessions.list(ws.id)).map(t => [t.title, t.status]);
+    await (await rt.sessions.start(ws.id, { prompt: "You are a builder for the wsp repo", startedBy: "cli" })).finished;
+    const resume = (await rt.workspaces.get(ws.id)).claudeSessionId!;
+    expect(await titles(rt)).toEqual([["You are a builder for the wsp repo", "completed"]]);
+    await (await rt.sessions.start(ws.id, { prompt: "GitHub is signed in on this machine now", resume })).finished;
+    expect(await titles(rt)).toEqual([["You are a builder for the wsp repo", "completed"]]);
+    const history = await rt.sessions.history(ws.id);
+    expect(history.filter(e => e.type === "session.start").map(e => e.prompt)).toEqual(["You are a builder for the wsp repo", "GitHub is signed in on this machine now"]);
+    await rt.close();
+
+    const again = createRuntime({ backend, store, adapters: { claude: threaded() } });
+    await (await again.sessions.start(ws.id, { prompt: "Push the branch", resume })).finished;
+    expect(await titles(again)).toEqual([["You are a builder for the wsp repo", "completed"]]);
+    await again.close();
   });
 
   it("a transcript written before threads existed replays as one thread, and a resume into it stamps it in place", async () => {
@@ -971,7 +992,7 @@ describe("runtime session index", () => {
     const resume = first!.claudeSessionId!;
     await (await rt.sessions.start(ws.id, { prompt: "again", resume, harness: "dying" })).finished;
     const rows = await rt.sessions.list(ws.id);
-    expect(rows.map(r => [r.prompt, r.status, r.threadId, r.claudeSessionId])).toEqual([["again", "failed", first!.threadId, resume]]);
+    expect(rows.map(r => [r.prompt, r.status, r.threadId, r.claudeSessionId])).toEqual([["first", "failed", first!.threadId, resume]]);
     await rt.close();
     const stored = (await store.get("sessions", ws.id)) as { sessions: { claudeSessionId?: string }[] };
     expect(stored.sessions.map(r => r.claudeSessionId)).toEqual([resume]);
@@ -992,13 +1013,13 @@ describe("runtime session index", () => {
     const rt2 = createRuntime({ backend, store, adapters: { claude: t.adapter } });
     await (await rt2.sessions.start(ws.id, { prompt: "more", resume: first!.claudeSessionId, cwd: first!.cwd })).finished;
     expect(t.starts[0]).toMatchObject({ resume: first!.claudeSessionId, cwd: "/root/app" });
-    // the resumed turn keeps the session id, so it takes over that row, in memory and in the store
+    // the resumed turn keeps the session id, so it takes over that row and its opening prompt, in memory and in the store
     const rows = await rt2.sessions.list(ws.id);
-    expect(rows.map(s => s.prompt)).toEqual(["more"]);
+    expect(rows.map(s => s.prompt)).toEqual(["first"]);
     expect(rows[0]!.threadId).toBe(first!.threadId);
     await rt2.close();
     const stored = (await store.get("sessions", ws.id)) as { sessions: { prompt: string; threadId: string }[] };
-    expect(stored.sessions.map(s => s.prompt)).toEqual(["more"]);
+    expect(stored.sessions.map(s => s.prompt)).toEqual(["first"]);
     expect(stored.sessions[0]!.threadId).toBe(first!.threadId);
   });
 
@@ -4366,7 +4387,7 @@ describe("a start on a thread whose turn is running", () => {
     expect(second!.outcome).toBe("queued");
     expect(second!.turnId).not.toBe(first.turnId);
     expect(h.starts.map(s => [s.prompt, s.resume])).toEqual([["one", undefined], ["two", sid]]);
-    expect(second!.view()).toMatchObject({ status: "running", prompt: "two", threadId: first.view().threadId });
+    expect(second!.view()).toMatchObject({ status: "running", prompt: "one", threadId: first.view().threadId });
     h.end(1, "two done");
     expect(await second!.finished).toEqual({ status: "completed", text: "two done" });
     const history = await rt.sessions.history(ws.id);
@@ -4458,7 +4479,7 @@ describe("a thread whose start named who to tell", () => {
     expect(h.starts[2]).toMatchObject({ prompt: line, resume: parentSid });
     expect(h.steered).toEqual([]);
     const rows = await rt.sessions.list(ws.id);
-    expect(rows.filter(r => r.threadId === parentThread).map(r => [r.status, r.prompt, r.startedBy])).toEqual([["running", line, "cli"]]);
+    expect(rows.filter(r => r.threadId === parentThread).map(r => [r.status, r.prompt, r.startedBy])).toEqual([["running", "orchestrate", "cli"]]);
     const history = await rt.sessions.history(ws.id);
     expect(history.filter(e => e.threadId === parentThread).map(e => e.type)).toEqual(["session.start", "session.done", "session.end", "session.start"]);
     expect(history.at(-1)).toMatchObject({ type: "session.start", threadId: parentThread, prompt: line });

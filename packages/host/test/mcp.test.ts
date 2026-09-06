@@ -129,7 +129,7 @@ describe("the MCP server over the host", () => {
   it("offers the verbs as tools, each described, and none for import until it exists", async () => {
     const c = await connect();
     const { tools } = await c.listTools();
-    expect(tools.map(t => t.name).sort()).toEqual(["exec", "export", "fork", "new", "pause", "send", "snapshot", "thread_new", "threads", "workspaces"]);
+    expect(tools.map(t => t.name).sort()).toEqual(["exec", "export", "forget", "fork", "new", "pause", "send", "snapshot", "thread_new", "threads", "workspaces"]);
     for (const t of tools) expect(t.description, t.name).toMatch(/\S/);
     expect(Object.keys((tools.find(t => t.name === "new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["from", "name"]);
     expect(Object.keys((tools.find(t => t.name === "thread_new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "model", "notify", "task", "workspace"]);
@@ -231,6 +231,22 @@ describe("the MCP server over the host", () => {
     expect((await rt.workspaces.list())[0]!.phase).toBe("napping");
     const missing = await call("pause", { workspace: "nope" });
     expect(missing).toEqual({ text: "no workspace nope", structured: undefined, isError: true });
+  });
+
+  it("forget drops a workspace whose machine is gone and says what went; one whose machine exists is a tool error with the reason", async () => {
+    await call("new", { name: "alpha" });
+    const [alpha] = await rt.workspaces.list();
+    const refused = await call("forget", { workspace: "alpha" });
+    expect(refused).toEqual({ text: "alpha's machine m1 is still running; pause it or delete it at the provider first", structured: undefined, isError: true });
+    expect(await rt.workspaces.list()).toHaveLength(1);
+
+    backend.machines[0]!.killed = true;
+    const forgot = await call("forget", { workspace: "alpha" });
+    expect(forgot.isError).toBe(false);
+    expect(forgot.structured).toEqual({ workspaceId: alpha!.id, name: "alpha", threads: 0 });
+    expect(forgot.text).toBe(`forgot alpha ${alpha!.id}: its record and 0 threads are gone from this computer`);
+    expect(await rt.workspaces.list()).toEqual([]);
+    expect(await store.get("workspaces", alpha!.id)).toBeUndefined();
   });
 
   it("thread_new opens a thread under the named agent, started by the local agent, and returns the reply as the result", async () => {
@@ -357,8 +373,8 @@ describe("the MCP server over the host", () => {
     expect(new Set(requestIds).size).toBe(4);
     const { threads } = (await call("threads")).structured as { threads: ThreadView[] };
     expect(threads.map(t => [t.harness, t.startedBy, t.title, t.turns])).toEqual([
-      ["codex", "agent", "second", 1],
-      ["claude", "person", "and this", 1],
+      ["codex", "agent", "first", 1],
+      ["claude", "person", "from the app", 1],
     ]);
     const missing = await call("send", { thread: "nope", message: "x" });
     expect(missing).toEqual({ text: "no thread nope", structured: undefined, isError: true });

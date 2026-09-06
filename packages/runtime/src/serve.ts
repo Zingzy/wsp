@@ -185,6 +185,10 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               await rt.workspaces.delete(msg.workspaceId);
               send({ id: msg.id, ok: true });
               return;
+            case "workspaces.forget":
+              await rt.workspaces.forget(msg.workspaceId);
+              send({ id: msg.id, ok: true });
+              return;
             case "workspaces.snapshot":
               send({ id: msg.id, ok: true, projectGolden: await rt.workspaces.snapshot(msg.workspaceId) });
               return;

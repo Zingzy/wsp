@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The workspace sidebar over the fixture wire: rows from the store's
 // workspaces, statuses, costs and sessions; grouping; search; keyboard
-// traversal; the new-workspace dialog; the zombie rebuild action.
+// traversal; the new-workspace dialog; the zombie rebuild and the gone forget.
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionView, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
@@ -37,6 +37,7 @@ const session = (id: string, workspaceId: string, over: Partial<SessionView> = {
 type FakeApi = Api & {
   createFromGoldenHead: ReturnType<typeof vi.fn>;
   rebuild: ReturnType<typeof vi.fn>;
+  forget: ReturnType<typeof vi.fn>;
   watchStatuses: ReturnType<typeof vi.fn>;
 };
 
@@ -50,6 +51,7 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
     nap: vi.fn(async (id: string) => view(id, "?", "napping")),
     wake: vi.fn(async (id: string) => view(id, "?", "running")),
     rebuild: vi.fn(async (id: string) => ({ ...view(id, "?", "running"), machineId: "m_rebuilt" })),
+    forget: vi.fn(async (_id: string) => {}),
     upgrade: vi.fn(async (id: string) => view(id, "?", "running")),
     capabilities: vi.fn(async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true })),
     startSession: vi.fn(async (o: { workspaceId: string }) => session("s_x", o.workspaceId)),
@@ -530,8 +532,9 @@ describe("new workspace dialog", () => {
 });
 
 describe("gone machines", () => {
+  const OLD: WorkspaceView = { ...view("ws_c", "old", "gone"), gone: "machine m_ws_c is gone at the provider: Not found" };
+
   it("a gone row reads Gone with no rate or countdown, offers the rebuild with the provider's words, and no new thread", async () => {
-    const OLD: WorkspaceView = { ...view("ws_c", "old", "gone"), gone: "machine m_ws_c is gone at the provider: Not found" };
     await mount(fakeApi([OLD], [status(OLD, { machineState: "gone", reach: { state: "gone" }, reason: OLD.gone! })]), "old");
     const row = rowOf("old");
     expect(row.textContent).toContain("Gone");
@@ -540,6 +543,33 @@ describe("gone machines", () => {
     expect(row.textContent).not.toContain("active");
     expect(screen.getByRole("button", { name: "Rebuild old" }).getAttribute("title")).toBe("machine m_ws_c is gone at the provider: Not found");
     expect(screen.queryByRole("button", { name: "New thread in old" })).toBeNull();
+  });
+
+  it("a gone row offers forget beside the rebuild; confirming names what goes, calls the api once, and the row leaves on workspace.deleted", async () => {
+    const api = await mount(fakeApi([OLD], [status(OLD)], [session("s1", "ws_c", { prompt: "fix the port list", status: "completed" })]), "old");
+    await waitFor(() => expect(rowOf("old").textContent).toContain("Gone"));
+    expect(screen.getByRole("button", { name: "Rebuild old" })).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Forget old" }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog.textContent).toContain("Forget old?");
+    expect(dialog.textContent).toContain("Its record and 1 thread leave this computer; the machine is already gone.");
+    expect(api.forget).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Forget" }));
+    await waitFor(() => expect(api.forget).toHaveBeenCalledTimes(1));
+    expect(api.forget).toHaveBeenCalledWith("ws_c");
+    act(() => useStore.getState().applyEvent({ type: "workspace.deleted", workspaceId: "ws_c" }));
+    await waitFor(() => expect(screen.queryByText("old")).toBeNull());
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("the host's refusal shows in the dialog and the row stays", async () => {
+    const api = await mount(fakeApi([OLD], [status(OLD)]), "old");
+    const reason = "old's machine m_ws_c is still running; pause it or delete it at the provider first";
+    api.forget.mockRejectedValueOnce(new RequestError(reason, "conflict"));
+    fireEvent.click(screen.getByRole("button", { name: "Forget old" }));
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Forget" }));
+    await waitFor(() => expect(screen.getByText(reason)).toBeDefined());
+    expect(rowOf("old").textContent).toContain("Gone");
   });
 });
 

@@ -78,7 +78,9 @@ import {
   shouldPreserveAssistantLineBreaks,
   workEntryDisplayLabel,
   workEntryIsVisibleInGroup,
+  workEntryLabelText,
   type StableMessagesTimelineRowsState,
+  type WorkEntryLabel,
   TIMELINE_MINIMAP_MIN_ITEMS,
   type WorkGroupScrollAnchor,
 } from "./MessagesTimeline.logic";
@@ -1141,7 +1143,7 @@ function ThinkingTimelineRow() {
   // Reserve the activity row during setup so the handoff keeps the same height; nothing thinks on a machine that is not running.
   return (
     <div className="min-h-7">
-      {isPreparingWorktree || machineWait !== null ? null : <LiveActivityRow label="Thinking" iconName="brain" />}
+      {isPreparingWorktree || machineWait !== null ? null : <LiveActivityRow label={THINKING_LABEL} iconName="brain" />}
     </div>
   );
 }
@@ -1375,12 +1377,23 @@ function ActivityShimmerOverlay({ children }: { children: ReactNode }) {
   );
 }
 
+const THINKING_LABEL: WorkEntryLabel = { verb: null, text: "Thinking", mono: false };
+
+function WorkEntryLabelText({ label }: { label: WorkEntryLabel }) {
+  return (
+    <>
+      {label.verb !== null ? `${label.verb} ` : null}
+      <span className={label.mono ? "font-mono" : undefined}>{label.text}</span>
+    </>
+  );
+}
+
 function LiveActivityRow({
   label,
   iconName,
   failed = false,
 }: {
-  label: string;
+  label: WorkEntryLabel;
   iconName?: WorkEntryIconName;
   failed?: boolean;
 }) {
@@ -1406,7 +1419,7 @@ function LiveActivityContent({
   announceFailure = false,
   highlighted = false,
 }: {
-  label: string;
+  label: WorkEntryLabel;
   iconName: WorkEntryIconName | undefined;
   failed?: boolean;
   announceFailure?: boolean;
@@ -1438,7 +1451,7 @@ function LiveActivityContent({
           />
         </span>
       ) : null}
-      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <span className="min-w-0 flex-1 truncate"><WorkEntryLabelText label={label} /></span>
       {failed && isSpecialToolIcon ? <XIcon aria-hidden className="size-3 shrink-0" /> : null}
     </span>
   );
@@ -1453,7 +1466,7 @@ function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "
     <button
       type="button"
       className="group/live-work flex min-h-6 w-full max-w-full cursor-pointer items-center rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
-      aria-label={failed ? `${label}, tool call failed` : undefined}
+      aria-label={failed ? `${workEntryLabelText(label)}, tool call failed` : undefined}
       aria-expanded={row.expanded}
       onClick={() => ctx.onToggleWorkGroup(row.groupId, row.id)}
     >
@@ -1908,9 +1921,10 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   const toolPresentation = resolveWorkEntryToolPresentation(workEntry);
   const entryIconName =
     showFailedIndicator && !toolPresentation ? "circle-alert" : workEntryIconName(workEntry);
-  const previewText = workEntryDisplayLabel(workEntry, workspaceRoot);
-  const displayText =
-    !toolPresentation && expanded && workEntry.command?.trim() ? "Command" : previewText;
+  const preview = workEntryDisplayLabel(workEntry, workspaceRoot);
+  const previewText = workEntryLabelText(preview);
+  const display: WorkEntryLabel =
+    !toolPresentation && expanded && workEntry.command?.trim() ? { verb: null, text: "Command", mono: false } : preview;
   const detailText = workEntry.detail?.trim();
   const canExpand = Boolean(
     workEntry.command?.trim() ||
@@ -1979,7 +1993,7 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
           <div className="min-w-0 flex-1 overflow-hidden">
             <p className="flex min-w-0 w-full items-baseline gap-1.5 text-sm leading-relaxed">
-              <span className={cn("min-w-0 flex-1 truncate", headingClass)}>{displayText}</span>
+              <span className={cn("min-w-0 flex-1 truncate", headingClass)}><WorkEntryLabelText label={display} /></span>
             </p>
           </div>
           {showFailedIndicator && toolPresentation ? (
