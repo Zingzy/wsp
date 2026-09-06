@@ -746,14 +746,19 @@ describe("callback relay over a fake daemon link", () => {
     let release: () => void = () => {};
     fake.refuseDials = false;
     fake.slowDial = () => new Promise<void>(r => (release = r));
-    clock.advance(REDIAL_CEILING_MS * 1.5);
-    await until(() => fake.targets.length === 2);
-    // The dial is in flight for its whole budget; the hold must not run out under it.
-    clock.advance(DAEMON_CONNECT_TIMEOUT_MS - 1);
-    await new Promise(r => setTimeout(r, 50));
-    expect(got).toEqual([]);
-    expect(lines.some(l => l.includes("start the sign-in again"))).toBe(false);
-    release();
+    // Released on every path: close() awaits the gated dial, so a failed assertion here would hang afterEach.
+    try {
+      clock.advance(REDIAL_CEILING_MS * 1.5);
+      await until(() => fake.targets.length === 2);
+      // The dial is in flight for its whole budget; the hold must not run out under it.
+      clock.advance(DAEMON_CONNECT_TIMEOUT_MS - 1);
+      await new Promise(r => setTimeout(r, 50));
+      expect(got).toEqual([]);
+      expect(lines.some(l => l.includes("start the sign-in again"))).toBe(false);
+    } finally {
+      fake.slowDial = undefined;
+      release();
+    }
     await until(() => fake.links.length === 2);
     const second = fake.links[1]!;
     await until(() => second.ops.some(x => x.op === "tunnel.write"));

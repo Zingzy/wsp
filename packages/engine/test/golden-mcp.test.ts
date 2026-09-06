@@ -370,6 +370,30 @@ describe("applyMcp", () => {
     expect(script).not.toContain("mcp_servers");
   });
 
+  it("a machine that refuses the script, as the provider does over its body cap, skips every server with the words, touches no config, and does not throw", async () => {
+    const { root, machine } = guest(["npx"]);
+    seed(root);
+    const before = readFileSync(join(root, ".claude-cfg", ".claude.json"), "utf8");
+    const refusing = { ...machine, run: async () => { throw Object.assign(new Error("Payload Too Large"), { kind: "unknown", status: 413 }); } } as unknown as Machine;
+    const stages: string[] = [];
+    const results = await applyMcp(refusing, planOn(root), (s, d) => void stages.push(d ?? s));
+    expect(results.map(r => r.outcome)).toEqual(Array.from({ length: 11 }, () => "skipped"));
+    expect(results.find(r => r.name === "github")).toEqual({ id: `${MCP_ID_PREFIX}claude/github`, agent: "Claude Code", name: "github", outcome: "skipped", note: "the config edit did not run (Payload Too Large)" });
+    expect(results.find(r => r.name === "notes")?.note).toBe("command ~/Library/Application Support/Notes/mcp is macOS-only, will not run");
+    expect(stages.at(-1)).toContain("github skipped (the config edit did not run (Payload Too Large))");
+    expect(readFileSync(join(root, ".claude-cfg", ".claude.json"), "utf8")).toBe(before);
+  });
+
+  it("a PATH check the machine refuses drops no server: the definitions land and the stage still closes", async () => {
+    const { root, machine, cmds } = guest(["npx"]);
+    seed(root);
+    const refusing = { ...machine, exec: async (cmd: string) => { if (cmd.includes("command -v")) throw new Error("Bad Gateway"); return machine.exec(cmd); } } as unknown as Machine;
+    const results = await applyMcp(refusing, geminiOnly(root), () => {});
+    expect(geminiServers(root)).toEqual(["memory", "gone"]);
+    expect(results.find(r => r.name === "memory")).toMatchObject({ outcome: "installed" });
+    expect(cmds.filter(c => c.includes("command -v"))).toHaveLength(0);
+  });
+
   it("a failed uv install is named on every server that needed it, and the definitions still land", async () => {
     const { root, machine } = guest(["npx"], { uv: { exitCode: 1, stdout: "", stderr: "curl: (6) Could not resolve host" } });
     seed(root);

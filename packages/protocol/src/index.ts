@@ -14,6 +14,10 @@ import { z } from "zod";
  * equal. */
 export const HTTP_URL_RE = /^https?:\/\/[^\s\x00-\x1f\x7f]+$/i;
 export const HTTP_URL_MAX = 8192;
+/** The most bytes one exec request body may carry, the backend's wrapper included: the provider answers 413 Payload
+ * Too Large above 16 KiB (a 17,176 byte launch body was refused on 2026-09-06). Anything larger goes to the guest in
+ * more than one exec or through an upload. */
+export const EXEC_BODY_MAX = 16 * 1024;
 export function isHttpUrl(url: unknown): url is string {
   if (typeof url !== "string" || url.length > HTTP_URL_MAX || !HTTP_URL_RE.test(url)) return false;
   try {

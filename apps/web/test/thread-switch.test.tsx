@@ -3,13 +3,13 @@
 // same workspace: the click selects the thread, the center shows that thread,
 // the running turn keeps its row and its progress, and switching back shows
 // what streamed meanwhile.
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { EventUnion, GoldenManifest, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
 import { Shell } from "../src/App.js";
 import type { Api, ProtocolEvent, StartSessionOptions } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
-import { composerEditor, press, typeInto } from "./composer-harness.js";
+import { press, typeInto } from "./composer-harness.js";
 import { installFakeLayout } from "./fake-layout.js";
 
 const WS = "ws_switch";
@@ -67,6 +67,8 @@ function fixtureApi(transcript: SessionEvent[] = [...SETTLED_A, ...RUNNING_B], r
     getGolden: async () => manifest,
   };
   const emit = (e: SessionEvent) => {
+    // Once the next case has bound its own api, this case's events have no tree to land in.
+    if (useStore.getState().api !== api) return;
     history.push(e);
     act(() => { for (const fn of [...listeners]) fn(e as EventUnion); });
   };
@@ -82,16 +84,23 @@ beforeEach(() => {
 });
 afterEach(() => cleanup());
 
-const sidebar = () => within(document.querySelector<HTMLElement>("[data-app-sidebar]")!);
-const center = () => within(document.querySelector<HTMLElement>("[data-shell-center]")!);
-const threadRow = (title: string): HTMLElement => sidebar().getByText(title).closest<HTMLElement>("[data-sidebar-row]")!;
+/** Queries bound to one case's Shell: a case that outlives its budget keeps running, and must not reach the next case's tree. */
+function shellOf(container: HTMLElement) {
+  const shell = within(container);
+  const sidebar = () => within(container.querySelector<HTMLElement>("[data-app-sidebar]")!);
+  const center = () => within(container.querySelector<HTMLElement>("[data-shell-center]")!);
+  const threadRow = (title: string): HTMLElement => sidebar().getByText(title).closest<HTMLElement>("[data-sidebar-row]")!;
+  const editor = () => shell.getByTestId("composer-editor");
+  return { shell, sidebar, center, threadRow, editor };
+}
 
 async function mount(fixture = fixtureApi(), latest = "Checking the keychain.") {
   useStore.getState().bind(fixture.api);
-  render(<Shell />);
-  await center().findByText(latest);
-  await waitFor(() => expect(sidebar().getByText("make me a simple server")).toBeDefined());
-  return fixture;
+  const view = shellOf(render(<Shell />).container);
+  // The first paint is polled for: a stale case's open act scope can hold this render's work until it closes.
+  await waitFor(() => expect(view.center().getByText(latest)).toBeDefined());
+  await waitFor(() => expect(view.sidebar().getByText("make me a simple server")).toBeDefined());
+  return { ...fixture, ...view };
 }
 
 describe("switching between idle threads", () => {
@@ -102,7 +111,7 @@ describe("switching between idle threads", () => {
       { type: "session.end", ...B, at: T0 + 61_100, exitCode: 0, sawResult: true },
     ];
     const rows: SessionView[] = [ROWS[0]!, { ...ROWS[1]!, status: "completed", endedAt: T0 + 61_100 }];
-    await mount(fixtureApi([...SETTLED_A, ...DONE_B], rows));
+    const { center, threadRow } = await mount(fixtureApi([...SETTLED_A, ...DONE_B], rows));
     expect(center().queryByText("Added GET /health.")).toBeNull();
     fireEvent.click(threadRow("make me a simple server"));
     await center().findByText("Added GET /health.");
@@ -115,7 +124,7 @@ describe("switching between idle threads", () => {
 
 describe("switching threads while a turn runs", () => {
   it("clicking the idle thread's row selects it and the center shows its transcript and composer", async () => {
-    await mount();
+    const { center, threadRow } = await mount();
     expect(center().getByText(/Working for/)).toBeDefined();
     fireEvent.click(threadRow("make me a simple server"));
     expect(useStore.getState().selectedId).toBe(WS);
@@ -130,7 +139,7 @@ describe("switching threads while a turn runs", () => {
   });
 
   it("the running turn keeps its row in Working and its stream stays out of the shown thread", async () => {
-    const { emit } = await mount();
+    const { emit, center, threadRow } = await mount();
     fireEvent.click(threadRow("make me a simple server"));
     await center().findByText("Added GET /health.");
     emit({ type: "session.delta", ...B, at: T0 + 61_000, kind: "text", text: " Found it in the keychain." });
@@ -141,7 +150,7 @@ describe("switching threads while a turn runs", () => {
   });
 
   it("switching back shows the progress streamed meanwhile and keeps streaming", async () => {
-    const { emit } = await mount();
+    const { emit, center, threadRow } = await mount();
     fireEvent.click(threadRow("make me a simple server"));
     await center().findByText("Added GET /health.");
     emit({ type: "session.delta", ...B, at: T0 + 61_000, kind: "text", text: " Found it in the keychain." });
@@ -156,11 +165,11 @@ describe("switching threads while a turn runs", () => {
   });
 
   it("a send from an older thread's view resumes that thread's session, and from the latest view the latest one", async () => {
-    const { started } = await mount();
+    const { started, center, threadRow, editor } = await mount();
     fireEvent.click(threadRow("make me a simple server"));
     await center().findByText("Added GET /health.");
-    await typeInto(composerEditor(), "add a readiness route too");
-    await press(composerEditor(), "Enter");
+    await typeInto(editor(), "add a readiness route too");
+    await press(editor(), "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
     expect(started[0]).toMatchObject({ workspaceId: WS, prompt: "add a readiness route too", resume: "sess_a" });
     await center().findByText("add a readiness route too");
@@ -170,11 +179,11 @@ describe("switching threads while a turn runs", () => {
   });
 
   it("a send from an older thread makes it the latest; the latest view then keeps the still running thread's deltas out", async () => {
-    const { emit, started } = await mount();
+    const { emit, started, center, sidebar, threadRow, editor } = await mount();
     fireEvent.click(threadRow("make me a simple server"));
     await center().findByText("Added GET /health.");
-    await typeInto(composerEditor(), "add a readiness route too");
-    await press(composerEditor(), "Enter");
+    await typeInto(editor(), "add a readiness route too");
+    await press(editor(), "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
     const A2 = { ...A, turnId: "turn_a2" };
     emit({ type: "session.start", ...A2, at: T0 + 90_000, prompt: "add a readiness route too" });
@@ -199,7 +208,7 @@ describe("switching threads while a turn runs", () => {
       { type: "session.delta", ...A2, at: T0 + 90_300, kind: "text", text: "Adding GET /ready." },
     ];
     const rows: SessionView[] = [ROWS[0]!, ROWS[1]!, { id: "s_a2", workspaceId: WS, harness: "claude", status: "running", prompt: "add a readiness route too", startedAt: T0 + 90_000, threadId: "thr_a" }];
-    const { emit } = await mount(fixtureApi([...SETTLED_A, ...RUNNING_B, ...RUNNING_A2], rows), "Adding GET /ready.");
+    const { emit, center } = await mount(fixtureApi([...SETTLED_A, ...RUNNING_B, ...RUNNING_A2], rows), "Adding GET /ready.");
     expect(center().queryByText("Checking the keychain.")).toBeNull();
     emit({ type: "session.delta", ...B, at: T0 + 91_000, kind: "text", text: " Found it in the keychain." });
     expect(center().queryByText(/Found it in the keychain/)).toBeNull();
@@ -222,11 +231,11 @@ describe("switching threads while a turn runs", () => {
       { ...ROWS[1]!, status: "completed", endedAt: T0 + 91_100 },
       { id: "s_a2", workspaceId: WS, harness: "claude", status: "running", prompt: "add a readiness route too", startedAt: T0 + 90_000, threadId: "thr_a" },
     ];
-    const { emit, started } = await mount(fixtureApi(transcript, rows, { ...workspace, claudeSessionId: "sess_a" }));
+    const { emit, started, center, editor } = await mount(fixtureApi(transcript, rows, { ...workspace, claudeSessionId: "sess_a" }));
     expect(center().queryByText("Adding GET /ready.")).toBeNull();
     expect(center().getByTestId("settled-footer").textContent).toContain("completed");
-    await typeInto(composerEditor(), "check the login keychain too");
-    await press(composerEditor(), "Enter");
+    await typeInto(editor(), "check the login keychain too");
+    await press(editor(), "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
     expect(started[0]).toMatchObject({ prompt: "check the login keychain too", resume: "sess_b" });
     const B2 = { ...B, turnId: "turn_b2" };
@@ -248,8 +257,8 @@ describe("switching threads while a turn runs", () => {
       { type: "session.delta", ...A2, at: T0 + 90_300, kind: "text", text: "Adding GET /ready." },
     ];
     const rows: SessionView[] = [ROWS[0]!, ROWS[1]!, { id: "s_a2", workspaceId: WS, harness: "claude", status: "running", prompt: "add a readiness route too", startedAt: T0 + 90_000, threadId: "thr_a" }];
-    const { emit, started } = await mount(fixtureApi([...SETTLED_A, ...RUNNING_B, ...RUNNING_A2], rows), "Adding GET /ready.");
-    fireEvent.click(screen.getByRole("button", { name: "New thread" }));
+    const { emit, started, center, editor, shell } = await mount(fixtureApi([...SETTLED_A, ...RUNNING_B, ...RUNNING_A2], rows), "Adding GET /ready.");
+    fireEvent.click(shell.getByRole("button", { name: "New thread" }));
     await waitFor(() => expect(center().getByRole("heading", { level: 1 }).textContent).toBe("What should we build in api?"));
     emit({ type: "session.delta", ...B, at: T0 + 91_000, kind: "text", text: " Found it in the keychain." });
     expect(center().queryByText(/Found it in the keychain/)).toBeNull();
@@ -259,8 +268,8 @@ describe("switching threads while a turn runs", () => {
     // The composer opens once the left turn ends; the start that follows the send is the person's own by the prompt it carries.
     emit({ type: "session.done", ...A2, at: T0 + 100_000, result: { status: "completed", durationMs: 10_000, costUsd: 0.002 } });
     emit({ type: "session.end", ...A2, at: T0 + 100_100, exitCode: 0, sawResult: true });
-    await typeInto(composerEditor(), "third thread");
-    await press(composerEditor(), "Enter");
+    await typeInto(editor(), "third thread");
+    await press(editor(), "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
     expect(started[0]).toMatchObject({ workspaceId: WS, prompt: "third thread" });
     expect(started[0]).not.toHaveProperty("resume");
@@ -275,17 +284,17 @@ describe("switching threads while a turn runs", () => {
   });
 
   it("a new thread asked for from an older thread's view unpins it and opens as the workspace's latest", async () => {
-    const { emit, started } = await mount();
+    const { emit, started, center, threadRow, editor, shell } = await mount();
     fireEvent.click(threadRow("make me a simple server"));
     await center().findByText("Added GET /health.");
-    fireEvent.click(screen.getByRole("button", { name: "New thread" }));
+    fireEvent.click(shell.getByRole("button", { name: "New thread" }));
     expect(useStore.getState()).toMatchObject({ selectedId: WS, selectedThreadId: null });
     await waitFor(() => expect(center().getByRole("heading", { level: 1 }).textContent).toBe("What should we build in api?"));
     expect(threadRow("make me a simple server").getAttribute("data-active")).toBe("false");
     emit({ type: "session.done", ...B, at: T0 + 100_000, result: { status: "completed", durationMs: 40_000, costUsd: 0.002 } });
     emit({ type: "session.end", ...B, at: T0 + 100_100, exitCode: 0, sawResult: true });
-    await typeInto(composerEditor(), "third thread");
-    await press(composerEditor(), "Enter");
+    await typeInto(editor(), "third thread");
+    await press(editor(), "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
     const C = { workspaceId: WS, sessionId: "sess_c", turnId: "turn_c", threadId: "thr_c" };
     emit({ type: "session.start", ...C, at: T0 + 120_000, prompt: "third thread" });

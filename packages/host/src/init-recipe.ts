@@ -273,6 +273,24 @@ export function recipeWithAnswers(recipe: Recipe, choices: ReadonlyMap<string, s
   };
 }
 
+/** This computer's recipe with a saved one's ticks and answers written on, by id: a row the saved one lacks is off
+ * and unanswered, and a saved row this computer's recipe does not carry follows them as it was saved. */
+export function withTicksOf(here: Recipe, saved: Recipe): Recipe {
+  const rows = new Map(saved.rows.map(r => [r.id, r]));
+  const ids = new Set(here.rows.map(r => r.id));
+  return {
+    ...here,
+    rows: [
+      ...here.rows.map(r => {
+        const { signIn: _signIn, ...rest } = r;
+        const s = rows.get(r.id);
+        return { ...rest, on: s?.on === true, ...(s?.signIn === undefined ? {} : { signIn: s.signIn }) };
+      }),
+      ...saved.rows.filter(r => !ids.has(r.id)),
+    ],
+  };
+}
+
 export function saveSmallRecipe(path: string, recipe: Recipe): void {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(recipe, null, 2)}\n`);

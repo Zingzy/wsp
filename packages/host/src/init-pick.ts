@@ -2,16 +2,18 @@
 // The screens of wsp init on the catalog: the agents (the six, the ones on
 // this Mac ticked), what they need (one line of counts and the disk line, the
 // row list behind one key), and the sign-ins and keys (logins that sign in on
-// the machine after the build listed, keys ticked to copy). The recipe is the
-// state: catalog ids with a tick each; the collector's rows follow it.
+// the machine after the build listed, keys ticked to copy, and the wsp tools
+// offered to each agent here whose config the catalog knows). The recipe is
+// the state: catalog ids with a tick each; the collector's rows follow it.
 import type { Readable, Writable } from "node:stream";
 import { styleText } from "node:util";
 import { Prompt, isCancel } from "@clack/core";
 import { S_BAR, S_STEP_ACTIVE, S_STEP_CANCEL, S_STEP_SUBMIT } from "@clack/prompts";
-import { CATALOG_AGENTS, CATALOG_TOOLS, type CatalogEntry, type ToolEntry, agentName as catalogName } from "@wsp/catalog";
+import { CATALOG_AGENTS, CATALOG_TOOLS, MCP_AGENTS, type CatalogEntry, type ToolEntry, agentName as catalogName } from "@wsp/catalog";
 import type { LoginChoice, Manifest, ManifestEntry } from "@wsp/collect";
 import { MEASURED_ON, estimateDisk, isMcpRow, parseMcpId, type BrewTable, type DiskEstimate } from "@wsp/engine";
 import { fmtBytes, type Recipe, type RecipeRow } from "@wsp/protocol";
+import { mcpConfigFile } from "./mcp-install.js";
 import { GUTTER, S_BAR_FOCUS, S_BAR_FOCUS_END, colourDepth, helpLine, isTTY, widthOf, wrap, type HelpKey } from "./init-layout.js";
 import { agentName, applyRecipe, comingRows, defaultAnswers, initialChoice, isTickable, loginShown, loginTool, rowsHere } from "./init-recipe.js";
 import { rungSelect, type FooterLine, type SelectItem } from "./init-select.js";
@@ -25,11 +27,15 @@ export const SIGN_INS_TITLE = "Sign-ins and keys";
 export const BASE_WORD = "in the base";
 /** The word over the logins that run on the machine after the build; nothing here changes them. */
 export const MACHINE_WORD = "sign in on the machine after the build";
+/** The group over the rows that write on this Mac, under the keys that travel to the machine. */
+export const ON_THIS_MAC = "On this Mac";
 
 const dim = (s: string): string => styleText("dim", s);
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 const rowOf = (recipe: Recipe, id: string): RecipeRow | undefined => recipe.rows.find(r => r.id === id);
+/** Whether the recipe found the entry on this Mac. */
+const onThisMac = (recipe: Recipe, id: string): boolean => rowOf(recipe, id)?.source.kind === "installed";
 
 /** Where a tool's tick comes from, in the words the screen uses: the base for a floor row, else its recipe source. */
 export type SourceWord = typeof BASE_WORD | "installed here" | "used by your agents" | "popular in the catalog";
@@ -112,7 +118,7 @@ export function agentItems(recipe: Recipe, manifest: Manifest): SelectItem[] {
     const r = rowOf(recipe, a.id);
     const own = manifest.entries.find(e => e.rung === "agents" && agentName(e) === a.id);
     const config = own !== undefined && own.bytes > 0 ? `; its config (${fmtBytes(own.bytes)}) comes along` : "";
-    const here = r?.source.kind === "installed" ? `on this Mac${config}` : "not on this Mac; try it on the machine, nothing here changes";
+    const here = onThisMac(recipe, a.id) ? `on this Mac${config}` : "not on this Mac; try it on the machine, nothing here changes";
     return {
       id: a.id,
       label: a.name,
@@ -254,6 +260,24 @@ export function signInItems(manifest: Manifest): SignInScreen {
   };
 }
 
+const WSP_TOOLS = "wsp-tools/";
+/** The agent a wsp tools row is for; nothing for any other row on the screen. */
+const wspToolsAgent = (id: string): string | undefined => (id.startsWith(WSP_TOOLS) ? id.slice(WSP_TOOLS.length) : undefined);
+
+/** One row per agent on this Mac whose config the catalog can place the wsp MCP server in, whatever its tick for
+ * the machine: the file the install writes under `home` as the hint, unticked and out of the all row's reach, so
+ * nothing here is written unasked; the detail says what the tick does. */
+export function wspToolsItems(recipe: Recipe, home: string): SelectItem[] {
+  return MCP_AGENTS.filter(a => onThisMac(recipe, a.id)).map(a => ({
+    id: `${WSP_TOOLS}${a.id}`,
+    label: `wsp tools for ${a.name}`,
+    hint: mcpConfigFile(a, home).tilde,
+    group: ON_THIS_MAC,
+    detail: ["wsp joins its MCP servers, so it can drive workspaces, threads and commands", "ticked, it is written when the screens end; unticked, nothing here changes"],
+    apart: true,
+  }));
+}
+
 // --- the summary screen ------------------------------------------------------
 
 type NeedAnswer = "next" | "adjust" | "back";
@@ -320,6 +344,8 @@ export interface PickOptions {
   brew: BrewTable;
   /** The first screen: the agents, or the sign-ins alone when a recipe file already decided the rest. */
   from: "agents" | "logins";
+  /** The person's home, where an agent's config is read for the wsp tools rows. */
+  home: string;
   input: Readable;
   output: Writable;
 }
@@ -328,6 +354,8 @@ export interface Picked {
   recipe: Recipe;
   /** Every shown login row's answer. */
   logins: Map<string, LoginChoice>;
+  /** The agents on this Mac whose config gets the wsp MCP server, by catalog id. */
+  wspTools: Set<string>;
 }
 
 type Screen = "agents" | "need" | "logins";
@@ -337,6 +365,7 @@ export async function pickScreens(o: PickOptions): Promise<Picked | "cancel"> {
   const screens: readonly Screen[] = o.from === "agents" ? ["agents", "need", "logins"] : ["logins"];
   let recipe = o.recipe;
   let logins = new Map<string, LoginChoice>();
+  let wspTools = new Set<string>();
   const streams = { input: o.input, output: o.output };
   let i = 0;
   while (i < screens.length) {
@@ -376,9 +405,10 @@ export async function pickScreens(o: PickOptions): Promise<Picked | "cancel"> {
       }
       case "logins": {
         const s = signInItems(applyRecipe(o.manifest, recipe));
-        const r = await rungSelect({ title: SIGN_INS_TITLE, counter, items: s.items, initial: s.initial, detailLines: 3, lockedWord: MACHINE_WORD, ...streams });
+        const r = await rungSelect({ title: SIGN_INS_TITLE, counter, items: [...s.items, ...wspToolsItems(recipe, o.home)], initial: s.initial, detailLines: 3, lockedWord: MACHINE_WORD, ...streams });
         if (r.kind === "cancel") return "cancel";
         logins = s.answers(r.ticks);
+        wspTools = new Set([...r.ticks].flatMap(id => wspToolsAgent(id) ?? []));
         if (r.kind === "back") {
           i = Math.max(0, i - 1);
           break;
@@ -392,5 +422,5 @@ export async function pickScreens(o: PickOptions): Promise<Picked | "cancel"> {
       }
     }
   }
-  return { recipe, logins };
+  return { recipe, logins, wspTools };
 }

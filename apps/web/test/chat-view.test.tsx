@@ -13,9 +13,15 @@ import { ChatView } from "../src/components/chat/ChatView.js";
 import type { ChatThreadHandle } from "../src/components/chat/useChatThread.js";
 import { CHAT_STREAM, CHAT_T0, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
 import { requestNewThread } from "../src/shell/shellRequests.js";
+import { getSyntaxHighlighterPromise } from "../src/lib/syntaxHighlighting.js";
 
 let restoreLayout: () => void = () => {};
-beforeAll(() => { restoreLayout = installFakeLayout(); });
+// The fenced block's highlighter loads its wasm engine and grammar once per worker; cold, that load plus React's
+// suspense reveal is 300 ms idle and outgrows the 1 s query wait under load, so it is paid here, not in a case.
+beforeAll(async () => {
+  restoreLayout = installFakeLayout();
+  await getSyntaxHighlighterPromise("ts");
+});
 afterAll(() => restoreLayout());
 
 const WS = CHAT_WS;
