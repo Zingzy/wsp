@@ -63,6 +63,7 @@ import type {
   RecipeDigest,
   PortProbeView,
   PortReachView,
+  ProjectAgentOutcome,
   ProjectAgentResult,
   ProjectImportResult,
   ProjectImportStage,
@@ -355,6 +356,14 @@ export interface WakeOptions {
 const WAKE_PING_TIMEOUT_MS = 30_000;
 /** The probe's fetch bound; the frame keeps loading meanwhile, so silence costs nothing but the sentence. */
 const PORT_PROBE_TIMEOUT_MS = 10_000;
+/** How the import's done line reads each agent's outcome, after the agent's name. */
+const OUTCOME_WORDS: Record<Exclude<ProjectAgentOutcome, "failed">, string> = {
+  moved: "moved",
+  "transcript-only": "transcripts landed but not yet in its session list",
+  carried: "carried unchanged since it is not on the machine",
+  nothing: "had nothing to carry",
+};
+
 /** Vite's and Next's refusals fit in a few hundred bytes; a page that loaded fine is not carried back whole. */
 export const PORT_PROBE_BODY_CAP = 2048;
 const VAULT_CAP_BYTES = 200 * 1024 * 1024;
@@ -2444,15 +2453,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           cut.length === 0 ? "nothing cut" : `cut ${cut.join(", ")}`,
         ].join("; ");
         const named = new Set(o.agents ?? []);
-        const travelling = plan.agents.filter(a => named.has(a.agent));
-        const staying = plan.agents.filter(a => !named.has(a.agent));
+        const readable = plan.agents.filter(a => a.error === undefined);
+        const unreadable = plan.agents.filter(a => a.error !== undefined);
+        const travelling = readable.filter(a => named.has(a.agent));
+        const staying = readable.filter(a => !named.has(a.agent));
         const withCount = (a: ProjectPlan["agents"][number]): string => `${a.name} (${plural(a.sessions, "session")})`;
-        const agentsLine =
-          plan.agents.length === 0
-            ? ""
-            : travelling.length === 0
-              ? " No agent sessions travel."
-              : ` Sessions travel for ${travelling.map(withCount).join(", ")}${staying.length > 0 ? `; ${staying.map(a => a.name).join(", ")} ${staying.length === 1 ? "stays" : "stay"}` : ""}.`;
+        const notes = [
+          ...(plan.agents.length === 0 ? [] : travelling.length === 0 ? ["No agent sessions travel"] : [`Sessions travel for ${travelling.map(withCount).join(", ")}`]),
+          ...(travelling.length > 0 && staying.length > 0 ? [`${staying.map(a => a.name).join(", ")} ${staying.length === 1 ? "stays" : "stay"}`] : []),
+          ...unreadable.map(a => `${a.name} could not be read (${a.error})`),
+        ];
+        const agentsLine = notes.length === 0 ? "" : ` ${notes.join("; ")}.`;
         report("consented", `${plan.secrets.length === 0 ? "No secret-shaped files." : `${clauses.charAt(0).toUpperCase()}${clauses.slice(1)}.`}${agentsLine}`);
         report("packing", `Packing ${plural(plan.files - cut.length, "file")}.`);
         const packed = await o.bundler.pack(carry, rewrite);
@@ -2477,7 +2488,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           onLanding: () => report("landing", `Landing at ${o.dest}.`),
         });
         const nameOf = (id: string): string => plan.agents.find(a => a.agent === id)?.name ?? id;
-        const outcomes = (state?.agents ?? []).map(a => `${nameOf(a.agent)} ${a.outcome === "failed" ? `failed: ${a.error ?? "no reason given"}` : a.outcome}`);
+        const outcomes = (state?.agents ?? []).map(a => `${nameOf(a.agent)} ${a.outcome === "failed" ? `failed: ${a.error ?? "no reason given"}` : OUTCOME_WORDS[a.outcome]}`);
         if (state !== undefined && state.agents.some(a => a.files > 0)) {
           const files = state.agents.reduce((n, a) => n + a.files, 0);
           report("uploading", `Uploading ${plural(files, "session file")}, ${fmtBytes(state.tar.length)}.`, { bytes: 0, total: state.tar.length });

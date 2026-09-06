@@ -6,8 +6,11 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { INSTALL_NAMES, OUTPUT_NAMES } from "@wsp/collect";
+import { agentHomes } from "@wsp/engine";
 import { afterEach, describe, expect, it } from "vitest";
 import { isCacheName, packProject, planProject, projectBundler } from "../src/project-bundle.js";
+
+const { DatabaseSync } = process.getBuiltinModule("node:sqlite") as typeof import("node:sqlite");
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -81,7 +84,7 @@ const listed = (tgz: Buffer): string[] => execFileSync("tar", ["-tzf", "-"], { i
 describe("planProject", () => {
   it("carries the tracked tree, the untracked and ignored state and the repository, and leaves every cache shape behind", async () => {
     const root = fixture();
-    const { plan, files } = await planProject(root);
+    const { plan, files } = await planProject(root, {});
     const rels = files.map(f => f.rel);
     expect(plan.repo).toBe(true);
     expect(plan.source).toBe(realpathSync(root));
@@ -106,7 +109,7 @@ describe("planProject", () => {
 
   it("names the secret-shaped files by the collector's rules and nothing else", async () => {
     const root = fixture();
-    const { plan } = await planProject(root);
+    const { plan } = await planProject(root, {});
     expect(plan.secrets).toEqual([
       { path: ".env", bytes: Buffer.byteLength("API_TOKEN=sk-ant-x\n"), signals: ["name", "keys"] },
       { path: "config/secrets.json", bytes: Buffer.byteLength(JSON.stringify({ token: "sk-ant-x" })), signals: ["name", "keys"] },
@@ -117,7 +120,7 @@ describe("planProject", () => {
   it("a token in a remote URL in .git/config is named by the url rule, with the bare URL offered as the rewrite", async () => {
     const root = fixture();
     git(root, "remote", "add", "origin", TOKEN_URL);
-    const { plan } = await planProject(root);
+    const { plan } = await planProject(root, {});
     expect(plan.secrets.map(s => s.path)).toEqual([".env", ".git/config", "config/secrets.json", "keys/id_ed25519"]);
     expect(plan.secrets[1]).toEqual({ path: ".git/config", bytes: statSync(join(root, ".git/config")).size, signals: ["url"], rewrite: REWRITE });
     expect(JSON.stringify(plan)).not.toContain(FAKE_TOKEN);
@@ -127,10 +130,10 @@ describe("planProject", () => {
     const root = fixture();
     git(root, "remote", "add", "origin", USERNAME_TOKEN_URL);
     git(root, "remote", "add", "up", "https://dev@example.com/team/proj.git");
-    const { plan } = await planProject(root);
+    const { plan } = await planProject(root, {});
     expect(plan.secrets[1]).toEqual({ path: ".git/config", bytes: statSync(join(root, ".git/config")).size, signals: ["url"], rewrite: { urls: [BARE_URL, "https://example.com/team/proj.git"], drop: [] } });
     expect(JSON.stringify(plan)).not.toContain(FAKE_TOKEN);
-    const packed = packProject(await planProject(root), new Set(), new Set([".git/config"]));
+    const packed = packProject(await planProject(root, {}), new Set(), new Set([".git/config"]));
     expect(gunzipSync(packed.tar).includes(FAKE_TOKEN)).toBe(false);
     const out = extract(packed.tar);
     expect(git(out, "remote", "get-url", "origin").trim()).toBe(BARE_URL);
@@ -141,17 +144,17 @@ describe("planProject", () => {
     const root = fixture();
     git(root, "config", "http.extraheader", AUTH_HEADER);
     git(root, "config", "http.https://dev.azure.com/.extraheader", AUTH_HEADER);
-    const { plan } = await planProject(root);
+    const { plan } = await planProject(root, {});
     expect(plan.secrets[1]).toEqual({ path: ".git/config", bytes: statSync(join(root, ".git/config")).size, signals: ["keys"], rewrite: { urls: [], drop: ["http.extraheader", "http.https://dev.azure.com/.extraheader"] } });
     expect(JSON.stringify(plan)).not.toContain("ZmFrZ");
-    const packed = packProject(await planProject(root), new Set(), new Set([".git/config"]));
+    const packed = packProject(await planProject(root, {}), new Set(), new Set([".git/config"]));
     expect(packed.rewritten).toEqual([".git/config"]);
     expect(gunzipSync(packed.tar).includes("AUTHORIZATION")).toBe(false);
     const out = extract(packed.tar);
     expect(git(out, "config", "--list")).not.toMatch(/extraheader|AUTHORIZATION/i);
     expect(readFileSync(join(root, ".git/config"), "utf8")).toContain(AUTH_HEADER);
     git(root, "remote", "add", "origin", TOKEN_URL);
-    const both = (await planProject(root)).plan.secrets[1];
+    const both = (await planProject(root, {})).plan.secrets[1];
     expect(both).toMatchObject({ signals: ["keys", "url"], rewrite: { urls: [BARE_URL], drop: ["http.extraheader", "http.https://dev.azure.com/.extraheader"] } });
   });
 
@@ -161,12 +164,12 @@ describe("planProject", () => {
     mkdirSync(join(root, "vendor/tool"), { recursive: true });
     git(join(root, "vendor/tool"), "init", "-q");
     git(join(root, "vendor/tool"), "remote", "add", "origin", USERNAME_TOKEN_URL);
-    const { plan } = await planProject(root);
+    const { plan } = await planProject(root, {});
     expect(plan.secrets.map(s => s.path)).toEqual([".env", ".git/modules/lib/config", "config/secrets.json", "keys/id_ed25519", "vendor/tool/.git/config"]);
     expect(plan.secrets[1]).toMatchObject({ signals: ["url"], rewrite: REWRITE });
     expect(plan.secrets[4]).toMatchObject({ signals: ["url"], rewrite: REWRITE });
     expect(JSON.stringify(plan)).not.toContain(FAKE_TOKEN);
-    const packed = packProject(await planProject(root), new Set(), new Set([".git/modules/lib/config", "vendor/tool/.git/config"]));
+    const packed = packProject(await planProject(root, {}), new Set(), new Set([".git/modules/lib/config", "vendor/tool/.git/config"]));
     expect(packed.rewritten).toEqual([".git/modules/lib/config", "vendor/tool/.git/config"]);
     expect(gunzipSync(packed.tar).includes(FAKE_TOKEN)).toBe(false);
     const out = extract(packed.tar);
@@ -178,12 +181,12 @@ describe("planProject", () => {
     const root = fixture();
     git(root, "config", "credential.helper", "!f() { echo password=fakepw; }; f");
     put(root, ".git/info/secrets.json", JSON.stringify({ token: "sk-ant-x" }));
-    const { plan } = await planProject(root);
+    const { plan } = await planProject(root, {});
     expect(plan.secrets.map(s => s.path)).toEqual([".env", ".git/config", "config/secrets.json", "keys/id_ed25519"]);
     expect(plan.secrets[1]).toEqual({ path: ".git/config", bytes: statSync(join(root, ".git/config")).size, signals: ["keys"] });
     git(root, "config", "credential.helper", `!/usr/local/bin/helper --token=${FAKE_TOKEN}`);
     git(root, "remote", "add", "origin", TOKEN_URL);
-    const flagged = (await planProject(root)).plan.secrets[1];
+    const flagged = (await planProject(root, {})).plan.secrets[1];
     expect(flagged).toEqual({ path: ".git/config", bytes: statSync(join(root, ".git/config")).size, signals: ["keys", "url"] });
   });
 
@@ -192,7 +195,7 @@ describe("planProject", () => {
     git(root, "remote", "add", "origin", BARE_URL);
     git(root, "remote", "add", "fork", "git@github.com:example/fork.git");
     git(root, "config", "credential.helper", "osxkeychain");
-    const { plan } = await planProject(root);
+    const { plan } = await planProject(root, {});
     expect(plan.secrets.map(s => s.path)).toEqual([".env", "config/secrets.json", "keys/id_ed25519"]);
   });
 
@@ -202,7 +205,7 @@ describe("planProject", () => {
     put(root, "a.txt", "a\n");
     put(root, "dist/b.js", "b\n");
     put(root, "node_modules/c/index.js", "c\n");
-    const { plan, files } = await planProject(root);
+    const { plan, files } = await planProject(root, {});
     expect(plan.repo).toBe(false);
     expect(files.map(f => f.rel)).toEqual(["a.txt"]);
     expect(plan.excluded).toEqual(["dist", "node_modules"]);
@@ -214,7 +217,7 @@ describe("planProject", () => {
     dirs.push(tree);
     rmSync(tree, { recursive: true });
     git(root, "worktree", "add", "-q", tree, "-b", "side");
-    const { plan, files } = await planProject(tree);
+    const { plan, files } = await planProject(tree, {});
     expect(plan.repo).toBe(true);
     expect(files.map(f => f.rel)).not.toContain(".git");
     expect(plan.skipped).toEqual([{ path: ".git", note: expect.stringMatching(/^a worktree or submodule checkout: its repository is at .*worktrees\/.* and does not travel$/) }]);
@@ -238,11 +241,19 @@ describe("planProject", () => {
     expect((await planProject(root, {})).plan.agents).toEqual([]);
   });
 
+  it("the catalog homes under a home directory with nothing in it give no row, so a plan never needs the homes on this computer", async () => {
+    const home = mkdtempSync(join(tmpdir(), "wsp-home-"));
+    dirs.push(home);
+    const { plan } = await planProject(fixture(), agentHomes(home));
+    expect(plan.agents).toEqual([]);
+    expect(readdirSync(home)).toEqual([]);
+  });
+
   it("refuses a relative path and a path that is not a folder", async () => {
-    await expect(planProject("relative/dir")).rejects.toThrow(/absolute path/);
+    await expect(planProject("relative/dir", {})).rejects.toThrow(/absolute path/);
     const root = fixture();
-    await expect(planProject(join(root, "notes.txt"))).rejects.toThrow(/not a folder/);
-    await expect(planProject(join(root, "missing"))).rejects.toThrow(/not a folder/);
+    await expect(planProject(join(root, "notes.txt"), {})).rejects.toThrow(/not a folder/);
+    await expect(planProject(join(root, "missing"), {})).rejects.toThrow(/not a folder/);
   });
 
   it("the cache rule is the collector's name sets, the word and the Finder file", () => {
@@ -258,7 +269,7 @@ describe("planProject", () => {
     put(root, "src/.DS_Store", "finder\n");
     put(root, "src/a.ts", "a\n");
     put(root, "data.sqlite-wal", "journal\n");
-    const { plan, files } = await planProject(root);
+    const { plan, files } = await planProject(root, {});
     expect(files.map(f => f.rel)).toEqual(["data.sqlite-wal", "src", "src/a.ts"]);
     expect(plan.excluded).toEqual([".DS_Store", "src/.DS_Store"]);
   });
@@ -271,7 +282,7 @@ describe("planProject", () => {
     put(root, "z.txt", "z\n");
     chmodSync(join(root, "locked"), 0o000);
     try {
-      const { plan, files } = await planProject(root);
+      const { plan, files } = await planProject(root, {});
       expect(files.map(f => f.rel)).toEqual(["a.txt", "locked", "z.txt"]);
       expect(plan.skipped).toEqual([{ path: "locked", note: "cannot be read (EACCES); what it holds does not travel" }]);
       expect(plan.files).toBe(2);
@@ -284,7 +295,7 @@ describe("planProject", () => {
 describe("packProject", () => {
   it("round-trips every byte, the exec bit, the empty directory and the link; secret-shaped files travel only when named", async () => {
     const root = fixture();
-    const listing = await planProject(root);
+    const listing = await planProject(root, {});
     const packed = packProject(listing, new Set([".env"]), new Set());
     expect(packed.cut).toEqual(["config/secrets.json", "keys/id_ed25519"]);
     expect(packed.rewritten).toEqual([]);
@@ -309,7 +320,7 @@ describe("packProject", () => {
   });
 
   it("with nothing named every secret-shaped file is cut", async () => {
-    const listing = await planProject(fixture());
+    const listing = await planProject(fixture(), {});
     const packed = packProject(listing, new Set(), new Set());
     expect(packed.cut).toEqual([".env", "config/secrets.json", "keys/id_ed25519"]);
     expect(listed(packed.tar)).not.toContain(".env");
@@ -318,7 +329,7 @@ describe("packProject", () => {
   it("an accepted rewrite lands .git/config with the bare URL and the token nowhere in the archive; the file on this computer is untouched", async () => {
     const root = fixture();
     git(root, "remote", "add", "origin", TOKEN_URL);
-    const listing = await planProject(root);
+    const listing = await planProject(root, {});
     const rewritten = packProject(listing, new Set(), new Set([".git/config"]));
     expect(rewritten.rewritten).toEqual([".git/config"]);
     expect(rewritten.cut).toEqual([".env", "config/secrets.json", "keys/id_ed25519"]);
@@ -344,7 +355,7 @@ describe("packProject", () => {
 describe("projectBundler", () => {
   it("plans once and packs from that plan with the consent given", async () => {
     const root = fixture();
-    const b = projectBundler(root);
+    const b = projectBundler(root, {});
     const plan = await b.plan();
     expect(plan.secrets.map(s => s.path)).toEqual([".env", "config/secrets.json", "keys/id_ed25519"]);
     expect(await b.plan()).toBe(plan);
@@ -426,12 +437,36 @@ describe("packState", () => {
     });
     expect(packed.agents).toEqual([
       { agent: "claude", files: 0, bytes: 0, outcome: "failed", error: expect.stringMatching(/already exists$/) },
-      { agent: "hermes", files: 0, bytes: 0, outcome: "moved" },
+      { agent: "hermes", files: 0, bytes: 0, outcome: "nothing" },
       { agent: "pi", files: 1, bytes: Buffer.byteLength(piSession(`${real}/inner`)), outcome: "moved" },
     ]);
     const key = `${h.piKey.slice(0, -2)}-inner--`;
     expect(listed(packed.tar)).toEqual([`root/.pi/agent/sessions/${key}/2026-09-05T21-56-00-000Z_s1.jsonl`]);
     expect(readFileSync(join(extract(packed.tar), `root/.pi/agent/sessions/${key}/2026-09-05T21-56-00-000Z_s1.jsonl`), "utf8")).toBe(piSession(`${real}/inner`));
     expect(existsSync(join(h.claude, "projects", h.key, "S1.jsonl"))).toBe(true);
+  });
+
+  it("an agent whose rows stay behind lands its transcripts as they were and says transcript-only even when it is on the machine; an absent agent with no file for the folder says nothing", async () => {
+    const root = fixture();
+    const real = realpathSync(root);
+    const h = homes(real);
+    const codex = join(h.dir, "codex");
+    const rollout = join(codex, "sessions", "2026", "09", "05", "rollout-2026-09-05T21-58-00-t1.jsonl");
+    const meta = `{"timestamp":"2026-09-05T21:58:00.000Z","type":"session_meta","payload":{"id":"t1","cwd":"${real}","originator":"codex_exec"}}\n`;
+    put(codex, relative(codex, rollout), meta);
+    const db = new DatabaseSync(join(codex, "state_5.sqlite"));
+    db.exec("create table threads (id text primary key, rollout_path text not null, cwd text not null, archived integer not null default 0, updated_at integer not null default 0)");
+    db.prepare("insert into threads values (?, ?, ?, 0, 1)").run("t1", rollout, real);
+    db.close();
+    const gemini = join(h.dir, "gemini");
+    mkdirSync(gemini);
+    const b = projectBundler(root, { codex, gemini });
+    const packed = await b.packState({ dest: "/root/work/proj", agents: [{ agent: "codex", home: "/root/.codex", present: true }, { agent: "gemini", home: "/root/.gemini", present: false }] });
+    expect(packed.agents).toEqual([
+      { agent: "codex", files: 1, bytes: Buffer.byteLength(meta), outcome: "transcript-only" },
+      { agent: "gemini", files: 0, bytes: 0, outcome: "nothing" },
+    ]);
+    expect(listed(packed.tar)).toEqual(["root/.codex/sessions/2026/09/05/rollout-2026-09-05T21-58-00-t1.jsonl"]);
+    expect(readFileSync(join(extract(packed.tar), "root/.codex/sessions/2026/09/05/rollout-2026-09-05T21-58-00-t1.jsonl"), "utf8")).toBe(meta);
   });
 });

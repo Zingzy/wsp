@@ -84,22 +84,22 @@ function cwdOf(line: string): string | undefined {
 }
 
 /**
- * Every directory under parent keyed to the project or a folder inside it, with the tail of its recorded cwd past the
- * project root: the key is lossy (a slash and a dash key alike), so the transcript's recorded cwd decides, and a
- * directory with no transcript belongs only when it is the project's own key. A directory two projects share through
- * the key belongs, or not, on its first transcript.
+ * Every directory under parent keyed to the project or a folder inside it, with the cwd it is keyed to: the key is
+ * lossy (a slash and a dash key alike), so the transcript's recorded cwd decides, and a directory with no transcript
+ * belongs only when it is the project's own key. A directory two projects share through the key belongs, or not, on
+ * its first transcript.
  */
-export async function keyedDirectories(parent: string, keyOf: (path: string) => string, from: string): Promise<{ dir: string; tail: string }[]> {
+export async function keyedDirectories(parent: string, keyOf: (path: string) => string, from: string): Promise<{ dir: string; cwd: string }[]> {
   if (!existsSync(parent)) return [];
   const own = keyOf(from);
   const stem = commonPrefix(own, keyOf(`${from}/x`));
-  const out: { dir: string; tail: string }[] = [];
+  const out: { dir: string; cwd: string }[] = [];
   for (const name of readdirSync(parent).filter(n => n.startsWith(stem)).sort()) {
     const dir = join(parent, name);
     if (!statSync(dir).isDirectory()) continue;
     const cwd = (await recordedCwd(dir)) ?? (name === own ? from : undefined);
     if (cwd === undefined || !underProject(cwd, from)) continue;
-    out.push({ dir, tail: cwd.slice(from.length) });
+    out.push({ dir, cwd });
   }
   return out;
 }
@@ -109,8 +109,10 @@ export async function keyedDirectories(parent: string, keyOf: (path: string) => 
 export async function moveKeyedDirectories(parent: string, keyOf: (path: string) => string, from: string, to: string): Promise<{ files: string[]; changed: number }> {
   const files: string[] = [];
   let changed = 0;
-  for (const { dir, tail } of await keyedDirectories(parent, keyOf, from)) {
-    const moved = join(parent, keyOf(to + tail));
+  for (const { dir, cwd } of await keyedDirectories(parent, keyOf, from)) {
+    const target = movedPath(cwd, from, to);
+    if (target === undefined) continue;
+    const moved = join(parent, keyOf(target));
     if (existsSync(moved)) throw new Error(`${moved} already exists`);
     renameSync(dir, moved);
     files.push(moved);

@@ -453,8 +453,9 @@ export type ProjectSecret = z.infer<typeof ProjectSecret>;
 export const ProjectCarry = z.enum(["moves", "transcript-only"]);
 export type ProjectCarry = z.infer<typeof ProjectCarry>;
 /** One agent whose home on this computer holds sessions for the folder, by catalog id: the count, the bytes of the
- * state files that would travel and the carry answer. */
-export const ProjectAgent = z.object({ agent: z.string(), name: z.string(), sessions: z.number(), bytes: z.number(), carry: ProjectCarry });
+ * state files that would travel and the carry answer. An agent whose store could not be read keeps its row with
+ * `error` saying why and zero sessions; it never travels. */
+export const ProjectAgent = z.object({ agent: z.string(), name: z.string(), sessions: z.number(), bytes: z.number(), carry: ProjectCarry, error: z.string().optional() });
 export type ProjectAgent = z.infer<typeof ProjectAgent>;
 /** What a project import would carry, for the person to read before anything is packed: the files and their bytes,
  * the secret-shaped ones, the caches left behind (relative paths), the paths named but not carried, with why, and the
@@ -490,10 +491,11 @@ export const ProjectImportEvent = z.object({
   total: z.number().optional(),
 });
 export type ProjectImportEvent = z.infer<typeof ProjectImportEvent>;
-/** What became of one agent the import named: `moved` when the agent is on the machine and its state landed keyed to
- * dest, `carried` when it is not there so the state landed as it was, `failed` when the move raised and nothing of
- * that agent landed; files and bytes are what landed. */
-export const ProjectAgentOutcome = z.enum(["moved", "carried", "failed"]);
+/** What became of one agent the import named: `moved` when the agent is on the machine and its module re-keyed every
+ * file to dest, `transcript-only` when it is on the machine but only its files landed and the rows in its shared store
+ * that list them stayed behind, `carried` when it is not there so the files landed as they were, `nothing` when no
+ * file of its travelled, `failed` when the move raised and nothing of that agent landed; files and bytes are what landed. */
+export const ProjectAgentOutcome = z.enum(["moved", "transcript-only", "carried", "nothing", "failed"]);
 export type ProjectAgentOutcome = z.infer<typeof ProjectAgentOutcome>;
 export const ProjectAgentResult = z.object({ agent: z.string(), files: z.number(), bytes: z.number(), outcome: ProjectAgentOutcome, error: z.string().optional() });
 export type ProjectAgentResult = z.infer<typeof ProjectAgentResult>;

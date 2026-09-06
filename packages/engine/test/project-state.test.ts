@@ -626,6 +626,19 @@ describe("countProjectState", () => {
     expect(tree(hermes)).toEqual(before);
   });
 
+  it("an agent whose store cannot be read keeps its row with the reason, and the other agents are still counted", async () => {
+    const root = scratch();
+    const claude = claudeHome(root);
+    const opencode = join(root, "opencode");
+    write(join(opencode, "opencode.db"), "not a database\n");
+    const rows = await countProjectState(FROM, { claude, opencode, pi: piHome(root) });
+    expect(rows).toEqual([
+      { agent: "claude", name: "Claude Code", sessions: 2, bytes: expect.any(Number), carry: "moves" },
+      { agent: "opencode", name: "OpenCode", sessions: 0, bytes: 0, carry: "transcript-only", error: expect.stringMatching(/not a database/) },
+      { agent: "pi", name: "Pi", sessions: 2, bytes: expect.any(Number), carry: "moves" },
+    ]);
+  });
+
   it("agentHomes places every registered agent's home under the given home directory", () => {
     const homes = agentHomes("/Users/me");
     expect(Object.keys(homes)).toEqual(CATALOG_AGENTS.map(a => a.id));

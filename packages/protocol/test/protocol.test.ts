@@ -630,13 +630,29 @@ describe("the project plan", () => {
     const plan = { source: "/Users/dev/proj", repo: true, files: 1, bytes: 2, secrets: [], excluded: [], skipped: [], agents: [{ agent: "claude", name: "Claude Code", sessions: 2, bytes: 4096, carry: "moves" }] };
     expect(ProjectPlan.parse(plan)).toEqual(plan);
     expect(ProjectPlan.safeParse({ ...plan, agents: [{ ...plan.agents[0], carry: "maybe" }] }).success).toBe(false);
+    const unreadable = { agent: "opencode", name: "OpenCode", sessions: 0, bytes: 0, carry: "transcript-only", error: "file is not a database" };
+    expect(ProjectPlan.parse({ ...plan, agents: [unreadable] }).agents).toEqual([unreadable]);
     expect(ProjectPlan.safeParse({ ...plan, agents: undefined }).success).toBe(false);
   });
 
   it("the import names the agents that travel and the result says what became of each", () => {
     const req = { id: "r1", op: "project.import", workspaceId: "ws_1", source: "/Users/dev/proj", dest: "/root/proj", agents: ["claude"] };
     expect(RuntimeRequest.parse(req)).toEqual(req);
-    const result = { dest: "/root/proj", files: 1, bytes: 2, parts: 1, cut: [], rewritten: [], agents: [{ agent: "claude", files: 3, bytes: 40, outcome: "moved" }, { agent: "pi", files: 0, bytes: 0, outcome: "failed", error: "x already exists" }] };
+    const result = {
+      dest: "/root/proj",
+      files: 1,
+      bytes: 2,
+      parts: 1,
+      cut: [],
+      rewritten: [],
+      agents: [
+        { agent: "claude", files: 3, bytes: 40, outcome: "moved" },
+        { agent: "codex", files: 1, bytes: 40, outcome: "transcript-only" },
+        { agent: "gemini", files: 1, bytes: 40, outcome: "carried" },
+        { agent: "hermes", files: 0, bytes: 0, outcome: "nothing" },
+        { agent: "pi", files: 0, bytes: 0, outcome: "failed", error: "x already exists" },
+      ],
+    };
     expect(ProjectImportResult.parse(result)).toEqual(result);
     expect(ProjectImportResult.safeParse({ ...result, agents: [{ agent: "pi", files: 0, bytes: 0, outcome: "lost" }] }).success).toBe(false);
   });

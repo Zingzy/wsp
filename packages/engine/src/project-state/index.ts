@@ -82,7 +82,8 @@ export function guestAgentHomes(): Record<string, string> {
 
 /** The agents whose home holds sessions for the folder, in catalog order, each with its name, the bytes of the files
  * its module names for the folder and how its state travels; an agent with no home on disk, no module or no session
- * for the folder has no row. */
+ * for the folder has no row. An agent whose store cannot be read keeps a row carrying the reason, and the count goes
+ * on with the rest. */
 export async function countProjectState(path: string, homes: Readonly<Record<string, string>>, agents: readonly Pick<AgentEntry, "id" | "name">[] = CATALOG_AGENTS): Promise<ProjectAgent[]> {
   const root = resolveProjectPath(path);
   const rows: ProjectAgent[] = [];
@@ -90,10 +91,14 @@ export async function countProjectState(path: string, homes: Readonly<Record<str
     const resolver = PROJECT_STATE_RESOLVERS.get(agent);
     const home = homes[agent];
     if (resolver === undefined || home === undefined || !existsSync(home)) continue;
-    const sessions = await resolver.sessions(home, root);
-    if (sessions === 0) continue;
-    const bytes = (await resolver.entries(home, root)).reduce((n, f) => n + statSync(f).size, 0);
-    rows.push({ agent, name, sessions, bytes, carry: resolver.carry });
+    try {
+      const sessions = await resolver.sessions(home, root);
+      if (sessions === 0) continue;
+      const bytes = (await resolver.entries(home, root)).reduce((n, f) => n + statSync(f).size, 0);
+      rows.push({ agent, name, sessions, bytes, carry: resolver.carry });
+    } catch (e) {
+      rows.push({ agent, name, sessions: 0, bytes: 0, carry: resolver.carry, error: e instanceof Error ? e.message : String(e) });
+    }
   }
   return rows;
 }

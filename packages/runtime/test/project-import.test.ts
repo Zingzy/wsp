@@ -5,9 +5,9 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { tarOf } from "@wsp/engine";
-import type { EventUnion, ProjectAgent, ProjectImportEvent, ProjectPlan, ProjectSecret } from "@wsp/protocol";
+import type { EventUnion, ProjectAgent, ProjectAgentOutcome, ProjectImportEvent, ProjectPlan, ProjectSecret } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
-import { createRuntime, type PackedProject, type PackedState, type ProjectBundler } from "../src/runtime.js";
+import { createRuntime, type PackedProject, type PackedState, type ProjectBundler, type StateRequest } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
 import { stubBackend } from "./stub-backend.js";
@@ -73,7 +73,8 @@ function fakeBundler(extra: ProjectSecret[] = [], agents: ProjectAgent[] = []): 
     packState: async (req): Promise<PackedState> => {
       calls.push(`state ${req.agents.map(a => `${a.agent}${a.present ? "+" : "-"}`).join(",")} to ${req.dest}`);
       const files = req.agents.map(a => ({ path: `${a.home}/sessions/${a.agent}.jsonl`, mode: 0o600, content: `${a.agent} at ${a.present ? req.dest : SOURCE}\n` }));
-      return { tar: tarOf(files), agents: files.map((f, i) => ({ agent: req.agents[i]!.agent, files: 1, bytes: f.content.length, outcome: req.agents[i]!.present ? "moved" : "carried" })) };
+      const outcome = (a: StateRequest["agents"][number]): ProjectAgentOutcome => (!a.present ? "carried" : agents.find(x => x.agent === a.agent)?.carry === "moves" ? "moved" : "transcript-only");
+      return { tar: tarOf(files), agents: files.map((f, i) => ({ agent: req.agents[i]!.agent, files: 1, bytes: f.content.length, outcome: outcome(req.agents[i]!) })) };
     },
   };
 }
@@ -182,31 +183,48 @@ describe("project.import on a workspace", () => {
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
     const before = backend.puts.length;
     const bundler = fakeBundler([], AGENTS);
-    const result = await rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/work/proj", carry: [".env"], agents: ["claude", "pi"], bundler });
-    expect(bundler.calls).toEqual(["plan", "pack .env", "state claude+,pi- to /root/work/proj"]);
+    const result = await rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/work/proj", carry: [".env"], agents: ["claude", "pi", "codex"], bundler });
+    expect(bundler.calls).toEqual(["plan", "pack .env", "state claude+,pi-,codex+ to /root/work/proj"]);
     expect(result.agents).toEqual([
       { agent: "claude", files: 1, bytes: Buffer.byteLength("claude at /root/work/proj\n"), outcome: "moved" },
       { agent: "pi", files: 1, bytes: Buffer.byteLength(`pi at ${SOURCE}\n`), outcome: "carried" },
+      { agent: "codex", files: 1, bytes: Buffer.byteLength("codex at /root/work/proj\n"), outcome: "transcript-only" },
     ]);
     const probe = backend.machines[0]!.execLog.find(c => c.includes('echo "missing'))!;
-    expect(probe).toContain("for b in 'claude' 'pi'; do command -v");
-    expect(probe).not.toContain("codex");
+    expect(probe).toContain("for b in 'claude' 'codex' 'pi'; do command -v");
+    expect(probe).not.toContain("gemini");
     const stages = imports(events);
     expect(stages.map(e => e.stage)).toEqual(["planned", "consented", "packing", "uploading", "uploading", "landing", "uploading", "uploading", "landing", "done"]);
-    expect(stages[1]!.message).toBe("Carrying .env; cut config/secrets.json, keys/id_ed25519. Sessions travel for Claude Code (2 sessions), Pi (1 session); Codex stays.");
-    expect(stages[6]!.message).toMatch(/^Uploading 2 session files, /);
-    expect(stages[8]!.message).toBe("Landing sessions: Claude Code moved, Pi carried.");
-    expect(stages[9]!.message).toBe("4 files, 3.9 KB, landed at /root/work/proj; sessions: Claude Code moved, Pi carried.");
+    expect(stages[1]!.message).toBe("Carrying .env; cut config/secrets.json, keys/id_ed25519. Sessions travel for Claude Code (2 sessions), Pi (1 session), Codex (3 sessions).");
+    expect(stages[6]!.message).toMatch(/^Uploading 3 session files, /);
+    const said = "Claude Code moved, Pi carried unchanged since it is not on the machine, Codex transcripts landed but not yet in its session list";
+    expect(stages[8]!.message).toBe(`Landing sessions: ${said}.`);
+    expect(stages[9]!.message).toBe(`4 files, 3.9 KB, landed at /root/work/proj; sessions: ${said}.`);
     expect(backend.puts).toHaveLength(before + 2);
     const out = extract(backend.puts[before + 1]!.body);
     expect(readFileSync(join(out, "root/.claude-cfg/sessions/claude.jsonl"), "utf8")).toBe("claude at /root/work/proj\n");
     expect(readFileSync(join(out, "root/.pi/agent/sessions/pi.jsonl"), "utf8")).toBe(`pi at ${SOURCE}\n`);
+    expect(readFileSync(join(out, "root/.codex/sessions/codex.jsonl"), "utf8")).toBe("codex at /root/work/proj\n");
     const machine = backend.machines[0]!;
     // The create landed the machine context by the same road; the import's two archives are the last two.
     const untars = machine.runLog.filter(s => s.includes("tar xzf")).slice(-2);
     expect(untars[0]).toMatch(/tar xzf - -C '\/root\/work\/proj\.wsp-in-[^']+' --no-same-owner/);
     expect(untars[1]).toMatch(/tar xzf - -C '\/' --no-same-owner/);
     expect(machine.runLog.findIndex(s => s.includes("mv "))).toBeLessThan(machine.runLog.indexOf(untars[1]!));
+  });
+
+  it("an agent the plan could not read never travels, even when named, and the consented line says why", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const unreadable: ProjectAgent = { agent: "opencode", name: "OpenCode", sessions: 0, bytes: 0, carry: "transcript-only", error: "file is not a database" };
+    const bundler = fakeBundler([], [...AGENTS, unreadable]);
+    const result = await rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/proj", agents: ["claude", "opencode"], bundler });
+    expect(bundler.calls).toEqual(["plan", "pack ", "state claude+ to /root/proj"]);
+    expect(result.agents.map(a => a.agent)).toEqual(["claude"]);
+    expect(imports(events)[1]!.message).toBe("No secret-shaped file travels; cut .env, config/secrets.json, keys/id_ed25519. Sessions travel for Claude Code (2 sessions); Pi, Codex stay; OpenCode could not be read (file is not a database).");
   });
 
   it("with no agent named nothing about them is read and the consented line says so", async () => {
