@@ -16,7 +16,7 @@ import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BUILDER_DISK_GB, PACK_BUDGET_BYTES, TOOLS_DISK_FLOOR, agentInstallsFor, brewfileFor, estimateDisk, isMcpRow, pinState, toolInstallsFor, type BrewTable, type ImportResult } from "@wsp/engine";
-import { ALREADY_APPLIED, fmtBytes } from "@wsp/protocol";
+import { ALREADY_APPLIED, fmtBytes, fmtMemGb } from "@wsp/protocol";
 import { CLAUDE_INSTALLER, importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
   LOGIN_CHOICES,
@@ -563,7 +563,7 @@ export function summaryNote(
 function bootQuestion(recipe: GoldenRecipe, pricing: BackendPricing): string {
   const size = { cpu: recipe.cpu ?? pricing.defaultSize.cpu, memMb: recipe.memMb ?? pricing.defaultSize.memMb };
   const rate = pricing.rateUsdPerHour(size);
-  return `Boot a ${size.cpu} vCPU, ${Math.round(size.memMb / 1024)} GB builder on Solari and build this? About $${rate.toFixed(2)}/hr while it runs.`;
+  return `Boot a ${size.cpu} vCPU, ${fmtMemGb(size.memMb)} builder on Solari and build this? About $${rate.toFixed(2)}/hr while it runs.`;
 }
 
 function isCapRefusal(e: unknown): boolean {

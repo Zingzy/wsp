@@ -8,6 +8,7 @@ import { agentHomes } from "@wsp/engine";
 import type { BootPayload } from "@wsp/protocol";
 import { describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { projectBundler } from "./project-bundle.js";
+import { projectLander } from "./project-export.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
 import { describeStorage } from "./storage.js";
 
@@ -212,7 +213,8 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   });
   let rtServer: RuntimeServer;
   try {
-    rtServer = await serveRuntime(rt, { port: opts.wsPort ?? 4410, authToken, forwards: relay, projects: source => projectBundler(source, agentHomes(homedir())) });
+    const homes = agentHomes(homedir());
+    rtServer = await serveRuntime(rt, { port: opts.wsPort ?? 4410, authToken, forwards: relay, projects: source => projectBundler(source, homes), landing: projectLander(homes) });
   } catch (e) {
     await relay.close();
     throw e;

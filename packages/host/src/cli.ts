@@ -25,7 +25,7 @@ import {
   type Machine,
   type Runtime,
 } from "@wsp/runtime";
-import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
+import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENTS } from "@wsp/catalog";
 import { claudeEnvs, deployDaemon, doctor } from "./doctor.js";
 import { keychainReader } from "./init-import.js";
 import { readBrewTable } from "./init-brew.js";
@@ -38,7 +38,7 @@ import { systemOpener, type UrlOpener } from "./relay.js";
 import { hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from "./host-lock.js";
 import { startHost, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
-import { MCP_AGENTS, installMcp, mcpServerSpec } from "./mcp-install.js";
+import { installMcp, mcpServerSpec } from "./mcp-install.js";
 import { findVerb, runVerb, verbHelp, verbUsage } from "./verbs.js";
 import { VERSION } from "./version.js";
 

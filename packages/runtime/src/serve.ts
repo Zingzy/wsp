@@ -9,7 +9,7 @@ import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 import { RuntimeRequest, type ExecEvent, type ForwardEvent, type PortForward } from "@wsp/protocol";
-import type { ProjectBundler, Runtime } from "./runtime.js";
+import type { ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
 
 /** The port forwards a host holds, as the app lists and stops them. The
  * runtime keeps none itself: the host that owns the daemon links supplies this. */
@@ -30,6 +30,8 @@ export interface ServeOptions {
   forwards?: ForwardsSource;
   /** How a folder on this computer is read for project.plan and project.import; without it both are refused. */
   projects?: (source: string) => ProjectBundler;
+  /** How a folder from a machine lands on this computer for project.export; without it the op is refused. */
+  landing?: ProjectLander;
 }
 
 export interface RuntimeServer {
@@ -55,8 +57,16 @@ function safeEqual(a: string, b: string): boolean {
   return ab.length === bb.length && timingSafeEqual(ab, bb);
 }
 
+function landerFrom(opts: ServeOptions): () => ProjectLander {
+  return () => {
+    if (opts.landing === undefined) throw new Error("this runtime cannot write folders on this computer");
+    return opts.landing;
+  };
+}
+
 export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<RuntimeServer> {
   const bundler = bundlerFrom(opts);
+  const lander = landerFrom(opts);
   if (!opts.authToken) throw new Error("serveRuntime refuses to start without an auth token");
   const now = opts.now ?? Date.now;
   const ticketTtlMs = opts.ticketTtlMs ?? 300_000;
@@ -296,6 +306,11 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "project.import": {
               const { workspaceId, source, dest, replace, carry, rewrite, agents } = msg;
               send({ id: msg.id, ok: true, imported: await rt.projects.import({ workspaceId, source, dest, replace, carry, rewrite, agents, bundler: bundler(source) }) });
+              return;
+            }
+            case "project.export": {
+              const { workspaceId, source, dest, replace, agents } = msg;
+              send({ id: msg.id, ok: true, exported: await rt.projects.export({ workspaceId, source, dest, replace, agents, lander: lander() }) });
               return;
             }
           }

@@ -16,7 +16,7 @@ export { AGENTS, detectAgents } from "./detect/agents.js";
 export { type Presence, presenceOf } from "./detect/presence.js";
 export * from "./history/index.js";
 export { type RecipeOptions, USED_TICK_SESSIONS, computeRecipe } from "./recipe.js";
-export { MCP_BIN_DIRS, MCP_CONFIGS, MCP_REMOTE_ID, MCP_REMOTE_LABEL, detectMcp, homePaths, linuxFit, mcpRemoteHash, parseCodexMcp, parseMcp, type LinuxFit, type McpConfig, type McpFormat, type McpServer, type McpTransport } from "./detect/mcp.js";
+export { MCP_BIN_DIRS, MCP_REMOTE_ID, MCP_REMOTE_LABEL, detectMcp, homePaths, linuxFit, mcpRemoteHash, type LinuxFit } from "./detect/mcp.js";
 export { CLAUDE_KEY_ENV, CLAUDE_SETTINGS, apiKeyHelperOf, detectLogins } from "./detect/logins.js";
 export { FISH_CONF_D, RC_NAMES, RC_PATHS, isRcPath, isSecretName, rcFiles, simpleCommands, sourcedPaths, stripExports } from "./detect/shell-rc.js";
 export { type Signal, MAX_BYTES, bareUrls, fileSignals, keysSignal, modeSignal, nameSignal, pemSignal, topLevelKeys, urlSignal } from "./credential-signals.js";

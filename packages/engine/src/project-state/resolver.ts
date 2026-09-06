@@ -10,11 +10,13 @@ import { once } from "node:events";
 import { finished } from "node:stream/promises";
 import type { ProjectCarry } from "@wsp/protocol";
 
-/** One catalog projectState row the module moved: the files it touched and how many directories, keys, lines or rows changed. */
+/** One catalog projectState row the module moved: the files it touched and how many directories, keys, lines or rows
+ * changed; `skipped` counts sessions the row named whose transcript was not under the home, so the row moved alone. */
 export interface MovedState {
   state: string;
   files: readonly string[];
   changed: number;
+  skipped?: number;
 }
 
 /** Moves one agent's project state from an old absolute path to a new one inside that agent's home. */
@@ -23,6 +25,9 @@ export interface ProjectStateResolver {
   agent: string;
   /** The catalog projectState rows this module moves, by their `state`. */
   states: readonly string[];
+  /** The paths under home this module reads, relative to it: what a trip pulls from a home so nothing else in it
+   * (credentials, settings) crosses. */
+  roots: readonly string[];
   /** How the files `entries` names travel: whether they carry every key the agent needs to find the project's
    * sessions at the new path, or a shared store left behind holds one. */
   carry: ProjectCarry;

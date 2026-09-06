@@ -34,8 +34,11 @@ export interface RoadModule<R extends { road: RoadName } = InstallRoad> {
   names(road: R): readonly string[];
   /** The command the install puts on PATH when the road alone knows it. */
   bin?(road: R): string | undefined;
+  /** The road fixed to a version, for a road that pins one; absent for a road that installs what its source serves. */
+  at?(road: R, version: string): R;
 }
 
+const atVersion = <R extends { version?: string }>(r: R, version: string): R => ({ ...r, version });
 const pinned = (pkg: string, version: string | undefined, sep: string): string => (version === undefined ? pkg : `${pkg}${sep}${version}`);
 
 /** The pseudo step every apt row waits on: the index read once, before the first of them. */
@@ -90,6 +93,7 @@ const npm: RoadModule<Road<"npm">> = {
   install: r => `npm install -g ${r.ignoreScripts === true ? "--ignore-scripts " : ""}${pinned(r.package, r.version, "@")}`,
   uninstall: r => ({ cmd: `npm uninstall -g ${r.package}` }),
   names: r => [r.package],
+  at: atVersion,
 };
 
 /** pnpm and bun keep npm's global shape under their own verbs. */
@@ -99,6 +103,7 @@ const nodeGlobal = <K extends "pnpm" | "bun">(road: K): RoadModule<PackageRoad<K
   install: r => `${road} add -g ${pinned(r.package, r.version, "@")}`,
   uninstall: r => ({ cmd: `${road} remove -g ${r.package}` }),
   names: r => [r.package],
+  at: atVersion,
 });
 
 /** uv and pipx install a Python tool into its own environment, pinned the pip way. */
@@ -108,6 +113,7 @@ const pythonTool = <K extends "uv" | "pipx">(road: K, cmd: string): RoadModule<P
   install: r => `${cmd} install ${pinned(r.package, r.version, "==")}`,
   uninstall: r => ({ cmd: `${cmd} uninstall ${r.package}` }),
   names: r => [r.package],
+  at: atVersion,
 });
 
 const cargo: RoadModule<Road<"cargo">> = {
@@ -116,6 +122,7 @@ const cargo: RoadModule<Road<"cargo">> = {
   install: r => (r.version === undefined ? `cargo install ${r.package}` : `cargo install ${r.package} --version ${r.version}`),
   uninstall: r => ({ cmd: `cargo uninstall ${r.package}` }),
   names: r => [r.package],
+  at: atVersion,
 };
 
 const GO_BIN = "/root/go/bin";
@@ -147,19 +154,20 @@ const go: RoadModule<Road<"go">> = {
   uninstall: () => ({ note: `go has no uninstall; the binary stays in ${GO_BIN}` }),
   names: () => [],
   bin: r => (r.module === undefined ? undefined : goBinary(r.module)),
+  at: atVersion,
 };
 
 // --- releases ------------------------------------------------------------------
 
 /** A tool from its repository: the release asset built for this arch, unpacked and its binary put in
- * /usr/local/bin; with no Linux asset and go on the machine, `go install` of the repository's module at the tag,
- * moved to the row's command when the module is named otherwise. The asset's sha256 is checked against the pin when
- * the recipe has one for this tag, and printed with the tag on the WSP_ROAD line the stage reads either way,
- * so the first install of a tag records it. Without a tag the current release is fetched and its tag read. */
-function releaseInstall(name: string, repo: string, tag: string | undefined, pin: string | undefined): string {
+ * /usr/local/bin; with no Linux asset, a main package named and go on the machine, `go install` of that package
+ * at the tag (or at the version it carries), moved to the row's command when its name differs. The asset's sha256
+ * is checked against the pin when the recipe has one for this tag, and printed with the tag on the WSP_ROAD line
+ * the stage reads either way, so the first install of a tag records it. Without a tag the current release is
+ * fetched and its tag read. */
+function releaseInstall(name: string, repo: string, tag: string | undefined, pin: string | undefined, go: string | undefined): string {
   const api = tag === undefined ? `https://api.github.com/repos/${repo}/releases/latest` : `https://api.github.com/repos/${repo}/releases/tags/${tag}`;
-  const go = `github.com/${repo}@${tag ?? "latest"}`;
-  const goBin = goBinary(go);
+  const goAt = go === undefined || go.includes("@") ? go : `${go}@${tag ?? "latest"}`;
   return [
     "set -euo pipefail",
     `name=${shellQuote(name)}`,
@@ -187,12 +195,16 @@ function releaseInstall(name: string, repo: string, tag: string | undefined, pin
     '  [ -n "$bin" ] || { echo "Error: no binary in ${asset:-the release}" >&2; exit 1; }',
     '  install -m 0755 "$bin" "/usr/local/bin/$name"',
     tag === undefined ? '  echo "WSP_ROAD release ${asset:-$url} $sum $tag"' : `  echo "WSP_ROAD release \${asset:-$url} $sum "${shellQuote(tag)}`,
-    "elif command -v go >/dev/null 2>&1; then",
-    `  GOBIN=/usr/local/bin go install ${shellQuote(go)}`,
-    ...(goBin === name ? [] : [`  mv ${shellQuote(`/usr/local/bin/${goBin}`)} "/usr/local/bin/$name"`]),
-    `  echo "WSP_ROAD go "${shellQuote(go)}`,
+    ...(goAt === undefined
+      ? []
+      : [
+          "elif command -v go >/dev/null 2>&1; then",
+          `  GOBIN=/usr/local/bin go install ${shellQuote(goAt)}`,
+          ...(goBinary(goAt) === name ? [] : [`  mv ${shellQuote(`/usr/local/bin/${goBinary(goAt)}`)} "/usr/local/bin/$name"`]),
+          `  echo "WSP_ROAD go "${shellQuote(goAt)}`,
+        ]),
     "else",
-    `  echo "Error: ${tag === undefined ? "the current release" : `release "${shellQuote(tag)}"`} of "${shellQuote(repo)}" has no Linux build, and go is not on the machine" >&2`,
+    `  echo "Error: ${tag === undefined ? "the current release" : `release "${shellQuote(tag)}"`} of "${shellQuote(repo)}" has no Linux build${goAt === undefined ? "" : ", and go is not on the machine"}" >&2`,
     "  exit 1",
     "fi",
   ].join("\n");
@@ -204,10 +216,11 @@ const release: RoadModule<Road<"release">> = {
     if (r.repo === undefined) return { note: "no GitHub release to install from" };
     // Without a version the pinned tag stands, as a vendor install does; a first install with neither takes the current release.
     const tag = r.version ?? r.pin?.tag;
-    return releaseInstall(bin, r.repo, tag, pinStateOf(tag, r.pin) === "same" ? r.pin!.sha256 : undefined);
+    return releaseInstall(bin, r.repo, tag, pinStateOf(tag, r.pin) === "same" ? r.pin!.sha256 : undefined, r.go);
   },
   uninstall: (_r, bin) => ({ cmd: `rm -f /usr/local/bin/${shellQuote(bin)}` }),
   names: () => [],
+  at: atVersion,
 };
 
 const vendor: RoadModule<Road<"vendor">> = {
@@ -216,6 +229,7 @@ const vendor: RoadModule<Road<"vendor">> = {
   uninstall: r => ({ cmd: r.cask.uninstall }),
   names: () => [],
   bin: r => r.cask.bin,
+  at: atVersion,
 };
 
 // --- the distro and plain scripts ----------------------------------------------

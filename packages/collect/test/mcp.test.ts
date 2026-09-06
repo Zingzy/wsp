@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { detectMcp, linuxFit, mcpRemoteHash, parseCodexMcp, parseMcp, type McpServer } from "../src/index.js";
+import { CATALOG_AGENTS, type McpAgent, type McpFormat, type McpServer } from "@wsp/catalog";
+import { detectMcp, linuxFit, mcpRemoteHash } from "../src/index.js";
 import { fakeHost } from "./fake-host.js";
 
 const HOME = "/Users/dev";
@@ -63,7 +64,7 @@ describe("mcp servers", () => {
       rung: "agents", id: "agents/mcp/claude/home/zomato", label: "zomato", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "bring",
       detail: "local to ~; stdio: npx mcp-remote (mcp.zomato.com/mcp); runs via npx; its saved sign-in (1.4 KB) travels on the mcp-remote sign-ins row",
     });
-    // The whole store is claimed so the Everything screen stops listing it; only what the current bridge reads travels.
+    // The whole store is claimed; only what the current bridge reads travels.
     expect(rows[5]).toEqual({
       rung: "agents", id: "agents/mcp/mcp-remote", label: "mcp-remote sign-ins", group: "MCP sign-ins", paths: ["~/.mcp-auth"],
       excludes: ["~/.mcp-auth/mcp-remote-0.1.37", `~/.mcp-auth/mcp-remote-v1/${hash("https://mcp.zomato.com/mcp")}_lock.json`],
@@ -117,11 +118,6 @@ describe("mcp servers", () => {
       "[[hooks.SessionStart]]",
       "matcher = \"x\"",
     ].join("\n");
-    expect(parseCodexMcp(toml)).toEqual([
-      { name: "grafana", scope: "user", transport: { kind: "stdio", command: "/opt/homebrew/bin/uvx", args: ["mcp-grafana"], env: { GRAFANA_SERVICE_ACCOUNT_TOKEN: "glsa_abcdefghij", GRAFANA_URL: "https://g.example" } }, envRefs: [] },
-      { name: "sentry", scope: "user", transport: { kind: "http", url: "https://mcp.sentry.dev/mcp?x=1", headers: {} }, envRefs: ["SENTRY_TOKEN"] },
-      { name: "my server", scope: "user", transport: { kind: "stdio", command: "node", args: ["/Applications/Tool.app/Contents/mcp.js"], env: { A_KEY: "1234" } }, envRefs: [] },
-    ]);
     const rows = await detectMcp(fakeHost({ files: { "~/.codex/config.toml": toml } }));
     expect(rows.map(r => [r.id, r.default, r.reason, r.detail])).toEqual([
       ["agents/mcp/codex/grafana", "bring", undefined, "stdio: /opt/homebrew/bin/uvx mcp-grafana; needs uv, installed on the machine when missing; carries a secret: env GRAFANA_SERVICE_ACCOUNT_TOKEN (15 B)"],
@@ -187,14 +183,22 @@ describe("mcp servers", () => {
     expect(await detectMcp(fakeHost())).toEqual([]);
   });
 
-  it("parseMcp normalizes every format to one shape and ignores entries that name neither a command nor a url", () => {
-    expect(parseMcp("claude", JSON.stringify({ mcpServers: { a: { command: "x" }, b: { url: "https://b" }, c: { type: "sse", url: "https://c" }, d: {} } }), HOME)).toEqual<McpServer[]>([
-      { name: "a", scope: "user", transport: { kind: "stdio", command: "x", args: [], env: {} }, envRefs: [] },
-      { name: "b", scope: "user", transport: { kind: "http", url: "https://b", headers: {} }, envRefs: [] },
-      { name: "c", scope: "user", transport: { kind: "http", url: "https://c", headers: {} }, envRefs: [] },
+  it("an agent the catalog gains with a format of its own is read through its module: one row per server it names, under the agent's group,", async () => {
+    const lines: McpFormat = {
+      read: text => text.split("\n").filter(l => l !== "").map((l): McpServer => {
+        const [name, command, ...args] = l.split(" ");
+        return { name: name!, scope: "user", transport: { kind: "stdio", command: command!, args, env: {} }, envRefs: [] };
+      }),
+      place: () => ({ text: "", commentsDropped: false }),
+      guest: "() => []",
+    };
+    const entry: McpAgent = { ...CATALOG_AGENTS.find(a => a.id === "pi")!, id: "lines", name: "Lines", mcp: { format: lines, files: ["~/.lines/servers.txt"], scope: "one file" } };
+    const host = fakeHost({ files: { "~/.lines/servers.txt": "alpha npx -y pkg\nbeta /Applications/B.app/b\n", "~/.claude.json": claudeJson() } });
+    const rows = await detectMcp(host, [entry]);
+    expect(rows.map(r => [r.id, r.group, r.default, r.detail])).toEqual([
+      ["agents/mcp/lines/alpha", "Lines MCP servers", "bring", "stdio: npx pkg; runs via npx; carries no secret"],
+      ["agents/mcp/lines/beta", "Lines MCP servers", "skip", "stdio: /Applications/B.app/b; carries no secret"],
     ]);
-    expect(parseMcp("opencode", '{"mcp":{"a":{"type":"local","command":[]}}}', HOME)).toEqual([]);
-    expect(parseMcp("gemini", "nope", HOME)).toEqual([]);
   });
 
   it("linuxFit: home paths and Homebrew's prefix have a Linux equivalent, Library and Applications do not", () => {
@@ -216,3 +220,4 @@ describe("mcp servers", () => {
     expect(mcpRemoteHash(["-y", "@scope/other", NOTION])).toBeUndefined();
   });
 });
+

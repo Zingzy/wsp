@@ -1,212 +1,26 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // MCP servers travel with the agent that runs them, credentials included: one
 // row per server under its agent. The definition itself rides inside the
-// agent's config file (the agent's own row); this file reads that config to
-// say what each server is, what it needs on Linux and which secret it carries.
-// Token files are only stat'ed, never read.
+// agent's config file (the agent's own row); this file reads that config
+// through the catalog entry's format module to say what each server is, what
+// it needs on Linux and which secret it carries. Token files are only stat'ed,
+// never read.
 import { createHash } from "node:crypto";
-import { CATALOG_AGENTS, parseJsonc, type McpFormat } from "@wsp/catalog";
-import { MCP_ID_PREFIX } from "@wsp/protocol";
+import { MCP_AGENTS, type McpAgent, type McpConfig, type McpServer, type McpTransport } from "@wsp/catalog";
+import { MCP_ID_PREFIX, fmtBytes } from "@wsp/protocol";
 import { type Host, expand, tilde } from "../host.js";
 import type { ManifestEntry } from "../manifest.js";
-import { fmt } from "./common.js";
 import { isSecretName } from "./shell-rc.js";
 
 /** The row that carries mcp-remote's saved browser sign-ins for every agent. */
 export const MCP_REMOTE_ID = `${MCP_ID_PREFIX}mcp-remote`;
 export const MCP_REMOTE_LABEL = "mcp-remote sign-ins";
 
-export type { McpFormat } from "@wsp/catalog";
-
-export interface McpConfig {
-  agent: string;
-  label: string;
-  format: McpFormat;
-  /** `~/`-relative; the first that exists is read. */
-  files: readonly string[];
-  /** The scopes the read covers, shown on the group's heading; every agent's docs also give a project scope this file does not read. */
-  scope: string;
-}
-
-/** Where each agent keeps its user-wide MCP definitions: the catalog entries that name one, in catalog order. */
-export const MCP_CONFIGS: readonly McpConfig[] = CATALOG_AGENTS.flatMap(a =>
-  a.mcp !== undefined ? [{ agent: a.id, label: a.name, format: a.mcp.format, files: a.mcp.files, scope: a.mcp.scope }] : [],
-);
-
-export type McpTransport =
-  | { kind: "stdio"; command: string; args: string[]; env: Record<string, string>; cwd?: string }
-  | { kind: "http"; url: string; headers: Record<string, string> };
-
-export interface McpServer {
-  name: string;
-  /** `home`: Claude Code's project scope for the home folder itself, which the machine's home stands in for. */
-  scope: "user" | "home";
-  transport: McpTransport;
-  /** Variables the definition reads from the environment at run time (Codex's bearer_token_env_var); names only. */
-  envRefs: string[];
-}
-
 export type LinuxFit = { ok: true; needs: string } | { ok: false; reason: string };
 
 const MCP_AUTH = "~/.mcp-auth";
 /** mcp-remote's store since its versioned folders went away: MCP_REMOTE_CONFIG_DIR or ~/.mcp-auth, then mcp-remote-v1. */
 const MCP_REMOTE_STORE = `${MCP_AUTH}/mcp-remote-v1`;
-
-// --- parsing -----------------------------------------------------------------
-
-function parseJson(text: string): Record<string, unknown> | undefined {
-  try {
-    const v: unknown = parseJsonc(text);
-    return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
-const str = (v: unknown): string | undefined => (typeof v === "string" && v !== "" ? v : undefined);
-const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
-function dict(v: unknown): Record<string, string> {
-  if (!isObject(v)) return {};
-  return Object.fromEntries(Object.entries(v).filter((e): e is [string, string] => typeof e[1] === "string"));
-}
-
-/** Claude Code and Gemini CLI share one shape: command/args/env/cwd, or url (httpUrl for Gemini's streamable HTTP) with headers. */
-function fromClaudeLike(name: string, raw: unknown, scope: McpServer["scope"]): McpServer | undefined {
-  if (!isObject(raw)) return undefined;
-  const command = str(raw.command);
-  const url = str(raw.httpUrl) ?? str(raw.url);
-  if (command !== undefined) {
-    const cwd = str(raw.cwd);
-    return { name, scope, transport: { kind: "stdio", command, args: strs(raw.args), env: dict(raw.env), ...(cwd !== undefined ? { cwd } : {}) }, envRefs: [] };
-  }
-  if (url !== undefined) return { name, scope, transport: { kind: "http", url, headers: dict(raw.headers) }, envRefs: [] };
-  return undefined;
-}
-
-function fromOpenCode(name: string, raw: unknown): McpServer | undefined {
-  if (!isObject(raw)) return undefined;
-  if (raw.type === "remote") {
-    const url = str(raw.url);
-    return url === undefined ? undefined : { name, scope: "user", transport: { kind: "http", url, headers: dict(raw.headers) }, envRefs: [] };
-  }
-  const [command, ...args] = strs(raw.command);
-  if (command === undefined) return undefined;
-  return { name, scope: "user", transport: { kind: "stdio", command, args, env: dict(raw.environment) }, envRefs: [] };
-}
-
-interface CodexTable {
-  values: Record<string, unknown>;
-  env: Record<string, string>;
-  headers: Record<string, string>;
-  envHeaders: Record<string, string>;
-}
-
-const TOML_HEADER = /^\[\s*mcp_servers\s*\.\s*(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9_-]+))\s*(?:\.\s*([A-Za-z0-9_-]+)\s*)?\]$/;
-const TOML_STRING = /"((?:[^"\\]|\\.)*)"|'([^']*)'/g;
-
-/** A line without its trailing comment: `#` outside quotes ends it. */
-function uncommented(line: string): string {
-  let quote: string | undefined;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i]!;
-    if (quote !== undefined) {
-      if (c === "\\" && quote === '"') i++;
-      else if (c === quote) quote = undefined;
-    } else if (c === '"' || c === "'") quote = c;
-    else if (c === "#") return line.slice(0, i);
-  }
-  return line;
-}
-
-function unescapeToml(s: string): string {
-  return s.replace(/\\(["\\nrt])/g, (_, ch: string) => ({ '"': '"', "\\": "\\", n: "\n", r: "\r", t: "\t" })[ch] ?? ch);
-}
-
-function tomlStrings(s: string): string[] {
-  return [...s.matchAll(TOML_STRING)].map(m => (m[1] !== undefined ? unescapeToml(m[1]) : m[2]!));
-}
-
-/** A basic string, an array of strings, or an inline table of strings; anything else is left out. */
-function tomlValue(raw: string): unknown {
-  const s = raw.trim();
-  if (s.startsWith("[")) return tomlStrings(s);
-  if (s.startsWith("{")) {
-    const out: Record<string, string> = {};
-    for (const m of s.slice(1, -1).matchAll(/(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9_-]+))\s*=\s*("(?:[^"\\]|\\.)*"|'[^']*')/g)) {
-      out[m[1] ?? m[2] ?? m[3]!] = tomlStrings(m[4]!)[0] ?? "";
-    }
-    return out;
-  }
-  if (s.startsWith('"') || s.startsWith("'")) return tomlStrings(s)[0];
-  return undefined;
-}
-
-/** Codex's `[mcp_servers.<name>]` tables and their env, http_headers and env_http_headers sub-tables, in file
- * order. Only the table form Codex documents and `codex mcp add` writes is read. */
-export function parseCodexMcp(text: string): McpServer[] {
-  const tables = new Map<string, CodexTable>();
-  let current: { name: string; sub?: string } | undefined;
-  const lines = text.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    const line = uncommented(lines[i]!).trim();
-    if (line === "") continue;
-    if (line.startsWith("[")) {
-      const m = TOML_HEADER.exec(line);
-      current = m === null ? undefined : { name: m[1] ?? m[2] ?? m[3]!, ...(m[4] !== undefined ? { sub: m[4] } : {}) };
-      if (current !== undefined && !tables.has(current.name)) tables.set(current.name, { values: {}, env: {}, headers: {}, envHeaders: {} });
-      continue;
-    }
-    if (current === undefined) continue;
-    const eq = line.indexOf("=");
-    if (eq < 0) continue;
-    const key = line.slice(0, eq).trim().replace(/^"(.*)"$/, "$1");
-    let value = line.slice(eq + 1).trim();
-    // A multi-line array closes on a later line.
-    while (value.startsWith("[") && !value.endsWith("]") && i + 1 < lines.length) value += uncommented(lines[++i]!).trim();
-    const parsed = tomlValue(value);
-    if (parsed === undefined) continue;
-    const table = tables.get(current.name)!;
-    if (current.sub === undefined) table.values[key] = parsed;
-    else if (typeof parsed === "string") {
-      if (current.sub === "env") table.env[key] = parsed;
-      else if (current.sub === "http_headers") table.headers[key] = parsed;
-      else if (current.sub === "env_http_headers") table.envHeaders[key] = parsed;
-    }
-  }
-  const out: McpServer[] = [];
-  for (const [name, t] of tables) {
-    const command = str(t.values.command);
-    const url = str(t.values.url);
-    const bearer = str(t.values.bearer_token_env_var);
-    const envRefs = [...(bearer !== undefined ? [bearer] : []), ...Object.values({ ...dict(t.values.env_http_headers), ...t.envHeaders })];
-    if (command !== undefined) {
-      out.push({ name, scope: "user", transport: { kind: "stdio", command, args: strs(t.values.args), env: { ...dict(t.values.env), ...t.env } }, envRefs });
-    } else if (url !== undefined) {
-      out.push({ name, scope: "user", transport: { kind: "http", url, headers: { ...dict(t.values.http_headers), ...t.headers } }, envRefs });
-    }
-  }
-  return out;
-}
-
-/** Every server an agent's config defines, in one shape; a file that does not parse defines none. */
-export function parseMcp(format: McpFormat, text: string, home: string): McpServer[] {
-  if (format === "codex") return parseCodexMcp(text);
-  const root = parseJson(text);
-  if (root === undefined) return [];
-  const out: McpServer[] = [];
-  if (format === "opencode") {
-    if (isObject(root.mcp)) for (const [name, raw] of Object.entries(root.mcp)) out.push(...present(fromOpenCode(name, raw)));
-    return out;
-  }
-  if (isObject(root.mcpServers)) for (const [name, raw] of Object.entries(root.mcpServers)) out.push(...present(fromClaudeLike(name, raw, "user")));
-  if (format === "claude" && isObject(root.projects) && isObject(root.projects[home]) && isObject((root.projects[home] as Record<string, unknown>).mcpServers)) {
-    for (const [name, raw] of Object.entries((root.projects[home] as Record<string, unknown>).mcpServers as Record<string, unknown>)) out.push(...present(fromClaudeLike(name, raw, "home")));
-  }
-  return out;
-}
-
-const present = <T>(v: T | undefined): T[] => (v === undefined ? [] : [v]);
 
 // --- what runs on Linux --------------------------------------------------------
 
@@ -389,12 +203,12 @@ async function homeDeps(host: Host, server: McpServer, carriedPaths: readonly st
 
 /** What a definition carries: secret-named env values by size, the file such a value points at (which travels on
  * the row), header values, and where its mcp-remote or Claude Code sign-in lives. Nothing is read. */
-async function carried(host: Host, server: McpServer, format: McpFormat, remoteTokens: ReadonlyMap<string, number>): Promise<Carried> {
+async function carried(host: Host, server: McpServer, agent: McpAgent, remoteTokens: ReadonlyMap<string, number>): Promise<Carried> {
   const out: Carried = { secrets: [], notes: [], paths: [], bytes: 0 };
   const t = server.transport;
   if (t.kind === "http") {
     for (const [k, v] of Object.entries(t.headers)) out.secrets.push(`header ${k} (${Buffer.byteLength(v)} B)`);
-    if (format === "claude") out.notes.push("its sign-in is kept with the Claude Code login");
+    if (agent.id === "claude") out.notes.push("its sign-in is kept with the Claude Code login");
     return out;
   }
   for (const [k, v] of Object.entries(t.env)) {
@@ -406,7 +220,7 @@ async function carried(host: Host, server: McpServer, format: McpFormat, remoteT
         out.notes.push(`the file ${k} points at is outside your home and is not copied`);
         continue;
       }
-      out.secrets.push(`the file ${k} points at (${fmt(st.bytes)})`);
+      out.secrets.push(`the file ${k} points at (${fmtBytes(st.bytes)})`);
       out.paths.push(`~${abs.slice(host.home.length)}`);
       out.bytes += st.bytes;
       continue;
@@ -430,15 +244,15 @@ async function carried(host: Host, server: McpServer, format: McpFormat, remoteT
   const hash = mcpRemoteHash(t.args);
   if (hash !== undefined) {
     const bytes = remoteTokens.get(hash);
-    out.notes.push(bytes === undefined ? "no saved sign-in; the browser sign-in runs again on the machine" : `its saved sign-in (${fmt(bytes)}) travels on the ${MCP_REMOTE_LABEL} row`);
+    out.notes.push(bytes === undefined ? "no saved sign-in; the browser sign-in runs again on the machine" : `its saved sign-in (${fmtBytes(bytes)}) travels on the ${MCP_REMOTE_LABEL} row`);
   }
   return out;
 }
 
-const mcpGroup = (config: McpConfig): string => `${config.label} MCP servers`;
+const mcpGroup = (agent: McpAgent): string => `${agent.name} MCP servers`;
 
-function serverRow(config: McpConfig, server: McpServer, fit: LinuxFit, deps: HomeDeps, c: Carried, home: string): ManifestEntry {
-  const id = `${MCP_ID_PREFIX}${config.agent}/${server.scope === "home" ? "home/" : ""}${server.name}`;
+function serverRow(agent: McpAgent, server: McpServer, fit: LinuxFit, deps: HomeDeps, c: Carried, home: string): ManifestEntry {
+  const id = `${MCP_ID_PREFIX}${agent.id}/${server.scope === "home" ? "home/" : ""}${server.name}`;
   const reason = fit.ok ? undefined : fit.reason;
   const words = [
     ...(server.scope === "home" ? ["local to ~"] : []),
@@ -452,7 +266,7 @@ function serverRow(config: McpConfig, server: McpServer, fit: LinuxFit, deps: Ho
     rung: "agents",
     id,
     label: server.name,
-    group: mcpGroup(config),
+    group: mcpGroup(agent),
     paths: c.paths,
     bytes: c.bytes,
     default: reason === undefined && !deps.gone ? "bring" : "skip",
@@ -502,7 +316,7 @@ function remoteRow(store: RemoteStore, matched: readonly string[]): ManifestEntr
     ...base,
     default: "bring",
     consent: true,
-    detail: `browser sign-ins saved by mcp-remote for remote servers: ${n} token${n === 1 ? "" : "s"} (${fmt(tokenBytes)})${whom.length > 0 ? `, ${whom.join("; ")}` : ""}${older ? "; older bridge versions' folders stay here" : ""}`,
+    detail: `browser sign-ins saved by mcp-remote for remote servers: ${n} token${n === 1 ? "" : "s"} (${fmtBytes(tokenBytes)})${whom.length > 0 ? `, ${whom.join("; ")}` : ""}${older ? "; older bridge versions' folders stay here" : ""}`,
   };
 }
 
@@ -516,24 +330,26 @@ async function configText(host: Host, config: McpConfig): Promise<string | undef
   return undefined;
 }
 
-/** One row per MCP server under its agent, then the mcp-remote sign-in store when there is one. */
-export async function detectMcp(host: Host): Promise<ManifestEntry[]> {
+/** One row per MCP server under its agent, then the mcp-remote sign-in store when there is one. Each agent's
+ * config is read by its entry's format module, so an agent the catalog gains needs nothing here. */
+export async function detectMcp(host: Host, agents: readonly McpAgent[] = MCP_AGENTS): Promise<ManifestEntry[]> {
   const store = await remoteStore(host);
   const tokens = store?.tokens ?? new Map<string, number>();
   const rows: ManifestEntry[] = [];
   const matched: string[] = [];
-  for (const config of MCP_CONFIGS) {
-    const text = await configText(host, config);
+  for (const agent of agents) {
+    const text = await configText(host, agent.mcp);
     if (text === undefined) continue;
-    for (const server of parseMcp(config.format, text, host.home)) {
+    for (const server of agent.mcp.format.read(text, host.home)) {
       const fit = linuxFit(server, host.home);
-      const c = await carried(host, server, config.format, tokens);
+      const c = await carried(host, server, agent, tokens);
       const deps = await homeDeps(host, server, c.paths);
       const hash = server.transport.kind === "stdio" ? mcpRemoteHash(server.transport.args) : undefined;
       if (hash !== undefined && tokens.has(hash)) matched.push(server.name);
-      rows.push(serverRow(config, server, fit, deps, c, host.home));
+      rows.push(serverRow(agent, server, fit, deps, c, host.home));
     }
   }
   if (store !== undefined) rows.push(remoteRow(store, matched));
   return rows;
 }
+

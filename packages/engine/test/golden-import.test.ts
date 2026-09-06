@@ -785,6 +785,30 @@ describe("catalog rows", () => {
     expect(toolUninstall(catalog("nothing"))).toEqual({ note: "no manager known for this row" });
   });
 
+  it("a catalog go row beside go rows is the manager's step: go installs once, the go rows wait on the catalog row, and no manager step is planned", () => {
+    const t = toolInstallsFor([catalog("go"), row({ rung: "tools", id: "tools/go/gopls", label: "gopls", paths: ["golang.org/x/tools/gopls@v0.16.2"] })]);
+    expect(t.installs.map(i => [i.id, i.after])).toEqual([
+      ["tools/homebrew", undefined],
+      ["tools/brew-toolchain/glibc", "tools/homebrew"],
+      ["tools/brew-toolchain/gcc", "tools/brew-toolchain/glibc"],
+      ["tools/catalog/go", "tools/brew-toolchain/gcc"],
+      ["tools/go/gopls", "tools/catalog/go"],
+    ]);
+    expect(t.installs.filter(i => /brew install go'$/.test(i.cmd))).toHaveLength(1);
+    expect(t.installs.at(-1)!.cmd).toMatch(/\ngo install golang\.org\/x\/tools\/gopls@v0\.16\.2$/);
+  });
+
+  it("a catalog row's version is the install's where the road pins one; where the road cannot, the note says what it installed instead", () => {
+    const t = toolInstallsFor([catalog("wrangler", { version: "4.1.0" }), catalog("gh", { version: "v2.86.0" }), catalog("tmux", { version: "3.5a" })]);
+    const get = (id: string) => t.installs.find(i => i.id === id)!;
+    expect(get("tools/catalog/wrangler").cmd).toMatch(/\nnpm install -g wrangler@4\.1\.0$/);
+    expect(get("tools/catalog/wrangler").note).toBe(UNMEASURED_ROAD);
+    expect(get("tools/catalog/gh").cmd).toContain("'https://api.github.com/repos/cli/cli/releases/tags/v2.86.0'");
+    expect(get("tools/catalog/gh").cmd).not.toContain('[ "$sum" =');
+    expect(get("tools/catalog/tmux").cmd).toMatch(/\napt-get install -y -qq tmux$/);
+    expect(get("tools/catalog/tmux").note).toBe(`${UNMEASURED_ROAD}; 3.5a asked, installed by apt at its current version`);
+  });
+
   it("a bare row keeps the tag and checksum its first install recorded: the release fetches that tag and checks the sum, and so does the vendor's download", () => {
     const t = toolInstallsFor([catalog("gh", { pin: { tag: "v2.86.0", sha256: "d".repeat(64) } }), catalog("kubectl", { pin: { tag: "v1.37.0", sha256: "e".repeat(64) } })]);
     const gh = t.installs.find(i => i.id === "tools/catalog/gh")!.cmd;

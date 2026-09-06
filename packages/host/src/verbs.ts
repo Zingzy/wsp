@@ -17,6 +17,8 @@ import {
   workspaceWord,
   type ExecEvent,
   type GoldenManifest,
+  type ProjectExportEvent,
+  type ProjectExportResult,
   type SessionEvent,
   type SessionOrigin,
   type SessionView,
@@ -92,7 +94,7 @@ export async function dialHost(statePath: string, deadlineMs = DIAL_MS): Promise
       pending.set(id, { settle, fail });
       ws.send(JSON.stringify({ id, op, ...params }));
     });
-    if (frame.ok !== true) throw new Error(typeof frame["error"] === "string" ? frame["error"] : `${op} failed`);
+    if (frame.ok !== true) throw Object.assign(new Error(typeof frame["error"] === "string" ? frame["error"] : `${op} failed`), typeof frame["kind"] === "string" ? { kind: frame["kind"] } : {});
     return frame as T;
   };
   let timer: NodeJS.Timeout | undefined;
@@ -382,6 +384,49 @@ export async function execOn(client: HostClient, workspaceId: string, argv: read
   }
 }
 
+/** What an export asks for: the folder on the machine, where it lands here, whether to replace what is there, and
+ * which agents' sessions come home (every one with sessions for the folder when absent). */
+export interface ExportRequest {
+  source: string;
+  dest: string;
+  replace?: boolean;
+  agents?: readonly string[];
+}
+
+/** Brings a project folder and the agent sessions keyed to it home from the workspace's machine: `on` sees each
+ * stage of the export as the runtime says it, and the result is what landed. Fails when the host goes away first. */
+export async function exportProject(client: HostClient, workspaceId: string, req: ExportRequest, on: (e: ProjectExportEvent) => void): Promise<ProjectExportResult> {
+  const pushed = pushedFrames(client);
+  await client.events();
+  pushed.follow(
+    f => f.type === "project.export" && f["workspaceId"] === workspaceId && f["dest"] === req.dest,
+    f => on(f as unknown as ProjectExportEvent),
+  );
+  try {
+    const { exported } = await untilSettled(
+      client,
+      client.request<{ exported: ProjectExportResult }>("project.export", {
+        workspaceId,
+        source: req.source,
+        dest: req.dest,
+        ...(req.replace !== undefined ? { replace: req.replace } : {}),
+        ...(req.agents !== undefined ? { agents: req.agents } : {}),
+      }),
+    );
+    return exported;
+  } finally {
+    pushed.stop();
+  }
+}
+
+/** The agents a --agents flag names, comma-separated; nothing when the flag is absent. */
+export function agentsFlag(value: string | undefined): string[] | undefined {
+  if (value === undefined) return undefined;
+  const ids = value.split(",").map(s => s.trim()).filter(s => s !== "");
+  if (ids.length === 0) throw new Error("--agents names at least one agent, comma-separated");
+  return ids;
+}
+
 const notYet = (verb: string, usage: string, options: Verb["options"], does: string): Verb => ({
   name: verb,
   usage,
@@ -492,7 +537,34 @@ export const VERBS: readonly Verb[] = [
     },
   },
   notYet("import", "wsp import <folder> --to <workspace>", { to: { type: "string" } }, "moving a project folder into a workspace"),
-  notYet("export", "wsp export <workspace> <folder>", {}, "bringing a workspace's project folder home"),
+  {
+    name: "export",
+    usage: "wsp export <workspace> <folder> [--from <path on the machine>] [--replace] [--agents <ids>]",
+    about: "brings a project folder and the agent sessions keyed to it home from the machine",
+    options: { from: { type: "string" }, replace: { type: "boolean" }, agents: { type: "string" } },
+    run: async ctx => {
+      const [ref, folder] = ctx.args;
+      if (ref === undefined || folder === undefined || ctx.args.length !== 2) throw new Error("wsp export takes a workspace and a folder on this computer");
+      const dest = resolve(folder);
+      const agents = agentsFlag(flag(ctx.flags, "agents"));
+      const client = await ctx.client();
+      const workspace = await workspaceOf(client, ref);
+      const req: ExportRequest = { source: flag(ctx.flags, "from") ?? dest, dest, ...(ctx.flags["replace"] === true ? { replace: true } : {}), ...(agents !== undefined ? { agents } : {}) };
+      let done = "";
+      try {
+        const exported = await exportProject(client, workspace.id, req, e => {
+          if (e.stage === "done") done = e.message;
+          else if (e.stage !== "failed") ctx.out.stream(`${e.message}\n`);
+        });
+        ctx.out.emit({ exported }, done);
+        return 0;
+      } catch (e) {
+        if ((e as { kind?: unknown }).kind !== "exists") throw e;
+        ctx.io.error(`wsp export: ${e instanceof Error ? e.message : String(e)}\nRun again with --replace to overwrite it.`);
+        return 1;
+      }
+    },
+  },
 ];
 
 /** The verb whose words open argv, the longest first, so `thread new` wins over a verb named `thread`. */

@@ -4,7 +4,7 @@
 // the guest side of the exec stream over the stub backend.
 import { randomUUID } from "node:crypto";
 import type { TurnResult } from "@wsp/adapter-claude";
-import type { ExecResult } from "@wsp/engine";
+import { tarOf, type ExecResult } from "@wsp/engine";
 import type { HarnessAdapterFactory, HarnessStartOptions } from "@wsp/runtime";
 import type { CliIO } from "../src/cli.js";
 import type { StubBackend } from "./stub-backend.js";
@@ -90,6 +90,40 @@ export function execGuest(backend: StubBackend, output: string, exit: number | u
     }
     return base(m, cmd);
   };
+}
+
+export const EXPORT_SOURCE = "/root/work/proj";
+/** The one Claude Code session on the machine for the folder, as the export brings it down. */
+export const EXPORT_SESSION = (cwd: string): string => `{"type":"user","cwd":"${cwd}","sessionId":"S1"}\n`;
+
+/** The guest side of an export: the folder is there, its archive and the Claude Code state root come down for the
+ * paths the machine packs them at, and only that root exists among the agents' homes. */
+export function exportGuest(backend: StubBackend): { sources: string[] } {
+  const base = backend.execImpl;
+  const tars = new Map<string, Buffer>();
+  const sources: string[] = [];
+  backend.downloads = path => tars.get(path) ?? tarOf([]);
+  backend.execImpl = (m, cmd): Promise<ExecResult> | ExecResult => {
+    const probed = /^test -d '([^']+)'/.exec(cmd)?.[1];
+    if (probed !== undefined) {
+      sources.push(probed);
+      return { exitCode: 0, stdout: "yes\n", stderr: "" };
+    }
+    if (cmd.startsWith("for p in ")) return { exitCode: 0, stdout: cmd.includes("'/root/.claude-cfg/projects'") ? "/root/.claude-cfg/projects\n" : "", stderr: "" };
+    const out = /tar czf '([^']+)'/.exec(cmd)?.[1];
+    if (out !== undefined && cmd.includes("find .")) {
+      tars.set(out, tarOf([{ path: "./src/index.ts", mode: 0o644, content: "export const a = 1;\n" }, { path: "./.env", mode: 0o600, content: "TOKEN=x\n" }]));
+      return { exitCode: 0, stdout: "node_modules\n", stderr: "" };
+    }
+    if (out !== undefined) {
+      tars.set(out, tarOf([{ path: "root/.claude-cfg/projects/-root-work-proj/S1.jsonl", mode: 0o644, content: EXPORT_SESSION(EXPORT_SOURCE) }]));
+      return { exitCode: 0, stdout: "", stderr: "" };
+    }
+    const sized = /^wc -c < '([^']+)'/.exec(cmd)?.[1];
+    if (sized !== undefined) return { exitCode: 0, stdout: `${tars.get(sized)?.length ?? 0}\n`, stderr: "" };
+    return base(m, cmd);
+  };
+  return { sources };
 }
 
 /** The script the launch carried to the machine, decoded. */

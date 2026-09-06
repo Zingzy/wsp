@@ -134,6 +134,7 @@ describe("diff surface", () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS, "git.diff": { ...DIFF, files: [DIFF.files[0]!, { path: "huge.log", patch: "" }], truncated: true } }));
     const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
     await waitFor(() => expect(container.querySelector("[data-diff-truncated]")).not.toBeNull());
+    expect(container.querySelector("[data-diff-truncated]")?.textContent).toContain("2 MB budget");
     expect(items(container)).toHaveLength(1);
     expect(container.querySelector("[data-changed-files]")?.textContent).toContain("huge.log");
   });

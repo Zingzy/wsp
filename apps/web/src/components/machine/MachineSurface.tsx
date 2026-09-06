@@ -400,7 +400,7 @@ function LiveRow({ label, k, samples, y, text, tier, stale, unavailable }: LiveR
 
   return (
     <div
-      className="grid h-7 grid-cols-[3.25rem_minmax(0,1fr)_8rem] items-center gap-2 text-xs"
+      className="grid h-7 grid-cols-[3.25rem_minmax(0,1fr)_10rem] items-center gap-2 text-xs"
       data-live-row={k}
       {...(stale !== null ? { "data-stale": stale } : {})}
       {...(unavailable !== null ? { "data-unavailable": unavailable } : {})}

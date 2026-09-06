@@ -10,6 +10,7 @@ export const piResolver: ProjectStateResolver = {
   agent: "pi",
   carry: "moves",
   states: ["sessions"],
+  roots: ["sessions"],
   async move(home, from, to) {
     const { files, changed } = await moveKeyedDirectories(join(home, "sessions"), piProjectKey, from, to);
     return changed > 0 ? [{ state: "sessions", files, changed }] : [];
