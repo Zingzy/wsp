@@ -20,7 +20,7 @@ import type { HostHandle } from "../src/server.js";
 import type { HostClient } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
-import { EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, projectBundler, heldAgent, scriptedAgent, stuckAgent, doneOnlyAgent } from "./verbs-fixture.js";
+import { CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, projectBundler, heldAgent, scriptedAgent, stuckAgent, doneOnlyAgent } from "./verbs-fixture.js";
 
 interface Called {
   text: string;
@@ -322,6 +322,21 @@ describe("the MCP server over the host", () => {
     ]);
     const missing = await call("send", { thread: "nope", message: "x" });
     expect(missing).toEqual({ text: "no thread nope", structured: undefined, isError: true });
+  });
+
+  it("send into a thread whose last turn was cut puts the cut line first in the result text and flags it; the send after that is plain", async () => {
+    await call("new", { name: "alpha" });
+    const [alpha] = await rt.workspaces.list();
+    const cut = await call("thread_new", { workspace: "alpha", task: "cut" });
+    expect(cut).toMatchObject({ isError: true, text: CUT_LINE });
+    const [row] = await rt.sessions.list();
+    const resumed = await call("send", { thread: row!.threadId!, message: "again" });
+    expect(resumed.isError).toBe(false);
+    expect(resumed.text).toBe("previous turn was cut; resuming\nre: again");
+    expect(resumed.structured).toEqual({ threadId: row!.threadId, workspaceId: alpha!.id, harness: "claude", text: "re: again", outcome: "started", afterCut: true });
+    const next = await call("send", { thread: row!.threadId!, message: "once more" });
+    expect(next.text).toBe("re: once more");
+    expect(next.structured).not.toHaveProperty("afterCut");
   });
 
   it("send into a thread whose turn runs joins that turn when the agent steers and returns the running turn's reply; no second start", async () => {

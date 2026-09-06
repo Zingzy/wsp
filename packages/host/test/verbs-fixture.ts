@@ -38,7 +38,9 @@ export function captured(): Captured {
 }
 
 /** A harness that answers every prompt with reply(prompt) in two text deltas, or fails the turn when the reply is
- * empty; a resumed start keeps the session id, as the real one does. */
+ * empty; a resumed start keeps the session id, as the real one does. The prompt `cut` is a turn the transport cut,
+ * as the idle deadline does: a failed done, then an end with no exit code and no result. */
+export const CUT_LINE = "stopped after 15m 00s with no output for 10m";
 export function scriptedAgent(reply: (prompt: string) => string) {
   const starts: HarnessStartOptions[] = [];
   const adapter: HarnessAdapterFactory = () => ({
@@ -46,8 +48,9 @@ export function scriptedAgent(reply: (prompt: string) => string) {
     start: o => {
       starts.push(o);
       const sessionId = o.resume ?? randomUUID();
-      const text = reply(o.prompt);
-      const result: TurnResult = text === "" ? { status: "failed", error: "the harness died" } : { status: "completed", text };
+      const cut = o.prompt === "cut";
+      const text = cut ? "" : reply(o.prompt);
+      const result: TurnResult = cut ? { status: "failed", error: CUT_LINE } : text === "" ? { status: "failed", error: "the harness died" } : { status: "completed", text };
       const finished = Promise.resolve().then(() => {
         o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" });
         if (text !== "") {
@@ -56,7 +59,7 @@ export function scriptedAgent(reply: (prompt: string) => string) {
           o.onEvent({ type: "turn.delta", sessionId, kind: "text", text: text.slice(4) });
         }
         o.onEvent({ type: "turn.done", sessionId, result });
-        o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+        o.onEvent({ type: "session.end", sessionId, exitCode: cut ? null : 0, sawResult: !cut });
         return result;
       });
       return { localId: sessionId, finished, interrupt: async () => {} };

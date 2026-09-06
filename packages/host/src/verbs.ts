@@ -12,6 +12,7 @@ import { resolve } from "node:path";
 import { parseArgs, type ParseArgsConfig } from "node:util";
 import WebSocket from "ws";
 import {
+  AFTER_CUT_LINE,
   NOTIFY_ME,
   foldThreads,
   goldenHead,
@@ -330,6 +331,8 @@ export interface Turn {
   outcome: SessionStartOutcome;
   result?: TurnResult;
   reason?: string;
+  /** The thread's previous turn ended without a result, as the turn's session.start said. */
+  afterCut?: true;
 }
 
 /** A folder named for a thread, refused unless absolute: the harness would run a relative one against its own home
@@ -408,6 +411,7 @@ export async function follow(
       f => sessionEvent(f) && f.turnId === turnId,
       f => {
         const e = f as unknown as SessionEvent;
+        if (e.type === "session.start" && e.afterCut === true) turn.afterCut = true;
         if (e.type === "session.done") turn.result = e.result;
         if (e.type === "session.end" && e.reason !== undefined) turn.reason = e.reason;
         on.event(e, turn);
@@ -450,6 +454,7 @@ async function followVerb(ctx: VerbContext, client: HostClient, start: Record<st
     },
     event: e => {
       ctx.out.emit(e, e.type === "session.done" ? e.result.text : undefined);
+      if (e.type === "session.start" && e.afterCut === true) ctx.io.error(AFTER_CUT_LINE);
       if (e.type === "session.delta" && e.kind === "text") ctx.out.stream(e.text);
       if (e.type === "session.notify" && e.notify === NOTIFY_ME) ctx.io.error(e.text);
     },

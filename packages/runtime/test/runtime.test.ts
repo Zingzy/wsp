@@ -242,6 +242,34 @@ describe("runtime session history", () => {
     await rt.close();
   });
 
+  it("a harness that announces itself twice on one turn records one session.start, under the id it announced", async () => {
+    const sessionId = "66666666-6666-4666-8666-666666666666";
+    const twice: HarnessAdapterFactory = () => ({
+      steers: false,
+      start: o => {
+        const result: TurnResult = { status: "completed", text: "ok" };
+        const finished = Promise.resolve().then(() => {
+          o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5", cwd: "/root/work" });
+          o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5", cwd: "/root/work" });
+          o.onEvent({ type: "turn.delta", sessionId, kind: "text", text: "ok" });
+          o.onEvent({ type: "turn.done", sessionId, result });
+          o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+          return result;
+        });
+        return { localId: sessionId, finished, interrupt: async () => {} };
+      },
+    });
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: twice } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await (await rt.sessions.start(ws.id, { prompt: "first" })).finished;
+
+    const history = await rt.sessions.history(ws.id);
+    expect(history.map(e => e.type)).toEqual(["session.start", "session.delta", "session.done", "session.end"]);
+    expect(history[0]).toMatchObject({ type: "session.start", sessionId, prompt: "first", cwd: "/root/work" });
+    expect((await rt.sessions.list(ws.id))[0]).toMatchObject({ claudeSessionId: sessionId, cwd: "/root/work", status: "completed" });
+    await rt.close();
+  });
+
   /** Emits one full turn per start, under the resume id when given, else a fresh id; `rekey` makes a resumed
    * start announce a different id in system/init, as the CLI is allowed to. */
   const threaded = (rekey?: (resume: string) => string): HarnessAdapterFactory => () => ({
@@ -868,6 +896,61 @@ describe("runtime session index", () => {
     const rt3 = createRuntime({ backend, store, adapters: {} });
     expect((await rt3.sessions.history(ws.id)).filter(e => e.type === "session.end")).toHaveLength(2);
     await rt3.close();
+  });
+
+  it("a resume after a turn the restart cut stamps afterCut on its start; the resume after that does not", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const t = turns();
+    const rt1 = createRuntime({ backend, store, adapters: { claude: t.adapter, hung } });
+    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
+    await rt1.sessions.start(ws.id, { prompt: "first", harness: "hung" });
+    await rt1.close();
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: t.adapter } });
+    await (await rt2.sessions.start(ws.id, { prompt: "second", resume: HUNG_ID })).finished;
+    await (await rt2.sessions.start(ws.id, { prompt: "third", resume: HUNG_ID })).finished;
+    const starts = (await rt2.sessions.history(ws.id)).filter(e => e.type === "session.start");
+    expect(starts.map(e => [e.prompt, e.afterCut])).toEqual([["first", undefined], ["second", true], ["third", undefined]]);
+    expect(new Set(starts.map(e => e.threadId)).size).toBe(1);
+    await rt2.close();
+  });
+
+  /** A harness whose turn the transport cut, as the idle deadline does: a failed done, then an end with no exit code and
+   * no result. Every other prompt is one completed turn. */
+  const CUT_ID = "77777777-7777-4777-8777-777777777777";
+  const cutting: HarnessAdapterFactory = () => ({
+    steers: false,
+    start: o => {
+      const sessionId = o.resume ?? CUT_ID;
+      const cut = o.prompt === "cut";
+      const result: TurnResult = cut ? { status: "failed", error: "stopped after 15m 00s with no output for 10m" } : { status: "completed", text: o.prompt };
+      const finished = Promise.resolve().then(() => {
+        o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5", cwd: "/root/work" });
+        o.onEvent({ type: "turn.done", sessionId, result });
+        o.onEvent({ type: "session.end", sessionId, exitCode: cut ? null : 0, sawResult: !cut });
+        return result;
+      });
+      return { localId: sessionId, finished, interrupt: async () => {} };
+    },
+  });
+
+  it("a resume after a turn the transport cut stamps afterCut; a turn that failed with an exit code, or finished, leaves the next start plain", async () => {
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: cutting, dying } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await (await rt.sessions.start(ws.id, { prompt: "cut" })).finished;
+    await (await rt.sessions.start(ws.id, { prompt: "second", resume: CUT_ID })).finished;
+    await (await rt.sessions.start(ws.id, { prompt: "third", resume: CUT_ID })).finished;
+    await (await rt.sessions.start(ws.id, { prompt: "dies", resume: CUT_ID, harness: "dying" })).finished;
+    await (await rt.sessions.start(ws.id, { prompt: "fifth", resume: CUT_ID })).finished;
+    const starts = (await rt.sessions.history(ws.id)).filter(e => e.type === "session.start");
+    expect(starts.map(e => [e.prompt, e.afterCut])).toEqual([["cut", undefined], ["second", true], ["third", undefined], ["fifth", undefined]]);
+    // a fresh thread has no previous turn
+    await (await rt.sessions.start(ws.id, { prompt: "cut" })).finished;
+    const opened = (await rt.sessions.history(ws.id)).filter(e => e.type === "session.start").at(-1);
+    expect(opened).toMatchObject({ prompt: "cut" });
+    expect(opened!.afterCut).toBeUndefined();
+    await rt.close();
   });
 
   /** A harness that dies before init: only a done and an end, under the resume id or a fresh local one. */

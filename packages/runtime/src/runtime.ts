@@ -1031,6 +1031,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return randomUUID();
   };
 
+  /** Whether the thread's last turn ended with no exit code and no result: the runtime or its transport ended the
+   * process (a deadline, a host restart, a nap), so the harness resumes a transcript it never finished writing. */
+  const cutBefore = (workspaceId: string, threadId: string): boolean => {
+    const events = transcripts.get(workspaceId) ?? [];
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i]!;
+      if (e.type === "session.end" && e.threadId === threadId) return e.exitCode === null && !e.sawResult;
+    }
+    return false;
+  };
+
   /** The folder a resumed session's harness ran in, from its row or, past the index cap, its start event. The CLI
    * keys a session to that folder, so a resume anywhere else opens nothing. */
   const folderOf = (workspaceId: string, resume: string): string | undefined => {
@@ -1987,6 +1998,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
       const turnId = randomUUID();
       const cwd = (o.resume !== undefined ? folderOf(workspaceId, o.resume) : undefined) ?? o.cwd;
+      const afterCut = o.resume !== undefined && cutBefore(workspaceId, threadId);
       // Created before adapter.start so events that fire synchronously during
       // start() still land on the view. A resume id was announced by the harness
       // in an earlier turn, so the row carries it before this one answers.
@@ -2007,6 +2019,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}),
       };
       let ended = false;
+      let startRecorded = false;
 
       const forward = (event: AdapterEvent): void => {
         if (ended) return;
@@ -2019,6 +2032,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             entry.record.claudeSessionId = sessionId;
             void persist(entry.record);
             void persistSessions(workspaceId);
+            // One turn is one start row however often the harness announces itself.
+            if (startRecorded) return;
+            startRecorded = true;
             record({
               type: "session.start",
               workspaceId,
@@ -2027,6 +2043,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               threadId,
               prompt: o.prompt,
               ...(o.requestId !== undefined ? { requestId: o.requestId } : {}),
+              ...(afterCut ? { afterCut } : {}),
               ...(event.model !== undefined ? { model: event.model } : {}),
               ...(event.cwd !== undefined ? { cwd: event.cwd } : {}),
               ...(event.tools !== undefined ? { tools: event.tools } : {}),

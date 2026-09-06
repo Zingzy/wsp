@@ -220,6 +220,12 @@ describe("session wire fields the face reads", () => {
     expect(() => SessionEvent.parse({ ...started, harness: { slashCommands: "compact" } })).toThrow();
   });
 
+  it("session.start may say the thread's previous turn was cut, and only as true: the fact is stated or absent", () => {
+    const started = { type: "session.start", workspaceId: "ws_1", sessionId: "s1", afterCut: true };
+    expect(SessionEvent.parse(started)).toEqual(started);
+    expect(() => SessionEvent.parse({ ...started, afterCut: false })).toThrow();
+  });
+
   it("SessionView carries prompt, startedAt and endedAt so the sidebar can title and sort threads", () => {
     const running = {
       id: "0b6a9c1e-0000-4000-8000-000000000000",
