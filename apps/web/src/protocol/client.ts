@@ -17,6 +17,8 @@ import {
   type GoldenVersion,
   type PortProbeView,
   type PortReachView,
+  ProjectImportResult,
+  ProjectPlan,
   type SessionEvent,
   type SessionView,
   type SnapshotLineage,
@@ -272,6 +274,12 @@ export interface Api {
    * asks the binaries on its machine, else its table answers. Optional so fixtures without pickers need not fake it;
    * without it the composer shows none. */
   listHarnesses?(workspaceId?: string): Promise<HarnessCatalog[]>;
+  /** What importing a folder on this computer would carry; nothing is read into memory or uploaded. Optional so
+   * fixtures that never import need not fake it; the sidebar offers no import without it. */
+  planProject?(source: string): Promise<ProjectPlan>;
+  /** Packs the folder and lands it on the workspace's machine; progress rides project.import events, this resolves
+   * with what landed. carry and rewrite name paths from the plan's secrets; an existing dest is refused unless replace. */
+  importProject?(opts: ImportProjectOptions): Promise<ProjectImportResult>;
   subscribe(fn: (e: ProtocolEvent) => void): () => void;
   /** The named golden manifest, undefined on a fresh install: that absence is what points the page at wsp init. */
   getGolden(name?: string): Promise<GoldenManifest | undefined>;
@@ -299,6 +307,17 @@ export interface StartSessionOptions {
   effort?: string;
   permissionMode?: string;
   contextWindow?: string;
+}
+
+export interface ImportProjectOptions {
+  workspaceId: string;
+  /** The folder on this computer as the person picked it; events echo this spelling. */
+  source: string;
+  /** Where it lands on the machine, absolute. */
+  dest: string;
+  replace?: boolean;
+  carry?: string[];
+  rewrite?: string[];
 }
 
 /** The created view plus the runtime's notice when it stopped a builder kept after a save to make room. */
@@ -346,6 +365,9 @@ export function makeApi(c: ProtocolClient): Api {
     // Parsed, not trusted: a picker renders only values the wire type vouches for.
     listHarnesses: async workspaceId =>
       HarnessCatalog.array().parse((await c.request<{ harnesses?: unknown }>("harnesses.list", workspaceId !== undefined ? { workspaceId } : {})).harnesses),
+    // Parsed, not trusted: the consent step renders only what the wire type vouches for.
+    planProject: async source => ProjectPlan.parse((await c.request<{ plan?: unknown }>("project.plan", { source })).plan),
+    importProject: async opts => ProjectImportResult.parse((await c.request<{ imported?: unknown }>("project.import", { ...opts })).imported),
     subscribe: fn => c.subscribe(fn),
     getGolden: async (name = "default") => (await c.request<{ manifest?: GoldenManifest }>("golden.get", { name })).manifest,
     listSnapshots: async name =>

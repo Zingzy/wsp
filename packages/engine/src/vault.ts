@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
+import { shellQuote } from "@wsp/protocol";
 import { backoffMs, classify, shouldRetry } from "./errors.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import type { Machine } from "./machine.js";
@@ -31,10 +32,6 @@ export interface UploadProgress {
   total: number;
 }
 
-function quote(p: string): string {
-  return `'${p.replace(/'/g, `'\\''`)}'`;
-}
-
 /** The archive at path on the guest, brought down over its signed URL; total is the size read on the guest when
  * the caller has it, else the archive's own length once it is here. */
 async function download(machine: Machine, path: string, opts: VaultOptions, total?: number): Promise<Buffer> {
@@ -61,14 +58,14 @@ async function download(machine: Machine, path: string, opts: VaultOptions, tota
 // stdout could carry base64 for small exports but hits response-size limits.
 export async function exportPaths(machine: Machine, paths: string[], opts: VaultOptions = {}): Promise<Buffer> {
   const tmp = `/tmp/wsp-vault-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tgz`;
-  const rel = paths.map(p => quote(p.replace(/^\//, "")));
-  const tar = await machine.run(`tar czf ${quote(tmp)} -C / ${rel.join(" ")}`, { deadlineMs: opts.timeoutMs ?? 120_000 });
+  const rel = paths.map(p => shellQuote(p.replace(/^\//, "")));
+  const tar = await machine.run(`tar czf ${shellQuote(tmp)} -C / ${rel.join(" ")}`, { deadlineMs: opts.timeoutMs ?? 120_000 });
   if (tar.exitCode !== 0) {
     throw new Error(`vault export tar failed (exit ${tar.exitCode}): ${tar.stderr.slice(-500)}`);
   }
   try {
     if (opts.maxBytes !== undefined) {
-      const stat = await machine.exec(`stat -c %s ${quote(tmp)}`, { timeoutMs: INLINE_EXEC_MS });
+      const stat = await machine.exec(`stat -c %s ${shellQuote(tmp)}`, { timeoutMs: INLINE_EXEC_MS });
       const bytes = Number(stat.stdout.trim());
       if (stat.exitCode !== 0 || !Number.isFinite(bytes)) throw new Error(`vault export size unknown: ${stat.stderr.slice(-200)}`);
       if (bytes > opts.maxBytes) {
@@ -77,7 +74,7 @@ export async function exportPaths(machine: Machine, paths: string[], opts: Vault
     }
     return await download(machine, tmp, opts);
   } finally {
-    await machine.exec(`rm -f ${quote(tmp)}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => {});
+    await machine.exec(`rm -f ${shellQuote(tmp)}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => {});
   }
 }
 
@@ -92,34 +89,34 @@ export interface CacheRule {
  * the rule, tar leaves those subtrees behind, and the roots come back on stdout one per line, relative to the folder.
  * Nothing under a .git directory is judged, as on the trip out. Only find and tar features both GNU and BSD have. */
 export function folderExportScript(dir: string, rule: CacheRule, out: string): string {
-  const named = [...rule.globs.map(g => `-name ${quote(g)}`), ...rule.markers.map(m => `\\( -type d -exec test -f ${quote(`{}/${m}`)} \\; \\)`)];
+  const named = [...rule.globs.map(g => `-name ${shellQuote(g)}`), ...rule.markers.map(m => `\\( -type d -exec test -f ${shellQuote(`{}/${m}`)} \\; \\)`)];
   const list = `${out}.list`;
   return [
     "set -eo pipefail",
-    `cd ${quote(dir)}`,
-    `find . -mindepth 1 \\( -path './.git' -o -path '*/.git' \\) -prune -o \\( ${named.join(" -o ")} \\) -prune -print > ${quote(list)}`,
-    `tar czf ${quote(out)} -X ${quote(list)} .`,
-    `sed 's|^\\./||' ${quote(list)}`,
-    `rm -f ${quote(list)}`,
+    `cd ${shellQuote(dir)}`,
+    `find . -mindepth 1 \\( -path './.git' -o -path '*/.git' \\) -prune -o \\( ${named.join(" -o ")} \\) -prune -print > ${shellQuote(list)}`,
+    `tar czf ${shellQuote(out)} -X ${shellQuote(list)} .`,
+    `sed 's|^\\./||' ${shellQuote(list)}`,
+    `rm -f ${shellQuote(list)}`,
   ].join("\n");
 }
 
 /** A folder on the guest as an archive rooted at the folder, its caches left behind under the rule and named; the
  * folder is checked first so a wrong path costs one command, and the guest keeps nothing afterwards. */
 export async function exportFolder(machine: Machine, dir: string, rule: CacheRule, opts: VaultOptions = {}): Promise<{ tar: Buffer; excluded: string[] }> {
-  const probe = await machine.exec(`test -d ${quote(dir)} && echo yes || echo no`, { timeoutMs: INLINE_EXEC_MS });
+  const probe = await machine.exec(`test -d ${shellQuote(dir)} && echo yes || echo no`, { timeoutMs: INLINE_EXEC_MS });
   if (probe.exitCode !== 0 || probe.stdout.trim() !== "yes") throw new Error(`${dir} is not a folder on the machine`);
   const tmp = `/tmp/wsp-out-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tgz`;
   try {
     const packed = await machine.run(folderExportScript(dir, rule, tmp), { deadlineMs: opts.timeoutMs ?? 600_000 });
     if (packed.exitCode !== 0) throw new Error(`packing ${dir} on the machine failed (exit ${packed.exitCode}): ${packed.stderr.slice(-500)}`);
     const excluded = packed.stdout.split("\n").filter(l => l !== "").sort();
-    const size = await machine.exec(`wc -c < ${quote(tmp)}`, { timeoutMs: INLINE_EXEC_MS });
+    const size = await machine.exec(`wc -c < ${shellQuote(tmp)}`, { timeoutMs: INLINE_EXEC_MS });
     const total = Number(size.stdout.trim());
     if (size.exitCode !== 0 || !Number.isFinite(total)) throw new Error(`the archive's size on the machine is unknown: ${size.stderr.slice(-200)}`);
     return { tar: await download(machine, tmp, opts, total), excluded };
   } finally {
-    await machine.exec(`rm -f ${quote(tmp)} ${quote(`${tmp}.list`)}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => {});
+    await machine.exec(`rm -f ${shellQuote(tmp)} ${shellQuote(`${tmp}.list`)}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => {});
   }
 }
 
@@ -273,7 +270,7 @@ export async function importInto(machine: Machine, tar: Buffer, destDir: string,
     }
   } catch (e) {
     // Every part path, not only those that answered ok: a body can land before the response fails.
-    await machine.exec(`rm -f ${partPaths.map(quote).join(" ")}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => {});
+    await machine.exec(`rm -f ${partPaths.map(shellQuote).join(" ")}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => {});
     throw e;
   }
   const digest = createHash("sha256").update(tar).digest("hex");
@@ -284,14 +281,14 @@ export async function importInto(machine: Machine, tar: Buffer, destDir: string,
   const flags = opts.overlay ? "--no-same-owner" : "--recursive-unlink";
   // The parts are streamed into tar in order, never joined on disk, so the guest holds the archive once.
   // pipefail: a part cat cannot read fails the hash line with cat's message instead of hashing what flowed.
-  const joined = `cat ${partPaths.map(quote).join(" ")}`;
+  const joined = `cat ${partPaths.map(shellQuote).join(" ")}`;
   const script = [
     "set -eo pipefail",
-    `trap "rm -f ${partPaths.map(quote).join(" ")}" EXIT`,
+    `trap "rm -f ${partPaths.map(shellQuote).join(" ")}" EXIT`,
     `sum=$(${joined} | sha256sum | cut -d' ' -f1)`,
     `test "$sum" = ${digest} || exit ${HASH_MISMATCH_EXIT}`,
-    `mkdir -p ${quote(destDir)}`,
-    `${joined} | tar xzf - -C ${quote(destDir)} ${flags}`,
+    `mkdir -p ${shellQuote(destDir)}`,
+    `${joined} | tar xzf - -C ${shellQuote(destDir)} ${flags}`,
   ].join("\n");
   const untar = await machine.run(script, { deadlineMs: opts.timeoutMs ?? 120_000 });
   if (untar.exitCode === HASH_MISMATCH_EXIT) {
@@ -324,7 +321,7 @@ const exists = (path: string): Error => Object.assign(new Error(`${path} already
 export async function landBundle(machine: Machine, tar: Buffer, dest: string, opts: LandOptions = {}): Promise<{ parts: number }> {
   const target = dest.replace(/\/+$/, "");
   if (!dest.startsWith("/") || target === "") throw new Error(`destination must be an absolute path below /, got ${dest}`);
-  const probe = await machine.exec(`test -e ${quote(target)} && echo yes || echo no`, { timeoutMs: INLINE_EXEC_MS });
+  const probe = await machine.exec(`test -e ${shellQuote(target)} && echo yes || echo no`, { timeoutMs: INLINE_EXEC_MS });
   if (probe.exitCode !== 0) throw new Error(`could not look at ${target} on the machine: ${probe.stderr.slice(-200)}`);
   if (probe.stdout.trim() === "yes" && opts.replace !== true) throw exists(target);
   const staging = `${target}.wsp-in-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -334,16 +331,16 @@ export async function landBundle(machine: Machine, tar: Buffer, dest: string, op
     ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
     ...(opts.onPart !== undefined ? { onPart: opts.onPart } : {}),
   }).catch(async (e: unknown) => {
-    await machine.exec(`rm -rf ${quote(staging)}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => {});
+    await machine.exec(`rm -rf ${shellQuote(staging)}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => {});
     throw e;
   });
   opts.onLanding?.();
   const script = [
     "set -e",
-    `trap "rm -rf ${quote(staging)}" EXIT`,
-    `mkdir -p ${quote(target.slice(0, target.lastIndexOf("/")) || "/")}`,
-    opts.replace === true ? `rm -rf ${quote(target)}` : `test ! -e ${quote(target)} || exit ${EXISTS_EXIT}`,
-    `mv ${quote(staging)} ${quote(target)}`,
+    `trap "rm -rf ${shellQuote(staging)}" EXIT`,
+    `mkdir -p ${shellQuote(target.slice(0, target.lastIndexOf("/")) || "/")}`,
+    opts.replace === true ? `rm -rf ${shellQuote(target)}` : `test ! -e ${shellQuote(target)} || exit ${EXISTS_EXIT}`,
+    `mv ${shellQuote(staging)} ${shellQuote(target)}`,
   ].join("\n");
   const moved = await machine.run(script, { deadlineMs: opts.timeoutMs ?? 120_000 });
   if (moved.exitCode === EXISTS_EXIT) throw exists(target);

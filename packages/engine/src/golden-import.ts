@@ -6,7 +6,7 @@
 // runs the plan on the builder.
 import { createHash } from "node:crypto";
 import { join, relative } from "node:path";
-import { MCP_ID_PREFIX, type RecipeDigest } from "@wsp/protocol";
+import { MCP_ID_PREFIX, shellQuote, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
 import { APT_INDEX, APT_UPDATE, BREW, BREW_PREFIX, CATALOG_AGENTS, CLAUDE_KEY_FILE, HOMEBREW, HOMEBREW_STEP, NODE_PATH_LINE, NODE_RELEASES, UV_INSTALL, asLinuxbrew, asLinuxbrewScript, baseEntryFor, baseNote, catalogEntry, installLine, linuxCaskFor, nodeInstallScript, pinStateOf, ROAD_MODULES, roadModule, smokeOf, vendorRoad, type InstallRoad, type NodeMajor, type RoadName, type ToolPin } from "@wsp/catalog";
 
@@ -594,10 +594,6 @@ const PNPM_HOME = "/root/.local/share/pnpm";
 export const TOOLS_PATH = `/root/.local/bin:/usr/local/sbin:/usr/local/bin:${BREW_PREFIX}/bin:${BREW_PREFIX}/sbin:/root/go/bin:/root/.cargo/bin:${PNPM_HOME}:/root/.bun/bin:/usr/sbin:/usr/bin:/sbin:/bin`;
 export const PATH_LINE = `export PATH=${TOOLS_PATH} PNPM_HOME=${PNPM_HOME}`;
 
-function squote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
-}
-
 /** After the tools loop: dependencies no formula needs any more (a failed formula
  * left a 2.4 GB llvm@21 behind), then the bottle cache and old kegs (5.5 GB measured). */
 export const BREW_HOUSEKEEPING: readonly string[] = [`${PATH_LINE}\n${asLinuxbrew("autoremove")}`, `${PATH_LINE}\n${asLinuxbrew("cleanup -s --prune=all")}`];
@@ -610,7 +606,7 @@ function brewSharedDeps(formulae: readonly string[]): string {
   return asLinuxbrewScript(
     [
       "set -uo pipefail",
-      `shared=$(${BREW} deps --for-each ${formulae.map(squote).join(" ")} | sed 's/^[^:]*: *//' | tr ' ' '\\n' | grep -vx -e '' ${keep} | sort | uniq -d || true)`,
+      `shared=$(${BREW} deps --for-each ${formulae.map(shellQuote).join(" ")} | sed 's/^[^:]*: *//' | tr ' ' '\\n' | grep -vx -e '' ${keep} | sort | uniq -d || true)`,
       'if [ -z "$shared" ]; then echo "no shared dependencies"; exit 0; fi',
       'echo "shared: $(echo $shared)"',
       `${BREW} install $shared; rc=$?`,
@@ -633,7 +629,7 @@ function homebrewBootstrap(): string {
     `  ln -sfn ../Homebrew/bin/brew ${BREW_PREFIX}/bin/brew`,
     "  chown -R linuxbrew:linuxbrew /home/linuxbrew",
     "fi",
-    `printf '%s\\n' ${squote(PATH_LINE)} > /etc/profile.d/wsp-golden.sh`,
+    `printf '%s\\n' ${shellQuote(PATH_LINE)} > /etc/profile.d/wsp-golden.sh`,
     `${asLinuxbrew("--version")} >/dev/null`,
   ].join("\n");
 }
@@ -957,7 +953,7 @@ export function editorInstallsFor(entries: readonly RecipeEntry[]): EditorsPlan 
       else out.skipped.push({ id: e.id, note: "not an extension id" });
     }
     if (ids.length === 0) continue;
-    const list = ids.map(squote).join(" ");
+    const list = ids.map(shellQuote).join(" ");
     out.installs.push({
       id: `editors/${key}-ext`,
       label: `${ed.name} extension list`,

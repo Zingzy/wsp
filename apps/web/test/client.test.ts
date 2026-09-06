@@ -48,6 +48,21 @@ describe("makeApi wrappers", () => {
     await expect(interrupt("s1")).rejects.toThrow();
   });
 
+  it("planProject and importProject send the project ops and unwrap only what the wire type vouches for", async () => {
+    const { api, lastSent } = await connect();
+    const plan = { source: "/private/var/proj", repo: true, files: 3, bytes: 900, secrets: [{ path: ".env", bytes: 10, signals: ["name"] }], excluded: ["node_modules"], skipped: [], agents: [] };
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, plan });
+    expect(await api.planProject!("/var/proj")).toEqual(plan);
+    expect(lastSent()).toEqual({ id: expect.any(Number), op: "project.plan", source: "/var/proj" });
+    const imported = { dest: "/private/var/proj", files: 2, bytes: 800, parts: 1, cut: [".env"], rewritten: [], agents: [] };
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, imported });
+    expect(await api.importProject!({ workspaceId: "ws_1", source: "/var/proj", dest: "/private/var/proj", carry: [], rewrite: [".git/config"], replace: true })).toEqual(imported);
+    expect(lastSent()).toEqual({ id: expect.any(Number), op: "project.import", workspaceId: "ws_1", source: "/var/proj", dest: "/private/var/proj", carry: [], rewrite: [".git/config"], replace: true });
+    // A reply without the plan must not become a plan.
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true });
+    await expect(api.planProject!("/var/proj")).rejects.toThrow();
+  });
+
   it("upgrade sends workspaces.upgrade with the size and unwraps the workspace", async () => {
     const { api, lastSent } = await connect();
     const workspace = { id: "ws_1", name: "x", machineId: "m2", phase: "running", golden: "g", createdAt: "t" };

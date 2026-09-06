@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { hostname } from "node:os";
-import { shellQuote, type AdapterEvent, type ExecStream, type TurnResult } from "@wsp/adapter-claude";
+import type { AdapterEvent, ExecStream, TurnResult } from "@wsp/adapter-claude";
 import {
   BUILDER_IDLE_MS,
   DAEMON_PORT,
@@ -14,7 +14,6 @@ import {
   goldenHead,
   importInto,
   landBundle,
-  fmtBytes,
   plural,
   agentsOnMachine,
   guestAgentHomes,
@@ -84,7 +83,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, sendRefusal, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, fmtBytes, sendRefusal, shellQuote, workspaceState } from "@wsp/protocol";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { DAEMON_TOKEN_SET, assertTokenShape, rotateDaemonTokenScript } from "./daemon-token.js";
@@ -956,6 +955,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return randomUUID();
   };
 
+  /** The folder a resumed session's harness ran in, from its row or, past the index cap, its start event. The CLI
+   * keys a session to that folder, so a resume anywhere else opens nothing. */
+  const folderOf = (workspaceId: string, resume: string): string | undefined => {
+    for (const s of sessions.values()) {
+      if (s.view.workspaceId === workspaceId && s.view.claudeSessionId === resume && s.view.cwd !== undefined) return s.view.cwd;
+    }
+    const events = transcripts.get(workspaceId) ?? [];
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i]!;
+      if (e.type === "session.start" && e.sessionId === resume && e.cwd !== undefined) return e.cwd;
+    }
+    return undefined;
+  };
+
   const view = (r: WorkspaceRecord): WorkspaceView => ({
     id: r.id,
     name: r.name,
@@ -1764,6 +1777,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
       const turnId = randomUUID();
       const threadId = threadOf(workspaceId, o.resume);
+      const cwd = (o.resume !== undefined ? folderOf(workspaceId, o.resume) : undefined) ?? o.cwd;
       // Created before adapter.start so events that fire synchronously during
       // start() still land on the view. A resume id was announced by the harness
       // in an earlier turn, so the row carries it before this one answers.
@@ -1777,7 +1791,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         prompt: o.prompt,
         startedAt: Date.now(),
         ...(o.resume !== undefined ? { claudeSessionId: o.resume } : {}),
-        ...(o.cwd !== undefined ? { cwd: o.cwd } : {}),
+        ...(cwd !== undefined ? { cwd } : {}),
         ...(o.model !== undefined ? { model: o.model } : {}),
         ...(o.effort !== undefined ? { effort: o.effort } : {}),
         ...(o.permissionMode !== undefined ? { permissionMode: o.permissionMode } : {}),
@@ -1811,7 +1825,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             return;
           }
           case "turn.delta":
-            if (event.cwd !== undefined) sessionView.cwd = event.cwd;
             record({
               type: "session.delta",
               workspaceId,
@@ -1852,7 +1865,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         started = adapter.start({
           prompt: o.prompt,
           ...(o.resume !== undefined ? { resume: o.resume } : {}),
-          ...(o.cwd !== undefined ? { cwd: o.cwd } : {}),
+          ...(cwd !== undefined ? { cwd } : {}),
           ...(o.model !== undefined ? { model: o.model } : {}),
           ...(o.effort !== undefined ? { effort: o.effort } : {}),
           ...(o.permissionMode !== undefined ? { permissionMode: o.permissionMode } : {}),

@@ -9,7 +9,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { cloneElement, createContext, useContext, useState, type ReactElement, type ReactNode } from "react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { EventUnion, SessionEvent, WorkspaceView } from "@wsp/protocol";
+import type { EventUnion, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
 
 vi.mock("../src/components/ui/menu.js", () => {
   const Ctx = createContext<{ open: boolean; set: (open: boolean) => void }>({ open: false, set: () => {} });
@@ -91,7 +91,7 @@ const workspace: WorkspaceView = {
 };
 const STATUS = { branch: { oid: "abc", head: "feature/panes", ahead: 0, behind: 0 }, entries: [], root: "/root/app" };
 
-function fixtureApi(history: SessionEvent[] = []) {
+function fixtureApi(history: SessionEvent[] = [], rows: SessionView[] = []) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
   const started: Array<{ workspaceId: string; prompt: string; resume?: string; cwd?: string }> = [];
   const api: Api = {
@@ -108,7 +108,7 @@ function fixtureApi(history: SessionEvent[] = []) {
     wake: async () => workspace,
     upgrade: async () => workspace,
     capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true }),
-    listSessions: async () => [],
+    listSessions: async () => rows,
     watchStatuses: async () => [],
     createFromGoldenHead: async () => workspace,
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
@@ -122,12 +122,12 @@ function fixtureApi(history: SessionEvent[] = []) {
   return { api, started, emit };
 }
 
-async function setup(api: Api) {
+async function setup(api: Api, threadId: string | null = null) {
   useStore.setState({ conn: "connecting", workspaces: [], statuses: {} });
   useStore.getState().bind(api);
   useStore.getState().setConn("live");
   await waitFor(() => expect(useStore.getState().workspaces.length).toBeGreaterThan(0));
-  render(<WorkspaceThread workspaceId={WS} />);
+  render(<WorkspaceThread workspaceId={WS} threadId={threadId} />);
   await waitFor(() => expect(screen.queryByText("loading transcript")).toBeNull());
 }
 
@@ -259,5 +259,51 @@ describe("composer checkout row", () => {
     await waitFor(() => expect(menuEntry("/root/app")).not.toBeNull());
     expect(menuPick("/root")).not.toBeNull();
     expect(screen.queryByRole("button", { name: "New thread here" })).toBeNull();
+  });
+});
+
+describe("composer checkout row on a thread resumed from its row", () => {
+  const TAIL: SessionEvent[] = CHAT_STREAM.slice(1).map(e => ({ ...e, threadId: "thr_a" }));
+  const ROW: SessionView = { id: "sess_0001", workspaceId: WS, harness: "claude", status: "completed", claudeSessionId: "sess_0001", threadId: "thr_a", prompt: "hello", startedAt: 0, cwd: "/root/app" };
+
+  it("pinned to a thread whose start fell off the cap, is a label for the row's folder and sends there, not where the person was following", async () => {
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
+    const { api, started } = fixtureApi(TAIL, [ROW]);
+    act(() => useRootStore.getState().follow(WS, "/root/lib"));
+    await setup(api, "thr_a");
+    await screen.findByText(/Server is live at :3000\./);
+    await waitFor(() => expect(folder()).toBe("/root/app"));
+    expect(row()?.dataset["pickable"]).toBeUndefined();
+    expect(root()).toBe("/root/app");
+
+    const editor = composerEditor();
+    await typeInto(editor, "more");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]).toMatchObject({ resume: "sess_0001", cwd: "/root/app" });
+  });
+
+  it("on an empty latest view, the remembered session resumes in its row's folder, the strip locked to it, not in the daemon root", async () => {
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
+    const { api, started } = fixtureApi([], [ROW]);
+    await setup(api);
+    await waitFor(() => expect(folder()).toBe("/root/app"));
+    expect(row()?.dataset["pickable"]).toBeUndefined();
+    expect(screen.queryByRole("button", { name: /Working folder/ })).toBeNull();
+    expect(root()).toBe("/root/app");
+
+    const editor = composerEditor();
+    await typeInto(editor, "more");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]).toMatchObject({ resume: "sess_0001", cwd: "/root/app" });
+  });
+
+  it("an empty latest view whose remembered session has no row keeps the picker: nothing names its folder", async () => {
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
+    const { api } = fixtureApi([], []);
+    await setup(api);
+    expect(row()?.dataset["pickable"]).toBe("true");
+    expect(folder()).toBe("/root");
   });
 });

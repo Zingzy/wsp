@@ -4,11 +4,11 @@
 // once they are on. It runs under the base stage ahead of the daemon, so the
 // daemon's native module compiles against the Node the agents will run.
 import { APT_INDEX, APT_UPDATE, BASE_FLOOR, installAfter, installLine, smokeOf } from "@wsp/catalog";
-import type { GoldenBaseTool, GoldenStage } from "@wsp/protocol";
+import { fmtBytes, type GoldenBaseTool, type GoldenStage } from "@wsp/protocol";
 import { PRELUDE } from "./dotfiles-presets.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { PATH_LINE, TOOLS_PATH, type ToolInstall } from "./golden-import.js";
-import { fmtBytes, installTools, type ToolResult } from "./golden-tools.js";
+import { installTools, type ToolResult } from "./golden-tools.js";
 import type { Machine } from "./machine.js";
 
 const BASE_STAGE: GoldenStage = "deploying-daemon";

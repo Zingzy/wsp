@@ -4,7 +4,7 @@
 // these screens means weight and nothing else.
 import type { ManifestEntry } from "@wsp/collect";
 import { BUILDER_DISK_GB, toolSize, type BrewTable, type DiskEstimate } from "@wsp/engine";
-import { fmtBytes } from "./init-layout.js";
+import { fmtBytes } from "@wsp/protocol";
 import type { Tone } from "./init-select.js";
 
 const MIB = 1024 * 1024;

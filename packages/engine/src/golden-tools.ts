@@ -7,7 +7,7 @@
 // process descended from it before returning, so a slow brew never holds a
 // cellar lock into the next tool's turn.
 import { HOMEBREW, MIB, ROAD_MODULES, type RoadName } from "@wsp/catalog";
-import type { GoldenStage } from "@wsp/protocol";
+import { fmtBytes, shellQuote, type GoldenStage } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { BREW_HOUSEKEEPING, TOOLS_PATH, type GuestFacts, type ToolInstall } from "./golden-import.js";
 import type { ExecResult, Machine } from "./machine.js";
@@ -59,17 +59,7 @@ const CELLAR_LOCKED = /has already locked/;
 const BREW_LOCK_WAIT_S = 600;
 const BREW_LOCK_WAIT_CMD = `for l in /home/linuxbrew/.linuxbrew/var/homebrew/locks/*.lock; do [ -e "$l" ] && flock -w ${BREW_LOCK_WAIT_S} "$l" true; done; true`;
 
-export function fmtBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < MIB) return `${(n / 1024).toFixed(1)} KB`;
-  return `${Math.round(n / MIB)} MB`;
-}
-
 export const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
-
-function squote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
-}
 
 /** The line that names the failure, for a warning: the last `Error:` line on stderr (Homebrew
  * follows its error with advice), else the last stderr line, else stdout's; 124 is the guest-side timeout. */
@@ -158,7 +148,7 @@ const TREE_FN = [
 export function guarded(script: string, timeoutS: number): string {
   return [
     TREE_FN,
-    `setsid bash -c ${squote(script)} &`,
+    `setsid bash -c ${shellQuote(script)} &`,
     "p=$!",
     "t=0",
     `while [ $t -lt ${timeoutS} ] && kill -0 $p 2>/dev/null; do sleep 1; t=$((t+1)); done`,
@@ -217,7 +207,7 @@ function summarize(tools: ToolResult[], housekeeping: string | undefined): strin
 
 /** Which of the commands are not on the machine's tools PATH; `failed` says why the check itself could not run. */
 export async function missingCommands(machine: Machine, bins: readonly string[]): Promise<{ missing: Set<string>; failed?: string }> {
-  const cmd = `export PATH=${TOOLS_PATH}\nfor b in ${bins.map(squote).join(" ")}; do command -v "$b" >/dev/null 2>&1 || echo "missing $b"; done`;
+  const cmd = `export PATH=${TOOLS_PATH}\nfor b in ${bins.map(shellQuote).join(" ")}; do command -v "$b" >/dev/null 2>&1 || echo "missing $b"; done`;
   const res = await machine.exec(cmd, { timeoutMs: INLINE_EXEC_MS });
   const failed = res.exitCode === 0 ? undefined : reasonOf(res, INLINE_EXEC_MS / 1000);
   const missing = new Set(res.stdout.split("\n").flatMap(l => (l.startsWith("missing ") ? [l.slice("missing ".length).trim()] : [])));
