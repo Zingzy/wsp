@@ -298,6 +298,17 @@ describe("runtime session history", () => {
     await rt.close();
   });
 
+  it("a row says who opened its thread: a resumed turn keeps the answer of the turn it resumes, a fresh start gives its own", async () => {
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: threaded() } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await (await rt.sessions.start(ws.id, { prompt: "first", startedBy: "cli" })).finished;
+    const resume = (await rt.workspaces.get(ws.id)).claudeSessionId!;
+    await (await rt.sessions.start(ws.id, { prompt: "second", resume })).finished;
+    await (await rt.sessions.start(ws.id, { prompt: "third" })).finished;
+    expect((await rt.sessions.list(ws.id)).map(s => [s.prompt, s.startedBy])).toEqual([["second", "cli"], ["third", "person"]]);
+    await rt.close();
+  });
+
   it("a transcript written before threads existed replays as one thread, and a resume into it stamps it in place", async () => {
     const backend = stubBackend();
     const store = memoryStore();

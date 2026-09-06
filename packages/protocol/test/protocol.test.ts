@@ -31,7 +31,11 @@ import {
   SessionInterruptResult,
   SnapshotLineage,
   SnapshotRollbackResult,
+  SessionOrigin,
   SessionView,
+  ThreadView,
+  ExecEvent,
+  foldThreads,
   WorkspaceStatus,
   WorkspaceView,
 } from "../src/index.js";
@@ -548,6 +552,58 @@ describe("goldenHead", () => {
   it("is the version the head names", () => {
     const v2: GoldenVersion = { ...v1, version: 2, snapshotId: "snap_2" };
     expect(goldenHead({ head: 2, versions: [v1, v2] })).toBe(v2);
+  });
+});
+
+describe("thread provenance", () => {
+  const row = { id: "s1", workspaceId: "ws_1", harness: "claude", status: "completed" } as const;
+
+  it("SessionView carries who asked for the turn, person or cli, and stays optional for rows written before", () => {
+    expect(SessionView.parse({ ...row, startedBy: "cli" }).startedBy).toBe("cli");
+    expect(SessionView.parse(row).startedBy).toBeUndefined();
+    expect(() => SessionView.parse({ ...row, startedBy: "robot" })).toThrow();
+    expect(SessionOrigin.options).toEqual(["person", "cli"]);
+  });
+
+  it("sessions.start takes startedBy and nothing else new", () => {
+    expect(RuntimeRequest.parse({ id: 1, op: "sessions.start", workspaceId: "ws_1", prompt: "go", startedBy: "cli" })).toMatchObject({ startedBy: "cli" });
+    expect(() => RuntimeRequest.parse({ id: 1, op: "sessions.start", workspaceId: "ws_1", prompt: "go", startedBy: "app" })).toThrow();
+  });
+
+  it("foldThreads groups turns by threadId, titles by the opening turn, reads state and resume id from the latest, and keeps the opener's provenance", () => {
+    const threads = foldThreads([
+      { ...row, id: "s1", threadId: "thr_a", startedBy: "cli", prompt: "make a server", claudeSessionId: "c1", startedAt: 1_000, endedAt: 2_000 },
+      { ...row, id: "s2", threadId: "thr_b", prompt: "unrelated", startedAt: 3_000, endedAt: 4_000 },
+      { ...row, id: "s3", threadId: "thr_a", status: "running", startedBy: "person", prompt: "and tests", claudeSessionId: "c2", startedAt: 5_000 },
+      { ...row, id: "s4", status: "failed", prompt: "before threads", startedAt: 6_000, endedAt: 7_000 },
+    ]);
+    expect(threads).toEqual([
+      { id: "thr_a", threadId: "thr_a", workspaceId: "ws_1", harness: "claude", startedBy: "cli", status: "running", title: "make a server", claudeSessionId: "c2", startedAt: 5_000, turns: 2 },
+      { id: "thr_b", threadId: "thr_b", workspaceId: "ws_1", harness: "claude", startedBy: "person", status: "completed", title: "unrelated", startedAt: 3_000, endedAt: 4_000, turns: 1 },
+      { id: "s4", workspaceId: "ws_1", harness: "claude", startedBy: "person", status: "failed", title: "before threads", startedAt: 6_000, endedAt: 7_000, turns: 1 },
+    ]);
+    for (const t of threads) expect(ThreadView.parse(t)).toEqual(t);
+  });
+
+  it("a thread always says who opened it: the fold reads a row from before provenance as a person's, once, for every client", () => {
+    const [t] = foldThreads([{ ...row, prompt: "old" }]);
+    expect(t!.startedBy).toBe("person");
+    expect(() => ThreadView.parse({ id: "s1", workspaceId: "ws_1", harness: "claude", status: "completed", title: "old", turns: 1 })).toThrow();
+  });
+});
+
+describe("workspaces.exec", () => {
+  it("takes a workspace and the command as argv, at least one word, so quoting is the runtime's and never lost on the wire", () => {
+    expect(RuntimeRequest.parse({ id: 1, op: "workspaces.exec", workspaceId: "ws_1", argv: ["grep", "a b", "f"] })).toMatchObject({ argv: ["grep", "a b", "f"] });
+    expect(() => RuntimeRequest.parse({ id: 1, op: "workspaces.exec", workspaceId: "ws_1", argv: [] })).toThrow();
+    expect(() => RuntimeRequest.parse({ id: 1, op: "workspaces.exec", workspaceId: "ws_1", cmd: "ls" })).toThrow();
+  });
+
+  it("pushes output lines and one exit, whose code is null with a reason when the command was ended without one", () => {
+    expect(ExecEvent.parse({ type: "exec.output", execId: "e1", text: "hello" })).toEqual({ type: "exec.output", execId: "e1", text: "hello" });
+    expect(ExecEvent.parse({ type: "exec.exit", execId: "e1", exitCode: 0 })).toEqual({ type: "exec.exit", execId: "e1", exitCode: 0 });
+    expect(ExecEvent.parse({ type: "exec.exit", execId: "e1", exitCode: null, error: "deadline" })).toMatchObject({ exitCode: null, error: "deadline" });
+    expect(() => ExecEvent.parse({ type: "exec.exit", execId: "e1", exitCode: 1.5 })).toThrow();
   });
 });
 
