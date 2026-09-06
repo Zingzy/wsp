@@ -6,9 +6,9 @@
 // runs the plan on the builder.
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { MCP_ID_PREFIX, shellQuote, type RecipeDigest } from "@wsp/protocol";
+import { MCP_ID_PREFIX, shellQuote, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
-import { APT_ENV, APT_INDEX, APT_UPDATE, BREW, BREW_PREFIX, CATALOG_AGENTS, CLAUDE_KEY_FILE, HOMEBREW, HOMEBREW_STEP, NODE_PATH_LINE, NODE_RELEASES, UV_INSTALL, asLinuxbrew, asLinuxbrewScript, baseEntryFor, baseNote, catalogEntry, installLine, nodeInstallScript, pinStateOf, ROAD_MODULES, roadModule, smokeOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolPin } from "@wsp/catalog";
+import { APT_ENV, APT_INDEX, APT_UPDATE, BREW, BREW_PREFIX, CATALOG_AGENTS, CLAUDE_KEY_FILE, HOMEBREW, HOMEBREW_STEP, NODE_PATH_LINE, NODE_RELEASES, LINUXBREW_SHIM, ROADS, UV_INSTALL, asLinuxbrew, asLinuxbrewScript, baseEntryFor, baseNote, catalogEntry, installLine, nodeInstallScript, pinStateOf, ROAD_MODULES, roadModule, smokeOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolPin } from "@wsp/catalog";
 
 export { CLAUDE_KEY_FILE, HOMEBREW, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
 
@@ -434,13 +434,17 @@ const sorted = <T extends object>(rows: T[]): T[] => rows.sort((a, b) => (JSON.s
 
 /** What a golden is built from: the ticked ids with their login answers and
  * tool pins, the computer's login shell once when a shell row is ticked, and
- * every planned path with its digest, volatile ones marked. Labels, row order,
- * disk stats and the terminal font row do not enter, so a file rewritten with
- * the same bytes reads the same and a font tick changes no golden. */
-export function recipeDigest(entries: readonly RecipeEntry[], files: readonly DigestedFile[] = []): RecipeDigest {
+ * every planned path with its digest, volatile ones marked, and every row
+ * outside the catalog under its install line. Labels, row order, disk stats and
+ * the terminal font row do not enter, so a file rewritten with the same bytes
+ * reads the same and a font tick changes no golden. */
+export function recipeDigest(entries: readonly RecipeEntry[], files: readonly DigestedFile[] = [], custom: readonly RecipeCustomRow[] = []): RecipeDigest {
   const login = entries.find(e => ticked(e) && e.rung === "shell" && e.login !== undefined)?.login;
+  // A row outside the catalog is pinned by the lines that install it: change one and the golden is another golden.
+  // A check that changed alone is not a change to the machine, so it does not rebuild.
+  const customTicks = custom.map(c => ({ id: `${CUSTOM_PREFIX}${c.id}`, version: c.install.join("; ") }));
   return {
-    ticks: sorted(entries.filter(e => ticked(e) && e.font === undefined).map(e => ({ id: e.id, ...(e.choice !== undefined ? { choice: e.choice } : {}), ...(e.version !== undefined ? { version: e.version } : {}) }))),
+    ticks: sorted([...entries.filter(e => ticked(e) && e.font === undefined).map(e => ({ id: e.id, ...(e.choice !== undefined ? { choice: e.choice } : {}), ...(e.version !== undefined ? { version: e.version } : {}) })), ...customTicks]),
     ...(login !== undefined ? { login } : {}),
     files: sorted(files.map(f => ({ id: f.id, path: f.path, dest: f.dest, digest: f.digest, ...(f.volatile === true ? { volatile: true } : {}) }))),
   };
@@ -467,6 +471,10 @@ export interface ToolInstall {
   after?: string;
   /** The command the install puts on PATH, when the row names it; checked with command -v after the stage. */
   bin?: string;
+  /** A command that exits 0 once the row is on the machine, run after the install for a row that carries its own. */
+  check?: string;
+  /** The line the log shows before the install runs, for a row whose command is the person's own rather than a road's. */
+  shown?: string;
   /** What the result says beside the install once it lands: a road no golden build has proven yet, a version the road could not pin. */
   note?: string;
 }
@@ -693,7 +701,34 @@ export interface ToolsPlan {
   brewfile: string;
 }
 
-export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTable = new Map()): ToolsPlan {
+/** A row an agent added by hand: its id under this prefix, so the lineage names it apart from any catalog road. */
+export const CUSTOM_PREFIX = "tools/custom/";
+
+/** What a custom row runs with: the catalog roads' own PATH and apt environment, and the catalog's brew for a root
+ * script, since Homebrew refuses to run as the root a custom row runs as. */
+export const CUSTOM_PRELUDE = [PATH_LINE, APT_ENV, LINUXBREW_SHIM].join("\n");
+
+/** The rows outside the catalog as installs, in the order the recipe carries them; each runs its own lines as given.
+ * `after` is what the plan brings the row's manager by, when the row names one and the plan brings it. */
+export function customInstallsFor(custom: readonly RecipeCustomRow[], after: (c: RecipeCustomRow) => string | undefined = () => undefined): ToolInstall[] {
+  return custom.map(c => {
+    const waits = after(c);
+    return {
+      id: `${CUSTOM_PREFIX}${c.id}`,
+      label: c.name,
+      manager: "script" as const,
+      cmd: [CUSTOM_PRELUDE, ...c.install].join("\n"),
+      check: c.check,
+      shown: c.install.join("; "),
+      ...(waits !== undefined ? { after: waits } : {}),
+    };
+  });
+}
+
+/** The road a row outside the catalog names as its manager, when it names one the catalog knows. */
+const managerRoad = (c: RecipeCustomRow): RoadName | undefined => ROADS.find(r => r === c.manager);
+
+export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTable = new Map(), custom: readonly RecipeCustomRow[] = []): ToolsPlan {
   const brew = brewfileFor(entries, table);
   const installs: ToolInstall[] = [];
   const skipped: SkippedItem[] = [...brew.skipped];
@@ -720,11 +755,14 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
     { steps: [], last: "tools/homebrew" },
   );
 
+  // A row outside the catalog calls its manager's own command, so it counts as a row of that manager here: the
+  // manager is brought onto the machine the one way this function knows, and the row waits on it.
+  const customOf = (manager: RoadName): RecipeCustomRow[] => custom.filter(c => managerRoad(c) === manager);
   // One step per manager that has rows, unless the base carries it or it already comes along as a formula, a catalog row or an npm global.
   const managers = new Map<RoadName, { after: string; step?: ToolInstall; row?: { e: RecipeEntry; planned: PlannedRow } }>();
   const managerFormulae: string[] = [];
   for (const manager of MANAGER_ORDER) {
-    if (rowsOf(manager).length + catalogRowsOf(manager).length === 0 || baseEntryFor(manager) !== undefined) continue;
+    if (rowsOf(manager).length + catalogRowsOf(manager).length + customOf(manager).length === 0 || baseEntryFor(manager) !== undefined) continue;
     const own = `tools/manager/${manager}`;
     const formula = MANAGER_FORMULA[manager];
     if (formula === undefined) throw new Error(`${manager} is neither in the base nor a formula`);
@@ -739,7 +777,7 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
   }
   const catalogFormulae = catalog.flatMap(c => (c.planned.road.road === "brew" ? roadModule(c.planned.road).names(c.planned.road) : []));
 
-  if (brew.taps.length + brew.formulae.length > 0 || managerFormulae.length + catalogFormulae.length > 0) {
+  if (brew.taps.length + brew.formulae.length > 0 || managerFormulae.length + catalogFormulae.length + customOf("brew").length > 0) {
     installs.push({ id: "tools/homebrew", label: "Homebrew", manager: "brew", cmd: withPath(homebrewBootstrap()) });
     installs.push(...toolchain.steps);
     for (const t of brew.taps) installs.push({ id: `tools/brew-tap/${t}`, label: t, manager: "brew", cmd: withPath(asLinuxbrew(`tap ${t}`)), after: toolchain.last });
@@ -749,15 +787,16 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
   }
   // What a row waits on: the apt index read once by its own step, Homebrew's toolchain, the manager's step; a floor row is there already.
   const APT_STEP = `tools/${APT_INDEX}`;
-  const afterFor = (road: InstallRoad): string | undefined => {
-    const dep = roadModule(road).after;
+  const afterRoad = (road: RoadName): string | undefined => {
+    const dep = ROAD_MODULES[road].after;
     if (dep === APT_INDEX) {
       if (!installs.some(t => t.id === APT_STEP)) installs.push({ id: APT_STEP, label: "apt index", manager: "apt", cmd: withPath(APT_UPDATE) });
       return APT_STEP;
     }
     if (dep === HOMEBREW_STEP) return toolchain.last;
-    return managers.get(road.road)?.after;
+    return managers.get(road)?.after;
   };
+  const afterFor = (road: InstallRoad): string | undefined => afterRoad(road.road);
   const plan = (e: RecipeEntry, planned: PlannedRow): void => {
     const line = roadModule(planned.road).install(planned.road, planned.bin ?? packageOf(e));
     if (typeof line !== "string") {
@@ -770,7 +809,7 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
   for (const manager of MANAGER_ORDER) {
     const rows = rowsOf(manager);
     const fromCatalog = catalogRowsOf(manager);
-    if (rows.length + fromCatalog.length === 0) continue;
+    if (rows.length + fromCatalog.length + customOf(manager).length === 0) continue;
     const brings = managers.get(manager);
     if (brings?.step !== undefined) installs.push(brings.step);
     if (brings?.row !== undefined) plan(brings.row.e, brings.row.planned);
@@ -785,6 +824,12 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
   // The catalog rows on every other road: Homebrew's (unless one went out as a manager's step above), apt's, a release, a vendor's, a script.
   const asManager = new Set([...managers.values()].flatMap(m => (m.row !== undefined ? [m.row.e.id] : [])));
   for (const { e, planned } of catalog) if (!(MANAGER_ORDER as readonly string[]).includes(planned.road.road) && !asManager.has(e.id)) plan(e, planned);
+  // Last of all: the rows the catalog does not carry, each after the manager its line calls, so every road they
+  // lean on has already run.
+  installs.push(...customInstallsFor(custom, c => {
+    const road = managerRoad(c);
+    return road === undefined ? undefined : afterRoad(road);
+  }));
   return { installs, skipped, base: brew.base, brewfile: brew.text };
 }
 

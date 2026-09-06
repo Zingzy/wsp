@@ -12,10 +12,10 @@ import { CATALOG, CATALOG_AGENTS, CATALOG_TOOLS, type CatalogEntry } from "@wsp/
 import type { ManifestEntry } from "@wsp/collect";
 import type { Recipe } from "@wsp/protocol";
 import { describe, expect, it, onTestFinished } from "vitest";
+import { ALSO_EMPTY } from "../src/init-also.js";
 import {
   AGENT_LOGINS,
   CLI_LOGINS,
-  MAC_EMPTY,
   MCP_LOGINS,
   SIGN_INS_TOP,
   TOOLS_TOP,
@@ -306,7 +306,7 @@ describe("the whole flow", () => {
     const mac = o.text().slice(o.text().lastIndexOf("◆  Also on this Mac"));
     expect(mac).toContain("◆  Also on this Mac  3/6");
     expect(mac).toContain("What this Mac has installed that a package manager could put on the image too.");
-    expect(mac).toContain(MAC_EMPTY);
+    expect(mac).toContain(ALSO_EMPTY);
     o.input.write(KEY.enter);
     await settle(20);
     const signIns = o.text().slice(o.text().lastIndexOf("◆  Sign-ins"));

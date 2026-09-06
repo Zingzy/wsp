@@ -171,6 +171,24 @@ The folder must not exist on this computer unless `--replace`. `--from` is the f
 - One thread runs one agent process; a 4 GB machine runs one build or one agent at a time. Put a second builder on a second workspace, not a second thread on the same one.
 - The model, effort and permission mode are the agent's own defaults; the command line and the MCP tools cannot choose them yet. Choose the role by the brief and the agent, and keep review threads short.
 
+## Tools the catalog does not carry
+
+`wsp recipe` ticks catalog rows. A tool the person's projects use that the catalog has no row for goes on the image as its own row:
+
+```
+wsp recipe --add just="brew install just" --add-check just="just --version"
+wsp recipe --add ruff="uv tool install ruff"
+```
+
+`--add <id>=<install command>` is repeatable and `--add-check <id>=<command>` says what proves the tool landed (without one, `command -v <id>`). The line runs on the machine as given, as root, after every catalog install, with Homebrew and apt already there. Rules for adding one:
+
+- Add only what the person's own history or their repository files show in use: a formula in their Brewfile, a tool their agents ran, a runner their project's config names. Never add on a guess.
+- Prefer a Homebrew, npm, uv or apt form (`brew install x`, `npm install -g x`, `uv tool install x`, `apt-get install -y x`) over a downloader. A line that pipes a download into a shell is refused in review.
+- One tool per row, so a row that fails names the tool that failed. A failed row does not fail the build; it is listed as failed on the machine's lineage.
+- There is no sign-in for these rows. A tool that needs a login needs a catalog row; say so instead of adding it.
+
+`wsp init` also offers what this Mac's package managers already have, on the Also on this Mac screen, and a tick there writes the same kind of row with the size measured here.
+
 ## Rules learned the hard way
 
 - A send into a running thread steers it or waits behind it, never a second concurrent turn (#274).

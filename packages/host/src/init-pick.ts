@@ -10,15 +10,17 @@ import type { Readable, Writable } from "node:stream";
 import { CATALOG_AGENTS, CATALOG_TOOLS, MCP_AGENTS, catalogEntry, type AgentEntry, type CatalogEntry, type ToolEntry, agentName as catalogName } from "@wsp/catalog";
 import type { LoginChoice, Manifest, ManifestEntry } from "@wsp/collect";
 import { MEASURED_ON, estimateDisk, isMcpRow, parseMcpId, plural, type BrewTable, type DiskEstimate } from "@wsp/engine";
-import { fmtBytes, type Recipe, type RecipeRow } from "@wsp/protocol";
+import { customRows, fmtBytes, type Recipe, type RecipeRow } from "@wsp/protocol";
 import { mcpConfigFile } from "./mcp-install.js";
 import { GUTTER, colourDepth, isTTY } from "./init-layout.js";
 import { agentName, applyRecipe, comingRows, defaultAnswers, initialChoice, isTickable, loginEntryId, loginShown, loginTool, rowsHere } from "./init-recipe.js";
+import { ALSO_EMPTY, ALSO_EMPTY_TOP, ALSO_TITLE, ALSO_TOP, alsoGroupLine, alsoItems, scannedTicks, withScanned } from "./init-also.js";
 import { answerOf, rungSelect, type Choice, type FooterLine, type RungAnswer, type RungSelectResult, type SelectItem } from "./init-select.js";
 import { BASE_GROUP, groupTotal, recipeTable, sizeCell, totalsLine, whyCell, type TableRow } from "./init-table.js";
 import { diskHead, diskTone } from "./init-weight.js";
 import { hasLogin, signInFor, type SignIn } from "./signin-table.js";
 import { SIGN_IN_CHOICES, SIGN_IN_WORDS, signInChoice } from "./signin-words.js";
+import type { ScanRow } from "./scan.js";
 
 /** The six screens of a run, in order, with the one sentence each opens with. Screen 3 is the manager scan's, and
  * screen 6 is the build itself. */
@@ -26,11 +28,6 @@ export const AGENTS_TITLE = "Agents";
 export const AGENTS_TOP = "Which coding agents go on your machine image.";
 export const TOOLS_TITLE = "Tools";
 export const TOOLS_TOP = "What installs on the image, from what you use.";
-export const MAC_TITLE = "Also on this Mac";
-export const MAC_TOP = "We found these installed on this Mac. Tick the ones you or your agents need on the image.";
-/** What the screen says while nothing has read this computer's package managers: no rows to promise, and none shown. */
-export const MAC_EMPTY_TOP = "What this Mac has installed that a package manager could put on the image too.";
-export const MAC_EMPTY = "nothing found here yet";
 export const SIGN_INS_TITLE = "Sign-ins";
 export const SIGN_INS_TOP = "Each row is something the machine needs to be signed in to. Choose how.";
 export const WSP_TITLE = "wsp for your agents";
@@ -80,7 +77,7 @@ function rowsFor(manifest: Manifest, recipe: Recipe): { rows: ManifestEntry[]; b
 /** What the recipe costs on the builder's disk: the collector's rows it ticks, sized as the build would size them. */
 export function pickEstimate(manifest: Manifest, recipe: Recipe, brew: BrewTable): DiskEstimate {
   const { rows, bytes } = rowsFor(manifest, recipe);
-  return estimateDisk(rows, bytes, brew);
+  return estimateDisk(rows, bytes, brew, customRows(recipe));
 }
 
 /** The Disk line, loud in its weight's colour: the one loud element on the screen. The parts behind the total stay
@@ -324,6 +321,9 @@ export interface PickOptions {
   from: "agents" | "logins";
   /** The person's home, where an agent's config is read for the wsp tools rows. */
   home: string;
+  /** What the package managers here could put on the image: the rows of screen three. With none, that screen keeps
+   * its place and says nothing was found. */
+  scan?: readonly ScanRow[];
   input: Readable;
   output: Writable;
 }
@@ -336,13 +336,15 @@ export interface Picked {
   wspTools: Set<string>;
 }
 
-type Screen = "agents" | "tools" | "mac" | "logins" | "wsp";
+type Screen = "agents" | "tools" | "also" | "logins" | "wsp";
 /** Where each screen sits in the six a run has; the build is the sixth. */
-const SCREEN_AT: Record<Screen, number> = { agents: 1, tools: 2, mac: 3, logins: 4, wsp: 5 };
+const SCREEN_AT: Record<Screen, number> = { agents: 1, tools: 2, also: 3, logins: 4, wsp: 5 };
 
 /** The screens in order, esc stepping back one; the recipe carries the ticks and the answers between them. */
 export async function pickScreens(o: PickOptions): Promise<Picked | "cancel"> {
-  const screens: readonly Screen[] = o.from === "agents" ? ["agents", "tools", "mac", "logins", "wsp"] : ["logins", "wsp"];
+  // The scan screen keeps its place in the six whether or not the managers here had anything to offer.
+  const scan = o.scan ?? [];
+  const screens: readonly Screen[] = o.from === "agents" ? ["agents", "tools", "also", "logins", "wsp"] : ["logins", "wsp"];
   let recipe = o.recipe;
   let logins = new Map<string, LoginChoice>();
   // What screens four and five were left on, so esc back onto them shows the answers again, as the recipe shows the
@@ -396,10 +398,21 @@ export async function pickScreens(o: PickOptions): Promise<Picked | "cancel"> {
         step(r);
         break;
       }
-      case "mac": {
-        // Nothing reads this computer's package managers yet, so the screen holds its place and takes no answer.
-        const r = await rungSelect({ title: MAC_TITLE, top: MAC_EMPTY_TOP, counter, items: [], initial: new Set(), empty: MAC_EMPTY, ...streams });
+      case "also": {
+        // The Disk line follows the ticks here too: these are the heavy rows, and they are what the boot check reads.
+        const r = await rungSelect({
+          title: ALSO_TITLE,
+          top: scan.length > 0 ? ALSO_TOP : ALSO_EMPTY_TOP,
+          counter,
+          items: alsoItems(scan),
+          initial: scannedTicks(recipe, scan),
+          empty: ALSO_EMPTY,
+          groupLine: alsoGroupLine(scan),
+          footer: a => [diskFooter(pickEstimate(o.manifest, withScanned(recipe, scan, a.ticks), o.brew))],
+          ...streams,
+        });
         if (r.kind === "cancel") return "cancel";
+        recipe = withScanned(recipe, scan, r.ticks);
         step(r);
         break;
       }

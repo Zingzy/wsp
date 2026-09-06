@@ -268,12 +268,14 @@ export function recipeWithAnswers(recipe: Recipe, choices: ReadonlyMap<string, s
 }
 
 /** This computer's recipe with a saved one's ticks and answers written on, by id: a row the saved one lacks is off
- * and unanswered, and a saved row this computer's recipe does not carry follows them as it was saved. */
+ * and unanswered, and a saved row this computer's recipe does not carry follows them as it was saved. The rows
+ * outside the catalog are the saved recipe's own: nothing on this computer decides them. */
 export function withTicksOf(here: Recipe, saved: Recipe): Recipe {
   const rows = new Map(saved.rows.map(r => [r.id, r]));
   const ids = new Set(here.rows.map(r => r.id));
   return {
     ...here,
+    ...(saved.custom !== undefined ? { custom: saved.custom } : {}),
     rows: [
       ...here.rows.map(r => {
         const { signIn: _signIn, ...rest } = r;

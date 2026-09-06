@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // wsp recipe from a fake computer: what it writes, what it says about each
-// agent's history, and the two tables it prints, which are the wizard's own.
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+// agent's history, the two tables it prints, which are the wizard's own, and
+// the rows the catalog does not carry under them.
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS, CATALOG_TOOLS } from "@wsp/catalog";
 import type { Host } from "@wsp/collect";
 import { Recipe } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
-import { tableItems } from "../src/init-pick.js";
+import { signInItems, tableItems } from "../src/init-pick.js";
+import { applyRecipe, withCatalogAgents } from "../src/init-recipe.js";
 import { recipeTable, sizeText, tableLines, totalsLine } from "../src/init-table.js";
 import { writeRecipe } from "../src/recipe-command.js";
+import { customFromFlags } from "../src/recipe-custom.js";
 import { FIXTURE } from "./init-fixture.js";
 
 /** A laptop with Claude Code and gh on it, one config file, and no session history anywhere. */
@@ -73,5 +76,44 @@ describe("wsp recipe", () => {
       const at = lines.indexOf(totalsLine(rows, noun));
       expect(lines.slice(at - rows.length, at)).toEqual(tableLines(rows, 1));
     }
+  });
+
+  it("carries the rows --add names into the file and shows them in the printout with the exact command", async () => {
+    dir = mkdtempSync(join(tmpdir(), "wsp-recipe-cmd-"));
+    const out = join(dir, "recipe.json");
+    const lines: string[] = [];
+    const recipe = await writeRecipe(laptop(), out, l => lines.push(l), { add: customFromFlags({ add: ["just=brew install just"] }) });
+    expect(recipe.custom).toEqual([{ kind: "custom", id: "just", name: "just", install: ["brew install just"], check: "command -v 'just'", why: "added by the agent" }]);
+    expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8"))).custom).toEqual(recipe.custom);
+    expect(lines).toContain("Rows the catalog does not carry:");
+    expect(lines.find(l => l.includes("just"))).toContain("brew install just");
+  });
+
+  it("says so and rewrites the file when a recipe already there cannot be read, rather than refusing to run", async () => {
+    dir = mkdtempSync(join(tmpdir(), "wsp-recipe-cmd-"));
+    const out = join(dir, "recipe.json");
+    writeFileSync(out, "{ not json");
+    const lines: string[] = [];
+    const recipe = await writeRecipe(laptop(), out, l => lines.push(l), { add: customFromFlags({ add: ["just=brew install just"] }) });
+    expect(lines.find(l => l.includes("could not be read"))).toContain("any rows it added are gone");
+    expect(recipe.custom?.map(r => r.id)).toEqual(["just"]);
+    expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8")))).toEqual(recipe);
+  });
+
+  it("keeps the rows an earlier run added, so --add adds up across calls", async () => {
+    dir = mkdtempSync(join(tmpdir(), "wsp-recipe-cmd-"));
+    const out = join(dir, "recipe.json");
+    await writeRecipe(laptop(), out, () => {}, { add: customFromFlags({ add: ["just=brew install just"] }) });
+    const second = await writeRecipe(laptop(), out, () => {}, { add: customFromFlags({ add: ["ruff=uv tool install ruff"] }) });
+    expect(second.custom?.map(r => r.id)).toEqual(["just", "ruff"]);
+  });
+
+  it("never offers a sign-in for a row outside the catalog: the install is the whole row", async () => {
+    dir = mkdtempSync(join(tmpdir(), "wsp-recipe-cmd-"));
+    const out = join(dir, "recipe.json");
+    const recipe = await writeRecipe(laptop(), out, () => {}, { add: customFromFlags({ add: ["gh-enterprise=brew install gh-enterprise"] }) });
+    expect(recipe.custom?.[0]).not.toHaveProperty("signIn");
+    expect(recipe.rows.some(r => r.id === "gh-enterprise")).toBe(false);
+    expect(signInItems(applyRecipe(withCatalogAgents({ entries: [] }), recipe)).items.map(i => i.id)).not.toContain("logins/gh-enterprise");
   });
 });
