@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The store's session folding: rows come from the sessions.list op, the
 // session.* events decide when to refetch and what to patch in between.
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { SessionView, WorkspaceView } from "@wsp/protocol";
 import { DisconnectedError, RequestError, type Api, type ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -66,6 +66,11 @@ beforeEach(() => {
   useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, creations: [], sessions: {}, ready: false, gaps: 0 });
 });
 
+// The address is a global the store reads: a #w/<id> left behind would pick the workspace for every test after it.
+afterEach(() => {
+  window.location.hash = "";
+});
+
 describe("store selection", () => {
   it("select takes a thread of the workspace; selecting without one shows the latest thread again", () => {
     useStore.getState().select("ws_a", "thr_1");
@@ -75,6 +80,40 @@ describe("store selection", () => {
     useStore.getState().select("ws_b", "thr_2");
     useStore.getState().select(null);
     expect(useStore.getState()).toMatchObject({ selectedId: null, selectedThreadId: null });
+  });
+});
+
+describe("the workspace the address opens on", () => {
+  const hash = (h: string) => {
+    window.location.hash = h;
+  };
+  const refreshed = async (workspaces: WorkspaceView[]) => {
+    const { api } = fakeApi(workspaces, []);
+    useStore.setState({ api });
+    await useStore.getState().refresh();
+    return useStore.getState().selectedId;
+  };
+
+  it("selects the workspace wsp init's address names, not the first row", async () => {
+    hash("#w/ws_b");
+    expect(await refreshed([view("ws_a"), view("ws_b")])).toBe("ws_b");
+  });
+
+  it("falls back to the first row when the address names no workspace, or one that is gone", async () => {
+    hash("");
+    expect(await refreshed([view("ws_a"), view("ws_b")])).toBe("ws_a");
+    useStore.setState({ selectedId: null });
+    hash("#gallery");
+    expect(await refreshed([view("ws_a"), view("ws_b")])).toBe("ws_a");
+    useStore.setState({ selectedId: null });
+    hash("#w/ws_gone");
+    expect(await refreshed([view("ws_a"), view("ws_b")])).toBe("ws_a");
+  });
+
+  it("never moves a selection the person already made", async () => {
+    hash("#w/ws_b");
+    useStore.setState({ selectedId: "ws_a" });
+    expect(await refreshed([view("ws_a"), view("ws_b")])).toBe("ws_a");
   });
 });
 
@@ -401,5 +440,15 @@ describe("store replay gaps", () => {
     useStore.getState().noteGap();
     useStore.getState().noteGap();
     expect(useStore.getState().gaps).toBe(2);
+  });
+});
+
+// Last in the file on purpose: it runs after every test that set an address, so it fails if one was left behind.
+describe("the address never leaks out of the tests that set it", () => {
+  it("a refresh with no address of its own still takes the first row", async () => {
+    const { api } = fakeApi([view("ws_a"), view("ws_b")], []);
+    useStore.setState({ api });
+    await useStore.getState().refresh();
+    expect(useStore.getState().selectedId).toBe("ws_a");
   });
 });

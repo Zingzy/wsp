@@ -96,8 +96,11 @@ export function usePinned(workspaceId: string): boolean {
   return useRootStore(s => (s.byWorkspaceId[workspaceId] ?? NONE).pinned !== null);
 }
 
-/** The folder the next session starts in, pin or no pin: the thread's own, else the daemon root, else nothing known. */
+/** The folder the next session starts in, pin or no pin: the thread's own, else the imported project's, else the
+ * daemon root, else nothing known. A thread's folder decides which project state its agent loads, so a workspace with
+ * a project opens its threads there; wsp's own verbs read the same order (threadFolder). */
 export function useThreadFolder(workspaceId: string): string | null {
   const daemonRoot = useDaemonRoot(workspaceId);
-  return useRootStore(s => (s.byWorkspaceId[workspaceId] ?? NONE).followed ?? daemonRoot);
+  const projectDest = useStore(s => s.workspaces.find(w => w.id === workspaceId)?.project?.dest);
+  return useRootStore(s => (s.byWorkspaceId[workspaceId] ?? NONE).followed ?? projectDest ?? daemonRoot);
 }

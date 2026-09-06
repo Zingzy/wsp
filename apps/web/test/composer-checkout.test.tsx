@@ -194,23 +194,28 @@ describe("composer checkout row", () => {
     provideDaemonWire(WS, wire);
     const { api, started } = fixtureApi([], [], withProject);
     await setup(api);
-    expect(folder()).toBe("/root");
+    // A workspace with an imported project opens its threads there, so the picker starts inside it.
+    expect(folder()).toBe(PROJECT_DEST);
 
-    fireEvent.click(screen.getByRole("button", { name: "Working folder: /root" }));
-    await waitFor(() => expect(menuEntry("/root/app")).not.toBeNull());
-    expect(menuRoots()).toEqual([["/root", "true"], [PROJECT_DEST, "false"]]);
-
-    fireEvent.click(document.querySelector<HTMLElement>(`[data-composer-folder-root="${PROJECT_DEST}"]`)!);
+    fireEvent.click(screen.getByRole("button", { name: `Working folder: ${PROJECT_DEST}` }));
     await waitFor(() => expect(menuEntry(`${PROJECT_DEST}/packages`)).not.toBeNull());
     expect(menuRoots()).toEqual([["/root", "false"], [PROJECT_DEST, "true"]]);
     expect(menuPick(PROJECT_DEST)).not.toBeNull();
     // Up stops at the project root, which the daemon browses; its parent is outside every root.
     expect(screen.queryByText(/Up to/)).toBeNull();
 
+    // Home is still a root the picker offers, and switching back is one click.
+    fireEvent.click(document.querySelector<HTMLElement>('[data-composer-folder-root="/root"]')!);
+    await waitFor(() => expect(menuEntry("/root/app")).not.toBeNull());
+    expect(menuRoots()).toEqual([["/root", "true"], [PROJECT_DEST, "false"]]);
+    fireEvent.click(document.querySelector<HTMLElement>(`[data-composer-folder-root="${PROJECT_DEST}"]`)!);
+    await waitFor(() => expect(menuEntry(`${PROJECT_DEST}/packages`)).not.toBeNull());
+
     fireEvent.click(menuEntry(`${PROJECT_DEST}/packages`)!);
     await waitFor(() => expect(menuEntry(`${PROJECT_DEST}/packages/web`)).not.toBeNull());
     expect(screen.getByText(/Up to/).textContent).toBe(`Up to ${PROJECT_DEST}`);
-    expect(wire.calls.filter(([op]) => op === "fs.list").map(([, p]) => p["path"])).toEqual(["/root", PROJECT_DEST, `${PROJECT_DEST}/packages`]);
+    // The listing is kept per folder, so coming back to the project root costs no second fs.list.
+    expect(wire.calls.filter(([op]) => op === "fs.list").map(([, p]) => p["path"])).toEqual([PROJECT_DEST, "/root", `${PROJECT_DEST}/packages`]);
 
     fireEvent.click(menuPick(`${PROJECT_DEST}/packages`)!);
     await waitFor(() => expect(screen.getByRole("button", { name: `Working folder: ${PROJECT_DEST}/packages` })).toBeTruthy());
@@ -219,6 +224,17 @@ describe("composer checkout row", () => {
     await press(editor, "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
     expect(started[0]).toMatchObject({ prompt: "work in the project", cwd: `${PROJECT_DEST}/packages` });
+  });
+
+  it("starts an unpicked thread on a workspace with a project in the project folder, which is what wsp init's first import leaves", async () => {
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": params => ({ ...STATUS, root: String(params["cwd"]) }) }));
+    const { api, started } = fixtureApi([], [], withProject);
+    await setup(api);
+    const editor = composerEditor();
+    await typeInto(editor, "hello");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]?.cwd).toBe(PROJECT_DEST);
   });
 
   it("starts an unpicked thread in the daemon root", async () => {

@@ -166,7 +166,15 @@ describe.runIf(LIVE)("sign-in stage (live)", () => {
             if (!hooks.onLine(line)) hostLines.push(line);
           },
         });
-        return { port: 0, wsPort: 0, authToken: "", createWorkspace: async () => { throw new Error("no workspace in this live run"); }, close: async () => relay?.close() };
+        return {
+          port: 0,
+          wsPort: 0,
+          authToken: "",
+          createWorkspace: async () => { throw new Error("no workspace in this live run"); },
+          planProject: async () => { throw new Error("no project in this live run"); },
+          importProject: async () => { throw new Error("no project in this live run"); },
+          close: async () => relay?.close(),
+        };
       },
     };
 

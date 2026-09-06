@@ -2,8 +2,8 @@
 // The few rules every wsp init screen shares: cut to a width with an
 // ellipsis, flatten a program's output line to one row, pad cells into
 // aligned columns, print a duration, the bar down the left of the screen being
-// answered, the help line, a card in the frame, and the confirm and password
-// prompts drawn with those same rules.
+// answered, the help line, a card in the frame, and the confirm, text and
+// password prompts drawn with those same rules.
 import type { Readable, Writable } from "node:stream";
 import { WriteStream } from "node:tty";
 import { stripVTControlCharacters, styleText } from "node:util";
@@ -130,8 +130,8 @@ export function card(title: string, lines: readonly string[], output: Writable):
 const dim = (s: string): string => styleText("dim", s);
 const MASK = unicode ? "▪" : "*";
 const CONFIRM_KEYS: readonly HelpKey[] = [{ key: "← →", does: "change" }, { key: "y n", does: "answer" }, { key: "enter", does: "choose" }, { key: "esc", does: "cancel" }];
-const PASSWORD_KEYS: readonly HelpKey[] = [{ key: "enter", does: "next" }, { key: "esc", does: "cancel" }];
-const TEXT_KEYS: readonly HelpKey[] = [{ key: "enter", does: "next" }, { key: "esc", does: "cancel" }];
+/** The help line under a prompt that is typed into, secret or not. */
+const ENTER_KEYS: readonly HelpKey[] = [{ key: "enter", does: "next" }, { key: "esc", does: "cancel" }];
 
 export interface PromptOptions {
   /** The question: cyan on the step glyph while the prompt is being answered, plain once it is done. */
@@ -190,7 +190,7 @@ export async function passwordPrompt(o: PromptOptions): Promise<string | symbol>
     ...streamsOf(o),
     render() {
       const body = this.state === "submit" || this.state === "cancel" ? (this.masked === "" ? [] : [styleText(this.state === "submit" ? "dim" : ["strikethrough", "dim"], this.masked)]) : [this.userInputWithCursor];
-      return promptFrame(this.state, o, body, PASSWORD_KEYS);
+      return promptFrame(this.state, o, body, ENTER_KEYS);
     },
   });
   // An untouched prompt settles to "" before it resolves; the undefined in clack's type never comes back.
@@ -204,9 +204,9 @@ export async function textPrompt(o: PromptOptions & { placeholder?: string }): P
     ...(o.placeholder !== undefined ? { placeholder: o.placeholder } : {}),
     render() {
       const typed = this.value === undefined ? "" : String(this.value);
-      if (this.state === "submit") return promptFrame(this.state, o, typed === "" ? [] : [dim(typed)], TEXT_KEYS);
-      if (this.state === "cancel") return promptFrame(this.state, o, typed === "" ? [] : [styleText(["strikethrough", "dim"], typed)], TEXT_KEYS);
-      return promptFrame(this.state, o, [typed === "" && o.placeholder !== undefined ? dim(o.placeholder) : this.userInputWithCursor], TEXT_KEYS);
+      if (this.state === "submit") return promptFrame(this.state, o, typed === "" ? [] : [dim(typed)], ENTER_KEYS);
+      if (this.state === "cancel") return promptFrame(this.state, o, typed === "" ? [] : [styleText(["strikethrough", "dim"], typed)], ENTER_KEYS);
+      return promptFrame(this.state, o, [typed === "" && o.placeholder !== undefined ? dim(o.placeholder) : this.userInputWithCursor], ENTER_KEYS);
     },
   });
   // An untouched prompt settles to "" before it resolves; the undefined in clack's type never comes back.

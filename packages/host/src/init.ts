@@ -54,6 +54,7 @@ import { secretsStage, type SecretOutcome } from "./init-secrets.js";
 import { buildTakes, buildTimes, readBuildTimes } from "./init-times.js";
 import { keptBuilder, stopKeptBuilder, updateRoad } from "./init-upgrade.js";
 import { retentionOffer } from "./storage.js";
+import { DONE_LINE, appUrl, askFirst, checkImportFolder, runFirst, type FirstResult } from "./init-first.js";
 import type { Tone } from "./init-select.js";
 import { diskLine, diskTone } from "./init-weight.js";
 import { builderLink, flowHooks, keyAsks, noteOutcomes, signInStage, stageLogins, type BuilderLink, type HostHooks, type LoginOutcome, type SignInFlow } from "./init-signin.js";
@@ -93,6 +94,10 @@ export interface InitOptions {
   /** Reads one project folder's own manifests for what it needs, for the folder the first screen asks for; nothing
    * when there is no folder there. */
   scanProject(folder: string): Promise<ProjectScan | undefined>;
+  /** --first-workspace: the name the first fork takes, and an answer of yes to the last question. */
+  firstWorkspace?: string;
+  /** --import: the folder whose project lands on that first workspace, and an answer of yes to the last question. */
+  importFolder?: string;
   /** Reads this computer, telling onRung how many rows each rung found as it finishes. */
   collect(onRung: (rung: Rung, rows: number) => void): Promise<Manifest>;
   /** Reads this computer against the catalog and the agents' session histories for the recipe the screens start
@@ -143,7 +148,6 @@ interface Earlier {
 }
 
 const GOLDEN_NAME = "default";
-const FIRST_WORKSPACE = "first";
 const DEFAULT_RETRY = { waitMs: 30_000, attempts: 20 };
 /** What ends a builder this run could not: a record its dead holder left is stale to the next start, which stops it. */
 const SWEEP = "the next wsp or wsp init on this computer stops it, or stop it from the Solari console.";
@@ -684,6 +688,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const counts: string[] = [];
   const notes: string[] = [];
   try {
+    if (opts.importFolder !== undefined) checkImportFolder(opts.importFolder);
     if (opts.recipeFile !== undefined) given = loadRecipe(opts.recipeFile);
     manifest = await opts.collect((rung, rows) => {
       counts.push(`${RUNG_TITLE[rung]} ${rows}`);
@@ -1208,22 +1213,27 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
 
   if (version > 1) await retentionOffer({ rt, interactive, yes: opts.yes, input: io.input, output: io.output });
 
-  // Only the first seal ever forks a workspace; a rebuild leaves the existing ones on the version they came from.
+  // Only the first seal ever offers a workspace; a rebuild leaves the existing ones on the version they came from.
   const existing = await rt.workspaces.list();
+  let first: FirstResult | undefined;
   if (existing.length > 0) {
     log.step(`Your ${existing.length} workspace${existing.length === 1 ? " stays" : "s stay"} on the golden version ${existing.length === 1 ? "it was" : "they were"} forked from; upgrade ${existing.length === 1 ? "it" : "them"} from the app. New workspaces fork v${version}.`, out);
   } else {
-    const forking = spin(io.output, `Forking your first workspace, ${FIRST_WORKSPACE}`, io.isTTY);
-    try {
-      const first = await handle.createWorkspace(FIRST_WORKSPACE);
-      forking.stop();
-      log.step(`Workspace ${first.name} (${first.id}) forked from golden v${version}.${first.notice !== undefined ? ` ${first.notice}` : ""}`, out);
-    } catch (e) {
-      forking.stop();
-      log.warn(`The first workspace could not be forked: ${e instanceof Error ? e.message : String(e)}. Create one from the app.`, out);
+    const ask = await askFirst({
+      interactive,
+      ...(opts.firstWorkspace !== undefined ? { name: opts.firstWorkspace } : {}),
+      ...(opts.importFolder !== undefined ? { folder: opts.importFolder } : {}),
+      input: io.input,
+      output: io.output,
+    });
+    // No and esc both end with nothing forked; neither unwinds the seal, which is already on the account by here.
+    if (isCancel(ask) || ask === undefined) {
+      log.step(DONE_LINE, out);
+    } else {
+      first = await runFirst({ first: ask, handle, goldenVersion: version, output: io.output, spin: label => spin(io.output, label, io.isTTY) });
     }
   }
-  const url = `http://127.0.0.1:${handle.port}/`;
+  const url = appUrl(handle.port, first?.workspace.id);
   runLog.note(`app ${url}`);
   await openApp(url, handle, io, interactive, logLine(), out);
   outro("wsp keeps serving the app from this terminal; Ctrl-C stops it.", out);
