@@ -32,8 +32,8 @@ export type InstallRoad =
   /** `go install` of a module at a version; a row whose module nobody could read carries none and installs nothing. */
   | { road: "go"; module?: string; version?: string }
   /** A GitHub repository's Linux asset for the arch, at `version` (a tag) or the current release; `pin` is what the first
-   * install of that tag recorded and `go` the module `go install` falls back to. A row that came back from a golden's
-   * digest names no repository: it only ever comes off. */
+   * install of that tag recorded and `go` the main package `go install` falls back to, at its own version or the tag's;
+   * with none there is no fall-through. A row that came back from a golden's digest names no repository: it only ever comes off. */
   | { road: "release"; repo?: string; version?: string; pin?: ToolPin; go?: string }
   /** A vendor's own Linux download, as its cask row scripts and hashes it. */
   | { road: "vendor"; cask: LinuxCask; version?: string; pin?: ToolPin }
@@ -49,8 +49,10 @@ export const ROADS: readonly RoadName[] = ["brew", "npm", "pnpm", "bun", "uv", "
 export const GOLDEN_SETUP = "curl -fsSL https://claude.ai/install.sh | bash";
 export const GOLDEN_SMOKE = "claude --version";
 
+/** The guest's home directory: every machine runs as root. */
+export const GUEST_HOME = "/root";
 /** Claude Code's config dir on the guest, always CLAUDE_CONFIG_DIR and never HOME. */
-export const CLAUDE_CONFIG_DIR = "/root/.claude-cfg";
+export const CLAUDE_CONFIG_DIR = `${GUEST_HOME}/.claude-cfg`;
 /** The file under Claude Code's config dir that the apiKeyHelper's key is placed in and the copied settings read. */
 export const CLAUDE_KEY_FILE = "anthropic-api-key";
 

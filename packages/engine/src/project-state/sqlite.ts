@@ -16,11 +16,29 @@ export const underPath = (column: string): string => `(${column} = $from or subs
 export const movedColumn = (column: string): string => `iif(${underPath(column)}, $to || substr(${column}, length($from) + 1), ${column})`;
 export const pathParams = (from: string, to: string): Record<string, SQLInputValue> => ({ $from: from, $to: to });
 
+// Fetched on first use, not at import: loading node:sqlite prints an ExperimentalWarning, and vite-node 2 cannot resolve an import of it.
+const binding = (): typeof import("node:sqlite") => process.getBuiltinModule("node:sqlite") as typeof import("node:sqlite");
+
+/** Runs fn on the database opened read-only, or returns nothing when the file is absent. */
+export function readOnly<T>(db: string, fn: (d: DatabaseSync) => T): T | undefined {
+  if (!existsSync(db)) return undefined;
+  const { DatabaseSync } = binding();
+  const d = new DatabaseSync(db, { readOnly: true });
+  try {
+    return fn(d);
+  } finally {
+    d.close();
+  }
+}
+
+/** The `n` the count query selects, or zero when the file is absent. */
+export const countRows = (db: string, sql: string, params: Readonly<Record<string, SQLInputValue>>): number =>
+  readOnly(db, d => Number((d.prepare(sql).get(params) as { n: number | bigint }).n)) ?? 0;
+
 /** Runs fn on the open database inside one transaction, or returns nothing when the file is absent. */
 export function inTransaction<T>(db: string, fn: (d: DatabaseSync) => T): T | undefined {
   if (!existsSync(db)) return undefined;
-  // Fetched here, not at import: loading node:sqlite prints an ExperimentalWarning, and vite-node 2 cannot resolve an import of it.
-  const { DatabaseSync } = process.getBuiltinModule("node:sqlite") as typeof import("node:sqlite");
+  const { DatabaseSync } = binding();
   const d = new DatabaseSync(db);
   try {
     d.exec("begin");

@@ -205,16 +205,22 @@ function summarize(tools: ToolResult[], housekeeping: string | undefined): strin
   return housekeeping !== undefined ? `${parts.join(", ")}; ${housekeeping}` : parts.join(", ");
 }
 
+/** Which of the commands are not on the machine's tools PATH; `failed` says why the check itself could not run. */
+export async function missingCommands(machine: Machine, bins: readonly string[]): Promise<{ missing: Set<string>; failed?: string }> {
+  const cmd = `export PATH=${TOOLS_PATH}\nfor b in ${bins.map(shellQuote).join(" ")}; do command -v "$b" >/dev/null 2>&1 || echo "missing $b"; done`;
+  const res = await machine.exec(cmd, { timeoutMs: INLINE_EXEC_MS });
+  const failed = res.exitCode === 0 ? undefined : reasonOf(res, INLINE_EXEC_MS / 1000);
+  const missing = new Set(res.stdout.split("\n").flatMap(l => (l.startsWith("missing ") ? [l.slice("missing ".length).trim()] : [])));
+  return failed === undefined ? { missing } : { missing, failed };
+}
+
 /** The installs that name their command, checked by name on the tools PATH: an install that exited 0 without
  * putting the command there is a failure, not an install, and so is one the check could not reach. */
 async function verifyCommands(machine: Machine, tools: readonly ToolInstall[], results: ToolResult[], stage: (detail: string) => void): Promise<void> {
   const named = results.filter(r => r.outcome === "installed").map(r => ({ result: r, bin: tools.find(t => t.id === r.id)?.bin })).filter((x): x is { result: ToolResult; bin: string } => x.bin !== undefined);
   if (named.length === 0) return;
-  const cmd = `export PATH=${TOOLS_PATH}\nfor b in ${named.map(x => shellQuote(x.bin)).join(" ")}; do command -v "$b" >/dev/null 2>&1 || echo "missing $b"; done`;
-  const res = await machine.exec(cmd, { timeoutMs: INLINE_EXEC_MS });
-  const failed = res.exitCode === 0 ? undefined : reasonOf(res, INLINE_EXEC_MS / 1000);
+  const { missing, failed } = await missingCommands(machine, named.map(x => x.bin));
   if (failed !== undefined) stage(`the PATH check failed (${failed}): ${named.map(x => x.bin).join(", ")} count as failed`);
-  const missing = new Set(res.stdout.split("\n").flatMap(l => (l.startsWith("missing ") ? [l.slice("missing ".length).trim()] : [])));
   for (const x of named) {
     if (failed === undefined && !missing.has(x.bin)) continue;
     x.result.outcome = "failed";

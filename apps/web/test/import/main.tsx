@@ -35,6 +35,7 @@ const plan: ProjectPlan = {
         ],
   excluded: ["node_modules", "dist", ".venv", "coverage"],
   skipped: [{ path: "public/uploads", note: "points outside the folder; not followed" }],
+  agents: [],
 };
 
 const listeners = new Set<(e: EventUnion) => void>();
@@ -79,7 +80,7 @@ const api: Api = {
     emit({ stage: "landing", message: `Landing at ${SOURCE}.`, elapsedMs: 7_100 });
     await beat(150);
     emit({ stage: "done", message: `1202 files, 38.0 MB, landed at ${SOURCE}.`, elapsedMs: 9_800 });
-    return { dest: SOURCE, files: 1_202, bytes: 38.0 * 1024 * 1024, parts: 1, cut, rewritten: [".git/config"] };
+    return { dest: SOURCE, files: 1_202, bytes: 38.0 * 1024 * 1024, parts: 1, cut, rewritten: [".git/config"], agents: [] };
   },
   subscribe: fn => {
     listeners.add(fn);

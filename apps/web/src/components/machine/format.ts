@@ -2,11 +2,11 @@
 // Words the machine surface puts next to wire values. Phase is the product
 // word (Running, Paused, Waking); machine state is the provider word and only
 // shows when it diverges from what the phase implies.
-import { workspaceState, workspaceWord, type MachineState, type ReachState, type WorkspacePhase, type WorkspaceSize } from "@wsp/protocol";
+import { fmtBytes, fmtMemGb, workspaceState, workspaceWord, type MachineState, type ReachState, type WorkspacePhase, type WorkspaceSize } from "@wsp/protocol";
 
 export const money = (n: number, digits = 4): string => `$${n.toFixed(digits)}`;
 
-export const sizeLabel = (size: WorkspaceSize): string => `${size.cpu} vCPU · ${size.memMb / 1024} GB`;
+export const sizeLabel = (size: WorkspaceSize): string => `${size.cpu} vCPU · ${fmtMemGb(size.memMb)}`;
 
 /** A tick's wall-clock time in the person's zone, hours and minutes. */
 export const clockLabel = (iso: string): string => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -80,17 +80,11 @@ export function diskTier(percent: number): DiskTier {
 
 export const percentLabel = (n: number): string => `${Math.round(n)}%`;
 
-/** Used and total in one unit picked by the total: GB with a decimal from a gigabyte up, whole MB below. */
-export function bytesOfLabel(used: number, total: number): string {
-  const GiB = 1024 ** 3;
-  if (total >= GiB) return `${(used / GiB).toFixed(1)} of ${(total / GiB).toFixed(1)} GB`;
-  const MiB = 1024 ** 2;
-  return `${Math.round(used / MiB)} of ${Math.round(total / MiB)} MB`;
-}
+export const bytesOfLabel = (used: number, total: number): string => `${fmtBytes(used)} of ${fmtBytes(total)}`;
 
 const UNITS = ["", "K", "M", "G", "T"];
 
-/** rss in one unit with at most three digits, as a process table column: 900, 12K, 1.5M, 123M, 2.3G. */
+/** rss as a process table column with a three-digit budget fmtBytes does not fit, so its own rule: 900, 12K, 1.5M, 123M, 2.3G. */
 export function compactBytes(n: number): string {
   let v = Math.max(0, n);
   let i = 0;

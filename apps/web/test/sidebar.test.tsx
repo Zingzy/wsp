@@ -296,7 +296,7 @@ describe("new thread", () => {
 
   it("a workspace row offers the import when the runtime can read folders here, and the dialog opens for that workspace", async () => {
     const api = fakeApi([API, WEB], [status(API), status(WEB)]);
-    api.planProject = vi.fn(async () => ({ source: "/private/var/proj", repo: true, files: 3, bytes: 900, secrets: [], excluded: [], skipped: [] }));
+    api.planProject = vi.fn(async () => ({ source: "/private/var/proj", repo: true, files: 3, bytes: 900, secrets: [], excluded: [], skipped: [], agents: [] }));
     api.importProject = vi.fn();
     await mount(api, "api");
     fireEvent.click(screen.getByRole("button", { name: "Import a project into web" }));
@@ -444,7 +444,7 @@ describe("new workspace dialog", () => {
   it("the second choice creates, then opens the import dialog for the workspace the runtime made", async () => {
     vi.stubGlobal("PointerEvent", class extends MouseEvent {});
     const api = fakeApi([API], [status(API)]);
-    api.planProject = vi.fn(async () => ({ source: "/private/var/proj", repo: true, files: 3, bytes: 900, secrets: [], excluded: [], skipped: [] }));
+    api.planProject = vi.fn(async () => ({ source: "/private/var/proj", repo: true, files: 3, bytes: 900, secrets: [], excluded: [], skipped: [], agents: [] }));
     api.importProject = vi.fn();
     api.createFromGoldenHead = vi.fn(async (name: string) => view("ws_beta", name));
     await mount(api, "api");

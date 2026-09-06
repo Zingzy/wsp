@@ -7,11 +7,10 @@
 // never read.
 import { createHash } from "node:crypto";
 import { MCP_AGENTS, parseJsonc, type McpAgent, type McpConfig, type McpServer, type McpTransport } from "@wsp/catalog";
-import { MCP_ID_PREFIX } from "@wsp/protocol";
+import { MCP_ID_PREFIX, fmtBytes } from "@wsp/protocol";
 import { type Host, expand } from "../host.js";
 import type { GroupNote, ManifestEntry } from "../manifest.js";
 import { isSecretName } from "../everything/shell-rc.js";
-import { fmt } from "./common.js";
 import { BASE_INTERPRETERS, HAND_DIRS, HAND_GROUP, type HandBin, brought, carries, handBins } from "./hand-bins.js";
 
 /** The row that carries mcp-remote's saved browser sign-ins for every agent. */
@@ -261,7 +260,7 @@ async function carried(host: Host, server: McpServer, agent: McpAgent, remoteTok
         out.notes.push(`the file ${k} points at is outside your home and is not copied`);
         continue;
       }
-      out.secrets.push(`the file ${k} points at (${fmt(st.bytes)})`);
+      out.secrets.push(`the file ${k} points at (${fmtBytes(st.bytes)})`);
       out.paths.push(`~${abs.slice(host.home.length)}`);
       out.bytes += st.bytes;
       continue;
@@ -285,7 +284,7 @@ async function carried(host: Host, server: McpServer, agent: McpAgent, remoteTok
   const hash = mcpRemoteHash(t.args);
   if (hash !== undefined) {
     const bytes = remoteTokens.get(hash);
-    out.notes.push(bytes === undefined ? "no saved sign-in; the browser sign-in runs again on the machine" : `its saved sign-in (${fmt(bytes)}) travels on the ${MCP_REMOTE_LABEL} row`);
+    out.notes.push(bytes === undefined ? "no saved sign-in; the browser sign-in runs again on the machine" : `its saved sign-in (${fmtBytes(bytes)}) travels on the ${MCP_REMOTE_LABEL} row`);
   }
   return out;
 }
@@ -357,7 +356,7 @@ function remoteRow(store: RemoteStore, matched: readonly string[]): ManifestEntr
     ...base,
     default: "bring",
     consent: true,
-    detail: `browser sign-ins saved by mcp-remote for remote servers: ${n} token${n === 1 ? "" : "s"} (${fmt(tokenBytes)})${whom.length > 0 ? `, ${whom.join("; ")}` : ""}${older ? "; older bridge versions' folders stay here" : ""}`,
+    detail: `browser sign-ins saved by mcp-remote for remote servers: ${n} token${n === 1 ? "" : "s"} (${fmtBytes(tokenBytes)})${whom.length > 0 ? `, ${whom.join("; ")}` : ""}${older ? "; older bridge versions' folders stay here" : ""}`,
   };
 }
 

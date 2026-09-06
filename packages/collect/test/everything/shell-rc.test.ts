@@ -203,7 +203,7 @@ describe("pass 6: shell rc exports", () => {
     const notes: string[] = [];
     const out = await shellRc(laptop({ files: { "~/.zshrc": { bytes: 2_000_000 }, "~/.bashrc": "export GH_TOKEN=x\n" } }), { notes });
     expect(out.map(o => o.path)).toEqual(["~/.bashrc"]);
-    expect(notes).toEqual(["~/.zshrc could not be read (over 1 MiB or unreadable) and was not scanned"]);
+    expect(notes).toEqual(["~/.zshrc could not be read (over 1 MB or unreadable) and was not scanned"]);
   });
 
   it("a value never appears in the output, and a file with no secret exports is not reported", async () => {

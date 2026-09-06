@@ -7,7 +7,7 @@
 import { GCLOUD, KUBECTL } from "./linux-casks.js";
 import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, type McpConfig } from "./mcp.js";
 import { roadModule } from "./road-modules.js";
-import { GOLDEN_SETUP, HERMES_INSTALL, MIB, NODE_RELEASES, PYTHON_INSTALL, UV_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
+import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, HERMES_INSTALL, MIB, NODE_RELEASES, PYTHON_INSTALL, UV_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
 import { NO_SIGN_IN, SIGN_IN_ROWS, hasLogin, keysIdOf, keysRowOf, loginIdOf, type KeyFiles, type SignIn } from "./signin.js";
 
 export type EntryKind = "agent" | "tool";
@@ -68,6 +68,10 @@ export interface SessionHistory {
 /** An agent is never on by default: the wizard ticks the ones found on the Mac. */
 export interface AgentEntry extends EntryBase {
   kind: "agent";
+  /** The directory the projectState rows sit under, relative to the home directory of the computer the agent ran on. */
+  stateHome: string;
+  /** Where that directory is on the guest when it is not stateHome under the guest's home, absolute. */
+  guestStateHome?: string;
   /** Every store that holds the project's path. */
   projectState: readonly ProjectState[];
   /** Absent while the agent's session format has no reader: its history reads as none. */
@@ -137,7 +141,8 @@ const brew = (formula: string): { installRoad: InstallRoad; size?: number } => {
 };
 const apt = (...packages: string[]): InstallRoad => ({ road: "apt", packages });
 const npm = (pkg: string, version?: string): InstallRoad => ({ road: "npm", package: pkg, ...(version !== undefined ? { version } : {}) });
-const github = (repo: string): InstallRoad => ({ road: "release", repo });
+/** A release road; `go` is the repository's main package for the fall-through, left off when it has none. */
+const github = (repo: string, go?: string): InstallRoad => ({ road: "release", repo, ...(go !== undefined ? { go } : {}) });
 const tool = { kind: "tool", configPaths: [], floor: false } as const;
 const agent = (id: keyof typeof AGENT_MIB) => ({ id, kind: "agent", bin: id, size: AGENT_MIB[id] * MIB }) as const;
 
@@ -145,6 +150,8 @@ export const CATALOG: readonly CatalogEntry[] = [
   // --- agents: the six whose project state a move can follow -------------------------------------------------------
   {
     ...agent("claude"),
+    stateHome: ".claude",
+    guestStateHome: CLAUDE_CONFIG_DIR,
     name: "Claude Code",
     installRoad: { road: "script", script: GOLDEN_SETUP },
     signIn: SIGN_IN_ROWS.claude,
@@ -167,6 +174,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   },
   {
     ...agent("codex"),
+    stateHome: ".codex",
     name: "Codex",
     installRoad: npm("@openai/codex", "0.153.0"),
     node: 16,
@@ -185,6 +193,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   },
   {
     ...agent("gemini"),
+    stateHome: ".gemini",
     name: "Gemini CLI",
     installRoad: npm("@google/gemini-cli", "0.58.0"),
     node: 20,
@@ -203,6 +212,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   },
   {
     ...agent("opencode"),
+    stateHome: ".local/share/opencode",
     name: "OpenCode",
     installRoad: npm("opencode-ai", "1.18.27"),
     signIn: SIGN_IN_ROWS.opencode,
@@ -221,6 +231,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   },
   {
     ...agent("pi"),
+    stateHome: ".pi/agent",
     name: "Pi",
     installRoad: { road: "npm", package: "@earendil-works/pi-coding-agent", version: "0.84.4", ignoreScripts: true },
     node: 22,
@@ -238,6 +249,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   },
   {
     ...agent("hermes"),
+    stateHome: ".hermes",
     name: "Hermes Agent",
     installRoad: { road: "script", script: HERMES_INSTALL },
     signIn: SIGN_IN_ROWS.hermes,
@@ -262,7 +274,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   { ...tool, id: "curl", name: "curl", bin: "curl", installRoad: apt("curl"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 87, images: 4, road: "unmeasured" } },
   { ...tool, id: "docker", name: "Docker engine and compose", bin: "docker", installRoad: apt("docker.io", "docker-compose-v2"), floor: true, covers: ["docker-compose"], brings: [{ bin: "docker compose", version: "docker compose version" }], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 30, images: 3, road: "unmeasured" } },
   // gh has no pinned release yet and agent-browser waits on a second data point: default-on through the tools stage.
-  { ...tool, id: "gh", name: "GitHub CLI", bin: "gh", installRoad: github("cli/cli"), signIn: SIGN_IN_ROWS.gh, defaultOn: true, source: { sessions: 100, images: 3, road: "unmeasured" } },
+  { ...tool, id: "gh", name: "GitHub CLI", bin: "gh", installRoad: github("cli/cli", "github.com/cli/cli/v2/cmd/gh"), signIn: SIGN_IN_ROWS.gh, defaultOn: true, source: { sessions: 100, images: 3, road: "unmeasured" } },
   { ...tool, id: "agent-browser", name: "agent-browser", bin: "agent-browser", installRoad: npm("agent-browser", "0.31.1"), signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 45, images: 0, road: "unmeasured", note: "sessions counted on one Mac only; on by default for this user until a second data point" } },
 
   // --- tools on request ---------------------------------------------------------------------------------------------
@@ -272,20 +284,20 @@ export const CATALOG: readonly CatalogEntry[] = [
   { ...tool, id: "maven", name: "Maven", bin: "mvn", ...brew("maven"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 4, road: "unmeasured" } },
   { ...tool, id: "gradle", name: "Gradle", bin: "gradle", ...brew("gradle"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 4, road: "measured" } },
   { ...tool, id: "wrangler", name: "Cloudflare Wrangler", bin: "wrangler", installRoad: npm("wrangler"), covers: ["cloudflare-wrangler"], signIn: SIGN_IN_ROWS.wrangler, defaultOn: false, source: { sessions: 3, images: 0, road: "unmeasured" } },
-  { ...tool, id: "cloudflared", name: "cloudflared", bin: "cloudflared", installRoad: github("cloudflare/cloudflared"), signIn: SIGN_IN_ROWS.cloudflared, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" } },
+  { ...tool, id: "cloudflared", name: "cloudflared", bin: "cloudflared", installRoad: github("cloudflare/cloudflared", "github.com/cloudflare/cloudflared/cmd/cloudflared"), signIn: SIGN_IN_ROWS.cloudflared, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" } },
   { ...tool, id: "gcloud", name: "Google Cloud CLI", bin: "gcloud", installRoad: { road: "vendor", cask: GCLOUD }, signIn: SIGN_IN_ROWS.gcloud, defaultOn: false, source: { sessions: 4, images: 0, road: "measured" } },
   { ...tool, id: "kubectl", name: "kubectl", bin: "kubectl", installRoad: { road: "vendor", cask: KUBECTL }, covers: ["kubernetes-cli"], signIn: SIGN_IN_ROWS.kubectl, defaultOn: false, source: { sessions: 1, images: 1, road: "unmeasured" } },
   { ...tool, id: "aws", name: "AWS CLI", bin: "aws", ...brew("awscli"), signIn: SIGN_IN_ROWS.aws, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
   { ...tool, id: "vercel", name: "Vercel CLI", bin: "vercel", installRoad: npm("vercel"), signIn: SIGN_IN_ROWS.vercel, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
   { ...tool, id: "netlify", name: "Netlify CLI", bin: "netlify", installRoad: npm("netlify-cli"), signIn: SIGN_IN_ROWS.netlify, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
-  { ...tool, id: "fly", name: "flyctl", bin: "fly", installRoad: github("superfly/flyctl"), signIn: SIGN_IN_ROWS.fly, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
+  { ...tool, id: "fly", name: "flyctl", bin: "fly", installRoad: github("superfly/flyctl", "github.com/superfly/flyctl"), signIn: SIGN_IN_ROWS.fly, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
   { ...tool, id: "supabase", name: "Supabase CLI", bin: "supabase", installRoad: github("supabase/cli"), signIn: SIGN_IN_ROWS.supabase, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
   { ...tool, id: "railway", name: "Railway CLI", bin: "railway", installRoad: npm("@railway/cli"), signIn: SIGN_IN_ROWS.railway, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
-  { ...tool, id: "doppler", name: "Doppler CLI", bin: "doppler", installRoad: github("DopplerHQ/cli"), signIn: SIGN_IN_ROWS.doppler, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" } },
+  { ...tool, id: "doppler", name: "Doppler CLI", bin: "doppler", installRoad: github("DopplerHQ/cli", "github.com/DopplerHQ/cli"), signIn: SIGN_IN_ROWS.doppler, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" } },
   // 1Password publishes the CLI through its own apt repository, which the road has to add first.
   { ...tool, id: "op", name: "1Password CLI", bin: "op", installRoad: apt("1password-cli"), signIn: SIGN_IN_ROWS.op, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" } },
   { ...tool, id: "ffmpeg", name: "ffmpeg", bin: "ffmpeg", installRoad: apt("ffmpeg"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" } },
-  { ...tool, id: "yq", name: "yq", bin: "yq", installRoad: github("mikefarah/yq"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 3, road: "unmeasured" } },
+  { ...tool, id: "yq", name: "yq", bin: "yq", installRoad: github("mikefarah/yq", "github.com/mikefarah/yq/v4"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 3, road: "unmeasured" } },
   { ...tool, id: "git-lfs", name: "Git LFS", bin: "git-lfs", installRoad: apt("git-lfs"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 2, road: "unmeasured" } },
   { ...tool, id: "tmux", name: "tmux", bin: "tmux", installRoad: apt("tmux"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 3, road: "unmeasured" } },
 ];

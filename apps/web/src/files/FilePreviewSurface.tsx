@@ -5,7 +5,7 @@
 import { File, Virtualizer } from "@pierre/diffs/react";
 import { Code2, Eye, RotateCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import type { FsReadReply } from "@wsp/protocol";
+import { fmtBytes, type FsReadReply } from "@wsp/protocol";
 import { FileBreadcrumbs } from "../components/files/FileBreadcrumbs.js";
 import { FileMarkdownPreview } from "../components/files/FileMarkdownPreview.js";
 import { Button } from "../components/ui/button.js";
@@ -35,12 +35,6 @@ type ReadState =
 /** Reading markdown rendered is a preference, not a property of one file. */
 const RENDER_MARKDOWN_KEY = "wsp:render-markdown";
 const boolean: Codec<boolean> = { decode: raw => raw === "true", encode: value => String(value) };
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MiB`;
-}
 
 function lastReply(state: ReadState): FsReadReply | null {
   return state.kind === "ready" ? state.reply : state.last;
@@ -130,7 +124,7 @@ export function FilePreviewSurface({ workspaceId, surface, theme }: { workspaceI
       </div>
       {reply?.truncated ? (
         <p className="shrink-0 border-b border-border/70 bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground" data-file-truncated>
-          Showing the first {formatBytes(reply.content.length)} of {formatBytes(reply.size)}; the daemon caps reads at 2 MiB.
+          Showing the first {fmtBytes(reply.content.length)} of {fmtBytes(reply.size)}; the daemon caps reads at 2 MB.
         </p>
       ) : null}
       {read.kind === "error" && reply === null ? (
@@ -141,7 +135,7 @@ export function FilePreviewSurface({ workspaceId, surface, theme }: { workspaceI
         </div>
       ) : binary ? (
         <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-xs text-muted-foreground">
-          Binary file, {formatBytes(reply.size)}. Nothing to preview.
+          Binary file, {fmtBytes(reply.size)}. Nothing to preview.
         </div>
       ) : rendered ? (
         <ScrollArea className="min-h-0 flex-1">

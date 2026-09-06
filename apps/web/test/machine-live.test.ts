@@ -26,11 +26,10 @@ describe("live labels", () => {
     expect(percentLabel(100)).toBe("100%");
   });
 
-  it("used of total shares one unit chosen by the total", () => {
+  it("used of total prints each side under the shared byte rule", () => {
     const GiB = 1024 ** 3;
-    expect(bytesOfLabel(3.14 * GiB, 7.75 * GiB)).toBe("3.1 of 7.8 GB");
-    expect(bytesOfLabel(12.4 * GiB, 40 * GiB)).toBe("12.4 of 40.0 GB");
-    expect(bytesOfLabel(200 * 1024 ** 2, 900 * 1024 ** 2)).toBe("200 of 900 MB");
+    expect(bytesOfLabel(3.14 * GiB, 7.75 * GiB)).toBe("3.1 GB of 7.8 GB");
+    expect(bytesOfLabel(900 * 1024 ** 2, 7.75 * GiB)).toBe("900.0 MB of 7.8 GB");
   });
 });
 

@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "tsup src/index.ts src/bin.ts --format esm --dts",
-    "test": "vitest run"
+    "test": "vitest run packages/host"
   },
   "dependencies": {
     "@clack/core": "1.4.3",

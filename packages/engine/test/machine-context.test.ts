@@ -196,7 +196,7 @@ describe("the document", () => {
     expect(doc.startsWith(`${CONTEXT_MARKER}\n`)).toBe(true);
     expect(doc).toContain("- Workspace: task-1.");
     expect(doc).toContain("- Golden: v3, sealed 2026-09-05, setup 9f2a7c1d4e5b.");
-    expect(doc).toContain("- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written. wsp keeps 2.0 GiB free");
+    expect(doc).toContain("- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free");
     expect(doc).toContain("- Every agent session starts in the thread's folder; terminal panes open in the home folder.");
     expect(doc).toContain("- Work in a folder: cd <dir> && <cmd> on one line, or absolute paths.");
     expect(doc).not.toContain("does not move the thread");
@@ -252,7 +252,7 @@ describe("the document", () => {
     expect(short).toContain("- Sign-ins go through wsp: run the tool's own login command");
     expect(short).toContain("bind 0.0.0.0, not 127.0.0.1");
     expect(short).toContain("- Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed.");
-    expect(short).toContain("- Disk: 19.5 GiB root disk, 11.2 GiB free when this file was written. wsp keeps 2.0 GiB free.");
+    expect(short).toContain("- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free.");
     expect(short).toContain("- Secrets are exported by /etc/profile.d/wsp-secrets.sh. Use them by name ($NAME); never print, log or commit a value");
     expect(short).not.toContain("OPENAI_API_KEY");
     expect(short).not.toContain("raycast");
@@ -261,7 +261,7 @@ describe("the document", () => {
     const bare = renderShortContext({ probe: probeOf({ has: new Set(), overlay: true, disk: undefined }), facts: FACTS });
     expect(bare).not.toContain("tmux");
     expect(bare).toContain("- Docker and Podman are not installed.");
-    expect(bare).toContain("- Disk: size unknown when this file was written. wsp keeps 2.0 GiB free.");
+    expect(bare).toContain("- Disk: size unknown when this file was written. wsp keeps 2.0 GB free.");
     expect(bare).not.toContain("Sign-ins");
   });
 

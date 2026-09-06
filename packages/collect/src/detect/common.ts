@@ -89,12 +89,6 @@ export function present(rows: (ManifestEntry | undefined)[]): ManifestEntry[] {
   return rows.filter((r): r is ManifestEntry => r !== undefined);
 }
 
-export function fmt(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${Math.round(n / (1024 * 1024))} MB`;
-}
-
 export function firstLine(out: string | undefined): string | undefined {
   const line = out?.split("\n")[0]?.trim();
   return line === undefined || line === "" ? undefined : line;

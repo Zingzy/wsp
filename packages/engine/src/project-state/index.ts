@@ -4,8 +4,12 @@
 // import the engine, so this registry is the one engine place an agent
 // touches: its entry, its module and one line below. Nothing here switches
 // on an agent id.
-import { existsSync } from "node:fs";
-import { CATALOG_AGENTS, type AgentEntry } from "@wsp/catalog";
+import { existsSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { CATALOG_AGENTS, GUEST_HOME, type AgentEntry } from "@wsp/catalog";
+import type { ProjectAgent } from "@wsp/protocol";
+import { missingCommands } from "../golden-tools.js";
+import type { Machine } from "../machine.js";
 import { claudeResolver } from "./claude.js";
 import { codexResolver } from "./codex.js";
 import { geminiResolver } from "./gemini.js";
@@ -14,7 +18,7 @@ import { opencodeResolver } from "./opencode.js";
 import { piResolver } from "./pi.js";
 import { resolveProjectPath, type MovedState, type ProjectStateResolver } from "./resolver.js";
 
-export { resolveProjectPath, underProject, type MovedState, type ProjectStateResolver } from "./resolver.js";
+export { filesUnder, resolveProjectPath, underProject, type MovedState, type ProjectStateResolver } from "./resolver.js";
 
 export const PROJECT_STATE_RESOLVERS: ReadonlyMap<string, ProjectStateResolver> = new Map(
   [claudeResolver, codexResolver, geminiResolver, hermesResolver, opencodeResolver, piResolver].map(r => [r.agent, r]),
@@ -64,4 +68,46 @@ export async function moveProjectState(move: ProjectStateMove, agents: readonly 
     }
   }
   return report;
+}
+
+/** Every catalog agent's home under a home directory, by id: the entry's stateHome joined onto it. */
+export function agentHomes(homeDir: string): Record<string, string> {
+  return Object.fromEntries(CATALOG_AGENTS.map(a => [a.id, join(homeDir, a.stateHome)]));
+}
+
+/** Every catalog agent's home on the guest, by id: the entry's own guest home where it names one, else stateHome under the guest's home. */
+export function guestAgentHomes(): Record<string, string> {
+  return Object.fromEntries(CATALOG_AGENTS.map(a => [a.id, a.guestStateHome ?? join(GUEST_HOME, a.stateHome)]));
+}
+
+/** The agents whose home holds sessions for the folder, in catalog order, each with its name, the bytes of the files
+ * its module names for the folder and how its state travels; an agent with no home on disk, no module or no session
+ * for the folder has no row. An agent whose store cannot be read keeps a row carrying the reason, and the count goes
+ * on with the rest. */
+export async function countProjectState(path: string, homes: Readonly<Record<string, string>>, agents: readonly Pick<AgentEntry, "id" | "name">[] = CATALOG_AGENTS): Promise<ProjectAgent[]> {
+  const root = resolveProjectPath(path);
+  const rows: ProjectAgent[] = [];
+  for (const { id: agent, name } of agents) {
+    const resolver = PROJECT_STATE_RESOLVERS.get(agent);
+    const home = homes[agent];
+    if (resolver === undefined || home === undefined || !existsSync(home)) continue;
+    try {
+      const sessions = await resolver.sessions(home, root);
+      if (sessions === 0) continue;
+      const bytes = (await resolver.entries(home, root)).reduce((n, f) => n + statSync(f).size, 0);
+      rows.push({ agent, name, sessions, bytes, carry: resolver.carry });
+    } catch (e) {
+      rows.push({ agent, name, sessions: 0, bytes: 0, carry: resolver.carry, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  return rows;
+}
+
+/** Which of the catalog agents are on the machine: the ones whose command is on its tools PATH. */
+export async function agentsOnMachine(machine: Machine, ids: readonly string[]): Promise<Set<string>> {
+  const agents = CATALOG_AGENTS.filter(a => ids.includes(a.id));
+  if (agents.length === 0) return new Set();
+  const { missing, failed } = await missingCommands(machine, agents.map(a => a.bin));
+  if (failed !== undefined) throw new Error(`could not see which agents are on the machine: ${failed}`);
+  return new Set(agents.filter(a => !missing.has(a.bin)).map(a => a.id));
 }
