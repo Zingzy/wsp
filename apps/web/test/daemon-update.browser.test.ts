@@ -76,6 +76,12 @@ describe.skipIf(skipped !== undefined)("the machine tab over an old daemon laid 
     expect(lineDuring.height).toBe(line.height);
     await page!.locator("[data-testid=machine-tab]").screenshot({ path: join(SHOTS, `daemon-updating-${theme}.png`) });
 
+    // The runtime's op has resolved by now and the hello has not come: the keycap is still busy, the line still v1.
+    await page!.waitForTimeout(1_200);
+    expect(await page!.locator("[data-k=daemon-update] button").textContent()).toBe("updating");
+    expect(await page!.locator("[data-k=daemon-update] button").isDisabled()).toBe(true);
+    expect(await page!.locator("[data-k=daemon-update] span").textContent()).toBe("daemon v1 predates Live and Processes");
+
     await page!.waitForSelector("[data-k=daemon-update]", { state: "detached" });
     expect(await page!.locator("[data-live-row=cpu] [data-k]").textContent()).toBe("12%");
     const rowAfter = (await page!.locator("[data-live-row=disk]").boundingBox())!;

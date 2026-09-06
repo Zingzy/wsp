@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The version each workspace's daemon announced in its hello, and what this
-// app needs from a daemon by the version that added it. A machine whose
-// daemon is behind gets one line naming what it predates and the update.
-import { useSyncExternalStore } from "react";
+// What this app needs from a daemon by the version that added it, read
+// against the version its hello announced (files/wire.ts keeps that). A
+// machine whose daemon is behind gets one line naming what it predates and
+// the update.
 import { DAEMON_VERSION } from "@wsp/protocol";
 
 export interface DaemonFeature {
@@ -30,32 +30,4 @@ function listWords(words: string[]): string {
 export function daemonBehindLine(version: number | null): string | null {
   if (version === null || version >= DAEMON_VERSION) return null;
   return `daemon v${version} predates ${listWords(missingFeatures(version).map(f => f.label))}`;
-}
-
-const versions = new Map<string, number>();
-const fns = new Set<() => void>();
-
-export function provideDaemonVersion(workspaceId: string, version: number | null): void {
-  if (version !== null) versions.set(workspaceId, version);
-  else versions.delete(workspaceId);
-  for (const fn of fns) fn();
-}
-
-/** null until the daemon's hello arrived on this workspace's link. */
-export function getDaemonVersion(workspaceId: string): number | null {
-  return versions.get(workspaceId) ?? null;
-}
-
-function subscribe(fn: () => void): () => void {
-  fns.add(fn);
-  return () => fns.delete(fn);
-}
-
-export function useDaemonVersion(workspaceId: string): number | null {
-  return useSyncExternalStore(subscribe, () => getDaemonVersion(workspaceId));
-}
-
-/** Test isolation: forget every workspace's daemon version. */
-export function resetDaemonVersions(): void {
-  versions.clear();
 }

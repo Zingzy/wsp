@@ -11,7 +11,7 @@ import { provideDaemonWire } from "../src/files/wire.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { onNewThreadRequest } from "../src/shell/shellRequests.js";
 import { fakeWire, LISTING, resetSurfaces, WS } from "./surface-harness.js";
-import { provideDaemonRoot } from "../src/files/wire.js";
+import { provideDaemonHello } from "../src/files/wire.js";
 
 beforeEach(resetSurfaces);
 
@@ -169,7 +169,7 @@ describe("files surface", () => {
     render(<FilesSurface workspaceId={WS} theme="dark" />);
     expect(screen.getByText("The workspace is not running.")).toBeTruthy();
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING }));
-    provideDaemonRoot(WS, null);
+    provideDaemonHello(WS, null);
     render(<FilesSurface workspaceId={WS} theme="dark" />);
     expect(screen.getAllByText("The workspace is not running.")).toHaveLength(2);
   });

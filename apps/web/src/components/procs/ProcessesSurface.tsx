@@ -6,8 +6,9 @@
 // controls. A workspace with only the daemon running shows the daemon.
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { ProcEntry, ProcInspectReply, ProcSignal } from "@wsp/protocol";
+import { useDaemonVersion } from "../../files/wire.js";
 import { cn, errorText } from "../../lib/utils.js";
-import { daemonBehindLine, useDaemonVersion } from "../../machine/daemon.js";
+import { daemonBehindLine } from "../../machine/daemon.js";
 import { getProcs, useWorkspaceProcs } from "../../machine/procs.js";
 import { useWorkspace } from "../../protocol/store.js";
 import { getTerminals, onTerminals } from "../../terminal/link.js";

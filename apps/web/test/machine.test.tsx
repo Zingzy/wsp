@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   Capabilities,
   EventUnion,
@@ -13,8 +13,8 @@ import type {
   WorkspaceStatus,
   WorkspaceView,
 } from "@wsp/protocol";
-import { MachineSurface } from "../src/components/machine/MachineSurface.js";
-import { provideDaemonVersion, resetDaemonVersions } from "../src/machine/daemon.js";
+import { DAEMON_HELLO_WAIT_MS, MachineSurface } from "../src/components/machine/MachineSurface.js";
+import { provideDaemonHello } from "../src/files/wire.js";
 import { getLive, resetLive } from "../src/machine/live.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -103,7 +103,7 @@ function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS,
 
 beforeEach(() => {
   resetLive();
-  resetDaemonVersions();
+  provideDaemonHello("ws_a", null);
   document.documentElement.classList.add("dark");
   useStore.setState({
     api: null,
@@ -117,6 +117,10 @@ beforeEach(() => {
     sessions: {},
     ready: false,
   });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 async function mount(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS, lineage: SnapshotLineage = EMPTY_LINEAGE) {
@@ -729,9 +733,9 @@ describe("daemon version", () => {
     const updateDaemon = vi.fn(async (_id: string) => {});
     (api as Api).updateDaemon = updateDaemon;
     expect(updateLine()).toBeNull();
-    act(() => provideDaemonVersion("ws_a", 2));
+    act(() => provideDaemonHello("ws_a", { root: "/root", version: 2 }));
     expect(updateLine()).toBeNull();
-    act(() => provideDaemonVersion("ws_a", 1));
+    act(() => provideDaemonHello("ws_a", { root: "/root", version: 1 }));
     const line = updateLine()!;
     expect(line.querySelector("span")!.textContent).toBe("daemon v1 predates Live and Processes");
     expect(line.className).toMatch(/font-mono/);
@@ -747,18 +751,51 @@ describe("daemon version", () => {
     expect(button.className).not.toMatch(/warning|caution|destructive|success|info/);
     fireEvent.click(button);
     expect(updateDaemon).toHaveBeenCalledWith("ws_a");
-    await waitFor(() => expect(updateButton().textContent).toBe("update"));
+    await waitFor(() => expect(updateButton().textContent).toBe("updating"));
     expect(updateLine()!.className).toMatch(/\bh-6\b/);
     // The new daemon's hello names a current version: the line leaves.
-    act(() => provideDaemonVersion("ws_a", 2));
+    act(() => provideDaemonHello("ws_a", { root: "/root", version: 2 }));
     expect(updateLine()).toBeNull();
+  });
+
+  it("after the update resolves the keycap stays busy until the daemon's hello names a current version, so a second click cannot run the deploy again", async () => {
+    const api = await mount([view("ws_a", "api")]);
+    let settle!: () => void;
+    (api as Api).updateDaemon = vi.fn((_id: string) => new Promise<void>(resolve => (settle = resolve)));
+    act(() => provideDaemonHello("ws_a", { root: "/root", version: 1 }));
+    fireEvent.click(updateButton());
+    await waitFor(() => expect(updateButton().textContent).toBe("updating"));
+    await act(async () => settle());
+    // The runtime is done but the link it killed has not redialled yet: the line still reads v1 and the keycap stays busy.
+    expect(updateLine()!.querySelector("span")!.textContent).toBe("daemon v1 predates Live and Processes");
+    expect(updateButton().textContent).toBe("updating");
+    expect(updateButton().disabled).toBe(true);
+    act(() => provideDaemonHello("ws_a", { root: "/root", version: 2 }));
+    expect(updateLine()).toBeNull();
+  });
+
+  it("a daemon that never reports back frees the keycap once the bound passes, with the daemon's line as the title", async () => {
+    const api = await mount([view("ws_a", "api")]);
+    (api as Api).updateDaemon = vi.fn(async (_id: string) => {});
+    act(() => provideDaemonHello("ws_a", { root: "/root", version: 1 }));
+    vi.useFakeTimers();
+    fireEvent.click(updateButton());
+    await act(async () => {});
+    expect(updateButton().textContent).toBe("updating");
+    act(() => vi.advanceTimersByTime(DAEMON_HELLO_WAIT_MS - 1));
+    expect(updateButton().textContent).toBe("updating");
+    act(() => vi.advanceTimersByTime(1));
+    expect(updateButton().textContent).toBe("update");
+    expect(updateButton().disabled).toBe(false);
+    expect(updateLine()!.querySelector("span")!.textContent).toBe("daemon v1 predates Live and Processes");
+    expect(updateLine()!.querySelector("span")!.getAttribute("title")).toBe("daemon v1 predates Live and Processes");
   });
 
   it("the keycap reads updating while the runtime redeploys, and a refusal takes the line's place", async () => {
     const api = await mount([view("ws_a", "api")]);
     let settle!: (e?: Error) => void;
     (api as Api).updateDaemon = vi.fn((_id: string) => new Promise<void>((resolve, reject) => (settle = e => (e ? reject(e) : resolve()))));
-    act(() => provideDaemonVersion("ws_a", 1));
+    act(() => provideDaemonHello("ws_a", { root: "/root", version: 1 }));
     fireEvent.click(updateButton());
     await waitFor(() => expect(updateButton().textContent).toBe("updating"));
     expect(updateButton().disabled).toBe(true);
@@ -770,14 +807,14 @@ describe("daemon version", () => {
 
   it("a client without the update op says so instead of offering nothing", async () => {
     await mount([view("ws_a", "api")]);
-    act(() => provideDaemonVersion("ws_a", 1));
+    act(() => provideDaemonHello("ws_a", { root: "/root", version: 1 }));
     fireEvent.click(updateButton());
     await waitFor(() => expect(updateLine()!.querySelector("span")!.textContent).toBe("This client cannot update daemons."));
   });
 
   it("a napping workspace shows no update line: its daemon is not running to replace", async () => {
     await mount([view("ws_a", "api", "napping")]);
-    act(() => provideDaemonVersion("ws_a", 1));
+    act(() => provideDaemonHello("ws_a", { root: "/root", version: 1 }));
     expect(updateLine()).toBeNull();
   });
 });

@@ -11,8 +11,7 @@ import { DAEMON_VERSION, type WorkspaceView } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
-import { getDaemonRoot } from "../src/files/wire.js";
-import { getDaemonVersion, resetDaemonVersions } from "../src/machine/daemon.js";
+import { getDaemonRoot, getDaemonVersion } from "../src/files/wire.js";
 import { getLive, resetLive } from "../src/machine/live.js";
 import { getProcs, resetProcs } from "../src/machine/procs.js";
 import { getTerminals } from "../src/terminal/link.js";
@@ -87,7 +86,6 @@ beforeEach(async () => {
   useStore.setState({ api: null, capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, sessions: {}, ready: false });
   resetLive();
   resetProcs();
-  resetDaemonVersions();
   inboxDir = mkdtempSync(join(tmpdir(), "wsp-wiring-inbox-"));
   daemon = await startDaemon({
     port: 0,

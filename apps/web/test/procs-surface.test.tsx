@@ -6,11 +6,10 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProcEntry, ProcSnapshot } from "@wsp/protocol";
 import { ProcessesSurface, ROW_PX } from "../src/components/procs/ProcessesSurface.js";
-import { provideDaemonWire } from "../src/files/wire.js";
-import { provideDaemonVersion, resetDaemonVersions } from "../src/machine/daemon.js";
+import { provideDaemonHello, provideDaemonWire } from "../src/files/wire.js";
 import { getProcs, resetProcs } from "../src/machine/procs.js";
 import { useStore } from "../src/protocol/store.js";
-import { fakeWire, resetSurfaces, view, WS, type FakeWire } from "./surface-harness.js";
+import { DAEMON_ROOT, fakeWire, resetSurfaces, view, WS, type FakeWire } from "./surface-harness.js";
 
 const DAEMON = 40;
 
@@ -43,7 +42,6 @@ let wire: FakeWire;
 beforeEach(() => {
   resetSurfaces();
   resetProcs();
-  resetDaemonVersions();
   wire = fakeWire({
     "proc.watch": {},
     "proc.unwatch": {},
@@ -112,12 +110,12 @@ describe("processes surface", () => {
     expect(line.style.lineHeight).toBe(`${ROW_PX}px`);
     expect(line.className).not.toMatch(/warning|caution|destructive|success/);
     // The daemon's hello said it is behind: the line names what it predates and where the update is.
-    act(() => provideDaemonVersion(WS, 1));
+    act(() => provideDaemonHello(WS, { root: DAEMON_ROOT, version: 1 }));
     expect(document.querySelector("[data-procs-unavailable]")!.textContent).toBe("daemon v1 predates Live and Processes; update it from the machine tab");
     // A redeployed daemon answers the watch: the reason goes and the rows fill.
     wire.replies["proc.watch"] = {};
     act(() => {
-      provideDaemonVersion(WS, 2);
+      provideDaemonHello(WS, { root: DAEMON_ROOT, version: 2 });
       getProcs(WS).feedStatus("connecting");
       getProcs(WS).feedStatus("live");
     });

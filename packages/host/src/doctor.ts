@@ -129,7 +129,7 @@ export function deployScript(token: string, previewHostSuffix?: string): string 
     'echo "NODE_VERSION $(node --version)"',
     "cd /root/wsp-daemon",
     "npm install --omit=dev --no-audit --no-fund > /tmp/wsp-npm.log 2>&1 || { tail -3 /tmp/wsp-npm.log; echo NPM_FAIL; false; }",
-    "rm -rf /root/.npm /root/.cache/node-gyp /root/wsp-daemon/node_modules/node-pty/prebuilds",
+    "rm -rf /root/wsp-daemon/node_modules/node-pty/prebuilds",
     // Both names: only some tools read BROWSER; the rest exec xdg-open by name, and /usr/local/bin is first on PATH.
     // BROWSER itself is set by the daemon for its ptys, by profile.d for login shells, and in a fork's envs only
     // when its golden was sealed with the shim (claudeEnvs), never on a machine that may lack the file.

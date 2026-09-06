@@ -8,9 +8,8 @@
 // socket, so every live transition asks again.
 import { daemonVersionOf } from "@wsp/protocol";
 import { getBrowser } from "../browser/model.js";
-import { provideDaemonRoot, provideDaemonWire } from "../files/wire.js";
+import { provideDaemonHello, provideDaemonWire } from "../files/wire.js";
 import { errorText } from "../lib/utils.js";
-import { provideDaemonVersion } from "../machine/daemon.js";
 import { getLive } from "../machine/live.js";
 import { getProcs } from "../machine/procs.js";
 import type { useStore } from "../protocol/store.js";
@@ -74,10 +73,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
               browser.feedEvent({ ...e, workspaceId: w.id });
               if (e.type === "port.close") useSignInStore.getState().portClosed(w.id, e.port);
             } else if (e.type === "browser.open") useSignInStore.getState().announce(w.id, e.url, e.port);
-            else if (e.type === "daemon.hello") {
-              provideDaemonRoot(w.id, e.root);
-              provideDaemonVersion(w.id, daemonVersionOf(e));
-            }
+            else if (e.type === "daemon.hello") provideDaemonHello(w.id, { root: e.root, version: daemonVersionOf(e) });
             else if (e.type === "sys.sample") getLive(w.id).feedSample(e);
             else if (e.type === "proc.snapshot") getProcs(w.id).feedSnapshot(e);
             else wt.feedEvent(e);
@@ -112,8 +108,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
       wired.delete(id);
       provideTerminals(id, null);
       provideDaemonWire(id, null);
-      provideDaemonRoot(id, null);
-      provideDaemonVersion(id, null);
+      provideDaemonHello(id, null);
       useSignInStore.getState().forget(id);
     }
   };
@@ -126,8 +121,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
       unlink(entry);
       provideTerminals(id, null);
       provideDaemonWire(id, null);
-      provideDaemonRoot(id, null);
-      provideDaemonVersion(id, null);
+      provideDaemonHello(id, null);
     }
     wired.clear();
   };

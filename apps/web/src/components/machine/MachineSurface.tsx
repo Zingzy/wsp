@@ -5,8 +5,9 @@
 import { CopyIcon } from "lucide-react";
 import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import type { GoldenMissingTool, GoldenVersion, SnapshotLineage, SysSample, WorkspaceSize, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import { useDaemonVersion } from "../../files/wire.js";
 import { cn, errorText } from "../../lib/utils.js";
-import { daemonBehindLine, useDaemonVersion } from "../../machine/daemon.js";
+import { daemonBehindLine } from "../../machine/daemon.js";
 import { LIVE_WINDOW, useWorkspaceLive } from "../../machine/live.js";
 import { upgradeOptions, useCostSeries, useUpgrade, type CostPoint, type Upgrade } from "../../protocol/machine.js";
 import { useCapabilities, useCost, useProtocolEvents, useStatus, useStore, useWorkspace } from "../../protocol/store.js";
@@ -297,26 +298,40 @@ function Live({ workspace }: { workspace: WorkspaceView }) {
   );
 }
 
+/** How long after the runtime's update resolves the keycap waits for the new daemon's hello. The link the update
+ * killed redials with backoff up to 10 s, plus one more round when a redial beat the token rotation. */
+export const DAEMON_HELLO_WAIT_MS = 45_000;
+
+type UpdatePhase = "idle" | "deploying" | "awaiting-hello";
+
 /** One fixed-height line: what the machine's daemon predates, and the update as a keycap. The runtime redeploys the
- * daemon and the link redials on its own; the line leaves when the new hello names a current version. */
+ * daemon and the link redials on its own; the line leaves when the new hello names a current version. The keycap
+ * stays busy until then, so a second click cannot run the deploy again while the old version is still on show. */
 function DaemonUpdate({ workspace, line }: { workspace: WorkspaceView; line: string }) {
   const api = useStore(s => s.api);
-  const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState<UpdatePhase>("idle");
   const [note, setNote] = useState<string | null>(null);
+  const busy = phase !== "idle";
+
+  useEffect(() => {
+    if (phase !== "awaiting-hello") return;
+    const timer = setTimeout(() => setPhase("idle"), DAEMON_HELLO_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, [phase]);
 
   const update = async (): Promise<void> => {
     if (!api?.updateDaemon) {
       setNote("This client cannot update daemons.");
       return;
     }
-    setBusy(true);
+    setPhase("deploying");
     setNote(null);
     try {
       await api.updateDaemon(workspace.id);
+      setPhase("awaiting-hello");
     } catch (e) {
       setNote(errorText(e));
-    } finally {
-      setBusy(false);
+      setPhase("idle");
     }
   };
 
