@@ -9,7 +9,8 @@
 import { createHash } from "node:crypto";
 import { ALREADY_APPLIED, fmtBytes, goldenHead, type GoldenBaseTool, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenStage, type GoldenVersion, type RecipeDigest } from "@wsp/protocol";
 import type { Removal } from "./golden-diff.js";
-import { AGENT_INSTALLERS, NODE_PATH_LINE, type AgentInstall, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
+import { AGENT_INSTALLERS, NODE_PATH_LINE, type AgentInstall, type LoginShell, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
+import { PRELUDE } from "./dotfiles-presets.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { MIB, TOOL_TIMEOUT_S, closing, freeBytes, freeNote, guardDeadlineMs, guarded, installTools, plural, reasonOf, sweepCaches, type ToolResult } from "./golden-tools.js";
 import { installBase } from "./golden-base.js";
@@ -141,6 +142,8 @@ export interface PackedFiles {
   skipped: SkippedPath[];
   /** The rc files stripped at pack time, so the checklist names what to set from what actually left. */
   cut: CutNames[];
+  /** Commands the rc files call that the image does not have, once each; the pack defined each as a silent no-op. */
+  silenced: string[];
 }
 
 export interface GoldenImport {
@@ -194,6 +197,10 @@ export interface ImportLedger {
   /** The tools the tools stage did not put on the image, skipped or failed, and why; absent when every tool installed.
    * The seal stamps it on the version. */
   missingTools?: GoldenMissingTool[];
+  /** The rc calls the pack silenced, once each; absent when every call has a command behind it. The seal stamps it on the version. */
+  silenced?: string[];
+  /** What the login shell printed to stderr on its first interactive start after the files landed, as the version records it; absent when it started quiet. */
+  shellNoise?: string;
 }
 
 export interface AgentResult {
@@ -252,6 +259,10 @@ const AGENTS_DISK_FLOOR = 800 * MIB;
 const AGENT_TIMEOUT_S = 900;
 const SHELL_TIMEOUT_S = 300;
 
+/** One interactive start of the login shell, reading the rc files the way the app's terminal will: what it prints
+ * to stderr is what the person sees before the first prompt. The guest exec has no HOME, so the prelude sets it. */
+const shellCheck = (shell: LoginShell): string => `${PRELUDE}\nTERM=xterm-256color ${shell} -ic true </dev/null || true`;
+
 /** Runs the import stages and the harness on a builder, skipping what the
  * ledger says is already there for the same recipe. Files and upload fail the
  * build; each tool and agent fails alone and is named in the stage detail. */
@@ -266,6 +277,8 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
     smoke: prior?.smoke ?? "true",
     ...(recipe !== undefined ? { recipe } : {}),
     ...(prior?.missingTools !== undefined ? { missingTools: prior.missingTools } : {}),
+    ...(prior?.silenced !== undefined ? { silenced: prior.silenced } : {}),
+    ...(prior?.shellNoise !== undefined ? { shellNoise: prior.shellNoise } : {}),
   };
   const result: ImportResult = { recipeHash: imp.recipeHash, tools: [], agents: [], ...(opts.base !== undefined ? { base: opts.base } : {}), ...(opts.removed !== undefined ? { removed: opts.removed } : {}) };
   const done = (s: ImportStage): boolean => ledger.applied.includes(s);
@@ -327,7 +340,10 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
       const packed = await imp.files.pack();
       packed.skipped = [...imp.files.skipped, ...packed.skipped];
       const notes = packed.skipped.map(s => `${s.path} (${s.note})`);
-      stage("applying-setup", `${fmtBytes(packed.bytes)} packed${notes.length > 0 ? `; skipped ${notes.join(", ")}` : ""}`);
+      const silenced = packed.silenced.length > 0 ? `; silenced in the shell: ${packed.silenced.join(", ")}` : "";
+      stage("applying-setup", `${fmtBytes(packed.bytes)} packed${notes.length > 0 ? `; skipped ${notes.join(", ")}` : ""}${silenced}`);
+      if (packed.silenced.length > 0) ledger.silenced = packed.silenced;
+      else delete ledger.silenced;
       mark("applying-setup");
       // The frameworks clone into empty homes, so the shell goes on before the files land; the upload's mark covers it.
       if (imp.shell !== undefined) {
@@ -343,6 +359,16 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
       ran = true;
       await upload(packed, "");
       result.files = { bytes: packed.bytes, skipped: packed.skipped, cut: packed.cut };
+      if (imp.shell !== undefined) {
+        const noise = (await machine.run(shellCheck(imp.shell.shell), { deadlineMs: 60_000 })).stderr.split("\n").filter(l => l.trim() !== "");
+        if (noise.length === 0) {
+          stage("uploading-files", `${imp.shell.shell} starts quiet`);
+          delete ledger.shellNoise;
+        } else {
+          ledger.shellNoise = `${noise[0]}, ${plural(noise.length, "line")}`;
+          stage("uploading-files", `shell noise: ${ledger.shellNoise}`);
+        }
+      }
       mark("uploading-files");
     }
   }
@@ -702,6 +728,8 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
       browserShim,
       ...(opts.logins !== undefined ? { logins: opts.logins } : {}),
       ...(builder.import?.missingTools !== undefined ? { missingTools: builder.import.missingTools } : {}),
+      ...(builder.import?.silenced !== undefined ? { silenced: builder.import.silenced } : {}),
+      ...(builder.import?.shellNoise !== undefined ? { shellNoise: builder.import.shellNoise } : {}),
       ...(builder.base !== undefined ? { base: builder.base } : {}),
     };
     const kept = builderAlive ? "; builder kept for one more change" : "";

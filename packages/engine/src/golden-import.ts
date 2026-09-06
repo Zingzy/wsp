@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { MCP_ID_PREFIX, shellQuote, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
-import { APT_ENV, APT_INDEX, APT_UPDATE, BREW, BREW_PREFIX, CATALOG_AGENTS, CLAUDE_KEY_FILE, HOMEBREW, HOMEBREW_STEP, NODE_PATH_LINE, NODE_RELEASES, LINUXBREW_SHIM, ROADS, UV_INSTALL, asLinuxbrew, asLinuxbrewScript, baseEntryFor, baseNote, catalogEntry, catalogToolFor, installLine, nodeInstallScript, pinStateOf, ROAD_MODULES, roadModule, smokeOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolPin } from "@wsp/catalog";
+import { APT_ENV, APT_INDEX, APT_UPDATE, BASE_FLOOR, BASE_IMAGE_COMMANDS, BREW, BREW_PREFIX, CATALOG_AGENTS, CATALOG_TOOLS, CLAUDE_KEY_FILE, HOMEBREW, HOMEBREW_STEP, NODE_PATH_LINE, NODE_RELEASES, LINUXBREW_SHIM, ROADS, UV_INSTALL, asLinuxbrew, asLinuxbrewScript, baseEntryFor, baseNote, catalogEntry, catalogToolFor, installLine, nodeInstallScript, pinStateOf, ROAD_MODULES, roadModule, smokeOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolPin } from "@wsp/catalog";
 
 export { CLAUDE_KEY_FILE, HOMEBREW, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
 
@@ -841,6 +841,47 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
     return road === undefined ? undefined : afterRoad(road);
   }));
   return { installs, skipped, base: brew.base, brewfile: brew.text };
+}
+
+/** Every command the golden answers, for the pack's guard over the carried rc files: the base image's, the floor's,
+ * the shell the shell rows bring, each ticked tools row by its package name and the command its road puts on PATH,
+ * Homebrew and each manager the tools plan brings, and each ticked agent's command. An unticked row adds nothing:
+ * a call to it in an rc file is what the guard silences. */
+export function imageCommands(entries: readonly RecipeEntry[], tools: ToolsPlan): Set<string> {
+  const out = new Set(BASE_IMAGE_COMMANDS);
+  for (const e of BASE_FLOOR) for (const bin of [e.bin, ...(e.brings ?? []).map(b => b.bin)]) out.add(bin);
+  const shell = shellInstallFor(entries);
+  if (shell !== undefined) out.add(shell.shell);
+  for (const e of entries) {
+    if (!ticked(e)) continue;
+    if (e.rung === "agents" && !isMcpRow(e)) out.add(catalogEntry(name(e))?.bin ?? name(e));
+    if (e.rung !== "tools" || e.id.startsWith("tools/brew-tap/")) continue;
+    const pkg = packageOf(e);
+    out.add(pkg.slice(pkg.lastIndexOf("/") + 1));
+    const known = catalogToolFor(pkg);
+    for (const bin of [rowRoad(e)?.bin, known?.bin, ...(known?.brings ?? []).map(b => b.bin)]) if (bin !== undefined) out.add(bin);
+  }
+  for (const t of tools.installs) {
+    if (t.id === "tools/homebrew") out.add("brew");
+    if (t.id.startsWith("tools/manager/")) out.add(t.id.slice("tools/manager/".length));
+    if (t.id.startsWith(CUSTOM_PREFIX)) out.add(t.id.slice(CUSTOM_PREFIX.length));
+    if (t.bin !== undefined) out.add(t.bin);
+  }
+  return out;
+}
+
+/** Every command the recipe or the catalog knows a tool for, ticked or not: the catalog's tools by id and command,
+ * and each tools row by its package name. An oh-my-zsh plugin by one of these names, with the tool off the image,
+ * is a plugin for a missing tool and leaves the list; a plugin by any other name is a plugin and stays. */
+export function toolNames(entries: readonly RecipeEntry[]): Set<string> {
+  const out = new Set<string>();
+  for (const e of CATALOG_TOOLS) for (const bin of [e.id, e.bin, ...(e.brings ?? []).map(b => b.bin)]) out.add(bin);
+  for (const e of entries) {
+    if (e.rung !== "tools" || e.id.startsWith("tools/brew-tap/")) continue;
+    const pkg = packageOf(e);
+    out.add(pkg.slice(pkg.lastIndexOf("/") + 1));
+  }
+  return out;
 }
 
 // --- shell -------------------------------------------------------------------

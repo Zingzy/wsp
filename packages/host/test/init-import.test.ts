@@ -3,13 +3,13 @@
 // into one archive with their modes, reading Keychain logins through an
 // injected reader (the real one is never run here), and the import the
 // recipe's ticks add up to.
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ManifestEntry } from "@wsp/collect";
+import { GUARD_BEGIN, GUARD_END, type ManifestEntry } from "@wsp/collect";
 import { NODE_RELEASES, planFiles } from "@wsp/engine";
 import { afterEach, describe, expect, it } from "vitest";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_SERVERS_JSON } from "@wsp/catalog";
@@ -676,6 +676,57 @@ describe("packPlan: source guard", () => {
     expect(packed.cut).toEqual([{ path: "~/.zshrc", names: ["RO_KEY"] }]);
     const without = await packPlan(planFiles([rows[0]!], { home, stat: statOf, platform: "darwin" }), { secrets: new Map(), home });
     expect(readFileSync(join(extract(without.tar), ".zshrc"), "utf8")).toContain("[ -r ~/.zsh/functions.zsh ] && source ~/.zsh/functions.zsh");
+  });
+});
+
+describe("packPlan: command guard", () => {
+  /** The rc as zsh reads it on a machine with only the base on PATH: what it prints to stderr and its last exit status. */
+  const zsh = (dir: string): { stderr: string; status: number } => {
+    const r = spawnSync("/bin/zsh", ["-f", "-c", `source ./.zshrc; echo "exit=$?"`], { cwd: dir, encoding: "utf8", env: { HOME: dir, PATH: "/usr/bin:/bin" } });
+    return { stderr: r.stderr, status: Number(/exit=(\d+)/.exec(r.stdout)?.[1]) };
+  };
+  const RC = ['eval "$(starship init zsh)"', "alias ls='eza -la'", "diskbloom --quiet", "ls", ""].join("\n");
+
+  it.skipIf(!existsSync("/bin/zsh"))("an rc file calling tools the image does not have ships behind one guard block naming them, so a shell on the machine starts silent; a tool the recipe ticked is not guarded; the names land on the pack once", async () => {
+    const home = laptop();
+    writeFileSync(join(home, ".zshrc"), RC);
+    writeFileSync(join(home, ".bashrc"), "eval \"$(starship init bash)\"\n");
+    const rows = [row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"] }), row({ rung: "shell", id: "shell/bashrc", paths: ["~/.bashrc"] })];
+    const plan = planFiles(rows, { home, stat: statOf, platform: "darwin" });
+    const bare = extract((await packPlan(plan, { secrets: new Map(), home })).tar);
+    expect(zsh(bare).stderr).toContain("command not found");
+
+    const none = await packPlan(plan, { secrets: new Map(), home, onImage: new Set(["ls", "cat"]) });
+    const dir = extract(none.tar);
+    const zshrc = readFileSync(join(dir, ".zshrc"), "utf8");
+    expect(zshrc).toBe([GUARD_BEGIN, "starship() { return 127; }", "eza() { return 127; }", "diskbloom() { return 127; }", "# Not on this machine, so wsp silenced their calls above: starship, eza, diskbloom. Tick them in wsp init to install them.", GUARD_END, "", RC].join("\n"));
+    expect(readFileSync(join(dir, ".bashrc"), "utf8")).toBe([GUARD_BEGIN, "starship() { return 127; }", "# Not on this machine, so wsp silenced their calls above: starship. Tick them in wsp init to install them.", GUARD_END, "", 'eval "$(starship init bash)"', ""].join("\n"));
+    expect(none.silenced).toEqual(["starship", "eza", "diskbloom"]);
+    expect(zsh(dir)).toEqual({ stderr: "", status: 127 });
+
+    const withEza = await packPlan(plan, { secrets: new Map(), home, onImage: new Set(["ls", "cat", "eza"]) });
+    const two = readFileSync(join(extract(withEza.tar), ".zshrc"), "utf8");
+    expect(two).toContain("starship() { return 127; }\ndiskbloom() { return 127; }\n# Not on this machine, so wsp silenced their calls above: starship, diskbloom.");
+    expect(two).not.toContain("eza()");
+    expect(withEza.silenced).toEqual(["starship", "diskbloom"]);
+
+    const all = await packPlan(plan, { secrets: new Map(), home, onImage: new Set(["ls", "eza", "starship", "diskbloom"]) });
+    expect(readFileSync(join(extract(all.tar), ".zshrc"), "utf8")).toBe(RC);
+    expect(all.silenced).toEqual([]);
+  });
+});
+
+describe("packPlan: oh-my-zsh plugins", () => {
+  it("a plugin named after a tool the recipe knows but the image lacks leaves the plugins list, is named in the guard block and counts as silenced; a plugin that is no tool, or whose tool is on the image, stays", async () => {
+    const home = laptop();
+    writeFileSync(join(home, ".zshrc"), "plugins=(\n  git\n  eza\n  z\n  gh\n)\nsource $ZSH/oh-my-zsh.sh\n");
+    const plan = planFiles([row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"] })], { home, stat: statOf, platform: "darwin" });
+    const packed = await packPlan(plan, { secrets: new Map(), home, onImage: new Set(["git", "gh", "z"]), tools: new Set(["git", "gh", "eza", "z"]) });
+    expect(readFileSync(join(extract(packed.tar), ".zshrc"), "utf8")).toBe([GUARD_BEGIN, "# plugin eza left out: eza is not on the image", GUARD_END, "", "plugins=(", "  git", "  z", "  gh", ")", "source $ZSH/oh-my-zsh.sh", ""].join("\n"));
+    expect(packed.silenced).toEqual(["eza"]);
+    const kept = await packPlan(plan, { secrets: new Map(), home, onImage: new Set(["git", "gh", "eza"]), tools: new Set(["git", "gh", "eza"]) });
+    expect(readFileSync(join(extract(kept.tar), ".zshrc"), "utf8")).toBe("plugins=(\n  git\n  eza\n  z\n  gh\n)\nsource $ZSH/oh-my-zsh.sh\n");
+    expect(kept.silenced).toEqual([]);
   });
 });
 

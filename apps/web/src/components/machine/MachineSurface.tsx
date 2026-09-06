@@ -534,6 +534,8 @@ function Lineage({ workspace }: { workspace: WorkspaceView }) {
                 below={
                   <>
                     {fork && v.missingTools !== undefined && v.missingTools.length > 0 && <MissingTools tools={v.missingTools} />}
+                    {fork && v.silenced !== undefined && v.silenced.length > 0 && <LineageNote k="silenced" label="silenced in the shell" text={v.silenced.join(", ")} />}
+                    {fork && v.shellNoise !== undefined && <LineageNote k="shell-noise" label="shell noise" text={v.shellNoise} />}
                     {under(v.snapshotId)}
                   </>
                 }
@@ -635,6 +637,15 @@ function MissingTools({ tools }: { tools: GoldenMissingTool[] }) {
         ))}
       </ul>
     </div>
+  );
+}
+
+/** One line under a version about its shell: the rc calls the pack silenced, or what the shell printed on its first start, so a command that does nothing or a line before the prompt has its reason here. */
+function LineageNote({ k, label, text }: { k: string; label: string; text: string }) {
+  return (
+    <p className="mt-1.5 ml-3.5 text-[11px] text-muted-foreground" data-k={k}>
+      <span className="text-[.65rem] font-medium uppercase tracking-wider">{label}</span> <span className="font-mono">{text}</span>
+    </p>
   );
 }
 

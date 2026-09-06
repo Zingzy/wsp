@@ -8,6 +8,7 @@ export type { Detector } from "./detect/common.js";
 export { detectIdentity } from "./detect/identity.js";
 export { detectShell } from "./detect/shell.js";
 export { bareSources, guardSources, shellSources } from "./detect/sources.js";
+export { GUARD_BEGIN, GUARD_END, calledCommands, dropPlugins, guardCommands } from "./detect/commands.js";
 export { TERMINAL_FONT_ID, alacrittyFont, detectTerminalFont, ghosttyFont, itermFont, kittyFont, weztermFont } from "./detect/terminal.js";
 export { detectToolchains } from "./detect/toolchains.js";
 export { detectTools, parseBrewfile, parseBunGlobals, parseCargoInstalls, parseGoVersionM, parseNpmGlobals, parsePipxList, parsePnpmGlobals, parseUvToolList, type BrewLine, type GoModule, type Pkg } from "./detect/tools.js";

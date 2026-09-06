@@ -418,6 +418,28 @@ describe("lineage", () => {
     expect(screen.queryByText("Raycast")).toBeNull();
   });
 
+  it("names the shell calls the forked version silenced, once and under that version alone", async () => {
+    const lineage: SnapshotLineage = { name: "default", head: 12, versions: [{ ...gv(11), silenced: ["fzf"] }, { ...gv(12), silenced: ["starship", "eza", "diskbloom"] }] };
+    await mount([onV12()], CAPS, lineage);
+    await waitFor(() => expect(fact("v12")).toBe("v12headthis fork"));
+    const lines = document.querySelectorAll("[data-k='silenced']");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.closest("li")?.querySelector("[data-k='v12']")).not.toBeNull();
+    expect(lines[0]!.textContent).toBe("silenced in the shell starship, eza, diskbloom");
+    expect(screen.queryByText("fzf")).toBeNull();
+  });
+
+  it("names the forked version's shell noise on one line, under that version alone", async () => {
+    const lineage: SnapshotLineage = { name: "default", head: 12, versions: [{ ...gv(11), shellNoise: "old noise, 1 line" }, { ...gv(12), shellNoise: "zsh: command not found: starship, 2 lines" }] };
+    await mount([onV12()], CAPS, lineage);
+    await waitFor(() => expect(fact("v12")).toBe("v12headthis fork"));
+    const lines = document.querySelectorAll("[data-k='shell-noise']");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.closest("li")?.querySelector("[data-k='v12']")).not.toBeNull();
+    expect(lines[0]!.textContent).toBe("shell noise zsh: command not found: starship, 2 lines");
+    expect(screen.queryByText(/old noise/)).toBeNull();
+  });
+
   it("two missing tools sharing a label are two rows keyed apart", async () => {
     const missing = [
       { id: "tools/brew/gh", name: "gh", outcome: "skipped" as const, note: "no Linux bottle" },

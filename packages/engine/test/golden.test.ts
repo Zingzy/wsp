@@ -418,7 +418,7 @@ describe("golden import stages", () => {
         rungs: { identity: 1, shell: 2 },
         bytes: 4096,
         skipped: [{ id: "shell/bashrc", path: "~/.bashrc", note: "no longer on this computer" }],
-        pack: async () => ({ tar: Buffer.from("tgz-bytes"), bytes: 1200, unpacked: 4096, skipped: [], cut: [] }),
+        pack: async () => ({ tar: Buffer.from("tgz-bytes"), bytes: 1200, unpacked: 4096, skipped: [], cut: [], silenced: [] }),
       },
       tools: [
         { id: "tools/homebrew", label: "Homebrew", manager: "brew", cmd: "brew-bootstrap" },
@@ -615,7 +615,7 @@ describe("golden import stages", () => {
   it("an archive over one upload part says how many parts it went up in", async () => {
     const { backend, puts, fetch } = backendFor();
     const stages: string[] = [];
-    const big = importOf({ files: { ...importOf().files!, pack: async () => ({ tar: Buffer.alloc(33 * 1024 * 1024), bytes: 33 * 1024 * 1024, unpacked: 4096, skipped: [], cut: [] }) } });
+    const big = importOf({ files: { ...importOf().files!, pack: async () => ({ tar: Buffer.alloc(33 * 1024 * 1024), bytes: 33 * 1024 * 1024, unpacked: 4096, skipped: [], cut: [], silenced: [] }) } });
     await prepareBuilder({ backend, setup: "true", fetch, onStage: (s, d) => void stages.push(`${s}:${d ?? ""}`), import: big });
     expect(puts).toHaveLength(3);
     expect(stages).toContainEqual("uploading-files:part 1 of 2, 32.0 MB of 33.0 MB");
@@ -777,6 +777,29 @@ describe("golden import stages", () => {
     expect(cmds.some(c => c.includes("tar xzf"))).toBe(true);
     expect(stages.at(-1)).toBe("ready");
     expect(builder.import?.applied).toContain("uploading-files");
+  });
+
+  it("after the files land the login shell is started once interactively; what it prints to stderr is the version's shell noise, first line and count, and the golden still seals; a quiet shell records none", async () => {
+    const noisy = backendFor([["zsh -ic true", { exitCode: 0, stdout: "", stderr: "zsh: command not found: starship\nzsh eza plugin: eza not found.\n" }]]);
+    const { stages, onStage } = stageRecorder();
+    const shell = { shell: "zsh" as const, frameworks: [], cmd: "install-zsh" };
+    const builder = await prepareBuilder({ backend: noisy.backend, setup: "true", fetch: noisy.fetch, onStage, import: importOf({ shell }) });
+    const check = noisy.cmds.find(c => c.includes("zsh -ic true"))!;
+    expect(check).toContain('TERM=xterm-256color zsh -ic true </dev/null');
+    expect(noisy.cmds.indexOf(check)).toBeGreaterThan(noisy.cmds.indexOf(noisy.cmds.find(c => c.includes("tar xzf"))!));
+    expect(stages).toContain("uploading-files:shell noise: zsh: command not found: starship, 2 lines");
+    expect(builder.import?.shellNoise).toBe("zsh: command not found: starship, 2 lines");
+    expect((await sealGolden(builder, { backend: noisy.backend, smoke: "true" })).version.shellNoise).toBe("zsh: command not found: starship, 2 lines");
+
+    const quiet = backendFor();
+    const q = stageRecorder();
+    const b = await prepareBuilder({ backend: quiet.backend, setup: "true", fetch: quiet.fetch, onStage: q.onStage, import: importOf({ shell }) });
+    expect(q.stages).toContain("uploading-files:zsh starts quiet");
+    expect(b.import).not.toHaveProperty("shellNoise");
+    expect((await sealGolden(b, { backend: quiet.backend, smoke: "true" })).version).not.toHaveProperty("shellNoise");
+    const none = backendFor();
+    await prepareBuilder({ backend: none.backend, setup: "true", fetch: none.fetch, import: importOf() });
+    expect(none.cmds.some(c => c.includes("-ic true"))).toBe(false);
   });
 
   it("a builder that already carries the files does not run the shell step again", async () => {
@@ -1474,7 +1497,7 @@ describe("golden import stages", () => {
     const { stages, onStage } = stageRecorder();
     const volatile = {
       paths: ["~/.claude.json", "~/.claude/plugins/installed_plugins.json"],
-      pack: async () => ({ tar: Buffer.from("volatile-tgz"), bytes: 300, unpacked: 2048, skipped: [], cut: [] }),
+      pack: async () => ({ tar: Buffer.from("volatile-tgz"), bytes: 300, unpacked: 2048, skipped: [], cut: [], silenced: [] }),
     };
     const results: ImportResult[] = [];
     const again = await applyGoldenImport(builder.machine, { import: importOf({ files: { ...importOf().files!, volatile }, onResult: r => void results.push(r) }), setup: "true", ledger: builder.import, fetch, onStage });
@@ -1500,7 +1523,7 @@ describe("golden import stages", () => {
     const before = { cmds: cmds.length, puts: puts.length };
     // A default recipe leaves about 250 MB free after the install stages, under the 256 MiB upload headroom.
     free = mb(200);
-    const volatile = { paths: ["~/.claude.json"], pack: async () => ({ tar: Buffer.from("volatile-tgz"), bytes: 300, unpacked: 2048, skipped: [], cut: [] }) };
+    const volatile = { paths: ["~/.claude.json"], pack: async () => ({ tar: Buffer.from("volatile-tgz"), bytes: 300, unpacked: 2048, skipped: [], cut: [], silenced: [] }) };
     const { stages, onStage } = stageRecorder();
     const again = await applyGoldenImport(builder.machine, { import: importOf({ files: { ...importOf().files!, volatile } }), setup: "true", ledger: builder.import, fetch, onStage });
     expect(puts.length).toBe(before.puts);
@@ -1540,6 +1563,21 @@ describe("golden import stages", () => {
     ];
     expect(builder.import?.missingTools).toEqual(want);
     expect((await sealGolden(builder, { backend, smoke: "true" })).version.missingTools).toEqual(want);
+  });
+
+  it("the rc calls the pack silenced land on the ledger and the seal stamps them on the version, with the stage line naming them; a pack that silenced nothing leaves both without", async () => {
+    const { backend, fetch } = backendFor();
+    const { stages, onStage } = stageRecorder();
+    const pack = async () => ({ tar: Buffer.from("tgz-bytes"), bytes: 1200, unpacked: 4096, skipped: [], cut: [], silenced: ["starship", "eza", "diskbloom"] });
+    const builder = await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ files: { ...importOf().files!, pack } }) });
+    expect(builder.import?.silenced).toEqual(["starship", "eza", "diskbloom"]);
+    expect(stages).toContain("applying-setup:1.2 KB packed; skipped ~/.bashrc (no longer on this computer); silenced in the shell: starship, eza, diskbloom");
+    expect((await sealGolden(builder, { backend, smoke: "true" })).version.silenced).toEqual(["starship", "eza", "diskbloom"]);
+    const again = await applyGoldenImport(builder.machine, { import: importOf(), setup: "true", ledger: builder.import, fetch });
+    expect(again.ledger.silenced).toEqual(["starship", "eza", "diskbloom"]);
+    const quiet = await prepareBuilder({ backend, setup: "true", fetch, import: importOf() });
+    expect(quiet.import).not.toHaveProperty("silenced");
+    expect((await sealGolden(quiet, { backend, smoke: "true" })).version).not.toHaveProperty("silenced");
   });
 
   it("a builder whose tools all installed records no missing list, and its version carries none", async () => {

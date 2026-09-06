@@ -8,9 +8,10 @@ import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readF
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { AGENTS, CLAUDE_SETTINGS, FISH_CONF_D, MCP_BIN_DIRS, type ManifestEntry, RC_NAMES, guardSources, isRcPath, rcFiles, sourcedPaths, stripExports } from "@wsp/collect";
+import { AGENTS, CLAUDE_SETTINGS, FISH_CONF_D, MCP_BIN_DIRS, type ManifestEntry, RC_NAMES, calledCommands, dropPlugins, guardCommands, guardSources, isRcPath, rcFiles, sourcedPaths, stripExports } from "@wsp/collect";
 import {
   agentInstallsFor,
+  imageCommands,
   mcpPlanFor,
   planFiles,
   recipeDigest,
@@ -18,6 +19,7 @@ import {
   refusedPath,
   shellInstallFor,
   toolInstallsFor,
+  toolNames,
   type BrewTable,
   type FilesPlan,
   type GoldenImport,
@@ -216,6 +218,10 @@ export interface PackOptions {
   home: string;
   /** Whether ~/.claude/settings.json is among the plan's files, in this pack or an earlier one this pack lands over; left out, this pack's files decide. */
   settingsPlanned?: boolean;
+  /** Every command the image answers (see imageCommands); an rc file's call outside it is silenced by the guard block. Left out, no rc file is guarded. */
+  onImage?: ReadonlySet<string>;
+  /** Every command the recipe or the catalog knows a tool for (see toolNames); an oh-my-zsh plugin by one of these names, off the image, leaves the plugin list. */
+  tools?: ReadonlySet<string>;
 }
 
 /** Copies the planned files into a staging tree, renders each secret into it,
@@ -273,14 +279,23 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
       chmodSync(target, f.mode);
     }
     // Every rc file staged, by name where dotfiles live or by identity with one of the laptop's, ships as its
-    // carried copy: secret exports are set on the machine by hand, never carried in the file, and a bare source
+    // carried copy: secret exports are set on the machine by hand, never carried in the file, a bare source
     // of a file under home that is not in this pack is wrapped so the machine skips it instead of printing an
-    // error. The copy keeps the laptop's mode, so a read-only file is opened writable for the one write.
+    // error, an oh-my-zsh plugin for a tool the image does not have leaves the plugin list, and a call to a command
+    // the image does not have gets a silent no-op in one guard block on top. The copy keeps the laptop's mode, so
+    // a read-only file is opened writable for the one write.
     const cut: CutNames[] = [];
+    const silenced: string[] = [];
+    const { onImage, tools } = opts;
     const strip = (staged: string): void => {
       const text = readFileSync(staged, "utf8");
       const { names, carried } = stripExports(text);
-      const guarded = staged.endsWith(".fish") ? carried : guardSources(carried, opts.home, rel => existsSync(join(stage, rel)));
+      const fish = staged.endsWith(".fish");
+      const sourced = fish ? carried : guardSources(carried, opts.home, rel => existsSync(join(stage, rel)));
+      const pruned = fish || onImage === undefined || tools === undefined ? { text: sourced, dropped: [] } : dropPlugins(sourced, name => tools.has(name) && !onImage.has(name));
+      const missing = onImage === undefined || fish ? [] : calledCommands(pruned.text).filter(n => !onImage.has(n));
+      const guarded = fish ? sourced : guardCommands(pruned.text, missing, pruned.dropped);
+      for (const n of [...pruned.dropped, ...missing]) if (!silenced.includes(n)) silenced.push(n);
       if (names.length > 0) cut.push({ path: `~/${relative(stage, staged)}`, names });
       if (guarded === text) return;
       const mode = statSync(staged).mode & 0o7777;
@@ -356,7 +371,7 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
     const { file, args, env } = tarPackCommand(stage, tgz);
     await execFileAsync(file, args, { env });
     const tar = readFileSync(tgz);
-    return { tar, bytes: tar.length, unpacked, skipped, cut };
+    return { tar, bytes: tar.length, unpacked, skipped, cut, silenced };
   } finally {
     rmSync(stage, { recursive: true, force: true });
     rmSync(out, { recursive: true, force: true });
@@ -505,7 +520,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
     });
   const hash = recipeHash(recipeDigest(bring, digested, opts.custom));
   const settingsSource = join(home, CLAUDE_SETTINGS.slice(2));
-  const packOpts: PackOptions = { secrets: opts.secrets, home, settingsPlanned: plan.files.some(f => f.source === settingsSource || f.source === dirname(settingsSource)) };
+  const packOpts: PackOptions = { secrets: opts.secrets, home, settingsPlanned: plan.files.some(f => f.source === settingsSource || f.source === dirname(settingsSource)), onImage: imageCommands(bring, tools), tools: toolNames(opts.rows ?? bring) };
   const pack = (): Promise<PackedFiles> => packPlan(plan, packOpts);
   const volatileFiles = files.filter(f => f.volatile);
   const volatile =

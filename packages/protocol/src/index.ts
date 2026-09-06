@@ -761,6 +761,12 @@ export const GoldenVersion = z.object({
   /** Every tool the import skipped or failed to install, by name with the cause and reason, so a workspace can say why
    * one is missing; absent when every tool installed or the version was sealed before this was recorded. */
   missingTools: z.array(GoldenMissingTool).optional(),
+  /** Commands the carried rc files call that the image does not have, each defined as a silent no-op in the file's
+   * guard block so the shell comes up quiet; absent when every call has a command behind it. */
+  silenced: z.array(z.string()).optional(),
+  /** What the login shell printed to stderr when the builder started it interactively after the files landed, first
+   * line and line count; absent when it started quiet or no shell row was ticked. */
+  shellNoise: z.string().optional(),
   /** The snapshot the builder that sealed this version descends from: an update's head. Absent on a version built
    * from a fresh machine, and on versions sealed before this was recorded. */
   parentSnapshotId: z.string().optional(),
